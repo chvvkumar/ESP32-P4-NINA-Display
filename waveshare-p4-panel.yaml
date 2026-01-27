@@ -1,0 +1,1271 @@
+# =======================================================
+# ESPHome Configuration for WaveShare P4 Panel Box
+# THEME: Modern Quad-Dashboard (Integer Math Fix)
+# RESOLUTION: 720x720
+# =======================================================
+esphome:
+  name: waveshare-p4-box
+  friendly_name: WaveShare P4 Box
+  name_add_mac_suffix: false
+
+esp32:
+  board: esp32-p4-evboard
+  flash_size: 32MB
+  framework:
+    type: esp-idf
+    version: recommended
+    advanced:
+      enable_idf_experimental_features: true
+  cpu_frequency: 360MHz
+
+logger:
+  level: debug
+  logs:
+    lvgl: info
+  hardware_uart: UART0
+
+web_server:
+  port: 80
+  version: 3
+
+psram:
+  speed: 200MHz
+
+esp_ldo:
+  - channel: 3
+    voltage: 2.5V
+
+button:
+  - platform: restart
+    name: "WaveShare P4 Box"
+
+# =======================================================
+# Connectivity
+# =======================================================
+esp32_hosted:
+  active_high: true
+  variant: ESP32C6
+  reset_pin: GPIO54
+  cmd_pin: GPIO19
+  clk_pin: GPIO18
+  d0_pin: GPIO14
+  d1_pin: GPIO15
+  d2_pin: GPIO16
+  d3_pin: GPIO17
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: NONE
+  fast_connect: True
+
+# =======================================================
+# Display & Touch
+# =======================================================
+display:
+  - platform: mipi_dsi
+    model: WAVESHARE-P4-86-PANEL
+    # dimensions: 720x720
+
+i2c:
+  sda: GPIO7
+  scl: GPIO8
+  scan: true
+  frequency: 400kHz
+  id: i2c_bus
+
+touchscreen:
+  - platform: gt911
+    id: touchscreen_
+    on_touch:
+      - logger.log:
+          format: "Touch at %d/%d"
+          args: [touch.x, touch.y]
+
+# =======================================================
+# Globals for Color Storage
+# =======================================================
+globals:
+  # CPU Colors
+  - id: g_cpu_c1_r
+    type: float
+    restore_value: true
+    initial_value: '0'
+  - id: g_cpu_c1_g
+    type: float
+    restore_value: true
+    initial_value: '255'
+  - id: g_cpu_c1_b
+    type: float
+    restore_value: true
+    initial_value: '0'
+  - id: g_cpu_c2_r
+    type: float
+    restore_value: true
+    initial_value: '255'
+  - id: g_cpu_c2_g
+    type: float
+    restore_value: true
+    initial_value: '0'
+  - id: g_cpu_c2_b
+    type: float
+    restore_value: true
+    initial_value: '0'
+
+  # Fan Colors
+  - id: g_fan_c1_r
+    type: float
+    restore_value: true
+    initial_value: '173'
+  - id: g_fan_c1_g
+    type: float
+    restore_value: true
+    initial_value: '216'
+  - id: g_fan_c1_b
+    type: float
+    restore_value: true
+    initial_value: '230'
+  - id: g_fan_c2_r
+    type: float
+    restore_value: true
+    initial_value: '29'
+  - id: g_fan_c2_g
+    type: float
+    restore_value: true
+    initial_value: '78'
+  - id: g_fan_c2_b
+    type: float
+    restore_value: true
+    initial_value: '216'
+
+  # Env Colors
+  - id: g_env_c1_r
+    type: float
+    restore_value: true
+    initial_value: '0'
+  - id: g_env_c1_g
+    type: float
+    restore_value: true
+    initial_value: '255'
+  - id: g_env_c1_b
+    type: float
+    restore_value: true
+    initial_value: '255'
+  - id: g_env_c2_r
+    type: float
+    restore_value: true
+    initial_value: '255'
+  - id: g_env_c2_g
+    type: float
+    restore_value: true
+    initial_value: '165'
+  - id: g_env_c2_b
+    type: float
+    restore_value: true
+    initial_value: '0'
+
+  # Power Colors
+  - id: g_pwr_c1_r
+    type: float
+    restore_value: true
+    initial_value: '255'
+  - id: g_pwr_c1_g
+    type: float
+    restore_value: true
+    initial_value: '255'
+  - id: g_pwr_c1_b
+    type: float
+    restore_value: true
+    initial_value: '0'
+  - id: g_pwr_c2_r
+    type: float
+    restore_value: true
+    initial_value: '220'
+  - id: g_pwr_c2_g
+    type: float
+    restore_value: true
+    initial_value: '20'
+  - id: g_pwr_c2_b
+    type: float
+    restore_value: true
+    initial_value: '60'
+
+# =======================================================
+# Outputs
+# =======================================================
+output:
+  - platform: ledc
+    id: backlight_
+    pin: GPIO26
+    frequency: 100Hz
+    inverted: true
+    min_power: 0.1
+    max_power: 0.8
+
+  # CPU Start Color
+  - platform: template
+    id: cpu_c1_r
+    type: float
+    write_action:
+      - globals.set:
+          id: g_cpu_c1_r
+          value: !lambda 'return state * 255;'
+  - platform: template
+    id: cpu_c1_g
+    type: float
+    write_action:
+      - globals.set:
+          id: g_cpu_c1_g
+          value: !lambda 'return state * 255;'
+  - platform: template
+    id: cpu_c1_b
+    type: float
+    write_action:
+      - globals.set:
+          id: g_cpu_c1_b
+          value: !lambda 'return state * 255;'
+
+  # CPU End Color
+  - platform: template
+    id: cpu_c2_r
+    type: float
+    write_action:
+      - globals.set:
+          id: g_cpu_c2_r
+          value: !lambda 'return state * 255;'
+  - platform: template
+    id: cpu_c2_g
+    type: float
+    write_action:
+      - globals.set:
+          id: g_cpu_c2_g
+          value: !lambda 'return state * 255;'
+  - platform: template
+    id: cpu_c2_b
+    type: float
+    write_action:
+      - globals.set:
+          id: g_cpu_c2_b
+          value: !lambda 'return state * 255;'
+
+  # Fan Start Color
+  - platform: template
+    id: fan_c1_r
+    type: float
+    write_action:
+      - globals.set:
+          id: g_fan_c1_r
+          value: !lambda 'return state * 255;'
+  - platform: template
+    id: fan_c1_g
+    type: float
+    write_action:
+      - globals.set:
+          id: g_fan_c1_g
+          value: !lambda 'return state * 255;'
+  - platform: template
+    id: fan_c1_b
+    type: float
+    write_action:
+      - globals.set:
+          id: g_fan_c1_b
+          value: !lambda 'return state * 255;'
+
+  # Fan End Color
+  - platform: template
+    id: fan_c2_r
+    type: float
+    write_action:
+      - globals.set:
+          id: g_fan_c2_r
+          value: !lambda 'return state * 255;'
+  - platform: template
+    id: fan_c2_g
+    type: float
+    write_action:
+      - globals.set:
+          id: g_fan_c2_g
+          value: !lambda 'return state * 255;'
+  - platform: template
+    id: fan_c2_b
+    type: float
+    write_action:
+      - globals.set:
+          id: g_fan_c2_b
+          value: !lambda 'return state * 255;'
+
+  # Env Start Color
+  - platform: template
+    id: env_c1_r
+    type: float
+    write_action:
+      - globals.set:
+          id: g_env_c1_r
+          value: !lambda 'return state * 255;'
+  - platform: template
+    id: env_c1_g
+    type: float
+    write_action:
+      - globals.set:
+          id: g_env_c1_g
+          value: !lambda 'return state * 255;'
+  - platform: template
+    id: env_c1_b
+    type: float
+    write_action:
+      - globals.set:
+          id: g_env_c1_b
+          value: !lambda 'return state * 255;'
+
+  # Env End Color
+  - platform: template
+    id: env_c2_r
+    type: float
+    write_action:
+      - globals.set:
+          id: g_env_c2_r
+          value: !lambda 'return state * 255;'
+  - platform: template
+    id: env_c2_g
+    type: float
+    write_action:
+      - globals.set:
+          id: g_env_c2_g
+          value: !lambda 'return state * 255;'
+  - platform: template
+    id: env_c2_b
+    type: float
+    write_action:
+      - globals.set:
+          id: g_env_c2_b
+          value: !lambda 'return state * 255;'
+
+  # Power Start Color
+  - platform: template
+    id: pwr_c1_r
+    type: float
+    write_action:
+      - globals.set:
+          id: g_pwr_c1_r
+          value: !lambda 'return state * 255;'
+  - platform: template
+    id: pwr_c1_g
+    type: float
+    write_action:
+      - globals.set:
+          id: g_pwr_c1_g
+          value: !lambda 'return state * 255;'
+  - platform: template
+    id: pwr_c1_b
+    type: float
+    write_action:
+      - globals.set:
+          id: g_pwr_c1_b
+          value: !lambda 'return state * 255;'
+
+  # Power End Color
+  - platform: template
+    id: pwr_c2_r
+    type: float
+    write_action:
+      - globals.set:
+          id: g_pwr_c2_r
+          value: !lambda 'return state * 255;'
+  - platform: template
+    id: pwr_c2_g
+    type: float
+    write_action:
+      - globals.set:
+          id: g_pwr_c2_g
+          value: !lambda 'return state * 255;'
+  - platform: template
+    id: pwr_c2_b
+    type: float
+    write_action:
+      - globals.set:
+          id: g_pwr_c2_b
+          value: !lambda 'return state * 255;'
+
+# =======================================================
+# Lights
+# =======================================================
+light:
+  - platform: monochromatic
+    name: "backlight"
+    output: backlight_
+    id: backlight_light
+    restore_mode: ALWAYS_ON
+
+  # Color picker lights for gradient configuration
+  - platform: rgb
+    name: "CPU Start Color"
+    red: cpu_c1_r
+    green: cpu_c1_g
+    blue: cpu_c1_b
+    restore_mode: RESTORE_DEFAULT_ON
+
+  - platform: rgb
+    name: "CPU End Color"
+    red: cpu_c2_r
+    green: cpu_c2_g
+    blue: cpu_c2_b
+    restore_mode: RESTORE_DEFAULT_ON
+
+  - platform: rgb
+    name: "Fan Start Color"
+    red: fan_c1_r
+    green: fan_c1_g
+    blue: fan_c1_b
+    restore_mode: RESTORE_DEFAULT_ON
+
+  - platform: rgb
+    name: "Fan End Color"
+    red: fan_c2_r
+    green: fan_c2_g
+    blue: fan_c2_b
+    restore_mode: RESTORE_DEFAULT_ON
+
+  - platform: rgb
+    name: "Env Start Color"
+    red: env_c1_r
+    green: env_c1_g
+    blue: env_c1_b
+    restore_mode: RESTORE_DEFAULT_ON
+
+  - platform: rgb
+    name: "Env End Color"
+    red: env_c2_r
+    green: env_c2_g
+    blue: env_c2_b
+    restore_mode: RESTORE_DEFAULT_ON
+
+  - platform: rgb
+    name: "Power Start Color"
+    red: pwr_c1_r
+    green: pwr_c1_g
+    blue: pwr_c1_b
+    restore_mode: RESTORE_DEFAULT_ON
+
+  - platform: rgb
+    name: "Power End Color"
+    red: pwr_c2_r
+    green: pwr_c2_g
+    blue: pwr_c2_b
+    restore_mode: RESTORE_DEFAULT_ON
+
+api:
+  # encryption:
+  #   key: !secret waveshare_api
+
+ota:
+  - platform: esphome
+  #   password: !secret waveshare_ota
+
+# =======================================================
+# LVGL Font Configuration
+# =======================================================
+font:
+  # Standard Text (Subtitles, Units)
+  - file:
+      type: gfonts
+      family: Roboto
+      weight: 400
+    id: font_roboto_28
+    size: 28
+    bpp: 8
+    glyphs: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-°%/:_ "
+
+  # Card Headers
+  - file:
+      type: gfonts
+      family: Roboto Condensed
+      weight: 700
+    id: font_header_40
+    size: 40
+    bpp: 8
+    glyphs: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.- "
+
+  # Hero Values (Resized to 90 to fit Quadrants)
+  - file:
+      type: gfonts
+      family: Roboto
+      weight: 700
+    id: font_roboto_hero
+    size: 90
+    bpp: 8
+    # Added 'C' and 'W' for units
+    glyphs: "0123456789.-°% finCW"
+
+# =======================================================
+# CONFIGURABLE SETTINGS (Web UI)
+# =======================================================
+number:
+  # --- CPU TEMP SETTINGS ---
+  - platform: template
+    name: "Set CPU Min Value"
+    id: set_cpu_min
+    optimistic: true
+    min_value: 0
+    max_value: 100
+    initial_value: 20
+    step: 1
+    restore_value: true
+  - platform: template
+    name: "Set CPU Max Value"
+    id: set_cpu_max
+    optimistic: true
+    min_value: 0
+    max_value: 150
+    initial_value: 80
+    step: 1
+    restore_value: true
+
+  # --- FAN SETTINGS ---
+  - platform: template
+    name: "Set Fan Min Value"
+    id: set_fan_min
+    optimistic: true
+    min_value: 0
+    max_value: 1000
+    initial_value: 0
+    step: 100
+    restore_value: true
+  - platform: template
+    name: "Set Fan Max Value"
+    id: set_fan_max
+    optimistic: true
+    min_value: 0
+    max_value: 8000
+    initial_value: 5500
+    step: 100
+    restore_value: true
+
+  # --- ENCLOSURE/AMBIENT SETTINGS ---
+  - platform: template
+    name: "Set Env Min Value"
+    id: set_env_min
+    optimistic: true
+    min_value: -40
+    max_value: 50
+    initial_value: -10
+    step: 1
+    restore_value: true
+  - platform: template
+    name: "Set Env Max Value"
+    id: set_env_max
+    optimistic: true
+    min_value: 0
+    max_value: 100
+    initial_value: 40
+    step: 1
+    restore_value: true
+
+  # --- POWER SETTINGS ---
+  - platform: template
+    name: "Set Power Min Value"
+    id: set_pwr_min
+    optimistic: true
+    min_value: 0
+    max_value: 10
+    initial_value: 0
+    step: 0.1
+    restore_value: true
+  - platform: template
+    name: "Set Power Max Value"
+    id: set_pwr_max
+    optimistic: true
+    min_value: 1
+    max_value: 100
+    initial_value: 15
+    step: 1
+    restore_value: true
+
+switch:
+  - platform: template
+    name: "Dark Mode"
+    id: sw_dark_mode
+    restore_mode: RESTORE_DEFAULT_OFF
+    optimistic: true
+    turn_on_action:
+      - lvgl.obj.update:
+          id: card_thermal
+          bg_color: 0x000000
+      - lvgl.obj.update:
+          id: card_system
+          bg_color: 0x000000
+      - lvgl.obj.update:
+          id: card_ambient
+          bg_color: 0x000000
+      - lvgl.obj.update:
+          id: card_power
+          bg_color: 0x000000
+    turn_off_action:
+      - lvgl.obj.update:
+          id: card_thermal
+          bg_color: 0x1F2937
+      - lvgl.obj.update:
+          id: card_system
+          bg_color: 0x1F2937
+      - lvgl.obj.update:
+          id: card_ambient
+          bg_color: 0x1F2937
+      - lvgl.obj.update:
+          id: card_power
+          bg_color: 0x1F2937
+
+# =======================================================
+# Home Assistant Sensors
+# =======================================================
+sensor:
+  # --- THERMAL PAGE (Top Left) ---
+  - platform: homeassistant
+    id: ha_cpu_temp
+    entity_id: sensor.allskypi5_cpu_temp
+    on_value:
+      - lambda: |-
+          // 1. Settings & Gradient
+          float min = id(set_cpu_min).state;
+          float max = id(set_cpu_max).state;
+          if (max <= min) max = min + 1;
+          
+          float ratio = (x - min) / (max - min);
+          if (ratio < 0.0) ratio = 0.0; else if (ratio > 1.0) ratio = 1.0;
+          
+          lv_bar_set_value(id(bar_cpu_temp), (int32_t)(ratio * 100), LV_ANIM_OFF);
+          
+          int r = (int)(id(g_cpu_c1_r) + ratio * (id(g_cpu_c2_r) - id(g_cpu_c1_r)));
+          int g = (int)(id(g_cpu_c1_g) + ratio * (id(g_cpu_c2_g) - id(g_cpu_c1_g)));
+          int b = (int)(id(g_cpu_c1_b) + ratio * (id(g_cpu_c2_b) - id(g_cpu_c1_b)));
+          lv_obj_set_style_bg_color(id(bar_cpu_temp), lv_color_make(r, g, b), LV_PART_INDICATOR);
+          
+          // 2. Manual Float Formatting
+          float abs_v = fabsf(x);
+          int val_int = (int)abs_v;
+          int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+          if (val_dec >= 10) { val_int++; val_dec = 0; }
+          
+          // Added %2d padding and "C" unit
+          lv_label_set_text_fmt(id(lbl_cpu_temp_val), "%s%2d.%d°C", (x < 0 ? "-" : ""), val_int, val_dec);
+
+  - platform: homeassistant
+    id: ha_ssd_temp
+    entity_id: sensor.allskypi5_disk_ssd_temp
+    on_value:
+      - lambda: |-
+          float abs_v = fabsf(x);
+          int val_int = (int)abs_v;
+          int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+          if (val_dec >= 10) { val_int++; val_dec = 0; }
+          lv_label_set_text_fmt(id(lbl_ssd_temp_val), "SSD: %s%2d.%d°C", (x < 0 ? "-" : ""), val_int, val_dec);
+
+  # --- SYSTEM PAGE (Top Right) ---
+  - platform: homeassistant
+    id: ha_fan_speed
+    entity_id: sensor.allskypi5_fan_speedp
+    on_value:
+      - lambda: |-
+          float min = id(set_fan_min).state;
+          float max = id(set_fan_max).state;
+          if (max <= min) max = min + 1;
+          
+          float ratio = (x - min) / (max - min);
+          if (ratio < 0.0) ratio = 0.0; else if (ratio > 1.0) ratio = 1.0;
+          
+          lv_bar_set_value(id(bar_fan), (int32_t)(ratio * 100), LV_ANIM_OFF);
+          
+          int r = (int)(id(g_fan_c1_r) + ratio * (id(g_fan_c2_r) - id(g_fan_c1_r)));
+          int g = (int)(id(g_fan_c1_g) + ratio * (id(g_fan_c2_g) - id(g_fan_c1_g)));
+          int b = (int)(id(g_fan_c1_b) + ratio * (id(g_fan_c2_b) - id(g_fan_c1_b)));
+          lv_obj_set_style_bg_color(id(bar_fan), lv_color_make(r, g, b), LV_PART_INDICATOR);
+          
+          // Fan RPM is integer. Added %4d padding.
+          lv_label_set_text_fmt(id(lbl_fan_val), "%4d", (int)x);
+
+  - platform: homeassistant
+    id: ha_cpu_use
+    entity_id: sensor.allskypi5_cpu_use
+    on_value:
+      - lambda: |-
+          float abs_v = fabsf(x);
+          int val_int = (int)abs_v;
+          int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+          if (val_dec >= 10) { val_int++; val_dec = 0; }
+          lv_label_set_text_fmt(id(lbl_cpu_use_val), "CPU: %2d.%d%%", val_int, val_dec);
+      - lvgl.bar.update:
+          id: bar_cpu_load
+          value: !lambda 'return (int)x;'
+
+  - platform: homeassistant
+    id: ha_disk_usage
+    entity_id: sensor.allskypi5_disk_usage
+    on_value:
+      - lambda: |-
+          float abs_v = fabsf(x);
+          int val_int = (int)abs_v;
+          int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+          if (val_dec >= 10) { val_int++; val_dec = 0; }
+          lv_label_set_text_fmt(id(lbl_disk_use_val), "DISK: %2d.%d%%", val_int, val_dec);
+
+  # --- ENVIRONMENT PAGE (Bottom Left) ---
+  - platform: homeassistant
+    id: ha_enclosure_temp
+    entity_id: sensor.allskypi5_as_dewcontrolambient
+    on_value:
+      - lambda: |-
+          float min = id(set_env_min).state;
+          float max = id(set_env_max).state;
+          if (max <= min) max = min + 1;
+          
+          float ratio = (x - min) / (max - min);
+          if (ratio < 0.0) ratio = 0.0; else if (ratio > 1.0) ratio = 1.0;
+          
+          lv_bar_set_value(id(bar_enclosure), (int32_t)(ratio * 100), LV_ANIM_OFF);
+          
+          int r = (int)(id(g_env_c1_r) + ratio * (id(g_env_c2_r) - id(g_env_c1_r)));
+          int g = (int)(id(g_env_c1_g) + ratio * (id(g_env_c2_g) - id(g_env_c1_g)));
+          int b = (int)(id(g_env_c1_b) + ratio * (id(g_env_c2_b) - id(g_env_c1_b)));
+          lv_obj_set_style_bg_color(id(bar_enclosure), lv_color_make(r, g, b), LV_PART_INDICATOR);
+          
+          // Added %2d padding and "C" unit
+          float abs_v = fabsf(x);
+          int val_int = (int)abs_v;
+          int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+          if (val_dec >= 10) { val_int++; val_dec = 0; }
+          lv_label_set_text_fmt(id(lbl_enclosure_temp_val), "%s%2d.%d°C", (x < 0 ? "-" : ""), val_int, val_dec);
+
+  - platform: homeassistant
+    id: ha_enclosure_humidity
+    entity_id: sensor.allskypi5_as_dewcontrolhumidity
+    on_value:
+      - lambda: |-
+          float abs_v = fabsf(x);
+          int val_int = (int)abs_v;
+          int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+          if (val_dec >= 10) { val_int++; val_dec = 0; }
+          lv_label_set_text_fmt(id(lbl_humidity_val), "HUM: %2d.%d%%", val_int, val_dec);
+
+  - platform: homeassistant
+    id: ha_dew_point
+    entity_id: sensor.allskypi5_as_dewcontroldew
+    on_value:
+      - lambda: |-
+          float abs_v = fabsf(x);
+          int val_int = (int)abs_v;
+          int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+          if (val_dec >= 10) { val_int++; val_dec = 0; }
+          lv_label_set_text_fmt(id(lbl_dew_val), "DEW: %s%2d.%d°C", (x < 0 ? "-" : ""), val_int, val_dec);
+
+  # --- POWER PAGE (Bottom Right) ---
+  - platform: homeassistant
+    id: ha_power
+    entity_id: sensor.sqm_reader_ina260_power
+    on_value:
+      - lambda: |-
+          float min = id(set_pwr_min).state;
+          float max = id(set_pwr_max).state;
+          if (max <= min) max = min + 1;
+          
+          float ratio = (x - min) / (max - min);
+          if (ratio < 0.0) ratio = 0.0; else if (ratio > 1.0) ratio = 1.0;
+          
+          lv_bar_set_value(id(bar_power), (int32_t)(ratio * 100), LV_ANIM_OFF);
+          
+          int r = (int)(id(g_pwr_c1_r) + ratio * (id(g_pwr_c2_r) - id(g_pwr_c1_r)));
+          int g = (int)(id(g_pwr_c1_g) + ratio * (id(g_pwr_c2_g) - id(g_pwr_c1_g)));
+          int b = (int)(id(g_pwr_c1_b) + ratio * (id(g_pwr_c2_b) - id(g_pwr_c1_b)));
+          lv_obj_set_style_bg_color(id(bar_power), lv_color_make(r, g, b), LV_PART_INDICATOR);
+          
+          // Added %2d padding and "W" unit
+          float abs_v = fabsf(x);
+          int val_int = (int)abs_v;
+          int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+          if (val_dec >= 10) { val_int++; val_dec = 0; }
+          lv_label_set_text_fmt(id(lbl_power_val), "%2d.%d W", val_int, val_dec);
+
+  - platform: homeassistant
+    id: ha_voltage
+    entity_id: sensor.sqm_reader_ina260_voltage
+    on_value:
+      - lambda: |-
+          float abs_v = fabsf(x);
+          int val_int = (int)abs_v;
+          int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+          if (val_dec >= 10) { val_int++; val_dec = 0; }
+          lv_label_set_text_fmt(id(lbl_voltage_val), "%2d.%dV", val_int, val_dec);
+
+  - platform: homeassistant
+    id: ha_current
+    entity_id: sensor.sqm_reader_ina260_current
+    on_value:
+      - lambda: |-
+          float abs_v = fabsf(x);
+          int val_int = (int)abs_v;
+          int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+          if (val_dec >= 10) { val_int++; val_dec = 0; }
+          lv_label_set_text_fmt(id(lbl_current_val), "%2d.%dA", val_int, val_dec);
+
+# Binary sensors for status indicators
+text_sensor:
+  - platform: homeassistant
+    id: ha_heater
+    entity_id: sensor.allskypi5_as_dewcontrolheater
+    on_value:
+      - if:
+          condition:
+            lambda: 'return x == "True";'
+          then:
+            - lvgl.obj.update:
+                id: ind_heater_dot
+                bg_color: 0xFF4500
+                bg_opa: COVER
+          else:
+            - lvgl.obj.update:
+                id: ind_heater_dot
+                bg_color: 0x444444
+                bg_opa: 50%
+
+  - platform: homeassistant
+    id: ha_enclosure_fan
+    entity_id: sensor.allskypi5_as_dewcontrolfan
+    on_value:
+      - if:
+          condition:
+            lambda: 'return x == "True";'
+          then:
+            - lvgl.obj.update:
+                id: ind_fan_dot
+                bg_color: 0x0EA5E9
+                bg_opa: COVER
+          else:
+            - lvgl.obj.update:
+                id: ind_fan_dot
+                bg_color: 0x444444
+                bg_opa: 50%
+
+# =======================================================
+# LVGL UI Configuration
+# =======================================================
+lvgl:
+  buffer_size: 100%
+  byte_order: little_endian
+  
+  style_definitions:
+    # --- Backgrounds ---
+    - id: style_page_bg
+      bg_color: 0x000000
+      bg_opa: COVER
+
+    - id: style_card_bg
+      bg_color: 0x1F2937
+      bg_opa: COVER
+      radius: 16
+      border_width: 0
+      pad_all: 15
+
+    # --- Typography ---
+    - id: style_header
+      text_color: 0x9CA3AF
+      text_font: font_header_40
+      text_align: LEFT
+
+    - id: style_value_hero
+      text_font: font_roboto_hero
+      text_color: 0xFFFFFF
+      text_align: CENTER
+      pad_top: 10
+      pad_bottom: 10
+    
+    - id: style_label_sub
+      text_font: font_roboto_28
+      text_color: 0xE5E7EB
+      text_align: CENTER
+
+    - id: style_unit_small
+      text_font: font_roboto_28
+      text_color: 0x6B7280
+      text_align: CENTER
+
+    # --- Bars (Progress) ---
+    - id: style_bar_bg
+      bg_color: 0x111827
+      radius: 6
+      bg_opa: COVER
+
+    # --- Accents (Note: These are now defaults, overridden dynamically) ---
+    - id: style_bar_red
+      bg_color: 0xEF4444
+      radius: 6
+    
+    - id: style_bar_blue
+      bg_color: 0x3B82F6
+      radius: 6
+
+    - id: style_bar_green
+      bg_color: 0x10B981
+      radius: 6
+
+    - id: style_bar_amber
+      bg_color: 0xF59E0B
+      radius: 6
+
+  pages:
+    - id: main_page
+      styles: style_page_bg
+      scrollbar_mode: "OFF"
+      widgets:
+        - obj:
+            # Main Flex Container 720x720
+            width: 720
+            height: 720
+            bg_opa: TRANSP
+            border_width: 0
+            scrollbar_mode: "OFF"
+            layout:
+              type: flex
+              flex_flow: ROW_WRAP
+              flex_align_main: SPACE_EVENLY
+              flex_align_cross: SPACE_EVENLY
+            pad_all: 5
+            
+            widgets:
+              # =================================================
+              # CARD 1: THERMAL (Top Left)
+              # =================================================
+              - obj:
+                  id: card_thermal
+                  width: 350
+                  height: 350
+                  styles: style_card_bg
+                  scrollbar_mode: "OFF"
+                  layout:
+                    type: flex
+                    flex_flow: COLUMN
+                    flex_align_main: SPACE_BETWEEN
+                  widgets:
+                    # Header
+                    - label:
+                        text: "THERMAL"
+                        styles: style_header
+                    
+                    # Main Value
+                    - obj:
+                        width: 100%
+                        height: 110
+                        bg_opa: TRANSP
+                        border_width: 0
+                        scrollbar_mode: "OFF"
+                        layout:
+                          type: flex
+                          flex_flow: COLUMN
+                          flex_align_main: CENTER
+                          flex_align_cross: CENTER
+                        widgets:
+                          - label:
+                              id: lbl_cpu_temp_val
+                              text: "--"
+                              styles: style_value_hero
+                          - label:
+                              text: "CPU TEMP"
+                              styles: style_unit_small
+
+                    # Bar
+                    - bar:
+                        id: bar_cpu_temp
+                        width: 100%
+                        height: 12
+                        min_value: 0
+                        max_value: 100
+                        mode: NORMAL
+                        styles: style_bar_bg
+                        indicator:
+                          styles: style_bar_red
+
+                    # Footer
+                    - label:
+                        id: lbl_ssd_temp_val
+                        text: "SSD: --°C"
+                        styles: style_label_sub
+                        align: CENTER
+                        pad_top: 10
+
+              # =================================================
+              # CARD 2: SYSTEM (Top Right)
+              # =================================================
+              - obj:
+                  id: card_system
+                  width: 350
+                  height: 350
+                  styles: style_card_bg
+                  scrollbar_mode: "OFF"
+                  layout:
+                    type: flex
+                    flex_flow: COLUMN
+                    flex_align_main: SPACE_BETWEEN
+                  widgets:
+                    # Header with Indicator
+                    - obj:
+                        width: 100%
+                        height: 50
+                        bg_opa: TRANSP
+                        border_width: 0
+                        scrollbar_mode: "OFF"
+                        layout:
+                          type: flex
+                          flex_flow: ROW
+                          flex_align_main: SPACE_BETWEEN
+                          flex_align_cross: CENTER
+                        widgets:
+                          - label:
+                              text: "SYSTEM"
+                              styles: style_header
+                          - obj:
+                              id: ind_fan_dot
+                              width: 16
+                              height: 16
+                              radius: 8
+                              bg_color: 0x444444
+                              scrollbar_mode: "OFF"
+                    
+                    # Main Value
+                    - obj:
+                        width: 100%
+                        height: 110
+                        bg_opa: TRANSP
+                        border_width: 0
+                        scrollbar_mode: "OFF"
+                        layout:
+                          type: flex
+                          flex_flow: COLUMN
+                          flex_align_main: CENTER
+                          flex_align_cross: CENTER
+                        widgets:
+                          - label:
+                              id: lbl_fan_val
+                              text: "--"
+                              styles: style_value_hero
+                          - label:
+                              text: "FAN RPM"
+                              styles: style_unit_small
+                    
+                    # Bar (Fan)
+                    - bar:
+                        id: bar_fan
+                        width: 100%
+                        height: 12
+                        min_value: 0
+                        max_value: 100
+                        mode: NORMAL
+                        styles: style_bar_bg
+                        indicator:
+                          styles: style_bar_blue
+
+                    # Footer Rows (CPU/DISK Bars small)
+                    - obj:
+                        width: 100%
+                        height: 60
+                        bg_opa: TRANSP
+                        border_width: 0
+                        scrollbar_mode: "OFF"
+                        layout:
+                          type: flex
+                          flex_flow: COLUMN
+                          flex_align_main: SPACE_EVENLY
+                        widgets:
+                          # CPU Row
+                          - obj:
+                              width: 100%
+                              height: 20
+                              bg_opa: TRANSP
+                              border_width: 0
+                              scrollbar_mode: "OFF"
+                              layout:
+                                type: flex
+                                flex_flow: ROW
+                                flex_align_main: SPACE_BETWEEN
+                                flex_align_cross: CENTER
+                              widgets:
+                                - label:
+                                    id: lbl_cpu_use_val
+                                    text: "CPU: --%"
+                                    styles: style_unit_small
+                                - bar:
+                                    id: bar_cpu_load
+                                    width: 100
+                                    height: 8
+                                    min_value: 0
+                                    max_value: 100
+                                    styles: style_bar_bg
+                                    indicator:
+                                      styles: style_bar_blue
+                          
+                          # Disk Row
+                          - label:
+                              id: lbl_disk_use_val
+                              text: "DISK: --%"
+                              styles: style_unit_small
+
+
+              # =================================================
+              # CARD 3: AMBIENT (Bottom Left)
+              # =================================================
+              - obj:
+                  id: card_ambient
+                  width: 350
+                  height: 350
+                  styles: style_card_bg
+                  scrollbar_mode: "OFF"
+                  layout:
+                    type: flex
+                    flex_flow: COLUMN
+                    flex_align_main: SPACE_BETWEEN
+                  widgets:
+                    # Header with Indicator
+                    - obj:
+                        width: 100%
+                        height: 50
+                        bg_opa: TRANSP
+                        border_width: 0
+                        scrollbar_mode: "OFF"
+                        layout:
+                          type: flex
+                          flex_flow: ROW
+                          flex_align_main: SPACE_BETWEEN
+                          flex_align_cross: CENTER
+                        widgets:
+                          - label:
+                              text: "AMBIENT"
+                              styles: style_header
+                          - obj:
+                              id: ind_heater_dot
+                              width: 16
+                              height: 16
+                              radius: 8
+                              bg_color: 0x444444
+                              scrollbar_mode: "OFF"
+
+                    # Main Value
+                    - obj:
+                        width: 100%
+                        height: 110
+                        bg_opa: TRANSP
+                        border_width: 0
+                        scrollbar_mode: "OFF"
+                        layout:
+                          type: flex
+                          flex_flow: COLUMN
+                          flex_align_main: CENTER
+                          flex_align_cross: CENTER
+                        widgets:
+                          - label:
+                              id: lbl_enclosure_temp_val
+                              text: "--"
+                              styles: style_value_hero
+                          - label:
+                              text: "TEMP °C"
+                              styles: style_unit_small
+
+                    # Bar
+                    - bar:
+                        id: bar_enclosure
+                        width: 100%
+                        height: 12
+                        min_value: 0
+                        max_value: 100
+                        mode: NORMAL
+                        styles: style_bar_bg
+                        indicator:
+                          styles: style_bar_green
+
+                    # Footer
+                    - obj:
+                        width: 100%
+                        height: 60
+                        bg_opa: TRANSP
+                        border_width: 0
+                        scrollbar_mode: "OFF"
+                        layout:
+                          type: flex
+                          flex_flow: COLUMN
+                          flex_align_main: SPACE_EVENLY
+                        widgets:
+                          - label:
+                              id: lbl_humidity_val
+                              text: "H: --%"
+                              styles: style_label_sub
+                          - label:
+                              id: lbl_dew_val
+                              text: "D: --°C"
+                              styles: style_label_sub
+
+              # =================================================
+              # CARD 4: POWER (Bottom Right)
+              # =================================================
+              - obj:
+                  id: card_power
+                  width: 350
+                  height: 350
+                  styles: style_card_bg
+                  scrollbar_mode: "OFF"
+                  layout:
+                    type: flex
+                    flex_flow: COLUMN
+                    flex_align_main: SPACE_BETWEEN
+                  widgets:
+                    # Header
+                    - label:
+                        text: "POWER"
+                        styles: style_header
+
+                    # Main Value
+                    - obj:
+                        width: 100%
+                        height: 110
+                        bg_opa: TRANSP
+                        border_width: 0
+                        scrollbar_mode: "OFF"
+                        layout:
+                          type: flex
+                          flex_flow: COLUMN
+                          flex_align_main: CENTER
+                          flex_align_cross: CENTER
+                        widgets:
+                          - label:
+                              id: lbl_power_val
+                              text: "--"
+                              styles: style_value_hero
+                          - label:
+                              text: "WATTS"
+                              styles: style_unit_small
+
+                    # Bar
+                    - bar:
+                        id: bar_power
+                        width: 100%
+                        height: 12
+                        min_value: 0
+                        max_value: 100
+                        mode: NORMAL
+                        styles: style_bar_bg
+                        indicator:
+                          styles: style_bar_amber
+
+                    # Footer
+                    - obj:
+                        width: 100%
+                        height: 50
+                        bg_opa: TRANSP
+                        border_width: 0
+                        scrollbar_mode: "OFF"
+                        layout:
+                          type: flex
+                          flex_flow: ROW
+                          flex_align_main: SPACE_BETWEEN
+                        widgets:
+                          - label:
+                              id: lbl_voltage_val
+                              text: "-- V"
+                              styles: style_label_sub
+                          - label:
+                              id: lbl_current_val
+                              text: "-- A"
+                              styles: style_label_sub
