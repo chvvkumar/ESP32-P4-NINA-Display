@@ -1,3 +1,19 @@
+color:
+  - id: filter_l
+    hex: "F8FAFC"
+  - id: filter_r
+    hex: "F87171"
+  - id: filter_g
+    hex: "4ADE80"
+  - id: filter_b
+    hex: "60A5FA"
+  - id: filter_sii
+    hex: "FB7185"
+  - id: filter_ha
+    hex: "FACC15"
+  - id: filter_oiii
+    hex: "22D3EE"
+
 font:
   - file: { type: gfonts, family: Roboto, weight: 400 }
     id: font_roboto_28
@@ -69,6 +85,26 @@ lvgl:
     - id: style_bar_amber
       bg_color: 0xF59E0B
       radius: 6
+    - id: style_filter_active
+      text_opa: 100%
+      text_font: font_header_40
+    - id: style_filter_muted
+      text_opa: 25%
+      text_font: font_header_40
+    - id: style_clr_l
+      text_color: filter_l
+    - id: style_clr_r
+      text_color: filter_r
+    - id: style_clr_g
+      text_color: filter_g
+    - id: style_clr_b
+      text_color: filter_b
+    - id: style_clr_sii
+      text_color: filter_sii
+    - id: style_clr_ha
+      text_color: filter_ha
+    - id: style_clr_oiii
+      text_color: filter_oiii
 
   pages:
     - id: main_page
@@ -304,7 +340,7 @@ lvgl:
                   widgets:
                     - obj:
                         id: nina2_card_rms
-                        width: 345
+                        width: 350
                         height: 175
                         styles: style_card_bg
                         scrollbar_mode: "OFF"
@@ -314,7 +350,7 @@ lvgl:
                           - label: { id: lbl_nina2_rms, text: "--", text_font: font_roboto_hero, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
                     - obj:
                         id: nina2_card_hfr
-                        width: 345
+                        width: 350
                         height: 175
                         styles: style_card_bg
                         scrollbar_mode: "OFF"
@@ -323,7 +359,7 @@ lvgl:
                           - label: { text: "HFR (Px)", styles: style_unit_small, width: 100% }
                           - label: { id: lbl_nina2_hfr, text: "--", text_font: font_roboto_hero, text_color: 0xFF6B9D, text_align: CENTER, width: 100% }
 
-              # PRIORITY 2: EXP #, EXP TIME, FILTER
+              # PRIORITY 2: EXP #, EXP TIME, SAT. PIXELS
               - obj:
                   width: 700
                   height: 145
@@ -334,7 +370,7 @@ lvgl:
                   widgets:
                     - obj:
                         id: nina2_card_exp_num
-                        width: 225
+                        width: 233
                         height: 145
                         styles: style_card_bg
                         scrollbar_mode: "OFF"
@@ -344,7 +380,7 @@ lvgl:
                           - label: { id: lbl_nina2_exp_num, text: "--", text_font: font_header_40, text_color: 0x10B981, text_align: CENTER, width: 100% }
                     - obj:
                         id: nina2_card_exp_time
-                        width: 225
+                        width: 234
                         height: 145
                         styles: style_card_bg
                         scrollbar_mode: "OFF"
@@ -353,27 +389,32 @@ lvgl:
                           - label: { text: "EXP (s)", styles: style_unit_small, width: 100% }
                           - label: { id: lbl_nina2_exp_time, text: "--", text_font: font_header_40, text_color: 0xF59E0B, text_align: CENTER, width: 100% }
                     - obj:
-                        id: nina2_card_filter
-                        width: 225
+                        id: nina2_card_sat_px
+                        width: 233
                         height: 145
                         styles: style_card_bg
                         scrollbar_mode: "OFF"
                         layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER }
                         widgets:
-                          - label: { text: "FILTER", styles: style_unit_small, width: 100% }
-                          - label: { id: lbl_nina2_filter, text: "--", text_font: font_header_40, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
+                          - label: { text: "SAT. PIXELS", styles: style_unit_small, width: 100% }
+                          - label: { id: lbl_nina2_sat_px, text: "--", text_font: font_header_40, text_color: 0xCCCCCC, text_align: CENTER, width: 100% }
 
-              # PRIORITY 2: SATURATED PIXELS
+              # PRIORITY 2: FILTER
               - obj:
-                  id: nina2_card_sat_px
+                  id: nina2_card_filter
                   width: 700
                   height: 70
                   styles: style_card_bg
                   scrollbar_mode: "OFF"
-                  layout: { type: flex, flex_flow: ROW, flex_align_main: SPACE_BETWEEN, flex_align_cross: CENTER }
+                  layout: { type: flex, flex_flow: ROW, flex_align_main: SPACE_EVENLY, flex_align_cross: CENTER }
                   widgets:
-                    - label: { text: "SATURATED PIXELS:", styles: style_label_sub }
-                    - label: { id: lbl_nina2_sat_px, text: "--", text_font: font_roboto_28, text_color: 0xCCCCCC }
+                    - label: { id: lbl_nina2_filter_l, text: "L", styles: [style_filter_muted, style_clr_l] }
+                    - label: { id: lbl_nina2_filter_r, text: "R", styles: [style_filter_muted, style_clr_r] }
+                    - label: { id: lbl_nina2_filter_g, text: "G", styles: [style_filter_muted, style_clr_g] }
+                    - label: { id: lbl_nina2_filter_b, text: "B", styles: [style_filter_muted, style_clr_b] }
+                    - label: { id: lbl_nina2_filter_sii, text: "Sii", styles: [style_filter_muted, style_clr_sii] }
+                    - label: { id: lbl_nina2_filter_ha, text: "Ha", styles: [style_filter_muted, style_clr_ha] }
+                    - label: { id: lbl_nina2_filter_oiii, text: "Oiii", styles: [style_filter_muted, style_clr_oiii] }
 
               # PRIORITY 3: THE REST
               - obj:
@@ -386,7 +427,7 @@ lvgl:
                   widgets:
                     - obj:
                         id: nina2_card_cam_temp
-                        width: 225
+                        width: 233
                         height: 155
                         styles: style_card_bg
                         scrollbar_mode: "OFF"
@@ -396,7 +437,7 @@ lvgl:
                           - label: { id: lbl_nina2_cam_temp, text: "--", text_font: font_roboto_28, text_color: 0x3B82F6, text_align: CENTER, width: 100% }
                     - obj:
                         id: nina2_card_stars
-                        width: 225
+                        width: 234
                         height: 155
                         styles: style_card_bg
                         scrollbar_mode: "OFF"
@@ -406,7 +447,7 @@ lvgl:
                           - label: { id: lbl_nina2_stars, text: "--", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
                     - obj:
                         id: nina2_card_ra_dec
-                        width: 225
+                        width: 233
                         height: 155
                         styles: style_card_bg
                         scrollbar_mode: "OFF"
@@ -460,7 +501,7 @@ lvgl:
                   widgets:
                     - obj:
                         id: nina3_card_rms
-                        width: 345
+                        width: 350
                         height: 175
                         styles: style_card_bg
                         scrollbar_mode: "OFF"
@@ -470,7 +511,7 @@ lvgl:
                           - label: { id: lbl_nina3_rms, text: "--", text_font: font_roboto_hero, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
                     - obj:
                         id: nina3_card_hfr
-                        width: 345
+                        width: 350
                         height: 175
                         styles: style_card_bg
                         scrollbar_mode: "OFF"
@@ -479,7 +520,7 @@ lvgl:
                           - label: { text: "HFR (Px)", styles: style_unit_small, width: 100% }
                           - label: { id: lbl_nina3_hfr, text: "--", text_font: font_roboto_hero, text_color: 0xFF6B9D, text_align: CENTER, width: 100% }
 
-              # PRIORITY 2: EXP #, EXP TIME, FILTER
+              # PRIORITY 2: EXP #, EXP TIME, SAT. PIXELS
               - obj:
                   width: 700
                   height: 145
@@ -490,7 +531,7 @@ lvgl:
                   widgets:
                     - obj:
                         id: nina3_card_exp_num
-                        width: 225
+                        width: 233
                         height: 145
                         styles: style_card_bg
                         scrollbar_mode: "OFF"
@@ -500,7 +541,7 @@ lvgl:
                           - label: { id: lbl_nina3_exp_num, text: "--", text_font: font_header_40, text_color: 0x10B981, text_align: CENTER, width: 100% }
                     - obj:
                         id: nina3_card_exp_time
-                        width: 225
+                        width: 234
                         height: 145
                         styles: style_card_bg
                         scrollbar_mode: "OFF"
@@ -509,27 +550,32 @@ lvgl:
                           - label: { text: "EXP (s)", styles: style_unit_small, width: 100% }
                           - label: { id: lbl_nina3_exp_time, text: "--", text_font: font_header_40, text_color: 0xF59E0B, text_align: CENTER, width: 100% }
                     - obj:
-                        id: nina3_card_filter
-                        width: 225
+                        id: nina3_card_sat_px
+                        width: 233
                         height: 145
                         styles: style_card_bg
                         scrollbar_mode: "OFF"
                         layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER }
                         widgets:
-                          - label: { text: "FILTER", styles: style_unit_small, width: 100% }
-                          - label: { id: lbl_nina3_filter, text: "--", text_font: font_header_40, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
+                          - label: { text: "SAT. PIXELS", styles: style_unit_small, width: 100% }
+                          - label: { id: lbl_nina3_sat_px, text: "--", text_font: font_header_40, text_color: 0xCCCCCC, text_align: CENTER, width: 100% }
 
-              # PRIORITY 2: SATURATED PIXELS
+              # PRIORITY 2: FILTER
               - obj:
-                  id: nina3_card_sat_px
+                  id: nina3_card_filter
                   width: 700
                   height: 70
                   styles: style_card_bg
                   scrollbar_mode: "OFF"
-                  layout: { type: flex, flex_flow: ROW, flex_align_main: SPACE_BETWEEN, flex_align_cross: CENTER }
+                  layout: { type: flex, flex_flow: ROW, flex_align_main: SPACE_EVENLY, flex_align_cross: CENTER }
                   widgets:
-                    - label: { text: "SATURATED PIXELS:", styles: style_label_sub }
-                    - label: { id: lbl_nina3_sat_px, text: "--", text_font: font_roboto_28, text_color: 0xCCCCCC }
+                    - label: { id: lbl_nina3_filter_l, text: "L", styles: [style_filter_muted, style_clr_l] }
+                    - label: { id: lbl_nina3_filter_r, text: "R", styles: [style_filter_muted, style_clr_r] }
+                    - label: { id: lbl_nina3_filter_g, text: "G", styles: [style_filter_muted, style_clr_g] }
+                    - label: { id: lbl_nina3_filter_b, text: "B", styles: [style_filter_muted, style_clr_b] }
+                    - label: { id: lbl_nina3_filter_sii, text: "Sii", styles: [style_filter_muted, style_clr_sii] }
+                    - label: { id: lbl_nina3_filter_ha, text: "Ha", styles: [style_filter_muted, style_clr_ha] }
+                    - label: { id: lbl_nina3_filter_oiii, text: "Oiii", styles: [style_filter_muted, style_clr_oiii] }
 
               # PRIORITY 3: THE REST
               - obj:
@@ -542,7 +588,7 @@ lvgl:
                   widgets:
                     - obj:
                         id: nina3_card_cam_temp
-                        width: 225
+                        width: 233
                         height: 155
                         styles: style_card_bg
                         scrollbar_mode: "OFF"
@@ -552,7 +598,7 @@ lvgl:
                           - label: { id: lbl_nina3_cam_temp, text: "--", text_font: font_roboto_28, text_color: 0x3B82F6, text_align: CENTER, width: 100% }
                     - obj:
                         id: nina3_card_stars
-                        width: 225
+                        width: 234
                         height: 155
                         styles: style_card_bg
                         scrollbar_mode: "OFF"
@@ -562,7 +608,7 @@ lvgl:
                           - label: { id: lbl_nina3_stars, text: "--", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
                     - obj:
                         id: nina3_card_ra_dec
-                        width: 225
+                        width: 233
                         height: 155
                         styles: style_card_bg
                         scrollbar_mode: "OFF"

@@ -373,7 +373,66 @@ text_sensor:
     entity_id: sensor.nina2_filter_wheel_filter
     on_value:
       - lambda: |- 
-          lv_label_set_text(id(lbl_nina2_filter), x.c_str());
+          // Reset all filters to muted
+          lv_obj_remove_style(id(lbl_nina2_filter_l), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina2_filter_l), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina2_filter_l), (lv_style_t *)id(style_clr_l), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          
+          lv_obj_remove_style(id(lbl_nina2_filter_r), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina2_filter_r), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina2_filter_r), (lv_style_t *)id(style_clr_r), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          
+          lv_obj_remove_style(id(lbl_nina2_filter_g), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina2_filter_g), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina2_filter_g), (lv_style_t *)id(style_clr_g), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          
+          lv_obj_remove_style(id(lbl_nina2_filter_b), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina2_filter_b), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina2_filter_b), (lv_style_t *)id(style_clr_b), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          
+          lv_obj_remove_style(id(lbl_nina2_filter_sii), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina2_filter_sii), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina2_filter_sii), (lv_style_t *)id(style_clr_sii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          
+          lv_obj_remove_style(id(lbl_nina2_filter_ha), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina2_filter_ha), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina2_filter_ha), (lv_style_t *)id(style_clr_ha), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          
+          lv_obj_remove_style(id(lbl_nina2_filter_oiii), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina2_filter_oiii), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina2_filter_oiii), (lv_style_t *)id(style_clr_oiii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          
+          // Activate the current filter
+          std::string filter = x.c_str();
+          if (filter == "L" || filter == "Lum" || filter == "Luminance") {
+            lv_obj_remove_style(id(lbl_nina2_filter_l), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina2_filter_l), (lv_style_t *)id(style_filter_active), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina2_filter_l), (lv_style_t *)id(style_clr_l), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          } else if (filter == "R" || filter == "Red") {
+            lv_obj_remove_style(id(lbl_nina2_filter_r), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina2_filter_r), (lv_style_t *)id(style_filter_active), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina2_filter_r), (lv_style_t *)id(style_clr_r), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          } else if (filter == "G" || filter == "Green") {
+            lv_obj_remove_style(id(lbl_nina2_filter_g), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina2_filter_g), (lv_style_t *)id(style_filter_active), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina2_filter_g), (lv_style_t *)id(style_clr_g), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          } else if (filter == "B" || filter == "Blue") {
+            lv_obj_remove_style(id(lbl_nina2_filter_b), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina2_filter_b), (lv_style_t *)id(style_filter_active), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina2_filter_b), (lv_style_t *)id(style_clr_b), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          } else if (filter == "Ha" || filter == "H-Alpha" || filter == "Halpha") {
+            lv_obj_remove_style(id(lbl_nina2_filter_ha), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina2_filter_ha), (lv_style_t *)id(style_filter_active), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina2_filter_ha), (lv_style_t *)id(style_clr_ha), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          } else if (filter == "Oiii" || filter == "OIII" || filter == "O-III") {
+            lv_obj_remove_style(id(lbl_nina2_filter_oiii), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina2_filter_oiii), (lv_style_t *)id(style_filter_active), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina2_filter_oiii), (lv_style_t *)id(style_clr_oiii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          } else if (filter == "Sii" || filter == "SII" || filter.find("ii") != std::string::npos) {
+            lv_obj_remove_style(id(lbl_nina2_filter_sii), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina2_filter_sii), (lv_style_t *)id(style_filter_active), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina2_filter_sii), (lv_style_t *)id(style_clr_sii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          }
   - platform: homeassistant
     id: nina2_target
     entity_id: sensor.nina2_target_name
@@ -386,7 +445,66 @@ text_sensor:
     entity_id: sensor.nina3_filter_wheel_filter
     on_value:
       - lambda: |- 
-          lv_label_set_text(id(lbl_nina3_filter), x.c_str());
+          // Reset all filters to muted
+          lv_obj_remove_style(id(lbl_nina3_filter_l), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina3_filter_l), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina3_filter_l), (lv_style_t *)id(style_clr_l), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          
+          lv_obj_remove_style(id(lbl_nina3_filter_r), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina3_filter_r), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina3_filter_r), (lv_style_t *)id(style_clr_r), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          
+          lv_obj_remove_style(id(lbl_nina3_filter_g), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina3_filter_g), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina3_filter_g), (lv_style_t *)id(style_clr_g), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          
+          lv_obj_remove_style(id(lbl_nina3_filter_b), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina3_filter_b), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina3_filter_b), (lv_style_t *)id(style_clr_b), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          
+          lv_obj_remove_style(id(lbl_nina3_filter_sii), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina3_filter_sii), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina3_filter_sii), (lv_style_t *)id(style_clr_sii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          
+          lv_obj_remove_style(id(lbl_nina3_filter_ha), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina3_filter_ha), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina3_filter_ha), (lv_style_t *)id(style_clr_ha), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          
+          lv_obj_remove_style(id(lbl_nina3_filter_oiii), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina3_filter_oiii), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_nina3_filter_oiii), (lv_style_t *)id(style_clr_oiii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          
+          // Activate the current filter
+          std::string filter = x.c_str();
+          if (filter == "L" || filter == "Lum" || filter == "Luminance") {
+            lv_obj_remove_style(id(lbl_nina3_filter_l), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina3_filter_l), (lv_style_t *)id(style_filter_active), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina3_filter_l), (lv_style_t *)id(style_clr_l), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          } else if (filter == "R" || filter == "Red") {
+            lv_obj_remove_style(id(lbl_nina3_filter_r), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina3_filter_r), (lv_style_t *)id(style_filter_active), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina3_filter_r), (lv_style_t *)id(style_clr_r), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          } else if (filter == "G" || filter == "Green") {
+            lv_obj_remove_style(id(lbl_nina3_filter_g), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina3_filter_g), (lv_style_t *)id(style_filter_active), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina3_filter_g), (lv_style_t *)id(style_clr_g), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          } else if (filter == "B" || filter == "Blue") {
+            lv_obj_remove_style(id(lbl_nina3_filter_b), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina3_filter_b), (lv_style_t *)id(style_filter_active), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina3_filter_b), (lv_style_t *)id(style_clr_b), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          } else if (filter == "Ha" || filter == "H-Alpha" || filter == "Halpha") {
+            lv_obj_remove_style(id(lbl_nina3_filter_ha), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina3_filter_ha), (lv_style_t *)id(style_filter_active), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina3_filter_ha), (lv_style_t *)id(style_clr_ha), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          } else if (filter == "Oiii" || filter == "OIII" || filter == "O-III") {
+            lv_obj_remove_style(id(lbl_nina3_filter_oiii), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina3_filter_oiii), (lv_style_t *)id(style_filter_active), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina3_filter_oiii), (lv_style_t *)id(style_clr_oiii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          } else if (filter == "Sii" || filter == "SII" || filter.find("ii") != std::string::npos) {
+            lv_obj_remove_style(id(lbl_nina3_filter_sii), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina3_filter_sii), (lv_style_t *)id(style_filter_active), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_nina3_filter_sii), (lv_style_t *)id(style_clr_sii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          }
   - platform: homeassistant
     id: nina3_target
     entity_id: sensor.nina3_target_name
