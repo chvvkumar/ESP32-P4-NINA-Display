@@ -1,0 +1,91 @@
+esp32_hosted:
+  active_high: True
+  variant: ESP32C6
+  reset_pin: GPIO54
+  cmd_pin: GPIO19
+  clk_pin: GPIO18
+  d0_pin: GPIO14
+  d1_pin: GPIO15
+  d2_pin: GPIO16
+  d3_pin: GPIO17
+
+display:
+  - platform: mipi_dsi
+    model: WAVESHARE-P4-86-PANEL
+    id: my_display
+    rotation: ${display_rotation}
+
+i2c:
+  sda: GPIO7
+  scl: GPIO8
+  scan: true
+  frequency: 400kHz
+  id: i2c_bus
+
+touchscreen:
+  - platform: gt911
+    id: touchscreen_
+    on_touch:
+      - lambda: |-
+          if (id(g_touch_start_x) == -1) {
+            id(g_touch_start_x) = touch.x;
+          } 
+          else if (id(g_touch_start_x) >= 0) {
+            int delta = touch.x - id(g_touch_start_x);
+            int threshold = 80;
+
+            if (delta < -threshold) {
+               if (id(g_current_page) < 2) {
+                  id(g_current_page) += 1;
+               } else {
+                  id(g_current_page) = 0;
+               }
+
+               if (id(g_current_page) == 0) {
+                  lv_scr_load_anim(id(main_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+               } else if (id(g_current_page) == 1) {
+                  lv_scr_load_anim(id(nina2_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+               } else {
+                  lv_scr_load_anim(id(nina3_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+               }
+               
+               id(g_touch_start_x) = -2;
+            }
+            else if (delta > threshold) {
+               if (id(g_current_page) > 0) {
+                  id(g_current_page) -= 1;
+               } else {
+                  id(g_current_page) = 2;
+               }
+
+               if (id(g_current_page) == 0) {
+                  lv_scr_load_anim(id(main_page)->obj, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 300, 0, false);
+               } else if (id(g_current_page) == 1) {
+                  lv_scr_load_anim(id(nina2_page)->obj, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 300, 0, false);
+               } else {
+                  lv_scr_load_anim(id(nina3_page)->obj, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 300, 0, false);
+               }
+
+               id(g_touch_start_x) = -2;
+            }
+          }
+
+output:
+  - platform: ledc
+    id: backlight_
+    pin: GPIO26
+    frequency: 100Hz
+    inverted: true
+    min_power: 0.1
+    max_power: 0.8
+
+binary_sensor:
+  - platform: touchscreen
+    id: touch_active
+    touchscreen_id: touchscreen_
+    x_min: 0
+    x_max: 720
+    y_min: 0
+    y_max: 720
+    on_release:
+      - globals.set: { id: g_touch_start_x, value: '-1' }

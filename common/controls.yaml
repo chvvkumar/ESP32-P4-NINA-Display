@@ -1,0 +1,650 @@
+button:
+  - platform: restart
+    name: "WaveShare P4 Box"
+
+number:
+  - platform: template
+    name: "Set CPU Min Value"
+    id: set_cpu_min
+    optimistic: true
+    min_value: 0
+    max_value: 100
+    initial_value: 0
+    step: 1
+    restore_value: true
+  - platform: template
+    name: "Set CPU Max Value"
+    id: set_cpu_max
+    optimistic: true
+    min_value: 0
+    max_value: 150
+    initial_value: 80
+    step: 1
+    restore_value: true
+  - platform: template
+    name: "Set Fan Min Value"
+    id: set_fan_min
+    optimistic: true
+    min_value: 0
+    max_value: 1000
+    initial_value: 0
+    step: 100
+    restore_value: true
+  - platform: template
+    name: "Set Fan Max Value"
+    id: set_fan_max
+    optimistic: true
+    min_value: 0
+    max_value: 8000
+    initial_value: 5500
+    step: 100
+    restore_value: true
+  - platform: template
+    name: "Set Env Min Value"
+    id: set_env_min
+    optimistic: true
+    min_value: -40
+    max_value: 50
+    initial_value: -20
+    step: 1
+    restore_value: true
+  - platform: template
+    name: "Set Env Max Value"
+    id: set_env_max
+    optimistic: true
+    min_value: 0
+    max_value: 100
+    initial_value: 70
+    step: 1
+    restore_value: true
+  - platform: template
+    name: "Set Power Min Value"
+    id: set_pwr_min
+    optimistic: true
+    min_value: 0
+    max_value: 10
+    initial_value: 0
+    step: 0.1
+    restore_value: true
+  - platform: template
+    name: "Set Power Max Value"
+    id: set_pwr_max
+    optimistic: true
+    min_value: 1
+    max_value: 100
+    initial_value: 17
+    step: 1
+    restore_value: true
+  - platform: template
+    name: "Set SQM Min Value"
+    id: set_sqm_min
+    optimistic: true
+    min_value: 0
+    max_value: 23
+    initial_value: 1
+    step: 0.1
+    restore_value: true
+  - platform: template
+    name: "Set SQM Max Value"
+    id: set_sqm_max
+    optimistic: true
+    min_value: 0
+    max_value: 24
+    initial_value: 22
+    step: 0.1
+    restore_value: true
+
+switch:
+  - platform: template
+    name: "Match Text Color"
+    id: match_text_color
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    on_turn_on:
+      - lambda: |-
+          if (!isnan(id(ha_cpu_temp).state)) {
+             float x = id(ha_cpu_temp).state;
+             float min = id(set_cpu_min).state;
+             float max = id(set_cpu_max).state;
+             if (max <= min) max = min + 1;
+             float ratio = (x - min) / (max - min);
+             if (ratio < 0.0) ratio = 0.0; else if (ratio > 1.0) ratio = 1.0;
+             int r = (int)(id(g_cpu_c1_r) + ratio * (id(g_cpu_c2_r) - id(g_cpu_c1_r)));
+             int g = (int)(id(g_cpu_c1_g) + ratio * (id(g_cpu_c2_g) - id(g_cpu_c1_g)));
+             int b = (int)(id(g_cpu_c1_b) + ratio * (id(g_cpu_c2_b) - id(g_cpu_c1_b)));
+             lv_obj_set_style_text_color(id(lbl_cpu_temp_val), lv_color_make(r, g, b), LV_PART_MAIN);
+          }
+          if (!isnan(id(ha_sqm).state)) {
+             float x = id(ha_sqm).state;
+             float min = id(set_sqm_min).state;
+             float max = id(set_sqm_max).state;
+             if (max <= min) max = min + 0.1;
+             float ratio = (x - min) / (max - min);
+             if (ratio < 0.0) ratio = 0.0; else if (ratio > 1.0) ratio = 1.0;
+             int r = (int)(id(g_sqm_c1_r) + ratio * (id(g_sqm_c2_r) - id(g_sqm_c1_r)));
+             int g = (int)(id(g_sqm_c1_g) + ratio * (id(g_sqm_c2_g) - id(g_sqm_c1_g)));
+             int b = (int)(id(g_sqm_c1_b) + ratio * (id(g_sqm_c2_b) - id(g_sqm_c1_b)));
+             lv_obj_set_style_text_color(id(lbl_sqm_val), lv_color_make(r, g, b), LV_PART_MAIN);
+          }
+          if (!isnan(id(ha_enclosure_temp).state)) {
+             float x = id(ha_enclosure_temp).state;
+             float min = id(set_env_min).state;
+             float max = id(set_env_max).state;
+             if (max <= min) max = min + 1;
+             float ratio = (x - min) / (max - min);
+             if (ratio < 0.0) ratio = 0.0; else if (ratio > 1.0) ratio = 1.0;
+             int r = (int)(id(g_env_c1_r) + ratio * (id(g_env_c2_r) - id(g_env_c1_r)));
+             int g = (int)(id(g_env_c1_g) + ratio * (id(g_env_c2_g) - id(g_env_c1_g)));
+             int b = (int)(id(g_env_c1_b) + ratio * (id(g_env_c2_b) - id(g_env_c1_b)));
+             lv_obj_set_style_text_color(id(lbl_enclosure_temp_val), lv_color_make(r, g, b), LV_PART_MAIN);
+          }
+          if (!isnan(id(ha_power).state)) {
+             float x = id(ha_power).state;
+             float min = id(set_pwr_min).state;
+             float max = id(set_pwr_max).state;
+             if (max <= min) max = min + 1;
+             float ratio = (x - min) / (max - min);
+             if (ratio < 0.0) ratio = 0.0; else if (ratio > 1.0) ratio = 1.0;
+             int r = (int)(id(g_pwr_c1_r) + ratio * (id(g_pwr_c2_r) - id(g_pwr_c1_r)));
+             int g = (int)(id(g_pwr_c1_g) + ratio * (id(g_pwr_c2_g) - id(g_pwr_c1_g)));
+             int b = (int)(id(g_pwr_c1_b) + ratio * (id(g_pwr_c2_b) - id(g_pwr_c1_b)));
+             lv_obj_set_style_text_color(id(lbl_power_val), lv_color_make(r, g, b), LV_PART_MAIN);
+          }
+    on_turn_off:
+      - lambda: |-
+          lv_color_t white = lv_color_hex(0xFFFFFF);
+          lv_obj_set_style_text_color(id(lbl_cpu_temp_val), white, LV_PART_MAIN);
+          lv_obj_set_style_text_color(id(lbl_sqm_val), white, LV_PART_MAIN);
+          lv_obj_set_style_text_color(id(lbl_enclosure_temp_val), white, LV_PART_MAIN);
+          lv_obj_set_style_text_color(id(lbl_power_val), white, LV_PART_MAIN);
+
+select:
+  - platform: template
+    name: "Theme Selection"
+    id: theme_selector
+    optimistic: true
+    initial_option: "Royal Purple"
+    restore_value: true
+    options:
+      - "Modern Slate"
+      - "Midnight Black"
+      - "Deep Ocean"
+      - "Forest Night"
+      - "Cyber Neon"
+      - "Crimson Dark"
+      - "Solar Flare"
+      - "Royal Purple"
+    set_action:
+      - lambda: |-
+          lv_color_t bg_c, card_c, border_c;
+          std::string val = x;
+          
+          // Default / Modern Slate
+          bg_c = lv_color_hex(0x050505);
+          card_c = lv_color_hex(0x111111);
+          border_c = lv_color_hex(0x333333);
+
+          if (val == "Midnight Black") { 
+             bg_c = lv_color_hex(0x000000); 
+             card_c = lv_color_hex(0x000000); 
+             border_c = lv_color_hex(0x222222);
+          }
+          else if (val == "Deep Ocean") { 
+             bg_c = lv_color_hex(0x010205); 
+             card_c = lv_color_hex(0x080c14); 
+             border_c = lv_color_hex(0x1a2e4d); 
+          }
+          else if (val == "Forest Night") { 
+             bg_c = lv_color_hex(0x010301); 
+             card_c = lv_color_hex(0x051005); 
+             border_c = lv_color_hex(0x103010); 
+          }
+          else if (val == "Cyber Neon") { 
+             bg_c = lv_color_hex(0x030003); 
+             card_c = lv_color_hex(0x120412); 
+             border_c = lv_color_hex(0x360e36); 
+          }
+          else if (val == "Crimson Dark") { 
+             bg_c = lv_color_hex(0x050101); 
+             card_c = lv_color_hex(0x140505); 
+             border_c = lv_color_hex(0x381010); 
+          }
+          else if (val == "Solar Flare") { 
+             bg_c = lv_color_hex(0x050201); 
+             card_c = lv_color_hex(0x140a05); 
+             border_c = lv_color_hex(0x381e0e); 
+          }
+          else if (val == "Royal Purple") { 
+             bg_c = lv_color_hex(0x030105); 
+             card_c = lv_color_hex(0x0a0514); 
+             border_c = lv_color_hex(0x241240); 
+          }
+
+          if (id(main_container) != nullptr) {
+              lv_obj_set_style_bg_color(id(main_container), bg_c, LV_PART_MAIN);
+          }
+
+          auto apply_theme = [](lv_obj_t *obj, lv_color_t bg, lv_color_t border) {
+              if (obj != nullptr) {
+                  lv_obj_set_style_bg_color(obj, bg, LV_PART_MAIN);
+                  lv_obj_set_style_border_color(obj, border, LV_PART_MAIN);
+              }
+          };
+          apply_theme(id(card_thermal), card_c, border_c);
+          apply_theme(id(card_system), card_c, border_c);
+          apply_theme(id(card_ambient), card_c, border_c);
+          apply_theme(id(card_power), card_c, border_c);
+
+  - platform: template
+    name: "Page Selection"
+    id: page_selector
+    optimistic: true
+    initial_option: "Main Dashboard"
+    icon: "mdi:layers-search"
+    options:
+      - "Main Dashboard"
+      - "NINA Instance 2"
+      - "NINA Instance 3"
+    set_action:
+      - lambda: |-
+          if (x == "Main Dashboard") {
+             id(g_current_page) = 0;
+             lv_scr_load_anim(id(main_page)->obj, LV_SCR_LOAD_ANIM_FADE_ON, 400, 0, false);
+          } else if (x == "NINA Instance 2") {
+             id(g_current_page) = 1;
+             lv_scr_load_anim(id(nina2_page)->obj, LV_SCR_LOAD_ANIM_FADE_ON, 400, 0, false);
+          } else if (x == "NINA Instance 3") {
+             id(g_current_page) = 2;
+             lv_scr_load_anim(id(nina3_page)->obj, LV_SCR_LOAD_ANIM_FADE_ON, 400, 0, false);
+          }
+
+light:
+  - platform: monochromatic
+    name: "backlight"
+    output: backlight_
+    id: backlight_light
+    restore_mode: ALWAYS_ON
+    default_transition_length: 0s
+    gamma_correct: 1.0
+    on_turn_on:
+      - light.control:
+          id: backlight_light
+          brightness: 76.9%  # 196/255
+
+  - name: "CPU Start Color"
+    platform: rgb
+    id: cpu_start_color
+    red: cpu_start_red
+    green: cpu_start_green
+    blue: cpu_start_blue
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 0s
+    on_turn_on:
+      - light.control:
+          id: cpu_start_color
+          red: 49.8%    # 127/255
+          green: 67.5%  # 172/255
+          blue: 100%    # 255/255
+
+  - name: "CPU End Color"
+    platform: rgb
+    id: cpu_end_color
+    red: cpu_end_red
+    green: cpu_end_green
+    blue: cpu_end_blue
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 0s
+    on_turn_on:
+      - light.control:
+          id: cpu_end_color
+          red: 100%    # 255/255
+          green: 53.7% # 137/255
+          blue: 5.5%   # 14/255
+
+  - name: "Fan Start Color"
+    platform: rgb
+    id: fan_start_color
+    red: fan_start_red
+    green: fan_start_green
+    blue: fan_start_blue
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 0s
+    on_turn_on:
+      - light.control:
+          id: fan_start_color
+          red: 49.8%    # 127/255
+          green: 67.5%  # 172/255
+          blue: 100%    # 255/255
+
+  - name: "Fan End Color"
+    platform: rgb
+    id: fan_end_color
+    red: fan_end_red
+    green: fan_end_green
+    blue: fan_end_blue
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 0s
+    on_turn_on:
+      - light.control:
+          id: fan_end_color
+          red: 100%    # 255/255
+          green: 53.7% # 137/255
+          blue: 5.5%   # 14/255
+
+  - name: "Env Start Color"
+    platform: rgb
+    id: env_start_color
+    red: env_start_red
+    green: env_start_green
+    blue: env_start_blue
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 0s
+    on_turn_on:
+      - light.control:
+          id: env_start_color
+          red: 49.8%    # 127/255
+          green: 67.5%  # 172/255
+          blue: 100%    # 255/255
+
+  - name: "Env End Color"
+    platform: rgb
+    id: env_end_color
+    red: env_end_red
+    green: env_end_green
+    blue: env_end_blue
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 0s
+    on_turn_on:
+      - light.control:
+          id: env_end_color
+          red: 100%    # 255/255
+          green: 53.7% # 137/255
+          blue: 5.5%   # 14/255
+
+  - name: "Power Start Color"
+    platform: rgb
+    id: pwr_start_color
+    red: pwr_start_red
+    green: pwr_start_green
+    blue: pwr_start_blue
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 0s
+    on_turn_on:
+      - light.control:
+          id: pwr_start_color
+          red: 49.8%    # 127/255
+          green: 67.5%  # 172/255
+          blue: 100%    # 255/255
+
+  - name: "Power End Color"
+    platform: rgb
+    id: pwr_end_color
+    red: pwr_end_red
+    green: pwr_end_green
+    blue: pwr_end_blue
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 0s
+    on_turn_on:
+      - light.control:
+          id: pwr_end_color
+          red: 100%    # 255/255
+          green: 53.7% # 137/255
+          blue: 5.5%   # 14/255
+
+  - name: "SQM Start Color"
+    platform: rgb
+    id: sqm_start_color
+    red: sqm_start_red
+    green: sqm_start_green
+    blue: sqm_start_blue
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 0s
+    on_turn_on:
+      - light.control:
+          id: sqm_start_color
+          red: 100%    # 255/255
+          green: 53.7% # 137/255
+          blue: 5.5%   # 14/255
+
+  - name: "SQM End Color"
+    platform: rgb
+    id: sqm_end_color
+    red: sqm_end_red
+    green: sqm_end_green
+    blue: sqm_end_blue
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 0s
+    on_turn_on:
+      - light.control:
+          id: sqm_end_color
+          red: 18.0%   # 46/255
+          green: 2.0%  # 5/255
+          blue: 100%   # 255/255
+
+  - name: "Cloud Status Light"
+    platform: rgb
+    id: cloud_status_light
+    red: cloud_status_red
+    green: cloud_status_green
+    blue: cloud_status_blue
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 0s
+    on_turn_on:
+      - light.control:
+          id: cloud_status_light
+          red: 100%    # 255/255
+          green: 100%  # 255/255
+          blue: 100%   # 255/255
+
+output:
+  - platform: template
+    type: float
+    id: cpu_start_red
+    write_action:
+      - lambda: |-
+          id(g_cpu_c1_r) = state * 255.0;
+  - platform: template
+    type: float
+    id: cpu_start_green
+    write_action:
+      - lambda: |-
+          id(g_cpu_c1_g) = state * 255.0;
+  - platform: template
+    type: float
+    id: cpu_start_blue
+    write_action:
+      - lambda: |-
+          id(g_cpu_c1_b) = state * 255.0;
+
+  - platform: template
+    type: float
+    id: cpu_end_red
+    write_action:
+      - lambda: |-
+          id(g_cpu_c2_r) = state * 255.0;
+  - platform: template
+    type: float
+    id: cpu_end_green
+    write_action:
+      - lambda: |-
+          id(g_cpu_c2_g) = state * 255.0;
+  - platform: template
+    type: float
+    id: cpu_end_blue
+    write_action:
+      - lambda: |-
+          id(g_cpu_c2_b) = state * 255.0;
+
+  - platform: template
+    type: float
+    id: fan_start_red
+    write_action:
+      - lambda: |-
+          id(g_fan_c1_r) = state * 255.0;
+  - platform: template
+    type: float
+    id: fan_start_green
+    write_action:
+      - lambda: |-
+          id(g_fan_c1_g) = state * 255.0;
+  - platform: template
+    type: float
+    id: fan_start_blue
+    write_action:
+      - lambda: |-
+          id(g_fan_c1_b) = state * 255.0;
+
+  - platform: template
+    type: float
+    id: fan_end_red
+    write_action:
+      - lambda: |-
+          id(g_fan_c2_r) = state * 255.0;
+  - platform: template
+    type: float
+    id: fan_end_green
+    write_action:
+      - lambda: |-
+          id(g_fan_c2_g) = state * 255.0;
+  - platform: template
+    type: float
+    id: fan_end_blue
+    write_action:
+      - lambda: |-
+          id(g_fan_c2_b) = state * 255.0;
+
+  - platform: template
+    type: float
+    id: env_start_red
+    write_action:
+      - lambda: |-
+          id(g_env_c1_r) = state * 255.0;
+  - platform: template
+    type: float
+    id: env_start_green
+    write_action:
+      - lambda: |-
+          id(g_env_c1_g) = state * 255.0;
+  - platform: template
+    type: float
+    id: env_start_blue
+    write_action:
+      - lambda: |-
+          id(g_env_c1_b) = state * 255.0;
+
+  - platform: template
+    type: float
+    id: env_end_red
+    write_action:
+      - lambda: |-
+          id(g_env_c2_r) = state * 255.0;
+  - platform: template
+    type: float
+    id: env_end_green
+    write_action:
+      - lambda: |-
+          id(g_env_c2_g) = state * 255.0;
+  - platform: template
+    type: float
+    id: env_end_blue
+    write_action:
+      - lambda: |-
+          id(g_env_c2_b) = state * 255.0;
+
+  - platform: template
+    type: float
+    id: pwr_start_red
+    write_action:
+      - lambda: |-
+          id(g_pwr_c1_r) = state * 255.0;
+  - platform: template
+    type: float
+    id: pwr_start_green
+    write_action:
+      - lambda: |-
+          id(g_pwr_c1_g) = state * 255.0;
+  - platform: template
+    type: float
+    id: pwr_start_blue
+    write_action:
+      - lambda: |-
+          id(g_pwr_c1_b) = state * 255.0;
+
+  - platform: template
+    type: float
+    id: pwr_end_red
+    write_action:
+      - lambda: |-
+          id(g_pwr_c2_r) = state * 255.0;
+  - platform: template
+    type: float
+    id: pwr_end_green
+    write_action:
+      - lambda: |-
+          id(g_pwr_c2_g) = state * 255.0;
+  - platform: template
+    type: float
+    id: pwr_end_blue
+    write_action:
+      - lambda: |-
+          id(g_pwr_c2_b) = state * 255.0;
+
+  - platform: template
+    type: float
+    id: sqm_start_red
+    write_action:
+      - lambda: |-
+          id(g_sqm_c1_r) = state * 255.0;
+  - platform: template
+    type: float
+    id: sqm_start_green
+    write_action:
+      - lambda: |-
+          id(g_sqm_c1_g) = state * 255.0;
+  - platform: template
+    type: float
+    id: sqm_start_blue
+    write_action:
+      - lambda: |-
+          id(g_sqm_c1_b) = state * 255.0;
+
+  - platform: template
+    type: float
+    id: sqm_end_red
+    write_action:
+      - lambda: |-
+          id(g_sqm_c2_r) = state * 255.0;
+  - platform: template
+    type: float
+    id: sqm_end_green
+    write_action:
+      - lambda: |-
+          id(g_sqm_c2_g) = state * 255.0;
+  - platform: template
+    type: float
+    id: sqm_end_blue
+    write_action:
+      - lambda: |-
+          id(g_sqm_c2_b) = state * 255.0;
+
+  - platform: template
+    type: float
+    id: cloud_status_red
+    write_action:
+      - lambda: |-
+          id(g_cloud_r) = state * 255.0;
+          lv_obj_set_style_text_color(id(lbl_cloud_status), lv_color_make(id(g_cloud_r), id(g_cloud_g), id(g_cloud_b)), LV_PART_MAIN);
+  - platform: template
+    type: float
+    id: cloud_status_green
+    write_action:
+      - lambda: |-
+          id(g_cloud_g) = state * 255.0;
+          lv_obj_set_style_text_color(id(lbl_cloud_status), lv_color_make(id(g_cloud_r), id(g_cloud_g), id(g_cloud_b)), LV_PART_MAIN);
+  - platform: template
+    type: float
+    id: cloud_status_blue
+    write_action:
+      - lambda: |-
+          id(g_cloud_b) = state * 255.0;
+          lv_obj_set_style_text_color(id(lbl_cloud_status), lv_color_make(id(g_cloud_r), id(g_cloud_g), id(g_cloud_b)), LV_PART_MAIN);

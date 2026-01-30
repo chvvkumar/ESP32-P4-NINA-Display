@@ -1,0 +1,155 @@
+esphome:
+  name_add_mac_suffix: false
+
+esp32:
+  board: esp32-p4-evboard
+  flash_size: 32MB
+  framework:
+    components:
+      - espressif/esp_hosted==2.11.3
+    type: esp-idf
+    version: recommended
+    advanced:
+      enable_idf_experimental_features: true
+  cpu_frequency: 360MHz
+
+logger:
+  level: debug
+  logs:
+    lvgl: info
+  hardware_uart: UART0
+
+web_server:
+  port: 80
+  version: 3
+
+psram:
+  speed: 200MHz
+
+esp_ldo:
+  - channel: 3
+    voltage: 2.7V
+
+wifi:
+  power_save_mode: NONE
+  fast_connect: True
+  post_connect_roaming: False
+  networks:
+    - ssid: "IoT"
+      password: "kkkkkkkk"
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+  on_client_connected:
+    - delay: 2s
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.allskypi5_cpu_temp }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.allskypi5_disk_ssd_temp }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.sqm_reader_tsl2591_sqm }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.allskypi5_as_starcount }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.allskypi5_as_dewcontrolambient }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.allskypi5_as_dewcontrolhumidity }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.allskypi5_as_dewcontroldew }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.sqm_reader_ina260_power }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.sqm_reader_ina260_voltage }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.sqm_reader_ina260_current }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.allskypi5_cloud_detector_status }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.allskypi5_as_dewcontrolheater }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.allsky_fan }
+    # --- NINA2 ---
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.nina2_camera_temperature }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.nina2_exposure_number }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.nina2_exposure_time }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.nina2_star_detectedstars }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.nina2_star_hfr }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.nina2_target_max_saturated_pixels }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.nina2_total_rms }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.nina_instance_2_nina2_ra_rms }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.nina_instance_2_nina2_dec_rms }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.nina2_filter_wheel_filter }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.nina2_target_name }
+    # --- NINA3 ---
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.nina3_camera_temperature }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.nina3_exposure_number }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.nina3_exposure_time }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.nina3_star_detectedstars }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.nina3_star_hfr }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.nina3_target_max_saturated_pixels }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.nina3_total_rms }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.nina_instance_3_nina3_ra_rms }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.nina_instance_3_nina3_dec_rms }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.nina3_filter_wheel_filter }
+    - homeassistant.service:
+        service: homeassistant.update_entity
+        data: { entity_id: sensor.nina3_target_name }
+
+ota:
+  - platform: esphome

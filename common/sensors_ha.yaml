@@ -1,0 +1,413 @@
+sensor:
+  - platform: homeassistant
+    id: ha_cpu_temp
+    entity_id: sensor.allskypi5_cpu_temp
+    on_value:
+      - lambda: |- 
+          float min = id(set_cpu_min).state;
+          float max = id(set_cpu_max).state;
+          if (max <= min) max = min + 1;
+          float ratio = (x - min) / (max - min);
+          if (ratio < 0.0) ratio = 0.0; else if (ratio > 1.0) ratio = 1.0;
+          lv_bar_set_value(id(bar_cpu_temp), (int32_t)(ratio * 100), LV_ANIM_OFF);
+          int r = (int)(id(g_cpu_c1_r) + ratio * (id(g_cpu_c2_r) - id(g_cpu_c1_r)));
+          int g = (int)(id(g_cpu_c1_g) + ratio * (id(g_cpu_c2_g) - id(g_cpu_c1_g)));
+          int b = (int)(id(g_cpu_c1_b) + ratio * (id(g_cpu_c2_b) - id(g_cpu_c1_b)));
+          lv_color_t c = lv_color_make(r, g, b);
+          lv_obj_set_style_bg_color(id(bar_cpu_temp), c, LV_PART_INDICATOR);
+          if (id(match_text_color).state) lv_obj_set_style_text_color(id(lbl_cpu_temp_val), c, LV_PART_MAIN);
+          else lv_obj_set_style_text_color(id(lbl_cpu_temp_val), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+          float abs_v = fabsf(x);
+          int val_int = (int)abs_v;
+          int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+          if (val_dec >= 10) { val_int++; val_dec = 0; }
+          lv_label_set_text_fmt(id(lbl_cpu_temp_val), "%s%2d.%d°", (x < 0 ? "-" : ""), val_int, val_dec);
+
+  - platform: homeassistant
+    id: ha_ssd_temp
+    entity_id: sensor.allskypi5_disk_ssd_temp
+    on_value:
+      - lambda: |- 
+          float abs_v = fabsf(x);
+          int val_int = (int)abs_v;
+          int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+          if (val_dec >= 10) { val_int++; val_dec = 0; }
+          lv_label_set_text_fmt(id(lbl_ssd_temp_val), "SSD: %s%2d.%d°C", (x < 0 ? "-" : ""), val_int, val_dec);
+
+  - platform: homeassistant
+    id: ha_sqm
+    entity_id: sensor.sqm_reader_tsl2591_sqm
+    on_value:
+      - lambda: |- 
+          float min = id(set_sqm_min).state;
+          float max = id(set_sqm_max).state;
+          if (max <= min) max = min + 0.1;
+          float ratio = (x - min) / (max - min);
+          if (ratio < 0.0) ratio = 0.0; else if (ratio > 1.0) ratio = 1.0;
+          int r = (int)(id(g_sqm_c1_r) + ratio * (id(g_sqm_c2_r) - id(g_sqm_c1_r)));
+          int g = (int)(id(g_sqm_c1_g) + ratio * (id(g_sqm_c2_g) - id(g_sqm_c1_g)));
+          int b = (int)(id(g_sqm_c1_b) + ratio * (id(g_sqm_c2_b) - id(g_sqm_c1_b)));
+          lv_color_t c = lv_color_make(r, g, b);
+          if (id(match_text_color).state) lv_obj_set_style_text_color(id(lbl_sqm_val), c, LV_PART_MAIN);
+          else lv_obj_set_style_text_color(id(lbl_sqm_val), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+          float abs_v = fabsf(x);
+          int val_int = (int)abs_v;
+          int val_dec = (int)((abs_v - val_int) * 100.0 + 0.5);
+          if (val_dec >= 100) { val_int++; val_dec = 0; }
+          lv_label_set_text_fmt(id(lbl_sqm_val), "%d.%02d", val_int, val_dec);
+
+  - platform: homeassistant
+    id: ha_starcount
+    entity_id: sensor.allskypi5_as_starcount
+    on_value:
+      - lambda: |- 
+          lv_label_set_text_fmt(id(lbl_star_count), "Stars: %d", (int)x);
+
+  - platform: homeassistant
+    id: ha_enclosure_temp
+    entity_id: sensor.allskypi5_as_dewcontrolambient
+    on_value:
+      - lambda: |- 
+          float min = id(set_env_min).state;
+          float max = id(set_env_max).state;
+          if (max <= min) max = min + 1;
+          float ratio = (x - min) / (max - min);
+          if (ratio < 0.0) ratio = 0.0; else if (ratio > 1.0) ratio = 1.0;
+          lv_bar_set_value(id(bar_enclosure), (int32_t)(ratio * 100), LV_ANIM_OFF);
+          int r = (int)(id(g_env_c1_r) + ratio * (id(g_env_c2_r) - id(g_env_c1_r)));
+          int g = (int)(id(g_env_c1_g) + ratio * (id(g_env_c2_g) - id(g_env_c1_g)));
+          int b = (int)(id(g_env_c1_b) + ratio * (id(g_env_c2_b) - id(g_env_c1_b)));
+          lv_color_t c = lv_color_make(r, g, b);
+          lv_obj_set_style_bg_color(id(bar_enclosure), c, LV_PART_INDICATOR);
+          if (id(match_text_color).state) lv_obj_set_style_text_color(id(lbl_enclosure_temp_val), c, LV_PART_MAIN);
+          else lv_obj_set_style_text_color(id(lbl_enclosure_temp_val), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+          float abs_v = fabsf(x);
+          int val_int = (int)abs_v;
+          int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+          if (val_dec >= 10) { val_int++; val_dec = 0; }
+          lv_label_set_text_fmt(id(lbl_enclosure_temp_val), "%s%2d.%d°", (x < 0 ? "-" : ""), val_int, val_dec);
+
+  - platform: homeassistant
+    id: ha_enclosure_humidity
+    entity_id: sensor.allskypi5_as_dewcontrolhumidity
+    on_value:
+      - lambda: |- 
+          float abs_v = fabsf(x);
+          int val_int = (int)abs_v;
+          int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+          if (val_dec >= 10) { val_int++; val_dec = 0; }
+          lv_label_set_text_fmt(id(lbl_humidity_val), "HUM: %2d.%d%%", val_int, val_dec);
+
+  - platform: homeassistant
+    id: ha_dew_point
+    entity_id: sensor.allskypi5_as_dewcontroldew
+    on_value:
+      - lambda: |- 
+          float abs_v = fabsf(x);
+          int val_int = (int)abs_v;
+          int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+          if (val_dec >= 10) { val_int++; val_dec = 0; }
+          lv_label_set_text_fmt(id(lbl_dew_val), "DEW: %s%2d.%d°C", (x < 0 ? "-" : ""), val_int, val_dec);
+
+  - platform: homeassistant
+    id: ha_power
+    entity_id: sensor.sqm_reader_ina260_power
+    on_value:
+      - lambda: |- 
+          float min = id(set_pwr_min).state;
+          float max = id(set_pwr_max).state;
+          if (max <= min) max = min + 1;
+          float ratio = (x - min) / (max - min);
+          if (ratio < 0.0) ratio = 0.0; else if (ratio > 1.0) ratio = 1.0;
+          lv_bar_set_value(id(bar_power), (int32_t)(ratio * 100), LV_ANIM_OFF);
+          int r = (int)(id(g_pwr_c1_r) + ratio * (id(g_pwr_c2_r) - id(g_pwr_c1_r)));
+          int g = (int)(id(g_pwr_c1_g) + ratio * (id(g_pwr_c2_g) - id(g_pwr_c1_g)));
+          int b = (int)(id(g_pwr_c1_b) + ratio * (id(g_pwr_c2_b) - id(g_pwr_c1_b)));
+          lv_color_t c = lv_color_make(r, g, b);
+          lv_obj_set_style_bg_color(id(bar_power), c, LV_PART_INDICATOR);
+          if (id(match_text_color).state) lv_obj_set_style_text_color(id(lbl_power_val), c, LV_PART_MAIN);
+          else lv_obj_set_style_text_color(id(lbl_power_val), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+          float abs_v = fabsf(x);
+          int val_int = (int)abs_v;
+          int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+          if (val_dec >= 10) { val_int++; val_dec = 0; }
+          lv_label_set_text_fmt(id(lbl_power_val), "%2d.%d", val_int, val_dec);
+
+  - platform: homeassistant
+    id: ha_voltage
+    entity_id: sensor.sqm_reader_ina260_voltage
+    on_value:
+      - lambda: |- 
+          float abs_v = fabsf(x);
+          int val_int = (int)abs_v;
+          int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+          if (val_dec >= 10) { val_int++; val_dec = 0; }
+          lv_label_set_text_fmt(id(lbl_voltage_val), "%2d.%dV", val_int, val_dec);
+
+  - platform: homeassistant
+    id: ha_current
+    entity_id: sensor.sqm_reader_ina260_current
+    on_value:
+      - lambda: |- 
+          float abs_v = fabsf(x);
+          int val_int = (int)abs_v;
+          int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+          if (val_dec >= 10) { val_int++; val_dec = 0; }
+          lv_label_set_text_fmt(id(lbl_current_val), "%2d.%dA", val_int, val_dec);
+
+  # --- NINA2/3 Sensors ---
+  - platform: homeassistant
+    id: nina2_camera_temp
+    entity_id: sensor.nina2_camera_temperature
+    on_value:
+      - lambda: |- 
+          if (!isnan(x)) {
+            float abs_v = fabsf(x);
+            int val_int = (int)abs_v;
+            int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+            if (val_dec >= 10) { val_int++; val_dec = 0; }
+            lv_label_set_text_fmt(id(lbl_nina2_cam_temp), "%s%2d.%d°C", (x < 0 ? "-" : ""), val_int, val_dec);
+          } else { lv_label_set_text(id(lbl_nina2_cam_temp), "--"); }
+
+  - platform: homeassistant
+    id: nina2_exposure_num
+    entity_id: sensor.nina2_exposure_number
+    on_value:
+      - lambda: |- 
+          if (!isnan(x)) lv_label_set_text_fmt(id(lbl_nina2_exp_num), "%d", (int)x);
+          else lv_label_set_text(id(lbl_nina2_exp_num), "--");
+
+  - platform: homeassistant
+    id: nina2_exposure_time
+    entity_id: sensor.nina2_exposure_time
+    on_value:
+      - lambda: |- 
+          if (!isnan(x)) {
+            float abs_v = fabsf(x);
+            int val_int = (int)abs_v;
+            int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+            if (val_dec >= 10) { val_int++; val_dec = 0; }
+            lv_label_set_text_fmt(id(lbl_nina2_exp_time), "%d.%dS", val_int, val_dec);
+          } else { lv_label_set_text(id(lbl_nina2_exp_time), "--"); }
+
+  - platform: homeassistant
+    id: nina2_detected_stars
+    entity_id: sensor.nina2_star_detectedstars
+    on_value:
+      - lambda: |- 
+          if (!isnan(x)) lv_label_set_text_fmt(id(lbl_nina2_stars), "%d", (int)x);
+          else lv_label_set_text(id(lbl_nina2_stars), "--");
+
+  - platform: homeassistant
+    id: nina2_hfr
+    entity_id: sensor.nina2_star_hfr
+    on_value:
+      - lambda: |- 
+          if (!isnan(x)) {
+            float abs_v = fabsf(x);
+            int val_int = (int)abs_v;
+            int val_dec = (int)((abs_v - val_int) * 100.0 + 0.5);
+            if (val_dec >= 100) { val_int++; val_dec = 0; }
+            lv_label_set_text_fmt(id(lbl_nina2_hfr), "%d.%02d", val_int, val_dec);
+          } else { lv_label_set_text(id(lbl_nina2_hfr), "--"); }
+
+  - platform: homeassistant
+    id: nina2_saturated_pixels
+    entity_id: sensor.nina2_target_max_saturated_pixels
+    on_value:
+      - lambda: |- 
+          if (!isnan(x)) lv_label_set_text_fmt(id(lbl_nina2_sat_px), "%d Px", (int)x);
+          else lv_label_set_text(id(lbl_nina2_sat_px), "--");
+
+  - platform: homeassistant
+    id: nina2_total_rms
+    entity_id: sensor.nina2_total_rms
+    on_value:
+      - lambda: |- 
+          if (!isnan(x)) {
+            float abs_v = fabsf(x);
+            int val_int = (int)abs_v;
+            int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+            if (val_dec >= 10) { val_int++; val_dec = 0; }
+            lv_label_set_text_fmt(id(lbl_nina2_rms), "%d.%d\"", val_int, val_dec);
+          } else { lv_label_set_text(id(lbl_nina2_rms), "--"); }
+
+  - platform: homeassistant
+    id: nina2_ra_rms
+    entity_id: sensor.nina_instance_2_nina2_ra_rms
+    on_value:
+      - lambda: |- 
+          if (!isnan(x)) {
+            float abs_v = fabsf(x);
+            int val_int = (int)abs_v;
+            int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+            if (val_dec >= 10) { val_int++; val_dec = 0; }
+            lv_label_set_text_fmt(id(lbl_nina2_ra_rms), "RA: %d.%d\"", val_int, val_dec);
+          } else { lv_label_set_text(id(lbl_nina2_ra_rms), "RA: --"); }
+
+  - platform: homeassistant
+    id: nina2_dec_rms
+    entity_id: sensor.nina_instance_2_nina2_dec_rms
+    on_value:
+      - lambda: |- 
+          if (!isnan(x)) {
+            float abs_v = fabsf(x);
+            int val_int = (int)abs_v;
+            int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+            if (val_dec >= 10) { val_int++; val_dec = 0; }
+            lv_label_set_text_fmt(id(lbl_nina2_dec_rms), "DEC: %d.%d\"", val_int, val_dec);
+          } else { lv_label_set_text(id(lbl_nina2_dec_rms), "DEC: --"); }
+
+  - platform: homeassistant
+    id: nina3_camera_temp
+    entity_id: sensor.nina3_camera_temperature
+    on_value:
+      - lambda: |- 
+          if (!isnan(x)) {
+            float abs_v = fabsf(x);
+            int val_int = (int)abs_v;
+            int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+            if (val_dec >= 10) { val_int++; val_dec = 0; }
+            lv_label_set_text_fmt(id(lbl_nina3_cam_temp), "%s%2d.%d°C", (x < 0 ? "-" : ""), val_int, val_dec);
+          } else { lv_label_set_text(id(lbl_nina3_cam_temp), "--"); }
+
+  - platform: homeassistant
+    id: nina3_exposure_num
+    entity_id: sensor.nina3_exposure_number
+    on_value:
+      - lambda: |- 
+          if (!isnan(x)) lv_label_set_text_fmt(id(lbl_nina3_exp_num), "%d", (int)x);
+          else lv_label_set_text(id(lbl_nina3_exp_num), "--");
+
+  - platform: homeassistant
+    id: nina3_exposure_time
+    entity_id: sensor.nina3_exposure_time
+    on_value:
+      - lambda: |- 
+          if (!isnan(x)) {
+            float abs_v = fabsf(x);
+            int val_int = (int)abs_v;
+            int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+            if (val_dec >= 10) { val_int++; val_dec = 0; }
+            lv_label_set_text_fmt(id(lbl_nina3_exp_time), "%d.%dS", val_int, val_dec);
+          } else { lv_label_set_text(id(lbl_nina3_exp_time), "--"); }
+
+  - platform: homeassistant
+    id: nina3_detected_stars
+    entity_id: sensor.nina3_star_detectedstars
+    on_value:
+      - lambda: |- 
+          if (!isnan(x)) lv_label_set_text_fmt(id(lbl_nina3_stars), "%d", (int)x);
+          else lv_label_set_text(id(lbl_nina3_stars), "--");
+
+  - platform: homeassistant
+    id: nina3_hfr
+    entity_id: sensor.nina3_star_hfr
+    on_value:
+      - lambda: |- 
+          if (!isnan(x)) {
+            float abs_v = fabsf(x);
+            int val_int = (int)abs_v;
+            int val_dec = (int)((abs_v - val_int) * 100.0 + 0.5);
+            if (val_dec >= 100) { val_int++; val_dec = 0; }
+            lv_label_set_text_fmt(id(lbl_nina3_hfr), "%d.%02d", val_int, val_dec);
+          } else { lv_label_set_text(id(lbl_nina3_hfr), "--"); }
+
+  - platform: homeassistant
+    id: nina3_saturated_pixels
+    entity_id: sensor.nina3_target_max_saturated_pixels
+    on_value:
+      - lambda: |- 
+          if (!isnan(x)) lv_label_set_text_fmt(id(lbl_nina3_sat_px), "%d Px", (int)x);
+          else lv_label_set_text(id(lbl_nina3_sat_px), "--");
+
+  - platform: homeassistant
+    id: nina3_total_rms
+    entity_id: sensor.nina3_total_rms
+    on_value:
+      - lambda: |- 
+          if (!isnan(x)) {
+            float abs_v = fabsf(x);
+            int val_int = (int)abs_v;
+            int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+            if (val_dec >= 10) { val_int++; val_dec = 0; }
+            lv_label_set_text_fmt(id(lbl_nina3_rms), "%d.%d\"", val_int, val_dec);
+          } else { lv_label_set_text(id(lbl_nina3_rms), "--"); }
+
+  - platform: homeassistant
+    id: nina3_ra_rms
+    entity_id: sensor.nina_instance_3_nina3_ra_rms
+    on_value:
+      - lambda: |- 
+          if (!isnan(x)) {
+            float abs_v = fabsf(x);
+            int val_int = (int)abs_v;
+            int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+            if (val_dec >= 10) { val_int++; val_dec = 0; }
+            lv_label_set_text_fmt(id(lbl_nina3_ra_rms), "RA: %d.%d\"", val_int, val_dec);
+          } else { lv_label_set_text(id(lbl_nina3_ra_rms), "RA: --"); }
+
+  - platform: homeassistant
+    id: nina3_dec_rms
+    entity_id: sensor.nina_instance_3_nina3_dec_rms
+    on_value:
+      - lambda: |- 
+          if (!isnan(x)) {
+            float abs_v = fabsf(x);
+            int val_int = (int)abs_v;
+            int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+            if (val_dec >= 10) { val_int++; val_dec = 0; }
+            lv_label_set_text_fmt(id(lbl_nina3_dec_rms), "DEC: %d.%d\"", val_int, val_dec);
+          } else { lv_label_set_text(id(lbl_nina3_dec_rms), "DEC: --"); }
+
+text_sensor:
+  - platform: homeassistant
+    id: ha_cloud_status
+    entity_id: sensor.allskypi5_cloud_detector_status
+    on_value:
+      - lambda: |- 
+          lv_label_set_text(id(lbl_cloud_status), x.c_str());
+
+  - platform: homeassistant
+    id: nina2_filter
+    entity_id: sensor.nina2_filter_wheel_filter
+    on_value:
+      - lambda: |- 
+          lv_label_set_text(id(lbl_nina2_filter), x.c_str());
+  - platform: homeassistant
+    id: nina2_target
+    entity_id: sensor.nina2_target_name
+    on_value:
+      - lambda: |- 
+          lv_label_set_text(id(lbl_nina2_target), x.c_str());
+
+  - platform: homeassistant
+    id: nina3_filter
+    entity_id: sensor.nina3_filter_wheel_filter
+    on_value:
+      - lambda: |- 
+          lv_label_set_text(id(lbl_nina3_filter), x.c_str());
+  - platform: homeassistant
+    id: nina3_target
+    entity_id: sensor.nina3_target_name
+    on_value:
+      - lambda: |- 
+          lv_label_set_text(id(lbl_nina3_target), x.c_str());
+
+  - platform: homeassistant
+    id: ha_heater
+    entity_id: sensor.allskypi5_as_dewcontrolheater
+    on_value:
+      - if:
+          condition: { lambda: 'return x == "True" || x == "true";' }
+          then: [ lvgl.obj.update: { id: ind_heater_dot, bg_color: 0xFF4500, bg_opa: COVER } ]
+          else: [ lvgl.obj.update: { id: ind_heater_dot, bg_color: 0x444444, bg_opa: 50% } ]
+
+  - platform: homeassistant
+    id: ha_enclosure_fan
+    entity_id: sensor.allsky_fan
+    on_value:
+      - if:
+          condition: { lambda: 'return x == "True" || x == "true";' }
+          then: [ lvgl.obj.update: { id: ind_fan_dot, bg_color: 0x0EA5E9, bg_opa: COVER } ]
+          else: [ lvgl.obj.update: { id: ind_fan_dot, bg_color: 0x444444, bg_opa: 50% } ]

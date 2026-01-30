@@ -1,0 +1,140 @@
+globals:
+  - id: g_touch_start_x
+    type: int
+    initial_value: '-1'
+  - id: g_current_page
+    type: int
+    initial_value: '0'
+  - id: g_cpu_c1_r
+    type: float
+    restore_value: true
+    initial_value: '127'
+  - id: g_cpu_c1_g
+    type: float
+    restore_value: true
+    initial_value: '172'
+  - id: g_cpu_c1_b
+    type: float
+    restore_value: true
+    initial_value: '255'
+  - id: g_cpu_c2_r
+    type: float
+    restore_value: true
+    initial_value: '255'
+  - id: g_cpu_c2_g
+    type: float
+    restore_value: true
+    initial_value: '137'
+  - id: g_cpu_c2_b
+    type: float
+    restore_value: true
+    initial_value: '14'
+  - id: g_fan_c1_r
+    type: float
+    restore_value: true
+    initial_value: '127'
+  - id: g_fan_c1_g
+    type: float
+    restore_value: true
+    initial_value: '172'
+  - id: g_fan_c1_b
+    type: float
+    restore_value: true
+    initial_value: '255'
+  - id: g_fan_c2_r
+    type: float
+    restore_value: true
+    initial_value: '255'
+  - id: g_fan_c2_g
+    type: float
+    restore_value: true
+    initial_value: '137'
+  - id: g_fan_c2_b
+    type: float
+    restore_value: true
+    initial_value: '14'
+  - id: g_env_c1_r
+    type: float
+    restore_value: true
+    initial_value: '127'
+  - id: g_env_c1_g
+    type: float
+    restore_value: true
+    initial_value: '172'
+  - id: g_env_c1_b
+    type: float
+    restore_value: true
+    initial_value: '255'
+  - id: g_env_c2_r
+    type: float
+    restore_value: true
+    initial_value: '255'
+  - id: g_env_c2_g
+    type: float
+    restore_value: true
+    initial_value: '137'
+  - id: g_env_c2_b
+    type: float
+    restore_value: true
+    initial_value: '14'
+  - id: g_pwr_c1_r
+    type: float
+    restore_value: true
+    initial_value: '127'
+  - id: g_pwr_c1_g
+    type: float
+    restore_value: true
+    initial_value: '172'
+  - id: g_pwr_c1_b
+    type: float
+    restore_value: true
+    initial_value: '255'
+  - id: g_pwr_c2_r
+    type: float
+    restore_value: true
+    initial_value: '255'
+  - id: g_pwr_c2_g
+    type: float
+    restore_value: true
+    initial_value: '137'
+  - id: g_pwr_c2_b
+    type: float
+    restore_value: true
+    initial_value: '14'
+  - id: g_sqm_c1_r
+    type: float
+    restore_value: true
+    initial_value: '255'
+  - id: g_sqm_c1_g
+    type: float
+    restore_value: true
+    initial_value: '137'
+  - id: g_sqm_c1_b
+    type: float
+    restore_value: true
+    initial_value: '14'
+  - id: g_sqm_c2_r
+    type: float
+    restore_value: true
+    initial_value: '46'
+  - id: g_sqm_c2_g
+    type: float
+    restore_value: true
+    initial_value: '5'
+  - id: g_sqm_c2_b
+    type: float
+    restore_value: true
+    initial_value: '255'
+  - id: g_cloud_r
+    type: float
+    restore_value: true
+    initial_value: '255'
+  - id: g_cloud_g
+    type: float
+    restore_value: true
+    initial_value: '255'
+  - id: g_cloud_b
+    type: float
+    restore_value: true
+    initial_value: '255'
+
