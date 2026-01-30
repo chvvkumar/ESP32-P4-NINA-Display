@@ -29,12 +29,16 @@ touchscreen:
       - lambda: |-
           if (id(g_touch_start_x) == -1) {
             id(g_touch_start_x) = touch.x;
-          } 
-          else if (id(g_touch_start_x) >= 0) {
-            int delta = touch.x - id(g_touch_start_x);
-            int threshold = 80;
+          }
+          id(g_touch_end_x) = touch.x;
+    on_release:
+      - lambda: |-
+          if (id(g_touch_start_x) >= 0 && id(g_touch_end_x) >= 0) {
+            int delta = id(g_touch_end_x) - id(g_touch_start_x);
+            int threshold = 100;
 
             if (delta < -threshold) {
+               // Swipe left - next page
                if (id(g_current_page) < 2) {
                   id(g_current_page) += 1;
                } else {
@@ -48,10 +52,9 @@ touchscreen:
                } else {
                   lv_scr_load_anim(id(nina3_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
                }
-               
-               id(g_touch_start_x) = -2;
             }
             else if (delta > threshold) {
+               // Swipe right - previous page
                if (id(g_current_page) > 0) {
                   id(g_current_page) -= 1;
                } else {
@@ -65,10 +68,10 @@ touchscreen:
                } else {
                   lv_scr_load_anim(id(nina3_page)->obj, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 300, 0, false);
                }
-
-               id(g_touch_start_x) = -2;
             }
           }
+          id(g_touch_start_x) = -1;
+          id(g_touch_end_x) = -1;
 
 output:
   - platform: ledc
@@ -80,12 +83,22 @@ output:
     max_power: 0.8
 
 binary_sensor:
-  - platform: touchscreen
-    id: touch_active
-    touchscreen_id: touchscreen_
-    x_min: 0
-    x_max: 720
-    y_min: 0
-    y_max: 720
-    on_release:
-      - globals.set: { id: g_touch_start_x, value: '-1' }
+  - platform: gpio
+    id: boot_button
+    name: "Boot Button"
+    pin:
+      number: GPIO35
+      mode: INPUT_PULLUP
+      inverted: true
+    on_press:
+      - lambda: |-
+          // Cycle to next page
+          id(g_current_page) = (id(g_current_page) + 1) % 3;
+          
+          if (id(g_current_page) == 0) {
+            lv_scr_load_anim(id(main_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+          } else if (id(g_current_page) == 1) {
+            lv_scr_load_anim(id(nina2_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+          } else {
+            lv_scr_load_anim(id(nina3_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+          }

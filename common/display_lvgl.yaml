@@ -40,6 +40,8 @@ lvgl:
   buffer_size: 100%
   byte_order: little_endian
   
+  page_wrap: true
+  
   style_definitions:
     - id: style_page_bg
       bg_color: 0x050505

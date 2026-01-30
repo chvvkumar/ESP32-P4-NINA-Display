@@ -2,6 +2,9 @@ globals:
   - id: g_touch_start_x
     type: int
     initial_value: '-1'
+  - id: g_touch_end_x
+    type: int
+    initial_value: '-1'
   - id: g_current_page
     type: int
     initial_value: '0'
