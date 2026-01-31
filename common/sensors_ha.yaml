@@ -167,6 +167,18 @@ sensor:
             int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
             if (val_dec >= 10) { val_int++; val_dec = 0; }
             lv_label_set_text_fmt(id(lbl_nina2_cam_temp), "%s%2d.%d°C", (x < 0 ? "-" : ""), val_int, val_dec);
+            // Update color if match_text_color is enabled
+            if (id(match_text_color).state) {
+              float min = id(set_nina2_cam_temp_min).state;
+              float max = id(set_nina2_cam_temp_max).state;
+              if (max <= min) max = min + 1;
+              float ratio = (x - min) / (max - min);
+              if (ratio < 0.0) ratio = 0.0; else if (ratio > 1.0) ratio = 1.0;
+              int r = (int)(id(g_nina2_cam_temp_c1_r) + ratio * (id(g_nina2_cam_temp_c2_r) - id(g_nina2_cam_temp_c1_r)));
+              int g = (int)(id(g_nina2_cam_temp_c1_g) + ratio * (id(g_nina2_cam_temp_c2_g) - id(g_nina2_cam_temp_c1_g)));
+              int b = (int)(id(g_nina2_cam_temp_c1_b) + ratio * (id(g_nina2_cam_temp_c2_b) - id(g_nina2_cam_temp_c1_b)));
+              lv_obj_set_style_text_color(id(lbl_nina2_cam_temp), lv_color_make(r, g, b), LV_PART_MAIN);
+            }
           } else { lv_label_set_text(id(lbl_nina2_cam_temp), "--"); }
 
   - platform: homeassistant
@@ -174,8 +186,21 @@ sensor:
     entity_id: sensor.nina2_exposure_number
     on_value:
       - lambda: |- 
-          if (!isnan(x)) lv_label_set_text_fmt(id(lbl_nina2_exp_num), "%d", (int)x);
-          else lv_label_set_text(id(lbl_nina2_exp_num), "--");
+          if (!isnan(x)) {
+            lv_label_set_text_fmt(id(lbl_nina2_exp_num), "%d", (int)x);
+            // Update color if match_text_color is enabled
+            if (id(match_text_color).state) {
+              float min = id(set_nina2_exp_num_min).state;
+              float max = id(set_nina2_exp_num_max).state;
+              if (max <= min) max = min + 1;
+              float ratio = (x - min) / (max - min);
+              if (ratio < 0.0) ratio = 0.0; else if (ratio > 1.0) ratio = 1.0;
+              int r = (int)(id(g_nina2_exp_num_c1_r) + ratio * (id(g_nina2_exp_num_c2_r) - id(g_nina2_exp_num_c1_r)));
+              int g = (int)(id(g_nina2_exp_num_c1_g) + ratio * (id(g_nina2_exp_num_c2_g) - id(g_nina2_exp_num_c1_g)));
+              int b = (int)(id(g_nina2_exp_num_c1_b) + ratio * (id(g_nina2_exp_num_c2_b) - id(g_nina2_exp_num_c1_b)));
+              lv_obj_set_style_text_color(id(lbl_nina2_exp_num), lv_color_make(r, g, b), LV_PART_MAIN);
+            }
+          } else lv_label_set_text(id(lbl_nina2_exp_num), "--");
 
   - platform: homeassistant
     id: nina2_exposure_time
@@ -188,6 +213,18 @@ sensor:
             int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
             if (val_dec >= 10) { val_int++; val_dec = 0; }
             lv_label_set_text_fmt(id(lbl_nina2_exp_time), "%d.%dS", val_int, val_dec);
+            // Update color if match_text_color is enabled
+            if (id(match_text_color).state) {
+              float min = id(set_nina2_exp_time_min).state;
+              float max = id(set_nina2_exp_time_max).state;
+              if (max <= min) max = min + 1;
+              float ratio = (x - min) / (max - min);
+              if (ratio < 0.0) ratio = 0.0; else if (ratio > 1.0) ratio = 1.0;
+              int r = (int)(id(g_nina2_exp_time_c1_r) + ratio * (id(g_nina2_exp_time_c2_r) - id(g_nina2_exp_time_c1_r)));
+              int g = (int)(id(g_nina2_exp_time_c1_g) + ratio * (id(g_nina2_exp_time_c2_g) - id(g_nina2_exp_time_c1_g)));
+              int b = (int)(id(g_nina2_exp_time_c1_b) + ratio * (id(g_nina2_exp_time_c2_b) - id(g_nina2_exp_time_c1_b)));
+              lv_obj_set_style_text_color(id(lbl_nina2_exp_time), lv_color_make(r, g, b), LV_PART_MAIN);
+            }
           } else { lv_label_set_text(id(lbl_nina2_exp_time), "--"); }
 
   - platform: homeassistant
@@ -195,8 +232,21 @@ sensor:
     entity_id: sensor.nina2_star_detectedstars
     on_value:
       - lambda: |- 
-          if (!isnan(x)) lv_label_set_text_fmt(id(lbl_nina2_stars), "%d", (int)x);
-          else lv_label_set_text(id(lbl_nina2_stars), "--");
+          if (!isnan(x)) {
+            lv_label_set_text_fmt(id(lbl_nina2_stars), "%d", (int)x);
+            // Update color if match_text_color is enabled
+            if (id(match_text_color).state) {
+              float min = id(set_nina2_stars_min).state;
+              float max = id(set_nina2_stars_max).state;
+              if (max <= min) max = min + 1;
+              float ratio = (x - min) / (max - min);
+              if (ratio < 0.0) ratio = 0.0; else if (ratio > 1.0) ratio = 1.0;
+              int r = (int)(id(g_nina2_stars_c1_r) + ratio * (id(g_nina2_stars_c2_r) - id(g_nina2_stars_c1_r)));
+              int g = (int)(id(g_nina2_stars_c1_g) + ratio * (id(g_nina2_stars_c2_g) - id(g_nina2_stars_c1_g)));
+              int b = (int)(id(g_nina2_stars_c1_b) + ratio * (id(g_nina2_stars_c2_b) - id(g_nina2_stars_c1_b)));
+              lv_obj_set_style_text_color(id(lbl_nina2_stars), lv_color_make(r, g, b), LV_PART_MAIN);
+            }
+          } else lv_label_set_text(id(lbl_nina2_stars), "--");
 
   - platform: homeassistant
     id: nina2_hfr
@@ -209,6 +259,18 @@ sensor:
             int val_dec = (int)((abs_v - val_int) * 100.0 + 0.5);
             if (val_dec >= 100) { val_int++; val_dec = 0; }
             lv_label_set_text_fmt(id(lbl_nina2_hfr), "%d.%02d", val_int, val_dec);
+            // Update color if match_text_color is enabled
+            if (id(match_text_color).state) {
+              float min = id(set_nina2_hfr_min).state;
+              float max = id(set_nina2_hfr_max).state;
+              if (max <= min) max = min + 0.1;
+              float ratio = (x - min) / (max - min);
+              if (ratio < 0.0) ratio = 0.0; else if (ratio > 1.0) ratio = 1.0;
+              int r = (int)(id(g_nina2_hfr_c1_r) + ratio * (id(g_nina2_hfr_c2_r) - id(g_nina2_hfr_c1_r)));
+              int g = (int)(id(g_nina2_hfr_c1_g) + ratio * (id(g_nina2_hfr_c2_g) - id(g_nina2_hfr_c1_g)));
+              int b = (int)(id(g_nina2_hfr_c1_b) + ratio * (id(g_nina2_hfr_c2_b) - id(g_nina2_hfr_c1_b)));
+              lv_obj_set_style_text_color(id(lbl_nina2_hfr), lv_color_make(r, g, b), LV_PART_MAIN);
+            }
           } else { lv_label_set_text(id(lbl_nina2_hfr), "--"); }
 
   - platform: homeassistant
@@ -216,8 +278,21 @@ sensor:
     entity_id: sensor.nina2_target_max_saturated_pixels
     on_value:
       - lambda: |- 
-          if (!isnan(x)) lv_label_set_text_fmt(id(lbl_nina2_sat_px), "%d Px", (int)x);
-          else lv_label_set_text(id(lbl_nina2_sat_px), "--");
+          if (!isnan(x)) {
+            lv_label_set_text_fmt(id(lbl_nina2_sat_px), "%d Px", (int)x);
+            // Update color if match_text_color is enabled
+            if (id(match_text_color).state) {
+              float min = id(set_nina2_sat_px_min).state;
+              float max = id(set_nina2_sat_px_max).state;
+              if (max <= min) max = min + 1;
+              float ratio = (x - min) / (max - min);
+              if (ratio < 0.0) ratio = 0.0; else if (ratio > 1.0) ratio = 1.0;
+              int r = (int)(id(g_nina2_sat_px_c1_r) + ratio * (id(g_nina2_sat_px_c2_r) - id(g_nina2_sat_px_c1_r)));
+              int g = (int)(id(g_nina2_sat_px_c1_g) + ratio * (id(g_nina2_sat_px_c2_g) - id(g_nina2_sat_px_c1_g)));
+              int b = (int)(id(g_nina2_sat_px_c1_b) + ratio * (id(g_nina2_sat_px_c2_b) - id(g_nina2_sat_px_c1_b)));
+              lv_obj_set_style_text_color(id(lbl_nina2_sat_px), lv_color_make(r, g, b), LV_PART_MAIN);
+            }
+          } else lv_label_set_text(id(lbl_nina2_sat_px), "--");
 
   - platform: homeassistant
     id: nina2_total_rms
@@ -230,6 +305,18 @@ sensor:
             int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
             if (val_dec >= 10) { val_int++; val_dec = 0; }
             lv_label_set_text_fmt(id(lbl_nina2_rms), "%d.%d\"", val_int, val_dec);
+            // Update color if match_text_color is enabled
+            if (id(match_text_color).state) {
+              float min = id(set_nina2_rms_min).state;
+              float max = id(set_nina2_rms_max).state;
+              if (max <= min) max = min + 0.1;
+              float ratio = (x - min) / (max - min);
+              if (ratio < 0.0) ratio = 0.0; else if (ratio > 1.0) ratio = 1.0;
+              int r = (int)(id(g_nina2_rms_c1_r) + ratio * (id(g_nina2_rms_c2_r) - id(g_nina2_rms_c1_r)));
+              int g = (int)(id(g_nina2_rms_c1_g) + ratio * (id(g_nina2_rms_c2_g) - id(g_nina2_rms_c1_g)));
+              int b = (int)(id(g_nina2_rms_c1_b) + ratio * (id(g_nina2_rms_c2_b) - id(g_nina2_rms_c1_b)));
+              lv_obj_set_style_text_color(id(lbl_nina2_rms), lv_color_make(r, g, b), LV_PART_MAIN);
+            }
           } else { lv_label_set_text(id(lbl_nina2_rms), "--"); }
 
   - platform: homeassistant
@@ -269,6 +356,18 @@ sensor:
             int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
             if (val_dec >= 10) { val_int++; val_dec = 0; }
             lv_label_set_text_fmt(id(lbl_nina3_cam_temp), "%s%2d.%d°C", (x < 0 ? "-" : ""), val_int, val_dec);
+            // Update color if match_text_color is enabled
+            if (id(match_text_color).state) {
+              float min = id(set_nina3_cam_temp_min).state;
+              float max = id(set_nina3_cam_temp_max).state;
+              if (max <= min) max = min + 1;
+              float ratio = (x - min) / (max - min);
+              if (ratio < 0.0) ratio = 0.0; else if (ratio > 1.0) ratio = 1.0;
+              int r = (int)(id(g_nina3_cam_temp_c1_r) + ratio * (id(g_nina3_cam_temp_c2_r) - id(g_nina3_cam_temp_c1_r)));
+              int g = (int)(id(g_nina3_cam_temp_c1_g) + ratio * (id(g_nina3_cam_temp_c2_g) - id(g_nina3_cam_temp_c1_g)));
+              int b = (int)(id(g_nina3_cam_temp_c1_b) + ratio * (id(g_nina3_cam_temp_c2_b) - id(g_nina3_cam_temp_c1_b)));
+              lv_obj_set_style_text_color(id(lbl_nina3_cam_temp), lv_color_make(r, g, b), LV_PART_MAIN);
+            }
           } else { lv_label_set_text(id(lbl_nina3_cam_temp), "--"); }
 
   - platform: homeassistant
@@ -276,8 +375,21 @@ sensor:
     entity_id: sensor.nina3_exposure_number
     on_value:
       - lambda: |- 
-          if (!isnan(x)) lv_label_set_text_fmt(id(lbl_nina3_exp_num), "%d", (int)x);
-          else lv_label_set_text(id(lbl_nina3_exp_num), "--");
+          if (!isnan(x)) {
+            lv_label_set_text_fmt(id(lbl_nina3_exp_num), "%d", (int)x);
+            // Update color if match_text_color is enabled
+            if (id(match_text_color).state) {
+              float min = id(set_nina3_exp_num_min).state;
+              float max = id(set_nina3_exp_num_max).state;
+              if (max <= min) max = min + 1;
+              float ratio = (x - min) / (max - min);
+              if (ratio < 0.0) ratio = 0.0; else if (ratio > 1.0) ratio = 1.0;
+              int r = (int)(id(g_nina3_exp_num_c1_r) + ratio * (id(g_nina3_exp_num_c2_r) - id(g_nina3_exp_num_c1_r)));
+              int g = (int)(id(g_nina3_exp_num_c1_g) + ratio * (id(g_nina3_exp_num_c2_g) - id(g_nina3_exp_num_c1_g)));
+              int b = (int)(id(g_nina3_exp_num_c1_b) + ratio * (id(g_nina3_exp_num_c2_b) - id(g_nina3_exp_num_c1_b)));
+              lv_obj_set_style_text_color(id(lbl_nina3_exp_num), lv_color_make(r, g, b), LV_PART_MAIN);
+            }
+          } else lv_label_set_text(id(lbl_nina3_exp_num), "--");
 
   - platform: homeassistant
     id: nina3_exposure_time
@@ -290,6 +402,18 @@ sensor:
             int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
             if (val_dec >= 10) { val_int++; val_dec = 0; }
             lv_label_set_text_fmt(id(lbl_nina3_exp_time), "%d.%dS", val_int, val_dec);
+            // Update color if match_text_color is enabled
+            if (id(match_text_color).state) {
+              float min = id(set_nina3_exp_time_min).state;
+              float max = id(set_nina3_exp_time_max).state;
+              if (max <= min) max = min + 1;
+              float ratio = (x - min) / (max - min);
+              if (ratio < 0.0) ratio = 0.0; else if (ratio > 1.0) ratio = 1.0;
+              int r = (int)(id(g_nina3_exp_time_c1_r) + ratio * (id(g_nina3_exp_time_c2_r) - id(g_nina3_exp_time_c1_r)));
+              int g = (int)(id(g_nina3_exp_time_c1_g) + ratio * (id(g_nina3_exp_time_c2_g) - id(g_nina3_exp_time_c1_g)));
+              int b = (int)(id(g_nina3_exp_time_c1_b) + ratio * (id(g_nina3_exp_time_c2_b) - id(g_nina3_exp_time_c1_b)));
+              lv_obj_set_style_text_color(id(lbl_nina3_exp_time), lv_color_make(r, g, b), LV_PART_MAIN);
+            }
           } else { lv_label_set_text(id(lbl_nina3_exp_time), "--"); }
 
   - platform: homeassistant
@@ -297,8 +421,21 @@ sensor:
     entity_id: sensor.nina3_star_detectedstars
     on_value:
       - lambda: |- 
-          if (!isnan(x)) lv_label_set_text_fmt(id(lbl_nina3_stars), "%d", (int)x);
-          else lv_label_set_text(id(lbl_nina3_stars), "--");
+          if (!isnan(x)) {
+            lv_label_set_text_fmt(id(lbl_nina3_stars), "%d", (int)x);
+            // Update color if match_text_color is enabled
+            if (id(match_text_color).state) {
+              float min = id(set_nina3_stars_min).state;
+              float max = id(set_nina3_stars_max).state;
+              if (max <= min) max = min + 1;
+              float ratio = (x - min) / (max - min);
+              if (ratio < 0.0) ratio = 0.0; else if (ratio > 1.0) ratio = 1.0;
+              int r = (int)(id(g_nina3_stars_c1_r) + ratio * (id(g_nina3_stars_c2_r) - id(g_nina3_stars_c1_r)));
+              int g = (int)(id(g_nina3_stars_c1_g) + ratio * (id(g_nina3_stars_c2_g) - id(g_nina3_stars_c1_g)));
+              int b = (int)(id(g_nina3_stars_c1_b) + ratio * (id(g_nina3_stars_c2_b) - id(g_nina3_stars_c1_b)));
+              lv_obj_set_style_text_color(id(lbl_nina3_stars), lv_color_make(r, g, b), LV_PART_MAIN);
+            }
+          } else lv_label_set_text(id(lbl_nina3_stars), "--");
 
   - platform: homeassistant
     id: nina3_hfr
@@ -311,6 +448,18 @@ sensor:
             int val_dec = (int)((abs_v - val_int) * 100.0 + 0.5);
             if (val_dec >= 100) { val_int++; val_dec = 0; }
             lv_label_set_text_fmt(id(lbl_nina3_hfr), "%d.%02d", val_int, val_dec);
+            // Update color if match_text_color is enabled
+            if (id(match_text_color).state) {
+              float min = id(set_nina3_hfr_min).state;
+              float max = id(set_nina3_hfr_max).state;
+              if (max <= min) max = min + 0.1;
+              float ratio = (x - min) / (max - min);
+              if (ratio < 0.0) ratio = 0.0; else if (ratio > 1.0) ratio = 1.0;
+              int r = (int)(id(g_nina3_hfr_c1_r) + ratio * (id(g_nina3_hfr_c2_r) - id(g_nina3_hfr_c1_r)));
+              int g = (int)(id(g_nina3_hfr_c1_g) + ratio * (id(g_nina3_hfr_c2_g) - id(g_nina3_hfr_c1_g)));
+              int b = (int)(id(g_nina3_hfr_c1_b) + ratio * (id(g_nina3_hfr_c2_b) - id(g_nina3_hfr_c1_b)));
+              lv_obj_set_style_text_color(id(lbl_nina3_hfr), lv_color_make(r, g, b), LV_PART_MAIN);
+            }
           } else { lv_label_set_text(id(lbl_nina3_hfr), "--"); }
 
   - platform: homeassistant
@@ -318,8 +467,21 @@ sensor:
     entity_id: sensor.nina3_target_max_saturated_pixels
     on_value:
       - lambda: |- 
-          if (!isnan(x)) lv_label_set_text_fmt(id(lbl_nina3_sat_px), "%d Px", (int)x);
-          else lv_label_set_text(id(lbl_nina3_sat_px), "--");
+          if (!isnan(x)) {
+            lv_label_set_text_fmt(id(lbl_nina3_sat_px), "%d Px", (int)x);
+            // Update color if match_text_color is enabled
+            if (id(match_text_color).state) {
+              float min = id(set_nina3_sat_px_min).state;
+              float max = id(set_nina3_sat_px_max).state;
+              if (max <= min) max = min + 1;
+              float ratio = (x - min) / (max - min);
+              if (ratio < 0.0) ratio = 0.0; else if (ratio > 1.0) ratio = 1.0;
+              int r = (int)(id(g_nina3_sat_px_c1_r) + ratio * (id(g_nina3_sat_px_c2_r) - id(g_nina3_sat_px_c1_r)));
+              int g = (int)(id(g_nina3_sat_px_c1_g) + ratio * (id(g_nina3_sat_px_c2_g) - id(g_nina3_sat_px_c1_g)));
+              int b = (int)(id(g_nina3_sat_px_c1_b) + ratio * (id(g_nina3_sat_px_c2_b) - id(g_nina3_sat_px_c1_b)));
+              lv_obj_set_style_text_color(id(lbl_nina3_sat_px), lv_color_make(r, g, b), LV_PART_MAIN);
+            }
+          } else lv_label_set_text(id(lbl_nina3_sat_px), "--");
 
   - platform: homeassistant
     id: nina3_total_rms
@@ -332,6 +494,18 @@ sensor:
             int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
             if (val_dec >= 10) { val_int++; val_dec = 0; }
             lv_label_set_text_fmt(id(lbl_nina3_rms), "%d.%d\"", val_int, val_dec);
+            // Update color if match_text_color is enabled
+            if (id(match_text_color).state) {
+              float min = id(set_nina3_rms_min).state;
+              float max = id(set_nina3_rms_max).state;
+              if (max <= min) max = min + 0.1;
+              float ratio = (x - min) / (max - min);
+              if (ratio < 0.0) ratio = 0.0; else if (ratio > 1.0) ratio = 1.0;
+              int r = (int)(id(g_nina3_rms_c1_r) + ratio * (id(g_nina3_rms_c2_r) - id(g_nina3_rms_c1_r)));
+              int g = (int)(id(g_nina3_rms_c1_g) + ratio * (id(g_nina3_rms_c2_g) - id(g_nina3_rms_c1_g)));
+              int b = (int)(id(g_nina3_rms_c1_b) + ratio * (id(g_nina3_rms_c2_b) - id(g_nina3_rms_c1_b)));
+              lv_obj_set_style_text_color(id(lbl_nina3_rms), lv_color_make(r, g, b), LV_PART_MAIN);
+            }
           } else { lv_label_set_text(id(lbl_nina3_rms), "--"); }
 
   - platform: homeassistant
