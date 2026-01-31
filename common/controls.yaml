@@ -101,7 +101,7 @@ number:
     optimistic: true
     min_value: 0
     max_value: 10
-    initial_value: 0
+    initial_value: 0.3
     step: 0.1
     restore_value: true
   - platform: template
@@ -110,7 +110,7 @@ number:
     optimistic: true
     min_value: 0
     max_value: 10
-    initial_value: 3
+    initial_value: 1.3
     step: 0.1
     restore_value: true
   - platform: template
@@ -119,7 +119,7 @@ number:
     optimistic: true
     min_value: 0
     max_value: 10
-    initial_value: 0
+    initial_value: 1.5
     step: 0.1
     restore_value: true
   - platform: template
@@ -128,7 +128,7 @@ number:
     optimistic: true
     min_value: 0
     max_value: 10
-    initial_value: 5
+    initial_value: 4.0
     step: 0.1
     restore_value: true
   - platform: template
@@ -146,7 +146,7 @@ number:
     optimistic: true
     min_value: 0
     max_value: 1000
-    initial_value: 100
+    initial_value: 60
     step: 1
     restore_value: true
   - platform: template
@@ -154,8 +154,8 @@ number:
     id: set_nina2_exp_time_min
     optimistic: true
     min_value: 0
-    max_value: 600
-    initial_value: 0
+    max_value: 1200
+    initial_value: 10
     step: 1
     restore_value: true
   - platform: template
@@ -163,8 +163,8 @@ number:
     id: set_nina2_exp_time_max
     optimistic: true
     min_value: 0
-    max_value: 600
-    initial_value: 300
+    max_value: 1200
+    initial_value: 1200
     step: 1
     restore_value: true
   - platform: template
@@ -173,7 +173,7 @@ number:
     optimistic: true
     min_value: -40
     max_value: 50
-    initial_value: -20
+    initial_value: -10
     step: 1
     restore_value: true
   - platform: template
@@ -191,7 +191,7 @@ number:
     optimistic: true
     min_value: 0
     max_value: 10000
-    initial_value: 0
+    initial_value: 20
     step: 10
     restore_value: true
   - platform: template
@@ -200,7 +200,7 @@ number:
     optimistic: true
     min_value: 0
     max_value: 10000
-    initial_value: 5000
+    initial_value: 200
     step: 10
     restore_value: true
   - platform: template
@@ -218,7 +218,7 @@ number:
     optimistic: true
     min_value: 0
     max_value: 100000
-    initial_value: 10000
+    initial_value: 500
     step: 100
     restore_value: true
 
@@ -229,7 +229,7 @@ number:
     optimistic: true
     min_value: 0
     max_value: 10
-    initial_value: 0
+    initial_value: 0.3
     step: 0.1
     restore_value: true
   - platform: template
@@ -238,7 +238,7 @@ number:
     optimistic: true
     min_value: 0
     max_value: 10
-    initial_value: 3
+    initial_value: 3.5
     step: 0.1
     restore_value: true
   - platform: template
@@ -247,7 +247,7 @@ number:
     optimistic: true
     min_value: 0
     max_value: 10
-    initial_value: 0
+    initial_value: 1.0
     step: 0.1
     restore_value: true
   - platform: template
@@ -256,7 +256,7 @@ number:
     optimistic: true
     min_value: 0
     max_value: 10
-    initial_value: 5
+    initial_value: 4.5
     step: 0.1
     restore_value: true
   - platform: template
@@ -282,8 +282,8 @@ number:
     id: set_nina3_exp_time_min
     optimistic: true
     min_value: 0
-    max_value: 600
-    initial_value: 0
+    max_value: 1200
+    initial_value: 10
     step: 1
     restore_value: true
   - platform: template
@@ -291,8 +291,8 @@ number:
     id: set_nina3_exp_time_max
     optimistic: true
     min_value: 0
-    max_value: 600
-    initial_value: 300
+    max_value: 1200
+    initial_value: 1200
     step: 1
     restore_value: true
   - platform: template
@@ -301,7 +301,7 @@ number:
     optimistic: true
     min_value: -40
     max_value: 50
-    initial_value: -20
+    initial_value: -10
     step: 1
     restore_value: true
   - platform: template
@@ -319,7 +319,7 @@ number:
     optimistic: true
     min_value: 0
     max_value: 10000
-    initial_value: 0
+    initial_value: 100
     step: 10
     restore_value: true
   - platform: template
@@ -328,7 +328,7 @@ number:
     optimistic: true
     min_value: 0
     max_value: 10000
-    initial_value: 5000
+    initial_value: 2000
     step: 10
     restore_value: true
   - platform: template
@@ -346,7 +346,7 @@ number:
     optimistic: true
     min_value: 0
     max_value: 100000
-    initial_value: 10000
+    initial_value: 500
     step: 100
     restore_value: true
 
@@ -723,13 +723,13 @@ select:
       - lambda: |-
           if (x == "Main Dashboard") {
              id(g_current_page) = 0;
-             lv_scr_load_anim(id(main_page)->obj, LV_SCR_LOAD_ANIM_FADE_ON, 400, 0, false);
+             lv_scr_load_anim(id(main_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
           } else if (x == "NINA Instance 2") {
              id(g_current_page) = 1;
-             lv_scr_load_anim(id(nina2_page)->obj, LV_SCR_LOAD_ANIM_FADE_ON, 400, 0, false);
+             lv_scr_load_anim(id(nina2_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
           } else if (x == "NINA Instance 3") {
              id(g_current_page) = 2;
-             lv_scr_load_anim(id(nina3_page)->obj, LV_SCR_LOAD_ANIM_FADE_ON, 400, 0, false);
+             lv_scr_load_anim(id(nina3_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
           }
 
 light:
