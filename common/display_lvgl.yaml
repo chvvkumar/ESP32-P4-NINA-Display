@@ -91,8 +91,107 @@ lvgl:
       text_opa: 100%
       text_font: font_header_40
     - id: style_filter_muted
-      text_opa: 25%
+      text_opa: 45%
       text_font: font_header_40
+      text_color: filter_l
+    - id: style_filter_active_l
+      text_opa: 100%
+      text_font: font_header_40
+      bg_opa: 20%
+      bg_color: filter_l
+      border_width: 0
+      shadow_width: 8
+      shadow_ofs_x: 0
+      shadow_ofs_y: 0
+      shadow_color: filter_l
+      shadow_opa: 70%
+      shadow_spread: 2
+      pad_all: 8
+      radius: 8
+    - id: style_filter_active_r
+      text_opa: 100%
+      text_font: font_header_40
+      bg_opa: 20%
+      bg_color: filter_r
+      border_width: 0
+      shadow_width: 8
+      shadow_ofs_x: 0
+      shadow_ofs_y: 0
+      shadow_color: filter_r
+      shadow_opa: 70%
+      shadow_spread: 2
+      pad_all: 8
+      radius: 8
+    - id: style_filter_active_g
+      text_opa: 100%
+      text_font: font_header_40
+      bg_opa: 20%
+      bg_color: filter_g
+      border_width: 0
+      shadow_width: 8
+      shadow_ofs_x: 0
+      shadow_ofs_y: 0
+      shadow_color: filter_g
+      shadow_opa: 70%
+      shadow_spread: 2
+      pad_all: 8
+      radius: 8
+    - id: style_filter_active_b
+      text_opa: 100%
+      text_font: font_header_40
+      bg_opa: 20%
+      bg_color: filter_b
+      border_width: 0
+      shadow_width: 8
+      shadow_ofs_x: 0
+      shadow_ofs_y: 0
+      shadow_color: filter_b
+      shadow_opa: 70%
+      shadow_spread: 2
+      pad_all: 8
+      radius: 8
+    - id: style_filter_active_sii
+      text_opa: 100%
+      text_font: font_header_40
+      bg_opa: 20%
+      bg_color: filter_sii
+      border_width: 0
+      shadow_width: 8
+      shadow_ofs_x: 0
+      shadow_ofs_y: 0
+      shadow_color: filter_sii
+      shadow_opa: 70%
+      shadow_spread: 2
+      pad_all: 8
+      radius: 8
+    - id: style_filter_active_ha
+      text_opa: 100%
+      text_font: font_header_40
+      bg_opa: 20%
+      bg_color: filter_ha
+      border_width: 0
+      shadow_width: 8
+      shadow_ofs_x: 0
+      shadow_ofs_y: 0
+      shadow_color: filter_ha
+      shadow_opa: 70%
+      shadow_spread: 2
+      pad_all: 8
+      radius: 8
+    - id: style_filter_active_oiii
+      text_opa: 100%
+      text_font: font_header_40
+      bg_opa: 20%
+      bg_color: filter_oiii
+      border_width: 0
+      shadow_width: 8
+      shadow_ofs_x: 0
+      shadow_ofs_y: 0
+      shadow_color: filter_oiii
+      shadow_opa: 70%
+      shadow_spread: 2
+      pad_all: 8
+      radius: 8
     - id: style_clr_l
       text_color: filter_l
     - id: style_clr_r
