@@ -6,6 +6,7 @@ number:
   - platform: template
     name: "Set CPU Min Value"
     id: set_cpu_min
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 100
@@ -15,6 +16,7 @@ number:
   - platform: template
     name: "Set CPU Max Value"
     id: set_cpu_max
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 150
@@ -24,6 +26,7 @@ number:
   - platform: template
     name: "Set Fan Min Value"
     id: set_fan_min
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 1000
@@ -33,6 +36,7 @@ number:
   - platform: template
     name: "Set Fan Max Value"
     id: set_fan_max
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 8000
@@ -42,6 +46,7 @@ number:
   - platform: template
     name: "Set Env Min Value"
     id: set_env_min
+    internal: true
     optimistic: true
     min_value: -40
     max_value: 50
@@ -51,6 +56,7 @@ number:
   - platform: template
     name: "Set Env Max Value"
     id: set_env_max
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 100
@@ -60,6 +66,7 @@ number:
   - platform: template
     name: "Set Power Min Value"
     id: set_pwr_min
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 10
@@ -69,6 +76,7 @@ number:
   - platform: template
     name: "Set Power Max Value"
     id: set_pwr_max
+    internal: true
     optimistic: true
     min_value: 1
     max_value: 100
@@ -78,6 +86,7 @@ number:
   - platform: template
     name: "Set SQM Min Value"
     id: set_sqm_min
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 23
@@ -87,6 +96,7 @@ number:
   - platform: template
     name: "Set SQM Max Value"
     id: set_sqm_max
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 24
@@ -98,6 +108,7 @@ number:
   - platform: template
     name: "Set NINA2 RMS Min Value"
     id: set_nina2_rms_min
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 10
@@ -107,6 +118,7 @@ number:
   - platform: template
     name: "Set NINA2 RMS Max Value"
     id: set_nina2_rms_max
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 10
@@ -116,6 +128,7 @@ number:
   - platform: template
     name: "Set NINA2 HFR Min Value"
     id: set_nina2_hfr_min
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 10
@@ -125,6 +138,7 @@ number:
   - platform: template
     name: "Set NINA2 HFR Max Value"
     id: set_nina2_hfr_max
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 10
@@ -134,6 +148,7 @@ number:
   - platform: template
     name: "Set NINA2 EXP NUM Min Value"
     id: set_nina2_exp_num_min
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 1000
@@ -143,6 +158,7 @@ number:
   - platform: template
     name: "Set NINA2 EXP NUM Max Value"
     id: set_nina2_exp_num_max
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 1000
@@ -152,6 +168,7 @@ number:
   - platform: template
     name: "Set NINA2 EXP TIME Min Value"
     id: set_nina2_exp_time_min
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 1200
@@ -161,6 +178,7 @@ number:
   - platform: template
     name: "Set NINA2 EXP TIME Max Value"
     id: set_nina2_exp_time_max
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 1200
@@ -170,6 +188,7 @@ number:
   - platform: template
     name: "Set NINA2 CAM TEMP Min Value"
     id: set_nina2_cam_temp_min
+    internal: true
     optimistic: true
     min_value: -40
     max_value: 50
@@ -179,6 +198,7 @@ number:
   - platform: template
     name: "Set NINA2 CAM TEMP Max Value"
     id: set_nina2_cam_temp_max
+    internal: true
     optimistic: true
     min_value: -40
     max_value: 50
@@ -188,6 +208,7 @@ number:
   - platform: template
     name: "Set NINA2 STARS Min Value"
     id: set_nina2_stars_min
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 10000
@@ -197,6 +218,7 @@ number:
   - platform: template
     name: "Set NINA2 STARS Max Value"
     id: set_nina2_stars_max
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 10000
@@ -206,6 +228,7 @@ number:
   - platform: template
     name: "Set NINA2 SAT PX Min Value"
     id: set_nina2_sat_px_min
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 100000
@@ -215,6 +238,7 @@ number:
   - platform: template
     name: "Set NINA2 SAT PX Max Value"
     id: set_nina2_sat_px_max
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 100000
@@ -226,6 +250,7 @@ number:
   - platform: template
     name: "Set NINA3 RMS Min Value"
     id: set_nina3_rms_min
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 10
@@ -235,6 +260,7 @@ number:
   - platform: template
     name: "Set NINA3 RMS Max Value"
     id: set_nina3_rms_max
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 10
@@ -244,6 +270,7 @@ number:
   - platform: template
     name: "Set NINA3 HFR Min Value"
     id: set_nina3_hfr_min
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 10
@@ -253,6 +280,7 @@ number:
   - platform: template
     name: "Set NINA3 HFR Max Value"
     id: set_nina3_hfr_max
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 10
@@ -262,6 +290,7 @@ number:
   - platform: template
     name: "Set NINA3 EXP NUM Min Value"
     id: set_nina3_exp_num_min
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 1000
@@ -271,6 +300,7 @@ number:
   - platform: template
     name: "Set NINA3 EXP NUM Max Value"
     id: set_nina3_exp_num_max
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 1000
@@ -280,6 +310,7 @@ number:
   - platform: template
     name: "Set NINA3 EXP TIME Min Value"
     id: set_nina3_exp_time_min
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 1200
@@ -289,6 +320,7 @@ number:
   - platform: template
     name: "Set NINA3 EXP TIME Max Value"
     id: set_nina3_exp_time_max
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 1200
@@ -298,6 +330,7 @@ number:
   - platform: template
     name: "Set NINA3 CAM TEMP Min Value"
     id: set_nina3_cam_temp_min
+    internal: true
     optimistic: true
     min_value: -40
     max_value: 50
@@ -307,6 +340,7 @@ number:
   - platform: template
     name: "Set NINA3 CAM TEMP Max Value"
     id: set_nina3_cam_temp_max
+    internal: true
     optimistic: true
     min_value: -40
     max_value: 50
@@ -316,6 +350,7 @@ number:
   - platform: template
     name: "Set NINA3 STARS Min Value"
     id: set_nina3_stars_min
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 10000
@@ -325,6 +360,7 @@ number:
   - platform: template
     name: "Set NINA3 STARS Max Value"
     id: set_nina3_stars_max
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 10000
@@ -334,6 +370,7 @@ number:
   - platform: template
     name: "Set NINA3 SAT PX Min Value"
     id: set_nina3_sat_px_min
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 100000
@@ -343,6 +380,7 @@ number:
   - platform: template
     name: "Set NINA3 SAT PX Max Value"
     id: set_nina3_sat_px_max
+    internal: true
     optimistic: true
     min_value: 0
     max_value: 100000
@@ -354,6 +392,7 @@ switch:
   - platform: template
     name: "Match Text Color"
     id: match_text_color
+    internal: true
     optimistic: true
     restore_mode: RESTORE_DEFAULT_ON
     on_turn_on:
@@ -730,6 +769,7 @@ light:
   - name: "CPU Start Color"
     platform: rgb
     id: cpu_start_color
+    internal: true
     red: cpu_start_red
     green: cpu_start_green
     blue: cpu_start_blue
@@ -745,6 +785,7 @@ light:
   - name: "CPU End Color"
     platform: rgb
     id: cpu_end_color
+    internal: true
     red: cpu_end_red
     green: cpu_end_green
     blue: cpu_end_blue
@@ -760,6 +801,7 @@ light:
   - name: "Fan Start Color"
     platform: rgb
     id: fan_start_color
+    internal: true
     red: fan_start_red
     green: fan_start_green
     blue: fan_start_blue
@@ -775,6 +817,7 @@ light:
   - name: "Fan End Color"
     platform: rgb
     id: fan_end_color
+    internal: true
     red: fan_end_red
     green: fan_end_green
     blue: fan_end_blue
@@ -790,6 +833,7 @@ light:
   - name: "Env Start Color"
     platform: rgb
     id: env_start_color
+    internal: true
     red: env_start_red
     green: env_start_green
     blue: env_start_blue
@@ -805,6 +849,7 @@ light:
   - name: "Env End Color"
     platform: rgb
     id: env_end_color
+    internal: true
     red: env_end_red
     green: env_end_green
     blue: env_end_blue
@@ -820,6 +865,7 @@ light:
   - name: "Power Start Color"
     platform: rgb
     id: pwr_start_color
+    internal: true
     red: pwr_start_red
     green: pwr_start_green
     blue: pwr_start_blue
@@ -835,6 +881,7 @@ light:
   - name: "Power End Color"
     platform: rgb
     id: pwr_end_color
+    internal: true
     red: pwr_end_red
     green: pwr_end_green
     blue: pwr_end_blue
@@ -850,6 +897,7 @@ light:
   - name: "SQM Start Color"
     platform: rgb
     id: sqm_start_color
+    internal: true
     red: sqm_start_red
     green: sqm_start_green
     blue: sqm_start_blue
@@ -865,6 +913,7 @@ light:
   - name: "SQM End Color"
     platform: rgb
     id: sqm_end_color
+    internal: true
     red: sqm_end_red
     green: sqm_end_green
     blue: sqm_end_blue
@@ -896,6 +945,7 @@ light:
   - name: "NINA2 RMS Start Color"
     platform: rgb
     id: nina2_rms_start_color
+    internal: true
     red: nina2_rms_start_red
     green: nina2_rms_start_green
     blue: nina2_rms_start_blue
@@ -911,6 +961,7 @@ light:
   - name: "NINA2 RMS End Color"
     platform: rgb
     id: nina2_rms_end_color
+    internal: true
     red: nina2_rms_end_red
     green: nina2_rms_end_green
     blue: nina2_rms_end_blue
@@ -926,6 +977,7 @@ light:
   - name: "NINA2 HFR Start Color"
     platform: rgb
     id: nina2_hfr_start_color
+    internal: true
     red: nina2_hfr_start_red
     green: nina2_hfr_start_green
     blue: nina2_hfr_start_blue
@@ -941,6 +993,7 @@ light:
   - name: "NINA2 HFR End Color"
     platform: rgb
     id: nina2_hfr_end_color
+    internal: true
     red: nina2_hfr_end_red
     green: nina2_hfr_end_green
     blue: nina2_hfr_end_blue
@@ -956,6 +1009,7 @@ light:
   - name: "NINA2 EXP NUM Start Color"
     platform: rgb
     id: nina2_exp_num_start_color
+    internal: true
     red: nina2_exp_num_start_red
     green: nina2_exp_num_start_green
     blue: nina2_exp_num_start_blue
@@ -971,6 +1025,7 @@ light:
   - name: "NINA2 EXP NUM End Color"
     platform: rgb
     id: nina2_exp_num_end_color
+    internal: true
     red: nina2_exp_num_end_red
     green: nina2_exp_num_end_green
     blue: nina2_exp_num_end_blue
@@ -986,6 +1041,7 @@ light:
   - name: "NINA2 EXP TIME Start Color"
     platform: rgb
     id: nina2_exp_time_start_color
+    internal: true
     red: nina2_exp_time_start_red
     green: nina2_exp_time_start_green
     blue: nina2_exp_time_start_blue
@@ -1001,6 +1057,7 @@ light:
   - name: "NINA2 EXP TIME End Color"
     platform: rgb
     id: nina2_exp_time_end_color
+    internal: true
     red: nina2_exp_time_end_red
     green: nina2_exp_time_end_green
     blue: nina2_exp_time_end_blue
@@ -1016,6 +1073,7 @@ light:
   - name: "NINA2 CAM TEMP Start Color"
     platform: rgb
     id: nina2_cam_temp_start_color
+    internal: true
     red: nina2_cam_temp_start_red
     green: nina2_cam_temp_start_green
     blue: nina2_cam_temp_start_blue
@@ -1031,6 +1089,7 @@ light:
   - name: "NINA2 CAM TEMP End Color"
     platform: rgb
     id: nina2_cam_temp_end_color
+    internal: true
     red: nina2_cam_temp_end_red
     green: nina2_cam_temp_end_green
     blue: nina2_cam_temp_end_blue
@@ -1046,6 +1105,7 @@ light:
   - name: "NINA2 STARS Start Color"
     platform: rgb
     id: nina2_stars_start_color
+    internal: true
     red: nina2_stars_start_red
     green: nina2_stars_start_green
     blue: nina2_stars_start_blue
@@ -1061,6 +1121,7 @@ light:
   - name: "NINA2 STARS End Color"
     platform: rgb
     id: nina2_stars_end_color
+    internal: true
     red: nina2_stars_end_red
     green: nina2_stars_end_green
     blue: nina2_stars_end_blue
@@ -1076,6 +1137,7 @@ light:
   - name: "NINA2 SAT PX Start Color"
     platform: rgb
     id: nina2_sat_px_start_color
+    internal: true
     red: nina2_sat_px_start_red
     green: nina2_sat_px_start_green
     blue: nina2_sat_px_start_blue
@@ -1091,6 +1153,7 @@ light:
   - name: "NINA2 SAT PX End Color"
     platform: rgb
     id: nina2_sat_px_end_color
+    internal: true
     red: nina2_sat_px_end_red
     green: nina2_sat_px_end_green
     blue: nina2_sat_px_end_blue
@@ -1107,6 +1170,7 @@ light:
   - name: "NINA3 RMS Start Color"
     platform: rgb
     id: nina3_rms_start_color
+    internal: true
     red: nina3_rms_start_red
     green: nina3_rms_start_green
     blue: nina3_rms_start_blue
@@ -1122,6 +1186,7 @@ light:
   - name: "NINA3 RMS End Color"
     platform: rgb
     id: nina3_rms_end_color
+    internal: true
     red: nina3_rms_end_red
     green: nina3_rms_end_green
     blue: nina3_rms_end_blue
@@ -1137,6 +1202,7 @@ light:
   - name: "NINA3 HFR Start Color"
     platform: rgb
     id: nina3_hfr_start_color
+    internal: true
     red: nina3_hfr_start_red
     green: nina3_hfr_start_green
     blue: nina3_hfr_start_blue
@@ -1152,6 +1218,7 @@ light:
   - name: "NINA3 HFR End Color"
     platform: rgb
     id: nina3_hfr_end_color
+    internal: true
     red: nina3_hfr_end_red
     green: nina3_hfr_end_green
     blue: nina3_hfr_end_blue
@@ -1167,6 +1234,7 @@ light:
   - name: "NINA3 EXP NUM Start Color"
     platform: rgb
     id: nina3_exp_num_start_color
+    internal: true
     red: nina3_exp_num_start_red
     green: nina3_exp_num_start_green
     blue: nina3_exp_num_start_blue
@@ -1182,6 +1250,7 @@ light:
   - name: "NINA3 EXP NUM End Color"
     platform: rgb
     id: nina3_exp_num_end_color
+    internal: true
     red: nina3_exp_num_end_red
     green: nina3_exp_num_end_green
     blue: nina3_exp_num_end_blue
@@ -1197,6 +1266,7 @@ light:
   - name: "NINA3 EXP TIME Start Color"
     platform: rgb
     id: nina3_exp_time_start_color
+    internal: true
     red: nina3_exp_time_start_red
     green: nina3_exp_time_start_green
     blue: nina3_exp_time_start_blue
@@ -1212,6 +1282,7 @@ light:
   - name: "NINA3 EXP TIME End Color"
     platform: rgb
     id: nina3_exp_time_end_color
+    internal: true
     red: nina3_exp_time_end_red
     green: nina3_exp_time_end_green
     blue: nina3_exp_time_end_blue
@@ -1227,6 +1298,7 @@ light:
   - name: "NINA3 CAM TEMP Start Color"
     platform: rgb
     id: nina3_cam_temp_start_color
+    internal: true
     red: nina3_cam_temp_start_red
     green: nina3_cam_temp_start_green
     blue: nina3_cam_temp_start_blue
@@ -1242,6 +1314,7 @@ light:
   - name: "NINA3 CAM TEMP End Color"
     platform: rgb
     id: nina3_cam_temp_end_color
+    internal: true
     red: nina3_cam_temp_end_red
     green: nina3_cam_temp_end_green
     blue: nina3_cam_temp_end_blue
@@ -1257,6 +1330,7 @@ light:
   - name: "NINA3 STARS Start Color"
     platform: rgb
     id: nina3_stars_start_color
+    internal: true
     red: nina3_stars_start_red
     green: nina3_stars_start_green
     blue: nina3_stars_start_blue
@@ -1272,6 +1346,7 @@ light:
   - name: "NINA3 STARS End Color"
     platform: rgb
     id: nina3_stars_end_color
+    internal: true
     red: nina3_stars_end_red
     green: nina3_stars_end_green
     blue: nina3_stars_end_blue
@@ -1287,6 +1362,7 @@ light:
   - name: "NINA3 SAT PX Start Color"
     platform: rgb
     id: nina3_sat_px_start_color
+    internal: true
     red: nina3_sat_px_start_red
     green: nina3_sat_px_start_green
     blue: nina3_sat_px_start_blue
@@ -1302,6 +1378,7 @@ light:
   - name: "NINA3 SAT PX End Color"
     platform: rgb
     id: nina3_sat_px_end_color
+    internal: true
     red: nina3_sat_px_end_red
     green: nina3_sat_px_end_green
     blue: nina3_sat_px_end_blue
