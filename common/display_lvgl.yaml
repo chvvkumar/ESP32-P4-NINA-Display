@@ -108,6 +108,9 @@ lvgl:
       shadow_spread: 2
       pad_all: 8
       radius: 8
+      width: 80
+      height: 60
+      text_align: CENTER
     - id: style_filter_active_r
       text_opa: 100%
       text_font: font_header_40
@@ -122,6 +125,9 @@ lvgl:
       shadow_spread: 2
       pad_all: 8
       radius: 8
+      width: 80
+      height: 60
+      text_align: CENTER
     - id: style_filter_active_g
       text_opa: 100%
       text_font: font_header_40
@@ -136,6 +142,9 @@ lvgl:
       shadow_spread: 2
       pad_all: 8
       radius: 8
+      width: 80
+      height: 60
+      text_align: CENTER
     - id: style_filter_active_b
       text_opa: 100%
       text_font: font_header_40
@@ -150,6 +159,9 @@ lvgl:
       shadow_spread: 2
       pad_all: 8
       radius: 8
+      width: 80
+      height: 60
+      text_align: CENTER
     - id: style_filter_active_sii
       text_opa: 100%
       text_font: font_header_40
@@ -164,6 +176,9 @@ lvgl:
       shadow_spread: 2
       pad_all: 8
       radius: 8
+      width: 80
+      height: 60
+      text_align: CENTER
     - id: style_filter_active_ha
       text_opa: 100%
       text_font: font_header_40
@@ -178,6 +193,9 @@ lvgl:
       shadow_spread: 2
       pad_all: 8
       radius: 8
+      width: 80
+      height: 60
+      text_align: CENTER
     - id: style_filter_active_oiii
       text_opa: 100%
       text_font: font_header_40
@@ -192,6 +210,9 @@ lvgl:
       shadow_spread: 2
       pad_all: 8
       radius: 8
+      width: 80
+      height: 60
+      text_align: CENTER
     - id: style_clr_l
       text_color: filter_l
     - id: style_clr_r
