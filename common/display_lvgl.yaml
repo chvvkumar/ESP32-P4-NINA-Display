@@ -534,7 +534,7 @@ lvgl:
                   border_width: 1
                   border_color: 0x222222
                   pad_all: 8
-                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER }
+                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: SPACE_BETWEEN }
                   widgets:
                     - label: { text: "HFR (Px)", styles: style_unit_small, width: 100% }
                     - label: { id: lbl_nina2_hfr, text: "--", text_font: font_roboto_hero, text_color: 0xFF6B9D, text_align: CENTER, width: 100% }
@@ -555,10 +555,10 @@ lvgl:
                   scrollbar_mode: "OFF"
                   layout: { type: flex, flex_flow: COLUMN, flex_align_main: SPACE_BETWEEN }
                   widgets:
+                    - label: { text: "Heater", styles: style_unit_small, width: 100% }
+                    - label: { id: lbl_nina2_heater, text: "--", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
                     - label: { text: "Current", styles: style_unit_small, width: 100% }
                     - label: { id: lbl_nina2_current, text: "--", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
-                    - label: { text: "Heater #1", styles: style_unit_small, width: 100% }
-                    - label: { id: lbl_nina2_heater, text: "--", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
                     - label: { text: "Power", styles: style_unit_small, width: 100% }
                     - label: { id: lbl_nina2_power, text: "--", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
 
@@ -759,7 +759,7 @@ lvgl:
                   border_color: 0x222222
                   pad_all: 8
                   scrollbar_mode: "OFF"
-                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER }
+                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: SPACE_BETWEEN }
                   widgets:
                     - label: { text: "RMS (Arc-sec)", styles: style_unit_small, width: 100% }
                     - label: { id: lbl_nina3_rms, text: "--", text_font: font_roboto_hero, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
