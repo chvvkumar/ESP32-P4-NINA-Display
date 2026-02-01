@@ -2,6 +2,8 @@ sensor:
   - platform: homeassistant
     id: ha_cpu_temp
     entity_id: sensor.allskypi5_cpu_temp
+    filters:
+      - throttle: 5s
     on_value:
       - lambda: |- 
           float min = id(set_cpu_min).state;
@@ -26,6 +28,8 @@ sensor:
   - platform: homeassistant
     id: ha_ssd_temp
     entity_id: sensor.allskypi5_disk_ssd_temp
+    filters:
+      - throttle: 10s
     on_value:
       - lambda: |- 
           float abs_v = fabsf(x);
@@ -37,6 +41,8 @@ sensor:
   - platform: homeassistant
     id: ha_sqm
     entity_id: sensor.sqm_reader_tsl2591_sqm
+    filters:
+      - throttle: 5s
     on_value:
       - lambda: |- 
           float min = id(set_sqm_min).state;
@@ -59,6 +65,8 @@ sensor:
   - platform: homeassistant
     id: ha_starcount
     entity_id: sensor.allskypi5_as_starcount
+    filters:
+      - throttle: 10s
     on_value:
       - lambda: |- 
           lv_label_set_text_fmt(id(lbl_star_count), "Stars: %d", (int)x);
@@ -66,6 +74,8 @@ sensor:
   - platform: homeassistant
     id: ha_enclosure_temp
     entity_id: sensor.allskypi5_as_dewcontrolambient
+    filters:
+      - throttle: 5s
     on_value:
       - lambda: |- 
           float min = id(set_env_min).state;
@@ -90,6 +100,8 @@ sensor:
   - platform: homeassistant
     id: ha_enclosure_humidity
     entity_id: sensor.allskypi5_as_dewcontrolhumidity
+    filters:
+      - throttle: 10s
     on_value:
       - lambda: |- 
           float abs_v = fabsf(x);
@@ -101,6 +113,8 @@ sensor:
   - platform: homeassistant
     id: ha_dew_point
     entity_id: sensor.allskypi5_as_dewcontroldew
+    filters:
+      - throttle: 10s
     on_value:
       - lambda: |- 
           float abs_v = fabsf(x);
@@ -112,6 +126,8 @@ sensor:
   - platform: homeassistant
     id: ha_power
     entity_id: sensor.sqm_reader_ina260_power
+    filters:
+      - throttle: 3s
     on_value:
       - lambda: |- 
           float min = id(set_pwr_min).state;
@@ -136,6 +152,8 @@ sensor:
   - platform: homeassistant
     id: ha_voltage
     entity_id: sensor.sqm_reader_ina260_voltage
+    filters:
+      - throttle: 3s
     on_value:
       - lambda: |- 
           float abs_v = fabsf(x);
@@ -147,6 +165,8 @@ sensor:
   - platform: homeassistant
     id: ha_current
     entity_id: sensor.sqm_reader_ina260_current
+    filters:
+      - throttle: 3s
     on_value:
       - lambda: |- 
           float abs_v = fabsf(x);
@@ -159,6 +179,8 @@ sensor:
   - platform: homeassistant
     id: nina2_camera_temp
     entity_id: sensor.nina2_camera_temperature
+    filters:
+      - throttle: 10s
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -184,6 +206,8 @@ sensor:
   - platform: homeassistant
     id: nina2_exposure_num
     entity_id: sensor.nina2_exposure_number
+    filters:
+      - throttle: 5s
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -205,6 +229,8 @@ sensor:
   - platform: homeassistant
     id: nina2_exposure_time
     entity_id: sensor.nina2_exposure_time
+    filters:
+      - throttle: 5s
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -230,6 +256,8 @@ sensor:
   - platform: homeassistant
     id: nina2_detected_stars
     entity_id: sensor.nina2_star_detectedstars
+    filters:
+      - throttle: 5s
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -248,9 +276,53 @@ sensor:
             }
           } else lv_label_set_text(id(lbl_nina2_stars), "--");
 
+  # --- UPBA Power Sensors for NINA2 ---
+  - platform: homeassistant
+    id: upba_current
+    entity_id: sensor.upba_current
+    filters:
+      - throttle: 5s
+    on_value:
+      - lambda: |- 
+          if (!isnan(x)) {
+            float abs_v = fabsf(x);
+            int val_int = (int)abs_v;
+            int val_dec = (int)((abs_v - val_int) * 100.0 + 0.5);
+            if (val_dec >= 100) { val_int++; val_dec = 0; }
+            lv_label_set_text_fmt(id(lbl_nina2_current), "%d.%02dA", val_int, val_dec);
+          } else lv_label_set_text(id(lbl_nina2_current), "--");
+
+  - platform: homeassistant
+    id: upba_primary_heater
+    entity_id: sensor.upba_primary_heater
+    filters:
+      - throttle: 5s
+    on_value:
+      - lambda: |- 
+          if (!isnan(x)) {
+            float abs_v = fabsf(x);
+            int val_int = (int)abs_v;
+            int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
+            if (val_dec >= 10) { val_int++; val_dec = 0; }
+            lv_label_set_text_fmt(id(lbl_nina2_heater), "%d.%dA", val_int, val_dec);
+          } else lv_label_set_text(id(lbl_nina2_heater), "--");
+
+  - platform: homeassistant
+    id: upba_power
+    entity_id: sensor.upba_power
+    filters:
+      - throttle: 5s
+    on_value:
+      - lambda: |- 
+          if (!isnan(x)) {
+            lv_label_set_text_fmt(id(lbl_nina2_power), "%dW", (int)x);
+          } else lv_label_set_text(id(lbl_nina2_power), "--");
+
   - platform: homeassistant
     id: nina2_hfr
     entity_id: sensor.nina2_star_hfr
+    filters:
+      - throttle: 5s
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -276,6 +348,8 @@ sensor:
   - platform: homeassistant
     id: nina2_saturated_pixels
     entity_id: sensor.nina2_target_max_saturated_pixels
+    filters:
+      - throttle: 5s
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -297,6 +371,8 @@ sensor:
   - platform: homeassistant
     id: nina2_total_rms
     entity_id: sensor.nina2_total_rms
+    filters:
+      - throttle: 5s
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -322,6 +398,8 @@ sensor:
   - platform: homeassistant
     id: nina2_ra_rms
     entity_id: sensor.nina_instance_2_nina2_ra_rms
+    filters:
+      - throttle: 5s
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -335,6 +413,8 @@ sensor:
   - platform: homeassistant
     id: nina2_dec_rms
     entity_id: sensor.nina_instance_2_nina2_dec_rms
+    filters:
+      - throttle: 5s
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -348,6 +428,8 @@ sensor:
   - platform: homeassistant
     id: nina3_camera_temp
     entity_id: sensor.nina3_camera_temperature
+    filters:
+      - throttle: 10s
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -373,6 +455,8 @@ sensor:
   - platform: homeassistant
     id: nina3_exposure_num
     entity_id: sensor.nina3_exposure_number
+    filters:
+      - throttle: 5s
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -394,6 +478,8 @@ sensor:
   - platform: homeassistant
     id: nina3_exposure_time
     entity_id: sensor.nina3_exposure_time
+    filters:
+      - throttle: 5s
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -419,6 +505,8 @@ sensor:
   - platform: homeassistant
     id: nina3_detected_stars
     entity_id: sensor.nina3_star_detectedstars
+    filters:
+      - throttle: 5s
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -440,6 +528,8 @@ sensor:
   - platform: homeassistant
     id: nina3_hfr
     entity_id: sensor.nina3_star_hfr
+    filters:
+      - throttle: 5s
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -465,6 +555,8 @@ sensor:
   - platform: homeassistant
     id: nina3_saturated_pixels
     entity_id: sensor.nina3_target_max_saturated_pixels
+    filters:
+      - throttle: 5s
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -486,6 +578,8 @@ sensor:
   - platform: homeassistant
     id: nina3_total_rms
     entity_id: sensor.nina3_total_rms
+    filters:
+      - throttle: 5s
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -511,6 +605,8 @@ sensor:
   - platform: homeassistant
     id: nina3_ra_rms
     entity_id: sensor.nina_instance_3_nina3_ra_rms
+    filters:
+      - throttle: 5s
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -524,6 +620,8 @@ sensor:
   - platform: homeassistant
     id: nina3_dec_rms
     entity_id: sensor.nina_instance_3_nina3_dec_rms
+    filters:
+      - throttle: 5s
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -538,6 +636,12 @@ text_sensor:
   - platform: homeassistant
     id: ha_cloud_status
     entity_id: sensor.allskypi5_cloud_detector_status
+    filters:
+      - lambda: |-
+          static uint32_t last_update = 0;
+          if (last_update != 0 && millis() - last_update < 10000) return {};
+          last_update = millis();
+          return x;
     on_value:
       - lambda: |- 
           lv_label_set_text(id(lbl_cloud_status), x.c_str());
@@ -545,6 +649,12 @@ text_sensor:
   - platform: homeassistant
     id: nina2_filter
     entity_id: sensor.nina2_filter_wheel_filter
+    filters:
+      - lambda: |-
+          static uint32_t last_update = 0;
+          if (last_update != 0 && millis() - last_update < 2000) return {};
+          last_update = millis();
+          return x;
     on_value:
       - lambda: |- 
           // Reset all filters to muted
@@ -610,6 +720,12 @@ text_sensor:
   - platform: homeassistant
     id: nina2_target
     entity_id: sensor.nina2_target_name
+    filters:
+      - lambda: |-
+          static uint32_t last_update = 0;
+          if (last_update != 0 && millis() - last_update < 30000) return {};
+          last_update = millis();
+          return x;
     on_value:
       - lambda: |- 
           lv_label_set_text(id(lbl_nina2_target), x.c_str());
@@ -617,6 +733,12 @@ text_sensor:
   - platform: homeassistant
     id: nina3_filter
     entity_id: sensor.nina3_filter_wheel_filter
+    filters:
+      - lambda: |-
+          static uint32_t last_update = 0;
+          if (last_update != 0 && millis() - last_update < 2000) return {};
+          last_update = millis();
+          return x;
     on_value:
       - lambda: |- 
           // Reset all filters to muted

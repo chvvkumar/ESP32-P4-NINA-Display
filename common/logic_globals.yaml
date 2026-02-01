@@ -10,473 +10,356 @@ globals:
     initial_value: '0'
   - id: g_cpu_c1_r
     type: float
-    restore_value: true
     initial_value: '127'
   - id: g_cpu_c1_g
     type: float
-    restore_value: true
     initial_value: '172'
   - id: g_cpu_c1_b
     type: float
-    restore_value: true
     initial_value: '255'
   - id: g_cpu_c2_r
     type: float
-    restore_value: true
     initial_value: '255'
   - id: g_cpu_c2_g
     type: float
-    restore_value: true
     initial_value: '137'
   - id: g_cpu_c2_b
     type: float
-    restore_value: true
     initial_value: '14'
   - id: g_fan_c1_r
     type: float
-    restore_value: true
     initial_value: '127'
   - id: g_fan_c1_g
     type: float
-    restore_value: true
     initial_value: '172'
   - id: g_fan_c1_b
     type: float
-    restore_value: true
     initial_value: '255'
   - id: g_fan_c2_r
     type: float
-    restore_value: true
     initial_value: '255'
   - id: g_fan_c2_g
     type: float
-    restore_value: true
     initial_value: '137'
   - id: g_fan_c2_b
     type: float
-    restore_value: true
     initial_value: '14'
   - id: g_env_c1_r
     type: float
-    restore_value: true
     initial_value: '127'
   - id: g_env_c1_g
     type: float
-    restore_value: true
     initial_value: '172'
   - id: g_env_c1_b
     type: float
-    restore_value: true
     initial_value: '255'
   - id: g_env_c2_r
     type: float
-    restore_value: true
     initial_value: '255'
   - id: g_env_c2_g
     type: float
-    restore_value: true
     initial_value: '137'
   - id: g_env_c2_b
     type: float
-    restore_value: true
     initial_value: '14'
   - id: g_pwr_c1_r
     type: float
-    restore_value: true
     initial_value: '127'
   - id: g_pwr_c1_g
     type: float
-    restore_value: true
     initial_value: '172'
   - id: g_pwr_c1_b
     type: float
-    restore_value: true
     initial_value: '255'
   - id: g_pwr_c2_r
     type: float
-    restore_value: true
     initial_value: '255'
   - id: g_pwr_c2_g
     type: float
-    restore_value: true
     initial_value: '137'
   - id: g_pwr_c2_b
     type: float
-    restore_value: true
     initial_value: '14'
   - id: g_sqm_c1_r
     type: float
-    restore_value: true
     initial_value: '255'
   - id: g_sqm_c1_g
     type: float
-    restore_value: true
     initial_value: '137'
   - id: g_sqm_c1_b
     type: float
-    restore_value: true
     initial_value: '14'
   - id: g_sqm_c2_r
     type: float
-    restore_value: true
     initial_value: '46'
   - id: g_sqm_c2_g
     type: float
-    restore_value: true
     initial_value: '5'
   - id: g_sqm_c2_b
     type: float
-    restore_value: true
     initial_value: '255'
   - id: g_cloud_r
     type: float
-    restore_value: true
     initial_value: '255'
   - id: g_cloud_g
     type: float
-    restore_value: true
     initial_value: '255'
   - id: g_cloud_b
     type: float
-    restore_value: true
     initial_value: '255'
 
   # NINA2 Color Globals
   - id: g_nina2_rms_c1_r
     type: float
-    restore_value: true
     initial_value: '45'
   - id: g_nina2_rms_c1_g
     type: float
-    restore_value: true
     initial_value: '212'
   - id: g_nina2_rms_c1_b
     type: float
-    restore_value: true
     initial_value: '191'
   - id: g_nina2_rms_c2_r
     type: float
-    restore_value: true
     initial_value: '244'
   - id: g_nina2_rms_c2_g
     type: float
-    restore_value: true
     initial_value: '63'
   - id: g_nina2_rms_c2_b
     type: float
-    restore_value: true
     initial_value: '94'
   - id: g_nina2_hfr_c1_r
     type: float
-    restore_value: true
     initial_value: '45'
   - id: g_nina2_hfr_c1_g
     type: float
-    restore_value: true
     initial_value: '212'
   - id: g_nina2_hfr_c1_b
     type: float
-    restore_value: true
     initial_value: '191'
   - id: g_nina2_hfr_c2_r
     type: float
-    restore_value: true
     initial_value: '244'
   - id: g_nina2_hfr_c2_g
     type: float
-    restore_value: true
     initial_value: '63'
   - id: g_nina2_hfr_c2_b
     type: float
-    restore_value: true
     initial_value: '94'
   - id: g_nina2_exp_num_c1_r
     type: float
-    restore_value: true
     initial_value: '45'
   - id: g_nina2_exp_num_c1_g
     type: float
-    restore_value: true
     initial_value: '212'
   - id: g_nina2_exp_num_c1_b
     type: float
-    restore_value: true
     initial_value: '191'
   - id: g_nina2_exp_num_c2_r
     type: float
-    restore_value: true
     initial_value: '244'
   - id: g_nina2_exp_num_c2_g
     type: float
-    restore_value: true
     initial_value: '63'
   - id: g_nina2_exp_num_c2_b
     type: float
-    restore_value: true
     initial_value: '94'
   - id: g_nina2_exp_time_c1_r
     type: float
-    restore_value: true
     initial_value: '45'
   - id: g_nina2_exp_time_c1_g
     type: float
-    restore_value: true
     initial_value: '212'
   - id: g_nina2_exp_time_c1_b
     type: float
-    restore_value: true
     initial_value: '191'
   - id: g_nina2_exp_time_c2_r
     type: float
-    restore_value: true
     initial_value: '244'
   - id: g_nina2_exp_time_c2_g
     type: float
-    restore_value: true
     initial_value: '63'
   - id: g_nina2_exp_time_c2_b
     type: float
-    restore_value: true
     initial_value: '94'
   - id: g_nina2_cam_temp_c1_r
     type: float
-    restore_value: true
     initial_value: '45'
   - id: g_nina2_cam_temp_c1_g
     type: float
-    restore_value: true
     initial_value: '212'
   - id: g_nina2_cam_temp_c1_b
     type: float
-    restore_value: true
     initial_value: '191'
   - id: g_nina2_cam_temp_c2_r
     type: float
-    restore_value: true
     initial_value: '244'
   - id: g_nina2_cam_temp_c2_g
     type: float
-    restore_value: true
     initial_value: '63'
   - id: g_nina2_cam_temp_c2_b
     type: float
-    restore_value: true
     initial_value: '94'
   - id: g_nina2_stars_c1_r
     type: float
-    restore_value: true
     initial_value: '45'
   - id: g_nina2_stars_c1_g
     type: float
-    restore_value: true
     initial_value: '212'
   - id: g_nina2_stars_c1_b
     type: float
-    restore_value: true
     initial_value: '191'
   - id: g_nina2_stars_c2_r
     type: float
-    restore_value: true
     initial_value: '244'
   - id: g_nina2_stars_c2_g
     type: float
-    restore_value: true
     initial_value: '63'
   - id: g_nina2_stars_c2_b
     type: float
-    restore_value: true
     initial_value: '94'
   - id: g_nina2_sat_px_c1_r
     type: float
-    restore_value: true
     initial_value: '45'
   - id: g_nina2_sat_px_c1_g
     type: float
-    restore_value: true
     initial_value: '212'
   - id: g_nina2_sat_px_c1_b
     type: float
-    restore_value: true
     initial_value: '191'
   - id: g_nina2_sat_px_c2_r
     type: float
-    restore_value: true
     initial_value: '244'
   - id: g_nina2_sat_px_c2_g
     type: float
-    restore_value: true
     initial_value: '63'
   - id: g_nina2_sat_px_c2_b
     type: float
-    restore_value: true
     initial_value: '94'
 
   # NINA3 Color Globals
   - id: g_nina3_rms_c1_r
     type: float
-    restore_value: true
     initial_value: '45'
   - id: g_nina3_rms_c1_g
     type: float
-    restore_value: true
     initial_value: '212'
   - id: g_nina3_rms_c1_b
     type: float
-    restore_value: true
     initial_value: '191'
   - id: g_nina3_rms_c2_r
     type: float
-    restore_value: true
     initial_value: '244'
   - id: g_nina3_rms_c2_g
     type: float
-    restore_value: true
     initial_value: '63'
   - id: g_nina3_rms_c2_b
     type: float
-    restore_value: true
     initial_value: '94'
   - id: g_nina3_hfr_c1_r
     type: float
-    restore_value: true
     initial_value: '45'
   - id: g_nina3_hfr_c1_g
     type: float
-    restore_value: true
     initial_value: '212'
   - id: g_nina3_hfr_c1_b
     type: float
-    restore_value: true
     initial_value: '191'
   - id: g_nina3_hfr_c2_r
     type: float
-    restore_value: true
     initial_value: '244'
   - id: g_nina3_hfr_c2_g
     type: float
-    restore_value: true
     initial_value: '63'
   - id: g_nina3_hfr_c2_b
     type: float
-    restore_value: true
     initial_value: '94'
   - id: g_nina3_exp_num_c1_r
     type: float
-    restore_value: true
     initial_value: '45'
   - id: g_nina3_exp_num_c1_g
     type: float
-    restore_value: true
     initial_value: '212'
   - id: g_nina3_exp_num_c1_b
     type: float
-    restore_value: true
     initial_value: '191'
   - id: g_nina3_exp_num_c2_r
     type: float
-    restore_value: true
     initial_value: '244'
   - id: g_nina3_exp_num_c2_g
     type: float
-    restore_value: true
     initial_value: '63'
   - id: g_nina3_exp_num_c2_b
     type: float
-    restore_value: true
     initial_value: '94'
   - id: g_nina3_exp_time_c1_r
     type: float
-    restore_value: true
     initial_value: '45'
   - id: g_nina3_exp_time_c1_g
     type: float
-    restore_value: true
     initial_value: '212'
   - id: g_nina3_exp_time_c1_b
     type: float
-    restore_value: true
     initial_value: '191'
   - id: g_nina3_exp_time_c2_r
     type: float
-    restore_value: true
     initial_value: '244'
   - id: g_nina3_exp_time_c2_g
     type: float
-    restore_value: true
     initial_value: '63'
   - id: g_nina3_exp_time_c2_b
     type: float
-    restore_value: true
     initial_value: '94'
   - id: g_nina3_cam_temp_c1_r
     type: float
-    restore_value: true
     initial_value: '45'
   - id: g_nina3_cam_temp_c1_g
     type: float
-    restore_value: true
     initial_value: '212'
   - id: g_nina3_cam_temp_c1_b
     type: float
-    restore_value: true
     initial_value: '191'
   - id: g_nina3_cam_temp_c2_r
     type: float
-    restore_value: true
     initial_value: '244'
   - id: g_nina3_cam_temp_c2_g
     type: float
-    restore_value: true
     initial_value: '63'
   - id: g_nina3_cam_temp_c2_b
     type: float
-    restore_value: true
     initial_value: '94'
   - id: g_nina3_stars_c1_r
     type: float
-    restore_value: true
     initial_value: '45'
   - id: g_nina3_stars_c1_g
     type: float
-    restore_value: true
     initial_value: '212'
   - id: g_nina3_stars_c1_b
     type: float
-    restore_value: true
     initial_value: '191'
   - id: g_nina3_stars_c2_r
     type: float
-    restore_value: true
     initial_value: '244'
   - id: g_nina3_stars_c2_g
     type: float
-    restore_value: true
     initial_value: '63'
   - id: g_nina3_stars_c2_b
     type: float
-    restore_value: true
     initial_value: '94'
   - id: g_nina3_sat_px_c1_r
     type: float
-    restore_value: true
     initial_value: '45'
   - id: g_nina3_sat_px_c1_g
     type: float
-    restore_value: true
     initial_value: '212'
   - id: g_nina3_sat_px_c1_b
     type: float
-    restore_value: true
     initial_value: '191'
   - id: g_nina3_sat_px_c2_r
     type: float
-    restore_value: true
     initial_value: '244'
   - id: g_nina3_sat_px_c2_g
     type: float
-    restore_value: true
     initial_value: '63'
   - id: g_nina3_sat_px_c2_b
     type: float
-    restore_value: true
     initial_value: '94'

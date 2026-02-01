@@ -42,6 +42,9 @@ lvgl:
   
   page_wrap: true
   
+  # Optimize display updates
+  update_interval: 100ms
+  
   style_definitions:
     - id: style_page_bg
       bg_color: 0x050505
@@ -476,7 +479,7 @@ lvgl:
             layout:
               type: grid
               grid_columns: [FR(1), FR(1), FR(1)]
-              grid_rows: [120, 190, 140, 100, 140]
+              grid_rows: [120, 230, 140, 100, 100]
               pad_row: 0
               pad_column: 0
             widgets:
@@ -510,16 +513,19 @@ lvgl:
                   border_width: 1
                   border_color: 0x222222
                   pad_all: 8
+                  scrollbar_mode: "OFF"
                   layout: { type: flex, flex_flow: COLUMN, flex_align_main: SPACE_BETWEEN }
                   widgets:
                     - label: { text: "RMS (Arc-sec)", styles: style_unit_small, width: 100% }
                     - label: { id: lbl_nina2_rms, text: "--", text_font: font_roboto_hero, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
+                    - label: { id: lbl_nina2_ra_rms, text: "RA: --", styles: style_unit_small, width: 100% }
+                    - label: { id: lbl_nina2_dec_rms, text: "DEC: --", styles: style_unit_small, width: 100% }
 
-              # Row 2: HFR - spans columns 1-2
+              # Row 2: HFR - column 1
               - obj:
                   id: nina2_cell_hfr
                   grid_cell_column_pos: 1
-                  grid_cell_column_span: 2
+                  grid_cell_column_span: 1
                   grid_cell_row_pos: 1
                   grid_cell_row_span: 1
                   grid_cell_x_align: STRETCH
@@ -528,10 +534,33 @@ lvgl:
                   border_width: 1
                   border_color: 0x222222
                   pad_all: 8
-                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: SPACE_BETWEEN }
+                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER }
                   widgets:
                     - label: { text: "HFR (Px)", styles: style_unit_small, width: 100% }
                     - label: { id: lbl_nina2_hfr, text: "--", text_font: font_roboto_hero, text_color: 0xFF6B9D, text_align: CENTER, width: 100% }
+
+              # Row 2: Power Info - column 2
+              - obj:
+                  id: nina2_cell_power
+                  grid_cell_column_pos: 2
+                  grid_cell_column_span: 1
+                  grid_cell_row_pos: 1
+                  grid_cell_row_span: 1
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
+                  bg_opa: TRANSP
+                  border_width: 1
+                  border_color: 0x222222
+                  pad_all: 8
+                  scrollbar_mode: "OFF"
+                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: SPACE_BETWEEN }
+                  widgets:
+                    - label: { text: "Current", styles: style_unit_small, width: 100% }
+                    - label: { id: lbl_nina2_current, text: "--", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
+                    - label: { text: "Heater #1", styles: style_unit_small, width: 100% }
+                    - label: { id: lbl_nina2_heater, text: "--", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
+                    - label: { text: "Power", styles: style_unit_small, width: 100% }
+                    - label: { id: lbl_nina2_power, text: "--", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
 
               # Row 3: EXP # - column 0
               - obj:
@@ -660,24 +689,6 @@ lvgl:
                     - label: { text: "STARS", styles: style_unit_small, width: 100% }
                     - label: { id: lbl_nina2_stars, text: "--", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
 
-              # Row 5: RA/DEC - column 2
-              - obj:
-                  id: nina2_cell_ra_dec
-                  grid_cell_column_pos: 2
-                  grid_cell_column_span: 1
-                  grid_cell_row_pos: 4
-                  grid_cell_row_span: 1
-                  grid_cell_x_align: STRETCH
-                  grid_cell_y_align: STRETCH
-                  bg_opa: TRANSP
-                  border_width: 1
-                  border_color: 0x222222
-                  pad_all: 8
-                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER }
-                  widgets:
-                    - label: { id: lbl_nina2_ra_rms, text: "RA: --", styles: style_unit_small, width: 100% }
-                    - label: { id: lbl_nina2_dec_rms, text: "DEC: --", styles: style_unit_small, width: 100% }
-
     - id: nina3_page
       styles: style_page_bg
       scrollbar_mode: "OFF"
@@ -694,7 +705,7 @@ lvgl:
             layout:
               type: grid
               grid_columns: [FR(1), FR(1), FR(1)]
-              grid_rows: [120, 190, 140, 100, 140]
+              grid_rows: [120, 230, 140, 100, 100]
               pad_row: 0
               pad_column: 0
             widgets:
@@ -728,16 +739,19 @@ lvgl:
                   border_width: 1
                   border_color: 0x222222
                   pad_all: 8
-                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: SPACE_BETWEEN }
+                  scrollbar_mode: "OFF"
+                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER }
                   widgets:
                     - label: { text: "RMS (Arc-sec)", styles: style_unit_small, width: 100% }
                     - label: { id: lbl_nina3_rms, text: "--", text_font: font_roboto_hero, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
+                    - label: { id: lbl_nina3_ra_rms, text: "RA: --", styles: style_unit_small, width: 100% }
+                    - label: { id: lbl_nina3_dec_rms, text: "DEC: --", styles: style_unit_small, width: 100% }
 
-              # Row 2: HFR - spans columns 1-2
+              # Row 2: HFR - column 1
               - obj:
                   id: nina3_cell_hfr
                   grid_cell_column_pos: 1
-                  grid_cell_column_span: 2
+                  grid_cell_column_span: 1
                   grid_cell_row_pos: 1
                   grid_cell_row_span: 1
                   grid_cell_x_align: STRETCH
@@ -750,6 +764,21 @@ lvgl:
                   widgets:
                     - label: { text: "HFR (Px)", styles: style_unit_small, width: 100% }
                     - label: { id: lbl_nina3_hfr, text: "--", text_font: font_roboto_hero, text_color: 0xFF6B9D, text_align: CENTER, width: 100% }
+
+              # Row 2: Empty - column 2
+              - obj:
+                  id: nina3_cell_empty
+                  grid_cell_column_pos: 2
+                  grid_cell_column_span: 1
+                  grid_cell_row_pos: 1
+                  grid_cell_row_span: 1
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
+                  bg_opa: TRANSP
+                  border_width: 1
+                  border_color: 0x222222
+                  pad_all: 8
+                  scrollbar_mode: "OFF"
 
               # Row 3: EXP # - column 0
               - obj:
@@ -877,21 +906,3 @@ lvgl:
                   widgets:
                     - label: { text: "STARS", styles: style_unit_small, width: 100% }
                     - label: { id: lbl_nina3_stars, text: "--", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
-
-              # Row 5: RA/DEC - column 2
-              - obj:
-                  id: nina3_cell_ra_dec
-                  grid_cell_column_pos: 2
-                  grid_cell_column_span: 1
-                  grid_cell_row_pos: 4
-                  grid_cell_row_span: 1
-                  grid_cell_x_align: STRETCH
-                  grid_cell_y_align: STRETCH
-                  bg_opa: TRANSP
-                  border_width: 1
-                  border_color: 0x222222
-                  pad_all: 8
-                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER }
-                  widgets:
-                    - label: { id: lbl_nina3_ra_rms, text: "RA: --", styles: style_unit_small, width: 100% }
-                    - label: { id: lbl_nina3_dec_rms, text: "DEC: --", styles: style_unit_small, width: 100% }
