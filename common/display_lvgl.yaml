@@ -47,6 +47,11 @@ font:
     size: 20
     bpp: 8
     glyphs: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-°%/:_ #()*"
+  - file: { type: gfonts, family: Roboto, weight: 400 }
+    id: font_plant_metrics
+    size: 14
+    bpp: 4
+    glyphs: "0123456789.-°%MB:"
 
 lvgl:
   buffer_size: 100%
@@ -1006,6 +1011,15 @@ lvgl:
                     - label: { id: lbl_name_spider, text: "Spider Plant", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
                     - obj:
                         width: 100%
+                        height: 24
+                        bg_opa: TRANSP
+                        border_width: 0
+                        layout: { type: flex, flex_flow: ROW, flex_align_main: SPACE_EVENLY }
+                        widgets:
+                          - label: { id: lbl_moist_spider, text: "M:--", text_font: font_plant_metrics, text_color: 0x999999 }
+                          - label: { id: lbl_temp_spider, text: "--°", text_font: font_plant_metrics, text_color: 0x999999 }
+                    - obj:
+                        width: 100%
                         height: 40
                         bg_opa: TRANSP
                         border_width: 0
@@ -1026,6 +1040,16 @@ lvgl:
                   widgets:
                     - obj: { id: accent_jade, width: 100%, height: 8, bg_color: color_ok, bg_opa: COVER, border_width: 0, radius: 4 }
                     - label: { id: lbl_name_jade, text: "Jade Plant", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
+                    - obj:
+                        width: 100%
+                        height: 24
+                        bg_opa: TRANSP
+                        border_width: 0
+                        layout: { type: flex, flex_flow: ROW, flex_align_main: SPACE_EVENLY }
+                        widgets:
+                          - label: { id: lbl_moist_jade, text: "M:--", text_font: font_plant_metrics, text_color: 0x999999 }
+                          - label: { id: lbl_temp_jade, text: "--°", text_font: font_plant_metrics, text_color: 0x999999 }
+                          - label: { id: lbl_batt_jade, text: "B:--", text_font: font_plant_metrics, text_color: 0x999999 }
                     - obj:
                         width: 100%
                         height: 40
@@ -1050,6 +1074,16 @@ lvgl:
                     - label: { id: lbl_name_elephant, text: "Elephant Ears", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
                     - obj:
                         width: 100%
+                        height: 24
+                        bg_opa: TRANSP
+                        border_width: 0
+                        layout: { type: flex, flex_flow: ROW, flex_align_main: SPACE_EVENLY }
+                        widgets:
+                          - label: { id: lbl_moist_elephant, text: "M:--", text_font: font_plant_metrics, text_color: 0x999999 }
+                          - label: { id: lbl_temp_elephant, text: "--°", text_font: font_plant_metrics, text_color: 0x999999 }
+                          - label: { id: lbl_batt_elephant, text: "B:--", text_font: font_plant_metrics, text_color: 0x999999 }
+                    - obj:
+                        width: 100%
                         height: 40
                         bg_opa: TRANSP
                         border_width: 0
@@ -1070,6 +1104,16 @@ lvgl:
                   widgets:
                     - obj: { id: accent_begonia, width: 100%, height: 8, bg_color: color_ok, bg_opa: COVER, border_width: 0, radius: 4 }
                     - label: { id: lbl_name_begonia, text: "Begonia", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
+                    - obj:
+                        width: 100%
+                        height: 24
+                        bg_opa: TRANSP
+                        border_width: 0
+                        layout: { type: flex, flex_flow: ROW, flex_align_main: SPACE_EVENLY }
+                        widgets:
+                          - label: { id: lbl_moist_begonia, text: "M:--", text_font: font_plant_metrics, text_color: 0x999999 }
+                          - label: { id: lbl_temp_begonia, text: "--°", text_font: font_plant_metrics, text_color: 0x999999 }
+                          - label: { id: lbl_batt_begonia, text: "B:--", text_font: font_plant_metrics, text_color: 0x999999 }
                     - obj:
                         width: 100%
                         height: 40
@@ -1094,6 +1138,16 @@ lvgl:
                     - label: { id: lbl_name_nerve, text: "Nerve Plant", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
                     - obj:
                         width: 100%
+                        height: 24
+                        bg_opa: TRANSP
+                        border_width: 0
+                        layout: { type: flex, flex_flow: ROW, flex_align_main: SPACE_EVENLY }
+                        widgets:
+                          - label: { id: lbl_moist_nerve, text: "M:--", text_font: font_plant_metrics, text_color: 0x999999 }
+                          - label: { id: lbl_temp_nerve, text: "--°", text_font: font_plant_metrics, text_color: 0x999999 }
+                          - label: { id: lbl_batt_nerve, text: "B:--", text_font: font_plant_metrics, text_color: 0x999999 }
+                    - obj:
+                        width: 100%
                         height: 40
                         bg_opa: TRANSP
                         border_width: 0
@@ -1114,6 +1168,15 @@ lvgl:
                   widgets:
                     - obj: { id: accent_pothos, width: 100%, height: 8, bg_color: color_ok, bg_opa: COVER, border_width: 0, radius: 4 }
                     - label: { id: lbl_name_pothos, text: "Pothos", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
+                    - obj:
+                        width: 100%
+                        height: 24
+                        bg_opa: TRANSP
+                        border_width: 0
+                        layout: { type: flex, flex_flow: ROW, flex_align_main: SPACE_EVENLY }
+                        widgets:
+                          - label: { id: lbl_moist_pothos, text: "M:--", text_font: font_plant_metrics, text_color: 0x999999 }
+                          - label: { id: lbl_temp_pothos, text: "--°", text_font: font_plant_metrics, text_color: 0x999999 }
                     - obj:
                         width: 100%
                         height: 40
@@ -1138,6 +1201,16 @@ lvgl:
                     - label: { id: lbl_name_croton, text: "Croton", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
                     - obj:
                         width: 100%
+                        height: 24
+                        bg_opa: TRANSP
+                        border_width: 0
+                        layout: { type: flex, flex_flow: ROW, flex_align_main: SPACE_EVENLY }
+                        widgets:
+                          - label: { id: lbl_moist_croton, text: "M:--", text_font: font_plant_metrics, text_color: 0x999999 }
+                          - label: { id: lbl_temp_croton, text: "--°", text_font: font_plant_metrics, text_color: 0x999999 }
+                          - label: { id: lbl_batt_croton, text: "B:--", text_font: font_plant_metrics, text_color: 0x999999 }
+                    - obj:
+                        width: 100%
                         height: 40
                         bg_opa: TRANSP
                         border_width: 0
@@ -1160,6 +1233,16 @@ lvgl:
                     - label: { id: lbl_name_aglaonema, text: "Aglaonema", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
                     - obj:
                         width: 100%
+                        height: 24
+                        bg_opa: TRANSP
+                        border_width: 0
+                        layout: { type: flex, flex_flow: ROW, flex_align_main: SPACE_EVENLY }
+                        widgets:
+                          - label: { id: lbl_moist_aglaonema, text: "M:--", text_font: font_plant_metrics, text_color: 0x999999 }
+                          - label: { id: lbl_temp_aglaonema, text: "--°", text_font: font_plant_metrics, text_color: 0x999999 }
+                          - label: { id: lbl_batt_aglaonema, text: "B:--", text_font: font_plant_metrics, text_color: 0x999999 }
+                    - obj:
+                        width: 100%
                         height: 40
                         bg_opa: TRANSP
                         border_width: 0
@@ -1180,6 +1263,16 @@ lvgl:
                   widgets:
                     - obj: { id: accent_monstera, width: 100%, height: 8, bg_color: color_ok, bg_opa: COVER, border_width: 0, radius: 4 }
                     - label: { id: lbl_name_monstera, text: "Monstera", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
+                    - obj:
+                        width: 100%
+                        height: 24
+                        bg_opa: TRANSP
+                        border_width: 0
+                        layout: { type: flex, flex_flow: ROW, flex_align_main: SPACE_EVENLY }
+                        widgets:
+                          - label: { id: lbl_moist_monstera, text: "M:--", text_font: font_plant_metrics, text_color: 0x999999 }
+                          - label: { id: lbl_temp_monstera, text: "--°", text_font: font_plant_metrics, text_color: 0x999999 }
+                          - label: { id: lbl_batt_monstera, text: "B:--", text_font: font_plant_metrics, text_color: 0x999999 }
                     - obj:
                         width: 100%
                         height: 40

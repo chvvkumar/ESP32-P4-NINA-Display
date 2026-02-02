@@ -1135,3 +1135,180 @@ text_sensor:
           lv_obj_set_style_text_color(id(lbl_status_monstera), text_color, LV_PART_MAIN);
           lv_obj_set_style_text_color(id(lbl_icon_monstera), text_color, LV_PART_MAIN);
           lv_label_set_text(id(lbl_status_monstera), moisture.c_str());
+  # ==================== PLANT SENSORS - DETAILED METRICS ====================
+  # Monstera - Moisture, Temperature, Humidity, Battery
+  - platform: homeassistant
+    id: monstera_moisture
+    entity_id: plant.monstera
+    attribute: moisture
+    on_value:
+      - lambda: 'int val = atoi(x.c_str()); lv_label_set_text_fmt(id(lbl_moist_monstera), "M:%d%%", val);'
+  
+  - platform: homeassistant
+    id: monstera_temp
+    entity_id: plant.monstera
+    attribute: temperature
+    on_value:
+      - lambda: 'int val = atoi(x.c_str()); lv_label_set_text_fmt(id(lbl_temp_monstera), "%d°", val);'
+  
+  - platform: homeassistant
+    id: monstera_battery
+    entity_id: sensor.monstera_battery
+    on_value:
+      - lambda: 'int val = atoi(x.c_str()); lv_label_set_text_fmt(id(lbl_batt_monstera), "B:%d%%", val);'
+
+  # Pothos - Moisture, Temperature, Humidity (no battery sensor listed)
+  - platform: homeassistant
+    id: pothos_moisture
+    entity_id: plant.pothos
+    attribute: moisture
+    on_value:
+      - lambda: 'int val = atoi(x.c_str()); lv_label_set_text_fmt(id(lbl_moist_pothos), "M:%d%%", val);'
+  
+  - platform: homeassistant
+    id: pothos_temp
+    entity_id: plant.pothos
+    attribute: temperature
+    on_value:
+      - lambda: 'int val = atoi(x.c_str()); lv_label_set_text_fmt(id(lbl_temp_pothos), "%d°", val);'
+
+  # Begonia - Moisture, Temperature, Humidity, Battery
+  - platform: homeassistant
+    id: begonia_moisture
+    entity_id: plant.begonia
+    attribute: moisture
+    on_value:
+      - lambda: 'int val = atoi(x.c_str()); lv_label_set_text_fmt(id(lbl_moist_begonia), "M:%d%%", val);'
+  
+  - platform: homeassistant
+    id: begonia_temp
+    entity_id: plant.begonia
+    attribute: temperature
+    on_value:
+      - lambda: 'int val = atoi(x.c_str()); lv_label_set_text_fmt(id(lbl_temp_begonia), "%d°", val);'
+  
+  - platform: homeassistant
+    id: begonia_battery
+    entity_id: sensor.fuchsia_right_battery
+    on_value:
+      - lambda: 'int val = atoi(x.c_str()); lv_label_set_text_fmt(id(lbl_batt_begonia), "B:%d%%", val);'
+
+  # Jade Plant - Moisture, Temperature, Humidity, Battery
+  - platform: homeassistant
+    id: jade_moisture
+    entity_id: plant.jade_plant
+    attribute: moisture
+    on_value:
+      - lambda: 'int val = atoi(x.c_str()); lv_label_set_text_fmt(id(lbl_moist_jade), "M:%d%%", val);'
+  
+  - platform: homeassistant
+    id: jade_temp
+    entity_id: plant.jade_plant
+    attribute: temperature
+    on_value:
+      - lambda: 'int val = atoi(x.c_str()); lv_label_set_text_fmt(id(lbl_temp_jade), "%d°", val);'
+  
+  - platform: homeassistant
+    id: jade_battery
+    entity_id: sensor.cactus_battery
+    on_value:
+      - lambda: 'int val = atoi(x.c_str()); lv_label_set_text_fmt(id(lbl_batt_jade), "B:%d%%", val);'
+
+  # Nerve Plant - Moisture, Temperature, Humidity, Battery
+  - platform: homeassistant
+    id: nerve_moisture
+    entity_id: plant.nerve_plant
+    attribute: moisture
+    on_value:
+      - lambda: 'int val = atoi(x.c_str()); lv_label_set_text_fmt(id(lbl_moist_nerve), "M:%d%%", val);'
+  
+  - platform: homeassistant
+    id: nerve_temp
+    entity_id: plant.nerve_plant
+    attribute: temperature
+    on_value:
+      - lambda: 'int val = atoi(x.c_str()); lv_label_set_text_fmt(id(lbl_temp_nerve), "%d°", val);'
+  
+  - platform: homeassistant
+    id: nerve_battery
+    entity_id: sensor.fuchsia_left_battery
+    on_value:
+      - lambda: 'int val = atoi(x.c_str()); lv_label_set_text_fmt(id(lbl_batt_nerve), "B:%d%%", val);'
+
+  # Elephant Ears - Moisture, Temperature, Humidity, Battery
+  - platform: homeassistant
+    id: elephant_moisture
+    entity_id: plant.elephant_ears
+    attribute: moisture
+    on_value:
+      - lambda: 'int val = atoi(x.c_str()); lv_label_set_text_fmt(id(lbl_moist_elephant), "M:%d%%", val);'
+  
+  - platform: homeassistant
+    id: elephant_temp
+    entity_id: plant.elephant_ears
+    attribute: temperature
+    on_value:
+      - lambda: 'int val = atoi(x.c_str()); lv_label_set_text_fmt(id(lbl_temp_elephant), "%d°", val);'
+  
+  - platform: homeassistant
+    id: elephant_battery
+    entity_id: sensor.elephant_ears_battery
+    on_value:
+      - lambda: 'int val = atoi(x.c_str()); lv_label_set_text_fmt(id(lbl_batt_elephant), "B:%d%%", val);'
+
+  # Aglaonema - Moisture, Temperature, Humidity, Battery
+  - platform: homeassistant
+    id: aglaonema_moisture
+    entity_id: plant.aglaonema
+    attribute: moisture
+    on_value:
+      - lambda: 'int val = atoi(x.c_str()); lv_label_set_text_fmt(id(lbl_moist_aglaonema), "M:%d%%", val);'
+  
+  - platform: homeassistant
+    id: aglaonema_temp
+    entity_id: plant.aglaonema
+    attribute: temperature
+    on_value:
+      - lambda: 'int val = atoi(x.c_str()); lv_label_set_text_fmt(id(lbl_temp_aglaonema), "%d°", val);'
+  
+  - platform: homeassistant
+    id: aglaonema_battery
+    entity_id: sensor.aglaonema_battery
+    on_value:
+      - lambda: 'int val = atoi(x.c_str()); lv_label_set_text_fmt(id(lbl_batt_aglaonema), "B:%d%%", val);'
+
+  # Croton - Moisture, Temperature, Humidity, Battery
+  - platform: homeassistant
+    id: croton_moisture
+    entity_id: plant.croton
+    attribute: moisture
+    on_value:
+      - lambda: 'int val = atoi(x.c_str()); lv_label_set_text_fmt(id(lbl_moist_croton), "M:%d%%", val);'
+  
+  - platform: homeassistant
+    id: croton_temp
+    entity_id: plant.croton
+    attribute: temperature
+    on_value:
+      - lambda: 'int val = atoi(x.c_str()); lv_label_set_text_fmt(id(lbl_temp_croton), "%d°", val);'
+  
+  - platform: homeassistant
+    id: croton_battery
+    entity_id: sensor.croton_battery
+    on_value:
+      - lambda: 'int val = atoi(x.c_str()); lv_label_set_text_fmt(id(lbl_batt_croton), "B:%d%%", val);'
+
+  # Spider Plant - Moisture, Temperature, Humidity (no battery sensor listed)
+  - platform: homeassistant
+    id: spider_moisture
+    entity_id: plant.spider_plant
+    attribute: moisture
+    on_value:
+      - lambda: 'int val = atoi(x.c_str()); lv_label_set_text_fmt(id(lbl_moist_spider), "M:%d%%", val);'
+  
+  - platform: homeassistant
+    id: spider_temp
+    entity_id: plant.spider_plant
+    attribute: temperature
+    on_value:
+      - lambda: 'int val = atoi(x.c_str()); lv_label_set_text_fmt(id(lbl_temp_spider), "%d°", val);'
