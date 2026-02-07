@@ -975,6 +975,7 @@ lvgl:
             id: plants_container
             width: 720
             height: 720
+            align: CENTER
             bg_color: 0x000000
             bg_opa: COVER
             border_width: 0
