@@ -13,13 +13,6 @@ color:
     hex: "FACC15"
   - id: filter_oiii
     hex: "22D3EE"
-  # Plant dashboard colors
-  - id: color_ok
-    hex: "3B82F6"  # Blue
-  - id: color_problem
-    hex: "EF4444"  # Red
-  - id: color_warning
-    hex: "F59E0B"  # Amber
 
 font:
   - file: { type: gfonts, family: Roboto, weight: 400 }
@@ -42,16 +35,6 @@ font:
     size: 54
     bpp: 8
     glyphs: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.- '"
-  - file: { type: gfonts, family: Roboto, weight: 400 }
-    id: font_plant_status
-    size: 20
-    bpp: 8
-    glyphs: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-°%/:_ #()*"
-  - file: { type: gfonts, family: Roboto, weight: 400 }
-    id: font_plant_metrics
-    size: 14
-    bpp: 4
-    glyphs: "0123456789.-°%MB:"
 
 lvgl:
   buffer_size: 100%
@@ -815,9 +798,9 @@ lvgl:
                         widgets:
                           - label: { id: lbl_nina3_hfr, text: "--", text_font: font_roboto_hero, text_color: 0xFF6B9D, text_align: CENTER, width: 100% }
 
-              # Row 2: Empty - column 2
+              # Row 2: Power Info - column 2
               - obj:
-                  id: nina3_cell_empty
+                  id: nina3_cell_power
                   grid_cell_column_pos: 2
                   grid_cell_column_span: 1
                   grid_cell_row_pos: 1
@@ -829,6 +812,14 @@ lvgl:
                   border_color: 0x222222
                   pad_all: 8
                   scrollbar_mode: "OFF"
+                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: SPACE_BETWEEN }
+                  widgets:
+                    - label: { text: "Heater", styles: style_unit_small, width: 100% }
+                    - label: { id: lbl_nina3_heater, text: "--", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
+                    - label: { text: "Current", styles: style_unit_small, width: 100% }
+                    - label: { id: lbl_nina3_current, text: "--", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
+                    - label: { text: "Power", styles: style_unit_small, width: 100% }
+                    - label: { id: lbl_nina3_power, text: "--", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
 
               # Row 3: EXP # - column 0
               - obj:
@@ -976,7 +967,6 @@ lvgl:
                     - label: { text: "SKY", styles: style_unit_small, width: 100% }
                     - label: { id: lbl_nina3_cloud_detector, text: "--", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
 
-# PLANTS PAGE - 9 Plant High-Density Dashboard (Full 720x720 Grid)
     - id: plants_page
       styles: style_page_bg
       scrollbar_mode: "OFF"
@@ -989,296 +979,127 @@ lvgl:
             bg_opa: COVER
             border_width: 0
             scrollbar_mode: "OFF"
+            pad_all: 0
             layout:
               type: grid
               grid_columns: [FR(1), FR(1), FR(1)]
-              grid_rows: [FR(1), FR(1), FR(1)]  # Refactored to pure 3x3 without header row
-              pad_row: 10
-              pad_column: 10
-            pad_all: 10
+              grid_rows: [FR(1), FR(1), FR(1)]
+              pad_row: 0
+              pad_column: 0
             widgets:
-              # Plant 1: Spider Plant
+              # Row 1, Col 1: Spider Plant
               - obj:
-                  id: plant_strip_spider
                   grid_cell_column_pos: 0
                   grid_cell_row_pos: 0
-                  width: 100%
-                  height: 100%
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
                   styles: style_card_bg
-                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: SPACE_BETWEEN }
+                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER }
                   widgets:
-                    - obj: { id: accent_spider, width: 100%, height: 8, bg_color: color_ok, bg_opa: COVER, border_width: 0, radius: 4 }
-                    - label: { id: lbl_name_spider, text: "Spider Plant", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
-                    - obj:
-                        width: 100%
-                        height: 24
-                        bg_opa: TRANSP
-                        border_width: 0
-                        layout: { type: flex, flex_flow: ROW, flex_align_main: SPACE_EVENLY }
-                        widgets:
-                          - label: { id: lbl_moist_spider, text: "M:--", text_font: font_plant_metrics, text_color: 0x999999 }
-                          - label: { id: lbl_temp_spider, text: "--°", text_font: font_plant_metrics, text_color: 0x999999 }
-                    - obj:
-                        width: 100%
-                        height: 40
-                        bg_opa: TRANSP
-                        border_width: 0
-                        layout: { type: flex, flex_flow: ROW, flex_align_main: CENTER, flex_align_cross: CENTER }
-                        widgets:
-                          - label: { id: lbl_status_spider, text: "OK", text_font: font_plant_status, text_color: color_ok, text_align: CENTER, pad_right: 8 }
-                          - label: { id: lbl_icon_spider, text: "*", text_font: font_roboto_28, text_color: color_ok }
+                    - label: { text: "Spider Plant", styles: style_header, text_font: font_roboto_28 }
+                    - label: { id: lbl_plant_spider_plant_status, text: "--", styles: style_unit_small }
+                    - label: { id: lbl_plant_spider_plant_moisture, text: "--%", styles: style_value_hero, width: 100%, text_align: RIGHT }
 
-              # Plant 2: Jade Plant
+              # Row 1, Col 2: Jade Plant
               - obj:
-                  id: plant_strip_jade
                   grid_cell_column_pos: 1
                   grid_cell_row_pos: 0
-                  width: 100%
-                  height: 100%
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
                   styles: style_card_bg
-                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: SPACE_BETWEEN }
+                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER }
                   widgets:
-                    - obj: { id: accent_jade, width: 100%, height: 8, bg_color: color_ok, bg_opa: COVER, border_width: 0, radius: 4 }
-                    - label: { id: lbl_name_jade, text: "Jade Plant", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
-                    - obj:
-                        width: 100%
-                        height: 24
-                        bg_opa: TRANSP
-                        border_width: 0
-                        layout: { type: flex, flex_flow: ROW, flex_align_main: SPACE_EVENLY }
-                        widgets:
-                          - label: { id: lbl_moist_jade, text: "M:--", text_font: font_plant_metrics, text_color: 0x999999 }
-                          - label: { id: lbl_temp_jade, text: "--°", text_font: font_plant_metrics, text_color: 0x999999 }
-                          - label: { id: lbl_batt_jade, text: "B:--", text_font: font_plant_metrics, text_color: 0x999999 }
-                    - obj:
-                        width: 100%
-                        height: 40
-                        bg_opa: TRANSP
-                        border_width: 0
-                        layout: { type: flex, flex_flow: ROW, flex_align_main: CENTER, flex_align_cross: CENTER }
-                        widgets:
-                          - label: { id: lbl_status_jade, text: "OK", text_font: font_plant_status, text_color: color_ok, text_align: CENTER, pad_right: 8 }
-                          - label: { id: lbl_icon_jade, text: "*", text_font: font_roboto_28, text_color: color_ok }
+                    - label: { text: "Jade Plant", styles: style_header, text_font: font_roboto_28 }
+                    - label: { id: lbl_plant_jade_plant_status, text: "--", styles: style_unit_small }
+                    - label: { id: lbl_plant_jade_plant_moisture, text: "--%", styles: style_value_hero, width: 100%, text_align: RIGHT }
 
-              # Plant 3: Elephant Ears
+              # Row 1, Col 3: Pothos
               - obj:
-                  id: plant_strip_elephant
                   grid_cell_column_pos: 2
                   grid_cell_row_pos: 0
-                  width: 100%
-                  height: 100%
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
                   styles: style_card_bg
-                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: SPACE_BETWEEN }
+                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER }
                   widgets:
-                    - obj: { id: accent_elephant, width: 100%, height: 8, bg_color: color_ok, bg_opa: COVER, border_width: 0, radius: 4 }
-                    - label: { id: lbl_name_elephant, text: "Elephant Ears", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
-                    - obj:
-                        width: 100%
-                        height: 24
-                        bg_opa: TRANSP
-                        border_width: 0
-                        layout: { type: flex, flex_flow: ROW, flex_align_main: SPACE_EVENLY }
-                        widgets:
-                          - label: { id: lbl_moist_elephant, text: "M:--", text_font: font_plant_metrics, text_color: 0x999999 }
-                          - label: { id: lbl_temp_elephant, text: "--°", text_font: font_plant_metrics, text_color: 0x999999 }
-                          - label: { id: lbl_batt_elephant, text: "B:--", text_font: font_plant_metrics, text_color: 0x999999 }
-                    - obj:
-                        width: 100%
-                        height: 40
-                        bg_opa: TRANSP
-                        border_width: 0
-                        layout: { type: flex, flex_flow: ROW, flex_align_main: CENTER, flex_align_cross: CENTER }
-                        widgets:
-                          - label: { id: lbl_status_elephant, text: "OK", text_font: font_plant_status, text_color: color_ok, text_align: CENTER, pad_right: 8 }
-                          - label: { id: lbl_icon_elephant, text: "*", text_font: font_roboto_28, text_color: color_ok }
+                    - label: { text: "Pothos", styles: style_header, text_font: font_roboto_28 }
+                    - label: { id: lbl_plant_pothos_status, text: "--", styles: style_unit_small }
+                    - label: { id: lbl_plant_pothos_moisture, text: "--%", styles: style_value_hero, width: 100%, text_align: RIGHT }
 
-              # Plant 4: Begonia
+              # Row 2, Col 1: Begonia
               - obj:
-                  id: plant_strip_begonia
                   grid_cell_column_pos: 0
                   grid_cell_row_pos: 1
-                  width: 100%
-                  height: 100%
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
                   styles: style_card_bg
-                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: SPACE_BETWEEN }
+                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER }
                   widgets:
-                    - obj: { id: accent_begonia, width: 100%, height: 8, bg_color: color_ok, bg_opa: COVER, border_width: 0, radius: 4 }
-                    - label: { id: lbl_name_begonia, text: "Begonia", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
-                    - obj:
-                        width: 100%
-                        height: 24
-                        bg_opa: TRANSP
-                        border_width: 0
-                        layout: { type: flex, flex_flow: ROW, flex_align_main: SPACE_EVENLY }
-                        widgets:
-                          - label: { id: lbl_moist_begonia, text: "M:--", text_font: font_plant_metrics, text_color: 0x999999 }
-                          - label: { id: lbl_temp_begonia, text: "--°", text_font: font_plant_metrics, text_color: 0x999999 }
-                          - label: { id: lbl_batt_begonia, text: "B:--", text_font: font_plant_metrics, text_color: 0x999999 }
-                    - obj:
-                        width: 100%
-                        height: 40
-                        bg_opa: TRANSP
-                        border_width: 0
-                        layout: { type: flex, flex_flow: ROW, flex_align_main: CENTER, flex_align_cross: CENTER }
-                        widgets:
-                          - label: { id: lbl_status_begonia, text: "OK", text_font: font_plant_status, text_color: color_ok, text_align: CENTER, pad_right: 8 }
-                          - label: { id: lbl_icon_begonia, text: "*", text_font: font_roboto_28, text_color: color_ok }
+                    - label: { text: "Begonia", styles: style_header, text_font: font_roboto_28 }
+                    - label: { id: lbl_plant_begonia_status, text: "--", styles: style_unit_small }
+                    - label: { id: lbl_plant_begonia_moisture, text: "--%", styles: style_value_hero, width: 100%, text_align: RIGHT }
 
-              # Plant 5: Nerve Plant
+              # Row 2, Col 2: Monstera
               - obj:
-                  id: plant_strip_nerve
                   grid_cell_column_pos: 1
                   grid_cell_row_pos: 1
-                  width: 100%
-                  height: 100%
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
                   styles: style_card_bg
-                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: SPACE_BETWEEN }
+                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER }
                   widgets:
-                    - obj: { id: accent_nerve, width: 100%, height: 8, bg_color: color_ok, bg_opa: COVER, border_width: 0, radius: 4 }
-                    - label: { id: lbl_name_nerve, text: "Nerve Plant", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
-                    - obj:
-                        width: 100%
-                        height: 24
-                        bg_opa: TRANSP
-                        border_width: 0
-                        layout: { type: flex, flex_flow: ROW, flex_align_main: SPACE_EVENLY }
-                        widgets:
-                          - label: { id: lbl_moist_nerve, text: "M:--", text_font: font_plant_metrics, text_color: 0x999999 }
-                          - label: { id: lbl_temp_nerve, text: "--°", text_font: font_plant_metrics, text_color: 0x999999 }
-                          - label: { id: lbl_batt_nerve, text: "B:--", text_font: font_plant_metrics, text_color: 0x999999 }
-                    - obj:
-                        width: 100%
-                        height: 40
-                        bg_opa: TRANSP
-                        border_width: 0
-                        layout: { type: flex, flex_flow: ROW, flex_align_main: CENTER, flex_align_cross: CENTER }
-                        widgets:
-                          - label: { id: lbl_status_nerve, text: "OK", text_font: font_plant_status, text_color: color_ok, text_align: CENTER, pad_right: 8 }
-                          - label: { id: lbl_icon_nerve, text: "*", text_font: font_roboto_28, text_color: color_ok }
+                    - label: { text: "Monstera", styles: style_header, text_font: font_roboto_28 }
+                    - label: { id: lbl_plant_monstera_status, text: "--", styles: style_unit_small }
+                    - label: { id: lbl_plant_monstera_moisture, text: "--%", styles: style_value_hero, width: 100%, text_align: RIGHT }
 
-              # Plant 6: Pothos
+              # Row 2, Col 3: Nerve Plant
               - obj:
-                  id: plant_strip_pothos
                   grid_cell_column_pos: 2
                   grid_cell_row_pos: 1
-                  width: 100%
-                  height: 100%
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
                   styles: style_card_bg
-                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: SPACE_BETWEEN }
+                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER }
                   widgets:
-                    - obj: { id: accent_pothos, width: 100%, height: 8, bg_color: color_ok, bg_opa: COVER, border_width: 0, radius: 4 }
-                    - label: { id: lbl_name_pothos, text: "Pothos", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
-                    - obj:
-                        width: 100%
-                        height: 24
-                        bg_opa: TRANSP
-                        border_width: 0
-                        layout: { type: flex, flex_flow: ROW, flex_align_main: SPACE_EVENLY }
-                        widgets:
-                          - label: { id: lbl_moist_pothos, text: "M:--", text_font: font_plant_metrics, text_color: 0x999999 }
-                          - label: { id: lbl_temp_pothos, text: "--°", text_font: font_plant_metrics, text_color: 0x999999 }
-                    - obj:
-                        width: 100%
-                        height: 40
-                        bg_opa: TRANSP
-                        border_width: 0
-                        layout: { type: flex, flex_flow: ROW, flex_align_main: CENTER, flex_align_cross: CENTER }
-                        widgets:
-                          - label: { id: lbl_status_pothos, text: "OK", text_font: font_plant_status, text_color: color_ok, text_align: CENTER, pad_right: 8 }
-                          - label: { id: lbl_icon_pothos, text: "*", text_font: font_roboto_28, text_color: color_ok }
+                    - label: { text: "Nerve Plant", styles: style_header, text_font: font_roboto_28 }
+                    - label: { id: lbl_plant_nerve_plant_status, text: "--", styles: style_unit_small }
+                    - label: { id: lbl_plant_nerve_plant_moisture, text: "--%", styles: style_value_hero, width: 100%, text_align: RIGHT }
 
-              # Plant 7: Croton
+              # Row 3, Col 1: Aglaonema
               - obj:
-                  id: plant_strip_croton
                   grid_cell_column_pos: 0
                   grid_cell_row_pos: 2
-                  width: 100%
-                  height: 100%
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
                   styles: style_card_bg
-                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: SPACE_BETWEEN }
+                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER }
                   widgets:
-                    - obj: { id: accent_croton, width: 100%, height: 8, bg_color: color_ok, bg_opa: COVER, border_width: 0, radius: 4 }
-                    - label: { id: lbl_name_croton, text: "Croton", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
-                    - obj:
-                        width: 100%
-                        height: 24
-                        bg_opa: TRANSP
-                        border_width: 0
-                        layout: { type: flex, flex_flow: ROW, flex_align_main: SPACE_EVENLY }
-                        widgets:
-                          - label: { id: lbl_moist_croton, text: "M:--", text_font: font_plant_metrics, text_color: 0x999999 }
-                          - label: { id: lbl_temp_croton, text: "--°", text_font: font_plant_metrics, text_color: 0x999999 }
-                          - label: { id: lbl_batt_croton, text: "B:--", text_font: font_plant_metrics, text_color: 0x999999 }
-                    - obj:
-                        width: 100%
-                        height: 40
-                        bg_opa: TRANSP
-                        border_width: 0
-                        layout: { type: flex, flex_flow: ROW, flex_align_main: CENTER, flex_align_cross: CENTER }
-                        widgets:
-                          - label: { id: lbl_status_croton, text: "OK", text_font: font_plant_status, text_color: color_ok, text_align: CENTER, pad_right: 8 }
-                          - label: { id: lbl_icon_croton, text: "*", text_font: font_roboto_28, text_color: color_ok }
+                    - label: { text: "Aglaonema", styles: style_header, text_font: font_roboto_28 }
+                    - label: { id: lbl_plant_aglaonema_status, text: "--", styles: style_unit_small }
+                    - label: { id: lbl_plant_aglaonema_moisture, text: "--%", styles: style_value_hero, width: 100%, text_align: RIGHT }
 
-              # Plant 8: Aglaonema
+              # Row 3, Col 2: Croton
               - obj:
-                  id: plant_strip_aglaonema
                   grid_cell_column_pos: 1
                   grid_cell_row_pos: 2
-                  width: 100%
-                  height: 100%
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
                   styles: style_card_bg
-                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: SPACE_BETWEEN }
+                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER }
                   widgets:
-                    - obj: { id: accent_aglaonema, width: 100%, height: 8, bg_color: color_ok, bg_opa: COVER, border_width: 0, radius: 4 }
-                    - label: { id: lbl_name_aglaonema, text: "Aglaonema", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
-                    - obj:
-                        width: 100%
-                        height: 24
-                        bg_opa: TRANSP
-                        border_width: 0
-                        layout: { type: flex, flex_flow: ROW, flex_align_main: SPACE_EVENLY }
-                        widgets:
-                          - label: { id: lbl_moist_aglaonema, text: "M:--", text_font: font_plant_metrics, text_color: 0x999999 }
-                          - label: { id: lbl_temp_aglaonema, text: "--°", text_font: font_plant_metrics, text_color: 0x999999 }
-                          - label: { id: lbl_batt_aglaonema, text: "B:--", text_font: font_plant_metrics, text_color: 0x999999 }
-                    - obj:
-                        width: 100%
-                        height: 40
-                        bg_opa: TRANSP
-                        border_width: 0
-                        layout: { type: flex, flex_flow: ROW, flex_align_main: CENTER, flex_align_cross: CENTER }
-                        widgets:
-                          - label: { id: lbl_status_aglaonema, text: "OK", text_font: font_plant_status, text_color: color_ok, text_align: CENTER, pad_right: 8 }
-                          - label: { id: lbl_icon_aglaonema, text: "*", text_font: font_roboto_28, text_color: color_ok }
+                    - label: { text: "Croton", styles: style_header, text_font: font_roboto_28 }
+                    - label: { id: lbl_plant_croton_status, text: "--", styles: style_unit_small }
+                    - label: { id: lbl_plant_croton_moisture, text: "--%", styles: style_value_hero, width: 100%, text_align: RIGHT }
 
-              # Plant 9: Monstera
+              # Row 3, Col 3: Elephant Ears
               - obj:
-                  id: plant_strip_monstera
                   grid_cell_column_pos: 2
                   grid_cell_row_pos: 2
-                  width: 100%
-                  height: 100%
+                  grid_cell_x_align: STRETCH
+                  grid_cell_y_align: STRETCH
                   styles: style_card_bg
-                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: SPACE_BETWEEN }
+                  layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER }
                   widgets:
-                    - obj: { id: accent_monstera, width: 100%, height: 8, bg_color: color_ok, bg_opa: COVER, border_width: 0, radius: 4 }
-                    - label: { id: lbl_name_monstera, text: "Monstera", text_font: font_roboto_28, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
-                    - obj:
-                        width: 100%
-                        height: 24
-                        bg_opa: TRANSP
-                        border_width: 0
-                        layout: { type: flex, flex_flow: ROW, flex_align_main: SPACE_EVENLY }
-                        widgets:
-                          - label: { id: lbl_moist_monstera, text: "M:--", text_font: font_plant_metrics, text_color: 0x999999 }
-                          - label: { id: lbl_temp_monstera, text: "--°", text_font: font_plant_metrics, text_color: 0x999999 }
-                          - label: { id: lbl_batt_monstera, text: "B:--", text_font: font_plant_metrics, text_color: 0x999999 }
-                    - obj:
-                        width: 100%
-                        height: 40
-                        bg_opa: TRANSP
-                        border_width: 0
-                        layout: { type: flex, flex_flow: ROW, flex_align_main: CENTER, flex_align_cross: CENTER }
-                        widgets:
-                          - label: { id: lbl_status_monstera, text: "OK", text_font: font_plant_status, text_color: color_ok, text_align: CENTER, pad_right: 8 }
-                          - label: { id: lbl_icon_monstera, text: "*", text_font: font_roboto_28, text_color: color_ok }
+                    - label: { text: "Elephant Ears", styles: style_header, text_font: font_roboto_28 }
+                    - label: { id: lbl_plant_elephant_ears_status, text: "--", styles: style_unit_small }
+                    - label: { id: lbl_plant_elephant_ears_moisture, text: "--%", styles: style_value_hero, width: 100%, text_align: RIGHT }

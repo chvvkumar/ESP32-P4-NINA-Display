@@ -1,0 +1,438 @@
+lvgl:
+  displays:
+    - id: main_display
+      bg_color: 0x000000
+      widgets:
+        - obj:
+            id: main_screen
+            width: 100%
+            height: 100%
+            bg_color: 0x000000
+            layout:
+              type: GRID
+              grid_columns: [FR(1), FR(1), FR(1)]
+              grid_rows: [FR(1), FR(1), FR(1)]
+              pad_all: 8
+              pad_row: 8
+              pad_column: 8
+            widgets:
+              # --- 1. SPIDER PLANT ---
+              - obj:
+                  grid_cell_column_pos: 0
+                  grid_cell_row_pos: 0
+                  width: 100%
+                  height: 100%
+                  radius: 12
+                  bg_color: 0x1F2937 # Gray 800
+                  clip_corner: true
+                  widgets:
+                    # Status Strip
+                    - obj:
+                        width: 100%
+                        height: 8
+                        y: 0
+                        bg_color: 0x10B981 # Default Green
+                      on_val:
+                        if:
+                          condition:
+                            text_sensor.state:
+                              id: spider_state
+                              state: "problem"
+                          then:
+                            - lvgl.obj.set_style_bg_color: 
+                                color: 0xEF4444 # Red
+                          else:
+                            - lvgl.obj.set_style_bg_color: 
+                                color: 0x10B981 # Green
+                    # Name
+                    - label:
+                        text: "Spider Plant"
+                        text_font: font_roboto_24
+                        text_color: 0xFFFFFF
+                        align: CENTER
+                        y: -10
+                    # Species
+                    - label:
+                        text: "Chlorophytum comosum"
+                        text_font: font_roboto_14
+                        text_color: 0x9CA3AF # Gray 400
+                        align: CENTER
+                        y: 15
+                    # Metrics Footer
+                    - label:
+                        text: "Checking..."
+                        text_font: font_roboto_14
+                        text_color: 0xD1D5DB
+                        align: BOTTOM_MID
+                        y: -10
+                      on_val:
+                         text: !lambda 'return "Moisture: " + id(spider_moist).state;'
+
+              # --- 2. POTHOS ---
+              - obj:
+                  grid_cell_column_pos: 1
+                  grid_cell_row_pos: 0
+                  width: 100%
+                  height: 100%
+                  radius: 12
+                  bg_color: 0x1F2937
+                  clip_corner: true
+                  widgets:
+                    - obj:
+                        width: 100%
+                        height: 8
+                        bg_color: 0x10B981
+                      on_val:
+                        if:
+                          condition:
+                            text_sensor.state:
+                              id: pothos_state
+                              state: "problem"
+                          then:
+                            - lvgl.obj.set_style_bg_color: 0xEF4444
+                          else:
+                            - lvgl.obj.set_style_bg_color: 0x10B981
+                    - label:
+                        text: "Pothos"
+                        text_font: font_roboto_24
+                        text_color: 0xFFFFFF
+                        align: CENTER
+                        y: -10
+                    - label:
+                        text: "Epipremnum aureum"
+                        text_font: font_roboto_14
+                        text_color: 0x9CA3AF
+                        align: CENTER
+                        y: 15
+                    - label:
+                        text: "Checking..."
+                        text_font: font_roboto_14
+                        text_color: 0xD1D5DB
+                        align: BOTTOM_MID
+                        y: -10
+                      on_val:
+                         text: !lambda 'return "Moisture: " + id(pothos_moist).state;'
+
+              # --- 3. JADE PLANT ---
+              - obj:
+                  grid_cell_column_pos: 2
+                  grid_cell_row_pos: 0
+                  width: 100%
+                  height: 100%
+                  radius: 12
+                  bg_color: 0x1F2937
+                  clip_corner: true
+                  widgets:
+                    - obj:
+                        width: 100%
+                        height: 8
+                        bg_color: 0x10B981
+                      on_val:
+                        if:
+                          condition:
+                            text_sensor.state:
+                              id: jade_state
+                              state: "problem"
+                          then:
+                            - lvgl.obj.set_style_bg_color: 0xEF4444
+                          else:
+                            - lvgl.obj.set_style_bg_color: 0x10B981
+                    - label:
+                        text: "Jade Plant"
+                        text_font: font_roboto_24
+                        text_color: 0xFFFFFF
+                        align: CENTER
+                        y: -10
+                    - label:
+                        text: "Crassula ovata"
+                        text_font: font_roboto_14
+                        text_color: 0x9CA3AF
+                        align: CENTER
+                        y: 15
+                    - label:
+                        text: "Checking..."
+                        text_font: font_roboto_14
+                        text_color: 0xD1D5DB
+                        align: BOTTOM_MID
+                        y: -10
+                      on_val:
+                         text: !lambda 'return "Moisture: " + id(jade_moist).state;'
+
+              # --- 4. NERVE PLANT ---
+              - obj:
+                  grid_cell_column_pos: 0
+                  grid_cell_row_pos: 1
+                  width: 100%
+                  height: 100%
+                  radius: 12
+                  bg_color: 0x1F2937
+                  clip_corner: true
+                  widgets:
+                    - obj:
+                        width: 100%
+                        height: 8
+                        bg_color: 0x10B981
+                      on_val:
+                        if:
+                          condition:
+                            text_sensor.state:
+                              id: nerve_state
+                              state: "problem"
+                          then:
+                            - lvgl.obj.set_style_bg_color: 0xEF4444
+                          else:
+                            - lvgl.obj.set_style_bg_color: 0x10B981
+                    - label:
+                        text: "Nerve Plant"
+                        text_font: font_roboto_24
+                        text_color: 0xFFFFFF
+                        align: CENTER
+                        y: -10
+                    - label:
+                        text: "Fittonia"
+                        text_font: font_roboto_14
+                        text_color: 0x9CA3AF
+                        align: CENTER
+                        y: 15
+                    - label:
+                        text: "Checking..."
+                        text_font: font_roboto_14
+                        text_color: 0xD1D5DB
+                        align: BOTTOM_MID
+                        y: -10
+                      on_val:
+                         text: !lambda 'return "Moisture: " + id(nerve_moist).state;'
+
+              # --- 5. BEGONIA ---
+              - obj:
+                  grid_cell_column_pos: 1
+                  grid_cell_row_pos: 1
+                  width: 100%
+                  height: 100%
+                  radius: 12
+                  bg_color: 0x1F2937
+                  clip_corner: true
+                  widgets:
+                    - obj:
+                        width: 100%
+                        height: 8
+                        bg_color: 0x10B981
+                      on_val:
+                        if:
+                          condition:
+                            text_sensor.state:
+                              id: begonia_state
+                              state: "problem"
+                          then:
+                            - lvgl.obj.set_style_bg_color: 0xEF4444
+                          else:
+                            - lvgl.obj.set_style_bg_color: 0x10B981
+                    - label:
+                        text: "Begonia"
+                        text_font: font_roboto_24
+                        text_color: 0xFFFFFF
+                        align: CENTER
+                        y: -10
+                    - label:
+                        text: "Begonia rex"
+                        text_font: font_roboto_14
+                        text_color: 0x9CA3AF
+                        align: CENTER
+                        y: 15
+                    - label:
+                        text: "Checking..."
+                        text_font: font_roboto_14
+                        text_color: 0xD1D5DB
+                        align: BOTTOM_MID
+                        y: -10
+                      on_val:
+                         text: !lambda 'return "Moisture: " + id(begonia_moist).state;'
+
+              # --- 6. MONSTERA ---
+              - obj:
+                  grid_cell_column_pos: 2
+                  grid_cell_row_pos: 1
+                  width: 100%
+                  height: 100%
+                  radius: 12
+                  bg_color: 0x1F2937
+                  clip_corner: true
+                  widgets:
+                    - obj:
+                        width: 100%
+                        height: 8
+                        bg_color: 0x10B981
+                      on_val:
+                        if:
+                          condition:
+                            text_sensor.state:
+                              id: monstera_state
+                              state: "problem"
+                          then:
+                            - lvgl.obj.set_style_bg_color: 0xEF4444
+                          else:
+                            - lvgl.obj.set_style_bg_color: 0x10B981
+                    - label:
+                        text: "Monstera"
+                        text_font: font_roboto_24
+                        text_color: 0xFFFFFF
+                        align: CENTER
+                        y: -10
+                    - label:
+                        text: "Monstera deliciosa"
+                        text_font: font_roboto_14
+                        text_color: 0x9CA3AF
+                        align: CENTER
+                        y: 15
+                    - label:
+                        text: "Checking..."
+                        text_font: font_roboto_14
+                        text_color: 0xD1D5DB
+                        align: BOTTOM_MID
+                        y: -10
+                      on_val:
+                         text: !lambda 'return "Moisture: " + id(monstera_moist).state;'
+
+              # --- 7. ELEPHANT EARS ---
+              - obj:
+                  grid_cell_column_pos: 0
+                  grid_cell_row_pos: 2
+                  width: 100%
+                  height: 100%
+                  radius: 12
+                  bg_color: 0x1F2937
+                  clip_corner: true
+                  widgets:
+                    - obj:
+                        width: 100%
+                        height: 8
+                        bg_color: 0x10B981
+                      on_val:
+                        if:
+                          condition:
+                            text_sensor.state:
+                              id: elephant_state
+                              state: "problem"
+                          then:
+                            - lvgl.obj.set_style_bg_color: 0xEF4444
+                          else:
+                            - lvgl.obj.set_style_bg_color: 0x10B981
+                    - label:
+                        text: "Elephant Ears"
+                        text_font: font_roboto_24
+                        text_color: 0xFFFFFF
+                        align: CENTER
+                        y: -10
+                    - label:
+                        text: "Alocasia cucullata"
+                        text_font: font_roboto_14
+                        text_color: 0x9CA3AF
+                        align: CENTER
+                        y: 15
+                    - label:
+                        text: "Checking..."
+                        text_font: font_roboto_14
+                        text_color: 0xD1D5DB
+                        align: BOTTOM_MID
+                        y: -10
+                      on_val:
+                         text: !lambda 'return "Moisture: " + id(elephant_moist).state;'
+
+              # --- 8. CROTON ---
+              - obj:
+                  grid_cell_column_pos: 1
+                  grid_cell_row_pos: 2
+                  width: 100%
+                  height: 100%
+                  radius: 12
+                  bg_color: 0x1F2937
+                  clip_corner: true
+                  widgets:
+                    - obj:
+                        width: 100%
+                        height: 8
+                        bg_color: 0x10B981
+                      on_val:
+                        if:
+                          condition:
+                            text_sensor.state:
+                              id: croton_state
+                              state: "problem"
+                          then:
+                            - lvgl.obj.set_style_bg_color: 0xEF4444
+                          else:
+                            - lvgl.obj.set_style_bg_color: 0x10B981
+                    - label:
+                        text: "Croton"
+                        text_font: font_roboto_24
+                        text_color: 0xFFFFFF
+                        align: CENTER
+                        y: -10
+                    - label:
+                        text: "Codiaeum variegatum"
+                        text_font: font_roboto_14
+                        text_color: 0x9CA3AF
+                        align: CENTER
+                        y: 15
+                    - label:
+                        text: "Checking..."
+                        text_font: font_roboto_14
+                        text_color: 0xD1D5DB
+                        align: BOTTOM_MID
+                        y: -10
+                      on_val:
+                         text: !lambda 'return "Moisture: " + id(croton_moist).state;'
+
+              # --- 9. AGLAONEMA ---
+              - obj:
+                  grid_cell_column_pos: 2
+                  grid_cell_row_pos: 2
+                  width: 100%
+                  height: 100%
+                  radius: 12
+                  bg_color: 0x1F2937
+                  clip_corner: true
+                  widgets:
+                    - obj:
+                        width: 100%
+                        height: 8
+                        bg_color: 0x10B981
+                      on_val:
+                        if:
+                          condition:
+                            text_sensor.state:
+                              id: aglaonema_state
+                              state: "problem"
+                          then:
+                            - lvgl.obj.set_style_bg_color: 0xEF4444
+                          else:
+                            - lvgl.obj.set_style_bg_color: 0x10B981
+                    - label:
+                        text: "Aglaonema"
+                        text_font: font_roboto_24
+                        text_color: 0xFFFFFF
+                        align: CENTER
+                        y: -10
+                    - label:
+                        text: "Aglaonema sp"
+                        text_font: font_roboto_14
+                        text_color: 0x9CA3AF
+                        align: CENTER
+                        y: 15
+                    - label:
+                        text: "Checking..."
+                        text_font: font_roboto_14
+                        text_color: 0xD1D5DB
+                        align: BOTTOM_MID
+                        y: -10
+                      on_val:
+                         text: !lambda 'return "Moisture: " + id(aglaonema_moist).state;'
+
+# Define fonts if not already in your base config
+font:
+  - file: "fonts/Roboto-Regular.ttf"
+    id: font_roboto_24
+    size: 24
+  - file: "fonts/Roboto-Regular.ttf"
+    id: font_roboto_14
+    size: 14

@@ -13,3 +13,4 @@ packages:
   sensors: !include common/sensors_ha.yaml
   controls: !include common/controls.yaml
   ui: !include common/display_lvgl.yaml
+  plants: !include common/sensors_plants.yaml

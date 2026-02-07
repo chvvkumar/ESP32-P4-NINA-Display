@@ -1,0 +1,163 @@
+# Complete configuration for importing all 9 plants' data from Home Assistant
+text_sensor:
+  # --- Plant 1: Spider Plant ---
+  - platform: homeassistant
+    id: spider_state
+    entity_id: plant.spider_plant
+    attribute: state
+  - platform: homeassistant
+    id: spider_moist
+    entity_id: plant.spider_plant
+    attribute: moisture_status
+  - platform: homeassistant
+    id: spider_temp
+    entity_id: plant.spider_plant
+    attribute: temperature_status
+  - platform: homeassistant
+    id: spider_species
+    entity_id: plant.spider_plant
+    attribute: species
+
+  # --- Plant 2: Pothos ---
+  - platform: homeassistant
+    id: pothos_state
+    entity_id: plant.pothos
+    attribute: state
+  - platform: homeassistant
+    id: pothos_moist
+    entity_id: plant.pothos
+    attribute: moisture_status
+  - platform: homeassistant
+    id: pothos_temp
+    entity_id: plant.pothos
+    attribute: temperature_status
+  - platform: homeassistant
+    id: pothos_species
+    entity_id: plant.pothos
+    attribute: species
+
+  # --- Plant 3: Jade Plant ---
+  - platform: homeassistant
+    id: jade_state
+    entity_id: plant.jade_plant
+    attribute: state
+  - platform: homeassistant
+    id: jade_moist
+    entity_id: plant.jade_plant
+    attribute: moisture_status
+  - platform: homeassistant
+    id: jade_temp
+    entity_id: plant.jade_plant
+    attribute: temperature_status
+  - platform: homeassistant
+    id: jade_species
+    entity_id: plant.jade_plant
+    attribute: species
+
+  # --- Plant 4: Nerve Plant ---
+  - platform: homeassistant
+    id: nerve_state
+    entity_id: plant.nerve_plant
+    attribute: state
+  - platform: homeassistant
+    id: nerve_moist
+    entity_id: plant.nerve_plant
+    attribute: moisture_status
+  - platform: homeassistant
+    id: nerve_temp
+    entity_id: plant.nerve_plant
+    attribute: temperature_status
+  - platform: homeassistant
+    id: nerve_species
+    entity_id: plant.nerve_plant
+    attribute: species
+
+  # --- Plant 5: Begonia ---
+  - platform: homeassistant
+    id: begonia_state
+    entity_id: plant.begonia
+    attribute: state
+  - platform: homeassistant
+    id: begonia_moist
+    entity_id: plant.begonia
+    attribute: moisture_status
+  - platform: homeassistant
+    id: begonia_temp
+    entity_id: plant.begonia
+    attribute: temperature_status
+  - platform: homeassistant
+    id: begonia_species
+    entity_id: plant.begonia
+    attribute: species
+
+  # --- Plant 6: Monstera ---
+  - platform: homeassistant
+    id: monstera_state
+    entity_id: plant.monstera
+    attribute: state
+  - platform: homeassistant
+    id: monstera_moist
+    entity_id: plant.monstera
+    attribute: moisture_status
+  - platform: homeassistant
+    id: monstera_temp
+    entity_id: plant.monstera
+    attribute: temperature_status
+  - platform: homeassistant
+    id: monstera_species
+    entity_id: plant.monstera
+    attribute: species
+
+  # --- Plant 7: Elephant Ears ---
+  - platform: homeassistant
+    id: elephant_state
+    entity_id: plant.elephant_ears
+    attribute: state
+  - platform: homeassistant
+    id: elephant_moist
+    entity_id: plant.elephant_ears
+    attribute: moisture_status
+  - platform: homeassistant
+    id: elephant_temp
+    entity_id: plant.elephant_ears
+    attribute: temperature_status
+  - platform: homeassistant
+    id: elephant_species
+    entity_id: plant.elephant_ears
+    attribute: species
+
+  # --- Plant 8: Croton ---
+  - platform: homeassistant
+    id: croton_state
+    entity_id: plant.croton
+    attribute: state
+  - platform: homeassistant
+    id: croton_moist
+    entity_id: plant.croton
+    attribute: moisture_status
+  - platform: homeassistant
+    id: croton_temp
+    entity_id: plant.croton
+    attribute: temperature_status
+  - platform: homeassistant
+    id: croton_species
+    entity_id: plant.croton
+    attribute: species
+
+  # --- Plant 9: Aglaonema ---
+  - platform: homeassistant
+    id: aglaonema_state
+    entity_id: plant.aglaonema
+    attribute: state
+  - platform: homeassistant
+    id: aglaonema_moist
+    entity_id: plant.aglaonema
+    attribute: moisture_status
+  - platform: homeassistant
+    id: aglaonema_temp
+    entity_id: plant.aglaonema
+    attribute: temperature_status
+  - platform: homeassistant
+    id: aglaonema_species
+    entity_id: plant.aglaonema
+    attribute: species

@@ -710,6 +710,9 @@ select:
           if (id(nina3_container) != nullptr) {
               lv_obj_set_style_bg_color(id(nina3_container), bg_c, LV_PART_MAIN);
           }
+          if (id(plants_container) != nullptr) {
+              lv_obj_set_style_bg_color(id(plants_container), bg_c, LV_PART_MAIN);
+          }
 
           auto apply_theme = [](lv_obj_t *obj, lv_color_t bg, lv_color_t border) {
               if (obj != nullptr) {

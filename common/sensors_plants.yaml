@@ -1,0 +1,136 @@
+text_sensor:
+  # Spider Plant
+  - platform: homeassistant
+    id: plant_spider_plant_status
+    entity_id: plant.spider_plant
+    attribute: moisture_status
+    on_value:
+      - lambda: lv_label_set_text(id(lbl_plant_spider_plant_status), x.c_str());
+
+  # Jade Plant
+  - platform: homeassistant
+    id: plant_jade_plant_status
+    entity_id: plant.jade_plant
+    attribute: moisture_status
+    on_value:
+      - lambda: lv_label_set_text(id(lbl_plant_jade_plant_status), x.c_str());
+
+  # Pothos
+  - platform: homeassistant
+    id: plant_pothos_status
+    entity_id: plant.pothos
+    attribute: moisture_status
+    on_value:
+      - lambda: lv_label_set_text(id(lbl_plant_pothos_status), x.c_str());
+
+  # Begonia
+  - platform: homeassistant
+    id: plant_begonia_status
+    entity_id: plant.begonia
+    attribute: moisture_status
+    on_value:
+      - lambda: lv_label_set_text(id(lbl_plant_begonia_status), x.c_str());
+
+  # Monstera
+  - platform: homeassistant
+    id: plant_monstera_status
+    entity_id: plant.monstera
+    attribute: moisture_status
+    on_value:
+      - lambda: lv_label_set_text(id(lbl_plant_monstera_status), x.c_str());
+
+  # Nerve Plant
+  - platform: homeassistant
+    id: plant_nerve_plant_status
+    entity_id: plant.nerve_plant
+    attribute: moisture_status
+    on_value:
+      - lambda: lv_label_set_text(id(lbl_plant_nerve_plant_status), x.c_str());
+
+  # Aglaonema
+  - platform: homeassistant
+    id: plant_aglaonema_status
+    entity_id: plant.aglaonema
+    attribute: moisture_status
+    on_value:
+      - lambda: lv_label_set_text(id(lbl_plant_aglaonema_status), x.c_str());
+
+  # Croton
+  - platform: homeassistant
+    id: plant_croton_status
+    entity_id: plant.croton
+    attribute: moisture_status
+    on_value:
+      - lambda: lv_label_set_text(id(lbl_plant_croton_status), x.c_str());
+
+  # Elephant Ears
+  - platform: homeassistant
+    id: plant_elephant_ears_status
+    entity_id: plant.elephant_ears
+    attribute: moisture_status
+    on_value:
+      - lambda: lv_label_set_text(id(lbl_plant_elephant_ears_status), x.c_str());
+
+sensor:
+  # Spider Plant
+  - platform: homeassistant
+    id: plant_spider_plant_moisture
+    entity_id: sensor.spider_plant_soil_moisture
+    on_value:
+      - lambda: lv_label_set_text_fmt(id(lbl_plant_spider_plant_moisture), "%d%%", (int)x);
+
+  # Jade Plant
+  - platform: homeassistant
+    id: plant_jade_plant_moisture
+    entity_id: sensor.jade_plant_soil_moisture
+    on_value:
+      - lambda: lv_label_set_text_fmt(id(lbl_plant_jade_plant_moisture), "%d%%", (int)x);
+
+  # Pothos
+  - platform: homeassistant
+    id: plant_pothos_moisture
+    entity_id: sensor.pothos_soil_moisture
+    on_value:
+      - lambda: lv_label_set_text_fmt(id(lbl_plant_pothos_moisture), "%d%%", (int)x);
+
+  # Begonia
+  - platform: homeassistant
+    id: plant_begonia_moisture
+    entity_id: sensor.begonia_soil_moisture
+    on_value:
+      - lambda: lv_label_set_text_fmt(id(lbl_plant_begonia_moisture), "%d%%", (int)x);
+
+  # Monstera
+  - platform: homeassistant
+    id: plant_monstera_moisture
+    entity_id: sensor.monstera_soil_moisture
+    on_value:
+      - lambda: lv_label_set_text_fmt(id(lbl_plant_monstera_moisture), "%d%%", (int)x);
+
+  # Nerve Plant
+  - platform: homeassistant
+    id: plant_nerve_plant_moisture
+    entity_id: sensor.nerve_plant_soil_moisture
+    on_value:
+      - lambda: lv_label_set_text_fmt(id(lbl_plant_nerve_plant_moisture), "%d%%", (int)x);
+
+  # Aglaonema
+  - platform: homeassistant
+    id: plant_aglaonema_moisture
+    entity_id: sensor.aglaonema_soil_moisture
+    on_value:
+      - lambda: lv_label_set_text_fmt(id(lbl_plant_aglaonema_moisture), "%d%%", (int)x);
+
+  # Croton
+  - platform: homeassistant
+    id: plant_croton_moisture
+    entity_id: sensor.croton_soil_moisture
+    on_value:
+      - lambda: lv_label_set_text_fmt(id(lbl_plant_croton_moisture), "%d%%", (int)x);
+
+  # Elephant Ears
+  - platform: homeassistant
+    id: plant_elephant_ears_moisture
+    entity_id: sensor.elephant_ears_soil_moisture
+    on_value:
+      - lambda: lv_label_set_text_fmt(id(lbl_plant_elephant_ears_moisture), "%d%%", (int)x);
