@@ -57,7 +57,7 @@ api:
     # Restore backlight to normal after boot tasks complete
     - light.turn_on:
         id: backlight_light
-        brightness: 40%
+        brightness: 20%
     - script.execute: refresh_main_page
 
 ota:
