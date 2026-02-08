@@ -1,7 +1,7 @@
-external_components:
-  - source:
-      type: local
-      path: esp32_p4_wifi6_touch_lcd_4b
+# external_components:
+#   - source:
+#       type: local
+#       path: waveshare-example
 
 packages:
   ha_entities: !include ha_entity_config.yaml
