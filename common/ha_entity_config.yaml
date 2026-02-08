@@ -1,0 +1,138 @@
+substitutions:
+  # AllSky / Pi System Entities
+  # Expected Data: Number (Temperature in °C)
+  entity_cpu_temp: sensor.allskypi5_cpu_temp
+  # Expected Data: Number (Temperature in °C)
+  entity_ssd_temp: sensor.allskypi5_disk_ssd_temp
+  # Expected Data: Number (SQM in mag/arcsec²)
+  entity_sqm: sensor.sqm_reader_tsl2591_sqm
+  # Expected Data: Number (Count)
+  entity_starcount: sensor.allskypi5_as_starcount
+  # Expected Data: Number (Temperature in °C)
+  entity_ambient_temp: sensor.allskypi5_as_dewcontrolambient
+  # Expected Data: Number (Humidity in %)
+  entity_humidity: sensor.allskypi5_as_dewcontrolhumidity
+  # Expected Data: Number (Temperature in °C)
+  entity_dew_point: sensor.allskypi5_as_dewcontroldew
+  # Expected Data: Number (Power in Watts)
+  entity_power: sensor.sqm_reader_ina260_power
+  # Expected Data: Number (Voltage in Volts)
+  entity_voltage: sensor.sqm_reader_ina260_voltage
+  # Expected Data: Number (Current in Amps)
+  entity_current: sensor.sqm_reader_ina260_current
+  # Expected Data: Text (e.g. "Clear", "Cloudy")
+  entity_cloud_status: sensor.allskypi5_cloud_detector_status
+  # Expected Data: Number (Heater Duty Cycle/Amps)
+  entity_dew_heater: sensor.allskypi5_as_dewcontrolheater
+  # Expected Data: Number (Fan Speed/Status)
+  entity_fan: sensor.allsky_fan
+
+  # NINA Instance 2 Entities - Ground Station Provided
+  # Expected Data: Number (Temperature in °C)
+  entity_nina2_cam_temp: sensor.nina2_camera_temperature
+  # Expected Data: Number (Count)
+  entity_nina2_exp_num: sensor.nina2_exposure_number
+  # Expected Data: Number (Seconds)
+  entity_nina2_exp_time: sensor.nina2_exposure_time
+  # Expected Data: Number (Count)
+  entity_nina2_stars: sensor.nina2_star_detectedstars
+  # Expected Data: Number (Pixels)
+  entity_nina2_hfr: sensor.nina2_star_hfr
+  # Expected Data: Number (Count)
+  entity_nina2_sat_pixels: sensor.nina2_target_max_saturated_pixels
+  # Expected Data: Number (Arcseconds)
+  entity_nina2_rms: sensor.nina2_total_rms
+  # Expected Data: Number (Arcseconds)
+  entity_nina2_ra_rms: sensor.nina_instance_2_nina2_ra_rms
+  # Expected Data: Number (Arcseconds)
+  entity_nina2_dec_rms: sensor.nina_instance_2_nina2_dec_rms
+  # Expected Data: Text (Filter Name)
+  entity_nina2_filter: sensor.nina2_filter_wheel_filter
+  # Expected Data: Text (Target Name)
+  entity_nina2_target: sensor.nina2_target_name
+  # NINA 2 Power/Env - UPBA Provided
+  # Expected Data: Number (Amps)
+  entity_nina2_upba_current: sensor.upba_current
+  # Expected Data: Number (Amps)
+  entity_nina2_upba_heater: sensor.upba_primary_heater
+  # Expected Data: Number (Watts)
+  entity_nina2_upba_power: sensor.upba_power
+
+  # NINA Instance 3 Entities - Ground Station Provided
+  # Expected Data: Number (Temperature in °C)
+  entity_nina3_cam_temp: sensor.nina3_camera_temperature
+  # Expected Data: Number (Count)
+  entity_nina3_exp_num: sensor.nina3_exposure_number
+  # Expected Data: Number (Seconds)
+  entity_nina3_exp_time: sensor.nina3_exposure_time
+  # Expected Data: Number (Count)
+  entity_nina3_stars: sensor.nina3_star_detectedstars
+  # Expected Data: Number (Pixels)
+  entity_nina3_hfr: sensor.nina3_star_hfr
+  # Expected Data: Number (Count)
+  entity_nina3_sat_pixels: sensor.nina3_target_max_saturated_pixels
+  # Expected Data: Number (Arcseconds)
+  entity_nina3_rms: sensor.nina3_total_rms
+  # Expected Data: Number (Arcseconds)
+  entity_nina3_ra_rms: sensor.nina_instance_3_nina3_ra_rms
+  # Expected Data: Number (Arcseconds)
+  entity_nina3_dec_rms: sensor.nina_instance_3_nina3_dec_rms
+  # Expected Data: Text (Filter Name)
+  entity_nina3_filter: sensor.nina3_filter_wheel_filter
+  # Expected Data: Text (Target Name)
+  entity_nina3_target: sensor.nina3_target_name
+  # NINA 3 Power/Env - SVBony SV241-Pro with Unbound firmware provided
+  # Expected Data: Number (Duty Cycle %)
+  entity_nina3_heater_duty: sensor.astromele3_main_dew_heater_duty
+  # Expected Data: Number (Amps)
+  entity_nina3_current: sensor.astromele3_current_2
+  # Expected Data: Number (Watts)
+  entity_nina3_power: sensor.astromele3_power_2
+
+  # Plant Monitor Entities - Using the following addons:
+  #  https://github.com/Olen/homeassistant-plant/
+  # https://github.com/Olen/home-assistant-openplantbook/
+  # Expected Data: Text (Plant Entity - attribute: moisture_status)
+  entity_plant_spider: plant.spider_plant
+  # Expected Data: Number (Moisture %)
+  entity_moisture_spider: sensor.spider_plant_soil_moisture
+  
+  # Expected Data: Text (Plant Entity - attribute: moisture_status)
+  entity_plant_jade: plant.jade_plant
+  # Expected Data: Number (Moisture %)
+  entity_moisture_jade: sensor.jade_plant_soil_moisture
+  
+  # Expected Data: Text (Plant Entity - attribute: moisture_status)
+  entity_plant_pothos: plant.pothos
+  # Expected Data: Number (Moisture %)
+  entity_moisture_pothos: sensor.pothos_soil_moisture
+  
+  # Expected Data: Text (Plant Entity - attribute: moisture_status)
+  entity_plant_begonia: plant.begonia
+  # Expected Data: Number (Moisture %)
+  entity_moisture_begonia: sensor.begonia_soil_moisture
+  
+  # Expected Data: Text (Plant Entity - attribute: moisture_status)
+  entity_plant_monstera: plant.monstera
+  # Expected Data: Number (Moisture %)
+  entity_moisture_monstera: sensor.monstera_soil_moisture
+  
+  # Expected Data: Text (Plant Entity - attribute: moisture_status)
+  entity_plant_nerve: plant.nerve_plant
+  # Expected Data: Number (Moisture %)
+  entity_moisture_nerve: sensor.nerve_plant_soil_moisture
+  
+  # Expected Data: Text (Plant Entity - attribute: moisture_status)
+  entity_plant_aglaonema: plant.aglaonema
+  # Expected Data: Number (Moisture %)
+  entity_moisture_aglaonema: sensor.aglaonema_soil_moisture
+  
+  # Expected Data: Text (Plant Entity - attribute: moisture_status)
+  entity_plant_croton: plant.croton
+  # Expected Data: Number (Moisture %)
+  entity_moisture_croton: sensor.croton_soil_moisture
+  
+  # Expected Data: Text (Plant Entity - attribute: moisture_status)
+  entity_plant_elephant: plant.elephant_ears
+  # Expected Data: Number (Moisture %)
+  entity_moisture_elephant: sensor.elephant_ears_soil_moisture

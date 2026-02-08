@@ -3,6 +3,9 @@ external_components:
       type: local
       path: esp32_p4_wifi6_touch_lcd_4b
 
+packages:
+  ha_entities: !include ha_entity_config.yaml
+
 esphome:
   name_add_mac_suffix: false
   on_boot:
@@ -73,177 +76,177 @@ script:
     then:
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.allskypi5_cpu_temp }
+          data: { entity_id: "${entity_cpu_temp}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.allskypi5_disk_ssd_temp }
+          data: { entity_id: "${entity_ssd_temp}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.sqm_reader_tsl2591_sqm }
+          data: { entity_id: "${entity_sqm}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.allskypi5_as_starcount }
+          data: { entity_id: "${entity_starcount}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.allskypi5_as_dewcontrolambient }
+          data: { entity_id: "${entity_ambient_temp}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.allskypi5_as_dewcontrolhumidity }
+          data: { entity_id: "${entity_humidity}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.allskypi5_as_dewcontroldew }
+          data: { entity_id: "${entity_dew_point}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.sqm_reader_ina260_power }
+          data: { entity_id: "${entity_power}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.sqm_reader_ina260_voltage }
+          data: { entity_id: "${entity_voltage}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.sqm_reader_ina260_current }
+          data: { entity_id: "${entity_current}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.allskypi5_cloud_detector_status }
+          data: { entity_id: "${entity_cloud_status}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.allskypi5_as_dewcontrolheater }
+          data: { entity_id: "${entity_dew_heater}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.allsky_fan }
+          data: { entity_id: "${entity_fan}" }
 
   - id: refresh_nina2_page
     then:
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.nina2_camera_temperature }
+          data: { entity_id: "${entity_nina2_cam_temp}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.nina2_exposure_number }
+          data: { entity_id: "${entity_nina2_exp_num}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.nina2_exposure_time }
+          data: { entity_id: "${entity_nina2_exp_time}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.nina2_star_detectedstars }
+          data: { entity_id: "${entity_nina2_stars}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.nina2_star_hfr }
+          data: { entity_id: "${entity_nina2_hfr}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.nina2_target_max_saturated_pixels }
+          data: { entity_id: "${entity_nina2_sat_pixels}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.nina2_total_rms }
+          data: { entity_id: "${entity_nina2_rms}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.nina_instance_2_nina2_ra_rms }
+          data: { entity_id: "${entity_nina2_ra_rms}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.nina_instance_2_nina2_dec_rms }
+          data: { entity_id: "${entity_nina2_dec_rms}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.nina2_filter_wheel_filter }
+          data: { entity_id: "${entity_nina2_filter}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.nina2_target_name }
+          data: { entity_id: "${entity_nina2_target}" }
       # Shared sensors
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.allskypi5_cloud_detector_status }
+          data: { entity_id: "${entity_cloud_status}" }
 
   - id: refresh_nina3_page
     then:
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.nina3_camera_temperature }
+          data: { entity_id: "${entity_nina3_cam_temp}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.nina3_exposure_number }
+          data: { entity_id: "${entity_nina3_exp_num}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.nina3_exposure_time }
+          data: { entity_id: "${entity_nina3_exp_time}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.nina3_star_detectedstars }
+          data: { entity_id: "${entity_nina3_stars}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.nina3_star_hfr }
+          data: { entity_id: "${entity_nina3_hfr}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.nina3_target_max_saturated_pixels }
+          data: { entity_id: "${entity_nina3_sat_pixels}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.nina3_total_rms }
+          data: { entity_id: "${entity_nina3_rms}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.nina_instance_3_nina3_ra_rms }
+          data: { entity_id: "${entity_nina3_ra_rms}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.nina_instance_3_nina3_dec_rms }
+          data: { entity_id: "${entity_nina3_dec_rms}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.nina3_filter_wheel_filter }
+          data: { entity_id: "${entity_nina3_filter}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.nina3_target_name }
+          data: { entity_id: "${entity_nina3_target}" }
       # Shared sensors
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.allskypi5_cloud_detector_status }
+          data: { entity_id: "${entity_cloud_status}" }
 
   - id: refresh_plants_page
     then:
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: plant.spider_plant }
+          data: { entity_id: "${entity_plant_spider}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.spider_plant_soil_moisture }
+          data: { entity_id: "${entity_moisture_spider}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: plant.jade_plant }
+          data: { entity_id: "${entity_plant_jade}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.jade_plant_soil_moisture }
+          data: { entity_id: "${entity_moisture_jade}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: plant.pothos }
+          data: { entity_id: "${entity_plant_pothos}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.pothos_soil_moisture }
+          data: { entity_id: "${entity_moisture_pothos}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: plant.begonia }
+          data: { entity_id: "${entity_plant_begonia}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.begonia_soil_moisture }
+          data: { entity_id: "${entity_moisture_begonia}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: plant.monstera }
+          data: { entity_id: "${entity_plant_monstera}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.monstera_soil_moisture }
+          data: { entity_id: "${entity_moisture_monstera}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: plant.nerve_plant }
+          data: { entity_id: "${entity_plant_nerve}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.nerve_plant_soil_moisture }
+          data: { entity_id: "${entity_moisture_nerve}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: plant.aglaonema }
+          data: { entity_id: "${entity_plant_aglaonema}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.aglaonema_soil_moisture }
+          data: { entity_id: "${entity_moisture_aglaonema}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: plant.croton }
+          data: { entity_id: "${entity_plant_croton}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.croton_soil_moisture }
+          data: { entity_id: "${entity_moisture_croton}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: plant.elephant_ears }
+          data: { entity_id: "${entity_plant_elephant}" }
       - homeassistant.service:
           service: homeassistant.update_entity
-          data: { entity_id: sensor.elephant_ears_soil_moisture }
+          data: { entity_id: "${entity_moisture_elephant}" }

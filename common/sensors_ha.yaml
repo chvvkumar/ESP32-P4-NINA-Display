@@ -1,7 +1,7 @@
 sensor:
   - platform: homeassistant
     id: ha_cpu_temp
-    entity_id: sensor.allskypi5_cpu_temp
+    entity_id: ${entity_cpu_temp}
     filters:
       - throttle: 5s
     on_value:
@@ -27,7 +27,7 @@ sensor:
 
   - platform: homeassistant
     id: ha_ssd_temp
-    entity_id: sensor.allskypi5_disk_ssd_temp
+    entity_id: ${entity_ssd_temp}
     filters:
       - throttle: 10s
     on_value:
@@ -40,7 +40,7 @@ sensor:
 
   - platform: homeassistant
     id: ha_sqm
-    entity_id: sensor.sqm_reader_tsl2591_sqm
+    entity_id: ${entity_sqm}
     filters:
       - throttle: 5s
     on_value:
@@ -64,7 +64,7 @@ sensor:
 
   - platform: homeassistant
     id: ha_starcount
-    entity_id: sensor.allskypi5_as_starcount
+    entity_id: ${entity_starcount}
     filters:
       - throttle: 10s
     on_value:
@@ -73,7 +73,7 @@ sensor:
 
   - platform: homeassistant
     id: ha_enclosure_temp
-    entity_id: sensor.allskypi5_as_dewcontrolambient
+    entity_id: ${entity_ambient_temp}
     filters:
       - throttle: 5s
     on_value:
@@ -99,7 +99,7 @@ sensor:
 
   - platform: homeassistant
     id: ha_enclosure_humidity
-    entity_id: sensor.allskypi5_as_dewcontrolhumidity
+    entity_id: ${entity_humidity}
     filters:
       - throttle: 10s
     on_value:
@@ -112,7 +112,7 @@ sensor:
 
   - platform: homeassistant
     id: ha_dew_point
-    entity_id: sensor.allskypi5_as_dewcontroldew
+    entity_id: ${entity_dew_point}
     filters:
       - throttle: 10s
     on_value:
@@ -125,7 +125,7 @@ sensor:
 
   - platform: homeassistant
     id: ha_power
-    entity_id: sensor.sqm_reader_ina260_power
+    entity_id: ${entity_power}
     filters:
       - throttle: 3s
     on_value:
@@ -151,7 +151,7 @@ sensor:
 
   - platform: homeassistant
     id: ha_voltage
-    entity_id: sensor.sqm_reader_ina260_voltage
+    entity_id: ${entity_voltage}
     filters:
       - throttle: 3s
     on_value:
@@ -164,7 +164,7 @@ sensor:
 
   - platform: homeassistant
     id: ha_current
-    entity_id: sensor.sqm_reader_ina260_current
+    entity_id: ${entity_current}
     filters:
       - throttle: 3s
     on_value:
@@ -178,7 +178,7 @@ sensor:
   # --- NINA2/3 Sensors ---
   - platform: homeassistant
     id: nina2_camera_temp
-    entity_id: sensor.nina2_camera_temperature
+    entity_id: ${entity_nina2_cam_temp}
     filters:
       - throttle: 10s
     on_value:
@@ -205,7 +205,7 @@ sensor:
 
   - platform: homeassistant
     id: nina2_exposure_num
-    entity_id: sensor.nina2_exposure_number
+    entity_id: ${entity_nina2_exp_num}
     filters:
       - throttle: 5s
     on_value:
@@ -228,7 +228,7 @@ sensor:
 
   - platform: homeassistant
     id: nina2_exposure_time
-    entity_id: sensor.nina2_exposure_time
+    entity_id: ${entity_nina2_exp_time}
     filters:
       - throttle: 5s
     on_value:
@@ -255,7 +255,7 @@ sensor:
 
   - platform: homeassistant
     id: nina2_detected_stars
-    entity_id: sensor.nina2_star_detectedstars
+    entity_id: ${entity_nina2_stars}
     filters:
       - throttle: 5s
     on_value:
@@ -279,7 +279,7 @@ sensor:
   # --- UPBA Power Sensors for NINA2 ---
   - platform: homeassistant
     id: upba_current
-    entity_id: sensor.upba_current
+    entity_id: ${entity_nina2_upba_current}
     filters:
       - throttle: 5s
     on_value:
@@ -294,7 +294,7 @@ sensor:
 
   - platform: homeassistant
     id: upba_primary_heater
-    entity_id: sensor.upba_primary_heater
+    entity_id: ${entity_nina2_upba_heater}
     filters:
       - throttle: 5s
     on_value:
@@ -309,7 +309,7 @@ sensor:
 
   - platform: homeassistant
     id: upba_power
-    entity_id: sensor.upba_power
+    entity_id: ${entity_nina2_upba_power}
     filters:
       - throttle: 5s
     on_value:
@@ -320,7 +320,7 @@ sensor:
 
   - platform: homeassistant
     id: nina2_hfr
-    entity_id: sensor.nina2_star_hfr
+    entity_id: ${entity_nina2_hfr}
     filters:
       - throttle: 5s
     on_value:
@@ -347,7 +347,7 @@ sensor:
 
   - platform: homeassistant
     id: nina2_saturated_pixels
-    entity_id: sensor.nina2_target_max_saturated_pixels
+    entity_id: ${entity_nina2_sat_pixels}
     filters:
       - throttle: 5s
     on_value:
@@ -370,7 +370,7 @@ sensor:
 
   - platform: homeassistant
     id: nina2_total_rms
-    entity_id: sensor.nina2_total_rms
+    entity_id: ${entity_nina2_rms}
     filters:
       - throttle: 5s
     on_value:
@@ -397,7 +397,7 @@ sensor:
 
   - platform: homeassistant
     id: nina2_ra_rms
-    entity_id: sensor.nina_instance_2_nina2_ra_rms
+    entity_id: ${entity_nina2_ra_rms}
     filters:
       - throttle: 5s
     on_value:
@@ -412,7 +412,7 @@ sensor:
 
   - platform: homeassistant
     id: nina2_dec_rms
-    entity_id: sensor.nina_instance_2_nina2_dec_rms
+    entity_id: ${entity_nina2_dec_rms}
     filters:
       - throttle: 5s
     on_value:
@@ -427,7 +427,7 @@ sensor:
 
   - platform: homeassistant
     id: nina3_camera_temp
-    entity_id: sensor.nina3_camera_temperature
+    entity_id: ${entity_nina3_cam_temp}
     filters:
       - throttle: 10s
     on_value:
@@ -454,7 +454,7 @@ sensor:
 
   - platform: homeassistant
     id: nina3_exposure_num
-    entity_id: sensor.nina3_exposure_number
+    entity_id: ${entity_nina3_exp_num}
     filters:
       - throttle: 5s
     on_value:
@@ -477,7 +477,7 @@ sensor:
 
   - platform: homeassistant
     id: nina3_exposure_time
-    entity_id: sensor.nina3_exposure_time
+    entity_id: ${entity_nina3_exp_time}
     filters:
       - throttle: 5s
     on_value:
@@ -504,7 +504,7 @@ sensor:
 
   - platform: homeassistant
     id: nina3_detected_stars
-    entity_id: sensor.nina3_star_detectedstars
+    entity_id: ${entity_nina3_stars}
     filters:
       - throttle: 5s
     on_value:
@@ -527,7 +527,7 @@ sensor:
 
   - platform: homeassistant
     id: nina3_hfr
-    entity_id: sensor.nina3_star_hfr
+    entity_id: ${entity_nina3_hfr}
     filters:
       - throttle: 5s
     on_value:
@@ -554,7 +554,7 @@ sensor:
 
   - platform: homeassistant
     id: nina3_saturated_pixels
-    entity_id: sensor.nina3_target_max_saturated_pixels
+    entity_id: ${entity_nina3_sat_pixels}
     filters:
       - throttle: 5s
     on_value:
@@ -577,7 +577,7 @@ sensor:
 
   - platform: homeassistant
     id: nina3_total_rms
-    entity_id: sensor.nina3_total_rms
+    entity_id: ${entity_nina3_rms}
     filters:
       - throttle: 5s
     on_value:
@@ -604,7 +604,7 @@ sensor:
 
   - platform: homeassistant
     id: nina3_ra_rms
-    entity_id: sensor.nina_instance_3_nina3_ra_rms
+    entity_id: ${entity_nina3_ra_rms}
     filters:
       - throttle: 5s
     on_value:
@@ -619,7 +619,7 @@ sensor:
 
   - platform: homeassistant
     id: nina3_dec_rms
-    entity_id: sensor.nina_instance_3_nina3_dec_rms
+    entity_id: ${entity_nina3_dec_rms}
     filters:
       - throttle: 5s
     on_value:
@@ -634,7 +634,7 @@ sensor:
 
   - platform: homeassistant
     id: astromele3_main_dew_heater_duty
-    entity_id: sensor.astromele3_main_dew_heater_duty
+    entity_id: ${entity_nina3_heater_duty}
     filters:
       - throttle: 5s
     on_value:
@@ -649,7 +649,7 @@ sensor:
 
   - platform: homeassistant
     id: astromele3_current_2
-    entity_id: sensor.astromele3_current_2
+    entity_id: ${entity_nina3_current}
     filters:
       - throttle: 5s
     on_value:
@@ -664,7 +664,7 @@ sensor:
 
   - platform: homeassistant
     id: astromele3_power_2
-    entity_id: sensor.astromele3_power_2
+    entity_id: ${entity_nina3_power}
     filters:
       - throttle: 5s
     on_value:
@@ -676,7 +676,7 @@ sensor:
 text_sensor:
   - platform: homeassistant
     id: ha_cloud_status
-    entity_id: sensor.allskypi5_cloud_detector_status
+    entity_id: ${entity_cloud_status}
     filters:
       - lambda: |-
           static uint32_t last_update = 0;
@@ -691,7 +691,7 @@ text_sensor:
 
   - platform: homeassistant
     id: nina2_filter
-    entity_id: sensor.nina2_filter_wheel_filter
+    entity_id: ${entity_nina2_filter}
     filters:
       - lambda: |-
           static uint32_t last_update = 0;
@@ -762,7 +762,7 @@ text_sensor:
           }
   - platform: homeassistant
     id: nina2_target
-    entity_id: sensor.nina2_target_name
+    entity_id: ${entity_nina2_target}
     filters:
       - lambda: |-
           static uint32_t last_update = 0;
@@ -775,7 +775,7 @@ text_sensor:
 
   - platform: homeassistant
     id: nina3_filter
-    entity_id: sensor.nina3_filter_wheel_filter
+    entity_id: ${entity_nina3_filter}
     filters:
       - lambda: |-
           static uint32_t last_update = 0;
@@ -846,7 +846,7 @@ text_sensor:
           }
   - platform: homeassistant
     id: nina3_target
-    entity_id: sensor.nina3_target_name
+    entity_id: ${entity_nina3_target}
     on_value:
       - lambda: |- 
           lv_label_set_text(id(lbl_nina3_target), x.c_str());

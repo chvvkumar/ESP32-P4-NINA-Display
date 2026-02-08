@@ -2,7 +2,7 @@ text_sensor:
   # Spider Plant
   - platform: homeassistant
     id: plant_spider_plant_status
-    entity_id: plant.spider_plant
+    entity_id: ${entity_plant_spider}
     attribute: moisture_status
     on_value:
       - lambda: |-
@@ -22,7 +22,7 @@ text_sensor:
   # Jade Plant
   - platform: homeassistant
     id: plant_jade_plant_status
-    entity_id: plant.jade_plant
+    entity_id: ${entity_plant_jade}
     attribute: moisture_status
     on_value:
       - lambda: |-
@@ -42,7 +42,7 @@ text_sensor:
   # Pothos
   - platform: homeassistant
     id: plant_pothos_status
-    entity_id: plant.pothos
+    entity_id: ${entity_plant_pothos}
     attribute: moisture_status
     on_value:
       - lambda: |-
@@ -62,7 +62,7 @@ text_sensor:
   # Begonia
   - platform: homeassistant
     id: plant_begonia_status
-    entity_id: plant.begonia
+    entity_id: ${entity_plant_begonia}
     attribute: moisture_status
     on_value:
       - lambda: |-
@@ -82,7 +82,7 @@ text_sensor:
   # Monstera
   - platform: homeassistant
     id: plant_monstera_status
-    entity_id: plant.monstera
+    entity_id: ${entity_plant_monstera}
     attribute: moisture_status
     on_value:
       - lambda: |-
@@ -102,7 +102,7 @@ text_sensor:
   # Nerve Plant
   - platform: homeassistant
     id: plant_nerve_plant_status
-    entity_id: plant.nerve_plant
+    entity_id: ${entity_plant_nerve}
     attribute: moisture_status
     on_value:
       - lambda: |-
@@ -122,7 +122,7 @@ text_sensor:
   # Aglaonema
   - platform: homeassistant
     id: plant_aglaonema_status
-    entity_id: plant.aglaonema
+    entity_id: ${entity_plant_aglaonema}
     attribute: moisture_status
     on_value:
       - lambda: |-
@@ -142,7 +142,7 @@ text_sensor:
   # Croton
   - platform: homeassistant
     id: plant_croton_status
-    entity_id: plant.croton
+    entity_id: ${entity_plant_croton}
     attribute: moisture_status
     on_value:
       - lambda: |-
@@ -162,7 +162,7 @@ text_sensor:
   # Elephant Ears
   - platform: homeassistant
     id: plant_elephant_ears_status
-    entity_id: plant.elephant_ears
+    entity_id: ${entity_plant_elephant}
     attribute: moisture_status
     on_value:
       - lambda: |-
@@ -183,62 +183,62 @@ sensor:
   # Spider Plant
   - platform: homeassistant
     id: plant_spider_plant_moisture
-    entity_id: sensor.spider_plant_soil_moisture
+    entity_id: ${entity_moisture_spider}
     on_value:
       - lambda: lv_label_set_text_fmt(id(lbl_plant_spider_plant_moisture), "%d%%", (int)x);
 
   # Jade Plant
   - platform: homeassistant
     id: plant_jade_plant_moisture
-    entity_id: sensor.jade_plant_soil_moisture
+    entity_id: ${entity_moisture_jade}
     on_value:
       - lambda: lv_label_set_text_fmt(id(lbl_plant_jade_plant_moisture), "%d%%", (int)x);
 
   # Pothos
   - platform: homeassistant
     id: plant_pothos_moisture
-    entity_id: sensor.pothos_soil_moisture
+    entity_id: ${entity_moisture_pothos}
     on_value:
       - lambda: lv_label_set_text_fmt(id(lbl_plant_pothos_moisture), "%d%%", (int)x);
 
   # Begonia
   - platform: homeassistant
     id: plant_begonia_moisture
-    entity_id: sensor.begonia_soil_moisture
+    entity_id: ${entity_moisture_begonia}
     on_value:
       - lambda: lv_label_set_text_fmt(id(lbl_plant_begonia_moisture), "%d%%", (int)x);
 
   # Monstera
   - platform: homeassistant
     id: plant_monstera_moisture
-    entity_id: sensor.monstera_soil_moisture
+    entity_id: ${entity_moisture_monstera}
     on_value:
       - lambda: lv_label_set_text_fmt(id(lbl_plant_monstera_moisture), "%d%%", (int)x);
 
   # Nerve Plant
   - platform: homeassistant
     id: plant_nerve_plant_moisture
-    entity_id: sensor.nerve_plant_soil_moisture
+    entity_id: ${entity_moisture_nerve}
     on_value:
       - lambda: lv_label_set_text_fmt(id(lbl_plant_nerve_plant_moisture), "%d%%", (int)x);
 
   # Aglaonema
   - platform: homeassistant
     id: plant_aglaonema_moisture
-    entity_id: sensor.aglaonema_soil_moisture
+    entity_id: ${entity_moisture_aglaonema}
     on_value:
       - lambda: lv_label_set_text_fmt(id(lbl_plant_aglaonema_moisture), "%d%%", (int)x);
 
   # Croton
   - platform: homeassistant
     id: plant_croton_moisture
-    entity_id: sensor.croton_soil_moisture
+    entity_id: ${entity_moisture_croton}
     on_value:
       - lambda: lv_label_set_text_fmt(id(lbl_plant_croton_moisture), "%d%%", (int)x);
 
   # Elephant Ears
   - platform: homeassistant
     id: plant_elephant_ears_moisture
-    entity_id: sensor.elephant_ears_soil_moisture
+    entity_id: ${entity_moisture_elephant}
     on_value:
       - lambda: lv_label_set_text_fmt(id(lbl_plant_elephant_ears_moisture), "%d%%", (int)x);
