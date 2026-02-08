@@ -717,6 +717,7 @@ select:
           auto apply_theme = [](lv_obj_t *obj, lv_color_t bg, lv_color_t border) {
               if (obj != nullptr) {
                   lv_obj_set_style_bg_color(obj, bg, LV_PART_MAIN);
+                  lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
                   lv_obj_set_style_border_color(obj, border, LV_PART_MAIN);
               }
           };
@@ -727,11 +728,42 @@ select:
           apply_theme(id(card_ambient), card_c, border_c);
           apply_theme(id(card_power), card_c, border_c);
           
-          // NINA2 page cells (no cards in grid layout - cells are transparent)
-          // Grid layout doesn't use styled cards, just transparent containers
+          // NINA2 page cells
+          apply_theme(id(nina2_cell_target), card_c, border_c);
+          apply_theme(id(nina2_cell_rms), card_c, border_c);
+          apply_theme(id(nina2_cell_hfr), card_c, border_c);
+          apply_theme(id(nina2_cell_power), card_c, border_c);
+          apply_theme(id(nina2_cell_exp_num), card_c, border_c);
+          apply_theme(id(nina2_cell_exp_time), card_c, border_c);
+          apply_theme(id(nina2_cell_sat_px), card_c, border_c);
+          apply_theme(id(nina2_cell_filter), card_c, border_c);
+          apply_theme(id(nina2_cell_cam_temp), card_c, border_c);
+          apply_theme(id(nina2_cell_stars), card_c, border_c);
+          apply_theme(id(nina2_cell_cloud_detector), card_c, border_c);
           
-          // NINA3 page cells (no cards in grid layout - cells are transparent)
-          // Grid layout doesn't use styled cards, just transparent containers
+          // NINA3 page cells
+          apply_theme(id(nina3_cell_target), card_c, border_c);
+          apply_theme(id(nina3_cell_rms), card_c, border_c);
+          apply_theme(id(nina3_cell_hfr), card_c, border_c);
+          apply_theme(id(nina3_cell_power), card_c, border_c);
+          apply_theme(id(nina3_cell_exp_num), card_c, border_c);
+          apply_theme(id(nina3_cell_exp_time), card_c, border_c);
+          apply_theme(id(nina3_cell_sat_px), card_c, border_c);
+          apply_theme(id(nina3_cell_filter), card_c, border_c);
+          apply_theme(id(nina3_cell_cam_temp), card_c, border_c);
+          apply_theme(id(nina3_cell_stars), card_c, border_c);
+          apply_theme(id(nina3_cell_cloud_detector), card_c, border_c);
+
+          // Plants page cards
+          apply_theme(id(card_plant_aglaonema), card_c, border_c);
+          apply_theme(id(card_plant_begonia), card_c, border_c);
+          apply_theme(id(card_plant_croton), card_c, border_c);
+          apply_theme(id(card_plant_elephant_ears), card_c, border_c);
+          apply_theme(id(card_plant_jade_plant), card_c, border_c);
+          apply_theme(id(card_plant_monstera), card_c, border_c);
+          apply_theme(id(card_plant_nerve_plant), card_c, border_c);
+          apply_theme(id(card_plant_pothos), card_c, border_c);
+          apply_theme(id(card_plant_spider_plant), card_c, border_c);
 
   - platform: template
     name: "Page Selection"
@@ -749,15 +781,19 @@ select:
           if (x == "Main Dashboard") {
              id(g_current_page) = 0;
              lv_scr_load_anim(id(main_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+             id(refresh_main_page).execute();
           } else if (x == "NINA Instance 2") {
              id(g_current_page) = 1;
              lv_scr_load_anim(id(nina2_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+             id(refresh_nina2_page).execute();
           } else if (x == "NINA Instance 3") {
              id(g_current_page) = 2;
              lv_scr_load_anim(id(nina3_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+             id(refresh_nina3_page).execute();
           } else if (x == "Plant Monitor") {
              id(g_current_page) = 3;
              lv_scr_load_anim(id(plants_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+             id(refresh_plants_page).execute();
           }
 
 light:

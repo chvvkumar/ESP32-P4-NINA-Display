@@ -47,12 +47,16 @@ touchscreen:
 
                if (id(g_current_page) == 0) {
                   lv_scr_load_anim(id(main_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+                  id(refresh_main_page).execute();
                } else if (id(g_current_page) == 1) {
                   lv_scr_load_anim(id(nina2_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+                  id(refresh_nina2_page).execute();
                } else if (id(g_current_page) == 2) {
                   lv_scr_load_anim(id(nina3_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+                  id(refresh_nina3_page).execute();
                } else {
                   lv_scr_load_anim(id(plants_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+                  id(refresh_plants_page).execute();
                }
             }
             else if (delta > threshold) {
@@ -65,12 +69,16 @@ touchscreen:
 
                if (id(g_current_page) == 0) {
                   lv_scr_load_anim(id(main_page)->obj, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 300, 0, false);
+                  id(refresh_main_page).execute();
                } else if (id(g_current_page) == 1) {
                   lv_scr_load_anim(id(nina2_page)->obj, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 300, 0, false);
+                  id(refresh_nina2_page).execute();
                } else if (id(g_current_page) == 2) {
                   lv_scr_load_anim(id(nina3_page)->obj, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 300, 0, false);
+                  id(refresh_nina3_page).execute();
                } else {
                   lv_scr_load_anim(id(plants_page)->obj, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 300, 0, false);
+                  id(refresh_plants_page).execute();
                }
             }
           }
@@ -101,10 +109,14 @@ binary_sensor:
           
           if (id(g_current_page) == 0) {
             lv_scr_load_anim(id(main_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+            id(refresh_main_page).execute();
           } else if (id(g_current_page) == 1) {
             lv_scr_load_anim(id(nina2_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+            id(refresh_nina2_page).execute();
           } else if (id(g_current_page) == 2) {
             lv_scr_load_anim(id(nina3_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+            id(refresh_nina3_page).execute();
           } else {
             lv_scr_load_anim(id(plants_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+            id(refresh_plants_page).execute();
           }
