@@ -78,39 +78,51 @@ script:
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_cpu_temp}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_ssd_temp}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_sqm}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_starcount}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_ambient_temp}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_humidity}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_dew_point}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_power}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_voltage}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_current}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_cloud_status}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_dew_heater}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_fan}" }
@@ -120,36 +132,47 @@ script:
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_nina2_cam_temp}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_nina2_exp_num}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_nina2_exp_time}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_nina2_stars}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_nina2_hfr}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_nina2_sat_pixels}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_nina2_rms}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_nina2_ra_rms}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_nina2_dec_rms}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_nina2_filter}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_nina2_target}" }
+      - delay: 50ms
       # Shared sensors
       - homeassistant.service:
           service: homeassistant.update_entity
@@ -160,36 +183,47 @@ script:
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_nina3_cam_temp}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_nina3_exp_num}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_nina3_exp_time}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_nina3_stars}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_nina3_hfr}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_nina3_sat_pixels}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_nina3_rms}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_nina3_ra_rms}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_nina3_dec_rms}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_nina3_filter}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_nina3_target}" }
+      - delay: 50ms
       # Shared sensors
       - homeassistant.service:
           service: homeassistant.update_entity
@@ -200,54 +234,71 @@ script:
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_plant_spider}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_moisture_spider}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_plant_jade}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_moisture_jade}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_plant_pothos}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_moisture_pothos}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_plant_begonia}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_moisture_begonia}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_plant_monstera}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_moisture_monstera}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_plant_nerve}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_moisture_nerve}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_plant_aglaonema}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_moisture_aglaonema}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_plant_croton}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_moisture_croton}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_plant_elephant}" }
+      - delay: 50ms
       - homeassistant.service:
           service: homeassistant.update_entity
           data: { entity_id: "${entity_moisture_elephant}" }
