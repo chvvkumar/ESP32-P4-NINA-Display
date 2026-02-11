@@ -470,7 +470,6 @@ switch:
              int g = (int)(id(g_nina2_hfr_c1_g) + ratio * (id(g_nina2_hfr_c2_g) - id(g_nina2_hfr_c1_g)));
              int b = (int)(id(g_nina2_hfr_c1_b) + ratio * (id(g_nina2_hfr_c2_b) - id(g_nina2_hfr_c1_b)));
              lv_obj_set_style_text_color(id(lbl_nina2_hfr), lv_color_make(r, g, b), LV_PART_MAIN);
-             lv_obj_set_style_text_color(id(lbl_cmb_nina2_hfr), lv_color_make(r, g, b), LV_PART_MAIN);
           }
           if (!isnan(id(nina2_exposure_num).state)) {
              float x = id(nina2_exposure_num).state;
@@ -521,7 +520,6 @@ switch:
              int g = (int)(id(g_nina2_stars_c1_g) + ratio * (id(g_nina2_stars_c2_g) - id(g_nina2_stars_c1_g)));
              int b = (int)(id(g_nina2_stars_c1_b) + ratio * (id(g_nina2_stars_c2_b) - id(g_nina2_stars_c1_b)));
              lv_obj_set_style_text_color(id(lbl_nina2_stars), lv_color_make(r, g, b), LV_PART_MAIN);
-             lv_obj_set_style_text_color(id(lbl_cmb_nina2_stars), lv_color_make(r, g, b), LV_PART_MAIN);
           }
           if (!isnan(id(nina2_saturated_pixels).state)) {
              float x = id(nina2_saturated_pixels).state;
@@ -560,7 +558,6 @@ switch:
              int g = (int)(id(g_nina3_hfr_c1_g) + ratio * (id(g_nina3_hfr_c2_g) - id(g_nina3_hfr_c1_g)));
              int b = (int)(id(g_nina3_hfr_c1_b) + ratio * (id(g_nina3_hfr_c2_b) - id(g_nina3_hfr_c1_b)));
              lv_obj_set_style_text_color(id(lbl_nina3_hfr), lv_color_make(r, g, b), LV_PART_MAIN);
-             lv_obj_set_style_text_color(id(lbl_cmb_nina3_hfr), lv_color_make(r, g, b), LV_PART_MAIN);
           }
           if (!isnan(id(nina3_exposure_num).state)) {
              float x = id(nina3_exposure_num).state;
@@ -611,7 +608,6 @@ switch:
              int g = (int)(id(g_nina3_stars_c1_g) + ratio * (id(g_nina3_stars_c2_g) - id(g_nina3_stars_c1_g)));
              int b = (int)(id(g_nina3_stars_c1_b) + ratio * (id(g_nina3_stars_c2_b) - id(g_nina3_stars_c1_b)));
              lv_obj_set_style_text_color(id(lbl_nina3_stars), lv_color_make(r, g, b), LV_PART_MAIN);
-             lv_obj_set_style_text_color(id(lbl_cmb_nina3_stars), lv_color_make(r, g, b), LV_PART_MAIN);
           }
           if (!isnan(id(nina3_saturated_pixels).state)) {
              float x = id(nina3_saturated_pixels).state;
@@ -641,10 +637,8 @@ switch:
           lv_obj_set_style_text_color(id(lbl_nina2_stars), white, LV_PART_MAIN);
           lv_obj_set_style_text_color(id(lbl_nina2_sat_px), white, LV_PART_MAIN);
           lv_obj_set_style_text_color(id(lbl_cmb_nina2_rms), white, LV_PART_MAIN);
-          lv_obj_set_style_text_color(id(lbl_cmb_nina2_hfr), white, LV_PART_MAIN);
           lv_obj_set_style_text_color(id(lbl_cmb_nina2_exp_num), white, LV_PART_MAIN);
           lv_obj_set_style_text_color(id(lbl_cmb_nina2_exp_time), white, LV_PART_MAIN);
-          lv_obj_set_style_text_color(id(lbl_cmb_nina2_stars), white, LV_PART_MAIN);
           // NINA3 reset to white
           lv_obj_set_style_text_color(id(lbl_nina3_rms), white, LV_PART_MAIN);
           lv_obj_set_style_text_color(id(lbl_nina3_hfr), white, LV_PART_MAIN);
@@ -654,10 +648,8 @@ switch:
           lv_obj_set_style_text_color(id(lbl_nina3_stars), white, LV_PART_MAIN);
           lv_obj_set_style_text_color(id(lbl_nina3_sat_px), white, LV_PART_MAIN);
           lv_obj_set_style_text_color(id(lbl_cmb_nina3_rms), white, LV_PART_MAIN);
-          lv_obj_set_style_text_color(id(lbl_cmb_nina3_hfr), white, LV_PART_MAIN);
           lv_obj_set_style_text_color(id(lbl_cmb_nina3_exp_num), white, LV_PART_MAIN);
           lv_obj_set_style_text_color(id(lbl_cmb_nina3_exp_time), white, LV_PART_MAIN);
-          lv_obj_set_style_text_color(id(lbl_cmb_nina3_stars), white, LV_PART_MAIN);
 
 select:
   - platform: template

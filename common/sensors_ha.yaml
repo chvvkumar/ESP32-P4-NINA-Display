@@ -212,7 +212,7 @@ sensor:
       - lambda: |- 
           if (!isnan(x)) {
             lv_label_set_text_fmt(id(lbl_nina2_exp_num), "%d", (int)x);
-            lv_label_set_text_fmt(id(lbl_cmb_nina2_exp_num), "# %d", (int)x);
+            lv_label_set_text_fmt(id(lbl_cmb_nina2_exp_num), "%d", (int)x);
             // Update color if match_text_color is enabled
             if (id(match_text_color).state) {
               float min = id(set_nina2_exp_num_min).state;
@@ -228,7 +228,7 @@ sensor:
             }
           } else {
              lv_label_set_text(id(lbl_nina2_exp_num), "--");
-             lv_label_set_text(id(lbl_cmb_nina2_exp_num), "# --");
+             lv_label_set_text(id(lbl_cmb_nina2_exp_num), "--");
           }
 
   - platform: homeassistant
@@ -244,7 +244,7 @@ sensor:
             int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
             if (val_dec >= 10) { val_int++; val_dec = 0; }
             lv_label_set_text_fmt(id(lbl_nina2_exp_time), "%d.%dS", val_int, val_dec);
-            lv_label_set_text_fmt(id(lbl_cmb_nina2_exp_time), "%d.%ds", val_int, val_dec);
+            lv_label_set_text_fmt(id(lbl_cmb_nina2_exp_time), "%d.%dS", val_int, val_dec);
             // Update color if match_text_color is enabled
             if (id(match_text_color).state) {
               float min = id(set_nina2_exp_time_min).state;
@@ -260,7 +260,7 @@ sensor:
             }
           } else { 
             lv_label_set_text(id(lbl_nina2_exp_time), "--");
-            lv_label_set_text(id(lbl_cmb_nina2_exp_time), "-- s");
+            lv_label_set_text(id(lbl_cmb_nina2_exp_time), "--");
           }
 
   - platform: homeassistant
@@ -272,7 +272,6 @@ sensor:
       - lambda: |- 
           if (!isnan(x)) {
             lv_label_set_text_fmt(id(lbl_nina2_stars), "%d", (int)x);
-            lv_label_set_text_fmt(id(lbl_cmb_nina2_stars), "* %d", (int)x);
             // Update color if match_text_color is enabled
             if (id(match_text_color).state) {
               float min = id(set_nina2_stars_min).state;
@@ -284,11 +283,9 @@ sensor:
               int g = (int)(id(g_nina2_stars_c1_g) + ratio * (id(g_nina2_stars_c2_g) - id(g_nina2_stars_c1_g)));
               int b = (int)(id(g_nina2_stars_c1_b) + ratio * (id(g_nina2_stars_c2_b) - id(g_nina2_stars_c1_b)));
               lv_obj_set_style_text_color(id(lbl_nina2_stars), lv_color_make(r, g, b), LV_PART_MAIN);
-              lv_obj_set_style_text_color(id(lbl_cmb_nina2_stars), lv_color_make(r, g, b), LV_PART_MAIN);
             }
           } else {
              lv_label_set_text(id(lbl_nina2_stars), "--");
-             lv_label_set_text(id(lbl_cmb_nina2_stars), "* --");
           }
 
   # --- UPBA Power Sensors for NINA2 ---
@@ -346,7 +343,6 @@ sensor:
             int val_dec = (int)((abs_v - val_int) * 100.0 + 0.5);
             if (val_dec >= 100) { val_int++; val_dec = 0; }
             lv_label_set_text_fmt(id(lbl_nina2_hfr), "%d.%02d", val_int, val_dec);
-            lv_label_set_text_fmt(id(lbl_cmb_nina2_hfr), "%d.%02d", val_int, val_dec);
             // Update color if match_text_color is enabled
             if (id(match_text_color).state) {
               float min = id(set_nina2_hfr_min).state;
@@ -358,11 +354,9 @@ sensor:
               int g = (int)(id(g_nina2_hfr_c1_g) + ratio * (id(g_nina2_hfr_c2_g) - id(g_nina2_hfr_c1_g)));
               int b = (int)(id(g_nina2_hfr_c1_b) + ratio * (id(g_nina2_hfr_c2_b) - id(g_nina2_hfr_c1_b)));
               lv_obj_set_style_text_color(id(lbl_nina2_hfr), lv_color_make(r, g, b), LV_PART_MAIN);
-              lv_obj_set_style_text_color(id(lbl_cmb_nina2_hfr), lv_color_make(r, g, b), LV_PART_MAIN);
             }
           } else { 
             lv_label_set_text(id(lbl_nina2_hfr), "--");
-            lv_label_set_text(id(lbl_cmb_nina2_hfr), "--");
           }
 
   - platform: homeassistant
@@ -486,7 +480,7 @@ sensor:
       - lambda: |- 
           if (!isnan(x)) {
             lv_label_set_text_fmt(id(lbl_nina3_exp_num), "%d", (int)x);
-            lv_label_set_text_fmt(id(lbl_cmb_nina3_exp_num), "# %d", (int)x);
+            lv_label_set_text_fmt(id(lbl_cmb_nina3_exp_num), "%d", (int)x);
             // Update color if match_text_color is enabled
             if (id(match_text_color).state) {
               float min = id(set_nina3_exp_num_min).state;
@@ -502,7 +496,7 @@ sensor:
             }
           } else { 
              lv_label_set_text(id(lbl_nina3_exp_num), "--");
-             lv_label_set_text(id(lbl_cmb_nina3_exp_num), "# --");
+             lv_label_set_text(id(lbl_cmb_nina3_exp_num), "--");
           }
 
   - platform: homeassistant
@@ -518,7 +512,7 @@ sensor:
             int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
             if (val_dec >= 10) { val_int++; val_dec = 0; }
             lv_label_set_text_fmt(id(lbl_nina3_exp_time), "%d.%dS", val_int, val_dec);
-            lv_label_set_text_fmt(id(lbl_cmb_nina3_exp_time), "%d.%ds", val_int, val_dec);
+            lv_label_set_text_fmt(id(lbl_cmb_nina3_exp_time), "%d.%dS", val_int, val_dec);
             // Update color if match_text_color is enabled
             if (id(match_text_color).state) {
               float min = id(set_nina3_exp_time_min).state;
@@ -534,7 +528,7 @@ sensor:
             }
           } else { 
             lv_label_set_text(id(lbl_nina3_exp_time), "--");
-            lv_label_set_text(id(lbl_cmb_nina3_exp_time), "-- s");
+            lv_label_set_text(id(lbl_cmb_nina3_exp_time), "--");
           }
 
   - platform: homeassistant
@@ -546,7 +540,6 @@ sensor:
       - lambda: |- 
           if (!isnan(x)) {
             lv_label_set_text_fmt(id(lbl_nina3_stars), "%d", (int)x);
-            lv_label_set_text_fmt(id(lbl_cmb_nina3_stars), "* %d", (int)x);
             // Update color if match_text_color is enabled
             if (id(match_text_color).state) {
               float min = id(set_nina3_stars_min).state;
@@ -558,11 +551,9 @@ sensor:
               int g = (int)(id(g_nina3_stars_c1_g) + ratio * (id(g_nina3_stars_c2_g) - id(g_nina3_stars_c1_g)));
               int b = (int)(id(g_nina3_stars_c1_b) + ratio * (id(g_nina3_stars_c2_b) - id(g_nina3_stars_c1_b)));
               lv_obj_set_style_text_color(id(lbl_nina3_stars), lv_color_make(r, g, b), LV_PART_MAIN);
-              lv_obj_set_style_text_color(id(lbl_cmb_nina3_stars), lv_color_make(r, g, b), LV_PART_MAIN);
             }
           } else {
              lv_label_set_text(id(lbl_nina3_stars), "--");
-             lv_label_set_text(id(lbl_cmb_nina3_stars), "* --");
           }
 
   - platform: homeassistant
@@ -578,7 +569,6 @@ sensor:
             int val_dec = (int)((abs_v - val_int) * 100.0 + 0.5);
             if (val_dec >= 100) { val_int++; val_dec = 0; }
             lv_label_set_text_fmt(id(lbl_nina3_hfr), "%d.%02d", val_int, val_dec);
-            lv_label_set_text_fmt(id(lbl_cmb_nina3_hfr), "%d.%02d", val_int, val_dec);
             // Update color if match_text_color is enabled
             if (id(match_text_color).state) {
               float min = id(set_nina3_hfr_min).state;
@@ -590,11 +580,9 @@ sensor:
               int g = (int)(id(g_nina3_hfr_c1_g) + ratio * (id(g_nina3_hfr_c2_g) - id(g_nina3_hfr_c1_g)));
               int b = (int)(id(g_nina3_hfr_c1_b) + ratio * (id(g_nina3_hfr_c2_b) - id(g_nina3_hfr_c1_b)));
               lv_obj_set_style_text_color(id(lbl_nina3_hfr), lv_color_make(r, g, b), LV_PART_MAIN);
-              lv_obj_set_style_text_color(id(lbl_cmb_nina3_hfr), lv_color_make(r, g, b), LV_PART_MAIN);
             }
           } else { 
             lv_label_set_text(id(lbl_nina3_hfr), "--");
-            lv_label_set_text(id(lbl_cmb_nina3_hfr), "--");
           }
 
   - platform: homeassistant
@@ -812,6 +800,29 @@ text_sensor:
           lv_obj_remove_style(id(lbl_nina2_filter_oiii), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
           lv_obj_add_style(id(lbl_nina2_filter_oiii), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
           lv_obj_add_style(id(lbl_nina2_filter_oiii), (lv_style_t *)id(style_clr_oiii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+
+          // Reset combined filters
+          lv_obj_remove_style(id(lbl_cmb_nina2_filter_l), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina2_filter_l), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina2_filter_l), (lv_style_t *)id(style_clr_l), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_remove_style(id(lbl_cmb_nina2_filter_r), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina2_filter_r), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina2_filter_r), (lv_style_t *)id(style_clr_r), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_remove_style(id(lbl_cmb_nina2_filter_g), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina2_filter_g), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina2_filter_g), (lv_style_t *)id(style_clr_g), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_remove_style(id(lbl_cmb_nina2_filter_b), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina2_filter_b), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina2_filter_b), (lv_style_t *)id(style_clr_b), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_remove_style(id(lbl_cmb_nina2_filter_sii), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina2_filter_sii), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina2_filter_sii), (lv_style_t *)id(style_clr_sii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_remove_style(id(lbl_cmb_nina2_filter_ha), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina2_filter_ha), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina2_filter_ha), (lv_style_t *)id(style_clr_ha), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_remove_style(id(lbl_cmb_nina2_filter_oiii), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina2_filter_oiii), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina2_filter_oiii), (lv_style_t *)id(style_clr_oiii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
           
           // Activate the current filter
           std::string filter = x.c_str();
@@ -819,30 +830,51 @@ text_sensor:
             lv_obj_remove_style(id(lbl_nina2_filter_l), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina2_filter_l), (lv_style_t *)id(style_filter_active_l), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina2_filter_l), (lv_style_t *)id(style_clr_l), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_remove_style(id(lbl_cmb_nina2_filter_l), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina2_filter_l), (lv_style_t *)id(style_filter_active_l), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina2_filter_l), (lv_style_t *)id(style_clr_l), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
           } else if (filter == "R" || filter == "Red") {
             lv_obj_remove_style(id(lbl_nina2_filter_r), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina2_filter_r), (lv_style_t *)id(style_filter_active_r), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina2_filter_r), (lv_style_t *)id(style_clr_r), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_remove_style(id(lbl_cmb_nina2_filter_r), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina2_filter_r), (lv_style_t *)id(style_filter_active_r), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina2_filter_r), (lv_style_t *)id(style_clr_r), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
           } else if (filter == "G" || filter == "Green") {
             lv_obj_remove_style(id(lbl_nina2_filter_g), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina2_filter_g), (lv_style_t *)id(style_filter_active_g), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina2_filter_g), (lv_style_t *)id(style_clr_g), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_remove_style(id(lbl_cmb_nina2_filter_g), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina2_filter_g), (lv_style_t *)id(style_filter_active_g), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina2_filter_g), (lv_style_t *)id(style_clr_g), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
           } else if (filter == "B" || filter == "Blue") {
             lv_obj_remove_style(id(lbl_nina2_filter_b), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina2_filter_b), (lv_style_t *)id(style_filter_active_b), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina2_filter_b), (lv_style_t *)id(style_clr_b), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_remove_style(id(lbl_cmb_nina2_filter_b), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina2_filter_b), (lv_style_t *)id(style_filter_active_b), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina2_filter_b), (lv_style_t *)id(style_clr_b), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
           } else if (filter == "Ha" || filter == "H-Alpha" || filter == "Halpha") {
             lv_obj_remove_style(id(lbl_nina2_filter_ha), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina2_filter_ha), (lv_style_t *)id(style_filter_active_ha), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina2_filter_ha), (lv_style_t *)id(style_clr_ha), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_remove_style(id(lbl_cmb_nina2_filter_ha), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina2_filter_ha), (lv_style_t *)id(style_filter_active_ha), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina2_filter_ha), (lv_style_t *)id(style_clr_ha), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
           } else if (filter == "Oiii" || filter == "OIII" || filter == "O-III") {
             lv_obj_remove_style(id(lbl_nina2_filter_oiii), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina2_filter_oiii), (lv_style_t *)id(style_filter_active_oiii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina2_filter_oiii), (lv_style_t *)id(style_clr_oiii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_remove_style(id(lbl_cmb_nina2_filter_oiii), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina2_filter_oiii), (lv_style_t *)id(style_filter_active_oiii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina2_filter_oiii), (lv_style_t *)id(style_clr_oiii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
           } else if (filter == "Sii" || filter == "SII" || filter.find("ii") != std::string::npos) {
             lv_obj_remove_style(id(lbl_nina2_filter_sii), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina2_filter_sii), (lv_style_t *)id(style_filter_active_sii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina2_filter_sii), (lv_style_t *)id(style_clr_sii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_remove_style(id(lbl_cmb_nina2_filter_sii), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina2_filter_sii), (lv_style_t *)id(style_filter_active_sii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina2_filter_sii), (lv_style_t *)id(style_clr_sii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
           }
   - platform: homeassistant
     id: nina2_target
@@ -897,6 +929,29 @@ text_sensor:
           lv_obj_remove_style(id(lbl_nina3_filter_oiii), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
           lv_obj_add_style(id(lbl_nina3_filter_oiii), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
           lv_obj_add_style(id(lbl_nina3_filter_oiii), (lv_style_t *)id(style_clr_oiii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+
+          // Reset combined filters
+          lv_obj_remove_style(id(lbl_cmb_nina3_filter_l), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina3_filter_l), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina3_filter_l), (lv_style_t *)id(style_clr_l), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_remove_style(id(lbl_cmb_nina3_filter_r), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina3_filter_r), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina3_filter_r), (lv_style_t *)id(style_clr_r), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_remove_style(id(lbl_cmb_nina3_filter_g), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina3_filter_g), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina3_filter_g), (lv_style_t *)id(style_clr_g), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_remove_style(id(lbl_cmb_nina3_filter_b), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina3_filter_b), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina3_filter_b), (lv_style_t *)id(style_clr_b), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_remove_style(id(lbl_cmb_nina3_filter_sii), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina3_filter_sii), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina3_filter_sii), (lv_style_t *)id(style_clr_sii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_remove_style(id(lbl_cmb_nina3_filter_ha), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina3_filter_ha), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina3_filter_ha), (lv_style_t *)id(style_clr_ha), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_remove_style(id(lbl_cmb_nina3_filter_oiii), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina3_filter_oiii), (lv_style_t *)id(style_filter_muted), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+          lv_obj_add_style(id(lbl_cmb_nina3_filter_oiii), (lv_style_t *)id(style_clr_oiii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
           
           // Activate the current filter
           std::string filter = x.c_str();
@@ -904,30 +959,51 @@ text_sensor:
             lv_obj_remove_style(id(lbl_nina3_filter_l), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina3_filter_l), (lv_style_t *)id(style_filter_active_l), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina3_filter_l), (lv_style_t *)id(style_clr_l), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_remove_style(id(lbl_cmb_nina3_filter_l), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina3_filter_l), (lv_style_t *)id(style_filter_active_l), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina3_filter_l), (lv_style_t *)id(style_clr_l), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
           } else if (filter == "R" || filter == "Red") {
             lv_obj_remove_style(id(lbl_nina3_filter_r), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina3_filter_r), (lv_style_t *)id(style_filter_active_r), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina3_filter_r), (lv_style_t *)id(style_clr_r), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_remove_style(id(lbl_cmb_nina3_filter_r), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina3_filter_r), (lv_style_t *)id(style_filter_active_r), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina3_filter_r), (lv_style_t *)id(style_clr_r), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
           } else if (filter == "G" || filter == "Green") {
             lv_obj_remove_style(id(lbl_nina3_filter_g), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina3_filter_g), (lv_style_t *)id(style_filter_active_g), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina3_filter_g), (lv_style_t *)id(style_clr_g), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_remove_style(id(lbl_cmb_nina3_filter_g), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina3_filter_g), (lv_style_t *)id(style_filter_active_g), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina3_filter_g), (lv_style_t *)id(style_clr_g), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
           } else if (filter == "B" || filter == "Blue") {
             lv_obj_remove_style(id(lbl_nina3_filter_b), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina3_filter_b), (lv_style_t *)id(style_filter_active_b), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina3_filter_b), (lv_style_t *)id(style_clr_b), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_remove_style(id(lbl_cmb_nina3_filter_b), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina3_filter_b), (lv_style_t *)id(style_filter_active_b), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina3_filter_b), (lv_style_t *)id(style_clr_b), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
           } else if (filter == "Ha" || filter == "H-Alpha" || filter == "Halpha") {
             lv_obj_remove_style(id(lbl_nina3_filter_ha), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina3_filter_ha), (lv_style_t *)id(style_filter_active_ha), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina3_filter_ha), (lv_style_t *)id(style_clr_ha), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_remove_style(id(lbl_cmb_nina3_filter_ha), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina3_filter_ha), (lv_style_t *)id(style_filter_active_ha), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina3_filter_ha), (lv_style_t *)id(style_clr_ha), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
           } else if (filter == "Oiii" || filter == "OIII" || filter == "O-III") {
             lv_obj_remove_style(id(lbl_nina3_filter_oiii), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina3_filter_oiii), (lv_style_t *)id(style_filter_active_oiii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina3_filter_oiii), (lv_style_t *)id(style_clr_oiii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_remove_style(id(lbl_cmb_nina3_filter_oiii), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina3_filter_oiii), (lv_style_t *)id(style_filter_active_oiii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina3_filter_oiii), (lv_style_t *)id(style_clr_oiii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
           } else if (filter == "Sii" || filter == "SII" || filter.find("ii") != std::string::npos) {
             lv_obj_remove_style(id(lbl_nina3_filter_sii), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina3_filter_sii), (lv_style_t *)id(style_filter_active_sii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
             lv_obj_add_style(id(lbl_nina3_filter_sii), (lv_style_t *)id(style_clr_sii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_remove_style(id(lbl_cmb_nina3_filter_sii), NULL, (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina3_filter_sii), (lv_style_t *)id(style_filter_active_sii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
+            lv_obj_add_style(id(lbl_cmb_nina3_filter_sii), (lv_style_t *)id(style_clr_sii), (lv_part_t)(LV_PART_MAIN | LV_STATE_DEFAULT));
           }
   - platform: homeassistant
     id: nina3_target

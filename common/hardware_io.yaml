@@ -39,7 +39,7 @@ touchscreen:
 
             if (delta < -threshold) {
                // Swipe left - next page
-               if (id(g_current_page) < 3) {
+               if (id(g_current_page) < 4) {
                   id(g_current_page) += 1;
                } else {
                   id(g_current_page) = 0;
@@ -49,9 +49,13 @@ touchscreen:
                   lv_scr_load_anim(id(main_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
                   id(refresh_main_page).execute();
                } else if (id(g_current_page) == 1) {
+                  lv_scr_load_anim(id(combined_nina_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+                  id(refresh_nina2_page).execute();
+                  id(refresh_nina3_page).execute();
+               } else if (id(g_current_page) == 2) {
                   lv_scr_load_anim(id(nina2_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
                   id(refresh_nina2_page).execute();
-               } else if (id(g_current_page) == 2) {
+               } else if (id(g_current_page) == 3) {
                   lv_scr_load_anim(id(nina3_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
                   id(refresh_nina3_page).execute();
                } else {
@@ -64,16 +68,20 @@ touchscreen:
                if (id(g_current_page) > 0) {
                   id(g_current_page) -= 1;
                } else {
-                  id(g_current_page) = 3;
+                  id(g_current_page) = 4;
                }
 
                if (id(g_current_page) == 0) {
                   lv_scr_load_anim(id(main_page)->obj, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 300, 0, false);
                   id(refresh_main_page).execute();
                } else if (id(g_current_page) == 1) {
+                  lv_scr_load_anim(id(combined_nina_page)->obj, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 300, 0, false);
+                  id(refresh_nina2_page).execute();
+                  id(refresh_nina3_page).execute();
+               } else if (id(g_current_page) == 2) {
                   lv_scr_load_anim(id(nina2_page)->obj, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 300, 0, false);
                   id(refresh_nina2_page).execute();
-               } else if (id(g_current_page) == 2) {
+               } else if (id(g_current_page) == 3) {
                   lv_scr_load_anim(id(nina3_page)->obj, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 300, 0, false);
                   id(refresh_nina3_page).execute();
                } else {
@@ -114,16 +122,20 @@ binary_sensor:
               if (id(g_current_page) > 0) {
                  id(g_current_page) -= 1;
               } else {
-                 id(g_current_page) = 3;
+                 id(g_current_page) = 4;
               }
 
               if (id(g_current_page) == 0) {
                  lv_scr_load_anim(id(main_page)->obj, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 300, 0, false);
                  id(refresh_main_page).execute();
               } else if (id(g_current_page) == 1) {
+                 lv_scr_load_anim(id(combined_nina_page)->obj, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 300, 0, false);
+                 id(refresh_nina2_page).execute();
+                 id(refresh_nina3_page).execute();
+              } else if (id(g_current_page) == 2) {
                  lv_scr_load_anim(id(nina2_page)->obj, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 300, 0, false);
                  id(refresh_nina2_page).execute();
-              } else if (id(g_current_page) == 2) {
+              } else if (id(g_current_page) == 3) {
                  lv_scr_load_anim(id(nina3_page)->obj, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 300, 0, false);
                  id(refresh_nina3_page).execute();
               } else {
@@ -136,15 +148,19 @@ binary_sensor:
         then:
           - lambda: |-
               // Single Click: Next Page
-              id(g_current_page) = (id(g_current_page) + 1) % 4;
+              id(g_current_page) = (id(g_current_page) + 1) % 5;
               
               if (id(g_current_page) == 0) {
                 lv_scr_load_anim(id(main_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
                 id(refresh_main_page).execute();
               } else if (id(g_current_page) == 1) {
+                lv_scr_load_anim(id(combined_nina_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+                id(refresh_nina2_page).execute();
+                id(refresh_nina3_page).execute();
+              } else if (id(g_current_page) == 2) {
                 lv_scr_load_anim(id(nina2_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
                 id(refresh_nina2_page).execute();
-              } else if (id(g_current_page) == 2) {
+              } else if (id(g_current_page) == 3) {
                 lv_scr_load_anim(id(nina3_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
                 id(refresh_nina3_page).execute();
               } else {
