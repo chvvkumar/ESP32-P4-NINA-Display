@@ -4,6 +4,7 @@ sensor:
     entity_id: ${entity_cpu_temp}
     filters:
       - throttle: 5s
+      - delta: 0.5
     on_value:
       - lambda: |- 
           float min = id(set_cpu_min).state;
@@ -30,6 +31,7 @@ sensor:
     entity_id: ${entity_ssd_temp}
     filters:
       - throttle: 10s
+      - delta: 1.0
     on_value:
       - lambda: |- 
           float abs_v = fabsf(x);
@@ -42,7 +44,11 @@ sensor:
     id: ha_sqm
     entity_id: ${entity_sqm}
     filters:
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 1
       - throttle: 5s
+      - delta: 0.05
     on_value:
       - lambda: |- 
           float min = id(set_sqm_min).state;
@@ -67,6 +73,7 @@ sensor:
     entity_id: ${entity_starcount}
     filters:
       - throttle: 10s
+      - delta: 5.0
     on_value:
       - lambda: |- 
           lv_label_set_text_fmt(id(lbl_star_count), "Stars: %d", (int)x);
@@ -76,6 +83,7 @@ sensor:
     entity_id: ${entity_ambient_temp}
     filters:
       - throttle: 5s
+      - delta: 0.5
     on_value:
       - lambda: |- 
           float min = id(set_env_min).state;
@@ -102,6 +110,7 @@ sensor:
     entity_id: ${entity_humidity}
     filters:
       - throttle: 10s
+      - delta: 1.0
     on_value:
       - lambda: |- 
           float abs_v = fabsf(x);
@@ -115,6 +124,7 @@ sensor:
     entity_id: ${entity_dew_point}
     filters:
       - throttle: 10s
+      - delta: 0.5
     on_value:
       - lambda: |- 
           float abs_v = fabsf(x);
@@ -128,6 +138,7 @@ sensor:
     entity_id: ${entity_power}
     filters:
       - throttle: 3s
+      - delta: 0.5
     on_value:
       - lambda: |- 
           float min = id(set_pwr_min).state;
@@ -154,6 +165,7 @@ sensor:
     entity_id: ${entity_voltage}
     filters:
       - throttle: 3s
+      - delta: 0.05
     on_value:
       - lambda: |- 
           float abs_v = fabsf(x);
@@ -167,6 +179,7 @@ sensor:
     entity_id: ${entity_current}
     filters:
       - throttle: 3s
+      - delta: 0.01
     on_value:
       - lambda: |- 
           float abs_v = fabsf(x);
@@ -181,6 +194,7 @@ sensor:
     entity_id: ${entity_nina2_cam_temp}
     filters:
       - throttle: 10s
+      - delta: 0.5
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -208,6 +222,7 @@ sensor:
     entity_id: ${entity_nina2_exp_num}
     filters:
       - throttle: 5s
+      - delta: 1.0
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -236,6 +251,7 @@ sensor:
     entity_id: ${entity_nina2_exp_time}
     filters:
       - throttle: 5s
+      - delta: 1.0
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -244,7 +260,7 @@ sensor:
             int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
             if (val_dec >= 10) { val_int++; val_dec = 0; }
             lv_label_set_text_fmt(id(lbl_nina2_exp_time), "%d.%dS", val_int, val_dec);
-            lv_label_set_text_fmt(id(lbl_cmb_nina2_exp_time), "%d.%dS", val_int, val_dec);
+            lv_label_set_text_fmt(id(lbl_cmb_nina2_exp_time), "%d", val_int);
             // Update color if match_text_color is enabled
             if (id(match_text_color).state) {
               float min = id(set_nina2_exp_time_min).state;
@@ -268,6 +284,7 @@ sensor:
     entity_id: ${entity_nina2_stars}
     filters:
       - throttle: 5s
+      - delta: 5.0
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -294,6 +311,7 @@ sensor:
     entity_id: ${entity_nina2_upba_current}
     filters:
       - throttle: 5s
+      - delta: 0.01
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -309,6 +327,7 @@ sensor:
     entity_id: ${entity_nina2_upba_heater}
     filters:
       - throttle: 5s
+      - delta: 0.01
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -324,6 +343,7 @@ sensor:
     entity_id: ${entity_nina2_upba_power}
     filters:
       - throttle: 5s
+      - delta: 0.5
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -335,6 +355,7 @@ sensor:
     entity_id: ${entity_nina2_hfr}
     filters:
       - throttle: 5s
+      - delta: 0.05
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -364,6 +385,7 @@ sensor:
     entity_id: ${entity_nina2_sat_pixels}
     filters:
       - throttle: 5s
+      - delta: 10.0
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -387,6 +409,7 @@ sensor:
     entity_id: ${entity_nina2_rms}
     filters:
       - throttle: 5s
+      - delta: 0.05
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -419,6 +442,7 @@ sensor:
     entity_id: ${entity_nina2_ra_rms}
     filters:
       - throttle: 5s
+      - delta: 0.05
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -434,6 +458,7 @@ sensor:
     entity_id: ${entity_nina2_dec_rms}
     filters:
       - throttle: 5s
+      - delta: 0.05
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -449,6 +474,7 @@ sensor:
     entity_id: ${entity_nina3_cam_temp}
     filters:
       - throttle: 10s
+      - delta: 0.5
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -476,6 +502,7 @@ sensor:
     entity_id: ${entity_nina3_exp_num}
     filters:
       - throttle: 5s
+      - delta: 1.0
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -504,6 +531,7 @@ sensor:
     entity_id: ${entity_nina3_exp_time}
     filters:
       - throttle: 5s
+      - delta: 1.0
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -512,7 +540,7 @@ sensor:
             int val_dec = (int)((abs_v - val_int) * 10.0 + 0.5);
             if (val_dec >= 10) { val_int++; val_dec = 0; }
             lv_label_set_text_fmt(id(lbl_nina3_exp_time), "%d.%dS", val_int, val_dec);
-            lv_label_set_text_fmt(id(lbl_cmb_nina3_exp_time), "%d.%dS", val_int, val_dec);
+            lv_label_set_text_fmt(id(lbl_cmb_nina3_exp_time), "%d", val_int);
             // Update color if match_text_color is enabled
             if (id(match_text_color).state) {
               float min = id(set_nina3_exp_time_min).state;
@@ -536,6 +564,7 @@ sensor:
     entity_id: ${entity_nina3_stars}
     filters:
       - throttle: 5s
+      - delta: 5.0
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -561,6 +590,7 @@ sensor:
     entity_id: ${entity_nina3_hfr}
     filters:
       - throttle: 5s
+      - delta: 0.05
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -590,6 +620,7 @@ sensor:
     entity_id: ${entity_nina3_sat_pixels}
     filters:
       - throttle: 5s
+      - delta: 10.0
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -613,6 +644,7 @@ sensor:
     entity_id: ${entity_nina3_rms}
     filters:
       - throttle: 5s
+      - delta: 0.05
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -645,6 +677,7 @@ sensor:
     entity_id: ${entity_nina3_ra_rms}
     filters:
       - throttle: 5s
+      - delta: 0.05
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -660,6 +693,7 @@ sensor:
     entity_id: ${entity_nina3_dec_rms}
     filters:
       - throttle: 5s
+      - delta: 0.05
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -675,6 +709,7 @@ sensor:
     entity_id: ${entity_nina3_heater_duty}
     filters:
       - throttle: 5s
+      - delta: 1.0
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -690,6 +725,7 @@ sensor:
     entity_id: ${entity_nina3_current}
     filters:
       - throttle: 5s
+      - delta: 0.01
     on_value:
       - lambda: |- 
           if (!isnan(x)) {
@@ -705,6 +741,7 @@ sensor:
     entity_id: ${entity_nina3_power}
     filters:
       - throttle: 5s
+      - delta: 0.5
     on_value:
       - lambda: |- 
           if (!isnan(x)) {

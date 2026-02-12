@@ -43,7 +43,7 @@ lvgl:
   page_wrap: true
   
   # Optimize display updates
-  update_interval: 100ms
+  update_interval: 1s
   
   style_definitions:
     - id: style_page_bg
@@ -246,6 +246,13 @@ lvgl:
       text_color: filter_ha
     - id: style_clr_oiii
       text_color: filter_oiii
+
+    - id: style_value_large
+      text_font: font_target_large
+      text_color: 0xFFFFFF
+      text_align: CENTER
+      pad_top: -5
+      pad_bottom: -5
 
   pages:
     - id: main_page
@@ -541,8 +548,8 @@ lvgl:
                                scrollbar_mode: "OFF"
                                layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER }
                                widgets:
-                                 - label: { text: "RMS", styles: style_unit_small }
-                                 - label: { id: lbl_cmb_nina2_rms, text: "--", styles: style_value_hero }
+                                 - label: { text: "RMS", styles: style_unit_small, width: 100% }
+                                 - label: { id: lbl_cmb_nina2_rms, text: "--", styles: style_value_large, width: 100% }
                            # Exp Num
                            - obj:
                                height: 100%
@@ -552,8 +559,8 @@ lvgl:
                                scrollbar_mode: "OFF"
                                layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER }
                                widgets:
-                                 - label: { text: "EXP #", styles: style_unit_small }
-                                 - label: { id: lbl_cmb_nina2_exp_num, text: "--", text_font: font_header_40, text_color: 0x10B981 }
+                                 - label: { text: "EXP #", styles: style_unit_small, width: 100% }
+                                 - label: { id: lbl_cmb_nina2_exp_num, text: "--", styles: style_value_large, text_color: 0x10B981, width: 100% }
                            # Exp Time
                            - obj:
                                height: 100%
@@ -563,8 +570,8 @@ lvgl:
                                scrollbar_mode: "OFF"
                                layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER }
                                widgets:
-                                 - label: { text: "EXP (s)", styles: style_unit_small }
-                                 - label: { id: lbl_cmb_nina2_exp_time, text: "--", text_font: font_header_40, text_color: 0xF59E0B }
+                                 - label: { text: "EXP (s)", styles: style_unit_small, width: 100% }
+                                 - label: { id: lbl_cmb_nina2_exp_time, text: "--", styles: style_value_large, text_color: 0xF59E0B, width: 100% }
 
               # NINA 3 Card
               - obj:
@@ -622,8 +629,8 @@ lvgl:
                                scrollbar_mode: "OFF"
                                layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER }
                                widgets:
-                                 - label: { text: "RMS", styles: style_unit_small }
-                                 - label: { id: lbl_cmb_nina3_rms, text: "--", styles: style_value_hero }
+                                 - label: { text: "RMS", styles: style_unit_small, width: 100% }
+                                 - label: { id: lbl_cmb_nina3_rms, text: "--", styles: style_value_large, width: 100% }
                            # Exp Num
                            - obj:
                                height: 100%
@@ -633,8 +640,8 @@ lvgl:
                                scrollbar_mode: "OFF"
                                layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER }
                                widgets:
-                                 - label: { text: "EXP #", styles: style_unit_small }
-                                 - label: { id: lbl_cmb_nina3_exp_num, text: "--", text_font: font_header_40, text_color: 0x10B981 }
+                                 - label: { text: "EXP #", styles: style_unit_small, width: 100% }
+                                 - label: { id: lbl_cmb_nina3_exp_num, text: "--", styles: style_value_large, text_color: 0x10B981, width: 100% }
                            # Exp Time
                            - obj:
                                height: 100%
@@ -644,8 +651,8 @@ lvgl:
                                scrollbar_mode: "OFF"
                                layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER }
                                widgets:
-                                 - label: { text: "EXP (s)", styles: style_unit_small }
-                                 - label: { id: lbl_cmb_nina3_exp_time, text: "--", text_font: font_header_40, text_color: 0xF59E0B }
+                                 - label: { text: "EXP (s)", styles: style_unit_small, width: 100% }
+                                 - label: { id: lbl_cmb_nina3_exp_time, text: "--", styles: style_value_large, text_color: 0xF59E0B, width: 100% }
 
 
     - id: nina2_page

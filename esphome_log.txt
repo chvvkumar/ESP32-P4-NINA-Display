@@ -1,0 +1,821 @@
+INFO ESPHome 2026.1.1
+INFO Reading configuration waveshare-p4-panel.yaml...
+WARNING GPIO35 is a strapping PIN and should only be used for I/O with care.
+Attaching external pullup/down resistors to strapping pins can cause unexpected failures.
+See https://esphome.io/guides/faq/#why-am-i-getting-a-warning-about-strapping-pins
+INFO Starting log output from COM30 with baud rate 115200
+[22:15:26.009][C][wifi:475]: Starting
+[22:15:26.187][I][wifi:418]: Starting with explicit hidden network (highest priority)
+[22:15:26.194][I][wifi:899]: Connecting to 'IoT' (any) (priority 0, attempt 1/1 in phase EXPLICIT_HIDDEN)...
+[22:15:26.371][C][component:249]: Setup wifi took 2392ms
+[22:15:26.375][I][app:134]: setup() finished successfully!
+[22:15:26.385][W][component:395]: wifi set Warning flag: associating to network
+[22:15:26.479][W][component:543]: lvgl took a long time for an operation (90 ms)
+[22:15:26.485][W][component:546]: Components should block for at most 30 ms
+[22:15:26.490][I][app:206]: ESPHome version 2026.1.1 compiled on 2026-02-11 22:12:41 -0600
+[22:15:26.496][I][app:213]: ESP32 Chip: ESP32-P4 r1.0, 2 core(s)
+[22:15:26.501][C][logger:316]: Logger:
+[22:15:26.501][C][logger:316]:   Max Level: DEBUG
+[22:15:26.501][C][logger:316]:   Initial Level: DEBUG
+[22:15:26.507][C][logger:322]:   Log Baud Rate: 115200
+[22:15:26.513][C][logger:322]:   Hardware UART: UART0
+[22:15:26.518][C][logger:332]:   Task Log Buffer Size: 768 bytes
+[22:15:26.518][C][logger:339]:   Level for 'api': DEBUG
+[22:15:26.524][C][logger:339]:   Level for 'i2c': INFO
+[22:15:26.529][C][logger:339]:   Level for 'lvgl': INFO
+[22:15:26.535][C][logger:339]:   Level for 'wifi': DEBUG
+[22:15:26.535][C][i2c.idf:093]: I2C Bus:
+[22:15:26.540][C][i2c.idf:094]:   SDA Pin: GPIO7
+[22:15:26.540][C][i2c.idf:094]:   SCL Pin: GPIO8
+[22:15:26.546][C][i2c.idf:094]:   Frequency: 400000 Hz
+[22:15:26.551][C][i2c.idf:104]:   Recovery: bus successfully recovered
+[22:15:26.557][C][i2c.idf:114]: Results from bus scan:
+[22:15:26.563][C][i2c.idf:120]: Found device at address 0x18
+[22:15:26.563][C][i2c.idf:120]: Found device at address 0x40
+[22:15:26.568][C][i2c.idf:120]: Found device at address 0x5D
+[22:15:26.574][C][esp_ldo:024]: ESP LDO Channel 3:
+[22:15:26.574][C][esp_ldo:024]:   Voltage: 2.500000V
+[22:15:26.579][C][esp_ldo:024]:   Adjustable: NO
+[22:15:26.579][C][ledc.output:152]: Output:
+[22:15:26.585][C][ledc.output:152]:   Channel: 0
+[22:15:26.585][C][ledc.output:152]:   PWM Frequency: 100.0 Hz
+[22:15:26.585][C][ledc.output:152]:   Phase angle: 0.0░
+[22:15:26.590][C][ledc.output:152]:   Bit depth: 19
+[22:15:26.590][C][ledc.output:152]:   Pin GPIO26
+[22:15:26.596][C][template.number:016]: Template Number 'Set CPU Min Value'
+[22:15:26.601][C][template.number:049]:   Optimistic: YES
+[22:15:26.607][C][template.number:452]:   Update Interval: 60.0s
+[22:15:26.613][C][template.number:016]: Template Number 'Set CPU Max Value'
+[22:15:26.618][C][template.number:049]:   Optimistic: YES
+[22:15:26.624][C][template.number:452]:   Update Interval: 60.0s
+[22:15:26.629][C][template.number:016]: Template Number 'Set Fan Min Value'
+[22:15:26.635][C][template.number:049]:   Optimistic: YES
+[22:15:26.640][C][template.number:452]:   Update Interval: 60.0s
+[22:15:26.646][C][template.number:016]: Template Number 'Set Fan Max Value'
+[22:15:26.651][C][template.number:049]:   Optimistic: YES
+[22:15:26.657][C][template.number:452]:   Update Interval: 60.0s
+[22:15:26.662][C][template.number:016]: Template Number 'Set Env Min Value'
+[22:15:26.668][C][template.number:049]:   Optimistic: YES
+[22:15:26.674][C][template.number:452]:   Update Interval: 60.0s
+[22:15:26.679][C][template.number:016]: Template Number 'Set Env Max Value'
+[22:15:26.685][C][template.number:049]:   Optimistic: YES
+[22:15:26.690][C][template.number:452]:   Update Interval: 60.0s
+[22:15:26.696][C][template.number:016]: Template Number 'Set Power Min Value'
+[22:15:26.701][C][template.number:049]:   Optimistic: YES
+[22:15:26.707][C][template.number:452]:   Update Interval: 60.0s
+[22:15:26.713][C][template.number:016]: Template Number 'Set Power Max Value'
+[22:15:26.718][C][template.number:049]:   Optimistic: YES
+[22:15:26.724][C][template.number:452]:   Update Interval: 60.0s
+[22:15:26.729][C][template.number:016]: Template Number 'Set SQM Min Value'
+[22:15:26.735][C][template.number:049]:   Optimistic: YES
+[22:15:26.740][C][template.number:452]:   Update Interval: 60.0s
+[22:15:26.746][C][template.number:016]: Template Number 'Set SQM Max Value'
+[22:15:26.751][C][template.number:049]:   Optimistic: YES
+[22:15:26.757][C][template.number:452]:   Update Interval: 60.0s
+[22:15:26.763][C][template.number:016]: Template Number 'Set NINA2 RMS Min Value'
+[22:15:26.768][C][template.number:049]:   Optimistic: YES
+[22:15:26.774][C][template.number:452]:   Update Interval: 60.0s
+[22:15:26.779][C][template.number:016]: Template Number 'Set NINA2 RMS Max Value'
+[22:15:26.785][C][template.number:049]:   Optimistic: YES
+[22:15:26.790][C][template.number:452]:   Update Interval: 60.0s
+[22:15:26.796][C][template.number:016]: Template Number 'Set NINA2 HFR Min Value'
+[22:15:26.801][C][template.number:049]:   Optimistic: YES
+[22:15:26.807][C][template.number:452]:   Update Interval: 60.0s
+[22:15:26.813][C][template.number:016]: Template Number 'Set NINA2 HFR Max Value'
+[22:15:26.818][C][template.number:049]:   Optimistic: YES
+[22:15:26.824][C][template.number:452]:   Update Interval: 60.0s
+[22:15:26.835][D][esp32.preferences:155]: Writing 40 items: 40 cached, 0 written, 0 failed
+[22:15:26.840][C][template.number:016]: Template Number 'Set NINA2 EXP NUM Min Value'
+[22:15:26.846][C][template.number:049]:   Optimistic: YES
+[22:15:26.851][C][template.number:452]:   Update Interval: 60.0s
+[22:15:26.857][C][template.number:016]: Template Number 'Set NINA2 EXP NUM Max Value'
+[22:15:26.863][C][template.number:049]:   Optimistic: YES
+[22:15:26.868][C][template.number:452]:   Update Interval: 60.0s
+[22:15:26.874][C][template.number:016]: Template Number 'Set NINA2 EXP TIME Min Value'
+[22:15:26.879][C][template.number:049]:   Optimistic: YES
+[22:15:26.885][C][template.number:452]:   Update Interval: 60.0s
+[22:15:26.890][C][template.number:016]: Template Number 'Set NINA2 EXP TIME Max Value'
+[22:15:26.896][C][template.number:049]:   Optimistic: YES
+[22:15:26.901][C][template.number:452]:   Update Interval: 60.0s
+[22:15:26.912][C][template.number:016]: Template Number 'Set NINA2 CAM TEMP Min Value'
+[22:15:26.913][C][template.number:049]:   Optimistic: YES
+[22:15:26.918][C][template.number:452]:   Update Interval: 60.0s
+[22:15:26.929][C][template.number:016]: Template Number 'Set NINA2 CAM TEMP Max Value'
+[22:15:26.935][C][template.number:049]:   Optimistic: YES
+[22:15:26.935][C][template.number:452]:   Update Interval: 60.0s
+[22:15:26.946][C][template.number:016]: Template Number 'Set NINA2 STARS Min Value'
+[22:15:26.951][C][template.number:049]:   Optimistic: YES
+[22:15:26.957][C][template.number:452]:   Update Interval: 60.0s
+[22:15:26.962][C][template.number:016]: Template Number 'Set NINA2 STARS Max Value'
+[22:15:26.968][C][template.number:049]:   Optimistic: YES
+[22:15:26.974][C][template.number:452]:   Update Interval: 60.0s
+[22:15:26.979][C][template.number:016]: Template Number 'Set NINA2 SAT PX Min Value'
+[22:15:26.985][C][template.number:049]:   Optimistic: YES
+[22:15:26.990][C][template.number:452]:   Update Interval: 60.0s
+[22:15:26.996][C][template.number:016]: Template Number 'Set NINA2 SAT PX Max Value'
+[22:15:27.001][C][template.number:049]:   Optimistic: YES
+[22:15:27.007][C][template.number:452]:   Update Interval: 60.0s
+[22:15:27.013][C][template.number:016]: Template Number 'Set NINA3 RMS Min Value'
+[22:15:27.018][C][template.number:049]:   Optimistic: YES
+[22:15:27.024][C][template.number:452]:   Update Interval: 60.0s
+[22:15:27.029][C][template.number:016]: Template Number 'Set NINA3 RMS Max Value'
+[22:15:27.035][C][template.number:049]:   Optimistic: YES
+[22:15:27.040][C][template.number:452]:   Update Interval: 60.0s
+[22:15:27.046][C][template.number:016]: Template Number 'Set NINA3 HFR Min Value'
+[22:15:27.051][C][template.number:049]:   Optimistic: YES
+[22:15:27.057][C][template.number:452]:   Update Interval: 60.0s
+[22:15:27.063][C][template.number:016]: Template Number 'Set NINA3 HFR Max Value'
+[22:15:27.068][C][template.number:049]:   Optimistic: YES
+[22:15:27.074][C][template.number:452]:   Update Interval: 60.0s
+[22:15:27.079][C][template.number:016]: Template Number 'Set NINA3 EXP NUM Min Value'
+[22:15:27.085][C][template.number:049]:   Optimistic: YES
+[22:15:27.090][C][template.number:452]:   Update Interval: 60.0s
+[22:15:27.101][C][template.number:016]: Template Number 'Set NINA3 EXP NUM Max Value'
+[22:15:27.101][C][template.number:049]:   Optimistic: YES
+[22:15:27.107][C][template.number:452]:   Update Interval: 60.0s
+[22:15:27.118][C][template.number:016]: Template Number 'Set NINA3 EXP TIME Min Value'
+[22:15:27.124][C][template.number:049]:   Optimistic: YES
+[22:15:27.129][C][template.number:452]:   Update Interval: 60.0s
+[22:15:27.135][C][template.number:016]: Template Number 'Set NINA3 EXP TIME Max Value'
+[22:15:27.140][C][template.number:049]:   Optimistic: YES
+[22:15:27.146][C][template.number:452]:   Update Interval: 60.0s
+[22:15:27.151][C][template.number:016]: Template Number 'Set NINA3 CAM TEMP Min Value'
+[22:15:27.157][C][template.number:049]:   Optimistic: YES
+[22:15:27.163][C][template.number:452]:   Update Interval: 60.0s
+[22:15:27.168][C][template.number:016]: Template Number 'Set NINA3 CAM TEMP Max Value'
+[22:15:27.174][C][template.number:049]:   Optimistic: YES
+[22:15:27.179][C][template.number:452]:   Update Interval: 60.0s
+[22:15:27.185][C][template.number:016]: Template Number 'Set NINA3 STARS Min Value'
+[22:15:27.190][C][template.number:049]:   Optimistic: YES
+[22:15:27.196][C][template.number:452]:   Update Interval: 60.0s
+[22:15:27.201][C][template.number:016]: Template Number 'Set NINA3 STARS Max Value'
+[22:15:27.207][C][template.number:049]:   Optimistic: YES
+[22:15:27.212][C][template.number:452]:   Update Interval: 60.0s
+[22:15:27.218][C][template.number:016]: Template Number 'Set NINA3 SAT PX Min Value'
+[22:15:27.224][C][template.number:049]:   Optimistic: YES
+[22:15:27.229][C][template.number:452]:   Update Interval: 60.0s
+[22:15:27.240][C][template.number:016]: Template Number 'Set NINA3 SAT PX Max Value'
+[22:15:27.240][C][template.number:049]:   Optimistic: YES
+[22:15:27.246][C][template.number:452]:   Update Interval: 60.0s
+[22:15:27.251][C][template.select:054]: Template Select 'Theme Selection'
+[22:15:27.257][C][template.select:452]:   Update Interval: 60.0s
+[22:15:27.263][C][template.select:058]:   Optimistic: YES
+[22:15:27.268][C][template.select:058]:   Initial Option: Royal Purple
+[22:15:27.268][C][template.select:058]:   Restore Value: YES
+[22:15:27.274][C][template.select:054]: Template Select 'Page Selection'
+[22:15:27.279][C][template.select:054]:   Icon: 'mdi:layers-search'
+[22:15:27.285][C][template.select:452]:   Update Interval: 60.0s
+[22:15:27.290][C][template.select:058]:   Optimistic: YES
+[22:15:27.290][C][template.select:058]:   Initial Option: Main Dashboard
+[22:15:27.296][C][template.select:058]:   Restore Value: NO
+[22:15:27.301][C][gpio.binary_sensor:016]: GPIO Binary Sensor 'Boot Button'
+[22:15:27.307][C][gpio.binary_sensor:152]:   Pin: GPIO35
+[22:15:27.313][C][gpio.binary_sensor:073]:   Mode: interrupt
+[22:15:27.318][C][gpio.binary_sensor:075]:   Interrupt Type: ANY_EDGE
+[22:15:27.324][C][light:091]: Light 'backlight'
+[22:15:27.324][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.329][C][light:094]:   Gamma Correct: 1.00
+[22:15:27.335][C][light:091]: Light 'CPU Start Color'
+[22:15:27.335][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.340][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.346][C][light:091]: Light 'CPU End Color'
+[22:15:27.351][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.351][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.357][C][light:091]: Light 'Fan Start Color'
+[22:15:27.363][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.363][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.368][C][light:091]: Light 'Fan End Color'
+[22:15:27.374][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.374][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.379][C][light:091]: Light 'Env Start Color'
+[22:15:27.385][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.385][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.390][C][light:091]: Light 'Env End Color'
+[22:15:27.396][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.396][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.401][C][light:091]: Light 'Power Start Color'
+[22:15:27.407][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.407][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.413][C][light:091]: Light 'Power End Color'
+[22:15:27.418][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.418][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.424][C][light:091]: Light 'SQM Start Color'
+[22:15:27.429][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.435][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.435][C][light:091]: Light 'SQM End Color'
+[22:15:27.440][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.446][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.446][C][light:091]: Light 'Cloud Status Light'
+[22:15:27.451][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.457][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.463][C][light:091]: Light 'NINA2 RMS Start Color'
+[22:15:27.468][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.468][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.474][C][light:091]: Light 'NINA2 RMS End Color'
+[22:15:27.479][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.479][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.485][C][light:091]: Light 'NINA2 HFR Start Color'
+[22:15:27.490][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.490][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.496][C][light:091]: Light 'NINA2 HFR End Color'
+[22:15:27.501][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.501][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.507][C][light:091]: Light 'NINA2 EXP NUM Start Color'
+[22:15:27.513][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.518][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.524][C][light:091]: Light 'NINA2 EXP NUM End Color'
+[22:15:27.529][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.529][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.535][C][light:091]: Light 'NINA2 EXP TIME Start Color'
+[22:15:27.540][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.540][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.546][C][light:091]: Light 'NINA2 EXP TIME End Color'
+[22:15:27.551][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.551][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.557][C][light:091]: Light 'NINA2 CAM TEMP Start Color'
+[22:15:27.563][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.568][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.574][C][light:091]: Light 'NINA2 CAM TEMP End Color'
+[22:15:27.579][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.579][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.585][C][light:091]: Light 'NINA2 STARS Start Color'
+[22:15:27.590][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.590][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.596][C][light:091]: Light 'NINA2 STARS End Color'
+[22:15:27.601][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.601][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.607][C][light:091]: Light 'NINA2 SAT PX Start Color'
+[22:15:27.613][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.618][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.618][C][light:091]: Light 'NINA2 SAT PX End Color'
+[22:15:27.624][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.629][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.635][C][light:091]: Light 'NINA3 RMS Start Color'
+[22:15:27.640][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.640][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.646][C][light:091]: Light 'NINA3 RMS End Color'
+[22:15:27.651][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.651][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.657][C][light:091]: Light 'NINA3 HFR Start Color'
+[22:15:27.663][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.663][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.668][C][light:091]: Light 'NINA3 HFR End Color'
+[22:15:27.674][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.674][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.679][C][light:091]: Light 'NINA3 EXP NUM Start Color'
+[22:15:27.685][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.690][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.696][C][light:091]: Light 'NINA3 EXP NUM End Color'
+[22:15:27.701][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.701][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.707][C][light:091]: Light 'NINA3 EXP TIME Start Color'
+[22:15:27.712][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.712][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.718][C][light:091]: Light 'NINA3 EXP TIME End Color'
+[22:15:27.724][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.724][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.729][C][light:091]: Light 'NINA3 CAM TEMP Start Color'
+[22:15:27.735][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.740][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.746][C][light:091]: Light 'NINA3 CAM TEMP End Color'
+[22:15:27.751][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.751][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.757][C][light:091]: Light 'NINA3 STARS Start Color'
+[22:15:27.762][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.762][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.768][C][light:091]: Light 'NINA3 STARS End Color'
+[22:15:27.774][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.774][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.779][C][light:091]: Light 'NINA3 SAT PX Start Color'
+[22:15:27.785][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.790][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.790][C][light:091]: Light 'NINA3 SAT PX End Color'
+[22:15:27.796][C][light:094]:   Default Transition Length: 0.0s
+[22:15:27.801][C][light:094]:   Gamma Correct: 2.80
+[22:15:27.807][C][template.switch:092]: Template Switch 'Match Text Color'
+[22:15:27.813][C][template.switch:092]:   Restore Mode: restore defaults to ON
+[22:15:27.813][C][template.switch:055]:   Optimistic: YES
+[22:15:27.818][C][psram:016]: PSRAM:
+[22:15:27.824][C][psram:019]:   Available: YES
+[22:15:27.824][C][psram:021]:   Size: 32768 KB
+[22:15:27.829][C][display.mipi_dsi:367]: MIPI_DSI RGB LCD
+[22:15:27.835][C][display.mipi_dsi:367]:   Model: WAVESHARE-P4-86-PANEL
+[22:15:27.835][C][display.mipi_dsi:367]:   Width: 720
+[22:15:27.835][C][display.mipi_dsi:367]:   Height: 720
+[22:15:27.835][C][display.mipi_dsi:367]:   Mirror X: YES
+[22:15:27.835][C][display.mipi_dsi:367]:   Mirror Y: YES
+[22:15:27.840][C][display.mipi_dsi:367]:   Swap X/Y: NO
+[22:15:27.840][C][display.mipi_dsi:367]:   Rotation: 0 degrees
+[22:15:27.840][C][display.mipi_dsi:367]:   DSI Lanes: 2
+[22:15:27.846][C][display.mipi_dsi:367]:   Lane Bit Rate: 480Mbps
+[22:15:27.846][C][display.mipi_dsi:367]:   HSync Pulse Width: 20
+[22:15:27.846][C][display.mipi_dsi:367]:   HSync Back Porch: 50
+[22:15:27.851][C][display.mipi_dsi:367]:   HSync Front Porch: 50
+[22:15:27.851][C][display.mipi_dsi:367]:   VSync Pulse Width: 4
+[22:15:27.857][C][display.mipi_dsi:367]:   VSync Back Porch: 20
+[22:15:27.857][C][display.mipi_dsi:367]:   VSync Front Porch: 20
+[22:15:27.857][C][display.mipi_dsi:367]:   Buffer Color Depth: 16 bit
+[22:15:27.862][C][display.mipi_dsi:367]:   Display Pixel Mode: 16 bit
+[22:15:27.862][C][display.mipi_dsi:367]:   Color Order: RGB
+[22:15:27.862][C][display.mipi_dsi:367]:   Invert Colors: NO
+[22:15:27.868][C][display.mipi_dsi:367]:   Pixel Clock: 38MHz
+[22:15:27.874][C][display.mipi_dsi:152]:   Reset Pin GPIO27
+[22:15:27.879][C][gt911.touchscreen:139]: GT911 Touchscreen:
+[22:15:27.879][C][gt911.touchscreen:140]:   Address: 0x5D
+[22:15:27.890][C][restart.button:014]: Restart Button 'WaveShare P4 Box'
+[22:15:27.890][C][restart.button:017]:   Icon: 'mdi:restart'
+[22:15:28.905][C][wifi:1304]: WiFi:
+[22:15:28.905][C][wifi:1304]:   Local MAC: 30:ED:A0:E1:F3:35
+[22:15:28.907][C][wifi:1304]:   Connected: NO
+[22:15:28.921][C][web_server:416]: Web Server:
+[22:15:28.927][C][web_server:416]:   Address: waveshare-p4-box.local:80
+[22:15:28.932][C][esphome.ota:075]: Over-The-Air updates:
+[22:15:28.932][C][esphome.ota:075]:   Address: waveshare-p4-box.local:3232
+[22:15:28.932][C][esphome.ota:075]:   Version: 2
+[22:15:28.939][C][safe_mode:021]: Safe Mode:
+[22:15:28.939][C][safe_mode:021]:   Successful after: 60s
+[22:15:28.945][C][safe_mode:021]:   Invoke after: 10 attempts
+[22:15:28.945][C][safe_mode:021]:   Duration: 300s
+[22:15:28.950][C][safe_mode:038]:   Bootloader rollback: support unknown
+[22:15:28.956][C][api:221]: Server:
+[22:15:28.956][C][api:221]:   Address: waveshare-p4-box.local:6053
+[22:15:28.961][C][api:221]:   Listen backlog: 4
+[22:15:28.961][C][api:221]:   Max connections: 8
+[22:15:28.967][C][api:228]:   Noise encryption: YES
+[22:15:28.967][C][mdns:177]: mDNS:
+[22:15:28.972][C][mdns:177]:   Hostname: waveshare-p4-box
+[22:15:28.978][C][homeassistant.sensor:016]: Homeassistant Sensor 'ha_ssd_temp'
+[22:15:28.978][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:28.983][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:28.983][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:28.989][C][homeassistant.sensor:030]:   Entity ID: 'sensor.allskypi5_disk_ssd_temp'
+[22:15:29.000][C][homeassistant.sensor:016]: Homeassistant Sensor 'ha_starcount'
+[22:15:29.000][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.000][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.006][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.011][C][homeassistant.sensor:030]:   Entity ID: 'sensor.allskypi5_as_starcount'
+[22:15:29.017][C][homeassistant.sensor:016]: Homeassistant Sensor 'ha_enclosure_humidity'
+[22:15:29.022][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.022][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.022][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.033][C][homeassistant.sensor:030]:   Entity ID: 'sensor.allskypi5_as_dewcontrolhumidity'
+[22:15:29.039][C][homeassistant.sensor:016]: Homeassistant Sensor 'ha_dew_point'
+[22:15:29.039][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.045][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.045][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.056][C][homeassistant.sensor:030]:   Entity ID: 'sensor.allskypi5_as_dewcontroldew'
+[22:15:29.061][C][homeassistant.sensor:016]: Homeassistant Sensor 'ha_voltage'
+[22:15:29.061][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.061][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.067][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.072][C][homeassistant.sensor:030]:   Entity ID: 'sensor.sqm_reader_ina260_voltage'
+[22:15:29.078][C][homeassistant.sensor:016]: Homeassistant Sensor 'ha_current'
+[22:15:29.084][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.084][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.089][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.095][C][homeassistant.sensor:030]:   Entity ID: 'sensor.sqm_reader_ina260_current'
+[22:15:29.100][C][homeassistant.sensor:016]: Homeassistant Sensor 'upba_current'
+[22:15:29.100][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.106][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.106][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.111][C][homeassistant.sensor:030]:   Entity ID: 'sensor.upba_current'
+[22:15:29.122][C][homeassistant.sensor:016]: Homeassistant Sensor 'upba_primary_heater'
+[22:15:29.122][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.122][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.128][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.133][C][homeassistant.sensor:030]:   Entity ID: 'sensor.upba_primary_heater'
+[22:15:29.139][C][homeassistant.sensor:016]: Homeassistant Sensor 'upba_power'
+[22:15:29.139][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.145][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.145][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.150][C][homeassistant.sensor:030]:   Entity ID: 'sensor.upba_power'
+[22:15:29.161][C][homeassistant.sensor:016]: Homeassistant Sensor 'nina2_ra_rms'
+[22:15:29.161][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.161][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.167][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.172][C][homeassistant.sensor:030]:   Entity ID: 'sensor.nina_instance_2_nina2_ra_rms'
+[22:15:29.178][C][homeassistant.sensor:016]: Homeassistant Sensor 'nina2_dec_rms'
+[22:15:29.183][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.183][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.183][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.195][C][homeassistant.sensor:030]:   Entity ID: 'sensor.nina_instance_2_nina2_dec_rms'
+[22:15:29.200][C][homeassistant.sensor:016]: Homeassistant Sensor 'nina3_ra_rms'
+[22:15:29.200][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.206][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.206][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.217][C][homeassistant.sensor:030]:   Entity ID: 'sensor.nina_instance_3_nina3_ra_rms'
+[22:15:29.222][C][homeassistant.sensor:016]: Homeassistant Sensor 'nina3_dec_rms'
+[22:15:29.222][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.228][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.228][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.233][C][homeassistant.sensor:030]:   Entity ID: 'sensor.nina_instance_3_nina3_dec_rms'
+[22:15:29.245][C][homeassistant.sensor:016]: Homeassistant Sensor 'astromele3_main_dew_heater_duty'
+[22:15:29.245][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.250][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.250][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.256][C][homeassistant.sensor:030]:   Entity ID: 'sensor.astromele3_main_dew_heater_duty'
+[22:15:29.267][C][homeassistant.sensor:016]: Homeassistant Sensor 'astromele3_current_2'
+[22:15:29.267][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.267][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.272][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.278][C][homeassistant.sensor:030]:   Entity ID: 'sensor.astromele3_current_2'
+[22:15:29.283][C][homeassistant.sensor:016]: Homeassistant Sensor 'astromele3_power_2'
+[22:15:29.289][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.289][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.295][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.300][C][homeassistant.sensor:030]:   Entity ID: 'sensor.astromele3_power_2'
+[22:15:29.306][C][homeassistant.sensor:016]: Homeassistant Sensor 'plant_spider_plant_moisture'
+[22:15:29.311][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.311][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.311][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.322][C][homeassistant.sensor:030]:   Entity ID: 'sensor.spider_plant_soil_moisture'
+[22:15:29.328][C][homeassistant.sensor:016]: Homeassistant Sensor 'plant_jade_plant_moisture'
+[22:15:29.328][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.333][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.333][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.345][C][homeassistant.sensor:030]:   Entity ID: 'sensor.jade_plant_soil_moisture'
+[22:15:29.350][C][homeassistant.sensor:016]: Homeassistant Sensor 'plant_pothos_moisture'
+[22:15:29.350][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.356][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.356][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.361][C][homeassistant.sensor:030]:   Entity ID: 'sensor.pothos_soil_moisture'
+[22:15:29.372][C][homeassistant.sensor:016]: Homeassistant Sensor 'plant_begonia_moisture'
+[22:15:29.372][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.372][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.378][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.383][C][homeassistant.sensor:030]:   Entity ID: 'sensor.begonia_soil_moisture'
+[22:15:29.389][C][homeassistant.sensor:016]: Homeassistant Sensor 'plant_monstera_moisture'
+[22:15:29.395][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.395][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.400][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.406][C][homeassistant.sensor:030]:   Entity ID: 'sensor.monstera_soil_moisture'
+[22:15:29.411][C][homeassistant.sensor:016]: Homeassistant Sensor 'plant_nerve_plant_moisture'
+[22:15:29.417][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.417][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.417][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.428][C][homeassistant.sensor:030]:   Entity ID: 'sensor.nerve_plant_soil_moisture'
+[22:15:29.433][C][homeassistant.sensor:016]: Homeassistant Sensor 'plant_aglaonema_moisture'
+[22:15:29.433][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.439][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.439][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.450][C][homeassistant.sensor:030]:   Entity ID: 'sensor.aglaonema_soil_moisture'
+[22:15:29.456][C][homeassistant.sensor:016]: Homeassistant Sensor 'plant_croton_moisture'
+[22:15:29.456][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.461][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.461][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.467][C][homeassistant.sensor:030]:   Entity ID: 'sensor.croton_soil_moisture'
+[22:15:29.478][C][homeassistant.sensor:016]: Homeassistant Sensor 'plant_elephant_ears_moisture'
+[22:15:29.478][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.478][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.483][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.489][C][homeassistant.sensor:030]:   Entity ID: 'sensor.elephant_ears_soil_moisture'
+[22:15:29.500][C][homeassistant.text_sensor:017]: Homeassistant Text Sensor 'ha_dew_heater'
+[22:15:29.506][C][homeassistant.text_sensor:023]:   Entity ID: 'sensor.allskypi5_as_dewcontrolheater'
+[22:15:29.517][C][homeassistant.text_sensor:017]: Homeassistant Text Sensor 'ha_fan'
+[22:15:29.522][C][homeassistant.text_sensor:023]:   Entity ID: 'sensor.allsky_fan'
+[22:15:29.528][C][homeassistant.text_sensor:017]: Homeassistant Text Sensor 'ha_cloud_status'
+[22:15:29.539][C][homeassistant.text_sensor:023]:   Entity ID: 'sensor.allskypi5_cloud_detector_status'
+[22:15:29.545][C][homeassistant.text_sensor:017]: Homeassistant Text Sensor 'nina2_filter'
+[22:15:29.556][C][homeassistant.text_sensor:023]:   Entity ID: 'sensor.nina2_filter_wheel_filter'
+[22:15:29.561][C][homeassistant.text_sensor:017]: Homeassistant Text Sensor 'nina2_target'
+[22:15:29.567][C][homeassistant.text_sensor:023]:   Entity ID: 'sensor.nina2_target_name'
+[22:15:29.578][C][homeassistant.text_sensor:017]: Homeassistant Text Sensor 'nina3_filter'
+[22:15:29.583][C][homeassistant.text_sensor:023]:   Entity ID: 'sensor.nina3_filter_wheel_filter'
+[22:15:29.594][C][homeassistant.text_sensor:017]: Homeassistant Text Sensor 'nina3_target'
+[22:15:29.600][C][homeassistant.text_sensor:023]:   Entity ID: 'sensor.nina3_target_name'
+[22:15:29.611][C][homeassistant.text_sensor:017]: Homeassistant Text Sensor 'plant_spider_plant_status'
+[22:15:29.617][C][homeassistant.text_sensor:023]:   Entity ID: 'plant.spider_plant'
+[22:15:29.622][C][homeassistant.text_sensor:025]:   Attribute: 'moisture_status'
+[22:15:29.633][C][homeassistant.text_sensor:017]: Homeassistant Text Sensor 'plant_jade_plant_status'
+[22:15:29.639][C][homeassistant.text_sensor:023]:   Entity ID: 'plant.jade_plant'
+[22:15:29.645][C][homeassistant.text_sensor:025]:   Attribute: 'moisture_status'
+[22:15:29.656][C][homeassistant.text_sensor:017]: Homeassistant Text Sensor 'plant_pothos_status'
+[22:15:29.661][C][homeassistant.text_sensor:023]:   Entity ID: 'plant.pothos'
+[22:15:29.667][C][homeassistant.text_sensor:025]:   Attribute: 'moisture_status'
+[22:15:29.672][C][homeassistant.text_sensor:017]: Homeassistant Text Sensor 'plant_begonia_status'
+[22:15:29.683][C][homeassistant.text_sensor:023]:   Entity ID: 'plant.begonia'
+[22:15:29.689][C][homeassistant.text_sensor:025]:   Attribute: 'moisture_status'
+[22:15:29.695][C][homeassistant.text_sensor:017]: Homeassistant Text Sensor 'plant_monstera_status'
+[22:15:29.706][C][homeassistant.text_sensor:023]:   Entity ID: 'plant.monstera'
+[22:15:29.711][C][homeassistant.text_sensor:025]:   Attribute: 'moisture_status'
+[22:15:29.717][C][homeassistant.text_sensor:017]: Homeassistant Text Sensor 'plant_nerve_plant_status'
+[22:15:29.728][C][homeassistant.text_sensor:023]:   Entity ID: 'plant.nerve_plant'
+[22:15:29.733][C][homeassistant.text_sensor:025]:   Attribute: 'moisture_status'
+[22:15:29.739][C][homeassistant.text_sensor:017]: Homeassistant Text Sensor 'plant_aglaonema_status'
+[22:15:29.750][C][homeassistant.text_sensor:023]:   Entity ID: 'plant.aglaonema'
+[22:15:29.756][C][homeassistant.text_sensor:025]:   Attribute: 'moisture_status'
+[22:15:29.761][C][homeassistant.text_sensor:017]: Homeassistant Text Sensor 'plant_croton_status'
+[22:15:29.767][C][homeassistant.text_sensor:023]:   Entity ID: 'plant.croton'
+[22:15:29.778][C][homeassistant.text_sensor:025]:   Attribute: 'moisture_status'
+[22:15:29.783][C][homeassistant.text_sensor:017]: Homeassistant Text Sensor 'plant_elephant_ears_status'
+[22:15:29.795][C][homeassistant.text_sensor:023]:   Entity ID: 'plant.elephant_ears'
+[22:15:29.800][C][homeassistant.text_sensor:025]:   Attribute: 'moisture_status'
+[22:15:29.806][C][homeassistant.sensor:016]: Homeassistant Sensor 'ha_cpu_temp'
+[22:15:29.806][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.811][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.811][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.817][C][homeassistant.sensor:030]:   Entity ID: 'sensor.allskypi5_cpu_temp'
+[22:15:29.822][C][homeassistant.sensor:016]: Homeassistant Sensor 'ha_sqm'
+[22:15:29.828][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.828][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.828][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.839][C][homeassistant.sensor:030]:   Entity ID: 'sensor.sqm_reader_tsl2591_sqm'
+[22:15:29.845][C][homeassistant.sensor:016]: Homeassistant Sensor 'ha_enclosure_temp'
+[22:15:29.845][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.850][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.850][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.861][C][homeassistant.sensor:030]:   Entity ID: 'sensor.allskypi5_as_dewcontrolambient'
+[22:15:29.867][C][homeassistant.sensor:016]: Homeassistant Sensor 'ha_power'
+[22:15:29.867][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.867][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.872][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.878][C][homeassistant.sensor:030]:   Entity ID: 'sensor.sqm_reader_ina260_power'
+[22:15:29.883][C][homeassistant.sensor:016]: Homeassistant Sensor 'nina2_camera_temp'
+[22:15:29.889][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.889][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.895][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.900][C][homeassistant.sensor:030]:   Entity ID: 'sensor.nina2_camera_temperature'
+[22:15:29.906][C][homeassistant.sensor:016]: Homeassistant Sensor 'nina2_exposure_num'
+[22:15:29.911][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.911][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.911][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.922][C][homeassistant.sensor:030]:   Entity ID: 'sensor.nina2_exposure_number'
+[22:15:29.928][C][homeassistant.sensor:016]: Homeassistant Sensor 'nina2_exposure_time'
+[22:15:29.928][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.933][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.933][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.939][C][homeassistant.sensor:030]:   Entity ID: 'sensor.nina2_exposure_time'
+[22:15:29.950][C][homeassistant.sensor:016]: Homeassistant Sensor 'nina2_detected_stars'
+[22:15:29.950][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.950][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.956][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.961][C][homeassistant.sensor:030]:   Entity ID: 'sensor.nina2_star_detectedstars'
+[22:15:29.967][C][homeassistant.sensor:016]: Homeassistant Sensor 'nina2_hfr'
+[22:15:29.972][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.972][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.972][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:29.983][C][homeassistant.sensor:030]:   Entity ID: 'sensor.nina2_star_hfr'
+[22:15:29.989][C][homeassistant.sensor:016]: Homeassistant Sensor 'nina2_saturated_pixels'
+[22:15:29.989][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:29.995][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:29.995][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:30.006][C][homeassistant.sensor:030]:   Entity ID: 'sensor.nina2_target_max_saturated_pixels'
+[22:15:30.011][C][homeassistant.sensor:016]: Homeassistant Sensor 'nina2_total_rms'
+[22:15:30.011][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:30.011][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:30.017][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:30.022][C][homeassistant.sensor:030]:   Entity ID: 'sensor.nina2_total_rms'
+[22:15:30.028][C][homeassistant.sensor:016]: Homeassistant Sensor 'nina3_camera_temp'
+[22:15:30.033][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:30.033][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:30.033][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:30.045][C][homeassistant.sensor:030]:   Entity ID: 'sensor.nina3_camera_temperature'
+[22:15:30.050][C][homeassistant.sensor:016]: Homeassistant Sensor 'nina3_exposure_num'
+[22:15:30.050][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:30.056][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:30.056][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:30.067][C][homeassistant.sensor:030]:   Entity ID: 'sensor.nina3_exposure_number'
+[22:15:30.072][C][homeassistant.sensor:016]: Homeassistant Sensor 'nina3_exposure_time'
+[22:15:30.072][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:30.078][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:30.078][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:30.083][C][homeassistant.sensor:030]:   Entity ID: 'sensor.nina3_exposure_time'
+[22:15:30.095][C][homeassistant.sensor:016]: Homeassistant Sensor 'nina3_detected_stars'
+[22:15:30.095][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:30.095][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:30.100][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:30.106][C][homeassistant.sensor:030]:   Entity ID: 'sensor.nina3_star_detectedstars'
+[22:15:30.111][C][homeassistant.sensor:016]: Homeassistant Sensor 'nina3_hfr'
+[22:15:30.111][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:30.117][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:30.117][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:30.122][C][homeassistant.sensor:030]:   Entity ID: 'sensor.nina3_star_hfr'
+[22:15:30.133][C][homeassistant.sensor:016]: Homeassistant Sensor 'nina3_saturated_pixels'
+[22:15:30.133][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:30.133][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:30.139][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:30.144][C][homeassistant.sensor:030]:   Entity ID: 'sensor.nina3_target_max_saturated_pixels'
+[22:15:30.156][C][homeassistant.sensor:016]: Homeassistant Sensor 'nina3_total_rms'
+[22:15:30.156][C][homeassistant.sensor:016]:   State Class: ''
+[22:15:30.156][C][homeassistant.sensor:016]:   Unit of Measurement: ''
+[22:15:30.161][C][homeassistant.sensor:016]:   Accuracy Decimals: 1
+[22:15:30.164][C][homeassistant.sensor:030]:   Entity ID: 'sensor.nina3_total_rms'
+[22:15:31.112][I][wifi:1329]: Connected
+[22:15:31.150][C][wifi:1037]:   IP Address: 192.168.1.201
+[22:15:31.233][C][wifi:1048]:   SSID: 'IoT'
+[22:15:31.239][C][wifi:1048]:   BSSID: 5A:91:E3:7A:8E:1A
+[22:15:31.239][C][wifi:1048]:   Hostname: 'waveshare-p4-box'
+[22:15:31.245][C][wifi:1048]:   Signal strength: -57 dB b'[22:15:31.245]\x1b[0;35m[C][wifi:1048]:   Signal strength: -57 dB \x1b[0;33m\xe2\x96\x82\xe2\x96\x84\xe2\x96\x86\x1b[0;37m\xe2\x96\x88\x1b[0m'
+[22:15:31.245][C][wifi:1048]:   Channel: 2
+[22:15:31.250][C][wifi:1048]:   Subnet: 255.255.255.0
+[22:15:31.250][C][wifi:1048]:   Gateway: 192.168.1.1
+[22:15:31.250][C][wifi:1048]:   DNS1: 192.168.1.250
+[22:15:31.256][C][wifi:1048]:   DNS2: 192.168.1.250
+[22:15:31.261][W][component:543]: wifi took a long time for an operation (147 ms)
+[22:15:31.267][W][component:546]: Components should block for at most 30 ms
+[22:15:31.270][W][component:426]: wifi cleared Warning flag
+[22:16:22.022][I][safe_mode:066]: Boot seems successful; resetting boot loop counter
+[22:16:26.803][D][esp32.preferences:155]: Writing 1 items: 0 cached, 1 written, 0 failed
+[22:16:41.964][D][api:139]: Accept 192.168.1.142
+[22:16:42.033][D][api.connection:2221]: Home Assistant 2026.2.1 (192.168.1.142): connected
+[22:16:42.250][D][homeassistant.sensor:023]: 'sensor.allskypi5_disk_ssd_temp': Got state 20.85
+[22:16:42.252][D][sensor:129]: 'ha_ssd_temp' >> 20.9 
+[22:16:42.277][D][homeassistant.sensor:023]: 'sensor.allskypi5_as_starcount': Got state 219.00
+[22:16:42.283][D][sensor:129]: 'ha_starcount' >> 219.0 
+[22:16:42.288][D][homeassistant.sensor:023]: 'sensor.allskypi5_as_dewcontrolhumidity': Got state 40.15
+[22:16:42.294][D][sensor:129]: 'ha_enclosure_humidity' >> 40.2 
+[22:16:42.305][D][homeassistant.sensor:023]: 'sensor.allskypi5_as_dewcontroldew': Got state -6.45
+[22:16:42.310][D][sensor:129]: 'ha_dew_point' >> -6.4 
+[22:16:42.316][D][homeassistant.sensor:023]: 'sensor.sqm_reader_ina260_voltage': Got state 11.98
+[22:16:42.322][D][sensor:129]: 'ha_voltage' >> 12.0 
+[22:16:42.327][D][homeassistant.sensor:023]: 'sensor.sqm_reader_ina260_current': Got state 0.76
+[22:16:42.333][D][sensor:129]: 'ha_current' >> 0.8 
+[22:16:42.338][D][homeassistant.sensor:023]: 'sensor.upba_current': Got state 1.03
+[22:16:42.344][D][sensor:129]: 'upba_current' >> 1.0 
+[22:16:42.349][D][homeassistant.sensor:023]: 'sensor.upba_primary_heater': Got state 0.00
+[22:16:42.355][D][sensor:129]: 'upba_primary_heater' >> 0.0 
+[22:16:42.366][D][homeassistant.sensor:023]: 'sensor.upba_power': Got state 12.00
+[22:16:42.366][D][sensor:129]: 'upba_power' >> 12.0 
+[22:16:42.377][D][homeassistant.sensor:023]: 'sensor.nina_instance_2_nina2_ra_rms': Got state 0.00
+[22:16:42.383][D][sensor:129]: 'nina2_ra_rms' >> 0.0 
+[22:16:42.388][D][homeassistant.sensor:023]: 'sensor.nina_instance_2_nina2_dec_rms': Got state 0.00
+[22:16:42.394][D][sensor:129]: 'nina2_dec_rms' >> 0.0 
+[22:16:42.399][D][homeassistant.sensor:023]: 'sensor.nina_instance_3_nina3_ra_rms': Got state 0.00
+[22:16:42.405][D][sensor:129]: 'nina3_ra_rms' >> 0.0 
+[22:16:42.416][D][homeassistant.sensor:023]: 'sensor.nina_instance_3_nina3_dec_rms': Got state 0.00
+[22:16:42.421][D][sensor:129]: 'nina3_dec_rms' >> 0.0 
+[22:16:42.427][D][homeassistant.sensor:023]: 'sensor.astromele3_main_dew_heater_duty': Got state 0.00
+[22:16:42.431][D][sensor:129]: 'astromele3_main_dew_heater_duty' >> 0.0 
+[22:16:42.451][D][homeassistant.sensor:023]: 'sensor.astromele3_current_2': Got state 1.86
+[22:16:42.456][D][sensor:129]: 'astromele3_current_2' >> 1.9 
+[22:16:42.462][D][homeassistant.sensor:023]: 'sensor.astromele3_power_2': Got state 21.70
+[22:16:42.468][D][sensor:129]: 'astromele3_power_2' >> 21.7 
+[22:16:42.479][D][homeassistant.sensor:023]: 'sensor.spider_plant_soil_moisture': Got state 68.54
+[22:16:42.484][D][sensor:129]: 'plant_spider_plant_moisture' >> 68.5 
+[22:16:42.490][D][homeassistant.sensor:023]: 'sensor.jade_plant_soil_moisture': Got state 11.79
+[22:16:42.495][D][sensor:129]: 'plant_jade_plant_moisture' >> 11.8 
+[22:16:42.501][D][homeassistant.sensor:023]: 'sensor.pothos_soil_moisture': Got state 29.00
+[22:16:42.507][D][sensor:129]: 'plant_pothos_moisture' >> 29.0 
+[22:16:42.518][D][homeassistant.sensor:023]: 'sensor.begonia_soil_moisture': Got state 16.02
+[22:16:42.523][D][sensor:129]: 'plant_begonia_moisture' >> 16.0 
+[22:16:42.529][D][homeassistant.sensor:023]: 'sensor.monstera_soil_moisture': Got state 59.91
+[22:16:42.534][D][sensor:129]: 'plant_monstera_moisture' >> 59.9 
+[22:16:42.545][D][homeassistant.sensor:023]: 'sensor.nerve_plant_soil_moisture': Got state 21.67
+[22:16:42.546][D][sensor:129]: 'plant_nerve_plant_moisture' >> 21.7 
+[22:16:43.317][D][homeassistant.sensor:023]: 'sensor.aglaonema_soil_moisture': Got state 43.11
+[22:16:43.322][D][sensor:129]: 'plant_aglaonema_moisture' >> 43.1 
+[22:16:43.328][D][homeassistant.sensor:023]: 'sensor.croton_soil_moisture': Got state 78.08
+[22:16:43.333][D][sensor:129]: 'plant_croton_moisture' >> 78.1 
+[22:16:43.345][D][homeassistant.sensor:023]: 'sensor.elephant_ears_soil_moisture': Got state 51.93
+[22:16:43.350][D][sensor:129]: 'plant_elephant_ears_moisture' >> 51.9 
+[22:16:43.356][D][homeassistant.text_sensor:016]: 'sensor.allskypi5_as_dewcontrolheater': Got state 'True'
+[22:16:43.361][D][text_sensor:119]: 'ha_dew_heater' >> 'True'
+[22:16:43.372][D][homeassistant.text_sensor:016]: 'sensor.allsky_fan': Got state 'False'
+[22:16:43.378][D][text_sensor:119]: 'ha_fan' >> 'False'
+[22:16:43.383][D][homeassistant.text_sensor:016]: 'sensor.allskypi5_cloud_detector_status': Got state 'Clear'
+[22:16:43.389][D][text_sensor:119]: 'ha_cloud_status' >> 'Clear'
+[22:16:43.400][D][homeassistant.text_sensor:016]: 'sensor.nina2_filter_wheel_filter': Got state 'Ha'
+[22:16:43.406][D][text_sensor:119]: 'nina2_filter' >> 'Ha'
+[22:16:43.411][D][homeassistant.text_sensor:016]: 'sensor.nina2_target_name': Got state ''
+[22:16:43.417][D][text_sensor:119]: 'nina2_target' >> ''
+[22:16:43.422][D][homeassistant.text_sensor:016]: 'sensor.nina3_filter_wheel_filter': Got state 'Ha'
+[22:16:43.428][D][text_sensor:119]: 'nina3_filter' >> 'Ha'
+[22:16:43.439][D][homeassistant.text_sensor:016]: 'sensor.nina3_target_name': Got state ''
+[22:16:43.439][D][text_sensor:119]: 'nina3_target' >> ''
+[22:16:43.450][D][homeassistant.text_sensor:014]: 'plant.spider_plant::moisture_status': Got attribute state 'High'
+[22:16:43.456][D][text_sensor:119]: 'plant_spider_plant_status' >> 'High'
+[22:16:43.467][W][component:543]: api took a long time for an operation (63 ms)
+[22:16:43.472][W][component:546]: Components should block for at most 30 ms
+[22:16:43.478][D][homeassistant.text_sensor:014]: 'plant.jade_plant::moisture_status': Got attribute state 'ok'
+[22:16:43.483][D][text_sensor:119]: 'plant_jade_plant_status' >> 'ok'
+[22:16:43.495][D][homeassistant.text_sensor:014]: 'plant.pothos::moisture_status': Got attribute state 'ok'
+[22:16:43.500][D][text_sensor:119]: 'plant_pothos_status' >> 'ok'
+[22:16:43.511][D][homeassistant.text_sensor:014]: 'plant.begonia::moisture_status': Got attribute state 'ok'
+[22:16:43.517][D][text_sensor:119]: 'plant_begonia_status' >> 'ok'
+[22:16:43.522][D][homeassistant.text_sensor:014]: 'plant.monstera::moisture_status': Got attribute state 'ok'
+[22:16:43.528][D][text_sensor:119]: 'plant_monstera_status' >> 'ok'
+[22:16:43.539][D][homeassistant.text_sensor:014]: 'plant.nerve_plant::moisture_status': Got attribute state 'ok'
+[22:16:43.545][D][text_sensor:119]: 'plant_nerve_plant_status' >> 'ok'
+[22:16:43.556][D][homeassistant.text_sensor:014]: 'plant.aglaonema::moisture_status': Got attribute state 'ok'
+[22:16:43.561][D][text_sensor:119]: 'plant_aglaonema_status' >> 'ok'
+[22:16:43.572][D][homeassistant.text_sensor:014]: 'plant.croton::moisture_status': Got attribute state 'High'
+[22:16:43.578][D][text_sensor:119]: 'plant_croton_status' >> 'High'
+[22:16:43.583][D][homeassistant.text_sensor:014]: 'plant.elephant_ears::moisture_status': Got attribute state 'ok'
+[22:16:43.589][D][text_sensor:119]: 'plant_elephant_ears_status' >> 'ok'
+[22:16:43.600][D][homeassistant.sensor:023]: 'sensor.allskypi5_cpu_temp': Got state 32.00
+[22:16:43.606][D][sensor:129]: 'ha_cpu_temp' >> 32.0 
+[22:16:43.611][D][homeassistant.sensor:023]: 'sensor.sqm_reader_tsl2591_sqm': Got state 18.88
+[22:16:43.612][D][sensor:129]: 'ha_sqm' >> 18.9 
+[22:16:43.812][D][homeassistant.sensor:023]: 'sensor.astromele3_current_2': Got state 1.73
+[22:16:43.816][D][homeassistant.sensor:023]: 'sensor.astromele3_power_2': Got state 20.20
+[22:16:44.026][D][homeassistant.sensor:023]: 'sensor.allskypi5_as_dewcontrolambient': Got state 6.08
+[22:16:44.032][D][sensor:129]: 'ha_enclosure_temp' >> 6.1 
+[22:16:44.037][D][homeassistant.sensor:023]: 'sensor.sqm_reader_ina260_power': Got state 9.08
+[22:16:44.043][D][sensor:129]: 'ha_power' >> 9.1 
+[22:16:44.054][D][homeassistant.sensor:023]: 'sensor.nina2_camera_temperature': Got state -1.70
+[22:16:44.054][D][sensor:129]: 'nina2_camera_temp' >> -1.7 
+[22:16:44.065][D][homeassistant.sensor:023]: 'sensor.nina2_exposure_number': Got state 1.00
+[22:16:44.071][D][sensor:129]: 'nina2_exposure_num' >> 1.0 
+[22:16:44.076][D][homeassistant.sensor:023]: 'sensor.nina2_exposure_time': Got state 180.00
+[22:16:44.082][D][sensor:129]: 'nina2_exposure_time' >> 180.0 
+[22:16:44.087][D][light:091]: 'backlight' Setting:
+[22:16:44.087][D][light:079]:   Brightness: 20%
+[22:16:44.093][D][main:1782]: Main page loaded - Auto-update active
+[22:16:44.104][D][homeassistant.sensor:023]: 'sensor.nina2_star_detectedstars': Got state -1.00
+[22:16:44.109][D][sensor:129]: 'nina2_detected_stars' >> -1.0 
+[22:16:44.115][W][homeassistant.sensor:015]: 'sensor.nina2_star_hfr': Can't convert 'unknown' to number!
+[22:16:44.126][D][homeassistant.sensor:023]: 'sensor.nina2_target_max_saturated_pixels': Got state 9.00
+[22:16:44.132][D][sensor:129]: 'nina2_saturated_pixels' >> 9.0 
+[22:16:44.137][D][homeassistant.sensor:023]: 'sensor.nina2_total_rms': Got state 0.00
+[22:16:44.143][D][sensor:129]: 'nina2_total_rms' >> 0.0 
+[22:16:44.154][D][homeassistant.sensor:023]: 'sensor.nina3_camera_temperature': Got state 0.00
+[22:16:44.154][D][sensor:129]: 'nina3_camera_temp' >> 0.0 
+[22:16:44.165][D][homeassistant.sensor:023]: 'sensor.nina3_exposure_number': Got state 17.00
+[22:16:44.171][D][sensor:129]: 'nina3_exposure_num' >> 17.0 
+[22:16:44.176][D][homeassistant.sensor:023]: 'sensor.nina3_exposure_time': Got state 60.00
+[22:16:44.182][D][sensor:129]: 'nina3_exposure_time' >> 60.0 
+[22:16:44.193][D][homeassistant.sensor:023]: 'sensor.nina3_star_detectedstars': Got state -1.00
+[22:16:44.193][D][sensor:129]: 'nina3_detected_stars' >> -1.0 
+[22:16:44.204][W][homeassistant.sensor:015]: 'sensor.nina3_star_hfr': Can't convert 'unknown' to number!
+[22:16:44.215][D][homeassistant.sensor:023]: 'sensor.nina3_target_max_saturated_pixels': Got state 13.00
+[22:16:44.220][D][sensor:129]: 'nina3_saturated_pixels' >> 13.0 
+[22:16:44.226][D][homeassistant.sensor:023]: 'sensor.nina3_total_rms': Got state 0.00
+[22:16:44.232][D][sensor:129]: 'nina3_total_rms' >> 0.0 
+[22:16:44.237][D][homeassistant.sensor:023]: 'sensor.sqm_reader_tsl2591_sqm': Got state 18.90
+[22:16:44.248][D][homeassistant.sensor:023]: 'sensor.sqm_reader_ina260_current': Got state 0.75
+[22:16:44.251][D][homeassistant.sensor:023]: 'sensor.sqm_reader_ina260_power': Got state 8.95
+[22:16:50.698][D][binary_sensor:047]: 'Boot Button' >> ON
+[22:16:50.870][D][binary_sensor:047]: 'Boot Button' >> OFF
+[22:16:51.384][D][main:1787]: NINA2 page loaded - Auto-update active
+[22:16:51.384][D][main:1792]: NINA3 page loaded - Auto-update active
+[22:16:51.543][W][component:543]: lvgl took a long time for an operation (118 ms)
+[22:16:51.545][W][component:546]: Components should block for at most 30 ms
+[22:16:53.807][D][homeassistant.sensor:023]: 'sensor.astromele3_current_2': Got state 1.77
+[22:16:53.812][D][sensor:129]: 'astromele3_current_2' >> 1.8 
+[22:16:53.818][D][homeassistant.sensor:023]: 'sensor.astromele3_power_2': Got state 20.70
+[22:16:53.821][D][sensor:129]: 'astromele3_power_2' >> 20.7 
+[22:16:55.120][D][homeassistant.sensor:023]: 'sensor.sqm_reader_tsl2591_sqm': Got state 18.92
+[22:16:55.125][D][homeassistant.sensor:023]: 'sensor.sqm_reader_ina260_current': Got state 0.77
+[22:16:55.136][D][homeassistant.sensor:023]: 'sensor.sqm_reader_ina260_voltage': Got state 11.97
+[22:16:55.141][D][homeassistant.sensor:023]: 'sensor.sqm_reader_ina260_power': Got state 9.24
+[22:17:00.854][D][homeassistant.sensor:023]: 'sensor.allskypi5_as_dewcontrolhumidity': Got state 40.36
+[22:17:00.866][D][homeassistant.sensor:023]: 'sensor.allskypi5_as_dewcontroldew': Got state -6.38
+[22:17:03.855][D][homeassistant.sensor:023]: 'sensor.astromele3_current_2': Got state 1.80
+[22:17:03.861][D][sensor:129]: 'astromele3_current_2' >> 1.8 
+[22:17:03.865][D][homeassistant.sensor:023]: 'sensor.astromele3_power_2': Got state 21.00
+[22:17:03.877][D][homeassistant.sensor:023]: 'sensor.upba_current': Got state 1.05
+[22:17:03.883][D][sensor:129]: 'upba_current' >> 1.0 
+[22:17:03.888][D][homeassistant.sensor:023]: 'sensor.upba_power': Got state 13.00
+[22:17:03.888][D][sensor:129]: 'upba_power' >> 13.0 
+[22:17:05.581][D][homeassistant.sensor:023]: 'sensor.sqm_reader_ina260_current': Got state 0.70
+[22:17:05.586][D][sensor:129]: 'ha_current' >> 0.7 
+[22:17:05.592][D][homeassistant.sensor:023]: 'sensor.sqm_reader_ina260_voltage': Got state 11.99
+[22:17:05.602][D][homeassistant.sensor:023]: 'sensor.sqm_reader_ina260_power': Got state 8.37
+[22:17:05.602][D][sensor:129]: 'ha_power' >> 8.4 
+[22:17:13.808][D][homeassistant.sensor:023]: 'sensor.astromele3_current_2': Got state 1.71
+[22:17:13.813][D][sensor:129]: 'astromele3_current_2' >> 1.7 
+[22:17:13.819][D][homeassistant.sensor:023]: 'sensor.astromele3_power_2': Got state 20.00
+[22:17:13.822][D][sensor:129]: 'astromele3_power_2' >> 20.0 
+[22:17:16.288][D][homeassistant.sensor:023]: 'sensor.sqm_reader_tsl2591_sqm': Got state 18.93
+[22:17:16.330][D][homeassistant.sensor:023]: 'sensor.sqm_reader_ina260_power': Got state 8.19
+[22:17:20.541][D][homeassistant.sensor:023]: 'sensor.nina2_exposure_number': Got state 2.00
+[22:17:20.546][D][sensor:129]: 'nina2_exposure_num' >> 2.0 
+[22:17:20.551][D][homeassistant.sensor:023]: 'sensor.nina2_camera_temperature': Got state -1.80
+[22:17:22.019][D][homeassistant.sensor:023]: 'sensor.nina3_target_max_saturated_pixels': Got state 14.00
+[22:17:22.025][D][homeassistant.sensor:023]: 'sensor.nina3_exposure_number': Got state 18.00
+[22:17:22.030][D][sensor:129]: 'nina3_exposure_num' >> 18.0 
+[22:17:23.809][D][homeassistant.sensor:023]: 'sensor.astromele3_current_2': Got state 1.96
+[22:17:23.815][D][sensor:129]: 'astromele3_current_2' >> 2.0 
+[22:17:23.821][D][homeassistant.sensor:023]: 'sensor.astromele3_power_2': Got state 22.80
+[22:17:23.824][D][sensor:129]: 'astromele3_power_2' >> 22.8 
+[22:17:26.022][D][homeassistant.sensor:023]: 'sensor.monstera_soil_moisture': Got state 60.00
+[22:17:26.024][D][sensor:129]: 'plant_monstera_moisture' >> 60.0 
+[22:17:27.019][D][homeassistant.sensor:023]: 'sensor.sqm_reader_tsl2591_sqm': Got state 18.92
+[22:17:27.024][D][homeassistant.sensor:023]: 'sensor.sqm_reader_ina260_voltage': Got state 12.00
+[22:17:27.032][D][homeassistant.sensor:023]: 'sensor.sqm_reader_ina260_power': Got state 8.36
+[22:17:31.524][D][homeassistant.sensor:023]: 'sensor.allskypi5_disk_ssd_temp': Got state 21.85
+[22:17:31.526][D][sensor:129]: 'ha_ssd_temp' >> 21.9 
+[22:17:33.826][D][homeassistant.sensor:023]: 'sensor.astromele3_current_2': Got state 1.78
+[22:17:33.832][D][sensor:129]: 'astromele3_current_2' >> 1.8 
+[22:17:33.837][D][homeassistant.sensor:023]: 'sensor.astromele3_power_2': Got state 20.70
+[22:17:33.840][D][sensor:129]: 'astromele3_power_2' >> 20.7 
+[22:17:33.895][D][homeassistant.sensor:023]: 'sensor.upba_current': Got state 1.03
+[22:17:33.901][D][sensor:129]: 'upba_current' >> 1.0 
+[22:17:33.906][D][homeassistant.sensor:023]: 'sensor.upba_power': Got state 12.00
+[22:17:33.907][D][sensor:129]: 'upba_power' >> 12.0 
+[22:19:15.591][D][binary_sensor:047]: 'Boot Button' >> ON
+[22:19:15.794][D][binary_sensor:047]: 'Boot Button' >> OFF
+[22:19:16.297][D][main:1787]: NINA2 page loaded - Auto-update active
+[22:19:19.921][D][binary_sensor:047]: 'Boot Button' >> ON
+[22:19:20.172][D][binary_sensor:047]: 'Boot Button' >> OFF
+[22:19:20.675][D][main:1792]: NINA3 page loaded - Auto-update active
+[22:19:22.878][D][binary_sensor:047]: 'Boot Button' >> ON
+[22:19:23.077][D][binary_sensor:047]: 'Boot Button' >> OFF
+[22:19:23.585][D][main:1797]: Plants page loaded - Auto-update active
+[22:19:28.125][D][binary_sensor:047]: 'Boot Button' >> ON
+[22:19:28.333][D][binary_sensor:047]: 'Boot Button' >> OFF
+[22:19:28.836][D][main:1782]: Main page loaded - Auto-update active
+[22:19:39.184][D][binary_sensor:047]: 'Boot Button' >> ON
+[22:19:39.410][D][binary_sensor:047]: 'Boot Button' >> OFF
+[22:19:39.919][D][main:1787]: NINA2 page loaded - Auto-update active
+[22:19:39.920][D][main:1792]: NINA3 page loaded - Auto-update active
