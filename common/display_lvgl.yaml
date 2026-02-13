@@ -57,7 +57,7 @@ lvgl:
       border_color: 0x333333
       pad_all: 8
     - id: style_header
-      text_color: 0x888888
+      text_color: 0xFFFFFF
       text_font: font_header_40
       text_align: LEFT
     - id: style_value_hero
@@ -68,11 +68,11 @@ lvgl:
       pad_bottom: -15
     - id: style_label_sub
       text_font: font_roboto_28
-      text_color: 0xCCCCCC
+      text_color: 0xFFFFFF
       text_align: CENTER
     - id: style_unit_small
       text_font: font_roboto_28
-      text_color: 0x888888
+      text_color: 0xFFFFFF
       text_align: CENTER
     - id: style_bar_bg
       bg_color: 0x222222
@@ -560,7 +560,7 @@ lvgl:
                                layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER }
                                widgets:
                                  - label: { text: "EXP #", styles: style_unit_small, width: 100% }
-                                 - label: { id: lbl_cmb_nina2_exp_num, text: "--", styles: style_value_large, text_color: 0x10B981, width: 100% }
+                                 - label: { id: lbl_cmb_nina2_exp_num, text: "--", styles: style_value_large, text_color: 0xFFFFFF, width: 100% }
                            # Exp Time
                            - obj:
                                height: 100%
@@ -571,7 +571,7 @@ lvgl:
                                layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER }
                                widgets:
                                  - label: { text: "EXP (s)", styles: style_unit_small, width: 100% }
-                                 - label: { id: lbl_cmb_nina2_exp_time, text: "--", styles: style_value_large, text_color: 0xF59E0B, width: 100% }
+                                 - label: { id: lbl_cmb_nina2_exp_time, text: "--", styles: style_value_large, text_color: 0xFFFFFF, width: 100% }
 
               # NINA 3 Card
               - obj:
@@ -641,7 +641,7 @@ lvgl:
                                layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER }
                                widgets:
                                  - label: { text: "EXP #", styles: style_unit_small, width: 100% }
-                                 - label: { id: lbl_cmb_nina3_exp_num, text: "--", styles: style_value_large, text_color: 0x10B981, width: 100% }
+                                 - label: { id: lbl_cmb_nina3_exp_num, text: "--", styles: style_value_large, text_color: 0xFFFFFF, width: 100% }
                            # Exp Time
                            - obj:
                                height: 100%
@@ -652,7 +652,7 @@ lvgl:
                                layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER }
                                widgets:
                                  - label: { text: "EXP (s)", styles: style_unit_small, width: 100% }
-                                 - label: { id: lbl_cmb_nina3_exp_time, text: "--", styles: style_value_large, text_color: 0xF59E0B, width: 100% }
+                                 - label: { id: lbl_cmb_nina3_exp_time, text: "--", styles: style_value_large, text_color: 0xFFFFFF, width: 100% }
 
 
     - id: nina2_page
@@ -736,7 +736,7 @@ lvgl:
                         border_width: 0
                         layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER }
                         widgets:
-                          - label: { id: lbl_nina2_hfr, text: "--", text_font: font_roboto_hero, text_color: 0xFF6B9D, text_align: CENTER, width: 100% }
+                          - label: { id: lbl_nina2_hfr, text: "--", text_font: font_roboto_hero, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
 
               # Row 2: Power Info - column 2
               - obj:
@@ -777,7 +777,7 @@ lvgl:
                   layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER }
                   widgets:
                     - label: { text: "EXP #", styles: style_unit_small, width: 100% }
-                    - label: { id: lbl_nina2_exp_num, text: "--", text_font: font_header_40, text_color: 0x10B981, text_align: CENTER, width: 100% }
+                    - label: { id: lbl_nina2_exp_num, text: "--", text_font: font_header_40, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
 
               # Row 3: EXP TIME - column 1
               - obj:
@@ -795,7 +795,7 @@ lvgl:
                   layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER }
                   widgets:
                     - label: { text: "EXP (s)", styles: style_unit_small, width: 100% }
-                    - label: { id: lbl_nina2_exp_time, text: "--", text_font: font_header_40, text_color: 0xF59E0B, text_align: CENTER, width: 100% }
+                    - label: { id: lbl_nina2_exp_time, text: "--", text_font: font_header_40, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
 
               # Row 3: SAT PIXELS - column 2
               - obj:
@@ -813,7 +813,7 @@ lvgl:
                   layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER }
                   widgets:
                     - label: { text: "SAT. PIXELS", styles: style_unit_small, width: 100% }
-                    - label: { id: lbl_nina2_sat_px, text: "--", text_font: font_header_40, text_color: 0xCCCCCC, text_align: CENTER, width: 100% }
+                    - label: { id: lbl_nina2_sat_px, text: "--", text_font: font_header_40, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
 
               # Row 4: FILTER - spans all 3 columns
               - obj:
@@ -868,7 +868,7 @@ lvgl:
                   layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER }
                   widgets:
                     - label: { text: "CAM (°C)", styles: style_unit_small, width: 100% }
-                    - label: { id: lbl_nina2_cam_temp, text: "--", text_font: font_header_40, text_color: 0x3B82F6, text_align: CENTER, width: 100% }
+                    - label: { id: lbl_nina2_cam_temp, text: "--", text_font: font_header_40, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
 
               # Row 5: STARS - column 1
               - obj:
@@ -988,7 +988,7 @@ lvgl:
                         border_width: 0
                         layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER }
                         widgets:
-                          - label: { id: lbl_nina3_hfr, text: "--", text_font: font_roboto_hero, text_color: 0xFF6B9D, text_align: CENTER, width: 100% }
+                          - label: { id: lbl_nina3_hfr, text: "--", text_font: font_roboto_hero, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
 
               # Row 2: Power Info - column 2
               - obj:
@@ -1029,7 +1029,7 @@ lvgl:
                   layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER }
                   widgets:
                     - label: { text: "EXP #", styles: style_unit_small, width: 100% }
-                    - label: { id: lbl_nina3_exp_num, text: "--", text_font: font_header_40, text_color: 0x10B981, text_align: CENTER, width: 100% }
+                    - label: { id: lbl_nina3_exp_num, text: "--", text_font: font_header_40, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
 
               # Row 3: EXP TIME - column 1
               - obj:
@@ -1047,7 +1047,7 @@ lvgl:
                   layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER }
                   widgets:
                     - label: { text: "EXP (s)", styles: style_unit_small, width: 100% }
-                    - label: { id: lbl_nina3_exp_time, text: "--", text_font: font_header_40, text_color: 0xF59E0B, text_align: CENTER, width: 100% }
+                    - label: { id: lbl_nina3_exp_time, text: "--", text_font: font_header_40, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
 
               # Row 3: SAT PIXELS - column 2
               - obj:
@@ -1065,7 +1065,7 @@ lvgl:
                   layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER }
                   widgets:
                     - label: { text: "SAT. PIXELS", styles: style_unit_small, width: 100% }
-                    - label: { id: lbl_nina3_sat_px, text: "--", text_font: font_header_40, text_color: 0xCCCCCC, text_align: CENTER, width: 100% }
+                    - label: { id: lbl_nina3_sat_px, text: "--", text_font: font_header_40, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
 
               # Row 4: FILTER - spans all 3 columns
               - obj:
@@ -1120,7 +1120,7 @@ lvgl:
                   layout: { type: flex, flex_flow: COLUMN, flex_align_main: CENTER }
                   widgets:
                     - label: { text: "CAM (°C)", styles: style_unit_small, width: 100% }
-                    - label: { id: lbl_nina3_cam_temp, text: "--", text_font: font_header_40, text_color: 0x3B82F6, text_align: CENTER, width: 100% }
+                    - label: { id: lbl_nina3_cam_temp, text: "--", text_font: font_header_40, text_color: 0xFFFFFF, text_align: CENTER, width: 100% }
 
               # Row 5: STARS - column 1
               - obj:

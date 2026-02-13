@@ -10,11 +10,11 @@ text_sensor:
           std::string val = x;
           std::transform(val.begin(), val.end(), val.begin(), ::tolower);
           if (val == "ok") {
-            lv_obj_set_style_text_color(id(lbl_plant_spider_plant_status), lv_color_hex(0x10B981), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(lbl_plant_spider_plant_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           } else if (val == "low") {
-            lv_obj_set_style_text_color(id(lbl_plant_spider_plant_status), lv_color_hex(0xEF4444), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(lbl_plant_spider_plant_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           } else if (val == "high") {
-            lv_obj_set_style_text_color(id(lbl_plant_spider_plant_status), lv_color_hex(0x3B82F6), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(lbl_plant_spider_plant_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           } else {
             lv_obj_set_style_text_color(id(lbl_plant_spider_plant_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           }
@@ -30,11 +30,11 @@ text_sensor:
           std::string val = x;
           std::transform(val.begin(), val.end(), val.begin(), ::tolower);
           if (val == "ok") {
-            lv_obj_set_style_text_color(id(lbl_plant_jade_plant_status), lv_color_hex(0x10B981), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(lbl_plant_jade_plant_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           } else if (val == "low") {
-            lv_obj_set_style_text_color(id(lbl_plant_jade_plant_status), lv_color_hex(0xEF4444), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(lbl_plant_jade_plant_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           } else if (val == "high") {
-            lv_obj_set_style_text_color(id(lbl_plant_jade_plant_status), lv_color_hex(0x3B82F6), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(lbl_plant_jade_plant_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           } else {
             lv_obj_set_style_text_color(id(lbl_plant_jade_plant_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           }
@@ -50,11 +50,11 @@ text_sensor:
           std::string val = x;
           std::transform(val.begin(), val.end(), val.begin(), ::tolower);
           if (val == "ok") {
-            lv_obj_set_style_text_color(id(lbl_plant_pothos_status), lv_color_hex(0x10B981), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(lbl_plant_pothos_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           } else if (val == "low") {
-            lv_obj_set_style_text_color(id(lbl_plant_pothos_status), lv_color_hex(0xEF4444), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(lbl_plant_pothos_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           } else if (val == "high") {
-            lv_obj_set_style_text_color(id(lbl_plant_pothos_status), lv_color_hex(0x3B82F6), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(lbl_plant_pothos_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           } else {
             lv_obj_set_style_text_color(id(lbl_plant_pothos_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           }
@@ -70,11 +70,11 @@ text_sensor:
           std::string val = x;
           std::transform(val.begin(), val.end(), val.begin(), ::tolower);
           if (val == "ok") {
-            lv_obj_set_style_text_color(id(lbl_plant_begonia_status), lv_color_hex(0x10B981), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(lbl_plant_begonia_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           } else if (val == "low") {
-            lv_obj_set_style_text_color(id(lbl_plant_begonia_status), lv_color_hex(0xEF4444), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(lbl_plant_begonia_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           } else if (val == "high") {
-            lv_obj_set_style_text_color(id(lbl_plant_begonia_status), lv_color_hex(0x3B82F6), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(lbl_plant_begonia_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           } else {
             lv_obj_set_style_text_color(id(lbl_plant_begonia_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           }
@@ -90,11 +90,11 @@ text_sensor:
           std::string val = x;
           std::transform(val.begin(), val.end(), val.begin(), ::tolower);
           if (val == "ok") {
-            lv_obj_set_style_text_color(id(lbl_plant_monstera_status), lv_color_hex(0x10B981), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(lbl_plant_monstera_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           } else if (val == "low") {
-            lv_obj_set_style_text_color(id(lbl_plant_monstera_status), lv_color_hex(0xEF4444), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(lbl_plant_monstera_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           } else if (val == "high") {
-            lv_obj_set_style_text_color(id(lbl_plant_monstera_status), lv_color_hex(0x3B82F6), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(lbl_plant_monstera_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           } else {
             lv_obj_set_style_text_color(id(lbl_plant_monstera_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           }
@@ -110,11 +110,11 @@ text_sensor:
           std::string val = x;
           std::transform(val.begin(), val.end(), val.begin(), ::tolower);
           if (val == "ok") {
-            lv_obj_set_style_text_color(id(lbl_plant_nerve_plant_status), lv_color_hex(0x10B981), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(lbl_plant_nerve_plant_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           } else if (val == "low") {
-            lv_obj_set_style_text_color(id(lbl_plant_nerve_plant_status), lv_color_hex(0xEF4444), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(lbl_plant_nerve_plant_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           } else if (val == "high") {
-            lv_obj_set_style_text_color(id(lbl_plant_nerve_plant_status), lv_color_hex(0x3B82F6), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(lbl_plant_nerve_plant_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           } else {
             lv_obj_set_style_text_color(id(lbl_plant_nerve_plant_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           }
@@ -130,11 +130,11 @@ text_sensor:
           std::string val = x;
           std::transform(val.begin(), val.end(), val.begin(), ::tolower);
           if (val == "ok") {
-            lv_obj_set_style_text_color(id(lbl_plant_aglaonema_status), lv_color_hex(0x10B981), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(lbl_plant_aglaonema_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           } else if (val == "low") {
-            lv_obj_set_style_text_color(id(lbl_plant_aglaonema_status), lv_color_hex(0xEF4444), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(lbl_plant_aglaonema_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           } else if (val == "high") {
-            lv_obj_set_style_text_color(id(lbl_plant_aglaonema_status), lv_color_hex(0x3B82F6), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(lbl_plant_aglaonema_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           } else {
             lv_obj_set_style_text_color(id(lbl_plant_aglaonema_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           }
@@ -150,11 +150,11 @@ text_sensor:
           std::string val = x;
           std::transform(val.begin(), val.end(), val.begin(), ::tolower);
           if (val == "ok") {
-            lv_obj_set_style_text_color(id(lbl_plant_croton_status), lv_color_hex(0x10B981), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(lbl_plant_croton_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           } else if (val == "low") {
-            lv_obj_set_style_text_color(id(lbl_plant_croton_status), lv_color_hex(0xEF4444), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(lbl_plant_croton_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           } else if (val == "high") {
-            lv_obj_set_style_text_color(id(lbl_plant_croton_status), lv_color_hex(0x3B82F6), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(lbl_plant_croton_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           } else {
             lv_obj_set_style_text_color(id(lbl_plant_croton_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           }
@@ -170,11 +170,11 @@ text_sensor:
           std::string val = x;
           std::transform(val.begin(), val.end(), val.begin(), ::tolower);
           if (val == "ok") {
-            lv_obj_set_style_text_color(id(lbl_plant_elephant_ears_status), lv_color_hex(0x10B981), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(lbl_plant_elephant_ears_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           } else if (val == "low") {
-            lv_obj_set_style_text_color(id(lbl_plant_elephant_ears_status), lv_color_hex(0xEF4444), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(lbl_plant_elephant_ears_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           } else if (val == "high") {
-            lv_obj_set_style_text_color(id(lbl_plant_elephant_ears_status), lv_color_hex(0x3B82F6), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(lbl_plant_elephant_ears_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           } else {
             lv_obj_set_style_text_color(id(lbl_plant_elephant_ears_status), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           }

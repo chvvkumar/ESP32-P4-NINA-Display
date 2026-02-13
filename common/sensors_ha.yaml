@@ -18,7 +18,7 @@ sensor:
           int b = (int)(id(g_cpu_c1_b) + ratio * (id(g_cpu_c2_b) - id(g_cpu_c1_b)));
           lv_color_t c = lv_color_make(r, g, b);
           lv_obj_set_style_bg_color(id(bar_cpu_temp), c, LV_PART_INDICATOR);
-          if (id(match_text_color).state) lv_obj_set_style_text_color(id(lbl_cpu_temp_val), c, LV_PART_MAIN);
+          if (id(match_text_color).state) lv_obj_set_style_text_color(id(lbl_cpu_temp_val), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           else lv_obj_set_style_text_color(id(lbl_cpu_temp_val), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           float abs_v = fabsf(x);
           int val_int = (int)abs_v;
@@ -60,7 +60,7 @@ sensor:
           int g = (int)(id(g_sqm_c1_g) + ratio * (id(g_sqm_c2_g) - id(g_sqm_c1_g)));
           int b = (int)(id(g_sqm_c1_b) + ratio * (id(g_sqm_c2_b) - id(g_sqm_c1_b)));
           lv_color_t c = lv_color_make(r, g, b);
-          if (id(match_text_color).state) lv_obj_set_style_text_color(id(lbl_sqm_val), c, LV_PART_MAIN);
+          if (id(match_text_color).state) lv_obj_set_style_text_color(id(lbl_sqm_val), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           else lv_obj_set_style_text_color(id(lbl_sqm_val), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           float abs_v = fabsf(x);
           int val_int = (int)abs_v;
@@ -97,7 +97,7 @@ sensor:
           int b = (int)(id(g_env_c1_b) + ratio * (id(g_env_c2_b) - id(g_env_c1_b)));
           lv_color_t c = lv_color_make(r, g, b);
           lv_obj_set_style_bg_color(id(bar_enclosure), c, LV_PART_INDICATOR);
-          if (id(match_text_color).state) lv_obj_set_style_text_color(id(lbl_enclosure_temp_val), c, LV_PART_MAIN);
+          if (id(match_text_color).state) lv_obj_set_style_text_color(id(lbl_enclosure_temp_val), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           else lv_obj_set_style_text_color(id(lbl_enclosure_temp_val), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           float abs_v = fabsf(x);
           int val_int = (int)abs_v;
@@ -152,7 +152,7 @@ sensor:
           int b = (int)(id(g_pwr_c1_b) + ratio * (id(g_pwr_c2_b) - id(g_pwr_c1_b)));
           lv_color_t c = lv_color_make(r, g, b);
           lv_obj_set_style_bg_color(id(bar_power), c, LV_PART_INDICATOR);
-          if (id(match_text_color).state) lv_obj_set_style_text_color(id(lbl_power_val), c, LV_PART_MAIN);
+          if (id(match_text_color).state) lv_obj_set_style_text_color(id(lbl_power_val), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           else lv_obj_set_style_text_color(id(lbl_power_val), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
           float abs_v = fabsf(x);
           int val_int = (int)abs_v;
@@ -213,7 +213,7 @@ sensor:
               int r = (int)(id(g_nina2_cam_temp_c1_r) + ratio * (id(g_nina2_cam_temp_c2_r) - id(g_nina2_cam_temp_c1_r)));
               int g = (int)(id(g_nina2_cam_temp_c1_g) + ratio * (id(g_nina2_cam_temp_c2_g) - id(g_nina2_cam_temp_c1_g)));
               int b = (int)(id(g_nina2_cam_temp_c1_b) + ratio * (id(g_nina2_cam_temp_c2_b) - id(g_nina2_cam_temp_c1_b)));
-              lv_obj_set_style_text_color(id(lbl_nina2_cam_temp), lv_color_make(r, g, b), LV_PART_MAIN);
+              lv_obj_set_style_text_color(id(lbl_nina2_cam_temp), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
             }
           } else { lv_label_set_text(id(lbl_nina2_cam_temp), "--"); }
 
@@ -238,8 +238,8 @@ sensor:
               int r = (int)(id(g_nina2_exp_num_c1_r) + ratio * (id(g_nina2_exp_num_c2_r) - id(g_nina2_exp_num_c1_r)));
               int g = (int)(id(g_nina2_exp_num_c1_g) + ratio * (id(g_nina2_exp_num_c2_g) - id(g_nina2_exp_num_c1_g)));
               int b = (int)(id(g_nina2_exp_num_c1_b) + ratio * (id(g_nina2_exp_num_c2_b) - id(g_nina2_exp_num_c1_b)));
-              lv_obj_set_style_text_color(id(lbl_nina2_exp_num), lv_color_make(r, g, b), LV_PART_MAIN);
-              lv_obj_set_style_text_color(id(lbl_cmb_nina2_exp_num), lv_color_make(r, g, b), LV_PART_MAIN);
+              lv_obj_set_style_text_color(id(lbl_nina2_exp_num), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+              lv_obj_set_style_text_color(id(lbl_cmb_nina2_exp_num), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
             }
           } else {
              lv_label_set_text(id(lbl_nina2_exp_num), "--");
@@ -271,8 +271,8 @@ sensor:
               int r = (int)(id(g_nina2_exp_time_c1_r) + ratio * (id(g_nina2_exp_time_c2_r) - id(g_nina2_exp_time_c1_r)));
               int g = (int)(id(g_nina2_exp_time_c1_g) + ratio * (id(g_nina2_exp_time_c2_g) - id(g_nina2_exp_time_c1_g)));
               int b = (int)(id(g_nina2_exp_time_c1_b) + ratio * (id(g_nina2_exp_time_c2_b) - id(g_nina2_exp_time_c1_b)));
-              lv_obj_set_style_text_color(id(lbl_nina2_exp_time), lv_color_make(r, g, b), LV_PART_MAIN);
-              lv_obj_set_style_text_color(id(lbl_cmb_nina2_exp_time), lv_color_make(r, g, b), LV_PART_MAIN);
+              lv_obj_set_style_text_color(id(lbl_nina2_exp_time), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+              lv_obj_set_style_text_color(id(lbl_cmb_nina2_exp_time), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
             }
           } else { 
             lv_label_set_text(id(lbl_nina2_exp_time), "--");
@@ -299,7 +299,7 @@ sensor:
               int r = (int)(id(g_nina2_stars_c1_r) + ratio * (id(g_nina2_stars_c2_r) - id(g_nina2_stars_c1_r)));
               int g = (int)(id(g_nina2_stars_c1_g) + ratio * (id(g_nina2_stars_c2_g) - id(g_nina2_stars_c1_g)));
               int b = (int)(id(g_nina2_stars_c1_b) + ratio * (id(g_nina2_stars_c2_b) - id(g_nina2_stars_c1_b)));
-              lv_obj_set_style_text_color(id(lbl_nina2_stars), lv_color_make(r, g, b), LV_PART_MAIN);
+              lv_obj_set_style_text_color(id(lbl_nina2_stars), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
             }
           } else {
              lv_label_set_text(id(lbl_nina2_stars), "--");
@@ -374,7 +374,7 @@ sensor:
               int r = (int)(id(g_nina2_hfr_c1_r) + ratio * (id(g_nina2_hfr_c2_r) - id(g_nina2_hfr_c1_r)));
               int g = (int)(id(g_nina2_hfr_c1_g) + ratio * (id(g_nina2_hfr_c2_g) - id(g_nina2_hfr_c1_g)));
               int b = (int)(id(g_nina2_hfr_c1_b) + ratio * (id(g_nina2_hfr_c2_b) - id(g_nina2_hfr_c1_b)));
-              lv_obj_set_style_text_color(id(lbl_nina2_hfr), lv_color_make(r, g, b), LV_PART_MAIN);
+              lv_obj_set_style_text_color(id(lbl_nina2_hfr), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
             }
           } else { 
             lv_label_set_text(id(lbl_nina2_hfr), "--");
@@ -400,7 +400,7 @@ sensor:
               int r = (int)(id(g_nina2_sat_px_c1_r) + ratio * (id(g_nina2_sat_px_c2_r) - id(g_nina2_sat_px_c1_r)));
               int g = (int)(id(g_nina2_sat_px_c1_g) + ratio * (id(g_nina2_sat_px_c2_g) - id(g_nina2_sat_px_c1_g)));
               int b = (int)(id(g_nina2_sat_px_c1_b) + ratio * (id(g_nina2_sat_px_c2_b) - id(g_nina2_sat_px_c1_b)));
-              lv_obj_set_style_text_color(id(lbl_nina2_sat_px), lv_color_make(r, g, b), LV_PART_MAIN);
+              lv_obj_set_style_text_color(id(lbl_nina2_sat_px), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
             }
           } else lv_label_set_text(id(lbl_nina2_sat_px), "--");
 
@@ -429,8 +429,8 @@ sensor:
               int r = (int)(id(g_nina2_rms_c1_r) + ratio * (id(g_nina2_rms_c2_r) - id(g_nina2_rms_c1_r)));
               int g = (int)(id(g_nina2_rms_c1_g) + ratio * (id(g_nina2_rms_c2_g) - id(g_nina2_rms_c1_g)));
               int b = (int)(id(g_nina2_rms_c1_b) + ratio * (id(g_nina2_rms_c2_b) - id(g_nina2_rms_c1_b)));
-              lv_obj_set_style_text_color(id(lbl_nina2_rms), lv_color_make(r, g, b), LV_PART_MAIN);
-              lv_obj_set_style_text_color(id(lbl_cmb_nina2_rms), lv_color_make(r, g, b), LV_PART_MAIN);
+              lv_obj_set_style_text_color(id(lbl_nina2_rms), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+              lv_obj_set_style_text_color(id(lbl_cmb_nina2_rms), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
             }
           } else { 
             lv_label_set_text(id(lbl_nina2_rms), "--");
@@ -493,7 +493,7 @@ sensor:
               int r = (int)(id(g_nina3_cam_temp_c1_r) + ratio * (id(g_nina3_cam_temp_c2_r) - id(g_nina3_cam_temp_c1_r)));
               int g = (int)(id(g_nina3_cam_temp_c1_g) + ratio * (id(g_nina3_cam_temp_c2_g) - id(g_nina3_cam_temp_c1_g)));
               int b = (int)(id(g_nina3_cam_temp_c1_b) + ratio * (id(g_nina3_cam_temp_c2_b) - id(g_nina3_cam_temp_c1_b)));
-              lv_obj_set_style_text_color(id(lbl_nina3_cam_temp), lv_color_make(r, g, b), LV_PART_MAIN);
+              lv_obj_set_style_text_color(id(lbl_nina3_cam_temp), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
             }
           } else { lv_label_set_text(id(lbl_nina3_cam_temp), "--"); }
 
@@ -518,8 +518,8 @@ sensor:
               int r = (int)(id(g_nina3_exp_num_c1_r) + ratio * (id(g_nina3_exp_num_c2_r) - id(g_nina3_exp_num_c1_r)));
               int g = (int)(id(g_nina3_exp_num_c1_g) + ratio * (id(g_nina3_exp_num_c2_g) - id(g_nina3_exp_num_c1_g)));
               int b = (int)(id(g_nina3_exp_num_c1_b) + ratio * (id(g_nina3_exp_num_c2_b) - id(g_nina3_exp_num_c1_b)));
-              lv_obj_set_style_text_color(id(lbl_nina3_exp_num), lv_color_make(r, g, b), LV_PART_MAIN);
-              lv_obj_set_style_text_color(id(lbl_cmb_nina3_exp_num), lv_color_make(r, g, b), LV_PART_MAIN);
+              lv_obj_set_style_text_color(id(lbl_nina3_exp_num), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+              lv_obj_set_style_text_color(id(lbl_cmb_nina3_exp_num), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
             }
           } else { 
              lv_label_set_text(id(lbl_nina3_exp_num), "--");
@@ -551,8 +551,8 @@ sensor:
               int r = (int)(id(g_nina3_exp_time_c1_r) + ratio * (id(g_nina3_exp_time_c2_r) - id(g_nina3_exp_time_c1_r)));
               int g = (int)(id(g_nina3_exp_time_c1_g) + ratio * (id(g_nina3_exp_time_c2_g) - id(g_nina3_exp_time_c1_g)));
               int b = (int)(id(g_nina3_exp_time_c1_b) + ratio * (id(g_nina3_exp_time_c2_b) - id(g_nina3_exp_time_c1_b)));
-              lv_obj_set_style_text_color(id(lbl_nina3_exp_time), lv_color_make(r, g, b), LV_PART_MAIN);
-              lv_obj_set_style_text_color(id(lbl_cmb_nina3_exp_time), lv_color_make(r, g, b), LV_PART_MAIN);
+              lv_obj_set_style_text_color(id(lbl_nina3_exp_time), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+              lv_obj_set_style_text_color(id(lbl_cmb_nina3_exp_time), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
             }
           } else { 
             lv_label_set_text(id(lbl_nina3_exp_time), "--");
@@ -579,7 +579,7 @@ sensor:
               int r = (int)(id(g_nina3_stars_c1_r) + ratio * (id(g_nina3_stars_c2_r) - id(g_nina3_stars_c1_r)));
               int g = (int)(id(g_nina3_stars_c1_g) + ratio * (id(g_nina3_stars_c2_g) - id(g_nina3_stars_c1_g)));
               int b = (int)(id(g_nina3_stars_c1_b) + ratio * (id(g_nina3_stars_c2_b) - id(g_nina3_stars_c1_b)));
-              lv_obj_set_style_text_color(id(lbl_nina3_stars), lv_color_make(r, g, b), LV_PART_MAIN);
+              lv_obj_set_style_text_color(id(lbl_nina3_stars), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
             }
           } else {
              lv_label_set_text(id(lbl_nina3_stars), "--");
@@ -609,7 +609,7 @@ sensor:
               int r = (int)(id(g_nina3_hfr_c1_r) + ratio * (id(g_nina3_hfr_c2_r) - id(g_nina3_hfr_c1_r)));
               int g = (int)(id(g_nina3_hfr_c1_g) + ratio * (id(g_nina3_hfr_c2_g) - id(g_nina3_hfr_c1_g)));
               int b = (int)(id(g_nina3_hfr_c1_b) + ratio * (id(g_nina3_hfr_c2_b) - id(g_nina3_hfr_c1_b)));
-              lv_obj_set_style_text_color(id(lbl_nina3_hfr), lv_color_make(r, g, b), LV_PART_MAIN);
+              lv_obj_set_style_text_color(id(lbl_nina3_hfr), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
             }
           } else { 
             lv_label_set_text(id(lbl_nina3_hfr), "--");
@@ -635,7 +635,7 @@ sensor:
               int r = (int)(id(g_nina3_sat_px_c1_r) + ratio * (id(g_nina3_sat_px_c2_r) - id(g_nina3_sat_px_c1_r)));
               int g = (int)(id(g_nina3_sat_px_c1_g) + ratio * (id(g_nina3_sat_px_c2_g) - id(g_nina3_sat_px_c1_g)));
               int b = (int)(id(g_nina3_sat_px_c1_b) + ratio * (id(g_nina3_sat_px_c2_b) - id(g_nina3_sat_px_c1_b)));
-              lv_obj_set_style_text_color(id(lbl_nina3_sat_px), lv_color_make(r, g, b), LV_PART_MAIN);
+              lv_obj_set_style_text_color(id(lbl_nina3_sat_px), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
             }
           } else lv_label_set_text(id(lbl_nina3_sat_px), "--");
 
@@ -664,8 +664,8 @@ sensor:
               int r = (int)(id(g_nina3_rms_c1_r) + ratio * (id(g_nina3_rms_c2_r) - id(g_nina3_rms_c1_r)));
               int g = (int)(id(g_nina3_rms_c1_g) + ratio * (id(g_nina3_rms_c2_g) - id(g_nina3_rms_c1_g)));
               int b = (int)(id(g_nina3_rms_c1_b) + ratio * (id(g_nina3_rms_c2_b) - id(g_nina3_rms_c1_b)));
-              lv_obj_set_style_text_color(id(lbl_nina3_rms), lv_color_make(r, g, b), LV_PART_MAIN);
-              lv_obj_set_style_text_color(id(lbl_cmb_nina3_rms), lv_color_make(r, g, b), LV_PART_MAIN);
+              lv_obj_set_style_text_color(id(lbl_nina3_rms), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+              lv_obj_set_style_text_color(id(lbl_cmb_nina3_rms), lv_color_hex(0xFFFFFF), LV_PART_MAIN);
             }
           } else { 
             lv_label_set_text(id(lbl_nina3_rms), "--");
