@@ -651,6 +651,20 @@ switch:
           lv_obj_set_style_text_color(id(lbl_cmb_nina3_exp_num), white, LV_PART_MAIN);
           lv_obj_set_style_text_color(id(lbl_cmb_nina3_exp_time), white, LV_PART_MAIN);
 
+  - platform: template
+    name: "Enable Plant Page"
+    id: switch_enable_plants
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    turn_on_action:
+      - globals.set:
+          id: g_plants_enabled
+          value: 'true'
+    turn_off_action:
+      - globals.set:
+          id: g_plants_enabled
+          value: 'false'
+
 select:
   - platform: template
     name: "Theme Selection"
@@ -814,9 +828,11 @@ select:
              lv_scr_load_anim(id(nina3_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
              id(refresh_nina3_page).execute();
           } else if (x == "Plant Monitor") {
-             id(g_current_page) = 4;
-             lv_scr_load_anim(id(plants_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
-             id(refresh_plants_page).execute();
+             if (id(g_plants_enabled)) {
+               id(g_current_page) = 4;
+               lv_scr_load_anim(id(plants_page)->obj, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+               id(refresh_plants_page).execute();
+             }
           }
 
 light:

@@ -6,6 +6,7 @@ text_sensor:
     attribute: moisture_status
     on_value:
       - lambda: |-
+          if (!id(g_plants_enabled)) return;
           lv_label_set_text(id(lbl_plant_spider_plant_status), x.c_str());
           std::string val = x;
           std::transform(val.begin(), val.end(), val.begin(), ::tolower);
@@ -26,6 +27,7 @@ text_sensor:
     attribute: moisture_status
     on_value:
       - lambda: |-
+          if (!id(g_plants_enabled)) return;
           lv_label_set_text(id(lbl_plant_jade_plant_status), x.c_str());
           std::string val = x;
           std::transform(val.begin(), val.end(), val.begin(), ::tolower);
@@ -46,6 +48,7 @@ text_sensor:
     attribute: moisture_status
     on_value:
       - lambda: |-
+          if (!id(g_plants_enabled)) return;
           lv_label_set_text(id(lbl_plant_pothos_status), x.c_str());
           std::string val = x;
           std::transform(val.begin(), val.end(), val.begin(), ::tolower);
@@ -66,6 +69,7 @@ text_sensor:
     attribute: moisture_status
     on_value:
       - lambda: |-
+          if (!id(g_plants_enabled)) return;
           lv_label_set_text(id(lbl_plant_begonia_status), x.c_str());
           std::string val = x;
           std::transform(val.begin(), val.end(), val.begin(), ::tolower);
@@ -86,6 +90,7 @@ text_sensor:
     attribute: moisture_status
     on_value:
       - lambda: |-
+          if (!id(g_plants_enabled)) return;
           lv_label_set_text(id(lbl_plant_monstera_status), x.c_str());
           std::string val = x;
           std::transform(val.begin(), val.end(), val.begin(), ::tolower);
@@ -106,6 +111,7 @@ text_sensor:
     attribute: moisture_status
     on_value:
       - lambda: |-
+          if (!id(g_plants_enabled)) return;
           lv_label_set_text(id(lbl_plant_nerve_plant_status), x.c_str());
           std::string val = x;
           std::transform(val.begin(), val.end(), val.begin(), ::tolower);
@@ -126,6 +132,7 @@ text_sensor:
     attribute: moisture_status
     on_value:
       - lambda: |-
+          if (!id(g_plants_enabled)) return;
           lv_label_set_text(id(lbl_plant_aglaonema_status), x.c_str());
           std::string val = x;
           std::transform(val.begin(), val.end(), val.begin(), ::tolower);
@@ -146,6 +153,7 @@ text_sensor:
     attribute: moisture_status
     on_value:
       - lambda: |-
+          if (!id(g_plants_enabled)) return;
           lv_label_set_text(id(lbl_plant_croton_status), x.c_str());
           std::string val = x;
           std::transform(val.begin(), val.end(), val.begin(), ::tolower);
@@ -166,6 +174,7 @@ text_sensor:
     attribute: moisture_status
     on_value:
       - lambda: |-
+          if (!id(g_plants_enabled)) return;
           lv_label_set_text(id(lbl_plant_elephant_ears_status), x.c_str());
           std::string val = x;
           std::transform(val.begin(), val.end(), val.begin(), ::tolower);
@@ -185,60 +194,60 @@ sensor:
     id: plant_spider_plant_moisture
     entity_id: ${entity_moisture_spider}
     on_value:
-      - lambda: lv_label_set_text_fmt(id(lbl_plant_spider_plant_moisture), "%d%%", (int)x);
+      - lambda: if (id(g_plants_enabled)) lv_label_set_text_fmt(id(lbl_plant_spider_plant_moisture), "%d%%", (int)x);
 
   # Jade Plant
   - platform: homeassistant
     id: plant_jade_plant_moisture
     entity_id: ${entity_moisture_jade}
     on_value:
-      - lambda: lv_label_set_text_fmt(id(lbl_plant_jade_plant_moisture), "%d%%", (int)x);
+      - lambda: if (id(g_plants_enabled)) lv_label_set_text_fmt(id(lbl_plant_jade_plant_moisture), "%d%%", (int)x);
 
   # Pothos
   - platform: homeassistant
     id: plant_pothos_moisture
     entity_id: ${entity_moisture_pothos}
     on_value:
-      - lambda: lv_label_set_text_fmt(id(lbl_plant_pothos_moisture), "%d%%", (int)x);
+      - lambda: if (id(g_plants_enabled)) lv_label_set_text_fmt(id(lbl_plant_pothos_moisture), "%d%%", (int)x);
 
   # Begonia
   - platform: homeassistant
     id: plant_begonia_moisture
     entity_id: ${entity_moisture_begonia}
     on_value:
-      - lambda: lv_label_set_text_fmt(id(lbl_plant_begonia_moisture), "%d%%", (int)x);
+      - lambda: if (id(g_plants_enabled)) lv_label_set_text_fmt(id(lbl_plant_begonia_moisture), "%d%%", (int)x);
 
   # Monstera
   - platform: homeassistant
     id: plant_monstera_moisture
     entity_id: ${entity_moisture_monstera}
     on_value:
-      - lambda: lv_label_set_text_fmt(id(lbl_plant_monstera_moisture), "%d%%", (int)x);
+      - lambda: if (id(g_plants_enabled)) lv_label_set_text_fmt(id(lbl_plant_monstera_moisture), "%d%%", (int)x);
 
   # Nerve Plant
   - platform: homeassistant
     id: plant_nerve_plant_moisture
     entity_id: ${entity_moisture_nerve}
     on_value:
-      - lambda: lv_label_set_text_fmt(id(lbl_plant_nerve_plant_moisture), "%d%%", (int)x);
+      - lambda: if (id(g_plants_enabled)) lv_label_set_text_fmt(id(lbl_plant_nerve_plant_moisture), "%d%%", (int)x);
 
   # Aglaonema
   - platform: homeassistant
     id: plant_aglaonema_moisture
     entity_id: ${entity_moisture_aglaonema}
     on_value:
-      - lambda: lv_label_set_text_fmt(id(lbl_plant_aglaonema_moisture), "%d%%", (int)x);
+      - lambda: if (id(g_plants_enabled)) lv_label_set_text_fmt(id(lbl_plant_aglaonema_moisture), "%d%%", (int)x);
 
   # Croton
   - platform: homeassistant
     id: plant_croton_moisture
     entity_id: ${entity_moisture_croton}
     on_value:
-      - lambda: lv_label_set_text_fmt(id(lbl_plant_croton_moisture), "%d%%", (int)x);
+      - lambda: if (id(g_plants_enabled)) lv_label_set_text_fmt(id(lbl_plant_croton_moisture), "%d%%", (int)x);
 
   # Elephant Ears
   - platform: homeassistant
     id: plant_elephant_ears_moisture
     entity_id: ${entity_moisture_elephant}
     on_value:
-      - lambda: lv_label_set_text_fmt(id(lbl_plant_elephant_ears_moisture), "%d%%", (int)x);
+      - lambda: if (id(g_plants_enabled)) lv_label_set_text_fmt(id(lbl_plant_elephant_ears_moisture), "%d%%", (int)x);

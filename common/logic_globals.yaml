@@ -363,3 +363,8 @@ globals:
   - id: g_nina3_sat_px_c2_b
     type: float
     initial_value: '94'
+
+  - id: g_plants_enabled
+    type: bool
+    initial_value: 'true'
+    restore_value: yes
