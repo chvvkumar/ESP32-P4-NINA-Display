@@ -15,6 +15,7 @@
 *.managed_components/
 managed_components/
 managed_components/*
+.esphome/
 
 # Arduino build directories
 build/

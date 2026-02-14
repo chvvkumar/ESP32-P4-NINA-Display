@@ -17,11 +17,10 @@
 #include "esp_wifi.h"
 #include "esp_event.h"
 
-#define BOOT_BUTTON_GPIO GPIO_NUM_35
+#include "app_config.h"
+#include "web_server.h"
 
-// WIFI CONFIGURATION - UPDATE THESE
-#define WIFI_SSID      "IoT"
-#define WIFI_PASS      "kkkkkkkk"
+#define BOOT_BUTTON_GPIO GPIO_NUM_35
 
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
@@ -44,13 +43,14 @@ static void event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
-void wifi_init_sta(void)
+void wifi_init(void)
 {
     s_wifi_event_group = xEventGroupCreate();
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     esp_netif_create_default_wifi_sta();
+    esp_netif_create_default_wifi_ap();
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
@@ -68,18 +68,35 @@ void wifi_init_sta(void)
                                                         NULL,
                                                         &instance_got_ip));
 
-    wifi_config_t wifi_config = {
+    app_config_t *app_cfg = app_config_get();
+
+    wifi_config_t wifi_config_sta = {
         .sta = {
-            .ssid = WIFI_SSID,
-            .password = WIFI_PASS,
             .threshold.authmode = WIFI_AUTH_WPA2_PSK,
         },
     };
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    if (strlen(app_cfg->wifi_ssid) > 0) {
+        strncpy((char*)wifi_config_sta.sta.ssid, app_cfg->wifi_ssid, sizeof(wifi_config_sta.sta.ssid));
+        strncpy((char*)wifi_config_sta.sta.password, app_cfg->wifi_pass, sizeof(wifi_config_sta.sta.password));
+    }
+
+    wifi_config_t wifi_config_ap = {
+        .ap = {
+            .ssid = "AllSky-Config",
+            .ssid_len = strlen("AllSky-Config"),
+            .channel = 1,
+            .password = "12345678",
+            .max_connection = 4,
+            .authmode = WIFI_AUTH_WPA_WPA2_PSK
+        },
+    };
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config_sta));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config_ap));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_LOGI(TAG, "wifi_init_sta finished.");
+    ESP_LOGI(TAG, "wifi_init finished.");
 }
 
 static void input_task(void *arg) {
@@ -114,9 +131,20 @@ static void data_update_task(void *arg) {
     xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
     ESP_LOGI(TAG, "WiFi Connected, starting data polling");
 
+    app_config_t *cfg = app_config_get();
+
     while (1) {
-        nina_client_get_data("http://192.168.1.154:1888/v2/api/", &d1);
-        nina_client_get_data("http://192.168.1.136:1888/v2/api/", &d2);
+        if (strlen(cfg->api_url_1) > 0) {
+            ESP_LOGI(TAG, "Polling NINA instance 1...");
+            nina_client_get_data(cfg->api_url_1, &d1);
+            ESP_LOGI(TAG, "Instance 1: connected=%d, status=%s, target=%s", d1.connected, d1.status, d1.target_name);
+        }
+        
+        if (strlen(cfg->api_url_2) > 0) {
+            ESP_LOGI(TAG, "Polling NINA instance 2...");
+            nina_client_get_data(cfg->api_url_2, &d2);
+            ESP_LOGI(TAG, "Instance 2: connected=%d, status=%s, target=%s", d2.connected, d2.status, d2.target_name);
+        }
 
         bsp_display_lock(0);
         nina_dashboard_update(0, &d1);
@@ -137,8 +165,14 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
+    // Initialize Config
+    app_config_init();
+
     // Init WiFi
-    wifi_init_sta();
+    wifi_init();
+
+    // Start Web Server
+    start_web_server();
 
     bsp_display_cfg_t cfg = {
         .lvgl_port_cfg = ESP_LVGL_PORT_INIT_CONFIG(),
