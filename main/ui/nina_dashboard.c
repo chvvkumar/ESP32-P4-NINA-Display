@@ -51,6 +51,8 @@ static lv_obj_t * lbl_loop_count;
 
 // Data Display Labels
 static lv_obj_t * lbl_rms_value;
+static lv_obj_t * lbl_rms_ra_value;
+static lv_obj_t * lbl_rms_dec_value;
 static lv_obj_t * lbl_hfr_value;
 static lv_obj_t * lbl_stars_value;
 static lv_obj_t * lbl_saturated_value;
@@ -257,13 +259,48 @@ void create_nina_dashboard(lv_obj_t * parent) {
     lv_obj_t * box_rms = create_bento_box(main_cont);
     lv_obj_set_grid_cell(box_rms, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 1, 1);
     lv_obj_set_flex_flow(box_rms, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(box_rms, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(box_rms, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     create_small_label(box_rms, "GUIDING RMS");
-    
+
+    // Total RMS (main value)
     lbl_rms_value = create_value_label(box_rms);
     lv_obj_set_style_text_color(lbl_rms_value, COLOR_ROSE, 0);
     lv_label_set_text(lbl_rms_value, "0.38\"");
+
+    // RA and DEC RMS (smaller values below)
+    lv_obj_t * rms_details = lv_obj_create(box_rms);
+    lv_obj_remove_style_all(rms_details);
+    lv_obj_set_size(rms_details, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(rms_details, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(rms_details, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(rms_details, 16, 0);
+
+    // RA container
+    lv_obj_t * ra_cont = lv_obj_create(rms_details);
+    lv_obj_remove_style_all(ra_cont);
+    lv_obj_set_size(ra_cont, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(ra_cont, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(ra_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    create_small_label(ra_cont, "RA");
+    lbl_rms_ra_value = lv_label_create(ra_cont);
+    lv_obj_set_style_text_color(lbl_rms_ra_value, COLOR_ROSE, 0);
+    lv_obj_set_style_text_font(lbl_rms_ra_value, &lv_font_montserrat_20, 0);
+    lv_label_set_text(lbl_rms_ra_value, "0.25\"");
+
+    // DEC container
+    lv_obj_t * dec_cont = lv_obj_create(rms_details);
+    lv_obj_remove_style_all(dec_cont);
+    lv_obj_set_size(dec_cont, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(dec_cont, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(dec_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    create_small_label(dec_cont, "DEC");
+    lbl_rms_dec_value = lv_label_create(dec_cont);
+    lv_obj_set_style_text_color(lbl_rms_dec_value, COLOR_ROSE, 0);
+    lv_obj_set_style_text_font(lbl_rms_dec_value, &lv_font_montserrat_20, 0);
+    lv_label_set_text(lbl_rms_dec_value, "0.28\"");
 
     /* ═══════════════════════════════════════════════════════════
      * HFR / SHARPNESS (Col 1, Row 2)
@@ -376,11 +413,23 @@ void update_nina_dashboard_ui(const nina_client_t *data) {
          lv_label_set_text(lbl_loop_count, "-- / --");
     }
 
-    // 5. Guiding RMS
+    // 5. Guiding RMS (Total, RA, DEC)
     if (data->guider.rms_total > 0) {
         lv_label_set_text_fmt(lbl_rms_value, "%.2f\"", data->guider.rms_total);
     } else {
         lv_label_set_text(lbl_rms_value, "--");
+    }
+
+    if (data->guider.rms_ra > 0) {
+        lv_label_set_text_fmt(lbl_rms_ra_value, "%.2f\"", data->guider.rms_ra);
+    } else {
+        lv_label_set_text(lbl_rms_ra_value, "--");
+    }
+
+    if (data->guider.rms_dec > 0) {
+        lv_label_set_text_fmt(lbl_rms_dec_value, "%.2f\"", data->guider.rms_dec);
+    } else {
+        lv_label_set_text(lbl_rms_dec_value, "--");
     }
 
     // 6. HFR / Sharpness

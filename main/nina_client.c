@@ -308,14 +308,35 @@ static void fetch_guider_robust(const char *base_url, nina_client_t *data) {
     if (response) {
         cJSON *rms = cJSON_GetObjectItem(response, "RMSError");
         if (rms) {
+            // Total RMS
             cJSON *total = cJSON_GetObjectItem(rms, "Total");
             if (total) {
                 cJSON *arcsec = cJSON_GetObjectItem(total, "Arcseconds");
                 if (arcsec) {
                     data->guider.rms_total = (float)arcsec->valuedouble;
-                    ESP_LOGI(TAG, "Guiding RMS: %.2f\"", data->guider.rms_total);
                 }
             }
+
+            // RA RMS
+            cJSON *ra = cJSON_GetObjectItem(rms, "RA");
+            if (ra) {
+                cJSON *arcsec = cJSON_GetObjectItem(ra, "Arcseconds");
+                if (arcsec) {
+                    data->guider.rms_ra = (float)arcsec->valuedouble;
+                }
+            }
+
+            // DEC RMS
+            cJSON *dec = cJSON_GetObjectItem(rms, "Dec");
+            if (dec) {
+                cJSON *arcsec = cJSON_GetObjectItem(dec, "Arcseconds");
+                if (arcsec) {
+                    data->guider.rms_dec = (float)arcsec->valuedouble;
+                }
+            }
+
+            ESP_LOGI(TAG, "Guiding RMS - Total: %.2f\", RA: %.2f\", DEC: %.2f\"",
+                data->guider.rms_total, data->guider.rms_ra, data->guider.rms_dec);
         }
     }
 
