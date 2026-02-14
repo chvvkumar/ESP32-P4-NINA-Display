@@ -189,7 +189,7 @@ void create_nina_dashboard(lv_obj_t * parent) {
     lbl_instance_name = lv_label_create(header_left);
     lv_obj_set_style_text_color(lbl_instance_name, COLOR_BLUE, 0);
     lv_obj_set_style_text_font(lbl_instance_name, &lv_font_montserrat_26, 0);
-    lv_label_set_text(lbl_instance_name, "NINA - RIG 01");
+    lv_label_set_text(lbl_instance_name, "N.I.N.A.");
 
     // Right Side: Target Name (centered vertically, right-justified)
     lv_obj_t * header_right = lv_obj_create(header);
@@ -201,7 +201,7 @@ void create_nina_dashboard(lv_obj_t * parent) {
     lbl_target_name = lv_label_create(header_right);
     lv_obj_add_style(lbl_target_name, &style_value_large, 0);
     lv_obj_set_style_text_color(lbl_target_name, COLOR_TEXT, 0);
-    lv_label_set_text(lbl_target_name, "M42 ORION");
+    lv_label_set_text(lbl_target_name, "----");
 
     /* ═══════════════════════════════════════════════════════════
      * EXPOSURE DISPLAY (Col 0, Rows 1-2, Span 2 Rows)
@@ -235,10 +235,12 @@ void create_nina_dashboard(lv_obj_t * parent) {
 
     lbl_exposure_current = lv_label_create(arc_center);
     lv_obj_add_style(lbl_exposure_current, &style_value_large, 0);
-    lv_label_set_text(lbl_exposure_current, "420s");
+    lv_label_set_text(lbl_exposure_current, "----s");
 
-    lbl_exposure_total = create_small_label(arc_center, "7:00");
-    lv_obj_set_style_text_color(lbl_exposure_total, COLOR_LABEL, 0);
+    lbl_exposure_total = create_small_label(arc_center, "Filter");
+    lv_obj_set_style_text_color(lbl_exposure_total, COLOR_AMBER, 0);
+    lv_obj_set_style_text_font(lbl_exposure_total, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_pad_top(lbl_exposure_total, 10, 0);
 
     // Loop Count at Bottom (larger font)
     lbl_loop_count = lv_label_create(box_exposure);
@@ -357,8 +359,9 @@ void update_nina_dashboard_ui(const nina_client_t *data) {
     }
 
     // 2. Filter - Update arc color based on current filter
+    uint32_t filter_color = 0x3b82f6;  // Default color (blue)
     if (data->current_filter[0] != '\0' && strcmp(data->current_filter, "--") != 0) {
-        uint32_t filter_color = app_config_get_filter_color(data->current_filter);
+        filter_color = app_config_get_filter_color(data->current_filter);
         lv_obj_set_style_arc_color(arc_exposure, lv_color_hex(filter_color), LV_PART_INDICATOR);
     }
 
@@ -368,24 +371,15 @@ void update_nina_dashboard_ui(const nina_client_t *data) {
         float total = data->exposure_total;
         int total_sec = (int)total;
 
-        // Center label: Show total exposure length in seconds
-        if (total_sec < 60) {
-            lv_label_set_text_fmt(lbl_exposure_current, "%ds", total_sec);
-        } else if (total_sec < 3600) {
-            lv_label_set_text_fmt(lbl_exposure_current, "%d:%02d", total_sec / 60, total_sec % 60);
-        } else {
-            lv_label_set_text_fmt(lbl_exposure_current, "%d:%02d:%02d",
-                total_sec / 3600, (total_sec % 3600) / 60, total_sec % 60);
-        }
+        // Center label: Always show total exposure length in seconds
+        lv_label_set_text_fmt(lbl_exposure_current, "%ds", total_sec);
 
-        // Secondary label: Show elapsed time
-        int elapsed_sec = (int)elapsed;
-        if (total_sec < 3600) {
-            lv_label_set_text_fmt(lbl_exposure_total, "%d:%02d elapsed",
-                elapsed_sec / 60, elapsed_sec % 60);
+        // Secondary label: Show filter name with matching color
+        if (data->current_filter[0] != '\0' && strcmp(data->current_filter, "--") != 0) {
+            lv_label_set_text(lbl_exposure_total, data->current_filter);
+            lv_obj_set_style_text_color(lbl_exposure_total, lv_color_hex(filter_color), 0);
         } else {
-            lv_label_set_text_fmt(lbl_exposure_total, "%d:%02d elapsed",
-                elapsed_sec / 3600, (elapsed_sec % 3600) / 60);
+            lv_label_set_text(lbl_exposure_total, "");
         }
 
         // Update Arc progress (0-100)
