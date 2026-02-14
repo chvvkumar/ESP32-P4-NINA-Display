@@ -1,3 +1,70 @@
+Here are the precise instructions for an AI agent (or a human developer) to implement the "Modern Bento XL" layout in LVGL, followed by the actual C code implementation.
+
+Agent Implementation Instructions
+Project Context:
+
+Platform: ESP32-P4 with LVGL v8.3/v9.
+
+Display: 720x720 resolution (Square).
+
+Theme: "Modern Bento XL" (Dark Mode, High Contrast, Large Typography).
+
+Data Source: nina_client_t structure (populated from JSON API).
+
+Visual Specification:
+
+Color Palette:
+
+Background: #050505 (Almost Black).
+
+Card Background: #18181b (Zinc-900) with LV_OPA_90 opacity.
+
+Accent (Imaging): #10b981 (Emerald-500).
+
+Accent (Text): #ffffff (White) and #a1a1aa (Zinc-400) for labels.
+
+Typography:
+
+Use the largest available fonts (LV_FONT_MONTSERRAT_48 or 28 scaled up) for primary metrics (Progress, RMS, Temp).
+
+Use smaller, uppercase, tracked-out fonts for labels (e.g., "SEQUENCE PROGRESS").
+
+Layout Grid (Bento):
+
+Use LV_LAYOUT_GRID.
+
+Columns: 2 Equal columns (LV_GRID_FR(1)).
+
+Rows: Header (Content), Imaging Card (Flex), Lower Cards (Equal Flex).
+
+Gap: 20px padding between elements.
+
+Component Requirements:
+
+Header: Display "Active Target" label and the Target Name (e.g., "M31") in large, bold emerald text.
+
+Imaging Card (Span 2): Must span the full width. Include a visual "Progress Bar" at the bottom of the card using a nested lv_obj with partial width.
+
+Metrics Cards:
+
+Guiding: Show Total RMS (Large) and RA/DEC breakdown (Small).
+
+Camera: Show Temperature (Large) and Cooler Power (Small).
+
+Moon: Show Illumination %.
+
+Focuser: Show Position count.
+
+Constraint Checklist:
+
+Do NOT use external image assets (PNG/JPG). Use lv_draw or lv_obj styling (circles/rectangles) to simulate icons to ensure code portability.
+
+Code must be contained in nina_dashboard.c.
+
+Ensure thread safety if updating LVGL from a separate task (use a mutex or dispatcher if applicable, though standard LVGL is not thread-safe without locks).
+
+
+main/ui/nina_dashboard.c:
 /**
  * @file nina_dashboard.c
  * @brief "Modern Bento XL" Layout implementation for 720x720 Displays
@@ -8,7 +75,6 @@
 #include "nina_client.h"
 #include "lvgl.h"
 #include <stdio.h>
-#include <string.h>
 
 /*********************
  * DEFINES
@@ -270,7 +336,7 @@ void update_nina_dashboard_ui(const nina_client_t *data) {
     if (!scr_dashboard || !data) return;
 
     // 1. Target & Status
-    if (data->status[0] != '\0') {
+    if (data->status) {
         lv_label_set_text(lbl_status_pill, data->status);
         if (strcmp(data->status, "IMAGING") == 0) {
             lv_obj_set_style_text_color(lbl_status_pill, COLOR_ACCENT, 0);
@@ -307,3 +373,32 @@ void update_nina_dashboard_ui(const nina_client_t *data) {
     // int pct = (data->imaging.current * 100) / data->imaging.total;
     // lv_obj_set_width(bar_progress, LV_PCT(pct));
 }
+
+main/ui/nina_dashboard.h:
+#ifndef NINA_DASHBOARD_H
+#define NINA_DASHBOARD_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include "lvgl.h"
+#include "nina_client.h"
+
+/**
+ * @brief Initialize the Modern Bento XL Dashboard
+ * @param parent The parent LVGL object (usually the screen)
+ */
+void create_nina_dashboard(lv_obj_t * parent);
+
+/**
+ * @brief Update the dashboard metrics
+ * @param data Pointer to the latest NINA client data
+ */
+void update_nina_dashboard_ui(const nina_client_t *data);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // NINA_DASHBOARD_H

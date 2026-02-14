@@ -113,10 +113,8 @@ static void input_task(void *arg) {
     while (1) {
         int level = gpio_get_level(BOOT_BUTTON_GPIO);
         if (level == 0 && last_level == 1) {
-            ESP_LOGI(TAG, "Button pressed, cycling view");
-            bsp_display_lock(0);
-            nina_dashboard_cycle_view();
-            bsp_display_unlock();
+            ESP_LOGI(TAG, "Button pressed");
+            // Future: Could toggle between instances or trigger actions
         }
         last_level = level;
         vTaskDelay(pdMS_TO_TICKS(100)); 
@@ -124,8 +122,7 @@ static void input_task(void *arg) {
 }
 
 static void data_update_task(void *arg) {
-    NinaData d1 = {0};
-    NinaData d2 = {0};
+    nina_client_t d1 = {0};
 
     // Wait for WiFi
     xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
@@ -139,16 +136,9 @@ static void data_update_task(void *arg) {
             nina_client_get_data(cfg->api_url_1, &d1);
             ESP_LOGI(TAG, "Instance 1: connected=%d, status=%s, target=%s", d1.connected, d1.status, d1.target_name);
         }
-        
-        if (strlen(cfg->api_url_2) > 0) {
-            ESP_LOGI(TAG, "Polling NINA instance 2...");
-            nina_client_get_data(cfg->api_url_2, &d2);
-            ESP_LOGI(TAG, "Instance 2: connected=%d, status=%s, target=%s", d2.connected, d2.status, d2.target_name);
-        }
 
         bsp_display_lock(0);
-        nina_dashboard_update(0, &d1);
-        nina_dashboard_update(1, &d2);
+        update_nina_dashboard_ui(&d1);
         bsp_display_unlock();
 
         vTaskDelay(pdMS_TO_TICKS(2000)); // Poll every 2 seconds
@@ -189,7 +179,8 @@ void app_main(void)
     bsp_display_brightness_set(50);
 
     bsp_display_lock(0);
-    nina_dashboard_init();
+    lv_obj_t *scr = lv_scr_act();
+    create_nina_dashboard(scr);
     bsp_display_unlock();
 
     xTaskCreate(input_task, "input_task", 4096, NULL, 5, NULL);

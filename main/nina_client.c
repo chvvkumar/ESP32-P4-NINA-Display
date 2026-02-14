@@ -105,7 +105,7 @@ static cJSON *http_get_json(const char *url) {
 // Data Fetchers for Orbital Theme
 // =============================================================================
 
-static void fetch_camera_info(const char *base_url, NinaData *data) {
+static void fetch_camera_info(const char *base_url, nina_client_t *data) {
     char url[256];
     snprintf(url, sizeof(url), "%sequipment/camera/info", base_url);
     
@@ -128,11 +128,11 @@ static void fetch_camera_info(const char *base_url, NinaData *data) {
         
         // Temperature
         cJSON *temp = cJSON_GetObjectItem(response, "Temperature");
-        if (temp) data->cam_temp = (float)temp->valuedouble;
+        if (temp) data->camera.temp = (float)temp->valuedouble;
         
         // Cooler Power
         cJSON *cooler = cJSON_GetObjectItem(response, "CoolerPower");
-        if (cooler) data->cooler_power = (int)cooler->valuedouble;
+        if (cooler) data->camera.cooler_power = (float)cooler->valuedouble;
         
         // Exposure timing (Use IsExposing and ExposureEndTime)
         cJSON *is_exposing = cJSON_GetObjectItem(response, "IsExposing");
@@ -162,7 +162,7 @@ static void fetch_camera_info(const char *base_url, NinaData *data) {
     cJSON_Delete(json);
 }
 
-static void traverse_sequence_state(cJSON *item, NinaData *data) {
+static void traverse_sequence_state(cJSON *item, nina_client_t *data) {
     if (!item) return;
 
     // Check if this item has exposure info and seems active/relevant
@@ -201,7 +201,7 @@ static void traverse_sequence_state(cJSON *item, NinaData *data) {
     }
 }
 
-static void fetch_sequence_state(const char *base_url, NinaData *data) {
+static void fetch_sequence_state(const char *base_url, nina_client_t *data) {
     char url[256];
     snprintf(url, sizeof(url), "%ssequence/state", base_url);
     
@@ -216,7 +216,7 @@ static void fetch_sequence_state(const char *base_url, NinaData *data) {
     cJSON_Delete(json);
 }
 
-static void fetch_sequence_info(const char *base_url, NinaData *data) {
+static void fetch_sequence_info(const char *base_url, nina_client_t *data) {
     char url[256];
     snprintf(url, sizeof(url), "%ssequence/json", base_url);
     
@@ -256,7 +256,7 @@ static void fetch_sequence_info(const char *base_url, NinaData *data) {
     cJSON_Delete(json);
 }
 
-static void fetch_guider_info(const char *base_url, NinaData *data) {
+static void fetch_guider_info(const char *base_url, nina_client_t *data) {
     char url[256];
     snprintf(url, sizeof(url), "%sequipment/guider/info", base_url);
     
@@ -271,7 +271,7 @@ static void fetch_guider_info(const char *base_url, NinaData *data) {
             if (total) {
                 cJSON *arcsec = cJSON_GetObjectItem(total, "Arcseconds");
                 if (arcsec) {
-                    data->guide_rms = (float)arcsec->valuedouble;
+                    data->guider.rms_total = (float)arcsec->valuedouble;
                 }
             }
         }
@@ -280,7 +280,7 @@ static void fetch_guider_info(const char *base_url, NinaData *data) {
     cJSON_Delete(json);
 }
 
-static void fetch_mount_info(const char *base_url, NinaData *data) {
+static void fetch_mount_info(const char *base_url, nina_client_t *data) {
     char url[256];
     snprintf(url, sizeof(url), "%sequipment/mount/info", base_url);
     
@@ -301,7 +301,7 @@ static void fetch_mount_info(const char *base_url, NinaData *data) {
     cJSON_Delete(json);
 }
 
-static void fetch_image_history(const char *base_url, NinaData *data) {
+static void fetch_image_history(const char *base_url, nina_client_t *data) {
     char url[256];
     snprintf(url, sizeof(url), "%simage-history", base_url);
     
@@ -324,7 +324,7 @@ static void fetch_image_history(const char *base_url, NinaData *data) {
     cJSON_Delete(json);
 }
 
-static void fetch_profile_info(const char *base_url, NinaData *data) {
+static void fetch_profile_info(const char *base_url, nina_client_t *data) {
     char url[256];
     snprintf(url, sizeof(url), "%sprofile/show", base_url);
     
@@ -348,7 +348,7 @@ static void fetch_profile_info(const char *base_url, NinaData *data) {
     cJSON_Delete(json);
 }
 
-static void fetch_filter_info(const char *base_url, NinaData *data) {
+static void fetch_filter_info(const char *base_url, nina_client_t *data) {
     char url[256];
     snprintf(url, sizeof(url), "%sequipment/filterwheel/info", base_url);
     
@@ -368,13 +368,30 @@ static void fetch_filter_info(const char *base_url, NinaData *data) {
     cJSON_Delete(json);
 }
 
+static void fetch_focuser_info(const char *base_url, nina_client_t *data) {
+    char url[256];
+    snprintf(url, sizeof(url), "%sequipment/focuser/info", base_url);
+    
+    cJSON *json = http_get_json(url);
+    if (!json) return;
+    
+    cJSON *response = cJSON_GetObjectItem(json, "Response");
+    if (response) {
+        cJSON *position = cJSON_GetObjectItem(response, "Position");
+        if (position) {
+            data->focuser.position = position->valueint;
+        }
+    }
+    cJSON_Delete(json);
+}
+
 // =============================================================================
 // Public API
 // =============================================================================
 
-void nina_client_get_data(const char *base_url, NinaData *data) {
+void nina_client_get_data(const char *base_url, nina_client_t *data) {
     // Initialize data structure
-    memset(data, 0, sizeof(NinaData));
+    memset(data, 0, sizeof(nina_client_t));
     data->connected = false;
     strcpy(data->target_name, "No Target");
     strcpy(data->status, "IDLE");
@@ -395,6 +412,7 @@ void nina_client_get_data(const char *base_url, NinaData *data) {
         fetch_image_history(base_url, data);
         fetch_profile_info(base_url, data);
         fetch_filter_info(base_url, data);
+        fetch_focuser_info(base_url, data);
         
         // Finalize exposure calculation
         // fetch_camera_info sets exposure_current to -remaining if exposing
@@ -422,5 +440,5 @@ void nina_client_get_data(const char *base_url, NinaData *data) {
     }
     
     ESP_LOGI(TAG, "NINA Data: connected=%d, profile=%s, target=%s, status=%s, filter=%s, temp=%.1f, rms=%.2f, hfr=%.2f, exp=%.1f/%.1f",
-        data->connected, data->profile_name, data->target_name, data->status, data->current_filter, data->cam_temp, data->guide_rms, data->hfr, data->exposure_current, data->exposure_total);
+        data->connected, data->profile_name, data->target_name, data->status, data->current_filter, data->camera.temp, data->guider.rms_total, data->hfr, data->exposure_current, data->exposure_total);
 }
