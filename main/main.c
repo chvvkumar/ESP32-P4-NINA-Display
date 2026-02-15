@@ -158,14 +158,20 @@ static void data_update_task(void *arg) {
         ESP_LOGI(TAG, "System time set: %s", strftime_buf);
     }
 
-    ESP_LOGI(TAG, "Starting data polling (tiered)");
+    ESP_LOGI(TAG, "Starting data polling (tiered) with WebSocket events");
 
     app_config_t *cfg = app_config_get();
+
+    // Start WebSocket connection for event-driven updates (IMAGE-SAVE, FILTERWHEEL-CHANGED)
+    if (strlen(cfg->api_url_1) > 0) {
+        nina_websocket_start(cfg->api_url_1, &d1);
+    }
 
     while (1) {
         if (strlen(cfg->api_url_1) > 0) {
             nina_client_poll(cfg->api_url_1, &d1, &poll_state);
-            ESP_LOGI(TAG, "Instance 1: connected=%d, status=%s, target=%s", d1.connected, d1.status, d1.target_name);
+            ESP_LOGI(TAG, "Instance 1: connected=%d, status=%s, target=%s, ws=%d",
+                d1.connected, d1.status, d1.target_name, d1.websocket_connected);
         }
 
         bsp_display_lock(0);
@@ -215,5 +221,5 @@ void app_main(void)
     bsp_display_unlock();
 
     xTaskCreate(input_task, "input_task", 4096, NULL, 5, NULL);
-    xTaskCreate(data_update_task, "data_task", 8192, NULL, 5, NULL); // Increased stack for HTTP client
+    xTaskCreate(data_update_task, "data_task", 12288, NULL, 5, NULL); // Stack for HTTP + WebSocket clients
 }
