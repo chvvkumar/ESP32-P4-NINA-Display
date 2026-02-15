@@ -1,10 +1,8 @@
 /**
  * @file nina_dashboard.c
- * @brief "Bento" NINA Dashboard - Multi-page grid layout for 720x720 displays
- * @version 4.0 (Multi-Instance Support)
+ * @brief NINA dashboard UI - grid layout for 720x720 displays
  *
- * Supports up to 3 NINA instances, each on its own page with identical layout.
- * Only the active page is visible; others are hidden via LV_OBJ_FLAG_HIDDEN.
+ * Each NINA instance gets its own page. Swipe left/right to switch pages.
  */
 
 #include "nina_dashboard.h"
@@ -15,21 +13,17 @@
 #include <stdio.h>
 #include <string.h>
 
-/*********************
- * DESIGN CONSTANTS
- *********************/
+/* Layout constants */
 #define SCREEN_SIZE     720
 #define OUTER_PADDING   16
 #define GRID_GAP        16
 #define BENTO_RADIUS    24
 
-/*********************
- * PER-PAGE WIDGET STRUCT
- *********************/
+/* Per-page widgets */
 #define MAX_POWER_WIDGETS 8
 
 typedef struct {
-    lv_obj_t *page;               // Root container for this page (full-screen grid)
+    lv_obj_t *page;
 
     // Header
     lv_obj_t *header_box;
@@ -65,47 +59,41 @@ typedef struct {
     lv_obj_t *lbl_pwr_title[MAX_POWER_WIDGETS];
     lv_obj_t *lbl_pwr_value[MAX_POWER_WIDGETS];
 
-    // Arc animation state (per-page)
+    // Arc animation state
     int prev_target_progress;
     int pending_arc_progress;
     bool arc_completing;
 } dashboard_page_t;
 
-/*********************
- * MODULE STATE
- *********************/
+/* State */
 static lv_obj_t *scr_dashboard = NULL;
 static lv_obj_t *main_cont = NULL;
 static dashboard_page_t pages[MAX_NINA_INSTANCES];
 static int page_count = 0;
 static int active_page = 0;
 
-// Page indicator dots (shared overlay)
+// Page dots
 static lv_obj_t *indicator_cont = NULL;
 static lv_obj_t *indicator_dots[MAX_NINA_INSTANCES];
 
 static const theme_t *current_theme = NULL;
 
-// Page change callback (for swipe gesture -> main.c notification)
+// Swipe callback — tells main.c which page we switched to
 static nina_page_change_cb_t page_change_cb = NULL;
 
-/*********************
- * STYLES
- *********************/
+/* Styles */
 static lv_style_t style_bento_box;
 static lv_style_t style_label_small;
 static lv_style_t style_value_large;
 static lv_style_t style_header_gradient;
 
-/**
- * @brief Initialize or update all styles based on current theme
- */
+/* (Re)init styles from the active theme */
 static void update_styles(void) {
     if (!current_theme) return;
 
     int gb = app_config_get()->color_brightness;
 
-    // Bento Box Style
+    // Box style
     lv_style_reset(&style_bento_box);
     lv_style_init(&style_bento_box);
     lv_style_set_bg_color(&style_bento_box, lv_color_hex(current_theme->bento_bg));
@@ -116,14 +104,14 @@ static void update_styles(void) {
     lv_style_set_border_opa(&style_bento_box, LV_OPA_COVER);
     lv_style_set_pad_all(&style_bento_box, 20);
 
-    // Small Label Style
+    // Small label
     lv_style_reset(&style_label_small);
     lv_style_init(&style_label_small);
     lv_style_set_text_color(&style_label_small, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)));
     lv_style_set_text_font(&style_label_small, &lv_font_montserrat_16);
     lv_style_set_text_letter_space(&style_label_small, 1);
 
-    // Large Value Style
+    // Large value
     lv_style_reset(&style_value_large);
     lv_style_init(&style_value_large);
     lv_style_set_text_color(&style_value_large, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)));
@@ -137,7 +125,7 @@ static void update_styles(void) {
     lv_style_set_text_font(&style_value_large, &lv_font_montserrat_20);
 #endif
 
-    // Header Gradient Style
+    // Header gradient
     lv_style_reset(&style_header_gradient);
     lv_style_init(&style_header_gradient);
     lv_style_set_bg_color(&style_header_gradient, lv_color_hex(current_theme->header_grad_color));
@@ -172,9 +160,7 @@ static lv_obj_t* create_value_label(lv_obj_t * parent) {
     return label;
 }
 
-/**
- * @brief Apply theme colors to a single page's widgets
- */
+/* Set theme colors on all widgets in a page */
 static void apply_theme_to_page(dashboard_page_t *p) {
     if (!p->page || !current_theme) return;
 
@@ -215,23 +201,23 @@ void nina_dashboard_apply_theme(int theme_index) {
 
     if (!scr_dashboard) return;
 
-    // Update main container BG
+    // Background
     if (main_cont) {
         lv_obj_set_style_bg_color(main_cont, lv_color_hex(current_theme->bg_main), 0);
     }
 
-    // Notify LVGL about style changes
+    // Tell LVGL styles changed
     lv_obj_report_style_change(&style_bento_box);
     lv_obj_report_style_change(&style_label_small);
     lv_obj_report_style_change(&style_value_large);
     lv_obj_report_style_change(&style_header_gradient);
 
-    // Apply per-widget theme colors to ALL pages
+    // Recolor widgets on every page
     for (int i = 0; i < page_count; i++) {
         apply_theme_to_page(&pages[i]);
     }
 
-    // Update page indicator dot colors
+    // Update dot colors
     if (indicator_cont) {
         int gb = app_config_get()->color_brightness;
         for (int i = 0; i < page_count; i++) {
@@ -247,13 +233,11 @@ void nina_dashboard_apply_theme(int theme_index) {
     lv_obj_invalidate(scr_dashboard);
 }
 
-/**
- * @brief Create the widget tree for a single dashboard page
- */
+/* Build all widgets for one dashboard page */
 static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent) {
     memset(p, 0, sizeof(dashboard_page_t));
 
-    // Page root — full-screen grid container
+    // Page root
     p->page = lv_obj_create(parent);
     lv_obj_remove_style_all(p->page);
     lv_obj_set_size(p->page, SCREEN_SIZE - 2 * OUTER_PADDING, SCREEN_SIZE - 2 * OUTER_PADDING);
@@ -273,7 +257,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent) {
     lv_obj_set_layout(p->page, LV_LAYOUT_GRID);
     lv_obj_set_grid_dsc_array(p->page, col_dsc, row_dsc);
 
-    /* ═══ HEADER (Row 0, Span 2 Columns) ═══ */
+    // Header (row 0, spans 2 cols)
     p->header_box = create_bento_box(p->page);
     lv_obj_set_grid_cell(p->header_box, LV_GRID_ALIGN_STRETCH, 0, 2, LV_GRID_ALIGN_STRETCH, 0, 1);
     lv_obj_set_flex_flow(p->header_box, LV_FLEX_FLOW_COLUMN);
@@ -291,7 +275,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent) {
     lv_obj_set_style_text_align(p->lbl_target_name, LV_TEXT_ALIGN_RIGHT, 0);
     lv_label_set_text(p->lbl_target_name, "----");
 
-    /* ═══ SEQUENCE INFO (Row 1, Span 2 Columns) ═══ */
+    // Sequence info (row 1, spans 2 cols)
     lv_obj_t *box_seq = create_bento_box(p->page);
     lv_obj_set_grid_cell(box_seq, LV_GRID_ALIGN_STRETCH, 0, 2, LV_GRID_ALIGN_STRETCH, 1, 1);
     lv_obj_set_flex_flow(box_seq, LV_FLEX_FLOW_ROW);
@@ -326,7 +310,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent) {
     lv_obj_set_style_text_font(p->lbl_seq_step, &lv_font_montserrat_24, 0);
     lv_label_set_text(p->lbl_seq_step, "----");
 
-    /* ═══ EXPOSURE ARC (Col 0, Rows 2-4, Span 3 Rows) ═══ */
+    // Exposure arc (col 0, rows 2-4)
     lv_obj_t *box_exposure = create_bento_box(p->page);
     lv_obj_set_grid_cell(box_exposure, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_STRETCH, 2, 3);
     lv_obj_set_flex_flow(box_exposure, LV_FLEX_FLOW_COLUMN);
@@ -370,7 +354,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent) {
     lv_obj_set_style_pad_top(p->lbl_loop_count, 8, 0);
     lv_label_set_text(p->lbl_loop_count, "-- / --");
 
-    /* ═══ RMS + HFR (Col 1, Row 2) ═══ */
+    // RMS + HFR (col 1, row 2)
     lv_obj_t *box_rms_hfr = create_bento_box(p->page);
     lv_obj_set_grid_cell(box_rms_hfr, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 2, 1);
     lv_obj_set_flex_flow(box_rms_hfr, LV_FLEX_FLOW_ROW);
@@ -409,7 +393,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent) {
     lv_obj_set_style_text_color(p->lbl_hfr_value, lv_color_hex(current_theme->hfr_color), 0);
     lv_label_set_text(p->lbl_hfr_value, "2.15");
 
-    /* ═══ TIME TO FLIP (Col 1, Row 3) ═══ */
+    // Time to flip (col 1, row 3)
     lv_obj_t *box_flip = create_bento_box(p->page);
     lv_obj_set_grid_cell(box_flip, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 3, 1);
     lv_obj_set_flex_flow(box_flip, LV_FLEX_FLOW_COLUMN);
@@ -423,7 +407,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent) {
     p->lbl_flip_value = create_value_label(box_flip);
     lv_label_set_text(p->lbl_flip_value, "--");
 
-    /* ═══ SAT. PIXELS + STARS (Col 1, Row 4) ═══ */
+    // Sat. pixels + stars (col 1, row 4)
     lv_obj_t *box_sat_stars = create_bento_box(p->page);
     lv_obj_set_grid_cell(box_sat_stars, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 4, 1);
     lv_obj_set_flex_flow(box_sat_stars, LV_FLEX_FLOW_ROW);
@@ -458,7 +442,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent) {
     p->lbl_stars_value = create_value_label(box_stars);
     lv_label_set_text(p->lbl_stars_value, "2451");
 
-    /* ═══ POWER ROW (Row 5, Span 2 Columns) ═══ */
+    // Power row (row 5, spans 2 cols)
     lv_obj_t *box_power = create_bento_box(p->page);
     lv_obj_set_grid_cell(box_power, LV_GRID_ALIGN_STRETCH, 0, 2, LV_GRID_ALIGN_STRETCH, 5, 1);
     lv_obj_set_flex_flow(box_power, LV_FLEX_FLOW_ROW);
@@ -491,17 +475,15 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent) {
         lv_obj_add_flag(p->box_pwr[i], LV_OBJ_FLAG_HIDDEN);
     }
 
-    // Init animation state
+    // Arc anim defaults
     p->prev_target_progress = 0;
     p->pending_arc_progress = 0;
     p->arc_completing = false;
 }
 
-/**
- * @brief Create the page indicator dots (shared overlay at bottom of screen)
- */
+/* Page indicator dots at the bottom */
 static void create_page_indicator(lv_obj_t *parent, int count) {
-    if (count <= 1) return;  // No indicator for single instance
+    if (count <= 1) return;
 
     indicator_cont = lv_obj_create(parent);
     lv_obj_remove_style_all(indicator_cont);
@@ -531,9 +513,7 @@ void nina_dashboard_set_page_change_cb(nina_page_change_cb_t cb) {
     page_change_cb = cb;
 }
 
-/**
- * @brief Gesture event handler for swipe navigation
- */
+/* Swipe left/right to change pages */
 static void gesture_event_cb(lv_event_t *e) {
     if (page_count <= 1) return;
 
@@ -545,20 +525,18 @@ static void gesture_event_cb(lv_event_t *e) {
     } else if (dir == LV_DIR_RIGHT) {
         new_page = (active_page - 1 + page_count) % page_count;
     } else {
-        return;  // Not a horizontal swipe
+        return;
     }
 
     nina_dashboard_show_page(new_page, page_count);
 
-    // Notify main.c about the page change
+    // Let main.c know
     if (page_change_cb) {
         page_change_cb(new_page);
     }
 }
 
-/**
- * @brief Create the multi-page Bento NINA Dashboard
- */
+/* Set up the dashboard with one page per NINA instance */
 void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     app_config_t *cfg = app_config_get();
     current_theme = themes_get(cfg->theme_index);
@@ -571,7 +549,7 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     page_count = instance_count;
     active_page = 0;
 
-    // Main Container - 720x720 background
+    // 720x720 background
     main_cont = lv_obj_create(scr_dashboard);
     lv_obj_remove_style_all(main_cont);
     lv_obj_set_size(main_cont, SCREEN_SIZE, SCREEN_SIZE);
@@ -579,7 +557,7 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     lv_obj_set_style_bg_opa(main_cont, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(main_cont, OUTER_PADDING, 0);
 
-    // Create pages
+    // Pages
     for (int i = 0; i < page_count; i++) {
         create_dashboard_page(&pages[i], main_cont);
         if (i != 0) {
@@ -587,16 +565,16 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
         }
     }
 
-    // Create page indicator dots
+    // Dots
     create_page_indicator(scr_dashboard, page_count);
 
-    // Register swipe gesture on the screen for page navigation
+    // Swipe to switch pages
     if (page_count > 1) {
         lv_obj_add_event_cb(scr_dashboard, gesture_event_cb, LV_EVENT_GESTURE, NULL);
         lv_obj_clear_flag(scr_dashboard, LV_OBJ_FLAG_GESTURE_BUBBLE);
     }
 
-    // Apply theme to finalize all colors
+    // Apply theme
     nina_dashboard_apply_theme(cfg->theme_index);
 }
 
@@ -629,7 +607,7 @@ int nina_dashboard_get_active_page(void) {
     return active_page;
 }
 
-// Arc animation callbacks (per-page via user_data)
+// Arc animation callbacks
 static void arc_reset_complete_cb(lv_anim_t *a) {
     dashboard_page_t *p = (dashboard_page_t *)a->user_data;
     if (p) p->arc_completing = false;
@@ -651,9 +629,7 @@ static void arc_fill_complete_cb(lv_anim_t *a) {
     lv_anim_start(&a2);
 }
 
-/**
- * @brief Update a single dashboard page with live data
- */
+/* Push new data to a dashboard page */
 void update_nina_dashboard_page(int page_index, const nina_client_t *data) {
     if (page_index < 0 || page_index >= page_count) return;
     if (!data) return;
@@ -663,7 +639,7 @@ void update_nina_dashboard_page(int page_index, const nina_client_t *data) {
 
     int gb = app_config_get()->color_brightness;
 
-    // 1. Header
+    // Header
     if (data->telescope_name[0] != '\0') {
         lv_label_set_text(p->lbl_instance_name, data->telescope_name);
     }
@@ -671,7 +647,7 @@ void update_nina_dashboard_page(int page_index, const nina_client_t *data) {
         lv_label_set_text(p->lbl_target_name, data->target_name);
     }
 
-    // 2. Sequence Info
+    // Sequence
     if (data->container_name[0] != '\0') {
         lv_label_set_text(p->lbl_seq_container, data->container_name);
     } else {
@@ -683,7 +659,7 @@ void update_nina_dashboard_page(int page_index, const nina_client_t *data) {
         lv_label_set_text(p->lbl_seq_step, "----");
     }
 
-    // 3. Filter - Update arc color
+    // Filter color on the arc
     uint32_t filter_color = app_config_apply_brightness(current_theme->progress_color, gb);
     if (data->current_filter[0] != '\0' && strcmp(data->current_filter, "--") != 0) {
         filter_color = app_config_get_filter_color(data->current_filter);
@@ -691,7 +667,7 @@ void update_nina_dashboard_page(int page_index, const nina_client_t *data) {
     lv_obj_set_style_arc_color(p->arc_exposure, lv_color_hex(filter_color), LV_PART_INDICATOR);
     lv_obj_set_style_shadow_color(p->arc_exposure, lv_color_hex(filter_color), LV_PART_INDICATOR);
 
-    // 4. Exposure Progress
+    // Exposure progress
     if (data->exposure_total > 0) {
         float elapsed = data->exposure_current;
         float total = data->exposure_total;
@@ -750,7 +726,7 @@ void update_nina_dashboard_page(int page_index, const nina_client_t *data) {
         lv_arc_set_value(p->arc_exposure, 0);
     }
 
-    // 5. Loop Count
+    // Loop count
     if (data->exposure_iterations > 0) {
         lv_label_set_text_fmt(p->lbl_loop_count, "%d / %d",
             data->exposure_count, data->exposure_iterations);
@@ -758,7 +734,7 @@ void update_nina_dashboard_page(int page_index, const nina_client_t *data) {
         lv_label_set_text(p->lbl_loop_count, "-- / --");
     }
 
-    // 6. RMS
+    // RMS
     if (data->guider.rms_total > 0) {
         lv_label_set_text_fmt(p->lbl_rms_value, "%.2f\"", data->guider.rms_total);
         uint32_t rms_color = app_config_get_rms_color(data->guider.rms_total);
@@ -783,7 +759,7 @@ void update_nina_dashboard_page(int page_index, const nina_client_t *data) {
         }
     }
 
-    // 7. HFR
+    // HFR
     if (data->hfr > 0) {
         lv_label_set_text_fmt(p->lbl_hfr_value, "%.2f", data->hfr);
         uint32_t hfr_color = app_config_get_hfr_color(data->hfr);
@@ -793,28 +769,28 @@ void update_nina_dashboard_page(int page_index, const nina_client_t *data) {
         lv_obj_set_style_text_color(p->lbl_hfr_value, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
     }
 
-    // 8. Meridian Flip
+    // Meridian flip
     if (data->meridian_flip[0] != '\0' && strcmp(data->meridian_flip, "--") != 0) {
         lv_label_set_text(p->lbl_flip_value, data->meridian_flip);
     } else {
         lv_label_set_text(p->lbl_flip_value, "--");
     }
 
-    // 9. Stars
+    // Stars
     if (data->stars >= 0) {
         lv_label_set_text_fmt(p->lbl_stars_value, "%d", data->stars);
     } else {
         lv_label_set_text(p->lbl_stars_value, "--");
     }
 
-    // 10. Saturated Pixels
+    // Saturated pixels
     if (data->saturated_pixels >= 0) {
         lv_label_set_text_fmt(p->lbl_saturated_value, "%d", data->saturated_pixels);
     } else {
         lv_label_set_text(p->lbl_saturated_value, "--");
     }
 
-    // 11. Power Row
+    // Power
     int pwr_idx = 0;
     bool sw = data->power.switch_connected;
 

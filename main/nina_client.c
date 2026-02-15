@@ -1,6 +1,6 @@
 /**
  * @file nina_client.c
- * @brief Robust NINA Client - Structure-independent data fetching
+ * @brief NINA Client - Structure-independent data fetching
  * @version 2.0
  *
  * This version uses simple, flat API endpoints that work regardless of
