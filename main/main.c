@@ -133,6 +133,7 @@ static void data_update_task(void *arg) {
     nina_client_t d1 = {0};
     nina_poll_state_t poll_state;
     nina_poll_state_init(&poll_state);
+    bool filters_synced = false;
 
     // Wait for WiFi
     xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
@@ -172,6 +173,16 @@ static void data_update_task(void *arg) {
             nina_client_poll(cfg->api_url_1, &d1, &poll_state);
             ESP_LOGI(TAG, "Instance 1: connected=%d, status=%s, target=%s, ws=%d",
                 d1.connected, d1.status, d1.target_name, d1.websocket_connected);
+
+            // Sync NVS filter config with API on first successful filter fetch
+            if (!filters_synced && d1.filter_count > 0) {
+                const char *names[MAX_FILTERS];
+                for (int i = 0; i < d1.filter_count; i++) {
+                    names[i] = d1.filters[i].name;
+                }
+                app_config_sync_filters(names, d1.filter_count);
+                filters_synced = true;
+            }
         }
 
         bsp_display_lock(0);

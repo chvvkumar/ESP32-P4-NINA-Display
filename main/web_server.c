@@ -8,6 +8,8 @@
 #include "freertos/task.h"
 #include "bsp/esp-bsp.h"
 #include "bsp/display.h"
+#include "ui/nina_dashboard.h"
+#include "ui/themes.h"
 
 static const char *TAG = "web_server";
 
@@ -52,7 +54,7 @@ static const char *HTML_CONTENT =
 "<div class=\"group\"><label>Host 2 (IP or Hostname)</label><input type=\"text\" id=\"url2\" placeholder=\"e.g., astromele3.lan or 192.168.1.101\"></div></div>"
 "<div class=\"tile area-appearance\"><h3>Appearance</h3>"
 "<div class=\"group\"><label>Dashboard Theme</label>"
-"<select id=\"theme_select\">"
+"<select id=\"theme_select\" onchange=\"setTheme(this.value)\">"
 "<option value=\"0\">Bento Default</option>"
 "<option value=\"1\">OLED Black</option>"
 "<option value=\"2\">Deep Space</option>"
@@ -100,6 +102,7 @@ static const char *HTML_CONTENT =
 "}"
 "function updateFilterColor(n,v){filterColorsObj[n]=v;}"
 "function updateFilterBrightness(n,v){filterBrightnessObj[n]=parseInt(v);}"
+"function setTheme(v){fetch('/api/theme',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({theme_index:parseInt(v)})});}"
 "let brightTimer=null;function setBrightness(v){document.getElementById('bright_val').innerText=v+'%';clearTimeout(brightTimer);brightTimer=setTimeout(()=>{fetch('/api/brightness',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({brightness:parseInt(v)})});},150);}"
 "let cbrightTimer=null;function setColorBrightness(v){document.getElementById('cbright_val').innerText=v+'%';clearTimeout(cbrightTimer);cbrightTimer=setTimeout(()=>{fetch('/api/color-brightness',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({color_brightness:parseInt(v)})});},150);}"
 "function checkOnline(){"
@@ -394,6 +397,49 @@ static esp_err_t color_brightness_post_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+// Handler for live theme switching (no reboot needed)
+static esp_err_t theme_post_handler(httpd_req_t *req)
+{
+    char buf[128];
+    int ret, remaining = req->content_len;
+
+    if (remaining >= (int)sizeof(buf)) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    ret = httpd_req_recv(req, buf, remaining);
+    if (ret <= 0) {
+        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+            httpd_resp_send_408(req);
+        }
+        return ESP_FAIL;
+    }
+    buf[ret] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    cJSON *val = cJSON_GetObjectItem(root, "theme_index");
+    if (cJSON_IsNumber(val)) {
+        int idx = val->valueint;
+        if (idx < 0) idx = 0;
+        if (idx >= themes_get_count()) idx = themes_get_count() - 1;
+        app_config_get()->theme_index = idx;
+        bsp_display_lock(0);
+        nina_dashboard_apply_theme(idx);
+        bsp_display_unlock();
+        ESP_LOGI(TAG, "Theme set to %d", idx);
+    }
+
+    cJSON_Delete(root);
+    httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
 // Handler for reboot
 static esp_err_t reboot_post_handler(httpd_req_t *req)
 {
@@ -468,6 +514,14 @@ void start_web_server(void)
             .user_ctx  = NULL
         };
         httpd_register_uri_handler(server, &uri_post_color_brightness);
+
+        httpd_uri_t uri_post_theme = {
+            .uri       = "/api/theme",
+            .method    = HTTP_POST,
+            .handler   = theme_post_handler,
+            .user_ctx  = NULL
+        };
+        httpd_register_uri_handler(server, &uri_post_theme);
 
         httpd_uri_t uri_post_reboot = {
             .uri       = "/api/reboot",

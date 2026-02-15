@@ -50,8 +50,19 @@ static lv_obj_t * lbl_stars_header;
 static lv_obj_t * lbl_stars_value;
 static lv_obj_t * lbl_sat_header;
 static lv_obj_t * lbl_saturated_value;
+static lv_obj_t * lbl_rms_title;
+static lv_obj_t * lbl_hfr_title;
+static lv_obj_t * lbl_flip_title;
+static lv_obj_t * lbl_flip_value;
 
 static const theme_t *current_theme = NULL;
+
+// Last computed progress value (from data, not from arc widget) to detect resets
+static int prev_target_progress = 0;
+// Pending arc progress to animate to after the "fill to 100%" animation completes
+static int pending_arc_progress = 0;
+// True while the "fill to 100%" + "reset to 0" animation sequence is playing
+static bool arc_completing = false;
 
 /*********************
  * STYLES
@@ -74,7 +85,7 @@ static void update_styles(void) {
     lv_style_set_bg_opa(&style_bento_box, LV_OPA_COVER);
     lv_style_set_radius(&style_bento_box, BENTO_RADIUS);
     lv_style_set_border_width(&style_bento_box, 1);
-    lv_style_set_border_color(&style_bento_box, lv_color_hex(current_theme->bento_border));
+    lv_style_set_border_color(&style_bento_box, lv_color_hex(current_theme->bento_bg));
     lv_style_set_border_opa(&style_bento_box, LV_OPA_COVER);
     lv_style_set_pad_all(&style_bento_box, 20);
 
@@ -176,11 +187,16 @@ void nina_dashboard_apply_theme(int theme_index) {
     
     if (lbl_exposure_total) lv_obj_set_style_text_color(lbl_exposure_total, lv_color_hex(current_theme->filter_text_color), 0);
     
-    // Semantic colors update - if they were set to default/placeholder
+    // Widget title colors (all use text_color, same as Target text)
+    if (lbl_rms_title) lv_obj_set_style_text_color(lbl_rms_title, lv_color_hex(current_theme->text_color), 0);
+    if (lbl_hfr_title) lv_obj_set_style_text_color(lbl_hfr_title, lv_color_hex(current_theme->text_color), 0);
+    if (lbl_flip_title) lv_obj_set_style_text_color(lbl_flip_title, lv_color_hex(current_theme->text_color), 0);
+    if (lbl_stars_header) lv_obj_set_style_text_color(lbl_stars_header, lv_color_hex(current_theme->text_color), 0);
+    if (lbl_sat_header) lv_obj_set_style_text_color(lbl_sat_header, lv_color_hex(current_theme->text_color), 0);
+
+    // Semantic value colors
     if (lbl_rms_value) lv_obj_set_style_text_color(lbl_rms_value, lv_color_hex(current_theme->rms_color), 0);
     if (lbl_hfr_value) lv_obj_set_style_text_color(lbl_hfr_value, lv_color_hex(current_theme->hfr_color), 0);
-    if (lbl_stars_header) lv_obj_set_style_text_color(lbl_stars_header, lv_color_hex(current_theme->stars_color), 0);
-    if (lbl_sat_header) lv_obj_set_style_text_color(lbl_sat_header, lv_color_hex(current_theme->saturated_color), 0);
     
     lv_obj_invalidate(scr_dashboard);
 }
@@ -207,14 +223,15 @@ void create_nina_dashboard(lv_obj_t * parent) {
     lv_obj_set_style_pad_all(main_cont, OUTER_PADDING, 0);
     lv_obj_set_style_pad_gap(main_cont, GRID_GAP, 0);
 
-    // Setup Grid: 2 Equal Columns x 5 Rows
+    // Setup Grid: 2 Equal Columns x 6 Rows
     static lv_coord_t col_dsc[] = {LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
     static lv_coord_t row_dsc[] = {
         LV_GRID_FR(2),  // Row 0 - Header (telescope + target stacked)
         LV_GRID_FR(1),  // Row 1 - Sequence Info (container + step)
-        LV_GRID_FR(3),  // Row 2
-        LV_GRID_FR(3),  // Row 3
-        LV_GRID_FR(2),  // Row 4 - Bottom row
+        LV_GRID_FR(2),  // Row 2 - RMS / Exposure arc top
+        LV_GRID_FR(2),  // Row 3 - HFR / Exposure arc mid
+        LV_GRID_FR(2),  // Row 4 - Time to Flip / Exposure arc bottom
+        LV_GRID_FR(2),  // Row 5 - Bottom row (Stars / Saturated)
         LV_GRID_TEMPLATE_LAST
     };
     lv_obj_set_layout(main_cont, LV_LAYOUT_GRID);
@@ -286,7 +303,7 @@ void create_nina_dashboard(lv_obj_t * parent) {
      * EXPOSURE DISPLAY (Col 0, Rows 2-3, Span 2 Rows)
      * ═══════════════════════════════════════════════════════════ */
     lv_obj_t * box_exposure = create_bento_box(main_cont);
-    lv_obj_set_grid_cell(box_exposure, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_STRETCH, 2, 2);
+    lv_obj_set_grid_cell(box_exposure, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_STRETCH, 2, 3);
     lv_obj_set_flex_flow(box_exposure, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(box_exposure, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(box_exposure, 0, 0);
@@ -335,7 +352,10 @@ void create_nina_dashboard(lv_obj_t * parent) {
     lv_obj_set_flex_flow(box_rms, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(box_rms, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    create_small_label(box_rms, "GUIDING RMS");
+    lbl_rms_title = create_small_label(box_rms, "GUIDING RMS");
+    lv_obj_set_width(lbl_rms_title, LV_PCT(100));
+    lv_obj_set_style_text_align(lbl_rms_title, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_color(lbl_rms_title, lv_color_hex(current_theme->text_color), 0);
 
     // Total RMS (main value)
     lbl_rms_value = create_value_label(box_rms);
@@ -350,43 +370,81 @@ void create_nina_dashboard(lv_obj_t * parent) {
     lv_obj_set_flex_flow(box_hfr, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(box_hfr, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    create_small_label(box_hfr, "HFR");
-    
+    lbl_hfr_title = create_small_label(box_hfr, "HFR");
+    lv_obj_set_width(lbl_hfr_title, LV_PCT(100));
+    lv_obj_set_style_text_align(lbl_hfr_title, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_color(lbl_hfr_title, lv_color_hex(current_theme->text_color), 0);
+
     lbl_hfr_value = create_value_label(box_hfr);
     lv_obj_set_style_text_color(lbl_hfr_value, lv_color_hex(current_theme->hfr_color), 0);
     lv_label_set_text(lbl_hfr_value, "2.15");
 
     /* ═══════════════════════════════════════════════════════════
-     * STAR COUNT (Col 0, Row 4)
+     * TIME TO FLIP (Col 1, Row 4)
+     * ═══════════════════════════════════════════════════════════ */
+    lv_obj_t * box_flip = create_bento_box(main_cont);
+    lv_obj_set_grid_cell(box_flip, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 4, 1);
+    lv_obj_set_flex_flow(box_flip, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(box_flip, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    lbl_flip_title = create_small_label(box_flip, "TIME TO FLIP");
+    lv_obj_set_width(lbl_flip_title, LV_PCT(100));
+    lv_obj_set_style_text_align(lbl_flip_title, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_color(lbl_flip_title, lv_color_hex(current_theme->text_color), 0);
+
+    lbl_flip_value = create_value_label(box_flip);
+    lv_label_set_text(lbl_flip_value, "--");
+
+    /* ═══════════════════════════════════════════════════════════
+     * STAR COUNT (Col 0, Row 5)
      * ═══════════════════════════════════════════════════════════ */
     lv_obj_t * box_stars = create_bento_box(main_cont);
-    lv_obj_set_grid_cell(box_stars, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_STRETCH, 4, 1);
+    lv_obj_set_grid_cell(box_stars, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_STRETCH, 5, 1);
     lv_obj_set_flex_flow(box_stars, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(box_stars, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    // Label with Star Icon (Unicode star)
     lbl_stars_header = create_small_label(box_stars, "STARS");
-    lv_obj_set_style_text_color(lbl_stars_header, lv_color_hex(current_theme->stars_color), 0);
-    
+    lv_obj_set_width(lbl_stars_header, LV_PCT(100));
+    lv_obj_set_style_text_align(lbl_stars_header, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_color(lbl_stars_header, lv_color_hex(current_theme->text_color), 0);
+
     lbl_stars_value = create_value_label(box_stars);
     lv_label_set_text(lbl_stars_value, "2451");
 
     /* ═══════════════════════════════════════════════════════════
-     * SATURATED PIXELS (Col 1, Row 4)
+     * SATURATED PIXELS (Col 1, Row 5)
      * ═══════════════════════════════════════════════════════════ */
     lv_obj_t * box_saturated = create_bento_box(main_cont);
-    lv_obj_set_grid_cell(box_saturated, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 4, 1);
+    lv_obj_set_grid_cell(box_saturated, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 5, 1);
     lv_obj_set_flex_flow(box_saturated, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(box_saturated, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    // Label with Lightning Icon (Unicode lightning bolt)
     lbl_sat_header = create_small_label(box_saturated, "SATURATED PIXELS");
-    lv_obj_set_style_text_color(lbl_sat_header, lv_color_hex(current_theme->saturated_color), 0);
-    
+    lv_obj_set_width(lbl_sat_header, LV_PCT(100));
+    lv_obj_set_style_text_align(lbl_sat_header, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_color(lbl_sat_header, lv_color_hex(current_theme->text_color), 0);
+
     lbl_saturated_value = create_value_label(box_saturated);
     lv_label_set_text(lbl_saturated_value, "84");
 }
 
+
+// Callback: after arc fills to 100%, animate from 0 to the new exposure's progress
+static void arc_reset_complete_cb(lv_anim_t *a) {
+    arc_completing = false;
+}
+
+static void arc_fill_complete_cb(lv_anim_t *a) {
+    lv_anim_t a2;
+    lv_anim_init(&a2);
+    lv_anim_set_var(&a2, arc_exposure);
+    lv_anim_set_values(&a2, 0, pending_arc_progress);
+    lv_anim_set_time(&a2, 350);
+    lv_anim_set_exec_cb(&a2, (lv_anim_exec_xcb_t)lv_arc_set_value);
+    lv_anim_set_path_cb(&a2, lv_anim_path_ease_out);
+    lv_anim_set_ready_cb(&a2, arc_reset_complete_cb);
+    lv_anim_start(&a2);
+}
 
 /**
  * @brief Update the Bento Dashboard with live data from NINA client
@@ -444,15 +502,48 @@ void update_nina_dashboard_ui(const nina_client_t *data) {
         int progress = (int)((elapsed * 100) / total);
         if (progress > 100) progress = 100;
         if (progress < 0) progress = 0;
-        
-        lv_anim_t a;
-        lv_anim_init(&a);
-        lv_anim_set_var(&a, arc_exposure);
-        lv_anim_set_values(&a, lv_arc_get_value(arc_exposure), progress);
-        lv_anim_set_time(&a, 250);
-        lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_arc_set_value);
-        lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
-        lv_anim_start(&a);
+
+        int current_val = lv_arc_get_value(arc_exposure);
+
+        // Detect new exposure: computed progress dropped significantly
+        bool new_exposure = (prev_target_progress > 70 && progress < 30);
+        prev_target_progress = progress;
+
+        if (new_exposure && current_val > 0) {
+            // New exposure started: first animate arc to 100% (complete the circle),
+            // then chain a second animation from 0 to new progress via callback.
+            arc_completing = true;
+            pending_arc_progress = progress;
+
+            lv_anim_t a;
+            lv_anim_init(&a);
+            lv_anim_set_var(&a, arc_exposure);
+            lv_anim_set_values(&a, current_val, 100);
+            lv_anim_set_time(&a, 300);
+            lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_arc_set_value);
+            lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+            lv_anim_set_ready_cb(&a, arc_fill_complete_cb);
+            lv_anim_start(&a);
+        } else if (arc_completing) {
+            // Completion animation still in flight — update the pending target
+            // so the reset animation lands on the latest progress value.
+            pending_arc_progress = progress;
+            // Safety: if progress has advanced well past the start, the animation
+            // likely finished but the flag wasn't cleared — force-clear it.
+            if (progress > 30) {
+                arc_completing = false;
+                lv_arc_set_value(arc_exposure, progress);
+            }
+        } else {
+            lv_anim_t a;
+            lv_anim_init(&a);
+            lv_anim_set_var(&a, arc_exposure);
+            lv_anim_set_values(&a, current_val, progress);
+            lv_anim_set_time(&a, 350);
+            lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_arc_set_value);
+            lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+            lv_anim_start(&a);
+        }
     } else {
         lv_label_set_text(lbl_exposure_current, "--");
         lv_label_set_text(lbl_exposure_total, "");
@@ -503,14 +594,21 @@ void update_nina_dashboard_ui(const nina_client_t *data) {
         lv_obj_set_style_text_color(lbl_hfr_value, lv_color_hex(current_theme->label_color), 0);
     }
 
-    // 8. Star Count
+    // 8. Time to Meridian Flip
+    if (data->meridian_flip[0] != '\0' && strcmp(data->meridian_flip, "--") != 0) {
+        lv_label_set_text(lbl_flip_value, data->meridian_flip);
+    } else {
+        lv_label_set_text(lbl_flip_value, "--");
+    }
+
+    // 9. Star Count
     if (data->stars >= 0) {
         lv_label_set_text_fmt(lbl_stars_value, "%d", data->stars);
     } else {
         lv_label_set_text(lbl_stars_value, "--");
     }
 
-    // 9. Saturated Pixels
+    // 10. Saturated Pixels
     if (data->saturated_pixels >= 0) {
         lv_label_set_text_fmt(lbl_saturated_value, "%d", data->saturated_pixels);
     } else {

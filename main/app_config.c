@@ -341,3 +341,111 @@ uint32_t app_config_get_hfr_color(float hfr_value) {
 
     return result;
 }
+
+/**
+ * @brief Check if a filter name exists in the API filter list
+ */
+static bool filter_in_api_list(const char *name, const char *filter_names[], int count) {
+    for (int i = 0; i < count; i++) {
+        if (strcmp(name, filter_names[i]) == 0) return true;
+    }
+    return false;
+}
+
+/**
+ * @brief Sync NVS filter_colors and filter_brightness with the actual filter list from the NINA API.
+ *
+ * - Adds entries for any API filters missing from the config (default color / brightness)
+ * - Removes stale entries for filters no longer in the API
+ * - Saves to NVS only if something changed
+ */
+void app_config_sync_filters(const char *filter_names[], int count) {
+    if (count <= 0) return;
+
+    bool needs_save = false;
+
+    // --- Sync filter_colors ---
+    cJSON *colors = cJSON_Parse(s_config.filter_colors);
+    if (!colors) colors = cJSON_CreateObject();
+
+    // Add missing filters
+    for (int i = 0; i < count; i++) {
+        if (!cJSON_GetObjectItem(colors, filter_names[i])) {
+            cJSON_AddStringToObject(colors, filter_names[i], "#3b82f6");
+            ESP_LOGI(TAG, "Filter sync: added color for '%s' (default blue)", filter_names[i]);
+            needs_save = true;
+        }
+    }
+
+    // Remove stale filters
+    cJSON *child = colors->child;
+    while (child) {
+        cJSON *next = child->next;
+        if (!filter_in_api_list(child->string, filter_names, count)) {
+            ESP_LOGI(TAG, "Filter sync: removed stale color for '%s'", child->string);
+            cJSON_DeleteItemFromObject(colors, child->string);
+            needs_save = true;
+        }
+        child = next;
+    }
+
+    if (needs_save) {
+        char *json_str = cJSON_PrintUnformatted(colors);
+        if (json_str) {
+            if (strlen(json_str) < sizeof(s_config.filter_colors)) {
+                strcpy(s_config.filter_colors, json_str);
+            } else {
+                ESP_LOGW(TAG, "Filter colors JSON too large (%d bytes), not updating", (int)strlen(json_str));
+            }
+            free(json_str);
+        }
+    }
+    cJSON_Delete(colors);
+
+    // --- Sync filter_brightness ---
+    bool brightness_changed = false;
+    cJSON *bright = cJSON_Parse(s_config.filter_brightness);
+    if (!bright) bright = cJSON_CreateObject();
+
+    // Add missing filters
+    for (int i = 0; i < count; i++) {
+        if (!cJSON_GetObjectItem(bright, filter_names[i])) {
+            cJSON_AddNumberToObject(bright, filter_names[i], 100);
+            ESP_LOGI(TAG, "Filter sync: added brightness for '%s' (default 100)", filter_names[i]);
+            brightness_changed = true;
+        }
+    }
+
+    // Remove stale filters
+    child = bright->child;
+    while (child) {
+        cJSON *next = child->next;
+        if (!filter_in_api_list(child->string, filter_names, count)) {
+            ESP_LOGI(TAG, "Filter sync: removed stale brightness for '%s'", child->string);
+            cJSON_DeleteItemFromObject(bright, child->string);
+            brightness_changed = true;
+        }
+        child = next;
+    }
+
+    if (brightness_changed) {
+        char *json_str = cJSON_PrintUnformatted(bright);
+        if (json_str) {
+            if (strlen(json_str) < sizeof(s_config.filter_brightness)) {
+                strcpy(s_config.filter_brightness, json_str);
+            } else {
+                ESP_LOGW(TAG, "Filter brightness JSON too large (%d bytes), not updating", (int)strlen(json_str));
+            }
+            free(json_str);
+        }
+        needs_save = true;
+    }
+    cJSON_Delete(bright);
+
+    if (needs_save) {
+        app_config_save(&s_config);
+        ESP_LOGI(TAG, "Filter config synced with API and saved to NVS");
+    } else {
+        ESP_LOGI(TAG, "Filter config already in sync with API");
+    }
+}
