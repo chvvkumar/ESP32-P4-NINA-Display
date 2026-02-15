@@ -44,6 +44,7 @@ static lv_obj_t * lbl_instance_name;
 static lv_obj_t * lbl_target_name;
 
 // Exposure Arc/Circle
+static lv_obj_t * lbl_exposure_title;
 static lv_obj_t * arc_exposure;
 static lv_obj_t * lbl_exposure_current;
 static lv_obj_t * lbl_exposure_total;
@@ -212,7 +213,11 @@ void create_nina_dashboard(lv_obj_t * parent) {
     lv_obj_set_flex_align(box_exposure, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(box_exposure, 12, 0);
 
-    create_small_label(box_exposure, "EXPOSURE");
+    lbl_exposure_title = create_small_label(box_exposure, "EXPOSURE");
+    lv_obj_set_style_text_font(lbl_exposure_title, &lv_font_montserrat_24, 0);
+    lv_label_set_long_mode(lbl_exposure_title, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_set_width(lbl_exposure_title, LV_PCT(100));
+    lv_obj_set_style_text_align(lbl_exposure_title, LV_TEXT_ALIGN_CENTER, 0);
 
     // Arc/Circle Widget (expanded downward to fill available space)
     arc_exposure = lv_arc_create(box_exposure);
@@ -360,14 +365,21 @@ void update_nina_dashboard_ui(const nina_client_t *data) {
         lv_label_set_text(lbl_target_name, data->target_name);
     }
 
-    // 2. Filter - Update arc color based on current filter
+    // 2. Exposure Title - Show running container name or fallback to "EXPOSURE"
+    if (data->container_name[0] != '\0') {
+        lv_label_set_text(lbl_exposure_title, data->container_name);
+    } else {
+        lv_label_set_text(lbl_exposure_title, "EXPOSURE");
+    }
+
+    // 3. Filter - Update arc color based on current filter
     uint32_t filter_color = 0x3b82f6;  // Default color (blue)
     if (data->current_filter[0] != '\0' && strcmp(data->current_filter, "--") != 0) {
         filter_color = app_config_get_filter_color(data->current_filter);
         lv_obj_set_style_arc_color(arc_exposure, lv_color_hex(filter_color), LV_PART_INDICATOR);
     }
 
-    // 3. Exposure Progress (Current Exposure Time)
+    // 4. Exposure Progress (Current Exposure Time)
     if (data->exposure_total > 0) {
         float elapsed = data->exposure_current;
         float total = data->exposure_total;
@@ -388,14 +400,22 @@ void update_nina_dashboard_ui(const nina_client_t *data) {
         int progress = (int)((elapsed * 100) / total);
         if (progress > 100) progress = 100;
         if (progress < 0) progress = 0;
-        lv_arc_set_value(arc_exposure, progress);
+        
+        lv_anim_t a;
+        lv_anim_init(&a);
+        lv_anim_set_var(&a, arc_exposure);
+        lv_anim_set_values(&a, lv_arc_get_value(arc_exposure), progress);
+        lv_anim_set_time(&a, 1000);
+        lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_arc_set_value);
+        lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+        lv_anim_start(&a);
     } else {
         lv_label_set_text(lbl_exposure_current, "--");
         lv_label_set_text(lbl_exposure_total, "");
         lv_arc_set_value(arc_exposure, 0);
     }
 
-    // 4. Loop Count (Completed Exposures / Total Exposures for current filter)
+    // 5. Loop Count (Completed Exposures / Total Exposures for current filter)
     if (data->exposure_iterations > 0) {
         lv_label_set_text_fmt(lbl_loop_count, "%d / %d",
             data->exposure_count, data->exposure_iterations);
@@ -403,7 +423,7 @@ void update_nina_dashboard_ui(const nina_client_t *data) {
          lv_label_set_text(lbl_loop_count, "-- / --");
     }
 
-    // 5. Guiding RMS (Total, RA, DEC) - color based on threshold
+    // 6. Guiding RMS (Total, RA, DEC) - color based on threshold
     if (data->guider.rms_total > 0) {
         lv_label_set_text_fmt(lbl_rms_value, "%.2f\"", data->guider.rms_total);
         uint32_t rms_color = app_config_get_rms_color(data->guider.rms_total);
@@ -429,7 +449,7 @@ void update_nina_dashboard_ui(const nina_client_t *data) {
         }
     }
 
-    // 6. HFR / Sharpness - color based on threshold
+    // 7. HFR / Sharpness - color based on threshold
     if (data->hfr > 0) {
         lv_label_set_text_fmt(lbl_hfr_value, "%.2f", data->hfr);
         uint32_t hfr_color = app_config_get_hfr_color(data->hfr);
@@ -439,14 +459,14 @@ void update_nina_dashboard_ui(const nina_client_t *data) {
         lv_obj_set_style_text_color(lbl_hfr_value, COLOR_LABEL, 0);
     }
 
-    // 7. Star Count
+    // 8. Star Count
     if (data->stars >= 0) {
         lv_label_set_text_fmt(lbl_stars_value, "%d", data->stars);
     } else {
         lv_label_set_text(lbl_stars_value, "--");
     }
 
-    // 8. Saturated Pixels
+    // 9. Saturated Pixels
     if (data->saturated_pixels >= 0) {
         lv_label_set_text_fmt(lbl_saturated_value, "%d", data->saturated_pixels);
     } else {

@@ -43,6 +43,7 @@ typedef struct {
     float exposure_current;     // Elapsed time in current exposure (seconds)
     float exposure_total;       // Total duration of current exposure (seconds, from ExposureTime)
     char current_filter[32];    // Current filter name (e.g., "Ha", "Sii", "L")
+    char container_name[64];    // Running container name (e.g., "LRGBSHO") - stripped of "_Container"
     char time_remaining[32];    // Time remaining for entire sequence (HH:MM:SS format)
     bool is_dithering;
     

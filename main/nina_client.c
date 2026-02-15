@@ -396,6 +396,36 @@ static void fetch_mount_robust(const char *base_url, nina_client_t *data) {
     cJSON_Delete(json);
 }
 
+// Helper function to find the RUNNING container name (e.g., "LRGBSHO_Container" -> "LRGBSHO")
+static void find_running_container_name(cJSON *container, char *out, size_t out_size) {
+    if (!container) return;
+
+    cJSON *items = cJSON_GetObjectItem(container, "Items");
+    if (!items || !cJSON_IsArray(items)) return;
+
+    cJSON *item = NULL;
+    cJSON_ArrayForEach(item, items) {
+        cJSON *item_status = cJSON_GetObjectItem(item, "Status");
+        cJSON *item_name = cJSON_GetObjectItem(item, "Name");
+
+        if (item_status && item_status->valuestring &&
+            strcmp(item_status->valuestring, "RUNNING") == 0 &&
+            item_name && item_name->valuestring &&
+            strcmp(item_name->valuestring, "Smart Exposure") != 0) {
+            // Copy name and strip "_Container" suffix if present
+            strncpy(out, item_name->valuestring, out_size - 1);
+            out[out_size - 1] = '\0';
+            char *suffix = strstr(out, "_Container");
+            if (suffix) *suffix = '\0';
+            return;
+        }
+
+        // Recurse into nested items
+        find_running_container_name(item, out, out_size);
+        if (out[0] != '\0') return;
+    }
+}
+
 // Helper function to recursively search for RUNNING Smart Exposure
 static cJSON* find_running_smart_exposure(cJSON *container) {
     if (!container) return NULL;
@@ -455,6 +485,12 @@ static void fetch_sequence_counts_optional(const char *base_url, nina_client_t *
             if (items && cJSON_IsArray(items) && cJSON_GetArraySize(items) > 0) {
                 // Get first target container
                 cJSON *target_container = cJSON_GetArrayItem(items, 0);
+
+                // Find running container name (e.g., "LRGBSHO")
+                find_running_container_name(target_container, data->container_name, sizeof(data->container_name));
+                if (data->container_name[0] != '\0') {
+                    ESP_LOGI(TAG, "Running container: %s", data->container_name);
+                }
 
                 // Recursively search for RUNNING Smart Exposure
                 cJSON *running_exp = find_running_smart_exposure(target_container);
