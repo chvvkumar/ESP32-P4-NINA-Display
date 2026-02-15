@@ -12,7 +12,7 @@ static const char *NVS_NAMESPACE = "app_conf";
 
 // Default filter color mappings (matching common LRGB + Narrowband filters) - DIMMED for Night Vision
 static const char *DEFAULT_FILTER_COLORS =
-    "{\"L\":\"#3b82f6\",\"R\":\"#991b1b\",\"G\":\"#15803d\",\"B\":\"#1d4ed8\","
+    "{\"L\":\"#d4d4d4\",\"R\":\"#991b1b\",\"G\":\"#15803d\",\"B\":\"#1d4ed8\","
     "\"Ha\":\"#be123c\",\"Sii\":\"#7e22ce\",\"Oiii\":\"#0e7490\"}";
 
 // Default RMS thresholds: good <= 0.5", ok <= 1.0", bad > 1.0" - DIMMED for Night Vision
@@ -24,6 +24,9 @@ static const char *DEFAULT_RMS_THRESHOLDS =
 static const char *DEFAULT_HFR_THRESHOLDS =
     "{\"good_max\":2.0,\"ok_max\":3.5,"
     "\"good_color\":\"#15803d\",\"ok_color\":\"#ca8a04\",\"bad_color\":\"#b91c1c\"}";
+
+// Default per-filter brightness (all 100%)
+static const char *DEFAULT_FILTER_BRIGHTNESS = "{}";
 
 void app_config_init(void) {
     nvs_handle_t my_handle;
@@ -40,8 +43,10 @@ void app_config_init(void) {
         strcpy(s_config.filter_colors, DEFAULT_FILTER_COLORS);
         strcpy(s_config.rms_thresholds, DEFAULT_RMS_THRESHOLDS);
         strcpy(s_config.hfr_thresholds, DEFAULT_HFR_THRESHOLDS);
+        strcpy(s_config.filter_brightness, DEFAULT_FILTER_BRIGHTNESS);
         s_config.theme_index = 0;
         s_config.brightness = 50;
+        s_config.color_brightness = 100;
         return;
     }
 
@@ -58,8 +63,10 @@ void app_config_init(void) {
         strcpy(s_config.filter_colors, DEFAULT_FILTER_COLORS);
         strcpy(s_config.rms_thresholds, DEFAULT_RMS_THRESHOLDS);
         strcpy(s_config.hfr_thresholds, DEFAULT_HFR_THRESHOLDS);
+        strcpy(s_config.filter_brightness, DEFAULT_FILTER_BRIGHTNESS);
         s_config.theme_index = 0;
         s_config.brightness = 50;
+        s_config.color_brightness = 100;
 
         // Save defaults so we have them next time
         nvs_set_blob(my_handle, "config", &s_config, sizeof(app_config_t));
@@ -80,6 +87,15 @@ void app_config_init(void) {
         if (s_config.hfr_thresholds[0] == '\0') {
             ESP_LOGI(TAG, "HFR thresholds empty, initializing with defaults");
             strcpy(s_config.hfr_thresholds, DEFAULT_HFR_THRESHOLDS);
+            needs_save = true;
+        }
+        if (s_config.filter_brightness[0] == '\0') {
+            ESP_LOGI(TAG, "Filter brightness empty, initializing with defaults");
+            strcpy(s_config.filter_brightness, DEFAULT_FILTER_BRIGHTNESS);
+            needs_save = true;
+        }
+        if (s_config.color_brightness < 0 || s_config.color_brightness > 100) {
+            s_config.color_brightness = 100;
             needs_save = true;
         }
         if (s_config.theme_index < 0 || s_config.theme_index > 20) {
@@ -148,6 +164,60 @@ void app_config_factory_reset(void) {
 }
 
 /**
+ * @brief Parse a hex color string from a cJSON object field
+ */
+static uint32_t parse_color_field(cJSON *root, const char *field, uint32_t fallback) {
+    cJSON *item = cJSON_GetObjectItem(root, field);
+    if (item && cJSON_IsString(item) && item->valuestring) {
+        const char *hex = item->valuestring;
+        if (hex[0] == '#') hex++;
+        return (uint32_t)strtol(hex, NULL, 16);
+    }
+    return fallback;
+}
+
+/**
+ * @brief Apply brightness scaling to a color
+ * @param color 0xRRGGBB color value
+ * @param brightness Brightness percentage 0-100
+ * @return Adjusted color
+ */
+static uint32_t apply_brightness(uint32_t color, int brightness) {
+    if (brightness >= 100) return color;
+    if (brightness <= 0) return 0x000000;
+    uint8_t r = (color >> 16) & 0xFF;
+    uint8_t g = (color >> 8) & 0xFF;
+    uint8_t b = color & 0xFF;
+    r = (uint8_t)((r * brightness) / 100);
+    g = (uint8_t)((g * brightness) / 100);
+    b = (uint8_t)((b * brightness) / 100);
+    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+}
+
+/**
+ * @brief Get the per-filter brightness for a specific filter
+ * @param filter_name Name of the filter
+ * @return Brightness 0-100 (default 100)
+ */
+static int get_filter_brightness(const char *filter_name) {
+    if (!filter_name || filter_name[0] == '\0') return 100;
+
+    cJSON *root = cJSON_Parse(s_config.filter_brightness);
+    if (!root) return 100;
+
+    cJSON *item = cJSON_GetObjectItem(root, filter_name);
+    int brightness = 100;
+    if (item && cJSON_IsNumber(item)) {
+        brightness = item->valueint;
+        if (brightness < 0) brightness = 0;
+        if (brightness > 100) brightness = 100;
+    }
+
+    cJSON_Delete(root);
+    return brightness;
+}
+
+/**
  * @brief Get the color for a specific filter
  * @param filter_name Name of the filter (e.g., "Ha", "L", "R")
  * @return 32-bit color value (0xRRGGBB) or default blue if not found
@@ -181,20 +251,15 @@ uint32_t app_config_get_filter_color(const char *filter_name) {
     }
 
     cJSON_Delete(root);
-    return color;
-}
 
-/**
- * @brief Parse a hex color string from a cJSON object field
- */
-static uint32_t parse_color_field(cJSON *root, const char *field, uint32_t fallback) {
-    cJSON *item = cJSON_GetObjectItem(root, field);
-    if (item && cJSON_IsString(item) && item->valuestring) {
-        const char *hex = item->valuestring;
-        if (hex[0] == '#') hex++;
-        return (uint32_t)strtol(hex, NULL, 16);
-    }
-    return fallback;
+    // Apply per-filter brightness and global color brightness
+    int fb = get_filter_brightness(filter_name);
+    int gb = s_config.color_brightness;
+    if (gb < 0 || gb > 100) gb = 100;
+    int combined = (fb * gb) / 100;
+    color = apply_brightness(color, combined);
+
+    return color;
 }
 
 /**
@@ -228,6 +293,12 @@ uint32_t app_config_get_rms_color(float rms_value) {
     }
 
     cJSON_Delete(root);
+
+    // Apply global color brightness
+    int gb = s_config.color_brightness;
+    if (gb < 0 || gb > 100) gb = 100;
+    result = apply_brightness(result, gb);
+
     return result;
 }
 
@@ -262,5 +333,11 @@ uint32_t app_config_get_hfr_color(float hfr_value) {
     }
 
     cJSON_Delete(root);
+
+    // Apply global color brightness
+    int gb = s_config.color_brightness;
+    if (gb < 0 || gb > 100) gb = 100;
+    result = apply_brightness(result, gb);
+
     return result;
 }

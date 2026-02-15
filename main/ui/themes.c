@@ -161,6 +161,22 @@ static const theme_t themes[] = {
         .hfr_color = 0x065f46,
         .stars_color = 0x92400e,
         .saturated_color = 0x6b21a8
+    },
+    {
+        .name = "All Black",
+        .bg_main = 0x000000,
+        .bento_bg = 0x000000,
+        .bento_border = 0x000000,
+        .label_color = 0x333333,
+        .text_color = 0x666666,
+        .header_text_color = 0x555555,
+        .header_grad_color = 0x000000,
+        .filter_text_color = 0x666666,
+        .progress_color = 0x333333,
+        .rms_color = 0x666666,
+        .hfr_color = 0x666666,
+        .stars_color = 0x666666,
+        .saturated_color = 0x666666
     }
 };
 

@@ -29,7 +29,9 @@ static const char *HTML_CONTENT =
 ".group{margin-bottom:15px;}"
 "label{display:block;margin-bottom:5px;color:var(--text-secondary);font-size:0.8rem;text-transform:uppercase;letter-spacing:0.5px;}"
 ".color-grid{display:flex;flex-wrap:wrap;gap:15px;}"
-".filter-item{display:flex;flex-direction:column;align-items:center;gap:8px;}"
+".filter-item{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:55px;}"
+".filter-bright{width:40px;height:4px;-webkit-appearance:none;appearance:none;background:#333;border-radius:2px;outline:none;padding:0;margin:0;}"
+".filter-bright::-webkit-slider-thumb{-webkit-appearance:none;width:10px;height:10px;border-radius:50%;background:var(--accent-color);cursor:pointer;}"
 ".color-dot{width:40px;height:40px;border-radius:50%;border:2px solid var(--border-color);cursor:pointer;padding:0;background:none;transition:transform 0.2s,border-color 0.2s;}"
 ".color-dot:hover{transform:scale(1.1);border-color:var(--text-primary);}"
 ".btn{width:100%;padding:14px;border:none;border-radius:4px;font-weight:bold;cursor:pointer;text-transform:uppercase;font-size:0.9rem;letter-spacing:1px;transition:opacity 0.2s;}"
@@ -61,11 +63,15 @@ static const char *HTML_CONTENT =
 "<option value=\"7\">Monochrome</option>"
 "<option value=\"8\">Crimson</option>"
 "<option value=\"9\">Slate</option>"
+"<option value=\"10\">All Black</option>"
 "</select></div>"
 "<div class=\"group\"><label>Display Brightness</label>"
 "<div class=\"flex-row\"><input type=\"range\" id=\"brightness\" min=\"0\" max=\"100\" value=\"50\" oninput=\"setBrightness(this.value)\" style=\"flex:1\"><span id=\"bright_val\" style=\"min-width:36px;text-align:right\">50%</span></div>"
 "</div></div>"
-"<div class=\"tile area-filter\"><h3>Filter Colors</h3><div id=\"filterColors\" class=\"color-grid\"></div></div>"
+"<div class=\"tile area-filter\"><h3>Filter Colors</h3>"
+"<div class=\"group\"><label>Global Color Brightness</label>"
+"<div class=\"flex-row\"><input type=\"range\" id=\"color_brightness\" min=\"0\" max=\"100\" value=\"100\" oninput=\"setColorBrightness(this.value)\" style=\"flex:1\"><span id=\"cbright_val\" style=\"min-width:36px;text-align:right\">100%</span></div></div>"
+"<div id=\"filterColors\" class=\"color-grid\"></div></div>"
 "<div class=\"tile area-rms\"><h3>RMS THRESHOLDS</h3>"
 "<div class=\"group\"><label>Good RMS Max Value</label><div class=\"flex-row\"><input type=\"text\" id=\"rms_good_max\"><input type=\"color\" id=\"rms_good_color\" class=\"color-rect\"></div></div>"
 "<div class=\"group\"><label>OK RMS Max Value</label><div class=\"flex-row\"><input type=\"text\" id=\"rms_ok_max\"><input type=\"color\" id=\"rms_ok_color\" class=\"color-rect\"></div></div>"
@@ -79,18 +85,23 @@ static const char *HTML_CONTENT =
 "<button class=\"btn btn-danger\" onclick=\"factoryReset()\">Factory Reset</button></div>"
 "</div></div>"
 "<script>"
-"let filterColorsObj={};"
+"let filterColorsObj={};let filterBrightnessObj={};"
 "function renderFilterColors(){"
 "const c=document.getElementById('filterColors');c.innerHTML='';"
 "const fs=Object.keys(filterColorsObj).sort();"
 "if(fs.length===0){c.innerHTML='<p style=\"color:var(--text-secondary);font-style:italic\">No filters loaded.</p>';return;}"
 "fs.forEach(f=>{"
+"const b=filterBrightnessObj[f]!=null?filterBrightnessObj[f]:100;"
 "const w=document.createElement('div');w.className='filter-item';"
-"w.innerHTML=`<label style='font-size:0.7rem;margin:0;color:var(--text-secondary)'>${f}</label><input type='color' class='color-dot' value='${filterColorsObj[f]}' onchange='updateFilterColor(\"${f}\",this.value)'>`;"
+"w.innerHTML=`<label style='font-size:0.7rem;margin:0;color:var(--text-secondary)'>${f}</label>"
+"<input type='color' class='color-dot' value='${filterColorsObj[f]}' onchange='updateFilterColor(\"${f}\",this.value)'>"
+"<input type='range' class='filter-bright' min='0' max='100' value='${b}' title='${b}%' oninput='updateFilterBrightness(\"${f}\",this.value)'>`;"
 "c.appendChild(w);});"
 "}"
 "function updateFilterColor(n,v){filterColorsObj[n]=v;}"
+"function updateFilterBrightness(n,v){filterBrightnessObj[n]=parseInt(v);}"
 "let brightTimer=null;function setBrightness(v){document.getElementById('bright_val').innerText=v+'%';clearTimeout(brightTimer);brightTimer=setTimeout(()=>{fetch('/api/brightness',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({brightness:parseInt(v)})});},150);}"
+"let cbrightTimer=null;function setColorBrightness(v){document.getElementById('cbright_val').innerText=v+'%';clearTimeout(cbrightTimer);cbrightTimer=setTimeout(()=>{fetch('/api/color-brightness',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({color_brightness:parseInt(v)})});},150);}"
 "function checkOnline(){"
 "return fetch('/api/config',{method:'GET',cache:'no-cache'}).then(r=>r.ok).catch(()=>false);"
 "}"
@@ -111,7 +122,7 @@ static const char *HTML_CONTENT =
 "const h2=document.getElementById('url2').value.trim();"
 "const u1=h1?'http://'+h1+':1888/v2/api/':'';"
 "const u2=h2?'http://'+h2+':1888/v2/api/':'';"
-"const d={ssid:document.getElementById('ssid').value,pass:document.getElementById('pass').value,url1:u1,url2:u2,ntp:document.getElementById('ntp').value,theme_index:parseInt(document.getElementById('theme_select').value),brightness:parseInt(document.getElementById('brightness').value),filter_colors:JSON.stringify(filterColorsObj),rms_thresholds:JSON.stringify(rms),hfr_thresholds:JSON.stringify(hfr)};"
+"const d={ssid:document.getElementById('ssid').value,pass:document.getElementById('pass').value,url1:u1,url2:u2,ntp:document.getElementById('ntp').value,theme_index:parseInt(document.getElementById('theme_select').value),brightness:parseInt(document.getElementById('brightness').value),color_brightness:parseInt(document.getElementById('color_brightness').value),filter_colors:JSON.stringify(filterColorsObj),filter_brightness:JSON.stringify(filterBrightnessObj),rms_thresholds:JSON.stringify(rms),hfr_thresholds:JSON.stringify(hfr)};"
 "fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})"
 ".then(r=>{if(r.ok){b.innerText='REBOOTING...';fetch('/api/reboot',{method:'POST'}).catch(()=>{});waitForReboot();}else{alert('Error saving');b.innerText=ot;b.disabled=false;}}).catch(e=>{alert('Connection failed');b.innerText=ot;b.disabled=false;});"
 "}"
@@ -126,7 +137,9 @@ static const char *HTML_CONTENT =
 "document.getElementById('url2').value=extractHost(d.url2);"
 "document.getElementById('theme_select').value=d.theme_index||0;"
 "var br=d.brightness!=null?d.brightness:50;document.getElementById('brightness').value=br;document.getElementById('bright_val').innerText=br+'%';"
+"var cb=d.color_brightness!=null?d.color_brightness:100;document.getElementById('color_brightness').value=cb;document.getElementById('cbright_val').innerText=cb+'%';"
 "try{filterColorsObj=JSON.parse(d.filter_colors||'{}');}catch(e){}"
+"try{filterBrightnessObj=JSON.parse(d.filter_brightness||'{}');}catch(e){}"
 "renderFilterColors();"
 "try{const r=JSON.parse(d.rms_thresholds||'{}');"
 "document.getElementById('rms_good_max').value=r.good_max||0.5;"
@@ -170,8 +183,10 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddStringToObject(root, "filter_colors", cfg->filter_colors);
     cJSON_AddStringToObject(root, "rms_thresholds", cfg->rms_thresholds);
     cJSON_AddStringToObject(root, "hfr_thresholds", cfg->hfr_thresholds);
+    cJSON_AddStringToObject(root, "filter_brightness", cfg->filter_brightness);
     cJSON_AddNumberToObject(root, "theme_index", cfg->theme_index);
     cJSON_AddNumberToObject(root, "brightness", cfg->brightness);
+    cJSON_AddNumberToObject(root, "color_brightness", cfg->color_brightness);
 
     const char *json_str = cJSON_PrintUnformatted(root);
     if (json_str == NULL) {
@@ -190,7 +205,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
 // Handler for saving config
 static esp_err_t config_post_handler(httpd_req_t *req)
 {
-    char buf[2048];
+    char buf[2560];
     int ret, remaining = req->content_len;
 
     if (remaining >= sizeof(buf)) {
@@ -278,6 +293,20 @@ static esp_err_t config_post_handler(httpd_req_t *req)
         cfg.hfr_thresholds[sizeof(cfg.hfr_thresholds) - 1] = '\0';
     }
 
+    cJSON *filter_brightness = cJSON_GetObjectItem(root, "filter_brightness");
+    if (cJSON_IsString(filter_brightness)) {
+        strncpy(cfg.filter_brightness, filter_brightness->valuestring, sizeof(cfg.filter_brightness) - 1);
+        cfg.filter_brightness[sizeof(cfg.filter_brightness) - 1] = '\0';
+    }
+
+    cJSON *color_brightness = cJSON_GetObjectItem(root, "color_brightness");
+    if (cJSON_IsNumber(color_brightness)) {
+        int val = color_brightness->valueint;
+        if (val < 0) val = 0;
+        if (val > 100) val = 100;
+        cfg.color_brightness = val;
+    }
+
     app_config_save(&cfg);
     cJSON_Delete(root);
 
@@ -318,6 +347,46 @@ static esp_err_t brightness_post_handler(httpd_req_t *req)
         if (brightness > 100) brightness = 100;
         bsp_display_brightness_set(brightness);
         ESP_LOGI(TAG, "Brightness set to %d%%", brightness);
+    }
+
+    cJSON_Delete(root);
+    httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+// Handler for live color brightness adjustment (no reboot needed)
+static esp_err_t color_brightness_post_handler(httpd_req_t *req)
+{
+    char buf[128];
+    int ret, remaining = req->content_len;
+
+    if (remaining >= (int)sizeof(buf)) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    ret = httpd_req_recv(req, buf, remaining);
+    if (ret <= 0) {
+        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+            httpd_resp_send_408(req);
+        }
+        return ESP_FAIL;
+    }
+    buf[ret] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    cJSON *val = cJSON_GetObjectItem(root, "color_brightness");
+    if (cJSON_IsNumber(val)) {
+        int cb = val->valueint;
+        if (cb < 0) cb = 0;
+        if (cb > 100) cb = 100;
+        app_config_get()->color_brightness = cb;
+        ESP_LOGI(TAG, "Color brightness set to %d%%", cb);
     }
 
     cJSON_Delete(root);
@@ -391,6 +460,14 @@ void start_web_server(void)
             .user_ctx  = NULL
         };
         httpd_register_uri_handler(server, &uri_post_brightness);
+
+        httpd_uri_t uri_post_color_brightness = {
+            .uri       = "/api/color-brightness",
+            .method    = HTTP_POST,
+            .handler   = color_brightness_post_handler,
+            .user_ctx  = NULL
+        };
+        httpd_register_uri_handler(server, &uri_post_color_brightness);
 
         httpd_uri_t uri_post_reboot = {
             .uri       = "/api/reboot",
