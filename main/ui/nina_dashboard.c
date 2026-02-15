@@ -307,7 +307,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent) {
     lv_obj_set_style_text_font(lbl_seq_title, &lv_font_montserrat_14, 0);
 
     p->lbl_seq_container = lv_label_create(seq_left);
-    lv_obj_set_style_text_color(p->lbl_seq_container, lv_color_hex(current_theme->header_text_color), 0);
+    lv_obj_set_style_text_color(p->lbl_seq_container, lv_color_hex(current_theme->text_color), 0);
     lv_obj_set_style_text_font(p->lbl_seq_container, &lv_font_montserrat_24, 0);
     lv_label_set_text(p->lbl_seq_container, "----");
 

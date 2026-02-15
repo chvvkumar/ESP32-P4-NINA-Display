@@ -10,6 +10,9 @@
 #include "bsp/display.h"
 #include "ui/nina_dashboard.h"
 #include "ui/themes.h"
+#include "esp_heap_caps.h"
+#include "lvgl.h"
+#include "src/others/snapshot/lv_snapshot.h"
 
 static const char *TAG = "web_server";
 
@@ -485,10 +488,127 @@ static esp_err_t factory_reset_post_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+// BMP file header for 720x720 RGB565 image (bottom-up, no compression)
+#define SCREENSHOT_W    BSP_LCD_H_RES
+#define SCREENSHOT_H    BSP_LCD_V_RES
+#define BMP_HEADER_SIZE 66  // 14 (file header) + 40 (DIB header) + 12 (RGB565 masks)
+
+static void build_bmp_header(uint8_t *hdr, uint32_t width, uint32_t height)
+{
+    uint32_t row_size = width * 2;  // RGB565: 2 bytes per pixel
+    uint32_t img_size = row_size * height;
+    uint32_t file_size = BMP_HEADER_SIZE + img_size;
+
+    memset(hdr, 0, BMP_HEADER_SIZE);
+
+    // BMP file header (14 bytes)
+    hdr[0] = 'B'; hdr[1] = 'M';
+    memcpy(&hdr[2], &file_size, 4);
+    // reserved (4 bytes) = 0
+    uint32_t offset = BMP_HEADER_SIZE;
+    memcpy(&hdr[10], &offset, 4);
+
+    // DIB header (BITMAPINFOHEADER = 40 bytes)
+    uint32_t dib_size = 40;
+    memcpy(&hdr[14], &dib_size, 4);
+    int32_t w = (int32_t)width;
+    int32_t h = -(int32_t)height;  // negative = top-down (no row reversal needed)
+    memcpy(&hdr[18], &w, 4);
+    memcpy(&hdr[22], &h, 4);
+    uint16_t planes = 1;
+    memcpy(&hdr[26], &planes, 2);
+    uint16_t bpp = 16;
+    memcpy(&hdr[28], &bpp, 2);
+    uint32_t compression = 3;  // BI_BITFIELDS
+    memcpy(&hdr[30], &compression, 4);
+    memcpy(&hdr[34], &img_size, 4);
+    // pixels per meter (can be 0)
+    // colors used, important (0)
+
+    // RGB565 bitmasks (12 bytes after DIB header)
+    uint32_t mask_r = 0xF800;
+    uint32_t mask_g = 0x07E0;
+    uint32_t mask_b = 0x001F;
+    memcpy(&hdr[54], &mask_r, 4);
+    memcpy(&hdr[58], &mask_g, 4);
+    memcpy(&hdr[62], &mask_b, 4);
+}
+
+// Handler for screenshot capture - serves a BMP image viewable in any browser
+static esp_err_t screenshot_get_handler(httpd_req_t *req)
+{
+    ESP_LOGI(TAG, "Screenshot requested");
+
+    // Take LVGL snapshot while holding the display lock
+    if (!bsp_display_lock(5000)) {
+        ESP_LOGE(TAG, "Failed to acquire display lock for screenshot");
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    lv_obj_t *scr = lv_scr_act();
+    if (!scr) {
+        bsp_display_unlock();
+        ESP_LOGE(TAG, "No active screen");
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    lv_draw_buf_t *snapshot = lv_snapshot_take(scr, LV_COLOR_FORMAT_RGB565);
+    bsp_display_unlock();
+
+    if (!snapshot || !snapshot->data) {
+        ESP_LOGE(TAG, "Snapshot capture failed");
+        if (snapshot) lv_draw_buf_destroy(snapshot);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    uint32_t width = snapshot->header.w;
+    uint32_t height = snapshot->header.h;
+    uint32_t stride = snapshot->header.stride;
+    uint32_t row_size = width * 2;  // RGB565 packed row (no padding)
+
+    ESP_LOGI(TAG, "Snapshot captured: %lux%lu, stride=%lu", width, height, stride);
+
+    // Build BMP header
+    uint8_t bmp_hdr[BMP_HEADER_SIZE];
+    build_bmp_header(bmp_hdr, width, height);
+
+    // Send as BMP image
+    httpd_resp_set_type(req, "image/bmp");
+    httpd_resp_set_hdr(req, "Content-Disposition", "inline; filename=\"screenshot.bmp\"");
+
+    // Send BMP header
+    esp_err_t err = httpd_resp_send_chunk(req, (const char *)bmp_hdr, BMP_HEADER_SIZE);
+    if (err != ESP_OK) {
+        lv_draw_buf_destroy(snapshot);
+        httpd_resp_send_chunk(req, NULL, 0);
+        return ESP_FAIL;
+    }
+
+    // Send pixel rows - handle stride != row_size (LVGL may add padding per row)
+    for (uint32_t y = 0; y < height; y++) {
+        uint8_t *row = snapshot->data + (y * stride);
+        err = httpd_resp_send_chunk(req, (const char *)row, row_size);
+        if (err != ESP_OK) {
+            break;
+        }
+    }
+
+    // End chunked response
+    httpd_resp_send_chunk(req, NULL, 0);
+    lv_draw_buf_destroy(snapshot);
+
+    ESP_LOGI(TAG, "Screenshot sent successfully");
+    return ESP_OK;
+}
+
 void start_web_server(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.stack_size = 8192; 
+    config.stack_size = 8192;
+    config.max_uri_handlers = 12;
     httpd_handle_t server = NULL;
 
     if (httpd_start(&server, &config) == ESP_OK) {
@@ -555,6 +675,14 @@ void start_web_server(void)
             .user_ctx  = NULL
         };
         httpd_register_uri_handler(server, &uri_post_factory_reset);
+
+        httpd_uri_t uri_get_screenshot = {
+            .uri       = "/api/screenshot",
+            .method    = HTTP_GET,
+            .handler   = screenshot_get_handler,
+            .user_ctx  = NULL
+        };
+        httpd_register_uri_handler(server, &uri_get_screenshot);
 
         ESP_LOGI(TAG, "Web server started");
     } else {
