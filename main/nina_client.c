@@ -397,33 +397,80 @@ static void fetch_mount_robust(const char *base_url, nina_client_t *data) {
     cJSON_Delete(json);
 }
 
-// Helper function to find the RUNNING container name (e.g., "LRGBSHO_Container" -> "LRGBSHO")
-static void find_running_container_name(cJSON *container, char *out, size_t out_size) {
-    if (!container) return;
+// Find the active target container (RUNNING preferred, otherwise last FINISHED)
+static cJSON* find_active_target_container(cJSON *targets_container) {
+    cJSON *items = cJSON_GetObjectItem(targets_container, "Items");
+    if (!items || !cJSON_IsArray(items)) return NULL;
 
-    cJSON *items = cJSON_GetObjectItem(container, "Items");
+    cJSON *running = NULL;
+    cJSON *last_finished = NULL;
+    cJSON *item = NULL;
+    cJSON_ArrayForEach(item, items) {
+        cJSON *status = cJSON_GetObjectItem(item, "Status");
+        if (!status || !status->valuestring) continue;
+        if (strcmp(status->valuestring, "RUNNING") == 0) {
+            running = item;
+            break;
+        }
+        if (strcmp(status->valuestring, "FINISHED") == 0) {
+            last_finished = item;
+        }
+    }
+    return running ? running : last_finished;
+}
+
+// Find the deepest RUNNING container name, or fall back to last FINISHED container
+// A "container" is an item that has an "Items" array (not a leaf action)
+static void find_active_container_name(cJSON *parent, char *out, size_t out_size) {
+    if (!parent) return;
+
+    cJSON *items = cJSON_GetObjectItem(parent, "Items");
     if (!items || !cJSON_IsArray(items)) return;
 
+    // First pass: look for a RUNNING container child
     cJSON *item = NULL;
     cJSON_ArrayForEach(item, items) {
         cJSON *item_status = cJSON_GetObjectItem(item, "Status");
         cJSON *item_name = cJSON_GetObjectItem(item, "Name");
+        cJSON *item_items = cJSON_GetObjectItem(item, "Items");
+        if (!item_status || !item_status->valuestring || !item_name || !item_name->valuestring) continue;
+        if (!item_items || !cJSON_IsArray(item_items)) continue;
 
-        if (item_status && item_status->valuestring &&
-            strcmp(item_status->valuestring, "RUNNING") == 0 &&
-            item_name && item_name->valuestring &&
-            strcmp(item_name->valuestring, "Smart Exposure") != 0) {
-            // Copy name and strip "_Container" suffix if present
+        if (strcmp(item_status->valuestring, "RUNNING") == 0) {
             strncpy(out, item_name->valuestring, out_size - 1);
             out[out_size - 1] = '\0';
             char *suffix = strstr(out, "_Container");
             if (suffix) *suffix = '\0';
+            // Try to find a deeper RUNNING container
+            char deeper[64] = {0};
+            find_active_container_name(item, deeper, sizeof(deeper));
+            if (deeper[0] != '\0') {
+                strncpy(out, deeper, out_size - 1);
+                out[out_size - 1] = '\0';
+            }
             return;
         }
+    }
 
-        // Recurse into nested items
-        find_running_container_name(item, out, out_size);
-        if (out[0] != '\0') return;
+    // Second pass: no RUNNING container, use last FINISHED container
+    cJSON *last_finished = NULL;
+    cJSON_ArrayForEach(item, items) {
+        cJSON *item_status = cJSON_GetObjectItem(item, "Status");
+        cJSON *item_items = cJSON_GetObjectItem(item, "Items");
+        if (!item_status || !item_status->valuestring) continue;
+        if (!item_items || !cJSON_IsArray(item_items)) continue;
+        if (strcmp(item_status->valuestring, "FINISHED") == 0) {
+            last_finished = item;
+        }
+    }
+    if (last_finished) {
+        cJSON *item_name = cJSON_GetObjectItem(last_finished, "Name");
+        if (item_name && item_name->valuestring) {
+            strncpy(out, item_name->valuestring, out_size - 1);
+            out[out_size - 1] = '\0';
+            char *suffix = strstr(out, "_Container");
+            if (suffix) *suffix = '\0';
+        }
     }
 }
 
@@ -484,13 +531,14 @@ static void fetch_sequence_counts_optional(const char *base_url, nina_client_t *
         if (name && name->valuestring && strcmp(name->valuestring, "Targets_Container") == 0) {
             cJSON *items = cJSON_GetObjectItem(item, "Items");
             if (items && cJSON_IsArray(items) && cJSON_GetArraySize(items) > 0) {
-                // Get first target container
-                cJSON *target_container = cJSON_GetArrayItem(items, 0);
+                // Find the active target container (RUNNING or last FINISHED)
+                cJSON *target_container = find_active_target_container(item);
+                if (!target_container) target_container = cJSON_GetArrayItem(items, 0);
 
-                // Find running container name (e.g., "LRGBSHO")
-                find_running_container_name(target_container, data->container_name, sizeof(data->container_name));
+                // Find the active container name (e.g., "LRGBSHO2")
+                find_active_container_name(target_container, data->container_name, sizeof(data->container_name));
                 if (data->container_name[0] != '\0') {
-                    ESP_LOGI(TAG, "Running container: %s", data->container_name);
+                    ESP_LOGI(TAG, "Active container: %s", data->container_name);
                 }
 
                 // Recursively search for RUNNING Smart Exposure
