@@ -234,10 +234,10 @@ void create_nina_dashboard(lv_obj_t * parent) {
     static lv_coord_t row_dsc[] = {
         LV_GRID_FR(2),  // Row 0 - Header (telescope + target stacked)
         LV_GRID_FR(1),  // Row 1 - Sequence Info (container + step)
-        LV_GRID_FR(2),  // Row 2 - RMS / Exposure arc top
-        LV_GRID_FR(2),  // Row 3 - HFR / Exposure arc mid
-        LV_GRID_FR(2),  // Row 4 - Time to Flip / Exposure arc bottom
-        LV_GRID_FR(2),  // Row 5 - Bottom row (Stars / Saturated)
+        LV_GRID_FR(2),  // Row 2 - RMS+HFR / Exposure arc top
+        LV_GRID_FR(2),  // Row 3 - Time to Flip / Exposure arc mid
+        LV_GRID_FR(2),  // Row 4 - Sat.Pixels+Stars / Exposure arc bottom
+        LV_GRID_FR(2),  // Row 5 - Placeholder (spans 2 cols)
         LV_GRID_TEMPLATE_LAST
     };
     lv_obj_set_layout(main_cont, LV_LAYOUT_GRID);
@@ -355,34 +355,40 @@ void create_nina_dashboard(lv_obj_t * parent) {
     lv_label_set_text(lbl_loop_count, "-- / --");
 
     /* ═══════════════════════════════════════════════════════════
-     * GUIDING RMS (Col 1, Row 2)
+     * RMS + HFR (Col 1, Row 2) - Side by side in a single cell
      * ═══════════════════════════════════════════════════════════ */
-    lv_obj_t * box_rms = create_bento_box(main_cont);
-    lv_obj_set_grid_cell(box_rms, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 2, 1);
+    lv_obj_t * box_rms_hfr = create_bento_box(main_cont);
+    lv_obj_set_grid_cell(box_rms_hfr, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 2, 1);
+    lv_obj_set_flex_flow(box_rms_hfr, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(box_rms_hfr, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(box_rms_hfr, 8, 0);
+
+    // RMS sub-container (left half)
+    lv_obj_t * box_rms = lv_obj_create(box_rms_hfr);
+    lv_obj_remove_style_all(box_rms);
+    lv_obj_set_size(box_rms, LV_PCT(50), LV_PCT(100));
     lv_obj_set_flex_flow(box_rms, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(box_rms, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     lbl_rms_title = create_small_label(box_rms, "RMS");
     lv_obj_set_width(lbl_rms_title, LV_PCT(100));
-    lv_obj_set_style_text_align(lbl_rms_title, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_align(lbl_rms_title, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(lbl_rms_title, lv_color_hex(current_theme->text_color), 0);
 
-    // Total RMS (main value)
     lbl_rms_value = create_value_label(box_rms);
     lv_obj_set_style_text_color(lbl_rms_value, lv_color_hex(current_theme->rms_color), 0);
     lv_label_set_text(lbl_rms_value, "--.--\"");
 
-    /* ═══════════════════════════════════════════════════════════
-     * HFR / SHARPNESS (Col 1, Row 3)
-     * ═══════════════════════════════════════════════════════════ */
-    lv_obj_t * box_hfr = create_bento_box(main_cont);
-    lv_obj_set_grid_cell(box_hfr, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 3, 1);
+    // HFR sub-container (right half)
+    lv_obj_t * box_hfr = lv_obj_create(box_rms_hfr);
+    lv_obj_remove_style_all(box_hfr);
+    lv_obj_set_size(box_hfr, LV_PCT(50), LV_PCT(100));
     lv_obj_set_flex_flow(box_hfr, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(box_hfr, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(box_hfr, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     lbl_hfr_title = create_small_label(box_hfr, "HFR");
     lv_obj_set_width(lbl_hfr_title, LV_PCT(100));
-    lv_obj_set_style_text_align(lbl_hfr_title, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_align(lbl_hfr_title, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(lbl_hfr_title, lv_color_hex(current_theme->text_color), 0);
 
     lbl_hfr_value = create_value_label(box_hfr);
@@ -390,10 +396,10 @@ void create_nina_dashboard(lv_obj_t * parent) {
     lv_label_set_text(lbl_hfr_value, "2.15");
 
     /* ═══════════════════════════════════════════════════════════
-     * TIME TO FLIP (Col 1, Row 4)
+     * TIME TO FLIP (Col 1, Row 3) - Moved from Row 4
      * ═══════════════════════════════════════════════════════════ */
     lv_obj_t * box_flip = create_bento_box(main_cont);
-    lv_obj_set_grid_cell(box_flip, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 4, 1);
+    lv_obj_set_grid_cell(box_flip, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 3, 1);
     lv_obj_set_flex_flow(box_flip, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(box_flip, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
@@ -406,36 +412,49 @@ void create_nina_dashboard(lv_obj_t * parent) {
     lv_label_set_text(lbl_flip_value, "--");
 
     /* ═══════════════════════════════════════════════════════════
-     * STAR COUNT (Col 0, Row 5)
+     * SAT. PIXELS + STARS (Col 1, Row 4) - Side by side
      * ═══════════════════════════════════════════════════════════ */
-    lv_obj_t * box_stars = create_bento_box(main_cont);
-    lv_obj_set_grid_cell(box_stars, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_STRETCH, 5, 1);
+    lv_obj_t * box_sat_stars = create_bento_box(main_cont);
+    lv_obj_set_grid_cell(box_sat_stars, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 4, 1);
+    lv_obj_set_flex_flow(box_sat_stars, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(box_sat_stars, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(box_sat_stars, 8, 0);
+
+    // Saturated Pixels sub-container (left half)
+    lv_obj_t * box_saturated = lv_obj_create(box_sat_stars);
+    lv_obj_remove_style_all(box_saturated);
+    lv_obj_set_size(box_saturated, LV_PCT(50), LV_PCT(100));
+    lv_obj_set_flex_flow(box_saturated, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(box_saturated, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    lbl_sat_header = create_small_label(box_saturated, "SAT. PIXELS");
+    lv_obj_set_width(lbl_sat_header, LV_PCT(100));
+    lv_obj_set_style_text_align(lbl_sat_header, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(lbl_sat_header, lv_color_hex(current_theme->text_color), 0);
+
+    lbl_saturated_value = create_value_label(box_saturated);
+    lv_label_set_text(lbl_saturated_value, "84");
+
+    // Stars sub-container (right half)
+    lv_obj_t * box_stars = lv_obj_create(box_sat_stars);
+    lv_obj_remove_style_all(box_stars);
+    lv_obj_set_size(box_stars, LV_PCT(50), LV_PCT(100));
     lv_obj_set_flex_flow(box_stars, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(box_stars, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(box_stars, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     lbl_stars_header = create_small_label(box_stars, "STARS");
     lv_obj_set_width(lbl_stars_header, LV_PCT(100));
-    lv_obj_set_style_text_align(lbl_stars_header, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_align(lbl_stars_header, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(lbl_stars_header, lv_color_hex(current_theme->text_color), 0);
 
     lbl_stars_value = create_value_label(box_stars);
     lv_label_set_text(lbl_stars_value, "2451");
 
     /* ═══════════════════════════════════════════════════════════
-     * SATURATED PIXELS (Col 1, Row 5)
+     * PLACEHOLDER (Row 5, Span 2 Columns) - Reserved for future use
      * ═══════════════════════════════════════════════════════════ */
-    lv_obj_t * box_saturated = create_bento_box(main_cont);
-    lv_obj_set_grid_cell(box_saturated, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 5, 1);
-    lv_obj_set_flex_flow(box_saturated, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(box_saturated, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-
-    lbl_sat_header = create_small_label(box_saturated, "SATURATED PIXELS");
-    lv_obj_set_width(lbl_sat_header, LV_PCT(100));
-    lv_obj_set_style_text_align(lbl_sat_header, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_style_text_color(lbl_sat_header, lv_color_hex(current_theme->text_color), 0);
-
-    lbl_saturated_value = create_value_label(box_saturated);
-    lv_label_set_text(lbl_saturated_value, "84");
+    lv_obj_t * box_placeholder = create_bento_box(main_cont);
+    lv_obj_set_grid_cell(box_placeholder, LV_GRID_ALIGN_STRETCH, 0, 2, LV_GRID_ALIGN_STRETCH, 5, 1);
 
     // Apply theme again to ensure all brightness adjustments are correct
     nina_dashboard_apply_theme(cfg->theme_index);
