@@ -475,6 +475,40 @@ static void find_active_container_name(cJSON *parent, char *out, size_t out_size
     }
 }
 
+// Find the currently running step (leaf instruction) within a container tree
+// A "leaf" is an item that has no "Items" array (it's an action, not a container)
+static void find_running_step_name(cJSON *parent, char *out, size_t out_size) {
+    if (!parent) return;
+
+    cJSON *items = cJSON_GetObjectItem(parent, "Items");
+    if (!items || !cJSON_IsArray(items)) return;
+
+    cJSON *item = NULL;
+    cJSON_ArrayForEach(item, items) {
+        cJSON *item_status = cJSON_GetObjectItem(item, "Status");
+        cJSON *item_name = cJSON_GetObjectItem(item, "Name");
+        if (!item_status || !item_status->valuestring || !item_name || !item_name->valuestring) continue;
+
+        if (strcmp(item_status->valuestring, "RUNNING") == 0) {
+            cJSON *child_items = cJSON_GetObjectItem(item, "Items");
+            if (child_items && cJSON_IsArray(child_items) && cJSON_GetArraySize(child_items) > 0) {
+                // This is a container - recurse deeper
+                find_running_step_name(item, out, out_size);
+                // If we found a deeper step, use that; otherwise use this container's name
+                if (out[0] == '\0') {
+                    strncpy(out, item_name->valuestring, out_size - 1);
+                    out[out_size - 1] = '\0';
+                }
+            } else {
+                // Leaf instruction - this is the current step
+                strncpy(out, item_name->valuestring, out_size - 1);
+                out[out_size - 1] = '\0';
+            }
+            return;
+        }
+    }
+}
+
 // Helper function to recursively search for RUNNING Smart Exposure
 static cJSON* find_running_smart_exposure(cJSON *container) {
     if (!container) return NULL;
@@ -540,6 +574,13 @@ static void fetch_sequence_counts_optional(const char *base_url, nina_client_t *
                 find_active_container_name(target_container, data->container_name, sizeof(data->container_name));
                 if (data->container_name[0] != '\0') {
                     ESP_LOGI(TAG, "Active container: %s", data->container_name);
+                }
+
+                // Find the currently running step/instruction name
+                data->container_step[0] = '\0';
+                find_running_step_name(target_container, data->container_step, sizeof(data->container_step));
+                if (data->container_step[0] != '\0') {
+                    ESP_LOGI(TAG, "Active step: %s", data->container_step);
                 }
 
                 // Recursively search for RUNNING Smart Exposure

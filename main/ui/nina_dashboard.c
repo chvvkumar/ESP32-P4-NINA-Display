@@ -44,11 +44,14 @@ static lv_obj_t * lbl_instance_name;
 static lv_obj_t * lbl_target_name;
 
 // Exposure Arc/Circle
-static lv_obj_t * lbl_exposure_title;
 static lv_obj_t * arc_exposure;
 static lv_obj_t * lbl_exposure_current;
 static lv_obj_t * lbl_exposure_total;
 static lv_obj_t * lbl_loop_count;
+
+// Sequence Info
+static lv_obj_t * lbl_seq_container;
+static lv_obj_t * lbl_seq_step;
 
 // Data Display Labels
 static lv_obj_t * lbl_rms_value;
@@ -160,13 +163,14 @@ void create_nina_dashboard(lv_obj_t * parent) {
     lv_obj_set_style_pad_all(main_cont, OUTER_PADDING, 0);
     lv_obj_set_style_pad_gap(main_cont, GRID_GAP, 0);
 
-    // Setup Grid: 2 Equal Columns x 4 Equal Rows
+    // Setup Grid: 2 Equal Columns x 5 Rows
     static lv_coord_t col_dsc[] = {LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
     static lv_coord_t row_dsc[] = {
-        LV_GRID_FR(1),  // Row 0 - Header
-        LV_GRID_FR(1),  // Row 1
-        LV_GRID_FR(1),  // Row 2
-        LV_GRID_FR(1),  // Row 3
+        LV_GRID_FR(2),  // Row 0 - Header (telescope + target stacked)
+        LV_GRID_FR(1),  // Row 1 - Sequence Info (container + step)
+        LV_GRID_FR(3),  // Row 2
+        LV_GRID_FR(3),  // Row 3
+        LV_GRID_FR(2),  // Row 4 - Bottom row
         LV_GRID_TEMPLATE_LAST
     };
     lv_obj_set_layout(main_cont, LV_LAYOUT_GRID);
@@ -177,51 +181,75 @@ void create_nina_dashboard(lv_obj_t * parent) {
      * ═══════════════════════════════════════════════════════════ */
     lv_obj_t * header = create_bento_box(main_cont);
     lv_obj_set_grid_cell(header, LV_GRID_ALIGN_STRETCH, 0, 2, LV_GRID_ALIGN_STRETCH, 0, 1);
-    lv_obj_set_flex_flow(header, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(header, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_flow(header, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(header, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_all(header, 12, 0);
 
-    // Left Side: Telescope Name (positioned at bottom left)
-    lv_obj_t * header_left = lv_obj_create(header);
-    lv_obj_remove_style_all(header_left);
-    lv_obj_set_size(header_left, LV_SIZE_CONTENT, LV_PCT(100));
-    lv_obj_set_flex_flow(header_left, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(header_left, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-
-    lbl_instance_name = lv_label_create(header_left);
+    // Top: Telescope Name
+    lbl_instance_name = lv_label_create(header);
     lv_obj_set_style_text_color(lbl_instance_name, COLOR_BLUE, 0);
     lv_obj_set_style_text_font(lbl_instance_name, &lv_font_montserrat_26, 0);
     lv_label_set_text(lbl_instance_name, "N.I.N.A.");
 
-    // Right Side: Target Name (centered vertically, right-justified)
-    lv_obj_t * header_right = lv_obj_create(header);
-    lv_obj_remove_style_all(header_right);
-    lv_obj_set_size(header_right, LV_SIZE_CONTENT, LV_PCT(100));
-    lv_obj_set_flex_flow(header_right, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(header_right, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
-
-    lbl_target_name = lv_label_create(header_right);
+    // Bottom: Target Name (right-aligned)
+    lbl_target_name = lv_label_create(header);
     lv_obj_add_style(lbl_target_name, &style_value_large, 0);
     lv_obj_set_style_text_color(lbl_target_name, COLOR_TEXT, 0);
+    lv_obj_set_width(lbl_target_name, LV_PCT(100));
+    lv_obj_set_style_text_align(lbl_target_name, LV_TEXT_ALIGN_RIGHT, 0);
     lv_label_set_text(lbl_target_name, "----");
 
     /* ═══════════════════════════════════════════════════════════
-     * EXPOSURE DISPLAY (Col 0, Rows 1-2, Span 2 Rows)
+     * SEQUENCE INFO (Row 1, Span 2 Columns)
+     * ═══════════════════════════════════════════════════════════ */
+    lv_obj_t * box_seq = create_bento_box(main_cont);
+    lv_obj_set_grid_cell(box_seq, LV_GRID_ALIGN_STRETCH, 0, 2, LV_GRID_ALIGN_STRETCH, 1, 1);
+    lv_obj_set_flex_flow(box_seq, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(box_seq, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_all(box_seq, 12, 0);
+
+    // Left: Container name
+    lv_obj_t * seq_left = lv_obj_create(box_seq);
+    lv_obj_remove_style_all(seq_left);
+    lv_obj_set_size(seq_left, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(seq_left, LV_FLEX_FLOW_COLUMN);
+
+    lv_obj_t * lbl_seq_title = create_small_label(seq_left, "SEQUENCE");
+    lv_obj_set_style_text_font(lbl_seq_title, &lv_font_montserrat_14, 0);
+
+    lbl_seq_container = lv_label_create(seq_left);
+    lv_obj_set_style_text_color(lbl_seq_container, COLOR_BLUE, 0);
+    lv_obj_set_style_text_font(lbl_seq_container, &lv_font_montserrat_24, 0);
+    lv_label_set_text(lbl_seq_container, "----");
+
+    // Right: Step name
+    lv_obj_t * seq_right = lv_obj_create(box_seq);
+    lv_obj_remove_style_all(seq_right);
+    lv_obj_set_size(seq_right, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(seq_right, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(seq_right, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+
+    lv_obj_t * lbl_step_title = create_small_label(seq_right, "STEP");
+    lv_obj_set_style_text_font(lbl_step_title, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_align(lbl_step_title, LV_TEXT_ALIGN_RIGHT, 0);
+
+    lbl_seq_step = lv_label_create(seq_right);
+    lv_obj_set_style_text_color(lbl_seq_step, COLOR_TEXT, 0);
+    lv_obj_set_style_text_font(lbl_seq_step, &lv_font_montserrat_24, 0);
+    lv_label_set_text(lbl_seq_step, "----");
+
+    /* ═══════════════════════════════════════════════════════════
+     * EXPOSURE DISPLAY (Col 0, Rows 2-3, Span 2 Rows)
      * ═══════════════════════════════════════════════════════════ */
     lv_obj_t * box_exposure = create_bento_box(main_cont);
-    lv_obj_set_grid_cell(box_exposure, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_STRETCH, 1, 2);
+    lv_obj_set_grid_cell(box_exposure, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_STRETCH, 2, 2);
     lv_obj_set_flex_flow(box_exposure, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(box_exposure, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(box_exposure, 12, 0);
+    lv_obj_set_flex_align(box_exposure, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(box_exposure, 0, 0);
 
-    lbl_exposure_title = create_small_label(box_exposure, "EXPOSURE");
-    lv_obj_set_style_text_font(lbl_exposure_title, &lv_font_montserrat_24, 0);
-    lv_label_set_long_mode(lbl_exposure_title, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_obj_set_width(lbl_exposure_title, LV_PCT(100));
-    lv_obj_set_style_text_align(lbl_exposure_title, LV_TEXT_ALIGN_CENTER, 0);
-
-    // Arc/Circle Widget (expanded downward to fill available space)
+    // Arc/Circle Widget (fills the full exposure box)
     arc_exposure = lv_arc_create(box_exposure);
-    lv_obj_set_size(arc_exposure, 260, 260);
+    lv_obj_set_size(arc_exposure, 300, 300);
     lv_arc_set_rotation(arc_exposure, 270);
     lv_arc_set_bg_angles(arc_exposure, 0, 360);
     lv_arc_set_value(arc_exposure, 0);
@@ -256,10 +284,10 @@ void create_nina_dashboard(lv_obj_t * parent) {
     lv_label_set_text(lbl_loop_count, "-- / --");
 
     /* ═══════════════════════════════════════════════════════════
-     * GUIDING RMS (Col 1, Row 1)
+     * GUIDING RMS (Col 1, Row 2)
      * ═══════════════════════════════════════════════════════════ */
     lv_obj_t * box_rms = create_bento_box(main_cont);
-    lv_obj_set_grid_cell(box_rms, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 1, 1);
+    lv_obj_set_grid_cell(box_rms, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 2, 1);
     lv_obj_set_flex_flow(box_rms, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(box_rms, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
@@ -305,10 +333,10 @@ void create_nina_dashboard(lv_obj_t * parent) {
     // lv_label_set_text(lbl_rms_dec_value, "0.28\"");
 
     /* ═══════════════════════════════════════════════════════════
-     * HFR / SHARPNESS (Col 1, Row 2)
+     * HFR / SHARPNESS (Col 1, Row 3)
      * ═══════════════════════════════════════════════════════════ */
     lv_obj_t * box_hfr = create_bento_box(main_cont);
-    lv_obj_set_grid_cell(box_hfr, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 2, 1);
+    lv_obj_set_grid_cell(box_hfr, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 3, 1);
     lv_obj_set_flex_flow(box_hfr, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(box_hfr, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
@@ -319,10 +347,10 @@ void create_nina_dashboard(lv_obj_t * parent) {
     lv_label_set_text(lbl_hfr_value, "2.15");
 
     /* ═══════════════════════════════════════════════════════════
-     * STAR COUNT (Col 0, Row 3)
+     * STAR COUNT (Col 0, Row 4)
      * ═══════════════════════════════════════════════════════════ */
     lv_obj_t * box_stars = create_bento_box(main_cont);
-    lv_obj_set_grid_cell(box_stars, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_STRETCH, 3, 1);
+    lv_obj_set_grid_cell(box_stars, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_STRETCH, 4, 1);
     lv_obj_set_flex_flow(box_stars, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(box_stars, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
@@ -334,10 +362,10 @@ void create_nina_dashboard(lv_obj_t * parent) {
     lv_label_set_text(lbl_stars_value, "2451");
 
     /* ═══════════════════════════════════════════════════════════
-     * SATURATED PIXELS (Col 1, Row 3)
+     * SATURATED PIXELS (Col 1, Row 4)
      * ═══════════════════════════════════════════════════════════ */
     lv_obj_t * box_saturated = create_bento_box(main_cont);
-    lv_obj_set_grid_cell(box_saturated, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 3, 1);
+    lv_obj_set_grid_cell(box_saturated, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 4, 1);
     lv_obj_set_flex_flow(box_saturated, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(box_saturated, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
@@ -365,11 +393,17 @@ void update_nina_dashboard_ui(const nina_client_t *data) {
         lv_label_set_text(lbl_target_name, data->target_name);
     }
 
-    // 2. Exposure Title - Show running container name or fallback to "EXPOSURE"
+    // 2. Sequence Info - Container name and current step
     if (data->container_name[0] != '\0') {
-        lv_label_set_text(lbl_exposure_title, data->container_name);
+        lv_label_set_text(lbl_seq_container, data->container_name);
     } else {
-        lv_label_set_text(lbl_exposure_title, "EXPOSURE");
+        lv_label_set_text(lbl_seq_container, "----");
+    }
+
+    if (data->container_step[0] != '\0') {
+        lv_label_set_text(lbl_seq_step, data->container_step);
+    } else {
+        lv_label_set_text(lbl_seq_step, "----");
     }
 
     // 3. Filter - Update arc color based on current filter
