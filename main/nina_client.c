@@ -683,11 +683,10 @@ static void handle_websocket_message(const char *payload, int len) {
             cJSON *exp = cJSON_GetObjectItem(stats, "ExposureTime");
             if (exp) ws_client_data->exposure_total = (float)exp->valuedouble;
 
-            cJSON *filter = cJSON_GetObjectItem(stats, "Filter");
-            if (filter && filter->valuestring) {
-                strncpy(ws_client_data->current_filter, filter->valuestring,
-                        sizeof(ws_client_data->current_filter) - 1);
-            }
+            // NOTE: Do NOT update current_filter from IMAGE-SAVE.
+            // The filter wheel may have already moved to the next filter
+            // by the time the image is saved. FILTERWHEEL-CHANGED is the
+            // authoritative source for the current filter.
 
             cJSON *target = cJSON_GetObjectItem(stats, "TargetName");
             if (target && target->valuestring) {

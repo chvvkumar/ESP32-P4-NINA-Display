@@ -389,6 +389,12 @@ static esp_err_t color_brightness_post_handler(httpd_req_t *req)
         if (cb < 0) cb = 0;
         if (cb > 100) cb = 100;
         app_config_get()->color_brightness = cb;
+        
+        // Re-apply theme to update static text brightness
+        bsp_display_lock(0);
+        nina_dashboard_apply_theme(app_config_get()->theme_index);
+        bsp_display_unlock();
+        
         ESP_LOGI(TAG, "Color brightness set to %d%%", cb);
     }
 

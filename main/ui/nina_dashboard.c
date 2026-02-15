@@ -78,6 +78,8 @@ static lv_style_t style_header_gradient;
 static void update_styles(void) {
     if (!current_theme) return;
 
+    int gb = app_config_get()->color_brightness;
+
     // Bento Box Style
     lv_style_reset(&style_bento_box);
     lv_style_init(&style_bento_box);
@@ -92,14 +94,14 @@ static void update_styles(void) {
     // Small Label Style (Uppercase, Bold, Gray)
     lv_style_reset(&style_label_small);
     lv_style_init(&style_label_small);
-    lv_style_set_text_color(&style_label_small, lv_color_hex(current_theme->label_color));
+    lv_style_set_text_color(&style_label_small, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)));
     lv_style_set_text_font(&style_label_small, &lv_font_montserrat_16);
     lv_style_set_text_letter_space(&style_label_small, 1);
 
     // Large Value Style
     lv_style_reset(&style_value_large);
     lv_style_init(&style_value_large);
-    lv_style_set_text_color(&style_value_large, lv_color_hex(current_theme->text_color));
+    lv_style_set_text_color(&style_value_large, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)));
 #ifdef LV_FONT_MONTSERRAT_48
     lv_style_set_text_font(&style_value_large, &lv_font_montserrat_48);
 #elif defined(LV_FONT_MONTSERRAT_32)
@@ -159,6 +161,8 @@ void nina_dashboard_apply_theme(int theme_index) {
     update_styles();
 
     if (!scr_dashboard) return;
+    
+    int gb = app_config_get()->color_brightness;
 
     // Update Main Container BG
     if (main_cont) {
@@ -173,30 +177,32 @@ void nina_dashboard_apply_theme(int theme_index) {
     lv_obj_report_style_change(&style_header_gradient);
 
     // Update specific colors that aren't covered by shared styles
-    if (lbl_instance_name) lv_obj_set_style_text_color(lbl_instance_name, lv_color_hex(current_theme->header_text_color), 0);
-    if (lbl_target_name) lv_obj_set_style_text_color(lbl_target_name, lv_color_hex(current_theme->text_color), 0); // Is large value
+    if (lbl_instance_name) lv_obj_set_style_text_color(lbl_instance_name, lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
+    if (lbl_target_name) lv_obj_set_style_text_color(lbl_target_name, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0); // Is large value
     
-    if (lbl_seq_container) lv_obj_set_style_text_color(lbl_seq_container, lv_color_hex(current_theme->header_text_color), 0);
-    if (lbl_seq_step) lv_obj_set_style_text_color(lbl_seq_step, lv_color_hex(current_theme->text_color), 0);
+    if (lbl_seq_container) lv_obj_set_style_text_color(lbl_seq_container, lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
+    if (lbl_seq_step) lv_obj_set_style_text_color(lbl_seq_step, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
 
     if (arc_exposure) {
          // Background of arc often needs to be darker than theme bg
          lv_obj_set_style_arc_color(arc_exposure, lv_color_hex(current_theme->bg_main), LV_PART_MAIN);
          lv_obj_set_style_arc_color(arc_exposure, lv_color_hex(current_theme->progress_color), LV_PART_INDICATOR);
+         lv_obj_set_style_shadow_color(arc_exposure, lv_color_hex(current_theme->progress_color), LV_PART_INDICATOR);
     }
     
-    if (lbl_exposure_total) lv_obj_set_style_text_color(lbl_exposure_total, lv_color_hex(current_theme->filter_text_color), 0);
+    if (lbl_exposure_total) lv_obj_set_style_text_color(lbl_exposure_total, lv_color_hex(app_config_apply_brightness(current_theme->filter_text_color, gb)), 0);
+    if (lbl_loop_count) lv_obj_set_style_text_color(lbl_loop_count, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
     
     // Widget title colors (all use text_color, same as Target text)
-    if (lbl_rms_title) lv_obj_set_style_text_color(lbl_rms_title, lv_color_hex(current_theme->text_color), 0);
-    if (lbl_hfr_title) lv_obj_set_style_text_color(lbl_hfr_title, lv_color_hex(current_theme->text_color), 0);
-    if (lbl_flip_title) lv_obj_set_style_text_color(lbl_flip_title, lv_color_hex(current_theme->text_color), 0);
-    if (lbl_stars_header) lv_obj_set_style_text_color(lbl_stars_header, lv_color_hex(current_theme->text_color), 0);
-    if (lbl_sat_header) lv_obj_set_style_text_color(lbl_sat_header, lv_color_hex(current_theme->text_color), 0);
+    if (lbl_rms_title) lv_obj_set_style_text_color(lbl_rms_title, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+    if (lbl_hfr_title) lv_obj_set_style_text_color(lbl_hfr_title, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+    if (lbl_flip_title) lv_obj_set_style_text_color(lbl_flip_title, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+    if (lbl_stars_header) lv_obj_set_style_text_color(lbl_stars_header, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+    if (lbl_sat_header) lv_obj_set_style_text_color(lbl_sat_header, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
 
     // Semantic value colors
-    if (lbl_rms_value) lv_obj_set_style_text_color(lbl_rms_value, lv_color_hex(current_theme->rms_color), 0);
-    if (lbl_hfr_value) lv_obj_set_style_text_color(lbl_hfr_value, lv_color_hex(current_theme->hfr_color), 0);
+    if (lbl_rms_value) lv_obj_set_style_text_color(lbl_rms_value, lv_color_hex(app_config_apply_brightness(current_theme->rms_color, gb)), 0);
+    if (lbl_hfr_value) lv_obj_set_style_text_color(lbl_hfr_value, lv_color_hex(app_config_apply_brightness(current_theme->hfr_color, gb)), 0);
     
     lv_obj_invalidate(scr_dashboard);
 }
@@ -319,7 +325,11 @@ void create_nina_dashboard(lv_obj_t * parent) {
     lv_obj_set_style_arc_width(arc_exposure, 12, LV_PART_MAIN);
     lv_obj_set_style_arc_color(arc_exposure, lv_color_hex(current_theme->progress_color), LV_PART_INDICATOR);
     lv_obj_set_style_arc_width(arc_exposure, 12, LV_PART_INDICATOR);
-    
+    lv_obj_set_style_shadow_color(arc_exposure, lv_color_hex(current_theme->progress_color), LV_PART_INDICATOR);
+    lv_obj_set_style_shadow_width(arc_exposure, 16, LV_PART_INDICATOR);
+    lv_obj_set_style_shadow_spread(arc_exposure, 10, LV_PART_INDICATOR);
+    lv_obj_set_style_shadow_opa(arc_exposure, LV_OPA_100, LV_PART_INDICATOR);
+
     // Center Text in Arc
     lv_obj_t * arc_center = lv_obj_create(arc_exposure);
     lv_obj_remove_style_all(arc_center);
@@ -352,7 +362,7 @@ void create_nina_dashboard(lv_obj_t * parent) {
     lv_obj_set_flex_flow(box_rms, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(box_rms, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    lbl_rms_title = create_small_label(box_rms, "GUIDING RMS");
+    lbl_rms_title = create_small_label(box_rms, "RMS");
     lv_obj_set_width(lbl_rms_title, LV_PCT(100));
     lv_obj_set_style_text_align(lbl_rms_title, LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_set_style_text_color(lbl_rms_title, lv_color_hex(current_theme->text_color), 0);
@@ -426,6 +436,9 @@ void create_nina_dashboard(lv_obj_t * parent) {
 
     lbl_saturated_value = create_value_label(box_saturated);
     lv_label_set_text(lbl_saturated_value, "84");
+
+    // Apply theme again to ensure all brightness adjustments are correct
+    nina_dashboard_apply_theme(cfg->theme_index);
 }
 
 
@@ -452,6 +465,8 @@ static void arc_fill_complete_cb(lv_anim_t *a) {
 void update_nina_dashboard_ui(const nina_client_t *data) {
     if (!scr_dashboard || !data) return;
 
+    int gb = app_config_get()->color_brightness;
+
     // 1. Header - Instance Name (Telescope) & Target Name
     if (data->telescope_name[0] != '\0') {
         lv_label_set_text(lbl_instance_name, data->telescope_name);
@@ -475,11 +490,12 @@ void update_nina_dashboard_ui(const nina_client_t *data) {
     }
 
     // 3. Filter - Update arc color based on current filter
-    uint32_t filter_color = current_theme->progress_color;  // Default theme color
+    uint32_t filter_color = app_config_apply_brightness(current_theme->progress_color, gb);  // Default theme color
     if (data->current_filter[0] != '\0' && strcmp(data->current_filter, "--") != 0) {
         filter_color = app_config_get_filter_color(data->current_filter);
     }
     lv_obj_set_style_arc_color(arc_exposure, lv_color_hex(filter_color), LV_PART_INDICATOR);
+    lv_obj_set_style_shadow_color(arc_exposure, lv_color_hex(filter_color), LV_PART_INDICATOR);
 
     // 4. Exposure Progress (Current Exposure Time)
     if (data->exposure_total > 0) {
@@ -565,7 +581,7 @@ void update_nina_dashboard_ui(const nina_client_t *data) {
         lv_obj_set_style_text_color(lbl_rms_value, lv_color_hex(rms_color), 0);
     } else {
         lv_label_set_text(lbl_rms_value, "--");
-        lv_obj_set_style_text_color(lbl_rms_value, lv_color_hex(current_theme->label_color), 0);
+        lv_obj_set_style_text_color(lbl_rms_value, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
     }
 
     if (lbl_rms_ra_value) {
@@ -591,7 +607,7 @@ void update_nina_dashboard_ui(const nina_client_t *data) {
         lv_obj_set_style_text_color(lbl_hfr_value, lv_color_hex(hfr_color), 0);
     } else {
         lv_label_set_text(lbl_hfr_value, "--");
-        lv_obj_set_style_text_color(lbl_hfr_value, lv_color_hex(current_theme->label_color), 0);
+        lv_obj_set_style_text_color(lbl_hfr_value, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
     }
 
     // 8. Time to Meridian Flip

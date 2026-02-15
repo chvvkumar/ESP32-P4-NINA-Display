@@ -29,6 +29,7 @@ uint32_t app_config_get_filter_color(const char *filter_name);
 uint32_t app_config_get_rms_color(float rms_value);
 uint32_t app_config_get_hfr_color(float hfr_value);
 void app_config_sync_filters(const char *filter_names[], int count);
+uint32_t app_config_apply_brightness(uint32_t color, int brightness);
 
 #ifdef __cplusplus
 }

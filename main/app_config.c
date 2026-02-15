@@ -182,7 +182,7 @@ static uint32_t parse_color_field(cJSON *root, const char *field, uint32_t fallb
  * @param brightness Brightness percentage 0-100
  * @return Adjusted color
  */
-static uint32_t apply_brightness(uint32_t color, int brightness) {
+uint32_t app_config_apply_brightness(uint32_t color, int brightness) {
     if (brightness >= 100) return color;
     if (brightness <= 0) return 0x000000;
     uint8_t r = (color >> 16) & 0xFF;
@@ -257,7 +257,7 @@ uint32_t app_config_get_filter_color(const char *filter_name) {
     int gb = s_config.color_brightness;
     if (gb < 0 || gb > 100) gb = 100;
     int combined = (fb * gb) / 100;
-    color = apply_brightness(color, combined);
+    color = app_config_apply_brightness(color, combined);
 
     return color;
 }
@@ -297,7 +297,7 @@ uint32_t app_config_get_rms_color(float rms_value) {
     // Apply global color brightness
     int gb = s_config.color_brightness;
     if (gb < 0 || gb > 100) gb = 100;
-    result = apply_brightness(result, gb);
+    result = app_config_apply_brightness(result, gb);
 
     return result;
 }
@@ -337,7 +337,7 @@ uint32_t app_config_get_hfr_color(float hfr_value) {
     // Apply global color brightness
     int gb = s_config.color_brightness;
     if (gb < 0 || gb > 100) gb = 100;
-    result = apply_brightness(result, gb);
+    result = app_config_apply_brightness(result, gb);
 
     return result;
 }
