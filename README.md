@@ -25,7 +25,9 @@ The dashboard monitors critical parameters of an imaging session, including:
 
 NOTE: If your ESP32P4 shows warnings on serial console about old version on the esp-hosted co-processor, erase the device using the same website mentioned in the release and then flash the `network_adapter.bin` at 0x0000 from the release page. This firmware has embedded OTA update for the ESP32C6 co-processor that will update it to the latest firmware built by ESP-IDF 5.5.2. This is the same version of ESP-IDF that was used to build the firmware in this project.
 
-![NINA Plugin](images\NINA_Plugin.jpg)
+<p align="center">
+  <img src="images/NINA_Plugin.jpg" alt="NINA Plugin" width="1200">
+</p>
 
 ## Hardware Requirements
 
@@ -35,29 +37,47 @@ NOTE: If your ESP32P4 shows warnings on serial console about old version on the 
     * https://www.amazon.com/Waveshare-ESP32-P4-WIFI6-Touch-LCD-4B-External-Dual-Core-Single-Core/dp/
 
 
-![Device](images/pic1.jpg)
+<p align="center">
+  <img src="images/pic1.jpg" alt="Device" width="1200">
+</p>
 
 ## Screenshots
 
 Web config page:
 
-![Web config](images\Web-config.jpg)
+<p align="center">
+  <img src="images/Web-config.jpg" alt="Web config" width="1200">
+</p>
 
 The following images demonstrate the dashboard interface with different filter configurations:
 
-![Luminance Filter](images/L.jpg)
+<p align="center">
+  <img src="images/L.jpg" alt="Luminance Filter" width="1200">
+</p>
 
-![Red Filter](images/R.jpg)
+<p align="center">
+  <img src="images/R.jpg" alt="Red Filter" width="1200">
+</p>
 
-![Green Filter](images/G.jpg)
+<p align="center">
+  <img src="images/G.jpg" alt="Green Filter" width="1200">
+</p>
 
-![Blue Filter](images/B.jpg)
+<p align="center">
+  <img src="images/B.jpg" alt="Blue Filter" width="1200">
+</p>
 
-![Ha Filter](images/Ha.jpg)
+<p align="center">
+  <img src="images/Ha.jpg" alt="Ha Filter" width="1200">
+</p>
 
-![Oiii Filter](images/Oiii.jpg)
+<p align="center">
+  <img src="images/Oiii.jpg" alt="Oiii Filter" width="1200">
+</p>
 
-![Sii Filter](images/Sii.jpg)
+<p align="center">
+  <img src="images/Sii.jpg" alt="Sii Filter" width="1200">
+</p>
 
 ## Installation
 
