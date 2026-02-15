@@ -15,6 +15,16 @@ static const char *DEFAULT_FILTER_COLORS =
     "{\"L\":\"#60a5fa\",\"R\":\"#ef4444\",\"G\":\"#10b981\",\"B\":\"#3b82f6\","
     "\"Ha\":\"#f43f5e\",\"Sii\":\"#a855f7\",\"Oiii\":\"#06b6d4\"}";
 
+// Default RMS thresholds: good <= 0.5", ok <= 1.0", bad > 1.0"
+static const char *DEFAULT_RMS_THRESHOLDS =
+    "{\"good_max\":0.5,\"ok_max\":1.0,"
+    "\"good_color\":\"#10b981\",\"ok_color\":\"#eab308\",\"bad_color\":\"#ef4444\"}";
+
+// Default HFR thresholds: good <= 2.0, ok <= 3.5, bad > 3.5
+static const char *DEFAULT_HFR_THRESHOLDS =
+    "{\"good_max\":2.0,\"ok_max\":3.5,"
+    "\"good_color\":\"#10b981\",\"ok_color\":\"#eab308\",\"bad_color\":\"#ef4444\"}";
+
 void app_config_init(void) {
     nvs_handle_t my_handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &my_handle);
@@ -28,6 +38,8 @@ void app_config_init(void) {
         strcpy(s_config.api_url_2, "http://astromele3.lan:1888/v2/api/");
         strcpy(s_config.ntp_server, "pool.ntp.org");
         strcpy(s_config.filter_colors, DEFAULT_FILTER_COLORS);
+        strcpy(s_config.rms_thresholds, DEFAULT_RMS_THRESHOLDS);
+        strcpy(s_config.hfr_thresholds, DEFAULT_HFR_THRESHOLDS);
         return;
     }
 
@@ -42,15 +54,31 @@ void app_config_init(void) {
         strcpy(s_config.api_url_2, "http://astromele3.lan:1888/v2/api/");
         strcpy(s_config.ntp_server, "pool.ntp.org");
         strcpy(s_config.filter_colors, DEFAULT_FILTER_COLORS);
+        strcpy(s_config.rms_thresholds, DEFAULT_RMS_THRESHOLDS);
+        strcpy(s_config.hfr_thresholds, DEFAULT_HFR_THRESHOLDS);
 
         // Save defaults so we have them next time
         nvs_set_blob(my_handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(my_handle);
     } else {
-        // Config loaded successfully, but check if filter_colors is valid
+        // Config loaded successfully, but check if fields are valid
+        bool needs_save = false;
         if (s_config.filter_colors[0] == '\0') {
             ESP_LOGI(TAG, "Filter colors empty, initializing with defaults");
             strcpy(s_config.filter_colors, DEFAULT_FILTER_COLORS);
+            needs_save = true;
+        }
+        if (s_config.rms_thresholds[0] == '\0') {
+            ESP_LOGI(TAG, "RMS thresholds empty, initializing with defaults");
+            strcpy(s_config.rms_thresholds, DEFAULT_RMS_THRESHOLDS);
+            needs_save = true;
+        }
+        if (s_config.hfr_thresholds[0] == '\0') {
+            ESP_LOGI(TAG, "HFR thresholds empty, initializing with defaults");
+            strcpy(s_config.hfr_thresholds, DEFAULT_HFR_THRESHOLDS);
+            needs_save = true;
+        }
+        if (needs_save) {
             nvs_set_blob(my_handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(my_handle);
         }
@@ -142,4 +170,85 @@ uint32_t app_config_get_filter_color(const char *filter_name) {
 
     cJSON_Delete(root);
     return color;
+}
+
+/**
+ * @brief Parse a hex color string from a cJSON object field
+ */
+static uint32_t parse_color_field(cJSON *root, const char *field, uint32_t fallback) {
+    cJSON *item = cJSON_GetObjectItem(root, field);
+    if (item && cJSON_IsString(item) && item->valuestring) {
+        const char *hex = item->valuestring;
+        if (hex[0] == '#') hex++;
+        return (uint32_t)strtol(hex, NULL, 16);
+    }
+    return fallback;
+}
+
+/**
+ * @brief Get the color for a guiding RMS value based on configured thresholds
+ * @param rms_value The current RMS value in arcseconds
+ * @return 32-bit color value (0xRRGGBB)
+ */
+uint32_t app_config_get_rms_color(float rms_value) {
+    cJSON *root = cJSON_Parse(s_config.rms_thresholds);
+    if (!root) {
+        return 0xf43f5e;  // Fallback rose
+    }
+
+    cJSON *good_max = cJSON_GetObjectItem(root, "good_max");
+    cJSON *ok_max = cJSON_GetObjectItem(root, "ok_max");
+
+    uint32_t good_color = parse_color_field(root, "good_color", 0x10b981);
+    uint32_t ok_color   = parse_color_field(root, "ok_color",   0xeab308);
+    uint32_t bad_color  = parse_color_field(root, "bad_color",  0xef4444);
+
+    float good_threshold = (good_max && cJSON_IsNumber(good_max)) ? (float)good_max->valuedouble : 0.5f;
+    float ok_threshold   = (ok_max && cJSON_IsNumber(ok_max))     ? (float)ok_max->valuedouble   : 1.0f;
+
+    uint32_t result;
+    if (rms_value <= good_threshold) {
+        result = good_color;
+    } else if (rms_value <= ok_threshold) {
+        result = ok_color;
+    } else {
+        result = bad_color;
+    }
+
+    cJSON_Delete(root);
+    return result;
+}
+
+/**
+ * @brief Get the color for an HFR value based on configured thresholds
+ * @param hfr_value The current HFR value
+ * @return 32-bit color value (0xRRGGBB)
+ */
+uint32_t app_config_get_hfr_color(float hfr_value) {
+    cJSON *root = cJSON_Parse(s_config.hfr_thresholds);
+    if (!root) {
+        return 0x10b981;  // Fallback emerald
+    }
+
+    cJSON *good_max = cJSON_GetObjectItem(root, "good_max");
+    cJSON *ok_max = cJSON_GetObjectItem(root, "ok_max");
+
+    uint32_t good_color = parse_color_field(root, "good_color", 0x10b981);
+    uint32_t ok_color   = parse_color_field(root, "ok_color",   0xeab308);
+    uint32_t bad_color  = parse_color_field(root, "bad_color",  0xef4444);
+
+    float good_threshold = (good_max && cJSON_IsNumber(good_max)) ? (float)good_max->valuedouble : 2.0f;
+    float ok_threshold   = (ok_max && cJSON_IsNumber(ok_max))     ? (float)ok_max->valuedouble   : 3.5f;
+
+    uint32_t result;
+    if (hfr_value <= good_threshold) {
+        result = good_color;
+    } else if (hfr_value <= ok_threshold) {
+        result = ok_color;
+    } else {
+        result = bad_color;
+    }
+
+    cJSON_Delete(root);
+    return result;
 }

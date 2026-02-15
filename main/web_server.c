@@ -43,6 +43,28 @@ static const char *HTML_CONTENT =
 "<div class='card'><h3>Filter Colors</h3>"
 "<p style='font-size:0.9rem;margin-bottom:16px'>Configure colors for each filter. The exposure arc will be colored based on the active filter.</p>"
 "<div id='filterColors'></div></div>"
+"<div class='card'><h3>Guiding RMS Thresholds</h3>"
+"<p style='font-size:0.9rem;margin-bottom:16px'>Set value thresholds and colors for Good, OK, and Bad guiding RMS levels (arcseconds).</p>"
+"<div class='group'><label>Good (max value)</label><div style='display:flex;gap:8px;align-items:center'>"
+"<input type='text' id='rms_good_max' style='flex:1' placeholder='0.5'>"
+"<input type='color' class='color-input' id='rms_good_color' value='#10b981'></div></div>"
+"<div class='group'><label>OK (max value)</label><div style='display:flex;gap:8px;align-items:center'>"
+"<input type='text' id='rms_ok_max' style='flex:1' placeholder='1.0'>"
+"<input type='color' class='color-input' id='rms_ok_color' value='#eab308'></div></div>"
+"<div class='group'><label>Bad (above OK threshold)</label><div style='display:flex;gap:8px;align-items:center'>"
+"<span style='flex:1;color:var(--text-secondary);font-size:0.9rem'>Values above OK threshold</span>"
+"<input type='color' class='color-input' id='rms_bad_color' value='#ef4444'></div></div></div>"
+"<div class='card'><h3>HFR Thresholds</h3>"
+"<p style='font-size:0.9rem;margin-bottom:16px'>Set value thresholds and colors for Good, OK, and Bad HFR levels.</p>"
+"<div class='group'><label>Good (max value)</label><div style='display:flex;gap:8px;align-items:center'>"
+"<input type='text' id='hfr_good_max' style='flex:1' placeholder='2.0'>"
+"<input type='color' class='color-input' id='hfr_good_color' value='#10b981'></div></div>"
+"<div class='group'><label>OK (max value)</label><div style='display:flex;gap:8px;align-items:center'>"
+"<input type='text' id='hfr_ok_max' style='flex:1' placeholder='3.5'>"
+"<input type='color' class='color-input' id='hfr_ok_color' value='#eab308'></div></div>"
+"<div class='group'><label>Bad (above OK threshold)</label><div style='display:flex;gap:8px;align-items:center'>"
+"<span style='flex:1;color:var(--text-secondary);font-size:0.9rem'>Values above OK threshold</span>"
+"<input type='color' class='color-input' id='hfr_bad_color' value='#ef4444'></div></div></div>"
 "<button class='btn btn-primary' onclick='save()'>Save & Reboot</button>"
 "<button class='btn btn-danger' onclick='factoryReset()'>Factory Reset</button></div>"
 "<script>"
@@ -55,6 +77,20 @@ static const char *HTML_CONTENT =
 "document.getElementById('ntp').value=d.ntp||'';"
 "try{filterColorsObj=JSON.parse(d.filter_colors||'{}');}catch(e){filterColorsObj={};}"
 "renderFilterColors();"
+"try{var rms=JSON.parse(d.rms_thresholds||'{}');"
+"document.getElementById('rms_good_max').value=rms.good_max||0.5;"
+"document.getElementById('rms_ok_max').value=rms.ok_max||1.0;"
+"document.getElementById('rms_good_color').value=rms.good_color||'#10b981';"
+"document.getElementById('rms_ok_color').value=rms.ok_color||'#eab308';"
+"document.getElementById('rms_bad_color').value=rms.bad_color||'#ef4444';"
+"}catch(e){}"
+"try{var hfr=JSON.parse(d.hfr_thresholds||'{}');"
+"document.getElementById('hfr_good_max').value=hfr.good_max||2.0;"
+"document.getElementById('hfr_ok_max').value=hfr.ok_max||3.5;"
+"document.getElementById('hfr_good_color').value=hfr.good_color||'#10b981';"
+"document.getElementById('hfr_ok_color').value=hfr.ok_color||'#eab308';"
+"document.getElementById('hfr_bad_color').value=hfr.bad_color||'#ef4444';"
+"}catch(e){}"
 "});"
 "function renderFilterColors(){"
 "const container=document.getElementById('filterColors');"
@@ -71,7 +107,9 @@ static const char *HTML_CONTENT =
 "function updateFilterColor(name,color){filterColorsObj[name]=color;}"
 "function save(){"
 "const btn=document.querySelector('.btn-primary');const originalText=btn.innerText;btn.innerText='Saving...';btn.disabled=true;"
-"const data={ssid:document.getElementById('ssid').value,pass:document.getElementById('pass').value,url1:document.getElementById('url1').value,url2:document.getElementById('url2').value,ntp:document.getElementById('ntp').value,filter_colors:JSON.stringify(filterColorsObj)};"
+"const rmsT=JSON.stringify({good_max:parseFloat(document.getElementById('rms_good_max').value)||0.5,ok_max:parseFloat(document.getElementById('rms_ok_max').value)||1.0,good_color:document.getElementById('rms_good_color').value,ok_color:document.getElementById('rms_ok_color').value,bad_color:document.getElementById('rms_bad_color').value});"
+"const hfrT=JSON.stringify({good_max:parseFloat(document.getElementById('hfr_good_max').value)||2.0,ok_max:parseFloat(document.getElementById('hfr_ok_max').value)||3.5,good_color:document.getElementById('hfr_good_color').value,ok_color:document.getElementById('hfr_ok_color').value,bad_color:document.getElementById('hfr_bad_color').value});"
+"const data={ssid:document.getElementById('ssid').value,pass:document.getElementById('pass').value,url1:document.getElementById('url1').value,url2:document.getElementById('url2').value,ntp:document.getElementById('ntp').value,filter_colors:JSON.stringify(filterColorsObj),rms_thresholds:rmsT,hfr_thresholds:hfrT};"
 "fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})"
 ".then(r=>{if(r.ok){alert('Saved! Rebooting...');fetch('/api/reboot',{method:'POST'});}else{alert('Error saving');btn.innerText=originalText;btn.disabled=false;}}).catch(()=>{alert('Connection failed');btn.innerText=originalText;btn.disabled=false;});"
 "}"
@@ -106,7 +144,9 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddStringToObject(root, "url2", cfg->api_url_2);
     cJSON_AddStringToObject(root, "ntp", cfg->ntp_server);
     cJSON_AddStringToObject(root, "filter_colors", cfg->filter_colors);
-    
+    cJSON_AddStringToObject(root, "rms_thresholds", cfg->rms_thresholds);
+    cJSON_AddStringToObject(root, "hfr_thresholds", cfg->hfr_thresholds);
+
     const char *json_str = cJSON_PrintUnformatted(root);
     if (json_str == NULL) {
         cJSON_Delete(root);
@@ -124,7 +164,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
 // Handler for saving config
 static esp_err_t config_post_handler(httpd_req_t *req)
 {
-    char buf[1024];
+    char buf[2048];
     int ret, remaining = req->content_len;
 
     if (remaining >= sizeof(buf)) {
@@ -185,6 +225,18 @@ static esp_err_t config_post_handler(httpd_req_t *req)
     if (cJSON_IsString(filter_colors)) {
         strncpy(cfg.filter_colors, filter_colors->valuestring, sizeof(cfg.filter_colors) - 1);
         cfg.filter_colors[sizeof(cfg.filter_colors) - 1] = '\0';
+    }
+
+    cJSON *rms_thresholds = cJSON_GetObjectItem(root, "rms_thresholds");
+    if (cJSON_IsString(rms_thresholds)) {
+        strncpy(cfg.rms_thresholds, rms_thresholds->valuestring, sizeof(cfg.rms_thresholds) - 1);
+        cfg.rms_thresholds[sizeof(cfg.rms_thresholds) - 1] = '\0';
+    }
+
+    cJSON *hfr_thresholds = cJSON_GetObjectItem(root, "hfr_thresholds");
+    if (cJSON_IsString(hfr_thresholds)) {
+        strncpy(cfg.hfr_thresholds, hfr_thresholds->valuestring, sizeof(cfg.hfr_thresholds) - 1);
+        cfg.hfr_thresholds[sizeof(cfg.hfr_thresholds) - 1] = '\0';
     }
 
     app_config_save(&cfg);

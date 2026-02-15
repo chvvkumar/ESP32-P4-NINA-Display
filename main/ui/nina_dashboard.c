@@ -209,18 +209,19 @@ void create_nina_dashboard(lv_obj_t * parent) {
     lv_obj_t * box_exposure = create_bento_box(main_cont);
     lv_obj_set_grid_cell(box_exposure, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_STRETCH, 1, 2);
     lv_obj_set_flex_flow(box_exposure, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(box_exposure, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(box_exposure, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(box_exposure, 12, 0);
 
     create_small_label(box_exposure, "EXPOSURE");
 
-    // Arc/Circle Widget (~200x200px)
+    // Arc/Circle Widget (expanded downward to fill available space)
     arc_exposure = lv_arc_create(box_exposure);
-    lv_obj_set_size(arc_exposure, 200, 200);
+    lv_obj_set_size(arc_exposure, 260, 260);
     lv_arc_set_rotation(arc_exposure, 270);
     lv_arc_set_bg_angles(arc_exposure, 0, 360);
     lv_arc_set_value(arc_exposure, 0);
     lv_obj_remove_style(arc_exposure, NULL, LV_PART_KNOB);
-    lv_obj_set_style_arc_color(arc_exposure, lv_color_hex(0x333333), LV_PART_MAIN);
+    lv_obj_set_style_arc_color(arc_exposure, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
     lv_obj_set_style_arc_width(arc_exposure, 12, LV_PART_MAIN);
     lv_obj_set_style_arc_color(arc_exposure, COLOR_PROGRESS, LV_PART_INDICATOR);
     lv_obj_set_style_arc_width(arc_exposure, 12, LV_PART_INDICATOR);
@@ -242,11 +243,12 @@ void create_nina_dashboard(lv_obj_t * parent) {
     lv_obj_set_style_text_font(lbl_exposure_total, &lv_font_montserrat_28, 0);
     lv_obj_set_style_pad_top(lbl_exposure_total, 14, 0);
 
-    // Loop Count at Bottom (larger font)
-    lbl_loop_count = lv_label_create(box_exposure);
+    // Loop Count (moved into circle)
+    lbl_loop_count = lv_label_create(arc_center);
     lv_obj_set_style_text_color(lbl_loop_count, COLOR_LABEL, 0);
     lv_obj_set_style_text_font(lbl_loop_count, &lv_font_montserrat_24, 0);
-    lv_label_set_text(lbl_loop_count, "12 / 30");
+    lv_obj_set_style_pad_top(lbl_loop_count, 8, 0);
+    lv_label_set_text(lbl_loop_count, "-- / --");
 
     /* ═══════════════════════════════════════════════════════════
      * GUIDING RMS (Col 1, Row 1)
@@ -261,41 +263,41 @@ void create_nina_dashboard(lv_obj_t * parent) {
     // Total RMS (main value)
     lbl_rms_value = create_value_label(box_rms);
     lv_obj_set_style_text_color(lbl_rms_value, COLOR_ROSE, 0);
-    lv_label_set_text(lbl_rms_value, "0.38\"");
+    lv_label_set_text(lbl_rms_value, "--.--\"");
 
     // RA and DEC RMS (smaller values below)
-    lv_obj_t * rms_details = lv_obj_create(box_rms);
-    lv_obj_remove_style_all(rms_details);
-    lv_obj_set_size(rms_details, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(rms_details, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(rms_details, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(rms_details, 16, 0);
+    // lv_obj_t * rms_details = lv_obj_create(box_rms);
+    // lv_obj_remove_style_all(rms_details);
+    // lv_obj_set_size(rms_details, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    // lv_obj_set_flex_flow(rms_details, LV_FLEX_FLOW_ROW);
+    // lv_obj_set_flex_align(rms_details, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    // lv_obj_set_style_pad_column(rms_details, 16, 0);
 
-    // RA container
-    lv_obj_t * ra_cont = lv_obj_create(rms_details);
-    lv_obj_remove_style_all(ra_cont);
-    lv_obj_set_size(ra_cont, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(ra_cont, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(ra_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    // // RA container
+    // lv_obj_t * ra_cont = lv_obj_create(rms_details);
+    // lv_obj_remove_style_all(ra_cont);
+    // lv_obj_set_size(ra_cont, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    // lv_obj_set_flex_flow(ra_cont, LV_FLEX_FLOW_COLUMN);
+    // lv_obj_set_flex_align(ra_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    create_small_label(ra_cont, "RA");
-    lbl_rms_ra_value = lv_label_create(ra_cont);
-    lv_obj_set_style_text_color(lbl_rms_ra_value, COLOR_ROSE, 0);
-    lv_obj_set_style_text_font(lbl_rms_ra_value, &lv_font_montserrat_24, 0);
-    lv_label_set_text(lbl_rms_ra_value, "0.25\"");
+    // create_small_label(ra_cont, "RA");
+    // lbl_rms_ra_value = lv_label_create(ra_cont);
+    // lv_obj_set_style_text_color(lbl_rms_ra_value, COLOR_ROSE, 0);
+    // lv_obj_set_style_text_font(lbl_rms_ra_value, &lv_font_montserrat_24, 0);
+    // lv_label_set_text(lbl_rms_ra_value, "0.25\"");
 
-    // DEC container
-    lv_obj_t * dec_cont = lv_obj_create(rms_details);
-    lv_obj_remove_style_all(dec_cont);
-    lv_obj_set_size(dec_cont, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(dec_cont, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(dec_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    // // DEC container
+    // lv_obj_t * dec_cont = lv_obj_create(rms_details);
+    // lv_obj_remove_style_all(dec_cont);
+    // lv_obj_set_size(dec_cont, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    // lv_obj_set_flex_flow(dec_cont, LV_FLEX_FLOW_COLUMN);
+    // lv_obj_set_flex_align(dec_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    create_small_label(dec_cont, "DEC");
-    lbl_rms_dec_value = lv_label_create(dec_cont);
-    lv_obj_set_style_text_color(lbl_rms_dec_value, COLOR_ROSE, 0);
-    lv_obj_set_style_text_font(lbl_rms_dec_value, &lv_font_montserrat_24, 0);
-    lv_label_set_text(lbl_rms_dec_value, "0.28\"");
+    // create_small_label(dec_cont, "DEC");
+    // lbl_rms_dec_value = lv_label_create(dec_cont);
+    // lv_obj_set_style_text_color(lbl_rms_dec_value, COLOR_ROSE, 0);
+    // lv_obj_set_style_text_font(lbl_rms_dec_value, &lv_font_montserrat_24, 0);
+    // lv_label_set_text(lbl_rms_dec_value, "0.28\"");
 
     /* ═══════════════════════════════════════════════════════════
      * HFR / SHARPNESS (Col 1, Row 2)
@@ -401,30 +403,40 @@ void update_nina_dashboard_ui(const nina_client_t *data) {
          lv_label_set_text(lbl_loop_count, "-- / --");
     }
 
-    // 5. Guiding RMS (Total, RA, DEC)
+    // 5. Guiding RMS (Total, RA, DEC) - color based on threshold
     if (data->guider.rms_total > 0) {
         lv_label_set_text_fmt(lbl_rms_value, "%.2f\"", data->guider.rms_total);
+        uint32_t rms_color = app_config_get_rms_color(data->guider.rms_total);
+        lv_obj_set_style_text_color(lbl_rms_value, lv_color_hex(rms_color), 0);
     } else {
         lv_label_set_text(lbl_rms_value, "--");
+        lv_obj_set_style_text_color(lbl_rms_value, COLOR_LABEL, 0);
     }
 
-    if (data->guider.rms_ra > 0) {
-        lv_label_set_text_fmt(lbl_rms_ra_value, "%.2f\"", data->guider.rms_ra);
-    } else {
-        lv_label_set_text(lbl_rms_ra_value, "--");
+    if (lbl_rms_ra_value) {
+        if (data->guider.rms_ra > 0) {
+            lv_label_set_text_fmt(lbl_rms_ra_value, "%.2f\"", data->guider.rms_ra);
+        } else {
+            lv_label_set_text(lbl_rms_ra_value, "--");
+        }
     }
 
-    if (data->guider.rms_dec > 0) {
-        lv_label_set_text_fmt(lbl_rms_dec_value, "%.2f\"", data->guider.rms_dec);
-    } else {
-        lv_label_set_text(lbl_rms_dec_value, "--");
+    if (lbl_rms_dec_value) {
+        if (data->guider.rms_dec > 0) {
+            lv_label_set_text_fmt(lbl_rms_dec_value, "%.2f\"", data->guider.rms_dec);
+        } else {
+            lv_label_set_text(lbl_rms_dec_value, "--");
+        }
     }
 
-    // 6. HFR / Sharpness
+    // 6. HFR / Sharpness - color based on threshold
     if (data->hfr > 0) {
         lv_label_set_text_fmt(lbl_hfr_value, "%.2f", data->hfr);
+        uint32_t hfr_color = app_config_get_hfr_color(data->hfr);
+        lv_obj_set_style_text_color(lbl_hfr_value, lv_color_hex(hfr_color), 0);
     } else {
         lv_label_set_text(lbl_hfr_value, "--");
+        lv_obj_set_style_text_color(lbl_hfr_value, COLOR_LABEL, 0);
     }
 
     // 7. Star Count
