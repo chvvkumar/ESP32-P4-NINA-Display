@@ -1163,3 +1163,10 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
     ESP_LOGI(TAG, "Exposure: %.1fs (%.1f/%.1f)", data->exposure_total, data->exposure_current, data->exposure_total);
     ESP_LOGI(TAG, "Guiding: %.2f\", HFR: %.2f, Stars: %d", data->guider.rms_total, data->hfr, data->stars);
 }
+
+void nina_client_poll_heartbeat(const char *base_url, nina_client_t *data) {
+    // Background instances: only check camera info to maintain connection status
+    data->connected = false;
+    fetch_camera_info_robust(base_url, data);
+    ESP_LOGD(TAG, "Heartbeat: connected=%d", data->connected);
+}

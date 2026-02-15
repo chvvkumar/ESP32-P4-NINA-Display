@@ -39,6 +39,7 @@ void app_config_init(void) {
         strcpy(s_config.wifi_pass, "");
         strcpy(s_config.api_url_1, "http://astromele2.lan:1888/v2/api/");
         strcpy(s_config.api_url_2, "http://astromele3.lan:1888/v2/api/");
+        s_config.api_url_3[0] = '\0';
         strcpy(s_config.ntp_server, "pool.ntp.org");
         strcpy(s_config.filter_colors, DEFAULT_FILTER_COLORS);
         strcpy(s_config.rms_thresholds, DEFAULT_RMS_THRESHOLDS);
@@ -59,6 +60,7 @@ void app_config_init(void) {
         strcpy(s_config.wifi_pass, "");
         strcpy(s_config.api_url_1, "http://astromele2.lan:1888/v2/api/");
         strcpy(s_config.api_url_2, "http://astromele3.lan:1888/v2/api/");
+        s_config.api_url_3[0] = '\0';
         strcpy(s_config.ntp_server, "pool.ntp.org");
         strcpy(s_config.filter_colors, DEFAULT_FILTER_COLORS);
         strcpy(s_config.rms_thresholds, DEFAULT_RMS_THRESHOLDS);
@@ -447,5 +449,22 @@ void app_config_sync_filters(const char *filter_names[], int count) {
         ESP_LOGI(TAG, "Filter config synced with API and saved to NVS");
     } else {
         ESP_LOGI(TAG, "Filter config already in sync with API");
+    }
+}
+
+int app_config_get_instance_count(void) {
+    int count = 0;
+    if (s_config.api_url_1[0] != '\0') count++;
+    if (s_config.api_url_2[0] != '\0') count++;
+    if (s_config.api_url_3[0] != '\0') count++;
+    return count > 0 ? count : 1;  // Always at least 1
+}
+
+const char *app_config_get_instance_url(int index) {
+    switch (index) {
+        case 0: return s_config.api_url_1;
+        case 1: return s_config.api_url_2;
+        case 2: return s_config.api_url_3;
+        default: return "";
     }
 }

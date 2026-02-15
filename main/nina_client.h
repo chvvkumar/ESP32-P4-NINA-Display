@@ -106,6 +106,10 @@ void nina_poll_state_init(nina_poll_state_t *state);
 // Tiered polling - fetches data at different rates based on change frequency
 void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state_t *state);
 
+// Heartbeat-only polling for background (inactive) instances
+// Only fetches camera info to maintain connection status
+void nina_client_poll_heartbeat(const char *base_url, nina_client_t *data);
+
 // Legacy API - fetches all data every call (kept for compatibility)
 void nina_client_get_data(const char *base_url, nina_client_t *data);
 

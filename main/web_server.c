@@ -51,7 +51,8 @@ static const char *HTML_CONTENT =
 "<div class=\"group\"><label>NTP Server</label><input type=\"text\" id=\"ntp\"></div></div>"
 "<div class=\"tile area-api\"><h3>NINA API</h3>"
 "<div class=\"group\"><label>Host 1 (IP or Hostname)</label><input type=\"text\" id=\"url1\" placeholder=\"e.g., astromele2.lan or 192.168.1.100\"></div>"
-"<div class=\"group\"><label>Host 2 (IP or Hostname)</label><input type=\"text\" id=\"url2\" placeholder=\"e.g., astromele3.lan or 192.168.1.101\"></div></div>"
+"<div class=\"group\"><label>Host 2 (IP or Hostname)</label><input type=\"text\" id=\"url2\" placeholder=\"e.g., astromele3.lan or 192.168.1.101\"></div>"
+"<div class=\"group\"><label>Host 3 (IP or Hostname)</label><input type=\"text\" id=\"url3\" placeholder=\"e.g., astromele4.lan or 192.168.1.102\"></div></div>"
 "<div class=\"tile area-appearance\"><h3>Appearance</h3>"
 "<div class=\"group\"><label>Dashboard Theme</label>"
 "<select id=\"theme_select\" onchange=\"setTheme(this.value)\">"
@@ -123,9 +124,11 @@ static const char *HTML_CONTENT =
 "const hfr={good_max:parseFloat(document.getElementById('hfr_good_max').value)||2.0,ok_max:parseFloat(document.getElementById('hfr_ok_max').value)||3.5,good_color:document.getElementById('hfr_good_color').value,ok_color:document.getElementById('hfr_ok_color').value,bad_color:document.getElementById('hfr_bad_color').value};"
 "const h1=document.getElementById('url1').value.trim();"
 "const h2=document.getElementById('url2').value.trim();"
+"const h3=document.getElementById('url3').value.trim();"
 "const u1=h1?'http://'+h1+':1888/v2/api/':'';"
 "const u2=h2?'http://'+h2+':1888/v2/api/':'';"
-"const d={ssid:document.getElementById('ssid').value,pass:document.getElementById('pass').value,url1:u1,url2:u2,ntp:document.getElementById('ntp').value,theme_index:parseInt(document.getElementById('theme_select').value),brightness:parseInt(document.getElementById('brightness').value),color_brightness:parseInt(document.getElementById('color_brightness').value),filter_colors:JSON.stringify(filterColorsObj),filter_brightness:JSON.stringify(filterBrightnessObj),rms_thresholds:JSON.stringify(rms),hfr_thresholds:JSON.stringify(hfr)};"
+"const u3=h3?'http://'+h3+':1888/v2/api/':'';"
+"const d={ssid:document.getElementById('ssid').value,pass:document.getElementById('pass').value,url1:u1,url2:u2,url3:u3,ntp:document.getElementById('ntp').value,theme_index:parseInt(document.getElementById('theme_select').value),brightness:parseInt(document.getElementById('brightness').value),color_brightness:parseInt(document.getElementById('color_brightness').value),filter_colors:JSON.stringify(filterColorsObj),filter_brightness:JSON.stringify(filterBrightnessObj),rms_thresholds:JSON.stringify(rms),hfr_thresholds:JSON.stringify(hfr)};"
 "fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})"
 ".then(r=>{if(r.ok){b.innerText='REBOOTING...';fetch('/api/reboot',{method:'POST'}).catch(()=>{});waitForReboot();}else{alert('Error saving');b.innerText=ot;b.disabled=false;}}).catch(e=>{alert('Connection failed');b.innerText=ot;b.disabled=false;});"
 "}"
@@ -138,6 +141,7 @@ static const char *HTML_CONTENT =
 "const extractHost=u=>{if(!u)return '';const m=u.match(/^https?:\\/\\/([^:\\/]+)/);return m?m[1]:u;};"
 "document.getElementById('url1').value=extractHost(d.url1);"
 "document.getElementById('url2').value=extractHost(d.url2);"
+"document.getElementById('url3').value=extractHost(d.url3||'');"
 "document.getElementById('theme_select').value=d.theme_index||0;"
 "var br=d.brightness!=null?d.brightness:50;document.getElementById('brightness').value=br;document.getElementById('bright_val').innerText=br+'%';"
 "var cb=d.color_brightness!=null?d.color_brightness:100;document.getElementById('color_brightness').value=cb;document.getElementById('cbright_val').innerText=cb+'%';"
@@ -182,6 +186,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddStringToObject(root, "pass", cfg->wifi_pass);
     cJSON_AddStringToObject(root, "url1", cfg->api_url_1);
     cJSON_AddStringToObject(root, "url2", cfg->api_url_2);
+    cJSON_AddStringToObject(root, "url3", cfg->api_url_3);
     cJSON_AddStringToObject(root, "ntp", cfg->ntp_server);
     cJSON_AddStringToObject(root, "filter_colors", cfg->filter_colors);
     cJSON_AddStringToObject(root, "rms_thresholds", cfg->rms_thresholds);
@@ -257,6 +262,12 @@ static esp_err_t config_post_handler(httpd_req_t *req)
     if (cJSON_IsString(url2)) {
         strncpy(cfg.api_url_2, url2->valuestring, sizeof(cfg.api_url_2) - 1);
         cfg.api_url_2[sizeof(cfg.api_url_2) - 1] = '\0';
+    }
+
+    cJSON *url3 = cJSON_GetObjectItem(root, "url3");
+    if (cJSON_IsString(url3)) {
+        strncpy(cfg.api_url_3, url3->valuestring, sizeof(cfg.api_url_3) - 1);
+        cfg.api_url_3[sizeof(cfg.api_url_3) - 1] = '\0';
     }
 
     cJSON *ntp = cJSON_GetObjectItem(root, "ntp");
