@@ -6,6 +6,8 @@
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "bsp/esp-bsp.h"
+#include "bsp/display.h"
 
 static const char *TAG = "web_server";
 
@@ -15,14 +17,14 @@ static const char *HTML_CONTENT =
 "<style>"
 ":root{--bg-color:#111111;--tile-color:#1A1A1A;--accent-color:#2979ff;--text-primary:#ffffff;--text-secondary:#aaaaaa;--border-color:#333333;--danger-color:#cf6679;}"
 "body{font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background-color:var(--bg-color);color:var(--text-primary);margin:0;padding:20px;}"
-"input{background:#000;border:1px solid #333;color:#fff;padding:10px;border-radius:4px;width:100%;box-sizing:border-box;font-size:0.9rem;}"
-"input:focus{outline:none;border-color:var(--accent-color);}"
+"input,select{background:#000;border:1px solid #333;color:#fff;padding:10px;border-radius:4px;width:100%;box-sizing:border-box;font-size:0.9rem;}"
+"input:focus,select:focus{outline:none;border-color:var(--accent-color);}"
 "h3{text-transform:uppercase;opacity:0.9;font-size:0.9rem;margin-top:0;margin-bottom:15px;letter-spacing:1px;color:var(--text-primary);}"
 ".container{max-width:800px;margin:0 auto;}"
 ".bento-grid{display:grid;gap:16px;grid-template-columns:1fr;}"
 "@media(min-width:768px){"
-".bento-grid{grid-template-columns:1fr 1fr;grid-template-areas:\"net api\" \"filter filter\" \"rms hfr\" \"actions actions\";}"
-".area-net{grid-area:net;}.area-api{grid-area:api;}.area-filter{grid-area:filter;}.area-rms{grid-area:rms;}.area-hfr{grid-area:hfr;}.area-actions{grid-area:actions;}}"
+".bento-grid{grid-template-columns:1fr 1fr;grid-template-areas:\"net api\" \"appearance appearance\" \"filter filter\" \"rms hfr\" \"actions actions\";}"
+".area-net{grid-area:net;}.area-api{grid-area:api;}.area-appearance{grid-area:appearance;}.area-filter{grid-area:filter;}.area-rms{grid-area:rms;}.area-hfr{grid-area:hfr;}.area-actions{grid-area:actions;}}"
 ".tile{background-color:var(--tile-color);padding:20px;border-radius:8px;border:1px solid var(--border-color);}"
 ".group{margin-bottom:15px;}"
 "label{display:block;margin-bottom:5px;color:var(--text-secondary);font-size:0.8rem;text-transform:uppercase;letter-spacing:0.5px;}"
@@ -46,6 +48,23 @@ static const char *HTML_CONTENT =
 "<div class=\"tile area-api\"><h3>NINA API</h3>"
 "<div class=\"group\"><label>Host 1 (IP or Hostname)</label><input type=\"text\" id=\"url1\" placeholder=\"e.g., astromele2.lan or 192.168.1.100\"></div>"
 "<div class=\"group\"><label>Host 2 (IP or Hostname)</label><input type=\"text\" id=\"url2\" placeholder=\"e.g., astromele3.lan or 192.168.1.101\"></div></div>"
+"<div class=\"tile area-appearance\"><h3>Appearance</h3>"
+"<div class=\"group\"><label>Dashboard Theme</label>"
+"<select id=\"theme_select\">"
+"<option value=\"0\">Bento Default</option>"
+"<option value=\"1\">OLED Black</option>"
+"<option value=\"2\">Deep Space</option>"
+"<option value=\"3\">Red Night</option>"
+"<option value=\"4\">Cyberpunk</option>"
+"<option value=\"5\">Midnight Green</option>"
+"<option value=\"6\">Solarized Dark</option>"
+"<option value=\"7\">Monochrome</option>"
+"<option value=\"8\">Crimson</option>"
+"<option value=\"9\">Slate</option>"
+"</select></div>"
+"<div class=\"group\"><label>Display Brightness</label>"
+"<div class=\"flex-row\"><input type=\"range\" id=\"brightness\" min=\"0\" max=\"100\" value=\"50\" oninput=\"setBrightness(this.value)\" style=\"flex:1\"><span id=\"bright_val\" style=\"min-width:36px;text-align:right\">50%</span></div>"
+"</div></div>"
 "<div class=\"tile area-filter\"><h3>Filter Colors</h3><div id=\"filterColors\" class=\"color-grid\"></div></div>"
 "<div class=\"tile area-rms\"><h3>RMS THRESHOLDS</h3>"
 "<div class=\"group\"><label>Good RMS Max Value</label><div class=\"flex-row\"><input type=\"text\" id=\"rms_good_max\"><input type=\"color\" id=\"rms_good_color\" class=\"color-rect\"></div></div>"
@@ -71,6 +90,19 @@ static const char *HTML_CONTENT =
 "c.appendChild(w);});"
 "}"
 "function updateFilterColor(n,v){filterColorsObj[n]=v;}"
+"let brightTimer=null;function setBrightness(v){document.getElementById('bright_val').innerText=v+'%';clearTimeout(brightTimer);brightTimer=setTimeout(()=>{fetch('/api/brightness',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({brightness:parseInt(v)})});},150);}"
+"function checkOnline(){"
+"return fetch('/api/config',{method:'GET',cache:'no-cache'}).then(r=>r.ok).catch(()=>false);"
+"}"
+"function waitForReboot(){"
+"const b=document.querySelector('.btn-primary');"
+"let attempts=0;const maxAttempts=60;"
+"const check=()=>{"
+"attempts++;checkOnline().then(online=>{"
+"if(online){location.reload();}else if(attempts<maxAttempts){setTimeout(check,1000);}else{b.innerText='REBOOT TIMEOUT';b.disabled=false;}"
+"});};"
+"setTimeout(check,3000);"
+"}"
 "function save(){"
 "const b=document.querySelector('.btn-primary');const ot=b.innerText;b.innerText='SAVING...';b.disabled=true;"
 "const rms={good_max:parseFloat(document.getElementById('rms_good_max').value)||0.5,ok_max:parseFloat(document.getElementById('rms_ok_max').value)||1.0,good_color:document.getElementById('rms_good_color').value,ok_color:document.getElementById('rms_ok_color').value,bad_color:document.getElementById('rms_bad_color').value};"
@@ -79,9 +111,9 @@ static const char *HTML_CONTENT =
 "const h2=document.getElementById('url2').value.trim();"
 "const u1=h1?'http://'+h1+':1888/v2/api/':'';"
 "const u2=h2?'http://'+h2+':1888/v2/api/':'';"
-"const d={ssid:document.getElementById('ssid').value,pass:document.getElementById('pass').value,url1:u1,url2:u2,ntp:document.getElementById('ntp').value,filter_colors:JSON.stringify(filterColorsObj),rms_thresholds:JSON.stringify(rms),hfr_thresholds:JSON.stringify(hfr)};"
+"const d={ssid:document.getElementById('ssid').value,pass:document.getElementById('pass').value,url1:u1,url2:u2,ntp:document.getElementById('ntp').value,theme_index:parseInt(document.getElementById('theme_select').value),brightness:parseInt(document.getElementById('brightness').value),filter_colors:JSON.stringify(filterColorsObj),rms_thresholds:JSON.stringify(rms),hfr_thresholds:JSON.stringify(hfr)};"
 "fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})"
-".then(r=>{if(r.ok){alert('Saved! Rebooting...');fetch('/api/reboot',{method:'POST'});}else{alert('Error saving');b.innerText=ot;b.disabled=false;}}).catch(e=>{alert('Connection failed');b.innerText=ot;b.disabled=false;});"
+".then(r=>{if(r.ok){b.innerText='REBOOTING...';fetch('/api/reboot',{method:'POST'}).catch(()=>{});waitForReboot();}else{alert('Error saving');b.innerText=ot;b.disabled=false;}}).catch(e=>{alert('Connection failed');b.innerText=ot;b.disabled=false;});"
 "}"
 "function factoryReset(){"
 "if(confirm('WARNING: Factory Reset?\\n\\nAll settings will be lost.')){if(confirm('Are you sure?')){fetch('/api/factory-reset',{method:'POST'}).then(r=>{if(r.ok)alert('Resetting...');});}}}"
@@ -92,6 +124,8 @@ static const char *HTML_CONTENT =
 "const extractHost=u=>{if(!u)return '';const m=u.match(/^https?:\\/\\/([^:\\/]+)/);return m?m[1]:u;};"
 "document.getElementById('url1').value=extractHost(d.url1);"
 "document.getElementById('url2').value=extractHost(d.url2);"
+"document.getElementById('theme_select').value=d.theme_index||0;"
+"var br=d.brightness!=null?d.brightness:50;document.getElementById('brightness').value=br;document.getElementById('bright_val').innerText=br+'%';"
 "try{filterColorsObj=JSON.parse(d.filter_colors||'{}');}catch(e){}"
 "renderFilterColors();"
 "try{const r=JSON.parse(d.rms_thresholds||'{}');"
@@ -136,6 +170,8 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddStringToObject(root, "filter_colors", cfg->filter_colors);
     cJSON_AddStringToObject(root, "rms_thresholds", cfg->rms_thresholds);
     cJSON_AddStringToObject(root, "hfr_thresholds", cfg->hfr_thresholds);
+    cJSON_AddNumberToObject(root, "theme_index", cfg->theme_index);
+    cJSON_AddNumberToObject(root, "brightness", cfg->brightness);
 
     const char *json_str = cJSON_PrintUnformatted(root);
     if (json_str == NULL) {
@@ -211,6 +247,19 @@ static esp_err_t config_post_handler(httpd_req_t *req)
         cfg.ntp_server[sizeof(cfg.ntp_server) - 1] = '\0';
     }
 
+    cJSON *theme_index = cJSON_GetObjectItem(root, "theme_index");
+    if (cJSON_IsNumber(theme_index)) {
+        cfg.theme_index = theme_index->valueint;
+    }
+
+    cJSON *brightness = cJSON_GetObjectItem(root, "brightness");
+    if (cJSON_IsNumber(brightness)) {
+        int val = brightness->valueint;
+        if (val < 0) val = 0;
+        if (val > 100) val = 100;
+        cfg.brightness = val;
+    }
+
     cJSON *filter_colors = cJSON_GetObjectItem(root, "filter_colors");
     if (cJSON_IsString(filter_colors)) {
         strncpy(cfg.filter_colors, filter_colors->valuestring, sizeof(cfg.filter_colors) - 1);
@@ -232,6 +281,46 @@ static esp_err_t config_post_handler(httpd_req_t *req)
     app_config_save(&cfg);
     cJSON_Delete(root);
 
+    httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+// Handler for live brightness adjustment (no reboot needed)
+static esp_err_t brightness_post_handler(httpd_req_t *req)
+{
+    char buf[128];
+    int ret, remaining = req->content_len;
+
+    if (remaining >= (int)sizeof(buf)) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    ret = httpd_req_recv(req, buf, remaining);
+    if (ret <= 0) {
+        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+            httpd_resp_send_408(req);
+        }
+        return ESP_FAIL;
+    }
+    buf[ret] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    cJSON *val = cJSON_GetObjectItem(root, "brightness");
+    if (cJSON_IsNumber(val)) {
+        int brightness = val->valueint;
+        if (brightness < 0) brightness = 0;
+        if (brightness > 100) brightness = 100;
+        bsp_display_brightness_set(brightness);
+        ESP_LOGI(TAG, "Brightness set to %d%%", brightness);
+    }
+
+    cJSON_Delete(root);
     httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
@@ -294,6 +383,14 @@ void start_web_server(void)
             .user_ctx  = NULL
         };
         httpd_register_uri_handler(server, &uri_post_config);
+
+        httpd_uri_t uri_post_brightness = {
+            .uri       = "/api/brightness",
+            .method    = HTTP_POST,
+            .handler   = brightness_post_handler,
+            .user_ctx  = NULL
+        };
+        httpd_register_uri_handler(server, &uri_post_brightness);
 
         httpd_uri_t uri_post_reboot = {
             .uri       = "/api/reboot",

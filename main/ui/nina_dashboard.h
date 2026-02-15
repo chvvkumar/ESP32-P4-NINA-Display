@@ -20,6 +20,12 @@ void create_nina_dashboard(lv_obj_t * parent);
  */
 void update_nina_dashboard_ui(const nina_client_t *data);
 
+/**
+ * @brief Apply a specific theme to the dashboard
+ * @param theme_index Index of the theme to apply
+ */
+void nina_dashboard_apply_theme(int theme_index);
+
 #ifdef __cplusplus
 }
 #endif

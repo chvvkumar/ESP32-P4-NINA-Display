@@ -8,6 +8,7 @@
 #include "nina_client.h"
 #include "app_config.h"
 #include "lvgl.h"
+#include "themes.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -19,27 +20,14 @@
 #define GRID_GAP        16
 #define BENTO_RADIUS    24
 
-// Color Palette
-#define COLOR_BG_MAIN   lv_color_hex(0x0a0a0a)  // Near Black
-#define COLOR_BENTO_BG  lv_color_hex(0x111111)  // Very Dark Gray
-#define COLOR_BENTO_BORDER lv_color_hex(0x222222)
-#define COLOR_LABEL     lv_color_hex(0x6b7280)  // Gray labels
-#define COLOR_TEXT      lv_color_hex(0xFFFFFF)  // White values
-#define COLOR_BLUE      lv_color_hex(0x60a5fa)  // Instance/Target
-#define COLOR_BLUE_DARK lv_color_hex(0x1e3a8a)  // Header gradient
-#define COLOR_AMBER     lv_color_hex(0xfbbf24)  // Filter
-#define COLOR_PROGRESS  lv_color_hex(0x3b82f6)  // Arc indicator
-#define COLOR_ROSE      lv_color_hex(0xf43f5e)  // RMS
-#define COLOR_EMERALD   lv_color_hex(0x10b981)  // HFR
-#define COLOR_YELLOW    lv_color_hex(0xeab308)  // Star icon
-#define COLOR_PURPLE    lv_color_hex(0xa855f7)  // Saturated icon
-
 /*********************
  * UI OBJECTS
  *********************/
 static lv_obj_t * scr_dashboard = NULL;
+static lv_obj_t * main_cont = NULL;
 
 // Header Elements
+static lv_obj_t * header_box;
 static lv_obj_t * lbl_instance_name;
 static lv_obj_t * lbl_target_name;
 
@@ -58,8 +46,12 @@ static lv_obj_t * lbl_rms_value;
 static lv_obj_t * lbl_rms_ra_value;
 static lv_obj_t * lbl_rms_dec_value;
 static lv_obj_t * lbl_hfr_value;
+static lv_obj_t * lbl_stars_header;
 static lv_obj_t * lbl_stars_value;
+static lv_obj_t * lbl_sat_header;
 static lv_obj_t * lbl_saturated_value;
+
+static const theme_t *current_theme = NULL;
 
 /*********************
  * STYLES
@@ -70,28 +62,33 @@ static lv_style_t style_value_large;   // Large data values
 static lv_style_t style_header_gradient;
 
 /**
- * @brief Initialize all styles for the Bento Dashboard
+ * @brief Initialize or update all styles for the Bento Dashboard based on current theme
  */
-static void init_styles(void) {
+static void update_styles(void) {
+    if (!current_theme) return;
+
     // Bento Box Style
+    lv_style_reset(&style_bento_box);
     lv_style_init(&style_bento_box);
-    lv_style_set_bg_color(&style_bento_box, COLOR_BENTO_BG);
+    lv_style_set_bg_color(&style_bento_box, lv_color_hex(current_theme->bento_bg));
     lv_style_set_bg_opa(&style_bento_box, LV_OPA_COVER);
     lv_style_set_radius(&style_bento_box, BENTO_RADIUS);
     lv_style_set_border_width(&style_bento_box, 1);
-    lv_style_set_border_color(&style_bento_box, COLOR_BENTO_BORDER);
+    lv_style_set_border_color(&style_bento_box, lv_color_hex(current_theme->bento_border));
     lv_style_set_border_opa(&style_bento_box, LV_OPA_COVER);
     lv_style_set_pad_all(&style_bento_box, 20);
 
     // Small Label Style (Uppercase, Bold, Gray)
+    lv_style_reset(&style_label_small);
     lv_style_init(&style_label_small);
-    lv_style_set_text_color(&style_label_small, COLOR_LABEL);
+    lv_style_set_text_color(&style_label_small, lv_color_hex(current_theme->label_color));
     lv_style_set_text_font(&style_label_small, &lv_font_montserrat_16);
     lv_style_set_text_letter_space(&style_label_small, 1);
 
     // Large Value Style
+    lv_style_reset(&style_value_large);
     lv_style_init(&style_value_large);
-    lv_style_set_text_color(&style_value_large, COLOR_TEXT);
+    lv_style_set_text_color(&style_value_large, lv_color_hex(current_theme->text_color));
 #ifdef LV_FONT_MONTSERRAT_48
     lv_style_set_text_font(&style_value_large, &lv_font_montserrat_48);
 #elif defined(LV_FONT_MONTSERRAT_32)
@@ -103,14 +100,15 @@ static void init_styles(void) {
 #endif
 
     // Header Gradient Style
+    lv_style_reset(&style_header_gradient);
     lv_style_init(&style_header_gradient);
-    lv_style_set_bg_color(&style_header_gradient, COLOR_BLUE_DARK);
+    lv_style_set_bg_color(&style_header_gradient, lv_color_hex(current_theme->header_grad_color));
     lv_style_set_bg_grad_color(&style_header_gradient, lv_color_hex(0x000000));
     lv_style_set_bg_grad_dir(&style_header_gradient, LV_GRAD_DIR_VER);
     lv_style_set_bg_opa(&style_header_gradient, LV_OPA_30);
     lv_style_set_radius(&style_header_gradient, BENTO_RADIUS);
     lv_style_set_border_width(&style_header_gradient, 1);
-    lv_style_set_border_color(&style_header_gradient, COLOR_BLUE_DARK);
+    lv_style_set_border_color(&style_header_gradient, lv_color_hex(current_theme->header_grad_color));
     lv_style_set_border_opa(&style_header_gradient, LV_OPA_30);
     lv_style_set_pad_all(&style_header_gradient, 20);
 }
@@ -145,20 +143,66 @@ static lv_obj_t* create_value_label(lv_obj_t * parent) {
     return label;
 }
 
+void nina_dashboard_apply_theme(int theme_index) {
+    current_theme = themes_get(theme_index);
+    update_styles();
+
+    if (!scr_dashboard) return;
+
+    // Update Main Container BG
+    if (main_cont) {
+        lv_obj_set_style_bg_color(main_cont, lv_color_hex(current_theme->bg_main), 0);
+    }
+
+    // Refresh Objects using standard styles
+    // Since we updated the styles using lv_style_reset/init, we might need to notify LVGL
+    lv_obj_report_style_change(&style_bento_box);
+    lv_obj_report_style_change(&style_label_small);
+    lv_obj_report_style_change(&style_value_large);
+    lv_obj_report_style_change(&style_header_gradient);
+
+    // Update specific colors that aren't covered by shared styles
+    if (lbl_instance_name) lv_obj_set_style_text_color(lbl_instance_name, lv_color_hex(current_theme->header_text_color), 0);
+    if (lbl_target_name) lv_obj_set_style_text_color(lbl_target_name, lv_color_hex(current_theme->text_color), 0); // Is large value
+    
+    if (lbl_seq_container) lv_obj_set_style_text_color(lbl_seq_container, lv_color_hex(current_theme->header_text_color), 0);
+    if (lbl_seq_step) lv_obj_set_style_text_color(lbl_seq_step, lv_color_hex(current_theme->text_color), 0);
+
+    if (arc_exposure) {
+         // Background of arc often needs to be darker than theme bg
+         lv_obj_set_style_arc_color(arc_exposure, lv_color_hex(current_theme->bg_main), LV_PART_MAIN);
+         lv_obj_set_style_arc_color(arc_exposure, lv_color_hex(current_theme->progress_color), LV_PART_INDICATOR);
+    }
+    
+    if (lbl_exposure_total) lv_obj_set_style_text_color(lbl_exposure_total, lv_color_hex(current_theme->filter_text_color), 0);
+    
+    // Semantic colors update - if they were set to default/placeholder
+    if (lbl_rms_value) lv_obj_set_style_text_color(lbl_rms_value, lv_color_hex(current_theme->rms_color), 0);
+    if (lbl_hfr_value) lv_obj_set_style_text_color(lbl_hfr_value, lv_color_hex(current_theme->hfr_color), 0);
+    if (lbl_stars_header) lv_obj_set_style_text_color(lbl_stars_header, lv_color_hex(current_theme->stars_color), 0);
+    if (lbl_sat_header) lv_obj_set_style_text_color(lbl_sat_header, lv_color_hex(current_theme->saturated_color), 0);
+    
+    lv_obj_invalidate(scr_dashboard);
+}
+
 
 /**
  * @brief Create the Bento NINA Dashboard
  * Layout: 2 columns x 4 rows, 720x720px with 24px padding and 16px gaps
  */
 void create_nina_dashboard(lv_obj_t * parent) {
-    init_styles();
+    // Initial theme load
+    app_config_t *cfg = app_config_get();
+    current_theme = themes_get(cfg->theme_index);
+    update_styles();
+
     scr_dashboard = parent;
     
     // Main Container - 720x720 with outer padding
-    lv_obj_t * main_cont = lv_obj_create(scr_dashboard);
+    main_cont = lv_obj_create(scr_dashboard);
     lv_obj_remove_style_all(main_cont);
     lv_obj_set_size(main_cont, SCREEN_SIZE, SCREEN_SIZE);
-    lv_obj_set_style_bg_color(main_cont, COLOR_BG_MAIN, 0);
+    lv_obj_set_style_bg_color(main_cont, lv_color_hex(current_theme->bg_main), 0);
     lv_obj_set_style_bg_opa(main_cont, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(main_cont, OUTER_PADDING, 0);
     lv_obj_set_style_pad_gap(main_cont, GRID_GAP, 0);
@@ -179,22 +223,22 @@ void create_nina_dashboard(lv_obj_t * parent) {
     /* ═══════════════════════════════════════════════════════════
      * HEADER (Row 0, Span 2 Columns)
      * ═══════════════════════════════════════════════════════════ */
-    lv_obj_t * header = create_bento_box(main_cont);
-    lv_obj_set_grid_cell(header, LV_GRID_ALIGN_STRETCH, 0, 2, LV_GRID_ALIGN_STRETCH, 0, 1);
-    lv_obj_set_flex_flow(header, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(header, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_all(header, 12, 0);
+    header_box = create_bento_box(main_cont);
+    lv_obj_set_grid_cell(header_box, LV_GRID_ALIGN_STRETCH, 0, 2, LV_GRID_ALIGN_STRETCH, 0, 1);
+    lv_obj_set_flex_flow(header_box, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(header_box, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_all(header_box, 12, 0);
 
     // Top: Telescope Name
-    lbl_instance_name = lv_label_create(header);
-    lv_obj_set_style_text_color(lbl_instance_name, COLOR_BLUE, 0);
+    lbl_instance_name = lv_label_create(header_box);
+    lv_obj_set_style_text_color(lbl_instance_name, lv_color_hex(current_theme->header_text_color), 0);
     lv_obj_set_style_text_font(lbl_instance_name, &lv_font_montserrat_26, 0);
     lv_label_set_text(lbl_instance_name, "N.I.N.A.");
 
     // Bottom: Target Name (right-aligned)
-    lbl_target_name = lv_label_create(header);
+    lbl_target_name = lv_label_create(header_box);
     lv_obj_add_style(lbl_target_name, &style_value_large, 0);
-    lv_obj_set_style_text_color(lbl_target_name, COLOR_TEXT, 0);
+    // lv_obj_set_style_text_color(lbl_target_name, COLOR_TEXT, 0); // Handled by style
     lv_obj_set_width(lbl_target_name, LV_PCT(100));
     lv_obj_set_style_text_align(lbl_target_name, LV_TEXT_ALIGN_RIGHT, 0);
     lv_label_set_text(lbl_target_name, "----");
@@ -218,7 +262,7 @@ void create_nina_dashboard(lv_obj_t * parent) {
     lv_obj_set_style_text_font(lbl_seq_title, &lv_font_montserrat_14, 0);
 
     lbl_seq_container = lv_label_create(seq_left);
-    lv_obj_set_style_text_color(lbl_seq_container, COLOR_BLUE, 0);
+    lv_obj_set_style_text_color(lbl_seq_container, lv_color_hex(current_theme->header_text_color), 0);
     lv_obj_set_style_text_font(lbl_seq_container, &lv_font_montserrat_24, 0);
     lv_label_set_text(lbl_seq_container, "----");
 
@@ -234,7 +278,7 @@ void create_nina_dashboard(lv_obj_t * parent) {
     lv_obj_set_style_text_align(lbl_step_title, LV_TEXT_ALIGN_RIGHT, 0);
 
     lbl_seq_step = lv_label_create(seq_right);
-    lv_obj_set_style_text_color(lbl_seq_step, COLOR_TEXT, 0);
+    lv_obj_set_style_text_color(lbl_seq_step, lv_color_hex(current_theme->text_color), 0);
     lv_obj_set_style_text_font(lbl_seq_step, &lv_font_montserrat_24, 0);
     lv_label_set_text(lbl_seq_step, "----");
 
@@ -254,9 +298,9 @@ void create_nina_dashboard(lv_obj_t * parent) {
     lv_arc_set_bg_angles(arc_exposure, 0, 360);
     lv_arc_set_value(arc_exposure, 0);
     lv_obj_remove_style(arc_exposure, NULL, LV_PART_KNOB);
-    lv_obj_set_style_arc_color(arc_exposure, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
+    lv_obj_set_style_arc_color(arc_exposure, lv_color_hex(current_theme->bg_main), LV_PART_MAIN);
     lv_obj_set_style_arc_width(arc_exposure, 12, LV_PART_MAIN);
-    lv_obj_set_style_arc_color(arc_exposure, COLOR_PROGRESS, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(arc_exposure, lv_color_hex(current_theme->progress_color), LV_PART_INDICATOR);
     lv_obj_set_style_arc_width(arc_exposure, 12, LV_PART_INDICATOR);
     
     // Center Text in Arc
@@ -272,13 +316,13 @@ void create_nina_dashboard(lv_obj_t * parent) {
     lv_label_set_text(lbl_exposure_current, "----s");
 
     lbl_exposure_total = create_small_label(arc_center, "Filter");
-    lv_obj_set_style_text_color(lbl_exposure_total, COLOR_AMBER, 0);
+    lv_obj_set_style_text_color(lbl_exposure_total, lv_color_hex(current_theme->filter_text_color), 0);
     lv_obj_set_style_text_font(lbl_exposure_total, &lv_font_montserrat_28, 0);
     lv_obj_set_style_pad_top(lbl_exposure_total, 14, 0);
 
     // Loop Count (moved into circle)
     lbl_loop_count = lv_label_create(arc_center);
-    lv_obj_set_style_text_color(lbl_loop_count, COLOR_LABEL, 0);
+    lv_obj_set_style_text_color(lbl_loop_count, lv_color_hex(current_theme->label_color), 0);
     lv_obj_set_style_text_font(lbl_loop_count, &lv_font_montserrat_24, 0);
     lv_obj_set_style_pad_top(lbl_loop_count, 8, 0);
     lv_label_set_text(lbl_loop_count, "-- / --");
@@ -295,42 +339,8 @@ void create_nina_dashboard(lv_obj_t * parent) {
 
     // Total RMS (main value)
     lbl_rms_value = create_value_label(box_rms);
-    lv_obj_set_style_text_color(lbl_rms_value, COLOR_ROSE, 0);
+    lv_obj_set_style_text_color(lbl_rms_value, lv_color_hex(current_theme->rms_color), 0);
     lv_label_set_text(lbl_rms_value, "--.--\"");
-
-    // RA and DEC RMS (smaller values below)
-    // lv_obj_t * rms_details = lv_obj_create(box_rms);
-    // lv_obj_remove_style_all(rms_details);
-    // lv_obj_set_size(rms_details, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    // lv_obj_set_flex_flow(rms_details, LV_FLEX_FLOW_ROW);
-    // lv_obj_set_flex_align(rms_details, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    // lv_obj_set_style_pad_column(rms_details, 16, 0);
-
-    // // RA container
-    // lv_obj_t * ra_cont = lv_obj_create(rms_details);
-    // lv_obj_remove_style_all(ra_cont);
-    // lv_obj_set_size(ra_cont, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    // lv_obj_set_flex_flow(ra_cont, LV_FLEX_FLOW_COLUMN);
-    // lv_obj_set_flex_align(ra_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-
-    // create_small_label(ra_cont, "RA");
-    // lbl_rms_ra_value = lv_label_create(ra_cont);
-    // lv_obj_set_style_text_color(lbl_rms_ra_value, COLOR_ROSE, 0);
-    // lv_obj_set_style_text_font(lbl_rms_ra_value, &lv_font_montserrat_24, 0);
-    // lv_label_set_text(lbl_rms_ra_value, "0.25\"");
-
-    // // DEC container
-    // lv_obj_t * dec_cont = lv_obj_create(rms_details);
-    // lv_obj_remove_style_all(dec_cont);
-    // lv_obj_set_size(dec_cont, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    // lv_obj_set_flex_flow(dec_cont, LV_FLEX_FLOW_COLUMN);
-    // lv_obj_set_flex_align(dec_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-
-    // create_small_label(dec_cont, "DEC");
-    // lbl_rms_dec_value = lv_label_create(dec_cont);
-    // lv_obj_set_style_text_color(lbl_rms_dec_value, COLOR_ROSE, 0);
-    // lv_obj_set_style_text_font(lbl_rms_dec_value, &lv_font_montserrat_24, 0);
-    // lv_label_set_text(lbl_rms_dec_value, "0.28\"");
 
     /* ═══════════════════════════════════════════════════════════
      * HFR / SHARPNESS (Col 1, Row 3)
@@ -343,7 +353,7 @@ void create_nina_dashboard(lv_obj_t * parent) {
     create_small_label(box_hfr, "HFR");
     
     lbl_hfr_value = create_value_label(box_hfr);
-    lv_obj_set_style_text_color(lbl_hfr_value, COLOR_EMERALD, 0);
+    lv_obj_set_style_text_color(lbl_hfr_value, lv_color_hex(current_theme->hfr_color), 0);
     lv_label_set_text(lbl_hfr_value, "2.15");
 
     /* ═══════════════════════════════════════════════════════════
@@ -355,8 +365,8 @@ void create_nina_dashboard(lv_obj_t * parent) {
     lv_obj_set_flex_align(box_stars, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     // Label with Star Icon (Unicode star)
-    lv_obj_t * lbl_stars_header = create_small_label(box_stars, "STARS");
-    lv_obj_set_style_text_color(lbl_stars_header, COLOR_YELLOW, 0);
+    lbl_stars_header = create_small_label(box_stars, "STARS");
+    lv_obj_set_style_text_color(lbl_stars_header, lv_color_hex(current_theme->stars_color), 0);
     
     lbl_stars_value = create_value_label(box_stars);
     lv_label_set_text(lbl_stars_value, "2451");
@@ -370,8 +380,8 @@ void create_nina_dashboard(lv_obj_t * parent) {
     lv_obj_set_flex_align(box_saturated, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     // Label with Lightning Icon (Unicode lightning bolt)
-    lv_obj_t * lbl_sat_header = create_small_label(box_saturated, "SATURATED PIXELS");
-    lv_obj_set_style_text_color(lbl_sat_header, COLOR_PURPLE, 0);
+    lbl_sat_header = create_small_label(box_saturated, "SATURATED PIXELS");
+    lv_obj_set_style_text_color(lbl_sat_header, lv_color_hex(current_theme->saturated_color), 0);
     
     lbl_saturated_value = create_value_label(box_saturated);
     lv_label_set_text(lbl_saturated_value, "84");
@@ -407,11 +417,11 @@ void update_nina_dashboard_ui(const nina_client_t *data) {
     }
 
     // 3. Filter - Update arc color based on current filter
-    uint32_t filter_color = 0x3b82f6;  // Default color (blue)
+    uint32_t filter_color = current_theme->progress_color;  // Default theme color
     if (data->current_filter[0] != '\0' && strcmp(data->current_filter, "--") != 0) {
         filter_color = app_config_get_filter_color(data->current_filter);
-        lv_obj_set_style_arc_color(arc_exposure, lv_color_hex(filter_color), LV_PART_INDICATOR);
     }
+    lv_obj_set_style_arc_color(arc_exposure, lv_color_hex(filter_color), LV_PART_INDICATOR);
 
     // 4. Exposure Progress (Current Exposure Time)
     if (data->exposure_total > 0) {
@@ -464,7 +474,7 @@ void update_nina_dashboard_ui(const nina_client_t *data) {
         lv_obj_set_style_text_color(lbl_rms_value, lv_color_hex(rms_color), 0);
     } else {
         lv_label_set_text(lbl_rms_value, "--");
-        lv_obj_set_style_text_color(lbl_rms_value, COLOR_LABEL, 0);
+        lv_obj_set_style_text_color(lbl_rms_value, lv_color_hex(current_theme->label_color), 0);
     }
 
     if (lbl_rms_ra_value) {
@@ -490,7 +500,7 @@ void update_nina_dashboard_ui(const nina_client_t *data) {
         lv_obj_set_style_text_color(lbl_hfr_value, lv_color_hex(hfr_color), 0);
     } else {
         lv_label_set_text(lbl_hfr_value, "--");
-        lv_obj_set_style_text_color(lbl_hfr_value, COLOR_LABEL, 0);
+        lv_obj_set_style_text_color(lbl_hfr_value, lv_color_hex(current_theme->label_color), 0);
     }
 
     // 8. Star Count

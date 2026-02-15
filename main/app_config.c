@@ -10,20 +10,20 @@ static const char *TAG = "app_config";
 static app_config_t s_config;
 static const char *NVS_NAMESPACE = "app_conf";
 
-// Default filter color mappings (matching common LRGB + Narrowband filters)
+// Default filter color mappings (matching common LRGB + Narrowband filters) - DIMMED for Night Vision
 static const char *DEFAULT_FILTER_COLORS =
-    "{\"L\":\"#60a5fa\",\"R\":\"#ef4444\",\"G\":\"#10b981\",\"B\":\"#3b82f6\","
-    "\"Ha\":\"#f43f5e\",\"Sii\":\"#a855f7\",\"Oiii\":\"#06b6d4\"}";
+    "{\"L\":\"#3b82f6\",\"R\":\"#991b1b\",\"G\":\"#15803d\",\"B\":\"#1d4ed8\","
+    "\"Ha\":\"#be123c\",\"Sii\":\"#7e22ce\",\"Oiii\":\"#0e7490\"}";
 
-// Default RMS thresholds: good <= 0.5", ok <= 1.0", bad > 1.0"
+// Default RMS thresholds: good <= 0.5", ok <= 1.0", bad > 1.0" - DIMMED for Night Vision
 static const char *DEFAULT_RMS_THRESHOLDS =
     "{\"good_max\":0.5,\"ok_max\":1.0,"
-    "\"good_color\":\"#10b981\",\"ok_color\":\"#eab308\",\"bad_color\":\"#ef4444\"}";
+    "\"good_color\":\"#15803d\",\"ok_color\":\"#ca8a04\",\"bad_color\":\"#b91c1c\"}";
 
-// Default HFR thresholds: good <= 2.0, ok <= 3.5, bad > 3.5
+// Default HFR thresholds: good <= 2.0, ok <= 3.5, bad > 3.5 - DIMMED for Night Vision
 static const char *DEFAULT_HFR_THRESHOLDS =
     "{\"good_max\":2.0,\"ok_max\":3.5,"
-    "\"good_color\":\"#10b981\",\"ok_color\":\"#eab308\",\"bad_color\":\"#ef4444\"}";
+    "\"good_color\":\"#15803d\",\"ok_color\":\"#ca8a04\",\"bad_color\":\"#b91c1c\"}";
 
 void app_config_init(void) {
     nvs_handle_t my_handle;
@@ -40,6 +40,8 @@ void app_config_init(void) {
         strcpy(s_config.filter_colors, DEFAULT_FILTER_COLORS);
         strcpy(s_config.rms_thresholds, DEFAULT_RMS_THRESHOLDS);
         strcpy(s_config.hfr_thresholds, DEFAULT_HFR_THRESHOLDS);
+        s_config.theme_index = 0;
+        s_config.brightness = 50;
         return;
     }
 
@@ -56,6 +58,8 @@ void app_config_init(void) {
         strcpy(s_config.filter_colors, DEFAULT_FILTER_COLORS);
         strcpy(s_config.rms_thresholds, DEFAULT_RMS_THRESHOLDS);
         strcpy(s_config.hfr_thresholds, DEFAULT_HFR_THRESHOLDS);
+        s_config.theme_index = 0;
+        s_config.brightness = 50;
 
         // Save defaults so we have them next time
         nvs_set_blob(my_handle, "config", &s_config, sizeof(app_config_t));
@@ -77,6 +81,14 @@ void app_config_init(void) {
             ESP_LOGI(TAG, "HFR thresholds empty, initializing with defaults");
             strcpy(s_config.hfr_thresholds, DEFAULT_HFR_THRESHOLDS);
             needs_save = true;
+        }
+        if (s_config.theme_index < 0 || s_config.theme_index > 20) {
+             s_config.theme_index = 0;
+             needs_save = true;
+        }
+        if (s_config.brightness < 0 || s_config.brightness > 100) {
+             s_config.brightness = 50;
+             needs_save = true;
         }
         if (needs_save) {
             nvs_set_blob(my_handle, "config", &s_config, sizeof(app_config_t));
