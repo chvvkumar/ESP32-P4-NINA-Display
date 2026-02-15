@@ -59,6 +59,19 @@ typedef struct {
     char meridian_flip[16];
     float rotator_angle;
 
+    // Power/Switch info (from /equipment/switch/info)
+    struct {
+        float input_voltage;
+        float total_amps;
+        float total_watts;
+        char  amps_name[32];       // API name for current (e.g., "Total Current", "Amp")
+        char  watts_name[32];      // API name for power (e.g., "Total Power", "Watt")
+        float pwm[4];              // PWM/dew heater outputs (%)
+        char  pwm_names[4][32];    // Names for each PWM output
+        int   pwm_count;
+        bool  switch_connected;
+    } power;
+
     // Available filters from filter wheel
     nina_filter_t filters[MAX_FILTERS];
     int filter_count;

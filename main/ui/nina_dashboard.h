@@ -15,10 +15,11 @@ extern "C" {
 void create_nina_dashboard(lv_obj_t * parent);
 
 /**
- * @brief Update the dashboard with live NINA client data
- * @param data Pointer to the latest NINA client data
+ * @brief Update the dashboard with live NINA client data from both instances
+ * @param data1 Pointer to instance 1 data (primary scope)
+ * @param data2 Pointer to instance 2 data (secondary scope, may be NULL)
  */
-void update_nina_dashboard_ui(const nina_client_t *data);
+void update_nina_dashboard_ui(const nina_client_t *data1, const nina_client_t *data2);
 
 /**
  * @brief Apply a specific theme to the dashboard

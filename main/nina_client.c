@@ -638,6 +638,128 @@ static void fetch_focuser_robust(const char *base_url, nina_client_t *data) {
     cJSON_Delete(json);
 }
 
+/**
+ * @brief Fetch switch/power info - Reads voltage, amps, watts, and PWM/dew heater outputs
+ * Works with both SV241 (ReadonlySwitches: "Total Current", "Total Power", "pwm1", "pwm2")
+ * and PPBA (ReadonlySwitches: "Amp", "Watt"; WritableSwitches: "Dew A"/"Dew B" with Max=100)
+ */
+static void fetch_switch_info(const char *base_url, nina_client_t *data) {
+    char url[256];
+    snprintf(url, sizeof(url), "%sequipment/switch/info", base_url);
+
+    cJSON *json = http_get_json(url);
+    if (!json) return;
+
+    cJSON *response = cJSON_GetObjectItem(json, "Response");
+    if (!response) {
+        cJSON_Delete(json);
+        return;
+    }
+
+    cJSON *connected = cJSON_GetObjectItem(response, "Connected");
+    if (!connected || !cJSON_IsTrue(connected)) {
+        cJSON_Delete(json);
+        return;
+    }
+
+    data->power.switch_connected = true;
+    data->power.pwm_count = 0;
+
+    // Parse ReadonlySwitches for voltage, amps, watts, and PWM readbacks
+    // Order matters: check voltage, current, then PWM (by name OR description)
+    // before watts/power to avoid PWM descriptions containing "power" being
+    // misclassified as the total watts sensor.
+    cJSON *readonly = cJSON_GetObjectItem(response, "ReadonlySwitches");
+    if (readonly && cJSON_IsArray(readonly)) {
+        cJSON *sw = NULL;
+        cJSON_ArrayForEach(sw, readonly) {
+            cJSON *name = cJSON_GetObjectItem(sw, "Name");
+            cJSON *desc = cJSON_GetObjectItem(sw, "Description");
+            cJSON *value = cJSON_GetObjectItem(sw, "Value");
+            if (!name || !name->valuestring || !value) continue;
+
+            const char *n = name->valuestring;
+            const char *d = desc && desc->valuestring ? desc->valuestring : "";
+
+            // Voltage: "Input Voltage" or description contains "Voltage"
+            if (strcasecmp(n, "Input Voltage") == 0 || strstr(d, "oltage") || strstr(d, "Volts")) {
+                data->power.input_voltage = (float)value->valuedouble;
+            }
+            // Current: "Total Current" or "Amp" or description contains "Current" or "Ampere"
+            else if (strcasecmp(n, "Total Current") == 0 || strcasecmp(n, "Amp") == 0 ||
+                     strstr(d, "urrent") || strstr(d, "Ampere")) {
+                data->power.total_amps = (float)value->valuedouble;
+                strncpy(data->power.amps_name, n, sizeof(data->power.amps_name) - 1);
+            }
+            // PWM readbacks: name starts with "pwm" OR description indicates PWM output
+            // Must check BEFORE watts/power since PWM descriptions contain "power"
+            else if ((strncasecmp(n, "pwm", 3) == 0 || strstr(d, "PWM") ||
+                      strstr(d, "power output")) && data->power.pwm_count < 4) {
+                int idx = data->power.pwm_count;
+                data->power.pwm[idx] = (float)value->valuedouble;
+                strncpy(data->power.pwm_names[idx], n, sizeof(data->power.pwm_names[idx]) - 1);
+                data->power.pwm_count++;
+            }
+            // Power/Watts: "Total Power" or "Watt" or description contains "Watt"
+            // Note: only match "Watt" not "ower"/"Power" to avoid catching PWM descriptions
+            else if (strcasecmp(n, "Total Power") == 0 || strcasecmp(n, "Watt") == 0 ||
+                     strstr(d, "Watt")) {
+                data->power.total_watts = (float)value->valuedouble;
+                strncpy(data->power.watts_name, n, sizeof(data->power.watts_name) - 1);
+            }
+        }
+    }
+
+    // Parse WritableSwitches for dew heaters, skipping names already seen in ReadonlySwitches
+    cJSON *writable = cJSON_GetObjectItem(response, "WritableSwitches");
+    if (writable && cJSON_IsArray(writable)) {
+        cJSON *sw = NULL;
+        cJSON_ArrayForEach(sw, writable) {
+            cJSON *name = cJSON_GetObjectItem(sw, "Name");
+            cJSON *desc = cJSON_GetObjectItem(sw, "Description");
+            cJSON *value = cJSON_GetObjectItem(sw, "Value");
+            cJSON *maximum = cJSON_GetObjectItem(sw, "Maximum");
+            if (!name || !name->valuestring || !value || !maximum) continue;
+
+            const char *n = name->valuestring;
+            const char *d = desc && desc->valuestring ? desc->valuestring : "";
+            int max_val = maximum->valueint;
+
+            // Skip if this name already exists in the PWM list (ReadonlySwitches readback)
+            bool duplicate = false;
+            for (int i = 0; i < data->power.pwm_count; i++) {
+                if (strcasecmp(data->power.pwm_names[i], n) == 0) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (duplicate) continue;
+
+            if (max_val == 100 && data->power.pwm_count < 4) {
+                // Percentage-based output (dew heater / PWM)
+                int idx = data->power.pwm_count;
+                data->power.pwm[idx] = (float)value->valuedouble;
+                strncpy(data->power.pwm_names[idx], n, sizeof(data->power.pwm_names[idx]) - 1);
+                data->power.pwm_count++;
+            } else if (max_val > 1 &&
+                       (strstr(d, "Dew") || strstr(d, "PWM") || strstr(d, "pwm")) &&
+                       data->power.pwm_count < 4) {
+                // Non-boolean output with PWM/Dew description — normalize to %
+                int idx = data->power.pwm_count;
+                data->power.pwm[idx] = (float)value->valuedouble * 100.0f / max_val;
+                strncpy(data->power.pwm_names[idx], n, sizeof(data->power.pwm_names[idx]) - 1);
+                data->power.pwm_count++;
+            }
+        }
+    }
+
+    ESP_LOGI(TAG, "Switch: %.1fV, %.2fA, %.1fW, %d PWM outputs",
+        data->power.input_voltage, data->power.total_amps,
+        data->power.total_watts, data->power.pwm_count);
+
+    cJSON_Delete(json);
+}
+
 // =============================================================================
 // WebSocket Client - Event-driven updates for IMAGE-SAVE, FILTERWHEEL-CHANGED
 // =============================================================================
@@ -955,11 +1077,12 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
         return;
     }
 
-    // --- ONCE: Static data (profile, available filters, initial image history) ---
+    // --- ONCE: Static data (profile, available filters, initial image history, switch) ---
     if (!state->static_fetched) {
         fetch_profile_robust(base_url, data);
         fetch_filter_robust_ex(base_url, data, true);  // Full: selected + available filters
         fetch_image_history_robust(base_url, data);
+        fetch_switch_info(base_url, data);
 
         // Cache static data
         snprintf(state->cached_profile, sizeof(state->cached_profile), "%s", data->profile_name);
@@ -1000,10 +1123,11 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
         }
     }
 
-    // --- SLOW: Focuser + Mount (every 30s) ---
+    // --- SLOW: Focuser + Mount + Switch (every 30s) ---
     if (now_ms - state->last_slow_poll_ms >= NINA_POLL_SLOW_MS) {
         fetch_focuser_robust(base_url, data);
         fetch_mount_robust(base_url, data);
+        fetch_switch_info(base_url, data);
         state->last_slow_poll_ms = now_ms;
     }
 

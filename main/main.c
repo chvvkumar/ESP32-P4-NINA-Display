@@ -131,8 +131,11 @@ static void input_task(void *arg) {
 
 static void data_update_task(void *arg) {
     nina_client_t d1 = {0};
-    nina_poll_state_t poll_state;
-    nina_poll_state_init(&poll_state);
+    nina_client_t d2 = {0};
+    nina_poll_state_t poll_state1;
+    nina_poll_state_t poll_state2;
+    nina_poll_state_init(&poll_state1);
+    nina_poll_state_init(&poll_state2);
     bool filters_synced = false;
 
     // Wait for WiFi
@@ -170,7 +173,7 @@ static void data_update_task(void *arg) {
 
     while (1) {
         if (strlen(cfg->api_url_1) > 0) {
-            nina_client_poll(cfg->api_url_1, &d1, &poll_state);
+            nina_client_poll(cfg->api_url_1, &d1, &poll_state1);
             ESP_LOGI(TAG, "Instance 1: connected=%d, status=%s, target=%s, ws=%d",
                 d1.connected, d1.status, d1.target_name, d1.websocket_connected);
 
@@ -185,8 +188,15 @@ static void data_update_task(void *arg) {
             }
         }
 
+        if (strlen(cfg->api_url_2) > 0) {
+            nina_client_poll(cfg->api_url_2, &d2, &poll_state2);
+            ESP_LOGI(TAG, "Instance 2: connected=%d, switch=%d, amps=%.2f, watts=%.1f",
+                d2.connected, d2.power.switch_connected,
+                d2.power.total_amps, d2.power.total_watts);
+        }
+
         bsp_display_lock(0);
-        update_nina_dashboard_ui(&d1);
+        update_nina_dashboard_ui(&d1, &d2);
         bsp_display_unlock();
 
         vTaskDelay(pdMS_TO_TICKS(2000)); // Poll every 2 seconds
@@ -232,5 +242,5 @@ void app_main(void)
     bsp_display_unlock();
 
     xTaskCreate(input_task, "input_task", 4096, NULL, 5, NULL);
-    xTaskCreate(data_update_task, "data_task", 12288, NULL, 5, NULL); // Stack for HTTP + WebSocket clients
+    xTaskCreate(data_update_task, "data_task", 16384, NULL, 5, NULL); // Stack for HTTP + WebSocket clients (2 instances)
 }

@@ -55,6 +55,12 @@ static lv_obj_t * lbl_hfr_title;
 static lv_obj_t * lbl_flip_title;
 static lv_obj_t * lbl_flip_value;
 
+// Power Row - dynamic widget slots (amps, watts, dew heaters from both instances)
+#define MAX_POWER_WIDGETS 8
+static lv_obj_t * box_pwr[MAX_POWER_WIDGETS];
+static lv_obj_t * lbl_pwr_title[MAX_POWER_WIDGETS];
+static lv_obj_t * lbl_pwr_value[MAX_POWER_WIDGETS];
+
 static const theme_t *current_theme = NULL;
 
 // Last computed progress value (from data, not from arc widget) to detect resets
@@ -203,7 +209,12 @@ void nina_dashboard_apply_theme(int theme_index) {
     // Semantic value colors
     if (lbl_rms_value) lv_obj_set_style_text_color(lbl_rms_value, lv_color_hex(app_config_apply_brightness(current_theme->rms_color, gb)), 0);
     if (lbl_hfr_value) lv_obj_set_style_text_color(lbl_hfr_value, lv_color_hex(app_config_apply_brightness(current_theme->hfr_color, gb)), 0);
-    
+
+    // Power widget colors
+    for (int i = 0; i < MAX_POWER_WIDGETS; i++) {
+        if (lbl_pwr_title[i]) lv_obj_set_style_text_color(lbl_pwr_title[i], lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+    }
+
     lv_obj_invalidate(scr_dashboard);
 }
 
@@ -451,10 +462,41 @@ void create_nina_dashboard(lv_obj_t * parent) {
     lv_label_set_text(lbl_stars_value, "2451");
 
     /* ═══════════════════════════════════════════════════════════
-     * PLACEHOLDER (Row 5, Span 2 Columns) - Reserved for future use
+     * POWER ROW (Row 5, Span 2 Columns) - Dynamic: Amps | Watts | Dew Heaters
      * ═══════════════════════════════════════════════════════════ */
-    lv_obj_t * box_placeholder = create_bento_box(main_cont);
-    lv_obj_set_grid_cell(box_placeholder, LV_GRID_ALIGN_STRETCH, 0, 2, LV_GRID_ALIGN_STRETCH, 5, 1);
+    lv_obj_t * box_power = create_bento_box(main_cont);
+    lv_obj_set_grid_cell(box_power, LV_GRID_ALIGN_STRETCH, 0, 2, LV_GRID_ALIGN_STRETCH, 5, 1);
+    lv_obj_set_flex_flow(box_power, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(box_power, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(box_power, 8, 0);
+
+    // All power slots are identical: title + value, hidden until data arrives
+    for (int i = 0; i < MAX_POWER_WIDGETS; i++) {
+        box_pwr[i] = lv_obj_create(box_power);
+        lv_obj_remove_style_all(box_pwr[i]);
+        lv_obj_set_flex_grow(box_pwr[i], 1);
+        lv_obj_set_height(box_pwr[i], LV_PCT(100));
+        lv_obj_set_flex_flow(box_pwr[i], LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(box_pwr[i], LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+        lbl_pwr_title[i] = create_small_label(box_pwr[i], "--");
+        lv_obj_set_width(lbl_pwr_title[i], LV_PCT(100));
+        lv_obj_set_style_text_align(lbl_pwr_title[i], LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_color(lbl_pwr_title[i], lv_color_hex(current_theme->text_color), 0);
+
+        lbl_pwr_value[i] = create_value_label(box_pwr[i]);
+        lv_label_set_text(lbl_pwr_value[i], "--");
+        // Use ~80% of the large value font size for the power row
+#ifdef LV_FONT_MONTSERRAT_36
+        lv_obj_set_style_text_font(lbl_pwr_value[i], &lv_font_montserrat_36, 0);
+#elif defined(LV_FONT_MONTSERRAT_28)
+        lv_obj_set_style_text_font(lbl_pwr_value[i], &lv_font_montserrat_28, 0);
+#elif defined(LV_FONT_MONTSERRAT_24)
+        lv_obj_set_style_text_font(lbl_pwr_value[i], &lv_font_montserrat_24, 0);
+#endif
+
+        lv_obj_add_flag(box_pwr[i], LV_OBJ_FLAG_HIDDEN);
+    }
 
     // Apply theme again to ensure all brightness adjustments are correct
     nina_dashboard_apply_theme(cfg->theme_index);
@@ -479,9 +521,9 @@ static void arc_fill_complete_cb(lv_anim_t *a) {
 }
 
 /**
- * @brief Update the Bento Dashboard with live data from NINA client
+ * @brief Update the Bento Dashboard with live data from both NINA instances
  */
-void update_nina_dashboard_ui(const nina_client_t *data) {
+void update_nina_dashboard_ui(const nina_client_t *data, const nina_client_t *data2) {
     if (!scr_dashboard || !data) return;
 
     int gb = app_config_get()->color_brightness;
@@ -649,4 +691,54 @@ void update_nina_dashboard_ui(const nina_client_t *data) {
     } else {
         lv_label_set_text(lbl_saturated_value, "--");
     }
+
+    // 11. Power Row - populate dynamic slots from primary instance only
+    int pwr_idx = 0;
+    bool sw1 = data->power.switch_connected;
+
+    // Helper: uppercase a string in-place
+    #define UPPER(buf) do { for (int _c = 0; (buf)[_c]; _c++) \
+        if ((buf)[_c] >= 'a' && (buf)[_c] <= 'z') (buf)[_c] -= 32; } while(0)
+
+    // Instance 1 amps + watts
+    if (sw1 && pwr_idx < MAX_POWER_WIDGETS) {
+        char title[32];
+        strncpy(title, data->power.amps_name[0] ? data->power.amps_name : "Amps", sizeof(title) - 1);
+        title[sizeof(title) - 1] = '\0';
+        UPPER(title);
+        lv_label_set_text(lbl_pwr_title[pwr_idx], title);
+        lv_label_set_text_fmt(lbl_pwr_value[pwr_idx], "%.2fA", data->power.total_amps);
+        lv_obj_clear_flag(box_pwr[pwr_idx], LV_OBJ_FLAG_HIDDEN);
+        pwr_idx++;
+    }
+    if (sw1 && pwr_idx < MAX_POWER_WIDGETS) {
+        char title[32];
+        strncpy(title, data->power.watts_name[0] ? data->power.watts_name : "Watts", sizeof(title) - 1);
+        title[sizeof(title) - 1] = '\0';
+        UPPER(title);
+        lv_label_set_text(lbl_pwr_title[pwr_idx], title);
+        lv_label_set_text_fmt(lbl_pwr_value[pwr_idx], "%.1fW", data->power.total_watts);
+        lv_obj_clear_flag(box_pwr[pwr_idx], LV_OBJ_FLAG_HIDDEN);
+        pwr_idx++;
+    }
+
+    // Instance 1 PWM/dew heater outputs
+    if (sw1) {
+        for (int i = 0; i < data->power.pwm_count && pwr_idx < MAX_POWER_WIDGETS; i++, pwr_idx++) {
+            char title[32];
+            strncpy(title, data->power.pwm_names[i], sizeof(title) - 1);
+            title[sizeof(title) - 1] = '\0';
+            UPPER(title);
+            lv_label_set_text(lbl_pwr_title[pwr_idx], title);
+            lv_label_set_text_fmt(lbl_pwr_value[pwr_idx], "%.0f%%", data->power.pwm[i]);
+            lv_obj_clear_flag(box_pwr[pwr_idx], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    // Hide unused slots
+    for (int i = pwr_idx; i < MAX_POWER_WIDGETS; i++) {
+        lv_obj_add_flag(box_pwr[i], LV_OBJ_FLAG_HIDDEN);
+    }
+
+    #undef UPPER
 }
