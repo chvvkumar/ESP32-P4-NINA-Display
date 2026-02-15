@@ -7,7 +7,11 @@
       "Bash(grep:*)",
       "Bash(python -c \" import json with open\\(''api-1.json'', ''r''\\) as f: data = json.load\\(f\\) for path, details in data.get\\(''paths'', {}\\).items\\(\\): if ''sequence'' in path or ''image'' in path or ''camera'' in path: methods = list\\(details.keys\\(\\)\\) if ''get'' in methods: summary = details[''get''].get\\(''summary'', ''''\\) print\\(f''{path:40s} - {summary}''\\) \")",
       "Bash(python3:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(idf.py build:*)",
+      "Bash(export:*)",
+      "Bash(export PATH=\"$IDF_PATH/tools:$PATH\")",
+      "Bash(source:*)"
     ]
   }
 }
