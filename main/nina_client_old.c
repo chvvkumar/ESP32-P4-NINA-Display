@@ -658,7 +658,7 @@ void nina_client_get_data(const char *base_url, nina_client_t *data) {
     strcpy(data->profile_name, "NINA");
     strcpy(data->current_filter, "--");
     strcpy(data->time_remaining, "--");
-    data->saturated_pixels = -1; // Not available in standard API
+    data->target_time_remaining[0] = '\0';
     
     // Fetch all data from NINA API
     fetch_camera_info(base_url, data);

@@ -408,6 +408,40 @@ static void fetch_mount_robust(const char *base_url, nina_client_t *data) {
     cJSON_Delete(json);
 }
 
+// Recursively find Loop Until Time_Condition in a container or its RUNNING children
+static cJSON* find_time_condition(cJSON *container) {
+    if (!container) return NULL;
+
+    // Check this container's conditions
+    cJSON *conditions = cJSON_GetObjectItem(container, "Conditions");
+    if (conditions && cJSON_IsArray(conditions)) {
+        cJSON *cond = NULL;
+        cJSON_ArrayForEach(cond, conditions) {
+            cJSON *cond_name = cJSON_GetObjectItem(cond, "Name");
+            if (cond_name && cond_name->valuestring &&
+                strcmp(cond_name->valuestring, "Loop Until Time_Condition") == 0) {
+                return cond;
+            }
+        }
+    }
+
+    // Search RUNNING child containers
+    cJSON *items = cJSON_GetObjectItem(container, "Items");
+    if (items && cJSON_IsArray(items)) {
+        cJSON *item = NULL;
+        cJSON_ArrayForEach(item, items) {
+            cJSON *status = cJSON_GetObjectItem(item, "Status");
+            cJSON *child_items = cJSON_GetObjectItem(item, "Items");
+            if (status && status->valuestring && child_items &&
+                strcmp(status->valuestring, "RUNNING") == 0) {
+                cJSON *found = find_time_condition(item);
+                if (found) return found;
+            }
+        }
+    }
+    return NULL;
+}
+
 // Find the active target container (RUNNING preferred, otherwise last FINISHED)
 static cJSON* find_active_target_container(cJSON *targets_container) {
     cJSON *items = cJSON_GetObjectItem(targets_container, "Items");
@@ -584,6 +618,24 @@ static void fetch_sequence_counts_optional(const char *base_url, nina_client_t *
                 find_active_container_name(target_container, data->container_name, sizeof(data->container_name));
                 if (data->container_name[0] != '\0') {
                     ESP_LOGI(TAG, "Active container: %s", data->container_name);
+                }
+
+                // Extract target remaining time from Loop Until Time_Condition
+                // (may be on the target container or nested in a child container)
+                data->target_time_remaining[0] = '\0';
+                cJSON *time_cond = find_time_condition(target_container);
+                if (time_cond) {
+                    cJSON *rem = cJSON_GetObjectItem(time_cond, "RemainingTime");
+                    if (rem && rem->valuestring) {
+                        // Parse "HH:MM:SS.xxx" -> "H:MM"
+                        int h = 0, m = 0;
+                        if (sscanf(rem->valuestring, "%d:%d:", &h, &m) >= 2) {
+                            snprintf(data->target_time_remaining,
+                                     sizeof(data->target_time_remaining),
+                                     "%d:%02d", h, m);
+                            ESP_LOGI(TAG, "Target time remaining: %s", data->target_time_remaining);
+                        }
+                    }
                 }
 
                 // Find the currently running step/instruction name
@@ -1003,7 +1055,7 @@ void nina_client_get_data(const char *base_url, nina_client_t *data) {
     strcpy(data->profile_name, "NINA");
     strcpy(data->current_filter, "--");
     strcpy(data->time_remaining, "--");
-    data->saturated_pixels = -1;
+    data->target_time_remaining[0] = '\0';
     data->filter_count = 0;
 
     ESP_LOGI(TAG, "=== Fetching NINA data (robust method) ===");
@@ -1067,7 +1119,6 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
     data->exposure_current = 0;
     strcpy(data->status, "IDLE");
     strcpy(data->time_remaining, "--");
-    data->saturated_pixels = -1;
 
     // On very first call, set defaults for persistent fields
     if (!state->static_fetched) {

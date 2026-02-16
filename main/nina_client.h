@@ -53,7 +53,7 @@ typedef struct {
     // Image stats
     float hfr;
     int stars;
-    int saturated_pixels;
+    char target_time_remaining[16]; // Target remaining time "HH:MM" from Loop Until Time_Condition
     
     // Mount
     char meridian_flip[16];

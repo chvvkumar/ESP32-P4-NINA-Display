@@ -47,8 +47,8 @@ typedef struct {
     lv_obj_t *lbl_hfr_value;
     lv_obj_t *lbl_stars_header;
     lv_obj_t *lbl_stars_value;
-    lv_obj_t *lbl_sat_header;
-    lv_obj_t *lbl_saturated_value;
+    lv_obj_t *lbl_target_time_header;
+    lv_obj_t *lbl_target_time_value;
     lv_obj_t *lbl_rms_title;
     lv_obj_t *lbl_hfr_title;
     lv_obj_t *lbl_flip_title;
@@ -193,7 +193,7 @@ static void apply_theme_to_page(dashboard_page_t *p) {
     if (p->lbl_hfr_title) lv_obj_set_style_text_color(p->lbl_hfr_title, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
     if (p->lbl_flip_title) lv_obj_set_style_text_color(p->lbl_flip_title, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
     if (p->lbl_stars_header) lv_obj_set_style_text_color(p->lbl_stars_header, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-    if (p->lbl_sat_header) lv_obj_set_style_text_color(p->lbl_sat_header, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+    if (p->lbl_target_time_header) lv_obj_set_style_text_color(p->lbl_target_time_header, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
 
     if (p->lbl_rms_value) lv_obj_set_style_text_color(p->lbl_rms_value, lv_color_hex(app_config_apply_brightness(current_theme->rms_color, gb)), 0);
     if (p->lbl_hfr_value) lv_obj_set_style_text_color(p->lbl_hfr_value, lv_color_hex(app_config_apply_brightness(current_theme->hfr_color, gb)), 0);
@@ -407,34 +407,34 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent) {
     lv_obj_set_flex_flow(box_flip, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(box_flip, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    p->lbl_flip_title = create_small_label(box_flip, "TIME TO FLIP");
+    p->lbl_flip_title = create_small_label(box_flip, "TIME UNTIL FLIP");
     lv_obj_set_width(p->lbl_flip_title, LV_PCT(100));
-    lv_obj_set_style_text_align(p->lbl_flip_title, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_align(p->lbl_flip_title, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(p->lbl_flip_title, lv_color_hex(current_theme->text_color), 0);
 
     p->lbl_flip_value = create_value_label(box_flip);
     lv_label_set_text(p->lbl_flip_value, "--");
 
-    // Sat. pixels + stars (col 1, row 4)
+    // Target time + stars (col 1, row 4)
     lv_obj_t *box_sat_stars = create_bento_box(p->page);
     lv_obj_set_grid_cell(box_sat_stars, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 4, 1);
     lv_obj_set_flex_flow(box_sat_stars, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(box_sat_stars, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(box_sat_stars, 8, 0);
 
-    lv_obj_t *box_saturated = lv_obj_create(box_sat_stars);
-    lv_obj_remove_style_all(box_saturated);
-    lv_obj_set_size(box_saturated, LV_PCT(50), LV_PCT(100));
-    lv_obj_set_flex_flow(box_saturated, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(box_saturated, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_t *box_target_time = lv_obj_create(box_sat_stars);
+    lv_obj_remove_style_all(box_target_time);
+    lv_obj_set_size(box_target_time, LV_PCT(50), LV_PCT(100));
+    lv_obj_set_flex_flow(box_target_time, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(box_target_time, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    p->lbl_sat_header = create_small_label(box_saturated, "SAT. PIXELS");
-    lv_obj_set_width(p->lbl_sat_header, LV_PCT(100));
-    lv_obj_set_style_text_align(p->lbl_sat_header, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(p->lbl_sat_header, lv_color_hex(current_theme->text_color), 0);
+    p->lbl_target_time_header = create_small_label(box_target_time, "TIME LEFT (H:M)");
+    lv_obj_set_width(p->lbl_target_time_header, LV_PCT(100));
+    lv_obj_set_style_text_align(p->lbl_target_time_header, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(p->lbl_target_time_header, lv_color_hex(current_theme->text_color), 0);
 
-    p->lbl_saturated_value = create_value_label(box_saturated);
-    lv_label_set_text(p->lbl_saturated_value, "84");
+    p->lbl_target_time_value = create_value_label(box_target_time);
+    lv_label_set_text(p->lbl_target_time_value, "--");
 
     lv_obj_t *box_stars = lv_obj_create(box_sat_stars);
     lv_obj_remove_style_all(box_stars);
@@ -853,11 +853,11 @@ void update_nina_dashboard_page(int page_index, const nina_client_t *data) {
         lv_label_set_text(p->lbl_stars_value, "--");
     }
 
-    // Saturated pixels
-    if (data->saturated_pixels >= 0) {
-        lv_label_set_text_fmt(p->lbl_saturated_value, "%d", data->saturated_pixels);
+    // Target time remaining
+    if (data->target_time_remaining[0] != '\0') {
+        lv_label_set_text(p->lbl_target_time_value, data->target_time_remaining);
     } else {
-        lv_label_set_text(p->lbl_saturated_value, "--");
+        lv_label_set_text(p->lbl_target_time_value, "--");
     }
 
     // Power
