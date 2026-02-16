@@ -13,6 +13,7 @@
 #include "esp_websocket_client.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
 #include "cJSON.h"
 #include <string.h>
 #include <time.h>
@@ -248,6 +249,10 @@ static void fetch_image_history_robust(const char *base_url, nina_client_t *data
     char url[256];
     snprintf(url, sizeof(url), "%simage-history", base_url);
 
+    // Snapshot previous values to detect new images
+    float prev_hfr = data->hfr;
+    int prev_stars = data->stars;
+
     cJSON *json = http_get_json(url);
     if (!json) return;
 
@@ -292,6 +297,11 @@ static void fetch_image_history_robust(const char *base_url, nina_client_t *data
             // Stars
             cJSON *stars = cJSON_GetObjectItem(latest, "Stars");
             if (stars) data->stars = stars->valueint;
+
+            // Detect new image (HFR or stars changed)
+            if (data->hfr != prev_hfr || data->stars != prev_stars) {
+                data->new_image_available = true;
+            }
 
             ESP_LOGI(TAG, "Image stats: HFR=%.2f, Stars=%d", data->hfr, data->stars);
         }
@@ -822,6 +832,8 @@ static void handle_websocket_message(const char *payload, int len) {
                         sizeof(ws_client_data->telescope_name) - 1);
             }
 
+            ws_client_data->new_image_available = true;
+
             ESP_LOGI(TAG, "WS: HFR=%.2f Stars=%d Filter=%s Target=%s",
                 ws_client_data->hfr, ws_client_data->stars,
                 ws_client_data->current_filter, ws_client_data->target_name);
@@ -1169,4 +1181,87 @@ void nina_client_poll_heartbeat(const char *base_url, nina_client_t *data) {
     data->connected = false;
     fetch_camera_info_robust(base_url, data);
     ESP_LOGD(TAG, "Heartbeat: connected=%d", data->connected);
+}
+
+uint8_t *nina_client_fetch_prepared_image(const char *base_url, int width, int height, int quality, size_t *out_size) {
+    char url[320];
+    snprintf(url, sizeof(url),
+        "%sprepared-image?resize=true&size=%dx%d&quality=%d&autoPrepare=true",
+        base_url, width, height, quality);
+
+    ESP_LOGI(TAG, "Fetching prepared image: %s", url);
+
+    esp_http_client_config_t config = {
+        .url = url,
+        .timeout_ms = 15000,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (!client) return NULL;
+
+    esp_err_t err = esp_http_client_open(client, 0);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open HTTP connection for image");
+        esp_http_client_cleanup(client);
+        return NULL;
+    }
+
+    int content_length = esp_http_client_fetch_headers(client);
+    int status = esp_http_client_get_status_code(client);
+    if (status != 200) {
+        ESP_LOGE(TAG, "Image request failed with HTTP %d", status);
+        esp_http_client_cleanup(client);
+        return NULL;
+    }
+
+    bool chunked = esp_http_client_is_chunked_response(client);
+    ESP_LOGI(TAG, "Image response: content_length=%d, chunked=%d", content_length, chunked);
+
+    // For chunked responses, start with a reasonable buffer and grow as needed
+    int buf_size = (content_length > 0) ? content_length : (256 * 1024);
+    uint8_t *buffer = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
+    if (!buffer) {
+        ESP_LOGE(TAG, "Failed to allocate %d bytes for image", buf_size);
+        esp_http_client_cleanup(client);
+        return NULL;
+    }
+
+    int total_read = 0, read_len;
+    while (1) {
+        int to_read = buf_size - total_read;
+        if (to_read <= 0) {
+            // Grow buffer for chunked responses
+            int new_size = buf_size + (256 * 1024);
+            uint8_t *new_buf = heap_caps_realloc(buffer, new_size, MALLOC_CAP_SPIRAM);
+            if (!new_buf) {
+                ESP_LOGE(TAG, "Failed to grow image buffer to %d", new_size);
+                free(buffer);
+                esp_http_client_cleanup(client);
+                return NULL;
+            }
+            buffer = new_buf;
+            buf_size = new_size;
+            to_read = buf_size - total_read;
+        }
+        read_len = esp_http_client_read(client, (char *)buffer + total_read, to_read);
+        if (read_len <= 0) break;
+        total_read += read_len;
+    }
+
+    esp_http_client_cleanup(client);
+
+    if (total_read == 0) {
+        ESP_LOGE(TAG, "No image data received");
+        free(buffer);
+        return NULL;
+    }
+
+    if (!chunked && total_read < content_length) {
+        ESP_LOGE(TAG, "Incomplete image read: %d/%d", total_read, content_length);
+        free(buffer);
+        return NULL;
+    }
+
+    *out_size = (size_t)total_read;
+    ESP_LOGI(TAG, "Image fetched: %d bytes", total_read);
+    return buffer;
 }

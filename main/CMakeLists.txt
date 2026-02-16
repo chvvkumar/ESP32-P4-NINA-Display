@@ -7,8 +7,12 @@ idf_component_register(
 
 idf_component_get_property(LVGL_LIB lvgl__lvgl COMPONENT_LIB)
 target_compile_options(
-    ${LVGL_LIB} 
+    ${LVGL_LIB}
     PRIVATE
         -DLV_LVGL_H_INCLUDE_SIMPLE
         -DLV_USE_DEMO_MUSIC
 )
+
+# Add hardware JPEG decoder for thumbnail feature
+idf_component_get_property(JPEG_LIB esp_driver_jpeg COMPONENT_LIB)
+target_link_libraries(${COMPONENT_LIB} PRIVATE ${JPEG_LIB})
