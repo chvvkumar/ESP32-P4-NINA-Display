@@ -6,8 +6,6 @@ ESP32P4 based dashboard for N.I.N.A. running on the Waveshare ESP32-P4-WIFI6-Tou
 
 ## Features
 
-The dashboard monitors critical parameters of an imaging session, including:
-
 *   **Session Information:** Target name, Telescope name, Profile name.
 *   **Sequence Progress:** Active sequence container, current step name, loop counts.
 *   **Exposure Status:** Real-time exposure progress bar, remaining time, and filter wheel status.
