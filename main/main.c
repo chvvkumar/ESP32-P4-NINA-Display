@@ -56,7 +56,8 @@ static void event_handler(void* arg, esp_event_base_t event_base,
         // Initialize SNTP for time synchronization
         ESP_LOGI(TAG, "Initializing SNTP");
         esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
-        esp_sntp_setservername(0, "pool.ntp.org");
+        const char *ntp = app_config_get()->ntp_server;
+        esp_sntp_setservername(0, (ntp[0] != '\0') ? ntp : "pool.ntp.org");
         esp_sntp_init();
 
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
@@ -310,6 +311,9 @@ static void data_update_task(void *arg) {
 
     while (1) {
         int current_active = active_page;  // Snapshot to avoid races
+
+        // Re-read instance count from config so API URL changes take effect live
+        instance_count = app_config_get_instance_count();
 
         // Handle page change: stop/start WebSocket, trigger immediate full poll
         if (page_changed) {

@@ -41,11 +41,13 @@ static const char *HTML_CONTENT =
 ".color-dot:hover{transform:scale(1.1);border-color:var(--text-primary);}"
 ".btn{width:100%;padding:14px;border:none;border-radius:4px;font-weight:bold;cursor:pointer;text-transform:uppercase;font-size:0.9rem;letter-spacing:1px;transition:opacity 0.2s;}"
 ".btn-primary{background-color:var(--accent-color);color:#fff;}"
+".btn-reboot{background-color:transparent;border:1px solid #ffa726;color:#ffa726;margin-top:10px;}"
 ".btn-danger{background-color:transparent;border:1px solid var(--danger-color);color:var(--danger-color);margin-top:10px;}"
+".hint{font-size:0.7rem;color:var(--text-secondary);text-align:center;margin-top:6px;}"
 ".btn:hover{opacity:0.8;}"
 ".flex-row{display:flex;gap:10px;align-items:center;}"
 ".color-rect{width:40px;height:38px;padding:0;border:1px solid #333;background:none;border-radius:4px;cursor:pointer;}"
-"@media(min-width:768px){.area-actions{display:flex;gap:16px;}.btn-danger{margin-top:0;}}"
+"@media(min-width:768px){.area-actions{display:flex;flex-wrap:wrap;gap:16px;}.btn-reboot{margin-top:0;}.btn-danger{margin-top:0;}}"
 "</style></head>"
 "<body><div class=\"container\"><div class=\"bento-grid\">"
 "<div class=\"tile area-net\"><h3>Network</h3>"
@@ -70,6 +72,7 @@ static const char *HTML_CONTENT =
 "<option value=\"8\">Crimson</option>"
 "<option value=\"9\">Slate</option>"
 "<option value=\"10\">All Black</option>"
+"<option value=\"11\">Kumar</option>"
 "</select></div>"
 "<div class=\"group\"><label>Display Brightness</label>"
 "<div class=\"flex-row\"><input type=\"range\" id=\"brightness\" min=\"0\" max=\"100\" value=\"50\" oninput=\"setBrightness(this.value)\" style=\"flex:1\"><span id=\"bright_val\" style=\"min-width:36px;text-align:right\">50%</span></div>"
@@ -87,7 +90,9 @@ static const char *HTML_CONTENT =
 "<div class=\"group\"><label>OK HFR Max Value</label><div class=\"flex-row\"><input type=\"text\" id=\"hfr_ok_max\"><input type=\"color\" id=\"hfr_ok_color\" class=\"color-rect\"></div></div>"
 "<div class=\"group\"><label>Bad HFR Color</label><input type=\"color\" id=\"hfr_bad_color\" class=\"color-rect\" style=\"width:100%\"></div></div>"
 "<div class=\"tile area-actions\">"
-"<button class=\"btn btn-primary\" onclick=\"save()\">Save & Reboot</button>"
+"<button class=\"btn btn-primary\" id=\"saveBtn\" onclick=\"save()\">Save Settings</button>"
+"<div><button class=\"btn btn-reboot\" onclick=\"saveAndReboot()\">Save & Reboot</button>"
+"<p class=\"hint\">Only needed for WiFi or NTP changes</p></div>"
 "<button class=\"btn btn-danger\" onclick=\"factoryReset()\">Factory Reset</button></div>"
 "</div></div>"
 "<script>"
@@ -113,7 +118,7 @@ static const char *HTML_CONTENT =
 "return fetch('/api/config',{method:'GET',cache:'no-cache'}).then(r=>r.ok).catch(()=>false);"
 "}"
 "function waitForReboot(){"
-"const b=document.querySelector('.btn-primary');"
+"const b=document.querySelector('.btn-reboot');"
 "let attempts=0;const maxAttempts=60;"
 "const check=()=>{"
 "attempts++;checkOnline().then(online=>{"
@@ -121,8 +126,7 @@ static const char *HTML_CONTENT =
 "});};"
 "setTimeout(check,3000);"
 "}"
-"function save(){"
-"const b=document.querySelector('.btn-primary');const ot=b.innerText;b.innerText='SAVING...';b.disabled=true;"
+"function getConfigData(){"
 "const rms={good_max:parseFloat(document.getElementById('rms_good_max').value)||0.5,ok_max:parseFloat(document.getElementById('rms_ok_max').value)||1.0,good_color:document.getElementById('rms_good_color').value,ok_color:document.getElementById('rms_ok_color').value,bad_color:document.getElementById('rms_bad_color').value};"
 "const hfr={good_max:parseFloat(document.getElementById('hfr_good_max').value)||2.0,ok_max:parseFloat(document.getElementById('hfr_ok_max').value)||3.5,good_color:document.getElementById('hfr_good_color').value,ok_color:document.getElementById('hfr_ok_color').value,bad_color:document.getElementById('hfr_bad_color').value};"
 "const h1=document.getElementById('url1').value.trim();"
@@ -131,8 +135,16 @@ static const char *HTML_CONTENT =
 "const u1=h1?'http://'+h1+':1888/v2/api/':'';"
 "const u2=h2?'http://'+h2+':1888/v2/api/':'';"
 "const u3=h3?'http://'+h3+':1888/v2/api/':'';"
-"const d={ssid:document.getElementById('ssid').value,pass:document.getElementById('pass').value,url1:u1,url2:u2,url3:u3,ntp:document.getElementById('ntp').value,theme_index:parseInt(document.getElementById('theme_select').value),brightness:parseInt(document.getElementById('brightness').value),color_brightness:parseInt(document.getElementById('color_brightness').value),filter_colors:JSON.stringify(filterColorsObj),filter_brightness:JSON.stringify(filterBrightnessObj),rms_thresholds:JSON.stringify(rms),hfr_thresholds:JSON.stringify(hfr)};"
-"fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})"
+"return{ssid:document.getElementById('ssid').value,pass:document.getElementById('pass').value,url1:u1,url2:u2,url3:u3,ntp:document.getElementById('ntp').value,theme_index:parseInt(document.getElementById('theme_select').value),brightness:parseInt(document.getElementById('brightness').value),color_brightness:parseInt(document.getElementById('color_brightness').value),filter_colors:JSON.stringify(filterColorsObj),filter_brightness:JSON.stringify(filterBrightnessObj),rms_thresholds:JSON.stringify(rms),hfr_thresholds:JSON.stringify(hfr)};}"
+"function save(){"
+"const b=document.getElementById('saveBtn');const ot=b.innerText;b.innerText='SAVING...';b.disabled=true;"
+"fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(getConfigData())})"
+".then(r=>{if(r.ok){b.innerText='SAVED';setTimeout(()=>{b.innerText=ot;b.disabled=false;},2000);}else{alert('Error saving');b.innerText=ot;b.disabled=false;}}).catch(e=>{alert('Connection failed');b.innerText=ot;b.disabled=false;});"
+"}"
+"function saveAndReboot(){"
+"if(!confirm('Save all settings and reboot?\\nReboot is required for WiFi and NTP changes to take effect.'))return;"
+"const b=document.querySelector('.btn-reboot');const ot=b.innerText;b.innerText='SAVING...';b.disabled=true;"
+"fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(getConfigData())})"
 ".then(r=>{if(r.ok){b.innerText='REBOOTING...';fetch('/api/reboot',{method:'POST'}).catch(()=>{});waitForReboot();}else{alert('Error saving');b.innerText=ot;b.disabled=false;}}).catch(e=>{alert('Connection failed');b.innerText=ot;b.disabled=false;});"
 "}"
 "function factoryReset(){"
@@ -326,6 +338,13 @@ static esp_err_t config_post_handler(httpd_req_t *req)
 
     app_config_save(&cfg);
     cJSON_Delete(root);
+
+    // Apply settings live (no reboot needed for these)
+    bsp_display_brightness_set(cfg.brightness);
+    bsp_display_lock(0);
+    nina_dashboard_apply_theme(cfg.theme_index);
+    bsp_display_unlock();
+    ESP_LOGI(TAG, "Config saved and applied live");
 
     httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
     return ESP_OK;

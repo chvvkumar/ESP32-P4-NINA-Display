@@ -16,6 +16,7 @@ typedef struct {
     uint32_t text_color;
     uint32_t header_text_color;
     uint32_t header_grad_color;
+    uint32_t target_name_color;
     uint32_t filter_text_color;
     uint32_t progress_color;
     uint32_t rms_color;

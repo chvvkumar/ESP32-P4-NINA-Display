@@ -175,7 +175,7 @@ static void apply_theme_to_page(dashboard_page_t *p) {
     int gb = app_config_get()->color_brightness;
 
     if (p->lbl_instance_name) lv_obj_set_style_text_color(p->lbl_instance_name, lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
-    if (p->lbl_target_name) lv_obj_set_style_text_color(p->lbl_target_name, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+    if (p->lbl_target_name) lv_obj_set_style_text_color(p->lbl_target_name, lv_color_hex(app_config_apply_brightness(current_theme->target_name_color, gb)), 0);
 
     if (p->lbl_seq_container) lv_obj_set_style_text_color(p->lbl_seq_container, lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
     if (p->lbl_seq_step) lv_obj_set_style_text_color(p->lbl_seq_step, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
@@ -299,7 +299,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent) {
     lv_obj_set_style_text_font(lbl_seq_title, &lv_font_montserrat_14, 0);
 
     p->lbl_seq_container = lv_label_create(seq_left);
-    lv_obj_set_style_text_color(p->lbl_seq_container, lv_color_hex(current_theme->text_color), 0);
+    lv_obj_set_style_text_color(p->lbl_seq_container, lv_color_hex(0x4FC3F7), 0);
     lv_obj_set_style_text_font(p->lbl_seq_container, &lv_font_montserrat_24, 0);
     lv_label_set_text(p->lbl_seq_container, "----");
 
