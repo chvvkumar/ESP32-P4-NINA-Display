@@ -43,6 +43,19 @@ int nina_dashboard_get_active_page(void);
 void nina_dashboard_apply_theme(int theme_index);
 
 /**
+ * @brief Update the WiFi signal bars and connection indicator dot for a page.
+ *
+ * Call this both before an API request (api_active=true, starts pulse) and
+ * after (api_active=false, stops pulse).  Safe to call under the display lock.
+ *
+ * @param page_index     Dashboard page to update (0-based)
+ * @param rssi           Current WiFi RSSI in dBm; -100 when unknown
+ * @param nina_connected true when the NINA HTTP API is reachable
+ * @param api_active     true while an HTTP request is in-flight
+ */
+void nina_dashboard_update_status(int page_index, int rssi, bool nina_connected, bool api_active);
+
+/**
  * @brief Callback type for page change events (triggered by swipe gestures)
  * @param new_page The page index that was switched to
  */
@@ -53,6 +66,37 @@ typedef void (*nina_page_change_cb_t)(int new_page);
  * @param cb Callback function to invoke on page change
  */
 void nina_dashboard_set_page_change_cb(nina_page_change_cb_t cb);
+
+/**
+ * @brief Check if a thumbnail image has been requested (target name was clicked)
+ * @return true if thumbnail fetch is needed
+ */
+bool nina_dashboard_thumbnail_requested(void);
+
+/**
+ * @brief Clear the thumbnail request flag (call after starting the fetch)
+ */
+void nina_dashboard_clear_thumbnail_request(void);
+
+/**
+ * @brief Set decoded thumbnail image data for display
+ * @param rgb565_data Heap-allocated RGB565 pixel data (ownership transferred to dashboard)
+ * @param w Image width in pixels
+ * @param h Image height in pixels
+ * @param data_size Size of rgb565_data in bytes
+ */
+void nina_dashboard_set_thumbnail(const uint8_t *rgb565_data, uint32_t w, uint32_t h, uint32_t data_size);
+
+/**
+ * @brief Hide the thumbnail overlay and free image memory
+ */
+void nina_dashboard_hide_thumbnail(void);
+
+/**
+ * @brief Check if thumbnail overlay is currently visible
+ * @return true if visible
+ */
+bool nina_dashboard_thumbnail_visible(void);
 
 #ifdef __cplusplus
 }
