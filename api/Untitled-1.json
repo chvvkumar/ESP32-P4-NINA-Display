@@ -1,0 +1,449 @@
+{
+"Response": [
+{
+"GlobalTriggers": []
+},
+{
+"Conditions": [],
+"Triggers": [],
+"Name": "Start_Container",
+"Status": "FINISHED",
+"Items": []
+},
+{
+"Conditions": [],
+"Triggers": [],
+"Name": "Targets_Container",
+"Status": "RUNNING",
+"Items": [
+{
+"Conditions": [],
+"Triggers": [
+{
+"TimeToFlip": 24,
+"Name": "Meridian Flip_Trigger",
+"Status": "CREATED"
+}
+],
+"Name": "_Container",
+"Status": "RUNNING",
+"Items": [
+{
+"Conditions": [],
+"Triggers": [],
+"Name": "Prepare Target_Container",
+"Status": "FINISHED",
+"Items": [
+{
+"Filter": "L",
+"Name": "Switch Filter",
+"Status": "FINISHED"
+},
+{
+"Name": "Wait for Time Span",
+"Status": "FINISHED",
+"Delay": 2
+},
+{
+"ForceCalibration": false,
+"Name": "Start Guiding",
+"Status": "FINISHED"
+}
+]
+},
+{
+"Conditions": [],
+"Triggers": [],
+"Name": "LRGBSHO_Container",
+"Status": "RUNNING",
+"Items": [
+{
+"DitherProgressExposures": 0,
+"Type": "LIGHT",
+"Binning": {
+"Name": "1x1",
+"X": 1,
+"Y": 1
+},
+"DitherTargetExposures": 0,
+"Name": "Smart Exposure",
+"ExposureTime": 10,
+"Filter": "L",
+"Status": "FINISHED",
+"Offset": -1,
+"Gain": -1,
+"ExposureCount": 3,
+"CompletedIterations": 1,
+"Iterations": 1
+},
+{
+"Name": "Wait for Time Span",
+"Status": "FINISHED",
+"Delay": 2
+},
+{
+"DitherProgressExposures": 0,
+"Type": "LIGHT",
+"Binning": {
+"Name": "1x1",
+"X": 1,
+"Y": 1
+},
+"DitherTargetExposures": 0,
+"Name": "Smart Exposure",
+"ExposureTime": 10,
+"Filter": "R",
+"Status": "FINISHED",
+"Offset": -1,
+"Gain": -1,
+"ExposureCount": 1,
+"CompletedIterations": 1,
+"Iterations": 1
+},
+{
+"Name": "Wait for Time Span",
+"Status": "FINISHED",
+"Delay": 2
+},
+{
+"DitherProgressExposures": 0,
+"Type": "LIGHT",
+"Binning": {
+"Name": "1x1",
+"X": 1,
+"Y": 1
+},
+"DitherTargetExposures": 0,
+"Name": "Smart Exposure",
+"ExposureTime": 10,
+"Filter": "G",
+"Status": "RUNNING",
+"Offset": -1,
+"Gain": -1,
+"ExposureCount": 0,
+"CompletedIterations": 0,
+"Iterations": 1
+},
+{
+"Name": "Wait for Time Span",
+"Status": "CREATED",
+"Delay": 2
+},
+{
+"DitherProgressExposures": 0,
+"Type": "LIGHT",
+"Binning": {
+"Name": "1x1",
+"X": 1,
+"Y": 1
+},
+"DitherTargetExposures": 0,
+"Name": "Smart Exposure",
+"ExposureTime": 10,
+"Filter": "B",
+"Status": "CREATED",
+"Offset": -1,
+"Gain": -1,
+"ExposureCount": 0,
+"CompletedIterations": 0,
+"Iterations": 1
+},
+{
+"Name": "Wait for Time Span",
+"Status": "CREATED",
+"Delay": 2
+},
+{
+"DitherProgressExposures": 0,
+"Type": "LIGHT",
+"Binning": {
+"Name": "1x1",
+"X": 1,
+"Y": 1
+},
+"DitherTargetExposures": 0,
+"Name": "Smart Exposure",
+"ExposureTime": 10,
+"Filter": "Sii",
+"Status": "CREATED",
+"Offset": -1,
+"Gain": -1,
+"ExposureCount": 0,
+"CompletedIterations": 0,
+"Iterations": 1
+},
+{
+"Name": "Wait for Time Span",
+"Status": "CREATED",
+"Delay": 2
+},
+{
+"DitherProgressExposures": 0,
+"Type": "LIGHT",
+"Binning": {
+"Name": "1x1",
+"X": 1,
+"Y": 1
+},
+"DitherTargetExposures": 0,
+"Name": "Smart Exposure",
+"ExposureTime": 10,
+"Filter": "Ha",
+"Status": "CREATED",
+"Offset": -1,
+"Gain": -1,
+"ExposureCount": 0,
+"CompletedIterations": 0,
+"Iterations": 1
+},
+{
+"Name": "Wait for Time Span",
+"Status": "CREATED",
+"Delay": 2
+},
+{
+"DitherProgressExposures": 0,
+"Type": "LIGHT",
+"Binning": {
+"Name": "1x1",
+"X": 1,
+"Y": 1
+},
+"DitherTargetExposures": 0,
+"Name": "Smart Exposure",
+"ExposureTime": 10,
+"Filter": "Oiii",
+"Status": "CREATED",
+"Offset": -1,
+"Gain": -1,
+"ExposureCount": 0,
+"CompletedIterations": 0,
+"Iterations": 1
+}
+]
+}
+]
+},
+{
+"Conditions": [],
+"Triggers": [
+{
+"TimeToFlip": 24,
+"Name": "Meridian Flip_Trigger",
+"Status": "CREATED"
+}
+],
+"Name": "CTB-1_Container",
+"Status": "CREATED",
+"Items": [
+{
+"Conditions": [],
+"Triggers": [],
+"Name": "Prepare Target_Container",
+"Status": "FINISHED",
+"Items": [
+{
+"Filter": "L",
+"Name": "Switch Filter",
+"Status": "FINISHED"
+},
+{
+"Name": "Wait for Time Span",
+"Status": "FINISHED",
+"Delay": 2
+},
+{
+"ForceCalibration": false,
+"Name": "Start Guiding",
+"Status": "FINISHED"
+}
+]
+},
+{
+"Conditions": [],
+"Triggers": [],
+"Name": "LRGBSHO_Container",
+"Status": "CREATED",
+"Items": [
+{
+"DitherProgressExposures": 0,
+"Type": "LIGHT",
+"Binning": {
+"Name": "1x1",
+"X": 1,
+"Y": 1
+},
+"DitherTargetExposures": 0,
+"Name": "Smart Exposure",
+"ExposureTime": 10,
+"Filter": "L",
+"Status": "FINISHED",
+"Offset": -1,
+"Gain": -1,
+"ExposureCount": 0,
+"CompletedIterations": 1,
+"Iterations": 1
+},
+{
+"Name": "Wait for Time Span",
+"Status": "FINISHED",
+"Delay": 2
+},
+{
+"DitherProgressExposures": 0,
+"Type": "LIGHT",
+"Binning": {
+"Name": "1x1",
+"X": 1,
+"Y": 1
+},
+"DitherTargetExposures": 0,
+"Name": "Smart Exposure",
+"ExposureTime": 10,
+"Filter": "R",
+"Status": "FINISHED",
+"Offset": -1,
+"Gain": -1,
+"ExposureCount": 1,
+"CompletedIterations": 1,
+"Iterations": 1
+},
+{
+"Name": "Wait for Time Span",
+"Status": "FINISHED",
+"Delay": 2
+},
+{
+"DitherProgressExposures": 0,
+"Type": "LIGHT",
+"Binning": {
+"Name": "1x1",
+"X": 1,
+"Y": 1
+},
+"DitherTargetExposures": 0,
+"Name": "Smart Exposure",
+"ExposureTime": 10,
+"Filter": "G",
+"Status": "FINISHED",
+"Offset": -1,
+"Gain": -1,
+"ExposureCount": 1,
+"CompletedIterations": 1,
+"Iterations": 1
+},
+{
+"Name": "Wait for Time Span",
+"Status": "FINISHED",
+"Delay": 2
+},
+{
+"DitherProgressExposures": 0,
+"Type": "LIGHT",
+"Binning": {
+"Name": "1x1",
+"X": 1,
+"Y": 1
+},
+"DitherTargetExposures": 0,
+"Name": "Smart Exposure",
+"ExposureTime": 10,
+"Filter": "B",
+"Status": "CREATED",
+"Offset": -1,
+"Gain": -1,
+"ExposureCount": 0,
+"CompletedIterations": 0,
+"Iterations": 1
+},
+{
+"Name": "Wait for Time Span",
+"Status": "CREATED",
+"Delay": 2
+},
+{
+"DitherProgressExposures": 0,
+"Type": "LIGHT",
+"Binning": {
+"Name": "1x1",
+"X": 1,
+"Y": 1
+},
+"DitherTargetExposures": 0,
+"Name": "Smart Exposure",
+"ExposureTime": 10,
+"Filter": "Sii",
+"Status": "CREATED",
+"Offset": -1,
+"Gain": -1,
+"ExposureCount": 0,
+"CompletedIterations": 0,
+"Iterations": 1
+},
+{
+"Name": "Wait for Time Span",
+"Status": "CREATED",
+"Delay": 2
+},
+{
+"DitherProgressExposures": 0,
+"Type": "LIGHT",
+"Binning": {
+"Name": "1x1",
+"X": 1,
+"Y": 1
+},
+"DitherTargetExposures": 0,
+"Name": "Smart Exposure",
+"ExposureTime": 10,
+"Filter": "Ha",
+"Status": "CREATED",
+"Offset": -1,
+"Gain": -1,
+"ExposureCount": 0,
+"CompletedIterations": 0,
+"Iterations": 1
+},
+{
+"Name": "Wait for Time Span",
+"Status": "CREATED",
+"Delay": 2
+},
+{
+"DitherProgressExposures": 0,
+"Type": "LIGHT",
+"Binning": {
+"Name": "1x1",
+"X": 1,
+"Y": 1
+},
+"DitherTargetExposures": 0,
+"Name": "Smart Exposure",
+"ExposureTime": 10,
+"Filter": "Oiii",
+"Status": "CREATED",
+"Offset": -1,
+"Gain": -1,
+"ExposureCount": 0,
+"CompletedIterations": 0,
+"Iterations": 1
+}
+]
+}
+]
+}
+]
+},
+{
+"Conditions": [],
+"Triggers": [],
+"Name": "End_Container",
+"Status": "CREATED",
+"Items": []
+}
+],
+"Error": "",
+"StatusCode": 200,
+"Success": true,
+"Type": "API"
+}

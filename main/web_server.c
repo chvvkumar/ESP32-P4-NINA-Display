@@ -18,7 +18,7 @@ static const char *TAG = "web_server";
 
 static const char *HTML_CONTENT =
 "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-"<title>NINA Control Center</title>"
+"<title>NINA Display</title>"
 "<style>"
 ":root{"
 "--bg:#09090b;--card:#121217;--border:#27272a;--accent:#14b8a6;--accent-hover:#0d9488;--text:#fafafa;--text-dim:#a1a1aa;--danger:#ef4444;--warning:#f59e0b;"
@@ -43,8 +43,6 @@ static const char *HTML_CONTENT =
 ".filter-item label{margin:0;font-size:0.7rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}"
 ".color-dot{width:40px;height:40px;border-radius:10px;border:2px solid var(--border);cursor:pointer;padding:0;background:none;transition:transform 0.1s;}"
 ".color-dot:active{transform:scale(0.9);}"
-".filter-bright{width:100%;height:4px;appearance:none;background:var(--border);border-radius:2px;outline:none;}"
-".filter-bright::-webkit-slider-thumb{appearance:none;width:12px;height:12px;border-radius:50%;background:var(--accent);cursor:pointer;}"
 ".slider-wrapper{display:flex;align-items:center;gap:12px;}"
 "input[type='range']{flex:1;height:6px;appearance:none;background:var(--border);border-radius:3px;outline:none;}"
 "input[type='range']::-webkit-slider-thumb{appearance:none;width:18px;height:18px;border-radius:50%;background:var(--accent);cursor:pointer;border:3px solid var(--card);box-shadow:0 0 10px rgba(0,0,0,0.5);}"
@@ -57,45 +55,74 @@ static const char *HTML_CONTENT =
 ".btn-danger:hover{border-color:var(--danger);color:var(--danger);}"
 ".color-rect{width:48px;height:38px;padding:0;border:1px solid var(--border);background:none;border-radius:8px;cursor:pointer;}"
 ".area-net{grid-column:span 4;}.area-api{grid-column:span 4;}.area-appearance{grid-column:span 4;}"
-".area-filter{grid-column:span 12;}.area-rms{grid-column:span 6;}.area-hfr{grid-column:span 6;}"
+".area-filter{grid-column:span 12;}.area-thresholds{grid-column:span 12;}"
 ".area-actions{grid-column:span 12;background:rgba(20,184,166,0.03);border-color:rgba(20,184,166,0.2);}"
 ".action-row{display:flex;gap:16px;align-items:flex-start;}"
 ".action-main{flex:2;}.action-subs{flex:3;display:flex;flex-direction:column;gap:12px;}"
 ".hint{font-size:0.75rem;color:var(--text-dim);margin:4px 0 0 0;}"
+".threshold-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;}"
+".threshold-node{background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:12px;padding:16px;}"
+".threshold-node h4{margin:0 0 14px;font-size:0.82rem;color:var(--accent);font-weight:600;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}"
+".threshold-sub h5{margin:0 0 10px;font-size:0.72rem;color:var(--text-dim);font-weight:600;text-transform:uppercase;letter-spacing:0.04em;}"
+".threshold-sub{margin-bottom:16px;}"
+".threshold-sub:last-child{margin-bottom:0;}"
 "@media(max-width:900px){"
-".area-net,.area-api,.area-appearance,.area-rms,.area-hfr{grid-column:span 12;}"
+".area-net,.area-api,.area-appearance{grid-column:span 12;}"
 ".action-row{flex-direction:column;width:100%;}"
 ".action-main,.action-subs{width:100%;}"
 ".filter-item{flex:1 0 45%;}"
+".threshold-grid{grid-template-columns:1fr;}"
 "}"
 "</style></head>"
 "<body><div class=\"container\">"
-"<header><h1>NINA DISPLAY</h1><p>System Configuration & Performance Tuning</p></header>"
+"<header><h1>NINA DISPLAY</h1><p>System Configuration</p></header>"
 "<div class=\"bento-grid\">"
 "<div class=\"tile area-net\"><h3>Connectivity</h3>"
 "<div class=\"group\"><label>SSID</label><input type=\"text\" id=\"ssid\"></div>"
 "<div class=\"group\"><label>Password</label><input type=\"password\" id=\"pass\"></div>"
 "<div class=\"group\"><label>NTP Server</label><input type=\"text\" id=\"ntp\"></div></div>"
-"<div class=\"tile area-api\"><h3>API Hosts</h3>"
-"<div class=\"group\"><label>Primary Node</label><input type=\"text\" id=\"url1\" placeholder=\"astromele2.lan\"></div>"
-"<div class=\"group\"><label>Node 2</label><input type=\"text\" id=\"url2\" placeholder=\"astromele3.lan\"></div>"
-"<div class=\"group\"><label>Node 3</label><input type=\"text\" id=\"url3\" placeholder=\"astromele4.lan\"></div></div>"
+"<div class=\"tile area-api\"><h3>NINA Endpoints</h3>"
+"<div class=\"group\"><label>NINA 1</label><input type=\"text\" id=\"url1\" placeholder=\"astromele2.lan\" oninput=\"updateNodeLabels()\"></div>"
+"<div class=\"group\"><label>NINA 2</label><input type=\"text\" id=\"url2\" placeholder=\"astromele3.lan\" oninput=\"updateNodeLabels()\"></div>"
+"<div class=\"group\"><label>NINA 3</label><input type=\"text\" id=\"url3\" placeholder=\"astromele4.lan\" oninput=\"updateNodeLabels()\"></div></div>"
 "<div class=\"tile area-appearance\"><h3>Display</h3>"
 "<div class=\"group\"><label>Theme</label><select id=\"theme_select\" onchange=\"setTheme(this.value)\">"
 "<option value=\"0\">Bento Default</option><option value=\"1\">OLED Black</option><option value=\"2\">Deep Space</option><option value=\"3\">Red Night</option><option value=\"4\">Cyberpunk</option><option value=\"5\">Midnight Green</option><option value=\"6\">Solarized Dark</option><option value=\"7\">Monochrome</option><option value=\"8\">Crimson</option><option value=\"9\">Slate</option><option value=\"10\">All Black</option><option value=\"11\">Kumar</option><option value=\"12\">Aquamarine Dream</option><option value=\"13\">Midnight Industrial</option><option value=\"14\">Electric Prism</option>"
 "</select></div>"
-"<div class=\"group\"><label>Backlight</label><div class=\"slider-wrapper\"><input type=\"range\" id=\"brightness\" min=\"0\" max=\"100\" value=\"50\" oninput=\"setBrightness(this.value)\"><span id=\"bright_val\" style=\"width:35px;font-size:0.8rem\">50%</span></div></div></div>"
-"<div class=\"tile area-filter\"><h3>Filter Palette</h3>"
-"<div class=\"group\"><label>Global Multiplier</label><div class=\"slider-wrapper\"><input type=\"range\" id=\"color_brightness\" min=\"0\" max=\"100\" value=\"100\" oninput=\"setColorBrightness(this.value)\"><span id=\"cbright_val\" style=\"width:35px;font-size:0.8rem\">100%</span></div></div>"
+"<div class=\"group\"><label>Backlight</label><div class=\"slider-wrapper\"><input type=\"range\" id=\"brightness\" min=\"0\" max=\"100\" value=\"50\" oninput=\"setBrightness(this.value)\"><span id=\"bright_val\" style=\"width:35px;font-size:0.8rem\">50%</span></div></div>"
+"<div class=\"group\"><label>Text Brightness</label><div class=\"slider-wrapper\"><input type=\"range\" id=\"color_brightness\" min=\"0\" max=\"100\" value=\"100\" oninput=\"setColorBrightness(this.value)\"><span id=\"cbright_val\" style=\"width:35px;font-size:0.8rem\">100%</span></div></div></div>"
+"<div class=\"tile area-filter\"><h3>Filters</h3>"
 "<div id=\"filterColors\" class=\"color-grid\"></div></div>"
-"<div class=\"tile area-rms\"><h3>RMS Thresholds</h3>"
-"<div class=\"group\"><label>Target (Optimal)</label><div style=\"display:flex;gap:8px\"><input type=\"text\" id=\"rms_good_max\"><input type=\"color\" id=\"rms_good_color\" class=\"color-rect\"></div></div>"
-"<div class=\"group\"><label>Warning (Caution)</label><div style=\"display:flex;gap:8px\"><input type=\"text\" id=\"rms_ok_max\"><input type=\"color\" id=\"rms_ok_color\" class=\"color-rect\"></div></div>"
-"<div class=\"group\"><label>Critical Color</label><input type=\"color\" id=\"rms_bad_color\" class=\"color-rect\" style=\"width:100%\"></div></div>"
-"<div class=\"tile area-hfr\"><h3>HFR Thresholds</h3>"
-"<div class=\"group\"><label>Target (Optimal)</label><div style=\"display:flex;gap:8px\"><input type=\"text\" id=\"hfr_good_max\"><input type=\"color\" id=\"hfr_good_color\" class=\"color-rect\"></div></div>"
-"<div class=\"group\"><label>Warning (Caution)</label><div style=\"display:flex;gap:8px\"><input type=\"text\" id=\"hfr_ok_max\"><input type=\"color\" id=\"hfr_ok_color\" class=\"color-rect\"></div></div>"
-"<div class=\"group\"><label>Critical Color</label><input type=\"color\" id=\"hfr_bad_color\" class=\"color-rect\" style=\"width:100%\"></div></div>"
+"<div class=\"tile area-thresholds\"><h3>Thresholds</h3>"
+"<div class=\"threshold-grid\">"
+"<div class=\"threshold-node\"><h4 id=\"tnode0\">Node 1</h4>"
+"<div class=\"threshold-sub\"><h5>RMS</h5>"
+"<div class=\"group\"><label>Target (Optimal)</label><div style=\"display:flex;gap:8px\"><input type=\"text\" id=\"rms_good_max_0\"><input type=\"color\" id=\"rms_good_color_0\" class=\"color-rect\"></div></div>"
+"<div class=\"group\"><label>Warning (Caution)</label><div style=\"display:flex;gap:8px\"><input type=\"text\" id=\"rms_ok_max_0\"><input type=\"color\" id=\"rms_ok_color_0\" class=\"color-rect\"></div></div>"
+"<div class=\"group\"><label>Critical Color</label><input type=\"color\" id=\"rms_bad_color_0\" class=\"color-rect\" style=\"width:100%\"></div></div>"
+"<div class=\"threshold-sub\"><h5>HFR</h5>"
+"<div class=\"group\"><label>Target (Optimal)</label><div style=\"display:flex;gap:8px\"><input type=\"text\" id=\"hfr_good_max_0\"><input type=\"color\" id=\"hfr_good_color_0\" class=\"color-rect\"></div></div>"
+"<div class=\"group\"><label>Warning (Caution)</label><div style=\"display:flex;gap:8px\"><input type=\"text\" id=\"hfr_ok_max_0\"><input type=\"color\" id=\"hfr_ok_color_0\" class=\"color-rect\"></div></div>"
+"<div class=\"group\"><label>Critical Color</label><input type=\"color\" id=\"hfr_bad_color_0\" class=\"color-rect\" style=\"width:100%\"></div></div></div>"
+"<div class=\"threshold-node\"><h4 id=\"tnode1\">Node 2</h4>"
+"<div class=\"threshold-sub\"><h5>RMS</h5>"
+"<div class=\"group\"><label>Target (Optimal)</label><div style=\"display:flex;gap:8px\"><input type=\"text\" id=\"rms_good_max_1\"><input type=\"color\" id=\"rms_good_color_1\" class=\"color-rect\"></div></div>"
+"<div class=\"group\"><label>Warning (Caution)</label><div style=\"display:flex;gap:8px\"><input type=\"text\" id=\"rms_ok_max_1\"><input type=\"color\" id=\"rms_ok_color_1\" class=\"color-rect\"></div></div>"
+"<div class=\"group\"><label>Critical Color</label><input type=\"color\" id=\"rms_bad_color_1\" class=\"color-rect\" style=\"width:100%\"></div></div>"
+"<div class=\"threshold-sub\"><h5>HFR</h5>"
+"<div class=\"group\"><label>Target (Optimal)</label><div style=\"display:flex;gap:8px\"><input type=\"text\" id=\"hfr_good_max_1\"><input type=\"color\" id=\"hfr_good_color_1\" class=\"color-rect\"></div></div>"
+"<div class=\"group\"><label>Warning (Caution)</label><div style=\"display:flex;gap:8px\"><input type=\"text\" id=\"hfr_ok_max_1\"><input type=\"color\" id=\"hfr_ok_color_1\" class=\"color-rect\"></div></div>"
+"<div class=\"group\"><label>Critical Color</label><input type=\"color\" id=\"hfr_bad_color_1\" class=\"color-rect\" style=\"width:100%\"></div></div></div>"
+"<div class=\"threshold-node\"><h4 id=\"tnode2\">Node 3</h4>"
+"<div class=\"threshold-sub\"><h5>RMS</h5>"
+"<div class=\"group\"><label>Target (Optimal)</label><div style=\"display:flex;gap:8px\"><input type=\"text\" id=\"rms_good_max_2\"><input type=\"color\" id=\"rms_good_color_2\" class=\"color-rect\"></div></div>"
+"<div class=\"group\"><label>Warning (Caution)</label><div style=\"display:flex;gap:8px\"><input type=\"text\" id=\"rms_ok_max_2\"><input type=\"color\" id=\"rms_ok_color_2\" class=\"color-rect\"></div></div>"
+"<div class=\"group\"><label>Critical Color</label><input type=\"color\" id=\"rms_bad_color_2\" class=\"color-rect\" style=\"width:100%\"></div></div>"
+"<div class=\"threshold-sub\"><h5>HFR</h5>"
+"<div class=\"group\"><label>Target (Optimal)</label><div style=\"display:flex;gap:8px\"><input type=\"text\" id=\"hfr_good_max_2\"><input type=\"color\" id=\"hfr_good_color_2\" class=\"color-rect\"></div></div>"
+"<div class=\"group\"><label>Warning (Caution)</label><div style=\"display:flex;gap:8px\"><input type=\"text\" id=\"hfr_ok_max_2\"><input type=\"color\" id=\"hfr_ok_color_2\" class=\"color-rect\"></div></div>"
+"<div class=\"group\"><label>Critical Color</label><input type=\"color\" id=\"hfr_bad_color_2\" class=\"color-rect\" style=\"width:100%\"></div></div></div>"
+"</div></div>"
 "<div class=\"tile area-actions\">"
 "<div class=\"action-row\">"
 "<div class=\"action-main\"><button class=\"btn btn-primary\" id=\"saveBtn\" onclick=\"save()\">COMMIT CHANGES</button></div>"
@@ -108,30 +135,36 @@ static const char *HTML_CONTENT =
 "</div></div></div>"
 "</div></div>"
 "<script>"
-"let filterColorsObj={};let filterBrightnessObj={};"
+"let filterColorsObj={};"
 "function renderFilterColors(){"
 "const c=document.getElementById('filterColors');c.innerHTML='';"
 "const fs=Object.keys(filterColorsObj).sort();"
 "if(fs.length===0){c.innerHTML='<p style=\"color:var(--text-dim);font-style:italic;font-size:0.8rem\">No filter data available.</p>';return;}"
 "fs.forEach(f=>{"
-"const b=filterBrightnessObj[f]!=null?filterBrightnessObj[f]:100;"
 "const w=document.createElement('div');w.className='filter-item';"
 "w.innerHTML=`<label>${f}</label>"
-"<input type='color' class='color-dot' value='${filterColorsObj[f]}' onchange='updateFilterColor(\"${f}\",this.value)'>"
-"<input type='range' class='filter-bright' min='0' max='100' value='${b}' title='${b}%' oninput='updateFilterBrightness(\"${f}\",this.value)'>`;"
+"<input type='color' class='color-dot' value='${filterColorsObj[f]}' onchange='updateFilterColor(\"${f}\",this.value)'>`;"
 "c.appendChild(w);});"
 "}"
 "function updateFilterColor(n,v){filterColorsObj[n]=v;}"
-"function updateFilterBrightness(n,v){filterBrightnessObj[n]=parseInt(v);}"
+"function updateNodeLabels(){"
+"['url1','url2','url3'].forEach((id,i)=>{"
+"const v=document.getElementById(id).value.trim();"
+"document.getElementById('tnode'+i).innerText=v||('Node '+(i+1));"
+"});}"
 "function setTheme(v){fetch('/api/theme',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({theme_index:parseInt(v)})});}"
 "let brightTimer=null;function setBrightness(v){document.getElementById('bright_val').innerText=v+'%';clearTimeout(brightTimer);brightTimer=setTimeout(()=>{fetch('/api/brightness',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({brightness:parseInt(v)})});},150);}"
 "let cbrightTimer=null;function setColorBrightness(v){document.getElementById('cbright_val').innerText=v+'%';clearTimeout(cbrightTimer);cbrightTimer=setTimeout(()=>{fetch('/api/color-brightness',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({color_brightness:parseInt(v)})});},150);}"
+"function getRmsObj(i){return{good_max:parseFloat(document.getElementById('rms_good_max_'+i).value)||0.5,ok_max:parseFloat(document.getElementById('rms_ok_max_'+i).value)||1.0,good_color:document.getElementById('rms_good_color_'+i).value,ok_color:document.getElementById('rms_ok_color_'+i).value,bad_color:document.getElementById('rms_bad_color_'+i).value};}"
+"function getHfrObj(i){return{good_max:parseFloat(document.getElementById('hfr_good_max_'+i).value)||2.0,ok_max:parseFloat(document.getElementById('hfr_ok_max_'+i).value)||3.5,good_color:document.getElementById('hfr_good_color_'+i).value,ok_color:document.getElementById('hfr_ok_color_'+i).value,bad_color:document.getElementById('hfr_bad_color_'+i).value};}"
 "function getConfigData(){"
-"const rms={good_max:parseFloat(document.getElementById('rms_good_max').value)||0.5,ok_max:parseFloat(document.getElementById('rms_ok_max').value)||1.0,good_color:document.getElementById('rms_good_color').value,ok_color:document.getElementById('rms_ok_color').value,bad_color:document.getElementById('rms_bad_color').value};"
-"const hfr={good_max:parseFloat(document.getElementById('hfr_good_max').value)||2.0,ok_max:parseFloat(document.getElementById('hfr_ok_max').value)||3.5,good_color:document.getElementById('hfr_good_color').value,ok_color:document.getElementById('hfr_ok_color').value,bad_color:document.getElementById('hfr_bad_color').value};"
 "const h1=document.getElementById('url1').value.trim();const h2=document.getElementById('url2').value.trim();const h3=document.getElementById('url3').value.trim();"
 "const u1=h1?'http://'+h1+':1888/v2/api/':'';const u2=h2?'http://'+h2+':1888/v2/api/':'';const u3=h3?'http://'+h3+':1888/v2/api/':'';"
-"return{ssid:document.getElementById('ssid').value,pass:document.getElementById('pass').value,url1:u1,url2:u2,url3:u3,ntp:document.getElementById('ntp').value,theme_index:parseInt(document.getElementById('theme_select').value),brightness:parseInt(document.getElementById('brightness').value),color_brightness:parseInt(document.getElementById('color_brightness').value),filter_colors:JSON.stringify(filterColorsObj),filter_brightness:JSON.stringify(filterBrightnessObj),rms_thresholds:JSON.stringify(rms),hfr_thresholds:JSON.stringify(hfr)};}"
+"return{ssid:document.getElementById('ssid').value,pass:document.getElementById('pass').value,url1:u1,url2:u2,url3:u3,ntp:document.getElementById('ntp').value,theme_index:parseInt(document.getElementById('theme_select').value),brightness:parseInt(document.getElementById('brightness').value),color_brightness:parseInt(document.getElementById('color_brightness').value),filter_colors:JSON.stringify(filterColorsObj),rms_thresholds_1:JSON.stringify(getRmsObj(0)),rms_thresholds_2:JSON.stringify(getRmsObj(1)),rms_thresholds_3:JSON.stringify(getRmsObj(2)),hfr_thresholds_1:JSON.stringify(getHfrObj(0)),hfr_thresholds_2:JSON.stringify(getHfrObj(1)),hfr_thresholds_3:JSON.stringify(getHfrObj(2))};}"
+"function loadThresholds(d,i,rkey,hkey){"
+"try{const r=JSON.parse(d[rkey]||'{}');document.getElementById('rms_good_max_'+i).value=r.good_max||0.5;document.getElementById('rms_ok_max_'+i).value=r.ok_max||1.0;document.getElementById('rms_good_color_'+i).value=r.good_color||'#10b981';document.getElementById('rms_ok_color_'+i).value=r.ok_color||'#eab308';document.getElementById('rms_bad_color_'+i).value=r.bad_color||'#ef4444';}catch(e){}"
+"try{const h=JSON.parse(d[hkey]||'{}');document.getElementById('hfr_good_max_'+i).value=h.good_max||2.0;document.getElementById('hfr_ok_max_'+i).value=h.ok_max||3.5;document.getElementById('hfr_good_color_'+i).value=h.good_color||'#10b981';document.getElementById('hfr_ok_color_'+i).value=h.ok_color||'#eab308';document.getElementById('hfr_bad_color_'+i).value=h.bad_color||'#ef4444';}catch(e){}"
+"}"
 "function save(){"
 "const b=document.getElementById('saveBtn');const ot=b.innerText;b.innerText='SYNCING...';b.disabled=true;"
 "fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(getConfigData())})"
@@ -150,10 +183,11 @@ static const char *HTML_CONTENT =
 "var br=d.brightness!=null?d.brightness:50;document.getElementById('brightness').value=br;document.getElementById('bright_val').innerText=br+'%';"
 "var cb=d.color_brightness!=null?d.color_brightness:100;document.getElementById('color_brightness').value=cb;document.getElementById('cbright_val').innerText=cb+'%';"
 "try{filterColorsObj=JSON.parse(d.filter_colors||'{}');}catch(e){}"
-"try{filterBrightnessObj=JSON.parse(d.filter_brightness||'{}');}catch(e){}"
 "renderFilterColors();"
-"try{const r=JSON.parse(d.rms_thresholds||'{}');document.getElementById('rms_good_max').value=r.good_max||0.5;document.getElementById('rms_ok_max').value=r.ok_max||1.0;document.getElementById('rms_good_color').value=r.good_color||'#10b981';document.getElementById('rms_ok_color').value=r.ok_color||'#eab308';document.getElementById('rms_bad_color').value=r.bad_color||'#ef4444';}catch(e){}"
-"try{const h=JSON.parse(d.hfr_thresholds||'{}');document.getElementById('hfr_good_max').value=h.good_max||2.0;document.getElementById('hfr_ok_max').value=h.ok_max||3.5;document.getElementById('hfr_good_color').value=h.good_color||'#10b981';document.getElementById('hfr_ok_color').value=h.ok_color||'#eab308';document.getElementById('hfr_bad_color').value=h.bad_color||'#ef4444';}catch(e){}"
+"loadThresholds(d,0,'rms_thresholds_1','hfr_thresholds_1');"
+"loadThresholds(d,1,'rms_thresholds_2','hfr_thresholds_2');"
+"loadThresholds(d,2,'rms_thresholds_3','hfr_thresholds_3');"
+"updateNodeLabels();"
 "});"
 "</script></body></html>";
 
@@ -181,9 +215,12 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddStringToObject(root, "url3", cfg->api_url_3);
     cJSON_AddStringToObject(root, "ntp", cfg->ntp_server);
     cJSON_AddStringToObject(root, "filter_colors", cfg->filter_colors);
-    cJSON_AddStringToObject(root, "rms_thresholds", cfg->rms_thresholds);
-    cJSON_AddStringToObject(root, "hfr_thresholds", cfg->hfr_thresholds);
-    cJSON_AddStringToObject(root, "filter_brightness", cfg->filter_brightness);
+    cJSON_AddStringToObject(root, "rms_thresholds_1", cfg->rms_thresholds_1);
+    cJSON_AddStringToObject(root, "rms_thresholds_2", cfg->rms_thresholds_2);
+    cJSON_AddStringToObject(root, "rms_thresholds_3", cfg->rms_thresholds_3);
+    cJSON_AddStringToObject(root, "hfr_thresholds_1", cfg->hfr_thresholds_1);
+    cJSON_AddStringToObject(root, "hfr_thresholds_2", cfg->hfr_thresholds_2);
+    cJSON_AddStringToObject(root, "hfr_thresholds_3", cfg->hfr_thresholds_3);
     cJSON_AddNumberToObject(root, "theme_index", cfg->theme_index);
     cJSON_AddNumberToObject(root, "brightness", cfg->brightness);
     cJSON_AddNumberToObject(root, "color_brightness", cfg->color_brightness);
@@ -205,7 +242,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
 // Handler for saving config
 static esp_err_t config_post_handler(httpd_req_t *req)
 {
-    char buf[2560];
+    char buf[3584];
     int ret, remaining = req->content_len;
 
     if (remaining >= sizeof(buf)) {
@@ -287,22 +324,36 @@ static esp_err_t config_post_handler(httpd_req_t *req)
         cfg.filter_colors[sizeof(cfg.filter_colors) - 1] = '\0';
     }
 
-    cJSON *rms_thresholds = cJSON_GetObjectItem(root, "rms_thresholds");
-    if (cJSON_IsString(rms_thresholds)) {
-        strncpy(cfg.rms_thresholds, rms_thresholds->valuestring, sizeof(cfg.rms_thresholds) - 1);
-        cfg.rms_thresholds[sizeof(cfg.rms_thresholds) - 1] = '\0';
+    cJSON *rms_thresholds_1 = cJSON_GetObjectItem(root, "rms_thresholds_1");
+    if (cJSON_IsString(rms_thresholds_1)) {
+        strncpy(cfg.rms_thresholds_1, rms_thresholds_1->valuestring, sizeof(cfg.rms_thresholds_1) - 1);
+        cfg.rms_thresholds_1[sizeof(cfg.rms_thresholds_1) - 1] = '\0';
+    }
+    cJSON *rms_thresholds_2 = cJSON_GetObjectItem(root, "rms_thresholds_2");
+    if (cJSON_IsString(rms_thresholds_2)) {
+        strncpy(cfg.rms_thresholds_2, rms_thresholds_2->valuestring, sizeof(cfg.rms_thresholds_2) - 1);
+        cfg.rms_thresholds_2[sizeof(cfg.rms_thresholds_2) - 1] = '\0';
+    }
+    cJSON *rms_thresholds_3 = cJSON_GetObjectItem(root, "rms_thresholds_3");
+    if (cJSON_IsString(rms_thresholds_3)) {
+        strncpy(cfg.rms_thresholds_3, rms_thresholds_3->valuestring, sizeof(cfg.rms_thresholds_3) - 1);
+        cfg.rms_thresholds_3[sizeof(cfg.rms_thresholds_3) - 1] = '\0';
     }
 
-    cJSON *hfr_thresholds = cJSON_GetObjectItem(root, "hfr_thresholds");
-    if (cJSON_IsString(hfr_thresholds)) {
-        strncpy(cfg.hfr_thresholds, hfr_thresholds->valuestring, sizeof(cfg.hfr_thresholds) - 1);
-        cfg.hfr_thresholds[sizeof(cfg.hfr_thresholds) - 1] = '\0';
+    cJSON *hfr_thresholds_1 = cJSON_GetObjectItem(root, "hfr_thresholds_1");
+    if (cJSON_IsString(hfr_thresholds_1)) {
+        strncpy(cfg.hfr_thresholds_1, hfr_thresholds_1->valuestring, sizeof(cfg.hfr_thresholds_1) - 1);
+        cfg.hfr_thresholds_1[sizeof(cfg.hfr_thresholds_1) - 1] = '\0';
     }
-
-    cJSON *filter_brightness = cJSON_GetObjectItem(root, "filter_brightness");
-    if (cJSON_IsString(filter_brightness)) {
-        strncpy(cfg.filter_brightness, filter_brightness->valuestring, sizeof(cfg.filter_brightness) - 1);
-        cfg.filter_brightness[sizeof(cfg.filter_brightness) - 1] = '\0';
+    cJSON *hfr_thresholds_2 = cJSON_GetObjectItem(root, "hfr_thresholds_2");
+    if (cJSON_IsString(hfr_thresholds_2)) {
+        strncpy(cfg.hfr_thresholds_2, hfr_thresholds_2->valuestring, sizeof(cfg.hfr_thresholds_2) - 1);
+        cfg.hfr_thresholds_2[sizeof(cfg.hfr_thresholds_2) - 1] = '\0';
+    }
+    cJSON *hfr_thresholds_3 = cJSON_GetObjectItem(root, "hfr_thresholds_3");
+    if (cJSON_IsString(hfr_thresholds_3)) {
+        strncpy(cfg.hfr_thresholds_3, hfr_thresholds_3->valuestring, sizeof(cfg.hfr_thresholds_3) - 1);
+        cfg.hfr_thresholds_3[sizeof(cfg.hfr_thresholds_3) - 1] = '\0';
     }
 
     cJSON *color_brightness = cJSON_GetObjectItem(root, "color_brightness");
@@ -316,12 +367,7 @@ static esp_err_t config_post_handler(httpd_req_t *req)
     app_config_save(&cfg);
     cJSON_Delete(root);
 
-    // Apply settings live (no reboot needed for these)
-    bsp_display_brightness_set(cfg.brightness);
-    bsp_display_lock(0);
-    nina_dashboard_apply_theme(cfg.theme_index);
-    bsp_display_unlock();
-    ESP_LOGI(TAG, "Config saved and applied live");
+    ESP_LOGI(TAG, "Config saved to NVS");
 
     httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
     return ESP_OK;

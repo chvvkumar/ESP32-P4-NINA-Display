@@ -260,9 +260,9 @@ static void fetch_image_history_robust(const char *base_url, nina_client_t *data
     if (response && cJSON_IsArray(response) && cJSON_GetArraySize(response) > 0) {
         cJSON *latest = cJSON_GetArrayItem(response, 0);
         if (latest) {
-            // Target name - RELIABLE!
+            // Target name from last saved image (only if non-empty)
             cJSON *target = cJSON_GetObjectItem(latest, "TargetName");
-            if (target && target->valuestring) {
+            if (target && target->valuestring && target->valuestring[0] != '\0') {
                 strncpy(data->target_name, target->valuestring, sizeof(data->target_name) - 1);
                 ESP_LOGI(TAG, "Target (from image): %s", data->target_name);
             }
@@ -614,6 +614,28 @@ static void fetch_sequence_counts_optional(const char *base_url, nina_client_t *
                 cJSON *target_container = find_active_target_container(item);
                 if (!target_container) target_container = cJSON_GetArrayItem(items, 0);
 
+                // Use container name as fallback target name ONLY when image-history
+                // and WebSocket haven't provided a real target name yet.
+                // Container names (e.g., "_Container", "CTB-1_Container") are internal
+                // identifiers, but better than showing "----" when no image exists.
+                cJSON *target_name_json = cJSON_GetObjectItem(target_container, "Name");
+                if (target_name_json && target_name_json->valuestring) {
+                    char temp_name[64];
+                    strlcpy(temp_name, target_name_json->valuestring, sizeof(temp_name));
+
+                    // Strip "_Container" suffix
+                    char *suffix = strstr(temp_name, "_Container");
+                    if (suffix) *suffix = '\0';
+
+                    // Only use as fallback when target_name is empty or default
+                    if (temp_name[0] != '\0' &&
+                        (data->target_name[0] == '\0' ||
+                         strcmp(data->target_name, "No Target") == 0)) {
+                        strlcpy(data->target_name, temp_name, sizeof(data->target_name));
+                        ESP_LOGI(TAG, "Target (fallback from sequence): %s", data->target_name);
+                    }
+                }
+
                 // Find the active container name (e.g., "LRGBSHO2")
                 find_active_container_name(target_container, data->container_name, sizeof(data->container_name));
                 if (data->container_name[0] != '\0') {
@@ -873,7 +895,7 @@ static void handle_websocket_message(const char *payload, int len) {
             // authoritative source for the current filter.
 
             cJSON *target = cJSON_GetObjectItem(stats, "TargetName");
-            if (target && target->valuestring) {
+            if (target && target->valuestring && target->valuestring[0] != '\0') {
                 strncpy(ws_client_data->target_name, target->valuestring,
                         sizeof(ws_client_data->target_name) - 1);
             }

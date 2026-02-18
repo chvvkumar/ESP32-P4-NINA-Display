@@ -14,7 +14,9 @@
       "Bash(source:*)",
       "WebFetch(domain:astromele2.lan)",
       "Bash(done)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "WebFetch(domain:desktop-bdt978m)",
+      "WebFetch(domain:desktop-bdt978m.lan)"
     ]
   }
 }

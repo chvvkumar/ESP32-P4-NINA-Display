@@ -177,7 +177,7 @@ static void input_task(void *arg) {
  */
 static bool fetch_and_show_thumbnail(const char *base_url) {
     size_t jpeg_size = 0;
-    uint8_t *jpeg_buf = nina_client_fetch_prepared_image(base_url, 640, 640, 70, &jpeg_size);
+    uint8_t *jpeg_buf = nina_client_fetch_prepared_image(base_url, 720, 720, 70, &jpeg_size);
     if (!jpeg_buf || jpeg_size == 0) {
         return false;
     }
@@ -307,8 +307,6 @@ static void data_update_task(void *arg) {
         nina_websocket_start(active_url, &instances[active_page]);
     }
 
-    int ws_instance = active_page;  // Track which instance has the WS connection
-
     while (1) {
         int current_active = active_page;  // Snapshot to avoid races
 
@@ -327,8 +325,6 @@ static void data_update_task(void *arg) {
             if (strlen(new_url) > 0) {
                 nina_websocket_start(new_url, &instances[current_active]);
             }
-            ws_instance = current_active;
-
             // Reset poll state for newly active instance to force full re-fetch
             nina_poll_state_init(&poll_states[current_active]);
 

@@ -12,7 +12,7 @@ static const char *NVS_NAMESPACE = "app_conf";
 
 // Default filter color mappings (matching common LRGB + Narrowband filters) - DIMMED for Night Vision
 static const char *DEFAULT_FILTER_COLORS =
-    "{\"L\":\"#d4d4d4\",\"R\":\"#991b1b\",\"G\":\"#15803d\",\"B\":\"#1d4ed8\","
+    "{\"L\":\"#787878\",\"R\":\"#991b1b\",\"G\":\"#15803d\",\"B\":\"#1d4ed8\","
     "\"Ha\":\"#be123c\",\"Sii\":\"#7e22ce\",\"Oiii\":\"#0e7490\"}";
 
 // Default RMS thresholds: good <= 0.5", ok <= 1.0", bad > 1.0" - DIMMED for Night Vision
@@ -25,8 +25,6 @@ static const char *DEFAULT_HFR_THRESHOLDS =
     "{\"good_max\":2.0,\"ok_max\":3.5,"
     "\"good_color\":\"#15803d\",\"ok_color\":\"#ca8a04\",\"bad_color\":\"#b91c1c\"}";
 
-// Default per-filter brightness (all 100%)
-static const char *DEFAULT_FILTER_BRIGHTNESS = "{}";
 
 void app_config_init(void) {
     nvs_handle_t my_handle;
@@ -42,9 +40,12 @@ void app_config_init(void) {
         s_config.api_url_3[0] = '\0';
         strcpy(s_config.ntp_server, "pool.ntp.org");
         strcpy(s_config.filter_colors, DEFAULT_FILTER_COLORS);
-        strcpy(s_config.rms_thresholds, DEFAULT_RMS_THRESHOLDS);
-        strcpy(s_config.hfr_thresholds, DEFAULT_HFR_THRESHOLDS);
-        strcpy(s_config.filter_brightness, DEFAULT_FILTER_BRIGHTNESS);
+        strcpy(s_config.rms_thresholds_1, DEFAULT_RMS_THRESHOLDS);
+        strcpy(s_config.rms_thresholds_2, DEFAULT_RMS_THRESHOLDS);
+        strcpy(s_config.rms_thresholds_3, DEFAULT_RMS_THRESHOLDS);
+        strcpy(s_config.hfr_thresholds_1, DEFAULT_HFR_THRESHOLDS);
+        strcpy(s_config.hfr_thresholds_2, DEFAULT_HFR_THRESHOLDS);
+        strcpy(s_config.hfr_thresholds_3, DEFAULT_HFR_THRESHOLDS);
         s_config.theme_index = 0;
         s_config.brightness = 50;
         s_config.color_brightness = 100;
@@ -63,9 +64,12 @@ void app_config_init(void) {
         s_config.api_url_3[0] = '\0';
         strcpy(s_config.ntp_server, "pool.ntp.org");
         strcpy(s_config.filter_colors, DEFAULT_FILTER_COLORS);
-        strcpy(s_config.rms_thresholds, DEFAULT_RMS_THRESHOLDS);
-        strcpy(s_config.hfr_thresholds, DEFAULT_HFR_THRESHOLDS);
-        strcpy(s_config.filter_brightness, DEFAULT_FILTER_BRIGHTNESS);
+        strcpy(s_config.rms_thresholds_1, DEFAULT_RMS_THRESHOLDS);
+        strcpy(s_config.rms_thresholds_2, DEFAULT_RMS_THRESHOLDS);
+        strcpy(s_config.rms_thresholds_3, DEFAULT_RMS_THRESHOLDS);
+        strcpy(s_config.hfr_thresholds_1, DEFAULT_HFR_THRESHOLDS);
+        strcpy(s_config.hfr_thresholds_2, DEFAULT_HFR_THRESHOLDS);
+        strcpy(s_config.hfr_thresholds_3, DEFAULT_HFR_THRESHOLDS);
         s_config.theme_index = 0;
         s_config.brightness = 50;
         s_config.color_brightness = 100;
@@ -81,19 +85,28 @@ void app_config_init(void) {
             strcpy(s_config.filter_colors, DEFAULT_FILTER_COLORS);
             needs_save = true;
         }
-        if (s_config.rms_thresholds[0] == '\0') {
-            ESP_LOGI(TAG, "RMS thresholds empty, initializing with defaults");
-            strcpy(s_config.rms_thresholds, DEFAULT_RMS_THRESHOLDS);
+        if (s_config.rms_thresholds_1[0] == '\0') {
+            strcpy(s_config.rms_thresholds_1, DEFAULT_RMS_THRESHOLDS);
             needs_save = true;
         }
-        if (s_config.hfr_thresholds[0] == '\0') {
-            ESP_LOGI(TAG, "HFR thresholds empty, initializing with defaults");
-            strcpy(s_config.hfr_thresholds, DEFAULT_HFR_THRESHOLDS);
+        if (s_config.rms_thresholds_2[0] == '\0') {
+            strcpy(s_config.rms_thresholds_2, DEFAULT_RMS_THRESHOLDS);
             needs_save = true;
         }
-        if (s_config.filter_brightness[0] == '\0') {
-            ESP_LOGI(TAG, "Filter brightness empty, initializing with defaults");
-            strcpy(s_config.filter_brightness, DEFAULT_FILTER_BRIGHTNESS);
+        if (s_config.rms_thresholds_3[0] == '\0') {
+            strcpy(s_config.rms_thresholds_3, DEFAULT_RMS_THRESHOLDS);
+            needs_save = true;
+        }
+        if (s_config.hfr_thresholds_1[0] == '\0') {
+            strcpy(s_config.hfr_thresholds_1, DEFAULT_HFR_THRESHOLDS);
+            needs_save = true;
+        }
+        if (s_config.hfr_thresholds_2[0] == '\0') {
+            strcpy(s_config.hfr_thresholds_2, DEFAULT_HFR_THRESHOLDS);
+            needs_save = true;
+        }
+        if (s_config.hfr_thresholds_3[0] == '\0') {
+            strcpy(s_config.hfr_thresholds_3, DEFAULT_HFR_THRESHOLDS);
             needs_save = true;
         }
         if (s_config.color_brightness < 0 || s_config.color_brightness > 100) {
@@ -197,29 +210,6 @@ uint32_t app_config_apply_brightness(uint32_t color, int brightness) {
 }
 
 /**
- * @brief Get the per-filter brightness for a specific filter
- * @param filter_name Name of the filter
- * @return Brightness 0-100 (default 100)
- */
-static int get_filter_brightness(const char *filter_name) {
-    if (!filter_name || filter_name[0] == '\0') return 100;
-
-    cJSON *root = cJSON_Parse(s_config.filter_brightness);
-    if (!root) return 100;
-
-    cJSON *item = cJSON_GetObjectItem(root, filter_name);
-    int brightness = 100;
-    if (item && cJSON_IsNumber(item)) {
-        brightness = item->valueint;
-        if (brightness < 0) brightness = 0;
-        if (brightness > 100) brightness = 100;
-    }
-
-    cJSON_Delete(root);
-    return brightness;
-}
-
-/**
  * @brief Get the color for a specific filter
  * @param filter_name Name of the filter (e.g., "Ha", "L", "R")
  * @return 32-bit color value (0xRRGGBB) or default blue if not found
@@ -254,23 +244,25 @@ uint32_t app_config_get_filter_color(const char *filter_name) {
 
     cJSON_Delete(root);
 
-    // Apply per-filter brightness and global color brightness
-    int fb = get_filter_brightness(filter_name);
+    // Apply global color brightness
     int gb = s_config.color_brightness;
     if (gb < 0 || gb > 100) gb = 100;
-    int combined = (fb * gb) / 100;
-    color = app_config_apply_brightness(color, combined);
+    color = app_config_apply_brightness(color, gb);
 
     return color;
 }
 
 /**
- * @brief Get the color for a guiding RMS value based on configured thresholds
+ * @brief Get the color for a guiding RMS value based on per-instance configured thresholds
  * @param rms_value The current RMS value in arcseconds
+ * @param instance_index NINA instance index (0-based)
  * @return 32-bit color value (0xRRGGBB)
  */
-uint32_t app_config_get_rms_color(float rms_value) {
-    cJSON *root = cJSON_Parse(s_config.rms_thresholds);
+uint32_t app_config_get_rms_color(float rms_value, int instance_index) {
+    const char *json = (instance_index == 1) ? s_config.rms_thresholds_2 :
+                       (instance_index == 2) ? s_config.rms_thresholds_3 :
+                                               s_config.rms_thresholds_1;
+    cJSON *root = cJSON_Parse(json);
     if (!root) {
         return 0xf43f5e;  // Fallback rose
     }
@@ -305,12 +297,16 @@ uint32_t app_config_get_rms_color(float rms_value) {
 }
 
 /**
- * @brief Get the color for an HFR value based on configured thresholds
+ * @brief Get the color for an HFR value based on per-instance configured thresholds
  * @param hfr_value The current HFR value
+ * @param instance_index NINA instance index (0-based)
  * @return 32-bit color value (0xRRGGBB)
  */
-uint32_t app_config_get_hfr_color(float hfr_value) {
-    cJSON *root = cJSON_Parse(s_config.hfr_thresholds);
+uint32_t app_config_get_hfr_color(float hfr_value, int instance_index) {
+    const char *json = (instance_index == 1) ? s_config.hfr_thresholds_2 :
+                       (instance_index == 2) ? s_config.hfr_thresholds_3 :
+                                               s_config.hfr_thresholds_1;
+    cJSON *root = cJSON_Parse(json);
     if (!root) {
         return 0x10b981;  // Fallback emerald
     }
@@ -403,46 +399,6 @@ void app_config_sync_filters(const char *filter_names[], int count) {
         }
     }
     cJSON_Delete(colors);
-
-    // --- Sync filter_brightness ---
-    bool brightness_changed = false;
-    cJSON *bright = cJSON_Parse(s_config.filter_brightness);
-    if (!bright) bright = cJSON_CreateObject();
-
-    // Add missing filters
-    for (int i = 0; i < count; i++) {
-        if (!cJSON_GetObjectItem(bright, filter_names[i])) {
-            cJSON_AddNumberToObject(bright, filter_names[i], 100);
-            ESP_LOGI(TAG, "Filter sync: added brightness for '%s' (default 100)", filter_names[i]);
-            brightness_changed = true;
-        }
-    }
-
-    // Remove stale filters
-    child = bright->child;
-    while (child) {
-        cJSON *next = child->next;
-        if (!filter_in_api_list(child->string, filter_names, count)) {
-            ESP_LOGI(TAG, "Filter sync: removed stale brightness for '%s'", child->string);
-            cJSON_DeleteItemFromObject(bright, child->string);
-            brightness_changed = true;
-        }
-        child = next;
-    }
-
-    if (brightness_changed) {
-        char *json_str = cJSON_PrintUnformatted(bright);
-        if (json_str) {
-            if (strlen(json_str) < sizeof(s_config.filter_brightness)) {
-                strcpy(s_config.filter_brightness, json_str);
-            } else {
-                ESP_LOGW(TAG, "Filter brightness JSON too large (%d bytes), not updating", (int)strlen(json_str));
-            }
-            free(json_str);
-        }
-        needs_save = true;
-    }
-    cJSON_Delete(bright);
 
     if (needs_save) {
         app_config_save(&s_config);

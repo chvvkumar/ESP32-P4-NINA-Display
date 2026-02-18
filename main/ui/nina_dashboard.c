@@ -29,7 +29,6 @@ typedef struct {
     lv_obj_t *header_box;
     lv_obj_t *lbl_instance_name;
     lv_obj_t *lbl_target_name;
-    lv_obj_t *dot_connection;   // NINA connection indicator (pulses during API call)
 
     // Exposure Arc
     lv_obj_t *arc_exposure;
@@ -96,26 +95,29 @@ static lv_style_t style_label_small;
 static lv_style_t style_value_large;
 static lv_style_t style_header_gradient;
 
-/* Strip http(s):// and path from URL, uppercase result into out */
+/* Strip http(s)://, path, and domain from URL, then sentence case */
 static void extract_host_from_url(const char *url, char *out, size_t out_size) {
     const char *start = url;
     if (strncmp(start, "https://", 8) == 0) start += 8;
     else if (strncmp(start, "http://", 7) == 0) start += 7;
 
-    // Take only hostname (stop at port ':' or path '/')
+    // Take only hostname (stop at port ':', path '/', or domain '.')
     const char *end = start;
-    while (*end && *end != '/' && *end != ':') end++;
+    while (*end && *end != '/' && *end != ':' && *end != '.') end++;
 
     size_t len = (size_t)(end - start);
     if (len >= out_size) len = out_size - 1;
     if (len > 0) {
         memcpy(out, start, len);
-    }
-    out[len] = '\0';
-
-    // Uppercase any letters (for hostnames)
-    for (size_t i = 0; i < len; i++) {
-        if (out[i] >= 'a' && out[i] <= 'z') out[i] -= 32;
+        out[len] = '\0';
+        
+        // Sentence case: First letter upper, rest lower
+        if (out[0] >= 'a' && out[0] <= 'z') out[0] -= 32;
+        for (size_t i = 1; i < len; i++) {
+            if (out[i] >= 'A' && out[i] <= 'Z') out[i] += 32;
+        }
+    } else {
+        out[0] = '\0';
     }
 }
 
@@ -198,7 +200,6 @@ static void apply_theme_to_page(dashboard_page_t *p) {
 
     int gb = app_config_get()->color_brightness;
 
-    if (p->lbl_instance_name) lv_obj_set_style_text_color(p->lbl_instance_name, lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
     if (p->lbl_target_name) lv_obj_set_style_text_color(p->lbl_target_name, lv_color_hex(app_config_apply_brightness(current_theme->target_name_color, gb)), 0);
 
     if (p->lbl_seq_container) lv_obj_set_style_text_color(p->lbl_seq_container, lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
@@ -206,11 +207,8 @@ static void apply_theme_to_page(dashboard_page_t *p) {
 
     if (p->arc_exposure) {
         lv_obj_set_style_arc_color(p->arc_exposure, lv_color_hex(current_theme->bg_main), LV_PART_MAIN);
-        lv_obj_set_style_arc_color(p->arc_exposure, lv_color_hex(current_theme->progress_color), LV_PART_INDICATOR);
-        lv_obj_set_style_shadow_color(p->arc_exposure, lv_color_hex(current_theme->progress_color), LV_PART_INDICATOR);
     }
 
-    if (p->lbl_exposure_total) lv_obj_set_style_text_color(p->lbl_exposure_total, lv_color_hex(app_config_apply_brightness(current_theme->filter_text_color, gb)), 0);
     if (p->lbl_loop_count) lv_obj_set_style_text_color(p->lbl_loop_count, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
 
     if (p->lbl_rms_title) lv_obj_set_style_text_color(p->lbl_rms_title, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
@@ -265,11 +263,6 @@ void nina_dashboard_apply_theme(int theme_index) {
     lv_obj_invalidate(scr_dashboard);
 }
 
-/* Opacity animation callback for the pulsing connection dot */
-static void dot_opa_anim_cb(void *obj, int32_t opa) {
-    lv_obj_set_style_opa((lv_obj_t *)obj, (lv_opa_t)opa, 0);
-}
-
 /* Build all widgets for one dashboard page */
 static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int page_index) {
     memset(p, 0, sizeof(dashboard_page_t));
@@ -309,25 +302,17 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_flex_flow(top_row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(top_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    // Left container: connection dot + telescope name
+    // Left container: telescope name
     lv_obj_t *left_cont = lv_obj_create(top_row);
     lv_obj_remove_style_all(left_cont);
     lv_obj_set_size(left_cont, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(left_cont, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(left_cont, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(left_cont, 12, 0); // Consistent spacing
-
-    // Connection indicator dot
-    p->dot_connection = lv_obj_create(left_cont);
-    lv_obj_remove_style_all(p->dot_connection);
-    lv_obj_set_size(p->dot_connection, 20, 20);
-    lv_obj_set_style_radius(p->dot_connection, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_opa(p->dot_connection, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(p->dot_connection, lv_color_hex(0x606060), 0);
+    lv_obj_set_style_pad_column(left_cont, 0, 0);
 
     // Telescope name — show URL-based "Not Connected" until a connection is made
     p->lbl_instance_name = lv_label_create(left_cont);
-    lv_obj_set_style_text_color(p->lbl_instance_name, lv_color_hex(current_theme->header_text_color), 0);
+    lv_obj_set_style_text_color(p->lbl_instance_name, lv_color_hex(0xf87171), 0); // Default disconnected color
     lv_obj_set_style_text_font(p->lbl_instance_name, &lv_font_montserrat_26, 0);
     {
         const char *init_url = app_config_get_instance_url(page_index);
@@ -404,7 +389,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_style_shadow_color(p->arc_exposure, lv_color_hex(current_theme->progress_color), LV_PART_INDICATOR);
     lv_obj_set_style_shadow_width(p->arc_exposure, 16, LV_PART_INDICATOR);
     lv_obj_set_style_shadow_spread(p->arc_exposure, 10, LV_PART_INDICATOR);
-    lv_obj_set_style_shadow_opa(p->arc_exposure, LV_OPA_100, LV_PART_INDICATOR);
+    lv_obj_set_style_shadow_opa(p->arc_exposure, LV_OPA_30, LV_PART_INDICATOR);
 
     lv_obj_t *arc_center = lv_obj_create(p->arc_exposure);
     lv_obj_remove_style_all(arc_center);
@@ -778,27 +763,16 @@ void nina_dashboard_update_status(int page_index, int rssi, bool nina_connected,
     dashboard_page_t *p = &pages[page_index];
     if (!p->page) return;
 
-    // --- Connection dot ---
-    uint32_t dot_color = nina_connected ? 0x4CAF50 : 0xF44336;
-    lv_obj_set_style_bg_color(p->dot_connection, lv_color_hex(dot_color), 0);
+    // --- Connection Status Color ---
+    // #4ade80 (green) if connected, #f87171 (red) if disconnected
+    uint32_t text_color = nina_connected ? 0x4ade80 : 0xf87171;
+    
+    // Apply brightness scaling to the status color
+    int gb = app_config_get()->color_brightness;
+    text_color = app_config_apply_brightness(text_color, gb);
 
-    if (api_active) {
-        // Start pulsing if not already running
-        if (lv_anim_get(p->dot_connection, dot_opa_anim_cb) == NULL) {
-            lv_anim_t a;
-            lv_anim_init(&a);
-            lv_anim_set_var(&a, p->dot_connection);
-            lv_anim_set_exec_cb(&a, dot_opa_anim_cb);
-            lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_20);
-            lv_anim_set_time(&a, 400);
-            lv_anim_set_playback_time(&a, 400);
-            lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
-            lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
-            lv_anim_start(&a);
-        }
-    } else {
-        lv_anim_del(p->dot_connection, dot_opa_anim_cb);
-        lv_obj_set_style_opa(p->dot_connection, LV_OPA_COVER, 0);
+    if (p->lbl_instance_name) {
+        lv_obj_set_style_text_color(p->lbl_instance_name, lv_color_hex(text_color), 0);
     }
 }
 
@@ -939,7 +913,7 @@ void update_nina_dashboard_page(int page_index, const nina_client_t *data) {
     // RMS
     if (data->guider.rms_total > 0) {
         lv_label_set_text_fmt(p->lbl_rms_value, "%.2f\"", data->guider.rms_total);
-        uint32_t rms_color = app_config_get_rms_color(data->guider.rms_total);
+        uint32_t rms_color = app_config_get_rms_color(data->guider.rms_total, page_index);
         lv_obj_set_style_text_color(p->lbl_rms_value, lv_color_hex(rms_color), 0);
     } else {
         lv_label_set_text(p->lbl_rms_value, "--");
@@ -964,7 +938,7 @@ void update_nina_dashboard_page(int page_index, const nina_client_t *data) {
     // HFR
     if (data->hfr > 0) {
         lv_label_set_text_fmt(p->lbl_hfr_value, "%.2f", data->hfr);
-        uint32_t hfr_color = app_config_get_hfr_color(data->hfr);
+        uint32_t hfr_color = app_config_get_hfr_color(data->hfr, page_index);
         lv_obj_set_style_text_color(p->lbl_hfr_value, lv_color_hex(hfr_color), 0);
     } else {
         lv_label_set_text(p->lbl_hfr_value, "--");
@@ -1074,6 +1048,13 @@ void nina_dashboard_set_thumbnail(const uint8_t *rgb565_data, uint32_t w, uint32
     thumbnail_dsc.data_size = data_size;
 
     lv_image_set_src(thumbnail_img, &thumbnail_dsc);
+
+    // Scale image to fit screen width (720px) while preserving aspect ratio
+    // LVGL scale: 256 = 100%
+    if (w > 0) {
+        uint32_t scale = (uint32_t)SCREEN_SIZE * 256 / w;
+        lv_image_set_scale(thumbnail_img, scale);
+    }
 
     // Hide loading, show image
     if (thumbnail_loading_lbl) {
