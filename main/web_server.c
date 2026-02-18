@@ -84,6 +84,10 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddStringToObject(root, "mqtt_username", cfg->mqtt_username);
     cJSON_AddStringToObject(root, "mqtt_password", cfg->mqtt_password);
     cJSON_AddStringToObject(root, "mqtt_topic_prefix", cfg->mqtt_topic_prefix);
+    cJSON_AddNumberToObject(root, "active_page_override", cfg->active_page_override);
+    cJSON_AddNumberToObject(root, "auto_rotate_interval_s", cfg->auto_rotate_interval_s);
+    cJSON_AddNumberToObject(root, "auto_rotate_effect", cfg->auto_rotate_effect);
+    cJSON_AddBoolToObject(root, "auto_rotate_skip_disconnected", cfg->auto_rotate_skip_disconnected);
 
     const char *json_str = cJSON_PrintUnformatted(root);
     if (json_str == NULL) {
@@ -184,6 +188,32 @@ static esp_err_t config_post_handler(httpd_req_t *req)
     cJSON *mqtt_port = cJSON_GetObjectItem(root, "mqtt_port");
     if (cJSON_IsNumber(mqtt_port)) {
         cfg->mqtt_port = (uint16_t)mqtt_port->valueint;
+    }
+
+    JSON_TO_BOOL(root, "auto_rotate_skip_disconnected", cfg->auto_rotate_skip_disconnected);
+
+    cJSON *apo_item = cJSON_GetObjectItem(root, "active_page_override");
+    if (cJSON_IsNumber(apo_item)) {
+        int v = apo_item->valueint;
+        if (v < -1) v = -1;
+        if (v >= MAX_NINA_INSTANCES) v = MAX_NINA_INSTANCES - 1;
+        cfg->active_page_override = (int8_t)v;
+    }
+
+    cJSON *ari_item = cJSON_GetObjectItem(root, "auto_rotate_interval_s");
+    if (cJSON_IsNumber(ari_item)) {
+        int v = ari_item->valueint;
+        if (v < 0) v = 0;
+        if (v > 3600) v = 3600;
+        cfg->auto_rotate_interval_s = (uint16_t)v;
+    }
+
+    cJSON *are_item = cJSON_GetObjectItem(root, "auto_rotate_effect");
+    if (cJSON_IsNumber(are_item)) {
+        int v = are_item->valueint;
+        if (v < 0) v = 0;
+        if (v > 1) v = 1;
+        cfg->auto_rotate_effect = (uint8_t)v;
     }
 
     app_config_save(cfg);
@@ -355,6 +385,57 @@ static esp_err_t factory_reset_post_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+// Handler for live page switching (saves override and switches immediately)
+static esp_err_t page_post_handler(httpd_req_t *req)
+{
+    char buf[64];
+    int ret, remaining = req->content_len;
+
+    if (remaining >= (int)sizeof(buf)) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    ret = httpd_req_recv(req, buf, remaining);
+    if (ret <= 0) {
+        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+            httpd_resp_send_408(req);
+        }
+        return ESP_FAIL;
+    }
+    buf[ret] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    cJSON *val = cJSON_GetObjectItem(root, "page");
+    if (cJSON_IsNumber(val)) {
+        int page = val->valueint;
+        int cnt = app_config_get_instance_count();
+        app_config_t *cfg = app_config_get();
+
+        if (page >= 0 && page < cnt) {
+            cfg->active_page_override = (int8_t)page;
+            app_config_save(cfg);
+            bsp_display_lock(0);
+            nina_dashboard_show_page(page, cnt);
+            bsp_display_unlock();
+            ESP_LOGI(TAG, "Page switched to %d via web, override saved", page);
+        } else if (page == -1) {
+            cfg->active_page_override = -1;
+            app_config_save(cfg);
+            ESP_LOGI(TAG, "Page override cleared via web");
+        }
+    }
+
+    cJSON_Delete(root);
+    httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
 // BMP file header for 720x720 RGB565 image (bottom-up, no compression)
 #define SCREENSHOT_W    BSP_LCD_H_RES
 #define SCREENSHOT_H    BSP_LCD_V_RES
@@ -475,7 +556,7 @@ void start_web_server(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 8192;
-    config.max_uri_handlers = 12;
+    config.max_uri_handlers = 13;
     httpd_handle_t server = NULL;
 
     if (httpd_start(&server, &config) == ESP_OK) {
@@ -550,6 +631,14 @@ void start_web_server(void)
             .user_ctx  = NULL
         };
         httpd_register_uri_handler(server, &uri_get_screenshot);
+
+        httpd_uri_t uri_post_page = {
+            .uri       = "/api/page",
+            .method    = HTTP_POST,
+            .handler   = page_post_handler,
+            .user_ctx  = NULL
+        };
+        httpd_register_uri_handler(server, &uri_post_page);
 
         ESP_LOGI(TAG, "Web server started");
     } else {

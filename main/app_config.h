@@ -27,6 +27,10 @@ typedef struct {
     char mqtt_password[64];         // MQTT broker password
     char mqtt_topic_prefix[64];     // MQTT topic prefix (default "ninadisplay")
     uint16_t mqtt_port;             // MQTT broker port (default 1883)
+    int8_t   active_page_override;          // -1 = auto (no override), 0-2 = always boot to this page
+    uint16_t auto_rotate_interval_s;        // 0 = off, else seconds between automatic page rotations
+    uint8_t  auto_rotate_effect;            // 0 = instant, 1 = fade
+    bool     auto_rotate_skip_disconnected; // skip pages where NINA is not connected during auto-rotate
 } app_config_t;
 
 void app_config_init(void);

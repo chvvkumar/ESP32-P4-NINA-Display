@@ -36,6 +36,10 @@ static void set_defaults(app_config_t *cfg) {
     }
     cfg->brightness = 50;
     cfg->color_brightness = 100;
+    cfg->active_page_override = -1;
+    cfg->auto_rotate_interval_s = 0;
+    cfg->auto_rotate_effect = 0;
+    cfg->auto_rotate_skip_disconnected = true;
     strcpy(cfg->mqtt_broker_url, "mqtt://192.168.1.250");
     strcpy(cfg->mqtt_topic_prefix, "ninadisplay");
     cfg->mqtt_port = 1883;
@@ -91,6 +95,18 @@ void app_config_init(void) {
         }
         if (s_config.mqtt_port == 0) {
             s_config.mqtt_port = 1883;
+            needs_save = true;
+        }
+        if (s_config.active_page_override < -1 || s_config.active_page_override >= MAX_NINA_INSTANCES) {
+            s_config.active_page_override = -1;
+            needs_save = true;
+        }
+        if (s_config.auto_rotate_interval_s > 3600) {
+            s_config.auto_rotate_interval_s = 0;
+            needs_save = true;
+        }
+        if (s_config.auto_rotate_effect > 1) {
+            s_config.auto_rotate_effect = 0;
             needs_save = true;
         }
         if (needs_save) {

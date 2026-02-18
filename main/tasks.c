@@ -79,6 +79,7 @@ void data_update_task(void *arg) {
     nina_poll_state_t poll_states[MAX_NINA_INSTANCES];
     bool filters_synced[MAX_NINA_INSTANCES] = {false};
     int64_t last_heartbeat_ms[MAX_NINA_INSTANCES] = {0};
+    int64_t last_rotate_ms = 0;
 
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         nina_poll_state_init(&poll_states[i]);
@@ -132,10 +133,40 @@ void data_update_task(void *arg) {
         if (page_changed) {
             page_changed = false;
             nina_poll_state_init(&poll_states[current_active]);
+            last_rotate_ms = esp_timer_get_time() / 1000;  // Reset auto-rotate timer on any page change
             ESP_LOGI(TAG, "Page switched to %d", current_active);
         }
 
         int64_t now_ms = esp_timer_get_time() / 1000;
+
+        /* Auto-rotate logic */
+        {
+            app_config_t *r_cfg = app_config_get();
+            if (r_cfg->auto_rotate_interval_s > 0 && instance_count > 1) {
+                if (last_rotate_ms == 0) last_rotate_ms = now_ms;  /* Init on first iteration */
+                if (now_ms - last_rotate_ms >= (int64_t)r_cfg->auto_rotate_interval_s * 1000) {
+                    int next = (current_active + 1) % instance_count;
+                    if (r_cfg->auto_rotate_skip_disconnected) {
+                        int tried = 0;
+                        while (tried < instance_count) {
+                            if (instances[next].connected) break;
+                            next = (next + 1) % instance_count;
+                            tried++;
+                        }
+                        /* If no connected page found, stay put */
+                        if (!instances[next].connected) next = current_active;
+                    }
+                    if (next != current_active) {
+                        bsp_display_lock(0);
+                        nina_dashboard_show_page_animated(next, instance_count, r_cfg->auto_rotate_effect);
+                        bsp_display_unlock();
+                        page_changed = true;  /* Triggers full poll for new page next iteration */
+                        ESP_LOGI(TAG, "Auto-rotate: switched to page %d", next);
+                    }
+                    last_rotate_ms = now_ms;
+                }
+            }
+        }
 
         // Read WiFi RSSI once per cycle
         int rssi = -100;

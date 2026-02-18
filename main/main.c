@@ -138,6 +138,13 @@ void app_main(void)
     bsp_display_lock(0);
     lv_obj_t *scr = lv_scr_act();
     create_nina_dashboard(scr, instance_count);
+    {
+        /* Apply persisted page override immediately on boot */
+        app_config_t *cfg = app_config_get();
+        if (cfg->active_page_override >= 0 && cfg->active_page_override < instance_count) {
+            nina_dashboard_show_page(cfg->active_page_override, instance_count);
+        }
+    }
     bsp_display_unlock();
 
     if (instance_count > 1) {
