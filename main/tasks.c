@@ -56,13 +56,14 @@ void input_task(void *arg) {
             if (now_ms - last_press_ms > DEBOUNCE_MS) {
                 last_press_ms = now_ms;
 
-                if (instance_count > 1) {
+                {
+                    int total = nina_dashboard_get_total_page_count();
                     int current = nina_dashboard_get_active_page();
-                    int new_page = (current + 1) % instance_count;
+                    int new_page = (current + 1) % total;
                     ESP_LOGI(TAG, "Button: switching to page %d", new_page);
 
                     bsp_display_lock(0);
-                    nina_dashboard_show_page(new_page, instance_count);
+                    nina_dashboard_show_page(new_page, total);
                     bsp_display_unlock();
 
                     page_changed = true;
@@ -124,6 +125,7 @@ void data_update_task(void *arg) {
 
     while (1) {
         int current_active = nina_dashboard_get_active_page();  // Snapshot to avoid races
+        bool on_sysinfo = nina_dashboard_is_sysinfo_page();
 
         // Re-read instance count from config so API URL changes take effect live
         instance_count = app_config_get_instance_count();
@@ -132,15 +134,17 @@ void data_update_task(void *arg) {
         // (WebSocket connections for all instances remain persistent)
         if (page_changed) {
             page_changed = false;
-            nina_poll_state_init(&poll_states[current_active]);
+            if (!on_sysinfo) {
+                nina_poll_state_init(&poll_states[current_active]);
+            }
             last_rotate_ms = esp_timer_get_time() / 1000;  // Reset auto-rotate timer on any page change
-            ESP_LOGI(TAG, "Page switched to %d", current_active);
+            ESP_LOGI(TAG, "Page switched to %d%s", current_active, on_sysinfo ? " (sysinfo)" : "");
         }
 
         int64_t now_ms = esp_timer_get_time() / 1000;
 
-        /* Auto-rotate logic */
-        {
+        /* Auto-rotate logic — only rotates between NINA pages, not sysinfo */
+        if (!on_sysinfo) {
             app_config_t *r_cfg = app_config_get();
             if (r_cfg->auto_rotate_interval_s > 0 && instance_count > 1) {
                 if (last_rotate_ms == 0) last_rotate_ms = now_ms;  /* Init on first iteration */
@@ -177,17 +181,19 @@ void data_update_task(void *arg) {
             }
         }
 
-        // Signal that an API call is starting — pulse the connection dot
-        bsp_display_lock(0);
-        nina_dashboard_update_status(current_active, rssi,
-                                     instances[current_active].connected, true);
-        bsp_display_unlock();
+        if (!on_sysinfo) {
+            // Signal that an API call is starting — pulse the connection dot
+            bsp_display_lock(0);
+            nina_dashboard_update_status(current_active, rssi,
+                                         instances[current_active].connected, true);
+            bsp_display_unlock();
+        }
 
         for (int i = 0; i < instance_count; i++) {
             const char *url = app_config_get_instance_url(i);
             if (strlen(url) == 0) continue;
 
-            if (i == current_active) {
+            if (!on_sysinfo && i == current_active) {
                 nina_client_poll(url, &instances[i], &poll_states[i]);
                 ESP_LOGI(TAG, "Instance %d (active): connected=%d, status=%s, target=%s, ws=%d",
                     i + 1, instances[i].connected, instances[i].status,
@@ -213,28 +219,30 @@ void data_update_task(void *arg) {
             }
         }
 
-        // Update active page UI; stop the pulse now that the call is done
-        bsp_display_lock(0);
-        update_nina_dashboard_page(current_active, &instances[current_active]);
-        nina_dashboard_update_status(current_active, rssi,
-                                     instances[current_active].connected, false);
-        bsp_display_unlock();
+        if (!on_sysinfo) {
+            // Update active page UI; stop the pulse now that the call is done
+            bsp_display_lock(0);
+            update_nina_dashboard_page(current_active, &instances[current_active]);
+            nina_dashboard_update_status(current_active, rssi,
+                                         instances[current_active].connected, false);
+            bsp_display_unlock();
 
-        // Handle thumbnail: initial request or auto-refresh on new image
-        bool want_thumbnail = nina_dashboard_thumbnail_requested();
-        bool auto_refresh = nina_dashboard_thumbnail_visible()
-                            && instances[current_active].new_image_available;
+            // Handle thumbnail: initial request or auto-refresh on new image
+            bool want_thumbnail = nina_dashboard_thumbnail_requested();
+            bool auto_refresh = nina_dashboard_thumbnail_visible()
+                                && instances[current_active].new_image_available;
 
-        if (want_thumbnail || auto_refresh) {
-            if (want_thumbnail) nina_dashboard_clear_thumbnail_request();
-            if (auto_refresh) instances[current_active].new_image_available = false;
+            if (want_thumbnail || auto_refresh) {
+                if (want_thumbnail) nina_dashboard_clear_thumbnail_request();
+                if (auto_refresh) instances[current_active].new_image_available = false;
 
-            const char *thumb_url = app_config_get_instance_url(current_active);
-            if (strlen(thumb_url) > 0 && instances[current_active].connected) {
-                if (!fetch_and_show_thumbnail(thumb_url) && want_thumbnail) {
-                    bsp_display_lock(0);
-                    nina_dashboard_hide_thumbnail();
-                    bsp_display_unlock();
+                const char *thumb_url = app_config_get_instance_url(current_active);
+                if (strlen(thumb_url) > 0 && instances[current_active].connected) {
+                    if (!fetch_and_show_thumbnail(thumb_url) && want_thumbnail) {
+                        bsp_display_lock(0);
+                        nina_dashboard_hide_thumbnail();
+                        bsp_display_unlock();
+                    }
                 }
             }
         }

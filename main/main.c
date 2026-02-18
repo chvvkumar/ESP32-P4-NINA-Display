@@ -147,9 +147,7 @@ void app_main(void)
     }
     bsp_display_unlock();
 
-    if (instance_count > 1) {
-        nina_dashboard_set_page_change_cb(on_page_changed);
-    }
+    nina_dashboard_set_page_change_cb(on_page_changed);
 
     xTaskCreate(input_task,       "input_task", 4096,  NULL, 5, NULL);
     xTaskCreate(data_update_task, "data_task",  20480, NULL, 5, NULL);

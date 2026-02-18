@@ -76,6 +76,18 @@ typedef void (*nina_page_change_cb_t)(int new_page);
 void nina_dashboard_set_page_change_cb(nina_page_change_cb_t cb);
 
 /**
+ * @brief Check if the active page is the system info page
+ * @return true if the system info page is currently shown
+ */
+bool nina_dashboard_is_sysinfo_page(void);
+
+/**
+ * @brief Get the total number of navigable pages (NINA + sysinfo)
+ * @return Total navigable page count
+ */
+int nina_dashboard_get_total_page_count(void);
+
+/**
  * @brief Check if a thumbnail image has been requested (target name was clicked)
  * @return true if thumbnail fetch is needed
  */
