@@ -13,7 +13,8 @@
       "Bash(export PATH=\"$IDF_PATH/tools:$PATH\")",
       "Bash(source:*)",
       "WebFetch(domain:astromele2.lan)",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(dir:*)"
     ]
   }
 }

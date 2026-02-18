@@ -29,6 +29,7 @@ typedef struct {
     lv_obj_t *header_box;
     lv_obj_t *lbl_instance_name;
     lv_obj_t *lbl_target_name;
+    lv_obj_t *dot_connection;   // NINA connection indicator (pulses during API call)
 
     // Exposure Arc
     lv_obj_t *arc_exposure;
@@ -94,6 +95,29 @@ static lv_style_t style_bento_box;
 static lv_style_t style_label_small;
 static lv_style_t style_value_large;
 static lv_style_t style_header_gradient;
+
+/* Strip http(s):// and path from URL, uppercase result into out */
+static void extract_host_from_url(const char *url, char *out, size_t out_size) {
+    const char *start = url;
+    if (strncmp(start, "https://", 8) == 0) start += 8;
+    else if (strncmp(start, "http://", 7) == 0) start += 7;
+
+    // Take only hostname (stop at port ':' or path '/')
+    const char *end = start;
+    while (*end && *end != '/' && *end != ':') end++;
+
+    size_t len = (size_t)(end - start);
+    if (len >= out_size) len = out_size - 1;
+    if (len > 0) {
+        memcpy(out, start, len);
+    }
+    out[len] = '\0';
+
+    // Uppercase any letters (for hostnames)
+    for (size_t i = 0; i < len; i++) {
+        if (out[i] >= 'a' && out[i] <= 'z') out[i] -= 32;
+    }
+}
 
 /* (Re)init styles from the active theme */
 static void update_styles(void) {
@@ -241,8 +265,13 @@ void nina_dashboard_apply_theme(int theme_index) {
     lv_obj_invalidate(scr_dashboard);
 }
 
+/* Opacity animation callback for the pulsing connection dot */
+static void dot_opa_anim_cb(void *obj, int32_t opa) {
+    lv_obj_set_style_opa((lv_obj_t *)obj, (lv_opa_t)opa, 0);
+}
+
 /* Build all widgets for one dashboard page */
-static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent) {
+static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int page_index) {
     memset(p, 0, sizeof(dashboard_page_t));
 
     // Page root
@@ -272,11 +301,48 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent) {
     lv_obj_set_flex_align(p->header_box, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_all(p->header_box, 12, 0);
 
-    p->lbl_instance_name = lv_label_create(p->header_box);
+    // Top row: [dot + name] ... [wifi]
+    lv_obj_t *top_row = lv_obj_create(p->header_box);
+    lv_obj_remove_style_all(top_row);
+    lv_obj_set_width(top_row, LV_PCT(100));
+    lv_obj_set_height(top_row, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(top_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(top_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    // Left container: connection dot + telescope name
+    lv_obj_t *left_cont = lv_obj_create(top_row);
+    lv_obj_remove_style_all(left_cont);
+    lv_obj_set_size(left_cont, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(left_cont, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(left_cont, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(left_cont, 12, 0); // Consistent spacing
+
+    // Connection indicator dot
+    p->dot_connection = lv_obj_create(left_cont);
+    lv_obj_remove_style_all(p->dot_connection);
+    lv_obj_set_size(p->dot_connection, 20, 20);
+    lv_obj_set_style_radius(p->dot_connection, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(p->dot_connection, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(p->dot_connection, lv_color_hex(0x606060), 0);
+
+    // Telescope name — show URL-based "Not Connected" until a connection is made
+    p->lbl_instance_name = lv_label_create(left_cont);
     lv_obj_set_style_text_color(p->lbl_instance_name, lv_color_hex(current_theme->header_text_color), 0);
     lv_obj_set_style_text_font(p->lbl_instance_name, &lv_font_montserrat_26, 0);
-    lv_label_set_text(p->lbl_instance_name, "N.I.N.A.");
+    {
+        const char *init_url = app_config_get_instance_url(page_index);
+        char host[64] = {0};
+        extract_host_from_url(init_url, host, sizeof(host));
+        if (host[0] != '\0') {
+            char buf[96];
+            snprintf(buf, sizeof(buf), "%s - Not Connected", host);
+            lv_label_set_text(p->lbl_instance_name, buf);
+        } else {
+            lv_label_set_text(p->lbl_instance_name, "N.I.N.A.");
+        }
+    }
 
+    // Target name (full width, right-aligned)
     p->lbl_target_name = lv_label_create(p->header_box);
     lv_obj_add_style(p->lbl_target_name, &style_value_large, 0);
     lv_obj_set_width(p->lbl_target_name, LV_PCT(100));
@@ -351,7 +417,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent) {
     lv_obj_add_style(p->lbl_exposure_current, &style_value_large, 0);
     lv_label_set_text(p->lbl_exposure_current, "----s");
 
-    p->lbl_exposure_total = create_small_label(arc_center, "Filter");
+    p->lbl_exposure_total = create_small_label(arc_center, "");
     lv_obj_set_style_text_color(p->lbl_exposure_total, lv_color_hex(current_theme->filter_text_color), 0);
     lv_obj_set_style_text_font(p->lbl_exposure_total, &lv_font_montserrat_28, 0);
     lv_obj_set_style_pad_top(p->lbl_exposure_total, 14, 0);
@@ -383,7 +449,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent) {
 
     p->lbl_rms_value = create_value_label(box_rms);
     lv_obj_set_style_text_color(p->lbl_rms_value, lv_color_hex(current_theme->rms_color), 0);
-    lv_label_set_text(p->lbl_rms_value, "--.--\"");
+    lv_label_set_text(p->lbl_rms_value, "--");
 
     // HFR sub-container
     lv_obj_t *box_hfr = lv_obj_create(box_rms_hfr);
@@ -399,7 +465,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent) {
 
     p->lbl_hfr_value = create_value_label(box_hfr);
     lv_obj_set_style_text_color(p->lbl_hfr_value, lv_color_hex(current_theme->hfr_color), 0);
-    lv_label_set_text(p->lbl_hfr_value, "2.15");
+    lv_label_set_text(p->lbl_hfr_value, "--");
 
     // Time to flip (col 1, row 3)
     lv_obj_t *box_flip = create_bento_box(p->page);
@@ -448,7 +514,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent) {
     lv_obj_set_style_text_color(p->lbl_stars_header, lv_color_hex(current_theme->text_color), 0);
 
     p->lbl_stars_value = create_value_label(box_stars);
-    lv_label_set_text(p->lbl_stars_value, "2451");
+    lv_label_set_text(p->lbl_stars_value, "--");
 
     // Power row (row 5, spans 2 cols)
     lv_obj_t *box_power = create_bento_box(p->page);
@@ -618,7 +684,7 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
 
     // Pages
     for (int i = 0; i < page_count; i++) {
-        create_dashboard_page(&pages[i], main_cont);
+        create_dashboard_page(&pages[i], main_cont, i);
         if (i != 0) {
             lv_obj_add_flag(pages[i].page, LV_OBJ_FLAG_HIDDEN);
         }
@@ -699,6 +765,43 @@ static void arc_fill_complete_cb(lv_anim_t *a) {
     lv_anim_start(&a2);
 }
 
+/**
+ * @brief Update WiFi signal bars and connection dot for a dashboard page.
+ *
+ * @param page_index  Page to update (0-based)
+ * @param rssi        WiFi RSSI in dBm (e.g. -55).  Pass -100 when unknown.
+ * @param nina_connected  true when the NINA HTTP endpoint is reachable
+ * @param api_active  true while an HTTP API call is in-flight (pulses the dot)
+ */
+void nina_dashboard_update_status(int page_index, int rssi, bool nina_connected, bool api_active) {
+    if (page_index < 0 || page_index >= page_count) return;
+    dashboard_page_t *p = &pages[page_index];
+    if (!p->page) return;
+
+    // --- Connection dot ---
+    uint32_t dot_color = nina_connected ? 0x4CAF50 : 0xF44336;
+    lv_obj_set_style_bg_color(p->dot_connection, lv_color_hex(dot_color), 0);
+
+    if (api_active) {
+        // Start pulsing if not already running
+        if (lv_anim_get(p->dot_connection, dot_opa_anim_cb) == NULL) {
+            lv_anim_t a;
+            lv_anim_init(&a);
+            lv_anim_set_var(&a, p->dot_connection);
+            lv_anim_set_exec_cb(&a, dot_opa_anim_cb);
+            lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_20);
+            lv_anim_set_time(&a, 400);
+            lv_anim_set_playback_time(&a, 400);
+            lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+            lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+            lv_anim_start(&a);
+        }
+    } else {
+        lv_anim_del(p->dot_connection, dot_opa_anim_cb);
+        lv_obj_set_style_opa(p->dot_connection, LV_OPA_COVER, 0);
+    }
+}
+
 /* Push new data to a dashboard page */
 void update_nina_dashboard_page(int page_index, const nina_client_t *data) {
     if (page_index < 0 || page_index >= page_count) return;
@@ -709,13 +812,42 @@ void update_nina_dashboard_page(int page_index, const nina_client_t *data) {
 
     int gb = app_config_get()->color_brightness;
 
+    // When NINA is unreachable, reset all labels to dashes and show URL in header
+    if (!data->connected) {
+        const char *url = app_config_get_instance_url(page_index);
+        char host[64] = {0};
+        extract_host_from_url(url, host, sizeof(host));
+        if (host[0] != '\0') {
+            char buf[96];
+            snprintf(buf, sizeof(buf), "%s - Not Connected", host);
+            lv_label_set_text(p->lbl_instance_name, buf);
+        } else {
+            lv_label_set_text(p->lbl_instance_name, "N.I.N.A.");
+        }
+        lv_label_set_text(p->lbl_target_name, "----");
+        lv_label_set_text(p->lbl_seq_container, "----");
+        lv_label_set_text(p->lbl_seq_step, "----");
+        lv_label_set_text(p->lbl_exposure_current, "--");
+        lv_label_set_text(p->lbl_exposure_total, "");
+        lv_arc_set_value(p->arc_exposure, 0);
+        lv_label_set_text(p->lbl_loop_count, "-- / --");
+        lv_label_set_text(p->lbl_rms_value, "--");
+        lv_obj_set_style_text_color(p->lbl_rms_value, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+        lv_label_set_text(p->lbl_hfr_value, "--");
+        lv_obj_set_style_text_color(p->lbl_hfr_value, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+        lv_label_set_text(p->lbl_flip_value, "--");
+        lv_label_set_text(p->lbl_stars_value, "--");
+        lv_label_set_text(p->lbl_target_time_value, "--");
+        for (int i = 0; i < MAX_POWER_WIDGETS; i++) {
+            lv_obj_add_flag(p->box_pwr[i], LV_OBJ_FLAG_HIDDEN);
+        }
+        return;
+    }
+
     // Header
-    if (data->telescope_name[0] != '\0') {
-        lv_label_set_text(p->lbl_instance_name, data->telescope_name);
-    }
-    if (data->target_name[0] != '\0') {
-        lv_label_set_text(p->lbl_target_name, data->target_name);
-    }
+    lv_label_set_text(p->lbl_instance_name,
+        data->telescope_name[0] != '\0' ? data->telescope_name : "N.I.N.A.");
+    lv_label_set_text(p->lbl_target_name, data->target_name[0] != '\0' ? data->target_name : "----");
 
     // Sequence
     if (data->container_name[0] != '\0') {

@@ -43,6 +43,19 @@ int nina_dashboard_get_active_page(void);
 void nina_dashboard_apply_theme(int theme_index);
 
 /**
+ * @brief Update the WiFi signal bars and connection indicator dot for a page.
+ *
+ * Call this both before an API request (api_active=true, starts pulse) and
+ * after (api_active=false, stops pulse).  Safe to call under the display lock.
+ *
+ * @param page_index     Dashboard page to update (0-based)
+ * @param rssi           Current WiFi RSSI in dBm; -100 when unknown
+ * @param nina_connected true when the NINA HTTP API is reachable
+ * @param api_active     true while an HTTP request is in-flight
+ */
+void nina_dashboard_update_status(int page_index, int rssi, bool nina_connected, bool api_active);
+
+/**
  * @brief Callback type for page change events (triggered by swipe gestures)
  * @param new_page The page index that was switched to
  */

@@ -337,6 +337,21 @@ static void data_update_task(void *arg) {
 
         int64_t now_ms = esp_timer_get_time() / 1000;
 
+        // Read WiFi RSSI once per cycle
+        int rssi = -100;
+        {
+            wifi_ap_record_t ap_info = {0};
+            if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+                rssi = ap_info.rssi;
+            }
+        }
+
+        // Signal that an API call is starting — pulse the connection dot
+        bsp_display_lock(0);
+        nina_dashboard_update_status(current_active, rssi,
+                                     instances[current_active].connected, true);
+        bsp_display_unlock();
+
         for (int i = 0; i < instance_count; i++) {
             const char *url = app_config_get_instance_url(i);
             if (strlen(url) == 0) continue;
@@ -368,9 +383,11 @@ static void data_update_task(void *arg) {
             }
         }
 
-        // Update only the active page's UI
+        // Update only the active page's UI; stop the pulse now that the call is done
         bsp_display_lock(0);
         update_nina_dashboard_page(current_active, &instances[current_active]);
+        nina_dashboard_update_status(current_active, rssi,
+                                     instances[current_active].connected, false);
         bsp_display_unlock();
 
         // Handle thumbnail: initial request or auto-refresh on new image
