@@ -706,13 +706,13 @@ Additional files created:
 - `nina_websocket.h` declarations removed from `nina_client.h`; `esp_websocket_client.h` dependency moved to `nina_websocket.c`
 - `CMakeLists.txt` updated with all new source files
 
-### Phase 3: Code Quality (low risk, cleaner codebase)
+### Phase 3: Code Quality (low risk, cleaner codebase) ✅ COMPLETE
 
-- [ ] 11. **Unify threshold color functions** in `app_config.c`
-- [ ] 12. **Break up `update_nina_dashboard_page()`** into sub-functions
-- [ ] 13. **Extract `tasks.c` and `jpeg_utils.c`** from `main.c`
-- [ ] 14. **Add config mutex** for thread safety
-- [ ] 15. **Create `ui_helpers.h`** for shared widget factories
+- [x] 11. **Unify threshold color functions** ✅ — `get_threshold_color()` static helper in `app_config.c`; `app_config_get_rms_color()` and `app_config_get_hfr_color()` each reduced to 3 lines
+- [x] 12. **Break up `update_nina_dashboard_page()`** ✅ — split into `update_disconnected_state`, `update_header`, `update_sequence_info`, `update_exposure_arc`, `update_guider_stats`, `update_mount_and_image_stats`, `update_power` in `nina_dashboard_update.c`
+- [x] 13. **Extract `tasks.c` and `jpeg_utils.c`** ✅ — `main.c` reduced to ~130 lines (entry point + WiFi); task functions in `tasks.c`/`tasks.h`; JPEG decode in `jpeg_utils.c`/`jpeg_utils.h`; CMakeLists.txt updated; `active_page` ownership resolved by using `nina_dashboard_get_active_page()`
+- [x] 14. **Add config mutex** ✅ — `SemaphoreHandle_t s_config_mutex` in `app_config.c`; `app_config_save()` protected; `app_config_get_snapshot()` added to `app_config.h`
+- [x] 15. **Create `ui_helpers.h`** ✅ — `ui/ui_helpers.h` declares widget factories + style externs; `create_bento_box/small_label/value_label` made non-static in `nina_dashboard.c`; `nina_dashboard_internal.h` includes `ui_helpers.h`
 
 **Estimated effort:** 3-4 hours.
 

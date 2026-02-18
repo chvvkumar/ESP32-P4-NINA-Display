@@ -110,22 +110,22 @@ static void update_styles(void) {
     lv_style_set_pad_all(&style_header_gradient, 20);
 }
 
-static lv_obj_t* create_bento_box(lv_obj_t * parent) {
-    lv_obj_t * box = lv_obj_create(parent);
+lv_obj_t *create_bento_box(lv_obj_t *parent) {
+    lv_obj_t *box = lv_obj_create(parent);
     lv_obj_remove_style_all(box);
     lv_obj_add_style(box, &style_bento_box, 0);
     return box;
 }
 
-static lv_obj_t* create_small_label(lv_obj_t * parent, const char * text) {
-    lv_obj_t * label = lv_label_create(parent);
+lv_obj_t *create_small_label(lv_obj_t *parent, const char *text) {
+    lv_obj_t *label = lv_label_create(parent);
     lv_obj_add_style(label, &style_label_small, 0);
     lv_label_set_text(label, text);
     return label;
 }
 
-static lv_obj_t* create_value_label(lv_obj_t * parent) {
-    lv_obj_t * label = lv_label_create(parent);
+lv_obj_t *create_value_label(lv_obj_t *parent) {
+    lv_obj_t *label = lv_label_create(parent);
     lv_obj_add_style(label, &style_value_large, 0);
     lv_label_set_text(label, "--");
     return label;

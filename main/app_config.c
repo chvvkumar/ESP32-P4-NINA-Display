@@ -3,11 +3,14 @@
 #include "nvs.h"
 #include "esp_log.h"
 #include "cJSON.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include <string.h>
 #include <stdlib.h>
 
 static const char *TAG = "app_config";
 static app_config_t s_config;
+static SemaphoreHandle_t s_config_mutex;
 static const char *NVS_NAMESPACE = "app_conf";
 
 // Default RMS thresholds: good <= 0.5", ok <= 1.0", bad > 1.0" - DIMMED for Night Vision
@@ -43,6 +46,7 @@ static void set_defaults(app_config_t *cfg) {
 }
 
 void app_config_init(void) {
+    s_config_mutex = xSemaphoreCreateMutex();
     nvs_handle_t my_handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &my_handle);
     if (err != ESP_OK) {
@@ -121,15 +125,17 @@ app_config_t *app_config_get(void) {
 }
 
 void app_config_save(const app_config_t *config) {
+    xSemaphoreTake(s_config_mutex, portMAX_DELAY);
+
+    memcpy(&s_config, config, sizeof(app_config_t));
+
     nvs_handle_t my_handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &my_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Error opening NVS handle for saving: %s", esp_err_to_name(err));
+        xSemaphoreGive(s_config_mutex);
         return;
     }
-
-    // Update static copy
-    memcpy(&s_config, config, sizeof(app_config_t));
 
     err = nvs_set_blob(my_handle, "config", &s_config, sizeof(app_config_t));
     if (err != ESP_OK) {
@@ -139,6 +145,15 @@ void app_config_save(const app_config_t *config) {
         nvs_commit(my_handle);
     }
     nvs_close(my_handle);
+
+    xSemaphoreGive(s_config_mutex);
+}
+
+app_config_t app_config_get_snapshot(void) {
+    xSemaphoreTake(s_config_mutex, portMAX_DELAY);
+    app_config_t copy = s_config;
+    xSemaphoreGive(s_config_mutex);
+    return copy;
 }
 
 void app_config_factory_reset(void) {
@@ -251,91 +266,55 @@ uint32_t app_config_get_filter_color(const char *filter_name, int instance_index
 }
 
 /**
- * @brief Get the color for a guiding RMS value based on per-instance configured thresholds
- * @param rms_value The current RMS value in arcseconds
- * @param instance_index NINA instance index (0-based)
- * @return 32-bit color value (0xRRGGBB)
+ * @brief Shared helper: parse threshold JSON, compare value, return brightness-adjusted color.
+ */
+static uint32_t get_threshold_color(float value, const char *json,
+                                    float default_good_max, float default_ok_max) {
+    cJSON *root = cJSON_Parse(json);
+    if (!root) {
+        int gb = s_config.color_brightness;
+        if (gb < 0 || gb > 100) gb = 100;
+        return app_config_apply_brightness(0xef4444, gb);
+    }
+
+    uint32_t good_color = parse_color_field(root, "good_color", 0x10b981);
+    uint32_t ok_color   = parse_color_field(root, "ok_color",   0xeab308);
+    uint32_t bad_color  = parse_color_field(root, "bad_color",  0xef4444);
+
+    cJSON *gm = cJSON_GetObjectItem(root, "good_max");
+    cJSON *om = cJSON_GetObjectItem(root, "ok_max");
+    float good_max = (gm && cJSON_IsNumber(gm)) ? (float)gm->valuedouble : default_good_max;
+    float ok_max   = (om && cJSON_IsNumber(om)) ? (float)om->valuedouble : default_ok_max;
+
+    uint32_t result = (value <= good_max) ? good_color
+                    : (value <= ok_max)   ? ok_color
+                    :                       bad_color;
+
+    cJSON_Delete(root);
+
+    int gb = s_config.color_brightness;
+    if (gb < 0 || gb > 100) gb = 100;
+    return app_config_apply_brightness(result, gb);
+}
+
+/**
+ * @brief Get the color for a guiding RMS value based on per-instance configured thresholds.
  */
 uint32_t app_config_get_rms_color(float rms_value, int instance_index) {
     const char *json = (instance_index == 1) ? s_config.rms_thresholds_2 :
                        (instance_index == 2) ? s_config.rms_thresholds_3 :
                                                s_config.rms_thresholds_1;
-    cJSON *root = cJSON_Parse(json);
-    if (!root) {
-        return 0xf43f5e;  // Fallback rose
-    }
-
-    cJSON *good_max = cJSON_GetObjectItem(root, "good_max");
-    cJSON *ok_max = cJSON_GetObjectItem(root, "ok_max");
-
-    uint32_t good_color = parse_color_field(root, "good_color", 0x10b981);
-    uint32_t ok_color   = parse_color_field(root, "ok_color",   0xeab308);
-    uint32_t bad_color  = parse_color_field(root, "bad_color",  0xef4444);
-
-    float good_threshold = (good_max && cJSON_IsNumber(good_max)) ? (float)good_max->valuedouble : 0.5f;
-    float ok_threshold   = (ok_max && cJSON_IsNumber(ok_max))     ? (float)ok_max->valuedouble   : 1.0f;
-
-    uint32_t result;
-    if (rms_value <= good_threshold) {
-        result = good_color;
-    } else if (rms_value <= ok_threshold) {
-        result = ok_color;
-    } else {
-        result = bad_color;
-    }
-
-    cJSON_Delete(root);
-
-    // Apply global color brightness
-    int gb = s_config.color_brightness;
-    if (gb < 0 || gb > 100) gb = 100;
-    result = app_config_apply_brightness(result, gb);
-
-    return result;
+    return get_threshold_color(rms_value, json, 0.5f, 1.0f);
 }
 
 /**
- * @brief Get the color for an HFR value based on per-instance configured thresholds
- * @param hfr_value The current HFR value
- * @param instance_index NINA instance index (0-based)
- * @return 32-bit color value (0xRRGGBB)
+ * @brief Get the color for an HFR value based on per-instance configured thresholds.
  */
 uint32_t app_config_get_hfr_color(float hfr_value, int instance_index) {
     const char *json = (instance_index == 1) ? s_config.hfr_thresholds_2 :
                        (instance_index == 2) ? s_config.hfr_thresholds_3 :
                                                s_config.hfr_thresholds_1;
-    cJSON *root = cJSON_Parse(json);
-    if (!root) {
-        return 0x10b981;  // Fallback emerald
-    }
-
-    cJSON *good_max = cJSON_GetObjectItem(root, "good_max");
-    cJSON *ok_max = cJSON_GetObjectItem(root, "ok_max");
-
-    uint32_t good_color = parse_color_field(root, "good_color", 0x10b981);
-    uint32_t ok_color   = parse_color_field(root, "ok_color",   0xeab308);
-    uint32_t bad_color  = parse_color_field(root, "bad_color",  0xef4444);
-
-    float good_threshold = (good_max && cJSON_IsNumber(good_max)) ? (float)good_max->valuedouble : 2.0f;
-    float ok_threshold   = (ok_max && cJSON_IsNumber(ok_max))     ? (float)ok_max->valuedouble   : 3.5f;
-
-    uint32_t result;
-    if (hfr_value <= good_threshold) {
-        result = good_color;
-    } else if (hfr_value <= ok_threshold) {
-        result = ok_color;
-    } else {
-        result = bad_color;
-    }
-
-    cJSON_Delete(root);
-
-    // Apply global color brightness
-    int gb = s_config.color_brightness;
-    if (gb < 0 || gb > 100) gb = 100;
-    result = app_config_apply_brightness(result, gb);
-
-    return result;
+    return get_threshold_color(hfr_value, json, 2.0f, 3.5f);
 }
 
 /**

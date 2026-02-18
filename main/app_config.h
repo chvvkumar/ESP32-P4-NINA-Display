@@ -39,6 +39,7 @@ typedef struct {
 
 void app_config_init(void);
 app_config_t *app_config_get(void);
+app_config_t app_config_get_snapshot(void);
 void app_config_save(const app_config_t *config);
 int app_config_get_instance_count(void);
 const char *app_config_get_instance_url(int index);

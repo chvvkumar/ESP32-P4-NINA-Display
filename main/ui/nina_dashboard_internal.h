@@ -11,6 +11,7 @@
 #include "nina_client.h"
 #include "app_config.h"
 #include "themes.h"
+#include "ui_helpers.h"
 
 /* Layout constants */
 #define SCREEN_SIZE     720
@@ -68,12 +69,6 @@ extern dashboard_page_t pages[MAX_NINA_INSTANCES];
 extern int page_count;
 extern int active_page;
 extern const theme_t *current_theme;
-
-/* Shared styles — defined in nina_dashboard.c */
-extern lv_style_t style_bento_box;
-extern lv_style_t style_label_small;
-extern lv_style_t style_value_large;
-extern lv_style_t style_header_gradient;
 
 /* Thumbnail overlay state — defined in nina_thumbnail.c */
 extern lv_obj_t *thumbnail_overlay;
