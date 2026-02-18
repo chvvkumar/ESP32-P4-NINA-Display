@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,6 +29,12 @@ typedef struct {
     int theme_index;             // Index of the selected theme
     int brightness;              // Display brightness 0-100 (default 50)
     int color_brightness;        // Global color brightness for dynamic elements 0-100 (default 100)
+    bool mqtt_enabled;           // Enable MQTT Home Assistant integration
+    char mqtt_broker_url[128];   // MQTT broker URL (e.g. "mqtt://192.168.1.100")
+    char mqtt_username[64];      // MQTT broker username
+    char mqtt_password[64];      // MQTT broker password
+    char mqtt_topic_prefix[64];  // MQTT topic prefix (default "ninadisplay")
+    uint16_t mqtt_port;          // MQTT broker port (default 1883)
 } app_config_t;
 
 void app_config_init(void);

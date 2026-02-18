@@ -1,5 +1,6 @@
 #include "web_server.h"
 #include "app_config.h"
+#include "mqtt_ha.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "cJSON.h"
@@ -46,6 +47,12 @@ static const char *HTML_CONTENT =
 ".slider-wrapper{display:flex;align-items:center;gap:12px;}"
 "input[type='range']{flex:1;height:6px;appearance:none;background:var(--border);border-radius:3px;outline:none;}"
 "input[type='range']::-webkit-slider-thumb{appearance:none;width:18px;height:18px;border-radius:50%;background:var(--accent);cursor:pointer;border:3px solid var(--card);box-shadow:0 0 10px rgba(0,0,0,0.5);}"
+".toggle{position:relative;display:inline-block;width:44px;height:24px;}"
+".toggle input{opacity:0;width:0;height:0;}"
+".toggle-slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:var(--border);transition:.2s;border-radius:24px;}"
+".toggle-slider:before{content:'';position:absolute;height:18px;width:18px;left:3px;bottom:3px;background:var(--text-dim);transition:.2s;border-radius:50%;}"
+".toggle input:checked+.toggle-slider{background:var(--accent);}"
+".toggle input:checked+.toggle-slider:before{transform:translateX(20px);background:var(--bg);}"
 ".btn{border:none;border-radius:10px;padding:14px 20px;font-weight:600;cursor:pointer;font-size:0.9rem;transition:all 0.2s;display:flex;align-items:center;justify-content:center;gap:8px;}"
 ".btn-primary{background:var(--accent);color:var(--bg);width:100%;}"
 ".btn-primary:hover{background:var(--accent-hover);transform:translateY(-1px);}"
@@ -60,9 +67,10 @@ static const char *HTML_CONTENT =
 ".filter-grid .filter-item{flex:none;min-width:0;padding:8px 4px;}"
 ".filter-grid .filter-item label{font-size:0.65rem;}"
 ".filter-grid .color-dot{width:32px;height:32px;border-radius:8px;}"
-".area-actions{grid-column:span 12;background:rgba(20,184,166,0.03);border-color:rgba(20,184,166,0.2);}"
-".action-row{display:flex;gap:16px;align-items:flex-start;}"
-".action-main{flex:2;}.action-subs{flex:3;display:flex;flex-direction:column;gap:12px;}"
+".area-mqtt{grid-column:span 6;}"
+".area-actions{grid-column:span 12;}"
+".action-row{display:flex;gap:12px;}"
+".action-row .btn{flex:1;}"
 ".hint{font-size:0.75rem;color:var(--text-dim);margin:4px 0 0 0;}"
 ".threshold-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;}"
 ".threshold-node{background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:12px;padding:16px;}"
@@ -71,9 +79,9 @@ static const char *HTML_CONTENT =
 ".threshold-sub{margin-bottom:16px;}"
 ".threshold-sub:last-child{margin-bottom:0;}"
 "@media(max-width:900px){"
-".area-net,.area-api,.area-appearance{grid-column:span 12;}"
-".action-row{flex-direction:column;width:100%;}"
-".action-main,.action-subs{width:100%;}"
+".area-net,.area-api,.area-appearance,.area-mqtt{grid-column:span 12;}"
+".action-row{flex-direction:column;}"
+".action-row .btn{width:100%;}"
 ".filter-item{flex:1 0 45%;}"
 ".threshold-grid{grid-template-columns:1fr;}"
 "}"
@@ -128,16 +136,21 @@ static const char *HTML_CONTENT =
 "<div class=\"group\"><label>Warning (Caution)</label><div style=\"display:flex;gap:8px\"><input type=\"text\" id=\"hfr_ok_max_2\"><input type=\"color\" id=\"hfr_ok_color_2\" class=\"color-rect\"></div></div>"
 "<div class=\"group\"><label>Critical Color</label><input type=\"color\" id=\"hfr_bad_color_2\" class=\"color-rect\" style=\"width:100%\"></div></div></div>"
 "</div></div>"
-"<div class=\"tile area-actions\">"
+"<div class=\"tile area-mqtt\"><h3>MQTT / Home Assistant</h3>"
+"<div class=\"group\" style=\"display:flex;align-items:center;justify-content:space-between\"><label style=\"margin:0\">Enable MQTT</label><label class=\"toggle\"><input type=\"checkbox\" id=\"mqtt_enabled\"><span class=\"toggle-slider\"></span></label></div>"
+"<div class=\"group\"><label>Broker Host</label><input type=\"text\" id=\"mqtt_broker\" placeholder=\"192.168.1.250\"></div>"
+"<div class=\"group\"><label>Port</label><input type=\"text\" id=\"mqtt_port\" placeholder=\"1883\"></div>"
+"<div class=\"group\"><label>Username</label><input type=\"text\" id=\"mqtt_user\"></div>"
+"<div class=\"group\"><label>Password</label><input type=\"password\" id=\"mqtt_pass\"></div>"
+"<div class=\"group\"><label>Topic Prefix</label><input type=\"text\" id=\"mqtt_prefix\" placeholder=\"ninadisplay\"></div>"
+"<p class=\"hint\">Reboot required after changing MQTT settings.</p></div>"
+"<div class=\"tile area-actions\"><h3>Actions</h3>"
 "<div class=\"action-row\">"
-"<div class=\"action-main\"><button class=\"btn btn-primary\" id=\"saveBtn\" onclick=\"save()\">COMMIT CHANGES</button></div>"
-"<div class=\"action-subs\">"
-"<div style=\"display:flex;gap:12px;width:100%\">"
-"<button class=\"btn btn-outline\" onclick=\"saveAndReboot()\">REBOOT DEVICE</button>"
+"<button class=\"btn btn-primary\" id=\"saveBtn\" onclick=\"save()\">SAVE</button>"
+"<button class=\"btn btn-outline\" onclick=\"saveAndReboot()\">REBOOT</button>"
 "<button class=\"btn btn-danger\" onclick=\"factoryReset()\">FACTORY RESET</button>"
 "</div>"
-"<p class=\"hint\">Reboot is required to apply WiFi or NTP changes.</p>"
-"</div></div></div>"
+"<p class=\"hint\">Reboot is required to apply WiFi, NTP, or MQTT changes.</p></div>"
 "</div></div>"
 "<script>"
 "let filterColorsArr=[{},{},{}];"
@@ -165,7 +178,8 @@ static const char *HTML_CONTENT =
 "function getConfigData(){"
 "const h1=document.getElementById('url1').value.trim();const h2=document.getElementById('url2').value.trim();const h3=document.getElementById('url3').value.trim();"
 "const u1=h1?'http://'+h1+':1888/v2/api/':'';const u2=h2?'http://'+h2+':1888/v2/api/':'';const u3=h3?'http://'+h3+':1888/v2/api/':'';"
-"return{ssid:document.getElementById('ssid').value,pass:document.getElementById('pass').value,url1:u1,url2:u2,url3:u3,ntp:document.getElementById('ntp').value,theme_index:parseInt(document.getElementById('theme_select').value),brightness:parseInt(document.getElementById('brightness').value),color_brightness:parseInt(document.getElementById('color_brightness').value),filter_colors_1:JSON.stringify(filterColorsArr[0]),filter_colors_2:JSON.stringify(filterColorsArr[1]),filter_colors_3:JSON.stringify(filterColorsArr[2]),rms_thresholds_1:JSON.stringify(getRmsObj(0)),rms_thresholds_2:JSON.stringify(getRmsObj(1)),rms_thresholds_3:JSON.stringify(getRmsObj(2)),hfr_thresholds_1:JSON.stringify(getHfrObj(0)),hfr_thresholds_2:JSON.stringify(getHfrObj(1)),hfr_thresholds_3:JSON.stringify(getHfrObj(2))};}"
+"const mb=document.getElementById('mqtt_broker').value.trim();const mu=mb?'mqtt://'+mb:'';"
+"return{ssid:document.getElementById('ssid').value,pass:document.getElementById('pass').value,url1:u1,url2:u2,url3:u3,ntp:document.getElementById('ntp').value,theme_index:parseInt(document.getElementById('theme_select').value),brightness:parseInt(document.getElementById('brightness').value),color_brightness:parseInt(document.getElementById('color_brightness').value),filter_colors_1:JSON.stringify(filterColorsArr[0]),filter_colors_2:JSON.stringify(filterColorsArr[1]),filter_colors_3:JSON.stringify(filterColorsArr[2]),rms_thresholds_1:JSON.stringify(getRmsObj(0)),rms_thresholds_2:JSON.stringify(getRmsObj(1)),rms_thresholds_3:JSON.stringify(getRmsObj(2)),hfr_thresholds_1:JSON.stringify(getHfrObj(0)),hfr_thresholds_2:JSON.stringify(getHfrObj(1)),hfr_thresholds_3:JSON.stringify(getHfrObj(2)),mqtt_enabled:document.getElementById('mqtt_enabled').checked,mqtt_broker_url:mu,mqtt_port:parseInt(document.getElementById('mqtt_port').value)||1883,mqtt_username:document.getElementById('mqtt_user').value,mqtt_password:document.getElementById('mqtt_pass').value,mqtt_topic_prefix:document.getElementById('mqtt_prefix').value||'ninadisplay'};}"
 "function loadThresholds(d,i,rkey,hkey){"
 "try{const r=JSON.parse(d[rkey]||'{}');document.getElementById('rms_good_max_'+i).value=r.good_max||0.5;document.getElementById('rms_ok_max_'+i).value=r.ok_max||1.0;document.getElementById('rms_good_color_'+i).value=r.good_color||'#10b981';document.getElementById('rms_ok_color_'+i).value=r.ok_color||'#eab308';document.getElementById('rms_bad_color_'+i).value=r.bad_color||'#ef4444';}catch(e){}"
 "try{const h=JSON.parse(d[hkey]||'{}');document.getElementById('hfr_good_max_'+i).value=h.good_max||2.0;document.getElementById('hfr_ok_max_'+i).value=h.ok_max||3.5;document.getElementById('hfr_good_color_'+i).value=h.good_color||'#10b981';document.getElementById('hfr_ok_color_'+i).value=h.ok_color||'#eab308';document.getElementById('hfr_bad_color_'+i).value=h.bad_color||'#ef4444';}catch(e){}"
@@ -195,6 +209,13 @@ static const char *HTML_CONTENT =
 "loadThresholds(d,1,'rms_thresholds_2','hfr_thresholds_2');"
 "loadThresholds(d,2,'rms_thresholds_3','hfr_thresholds_3');"
 "updateNodeLabels();"
+"document.getElementById('mqtt_enabled').checked=!!d.mqtt_enabled;"
+"const extractBrokerHost=u=>{if(!u)return '';const m=u.match(/^mqtts?:\\/\\/([^:\\/]+)/);return m?m[1]:u;};"
+"document.getElementById('mqtt_broker').value=extractBrokerHost(d.mqtt_broker_url);"
+"document.getElementById('mqtt_port').value=d.mqtt_port||1883;"
+"document.getElementById('mqtt_user').value=d.mqtt_username||'';"
+"document.getElementById('mqtt_pass').value=d.mqtt_password||'';"
+"document.getElementById('mqtt_prefix').value=d.mqtt_topic_prefix||'ninadisplay';"
 "});"
 "</script></body></html>";
 
@@ -233,6 +254,12 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "theme_index", cfg->theme_index);
     cJSON_AddNumberToObject(root, "brightness", cfg->brightness);
     cJSON_AddNumberToObject(root, "color_brightness", cfg->color_brightness);
+    cJSON_AddBoolToObject(root, "mqtt_enabled", cfg->mqtt_enabled);
+    cJSON_AddStringToObject(root, "mqtt_broker_url", cfg->mqtt_broker_url);
+    cJSON_AddNumberToObject(root, "mqtt_port", cfg->mqtt_port);
+    cJSON_AddStringToObject(root, "mqtt_username", cfg->mqtt_username);
+    cJSON_AddStringToObject(root, "mqtt_password", cfg->mqtt_password);
+    cJSON_AddStringToObject(root, "mqtt_topic_prefix", cfg->mqtt_topic_prefix);
 
     const char *json_str = cJSON_PrintUnformatted(root);
     if (json_str == NULL) {
@@ -251,7 +278,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
 // Handler for saving config
 static esp_err_t config_post_handler(httpd_req_t *req)
 {
-    #define POST_BUF_SIZE 4608
+    #define POST_BUF_SIZE 5120
     int remaining = req->content_len;
 
     if (remaining >= POST_BUF_SIZE) {
@@ -396,6 +423,40 @@ static esp_err_t config_post_handler(httpd_req_t *req)
         cfg->color_brightness = val;
     }
 
+    cJSON *mqtt_enabled = cJSON_GetObjectItem(root, "mqtt_enabled");
+    if (cJSON_IsBool(mqtt_enabled)) {
+        cfg->mqtt_enabled = cJSON_IsTrue(mqtt_enabled);
+    }
+
+    cJSON *mqtt_broker_url = cJSON_GetObjectItem(root, "mqtt_broker_url");
+    if (cJSON_IsString(mqtt_broker_url)) {
+        strncpy(cfg->mqtt_broker_url, mqtt_broker_url->valuestring, sizeof(cfg->mqtt_broker_url) - 1);
+        cfg->mqtt_broker_url[sizeof(cfg->mqtt_broker_url) - 1] = '\0';
+    }
+
+    cJSON *mqtt_port = cJSON_GetObjectItem(root, "mqtt_port");
+    if (cJSON_IsNumber(mqtt_port)) {
+        cfg->mqtt_port = (uint16_t)mqtt_port->valueint;
+    }
+
+    cJSON *mqtt_username = cJSON_GetObjectItem(root, "mqtt_username");
+    if (cJSON_IsString(mqtt_username)) {
+        strncpy(cfg->mqtt_username, mqtt_username->valuestring, sizeof(cfg->mqtt_username) - 1);
+        cfg->mqtt_username[sizeof(cfg->mqtt_username) - 1] = '\0';
+    }
+
+    cJSON *mqtt_password = cJSON_GetObjectItem(root, "mqtt_password");
+    if (cJSON_IsString(mqtt_password)) {
+        strncpy(cfg->mqtt_password, mqtt_password->valuestring, sizeof(cfg->mqtt_password) - 1);
+        cfg->mqtt_password[sizeof(cfg->mqtt_password) - 1] = '\0';
+    }
+
+    cJSON *mqtt_topic_prefix = cJSON_GetObjectItem(root, "mqtt_topic_prefix");
+    if (cJSON_IsString(mqtt_topic_prefix)) {
+        strncpy(cfg->mqtt_topic_prefix, mqtt_topic_prefix->valuestring, sizeof(cfg->mqtt_topic_prefix) - 1);
+        cfg->mqtt_topic_prefix[sizeof(cfg->mqtt_topic_prefix) - 1] = '\0';
+    }
+
     app_config_save(cfg);
     free(cfg);
     cJSON_Delete(root);
@@ -439,6 +500,7 @@ static esp_err_t brightness_post_handler(httpd_req_t *req)
         if (brightness > 100) brightness = 100;
         bsp_display_brightness_set(brightness);
         ESP_LOGI(TAG, "Brightness set to %d%%", brightness);
+        mqtt_ha_publish_state();
     }
 
     cJSON_Delete(root);
@@ -485,6 +547,7 @@ static esp_err_t color_brightness_post_handler(httpd_req_t *req)
         bsp_display_unlock();
         
         ESP_LOGI(TAG, "Color brightness set to %d%%", cb);
+        mqtt_ha_publish_state();
     }
 
     cJSON_Delete(root);

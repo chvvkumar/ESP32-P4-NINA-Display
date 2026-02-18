@@ -46,6 +46,12 @@ void app_config_init(void) {
         s_config.theme_index = 0;
         s_config.brightness = 50;
         s_config.color_brightness = 100;
+        s_config.mqtt_enabled = false;
+        strcpy(s_config.mqtt_broker_url, "mqtt://192.168.1.250");
+        s_config.mqtt_username[0] = '\0';
+        s_config.mqtt_password[0] = '\0';
+        strcpy(s_config.mqtt_topic_prefix, "ninadisplay");
+        s_config.mqtt_port = 1883;
         return;
     }
 
@@ -72,6 +78,12 @@ void app_config_init(void) {
         s_config.theme_index = 0;
         s_config.brightness = 50;
         s_config.color_brightness = 100;
+        s_config.mqtt_enabled = false;
+        strcpy(s_config.mqtt_broker_url, "mqtt://192.168.1.250");
+        s_config.mqtt_username[0] = '\0';
+        s_config.mqtt_password[0] = '\0';
+        strcpy(s_config.mqtt_topic_prefix, "ninadisplay");
+        s_config.mqtt_port = 1883;
 
         // Save defaults so we have them next time
         nvs_set_blob(my_handle, "config", &s_config, sizeof(app_config_t));
@@ -114,6 +126,14 @@ void app_config_init(void) {
         if (s_config.brightness < 0 || s_config.brightness > 100) {
              s_config.brightness = 50;
              needs_save = true;
+        }
+        if (s_config.mqtt_topic_prefix[0] == '\0') {
+            strcpy(s_config.mqtt_topic_prefix, "ninadisplay");
+            needs_save = true;
+        }
+        if (s_config.mqtt_port == 0) {
+            s_config.mqtt_port = 1883;
+            needs_save = true;
         }
         if (needs_save) {
             nvs_set_blob(my_handle, "config", &s_config, sizeof(app_config_t));

@@ -2,7 +2,7 @@ set(LV_DEMO_DIR ../managed_components/lvgl__lvgl/demos)
 file(GLOB_RECURSE LV_DEMOS_SOURCES ${LV_DEMO_DIR}/*.c)
 
 idf_component_register(
-    SRCS main.c ui/nina_dashboard.c ui/themes.c nina_client.c app_config.c web_server.c ${LV_DEMOS_SOURCES}
+    SRCS main.c ui/nina_dashboard.c ui/themes.c nina_client.c app_config.c web_server.c mqtt_ha.c ${LV_DEMOS_SOURCES}
     INCLUDE_DIRS . ui ${LV_DEMO_DIR})
 
 idf_component_get_property(LVGL_LIB lvgl__lvgl COMPONENT_LIB)

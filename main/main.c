@@ -20,6 +20,7 @@
 #include <string.h>
 #include "app_config.h"
 #include "web_server.h"
+#include "mqtt_ha.h"
 #include "esp_sntp.h"
 #include "driver/jpeg_decode.h"
 #include "esp_heap_caps.h"
@@ -298,6 +299,9 @@ static void data_update_task(void *arg) {
         strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
         ESP_LOGI(TAG, "System time set: %s", strftime_buf);
     }
+
+    // Start MQTT if enabled
+    mqtt_ha_start();
 
     ESP_LOGI(TAG, "Starting data polling with %d instances", instance_count);
 
