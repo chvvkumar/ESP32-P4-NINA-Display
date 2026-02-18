@@ -838,7 +838,7 @@ void update_nina_dashboard_page(int page_index, const nina_client_t *data) {
     // Filter color on the arc
     uint32_t filter_color = app_config_apply_brightness(current_theme->progress_color, gb);
     if (data->current_filter[0] != '\0' && strcmp(data->current_filter, "--") != 0) {
-        filter_color = app_config_get_filter_color(data->current_filter);
+        filter_color = app_config_get_filter_color(data->current_filter, page_index);
     }
     lv_obj_set_style_arc_color(p->arc_exposure, lv_color_hex(filter_color), LV_PART_INDICATOR);
     lv_obj_set_style_shadow_color(p->arc_exposure, lv_color_hex(filter_color), LV_PART_INDICATOR);

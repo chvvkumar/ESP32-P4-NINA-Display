@@ -40,7 +40,7 @@ static const char *HTML_CONTENT =
 ".color-grid{display:flex;gap:12px;width:100%;flex-wrap:wrap;margin-top:10px;}"
 ".filter-item{flex:1 0 90px;min-width:0;max-width:200px;background:rgba(255,255,255,0.03);padding:14px 10px;border-radius:12px;display:flex;flex-direction:column;align-items:center;gap:10px;border:1px solid transparent;transition:all 0.2s;}"
 ".filter-item:hover{background:rgba(255,255,255,0.06);border-color:var(--border);}"
-".filter-item label{margin:0;font-size:0.7rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}"
+".filter-item label{margin:0;font-size:0.7rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;text-transform:none;}"
 ".color-dot{width:40px;height:40px;border-radius:10px;border:2px solid var(--border);cursor:pointer;padding:0;background:none;transition:transform 0.1s;}"
 ".color-dot:active{transform:scale(0.9);}"
 ".slider-wrapper{display:flex;align-items:center;gap:12px;}"
@@ -55,7 +55,11 @@ static const char *HTML_CONTENT =
 ".btn-danger:hover{border-color:var(--danger);color:var(--danger);}"
 ".color-rect{width:48px;height:38px;padding:0;border:1px solid var(--border);background:none;border-radius:8px;cursor:pointer;}"
 ".area-net{grid-column:span 4;}.area-api{grid-column:span 4;}.area-appearance{grid-column:span 4;}"
-".area-filter{grid-column:span 12;}.area-thresholds{grid-column:span 12;}"
+".area-thresholds{grid-column:span 12;}"
+".filter-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px;}"
+".filter-grid .filter-item{flex:none;min-width:0;padding:8px 4px;}"
+".filter-grid .filter-item label{font-size:0.65rem;}"
+".filter-grid .color-dot{width:32px;height:32px;border-radius:8px;}"
 ".area-actions{grid-column:span 12;background:rgba(20,184,166,0.03);border-color:rgba(20,184,166,0.2);}"
 ".action-row{display:flex;gap:16px;align-items:flex-start;}"
 ".action-main{flex:2;}.action-subs{flex:3;display:flex;flex-direction:column;gap:12px;}"
@@ -91,11 +95,10 @@ static const char *HTML_CONTENT =
 "</select></div>"
 "<div class=\"group\"><label>Backlight</label><div class=\"slider-wrapper\"><input type=\"range\" id=\"brightness\" min=\"0\" max=\"100\" value=\"50\" oninput=\"setBrightness(this.value)\"><span id=\"bright_val\" style=\"width:35px;font-size:0.8rem\">50%</span></div></div>"
 "<div class=\"group\"><label>Text Brightness</label><div class=\"slider-wrapper\"><input type=\"range\" id=\"color_brightness\" min=\"0\" max=\"100\" value=\"100\" oninput=\"setColorBrightness(this.value)\"><span id=\"cbright_val\" style=\"width:35px;font-size:0.8rem\">100%</span></div></div></div>"
-"<div class=\"tile area-filter\"><h3>Filters</h3>"
-"<div id=\"filterColors\" class=\"color-grid\"></div></div>"
-"<div class=\"tile area-thresholds\"><h3>Thresholds</h3>"
+"<div class=\"tile area-thresholds\"><h3>NINA Settings</h3>"
 "<div class=\"threshold-grid\">"
 "<div class=\"threshold-node\"><h4 id=\"tnode0\">Node 1</h4>"
+"<div class=\"threshold-sub\"><h5>Filters</h5><div id=\"filters_0\" class=\"filter-grid\"></div></div>"
 "<div class=\"threshold-sub\"><h5>RMS</h5>"
 "<div class=\"group\"><label>Target (Optimal)</label><div style=\"display:flex;gap:8px\"><input type=\"text\" id=\"rms_good_max_0\"><input type=\"color\" id=\"rms_good_color_0\" class=\"color-rect\"></div></div>"
 "<div class=\"group\"><label>Warning (Caution)</label><div style=\"display:flex;gap:8px\"><input type=\"text\" id=\"rms_ok_max_0\"><input type=\"color\" id=\"rms_ok_color_0\" class=\"color-rect\"></div></div>"
@@ -105,6 +108,7 @@ static const char *HTML_CONTENT =
 "<div class=\"group\"><label>Warning (Caution)</label><div style=\"display:flex;gap:8px\"><input type=\"text\" id=\"hfr_ok_max_0\"><input type=\"color\" id=\"hfr_ok_color_0\" class=\"color-rect\"></div></div>"
 "<div class=\"group\"><label>Critical Color</label><input type=\"color\" id=\"hfr_bad_color_0\" class=\"color-rect\" style=\"width:100%\"></div></div></div>"
 "<div class=\"threshold-node\"><h4 id=\"tnode1\">Node 2</h4>"
+"<div class=\"threshold-sub\"><h5>Filters</h5><div id=\"filters_1\" class=\"filter-grid\"></div></div>"
 "<div class=\"threshold-sub\"><h5>RMS</h5>"
 "<div class=\"group\"><label>Target (Optimal)</label><div style=\"display:flex;gap:8px\"><input type=\"text\" id=\"rms_good_max_1\"><input type=\"color\" id=\"rms_good_color_1\" class=\"color-rect\"></div></div>"
 "<div class=\"group\"><label>Warning (Caution)</label><div style=\"display:flex;gap:8px\"><input type=\"text\" id=\"rms_ok_max_1\"><input type=\"color\" id=\"rms_ok_color_1\" class=\"color-rect\"></div></div>"
@@ -114,6 +118,7 @@ static const char *HTML_CONTENT =
 "<div class=\"group\"><label>Warning (Caution)</label><div style=\"display:flex;gap:8px\"><input type=\"text\" id=\"hfr_ok_max_1\"><input type=\"color\" id=\"hfr_ok_color_1\" class=\"color-rect\"></div></div>"
 "<div class=\"group\"><label>Critical Color</label><input type=\"color\" id=\"hfr_bad_color_1\" class=\"color-rect\" style=\"width:100%\"></div></div></div>"
 "<div class=\"threshold-node\"><h4 id=\"tnode2\">Node 3</h4>"
+"<div class=\"threshold-sub\"><h5>Filters</h5><div id=\"filters_2\" class=\"filter-grid\"></div></div>"
 "<div class=\"threshold-sub\"><h5>RMS</h5>"
 "<div class=\"group\"><label>Target (Optimal)</label><div style=\"display:flex;gap:8px\"><input type=\"text\" id=\"rms_good_max_2\"><input type=\"color\" id=\"rms_good_color_2\" class=\"color-rect\"></div></div>"
 "<div class=\"group\"><label>Warning (Caution)</label><div style=\"display:flex;gap:8px\"><input type=\"text\" id=\"rms_ok_max_2\"><input type=\"color\" id=\"rms_ok_color_2\" class=\"color-rect\"></div></div>"
@@ -135,18 +140,18 @@ static const char *HTML_CONTENT =
 "</div></div></div>"
 "</div></div>"
 "<script>"
-"let filterColorsObj={};"
-"function renderFilterColors(){"
-"const c=document.getElementById('filterColors');c.innerHTML='';"
-"const fs=Object.keys(filterColorsObj).sort();"
-"if(fs.length===0){c.innerHTML='<p style=\"color:var(--text-dim);font-style:italic;font-size:0.8rem\">No filter data available.</p>';return;}"
-"fs.forEach(f=>{"
+"let filterColorsArr=[{},{},{}];"
+"function renderFilterColors(i){"
+"const c=document.getElementById('filters_'+i);if(!c)return;c.innerHTML='';"
+"const obj=filterColorsArr[i];const fs=Object.keys(obj).sort();"
+"if(fs.length===0){c.innerHTML='<p style=\"color:var(--text-dim);font-style:italic;font-size:0.7rem\">No filters</p>';return;}"
+"fs.slice(0,8).forEach(f=>{"
 "const w=document.createElement('div');w.className='filter-item';"
 "w.innerHTML=`<label>${f}</label>"
-"<input type='color' class='color-dot' value='${filterColorsObj[f]}' onchange='updateFilterColor(\"${f}\",this.value)'>`;"
+"<input type='color' class='color-dot' value='${obj[f]}' onchange='updateFilterColor(${i},\"${f}\",this.value)'>`;"
 "c.appendChild(w);});"
 "}"
-"function updateFilterColor(n,v){filterColorsObj[n]=v;}"
+"function updateFilterColor(i,n,v){filterColorsArr[i][n]=v;}"
 "function updateNodeLabels(){"
 "['url1','url2','url3'].forEach((id,i)=>{"
 "const v=document.getElementById(id).value.trim();"
@@ -160,7 +165,7 @@ static const char *HTML_CONTENT =
 "function getConfigData(){"
 "const h1=document.getElementById('url1').value.trim();const h2=document.getElementById('url2').value.trim();const h3=document.getElementById('url3').value.trim();"
 "const u1=h1?'http://'+h1+':1888/v2/api/':'';const u2=h2?'http://'+h2+':1888/v2/api/':'';const u3=h3?'http://'+h3+':1888/v2/api/':'';"
-"return{ssid:document.getElementById('ssid').value,pass:document.getElementById('pass').value,url1:u1,url2:u2,url3:u3,ntp:document.getElementById('ntp').value,theme_index:parseInt(document.getElementById('theme_select').value),brightness:parseInt(document.getElementById('brightness').value),color_brightness:parseInt(document.getElementById('color_brightness').value),filter_colors:JSON.stringify(filterColorsObj),rms_thresholds_1:JSON.stringify(getRmsObj(0)),rms_thresholds_2:JSON.stringify(getRmsObj(1)),rms_thresholds_3:JSON.stringify(getRmsObj(2)),hfr_thresholds_1:JSON.stringify(getHfrObj(0)),hfr_thresholds_2:JSON.stringify(getHfrObj(1)),hfr_thresholds_3:JSON.stringify(getHfrObj(2))};}"
+"return{ssid:document.getElementById('ssid').value,pass:document.getElementById('pass').value,url1:u1,url2:u2,url3:u3,ntp:document.getElementById('ntp').value,theme_index:parseInt(document.getElementById('theme_select').value),brightness:parseInt(document.getElementById('brightness').value),color_brightness:parseInt(document.getElementById('color_brightness').value),filter_colors_1:JSON.stringify(filterColorsArr[0]),filter_colors_2:JSON.stringify(filterColorsArr[1]),filter_colors_3:JSON.stringify(filterColorsArr[2]),rms_thresholds_1:JSON.stringify(getRmsObj(0)),rms_thresholds_2:JSON.stringify(getRmsObj(1)),rms_thresholds_3:JSON.stringify(getRmsObj(2)),hfr_thresholds_1:JSON.stringify(getHfrObj(0)),hfr_thresholds_2:JSON.stringify(getHfrObj(1)),hfr_thresholds_3:JSON.stringify(getHfrObj(2))};}"
 "function loadThresholds(d,i,rkey,hkey){"
 "try{const r=JSON.parse(d[rkey]||'{}');document.getElementById('rms_good_max_'+i).value=r.good_max||0.5;document.getElementById('rms_ok_max_'+i).value=r.ok_max||1.0;document.getElementById('rms_good_color_'+i).value=r.good_color||'#10b981';document.getElementById('rms_ok_color_'+i).value=r.ok_color||'#eab308';document.getElementById('rms_bad_color_'+i).value=r.bad_color||'#ef4444';}catch(e){}"
 "try{const h=JSON.parse(d[hkey]||'{}');document.getElementById('hfr_good_max_'+i).value=h.good_max||2.0;document.getElementById('hfr_ok_max_'+i).value=h.ok_max||3.5;document.getElementById('hfr_good_color_'+i).value=h.good_color||'#10b981';document.getElementById('hfr_ok_color_'+i).value=h.ok_color||'#eab308';document.getElementById('hfr_bad_color_'+i).value=h.bad_color||'#ef4444';}catch(e){}"
@@ -182,8 +187,10 @@ static const char *HTML_CONTENT =
 "document.getElementById('theme_select').value=d.theme_index||0;"
 "var br=d.brightness!=null?d.brightness:50;document.getElementById('brightness').value=br;document.getElementById('bright_val').innerText=br+'%';"
 "var cb=d.color_brightness!=null?d.color_brightness:100;document.getElementById('color_brightness').value=cb;document.getElementById('cbright_val').innerText=cb+'%';"
-"try{filterColorsObj=JSON.parse(d.filter_colors||'{}');}catch(e){}"
-"renderFilterColors();"
+"try{filterColorsArr[0]=JSON.parse(d.filter_colors_1||'{}');}catch(e){}"
+"try{filterColorsArr[1]=JSON.parse(d.filter_colors_2||'{}');}catch(e){}"
+"try{filterColorsArr[2]=JSON.parse(d.filter_colors_3||'{}');}catch(e){}"
+"renderFilterColors(0);renderFilterColors(1);renderFilterColors(2);"
 "loadThresholds(d,0,'rms_thresholds_1','hfr_thresholds_1');"
 "loadThresholds(d,1,'rms_thresholds_2','hfr_thresholds_2');"
 "loadThresholds(d,2,'rms_thresholds_3','hfr_thresholds_3');"
@@ -214,7 +221,9 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddStringToObject(root, "url2", cfg->api_url_2);
     cJSON_AddStringToObject(root, "url3", cfg->api_url_3);
     cJSON_AddStringToObject(root, "ntp", cfg->ntp_server);
-    cJSON_AddStringToObject(root, "filter_colors", cfg->filter_colors);
+    cJSON_AddStringToObject(root, "filter_colors_1", cfg->filter_colors_1);
+    cJSON_AddStringToObject(root, "filter_colors_2", cfg->filter_colors_2);
+    cJSON_AddStringToObject(root, "filter_colors_3", cfg->filter_colors_3);
     cJSON_AddStringToObject(root, "rms_thresholds_1", cfg->rms_thresholds_1);
     cJSON_AddStringToObject(root, "rms_thresholds_2", cfg->rms_thresholds_2);
     cJSON_AddStringToObject(root, "rms_thresholds_3", cfg->rms_thresholds_3);
@@ -242,16 +251,23 @@ static esp_err_t config_get_handler(httpd_req_t *req)
 // Handler for saving config
 static esp_err_t config_post_handler(httpd_req_t *req)
 {
-    char buf[3584];
-    int ret, remaining = req->content_len;
+    #define POST_BUF_SIZE 4608
+    int remaining = req->content_len;
 
-    if (remaining >= sizeof(buf)) {
+    if (remaining >= POST_BUF_SIZE) {
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
 
-    ret = httpd_req_recv(req, buf, remaining);
+    char *buf = malloc(POST_BUF_SIZE);
+    if (!buf) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    int ret = httpd_req_recv(req, buf, remaining);
     if (ret <= 0) {
+        free(buf);
         if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
             httpd_resp_send_408(req);
         }
@@ -260,54 +276,60 @@ static esp_err_t config_post_handler(httpd_req_t *req)
     buf[ret] = '\0';
 
     cJSON *root = cJSON_Parse(buf);
+    free(buf);
     if (!root) {
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
 
-    app_config_t cfg;
+    app_config_t *cfg = malloc(sizeof(app_config_t));
+    if (!cfg) {
+        cJSON_Delete(root);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
     // Load current to preserve anything not sent
-    memcpy(&cfg, app_config_get(), sizeof(app_config_t));
+    memcpy(cfg, app_config_get(), sizeof(app_config_t));
 
     cJSON *ssid = cJSON_GetObjectItem(root, "ssid");
     if (cJSON_IsString(ssid)) {
-        strncpy(cfg.wifi_ssid, ssid->valuestring, sizeof(cfg.wifi_ssid) - 1);
-        cfg.wifi_ssid[sizeof(cfg.wifi_ssid) - 1] = '\0';
+        strncpy(cfg->wifi_ssid, ssid->valuestring, sizeof(cfg->wifi_ssid) - 1);
+        cfg->wifi_ssid[sizeof(cfg->wifi_ssid) - 1] = '\0';
     }
 
     cJSON *pass = cJSON_GetObjectItem(root, "pass");
     if (cJSON_IsString(pass)) {
-        strncpy(cfg.wifi_pass, pass->valuestring, sizeof(cfg.wifi_pass) - 1);
-        cfg.wifi_pass[sizeof(cfg.wifi_pass) - 1] = '\0';
+        strncpy(cfg->wifi_pass, pass->valuestring, sizeof(cfg->wifi_pass) - 1);
+        cfg->wifi_pass[sizeof(cfg->wifi_pass) - 1] = '\0';
     }
 
     cJSON *url1 = cJSON_GetObjectItem(root, "url1");
     if (cJSON_IsString(url1)) {
-        strncpy(cfg.api_url_1, url1->valuestring, sizeof(cfg.api_url_1) - 1);
-        cfg.api_url_1[sizeof(cfg.api_url_1) - 1] = '\0';
+        strncpy(cfg->api_url_1, url1->valuestring, sizeof(cfg->api_url_1) - 1);
+        cfg->api_url_1[sizeof(cfg->api_url_1) - 1] = '\0';
     }
 
     cJSON *url2 = cJSON_GetObjectItem(root, "url2");
     if (cJSON_IsString(url2)) {
-        strncpy(cfg.api_url_2, url2->valuestring, sizeof(cfg.api_url_2) - 1);
-        cfg.api_url_2[sizeof(cfg.api_url_2) - 1] = '\0';
+        strncpy(cfg->api_url_2, url2->valuestring, sizeof(cfg->api_url_2) - 1);
+        cfg->api_url_2[sizeof(cfg->api_url_2) - 1] = '\0';
     }
 
     cJSON *url3 = cJSON_GetObjectItem(root, "url3");
     if (cJSON_IsString(url3)) {
-        strncpy(cfg.api_url_3, url3->valuestring, sizeof(cfg.api_url_3) - 1);
-        cfg.api_url_3[sizeof(cfg.api_url_3) - 1] = '\0';
+        strncpy(cfg->api_url_3, url3->valuestring, sizeof(cfg->api_url_3) - 1);
+        cfg->api_url_3[sizeof(cfg->api_url_3) - 1] = '\0';
     }
 
     cJSON *ntp = cJSON_GetObjectItem(root, "ntp");
     if (cJSON_IsString(ntp)) {
-        strncpy(cfg.ntp_server, ntp->valuestring, sizeof(cfg.ntp_server) - 1);
-        cfg.ntp_server[sizeof(cfg.ntp_server) - 1] = '\0';
+        strncpy(cfg->ntp_server, ntp->valuestring, sizeof(cfg->ntp_server) - 1);
+        cfg->ntp_server[sizeof(cfg->ntp_server) - 1] = '\0';
     }
 
     cJSON *theme_index = cJSON_GetObjectItem(root, "theme_index");
     if (cJSON_IsNumber(theme_index)) {
-        cfg.theme_index = theme_index->valueint;
+        cfg->theme_index = theme_index->valueint;
     }
 
     cJSON *brightness = cJSON_GetObjectItem(root, "brightness");
@@ -315,45 +337,55 @@ static esp_err_t config_post_handler(httpd_req_t *req)
         int val = brightness->valueint;
         if (val < 0) val = 0;
         if (val > 100) val = 100;
-        cfg.brightness = val;
+        cfg->brightness = val;
     }
 
-    cJSON *filter_colors = cJSON_GetObjectItem(root, "filter_colors");
-    if (cJSON_IsString(filter_colors)) {
-        strncpy(cfg.filter_colors, filter_colors->valuestring, sizeof(cfg.filter_colors) - 1);
-        cfg.filter_colors[sizeof(cfg.filter_colors) - 1] = '\0';
+    cJSON *filter_colors_1 = cJSON_GetObjectItem(root, "filter_colors_1");
+    if (cJSON_IsString(filter_colors_1)) {
+        strncpy(cfg->filter_colors_1, filter_colors_1->valuestring, sizeof(cfg->filter_colors_1) - 1);
+        cfg->filter_colors_1[sizeof(cfg->filter_colors_1) - 1] = '\0';
+    }
+    cJSON *filter_colors_2 = cJSON_GetObjectItem(root, "filter_colors_2");
+    if (cJSON_IsString(filter_colors_2)) {
+        strncpy(cfg->filter_colors_2, filter_colors_2->valuestring, sizeof(cfg->filter_colors_2) - 1);
+        cfg->filter_colors_2[sizeof(cfg->filter_colors_2) - 1] = '\0';
+    }
+    cJSON *filter_colors_3 = cJSON_GetObjectItem(root, "filter_colors_3");
+    if (cJSON_IsString(filter_colors_3)) {
+        strncpy(cfg->filter_colors_3, filter_colors_3->valuestring, sizeof(cfg->filter_colors_3) - 1);
+        cfg->filter_colors_3[sizeof(cfg->filter_colors_3) - 1] = '\0';
     }
 
     cJSON *rms_thresholds_1 = cJSON_GetObjectItem(root, "rms_thresholds_1");
     if (cJSON_IsString(rms_thresholds_1)) {
-        strncpy(cfg.rms_thresholds_1, rms_thresholds_1->valuestring, sizeof(cfg.rms_thresholds_1) - 1);
-        cfg.rms_thresholds_1[sizeof(cfg.rms_thresholds_1) - 1] = '\0';
+        strncpy(cfg->rms_thresholds_1, rms_thresholds_1->valuestring, sizeof(cfg->rms_thresholds_1) - 1);
+        cfg->rms_thresholds_1[sizeof(cfg->rms_thresholds_1) - 1] = '\0';
     }
     cJSON *rms_thresholds_2 = cJSON_GetObjectItem(root, "rms_thresholds_2");
     if (cJSON_IsString(rms_thresholds_2)) {
-        strncpy(cfg.rms_thresholds_2, rms_thresholds_2->valuestring, sizeof(cfg.rms_thresholds_2) - 1);
-        cfg.rms_thresholds_2[sizeof(cfg.rms_thresholds_2) - 1] = '\0';
+        strncpy(cfg->rms_thresholds_2, rms_thresholds_2->valuestring, sizeof(cfg->rms_thresholds_2) - 1);
+        cfg->rms_thresholds_2[sizeof(cfg->rms_thresholds_2) - 1] = '\0';
     }
     cJSON *rms_thresholds_3 = cJSON_GetObjectItem(root, "rms_thresholds_3");
     if (cJSON_IsString(rms_thresholds_3)) {
-        strncpy(cfg.rms_thresholds_3, rms_thresholds_3->valuestring, sizeof(cfg.rms_thresholds_3) - 1);
-        cfg.rms_thresholds_3[sizeof(cfg.rms_thresholds_3) - 1] = '\0';
+        strncpy(cfg->rms_thresholds_3, rms_thresholds_3->valuestring, sizeof(cfg->rms_thresholds_3) - 1);
+        cfg->rms_thresholds_3[sizeof(cfg->rms_thresholds_3) - 1] = '\0';
     }
 
     cJSON *hfr_thresholds_1 = cJSON_GetObjectItem(root, "hfr_thresholds_1");
     if (cJSON_IsString(hfr_thresholds_1)) {
-        strncpy(cfg.hfr_thresholds_1, hfr_thresholds_1->valuestring, sizeof(cfg.hfr_thresholds_1) - 1);
-        cfg.hfr_thresholds_1[sizeof(cfg.hfr_thresholds_1) - 1] = '\0';
+        strncpy(cfg->hfr_thresholds_1, hfr_thresholds_1->valuestring, sizeof(cfg->hfr_thresholds_1) - 1);
+        cfg->hfr_thresholds_1[sizeof(cfg->hfr_thresholds_1) - 1] = '\0';
     }
     cJSON *hfr_thresholds_2 = cJSON_GetObjectItem(root, "hfr_thresholds_2");
     if (cJSON_IsString(hfr_thresholds_2)) {
-        strncpy(cfg.hfr_thresholds_2, hfr_thresholds_2->valuestring, sizeof(cfg.hfr_thresholds_2) - 1);
-        cfg.hfr_thresholds_2[sizeof(cfg.hfr_thresholds_2) - 1] = '\0';
+        strncpy(cfg->hfr_thresholds_2, hfr_thresholds_2->valuestring, sizeof(cfg->hfr_thresholds_2) - 1);
+        cfg->hfr_thresholds_2[sizeof(cfg->hfr_thresholds_2) - 1] = '\0';
     }
     cJSON *hfr_thresholds_3 = cJSON_GetObjectItem(root, "hfr_thresholds_3");
     if (cJSON_IsString(hfr_thresholds_3)) {
-        strncpy(cfg.hfr_thresholds_3, hfr_thresholds_3->valuestring, sizeof(cfg.hfr_thresholds_3) - 1);
-        cfg.hfr_thresholds_3[sizeof(cfg.hfr_thresholds_3) - 1] = '\0';
+        strncpy(cfg->hfr_thresholds_3, hfr_thresholds_3->valuestring, sizeof(cfg->hfr_thresholds_3) - 1);
+        cfg->hfr_thresholds_3[sizeof(cfg->hfr_thresholds_3) - 1] = '\0';
     }
 
     cJSON *color_brightness = cJSON_GetObjectItem(root, "color_brightness");
@@ -361,10 +393,11 @@ static esp_err_t config_post_handler(httpd_req_t *req)
         int val = color_brightness->valueint;
         if (val < 0) val = 0;
         if (val > 100) val = 100;
-        cfg.color_brightness = val;
+        cfg->color_brightness = val;
     }
 
-    app_config_save(&cfg);
+    app_config_save(cfg);
+    free(cfg);
     cJSON_Delete(root);
 
     ESP_LOGI(TAG, "Config saved to NVS");

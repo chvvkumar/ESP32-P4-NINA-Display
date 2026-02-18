@@ -10,11 +10,6 @@ static const char *TAG = "app_config";
 static app_config_t s_config;
 static const char *NVS_NAMESPACE = "app_conf";
 
-// Default filter color mappings (matching common LRGB + Narrowband filters) - DIMMED for Night Vision
-static const char *DEFAULT_FILTER_COLORS =
-    "{\"L\":\"#787878\",\"R\":\"#991b1b\",\"G\":\"#15803d\",\"B\":\"#1d4ed8\","
-    "\"Ha\":\"#be123c\",\"Sii\":\"#7e22ce\",\"Oiii\":\"#0e7490\"}";
-
 // Default RMS thresholds: good <= 0.5", ok <= 1.0", bad > 1.0" - DIMMED for Night Vision
 static const char *DEFAULT_RMS_THRESHOLDS =
     "{\"good_max\":0.5,\"ok_max\":1.0,"
@@ -39,7 +34,9 @@ void app_config_init(void) {
         strcpy(s_config.api_url_2, "http://astromele3.lan:1888/v2/api/");
         s_config.api_url_3[0] = '\0';
         strcpy(s_config.ntp_server, "pool.ntp.org");
-        strcpy(s_config.filter_colors, DEFAULT_FILTER_COLORS);
+        strcpy(s_config.filter_colors_1, "{}");
+        strcpy(s_config.filter_colors_2, "{}");
+        strcpy(s_config.filter_colors_3, "{}");
         strcpy(s_config.rms_thresholds_1, DEFAULT_RMS_THRESHOLDS);
         strcpy(s_config.rms_thresholds_2, DEFAULT_RMS_THRESHOLDS);
         strcpy(s_config.rms_thresholds_3, DEFAULT_RMS_THRESHOLDS);
@@ -63,7 +60,9 @@ void app_config_init(void) {
         strcpy(s_config.api_url_2, "http://astromele3.lan:1888/v2/api/");
         s_config.api_url_3[0] = '\0';
         strcpy(s_config.ntp_server, "pool.ntp.org");
-        strcpy(s_config.filter_colors, DEFAULT_FILTER_COLORS);
+        strcpy(s_config.filter_colors_1, "{}");
+        strcpy(s_config.filter_colors_2, "{}");
+        strcpy(s_config.filter_colors_3, "{}");
         strcpy(s_config.rms_thresholds_1, DEFAULT_RMS_THRESHOLDS);
         strcpy(s_config.rms_thresholds_2, DEFAULT_RMS_THRESHOLDS);
         strcpy(s_config.rms_thresholds_3, DEFAULT_RMS_THRESHOLDS);
@@ -80,11 +79,6 @@ void app_config_init(void) {
     } else {
         // Config loaded successfully, but check if fields are valid
         bool needs_save = false;
-        if (s_config.filter_colors[0] == '\0') {
-            ESP_LOGI(TAG, "Filter colors empty, initializing with defaults");
-            strcpy(s_config.filter_colors, DEFAULT_FILTER_COLORS);
-            needs_save = true;
-        }
         if (s_config.rms_thresholds_1[0] == '\0') {
             strcpy(s_config.rms_thresholds_1, DEFAULT_RMS_THRESHOLDS);
             needs_save = true;
@@ -192,6 +186,17 @@ static uint32_t parse_color_field(cJSON *root, const char *field, uint32_t fallb
 }
 
 /**
+ * @brief Get pointer to the filter_colors field for a given instance index
+ */
+static char *get_filter_colors_field(int instance_index) {
+    switch (instance_index) {
+        case 1: return s_config.filter_colors_2;
+        case 2: return s_config.filter_colors_3;
+        default: return s_config.filter_colors_1;
+    }
+}
+
+/**
  * @brief Apply brightness scaling to a color
  * @param color 0xRRGGBB color value
  * @param brightness Brightness percentage 0-100
@@ -214,13 +219,14 @@ uint32_t app_config_apply_brightness(uint32_t color, int brightness) {
  * @param filter_name Name of the filter (e.g., "Ha", "L", "R")
  * @return 32-bit color value (0xRRGGBB) or default blue if not found
  */
-uint32_t app_config_get_filter_color(const char *filter_name) {
+uint32_t app_config_get_filter_color(const char *filter_name, int instance_index) {
     if (!filter_name || filter_name[0] == '\0' || strcmp(filter_name, "--") == 0) {
         return 0x3b82f6;  // Default blue for unknown filter
     }
 
-    // Parse the filter_colors JSON string
-    cJSON *root = cJSON_Parse(s_config.filter_colors);
+    // Parse the per-instance filter_colors JSON string
+    const char *json = get_filter_colors_field(instance_index);
+    cJSON *root = cJSON_Parse(json);
     if (!root) {
         ESP_LOGW(TAG, "Failed to parse filter colors JSON, using default");
         return 0x3b82f6;  // Default blue
@@ -357,13 +363,14 @@ static bool filter_in_api_list(const char *name, const char *filter_names[], int
  * - Removes stale entries for filters no longer in the API
  * - Saves to NVS only if something changed
  */
-void app_config_sync_filters(const char *filter_names[], int count) {
+void app_config_sync_filters(const char *filter_names[], int count, int instance_index) {
     if (count <= 0) return;
 
     bool needs_save = false;
+    char *field = get_filter_colors_field(instance_index);
 
-    // --- Sync filter_colors ---
-    cJSON *colors = cJSON_Parse(s_config.filter_colors);
+    // --- Sync filter_colors for this instance ---
+    cJSON *colors = cJSON_Parse(field);
     if (!colors) colors = cJSON_CreateObject();
 
     // Add missing filters
@@ -390,8 +397,8 @@ void app_config_sync_filters(const char *filter_names[], int count) {
     if (needs_save) {
         char *json_str = cJSON_PrintUnformatted(colors);
         if (json_str) {
-            if (strlen(json_str) < sizeof(s_config.filter_colors)) {
-                strcpy(s_config.filter_colors, json_str);
+            if (strlen(json_str) < 512) {
+                strcpy(field, json_str);
             } else {
                 ESP_LOGW(TAG, "Filter colors JSON too large (%d bytes), not updating", (int)strlen(json_str));
             }

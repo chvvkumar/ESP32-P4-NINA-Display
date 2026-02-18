@@ -365,7 +365,7 @@ static void data_update_task(void *arg) {
                     for (int f = 0; f < instances[i].filter_count; f++) {
                         names[f] = instances[i].filters[f].name;
                     }
-                    app_config_sync_filters(names, instances[i].filter_count);
+                    app_config_sync_filters(names, instances[i].filter_count, i);
                     filters_synced[i] = true;
                 }
             } else {
