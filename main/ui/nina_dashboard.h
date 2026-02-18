@@ -24,11 +24,19 @@ void create_nina_dashboard(lv_obj_t * parent, int instance_count);
 void update_nina_dashboard_page(int page_index, const nina_client_t *data);
 
 /**
- * @brief Switch the visible dashboard page
+ * @brief Switch the visible dashboard page (instant)
  * @param page_index Index of the page to show (0-2)
  * @param instance_count Total number of configured instances
  */
 void nina_dashboard_show_page(int page_index, int instance_count);
+
+/**
+ * @brief Switch the visible dashboard page with an optional transition effect
+ * @param page_index Index of the page to show (0-2)
+ * @param instance_count Total number of configured instances
+ * @param effect Transition effect: 0 = instant, 1 = fade
+ */
+void nina_dashboard_show_page_animated(int page_index, int instance_count, int effect);
 
 /**
  * @brief Get the currently active page index

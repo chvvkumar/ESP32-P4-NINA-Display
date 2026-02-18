@@ -28,7 +28,7 @@
     .tile h3 { margin: 0 0 20px 0; font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent); display: flex; align-items: center; gap: 8px; }
     .group { margin-bottom: 18px; position: relative; }
     label { display: block; margin-bottom: 6px; color: var(--text-dim); font-size: 0.75rem; font-weight: 500; text-transform: uppercase; }
-    input[type='text'], input[type='password'], select { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 10px 14px; border-radius: 8px; width: 100%; font-size: 0.9rem; transition: all 0.2s; }
+    input[type='text'], input[type='password'], input[type='number'], select { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 10px 14px; border-radius: 8px; width: 100%; font-size: 0.9rem; transition: all 0.2s; }
     input:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(20,184,166,0.2); }
     .color-grid { display: flex; gap: 12px; width: 100%; flex-wrap: wrap; margin-top: 10px; }
     .filter-item { flex: 1 0 90px; min-width: 0; max-width: 200px; background: rgba(255,255,255,0.03); padding: 14px 10px; border-radius: 12px; display: flex; flex-direction: column; align-items: center; gap: 10px; border: 1px solid transparent; transition: all 0.2s; }
@@ -61,7 +61,6 @@
     .filter-grid .filter-item { flex: none; min-width: 0; padding: 8px 4px; }
     .filter-grid .filter-item label { font-size: 0.65rem; }
     .filter-grid .color-dot { width: 32px; height: 32px; border-radius: 8px; }
-    .area-mqtt { grid-column: span 6; }
     .area-actions { grid-column: span 12; }
     .action-row { display: flex; gap: 12px; }
     .action-row .btn { flex: 1; }
@@ -73,7 +72,7 @@
     .threshold-sub { margin-bottom: 16px; }
     .threshold-sub:last-child { margin-bottom: 0; }
     @media (max-width: 900px) {
-      .area-net, .area-api, .area-appearance, .area-mqtt { grid-column: span 12; }
+      .area-net, .area-api, .area-appearance { grid-column: span 12; }
       .action-row { flex-direction: column; }
       .action-row .btn { width: 100%; }
       .filter-item { flex: 1 0 45%; }
@@ -91,6 +90,14 @@
       <div class="group"><label>SSID</label><input type="text" id="ssid"></div>
       <div class="group"><label>Password</label><input type="password" id="pass"></div>
       <div class="group"><label>NTP Server</label><input type="text" id="ntp"></div>
+      <div style="border-top:1px solid var(--border);margin:16px 0 14px"></div>
+      <div class="group" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">MQTT / Home Assistant</label><label class="toggle"><input type="checkbox" id="mqtt_enabled"><span class="toggle-slider"></span></label></div>
+      <div class="group"><label>Broker Host</label><input type="text" id="mqtt_broker" placeholder="192.168.1.250"></div>
+      <div class="group"><label>Port</label><input type="text" id="mqtt_port" placeholder="1883"></div>
+      <div class="group"><label>Username</label><input type="text" id="mqtt_user"></div>
+      <div class="group"><label>Password</label><input type="password" id="mqtt_pass"></div>
+      <div class="group"><label>Topic Prefix</label><input type="text" id="mqtt_prefix" placeholder="ninadisplay"></div>
+      <p class="hint">Reboot required after changing WiFi, NTP, or MQTT settings.</p>
     </div>
 
     <div class="tile area-api">
@@ -115,6 +122,11 @@
       </div>
       <div class="group"><label>Backlight</label><div class="slider-wrapper"><input type="range" id="brightness" min="0" max="100" value="50" oninput="setBrightness(this.value)"><span id="bright_val" style="width:35px;font-size:0.8rem">50%</span></div></div>
       <div class="group"><label>Text Brightness</label><div class="slider-wrapper"><input type="range" id="color_brightness" min="0" max="100" value="100" oninput="setColorBrightness(this.value)"><span id="cbright_val" style="width:35px;font-size:0.8rem">100%</span></div></div>
+      <div style="border-top:1px solid var(--border);margin:16px 0 14px"></div>
+      <div class="group"><label>Active Page</label><select id="active_page" onchange="setPage(this.value)"><option value="-1">Auto (no override)</option><option value="0">Page 1</option><option value="1">Page 2</option><option value="2">Page 3</option></select><p class="hint">Switches immediately and persists through reboots. Set to Auto when using rotation.</p></div>
+      <div class="group"><label>Auto-Rotate Interval (seconds, 0 = off)</label><input type="number" id="auto_rotate_interval" min="0" max="3600" value="0"><p class="hint">Pages rotate every N seconds. Minimum effective interval is ~4 s.</p></div>
+      <div class="group"><label>Transition Effect</label><select id="auto_rotate_effect"><option value="0">Instant</option><option value="1">Fade</option></select></div>
+      <div class="group" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">Skip Disconnected Pages</label><label class="toggle"><input type="checkbox" id="auto_rotate_skip"><span class="toggle-slider"></span></label></div>
     </div>
 
     <div class="tile area-thresholds">
@@ -169,17 +181,6 @@
       </div>
     </div>
 
-    <div class="tile area-mqtt">
-      <h3>MQTT / Home Assistant</h3>
-      <div class="group" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">Enable MQTT</label><label class="toggle"><input type="checkbox" id="mqtt_enabled"><span class="toggle-slider"></span></label></div>
-      <div class="group"><label>Broker Host</label><input type="text" id="mqtt_broker" placeholder="192.168.1.250"></div>
-      <div class="group"><label>Port</label><input type="text" id="mqtt_port" placeholder="1883"></div>
-      <div class="group"><label>Username</label><input type="text" id="mqtt_user"></div>
-      <div class="group"><label>Password</label><input type="password" id="mqtt_pass"></div>
-      <div class="group"><label>Topic Prefix</label><input type="text" id="mqtt_prefix" placeholder="ninadisplay"></div>
-      <p class="hint">Reboot required after changing MQTT settings.</p>
-    </div>
-
     <div class="tile area-actions">
       <h3>Actions</h3>
       <div class="action-row">
@@ -187,7 +188,6 @@
         <button class="btn btn-outline" onclick="saveAndReboot()">REBOOT</button>
         <button class="btn btn-danger" onclick="factoryReset()">FACTORY RESET</button>
       </div>
-      <p class="hint">Reboot is required to apply WiFi, NTP, or MQTT changes.</p>
     </div>
 
   </div>
@@ -196,13 +196,15 @@
 let filterColorsArr=[{},{},{}];
 function renderFilterColors(i){const c=document.getElementById('filters_'+i);if(!c)return;c.innerHTML='';const obj=filterColorsArr[i];const fs=Object.keys(obj).sort();if(fs.length===0){c.innerHTML='<p style="color:var(--text-dim);font-style:italic;font-size:0.7rem">No filters</p>';return;}fs.slice(0,8).forEach(f=>{const w=document.createElement('div');w.className='filter-item';w.innerHTML=`<label>${f}</label><input type='color' class='color-dot' value='${obj[f]}' onchange='updateFilterColor(${i},"${f}",this.value)'>`;c.appendChild(w);});}
 function updateFilterColor(i,n,v){filterColorsArr[i][n]=v;}
-function updateNodeLabels(){['url1','url2','url3'].forEach((id,i)=>{const v=document.getElementById(id).value.trim();document.getElementById('tnode'+i).innerText=v||('Node '+(i+1));});}
+function updateNodeLabels(){['url1','url2','url3'].forEach((id,i)=>{const v=document.getElementById(id).value.trim();document.getElementById('tnode'+i).innerText=v||('Node '+(i+1));});updatePageSelectOptions();}
+function updatePageSelectOptions(){const sel=document.getElementById('active_page');if(!sel)return;['url1','url2','url3'].forEach((id,i)=>{const opt=sel.options[i+1];if(!opt)return;const v=document.getElementById(id).value.trim();opt.text=v?('Page '+(i+1)+': '+v):('Page '+(i+1));opt.disabled=!v;});}
+function setPage(v){fetch('/api/page',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({page:parseInt(v)})});}
 function setTheme(v){fetch('/api/theme',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({theme_index:parseInt(v)})});}
 let brightTimer=null;function setBrightness(v){document.getElementById('bright_val').innerText=v+'%';clearTimeout(brightTimer);brightTimer=setTimeout(()=>{fetch('/api/brightness',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({brightness:parseInt(v)})});},150);}
 let cbrightTimer=null;function setColorBrightness(v){document.getElementById('cbright_val').innerText=v+'%';clearTimeout(cbrightTimer);cbrightTimer=setTimeout(()=>{fetch('/api/color-brightness',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({color_brightness:parseInt(v)})});},150);}
 function getRmsObj(i){return{good_max:parseFloat(document.getElementById('rms_good_max_'+i).value)||0.5,ok_max:parseFloat(document.getElementById('rms_ok_max_'+i).value)||1.0,good_color:document.getElementById('rms_good_color_'+i).value,ok_color:document.getElementById('rms_ok_color_'+i).value,bad_color:document.getElementById('rms_bad_color_'+i).value};}
 function getHfrObj(i){return{good_max:parseFloat(document.getElementById('hfr_good_max_'+i).value)||2.0,ok_max:parseFloat(document.getElementById('hfr_ok_max_'+i).value)||3.5,good_color:document.getElementById('hfr_good_color_'+i).value,ok_color:document.getElementById('hfr_ok_color_'+i).value,bad_color:document.getElementById('hfr_bad_color_'+i).value};}
-function getConfigData(){const h1=document.getElementById('url1').value.trim();const h2=document.getElementById('url2').value.trim();const h3=document.getElementById('url3').value.trim();const u1=h1?'http://'+h1+':1888/v2/api/':'';const u2=h2?'http://'+h2+':1888/v2/api/':'';const u3=h3?'http://'+h3+':1888/v2/api/':'';const mb=document.getElementById('mqtt_broker').value.trim();const mu=mb?'mqtt://'+mb:'';return{ssid:document.getElementById('ssid').value,pass:document.getElementById('pass').value,url1:u1,url2:u2,url3:u3,ntp:document.getElementById('ntp').value,theme_index:parseInt(document.getElementById('theme_select').value),brightness:parseInt(document.getElementById('brightness').value),color_brightness:parseInt(document.getElementById('color_brightness').value),filter_colors_1:JSON.stringify(filterColorsArr[0]),filter_colors_2:JSON.stringify(filterColorsArr[1]),filter_colors_3:JSON.stringify(filterColorsArr[2]),rms_thresholds_1:JSON.stringify(getRmsObj(0)),rms_thresholds_2:JSON.stringify(getRmsObj(1)),rms_thresholds_3:JSON.stringify(getRmsObj(2)),hfr_thresholds_1:JSON.stringify(getHfrObj(0)),hfr_thresholds_2:JSON.stringify(getHfrObj(1)),hfr_thresholds_3:JSON.stringify(getHfrObj(2)),mqtt_enabled:document.getElementById('mqtt_enabled').checked,mqtt_broker_url:mu,mqtt_port:parseInt(document.getElementById('mqtt_port').value)||1883,mqtt_username:document.getElementById('mqtt_user').value,mqtt_password:document.getElementById('mqtt_pass').value,mqtt_topic_prefix:document.getElementById('mqtt_prefix').value||'ninadisplay'};}
+function getConfigData(){const h1=document.getElementById('url1').value.trim();const h2=document.getElementById('url2').value.trim();const h3=document.getElementById('url3').value.trim();const u1=h1?'http://'+h1+':1888/v2/api/':'';const u2=h2?'http://'+h2+':1888/v2/api/':'';const u3=h3?'http://'+h3+':1888/v2/api/':'';const mb=document.getElementById('mqtt_broker').value.trim();const mu=mb?'mqtt://'+mb:'';return{ssid:document.getElementById('ssid').value,pass:document.getElementById('pass').value,url1:u1,url2:u2,url3:u3,ntp:document.getElementById('ntp').value,theme_index:parseInt(document.getElementById('theme_select').value),brightness:parseInt(document.getElementById('brightness').value),color_brightness:parseInt(document.getElementById('color_brightness').value),filter_colors_1:JSON.stringify(filterColorsArr[0]),filter_colors_2:JSON.stringify(filterColorsArr[1]),filter_colors_3:JSON.stringify(filterColorsArr[2]),rms_thresholds_1:JSON.stringify(getRmsObj(0)),rms_thresholds_2:JSON.stringify(getRmsObj(1)),rms_thresholds_3:JSON.stringify(getRmsObj(2)),hfr_thresholds_1:JSON.stringify(getHfrObj(0)),hfr_thresholds_2:JSON.stringify(getHfrObj(1)),hfr_thresholds_3:JSON.stringify(getHfrObj(2)),mqtt_enabled:document.getElementById('mqtt_enabled').checked,mqtt_broker_url:mu,mqtt_port:parseInt(document.getElementById('mqtt_port').value)||1883,mqtt_username:document.getElementById('mqtt_user').value,mqtt_password:document.getElementById('mqtt_pass').value,mqtt_topic_prefix:document.getElementById('mqtt_prefix').value||'ninadisplay',active_page_override:parseInt(document.getElementById('active_page').value),auto_rotate_interval_s:parseInt(document.getElementById('auto_rotate_interval').value)||0,auto_rotate_effect:parseInt(document.getElementById('auto_rotate_effect').value),auto_rotate_skip_disconnected:document.getElementById('auto_rotate_skip').checked};}
 function loadThresholds(d,i,rkey,hkey){try{const r=JSON.parse(d[rkey]||'{}');document.getElementById('rms_good_max_'+i).value=r.good_max||0.5;document.getElementById('rms_ok_max_'+i).value=r.ok_max||1.0;document.getElementById('rms_good_color_'+i).value=r.good_color||'#10b981';document.getElementById('rms_ok_color_'+i).value=r.ok_color||'#eab308';document.getElementById('rms_bad_color_'+i).value=r.bad_color||'#ef4444';}catch(e){}try{const h=JSON.parse(d[hkey]||'{}');document.getElementById('hfr_good_max_'+i).value=h.good_max||2.0;document.getElementById('hfr_ok_max_'+i).value=h.ok_max||3.5;document.getElementById('hfr_good_color_'+i).value=h.good_color||'#10b981';document.getElementById('hfr_ok_color_'+i).value=h.ok_color||'#eab308';document.getElementById('hfr_bad_color_'+i).value=h.bad_color||'#ef4444';}catch(e){}}
 function save(){const b=document.getElementById('saveBtn');const ot=b.innerText;b.innerText='SYNCING...';b.disabled=true;fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(getConfigData())}).then(r=>{if(r.ok){b.innerText='SUCCESS';setTimeout(()=>{b.innerText=ot;b.disabled=false;},2000);}else{b.innerText='ERROR';setTimeout(()=>{b.innerText=ot;b.disabled=false;},2000);}}).catch(()=>{b.innerText='FAIL';b.disabled=false;});}
 function saveAndReboot(){if(!confirm('Apply changes and reboot now?'))return;fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(getConfigData())}).then(r=>{if(r.ok)fetch('/api/reboot',{method:'POST'});});}
@@ -233,6 +235,11 @@ fetch('/api/config').then(r=>r.json()).then(d=>{
   document.getElementById('mqtt_user').value=d.mqtt_username||'';
   document.getElementById('mqtt_pass').value=d.mqtt_password||'';
   document.getElementById('mqtt_prefix').value=d.mqtt_topic_prefix||'ninadisplay';
+  document.getElementById('active_page').value=(d.active_page_override!=null)?d.active_page_override:-1;
+  document.getElementById('auto_rotate_interval').value=d.auto_rotate_interval_s||0;
+  document.getElementById('auto_rotate_effect').value=d.auto_rotate_effect||0;
+  document.getElementById('auto_rotate_skip').checked=d.auto_rotate_skip_disconnected!==false;
+  updatePageSelectOptions();
 });
 </script>
 </body>
