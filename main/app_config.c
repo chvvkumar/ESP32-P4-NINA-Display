@@ -21,37 +21,33 @@ static const char *DEFAULT_HFR_THRESHOLDS =
     "\"good_color\":\"#15803d\",\"ok_color\":\"#ca8a04\",\"bad_color\":\"#b91c1c\"}";
 
 
+static void set_defaults(app_config_t *cfg) {
+    memset(cfg, 0, sizeof(app_config_t));
+    strcpy(cfg->api_url_1, "http://astromele2.lan:1888/v2/api/");
+    strcpy(cfg->api_url_2, "http://astromele3.lan:1888/v2/api/");
+    strcpy(cfg->ntp_server, "pool.ntp.org");
+    strcpy(cfg->filter_colors_1, "{}");
+    strcpy(cfg->filter_colors_2, "{}");
+    strcpy(cfg->filter_colors_3, "{}");
+    strcpy(cfg->rms_thresholds_1, DEFAULT_RMS_THRESHOLDS);
+    strcpy(cfg->rms_thresholds_2, DEFAULT_RMS_THRESHOLDS);
+    strcpy(cfg->rms_thresholds_3, DEFAULT_RMS_THRESHOLDS);
+    strcpy(cfg->hfr_thresholds_1, DEFAULT_HFR_THRESHOLDS);
+    strcpy(cfg->hfr_thresholds_2, DEFAULT_HFR_THRESHOLDS);
+    strcpy(cfg->hfr_thresholds_3, DEFAULT_HFR_THRESHOLDS);
+    cfg->brightness = 50;
+    cfg->color_brightness = 100;
+    strcpy(cfg->mqtt_broker_url, "mqtt://192.168.1.250");
+    strcpy(cfg->mqtt_topic_prefix, "ninadisplay");
+    cfg->mqtt_port = 1883;
+}
+
 void app_config_init(void) {
     nvs_handle_t my_handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &my_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Error (%s) opening NVS handle! Using defaults.", esp_err_to_name(err));
-        // Set defaults
-        memset(&s_config, 0, sizeof(app_config_t));
-        strcpy(s_config.wifi_ssid, "");
-        strcpy(s_config.wifi_pass, "");
-        strcpy(s_config.api_url_1, "http://astromele2.lan:1888/v2/api/");
-        strcpy(s_config.api_url_2, "http://astromele3.lan:1888/v2/api/");
-        s_config.api_url_3[0] = '\0';
-        strcpy(s_config.ntp_server, "pool.ntp.org");
-        strcpy(s_config.filter_colors_1, "{}");
-        strcpy(s_config.filter_colors_2, "{}");
-        strcpy(s_config.filter_colors_3, "{}");
-        strcpy(s_config.rms_thresholds_1, DEFAULT_RMS_THRESHOLDS);
-        strcpy(s_config.rms_thresholds_2, DEFAULT_RMS_THRESHOLDS);
-        strcpy(s_config.rms_thresholds_3, DEFAULT_RMS_THRESHOLDS);
-        strcpy(s_config.hfr_thresholds_1, DEFAULT_HFR_THRESHOLDS);
-        strcpy(s_config.hfr_thresholds_2, DEFAULT_HFR_THRESHOLDS);
-        strcpy(s_config.hfr_thresholds_3, DEFAULT_HFR_THRESHOLDS);
-        s_config.theme_index = 0;
-        s_config.brightness = 50;
-        s_config.color_brightness = 100;
-        s_config.mqtt_enabled = false;
-        strcpy(s_config.mqtt_broker_url, "mqtt://192.168.1.250");
-        s_config.mqtt_username[0] = '\0';
-        s_config.mqtt_password[0] = '\0';
-        strcpy(s_config.mqtt_topic_prefix, "ninadisplay");
-        s_config.mqtt_port = 1883;
+        set_defaults(&s_config);
         return;
     }
 
@@ -59,31 +55,7 @@ void app_config_init(void) {
     err = nvs_get_blob(my_handle, "config", &s_config, &required_size);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Config not found in NVS, using defaults");
-        memset(&s_config, 0, sizeof(app_config_t));
-        strcpy(s_config.wifi_ssid, "");
-        strcpy(s_config.wifi_pass, "");
-        strcpy(s_config.api_url_1, "http://astromele2.lan:1888/v2/api/");
-        strcpy(s_config.api_url_2, "http://astromele3.lan:1888/v2/api/");
-        s_config.api_url_3[0] = '\0';
-        strcpy(s_config.ntp_server, "pool.ntp.org");
-        strcpy(s_config.filter_colors_1, "{}");
-        strcpy(s_config.filter_colors_2, "{}");
-        strcpy(s_config.filter_colors_3, "{}");
-        strcpy(s_config.rms_thresholds_1, DEFAULT_RMS_THRESHOLDS);
-        strcpy(s_config.rms_thresholds_2, DEFAULT_RMS_THRESHOLDS);
-        strcpy(s_config.rms_thresholds_3, DEFAULT_RMS_THRESHOLDS);
-        strcpy(s_config.hfr_thresholds_1, DEFAULT_HFR_THRESHOLDS);
-        strcpy(s_config.hfr_thresholds_2, DEFAULT_HFR_THRESHOLDS);
-        strcpy(s_config.hfr_thresholds_3, DEFAULT_HFR_THRESHOLDS);
-        s_config.theme_index = 0;
-        s_config.brightness = 50;
-        s_config.color_brightness = 100;
-        s_config.mqtt_enabled = false;
-        strcpy(s_config.mqtt_broker_url, "mqtt://192.168.1.250");
-        s_config.mqtt_username[0] = '\0';
-        s_config.mqtt_password[0] = '\0';
-        strcpy(s_config.mqtt_topic_prefix, "ninadisplay");
-        s_config.mqtt_port = 1883;
+        set_defaults(&s_config);
 
         // Save defaults so we have them next time
         nvs_set_blob(my_handle, "config", &s_config, sizeof(app_config_t));

@@ -1,123 +1,64 @@
 /**
  * @file nina_dashboard.c
- * @brief NINA dashboard UI - grid layout for 720x720 displays
+ * @brief NINA dashboard UI - grid layout, page creation, theme application, gestures
  *
  * Each NINA instance gets its own page. Swipe left/right to switch pages.
+ * Data updates and thumbnail overlay are in separate files.
  */
 
 #include "nina_dashboard.h"
-#include "nina_client.h"
+#include "nina_dashboard_internal.h"
+#include "nina_thumbnail.h"
 #include "app_config.h"
-#include "lvgl.h"
 #include "themes.h"
+#include "lvgl.h"
 #include <stdio.h>
 #include <string.h>
 
-/* Layout constants */
-#define SCREEN_SIZE     720
-#define OUTER_PADDING   16
-#define GRID_GAP        16
-#define BENTO_RADIUS    24
+/* Shared state — accessed by nina_dashboard_update.c and nina_thumbnail.c */
+dashboard_page_t pages[MAX_NINA_INSTANCES];
+int page_count = 0;
+int active_page = 0;
+const theme_t *current_theme = NULL;
 
-/* Per-page widgets */
-#define MAX_POWER_WIDGETS 8
+/* Shared styles */
+lv_style_t style_bento_box;
+lv_style_t style_label_small;
+lv_style_t style_value_large;
+lv_style_t style_header_gradient;
 
-typedef struct {
-    lv_obj_t *page;
-
-    // Header
-    lv_obj_t *header_box;
-    lv_obj_t *lbl_instance_name;
-    lv_obj_t *lbl_target_name;
-
-    // Exposure Arc
-    lv_obj_t *arc_exposure;
-    lv_obj_t *lbl_exposure_current;
-    lv_obj_t *lbl_exposure_total;
-    lv_obj_t *lbl_loop_count;
-
-    // Sequence Info
-    lv_obj_t *lbl_seq_container;
-    lv_obj_t *lbl_seq_step;
-
-    // Data Labels
-    lv_obj_t *lbl_rms_value;
-    lv_obj_t *lbl_rms_ra_value;
-    lv_obj_t *lbl_rms_dec_value;
-    lv_obj_t *lbl_hfr_value;
-    lv_obj_t *lbl_stars_header;
-    lv_obj_t *lbl_stars_value;
-    lv_obj_t *lbl_target_time_header;
-    lv_obj_t *lbl_target_time_value;
-    lv_obj_t *lbl_rms_title;
-    lv_obj_t *lbl_hfr_title;
-    lv_obj_t *lbl_flip_title;
-    lv_obj_t *lbl_flip_value;
-
-    // Power Row
-    lv_obj_t *box_pwr[MAX_POWER_WIDGETS];
-    lv_obj_t *lbl_pwr_title[MAX_POWER_WIDGETS];
-    lv_obj_t *lbl_pwr_value[MAX_POWER_WIDGETS];
-
-    // Arc animation state
-    int prev_target_progress;
-    int pending_arc_progress;
-    bool arc_completing;
-} dashboard_page_t;
-
-/* State */
+/* Private state */
 static lv_obj_t *scr_dashboard = NULL;
 static lv_obj_t *main_cont = NULL;
-static dashboard_page_t pages[MAX_NINA_INSTANCES];
-static int page_count = 0;
-static int active_page = 0;
 
 // Page dots
 static lv_obj_t *indicator_cont = NULL;
 static lv_obj_t *indicator_dots[MAX_NINA_INSTANCES];
 
-static const theme_t *current_theme = NULL;
-
-// Swipe callback — tells main.c which page we switched to
+// Swipe callback
 static nina_page_change_cb_t page_change_cb = NULL;
 
-// Thumbnail overlay state
-static lv_obj_t *thumbnail_overlay = NULL;
-static lv_obj_t *thumbnail_img = NULL;
-static lv_obj_t *thumbnail_loading_lbl = NULL;
-static lv_image_dsc_t thumbnail_dsc;
-static uint8_t *thumbnail_decoded_buf = NULL;
-static volatile bool thumbnail_requested = false;
-
-/* Styles */
-static lv_style_t style_bento_box;
-static lv_style_t style_label_small;
-static lv_style_t style_value_large;
-static lv_style_t style_header_gradient;
-
 /* Strip http(s)://, path, and domain from URL, then sentence case */
-static void extract_host_from_url(const char *url, char *out, size_t out_size) {
+void extract_host_from_url(const char *url, char *out, size_t out_size) {
+    if (out_size == 0) return;
+
     const char *start = url;
     if (strncmp(start, "https://", 8) == 0) start += 8;
     else if (strncmp(start, "http://", 7) == 0) start += 7;
 
-    // Take only hostname (stop at port ':', path '/', or domain '.')
     const char *end = start;
     while (*end && *end != '/' && *end != ':' && *end != '.') end++;
 
-    size_t len = (size_t)(end - start);
-    if (len >= out_size) len = out_size - 1;
-    if (len > 0) {
-        memcpy(out, start, len);
-        out[len] = '\0';
-        
-        // Sentence case: First letter upper, rest lower
-        if (out[0] >= 'a' && out[0] <= 'z') out[0] -= 32;
-        for (size_t i = 1; i < len; i++) {
-            if (out[i] >= 'A' && out[i] <= 'Z') out[i] += 32;
-        }
-    } else {
-        out[0] = '\0';
+    int len = (int)(end - start);
+    if (len <= 0) { out[0] = '\0'; return; }
+    if ((size_t)len >= out_size) len = (int)(out_size - 1);
+
+    memcpy(out, start, (size_t)len);
+    out[len] = '\0';
+
+    if (out[0] >= 'a' && out[0] <= 'z') out[0] -= 32;
+    for (int i = 1; i < len; i++) {
+        if (out[i] >= 'A' && out[i] <= 'Z') out[i] += 32;
     }
 }
 
@@ -127,7 +68,6 @@ static void update_styles(void) {
 
     int gb = app_config_get()->color_brightness;
 
-    // Box style
     lv_style_reset(&style_bento_box);
     lv_style_init(&style_bento_box);
     lv_style_set_bg_color(&style_bento_box, lv_color_hex(current_theme->bento_bg));
@@ -138,14 +78,12 @@ static void update_styles(void) {
     lv_style_set_border_opa(&style_bento_box, LV_OPA_COVER);
     lv_style_set_pad_all(&style_bento_box, 20);
 
-    // Small label
     lv_style_reset(&style_label_small);
     lv_style_init(&style_label_small);
     lv_style_set_text_color(&style_label_small, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)));
     lv_style_set_text_font(&style_label_small, &lv_font_montserrat_16);
     lv_style_set_text_letter_space(&style_label_small, 1);
 
-    // Large value
     lv_style_reset(&style_value_large);
     lv_style_init(&style_value_large);
     lv_style_set_text_color(&style_value_large, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)));
@@ -159,7 +97,6 @@ static void update_styles(void) {
     lv_style_set_text_font(&style_value_large, &lv_font_montserrat_20);
 #endif
 
-    // Header gradient
     lv_style_reset(&style_header_gradient);
     lv_style_init(&style_header_gradient);
     lv_style_set_bg_color(&style_header_gradient, lv_color_hex(current_theme->header_grad_color));
@@ -231,23 +168,19 @@ void nina_dashboard_apply_theme(int theme_index) {
 
     if (!scr_dashboard) return;
 
-    // Background
     if (main_cont) {
         lv_obj_set_style_bg_color(main_cont, lv_color_hex(current_theme->bg_main), 0);
     }
 
-    // Tell LVGL styles changed
     lv_obj_report_style_change(&style_bento_box);
     lv_obj_report_style_change(&style_label_small);
     lv_obj_report_style_change(&style_value_large);
     lv_obj_report_style_change(&style_header_gradient);
 
-    // Recolor widgets on every page
     for (int i = 0; i < page_count; i++) {
         apply_theme_to_page(&pages[i]);
     }
 
-    // Update dot colors
     if (indicator_cont) {
         int gb = app_config_get()->color_brightness;
         for (int i = 0; i < page_count; i++) {
@@ -267,21 +200,15 @@ void nina_dashboard_apply_theme(int theme_index) {
 static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int page_index) {
     memset(p, 0, sizeof(dashboard_page_t));
 
-    // Page root
     p->page = lv_obj_create(parent);
     lv_obj_remove_style_all(p->page);
     lv_obj_set_size(p->page, SCREEN_SIZE - 2 * OUTER_PADDING, SCREEN_SIZE - 2 * OUTER_PADDING);
     lv_obj_set_style_pad_gap(p->page, GRID_GAP, 0);
 
-    // Grid: 2 columns x 6 rows
     static lv_coord_t col_dsc[] = {LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
     static lv_coord_t row_dsc[] = {
-        LV_GRID_FR(2),  // Row 0 - Header
-        LV_GRID_FR(1),  // Row 1 - Sequence Info
-        LV_GRID_FR(2),  // Row 2 - RMS+HFR / Exposure arc top
-        LV_GRID_FR(2),  // Row 3 - Time to Flip / Exposure arc mid
-        LV_GRID_FR(2),  // Row 4 - Sat.Pixels+Stars / Exposure arc bottom
-        LV_GRID_FR(2),  // Row 5 - Power
+        LV_GRID_FR(2), LV_GRID_FR(1), LV_GRID_FR(2),
+        LV_GRID_FR(2), LV_GRID_FR(2), LV_GRID_FR(2),
         LV_GRID_TEMPLATE_LAST
     };
     lv_obj_set_layout(p->page, LV_LAYOUT_GRID);
@@ -294,7 +221,6 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_flex_align(p->header_box, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_all(p->header_box, 12, 0);
 
-    // Top row: [dot + name] ... [wifi]
     lv_obj_t *top_row = lv_obj_create(p->header_box);
     lv_obj_remove_style_all(top_row);
     lv_obj_set_width(top_row, LV_PCT(100));
@@ -302,7 +228,6 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_flex_flow(top_row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(top_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    // Left container: telescope name
     lv_obj_t *left_cont = lv_obj_create(top_row);
     lv_obj_remove_style_all(left_cont);
     lv_obj_set_size(left_cont, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
@@ -310,9 +235,8 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_flex_align(left_cont, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(left_cont, 0, 0);
 
-    // Telescope name — show URL-based "Not Connected" until a connection is made
     p->lbl_instance_name = lv_label_create(left_cont);
-    lv_obj_set_style_text_color(p->lbl_instance_name, lv_color_hex(0xf87171), 0); // Default disconnected color
+    lv_obj_set_style_text_color(p->lbl_instance_name, lv_color_hex(0xf87171), 0);
     lv_obj_set_style_text_font(p->lbl_instance_name, &lv_font_montserrat_26, 0);
     {
         const char *init_url = app_config_get_instance_url(page_index);
@@ -327,7 +251,6 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
         }
     }
 
-    // Target name (full width, right-aligned)
     p->lbl_target_name = lv_label_create(p->header_box);
     lv_obj_add_style(p->lbl_target_name, &style_value_large, 0);
     lv_obj_set_width(p->lbl_target_name, LV_PCT(100));
@@ -420,7 +343,6 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_flex_align(box_rms_hfr, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(box_rms_hfr, 8, 0);
 
-    // RMS sub-container
     lv_obj_t *box_rms = lv_obj_create(box_rms_hfr);
     lv_obj_remove_style_all(box_rms);
     lv_obj_set_size(box_rms, LV_PCT(50), LV_PCT(100));
@@ -436,7 +358,6 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_style_text_color(p->lbl_rms_value, lv_color_hex(current_theme->rms_color), 0);
     lv_label_set_text(p->lbl_rms_value, "--");
 
-    // HFR sub-container
     lv_obj_t *box_hfr = lv_obj_create(box_rms_hfr);
     lv_obj_remove_style_all(box_hfr);
     lv_obj_set_size(box_hfr, LV_PCT(50), LV_PCT(100));
@@ -534,7 +455,6 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
         lv_obj_add_flag(p->box_pwr[i], LV_OBJ_FLAG_HIDDEN);
     }
 
-    // Arc anim defaults
     p->prev_target_progress = 0;
     p->pending_arc_progress = 0;
     p->arc_completing = false;
@@ -590,60 +510,15 @@ static void gesture_event_cb(lv_event_t *e) {
 
     nina_dashboard_show_page(new_page, page_count);
 
-    // Let main.c know
     if (page_change_cb) {
         page_change_cb(new_page);
     }
 }
 
-/* Thumbnail overlay: click to dismiss */
-static void thumbnail_overlay_click_cb(lv_event_t *e) {
-    LV_UNUSED(e);
-    nina_dashboard_hide_thumbnail();
-}
-
 /* Target name: click to request thumbnail */
 static void target_name_click_cb(lv_event_t *e) {
     LV_UNUSED(e);
-    if (!thumbnail_overlay) return;
-
-    // Show overlay with loading text
-    lv_obj_clear_flag(thumbnail_overlay, LV_OBJ_FLAG_HIDDEN);
-    if (thumbnail_loading_lbl) {
-        lv_obj_clear_flag(thumbnail_loading_lbl, LV_OBJ_FLAG_HIDDEN);
-    }
-    if (thumbnail_img) {
-        lv_obj_add_flag(thumbnail_img, LV_OBJ_FLAG_HIDDEN);
-    }
-    thumbnail_requested = true;
-}
-
-/* Create the fullscreen thumbnail overlay (initially hidden) */
-static void create_thumbnail_overlay(lv_obj_t *parent) {
-    thumbnail_overlay = lv_obj_create(parent);
-    lv_obj_remove_style_all(thumbnail_overlay);
-    lv_obj_set_size(thumbnail_overlay, SCREEN_SIZE, SCREEN_SIZE);
-    lv_obj_set_style_bg_color(thumbnail_overlay, lv_color_hex(0x000000), 0);
-    lv_obj_set_style_bg_opa(thumbnail_overlay, LV_OPA_COVER, 0);
-    lv_obj_set_flex_flow(thumbnail_overlay, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(thumbnail_overlay, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_add_flag(thumbnail_overlay, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(thumbnail_overlay, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_clear_flag(thumbnail_overlay, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(thumbnail_overlay, LV_OBJ_FLAG_GESTURE_BUBBLE);
-    lv_obj_add_event_cb(thumbnail_overlay, thumbnail_overlay_click_cb, LV_EVENT_CLICKED, NULL);
-
-    // Loading label
-    thumbnail_loading_lbl = lv_label_create(thumbnail_overlay);
-    lv_obj_set_style_text_color(thumbnail_loading_lbl, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_text_font(thumbnail_loading_lbl, &lv_font_montserrat_24, 0);
-    lv_label_set_text(thumbnail_loading_lbl, "Loading image...");
-
-    // Image widget (hidden until data arrives)
-    thumbnail_img = lv_image_create(thumbnail_overlay);
-    lv_obj_add_flag(thumbnail_img, LV_OBJ_FLAG_HIDDEN);
-
-    memset(&thumbnail_dsc, 0, sizeof(thumbnail_dsc));
+    nina_thumbnail_request();
 }
 
 /* Set up the dashboard with one page per NINA instance */
@@ -659,7 +534,6 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     page_count = instance_count;
     active_page = 0;
 
-    // 720x720 background
     main_cont = lv_obj_create(scr_dashboard);
     lv_obj_remove_style_all(main_cont);
     lv_obj_set_size(main_cont, SCREEN_SIZE, SCREEN_SIZE);
@@ -667,7 +541,6 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     lv_obj_set_style_bg_opa(main_cont, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(main_cont, OUTER_PADDING, 0);
 
-    // Pages
     for (int i = 0; i < page_count; i++) {
         create_dashboard_page(&pages[i], main_cont, i);
         if (i != 0) {
@@ -675,17 +548,15 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
         }
     }
 
-    // Dots
     create_page_indicator(scr_dashboard, page_count);
 
-    // Swipe to switch pages
     if (page_count > 1) {
         lv_obj_add_event_cb(scr_dashboard, gesture_event_cb, LV_EVENT_GESTURE, NULL);
         lv_obj_clear_flag(scr_dashboard, LV_OBJ_FLAG_GESTURE_BUBBLE);
     }
 
     // Thumbnail overlay (on top of everything)
-    create_thumbnail_overlay(scr_dashboard);
+    nina_thumbnail_create(scr_dashboard);
 
     // Make header box clickable on all pages to open thumbnail
     for (int i = 0; i < page_count; i++) {
@@ -695,7 +566,6 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
         }
     }
 
-    // Apply theme
     nina_dashboard_apply_theme(cfg->theme_index);
 }
 
@@ -703,14 +573,11 @@ void nina_dashboard_show_page(int page_index, int instance_count) {
     if (page_index < 0 || page_index >= page_count) return;
     if (page_index == active_page) return;
 
-    // Hide current page
     lv_obj_add_flag(pages[active_page].page, LV_OBJ_FLAG_HIDDEN);
 
-    // Show new page
     active_page = page_index;
     lv_obj_clear_flag(pages[active_page].page, LV_OBJ_FLAG_HIDDEN);
 
-    // Update indicator dots
     if (indicator_cont) {
         int gb = app_config_get()->color_brightness;
         for (int i = 0; i < page_count; i++) {
@@ -726,359 +593,4 @@ void nina_dashboard_show_page(int page_index, int instance_count) {
 
 int nina_dashboard_get_active_page(void) {
     return active_page;
-}
-
-// Arc animation callbacks
-static void arc_reset_complete_cb(lv_anim_t *a) {
-    dashboard_page_t *p = (dashboard_page_t *)a->user_data;
-    if (p) p->arc_completing = false;
-}
-
-static void arc_fill_complete_cb(lv_anim_t *a) {
-    dashboard_page_t *p = (dashboard_page_t *)a->user_data;
-    if (!p) return;
-
-    lv_anim_t a2;
-    lv_anim_init(&a2);
-    lv_anim_set_var(&a2, p->arc_exposure);
-    lv_anim_set_values(&a2, 0, p->pending_arc_progress);
-    lv_anim_set_time(&a2, 350);
-    lv_anim_set_exec_cb(&a2, (lv_anim_exec_xcb_t)lv_arc_set_value);
-    lv_anim_set_path_cb(&a2, lv_anim_path_ease_out);
-    a2.user_data = p;
-    lv_anim_set_ready_cb(&a2, arc_reset_complete_cb);
-    lv_anim_start(&a2);
-}
-
-/**
- * @brief Update WiFi signal bars and connection dot for a dashboard page.
- *
- * @param page_index  Page to update (0-based)
- * @param rssi        WiFi RSSI in dBm (e.g. -55).  Pass -100 when unknown.
- * @param nina_connected  true when the NINA HTTP endpoint is reachable
- * @param api_active  true while an HTTP API call is in-flight (pulses the dot)
- */
-void nina_dashboard_update_status(int page_index, int rssi, bool nina_connected, bool api_active) {
-    if (page_index < 0 || page_index >= page_count) return;
-    dashboard_page_t *p = &pages[page_index];
-    if (!p->page) return;
-
-    // --- Connection Status Color ---
-    // #4ade80 (green) if connected, #f87171 (red) if disconnected
-    uint32_t text_color = nina_connected ? 0x4ade80 : 0xf87171;
-    
-    // Apply brightness scaling to the status color
-    int gb = app_config_get()->color_brightness;
-    text_color = app_config_apply_brightness(text_color, gb);
-
-    if (p->lbl_instance_name) {
-        lv_obj_set_style_text_color(p->lbl_instance_name, lv_color_hex(text_color), 0);
-    }
-}
-
-/* Push new data to a dashboard page */
-void update_nina_dashboard_page(int page_index, const nina_client_t *data) {
-    if (page_index < 0 || page_index >= page_count) return;
-    if (!data) return;
-
-    dashboard_page_t *p = &pages[page_index];
-    if (!p->page) return;
-
-    int gb = app_config_get()->color_brightness;
-
-    // When NINA is unreachable, reset all labels to dashes and show URL in header
-    if (!data->connected) {
-        const char *url = app_config_get_instance_url(page_index);
-        char host[64] = {0};
-        extract_host_from_url(url, host, sizeof(host));
-        if (host[0] != '\0') {
-            char buf[96];
-            snprintf(buf, sizeof(buf), "%s - Not Connected", host);
-            lv_label_set_text(p->lbl_instance_name, buf);
-        } else {
-            lv_label_set_text(p->lbl_instance_name, "N.I.N.A.");
-        }
-        lv_label_set_text(p->lbl_target_name, "----");
-        lv_label_set_text(p->lbl_seq_container, "----");
-        lv_label_set_text(p->lbl_seq_step, "----");
-        lv_label_set_text(p->lbl_exposure_current, "--");
-        lv_label_set_text(p->lbl_exposure_total, "");
-        lv_arc_set_value(p->arc_exposure, 0);
-        lv_label_set_text(p->lbl_loop_count, "-- / --");
-        lv_label_set_text(p->lbl_rms_value, "--");
-        lv_obj_set_style_text_color(p->lbl_rms_value, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-        lv_label_set_text(p->lbl_hfr_value, "--");
-        lv_obj_set_style_text_color(p->lbl_hfr_value, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-        lv_label_set_text(p->lbl_flip_value, "--");
-        lv_label_set_text(p->lbl_stars_value, "--");
-        lv_label_set_text(p->lbl_target_time_value, "--");
-        for (int i = 0; i < MAX_POWER_WIDGETS; i++) {
-            lv_obj_add_flag(p->box_pwr[i], LV_OBJ_FLAG_HIDDEN);
-        }
-        return;
-    }
-
-    // Header
-    lv_label_set_text(p->lbl_instance_name,
-        data->telescope_name[0] != '\0' ? data->telescope_name : "N.I.N.A.");
-    lv_label_set_text(p->lbl_target_name, data->target_name[0] != '\0' ? data->target_name : "----");
-
-    // Sequence
-    if (data->container_name[0] != '\0') {
-        lv_label_set_text(p->lbl_seq_container, data->container_name);
-    } else {
-        lv_label_set_text(p->lbl_seq_container, "----");
-    }
-    if (data->container_step[0] != '\0') {
-        lv_label_set_text(p->lbl_seq_step, data->container_step);
-    } else {
-        lv_label_set_text(p->lbl_seq_step, "----");
-    }
-
-    // Filter color on the arc
-    uint32_t filter_color = app_config_apply_brightness(current_theme->progress_color, gb);
-    if (data->current_filter[0] != '\0' && strcmp(data->current_filter, "--") != 0) {
-        filter_color = app_config_get_filter_color(data->current_filter, page_index);
-    }
-    lv_obj_set_style_arc_color(p->arc_exposure, lv_color_hex(filter_color), LV_PART_INDICATOR);
-    lv_obj_set_style_shadow_color(p->arc_exposure, lv_color_hex(filter_color), LV_PART_INDICATOR);
-
-    // Exposure progress
-    if (data->exposure_total > 0) {
-        float elapsed = data->exposure_current;
-        float total = data->exposure_total;
-        int total_sec = (int)total;
-
-        lv_label_set_text_fmt(p->lbl_exposure_current, "%ds", total_sec);
-
-        if (data->current_filter[0] != '\0' && strcmp(data->current_filter, "--") != 0) {
-            lv_label_set_text(p->lbl_exposure_total, data->current_filter);
-            lv_obj_set_style_text_color(p->lbl_exposure_total, lv_color_hex(filter_color), 0);
-        } else {
-            lv_label_set_text(p->lbl_exposure_total, "");
-        }
-
-        int progress = (int)((elapsed * 100) / total);
-        if (progress > 100) progress = 100;
-        if (progress < 0) progress = 0;
-
-        int current_val = lv_arc_get_value(p->arc_exposure);
-        bool new_exposure = (p->prev_target_progress > 70 && progress < 30);
-        p->prev_target_progress = progress;
-
-        if (new_exposure && current_val > 0) {
-            p->arc_completing = true;
-            p->pending_arc_progress = progress;
-
-            lv_anim_t a;
-            lv_anim_init(&a);
-            lv_anim_set_var(&a, p->arc_exposure);
-            lv_anim_set_values(&a, current_val, 100);
-            lv_anim_set_time(&a, 300);
-            lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_arc_set_value);
-            lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
-            a.user_data = p;
-            lv_anim_set_ready_cb(&a, arc_fill_complete_cb);
-            lv_anim_start(&a);
-        } else if (p->arc_completing) {
-            p->pending_arc_progress = progress;
-            if (progress > 30) {
-                p->arc_completing = false;
-                lv_arc_set_value(p->arc_exposure, progress);
-            }
-        } else {
-            lv_anim_t a;
-            lv_anim_init(&a);
-            lv_anim_set_var(&a, p->arc_exposure);
-            lv_anim_set_values(&a, current_val, progress);
-            lv_anim_set_time(&a, 350);
-            lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_arc_set_value);
-            lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
-            lv_anim_start(&a);
-        }
-    } else {
-        lv_label_set_text(p->lbl_exposure_current, "--");
-        lv_label_set_text(p->lbl_exposure_total, "");
-        lv_arc_set_value(p->arc_exposure, 0);
-    }
-
-    // Loop count
-    if (data->exposure_iterations > 0) {
-        lv_label_set_text_fmt(p->lbl_loop_count, "%d / %d",
-            data->exposure_count, data->exposure_iterations);
-    } else {
-        lv_label_set_text(p->lbl_loop_count, "-- / --");
-    }
-
-    // RMS
-    if (data->guider.rms_total > 0) {
-        lv_label_set_text_fmt(p->lbl_rms_value, "%.2f\"", data->guider.rms_total);
-        uint32_t rms_color = app_config_get_rms_color(data->guider.rms_total, page_index);
-        lv_obj_set_style_text_color(p->lbl_rms_value, lv_color_hex(rms_color), 0);
-    } else {
-        lv_label_set_text(p->lbl_rms_value, "--");
-        lv_obj_set_style_text_color(p->lbl_rms_value, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
-
-    if (p->lbl_rms_ra_value) {
-        if (data->guider.rms_ra > 0) {
-            lv_label_set_text_fmt(p->lbl_rms_ra_value, "%.2f\"", data->guider.rms_ra);
-        } else {
-            lv_label_set_text(p->lbl_rms_ra_value, "--");
-        }
-    }
-    if (p->lbl_rms_dec_value) {
-        if (data->guider.rms_dec > 0) {
-            lv_label_set_text_fmt(p->lbl_rms_dec_value, "%.2f\"", data->guider.rms_dec);
-        } else {
-            lv_label_set_text(p->lbl_rms_dec_value, "--");
-        }
-    }
-
-    // HFR
-    if (data->hfr > 0) {
-        lv_label_set_text_fmt(p->lbl_hfr_value, "%.2f", data->hfr);
-        uint32_t hfr_color = app_config_get_hfr_color(data->hfr, page_index);
-        lv_obj_set_style_text_color(p->lbl_hfr_value, lv_color_hex(hfr_color), 0);
-    } else {
-        lv_label_set_text(p->lbl_hfr_value, "--");
-        lv_obj_set_style_text_color(p->lbl_hfr_value, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
-
-    // Meridian flip
-    if (data->meridian_flip[0] != '\0' && strcmp(data->meridian_flip, "--") != 0) {
-        lv_label_set_text(p->lbl_flip_value, data->meridian_flip);
-    } else {
-        lv_label_set_text(p->lbl_flip_value, "--");
-    }
-
-    // Stars
-    if (data->stars >= 0) {
-        lv_label_set_text_fmt(p->lbl_stars_value, "%d", data->stars);
-    } else {
-        lv_label_set_text(p->lbl_stars_value, "--");
-    }
-
-    // Target time remaining
-    if (data->target_time_remaining[0] != '\0') {
-        lv_label_set_text(p->lbl_target_time_value, data->target_time_remaining);
-    } else {
-        lv_label_set_text(p->lbl_target_time_value, "--");
-    }
-
-    // Power
-    int pwr_idx = 0;
-    bool sw = data->power.switch_connected;
-
-    #define UPPER(buf) do { for (int _c = 0; (buf)[_c]; _c++) \
-        if ((buf)[_c] >= 'a' && (buf)[_c] <= 'z') (buf)[_c] -= 32; } while(0)
-
-    if (sw && pwr_idx < MAX_POWER_WIDGETS) {
-        char title[32];
-        strncpy(title, data->power.amps_name[0] ? data->power.amps_name : "Amps", sizeof(title) - 1);
-        title[sizeof(title) - 1] = '\0';
-        UPPER(title);
-        lv_label_set_text(p->lbl_pwr_title[pwr_idx], title);
-        lv_label_set_text_fmt(p->lbl_pwr_value[pwr_idx], "%.2fA", data->power.total_amps);
-        lv_obj_clear_flag(p->box_pwr[pwr_idx], LV_OBJ_FLAG_HIDDEN);
-        pwr_idx++;
-    }
-    if (sw && pwr_idx < MAX_POWER_WIDGETS) {
-        char title[32];
-        strncpy(title, data->power.watts_name[0] ? data->power.watts_name : "Watts", sizeof(title) - 1);
-        title[sizeof(title) - 1] = '\0';
-        UPPER(title);
-        lv_label_set_text(p->lbl_pwr_title[pwr_idx], title);
-        lv_label_set_text_fmt(p->lbl_pwr_value[pwr_idx], "%.1fW", data->power.total_watts);
-        lv_obj_clear_flag(p->box_pwr[pwr_idx], LV_OBJ_FLAG_HIDDEN);
-        pwr_idx++;
-    }
-    if (sw) {
-        for (int i = 0; i < data->power.pwm_count && pwr_idx < MAX_POWER_WIDGETS; i++, pwr_idx++) {
-            char title[32];
-            strncpy(title, data->power.pwm_names[i], sizeof(title) - 1);
-            title[sizeof(title) - 1] = '\0';
-            UPPER(title);
-            lv_label_set_text(p->lbl_pwr_title[pwr_idx], title);
-            lv_label_set_text_fmt(p->lbl_pwr_value[pwr_idx], "%.0f%%", data->power.pwm[i]);
-            lv_obj_clear_flag(p->box_pwr[pwr_idx], LV_OBJ_FLAG_HIDDEN);
-        }
-    }
-    for (int i = pwr_idx; i < MAX_POWER_WIDGETS; i++) {
-        lv_obj_add_flag(p->box_pwr[i], LV_OBJ_FLAG_HIDDEN);
-    }
-
-    #undef UPPER
-}
-
-/* Thumbnail API for main.c */
-bool nina_dashboard_thumbnail_requested(void) {
-    return thumbnail_requested;
-}
-
-void nina_dashboard_clear_thumbnail_request(void) {
-    thumbnail_requested = false;
-}
-
-void nina_dashboard_set_thumbnail(const uint8_t *rgb565_data, uint32_t w, uint32_t h, uint32_t data_size) {
-    if (!thumbnail_overlay || !thumbnail_img) return;
-
-    // If overlay was dismissed while fetch was in progress, discard the data
-    if (lv_obj_has_flag(thumbnail_overlay, LV_OBJ_FLAG_HIDDEN)) {
-        free((void *)rgb565_data);
-        return;
-    }
-
-    // Free previous buffer
-    if (thumbnail_decoded_buf) {
-        free(thumbnail_decoded_buf);
-        thumbnail_decoded_buf = NULL;
-    }
-
-    // Take ownership of the buffer
-    thumbnail_decoded_buf = (uint8_t *)rgb565_data;
-
-    // Set up LVGL image descriptor
-    memset(&thumbnail_dsc, 0, sizeof(thumbnail_dsc));
-    thumbnail_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
-    thumbnail_dsc.header.w = w;
-    thumbnail_dsc.header.h = h;
-    thumbnail_dsc.header.stride = w * 2;
-    thumbnail_dsc.data = thumbnail_decoded_buf;
-    thumbnail_dsc.data_size = data_size;
-
-    lv_image_set_src(thumbnail_img, &thumbnail_dsc);
-
-    // Scale image to fit screen width (720px) while preserving aspect ratio
-    // LVGL scale: 256 = 100%
-    if (w > 0) {
-        uint32_t scale = (uint32_t)SCREEN_SIZE * 256 / w;
-        lv_image_set_scale(thumbnail_img, scale);
-    }
-
-    // Hide loading, show image
-    if (thumbnail_loading_lbl) {
-        lv_obj_add_flag(thumbnail_loading_lbl, LV_OBJ_FLAG_HIDDEN);
-    }
-    lv_obj_clear_flag(thumbnail_img, LV_OBJ_FLAG_HIDDEN);
-}
-
-void nina_dashboard_hide_thumbnail(void) {
-    if (thumbnail_overlay) {
-        lv_obj_add_flag(thumbnail_overlay, LV_OBJ_FLAG_HIDDEN);
-    }
-    if (thumbnail_img) {
-        lv_obj_add_flag(thumbnail_img, LV_OBJ_FLAG_HIDDEN);
-        lv_image_set_src(thumbnail_img, NULL);
-    }
-    // Free decoded image buffer
-    if (thumbnail_decoded_buf) {
-        free(thumbnail_decoded_buf);
-        thumbnail_decoded_buf = NULL;
-    }
-    thumbnail_requested = false;
-}
-
-bool nina_dashboard_thumbnail_visible(void) {
-    return thumbnail_overlay && !lv_obj_has_flag(thumbnail_overlay, LV_OBJ_FLAG_HIDDEN);
 }

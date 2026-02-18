@@ -14,6 +14,7 @@
 #include "driver/gpio.h"
 #include "ui/nina_dashboard.h"
 #include "nina_client.h"
+#include "nina_websocket.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 

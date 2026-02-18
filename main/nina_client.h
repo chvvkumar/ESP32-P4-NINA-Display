@@ -2,7 +2,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include "esp_websocket_client.h"
+#include <stddef.h>
 
 #define MAX_FILTERS 10
 
@@ -116,11 +116,6 @@ void nina_client_poll_heartbeat(const char *base_url, nina_client_t *data);
 
 // Legacy API - fetches all data every call (kept for compatibility)
 void nina_client_get_data(const char *base_url, nina_client_t *data);
-
-// WebSocket API - connect to NINA WebSocket for event-driven updates
-// Derives ws:// URL from the HTTP API base_url (e.g., http://host:1888/v2/api/ -> ws://host:1888/v2/socket)
-void nina_websocket_start(const char *base_url, nina_client_t *data);
-void nina_websocket_stop(void);
 
 // Fetch prepared image as JPEG from NINA API
 // Returns heap-allocated JPEG bytes (caller must free), or NULL on error
