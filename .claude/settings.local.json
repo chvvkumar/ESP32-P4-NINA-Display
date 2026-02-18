@@ -11,7 +11,12 @@
       "Bash(idf.py build:*)",
       "Bash(export:*)",
       "Bash(export PATH=\"$IDF_PATH/tools:$PATH\")",
-      "Bash(source:*)"
+      "Bash(source:*)",
+      "WebFetch(domain:astromele2.lan)",
+      "Bash(done)",
+      "Bash(dir:*)",
+      "WebFetch(domain:desktop-bdt978m)",
+      "WebFetch(domain:desktop-bdt978m.lan)"
     ]
   }
 }
