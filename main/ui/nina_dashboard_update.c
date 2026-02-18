@@ -10,6 +10,11 @@
 #include <stdio.h>
 #include <string.h>
 
+/* Red Night theme forces all colors to the theme palette, ignoring filter/threshold overrides */
+static bool theme_forces_colors(void) {
+    return current_theme && strcmp(current_theme->name, "Red Night") == 0;
+}
+
 // Arc animation callbacks
 static void arc_reset_complete_cb(lv_anim_t *a) {
     dashboard_page_t *p = (dashboard_page_t *)a->user_data;
@@ -37,7 +42,12 @@ void nina_dashboard_update_status(int page_index, int rssi, bool nina_connected,
     dashboard_page_t *p = &pages[page_index];
     if (!p->page) return;
 
-    uint32_t text_color = nina_connected ? 0x4ade80 : 0xf87171;
+    uint32_t text_color;
+    if (theme_forces_colors()) {
+        text_color = nina_connected ? current_theme->text_color : current_theme->label_color;
+    } else {
+        text_color = nina_connected ? 0x4ade80 : 0xf87171;
+    }
 
     int gb = app_config_get()->color_brightness;
     text_color = app_config_apply_brightness(text_color, gb);
@@ -95,7 +105,7 @@ static void update_sequence_info(dashboard_page_t *p, const nina_client_t *d) {
 static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
                                 int page_index, int gb) {
     uint32_t filter_color = app_config_apply_brightness(current_theme->progress_color, gb);
-    if (d->current_filter[0] != '\0' && strcmp(d->current_filter, "--") != 0) {
+    if (!theme_forces_colors() && d->current_filter[0] != '\0' && strcmp(d->current_filter, "--") != 0) {
         filter_color = app_config_get_filter_color(d->current_filter, page_index);
     }
     lv_obj_set_style_arc_color(p->arc_exposure, lv_color_hex(filter_color), LV_PART_INDICATOR);
@@ -172,7 +182,9 @@ static void update_guider_stats(dashboard_page_t *p, const nina_client_t *d,
                                 int page_index, int gb) {
     if (d->guider.rms_total > 0) {
         lv_label_set_text_fmt(p->lbl_rms_value, "%.2f\"", d->guider.rms_total);
-        uint32_t rms_color = app_config_get_rms_color(d->guider.rms_total, page_index);
+        uint32_t rms_color = theme_forces_colors()
+            ? app_config_apply_brightness(current_theme->rms_color, gb)
+            : app_config_get_rms_color(d->guider.rms_total, page_index);
         lv_obj_set_style_text_color(p->lbl_rms_value, lv_color_hex(rms_color), 0);
     } else {
         lv_label_set_text(p->lbl_rms_value, "--");
@@ -190,7 +202,9 @@ static void update_guider_stats(dashboard_page_t *p, const nina_client_t *d,
 
     if (d->hfr > 0) {
         lv_label_set_text_fmt(p->lbl_hfr_value, "%.2f", d->hfr);
-        uint32_t hfr_color = app_config_get_hfr_color(d->hfr, page_index);
+        uint32_t hfr_color = theme_forces_colors()
+            ? app_config_apply_brightness(current_theme->hfr_color, gb)
+            : app_config_get_hfr_color(d->hfr, page_index);
         lv_obj_set_style_text_color(p->lbl_hfr_value, lv_color_hex(hfr_color), 0);
     } else {
         lv_label_set_text(p->lbl_hfr_value, "--");
