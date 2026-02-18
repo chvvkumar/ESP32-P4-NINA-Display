@@ -594,3 +594,46 @@ void nina_dashboard_show_page(int page_index, int instance_count) {
 int nina_dashboard_get_active_page(void) {
     return active_page;
 }
+
+static void fade_anim_cb(void *obj, int32_t v)
+{
+    lv_obj_set_style_opa((lv_obj_t *)obj, (lv_opa_t)v, 0);
+}
+
+void nina_dashboard_show_page_animated(int page_index, int instance_count, int effect)
+{
+    if (page_index < 0 || page_index >= page_count) return;
+    if (page_index == active_page) return;
+
+    lv_obj_add_flag(pages[active_page].page, LV_OBJ_FLAG_HIDDEN);
+    active_page = page_index;
+
+    if (effect == 1) {
+        /* Fade-in: start transparent, animate to fully opaque */
+        lv_obj_set_style_opa(pages[active_page].page, LV_OPA_TRANSP, 0);
+        lv_obj_clear_flag(pages[active_page].page, LV_OBJ_FLAG_HIDDEN);
+
+        lv_anim_t a;
+        lv_anim_init(&a);
+        lv_anim_set_exec_cb(&a, fade_anim_cb);
+        lv_anim_set_var(&a, pages[active_page].page);
+        lv_anim_set_values(&a, LV_OPA_TRANSP, LV_OPA_COVER);
+        lv_anim_set_duration(&a, 1000);
+        lv_anim_start(&a);
+    } else {
+        lv_obj_clear_flag(pages[active_page].page, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    /* Update indicator dots */
+    if (indicator_cont) {
+        int gb = app_config_get()->color_brightness;
+        for (int i = 0; i < page_count; i++) {
+            if (indicator_dots[i]) {
+                uint32_t dot_color = (i == active_page)
+                    ? app_config_apply_brightness(current_theme->text_color, gb)
+                    : app_config_apply_brightness(current_theme->label_color, gb);
+                lv_obj_set_style_bg_color(indicator_dots[i], lv_color_hex(dot_color), 0);
+            }
+        }
+    }
+}
