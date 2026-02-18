@@ -21,8 +21,6 @@ typedef struct {
     uint32_t progress_color;
     uint32_t rms_color;
     uint32_t hfr_color;
-    uint32_t stars_color;
-    uint32_t saturated_color;
 } theme_t;
 
 /**

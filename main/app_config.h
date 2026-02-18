@@ -13,28 +13,20 @@ extern "C" {
 typedef struct {
     char wifi_ssid[32];
     char wifi_pass[64];
-    char api_url_1[128];
-    char api_url_2[128];
-    char api_url_3[128];
+    char api_url[3][128];           // API base URLs per instance
     char ntp_server[64];
-    char filter_colors_1[512];   // JSON per instance 1: {"L":"#787878","R":"#991b1b",...}
-    char filter_colors_2[512];   // JSON per instance 2
-    char filter_colors_3[512];   // JSON per instance 3
-    char rms_thresholds_1[256];  // JSON per instance 1: {"good_max":0.5,"ok_max":1.0,"good_color":"#10b981","ok_color":"#eab308","bad_color":"#ef4444"}
-    char rms_thresholds_2[256];  // JSON per instance 2
-    char rms_thresholds_3[256];  // JSON per instance 3
-    char hfr_thresholds_1[256];  // JSON per instance 1: {"good_max":2.0,"ok_max":3.5,"good_color":"#10b981","ok_color":"#eab308","bad_color":"#ef4444"}
-    char hfr_thresholds_2[256];  // JSON per instance 2
-    char hfr_thresholds_3[256];  // JSON per instance 3
-    int theme_index;             // Index of the selected theme
-    int brightness;              // Display brightness 0-100 (default 50)
-    int color_brightness;        // Global color brightness for dynamic elements 0-100 (default 100)
-    bool mqtt_enabled;           // Enable MQTT Home Assistant integration
-    char mqtt_broker_url[128];   // MQTT broker URL (e.g. "mqtt://192.168.1.100")
-    char mqtt_username[64];      // MQTT broker username
-    char mqtt_password[64];      // MQTT broker password
-    char mqtt_topic_prefix[64];  // MQTT topic prefix (default "ninadisplay")
-    uint16_t mqtt_port;          // MQTT broker port (default 1883)
+    char filter_colors[3][512];     // JSON filter color map per instance: {"L":"#787878","R":"#991b1b",...}
+    char rms_thresholds[3][256];    // JSON RMS threshold config per instance
+    char hfr_thresholds[3][256];    // JSON HFR threshold config per instance
+    int theme_index;                // Index of the selected theme
+    int brightness;                 // Display brightness 0-100 (default 50)
+    int color_brightness;           // Global color brightness for dynamic elements 0-100 (default 100)
+    bool mqtt_enabled;              // Enable MQTT Home Assistant integration
+    char mqtt_broker_url[128];      // MQTT broker URL (e.g. "mqtt://192.168.1.100")
+    char mqtt_username[64];         // MQTT broker username
+    char mqtt_password[64];         // MQTT broker password
+    char mqtt_topic_prefix[64];     // MQTT topic prefix (default "ninadisplay")
+    uint16_t mqtt_port;             // MQTT broker port (default 1883)
 } app_config_t;
 
 void app_config_init(void);

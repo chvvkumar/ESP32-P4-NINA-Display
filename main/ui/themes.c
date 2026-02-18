@@ -16,8 +16,6 @@ static const theme_t themes[] = {
         .progress_color = 0x2563eb,
         .rms_color = 0xbe123c,
         .hfr_color = 0x059669,
-        .stars_color = 0xc2410c,
-        .saturated_color = 0x7e22ce
     },
     {
         .name = "OLED Black",
@@ -33,8 +31,6 @@ static const theme_t themes[] = {
         .progress_color = 0x404040,
         .rms_color = 0x737373,
         .hfr_color = 0x737373,
-        .stars_color = 0x737373,
-        .saturated_color = 0x737373
     },
     {
         .name = "Deep Space",
@@ -50,8 +46,6 @@ static const theme_t themes[] = {
         .progress_color = 0x1d4ed8,
         .rms_color = 0x9f1239,
         .hfr_color = 0x065f46,
-        .stars_color = 0x92400e,
-        .saturated_color = 0x5b21b6
     },
     {
         .name = "Red Night",
@@ -67,8 +61,6 @@ static const theme_t themes[] = {
         .progress_color = 0x7f1d1d,
         .rms_color = 0xcc0000,
         .hfr_color = 0x991b1b,
-        .stars_color = 0x991b1b,
-        .saturated_color = 0x7f1d1d
     },
     {
         .name = "Cyberpunk",
@@ -84,8 +76,6 @@ static const theme_t themes[] = {
         .progress_color = 0xbe185d,
         .rms_color = 0x9f1239,
         .hfr_color = 0x115e59,
-        .stars_color = 0x854d0e,
-        .saturated_color = 0x6b21a8
     },
     {
         .name = "Midnight Green",
@@ -101,8 +91,6 @@ static const theme_t themes[] = {
         .progress_color = 0x15803d,
         .rms_color = 0x7f1d1d,
         .hfr_color = 0x166534,
-        .stars_color = 0x854d0e,
-        .saturated_color = 0x581c87
     },
     {
         .name = "Solarized Dark",
@@ -118,8 +106,6 @@ static const theme_t themes[] = {
         .progress_color = 0x2aa198,
         .rms_color = 0xdc322f,
         .hfr_color = 0x859900,
-        .stars_color = 0xb58900,
-        .saturated_color = 0x6c71c4
     },
     {
         .name = "Monochrome",
@@ -135,8 +121,6 @@ static const theme_t themes[] = {
         .progress_color = 0x262626,
         .rms_color = 0x525252,
         .hfr_color = 0x525252,
-        .stars_color = 0x525252,
-        .saturated_color = 0x525252
     },
     {
         .name = "Crimson",
@@ -152,8 +136,6 @@ static const theme_t themes[] = {
         .progress_color = 0x450a0a,
         .rms_color = 0x7f1d1d,
         .hfr_color = 0x7f1d1d,
-        .stars_color = 0x7f1d1d,
-        .saturated_color = 0x7f1d1d
     },
     {
         .name = "Slate",
@@ -169,8 +151,6 @@ static const theme_t themes[] = {
         .progress_color = 0x0e7490,
         .rms_color = 0x881337,
         .hfr_color = 0x064e3b,
-        .stars_color = 0x713f12,
-        .saturated_color = 0x581c87
     },
     {
         .name = "All Black",
@@ -186,8 +166,6 @@ static const theme_t themes[] = {
         .progress_color = 0x171717,
         .rms_color = 0x404040,
         .hfr_color = 0x404040,
-        .stars_color = 0x404040,
-        .saturated_color = 0x404040
     },
     {
         .name = "Aquamarine Dream",
@@ -203,8 +181,6 @@ static const theme_t themes[] = {
         .progress_color = 0x26C6DA,
         .rms_color = 0x00BCD4,
         .hfr_color = 0x00BCD4,
-        .stars_color = 0x80DEEA,
-        .saturated_color = 0x0097A7
     },
     {
         .name = "Midnight Industrial",
@@ -220,8 +196,6 @@ static const theme_t themes[] = {
         .progress_color = 0x00838F,
         .rms_color = 0x0097A7,
         .hfr_color = 0x0097A7,
-        .stars_color = 0x0097A7,
-        .saturated_color = 0x006064
     },
     {
         .name = "Electric Prism",
@@ -237,8 +211,6 @@ static const theme_t themes[] = {
         .progress_color = 0x00E5FF,
         .rms_color = 0x00E5FF,
         .hfr_color = 0x00E5FF,
-        .stars_color = 0x00E5FF,
-        .saturated_color = 0x00B8D4
     }
 };
 

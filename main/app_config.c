@@ -26,18 +26,14 @@ static const char *DEFAULT_HFR_THRESHOLDS =
 
 static void set_defaults(app_config_t *cfg) {
     memset(cfg, 0, sizeof(app_config_t));
-    strcpy(cfg->api_url_1, "http://astromele2.lan:1888/v2/api/");
-    strcpy(cfg->api_url_2, "http://astromele3.lan:1888/v2/api/");
+    strcpy(cfg->api_url[0], "http://astromele2.lan:1888/v2/api/");
+    strcpy(cfg->api_url[1], "http://astromele3.lan:1888/v2/api/");
     strcpy(cfg->ntp_server, "pool.ntp.org");
-    strcpy(cfg->filter_colors_1, "{}");
-    strcpy(cfg->filter_colors_2, "{}");
-    strcpy(cfg->filter_colors_3, "{}");
-    strcpy(cfg->rms_thresholds_1, DEFAULT_RMS_THRESHOLDS);
-    strcpy(cfg->rms_thresholds_2, DEFAULT_RMS_THRESHOLDS);
-    strcpy(cfg->rms_thresholds_3, DEFAULT_RMS_THRESHOLDS);
-    strcpy(cfg->hfr_thresholds_1, DEFAULT_HFR_THRESHOLDS);
-    strcpy(cfg->hfr_thresholds_2, DEFAULT_HFR_THRESHOLDS);
-    strcpy(cfg->hfr_thresholds_3, DEFAULT_HFR_THRESHOLDS);
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        strcpy(cfg->filter_colors[i], "{}");
+        strcpy(cfg->rms_thresholds[i], DEFAULT_RMS_THRESHOLDS);
+        strcpy(cfg->hfr_thresholds[i], DEFAULT_HFR_THRESHOLDS);
+    }
     cfg->brightness = 50;
     cfg->color_brightness = 100;
     strcpy(cfg->mqtt_broker_url, "mqtt://192.168.1.250");
@@ -67,29 +63,15 @@ void app_config_init(void) {
     } else {
         // Config loaded successfully, but check if fields are valid
         bool needs_save = false;
-        if (s_config.rms_thresholds_1[0] == '\0') {
-            strcpy(s_config.rms_thresholds_1, DEFAULT_RMS_THRESHOLDS);
-            needs_save = true;
-        }
-        if (s_config.rms_thresholds_2[0] == '\0') {
-            strcpy(s_config.rms_thresholds_2, DEFAULT_RMS_THRESHOLDS);
-            needs_save = true;
-        }
-        if (s_config.rms_thresholds_3[0] == '\0') {
-            strcpy(s_config.rms_thresholds_3, DEFAULT_RMS_THRESHOLDS);
-            needs_save = true;
-        }
-        if (s_config.hfr_thresholds_1[0] == '\0') {
-            strcpy(s_config.hfr_thresholds_1, DEFAULT_HFR_THRESHOLDS);
-            needs_save = true;
-        }
-        if (s_config.hfr_thresholds_2[0] == '\0') {
-            strcpy(s_config.hfr_thresholds_2, DEFAULT_HFR_THRESHOLDS);
-            needs_save = true;
-        }
-        if (s_config.hfr_thresholds_3[0] == '\0') {
-            strcpy(s_config.hfr_thresholds_3, DEFAULT_HFR_THRESHOLDS);
-            needs_save = true;
+        for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+            if (s_config.rms_thresholds[i][0] == '\0') {
+                strcpy(s_config.rms_thresholds[i], DEFAULT_RMS_THRESHOLDS);
+                needs_save = true;
+            }
+            if (s_config.hfr_thresholds[i][0] == '\0') {
+                strcpy(s_config.hfr_thresholds[i], DEFAULT_HFR_THRESHOLDS);
+                needs_save = true;
+            }
         }
         if (s_config.color_brightness < 0 || s_config.color_brightness > 100) {
             s_config.color_brightness = 100;
@@ -196,11 +178,8 @@ static uint32_t parse_color_field(cJSON *root, const char *field, uint32_t fallb
  * @brief Get pointer to the filter_colors field for a given instance index
  */
 static char *get_filter_colors_field(int instance_index) {
-    switch (instance_index) {
-        case 1: return s_config.filter_colors_2;
-        case 2: return s_config.filter_colors_3;
-        default: return s_config.filter_colors_1;
-    }
+    if (instance_index < 0 || instance_index >= MAX_NINA_INSTANCES) instance_index = 0;
+    return s_config.filter_colors[instance_index];
 }
 
 /**
@@ -301,20 +280,16 @@ static uint32_t get_threshold_color(float value, const char *json,
  * @brief Get the color for a guiding RMS value based on per-instance configured thresholds.
  */
 uint32_t app_config_get_rms_color(float rms_value, int instance_index) {
-    const char *json = (instance_index == 1) ? s_config.rms_thresholds_2 :
-                       (instance_index == 2) ? s_config.rms_thresholds_3 :
-                                               s_config.rms_thresholds_1;
-    return get_threshold_color(rms_value, json, 0.5f, 1.0f);
+    if (instance_index < 0 || instance_index >= MAX_NINA_INSTANCES) instance_index = 0;
+    return get_threshold_color(rms_value, s_config.rms_thresholds[instance_index], 0.5f, 1.0f);
 }
 
 /**
  * @brief Get the color for an HFR value based on per-instance configured thresholds.
  */
 uint32_t app_config_get_hfr_color(float hfr_value, int instance_index) {
-    const char *json = (instance_index == 1) ? s_config.hfr_thresholds_2 :
-                       (instance_index == 2) ? s_config.hfr_thresholds_3 :
-                                               s_config.hfr_thresholds_1;
-    return get_threshold_color(hfr_value, json, 2.0f, 3.5f);
+    if (instance_index < 0 || instance_index >= MAX_NINA_INSTANCES) instance_index = 0;
+    return get_threshold_color(hfr_value, s_config.hfr_thresholds[instance_index], 2.0f, 3.5f);
 }
 
 /**
@@ -388,17 +363,13 @@ void app_config_sync_filters(const char *filter_names[], int count, int instance
 
 int app_config_get_instance_count(void) {
     int count = 0;
-    if (s_config.api_url_1[0] != '\0') count++;
-    if (s_config.api_url_2[0] != '\0') count++;
-    if (s_config.api_url_3[0] != '\0') count++;
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        if (s_config.api_url[i][0] != '\0') count++;
+    }
     return count > 0 ? count : 1;  // Always at least 1
 }
 
 const char *app_config_get_instance_url(int index) {
-    switch (index) {
-        case 0: return s_config.api_url_1;
-        case 1: return s_config.api_url_2;
-        case 2: return s_config.api_url_3;
-        default: return "";
-    }
+    if (index < 0 || index >= MAX_NINA_INSTANCES) return "";
+    return s_config.api_url[index];
 }

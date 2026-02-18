@@ -2,8 +2,10 @@
  * @file nina_websocket.c
  * @brief WebSocket client lifecycle and event handling for NINA.
  *
- * Handles IMAGE-SAVE, FILTERWHEEL-CHANGED, SEQUENCE-FINISHED,
- * SEQUENCE-STARTING, GUIDER-DITHER, and GUIDER-START events.
+ * Maintains one persistent WebSocket connection per NINA instance
+ * (up to MAX_NINA_INSTANCES). Each connection receives IMAGE-SAVE,
+ * FILTERWHEEL-CHANGED, SEQUENCE-FINISHED, SEQUENCE-STARTING,
+ * GUIDER-DITHER, and GUIDER-START events independently.
  */
 
 #include "nina_websocket.h"
@@ -14,14 +16,15 @@
 
 static const char *TAG = "nina_ws";
 
-static esp_websocket_client_handle_t ws_client = NULL;
-static nina_client_t *ws_client_data = NULL;
+static esp_websocket_client_handle_t ws_clients[MAX_NINA_INSTANCES];
+static nina_client_t *ws_client_data[MAX_NINA_INSTANCES];
 
 /**
  * @brief Process incoming WebSocket JSON event from NINA
  */
-static void handle_websocket_message(const char *payload, int len) {
-    if (!ws_client_data || !payload || len <= 0) return;
+static void handle_websocket_message(int index, const char *payload, int len) {
+    nina_client_t *data = ws_client_data[index];
+    if (!data || !payload || len <= 0) return;
 
     cJSON *json = cJSON_ParseWithLength(payload, len);
     if (!json) return;
@@ -40,18 +43,18 @@ static void handle_websocket_message(const char *payload, int len) {
 
     // IMAGE-SAVE: Replaces fetch_image_history_robust for HFR, Stars, Filter, Target
     if (strcmp(evt->valuestring, "IMAGE-SAVE") == 0) {
-        ESP_LOGI(TAG, "WS: IMAGE-SAVE event received");
+        ESP_LOGI(TAG, "WS[%d]: IMAGE-SAVE event received", index);
 
         cJSON *stats = cJSON_GetObjectItem(response, "ImageStatistics");
         if (stats) {
             cJSON *hfr = cJSON_GetObjectItem(stats, "HFR");
-            if (hfr) ws_client_data->hfr = (float)hfr->valuedouble;
+            if (hfr) data->hfr = (float)hfr->valuedouble;
 
             cJSON *stars = cJSON_GetObjectItem(stats, "Stars");
-            if (stars) ws_client_data->stars = stars->valueint;
+            if (stars) data->stars = stars->valueint;
 
             cJSON *exp = cJSON_GetObjectItem(stats, "ExposureTime");
-            if (exp) ws_client_data->exposure_total = (float)exp->valuedouble;
+            if (exp) data->exposure_total = (float)exp->valuedouble;
 
             // NOTE: Do NOT update current_filter from IMAGE-SAVE.
             // The filter wheel may have already moved to the next filter
@@ -60,21 +63,21 @@ static void handle_websocket_message(const char *payload, int len) {
 
             cJSON *target = cJSON_GetObjectItem(stats, "TargetName");
             if (target && target->valuestring && target->valuestring[0] != '\0') {
-                strncpy(ws_client_data->target_name, target->valuestring,
-                        sizeof(ws_client_data->target_name) - 1);
+                strncpy(data->target_name, target->valuestring,
+                        sizeof(data->target_name) - 1);
             }
 
             cJSON *telescope = cJSON_GetObjectItem(stats, "TelescopeName");
             if (telescope && telescope->valuestring) {
-                strncpy(ws_client_data->telescope_name, telescope->valuestring,
-                        sizeof(ws_client_data->telescope_name) - 1);
+                strncpy(data->telescope_name, telescope->valuestring,
+                        sizeof(data->telescope_name) - 1);
             }
 
-            ws_client_data->new_image_available = true;
+            data->new_image_available = true;
 
-            ESP_LOGI(TAG, "WS: HFR=%.2f Stars=%d Filter=%s Target=%s",
-                ws_client_data->hfr, ws_client_data->stars,
-                ws_client_data->current_filter, ws_client_data->target_name);
+            ESP_LOGI(TAG, "WS[%d]: HFR=%.2f Stars=%d Filter=%s Target=%s",
+                index, data->hfr, data->stars,
+                data->current_filter, data->target_name);
         }
     }
     // FILTERWHEEL-CHANGED: Replaces fetch_filter_robust_ex for current filter
@@ -83,70 +86,72 @@ static void handle_websocket_message(const char *payload, int len) {
         if (new_f) {
             cJSON *name = cJSON_GetObjectItem(new_f, "Name");
             if (name && name->valuestring) {
-                strncpy(ws_client_data->current_filter, name->valuestring,
-                        sizeof(ws_client_data->current_filter) - 1);
-                ESP_LOGI(TAG, "WS: Filter changed to %s", ws_client_data->current_filter);
+                strncpy(data->current_filter, name->valuestring,
+                        sizeof(data->current_filter) - 1);
+                ESP_LOGI(TAG, "WS[%d]: Filter changed to %s", index, data->current_filter);
             }
         }
     }
     // SEQUENCE-FINISHED: Mark sequence as done
     else if (strcmp(evt->valuestring, "SEQUENCE-FINISHED") == 0) {
-        strcpy(ws_client_data->status, "FINISHED");
-        ESP_LOGI(TAG, "WS: Sequence finished");
+        strcpy(data->status, "FINISHED");
+        ESP_LOGI(TAG, "WS[%d]: Sequence finished", index);
     }
     // SEQUENCE-STARTING: Mark sequence as running
     else if (strcmp(evt->valuestring, "SEQUENCE-STARTING") == 0) {
-        strcpy(ws_client_data->status, "RUNNING");
-        ESP_LOGI(TAG, "WS: Sequence starting");
+        strcpy(data->status, "RUNNING");
+        ESP_LOGI(TAG, "WS[%d]: Sequence starting", index);
     }
     // GUIDER-DITHER: Flag dithering state
     else if (strcmp(evt->valuestring, "GUIDER-DITHER") == 0) {
-        ws_client_data->is_dithering = true;
-        ESP_LOGI(TAG, "WS: Dithering");
+        data->is_dithering = true;
+        ESP_LOGI(TAG, "WS[%d]: Dithering", index);
     }
     // GUIDER-START: Clear dithering flag
     else if (strcmp(evt->valuestring, "GUIDER-START") == 0) {
-        ws_client_data->is_dithering = false;
-        ESP_LOGI(TAG, "WS: Guiding started");
+        data->is_dithering = false;
+        ESP_LOGI(TAG, "WS[%d]: Guiding started", index);
     }
     else {
-        ESP_LOGD(TAG, "WS: Unhandled event: %s", evt->valuestring);
+        ESP_LOGD(TAG, "WS[%d]: Unhandled event: %s", index, evt->valuestring);
     }
 
     cJSON_Delete(json);
 }
 
 /**
- * @brief WebSocket event handler callback
+ * @brief WebSocket event handler callback.
+ * handler_args carries the instance index as (void *)(intptr_t)index.
  */
 static void websocket_event_handler(void *handler_args, esp_event_base_t base,
                                      int32_t event_id, void *event_data)
 {
+    int index = (int)(intptr_t)handler_args;
     esp_websocket_event_data_t *data = (esp_websocket_event_data_t *)event_data;
 
     switch (event_id) {
     case WEBSOCKET_EVENT_CONNECTED:
-        ESP_LOGI(TAG, "WS: Connected to NINA");
-        if (ws_client_data) {
-            ws_client_data->websocket_connected = true;
+        ESP_LOGI(TAG, "WS[%d]: Connected to NINA", index);
+        if (ws_client_data[index]) {
+            ws_client_data[index]->websocket_connected = true;
         }
         break;
 
     case WEBSOCKET_EVENT_DISCONNECTED:
-        ESP_LOGW(TAG, "WS: Disconnected from NINA");
-        if (ws_client_data) {
-            ws_client_data->websocket_connected = false;
+        ESP_LOGW(TAG, "WS[%d]: Disconnected from NINA", index);
+        if (ws_client_data[index]) {
+            ws_client_data[index]->websocket_connected = false;
         }
         break;
 
     case WEBSOCKET_EVENT_DATA:
         if (data->op_code == 0x01 && data->data_len > 0) {  // Text frame
-            handle_websocket_message((const char *)data->data_ptr, data->data_len);
+            handle_websocket_message(index, (const char *)data->data_ptr, data->data_len);
         }
         break;
 
     case WEBSOCKET_EVENT_ERROR:
-        ESP_LOGW(TAG, "WS: Error");
+        ESP_LOGW(TAG, "WS[%d]: Error", index);
         break;
 
     default:
@@ -155,7 +160,7 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base,
 }
 
 /**
- * @brief Build WebSocket URL from HTTP API base URL
+ * @brief Build WebSocket URL from HTTP API base URL.
  * Converts "http://host:1888/v2/api/" -> "ws://host:1888/v2/socket"
  */
 static bool build_ws_url(const char *base_url, char *ws_url, size_t ws_url_size) {
@@ -179,21 +184,23 @@ static bool build_ws_url(const char *base_url, char *ws_url, size_t ws_url_size)
     return true;
 }
 
-void nina_websocket_start(const char *base_url, nina_client_t *data) {
-    if (ws_client) {
-        ESP_LOGW(TAG, "WS: Already running, stopping first");
-        nina_websocket_stop();
+void nina_websocket_start(int index, const char *base_url, nina_client_t *data) {
+    if (index < 0 || index >= MAX_NINA_INSTANCES) return;
+
+    if (ws_clients[index]) {
+        ESP_LOGW(TAG, "WS[%d]: Already running, stopping first", index);
+        nina_websocket_stop(index);
     }
 
     char ws_url[192];
     if (!build_ws_url(base_url, ws_url, sizeof(ws_url))) {
-        ESP_LOGE(TAG, "WS: Failed to build WebSocket URL from %s", base_url);
+        ESP_LOGE(TAG, "WS[%d]: Failed to build WebSocket URL from %s", index, base_url);
         return;
     }
 
-    ESP_LOGI(TAG, "WS: Connecting to %s", ws_url);
+    ESP_LOGI(TAG, "WS[%d]: Connecting to %s", index, ws_url);
 
-    ws_client_data = data;
+    ws_client_data[index] = data;
 
     esp_websocket_client_config_t ws_cfg = {
         .uri = ws_url,
@@ -201,25 +208,34 @@ void nina_websocket_start(const char *base_url, nina_client_t *data) {
         .network_timeout_ms = 10000,
     };
 
-    ws_client = esp_websocket_client_init(&ws_cfg);
-    if (!ws_client) {
-        ESP_LOGE(TAG, "WS: Failed to init client");
+    ws_clients[index] = esp_websocket_client_init(&ws_cfg);
+    if (!ws_clients[index]) {
+        ESP_LOGE(TAG, "WS[%d]: Failed to init client", index);
+        ws_client_data[index] = NULL;
         return;
     }
 
-    esp_websocket_register_events(ws_client, WEBSOCKET_EVENT_ANY,
-                                   websocket_event_handler, NULL);
-    esp_websocket_client_start(ws_client);
+    esp_websocket_register_events(ws_clients[index], WEBSOCKET_EVENT_ANY,
+                                   websocket_event_handler, (void *)(intptr_t)index);
+    esp_websocket_client_start(ws_clients[index]);
 }
 
-void nina_websocket_stop(void) {
-    if (ws_client) {
-        esp_websocket_client_stop(ws_client);
-        esp_websocket_client_destroy(ws_client);
-        ws_client = NULL;
+void nina_websocket_stop(int index) {
+    if (index < 0 || index >= MAX_NINA_INSTANCES) return;
+
+    if (ws_clients[index]) {
+        esp_websocket_client_stop(ws_clients[index]);
+        esp_websocket_client_destroy(ws_clients[index]);
+        ws_clients[index] = NULL;
     }
-    if (ws_client_data) {
-        ws_client_data->websocket_connected = false;
-        ws_client_data = NULL;
+    if (ws_client_data[index]) {
+        ws_client_data[index]->websocket_connected = false;
+        ws_client_data[index] = NULL;
+    }
+}
+
+void nina_websocket_stop_all(void) {
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        nina_websocket_stop(i);
     }
 }

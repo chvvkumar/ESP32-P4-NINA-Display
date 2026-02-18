@@ -113,12 +113,11 @@ void data_update_task(void *arg) {
 
     ESP_LOGI(TAG, "Starting data polling with %d instances", instance_count);
 
-    // Start WebSocket for the initial active page
-    {
-        int init_page = nina_dashboard_get_active_page();
-        const char *active_url = app_config_get_instance_url(init_page);
-        if (strlen(active_url) > 0) {
-            nina_websocket_start(active_url, &instances[init_page]);
+    // Start WebSocket for all configured instances concurrently
+    for (int i = 0; i < instance_count; i++) {
+        const char *url = app_config_get_instance_url(i);
+        if (strlen(url) > 0) {
+            nina_websocket_start(i, url, &instances[i]);
         }
     }
 
@@ -128,19 +127,12 @@ void data_update_task(void *arg) {
         // Re-read instance count from config so API URL changes take effect live
         instance_count = app_config_get_instance_count();
 
-        // Handle page change: stop/start WebSocket, trigger immediate full poll
+        // Handle page change: trigger immediate full poll for the new active page
+        // (WebSocket connections for all instances remain persistent)
         if (page_changed) {
             page_changed = false;
-
-            nina_websocket_stop();
-
-            const char *new_url = app_config_get_instance_url(current_active);
-            if (strlen(new_url) > 0) {
-                nina_websocket_start(new_url, &instances[current_active]);
-            }
             nina_poll_state_init(&poll_states[current_active]);
-
-            ESP_LOGI(TAG, "Page switched to %d, WebSocket restarted", current_active);
+            ESP_LOGI(TAG, "Page switched to %d", current_active);
         }
 
         int64_t now_ms = esp_timer_get_time() / 1000;
