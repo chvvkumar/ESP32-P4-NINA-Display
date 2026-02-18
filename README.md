@@ -44,7 +44,7 @@ NOTE: If your ESP32P4 shows warnings on serial console about old version on the 
 Web config page:
 
 <p align="center">
-  <img src="images/Web-config.jpg" alt="Web config" width="1200">
+  <img src="images/Web-config.png" alt="Web config" width="1200">
 </p>
 
 The following images demonstrate the dashboard interface with different filter configurations:
