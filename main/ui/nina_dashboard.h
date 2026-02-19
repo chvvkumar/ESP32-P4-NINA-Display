@@ -76,6 +76,12 @@ typedef void (*nina_page_change_cb_t)(int new_page);
 void nina_dashboard_set_page_change_cb(nina_page_change_cb_t cb);
 
 /**
+ * @brief Check if the active page is the summary page
+ * @return true if the summary page is currently shown
+ */
+bool nina_dashboard_is_summary_page(void);
+
+/**
  * @brief Check if the active page is the system info page
  * @return true if the system info page is currently shown
  */

@@ -421,7 +421,7 @@ static esp_err_t page_post_handler(httpd_req_t *req)
             cfg->active_page_override = (int8_t)page;
             app_config_save(cfg);
             bsp_display_lock(0);
-            nina_dashboard_show_page(page, cnt);
+            nina_dashboard_show_page(page + 1, cnt);  /* +1: NINA pages start at index 1 (0 = summary) */
             bsp_display_unlock();
             ESP_LOGI(TAG, "Page switched to %d via web, override saved", page);
         } else if (page == -1) {
