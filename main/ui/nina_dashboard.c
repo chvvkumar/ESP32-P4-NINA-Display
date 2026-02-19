@@ -47,6 +47,8 @@ static lv_obj_t *indicator_dots[MAX_NINA_INSTANCES];
 // Swipe callback
 static nina_page_change_cb_t page_change_cb = NULL;
 
+static void update_indicators(void);
+
 /* Strip http(s)://, path, and domain from URL, then sentence case */
 void extract_host_from_url(const char *url, char *out, size_t out_size) {
     if (out_size == 0) return;
@@ -230,18 +232,7 @@ void nina_dashboard_apply_theme(int theme_index) {
     summary_page_apply_theme();
     sysinfo_page_apply_theme();
 
-    if (indicator_cont) {
-        int gb = app_config_get()->color_brightness;
-        for (int i = 0; i < page_count; i++) {
-            if (indicator_dots[i]) {
-                /* Dot i corresponds to NINA page at index i+1 */
-                uint32_t dot_color = (active_page == i + 1)
-                    ? app_config_apply_brightness(current_theme->text_color, gb)
-                    : app_config_apply_brightness(current_theme->label_color, gb);
-                lv_obj_set_style_bg_color(indicator_dots[i], lv_color_hex(dot_color), 0);
-            }
-        }
-    }
+    update_indicators();
 
     lv_obj_invalidate(scr_dashboard);
 }
@@ -568,10 +559,6 @@ static void gesture_event_cb(lv_event_t *e) {
     }
 
     nina_dashboard_show_page(new_page, total_page_count);
-
-    if (page_change_cb) {
-        page_change_cb(new_page);
-    }
 }
 
 /* Target name: click to request thumbnail */
@@ -643,23 +630,10 @@ void nina_dashboard_show_page(int page_index, int instance_count) {
     active_page = page_index;
     show_page_at(active_page);
 
-    /* Update indicator dots — NINA pages are at indices 1..page_count */
-    if (indicator_cont) {
-        int gb = app_config_get()->color_brightness;
-        for (int i = 0; i < page_count; i++) {
-            if (indicator_dots[i]) {
-                /* Dot i corresponds to NINA page at index i+1 */
-                uint32_t dot_color = (active_page == i + 1)
-                    ? app_config_apply_brightness(current_theme->text_color, gb)
-                    : app_config_apply_brightness(current_theme->label_color, gb);
-                lv_obj_set_style_bg_color(indicator_dots[i], lv_color_hex(dot_color), 0);
-            }
-        }
-        /* Hide indicators on summary (page 0) and sysinfo (page_count+1) */
-        if (active_page >= 1 && active_page <= page_count)
-            lv_obj_clear_flag(indicator_cont, LV_OBJ_FLAG_HIDDEN);
-        else
-            lv_obj_add_flag(indicator_cont, LV_OBJ_FLAG_HIDDEN);
+    update_indicators();
+
+    if (page_change_cb) {
+        page_change_cb(active_page);
     }
 }
 
@@ -679,9 +653,64 @@ int nina_dashboard_get_total_page_count(void) {
     return total_page_count;
 }
 
+static int next_page_index = -1;
+
 static void fade_anim_cb(void *obj, int32_t v)
 {
     lv_obj_set_style_opa((lv_obj_t *)obj, (lv_opa_t)v, 0);
+}
+
+static void update_indicators(void)
+{
+    if (!indicator_cont) return;
+
+    int gb = app_config_get()->color_brightness;
+    for (int i = 0; i < page_count; i++) {
+        if (indicator_dots[i]) {
+            uint32_t dot_color = (active_page == i + 1)
+                ? app_config_apply_brightness(current_theme->text_color, gb)
+                : app_config_apply_brightness(current_theme->label_color, gb);
+            lv_obj_set_style_bg_color(indicator_dots[i], lv_color_hex(dot_color), 0);
+        }
+    }
+    if (active_page >= 1 && active_page <= page_count)
+        lv_obj_clear_flag(indicator_cont, LV_OBJ_FLAG_HIDDEN);
+    else
+        lv_obj_add_flag(indicator_cont, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void fade_out_ready_cb(lv_anim_t * a)
+{
+    /* Hide the old page (which just finished fading out) */
+    hide_page_at(active_page);
+
+    /* Ensure opacity is reset for the old page so it's ready for next time */
+    lv_obj_t *old_obj = get_page_obj(active_page);
+    if (old_obj) lv_obj_set_style_opa(old_obj, LV_OPA_COVER, 0);
+
+    /* Switch to the new page */
+    if (next_page_index >= 0) {
+        active_page = next_page_index;
+        next_page_index = -1;
+    }
+
+    /* Update indicators for the new page */
+    update_indicators();
+
+    /* Fade-in the new page */
+    lv_obj_t *new_obj = get_page_obj(active_page);
+    if (new_obj) {
+        lv_obj_set_style_opa(new_obj, LV_OPA_TRANSP, 0);
+        show_page_at(active_page);
+
+        lv_anim_t a_in;
+        lv_anim_init(&a_in);
+        lv_anim_set_exec_cb(&a_in, fade_anim_cb);
+        lv_anim_set_var(&a_in, new_obj);
+        lv_anim_set_values(&a_in, LV_OPA_TRANSP, LV_OPA_COVER);
+        lv_anim_set_duration(&a_in, 500); /* 500ms fade in */
+        lv_anim_start(&a_in);
+    }
 }
 
 void nina_dashboard_show_page_animated(int page_index, int instance_count, int effect)
@@ -689,40 +718,35 @@ void nina_dashboard_show_page_animated(int page_index, int instance_count, int e
     if (page_index < 0 || page_index >= total_page_count) return;
     if (page_index == active_page) return;
 
-    hide_page_at(active_page);
-    active_page = page_index;
+    lv_obj_t *old_obj = get_page_obj(active_page);
 
-    lv_obj_t *new_obj = get_page_obj(active_page);
-    if (effect == 1 && new_obj) {
-        /* Fade-in: start transparent, animate to fully opaque */
-        lv_obj_set_style_opa(new_obj, LV_OPA_TRANSP, 0);
-        show_page_at(active_page);
+    if (effect == 1 && old_obj) {
+        /* Fade-out: start opaque, animate to transparent */
+        next_page_index = page_index;
+
+        /* Ensure opacity is correct before starting */
+        lv_obj_set_style_opa(old_obj, LV_OPA_COVER, 0);
 
         lv_anim_t a;
         lv_anim_init(&a);
         lv_anim_set_exec_cb(&a, fade_anim_cb);
-        lv_anim_set_var(&a, new_obj);
-        lv_anim_set_values(&a, LV_OPA_TRANSP, LV_OPA_COVER);
-        lv_anim_set_duration(&a, 1000);
+        lv_anim_set_var(&a, old_obj);
+        lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_TRANSP);
+        lv_anim_set_duration(&a, 500); /* 500ms fade out */
+        lv_anim_set_ready_cb(&a, fade_out_ready_cb);
         lv_anim_start(&a);
     } else {
+        /* Instant switch */
+        hide_page_at(active_page);
+        active_page = page_index;
         show_page_at(active_page);
-    }
 
-    /* Update indicator dots — NINA pages are at indices 1..page_count */
-    if (indicator_cont) {
-        int gb = app_config_get()->color_brightness;
-        for (int i = 0; i < page_count; i++) {
-            if (indicator_dots[i]) {
-                uint32_t dot_color = (active_page == i + 1)
-                    ? app_config_apply_brightness(current_theme->text_color, gb)
-                    : app_config_apply_brightness(current_theme->label_color, gb);
-                lv_obj_set_style_bg_color(indicator_dots[i], lv_color_hex(dot_color), 0);
-            }
+        /* Ensure opacity is reset if we switched back from a halfway fade */
+        lv_obj_t *new_obj = get_page_obj(active_page);
+        if (new_obj) {
+             lv_obj_set_style_opa(new_obj, LV_OPA_COVER, 0);
         }
-        if (active_page >= 1 && active_page <= page_count)
-            lv_obj_clear_flag(indicator_cont, LV_OBJ_FLAG_HIDDEN);
-        else
-            lv_obj_add_flag(indicator_cont, LV_OBJ_FLAG_HIDDEN);
+
+        update_indicators();
     }
 }
