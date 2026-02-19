@@ -66,7 +66,8 @@ typedef struct {
 
 /* Shared state — defined in nina_dashboard.c, used by update and thumbnail modules */
 extern dashboard_page_t pages[MAX_NINA_INSTANCES];
-extern int page_count;
+extern int page_count;        /* Number of NINA instance pages */
+extern int total_page_count;  /* page_count + 1 (sysinfo page) */
 extern int active_page;
 extern const theme_t *current_theme;
 
