@@ -23,6 +23,27 @@
 static const char *TAG = "nina_client";
 
 // =============================================================================
+// Mutex Helpers
+// =============================================================================
+
+void nina_client_init_mutex(nina_client_t *client) {
+    if (client && !client->mutex) {
+        client->mutex = xSemaphoreCreateMutex();
+    }
+}
+
+bool nina_client_lock(nina_client_t *client, uint32_t timeout_ms) {
+    if (!client || !client->mutex) return false;
+    return xSemaphoreTake(client->mutex, pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
+}
+
+void nina_client_unlock(nina_client_t *client) {
+    if (client && client->mutex) {
+        xSemaphoreGive(client->mutex);
+    }
+}
+
+// =============================================================================
 // Shared HTTP Helper Functions (exposed via nina_client_internal.h)
 // =============================================================================
 
@@ -111,6 +132,14 @@ cJSON *http_get_json(const char *url) {
 
     int content_length = esp_http_client_fetch_headers(client);
     if (content_length < 0) {
+        esp_http_client_cleanup(client);
+        return NULL;
+    }
+
+    // Validate HTTP status code — reject non-2xx responses
+    int status = esp_http_client_get_status_code(client);
+    if (status < 200 || status >= 300) {
+        ESP_LOGW(TAG, "HTTP %d for %s", status, url);
         esp_http_client_cleanup(client);
         return NULL;
     }
@@ -307,6 +336,8 @@ void nina_client_poll_heartbeat(const char *base_url, nina_client_t *data) {
     ESP_LOGD(TAG, "Heartbeat: connected=%d", data->connected);
 }
 
+#define MAX_IMAGE_SIZE (4 * 1024 * 1024)  // 4 MB cap for image downloads
+
 uint8_t *nina_client_fetch_prepared_image(const char *base_url, int width, int height, int quality, size_t *out_size) {
     char url[320];
     snprintf(url, sizeof(url),
@@ -353,6 +384,12 @@ uint8_t *nina_client_fetch_prepared_image(const char *base_url, int width, int h
         int to_read = buf_size - total_read;
         if (to_read <= 0) {
             int new_size = buf_size + (256 * 1024);
+            if (new_size > MAX_IMAGE_SIZE) {
+                ESP_LOGW(TAG, "Image exceeds %d byte cap, aborting fetch", MAX_IMAGE_SIZE);
+                free(buffer);
+                esp_http_client_cleanup(client);
+                return NULL;
+            }
             uint8_t *new_buf = heap_caps_realloc(buffer, new_size, MALLOC_CAP_SPIRAM);
             if (!new_buf) {
                 ESP_LOGE(TAG, "Failed to grow image buffer to %d", new_size);

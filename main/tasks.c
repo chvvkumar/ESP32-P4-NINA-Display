@@ -63,9 +63,12 @@ void input_task(void *arg) {
                     int new_page = (current + 1) % total;
                     ESP_LOGI(TAG, "Button: switching to page %d", new_page);
 
-                    bsp_display_lock(0);
-                    nina_dashboard_show_page(new_page, total);
-                    bsp_display_unlock();
+                    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                        nina_dashboard_show_page(new_page, total);
+                        bsp_display_unlock();
+                    } else {
+                        ESP_LOGW(TAG, "Display lock timeout (button page switch)");
+                    }
 
                     page_changed = true;
                 }
@@ -85,6 +88,7 @@ void data_update_task(void *arg) {
 
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         nina_poll_state_init(&poll_states[i]);
+        nina_client_init_mutex(&instances[i]);
     }
 
     // Wait for WiFi
@@ -182,9 +186,12 @@ void data_update_task(void *arg) {
                     }
                     if (next_nina != active_nina_idx) {
                         int next_page = next_nina + 1;  /* Convert to page index */
-                        bsp_display_lock(0);
-                        nina_dashboard_show_page_animated(next_page, instance_count, r_cfg->auto_rotate_effect);
-                        bsp_display_unlock();
+                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_dashboard_show_page_animated(next_page, instance_count, r_cfg->auto_rotate_effect);
+                            bsp_display_unlock();
+                        } else {
+                            ESP_LOGW(TAG, "Display lock timeout (auto-rotate)");
+                        }
                         page_changed = true;
                         ESP_LOGI(TAG, "Auto-rotate: switched to page %d (instance %d)", next_page, next_nina);
                     }
@@ -204,10 +211,11 @@ void data_update_task(void *arg) {
 
         /* Pulse connection dot on the active NINA page (not summary/sysinfo) */
         if (active_nina_idx >= 0 && active_nina_idx < instance_count) {
-            bsp_display_lock(0);
-            nina_dashboard_update_status(active_nina_idx, rssi,
-                                         instances[active_nina_idx].connected, true);
-            bsp_display_unlock();
+            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                nina_dashboard_update_status(active_nina_idx, rssi,
+                                             instances[active_nina_idx].connected, true);
+                bsp_display_unlock();
+            }
         }
 
         for (int i = 0; i < instance_count; i++) {
@@ -242,36 +250,49 @@ void data_update_task(void *arg) {
             }
         }
 
-        /* Update summary page when visible */
+        /* Update summary page when visible — lock each instance while reading */
         if (on_summary) {
-            bsp_display_lock(0);
-            summary_page_update(instances, instance_count);
-            bsp_display_unlock();
+            for (int i = 0; i < instance_count; i++)
+                nina_client_lock(&instances[i], 100);
+            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                summary_page_update(instances, instance_count);
+                bsp_display_unlock();
+            }
+            for (int i = 0; i < instance_count; i++)
+                nina_client_unlock(&instances[i]);
         }
 
         /* Update active NINA page UI */
         if (active_nina_idx >= 0 && active_nina_idx < instance_count) {
-            bsp_display_lock(0);
-            update_nina_dashboard_page(active_nina_idx, &instances[active_nina_idx]);
-            nina_dashboard_update_status(active_nina_idx, rssi,
-                                         instances[active_nina_idx].connected, false);
-            bsp_display_unlock();
+            nina_client_lock(&instances[active_nina_idx], 100);
+            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                update_nina_dashboard_page(active_nina_idx, &instances[active_nina_idx]);
+                nina_dashboard_update_status(active_nina_idx, rssi,
+                                             instances[active_nina_idx].connected, false);
+                bsp_display_unlock();
+            }
+            nina_client_unlock(&instances[active_nina_idx]);
 
             // Handle thumbnail: initial request or auto-refresh on new image
             bool want_thumbnail = nina_dashboard_thumbnail_requested();
-            bool auto_refresh = nina_dashboard_thumbnail_visible()
-                                && instances[active_nina_idx].new_image_available;
+            bool auto_refresh = false;
+            if (nina_client_lock(&instances[active_nina_idx], 100)) {
+                auto_refresh = nina_dashboard_thumbnail_visible()
+                               && instances[active_nina_idx].new_image_available;
+                if (auto_refresh) instances[active_nina_idx].new_image_available = false;
+                nina_client_unlock(&instances[active_nina_idx]);
+            }
 
             if (want_thumbnail || auto_refresh) {
                 if (want_thumbnail) nina_dashboard_clear_thumbnail_request();
-                if (auto_refresh) instances[active_nina_idx].new_image_available = false;
 
                 const char *thumb_url = app_config_get_instance_url(active_nina_idx);
                 if (strlen(thumb_url) > 0 && instances[active_nina_idx].connected) {
                     if (!fetch_and_show_thumbnail(thumb_url) && want_thumbnail) {
-                        bsp_display_lock(0);
-                        nina_dashboard_hide_thumbnail();
-                        bsp_display_unlock();
+                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_dashboard_hide_thumbnail();
+                            bsp_display_unlock();
+                        }
                     }
                 }
             }

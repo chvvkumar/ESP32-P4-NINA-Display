@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 #define MAX_FILTERS 10
 
@@ -82,7 +84,19 @@ typedef struct {
     // Set true when a new image is saved (IMAGE-SAVE event or image-history change)
     // Consumer should clear after handling
     volatile bool new_image_available;
+
+    // Mutex for synchronizing access between WebSocket event handler and data task.
+    // Must be created with nina_client_init_mutex() before use.
+    SemaphoreHandle_t mutex;
 } nina_client_t;
+
+// Initialize the mutex for a nina_client_t instance. Call once after struct init.
+void nina_client_init_mutex(nina_client_t *client);
+
+// Lock/unlock helpers with short timeouts suitable for real-time use.
+// nina_client_lock() returns true if the lock was acquired.
+bool nina_client_lock(nina_client_t *client, uint32_t timeout_ms);
+void nina_client_unlock(nina_client_t *client);
 
 // Polling intervals (ms)
 #define NINA_POLL_SLOW_MS     30000   // Focuser, mount

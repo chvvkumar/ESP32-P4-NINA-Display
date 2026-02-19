@@ -241,9 +241,12 @@ static void handle_text_command(const char *data, int len)
         if (cfg->color_brightness == 0) cfg->color_brightness = 100;
     }
 
-    bsp_display_lock(0);
-    nina_dashboard_apply_theme(cfg->theme_index);
-    bsp_display_unlock();
+    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+        nina_dashboard_apply_theme(cfg->theme_index);
+        bsp_display_unlock();
+    } else {
+        ESP_LOGW(TAG, "Display lock timeout (MQTT theme apply)");
+    }
 
     ESP_LOGI(TAG, "Text brightness set to %d%% via MQTT", cfg->color_brightness);
 

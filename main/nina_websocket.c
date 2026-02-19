@@ -47,36 +47,51 @@ static void handle_websocket_message(int index, const char *payload, int len) {
 
         cJSON *stats = cJSON_GetObjectItem(response, "ImageStatistics");
         if (stats) {
+            // Extract values from JSON before taking the lock
+            float new_hfr = data->hfr;
+            int new_stars = data->stars;
+            float new_exp_total = data->exposure_total;
+            const char *new_target = NULL;
+            const char *new_telescope = NULL;
+
             cJSON *hfr = cJSON_GetObjectItem(stats, "HFR");
-            if (hfr) data->hfr = (float)hfr->valuedouble;
+            if (hfr) new_hfr = (float)hfr->valuedouble;
 
             cJSON *stars = cJSON_GetObjectItem(stats, "Stars");
-            if (stars) data->stars = stars->valueint;
+            if (stars) new_stars = stars->valueint;
 
             cJSON *exp = cJSON_GetObjectItem(stats, "ExposureTime");
-            if (exp) data->exposure_total = (float)exp->valuedouble;
-
-            // NOTE: Do NOT update current_filter from IMAGE-SAVE.
-            // The filter wheel may have already moved to the next filter
-            // by the time the image is saved. FILTERWHEEL-CHANGED is the
-            // authoritative source for the current filter.
+            if (exp) new_exp_total = (float)exp->valuedouble;
 
             cJSON *target = cJSON_GetObjectItem(stats, "TargetName");
-            if (target && target->valuestring && target->valuestring[0] != '\0') {
-                strncpy(data->target_name, target->valuestring,
-                        sizeof(data->target_name) - 1);
-            }
+            if (target && target->valuestring && target->valuestring[0] != '\0')
+                new_target = target->valuestring;
 
             cJSON *telescope = cJSON_GetObjectItem(stats, "TelescopeName");
-            if (telescope && telescope->valuestring) {
-                strncpy(data->telescope_name, telescope->valuestring,
-                        sizeof(data->telescope_name) - 1);
+            if (telescope && telescope->valuestring)
+                new_telescope = telescope->valuestring;
+
+            // Short critical section: write parsed values into the shared struct
+            if (nina_client_lock(data, 50)) {
+                data->hfr = new_hfr;
+                data->stars = new_stars;
+                data->exposure_total = new_exp_total;
+                if (new_target) {
+                    strncpy(data->target_name, new_target,
+                            sizeof(data->target_name) - 1);
+                }
+                if (new_telescope) {
+                    strncpy(data->telescope_name, new_telescope,
+                            sizeof(data->telescope_name) - 1);
+                }
+                data->new_image_available = true;
+                nina_client_unlock(data);
+            } else {
+                ESP_LOGW(TAG, "WS[%d]: Could not acquire mutex for IMAGE-SAVE", index);
             }
 
-            data->new_image_available = true;
-
             ESP_LOGI(TAG, "WS[%d]: HFR=%.2f Stars=%d Filter=%s Target=%s",
-                index, data->hfr, data->stars,
+                index, new_hfr, new_stars,
                 data->current_filter, data->target_name);
         }
     }
@@ -86,30 +101,45 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         if (new_f) {
             cJSON *name = cJSON_GetObjectItem(new_f, "Name");
             if (name && name->valuestring) {
-                strncpy(data->current_filter, name->valuestring,
-                        sizeof(data->current_filter) - 1);
+                if (nina_client_lock(data, 50)) {
+                    strncpy(data->current_filter, name->valuestring,
+                            sizeof(data->current_filter) - 1);
+                    nina_client_unlock(data);
+                }
                 ESP_LOGI(TAG, "WS[%d]: Filter changed to %s", index, data->current_filter);
             }
         }
     }
     // SEQUENCE-FINISHED: Mark sequence as done
     else if (strcmp(evt->valuestring, "SEQUENCE-FINISHED") == 0) {
-        strcpy(data->status, "FINISHED");
+        if (nina_client_lock(data, 50)) {
+            strcpy(data->status, "FINISHED");
+            nina_client_unlock(data);
+        }
         ESP_LOGI(TAG, "WS[%d]: Sequence finished", index);
     }
     // SEQUENCE-STARTING: Mark sequence as running
     else if (strcmp(evt->valuestring, "SEQUENCE-STARTING") == 0) {
-        strcpy(data->status, "RUNNING");
+        if (nina_client_lock(data, 50)) {
+            strcpy(data->status, "RUNNING");
+            nina_client_unlock(data);
+        }
         ESP_LOGI(TAG, "WS[%d]: Sequence starting", index);
     }
     // GUIDER-DITHER: Flag dithering state
     else if (strcmp(evt->valuestring, "GUIDER-DITHER") == 0) {
-        data->is_dithering = true;
+        if (nina_client_lock(data, 50)) {
+            data->is_dithering = true;
+            nina_client_unlock(data);
+        }
         ESP_LOGI(TAG, "WS[%d]: Dithering", index);
     }
     // GUIDER-START: Clear dithering flag
     else if (strcmp(evt->valuestring, "GUIDER-START") == 0) {
-        data->is_dithering = false;
+        if (nina_client_lock(data, 50)) {
+            data->is_dithering = false;
+            nina_client_unlock(data);
+        }
         ESP_LOGI(TAG, "WS[%d]: Guiding started", index);
     }
     else {
@@ -133,14 +163,20 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base,
     case WEBSOCKET_EVENT_CONNECTED:
         ESP_LOGI(TAG, "WS[%d]: Connected to NINA", index);
         if (ws_client_data[index]) {
-            ws_client_data[index]->websocket_connected = true;
+            if (nina_client_lock(ws_client_data[index], 50)) {
+                ws_client_data[index]->websocket_connected = true;
+                nina_client_unlock(ws_client_data[index]);
+            }
         }
         break;
 
     case WEBSOCKET_EVENT_DISCONNECTED:
         ESP_LOGW(TAG, "WS[%d]: Disconnected from NINA", index);
         if (ws_client_data[index]) {
-            ws_client_data[index]->websocket_connected = false;
+            if (nina_client_lock(ws_client_data[index], 50)) {
+                ws_client_data[index]->websocket_connected = false;
+                nina_client_unlock(ws_client_data[index]);
+            }
         }
         break;
 

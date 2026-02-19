@@ -10,6 +10,10 @@ extern "C" {
 // Maximum number of NINA instances supported
 #define MAX_NINA_INSTANCES 3
 
+// Standardized LVGL display lock timeout (ms).
+// All callers should use this instead of 0 (infinite) to prevent deadlocks.
+#define LVGL_LOCK_TIMEOUT_MS 1000
+
 typedef struct {
     char wifi_ssid[32];
     char wifi_pass[64];

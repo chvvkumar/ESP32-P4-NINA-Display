@@ -301,9 +301,12 @@ static esp_err_t color_brightness_post_handler(httpd_req_t *req)
         app_config_get()->color_brightness = cb;
         
         // Re-apply theme to update static text brightness
-        bsp_display_lock(0);
-        nina_dashboard_apply_theme(app_config_get()->theme_index);
-        bsp_display_unlock();
+        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+            nina_dashboard_apply_theme(app_config_get()->theme_index);
+            bsp_display_unlock();
+        } else {
+            ESP_LOGW(TAG, "Display lock timeout (color brightness)");
+        }
         
         ESP_LOGI(TAG, "Color brightness set to %d%%", cb);
         mqtt_ha_publish_state();
@@ -346,9 +349,12 @@ static esp_err_t theme_post_handler(httpd_req_t *req)
         if (idx < 0) idx = 0;
         if (idx >= themes_get_count()) idx = themes_get_count() - 1;
         app_config_get()->theme_index = idx;
-        bsp_display_lock(0);
-        nina_dashboard_apply_theme(idx);
-        bsp_display_unlock();
+        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+            nina_dashboard_apply_theme(idx);
+            bsp_display_unlock();
+        } else {
+            ESP_LOGW(TAG, "Display lock timeout (theme switch)");
+        }
         ESP_LOGI(TAG, "Theme set to %d", idx);
     }
 
@@ -420,9 +426,12 @@ static esp_err_t page_post_handler(httpd_req_t *req)
         if (page >= 0 && page < cnt) {
             cfg->active_page_override = (int8_t)page;
             app_config_save(cfg);
-            bsp_display_lock(0);
-            nina_dashboard_show_page(page + 1, cnt);  /* +1: NINA pages start at index 1 (0 = summary) */
-            bsp_display_unlock();
+            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                nina_dashboard_show_page(page + 1, cnt);  /* +1: NINA pages start at index 1 (0 = summary) */
+                bsp_display_unlock();
+            } else {
+                ESP_LOGW(TAG, "Display lock timeout (page switch)");
+            }
             ESP_LOGI(TAG, "Page switched to %d via web, override saved", page);
         } else if (page == -1) {
             cfg->active_page_override = -1;
