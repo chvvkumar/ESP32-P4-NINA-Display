@@ -10,6 +10,7 @@
 #include "app_config.h"
 #include "mqtt_ha.h"
 #include "ui/nina_dashboard.h"
+#include "ui/nina_summary.h"
 #include "bsp/esp-bsp.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -56,13 +57,14 @@ void input_task(void *arg) {
             if (now_ms - last_press_ms > DEBOUNCE_MS) {
                 last_press_ms = now_ms;
 
-                if (instance_count > 1) {
+                {
+                    int total = nina_dashboard_get_total_page_count();
                     int current = nina_dashboard_get_active_page();
-                    int new_page = (current + 1) % instance_count;
+                    int new_page = (current + 1) % total;
                     ESP_LOGI(TAG, "Button: switching to page %d", new_page);
 
                     bsp_display_lock(0);
-                    nina_dashboard_show_page(new_page, instance_count);
+                    nina_dashboard_show_page(new_page, total);
                     bsp_display_unlock();
 
                     page_changed = true;
@@ -124,6 +126,21 @@ void data_update_task(void *arg) {
 
     while (1) {
         int current_active = nina_dashboard_get_active_page();  // Snapshot to avoid races
+        bool on_sysinfo = nina_dashboard_is_sysinfo_page();
+        bool on_summary = nina_dashboard_is_summary_page();
+
+        /*
+         * Page index convention:
+         *   0                    = summary page
+         *   1 .. instance_count  = NINA instance pages (instance i at page i+1)
+         *   instance_count + 1   = sysinfo page
+         *
+         * active_nina_idx: the 0-based NINA instance index for the active page,
+         *   or -1 if on summary/sysinfo.
+         */
+        int active_nina_idx = -1;
+        if (!on_sysinfo && !on_summary && current_active >= 1)
+            active_nina_idx = current_active - 1;
 
         // Re-read instance count from config so API URL changes take effect live
         instance_count = app_config_get_instance_count();
@@ -132,36 +149,44 @@ void data_update_task(void *arg) {
         // (WebSocket connections for all instances remain persistent)
         if (page_changed) {
             page_changed = false;
-            nina_poll_state_init(&poll_states[current_active]);
+            if (on_summary) {
+                /* Re-init poll state for all instances on summary page */
+                for (int i = 0; i < instance_count; i++)
+                    nina_poll_state_init(&poll_states[i]);
+            } else if (active_nina_idx >= 0 && active_nina_idx < instance_count) {
+                nina_poll_state_init(&poll_states[active_nina_idx]);
+            }
             last_rotate_ms = esp_timer_get_time() / 1000;  // Reset auto-rotate timer on any page change
-            ESP_LOGI(TAG, "Page switched to %d", current_active);
+            ESP_LOGI(TAG, "Page switched to %d%s%s", current_active,
+                     on_sysinfo ? " (sysinfo)" : "", on_summary ? " (summary)" : "");
         }
 
         int64_t now_ms = esp_timer_get_time() / 1000;
 
-        /* Auto-rotate logic */
-        {
+        /* Auto-rotate logic — only rotates between NINA pages (indices 1..instance_count) */
+        if (!on_sysinfo && !on_summary && active_nina_idx >= 0) {
             app_config_t *r_cfg = app_config_get();
             if (r_cfg->auto_rotate_interval_s > 0 && instance_count > 1) {
                 if (last_rotate_ms == 0) last_rotate_ms = now_ms;  /* Init on first iteration */
                 if (now_ms - last_rotate_ms >= (int64_t)r_cfg->auto_rotate_interval_s * 1000) {
-                    int next = (current_active + 1) % instance_count;
+                    /* Cycle through NINA instance indices 0..instance_count-1 */
+                    int next_nina = (active_nina_idx + 1) % instance_count;
                     if (r_cfg->auto_rotate_skip_disconnected) {
                         int tried = 0;
                         while (tried < instance_count) {
-                            if (instances[next].connected) break;
-                            next = (next + 1) % instance_count;
+                            if (instances[next_nina].connected) break;
+                            next_nina = (next_nina + 1) % instance_count;
                             tried++;
                         }
-                        /* If no connected page found, stay put */
-                        if (!instances[next].connected) next = current_active;
+                        if (!instances[next_nina].connected) next_nina = active_nina_idx;
                     }
-                    if (next != current_active) {
+                    if (next_nina != active_nina_idx) {
+                        int next_page = next_nina + 1;  /* Convert to page index */
                         bsp_display_lock(0);
-                        nina_dashboard_show_page_animated(next, instance_count, r_cfg->auto_rotate_effect);
+                        nina_dashboard_show_page_animated(next_page, instance_count, r_cfg->auto_rotate_effect);
                         bsp_display_unlock();
-                        page_changed = true;  /* Triggers full poll for new page next iteration */
-                        ESP_LOGI(TAG, "Auto-rotate: switched to page %d", next);
+                        page_changed = true;
+                        ESP_LOGI(TAG, "Auto-rotate: switched to page %d (instance %d)", next_page, next_nina);
                     }
                     last_rotate_ms = now_ms;
                 }
@@ -177,20 +202,24 @@ void data_update_task(void *arg) {
             }
         }
 
-        // Signal that an API call is starting — pulse the connection dot
-        bsp_display_lock(0);
-        nina_dashboard_update_status(current_active, rssi,
-                                     instances[current_active].connected, true);
-        bsp_display_unlock();
+        /* Pulse connection dot on the active NINA page (not summary/sysinfo) */
+        if (active_nina_idx >= 0 && active_nina_idx < instance_count) {
+            bsp_display_lock(0);
+            nina_dashboard_update_status(active_nina_idx, rssi,
+                                         instances[active_nina_idx].connected, true);
+            bsp_display_unlock();
+        }
 
         for (int i = 0; i < instance_count; i++) {
             const char *url = app_config_get_instance_url(i);
             if (strlen(url) == 0) continue;
 
-            if (i == current_active) {
+            /* Full poll when: on summary page (all instances) or on this instance's NINA page */
+            if (on_summary || i == active_nina_idx) {
                 nina_client_poll(url, &instances[i], &poll_states[i]);
-                ESP_LOGI(TAG, "Instance %d (active): connected=%d, status=%s, target=%s, ws=%d",
-                    i + 1, instances[i].connected, instances[i].status,
+                ESP_LOGI(TAG, "Instance %d (%s): connected=%d, status=%s, target=%s, ws=%d",
+                    i + 1, on_summary ? "summary" : "active",
+                    instances[i].connected, instances[i].status,
                     instances[i].target_name, instances[i].websocket_connected);
 
                 // Sync filters on first successful fetch
@@ -203,7 +232,7 @@ void data_update_task(void *arg) {
                     filters_synced[i] = true;
                 }
             } else {
-                // Background page: heartbeat-only polling (every 10s)
+                // Background instance: heartbeat-only polling (every 10s)
                 if (now_ms - last_heartbeat_ms[i] >= HEARTBEAT_INTERVAL_MS) {
                     nina_client_poll_heartbeat(url, &instances[i]);
                     last_heartbeat_ms[i] = now_ms;
@@ -213,28 +242,37 @@ void data_update_task(void *arg) {
             }
         }
 
-        // Update active page UI; stop the pulse now that the call is done
-        bsp_display_lock(0);
-        update_nina_dashboard_page(current_active, &instances[current_active]);
-        nina_dashboard_update_status(current_active, rssi,
-                                     instances[current_active].connected, false);
-        bsp_display_unlock();
+        /* Update summary page when visible */
+        if (on_summary) {
+            bsp_display_lock(0);
+            summary_page_update(instances, instance_count);
+            bsp_display_unlock();
+        }
 
-        // Handle thumbnail: initial request or auto-refresh on new image
-        bool want_thumbnail = nina_dashboard_thumbnail_requested();
-        bool auto_refresh = nina_dashboard_thumbnail_visible()
-                            && instances[current_active].new_image_available;
+        /* Update active NINA page UI */
+        if (active_nina_idx >= 0 && active_nina_idx < instance_count) {
+            bsp_display_lock(0);
+            update_nina_dashboard_page(active_nina_idx, &instances[active_nina_idx]);
+            nina_dashboard_update_status(active_nina_idx, rssi,
+                                         instances[active_nina_idx].connected, false);
+            bsp_display_unlock();
 
-        if (want_thumbnail || auto_refresh) {
-            if (want_thumbnail) nina_dashboard_clear_thumbnail_request();
-            if (auto_refresh) instances[current_active].new_image_available = false;
+            // Handle thumbnail: initial request or auto-refresh on new image
+            bool want_thumbnail = nina_dashboard_thumbnail_requested();
+            bool auto_refresh = nina_dashboard_thumbnail_visible()
+                                && instances[active_nina_idx].new_image_available;
 
-            const char *thumb_url = app_config_get_instance_url(current_active);
-            if (strlen(thumb_url) > 0 && instances[current_active].connected) {
-                if (!fetch_and_show_thumbnail(thumb_url) && want_thumbnail) {
-                    bsp_display_lock(0);
-                    nina_dashboard_hide_thumbnail();
-                    bsp_display_unlock();
+            if (want_thumbnail || auto_refresh) {
+                if (want_thumbnail) nina_dashboard_clear_thumbnail_request();
+                if (auto_refresh) instances[active_nina_idx].new_image_available = false;
+
+                const char *thumb_url = app_config_get_instance_url(active_nina_idx);
+                if (strlen(thumb_url) > 0 && instances[active_nina_idx].connected) {
+                    if (!fetch_and_show_thumbnail(thumb_url) && want_thumbnail) {
+                        bsp_display_lock(0);
+                        nina_dashboard_hide_thumbnail();
+                        bsp_display_unlock();
+                    }
                 }
             }
         }
