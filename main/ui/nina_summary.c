@@ -8,6 +8,7 @@
 
 #include "nina_summary.h"
 #include "nina_dashboard_internal.h"
+#include "nina_dashboard.h"
 #include "app_config.h"
 #include "themes.h"
 
@@ -47,6 +48,12 @@ static lv_style_t style_glass_card;
 static bool styles_initialized = false;
 
 /* ── Helpers ───────────────────────────────────────────────────────── */
+
+static void summary_card_click_cb(lv_event_t *e) {
+    int instance_index = (int)(intptr_t)lv_event_get_user_data(e);
+    /* Page 0 is summary. Page 1..N are NINA instances. */
+    nina_dashboard_show_page(instance_index + 1, 0);
+}
 
 static void init_glass_styles(void) {
     if (styles_initialized) return;
@@ -132,6 +139,10 @@ static void create_card(summary_card_t *sc, lv_obj_t *parent, int instance_index
                           LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_clear_flag(sc->card, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_pad_row(sc->card, 6, 0);
+
+    /* Make card clickable for navigation */
+    lv_obj_add_flag(sc->card, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(sc->card, summary_card_click_cb, LV_EVENT_CLICKED, (void *)(intptr_t)instance_index);
 
     /* ── Header row: instance name + filter badge ── */
     lv_obj_t *header = lv_obj_create(sc->card);

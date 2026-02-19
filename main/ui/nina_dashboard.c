@@ -246,6 +246,11 @@ void nina_dashboard_apply_theme(int theme_index) {
     lv_obj_invalidate(scr_dashboard);
 }
 
+/* Go back to summary page when bottom row is clicked */
+static void bottom_row_click_cb(lv_event_t *e) {
+    nina_dashboard_show_page(0, 0);
+}
+
 /* Build all widgets for one dashboard page */
 static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int page_index) {
     memset(p, 0, sizeof(dashboard_page_t));
@@ -475,6 +480,8 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     // Power row (row 5, spans 2 cols)
     lv_obj_t *box_power = create_bento_box(p->page);
     lv_obj_set_grid_cell(box_power, LV_GRID_ALIGN_STRETCH, 0, 2, LV_GRID_ALIGN_STRETCH, 5, 1);
+    lv_obj_add_flag(box_power, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(box_power, bottom_row_click_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_set_flex_flow(box_power, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(box_power, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(box_power, 8, 0);
