@@ -46,6 +46,7 @@ typedef struct {
     int exposure_iterations;    // Total number of exposures planned for current filter (ExposureCount)
     float exposure_current;     // Elapsed time in current exposure (seconds)
     float exposure_total;       // Total duration of current exposure (seconds, from ExposureTime)
+    int64_t exposure_end_epoch; // Absolute end time (Unix epoch seconds) for client-side interpolation
     char current_filter[32];    // Current filter name (e.g., "Ha", "Sii", "L")
     char container_name[64];    // Running container name (e.g., "LRGBSHO") - stripped of "_Container"
     char container_step[64];    // Currently running step/instruction name (e.g., "Smart Exposure", "Auto Focus")
@@ -85,6 +86,10 @@ typedef struct {
     // Consumer should clear after handling
     volatile bool new_image_available;
 
+    // Set true by WebSocket event handlers to request immediate UI refresh.
+    // Data task checks this and refreshes UI without waiting for next poll cycle.
+    volatile bool ui_refresh_needed;
+
     // Timestamp (ms from esp_timer_get_time/1000) of last successful poll.
     // Used by the UI to display a stale-data indicator.  0 = never polled.
     int64_t last_successful_poll_ms;
@@ -103,8 +108,8 @@ bool nina_client_lock(nina_client_t *client, uint32_t timeout_ms);
 void nina_client_unlock(nina_client_t *client);
 
 // Polling intervals (ms)
-#define NINA_POLL_SLOW_MS     30000   // Focuser, mount
-#define NINA_POLL_SEQUENCE_MS 10000   // Sequence counts (expensive JSON)
+#define NINA_POLL_SLOW_MS     10000   // Focuser, mount, switch (was 30000)
+#define NINA_POLL_SEQUENCE_MS  5000   // Sequence counts (was 10000)
 
 // Polling state - tracks timers and cached static data between polls
 typedef struct {

@@ -66,6 +66,11 @@ typedef struct {
     int prev_target_progress;
     int pending_arc_progress;
     bool arc_completing;
+
+    // Exposure interpolation state (updated by data task, read by LVGL timer)
+    int64_t interp_end_epoch;       // Absolute end time (Unix epoch seconds)
+    float   interp_total;           // Total exposure duration (seconds)
+    uint32_t interp_filter_color;   // Cached filter color for the arc
 } dashboard_page_t;
 
 /* Shared state — defined in nina_dashboard.c, used by update and thumbnail modules */
@@ -74,6 +79,9 @@ extern int page_count;        /* Number of NINA instance pages */
 extern int total_page_count;  /* page_count + 1 (sysinfo page) */
 extern int active_page;
 extern const theme_t *current_theme;
+
+/* Exposure interpolation timer callback — defined in nina_dashboard_update.c */
+void exposure_interp_timer_cb(lv_timer_t *timer);
 
 /* Thumbnail overlay state — defined in nina_thumbnail.c */
 extern lv_obj_t *thumbnail_overlay;

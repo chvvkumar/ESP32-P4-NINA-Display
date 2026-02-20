@@ -642,6 +642,10 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     }
 
     nina_dashboard_apply_theme(cfg->theme_index);
+
+    /* Exposure interpolation timer — fires every 200ms to smoothly update
+     * the exposure countdown and arc between poll cycles. */
+    lv_timer_create(exposure_interp_timer_cb, 200, NULL);
 }
 
 void nina_dashboard_show_page(int page_index, int instance_count) {

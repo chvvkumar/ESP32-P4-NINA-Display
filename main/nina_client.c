@@ -33,8 +33,8 @@ static bool s_poll_mode = false;
 static esp_http_client_handle_t s_reuse_client = NULL;
 
 // Retry delays between attempts (ms). Index 0 = delay before 2nd attempt, etc.
-static const int http_retry_delays_ms[] = {1000, 2000};
-#define HTTP_MAX_ATTEMPTS  3
+static const int http_retry_delays_ms[] = {500};
+#define HTTP_MAX_ATTEMPTS  2
 
 // =============================================================================
 // Mutex Helpers
@@ -151,7 +151,7 @@ cJSON *http_get_json(const char *url) {
         } else {
             esp_http_client_config_t cfg = {
                 .url = url,
-                .timeout_ms = 5000,
+                .timeout_ms = 3000,
                 .keep_alive_enable = s_poll_mode,
             };
             client = esp_http_client_init(&cfg);

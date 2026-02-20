@@ -126,7 +126,7 @@ void perf_timer_record(perf_timer_t *t, int64_t duration_us);
 
 // No-op stubs when profiling is disabled
 #define perf_timer_start(t)           ((void)0)
-#define perf_timer_stop(t)            (0)
+#define perf_timer_stop(t)            ((void)0)
 #define perf_timer_reset(t)           ((void)0)
 #define perf_timer_record(t, d)       ((void)0)
 #define perf_counter_increment(c)     ((void)0)

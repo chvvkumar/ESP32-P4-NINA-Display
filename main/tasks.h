@@ -1,6 +1,7 @@
 #pragma once
 
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "freertos/event_groups.h"
 #include <stdbool.h>
 
@@ -12,6 +13,9 @@ extern int instance_count;
 
 /* Signals the data task that a page switch occurred — defined in tasks.c */
 extern volatile bool page_changed;
+
+/** Task handle for data_update_task — used by WebSocket to wake the task early. */
+extern TaskHandle_t data_task_handle;
 
 /** Page-change callback registered with the dashboard swipe gesture. */
 void on_page_changed(int new_page);

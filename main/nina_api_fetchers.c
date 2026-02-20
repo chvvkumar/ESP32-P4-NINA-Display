@@ -59,9 +59,12 @@ void fetch_camera_info_robust(const char *base_url, nina_client_t *data) {
                 if (remaining >= 0 && remaining <= 7200) {  // Sanity check: 0-2 hours
                     // Store negative remaining time (will be fixed after getting total exposure)
                     data->exposure_current = -remaining;
+                    data->exposure_end_epoch = (int64_t)end_time;
                     ESP_LOGI(TAG, "Camera exposing: %.1fs remaining", remaining);
                 }
             }
+        } else {
+            data->exposure_end_epoch = 0;  // Not exposing — clear for interpolation timer
         }
     }
 

@@ -27,6 +27,7 @@ static const char *TAG = "tasks";
 
 /* Signals the data task that a page switch occurred */
 volatile bool page_changed = false;
+TaskHandle_t data_task_handle = NULL;
 
 /**
  * @brief Swipe callback from the dashboard — signals the data task to re-tune polling.
@@ -81,6 +82,7 @@ void input_task(void *arg) {
 }
 
 void data_update_task(void *arg) {
+    data_task_handle = xTaskGetCurrentTaskHandle();
     nina_client_t instances[MAX_NINA_INSTANCES] = {0};
     nina_poll_state_t poll_states[MAX_NINA_INSTANCES] = {0};
     bool filters_synced[MAX_NINA_INSTANCES] = {false};
@@ -296,10 +298,13 @@ void data_update_task(void *arg) {
                 nina_client_lock(&instances[i], 100);
 
             perf_timer_start(&g_perf.ui_update_total);
+#if PERF_MONITOR_ENABLED
             int64_t lock_start = esp_timer_get_time();
+#endif
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+#if PERF_MONITOR_ENABLED
                 perf_timer_record(&g_perf.ui_lock_wait, esp_timer_get_time() - lock_start);
-
+#endif
                 perf_timer_start(&g_perf.ui_summary_update);
                 summary_page_update(instances, instance_count);
                 perf_timer_stop(&g_perf.ui_summary_update);
@@ -317,10 +322,13 @@ void data_update_task(void *arg) {
             nina_client_lock(&instances[active_nina_idx], 100);
 
             perf_timer_start(&g_perf.ui_update_total);
+#if PERF_MONITOR_ENABLED
             int64_t lock_start2 = esp_timer_get_time();
+#endif
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+#if PERF_MONITOR_ENABLED
                 perf_timer_record(&g_perf.ui_lock_wait, esp_timer_get_time() - lock_start2);
-
+#endif
                 perf_timer_start(&g_perf.ui_dashboard_update);
                 update_nina_dashboard_page(active_nina_idx, &instances[active_nina_idx]);
                 perf_timer_stop(&g_perf.ui_dashboard_update);
@@ -369,6 +377,21 @@ void data_update_task(void *arg) {
             }
         }
 
+        // ── Event-driven UI refresh: check if any WS event needs immediate UI update ──
+        if (active_nina_idx >= 0 && active_nina_idx < instance_count
+            && instances[active_nina_idx].ui_refresh_needed) {
+            instances[active_nina_idx].ui_refresh_needed = false;
+            if (nina_client_lock(&instances[active_nina_idx], 50)) {
+                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                    update_nina_dashboard_page(active_nina_idx, &instances[active_nina_idx]);
+                    nina_dashboard_update_status(active_nina_idx, rssi,
+                                                 instances[active_nina_idx].connected, false);
+                    bsp_display_unlock();
+                }
+                nina_client_unlock(&instances[active_nina_idx]);
+            }
+        }
+
         // ── Perf: End cycle, capture memory, periodic report ──
         perf_timer_stop(&g_perf.poll_cycle_total);
         perf_monitor_capture_memory();
@@ -380,6 +403,14 @@ void data_update_task(void *arg) {
         }
 #endif
 
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        // Calculate remaining delay to maintain consistent 1s cycle
+        // (camera + guider poll every cycle; slow endpoints use absolute-time tiers)
+        {
+            int64_t elapsed_ms = (esp_timer_get_time() / 1000) - now_ms;
+            int64_t delay_ms = 1000 - elapsed_ms;
+            if (delay_ms < 100) delay_ms = 100;  // Minimum 100ms breathing room
+            // Use ulTaskNotifyTake so WebSocket events can wake us early
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS((uint32_t)delay_ms));
+        }
     }
 }
