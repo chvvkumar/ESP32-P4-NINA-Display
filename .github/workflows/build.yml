@@ -1,0 +1,241 @@
+name: Build Firmware
+
+on:
+  push:
+    branches: [main, snd]
+
+env:
+  IDF_PATH: /opt/esp-idf
+  IDF_TOOLS_PATH: /opt/esp-tools
+  IDF_VERSION: v5.5.2
+  IDF_TARGET: esp32p4
+
+jobs:
+  build:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version
+        id: version
+        run: |
+          VERSION=$(cat version.txt | tr -d '[:space:]')
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          BRANCH=${GITHUB_REF_NAME}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Ensure ESP-IDF ${{ env.IDF_VERSION }} is installed
+        run: |
+          # Check if ESP-IDF is already installed and at the correct version
+          if [ -f "$IDF_PATH/export.sh" ]; then
+            INSTALLED_VERSION=$(git -C "$IDF_PATH" describe --tags --exact-match 2>/dev/null || echo "")
+            if [ -z "$INSTALLED_VERSION" ] && [ -f "$IDF_PATH/version.txt" ]; then
+              INSTALLED_VERSION="v$(cat "$IDF_PATH/version.txt" | tr -d '[:space:]')"
+            fi
+            echo "ESP-IDF found: ${INSTALLED_VERSION:-unknown}"
+            if [ "$INSTALLED_VERSION" = "$IDF_VERSION" ]; then
+              echo "Correct version already installed. Skipping."
+              exit 0
+            else
+              echo "Version mismatch ($INSTALLED_VERSION != $IDF_VERSION). Reinstalling..."
+              rm -rf "$IDF_PATH"
+              rm -rf "$IDF_TOOLS_PATH"
+            fi
+          fi
+
+          echo "Installing ESP-IDF $IDF_VERSION..."
+
+          echo "::group::Install system dependencies"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git wget flex bison gperf python3 python3-pip python3-venv \
+            cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
+          echo "::endgroup::"
+
+          echo "::group::Clone ESP-IDF $IDF_VERSION"
+          sudo mkdir -p "$(dirname "$IDF_PATH")" "$(dirname "$IDF_TOOLS_PATH")"
+          sudo chown -R "$(id -u):$(id -g)" "$(dirname "$IDF_PATH")" "$(dirname "$IDF_TOOLS_PATH")"
+          git clone --branch "$IDF_VERSION" --depth 1 --recursive \
+            https://github.com/espressif/esp-idf.git "$IDF_PATH"
+          echo "::endgroup::"
+
+          echo "::group::Install ESP-IDF tools for $IDF_TARGET"
+          "$IDF_PATH/install.sh" "$IDF_TARGET"
+          echo "::endgroup::"
+
+          echo "ESP-IDF $IDF_VERSION installation complete."
+
+      - name: Setup ESP-IDF environment
+        run: |
+          . $IDF_PATH/export.sh
+          echo "IDF version: $(idf.py --version)"
+
+      - name: Build project
+        run: |
+          . $IDF_PATH/export.sh
+          idf.py build
+
+      - name: Generate firmware binaries
+        run: |
+          . $IDF_PATH/export.sh
+          mkdir -p firmware
+
+          # Detect app binary from project_description.json
+          APP_BIN=$(python3 -c "
+          import json
+          with open('build/project_description.json') as f:
+              d = json.load(f)
+          print('build/' + d['app_bin'])
+          ")
+
+          # Merge factory binary (bootloader + partition table + app)
+          python3 -m esptool --chip esp32p4 merge_bin \
+            --flash_mode dio \
+            --flash_size 32MB \
+            --flash_freq 80m \
+            -o firmware/nina-display-factory.bin \
+            0x2000  build/bootloader/bootloader.bin \
+            0x8000  build/partition_table/partition-table.bin \
+            0x20000 "$APP_BIN"
+
+          # Copy app binary as OTA file
+          cp "$APP_BIN" firmware/nina-display-ota.bin
+
+          # Report sizes
+          echo "Factory: $(du -h firmware/nina-display-factory.bin | cut -f1)"
+          echo "OTA:     $(du -h firmware/nina-display-ota.bin | cut -f1)"
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ steps.version.outputs.branch }}-${{ steps.version.outputs.short_sha }}
+          path: firmware/
+          retention-days: 30
+
+      - name: Determine tag
+        id: tag
+        run: |
+          VERSION=$(cat version.txt | tr -d '[:space:]')
+          BRANCH=${GITHUB_REF_NAME}
+
+          if [ "$BRANCH" = "main" ]; then
+            TAG="v${VERSION}"
+          else
+            # Count existing tags with this prefix to auto-increment
+            PREFIX="v${VERSION}-${BRANCH}."
+            EXISTING=$(git tag -l "${PREFIX}*" | wc -l)
+            NEXT=$((EXISTING + 1))
+            TAG="v${VERSION}-${BRANCH}.${NEXT}"
+          fi
+
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          if [ "$BRANCH" = "main" ]; then
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          else
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            CHANGES=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+          else
+            CHANGES=$(git log --pretty=format:"- %s (%h)" --no-merges -20)
+          fi
+          echo "$CHANGES" > /tmp/changelog.txt
+          echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
+
+      - name: Check for network_adapter.bin
+        id: network_adapter
+        run: |
+          if [ -f "network_adapter.bin" ]; then
+            cp network_adapter.bin firmware/
+            echo "included=true" >> $GITHUB_OUTPUT
+          else
+            echo "included=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate release notes
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          PREV_TAG="${{ steps.changelog.outputs.prev_tag }}"
+          VERSION=$(cat version.txt | tr -d '[:space:]')
+          BRANCH=${GITHUB_REF_NAME}
+
+          if [ -n "$PREV_TAG" ]; then
+            COMPARE_URL="https://github.com/chvvkumar/ESP32-P4-NINA-Display/compare/${PREV_TAG}...${TAG}"
+          else
+            COMPARE_URL=""
+          fi
+
+          export TAG PREV_TAG VERSION BRANCH COMPARE_URL
+          python3 << 'PYEOF'
+          import os
+          tag = os.environ['TAG']
+          prev_tag = os.environ.get('PREV_TAG', '')
+          version = os.environ['VERSION']
+          branch = os.environ['BRANCH']
+          compare_url = os.environ.get('COMPARE_URL', '')
+          with open('/tmp/changelog.txt') as f:
+              changes = f.read().strip()
+          since = f'### Changes since {prev_tag}' if prev_tag else '### Recent Changes'
+          lines = [
+              f'## NINA Display {tag}',
+              '',
+              f'**Branch:** {branch}',
+              f'**Version:** {version}',
+              '**Built with:** ESP-IDF v5.5.2',
+              '',
+              since,
+              changes,
+              '',
+          ]
+          if compare_url:
+              lines.append(f'**Full Changelog**: {compare_url}')
+              lines.append('')
+          lines += [
+              '### Firmware Files',
+              '| File | Description |',
+              '|------|-------------|',
+              '| `nina-display-factory.bin` | Full factory image (flash at 0x0000) |',
+              '| `nina-display-ota.bin` | OTA update binary (upload via web UI) |',
+              '',
+              '### Flashing',
+              '- **Factory:** Use [ESP Web Flasher](https://espressif.github.io/esptool-js/) — flash at address `0x0000`',
+              '- **OTA:** Upload `nina-display-ota.bin` via the device web UI at `http://<device-ip>/`',
+              '',
+          ]
+          with open('/tmp/release-notes.md', 'w') as f:
+              f.write('\n'.join(lines))
+          PYEOF
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          IS_PRERELEASE=${{ steps.tag.outputs.is_prerelease }}
+
+          PRERELEASE_FLAG=""
+          if [ "$IS_PRERELEASE" = "true" ]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+
+          # Create git tag
+          git tag "$TAG"
+          git push origin "$TAG"
+
+          # Create GitHub release with firmware assets
+          gh release create "$TAG" \
+            firmware/nina-display-factory.bin \
+            firmware/nina-display-ota.bin \
+            --title "$TAG" \
+            --notes-file /tmp/release-notes.md \
+            $PRERELEASE_FLAG

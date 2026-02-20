@@ -719,6 +719,9 @@ static esp_err_t version_get_handler(httpd_req_t *req)
     cJSON_AddStringToObject(root, "time", app->time);
     cJSON_AddStringToObject(root, "idf", app->idf_ver);
     cJSON_AddStringToObject(root, "partition", running ? running->label : "unknown");
+    cJSON_AddStringToObject(root, "git_tag", BUILD_GIT_TAG);
+    cJSON_AddStringToObject(root, "git_sha", BUILD_GIT_SHA);
+    cJSON_AddStringToObject(root, "git_branch", BUILD_GIT_BRANCH);
 
     const char *json_str = cJSON_PrintUnformatted(root);
     if (!json_str) {

@@ -5,6 +5,7 @@
 #include "esp_mac.h"
 #include "esp_netif.h"
 #include "esp_system.h"
+#include "esp_app_desc.h"
 #include "esp_timer.h"
 #include "cJSON.h"
 #include "bsp/esp-bsp.h"
@@ -82,7 +83,10 @@ static cJSON *create_device_object(void)
     cJSON_AddStringToObject(dev, "name", "NINA Display");
     cJSON_AddStringToObject(dev, "model", "ESP32-P4-WIFI6-Touch-LCD-4B");
     cJSON_AddStringToObject(dev, "manufacturer", "Waveshare");
-    cJSON_AddStringToObject(dev, "sw_version", "1.0.0");
+    const esp_app_desc_t *app_desc = esp_app_get_description();
+    char sw_ver[64];
+    snprintf(sw_ver, sizeof(sw_ver), "%s (%s)", app_desc->version, BUILD_GIT_TAG);
+    cJSON_AddStringToObject(dev, "sw_version", sw_ver);
 
     char config_url[48];
     snprintf(config_url, sizeof(config_url), "http://%s", get_device_ip());
