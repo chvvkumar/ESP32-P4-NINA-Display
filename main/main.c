@@ -8,6 +8,7 @@
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_sntp.h"
+#include "esp_timer.h"
 #include "bsp/esp-bsp.h"
 #include "bsp/display.h"
 #include "lvgl.h"
@@ -16,8 +17,11 @@
 #include "web_server.h"
 #include "mqtt_ha.h"
 #include "tasks.h"
+#include "esp_ota_ops.h"
 
 #include <string.h>
+#include <stdlib.h>
+#include <time.h>
 
 static const char *TAG = "main";
 
@@ -25,23 +29,66 @@ static const char *TAG = "main";
 EventGroupHandle_t s_wifi_event_group;
 int instance_count = 1;
 
+/* WiFi reconnection backoff */
+static int wifi_retry_count = 0;
+static esp_timer_handle_t wifi_reconnect_timer = NULL;
+static const int wifi_backoff_ms[] = {1000, 2000, 5000, 10000, 30000};
+#define WIFI_BACKOFF_STEPS (sizeof(wifi_backoff_ms) / sizeof(wifi_backoff_ms[0]))
+
+static void wifi_reconnect_cb(void *arg) {
+    ESP_LOGI(TAG, "WiFi reconnect attempt %d", wifi_retry_count);
+    esp_wifi_connect();
+}
+
 static void event_handler(void *arg, esp_event_base_t event_base,
                           int32_t event_id, void *event_data)
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        esp_wifi_connect();
-        ESP_LOGI(TAG, "retry to connect to the AP");
+        /* STA lost — re-enable the config AP so the user can reconfigure */
+        wifi_mode_t mode;
+        esp_wifi_get_mode(&mode);
+        if (mode == WIFI_MODE_STA) {
+            ESP_LOGI(TAG, "STA disconnected, re-enabling AP");
+            esp_wifi_set_mode(WIFI_MODE_APSTA);
+        }
+
+        int idx = wifi_retry_count < (int)WIFI_BACKOFF_STEPS
+                  ? wifi_retry_count : (int)WIFI_BACKOFF_STEPS - 1;
+        int delay = wifi_backoff_ms[idx];
+        wifi_retry_count++;
+        ESP_LOGI(TAG, "WiFi disconnected, reconnecting in %d ms (attempt %d)", delay, wifi_retry_count);
+        esp_timer_start_once(wifi_reconnect_timer, (uint64_t)delay * 1000);
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
+        wifi_retry_count = 0;
 
-        ESP_LOGI(TAG, "Initializing SNTP");
-        esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
-        const char *ntp = app_config_get()->ntp_server;
-        esp_sntp_setservername(0, (ntp[0] != '\0') ? ntp : "pool.ntp.org");
-        esp_sntp_init();
+        /* STA connected — disable the config AP to keep the air clean */
+        wifi_mode_t mode;
+        esp_wifi_get_mode(&mode);
+        if (mode == WIFI_MODE_APSTA) {
+            ESP_LOGI(TAG, "STA connected, disabling AP");
+            esp_wifi_set_mode(WIFI_MODE_STA);
+        }
+
+        /* Apply timezone before SNTP so localtime_r works as soon as time is set */
+        const char *tz = app_config_get()->tz_string;
+        if (tz[0] != '\0') {
+            setenv("TZ", tz, 1);
+            tzset();
+            ESP_LOGI(TAG, "Timezone set to: %s", tz);
+        }
+
+        /* Guard against double-init on WiFi reconnect */
+        if (!esp_sntp_enabled()) {
+            ESP_LOGI(TAG, "Initializing SNTP");
+            esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+            const char *ntp = app_config_get()->ntp_server;
+            esp_sntp_setservername(0, (ntp[0] != '\0') ? ntp : "pool.ntp.org");
+            esp_sntp_init();
+        }
 
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
@@ -59,6 +106,13 @@ static void wifi_init(void)
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
+    // Create WiFi reconnection backoff timer
+    const esp_timer_create_args_t reconnect_timer_args = {
+        .callback = wifi_reconnect_cb,
+        .name = "wifi_reconnect",
+    };
+    ESP_ERROR_CHECK(esp_timer_create(&reconnect_timer_args, &wifi_reconnect_timer));
+
     esp_event_handler_instance_t instance_any_id;
     esp_event_handler_instance_t instance_got_ip;
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
@@ -72,17 +126,12 @@ static void wifi_init(void)
                                                         NULL,
                                                         &instance_got_ip));
 
-    app_config_t *app_cfg = app_config_get();
-
-    wifi_config_t wifi_config_sta = {
-        .sta = {
-            .threshold.authmode = WIFI_AUTH_WPA2_PSK,
-        },
-    };
-    if (strlen(app_cfg->wifi_ssid) > 0) {
-        strncpy((char *)wifi_config_sta.sta.ssid,     app_cfg->wifi_ssid, sizeof(wifi_config_sta.sta.ssid));
-        strncpy((char *)wifi_config_sta.sta.password, app_cfg->wifi_pass, sizeof(wifi_config_sta.sta.password));
-    }
+    /*
+     * STA credentials are NOT stored in app_config — they live in ESP-IDF's
+     * own WiFi NVS namespace (auto-persisted by esp_wifi_set_config and
+     * auto-restored on esp_wifi_start).  The web server POST handler calls
+     * esp_wifi_set_config directly when the user saves new credentials.
+     */
 
     wifi_config_t wifi_config_ap = {
         .ap = {
@@ -96,7 +145,6 @@ static void wifi_init(void)
     };
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config_sta));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP,  &wifi_config_ap));
     ESP_ERROR_CHECK(esp_wifi_start());
 
@@ -127,7 +175,7 @@ void app_main(void)
         .double_buffer = BSP_LCD_DRAW_BUFF_DOUBLE,
         .flags = {
             .buff_dma = true,
-            .buff_spiram = false,
+            .buff_spiram = true,
             .sw_rotate = false,
         }
     };
@@ -135,21 +183,30 @@ void app_main(void)
     bsp_display_backlight_on();
     bsp_display_brightness_set(app_config_get()->brightness);
 
-    bsp_display_lock(0);
-    lv_obj_t *scr = lv_scr_act();
-    create_nina_dashboard(scr, instance_count);
-    {
-        /* Apply persisted page override immediately on boot.
-         * Page 0 = summary (default), NINA pages start at 1, so offset by 1. */
-        app_config_t *cfg = app_config_get();
-        if (cfg->active_page_override >= 0 && cfg->active_page_override < instance_count) {
-            nina_dashboard_show_page(cfg->active_page_override + 1, instance_count);
+    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+        lv_obj_t *scr = lv_scr_act();
+        create_nina_dashboard(scr, instance_count);
+        {
+            /* Apply persisted page override immediately on boot.
+             * Override stores absolute page index: 0=summary, 1..N=NINA, N+1=sysinfo */
+            app_config_t *cfg = app_config_get();
+            int total = instance_count + 2;  /* summary + NINA pages + sysinfo */
+            if (cfg->active_page_override >= 0 && cfg->active_page_override < total) {
+                nina_dashboard_show_page(cfg->active_page_override, instance_count);
+            }
         }
+        bsp_display_unlock();
+    } else {
+        ESP_LOGE(TAG, "Failed to acquire display lock during init!");
     }
-    bsp_display_unlock();
 
     nina_dashboard_set_page_change_cb(on_page_changed);
 
     xTaskCreate(input_task,       "input_task", 4096,  NULL, 5, NULL);
     xTaskCreate(data_update_task, "data_task",  20480, NULL, 5, NULL);
+
+    /* Mark this firmware as valid so the bootloader won't roll back.
+     * This must come after successful init — if we crash before here,
+     * the bootloader will revert to the previous OTA partition. */
+    esp_ota_mark_app_valid_cancel_rollback();
 }

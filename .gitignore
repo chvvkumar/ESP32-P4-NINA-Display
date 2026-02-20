@@ -18,7 +18,7 @@ managed_components/*
 .esphome/
 common/secrets.yaml
 CLAUDE.md
-
+.claude/
 # Arduino build directories
 build/
 .build/
@@ -106,10 +106,8 @@ cleanup_log_*.txt
 # secrets.h
 # credentials.h
 
-# Documentation build artifacts
-docs/_build/
-docs/html/
-docs/latex/
+# Documentation (local only)
+docs/
 
 # Python cache (if using Python scripts)
 __pycache__/

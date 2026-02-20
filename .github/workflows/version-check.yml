@@ -1,0 +1,26 @@
+name: Version Check
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  check-version:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check version bump
+        run: |
+          PR_VERSION=$(cat version.txt | tr -d '[:space:]')
+          LATEST_TAG=$(git describe --tags --abbrev=0 origin/main 2>/dev/null || echo "v0.0.0")
+          LATEST_VERSION=${LATEST_TAG#v}
+
+          echo "PR version:     $PR_VERSION"
+          echo "Latest release: $LATEST_VERSION"
+
+          if [ "$PR_VERSION" = "$LATEST_VERSION" ]; then
+            echo "::warning::version.txt ($PR_VERSION) matches latest tag ($LATEST_TAG). Consider bumping the version before merging."
+          fi

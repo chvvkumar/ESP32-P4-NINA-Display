@@ -7,8 +7,12 @@
 #include "nina_dashboard_internal.h"
 #include "app_config.h"
 #include "themes.h"
+#include "esp_timer.h"
 #include <stdio.h>
 #include <string.h>
+
+#define STALE_WARN_MS   30000   /* 30 s: show "Last update" label */
+#define STALE_DIM_MS   120000   /* 2 min: dim the entire page */
 
 /* Red Night theme forces all colors to the theme palette, ignoring filter/threshold overrides */
 static bool theme_forces_colors(void) {
@@ -269,6 +273,45 @@ static void update_power(dashboard_page_t *p, const nina_client_t *d) {
     #undef UPPER
 }
 
+static void update_stale_indicator(dashboard_page_t *p, const nina_client_t *d) {
+    if (!p->lbl_stale) return;
+
+    /* Nothing to compare against until the first successful poll */
+    if (d->last_successful_poll_ms == 0) {
+        lv_obj_add_flag(p->lbl_stale, LV_OBJ_FLAG_HIDDEN);
+        if (p->stale_overlay)
+            lv_obj_add_flag(p->stale_overlay, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+
+    int64_t now_ms = esp_timer_get_time() / 1000;
+    int64_t stale_ms = now_ms - d->last_successful_poll_ms;
+
+    if (stale_ms > STALE_WARN_MS) {
+        int stale_sec = (int)(stale_ms / 1000);
+        if (stale_sec >= 120)
+            lv_label_set_text_fmt(p->lbl_stale, "Last update: %dm ago", stale_sec / 60);
+        else
+            lv_label_set_text_fmt(p->lbl_stale, "Last update: %ds ago", stale_sec);
+
+        /* Red text when severely stale */
+        uint32_t stale_color = (stale_ms > STALE_DIM_MS) ? 0xf87171 : 0xfbbf24;
+        lv_obj_set_style_text_color(p->lbl_stale, lv_color_hex(stale_color), 0);
+
+        lv_obj_clear_flag(p->lbl_stale, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(p->lbl_stale, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    /* Dim overlay when data is very stale (> 2 min) */
+    if (p->stale_overlay) {
+        if (stale_ms > STALE_DIM_MS)
+            lv_obj_clear_flag(p->stale_overlay, LV_OBJ_FLAG_HIDDEN);
+        else
+            lv_obj_add_flag(p->stale_overlay, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 void update_nina_dashboard_page(int page_index, const nina_client_t *data) {
     if (page_index < 0 || page_index >= page_count) return;
     if (!data) return;
@@ -280,6 +323,7 @@ void update_nina_dashboard_page(int page_index, const nina_client_t *data) {
 
     if (!data->connected) {
         update_disconnected_state(p, page_index, gb);
+        update_stale_indicator(p, data);
         return;
     }
 
@@ -289,4 +333,5 @@ void update_nina_dashboard_page(int page_index, const nina_client_t *data) {
     update_guider_stats(p, data, page_index, gb);
     update_mount_and_image_stats(p, data);
     update_power(p, data);
+    update_stale_indicator(p, data);
 }

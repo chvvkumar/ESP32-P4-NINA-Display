@@ -1,6 +1,6 @@
 # build_firmware.ps1
 # Compiles the ESP32-P4 NINA Display project with ESP-IDF 5.5.2
-# and generates a factory firmware binary in the firmware/ folder.
+# and generates factory + OTA firmware binaries in the firmware/ folder.
 
 param(
     [string]$IdfPath = "C:\Espressif\frameworks\esp-idf-v5.5.2",
@@ -91,28 +91,38 @@ foreach ($bin in @($Bootloader, $PartTable, $AppBin)) {
 }
 Write-Host "App binary: $AppBin" -ForegroundColor Gray
 
-$OutputBin = Join-Path $FirmwareDir "nina-display-factory.bin"
+$FactoryBin = Join-Path $FirmwareDir "nina-display-factory.bin"
+$OtaBin     = Join-Path $FirmwareDir "nina-display-ota.bin"
 
 # Merge into a single factory binary using esptool
-# ESP32-P4 layout: bootloader@0x2000, partition-table@0x8000, app@0x10000
+# ESP32-P4 OTA layout: bootloader@0x2000, partition-table@0x8000, app@0x20000 (ota_0)
 Write-Host "`nMerging into factory firmware binary ..." -ForegroundColor Cyan
 python -m esptool --chip esp32p4 merge_bin `
     --flash_mode dio `
     --flash_size 32MB `
     --flash_freq 80m `
-    -o $OutputBin `
+    -o $FactoryBin `
     0x2000  $Bootloader `
     0x8000  $PartTable `
-    0x10000 $AppBin
+    0x20000 $AppBin
 
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Failed to merge firmware binary."
     exit 1
 }
 
-$Size = (Get-Item $OutputBin).Length
-$SizeMB = [math]::Round($Size / 1MB, 2)
-Write-Host "`nFactory firmware generated successfully!" -ForegroundColor Green
-Write-Host "  Output: $OutputBin" -ForegroundColor Green
-Write-Host "  Size:   $SizeMB MB ($Size bytes)" -ForegroundColor Green
-Write-Host "`nFlash with: esptool.py --chip esp32p4 write_flash 0x0 `"$OutputBin`"" -ForegroundColor Yellow
+# Copy app binary as OTA update file (raw app image, no bootloader/partition table)
+Copy-Item -Path $AppBin -Destination $OtaBin -Force
+
+$FactorySize = (Get-Item $FactoryBin).Length
+$FactorySizeMB = [math]::Round($FactorySize / 1MB, 2)
+$OtaSize = (Get-Item $OtaBin).Length
+$OtaSizeMB = [math]::Round($OtaSize / 1MB, 2)
+
+Write-Host "`nFirmware generated successfully!" -ForegroundColor Green
+Write-Host "  Factory: $FactoryBin" -ForegroundColor Green
+Write-Host "           $FactorySizeMB MB ($FactorySize bytes)" -ForegroundColor Green
+Write-Host "  OTA:     $OtaBin" -ForegroundColor Green
+Write-Host "           $OtaSizeMB MB ($OtaSize bytes)" -ForegroundColor Green
+Write-Host "`nFlash with: esptool.py --chip esp32p4 write_flash 0x0 `"$FactoryBin`"" -ForegroundColor Yellow
+Write-Host "OTA update: Upload `"$OtaBin`" via the web interface at http://<device-ip>/" -ForegroundColor Yellow

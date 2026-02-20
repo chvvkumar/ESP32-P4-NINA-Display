@@ -5,6 +5,8 @@
 #include "esp_mac.h"
 #include "esp_netif.h"
 #include "esp_system.h"
+#include "esp_app_desc.h"
+#include "esp_timer.h"
 #include "cJSON.h"
 #include "bsp/esp-bsp.h"
 #include "bsp/display.h"
@@ -12,12 +14,20 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <inttypes.h>
 
 static const char *TAG = "mqtt_ha";
+
+// Exponential backoff for MQTT reconnection
+#define MQTT_BACKOFF_INITIAL_MS  5000   // 5 seconds
+#define MQTT_BACKOFF_MAX_MS      60000  // 60 seconds
+#define MQTT_BACKOFF_MULTIPLIER  2
 
 static esp_mqtt_client_handle_t s_mqtt_client = NULL;
 static bool s_connected = false;
 static char s_device_id[16];  // Last 6 hex chars of MAC
+static uint32_t s_backoff_ms = MQTT_BACKOFF_INITIAL_MS;
+static esp_timer_handle_t s_reconnect_timer = NULL;
 
 // Topic buffers
 static char s_topic_screen_cmd[128];
@@ -73,7 +83,10 @@ static cJSON *create_device_object(void)
     cJSON_AddStringToObject(dev, "name", "NINA Display");
     cJSON_AddStringToObject(dev, "model", "ESP32-P4-WIFI6-Touch-LCD-4B");
     cJSON_AddStringToObject(dev, "manufacturer", "Waveshare");
-    cJSON_AddStringToObject(dev, "sw_version", "1.0.0");
+    const esp_app_desc_t *app_desc = esp_app_get_description();
+    char sw_ver[64];
+    snprintf(sw_ver, sizeof(sw_ver), "%s (%s)", app_desc->version, BUILD_GIT_TAG);
+    cJSON_AddStringToObject(dev, "sw_version", sw_ver);
 
     char config_url[48];
     snprintf(config_url, sizeof(config_url), "http://%s", get_device_ip());
@@ -241,9 +254,12 @@ static void handle_text_command(const char *data, int len)
         if (cfg->color_brightness == 0) cfg->color_brightness = 100;
     }
 
-    bsp_display_lock(0);
-    nina_dashboard_apply_theme(cfg->theme_index);
-    bsp_display_unlock();
+    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+        nina_dashboard_apply_theme(cfg->theme_index);
+        bsp_display_unlock();
+    } else {
+        ESP_LOGW(TAG, "Display lock timeout (MQTT theme apply)");
+    }
 
     ESP_LOGI(TAG, "Text brightness set to %d%% via MQTT", cfg->color_brightness);
 
@@ -259,6 +275,31 @@ static void handle_reboot_command(const char *data, int len)
     }
 }
 
+static void reconnect_timer_cb(void *arg)
+{
+    if (s_mqtt_client && !s_connected) {
+        ESP_LOGI(TAG, "Attempting MQTT reconnect (backoff: %"PRIu32" ms)", s_backoff_ms);
+        esp_mqtt_client_reconnect(s_mqtt_client);
+    }
+}
+
+static void schedule_reconnect(void)
+{
+    if (!s_reconnect_timer || !s_mqtt_client) return;
+
+    // Stop any pending reconnect before scheduling a new one
+    esp_timer_stop(s_reconnect_timer);
+
+    ESP_LOGD(TAG, "Scheduling MQTT reconnect in %"PRIu32" ms", s_backoff_ms);
+    esp_timer_start_once(s_reconnect_timer, (uint64_t)s_backoff_ms * 1000);
+
+    // Increase backoff for next attempt, capped at max
+    s_backoff_ms = s_backoff_ms * MQTT_BACKOFF_MULTIPLIER;
+    if (s_backoff_ms > MQTT_BACKOFF_MAX_MS) {
+        s_backoff_ms = MQTT_BACKOFF_MAX_MS;
+    }
+}
+
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
                                 int32_t event_id, void *event_data)
 {
@@ -268,6 +309,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "MQTT connected to broker");
         s_connected = true;
+        s_backoff_ms = MQTT_BACKOFF_INITIAL_MS;  // Reset backoff on successful connect
 
         // Publish availability
         esp_mqtt_client_publish(s_mqtt_client, s_topic_avail, "online", 0, 1, 1);
@@ -285,8 +327,9 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
         break;
 
     case MQTT_EVENT_DISCONNECTED:
-        ESP_LOGW(TAG, "MQTT disconnected");
+        ESP_LOGW(TAG, "MQTT disconnected from broker");
         s_connected = false;
+        schedule_reconnect();
         break;
 
     case MQTT_EVENT_DATA:
@@ -330,6 +373,20 @@ void mqtt_ha_start(void)
     init_device_id();
     build_topics(cfg->mqtt_topic_prefix);
 
+    // Create reconnect timer (one-shot, managed by backoff logic)
+    if (!s_reconnect_timer) {
+        const esp_timer_create_args_t timer_args = {
+            .callback = reconnect_timer_cb,
+            .name = "mqtt_reconnect",
+        };
+        esp_err_t terr = esp_timer_create(&timer_args, &s_reconnect_timer);
+        if (terr != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to create reconnect timer: %s", esp_err_to_name(terr));
+            return;
+        }
+    }
+    s_backoff_ms = MQTT_BACKOFF_INITIAL_MS;
+
     // Build broker URI with port
     char uri[192];
     // Check if URL already has a scheme
@@ -349,6 +406,7 @@ void mqtt_ha_start(void)
         .session.last_will.msg = "offline",
         .session.last_will.qos = 1,
         .session.last_will.retain = 1,
+        .network.disable_auto_reconnect = true,  // We handle reconnect with exponential backoff
     };
 
     s_mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
@@ -373,6 +431,13 @@ void mqtt_ha_stop(void)
 {
     if (!s_mqtt_client) return;
 
+    // Stop reconnect timer first to prevent it firing during shutdown
+    if (s_reconnect_timer) {
+        esp_timer_stop(s_reconnect_timer);
+        esp_timer_delete(s_reconnect_timer);
+        s_reconnect_timer = NULL;
+    }
+
     if (s_connected) {
         esp_mqtt_client_publish(s_mqtt_client, s_topic_avail, "offline", 0, 1, 1);
     }
@@ -381,6 +446,7 @@ void mqtt_ha_stop(void)
     esp_mqtt_client_destroy(s_mqtt_client);
     s_mqtt_client = NULL;
     s_connected = false;
+    s_backoff_ms = MQTT_BACKOFF_INITIAL_MS;
     ESP_LOGI(TAG, "MQTT client stopped");
 }
 

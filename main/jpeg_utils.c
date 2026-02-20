@@ -44,6 +44,10 @@ bool fetch_and_show_thumbnail(const char *base_url) {
                 .timeout_ms = 5000,
             };
             err = jpeg_new_decoder_engine(&engine_cfg, &decoder);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "jpeg_new_decoder_engine failed: %s", esp_err_to_name(err));
+                ESP_LOGE(TAG, "Free Internal DMA Heap: %d bytes", (int)heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+            }
             if (err == ESP_OK && decoder) {
                 jpeg_decode_cfg_t decode_cfg = {
                     .output_format = is_gray ? JPEG_DECODE_OUT_FORMAT_GRAY : JPEG_DECODE_OUT_FORMAT_RGB565,
@@ -85,10 +89,13 @@ bool fetch_and_show_thumbnail(const char *base_url) {
                     ESP_LOGI(TAG, "JPEG decoded: %lux%lu %s -> %lu bytes",
                         (unsigned long)pic_info.width, (unsigned long)pic_info.height,
                         is_gray ? "gray" : "color", (unsigned long)rgb_size);
-                    bsp_display_lock(0);
-                    nina_dashboard_set_thumbnail(rgb_buf, out_w, out_h, rgb_size);
-                    bsp_display_unlock();
-                    rgb_buf = NULL;  // ownership transferred
+                    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                        nina_dashboard_set_thumbnail(rgb_buf, out_w, out_h, rgb_size);
+                        bsp_display_unlock();
+                        rgb_buf = NULL;  // ownership transferred
+                    } else {
+                        ESP_LOGW(TAG, "Display lock timeout (thumbnail set)");
+                    }
                     decode_buf = NULL;
                     success = true;
                 } else {

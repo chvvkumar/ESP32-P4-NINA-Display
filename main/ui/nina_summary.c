@@ -8,6 +8,7 @@
 
 #include "nina_summary.h"
 #include "nina_dashboard_internal.h"
+#include "nina_dashboard.h"
 #include "app_config.h"
 #include "themes.h"
 
@@ -47,6 +48,12 @@ static lv_style_t style_glass_card;
 static bool styles_initialized = false;
 
 /* ── Helpers ───────────────────────────────────────────────────────── */
+
+static void summary_card_click_cb(lv_event_t *e) {
+    int instance_index = (int)(intptr_t)lv_event_get_user_data(e);
+    /* Page 0 is summary. Page 1..N are NINA instances. */
+    nina_dashboard_show_page(instance_index + 1, 0);
+}
 
 static void init_glass_styles(void) {
     if (styles_initialized) return;
@@ -132,6 +139,10 @@ static void create_card(summary_card_t *sc, lv_obj_t *parent, int instance_index
                           LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_clear_flag(sc->card, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_pad_row(sc->card, 6, 0);
+
+    /* Make card clickable for navigation */
+    lv_obj_add_flag(sc->card, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(sc->card, summary_card_click_cb, LV_EVENT_CLICKED, (void *)(intptr_t)instance_index);
 
     /* ── Header row: instance name + filter badge ── */
     lv_obj_t *header = lv_obj_create(sc->card);
@@ -227,16 +238,126 @@ lv_obj_t *summary_page_create(lv_obj_t *parent, int instance_count) {
     return sum_page;
 }
 
+/* ── Layout Update ─────────────────────────────────────────────────── */
+
+static void update_card_layout(summary_card_t *sc, bool large) {
+    /* Instance Name */
+    if (large) {
+#ifdef LV_FONT_MONTSERRAT_28
+        lv_obj_set_style_text_font(sc->lbl_name, &lv_font_montserrat_28, 0);
+#elif defined(LV_FONT_MONTSERRAT_24)
+        lv_obj_set_style_text_font(sc->lbl_name, &lv_font_montserrat_24, 0);
+#else
+        lv_obj_set_style_text_font(sc->lbl_name, &lv_font_montserrat_20, 0);
+#endif
+    } else {
+        lv_obj_set_style_text_font(sc->lbl_name, &lv_font_montserrat_18, 0);
+    }
+
+    /* Filter Badge Text */
+    if (large) {
+#ifdef LV_FONT_MONTSERRAT_20
+        lv_obj_set_style_text_font(sc->lbl_filter, &lv_font_montserrat_20, 0);
+#elif defined(LV_FONT_MONTSERRAT_18)
+        lv_obj_set_style_text_font(sc->lbl_filter, &lv_font_montserrat_18, 0);
+#else
+        lv_obj_set_style_text_font(sc->lbl_filter, &lv_font_montserrat_14, 0);
+#endif
+    } else {
+        lv_obj_set_style_text_font(sc->lbl_filter, &lv_font_montserrat_14, 0);
+    }
+
+    /* Target Name */
+    if (large) {
+#ifdef LV_FONT_MONTSERRAT_32
+        lv_obj_set_style_text_font(sc->lbl_target, &lv_font_montserrat_32, 0);
+#elif defined(LV_FONT_MONTSERRAT_28)
+        lv_obj_set_style_text_font(sc->lbl_target, &lv_font_montserrat_28, 0);
+#else
+        lv_obj_set_style_text_font(sc->lbl_target, &lv_font_montserrat_24, 0);
+#endif
+    } else {
+#ifdef LV_FONT_MONTSERRAT_24
+        lv_obj_set_style_text_font(sc->lbl_target, &lv_font_montserrat_24, 0);
+#else
+        lv_obj_set_style_text_font(sc->lbl_target, &lv_font_montserrat_20, 0);
+#endif
+    }
+
+    /* Progress Bar Height */
+    lv_obj_set_height(sc->bar_progress, large ? 12 : 6);
+
+    /* Stats (Labels and Values) */
+    lv_obj_t *labels[] = { sc->lbl_rms_label, sc->lbl_hfr_label, sc->lbl_flip_label };
+    lv_obj_t *values[] = { sc->lbl_rms_val, sc->lbl_hfr_val, sc->lbl_flip_val };
+
+    const lv_font_t *font_stat_label = large ? 
+#ifdef LV_FONT_MONTSERRAT_18
+        &lv_font_montserrat_18 
+#else
+        &lv_font_montserrat_14
+#endif
+        : &lv_font_montserrat_14;
+
+    const lv_font_t *font_stat_value = large ?
+#ifdef LV_FONT_MONTSERRAT_36
+        &lv_font_montserrat_36
+#elif defined(LV_FONT_MONTSERRAT_32)
+        &lv_font_montserrat_32
+#elif defined(LV_FONT_MONTSERRAT_28)
+        &lv_font_montserrat_28
+#else
+        &lv_font_montserrat_24
+#endif
+        : 
+#ifdef LV_FONT_MONTSERRAT_28
+        &lv_font_montserrat_28;
+#elif defined(LV_FONT_MONTSERRAT_24)
+        &lv_font_montserrat_24;
+#else
+        &lv_font_montserrat_20;
+#endif
+
+    for (int i = 0; i < 3; i++) {
+        if (labels[i]) lv_obj_set_style_text_font(labels[i], font_stat_label, 0);
+        if (values[i]) lv_obj_set_style_text_font(values[i], font_stat_value, 0);
+    }
+}
+
 /* ── Data Update ───────────────────────────────────────────────────── */
 
 void summary_page_update(const nina_client_t *instances, int count) {
     if (!sum_page) return;
 
     int gb = app_config_get()->color_brightness;
+    
+    /* First count how many are connected */
+    int connected_count = 0;
+    for (int i = 0; i < count; i++) {
+        if (instances[i].connected) connected_count++;
+    }
+
+    /* Determine visibility and layout mode */
+    int visible_count = (connected_count > 0) ? connected_count : card_count;
+    bool large_mode = (visible_count < 3);
 
     for (int i = 0; i < card_count && i < count; i++) {
         summary_card_t *sc = &cards[i];
         const nina_client_t *d = &instances[i];
+
+        /* Visibility logic:
+         * 1. If NO instances are connected, show all (placeholder mode).
+         * 2. If ANY instance is connected, hide disconnected ones.
+         */
+        bool show = (connected_count == 0) || d->connected;
+        
+        if (show) {
+            lv_obj_clear_flag(sc->card, LV_OBJ_FLAG_HIDDEN);
+            update_card_layout(sc, large_mode);
+        } else {
+            lv_obj_add_flag(sc->card, LV_OBJ_FLAG_HIDDEN);
+            continue; /* Skip updating hidden cards */
+        }
 
         /* Instance name — update if profile available */
         if (d->connected && d->profile_name[0]) {
