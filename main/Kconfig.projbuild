@@ -1,0 +1,20 @@
+menu "NINA Display"
+    config PERF_MONITOR_ENABLED
+        bool "Enable performance profiling"
+        default n
+        help
+            Enable detailed performance monitoring instrumentation.
+            Adds timing probes around all REST fetchers, JSON parsing,
+            UI updates, and memory tracking. Reports are printed to
+            serial log every 30 seconds and available via /api/perf.
+            Disable for production builds to save ~2KB RAM and reduce
+            logging overhead.
+
+    config PERF_REPORT_INTERVAL_S
+        int "Performance report interval (seconds)"
+        default 30
+        depends on PERF_MONITOR_ENABLED
+        range 10 300
+        help
+            How often to print the performance report to serial log.
+endmenu

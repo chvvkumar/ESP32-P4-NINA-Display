@@ -21,6 +21,7 @@
 #include "cJSON.h"
 #include <string.h>
 #include <time.h>
+#include "perf_monitor.h"
 
 static const char *TAG = "nina_client";
 
@@ -130,8 +131,11 @@ time_t parse_iso8601(const char *str) {
 }
 
 cJSON *http_get_json(const char *url) {
+    perf_timer_start(&g_perf.http_request);
+    perf_counter_increment(&g_perf.http_request_count);
     for (int attempt = 0; attempt < HTTP_MAX_ATTEMPTS; attempt++) {
         if (attempt > 0) {
+            perf_counter_increment(&g_perf.http_retry_count);
             ESP_LOGD(TAG, "HTTP retry %d/%d for %s (delay %d ms)",
                      attempt + 1, HTTP_MAX_ATTEMPTS, url,
                      http_retry_delays_ms[attempt - 1]);
@@ -212,11 +216,17 @@ cJSON *http_get_json(const char *url) {
             esp_http_client_cleanup(client);
         }
 
+        perf_timer_start(&g_perf.json_parse);
         cJSON *json = cJSON_Parse(buffer);
+        perf_timer_stop(&g_perf.json_parse);
+        perf_counter_increment(&g_perf.json_parse_count);
         free(buffer);
+        perf_timer_stop(&g_perf.http_request);
         return json;
     }
 
+    perf_counter_increment(&g_perf.http_failure_count);
+    perf_timer_stop(&g_perf.http_request);
     return NULL;  // All attempts exhausted
 }
 
@@ -322,7 +332,9 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
     ESP_LOGI(TAG, "=== Polling NINA data (tiered) ===");
 
     // --- ALWAYS: Camera heartbeat ---
+    perf_timer_start(&g_perf.poll_camera);
     fetch_camera_info_robust(base_url, data);
+    perf_timer_stop(&g_perf.poll_camera);
 
     if (!data->connected) {
         state->static_fetched = false;
@@ -334,10 +346,21 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
 
     // --- ONCE: Static data (profile, available filters, initial image history, switch) ---
     if (!state->static_fetched) {
+        perf_timer_start(&g_perf.poll_profile);
         fetch_profile_robust(base_url, data);
+        perf_timer_stop(&g_perf.poll_profile);
+
+        perf_timer_start(&g_perf.poll_filter);
         fetch_filter_robust_ex(base_url, data, true);
+        perf_timer_stop(&g_perf.poll_filter);
+
+        perf_timer_start(&g_perf.poll_image_history);
         fetch_image_history_robust(base_url, data);
+        perf_timer_stop(&g_perf.poll_image_history);
+
+        perf_timer_start(&g_perf.poll_switch);
         fetch_switch_info(base_url, data);
+        perf_timer_stop(&g_perf.poll_switch);
 
         snprintf(state->cached_profile, sizeof(state->cached_profile), "%s", data->profile_name);
         snprintf(state->cached_telescope, sizeof(state->cached_telescope), "%s", data->telescope_name);
@@ -357,15 +380,21 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
     }
 
     // --- FAST: Guider RMS ---
+    perf_timer_start(&g_perf.poll_guider);
     fetch_guider_robust(base_url, data);
+    perf_timer_stop(&g_perf.poll_guider);
 
     // --- CONDITIONAL: Only poll if WebSocket is NOT handling ---
     if (!data->websocket_connected) {
+        perf_timer_start(&g_perf.poll_image_history);
         fetch_image_history_robust(base_url, data);
+        perf_timer_stop(&g_perf.poll_image_history);
         if (data->telescope_name[0] != '\0') {
             snprintf(state->cached_telescope, sizeof(state->cached_telescope), "%s", data->telescope_name);
         }
+        perf_timer_start(&g_perf.poll_filter);
         fetch_filter_robust_ex(base_url, data, false);
+        perf_timer_stop(&g_perf.poll_filter);
     } else {
         if (data->telescope_name[0] != '\0') {
             snprintf(state->cached_telescope, sizeof(state->cached_telescope), "%s", data->telescope_name);
@@ -374,15 +403,26 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
 
     // --- SLOW: Focuser + Mount + Switch (every 30s) ---
     if (now_ms - state->last_slow_poll_ms >= NINA_POLL_SLOW_MS) {
+        perf_timer_start(&g_perf.poll_focuser);
         fetch_focuser_robust(base_url, data);
+        perf_timer_stop(&g_perf.poll_focuser);
+
+        perf_timer_start(&g_perf.poll_mount);
         fetch_mount_robust(base_url, data);
+        perf_timer_stop(&g_perf.poll_mount);
+
+        perf_timer_start(&g_perf.poll_switch);
         fetch_switch_info(base_url, data);
+        perf_timer_stop(&g_perf.poll_switch);
+
         state->last_slow_poll_ms = now_ms;
     }
 
     // --- SLOW: Sequence counts (every 10s) ---
     if (now_ms - state->last_sequence_poll_ms >= NINA_POLL_SEQUENCE_MS) {
+        perf_timer_start(&g_perf.poll_sequence);
         fetch_sequence_counts_optional(base_url, data);
+        perf_timer_stop(&g_perf.poll_sequence);
         state->last_sequence_poll_ms = now_ms;
     }
 

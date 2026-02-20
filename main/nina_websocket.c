@@ -14,6 +14,7 @@
 #include "esp_timer.h"
 #include "cJSON.h"
 #include <string.h>
+#include "perf_monitor.h"
 
 static const char *TAG = "nina_ws";
 
@@ -34,6 +35,8 @@ static bool ws_needs_reconnect[MAX_NINA_INSTANCES];
 static void handle_websocket_message(int index, const char *payload, int len) {
     nina_client_t *data = ws_client_data[index];
     if (!data || !payload || len <= 0) return;
+
+    perf_counter_increment(&g_perf.ws_event_count);
 
     cJSON *json = cJSON_ParseWithLength(payload, len);
     if (!json) return;
@@ -154,6 +157,11 @@ static void handle_websocket_message(int index, const char *payload, int len) {
     else {
         ESP_LOGD(TAG, "WS[%d]: Unhandled event: %s", index, evt->valuestring);
     }
+
+    // Record timestamp for WS-to-UI latency measurement
+#if PERF_MONITOR_ENABLED
+    g_perf.last_ws_event_time_us = esp_timer_get_time();
+#endif
 
     cJSON_Delete(json);
 }

@@ -17,6 +17,7 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include <time.h>
+#include "perf_monitor.h"
 
 static const char *TAG = "tasks";
 
@@ -129,6 +130,17 @@ void data_update_task(void *arg) {
     }
 
     while (1) {
+        // ── Perf: Track effective cycle interval ──
+        {
+            static int64_t prev_cycle_start = 0;
+            int64_t cycle_now = esp_timer_get_time();
+            if (prev_cycle_start > 0) {
+                perf_timer_record(&g_perf.effective_cycle_interval, cycle_now - prev_cycle_start);
+            }
+            prev_cycle_start = cycle_now;
+        }
+        perf_timer_start(&g_perf.poll_cycle_total);
+
         int current_active = nina_dashboard_get_active_page();  // Snapshot to avoid races
         bool on_sysinfo = nina_dashboard_is_sysinfo_page();
         bool on_summary = nina_dashboard_is_summary_page();
@@ -282,10 +294,20 @@ void data_update_task(void *arg) {
         if (on_summary) {
             for (int i = 0; i < instance_count; i++)
                 nina_client_lock(&instances[i], 100);
+
+            perf_timer_start(&g_perf.ui_update_total);
+            int64_t lock_start = esp_timer_get_time();
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                perf_timer_record(&g_perf.ui_lock_wait, esp_timer_get_time() - lock_start);
+
+                perf_timer_start(&g_perf.ui_summary_update);
                 summary_page_update(instances, instance_count);
+                perf_timer_stop(&g_perf.ui_summary_update);
+
                 bsp_display_unlock();
             }
+            perf_timer_stop(&g_perf.ui_update_total);
+
             for (int i = 0; i < instance_count; i++)
                 nina_client_unlock(&instances[i]);
         }
@@ -293,12 +315,33 @@ void data_update_task(void *arg) {
         /* Update active NINA page UI */
         if (active_nina_idx >= 0 && active_nina_idx < instance_count) {
             nina_client_lock(&instances[active_nina_idx], 100);
+
+            perf_timer_start(&g_perf.ui_update_total);
+            int64_t lock_start2 = esp_timer_get_time();
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                perf_timer_record(&g_perf.ui_lock_wait, esp_timer_get_time() - lock_start2);
+
+                perf_timer_start(&g_perf.ui_dashboard_update);
                 update_nina_dashboard_page(active_nina_idx, &instances[active_nina_idx]);
+                perf_timer_stop(&g_perf.ui_dashboard_update);
+
+                // Measure WS-to-UI latency if a recent event was received
+#if PERF_MONITOR_ENABLED
+                if (g_perf.last_ws_event_time_us > 0) {
+                    int64_t latency = esp_timer_get_time() - g_perf.last_ws_event_time_us;
+                    if (latency < 5000000) {  // Only if within 5 seconds (not stale)
+                        perf_timer_record(&g_perf.latency_ws_to_ui, latency);
+                    }
+                    g_perf.last_ws_event_time_us = 0;  // Reset after measuring
+                }
+#endif
+
                 nina_dashboard_update_status(active_nina_idx, rssi,
                                              instances[active_nina_idx].connected, false);
                 bsp_display_unlock();
             }
+            perf_timer_stop(&g_perf.ui_update_total);
+
             nina_client_unlock(&instances[active_nina_idx]);
 
             // Handle thumbnail: initial request or auto-refresh on new image
@@ -325,6 +368,17 @@ void data_update_task(void *arg) {
                 }
             }
         }
+
+        // ── Perf: End cycle, capture memory, periodic report ──
+        perf_timer_stop(&g_perf.poll_cycle_total);
+        perf_monitor_capture_memory();
+#if PERF_MONITOR_ENABLED
+        g_perf.data_task_stack_hwm = uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t);
+        if (esp_timer_get_time() - g_perf.last_report_time_us >=
+            (int64_t)g_perf.report_interval_s * 1000000) {
+            perf_monitor_report();
+        }
+#endif
 
         vTaskDelay(pdMS_TO_TICKS(2000));
     }

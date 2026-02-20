@@ -8,6 +8,7 @@
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
+#include "perf_monitor.h"
 
 static const char *TAG = "app_config";
 static app_config_t s_config;
@@ -441,7 +442,10 @@ uint32_t app_config_get_filter_color(const char *filter_name, int instance_index
 
     // Parse the per-instance filter_colors JSON string
     const char *json = get_filter_colors_field(instance_index);
+    perf_timer_start(&g_perf.json_config_color_parse);
     cJSON *root = cJSON_Parse(json);
+    perf_timer_stop(&g_perf.json_config_color_parse);
+    perf_counter_increment(&g_perf.json_parse_count);
     if (!root) {
         ESP_LOGW(TAG, "Failed to parse filter colors JSON, using default");
         return 0xFFFFFF;  // White fallback
@@ -479,7 +483,10 @@ uint32_t app_config_get_filter_color(const char *filter_name, int instance_index
  */
 static uint32_t get_threshold_color(float value, const char *json,
                                     float default_good_max, float default_ok_max) {
+    perf_timer_start(&g_perf.json_config_color_parse);
     cJSON *root = cJSON_Parse(json);
+    perf_timer_stop(&g_perf.json_config_color_parse);
+    perf_counter_increment(&g_perf.json_parse_count);
     if (!root) {
         int gb = s_config.color_brightness;
         if (gb < 0 || gb > 100) gb = 100;
