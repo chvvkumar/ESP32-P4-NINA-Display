@@ -135,6 +135,11 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
 // Only fetches camera info to maintain connection status
 void nina_client_poll_heartbeat(const char *base_url, nina_client_t *data);
 
+// Background polling for inactive instances — pre-fetches slow-changing data
+// (profile, filters, focuser, mount, switch, sequence) so it's ready on page switch.
+// Skips fast-changing data: guider RMS, HFR/stars, current filter position.
+void nina_client_poll_background(const char *base_url, nina_client_t *data, nina_poll_state_t *state);
+
 // Legacy API - fetches all data every call (kept for compatibility)
 void nina_client_get_data(const char *base_url, nina_client_t *data);
 

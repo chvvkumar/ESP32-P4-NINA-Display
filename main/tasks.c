@@ -153,13 +153,8 @@ void data_update_task(void *arg) {
         // (WebSocket connections for all instances remain persistent)
         if (page_changed) {
             page_changed = false;
-            if (on_summary) {
-                /* Re-init poll state for all instances on summary page */
-                for (int i = 0; i < instance_count; i++)
-                    nina_poll_state_init(&poll_states[i]);
-            } else if (active_nina_idx >= 0 && active_nina_idx < instance_count) {
-                nina_poll_state_init(&poll_states[active_nina_idx]);
-            }
+            /* Background polling keeps poll_states warm for all instances,
+             * so no need to reinitialize — pre-fetched data is preserved. */
             last_rotate_ms = esp_timer_get_time() / 1000;  // Reset auto-rotate timer on any page change
             ESP_LOGI(TAG, "Page switched to %d%s%s", current_active,
                      on_sysinfo ? " (sysinfo)" : "", on_summary ? " (summary)" : "");
@@ -257,26 +252,26 @@ void data_update_task(void *arg) {
                     i + 1, on_summary ? "summary" : "active",
                     instances[i].connected, instances[i].status,
                     instances[i].target_name, instances[i].websocket_connected);
-
-                // Sync filters on first successful fetch
-                if (!filters_synced[i] && instances[i].filter_count > 0) {
-                    const char *names[MAX_FILTERS];
-                    for (int f = 0; f < instances[i].filter_count; f++) {
-                        names[f] = instances[i].filters[f].name;
-                    }
-                    app_config_sync_filters(names, instances[i].filter_count, i);
-                    filters_synced[i] = true;
-                }
             } else {
-                // Background instance: heartbeat-only polling (every 10s)
+                // Background instance: pre-fetch slow-changing data (every 10s)
                 if (now_ms - last_heartbeat_ms[i] >= HEARTBEAT_INTERVAL_MS) {
-                    nina_client_poll_heartbeat(url, &instances[i]);
+                    nina_client_poll_background(url, &instances[i], &poll_states[i]);
                     if (instances[i].connected)
                         instances[i].last_successful_poll_ms = now_ms;
                     last_heartbeat_ms[i] = now_ms;
                     ESP_LOGD(TAG, "Instance %d (background): connected=%d",
                         i + 1, instances[i].connected);
                 }
+            }
+
+            // Sync filters on first successful fetch (foreground or background)
+            if (!filters_synced[i] && instances[i].filter_count > 0) {
+                const char *names[MAX_FILTERS];
+                for (int f = 0; f < instances[i].filter_count; f++) {
+                    names[f] = instances[i].filters[f].name;
+                }
+                app_config_sync_filters(names, instances[i].filter_count, i);
+                filters_synced[i] = true;
             }
 
             // Check WebSocket reconnection with exponential backoff

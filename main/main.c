@@ -45,6 +45,14 @@ static void event_handler(void *arg, esp_event_base_t event_base,
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        /* STA lost — re-enable the config AP so the user can reconfigure */
+        wifi_mode_t mode;
+        esp_wifi_get_mode(&mode);
+        if (mode == WIFI_MODE_STA) {
+            ESP_LOGI(TAG, "STA disconnected, re-enabling AP");
+            esp_wifi_set_mode(WIFI_MODE_APSTA);
+        }
+
         int idx = wifi_retry_count < (int)WIFI_BACKOFF_STEPS
                   ? wifi_retry_count : (int)WIFI_BACKOFF_STEPS - 1;
         int delay = wifi_backoff_ms[idx];
@@ -55,6 +63,14 @@ static void event_handler(void *arg, esp_event_base_t event_base,
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
         wifi_retry_count = 0;
+
+        /* STA connected — disable the config AP to keep the air clean */
+        wifi_mode_t mode;
+        esp_wifi_get_mode(&mode);
+        if (mode == WIFI_MODE_APSTA) {
+            ESP_LOGI(TAG, "STA connected, disabling AP");
+            esp_wifi_set_mode(WIFI_MODE_STA);
+        }
 
         /* Apply timezone before SNTP so localtime_r works as soon as time is set */
         const char *tz = app_config_get()->tz_string;

@@ -406,6 +406,88 @@ void nina_client_poll_heartbeat(const char *base_url, nina_client_t *data) {
     ESP_LOGD(TAG, "Heartbeat: connected=%d", data->connected);
 }
 
+void nina_client_poll_background(const char *base_url, nina_client_t *data, nina_poll_state_t *state) {
+    // Enable HTTP client reuse for this poll cycle
+    s_poll_mode = true;
+    s_reuse_client = (esp_http_client_handle_t)state->http_client;
+
+    int64_t now_ms = esp_timer_get_time() / 1000;
+
+    // Reset only volatile fields (preserve persistent data between polls)
+    data->connected = false;
+    data->exposure_current = 0;
+    strcpy(data->status, "IDLE");
+    strcpy(data->time_remaining, "--");
+
+    // On very first call, set defaults for persistent fields
+    if (!state->static_fetched) {
+        strcpy(data->target_name, "No Target");
+        strcpy(data->meridian_flip, "--");
+        strcpy(data->profile_name, "NINA");
+        strcpy(data->current_filter, "--");
+        data->filter_count = 0;
+    }
+
+    // --- ALWAYS: Camera heartbeat ---
+    fetch_camera_info_robust(base_url, data);
+
+    if (!data->connected) {
+        state->static_fetched = false;
+        state->http_client = (void *)s_reuse_client;
+        s_reuse_client = NULL;
+        s_poll_mode = false;
+        return;
+    }
+
+    // --- ONCE: Static data (profile, available filters, initial image history, switch) ---
+    if (!state->static_fetched) {
+        fetch_profile_robust(base_url, data);
+        fetch_filter_robust_ex(base_url, data, true);
+        fetch_image_history_robust(base_url, data);
+        fetch_switch_info(base_url, data);
+
+        snprintf(state->cached_profile, sizeof(state->cached_profile), "%s", data->profile_name);
+        snprintf(state->cached_telescope, sizeof(state->cached_telescope), "%s", data->telescope_name);
+        memcpy(state->cached_filters, data->filters, sizeof(state->cached_filters));
+        state->cached_filter_count = data->filter_count;
+
+        state->static_fetched = true;
+        state->last_slow_poll_ms = now_ms;
+        state->last_sequence_poll_ms = now_ms;
+    } else {
+        snprintf(data->profile_name, sizeof(data->profile_name), "%s", state->cached_profile);
+        if (state->cached_telescope[0] != '\0') {
+            snprintf(data->telescope_name, sizeof(data->telescope_name), "%s", state->cached_telescope);
+        }
+        memcpy(data->filters, state->cached_filters, sizeof(data->filters));
+        data->filter_count = state->cached_filter_count;
+    }
+
+    // --- SKIP: guider RMS, repeated image history (HFR/stars), filter position ---
+
+    // --- SLOW: Focuser + Mount + Switch (every 30s) ---
+    if (now_ms - state->last_slow_poll_ms >= NINA_POLL_SLOW_MS) {
+        fetch_focuser_robust(base_url, data);
+        fetch_mount_robust(base_url, data);
+        fetch_switch_info(base_url, data);
+        state->last_slow_poll_ms = now_ms;
+    }
+
+    // --- SLOW: Sequence counts (every 10s) ---
+    if (now_ms - state->last_sequence_poll_ms >= NINA_POLL_SEQUENCE_MS) {
+        fetch_sequence_counts_optional(base_url, data);
+        state->last_sequence_poll_ms = now_ms;
+    }
+
+    // Save persistent HTTP client for next poll cycle
+    state->http_client = (void *)s_reuse_client;
+    s_reuse_client = NULL;
+    s_poll_mode = false;
+
+    ESP_LOGD(TAG, "Background poll: connected=%d, profile=%s, target=%s",
+             data->connected, data->profile_name, data->target_name);
+}
+
 #define MAX_IMAGE_SIZE (4 * 1024 * 1024)  // 4 MB cap for image downloads
 
 uint8_t *nina_client_fetch_prepared_image(const char *base_url, int width, int height, int quality, size_t *out_size) {

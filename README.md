@@ -1,10 +1,42 @@
 # ESP32-P4 NINA Display
 
-A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nighttime-imaging.eu/), built for the **Waveshare ESP32-P4-WIFI6-Touch-LCD-4B** (720×720). It polls the [ninaAPI Advanced plugin](https://github.com/christian-photo/ninaAPI) over HTTP and WebSocket to show your session state in real time—exposure arcs, guiding RMS, filter status, power draw, and more. Monitor up to three separate N.I.N.A. instances from a single device.
+A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nighttime-imaging.eu/), built for the **Waveshare ESP32-P4-WIFI6-Touch-LCD-4B** (720x720). It polls the [ninaAPI Advanced plugin](https://github.com/christian-photo/ninaAPI) over HTTP and WebSocket to show real-time session data — exposure arcs, guiding RMS, filter status, sequence progress, power draw, and more. Monitor up to three separate N.I.N.A. instances from a single device.
 
 <p align="center">
   <img src="images/pic1.jpg" alt="Device" width="1200">
 </p>
+
+## Table of Contents
+
+- [Screenshots](#screenshots)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [First-Time Setup](#first-time-setup)
+- [What's on the Display](#whats-on-the-display)
+- [Navigation](#navigation)
+- [Multi-Instance Support](#multi-instance-support)
+- [Themes & Filter Colors](#themes--filter-colors)
+- [MQTT / Home Assistant Integration](#mqtt--home-assistant-integration)
+- [Web API](#web-api)
+- [Building from Source](#building-from-source)
+
+---
+
+## Screenshots
+
+<table align="center">
+  <tr>
+    <td align="center"><img src="images/summary.jpg" alt="Summary Page" width="480"></td>
+    <td align="center"><img src="images/R.jpg" alt="Red Filter" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="images/Ha.jpg" alt="Hydrogen-Alpha Filter" width="480"></td>
+    <td align="center"><img src="images/Oiii.jpg" alt="OIII Filter" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><img src="images/systemstats.jpg" alt="System Stats" width="480"></td>
+  </tr>
+</table>
 
 ---
 
@@ -12,7 +44,7 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
 
 ### Hardware
 
-- **[Waveshare ESP32-P4-WIFI6-Touch-LCD-4B](https://www.waveshare.com/esp32-p4-wifi6-touch-lcd-4b.htm?sku=31416)** — this is the only tested board. The layout is tuned for its 720×720 display.
+- **[Waveshare ESP32-P4-WIFI6-Touch-LCD-4B](https://www.waveshare.com/esp32-p4-wifi6-touch-lcd-4b.htm?sku=31416)** — this is the only tested board. The layout is tuned for its 720x720 display.
 
 ### Software (on the N.I.N.A. PC)
 
@@ -27,15 +59,29 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
 
 ## Installation
 
-Download the latest release from the [Releases page](../../releases) and follow the release notes for flashing instructions. No build environment needed for a standard install—just a browser and the Waveshare flash tool or `esptool`.
+### Flashing a pre-built release
 
-> **Watch out:** If your board shows warnings on the serial console about an outdated `esp-hosted` co-processor firmware, erase the ESP32-C6 coprocessor and flash `network_adapter.bin` at address `0x0000` from the release page. The firmware in this project embeds an OTA update for the C6..
+Download the latest factory binary from the [Releases page](../../releases). Each release includes step-by-step flashing instructions.
+
+If you have the [GitHub CLI](https://cli.github.com/) installed, you can read the flashing instructions directly from your terminal:
+
+```bash
+# View the latest release notes (includes full flashing guide)
+gh release view --repo chvvkumar/ESP32-P4-NINA-Display
+
+# Download the factory binary
+gh release download --repo chvvkumar/ESP32-P4-NINA-Display --pattern "nina-display-factory.bin"
+```
+
+No build environment needed — just a Chromium-based browser and the [ESP Web Flasher](https://espressif.github.io/esptool-js/). Flash `nina-display-factory.bin` at address `0x0000`.
+
+> **Note:** If your board shows warnings about outdated `esp-hosted` co-processor firmware, flash `network_adapter.bin` (also included in the release) at address `0x0000` to the ESP32-C6 coprocessor.
 
 ---
 
 ## First-Time Setup
 
-The device always broadcasts a WiFi access point named **`AllSky-Config`** (no password). Connect to it from your phone or laptop, then open `http://192.168.4.1` in a browser to reach the config page.
+On first boot (or whenever WiFi is not connected), the device broadcasts a WiFi access point named **`AllSky-Config`** (password: `12345678`). Connect to it from your phone or laptop, then open `http://192.168.4.1` in a browser.
 
 <p align="center">
   <img src="images/Web-config.png" alt="Web config" width="1200">
@@ -48,92 +94,105 @@ Set at minimum:
 
 Hit Save. The device reconnects to your network and starts polling immediately.
 
-> **Pro-tip:** The config AP stays active even after the device joins your network. You can reconfigure at any time without rebooting or pressing anything.
+> Once the device connects to your network, the config AP is automatically disabled to reduce radio interference. If the WiFi connection drops, the AP reappears so you can reconfigure.
 
 ---
 
 ## What's on the Display
 
-Each NINA instance gets its own page. Swipe left/right or press the **BOOT button** to switch between them. A row of dots at the bottom shows which page you're on.
+### Summary Page
 
-**Per-page data:**
+The first page shows glassmorphic cards for all configured NINA instances at a glance. Each card displays the instance name, active filter, target name, progress bar, RMS, HFR, and time to meridian flip. Tap a card to jump to that instance's full dashboard.
+
+### Instance Pages
+
+Each NINA instance gets a dedicated 720x720 bento-box layout:
 
 | Section | Data shown |
 |---|---|
-| Header | Target name, telescope, profile name, WiFi signal bars, connection status dot |
-| Exposure arc | Animated arc sized to exposure progress; color follows the active filter |
-| Filter & timing | Active filter name, elapsed / remaining time |
-| Sequence | Container name, current step, loop counter |
-| Guiding | Total RMS, RA RMS, DEC RMS (arcseconds); color shifts at configurable thresholds |
-| Image stats | HFR, star count, saturated pixel count from the last frame |
+| Header | Target name, profile name, WiFi signal bars, connection status dot |
+| Exposure arc | Animated arc showing exposure progress; color follows the active filter |
+| Filter & timing | Active filter name, elapsed / remaining time, loop count |
+| Sequence | Container name, current step |
+| Guiding | Total RMS, RA RMS, Dec RMS (arcseconds); color shifts at configurable thresholds |
+| Image stats | HFR, star count |
 | Mount | Time to meridian flip |
-| Power | Input voltage (V), total current (A), total power (W), PWM percentages for dew heaters |
+| Power | Input voltage (V), current (A), power (W), PWM percentages for dew heaters |
 
-**Tap the target name / header area** to pull a full-screen JPEG preview of the last captured image. The ESP32-P4's hardware JPEG decoder handles this—it's fast. Tap anywhere to dismiss.
+**Tap the header area** to pull a full-screen JPEG preview of the last captured image. The ESP32-P4's hardware JPEG decoder handles this. Tap anywhere to dismiss.
 
-A small pulsing dot in the header indicates an API request is in flight. When it's solid and colored, you're connected. When it fades to grey, NINA isn't reachable.
+A pulsing dot in the header indicates an active API request. When solid and colored, you're connected. Grey means NINA isn't reachable. After 30 seconds without data, an amber "Last update" warning appears. After 2 minutes, the page dims to indicate stale data.
+
+### System Info Page
+
+Swipe past the last instance page to see: device IP, hostname, WiFi SSID/RSSI, heap and PSRAM usage, chip info, IDF version, uptime, and task count.
+
+---
+
+## Navigation
+
+- **Swipe** left/right to cycle through pages (wraps around)
+- **BOOT button** (GPIO 35) advances to the next page
+- **Auto-rotate** cycles pages on a configurable interval with fade, slide, or instant transitions
+- **Page indicator dots** at the bottom show NINA instance pages
+- **Active page override** in config to boot directly to a specific page
+
+Page order: Summary → NINA instances (1..N) → System Info.
 
 ---
 
 ## Multi-Instance Support
 
-Add a second or third API URL in the config page. Each one gets its own dashboard page. During a session, only the **active (visible) page** gets full 2-second polling. Background instances get a 10-second heartbeat to check connectivity without hammering the API.
+Add a second or third API URL in the config page. Only the **active (visible) page** gets full 2-second polling. Background instances get a 10-second heartbeat. When the summary page is active, all instances receive full polling.
 
-**Auto-rotate** lets the display cycle through instances automatically on a configurable interval, with optional skip for disconnected instances. Configure it from the web UI under Display Settings.
+Auto-rotate can be configured to skip disconnected instances and to include or exclude specific pages via a bitmask.
 
 ---
 
 ## Themes & Filter Colors
 
-14 built-in dark themes are available—select one from the web config. Each theme colors the static UI chrome; the dynamic elements (exposure arc, guider values) pick up their colors from per-filter settings.
+Six built-in dark themes: Bento Default, OLED Black, Red Night, Monochrome, All Black, and Midnight Industrial. Select one from the web config. Theme changes apply instantly without a reboot.
 
-Filter colors are configured per-instance as hex values. When NINA reports a filter name the device hasn't seen before, it adds it with a default color you can then customize. Colors also drive the RMS and HFR threshold indicators—set your acceptable limits, and values outside range shift from white to amber to red.
+A color brightness slider (0–100%) uniformly adjusts all theme colors for dark-site use.
+
+Filter colors are configured per-instance as hex values. When NINA reports a new filter name, it's automatically added to the config with a default color you can customize. RMS and HFR threshold colors are also configurable — set your acceptable limits, and values outside range shift from green to amber to red.
 
 ---
 
 ## MQTT / Home Assistant Integration
 
-Enable MQTT in the web config and point it at your broker. The device publishes discovery configs so N.I.N.A. session sensors appear automatically in Home Assistant. It also exposes display brightness as a controllable entity, so you can dim the screen from an HA automation during a dark-site session.
+Enable MQTT in the web config and point it at your broker. The device publishes Home Assistant auto-discovery configs for:
+
+- **Screen Brightness** — a dimmable light entity (0–100%) to control the display backlight
+- **Text Brightness** — a dimmable light entity (0–100%) to control theme color intensity
+- **Reboot** — a button entity to restart the device remotely
+
+This lets you dim the screen from an HA automation during a dark-site session or integrate the display into your observatory control workflows.
 
 ---
 
-## System Info Page
+## Web API
 
-Swipe past the last NINA page to reach a system info screen showing device IP address, hostname, WiFi SSID/RSSI, free heap, CPU frequency, and uptime. Useful for confirming the device is on the right network after first setup.
+The on-device HTTP server (port 80) exposes endpoints beyond the config UI:
 
----
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/config` | GET/POST | Read or write the full device configuration |
+| `/api/brightness` | POST | Set display brightness (0–100%) live |
+| `/api/color-brightness` | POST | Set color brightness (0–100%) live |
+| `/api/theme` | POST | Switch theme live |
+| `/api/screenshot` | GET | Capture a JPEG screenshot of the current display |
+| `/api/reboot` | POST | Reboot the device |
+| `/api/factory-reset` | POST | Erase config and restore defaults |
 
-## Screenshots
+### Screenshots
 
-Dashboard with various active filters:
+The `/api/screenshot` endpoint captures a live JPEG of the current display using the ESP32-P4's hardware JPEG encoder. Open it in a browser or fetch it with `curl`:
 
-<p align="center">
-  <img src="images/L.jpg" alt="Luminance Filter" width="1200">
-</p>
-
-<p align="center">
-  <img src="images/R.jpg" alt="Red Filter" width="1200">
-</p>
-
-<p align="center">
-  <img src="images/G.jpg" alt="Green Filter" width="1200">
-</p>
-
-<p align="center">
-  <img src="images/B.jpg" alt="Blue Filter" width="1200">
-</p>
-
-<p align="center">
-  <img src="images/Ha.jpg" alt="Hydrogen-Alpha Filter" width="1200">
-</p>
-
-<p align="center">
-  <img src="images/Oiii.jpg" alt="OIII Filter" width="1200">
-</p>
-
-<p align="center">
-  <img src="images/Sii.jpg" alt="SII Filter" width="1200">
-</p>
+```bash
+# Save a screenshot
+curl -o screenshot.jpg http://<device-ip>/api/screenshot
+```
 
 ---
 
@@ -148,37 +207,32 @@ This is a standard **ESP-IDF** project targeting IDF 5.5.x. You need the IDF too
 # Build
 idf.py build
 
-# Flash and open monitor
+# Flash and open serial monitor
 idf.py flash monitor
 
-# Wipe the build directory if you hit component cache issues
+# Wipe build directory if you hit stale artifact issues
 idf.py fullclean
 ```
 
-Dependencies are managed via **IDF Component Manager** (`idf_component.yml`). Don't edit files under `managed_components/` directly—run `idf.py update-dependencies` if you need to refresh them.
-
-> **Pro-tip:** If you get linker errors after pulling new commits, `idf.py fullclean && idf.py build` fixes most of them. Component updates sometimes leave stale artifacts that confuse the incremental build.
+Dependencies are managed via **IDF Component Manager** (`idf_component.yml`). Don't edit files under `managed_components/` directly — run `idf.py update-dependencies` to refresh them.
 
 ### Key source files
 
-| File | What it does |
+| File | Purpose |
 |---|---|
-| `main/main.c` | Boot sequence, WiFi init, task spawning, JPEG decode |
-| `main/tasks.c` | Polling loop, WebSocket lifecycle, thumbnail fetch |
-| `main/nina_client.h/.c` | NINA REST API + WebSocket client |
-| `main/app_config.h/.c` | NVS-backed config (WiFi, URLs, themes, thresholds) |
-| `main/web_server.h/.c` | On-device HTTP config UI |
-| `main/mqtt_ha.h/.c` | MQTT + Home Assistant discovery |
-| `main/ui/nina_dashboard.h/.c` | LVGL widget tree, swipe gestures, thumbnail overlay |
+| `main/main.c` | Boot sequence, WiFi init, task spawning |
+| `main/tasks.c` | Polling loop, WebSocket lifecycle, auto-rotate, thumbnail fetch |
+| `main/nina_client.h/.c` | Poll orchestration and tiered request scheduling |
+| `main/nina_api_fetchers.h/.c` | Individual REST endpoint fetchers (camera, guider, mount, etc.) |
+| `main/nina_sequence.h/.c` | Sequence JSON parsing (container, step, exposure counts) |
+| `main/nina_websocket.h/.c` | WebSocket client with concurrent multi-instance connections |
+| `main/app_config.h/.c` | NVS-backed config (WiFi, URLs, themes, thresholds, MQTT) |
+| `main/web_server.h/.c` | On-device HTTP config UI + JSON API |
+| `main/mqtt_ha.h/.c` | MQTT + Home Assistant auto-discovery |
+| `main/jpeg_utils.h/.c` | Hardware JPEG decoding via `esp_driver_jpeg` |
+| `main/ui/nina_dashboard.h/.c` | LVGL page management, swipe gestures, page indicator dots |
+| `main/ui/nina_dashboard_update.c` | Live data widget update logic |
+| `main/ui/nina_summary.h/.c` | Summary page with glassmorphic instance cards |
 | `main/ui/nina_sysinfo.h/.c` | System info page |
-| `main/ui/themes.h/.c` | 14 built-in dark themes |
-
-All LVGL calls require the display mutex:
-
-```c
-lvgl_port_lock(0);
-// ... LVGL API calls ...
-lvgl_port_unlock();
-```
-
-Miss this and you'll get intermittent crashes that are genuinely painful to track down.
+| `main/ui/nina_thumbnail.h/.c` | Full-screen thumbnail overlay |
+| `main/ui/themes.h/.c` | 6 built-in dark themes |
