@@ -27,3 +27,11 @@ void nina_websocket_stop(int index);
  * @brief Stop and destroy all active WebSocket connections.
  */
 void nina_websocket_stop_all(void);
+
+/**
+ * @brief Check if a WebSocket connection needs reconnection and attempt it.
+ * Uses exponential backoff: starts at 5 s, doubles on failure, caps at 60 s.
+ * Resets to 5 s on successful connection.
+ * Call this periodically from the data task loop.
+ */
+void nina_websocket_check_reconnect(int index, const char *base_url, nina_client_t *data);

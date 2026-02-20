@@ -16,7 +16,11 @@
       "Bash(done)",
       "Bash(dir:*)",
       "WebFetch(domain:desktop-bdt978m)",
-      "WebFetch(domain:desktop-bdt978m.lan)"
+      "WebFetch(domain:desktop-bdt978m.lan)",
+      "Bash(cmd.exe /c \"cd /d C:\\\\Users\\\\Kumar\\\\git\\\\ESP32-P4-NINA-Display && C:\\\\Espressif\\\\frameworks\\\\esp-idf-v5.5.2\\\\export.bat >nul 2>&1 && idf.py build\")",
+      "Bash(. $IDF_PATH/export.sh)",
+      "WebFetch(domain:docs.espressif.com)",
+      "WebFetch(domain:github.com)"
     ]
   }
 }

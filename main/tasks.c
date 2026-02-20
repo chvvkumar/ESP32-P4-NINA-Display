@@ -81,7 +81,7 @@ void input_task(void *arg) {
 
 void data_update_task(void *arg) {
     nina_client_t instances[MAX_NINA_INSTANCES] = {0};
-    nina_poll_state_t poll_states[MAX_NINA_INSTANCES];
+    nina_poll_state_t poll_states[MAX_NINA_INSTANCES] = {0};
     bool filters_synced[MAX_NINA_INSTANCES] = {false};
     int64_t last_heartbeat_ms[MAX_NINA_INSTANCES] = {0};
     int64_t last_rotate_ms = 0;
@@ -167,25 +167,51 @@ void data_update_task(void *arg) {
 
         int64_t now_ms = esp_timer_get_time() / 1000;
 
-        /* Auto-rotate logic — only rotates between NINA pages (indices 1..instance_count) */
-        if (!on_sysinfo && !on_summary && active_nina_idx >= 0) {
+        /* Auto-rotate logic — rotates between pages selected by auto_rotate_pages bitmask.
+         *
+         * Page bitmask layout:
+         *   bit 0  = Summary page (page index 0)
+         *   bit 1  = NINA instance 1 (page index 1)
+         *   bit 2  = NINA instance 2 (page index 2)
+         *   bit 3  = NINA instance 3 (page index 3)
+         *   bit 4  = System Info page (page index instance_count + 1)
+         */
+        {
             app_config_t *r_cfg = app_config_get();
-            if (r_cfg->auto_rotate_interval_s > 0 && instance_count > 1) {
-                if (last_rotate_ms == 0) last_rotate_ms = now_ms;  /* Init on first iteration */
+            if (r_cfg->auto_rotate_enabled && r_cfg->auto_rotate_interval_s > 0) {
+                if (last_rotate_ms == 0) last_rotate_ms = now_ms;
                 if (now_ms - last_rotate_ms >= (int64_t)r_cfg->auto_rotate_interval_s * 1000) {
-                    /* Cycle through NINA instance indices 0..instance_count-1 */
-                    int next_nina = (active_nina_idx + 1) % instance_count;
-                    if (r_cfg->auto_rotate_skip_disconnected) {
-                        int tried = 0;
-                        while (tried < instance_count) {
-                            if (instances[next_nina].connected) break;
-                            next_nina = (next_nina + 1) % instance_count;
-                            tried++;
+                    uint8_t page_mask = r_cfg->auto_rotate_pages;
+                    int total = nina_dashboard_get_total_page_count();
+
+                    /* Find next page in rotation by stepping through candidates */
+                    int next_page = current_active;
+                    for (int step = 1; step < total; step++) {
+                        int candidate = (current_active + step) % total;
+
+                        /* Check if this candidate is in the rotation bitmask */
+                        bool in_mask = false;
+                        if (candidate == 0)
+                            in_mask = (page_mask & 0x01) != 0;             /* Summary */
+                        else if (candidate >= 1 && candidate <= instance_count)
+                            in_mask = (page_mask & (1 << candidate)) != 0; /* NINA page */
+                        else if (candidate == instance_count + 1)
+                            in_mask = (page_mask & 0x10) != 0;             /* Sysinfo */
+
+                        if (!in_mask) continue;
+
+                        /* Skip disconnected NINA instances if configured */
+                        if (r_cfg->auto_rotate_skip_disconnected
+                            && candidate >= 1 && candidate <= instance_count) {
+                            int nina_idx = candidate - 1;
+                            if (!instances[nina_idx].connected) continue;
                         }
-                        if (!instances[next_nina].connected) next_nina = active_nina_idx;
+
+                        next_page = candidate;
+                        break;
                     }
-                    if (next_nina != active_nina_idx) {
-                        int next_page = next_nina + 1;  /* Convert to page index */
+
+                    if (next_page != current_active) {
                         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                             nina_dashboard_show_page_animated(next_page, instance_count, r_cfg->auto_rotate_effect);
                             bsp_display_unlock();
@@ -193,7 +219,7 @@ void data_update_task(void *arg) {
                             ESP_LOGW(TAG, "Display lock timeout (auto-rotate)");
                         }
                         page_changed = true;
-                        ESP_LOGI(TAG, "Auto-rotate: switched to page %d (instance %d)", next_page, next_nina);
+                        ESP_LOGI(TAG, "Auto-rotate: switched to page %d", next_page);
                     }
                     last_rotate_ms = now_ms;
                 }
@@ -225,6 +251,8 @@ void data_update_task(void *arg) {
             /* Full poll when: on summary page (all instances) or on this instance's NINA page */
             if (on_summary || i == active_nina_idx) {
                 nina_client_poll(url, &instances[i], &poll_states[i]);
+                if (instances[i].connected)
+                    instances[i].last_successful_poll_ms = now_ms;
                 ESP_LOGI(TAG, "Instance %d (%s): connected=%d, status=%s, target=%s, ws=%d",
                     i + 1, on_summary ? "summary" : "active",
                     instances[i].connected, instances[i].status,
@@ -243,11 +271,16 @@ void data_update_task(void *arg) {
                 // Background instance: heartbeat-only polling (every 10s)
                 if (now_ms - last_heartbeat_ms[i] >= HEARTBEAT_INTERVAL_MS) {
                     nina_client_poll_heartbeat(url, &instances[i]);
+                    if (instances[i].connected)
+                        instances[i].last_successful_poll_ms = now_ms;
                     last_heartbeat_ms[i] = now_ms;
                     ESP_LOGD(TAG, "Instance %d (background): connected=%d",
                         i + 1, instances[i].connected);
                 }
             }
+
+            // Check WebSocket reconnection with exponential backoff
+            nina_websocket_check_reconnect(i, url, &instances[i]);
         }
 
         /* Update summary page when visible — lock each instance while reading */

@@ -87,9 +87,33 @@
 
     <div class="tile area-net">
       <h3>Connectivity</h3>
-      <div class="group"><label>SSID</label><input type="text" id="ssid"></div>
-      <div class="group"><label>Password</label><input type="password" id="pass"></div>
+      <div class="group"><label>WiFi SSID</label><input type="text" id="ssid"></div>
+      <div class="group"><label>WiFi Password</label><input type="password" id="pass" placeholder="Enter new password to change"><p class="hint">Stored in WiFi hardware. Leave blank to keep current.</p></div>
       <div class="group"><label>NTP Server</label><input type="text" id="ntp"></div>
+      <div class="group"><label>Timezone</label><select id="timezone">
+        <option value="">UTC (default)</option>
+        <option value="GMT0">GMT</option>
+        <option value="GMT0BST,M3.5.0/1,M10.5.0">UK (GMT/BST)</option>
+        <option value="CET-1CEST,M3.5.0,M10.5.0/3">Central Europe (CET/CEST)</option>
+        <option value="EET-2EEST,M3.5.0/3,M10.5.0/4">Eastern Europe (EET/EEST)</option>
+        <option value="EST5EDT,M3.2.0,M11.1.0">US Eastern (EST/EDT)</option>
+        <option value="CST6CDT,M3.2.0,M11.1.0">US Central (CST/CDT)</option>
+        <option value="MST7MDT,M3.2.0,M11.1.0">US Mountain (MST/MDT)</option>
+        <option value="MST7">US Arizona (MST, no DST)</option>
+        <option value="PST8PDT,M3.2.0,M11.1.0">US Pacific (PST/PDT)</option>
+        <option value="AKST9AKDT,M3.2.0,M11.1.0">US Alaska (AKST/AKDT)</option>
+        <option value="HST10">US Hawaii (HST, no DST)</option>
+        <option value="AEST-10AEDT,M10.1.0,M4.1.0/3">Australia Eastern (AEST/AEDT)</option>
+        <option value="ACST-9:30ACDT,M10.1.0,M4.1.0/3">Australia Central (ACST/ACDT)</option>
+        <option value="AWST-8">Australia Western (AWST, no DST)</option>
+        <option value="NZST-12NZDT,M9.5.0,M4.1.0/3">New Zealand (NZST/NZDT)</option>
+        <option value="JST-9">Japan (JST)</option>
+        <option value="CST-8">China (CST)</option>
+        <option value="IST-5:30">India (IST)</option>
+        <option value="<-03>3">Argentina (ART)</option>
+        <option value="<-03>3<-02>,M10.3.0/0,M2.3.0/0">Brazil (BRT/BRST)</option>
+        <option value="SAST-2">South Africa (SAST)</option>
+      </select></div>
       <div style="border-top:1px solid var(--border);margin:16px 0 14px"></div>
       <div class="group" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">MQTT / Home Assistant</label><label class="toggle"><input type="checkbox" id="mqtt_enabled"><span class="toggle-slider"></span></label></div>
       <div class="group"><label>Broker Host</label><input type="text" id="mqtt_broker" placeholder="192.168.1.250"></div>
@@ -97,7 +121,7 @@
       <div class="group"><label>Username</label><input type="text" id="mqtt_user"></div>
       <div class="group"><label>Password</label><input type="password" id="mqtt_pass"></div>
       <div class="group"><label>Topic Prefix</label><input type="text" id="mqtt_prefix" placeholder="ninadisplay"></div>
-      <p class="hint">Reboot required after changing WiFi, NTP, or MQTT settings.</p>
+      <p class="hint">Reboot required after changing WiFi, NTP, timezone, or MQTT settings.</p>
     </div>
 
     <div class="tile area-api">
@@ -123,10 +147,21 @@
       <div class="group"><label>Backlight</label><div class="slider-wrapper"><input type="range" id="brightness" min="0" max="100" value="50" oninput="setBrightness(this.value)"><span id="bright_val" style="width:35px;font-size:0.8rem">50%</span></div></div>
       <div class="group"><label>Text Brightness</label><div class="slider-wrapper"><input type="range" id="color_brightness" min="0" max="100" value="100" oninput="setColorBrightness(this.value)"><span id="cbright_val" style="width:35px;font-size:0.8rem">100%</span></div></div>
       <div style="border-top:1px solid var(--border);margin:16px 0 14px"></div>
-      <div class="group"><label>Active Page</label><select id="active_page" onchange="setPage(this.value)"><option value="-1">Auto (no override)</option><option value="0">Page 1</option><option value="1">Page 2</option><option value="2">Page 3</option></select><p class="hint">Switches immediately and persists through reboots. Set to Auto when using rotation.</p></div>
-      <div class="group"><label>Auto-Rotate Interval (seconds, 0 = off)</label><input type="number" id="auto_rotate_interval" min="0" max="3600" value="0"><p class="hint">Pages rotate every N seconds. Minimum effective interval is ~4 s.</p></div>
-      <div class="group"><label>Transition Effect</label><select id="auto_rotate_effect"><option value="0">Instant</option><option value="1">Fade</option></select></div>
+      <div class="group"><label>Active Page</label><select id="active_page" onchange="setPage(this.value)"><option value="-1">Auto (no override)</option><option value="0">Summary</option><option value="1">NINA 1</option><option value="2">NINA 2</option><option value="3">NINA 3</option><option value="4">System Info</option></select><p class="hint">Switches immediately and persists through reboots. Set to Auto when using rotation.</p></div>
+      <div class="group" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">Auto-Rotate Pages</label><label class="toggle"><input type="checkbox" id="auto_rotate_enabled"><span class="toggle-slider"></span></label></div>
+      <div class="group"><label>Rotation Interval (seconds)</label><input type="number" id="auto_rotate_interval" min="4" max="3600" value="30"><p class="hint">Pages rotate every N seconds. Minimum effective interval is ~4 s.</p></div>
+      <div class="group"><label>Transition Effect</label><select id="auto_rotate_effect"><option value="0">Instant</option><option value="1">Fade</option><option value="2">Slide Left</option><option value="3">Slide Right</option></select></div>
       <div class="group" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">Skip Disconnected Pages</label><label class="toggle"><input type="checkbox" id="auto_rotate_skip"><span class="toggle-slider"></span></label></div>
+      <div class="group"><label>Pages in Rotation</label>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:6px">
+          <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:0.85rem;cursor:pointer"><input type="checkbox" id="arp_summary" style="width:auto"> Summary</label>
+          <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:0.85rem;cursor:pointer"><input type="checkbox" id="arp_nina1" style="width:auto"> <span id="arp_lbl1">NINA 1</span></label>
+          <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:0.85rem;cursor:pointer"><input type="checkbox" id="arp_nina2" style="width:auto"> <span id="arp_lbl2">NINA 2</span></label>
+          <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:0.85rem;cursor:pointer"><input type="checkbox" id="arp_nina3" style="width:auto"> <span id="arp_lbl3">NINA 3</span></label>
+          <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:0.85rem;cursor:pointer"><input type="checkbox" id="arp_sysinfo" style="width:auto"> System Info</label>
+        </div>
+        <p class="hint">Select which pages are included in automatic rotation.</p>
+      </div>
     </div>
 
     <div class="tile area-thresholds">
@@ -196,23 +231,26 @@
 let filterColorsArr=[{},{},{}];
 function renderFilterColors(i){const c=document.getElementById('filters_'+i);if(!c)return;c.innerHTML='';const obj=filterColorsArr[i];const fs=Object.keys(obj).sort();if(fs.length===0){c.innerHTML='<p style="color:var(--text-dim);font-style:italic;font-size:0.7rem">No filters</p>';return;}fs.slice(0,8).forEach(f=>{const w=document.createElement('div');w.className='filter-item';w.innerHTML=`<label>${f}</label><input type='color' class='color-dot' value='${obj[f]}' onchange='updateFilterColor(${i},"${f}",this.value)'>`;c.appendChild(w);});}
 function updateFilterColor(i,n,v){filterColorsArr[i][n]=v;}
-function updateNodeLabels(){['url1','url2','url3'].forEach((id,i)=>{const v=document.getElementById(id).value.trim();document.getElementById('tnode'+i).innerText=v||('Node '+(i+1));});updatePageSelectOptions();}
-function updatePageSelectOptions(){const sel=document.getElementById('active_page');if(!sel)return;['url1','url2','url3'].forEach((id,i)=>{const opt=sel.options[i+1];if(!opt)return;const v=document.getElementById(id).value.trim();opt.text=v?('Page '+(i+1)+': '+v):('Page '+(i+1));opt.disabled=!v;});}
+function updateNodeLabels(){['url1','url2','url3'].forEach((id,i)=>{const v=document.getElementById(id).value.trim();document.getElementById('tnode'+i).innerText=v||('Node '+(i+1));const lbl=document.getElementById('arp_lbl'+(i+1));if(lbl)lbl.innerText=v?('NINA '+(i+1)+': '+v):('NINA '+(i+1));});updatePageSelectOptions();}
+function updatePageSelectOptions(){const sel=document.getElementById('active_page');if(!sel)return;['url1','url2','url3'].forEach((id,i)=>{const opt=sel.options[i+2];if(!opt)return;const v=document.getElementById(id).value.trim();opt.text=v?('NINA '+(i+1)+': '+v):('NINA '+(i+1));opt.disabled=!v;});}
 function setPage(v){fetch('/api/page',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({page:parseInt(v)})});}
 function setTheme(v){fetch('/api/theme',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({theme_index:parseInt(v)})});}
 let brightTimer=null;function setBrightness(v){document.getElementById('bright_val').innerText=v+'%';clearTimeout(brightTimer);brightTimer=setTimeout(()=>{fetch('/api/brightness',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({brightness:parseInt(v)})});},150);}
 let cbrightTimer=null;function setColorBrightness(v){document.getElementById('cbright_val').innerText=v+'%';clearTimeout(cbrightTimer);cbrightTimer=setTimeout(()=>{fetch('/api/color-brightness',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({color_brightness:parseInt(v)})});},150);}
 function getRmsObj(i){return{good_max:parseFloat(document.getElementById('rms_good_max_'+i).value)||0.5,ok_max:parseFloat(document.getElementById('rms_ok_max_'+i).value)||1.0,good_color:document.getElementById('rms_good_color_'+i).value,ok_color:document.getElementById('rms_ok_color_'+i).value,bad_color:document.getElementById('rms_bad_color_'+i).value};}
 function getHfrObj(i){return{good_max:parseFloat(document.getElementById('hfr_good_max_'+i).value)||2.0,ok_max:parseFloat(document.getElementById('hfr_ok_max_'+i).value)||3.5,good_color:document.getElementById('hfr_good_color_'+i).value,ok_color:document.getElementById('hfr_ok_color_'+i).value,bad_color:document.getElementById('hfr_bad_color_'+i).value};}
-function getConfigData(){const h1=document.getElementById('url1').value.trim();const h2=document.getElementById('url2').value.trim();const h3=document.getElementById('url3').value.trim();const u1=h1?'http://'+h1+':1888/v2/api/':'';const u2=h2?'http://'+h2+':1888/v2/api/':'';const u3=h3?'http://'+h3+':1888/v2/api/':'';const mb=document.getElementById('mqtt_broker').value.trim();const mu=mb?'mqtt://'+mb:'';return{ssid:document.getElementById('ssid').value,pass:document.getElementById('pass').value,url1:u1,url2:u2,url3:u3,ntp:document.getElementById('ntp').value,theme_index:parseInt(document.getElementById('theme_select').value),brightness:parseInt(document.getElementById('brightness').value),color_brightness:parseInt(document.getElementById('color_brightness').value),filter_colors_1:JSON.stringify(filterColorsArr[0]),filter_colors_2:JSON.stringify(filterColorsArr[1]),filter_colors_3:JSON.stringify(filterColorsArr[2]),rms_thresholds_1:JSON.stringify(getRmsObj(0)),rms_thresholds_2:JSON.stringify(getRmsObj(1)),rms_thresholds_3:JSON.stringify(getRmsObj(2)),hfr_thresholds_1:JSON.stringify(getHfrObj(0)),hfr_thresholds_2:JSON.stringify(getHfrObj(1)),hfr_thresholds_3:JSON.stringify(getHfrObj(2)),mqtt_enabled:document.getElementById('mqtt_enabled').checked,mqtt_broker_url:mu,mqtt_port:parseInt(document.getElementById('mqtt_port').value)||1883,mqtt_username:document.getElementById('mqtt_user').value,mqtt_password:document.getElementById('mqtt_pass').value,mqtt_topic_prefix:document.getElementById('mqtt_prefix').value||'ninadisplay',active_page_override:parseInt(document.getElementById('active_page').value),auto_rotate_interval_s:parseInt(document.getElementById('auto_rotate_interval').value)||0,auto_rotate_effect:parseInt(document.getElementById('auto_rotate_effect').value),auto_rotate_skip_disconnected:document.getElementById('auto_rotate_skip').checked};}
+function getRotatePages(){let m=0;if(document.getElementById('arp_summary').checked)m|=0x01;if(document.getElementById('arp_nina1').checked)m|=0x02;if(document.getElementById('arp_nina2').checked)m|=0x04;if(document.getElementById('arp_nina3').checked)m|=0x08;if(document.getElementById('arp_sysinfo').checked)m|=0x10;return m;}
+function setRotatePages(m){document.getElementById('arp_summary').checked=!!(m&0x01);document.getElementById('arp_nina1').checked=!!(m&0x02);document.getElementById('arp_nina2').checked=!!(m&0x04);document.getElementById('arp_nina3').checked=!!(m&0x08);document.getElementById('arp_sysinfo').checked=!!(m&0x10);}
+function getConfigData(){const h1=document.getElementById('url1').value.trim();const h2=document.getElementById('url2').value.trim();const h3=document.getElementById('url3').value.trim();const u1=h1?'http://'+h1+':1888/v2/api/':'';const u2=h2?'http://'+h2+':1888/v2/api/':'';const u3=h3?'http://'+h3+':1888/v2/api/':'';const mb=document.getElementById('mqtt_broker').value.trim();const mu=mb?'mqtt://'+mb:'';const d={url1:u1,url2:u2,url3:u3,ntp:document.getElementById('ntp').value,timezone:document.getElementById('timezone').value,theme_index:parseInt(document.getElementById('theme_select').value),brightness:parseInt(document.getElementById('brightness').value),color_brightness:parseInt(document.getElementById('color_brightness').value),filter_colors_1:JSON.stringify(filterColorsArr[0]),filter_colors_2:JSON.stringify(filterColorsArr[1]),filter_colors_3:JSON.stringify(filterColorsArr[2]),rms_thresholds_1:JSON.stringify(getRmsObj(0)),rms_thresholds_2:JSON.stringify(getRmsObj(1)),rms_thresholds_3:JSON.stringify(getRmsObj(2)),hfr_thresholds_1:JSON.stringify(getHfrObj(0)),hfr_thresholds_2:JSON.stringify(getHfrObj(1)),hfr_thresholds_3:JSON.stringify(getHfrObj(2)),mqtt_enabled:document.getElementById('mqtt_enabled').checked,mqtt_broker_url:mu,mqtt_port:parseInt(document.getElementById('mqtt_port').value)||1883,mqtt_username:document.getElementById('mqtt_user').value,mqtt_password:document.getElementById('mqtt_pass').value,mqtt_topic_prefix:document.getElementById('mqtt_prefix').value||'ninadisplay',active_page_override:parseInt(document.getElementById('active_page').value),auto_rotate_enabled:document.getElementById('auto_rotate_enabled').checked,auto_rotate_interval_s:parseInt(document.getElementById('auto_rotate_interval').value)||30,auto_rotate_effect:parseInt(document.getElementById('auto_rotate_effect').value),auto_rotate_skip_disconnected:document.getElementById('auto_rotate_skip').checked,auto_rotate_pages:getRotatePages()};const ss=document.getElementById('ssid').value;const pp=document.getElementById('pass').value;if(ss)d.ssid=ss;if(pp)d.pass=pp;return d;}
 function loadThresholds(d,i,rkey,hkey){try{const r=JSON.parse(d[rkey]||'{}');document.getElementById('rms_good_max_'+i).value=r.good_max||0.5;document.getElementById('rms_ok_max_'+i).value=r.ok_max||1.0;document.getElementById('rms_good_color_'+i).value=r.good_color||'#10b981';document.getElementById('rms_ok_color_'+i).value=r.ok_color||'#eab308';document.getElementById('rms_bad_color_'+i).value=r.bad_color||'#ef4444';}catch(e){}try{const h=JSON.parse(d[hkey]||'{}');document.getElementById('hfr_good_max_'+i).value=h.good_max||2.0;document.getElementById('hfr_ok_max_'+i).value=h.ok_max||3.5;document.getElementById('hfr_good_color_'+i).value=h.good_color||'#10b981';document.getElementById('hfr_ok_color_'+i).value=h.ok_color||'#eab308';document.getElementById('hfr_bad_color_'+i).value=h.bad_color||'#ef4444';}catch(e){}}
 function save(){const b=document.getElementById('saveBtn');const ot=b.innerText;b.innerText='SYNCING...';b.disabled=true;fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(getConfigData())}).then(r=>{if(r.ok){b.innerText='SUCCESS';setTimeout(()=>{b.innerText=ot;b.disabled=false;},2000);}else{b.innerText='ERROR';setTimeout(()=>{b.innerText=ot;b.disabled=false;},2000);}}).catch(()=>{b.innerText='FAIL';b.disabled=false;});}
-function saveAndReboot(){if(!confirm('Apply changes and reboot now?'))return;fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(getConfigData())}).then(r=>{if(r.ok)fetch('/api/reboot',{method:'POST'});});}
+function saveAndReboot(){if(!confirm('Apply changes and reboot now?'))return;fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(getConfigData())}).then(r=>{if(r.ok){fetch('/api/reboot',{method:'POST'});}else{r.json().then(j=>alert('Save failed: '+(j.error||r.statusText))).catch(()=>alert('Save failed: '+r.statusText));}}).catch(()=>alert('Save failed: network error'));}
 function factoryReset(){if(confirm('Wipe all settings?')&&confirm('Confirm Reset?'))fetch('/api/factory-reset',{method:'POST'});}
 fetch('/api/config').then(r=>r.json()).then(d=>{
   document.getElementById('ssid').value=d.ssid||'';
-  document.getElementById('pass').value=d.pass||'';
+  /* Password is never returned from the API — leave blank */
   document.getElementById('ntp').value=d.ntp||'';
+  document.getElementById('timezone').value=d.timezone||'';
   const extractHost=u=>{if(!u)return '';const m=u.match(/^https?:\/\/([^:/]+)/);return m?m[1]:u;};
   document.getElementById('url1').value=extractHost(d.url1);
   document.getElementById('url2').value=extractHost(d.url2);
@@ -236,9 +274,11 @@ fetch('/api/config').then(r=>r.json()).then(d=>{
   document.getElementById('mqtt_pass').value=d.mqtt_password||'';
   document.getElementById('mqtt_prefix').value=d.mqtt_topic_prefix||'ninadisplay';
   document.getElementById('active_page').value=(d.active_page_override!=null)?d.active_page_override:-1;
-  document.getElementById('auto_rotate_interval').value=d.auto_rotate_interval_s||0;
+  document.getElementById('auto_rotate_enabled').checked=!!d.auto_rotate_enabled;
+  document.getElementById('auto_rotate_interval').value=d.auto_rotate_interval_s||30;
   document.getElementById('auto_rotate_effect').value=d.auto_rotate_effect||0;
   document.getElementById('auto_rotate_skip').checked=d.auto_rotate_skip_disconnected!==false;
+  setRotatePages(d.auto_rotate_pages!=null?d.auto_rotate_pages:0x0E);
   updatePageSelectOptions();
 });
 </script>

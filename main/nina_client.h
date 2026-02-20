@@ -85,6 +85,10 @@ typedef struct {
     // Consumer should clear after handling
     volatile bool new_image_available;
 
+    // Timestamp (ms from esp_timer_get_time/1000) of last successful poll.
+    // Used by the UI to display a stale-data indicator.  0 = never polled.
+    int64_t last_successful_poll_ms;
+
     // Mutex for synchronizing access between WebSocket event handler and data task.
     // Must be created with nina_client_init_mutex() before use.
     SemaphoreHandle_t mutex;
@@ -116,6 +120,9 @@ typedef struct {
     char cached_telescope[64];
     nina_filter_t cached_filters[MAX_FILTERS];
     int cached_filter_count;
+
+    // Persistent HTTP client handle for keep-alive reuse (esp_http_client_handle_t)
+    void *http_client;
 } nina_poll_state_t;
 
 // Initialize polling state (call once before polling loop)

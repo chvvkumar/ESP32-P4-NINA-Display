@@ -11,13 +11,22 @@
 #include "nina_websocket.h"
 #include "esp_websocket_client.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "cJSON.h"
 #include <string.h>
 
 static const char *TAG = "nina_ws";
 
+#define WS_BACKOFF_INITIAL_MS  5000
+#define WS_BACKOFF_MAX_MS      60000
+
 static esp_websocket_client_handle_t ws_clients[MAX_NINA_INSTANCES];
 static nina_client_t *ws_client_data[MAX_NINA_INSTANCES];
+
+// Exponential backoff state per instance
+static int ws_backoff_ms[MAX_NINA_INSTANCES];
+static int64_t ws_disconnect_time_ms[MAX_NINA_INSTANCES];
+static bool ws_needs_reconnect[MAX_NINA_INSTANCES];
 
 /**
  * @brief Process incoming WebSocket JSON event from NINA
@@ -162,6 +171,8 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base,
     switch (event_id) {
     case WEBSOCKET_EVENT_CONNECTED:
         ESP_LOGI(TAG, "WS[%d]: Connected to NINA", index);
+        ws_backoff_ms[index] = WS_BACKOFF_INITIAL_MS;
+        ws_needs_reconnect[index] = false;
         if (ws_client_data[index]) {
             if (nina_client_lock(ws_client_data[index], 50)) {
                 ws_client_data[index]->websocket_connected = true;
@@ -172,6 +183,8 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base,
 
     case WEBSOCKET_EVENT_DISCONNECTED:
         ESP_LOGW(TAG, "WS[%d]: Disconnected from NINA", index);
+        ws_disconnect_time_ms[index] = esp_timer_get_time() / 1000;
+        ws_needs_reconnect[index] = true;
         if (ws_client_data[index]) {
             if (nina_client_lock(ws_client_data[index], 50)) {
                 ws_client_data[index]->websocket_connected = false;
@@ -237,10 +250,12 @@ void nina_websocket_start(int index, const char *base_url, nina_client_t *data) 
     ESP_LOGI(TAG, "WS[%d]: Connecting to %s", index, ws_url);
 
     ws_client_data[index] = data;
+    ws_backoff_ms[index] = WS_BACKOFF_INITIAL_MS;
+    ws_needs_reconnect[index] = false;
 
     esp_websocket_client_config_t ws_cfg = {
         .uri = ws_url,
-        .reconnect_timeout_ms = 5000,
+        .reconnect_timeout_ms = 0,      // Disable auto-reconnect; managed externally with backoff
         .network_timeout_ms = 10000,
     };
 
@@ -274,4 +289,22 @@ void nina_websocket_stop_all(void) {
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         nina_websocket_stop(i);
     }
+}
+
+void nina_websocket_check_reconnect(int index, const char *base_url, nina_client_t *data) {
+    if (index < 0 || index >= MAX_NINA_INSTANCES) return;
+    if (!ws_needs_reconnect[index]) return;
+
+    int64_t now_ms = esp_timer_get_time() / 1000;
+    if (now_ms - ws_disconnect_time_ms[index] < ws_backoff_ms[index]) return;
+
+    ESP_LOGD(TAG, "WS[%d]: Attempting reconnect (backoff: %d ms)", index, ws_backoff_ms[index]);
+
+    // Double backoff for next failure, cap at 60 s
+    ws_backoff_ms[index] = ws_backoff_ms[index] * 2;
+    if (ws_backoff_ms[index] > WS_BACKOFF_MAX_MS)
+        ws_backoff_ms[index] = WS_BACKOFF_MAX_MS;
+
+    nina_websocket_stop(index);
+    nina_websocket_start(index, base_url, data);
 }

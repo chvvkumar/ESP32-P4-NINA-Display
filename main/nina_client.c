@@ -12,6 +12,8 @@
 #include "nina_api_fetchers.h"
 #include "nina_sequence.h"
 #include "nina_websocket.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -21,6 +23,17 @@
 #include <time.h>
 
 static const char *TAG = "nina_client";
+
+// =============================================================================
+// HTTP Client Reuse State (file-scoped, single-threaded access from data task)
+// =============================================================================
+
+static bool s_poll_mode = false;
+static esp_http_client_handle_t s_reuse_client = NULL;
+
+// Retry delays between attempts (ms). Index 0 = delay before 2nd attempt, etc.
+static const int http_retry_delays_ms[] = {1000, 2000};
+#define HTTP_MAX_ATTEMPTS  3
 
 // =============================================================================
 // Mutex Helpers
@@ -117,52 +130,94 @@ time_t parse_iso8601(const char *str) {
 }
 
 cJSON *http_get_json(const char *url) {
-    esp_http_client_config_t config = {
-        .url = url,
-        .timeout_ms = 5000,
-    };
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (!client) return NULL;
+    for (int attempt = 0; attempt < HTTP_MAX_ATTEMPTS; attempt++) {
+        if (attempt > 0) {
+            ESP_LOGD(TAG, "HTTP retry %d/%d for %s (delay %d ms)",
+                     attempt + 1, HTTP_MAX_ATTEMPTS, url,
+                     http_retry_delays_ms[attempt - 1]);
+            vTaskDelay(pdMS_TO_TICKS(http_retry_delays_ms[attempt - 1]));
+        }
 
-    esp_err_t err = esp_http_client_open(client, 0);
-    if (err != ESP_OK) {
-        esp_http_client_cleanup(client);
-        return NULL;
+        esp_http_client_handle_t client;
+        bool reusing = (s_poll_mode && s_reuse_client != NULL);
+
+        if (reusing) {
+            client = s_reuse_client;
+            esp_http_client_set_url(client, url);
+        } else {
+            esp_http_client_config_t cfg = {
+                .url = url,
+                .timeout_ms = 5000,
+                .keep_alive_enable = s_poll_mode,
+            };
+            client = esp_http_client_init(&cfg);
+            if (!client) continue;
+        }
+
+        esp_err_t err = esp_http_client_open(client, 0);
+        if (err != ESP_OK) {
+            if (reusing) {
+                esp_http_client_cleanup(client);
+                s_reuse_client = NULL;
+            } else {
+                esp_http_client_cleanup(client);
+            }
+            continue;  // Transport error — retryable
+        }
+
+        int content_length = esp_http_client_fetch_headers(client);
+        if (content_length < 0) {
+            if (reusing) {
+                esp_http_client_cleanup(client);
+                s_reuse_client = NULL;
+            } else {
+                esp_http_client_cleanup(client);
+            }
+            continue;  // Transport error — retryable
+        }
+
+        int status = esp_http_client_get_status_code(client);
+        if (status < 200 || status >= 300) {
+            ESP_LOGW(TAG, "HTTP %d for %s", status, url);
+            if (reusing) {
+                esp_http_client_close(client);
+            } else {
+                esp_http_client_cleanup(client);
+            }
+            if (status >= 500) continue;  // 5xx — retryable
+            return NULL;  // 4xx — not retryable
+        }
+
+        char *buffer = malloc(content_length + 1);
+        if (!buffer) {
+            if (reusing) esp_http_client_close(client);
+            else esp_http_client_cleanup(client);
+            return NULL;  // OOM — not retryable
+        }
+
+        int total_read_len = 0, read_len;
+        while (total_read_len < content_length) {
+            read_len = esp_http_client_read(client, buffer + total_read_len,
+                                            content_length - total_read_len);
+            if (read_len <= 0) break;
+            total_read_len += read_len;
+        }
+        buffer[total_read_len] = '\0';
+
+        // Keep connection alive for reuse in poll mode; cleanup otherwise
+        if (s_poll_mode) {
+            esp_http_client_close(client);
+            s_reuse_client = client;
+        } else {
+            esp_http_client_cleanup(client);
+        }
+
+        cJSON *json = cJSON_Parse(buffer);
+        free(buffer);
+        return json;
     }
 
-    int content_length = esp_http_client_fetch_headers(client);
-    if (content_length < 0) {
-        esp_http_client_cleanup(client);
-        return NULL;
-    }
-
-    // Validate HTTP status code — reject non-2xx responses
-    int status = esp_http_client_get_status_code(client);
-    if (status < 200 || status >= 300) {
-        ESP_LOGW(TAG, "HTTP %d for %s", status, url);
-        esp_http_client_cleanup(client);
-        return NULL;
-    }
-
-    char *buffer = malloc(content_length + 1);
-    if (!buffer) {
-        esp_http_client_cleanup(client);
-        return NULL;
-    }
-
-    int total_read_len = 0, read_len;
-    while (total_read_len < content_length) {
-        read_len = esp_http_client_read(client, buffer + total_read_len, content_length - total_read_len);
-        if (read_len <= 0) break;
-        total_read_len += read_len;
-    }
-    buffer[total_read_len] = '\0';
-
-    esp_http_client_cleanup(client);
-
-    cJSON *json = cJSON_Parse(buffer);
-    free(buffer);
-    return json;
+    return NULL;  // All attempts exhausted
 }
 
 // =============================================================================
@@ -236,10 +291,17 @@ void nina_client_get_data(const char *base_url, nina_client_t *data) {
 // =============================================================================
 
 void nina_poll_state_init(nina_poll_state_t *state) {
+    if (state->http_client) {
+        esp_http_client_cleanup((esp_http_client_handle_t)state->http_client);
+    }
     memset(state, 0, sizeof(nina_poll_state_t));
 }
 
 void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state_t *state) {
+    // Enable HTTP client reuse for this poll cycle
+    s_poll_mode = true;
+    s_reuse_client = (esp_http_client_handle_t)state->http_client;
+
     int64_t now_ms = esp_timer_get_time() / 1000;
 
     // Reset only volatile fields (preserve persistent data between polls)
@@ -264,6 +326,9 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
 
     if (!data->connected) {
         state->static_fetched = false;
+        state->http_client = (void *)s_reuse_client;
+        s_reuse_client = NULL;
+        s_poll_mode = false;
         return;
     }
 
@@ -322,6 +387,11 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
     }
 
     fixup_exposure_timing(data);
+
+    // Save persistent HTTP client for next poll cycle
+    state->http_client = (void *)s_reuse_client;
+    s_reuse_client = NULL;
+    s_poll_mode = false;
 
     ESP_LOGI(TAG, "=== Poll Summary ===");
     ESP_LOGI(TAG, "Connected: %d, Profile: %s", data->connected, data->profile_name);

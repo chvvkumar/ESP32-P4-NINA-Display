@@ -23,12 +23,61 @@ static const char *DEFAULT_HFR_THRESHOLDS =
     "{\"good_max\":2.0,\"ok_max\":3.5,"
     "\"good_color\":\"#15803d\",\"ok_color\":\"#ca8a04\",\"bad_color\":\"#b91c1c\"}";
 
+/* ── Legacy config struct (version 0) — used only for NVS migration ────── */
+typedef struct {
+    char wifi_ssid[32];
+    char wifi_pass[64];
+    char api_url[3][128];
+    char ntp_server[64];
+    char filter_colors[3][512];
+    char rms_thresholds[3][256];
+    char hfr_thresholds[3][256];
+    int theme_index;
+    int brightness;
+    int color_brightness;
+    bool mqtt_enabled;
+    char mqtt_broker_url[128];
+    char mqtt_username[64];
+    char mqtt_password[64];
+    char mqtt_topic_prefix[64];
+    uint16_t mqtt_port;
+    int8_t   active_page_override;
+    uint16_t auto_rotate_interval_s;
+    uint8_t  auto_rotate_effect;
+    bool     auto_rotate_skip_disconnected;
+} app_config_v0_t;
+
+/* ── Version 1 config struct — used only for NVS migration to v2 ────── */
+typedef struct {
+    uint32_t config_version;
+    char api_url[3][128];
+    char ntp_server[64];
+    char tz_string[64];
+    char filter_colors[3][512];
+    char rms_thresholds[3][256];
+    char hfr_thresholds[3][256];
+    int theme_index;
+    int brightness;
+    int color_brightness;
+    bool mqtt_enabled;
+    char mqtt_broker_url[128];
+    char mqtt_username[64];
+    char mqtt_password[64];
+    char mqtt_topic_prefix[64];
+    uint16_t mqtt_port;
+    int8_t   active_page_override;
+    uint16_t auto_rotate_interval_s;
+    uint8_t  auto_rotate_effect;
+    bool     auto_rotate_skip_disconnected;
+} app_config_v1_t;
 
 static void set_defaults(app_config_t *cfg) {
     memset(cfg, 0, sizeof(app_config_t));
+    cfg->config_version = APP_CONFIG_VERSION;
     strcpy(cfg->api_url[0], "http://astromele2.lan:1888/v2/api/");
     strcpy(cfg->api_url[1], "http://astromele3.lan:1888/v2/api/");
     strcpy(cfg->ntp_server, "pool.ntp.org");
+    cfg->tz_string[0] = '\0';  // Default: UTC (no offset)
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         strcpy(cfg->filter_colors[i], "{}");
         strcpy(cfg->rms_thresholds[i], DEFAULT_RMS_THRESHOLDS);
@@ -37,85 +86,219 @@ static void set_defaults(app_config_t *cfg) {
     cfg->brightness = 50;
     cfg->color_brightness = 100;
     cfg->active_page_override = -1;
-    cfg->auto_rotate_interval_s = 0;
+    cfg->auto_rotate_enabled = false;
+    cfg->auto_rotate_interval_s = 30;
     cfg->auto_rotate_effect = 0;
     cfg->auto_rotate_skip_disconnected = true;
+    cfg->auto_rotate_pages = 0x0E;  // Default: all NINA instances (bits 1-3)
     strcpy(cfg->mqtt_broker_url, "mqtt://192.168.1.250");
     strcpy(cfg->mqtt_topic_prefix, "ninadisplay");
     cfg->mqtt_port = 1883;
 }
 
+/**
+ * @brief Migrate a v0 (legacy) config blob into the current struct layout.
+ *
+ * WiFi credentials from the old config are intentionally dropped — ESP-IDF's
+ * WiFi NVS subsystem already persists them from prior esp_wifi_set_config()
+ * calls, so they will be auto-restored on boot.
+ */
+static void migrate_from_v0(const app_config_v0_t *old, app_config_t *cfg) {
+    set_defaults(cfg);
+
+    memcpy(cfg->api_url, old->api_url, sizeof(cfg->api_url));
+    memcpy(cfg->ntp_server, old->ntp_server, sizeof(cfg->ntp_server));
+    memcpy(cfg->filter_colors, old->filter_colors, sizeof(cfg->filter_colors));
+    memcpy(cfg->rms_thresholds, old->rms_thresholds, sizeof(cfg->rms_thresholds));
+    memcpy(cfg->hfr_thresholds, old->hfr_thresholds, sizeof(cfg->hfr_thresholds));
+    cfg->theme_index = old->theme_index;
+    cfg->brightness = old->brightness;
+    cfg->color_brightness = old->color_brightness;
+    cfg->mqtt_enabled = old->mqtt_enabled;
+    memcpy(cfg->mqtt_broker_url, old->mqtt_broker_url, sizeof(cfg->mqtt_broker_url));
+    memcpy(cfg->mqtt_username, old->mqtt_username, sizeof(cfg->mqtt_username));
+    memcpy(cfg->mqtt_password, old->mqtt_password, sizeof(cfg->mqtt_password));
+    memcpy(cfg->mqtt_topic_prefix, old->mqtt_topic_prefix, sizeof(cfg->mqtt_topic_prefix));
+    cfg->mqtt_port = old->mqtt_port;
+    cfg->active_page_override = old->active_page_override;
+    cfg->auto_rotate_enabled = old->auto_rotate_interval_s > 0;  // infer from old interval
+    cfg->auto_rotate_interval_s = old->auto_rotate_interval_s > 0 ? old->auto_rotate_interval_s : 30;
+    cfg->auto_rotate_effect = old->auto_rotate_effect;
+    cfg->auto_rotate_skip_disconnected = old->auto_rotate_skip_disconnected;
+
+    ESP_LOGI(TAG, "Migrated config from v0 → v%d (WiFi credentials now managed by ESP-IDF WiFi NVS)",
+             APP_CONFIG_VERSION);
+}
+
+/**
+ * @brief Migrate a v1 config blob into the current struct layout.
+ *
+ * v1 → v2 adds: auto_rotate_pages bitmask, auto_rotate_effect range 0-3.
+ */
+static void migrate_from_v1(const app_config_v1_t *old, app_config_t *cfg) {
+    set_defaults(cfg);
+
+    memcpy(cfg->api_url, old->api_url, sizeof(cfg->api_url));
+    memcpy(cfg->ntp_server, old->ntp_server, sizeof(cfg->ntp_server));
+    memcpy(cfg->tz_string, old->tz_string, sizeof(cfg->tz_string));
+    memcpy(cfg->filter_colors, old->filter_colors, sizeof(cfg->filter_colors));
+    memcpy(cfg->rms_thresholds, old->rms_thresholds, sizeof(cfg->rms_thresholds));
+    memcpy(cfg->hfr_thresholds, old->hfr_thresholds, sizeof(cfg->hfr_thresholds));
+    cfg->theme_index = old->theme_index;
+    cfg->brightness = old->brightness;
+    cfg->color_brightness = old->color_brightness;
+    cfg->mqtt_enabled = old->mqtt_enabled;
+    memcpy(cfg->mqtt_broker_url, old->mqtt_broker_url, sizeof(cfg->mqtt_broker_url));
+    memcpy(cfg->mqtt_username, old->mqtt_username, sizeof(cfg->mqtt_username));
+    memcpy(cfg->mqtt_password, old->mqtt_password, sizeof(cfg->mqtt_password));
+    memcpy(cfg->mqtt_topic_prefix, old->mqtt_topic_prefix, sizeof(cfg->mqtt_topic_prefix));
+    cfg->mqtt_port = old->mqtt_port;
+    cfg->active_page_override = old->active_page_override;
+    cfg->auto_rotate_enabled = old->auto_rotate_interval_s > 0;  // infer from old interval
+    cfg->auto_rotate_interval_s = old->auto_rotate_interval_s > 0 ? old->auto_rotate_interval_s : 30;
+    cfg->auto_rotate_effect = old->auto_rotate_effect;
+    cfg->auto_rotate_skip_disconnected = old->auto_rotate_skip_disconnected;
+    /* auto_rotate_pages keeps default 0x0E from set_defaults() */
+
+    ESP_LOGI(TAG, "Migrated config from v1 → v%d", APP_CONFIG_VERSION);
+}
+
+/**
+ * @brief Validate and clamp config fields to sane ranges.
+ * @return true if any field was corrected.
+ */
+static bool validate_config(app_config_t *cfg) {
+    bool fixed = false;
+
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        if (cfg->rms_thresholds[i][0] == '\0') {
+            strcpy(cfg->rms_thresholds[i], DEFAULT_RMS_THRESHOLDS);
+            fixed = true;
+        }
+        if (cfg->hfr_thresholds[i][0] == '\0') {
+            strcpy(cfg->hfr_thresholds[i], DEFAULT_HFR_THRESHOLDS);
+            fixed = true;
+        }
+    }
+    if (cfg->color_brightness < 0 || cfg->color_brightness > 100) {
+        cfg->color_brightness = 100;
+        fixed = true;
+    }
+    if (cfg->theme_index < 0 || cfg->theme_index > 20) {
+        cfg->theme_index = 0;
+        fixed = true;
+    }
+    if (cfg->brightness < 0 || cfg->brightness > 100) {
+        cfg->brightness = 50;
+        fixed = true;
+    }
+    if (cfg->mqtt_topic_prefix[0] == '\0') {
+        strcpy(cfg->mqtt_topic_prefix, "ninadisplay");
+        fixed = true;
+    }
+    if (cfg->mqtt_port == 0) {
+        cfg->mqtt_port = 1883;
+        fixed = true;
+    }
+    if (cfg->active_page_override < -1 || cfg->active_page_override > MAX_NINA_INSTANCES + 1) {
+        cfg->active_page_override = -1;
+        fixed = true;
+    }
+    if (cfg->auto_rotate_interval_s == 0 || cfg->auto_rotate_interval_s > 3600) {
+        cfg->auto_rotate_interval_s = 30;
+        fixed = true;
+    }
+    if (cfg->auto_rotate_effect > 3) {
+        cfg->auto_rotate_effect = 0;
+        fixed = true;
+    }
+    if (cfg->auto_rotate_pages == 0) {
+        cfg->auto_rotate_pages = 0x0E;  // Default: all NINA instances
+        fixed = true;
+    }
+
+    return fixed;
+}
+
 void app_config_init(void) {
     s_config_mutex = xSemaphoreCreateMutex();
-    nvs_handle_t my_handle;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &my_handle);
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Error (%s) opening NVS handle! Using defaults.", esp_err_to_name(err));
         set_defaults(&s_config);
         return;
     }
 
-    size_t required_size = sizeof(app_config_t);
-    err = nvs_get_blob(my_handle, "config", &s_config, &required_size);
-    if (err != ESP_OK) {
+    /* Determine stored blob size without reading */
+    size_t stored_size = 0;
+    err = nvs_get_blob(handle, "config", NULL, &stored_size);
+    if (err != ESP_OK || stored_size == 0) {
         ESP_LOGW(TAG, "Config not found in NVS, using defaults");
         set_defaults(&s_config);
-
-        // Save defaults so we have them next time
-        nvs_set_blob(my_handle, "config", &s_config, sizeof(app_config_t));
-        nvs_commit(my_handle);
-    } else {
-        // Config loaded successfully, but check if fields are valid
-        bool needs_save = false;
-        for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
-            if (s_config.rms_thresholds[i][0] == '\0') {
-                strcpy(s_config.rms_thresholds[i], DEFAULT_RMS_THRESHOLDS);
-                needs_save = true;
-            }
-            if (s_config.hfr_thresholds[i][0] == '\0') {
-                strcpy(s_config.hfr_thresholds[i], DEFAULT_HFR_THRESHOLDS);
-                needs_save = true;
-            }
-        }
-        if (s_config.color_brightness < 0 || s_config.color_brightness > 100) {
-            s_config.color_brightness = 100;
-            needs_save = true;
-        }
-        if (s_config.theme_index < 0 || s_config.theme_index > 20) {
-             s_config.theme_index = 0;
-             needs_save = true;
-        }
-        if (s_config.brightness < 0 || s_config.brightness > 100) {
-             s_config.brightness = 50;
-             needs_save = true;
-        }
-        if (s_config.mqtt_topic_prefix[0] == '\0') {
-            strcpy(s_config.mqtt_topic_prefix, "ninadisplay");
-            needs_save = true;
-        }
-        if (s_config.mqtt_port == 0) {
-            s_config.mqtt_port = 1883;
-            needs_save = true;
-        }
-        if (s_config.active_page_override < -1 || s_config.active_page_override >= MAX_NINA_INSTANCES) {
-            s_config.active_page_override = -1;
-            needs_save = true;
-        }
-        if (s_config.auto_rotate_interval_s > 3600) {
-            s_config.auto_rotate_interval_s = 0;
-            needs_save = true;
-        }
-        if (s_config.auto_rotate_effect > 1) {
-            s_config.auto_rotate_effect = 0;
-            needs_save = true;
-        }
-        if (needs_save) {
-            nvs_set_blob(my_handle, "config", &s_config, sizeof(app_config_t));
-            nvs_commit(my_handle);
-        }
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+        nvs_close(handle);
+        return;
     }
 
-    nvs_close(my_handle);
+    /* Read raw blob into a temporary buffer for version detection */
+    void *raw = malloc(stored_size);
+    if (!raw) {
+        ESP_LOGE(TAG, "Failed to allocate %d bytes for config read", (int)stored_size);
+        set_defaults(&s_config);
+        nvs_close(handle);
+        return;
+    }
+    nvs_get_blob(handle, "config", raw, &stored_size);
+
+    /*
+     * Version detection strategy:
+     *   - Current format: first uint32_t == APP_CONFIG_VERSION and size matches.
+     *   - Legacy v0: first bytes are the wifi_ssid field (ASCII text), so the
+     *     first uint32_t will be a large value (printable ASCII) or zero (empty SSID).
+     *     In either case it won't equal APP_CONFIG_VERSION (1).
+     */
+    uint32_t version_check = 0;
+    memcpy(&version_check, raw, sizeof(uint32_t));
+
+    if (version_check == APP_CONFIG_VERSION && stored_size == sizeof(app_config_t)) {
+        /* Current version — load directly */
+        memcpy(&s_config, raw, sizeof(app_config_t));
+        ESP_LOGI(TAG, "Config v%d loaded (%d bytes)", APP_CONFIG_VERSION, (int)stored_size);
+
+        if (validate_config(&s_config)) {
+            nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+            nvs_commit(handle);
+        }
+    } else if (version_check == 1 && stored_size >= sizeof(app_config_v1_t)) {
+        /* Version 1 blob — migrate to v2 */
+        app_config_v1_t old;
+        memcpy(&old, raw, sizeof(app_config_v1_t));
+        migrate_from_v1(&old, &s_config);
+        validate_config(&s_config);
+
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    } else if (stored_size >= sizeof(app_config_v0_t)) {
+        /* Likely legacy v0 blob — attempt migration */
+        app_config_v0_t old;
+        memcpy(&old, raw, sizeof(app_config_v0_t));
+        migrate_from_v0(&old, &s_config);
+        validate_config(&s_config);
+
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    } else {
+        ESP_LOGW(TAG, "Unknown config blob (size=%d, ver=0x%08x), using defaults",
+                 (int)stored_size, (unsigned)version_check);
+        set_defaults(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    }
+
+    free(raw);
+    nvs_close(handle);
 }
 
 app_config_t *app_config_get(void) {
@@ -126,6 +309,7 @@ void app_config_save(const app_config_t *config) {
     xSemaphoreTake(s_config_mutex, portMAX_DELAY);
 
     memcpy(&s_config, config, sizeof(app_config_t));
+    s_config.config_version = APP_CONFIG_VERSION;  // Always stamp current version
 
     nvs_handle_t my_handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &my_handle);

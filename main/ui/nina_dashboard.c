@@ -503,6 +503,28 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
         lv_obj_add_flag(p->box_pwr[i], LV_OBJ_FLAG_HIDDEN);
     }
 
+    /* Stale data indicator — floating label in upper-right corner */
+    p->lbl_stale = lv_label_create(p->page);
+    lv_obj_add_flag(p->lbl_stale, LV_OBJ_FLAG_FLOATING);
+    lv_obj_set_style_text_color(p->lbl_stale, lv_color_hex(0xfbbf24), 0);  /* amber */
+    lv_obj_set_style_text_font(p->lbl_stale, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_bg_color(p->lbl_stale, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(p->lbl_stale, LV_OPA_70, 0);
+    lv_obj_set_style_pad_hor(p->lbl_stale, 8, 0);
+    lv_obj_set_style_pad_ver(p->lbl_stale, 4, 0);
+    lv_obj_set_style_radius(p->lbl_stale, 6, 0);
+    lv_obj_align(p->lbl_stale, LV_ALIGN_TOP_RIGHT, -4, 4);
+    lv_obj_add_flag(p->lbl_stale, LV_OBJ_FLAG_HIDDEN);
+
+    /* Stale overlay — semi-transparent dim for heavily stale data (> 2 min) */
+    p->stale_overlay = lv_obj_create(p->page);
+    lv_obj_remove_style_all(p->stale_overlay);
+    lv_obj_add_flag(p->stale_overlay, LV_OBJ_FLAG_FLOATING);
+    lv_obj_set_size(p->stale_overlay, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(p->stale_overlay, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(p->stale_overlay, LV_OPA_40, 0);
+    lv_obj_add_flag(p->stale_overlay, LV_OBJ_FLAG_HIDDEN);
+
     p->prev_target_progress = 0;
     p->pending_arc_progress = 0;
     p->arc_completing = false;
@@ -654,10 +676,16 @@ int nina_dashboard_get_total_page_count(void) {
 }
 
 static int next_page_index = -1;
+static int slide_old_page_idx = -1;
 
 static void fade_anim_cb(void *obj, int32_t v)
 {
     lv_obj_set_style_opa((lv_obj_t *)obj, (lv_opa_t)v, 0);
+}
+
+static void slide_x_anim_cb(void *obj, int32_t v)
+{
+    lv_obj_set_style_translate_x((lv_obj_t *)obj, v, 0);
 }
 
 static void update_indicators(void)
@@ -713,6 +741,27 @@ static void fade_out_ready_cb(lv_anim_t * a)
     }
 }
 
+static void slide_new_ready_cb(lv_anim_t *a)
+{
+    /* New page has arrived at x=0 — clean up the old page */
+    if (slide_old_page_idx >= 0) {
+        lv_obj_t *old_obj = get_page_obj(slide_old_page_idx);
+        if (old_obj) {
+            lv_obj_add_flag(old_obj, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_style_translate_x(old_obj, 0, 0);
+        }
+        slide_old_page_idx = -1;
+    }
+
+    /* Ensure new page transform is fully reset */
+    lv_obj_t *new_obj = (lv_obj_t *)a->var;
+    if (new_obj) {
+        lv_obj_set_style_translate_x(new_obj, 0, 0);
+    }
+
+    update_indicators();
+}
+
 void nina_dashboard_show_page_animated(int page_index, int instance_count, int effect)
 {
     if (page_index < 0 || page_index >= total_page_count) return;
@@ -735,16 +784,59 @@ void nina_dashboard_show_page_animated(int page_index, int instance_count, int e
         lv_anim_set_duration(&a, 500); /* 500ms fade out */
         lv_anim_set_ready_cb(&a, fade_out_ready_cb);
         lv_anim_start(&a);
+    } else if ((effect == 2 || effect == 3) && old_obj) {
+        /* Slide left (2) or slide right (3) */
+        int slide_dist = SCREEN_SIZE;
+        /* effect 2 = slide-left: old goes left, new enters from right
+         * effect 3 = slide-right: old goes right, new enters from left */
+        int old_end_x   = (effect == 2) ? -slide_dist : slide_dist;
+        int new_start_x = (effect == 2) ? slide_dist  : -slide_dist;
+
+        lv_obj_t *new_obj = get_page_obj(page_index);
+        if (!new_obj) {
+            /* Fallback to instant if page doesn't exist */
+            goto instant;
+        }
+
+        slide_old_page_idx = active_page;
+        active_page = page_index;
+
+        /* Position new page off-screen BEFORE showing it (avoids flash) */
+        lv_obj_set_style_translate_x(new_obj, new_start_x, 0);
+        show_page_at(page_index);
+
+        /* Animate old page out */
+        lv_anim_t a_old;
+        lv_anim_init(&a_old);
+        lv_anim_set_var(&a_old, old_obj);
+        lv_anim_set_exec_cb(&a_old, slide_x_anim_cb);
+        lv_anim_set_values(&a_old, 0, old_end_x);
+        lv_anim_set_duration(&a_old, 500);
+        lv_anim_set_path_cb(&a_old, lv_anim_path_ease_in_out);
+        lv_anim_start(&a_old);
+
+        /* Animate new page in */
+        lv_anim_t a_new;
+        lv_anim_init(&a_new);
+        lv_anim_set_var(&a_new, new_obj);
+        lv_anim_set_exec_cb(&a_new, slide_x_anim_cb);
+        lv_anim_set_values(&a_new, new_start_x, 0);
+        lv_anim_set_duration(&a_new, 500);
+        lv_anim_set_path_cb(&a_new, lv_anim_path_ease_in_out);
+        lv_anim_set_ready_cb(&a_new, slide_new_ready_cb);
+        lv_anim_start(&a_new);
     } else {
+instant:
         /* Instant switch */
         hide_page_at(active_page);
         active_page = page_index;
         show_page_at(active_page);
 
-        /* Ensure opacity is reset if we switched back from a halfway fade */
+        /* Ensure opacity and translate are reset if we switched back from a halfway animation */
         lv_obj_t *new_obj = get_page_obj(active_page);
         if (new_obj) {
              lv_obj_set_style_opa(new_obj, LV_OPA_COVER, 0);
+             lv_obj_set_style_translate_x(new_obj, 0, 0);
         }
 
         update_indicators();

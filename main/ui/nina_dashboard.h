@@ -34,7 +34,7 @@ void nina_dashboard_show_page(int page_index, int instance_count);
  * @brief Switch the visible dashboard page with an optional transition effect
  * @param page_index Index of the page to show (0-2)
  * @param instance_count Total number of configured instances
- * @param effect Transition effect: 0 = instant, 1 = fade
+ * @param effect Transition effect: 0 = instant, 1 = fade, 2 = slide-left, 3 = slide-right
  */
 void nina_dashboard_show_page_animated(int page_index, int instance_count, int effect);
 

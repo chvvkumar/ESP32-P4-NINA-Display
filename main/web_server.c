@@ -5,6 +5,7 @@
 #include "esp_log.h"
 #include "cJSON.h"
 #include "esp_system.h"
+#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "bsp/esp-bsp.h"
@@ -14,6 +15,7 @@
 #include "esp_heap_caps.h"
 #include "lvgl.h"
 #include "src/others/snapshot/lv_snapshot.h"
+#include "driver/jpeg_encode.h"
 
 static const char *TAG = "web_server";
 
@@ -42,6 +44,43 @@ extern const uint8_t config_html_end[]   asm("_binary_config_ui_html_end");
     } \
 } while (0)
 
+/* Maximum accepted POST payload size for config endpoints */
+#define CONFIG_MAX_PAYLOAD 4096
+
+/**
+ * @brief Send an HTTP 400 response with a JSON error message.
+ */
+static esp_err_t send_400(httpd_req_t *req, const char *message) {
+    ESP_LOGW(TAG, "Config rejected: %s", message);
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_set_type(req, "application/json");
+    char buf[192];
+    snprintf(buf, sizeof(buf), "{\"error\":\"%s\"}", message);
+    httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;  /* response was sent; ESP_OK tells httpd we handled it */
+}
+
+/**
+ * @brief Validate a string field won't overflow its destination buffer.
+ * @return true if valid, false if too long.
+ */
+static bool validate_string_len(cJSON *root, const char *key, size_t max_len) {
+    cJSON *item = cJSON_GetObjectItem(root, key);
+    if (!cJSON_IsString(item)) return true;  /* absent or non-string — OK, will be skipped */
+    return strlen(item->valuestring) < max_len;
+}
+
+/**
+ * @brief Validate that a URL field looks like a plausible URL (starts with a scheme).
+ */
+static bool validate_url_format(const char *url) {
+    if (url[0] == '\0') return true;  /* empty is allowed (means "not configured") */
+    return (strncmp(url, "http://", 7) == 0 ||
+            strncmp(url, "https://", 8) == 0 ||
+            strncmp(url, "mqtt://", 7) == 0 ||
+            strncmp(url, "mqtts://", 8) == 0);
+}
+
 // Handler for root URL
 static esp_err_t root_get_handler(httpd_req_t *req)
 {
@@ -60,12 +99,21 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
-    cJSON_AddStringToObject(root, "ssid", cfg->wifi_ssid);
-    cJSON_AddStringToObject(root, "pass", cfg->wifi_pass);
+
+    /* WiFi SSID: read from the WiFi stack (not stored in app_config).
+     * Password is never exposed via the API. */
+    wifi_config_t sta_cfg = {0};
+    if (esp_wifi_get_config(WIFI_IF_STA, &sta_cfg) == ESP_OK) {
+        cJSON_AddStringToObject(root, "ssid", (const char *)sta_cfg.sta.ssid);
+    } else {
+        cJSON_AddStringToObject(root, "ssid", "");
+    }
+
     cJSON_AddStringToObject(root, "url1", cfg->api_url[0]);
     cJSON_AddStringToObject(root, "url2", cfg->api_url[1]);
     cJSON_AddStringToObject(root, "url3", cfg->api_url[2]);
     cJSON_AddStringToObject(root, "ntp", cfg->ntp_server);
+    cJSON_AddStringToObject(root, "timezone", cfg->tz_string);
     cJSON_AddStringToObject(root, "filter_colors_1", cfg->filter_colors[0]);
     cJSON_AddStringToObject(root, "filter_colors_2", cfg->filter_colors[1]);
     cJSON_AddStringToObject(root, "filter_colors_3", cfg->filter_colors[2]);
@@ -85,9 +133,11 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddStringToObject(root, "mqtt_password", cfg->mqtt_password);
     cJSON_AddStringToObject(root, "mqtt_topic_prefix", cfg->mqtt_topic_prefix);
     cJSON_AddNumberToObject(root, "active_page_override", cfg->active_page_override);
+    cJSON_AddBoolToObject(root, "auto_rotate_enabled", cfg->auto_rotate_enabled);
     cJSON_AddNumberToObject(root, "auto_rotate_interval_s", cfg->auto_rotate_interval_s);
     cJSON_AddNumberToObject(root, "auto_rotate_effect", cfg->auto_rotate_effect);
     cJSON_AddBoolToObject(root, "auto_rotate_skip_disconnected", cfg->auto_rotate_skip_disconnected);
+    cJSON_AddNumberToObject(root, "auto_rotate_pages", cfg->auto_rotate_pages);
 
     const char *json_str = cJSON_PrintUnformatted(root);
     if (json_str == NULL) {
@@ -97,7 +147,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     }
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
-    
+
     free((void*)json_str);
     cJSON_Delete(root);
     return ESP_OK;
@@ -106,52 +156,127 @@ static esp_err_t config_get_handler(httpd_req_t *req)
 // Handler for saving config
 static esp_err_t config_post_handler(httpd_req_t *req)
 {
-    #define POST_BUF_SIZE 5120
     int remaining = req->content_len;
 
-    if (remaining >= POST_BUF_SIZE) {
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
+    /* 3.3: Enforce max payload size */
+    if (remaining >= CONFIG_MAX_PAYLOAD) {
+        return send_400(req, "Payload too large");
     }
 
-    char *buf = malloc(POST_BUF_SIZE);
+    char *buf = malloc(CONFIG_MAX_PAYLOAD);
     if (!buf) {
+        ESP_LOGE(TAG, "Config handler: malloc failed for payload buffer");
         httpd_resp_send_500(req);
-        return ESP_FAIL;
+        return ESP_OK;
     }
 
-    int ret = httpd_req_recv(req, buf, remaining);
-    if (ret <= 0) {
-        free(buf);
-        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
-            httpd_resp_send_408(req);
+    int received = 0;
+    while (received < remaining) {
+        int ret = httpd_req_recv(req, buf + received, remaining - received);
+        if (ret <= 0) {
+            free(buf);
+            if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+                ESP_LOGW(TAG, "Config handler: recv timeout (got %d/%d bytes)", received, remaining);
+                httpd_resp_send_408(req);
+                return ESP_OK;
+            }
+            ESP_LOGW(TAG, "Config handler: recv error %d (got %d/%d bytes)", ret, received, remaining);
+            return ESP_FAIL;
         }
-        return ESP_FAIL;
+        received += ret;
     }
-    buf[ret] = '\0';
+    buf[received] = '\0';
 
     cJSON *root = cJSON_Parse(buf);
     free(buf);
     if (!root) {
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
+        return send_400(req, "Invalid JSON");
+    }
+
+    /* 3.3: Validate string field lengths against buffer sizes */
+    if (!validate_string_len(root, "url1", 128) ||
+        !validate_string_len(root, "url2", 128) ||
+        !validate_string_len(root, "url3", 128) ||
+        !validate_string_len(root, "ntp", 64) ||
+        !validate_string_len(root, "timezone", 64) ||
+        !validate_string_len(root, "mqtt_broker_url", 128) ||
+        !validate_string_len(root, "mqtt_username", 64) ||
+        !validate_string_len(root, "mqtt_password", 64) ||
+        !validate_string_len(root, "mqtt_topic_prefix", 64) ||
+        !validate_string_len(root, "filter_colors_1", 512) ||
+        !validate_string_len(root, "filter_colors_2", 512) ||
+        !validate_string_len(root, "filter_colors_3", 512) ||
+        !validate_string_len(root, "rms_thresholds_1", 256) ||
+        !validate_string_len(root, "rms_thresholds_2", 256) ||
+        !validate_string_len(root, "rms_thresholds_3", 256) ||
+        !validate_string_len(root, "hfr_thresholds_1", 256) ||
+        !validate_string_len(root, "hfr_thresholds_2", 256) ||
+        !validate_string_len(root, "hfr_thresholds_3", 256)) {
+        cJSON_Delete(root);
+        return send_400(req, "String field exceeds maximum length");
+    }
+
+    /* 3.3: Validate URL formats */
+    cJSON *url_items[] = {
+        cJSON_GetObjectItem(root, "url1"),
+        cJSON_GetObjectItem(root, "url2"),
+        cJSON_GetObjectItem(root, "url3"),
+        cJSON_GetObjectItem(root, "mqtt_broker_url"),
+    };
+    for (int i = 0; i < 4; i++) {
+        if (cJSON_IsString(url_items[i]) && !validate_url_format(url_items[i]->valuestring)) {
+            cJSON_Delete(root);
+            return send_400(req, "Invalid URL format");
+        }
+    }
+
+    /*
+     * WiFi credentials: pass directly to ESP-IDF WiFi NVS (not stored in
+     * app_config).  The WiFi stack persists them automatically.
+     */
+    cJSON *ssid_item = cJSON_GetObjectItem(root, "ssid");
+    cJSON *pass_item = cJSON_GetObjectItem(root, "pass");
+    if (cJSON_IsString(ssid_item) && ssid_item->valuestring[0] != '\0') {
+        if (strlen(ssid_item->valuestring) >= 32) {
+            cJSON_Delete(root);
+            return send_400(req, "SSID too long (max 31 chars)");
+        }
+        if (cJSON_IsString(pass_item) && strlen(pass_item->valuestring) >= 64) {
+            cJSON_Delete(root);
+            return send_400(req, "WiFi password too long (max 63 chars)");
+        }
+
+        /* Read-modify-write: preserve current password if none provided */
+        wifi_config_t sta_cfg = {0};
+        esp_wifi_get_config(WIFI_IF_STA, &sta_cfg);
+        sta_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+        strncpy((char *)sta_cfg.sta.ssid, ssid_item->valuestring,
+                sizeof(sta_cfg.sta.ssid) - 1);
+        if (cJSON_IsString(pass_item) && pass_item->valuestring[0] != '\0') {
+            memset(sta_cfg.sta.password, 0, sizeof(sta_cfg.sta.password));
+            strncpy((char *)sta_cfg.sta.password, pass_item->valuestring,
+                    sizeof(sta_cfg.sta.password) - 1);
+        }
+        /* else: password from esp_wifi_get_config is preserved */
+        esp_wifi_set_config(WIFI_IF_STA, &sta_cfg);
+        ESP_LOGI(TAG, "WiFi STA credentials updated via esp_wifi_set_config");
     }
 
     app_config_t *cfg = malloc(sizeof(app_config_t));
     if (!cfg) {
+        ESP_LOGE(TAG, "Config handler: malloc failed for app_config_t");
         cJSON_Delete(root);
         httpd_resp_send_500(req);
-        return ESP_FAIL;
+        return ESP_OK;
     }
     // Load current to preserve anything not sent
     memcpy(cfg, app_config_get(), sizeof(app_config_t));
 
-    JSON_TO_STRING(root, "ssid",           cfg->wifi_ssid);
-    JSON_TO_STRING(root, "pass",           cfg->wifi_pass);
     JSON_TO_STRING(root, "url1",           cfg->api_url[0]);
     JSON_TO_STRING(root, "url2",           cfg->api_url[1]);
     JSON_TO_STRING(root, "url3",           cfg->api_url[2]);
     JSON_TO_STRING(root, "ntp",            cfg->ntp_server);
+    JSON_TO_STRING(root, "timezone",       cfg->tz_string);
     JSON_TO_INT   (root, "theme_index",    cfg->theme_index);
     JSON_TO_STRING(root, "filter_colors_1", cfg->filter_colors[0]);
     JSON_TO_STRING(root, "filter_colors_2", cfg->filter_colors[1]);
@@ -190,13 +315,14 @@ static esp_err_t config_post_handler(httpd_req_t *req)
         cfg->mqtt_port = (uint16_t)mqtt_port->valueint;
     }
 
+    JSON_TO_BOOL(root, "auto_rotate_enabled", cfg->auto_rotate_enabled);
     JSON_TO_BOOL(root, "auto_rotate_skip_disconnected", cfg->auto_rotate_skip_disconnected);
 
     cJSON *apo_item = cJSON_GetObjectItem(root, "active_page_override");
     if (cJSON_IsNumber(apo_item)) {
         int v = apo_item->valueint;
         if (v < -1) v = -1;
-        if (v >= MAX_NINA_INSTANCES) v = MAX_NINA_INSTANCES - 1;
+        if (v > MAX_NINA_INSTANCES + 1) v = MAX_NINA_INSTANCES + 1;  /* max = sysinfo page */
         cfg->active_page_override = (int8_t)v;
     }
 
@@ -212,8 +338,16 @@ static esp_err_t config_post_handler(httpd_req_t *req)
     if (cJSON_IsNumber(are_item)) {
         int v = are_item->valueint;
         if (v < 0) v = 0;
-        if (v > 1) v = 1;
+        if (v > 3) v = 3;
         cfg->auto_rotate_effect = (uint8_t)v;
+    }
+
+    cJSON *arp_item = cJSON_GetObjectItem(root, "auto_rotate_pages");
+    if (cJSON_IsNumber(arp_item)) {
+        int v = arp_item->valueint;
+        if (v < 0) v = 0;
+        if (v > 0x1F) v = 0x1F;  /* 5-bit mask */
+        cfg->auto_rotate_pages = (uint8_t)v;
     }
 
     app_config_save(cfg);
@@ -421,13 +555,14 @@ static esp_err_t page_post_handler(httpd_req_t *req)
     if (cJSON_IsNumber(val)) {
         int page = val->valueint;
         int cnt = app_config_get_instance_count();
+        int total = cnt + 2;  /* summary + NINA pages + sysinfo */
         app_config_t *cfg = app_config_get();
 
-        if (page >= 0 && page < cnt) {
+        if (page >= 0 && page < total) {
             cfg->active_page_override = (int8_t)page;
             app_config_save(cfg);
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                nina_dashboard_show_page(page + 1, cnt);  /* +1: NINA pages start at index 1 (0 = summary) */
+                nina_dashboard_show_page(page, cnt);
                 bsp_display_unlock();
             } else {
                 ESP_LOGW(TAG, "Display lock timeout (page switch)");
@@ -445,53 +580,7 @@ static esp_err_t page_post_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-// BMP file header for 720x720 RGB565 image (bottom-up, no compression)
-#define SCREENSHOT_W    BSP_LCD_H_RES
-#define SCREENSHOT_H    BSP_LCD_V_RES
-#define BMP_HEADER_SIZE 66  // 14 (file header) + 40 (DIB header) + 12 (RGB565 masks)
-
-static void build_bmp_header(uint8_t *hdr, uint32_t width, uint32_t height)
-{
-    uint32_t row_size = width * 2;  // RGB565: 2 bytes per pixel
-    uint32_t img_size = row_size * height;
-    uint32_t file_size = BMP_HEADER_SIZE + img_size;
-
-    memset(hdr, 0, BMP_HEADER_SIZE);
-
-    // BMP file header (14 bytes)
-    hdr[0] = 'B'; hdr[1] = 'M';
-    memcpy(&hdr[2], &file_size, 4);
-    // reserved (4 bytes) = 0
-    uint32_t offset = BMP_HEADER_SIZE;
-    memcpy(&hdr[10], &offset, 4);
-
-    // DIB header (BITMAPINFOHEADER = 40 bytes)
-    uint32_t dib_size = 40;
-    memcpy(&hdr[14], &dib_size, 4);
-    int32_t w = (int32_t)width;
-    int32_t h = -(int32_t)height;  // negative = top-down (no row reversal needed)
-    memcpy(&hdr[18], &w, 4);
-    memcpy(&hdr[22], &h, 4);
-    uint16_t planes = 1;
-    memcpy(&hdr[26], &planes, 2);
-    uint16_t bpp = 16;
-    memcpy(&hdr[28], &bpp, 2);
-    uint32_t compression = 3;  // BI_BITFIELDS
-    memcpy(&hdr[30], &compression, 4);
-    memcpy(&hdr[34], &img_size, 4);
-    // pixels per meter (can be 0)
-    // colors used, important (0)
-
-    // RGB565 bitmasks (12 bytes after DIB header)
-    uint32_t mask_r = 0xF800;
-    uint32_t mask_g = 0x07E0;
-    uint32_t mask_b = 0x001F;
-    memcpy(&hdr[54], &mask_r, 4);
-    memcpy(&hdr[58], &mask_g, 4);
-    memcpy(&hdr[62], &mask_b, 4);
-}
-
-// Handler for screenshot capture - serves a BMP image viewable in any browser
+// Handler for screenshot capture - serves a JPEG image via hardware encoder
 static esp_err_t screenshot_get_handler(httpd_req_t *req)
 {
     ESP_LOGI(TAG, "Screenshot requested");
@@ -524,39 +613,88 @@ static esp_err_t screenshot_get_handler(httpd_req_t *req)
     uint32_t width = snapshot->header.w;
     uint32_t height = snapshot->header.h;
     uint32_t stride = snapshot->header.stride;
-    uint32_t row_size = width * 2;  // RGB565 packed row (no padding)
+    uint32_t row_size = width * 2;  // RGB565: 2 bytes per pixel
+    uint32_t raw_size = row_size * height;
 
     ESP_LOGI(TAG, "Snapshot captured: %lux%lu, stride=%lu", width, height, stride);
 
-    // Build BMP header
-    uint8_t bmp_hdr[BMP_HEADER_SIZE];
-    build_bmp_header(bmp_hdr, width, height);
-
-    // Send as BMP image
-    httpd_resp_set_type(req, "image/bmp");
-    httpd_resp_set_hdr(req, "Content-Disposition", "inline; filename=\"screenshot.bmp\"");
-
-    // Send BMP header
-    esp_err_t err = httpd_resp_send_chunk(req, (const char *)bmp_hdr, BMP_HEADER_SIZE);
-    if (err != ESP_OK) {
+    // Allocate DMA-aligned input buffer for the JPEG encoder
+    jpeg_encode_memory_alloc_cfg_t in_mem_cfg = {
+        .buffer_direction = JPEG_ENC_ALLOC_INPUT_BUFFER,
+    };
+    size_t in_alloc_size = 0;
+    uint8_t *enc_in = (uint8_t *)jpeg_alloc_encoder_mem(raw_size, &in_mem_cfg, &in_alloc_size);
+    if (!enc_in) {
+        ESP_LOGE(TAG, "Failed to alloc JPEG encoder input buffer (%lu bytes)", raw_size);
         lv_draw_buf_destroy(snapshot);
-        httpd_resp_send_chunk(req, NULL, 0);
+        httpd_resp_send_500(req);
         return ESP_FAIL;
     }
 
-    // Send pixel rows - handle stride != row_size (LVGL may add padding per row)
+    // Copy snapshot pixels into the DMA-aligned buffer (handle stride != row_size)
     for (uint32_t y = 0; y < height; y++) {
-        uint8_t *row = snapshot->data + (y * stride);
-        err = httpd_resp_send_chunk(req, (const char *)row, row_size);
-        if (err != ESP_OK) {
-            break;
-        }
+        memcpy(enc_in + y * row_size, snapshot->data + y * stride, row_size);
     }
-
-    // End chunked response
-    httpd_resp_send_chunk(req, NULL, 0);
     lv_draw_buf_destroy(snapshot);
 
+    // Allocate DMA-aligned output buffer (raw_size is generous upper bound)
+    jpeg_encode_memory_alloc_cfg_t out_mem_cfg = {
+        .buffer_direction = JPEG_ENC_ALLOC_OUTPUT_BUFFER,
+    };
+    size_t out_alloc_size = 0;
+    uint8_t *enc_out = (uint8_t *)jpeg_alloc_encoder_mem(raw_size, &out_mem_cfg, &out_alloc_size);
+    if (!enc_out) {
+        ESP_LOGE(TAG, "Failed to alloc JPEG encoder output buffer");
+        free(enc_in);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    // Create hardware JPEG encoder
+    jpeg_encoder_handle_t encoder = NULL;
+    jpeg_encode_engine_cfg_t engine_cfg = {
+        .intr_priority = 0,
+        .timeout_ms = 5000,
+    };
+    esp_err_t err = jpeg_new_encoder_engine(&engine_cfg, &encoder);
+    if (err != ESP_OK || !encoder) {
+        ESP_LOGE(TAG, "jpeg_new_encoder_engine failed: %s", esp_err_to_name(err));
+        free(enc_in);
+        free(enc_out);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    // Encode RGB565 -> JPEG
+    jpeg_encode_cfg_t enc_cfg = {
+        .src_type = JPEG_ENCODE_IN_FORMAT_RGB565,
+        .sub_sample = JPEG_DOWN_SAMPLING_YUV422,
+        .image_quality = 90,
+        .width = width,
+        .height = height,
+    };
+    uint32_t jpg_size = 0;
+    err = jpeg_encoder_process(encoder, &enc_cfg,
+        enc_in, raw_size, enc_out, out_alloc_size, &jpg_size);
+    jpeg_del_encoder_engine(encoder);
+    free(enc_in);
+
+    if (err != ESP_OK || jpg_size == 0) {
+        ESP_LOGE(TAG, "JPEG encode failed: %s", esp_err_to_name(err));
+        free(enc_out);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Screenshot encoded: %lu bytes JPEG (%.1f:1 ratio)",
+        jpg_size, (float)raw_size / jpg_size);
+
+    // Send as JPEG image
+    httpd_resp_set_type(req, "image/jpeg");
+    httpd_resp_set_hdr(req, "Content-Disposition", "inline; filename=\"screenshot.jpg\"");
+    httpd_resp_send(req, (const char *)enc_out, jpg_size);
+
+    free(enc_out);
     ESP_LOGI(TAG, "Screenshot sent successfully");
     return ESP_OK;
 }
