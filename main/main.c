@@ -17,6 +17,7 @@
 #include "web_server.h"
 #include "mqtt_ha.h"
 #include "tasks.h"
+#include "esp_ota_ops.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -203,4 +204,9 @@ void app_main(void)
 
     xTaskCreate(input_task,       "input_task", 4096,  NULL, 5, NULL);
     xTaskCreate(data_update_task, "data_task",  20480, NULL, 5, NULL);
+
+    /* Mark this firmware as valid so the bootloader won't roll back.
+     * This must come after successful init — if we crash before here,
+     * the bootloader will revert to the previous OTA partition. */
+    esp_ota_mark_app_valid_cancel_rollback();
 }

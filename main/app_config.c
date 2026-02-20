@@ -6,6 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include <string.h>
+#include <strings.h>
 #include <stdlib.h>
 
 static const char *TAG = "app_config";
@@ -22,6 +23,34 @@ static const char *DEFAULT_RMS_THRESHOLDS =
 static const char *DEFAULT_HFR_THRESHOLDS =
     "{\"good_max\":2.0,\"ok_max\":3.5,"
     "\"good_color\":\"#15803d\",\"ok_color\":\"#ca8a04\",\"bad_color\":\"#b91c1c\"}";
+
+// Default filter colors for common astrophotography filters
+static const struct {
+    const char *name;
+    uint32_t    color;
+} DEFAULT_FILTER_COLORS[] = {
+    { "L",    0xFFFFFF },
+    { "R",    0xB91C1C },
+    { "G",    0x15803D },
+    { "B",    0x1D4ED8 },
+    { "Sii",  0xFF00FF },
+    { "Ha",   0xCCFF00 },
+    { "Oiii", 0x00FFFF },
+};
+
+static uint32_t get_default_filter_color(const char *name) {
+    for (int i = 0; i < (int)(sizeof(DEFAULT_FILTER_COLORS) / sizeof(DEFAULT_FILTER_COLORS[0])); i++) {
+        if (strcasecmp(name, DEFAULT_FILTER_COLORS[i].name) == 0) {
+            return DEFAULT_FILTER_COLORS[i].color;
+        }
+    }
+    return 0xFFFFFF;  // White for unknown filters
+}
+
+static void get_default_filter_color_hex(const char *name, char *out, size_t out_size) {
+    uint32_t color = get_default_filter_color(name);
+    snprintf(out, out_size, "#%06x", (unsigned int)color);
+}
 
 /* ── Legacy config struct (version 0) — used only for NVS migration ────── */
 typedef struct {
@@ -407,7 +436,7 @@ uint32_t app_config_apply_brightness(uint32_t color, int brightness) {
  */
 uint32_t app_config_get_filter_color(const char *filter_name, int instance_index) {
     if (!filter_name || filter_name[0] == '\0' || strcmp(filter_name, "--") == 0) {
-        return 0x3b82f6;  // Default blue for unknown filter
+        return 0xFFFFFF;  // White for empty/unknown filter
     }
 
     // Parse the per-instance filter_colors JSON string
@@ -415,12 +444,12 @@ uint32_t app_config_get_filter_color(const char *filter_name, int instance_index
     cJSON *root = cJSON_Parse(json);
     if (!root) {
         ESP_LOGW(TAG, "Failed to parse filter colors JSON, using default");
-        return 0x3b82f6;  // Default blue
+        return 0xFFFFFF;  // White fallback
     }
 
     // Look up the filter by name
     cJSON *color_item = cJSON_GetObjectItem(root, filter_name);
-    uint32_t color = 0x3b82f6;  // Default blue
+    uint32_t color;
 
     if (color_item && cJSON_IsString(color_item) && color_item->valuestring) {
         // Parse hex color string (e.g., "#60a5fa" or "60a5fa")
@@ -431,7 +460,8 @@ uint32_t app_config_get_filter_color(const char *filter_name, int instance_index
         color = (uint32_t)strtol(hex, NULL, 16);
         ESP_LOGD(TAG, "Filter '%s' -> color 0x%06x", filter_name, (unsigned int)color);
     } else {
-        ESP_LOGD(TAG, "Filter '%s' not found in config, using default blue", filter_name);
+        color = get_default_filter_color(filter_name);
+        ESP_LOGD(TAG, "Filter '%s' not found in config, using default 0x%06x", filter_name, (unsigned int)color);
     }
 
     cJSON_Delete(root);
@@ -519,11 +549,13 @@ void app_config_sync_filters(const char *filter_names[], int count, int instance
     cJSON *colors = cJSON_Parse(field);
     if (!colors) colors = cJSON_CreateObject();
 
-    // Add missing filters
+    // Add missing filters with per-filter default colors
     for (int i = 0; i < count; i++) {
         if (!cJSON_GetObjectItem(colors, filter_names[i])) {
-            cJSON_AddStringToObject(colors, filter_names[i], "#3b82f6");
-            ESP_LOGI(TAG, "Filter sync: added color for '%s' (default blue)", filter_names[i]);
+            char hex_buf[8];
+            get_default_filter_color_hex(filter_names[i], hex_buf, sizeof(hex_buf));
+            cJSON_AddStringToObject(colors, filter_names[i], hex_buf);
+            ESP_LOGI(TAG, "Filter sync: added color for '%s' (default %s)", filter_names[i], hex_buf);
             needs_save = true;
         }
     }
