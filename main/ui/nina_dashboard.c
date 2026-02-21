@@ -520,6 +520,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
 
     p->prev_target_progress = 0;
     p->pending_arc_progress = 0;
+    p->interp_arc_target = 0;
     p->arc_completing = false;
 }
 
@@ -659,10 +660,6 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     }
 
     nina_dashboard_apply_theme(cfg->theme_index);
-
-    /* Exposure interpolation timer — fires every 200ms to smoothly update
-     * the exposure countdown and arc between poll cycles. */
-    lv_timer_create(exposure_interp_timer_cb, 200, NULL);
 }
 
 void nina_dashboard_show_page(int page_index, int instance_count) {
