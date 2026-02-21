@@ -13,6 +13,7 @@
 #include "nina_sysinfo.h"
 #include "nina_summary.h"
 #include "nina_settings.h"
+#include "ui_styles.h"
 #include "app_config.h"
 #include "themes.h"
 #include "lvgl.h"
@@ -24,12 +25,6 @@ dashboard_page_t pages[MAX_NINA_INSTANCES];
 int page_count = 0;
 int active_page = 0;
 const theme_t *current_theme = NULL;
-
-/* Shared styles */
-lv_style_t style_bento_box;
-lv_style_t style_label_small;
-lv_style_t style_value_large;
-lv_style_t style_header_gradient;
 
 /* Summary page — always first (index 0), excluded from indicators */
 static lv_obj_t *summary_obj = NULL;
@@ -82,50 +77,7 @@ void extract_host_from_url(const char *url, char *out, size_t out_size) {
 
 /* (Re)init styles from the active theme */
 static void update_styles(void) {
-    if (!current_theme) return;
-
-    int gb = app_config_get()->color_brightness;
-
-    lv_style_reset(&style_bento_box);
-    lv_style_init(&style_bento_box);
-    lv_style_set_bg_color(&style_bento_box, lv_color_hex(current_theme->bento_bg));
-    lv_style_set_bg_opa(&style_bento_box, LV_OPA_COVER);
-    lv_style_set_radius(&style_bento_box, BENTO_RADIUS);
-    lv_style_set_border_width(&style_bento_box, 1);
-    lv_style_set_border_color(&style_bento_box, lv_color_hex(current_theme->bento_bg));
-    lv_style_set_border_opa(&style_bento_box, LV_OPA_COVER);
-    lv_style_set_pad_all(&style_bento_box, 20);
-
-    lv_style_reset(&style_label_small);
-    lv_style_init(&style_label_small);
-    lv_style_set_text_color(&style_label_small, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)));
-    lv_style_set_text_font(&style_label_small, &lv_font_montserrat_16);
-    lv_style_set_text_letter_space(&style_label_small, 1);
-
-    lv_style_reset(&style_value_large);
-    lv_style_init(&style_value_large);
-    lv_style_set_text_color(&style_value_large, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)));
-#ifdef LV_FONT_MONTSERRAT_48
-    lv_style_set_text_font(&style_value_large, &lv_font_montserrat_48);
-#elif defined(LV_FONT_MONTSERRAT_32)
-    lv_style_set_text_font(&style_value_large, &lv_font_montserrat_32);
-#elif defined(LV_FONT_MONTSERRAT_28)
-    lv_style_set_text_font(&style_value_large, &lv_font_montserrat_28);
-#else
-    lv_style_set_text_font(&style_value_large, &lv_font_montserrat_20);
-#endif
-
-    lv_style_reset(&style_header_gradient);
-    lv_style_init(&style_header_gradient);
-    lv_style_set_bg_color(&style_header_gradient, lv_color_hex(current_theme->header_grad_color));
-    lv_style_set_bg_grad_color(&style_header_gradient, lv_color_hex(0x000000));
-    lv_style_set_bg_grad_dir(&style_header_gradient, LV_GRAD_DIR_VER);
-    lv_style_set_bg_opa(&style_header_gradient, LV_OPA_30);
-    lv_style_set_radius(&style_header_gradient, BENTO_RADIUS);
-    lv_style_set_border_width(&style_header_gradient, 1);
-    lv_style_set_border_color(&style_header_gradient, lv_color_hex(current_theme->header_grad_color));
-    lv_style_set_border_opa(&style_header_gradient, LV_OPA_30);
-    lv_style_set_pad_all(&style_header_gradient, 20);
+    ui_styles_update(current_theme);
 }
 
 lv_obj_t *create_bento_box(lv_obj_t *parent) {
@@ -200,6 +152,16 @@ static void apply_theme_to_page(dashboard_page_t *p) {
 
     int gb = app_config_get()->color_brightness;
 
+    if (p->lbl_instance_name) {
+        uint32_t conn_color;
+        if (strcmp(current_theme->name, "Red Night") == 0) {
+            conn_color = p->nina_connected ? current_theme->text_color : current_theme->label_color;
+        } else {
+            conn_color = p->nina_connected ? 0x4ade80 : 0xf87171;
+        }
+        lv_obj_set_style_text_color(p->lbl_instance_name, lv_color_hex(app_config_apply_brightness(conn_color, gb)), 0);
+    }
+
     if (p->lbl_target_name) lv_obj_set_style_text_color(p->lbl_target_name, lv_color_hex(app_config_apply_brightness(current_theme->target_name_color, gb)), 0);
 
     if (p->lbl_seq_container) lv_obj_set_style_text_color(p->lbl_seq_container, lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
@@ -223,6 +185,10 @@ static void apply_theme_to_page(dashboard_page_t *p) {
     for (int i = 0; i < MAX_POWER_WIDGETS; i++) {
         if (p->lbl_pwr_title[i]) lv_obj_set_style_text_color(p->lbl_pwr_title[i], lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
     }
+}
+
+const theme_t *nina_dashboard_get_current_theme(void) {
+    return current_theme;
 }
 
 void nina_dashboard_apply_theme(int theme_index) {
@@ -299,7 +265,13 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_style_pad_column(left_cont, 0, 0);
 
     p->lbl_instance_name = lv_label_create(left_cont);
-    lv_obj_set_style_text_color(p->lbl_instance_name, lv_color_hex(0xf87171), 0);
+    {
+        uint32_t init_color = 0xf87171;
+        if (current_theme && strcmp(current_theme->name, "Red Night") == 0) {
+            init_color = current_theme->label_color;
+        }
+        lv_obj_set_style_text_color(p->lbl_instance_name, lv_color_hex(app_config_apply_brightness(init_color, app_config_get()->color_brightness)), 0);
+    }
     lv_obj_set_style_text_font(p->lbl_instance_name, &lv_font_montserrat_26, 0);
     {
         const char *init_url = app_config_get_instance_url(page_index);

@@ -4,8 +4,8 @@ file(GLOB_RECURSE LV_DEMOS_SOURCES ${LV_DEMO_DIR}/*.c)
 idf_component_register(
     SRCS main.c tasks.c jpeg_utils.c perf_monitor.c
          nina_client.c nina_api_fetchers.c nina_sequence.c nina_websocket.c
-         app_config.c web_server.c mqtt_ha.c
-         ui/nina_dashboard.c ui/nina_dashboard_update.c ui/nina_thumbnail.c ui/nina_graph_overlay.c ui/nina_sysinfo.c ui/nina_summary.c ui/nina_settings.c ui/themes.c
+         app_config.c web_server.c web_handlers_config.c web_handlers_display.c web_handlers_system.c mqtt_ha.c
+         ui/nina_dashboard.c ui/nina_dashboard_update.c ui/nina_thumbnail.c ui/nina_graph_overlay.c ui/nina_graph_controls.c ui/nina_sysinfo.c ui/nina_summary.c ui/nina_settings.c ui/themes.c ui/ui_styles.c
          ${LV_DEMOS_SOURCES}
     INCLUDE_DIRS . ui ${LV_DEMO_DIR}
     EMBED_TXTFILES config_ui.html)
@@ -16,6 +16,8 @@ target_compile_options(
     PRIVATE
         -DLV_LVGL_H_INCLUDE_SIMPLE
         -DLV_USE_DEMO_MUSIC
+        -Wno-attributes      # conflicting section attrs in lv_color/lv_math (upstream LVGL issue)
+        -Wno-unused-function  # unused atomic.h inlines in lv_freertos.c (upstream ESP-IDF issue)
 )
 
 # Add hardware JPEG decoder for thumbnail feature

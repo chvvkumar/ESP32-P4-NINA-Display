@@ -389,9 +389,9 @@
   <nav class="top-nav">
     <div class="brand"><span class="dot"></span> NINA Display</div>
     <div class="tabs" id="topTabs">
-      <button class="tab-btn active" data-tab="quick">Quick</button>
+      <button class="tab-btn active" data-tab="main">Main</button>
       <button class="tab-btn" data-tab="network">Network</button>
-      <button class="tab-btn" data-tab="nodes">Nodes</button>
+      <button class="tab-btn" data-tab="nina">NINA</button>
       <button class="tab-btn" data-tab="display">Display</button>
       <button class="tab-btn" data-tab="system">System</button>
     </div>
@@ -403,17 +403,17 @@
 
   <nav class="bottom-nav">
     <div class="nav-items" id="bottomTabs">
-      <button class="nav-btn active" data-tab="quick">
+      <button class="nav-btn active" data-tab="main">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-        Quick
+        Main
       </button>
       <button class="nav-btn" data-tab="network">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0114.08 0M1.42 9a16 16 0 0121.16 0M8.53 16.11a6 6 0 016.95 0M12 20h.01"/></svg>
         Network
       </button>
-      <button class="nav-btn" data-tab="nodes">
+      <button class="nav-btn" data-tab="nina">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-        Nodes
+        NINA
       </button>
       <button class="nav-btn" data-tab="display">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
@@ -427,18 +427,16 @@
   </nav>
 
   <main class="content">
-    <div id="tab-quick" class="tab-panel active">
+    <div id="tab-main" class="tab-panel active">
       <div class="card">
         <div class="card-title">Appearance</div>
         <div class="field">
           <label class="field-label">Theme</label>
           <select class="input" id="theme_select" onchange="setTheme(this.value)">
             <option value="0">Bento Default</option>
-            <option value="1">OLED Black</option>
-            <option value="2">Red Night</option>
-            <option value="3">Monochrome</option>
-            <option value="4">All Black</option>
-            <option value="5">Midnight Industrial</option>
+            <option value="1">Red Night</option>
+            <option value="2">Monochrome</option>
+            <option value="3">Midnight Industrial</option>
           </select>
         </div>
         <div class="field">
@@ -564,7 +562,7 @@
       </div>
       <div class="field-hint hint-center">Reboot required after changing WiFi, NTP, timezone, or MQTT settings.</div>
     </div>
-    <div id="tab-nodes" class="tab-panel">
+    <div id="tab-nina" class="tab-panel">
       <div class="sub-tabs">
         <button class="sub-tab active" data-node="0">Node 1</button>
         <button class="sub-tab" data-node="1">Node 2</button>
@@ -701,15 +699,15 @@
 
     /* ---- Adaptive Accent Colors ---- */
     const tabAccents={
-      quick:  {color:'#14b8a6', rgb:'20, 184, 166'},
+      main:   {color:'#14b8a6', rgb:'20, 184, 166'},
       network:{color:'#3b82f6', rgb:'59, 130, 246'},
-      nodes:  {color:'#8b5cf6', rgb:'139, 92, 246'},
+      nina:   {color:'#8b5cf6', rgb:'139, 92, 246'},
       display:{color:'#f59e0b', rgb:'245, 158, 11'},
       system: {color:'#f43f5e', rgb:'244, 63, 94'}
     };
 
     function setAccent(name){
-      const a=tabAccents[name]||tabAccents.quick;
+      const a=tabAccents[name]||tabAccents.main;
       const r=document.documentElement.style;
       r.setProperty('--accent',a.color);
       r.setProperty('--accent-rgb',a.rgb);
@@ -733,7 +731,7 @@
     try{
       const saved=localStorage.getItem('nina_tab');
       if(saved&&$('tab-'+saved)) switchTab(saved);
-      else setAccent('quick');
+      else setAccent('main');
     }catch(e){}
 
     /* ---- Node Sub-Tab Switching ---- */

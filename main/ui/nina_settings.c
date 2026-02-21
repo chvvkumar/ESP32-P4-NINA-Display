@@ -571,6 +571,8 @@ lv_obj_t *settings_page_create(lv_obj_t *parent) {
             if (current_theme) {
                 lv_obj_set_style_bg_color(sw_auto_rotate, lv_color_hex(current_theme->bento_border), 0);
                 lv_obj_set_style_bg_color(sw_auto_rotate, lv_color_hex(current_theme->progress_color), LV_PART_INDICATOR | LV_STATE_CHECKED);
+                lv_obj_set_style_bg_color(sw_auto_rotate, lv_color_hex(current_theme->text_color), LV_PART_KNOB);
+                lv_obj_set_style_bg_opa(sw_auto_rotate, LV_OPA_COVER, LV_PART_KNOB);
             }
             lv_obj_add_event_cb(sw_auto_rotate, auto_rotate_toggle_cb, LV_EVENT_VALUE_CHANGED, NULL);
         }
@@ -666,6 +668,8 @@ lv_obj_t *settings_page_create(lv_obj_t *parent) {
             if (current_theme) {
                 lv_obj_set_style_bg_color(sw_skip_disconnected, lv_color_hex(current_theme->bento_border), 0);
                 lv_obj_set_style_bg_color(sw_skip_disconnected, lv_color_hex(current_theme->progress_color), LV_PART_INDICATOR | LV_STATE_CHECKED);
+                lv_obj_set_style_bg_color(sw_skip_disconnected, lv_color_hex(current_theme->text_color), LV_PART_KNOB);
+                lv_obj_set_style_bg_opa(sw_skip_disconnected, LV_OPA_COVER, LV_PART_KNOB);
             }
             lv_obj_add_event_cb(sw_skip_disconnected, skip_disconnected_toggle_cb, LV_EVENT_VALUE_CHANGED, NULL);
         }
@@ -793,6 +797,7 @@ static void apply_theme_to_widget(lv_obj_t *obj) {
     } else if (lv_obj_check_type(obj, &lv_switch_class)) {
         lv_obj_set_style_bg_color(obj, lv_color_hex(current_theme->bento_border), 0);
         lv_obj_set_style_bg_color(obj, lv_color_hex(current_theme->progress_color), LV_PART_INDICATOR | LV_STATE_CHECKED);
+        lv_obj_set_style_bg_color(obj, lv_color_hex(current_theme->text_color), LV_PART_KNOB);
     } else if (lv_obj_check_type(obj, &lv_button_class)) {
         /* Check if this is the save button (wider than arrow/stepper buttons) */
         if (obj == btn_save) {

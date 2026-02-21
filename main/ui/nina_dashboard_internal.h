@@ -10,11 +10,11 @@
 #include "lvgl.h"
 #include "nina_client.h"
 #include "app_config.h"
+#include "display_defs.h"
 #include "themes.h"
 #include "ui_helpers.h"
 
 /* Layout constants */
-#define SCREEN_SIZE     720
 #define OUTER_PADDING   16
 #define GRID_GAP        16
 #define BENTO_RADIUS    24
@@ -72,6 +72,9 @@ typedef struct {
     int64_t interp_end_epoch;       // Absolute end time (Unix epoch seconds)
     float   interp_total;           // Total exposure duration (seconds)
     uint32_t interp_filter_color;   // Cached filter color for the arc
+
+    // Connection state (tracked for theme reapplication)
+    bool nina_connected;
 
     // Smooth RMS/HFR value interpolation state (value × 100 as int32_t)
     int32_t anim_rms_total_x100;
