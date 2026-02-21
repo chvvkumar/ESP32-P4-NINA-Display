@@ -66,6 +66,7 @@ typedef struct {
     int prev_target_progress;
     int pending_arc_progress;
     bool arc_completing;
+    char prev_filter[32];       // Track previous filter for change detection
 
     // Exposure interpolation state (updated by data task, read by LVGL timer)
     int64_t interp_end_epoch;       // Absolute end time (Unix epoch seconds)

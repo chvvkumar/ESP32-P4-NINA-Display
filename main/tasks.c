@@ -403,11 +403,13 @@ void data_update_task(void *arg) {
         }
 #endif
 
-        // Calculate remaining delay to maintain consistent 1s cycle
+        // Calculate remaining delay to maintain consistent cycle
         // (camera + guider poll every cycle; slow endpoints use absolute-time tiers)
         {
+            uint16_t cycle_ms = (uint16_t)app_config_get()->update_rate_s * 1000;
+            if (cycle_ms < 1000) cycle_ms = 1000;
             int64_t elapsed_ms = (esp_timer_get_time() / 1000) - now_ms;
-            int64_t delay_ms = 1000 - elapsed_ms;
+            int64_t delay_ms = cycle_ms - elapsed_ms;
             if (delay_ms < 100) delay_ms = 100;  // Minimum 100ms breathing room
             // Use ulTaskNotifyTake so WebSocket events can wake us early
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS((uint32_t)delay_ms));

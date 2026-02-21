@@ -15,7 +15,7 @@ extern "C" {
 #define LVGL_LOCK_TIMEOUT_MS 1000
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 2
+#define APP_CONFIG_VERSION 3
 
 typedef struct {
     uint32_t config_version;        // Must be first field — used to detect legacy blobs
@@ -40,6 +40,7 @@ typedef struct {
     uint8_t  auto_rotate_effect;            // 0 = instant, 1 = fade, 2 = slide-left, 3 = slide-right
     bool     auto_rotate_skip_disconnected; // skip pages where NINA is not connected during auto-rotate
     uint8_t  auto_rotate_pages;            // bitmask: bit0=summary, bit1-3=NINA 1-3, bit4=sysinfo
+    uint8_t  update_rate_s;                // UI/data update interval in seconds (1-10, default 2)
 } app_config_t;
 
 // WiFi credentials are NOT stored in app_config_t. They are managed by

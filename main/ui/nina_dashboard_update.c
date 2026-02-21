@@ -116,7 +116,17 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
     lv_obj_set_style_arc_color(p->arc_exposure, lv_color_hex(filter_color), LV_PART_INDICATOR);
     lv_obj_set_style_shadow_color(p->arc_exposure, lv_color_hex(filter_color), LV_PART_INDICATOR);
 
-    if (d->exposure_total > 0) {
+    // Detect filter change — reset arc animation state to avoid stale progress/color
+    if (d->current_filter[0] != '\0' && strcmp(p->prev_filter, d->current_filter) != 0) {
+        lv_anim_delete(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
+        p->arc_completing = false;
+        p->prev_target_progress = 0;
+        p->pending_arc_progress = 0;
+        lv_arc_set_value(p->arc_exposure, 0);
+        snprintf(p->prev_filter, sizeof(p->prev_filter), "%s", d->current_filter);
+    }
+
+    if (d->exposure_total > 0 && d->exposure_end_epoch > 0) {
         float elapsed = d->exposure_current;
         float total = d->exposure_total;
 
