@@ -1,7 +1,6 @@
 # Arduino IDE files
 *.hex
 *.elf
-*.bin
 *.map
 *.lst
 *.sym
@@ -44,7 +43,6 @@ sdkconfig.old
 dependencies.lock
 
 # ESP32 specific
-*.bin
 *.elf
 *.map
 bootloader.bin
