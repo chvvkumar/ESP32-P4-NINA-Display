@@ -35,6 +35,8 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
 
 ## Screenshots
 
+### Device Display
+
 <table align="center">
   <tr>
     <td align="center"><img src="images/summary.jpg" alt="Summary Page" width="480"></td>
@@ -45,12 +47,39 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
     <td align="center"><img src="images/Oiii.jpg" alt="OIII Filter" width="480"></td>
   </tr>
   <tr>
+    <td align="center"><img src="images/B1.jpg" alt="Broadband Filter" width="480"></td>
+    <td align="center"><img src="images/autofocus.jpg" alt="Autofocus" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="images/camera%20statistics.jpg" alt="Camera Statistics" width="480"></td>
+    <td align="center"><img src="images/image_statistics.jpg" alt="Image Statistics" width="480"></td>
+  </tr>
+  <tr>
     <td align="center"><img src="images/RMS.jpg" alt="RMS Graph" width="480"></td>
     <td align="center"><img src="images/RA_DEC.jpg" alt="RA/DEC Graph" width="480"></td>
   </tr>
   <tr>
     <td align="center"><img src="images/HFR.jpg" alt="HFR Graph" width="480"></td>
+    <td align="center"><img src="images/HFR_history.jpg" alt="HFR History Graph" width="480"></td>
+  </tr>
+  <tr>
     <td align="center"><img src="images/systemstats.jpg" alt="System Stats" width="480"></td>
+  </tr>
+</table>
+
+### Web Configuration UI
+
+<table align="center">
+  <tr>
+    <td align="center"><img src="images/main.jpg" alt="Main Settings" width="480"></td>
+    <td align="center"><img src="images/nina.jpg" alt="NINA Settings" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="images/network.jpg" alt="Network Settings" width="480"></td>
+    <td align="center"><img src="images/display.jpg" alt="Display Settings" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="images/system.jpg" alt="System Settings" width="480"></td>
   </tr>
 </table>
 
@@ -91,7 +120,7 @@ gh release download --repo chvvkumar/ESP32-P4-NINA-Display --pattern "nina-displ
 
 No build environment needed — just a Chromium-based browser and the [ESP Web Flasher](https://espressif.github.io/esptool-js/). Flash `nina-display-factory.bin` at address `0x0000`.
 
-> **Note:** If your board shows warnings about outdated `esp-hosted` co-processor firmware, flash `network_adapter.bin` (also included in the release) at address `0x0000` to the ESP32-C6 coprocessor.
+> **Note:** If your board shows warnings about outdated `esp-hosted` co-processor firmware, flash `network_adapter.bin` at address `0x0000` to the ESP32-C6 coprocessor. A pre-built binary is included in the [`firmware/`](firmware/) folder of this repository.
 
 ---
 

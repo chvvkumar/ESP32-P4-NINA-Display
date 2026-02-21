@@ -241,6 +241,21 @@ esp_err_t screenshot_get_handler(httpd_req_t *req)
 
     ESP_LOGI(TAG, "Snapshot captured: %lux%lu, stride=%lu", width, height, stride);
 
+    // Create hardware JPEG encoder FIRST — it needs internal DMA memory for
+    // link descriptors which must be allocated before the large data buffers.
+    jpeg_encoder_handle_t encoder = NULL;
+    jpeg_encode_engine_cfg_t engine_cfg = {
+        .intr_priority = 0,
+        .timeout_ms = 5000,
+    };
+    esp_err_t err = jpeg_new_encoder_engine(&engine_cfg, &encoder);
+    if (err != ESP_OK || !encoder) {
+        ESP_LOGE(TAG, "jpeg_new_encoder_engine failed: %s", esp_err_to_name(err));
+        lv_draw_buf_destroy(snapshot);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
     // Allocate DMA-aligned input buffer for the JPEG encoder
     jpeg_encode_memory_alloc_cfg_t in_mem_cfg = {
         .buffer_direction = JPEG_ENC_ALLOC_INPUT_BUFFER,
@@ -249,6 +264,7 @@ esp_err_t screenshot_get_handler(httpd_req_t *req)
     uint8_t *enc_in = (uint8_t *)jpeg_alloc_encoder_mem(raw_size, &in_mem_cfg, &in_alloc_size);
     if (!enc_in) {
         ESP_LOGE(TAG, "Failed to alloc JPEG encoder input buffer (%lu bytes)", raw_size);
+        jpeg_del_encoder_engine(encoder);
         lv_draw_buf_destroy(snapshot);
         httpd_resp_send_500(req);
         return ESP_FAIL;
@@ -268,22 +284,8 @@ esp_err_t screenshot_get_handler(httpd_req_t *req)
     uint8_t *enc_out = (uint8_t *)jpeg_alloc_encoder_mem(raw_size, &out_mem_cfg, &out_alloc_size);
     if (!enc_out) {
         ESP_LOGE(TAG, "Failed to alloc JPEG encoder output buffer");
+        jpeg_del_encoder_engine(encoder);
         free(enc_in);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-
-    // Create hardware JPEG encoder
-    jpeg_encoder_handle_t encoder = NULL;
-    jpeg_encode_engine_cfg_t engine_cfg = {
-        .intr_priority = 0,
-        .timeout_ms = 5000,
-    };
-    esp_err_t err = jpeg_new_encoder_engine(&engine_cfg, &encoder);
-    if (err != ESP_OK || !encoder) {
-        ESP_LOGE(TAG, "jpeg_new_encoder_engine failed: %s", esp_err_to_name(err));
-        free(enc_in);
-        free(enc_out);
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
