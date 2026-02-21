@@ -225,11 +225,12 @@ jobs:
             PRERELEASE_FLAG="--prerelease"
           fi
 
-          # Create git tag
-          git tag "$TAG"
-          git push origin "$TAG"
+          # Create or move git tag to current commit
+          git tag -f "$TAG"
+          git push origin "$TAG" --force
 
-          # Create GitHub release with firmware assets
+          # Delete existing release if present, then create fresh
+          gh release delete "$TAG" --yes 2>/dev/null || true
           gh release create "$TAG" \
             firmware/nina-display-factory.bin \
             firmware/nina-display-ota.bin \
