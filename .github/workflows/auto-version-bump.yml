@@ -1,0 +1,61 @@
+name: Auto Version Bump
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  bump-version:
+    # Only bump version for main branch releases (not prereleases)
+    if: github.event.release.prerelease == false && github.event.release.target_commitish == 'main'
+    runs-on: self-hosted
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Increment version
+        id: bump
+        run: |
+          CURRENT_VERSION=$(cat version.txt | tr -d '[:space:]')
+          echo "Current version: $CURRENT_VERSION"
+          
+          # Parse semantic version (MAJOR.MINOR.PATCH)
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+          
+          # Increment patch version
+          PATCH=$((PATCH + 1))
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          
+          echo "New version: $NEW_VERSION"
+          echo "$NEW_VERSION" > version.txt
+          
+          echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "new=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Commit and push version bump
+        run: |
+          git add version.txt
+          git commit -m "chore: bump version to ${{ steps.bump.outputs.new }} [skip ci]"
+          git push origin main
+
+      - name: Create summary
+        run: |
+          echo "## Version Bumped 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Previous version:** ${{ steps.bump.outputs.current }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **New version:** ${{ steps.bump.outputs.new }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by:** ${{ github.event.release.tag_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The next release will use version **${{ steps.bump.outputs.new }}**" >> $GITHUB_STEP_SUMMARY

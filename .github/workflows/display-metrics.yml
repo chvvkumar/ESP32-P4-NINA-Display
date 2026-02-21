@@ -1,0 +1,91 @@
+name: Display Build Metrics
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to analyze'
+        required: false
+        type: string
+        default: 'main'
+
+jobs:
+  display-metrics:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch || 'main' }}
+
+      - name: Fetch badge metrics
+        id: fetch
+        continue-on-error: true
+        run: |
+          if curl -f -s https://raw.githubusercontent.com/chvvkumar/ESP32-P4-NINA-Display/badges/firmware-metrics.json -o /tmp/metrics.json; then
+            echo "available=true" >> $GITHUB_OUTPUT
+          else
+            echo "available=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Extract local config
+        run: |
+          # Extract current configuration
+          FLASH_SIZE=$(grep "CONFIG_ESPTOOLPY_FLASHSIZE" sdkconfig | cut -d'"' -f2 || echo "N/A")
+          PSRAM_SIZE=$(grep "CONFIG_SPIRAM_SIZE" sdkconfig 2>/dev/null | cut -d'=' -f2 || echo "N/A")
+          PSRAM_SPEED=$(grep "CONFIG_SPIRAM_SPEED" sdkconfig 2>/dev/null | cut -d'=' -f2 || echo "N/A")
+          LVGL_VER=$(grep "lvgl__lvgl" main/idf_component.yml | grep "version:" | awk '{print $2}' || echo "N/A")
+          IDF_VER=$(grep "IDF_VERSION:" .github/workflows/build.yml | head -1 | awk '{print $2}' || echo "N/A")
+          
+          echo "FLASH_SIZE=$FLASH_SIZE" >> $GITHUB_ENV
+          echo "PSRAM_SIZE=$PSRAM_SIZE" >> $GITHUB_ENV
+          echo "PSRAM_SPEED=$PSRAM_SPEED" >> $GITHUB_ENV
+          echo "LVGL_VER=$LVGL_VER" >> $GITHUB_ENV
+          echo "IDF_VER=$IDF_VER" >> $GITHUB_ENV
+
+      - name: Generate metrics report
+        run: |
+          echo "# Build Metrics Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** ${{ inputs.branch || 'main' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Generated:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| ESP-IDF Version | ${{ env.IDF_VER }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| LVGL Version | ${{ env.LVGL_VER }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Target | esp32p4 |" >> $GITHUB_STEP_SUMMARY
+          echo "| Flash Size | ${{ env.FLASH_SIZE }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| PSRAM | ${{ env.PSRAM_SIZE }}MB @ ${{ env.PSRAM_SPEED }}MHz |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.fetch.outputs.available }}" = "true" ]; then
+            echo "## Latest Build Metrics" >> $GITHUB_STEP_SUMMARY
+            python3 << 'PYEOF'
+          import json
+          with open('/tmp/metrics.json') as f:
+              m = json.load(f)
+          print("| Metric | Value |")
+          print("|--------|-------|")
+          print(f"| Factory Binary | {m.get('factory_size', 'N/A')} |")
+          print(f"| OTA Binary | {m.get('ota_size', 'N/A')} |")
+          print(f"| DRAM Used | {m.get('dram_used', 'N/A')} |")
+          print(f"| IRAM Used | {m.get('iram_used', 'N/A')} |")
+          print(f"| Build Date | {m.get('build_date', 'N/A')} |")
+          print(f"| Commit | {m.get('commit', 'N/A')} |")
+          PYEOF
+          else
+            echo "## Latest Build Metrics" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "_No metrics available. Build the project first._" >> $GITHUB_STEP_SUMMARY
+          fi >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Badge URLs:**" >> $GITHUB_STEP_SUMMARY
+          echo "- [Build Status (main)](https://github.com/chvvkumar/ESP32-P4-NINA-Display/actions/workflows/build.yml?query=branch%3Amain)" >> $GITHUB_STEP_SUMMARY
+          echo "- [Build Status (snd)](https://github.com/chvvkumar/ESP32-P4-NINJA-Display/actions/workflows/build.yml?query=branch%3Asnd)" >> $GITHUB_STEP_SUMMARY
+          echo "- [Latest Release](https://github.com/chvvkumar/ESP32-P4-NINA-Display/releases/latest)" >> $GITHUB_STEP_SUMMARY

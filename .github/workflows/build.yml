@@ -19,7 +19,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check for skip CI
+        id: check_skip
+        run: |
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          if echo "$COMMIT_MSG" | grep -qi '\[skip ci\]'; then
+            echo "Skipping CI due to [skip ci] in commit message"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Read version
+        if: steps.check_skip.outputs.skip != 'true'
         id: version
         run: |
           VERSION=$(cat version.txt | tr -d '[:space:]')
@@ -30,11 +42,13 @@ jobs:
           echo "branch=$BRANCH" >> $GITHUB_OUTPUT
 
       - name: Set ESP-IDF paths
+        if: steps.check_skip.outputs.skip != 'true'
         run: |
           echo "IDF_PATH=$HOME/esp/esp-idf" >> $GITHUB_ENV
           echo "IDF_TOOLS_PATH=$HOME/esp/tools" >> $GITHUB_ENV
 
       - name: Ensure ESP-IDF ${{ env.IDF_VERSION }} is installed
+        if: steps.check_skip.outputs.skip != 'true'
         run: |
           # Check if ESP-IDF is already installed and at the correct version
           if [ -f "$IDF_PATH/export.sh" ]; then
@@ -68,16 +82,19 @@ jobs:
           echo "ESP-IDF $IDF_VERSION installation complete."
 
       - name: Setup ESP-IDF environment
+        if: steps.check_skip.outputs.skip != 'true'
         run: |
           . $IDF_PATH/export.sh
           echo "IDF version: $(idf.py --version)"
 
       - name: Build project
+        if: steps.check_skip.outputs.skip != 'true'
         run: |
           . $IDF_PATH/export.sh
           idf.py build
 
       - name: Generate firmware binaries
+        if: steps.check_skip.outputs.skip != 'true'
         run: |
           . $IDF_PATH/export.sh
           mkdir -p firmware
@@ -107,7 +124,95 @@ jobs:
           echo "Factory: $(du -h firmware/nina-display-factory.bin | cut -f1)"
           echo "OTA:     $(du -h firmware/nina-display-ota.bin | cut -f1)"
 
+      - name: Extract firmware metrics
+        if: steps.check_skip.outputs.skip != 'true'
+        id: metrics
+        run: |
+          . $IDF_PATH/export.sh
+          
+          # Get binary sizes
+          FACTORY_SIZE=$(stat -c%s firmware/nina-display-factory.bin 2>/dev/null || stat -f%z firmware/nina-display-factory.bin)
+          OTA_SIZE=$(stat -c%s firmware/nina-display-ota.bin 2>/dev/null || stat -f%z firmware/nina-display-ota.bin)
+          
+          # Convert to human readable
+          FACTORY_MB=$(echo "scale=2; $FACTORY_SIZE / 1024 / 1024" | bc)
+          OTA_MB=$(echo "scale=2; $OTA_SIZE / 1024 / 1024" | bc)
+          
+          # Extract PSRAM config from sdkconfig
+          PSRAM_SIZE=$(grep "CONFIG_SPIRAM_SIZE" sdkconfig 2>/dev/null | cut -d'=' -f2 || echo "32")
+          PSRAM_SPEED=$(grep "CONFIG_SPIRAM_SPEED" sdkconfig 2>/dev/null | cut -d'=' -f2 || echo "200")
+          
+          # Get partition table flash size
+          FLASH_SIZE=$(grep "CONFIG_ESPTOOLPY_FLASHSIZE" sdkconfig | cut -d'"' -f2 || echo "32MB")
+          
+          # Get memory usage from size output
+          if [ -f build/nina-display.map ]; then
+            DRAM_USED=$(grep -A 10 "Memory region.*Used Size" build/nina-display.map | grep "dram0" | awk '{print $2}' || echo "0")
+            IRAM_USED=$(grep -A 10 "Memory region.*Used Size" build/nina-display.map | grep "iram0" | awk '{print $2}' || echo "0")
+          else
+            DRAM_USED="N/A"
+            IRAM_USED="N/A"
+          fi
+          
+          # Create metrics JSON
+          cat > /tmp/firmware-metrics.json << EOF
+          {
+            "flash_size": "$FLASH_SIZE",
+            "psram": "${PSRAM_SIZE}MB @ ${PSRAM_SPEED}MHz",
+            "factory_size": "${FACTORY_MB} MB",
+            "ota_size": "${OTA_MB} MB",
+            "dram_used": "$DRAM_USED",
+            "iram_used": "$IRAM_USED",
+            "esp_idf": "${{ env.IDF_VERSION }}",
+            "target": "${{ env.IDF_TARGET }}",
+            "build_date": "$(date -u +%Y-%m-%d)",
+            "branch": "${GITHUB_REF_NAME}",
+            "commit": "${{ steps.version.outputs.short_sha }}"
+          }
+          EOF
+          
+          cat /tmp/firmware-metrics.json
+          
+          echo "factory_mb=$FACTORY_MB" >> $GITHUB_OUTPUT
+          echo "ota_mb=$OTA_MB" >> $GITHUB_OUTPUT
+
+      - name: Update badge metrics
+        if: steps.check_skip.outputs.skip != 'true' && github.ref == 'refs/heads/main'
+        run: |
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Store current state
+          CURRENT_BRANCH=${GITHUB_REF_NAME}
+          CURRENT_COMMIT=$(git rev-parse HEAD)
+          
+          # Fetch badges branch if it exists, or create orphan
+          git fetch origin badges:badges 2>/dev/null || git checkout --orphan badges
+          
+          # Switch to badges branch
+          if git show-ref --verify --quiet refs/heads/badges; then
+            git checkout badges
+          fi
+          
+          # Clean all except .git
+          git rm -rf . 2>/dev/null || true
+          
+          # Copy metrics file
+          cp /tmp/firmware-metrics.json .
+          
+          # Commit and push
+          git add firmware-metrics.json
+          if git commit -m "Update firmware metrics for ${{ steps.version.outputs.short_sha }}"; then
+            git push origin badges --force
+          fi
+          
+          # Return to original state
+          git checkout $CURRENT_COMMIT
+          git checkout $CURRENT_BRANCH
+
       - name: Upload firmware artifacts
+        if: steps.check_skip.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: firmware-${{ steps.version.outputs.branch }}-${{ steps.version.outputs.short_sha }}
@@ -115,6 +220,7 @@ jobs:
           retention-days: 30
 
       - name: Determine tag
+        if: steps.check_skip.outputs.skip != 'true'
         id: tag
         run: |
           VERSION=$(cat version.txt | tr -d '[:space:]')
@@ -138,6 +244,7 @@ jobs:
           fi
 
       - name: Generate changelog
+        if: steps.check_skip.outputs.skip != 'true'
         id: changelog
         run: |
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
@@ -150,6 +257,7 @@ jobs:
           echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
 
       - name: Check for network_adapter.bin
+        if: steps.check_skip.outputs.skip != 'true'
         id: network_adapter
         run: |
           if [ -f "network_adapter.bin" ]; then
@@ -160,11 +268,14 @@ jobs:
           fi
 
       - name: Generate release notes
+        if: steps.check_skip.outputs.skip != 'true'
         run: |
           TAG="${{ steps.tag.outputs.tag }}"
           PREV_TAG="${{ steps.changelog.outputs.prev_tag }}"
           VERSION=$(cat version.txt | tr -d '[:space:]')
           BRANCH=${GITHUB_REF_NAME}
+          FACTORY_MB="${{ steps.metrics.outputs.factory_mb }}"
+          OTA_MB="${{ steps.metrics.outputs.ota_mb }}"
 
           if [ -n "$PREV_TAG" ]; then
             COMPARE_URL="https://github.com/chvvkumar/ESP32-P4-NINA-Display/compare/${PREV_TAG}...${TAG}"
@@ -172,14 +283,24 @@ jobs:
             COMPARE_URL=""
           fi
 
-          export TAG PREV_TAG VERSION BRANCH COMPARE_URL
+          export TAG PREV_TAG VERSION BRANCH COMPARE_URL FACTORY_MB OTA_MB
           python3 << 'PYEOF'
-          import os
+          import os, json
           tag = os.environ['TAG']
           prev_tag = os.environ.get('PREV_TAG', '')
           version = os.environ['VERSION']
           branch = os.environ['BRANCH']
           compare_url = os.environ.get('COMPARE_URL', '')
+          factory_mb = os.environ.get('FACTORY_MB', 'N/A')
+          ota_mb = os.environ.get('OTA_MB', 'N/A')
+          
+          # Load metrics if available
+          try:
+              with open('/tmp/firmware-metrics.json') as f:
+                  metrics = json.load(f)
+          except:
+              metrics = {}
+          
           with open('/tmp/changelog.txt') as f:
               changes = f.read().strip()
           since = f'### Changes since {prev_tag}' if prev_tag else '### Recent Changes'
@@ -189,6 +310,13 @@ jobs:
               f'**Branch:** {branch}',
               f'**Version:** {version}',
               '**Built with:** ESP-IDF v5.5.2',
+              '',
+              '### Build Specifications',
+              f'- **Target:** {metrics.get("target", "esp32p4")}',
+              f'- **Flash Size:** {metrics.get("flash_size", "32MB")}',
+              f'- **PSRAM:** {metrics.get("psram", "32MB @ 200MHz")}',
+              f'- **Factory Binary:** {factory_mb} MB',
+              f'- **OTA Binary:** {ota_mb} MB',
               '',
               since,
               changes,
@@ -214,6 +342,7 @@ jobs:
           PYEOF
 
       - name: Create release
+        if: steps.check_skip.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
