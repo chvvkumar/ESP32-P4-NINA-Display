@@ -19,10 +19,10 @@
 
 /* -- Layout constants ---------------------------------------------------- */
 #define GR_HEADER_H     64
-#define GR_CONTROLS_H   56
+#define GR_CONTROLS_H   108
 #define GR_PAD          12
 #define GR_CHART_PAD    8
-#define GR_Y_LABEL_W    52      /* Y-axis label column width */
+#define GR_Y_LABEL_W    90      /* Y-axis label column width */
 
 /* -- Default series colors ----------------------------------------------- */
 #define COLOR_RA    0x42A5F5   /* blue */
@@ -31,14 +31,14 @@
 #define COLOR_HFR   0xFFA726   /* orange */
 
 /* -- Red Night series colors (different shades of red) ------------------- */
-#define COLOR_RA_RED    0xFF6666   /* bright salmon-red for RA */
+#define COLOR_RA_RED    0xE04040   /* bright red for RA */
 #define COLOR_DEC_RED   0x8B1A1A   /* dark crimson for DEC */
-#define COLOR_TOTAL_RED 0xCC3333   /* medium red for total */
+#define COLOR_TOTAL_RED 0xAA2222   /* muted red for total */
 #define COLOR_HFR_RED   0xCC0000   /* standard red for HFR */
 
 /* -- History point options ----------------------------------------------- */
-static const int point_options[] = {25, 50, 100, 200};
-#define POINT_OPT_COUNT 4
+static const int point_options[] = {25, 50, 100, 200, 400};
+#define POINT_OPT_COUNT 5
 
 /* -- Y-scale options for RMS (arcseconds x 100) ------------------------- */
 static const int rms_scale_values[] = {0, 100, 200, 400, 800, 1600};  /* 0 = auto */
@@ -242,13 +242,12 @@ static lv_obj_t *make_pill_btn(lv_obj_t *parent, const char *text, bool selected
     int gb = app_config_get()->color_brightness;
 
     lv_obj_t *btn = lv_button_create(parent);
-    lv_obj_set_height(btn, 44);
-    lv_obj_set_width(btn, LV_SIZE_CONTENT);
-    lv_obj_set_style_min_width(btn, 56, 0);
-    lv_obj_set_style_radius(btn, 22, 0);
+    lv_obj_set_height(btn, 48);
+    lv_obj_set_flex_grow(btn, 1);
+    lv_obj_set_style_radius(btn, 24, 0);
     lv_obj_set_style_border_width(btn, 0, 0);
     lv_obj_set_style_shadow_width(btn, 0, 0);
-    lv_obj_set_style_pad_hor(btn, 16, 0);
+    lv_obj_set_style_pad_hor(btn, 4, 0);
     lv_obj_set_style_pad_ver(btn, 6, 0);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
 
@@ -452,51 +451,6 @@ void nina_graph_overlay_create(lv_obj_t *parent) {
 
     int gb = app_config_get()->color_brightness;
 
-    /* -- Header row -- */
-    {
-        lv_obj_t *hdr = lv_obj_create(overlay);
-        lv_obj_remove_style_all(hdr);
-        lv_obj_set_width(hdr, LV_PCT(100));
-        lv_obj_set_height(hdr, GR_HEADER_H);
-        lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_ROW);
-        lv_obj_set_flex_align(hdr, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_column(hdr, 12, 0);
-
-        /* Back button */
-        btn_back = lv_button_create(hdr);
-        lv_obj_set_size(btn_back, 56, 52);
-        lv_obj_set_style_radius(btn_back, 14, 0);
-        lv_obj_set_style_bg_opa(btn_back, LV_OPA_COVER, 0);
-        lv_obj_set_style_bg_color(btn_back, lv_color_hex(current_theme ? current_theme->bento_border : 0x333333), 0);
-        lv_obj_set_style_bg_color(btn_back, lv_color_hex(current_theme ? current_theme->progress_color : 0x4FC3F7), LV_STATE_PRESSED);
-        lv_obj_set_style_border_width(btn_back, 0, 0);
-        lv_obj_set_style_shadow_width(btn_back, 0, 0);
-
-        btn_back_lbl = lv_label_create(btn_back);
-        lv_label_set_text(btn_back_lbl, LV_SYMBOL_LEFT);
-        lv_obj_set_style_text_font(btn_back_lbl, &lv_font_montserrat_20, 0);
-        lv_obj_set_style_text_color(btn_back_lbl, lv_color_hex(get_control_text_color(gb)), 0);
-        lv_obj_center(btn_back_lbl);
-
-        lv_obj_add_event_cb(btn_back, back_btn_cb, LV_EVENT_CLICKED, NULL);
-
-        /* Title */
-        lbl_title = lv_label_create(hdr);
-        lv_obj_set_style_text_font(lbl_title, &lv_font_montserrat_28, 0);
-        lv_obj_set_style_text_color(lbl_title, lv_color_hex(app_config_apply_brightness(0xffffff, gb)), 0);
-        lv_label_set_text(lbl_title, "RMS History");
-        lv_obj_set_flex_grow(lbl_title, 1);
-
-        /* Summary label (RMS values or HFR avg) - larger font */
-        lbl_summary = lv_label_create(hdr);
-        lv_obj_set_style_text_font(lbl_summary, &lv_font_montserrat_20, 0);
-        lv_obj_set_style_text_color(lbl_summary, lv_color_hex(app_config_apply_brightness(0xaaaaaa, gb)), 0);
-        lv_label_set_text(lbl_summary, "");
-    }
-
-    /* -- Controls row (point count + scale) -- */
-    /* Created dynamically per graph type in rebuild_controls() */
-
     /* -- Chart area: container holding chart (full width) -- */
     chart_area = lv_obj_create(overlay);
     lv_obj_remove_style_all(chart_area);
@@ -537,27 +491,27 @@ void nina_graph_overlay_create(lv_obj_t *parent) {
     lv_obj_align(y_label_col, LV_ALIGN_TOP_LEFT, 0, 0);
 
     lbl_y_top = lv_label_create(y_label_col);
-    lv_obj_set_style_text_font(lbl_y_top, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(lbl_y_top, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(lbl_y_top, lv_color_hex(0xaaaaaa), 0);
     lv_label_set_text(lbl_y_top, "");
 
     lbl_y_q1 = lv_label_create(y_label_col);
-    lv_obj_set_style_text_font(lbl_y_q1, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(lbl_y_q1, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(lbl_y_q1, lv_color_hex(0xaaaaaa), 0);
     lv_label_set_text(lbl_y_q1, "");
 
     lbl_y_mid = lv_label_create(y_label_col);
-    lv_obj_set_style_text_font(lbl_y_mid, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(lbl_y_mid, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(lbl_y_mid, lv_color_hex(0xaaaaaa), 0);
     lv_label_set_text(lbl_y_mid, "");
 
     lbl_y_q3 = lv_label_create(y_label_col);
-    lv_obj_set_style_text_font(lbl_y_q3, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(lbl_y_q3, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(lbl_y_q3, lv_color_hex(0xaaaaaa), 0);
     lv_label_set_text(lbl_y_q3, "");
 
     lbl_y_bot = lv_label_create(y_label_col);
-    lv_obj_set_style_text_font(lbl_y_bot, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(lbl_y_bot, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(lbl_y_bot, lv_color_hex(0xaaaaaa), 0);
     lv_label_set_text(lbl_y_bot, "");
 
@@ -587,13 +541,41 @@ void nina_graph_overlay_create(lv_obj_t *parent) {
     lv_obj_add_flag(loading_lbl, LV_OBJ_FLAG_FLOATING);
     lv_obj_center(loading_lbl);
 
+    /* -- Title (floating inside chart, top center) -- */
+    lbl_title = lv_label_create(chart);
+    lv_obj_set_style_text_font(lbl_title, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(lbl_title, lv_color_hex(app_config_apply_brightness(0xffffff, gb)), 0);
+    lv_obj_set_style_bg_color(lbl_title, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(lbl_title, LV_OPA_50, 0);
+    lv_obj_set_style_pad_hor(lbl_title, 10, 0);
+    lv_obj_set_style_pad_ver(lbl_title, 4, 0);
+    lv_obj_set_style_radius(lbl_title, 8, 0);
+    lv_label_set_text(lbl_title, "RMS History");
+    lv_obj_add_flag(lbl_title, LV_OBJ_FLAG_FLOATING);
+    lv_obj_clear_flag(lbl_title, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_align(lbl_title, LV_ALIGN_TOP_MID, 0, 6);
+
+    /* -- Summary label (floating inside chart, bottom center) -- */
+    lbl_summary = lv_label_create(chart);
+    lv_obj_set_style_text_font(lbl_summary, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(lbl_summary, lv_color_hex(app_config_apply_brightness(0xaaaaaa, gb)), 0);
+    lv_obj_set_style_bg_color(lbl_summary, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(lbl_summary, LV_OPA_50, 0);
+    lv_obj_set_style_pad_hor(lbl_summary, 10, 0);
+    lv_obj_set_style_pad_ver(lbl_summary, 4, 0);
+    lv_obj_set_style_radius(lbl_summary, 8, 0);
+    lv_label_set_text(lbl_summary, "");
+    lv_obj_add_flag(lbl_summary, LV_OBJ_FLAG_FLOATING);
+    lv_obj_clear_flag(lbl_summary, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_align(lbl_summary, LV_ALIGN_BOTTOM_MID, 0, -6);
+
     /* -- X-axis title -- */
     lbl_x_title = lv_label_create(overlay);
     lv_obj_set_style_text_font(lbl_x_title, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(lbl_x_title, lv_color_hex(app_config_apply_brightness(0x888888, gb)), 0);
     lv_label_set_text(lbl_x_title, "Samples");
 
-    /* -- Legend (inside chart, top-right corner) -- */
+    /* -- Legend toggle (inside chart, bottom-right corner) -- */
     legend_cont = lv_obj_create(chart);
     lv_obj_remove_style_all(legend_cont);
     lv_obj_set_size(legend_cont, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
@@ -605,8 +587,28 @@ void nina_graph_overlay_create(lv_obj_t *parent) {
     lv_obj_set_style_bg_opa(legend_cont, LV_OPA_50, 0);
     lv_obj_set_style_radius(legend_cont, 8, 0);
     lv_obj_add_flag(legend_cont, LV_OBJ_FLAG_FLOATING);
-    lv_obj_align(legend_cont, LV_ALIGN_TOP_RIGHT, -4, 4);
+    lv_obj_align(legend_cont, LV_ALIGN_BOTTOM_RIGHT, -4, -4);
     lv_obj_add_flag(legend_cont, LV_OBJ_FLAG_HIDDEN);
+
+    /* -- Back button (floating on overlay, bottom-right corner) -- */
+    btn_back = lv_button_create(overlay);
+    lv_obj_set_size(btn_back, 56, 52);
+    lv_obj_set_style_radius(btn_back, 14, 0);
+    lv_obj_set_style_bg_opa(btn_back, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(btn_back, lv_color_hex(current_theme ? current_theme->bento_border : 0x333333), 0);
+    lv_obj_set_style_bg_color(btn_back, lv_color_hex(current_theme ? current_theme->progress_color : 0x4FC3F7), LV_STATE_PRESSED);
+    lv_obj_set_style_border_width(btn_back, 0, 0);
+    lv_obj_set_style_shadow_width(btn_back, 0, 0);
+    lv_obj_add_flag(btn_back, LV_OBJ_FLAG_FLOATING);
+    lv_obj_align(btn_back, LV_ALIGN_BOTTOM_RIGHT, -GR_PAD, -GR_PAD);
+
+    btn_back_lbl = lv_label_create(btn_back);
+    lv_label_set_text(btn_back_lbl, LV_SYMBOL_LEFT);
+    lv_obj_set_style_text_font(btn_back_lbl, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(btn_back_lbl, lv_color_hex(get_control_text_color(gb)), 0);
+    lv_obj_center(btn_back_lbl);
+
+    lv_obj_add_event_cb(btn_back, back_btn_cb, LV_EVENT_CLICKED, NULL);
 }
 
 /* -- Controls row (rebuilt when switching graph type) --------------------- */
@@ -620,43 +622,54 @@ static void rebuild_controls(void) {
         controls_cont = NULL;
     }
 
-    /* Create new controls container at the bottom (after chart area) */
+    /* Create new controls container — column with two rows */
     controls_cont = lv_obj_create(overlay);
     lv_obj_remove_style_all(controls_cont);
     lv_obj_set_width(controls_cont, LV_PCT(100));
     lv_obj_set_height(controls_cont, GR_CONTROLS_H);
-    lv_obj_set_flex_flow(controls_cont, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(controls_cont, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(controls_cont, 6, 0);
+    lv_obj_set_flex_flow(controls_cont, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(controls_cont, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_row(controls_cont, 4, 0);
 
-    /* "Points:" label */
-    lv_obj_t *lbl_pts = lv_label_create(controls_cont);
+    /* -- Row 1: Point count -- */
+    lv_obj_t *row_pts = lv_obj_create(controls_cont);
+    lv_obj_remove_style_all(row_pts);
+    lv_obj_set_width(row_pts, LV_PCT(100));
+    lv_obj_set_height(row_pts, 48);
+    lv_obj_set_flex_flow(row_pts, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row_pts, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(row_pts, 6, 0);
+
+    lv_obj_t *lbl_pts = lv_label_create(row_pts);
     lv_label_set_text(lbl_pts, "Pts:");
     lv_obj_set_style_text_font(lbl_pts, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(lbl_pts, lv_color_hex(app_config_apply_brightness(
         current_theme ? current_theme->text_color : 0xaaaaaa, gb)), 0);
+    lv_obj_set_width(lbl_pts, LV_SIZE_CONTENT);
 
-    /* Point count buttons */
     for (int i = 0; i < POINT_OPT_COUNT; i++) {
         char buf[8];
         snprintf(buf, sizeof(buf), "%d", point_options[i]);
-        btn_points[i] = make_pill_btn(controls_cont, buf, (i == selected_points_idx),
+        btn_points[i] = make_pill_btn(row_pts, buf, (i == selected_points_idx),
                                        point_btn_cb, i);
     }
 
-    /* Spacer */
-    lv_obj_t *spacer = lv_obj_create(controls_cont);
-    lv_obj_remove_style_all(spacer);
-    lv_obj_set_size(spacer, 8, 1);
+    /* -- Row 2: Y scale -- */
+    lv_obj_t *row_scale = lv_obj_create(controls_cont);
+    lv_obj_remove_style_all(row_scale);
+    lv_obj_set_width(row_scale, LV_PCT(100));
+    lv_obj_set_height(row_scale, 48);
+    lv_obj_set_flex_flow(row_scale, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row_scale, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(row_scale, 6, 0);
 
-    /* "Scale:" label */
-    lv_obj_t *lbl_sc = lv_label_create(controls_cont);
+    lv_obj_t *lbl_sc = lv_label_create(row_scale);
     lv_label_set_text(lbl_sc, "Y:");
     lv_obj_set_style_text_font(lbl_sc, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(lbl_sc, lv_color_hex(app_config_apply_brightness(
         current_theme ? current_theme->text_color : 0xaaaaaa, gb)), 0);
+    lv_obj_set_width(lbl_sc, LV_SIZE_CONTENT);
 
-    /* Scale buttons */
     int sc_count = (current_type == GRAPH_TYPE_RMS) ? RMS_SCALE_COUNT : HFR_SCALE_COUNT;
     const char **sc_labels = (current_type == GRAPH_TYPE_RMS) ? rms_scale_labels : hfr_scale_labels;
     scale_btn_count = sc_count;
@@ -664,9 +677,12 @@ static void rebuild_controls(void) {
     if (selected_scale_idx >= sc_count) selected_scale_idx = 0;
 
     for (int i = 0; i < sc_count; i++) {
-        btn_scale[i] = make_pill_btn(controls_cont, sc_labels[i], (i == selected_scale_idx),
+        btn_scale[i] = make_pill_btn(row_scale, sc_labels[i], (i == selected_scale_idx),
                                       scale_btn_cb, i);
     }
+
+    /* Keep back button on top of newly created controls */
+    if (btn_back) lv_obj_move_foreground(btn_back);
 }
 
 /* -- Legend item click callback: toggle series visibility ---------------- */
@@ -698,8 +714,6 @@ static void legend_item_cb(lv_event_t *e) {
 
 static void rebuild_legend(void) {
     if (!legend_cont) return;
-
-    int gb = app_config_get()->color_brightness;
 
     /* Clear existing children */
     lv_obj_clean(legend_cont);
@@ -750,7 +764,7 @@ static void rebuild_legend(void) {
     }
 
     /* Re-align after content change */
-    lv_obj_align(legend_cont, LV_ALIGN_TOP_RIGHT, -4, 4);
+    lv_obj_align(legend_cont, LV_ALIGN_BOTTOM_RIGHT, -4, -4);
 }
 
 /* -- Public API ---------------------------------------------------------- */
@@ -989,17 +1003,19 @@ static void apply_chart_theme(void) {
     lv_obj_set_style_border_color(chart, lv_color_hex(current_theme->bento_border), 0);
     lv_obj_set_style_line_color(chart, lv_color_hex(app_config_apply_brightness(current_theme->bento_border, gb)), LV_PART_MAIN);
 
-    /* Title */
+    /* Title (floating inside chart) */
     if (lbl_title) {
         lv_obj_set_style_text_color(lbl_title, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+        lv_obj_set_style_bg_color(lbl_title, lv_color_hex(current_theme->bento_bg), 0);
     }
 
-    /* Summary */
+    /* Summary (floating inside chart) */
     if (lbl_summary) {
         uint32_t sum_color = is_red_night_theme()
             ? app_config_apply_brightness(current_theme->text_color, gb)
             : app_config_apply_brightness(0xaaaaaa, gb);
         lv_obj_set_style_text_color(lbl_summary, lv_color_hex(sum_color), 0);
+        lv_obj_set_style_bg_color(lbl_summary, lv_color_hex(current_theme->bento_bg), 0);
     }
 
     /* Back button */
