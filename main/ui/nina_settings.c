@@ -40,6 +40,11 @@ static lv_obj_t *lbl_update_rate_val   = NULL;
 static lv_obj_t *btn_rate_minus        = NULL;
 static lv_obj_t *btn_rate_plus         = NULL;
 
+/* ── Graph update interval card widgets ─────────────────────────────── */
+static lv_obj_t *lbl_graph_interval_val = NULL;
+static lv_obj_t *btn_graph_minus        = NULL;
+static lv_obj_t *btn_graph_plus         = NULL;
+
 /* ── Auto-rotate card widgets ────────────────────────────────────────── */
 static lv_obj_t *sw_auto_rotate        = NULL;
 static lv_obj_t *lbl_interval_val      = NULL;
@@ -222,6 +227,24 @@ static void rate_plus_cb(lv_event_t *e) {
     if (cfg->update_rate_s < 10) {
         cfg->update_rate_s++;
         lv_label_set_text_fmt(lbl_update_rate_val, "%d s", cfg->update_rate_s);
+    }
+}
+
+static void graph_minus_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    app_config_t *cfg = app_config_get();
+    if (cfg->graph_update_interval_s > 2) {
+        cfg->graph_update_interval_s--;
+        lv_label_set_text_fmt(lbl_graph_interval_val, "%d s", cfg->graph_update_interval_s);
+    }
+}
+
+static void graph_plus_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    app_config_t *cfg = app_config_get();
+    if (cfg->graph_update_interval_s < 30) {
+        cfg->graph_update_interval_s++;
+        lv_label_set_text_fmt(lbl_graph_interval_val, "%d s", cfg->graph_update_interval_s);
     }
 }
 
@@ -494,6 +517,34 @@ lv_obj_t *settings_page_create(lv_obj_t *parent) {
         lv_obj_add_event_cb(btn_rate_plus, rate_plus_cb, LV_EVENT_CLICKED, NULL);
     }
 
+    /* ── Graph Update Interval Card ── */
+    {
+        lv_obj_t *card = make_card(st_page);
+        make_section_title(card, "GRAPH UPDATE RATE");
+
+        lv_obj_t *row = lv_obj_create(card);
+        lv_obj_remove_style_all(row);
+        lv_obj_set_width(row, LV_PCT(100));
+        lv_obj_set_height(row, LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+        btn_graph_minus = make_stepper_btn(row, LV_SYMBOL_MINUS);
+        lv_obj_add_event_cb(btn_graph_minus, graph_minus_cb, LV_EVENT_CLICKED, NULL);
+
+        lbl_graph_interval_val = lv_label_create(row);
+        lv_obj_set_style_text_font(lbl_graph_interval_val, &lv_font_montserrat_28, 0);
+        lv_obj_set_flex_grow(lbl_graph_interval_val, 1);
+        lv_obj_set_style_text_align(lbl_graph_interval_val, LV_TEXT_ALIGN_CENTER, 0);
+        if (current_theme) {
+            lv_obj_set_style_text_color(lbl_graph_interval_val, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+        }
+        lv_label_set_text_fmt(lbl_graph_interval_val, "%d s", app_config_get()->graph_update_interval_s);
+
+        btn_graph_plus = make_stepper_btn(row, LV_SYMBOL_PLUS);
+        lv_obj_add_event_cb(btn_graph_plus, graph_plus_cb, LV_EVENT_CLICKED, NULL);
+    }
+
     /* ── Auto-Rotate Card ── */
     {
         lv_obj_t *card = make_card(st_page);
@@ -677,6 +728,11 @@ void settings_page_refresh(void) {
     /* Update rate */
     if (lbl_update_rate_val) {
         lv_label_set_text_fmt(lbl_update_rate_val, "%d s", cfg->update_rate_s);
+    }
+
+    /* Graph update interval */
+    if (lbl_graph_interval_val) {
+        lv_label_set_text_fmt(lbl_graph_interval_val, "%d s", cfg->graph_update_interval_s);
     }
 
     /* Auto-rotate */

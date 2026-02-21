@@ -6,322 +6,1035 @@
   <title>NINA Display</title>
   <style>
     :root {
-      --bg: #09090b;
-      --card: #121217;
-      --border: #27272a;
+      --bg: #0a0a0b;
+      --surface: #141418;
+      --surface-hover: #1a1a1f;
+      --border: rgba(255,255,255,0.06);
+      --border-focus: rgba(20,184,166,0.4);
       --accent: #14b8a6;
       --accent-hover: #0d9488;
-      --text: #fafafa;
-      --text-dim: #a1a1aa;
+      --text: #f4f4f5;
+      --text-muted: #71717a;
       --danger: #ef4444;
+      --danger-hover: #dc2626;
       --warning: #f59e0b;
+      --success: #10b981;
+      --radius: 12px;
+      --radius-sm: 8px;
+      --nav-height: 56px;
+      --bottom-nav-height: 64px;
+      --save-bar-height: 60px;
     }
-    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: var(--bg); color: var(--text); margin: 0; padding: 24px; line-height: 1.5; }
-    .container { max-width: 1100px; margin: 0 auto; }
-    header { margin-bottom: 32px; border-left: 4px solid var(--accent); padding-left: 16px; }
-    header h1 { margin: 0; font-size: 1.5rem; font-weight: 700; letter-spacing: -0.025em; }
-    header p { margin: 4px 0 0; color: var(--text-dim); font-size: 0.9rem; }
-    .bento-grid { display: grid; gap: 20px; grid-template-columns: repeat(12, 1fr); }
-    .tile { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 24px; display: flex; flex-direction: column; transition: border-color 0.2s; }
-    .tile:hover { border-color: var(--accent); }
-    .tile h3 { margin: 0 0 20px 0; font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent); display: flex; align-items: center; gap: 8px; }
-    .group { margin-bottom: 18px; position: relative; }
-    label { display: block; margin-bottom: 6px; color: var(--text-dim); font-size: 0.75rem; font-weight: 500; text-transform: uppercase; }
-    input[type='text'], input[type='password'], input[type='number'], select { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 10px 14px; border-radius: 8px; width: 100%; font-size: 0.9rem; transition: all 0.2s; }
-    input:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(20,184,166,0.2); }
-    .color-grid { display: flex; gap: 12px; width: 100%; flex-wrap: wrap; margin-top: 10px; }
-    .filter-item { flex: 1 0 90px; min-width: 0; max-width: 200px; background: rgba(255,255,255,0.03); padding: 14px 10px; border-radius: 12px; display: flex; flex-direction: column; align-items: center; gap: 10px; border: 1px solid transparent; transition: all 0.2s; }
-    .filter-item:hover { background: rgba(255,255,255,0.06); border-color: var(--border); }
-    .filter-item label { margin: 0; font-size: 0.7rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; text-transform: none; }
-    .color-dot { width: 40px; height: 40px; border-radius: 10px; border: 2px solid var(--border); cursor: pointer; padding: 0; background: none; transition: transform 0.1s; }
-    .color-dot:active { transform: scale(0.9); }
-    .slider-wrapper { display: flex; align-items: center; gap: 12px; }
-    input[type='range'] { flex: 1; height: 6px; appearance: none; background: var(--border); border-radius: 3px; outline: none; }
-    input[type='range']::-webkit-slider-thumb { appearance: none; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); cursor: pointer; border: 3px solid var(--card); box-shadow: 0 0 10px rgba(0,0,0,0.5); }
-    .toggle { position: relative; display: inline-block; width: 44px; height: 24px; }
-    .toggle input { opacity: 0; width: 0; height: 0; }
-    .toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: var(--border); transition: .2s; border-radius: 24px; }
-    .toggle-slider:before { content: ''; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background: var(--text-dim); transition: .2s; border-radius: 50%; }
-    .toggle input:checked + .toggle-slider { background: var(--accent); }
-    .toggle input:checked + .toggle-slider:before { transform: translateX(20px); background: var(--bg); }
-    .btn { border: none; border-radius: 10px; padding: 14px 20px; font-weight: 600; cursor: pointer; font-size: 0.9rem; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px; }
-    .btn-primary { background: var(--accent); color: var(--bg); width: 100%; }
-    .btn-primary:hover { background: var(--accent-hover); transform: translateY(-1px); }
-    .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text-dim); flex: 1; }
-    .btn-outline:hover { border-color: var(--warning); color: var(--warning); }
-    .btn-danger { background: transparent; border: 1px solid var(--border); color: var(--text-dim); flex: 1; }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      overflow-x: hidden;
+      min-height: 100dvh;
+    }
+
+    .top-nav {
+      position: sticky; top: 0; z-index: 100;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 24px; height: var(--nav-height);
+    }
+    .top-nav .brand {
+      font-size: 0.95rem; font-weight: 700; letter-spacing: -0.02em;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .top-nav .brand .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+    .top-nav .tabs {
+      display: flex; gap: 4px; background: var(--surface); padding: 4px;
+      border-radius: 10px;
+    }
+    .top-nav .tab-btn {
+      background: none; border: none; color: var(--text-muted); cursor: pointer;
+      padding: 8px 16px; border-radius: 8px; font-size: 0.8rem; font-weight: 500;
+      transition: all 0.15s; white-space: nowrap;
+    }
+    .top-nav .tab-btn:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+    .top-nav .tab-btn.active { color: var(--text); background: rgba(255,255,255,0.08); }
+    .top-nav .github-link {
+      color: var(--text-muted); text-decoration: none; font-size: 0.75rem;
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+      transition: all 0.15s;
+    }
+    .top-nav .github-link:hover { color: var(--text); border-color: var(--accent); }
+
+    .bottom-nav {
+      display: none; position: fixed; bottom: 0; left: 0; right: 0;
+      z-index: 100; background: var(--surface);
+      border-top: 1px solid var(--border);
+      height: var(--bottom-nav-height);
+      padding: 0 8px;
+    }
+    .bottom-nav .nav-items {
+      display: flex; height: 100%; align-items: center; justify-content: space-around;
+    }
+    .bottom-nav .nav-btn {
+      background: none; border: none; color: var(--text-muted); cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; gap: 2px;
+      padding: 8px 12px; border-radius: var(--radius-sm); font-size: 0.65rem;
+      font-weight: 500; transition: all 0.15s;
+    }
+    .bottom-nav .nav-btn svg { width: 20px; height: 20px; }
+    .bottom-nav .nav-btn.active { color: var(--accent); }
+
+    .content {
+      max-width: 960px; margin: 0 auto;
+      padding: 24px 24px 100px;
+    }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    @media (max-width: 768px) {
+      .top-nav .tabs, .top-nav .github-link { display: none; }
+      .bottom-nav { display: block; }
+      .content { padding: 16px 16px calc(var(--bottom-nav-height) + var(--save-bar-height) + 16px); }
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 16px;
+    }
+    .card-title {
+      font-size: 0.75rem; font-weight: 600; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.04em;
+      margin-bottom: 20px;
+    }
+
+    .field { margin-bottom: 16px; }
+    .field:last-child { margin-bottom: 0; }
+    .field-label {
+      display: block; font-size: 0.8rem; color: var(--text-muted);
+      margin-bottom: 6px; font-weight: 500;
+    }
+    .field-hint {
+      font-size: 0.72rem; color: var(--text-muted);
+      margin-top: 4px; opacity: 0.7;
+    }
+
+    .input {
+      background: var(--bg); border: 1px solid var(--border); color: var(--text);
+      padding: 10px 14px; border-radius: var(--radius-sm);
+      width: 100%; font-size: 0.875rem; min-height: 44px;
+      transition: border-color 0.15s;
+      font-family: inherit;
+    }
+    .input:focus { outline: none; border-color: var(--border-focus); }
+    .input::placeholder { color: var(--text-muted); opacity: 0.5; }
+    select.input { cursor: pointer; }
+
+    .row { display: flex; gap: 12px; align-items: flex-start; }
+    .row > * { flex: 1; }
+    @media (max-width: 768px) {
+      .row.stack-mobile { flex-direction: column; }
+    }
+
+    .toggle { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
+    .toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+    .toggle-track {
+      position: absolute; cursor: pointer; inset: 0;
+      background: rgba(255,255,255,0.1); border-radius: 24px; transition: 0.2s;
+    }
+    .toggle-track::before {
+      content: ''; position: absolute; height: 18px; width: 18px;
+      left: 3px; bottom: 3px; background: var(--text-muted);
+      border-radius: 50%; transition: 0.2s;
+    }
+    .toggle input:checked + .toggle-track { background: var(--accent); }
+    .toggle input:checked + .toggle-track::before { transform: translateX(20px); background: var(--bg); }
+
+    .toggle-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 0;
+    }
+    .toggle-row .toggle-label { font-size: 0.875rem; }
+
+    .slider-group { display: flex; align-items: center; gap: 12px; }
+    .slider {
+      flex: 1; height: 6px; appearance: none; -webkit-appearance: none;
+      background: rgba(255,255,255,0.1); border-radius: 3px; outline: none;
+    }
+    .slider::-webkit-slider-thumb {
+      appearance: none; -webkit-appearance: none;
+      width: 20px; height: 20px; border-radius: 50%;
+      background: var(--accent); cursor: pointer;
+      border: 3px solid var(--surface);
+      box-shadow: 0 0 8px rgba(0,0,0,0.4);
+    }
+    .slider-val {
+      font-size: 0.8rem; color: var(--text-muted);
+      width: 36px; text-align: right; flex-shrink: 0;
+    }
+
+    .btn {
+      border: none; border-radius: var(--radius-sm);
+      padding: 12px 20px; font-weight: 600; cursor: pointer;
+      font-size: 0.85rem; transition: all 0.15s;
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      min-height: 44px; font-family: inherit;
+    }
+    .btn-primary { background: var(--accent); color: var(--bg); }
+    .btn-primary:hover { background: var(--accent-hover); }
+    .btn-primary:disabled { opacity: 0.5; cursor: default; }
+    .btn-outline {
+      background: transparent; border: 1px solid var(--border); color: var(--text-muted);
+    }
+    .btn-outline:hover { border-color: var(--text-muted); color: var(--text); }
+    .btn-danger {
+      background: transparent; border: 1px solid var(--border); color: var(--text-muted);
+    }
     .btn-danger:hover { border-color: var(--danger); color: var(--danger); }
-    .color-rect { width: 48px; height: 38px; padding: 0; border: 1px solid var(--border); background: none; border-radius: 8px; cursor: pointer; }
-    .area-net { grid-column: span 4; }
-    .area-api { grid-column: span 4; }
-    .area-appearance { grid-column: span 4; }
-    .area-thresholds { grid-column: span 12; }
-    .filter-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px; }
-    .filter-grid .filter-item { flex: none; min-width: 0; padding: 8px 4px; }
-    .filter-grid .filter-item label { font-size: 0.65rem; }
-    .filter-grid .color-dot { width: 32px; height: 32px; border-radius: 8px; }
-    .area-firmware { grid-column: span 12; }
-    .firmware-info { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 18px; }
-    .firmware-info-item { background: rgba(255,255,255,0.03); padding: 12px; border-radius: 10px; border: 1px solid var(--border); }
-    .firmware-info-item .label { font-size: 0.65rem; text-transform: uppercase; color: var(--text-dim); margin-bottom: 4px; }
-    .firmware-info-item .value { font-size: 0.9rem; font-weight: 600; word-break: break-all; }
-    .ota-controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-    .ota-controls input[type='file'] { display: none; }
-    .ota-file-label { background: var(--bg); border: 1px dashed var(--border); color: var(--text-dim); padding: 12px 20px; border-radius: 10px; cursor: pointer; font-size: 0.85rem; transition: all 0.2s; flex: 1; text-align: center; min-width: 200px; }
-    .ota-file-label:hover { border-color: var(--accent); color: var(--text); }
-    .ota-file-label.has-file { border-color: var(--accent); border-style: solid; color: var(--accent); }
-    .progress-wrap { width: 100%; margin-top: 12px; display: none; }
-    .progress-bar { width: 100%; height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
-    .progress-bar-fill { height: 100%; background: var(--accent); border-radius: 4px; width: 0%; transition: width 0.2s; }
-    .ota-status { font-size: 0.8rem; color: var(--text-dim); margin-top: 8px; }
-    .area-actions { grid-column: span 12; }
-    .action-row { display: flex; gap: 12px; }
-    .action-row .btn { flex: 1; }
-    .hint { font-size: 0.75rem; color: var(--text-dim); margin: 4px 0 0 0; }
-    .threshold-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
-    .threshold-node { background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
-    .threshold-node h4 { margin: 0 0 14px; font-size: 0.82rem; color: var(--accent); font-weight: 600; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .threshold-sub h5 { margin: 0 0 10px; font-size: 0.72rem; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
-    .threshold-sub { margin-bottom: 16px; }
-    .threshold-sub:last-child { margin-bottom: 0; }
-    @media (max-width: 900px) {
-      .area-net, .area-api, .area-appearance { grid-column: span 12; }
-      .action-row { flex-direction: column; }
-      .action-row .btn { width: 100%; }
-      .filter-item { flex: 1 0 45%; }
-      .threshold-grid { grid-template-columns: 1fr; }
+
+    .color-swatch {
+      width: 44px; height: 38px; padding: 0; border: 1px solid var(--border);
+      background: none; border-radius: var(--radius-sm); cursor: pointer;
+      flex-shrink: 0;
     }
+
+    .filter-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+      gap: 8px;
+    }
+    .filter-chip {
+      display: flex; flex-direction: column; align-items: center; gap: 6px;
+      padding: 10px 6px; border-radius: var(--radius-sm);
+      background: rgba(255,255,255,0.02);
+    }
+    .filter-chip label {
+      font-size: 0.65rem; color: var(--text-muted);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      max-width: 100%; text-align: center;
+    }
+    .filter-dot {
+      width: 32px; height: 32px; border-radius: var(--radius-sm);
+      border: 1px solid var(--border); cursor: pointer; padding: 0;
+      background: none; transition: transform 0.1s;
+    }
+    .filter-dot:active { transform: scale(0.9); }
+
+    .divider { border-top: 1px solid var(--border); margin: 20px 0; }
+
+    .sub-tabs {
+      display: flex; gap: 4px; margin-bottom: 20px;
+      overflow-x: auto; -webkit-overflow-scrolling: touch;
+    }
+    .sub-tab {
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--text-muted); cursor: pointer;
+      padding: 8px 16px; border-radius: var(--radius-sm);
+      font-size: 0.8rem; font-weight: 500; white-space: nowrap;
+      transition: all 0.15s; font-family: inherit;
+    }
+    .sub-tab:hover { color: var(--text); border-color: rgba(255,255,255,0.12); }
+    .sub-tab.active { color: var(--text); background: rgba(255,255,255,0.06); border-color: var(--accent); }
+
+    .node-panel { display: none; }
+    .node-panel.active { display: block; }
+
+    .toast {
+      position: fixed; top: 72px; right: 24px; z-index: 200;
+      background: var(--surface); border: 1px solid var(--border);
+      padding: 12px 20px; border-radius: var(--radius);
+      font-size: 0.85rem; box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+      transform: translateX(120%); transition: transform 0.3s ease;
+    }
+    .toast.show { transform: translateX(0); }
+    .toast.success { border-left: 3px solid var(--success); }
+    .toast.error { border-left: 3px solid var(--danger); }
+
+    .save-bar {
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 90;
+      background: var(--surface); border-top: 1px solid var(--border);
+      padding: 10px 24px; display: flex; align-items: center;
+      justify-content: flex-end; gap: 12px;
+      height: var(--save-bar-height);
+      transform: translateY(100%); transition: transform 0.2s ease;
+    }
+    .save-bar.visible { transform: translateY(0); }
+    .save-bar .changes-hint {
+      font-size: 0.8rem; color: var(--text-muted); margin-right: auto;
+    }
+    @media (max-width: 768px) {
+      .save-bar { bottom: var(--bottom-nav-height); }
+      .toast { top: auto; bottom: calc(var(--bottom-nav-height) + var(--save-bar-height) + 16px); right: 16px; }
+    }
+
+    .fw-item {
+      background: rgba(255,255,255,0.02); padding: 10px 12px;
+      border-radius: var(--radius-sm); border: 1px solid var(--border);
+    }
+    .fw-label { font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; margin-bottom: 2px; }
+    .fw-value { font-size: 0.85rem; font-weight: 600; word-break: break-all; }
+    .ota-label {
+      flex: 1; min-width: 200px; text-align: center;
+      background: var(--bg); border: 1px dashed var(--border); color: var(--text-muted);
+      padding: 12px 20px; border-radius: var(--radius-sm); cursor: pointer;
+      font-size: 0.85rem; transition: all 0.15s;
+    }
+    .ota-label:hover { border-color: var(--accent); color: var(--text); }
+    .ota-label.has-file { border-color: var(--accent); border-style: solid; color: var(--accent); }
+    .fw-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(140px,1fr)); gap: 8px; margin-bottom: 20px; }
+    .flex-wrap-gap { display: flex; flex-wrap: wrap; gap: 12px; }
+    .flex-col-gap { display: flex; flex-direction: column; gap: 10px; }
+    .arp-label { display: flex; align-items: center; gap: 10px; font-size: 0.875rem; cursor: pointer; }
+    .arp-cb { accent-color: var(--accent); width: 18px; height: 18px; }
+    .hint-center { text-align: center; padding: 8px 0; }
+    .accent-link { color: var(--accent); text-decoration: none; }
+    .mono-link { color: var(--accent); text-decoration: none; font-family: monospace; }
+    .ota-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 16px; }
+    .progress-bg { background: rgba(255,255,255,0.06); border-radius: 4px; height: 8px; overflow: hidden; }
+    .progress-fill { height: 100%; width: 0%; background: var(--accent); border-radius: 4px; transition: width 0.3s; }
+    .progress-status { font-size: 0.8rem; color: var(--text-muted); margin-top: 8px; text-align: center; }
   </style>
 </head>
 <body>
-<div class="container">
-  <header style="display:flex;align-items:flex-start;justify-content:space-between"><div><h1>NINA DISPLAY</h1><p>System Configuration</p></div><a href="https://github.com/chvvkumar/ESP32-P4-NINA-Display" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:6px;color:var(--text-dim);text-decoration:none;font-size:0.8rem;padding:6px 10px;border:1px solid var(--border);border-radius:8px;transition:all 0.2s" onmouseover="this.style.color='var(--text)';this.style.borderColor='var(--accent)'" onmouseout="this.style.color='var(--text-dim)';this.style.borderColor='var(--border)'"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>GitHub</a></header>
-  <div class="bento-grid">
 
-    <div class="tile area-net">
-      <h3>Connectivity</h3>
-      <div class="group"><label>WiFi SSID</label><input type="text" id="ssid"></div>
-      <div class="group"><label>WiFi Password</label><input type="password" id="pass" placeholder="Enter new password to change"><p class="hint">Stored in WiFi hardware. Leave blank to keep current.</p></div>
-      <div class="group"><label>NTP Server</label><input type="text" id="ntp"></div>
-      <div class="group"><label>Timezone</label><select id="timezone">
-        <option value="">UTC (default)</option>
-        <option value="GMT0">GMT</option>
-        <option value="GMT0BST,M3.5.0/1,M10.5.0">UK (GMT/BST)</option>
-        <option value="CET-1CEST,M3.5.0,M10.5.0/3">Central Europe (CET/CEST)</option>
-        <option value="EET-2EEST,M3.5.0/3,M10.5.0/4">Eastern Europe (EET/EEST)</option>
-        <option value="EST5EDT,M3.2.0,M11.1.0">US Eastern (EST/EDT)</option>
-        <option value="CST6CDT,M3.2.0,M11.1.0">US Central (CST/CDT)</option>
-        <option value="MST7MDT,M3.2.0,M11.1.0">US Mountain (MST/MDT)</option>
-        <option value="MST7">US Arizona (MST, no DST)</option>
-        <option value="PST8PDT,M3.2.0,M11.1.0">US Pacific (PST/PDT)</option>
-        <option value="AKST9AKDT,M3.2.0,M11.1.0">US Alaska (AKST/AKDT)</option>
-        <option value="HST10">US Hawaii (HST, no DST)</option>
-        <option value="AEST-10AEDT,M10.1.0,M4.1.0/3">Australia Eastern (AEST/AEDT)</option>
-        <option value="ACST-9:30ACDT,M10.1.0,M4.1.0/3">Australia Central (ACST/ACDT)</option>
-        <option value="AWST-8">Australia Western (AWST, no DST)</option>
-        <option value="NZST-12NZDT,M9.5.0,M4.1.0/3">New Zealand (NZST/NZDT)</option>
-        <option value="JST-9">Japan (JST)</option>
-        <option value="CST-8">China (CST)</option>
-        <option value="IST-5:30">India (IST)</option>
-        <option value="<-03>3">Argentina (ART)</option>
-        <option value="<-03>3<-02>,M10.3.0/0,M2.3.0/0">Brazil (BRT/BRST)</option>
-        <option value="SAST-2">South Africa (SAST)</option>
-      </select></div>
-      <div style="border-top:1px solid var(--border);margin:16px 0 14px"></div>
-      <div class="group" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">MQTT / Home Assistant</label><label class="toggle"><input type="checkbox" id="mqtt_enabled"><span class="toggle-slider"></span></label></div>
-      <div class="group"><label>Broker Host</label><input type="text" id="mqtt_broker" placeholder="192.168.1.250"></div>
-      <div class="group"><label>Port</label><input type="text" id="mqtt_port" placeholder="1883"></div>
-      <div class="group"><label>Username</label><input type="text" id="mqtt_user"></div>
-      <div class="group"><label>Password</label><input type="password" id="mqtt_pass"></div>
-      <div class="group"><label>Topic Prefix</label><input type="text" id="mqtt_prefix" placeholder="ninadisplay"></div>
-      <p class="hint">Reboot required after changing WiFi, NTP, timezone, or MQTT settings.</p>
+  <nav class="top-nav">
+    <div class="brand"><span class="dot"></span> NINA Display</div>
+    <div class="tabs" id="topTabs">
+      <button class="tab-btn active" data-tab="quick">Quick</button>
+      <button class="tab-btn" data-tab="network">Network</button>
+      <button class="tab-btn" data-tab="nodes">Nodes</button>
+      <button class="tab-btn" data-tab="display">Display</button>
+      <button class="tab-btn" data-tab="system">System</button>
     </div>
+    <a class="github-link" href="https://github.com/chvvkumar/ESP32-P4-NINA-Display" target="_blank" rel="noopener">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+      GitHub
+    </a>
+  </nav>
 
-    <div class="tile area-api">
-      <h3>NINA Endpoints</h3>
-      <div class="group"><label>NINA 1</label><input type="text" id="url1" placeholder="astromele2.lan" oninput="updateNodeLabels()"></div>
-      <div class="group"><label>NINA 2</label><input type="text" id="url2" placeholder="astromele3.lan" oninput="updateNodeLabels()"></div>
-      <div class="group"><label>NINA 3</label><input type="text" id="url3" placeholder="astromele4.lan" oninput="updateNodeLabels()"></div>
+  <nav class="bottom-nav">
+    <div class="nav-items" id="bottomTabs">
+      <button class="nav-btn active" data-tab="quick">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        Quick
+      </button>
+      <button class="nav-btn" data-tab="network">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0114.08 0M1.42 9a16 16 0 0121.16 0M8.53 16.11a6 6 0 016.95 0M12 20h.01"/></svg>
+        Network
+      </button>
+      <button class="nav-btn" data-tab="nodes">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+        Nodes
+      </button>
+      <button class="nav-btn" data-tab="display">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        Display
+      </button>
+      <button class="nav-btn" data-tab="system">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
+        System
+      </button>
     </div>
+  </nav>
 
-    <div class="tile area-appearance">
-      <h3>Display</h3>
-      <div class="group">
-        <label>Theme</label>
-        <select id="theme_select" onchange="setTheme(this.value)">
-          <option value="0">Bento Default</option>
-          <option value="1">OLED Black</option>
-          <option value="2">Red Night</option>
-          <option value="3">Monochrome</option>
-          <option value="4">All Black</option>
-          <option value="5">Midnight Industrial</option>
-        </select>
-      </div>
-      <div class="group"><label>Backlight</label><div class="slider-wrapper"><input type="range" id="brightness" min="0" max="100" value="50" oninput="setBrightness(this.value)"><span id="bright_val" style="width:35px;font-size:0.8rem">50%</span></div></div>
-      <div class="group"><label>Text Brightness</label><div class="slider-wrapper"><input type="range" id="color_brightness" min="0" max="100" value="100" oninput="setColorBrightness(this.value)"><span id="cbright_val" style="width:35px;font-size:0.8rem">100%</span></div></div>
-      <div class="group"><label>Data Update Rate (seconds)</label><input type="number" id="update_rate" min="1" max="10" value="2"><p class="hint">How often exposure, filter, RMS and HFR update. Minimum 1 s.</p></div>
-      <div style="border-top:1px solid var(--border);margin:16px 0 14px"></div>
-      <div class="group"><label>Active Page</label><select id="active_page" onchange="setPage(this.value)"><option value="-1">Auto (no override)</option><option value="0">Summary</option><option value="1">NINA 1</option><option value="2">NINA 2</option><option value="3">NINA 3</option><option value="4">Settings</option><option value="5">System Info</option></select><p class="hint">Switches immediately and persists through reboots. Set to Auto when using rotation.</p></div>
-      <div class="group" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">Auto-Rotate Pages</label><label class="toggle"><input type="checkbox" id="auto_rotate_enabled"><span class="toggle-slider"></span></label></div>
-      <div class="group"><label>Rotation Interval (seconds)</label><input type="number" id="auto_rotate_interval" min="4" max="3600" value="30"><p class="hint">Pages rotate every N seconds. Minimum effective interval is ~4 s.</p></div>
-      <div class="group"><label>Transition Effect</label><select id="auto_rotate_effect"><option value="0">Instant</option><option value="1">Fade</option><option value="2">Slide Left</option><option value="3">Slide Right</option></select></div>
-      <div class="group" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">Skip Disconnected Pages</label><label class="toggle"><input type="checkbox" id="auto_rotate_skip"><span class="toggle-slider"></span></label></div>
-      <div class="group"><label>Pages in Rotation</label>
-        <div style="display:flex;flex-direction:column;gap:8px;margin-top:6px">
-          <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:0.85rem;cursor:pointer"><input type="checkbox" id="arp_summary" style="width:auto"> Summary</label>
-          <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:0.85rem;cursor:pointer"><input type="checkbox" id="arp_nina1" style="width:auto"> <span id="arp_lbl1">NINA 1</span></label>
-          <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:0.85rem;cursor:pointer"><input type="checkbox" id="arp_nina2" style="width:auto"> <span id="arp_lbl2">NINA 2</span></label>
-          <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:0.85rem;cursor:pointer"><input type="checkbox" id="arp_nina3" style="width:auto"> <span id="arp_lbl3">NINA 3</span></label>
-          <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:0.85rem;cursor:pointer"><input type="checkbox" id="arp_settings" style="width:auto"> Settings</label>
-          <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:0.85rem;cursor:pointer"><input type="checkbox" id="arp_sysinfo" style="width:auto"> System Info</label>
+  <main class="content">
+    <div id="tab-quick" class="tab-panel active">
+      <div class="card">
+        <div class="card-title">Appearance</div>
+        <div class="field">
+          <label class="field-label">Theme</label>
+          <select class="input" id="theme_select" onchange="setTheme(this.value)">
+            <option value="0">Bento Default</option>
+            <option value="1">OLED Black</option>
+            <option value="2">Red Night</option>
+            <option value="3">Monochrome</option>
+            <option value="4">All Black</option>
+            <option value="5">Midnight Industrial</option>
+          </select>
         </div>
-        <p class="hint">Select which pages are included in automatic rotation.</p>
-      </div>
-    </div>
-
-    <div class="tile area-thresholds">
-      <h3>NINA Settings</h3>
-      <div class="threshold-grid">
-
-        <div class="threshold-node">
-          <h4 id="tnode0">Node 1</h4>
-          <div class="threshold-sub"><h5>Filters</h5><div id="filters_0" class="filter-grid"></div></div>
-          <div class="threshold-sub"><h5>RMS</h5>
-            <div class="group"><label>Target (Optimal)</label><div style="display:flex;gap:8px"><input type="text" id="rms_good_max_0"><input type="color" id="rms_good_color_0" class="color-rect"></div></div>
-            <div class="group"><label>Warning (Caution)</label><div style="display:flex;gap:8px"><input type="text" id="rms_ok_max_0"><input type="color" id="rms_ok_color_0" class="color-rect"></div></div>
-            <div class="group"><label>Critical Color</label><input type="color" id="rms_bad_color_0" class="color-rect" style="width:100%"></div>
-          </div>
-          <div class="threshold-sub"><h5>HFR</h5>
-            <div class="group"><label>Target (Optimal)</label><div style="display:flex;gap:8px"><input type="text" id="hfr_good_max_0"><input type="color" id="hfr_good_color_0" class="color-rect"></div></div>
-            <div class="group"><label>Warning (Caution)</label><div style="display:flex;gap:8px"><input type="text" id="hfr_ok_max_0"><input type="color" id="hfr_ok_color_0" class="color-rect"></div></div>
-            <div class="group"><label>Critical Color</label><input type="color" id="hfr_bad_color_0" class="color-rect" style="width:100%"></div>
+        <div class="field">
+          <label class="field-label">Backlight</label>
+          <div class="slider-group">
+            <input type="range" class="slider" id="brightness" min="0" max="100" value="80" oninput="setBrightness(this.value)">
+            <span class="slider-val" id="brightness_val">80%</span>
           </div>
         </div>
-
-        <div class="threshold-node">
-          <h4 id="tnode1">Node 2</h4>
-          <div class="threshold-sub"><h5>Filters</h5><div id="filters_1" class="filter-grid"></div></div>
-          <div class="threshold-sub"><h5>RMS</h5>
-            <div class="group"><label>Target (Optimal)</label><div style="display:flex;gap:8px"><input type="text" id="rms_good_max_1"><input type="color" id="rms_good_color_1" class="color-rect"></div></div>
-            <div class="group"><label>Warning (Caution)</label><div style="display:flex;gap:8px"><input type="text" id="rms_ok_max_1"><input type="color" id="rms_ok_color_1" class="color-rect"></div></div>
-            <div class="group"><label>Critical Color</label><input type="color" id="rms_bad_color_1" class="color-rect" style="width:100%"></div>
-          </div>
-          <div class="threshold-sub"><h5>HFR</h5>
-            <div class="group"><label>Target (Optimal)</label><div style="display:flex;gap:8px"><input type="text" id="hfr_good_max_1"><input type="color" id="hfr_good_color_1" class="color-rect"></div></div>
-            <div class="group"><label>Warning (Caution)</label><div style="display:flex;gap:8px"><input type="text" id="hfr_ok_max_1"><input type="color" id="hfr_ok_color_1" class="color-rect"></div></div>
-            <div class="group"><label>Critical Color</label><input type="color" id="hfr_bad_color_1" class="color-rect" style="width:100%"></div>
+        <div class="field">
+          <label class="field-label">Text brightness</label>
+          <div class="slider-group">
+            <input type="range" class="slider" id="color_brightness" min="0" max="100" value="80" oninput="setColorBrightness(this.value)">
+            <span class="slider-val" id="color_brightness_val">80%</span>
           </div>
         </div>
-
-        <div class="threshold-node">
-          <h4 id="tnode2">Node 3</h4>
-          <div class="threshold-sub"><h5>Filters</h5><div id="filters_2" class="filter-grid"></div></div>
-          <div class="threshold-sub"><h5>RMS</h5>
-            <div class="group"><label>Target (Optimal)</label><div style="display:flex;gap:8px"><input type="text" id="rms_good_max_2"><input type="color" id="rms_good_color_2" class="color-rect"></div></div>
-            <div class="group"><label>Warning (Caution)</label><div style="display:flex;gap:8px"><input type="text" id="rms_ok_max_2"><input type="color" id="rms_ok_color_2" class="color-rect"></div></div>
-            <div class="group"><label>Critical Color</label><input type="color" id="rms_bad_color_2" class="color-rect" style="width:100%"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Navigation</div>
+        <div class="field">
+          <label class="field-label">Active page</label>
+          <select class="input" id="active_page" onchange="setPage(this.value)">
+            <option value="-1">Auto</option>
+            <option value="0">Summary</option>
+            <option value="1">NINA 1</option>
+            <option value="2">NINA 2</option>
+            <option value="3">NINA 3</option>
+            <option value="4">Settings</option>
+            <option value="5">System Info</option>
+          </select>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">Auto-rotate</span>
+          <label class="toggle"><input type="checkbox" id="auto_rotate_enabled"><span class="toggle-track"></span></label>
+        </div>
+        <div class="field">
+          <label class="field-label">Data update rate (seconds)</label>
+          <input type="number" class="input" id="update_rate" min="1" max="10" value="2">
+        </div>
+        <div class="field">
+          <label class="field-label">Graph update rate (seconds)</label>
+          <input type="number" class="input" id="graph_interval" min="2" max="30" value="5">
+        </div>
+      </div>
+    </div>
+    <div id="tab-network" class="tab-panel">
+      <div class="card">
+        <div class="card-title">WiFi</div>
+        <div class="field">
+          <label class="field-label">SSID</label>
+          <input type="text" class="input" id="ssid" placeholder="Network name">
+        </div>
+        <div class="field">
+          <label class="field-label">Password</label>
+          <input type="password" class="input" id="pass" placeholder="Enter new password to change">
+          <div class="field-hint">Password is stored in WiFi hardware and not readable.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Time</div>
+        <div class="field">
+          <label class="field-label">NTP server</label>
+          <input type="text" class="input" id="ntp" placeholder="pool.ntp.org">
+        </div>
+        <div class="field">
+          <label class="field-label">Timezone</label>
+          <select class="input" id="timezone">
+            <option value="">UTC (default)</option>
+            <option value="GMT0">GMT</option>
+            <option value="GMT0BST,M3.5.0/1,M10.5.0">UK (GMT/BST)</option>
+            <option value="CET-1CEST,M3.5.0,M10.5.0/3">Central Europe (CET/CEST)</option>
+            <option value="EET-2EEST,M3.5.0/3,M10.5.0/4">Eastern Europe (EET/EEST)</option>
+            <option value="EST5EDT,M3.2.0,M11.1.0">US Eastern (EST/EDT)</option>
+            <option value="CST6CDT,M3.2.0,M11.1.0">US Central (CST/CDT)</option>
+            <option value="MST7MDT,M3.2.0,M11.1.0">US Mountain (MST/MDT)</option>
+            <option value="MST7">US Arizona (MST, no DST)</option>
+            <option value="PST8PDT,M3.2.0,M11.1.0">US Pacific (PST/PDT)</option>
+            <option value="AKST9AKDT,M3.2.0,M11.1.0">US Alaska (AKST/AKDT)</option>
+            <option value="HST10">US Hawaii (HST, no DST)</option>
+            <option value="AEST-10AEDT,M10.1.0,M4.1.0/3">Australia Eastern (AEST/AEDT)</option>
+            <option value="ACST-9:30ACDT,M10.1.0,M4.1.0/3">Australia Central (ACST/ACDT)</option>
+            <option value="AWST-8">Australia Western (AWST, no DST)</option>
+            <option value="NZST-12NZDT,M9.5.0,M4.1.0/3">New Zealand (NZST/NZDT)</option>
+            <option value="JST-9">Japan (JST)</option>
+            <option value="CST-8">China (CST)</option>
+            <option value="IST-5:30">India (IST)</option>
+            <option value="<-03>3">Argentina (ART)</option>
+            <option value="<-03>3<-02>,M10.3.0/0,M2.3.0/0">Brazil (BRT/BRST)</option>
+            <option value="SAST-2">South Africa (SAST)</option>
+          </select>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">MQTT</div>
+        <div class="toggle-row">
+          <span class="toggle-label">Enable MQTT</span>
+          <label class="toggle"><input type="checkbox" id="mqtt_enabled"><span class="toggle-track"></span></label>
+        </div>
+        <div class="field">
+          <label class="field-label">Broker host</label>
+          <input type="text" class="input" id="mqtt_broker" placeholder="192.168.1.250">
+        </div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Port</label>
+            <input type="text" class="input" id="mqtt_port" placeholder="1883">
           </div>
-          <div class="threshold-sub"><h5>HFR</h5>
-            <div class="group"><label>Target (Optimal)</label><div style="display:flex;gap:8px"><input type="text" id="hfr_good_max_2"><input type="color" id="hfr_good_color_2" class="color-rect"></div></div>
-            <div class="group"><label>Warning (Caution)</label><div style="display:flex;gap:8px"><input type="text" id="hfr_ok_max_2"><input type="color" id="hfr_ok_color_2" class="color-rect"></div></div>
-            <div class="group"><label>Critical Color</label><input type="color" id="hfr_bad_color_2" class="color-rect" style="width:100%"></div>
+          <div class="field">
+            <label class="field-label">Topic prefix</label>
+            <input type="text" class="input" id="mqtt_prefix" placeholder="ninadisplay">
           </div>
         </div>
-
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Username</label>
+            <input type="text" class="input" id="mqtt_user" placeholder="Username">
+          </div>
+          <div class="field">
+            <label class="field-label">Password</label>
+            <input type="password" class="input" id="mqtt_pass" placeholder="Password">
+          </div>
+        </div>
+      </div>
+      <div class="field-hint hint-center">Reboot required after changing WiFi, NTP, timezone, or MQTT settings.</div>
+    </div>
+    <div id="tab-nodes" class="tab-panel">
+      <div class="sub-tabs">
+        <button class="sub-tab active" data-node="0">Node 1</button>
+        <button class="sub-tab" data-node="1">Node 2</button>
+        <button class="sub-tab" data-node="2">Node 3</button>
+      </div>
+      <div id="node-panels"></div>
+    </div>
+    <div id="tab-display" class="tab-panel">
+      <div class="card">
+        <div class="card-title">Auto-rotation</div>
+        <div class="field">
+          <label class="field-label">Rotation interval (seconds)</label>
+          <input type="number" class="input" id="auto_rotate_interval" min="4" max="3600" value="30">
+        </div>
+        <div class="field">
+          <label class="field-label">Transition effect</label>
+          <select class="input" id="auto_rotate_effect">
+            <option value="0">Instant</option>
+            <option value="1">Fade</option>
+            <option value="2">Slide Left</option>
+            <option value="3">Slide Right</option>
+          </select>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">Skip disconnected nodes</span>
+          <label class="toggle"><input type="checkbox" id="auto_rotate_skip"><span class="toggle-track"></span></label>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Pages in rotation</div>
+        <div class="flex-col-gap" id="arp-container"></div>
       </div>
     </div>
-
-    <div class="tile area-firmware">
-      <h3>Firmware Update</h3>
-      <div class="firmware-info">
-        <div class="firmware-info-item"><div class="label">Version</div><div class="value" id="fw_version">--</div></div>
-        <div class="firmware-info-item"><div class="label">Built</div><div class="value" id="fw_date">--</div></div>
-        <div class="firmware-info-item"><div class="label">IDF</div><div class="value" id="fw_idf">--</div></div>
-        <div class="firmware-info-item"><div class="label">Partition</div><div class="value" id="fw_partition">--</div></div>
-        <div class="firmware-info-item"><div class="label">Release</div><div class="value" id="fw_git_tag">--</div></div>
-        <div class="firmware-info-item"><div class="label">Commit</div><div class="value" id="fw_git_sha">--</div></div>
+    <div id="tab-system" class="tab-panel">
+      <div class="card">
+        <div class="card-title">Firmware</div>
+        <div class="fw-grid">
+          <div class="fw-item"><div class="fw-label">Version</div><div class="fw-value" id="fw_version">--</div></div>
+          <div class="fw-item"><div class="fw-label">Built</div><div class="fw-value" id="fw_date">--</div></div>
+          <div class="fw-item"><div class="fw-label">IDF</div><div class="fw-value" id="fw_idf">--</div></div>
+          <div class="fw-item"><div class="fw-label">Partition</div><div class="fw-value" id="fw_partition">--</div></div>
+          <div class="fw-item"><div class="fw-label">Release</div><div class="fw-value" id="fw_git_tag">--</div></div>
+          <div class="fw-item"><div class="fw-label">Commit</div><div class="fw-value" id="fw_git_sha">--</div></div>
+        </div>
+        <div class="divider"></div>
+        <div class="ota-bar">
+          <label class="ota-label" id="otaFileLabel">
+            Choose firmware .bin file
+            <input type="file" id="otaFile" accept=".bin" style="display:none" onchange="otaFileSelected(this)">
+          </label>
+          <button class="btn btn-primary" id="otaBtn" disabled onclick="startOta()">Update</button>
+        </div>
+        <div id="otaProgress" style="display:none;margin-top:16px">
+          <div class="progress-bg">
+            <div id="otaProgressFill" class="progress-fill"></div>
+          </div>
+          <div id="otaStatus" class="progress-status"></div>
+        </div>
       </div>
-      <div class="ota-controls">
-        <label class="ota-file-label" id="otaFileLabel" for="otaFile">Choose firmware .bin file</label>
-        <input type="file" id="otaFile" accept=".bin" onchange="otaFileSelected(this)">
-        <button class="btn btn-primary" id="otaBtn" onclick="startOta()" disabled style="flex:0 0 auto;width:auto;padding:14px 28px">UPDATE</button>
-      </div>
-      <div class="progress-wrap" id="otaProgress">
-        <div class="progress-bar"><div class="progress-bar-fill" id="otaProgressFill"></div></div>
-        <div class="ota-status" id="otaStatus"></div>
+      <div class="card">
+        <div class="card-title">Device</div>
+        <div class="flex-wrap-gap">
+          <button class="btn btn-outline" onclick="saveAndReboot()">Reboot</button>
+          <button class="btn btn-danger" onclick="factoryReset()">Factory Reset</button>
+        </div>
       </div>
     </div>
+  </main>
 
-    <div class="tile area-actions">
-      <h3>Actions</h3>
-      <div class="action-row">
-        <button class="btn btn-primary" id="saveBtn" onclick="save()">SAVE</button>
-        <button class="btn btn-outline" onclick="saveAndReboot()">REBOOT</button>
-        <button class="btn btn-danger" onclick="factoryReset()">FACTORY RESET</button>
-      </div>
-    </div>
-
+  <div class="save-bar" id="saveBar">
+    <span class="changes-hint">Unsaved changes</span>
+    <button class="btn btn-outline" onclick="reloadConfig()">Discard</button>
+    <button class="btn btn-primary" id="saveBtn" onclick="save()">Save</button>
   </div>
-</div>
-<script>
-let filterColorsArr=[{},{},{}];
-function renderFilterColors(i){const c=document.getElementById('filters_'+i);if(!c)return;c.innerHTML='';const obj=filterColorsArr[i];const fs=Object.keys(obj).sort();if(fs.length===0){c.innerHTML='<p style="color:var(--text-dim);font-style:italic;font-size:0.7rem">No filters</p>';return;}fs.slice(0,8).forEach(f=>{const w=document.createElement('div');w.className='filter-item';w.innerHTML=`<label>${f}</label><input type='color' class='color-dot' value='${obj[f]}' onchange='updateFilterColor(${i},"${f}",this.value)'>`;c.appendChild(w);});}
-function updateFilterColor(i,n,v){filterColorsArr[i][n]=v;}
-function updateNodeLabels(){['url1','url2','url3'].forEach((id,i)=>{const v=document.getElementById(id).value.trim();document.getElementById('tnode'+i).innerText=v||('Node '+(i+1));const lbl=document.getElementById('arp_lbl'+(i+1));if(lbl)lbl.innerText=v?('NINA '+(i+1)+': '+v):('NINA '+(i+1));});updatePageSelectOptions();}
-function updatePageSelectOptions(){const sel=document.getElementById('active_page');if(!sel)return;['url1','url2','url3'].forEach((id,i)=>{const opt=sel.options[i+2];if(!opt)return;const v=document.getElementById(id).value.trim();opt.text=v?('NINA '+(i+1)+': '+v):('NINA '+(i+1));opt.disabled=!v;});/* Settings=index 5, System Info=index 6 in the dropdown */}
-function setPage(v){fetch('/api/page',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({page:parseInt(v)})});}
-function setTheme(v){fetch('/api/theme',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({theme_index:parseInt(v)})});}
-let brightTimer=null;function setBrightness(v){document.getElementById('bright_val').innerText=v+'%';clearTimeout(brightTimer);brightTimer=setTimeout(()=>{fetch('/api/brightness',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({brightness:parseInt(v)})});},150);}
-let cbrightTimer=null;function setColorBrightness(v){document.getElementById('cbright_val').innerText=v+'%';clearTimeout(cbrightTimer);cbrightTimer=setTimeout(()=>{fetch('/api/color-brightness',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({color_brightness:parseInt(v)})});},150);}
-function getRmsObj(i){return{good_max:parseFloat(document.getElementById('rms_good_max_'+i).value)||0.5,ok_max:parseFloat(document.getElementById('rms_ok_max_'+i).value)||1.0,good_color:document.getElementById('rms_good_color_'+i).value,ok_color:document.getElementById('rms_ok_color_'+i).value,bad_color:document.getElementById('rms_bad_color_'+i).value};}
-function getHfrObj(i){return{good_max:parseFloat(document.getElementById('hfr_good_max_'+i).value)||2.0,ok_max:parseFloat(document.getElementById('hfr_ok_max_'+i).value)||3.5,good_color:document.getElementById('hfr_good_color_'+i).value,ok_color:document.getElementById('hfr_ok_color_'+i).value,bad_color:document.getElementById('hfr_bad_color_'+i).value};}
-function getRotatePages(){let m=0;if(document.getElementById('arp_summary').checked)m|=0x01;if(document.getElementById('arp_nina1').checked)m|=0x02;if(document.getElementById('arp_nina2').checked)m|=0x04;if(document.getElementById('arp_nina3').checked)m|=0x08;if(document.getElementById('arp_sysinfo').checked)m|=0x10;if(document.getElementById('arp_settings').checked)m|=0x20;return m;}
-function setRotatePages(m){document.getElementById('arp_summary').checked=!!(m&0x01);document.getElementById('arp_nina1').checked=!!(m&0x02);document.getElementById('arp_nina2').checked=!!(m&0x04);document.getElementById('arp_nina3').checked=!!(m&0x08);document.getElementById('arp_sysinfo').checked=!!(m&0x10);document.getElementById('arp_settings').checked=!!(m&0x20);}
-function getConfigData(){const h1=document.getElementById('url1').value.trim();const h2=document.getElementById('url2').value.trim();const h3=document.getElementById('url3').value.trim();const u1=h1?'http://'+h1+':1888/v2/api/':'';const u2=h2?'http://'+h2+':1888/v2/api/':'';const u3=h3?'http://'+h3+':1888/v2/api/':'';const mb=document.getElementById('mqtt_broker').value.trim();const mu=mb?'mqtt://'+mb:'';const d={url1:u1,url2:u2,url3:u3,ntp:document.getElementById('ntp').value,timezone:document.getElementById('timezone').value,theme_index:parseInt(document.getElementById('theme_select').value),brightness:parseInt(document.getElementById('brightness').value),color_brightness:parseInt(document.getElementById('color_brightness').value),filter_colors_1:JSON.stringify(filterColorsArr[0]),filter_colors_2:JSON.stringify(filterColorsArr[1]),filter_colors_3:JSON.stringify(filterColorsArr[2]),rms_thresholds_1:JSON.stringify(getRmsObj(0)),rms_thresholds_2:JSON.stringify(getRmsObj(1)),rms_thresholds_3:JSON.stringify(getRmsObj(2)),hfr_thresholds_1:JSON.stringify(getHfrObj(0)),hfr_thresholds_2:JSON.stringify(getHfrObj(1)),hfr_thresholds_3:JSON.stringify(getHfrObj(2)),mqtt_enabled:document.getElementById('mqtt_enabled').checked,mqtt_broker_url:mu,mqtt_port:parseInt(document.getElementById('mqtt_port').value)||1883,mqtt_username:document.getElementById('mqtt_user').value,mqtt_password:document.getElementById('mqtt_pass').value,mqtt_topic_prefix:document.getElementById('mqtt_prefix').value||'ninadisplay',active_page_override:parseInt(document.getElementById('active_page').value),auto_rotate_enabled:document.getElementById('auto_rotate_enabled').checked,auto_rotate_interval_s:parseInt(document.getElementById('auto_rotate_interval').value)||30,auto_rotate_effect:parseInt(document.getElementById('auto_rotate_effect').value),auto_rotate_skip_disconnected:document.getElementById('auto_rotate_skip').checked,auto_rotate_pages:getRotatePages(),update_rate_s:parseInt(document.getElementById('update_rate').value)||2};const ss=document.getElementById('ssid').value;const pp=document.getElementById('pass').value;if(ss)d.ssid=ss;if(pp)d.pass=pp;return d;}
-function loadThresholds(d,i,rkey,hkey){try{const r=JSON.parse(d[rkey]||'{}');document.getElementById('rms_good_max_'+i).value=r.good_max||0.5;document.getElementById('rms_ok_max_'+i).value=r.ok_max||1.0;document.getElementById('rms_good_color_'+i).value=r.good_color||'#10b981';document.getElementById('rms_ok_color_'+i).value=r.ok_color||'#eab308';document.getElementById('rms_bad_color_'+i).value=r.bad_color||'#ef4444';}catch(e){}try{const h=JSON.parse(d[hkey]||'{}');document.getElementById('hfr_good_max_'+i).value=h.good_max||2.0;document.getElementById('hfr_ok_max_'+i).value=h.ok_max||3.5;document.getElementById('hfr_good_color_'+i).value=h.good_color||'#10b981';document.getElementById('hfr_ok_color_'+i).value=h.ok_color||'#eab308';document.getElementById('hfr_bad_color_'+i).value=h.bad_color||'#ef4444';}catch(e){}}
-function save(){const b=document.getElementById('saveBtn');const ot=b.innerText;b.innerText='SYNCING...';b.disabled=true;fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(getConfigData())}).then(r=>{if(r.ok){b.innerText='SUCCESS';setTimeout(()=>{b.innerText=ot;b.disabled=false;},2000);}else{b.innerText='ERROR';setTimeout(()=>{b.innerText=ot;b.disabled=false;},2000);}}).catch(()=>{b.innerText='FAIL';b.disabled=false;});}
-function saveAndReboot(){if(!confirm('Apply changes and reboot now?'))return;fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(getConfigData())}).then(r=>{if(r.ok){fetch('/api/reboot',{method:'POST'});}else{r.json().then(j=>alert('Save failed: '+(j.error||r.statusText))).catch(()=>alert('Save failed: '+r.statusText));}}).catch(()=>alert('Save failed: network error'));}
-function factoryReset(){if(confirm('Wipe all settings?')&&confirm('Confirm Reset?'))fetch('/api/factory-reset',{method:'POST'});}
-function otaFileSelected(input){const lbl=document.getElementById('otaFileLabel');const btn=document.getElementById('otaBtn');if(input.files.length>0){lbl.textContent=input.files[0].name;lbl.classList.add('has-file');btn.disabled=false;}else{lbl.textContent='Choose firmware .bin file';lbl.classList.remove('has-file');btn.disabled=true;}}
-function startOta(){const fileInput=document.getElementById('otaFile');if(!fileInput.files.length)return;const file=fileInput.files[0];if(!confirm('Update firmware to "'+file.name+'"?\nThe device will reboot after the update.'))return;const btn=document.getElementById('otaBtn');const wrap=document.getElementById('otaProgress');const fill=document.getElementById('otaProgressFill');const status=document.getElementById('otaStatus');btn.disabled=true;btn.textContent='UPLOADING...';wrap.style.display='block';fill.style.width='0%';status.textContent='Starting upload...';const xhr=new XMLHttpRequest();xhr.open('POST','/api/ota',true);xhr.setRequestHeader('Content-Type','application/octet-stream');xhr.upload.onprogress=function(e){if(e.lengthComputable){const pct=Math.round((e.loaded/e.total)*100);fill.style.width=pct+'%';status.textContent='Uploading: '+pct+'% ('+Math.round(e.loaded/1024)+' / '+Math.round(e.total/1024)+' KB)';}};xhr.onload=function(){if(xhr.status===200){fill.style.width='100%';status.textContent='Update complete! Rebooting device...';btn.textContent='REBOOTING';status.style.color='var(--accent)';}else{let msg='Upload failed';try{const j=JSON.parse(xhr.responseText);if(j.error)msg=j.error;}catch(e){}status.textContent='Error: '+msg;status.style.color='var(--danger)';btn.textContent='UPDATE';btn.disabled=false;}};xhr.onerror=function(){status.textContent='Network error during upload';status.style.color='var(--danger)';btn.textContent='UPDATE';btn.disabled=false;};xhr.send(file);}
-fetch('/api/version').then(r=>r.json()).then(d=>{document.getElementById('fw_version').textContent=d.version||'--';document.getElementById('fw_date').textContent=(d.date||'')+' '+(d.time||'');document.getElementById('fw_idf').textContent=d.idf||'--';document.getElementById('fw_partition').textContent=d.partition||'--';const te=document.getElementById('fw_git_tag');if(d.git_tag&&d.git_tag!=='unknown'){const a=document.createElement('a');a.href='https://github.com/chvvkumar/ESP32-P4-NINA-Display/releases/tag/'+d.git_tag;a.target='_blank';a.rel='noopener';a.textContent=d.git_tag;a.style.cssText='color:var(--accent);text-decoration:none';te.textContent='';te.appendChild(a);}else{te.textContent=d.git_tag||'--';}const se=document.getElementById('fw_git_sha');if(d.git_sha&&d.git_sha!=='unknown'){const a=document.createElement('a');a.href='https://github.com/chvvkumar/ESP32-P4-NINA-Display/commit/'+d.git_sha;a.target='_blank';a.rel='noopener';a.textContent=d.git_sha;a.style.cssText='color:var(--accent);text-decoration:none;font-family:monospace';se.textContent='';se.appendChild(a);}else{se.textContent=d.git_sha||'--';}}).catch(()=>{});
-fetch('/api/config').then(r=>r.json()).then(d=>{
-  document.getElementById('ssid').value=d.ssid||'';
-  /* Password is never returned from the API — leave blank */
-  document.getElementById('ntp').value=d.ntp||'';
-  document.getElementById('timezone').value=d.timezone||'';
-  const extractHost=u=>{if(!u)return '';const m=u.match(/^https?:\/\/([^:/]+)/);return m?m[1]:u;};
-  document.getElementById('url1').value=extractHost(d.url1);
-  document.getElementById('url2').value=extractHost(d.url2);
-  document.getElementById('url3').value=extractHost(d.url3||'');
-  document.getElementById('theme_select').value=d.theme_index||0;
-  var br=d.brightness!=null?d.brightness:50;document.getElementById('brightness').value=br;document.getElementById('bright_val').innerText=br+'%';
-  var cb=d.color_brightness!=null?d.color_brightness:100;document.getElementById('color_brightness').value=cb;document.getElementById('cbright_val').innerText=cb+'%';
-  document.getElementById('update_rate').value=d.update_rate_s||2;
-  try{filterColorsArr[0]=JSON.parse(d.filter_colors_1||'{}');}catch(e){}
-  try{filterColorsArr[1]=JSON.parse(d.filter_colors_2||'{}');}catch(e){}
-  try{filterColorsArr[2]=JSON.parse(d.filter_colors_3||'{}');}catch(e){}
-  renderFilterColors(0);renderFilterColors(1);renderFilterColors(2);
-  loadThresholds(d,0,'rms_thresholds_1','hfr_thresholds_1');
-  loadThresholds(d,1,'rms_thresholds_2','hfr_thresholds_2');
-  loadThresholds(d,2,'rms_thresholds_3','hfr_thresholds_3');
-  updateNodeLabels();
-  document.getElementById('mqtt_enabled').checked=!!d.mqtt_enabled;
-  const extractBrokerHost=u=>{if(!u)return '';const m=u.match(/^mqtts?:\/\/([^:/]+)/);return m?m[1]:u;};
-  document.getElementById('mqtt_broker').value=extractBrokerHost(d.mqtt_broker_url);
-  document.getElementById('mqtt_port').value=d.mqtt_port||1883;
-  document.getElementById('mqtt_user').value=d.mqtt_username||'';
-  document.getElementById('mqtt_pass').value=d.mqtt_password||'';
-  document.getElementById('mqtt_prefix').value=d.mqtt_topic_prefix||'ninadisplay';
-  document.getElementById('active_page').value=(d.active_page_override!=null)?d.active_page_override:-1;
-  document.getElementById('auto_rotate_enabled').checked=!!d.auto_rotate_enabled;
-  document.getElementById('auto_rotate_interval').value=d.auto_rotate_interval_s||30;
-  document.getElementById('auto_rotate_effect').value=d.auto_rotate_effect||0;
-  document.getElementById('auto_rotate_skip').checked=d.auto_rotate_skip_disconnected!==false;
-  setRotatePages(d.auto_rotate_pages!=null?d.auto_rotate_pages:0x0E);
-  updatePageSelectOptions();
-});
-</script>
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const $=id=>document.getElementById(id);
+    const $$=s=>document.querySelectorAll(s);
+
+    /* ---- Generate Node Panels ---- */
+    (function(){
+      const c=$('node-panels');
+      const placeholders=['192.168.1.100','192.168.1.101','192.168.1.102'];
+      for(let i=0;i<3;i++){
+        const n=i,urlId='url'+(i+1);
+        const active=i===0?' active':'';
+        c.insertAdjacentHTML('beforeend',
+          '<div class="node-panel'+active+'" data-node-panel="'+i+'">'+
+          '<div class="card"><div class="card-title">Endpoint</div>'+
+          '<div class="field"><label class="field-label">Hostname / IP</label>'+
+          '<input type="text" class="input" id="'+urlId+'" placeholder="'+placeholders[i]+'" oninput="updateNodeLabels()">'+
+          '</div></div>'+
+          '<div class="card"><div class="card-title">Filter colors</div>'+
+          '<div id="filters_'+i+'" class="filter-grid"></div></div>'+
+          '<div class="row stack-mobile">'+
+          '<div class="card"><div class="card-title">RMS thresholds</div>'+
+          mkThresholdFields('rms',i,'Target (optimal)','0.5','Warning (caution)','1.0')+
+          '</div>'+
+          '<div class="card"><div class="card-title">HFR thresholds</div>'+
+          mkThresholdFields('hfr',i,'Target (optimal)','2.0','Warning (caution)','3.5')+
+          '</div></div></div>'
+        );
+      }
+      function mkThresholdFields(pfx,i,lbl1,ph1,lbl2,ph2){
+        return '<div class="field"><label class="field-label">'+lbl1+'</label>'+
+          '<div class="row"><input type="text" class="input" id="'+pfx+'_good_max_'+i+'" placeholder="'+ph1+'">'+
+          '<input type="color" class="color-swatch" id="'+pfx+'_good_color_'+i+'" value="#10b981"></div></div>'+
+          '<div class="field"><label class="field-label">'+lbl2+'</label>'+
+          '<div class="row"><input type="text" class="input" id="'+pfx+'_ok_max_'+i+'" placeholder="'+ph2+'">'+
+          '<input type="color" class="color-swatch" id="'+pfx+'_ok_color_'+i+'" value="#eab308"></div></div>'+
+          '<div class="field"><label class="field-label">Critical</label>'+
+          '<input type="color" class="color-swatch" id="'+pfx+'_bad_color_'+i+'" value="#ef4444"></div>';
+      }
+    })();
+
+    /* ---- Generate Rotation Page Checkboxes ---- */
+    (function(){
+      const items=[
+        ['arp_summary','Summary'],
+        ['arp_nina1','<span id="arp_lbl1">NINA 1</span>'],
+        ['arp_nina2','<span id="arp_lbl2">NINA 2</span>'],
+        ['arp_nina3','<span id="arp_lbl3">NINA 3</span>'],
+        ['arp_settings','Settings'],
+        ['arp_sysinfo','System Info']
+      ];
+      const c=$('arp-container');
+      items.forEach(function(it){
+        c.insertAdjacentHTML('beforeend',
+          '<label class="arp-label"><input type="checkbox" id="'+it[0]+'" class="arp-cb"> '+it[1]+'</label>'
+        );
+      });
+    })();
+
+    /* ---- Tab Navigation ---- */
+    function switchTab(name) {
+      $$('.tab-panel').forEach(p=>p.classList.remove('active'));
+      $$('.tab-btn, .nav-btn').forEach(b=>b.classList.remove('active'));
+      const panel=$('tab-'+name);
+      if(panel) panel.classList.add('active');
+      $$('[data-tab="'+name+'"]').forEach(b=>b.classList.add('active'));
+      try{localStorage.setItem('nina_tab',name);}catch(e){}
+    }
+
+    $$('.tab-btn, .nav-btn').forEach(btn=>{
+      btn.addEventListener('click',()=>switchTab(btn.dataset.tab));
+    });
+
+    try{
+      const saved=localStorage.getItem('nina_tab');
+      if(saved&&$('tab-'+saved)) switchTab(saved);
+    }catch(e){}
+
+    /* ---- Node Sub-Tab Switching ---- */
+    function switchNode(idx) {
+      $$('.sub-tab').forEach(b=>b.classList.remove('active'));
+      $$('.node-panel').forEach(p=>p.classList.remove('active'));
+      const btn=document.querySelector('.sub-tab[data-node="'+idx+'"]');
+      const panel=document.querySelector('.node-panel[data-node-panel="'+idx+'"]');
+      if(btn) btn.classList.add('active');
+      if(panel) panel.classList.add('active');
+    }
+
+    $$('.sub-tab').forEach(btn=>{
+      btn.addEventListener('click',()=>switchNode(btn.dataset.node));
+    });
+
+    /* ---- Live API Controls ---- */
+    const postJson=(url,body)=>fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+
+    function setTheme(v){postJson('/api/theme',{theme_index:parseInt(v)})}
+
+    let _brightTimer=null;
+    function setBrightness(v){
+      $('brightness_val').textContent=v+'%';
+      clearTimeout(_brightTimer);
+      _brightTimer=setTimeout(()=>postJson('/api/brightness',{brightness:parseInt(v)}),150);
+    }
+
+    let _colorTimer=null;
+    function setColorBrightness(v){
+      $('color_brightness_val').textContent=v+'%';
+      clearTimeout(_colorTimer);
+      _colorTimer=setTimeout(()=>postJson('/api/color-brightness',{color_brightness:parseInt(v)}),150);
+    }
+
+    function setPage(v){postJson('/api/page',{page:parseInt(v)})}
+
+    /* ---- Filter Colors ---- */
+    let filterColorsArr=[{},{},{}];
+
+    function renderFilterColors(i){
+      const container=$('filters_'+i);
+      if(!container) return;
+      container.innerHTML='';
+      const names=Object.keys(filterColorsArr[i]);
+      if(!names.length){
+        container.innerHTML='<i style="color:var(--text-muted);font-size:0.8rem">No filters</i>';
+        return;
+      }
+      names.forEach(name=>{
+        const chip=document.createElement('div');
+        chip.className='filter-chip';
+        const lbl=document.createElement('label');
+        lbl.textContent=name;
+        const dot=document.createElement('input');
+        dot.type='color';
+        dot.className='filter-dot';
+        dot.value=filterColorsArr[i][name]||'#ffffff';
+        dot.addEventListener('input',()=>{filterColorsArr[i][name]=dot.value;checkDirty();});
+        chip.appendChild(dot);
+        chip.appendChild(lbl);
+        container.appendChild(chip);
+      });
+    }
+
+    /* ---- Node Labels ---- */
+    function updateNodeLabels(){
+      const urls=[$('url1').value.trim(),$('url2').value.trim(),$('url3').value.trim()];
+      $$('.sub-tab').forEach((btn,idx)=>{btn.textContent=urls[idx]||'Node '+(idx+1);});
+      for(let n=1;n<=3;n++){
+        const lbl=$('arp_lbl'+n);
+        if(lbl) lbl.textContent=urls[n-1]||'NINA '+n;
+      }
+      updatePageSelectOptions();
+    }
+
+    function updatePageSelectOptions(){
+      const sel=$('active_page');
+      if(!sel) return;
+      const urls=[$('url1').value.trim(),$('url2').value.trim(),$('url3').value.trim()];
+      const opts=sel.options;
+      for(let i=0;i<opts.length;i++){
+        const v=parseInt(opts[i].value);
+        if(v>=1&&v<=3){
+          opts[i].textContent=urls[v-1]||'NINA '+v;
+          opts[i].disabled=!urls[v-1];
+        }
+      }
+    }
+
+    /* ---- Threshold Helpers ---- */
+    function getThreshObj(pfx,i,defGood,defOk){
+      return {
+        good_max:parseFloat($(pfx+'_good_max_'+i).value)||defGood,
+        ok_max:parseFloat($(pfx+'_ok_max_'+i).value)||defOk,
+        good_color:$(pfx+'_good_color_'+i).value,
+        ok_color:$(pfx+'_ok_color_'+i).value,
+        bad_color:$(pfx+'_bad_color_'+i).value
+      };
+    }
+    function getRmsObj(i){return getThreshObj('rms',i,0.5,1.0)}
+    function getHfrObj(i){return getThreshObj('hfr',i,2.0,3.5)}
+
+    function loadThresholds(data,nodeIdx,rmsKey,hfrKey){
+      const rmsDef={good_max:0.5,ok_max:1.0,good_color:'#10b981',ok_color:'#eab308',bad_color:'#ef4444'};
+      const hfrDef={good_max:2.0,ok_max:3.5,good_color:'#10b981',ok_color:'#eab308',bad_color:'#ef4444'};
+      let rms=rmsDef,hfr=hfrDef;
+      try{if(data[rmsKey]) rms=Object.assign({},rmsDef,JSON.parse(data[rmsKey]));}catch(e){}
+      try{if(data[hfrKey]) hfr=Object.assign({},hfrDef,JSON.parse(data[hfrKey]));}catch(e){}
+      ['good_max','ok_max','good_color','ok_color','bad_color'].forEach(k=>{
+        const re=$('rms_'+k+'_'+nodeIdx);
+        const he=$('hfr_'+k+'_'+nodeIdx);
+        if(re) re.value=rms[k];
+        if(he) he.value=hfr[k];
+      });
+    }
+
+    /* ---- Rotation Page Bitmask ---- */
+    const arpIds=['arp_summary','arp_nina1','arp_nina2','arp_nina3','arp_sysinfo','arp_settings'];
+    const arpBits=[0x01,0x02,0x04,0x08,0x10,0x20];
+
+    function getRotatePages(){
+      let mask=0;
+      arpIds.forEach((id,i)=>{if($(id).checked) mask|=arpBits[i];});
+      return mask;
+    }
+
+    function setRotatePages(mask){
+      arpIds.forEach((id,i)=>{$(id).checked=!!(mask&arpBits[i]);});
+    }
+
+    /* ---- Config Data Assembly ---- */
+    function getConfigData(){
+      const host1=$('url1').value.trim();
+      const host2=$('url2').value.trim();
+      const host3=$('url3').value.trim();
+      const mqttHost=$('mqtt_broker').value.trim();
+      const mkUrl=h=>h?'http://'+h+':1888/v2/api/':'';
+
+      const data={
+        url1:mkUrl(host1),url2:mkUrl(host2),url3:mkUrl(host3),
+        ntp:$('ntp').value.trim(),
+        timezone:$('timezone').value,
+        theme_index:parseInt($('theme_select').value),
+        brightness:parseInt($('brightness').value),
+        color_brightness:parseInt($('color_brightness').value),
+        filter_colors_1:JSON.stringify(filterColorsArr[0]),
+        filter_colors_2:JSON.stringify(filterColorsArr[1]),
+        filter_colors_3:JSON.stringify(filterColorsArr[2]),
+        rms_thresholds_1:JSON.stringify(getRmsObj(0)),
+        rms_thresholds_2:JSON.stringify(getRmsObj(1)),
+        rms_thresholds_3:JSON.stringify(getRmsObj(2)),
+        hfr_thresholds_1:JSON.stringify(getHfrObj(0)),
+        hfr_thresholds_2:JSON.stringify(getHfrObj(1)),
+        hfr_thresholds_3:JSON.stringify(getHfrObj(2)),
+        mqtt_enabled:$('mqtt_enabled').checked?1:0,
+        mqtt_broker_url:mqttHost?'mqtt://'+mqttHost:'',
+        mqtt_port:parseInt($('mqtt_port').value)||1883,
+        mqtt_username:$('mqtt_user').value,
+        mqtt_password:$('mqtt_pass').value,
+        mqtt_topic_prefix:$('mqtt_prefix').value.trim(),
+        active_page_override:parseInt($('active_page').value),
+        auto_rotate_enabled:$('auto_rotate_enabled').checked?1:0,
+        auto_rotate_interval_s:parseInt($('auto_rotate_interval').value)||30,
+        auto_rotate_effect:parseInt($('auto_rotate_effect').value),
+        auto_rotate_skip_disconnected:$('auto_rotate_skip').checked?1:0,
+        auto_rotate_pages:getRotatePages(),
+        update_rate_s:parseInt($('update_rate').value)||2,
+        graph_update_interval_s:parseInt($('graph_interval').value)||5
+      };
+
+      const ssid=$('ssid').value.trim();
+      const pass=$('pass').value;
+      if(ssid) data.ssid=ssid;
+      if(pass) data.pass=pass;
+
+      return data;
+    }
+
+    /* ---- Config Load ---- */
+    let loadedConfig='';
+
+    function populateConfig(data){
+      $('ssid').value=data.ssid||'';
+      $('ntp').value=data.ntp||'';
+      $('timezone').value=data.timezone||'';
+
+      function extractHost(url){
+        if(!url) return '';
+        const m=url.match(/^https?:\/\/([^:/]+)/);
+        return m?m[1]:'';
+      }
+
+      $('url1').value=extractHost(data.url1);
+      $('url2').value=extractHost(data.url2);
+      $('url3').value=extractHost(data.url3);
+
+      $('theme_select').value=data.theme_index||0;
+      const br=data.brightness!=null?data.brightness:80;
+      $('brightness').value=br;
+      $('brightness_val').textContent=br+'%';
+      const cb=data.color_brightness!=null?data.color_brightness:80;
+      $('color_brightness').value=cb;
+      $('color_brightness_val').textContent=cb+'%';
+      $('update_rate').value=data.update_rate_s||2;
+      $('graph_interval').value=data.graph_update_interval_s||5;
+
+      for(let i=0;i<3;i++){
+        const key='filter_colors_'+(i+1);
+        try{filterColorsArr[i]=data[key]?JSON.parse(data[key]):{};}catch(e){filterColorsArr[i]={};}
+        renderFilterColors(i);
+      }
+
+      loadThresholds(data,0,'rms_thresholds_1','hfr_thresholds_1');
+      loadThresholds(data,1,'rms_thresholds_2','hfr_thresholds_2');
+      loadThresholds(data,2,'rms_thresholds_3','hfr_thresholds_3');
+
+      const mqttUrl=data.mqtt_broker_url||'';
+      const mqttMatch=mqttUrl.match(/^mqtt:\/\/(.+)/);
+      $('mqtt_broker').value=mqttMatch?mqttMatch[1]:'';
+      $('mqtt_port').value=data.mqtt_port||1883;
+      $('mqtt_user').value=data.mqtt_username||'';
+      $('mqtt_pass').value=data.mqtt_password||'';
+      $('mqtt_prefix').value=data.mqtt_topic_prefix||'';
+      $('mqtt_enabled').checked=!!data.mqtt_enabled;
+
+      $('active_page').value=data.active_page_override!=null?data.active_page_override:-1;
+      $('auto_rotate_enabled').checked=!!data.auto_rotate_enabled;
+      $('auto_rotate_interval').value=data.auto_rotate_interval_s||30;
+      $('auto_rotate_effect').value=data.auto_rotate_effect||0;
+      $('auto_rotate_skip').checked=!!data.auto_rotate_skip_disconnected;
+      setRotatePages(data.auto_rotate_pages!=null?data.auto_rotate_pages:0x1F);
+
+      updateNodeLabels();
+      updatePageSelectOptions();
+
+      $('pass').value='';
+      loadedConfig=JSON.stringify(getConfigData());
+    }
+
+    function loadConfig(){
+      fetch('/api/config').then(r=>r.json()).then(populateConfig).catch(e=>console.error('Failed to load config',e));
+    }
+
+    /* ---- Version Load ---- */
+    function loadVersion(){
+      fetch('/api/version').then(r=>r.json()).then(data=>{
+        $('fw_version').textContent=data.version||'--';
+        $('fw_date').textContent=(data.date||'--')+' '+(data.time||'');
+        $('fw_idf').textContent=data.idf_version||'--';
+        $('fw_partition').textContent=data.partition||'--';
+
+        const ghBase='https://github.com/chvvkumar/ESP32-P4-NINA-Display/';
+        const tagEl=$('fw_git_tag');
+        if(data.git_tag&&data.git_tag!=='unknown'){
+          tagEl.innerHTML='<a href="'+ghBase+'releases/tag/'+encodeURIComponent(data.git_tag)+'" target="_blank" rel="noopener" class="accent-link">'+data.git_tag+'</a>';
+        }else{
+          tagEl.textContent=data.git_tag||'--';
+        }
+
+        const shaEl=$('fw_git_sha');
+        if(data.git_sha&&data.git_sha!=='unknown'){
+          shaEl.innerHTML='<a href="'+ghBase+'commit/'+encodeURIComponent(data.git_sha)+'" target="_blank" rel="noopener" class="mono-link">'+data.git_sha.substring(0,8)+'</a>';
+        }else{
+          shaEl.textContent=data.git_sha||'--';
+        }
+      }).catch(e=>console.error('Failed to load version',e));
+    }
+
+    /* ---- Toast ---- */
+    function showToast(msg,type){
+      const t=$('toast');
+      t.textContent=msg;
+      t.className='toast '+(type||'')+' show';
+      clearTimeout(t._timer);
+      t._timer=setTimeout(()=>{t.classList.remove('show');},3000);
+    }
+
+    /* ---- Save ---- */
+    function save(){
+      const btn=$('saveBtn');
+      btn.disabled=true;
+      btn.textContent='Saving...';
+      postJson('/api/config',getConfigData()).then(r=>{
+        if(!r.ok) throw new Error('Save failed');
+        return r.text();
+      }).then(()=>{
+        showToast('Settings saved','success');
+        loadedConfig=JSON.stringify(getConfigData());
+        $('saveBar').classList.remove('visible');
+      }).catch(e=>{
+        showToast('Save failed: '+e.message,'error');
+      }).finally(()=>{
+        btn.disabled=false;
+        btn.textContent='Save';
+      });
+    }
+
+    function reloadConfig(){
+      loadConfig();
+      $('saveBar').classList.remove('visible');
+    }
+
+    /* ---- Save and Reboot ---- */
+    function saveAndReboot(){
+      if(!confirm('Apply changes and reboot now?')) return;
+      postJson('/api/config',getConfigData()).then(r=>{
+        if(!r.ok) throw new Error('Save failed');
+        return fetch('/api/reboot',{method:'POST'});
+      }).then(()=>{
+        showToast('Rebooting...','success');
+      }).catch(e=>{
+        showToast('Error: '+e.message,'error');
+      });
+    }
+
+    /* ---- Factory Reset ---- */
+    function factoryReset(){
+      if(!confirm('Wipe all settings?')) return;
+      if(!confirm('Confirm Reset?')) return;
+      fetch('/api/factory-reset',{method:'POST'}).then(()=>{
+        showToast('Factory reset. Rebooting...','success');
+      }).catch(e=>{
+        showToast('Reset failed: '+e.message,'error');
+      });
+    }
+
+    /* ---- OTA ---- */
+    function otaFileSelected(input){
+      const label=$('otaFileLabel');
+      if(input.files.length>0){
+        label.textContent=input.files[0].name;
+        label.classList.add('has-file');
+        label.appendChild(input);
+        $('otaBtn').disabled=false;
+      }else{
+        label.textContent='Choose firmware .bin file';
+        label.classList.remove('has-file');
+        label.appendChild(input);
+        $('otaBtn').disabled=true;
+      }
+    }
+
+    function startOta(){
+      const fileInput=$('otaFile');
+      if(!fileInput.files.length) return;
+      if(!confirm('Flash new firmware? The device will reboot after update.')) return;
+
+      const file=fileInput.files[0];
+      const progressDiv=$('otaProgress');
+      const fill=$('otaProgressFill');
+      const status=$('otaStatus');
+      const btn=$('otaBtn');
+
+      progressDiv.style.display='block';
+      btn.disabled=true;
+      fill.style.width='0%';
+      status.textContent='Uploading...';
+
+      const xhr=new XMLHttpRequest();
+      xhr.open('POST','/api/ota',true);
+      xhr.setRequestHeader('Content-Type','application/octet-stream');
+
+      xhr.upload.addEventListener('progress',function(e){
+        if(e.lengthComputable){
+          const pct=Math.round((e.loaded/e.total)*100);
+          fill.style.width=pct+'%';
+          status.textContent='Uploading... '+pct+'%';
+        }
+      });
+
+      xhr.addEventListener('load',function(){
+        if(xhr.status>=200&&xhr.status<300){
+          fill.style.width='100%';
+          status.textContent='Update complete! Rebooting...';
+          showToast('Firmware updated. Rebooting...','success');
+        }else{
+          status.textContent='Update failed (HTTP '+xhr.status+')';
+          showToast('OTA failed','error');
+          btn.disabled=false;
+        }
+      });
+
+      xhr.addEventListener('error',function(){
+        status.textContent='Upload error';
+        showToast('OTA upload error','error');
+        btn.disabled=false;
+      });
+
+      xhr.send(file);
+    }
+
+    /* ---- Dirty State Detection ---- */
+    function checkDirty(){
+      const dirty=JSON.stringify(getConfigData())!==loadedConfig;
+      $('saveBar').classList.toggle('visible',dirty);
+    }
+
+    document.querySelector('.content').addEventListener('input',checkDirty);
+    document.querySelector('.content').addEventListener('change',checkDirty);
+
+    /* ---- Init ---- */
+    loadConfig();
+    loadVersion();
+  </script>
 </body>
 </html>
