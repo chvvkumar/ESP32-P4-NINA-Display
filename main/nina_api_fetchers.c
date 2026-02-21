@@ -421,6 +421,547 @@ void fetch_switch_info(const char *base_url, nina_client_t *data) {
     cJSON_Delete(json);
 }
 
+/* ── Info overlay detail fetchers ───────────────────────────────────── */
+
+#include "ui/info_overlay_types.h"
+
+/**
+ * @brief Fetch detailed camera info for the camera info overlay.
+ * Endpoint: GET {base_url}equipment/camera/info
+ */
+void fetch_camera_details(const char *base_url, camera_detail_data_t *out) {
+    if (!out) return;
+    memset(out, 0, sizeof(camera_detail_data_t));
+
+    char url[256];
+    snprintf(url, sizeof(url), "%sequipment/camera/info", base_url);
+
+    cJSON *json = http_get_json(url);
+    if (!json) return;
+
+    cJSON *response = cJSON_GetObjectItem(json, "Response");
+    if (!response) { cJSON_Delete(json); return; }
+
+    // Name
+    cJSON *name = cJSON_GetObjectItem(response, "Name");
+    if (name && name->valuestring)
+        strncpy(out->name, name->valuestring, sizeof(out->name) - 1);
+
+    // Sensor dimensions
+    cJSON *xsize = cJSON_GetObjectItem(response, "XSize");
+    if (xsize) out->x_size = xsize->valueint;
+    cJSON *ysize = cJSON_GetObjectItem(response, "YSize");
+    if (ysize) out->y_size = ysize->valueint;
+
+    // Pixel size
+    cJSON *pixel = cJSON_GetObjectItem(response, "PixelSize");
+    if (pixel) out->pixel_size = (float)pixel->valuedouble;
+
+    // Bit depth
+    cJSON *bits = cJSON_GetObjectItem(response, "BitDepth");
+    if (bits) out->bit_depth = bits->valueint;
+
+    // Sensor type
+    cJSON *sensor = cJSON_GetObjectItem(response, "SensorType");
+    if (sensor && sensor->valuestring)
+        strncpy(out->sensor_type, sensor->valuestring, sizeof(out->sensor_type) - 1);
+
+    // Temperature
+    cJSON *temp = cJSON_GetObjectItem(response, "Temperature");
+    if (temp) out->temperature = (float)temp->valuedouble;
+
+    // Target temperature (from CoolingTargetTemp or TemperatureSetPoint)
+    cJSON *target_temp = cJSON_GetObjectItem(response, "TemperatureSetPoint");
+    if (target_temp) out->target_temp = (float)target_temp->valuedouble;
+
+    // Cooler power
+    cJSON *cooler_pwr = cJSON_GetObjectItem(response, "CoolerPower");
+    if (cooler_pwr) out->cooler_power = (float)cooler_pwr->valuedouble;
+
+    // Cooler on
+    cJSON *cooler_on = cJSON_GetObjectItem(response, "CoolerOn");
+    if (cooler_on) out->cooler_on = cJSON_IsTrue(cooler_on);
+
+    // At target temp
+    cJSON *at_target = cJSON_GetObjectItem(response, "AtTargetTemp");
+    if (at_target) out->at_target = cJSON_IsTrue(at_target);
+
+    // Dew heater
+    cJSON *dew = cJSON_GetObjectItem(response, "DewHeaterOn");
+    if (dew) out->dew_heater_on = cJSON_IsTrue(dew);
+
+    // Camera state
+    cJSON *state = cJSON_GetObjectItem(response, "CameraState");
+    if (state && state->valuestring)
+        strncpy(out->camera_state, state->valuestring, sizeof(out->camera_state) - 1);
+
+    // Last download time
+    cJSON *download = cJSON_GetObjectItem(response, "LastDownloadTime");
+    if (download) out->last_download_time = (float)download->valuedouble;
+
+    // Gain
+    cJSON *gain = cJSON_GetObjectItem(response, "Gain");
+    if (gain) out->gain = gain->valueint;
+    cJSON *gain_min = cJSON_GetObjectItem(response, "GainMin");
+    if (gain_min) out->gain_min = gain_min->valueint;
+    cJSON *gain_max = cJSON_GetObjectItem(response, "GainMax");
+    if (gain_max) out->gain_max = gain_max->valueint;
+
+    // Offset
+    cJSON *offset = cJSON_GetObjectItem(response, "Offset");
+    if (offset) out->offset = offset->valueint;
+    cJSON *offset_min = cJSON_GetObjectItem(response, "OffsetMin");
+    if (offset_min) out->offset_min = offset_min->valueint;
+    cJSON *offset_max = cJSON_GetObjectItem(response, "OffsetMax");
+    if (offset_max) out->offset_max = offset_max->valueint;
+
+    // Readout mode — index maps to name from ReadoutModes array
+    cJSON *readout_idx = cJSON_GetObjectItem(response, "ReadoutMode");
+    cJSON *readout_modes = cJSON_GetObjectItem(response, "ReadoutModes");
+    if (readout_idx && readout_modes && cJSON_IsArray(readout_modes)) {
+        int idx = readout_idx->valueint;
+        cJSON *mode = cJSON_GetArrayItem(readout_modes, idx);
+        if (mode && mode->valuestring) {
+            strncpy(out->readout_mode, mode->valuestring, sizeof(out->readout_mode) - 1);
+        }
+    } else if (readout_idx) {
+        snprintf(out->readout_mode, sizeof(out->readout_mode), "Mode %d", readout_idx->valueint);
+    }
+
+    // USB limit
+    cJSON *usb = cJSON_GetObjectItem(response, "USBLimit");
+    if (usb) out->usb_limit = usb->valueint;
+
+    // Battery
+    cJSON *battery = cJSON_GetObjectItem(response, "Battery");
+    if (battery) out->battery = battery->valueint;
+
+    // Binning
+    cJSON *binx = cJSON_GetObjectItem(response, "BinX");
+    if (binx) out->bin_x = binx->valueint;
+    cJSON *biny = cJSON_GetObjectItem(response, "BinY");
+    if (biny) out->bin_y = biny->valueint;
+
+    ESP_LOGI(TAG, "Camera details: %s %dx%d %.2fum %dbit",
+             out->name, out->x_size, out->y_size, out->pixel_size, out->bit_depth);
+
+    cJSON_Delete(json);
+}
+
+/**
+ * @brief Fetch weather info and populate weather fields in camera_detail_data_t.
+ * Endpoint: GET {base_url}equipment/weather/info
+ */
+void fetch_weather_details(const char *base_url, camera_detail_data_t *out) {
+    if (!out) return;
+
+    char url[256];
+    snprintf(url, sizeof(url), "%sequipment/weather/info", base_url);
+
+    cJSON *json = http_get_json(url);
+    if (!json) return;
+
+    cJSON *response = cJSON_GetObjectItem(json, "Response");
+    if (!response) { cJSON_Delete(json); return; }
+
+    cJSON *connected = cJSON_GetObjectItem(response, "Connected");
+    if (!connected || !cJSON_IsTrue(connected)) {
+        out->weather_connected = false;
+        cJSON_Delete(json);
+        return;
+    }
+
+    out->weather_connected = true;
+
+    cJSON *temp = cJSON_GetObjectItem(response, "Temperature");
+    if (temp) out->weather_temp = (float)temp->valuedouble;
+
+    cJSON *dew = cJSON_GetObjectItem(response, "DewPoint");
+    if (dew) out->dew_point = (float)dew->valuedouble;
+
+    cJSON *humidity = cJSON_GetObjectItem(response, "Humidity");
+    if (humidity) out->humidity = (float)humidity->valuedouble;
+
+    cJSON *pressure = cJSON_GetObjectItem(response, "Pressure");
+    if (pressure) out->pressure = (float)pressure->valuedouble;
+
+    cJSON *wind = cJSON_GetObjectItem(response, "WindSpeed");
+    if (wind) out->wind_speed = (float)wind->valuedouble;
+
+    cJSON *wind_dir = cJSON_GetObjectItem(response, "WindDirection");
+    if (wind_dir) out->wind_direction = wind_dir->valueint;
+
+    cJSON *cloud = cJSON_GetObjectItem(response, "CloudCover");
+    if (cloud) out->cloud_cover = cloud->valueint;
+
+    cJSON *sqm = cJSON_GetObjectItem(response, "SkyQuality");
+    if (sqm) {
+        snprintf(out->sky_quality, sizeof(out->sky_quality), "%.1f", sqm->valuedouble);
+    }
+
+    ESP_LOGI(TAG, "Weather: %.1fC, %.0f%% humidity, %.1f hPa, wind %.1f",
+             out->weather_temp, out->humidity, out->pressure, out->wind_speed);
+
+    cJSON_Delete(json);
+}
+
+/**
+ * @brief Fetch detailed mount info for the mount info overlay.
+ * Endpoint: GET {base_url}equipment/mount/info
+ */
+void fetch_mount_details(const char *base_url, mount_detail_data_t *out) {
+    if (!out) return;
+    memset(out, 0, sizeof(mount_detail_data_t));
+
+    char url[256];
+    snprintf(url, sizeof(url), "%sequipment/mount/info", base_url);
+
+    cJSON *json = http_get_json(url);
+    if (!json) return;
+
+    cJSON *response = cJSON_GetObjectItem(json, "Response");
+    if (!response) { cJSON_Delete(json); return; }
+
+    // Connected
+    cJSON *conn = cJSON_GetObjectItem(response, "Connected");
+    if (conn) out->connected = cJSON_IsTrue(conn);
+
+    // Name
+    cJSON *name = cJSON_GetObjectItem(response, "Name");
+    if (name && name->valuestring)
+        strncpy(out->name, name->valuestring, sizeof(out->name) - 1);
+
+    // Coordinates
+    cJSON *coords = cJSON_GetObjectItem(response, "Coordinates");
+    if (coords) {
+        cJSON *ra_str = cJSON_GetObjectItem(coords, "RAString");
+        if (ra_str && ra_str->valuestring)
+            strncpy(out->ra_string, ra_str->valuestring, sizeof(out->ra_string) - 1);
+
+        cJSON *dec_str = cJSON_GetObjectItem(coords, "DecString");
+        if (dec_str && dec_str->valuestring)
+            strncpy(out->dec_string, dec_str->valuestring, sizeof(out->dec_string) - 1);
+
+        cJSON *ra_deg = cJSON_GetObjectItem(coords, "RADegrees");
+        if (ra_deg) out->ra_degrees = (float)ra_deg->valuedouble;
+
+        cJSON *dec_deg = cJSON_GetObjectItem(coords, "Dec");
+        if (dec_deg) out->dec_degrees = (float)dec_deg->valuedouble;
+    }
+
+    // Altitude / Azimuth
+    cJSON *alt = cJSON_GetObjectItem(response, "Altitude");
+    if (alt) out->altitude = (float)alt->valuedouble;
+
+    cJSON *az = cJSON_GetObjectItem(response, "Azimuth");
+    if (az) out->azimuth = (float)az->valuedouble;
+
+    // Side of pier
+    cJSON *pier = cJSON_GetObjectItem(response, "SideOfPier");
+    if (pier && pier->valuestring)
+        strncpy(out->pier_side, pier->valuestring, sizeof(out->pier_side) - 1);
+
+    // Alignment mode
+    cJSON *alignment = cJSON_GetObjectItem(response, "AlignmentMode");
+    if (alignment && alignment->valuestring)
+        strncpy(out->alignment_mode, alignment->valuestring, sizeof(out->alignment_mode) - 1);
+
+    // Tracking mode
+    cJSON *track_mode = cJSON_GetObjectItem(response, "TrackingMode");
+    if (track_mode && track_mode->valuestring)
+        strncpy(out->tracking_mode, track_mode->valuestring, sizeof(out->tracking_mode) - 1);
+
+    // Tracking enabled
+    cJSON *tracking = cJSON_GetObjectItem(response, "TrackingEnabled");
+    if (tracking) out->tracking_enabled = cJSON_IsTrue(tracking);
+
+    // Sidereal time
+    cJSON *sidereal = cJSON_GetObjectItem(response, "SiderealTimeString");
+    if (sidereal && sidereal->valuestring)
+        strncpy(out->sidereal_time, sidereal->valuestring, sizeof(out->sidereal_time) - 1);
+
+    // Meridian flip time
+    cJSON *flip = cJSON_GetObjectItem(response, "TimeToMeridianFlipString");
+    if (flip && flip->valuestring)
+        strncpy(out->flip_time, flip->valuestring, sizeof(out->flip_time) - 1);
+
+    // Site coordinates
+    cJSON *lat = cJSON_GetObjectItem(response, "SiteLatitude");
+    if (lat) out->latitude = (float)lat->valuedouble;
+
+    cJSON *lon = cJSON_GetObjectItem(response, "SiteLongitude");
+    if (lon) out->longitude = (float)lon->valuedouble;
+
+    cJSON *elev = cJSON_GetObjectItem(response, "SiteElevation");
+    if (elev) out->elevation = (float)elev->valuedouble;
+
+    // Status booleans
+    cJSON *at_park = cJSON_GetObjectItem(response, "AtPark");
+    if (at_park) out->at_park = cJSON_IsTrue(at_park);
+
+    cJSON *at_home = cJSON_GetObjectItem(response, "AtHome");
+    if (at_home) out->at_home = cJSON_IsTrue(at_home);
+
+    cJSON *slewing = cJSON_GetObjectItem(response, "Slewing");
+    if (slewing) out->slewing = cJSON_IsTrue(slewing);
+
+    ESP_LOGI(TAG, "Mount details: %s RA=%s DEC=%s Alt=%.1f Az=%.1f",
+             out->name, out->ra_string, out->dec_string, out->altitude, out->azimuth);
+
+    cJSON_Delete(json);
+}
+
+/**
+ * @brief Fetch detailed sequence data for the sequence info overlay.
+ * Endpoint: GET {base_url}sequence/json
+ *
+ * Walks the recursive sequence tree to extract per-filter breakdown and totals.
+ */
+void fetch_sequence_details(const char *base_url, sequence_detail_data_t *out) {
+    if (!out) return;
+    memset(out, 0, sizeof(sequence_detail_data_t));
+
+    char url[256];
+    snprintf(url, sizeof(url), "%ssequence/json", base_url);
+
+    cJSON *json = http_get_json(url);
+    if (!json) return;
+
+    cJSON *response = cJSON_GetObjectItem(json, "Response");
+    if (!response || !cJSON_IsArray(response)) {
+        cJSON_Delete(json);
+        return;
+    }
+
+    // Find Targets_Container in the top-level array
+    cJSON *targets_container = NULL;
+    cJSON *item = NULL;
+    cJSON_ArrayForEach(item, response) {
+        cJSON *name = cJSON_GetObjectItem(item, "Name");
+        if (name && name->valuestring && strcmp(name->valuestring, "Targets_Container") == 0) {
+            targets_container = item;
+            break;
+        }
+    }
+
+    if (!targets_container) {
+        cJSON_Delete(json);
+        return;
+    }
+
+    // Find the active target container (RUNNING preferred, otherwise last FINISHED)
+    cJSON *target_items = cJSON_GetObjectItem(targets_container, "Items");
+    if (!target_items || !cJSON_IsArray(target_items)) {
+        cJSON_Delete(json);
+        return;
+    }
+
+    cJSON *active_target = NULL;
+    cJSON *last_finished = NULL;
+    cJSON *target = NULL;
+    cJSON_ArrayForEach(target, target_items) {
+        cJSON *status = cJSON_GetObjectItem(target, "Status");
+        if (!status || !status->valuestring) continue;
+        if (strcmp(status->valuestring, "RUNNING") == 0) {
+            active_target = target;
+            break;
+        }
+        if (strcmp(status->valuestring, "FINISHED") == 0) {
+            last_finished = target;
+        }
+    }
+    if (!active_target) active_target = last_finished;
+    if (!active_target) active_target = cJSON_GetArrayItem(target_items, 0);
+    if (!active_target) {
+        cJSON_Delete(json);
+        return;
+    }
+
+    out->has_data = true;
+
+    // Target name (strip _Container suffix)
+    cJSON *target_name = cJSON_GetObjectItem(active_target, "Name");
+    if (target_name && target_name->valuestring) {
+        strncpy(out->target_name, target_name->valuestring, sizeof(out->target_name) - 1);
+        char *suffix = strstr(out->target_name, "_Container");
+        if (suffix) *suffix = '\0';
+    }
+
+    // Walk the target's children to find container name and running step
+    cJSON *target_children = cJSON_GetObjectItem(active_target, "Items");
+    if (target_children && cJSON_IsArray(target_children)) {
+        // Find the active sub-container (e.g., LRGB_Container)
+        cJSON *child = NULL;
+        cJSON *active_child = NULL;
+        cJSON *last_finished_child = NULL;
+        cJSON_ArrayForEach(child, target_children) {
+            cJSON *child_status = cJSON_GetObjectItem(child, "Status");
+            cJSON *child_items = cJSON_GetObjectItem(child, "Items");
+            if (!child_status || !child_status->valuestring) continue;
+            if (!child_items || !cJSON_IsArray(child_items)) continue;
+
+            if (strcmp(child_status->valuestring, "RUNNING") == 0) {
+                active_child = child;
+                break;
+            }
+            if (strcmp(child_status->valuestring, "FINISHED") == 0) {
+                last_finished_child = child;
+            }
+        }
+        if (!active_child) active_child = last_finished_child;
+
+        if (active_child) {
+            cJSON *child_name = cJSON_GetObjectItem(active_child, "Name");
+            if (child_name && child_name->valuestring) {
+                strncpy(out->container_name, child_name->valuestring, sizeof(out->container_name) - 1);
+                char *suffix = strstr(out->container_name, "_Container");
+                if (suffix) *suffix = '\0';
+            }
+        }
+    }
+
+    // Recursive walk to find all Smart Exposure nodes and build per-filter breakdown
+    // We search the entire active target tree for Smart Exposure items
+    // Use a simple iterative approach with a stack
+    cJSON *stack[32];
+    int stack_top = 0;
+    stack[stack_top++] = active_target;
+
+    out->filter_count = 0;
+    out->total_completed = 0;
+    out->total_total = 0;
+
+    // Also track the running Smart Exposure for current step info
+    cJSON *running_smart_exp = NULL;
+    cJSON *running_step = NULL;
+
+    while (stack_top > 0) {
+        cJSON *node = stack[--stack_top];
+        cJSON *node_items = cJSON_GetObjectItem(node, "Items");
+        if (!node_items || !cJSON_IsArray(node_items)) continue;
+
+        cJSON *child = NULL;
+        cJSON_ArrayForEach(child, node_items) {
+            cJSON *child_name = cJSON_GetObjectItem(child, "Name");
+            cJSON *child_status = cJSON_GetObjectItem(child, "Status");
+
+            if (child_name && child_name->valuestring &&
+                strcmp(child_name->valuestring, "Smart Exposure") == 0) {
+                // This is a Smart Exposure node — extract filter and counts
+                cJSON *completed = cJSON_GetObjectItem(child, "CompletedIterations");
+                cJSON *iterations = cJSON_GetObjectItem(child, "Iterations");
+                int comp = completed ? completed->valueint : 0;
+                int total = iterations ? iterations->valueint : 0;
+
+                // Look for filter name in the parent or sibling context
+                // Smart Exposure items typically sit inside a container with filter in its name,
+                // or have a Filter property
+                cJSON *filter_prop = cJSON_GetObjectItem(child, "Filter");
+                const char *filter_name = NULL;
+                if (filter_prop && filter_prop->valuestring) {
+                    filter_name = filter_prop->valuestring;
+                }
+
+                // If no Filter property, try the parent container name
+                if (!filter_name) {
+                    cJSON *parent_name = cJSON_GetObjectItem(node, "Name");
+                    if (parent_name && parent_name->valuestring) {
+                        filter_name = parent_name->valuestring;
+                    }
+                }
+
+                // Add to per-filter breakdown (aggregate by filter name)
+                if (filter_name && out->filter_count < MAX_SEQ_FILTERS) {
+                    // Check if filter already in list
+                    int existing = -1;
+                    for (int i = 0; i < out->filter_count; i++) {
+                        if (strcmp(out->filters[i].name, filter_name) == 0) {
+                            existing = i;
+                            break;
+                        }
+                    }
+                    if (existing >= 0) {
+                        out->filters[existing].completed += comp;
+                        out->filters[existing].total += total;
+                    } else {
+                        strncpy(out->filters[out->filter_count].name, filter_name,
+                                sizeof(out->filters[out->filter_count].name) - 1);
+                        out->filters[out->filter_count].completed = comp;
+                        out->filters[out->filter_count].total = total;
+                        out->filter_count++;
+                    }
+                }
+
+                out->total_completed += comp;
+                out->total_total += total;
+
+                // Track running Smart Exposure
+                if (child_status && child_status->valuestring &&
+                    strcmp(child_status->valuestring, "RUNNING") == 0) {
+                    running_smart_exp = child;
+                }
+            } else {
+                // Not a Smart Exposure — push onto stack to search deeper
+                cJSON *child_items = cJSON_GetObjectItem(child, "Items");
+                if (child_items && cJSON_IsArray(child_items) && stack_top < 32) {
+                    stack[stack_top++] = child;
+                }
+
+                // Track running step (leaf instruction)
+                if (child_status && child_status->valuestring &&
+                    strcmp(child_status->valuestring, "RUNNING") == 0) {
+                    cJSON *sub_items = cJSON_GetObjectItem(child, "Items");
+                    if (!sub_items || !cJSON_IsArray(sub_items) || cJSON_GetArraySize(sub_items) == 0) {
+                        running_step = child;
+                    }
+                }
+            }
+        }
+    }
+
+    // Fill current step info from the running Smart Exposure
+    if (running_smart_exp) {
+        cJSON *completed = cJSON_GetObjectItem(running_smart_exp, "CompletedIterations");
+        cJSON *iterations = cJSON_GetObjectItem(running_smart_exp, "Iterations");
+        cJSON *exp_time = cJSON_GetObjectItem(running_smart_exp, "ExposureTime");
+        cJSON *filter_prop = cJSON_GetObjectItem(running_smart_exp, "Filter");
+
+        out->current_completed = completed ? completed->valueint : 0;
+        out->current_total = iterations ? iterations->valueint : 0;
+        out->current_exposure_time = exp_time ? (float)exp_time->valuedouble : 0;
+        if (filter_prop && filter_prop->valuestring) {
+            strncpy(out->current_filter, filter_prop->valuestring, sizeof(out->current_filter) - 1);
+        }
+
+        strncpy(out->step_name, "Smart Exposure", sizeof(out->step_name) - 1);
+    } else if (running_step) {
+        cJSON *step_name = cJSON_GetObjectItem(running_step, "Name");
+        if (step_name && step_name->valuestring) {
+            strncpy(out->step_name, step_name->valuestring, sizeof(out->step_name) - 1);
+        }
+    }
+
+    // Time remaining — look for OverallRemainingTime or similar at sequence level
+    // Walk top-level conditions for time info
+    cJSON *seq_conditions = cJSON_GetObjectItem(active_target, "Conditions");
+    if (seq_conditions && cJSON_IsArray(seq_conditions)) {
+        cJSON *cond = NULL;
+        cJSON_ArrayForEach(cond, seq_conditions) {
+            cJSON *rem = cJSON_GetObjectItem(cond, "RemainingTime");
+            if (rem && rem->valuestring && rem->valuestring[0] != '\0') {
+                strncpy(out->time_remaining, rem->valuestring, sizeof(out->time_remaining) - 1);
+                break;
+            }
+        }
+    }
+
+    ESP_LOGI(TAG, "Sequence details: target=%s container=%s step=%s filters=%d total=%d/%d",
+             out->target_name, out->container_name, out->step_name,
+             out->filter_count, out->total_completed, out->total_total);
+
+    cJSON_Delete(json);
+}
+
 /* ── Graph data fetchers ────────────────────────────────────────────── */
 
 #include "ui/nina_graph_overlay.h"

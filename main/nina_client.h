@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "ui/info_overlay_types.h"
 
 #define MAX_FILTERS 10
 
@@ -93,6 +94,12 @@ typedef struct {
     // Timestamp (ms from esp_timer_get_time/1000) of last successful poll.
     // Used by the UI to display a stale-data indicator.  0 = never polled.
     int64_t last_successful_poll_ms;
+
+    // IMAGE-SAVE detailed stats (captured from WebSocket events)
+    imagestats_detail_data_t last_image_stats;
+
+    // Autofocus V-curve data (captured from WebSocket events)
+    autofocus_data_t autofocus;
 
     // Mutex for synchronizing access between WebSocket event handler and data task.
     // Must be created with nina_client_init_mutex() before use.

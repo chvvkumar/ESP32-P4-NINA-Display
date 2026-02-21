@@ -10,6 +10,7 @@
 #include "nina_dashboard_internal.h"
 #include "nina_thumbnail.h"
 #include "nina_graph_overlay.h"
+#include "nina_info_overlay.h"
 #include "nina_sysinfo.h"
 #include "nina_summary.h"
 #include "nina_settings.h"
@@ -50,6 +51,12 @@ static nina_page_change_cb_t page_change_cb = NULL;
 static void update_indicators(void);
 static void rms_click_cb(lv_event_t *e);
 static void hfr_click_cb(lv_event_t *e);
+static void exposure_arc_click_cb(lv_event_t *e);
+static void flip_click_cb(lv_event_t *e);
+static void stars_click_cb(lv_event_t *e);
+static void sequence_click_cb(lv_event_t *e);
+static void filter_click_cb(lv_event_t *e);
+static void autofocus_long_press_cb(lv_event_t *e);
 
 /* Strip http(s)://, path, and domain from URL, then sentence case */
 void extract_host_from_url(const char *url, char *out, size_t out_size) {
@@ -214,6 +221,7 @@ void nina_dashboard_apply_theme(int theme_index) {
     settings_page_apply_theme();
     sysinfo_page_apply_theme();
     nina_graph_overlay_apply_theme();
+    nina_info_overlay_apply_theme();
 
     update_indicators();
 
@@ -298,6 +306,8 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_flex_flow(box_seq, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(box_seq, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_all(box_seq, 12, 0);
+    lv_obj_add_flag(box_seq, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(box_seq, sequence_click_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *seq_left = lv_obj_create(box_seq);
     lv_obj_remove_style_all(seq_left);
@@ -333,6 +343,8 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_flex_flow(box_exposure, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(box_exposure, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(box_exposure, 0, 0);
+    lv_obj_add_flag(box_exposure, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(box_exposure, exposure_arc_click_cb, LV_EVENT_CLICKED, NULL);
 
     p->arc_exposure = lv_arc_create(box_exposure);
     lv_obj_set_size(p->arc_exposure, 300, 300);
@@ -348,9 +360,11 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_style_shadow_width(p->arc_exposure, 16, LV_PART_INDICATOR);
     lv_obj_set_style_shadow_spread(p->arc_exposure, 10, LV_PART_INDICATOR);
     lv_obj_set_style_shadow_opa(p->arc_exposure, LV_OPA_30, LV_PART_INDICATOR);
+    lv_obj_clear_flag(p->arc_exposure, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *arc_center = lv_obj_create(p->arc_exposure);
     lv_obj_remove_style_all(arc_center);
+    lv_obj_clear_flag(arc_center, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(arc_center, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_center(arc_center);
     lv_obj_set_flex_flow(arc_center, LV_FLEX_FLOW_COLUMN);
@@ -364,6 +378,9 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_style_text_color(p->lbl_exposure_total, lv_color_hex(current_theme->filter_text_color), 0);
     lv_obj_set_style_text_font(p->lbl_exposure_total, &lv_font_montserrat_28, 0);
     lv_obj_set_style_pad_top(p->lbl_exposure_total, 14, 0);
+    lv_obj_add_flag(p->lbl_exposure_total, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(p->lbl_exposure_total, filter_click_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_clear_flag(p->lbl_exposure_total, LV_OBJ_FLAG_GESTURE_BUBBLE | LV_OBJ_FLAG_EVENT_BUBBLE);
 
     p->lbl_loop_count = lv_label_create(arc_center);
     lv_obj_set_style_text_color(p->lbl_loop_count, lv_color_hex(current_theme->label_color), 0);
@@ -401,7 +418,8 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_flex_flow(box_hfr, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(box_hfr, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_add_flag(box_hfr, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(box_hfr, hfr_click_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(box_hfr, hfr_click_cb, LV_EVENT_SHORT_CLICKED, NULL);
+    lv_obj_add_event_cb(box_hfr, autofocus_long_press_cb, LV_EVENT_LONG_PRESSED, NULL);
 
     p->lbl_hfr_title = create_small_label(box_hfr, "HFR");
     lv_obj_set_width(p->lbl_hfr_title, LV_PCT(100));
@@ -417,6 +435,8 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_grid_cell(box_flip, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 3, 1);
     lv_obj_set_flex_flow(box_flip, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(box_flip, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_add_flag(box_flip, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(box_flip, flip_click_cb, LV_EVENT_CLICKED, NULL);
 
     p->lbl_flip_title = create_small_label(box_flip, "TIME UNTIL FLIP");
     lv_obj_set_width(p->lbl_flip_title, LV_PCT(100));
@@ -452,6 +472,8 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_size(box_stars, LV_PCT(50), LV_PCT(100));
     lv_obj_set_flex_flow(box_stars, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(box_stars, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_add_flag(box_stars, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(box_stars, stars_click_cb, LV_EVENT_CLICKED, NULL);
 
     p->lbl_stars_header = create_small_label(box_stars, "STARS");
     lv_obj_set_width(p->lbl_stars_header, LV_PCT(100));
@@ -563,6 +585,7 @@ static void gesture_event_cb(lv_event_t *e) {
     if (total_page_count <= 1) return;
     if (thumbnail_overlay && !lv_obj_has_flag(thumbnail_overlay, LV_OBJ_FLAG_HIDDEN)) return;
     if (nina_graph_visible()) return;
+    if (nina_info_overlay_visible()) return;
 
     /* Block screen-level swipe on settings page — sliders need horizontal drag.
      * Only the header widget on the settings page handles page-switch gestures. */
@@ -598,6 +621,42 @@ static void rms_click_cb(lv_event_t *e) {
 static void hfr_click_cb(lv_event_t *e) {
     LV_UNUSED(e);
     nina_graph_show(GRAPH_TYPE_HFR, active_page);
+}
+
+/* Exposure arc: click to open camera + weather info overlay */
+static void exposure_arc_click_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    nina_info_overlay_show(INFO_OVERLAY_CAMERA, active_page);
+}
+
+/* Flip time box: click to open mount position info overlay */
+static void flip_click_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    nina_info_overlay_show(INFO_OVERLAY_MOUNT, active_page);
+}
+
+/* Stars box: click to open image statistics info overlay */
+static void stars_click_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    nina_info_overlay_show(INFO_OVERLAY_IMAGESTATS, active_page);
+}
+
+/* Sequence box: click to open sequence details info overlay */
+static void sequence_click_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    nina_info_overlay_show(INFO_OVERLAY_SEQUENCE, active_page);
+}
+
+/* Filter label: click to open filter wheel info overlay */
+static void filter_click_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    nina_info_overlay_show(INFO_OVERLAY_FILTER, active_page);
+}
+
+/* HFR box: long-press to open autofocus V-curve overlay */
+static void autofocus_long_press_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    nina_info_overlay_show(INFO_OVERLAY_AUTOFOCUS, active_page);
 }
 
 /* Set up the dashboard with one page per NINA instance */
@@ -647,6 +706,9 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
 
     // Graph overlay (on top of pages, below thumbnail)
     nina_graph_overlay_create(scr_dashboard);
+
+    // Info overlay (on top of pages, below thumbnail)
+    nina_info_overlay_create(scr_dashboard);
 
     // Thumbnail overlay (on top of everything)
     nina_thumbnail_create(scr_dashboard);

@@ -18,6 +18,13 @@ void fetch_mount_robust(const char *base_url, nina_client_t *data);
 void fetch_focuser_robust(const char *base_url, nina_client_t *data);
 void fetch_switch_info(const char *base_url, nina_client_t *data);
 
+/* Info overlay detail fetchers — on-demand, not part of normal polling */
+#include "ui/info_overlay_types.h"
+void fetch_camera_details(const char *base_url, camera_detail_data_t *out);
+void fetch_weather_details(const char *base_url, camera_detail_data_t *out);
+void fetch_mount_details(const char *base_url, mount_detail_data_t *out);
+void fetch_sequence_details(const char *base_url, sequence_detail_data_t *out);
+
 /* Graph data fetchers — used by graph overlay, not part of normal polling */
 #include "graph_data_types.h"
 void fetch_guider_graph(const char *base_url, graph_rms_data_t *out, int max_points);
