@@ -13,6 +13,7 @@
 #include "ui/nina_dashboard.h"
 #include "ui/nina_summary.h"
 #include "ui/nina_graph_overlay.h"
+#include "ui/nina_info_overlay.h"
 #include "bsp/esp-bsp.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -420,6 +421,90 @@ void data_update_task(void *arg) {
                     }
                 }
                 last_graph_fetch_ms = esp_timer_get_time() / 1000;
+            }
+
+            /* Auto-refresh autofocus overlay while visible (data comes from WebSocket) */
+            if (nina_info_overlay_visible()
+                && nina_info_overlay_get_type() == INFO_OVERLAY_AUTOFOCUS
+                && !nina_info_overlay_requested()) {
+                if (nina_client_lock(&instances[active_nina_idx], 100)) {
+                    autofocus_data_t af_data = instances[active_nina_idx].autofocus;
+                    nina_client_unlock(&instances[active_nina_idx]);
+                    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                        nina_info_overlay_set_autofocus_data(&af_data);
+                        bsp_display_unlock();
+                    }
+                }
+            }
+
+            /* Handle info overlay data fetch */
+            if (nina_info_overlay_requested()) {
+                nina_info_overlay_clear_request();
+                const char *info_url = app_config_get_instance_url(active_nina_idx);
+                if (strlen(info_url) > 0 && instances[active_nina_idx].connected) {
+                    info_overlay_type_t itype = nina_info_overlay_get_type();
+
+                    if (itype == INFO_OVERLAY_CAMERA) {
+                        camera_detail_data_t cam_data = {0};
+                        fetch_camera_details(info_url, &cam_data);
+                        fetch_weather_details(info_url, &cam_data);
+                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_info_overlay_set_camera_data(&cam_data);
+                            bsp_display_unlock();
+                        }
+                    } else if (itype == INFO_OVERLAY_MOUNT) {
+                        mount_detail_data_t mount_data = {0};
+                        fetch_mount_details(info_url, &mount_data);
+                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_info_overlay_set_mount_data(&mount_data);
+                            bsp_display_unlock();
+                        }
+                    } else if (itype == INFO_OVERLAY_IMAGESTATS) {
+                        if (nina_client_lock(&instances[active_nina_idx], 100)) {
+                            imagestats_detail_data_t stats = instances[active_nina_idx].last_image_stats;
+                            nina_client_unlock(&instances[active_nina_idx]);
+                            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                                nina_info_overlay_set_imagestats_data(&stats);
+                                bsp_display_unlock();
+                            }
+                        }
+                    } else if (itype == INFO_OVERLAY_SEQUENCE) {
+                        sequence_detail_data_t seq_data = {0};
+                        fetch_sequence_details(info_url, &seq_data);
+                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_info_overlay_set_sequence_data(&seq_data);
+                            bsp_display_unlock();
+                        }
+                    } else if (itype == INFO_OVERLAY_FILTER) {
+                        filter_detail_data_t filt_data = {0};
+                        if (nina_client_lock(&instances[active_nina_idx], 100)) {
+                            strncpy(filt_data.current_filter, instances[active_nina_idx].current_filter, sizeof(filt_data.current_filter) - 1);
+                            filt_data.filter_count = instances[active_nina_idx].filter_count;
+                            for (int f = 0; f < filt_data.filter_count && f < 10; f++) {
+                                strncpy(filt_data.filters[f].name, instances[active_nina_idx].filters[f].name, sizeof(filt_data.filters[f].name) - 1);
+                                filt_data.filters[f].id = instances[active_nina_idx].filters[f].id;
+                                if (strcmp(filt_data.current_filter, filt_data.filters[f].name) == 0) {
+                                    filt_data.current_position = filt_data.filters[f].id;
+                                }
+                            }
+                            filt_data.connected = true;
+                            nina_client_unlock(&instances[active_nina_idx]);
+                        }
+                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_info_overlay_set_filter_data(&filt_data);
+                            bsp_display_unlock();
+                        }
+                    } else if (itype == INFO_OVERLAY_AUTOFOCUS) {
+                        if (nina_client_lock(&instances[active_nina_idx], 100)) {
+                            autofocus_data_t af_data = instances[active_nina_idx].autofocus;
+                            nina_client_unlock(&instances[active_nina_idx]);
+                            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                                nina_info_overlay_set_autofocus_data(&af_data);
+                                bsp_display_unlock();
+                            }
+                        }
+                    }
+                }
             }
         }
 

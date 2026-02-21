@@ -31,9 +31,9 @@ jobs:
       - name: Extract local config
         run: |
           # Extract current configuration
-          FLASH_SIZE=$(grep "CONFIG_ESPTOOLPY_FLASHSIZE" sdkconfig | cut -d'"' -f2 || echo "N/A")
-          PSRAM_SIZE=$(grep "CONFIG_SPIRAM_SIZE" sdkconfig 2>/dev/null | cut -d'=' -f2 || echo "N/A")
-          PSRAM_SPEED=$(grep "CONFIG_SPIRAM_SPEED" sdkconfig 2>/dev/null | cut -d'=' -f2 || echo "N/A")
+          FLASH_SIZE=$(grep '^CONFIG_ESPTOOLPY_FLASHSIZE=' sdkconfig | cut -d'"' -f2 || echo "N/A")
+          PSRAM_SIZE="32"
+          PSRAM_SPEED=$(grep '^CONFIG_SPIRAM_SPEED=' sdkconfig 2>/dev/null | cut -d'=' -f2 || echo "N/A")
           LVGL_VER=$(grep "lvgl__lvgl" main/idf_component.yml | grep "version:" | awk '{print $2}' || echo "N/A")
           IDF_VER=$(grep "IDF_VERSION:" .github/workflows/build.yml | head -1 | awk '{print $2}' || echo "N/A")
           
@@ -87,5 +87,5 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Badge URLs:**" >> $GITHUB_STEP_SUMMARY
           echo "- [Build Status (main)](https://github.com/chvvkumar/ESP32-P4-NINA-Display/actions/workflows/build.yml?query=branch%3Amain)" >> $GITHUB_STEP_SUMMARY
-          echo "- [Build Status (snd)](https://github.com/chvvkumar/ESP32-P4-NINJA-Display/actions/workflows/build.yml?query=branch%3Asnd)" >> $GITHUB_STEP_SUMMARY
+          echo "- [Build Status (snd)](https://github.com/chvvkumar/ESP32-P4-NINA-Display/actions/workflows/build.yml?query=branch%3Asnd)" >> $GITHUB_STEP_SUMMARY
           echo "- [Latest Release](https://github.com/chvvkumar/ESP32-P4-NINA-Display/releases/latest)" >> $GITHUB_STEP_SUMMARY

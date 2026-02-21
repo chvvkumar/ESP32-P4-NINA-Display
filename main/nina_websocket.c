@@ -54,13 +54,13 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         return;
     }
 
-    // IMAGE-SAVE: Replaces fetch_image_history_robust for HFR, Stars, Filter, Target
+    // IMAGE-SAVE: Capture full ImageStatistics for dashboard and info overlay
     if (strcmp(evt->valuestring, "IMAGE-SAVE") == 0) {
         ESP_LOGI(TAG, "WS[%d]: IMAGE-SAVE event received", index);
 
         cJSON *stats = cJSON_GetObjectItem(response, "ImageStatistics");
         if (stats) {
-            // Extract values from JSON before taking the lock
+            // Extract all values from JSON before taking the lock
             float new_hfr = data->hfr;
             int new_stars = data->stars;
             float new_exp_total = data->exposure_total;
@@ -84,6 +84,65 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             if (telescope && telescope->valuestring)
                 new_telescope = telescope->valuestring;
 
+            // Extract extended ImageStatistics for info overlay
+            imagestats_detail_data_t img_stats = {0};
+            img_stats.has_data = true;
+            img_stats.hfr = new_hfr;
+            img_stats.stars = new_stars;
+            img_stats.exposure_time = new_exp_total;
+
+            cJSON *hfr_stdev = cJSON_GetObjectItem(stats, "HFRStDev");
+            if (hfr_stdev) img_stats.hfr_stdev = (float)hfr_stdev->valuedouble;
+
+            cJSON *mean = cJSON_GetObjectItem(stats, "Mean");
+            if (mean) img_stats.mean = (float)mean->valuedouble;
+
+            cJSON *median = cJSON_GetObjectItem(stats, "Median");
+            if (median) img_stats.median = (float)median->valuedouble;
+
+            cJSON *stdev = cJSON_GetObjectItem(stats, "StDev");
+            if (stdev) img_stats.stdev = (float)stdev->valuedouble;
+
+            cJSON *min_val = cJSON_GetObjectItem(stats, "Min");
+            if (min_val) img_stats.min_val = min_val->valueint;
+
+            cJSON *max_val = cJSON_GetObjectItem(stats, "Max");
+            if (max_val) img_stats.max_val = max_val->valueint;
+
+            cJSON *gain = cJSON_GetObjectItem(stats, "Gain");
+            if (gain) img_stats.gain = gain->valueint;
+
+            cJSON *offset = cJSON_GetObjectItem(stats, "Offset");
+            if (offset) img_stats.offset = offset->valueint;
+
+            cJSON *temperature = cJSON_GetObjectItem(stats, "Temperature");
+            if (temperature) img_stats.temperature = (float)temperature->valuedouble;
+
+            cJSON *filter = cJSON_GetObjectItem(stats, "Filter");
+            if (filter && filter->valuestring)
+                strncpy(img_stats.filter, filter->valuestring, sizeof(img_stats.filter) - 1);
+
+            if (new_target)
+                strncpy(img_stats.camera_name, "", sizeof(img_stats.camera_name) - 1);
+
+            cJSON *camera_name = cJSON_GetObjectItem(stats, "CameraName");
+            if (camera_name && camera_name->valuestring)
+                strncpy(img_stats.camera_name, camera_name->valuestring, sizeof(img_stats.camera_name) - 1);
+
+            if (new_telescope)
+                strncpy(img_stats.telescope_name, new_telescope, sizeof(img_stats.telescope_name) - 1);
+
+            cJSON *focal_length = cJSON_GetObjectItem(stats, "FocalLength");
+            if (focal_length) img_stats.focal_length = focal_length->valueint;
+
+            cJSON *date = cJSON_GetObjectItem(stats, "Date");
+            if (date && date->valuestring)
+                strncpy(img_stats.date, date->valuestring, sizeof(img_stats.date) - 1);
+
+            cJSON *filename = cJSON_GetObjectItem(stats, "Filename");
+            if (filename && filename->valuestring)
+                strncpy(img_stats.filename, filename->valuestring, sizeof(img_stats.filename) - 1);
+
             // Short critical section: write parsed values into the shared struct
             if (nina_client_lock(data, 50)) {
                 data->hfr = new_hfr;
@@ -97,6 +156,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
                     strncpy(data->telescope_name, new_telescope,
                             sizeof(data->telescope_name) - 1);
                 }
+                data->last_image_stats = img_stats;
                 data->new_image_available = true;
                 data->ui_refresh_needed = true;
                 nina_client_unlock(data);
@@ -106,7 +166,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
 
             ESP_LOGI(TAG, "WS[%d]: HFR=%.2f Stars=%d Filter=%s Target=%s",
                 index, new_hfr, new_stars,
-                data->current_filter, data->target_name);
+                img_stats.filter, data->target_name);
         }
     }
     // FILTERWHEEL-CHANGED: Replaces fetch_filter_robust_ex for current filter
@@ -174,6 +234,60 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         }
         ESP_LOGI(TAG, "WS[%d]: New target: %s", index,
                  target_name && target_name->valuestring ? target_name->valuestring : "(null)");
+    }
+    // AUTOFOCUS-STARTING: Clear V-curve buffer and mark AF running
+    else if (strcmp(evt->valuestring, "AUTOFOCUS-STARTING") == 0) {
+        if (nina_client_lock(data, 50)) {
+            memset(&data->autofocus, 0, sizeof(data->autofocus));
+            data->autofocus.af_running = true;
+            data->autofocus.has_data = true;
+            data->ui_refresh_needed = true;
+            nina_client_unlock(data);
+        }
+        ESP_LOGI(TAG, "WS[%d]: Autofocus starting", index);
+    }
+    // AUTOFOCUS-FINISHED: Mark AF complete, find best point
+    else if (strcmp(evt->valuestring, "AUTOFOCUS-FINISHED") == 0) {
+        if (nina_client_lock(data, 50)) {
+            data->autofocus.af_running = false;
+            // Find best (minimum HFR) point
+            float best_hfr = 999.0f;
+            int best_pos = 0;
+            for (int i = 0; i < data->autofocus.count; i++) {
+                if (data->autofocus.points[i].hfr < best_hfr) {
+                    best_hfr = data->autofocus.points[i].hfr;
+                    best_pos = data->autofocus.points[i].position;
+                }
+            }
+            data->autofocus.best_hfr = best_hfr;
+            data->autofocus.best_position = best_pos;
+            data->ui_refresh_needed = true;
+            nina_client_unlock(data);
+        }
+        ESP_LOGI(TAG, "WS[%d]: Autofocus finished (%d points)", index, data->autofocus.count);
+    }
+    // AUTOFOCUS-POINT-ADDED: Add V-curve data point {Position, HFR}
+    else if (strcmp(evt->valuestring, "AUTOFOCUS-POINT-ADDED") == 0) {
+        cJSON *position = cJSON_GetObjectItem(response, "Position");
+        cJSON *af_hfr = cJSON_GetObjectItem(response, "HFR");
+
+        if (position && af_hfr) {
+            int pos = position->valueint;
+            float hfr_val = (float)af_hfr->valuedouble;
+
+            if (nina_client_lock(data, 50)) {
+                if (data->autofocus.count < MAX_AF_POINTS) {
+                    int idx = data->autofocus.count;
+                    data->autofocus.points[idx].position = pos;
+                    data->autofocus.points[idx].hfr = hfr_val;
+                    data->autofocus.count++;
+                }
+                data->ui_refresh_needed = true;
+                nina_client_unlock(data);
+            }
+            ESP_LOGI(TAG, "WS[%d]: AF point: pos=%d HFR=%.2f (%d/%d)",
+                     index, pos, hfr_val, data->autofocus.count, MAX_AF_POINTS);
+        }
     }
     else {
         ESP_LOGD(TAG, "WS[%d]: Unhandled event: %s", index, evt->valuestring);

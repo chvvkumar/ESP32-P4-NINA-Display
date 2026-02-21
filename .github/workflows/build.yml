@@ -138,12 +138,11 @@ jobs:
           FACTORY_MB=$(python3 -c "print(f'{$FACTORY_SIZE / 1024 / 1024:.2f}')")
           OTA_MB=$(python3 -c "print(f'{$OTA_SIZE / 1024 / 1024:.2f}')")
           
-          # Extract PSRAM config from sdkconfig
-          PSRAM_SIZE=$(grep "CONFIG_SPIRAM_SIZE" sdkconfig 2>/dev/null | cut -d'=' -f2 || echo "32")
-          PSRAM_SPEED=$(grep "CONFIG_SPIRAM_SPEED" sdkconfig 2>/dev/null | cut -d'=' -f2 || echo "200")
-          
-          # Get partition table flash size
-          FLASH_SIZE=$(grep "CONFIG_ESPTOOLPY_FLASHSIZE" sdkconfig | cut -d'"' -f2 || echo "32MB")
+          # Extract PSRAM config from sdkconfig (exact key match to avoid multi-line grep)
+          PSRAM_SPEED=$(grep '^CONFIG_SPIRAM_SPEED=' sdkconfig 2>/dev/null | cut -d'=' -f2 || echo "200")
+
+          # Get flash size from sdkconfig (exact key match)
+          FLASH_SIZE=$(grep '^CONFIG_ESPTOOLPY_FLASHSIZE=' sdkconfig | cut -d'"' -f2 || echo "32MB")
           
           # Get memory usage from size output
           if [ -f build/nina-display.map ]; then
@@ -158,7 +157,7 @@ jobs:
           cat > /tmp/firmware-metrics.json << EOF
           {
             "flash_size": "$FLASH_SIZE",
-            "psram": "${PSRAM_SIZE}MB @ ${PSRAM_SPEED}MHz",
+            "psram": "32MB @ ${PSRAM_SPEED}MHz",
             "factory_size": "${FACTORY_MB} MB",
             "ota_size": "${OTA_MB} MB",
             "dram_used": "$DRAM_USED",
@@ -366,3 +365,22 @@ jobs:
             --title "$TAG" \
             --notes-file /tmp/release-notes.md \
             $PRERELEASE_FLAG
+
+      - name: Bump version for next release
+        if: steps.check_skip.outputs.skip != 'true' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CURRENT_VERSION=$(cat version.txt | tr -d '[:space:]')
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+          PATCH=$((PATCH + 1))
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+
+          echo "$NEW_VERSION" > version.txt
+          echo "Bumped version: $CURRENT_VERSION -> $NEW_VERSION"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add version.txt
+          git commit -m "chore: bump version to $NEW_VERSION [skip ci]"
+          git push origin main
