@@ -19,6 +19,7 @@ extern const theme_t *current_theme;
 #define GR_PAD          12
 #define GR_CHART_PAD    8
 #define GR_Y_LABEL_W    90
+#define GR_BACK_BTN_W   84     /* 56 * 1.5 */
 
 /* History point options */
 extern const int point_options[];

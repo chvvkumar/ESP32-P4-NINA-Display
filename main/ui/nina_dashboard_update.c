@@ -28,6 +28,7 @@ static void arc_fill_complete_cb(lv_anim_t *a) {
     /* Reset arc to 0 instantly (visually invisible since it was just at 100)
      * and let the interpolation timer ramp it up smoothly on its next tick. */
     lv_arc_set_value(p->arc_exposure, 0);
+    p->interp_arc_target = 0;
     p->arc_completing = false;
 }
 
@@ -143,6 +144,7 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
         p->arc_completing = false;
         p->prev_target_progress = 0;
         p->pending_arc_progress = 0;
+        p->interp_arc_target = 0;
         lv_arc_set_value(p->arc_exposure, 0);
         snprintf(p->prev_filter, sizeof(p->prev_filter), "%s", d->current_filter);
     }
@@ -150,11 +152,6 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
     if (d->exposure_total > 0 && d->exposure_end_epoch > 0) {
         float elapsed = d->exposure_current;
         float total = d->exposure_total;
-
-        // Cache interpolation state for the LVGL timer
-        p->interp_end_epoch = d->exposure_end_epoch;
-        p->interp_total = total;
-        p->interp_filter_color = filter_color;
 
         // Show total exposure duration inside the arc
         int total_sec = (int)total;
@@ -196,10 +193,18 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
                 p->arc_completing = false;
                 lv_arc_set_value(p->arc_exposure, progress);
             }
+        } else if (progress != p->interp_arc_target) {
+            // Normal update — animate arc to the API-reported progress
+            p->interp_arc_target = progress;
+            lv_anim_t a;
+            lv_anim_init(&a);
+            lv_anim_set_var(&a, p->arc_exposure);
+            lv_anim_set_values(&a, current_val, progress);
+            lv_anim_set_time(&a, 400);
+            lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_arc_set_value);
+            lv_anim_set_path_cb(&a, lv_anim_path_linear);
+            lv_anim_start(&a);
         }
-        /* Normal arc updates are now handled by the interpolation timer
-         * for smooth sub-second progression. Only the new-exposure animation
-         * above needs to run here. */
 
         if (d->exposure_iterations > 0) {
             lv_label_set_text_fmt(p->lbl_loop_count, "%d / %d",
@@ -208,50 +213,11 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
             lv_label_set_text(p->lbl_loop_count, "-- / --");
         }
     } else {
-        p->interp_end_epoch = 0;  // Not exposing — stop interpolation
+        p->interp_arc_target = 0;
         lv_label_set_text(p->lbl_exposure_current, "--");
         lv_label_set_text(p->lbl_exposure_total, "");
         lv_arc_set_value(p->arc_exposure, 0);
         lv_label_set_text(p->lbl_loop_count, "-- / --");
-    }
-}
-
-/* ── Exposure Interpolation Timer ────────────────────────────────────
- * Fires every 200ms in LVGL context (display lock held) to smoothly
- * update the exposure countdown label and arc progress between polls.
- */
-void exposure_interp_timer_cb(lv_timer_t *timer) {
-    (void)timer;
-    int idx = active_page - 1;  // active_page 1..N maps to page index 0..N-1
-    if (idx < 0 || idx >= page_count) return;
-
-    dashboard_page_t *p = &pages[idx];
-    if (!p->page || p->interp_end_epoch == 0 || p->interp_total <= 0) return;
-    if (p->arc_completing) return;  // Don't interfere with new-exposure animation
-
-    time_t now = time(NULL);
-    double remaining = difftime((time_t)p->interp_end_epoch, now);
-    if (remaining < 0) remaining = 0;
-
-    float elapsed = p->interp_total - (float)remaining;
-    if (elapsed < 0) elapsed = 0;
-    if (elapsed > p->interp_total) elapsed = p->interp_total;
-
-    int progress = (int)((elapsed * 100) / p->interp_total);
-    if (progress > 100) progress = 100;
-    if (progress < 0) progress = 0;
-
-    // Animate arc smoothly only when the integer progress actually changes
-    int current_val = lv_arc_get_value(p->arc_exposure);
-    if (progress != current_val) {
-        lv_anim_t a;
-        lv_anim_init(&a);
-        lv_anim_set_var(&a, p->arc_exposure);
-        lv_anim_set_values(&a, current_val, progress);
-        lv_anim_set_time(&a, 400);
-        lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_arc_set_value);
-        lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
-        lv_anim_start(&a);
     }
 }
 

@@ -1,0 +1,91 @@
+name: Manual Version Bump
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: 'patch'
+      branch:
+        description: 'Target branch'
+        required: true
+        type: choice
+        options:
+          - main
+          - snd
+        default: 'main'
+
+jobs:
+  bump-version:
+    runs-on: self-hosted
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Increment version
+        id: bump
+        run: |
+          CURRENT_VERSION=$(cat version.txt | tr -d '[:space:]')
+          echo "Current version: $CURRENT_VERSION"
+          
+          # Parse semantic version (MAJOR.MINOR.PATCH)
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+          
+          # Increment based on bump type
+          case "${{ inputs.bump_type }}" in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            patch)
+              PATCH=$((PATCH + 1))
+              ;;
+          esac
+          
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          
+          echo "New version: $NEW_VERSION"
+          echo "$NEW_VERSION" > version.txt
+          
+          echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "new=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Commit and push version bump
+        run: |
+          git add version.txt
+          git commit -m "chore: bump version to ${{ steps.bump.outputs.new }} (${{ inputs.bump_type }})"
+          git push origin ${{ inputs.branch }}
+
+      - name: Create summary
+        run: |
+          echo "## Version Bumped 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Bump type:** ${{ inputs.bump_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ inputs.branch }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Previous version:** ${{ steps.bump.outputs.current }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **New version:** ${{ steps.bump.outputs.new }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Push to ${{ inputs.branch }} to trigger a new build with version **${{ steps.bump.outputs.new }}**" >> $GITHUB_STEP_SUMMARY

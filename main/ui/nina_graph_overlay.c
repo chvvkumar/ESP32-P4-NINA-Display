@@ -446,12 +446,12 @@ void nina_graph_overlay_create(lv_obj_t *parent) {
     lv_obj_set_style_bg_opa(legend_cont, LV_OPA_50, 0);
     lv_obj_set_style_radius(legend_cont, 8, 0);
     lv_obj_add_flag(legend_cont, LV_OBJ_FLAG_FLOATING);
-    lv_obj_align(legend_cont, LV_ALIGN_BOTTOM_RIGHT, -4, -4);
+    lv_obj_align(legend_cont, LV_ALIGN_TOP_RIGHT, -4, 4);
     lv_obj_add_flag(legend_cont, LV_OBJ_FLAG_HIDDEN);
 
     /* -- Back button (floating on overlay, bottom-right corner) -- */
     btn_back = lv_button_create(overlay);
-    lv_obj_set_size(btn_back, 56, 52);
+    lv_obj_set_size(btn_back, GR_BACK_BTN_W, GR_CONTROLS_H);
     lv_obj_set_style_radius(btn_back, 14, 0);
     lv_obj_set_style_bg_opa(btn_back, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(btn_back, lv_color_hex(current_theme ? current_theme->bento_border : 0x333333), 0);

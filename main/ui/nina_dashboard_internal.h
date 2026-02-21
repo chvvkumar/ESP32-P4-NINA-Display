@@ -68,10 +68,7 @@ typedef struct {
     bool arc_completing;
     char prev_filter[32];       // Track previous filter for change detection
 
-    // Exposure interpolation state (updated by data task, read by LVGL timer)
-    int64_t interp_end_epoch;       // Absolute end time (Unix epoch seconds)
-    float   interp_total;           // Total exposure duration (seconds)
-    uint32_t interp_filter_color;   // Cached filter color for the arc
+    int      interp_arc_target;     // Last animation target (avoid restarts)
 
     // Connection state (tracked for theme reapplication)
     bool nina_connected;
@@ -89,9 +86,6 @@ extern int page_count;        /* Number of NINA instance pages */
 extern int total_page_count;  /* page_count + 3 (summary + settings + sysinfo) */
 extern int active_page;
 extern const theme_t *current_theme;
-
-/* Exposure interpolation timer callback — defined in nina_dashboard_update.c */
-void exposure_interp_timer_cb(lv_timer_t *timer);
 
 /* Thumbnail overlay state — defined in nina_thumbnail.c */
 extern lv_obj_t *thumbnail_overlay;

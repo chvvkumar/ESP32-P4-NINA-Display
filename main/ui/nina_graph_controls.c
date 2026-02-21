@@ -147,6 +147,7 @@ void rebuild_controls(void) {
     lv_obj_set_flex_flow(controls_cont, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(controls_cont, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_row(controls_cont, 4, 0);
+    lv_obj_set_style_pad_right(controls_cont, GR_BACK_BTN_W + 20, 0);
 
     /* -- Row 1: Point count -- */
     lv_obj_t *row_pts = lv_obj_create(controls_cont);
@@ -281,5 +282,5 @@ void rebuild_legend(void) {
     }
 
     /* Re-align after content change */
-    lv_obj_align(legend_cont, LV_ALIGN_BOTTOM_RIGHT, -4, -4);
+    lv_obj_align(legend_cont, LV_ALIGN_TOP_RIGHT, -4, 4);
 }
