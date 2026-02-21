@@ -143,6 +143,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddBoolToObject(root, "auto_rotate_skip_disconnected", cfg->auto_rotate_skip_disconnected);
     cJSON_AddNumberToObject(root, "auto_rotate_pages", cfg->auto_rotate_pages);
     cJSON_AddNumberToObject(root, "update_rate_s", cfg->update_rate_s);
+    cJSON_AddNumberToObject(root, "graph_update_interval_s", cfg->graph_update_interval_s);
 
     const char *json_str = cJSON_PrintUnformatted(root);
     if (json_str == NULL) {
@@ -361,6 +362,14 @@ static esp_err_t config_post_handler(httpd_req_t *req)
         if (v < 1) v = 1;
         if (v > 10) v = 10;
         cfg->update_rate_s = (uint8_t)v;
+    }
+
+    cJSON *gui_item = cJSON_GetObjectItem(root, "graph_update_interval_s");
+    if (cJSON_IsNumber(gui_item)) {
+        int v = gui_item->valueint;
+        if (v < 2) v = 2;
+        if (v > 30) v = 30;
+        cfg->graph_update_interval_s = (uint8_t)v;
     }
 
     app_config_save(cfg);

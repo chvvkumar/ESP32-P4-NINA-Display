@@ -26,7 +26,7 @@ static const char *TAG = "tasks";
 #define BOOT_BUTTON_GPIO    GPIO_NUM_35
 #define DEBOUNCE_MS         200
 #define HEARTBEAT_INTERVAL_MS 10000
-#define GRAPH_REFRESH_INTERVAL_MS 5000  /* Auto-refresh graph every 5 seconds */
+/* Graph refresh interval read from config at runtime (graph_update_interval_s) */
 
 /* Signals the data task that a page switch occurred */
 volatile bool page_changed = false;
@@ -389,7 +389,8 @@ void data_update_task(void *arg) {
             /* Auto-refresh graph at defined interval while visible */
             if (nina_graph_visible() && !nina_graph_requested()) {
                 int64_t now_graph = esp_timer_get_time() / 1000;
-                if (now_graph - last_graph_fetch_ms >= GRAPH_REFRESH_INTERVAL_MS) {
+                int graph_interval_ms = (int)app_config_get()->graph_update_interval_s * 1000;
+                if (now_graph - last_graph_fetch_ms >= graph_interval_ms) {
                     nina_graph_set_refresh_pending();
                 }
             }
