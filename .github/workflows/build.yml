@@ -134,9 +134,9 @@ jobs:
           FACTORY_SIZE=$(stat -c%s firmware/nina-display-factory.bin 2>/dev/null || stat -f%z firmware/nina-display-factory.bin)
           OTA_SIZE=$(stat -c%s firmware/nina-display-ota.bin 2>/dev/null || stat -f%z firmware/nina-display-ota.bin)
           
-          # Convert to human readable
-          FACTORY_MB=$(echo "scale=2; $FACTORY_SIZE / 1024 / 1024" | bc)
-          OTA_MB=$(echo "scale=2; $OTA_SIZE / 1024 / 1024" | bc)
+          # Convert to human readable using Python (bc not available on all runners)
+          FACTORY_MB=$(python3 -c "print(f'{$FACTORY_SIZE / 1024 / 1024:.2f}')")
+          OTA_MB=$(python3 -c "print(f'{$OTA_SIZE / 1024 / 1024:.2f}')")
           
           # Extract PSRAM config from sdkconfig
           PSRAM_SIZE=$(grep "CONFIG_SPIRAM_SIZE" sdkconfig 2>/dev/null | cut -d'=' -f2 || echo "32")
