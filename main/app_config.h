@@ -57,6 +57,18 @@ void app_config_factory_reset(void);
 uint32_t app_config_get_filter_color(const char *filter_name, int instance_index);
 uint32_t app_config_get_rms_color(float rms_value, int instance_index);
 uint32_t app_config_get_hfr_color(float hfr_value, int instance_index);
+
+// Threshold configuration (values + colors) for graph overlay display
+typedef struct {
+    float good_max;
+    float ok_max;
+    uint32_t good_color;
+    uint32_t ok_color;
+    uint32_t bad_color;
+} threshold_config_t;
+
+void app_config_get_rms_threshold_config(int instance_index, threshold_config_t *out);
+void app_config_get_hfr_threshold_config(int instance_index, threshold_config_t *out);
 void app_config_sync_filters(const char *filter_names[], int count, int instance_index);
 uint32_t app_config_apply_brightness(uint32_t color, int brightness);
 

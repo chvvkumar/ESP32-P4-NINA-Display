@@ -420,3 +420,126 @@ void fetch_switch_info(const char *base_url, nina_client_t *data) {
 
     cJSON_Delete(json);
 }
+
+/* ── Graph data fetchers ────────────────────────────────────────────── */
+
+#include "ui/nina_graph_overlay.h"
+#include <math.h>
+
+/**
+ * @brief Fetch guider graph history from /equipment/guider/graph
+ * Populates graph_rms_data_t with RA/DEC raw distance values and RMS summary.
+ */
+void fetch_guider_graph(const char *base_url, graph_rms_data_t *out, int max_points) {
+    if (!out) return;
+    memset(out, 0, sizeof(graph_rms_data_t));
+
+    char url[256];
+    snprintf(url, sizeof(url), "%sequipment/guider/graph", base_url);
+
+    cJSON *json = http_get_json(url);
+    if (!json) return;
+
+    cJSON *response = cJSON_GetObjectItem(json, "Response");
+    if (!response) { cJSON_Delete(json); return; }
+
+    /* Parse RMS summary */
+    cJSON *rms = cJSON_GetObjectItem(response, "RMS");
+    if (rms) {
+        cJSON *ra = cJSON_GetObjectItem(rms, "RA");
+        cJSON *dec = cJSON_GetObjectItem(rms, "Dec");
+        cJSON *total = cJSON_GetObjectItem(rms, "Total");
+        cJSON *peak_ra = cJSON_GetObjectItem(rms, "PeakRA");
+        cJSON *peak_dec = cJSON_GetObjectItem(rms, "PeakDec");
+        cJSON *pscale = cJSON_GetObjectItem(rms, "Scale");
+
+        if (ra) out->rms_ra = (float)ra->valuedouble;
+        if (dec) out->rms_dec = (float)dec->valuedouble;
+        if (total) out->rms_total = (float)total->valuedouble;
+        if (peak_ra) out->peak_ra = (float)peak_ra->valuedouble;
+        if (peak_dec) out->peak_dec = (float)peak_dec->valuedouble;
+        if (pscale) out->pixel_scale = (float)pscale->valuedouble;
+    }
+
+    /* Parse pixel scale from response level */
+    cJSON *ps = cJSON_GetObjectItem(response, "PixelScale");
+    if (ps) out->pixel_scale = (float)ps->valuedouble;
+
+    /* Parse guide steps array */
+    cJSON *steps = cJSON_GetObjectItem(response, "GuideSteps");
+    if (steps && cJSON_IsArray(steps)) {
+        int total_steps = cJSON_GetArraySize(steps);
+        /* Take last max_points steps (most recent) */
+        int start = 0;
+        if (total_steps > max_points) start = total_steps - max_points;
+        if (max_points > GRAPH_MAX_POINTS) max_points = GRAPH_MAX_POINTS;
+
+        int idx = 0;
+        for (int i = start; i < total_steps && idx < GRAPH_MAX_POINTS; i++) {
+            cJSON *step = cJSON_GetArrayItem(steps, i);
+            if (!step) continue;
+
+            cJSON *ra_raw = cJSON_GetObjectItem(step, "RADistanceRaw");
+            cJSON *dec_raw = cJSON_GetObjectItem(step, "DECDistanceRaw");
+
+            out->ra[idx] = ra_raw ? (float)ra_raw->valuedouble : 0;
+            out->dec[idx] = dec_raw ? (float)dec_raw->valuedouble : 0;
+            /* Total computed from RA and DEC */
+            out->total[idx] = sqrtf(out->ra[idx] * out->ra[idx] +
+                                    out->dec[idx] * out->dec[idx]);
+            idx++;
+        }
+        out->count = idx;
+    }
+
+    ESP_LOGI(TAG, "Guider graph: %d steps, RMS=%.2f\"", out->count, out->rms_total);
+    cJSON_Delete(json);
+}
+
+/**
+ * @brief Fetch HFR history from /image-history?all=true&imageType=LIGHT
+ * Populates graph_hfr_data_t with HFR values from each captured image.
+ */
+void fetch_hfr_history(const char *base_url, graph_hfr_data_t *out, int max_points) {
+    if (!out) return;
+    memset(out, 0, sizeof(graph_hfr_data_t));
+
+    char url[256];
+    snprintf(url, sizeof(url), "%simage-history?all=true&imageType=LIGHT", base_url);
+
+    cJSON *json = http_get_json(url);
+    if (!json) return;
+
+    cJSON *response = cJSON_GetObjectItem(json, "Response");
+    if (!response || !cJSON_IsArray(response)) { cJSON_Delete(json); return; }
+
+    int total_images = cJSON_GetArraySize(response);
+    if (total_images <= 0) { cJSON_Delete(json); return; }
+
+    /* The API returns images newest-first; we want oldest-first for the chart.
+     * Take last max_points images and reverse into the output array. */
+    int start = 0;
+    if (total_images > max_points) start = total_images - max_points;
+    if (max_points > GRAPH_MAX_POINTS) max_points = GRAPH_MAX_POINTS;
+
+    /* First pass: collect from start..end into temp positions */
+    int count = 0;
+    for (int i = total_images - 1; i >= start && count < GRAPH_MAX_POINTS; i--) {
+        cJSON *item = cJSON_GetArrayItem(response, i);
+        if (!item) continue;
+
+        cJSON *hfr = cJSON_GetObjectItem(item, "HFR");
+        cJSON *stars = cJSON_GetObjectItem(item, "Stars");
+
+        float hfr_val = hfr ? (float)hfr->valuedouble : 0;
+        if (hfr_val <= 0) continue;  /* Skip images with no HFR data */
+
+        out->hfr[count] = hfr_val;
+        out->stars[count] = stars ? stars->valueint : 0;
+        count++;
+    }
+    out->count = count;
+
+    ESP_LOGI(TAG, "HFR history: %d images", out->count);
+    cJSON_Delete(json);
+}

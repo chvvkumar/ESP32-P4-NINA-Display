@@ -351,7 +351,7 @@ static esp_err_t config_post_handler(httpd_req_t *req)
     if (cJSON_IsNumber(arp_item)) {
         int v = arp_item->valueint;
         if (v < 0) v = 0;
-        if (v > 0x1F) v = 0x1F;  /* 5-bit mask */
+        if (v > 0x3F) v = 0x3F;  /* 6-bit mask (includes settings page) */
         cfg->auto_rotate_pages = (uint8_t)v;
     }
 
@@ -568,7 +568,7 @@ static esp_err_t page_post_handler(httpd_req_t *req)
     if (cJSON_IsNumber(val)) {
         int page = val->valueint;
         int cnt = app_config_get_instance_count();
-        int total = cnt + 2;  /* summary + NINA pages + sysinfo */
+        int total = cnt + 3;  /* summary + NINA pages + settings + sysinfo */
         app_config_t *cfg = app_config_get();
 
         if (page >= 0 && page < total) {

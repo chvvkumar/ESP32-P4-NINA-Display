@@ -638,6 +638,44 @@ uint32_t app_config_get_hfr_color(float hfr_value, int instance_index) {
                                &s_hfr_thresholds_cache[instance_index], 2.0f, 3.5f);
 }
 
+static void fill_threshold_config(const char *json, cJSON **cache,
+                                   float default_good_max, float default_ok_max,
+                                   threshold_config_t *out) {
+    if (!*cache) {
+        *cache = cJSON_Parse(json);
+    }
+    cJSON *root = *cache;
+    if (!root) {
+        out->good_max = default_good_max;
+        out->ok_max = default_ok_max;
+        out->good_color = 0x10b981;
+        out->ok_color = 0xeab308;
+        out->bad_color = 0xef4444;
+        return;
+    }
+    out->good_color = parse_color_field(root, "good_color", 0x10b981);
+    out->ok_color = parse_color_field(root, "ok_color", 0xeab308);
+    out->bad_color = parse_color_field(root, "bad_color", 0xef4444);
+    cJSON *gm = cJSON_GetObjectItem(root, "good_max");
+    cJSON *om = cJSON_GetObjectItem(root, "ok_max");
+    out->good_max = (gm && cJSON_IsNumber(gm)) ? (float)gm->valuedouble : default_good_max;
+    out->ok_max = (om && cJSON_IsNumber(om)) ? (float)om->valuedouble : default_ok_max;
+}
+
+void app_config_get_rms_threshold_config(int instance_index, threshold_config_t *out) {
+    if (instance_index < 0 || instance_index >= MAX_NINA_INSTANCES) instance_index = 0;
+    fill_threshold_config(s_config.rms_thresholds[instance_index],
+                          &s_rms_thresholds_cache[instance_index],
+                          0.5f, 1.0f, out);
+}
+
+void app_config_get_hfr_threshold_config(int instance_index, threshold_config_t *out) {
+    if (instance_index < 0 || instance_index >= MAX_NINA_INSTANCES) instance_index = 0;
+    fill_threshold_config(s_config.hfr_thresholds[instance_index],
+                          &s_hfr_thresholds_cache[instance_index],
+                          2.0f, 3.5f, out);
+}
+
 /**
  * @brief Check if a filter name exists in the API filter list
  */

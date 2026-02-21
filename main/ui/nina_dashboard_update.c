@@ -62,6 +62,30 @@ void nina_dashboard_update_status(int page_index, int rssi, bool nina_connected,
     }
 }
 
+/* ── Smooth RMS / HFR value animation ─────────────────────────────── */
+#define VALUE_ANIM_MS  500
+
+static void arcsec_anim_exec(void *obj, int32_t v) {
+    lv_label_set_text_fmt((lv_obj_t *)obj, "%.2f\"", v / 100.0f);
+}
+
+static void hfr_anim_exec(void *obj, int32_t v) {
+    lv_label_set_text_fmt((lv_obj_t *)obj, "%.2f", v / 100.0f);
+}
+
+static void animate_value(lv_obj_t *label, int32_t from, int32_t to,
+                          lv_anim_exec_xcb_t exec_cb) {
+    lv_anim_delete(label, exec_cb);
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, label);
+    lv_anim_set_values(&a, from, to);
+    lv_anim_set_time(&a, VALUE_ANIM_MS);
+    lv_anim_set_exec_cb(&a, exec_cb);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_start(&a);
+}
+
 /* ---- Sub-functions for update_nina_dashboard_page() ---- */
 
 static void update_disconnected_state(dashboard_page_t *p, int page_index, int gb) {
@@ -82,10 +106,16 @@ static void update_disconnected_state(dashboard_page_t *p, int page_index, int g
     lv_label_set_text(p->lbl_exposure_total, "");
     lv_arc_set_value(p->arc_exposure, 0);
     lv_label_set_text(p->lbl_loop_count, "-- / --");
+    lv_anim_delete(p->lbl_rms_value, arcsec_anim_exec);
     lv_label_set_text(p->lbl_rms_value, "--");
     lv_obj_set_style_text_color(p->lbl_rms_value, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+    p->anim_rms_total_x100 = 0;
+    if (p->lbl_rms_ra_value)  { lv_anim_delete(p->lbl_rms_ra_value, arcsec_anim_exec);  p->anim_rms_ra_x100 = 0; }
+    if (p->lbl_rms_dec_value) { lv_anim_delete(p->lbl_rms_dec_value, arcsec_anim_exec); p->anim_rms_dec_x100 = 0; }
+    lv_anim_delete(p->lbl_hfr_value, hfr_anim_exec);
     lv_label_set_text(p->lbl_hfr_value, "--");
     lv_obj_set_style_text_color(p->lbl_hfr_value, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+    p->anim_hfr_x100 = 0;
     lv_label_set_text(p->lbl_flip_value, "--");
     lv_label_set_text(p->lbl_stars_value, "--");
     lv_label_set_text(p->lbl_target_time_value, "--");
@@ -236,35 +266,84 @@ void exposure_interp_timer_cb(lv_timer_t *timer) {
 
 static void update_guider_stats(dashboard_page_t *p, const nina_client_t *d,
                                 int page_index, int gb) {
+    /* ── RMS Total ── */
     if (d->guider.rms_total > 0) {
-        lv_label_set_text_fmt(p->lbl_rms_value, "%.2f\"", d->guider.rms_total);
+        int32_t new_val = (int32_t)(d->guider.rms_total * 100.0f + 0.5f);
         uint32_t rms_color = theme_forces_colors()
             ? app_config_apply_brightness(current_theme->rms_color, gb)
             : app_config_get_rms_color(d->guider.rms_total, page_index);
         lv_obj_set_style_text_color(p->lbl_rms_value, lv_color_hex(rms_color), 0);
+
+        if (p->anim_rms_total_x100 > 0 && new_val != p->anim_rms_total_x100) {
+            animate_value(p->lbl_rms_value, p->anim_rms_total_x100, new_val, arcsec_anim_exec);
+        } else {
+            lv_anim_delete(p->lbl_rms_value, arcsec_anim_exec);
+            lv_label_set_text_fmt(p->lbl_rms_value, "%.2f\"", d->guider.rms_total);
+        }
+        p->anim_rms_total_x100 = new_val;
     } else {
+        lv_anim_delete(p->lbl_rms_value, arcsec_anim_exec);
         lv_label_set_text(p->lbl_rms_value, "--");
         lv_obj_set_style_text_color(p->lbl_rms_value, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+        p->anim_rms_total_x100 = 0;
     }
 
+    /* ── RMS RA ── */
     if (p->lbl_rms_ra_value) {
-        lv_label_set_text_fmt(p->lbl_rms_ra_value,
-            d->guider.rms_ra > 0 ? "%.2f\"" : "--", d->guider.rms_ra);
-    }
-    if (p->lbl_rms_dec_value) {
-        lv_label_set_text_fmt(p->lbl_rms_dec_value,
-            d->guider.rms_dec > 0 ? "%.2f\"" : "--", d->guider.rms_dec);
+        if (d->guider.rms_ra > 0) {
+            int32_t new_val = (int32_t)(d->guider.rms_ra * 100.0f + 0.5f);
+            if (p->anim_rms_ra_x100 > 0 && new_val != p->anim_rms_ra_x100) {
+                animate_value(p->lbl_rms_ra_value, p->anim_rms_ra_x100, new_val, arcsec_anim_exec);
+            } else {
+                lv_anim_delete(p->lbl_rms_ra_value, arcsec_anim_exec);
+                lv_label_set_text_fmt(p->lbl_rms_ra_value, "%.2f\"", d->guider.rms_ra);
+            }
+            p->anim_rms_ra_x100 = new_val;
+        } else {
+            lv_anim_delete(p->lbl_rms_ra_value, arcsec_anim_exec);
+            lv_label_set_text(p->lbl_rms_ra_value, "--");
+            p->anim_rms_ra_x100 = 0;
+        }
     }
 
+    /* ── RMS DEC ── */
+    if (p->lbl_rms_dec_value) {
+        if (d->guider.rms_dec > 0) {
+            int32_t new_val = (int32_t)(d->guider.rms_dec * 100.0f + 0.5f);
+            if (p->anim_rms_dec_x100 > 0 && new_val != p->anim_rms_dec_x100) {
+                animate_value(p->lbl_rms_dec_value, p->anim_rms_dec_x100, new_val, arcsec_anim_exec);
+            } else {
+                lv_anim_delete(p->lbl_rms_dec_value, arcsec_anim_exec);
+                lv_label_set_text_fmt(p->lbl_rms_dec_value, "%.2f\"", d->guider.rms_dec);
+            }
+            p->anim_rms_dec_x100 = new_val;
+        } else {
+            lv_anim_delete(p->lbl_rms_dec_value, arcsec_anim_exec);
+            lv_label_set_text(p->lbl_rms_dec_value, "--");
+            p->anim_rms_dec_x100 = 0;
+        }
+    }
+
+    /* ── HFR ── */
     if (d->hfr > 0) {
-        lv_label_set_text_fmt(p->lbl_hfr_value, "%.2f", d->hfr);
+        int32_t new_val = (int32_t)(d->hfr * 100.0f + 0.5f);
         uint32_t hfr_color = theme_forces_colors()
             ? app_config_apply_brightness(current_theme->hfr_color, gb)
             : app_config_get_hfr_color(d->hfr, page_index);
         lv_obj_set_style_text_color(p->lbl_hfr_value, lv_color_hex(hfr_color), 0);
+
+        if (p->anim_hfr_x100 > 0 && new_val != p->anim_hfr_x100) {
+            animate_value(p->lbl_hfr_value, p->anim_hfr_x100, new_val, hfr_anim_exec);
+        } else {
+            lv_anim_delete(p->lbl_hfr_value, hfr_anim_exec);
+            lv_label_set_text_fmt(p->lbl_hfr_value, "%.2f", d->hfr);
+        }
+        p->anim_hfr_x100 = new_val;
     } else {
+        lv_anim_delete(p->lbl_hfr_value, hfr_anim_exec);
         lv_label_set_text(p->lbl_hfr_value, "--");
         lv_obj_set_style_text_color(p->lbl_hfr_value, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+        p->anim_hfr_x100 = 0;
     }
 }
 
