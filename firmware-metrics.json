@@ -1,24 +1,13 @@
 {
-  "flash_size": "# CONFIG_ESPTOOLPY_FLASHSIZE_1MB is not set
-# CONFIG_ESPTOOLPY_FLASHSIZE_2MB is not set
-# CONFIG_ESPTOOLPY_FLASHSIZE_4MB is not set
-# CONFIG_ESPTOOLPY_FLASHSIZE_8MB is not set
-# CONFIG_ESPTOOLPY_FLASHSIZE_16MB is not set
-CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y
-# CONFIG_ESPTOOLPY_FLASHSIZE_64MB is not set
-# CONFIG_ESPTOOLPY_FLASHSIZE_128MB is not set
-32MB",
-  "psram": "MB @ y
-# CONFIG_SPIRAM_SPEED_80M is not set
-# CONFIG_SPIRAM_SPEED_20M is not set
-200MHz",
-  "factory_size": "1.99 MB",
-  "ota_size": "1.87 MB",
+  "flash_size": "32MB",
+  "psram": "32MB @ 200MHz",
+  "factory_size": "2.03 MB",
+  "ota_size": "1.90 MB",
   "dram_used": "N/A",
   "iram_used": "N/A",
   "esp_idf": "v5.5.2",
   "target": "esp32p4",
   "build_date": "2026-02-21",
   "branch": "main",
-  "commit": "b29b1a2"
+  "commit": "b10e531"
 }
