@@ -260,6 +260,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
 
     lv_obj_t *top_row = lv_obj_create(p->header_box);
     lv_obj_remove_style_all(top_row);
+    lv_obj_clear_flag(top_row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_width(top_row, LV_PCT(100));
     lv_obj_set_height(top_row, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(top_row, LV_FLEX_FLOW_ROW);
@@ -267,6 +268,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
 
     lv_obj_t *left_cont = lv_obj_create(top_row);
     lv_obj_remove_style_all(left_cont);
+    lv_obj_clear_flag(left_cont, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(left_cont, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(left_cont, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(left_cont, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -311,6 +313,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
 
     lv_obj_t *seq_left = lv_obj_create(box_seq);
     lv_obj_remove_style_all(seq_left);
+    lv_obj_clear_flag(seq_left, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(seq_left, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(seq_left, LV_FLEX_FLOW_COLUMN);
 
@@ -324,6 +327,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
 
     lv_obj_t *seq_right = lv_obj_create(box_seq);
     lv_obj_remove_style_all(seq_right);
+    lv_obj_clear_flag(seq_right, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(seq_right, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(seq_right, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(seq_right, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
@@ -455,6 +459,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
 
     lv_obj_t *box_target_time = lv_obj_create(box_sat_stars);
     lv_obj_remove_style_all(box_target_time);
+    lv_obj_clear_flag(box_target_time, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(box_target_time, LV_PCT(50), LV_PCT(100));
     lv_obj_set_flex_flow(box_target_time, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(box_target_time, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -495,6 +500,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     for (int i = 0; i < MAX_POWER_WIDGETS; i++) {
         p->box_pwr[i] = lv_obj_create(box_power);
         lv_obj_remove_style_all(p->box_pwr[i]);
+        lv_obj_clear_flag(p->box_pwr[i], LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_flex_grow(p->box_pwr[i], 1);
         lv_obj_set_height(p->box_pwr[i], LV_PCT(100));
         lv_obj_set_flex_flow(p->box_pwr[i], LV_FLEX_FLOW_COLUMN);

@@ -20,7 +20,7 @@ extern const theme_t *current_theme;
 #define INFO_CARD_PAD     14
 #define INFO_CARD_ROW_GAP  6
 #define INFO_BACK_BTN_W   84
-#define INFO_BACK_BTN_H   48
+#define INFO_BACK_BTN_H   108
 
 /* ── Shared widget state (defined in nina_info_overlay.c) ─────────── */
 extern lv_obj_t *info_overlay;

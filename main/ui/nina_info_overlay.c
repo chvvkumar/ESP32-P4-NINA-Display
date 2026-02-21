@@ -274,6 +274,10 @@ void nina_info_overlay_show(info_overlay_type_t type, int page_index) {
         case INFO_OVERLAY_AUTOFOCUS: build_autofocus_content(info_content); break;
         }
 
+        /* Re-apply bottom padding — some builders call lv_obj_remove_style_all()
+         * which strips the padding set in create(). */
+        lv_obj_set_style_pad_bottom(info_content, INFO_BACK_BTN_H + INFO_OUTER_PAD, 0);
+
         built_content_type = (int)type;
     }
 
