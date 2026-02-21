@@ -1,0 +1,764 @@
+/**
+ * @file nina_settings.c
+ * @brief Display settings page — theme, brightness, update rate, auto-rotate controls.
+ *
+ * Provides on-device access to the same display settings available in the web config.
+ * All changes are applied live; the Save button persists to NVS.
+ */
+
+#include "nina_settings.h"
+#include "nina_dashboard_internal.h"
+#include "nina_dashboard.h"
+#include "app_config.h"
+#include "themes.h"
+#include "bsp/esp-bsp.h"
+
+#include <stdio.h>
+#include <string.h>
+
+/* ── Layout ──────────────────────────────────────────────────────────── */
+#define ST_PAD       16
+#define ST_GAP       12
+#define ST_RADIUS    24
+
+/* ── Page root ───────────────────────────────────────────────────────── */
+static lv_obj_t *st_page = NULL;
+
+/* ── Theme card widgets ──────────────────────────────────────────────── */
+static lv_obj_t *lbl_theme_name  = NULL;
+static lv_obj_t *btn_theme_prev  = NULL;
+static lv_obj_t *btn_theme_next  = NULL;
+
+/* ── Brightness card widgets ─────────────────────────────────────────── */
+static lv_obj_t *slider_backlight      = NULL;
+static lv_obj_t *lbl_backlight_val     = NULL;
+static lv_obj_t *slider_text_bright    = NULL;
+static lv_obj_t *lbl_text_bright_val   = NULL;
+
+/* ── Update rate card widgets ────────────────────────────────────────── */
+static lv_obj_t *lbl_update_rate_val   = NULL;
+static lv_obj_t *btn_rate_minus        = NULL;
+static lv_obj_t *btn_rate_plus         = NULL;
+
+/* ── Auto-rotate card widgets ────────────────────────────────────────── */
+static lv_obj_t *sw_auto_rotate        = NULL;
+static lv_obj_t *lbl_interval_val      = NULL;
+static lv_obj_t *btn_interval_minus    = NULL;
+static lv_obj_t *btn_interval_plus     = NULL;
+static lv_obj_t *lbl_effect_val        = NULL;
+static lv_obj_t *btn_effect_prev       = NULL;
+static lv_obj_t *btn_effect_next       = NULL;
+static lv_obj_t *sw_skip_disconnected  = NULL;
+
+/* ── Save button ─────────────────────────────────────────────────────── */
+static lv_obj_t *btn_save              = NULL;
+static lv_obj_t *lbl_save              = NULL;
+
+/* ── Header icon (needs special handling in theme apply) ─────────────── */
+static lv_obj_t *lbl_header_icon       = NULL;
+
+/* ── Effect names ────────────────────────────────────────────────────── */
+static const char *effect_names[] = {"Instant", "Fade", "Slide Left", "Slide Right"};
+#define EFFECT_COUNT 4
+
+/* ── Helpers ─────────────────────────────────────────────────────────── */
+
+static lv_obj_t *make_card(lv_obj_t *parent) {
+    lv_obj_t *card = lv_obj_create(parent);
+    lv_obj_remove_style_all(card);
+    lv_obj_add_style(card, &style_bento_box, 0);
+    lv_obj_set_width(card, LV_PCT(100));
+    lv_obj_set_height(card, LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_all(card, 18, 0);
+    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_row(card, 10, 0);
+    return card;
+}
+
+static lv_obj_t *make_section_title(lv_obj_t *parent, const char *text) {
+    lv_obj_t *lbl = lv_label_create(parent);
+    lv_label_set_text(lbl, text);
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_letter_space(lbl, 2, 0);
+    if (current_theme) {
+        int gb = app_config_get()->color_brightness;
+        lv_obj_set_style_text_color(lbl, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+    }
+    return lbl;
+}
+
+/** Create a large circular arrow button with a label */
+static lv_obj_t *make_arrow_btn(lv_obj_t *parent, const char *symbol) {
+    lv_obj_t *btn = lv_button_create(parent);
+    lv_obj_set_size(btn, 56, 56);
+    lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+    if (current_theme) {
+        lv_obj_set_style_bg_color(btn, lv_color_hex(current_theme->bento_border), 0);
+        lv_obj_set_style_bg_color(btn, lv_color_hex(current_theme->progress_color), LV_STATE_PRESSED);
+    }
+    lv_obj_set_style_border_width(btn, 0, 0);
+    lv_obj_set_style_shadow_width(btn, 0, 0);
+
+    lv_obj_t *lbl = lv_label_create(btn);
+    lv_label_set_text(lbl, symbol);
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
+    if (current_theme) {
+        int gb = app_config_get()->color_brightness;
+        lv_obj_set_style_text_color(lbl, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+    }
+    lv_obj_center(lbl);
+
+    return btn;
+}
+
+/** Create a +/- stepper button (smaller than arrow buttons) */
+static lv_obj_t *make_stepper_btn(lv_obj_t *parent, const char *symbol) {
+    lv_obj_t *btn = lv_button_create(parent);
+    lv_obj_set_size(btn, 52, 48);
+    lv_obj_set_style_radius(btn, 12, 0);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+    if (current_theme) {
+        lv_obj_set_style_bg_color(btn, lv_color_hex(current_theme->bento_border), 0);
+        lv_obj_set_style_bg_color(btn, lv_color_hex(current_theme->progress_color), LV_STATE_PRESSED);
+    }
+    lv_obj_set_style_border_width(btn, 0, 0);
+    lv_obj_set_style_shadow_width(btn, 0, 0);
+
+    lv_obj_t *lbl = lv_label_create(btn);
+    lv_label_set_text(lbl, symbol);
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_24, 0);
+    if (current_theme) {
+        int gb = app_config_get()->color_brightness;
+        lv_obj_set_style_text_color(lbl, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+    }
+    lv_obj_center(lbl);
+
+    return btn;
+}
+
+/** Row with label on left, widget on right */
+static lv_obj_t *make_setting_row(lv_obj_t *parent) {
+    lv_obj_t *row = lv_obj_create(parent);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_width(row, LV_PCT(100));
+    lv_obj_set_height(row, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    return row;
+}
+
+/* ── Event Callbacks ─────────────────────────────────────────────────── */
+
+/** Swipe on header to navigate pages (rest of settings page blocks swipe) */
+static void header_gesture_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    if (total_page_count <= 1) return;
+
+    lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
+    int new_page = active_page;
+
+    if (dir == LV_DIR_LEFT) {
+        new_page = (active_page + 1) % total_page_count;
+    } else if (dir == LV_DIR_RIGHT) {
+        new_page = (active_page - 1 + total_page_count) % total_page_count;
+    } else {
+        return;
+    }
+
+    nina_dashboard_show_page(new_page, total_page_count);
+}
+
+static void theme_prev_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    app_config_t *cfg = app_config_get();
+    int idx = cfg->theme_index - 1;
+    if (idx < 0) idx = themes_get_count() - 1;
+    cfg->theme_index = idx;
+    nina_dashboard_apply_theme(idx);
+    /* Refresh after theme apply since it rebuilds styles */
+    settings_page_refresh();
+}
+
+static void theme_next_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    app_config_t *cfg = app_config_get();
+    int idx = cfg->theme_index + 1;
+    if (idx >= themes_get_count()) idx = 0;
+    cfg->theme_index = idx;
+    nina_dashboard_apply_theme(idx);
+    settings_page_refresh();
+}
+
+static void backlight_changed_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    int val = lv_slider_get_value(slider_backlight);
+    app_config_get()->brightness = val;
+    bsp_display_brightness_set(val);
+    lv_label_set_text_fmt(lbl_backlight_val, "%d%%", val);
+}
+
+static void text_bright_changed_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    int val = lv_slider_get_value(slider_text_bright);
+    app_config_get()->color_brightness = val;
+    nina_dashboard_apply_theme(app_config_get()->theme_index);
+    lv_label_set_text_fmt(lbl_text_bright_val, "%d%%", val);
+}
+
+static void rate_minus_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    app_config_t *cfg = app_config_get();
+    if (cfg->update_rate_s > 1) {
+        cfg->update_rate_s--;
+        lv_label_set_text_fmt(lbl_update_rate_val, "%d s", cfg->update_rate_s);
+    }
+}
+
+static void rate_plus_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    app_config_t *cfg = app_config_get();
+    if (cfg->update_rate_s < 10) {
+        cfg->update_rate_s++;
+        lv_label_set_text_fmt(lbl_update_rate_val, "%d s", cfg->update_rate_s);
+    }
+}
+
+static void auto_rotate_toggle_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    app_config_get()->auto_rotate_enabled = lv_obj_has_state(sw_auto_rotate, LV_STATE_CHECKED);
+}
+
+static void interval_minus_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    app_config_t *cfg = app_config_get();
+    int step = cfg->auto_rotate_interval_s > 60 ? 10 : 5;
+    int val = (int)cfg->auto_rotate_interval_s - step;
+    if (val < 4) val = 4;
+    cfg->auto_rotate_interval_s = (uint16_t)val;
+    lv_label_set_text_fmt(lbl_interval_val, "%d s", val);
+}
+
+static void interval_plus_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    app_config_t *cfg = app_config_get();
+    int step = cfg->auto_rotate_interval_s >= 60 ? 10 : 5;
+    int val = (int)cfg->auto_rotate_interval_s + step;
+    if (val > 3600) val = 3600;
+    cfg->auto_rotate_interval_s = (uint16_t)val;
+    lv_label_set_text_fmt(lbl_interval_val, "%d s", val);
+}
+
+static void effect_prev_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    app_config_t *cfg = app_config_get();
+    int idx = (int)cfg->auto_rotate_effect - 1;
+    if (idx < 0) idx = EFFECT_COUNT - 1;
+    cfg->auto_rotate_effect = (uint8_t)idx;
+    lv_label_set_text(lbl_effect_val, effect_names[idx]);
+}
+
+static void effect_next_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    app_config_t *cfg = app_config_get();
+    int idx = (int)cfg->auto_rotate_effect + 1;
+    if (idx >= EFFECT_COUNT) idx = 0;
+    cfg->auto_rotate_effect = (uint8_t)idx;
+    lv_label_set_text(lbl_effect_val, effect_names[idx]);
+}
+
+static void skip_disconnected_toggle_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    app_config_get()->auto_rotate_skip_disconnected =
+        lv_obj_has_state(sw_skip_disconnected, LV_STATE_CHECKED);
+}
+
+static lv_timer_t *save_feedback_timer = NULL;
+
+static void save_feedback_timer_cb(lv_timer_t *timer) {
+    LV_UNUSED(timer);
+    if (lbl_save) lv_label_set_text(lbl_save, LV_SYMBOL_SAVE "  SAVE");
+    save_feedback_timer = NULL;
+}
+
+static void save_btn_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    app_config_save(app_config_get());
+    if (lbl_save) lv_label_set_text(lbl_save, LV_SYMBOL_OK "  SAVED");
+    /* Revert label after 2 seconds */
+    if (save_feedback_timer) lv_timer_delete(save_feedback_timer);
+    save_feedback_timer = lv_timer_create(save_feedback_timer_cb, 2000, NULL);
+    lv_timer_set_repeat_count(save_feedback_timer, 1);
+}
+
+/* ── Page Creation ───────────────────────────────────────────────────── */
+
+lv_obj_t *settings_page_create(lv_obj_t *parent) {
+    st_page = lv_obj_create(parent);
+    lv_obj_remove_style_all(st_page);
+    lv_obj_set_size(st_page, SCREEN_SIZE - 2 * OUTER_PADDING, SCREEN_SIZE - 2 * OUTER_PADDING);
+    lv_obj_set_flex_flow(st_page, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(st_page, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(st_page, ST_GAP, 0);
+    lv_obj_set_scrollbar_mode(st_page, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_scroll_dir(st_page, LV_DIR_VER);
+
+    int gb = app_config_get()->color_brightness;
+
+    /* ── Header ── */
+    {
+        lv_obj_t *hdr = lv_obj_create(st_page);
+        lv_obj_remove_style_all(hdr);
+        lv_obj_add_style(hdr, &style_header_gradient, 0);
+        lv_obj_set_width(hdr, LV_PCT(100));
+        lv_obj_set_height(hdr, LV_SIZE_CONTENT);
+        lv_obj_set_style_pad_all(hdr, 14, 0);
+        lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(hdr, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_column(hdr, 12, 0);
+
+        lbl_header_icon = lv_label_create(hdr);
+        lv_label_set_text(lbl_header_icon, LV_SYMBOL_SETTINGS);
+        if (current_theme) {
+            lv_obj_set_style_text_color(lbl_header_icon, lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
+        }
+
+        lv_obj_t *title = lv_label_create(hdr);
+        lv_label_set_text(title, "Display Settings");
+        lv_obj_set_style_text_font(title, &lv_font_montserrat_26, 0);
+        if (current_theme) {
+            lv_obj_set_style_text_color(title, lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
+        }
+
+        /* Header is the only swipe target on the settings page */
+        lv_obj_add_flag(hdr, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(hdr, header_gesture_cb, LV_EVENT_GESTURE, NULL);
+        lv_obj_clear_flag(hdr, LV_OBJ_FLAG_GESTURE_BUBBLE);
+    }
+
+    /* ── Theme Card ── */
+    {
+        lv_obj_t *card = make_card(st_page);
+        make_section_title(card, "THEME");
+
+        lv_obj_t *row = lv_obj_create(card);
+        lv_obj_remove_style_all(row);
+        lv_obj_set_width(row, LV_PCT(100));
+        lv_obj_set_height(row, LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+        btn_theme_prev = make_arrow_btn(row, LV_SYMBOL_LEFT);
+        lv_obj_add_event_cb(btn_theme_prev, theme_prev_cb, LV_EVENT_CLICKED, NULL);
+
+        lbl_theme_name = lv_label_create(row);
+        lv_obj_set_style_text_font(lbl_theme_name, &lv_font_montserrat_22, 0);
+        lv_obj_set_flex_grow(lbl_theme_name, 1);
+        lv_obj_set_style_text_align(lbl_theme_name, LV_TEXT_ALIGN_CENTER, 0);
+        if (current_theme) {
+            lv_obj_set_style_text_color(lbl_theme_name, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+            lv_label_set_text(lbl_theme_name, current_theme->name);
+        } else {
+            lv_label_set_text(lbl_theme_name, "--");
+        }
+
+        btn_theme_next = make_arrow_btn(row, LV_SYMBOL_RIGHT);
+        lv_obj_add_event_cb(btn_theme_next, theme_next_cb, LV_EVENT_CLICKED, NULL);
+    }
+
+    /* ── Brightness Card ── */
+    {
+        lv_obj_t *card = make_card(st_page);
+        make_section_title(card, "BRIGHTNESS");
+
+        /* Backlight row */
+        {
+            lv_obj_t *lbl = lv_label_create(card);
+            lv_label_set_text(lbl, "Backlight");
+            lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
+            if (current_theme) {
+                lv_obj_set_style_text_color(lbl, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+            }
+
+            lv_obj_t *slider_row = lv_obj_create(card);
+            lv_obj_remove_style_all(slider_row);
+            lv_obj_set_width(slider_row, LV_PCT(100));
+            lv_obj_set_height(slider_row, 48);
+            lv_obj_set_flex_flow(slider_row, LV_FLEX_FLOW_ROW);
+            lv_obj_set_flex_align(slider_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+            lv_obj_set_style_pad_column(slider_row, 16, 0);
+
+            slider_backlight = lv_slider_create(slider_row);
+            lv_obj_set_flex_grow(slider_backlight, 1);
+            lv_obj_set_height(slider_backlight, 16);
+            lv_slider_set_range(slider_backlight, 0, 100);
+            lv_slider_set_value(slider_backlight, app_config_get()->brightness, LV_ANIM_OFF);
+            lv_obj_set_style_radius(slider_backlight, 8, 0);
+            lv_obj_set_style_radius(slider_backlight, 8, LV_PART_INDICATOR);
+            lv_obj_set_style_radius(slider_backlight, LV_RADIUS_CIRCLE, LV_PART_KNOB);
+            lv_obj_set_style_pad_all(slider_backlight, 8, LV_PART_KNOB);
+            if (current_theme) {
+                lv_obj_set_style_bg_color(slider_backlight, lv_color_hex(current_theme->bento_border), 0);
+                lv_obj_set_style_bg_opa(slider_backlight, LV_OPA_COVER, 0);
+                lv_obj_set_style_bg_color(slider_backlight, lv_color_hex(current_theme->progress_color), LV_PART_INDICATOR);
+                lv_obj_set_style_bg_opa(slider_backlight, LV_OPA_COVER, LV_PART_INDICATOR);
+                lv_obj_set_style_bg_color(slider_backlight, lv_color_hex(current_theme->progress_color), LV_PART_KNOB);
+                lv_obj_set_style_bg_opa(slider_backlight, LV_OPA_COVER, LV_PART_KNOB);
+            }
+            lv_obj_add_event_cb(slider_backlight, backlight_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+            lbl_backlight_val = lv_label_create(slider_row);
+            lv_obj_set_style_text_font(lbl_backlight_val, &lv_font_montserrat_20, 0);
+            lv_obj_set_style_min_width(lbl_backlight_val, 60, 0);
+            lv_obj_set_style_text_align(lbl_backlight_val, LV_TEXT_ALIGN_RIGHT, 0);
+            if (current_theme) {
+                lv_obj_set_style_text_color(lbl_backlight_val, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+            }
+            lv_label_set_text_fmt(lbl_backlight_val, "%d%%", app_config_get()->brightness);
+        }
+
+        /* Text brightness row */
+        {
+            lv_obj_t *lbl = lv_label_create(card);
+            lv_label_set_text(lbl, "Text Brightness");
+            lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
+            lv_obj_set_style_pad_top(lbl, 6, 0);
+            if (current_theme) {
+                lv_obj_set_style_text_color(lbl, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+            }
+
+            lv_obj_t *slider_row = lv_obj_create(card);
+            lv_obj_remove_style_all(slider_row);
+            lv_obj_set_width(slider_row, LV_PCT(100));
+            lv_obj_set_height(slider_row, 48);
+            lv_obj_set_flex_flow(slider_row, LV_FLEX_FLOW_ROW);
+            lv_obj_set_flex_align(slider_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+            lv_obj_set_style_pad_column(slider_row, 16, 0);
+
+            slider_text_bright = lv_slider_create(slider_row);
+            lv_obj_set_flex_grow(slider_text_bright, 1);
+            lv_obj_set_height(slider_text_bright, 16);
+            lv_slider_set_range(slider_text_bright, 0, 100);
+            lv_slider_set_value(slider_text_bright, app_config_get()->color_brightness, LV_ANIM_OFF);
+            lv_obj_set_style_radius(slider_text_bright, 8, 0);
+            lv_obj_set_style_radius(slider_text_bright, 8, LV_PART_INDICATOR);
+            lv_obj_set_style_radius(slider_text_bright, LV_RADIUS_CIRCLE, LV_PART_KNOB);
+            lv_obj_set_style_pad_all(slider_text_bright, 8, LV_PART_KNOB);
+            if (current_theme) {
+                lv_obj_set_style_bg_color(slider_text_bright, lv_color_hex(current_theme->bento_border), 0);
+                lv_obj_set_style_bg_opa(slider_text_bright, LV_OPA_COVER, 0);
+                lv_obj_set_style_bg_color(slider_text_bright, lv_color_hex(current_theme->progress_color), LV_PART_INDICATOR);
+                lv_obj_set_style_bg_opa(slider_text_bright, LV_OPA_COVER, LV_PART_INDICATOR);
+                lv_obj_set_style_bg_color(slider_text_bright, lv_color_hex(current_theme->progress_color), LV_PART_KNOB);
+                lv_obj_set_style_bg_opa(slider_text_bright, LV_OPA_COVER, LV_PART_KNOB);
+            }
+            lv_obj_add_event_cb(slider_text_bright, text_bright_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+            lbl_text_bright_val = lv_label_create(slider_row);
+            lv_obj_set_style_text_font(lbl_text_bright_val, &lv_font_montserrat_20, 0);
+            lv_obj_set_style_min_width(lbl_text_bright_val, 60, 0);
+            lv_obj_set_style_text_align(lbl_text_bright_val, LV_TEXT_ALIGN_RIGHT, 0);
+            if (current_theme) {
+                lv_obj_set_style_text_color(lbl_text_bright_val, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+            }
+            lv_label_set_text_fmt(lbl_text_bright_val, "%d%%", app_config_get()->color_brightness);
+        }
+    }
+
+    /* ── Update Rate Card ── */
+    {
+        lv_obj_t *card = make_card(st_page);
+        make_section_title(card, "DATA UPDATE RATE");
+
+        lv_obj_t *row = lv_obj_create(card);
+        lv_obj_remove_style_all(row);
+        lv_obj_set_width(row, LV_PCT(100));
+        lv_obj_set_height(row, LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+        btn_rate_minus = make_stepper_btn(row, LV_SYMBOL_MINUS);
+        lv_obj_add_event_cb(btn_rate_minus, rate_minus_cb, LV_EVENT_CLICKED, NULL);
+
+        lbl_update_rate_val = lv_label_create(row);
+        lv_obj_set_style_text_font(lbl_update_rate_val, &lv_font_montserrat_28, 0);
+        lv_obj_set_flex_grow(lbl_update_rate_val, 1);
+        lv_obj_set_style_text_align(lbl_update_rate_val, LV_TEXT_ALIGN_CENTER, 0);
+        if (current_theme) {
+            lv_obj_set_style_text_color(lbl_update_rate_val, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+        }
+        lv_label_set_text_fmt(lbl_update_rate_val, "%d s", app_config_get()->update_rate_s);
+
+        btn_rate_plus = make_stepper_btn(row, LV_SYMBOL_PLUS);
+        lv_obj_add_event_cb(btn_rate_plus, rate_plus_cb, LV_EVENT_CLICKED, NULL);
+    }
+
+    /* ── Auto-Rotate Card ── */
+    {
+        lv_obj_t *card = make_card(st_page);
+        make_section_title(card, "AUTO-ROTATE");
+
+        app_config_t *cfg = app_config_get();
+
+        /* Enable toggle row */
+        {
+            lv_obj_t *row = make_setting_row(card);
+
+            lv_obj_t *lbl = lv_label_create(row);
+            lv_label_set_text(lbl, "Enable");
+            lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
+            if (current_theme) {
+                lv_obj_set_style_text_color(lbl, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+            }
+
+            sw_auto_rotate = lv_switch_create(row);
+            lv_obj_set_size(sw_auto_rotate, 60, 32);
+            if (cfg->auto_rotate_enabled) {
+                lv_obj_add_state(sw_auto_rotate, LV_STATE_CHECKED);
+            }
+            if (current_theme) {
+                lv_obj_set_style_bg_color(sw_auto_rotate, lv_color_hex(current_theme->bento_border), 0);
+                lv_obj_set_style_bg_color(sw_auto_rotate, lv_color_hex(current_theme->progress_color), LV_PART_INDICATOR | LV_STATE_CHECKED);
+            }
+            lv_obj_add_event_cb(sw_auto_rotate, auto_rotate_toggle_cb, LV_EVENT_VALUE_CHANGED, NULL);
+        }
+
+        /* Interval stepper row */
+        {
+            lv_obj_t *row = make_setting_row(card);
+
+            lv_obj_t *lbl = lv_label_create(row);
+            lv_label_set_text(lbl, "Interval");
+            lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
+            if (current_theme) {
+                lv_obj_set_style_text_color(lbl, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+            }
+
+            lv_obj_t *stepper = lv_obj_create(row);
+            lv_obj_remove_style_all(stepper);
+            lv_obj_set_size(stepper, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+            lv_obj_set_flex_flow(stepper, LV_FLEX_FLOW_ROW);
+            lv_obj_set_flex_align(stepper, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+            lv_obj_set_style_pad_column(stepper, 12, 0);
+
+            btn_interval_minus = make_stepper_btn(stepper, LV_SYMBOL_MINUS);
+            lv_obj_add_event_cb(btn_interval_minus, interval_minus_cb, LV_EVENT_CLICKED, NULL);
+
+            lbl_interval_val = lv_label_create(stepper);
+            lv_obj_set_style_text_font(lbl_interval_val, &lv_font_montserrat_22, 0);
+            lv_obj_set_style_min_width(lbl_interval_val, 70, 0);
+            lv_obj_set_style_text_align(lbl_interval_val, LV_TEXT_ALIGN_CENTER, 0);
+            if (current_theme) {
+                lv_obj_set_style_text_color(lbl_interval_val, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+            }
+            lv_label_set_text_fmt(lbl_interval_val, "%d s", cfg->auto_rotate_interval_s);
+
+            btn_interval_plus = make_stepper_btn(stepper, LV_SYMBOL_PLUS);
+            lv_obj_add_event_cb(btn_interval_plus, interval_plus_cb, LV_EVENT_CLICKED, NULL);
+        }
+
+        /* Effect selector row */
+        {
+            lv_obj_t *row = make_setting_row(card);
+
+            lv_obj_t *lbl = lv_label_create(row);
+            lv_label_set_text(lbl, "Effect");
+            lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
+            if (current_theme) {
+                lv_obj_set_style_text_color(lbl, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+            }
+
+            lv_obj_t *selector = lv_obj_create(row);
+            lv_obj_remove_style_all(selector);
+            lv_obj_set_size(selector, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+            lv_obj_set_flex_flow(selector, LV_FLEX_FLOW_ROW);
+            lv_obj_set_flex_align(selector, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+            lv_obj_set_style_pad_column(selector, 10, 0);
+
+            btn_effect_prev = make_arrow_btn(selector, LV_SYMBOL_LEFT);
+            lv_obj_set_size(btn_effect_prev, 44, 44);
+            lv_obj_add_event_cb(btn_effect_prev, effect_prev_cb, LV_EVENT_CLICKED, NULL);
+
+            lbl_effect_val = lv_label_create(selector);
+            lv_obj_set_style_text_font(lbl_effect_val, &lv_font_montserrat_20, 0);
+            lv_obj_set_style_min_width(lbl_effect_val, 110, 0);
+            lv_obj_set_style_text_align(lbl_effect_val, LV_TEXT_ALIGN_CENTER, 0);
+            if (current_theme) {
+                lv_obj_set_style_text_color(lbl_effect_val, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+            }
+            int eff = cfg->auto_rotate_effect;
+            if (eff < 0 || eff >= EFFECT_COUNT) eff = 0;
+            lv_label_set_text(lbl_effect_val, effect_names[eff]);
+
+            btn_effect_next = make_arrow_btn(selector, LV_SYMBOL_RIGHT);
+            lv_obj_set_size(btn_effect_next, 44, 44);
+            lv_obj_add_event_cb(btn_effect_next, effect_next_cb, LV_EVENT_CLICKED, NULL);
+        }
+
+        /* Skip disconnected toggle row */
+        {
+            lv_obj_t *row = make_setting_row(card);
+
+            lv_obj_t *lbl = lv_label_create(row);
+            lv_label_set_text(lbl, "Skip Offline");
+            lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
+            if (current_theme) {
+                lv_obj_set_style_text_color(lbl, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+            }
+
+            sw_skip_disconnected = lv_switch_create(row);
+            lv_obj_set_size(sw_skip_disconnected, 60, 32);
+            if (cfg->auto_rotate_skip_disconnected) {
+                lv_obj_add_state(sw_skip_disconnected, LV_STATE_CHECKED);
+            }
+            if (current_theme) {
+                lv_obj_set_style_bg_color(sw_skip_disconnected, lv_color_hex(current_theme->bento_border), 0);
+                lv_obj_set_style_bg_color(sw_skip_disconnected, lv_color_hex(current_theme->progress_color), LV_PART_INDICATOR | LV_STATE_CHECKED);
+            }
+            lv_obj_add_event_cb(sw_skip_disconnected, skip_disconnected_toggle_cb, LV_EVENT_VALUE_CHANGED, NULL);
+        }
+    }
+
+    /* ── Save Button ── */
+    {
+        btn_save = lv_button_create(st_page);
+        lv_obj_set_width(btn_save, LV_PCT(100));
+        lv_obj_set_height(btn_save, 60);
+        lv_obj_set_style_radius(btn_save, 16, 0);
+        lv_obj_set_style_border_width(btn_save, 0, 0);
+        lv_obj_set_style_shadow_width(btn_save, 0, 0);
+        if (current_theme) {
+            lv_obj_set_style_bg_color(btn_save, lv_color_hex(current_theme->progress_color), 0);
+            lv_obj_set_style_bg_opa(btn_save, LV_OPA_COVER, 0);
+        }
+
+        lbl_save = lv_label_create(btn_save);
+        lv_label_set_text(lbl_save, LV_SYMBOL_SAVE "  SAVE");
+        lv_obj_set_style_text_font(lbl_save, &lv_font_montserrat_22, 0);
+        lv_obj_set_style_text_color(lbl_save, lv_color_hex(app_config_apply_brightness(0xffffff, gb)), 0);
+        lv_obj_center(lbl_save);
+
+        lv_obj_add_event_cb(btn_save, save_btn_cb, LV_EVENT_CLICKED, NULL);
+    }
+
+    /* Bottom padding for scroll comfort */
+    {
+        lv_obj_t *spacer = lv_obj_create(st_page);
+        lv_obj_remove_style_all(spacer);
+        lv_obj_set_size(spacer, LV_PCT(100), 20);
+    }
+
+    return st_page;
+}
+
+/* ── Refresh ─────────────────────────────────────────────────────────── */
+
+void settings_page_refresh(void) {
+    if (!st_page) return;
+
+    app_config_t *cfg = app_config_get();
+
+    /* Theme name */
+    if (lbl_theme_name && current_theme) {
+        lv_label_set_text(lbl_theme_name, current_theme->name);
+    }
+
+    /* Sliders */
+    if (slider_backlight) {
+        lv_slider_set_value(slider_backlight, cfg->brightness, LV_ANIM_OFF);
+        lv_label_set_text_fmt(lbl_backlight_val, "%d%%", cfg->brightness);
+    }
+    if (slider_text_bright) {
+        lv_slider_set_value(slider_text_bright, cfg->color_brightness, LV_ANIM_OFF);
+        lv_label_set_text_fmt(lbl_text_bright_val, "%d%%", cfg->color_brightness);
+    }
+
+    /* Update rate */
+    if (lbl_update_rate_val) {
+        lv_label_set_text_fmt(lbl_update_rate_val, "%d s", cfg->update_rate_s);
+    }
+
+    /* Auto-rotate */
+    if (sw_auto_rotate) {
+        if (cfg->auto_rotate_enabled)
+            lv_obj_add_state(sw_auto_rotate, LV_STATE_CHECKED);
+        else
+            lv_obj_remove_state(sw_auto_rotate, LV_STATE_CHECKED);
+    }
+    if (lbl_interval_val) {
+        lv_label_set_text_fmt(lbl_interval_val, "%d s", cfg->auto_rotate_interval_s);
+    }
+    if (lbl_effect_val) {
+        int eff = cfg->auto_rotate_effect;
+        if (eff < 0 || eff >= EFFECT_COUNT) eff = 0;
+        lv_label_set_text(lbl_effect_val, effect_names[eff]);
+    }
+    if (sw_skip_disconnected) {
+        if (cfg->auto_rotate_skip_disconnected)
+            lv_obj_add_state(sw_skip_disconnected, LV_STATE_CHECKED);
+        else
+            lv_obj_remove_state(sw_skip_disconnected, LV_STATE_CHECKED);
+    }
+}
+
+/* ── Theme Application ───────────────────────────────────────────────── */
+
+static void apply_theme_recursive_st(lv_obj_t *obj);
+
+static void apply_theme_to_widget(lv_obj_t *obj) {
+    if (!current_theme) return;
+    int gb = app_config_get()->color_brightness;
+
+    if (lv_obj_check_type(obj, &lv_label_class)) {
+        if (obj == lbl_save) {
+            /* Save button label — white with brightness */
+            lv_obj_set_style_text_color(obj, lv_color_hex(app_config_apply_brightness(0xffffff, gb)), 0);
+        } else if (obj == lbl_header_icon) {
+            /* Header icon — uses default font for symbols */
+            lv_obj_set_style_text_color(obj, lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
+        } else {
+            const lv_font_t *font = lv_obj_get_style_text_font(obj, 0);
+            if (font == &lv_font_montserrat_14) {
+                /* Section titles */
+                lv_obj_set_style_text_color(obj, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+            } else if (font == &lv_font_montserrat_26) {
+                /* Page title */
+                lv_obj_set_style_text_color(obj, lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
+            } else {
+                /* Value labels and row labels */
+                lv_obj_set_style_text_color(obj, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+            }
+        }
+    } else if (lv_obj_check_type(obj, &lv_slider_class)) {
+        lv_obj_set_style_bg_color(obj, lv_color_hex(current_theme->bento_border), 0);
+        lv_obj_set_style_bg_color(obj, lv_color_hex(current_theme->progress_color), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_color(obj, lv_color_hex(current_theme->progress_color), LV_PART_KNOB);
+    } else if (lv_obj_check_type(obj, &lv_switch_class)) {
+        lv_obj_set_style_bg_color(obj, lv_color_hex(current_theme->bento_border), 0);
+        lv_obj_set_style_bg_color(obj, lv_color_hex(current_theme->progress_color), LV_PART_INDICATOR | LV_STATE_CHECKED);
+    } else if (lv_obj_check_type(obj, &lv_button_class)) {
+        /* Check if this is the save button (wider than arrow/stepper buttons) */
+        if (obj == btn_save) {
+            lv_obj_set_style_bg_color(obj, lv_color_hex(current_theme->progress_color), 0);
+        } else {
+            lv_obj_set_style_bg_color(obj, lv_color_hex(current_theme->bento_border), 0);
+            lv_obj_set_style_bg_color(obj, lv_color_hex(current_theme->progress_color), LV_STATE_PRESSED);
+        }
+    }
+}
+
+static void apply_theme_recursive_st(lv_obj_t *obj) {
+    uint32_t child_cnt = lv_obj_get_child_count(obj);
+    for (uint32_t i = 0; i < child_cnt; i++) {
+        lv_obj_t *child = lv_obj_get_child(obj, i);
+        apply_theme_to_widget(child);
+        apply_theme_recursive_st(child);
+    }
+}
+
+void settings_page_apply_theme(void) {
+    if (!st_page || !current_theme) return;
+    apply_theme_recursive_st(st_page);
+    lv_obj_invalidate(st_page);
+}

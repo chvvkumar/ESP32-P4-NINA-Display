@@ -14,6 +14,8 @@
 #include "esp_timer.h"
 #include "cJSON.h"
 #include <string.h>
+#include "perf_monitor.h"
+#include "tasks.h"
 
 static const char *TAG = "nina_ws";
 
@@ -34,6 +36,8 @@ static bool ws_needs_reconnect[MAX_NINA_INSTANCES];
 static void handle_websocket_message(int index, const char *payload, int len) {
     nina_client_t *data = ws_client_data[index];
     if (!data || !payload || len <= 0) return;
+
+    perf_counter_increment(&g_perf.ws_event_count);
 
     cJSON *json = cJSON_ParseWithLength(payload, len);
     if (!json) return;
@@ -94,6 +98,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
                             sizeof(data->telescope_name) - 1);
                 }
                 data->new_image_available = true;
+                data->ui_refresh_needed = true;
                 nina_client_unlock(data);
             } else {
                 ESP_LOGW(TAG, "WS[%d]: Could not acquire mutex for IMAGE-SAVE", index);
@@ -113,6 +118,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
                 if (nina_client_lock(data, 50)) {
                     strncpy(data->current_filter, name->valuestring,
                             sizeof(data->current_filter) - 1);
+                    data->ui_refresh_needed = true;
                     nina_client_unlock(data);
                 }
                 ESP_LOGI(TAG, "WS[%d]: Filter changed to %s", index, data->current_filter);
@@ -123,6 +129,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
     else if (strcmp(evt->valuestring, "SEQUENCE-FINISHED") == 0) {
         if (nina_client_lock(data, 50)) {
             strcpy(data->status, "FINISHED");
+            data->ui_refresh_needed = true;
             nina_client_unlock(data);
         }
         ESP_LOGI(TAG, "WS[%d]: Sequence finished", index);
@@ -131,6 +138,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
     else if (strcmp(evt->valuestring, "SEQUENCE-STARTING") == 0) {
         if (nina_client_lock(data, 50)) {
             strcpy(data->status, "RUNNING");
+            data->ui_refresh_needed = true;
             nina_client_unlock(data);
         }
         ESP_LOGI(TAG, "WS[%d]: Sequence starting", index);
@@ -139,6 +147,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
     else if (strcmp(evt->valuestring, "GUIDER-DITHER") == 0) {
         if (nina_client_lock(data, 50)) {
             data->is_dithering = true;
+            data->ui_refresh_needed = true;
             nina_client_unlock(data);
         }
         ESP_LOGI(TAG, "WS[%d]: Dithering", index);
@@ -147,15 +156,40 @@ static void handle_websocket_message(int index, const char *payload, int len) {
     else if (strcmp(evt->valuestring, "GUIDER-START") == 0) {
         if (nina_client_lock(data, 50)) {
             data->is_dithering = false;
+            data->ui_refresh_needed = true;
             nina_client_unlock(data);
         }
         ESP_LOGI(TAG, "WS[%d]: Guiding started", index);
+    }
+    // TS-NEWTARGETSTART: New target started in sequence — instant target name update
+    else if (strcmp(evt->valuestring, "TS-NEWTARGETSTART") == 0) {
+        cJSON *target_name = cJSON_GetObjectItem(response, "TargetName");
+        if (nina_client_lock(data, 50)) {
+            if (target_name && target_name->valuestring && target_name->valuestring[0] != '\0') {
+                strncpy(data->target_name, target_name->valuestring,
+                        sizeof(data->target_name) - 1);
+            }
+            data->ui_refresh_needed = true;
+            nina_client_unlock(data);
+        }
+        ESP_LOGI(TAG, "WS[%d]: New target: %s", index,
+                 target_name && target_name->valuestring ? target_name->valuestring : "(null)");
     }
     else {
         ESP_LOGD(TAG, "WS[%d]: Unhandled event: %s", index, evt->valuestring);
     }
 
+    // Record timestamp for WS-to-UI latency measurement
+#if PERF_MONITOR_ENABLED
+    g_perf.last_ws_event_time_us = esp_timer_get_time();
+#endif
+
     cJSON_Delete(json);
+
+    // Wake data task for immediate UI refresh
+    if (data_task_handle) {
+        xTaskNotifyGive(data_task_handle);
+    }
 }
 
 /**

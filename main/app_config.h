@@ -15,7 +15,7 @@ extern "C" {
 #define LVGL_LOCK_TIMEOUT_MS 1000
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 2
+#define APP_CONFIG_VERSION 3
 
 typedef struct {
     uint32_t config_version;        // Must be first field — used to detect legacy blobs
@@ -40,6 +40,7 @@ typedef struct {
     uint8_t  auto_rotate_effect;            // 0 = instant, 1 = fade, 2 = slide-left, 3 = slide-right
     bool     auto_rotate_skip_disconnected; // skip pages where NINA is not connected during auto-rotate
     uint8_t  auto_rotate_pages;            // bitmask: bit0=summary, bit1-3=NINA 1-3, bit4=sysinfo
+    uint8_t  update_rate_s;                // UI/data update interval in seconds (1-10, default 2)
 } app_config_t;
 
 // WiFi credentials are NOT stored in app_config_t. They are managed by
@@ -56,6 +57,18 @@ void app_config_factory_reset(void);
 uint32_t app_config_get_filter_color(const char *filter_name, int instance_index);
 uint32_t app_config_get_rms_color(float rms_value, int instance_index);
 uint32_t app_config_get_hfr_color(float hfr_value, int instance_index);
+
+// Threshold configuration (values + colors) for graph overlay display
+typedef struct {
+    float good_max;
+    float ok_max;
+    uint32_t good_color;
+    uint32_t ok_color;
+    uint32_t bad_color;
+} threshold_config_t;
+
+void app_config_get_rms_threshold_config(int instance_index, threshold_config_t *out);
+void app_config_get_hfr_threshold_config(int instance_index, threshold_config_t *out);
 void app_config_sync_filters(const char *filter_names[], int count, int instance_index);
 uint32_t app_config_apply_brightness(uint32_t color, int brightness);
 

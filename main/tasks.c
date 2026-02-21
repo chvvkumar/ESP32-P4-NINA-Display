@@ -6,26 +6,32 @@
 #include "tasks.h"
 #include "jpeg_utils.h"
 #include "nina_client.h"
+#include "nina_api_fetchers.h"
 #include "nina_websocket.h"
 #include "app_config.h"
 #include "mqtt_ha.h"
 #include "ui/nina_dashboard.h"
 #include "ui/nina_summary.h"
+#include "ui/nina_graph_overlay.h"
 #include "bsp/esp-bsp.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include <time.h>
+#include "perf_monitor.h"
 
 static const char *TAG = "tasks";
 
 #define BOOT_BUTTON_GPIO    GPIO_NUM_35
 #define DEBOUNCE_MS         200
 #define HEARTBEAT_INTERVAL_MS 10000
+#define GRAPH_REFRESH_INTERVAL_MS 5000  /* Auto-refresh graph every 5 seconds */
 
 /* Signals the data task that a page switch occurred */
 volatile bool page_changed = false;
+TaskHandle_t data_task_handle = NULL;
+static int64_t last_graph_fetch_ms = 0;  /* Timestamp of last graph data fetch */
 
 /**
  * @brief Swipe callback from the dashboard — signals the data task to re-tune polling.
@@ -80,6 +86,7 @@ void input_task(void *arg) {
 }
 
 void data_update_task(void *arg) {
+    data_task_handle = xTaskGetCurrentTaskHandle();
     nina_client_t instances[MAX_NINA_INSTANCES] = {0};
     nina_poll_state_t poll_states[MAX_NINA_INSTANCES] = {0};
     bool filters_synced[MAX_NINA_INSTANCES] = {false};
@@ -129,21 +136,34 @@ void data_update_task(void *arg) {
     }
 
     while (1) {
+        // ── Perf: Track effective cycle interval ──
+        {
+            static int64_t prev_cycle_start = 0;
+            int64_t cycle_now = esp_timer_get_time();
+            if (prev_cycle_start > 0) {
+                perf_timer_record(&g_perf.effective_cycle_interval, cycle_now - prev_cycle_start);
+            }
+            prev_cycle_start = cycle_now;
+        }
+        perf_timer_start(&g_perf.poll_cycle_total);
+
         int current_active = nina_dashboard_get_active_page();  // Snapshot to avoid races
         bool on_sysinfo = nina_dashboard_is_sysinfo_page();
+        bool on_settings = nina_dashboard_is_settings_page();
         bool on_summary = nina_dashboard_is_summary_page();
 
         /*
          * Page index convention:
          *   0                    = summary page
          *   1 .. instance_count  = NINA instance pages (instance i at page i+1)
-         *   instance_count + 1   = sysinfo page
+         *   instance_count + 1   = settings page
+         *   instance_count + 2   = sysinfo page
          *
          * active_nina_idx: the 0-based NINA instance index for the active page,
-         *   or -1 if on summary/sysinfo.
+         *   or -1 if on summary/settings/sysinfo.
          */
         int active_nina_idx = -1;
-        if (!on_sysinfo && !on_summary && current_active >= 1)
+        if (!on_sysinfo && !on_settings && !on_summary && current_active >= 1)
             active_nina_idx = current_active - 1;
 
         // Re-read instance count from config so API URL changes take effect live
@@ -156,8 +176,9 @@ void data_update_task(void *arg) {
             /* Background polling keeps poll_states warm for all instances,
              * so no need to reinitialize — pre-fetched data is preserved. */
             last_rotate_ms = esp_timer_get_time() / 1000;  // Reset auto-rotate timer on any page change
-            ESP_LOGI(TAG, "Page switched to %d%s%s", current_active,
-                     on_sysinfo ? " (sysinfo)" : "", on_summary ? " (summary)" : "");
+            ESP_LOGI(TAG, "Page switched to %d%s%s%s", current_active,
+                     on_sysinfo ? " (sysinfo)" : "", on_settings ? " (settings)" : "",
+                     on_summary ? " (summary)" : "");
         }
 
         int64_t now_ms = esp_timer_get_time() / 1000;
@@ -169,7 +190,8 @@ void data_update_task(void *arg) {
          *   bit 1  = NINA instance 1 (page index 1)
          *   bit 2  = NINA instance 2 (page index 2)
          *   bit 3  = NINA instance 3 (page index 3)
-         *   bit 4  = System Info page (page index instance_count + 1)
+         *   bit 4  = System Info page (page index instance_count + 2)
+         *   bit 5  = Settings page (page index instance_count + 1)
          */
         {
             app_config_t *r_cfg = app_config_get();
@@ -191,6 +213,8 @@ void data_update_task(void *arg) {
                         else if (candidate >= 1 && candidate <= instance_count)
                             in_mask = (page_mask & (1 << candidate)) != 0; /* NINA page */
                         else if (candidate == instance_count + 1)
+                            in_mask = (page_mask & 0x20) != 0;             /* Settings */
+                        else if (candidate == instance_count + 2)
                             in_mask = (page_mask & 0x10) != 0;             /* Sysinfo */
 
                         if (!in_mask) continue;
@@ -282,10 +306,23 @@ void data_update_task(void *arg) {
         if (on_summary) {
             for (int i = 0; i < instance_count; i++)
                 nina_client_lock(&instances[i], 100);
+
+            perf_timer_start(&g_perf.ui_update_total);
+#if PERF_MONITOR_ENABLED
+            int64_t lock_start = esp_timer_get_time();
+#endif
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+#if PERF_MONITOR_ENABLED
+                perf_timer_record(&g_perf.ui_lock_wait, esp_timer_get_time() - lock_start);
+#endif
+                perf_timer_start(&g_perf.ui_summary_update);
                 summary_page_update(instances, instance_count);
+                perf_timer_stop(&g_perf.ui_summary_update);
+
                 bsp_display_unlock();
             }
+            perf_timer_stop(&g_perf.ui_update_total);
+
             for (int i = 0; i < instance_count; i++)
                 nina_client_unlock(&instances[i]);
         }
@@ -293,12 +330,36 @@ void data_update_task(void *arg) {
         /* Update active NINA page UI */
         if (active_nina_idx >= 0 && active_nina_idx < instance_count) {
             nina_client_lock(&instances[active_nina_idx], 100);
+
+            perf_timer_start(&g_perf.ui_update_total);
+#if PERF_MONITOR_ENABLED
+            int64_t lock_start2 = esp_timer_get_time();
+#endif
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+#if PERF_MONITOR_ENABLED
+                perf_timer_record(&g_perf.ui_lock_wait, esp_timer_get_time() - lock_start2);
+#endif
+                perf_timer_start(&g_perf.ui_dashboard_update);
                 update_nina_dashboard_page(active_nina_idx, &instances[active_nina_idx]);
+                perf_timer_stop(&g_perf.ui_dashboard_update);
+
+                // Measure WS-to-UI latency if a recent event was received
+#if PERF_MONITOR_ENABLED
+                if (g_perf.last_ws_event_time_us > 0) {
+                    int64_t latency = esp_timer_get_time() - g_perf.last_ws_event_time_us;
+                    if (latency < 5000000) {  // Only if within 5 seconds (not stale)
+                        perf_timer_record(&g_perf.latency_ws_to_ui, latency);
+                    }
+                    g_perf.last_ws_event_time_us = 0;  // Reset after measuring
+                }
+#endif
+
                 nina_dashboard_update_status(active_nina_idx, rssi,
                                              instances[active_nina_idx].connected, false);
                 bsp_display_unlock();
             }
+            perf_timer_stop(&g_perf.ui_update_total);
+
             nina_client_unlock(&instances[active_nina_idx]);
 
             // Handle thumbnail: initial request or auto-refresh on new image
@@ -324,8 +385,79 @@ void data_update_task(void *arg) {
                     }
                 }
             }
+
+            /* Auto-refresh graph at defined interval while visible */
+            if (nina_graph_visible() && !nina_graph_requested()) {
+                int64_t now_graph = esp_timer_get_time() / 1000;
+                if (now_graph - last_graph_fetch_ms >= GRAPH_REFRESH_INTERVAL_MS) {
+                    nina_graph_set_refresh_pending();
+                }
+            }
+
+            /* Handle graph overlay data fetch */
+            if (nina_graph_requested()) {
+                nina_graph_clear_request();
+                const char *graph_url = app_config_get_instance_url(active_nina_idx);
+                if (strlen(graph_url) > 0 && instances[active_nina_idx].connected) {
+                    graph_type_t gtype = nina_graph_get_type();
+                    int gpoints = nina_graph_get_requested_points();
+
+                    if (gtype == GRAPH_TYPE_RMS) {
+                        graph_rms_data_t rms_data;
+                        fetch_guider_graph(graph_url, &rms_data, gpoints);
+                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_graph_set_rms_data(&rms_data);
+                            bsp_display_unlock();
+                        }
+                    } else {
+                        graph_hfr_data_t hfr_data;
+                        fetch_hfr_history(graph_url, &hfr_data, gpoints);
+                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_graph_set_hfr_data(&hfr_data);
+                            bsp_display_unlock();
+                        }
+                    }
+                }
+                last_graph_fetch_ms = esp_timer_get_time() / 1000;
+            }
         }
 
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        // ── Event-driven UI refresh: check if any WS event needs immediate UI update ──
+        if (active_nina_idx >= 0 && active_nina_idx < instance_count
+            && instances[active_nina_idx].ui_refresh_needed) {
+            instances[active_nina_idx].ui_refresh_needed = false;
+            if (nina_client_lock(&instances[active_nina_idx], 50)) {
+                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                    update_nina_dashboard_page(active_nina_idx, &instances[active_nina_idx]);
+                    nina_dashboard_update_status(active_nina_idx, rssi,
+                                                 instances[active_nina_idx].connected, false);
+                    bsp_display_unlock();
+                }
+                nina_client_unlock(&instances[active_nina_idx]);
+            }
+        }
+
+        // ── Perf: End cycle, capture memory, periodic report ──
+        perf_timer_stop(&g_perf.poll_cycle_total);
+        perf_monitor_capture_memory();
+#if PERF_MONITOR_ENABLED
+        g_perf.data_task_stack_hwm = uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t);
+        if (esp_timer_get_time() - g_perf.last_report_time_us >=
+            (int64_t)g_perf.report_interval_s * 1000000) {
+            perf_monitor_report();
+        }
+#endif
+
+        // Calculate remaining delay to maintain consistent cycle
+        // (camera + guider poll every cycle; slow endpoints use absolute-time tiers)
+        {
+            uint16_t cycle_ms = (uint16_t)app_config_get()->update_rate_s * 1000;
+            if (cycle_ms < 1000) cycle_ms = 1000;
+            int64_t elapsed_ms = (esp_timer_get_time() / 1000) - now_ms;
+            int64_t delay_ms = cycle_ms - elapsed_ms;
+            if (delay_ms < 100) delay_ms = 100;  // Minimum 100ms breathing room
+            // Use ulTaskNotifyTake so WebSocket events can wake us early
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS((uint32_t)delay_ms));
+        }
     }
 }

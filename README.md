@@ -34,7 +34,12 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
     <td align="center"><img src="images/Oiii.jpg" alt="OIII Filter" width="480"></td>
   </tr>
   <tr>
-    <td align="center" colspan="2"><img src="images/systemstats.jpg" alt="System Stats" width="480"></td>
+    <td align="center"><img src="images/RMS.jpg" alt="RMS Graph" width="480"></td>
+    <td align="center"><img src="images/RA_DEC.jpg" alt="RA/DEC Graph" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="images/HFR.jpg" alt="HFR Graph" width="480"></td>
+    <td align="center"><img src="images/systemstats.jpg" alt="System Stats" width="480"></td>
   </tr>
 </table>
 

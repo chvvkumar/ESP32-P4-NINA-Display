@@ -19,6 +19,7 @@
 #include "lvgl.h"
 #include "src/others/snapshot/lv_snapshot.h"
 #include "driver/jpeg_encode.h"
+#include "perf_monitor.h"
 
 static const char *TAG = "web_server";
 
@@ -141,6 +142,7 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "auto_rotate_effect", cfg->auto_rotate_effect);
     cJSON_AddBoolToObject(root, "auto_rotate_skip_disconnected", cfg->auto_rotate_skip_disconnected);
     cJSON_AddNumberToObject(root, "auto_rotate_pages", cfg->auto_rotate_pages);
+    cJSON_AddNumberToObject(root, "update_rate_s", cfg->update_rate_s);
 
     const char *json_str = cJSON_PrintUnformatted(root);
     if (json_str == NULL) {
@@ -349,8 +351,16 @@ static esp_err_t config_post_handler(httpd_req_t *req)
     if (cJSON_IsNumber(arp_item)) {
         int v = arp_item->valueint;
         if (v < 0) v = 0;
-        if (v > 0x1F) v = 0x1F;  /* 5-bit mask */
+        if (v > 0x3F) v = 0x3F;  /* 6-bit mask (includes settings page) */
         cfg->auto_rotate_pages = (uint8_t)v;
+    }
+
+    cJSON *ur_item = cJSON_GetObjectItem(root, "update_rate_s");
+    if (cJSON_IsNumber(ur_item)) {
+        int v = ur_item->valueint;
+        if (v < 1) v = 1;
+        if (v > 10) v = 10;
+        cfg->update_rate_s = (uint8_t)v;
     }
 
     app_config_save(cfg);
@@ -558,7 +568,7 @@ static esp_err_t page_post_handler(httpd_req_t *req)
     if (cJSON_IsNumber(val)) {
         int page = val->valueint;
         int cnt = app_config_get_instance_count();
-        int total = cnt + 2;  /* summary + NINA pages + sysinfo */
+        int total = cnt + 3;  /* summary + NINA pages + settings + sysinfo */
         app_config_t *cfg = app_config_get();
 
         if (page >= 0 && page < total) {
@@ -847,11 +857,47 @@ static esp_err_t ota_post_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+// Handler for performance profiling data
+static esp_err_t perf_get_handler(httpd_req_t *req)
+{
+#if PERF_MONITOR_ENABLED
+    perf_monitor_capture_memory();  // Get fresh memory snapshot
+    char *json = perf_monitor_report_json();
+    if (!json) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json);
+    free(json);
+    return ESP_OK;
+#else
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"error\":\"Profiling disabled\"}");
+    return ESP_OK;
+#endif
+}
+
+// Handler for resetting performance metrics
+static esp_err_t perf_reset_post_handler(httpd_req_t *req)
+{
+#if PERF_MONITOR_ENABLED
+    perf_monitor_reset_all();
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"reset\"}");
+    return ESP_OK;
+#else
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"error\":\"Profiling disabled\"}");
+    return ESP_OK;
+#endif
+}
+
 void start_web_server(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 8192;
-    config.max_uri_handlers = 16;
+    config.max_uri_handlers = 20;
     httpd_handle_t server = NULL;
 
     if (httpd_start(&server, &config) == ESP_OK) {
@@ -950,6 +996,22 @@ void start_web_server(void)
             .user_ctx  = NULL
         };
         httpd_register_uri_handler(server, &uri_post_ota);
+
+        httpd_uri_t uri_get_perf = {
+            .uri       = "/api/perf",
+            .method    = HTTP_GET,
+            .handler   = perf_get_handler,
+            .user_ctx  = NULL
+        };
+        httpd_register_uri_handler(server, &uri_get_perf);
+
+        httpd_uri_t uri_post_perf_reset = {
+            .uri       = "/api/perf/reset",
+            .method    = HTTP_POST,
+            .handler   = perf_reset_post_handler,
+            .user_ctx  = NULL
+        };
+        httpd_register_uri_handler(server, &uri_post_perf_reset);
 
         ESP_LOGI(TAG, "Web server started");
     } else {

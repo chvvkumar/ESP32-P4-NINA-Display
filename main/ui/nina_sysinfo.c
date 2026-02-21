@@ -20,6 +20,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include "perf_monitor.h"
 
 /* ── Layout ──────────────────────────────────────────────────────────── */
 #define SI_PAD       16
@@ -56,6 +57,16 @@ static lv_obj_t *lbl_chip_val    = NULL;
 static lv_obj_t *lbl_idf_val     = NULL;
 static lv_obj_t *lbl_uptime_val  = NULL;
 static lv_obj_t *lbl_tasks_val   = NULL;
+
+/* Performance card (only when profiling enabled) */
+#if PERF_MONITOR_ENABLED
+static lv_obj_t *lbl_poll_cycle_val = NULL;
+static lv_obj_t *lbl_http_reqs_val  = NULL;
+static lv_obj_t *lbl_ws_events_val  = NULL;
+static lv_obj_t *lbl_json_parses_val = NULL;
+static lv_obj_t *lbl_lock_wait_val  = NULL;
+static lv_obj_t *lbl_stack_hwm_val  = NULL;
+#endif
 
 /* ── Helpers ─────────────────────────────────────────────────────────── */
 
@@ -234,6 +245,20 @@ lv_obj_t *sysinfo_page_create(lv_obj_t *parent) {
         make_kv_row(card, "Tasks", &lbl_tasks_val);
     }
 
+    /* ── Performance Card (left, only when profiling enabled) ── */
+#if PERF_MONITOR_ENABLED
+    {
+        lv_obj_t *card = make_card(col_left);
+        make_section_title(card, "PERFORMANCE");
+        make_kv_row(card, "Poll Cycle", &lbl_poll_cycle_val);
+        make_kv_row(card, "HTTP Reqs", &lbl_http_reqs_val);
+        make_kv_row(card, "WS Events", &lbl_ws_events_val);
+        make_kv_row(card, "JSON Parses", &lbl_json_parses_val);
+        make_kv_row(card, "Lock Wait", &lbl_lock_wait_val);
+        make_kv_row(card, "Stack HWM", &lbl_stack_hwm_val);
+    }
+#endif
+
     return si_page;
 }
 
@@ -380,6 +405,42 @@ void sysinfo_page_refresh(void) {
         snprintf(buf, sizeof(buf), "%u", (unsigned)uxTaskGetNumberOfTasks());
         lv_label_set_text(lbl_tasks_val, buf);
     }
+
+    /* ── Performance ── */
+#if PERF_MONITOR_ENABLED
+    {
+        if (g_perf.poll_cycle_total.count > 0) {
+            int64_t avg = g_perf.poll_cycle_total.total_us / g_perf.poll_cycle_total.count;
+            snprintf(buf, sizeof(buf), "%lld ms (avg)", (long long)(avg / 1000));
+            lv_label_set_text(lbl_poll_cycle_val, buf);
+        }
+
+        snprintf(buf, sizeof(buf), "%lu / %lus",
+                 (unsigned long)g_perf.http_request_count.per_interval,
+                 (unsigned long)g_perf.report_interval_s);
+        lv_label_set_text(lbl_http_reqs_val, buf);
+
+        snprintf(buf, sizeof(buf), "%lu / %lus",
+                 (unsigned long)g_perf.ws_event_count.per_interval,
+                 (unsigned long)g_perf.report_interval_s);
+        lv_label_set_text(lbl_ws_events_val, buf);
+
+        snprintf(buf, sizeof(buf), "%lu / %lus",
+                 (unsigned long)g_perf.json_parse_count.per_interval,
+                 (unsigned long)g_perf.report_interval_s);
+        lv_label_set_text(lbl_json_parses_val, buf);
+
+        if (g_perf.ui_lock_wait.count > 0) {
+            int64_t avg = g_perf.ui_lock_wait.total_us / g_perf.ui_lock_wait.count;
+            snprintf(buf, sizeof(buf), "%.1f ms (avg)", (float)avg / 1000.0f);
+            lv_label_set_text(lbl_lock_wait_val, buf);
+        }
+
+        snprintf(buf, sizeof(buf), "%lu B",
+                 (unsigned long)g_perf.data_task_stack_hwm);
+        lv_label_set_text(lbl_stack_hwm_val, buf);
+    }
+#endif
 }
 
 /* ── Theme ───────────────────────────────────────────────────────────── */

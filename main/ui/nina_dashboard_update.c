@@ -10,6 +10,7 @@
 #include "esp_timer.h"
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #define STALE_WARN_MS   30000   /* 30 s: show "Last update" label */
 #define STALE_DIM_MS   120000   /* 2 min: dim the entire page */
@@ -61,6 +62,30 @@ void nina_dashboard_update_status(int page_index, int rssi, bool nina_connected,
     }
 }
 
+/* ── Smooth RMS / HFR value animation ─────────────────────────────── */
+#define VALUE_ANIM_MS  500
+
+static void arcsec_anim_exec(void *obj, int32_t v) {
+    lv_label_set_text_fmt((lv_obj_t *)obj, "%.2f\"", v / 100.0f);
+}
+
+static void hfr_anim_exec(void *obj, int32_t v) {
+    lv_label_set_text_fmt((lv_obj_t *)obj, "%.2f", v / 100.0f);
+}
+
+static void animate_value(lv_obj_t *label, int32_t from, int32_t to,
+                          lv_anim_exec_xcb_t exec_cb) {
+    lv_anim_delete(label, exec_cb);
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, label);
+    lv_anim_set_values(&a, from, to);
+    lv_anim_set_time(&a, VALUE_ANIM_MS);
+    lv_anim_set_exec_cb(&a, exec_cb);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_start(&a);
+}
+
 /* ---- Sub-functions for update_nina_dashboard_page() ---- */
 
 static void update_disconnected_state(dashboard_page_t *p, int page_index, int gb) {
@@ -81,10 +106,16 @@ static void update_disconnected_state(dashboard_page_t *p, int page_index, int g
     lv_label_set_text(p->lbl_exposure_total, "");
     lv_arc_set_value(p->arc_exposure, 0);
     lv_label_set_text(p->lbl_loop_count, "-- / --");
+    lv_anim_delete(p->lbl_rms_value, arcsec_anim_exec);
     lv_label_set_text(p->lbl_rms_value, "--");
     lv_obj_set_style_text_color(p->lbl_rms_value, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+    p->anim_rms_total_x100 = 0;
+    if (p->lbl_rms_ra_value)  { lv_anim_delete(p->lbl_rms_ra_value, arcsec_anim_exec);  p->anim_rms_ra_x100 = 0; }
+    if (p->lbl_rms_dec_value) { lv_anim_delete(p->lbl_rms_dec_value, arcsec_anim_exec); p->anim_rms_dec_x100 = 0; }
+    lv_anim_delete(p->lbl_hfr_value, hfr_anim_exec);
     lv_label_set_text(p->lbl_hfr_value, "--");
     lv_obj_set_style_text_color(p->lbl_hfr_value, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+    p->anim_hfr_x100 = 0;
     lv_label_set_text(p->lbl_flip_value, "--");
     lv_label_set_text(p->lbl_stars_value, "--");
     lv_label_set_text(p->lbl_target_time_value, "--");
@@ -115,13 +146,30 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
     lv_obj_set_style_arc_color(p->arc_exposure, lv_color_hex(filter_color), LV_PART_INDICATOR);
     lv_obj_set_style_shadow_color(p->arc_exposure, lv_color_hex(filter_color), LV_PART_INDICATOR);
 
-    if (d->exposure_total > 0) {
+    // Detect filter change — reset arc animation state to avoid stale progress/color
+    if (d->current_filter[0] != '\0' && strcmp(p->prev_filter, d->current_filter) != 0) {
+        lv_anim_delete(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
+        p->arc_completing = false;
+        p->prev_target_progress = 0;
+        p->pending_arc_progress = 0;
+        lv_arc_set_value(p->arc_exposure, 0);
+        snprintf(p->prev_filter, sizeof(p->prev_filter), "%s", d->current_filter);
+    }
+
+    if (d->exposure_total > 0 && d->exposure_end_epoch > 0) {
         float elapsed = d->exposure_current;
         float total = d->exposure_total;
-        int total_sec = (int)total;
 
+        // Cache interpolation state for the LVGL timer
+        p->interp_end_epoch = d->exposure_end_epoch;
+        p->interp_total = total;
+        p->interp_filter_color = filter_color;
+
+        // Show total exposure duration inside the arc
+        int total_sec = (int)total;
         lv_label_set_text_fmt(p->lbl_exposure_current, "%ds", total_sec);
 
+        // Update filter label (below the duration)
         if (d->current_filter[0] != '\0' && strcmp(d->current_filter, "--") != 0) {
             lv_label_set_text(p->lbl_exposure_total, d->current_filter);
             lv_obj_set_style_text_color(p->lbl_exposure_total, lv_color_hex(filter_color), 0);
@@ -157,16 +205,10 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
                 p->arc_completing = false;
                 lv_arc_set_value(p->arc_exposure, progress);
             }
-        } else {
-            lv_anim_t a;
-            lv_anim_init(&a);
-            lv_anim_set_var(&a, p->arc_exposure);
-            lv_anim_set_values(&a, current_val, progress);
-            lv_anim_set_time(&a, 350);
-            lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_arc_set_value);
-            lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
-            lv_anim_start(&a);
         }
+        /* Normal arc updates are now handled by the interpolation timer
+         * for smooth sub-second progression. Only the new-exposure animation
+         * above needs to run here. */
 
         if (d->exposure_iterations > 0) {
             lv_label_set_text_fmt(p->lbl_loop_count, "%d / %d",
@@ -175,6 +217,7 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
             lv_label_set_text(p->lbl_loop_count, "-- / --");
         }
     } else {
+        p->interp_end_epoch = 0;  // Not exposing — stop interpolation
         lv_label_set_text(p->lbl_exposure_current, "--");
         lv_label_set_text(p->lbl_exposure_total, "");
         lv_arc_set_value(p->arc_exposure, 0);
@@ -182,37 +225,125 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
     }
 }
 
+/* ── Exposure Interpolation Timer ────────────────────────────────────
+ * Fires every 200ms in LVGL context (display lock held) to smoothly
+ * update the exposure countdown label and arc progress between polls.
+ */
+void exposure_interp_timer_cb(lv_timer_t *timer) {
+    (void)timer;
+    int idx = active_page - 1;  // active_page 1..N maps to page index 0..N-1
+    if (idx < 0 || idx >= page_count) return;
+
+    dashboard_page_t *p = &pages[idx];
+    if (!p->page || p->interp_end_epoch == 0 || p->interp_total <= 0) return;
+    if (p->arc_completing) return;  // Don't interfere with new-exposure animation
+
+    time_t now = time(NULL);
+    double remaining = difftime((time_t)p->interp_end_epoch, now);
+    if (remaining < 0) remaining = 0;
+
+    float elapsed = p->interp_total - (float)remaining;
+    if (elapsed < 0) elapsed = 0;
+    if (elapsed > p->interp_total) elapsed = p->interp_total;
+
+    int progress = (int)((elapsed * 100) / p->interp_total);
+    if (progress > 100) progress = 100;
+    if (progress < 0) progress = 0;
+
+    // Animate arc smoothly only when the integer progress actually changes
+    int current_val = lv_arc_get_value(p->arc_exposure);
+    if (progress != current_val) {
+        lv_anim_t a;
+        lv_anim_init(&a);
+        lv_anim_set_var(&a, p->arc_exposure);
+        lv_anim_set_values(&a, current_val, progress);
+        lv_anim_set_time(&a, 400);
+        lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_arc_set_value);
+        lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+        lv_anim_start(&a);
+    }
+}
+
 static void update_guider_stats(dashboard_page_t *p, const nina_client_t *d,
                                 int page_index, int gb) {
+    /* ── RMS Total ── */
     if (d->guider.rms_total > 0) {
-        lv_label_set_text_fmt(p->lbl_rms_value, "%.2f\"", d->guider.rms_total);
+        int32_t new_val = (int32_t)(d->guider.rms_total * 100.0f + 0.5f);
         uint32_t rms_color = theme_forces_colors()
             ? app_config_apply_brightness(current_theme->rms_color, gb)
             : app_config_get_rms_color(d->guider.rms_total, page_index);
         lv_obj_set_style_text_color(p->lbl_rms_value, lv_color_hex(rms_color), 0);
+
+        if (p->anim_rms_total_x100 > 0 && new_val != p->anim_rms_total_x100) {
+            animate_value(p->lbl_rms_value, p->anim_rms_total_x100, new_val, arcsec_anim_exec);
+        } else {
+            lv_anim_delete(p->lbl_rms_value, arcsec_anim_exec);
+            lv_label_set_text_fmt(p->lbl_rms_value, "%.2f\"", d->guider.rms_total);
+        }
+        p->anim_rms_total_x100 = new_val;
     } else {
+        lv_anim_delete(p->lbl_rms_value, arcsec_anim_exec);
         lv_label_set_text(p->lbl_rms_value, "--");
         lv_obj_set_style_text_color(p->lbl_rms_value, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+        p->anim_rms_total_x100 = 0;
     }
 
+    /* ── RMS RA ── */
     if (p->lbl_rms_ra_value) {
-        lv_label_set_text_fmt(p->lbl_rms_ra_value,
-            d->guider.rms_ra > 0 ? "%.2f\"" : "--", d->guider.rms_ra);
-    }
-    if (p->lbl_rms_dec_value) {
-        lv_label_set_text_fmt(p->lbl_rms_dec_value,
-            d->guider.rms_dec > 0 ? "%.2f\"" : "--", d->guider.rms_dec);
+        if (d->guider.rms_ra > 0) {
+            int32_t new_val = (int32_t)(d->guider.rms_ra * 100.0f + 0.5f);
+            if (p->anim_rms_ra_x100 > 0 && new_val != p->anim_rms_ra_x100) {
+                animate_value(p->lbl_rms_ra_value, p->anim_rms_ra_x100, new_val, arcsec_anim_exec);
+            } else {
+                lv_anim_delete(p->lbl_rms_ra_value, arcsec_anim_exec);
+                lv_label_set_text_fmt(p->lbl_rms_ra_value, "%.2f\"", d->guider.rms_ra);
+            }
+            p->anim_rms_ra_x100 = new_val;
+        } else {
+            lv_anim_delete(p->lbl_rms_ra_value, arcsec_anim_exec);
+            lv_label_set_text(p->lbl_rms_ra_value, "--");
+            p->anim_rms_ra_x100 = 0;
+        }
     }
 
+    /* ── RMS DEC ── */
+    if (p->lbl_rms_dec_value) {
+        if (d->guider.rms_dec > 0) {
+            int32_t new_val = (int32_t)(d->guider.rms_dec * 100.0f + 0.5f);
+            if (p->anim_rms_dec_x100 > 0 && new_val != p->anim_rms_dec_x100) {
+                animate_value(p->lbl_rms_dec_value, p->anim_rms_dec_x100, new_val, arcsec_anim_exec);
+            } else {
+                lv_anim_delete(p->lbl_rms_dec_value, arcsec_anim_exec);
+                lv_label_set_text_fmt(p->lbl_rms_dec_value, "%.2f\"", d->guider.rms_dec);
+            }
+            p->anim_rms_dec_x100 = new_val;
+        } else {
+            lv_anim_delete(p->lbl_rms_dec_value, arcsec_anim_exec);
+            lv_label_set_text(p->lbl_rms_dec_value, "--");
+            p->anim_rms_dec_x100 = 0;
+        }
+    }
+
+    /* ── HFR ── */
     if (d->hfr > 0) {
-        lv_label_set_text_fmt(p->lbl_hfr_value, "%.2f", d->hfr);
+        int32_t new_val = (int32_t)(d->hfr * 100.0f + 0.5f);
         uint32_t hfr_color = theme_forces_colors()
             ? app_config_apply_brightness(current_theme->hfr_color, gb)
             : app_config_get_hfr_color(d->hfr, page_index);
         lv_obj_set_style_text_color(p->lbl_hfr_value, lv_color_hex(hfr_color), 0);
+
+        if (p->anim_hfr_x100 > 0 && new_val != p->anim_hfr_x100) {
+            animate_value(p->lbl_hfr_value, p->anim_hfr_x100, new_val, hfr_anim_exec);
+        } else {
+            lv_anim_delete(p->lbl_hfr_value, hfr_anim_exec);
+            lv_label_set_text_fmt(p->lbl_hfr_value, "%.2f", d->hfr);
+        }
+        p->anim_hfr_x100 = new_val;
     } else {
+        lv_anim_delete(p->lbl_hfr_value, hfr_anim_exec);
         lv_label_set_text(p->lbl_hfr_value, "--");
         lv_obj_set_style_text_color(p->lbl_hfr_value, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+        p->anim_hfr_x100 = 0;
     }
 }
 

@@ -22,6 +22,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
+#include "perf_monitor.h"
 
 static const char *TAG = "main";
 
@@ -163,6 +164,10 @@ void app_main(void)
 
     app_config_init();
 
+#if PERF_MONITOR_ENABLED
+    perf_monitor_init(CONFIG_PERF_REPORT_INTERVAL_S);
+#endif
+
     instance_count = app_config_get_instance_count();
     ESP_LOGI(TAG, "Configured instances: %d", instance_count);
 
@@ -188,9 +193,9 @@ void app_main(void)
         create_nina_dashboard(scr, instance_count);
         {
             /* Apply persisted page override immediately on boot.
-             * Override stores absolute page index: 0=summary, 1..N=NINA, N+1=sysinfo */
+             * Override stores absolute page index: 0=summary, 1..N=NINA, N+1=settings, N+2=sysinfo */
             app_config_t *cfg = app_config_get();
-            int total = instance_count + 2;  /* summary + NINA pages + sysinfo */
+            int total = instance_count + 3;  /* summary + NINA pages + settings + sysinfo */
             if (cfg->active_page_override >= 0 && cfg->active_page_override < total) {
                 nina_dashboard_show_page(cfg->active_page_override, instance_count);
             }

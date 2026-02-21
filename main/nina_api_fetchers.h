@@ -17,3 +17,8 @@ void fetch_guider_robust(const char *base_url, nina_client_t *data);
 void fetch_mount_robust(const char *base_url, nina_client_t *data);
 void fetch_focuser_robust(const char *base_url, nina_client_t *data);
 void fetch_switch_info(const char *base_url, nina_client_t *data);
+
+/* Graph data fetchers — used by graph overlay, not part of normal polling */
+#include "ui/nina_graph_overlay.h"
+void fetch_guider_graph(const char *base_url, graph_rms_data_t *out, int max_points);
+void fetch_hfr_history(const char *base_url, graph_hfr_data_t *out, int max_points);

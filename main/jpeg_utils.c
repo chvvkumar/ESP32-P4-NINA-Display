@@ -10,12 +10,15 @@
 #include "driver/jpeg_decode.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "perf_monitor.h"
 
 static const char *TAG = "jpeg_utils";
 
 bool fetch_and_show_thumbnail(const char *base_url) {
     size_t jpeg_size = 0;
+    perf_timer_start(&g_perf.jpeg_fetch);
     uint8_t *jpeg_buf = nina_client_fetch_prepared_image(base_url, 720, 720, 70, &jpeg_size);
+    perf_timer_stop(&g_perf.jpeg_fetch);
     if (!jpeg_buf || jpeg_size == 0) {
         return false;
     }
@@ -54,9 +57,11 @@ bool fetch_and_show_thumbnail(const char *base_url) {
                     .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
                 };
                 uint32_t out_size = 0;
+                perf_timer_start(&g_perf.jpeg_decode);
                 err = jpeg_decoder_process(decoder, &decode_cfg,
                     jpeg_buf, jpeg_size,
                     decode_buf, allocated_size, &out_size);
+                perf_timer_stop(&g_perf.jpeg_decode);
                 jpeg_del_decoder_engine(decoder);
 
                 if (err == ESP_OK && out_size > 0) {

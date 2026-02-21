@@ -8,11 +8,39 @@
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
+#include "perf_monitor.h"
 
 static const char *TAG = "app_config";
 static app_config_t s_config;
 static SemaphoreHandle_t s_config_mutex;
 static const char *NVS_NAMESPACE = "app_conf";
+
+// ── Cached parsed JSON trees for hot-path lookups ──
+// Invalidated on config save. NULL = needs re-parse on next access.
+static cJSON *s_filter_colors_cache[MAX_NINA_INSTANCES] = {NULL};
+static cJSON *s_rms_thresholds_cache[MAX_NINA_INSTANCES] = {NULL};
+static cJSON *s_hfr_thresholds_cache[MAX_NINA_INSTANCES] = {NULL};
+
+/**
+ * @brief Invalidate all cached JSON parse trees.
+ * Call after any config mutation (save, sync, factory reset).
+ */
+static void invalidate_json_caches(void) {
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        if (s_filter_colors_cache[i]) {
+            cJSON_Delete(s_filter_colors_cache[i]);
+            s_filter_colors_cache[i] = NULL;
+        }
+        if (s_rms_thresholds_cache[i]) {
+            cJSON_Delete(s_rms_thresholds_cache[i]);
+            s_rms_thresholds_cache[i] = NULL;
+        }
+        if (s_hfr_thresholds_cache[i]) {
+            cJSON_Delete(s_hfr_thresholds_cache[i]);
+            s_hfr_thresholds_cache[i] = NULL;
+        }
+    }
+}
 
 // Default RMS thresholds: good <= 0.5", ok <= 1.0", bad > 1.0" - DIMMED for Night Vision
 static const char *DEFAULT_RMS_THRESHOLDS =
@@ -100,6 +128,32 @@ typedef struct {
     bool     auto_rotate_skip_disconnected;
 } app_config_v1_t;
 
+/* ── Version 2 config struct — used only for NVS migration to v3 ────── */
+typedef struct {
+    uint32_t config_version;
+    char api_url[3][128];
+    char ntp_server[64];
+    char tz_string[64];
+    char filter_colors[3][512];
+    char rms_thresholds[3][256];
+    char hfr_thresholds[3][256];
+    int theme_index;
+    int brightness;
+    int color_brightness;
+    bool mqtt_enabled;
+    char mqtt_broker_url[128];
+    char mqtt_username[64];
+    char mqtt_password[64];
+    char mqtt_topic_prefix[64];
+    uint16_t mqtt_port;
+    int8_t   active_page_override;
+    bool     auto_rotate_enabled;
+    uint16_t auto_rotate_interval_s;
+    uint8_t  auto_rotate_effect;
+    bool     auto_rotate_skip_disconnected;
+    uint8_t  auto_rotate_pages;
+} app_config_v2_t;
+
 static void set_defaults(app_config_t *cfg) {
     memset(cfg, 0, sizeof(app_config_t));
     cfg->config_version = APP_CONFIG_VERSION;
@@ -120,6 +174,7 @@ static void set_defaults(app_config_t *cfg) {
     cfg->auto_rotate_effect = 0;
     cfg->auto_rotate_skip_disconnected = true;
     cfg->auto_rotate_pages = 0x0E;  // Default: all NINA instances (bits 1-3)
+    cfg->update_rate_s = 2;
     strcpy(cfg->mqtt_broker_url, "mqtt://192.168.1.250");
     strcpy(cfg->mqtt_topic_prefix, "ninadisplay");
     cfg->mqtt_port = 1883;
@@ -193,6 +248,40 @@ static void migrate_from_v1(const app_config_v1_t *old, app_config_t *cfg) {
 }
 
 /**
+ * @brief Migrate a v2 config blob into the current struct layout.
+ *
+ * v2 → v3 adds: update_rate_s (UI/data update interval).
+ */
+static void migrate_from_v2(const app_config_v2_t *old, app_config_t *cfg) {
+    set_defaults(cfg);
+
+    memcpy(cfg->api_url, old->api_url, sizeof(cfg->api_url));
+    memcpy(cfg->ntp_server, old->ntp_server, sizeof(cfg->ntp_server));
+    memcpy(cfg->tz_string, old->tz_string, sizeof(cfg->tz_string));
+    memcpy(cfg->filter_colors, old->filter_colors, sizeof(cfg->filter_colors));
+    memcpy(cfg->rms_thresholds, old->rms_thresholds, sizeof(cfg->rms_thresholds));
+    memcpy(cfg->hfr_thresholds, old->hfr_thresholds, sizeof(cfg->hfr_thresholds));
+    cfg->theme_index = old->theme_index;
+    cfg->brightness = old->brightness;
+    cfg->color_brightness = old->color_brightness;
+    cfg->mqtt_enabled = old->mqtt_enabled;
+    memcpy(cfg->mqtt_broker_url, old->mqtt_broker_url, sizeof(cfg->mqtt_broker_url));
+    memcpy(cfg->mqtt_username, old->mqtt_username, sizeof(cfg->mqtt_username));
+    memcpy(cfg->mqtt_password, old->mqtt_password, sizeof(cfg->mqtt_password));
+    memcpy(cfg->mqtt_topic_prefix, old->mqtt_topic_prefix, sizeof(cfg->mqtt_topic_prefix));
+    cfg->mqtt_port = old->mqtt_port;
+    cfg->active_page_override = old->active_page_override;
+    cfg->auto_rotate_enabled = old->auto_rotate_enabled;
+    cfg->auto_rotate_interval_s = old->auto_rotate_interval_s;
+    cfg->auto_rotate_effect = old->auto_rotate_effect;
+    cfg->auto_rotate_skip_disconnected = old->auto_rotate_skip_disconnected;
+    cfg->auto_rotate_pages = old->auto_rotate_pages;
+    /* update_rate_s keeps default 2 from set_defaults() */
+
+    ESP_LOGI(TAG, "Migrated config from v2 → v%d", APP_CONFIG_VERSION);
+}
+
+/**
  * @brief Validate and clamp config fields to sane ranges.
  * @return true if any field was corrected.
  */
@@ -243,6 +332,10 @@ static bool validate_config(app_config_t *cfg) {
     }
     if (cfg->auto_rotate_pages == 0) {
         cfg->auto_rotate_pages = 0x0E;  // Default: all NINA instances
+        fixed = true;
+    }
+    if (cfg->update_rate_s < 1 || cfg->update_rate_s > 10) {
+        cfg->update_rate_s = 2;
         fixed = true;
     }
 
@@ -300,6 +393,15 @@ void app_config_init(void) {
             nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(handle);
         }
+    } else if (version_check == 2 && stored_size >= sizeof(app_config_v2_t)) {
+        /* Version 2 blob — migrate to v3 */
+        app_config_v2_t old;
+        memcpy(&old, raw, sizeof(app_config_v2_t));
+        migrate_from_v2(&old, &s_config);
+        validate_config(&s_config);
+
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 1 && stored_size >= sizeof(app_config_v1_t)) {
         /* Version 1 blob — migrate to v2 */
         app_config_v1_t old;
@@ -335,6 +437,7 @@ app_config_t *app_config_get(void) {
 }
 
 void app_config_save(const app_config_t *config) {
+    invalidate_json_caches();
     xSemaphoreTake(s_config_mutex, portMAX_DELAY);
 
     memcpy(&s_config, config, sizeof(app_config_t));
@@ -368,6 +471,7 @@ app_config_t app_config_get_snapshot(void) {
 }
 
 void app_config_factory_reset(void) {
+    invalidate_json_caches();
     ESP_LOGW(TAG, "Performing factory reset - erasing NVS partition");
 
     // Erase the entire NVS partition
@@ -439,32 +543,34 @@ uint32_t app_config_get_filter_color(const char *filter_name, int instance_index
         return 0xFFFFFF;  // White for empty/unknown filter
     }
 
-    // Parse the per-instance filter_colors JSON string
-    const char *json = get_filter_colors_field(instance_index);
-    cJSON *root = cJSON_Parse(json);
+    int idx = instance_index;
+    if (idx < 0 || idx >= MAX_NINA_INSTANCES) idx = 0;
+
+    // Use cached parse tree, re-parse only on first access or after invalidation
+    if (!s_filter_colors_cache[idx]) {
+        const char *json = get_filter_colors_field(idx);
+        perf_timer_start(&g_perf.json_config_color_parse);
+        s_filter_colors_cache[idx] = cJSON_Parse(json);
+        perf_timer_stop(&g_perf.json_config_color_parse);
+        perf_counter_increment(&g_perf.json_parse_count);
+    }
+    cJSON *root = s_filter_colors_cache[idx];
     if (!root) {
-        ESP_LOGW(TAG, "Failed to parse filter colors JSON, using default");
-        return 0xFFFFFF;  // White fallback
+        return 0xFFFFFF;
     }
 
-    // Look up the filter by name
     cJSON *color_item = cJSON_GetObjectItem(root, filter_name);
     uint32_t color;
 
     if (color_item && cJSON_IsString(color_item) && color_item->valuestring) {
-        // Parse hex color string (e.g., "#60a5fa" or "60a5fa")
         const char *hex = color_item->valuestring;
-        if (hex[0] == '#') hex++;  // Skip the '#' if present
-
-        // Convert hex string to integer
+        if (hex[0] == '#') hex++;
         color = (uint32_t)strtol(hex, NULL, 16);
-        ESP_LOGD(TAG, "Filter '%s' -> color 0x%06x", filter_name, (unsigned int)color);
     } else {
         color = get_default_filter_color(filter_name);
-        ESP_LOGD(TAG, "Filter '%s' not found in config, using default 0x%06x", filter_name, (unsigned int)color);
     }
 
-    cJSON_Delete(root);
+    // DO NOT call cJSON_Delete(root) — it's cached!
 
     // Apply global color brightness
     int gb = s_config.color_brightness;
@@ -478,8 +584,16 @@ uint32_t app_config_get_filter_color(const char *filter_name, int instance_index
  * @brief Shared helper: parse threshold JSON, compare value, return brightness-adjusted color.
  */
 static uint32_t get_threshold_color(float value, const char *json,
+                                    cJSON **cache,
                                     float default_good_max, float default_ok_max) {
-    cJSON *root = cJSON_Parse(json);
+    // Use cached parse tree, re-parse only on first access or after invalidation
+    if (!*cache) {
+        perf_timer_start(&g_perf.json_config_color_parse);
+        *cache = cJSON_Parse(json);
+        perf_timer_stop(&g_perf.json_config_color_parse);
+        perf_counter_increment(&g_perf.json_parse_count);
+    }
+    cJSON *root = *cache;
     if (!root) {
         int gb = s_config.color_brightness;
         if (gb < 0 || gb > 100) gb = 100;
@@ -499,7 +613,7 @@ static uint32_t get_threshold_color(float value, const char *json,
                     : (value <= ok_max)   ? ok_color
                     :                       bad_color;
 
-    cJSON_Delete(root);
+    // DO NOT call cJSON_Delete(root) — it's cached!
 
     int gb = s_config.color_brightness;
     if (gb < 0 || gb > 100) gb = 100;
@@ -511,7 +625,8 @@ static uint32_t get_threshold_color(float value, const char *json,
  */
 uint32_t app_config_get_rms_color(float rms_value, int instance_index) {
     if (instance_index < 0 || instance_index >= MAX_NINA_INSTANCES) instance_index = 0;
-    return get_threshold_color(rms_value, s_config.rms_thresholds[instance_index], 0.5f, 1.0f);
+    return get_threshold_color(rms_value, s_config.rms_thresholds[instance_index],
+                               &s_rms_thresholds_cache[instance_index], 0.5f, 1.0f);
 }
 
 /**
@@ -519,7 +634,46 @@ uint32_t app_config_get_rms_color(float rms_value, int instance_index) {
  */
 uint32_t app_config_get_hfr_color(float hfr_value, int instance_index) {
     if (instance_index < 0 || instance_index >= MAX_NINA_INSTANCES) instance_index = 0;
-    return get_threshold_color(hfr_value, s_config.hfr_thresholds[instance_index], 2.0f, 3.5f);
+    return get_threshold_color(hfr_value, s_config.hfr_thresholds[instance_index],
+                               &s_hfr_thresholds_cache[instance_index], 2.0f, 3.5f);
+}
+
+static void fill_threshold_config(const char *json, cJSON **cache,
+                                   float default_good_max, float default_ok_max,
+                                   threshold_config_t *out) {
+    if (!*cache) {
+        *cache = cJSON_Parse(json);
+    }
+    cJSON *root = *cache;
+    if (!root) {
+        out->good_max = default_good_max;
+        out->ok_max = default_ok_max;
+        out->good_color = 0x10b981;
+        out->ok_color = 0xeab308;
+        out->bad_color = 0xef4444;
+        return;
+    }
+    out->good_color = parse_color_field(root, "good_color", 0x10b981);
+    out->ok_color = parse_color_field(root, "ok_color", 0xeab308);
+    out->bad_color = parse_color_field(root, "bad_color", 0xef4444);
+    cJSON *gm = cJSON_GetObjectItem(root, "good_max");
+    cJSON *om = cJSON_GetObjectItem(root, "ok_max");
+    out->good_max = (gm && cJSON_IsNumber(gm)) ? (float)gm->valuedouble : default_good_max;
+    out->ok_max = (om && cJSON_IsNumber(om)) ? (float)om->valuedouble : default_ok_max;
+}
+
+void app_config_get_rms_threshold_config(int instance_index, threshold_config_t *out) {
+    if (instance_index < 0 || instance_index >= MAX_NINA_INSTANCES) instance_index = 0;
+    fill_threshold_config(s_config.rms_thresholds[instance_index],
+                          &s_rms_thresholds_cache[instance_index],
+                          0.5f, 1.0f, out);
+}
+
+void app_config_get_hfr_threshold_config(int instance_index, threshold_config_t *out) {
+    if (instance_index < 0 || instance_index >= MAX_NINA_INSTANCES) instance_index = 0;
+    fill_threshold_config(s_config.hfr_thresholds[instance_index],
+                          &s_hfr_thresholds_cache[instance_index],
+                          2.0f, 3.5f, out);
 }
 
 /**
@@ -586,6 +740,7 @@ void app_config_sync_filters(const char *filter_names[], int count, int instance
     cJSON_Delete(colors);
 
     if (needs_save) {
+        invalidate_json_caches();
         app_config_save(&s_config);
         ESP_LOGI(TAG, "Filter config synced with API and saved to NVS");
     } else {

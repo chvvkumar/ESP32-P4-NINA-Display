@@ -9,8 +9,10 @@
 #include "nina_dashboard.h"
 #include "nina_dashboard_internal.h"
 #include "nina_thumbnail.h"
+#include "nina_graph_overlay.h"
 #include "nina_sysinfo.h"
 #include "nina_summary.h"
+#include "nina_settings.h"
 #include "app_config.h"
 #include "themes.h"
 #include "lvgl.h"
@@ -32,9 +34,12 @@ lv_style_t style_header_gradient;
 /* Summary page — always first (index 0), excluded from indicators */
 static lv_obj_t *summary_obj = NULL;
 
+/* Settings page — before sysinfo (index page_count+1), excluded from indicators */
+static lv_obj_t *settings_obj = NULL;
+
 /* System info page — always the last navigable page, excluded from indicators */
 static lv_obj_t *sysinfo_obj = NULL;
-int total_page_count = 0;   /* 1 (summary) + page_count (NINA) + 1 (sysinfo) */
+int total_page_count = 0;   /* 1 (summary) + page_count (NINA) + 1 (settings) + 1 (sysinfo) */
 
 /* Private state */
 static lv_obj_t *scr_dashboard = NULL;
@@ -48,6 +53,8 @@ static lv_obj_t *indicator_dots[MAX_NINA_INSTANCES];
 static nina_page_change_cb_t page_change_cb = NULL;
 
 static void update_indicators(void);
+static void rms_click_cb(lv_event_t *e);
+static void hfr_click_cb(lv_event_t *e);
 
 /* Strip http(s)://, path, and domain from URL, then sentence case */
 void extract_host_from_url(const char *url, char *out, size_t out_size) {
@@ -146,8 +153,9 @@ lv_obj_t *create_value_label(lv_obj_t *parent) {
  * Page index convention:
  *   0                     = summary page
  *   1 .. page_count       = NINA instance pages  (pages[idx-1])
- *   page_count + 1        = sysinfo page
- *   total_page_count      = page_count + 2
+ *   page_count + 1        = settings page
+ *   page_count + 2        = sysinfo page
+ *   total_page_count      = page_count + 3
  */
 
 /* Hide the page object at the given index */
@@ -156,7 +164,9 @@ static void hide_page_at(int idx) {
         lv_obj_add_flag(summary_obj, LV_OBJ_FLAG_HIDDEN);
     else if (idx >= 1 && idx <= page_count)
         lv_obj_add_flag(pages[idx - 1].page, LV_OBJ_FLAG_HIDDEN);
-    else if (idx == page_count + 1 && sysinfo_obj)
+    else if (idx == page_count + 1 && settings_obj)
+        lv_obj_add_flag(settings_obj, LV_OBJ_FLAG_HIDDEN);
+    else if (idx == page_count + 2 && sysinfo_obj)
         lv_obj_add_flag(sysinfo_obj, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -166,7 +176,11 @@ static void show_page_at(int idx) {
         lv_obj_clear_flag(summary_obj, LV_OBJ_FLAG_HIDDEN);
     else if (idx >= 1 && idx <= page_count)
         lv_obj_clear_flag(pages[idx - 1].page, LV_OBJ_FLAG_HIDDEN);
-    else if (idx == page_count + 1 && sysinfo_obj) {
+    else if (idx == page_count + 1 && settings_obj) {
+        lv_obj_clear_flag(settings_obj, LV_OBJ_FLAG_HIDDEN);
+        settings_page_refresh();
+    }
+    else if (idx == page_count + 2 && sysinfo_obj) {
         lv_obj_clear_flag(sysinfo_obj, LV_OBJ_FLAG_HIDDEN);
         sysinfo_page_refresh();
     }
@@ -175,7 +189,8 @@ static void show_page_at(int idx) {
 static lv_obj_t *get_page_obj(int idx) {
     if (idx == 0 && summary_obj) return summary_obj;
     if (idx >= 1 && idx <= page_count) return pages[idx - 1].page;
-    if (idx == page_count + 1 && sysinfo_obj) return sysinfo_obj;
+    if (idx == page_count + 1 && settings_obj) return settings_obj;
+    if (idx == page_count + 2 && sysinfo_obj) return sysinfo_obj;
     return NULL;
 }
 
@@ -230,7 +245,9 @@ void nina_dashboard_apply_theme(int theme_index) {
     }
 
     summary_page_apply_theme();
+    settings_page_apply_theme();
     sysinfo_page_apply_theme();
+    nina_graph_overlay_apply_theme();
 
     update_indicators();
 
@@ -394,6 +411,8 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_size(box_rms, LV_PCT(50), LV_PCT(100));
     lv_obj_set_flex_flow(box_rms, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(box_rms, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_add_flag(box_rms, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(box_rms, rms_click_cb, LV_EVENT_CLICKED, NULL);
 
     p->lbl_rms_title = create_small_label(box_rms, "RMS");
     lv_obj_set_width(p->lbl_rms_title, LV_PCT(100));
@@ -409,6 +428,8 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_size(box_hfr, LV_PCT(50), LV_PCT(100));
     lv_obj_set_flex_flow(box_hfr, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(box_hfr, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_add_flag(box_hfr, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(box_hfr, hfr_click_cb, LV_EVENT_CLICKED, NULL);
 
     p->lbl_hfr_title = create_small_label(box_hfr, "HFR");
     lv_obj_set_width(p->lbl_hfr_title, LV_PCT(100));
@@ -568,6 +589,11 @@ void nina_dashboard_set_page_change_cb(nina_page_change_cb_t cb) {
 static void gesture_event_cb(lv_event_t *e) {
     if (total_page_count <= 1) return;
     if (thumbnail_overlay && !lv_obj_has_flag(thumbnail_overlay, LV_OBJ_FLAG_HIDDEN)) return;
+    if (nina_graph_visible()) return;
+
+    /* Block screen-level swipe on settings page — sliders need horizontal drag.
+     * Only the header widget on the settings page handles page-switch gestures. */
+    if (active_page == page_count + 1) return;
 
     lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
     int new_page = active_page;
@@ -587,6 +613,18 @@ static void gesture_event_cb(lv_event_t *e) {
 static void target_name_click_cb(lv_event_t *e) {
     LV_UNUSED(e);
     nina_thumbnail_request();
+}
+
+/* RMS widget: click to open RMS graph overlay */
+static void rms_click_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    nina_graph_show(GRAPH_TYPE_RMS, active_page);
+}
+
+/* HFR widget: click to open HFR graph overlay */
+static void hfr_click_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    nina_graph_show(GRAPH_TYPE_HFR, active_page);
 }
 
 /* Set up the dashboard with one page per NINA instance */
@@ -618,10 +656,14 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
         lv_obj_add_flag(pages[i].page, LV_OBJ_FLAG_HIDDEN);
     }
 
-    /* System info page — always last (page index page_count+1), hidden initially */
+    /* Settings page — page index page_count+1, hidden initially */
+    settings_obj = settings_page_create(main_cont);
+    lv_obj_add_flag(settings_obj, LV_OBJ_FLAG_HIDDEN);
+
+    /* System info page — always last (page index page_count+2), hidden initially */
     sysinfo_obj = sysinfo_page_create(main_cont);
     lv_obj_add_flag(sysinfo_obj, LV_OBJ_FLAG_HIDDEN);
-    total_page_count = page_count + 2;  /* summary + NINA pages + sysinfo */
+    total_page_count = page_count + 3;  /* summary + NINA pages + settings + sysinfo */
 
     /* Page indicator dots — only for NINA pages (not summary or sysinfo) */
     create_page_indicator(scr_dashboard, page_count);
@@ -629,6 +671,9 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     /* Always enable swipe gestures */
     lv_obj_add_event_cb(scr_dashboard, gesture_event_cb, LV_EVENT_GESTURE, NULL);
     lv_obj_clear_flag(scr_dashboard, LV_OBJ_FLAG_GESTURE_BUBBLE);
+
+    // Graph overlay (on top of pages, below thumbnail)
+    nina_graph_overlay_create(scr_dashboard);
 
     // Thumbnail overlay (on top of everything)
     nina_thumbnail_create(scr_dashboard);
@@ -642,6 +687,10 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     }
 
     nina_dashboard_apply_theme(cfg->theme_index);
+
+    /* Exposure interpolation timer — fires every 200ms to smoothly update
+     * the exposure countdown and arc between poll cycles. */
+    lv_timer_create(exposure_interp_timer_cb, 200, NULL);
 }
 
 void nina_dashboard_show_page(int page_index, int instance_count) {
@@ -663,8 +712,12 @@ int nina_dashboard_get_active_page(void) {
     return active_page;
 }
 
-bool nina_dashboard_is_sysinfo_page(void) {
+bool nina_dashboard_is_settings_page(void) {
     return active_page == page_count + 1;
+}
+
+bool nina_dashboard_is_sysinfo_page(void) {
+    return active_page == page_count + 2;
 }
 
 bool nina_dashboard_is_summary_page(void) {
