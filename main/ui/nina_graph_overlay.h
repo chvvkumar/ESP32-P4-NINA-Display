@@ -11,36 +11,7 @@
 #include "lvgl.h"
 #include <stdbool.h>
 #include <stdint.h>
-
-/** Graph type selector */
-typedef enum {
-    GRAPH_TYPE_RMS = 0,
-    GRAPH_TYPE_HFR = 1,
-} graph_type_t;
-
-/** Maximum number of data points the graph can display */
-#define GRAPH_MAX_POINTS 500
-
-/** RMS graph data — filled by the API fetcher */
-typedef struct {
-    float ra[GRAPH_MAX_POINTS];
-    float dec[GRAPH_MAX_POINTS];
-    float total[GRAPH_MAX_POINTS];
-    int   count;          /**< Number of valid data points */
-    float rms_ra;         /**< Current RMS RA summary */
-    float rms_dec;        /**< Current RMS DEC summary */
-    float rms_total;      /**< Current RMS Total summary */
-    float peak_ra;        /**< Peak RA */
-    float peak_dec;       /**< Peak DEC */
-    float pixel_scale;    /**< Pixel scale (arcsec/px) */
-} graph_rms_data_t;
-
-/** HFR graph data — filled by the API fetcher */
-typedef struct {
-    float hfr[GRAPH_MAX_POINTS];
-    int   stars[GRAPH_MAX_POINTS];
-    int   count;          /**< Number of valid data points */
-} graph_hfr_data_t;
+#include "graph_data_types.h"
 
 /** Create the graph overlay (initially hidden). Called once during dashboard init. */
 void nina_graph_overlay_create(lv_obj_t *parent);

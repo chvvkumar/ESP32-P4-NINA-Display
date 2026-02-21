@@ -9,11 +9,7 @@
 
 #include "lvgl.h"
 
-/* Shared styles — defined in nina_dashboard.c */
-extern lv_style_t style_bento_box;
-extern lv_style_t style_label_small;
-extern lv_style_t style_value_large;
-extern lv_style_t style_header_gradient;
+#include "ui_styles.h"
 
 /**
  * @brief Create a bento-box container with the shared bento box style.

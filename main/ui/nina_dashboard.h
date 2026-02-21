@@ -8,6 +8,7 @@ extern "C" {
 #include "lvgl.h"
 #include "nina_client.h"
 #include "app_config.h"
+#include "themes.h"
 
 /**
  * @brief Initialize the multi-page Bento NINA Dashboard (720x720px grid layout)
@@ -43,6 +44,9 @@ void nina_dashboard_show_page_animated(int page_index, int instance_count, int e
  * @return Active page index (0-2)
  */
 int nina_dashboard_get_active_page(void);
+
+/** Get the currently active theme. */
+const theme_t *nina_dashboard_get_current_theme(void);
 
 /**
  * @brief Apply a specific theme to all dashboard pages

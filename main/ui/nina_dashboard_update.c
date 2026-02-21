@@ -20,32 +20,23 @@ static bool theme_forces_colors(void) {
     return current_theme && strcmp(current_theme->name, "Red Night") == 0;
 }
 
-// Arc animation callbacks
-static void arc_reset_complete_cb(lv_anim_t *a) {
-    dashboard_page_t *p = (dashboard_page_t *)a->user_data;
-    if (p) p->arc_completing = false;
-}
-
+// Arc animation callback
 static void arc_fill_complete_cb(lv_anim_t *a) {
     dashboard_page_t *p = (dashboard_page_t *)a->user_data;
     if (!p) return;
 
-    lv_anim_t a2;
-    lv_anim_init(&a2);
-    lv_anim_set_var(&a2, p->arc_exposure);
-    lv_anim_set_values(&a2, 0, p->pending_arc_progress);
-    lv_anim_set_time(&a2, 350);
-    lv_anim_set_exec_cb(&a2, (lv_anim_exec_xcb_t)lv_arc_set_value);
-    lv_anim_set_path_cb(&a2, lv_anim_path_ease_out);
-    a2.user_data = p;
-    lv_anim_set_ready_cb(&a2, arc_reset_complete_cb);
-    lv_anim_start(&a2);
+    /* Reset arc to 0 instantly (visually invisible since it was just at 100)
+     * and let the interpolation timer ramp it up smoothly on its next tick. */
+    lv_arc_set_value(p->arc_exposure, 0);
+    p->arc_completing = false;
 }
 
 void nina_dashboard_update_status(int page_index, int rssi, bool nina_connected, bool api_active) {
     if (page_index < 0 || page_index >= page_count) return;
     dashboard_page_t *p = &pages[page_index];
     if (!p->page) return;
+
+    p->nina_connected = nina_connected;
 
     uint32_t text_color;
     if (theme_forces_colors()) {
