@@ -13,6 +13,8 @@
 #if PERF_MONITOR_ENABLED
 
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 // ── Timing Metrics ──────────────────────────────────────────────────
 
@@ -28,6 +30,30 @@ typedef struct {
 void     perf_timer_start(perf_timer_t *t);
 int64_t  perf_timer_stop(perf_timer_t *t);
 void     perf_timer_reset(perf_timer_t *t);
+
+// ── CPU Utilization ────────────────────────────────────────────────
+
+#define CPU_MAX_TRACKED_TASKS 24
+
+typedef struct {
+    char       name[16];          // Task name (configMAX_TASK_NAME_LEN)
+    uint8_t    core_id;           // 0, 1, or 0xFF (no affinity)
+    float      cpu_percent;       // CPU usage since last snapshot
+    uint32_t   runtime_delta_us;  // Runtime delta since last snapshot
+    uint32_t   stack_hwm_bytes;   // Stack high-water mark
+    eTaskState state;             // Current state
+} cpu_task_info_t;
+
+typedef struct {
+    float    core_load[2];        // Per-core CPU load % (0-100)
+    float    total_load;          // Combined CPU load %
+    float    idle_percent[2];     // Per-core idle % (= headroom)
+    uint32_t task_count;          // Total number of tasks
+    cpu_task_info_t tasks[CPU_MAX_TRACKED_TASKS]; // Top tasks sorted by CPU%
+    uint8_t  task_info_count;     // Actual tasks in array
+    uint32_t total_runtime_delta; // Total runtime delta for normalization
+    bool     valid;               // false until first delta computed
+} cpu_stats_t;
 
 // ── Counter Metrics ─────────────────────────────────────────────────
 
@@ -96,6 +122,14 @@ typedef struct {
     perf_timer_t jpeg_decode;
     perf_timer_t jpeg_fetch;
 
+    // CPU utilization (computed at report interval)
+    cpu_stats_t cpu;
+
+    // LVGL rendering metrics
+    perf_timer_t lvgl_render_time;    // Time spent rendering (display lock held)
+    float        lvgl_fps_estimate;   // Estimated FPS
+    uint32_t     lvgl_render_count;   // Render cycles in interval
+
     // Report control
     int64_t last_report_time_us;
     uint32_t report_interval_s;           // How often to print report (default 30s)
@@ -109,6 +143,9 @@ void perf_monitor_init(uint32_t report_interval_s);
 
 // Capture memory and stack snapshots. Call periodically from data task.
 void perf_monitor_capture_memory(void);
+
+// Capture CPU utilization snapshot. Call at report interval from data task.
+void perf_monitor_capture_cpu(void);
 
 // Print a formatted report to serial log. Called automatically at interval.
 void perf_monitor_report(void);
@@ -133,6 +170,7 @@ void perf_timer_record(perf_timer_t *t, int64_t duration_us);
 #define perf_counter_reset_interval(c)((void)0)
 #define perf_monitor_init(i)          ((void)0)
 #define perf_monitor_capture_memory() ((void)0)
+#define perf_monitor_capture_cpu()   ((void)0)
 #define perf_monitor_report()         ((void)0)
 #define perf_monitor_reset_all()      ((void)0)
 #define perf_monitor_report_json()    (NULL)

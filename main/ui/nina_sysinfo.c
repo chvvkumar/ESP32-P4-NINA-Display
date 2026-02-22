@@ -66,6 +66,17 @@ static lv_obj_t *lbl_ws_events_val  = NULL;
 static lv_obj_t *lbl_json_parses_val = NULL;
 static lv_obj_t *lbl_lock_wait_val  = NULL;
 static lv_obj_t *lbl_stack_hwm_val  = NULL;
+
+/* CPU card (only when profiling enabled) */
+static lv_obj_t *lbl_core0_val   = NULL;
+static lv_obj_t *bar_core0       = NULL;
+static lv_obj_t *lbl_core1_val   = NULL;
+static lv_obj_t *bar_core1       = NULL;
+static lv_obj_t *lbl_cputotal_val = NULL;
+static lv_obj_t *bar_cputotal    = NULL;
+static lv_obj_t *lbl_headroom_val = NULL;
+static lv_obj_t *lbl_lvgl_fps_val = NULL;
+static lv_obj_t *lbl_top_task_val = NULL;
 #endif
 
 /* ── Helpers ─────────────────────────────────────────────────────────── */
@@ -234,6 +245,23 @@ lv_obj_t *sysinfo_page_create(lv_obj_t *parent) {
         make_kv_row(card, "PSRAM", &lbl_psram_val);
         bar_psram = make_bar(card);
     }
+
+    /* ── CPU Card (right, only when profiling enabled) ── */
+#if PERF_MONITOR_ENABLED
+    {
+        lv_obj_t *card = make_card(col_right);
+        make_section_title(card, "CPU");
+        make_kv_row(card, "Core 0", &lbl_core0_val);
+        bar_core0 = make_bar(card);
+        make_kv_row(card, "Core 1", &lbl_core1_val);
+        bar_core1 = make_bar(card);
+        make_kv_row(card, "Total", &lbl_cputotal_val);
+        bar_cputotal = make_bar(card);
+        make_kv_row(card, "Headroom", &lbl_headroom_val);
+        make_kv_row(card, "Render", &lbl_lvgl_fps_val);
+        make_kv_row(card, "Top Task", &lbl_top_task_val);
+    }
+#endif
 
     /* ── System Card (right) ── */
     {
@@ -405,6 +433,70 @@ void sysinfo_page_refresh(void) {
         snprintf(buf, sizeof(buf), "%u", (unsigned)uxTaskGetNumberOfTasks());
         lv_label_set_text(lbl_tasks_val, buf);
     }
+
+    /* ── CPU ── */
+#if PERF_MONITOR_ENABLED
+    {
+        if (g_perf.cpu.valid) {
+            int core0_pct = (int)(g_perf.cpu.core_load[0] + 0.5f);
+            int core1_pct = (int)(g_perf.cpu.core_load[1] + 0.5f);
+            int total_pct = (int)(g_perf.cpu.total_load + 0.5f);
+            int headroom_pct = 100 - total_pct;
+
+            snprintf(buf, sizeof(buf), "%d%%", core0_pct);
+            lv_label_set_text(lbl_core0_val, buf);
+            lv_bar_set_value(bar_core0, core0_pct, LV_ANIM_ON);
+
+            snprintf(buf, sizeof(buf), "%d%%", core1_pct);
+            lv_label_set_text(lbl_core1_val, buf);
+            lv_bar_set_value(bar_core1, core1_pct, LV_ANIM_ON);
+
+            snprintf(buf, sizeof(buf), "%d%%", total_pct);
+            lv_label_set_text(lbl_cputotal_val, buf);
+            lv_bar_set_value(bar_cputotal, total_pct, LV_ANIM_ON);
+
+            snprintf(buf, sizeof(buf), "%d%%", headroom_pct);
+            lv_label_set_text(lbl_headroom_val, buf);
+
+            /* LVGL render timing */
+            if (g_perf.ui_update_total.count > 0) {
+                double avg_ms = (double)g_perf.ui_update_total.total_us
+                                / (double)g_perf.ui_update_total.count / 1000.0;
+                snprintf(buf, sizeof(buf), "%.1f ms avg", avg_ms);
+            } else {
+                snprintf(buf, sizeof(buf), "--");
+            }
+            lv_label_set_text(lbl_lvgl_fps_val, buf);
+
+            /* Top task by CPU */
+            if (g_perf.cpu.task_info_count > 0) {
+                snprintf(buf, sizeof(buf), "%s %.1f%%",
+                         g_perf.cpu.tasks[0].name, g_perf.cpu.tasks[0].cpu_percent);
+            } else {
+                snprintf(buf, sizeof(buf), "--");
+            }
+            lv_label_set_text(lbl_top_task_val, buf);
+
+            /* Color bars: green < 60%, yellow 60-85%, red > 85% */
+            uint32_t c0_col = core0_pct < 60 ? 0x22c55e : (core0_pct < 85 ? 0xeab308 : 0xef4444);
+            uint32_t c1_col = core1_pct < 60 ? 0x22c55e : (core1_pct < 85 ? 0xeab308 : 0xef4444);
+            uint32_t ct_col = total_pct < 60 ? 0x22c55e : (total_pct < 85 ? 0xeab308 : 0xef4444);
+            lv_obj_set_style_bg_color(bar_core0, lv_color_hex(c0_col), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_color(bar_core1, lv_color_hex(c1_col), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_color(bar_cputotal, lv_color_hex(ct_col), LV_PART_INDICATOR);
+        } else {
+            lv_label_set_text(lbl_core0_val, "...");
+            lv_label_set_text(lbl_core1_val, "...");
+            lv_label_set_text(lbl_cputotal_val, "...");
+            lv_label_set_text(lbl_headroom_val, "...");
+            lv_label_set_text(lbl_lvgl_fps_val, "...");
+            lv_label_set_text(lbl_top_task_val, "Waiting...");
+            lv_bar_set_value(bar_core0, 0, LV_ANIM_OFF);
+            lv_bar_set_value(bar_core1, 0, LV_ANIM_OFF);
+            lv_bar_set_value(bar_cputotal, 0, LV_ANIM_OFF);
+        }
+    }
+#endif
 
     /* ── Performance ── */
 #if PERF_MONITOR_ENABLED

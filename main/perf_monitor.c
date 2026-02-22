@@ -156,6 +156,124 @@ void perf_monitor_capture_memory(void)
     // We just capture what's been set.
 }
 
+// ── CPU utilization capture ─────────────────────────────────────────
+
+// Previous snapshot for delta computation
+static TaskStatus_t s_prev_tasks[CPU_MAX_TRACKED_TASKS];
+static uint32_t     s_prev_total_runtime = 0;
+static uint8_t      s_prev_task_count = 0;
+static bool         s_cpu_first_sample = true;
+
+// qsort comparator: sort by cpu_percent descending
+static int cmp_cpu_desc(const void *a, const void *b)
+{
+    const cpu_task_info_t *ta = (const cpu_task_info_t *)a;
+    const cpu_task_info_t *tb = (const cpu_task_info_t *)b;
+    if (tb->cpu_percent > ta->cpu_percent) return 1;
+    if (tb->cpu_percent < ta->cpu_percent) return -1;
+    return 0;
+}
+
+void perf_monitor_capture_cpu(void)
+{
+    // Allocate current snapshot on stack
+    UBaseType_t task_count = uxTaskGetNumberOfTasks();
+    if (task_count > CPU_MAX_TRACKED_TASKS) task_count = CPU_MAX_TRACKED_TASKS;
+
+    TaskStatus_t current_tasks[CPU_MAX_TRACKED_TASKS];
+    uint32_t total_runtime = 0;
+
+    UBaseType_t filled = uxTaskGetSystemState(current_tasks, task_count, &total_runtime);
+    if (filled == 0) {
+        ESP_LOGW(TAG, "uxTaskGetSystemState returned 0 tasks");
+        return;
+    }
+
+    cpu_stats_t *cpu = &g_perf.cpu;
+    cpu->task_count = filled;
+
+    // On first sample, just store the snapshot — no delta available yet
+    if (s_cpu_first_sample) {
+        memcpy(s_prev_tasks, current_tasks, filled * sizeof(TaskStatus_t));
+        s_prev_total_runtime = total_runtime;
+        s_prev_task_count = (uint8_t)filled;
+        s_cpu_first_sample = false;
+        cpu->valid = false;
+        return;
+    }
+
+    // Compute total runtime delta (handle 32-bit wraparound)
+    uint32_t total_delta = total_runtime - s_prev_total_runtime;
+    if (total_delta == 0) {
+        cpu->valid = false;
+        return;
+    }
+
+    cpu->total_runtime_delta = total_delta;
+    cpu->idle_percent[0] = 0;
+    cpu->idle_percent[1] = 0;
+
+    // Compute per-task deltas
+    uint8_t out_idx = 0;
+    for (UBaseType_t i = 0; i < filled && out_idx < CPU_MAX_TRACKED_TASKS; i++) {
+        // Find this task in previous snapshot by task number
+        uint32_t prev_runtime = 0;
+        for (uint8_t p = 0; p < s_prev_task_count; p++) {
+            if (s_prev_tasks[p].xTaskNumber == current_tasks[i].xTaskNumber) {
+                prev_runtime = s_prev_tasks[p].ulRunTimeCounter;
+                break;
+            }
+        }
+
+        uint32_t runtime_delta = current_tasks[i].ulRunTimeCounter - prev_runtime;
+        float pct = (float)runtime_delta / (float)total_delta * 100.0f;
+
+        // Check if this is an idle task (per-core idle tracking)
+        if (strncmp(current_tasks[i].pcTaskName, "IDLE", 4) == 0) {
+            int core = -1;
+            if (current_tasks[i].pcTaskName[4] >= '0' && current_tasks[i].pcTaskName[4] <= '1') {
+                core = current_tasks[i].pcTaskName[4] - '0';
+            }
+            if (core >= 0 && core < 2) {
+                cpu->idle_percent[core] = pct;
+            }
+        }
+
+        cpu_task_info_t *info = &cpu->tasks[out_idx];
+        strncpy(info->name, current_tasks[i].pcTaskName, sizeof(info->name) - 1);
+        info->name[sizeof(info->name) - 1] = '\0';
+        info->core_id = (uint8_t)current_tasks[i].xCoreID;
+        info->cpu_percent = pct;
+        info->runtime_delta_us = runtime_delta;
+        info->stack_hwm_bytes = current_tasks[i].usStackHighWaterMark * sizeof(StackType_t);
+        info->state = current_tasks[i].eCurrentState;
+        out_idx++;
+    }
+    cpu->task_info_count = out_idx;
+
+    // Sort tasks by CPU% descending
+    qsort(cpu->tasks, cpu->task_info_count, sizeof(cpu_task_info_t), cmp_cpu_desc);
+
+    // Compute per-core and total load
+    cpu->core_load[0] = 100.0f - cpu->idle_percent[0] * 2.0f;
+    cpu->core_load[1] = 100.0f - cpu->idle_percent[1] * 2.0f;
+
+    // Clamp to 0-100
+    for (int c = 0; c < 2; c++) {
+        if (cpu->core_load[c] < 0) cpu->core_load[c] = 0;
+        if (cpu->core_load[c] > 100) cpu->core_load[c] = 100;
+        cpu->idle_percent[c] = 100.0f - cpu->core_load[c];
+    }
+
+    cpu->total_load = (cpu->core_load[0] + cpu->core_load[1]) / 2.0f;
+    cpu->valid = true;
+
+    // Store current as previous for next delta
+    memcpy(s_prev_tasks, current_tasks, filled * sizeof(TaskStatus_t));
+    s_prev_total_runtime = total_runtime;
+    s_prev_task_count = (uint8_t)filled;
+}
+
 // ── Serial log report ───────────────────────────────────────────────
 
 static void log_timer(const char *name, const perf_timer_t *t)
@@ -234,12 +352,46 @@ void perf_monitor_report(void)
     ESP_LOGI(TAG, "  data_task HWM:  %"PRIu32" bytes free", g_perf.data_task_stack_hwm);
     ESP_LOGI(TAG, "  input_task HWM: %"PRIu32" bytes free", g_perf.input_task_stack_hwm);
 
+    // CPU utilization
+    if (g_perf.cpu.valid) {
+        ESP_LOGI(TAG, "── CPU Utilization ──");
+        ESP_LOGI(TAG, "  Core 0:  %5.1f%% load  (%5.1f%% idle)",
+                 g_perf.cpu.core_load[0], g_perf.cpu.idle_percent[0]);
+        ESP_LOGI(TAG, "  Core 1:  %5.1f%% load  (%5.1f%% idle)",
+                 g_perf.cpu.core_load[1], g_perf.cpu.idle_percent[1]);
+        ESP_LOGI(TAG, "  Total:   %5.1f%% load  (%5.1f%% headroom)",
+                 g_perf.cpu.total_load, 100.0f - g_perf.cpu.total_load);
+
+        // LVGL FPS estimate from UI update timing
+        if (g_perf.ui_update_total.count > 0) {
+            double avg_ms = (double)g_perf.ui_update_total.total_us
+                            / (double)g_perf.ui_update_total.count / 1000.0;
+            ESP_LOGI(TAG, "  LVGL render_avg=%.1f ms", avg_ms);
+        }
+
+        ESP_LOGI(TAG, "── Top Tasks by CPU ──");
+        int show = g_perf.cpu.task_info_count;
+        if (show > 10) show = 10;  // Top 10 only
+        for (int i = 0; i < show; i++) {
+            const cpu_task_info_t *t = &g_perf.cpu.tasks[i];
+            const char *core_str = "any";
+            char core_buf[4];
+            if (t->core_id < 2) {
+                snprintf(core_buf, sizeof(core_buf), "%d", t->core_id);
+                core_str = core_buf;
+            }
+            ESP_LOGI(TAG, "  %-20s %5.1f%%  core=%-3s  stack_hwm=%"PRIu32" B",
+                     t->name, t->cpu_percent, core_str, t->stack_hwm_bytes);
+        }
+    }
+
     // Reset per-interval counters
     perf_counter_reset_interval(&g_perf.http_request_count);
     perf_counter_reset_interval(&g_perf.http_retry_count);
     perf_counter_reset_interval(&g_perf.http_failure_count);
     perf_counter_reset_interval(&g_perf.ws_event_count);
     perf_counter_reset_interval(&g_perf.json_parse_count);
+    g_perf.lvgl_render_count = 0;
 
     g_perf.last_report_time_us = esp_timer_get_time();
 }
@@ -361,6 +513,61 @@ char *perf_monitor_report_json(void)
     cJSON_AddItemToObject(jpeg, "jpeg_decode", timer_to_json(&g_perf.jpeg_decode));
     cJSON_AddItemToObject(jpeg, "jpeg_fetch",  timer_to_json(&g_perf.jpeg_fetch));
     cJSON_AddItemToObject(root, "jpeg", jpeg);
+
+    // CPU utilization
+    if (g_perf.cpu.valid) {
+        cJSON *cpu = cJSON_CreateObject();
+
+        cJSON *core_load_arr = cJSON_CreateArray();
+        cJSON_AddItemToArray(core_load_arr, cJSON_CreateNumber(g_perf.cpu.core_load[0]));
+        cJSON_AddItemToArray(core_load_arr, cJSON_CreateNumber(g_perf.cpu.core_load[1]));
+        cJSON_AddItemToObject(cpu, "core_load", core_load_arr);
+
+        cJSON_AddNumberToObject(cpu, "total_load", g_perf.cpu.total_load);
+
+        cJSON *idle_arr = cJSON_CreateArray();
+        cJSON_AddItemToArray(idle_arr, cJSON_CreateNumber(g_perf.cpu.idle_percent[0]));
+        cJSON_AddItemToArray(idle_arr, cJSON_CreateNumber(g_perf.cpu.idle_percent[1]));
+        cJSON_AddItemToObject(cpu, "idle_percent", idle_arr);
+
+        cJSON_AddNumberToObject(cpu, "headroom_percent", 100.0 - g_perf.cpu.total_load);
+        cJSON_AddNumberToObject(cpu, "task_count", g_perf.cpu.task_count);
+
+        // LVGL render metrics
+        if (g_perf.ui_update_total.count > 0) {
+            double avg_ms = (double)g_perf.ui_update_total.total_us
+                            / (double)g_perf.ui_update_total.count / 1000.0;
+            cJSON_AddNumberToObject(cpu, "lvgl_render_avg_ms", avg_ms);
+        }
+
+        // Per-task breakdown
+        cJSON *task_arr = cJSON_CreateArray();
+        int show = g_perf.cpu.task_info_count;
+        if (show > CPU_MAX_TRACKED_TASKS) show = CPU_MAX_TRACKED_TASKS;
+        for (int i = 0; i < show; i++) {
+            const cpu_task_info_t *t = &g_perf.cpu.tasks[i];
+            cJSON *tobj = cJSON_CreateObject();
+            cJSON_AddStringToObject(tobj, "name", t->name);
+            cJSON_AddNumberToObject(tobj, "cpu_percent", t->cpu_percent);
+            cJSON_AddNumberToObject(tobj, "core", t->core_id == 0xFF ? -1 : (int)t->core_id);
+            cJSON_AddNumberToObject(tobj, "stack_hwm", t->stack_hwm_bytes);
+
+            const char *state_str = "unknown";
+            switch (t->state) {
+                case eRunning:   state_str = "running";   break;
+                case eReady:     state_str = "ready";     break;
+                case eBlocked:   state_str = "blocked";   break;
+                case eSuspended: state_str = "suspended"; break;
+                case eDeleted:   state_str = "deleted";   break;
+                default: break;
+            }
+            cJSON_AddStringToObject(tobj, "state", state_str);
+            cJSON_AddItemToArray(task_arr, tobj);
+        }
+        cJSON_AddItemToObject(cpu, "tasks", task_arr);
+
+        cJSON_AddItemToObject(root, "cpu", cpu);
+    }
 
     char *json_str = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
