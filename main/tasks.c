@@ -530,6 +530,7 @@ void data_update_task(void *arg) {
         g_perf.data_task_stack_hwm = uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t);
         if (esp_timer_get_time() - g_perf.last_report_time_us >=
             (int64_t)g_perf.report_interval_s * 1000000) {
+            perf_monitor_capture_cpu();
             perf_monitor_report();
         }
 #endif
