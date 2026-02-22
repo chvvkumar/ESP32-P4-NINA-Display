@@ -1,9 +1,14 @@
 /**
  * @file nina_summary.c
- * @brief Summary page — glassmorphism cards showing all NINA instances at a glance.
+ * @brief Summary page — adaptive cards showing connected NINA instances at a glance.
  *
- * Displays one card per configured NINA instance with: instance name, filter,
- * target name, progress bar, and key stats (RMS, HFR, time to flip).
+ * Displays one card per CONNECTED NINA instance with: instance name, filter badge,
+ * target name, progress bar with percentage, sequence info (1-card mode),
+ * and key stats (RMS, HFR, time to flip).
+ *
+ * Cards expand to fill the available 688×688 area using flex_grow.
+ * 3-tier font scaling adapts to 1, 2, or 3 visible cards.
+ * An empty-state message is shown when no instances are connected.
  */
 
 #include "nina_summary.h"
@@ -17,10 +22,72 @@
 
 /* ── Layout Constants ──────────────────────────────────────────────── */
 #define CARD_RADIUS      20
-#define CARD_PAD         16
 #define CARD_GAP         16
-#define BAR_HEIGHT        6
 #define STAT_COLS         3
+
+/* ── 3-tier font/layout presets ───────────────────────────────────── */
+typedef struct {
+    const lv_font_t *name;
+    const lv_font_t *filter;
+    const lv_font_t *target;
+    const lv_font_t *stat_label;
+    const lv_font_t *stat_value;
+    const lv_font_t *pct_label;
+    const lv_font_t *seq_label;
+    const lv_font_t *seq_value;
+    int bar_height;
+    int card_pad;
+    int card_row_gap;
+    int stat_pad_row;
+} card_layout_preset_t;
+
+static const card_layout_preset_t layout_presets[3] = {
+    /* 1 card visible — maximum size */
+    {
+        .name       = &lv_font_montserrat_36,
+        .filter     = &lv_font_montserrat_24,
+        .target     = &lv_font_montserrat_48,
+        .stat_label = &lv_font_montserrat_22,
+        .stat_value = &lv_font_montserrat_48,
+        .pct_label  = &lv_font_montserrat_22,
+        .seq_label  = &lv_font_montserrat_18,
+        .seq_value  = &lv_font_montserrat_28,
+        .bar_height = 20,
+        .card_pad   = 28,
+        .card_row_gap = 16,
+        .stat_pad_row = 12,
+    },
+    /* 2 cards visible — medium */
+    {
+        .name       = &lv_font_montserrat_28,
+        .filter     = &lv_font_montserrat_20,
+        .target     = &lv_font_montserrat_32,
+        .stat_label = &lv_font_montserrat_18,
+        .stat_value = &lv_font_montserrat_36,
+        .pct_label  = &lv_font_montserrat_18,
+        .seq_label  = &lv_font_montserrat_14,
+        .seq_value  = &lv_font_montserrat_22,
+        .bar_height = 12,
+        .card_pad   = 22,
+        .card_row_gap = 10,
+        .stat_pad_row = 8,
+    },
+    /* 3 cards visible — compact */
+    {
+        .name       = &lv_font_montserrat_20,
+        .filter     = &lv_font_montserrat_14,
+        .target     = &lv_font_montserrat_24,
+        .stat_label = &lv_font_montserrat_14,
+        .stat_value = &lv_font_montserrat_28,
+        .pct_label  = &lv_font_montserrat_14,
+        .seq_label  = &lv_font_montserrat_12,
+        .seq_value  = &lv_font_montserrat_14,
+        .bar_height = 6,
+        .card_pad   = 16,
+        .card_row_gap = 6,
+        .stat_pad_row = 4,
+    },
+};
 
 /* ── Per-card widget references ────────────────────────────────────── */
 typedef struct {
@@ -30,18 +97,34 @@ typedef struct {
     lv_obj_t *filter_box;
     lv_obj_t *lbl_target;
     lv_obj_t *bar_progress;
+    lv_obj_t *lbl_pct;          /* progress percentage label */
+    lv_obj_t *seq_row;          /* sequence info row (visible in 1-2 card mode) */
+    lv_obj_t *lbl_seq_title;    /* "SEQUENCE" label */
+    lv_obj_t *lbl_seq_name;
+    lv_obj_t *lbl_step_title;   /* "STEP" label */
+    lv_obj_t *lbl_seq_step;
+    lv_obj_t *stats_row;
     lv_obj_t *lbl_rms_label;
     lv_obj_t *lbl_rms_val;
     lv_obj_t *lbl_hfr_label;
     lv_obj_t *lbl_hfr_val;
     lv_obj_t *lbl_flip_label;
     lv_obj_t *lbl_flip_val;
+    lv_obj_t *detail_row;       /* exposure detail line (visible in 1-card mode) */
+    lv_obj_t *lbl_detail;
+    int instance_index;         /* which NINA instance this card represents */
 } summary_card_t;
 
 /* ── Module state ──────────────────────────────────────────────────── */
 static lv_obj_t *sum_page = NULL;
 static summary_card_t cards[MAX_NINA_INSTANCES];
 static int card_count = 0;
+static int prev_visible_count = -1;
+
+/* Empty state widgets */
+static lv_obj_t *empty_cont = NULL;
+static lv_obj_t *empty_msg = NULL;
+static lv_obj_t *empty_sub = NULL;
 
 /* Glass card style — semi-transparent with subtle border */
 static lv_style_t style_glass_card;
@@ -61,7 +144,6 @@ static void init_glass_styles(void) {
 
     lv_style_init(&style_glass_card);
     lv_style_set_radius(&style_glass_card, CARD_RADIUS);
-    lv_style_set_pad_all(&style_glass_card, CARD_PAD);
     lv_style_set_border_width(&style_glass_card, 1);
 
     /* Colors are applied in apply_glass_theme() */
@@ -110,23 +192,20 @@ static void create_stat_block(lv_obj_t *parent,
     /* Value (large) */
     lv_obj_t *val = lv_label_create(block);
     lv_label_set_text(val, "--");
-#ifdef LV_FONT_MONTSERRAT_28
     lv_obj_set_style_text_font(val, &lv_font_montserrat_28, 0);
-#elif defined(LV_FONT_MONTSERRAT_24)
-    lv_obj_set_style_text_font(val, &lv_font_montserrat_24, 0);
-#else
-    lv_obj_set_style_text_font(val, &lv_font_montserrat_20, 0);
-#endif
 
     *out_label = lbl;
     *out_value = val;
 }
 
 /**
- * @brief Build one glassmorphism instance card.
+ * @brief Build one glassmorphism instance card with all widgets.
+ *        Some widgets (seq_row, detail_row) are hidden by default
+ *        and shown only when visible_count is low enough.
  */
 static void create_card(summary_card_t *sc, lv_obj_t *parent, int instance_index) {
     memset(sc, 0, sizeof(summary_card_t));
+    sc->instance_index = instance_index;
 
     /* ── Card container ── */
     sc->card = lv_obj_create(parent);
@@ -135,14 +214,18 @@ static void create_card(summary_card_t *sc, lv_obj_t *parent, int instance_index
     lv_obj_set_width(sc->card, LV_PCT(100));
     lv_obj_set_flex_grow(sc->card, 1);
     lv_obj_set_flex_flow(sc->card, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(sc->card, LV_FLEX_ALIGN_SPACE_BETWEEN,
+    /* START packs header/target/bar at top; stats_row with flex_grow=1
+     * absorbs remaining vertical space, centering stats in the middle */
+    lv_obj_set_flex_align(sc->card, LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_clear_flag(sc->card, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_pad_all(sc->card, 16, 0);
     lv_obj_set_style_pad_row(sc->card, 6, 0);
 
     /* Make card clickable for navigation */
     lv_obj_add_flag(sc->card, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(sc->card, summary_card_click_cb, LV_EVENT_CLICKED, (void *)(intptr_t)instance_index);
+    lv_obj_add_event_cb(sc->card, summary_card_click_cb, LV_EVENT_CLICKED,
+                        (void *)(intptr_t)instance_index);
 
     /* ── Header row: instance name + filter badge ── */
     lv_obj_t *header = lv_obj_create(sc->card);
@@ -155,7 +238,7 @@ static void create_card(summary_card_t *sc, lv_obj_t *parent, int instance_index
 
     /* Instance name */
     sc->lbl_name = lv_label_create(header);
-    lv_obj_set_style_text_font(sc->lbl_name, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(sc->lbl_name, &lv_font_montserrat_20, 0);
     {
         const char *url = app_config_get_instance_url(instance_index);
         char host[64] = {0};
@@ -182,17 +265,22 @@ static void create_card(summary_card_t *sc, lv_obj_t *parent, int instance_index
     lv_obj_set_width(sc->lbl_target, LV_PCT(100));
     lv_obj_set_style_text_align(sc->lbl_target, LV_TEXT_ALIGN_LEFT, 0);
     lv_label_set_long_mode(sc->lbl_target, LV_LABEL_LONG_DOT);
-#ifdef LV_FONT_MONTSERRAT_24
     lv_obj_set_style_text_font(sc->lbl_target, &lv_font_montserrat_24, 0);
-#else
-    lv_obj_set_style_text_font(sc->lbl_target, &lv_font_montserrat_20, 0);
-#endif
     lv_label_set_text(sc->lbl_target, "----");
 
-    /* ── Progress bar ── */
-    sc->bar_progress = lv_bar_create(sc->card);
-    lv_obj_set_width(sc->bar_progress, LV_PCT(100));
-    lv_obj_set_height(sc->bar_progress, BAR_HEIGHT);
+    /* ── Progress bar + percentage ── */
+    lv_obj_t *bar_row = lv_obj_create(sc->card);
+    lv_obj_remove_style_all(bar_row);
+    lv_obj_set_width(bar_row, LV_PCT(100));
+    lv_obj_set_height(bar_row, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(bar_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(bar_row, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(bar_row, 10, 0);
+
+    sc->bar_progress = lv_bar_create(bar_row);
+    lv_obj_set_flex_grow(sc->bar_progress, 1);
+    lv_obj_set_height(sc->bar_progress, 6);
     lv_bar_set_range(sc->bar_progress, 0, 100);
     lv_bar_set_value(sc->bar_progress, 0, LV_ANIM_OFF);
     lv_obj_set_style_radius(sc->bar_progress, 3, 0);
@@ -200,16 +288,127 @@ static void create_card(summary_card_t *sc, lv_obj_t *parent, int instance_index
     lv_obj_set_style_bg_opa(sc->bar_progress, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_opa(sc->bar_progress, LV_OPA_COVER, LV_PART_INDICATOR);
 
-    /* ── Stats row: RMS | HFR | FLIP ── */
-    lv_obj_t *stats = lv_obj_create(sc->card);
-    lv_obj_remove_style_all(stats);
-    lv_obj_set_width(stats, LV_PCT(100));
-    lv_obj_set_height(stats, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(stats, LV_FLEX_FLOW_ROW);
+    sc->lbl_pct = lv_label_create(bar_row);
+    lv_obj_set_style_text_font(sc->lbl_pct, &lv_font_montserrat_14, 0);
+    lv_label_set_text(sc->lbl_pct, "");
 
-    create_stat_block(stats, "RMS",  &sc->lbl_rms_label,  &sc->lbl_rms_val);
-    create_stat_block(stats, "HFR",  &sc->lbl_hfr_label,  &sc->lbl_hfr_val);
-    create_stat_block(stats, "FLIP", &sc->lbl_flip_label, &sc->lbl_flip_val);
+    /* ── Sequence info row (shown in 1-2 card mode) ── */
+    sc->seq_row = lv_obj_create(sc->card);
+    lv_obj_remove_style_all(sc->seq_row);
+    lv_obj_set_width(sc->seq_row, LV_PCT(100));
+    lv_obj_set_height(sc->seq_row, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(sc->seq_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(sc->seq_row, LV_FLEX_ALIGN_SPACE_BETWEEN,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_add_flag(sc->seq_row, LV_OBJ_FLAG_HIDDEN); /* hidden by default */
+
+    lv_obj_t *seq_left = lv_obj_create(sc->seq_row);
+    lv_obj_remove_style_all(seq_left);
+    lv_obj_clear_flag(seq_left, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(seq_left, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(seq_left, LV_FLEX_FLOW_COLUMN);
+
+    sc->lbl_seq_title = lv_label_create(seq_left);
+    lv_label_set_text(sc->lbl_seq_title, "SEQUENCE");
+    lv_obj_set_style_text_font(sc->lbl_seq_title, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_letter_space(sc->lbl_seq_title, 1, 0);
+    if (current_theme) {
+        int gb = app_config_get()->color_brightness;
+        lv_obj_set_style_text_color(sc->lbl_seq_title,
+            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+    }
+
+    sc->lbl_seq_name = lv_label_create(seq_left);
+    lv_obj_set_style_text_font(sc->lbl_seq_name, &lv_font_montserrat_18, 0);
+    lv_label_set_text(sc->lbl_seq_name, "----");
+
+    lv_obj_t *seq_right = lv_obj_create(sc->seq_row);
+    lv_obj_remove_style_all(seq_right);
+    lv_obj_clear_flag(seq_right, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(seq_right, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(seq_right, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(seq_right, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+
+    sc->lbl_step_title = lv_label_create(seq_right);
+    lv_label_set_text(sc->lbl_step_title, "STEP");
+    lv_obj_set_style_text_font(sc->lbl_step_title, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_letter_space(sc->lbl_step_title, 1, 0);
+    lv_obj_set_style_text_align(sc->lbl_step_title, LV_TEXT_ALIGN_RIGHT, 0);
+    if (current_theme) {
+        int gb = app_config_get()->color_brightness;
+        lv_obj_set_style_text_color(sc->lbl_step_title,
+            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+    }
+
+    sc->lbl_seq_step = lv_label_create(seq_right);
+    lv_obj_set_style_text_font(sc->lbl_seq_step, &lv_font_montserrat_18, 0);
+    lv_label_set_text(sc->lbl_seq_step, "----");
+
+    /* ── Stats row: RMS | HFR | FLIP ── */
+    sc->stats_row = lv_obj_create(sc->card);
+    lv_obj_remove_style_all(sc->stats_row);
+    lv_obj_set_width(sc->stats_row, LV_PCT(100));
+    lv_obj_set_height(sc->stats_row, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(sc->stats_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_grow(sc->stats_row, 1);
+    lv_obj_set_flex_align(sc->stats_row, LV_FLEX_ALIGN_SPACE_EVENLY,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    create_stat_block(sc->stats_row, "RMS",  &sc->lbl_rms_label,  &sc->lbl_rms_val);
+    create_stat_block(sc->stats_row, "HFR",  &sc->lbl_hfr_label,  &sc->lbl_hfr_val);
+    create_stat_block(sc->stats_row, "FLIP", &sc->lbl_flip_label, &sc->lbl_flip_val);
+
+    /* ── Exposure detail line (shown in 1-card mode only) ── */
+    sc->detail_row = lv_obj_create(sc->card);
+    lv_obj_remove_style_all(sc->detail_row);
+    lv_obj_set_width(sc->detail_row, LV_PCT(100));
+    lv_obj_set_height(sc->detail_row, LV_SIZE_CONTENT);
+    lv_obj_add_flag(sc->detail_row, LV_OBJ_FLAG_HIDDEN); /* hidden by default */
+
+    sc->lbl_detail = lv_label_create(sc->detail_row);
+    lv_obj_set_width(sc->lbl_detail, LV_PCT(100));
+    lv_obj_set_style_text_font(sc->lbl_detail, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_align(sc->lbl_detail, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(sc->lbl_detail, "");
+    if (current_theme) {
+        int gb = app_config_get()->color_brightness;
+        lv_obj_set_style_text_color(sc->lbl_detail,
+            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+    }
+}
+
+/**
+ * @brief Create the empty-state container (shown when no instances connected).
+ */
+static void create_empty_state(lv_obj_t *parent) {
+    empty_cont = lv_obj_create(parent);
+    lv_obj_remove_style_all(empty_cont);
+    lv_obj_set_size(empty_cont, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_flex_flow(empty_cont, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(empty_cont,
+        LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(empty_cont, 16, 0);
+    lv_obj_clear_flag(empty_cont, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(empty_cont, LV_OBJ_FLAG_HIDDEN);
+
+    empty_msg = lv_label_create(empty_cont);
+    lv_label_set_text(empty_msg, "No Connections");
+    lv_obj_set_style_text_font(empty_msg, &lv_font_montserrat_32, 0);
+    lv_obj_set_style_text_align(empty_msg, LV_TEXT_ALIGN_CENTER, 0);
+
+    empty_sub = lv_label_create(empty_cont);
+    lv_label_set_text(empty_sub, "Waiting for N.I.N.A. instances...");
+    lv_obj_set_style_text_font(empty_sub, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_align(empty_sub, LV_TEXT_ALIGN_CENTER, 0);
+
+    if (current_theme) {
+        int gb = app_config_get()->color_brightness;
+        lv_obj_set_style_text_color(empty_msg,
+            lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
+        lv_obj_set_style_text_color(empty_sub,
+            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+    }
 }
 
 /* ── Page Creation ─────────────────────────────────────────────────── */
@@ -233,95 +432,150 @@ lv_obj_t *summary_page_create(lv_obj_t *parent, int instance_count) {
 
     for (int i = 0; i < card_count; i++) {
         create_card(&cards[i], sum_page, i);
+        /* Start hidden — will be shown by summary_page_update for connected instances */
+        lv_obj_add_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
     }
+
+    /* Empty state — shown when no instances are connected */
+    create_empty_state(sum_page);
+
+    prev_visible_count = -1;
 
     return sum_page;
 }
 
 /* ── Layout Update ─────────────────────────────────────────────────── */
 
-static void update_card_layout(summary_card_t *sc, bool large) {
-    /* Instance Name */
-    if (large) {
-#ifdef LV_FONT_MONTSERRAT_28
-        lv_obj_set_style_text_font(sc->lbl_name, &lv_font_montserrat_28, 0);
-#elif defined(LV_FONT_MONTSERRAT_24)
-        lv_obj_set_style_text_font(sc->lbl_name, &lv_font_montserrat_24, 0);
-#else
-        lv_obj_set_style_text_font(sc->lbl_name, &lv_font_montserrat_20, 0);
-#endif
+static void update_card_layout(summary_card_t *sc, int visible_count) {
+    int idx = (visible_count <= 1) ? 0 : (visible_count == 2) ? 1 : 2;
+    const card_layout_preset_t *p = &layout_presets[idx];
+
+    /* Card flex strategy: 1-card spreads elements evenly across the full
+     * height for a spacious layout; 2-3 cards pack to top with stats_row
+     * absorbing remaining vertical space to center the stat values. */
+    if (visible_count <= 1) {
+        lv_obj_set_flex_align(sc->card, LV_FLEX_ALIGN_SPACE_EVENLY,
+                              LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+        lv_obj_set_flex_grow(sc->stats_row, 0);
     } else {
-        lv_obj_set_style_text_font(sc->lbl_name, &lv_font_montserrat_18, 0);
+        lv_obj_set_flex_align(sc->card, LV_FLEX_ALIGN_START,
+                              LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+        lv_obj_set_flex_grow(sc->stats_row, 1);
     }
 
-    /* Filter Badge Text */
-    if (large) {
-#ifdef LV_FONT_MONTSERRAT_20
-        lv_obj_set_style_text_font(sc->lbl_filter, &lv_font_montserrat_20, 0);
-#elif defined(LV_FONT_MONTSERRAT_18)
-        lv_obj_set_style_text_font(sc->lbl_filter, &lv_font_montserrat_18, 0);
-#else
-        lv_obj_set_style_text_font(sc->lbl_filter, &lv_font_montserrat_14, 0);
-#endif
-    } else {
-        lv_obj_set_style_text_font(sc->lbl_filter, &lv_font_montserrat_14, 0);
-    }
+    /* Card padding and spacing */
+    lv_obj_set_style_pad_all(sc->card, p->card_pad, 0);
+    lv_obj_set_style_pad_row(sc->card, p->card_row_gap, 0);
 
-    /* Target Name */
-    if (large) {
-#ifdef LV_FONT_MONTSERRAT_32
-        lv_obj_set_style_text_font(sc->lbl_target, &lv_font_montserrat_32, 0);
-#elif defined(LV_FONT_MONTSERRAT_28)
-        lv_obj_set_style_text_font(sc->lbl_target, &lv_font_montserrat_28, 0);
-#else
-        lv_obj_set_style_text_font(sc->lbl_target, &lv_font_montserrat_24, 0);
-#endif
-    } else {
-#ifdef LV_FONT_MONTSERRAT_24
-        lv_obj_set_style_text_font(sc->lbl_target, &lv_font_montserrat_24, 0);
-#else
-        lv_obj_set_style_text_font(sc->lbl_target, &lv_font_montserrat_20, 0);
-#endif
-    }
+    /* Instance name */
+    lv_obj_set_style_text_font(sc->lbl_name, p->name, 0);
 
-    /* Progress Bar Height */
-    lv_obj_set_height(sc->bar_progress, large ? 12 : 6);
+    /* Filter badge */
+    lv_obj_set_style_text_font(sc->lbl_filter, p->filter, 0);
+
+    /* Target name */
+    lv_obj_set_style_text_font(sc->lbl_target, p->target, 0);
+
+    /* Progress bar height */
+    lv_obj_set_height(sc->bar_progress, p->bar_height);
+    lv_obj_set_style_radius(sc->bar_progress, p->bar_height / 2, 0);
+    lv_obj_set_style_radius(sc->bar_progress, p->bar_height / 2, LV_PART_INDICATOR);
+
+    /* Progress percentage label */
+    lv_obj_set_style_text_font(sc->lbl_pct, p->pct_label, 0);
+
+    /* Sequence row: shown in 1-2 card mode, hidden in 3-card mode */
+    if (visible_count <= 2) {
+        lv_obj_clear_flag(sc->seq_row, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_text_font(sc->lbl_seq_title, p->seq_label, 0);
+        lv_obj_set_style_text_font(sc->lbl_seq_name, p->seq_value, 0);
+        lv_obj_set_style_text_font(sc->lbl_step_title, p->seq_label, 0);
+        lv_obj_set_style_text_font(sc->lbl_seq_step, p->seq_value, 0);
+    } else {
+        lv_obj_add_flag(sc->seq_row, LV_OBJ_FLAG_HIDDEN);
+    }
 
     /* Stats (Labels and Values) */
     lv_obj_t *labels[] = { sc->lbl_rms_label, sc->lbl_hfr_label, sc->lbl_flip_label };
     lv_obj_t *values[] = { sc->lbl_rms_val, sc->lbl_hfr_val, sc->lbl_flip_val };
 
-    const lv_font_t *font_stat_label = large ? 
-#ifdef LV_FONT_MONTSERRAT_18
-        &lv_font_montserrat_18 
-#else
-        &lv_font_montserrat_14
-#endif
-        : &lv_font_montserrat_14;
-
-    const lv_font_t *font_stat_value = large ?
-#ifdef LV_FONT_MONTSERRAT_36
-        &lv_font_montserrat_36
-#elif defined(LV_FONT_MONTSERRAT_32)
-        &lv_font_montserrat_32
-#elif defined(LV_FONT_MONTSERRAT_28)
-        &lv_font_montserrat_28
-#else
-        &lv_font_montserrat_24
-#endif
-        : 
-#ifdef LV_FONT_MONTSERRAT_28
-        &lv_font_montserrat_28;
-#elif defined(LV_FONT_MONTSERRAT_24)
-        &lv_font_montserrat_24;
-#else
-        &lv_font_montserrat_20;
-#endif
-
     for (int i = 0; i < 3; i++) {
-        if (labels[i]) lv_obj_set_style_text_font(labels[i], font_stat_label, 0);
-        if (values[i]) lv_obj_set_style_text_font(values[i], font_stat_value, 0);
+        if (labels[i]) {
+            lv_obj_set_style_text_font(labels[i], p->stat_label, 0);
+            /* Update stat block padding */
+            lv_obj_t *block = lv_obj_get_parent(labels[i]);
+            if (block) lv_obj_set_style_pad_row(block, p->stat_pad_row, 0);
+        }
+        if (values[i]) lv_obj_set_style_text_font(values[i], p->stat_value, 0);
     }
+
+    /* Detail row: shown only in 1-card mode */
+    if (visible_count <= 1) {
+        lv_obj_clear_flag(sc->detail_row, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_text_font(sc->lbl_detail, p->pct_label, 0);
+    } else {
+        lv_obj_add_flag(sc->detail_row, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+/* ── Card Transition Animations ────────────────────────────────────── */
+
+#define ANIM_DURATION_MS  400
+
+static void anim_opa_cb(void *obj, int32_t v) {
+    lv_obj_set_style_opa((lv_obj_t *)obj, v, 0);
+}
+
+static void anim_translate_y_cb(void *obj, int32_t v) {
+    lv_obj_set_style_translate_y((lv_obj_t *)obj, v, 0);
+}
+
+static void anim_translate_y_done_cb(lv_anim_t *a) {
+    lv_obj_set_style_translate_y((lv_obj_t *)a->var, 0, 0);
+}
+
+/**
+ * @brief Fade-in + slide-up entrance for a newly appearing card.
+ */
+static void animate_card_in(summary_card_t *sc) {
+    lv_obj_set_style_opa(sc->card, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_translate_y(sc->card, 40, 0);
+
+    lv_anim_t a_opa;
+    lv_anim_init(&a_opa);
+    lv_anim_set_var(&a_opa, sc->card);
+    lv_anim_set_values(&a_opa, LV_OPA_TRANSP, LV_OPA_COVER);
+    lv_anim_set_duration(&a_opa, ANIM_DURATION_MS);
+    lv_anim_set_exec_cb(&a_opa, anim_opa_cb);
+    lv_anim_set_path_cb(&a_opa, lv_anim_path_ease_out);
+    lv_anim_start(&a_opa);
+
+    lv_anim_t a_y;
+    lv_anim_init(&a_y);
+    lv_anim_set_var(&a_y, sc->card);
+    lv_anim_set_values(&a_y, 40, 0);
+    lv_anim_set_duration(&a_y, ANIM_DURATION_MS);
+    lv_anim_set_exec_cb(&a_y, anim_translate_y_cb);
+    lv_anim_set_path_cb(&a_y, lv_anim_path_ease_out);
+    lv_anim_start(&a_y);
+}
+
+/**
+ * @brief Smoothly glide a card from its old position to its new position.
+ * Uses translate_y to offset from the flex-assigned position, then animate to 0.
+ */
+static void animate_card_move(summary_card_t *sc, int32_t dy) {
+    lv_obj_set_style_translate_y(sc->card, dy, 0);
+
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, sc->card);
+    lv_anim_set_values(&a, dy, 0);
+    lv_anim_set_duration(&a, ANIM_DURATION_MS);
+    lv_anim_set_exec_cb(&a, anim_translate_y_cb);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_set_completed_cb(&a, anim_translate_y_done_cb);
+    lv_anim_start(&a);
 }
 
 /* ── Data Update ───────────────────────────────────────────────────── */
@@ -330,105 +584,166 @@ void summary_page_update(const nina_client_t *instances, int count) {
     if (!sum_page) return;
 
     int gb = app_config_get()->color_brightness;
-    
-    /* First count how many are connected */
+
+    /* Count connected instances */
     int connected_count = 0;
-    for (int i = 0; i < count; i++) {
+    for (int i = 0; i < count && i < card_count; i++) {
         if (instances[i].connected) connected_count++;
     }
 
-    /* Determine visibility and layout mode */
-    int visible_count = (connected_count > 0) ? connected_count : card_count;
-    bool large_mode = (visible_count < 3);
+    /* Empty state: show message when nothing is connected */
+    if (connected_count == 0) {
+        for (int i = 0; i < card_count; i++) {
+            lv_obj_add_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
+        }
+        if (empty_cont) {
+            lv_obj_clear_flag(empty_cont, LV_OBJ_FLAG_HIDDEN);
+        }
+        prev_visible_count = 0;
+        return;
+    }
 
+    /* Hide empty state, show cards */
+    if (empty_cont) {
+        lv_obj_add_flag(empty_cont, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    bool layout_changed = (connected_count != prev_visible_count);
+
+    if (layout_changed) {
+        /* ── FLIP animation: First, Last, Invert, Play ───────────── */
+
+        /* FIRST: snapshot current visibility and Y positions */
+        bool was_visible[MAX_NINA_INSTANCES];
+        int32_t old_y[MAX_NINA_INSTANCES];
+        for (int i = 0; i < card_count; i++) {
+            was_visible[i] = !lv_obj_has_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
+            old_y[i] = was_visible[i] ? lv_obj_get_y(cards[i].card) : 0;
+        }
+
+        /* LAST: apply show/hide and layout preset changes */
+        for (int i = 0; i < card_count && i < count; i++) {
+            if (instances[i].connected) {
+                lv_obj_clear_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
+                update_card_layout(&cards[i], connected_count);
+            } else {
+                lv_obj_add_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+
+        /* Force synchronous layout so new positions are available */
+        lv_obj_update_layout(sum_page);
+
+        /* INVERT + PLAY: animate transitions */
+        for (int i = 0; i < card_count && i < count; i++) {
+            if (!instances[i].connected) continue;
+            int32_t new_y = lv_obj_get_y(cards[i].card);
+            if (!was_visible[i]) {
+                /* New card — fade in + slide up */
+                animate_card_in(&cards[i]);
+            } else if (old_y[i] != new_y) {
+                /* Existing card moved — smooth glide to new position */
+                animate_card_move(&cards[i], old_y[i] - new_y);
+            }
+        }
+    } else {
+        /* No layout change — just ensure correct visibility */
+        for (int i = 0; i < card_count && i < count; i++) {
+            if (instances[i].connected) {
+                lv_obj_clear_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_add_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+    }
+
+    prev_visible_count = connected_count;
+
+    /* ── Update card data ────────────────────────────────────────── */
     for (int i = 0; i < card_count && i < count; i++) {
         summary_card_t *sc = &cards[i];
         const nina_client_t *d = &instances[i];
 
-        /* Visibility logic:
-         * 1. If NO instances are connected, show all (placeholder mode).
-         * 2. If ANY instance is connected, hide disconnected ones.
-         */
-        bool show = (connected_count == 0) || d->connected;
-        
-        if (show) {
-            lv_obj_clear_flag(sc->card, LV_OBJ_FLAG_HIDDEN);
-            update_card_layout(sc, large_mode);
-        } else {
-            lv_obj_add_flag(sc->card, LV_OBJ_FLAG_HIDDEN);
-            continue; /* Skip updating hidden cards */
-        }
+        if (!d->connected) continue;
 
-        /* Instance name — update if profile available */
-        if (d->connected && d->profile_name[0]) {
+        /* Instance name — use profile name if available */
+        if (d->profile_name[0]) {
             lv_label_set_text(sc->lbl_name, d->profile_name);
-        } else if (!d->connected) {
+        } else {
             const char *url = app_config_get_instance_url(i);
             char host[64] = {0};
             extract_host_from_url(url, host, sizeof(host));
-            char buf[96];
-            snprintf(buf, sizeof(buf), "%s", host[0] ? host : "N.I.N.A.");
-            lv_label_set_text(sc->lbl_name, buf);
+            lv_label_set_text(sc->lbl_name, host[0] ? host : "N.I.N.A.");
         }
 
-        /* Name color: theme header color when connected, dimmed when not */
+        /* Name color: theme header color (always connected at this point) */
         if (current_theme) {
-            uint32_t name_color = d->connected
-                ? app_config_apply_brightness(current_theme->header_text_color, gb)
-                : app_config_apply_brightness(current_theme->label_color, gb);
+            uint32_t name_color = app_config_apply_brightness(
+                current_theme->header_text_color, gb);
             lv_obj_set_style_text_color(sc->lbl_name, lv_color_hex(name_color), 0);
         }
 
         /* Filter */
-        if (d->connected && d->current_filter[0]) {
+        if (d->current_filter[0]) {
             lv_label_set_text(sc->lbl_filter, d->current_filter);
             uint32_t fc = app_config_get_filter_color(d->current_filter, i);
             if (fc != 0) {
                 lv_obj_set_style_text_color(sc->lbl_filter,
                     lv_color_hex(app_config_apply_brightness(fc, gb)), 0);
+                /* Also tint the filter badge background with the filter color */
+                lv_obj_set_style_bg_color(sc->filter_box,
+                    lv_color_hex(app_config_apply_brightness(fc, gb)), 0);
+                lv_obj_set_style_bg_opa(sc->filter_box, LV_OPA_20, 0);
             } else if (current_theme) {
                 lv_obj_set_style_text_color(sc->lbl_filter,
-                    lv_color_hex(app_config_apply_brightness(current_theme->filter_text_color, gb)), 0);
+                    lv_color_hex(app_config_apply_brightness(
+                        current_theme->filter_text_color, gb)), 0);
+                lv_obj_set_style_bg_color(sc->filter_box, lv_color_black(), 0);
+                lv_obj_set_style_bg_opa(sc->filter_box, LV_OPA_50, 0);
             }
         } else {
             lv_label_set_text(sc->lbl_filter, "--");
             if (current_theme) {
                 lv_obj_set_style_text_color(sc->lbl_filter,
-                    lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+                    lv_color_hex(app_config_apply_brightness(
+                        current_theme->label_color, gb)), 0);
             }
+            lv_obj_set_style_bg_color(sc->filter_box, lv_color_black(), 0);
+            lv_obj_set_style_bg_opa(sc->filter_box, LV_OPA_50, 0);
         }
 
         /* Target name */
-        if (d->connected && d->target_name[0]) {
+        if (d->target_name[0]) {
             lv_label_set_text(sc->lbl_target, d->target_name);
-        } else if (!d->connected) {
-            lv_label_set_text(sc->lbl_target, "Not Connected");
         } else {
             lv_label_set_text(sc->lbl_target, "Idle");
         }
 
-        /* Target name color */
         if (current_theme) {
-            uint32_t tgt_color = d->connected
-                ? app_config_apply_brightness(current_theme->target_name_color, gb)
-                : app_config_apply_brightness(current_theme->label_color, gb);
+            uint32_t tgt_color = app_config_apply_brightness(
+                current_theme->target_name_color, gb);
             lv_obj_set_style_text_color(sc->lbl_target, lv_color_hex(tgt_color), 0);
         }
 
-        /* Progress bar */
-        if (d->connected && d->exposure_total > 0) {
+        /* Progress bar + percentage */
+        if (d->exposure_total > 0) {
             int pct = (int)((d->exposure_current / d->exposure_total) * 100.0f);
             if (pct < 0) pct = 0;
             if (pct > 100) pct = 100;
             lv_bar_set_value(sc->bar_progress, pct, LV_ANIM_ON);
+
+            char pct_buf[8];
+            snprintf(pct_buf, sizeof(pct_buf), "%d%%", pct);
+            lv_label_set_text(sc->lbl_pct, pct_buf);
         } else {
             lv_bar_set_value(sc->bar_progress, 0, LV_ANIM_OFF);
+            lv_label_set_text(sc->lbl_pct, "");
         }
 
         /* Progress bar color: filter color or theme progress */
         {
             uint32_t bar_col = 0;
-            if (d->connected && d->current_filter[0]) {
+            if (d->current_filter[0]) {
                 bar_col = app_config_get_filter_color(d->current_filter, i);
             }
             if (bar_col == 0 && current_theme) {
@@ -436,17 +751,47 @@ void summary_page_update(const nina_client_t *instances, int count) {
             }
             if (bar_col != 0) {
                 lv_obj_set_style_bg_color(sc->bar_progress,
-                    lv_color_hex(app_config_apply_brightness(bar_col, gb)), LV_PART_INDICATOR);
+                    lv_color_hex(app_config_apply_brightness(bar_col, gb)),
+                    LV_PART_INDICATOR);
             }
-            /* Bar background */
             if (current_theme) {
                 lv_obj_set_style_bg_color(sc->bar_progress,
                     lv_color_hex(current_theme->bento_border), 0);
             }
         }
 
+        /* Percentage label color */
+        if (current_theme) {
+            lv_obj_set_style_text_color(sc->lbl_pct,
+                lv_color_hex(app_config_apply_brightness(
+                    current_theme->text_color, gb)), 0);
+        }
+
+        /* Sequence info (visible in 1-2 card mode) */
+        if (connected_count <= 2 && !lv_obj_has_flag(sc->seq_row, LV_OBJ_FLAG_HIDDEN)) {
+            if (d->container_name[0]) {
+                lv_label_set_text(sc->lbl_seq_name, d->container_name);
+            } else {
+                lv_label_set_text(sc->lbl_seq_name, "----");
+            }
+            if (d->container_step[0]) {
+                lv_label_set_text(sc->lbl_seq_step, d->container_step);
+            } else {
+                lv_label_set_text(sc->lbl_seq_step, "----");
+            }
+
+            if (current_theme) {
+                lv_obj_set_style_text_color(sc->lbl_seq_name,
+                    lv_color_hex(app_config_apply_brightness(
+                        current_theme->header_text_color, gb)), 0);
+                lv_obj_set_style_text_color(sc->lbl_seq_step,
+                    lv_color_hex(app_config_apply_brightness(
+                        current_theme->text_color, gb)), 0);
+            }
+        }
+
         /* RMS */
-        if (d->connected && d->guider.rms_total > 0.001f) {
+        if (d->guider.rms_total > 0.001f) {
             char buf[16];
             snprintf(buf, sizeof(buf), "%.2f\"", d->guider.rms_total);
             lv_label_set_text(sc->lbl_rms_val, buf);
@@ -456,18 +801,20 @@ void summary_page_update(const nina_client_t *instances, int count) {
                     lv_color_hex(app_config_apply_brightness(rms_col, gb)), 0);
             } else if (current_theme) {
                 lv_obj_set_style_text_color(sc->lbl_rms_val,
-                    lv_color_hex(app_config_apply_brightness(current_theme->rms_color, gb)), 0);
+                    lv_color_hex(app_config_apply_brightness(
+                        current_theme->rms_color, gb)), 0);
             }
         } else {
             lv_label_set_text(sc->lbl_rms_val, "--");
             if (current_theme) {
                 lv_obj_set_style_text_color(sc->lbl_rms_val,
-                    lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+                    lv_color_hex(app_config_apply_brightness(
+                        current_theme->text_color, gb)), 0);
             }
         }
 
         /* HFR */
-        if (d->connected && d->hfr > 0.001f) {
+        if (d->hfr > 0.001f) {
             char buf[16];
             snprintf(buf, sizeof(buf), "%.2f", d->hfr);
             lv_label_set_text(sc->lbl_hfr_val, buf);
@@ -477,25 +824,62 @@ void summary_page_update(const nina_client_t *instances, int count) {
                     lv_color_hex(app_config_apply_brightness(hfr_col, gb)), 0);
             } else if (current_theme) {
                 lv_obj_set_style_text_color(sc->lbl_hfr_val,
-                    lv_color_hex(app_config_apply_brightness(current_theme->hfr_color, gb)), 0);
+                    lv_color_hex(app_config_apply_brightness(
+                        current_theme->hfr_color, gb)), 0);
             }
         } else {
             lv_label_set_text(sc->lbl_hfr_val, "--");
             if (current_theme) {
                 lv_obj_set_style_text_color(sc->lbl_hfr_val,
-                    lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+                    lv_color_hex(app_config_apply_brightness(
+                        current_theme->text_color, gb)), 0);
             }
         }
 
         /* Time to flip */
-        if (d->connected && d->meridian_flip[0]) {
+        if (d->meridian_flip[0]) {
             lv_label_set_text(sc->lbl_flip_val, d->meridian_flip);
         } else {
             lv_label_set_text(sc->lbl_flip_val, "--");
         }
         if (current_theme) {
             lv_obj_set_style_text_color(sc->lbl_flip_val,
-                lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+                lv_color_hex(app_config_apply_brightness(
+                    current_theme->text_color, gb)), 0);
+        }
+
+        /* Exposure detail line (1-card mode only) */
+        if (connected_count <= 1 &&
+            !lv_obj_has_flag(sc->detail_row, LV_OBJ_FLAG_HIDDEN)) {
+            char detail[128] = "";
+            int len = 0;
+
+            if (d->exposure_total > 0) {
+                len += snprintf(detail + len, sizeof(detail) - len,
+                    "%ds %s", (int)d->exposure_total,
+                    d->current_filter[0] ? d->current_filter : "");
+            }
+            if (d->exposure_iterations > 0 && len > 0) {
+                len += snprintf(detail + len, sizeof(detail) - len,
+                    "  |  %d / %d exp",
+                    d->exposure_count, d->exposure_iterations);
+            }
+            if (d->stars > 0 && len > 0) {
+                len += snprintf(detail + len, sizeof(detail) - len,
+                    "  |  %d stars", d->stars);
+            }
+            if (d->target_time_remaining[0] && len > 0) {
+                len += snprintf(detail + len, sizeof(detail) - len,
+                    "  |  %s left", d->target_time_remaining);
+            }
+
+            lv_label_set_text(sc->lbl_detail, detail);
+
+            if (current_theme) {
+                lv_obj_set_style_text_color(sc->lbl_detail,
+                    lv_color_hex(app_config_apply_brightness(
+                        current_theme->text_color, gb)), 0);
+            }
         }
     }
 }
@@ -515,12 +899,16 @@ void summary_page_apply_theme(void) {
     for (int i = 0; i < card_count; i++) {
         summary_card_t *sc = &cards[i];
 
-        /* Stat labels */
-        lv_obj_t *labels[] = { sc->lbl_rms_label, sc->lbl_hfr_label, sc->lbl_flip_label };
-        for (int j = 0; j < 3; j++) {
+        /* Stat labels + sequence title labels */
+        lv_obj_t *labels[] = {
+            sc->lbl_rms_label, sc->lbl_hfr_label, sc->lbl_flip_label,
+            sc->lbl_seq_title, sc->lbl_step_title
+        };
+        for (int j = 0; j < 5; j++) {
             if (labels[j]) {
                 lv_obj_set_style_text_color(labels[j],
-                    lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+                    lv_color_hex(app_config_apply_brightness(
+                        current_theme->label_color, gb)), 0);
             }
         }
 
@@ -529,6 +917,18 @@ void summary_page_apply_theme(void) {
             lv_obj_set_style_bg_color(sc->bar_progress,
                 lv_color_hex(current_theme->bento_border), 0);
         }
+    }
+
+    /* Update empty state theme */
+    if (empty_msg) {
+        lv_obj_set_style_text_color(empty_msg,
+            lv_color_hex(app_config_apply_brightness(
+                current_theme->header_text_color, gb)), 0);
+    }
+    if (empty_sub) {
+        lv_obj_set_style_text_color(empty_sub,
+            lv_color_hex(app_config_apply_brightness(
+                current_theme->label_color, gb)), 0);
     }
 
     lv_obj_invalidate(sum_page);

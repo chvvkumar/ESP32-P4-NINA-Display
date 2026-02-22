@@ -381,7 +381,7 @@ static bool validate_config(app_config_t *cfg) {
         cfg->mqtt_port = 1883;
         fixed = true;
     }
-    if (cfg->active_page_override < -1 || cfg->active_page_override > MAX_NINA_INSTANCES + 1) {
+    if (cfg->active_page_override < -1 || cfg->active_page_override > MAX_NINA_INSTANCES + 2) {
         cfg->active_page_override = -1;
         fixed = true;
     }

@@ -924,13 +924,15 @@
       const sel=$('active_page');
       if(!sel) return;
       const urls=[$('url1').value.trim(),$('url2').value.trim(),$('url3').value.trim()];
-      const opts=sel.options;
-      for(let i=0;i<opts.length;i++){
-        const v=parseInt(opts[i].value);
-        if(v>=1&&v<=3){
-          opts[i].textContent=urls[v-1]||'NINA '+v;
-        }
-      }
+      const cnt=urls.filter(u=>u.length>0).length||1;
+      const prev=sel.value;
+      sel.innerHTML='';
+      sel.add(new Option('Summary','0'));
+      for(let i=0;i<cnt;i++) sel.add(new Option(urls[i]||'NINA '+(i+1),''+(i+1)));
+      sel.add(new Option('Settings',''+(cnt+1)));
+      sel.add(new Option('System Info',''+(cnt+2)));
+      if([...sel.options].some(o=>o.value===prev)) sel.value=prev;
+      else sel.value='0';
     }
 
     /* ---- Threshold Helpers ---- */
@@ -1076,15 +1078,15 @@
       if(data.auto_rotate_enabled) pageMode='rotate';
       else if(data.active_page_override!=null&&data.active_page_override>=0) pageMode='fixed';
 
-      $('active_page').value=(data.active_page_override!=null&&data.active_page_override>=0)?data.active_page_override:0;
       $('auto_rotate_interval').value=data.auto_rotate_interval_s||30;
       $('auto_rotate_effect').value=data.auto_rotate_effect||0;
       $('auto_rotate_skip').checked=!!data.auto_rotate_skip_disconnected;
       setRotatePages(data.auto_rotate_pages!=null?data.auto_rotate_pages:0x1F);
-      setPageMode(pageMode);
 
       updateNodeLabels();
       updatePageSelectOptions();
+      $('active_page').value=(data.active_page_override!=null&&data.active_page_override>=0)?''+data.active_page_override:'0';
+      setPageMode(pageMode);
 
       $('pass').value='';
       loadedConfig=JSON.stringify(getConfigData());
