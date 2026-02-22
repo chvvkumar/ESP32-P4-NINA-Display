@@ -17,6 +17,10 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
   <img src="images/pic1.jpg" alt="Device" width="1200">
 </p>
 
+<p align="center">
+  <img src="images/imagepreview.jpg" alt="Image Preview" width="1200">
+</p>
+
 ## Table of Contents
 
 - [Screenshots](#screenshots)
