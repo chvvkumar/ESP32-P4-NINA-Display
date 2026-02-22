@@ -111,9 +111,11 @@ jobs:
 
       - name: Build project
         if: steps.check_skip.outputs.skip != 'true'
+        env:
+          IDF_CCACHE_ENABLE: 1
         run: |
           . $IDF_PATH/export.sh
-          idf.py build --ccache
+          idf.py build
 
       - name: Show ccache stats
         if: steps.check_skip.outputs.skip != 'true'
