@@ -3,6 +3,12 @@ name: Build Firmware
 on:
   push:
     branches: [main, snd]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'images/**'
+      - 'LICENSE'
+      - '.gitignore'
 
 env:
   IDF_VERSION: v5.5.2

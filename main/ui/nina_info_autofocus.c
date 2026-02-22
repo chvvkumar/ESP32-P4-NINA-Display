@@ -276,15 +276,36 @@ void populate_autofocus_data(const autofocus_data_t *data) {
     /* Hide loading, show data */
     lv_obj_add_flag(lbl_loading, LV_OBJ_FLAG_HIDDEN);
 
+    /* Make a sorted copy of the points (ascending by focuser position)
+     * so chart data aligns with X-axis labels (min left, max right).
+     * NINA sends points in measurement order which may be high→low. */
+    typedef struct { int position; float hfr; } af_pt_t;
+    af_pt_t sorted[MAX_AF_POINTS];
+    int n = data->count > MAX_AF_POINTS ? MAX_AF_POINTS : data->count;
+    for (int i = 0; i < n; i++) {
+        sorted[i].position = data->points[i].position;
+        sorted[i].hfr      = data->points[i].hfr;
+    }
+    /* Simple insertion sort — count is small (typically <20) */
+    for (int i = 1; i < n; i++) {
+        af_pt_t key = sorted[i];
+        int j = i - 1;
+        while (j >= 0 && sorted[j].position > key.position) {
+            sorted[j + 1] = sorted[j];
+            j--;
+        }
+        sorted[j + 1] = key;
+    }
+
     /* Compute Y range (HFR values scaled x100 for integer chart) */
     float min_hfr = 1e6f, max_hfr = 0.0f;
     int min_pos = 0x7FFFFFFF, max_pos = 0;
 
-    for (int i = 0; i < data->count; i++) {
-        if (data->points[i].hfr < min_hfr) min_hfr = data->points[i].hfr;
-        if (data->points[i].hfr > max_hfr) max_hfr = data->points[i].hfr;
-        if (data->points[i].position < min_pos) min_pos = data->points[i].position;
-        if (data->points[i].position > max_pos) max_pos = data->points[i].position;
+    for (int i = 0; i < n; i++) {
+        if (sorted[i].hfr < min_hfr) min_hfr = sorted[i].hfr;
+        if (sorted[i].hfr > max_hfr) max_hfr = sorted[i].hfr;
+        if (sorted[i].position < min_pos) min_pos = sorted[i].position;
+        if (sorted[i].position > max_pos) max_pos = sorted[i].position;
     }
 
     /* Add headroom */
@@ -293,12 +314,12 @@ void populate_autofocus_data(const autofocus_data_t *data) {
     if (y_max < 100) y_max = 100;
 
     /* Set chart range and point count */
-    lv_chart_set_point_count(af_chart, data->count > 0 ? data->count : 1);
+    lv_chart_set_point_count(af_chart, n > 0 ? n : 1);
     lv_chart_set_range(af_chart, LV_CHART_AXIS_PRIMARY_Y, y_min, y_max);
 
-    /* Populate points (HFR scaled x100) */
-    for (int i = 0; i < data->count; i++) {
-        int val = (int)(data->points[i].hfr * 100.0f);
+    /* Populate points (HFR scaled x100) — from sorted array */
+    for (int i = 0; i < n; i++) {
+        int val = (int)(sorted[i].hfr * 100.0f);
         lv_chart_set_value_by_id(af_chart, ser_af, i, val);
     }
     lv_chart_refresh(af_chart);
@@ -321,7 +342,7 @@ void populate_autofocus_data(const autofocus_data_t *data) {
     lv_label_set_text(lbl_y_bot, "0");
 
     /* X-axis labels (focuser positions) */
-    if (data->count > 0) {
+    if (n > 0) {
         snprintf(buf, sizeof(buf), "%d", min_pos);
         lv_label_set_text(lbl_x_min, buf);
 
