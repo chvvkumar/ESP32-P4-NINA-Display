@@ -255,8 +255,10 @@ void perf_monitor_capture_cpu(void)
     qsort(cpu->tasks, cpu->task_info_count, sizeof(cpu_task_info_t), cmp_cpu_desc);
 
     // Compute per-core and total load
-    cpu->core_load[0] = 100.0f - cpu->idle_percent[0] * 2.0f;
-    cpu->core_load[1] = 100.0f - cpu->idle_percent[1] * 2.0f;
+    // ulTotalRunTime is wall-clock time (not summed across cores), so
+    // each idle task's percentage is already in the 0-100% per-core range.
+    cpu->core_load[0] = 100.0f - cpu->idle_percent[0];
+    cpu->core_load[1] = 100.0f - cpu->idle_percent[1];
 
     // Clamp to 0-100
     for (int c = 0; c < 2; c++) {

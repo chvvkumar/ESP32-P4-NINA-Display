@@ -228,17 +228,24 @@ jobs:
         if: steps.check_skip.outputs.skip != 'true'
         id: tag
         run: |
-          VERSION=$(cat version.txt | tr -d '[:space:]')
           BRANCH=${GITHUB_REF_NAME}
 
           if [ "$BRANCH" = "main" ]; then
+            VERSION=$(cat version.txt | tr -d '[:space:]')
             TAG="v${VERSION}"
           else
+            # Use latest main release version so pre-releases sort correctly
+            LATEST_MAIN_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | grep -v '-' | head -1)
+            if [ -n "$LATEST_MAIN_TAG" ]; then
+              BASE_VERSION=${LATEST_MAIN_TAG#v}
+            else
+              BASE_VERSION=$(cat version.txt | tr -d '[:space:]')
+            fi
             # Count existing tags with this prefix to auto-increment
-            PREFIX="v${VERSION}-${BRANCH}."
+            PREFIX="v${BASE_VERSION}-${BRANCH}."
             EXISTING=$(git tag -l "${PREFIX}*" | wc -l)
             NEXT=$((EXISTING + 1))
-            TAG="v${VERSION}-${BRANCH}.${NEXT}"
+            TAG="v${BASE_VERSION}-${BRANCH}.${NEXT}"
           fi
 
           echo "tag=$TAG" >> $GITHUB_OUTPUT
