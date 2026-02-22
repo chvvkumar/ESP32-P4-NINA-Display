@@ -27,7 +27,7 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [First-Time Setup](#first-time-setup)
-- [What's on the Display](#whats-on-the-display)
+- [Display Interface](#display-interface)
 - [Navigation](#navigation)
 - [Multi-Instance Support](#multi-instance-support)
 - [Themes & Filter Colors](#themes--filter-colors)
@@ -94,12 +94,12 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
 
 ### Hardware
 
-- **[Waveshare ESP32-P4-WIFI6-Touch-LCD-4B](https://www.waveshare.com/esp32-p4-wifi6-touch-lcd-4b.htm?sku=31416)** — this is the only tested board. The layout is tuned for its 720x720 display.
+- **[Waveshare ESP32-P4-WIFI6-Touch-LCD-4B](https://www.waveshare.com/esp32-p4-wifi6-touch-lcd-4b.htm?sku=31416)** — currently the only tested board. The layout is tuned for its 720x720 display.
 
 ### Software (on the N.I.N.A. PC)
 
 - [N.I.N.A. Nighttime Imaging 'N' Astronomy](https://nighttime-imaging.eu/)
-- [ninaAPI Advanced plugin](https://github.com/christian-photo/ninaAPI) by Christian Palm — install it from N.I.N.A.'s plugin manager, then enable it. The display talks to this plugin exclusively.
+- [ninaAPI Advanced plugin](https://github.com/christian-photo/ninaAPI) by Christian Palm — install it from N.I.N.A.'s plugin manager, then enable it. Required for operation.
 
 <p align="center">
   <img src="images/NINA_Plugin.jpg" alt="NINA Plugin" width="1200">
@@ -142,13 +142,13 @@ Set at minimum:
 1. **WiFi credentials** — your observatory/home network where NINA runs.
 2. **NINA API URL(s)** — e.g. `http://192.168.1.50:1888/v2` for each instance you want to monitor. You can configure up to three.
 
-Hit Save. The device reconnects to your network and starts polling immediately.
+Save settings. The device reconnects to your network and starts polling immediately.
 
 > Once the device connects to your network, the config AP is automatically disabled to reduce radio interference. If the WiFi connection drops, the AP reappears so you can reconfigure.
 
 ---
 
-## What's on the Display
+## Display Interface
 
 ### Summary Page
 
@@ -217,7 +217,7 @@ Enable MQTT in the web config and point it at your broker. The device publishes 
 - **Text Brightness** — a dimmable light entity (0–100%) to control theme color intensity
 - **Reboot** — a button entity to restart the device remotely
 
-This lets you dim the screen from an HA automation during a dark-site session or integrate the display into your observatory control workflows.
+Enables screen dimming via HA automation during a dark-site session or display integration into observatory control workflows.
 
 ---
 
@@ -248,7 +248,7 @@ curl -o screenshot.jpg http://<device-ip>/api/screenshot
 
 ## Building from Source
 
-This is a standard **ESP-IDF** project targeting IDF 5.5.x. You need the IDF toolchain installed and `IDF_PATH` set.
+Standard **ESP-IDF** project targeting IDF 5.5.x. Requires the IDF toolchain installed and `IDF_PATH` set.
 
 ```bash
 # Activate IDF environment (once per terminal session)
@@ -266,7 +266,7 @@ idf.py fullclean
 
 Dependencies are managed via **IDF Component Manager** (`idf_component.yml`). Don't edit files under `managed_components/` directly — run `idf.py update-dependencies` to refresh them.
 
-### Key source files
+### source files
 
 | File | Purpose |
 |---|---|
