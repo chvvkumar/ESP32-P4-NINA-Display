@@ -383,6 +383,25 @@
     }
     .page-mode-details[hidden] { display: none; }
 
+    /* === COLLAPSIBLE CARD === */
+    .card-title-collapsible {
+      display: flex; align-items: center; justify-content: space-between;
+      cursor: pointer; user-select: none; -webkit-user-select: none;
+    }
+    .card-title-collapsible:hover { opacity: 1; }
+    .card-chevron {
+      font-size: 0.65rem; transition: transform 0.3s ease;
+      color: var(--text-muted); margin-left: 8px;
+    }
+    .card-chevron.collapsed { transform: rotate(-90deg); }
+    .card-body-collapsible {
+      overflow: hidden; transition: max-height 0.35s ease, opacity 0.25s ease;
+      max-height: 800px; opacity: 1;
+    }
+    .card-body-collapsible.collapsed {
+      max-height: 0; opacity: 0;
+    }
+
     /* === FIRMWARE & OTA === */
     .fw-item {
       background: rgba(255, 255, 255, 0.02); padding: 12px 14px;
@@ -488,7 +507,11 @@
         </div>
       </div>
       <div class="card">
-        <div class="card-title">Page mode</div>
+        <div class="card-title card-title-collapsible" onclick="togglePageMode()">
+          <span>Page mode <span id="pm_summary" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span></span>
+          <span class="card-chevron collapsed" id="pm_chevron">&#9660;</span>
+        </div>
+        <div class="card-body-collapsible collapsed" id="pm_body">
 
         <label class="page-mode-option" id="pm_auto_opt" onclick="setPageMode('auto')">
           <input type="radio" name="page_mode" value="auto" class="page-mode-radio" id="pm_auto">
@@ -549,6 +572,8 @@
             </div>
           </div>
         </label>
+
+        </div>
       </div>
       <div class="card">
         <div class="card-title">Data rates</div>
@@ -823,6 +848,18 @@
     function setPage(v){postJson('/api/page',{page:parseInt(v)})}
 
     /* ---- Page Mode ---- */
+    function togglePageMode(){
+      var body=$('pm_body'), chev=$('pm_chevron');
+      body.classList.toggle('collapsed');
+      chev.classList.toggle('collapsed');
+    }
+
+    function updatePageModeSummary(){
+      var mode=getPageMode();
+      var labels={auto:'Auto',fixed:'Fixed',rotate:'Rotate'};
+      $('pm_summary').textContent='\u2014 '+labels[mode];
+    }
+
     function setPageMode(mode){
       $('pm_auto').checked=(mode==='auto');
       $('pm_fixed').checked=(mode==='fixed');
@@ -834,6 +871,7 @@
       $('pm_fixed_details').hidden=(mode!=='fixed');
       $('pm_rotate_details').hidden=(mode!=='rotate');
 
+      updatePageModeSummary();
       checkDirty();
     }
 
@@ -986,8 +1024,10 @@
 
     /* ---- Config Load ---- */
     let loadedConfig='';
+    let _populating=false;
 
     function populateConfig(data){
+      _populating=true;
       $('ssid').value=data.ssid||'';
       $('ntp').value=data.ntp||'';
       $('timezone').value=data.timezone||'';
@@ -1048,6 +1088,8 @@
 
       $('pass').value='';
       loadedConfig=JSON.stringify(getConfigData());
+      _populating=false;
+      checkDirty();
     }
 
     function loadConfig(){
@@ -1204,6 +1246,7 @@
 
     /* ---- Dirty State Detection ---- */
     function checkDirty(){
+      if(_populating) return;
       const dirty=JSON.stringify(getConfigData())!==loadedConfig;
       $('saveBar').classList.toggle('visible',dirty);
     }

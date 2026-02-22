@@ -13,6 +13,9 @@ on:
 env:
   IDF_VERSION: v5.5.2
   IDF_TARGET: esp32p4
+  CCACHE_DIR: /opt/actions-runner-esp32/.ccache
+  CCACHE_MAXSIZE: 1G
+  CCACHE_COMPRESSLEVEL: 6
 
 jobs:
   build:
@@ -24,6 +27,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          clean: false
 
       - name: Check for skip CI
         id: check_skip
@@ -93,11 +97,30 @@ jobs:
           . $IDF_PATH/export.sh
           echo "IDF version: $(idf.py --version)"
 
+      - name: Setup ccache
+        if: steps.check_skip.outputs.skip != 'true'
+        run: |
+          # Install ccache if not present
+          if ! command -v ccache &>/dev/null; then
+            echo "Installing ccache..."
+            sudo apt-get update -qq && sudo apt-get install -y -qq ccache
+          fi
+          echo "ccache version: $(ccache --version | head -1)"
+          ccache --zero-stats
+          ccache --show-config | grep -E "max_size|cache_dir|compression"
+
       - name: Build project
         if: steps.check_skip.outputs.skip != 'true'
+        env:
+          IDF_CCACHE_ENABLE: 1
         run: |
           . $IDF_PATH/export.sh
           idf.py build
+
+      - name: Show ccache stats
+        if: steps.check_skip.outputs.skip != 'true'
+        run: |
+          ccache --show-stats
 
       - name: Generate firmware binaries
         if: steps.check_skip.outputs.skip != 'true'
