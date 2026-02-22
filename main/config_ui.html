@@ -345,6 +345,44 @@
     .arp-label:hover { background: rgba(255, 255, 255, 0.03); }
     .arp-cb { accent-color: var(--accent); width: 18px; height: 18px; }
 
+    /* === PAGE MODE RADIO GROUP === */
+    .page-mode-option {
+      display: flex; align-items: flex-start; gap: 14px;
+      padding: 16px; border-radius: var(--radius-sm);
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      background: rgba(255, 255, 255, 0.01);
+      cursor: pointer; transition: all 0.25s ease; margin-bottom: 8px;
+    }
+    .page-mode-option:last-child { margin-bottom: 0; }
+    .page-mode-option:hover { border-color: rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.025); }
+    .page-mode-option.selected {
+      border-color: rgba(var(--accent-rgb), 0.4);
+      background: rgba(var(--accent-rgb), 0.05);
+      box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.06);
+    }
+    .page-mode-radio {
+      appearance: none; -webkit-appearance: none; width: 20px; height: 20px;
+      border: 2px solid rgba(255, 255, 255, 0.15); border-radius: 50%;
+      background: transparent; cursor: pointer; flex-shrink: 0; margin-top: 2px;
+      transition: all 0.2s ease; position: relative;
+    }
+    .page-mode-radio:checked {
+      border-color: var(--accent); background: transparent;
+    }
+    .page-mode-radio:checked::after {
+      content: ''; position: absolute; top: 3px; left: 3px;
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--accent); box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.4);
+    }
+    .page-mode-body { flex: 1; min-width: 0; }
+    .page-mode-title { font-size: 0.9rem; font-weight: 600; margin-bottom: 2px; }
+    .page-mode-desc { font-size: 0.75rem; color: var(--text-muted); line-height: 1.4; }
+    .page-mode-details {
+      margin-top: 16px; padding-top: 16px;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .page-mode-details[hidden] { display: none; }
+
     /* === FIRMWARE & OTA === */
     .fw-item {
       background: rgba(255, 255, 255, 0.02); padding: 12px 14px;
@@ -392,7 +430,6 @@
       <button class="tab-btn active" data-tab="main">Main</button>
       <button class="tab-btn" data-tab="network">Network</button>
       <button class="tab-btn" data-tab="nina">NINA</button>
-      <button class="tab-btn" data-tab="display">Display</button>
       <button class="tab-btn" data-tab="system">System</button>
     </div>
     <a class="github-link" href="https://github.com/chvvkumar/ESP32-P4-NINA-Display" target="_blank" rel="noopener">
@@ -414,10 +451,6 @@
       <button class="nav-btn" data-tab="nina">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
         NINA
-      </button>
-      <button class="nav-btn" data-tab="display">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-        Display
       </button>
       <button class="nav-btn" data-tab="system">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
@@ -455,23 +488,70 @@
         </div>
       </div>
       <div class="card">
-        <div class="card-title">Navigation</div>
-        <div class="field">
-          <label class="field-label">Active page</label>
-          <select class="input" id="active_page" onchange="setPage(this.value)">
-            <option value="-1">Auto</option>
-            <option value="0">Summary</option>
-            <option value="1">NINA 1</option>
-            <option value="2">NINA 2</option>
-            <option value="3">NINA 3</option>
-            <option value="4">Settings</option>
-            <option value="5">System Info</option>
-          </select>
-        </div>
-        <div class="toggle-row">
-          <span class="toggle-label">Auto-rotate</span>
-          <label class="toggle"><input type="checkbox" id="auto_rotate_enabled"><span class="toggle-track"></span></label>
-        </div>
+        <div class="card-title">Page mode</div>
+
+        <label class="page-mode-option" id="pm_auto_opt" onclick="setPageMode('auto')">
+          <input type="radio" name="page_mode" value="auto" class="page-mode-radio" id="pm_auto">
+          <div class="page-mode-body">
+            <div class="page-mode-title">Auto</div>
+            <div class="page-mode-desc">Start on Summary, navigate manually via swipe or button</div>
+          </div>
+        </label>
+
+        <label class="page-mode-option" id="pm_fixed_opt" onclick="setPageMode('fixed')">
+          <input type="radio" name="page_mode" value="fixed" class="page-mode-radio" id="pm_fixed">
+          <div class="page-mode-body">
+            <div class="page-mode-title">Fixed</div>
+            <div class="page-mode-desc">Pin display to a specific page on boot</div>
+            <div class="page-mode-details" id="pm_fixed_details" hidden>
+              <div class="field">
+                <label class="field-label">Page</label>
+                <select class="input" id="active_page" onchange="setPage(this.value)">
+                  <option value="0">Summary</option>
+                  <option value="1">NINA 1</option>
+                  <option value="2">NINA 2</option>
+                  <option value="3">NINA 3</option>
+                  <option value="4">Settings</option>
+                  <option value="5">System Info</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </label>
+
+        <label class="page-mode-option" id="pm_rotate_opt" onclick="setPageMode('rotate')">
+          <input type="radio" name="page_mode" value="rotate" class="page-mode-radio" id="pm_rotate">
+          <div class="page-mode-body">
+            <div class="page-mode-title">Rotate</div>
+            <div class="page-mode-desc">Automatically cycle through selected pages</div>
+            <div class="page-mode-details" id="pm_rotate_details" hidden>
+              <div class="field">
+                <label class="field-label">Interval (seconds)</label>
+                <input type="number" class="input" id="auto_rotate_interval" min="4" max="3600" value="30">
+              </div>
+              <div class="field">
+                <label class="field-label">Transition</label>
+                <select class="input" id="auto_rotate_effect">
+                  <option value="0">Instant</option>
+                  <option value="1">Fade</option>
+                  <option value="2">Slide Left</option>
+                  <option value="3">Slide Right</option>
+                </select>
+              </div>
+              <div class="toggle-row">
+                <span class="toggle-label">Skip disconnected nodes</span>
+                <label class="toggle"><input type="checkbox" id="auto_rotate_skip"><span class="toggle-track"></span></label>
+              </div>
+              <div style="margin-top:16px">
+                <label class="field-label">Pages in rotation</label>
+                <div class="flex-col-gap" id="arp-container" style="margin-top:8px"></div>
+              </div>
+            </div>
+          </div>
+        </label>
+      </div>
+      <div class="card">
+        <div class="card-title">Data rates</div>
         <div class="field">
           <label class="field-label">Data update rate (seconds)</label>
           <input type="number" class="input" id="update_rate" min="1" max="10" value="2">
@@ -569,32 +649,6 @@
         <button class="sub-tab" data-node="2">Node 3</button>
       </div>
       <div id="node-panels"></div>
-    </div>
-    <div id="tab-display" class="tab-panel">
-      <div class="card">
-        <div class="card-title">Auto-rotation</div>
-        <div class="field">
-          <label class="field-label">Rotation interval (seconds)</label>
-          <input type="number" class="input" id="auto_rotate_interval" min="4" max="3600" value="30">
-        </div>
-        <div class="field">
-          <label class="field-label">Transition effect</label>
-          <select class="input" id="auto_rotate_effect">
-            <option value="0">Instant</option>
-            <option value="1">Fade</option>
-            <option value="2">Slide Left</option>
-            <option value="3">Slide Right</option>
-          </select>
-        </div>
-        <div class="toggle-row">
-          <span class="toggle-label">Skip disconnected nodes</span>
-          <label class="toggle"><input type="checkbox" id="auto_rotate_skip"><span class="toggle-track"></span></label>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title">Pages in rotation</div>
-        <div class="flex-col-gap" id="arp-container"></div>
-      </div>
     </div>
     <div id="tab-system" class="tab-panel">
       <div class="card">
@@ -702,7 +756,6 @@
       main:   {color:'#14b8a6', rgb:'20, 184, 166'},
       network:{color:'#3b82f6', rgb:'59, 130, 246'},
       nina:   {color:'#8b5cf6', rgb:'139, 92, 246'},
-      display:{color:'#f59e0b', rgb:'245, 158, 11'},
       system: {color:'#f43f5e', rgb:'244, 63, 94'}
     };
 
@@ -769,6 +822,27 @@
 
     function setPage(v){postJson('/api/page',{page:parseInt(v)})}
 
+    /* ---- Page Mode ---- */
+    function setPageMode(mode){
+      $('pm_auto').checked=(mode==='auto');
+      $('pm_fixed').checked=(mode==='fixed');
+      $('pm_rotate').checked=(mode==='rotate');
+
+      $$('.page-mode-option').forEach(o=>o.classList.remove('selected'));
+      $('pm_'+mode+'_opt').classList.add('selected');
+
+      $('pm_fixed_details').hidden=(mode!=='fixed');
+      $('pm_rotate_details').hidden=(mode!=='rotate');
+
+      checkDirty();
+    }
+
+    function getPageMode(){
+      if($('pm_rotate').checked) return 'rotate';
+      if($('pm_fixed').checked) return 'fixed';
+      return 'auto';
+    }
+
     /* ---- Filter Colors ---- */
     let filterColorsArr=[{},{},{}];
 
@@ -817,7 +891,6 @@
         const v=parseInt(opts[i].value);
         if(v>=1&&v<=3){
           opts[i].textContent=urls[v-1]||'NINA '+v;
-          opts[i].disabled=!urls[v-1];
         }
       }
     }
@@ -887,17 +960,17 @@
         hfr_thresholds_1:JSON.stringify(getHfrObj(0)),
         hfr_thresholds_2:JSON.stringify(getHfrObj(1)),
         hfr_thresholds_3:JSON.stringify(getHfrObj(2)),
-        mqtt_enabled:$('mqtt_enabled').checked?1:0,
+        mqtt_enabled:!!$('mqtt_enabled').checked,
         mqtt_broker_url:mqttHost?'mqtt://'+mqttHost:'',
         mqtt_port:parseInt($('mqtt_port').value)||1883,
         mqtt_username:$('mqtt_user').value,
         mqtt_password:$('mqtt_pass').value,
         mqtt_topic_prefix:$('mqtt_prefix').value.trim(),
-        active_page_override:parseInt($('active_page').value),
-        auto_rotate_enabled:$('auto_rotate_enabled').checked?1:0,
+        active_page_override:getPageMode()==='fixed'?parseInt($('active_page').value):-1,
+        auto_rotate_enabled:getPageMode()==='rotate',
         auto_rotate_interval_s:parseInt($('auto_rotate_interval').value)||30,
         auto_rotate_effect:parseInt($('auto_rotate_effect').value),
-        auto_rotate_skip_disconnected:$('auto_rotate_skip').checked?1:0,
+        auto_rotate_skip_disconnected:!!$('auto_rotate_skip').checked,
         auto_rotate_pages:getRotatePages(),
         update_rate_s:parseInt($('update_rate').value)||2,
         graph_update_interval_s:parseInt($('graph_interval').value)||5
@@ -958,12 +1031,17 @@
       $('mqtt_prefix').value=data.mqtt_topic_prefix||'';
       $('mqtt_enabled').checked=!!data.mqtt_enabled;
 
-      $('active_page').value=data.active_page_override!=null?data.active_page_override:-1;
-      $('auto_rotate_enabled').checked=!!data.auto_rotate_enabled;
+      /* Page mode: derive from active_page_override + auto_rotate_enabled */
+      var pageMode='auto';
+      if(data.auto_rotate_enabled) pageMode='rotate';
+      else if(data.active_page_override!=null&&data.active_page_override>=0) pageMode='fixed';
+
+      $('active_page').value=(data.active_page_override!=null&&data.active_page_override>=0)?data.active_page_override:0;
       $('auto_rotate_interval').value=data.auto_rotate_interval_s||30;
       $('auto_rotate_effect').value=data.auto_rotate_effect||0;
       $('auto_rotate_skip').checked=!!data.auto_rotate_skip_disconnected;
       setRotatePages(data.auto_rotate_pages!=null?data.auto_rotate_pages:0x1F);
+      setPageMode(pageMode);
 
       updateNodeLabels();
       updatePageSelectOptions();
