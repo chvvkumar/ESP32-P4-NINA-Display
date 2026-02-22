@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include "perf_monitor.h"
+#include "nina_connection.h"
 
 static const char *TAG = "main";
 
@@ -163,6 +164,7 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     app_config_init();
+    nina_connection_init();
 
 #if PERF_MONITOR_ENABLED
     perf_monitor_init(CONFIG_PERF_REPORT_INTERVAL_S);

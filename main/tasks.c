@@ -8,6 +8,7 @@
 #include "nina_client.h"
 #include "nina_api_fetchers.h"
 #include "nina_websocket.h"
+#include "nina_connection.h"
 #include "app_config.h"
 #include "mqtt_ha.h"
 #include "ui/nina_dashboard.h"
@@ -102,6 +103,18 @@ void data_update_task(void *arg) {
     // Wait for WiFi
     xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
     ESP_LOGI(TAG, "WiFi Connected, waiting for time sync...");
+
+    /* ── Boot-time priority probe: check NINA connectivity immediately ── */
+    {
+        int boot_instance_count = app_config_get_instance_count();
+        for (int i = 0; i < boot_instance_count; i++) {
+            const char *url = app_config_get_instance_url(i);
+            if (strlen(url) == 0) continue;
+            nina_connection_set_connecting(i);
+            nina_client_poll_heartbeat(url, &instances[i], i);
+            ESP_LOGI(TAG, "Boot probe instance %d: connected=%d", i + 1, instances[i].connected);
+        }
+    }
 
     // Wait for time to be set (up to 30 seconds)
     time_t now = 0;
@@ -224,7 +237,7 @@ void data_update_task(void *arg) {
                         if (r_cfg->auto_rotate_skip_disconnected
                             && candidate >= 1 && candidate <= instance_count) {
                             int nina_idx = candidate - 1;
-                            if (!instances[nina_idx].connected) continue;
+                            if (!nina_connection_is_connected(nina_idx)) continue;
                         }
 
                         next_page = candidate;
@@ -259,7 +272,7 @@ void data_update_task(void *arg) {
         if (active_nina_idx >= 0 && active_nina_idx < instance_count) {
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                 nina_dashboard_update_status(active_nina_idx, rssi,
-                                             instances[active_nina_idx].connected, true);
+                                             nina_connection_is_connected(active_nina_idx), true);
                 bsp_display_unlock();
             }
         }
@@ -270,8 +283,8 @@ void data_update_task(void *arg) {
 
             /* Full poll when: on summary page (all instances) or on this instance's NINA page */
             if (on_summary || i == active_nina_idx) {
-                nina_client_poll(url, &instances[i], &poll_states[i]);
-                if (instances[i].connected)
+                nina_client_poll(url, &instances[i], &poll_states[i], i);
+                if (nina_connection_is_connected(i))
                     instances[i].last_successful_poll_ms = now_ms;
                 ESP_LOGI(TAG, "Instance %d (%s): connected=%d, status=%s, target=%s, ws=%d",
                     i + 1, on_summary ? "summary" : "active",
@@ -280,8 +293,8 @@ void data_update_task(void *arg) {
             } else {
                 // Background instance: pre-fetch slow-changing data (every 10s)
                 if (now_ms - last_heartbeat_ms[i] >= HEARTBEAT_INTERVAL_MS) {
-                    nina_client_poll_background(url, &instances[i], &poll_states[i]);
-                    if (instances[i].connected)
+                    nina_client_poll_background(url, &instances[i], &poll_states[i], i);
+                    if (nina_connection_is_connected(i))
                         instances[i].last_successful_poll_ms = now_ms;
                     last_heartbeat_ms[i] = now_ms;
                     ESP_LOGD(TAG, "Instance %d (background): connected=%d",
@@ -356,7 +369,7 @@ void data_update_task(void *arg) {
 #endif
 
                 nina_dashboard_update_status(active_nina_idx, rssi,
-                                             instances[active_nina_idx].connected, false);
+                                             nina_connection_is_connected(active_nina_idx), false);
                 bsp_display_unlock();
             }
             perf_timer_stop(&g_perf.ui_update_total);
@@ -377,7 +390,7 @@ void data_update_task(void *arg) {
                 if (want_thumbnail) nina_dashboard_clear_thumbnail_request();
 
                 const char *thumb_url = app_config_get_instance_url(active_nina_idx);
-                if (strlen(thumb_url) > 0 && instances[active_nina_idx].connected) {
+                if (strlen(thumb_url) > 0 && nina_connection_is_connected(active_nina_idx)) {
                     if (!fetch_and_show_thumbnail(thumb_url) && want_thumbnail) {
                         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                             nina_dashboard_hide_thumbnail();
@@ -400,7 +413,7 @@ void data_update_task(void *arg) {
             if (nina_graph_requested()) {
                 nina_graph_clear_request();
                 const char *graph_url = app_config_get_instance_url(active_nina_idx);
-                if (strlen(graph_url) > 0 && instances[active_nina_idx].connected) {
+                if (strlen(graph_url) > 0 && nina_connection_is_connected(active_nina_idx)) {
                     graph_type_t gtype = nina_graph_get_type();
                     int gpoints = nina_graph_get_requested_points();
 
@@ -441,7 +454,7 @@ void data_update_task(void *arg) {
             if (nina_info_overlay_requested()) {
                 nina_info_overlay_clear_request();
                 const char *info_url = app_config_get_instance_url(active_nina_idx);
-                if (strlen(info_url) > 0 && instances[active_nina_idx].connected) {
+                if (strlen(info_url) > 0 && nina_connection_is_connected(active_nina_idx)) {
                     info_overlay_type_t itype = nina_info_overlay_get_type();
 
                     if (itype == INFO_OVERLAY_CAMERA) {
@@ -516,7 +529,7 @@ void data_update_task(void *arg) {
                 if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                     update_nina_dashboard_page(active_nina_idx, &instances[active_nina_idx]);
                     nina_dashboard_update_status(active_nina_idx, rssi,
-                                                 instances[active_nina_idx].connected, false);
+                                                 nina_connection_is_connected(active_nina_idx), false);
                     bsp_display_unlock();
                 }
                 nina_client_unlock(&instances[active_nina_idx]);

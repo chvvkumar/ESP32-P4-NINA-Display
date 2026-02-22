@@ -5,6 +5,7 @@
 
 #include "nina_dashboard.h"
 #include "nina_dashboard_internal.h"
+#include "nina_connection.h"
 #include "app_config.h"
 #include "themes.h"
 #include "esp_timer.h"
@@ -80,16 +81,18 @@ static void animate_value(lv_obj_t *label, int32_t from, int32_t to,
 
 /* ---- Sub-functions for update_nina_dashboard_page() ---- */
 
-static void update_disconnected_state(dashboard_page_t *p, int page_index, int gb) {
+static void update_disconnected_state(dashboard_page_t *p, int page_index, int gb, nina_conn_state_t conn_state) {
     const char *url = app_config_get_instance_url(page_index);
     char host[64] = {0};
     extract_host_from_url(url, host, sizeof(host));
+    const char *state_text = (conn_state == NINA_CONN_UNKNOWN || conn_state == NINA_CONN_CONNECTING)
+                             ? "Connecting..." : "Not Connected";
     if (host[0] != '\0') {
         char buf[96];
-        snprintf(buf, sizeof(buf), "%s - Not Connected", host);
+        snprintf(buf, sizeof(buf), "%s - %s", host, state_text);
         lv_label_set_text(p->lbl_instance_name, buf);
     } else {
-        lv_label_set_text(p->lbl_instance_name, "N.I.N.A.");
+        lv_label_set_text(p->lbl_instance_name, state_text);
     }
     lv_label_set_text(p->lbl_target_name, "----");
     lv_label_set_text(p->lbl_seq_container, "----");
@@ -410,7 +413,8 @@ void update_nina_dashboard_page(int page_index, const nina_client_t *data) {
     int gb = app_config_get()->color_brightness;
 
     if (!data->connected) {
-        update_disconnected_state(p, page_index, gb);
+        nina_conn_state_t conn_state = nina_connection_get_state(page_index);
+        update_disconnected_state(p, page_index, gb, conn_state);
         update_stale_indicator(p, data);
         return;
     }

@@ -14,6 +14,7 @@
 #include "nina_summary.h"
 #include "nina_dashboard_internal.h"
 #include "nina_dashboard.h"
+#include "nina_connection.h"
 #include "app_config.h"
 #include "themes.h"
 
@@ -585,11 +586,8 @@ void summary_page_update(const nina_client_t *instances, int count) {
 
     int gb = app_config_get()->color_brightness;
 
-    /* Count connected instances */
-    int connected_count = 0;
-    for (int i = 0; i < count && i < card_count; i++) {
-        if (instances[i].connected) connected_count++;
-    }
+    /* Count connected instances (use centralized connection state) */
+    int connected_count = nina_connection_connected_count();
 
     /* Empty state: show message when nothing is connected */
     if (connected_count == 0) {
@@ -623,7 +621,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
 
         /* LAST: apply show/hide and layout preset changes */
         for (int i = 0; i < card_count && i < count; i++) {
-            if (instances[i].connected) {
+            if (nina_connection_is_connected(i)) {
                 lv_obj_clear_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
                 update_card_layout(&cards[i], connected_count);
             } else {
@@ -636,7 +634,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
 
         /* INVERT + PLAY: animate transitions */
         for (int i = 0; i < card_count && i < count; i++) {
-            if (!instances[i].connected) continue;
+            if (!nina_connection_is_connected(i)) continue;
             int32_t new_y = lv_obj_get_y(cards[i].card);
             if (!was_visible[i]) {
                 /* New card — fade in + slide up */
@@ -649,7 +647,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
     } else {
         /* No layout change — just ensure correct visibility */
         for (int i = 0; i < card_count && i < count; i++) {
-            if (instances[i].connected) {
+            if (nina_connection_is_connected(i)) {
                 lv_obj_clear_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
             } else {
                 lv_obj_add_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
@@ -664,7 +662,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
         summary_card_t *sc = &cards[i];
         const nina_client_t *d = &instances[i];
 
-        if (!d->connected) continue;
+        if (!nina_connection_is_connected(i)) continue;
 
         /* Instance name — use profile name if available */
         if (d->profile_name[0]) {

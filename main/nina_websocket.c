@@ -15,6 +15,7 @@
 #include "cJSON.h"
 #include <string.h>
 #include "perf_monitor.h"
+#include "nina_connection.h"
 #include "tasks.h"
 
 static const char *TAG = "nina_ws";
@@ -324,6 +325,7 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base,
         if (ws_client_data[index]) {
             if (nina_client_lock(ws_client_data[index], 50)) {
                 ws_client_data[index]->websocket_connected = true;
+                nina_connection_report_ws(index, true);
                 nina_client_unlock(ws_client_data[index]);
             }
         }
@@ -336,6 +338,7 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base,
         if (ws_client_data[index]) {
             if (nina_client_lock(ws_client_data[index], 50)) {
                 ws_client_data[index]->websocket_connected = false;
+                nina_connection_report_ws(index, false);
                 nina_client_unlock(ws_client_data[index]);
             }
         }
@@ -429,6 +432,7 @@ void nina_websocket_stop(int index) {
     }
     if (ws_client_data[index]) {
         ws_client_data[index]->websocket_connected = false;
+        nina_connection_report_ws(index, false);
         ws_client_data[index] = NULL;
     }
 }

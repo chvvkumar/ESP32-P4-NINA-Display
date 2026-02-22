@@ -12,6 +12,7 @@
 #include "nina_api_fetchers.h"
 #include "nina_sequence.h"
 #include "nina_websocket.h"
+#include "nina_connection.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_http_client.h"
@@ -307,7 +308,7 @@ void nina_poll_state_init(nina_poll_state_t *state) {
     memset(state, 0, sizeof(nina_poll_state_t));
 }
 
-void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state_t *state) {
+void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state_t *state, int instance) {
     // Enable HTTP client reuse for this poll cycle
     s_poll_mode = true;
     s_reuse_client = (esp_http_client_handle_t)state->http_client;
@@ -336,8 +337,12 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
     fetch_camera_info_robust(base_url, data);
     perf_timer_stop(&g_perf.poll_camera);
 
+    nina_conn_state_t conn_state = nina_connection_report_poll(instance, data->connected);
+    data->connected = (conn_state == NINA_CONN_CONNECTED);
+
     if (!data->connected) {
         state->static_fetched = false;
+        nina_connection_set_static_data_ready(instance, false);
         state->http_client = (void *)s_reuse_client;
         s_reuse_client = NULL;
         s_poll_mode = false;
@@ -368,6 +373,7 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
         state->cached_filter_count = data->filter_count;
 
         state->static_fetched = true;
+        nina_connection_set_static_data_ready(instance, true);
         state->last_slow_poll_ms = now_ms;
         state->last_sequence_poll_ms = now_ms;
     } else {
@@ -440,13 +446,17 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
     ESP_LOGI(TAG, "Guiding: %.2f\", HFR: %.2f, Stars: %d", data->guider.rms_total, data->hfr, data->stars);
 }
 
-void nina_client_poll_heartbeat(const char *base_url, nina_client_t *data) {
+void nina_client_poll_heartbeat(const char *base_url, nina_client_t *data, int instance) {
     data->connected = false;
     fetch_camera_info_robust(base_url, data);
+
+    nina_conn_state_t conn_state = nina_connection_report_poll(instance, data->connected);
+    data->connected = (conn_state == NINA_CONN_CONNECTED);
+
     ESP_LOGD(TAG, "Heartbeat: connected=%d", data->connected);
 }
 
-void nina_client_poll_background(const char *base_url, nina_client_t *data, nina_poll_state_t *state) {
+void nina_client_poll_background(const char *base_url, nina_client_t *data, nina_poll_state_t *state, int instance) {
     // Enable HTTP client reuse for this poll cycle
     s_poll_mode = true;
     s_reuse_client = (esp_http_client_handle_t)state->http_client;
@@ -471,8 +481,12 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
     // --- ALWAYS: Camera heartbeat ---
     fetch_camera_info_robust(base_url, data);
 
+    nina_conn_state_t conn_state = nina_connection_report_poll(instance, data->connected);
+    data->connected = (conn_state == NINA_CONN_CONNECTED);
+
     if (!data->connected) {
         state->static_fetched = false;
+        nina_connection_set_static_data_ready(instance, false);
         state->http_client = (void *)s_reuse_client;
         s_reuse_client = NULL;
         s_poll_mode = false;
@@ -492,6 +506,7 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
         state->cached_filter_count = data->filter_count;
 
         state->static_fetched = true;
+        nina_connection_set_static_data_ready(instance, true);
         state->last_slow_poll_ms = now_ms;
         state->last_sequence_poll_ms = now_ms;
     } else {
