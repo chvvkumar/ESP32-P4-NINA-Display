@@ -72,6 +72,19 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
   </tr>
 </table>
 
+### Toast Notifications
+
+<table align="center">
+  <tr>
+    <td align="center"><img src="images/cam_notifications.jpg" alt="Camera Connected Notification" width="480"></td>
+    <td align="center"><img src="images/sequence_notifications.jpg" alt="Sequence Started Notification" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="images/safe_safety_notifications.jpg" alt="Safe Notification" width="480"></td>
+    <td align="center"><img src="images/unsafe_safety_notifications.jpg" alt="Unsafe Notification" width="480"></td>
+  </tr>
+</table>
+
 ### Web Configuration UI
 
 <table align="center">
@@ -132,10 +145,6 @@ No build environment needed — just a Chromium-based browser and the [ESP Web F
 ## First-Time Setup
 
 On first boot (or whenever WiFi is not connected), the device broadcasts a WiFi access point named **`AllSky-Config`** (password: `12345678`). Connect to it from your phone or laptop, then open `http://192.168.4.1` in a browser.
-
-<p align="center">
-  <img src="images/Web-config.png" alt="Web config" width="1200">
-</p>
 
 Set at minimum:
 

@@ -585,6 +585,16 @@
           <label class="field-label">Graph update rate (seconds)</label>
           <input type="number" class="input" id="graph_interval" min="2" max="30" value="5">
         </div>
+        <div class="field">
+          <label class="field-label">Connection timeout (seconds)</label>
+          <input type="number" class="input" id="connection_timeout" min="2" max="30" value="6">
+          <div class="field-hint">Time without a successful poll before a NINA instance is considered offline</div>
+        </div>
+        <div class="field">
+          <label class="field-label">Toast notification duration (seconds)</label>
+          <input type="number" class="input" id="toast_duration" min="3" max="30" value="8">
+          <div class="field-hint">How long toast notifications are shown on screen (errors show for 2x this value)</div>
+        </div>
       </div>
     </div>
     <div id="tab-network" class="tab-panel">
@@ -924,13 +934,15 @@
       const sel=$('active_page');
       if(!sel) return;
       const urls=[$('url1').value.trim(),$('url2').value.trim(),$('url3').value.trim()];
-      const opts=sel.options;
-      for(let i=0;i<opts.length;i++){
-        const v=parseInt(opts[i].value);
-        if(v>=1&&v<=3){
-          opts[i].textContent=urls[v-1]||'NINA '+v;
-        }
-      }
+      const cnt=urls.filter(u=>u.length>0).length||1;
+      const prev=sel.value;
+      sel.innerHTML='';
+      sel.add(new Option('Summary','0'));
+      for(let i=0;i<cnt;i++) sel.add(new Option(urls[i]||'NINA '+(i+1),''+(i+1)));
+      sel.add(new Option('Settings',''+(cnt+1)));
+      sel.add(new Option('System Info',''+(cnt+2)));
+      if([...sel.options].some(o=>o.value===prev)) sel.value=prev;
+      else sel.value='0';
     }
 
     /* ---- Threshold Helpers ---- */
@@ -1011,7 +1023,9 @@
         auto_rotate_skip_disconnected:!!$('auto_rotate_skip').checked,
         auto_rotate_pages:getRotatePages(),
         update_rate_s:parseInt($('update_rate').value)||2,
-        graph_update_interval_s:parseInt($('graph_interval').value)||5
+        graph_update_interval_s:parseInt($('graph_interval').value)||5,
+        connection_timeout_s:parseInt($('connection_timeout').value)||6,
+        toast_duration_s:parseInt($('toast_duration').value)||8
       };
 
       const ssid=$('ssid').value.trim();
@@ -1051,6 +1065,8 @@
       $('color_brightness_val').textContent=cb+'%';
       $('update_rate').value=data.update_rate_s||2;
       $('graph_interval').value=data.graph_update_interval_s||5;
+      $('connection_timeout').value=data.connection_timeout_s||6;
+      $('toast_duration').value=data.toast_duration_s||8;
 
       for(let i=0;i<3;i++){
         const key='filter_colors_'+(i+1);
@@ -1076,15 +1092,15 @@
       if(data.auto_rotate_enabled) pageMode='rotate';
       else if(data.active_page_override!=null&&data.active_page_override>=0) pageMode='fixed';
 
-      $('active_page').value=(data.active_page_override!=null&&data.active_page_override>=0)?data.active_page_override:0;
       $('auto_rotate_interval').value=data.auto_rotate_interval_s||30;
       $('auto_rotate_effect').value=data.auto_rotate_effect||0;
       $('auto_rotate_skip').checked=!!data.auto_rotate_skip_disconnected;
       setRotatePages(data.auto_rotate_pages!=null?data.auto_rotate_pages:0x1F);
-      setPageMode(pageMode);
 
       updateNodeLabels();
       updatePageSelectOptions();
+      $('active_page').value=(data.active_page_override!=null&&data.active_page_override>=0)?''+data.active_page_override:'0';
+      setPageMode(pageMode);
 
       $('pass').value='';
       loadedConfig=JSON.stringify(getConfigData());
@@ -1106,15 +1122,29 @@
 
         const ghBase='https://github.com/chvvkumar/ESP32-P4-NINA-Display/';
         const tagEl=$('fw_git_tag');
+        tagEl.textContent='';
         if(data.git_tag&&data.git_tag!=='unknown'){
-          tagEl.innerHTML='<a href="'+ghBase+'releases/tag/'+encodeURIComponent(data.git_tag)+'" target="_blank" rel="noopener" class="accent-link">'+data.git_tag+'</a>';
+          const a=document.createElement('a');
+          a.href=ghBase+'releases/tag/'+encodeURIComponent(data.git_tag);
+          a.target='_blank';
+          a.rel='noopener';
+          a.className='accent-link';
+          a.textContent=data.git_tag;
+          tagEl.appendChild(a);
         }else{
           tagEl.textContent=data.git_tag||'--';
         }
 
         const shaEl=$('fw_git_sha');
+        shaEl.textContent='';
         if(data.git_sha&&data.git_sha!=='unknown'){
-          shaEl.innerHTML='<a href="'+ghBase+'commit/'+encodeURIComponent(data.git_sha)+'" target="_blank" rel="noopener" class="mono-link">'+data.git_sha.substring(0,8)+'</a>';
+          const a=document.createElement('a');
+          a.href=ghBase+'commit/'+encodeURIComponent(data.git_sha);
+          a.target='_blank';
+          a.rel='noopener';
+          a.className='mono-link';
+          a.textContent=data.git_sha.substring(0,8);
+          shaEl.appendChild(a);
         }else{
           shaEl.textContent=data.git_sha||'--';
         }

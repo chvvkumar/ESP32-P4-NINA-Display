@@ -53,7 +53,9 @@ typedef struct {
     char container_step[64];    // Currently running step/instruction name (e.g., "Smart Exposure", "Auto Focus")
     char time_remaining[32];    // Time remaining for entire sequence (HH:MM:SS format)
     bool is_dithering;
-    
+    bool is_waiting;              // Sequence is in a wait state (TS-WAITSTART)
+    int64_t wait_start_epoch;     // Wait start time (Unix epoch seconds)
+
     // Image stats
     float hfr;
     int stars;
@@ -62,6 +64,11 @@ typedef struct {
     // Mount
     char meridian_flip[16];
     float rotator_angle;
+    bool rotator_connected;
+
+    // Safety monitor state (updated via SAFETY-CHANGED WebSocket event)
+    bool safety_is_safe;
+    bool safety_connected;
 
     // Power/Switch info (from /equipment/switch/info)
     struct {
@@ -91,6 +98,11 @@ typedef struct {
     // Data task checks this and refreshes UI without waiting for next poll cycle.
     volatile bool ui_refresh_needed;
 
+    // Set by WebSocket event handlers when a sequence-relevant event occurs
+    // (IMAGE-SAVE, TS-NEWTARGETSTART, SEQUENCE-STARTING). Causes immediate
+    // sequence poll on next cycle.
+    volatile bool sequence_poll_needed;
+
     // Timestamp (ms from esp_timer_get_time/1000) of last successful poll.
     // Used by the UI to display a stale-data indicator.  0 = never polled.
     int64_t last_successful_poll_ms;
@@ -115,8 +127,8 @@ bool nina_client_lock(nina_client_t *client, uint32_t timeout_ms);
 void nina_client_unlock(nina_client_t *client);
 
 // Polling intervals (ms)
-#define NINA_POLL_SLOW_MS     10000   // Focuser, mount, switch (was 30000)
-#define NINA_POLL_SEQUENCE_MS  5000   // Sequence counts (was 10000)
+#define NINA_POLL_SLOW_MS     30000   // Focuser, mount, switch
+#define NINA_POLL_SEQUENCE_MS 15000   // Sequence counts (supplemented by event-driven sequence_poll_needed)
 
 // Polling state - tracks timers and cached static data between polls
 typedef struct {
@@ -141,19 +153,24 @@ typedef struct {
 void nina_poll_state_init(nina_poll_state_t *state);
 
 // Tiered polling - fetches data at different rates based on change frequency
-void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state_t *state);
+void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state_t *state, int instance);
 
 // Heartbeat-only polling for background (inactive) instances
 // Only fetches camera info to maintain connection status
-void nina_client_poll_heartbeat(const char *base_url, nina_client_t *data);
+void nina_client_poll_heartbeat(const char *base_url, nina_client_t *data, int instance);
 
 // Background polling for inactive instances — pre-fetches slow-changing data
 // (profile, filters, focuser, mount, switch, sequence) so it's ready on page switch.
 // Skips fast-changing data: guider RMS, HFR/stars, current filter position.
-void nina_client_poll_background(const char *base_url, nina_client_t *data, nina_poll_state_t *state);
+void nina_client_poll_background(const char *base_url, nina_client_t *data, nina_poll_state_t *state, int instance);
 
 // Legacy API - fetches all data every call (kept for compatibility)
 void nina_client_get_data(const char *base_url, nina_client_t *data);
+
+// DNS pre-check: resolve hostname from a NINA base URL.
+// Returns true if hostname resolves (or is an IP address), false on DNS failure.
+// Use before polling to avoid expensive HTTP client setup for unreachable hosts.
+bool nina_client_dns_check(const char *base_url);
 
 // Fetch prepared image as JPEG from NINA API
 // Returns heap-allocated JPEG bytes (caller must free), or NULL on error

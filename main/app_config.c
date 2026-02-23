@@ -8,6 +8,7 @@
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
+#include "esp_heap_caps.h"
 #include "perf_monitor.h"
 
 static const char *TAG = "app_config";
@@ -181,6 +182,63 @@ typedef struct {
     uint8_t  update_rate_s;
 } app_config_v3_t;
 
+/* ── Version 4 config struct — used only for NVS migration to v5 ────── */
+typedef struct {
+    uint32_t config_version;
+    char api_url[3][128];
+    char ntp_server[64];
+    char tz_string[64];
+    char filter_colors[3][512];
+    char rms_thresholds[3][256];
+    char hfr_thresholds[3][256];
+    int theme_index;
+    int brightness;
+    int color_brightness;
+    bool mqtt_enabled;
+    char mqtt_broker_url[128];
+    char mqtt_username[64];
+    char mqtt_password[64];
+    char mqtt_topic_prefix[64];
+    uint16_t mqtt_port;
+    int8_t   active_page_override;
+    bool     auto_rotate_enabled;
+    uint16_t auto_rotate_interval_s;
+    uint8_t  auto_rotate_effect;
+    bool     auto_rotate_skip_disconnected;
+    uint8_t  auto_rotate_pages;
+    uint8_t  update_rate_s;
+    uint8_t  graph_update_interval_s;
+} app_config_v4_t;
+
+/* ── Version 5 config struct — used only for NVS migration to v6 ────── */
+typedef struct {
+    uint32_t config_version;
+    char api_url[3][128];
+    char ntp_server[64];
+    char tz_string[64];
+    char filter_colors[3][512];
+    char rms_thresholds[3][256];
+    char hfr_thresholds[3][256];
+    int theme_index;
+    int brightness;
+    int color_brightness;
+    bool mqtt_enabled;
+    char mqtt_broker_url[128];
+    char mqtt_username[64];
+    char mqtt_password[64];
+    char mqtt_topic_prefix[64];
+    uint16_t mqtt_port;
+    int8_t   active_page_override;
+    bool     auto_rotate_enabled;
+    uint16_t auto_rotate_interval_s;
+    uint8_t  auto_rotate_effect;
+    bool     auto_rotate_skip_disconnected;
+    uint8_t  auto_rotate_pages;
+    uint8_t  update_rate_s;
+    uint8_t  graph_update_interval_s;
+    uint8_t  connection_timeout_s;
+} app_config_v5_t;
+
 static void set_defaults(app_config_t *cfg) {
     memset(cfg, 0, sizeof(app_config_t));
     cfg->config_version = APP_CONFIG_VERSION;
@@ -203,6 +261,8 @@ static void set_defaults(app_config_t *cfg) {
     cfg->auto_rotate_pages = 0x0E;  // Default: all NINA instances (bits 1-3)
     cfg->update_rate_s = 2;
     cfg->graph_update_interval_s = 5;
+    cfg->connection_timeout_s = 6;
+    cfg->toast_duration_s = 8;
     strcpy(cfg->mqtt_broker_url, "mqtt://192.168.1.250");
     strcpy(cfg->mqtt_topic_prefix, "ninadisplay");
     cfg->mqtt_port = 1883;
@@ -345,6 +405,79 @@ static void migrate_from_v3(const app_config_v3_t *old, app_config_t *cfg) {
 }
 
 /**
+ * @brief Migrate a v4 config blob into the current struct layout.
+ *
+ * v4 → v5 adds: connection_timeout_s (seconds before marking instance offline).
+ */
+static void migrate_from_v4(const app_config_v4_t *old, app_config_t *cfg) {
+    set_defaults(cfg);
+
+    memcpy(cfg->api_url, old->api_url, sizeof(cfg->api_url));
+    memcpy(cfg->ntp_server, old->ntp_server, sizeof(cfg->ntp_server));
+    memcpy(cfg->tz_string, old->tz_string, sizeof(cfg->tz_string));
+    memcpy(cfg->filter_colors, old->filter_colors, sizeof(cfg->filter_colors));
+    memcpy(cfg->rms_thresholds, old->rms_thresholds, sizeof(cfg->rms_thresholds));
+    memcpy(cfg->hfr_thresholds, old->hfr_thresholds, sizeof(cfg->hfr_thresholds));
+    cfg->theme_index = old->theme_index;
+    cfg->brightness = old->brightness;
+    cfg->color_brightness = old->color_brightness;
+    cfg->mqtt_enabled = old->mqtt_enabled;
+    memcpy(cfg->mqtt_broker_url, old->mqtt_broker_url, sizeof(cfg->mqtt_broker_url));
+    memcpy(cfg->mqtt_username, old->mqtt_username, sizeof(cfg->mqtt_username));
+    memcpy(cfg->mqtt_password, old->mqtt_password, sizeof(cfg->mqtt_password));
+    memcpy(cfg->mqtt_topic_prefix, old->mqtt_topic_prefix, sizeof(cfg->mqtt_topic_prefix));
+    cfg->mqtt_port = old->mqtt_port;
+    cfg->active_page_override = old->active_page_override;
+    cfg->auto_rotate_enabled = old->auto_rotate_enabled;
+    cfg->auto_rotate_interval_s = old->auto_rotate_interval_s;
+    cfg->auto_rotate_effect = old->auto_rotate_effect;
+    cfg->auto_rotate_skip_disconnected = old->auto_rotate_skip_disconnected;
+    cfg->auto_rotate_pages = old->auto_rotate_pages;
+    cfg->update_rate_s = old->update_rate_s;
+    cfg->graph_update_interval_s = old->graph_update_interval_s;
+    /* connection_timeout_s keeps default 6 from set_defaults() */
+
+    ESP_LOGI(TAG, "Migrated config from v4 → v%d", APP_CONFIG_VERSION);
+}
+
+/**
+ * @brief Migrate a v5 config blob into the current struct layout.
+ *
+ * v5 → v6 adds: toast_duration_s (toast notification display duration).
+ */
+static void migrate_from_v5(const app_config_v5_t *old, app_config_t *cfg) {
+    set_defaults(cfg);
+
+    memcpy(cfg->api_url, old->api_url, sizeof(cfg->api_url));
+    memcpy(cfg->ntp_server, old->ntp_server, sizeof(cfg->ntp_server));
+    memcpy(cfg->tz_string, old->tz_string, sizeof(cfg->tz_string));
+    memcpy(cfg->filter_colors, old->filter_colors, sizeof(cfg->filter_colors));
+    memcpy(cfg->rms_thresholds, old->rms_thresholds, sizeof(cfg->rms_thresholds));
+    memcpy(cfg->hfr_thresholds, old->hfr_thresholds, sizeof(cfg->hfr_thresholds));
+    cfg->theme_index = old->theme_index;
+    cfg->brightness = old->brightness;
+    cfg->color_brightness = old->color_brightness;
+    cfg->mqtt_enabled = old->mqtt_enabled;
+    memcpy(cfg->mqtt_broker_url, old->mqtt_broker_url, sizeof(cfg->mqtt_broker_url));
+    memcpy(cfg->mqtt_username, old->mqtt_username, sizeof(cfg->mqtt_username));
+    memcpy(cfg->mqtt_password, old->mqtt_password, sizeof(cfg->mqtt_password));
+    memcpy(cfg->mqtt_topic_prefix, old->mqtt_topic_prefix, sizeof(cfg->mqtt_topic_prefix));
+    cfg->mqtt_port = old->mqtt_port;
+    cfg->active_page_override = old->active_page_override;
+    cfg->auto_rotate_enabled = old->auto_rotate_enabled;
+    cfg->auto_rotate_interval_s = old->auto_rotate_interval_s;
+    cfg->auto_rotate_effect = old->auto_rotate_effect;
+    cfg->auto_rotate_skip_disconnected = old->auto_rotate_skip_disconnected;
+    cfg->auto_rotate_pages = old->auto_rotate_pages;
+    cfg->update_rate_s = old->update_rate_s;
+    cfg->graph_update_interval_s = old->graph_update_interval_s;
+    cfg->connection_timeout_s = old->connection_timeout_s;
+    /* toast_duration_s keeps default 8 from set_defaults() */
+
+    ESP_LOGI(TAG, "Migrated config from v5 → v%d", APP_CONFIG_VERSION);
+}
+
+/**
  * @brief Validate and clamp config fields to sane ranges.
  * @return true if any field was corrected.
  */
@@ -381,7 +514,7 @@ static bool validate_config(app_config_t *cfg) {
         cfg->mqtt_port = 1883;
         fixed = true;
     }
-    if (cfg->active_page_override < -1 || cfg->active_page_override > MAX_NINA_INSTANCES + 1) {
+    if (cfg->active_page_override < -1 || cfg->active_page_override > MAX_NINA_INSTANCES + 2) {
         cfg->active_page_override = -1;
         fixed = true;
     }
@@ -403,6 +536,14 @@ static bool validate_config(app_config_t *cfg) {
     }
     if (cfg->graph_update_interval_s < 2 || cfg->graph_update_interval_s > 30) {
         cfg->graph_update_interval_s = 5;
+        fixed = true;
+    }
+    if (cfg->connection_timeout_s < 2 || cfg->connection_timeout_s > 30) {
+        cfg->connection_timeout_s = 6;
+        fixed = true;
+    }
+    if (cfg->toast_duration_s < 3 || cfg->toast_duration_s > 30) {
+        cfg->toast_duration_s = 8;
         fixed = true;
     }
 
@@ -432,7 +573,7 @@ void app_config_init(void) {
     }
 
     /* Read raw blob into a temporary buffer for version detection */
-    void *raw = malloc(stored_size);
+    void *raw = heap_caps_malloc(stored_size, MALLOC_CAP_SPIRAM);
     if (!raw) {
         ESP_LOGE(TAG, "Failed to allocate %d bytes for config read", (int)stored_size);
         set_defaults(&s_config);
@@ -460,6 +601,24 @@ void app_config_init(void) {
             nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(handle);
         }
+    } else if (version_check == 5 && stored_size >= sizeof(app_config_v5_t)) {
+        /* Version 5 blob — migrate to v6 */
+        app_config_v5_t old;
+        memcpy(&old, raw, sizeof(app_config_v5_t));
+        migrate_from_v5(&old, &s_config);
+        validate_config(&s_config);
+
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    } else if (version_check == 4 && stored_size >= sizeof(app_config_v4_t)) {
+        /* Version 4 blob — migrate to v5 */
+        app_config_v4_t old;
+        memcpy(&old, raw, sizeof(app_config_v4_t));
+        migrate_from_v4(&old, &s_config);
+        validate_config(&s_config);
+
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 3 && stored_size >= sizeof(app_config_v3_t)) {
         /* Version 3 blob — migrate to v4 */
         app_config_v3_t old;
@@ -513,8 +672,8 @@ app_config_t *app_config_get(void) {
 }
 
 void app_config_save(const app_config_t *config) {
-    invalidate_json_caches();
     xSemaphoreTake(s_config_mutex, portMAX_DELAY);
+    invalidate_json_caches();
 
     memcpy(&s_config, config, sizeof(app_config_t));
     s_config.config_version = APP_CONFIG_VERSION;  // Always stamp current version
@@ -622,6 +781,8 @@ uint32_t app_config_get_filter_color(const char *filter_name, int instance_index
     int idx = instance_index;
     if (idx < 0 || idx >= MAX_NINA_INSTANCES) idx = 0;
 
+    xSemaphoreTake(s_config_mutex, portMAX_DELAY);
+
     // Use cached parse tree, re-parse only on first access or after invalidation
     if (!s_filter_colors_cache[idx]) {
         const char *json = get_filter_colors_field(idx);
@@ -632,6 +793,7 @@ uint32_t app_config_get_filter_color(const char *filter_name, int instance_index
     }
     cJSON *root = s_filter_colors_cache[idx];
     if (!root) {
+        xSemaphoreGive(s_config_mutex);
         return 0xFFFFFF;
     }
 
@@ -651,6 +813,9 @@ uint32_t app_config_get_filter_color(const char *filter_name, int instance_index
     // Apply global color brightness
     int gb = s_config.color_brightness;
     if (gb < 0 || gb > 100) gb = 100;
+
+    xSemaphoreGive(s_config_mutex);
+
     color = app_config_apply_brightness(color, gb);
 
     return color;
@@ -701,8 +866,11 @@ static uint32_t get_threshold_color(float value, const char *json,
  */
 uint32_t app_config_get_rms_color(float rms_value, int instance_index) {
     if (instance_index < 0 || instance_index >= MAX_NINA_INSTANCES) instance_index = 0;
-    return get_threshold_color(rms_value, s_config.rms_thresholds[instance_index],
-                               &s_rms_thresholds_cache[instance_index], 0.5f, 1.0f);
+    xSemaphoreTake(s_config_mutex, portMAX_DELAY);
+    uint32_t color = get_threshold_color(rms_value, s_config.rms_thresholds[instance_index],
+                                         &s_rms_thresholds_cache[instance_index], 0.5f, 1.0f);
+    xSemaphoreGive(s_config_mutex);
+    return color;
 }
 
 /**
@@ -710,8 +878,11 @@ uint32_t app_config_get_rms_color(float rms_value, int instance_index) {
  */
 uint32_t app_config_get_hfr_color(float hfr_value, int instance_index) {
     if (instance_index < 0 || instance_index >= MAX_NINA_INSTANCES) instance_index = 0;
-    return get_threshold_color(hfr_value, s_config.hfr_thresholds[instance_index],
-                               &s_hfr_thresholds_cache[instance_index], 2.0f, 3.5f);
+    xSemaphoreTake(s_config_mutex, portMAX_DELAY);
+    uint32_t color = get_threshold_color(hfr_value, s_config.hfr_thresholds[instance_index],
+                                         &s_hfr_thresholds_cache[instance_index], 2.0f, 3.5f);
+    xSemaphoreGive(s_config_mutex);
+    return color;
 }
 
 static void fill_threshold_config(const char *json, cJSON **cache,

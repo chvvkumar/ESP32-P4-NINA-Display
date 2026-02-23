@@ -12,6 +12,7 @@
 #include "nina_api_fetchers.h"
 #include "nina_sequence.h"
 #include "nina_websocket.h"
+#include "nina_connection.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_http_client.h"
@@ -192,7 +193,20 @@ cJSON *http_get_json(const char *url) {
             return NULL;  // 4xx — not retryable
         }
 
-        char *buffer = malloc(content_length + 1);
+        // Guard against chunked transfer encoding or missing Content-Length.
+        // NINA API always sends Content-Length; if absent, treat as error.
+        if (content_length == 0) {
+            ESP_LOGW(TAG, "No Content-Length for %s (chunked?), skipping", url);
+            if (reusing) {
+                esp_http_client_close(client);
+            } else {
+                esp_http_client_cleanup(client);
+            }
+            perf_timer_stop(&g_perf.http_request);
+            return NULL;
+        }
+
+        char *buffer = heap_caps_malloc(content_length + 1, MALLOC_CAP_SPIRAM);
         if (!buffer) {
             if (reusing) esp_http_client_close(client);
             else esp_http_client_cleanup(client);
@@ -307,7 +321,7 @@ void nina_poll_state_init(nina_poll_state_t *state) {
     memset(state, 0, sizeof(nina_poll_state_t));
 }
 
-void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state_t *state) {
+void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state_t *state, int instance) {
     // Enable HTTP client reuse for this poll cycle
     s_poll_mode = true;
     s_reuse_client = (esp_http_client_handle_t)state->http_client;
@@ -336,8 +350,12 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
     fetch_camera_info_robust(base_url, data);
     perf_timer_stop(&g_perf.poll_camera);
 
+    nina_conn_state_t conn_state = nina_connection_report_poll(instance, data->connected);
+    data->connected = (conn_state == NINA_CONN_CONNECTED);
+
     if (!data->connected) {
         state->static_fetched = false;
+        nina_connection_set_static_data_ready(instance, false);
         state->http_client = (void *)s_reuse_client;
         s_reuse_client = NULL;
         s_poll_mode = false;
@@ -362,12 +380,15 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
         fetch_switch_info(base_url, data);
         perf_timer_stop(&g_perf.poll_switch);
 
+        fetch_safety_monitor_info(base_url, data);
+
         snprintf(state->cached_profile, sizeof(state->cached_profile), "%s", data->profile_name);
         snprintf(state->cached_telescope, sizeof(state->cached_telescope), "%s", data->telescope_name);
         memcpy(state->cached_filters, data->filters, sizeof(state->cached_filters));
         state->cached_filter_count = data->filter_count;
 
         state->static_fetched = true;
+        nina_connection_set_static_data_ready(instance, true);
         state->last_slow_poll_ms = now_ms;
         state->last_sequence_poll_ms = now_ms;
     } else {
@@ -418,8 +439,13 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
         state->last_slow_poll_ms = now_ms;
     }
 
-    // --- SLOW: Sequence counts (every 10s) ---
-    if (now_ms - state->last_sequence_poll_ms >= NINA_POLL_SEQUENCE_MS) {
+    // --- SEQUENCE: Timer-based + event-driven polling ---
+    bool sequence_due = (now_ms - state->last_sequence_poll_ms >= NINA_POLL_SEQUENCE_MS);
+    if (sequence_due || data->sequence_poll_needed) {
+        if (data->sequence_poll_needed) {
+            ESP_LOGD(TAG, "Event-driven sequence poll triggered");
+        }
+        data->sequence_poll_needed = false;
         perf_timer_start(&g_perf.poll_sequence);
         fetch_sequence_counts_optional(base_url, data);
         perf_timer_stop(&g_perf.poll_sequence);
@@ -440,13 +466,17 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
     ESP_LOGI(TAG, "Guiding: %.2f\", HFR: %.2f, Stars: %d", data->guider.rms_total, data->hfr, data->stars);
 }
 
-void nina_client_poll_heartbeat(const char *base_url, nina_client_t *data) {
+void nina_client_poll_heartbeat(const char *base_url, nina_client_t *data, int instance) {
     data->connected = false;
     fetch_camera_info_robust(base_url, data);
+
+    nina_conn_state_t conn_state = nina_connection_report_poll(instance, data->connected);
+    data->connected = (conn_state == NINA_CONN_CONNECTED);
+
     ESP_LOGD(TAG, "Heartbeat: connected=%d", data->connected);
 }
 
-void nina_client_poll_background(const char *base_url, nina_client_t *data, nina_poll_state_t *state) {
+void nina_client_poll_background(const char *base_url, nina_client_t *data, nina_poll_state_t *state, int instance) {
     // Enable HTTP client reuse for this poll cycle
     s_poll_mode = true;
     s_reuse_client = (esp_http_client_handle_t)state->http_client;
@@ -471,8 +501,12 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
     // --- ALWAYS: Camera heartbeat ---
     fetch_camera_info_robust(base_url, data);
 
+    nina_conn_state_t conn_state = nina_connection_report_poll(instance, data->connected);
+    data->connected = (conn_state == NINA_CONN_CONNECTED);
+
     if (!data->connected) {
         state->static_fetched = false;
+        nina_connection_set_static_data_ready(instance, false);
         state->http_client = (void *)s_reuse_client;
         s_reuse_client = NULL;
         s_poll_mode = false;
@@ -485,6 +519,7 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
         fetch_filter_robust_ex(base_url, data, true);
         fetch_image_history_robust(base_url, data);
         fetch_switch_info(base_url, data);
+        fetch_safety_monitor_info(base_url, data);
 
         snprintf(state->cached_profile, sizeof(state->cached_profile), "%s", data->profile_name);
         snprintf(state->cached_telescope, sizeof(state->cached_telescope), "%s", data->telescope_name);
@@ -492,6 +527,7 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
         state->cached_filter_count = data->filter_count;
 
         state->static_fetched = true;
+        nina_connection_set_static_data_ready(instance, true);
         state->last_slow_poll_ms = now_ms;
         state->last_sequence_poll_ms = now_ms;
     } else {
@@ -513,7 +549,7 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
         state->last_slow_poll_ms = now_ms;
     }
 
-    // --- SLOW: Sequence counts (every 10s) ---
+    // --- SEQUENCE: Timer-based polling (background instances) ---
     if (now_ms - state->last_sequence_poll_ms >= NINA_POLL_SEQUENCE_MS) {
         fetch_sequence_counts_optional(base_url, data);
         state->last_sequence_poll_ms = now_ms;
@@ -526,6 +562,108 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
 
     ESP_LOGD(TAG, "Background poll: connected=%d, profile=%s, target=%s",
              data->connected, data->profile_name, data->target_name);
+}
+
+// =============================================================================
+// DNS Pre-check with caching
+// =============================================================================
+
+#include <netdb.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+
+#define DNS_CACHE_TTL_MS 60000  // 60-second TTL
+
+typedef struct {
+    char hostname[128];
+    char resolved_ip[46];  // INET6_ADDRSTRLEN
+    int64_t resolve_time_ms;
+} dns_cache_entry_t;
+
+static dns_cache_entry_t s_dns_cache[3];  // One per instance (MAX_NINA_INSTANCES)
+
+bool nina_client_dns_check(const char *base_url) {
+    if (!base_url) return false;
+
+    // Extract hostname from URL: "http://hostname:port/path..."
+    const char *host_start = strstr(base_url, "://");
+    if (!host_start) return false;
+    host_start += 3;
+
+    // Find end of hostname (at ':' for port or '/' for path)
+    const char *host_end = host_start;
+    while (*host_end && *host_end != ':' && *host_end != '/') host_end++;
+
+    int host_len = host_end - host_start;
+    if (host_len <= 0 || host_len >= 128) return false;
+
+    char hostname[128];
+    memcpy(hostname, host_start, host_len);
+    hostname[host_len] = '\0';
+
+    // IP addresses don't need DNS resolution
+    if (hostname[0] >= '0' && hostname[0] <= '9') return true;
+
+    int64_t now_ms = esp_timer_get_time() / 1000;
+
+    // Check DNS cache for a valid (non-expired) entry
+    for (int i = 0; i < 3; i++) {
+        if (strcmp(s_dns_cache[i].hostname, hostname) == 0 &&
+            s_dns_cache[i].resolved_ip[0] != '\0') {
+            if (now_ms - s_dns_cache[i].resolve_time_ms < DNS_CACHE_TTL_MS) {
+                ESP_LOGD(TAG, "DNS cache hit for %s -> %s", hostname, s_dns_cache[i].resolved_ip);
+                return true;
+            }
+            break;  // Found entry but expired — do fresh lookup
+        }
+    }
+
+    // Cache miss or expired — perform real DNS lookup
+    struct addrinfo hints = {0};
+    hints.ai_family = AF_INET;
+    struct addrinfo *result = NULL;
+    int err = getaddrinfo(hostname, NULL, &hints, &result);
+
+    if (err == 0 && result) {
+        // Lookup succeeded — update cache
+        char ip_str[46] = {0};
+        struct sockaddr_in *addr = (struct sockaddr_in *)result->ai_addr;
+        inet_ntoa_r(addr->sin_addr, ip_str, sizeof(ip_str));
+        freeaddrinfo(result);
+
+        // Find existing slot or first empty slot
+        int slot = -1;
+        for (int i = 0; i < 3; i++) {
+            if (strcmp(s_dns_cache[i].hostname, hostname) == 0 ||
+                s_dns_cache[i].hostname[0] == '\0') {
+                slot = i;
+                break;
+            }
+        }
+        if (slot < 0) slot = 0;  // Evict first slot if all full
+
+        snprintf(s_dns_cache[slot].hostname, sizeof(s_dns_cache[slot].hostname), "%s", hostname);
+        snprintf(s_dns_cache[slot].resolved_ip, sizeof(s_dns_cache[slot].resolved_ip), "%s", ip_str);
+        s_dns_cache[slot].resolve_time_ms = now_ms;
+
+        ESP_LOGD(TAG, "DNS cached %s -> %s", hostname, ip_str);
+        return true;
+    }
+
+    if (result) freeaddrinfo(result);
+
+    // Lookup failed — try stale cache as fallback
+    for (int i = 0; i < 3; i++) {
+        if (strcmp(s_dns_cache[i].hostname, hostname) == 0 &&
+            s_dns_cache[i].resolved_ip[0] != '\0') {
+            ESP_LOGW(TAG, "DNS lookup failed for %s, using stale cache -> %s",
+                     hostname, s_dns_cache[i].resolved_ip);
+            return true;
+        }
+    }
+
+    ESP_LOGD(TAG, "DNS check failed for %s (err %d), no cache available", hostname, err);
+    return false;
 }
 
 #define MAX_IMAGE_SIZE (4 * 1024 * 1024)  // 4 MB cap for image downloads

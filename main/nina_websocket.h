@@ -35,3 +35,11 @@ void nina_websocket_stop_all(void);
  * Call this periodically from the data task loop.
  */
 void nina_websocket_check_reconnect(int index, const char *base_url, nina_client_t *data);
+
+/**
+ * @brief Check for deferred camera-disconnect alerts.
+ * NINA fires CAMERA-DISCONNECTED before CAMERA-CONNECTED during a connect
+ * sequence. This defers the disconnect toast by 3 s so it only shows for
+ * true disconnects. Call periodically from the data task loop.
+ */
+void nina_websocket_check_deferred_alerts(int index);

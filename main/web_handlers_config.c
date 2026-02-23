@@ -2,6 +2,7 @@
 #include "mqtt_ha.h"
 #include "esp_wifi.h"
 #include <string.h>
+#include "esp_heap_caps.h"
 
 extern const uint8_t config_html_start[] asm("_binary_config_ui_html_start");
 extern const uint8_t config_html_end[]   asm("_binary_config_ui_html_end");
@@ -65,6 +66,8 @@ esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "auto_rotate_pages", cfg->auto_rotate_pages);
     cJSON_AddNumberToObject(root, "update_rate_s", cfg->update_rate_s);
     cJSON_AddNumberToObject(root, "graph_update_interval_s", cfg->graph_update_interval_s);
+    cJSON_AddNumberToObject(root, "connection_timeout_s", cfg->connection_timeout_s);
+    cJSON_AddNumberToObject(root, "toast_duration_s", cfg->toast_duration_s);
 
     const char *json_str = cJSON_PrintUnformatted(root);
     if (json_str == NULL) {
@@ -90,7 +93,7 @@ esp_err_t config_post_handler(httpd_req_t *req)
         return send_400(req, "Payload too large");
     }
 
-    char *buf = malloc(CONFIG_MAX_PAYLOAD);
+    char *buf = heap_caps_malloc(CONFIG_MAX_PAYLOAD, MALLOC_CAP_SPIRAM);
     if (!buf) {
         ESP_LOGE(TAG, "Config handler: malloc failed for payload buffer");
         httpd_resp_send_500(req);
@@ -291,6 +294,22 @@ esp_err_t config_post_handler(httpd_req_t *req)
         if (v < 2) v = 2;
         if (v > 30) v = 30;
         cfg->graph_update_interval_s = (uint8_t)v;
+    }
+
+    cJSON *ct_item = cJSON_GetObjectItem(root, "connection_timeout_s");
+    if (cJSON_IsNumber(ct_item)) {
+        int v = ct_item->valueint;
+        if (v < 2) v = 2;
+        if (v > 30) v = 30;
+        cfg->connection_timeout_s = (uint8_t)v;
+    }
+
+    cJSON *td_item = cJSON_GetObjectItem(root, "toast_duration_s");
+    if (cJSON_IsNumber(td_item)) {
+        int v = td_item->valueint;
+        if (v < 3) v = 3;
+        if (v > 30) v = 30;
+        cfg->toast_duration_s = (uint8_t)v;
     }
 
     app_config_save(cfg);

@@ -193,11 +193,19 @@ static void backlight_changed_cb(lv_event_t *e) {
 }
 
 static void text_bright_changed_cb(lv_event_t *e) {
-    LV_UNUSED(e);
+    lv_event_code_t code = lv_event_get_code(e);
     int val = lv_slider_get_value(slider_text_bright);
     app_config_get()->color_brightness = val;
-    nina_dashboard_apply_theme(app_config_get()->theme_index);
-    lv_label_set_text_fmt(lbl_text_bright_val, "%d%%", val);
+
+    if (code == LV_EVENT_VALUE_CHANGED) {
+        /* Lightweight: update the value label during drag */
+        lv_label_set_text_fmt(lbl_text_bright_val, "%d%%", val);
+    }
+    if (code == LV_EVENT_RELEASED) {
+        /* Heavyweight: apply full theme only when user releases the slider */
+        lv_label_set_text_fmt(lbl_text_bright_val, "%d%%", val);
+        nina_dashboard_apply_theme(app_config_get()->theme_index);
+    }
 }
 
 static void rate_minus_cb(lv_event_t *e) {
@@ -464,6 +472,7 @@ lv_obj_t *settings_page_create(lv_obj_t *parent) {
             lv_obj_set_style_bg_opa(slider_text_bright, LV_OPA_COVER, LV_PART_KNOB);
         }
         lv_obj_add_event_cb(slider_text_bright, text_bright_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
+        lv_obj_add_event_cb(slider_text_bright, text_bright_changed_cb, LV_EVENT_RELEASED, NULL);
 
         lbl_text_bright_val = lv_label_create(ctrl);
         lv_obj_set_style_text_font(lbl_text_bright_val, &lv_font_montserrat_16, 0);

@@ -79,6 +79,25 @@ static lv_obj_t *lbl_lvgl_fps_val = NULL;
 static lv_obj_t *lbl_top_task_val = NULL;
 #endif
 
+/* Red Night theme forces all colors to the red palette */
+static bool theme_forces_colors(void) {
+    return current_theme && strcmp(current_theme->name, "Red Night") == 0;
+}
+
+/* Bar color helper: returns dim/medium/bright red when Red Night,
+ * otherwise returns standard green/yellow/red based on percentage. */
+static uint32_t bar_level_color(int pct, int low_thresh, int high_thresh) {
+    if (theme_forces_colors()) {
+        /* Dim, medium, bright red levels */
+        if (pct < low_thresh)  return 0x7f1d1d;  /* dim red */
+        if (pct < high_thresh) return 0xcc0000;   /* medium red */
+        return 0xff0000;                           /* bright red */
+    }
+    if (pct < low_thresh)  return 0x22c55e;  /* green */
+    if (pct < high_thresh) return 0xeab308;  /* yellow */
+    return 0xef4444;                           /* red */
+}
+
 /* ── Helpers ─────────────────────────────────────────────────────────── */
 
 static lv_obj_t *make_card(lv_obj_t *parent) {
@@ -355,11 +374,8 @@ void sysinfo_page_refresh(void) {
             if (pct > 100) pct = 100;
             lv_bar_set_value(bar_wifi, pct, LV_ANIM_ON);
 
-            /* Color the bar based on signal quality */
-            uint32_t bar_color;
-            if (pct >= 70) bar_color = 0x22c55e;       /* green */
-            else if (pct >= 40) bar_color = 0xeab308;   /* yellow */
-            else bar_color = 0xef4444;                   /* red */
+            /* Color the bar based on signal quality (inverted: high pct = good) */
+            uint32_t bar_color = bar_level_color(100 - pct, 30, 60);
             lv_obj_set_style_bg_color(bar_wifi, lv_color_hex(bar_color), LV_PART_INDICATOR);
         } else {
             lv_label_set_text(lbl_ssid_val, "N/A");
@@ -391,11 +407,9 @@ void sysinfo_page_refresh(void) {
         lv_label_set_text(lbl_psram_val, buf);
         lv_bar_set_value(bar_psram, psram_pct, LV_ANIM_ON);
 
-        /* Color bars: green when low usage, yellow when moderate, red when high */
-        uint32_t heap_col = heap_pct < 60 ? 0x22c55e : (heap_pct < 85 ? 0xeab308 : 0xef4444);
-        lv_obj_set_style_bg_color(bar_heap, lv_color_hex(heap_col), LV_PART_INDICATOR);
-        uint32_t psram_col = psram_pct < 60 ? 0x22c55e : (psram_pct < 85 ? 0xeab308 : 0xef4444);
-        lv_obj_set_style_bg_color(bar_psram, lv_color_hex(psram_col), LV_PART_INDICATOR);
+        /* Color bars based on usage level */
+        lv_obj_set_style_bg_color(bar_heap, lv_color_hex(bar_level_color(heap_pct, 60, 85)), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_color(bar_psram, lv_color_hex(bar_level_color(psram_pct, 60, 85)), LV_PART_INDICATOR);
     }
 
     /* ── System ── */
@@ -477,13 +491,10 @@ void sysinfo_page_refresh(void) {
             }
             lv_label_set_text(lbl_top_task_val, buf);
 
-            /* Color bars: green < 60%, yellow 60-85%, red > 85% */
-            uint32_t c0_col = core0_pct < 60 ? 0x22c55e : (core0_pct < 85 ? 0xeab308 : 0xef4444);
-            uint32_t c1_col = core1_pct < 60 ? 0x22c55e : (core1_pct < 85 ? 0xeab308 : 0xef4444);
-            uint32_t ct_col = total_pct < 60 ? 0x22c55e : (total_pct < 85 ? 0xeab308 : 0xef4444);
-            lv_obj_set_style_bg_color(bar_core0, lv_color_hex(c0_col), LV_PART_INDICATOR);
-            lv_obj_set_style_bg_color(bar_core1, lv_color_hex(c1_col), LV_PART_INDICATOR);
-            lv_obj_set_style_bg_color(bar_cputotal, lv_color_hex(ct_col), LV_PART_INDICATOR);
+            /* Color bars based on CPU load level */
+            lv_obj_set_style_bg_color(bar_core0, lv_color_hex(bar_level_color(core0_pct, 60, 85)), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_color(bar_core1, lv_color_hex(bar_level_color(core1_pct, 60, 85)), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_color(bar_cputotal, lv_color_hex(bar_level_color(total_pct, 60, 85)), LV_PART_INDICATOR);
         } else {
             lv_label_set_text(lbl_core0_val, "...");
             lv_label_set_text(lbl_core1_val, "...");

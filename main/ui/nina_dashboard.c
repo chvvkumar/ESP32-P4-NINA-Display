@@ -14,6 +14,10 @@
 #include "nina_sysinfo.h"
 #include "nina_summary.h"
 #include "nina_settings.h"
+#include "nina_toast.h"
+#include "nina_event_log.h"
+#include "nina_alerts.h"
+#include "nina_safety.h"
 #include "ui_styles.h"
 #include "app_config.h"
 #include "themes.h"
@@ -222,6 +226,10 @@ void nina_dashboard_apply_theme(int theme_index) {
     sysinfo_page_apply_theme();
     nina_graph_overlay_apply_theme();
     nina_info_overlay_apply_theme();
+    nina_toast_apply_theme();
+    nina_event_log_apply_theme();
+    nina_alerts_apply_theme();
+    nina_safety_apply_theme();
 
     update_indicators();
 
@@ -391,6 +399,20 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_style_text_font(p->lbl_loop_count, &lv_font_montserrat_24, 0);
     lv_obj_set_style_pad_top(p->lbl_loop_count, 8, 0);
     lv_label_set_text(p->lbl_loop_count, "-- / --");
+
+    // Safety monitor icon (floating, bottom-left of exposure box)
+    extern const lv_font_t lv_font_material_safety;
+    p->safety_icon = lv_label_create(box_exposure);
+    lv_obj_set_style_text_font(p->safety_icon, &lv_font_material_safety, 0);
+    lv_obj_set_style_text_color(p->safety_icon, lv_color_hex(0x999999), 0);
+    lv_label_set_text(p->safety_icon, "");
+    lv_obj_add_flag(p->safety_icon, LV_OBJ_FLAG_FLOATING);
+    lv_obj_clear_flag(p->safety_icon, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(p->safety_icon, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_align(p->safety_icon, LV_ALIGN_BOTTOM_LEFT);
+    lv_obj_set_style_translate_x(p->safety_icon, 6, 0);
+    lv_obj_set_style_translate_y(p->safety_icon, -6, 0);
+    lv_obj_add_flag(p->safety_icon, LV_OBJ_FLAG_HIDDEN);
 
     // RMS + HFR (col 1, row 2)
     lv_obj_t *box_rms_hfr = create_bento_box(p->page);
@@ -858,6 +880,32 @@ void nina_dashboard_show_page_animated(int page_index, int instance_count, int e
     if (page_index == active_page) return;
 
     lv_obj_t *old_obj = get_page_obj(active_page);
+    lv_obj_t *upcoming_obj = get_page_obj(page_index);
+
+    /* Cancel any in-progress animations on both pages to prevent stacking */
+    if (old_obj) lv_anim_delete(old_obj, NULL);
+    if (upcoming_obj) lv_anim_delete(upcoming_obj, NULL);
+
+    /* Also cancel animation on a previously sliding-out page if still in flight */
+    if (slide_old_page_idx >= 0 && slide_old_page_idx != active_page) {
+        lv_obj_t *prev_old = get_page_obj(slide_old_page_idx);
+        if (prev_old) {
+            lv_anim_delete(prev_old, NULL);
+            lv_obj_add_flag(prev_old, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_style_translate_x(prev_old, 0, 0);
+        }
+        slide_old_page_idx = -1;
+    }
+
+    /* Reset opacity/translate on both objects in case a prior animation was interrupted */
+    if (old_obj) {
+        lv_obj_set_style_opa(old_obj, LV_OPA_COVER, 0);
+        lv_obj_set_style_translate_x(old_obj, 0, 0);
+    }
+    if (upcoming_obj) {
+        lv_obj_set_style_opa(upcoming_obj, LV_OPA_COVER, 0);
+        lv_obj_set_style_translate_x(upcoming_obj, 0, 0);
+    }
 
     if (effect == 1 && old_obj) {
         /* Fade-out: start opaque, animate to transparent */

@@ -100,6 +100,8 @@ bool fetch_and_show_thumbnail(const char *base_url) {
                         rgb_buf = NULL;  // ownership transferred
                     } else {
                         ESP_LOGW(TAG, "Display lock timeout (thumbnail set)");
+                        free(rgb_buf);
+                        rgb_buf = NULL;
                     }
                     decode_buf = NULL;
                     success = true;
