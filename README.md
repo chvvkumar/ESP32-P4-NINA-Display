@@ -146,10 +146,6 @@ No build environment needed — just a Chromium-based browser and the [ESP Web F
 
 On first boot (or whenever WiFi is not connected), the device broadcasts a WiFi access point named **`AllSky-Config`** (password: `12345678`). Connect to it from your phone or laptop, then open `http://192.168.4.1` in a browser.
 
-<p align="center">
-  <img src="images/Web-config.png" alt="Web config" width="1200">
-</p>
-
 Set at minimum:
 
 1. **WiFi credentials** — your observatory/home network where NINA runs.
