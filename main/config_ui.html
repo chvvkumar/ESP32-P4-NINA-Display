@@ -1122,15 +1122,29 @@
 
         const ghBase='https://github.com/chvvkumar/ESP32-P4-NINA-Display/';
         const tagEl=$('fw_git_tag');
+        tagEl.textContent='';
         if(data.git_tag&&data.git_tag!=='unknown'){
-          tagEl.innerHTML='<a href="'+ghBase+'releases/tag/'+encodeURIComponent(data.git_tag)+'" target="_blank" rel="noopener" class="accent-link">'+data.git_tag+'</a>';
+          const a=document.createElement('a');
+          a.href=ghBase+'releases/tag/'+encodeURIComponent(data.git_tag);
+          a.target='_blank';
+          a.rel='noopener';
+          a.className='accent-link';
+          a.textContent=data.git_tag;
+          tagEl.appendChild(a);
         }else{
           tagEl.textContent=data.git_tag||'--';
         }
 
         const shaEl=$('fw_git_sha');
+        shaEl.textContent='';
         if(data.git_sha&&data.git_sha!=='unknown'){
-          shaEl.innerHTML='<a href="'+ghBase+'commit/'+encodeURIComponent(data.git_sha)+'" target="_blank" rel="noopener" class="mono-link">'+data.git_sha.substring(0,8)+'</a>';
+          const a=document.createElement('a');
+          a.href=ghBase+'commit/'+encodeURIComponent(data.git_sha);
+          a.target='_blank';
+          a.rel='noopener';
+          a.className='mono-link';
+          a.textContent=data.git_sha.substring(0,8);
+          shaEl.appendChild(a);
         }else{
           shaEl.textContent=data.git_sha||'--';
         }

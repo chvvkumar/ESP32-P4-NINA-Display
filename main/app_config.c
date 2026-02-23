@@ -8,6 +8,7 @@
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
+#include "esp_heap_caps.h"
 #include "perf_monitor.h"
 
 static const char *TAG = "app_config";
@@ -572,7 +573,7 @@ void app_config_init(void) {
     }
 
     /* Read raw blob into a temporary buffer for version detection */
-    void *raw = malloc(stored_size);
+    void *raw = heap_caps_malloc(stored_size, MALLOC_CAP_SPIRAM);
     if (!raw) {
         ESP_LOGE(TAG, "Failed to allocate %d bytes for config read", (int)stored_size);
         set_defaults(&s_config);
@@ -671,8 +672,8 @@ app_config_t *app_config_get(void) {
 }
 
 void app_config_save(const app_config_t *config) {
-    invalidate_json_caches();
     xSemaphoreTake(s_config_mutex, portMAX_DELAY);
+    invalidate_json_caches();
 
     memcpy(&s_config, config, sizeof(app_config_t));
     s_config.config_version = APP_CONFIG_VERSION;  // Always stamp current version
@@ -780,6 +781,8 @@ uint32_t app_config_get_filter_color(const char *filter_name, int instance_index
     int idx = instance_index;
     if (idx < 0 || idx >= MAX_NINA_INSTANCES) idx = 0;
 
+    xSemaphoreTake(s_config_mutex, portMAX_DELAY);
+
     // Use cached parse tree, re-parse only on first access or after invalidation
     if (!s_filter_colors_cache[idx]) {
         const char *json = get_filter_colors_field(idx);
@@ -790,6 +793,7 @@ uint32_t app_config_get_filter_color(const char *filter_name, int instance_index
     }
     cJSON *root = s_filter_colors_cache[idx];
     if (!root) {
+        xSemaphoreGive(s_config_mutex);
         return 0xFFFFFF;
     }
 
@@ -809,6 +813,9 @@ uint32_t app_config_get_filter_color(const char *filter_name, int instance_index
     // Apply global color brightness
     int gb = s_config.color_brightness;
     if (gb < 0 || gb > 100) gb = 100;
+
+    xSemaphoreGive(s_config_mutex);
+
     color = app_config_apply_brightness(color, gb);
 
     return color;
@@ -859,8 +866,11 @@ static uint32_t get_threshold_color(float value, const char *json,
  */
 uint32_t app_config_get_rms_color(float rms_value, int instance_index) {
     if (instance_index < 0 || instance_index >= MAX_NINA_INSTANCES) instance_index = 0;
-    return get_threshold_color(rms_value, s_config.rms_thresholds[instance_index],
-                               &s_rms_thresholds_cache[instance_index], 0.5f, 1.0f);
+    xSemaphoreTake(s_config_mutex, portMAX_DELAY);
+    uint32_t color = get_threshold_color(rms_value, s_config.rms_thresholds[instance_index],
+                                         &s_rms_thresholds_cache[instance_index], 0.5f, 1.0f);
+    xSemaphoreGive(s_config_mutex);
+    return color;
 }
 
 /**
@@ -868,8 +878,11 @@ uint32_t app_config_get_rms_color(float rms_value, int instance_index) {
  */
 uint32_t app_config_get_hfr_color(float hfr_value, int instance_index) {
     if (instance_index < 0 || instance_index >= MAX_NINA_INSTANCES) instance_index = 0;
-    return get_threshold_color(hfr_value, s_config.hfr_thresholds[instance_index],
-                               &s_hfr_thresholds_cache[instance_index], 2.0f, 3.5f);
+    xSemaphoreTake(s_config_mutex, portMAX_DELAY);
+    uint32_t color = get_threshold_color(hfr_value, s_config.hfr_thresholds[instance_index],
+                                         &s_hfr_thresholds_cache[instance_index], 2.0f, 3.5f);
+    xSemaphoreGive(s_config_mutex);
+    return color;
 }
 
 static void fill_threshold_config(const char *json, cJSON **cache,

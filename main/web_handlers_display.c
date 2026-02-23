@@ -83,11 +83,13 @@ esp_err_t color_brightness_post_handler(httpd_req_t *req)
         int cb = val->valueint;
         if (cb < 0) cb = 0;
         if (cb > 100) cb = 100;
-        app_config_get()->color_brightness = cb;
+        app_config_t *cfg = app_config_get();
+        cfg->color_brightness = cb;
+        app_config_save(cfg);
 
         // Re-apply theme to update static text brightness
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-            nina_dashboard_apply_theme(app_config_get()->theme_index);
+            nina_dashboard_apply_theme(cfg->theme_index);
             bsp_display_unlock();
         } else {
             ESP_LOGW(TAG, "Display lock timeout (color brightness)");
@@ -133,7 +135,9 @@ esp_err_t theme_post_handler(httpd_req_t *req)
         int idx = val->valueint;
         if (idx < 0) idx = 0;
         if (idx >= themes_get_count()) idx = themes_get_count() - 1;
-        app_config_get()->theme_index = idx;
+        app_config_t *cfg = app_config_get();
+        cfg->theme_index = idx;
+        app_config_save(cfg);
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
             nina_dashboard_apply_theme(idx);
             bsp_display_unlock();
@@ -203,10 +207,37 @@ esp_err_t page_post_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+// Persistent JPEG encoder engine — DMA link descriptors are allocated once from
+// internal DMA memory at startup (before display driver claims DMA resources) and
+// reused across all screenshot requests.
+static jpeg_encoder_handle_t s_jpeg_encoder = NULL;
+
+void screenshot_encoder_init(void)
+{
+    if (s_jpeg_encoder) return;
+    jpeg_encode_engine_cfg_t engine_cfg = {
+        .intr_priority = 0,
+        .timeout_ms = 5000,
+    };
+    esp_err_t err = jpeg_new_encoder_engine(&engine_cfg, &s_jpeg_encoder);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "jpeg_new_encoder_engine failed: %s", esp_err_to_name(err));
+        s_jpeg_encoder = NULL;
+    } else {
+        ESP_LOGI(TAG, "JPEG encoder engine pre-allocated");
+    }
+}
+
 // Handler for screenshot capture - serves a JPEG image via hardware encoder
 esp_err_t screenshot_get_handler(httpd_req_t *req)
 {
     ESP_LOGI(TAG, "Screenshot requested");
+
+    if (!s_jpeg_encoder) {
+        ESP_LOGE(TAG, "JPEG encoder not available (init failed at startup)");
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
 
     // Take LVGL snapshot while holding the display lock
     if (!bsp_display_lock(5000)) {
@@ -241,22 +272,7 @@ esp_err_t screenshot_get_handler(httpd_req_t *req)
 
     ESP_LOGI(TAG, "Snapshot captured: %lux%lu, stride=%lu", width, height, stride);
 
-    // Create hardware JPEG encoder FIRST — it needs internal DMA memory for
-    // link descriptors which must be allocated before the large data buffers.
-    jpeg_encoder_handle_t encoder = NULL;
-    jpeg_encode_engine_cfg_t engine_cfg = {
-        .intr_priority = 0,
-        .timeout_ms = 5000,
-    };
-    esp_err_t err = jpeg_new_encoder_engine(&engine_cfg, &encoder);
-    if (err != ESP_OK || !encoder) {
-        ESP_LOGE(TAG, "jpeg_new_encoder_engine failed: %s", esp_err_to_name(err));
-        lv_draw_buf_destroy(snapshot);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-
-    // Allocate DMA-aligned input buffer for the JPEG encoder
+    // Allocate DMA-aligned input buffer and copy pixels
     jpeg_encode_memory_alloc_cfg_t in_mem_cfg = {
         .buffer_direction = JPEG_ENC_ALLOC_INPUT_BUFFER,
     };
@@ -264,19 +280,17 @@ esp_err_t screenshot_get_handler(httpd_req_t *req)
     uint8_t *enc_in = (uint8_t *)jpeg_alloc_encoder_mem(raw_size, &in_mem_cfg, &in_alloc_size);
     if (!enc_in) {
         ESP_LOGE(TAG, "Failed to alloc JPEG encoder input buffer (%lu bytes)", raw_size);
-        jpeg_del_encoder_engine(encoder);
         lv_draw_buf_destroy(snapshot);
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
 
-    // Copy snapshot pixels into the DMA-aligned buffer (handle stride != row_size)
     for (uint32_t y = 0; y < height; y++) {
         memcpy(enc_in + y * row_size, snapshot->data + y * stride, row_size);
     }
     lv_draw_buf_destroy(snapshot);
 
-    // Allocate DMA-aligned output buffer (raw_size is generous upper bound)
+    // Allocate DMA-aligned output buffer
     jpeg_encode_memory_alloc_cfg_t out_mem_cfg = {
         .buffer_direction = JPEG_ENC_ALLOC_OUTPUT_BUFFER,
     };
@@ -284,7 +298,6 @@ esp_err_t screenshot_get_handler(httpd_req_t *req)
     uint8_t *enc_out = (uint8_t *)jpeg_alloc_encoder_mem(raw_size, &out_mem_cfg, &out_alloc_size);
     if (!enc_out) {
         ESP_LOGE(TAG, "Failed to alloc JPEG encoder output buffer");
-        jpeg_del_encoder_engine(encoder);
         free(enc_in);
         httpd_resp_send_500(req);
         return ESP_FAIL;
@@ -299,9 +312,8 @@ esp_err_t screenshot_get_handler(httpd_req_t *req)
         .height = height,
     };
     uint32_t jpg_size = 0;
-    err = jpeg_encoder_process(encoder, &enc_cfg,
+    esp_err_t err = jpeg_encoder_process(s_jpeg_encoder, &enc_cfg,
         enc_in, raw_size, enc_out, out_alloc_size, &jpg_size);
-    jpeg_del_encoder_engine(encoder);
     free(enc_in);
 
     if (err != ESP_OK || jpg_size == 0) {

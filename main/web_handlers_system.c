@@ -7,6 +7,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
+#include "esp_heap_caps.h"
 
 // Handler for reboot
 esp_err_t reboot_post_handler(httpd_req_t *req)
@@ -47,6 +48,10 @@ esp_err_t ota_post_handler(httpd_req_t *req)
         return send_400(req, "No firmware data received");
     }
 
+    if (req->content_len > 16 * 1024 * 1024) {
+        return send_400(req, "Firmware too large (max 16 MB)");
+    }
+
     const esp_partition_t *update_partition = esp_ota_get_next_update_partition(NULL);
     if (!update_partition) {
         ESP_LOGE(TAG, "OTA: no update partition found");
@@ -64,7 +69,7 @@ esp_err_t ota_post_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    char *buf = malloc(OTA_BUF_SIZE);
+    char *buf = heap_caps_malloc(OTA_BUF_SIZE, MALLOC_CAP_SPIRAM);
     if (!buf) {
         ESP_LOGE(TAG, "OTA: malloc failed for receive buffer");
         esp_ota_abort(ota_handle);

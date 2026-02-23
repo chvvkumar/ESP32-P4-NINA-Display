@@ -645,6 +645,7 @@ void nina_websocket_start(int index, const char *base_url, nina_client_t *data) 
         .uri = ws_url,
         .reconnect_timeout_ms = 0,      // Disable auto-reconnect; managed externally with backoff
         .network_timeout_ms = 10000,
+        .buffer_size = 4096,            // IMAGE-SAVE events with ImageStatistics can exceed 1KB default
     };
 
     ws_clients[index] = esp_websocket_client_init(&ws_cfg);
@@ -668,8 +669,11 @@ void nina_websocket_stop(int index) {
         ws_clients[index] = NULL;
     }
     if (ws_client_data[index]) {
-        ws_client_data[index]->websocket_connected = false;
-        nina_connection_report_ws(index, false);
+        if (nina_client_lock(ws_client_data[index], 50)) {
+            ws_client_data[index]->websocket_connected = false;
+            nina_connection_report_ws(index, false);
+            nina_client_unlock(ws_client_data[index]);
+        }
         ws_client_data[index] = NULL;
     }
 }

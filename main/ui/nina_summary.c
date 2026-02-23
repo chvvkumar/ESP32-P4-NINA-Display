@@ -21,6 +21,26 @@
 #include <stdio.h>
 #include <string.h>
 
+/* ── Change-detection helpers ──────────────────────────────────────── */
+/* Set label text only if it actually changed (avoids marking objects dirty) */
+static inline void set_label_if_changed(lv_obj_t *label, const char *text) {
+    const char *cur = lv_label_get_text(label);
+    if (strcmp(cur, text) != 0) lv_label_set_text(label, text);
+}
+
+/* Set label text (printf-style) only if it actually changed */
+#define SET_LABEL_FMT_IF_CHANGED(label, bufsize, fmt, ...) do { \
+    char _buf[bufsize]; \
+    snprintf(_buf, sizeof(_buf), fmt, __VA_ARGS__); \
+    const char *_cur = lv_label_get_text(label); \
+    if (strcmp(_cur, _buf) != 0) lv_label_set_text(label, _buf); \
+} while (0)
+
+/* Set bar value only if it actually changed */
+static inline void set_bar_if_changed(lv_obj_t *bar, int32_t val, lv_anim_enable_t anim) {
+    if (lv_bar_get_value(bar) != val) lv_bar_set_value(bar, val, anim);
+}
+
 /* ── Layout Constants ──────────────────────────────────────────────── */
 #define CARD_RADIUS      20
 #define CARD_GAP         16
@@ -671,12 +691,12 @@ void summary_page_update(const nina_client_t *instances, int count) {
 
         /* Instance name — use profile name if available */
         if (d->profile_name[0]) {
-            lv_label_set_text(sc->lbl_name, d->profile_name);
+            set_label_if_changed(sc->lbl_name, d->profile_name);
         } else {
             const char *url = app_config_get_instance_url(i);
             char host[64] = {0};
             extract_host_from_url(url, host, sizeof(host));
-            lv_label_set_text(sc->lbl_name, host[0] ? host : "N.I.N.A.");
+            set_label_if_changed(sc->lbl_name, host[0] ? host : "N.I.N.A.");
         }
 
         /* Name color: theme header color (always connected at this point) */
@@ -688,7 +708,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
 
         /* Filter */
         if (d->current_filter[0]) {
-            lv_label_set_text(sc->lbl_filter, d->current_filter);
+            set_label_if_changed(sc->lbl_filter, d->current_filter);
             uint32_t fc = theme_forces_colors()
                 ? 0 : app_config_get_filter_color(d->current_filter, i);
             if (fc != 0) {
@@ -707,7 +727,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
                 lv_obj_set_style_bg_opa(sc->filter_box, LV_OPA_50, 0);
             }
         } else {
-            lv_label_set_text(sc->lbl_filter, "--");
+            set_label_if_changed(sc->lbl_filter, "--");
             if (current_theme) {
                 lv_obj_set_style_text_color(sc->lbl_filter,
                     lv_color_hex(app_config_apply_brightness(
@@ -720,9 +740,9 @@ void summary_page_update(const nina_client_t *instances, int count) {
 
         /* Target name */
         if (d->target_name[0]) {
-            lv_label_set_text(sc->lbl_target, d->target_name);
+            set_label_if_changed(sc->lbl_target, d->target_name);
         } else {
-            lv_label_set_text(sc->lbl_target, "Idle");
+            set_label_if_changed(sc->lbl_target, "Idle");
         }
 
         if (current_theme) {
@@ -736,14 +756,12 @@ void summary_page_update(const nina_client_t *instances, int count) {
             int pct = (int)((d->exposure_current / d->exposure_total) * 100.0f);
             if (pct < 0) pct = 0;
             if (pct > 100) pct = 100;
-            lv_bar_set_value(sc->bar_progress, pct, LV_ANIM_ON);
+            set_bar_if_changed(sc->bar_progress, pct, LV_ANIM_ON);
 
-            char pct_buf[8];
-            snprintf(pct_buf, sizeof(pct_buf), "%d%%", pct);
-            lv_label_set_text(sc->lbl_pct, pct_buf);
+            SET_LABEL_FMT_IF_CHANGED(sc->lbl_pct, 8, "%d%%", pct);
         } else {
-            lv_bar_set_value(sc->bar_progress, 0, LV_ANIM_OFF);
-            lv_label_set_text(sc->lbl_pct, "");
+            set_bar_if_changed(sc->bar_progress, 0, LV_ANIM_OFF);
+            set_label_if_changed(sc->lbl_pct, "");
         }
 
         /* Progress bar color: filter color or theme progress */
@@ -776,14 +794,14 @@ void summary_page_update(const nina_client_t *instances, int count) {
         /* Sequence info (visible in 1-2 card mode) */
         if (connected_count <= 2 && !lv_obj_has_flag(sc->seq_row, LV_OBJ_FLAG_HIDDEN)) {
             if (d->container_name[0]) {
-                lv_label_set_text(sc->lbl_seq_name, d->container_name);
+                set_label_if_changed(sc->lbl_seq_name, d->container_name);
             } else {
-                lv_label_set_text(sc->lbl_seq_name, "----");
+                set_label_if_changed(sc->lbl_seq_name, "----");
             }
             if (d->container_step[0]) {
-                lv_label_set_text(sc->lbl_seq_step, d->container_step);
+                set_label_if_changed(sc->lbl_seq_step, d->container_step);
             } else {
-                lv_label_set_text(sc->lbl_seq_step, "----");
+                set_label_if_changed(sc->lbl_seq_step, "----");
             }
 
             if (current_theme) {
@@ -800,7 +818,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
         if (d->guider.rms_total > 0.001f) {
             char buf[16];
             snprintf(buf, sizeof(buf), "%.2f\"", d->guider.rms_total);
-            lv_label_set_text(sc->lbl_rms_val, buf);
+            set_label_if_changed(sc->lbl_rms_val, buf);
             uint32_t rms_col = theme_forces_colors()
                 ? 0 : app_config_get_rms_color(d->guider.rms_total, i);
             if (rms_col != 0) {
@@ -812,7 +830,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
                         current_theme->rms_color, gb)), 0);
             }
         } else {
-            lv_label_set_text(sc->lbl_rms_val, "--");
+            set_label_if_changed(sc->lbl_rms_val, "--");
             if (current_theme) {
                 lv_obj_set_style_text_color(sc->lbl_rms_val,
                     lv_color_hex(app_config_apply_brightness(
@@ -824,7 +842,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
         if (d->hfr > 0.001f) {
             char buf[16];
             snprintf(buf, sizeof(buf), "%.2f", d->hfr);
-            lv_label_set_text(sc->lbl_hfr_val, buf);
+            set_label_if_changed(sc->lbl_hfr_val, buf);
             uint32_t hfr_col = theme_forces_colors()
                 ? 0 : app_config_get_hfr_color(d->hfr, i);
             if (hfr_col != 0) {
@@ -836,7 +854,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
                         current_theme->hfr_color, gb)), 0);
             }
         } else {
-            lv_label_set_text(sc->lbl_hfr_val, "--");
+            set_label_if_changed(sc->lbl_hfr_val, "--");
             if (current_theme) {
                 lv_obj_set_style_text_color(sc->lbl_hfr_val,
                     lv_color_hex(app_config_apply_brightness(
@@ -846,9 +864,9 @@ void summary_page_update(const nina_client_t *instances, int count) {
 
         /* Time to flip */
         if (d->meridian_flip[0]) {
-            lv_label_set_text(sc->lbl_flip_val, d->meridian_flip);
+            set_label_if_changed(sc->lbl_flip_val, d->meridian_flip);
         } else {
-            lv_label_set_text(sc->lbl_flip_val, "--");
+            set_label_if_changed(sc->lbl_flip_val, "--");
         }
         if (current_theme) {
             lv_obj_set_style_text_color(sc->lbl_flip_val,
@@ -881,7 +899,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
                     "  |  %s left", d->target_time_remaining);
             }
 
-            lv_label_set_text(sc->lbl_detail, detail);
+            set_label_if_changed(sc->lbl_detail, detail);
 
             if (current_theme) {
                 lv_obj_set_style_text_color(sc->lbl_detail,

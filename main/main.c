@@ -27,8 +27,12 @@
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
+#include "esp_heap_caps.h"
+#include "cJSON.h"
 #include "perf_monitor.h"
 #include "nina_connection.h"
+
+static void *cjson_psram_malloc(size_t sz) { return heap_caps_malloc(sz, MALLOC_CAP_SPIRAM); }
 
 static const char *TAG = "main";
 
@@ -168,6 +172,10 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
+    /* Route all cJSON allocations to PSRAM to reduce internal heap pressure */
+    cJSON_Hooks psram_hooks = { .malloc_fn = cjson_psram_malloc, .free_fn = free };
+    cJSON_InitHooks(&psram_hooks);
+
     app_config_init();
     nina_connection_init();
 
@@ -180,6 +188,9 @@ void app_main(void)
 
     wifi_init();
     start_web_server();
+
+    /* Pre-allocate JPEG encoder DMA channel before display init claims DMA resources */
+    screenshot_encoder_init();
 
     bsp_display_cfg_t cfg = {
         .lvgl_port_cfg = ESP_LVGL_PORT_INIT_CONFIG(),

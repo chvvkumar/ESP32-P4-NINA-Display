@@ -193,7 +193,20 @@ cJSON *http_get_json(const char *url) {
             return NULL;  // 4xx — not retryable
         }
 
-        char *buffer = malloc(content_length + 1);
+        // Guard against chunked transfer encoding or missing Content-Length.
+        // NINA API always sends Content-Length; if absent, treat as error.
+        if (content_length == 0) {
+            ESP_LOGW(TAG, "No Content-Length for %s (chunked?), skipping", url);
+            if (reusing) {
+                esp_http_client_close(client);
+            } else {
+                esp_http_client_cleanup(client);
+            }
+            perf_timer_stop(&g_perf.http_request);
+            return NULL;
+        }
+
+        char *buffer = heap_caps_malloc(content_length + 1, MALLOC_CAP_SPIRAM);
         if (!buffer) {
             if (reusing) esp_http_client_close(client);
             else esp_http_client_cleanup(client);
@@ -549,11 +562,22 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
 }
 
 // =============================================================================
-// DNS Pre-check
+// DNS Pre-check with caching
 // =============================================================================
 
 #include <netdb.h>
 #include <sys/socket.h>
+#include <arpa/inet.h>
+
+#define DNS_CACHE_TTL_MS 60000  // 60-second TTL
+
+typedef struct {
+    char hostname[128];
+    char resolved_ip[46];  // INET6_ADDRSTRLEN
+    int64_t resolve_time_ms;
+} dns_cache_entry_t;
+
+static dns_cache_entry_t s_dns_cache[3];  // One per instance (MAX_NINA_INSTANCES)
 
 bool nina_client_dns_check(const char *base_url) {
     if (!base_url) return false;
@@ -577,17 +601,66 @@ bool nina_client_dns_check(const char *base_url) {
     // IP addresses don't need DNS resolution
     if (hostname[0] >= '0' && hostname[0] <= '9') return true;
 
-    // Attempt DNS resolution
+    int64_t now_ms = esp_timer_get_time() / 1000;
+
+    // Check DNS cache for a valid (non-expired) entry
+    for (int i = 0; i < 3; i++) {
+        if (strcmp(s_dns_cache[i].hostname, hostname) == 0 &&
+            s_dns_cache[i].resolved_ip[0] != '\0') {
+            if (now_ms - s_dns_cache[i].resolve_time_ms < DNS_CACHE_TTL_MS) {
+                ESP_LOGD(TAG, "DNS cache hit for %s -> %s", hostname, s_dns_cache[i].resolved_ip);
+                return true;
+            }
+            break;  // Found entry but expired — do fresh lookup
+        }
+    }
+
+    // Cache miss or expired — perform real DNS lookup
     struct addrinfo hints = {0};
     hints.ai_family = AF_INET;
     struct addrinfo *result = NULL;
     int err = getaddrinfo(hostname, NULL, &hints, &result);
+
+    if (err == 0 && result) {
+        // Lookup succeeded — update cache
+        char ip_str[46] = {0};
+        struct sockaddr_in *addr = (struct sockaddr_in *)result->ai_addr;
+        inet_ntoa_r(addr->sin_addr, ip_str, sizeof(ip_str));
+        freeaddrinfo(result);
+
+        // Find existing slot or first empty slot
+        int slot = -1;
+        for (int i = 0; i < 3; i++) {
+            if (strcmp(s_dns_cache[i].hostname, hostname) == 0 ||
+                s_dns_cache[i].hostname[0] == '\0') {
+                slot = i;
+                break;
+            }
+        }
+        if (slot < 0) slot = 0;  // Evict first slot if all full
+
+        snprintf(s_dns_cache[slot].hostname, sizeof(s_dns_cache[slot].hostname), "%s", hostname);
+        snprintf(s_dns_cache[slot].resolved_ip, sizeof(s_dns_cache[slot].resolved_ip), "%s", ip_str);
+        s_dns_cache[slot].resolve_time_ms = now_ms;
+
+        ESP_LOGD(TAG, "DNS cached %s -> %s", hostname, ip_str);
+        return true;
+    }
+
     if (result) freeaddrinfo(result);
 
-    if (err != 0) {
-        ESP_LOGD(TAG, "DNS check failed for %s (err %d)", hostname, err);
+    // Lookup failed — try stale cache as fallback
+    for (int i = 0; i < 3; i++) {
+        if (strcmp(s_dns_cache[i].hostname, hostname) == 0 &&
+            s_dns_cache[i].resolved_ip[0] != '\0') {
+            ESP_LOGW(TAG, "DNS lookup failed for %s, using stale cache -> %s",
+                     hostname, s_dns_cache[i].resolved_ip);
+            return true;
+        }
     }
-    return (err == 0);
+
+    ESP_LOGD(TAG, "DNS check failed for %s (err %d), no cache available", hostname, err);
+    return false;
 }
 
 #define MAX_IMAGE_SIZE (4 * 1024 * 1024)  // 4 MB cap for image downloads

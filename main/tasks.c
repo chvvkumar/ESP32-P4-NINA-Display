@@ -23,6 +23,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
+#include "esp_heap_caps.h"
 #include <time.h>
 #include "perf_monitor.h"
 
@@ -101,6 +102,17 @@ void data_update_task(void *arg) {
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         nina_poll_state_init(&poll_states[i]);
         nina_client_init_mutex(&instances[i]);
+    }
+
+    /* Allocate graph data in PSRAM to avoid ~10 KB stack pressure */
+    graph_rms_data_t *rms_data = heap_caps_calloc(1, sizeof(graph_rms_data_t), MALLOC_CAP_SPIRAM);
+    graph_hfr_data_t *hfr_data = heap_caps_calloc(1, sizeof(graph_hfr_data_t), MALLOC_CAP_SPIRAM);
+    if (!rms_data || !hfr_data) {
+        ESP_LOGE(TAG, "Failed to allocate graph data from PSRAM");
+        if (rms_data) heap_caps_free(rms_data);
+        if (hfr_data) heap_caps_free(hfr_data);
+        vTaskDelete(NULL);
+        return;
     }
 
     // Wait for WiFi
@@ -206,14 +218,15 @@ void data_update_task(void *arg) {
              * connected-instance metrics instantly on page switch instead of
              * waiting for the full poll cycle (which blocks on offline timeouts). */
             if (on_summary) {
-                for (int i = 0; i < instance_count; i++)
-                    nina_client_lock(&instances[i], 100);
+                bool locked[MAX_NINA_INSTANCES];
+                for (int j = 0; j < instance_count; j++)
+                    locked[j] = nina_client_lock(&instances[j], 100);
                 if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                     summary_page_update(instances, instance_count);
                     bsp_display_unlock();
                 }
-                for (int i = 0; i < instance_count; i++)
-                    nina_client_unlock(&instances[i]);
+                for (int j = 0; j < instance_count; j++)
+                    if (locked[j]) nina_client_unlock(&instances[j]);
             }
         }
 
@@ -317,14 +330,15 @@ void data_update_task(void *arg) {
             /* After connected instances are polled, update summary immediately
              * so the user sees fresh data before disconnected instances timeout. */
             if (on_summary && pi == connected_end && connected_end > 0 && connected_end < instance_count) {
+                bool locked[MAX_NINA_INSTANCES];
                 for (int j = 0; j < instance_count; j++)
-                    nina_client_lock(&instances[j], 100);
+                    locked[j] = nina_client_lock(&instances[j], 100);
                 if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                     summary_page_update(instances, instance_count);
                     bsp_display_unlock();
                 }
                 for (int j = 0; j < instance_count; j++)
-                    nina_client_unlock(&instances[j]);
+                    if (locked[j]) nina_client_unlock(&instances[j]);
             }
 
             int i = poll_order[pi];
@@ -380,8 +394,9 @@ void data_update_task(void *arg) {
 
         /* Update summary page when visible — lock each instance while reading */
         if (on_summary) {
-            for (int i = 0; i < instance_count; i++)
-                nina_client_lock(&instances[i], 100);
+            bool locked[MAX_NINA_INSTANCES];
+            for (int j = 0; j < instance_count; j++)
+                locked[j] = nina_client_lock(&instances[j], 100);
 
             perf_timer_start(&g_perf.ui_update_total);
 #if PERF_MONITOR_ENABLED
@@ -399,8 +414,8 @@ void data_update_task(void *arg) {
             }
             perf_timer_stop(&g_perf.ui_update_total);
 
-            for (int i = 0; i < instance_count; i++)
-                nina_client_unlock(&instances[i]);
+            for (int j = 0; j < instance_count; j++)
+                if (locked[j]) nina_client_unlock(&instances[j]);
         }
 
         /* Update active NINA page UI */
@@ -480,17 +495,17 @@ void data_update_task(void *arg) {
                     int gpoints = nina_graph_get_requested_points();
 
                     if (gtype == GRAPH_TYPE_RMS) {
-                        graph_rms_data_t rms_data;
-                        fetch_guider_graph(graph_url, &rms_data, gpoints);
+                        memset(rms_data, 0, sizeof(*rms_data));
+                        fetch_guider_graph(graph_url, rms_data, gpoints);
                         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                            nina_graph_set_rms_data(&rms_data);
+                            nina_graph_set_rms_data(rms_data);
                             bsp_display_unlock();
                         }
                     } else {
-                        graph_hfr_data_t hfr_data;
-                        fetch_hfr_history(graph_url, &hfr_data, gpoints);
+                        memset(hfr_data, 0, sizeof(*hfr_data));
+                        fetch_hfr_history(graph_url, hfr_data, gpoints);
                         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                            nina_graph_set_hfr_data(&hfr_data);
+                            nina_graph_set_hfr_data(hfr_data);
                             bsp_display_unlock();
                         }
                     }

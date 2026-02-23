@@ -881,6 +881,32 @@ void nina_dashboard_show_page_animated(int page_index, int instance_count, int e
     if (page_index == active_page) return;
 
     lv_obj_t *old_obj = get_page_obj(active_page);
+    lv_obj_t *upcoming_obj = get_page_obj(page_index);
+
+    /* Cancel any in-progress animations on both pages to prevent stacking */
+    if (old_obj) lv_anim_delete(old_obj, NULL);
+    if (upcoming_obj) lv_anim_delete(upcoming_obj, NULL);
+
+    /* Also cancel animation on a previously sliding-out page if still in flight */
+    if (slide_old_page_idx >= 0 && slide_old_page_idx != active_page) {
+        lv_obj_t *prev_old = get_page_obj(slide_old_page_idx);
+        if (prev_old) {
+            lv_anim_delete(prev_old, NULL);
+            lv_obj_add_flag(prev_old, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_style_translate_x(prev_old, 0, 0);
+        }
+        slide_old_page_idx = -1;
+    }
+
+    /* Reset opacity/translate on both objects in case a prior animation was interrupted */
+    if (old_obj) {
+        lv_obj_set_style_opa(old_obj, LV_OPA_COVER, 0);
+        lv_obj_set_style_translate_x(old_obj, 0, 0);
+    }
+    if (upcoming_obj) {
+        lv_obj_set_style_opa(upcoming_obj, LV_OPA_COVER, 0);
+        lv_obj_set_style_translate_x(upcoming_obj, 0, 0);
+    }
 
     if (effect == 1 && old_obj) {
         /* Fade-out: start opaque, animate to transparent */

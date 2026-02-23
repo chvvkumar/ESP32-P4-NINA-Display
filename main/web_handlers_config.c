@@ -2,6 +2,7 @@
 #include "mqtt_ha.h"
 #include "esp_wifi.h"
 #include <string.h>
+#include "esp_heap_caps.h"
 
 extern const uint8_t config_html_start[] asm("_binary_config_ui_html_start");
 extern const uint8_t config_html_end[]   asm("_binary_config_ui_html_end");
@@ -92,7 +93,7 @@ esp_err_t config_post_handler(httpd_req_t *req)
         return send_400(req, "Payload too large");
     }
 
-    char *buf = malloc(CONFIG_MAX_PAYLOAD);
+    char *buf = heap_caps_malloc(CONFIG_MAX_PAYLOAD, MALLOC_CAP_SPIRAM);
     if (!buf) {
         ESP_LOGE(TAG, "Config handler: malloc failed for payload buffer");
         httpd_resp_send_500(req);

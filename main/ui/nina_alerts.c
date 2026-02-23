@@ -41,6 +41,7 @@ static pending_alert_t  s_pending_alert = {0};
 static portMUX_TYPE     s_alert_lock = portMUX_INITIALIZER_UNLOCKED;
 
 /* ── Flash animation state ──────────────────────────────────────────── */
+static lv_timer_t *s_flash_anim_timer = NULL;
 static int  s_flash_step = 0;       /* Current step in flash sequence */
 static int  s_flash_total = 0;      /* Total steps (FLASH_CYCLES * 2) */
 
@@ -58,6 +59,7 @@ static int64_t now_ms(void) {
 static void flash_step_cb(lv_timer_t *timer) {
     if (!s_flash_overlay) {
         lv_timer_delete(timer);
+        s_flash_anim_timer = NULL;
         return;
     }
 
@@ -65,6 +67,7 @@ static void flash_step_cb(lv_timer_t *timer) {
         /* Animation complete — hide overlay */
         lv_obj_add_flag(s_flash_overlay, LV_OBJ_FLAG_HIDDEN);
         lv_timer_delete(timer);
+        s_flash_anim_timer = NULL;
         return;
     }
 
@@ -96,8 +99,12 @@ static void do_flash(void) {
     lv_obj_set_style_border_opa(s_flash_overlay, 200, 0);
     s_flash_step = 1;
 
-    /* Create a one-shot repeating timer for the animation steps */
-    lv_timer_create(flash_step_cb, FLASH_STEP_MS, NULL);
+    /* Cancel any in-progress flash animation timer before starting a new one */
+    if (s_flash_anim_timer) {
+        lv_timer_delete(s_flash_anim_timer);
+        s_flash_anim_timer = NULL;
+    }
+    s_flash_anim_timer = lv_timer_create(flash_step_cb, FLASH_STEP_MS, NULL);
 
     ESP_LOGI(TAG, "Alert flash triggered");
 }

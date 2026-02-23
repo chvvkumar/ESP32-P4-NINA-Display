@@ -17,6 +17,19 @@
 #define STALE_WARN_MS   30000   /* 30 s: show "Last update" label */
 #define STALE_DIM_MS   120000   /* 2 min: dim the entire page */
 
+/* ── Change-detection helpers ──────────────────────────────────────── */
+static inline void set_label_if_changed(lv_obj_t *label, const char *text) {
+    const char *cur = lv_label_get_text(label);
+    if (strcmp(cur, text) != 0) lv_label_set_text(label, text);
+}
+
+#define SET_LABEL_FMT_IF_CHANGED(label, bufsize, fmt, ...) do { \
+    char _buf[bufsize]; \
+    snprintf(_buf, sizeof(_buf), fmt, __VA_ARGS__); \
+    const char *_cur = lv_label_get_text(label); \
+    if (strcmp(_cur, _buf) != 0) lv_label_set_text(label, _buf); \
+} while (0)
+
 /* Red Night theme forces all colors to the theme palette, ignoring filter/threshold overrides */
 static bool theme_forces_colors(void) {
     return current_theme && strcmp(current_theme->name, "Red Night") == 0;
@@ -91,45 +104,45 @@ static void update_disconnected_state(dashboard_page_t *p, int page_index, int g
     if (host[0] != '\0') {
         char buf[96];
         snprintf(buf, sizeof(buf), "%s - %s", host, state_text);
-        lv_label_set_text(p->lbl_instance_name, buf);
+        set_label_if_changed(p->lbl_instance_name, buf);
     } else {
-        lv_label_set_text(p->lbl_instance_name, state_text);
+        set_label_if_changed(p->lbl_instance_name, state_text);
     }
-    lv_label_set_text(p->lbl_target_name, "----");
-    lv_label_set_text(p->lbl_seq_container, "----");
-    lv_label_set_text(p->lbl_seq_step, "----");
-    lv_label_set_text(p->lbl_exposure_current, "--");
-    lv_label_set_text(p->lbl_exposure_total, "");
+    set_label_if_changed(p->lbl_target_name, "----");
+    set_label_if_changed(p->lbl_seq_container, "----");
+    set_label_if_changed(p->lbl_seq_step, "----");
+    set_label_if_changed(p->lbl_exposure_current, "--");
+    set_label_if_changed(p->lbl_exposure_total, "");
     lv_arc_set_value(p->arc_exposure, 0);
-    lv_label_set_text(p->lbl_loop_count, "-- / --");
+    set_label_if_changed(p->lbl_loop_count, "-- / --");
     lv_anim_delete(p->lbl_rms_value, arcsec_anim_exec);
-    lv_label_set_text(p->lbl_rms_value, "--");
+    set_label_if_changed(p->lbl_rms_value, "--");
     lv_obj_set_style_text_color(p->lbl_rms_value, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
     p->anim_rms_total_x100 = 0;
     if (p->lbl_rms_ra_value)  { lv_anim_delete(p->lbl_rms_ra_value, arcsec_anim_exec);  p->anim_rms_ra_x100 = 0; }
     if (p->lbl_rms_dec_value) { lv_anim_delete(p->lbl_rms_dec_value, arcsec_anim_exec); p->anim_rms_dec_x100 = 0; }
     lv_anim_delete(p->lbl_hfr_value, hfr_anim_exec);
-    lv_label_set_text(p->lbl_hfr_value, "--");
+    set_label_if_changed(p->lbl_hfr_value, "--");
     lv_obj_set_style_text_color(p->lbl_hfr_value, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
     p->anim_hfr_x100 = 0;
-    lv_label_set_text(p->lbl_flip_value, "--");
-    lv_label_set_text(p->lbl_stars_value, "--");
-    lv_label_set_text(p->lbl_target_time_value, "--");
+    set_label_if_changed(p->lbl_flip_value, "--");
+    set_label_if_changed(p->lbl_stars_value, "--");
+    set_label_if_changed(p->lbl_target_time_value, "--");
     for (int i = 0; i < MAX_POWER_WIDGETS; i++) {
         lv_obj_add_flag(p->box_pwr[i], LV_OBJ_FLAG_HIDDEN);
     }
 }
 
 static void update_header(dashboard_page_t *p, const nina_client_t *d) {
-    lv_label_set_text(p->lbl_instance_name,
+    set_label_if_changed(p->lbl_instance_name,
         d->telescope_name[0] != '\0' ? d->telescope_name : "N.I.N.A.");
-    lv_label_set_text(p->lbl_target_name, d->target_name[0] != '\0' ? d->target_name : "----");
+    set_label_if_changed(p->lbl_target_name, d->target_name[0] != '\0' ? d->target_name : "----");
 }
 
 static void update_sequence_info(dashboard_page_t *p, const nina_client_t *d) {
-    lv_label_set_text(p->lbl_seq_container,
+    set_label_if_changed(p->lbl_seq_container,
         d->container_name[0] != '\0' ? d->container_name : "----");
-    lv_label_set_text(p->lbl_seq_step,
+    set_label_if_changed(p->lbl_seq_step,
         d->container_step[0] != '\0' ? d->container_step : "----");
 }
 
@@ -159,14 +172,14 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
 
         // Show total exposure duration inside the arc
         int total_sec = (int)total;
-        lv_label_set_text_fmt(p->lbl_exposure_current, "%ds", total_sec);
+        SET_LABEL_FMT_IF_CHANGED(p->lbl_exposure_current, 16, "%ds", total_sec);
 
         // Update filter label (below the duration)
         if (d->current_filter[0] != '\0' && strcmp(d->current_filter, "--") != 0) {
-            lv_label_set_text(p->lbl_exposure_total, d->current_filter);
+            set_label_if_changed(p->lbl_exposure_total, d->current_filter);
             lv_obj_set_style_text_color(p->lbl_exposure_total, lv_color_hex(filter_color), 0);
         } else {
-            lv_label_set_text(p->lbl_exposure_total, "");
+            set_label_if_changed(p->lbl_exposure_total, "");
         }
 
         int progress = (int)((elapsed * 100) / total);
@@ -211,17 +224,17 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
         }
 
         if (d->exposure_iterations > 0) {
-            lv_label_set_text_fmt(p->lbl_loop_count, "%d / %d",
+            SET_LABEL_FMT_IF_CHANGED(p->lbl_loop_count, 32, "%d / %d",
                 d->exposure_count, d->exposure_iterations);
         } else {
-            lv_label_set_text(p->lbl_loop_count, "-- / --");
+            set_label_if_changed(p->lbl_loop_count, "-- / --");
         }
     } else {
         p->interp_arc_target = 0;
-        lv_label_set_text(p->lbl_exposure_current, "--");
-        lv_label_set_text(p->lbl_exposure_total, "");
+        set_label_if_changed(p->lbl_exposure_current, "--");
+        set_label_if_changed(p->lbl_exposure_total, "");
         lv_arc_set_value(p->arc_exposure, 0);
-        lv_label_set_text(p->lbl_loop_count, "-- / --");
+        set_label_if_changed(p->lbl_loop_count, "-- / --");
     }
 }
 
@@ -244,7 +257,7 @@ static void update_guider_stats(dashboard_page_t *p, const nina_client_t *d,
         p->anim_rms_total_x100 = new_val;
     } else {
         lv_anim_delete(p->lbl_rms_value, arcsec_anim_exec);
-        lv_label_set_text(p->lbl_rms_value, "--");
+        set_label_if_changed(p->lbl_rms_value, "--");
         lv_obj_set_style_text_color(p->lbl_rms_value, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
         p->anim_rms_total_x100 = 0;
     }
@@ -262,7 +275,7 @@ static void update_guider_stats(dashboard_page_t *p, const nina_client_t *d,
             p->anim_rms_ra_x100 = new_val;
         } else {
             lv_anim_delete(p->lbl_rms_ra_value, arcsec_anim_exec);
-            lv_label_set_text(p->lbl_rms_ra_value, "--");
+            set_label_if_changed(p->lbl_rms_ra_value, "--");
             p->anim_rms_ra_x100 = 0;
         }
     }
@@ -280,7 +293,7 @@ static void update_guider_stats(dashboard_page_t *p, const nina_client_t *d,
             p->anim_rms_dec_x100 = new_val;
         } else {
             lv_anim_delete(p->lbl_rms_dec_value, arcsec_anim_exec);
-            lv_label_set_text(p->lbl_rms_dec_value, "--");
+            set_label_if_changed(p->lbl_rms_dec_value, "--");
             p->anim_rms_dec_x100 = 0;
         }
     }
@@ -302,21 +315,24 @@ static void update_guider_stats(dashboard_page_t *p, const nina_client_t *d,
         p->anim_hfr_x100 = new_val;
     } else {
         lv_anim_delete(p->lbl_hfr_value, hfr_anim_exec);
-        lv_label_set_text(p->lbl_hfr_value, "--");
+        set_label_if_changed(p->lbl_hfr_value, "--");
         lv_obj_set_style_text_color(p->lbl_hfr_value, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
         p->anim_hfr_x100 = 0;
     }
 }
 
 static void update_mount_and_image_stats(dashboard_page_t *p, const nina_client_t *d) {
-    lv_label_set_text(p->lbl_flip_value,
+    set_label_if_changed(p->lbl_flip_value,
         (d->meridian_flip[0] != '\0' && strcmp(d->meridian_flip, "--") != 0)
             ? d->meridian_flip : "--");
 
-    lv_label_set_text_fmt(p->lbl_stars_value,
-        d->stars >= 0 ? "%d" : "--", d->stars);
+    if (d->stars >= 0) {
+        SET_LABEL_FMT_IF_CHANGED(p->lbl_stars_value, 16, "%d", d->stars);
+    } else {
+        set_label_if_changed(p->lbl_stars_value, "--");
+    }
 
-    lv_label_set_text(p->lbl_target_time_value,
+    set_label_if_changed(p->lbl_target_time_value,
         d->target_time_remaining[0] != '\0' ? d->target_time_remaining : "--");
 }
 
@@ -332,8 +348,8 @@ static void update_power(dashboard_page_t *p, const nina_client_t *d) {
         strncpy(title, d->power.amps_name[0] ? d->power.amps_name : "Amps", sizeof(title) - 1);
         title[sizeof(title) - 1] = '\0';
         UPPER(title);
-        lv_label_set_text(p->lbl_pwr_title[pwr_idx], title);
-        lv_label_set_text_fmt(p->lbl_pwr_value[pwr_idx], "%.2fA", d->power.total_amps);
+        set_label_if_changed(p->lbl_pwr_title[pwr_idx], title);
+        SET_LABEL_FMT_IF_CHANGED(p->lbl_pwr_value[pwr_idx], 16, "%.2fA", d->power.total_amps);
         lv_obj_clear_flag(p->box_pwr[pwr_idx], LV_OBJ_FLAG_HIDDEN);
         pwr_idx++;
     }
@@ -342,8 +358,8 @@ static void update_power(dashboard_page_t *p, const nina_client_t *d) {
         strncpy(title, d->power.watts_name[0] ? d->power.watts_name : "Watts", sizeof(title) - 1);
         title[sizeof(title) - 1] = '\0';
         UPPER(title);
-        lv_label_set_text(p->lbl_pwr_title[pwr_idx], title);
-        lv_label_set_text_fmt(p->lbl_pwr_value[pwr_idx], "%.1fW", d->power.total_watts);
+        set_label_if_changed(p->lbl_pwr_title[pwr_idx], title);
+        SET_LABEL_FMT_IF_CHANGED(p->lbl_pwr_value[pwr_idx], 16, "%.1fW", d->power.total_watts);
         lv_obj_clear_flag(p->box_pwr[pwr_idx], LV_OBJ_FLAG_HIDDEN);
         pwr_idx++;
     }
@@ -353,8 +369,8 @@ static void update_power(dashboard_page_t *p, const nina_client_t *d) {
             strncpy(title, d->power.pwm_names[i], sizeof(title) - 1);
             title[sizeof(title) - 1] = '\0';
             UPPER(title);
-            lv_label_set_text(p->lbl_pwr_title[pwr_idx], title);
-            lv_label_set_text_fmt(p->lbl_pwr_value[pwr_idx], "%.0f%%", d->power.pwm[i]);
+            set_label_if_changed(p->lbl_pwr_title[pwr_idx], title);
+            SET_LABEL_FMT_IF_CHANGED(p->lbl_pwr_value[pwr_idx], 16, "%.0f%%", d->power.pwm[i]);
             lv_obj_clear_flag(p->box_pwr[pwr_idx], LV_OBJ_FLAG_HIDDEN);
         }
     }
