@@ -30,7 +30,6 @@ static const char *TAG = "toast";
 #define TICK_INTERVAL_MS    200
 
 /* Toast bar dimensions */
-#define TOAST_HEIGHT        80
 #define TOAST_RADIUS        18
 #define TOAST_MARGIN_X      12
 #define TOAST_BOTTOM_Y      -30   /* Offset from bottom, above page dots */
@@ -275,7 +274,8 @@ void nina_toast_init(lv_obj_t *screen) {
     /* Create the persistent toast bar (hidden initially) */
     lv_obj_t *bar = lv_obj_create(screen);
     lv_obj_remove_style_all(bar);
-    lv_obj_set_size(bar, SCREEN_SIZE - 2 * TOAST_MARGIN_X, TOAST_HEIGHT);
+    lv_obj_set_width(bar, SCREEN_SIZE - 2 * TOAST_MARGIN_X);
+    lv_obj_set_height(bar, LV_SIZE_CONTENT);
     lv_obj_set_align(bar, LV_ALIGN_BOTTOM_MID);
     lv_obj_set_style_translate_y(bar, TOAST_BOTTOM_Y, 0);
     lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
@@ -291,6 +291,8 @@ void nina_toast_init(lv_obj_t *screen) {
     lv_obj_set_flex_align(bar, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_left(bar, 16, 0);
     lv_obj_set_style_pad_right(bar, 16, 0);
+    lv_obj_set_style_pad_top(bar, 12, 0);
+    lv_obj_set_style_pad_bottom(bar, 12, 0);
     lv_obj_set_style_pad_column(bar, 10, 0);
     s_toast.bar = bar;
 
@@ -304,20 +306,22 @@ void nina_toast_init(lv_obj_t *screen) {
     lv_obj_clear_flag(dot, LV_OBJ_FLAG_CLICKABLE);
     s_toast.dot = dot;
 
-    /* Message label (grows to fill available space) */
+    /* Message label (grows to fill available space, wraps long text) */
     lv_obj_t *lbl_msg = lv_label_create(bar);
     lv_obj_set_style_text_font(lbl_msg, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(lbl_msg, lv_color_hex(0xFFFFFF), 0);
     lv_label_set_text(lbl_msg, "");
-    lv_label_set_long_mode(lbl_msg, LV_LABEL_LONG_CLIP);
+    lv_label_set_long_mode(lbl_msg, LV_LABEL_LONG_WRAP);
     lv_obj_set_flex_grow(lbl_msg, 1);
     s_toast.lbl_msg = lbl_msg;
 
-    /* Age label (right-aligned) */
+    /* Age label (right-aligned, fixed minimum width so it never gets clipped) */
     lv_obj_t *lbl_age = lv_label_create(bar);
     lv_obj_set_style_text_font(lbl_age, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(lbl_age, lv_color_hex(0xBBBBBB), 0);
     lv_label_set_text(lbl_age, "");
+    lv_obj_set_style_min_width(lbl_age, 48, 0);
+    lv_obj_set_style_text_align(lbl_age, LV_TEXT_ALIGN_RIGHT, 0);
     s_toast.lbl_age = lbl_age;
 
     /* Clear pending queue */

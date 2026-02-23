@@ -399,10 +399,10 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         }
         /* Toast + event log (thread-safe, no lock needed) */
         if (safe) {
-            ws_toast(index, TOAST_SUCCESS, "Observatory is safe");
+            ws_toast(index, TOAST_SUCCESS, "Safe");
             nina_event_log_add(EVENT_SEV_SUCCESS, index, "Observatory is safe");
         } else {
-            ws_toast(index, TOAST_ERROR, "Observatory UNSAFE");
+            ws_toast(index, TOAST_ERROR, "UNSAFE");
             nina_event_log_add(EVENT_SEV_ERROR, index, "Observatory UNSAFE!");
             nina_alert_trigger(ALERT_SAFETY, index, 0);
         }
