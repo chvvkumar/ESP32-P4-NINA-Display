@@ -548,6 +548,48 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
              data->connected, data->profile_name, data->target_name);
 }
 
+// =============================================================================
+// DNS Pre-check
+// =============================================================================
+
+#include <netdb.h>
+#include <sys/socket.h>
+
+bool nina_client_dns_check(const char *base_url) {
+    if (!base_url) return false;
+
+    // Extract hostname from URL: "http://hostname:port/path..."
+    const char *host_start = strstr(base_url, "://");
+    if (!host_start) return false;
+    host_start += 3;
+
+    // Find end of hostname (at ':' for port or '/' for path)
+    const char *host_end = host_start;
+    while (*host_end && *host_end != ':' && *host_end != '/') host_end++;
+
+    int host_len = host_end - host_start;
+    if (host_len <= 0 || host_len >= 128) return false;
+
+    char hostname[128];
+    memcpy(hostname, host_start, host_len);
+    hostname[host_len] = '\0';
+
+    // IP addresses don't need DNS resolution
+    if (hostname[0] >= '0' && hostname[0] <= '9') return true;
+
+    // Attempt DNS resolution
+    struct addrinfo hints = {0};
+    hints.ai_family = AF_INET;
+    struct addrinfo *result = NULL;
+    int err = getaddrinfo(hostname, NULL, &hints, &result);
+    if (result) freeaddrinfo(result);
+
+    if (err != 0) {
+        ESP_LOGD(TAG, "DNS check failed for %s (err %d)", hostname, err);
+    }
+    return (err == 0);
+}
+
 #define MAX_IMAGE_SIZE (4 * 1024 * 1024)  // 4 MB cap for image downloads
 
 uint8_t *nina_client_fetch_prepared_image(const char *base_url, int width, int height, int quality, size_t *out_size) {

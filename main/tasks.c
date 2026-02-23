@@ -15,6 +15,9 @@
 #include "ui/nina_summary.h"
 #include "ui/nina_graph_overlay.h"
 #include "ui/nina_info_overlay.h"
+#include "ui/nina_safety.h"
+#include "ui/nina_alerts.h"
+#include "ui/nina_session_stats.h"
 #include "bsp/esp-bsp.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -111,6 +114,11 @@ void data_update_task(void *arg) {
             const char *url = app_config_get_instance_url(i);
             if (strlen(url) == 0) continue;
             nina_connection_set_connecting(i);
+            if (!nina_client_dns_check(url)) {
+                ESP_LOGW(TAG, "Boot probe instance %d: DNS failed for %s", i + 1, url);
+                nina_connection_report_poll(i, false);
+                continue;
+            }
             nina_client_poll_heartbeat(url, &instances[i], i);
             ESP_LOGI(TAG, "Boot probe instance %d: connected=%d", i + 1, instances[i].connected);
         }
@@ -144,7 +152,7 @@ void data_update_task(void *arg) {
     // Start WebSocket for all configured instances concurrently
     for (int i = 0; i < instance_count; i++) {
         const char *url = app_config_get_instance_url(i);
-        if (strlen(url) > 0) {
+        if (strlen(url) > 0 && nina_client_dns_check(url)) {
             nina_websocket_start(i, url, &instances[i]);
         }
     }
@@ -193,6 +201,20 @@ void data_update_task(void *arg) {
             ESP_LOGI(TAG, "Page switched to %d%s%s%s", current_active,
                      on_sysinfo ? " (sysinfo)" : "", on_settings ? " (settings)" : "",
                      on_summary ? " (summary)" : "");
+
+            /* Immediate summary render with cached data so the user sees
+             * connected-instance metrics instantly on page switch instead of
+             * waiting for the full poll cycle (which blocks on offline timeouts). */
+            if (on_summary) {
+                for (int i = 0; i < instance_count; i++)
+                    nina_client_lock(&instances[i], 100);
+                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                    summary_page_update(instances, instance_count);
+                    bsp_display_unlock();
+                }
+                for (int i = 0; i < instance_count; i++)
+                    nina_client_unlock(&instances[i]);
+            }
         }
 
         int64_t now_ms = esp_timer_get_time() / 1000;
@@ -277,9 +299,49 @@ void data_update_task(void *arg) {
             }
         }
 
-        for (int i = 0; i < instance_count; i++) {
+        /* On summary page, poll connected instances first so their data
+         * appears quickly; disconnected instances (which timeout) come second. */
+        int poll_order[MAX_NINA_INSTANCES];
+        int connected_end = instance_count;
+        for (int i = 0; i < instance_count; i++) poll_order[i] = i;
+        if (on_summary) {
+            int wi = 0;
+            for (int i = 0; i < instance_count; i++)
+                if (nina_connection_is_connected(i)) poll_order[wi++] = i;
+            connected_end = wi;
+            for (int i = 0; i < instance_count; i++)
+                if (!nina_connection_is_connected(i)) poll_order[wi++] = i;
+        }
+
+        for (int pi = 0; pi < instance_count; pi++) {
+            /* After connected instances are polled, update summary immediately
+             * so the user sees fresh data before disconnected instances timeout. */
+            if (on_summary && pi == connected_end && connected_end > 0 && connected_end < instance_count) {
+                for (int j = 0; j < instance_count; j++)
+                    nina_client_lock(&instances[j], 100);
+                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                    summary_page_update(instances, instance_count);
+                    bsp_display_unlock();
+                }
+                for (int j = 0; j < instance_count; j++)
+                    nina_client_unlock(&instances[j]);
+            }
+
+            int i = poll_order[pi];
+
+            // Check deferred camera-disconnect alerts (runs regardless of poll skip)
+            nina_websocket_check_deferred_alerts(i);
+
             const char *url = app_config_get_instance_url(i);
             if (strlen(url) == 0) continue;
+
+            /* DNS pre-check: skip all HTTP/WS work if hostname doesn't resolve */
+            if (!nina_client_dns_check(url)) {
+                instances[i].connected = false;
+                nina_connection_report_poll(i, false);
+                ESP_LOGD(TAG, "Instance %d: DNS failed, skipping poll cycle", i + 1);
+                continue;
+            }
 
             /* Full poll when: on summary page (all instances) or on this instance's NINA page */
             if (on_summary || i == active_nina_idx) {
@@ -533,6 +595,42 @@ void data_update_task(void *arg) {
                     bsp_display_unlock();
                 }
                 nina_client_unlock(&instances[active_nina_idx]);
+            }
+        }
+
+        // ── Session stats recording + safety monitor + RMS/HFR alerts ──
+        for (int i = 0; i < instance_count; i++) {
+            if (!nina_connection_is_connected(i)) continue;
+
+            // Record session stats (thread-safe, no LVGL)
+            nina_session_stats_record(i,
+                instances[i].guider.rms_total,
+                instances[i].hfr,
+                instances[i].camera.temp,
+                instances[i].stars,
+                instances[i].camera.cooler_power);
+
+            // Safety state update (no display lock needed — state tracking only)
+            if (instances[i].safety_connected) {
+                nina_safety_update(true, instances[i].safety_is_safe);
+            }
+
+            // RMS threshold alert (thread-safe via pending queue)
+            if (instances[i].guider.rms_total > 0.0f) {
+                threshold_config_t rms_cfg;
+                app_config_get_rms_threshold_config(i, &rms_cfg);
+                if (rms_cfg.ok_max > 0.0f && instances[i].guider.rms_total > rms_cfg.ok_max) {
+                    nina_alert_trigger(ALERT_RMS, i, instances[i].guider.rms_total);
+                }
+            }
+
+            // HFR threshold alert (thread-safe via pending queue)
+            if (instances[i].hfr > 0.0f) {
+                threshold_config_t hfr_cfg;
+                app_config_get_hfr_threshold_config(i, &hfr_cfg);
+                if (hfr_cfg.ok_max > 0.0f && instances[i].hfr > hfr_cfg.ok_max) {
+                    nina_alert_trigger(ALERT_HFR, i, instances[i].hfr);
+                }
             }
         }
 

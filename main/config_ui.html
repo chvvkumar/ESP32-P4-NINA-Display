@@ -590,6 +590,11 @@
           <input type="number" class="input" id="connection_timeout" min="2" max="30" value="6">
           <div class="field-hint">Time without a successful poll before a NINA instance is considered offline</div>
         </div>
+        <div class="field">
+          <label class="field-label">Toast notification duration (seconds)</label>
+          <input type="number" class="input" id="toast_duration" min="3" max="30" value="8">
+          <div class="field-hint">How long toast notifications are shown on screen (errors show for 2x this value)</div>
+        </div>
       </div>
     </div>
     <div id="tab-network" class="tab-panel">
@@ -1019,7 +1024,8 @@
         auto_rotate_pages:getRotatePages(),
         update_rate_s:parseInt($('update_rate').value)||2,
         graph_update_interval_s:parseInt($('graph_interval').value)||5,
-        connection_timeout_s:parseInt($('connection_timeout').value)||6
+        connection_timeout_s:parseInt($('connection_timeout').value)||6,
+        toast_duration_s:parseInt($('toast_duration').value)||8
       };
 
       const ssid=$('ssid').value.trim();
@@ -1060,6 +1066,7 @@
       $('update_rate').value=data.update_rate_s||2;
       $('graph_interval').value=data.graph_update_interval_s||5;
       $('connection_timeout').value=data.connection_timeout_s||6;
+      $('toast_duration').value=data.toast_duration_s||8;
 
       for(let i=0;i<3;i++){
         const key='filter_colors_'+(i+1);

@@ -167,6 +167,11 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
 // Legacy API - fetches all data every call (kept for compatibility)
 void nina_client_get_data(const char *base_url, nina_client_t *data);
 
+// DNS pre-check: resolve hostname from a NINA base URL.
+// Returns true if hostname resolves (or is an IP address), false on DNS failure.
+// Use before polling to avoid expensive HTTP client setup for unreachable hosts.
+bool nina_client_dns_check(const char *base_url);
+
 // Fetch prepared image as JPEG from NINA API
 // Returns heap-allocated JPEG bytes (caller must free), or NULL on error
 // Uses: GET /prepared-image?resize=true&size=WxH&quality=Q&autoPrepare=true

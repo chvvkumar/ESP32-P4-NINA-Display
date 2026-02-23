@@ -66,6 +66,7 @@ esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "update_rate_s", cfg->update_rate_s);
     cJSON_AddNumberToObject(root, "graph_update_interval_s", cfg->graph_update_interval_s);
     cJSON_AddNumberToObject(root, "connection_timeout_s", cfg->connection_timeout_s);
+    cJSON_AddNumberToObject(root, "toast_duration_s", cfg->toast_duration_s);
 
     const char *json_str = cJSON_PrintUnformatted(root);
     if (json_str == NULL) {
@@ -300,6 +301,14 @@ esp_err_t config_post_handler(httpd_req_t *req)
         if (v < 2) v = 2;
         if (v > 30) v = 30;
         cfg->connection_timeout_s = (uint8_t)v;
+    }
+
+    cJSON *td_item = cJSON_GetObjectItem(root, "toast_duration_s");
+    if (cJSON_IsNumber(td_item)) {
+        int v = td_item->valueint;
+        if (v < 3) v = 3;
+        if (v > 30) v = 30;
+        cfg->toast_duration_s = (uint8_t)v;
     }
 
     app_config_save(cfg);

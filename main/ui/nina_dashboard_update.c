@@ -6,6 +6,7 @@
 #include "nina_dashboard.h"
 #include "nina_dashboard_internal.h"
 #include "nina_connection.h"
+#include "nina_safety.h"
 #include "app_config.h"
 #include "themes.h"
 #include "esp_timer.h"
@@ -42,7 +43,7 @@ void nina_dashboard_update_status(int page_index, int rssi, bool nina_connected,
 
     uint32_t text_color;
     if (theme_forces_colors()) {
-        text_color = nina_connected ? current_theme->text_color : current_theme->label_color;
+        text_color = nina_connected ? current_theme->text_color : current_theme->bento_border;
     } else {
         text_color = nina_connected ? 0x4ade80 : 0xf87171;
     }
@@ -385,8 +386,13 @@ static void update_stale_indicator(dashboard_page_t *p, const nina_client_t *d) 
         else
             lv_label_set_text_fmt(p->lbl_stale, "Last update: %ds ago", stale_sec);
 
-        /* Red text when severely stale */
-        uint32_t stale_color = (stale_ms > STALE_DIM_MS) ? 0xf87171 : 0xfbbf24;
+        /* Stale color: dim for warning, bright for severe */
+        uint32_t stale_color;
+        if (theme_forces_colors()) {
+            stale_color = (stale_ms > STALE_DIM_MS) ? 0xff0000 : 0xcc0000;
+        } else {
+            stale_color = (stale_ms > STALE_DIM_MS) ? 0xf87171 : 0xfbbf24;
+        }
         lv_obj_set_style_text_color(p->lbl_stale, lv_color_hex(stale_color), 0);
 
         lv_obj_clear_flag(p->lbl_stale, LV_OBJ_FLAG_HIDDEN);
@@ -403,6 +409,25 @@ static void update_stale_indicator(dashboard_page_t *p, const nina_client_t *d) 
     }
 }
 
+static void update_safety_dot(dashboard_page_t *p) {
+    if (!p->safety_dot) return;
+
+    if (!nina_safety_is_connected()) {
+        lv_obj_add_flag(p->safety_dot, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+
+    lv_obj_clear_flag(p->safety_dot, LV_OBJ_FLAG_HIDDEN);
+
+    if (nina_safety_is_safe()) {
+        lv_obj_set_style_bg_color(p->safety_dot,
+            lv_color_hex(theme_forces_colors() ? 0x7f1d1d : 0x4CAF50), 0);
+    } else {
+        lv_obj_set_style_bg_color(p->safety_dot,
+            lv_color_hex(theme_forces_colors() ? 0xff0000 : 0xF44336), 0);
+    }
+}
+
 void update_nina_dashboard_page(int page_index, const nina_client_t *data) {
     if (page_index < 0 || page_index >= page_count) return;
     if (!data) return;
@@ -411,6 +436,8 @@ void update_nina_dashboard_page(int page_index, const nina_client_t *data) {
     if (!p->page) return;
 
     int gb = app_config_get()->color_brightness;
+
+    update_safety_dot(p);
 
     if (!data->connected) {
         nina_conn_state_t conn_state = nina_connection_get_state(page_index);

@@ -10,14 +10,21 @@
 
 #include "nina_websocket.h"
 #include "nina_client_internal.h"
+#include "app_config.h"
 #include "esp_websocket_client.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "cJSON.h"
 #include <string.h>
+#include <stdarg.h>
 #include "perf_monitor.h"
 #include "nina_connection.h"
 #include "tasks.h"
+#include "ui/nina_toast.h"
+#include "ui/nina_event_log.h"
+#include "ui/nina_alerts.h"
+#include "ui/nina_safety.h"
+#include "ui/nina_session_stats.h"
 
 static const char *TAG = "nina_ws";
 
@@ -31,6 +38,57 @@ static nina_client_t *ws_client_data[MAX_NINA_INSTANCES];
 static int ws_backoff_ms[MAX_NINA_INSTANCES];
 static int64_t ws_disconnect_time_ms[MAX_NINA_INSTANCES];
 static bool ws_needs_reconnect[MAX_NINA_INSTANCES];
+
+// Deferred camera-disconnect toast: suppress if CAMERA-CONNECTED follows quickly
+#define CAMERA_DISCONNECT_GRACE_MS 3000
+static int64_t s_camera_disconnect_pending_ms[MAX_NINA_INSTANCES] = {0};
+
+/**
+ * @brief Extract hostname from a NINA instance config URL.
+ *
+ * Given "http://astromele2.lan:1888/v2/api/" returns "astromele2.lan".
+ * Result is written to @p out (max @p out_size bytes).
+ */
+static void get_instance_hostname(int index, char *out, size_t out_size) {
+    if (out_size == 0) return;
+    out[0] = '\0';
+    if (index < 0 || index >= MAX_NINA_INSTANCES) return;
+    const char *url = app_config_get_instance_url(index);
+    if (!url || url[0] == '\0') return;
+
+    /* Skip scheme (http:// or https://) */
+    const char *host = strstr(url, "://");
+    host = host ? host + 3 : url;
+
+    /* Copy until ':' or '/' or end */
+    size_t i = 0;
+    while (host[i] && host[i] != ':' && host[i] != '/' && i < out_size - 1) {
+        out[i] = host[i];
+        i++;
+    }
+    out[i] = '\0';
+}
+
+/** Show a toast prefixed with the NINA instance hostname. Thread-safe. */
+static void ws_toast(int index, toast_severity_t sev, const char *msg) {
+    char host[48];
+    get_instance_hostname(index, host, sizeof(host));
+    if (host[0]) {
+        nina_toast_show_fmt(sev, "%s: %s", host, msg);
+    } else {
+        nina_toast_show(sev, msg);
+    }
+}
+
+/** Printf-style ws_toast. Thread-safe. */
+static void ws_toast_fmt(int index, toast_severity_t sev, const char *fmt, ...) {
+    char msg[96];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+    ws_toast(index, sev, msg);
+}
 
 /**
  * @brief Process incoming WebSocket JSON event from NINA
@@ -167,6 +225,11 @@ static void handle_websocket_message(int index, const char *payload, int len) {
                 ESP_LOGW(TAG, "WS[%d]: Could not acquire mutex for IMAGE-SAVE", index);
             }
 
+            nina_event_log_add_fmt(EVENT_SEV_INFO, index,
+                "Image #%d: %s, HFR %.2f, %d stars",
+                data->exposure_count, img_stats.filter, new_hfr, new_stars);
+            nina_session_stats_add_exposure(index, new_exp_total);
+
             ESP_LOGI(TAG, "WS[%d]: HFR=%.2f Stars=%d Filter=%s Target=%s",
                 index, new_hfr, new_stars,
                 img_stats.filter, data->target_name);
@@ -184,6 +247,8 @@ static void handle_websocket_message(int index, const char *payload, int len) {
                     data->ui_refresh_needed = true;
                     nina_client_unlock(data);
                 }
+                nina_event_log_add_fmt(EVENT_SEV_INFO, index,
+                    "Filter changed to %s", name->valuestring);
                 ESP_LOGI(TAG, "WS[%d]: Filter changed to %s", index, data->current_filter);
             }
         }
@@ -195,6 +260,8 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             data->ui_refresh_needed = true;
             nina_client_unlock(data);
         }
+        ws_toast(index, TOAST_SUCCESS, "Sequence completed");
+        nina_event_log_add(EVENT_SEV_SUCCESS, index, "Sequence completed");
         ESP_LOGI(TAG, "WS[%d]: Sequence finished", index);
     }
     // SEQUENCE-STARTING: Mark sequence as running
@@ -206,6 +273,9 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             data->sequence_poll_needed = true;
             nina_client_unlock(data);
         }
+        ws_toast(index, TOAST_INFO, "Sequence started");
+        nina_event_log_add(EVENT_SEV_INFO, index, "Sequence started");
+        nina_session_stats_reset();
         ESP_LOGI(TAG, "WS[%d]: Sequence starting", index);
     }
     // GUIDER-DITHER: Flag dithering state
@@ -215,6 +285,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             data->ui_refresh_needed = true;
             nina_client_unlock(data);
         }
+        nina_event_log_add(EVENT_SEV_INFO, index, "Dithering");
         ESP_LOGI(TAG, "WS[%d]: Dithering", index);
     }
     // GUIDER-START: Clear dithering flag
@@ -239,6 +310,8 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             data->sequence_poll_needed = true;
             nina_client_unlock(data);
         }
+        if (target_name && target_name->valuestring)
+            nina_event_log_add_fmt(EVENT_SEV_INFO, index, "New target: %s", target_name->valuestring);
         ESP_LOGI(TAG, "WS[%d]: New target: %s", index,
                  target_name && target_name->valuestring ? target_name->valuestring : "(null)");
     }
@@ -251,6 +324,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             data->ui_refresh_needed = true;
             nina_client_unlock(data);
         }
+        nina_event_log_add(EVENT_SEV_INFO, index, "Autofocus started");
         ESP_LOGI(TAG, "WS[%d]: Autofocus starting", index);
     }
     // AUTOFOCUS-FINISHED: Mark AF complete, find best point
@@ -271,6 +345,10 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             data->ui_refresh_needed = true;
             nina_client_unlock(data);
         }
+        ws_toast(index, TOAST_SUCCESS, "Autofocus complete");
+        nina_event_log_add_fmt(EVENT_SEV_SUCCESS, index,
+            "Autofocus complete: pos %d, HFR %.2f",
+            data->autofocus.best_position, data->autofocus.best_hfr);
         ESP_LOGI(TAG, "WS[%d]: Autofocus finished (%d points)", index, data->autofocus.count);
     }
     // AUTOFOCUS-POINT-ADDED: Add V-curve data point {Position, HFR}
@@ -312,16 +390,25 @@ static void handle_websocket_message(int index, const char *payload, int len) {
     // SAFETY-CHANGED: Update safety monitor state
     else if (strcmp(evt->valuestring, "SAFETY-CHANGED") == 0) {
         cJSON *is_safe = cJSON_GetObjectItem(response, "IsSafe");
+        bool safe = is_safe && cJSON_IsTrue(is_safe);
         if (nina_client_lock(data, 50)) {
             data->safety_connected = true;
-            if (is_safe) {
-                data->safety_is_safe = cJSON_IsTrue(is_safe);
-            }
+            data->safety_is_safe = safe;
             data->ui_refresh_needed = true;
             nina_client_unlock(data);
         }
-        ESP_LOGI(TAG, "WS[%d]: Safety changed: %s", index,
-                 (is_safe && cJSON_IsTrue(is_safe)) ? "SAFE" : "UNSAFE");
+        /* Toast + event log (thread-safe, no lock needed) */
+        if (safe) {
+            ws_toast(index, TOAST_SUCCESS, "Observatory is safe");
+            nina_event_log_add(EVENT_SEV_SUCCESS, index, "Observatory is safe");
+        } else {
+            ws_toast(index, TOAST_ERROR, "Observatory UNSAFE");
+            nina_event_log_add(EVENT_SEV_ERROR, index, "Observatory UNSAFE!");
+            nina_alert_trigger(ALERT_SAFETY, index, 0);
+        }
+        /* Safety state update (no display lock needed — state tracking only) */
+        nina_safety_update(true, safe);
+        ESP_LOGI(TAG, "WS[%d]: Safety changed: %s", index, safe ? "SAFE" : "UNSAFE");
     }
     // TS-WAITSTART: Sequence entering wait state
     else if (strcmp(evt->valuestring, "TS-WAITSTART") == 0) {
@@ -334,6 +421,8 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             data->ui_refresh_needed = true;
             nina_client_unlock(data);
         }
+        ws_toast(index, TOAST_INFO, "Waiting for next target");
+        nina_event_log_add(EVENT_SEV_INFO, index, "Waiting for next target");
         ESP_LOGI(TAG, "WS[%d]: Waiting for next target", index);
     }
     // MOUNT-BEFORE-FLIP: Meridian flip starting
@@ -352,6 +441,8 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             data->ui_refresh_needed = true;
             nina_client_unlock(data);
         }
+        ws_toast(index, TOAST_INFO, "Meridian flip completed");
+        nina_event_log_add(EVENT_SEV_INFO, index, "Meridian flip completed");
         ESP_LOGI(TAG, "WS[%d]: Meridian flip completed", index);
     }
     // GUIDER-STOP: Guider stopped — clear RMS values
@@ -364,19 +455,77 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             data->ui_refresh_needed = true;
             nina_client_unlock(data);
         }
+        ws_toast(index, TOAST_WARNING, "Guider stopped");
+        nina_event_log_add(EVENT_SEV_WARNING, index, "Guider stopped");
         ESP_LOGI(TAG, "WS[%d]: Guider stopped", index);
     }
     // PROFILE-CHANGED: Invalidate cached static data to force re-fetch
     else if (strcmp(evt->valuestring, "PROFILE-CHANGED") == 0) {
         ESP_LOGI(TAG, "WS[%d]: Profile changed, will re-fetch static data", index);
-        // Note: static_fetched is in nina_poll_state_t (not in nina_client_t),
-        // so we can't reset it from here. Setting sequence_poll_needed as a
-        // workaround to trigger a sequence refresh on next cycle.
         if (nina_client_lock(data, 50)) {
             data->sequence_poll_needed = true;
             data->ui_refresh_needed = true;
             nina_client_unlock(data);
         }
+        ws_toast(index, TOAST_INFO, "Profile changed");
+        nina_event_log_add(EVENT_SEV_INFO, index, "Profile changed");
+    }
+    // AUTOFOCUS-FAILED: AF did not converge
+    else if (strcmp(evt->valuestring, "AUTOFOCUS-FAILED") == 0) {
+        if (nina_client_lock(data, 50)) {
+            data->autofocus.af_running = false;
+            data->ui_refresh_needed = true;
+            nina_client_unlock(data);
+        }
+        ws_toast(index, TOAST_ERROR, "Autofocus failed");
+        nina_event_log_add(EVENT_SEV_ERROR, index, "Autofocus failed");
+        ESP_LOGW(TAG, "WS[%d]: Autofocus failed", index);
+    }
+    // CAMERA-CONNECTED: Camera connected — cancel any pending disconnect toast
+    else if (strcmp(evt->valuestring, "CAMERA-CONNECTED") == 0) {
+        s_camera_disconnect_pending_ms[index] = 0;
+        ws_toast(index, TOAST_SUCCESS, "Camera connected");
+        nina_event_log_add(EVENT_SEV_INFO, index, "Camera connected");
+        ESP_LOGI(TAG, "WS[%d]: Camera connected", index);
+    }
+    // CAMERA-DISCONNECTED: Defer toast — NINA fires this before CAMERA-CONNECTED
+    // during a fresh connect sequence. Only show if no connect follows within 3s.
+    else if (strcmp(evt->valuestring, "CAMERA-DISCONNECTED") == 0) {
+        s_camera_disconnect_pending_ms[index] = esp_timer_get_time() / 1000;
+        ESP_LOGW(TAG, "WS[%d]: Camera disconnect pending (grace %dms)", index, CAMERA_DISCONNECT_GRACE_MS);
+    }
+    // MOUNT-SLEWING: Mount is slewing to target
+    else if (strcmp(evt->valuestring, "MOUNT-SLEWING") == 0) {
+        ws_toast(index, TOAST_INFO, "Mount slewing to target");
+        ESP_LOGI(TAG, "WS[%d]: Mount slewing", index);
+    }
+    // MOUNT-PARKED: Mount parked
+    else if (strcmp(evt->valuestring, "MOUNT-PARKED") == 0) {
+        ws_toast(index, TOAST_INFO, "Mount parked");
+        nina_event_log_add(EVENT_SEV_INFO, index, "Mount parked");
+        ESP_LOGI(TAG, "WS[%d]: Mount parked", index);
+    }
+    // MOUNT-HOMED: Mount homed
+    else if (strcmp(evt->valuestring, "MOUNT-HOMED") == 0) {
+        ws_toast(index, TOAST_INFO, "Mount homed");
+        ESP_LOGI(TAG, "WS[%d]: Mount homed", index);
+    }
+    // MOUNT-TRACKING-ON: Tracking started
+    else if (strcmp(evt->valuestring, "MOUNT-TRACKING-ON") == 0) {
+        ws_toast(index, TOAST_SUCCESS, "Tracking started");
+        ESP_LOGI(TAG, "WS[%d]: Tracking started", index);
+    }
+    // MOUNT-TRACKING-OFF: Tracking stopped
+    else if (strcmp(evt->valuestring, "MOUNT-TRACKING-OFF") == 0) {
+        ws_toast(index, TOAST_WARNING, "Tracking stopped");
+        nina_event_log_add(EVENT_SEV_WARNING, index, "Tracking stopped");
+        ESP_LOGW(TAG, "WS[%d]: Tracking stopped", index);
+    }
+    // ERROR*: Any error event
+    else if (strncmp(evt->valuestring, "ERROR", 5) == 0) {
+        ws_toast_fmt(index, TOAST_ERROR, "Error: %s", evt->valuestring);
+        nina_event_log_add_fmt(EVENT_SEV_ERROR, index, "Error: %s", evt->valuestring);
+        ESP_LOGE(TAG, "WS[%d]: Error event: %s", index, evt->valuestring);
     }
     else {
         ESP_LOGD(TAG, "WS[%d]: Unhandled event: %s", index, evt->valuestring);
@@ -547,4 +696,17 @@ void nina_websocket_check_reconnect(int index, const char *base_url, nina_client
 
     nina_websocket_stop(index);
     nina_websocket_start(index, base_url, data);
+}
+
+void nina_websocket_check_deferred_alerts(int index) {
+    if (index < 0 || index >= MAX_NINA_INSTANCES) return;
+    if (s_camera_disconnect_pending_ms[index] == 0) return;
+
+    int64_t now_ms = esp_timer_get_time() / 1000;
+    if (now_ms - s_camera_disconnect_pending_ms[index] >= CAMERA_DISCONNECT_GRACE_MS) {
+        s_camera_disconnect_pending_ms[index] = 0;
+        ws_toast(index, TOAST_ERROR, "Camera disconnected");
+        nina_event_log_add(EVENT_SEV_ERROR, index, "Camera disconnected");
+        ESP_LOGW(TAG, "WS[%d]: Camera disconnect confirmed (no reconnect within grace period)", index);
+    }
 }

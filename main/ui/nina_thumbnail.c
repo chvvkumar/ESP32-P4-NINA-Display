@@ -38,7 +38,8 @@ void nina_thumbnail_create(lv_obj_t *parent) {
 
     // Loading label
     thumbnail_loading_lbl = lv_label_create(thumbnail_overlay);
-    lv_obj_set_style_text_color(thumbnail_loading_lbl, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_color(thumbnail_loading_lbl,
+        lv_color_hex(current_theme ? current_theme->text_color : 0xFFFFFF), 0);
     lv_obj_set_style_text_font(thumbnail_loading_lbl, &lv_font_montserrat_24, 0);
     lv_label_set_text(thumbnail_loading_lbl, "Loading image...");
 

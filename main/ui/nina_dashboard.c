@@ -14,6 +14,10 @@
 #include "nina_sysinfo.h"
 #include "nina_summary.h"
 #include "nina_settings.h"
+#include "nina_toast.h"
+#include "nina_event_log.h"
+#include "nina_alerts.h"
+#include "nina_safety.h"
 #include "ui_styles.h"
 #include "app_config.h"
 #include "themes.h"
@@ -222,6 +226,10 @@ void nina_dashboard_apply_theme(int theme_index) {
     sysinfo_page_apply_theme();
     nina_graph_overlay_apply_theme();
     nina_info_overlay_apply_theme();
+    nina_toast_apply_theme();
+    nina_event_log_apply_theme();
+    nina_alerts_apply_theme();
+    nina_safety_apply_theme();
 
     update_indicators();
 
@@ -391,6 +399,21 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_style_text_font(p->lbl_loop_count, &lv_font_montserrat_24, 0);
     lv_obj_set_style_pad_top(p->lbl_loop_count, 8, 0);
     lv_label_set_text(p->lbl_loop_count, "-- / --");
+
+    // Safety monitor dot (floating, bottom-left of exposure box)
+    p->safety_dot = lv_obj_create(box_exposure);
+    lv_obj_remove_style_all(p->safety_dot);
+    lv_obj_set_size(p->safety_dot, 16, 16);
+    lv_obj_set_style_radius(p->safety_dot, 8, 0);
+    lv_obj_set_style_bg_opa(p->safety_dot, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(p->safety_dot, lv_color_hex(0x999999), 0);
+    lv_obj_add_flag(p->safety_dot, LV_OBJ_FLAG_FLOATING);
+    lv_obj_clear_flag(p->safety_dot, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(p->safety_dot, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_align(p->safety_dot, LV_ALIGN_BOTTOM_LEFT);
+    lv_obj_set_style_translate_x(p->safety_dot, 8, 0);
+    lv_obj_set_style_translate_y(p->safety_dot, -8, 0);
+    lv_obj_add_flag(p->safety_dot, LV_OBJ_FLAG_HIDDEN);
 
     // RMS + HFR (col 1, row 2)
     lv_obj_t *box_rms_hfr = create_bento_box(p->page);

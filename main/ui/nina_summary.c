@@ -131,6 +131,11 @@ static lv_obj_t *empty_sub = NULL;
 static lv_style_t style_glass_card;
 static bool styles_initialized = false;
 
+/* Red Night theme forces all colors to the red palette */
+static bool theme_forces_colors(void) {
+    return current_theme && strcmp(current_theme->name, "Red Night") == 0;
+}
+
 /* ── Helpers ───────────────────────────────────────────────────────── */
 
 static void summary_card_click_cb(lv_event_t *e) {
@@ -684,11 +689,11 @@ void summary_page_update(const nina_client_t *instances, int count) {
         /* Filter */
         if (d->current_filter[0]) {
             lv_label_set_text(sc->lbl_filter, d->current_filter);
-            uint32_t fc = app_config_get_filter_color(d->current_filter, i);
+            uint32_t fc = theme_forces_colors()
+                ? 0 : app_config_get_filter_color(d->current_filter, i);
             if (fc != 0) {
                 lv_obj_set_style_text_color(sc->lbl_filter,
                     lv_color_hex(app_config_apply_brightness(fc, gb)), 0);
-                /* Also tint the filter badge background with the filter color */
                 lv_obj_set_style_bg_color(sc->filter_box,
                     lv_color_hex(app_config_apply_brightness(fc, gb)), 0);
                 lv_obj_set_style_bg_opa(sc->filter_box, LV_OPA_20, 0);
@@ -696,7 +701,9 @@ void summary_page_update(const nina_client_t *instances, int count) {
                 lv_obj_set_style_text_color(sc->lbl_filter,
                     lv_color_hex(app_config_apply_brightness(
                         current_theme->filter_text_color, gb)), 0);
-                lv_obj_set_style_bg_color(sc->filter_box, lv_color_black(), 0);
+                lv_obj_set_style_bg_color(sc->filter_box,
+                    lv_color_hex(app_config_apply_brightness(
+                        current_theme->bento_border, gb)), 0);
                 lv_obj_set_style_bg_opa(sc->filter_box, LV_OPA_50, 0);
             }
         } else {
@@ -706,7 +713,8 @@ void summary_page_update(const nina_client_t *instances, int count) {
                     lv_color_hex(app_config_apply_brightness(
                         current_theme->label_color, gb)), 0);
             }
-            lv_obj_set_style_bg_color(sc->filter_box, lv_color_black(), 0);
+            lv_obj_set_style_bg_color(sc->filter_box,
+                lv_color_hex(current_theme ? current_theme->bento_bg : 0x000000), 0);
             lv_obj_set_style_bg_opa(sc->filter_box, LV_OPA_50, 0);
         }
 
@@ -741,7 +749,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
         /* Progress bar color: filter color or theme progress */
         {
             uint32_t bar_col = 0;
-            if (d->current_filter[0]) {
+            if (!theme_forces_colors() && d->current_filter[0]) {
                 bar_col = app_config_get_filter_color(d->current_filter, i);
             }
             if (bar_col == 0 && current_theme) {
@@ -793,7 +801,8 @@ void summary_page_update(const nina_client_t *instances, int count) {
             char buf[16];
             snprintf(buf, sizeof(buf), "%.2f\"", d->guider.rms_total);
             lv_label_set_text(sc->lbl_rms_val, buf);
-            uint32_t rms_col = app_config_get_rms_color(d->guider.rms_total, i);
+            uint32_t rms_col = theme_forces_colors()
+                ? 0 : app_config_get_rms_color(d->guider.rms_total, i);
             if (rms_col != 0) {
                 lv_obj_set_style_text_color(sc->lbl_rms_val,
                     lv_color_hex(app_config_apply_brightness(rms_col, gb)), 0);
@@ -816,7 +825,8 @@ void summary_page_update(const nina_client_t *instances, int count) {
             char buf[16];
             snprintf(buf, sizeof(buf), "%.2f", d->hfr);
             lv_label_set_text(sc->lbl_hfr_val, buf);
-            uint32_t hfr_col = app_config_get_hfr_color(d->hfr, i);
+            uint32_t hfr_col = theme_forces_colors()
+                ? 0 : app_config_get_hfr_color(d->hfr, i);
             if (hfr_col != 0) {
                 lv_obj_set_style_text_color(sc->lbl_hfr_val,
                     lv_color_hex(app_config_apply_brightness(hfr_col, gb)), 0);

@@ -13,6 +13,11 @@
 #include "bsp/display.h"
 #include "lvgl.h"
 #include "ui/nina_dashboard.h"
+#include "ui/nina_toast.h"
+#include "ui/nina_event_log.h"
+#include "ui/nina_alerts.h"
+#include "ui/nina_safety.h"
+#include "ui/nina_session_stats.h"
 #include "app_config.h"
 #include "web_server.h"
 #include "mqtt_ha.h"
@@ -190,9 +195,19 @@ void app_main(void)
     bsp_display_backlight_on();
     bsp_display_brightness_set(app_config_get()->brightness);
 
+    /* Initialize session stats (PSRAM allocation, no LVGL) */
+    nina_session_stats_init();
+
     if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
         lv_obj_t *scr = lv_scr_act();
         create_nina_dashboard(scr, instance_count);
+
+        /* Initialize notification overlays (must be after dashboard so they float on top) */
+        nina_toast_init(scr);
+        nina_event_log_overlay_create(scr);
+        nina_alerts_init(scr);
+        nina_safety_create(scr);
+
         {
             /* Apply persisted page override immediately on boot.
              * Override stores absolute page index: 0=summary, 1..N=NINA, N+1=settings, N+2=sysinfo */

@@ -58,6 +58,9 @@ typedef struct {
     lv_obj_t *lbl_pwr_title[MAX_POWER_WIDGETS];
     lv_obj_t *lbl_pwr_value[MAX_POWER_WIDGETS];
 
+    // Safety dot (inside exposure box, bottom-left)
+    lv_obj_t *safety_dot;
+
     // Stale data indicator
     lv_obj_t *lbl_stale;        // "Last update: Xs ago" floating label
     lv_obj_t *stale_overlay;    // Semi-transparent dimming overlay (> 2 min stale)

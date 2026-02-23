@@ -12,7 +12,7 @@ extern "C" {
 #define MAX_NINA_INSTANCES 3
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 5
+#define APP_CONFIG_VERSION 6
 
 typedef struct {
     uint32_t config_version;        // Must be first field — used to detect legacy blobs
@@ -40,6 +40,7 @@ typedef struct {
     uint8_t  update_rate_s;                // UI/data update interval in seconds (1-10, default 2)
     uint8_t  graph_update_interval_s;     // Graph overlay auto-refresh interval in seconds (2-30, default 5)
     uint8_t  connection_timeout_s;        // Seconds without successful poll before marking offline (2-30, default 6)
+    uint8_t  toast_duration_s;           // Toast notification display duration in seconds (3-30, default 8)
 } app_config_t;
 
 // WiFi credentials are NOT stored in app_config_t. They are managed by
