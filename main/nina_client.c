@@ -424,8 +424,13 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
         state->last_slow_poll_ms = now_ms;
     }
 
-    // --- SLOW: Sequence counts (every 10s) ---
-    if (now_ms - state->last_sequence_poll_ms >= NINA_POLL_SEQUENCE_MS) {
+    // --- SEQUENCE: Timer-based + event-driven polling ---
+    bool sequence_due = (now_ms - state->last_sequence_poll_ms >= NINA_POLL_SEQUENCE_MS);
+    if (sequence_due || data->sequence_poll_needed) {
+        if (data->sequence_poll_needed) {
+            ESP_LOGD(TAG, "Event-driven sequence poll triggered");
+        }
+        data->sequence_poll_needed = false;
         perf_timer_start(&g_perf.poll_sequence);
         fetch_sequence_counts_optional(base_url, data);
         perf_timer_stop(&g_perf.poll_sequence);
@@ -528,7 +533,7 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
         state->last_slow_poll_ms = now_ms;
     }
 
-    // --- SLOW: Sequence counts (every 10s) ---
+    // --- SEQUENCE: Timer-based polling (background instances) ---
     if (now_ms - state->last_sequence_poll_ms >= NINA_POLL_SEQUENCE_MS) {
         fetch_sequence_counts_optional(base_url, data);
         state->last_sequence_poll_ms = now_ms;

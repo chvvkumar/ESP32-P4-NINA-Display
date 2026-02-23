@@ -160,6 +160,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
                 data->last_image_stats = img_stats;
                 data->new_image_available = true;
                 data->ui_refresh_needed = true;
+                data->sequence_poll_needed = true;
                 nina_client_unlock(data);
             } else {
                 ESP_LOGW(TAG, "WS[%d]: Could not acquire mutex for IMAGE-SAVE", index);
@@ -200,6 +201,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         if (nina_client_lock(data, 50)) {
             strcpy(data->status, "RUNNING");
             data->ui_refresh_needed = true;
+            data->sequence_poll_needed = true;
             nina_client_unlock(data);
         }
         ESP_LOGI(TAG, "WS[%d]: Sequence starting", index);
@@ -231,6 +233,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
                         sizeof(data->target_name) - 1);
             }
             data->ui_refresh_needed = true;
+            data->sequence_poll_needed = true;
             nina_client_unlock(data);
         }
         ESP_LOGI(TAG, "WS[%d]: New target: %s", index,

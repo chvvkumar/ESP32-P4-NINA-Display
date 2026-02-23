@@ -91,6 +91,11 @@ typedef struct {
     // Data task checks this and refreshes UI without waiting for next poll cycle.
     volatile bool ui_refresh_needed;
 
+    // Set by WebSocket event handlers when a sequence-relevant event occurs
+    // (IMAGE-SAVE, TS-NEWTARGETSTART, SEQUENCE-STARTING). Causes immediate
+    // sequence poll on next cycle.
+    volatile bool sequence_poll_needed;
+
     // Timestamp (ms from esp_timer_get_time/1000) of last successful poll.
     // Used by the UI to display a stale-data indicator.  0 = never polled.
     int64_t last_successful_poll_ms;
@@ -115,8 +120,8 @@ bool nina_client_lock(nina_client_t *client, uint32_t timeout_ms);
 void nina_client_unlock(nina_client_t *client);
 
 // Polling intervals (ms)
-#define NINA_POLL_SLOW_MS     10000   // Focuser, mount, switch (was 30000)
-#define NINA_POLL_SEQUENCE_MS  5000   // Sequence counts (was 10000)
+#define NINA_POLL_SLOW_MS     30000   // Focuser, mount, switch
+#define NINA_POLL_SEQUENCE_MS 15000   // Sequence counts (supplemented by event-driven sequence_poll_needed)
 
 // Polling state - tracks timers and cached static data between polls
 typedef struct {
