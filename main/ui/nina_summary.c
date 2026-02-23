@@ -71,11 +71,11 @@ static const card_layout_preset_t layout_presets[3] = {
     /* 1 card visible — maximum size */
     {
         .name       = &lv_font_montserrat_36,
-        .filter     = &lv_font_montserrat_24,
+        .filter     = &lv_font_montserrat_28,
         .target     = &lv_font_montserrat_48,
         .stat_label = &lv_font_montserrat_22,
         .stat_value = &lv_font_montserrat_48,
-        .pct_label  = &lv_font_montserrat_22,
+        .pct_label  = &lv_font_montserrat_28,
         .seq_label  = &lv_font_montserrat_18,
         .seq_value  = &lv_font_montserrat_28,
         .bar_height = 20,
@@ -86,11 +86,11 @@ static const card_layout_preset_t layout_presets[3] = {
     /* 2 cards visible — medium */
     {
         .name       = &lv_font_montserrat_28,
-        .filter     = &lv_font_montserrat_20,
+        .filter     = &lv_font_montserrat_24,
         .target     = &lv_font_montserrat_32,
         .stat_label = &lv_font_montserrat_18,
         .stat_value = &lv_font_montserrat_36,
-        .pct_label  = &lv_font_montserrat_18,
+        .pct_label  = &lv_font_montserrat_22,
         .seq_label  = &lv_font_montserrat_14,
         .seq_value  = &lv_font_montserrat_22,
         .bar_height = 12,
@@ -101,11 +101,11 @@ static const card_layout_preset_t layout_presets[3] = {
     /* 3 cards visible — compact */
     {
         .name       = &lv_font_montserrat_20,
-        .filter     = &lv_font_montserrat_14,
+        .filter     = &lv_font_montserrat_18,
         .target     = &lv_font_montserrat_24,
         .stat_label = &lv_font_montserrat_14,
         .stat_value = &lv_font_montserrat_28,
-        .pct_label  = &lv_font_montserrat_14,
+        .pct_label  = &lv_font_montserrat_18,
         .seq_label  = &lv_font_montserrat_12,
         .seq_value  = &lv_font_montserrat_14,
         .bar_height = 6,
@@ -203,8 +203,7 @@ static void create_stat_block(lv_obj_t *parent,
 {
     lv_obj_t *block = lv_obj_create(parent);
     lv_obj_remove_style_all(block);
-    lv_obj_set_width(block, LV_PCT(25));
-    lv_obj_set_height(block, LV_SIZE_CONTENT);
+    lv_obj_set_size(block, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(block, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(block, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -384,7 +383,7 @@ static void create_card(summary_card_t *sc, lv_obj_t *parent, int instance_index
     lv_obj_set_height(sc->stats_row, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(sc->stats_row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_grow(sc->stats_row, 1);
-    lv_obj_set_flex_align(sc->stats_row, LV_FLEX_ALIGN_SPACE_EVENLY,
+    lv_obj_set_flex_align(sc->stats_row, LV_FLEX_ALIGN_SPACE_BETWEEN,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     /* Safety icon column (first in stats row) */
