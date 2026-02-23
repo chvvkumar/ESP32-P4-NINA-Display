@@ -53,7 +53,9 @@ typedef struct {
     char container_step[64];    // Currently running step/instruction name (e.g., "Smart Exposure", "Auto Focus")
     char time_remaining[32];    // Time remaining for entire sequence (HH:MM:SS format)
     bool is_dithering;
-    
+    bool is_waiting;              // Sequence is in a wait state (TS-WAITSTART)
+    int64_t wait_start_epoch;     // Wait start time (Unix epoch seconds)
+
     // Image stats
     float hfr;
     int stars;
@@ -62,6 +64,11 @@ typedef struct {
     // Mount
     char meridian_flip[16];
     float rotator_angle;
+    bool rotator_connected;
+
+    // Safety monitor state (updated via SAFETY-CHANGED WebSocket event)
+    bool safety_is_safe;
+    bool safety_connected;
 
     // Power/Switch info (from /equipment/switch/info)
     struct {

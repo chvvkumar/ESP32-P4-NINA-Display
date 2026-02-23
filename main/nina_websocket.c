@@ -9,6 +9,7 @@
  */
 
 #include "nina_websocket.h"
+#include "nina_client_internal.h"
 #include "esp_websocket_client.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -200,6 +201,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
     else if (strcmp(evt->valuestring, "SEQUENCE-STARTING") == 0) {
         if (nina_client_lock(data, 50)) {
             strcpy(data->status, "RUNNING");
+            data->is_waiting = false;
             data->ui_refresh_needed = true;
             data->sequence_poll_needed = true;
             nina_client_unlock(data);
@@ -232,6 +234,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
                 strncpy(data->target_name, target_name->valuestring,
                         sizeof(data->target_name) - 1);
             }
+            data->is_waiting = false;
             data->ui_refresh_needed = true;
             data->sequence_poll_needed = true;
             nina_client_unlock(data);
@@ -291,6 +294,88 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             }
             ESP_LOGI(TAG, "WS[%d]: AF point: pos=%d HFR=%.2f (%d/%d)",
                      index, pos, hfr_val, data->autofocus.count, MAX_AF_POINTS);
+        }
+    }
+    // ROTATOR-MOVED / ROTATOR-MOVED-MECHANICAL: Update rotator angle from WS
+    else if (strcmp(evt->valuestring, "ROTATOR-MOVED") == 0 ||
+             strcmp(evt->valuestring, "ROTATOR-MOVED-MECHANICAL") == 0) {
+        cJSON *to = cJSON_GetObjectItem(response, "To");
+        if (to && nina_client_lock(data, 50)) {
+            data->rotator_angle = (float)to->valuedouble;
+            data->rotator_connected = true;
+            data->ui_refresh_needed = true;
+            nina_client_unlock(data);
+        }
+        ESP_LOGI(TAG, "WS[%d]: Rotator moved to %.1f", index,
+                 to ? (float)to->valuedouble : 0.0f);
+    }
+    // SAFETY-CHANGED: Update safety monitor state
+    else if (strcmp(evt->valuestring, "SAFETY-CHANGED") == 0) {
+        cJSON *is_safe = cJSON_GetObjectItem(response, "IsSafe");
+        if (nina_client_lock(data, 50)) {
+            data->safety_connected = true;
+            if (is_safe) {
+                data->safety_is_safe = cJSON_IsTrue(is_safe);
+            }
+            data->ui_refresh_needed = true;
+            nina_client_unlock(data);
+        }
+        ESP_LOGI(TAG, "WS[%d]: Safety changed: %s", index,
+                 (is_safe && cJSON_IsTrue(is_safe)) ? "SAFE" : "UNSAFE");
+    }
+    // TS-WAITSTART: Sequence entering wait state
+    else if (strcmp(evt->valuestring, "TS-WAITSTART") == 0) {
+        if (nina_client_lock(data, 50)) {
+            data->is_waiting = true;
+            cJSON *wait_time = cJSON_GetObjectItem(response, "WaitStartTime");
+            if (wait_time && wait_time->valuestring) {
+                data->wait_start_epoch = parse_iso8601(wait_time->valuestring);
+            }
+            data->ui_refresh_needed = true;
+            nina_client_unlock(data);
+        }
+        ESP_LOGI(TAG, "WS[%d]: Waiting for next target", index);
+    }
+    // MOUNT-BEFORE-FLIP: Meridian flip starting
+    else if (strcmp(evt->valuestring, "MOUNT-BEFORE-FLIP") == 0) {
+        if (nina_client_lock(data, 50)) {
+            strncpy(data->meridian_flip, "FLIPPING", sizeof(data->meridian_flip) - 1);
+            data->ui_refresh_needed = true;
+            nina_client_unlock(data);
+        }
+        ESP_LOGI(TAG, "WS[%d]: Meridian flip starting", index);
+    }
+    // MOUNT-AFTER-FLIP: Meridian flip completed
+    else if (strcmp(evt->valuestring, "MOUNT-AFTER-FLIP") == 0) {
+        if (nina_client_lock(data, 50)) {
+            strncpy(data->meridian_flip, "--", sizeof(data->meridian_flip) - 1);
+            data->ui_refresh_needed = true;
+            nina_client_unlock(data);
+        }
+        ESP_LOGI(TAG, "WS[%d]: Meridian flip completed", index);
+    }
+    // GUIDER-STOP: Guider stopped — clear RMS values
+    else if (strcmp(evt->valuestring, "GUIDER-STOP") == 0) {
+        if (nina_client_lock(data, 50)) {
+            data->guider.rms_total = 0;
+            data->guider.rms_ra = 0;
+            data->guider.rms_dec = 0;
+            data->is_dithering = false;
+            data->ui_refresh_needed = true;
+            nina_client_unlock(data);
+        }
+        ESP_LOGI(TAG, "WS[%d]: Guider stopped", index);
+    }
+    // PROFILE-CHANGED: Invalidate cached static data to force re-fetch
+    else if (strcmp(evt->valuestring, "PROFILE-CHANGED") == 0) {
+        ESP_LOGI(TAG, "WS[%d]: Profile changed, will re-fetch static data", index);
+        // Note: static_fetched is in nina_poll_state_t (not in nina_client_t),
+        // so we can't reset it from here. Setting sequence_poll_needed as a
+        // workaround to trigger a sequence refresh on next cycle.
+        if (nina_client_lock(data, 50)) {
+            data->sequence_poll_needed = true;
+            data->ui_refresh_needed = true;
+            nina_client_unlock(data);
         }
     }
     else {
