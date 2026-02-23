@@ -421,6 +421,36 @@ void fetch_switch_info(const char *base_url, nina_client_t *data) {
     cJSON_Delete(json);
 }
 
+/**
+ * @brief Fetch safety monitor state (one-shot on connect).
+ * Endpoint: GET {base_url}equipment/safetymonitor/info
+ * Sets safety_connected and safety_is_safe in nina_client_t.
+ */
+void fetch_safety_monitor_info(const char *base_url, nina_client_t *data) {
+    char url[256];
+    snprintf(url, sizeof(url), "%sequipment/safetymonitor/info", base_url);
+
+    cJSON *json = http_get_json(url);
+    if (!json) return;
+
+    cJSON *response = cJSON_GetObjectItem(json, "Response");
+    if (!response) {
+        cJSON_Delete(json);
+        return;
+    }
+
+    cJSON *connected = cJSON_GetObjectItem(response, "Connected");
+    if (connected && cJSON_IsTrue(connected)) {
+        data->safety_connected = true;
+        cJSON *is_safe = cJSON_GetObjectItem(response, "IsSafe");
+        data->safety_is_safe = is_safe && cJSON_IsTrue(is_safe);
+        ESP_LOGI(TAG, "Safety monitor: connected=%d, safe=%d",
+                 data->safety_connected, data->safety_is_safe);
+    }
+
+    cJSON_Delete(json);
+}
+
 /* ── Info overlay detail fetchers ───────────────────────────────────── */
 
 #include "ui/info_overlay_types.h"

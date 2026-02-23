@@ -17,6 +17,7 @@ void fetch_guider_robust(const char *base_url, nina_client_t *data);
 void fetch_mount_robust(const char *base_url, nina_client_t *data);
 void fetch_focuser_robust(const char *base_url, nina_client_t *data);
 void fetch_switch_info(const char *base_url, nina_client_t *data);
+void fetch_safety_monitor_info(const char *base_url, nina_client_t *data);
 
 /* Info overlay detail fetchers — on-demand, not part of normal polling */
 #include "ui/info_overlay_types.h"

@@ -41,6 +41,11 @@ static inline void set_bar_if_changed(lv_obj_t *bar, int32_t val, lv_anim_enable
     if (lv_bar_get_value(bar) != val) lv_bar_set_value(bar, val, anim);
 }
 
+/* ── Safety icon glyphs (Material Symbols, UTF-8) ─────────────────── */
+#define ICON_VERIFIED_USER  "\xee\xa3\xa8"  /* U+E8E8 — shield + check */
+#define ICON_GPP_BAD        "\xef\x80\x92"  /* U+F012 — shield + X     */
+#define ICON_GPP_MAYBE      "\xef\x80\x94"  /* U+F014 — shield + ?     */
+
 /* ── Layout Constants ──────────────────────────────────────────────── */
 #define CARD_RADIUS      20
 #define CARD_GAP         16
@@ -133,6 +138,7 @@ typedef struct {
     lv_obj_t *lbl_flip_val;
     lv_obj_t *detail_row;       /* exposure detail line (visible in 1-card mode) */
     lv_obj_t *lbl_detail;
+    lv_obj_t *lbl_safety;       /* safety monitor icon (floating, bottom-left) */
     int instance_index;         /* which NINA instance this card represents */
 } summary_card_t;
 
@@ -197,7 +203,7 @@ static void create_stat_block(lv_obj_t *parent,
 {
     lv_obj_t *block = lv_obj_create(parent);
     lv_obj_remove_style_all(block);
-    lv_obj_set_width(block, LV_PCT(33));
+    lv_obj_set_width(block, LV_PCT(25));
     lv_obj_set_height(block, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(block, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(block, LV_FLEX_ALIGN_CENTER,
@@ -381,6 +387,23 @@ static void create_card(summary_card_t *sc, lv_obj_t *parent, int instance_index
     lv_obj_set_flex_align(sc->stats_row, LV_FLEX_ALIGN_SPACE_EVENLY,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
+    /* Safety icon column (first in stats row) */
+    {
+        extern const lv_font_t lv_font_material_safety;
+        lv_obj_t *safety_block = lv_obj_create(sc->stats_row);
+        lv_obj_remove_style_all(safety_block);
+        lv_obj_set_size(safety_block, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(safety_block, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(safety_block, LV_FLEX_ALIGN_CENTER,
+                              LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+        sc->lbl_safety = lv_label_create(safety_block);
+        lv_obj_set_style_text_font(sc->lbl_safety, &lv_font_material_safety, 0);
+        lv_obj_set_style_text_color(sc->lbl_safety, lv_color_hex(0x999999), 0);
+        lv_label_set_text(sc->lbl_safety, ICON_GPP_MAYBE);
+        lv_obj_add_flag(sc->lbl_safety, LV_OBJ_FLAG_HIDDEN);
+    }
+
     create_stat_block(sc->stats_row, "RMS",  &sc->lbl_rms_label,  &sc->lbl_rms_val);
     create_stat_block(sc->stats_row, "HFR",  &sc->lbl_hfr_label,  &sc->lbl_hfr_val);
     create_stat_block(sc->stats_row, "FLIP", &sc->lbl_flip_label, &sc->lbl_flip_val);
@@ -402,6 +425,7 @@ static void create_card(summary_card_t *sc, lv_obj_t *parent, int instance_index
         lv_obj_set_style_text_color(sc->lbl_detail,
             lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
     }
+
 }
 
 /**
@@ -905,6 +929,25 @@ void summary_page_update(const nina_client_t *instances, int count) {
                 lv_obj_set_style_text_color(sc->lbl_detail,
                     lv_color_hex(app_config_apply_brightness(
                         current_theme->text_color, gb)), 0);
+            }
+        }
+
+        /* Safety monitor icon */
+        if (sc->lbl_safety) {
+            lv_obj_clear_flag(sc->lbl_safety, LV_OBJ_FLAG_HIDDEN);
+            if (d->safety_connected) {
+                if (d->safety_is_safe) {
+                    set_label_if_changed(sc->lbl_safety, ICON_VERIFIED_USER);
+                    lv_obj_set_style_text_color(sc->lbl_safety,
+                        lv_color_hex(theme_forces_colors() ? 0x7f1d1d : 0x4CAF50), 0);
+                } else {
+                    set_label_if_changed(sc->lbl_safety, ICON_GPP_BAD);
+                    lv_obj_set_style_text_color(sc->lbl_safety,
+                        lv_color_hex(theme_forces_colors() ? 0xff0000 : 0xF44336), 0);
+                }
+            } else {
+                set_label_if_changed(sc->lbl_safety, ICON_GPP_MAYBE);
+                lv_obj_set_style_text_color(sc->lbl_safety, lv_color_hex(0x999999), 0);
             }
         }
     }

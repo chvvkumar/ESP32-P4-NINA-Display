@@ -6,7 +6,6 @@
 #include "nina_dashboard.h"
 #include "nina_dashboard_internal.h"
 #include "nina_connection.h"
-#include "nina_safety.h"
 #include "app_config.h"
 #include "themes.h"
 #include "esp_timer.h"
@@ -425,22 +424,34 @@ static void update_stale_indicator(dashboard_page_t *p, const nina_client_t *d) 
     }
 }
 
-static void update_safety_dot(dashboard_page_t *p) {
-    if (!p->safety_dot) return;
+/* Material Symbols codepoints (UTF-8 encoded) */
+#define ICON_VERIFIED_USER  "\xee\xa3\xa8"  /* U+E8E8 — shield with check */
+#define ICON_GPP_BAD        "\xef\x80\x92"  /* U+F012 — shield with X     */
+#define ICON_GPP_MAYBE      "\xef\x80\x94"  /* U+F014 — shield with ?     */
 
-    if (!nina_safety_is_connected()) {
-        lv_obj_add_flag(p->safety_dot, LV_OBJ_FLAG_HIDDEN);
+static void update_safety_icon(dashboard_page_t *p, const nina_client_t *data) {
+    if (!p->safety_icon) return;
+
+    if (!data->connected) {
+        lv_obj_add_flag(p->safety_icon, LV_OBJ_FLAG_HIDDEN);
         return;
     }
 
-    lv_obj_clear_flag(p->safety_dot, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(p->safety_icon, LV_OBJ_FLAG_HIDDEN);
 
-    if (nina_safety_is_safe()) {
-        lv_obj_set_style_bg_color(p->safety_dot,
-            lv_color_hex(theme_forces_colors() ? 0x7f1d1d : 0x4CAF50), 0);
+    if (data->safety_connected) {
+        if (data->safety_is_safe) {
+            set_label_if_changed(p->safety_icon, ICON_VERIFIED_USER);
+            lv_obj_set_style_text_color(p->safety_icon,
+                lv_color_hex(theme_forces_colors() ? 0x7f1d1d : 0x4CAF50), 0);
+        } else {
+            set_label_if_changed(p->safety_icon, ICON_GPP_BAD);
+            lv_obj_set_style_text_color(p->safety_icon,
+                lv_color_hex(theme_forces_colors() ? 0xff0000 : 0xF44336), 0);
+        }
     } else {
-        lv_obj_set_style_bg_color(p->safety_dot,
-            lv_color_hex(theme_forces_colors() ? 0xff0000 : 0xF44336), 0);
+        set_label_if_changed(p->safety_icon, ICON_GPP_MAYBE);
+        lv_obj_set_style_text_color(p->safety_icon, lv_color_hex(0x999999), 0);
     }
 }
 
@@ -453,7 +464,7 @@ void update_nina_dashboard_page(int page_index, const nina_client_t *data) {
 
     int gb = app_config_get()->color_brightness;
 
-    update_safety_dot(p);
+    update_safety_icon(p, data);
 
     if (!data->connected) {
         nina_conn_state_t conn_state = nina_connection_get_state(page_index);

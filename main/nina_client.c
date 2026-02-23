@@ -380,6 +380,8 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
         fetch_switch_info(base_url, data);
         perf_timer_stop(&g_perf.poll_switch);
 
+        fetch_safety_monitor_info(base_url, data);
+
         snprintf(state->cached_profile, sizeof(state->cached_profile), "%s", data->profile_name);
         snprintf(state->cached_telescope, sizeof(state->cached_telescope), "%s", data->telescope_name);
         memcpy(state->cached_filters, data->filters, sizeof(state->cached_filters));
@@ -517,6 +519,7 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
         fetch_filter_robust_ex(base_url, data, true);
         fetch_image_history_robust(base_url, data);
         fetch_switch_info(base_url, data);
+        fetch_safety_monitor_info(base_url, data);
 
         snprintf(state->cached_profile, sizeof(state->cached_profile), "%s", data->profile_name);
         snprintf(state->cached_telescope, sizeof(state->cached_telescope), "%s", data->telescope_name);

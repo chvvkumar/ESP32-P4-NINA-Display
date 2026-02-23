@@ -58,8 +58,8 @@ typedef struct {
     lv_obj_t *lbl_pwr_title[MAX_POWER_WIDGETS];
     lv_obj_t *lbl_pwr_value[MAX_POWER_WIDGETS];
 
-    // Safety dot (inside exposure box, bottom-left)
-    lv_obj_t *safety_dot;
+    // Safety icon (inside exposure box, bottom-left)
+    lv_obj_t *safety_icon;
 
     // Stale data indicator
     lv_obj_t *lbl_stale;        // "Last update: Xs ago" floating label
