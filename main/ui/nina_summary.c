@@ -499,11 +499,11 @@ static void update_card_layout(summary_card_t *sc, int visible_count) {
     int idx = (visible_count <= 1) ? 0 : (visible_count == 2) ? 1 : 2;
     const card_layout_preset_t *p = &layout_presets[idx];
 
-    /* Card flex strategy: 1-card spreads elements evenly across the full
-     * height for a spacious layout; 2-3 cards pack to top with stats_row
-     * absorbing remaining vertical space to center the stat values. */
+    /* Card flex strategy: 1-card uses SPACE_BETWEEN to pin header at top
+     * and detail at bottom, spreading items across the full height.
+     * 2-3 cards pack to top with stats_row absorbing remaining space. */
     if (visible_count <= 1) {
-        lv_obj_set_flex_align(sc->card, LV_FLEX_ALIGN_SPACE_EVENLY,
+        lv_obj_set_flex_align(sc->card, LV_FLEX_ALIGN_SPACE_BETWEEN,
                               LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
         lv_obj_set_flex_grow(sc->stats_row, 0);
     } else {

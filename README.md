@@ -72,6 +72,19 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
   </tr>
 </table>
 
+### Toast Notifications
+
+<table align="center">
+  <tr>
+    <td align="center"><img src="images/cam_notifications.jpg" alt="Camera Connected Notification" width="480"></td>
+    <td align="center"><img src="images/sequence_notifications.jpg" alt="Sequence Started Notification" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="images/safe_safety_notifications.jpg" alt="Safe Notification" width="480"></td>
+    <td align="center"><img src="images/unsafe_safety_notifications.jpg" alt="Unsafe Notification" width="480"></td>
+  </tr>
+</table>
+
 ### Web Configuration UI
 
 <table align="center">
