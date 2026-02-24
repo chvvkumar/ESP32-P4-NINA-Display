@@ -147,6 +147,9 @@ typedef struct {
 
     // Persistent HTTP client handle for keep-alive reuse (esp_http_client_handle_t)
     void *http_client;
+
+    // Set true if /equipment/info returned 404 (old ninaAPI); disables bundled fetch
+    bool bundle_not_available;
 } nina_poll_state_t;
 
 // Initialize polling state (call once before polling loop)

@@ -303,6 +303,7 @@ void perf_monitor_report(void)
     log_timer("effective_interval", &g_perf.effective_cycle_interval);
 
     ESP_LOGI(TAG, "── Endpoint Fetchers ──");
+    log_timer("equipment_bundle", &g_perf.poll_equipment_bundle);
     log_timer("camera",        &g_perf.poll_camera);
     log_timer("guider",        &g_perf.poll_guider);
     log_timer("mount",         &g_perf.poll_mount);
@@ -457,6 +458,7 @@ char *perf_monitor_report_json(void)
 
     // Endpoints
     cJSON *endpoints = cJSON_CreateObject();
+    cJSON_AddItemToObject(endpoints, "equipment_bundle", timer_to_json(&g_perf.poll_equipment_bundle));
     cJSON_AddItemToObject(endpoints, "camera_info",    timer_to_json(&g_perf.poll_camera));
     cJSON_AddItemToObject(endpoints, "guider_info",    timer_to_json(&g_perf.poll_guider));
     cJSON_AddItemToObject(endpoints, "mount_info",     timer_to_json(&g_perf.poll_mount));

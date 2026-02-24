@@ -79,6 +79,7 @@ typedef struct {
     perf_timer_t poll_image_history;      // fetch_image_history_robust duration
     perf_timer_t poll_filter;             // fetch_filter_robust_ex duration
     perf_timer_t poll_profile;            // fetch_profile_robust duration
+    perf_timer_t poll_equipment_bundle;   // fetch_equipment_info_bundled duration
 
     // UI update timing
     perf_timer_t ui_update_total;         // Total time in bsp_display_lock for UI updates

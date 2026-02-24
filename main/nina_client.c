@@ -343,13 +343,34 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
         data->filter_count = 0;
     }
 
-    ESP_LOGI(TAG, "=== Polling NINA data (tiered) ===");
+    ESP_LOGI(TAG, "=== Polling NINA data (%s: %s) ===",
+             state->bundle_not_available ? "tiered" : "bundled",
+             state->bundle_not_available ? "equipment/*/info" : "equipment/info");
 
-    // --- ALWAYS: Camera heartbeat ---
-    perf_timer_start(&g_perf.poll_camera);
-    fetch_camera_info_robust(base_url, data);
-    perf_timer_stop(&g_perf.poll_camera);
+    // --- BUNDLED: All equipment in one request (ninaAPI 2.2.15+) ---
+    if (!state->bundle_not_available) {
+        perf_timer_start(&g_perf.poll_equipment_bundle);
+        int bundle_result = fetch_equipment_info_bundled(base_url, data, !state->static_fetched);
+        perf_timer_stop(&g_perf.poll_equipment_bundle);
 
+        if (bundle_result == -2) {
+            // Endpoint not available (old ninaAPI) — fall back to individual fetchers
+            ESP_LOGW(TAG, "/equipment/info not available, falling back to individual fetchers");
+            state->bundle_not_available = true;
+            // Fall through to legacy path below
+        }
+        // bundle_result == -1: HTTP failure, data->connected stays false (set at line 332)
+        // bundle_result == 0: success, data->connected set by bundled parser
+    }
+
+    if (state->bundle_not_available) {
+        // --- LEGACY: Individual equipment fetchers (old ninaAPI without /equipment/info) ---
+        perf_timer_start(&g_perf.poll_camera);
+        fetch_camera_info_robust(base_url, data);
+        perf_timer_stop(&g_perf.poll_camera);
+    }
+
+    // --- Connection check (both bundled and legacy paths) ---
     nina_conn_state_t conn_state = nina_connection_report_poll(instance, data->connected);
     data->connected = (conn_state == NINA_CONN_CONNECTED);
 
@@ -362,25 +383,28 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
         return;
     }
 
-    // --- ONCE: Static data (profile, available filters, initial image history, switch) ---
+    // --- ONCE: Static data (profile, image history; filters/switch/safety handled by bundle) ---
     if (!state->static_fetched) {
         perf_timer_start(&g_perf.poll_profile);
         fetch_profile_robust(base_url, data);
         perf_timer_stop(&g_perf.poll_profile);
 
-        perf_timer_start(&g_perf.poll_filter);
-        fetch_filter_robust_ex(base_url, data, true);
-        perf_timer_stop(&g_perf.poll_filter);
+        if (state->bundle_not_available) {
+            // Legacy: fetch equipment data individually on first connect
+            perf_timer_start(&g_perf.poll_filter);
+            fetch_filter_robust_ex(base_url, data, true);
+            perf_timer_stop(&g_perf.poll_filter);
+
+            perf_timer_start(&g_perf.poll_switch);
+            fetch_switch_info(base_url, data);
+            perf_timer_stop(&g_perf.poll_switch);
+
+            fetch_safety_monitor_info(base_url, data);
+        }
 
         perf_timer_start(&g_perf.poll_image_history);
         fetch_image_history_robust(base_url, data);
         perf_timer_stop(&g_perf.poll_image_history);
-
-        perf_timer_start(&g_perf.poll_switch);
-        fetch_switch_info(base_url, data);
-        perf_timer_stop(&g_perf.poll_switch);
-
-        fetch_safety_monitor_info(base_url, data);
 
         snprintf(state->cached_profile, sizeof(state->cached_profile), "%s", data->profile_name);
         snprintf(state->cached_telescope, sizeof(state->cached_telescope), "%s", data->telescope_name);
@@ -396,47 +420,64 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
         if (state->cached_telescope[0] != '\0') {
             snprintf(data->telescope_name, sizeof(data->telescope_name), "%s", state->cached_telescope);
         }
-        memcpy(data->filters, state->cached_filters, sizeof(data->filters));
-        data->filter_count = state->cached_filter_count;
+        if (state->bundle_not_available) {
+            // Legacy: restore cached filters
+            memcpy(data->filters, state->cached_filters, sizeof(data->filters));
+            data->filter_count = state->cached_filter_count;
+        } else {
+            // Bundled: filters come fresh every cycle, update cache
+            memcpy(state->cached_filters, data->filters, sizeof(state->cached_filters));
+            state->cached_filter_count = data->filter_count;
+        }
     }
 
-    // --- FAST: Guider RMS ---
-    perf_timer_start(&g_perf.poll_guider);
-    fetch_guider_robust(base_url, data);
-    perf_timer_stop(&g_perf.poll_guider);
+    if (state->bundle_not_available) {
+        // --- LEGACY: Fast + conditional + slow tier fetchers ---
+        perf_timer_start(&g_perf.poll_guider);
+        fetch_guider_robust(base_url, data);
+        perf_timer_stop(&g_perf.poll_guider);
 
-    // --- CONDITIONAL: Only poll if WebSocket is NOT handling ---
-    if (!data->websocket_connected) {
-        perf_timer_start(&g_perf.poll_image_history);
-        fetch_image_history_robust(base_url, data);
-        perf_timer_stop(&g_perf.poll_image_history);
-        if (data->telescope_name[0] != '\0') {
-            snprintf(state->cached_telescope, sizeof(state->cached_telescope), "%s", data->telescope_name);
+        if (!data->websocket_connected) {
+            perf_timer_start(&g_perf.poll_image_history);
+            fetch_image_history_robust(base_url, data);
+            perf_timer_stop(&g_perf.poll_image_history);
+            if (data->telescope_name[0] != '\0') {
+                snprintf(state->cached_telescope, sizeof(state->cached_telescope), "%s", data->telescope_name);
+            }
+            perf_timer_start(&g_perf.poll_filter);
+            fetch_filter_robust_ex(base_url, data, false);
+            perf_timer_stop(&g_perf.poll_filter);
+        } else {
+            if (data->telescope_name[0] != '\0') {
+                snprintf(state->cached_telescope, sizeof(state->cached_telescope), "%s", data->telescope_name);
+            }
         }
-        perf_timer_start(&g_perf.poll_filter);
-        fetch_filter_robust_ex(base_url, data, false);
-        perf_timer_stop(&g_perf.poll_filter);
+
+        if (now_ms - state->last_slow_poll_ms >= NINA_POLL_SLOW_MS) {
+            perf_timer_start(&g_perf.poll_focuser);
+            fetch_focuser_robust(base_url, data);
+            perf_timer_stop(&g_perf.poll_focuser);
+
+            perf_timer_start(&g_perf.poll_mount);
+            fetch_mount_robust(base_url, data);
+            perf_timer_stop(&g_perf.poll_mount);
+
+            perf_timer_start(&g_perf.poll_switch);
+            fetch_switch_info(base_url, data);
+            perf_timer_stop(&g_perf.poll_switch);
+
+            state->last_slow_poll_ms = now_ms;
+        }
     } else {
+        // --- BUNDLED: Only image history needs separate fetch (not in bundle) ---
+        if (!data->websocket_connected) {
+            perf_timer_start(&g_perf.poll_image_history);
+            fetch_image_history_robust(base_url, data);
+            perf_timer_stop(&g_perf.poll_image_history);
+        }
         if (data->telescope_name[0] != '\0') {
             snprintf(state->cached_telescope, sizeof(state->cached_telescope), "%s", data->telescope_name);
         }
-    }
-
-    // --- SLOW: Focuser + Mount + Switch (every 30s) ---
-    if (now_ms - state->last_slow_poll_ms >= NINA_POLL_SLOW_MS) {
-        perf_timer_start(&g_perf.poll_focuser);
-        fetch_focuser_robust(base_url, data);
-        perf_timer_stop(&g_perf.poll_focuser);
-
-        perf_timer_start(&g_perf.poll_mount);
-        fetch_mount_robust(base_url, data);
-        perf_timer_stop(&g_perf.poll_mount);
-
-        perf_timer_start(&g_perf.poll_switch);
-        fetch_switch_info(base_url, data);
-        perf_timer_stop(&g_perf.poll_switch);
-
-        state->last_slow_poll_ms = now_ms;
     }
 
     // --- SEQUENCE: Timer-based + event-driven polling ---
@@ -498,8 +539,21 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
         data->filter_count = 0;
     }
 
-    // --- ALWAYS: Camera heartbeat ---
-    fetch_camera_info_robust(base_url, data);
+    // --- Equipment fetch (bundled or individual camera heartbeat) ---
+    if (!state->bundle_not_available) {
+        // Bundled: all equipment in one request (skip guider RMS for background)
+        int bundle_result = fetch_equipment_info_bundled(base_url, data, !state->static_fetched);
+        if (bundle_result == -2) {
+            ESP_LOGW(TAG, "Background: /equipment/info not available, falling back");
+            state->bundle_not_available = true;
+            // Fall through to legacy camera heartbeat
+        }
+    }
+
+    if (state->bundle_not_available) {
+        // Legacy: camera-only heartbeat
+        fetch_camera_info_robust(base_url, data);
+    }
 
     nina_conn_state_t conn_state = nina_connection_report_poll(instance, data->connected);
     data->connected = (conn_state == NINA_CONN_CONNECTED);
@@ -513,13 +567,18 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
         return;
     }
 
-    // --- ONCE: Static data (profile, available filters, initial image history, switch) ---
+    // --- ONCE: Static data (profile, image history; filters/switch/safety from bundle) ---
     if (!state->static_fetched) {
         fetch_profile_robust(base_url, data);
-        fetch_filter_robust_ex(base_url, data, true);
+
+        if (state->bundle_not_available) {
+            // Legacy: fetch equipment data individually
+            fetch_filter_robust_ex(base_url, data, true);
+            fetch_switch_info(base_url, data);
+            fetch_safety_monitor_info(base_url, data);
+        }
+
         fetch_image_history_robust(base_url, data);
-        fetch_switch_info(base_url, data);
-        fetch_safety_monitor_info(base_url, data);
 
         snprintf(state->cached_profile, sizeof(state->cached_profile), "%s", data->profile_name);
         snprintf(state->cached_telescope, sizeof(state->cached_telescope), "%s", data->telescope_name);
@@ -535,14 +594,18 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
         if (state->cached_telescope[0] != '\0') {
             snprintf(data->telescope_name, sizeof(data->telescope_name), "%s", state->cached_telescope);
         }
-        memcpy(data->filters, state->cached_filters, sizeof(data->filters));
-        data->filter_count = state->cached_filter_count;
+        if (state->bundle_not_available) {
+            memcpy(data->filters, state->cached_filters, sizeof(data->filters));
+            data->filter_count = state->cached_filter_count;
+        } else {
+            // Bundled: filters come fresh, update cache
+            memcpy(state->cached_filters, data->filters, sizeof(state->cached_filters));
+            state->cached_filter_count = data->filter_count;
+        }
     }
 
-    // --- SKIP: guider RMS, repeated image history (HFR/stars), filter position ---
-
-    // --- SLOW: Focuser + Mount + Switch (every 30s) ---
-    if (now_ms - state->last_slow_poll_ms >= NINA_POLL_SLOW_MS) {
+    // --- SLOW: Focuser + Mount + Switch (every 30s, legacy only — bundle handles these) ---
+    if (state->bundle_not_available && now_ms - state->last_slow_poll_ms >= NINA_POLL_SLOW_MS) {
         fetch_focuser_robust(base_url, data);
         fetch_mount_robust(base_url, data);
         fetch_switch_info(base_url, data);

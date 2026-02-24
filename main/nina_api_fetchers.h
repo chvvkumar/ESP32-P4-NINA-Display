@@ -19,6 +19,18 @@ void fetch_focuser_robust(const char *base_url, nina_client_t *data);
 void fetch_switch_info(const char *base_url, nina_client_t *data);
 void fetch_safety_monitor_info(const char *base_url, nina_client_t *data);
 
+/**
+ * @brief Fetch all equipment info from the bundled /equipment/info endpoint (ninaAPI 2.2.15+).
+ * Populates camera, filter wheel, focuser, guider, mount, switch, and safety monitor
+ * fields in nina_client_t from a single HTTP request.
+ *
+ * @param base_url          NINA API base URL
+ * @param data              Client data structure to populate
+ * @param fetch_filter_list If true, also parse AvailableFilters[] (use on first connect)
+ * @return 0 on success, -1 on HTTP failure (offline), -2 if endpoint unavailable (404/error)
+ */
+int fetch_equipment_info_bundled(const char *base_url, nina_client_t *data, bool fetch_filter_list);
+
 /* Info overlay detail fetchers — on-demand, not part of normal polling */
 #include "ui/info_overlay_types.h"
 void fetch_camera_details(const char *base_url, camera_detail_data_t *out);

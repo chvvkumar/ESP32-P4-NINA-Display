@@ -309,24 +309,14 @@ void fetch_focuser_robust(const char *base_url, nina_client_t *data) {
 }
 
 /**
- * @brief Fetch switch/power info - Reads voltage, amps, watts, and PWM/dew heater outputs
+ * @brief Parse switch/power response JSON into nina_client_t power fields.
+ * Shared by both fetch_switch_info() and fetch_equipment_info_bundled().
+ * @param response  The switch info cJSON object (Response from individual, or Switch sub-object from bundle)
+ * @param data      Client data to populate
  */
-void fetch_switch_info(const char *base_url, nina_client_t *data) {
-    char url[256];
-    snprintf(url, sizeof(url), "%sequipment/switch/info", base_url);
-
-    cJSON *json = http_get_json(url);
-    if (!json) return;
-
-    cJSON *response = cJSON_GetObjectItem(json, "Response");
-    if (!response) {
-        cJSON_Delete(json);
-        return;
-    }
-
+static void parse_switch_response(cJSON *response, nina_client_t *data) {
     cJSON *connected = cJSON_GetObjectItem(response, "Connected");
     if (!connected || !cJSON_IsTrue(connected)) {
-        cJSON_Delete(json);
         return;
     }
 
@@ -417,6 +407,22 @@ void fetch_switch_info(const char *base_url, nina_client_t *data) {
     ESP_LOGI(TAG, "Switch: %.1fV, %.2fA, %.1fW, %d PWM outputs",
         data->power.input_voltage, data->power.total_amps,
         data->power.total_watts, data->power.pwm_count);
+}
+
+/**
+ * @brief Fetch switch/power info - Reads voltage, amps, watts, and PWM/dew heater outputs
+ */
+void fetch_switch_info(const char *base_url, nina_client_t *data) {
+    char url[256];
+    snprintf(url, sizeof(url), "%sequipment/switch/info", base_url);
+
+    cJSON *json = http_get_json(url);
+    if (!json) return;
+
+    cJSON *response = cJSON_GetObjectItem(json, "Response");
+    if (response) {
+        parse_switch_response(response, data);
+    }
 
     cJSON_Delete(json);
 }
@@ -449,6 +455,160 @@ void fetch_safety_monitor_info(const char *base_url, nina_client_t *data) {
     }
 
     cJSON_Delete(json);
+}
+
+/**
+ * @brief Fetch all equipment info from the bundled /equipment/info endpoint.
+ * ninaAPI 2.2.15+ returns Camera, FilterWheel, Focuser, Guider, Mount, Switch,
+ * SafetyMonitor (and more) in a single HTTP response, replacing 7+ individual calls.
+ *
+ * @return 0 on success, -1 on HTTP failure (offline), -2 if endpoint unavailable
+ */
+int fetch_equipment_info_bundled(const char *base_url, nina_client_t *data, bool fetch_filter_list) {
+    char url[256];
+    snprintf(url, sizeof(url), "%sequipment/info", base_url);
+
+    cJSON *json = http_get_json(url);
+    if (!json) {
+        strcpy(data->status, "OFFLINE");
+        return -1;
+    }
+
+    cJSON *response = cJSON_GetObjectItem(json, "Response");
+    if (!response) {
+        // No Response object — may be a 404 or unsupported endpoint
+        cJSON_Delete(json);
+        strcpy(data->status, "OFFLINE");
+        return -2;
+    }
+
+    // ── Camera ──
+    cJSON *camera = cJSON_GetObjectItem(response, "Camera");
+    if (camera) {
+        data->connected = true;
+
+        cJSON *state = cJSON_GetObjectItem(camera, "CameraState");
+        if (state && state->valuestring)
+            strncpy(data->status, state->valuestring, sizeof(data->status) - 1);
+
+        cJSON *temp = cJSON_GetObjectItem(camera, "Temperature");
+        if (temp) data->camera.temp = (float)temp->valuedouble;
+
+        cJSON *cooler = cJSON_GetObjectItem(camera, "CoolerPower");
+        if (cooler) data->camera.cooler_power = (float)cooler->valuedouble;
+
+        // Exposure timing (same logic as fetch_camera_info_robust)
+        cJSON *is_exposing = cJSON_GetObjectItem(camera, "IsExposing");
+        cJSON *exp_end = cJSON_GetObjectItem(camera, "ExposureEndTime");
+        if (is_exposing && cJSON_IsTrue(is_exposing) && exp_end && exp_end->valuestring) {
+            time_t end_time = parse_iso8601(exp_end->valuestring);
+            time_t now = time(NULL);
+            if (now > 1577836800 && end_time > 0) {
+                double remaining = difftime(end_time, now);
+                if (remaining >= 0 && remaining <= 7200) {
+                    data->exposure_current = -remaining;
+                    data->exposure_end_epoch = (int64_t)end_time;
+                }
+            }
+        } else {
+            data->exposure_end_epoch = 0;
+        }
+    }
+
+    // ── Guider ──
+    cJSON *guider = cJSON_GetObjectItem(response, "Guider");
+    if (guider) {
+        cJSON *rms = cJSON_GetObjectItem(guider, "RMSError");
+        if (rms) {
+            cJSON *total = cJSON_GetObjectItem(rms, "Total");
+            if (total) {
+                cJSON *arcsec = cJSON_GetObjectItem(total, "Arcseconds");
+                if (arcsec) data->guider.rms_total = (float)arcsec->valuedouble;
+            }
+            cJSON *ra = cJSON_GetObjectItem(rms, "RA");
+            if (ra) {
+                cJSON *arcsec = cJSON_GetObjectItem(ra, "Arcseconds");
+                if (arcsec) data->guider.rms_ra = (float)arcsec->valuedouble;
+            }
+            cJSON *dec = cJSON_GetObjectItem(rms, "Dec");
+            if (dec) {
+                cJSON *arcsec = cJSON_GetObjectItem(dec, "Arcseconds");
+                if (arcsec) data->guider.rms_dec = (float)arcsec->valuedouble;
+            }
+            ESP_LOGI(TAG, "Guiding RMS - Total: %.2f\", RA: %.2f\", DEC: %.2f\"",
+                data->guider.rms_total, data->guider.rms_ra, data->guider.rms_dec);
+        }
+    }
+
+    // ── Filter Wheel ──
+    cJSON *fw = cJSON_GetObjectItem(response, "FilterWheel");
+    if (fw) {
+        cJSON *sel = cJSON_GetObjectItem(fw, "SelectedFilter");
+        if (sel) {
+            cJSON *name = cJSON_GetObjectItem(sel, "Name");
+            if (name && name->valuestring) {
+                strncpy(data->current_filter, name->valuestring, sizeof(data->current_filter) - 1);
+            }
+        }
+
+        if (fetch_filter_list) {
+            cJSON *avail = cJSON_GetObjectItem(fw, "AvailableFilters");
+            if (avail && cJSON_IsArray(avail)) {
+                int count = cJSON_GetArraySize(avail);
+                if (count > MAX_FILTERS) count = MAX_FILTERS;
+                data->filter_count = 0;
+                for (int i = 0; i < count; i++) {
+                    cJSON *f = cJSON_GetArrayItem(avail, i);
+                    if (f) {
+                        cJSON *fn = cJSON_GetObjectItem(f, "Name");
+                        cJSON *fi = cJSON_GetObjectItem(f, "Id");
+                        if (fn && fn->valuestring) {
+                            strncpy(data->filters[i].name, fn->valuestring,
+                                    sizeof(data->filters[i].name) - 1);
+                            data->filters[i].id = fi ? fi->valueint : i;
+                            data->filter_count++;
+                        }
+                    }
+                }
+                ESP_LOGI(TAG, "Found %d available filters (bundled)", data->filter_count);
+            }
+        }
+    }
+
+    // ── Focuser ──
+    cJSON *focuser = cJSON_GetObjectItem(response, "Focuser");
+    if (focuser) {
+        cJSON *pos = cJSON_GetObjectItem(focuser, "Position");
+        if (pos) data->focuser.position = pos->valueint;
+    }
+
+    // ── Mount ──
+    cJSON *mount = cJSON_GetObjectItem(response, "Mount");
+    if (mount) {
+        cJSON *flip = cJSON_GetObjectItem(mount, "TimeToMeridianFlipString");
+        if (flip && flip->valuestring)
+            strncpy(data->meridian_flip, flip->valuestring, sizeof(data->meridian_flip) - 1);
+    }
+
+    // ── Switch ──
+    cJSON *sw = cJSON_GetObjectItem(response, "Switch");
+    if (sw) {
+        parse_switch_response(sw, data);
+    }
+
+    // ── Safety Monitor ──
+    cJSON *safety = cJSON_GetObjectItem(response, "SafetyMonitor");
+    if (safety) {
+        cJSON *conn = cJSON_GetObjectItem(safety, "Connected");
+        if (conn && cJSON_IsTrue(conn)) {
+            data->safety_connected = true;
+            cJSON *is_safe = cJSON_GetObjectItem(safety, "IsSafe");
+            data->safety_is_safe = is_safe && cJSON_IsTrue(is_safe);
+        }
+    }
+
+    cJSON_Delete(json);
+    return 0;
 }
 
 /* ── Info overlay detail fetchers ───────────────────────────────────── */
