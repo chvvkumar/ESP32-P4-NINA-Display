@@ -322,8 +322,9 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_t *seq_left = lv_obj_create(box_seq);
     lv_obj_remove_style_all(seq_left);
     lv_obj_clear_flag(seq_left, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_size(seq_left, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_height(seq_left, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(seq_left, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_grow(seq_left, 1);
 
     lv_obj_t *lbl_seq_title = create_small_label(seq_left, "SEQUENCE");
     lv_obj_set_style_text_font(lbl_seq_title, &lv_font_montserrat_14, 0);
@@ -333,11 +334,22 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_style_text_font(p->lbl_seq_container, &lv_font_montserrat_24, 0);
     lv_label_set_text(p->lbl_seq_container, "----");
 
+    // Safety monitor icon (centered in sequence row)
+    extern const lv_font_t lv_font_material_safety;
+    p->safety_icon = lv_label_create(box_seq);
+    lv_obj_set_style_text_font(p->safety_icon, &lv_font_material_safety, 0);
+    lv_obj_set_style_text_color(p->safety_icon, lv_color_hex(0x999999), 0);
+    lv_label_set_text(p->safety_icon, "");
+    lv_obj_clear_flag(p->safety_icon, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(p->safety_icon, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(p->safety_icon, LV_OBJ_FLAG_HIDDEN);
+
     lv_obj_t *seq_right = lv_obj_create(box_seq);
     lv_obj_remove_style_all(seq_right);
     lv_obj_clear_flag(seq_right, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_size(seq_right, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_height(seq_right, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(seq_right, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_grow(seq_right, 1);
     lv_obj_set_flex_align(seq_right, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
 
     lv_obj_t *lbl_step_title = create_small_label(seq_right, "STEP");
@@ -400,19 +412,6 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_style_pad_top(p->lbl_loop_count, 8, 0);
     lv_label_set_text(p->lbl_loop_count, "-- / --");
 
-    // Safety monitor icon (floating, bottom-left of exposure box)
-    extern const lv_font_t lv_font_material_safety;
-    p->safety_icon = lv_label_create(box_exposure);
-    lv_obj_set_style_text_font(p->safety_icon, &lv_font_material_safety, 0);
-    lv_obj_set_style_text_color(p->safety_icon, lv_color_hex(0x999999), 0);
-    lv_label_set_text(p->safety_icon, "");
-    lv_obj_add_flag(p->safety_icon, LV_OBJ_FLAG_FLOATING);
-    lv_obj_clear_flag(p->safety_icon, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_clear_flag(p->safety_icon, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_align(p->safety_icon, LV_ALIGN_BOTTOM_LEFT);
-    lv_obj_set_style_translate_x(p->safety_icon, 6, 0);
-    lv_obj_set_style_translate_y(p->safety_icon, -6, 0);
-    lv_obj_add_flag(p->safety_icon, LV_OBJ_FLAG_HIDDEN);
 
     // RMS + HFR (col 1, row 2)
     lv_obj_t *box_rms_hfr = create_bento_box(p->page);
