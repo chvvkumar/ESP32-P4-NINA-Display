@@ -37,6 +37,7 @@ static const char *TAG = "tasks";
 
 /* Signals the data task that a page switch occurred */
 volatile bool page_changed = false;
+volatile bool ota_in_progress = false;
 TaskHandle_t data_task_handle = NULL;
 static int64_t last_graph_fetch_ms = 0;  /* Timestamp of last graph data fetch */
 
@@ -171,6 +172,11 @@ void data_update_task(void *arg) {
     }
 
     while (1) {
+        /* Suspend polling during OTA update */
+        while (ota_in_progress) {
+            vTaskDelay(pdMS_TO_TICKS(500));
+        }
+
         // ── Perf: Track effective cycle interval ──
         {
             static int64_t prev_cycle_start = 0;
@@ -536,12 +542,30 @@ void data_update_task(void *arg) {
                 }
             }
 
+            /* Auto-refresh session stats overlay (on-device data, updates each poll) */
+            if (nina_info_overlay_visible()
+                && nina_info_overlay_get_type() == INFO_OVERLAY_SESSION_STATS
+                && !nina_info_overlay_requested()) {
+                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                    nina_info_overlay_set_session_stats(active_nina_idx);
+                    bsp_display_unlock();
+                }
+            }
+
             /* Handle info overlay data fetch */
             if (nina_info_overlay_requested()) {
                 nina_info_overlay_clear_request();
+                info_overlay_type_t itype = nina_info_overlay_get_type();
+
+                /* Session stats uses on-device data — no API fetch needed */
+                if (itype == INFO_OVERLAY_SESSION_STATS) {
+                    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                        nina_info_overlay_set_session_stats(active_nina_idx);
+                        bsp_display_unlock();
+                    }
+                } else {
                 const char *info_url = app_config_get_instance_url(active_nina_idx);
                 if (strlen(info_url) > 0 && nina_connection_is_connected(active_nina_idx)) {
-                    info_overlay_type_t itype = nina_info_overlay_get_type();
 
                     if (itype == INFO_OVERLAY_CAMERA) {
                         camera_detail_data_t cam_data = {0};
@@ -604,6 +628,7 @@ void data_update_task(void *arg) {
                         }
                     }
                 }
+                } /* else (non-session-stats overlay) */
             }
         }
 

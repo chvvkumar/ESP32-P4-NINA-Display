@@ -51,7 +51,7 @@ static lv_obj_t *make_status_pill(lv_obj_t *parent, const char *text, lv_obj_t *
 
     lv_obj_t *lbl = lv_label_create(parent);
     lv_label_set_text(lbl, text);
-    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
     if (current_theme) {
         lv_obj_set_style_text_color(lbl,
             lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
@@ -102,7 +102,7 @@ void build_mount_content(lv_obj_t *content) {
 
         lv_obj_t *ra_lbl = lv_label_create(ra_block);
         lv_label_set_text(ra_lbl, "RA");
-        lv_obj_set_style_text_font(ra_lbl, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(ra_lbl, &lv_font_montserrat_16, 0);
         lv_obj_set_style_text_letter_space(ra_lbl, 2, 0);
         if (current_theme) {
             lv_obj_set_style_text_color(ra_lbl,
@@ -111,7 +111,7 @@ void build_mount_content(lv_obj_t *content) {
 
         lbl_ra_value = lv_label_create(ra_block);
         lv_label_set_text(lbl_ra_value, "--");
-        lv_obj_set_style_text_font(lbl_ra_value, &lv_font_montserrat_28, 0);
+        lv_obj_set_style_text_font(lbl_ra_value, &lv_font_montserrat_36, 0);
         if (current_theme) {
             lv_obj_set_style_text_color(lbl_ra_value,
                 lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
@@ -120,7 +120,7 @@ void build_mount_content(lv_obj_t *content) {
         /* Vertical divider */
         coord_divider = lv_obj_create(coord_row);
         lv_obj_remove_style_all(coord_divider);
-        lv_obj_set_size(coord_divider, 1, 40);
+        lv_obj_set_size(coord_divider, 1, 48);
         if (current_theme) {
             lv_obj_set_style_bg_color(coord_divider,
                 lv_color_hex(current_theme->bento_border), 0);
@@ -137,7 +137,7 @@ void build_mount_content(lv_obj_t *content) {
 
         lv_obj_t *dec_lbl = lv_label_create(dec_block);
         lv_label_set_text(dec_lbl, "DEC");
-        lv_obj_set_style_text_font(dec_lbl, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(dec_lbl, &lv_font_montserrat_16, 0);
         lv_obj_set_style_text_letter_space(dec_lbl, 2, 0);
         if (current_theme) {
             lv_obj_set_style_text_color(dec_lbl,
@@ -146,7 +146,7 @@ void build_mount_content(lv_obj_t *content) {
 
         lbl_dec_value = lv_label_create(dec_block);
         lv_label_set_text(lbl_dec_value, "--");
-        lv_obj_set_style_text_font(lbl_dec_value, &lv_font_montserrat_28, 0);
+        lv_obj_set_style_text_font(lbl_dec_value, &lv_font_montserrat_36, 0);
         if (current_theme) {
             lv_obj_set_style_text_color(lbl_dec_value,
                 lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
@@ -230,6 +230,7 @@ void build_mount_content(lv_obj_t *content) {
                               LV_FLEX_ALIGN_CENTER);
         lv_obj_set_style_pad_ver(status_row, 4, 0);
 
+        lv_obj_set_style_pad_right(status_row, INFO_BACK_BTN_ZONE, 0);
         make_status_pill(status_row, "Parked: --",  &lbl_parked);
         make_status_pill(status_row, "Home: --",    &lbl_home);
         make_status_pill(status_row, "Slewing: --", &lbl_slewing);
@@ -330,15 +331,15 @@ static void apply_theme_to_label_mount(lv_obj_t *obj) {
     int gb = app_config_get()->color_brightness;
 
     const lv_font_t *font = lv_obj_get_style_text_font(obj, 0);
-    if (font == &lv_font_montserrat_14) {
-        /* Section header / coordinate sublabel */
+    if (font == &lv_font_montserrat_16) {
+        /* Section header / coordinate sublabel / status pill */
         lv_obj_set_style_text_color(obj,
             lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    } else if (font == &lv_font_montserrat_16) {
-        /* Key label or status pill */
+    } else if (font == &lv_font_montserrat_20) {
+        /* Key label */
         lv_obj_set_style_text_color(obj,
             lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    } else if (font == &lv_font_montserrat_28) {
+    } else if (font == &lv_font_montserrat_36) {
         /* Hero RA/Dec values */
         lv_obj_set_style_text_color(obj,
             lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);

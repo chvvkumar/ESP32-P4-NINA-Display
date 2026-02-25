@@ -61,7 +61,8 @@ typedef struct {
     int stars;
     char target_time_remaining[16]; // Earliest remaining time across all conditions (H:MM format)
     char target_time_reason[16];    // Binding constraint label: "TIME LEFT", "SETS IN", "DAWN IN"
-    
+    int  target_condition_count;    // Number of active loop conditions (for "+" indicator)
+
     // Mount
     char meridian_flip[16];
     float rotator_angle;

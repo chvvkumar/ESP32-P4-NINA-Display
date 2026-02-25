@@ -62,7 +62,7 @@ static lv_obj_t *make_weather_block(lv_obj_t *parent, const char *title,
 
     lv_obj_t *lbl_title = lv_label_create(block);
     lv_label_set_text(lbl_title, title);
-    lv_obj_set_style_text_font(lbl_title, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(lbl_title, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_letter_space(lbl_title, 1, 0);
     if (current_theme) {
         lv_obj_set_style_text_color(lbl_title,
@@ -71,7 +71,7 @@ static lv_obj_t *make_weather_block(lv_obj_t *parent, const char *title,
 
     lv_obj_t *lbl_val = lv_label_create(block);
     lv_label_set_text(lbl_val, "--");
-    lv_obj_set_style_text_font(lbl_val, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(lbl_val, &lv_font_montserrat_20, 0);
     if (current_theme) {
         lv_obj_set_style_text_color(lbl_val,
             lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
@@ -343,12 +343,12 @@ static void apply_theme_to_label_cam(lv_obj_t *obj) {
     int gb = app_config_get()->color_brightness;
 
     const lv_font_t *font = lv_obj_get_style_text_font(obj, 0);
-    if (font == &lv_font_montserrat_14) {
+    if (font == &lv_font_montserrat_16) {
         /* Section header */
         lv_obj_set_style_text_color(obj,
             lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    } else if (font == &lv_font_montserrat_16 || font == &lv_font_montserrat_12) {
-        /* Key label */
+    } else if (font == &lv_font_montserrat_20 || font == &lv_font_montserrat_14) {
+        /* Key label or weather block title */
         lv_obj_set_style_text_color(obj,
             lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
     } else {

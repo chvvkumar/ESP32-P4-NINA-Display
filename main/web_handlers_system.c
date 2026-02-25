@@ -8,6 +8,12 @@
 #include "freertos/task.h"
 #include <string.h>
 #include "esp_heap_caps.h"
+#include "nina_websocket.h"
+#include "mqtt_ha.h"
+#include "tasks.h"
+#include "bsp/esp-bsp.h"
+#include "lvgl.h"
+#include "display_defs.h"
 
 // Handler for reboot
 esp_err_t reboot_post_handler(httpd_req_t *req)
@@ -37,6 +43,90 @@ esp_err_t factory_reset_post_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+// ── OTA overlay helpers ──
+
+static lv_obj_t *ota_overlay = NULL;
+static lv_obj_t *ota_progress_label = NULL;
+
+static void ota_show_overlay(const char *message) {
+    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+        ota_overlay = lv_obj_create(lv_scr_act());
+        lv_obj_remove_style_all(ota_overlay);
+        lv_obj_set_size(ota_overlay, SCREEN_SIZE, SCREEN_SIZE);
+        lv_obj_set_style_bg_color(ota_overlay, lv_color_hex(0x000000), 0);
+        lv_obj_set_style_bg_opa(ota_overlay, LV_OPA_COVER, 0);
+        lv_obj_center(ota_overlay);
+        lv_obj_set_flex_flow(ota_overlay, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(ota_overlay, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_row(ota_overlay, 20, 0);
+
+        lv_obj_t *title = lv_label_create(ota_overlay);
+        lv_label_set_text(title, message);
+        lv_obj_set_style_text_color(title, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_text_font(title, &lv_font_montserrat_36, 0);
+        lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_width(title, LV_PCT(90));
+
+        ota_progress_label = lv_label_create(ota_overlay);
+        lv_label_set_text(ota_progress_label, "0%");
+        lv_obj_set_style_text_color(ota_progress_label, lv_color_hex(0x888888), 0);
+        lv_obj_set_style_text_font(ota_progress_label, &lv_font_montserrat_28, 0);
+        lv_obj_set_style_text_align(ota_progress_label, LV_TEXT_ALIGN_CENTER, 0);
+
+        lv_obj_t *hint = lv_label_create(ota_overlay);
+        lv_label_set_text(hint, "Do not power off");
+        lv_obj_set_style_text_color(hint, lv_color_hex(0x555555), 0);
+        lv_obj_set_style_text_font(hint, &lv_font_montserrat_20, 0);
+        lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
+
+        bsp_display_unlock();
+    }
+}
+
+static void ota_update_progress(int percent) {
+    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+        if (ota_progress_label) {
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%d%%", percent);
+            lv_label_set_text(ota_progress_label, buf);
+        }
+        bsp_display_unlock();
+    }
+}
+
+static void ota_remove_overlay(void) {
+    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+        if (ota_overlay) {
+            lv_obj_delete(ota_overlay);
+            ota_overlay = NULL;
+            ota_progress_label = NULL;
+        }
+        bsp_display_unlock();
+    }
+}
+
+/**
+ * Stop all background network activity to give OTA maximum bandwidth.
+ * Sets ota_in_progress to suspend the data task, then stops WebSockets and MQTT.
+ */
+static void ota_stop_network(void) {
+    ota_in_progress = true;
+    /* Give the data task time to reach its suspend point */
+    vTaskDelay(pdMS_TO_TICKS(200));
+    nina_websocket_stop_all();
+    mqtt_ha_stop();
+}
+
+/**
+ * Restore background network activity after a failed OTA.
+ * WebSocket reconnects are handled by the data task's check_reconnect logic.
+ * MQTT must be explicitly restarted since the data task only starts it once.
+ */
+static void ota_restore_network(void) {
+    mqtt_ha_start();
+    ota_in_progress = false;
+}
+
 // Handler for OTA firmware upload (receives raw binary via POST)
 #define OTA_BUF_SIZE 4096
 
@@ -52,9 +142,15 @@ esp_err_t ota_post_handler(httpd_req_t *req)
         return send_400(req, "Firmware too large (max 16 MB)");
     }
 
+    /* ── Stop all network traffic and show OTA screen ── */
+    ota_stop_network();
+    ota_show_overlay("OTA Update\nIn Progress");
+
     const esp_partition_t *update_partition = esp_ota_get_next_update_partition(NULL);
     if (!update_partition) {
         ESP_LOGE(TAG, "OTA: no update partition found");
+        ota_remove_overlay();
+        ota_restore_network();
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
@@ -65,6 +161,8 @@ esp_err_t ota_post_handler(httpd_req_t *req)
     esp_err_t err = esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &ota_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_begin failed: %s", esp_err_to_name(err));
+        ota_remove_overlay();
+        ota_restore_network();
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
@@ -73,6 +171,8 @@ esp_err_t ota_post_handler(httpd_req_t *req)
     if (!buf) {
         ESP_LOGE(TAG, "OTA: malloc failed for receive buffer");
         esp_ota_abort(ota_handle);
+        ota_remove_overlay();
+        ota_restore_network();
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
@@ -80,7 +180,7 @@ esp_err_t ota_post_handler(httpd_req_t *req)
     int remaining = req->content_len;
     int total = remaining;
     int received_total = 0;
-    int last_log_kb = 0;
+    int last_progress_pct = -1;
     bool failed = false;
 
     while (remaining > 0) {
@@ -106,12 +206,14 @@ esp_err_t ota_post_handler(httpd_req_t *req)
         remaining -= received;
         received_total += received;
 
-        /* Log progress every 100 KB */
-        int current_kb = received_total / (100 * 1024);
-        if (current_kb > last_log_kb) {
-            last_log_kb = current_kb;
-            ESP_LOGI(TAG, "OTA progress: %d / %d bytes (%d%%)",
-                     received_total, total, (received_total * 100) / total);
+        /* Update progress on screen every 1% */
+        int pct = (received_total * 100) / total;
+        if (pct != last_progress_pct) {
+            last_progress_pct = pct;
+            ota_update_progress(pct);
+            if (pct % 10 == 0) {
+                ESP_LOGI(TAG, "OTA progress: %d%%", pct);
+            }
         }
     }
 
@@ -119,6 +221,8 @@ esp_err_t ota_post_handler(httpd_req_t *req)
 
     if (failed) {
         esp_ota_abort(ota_handle);
+        ota_remove_overlay();
+        ota_restore_network();
         httpd_resp_set_status(req, "500 Internal Server Error");
         httpd_resp_sendstr(req, "{\"error\":\"OTA receive/write failed\"}");
         return ESP_FAIL;
@@ -127,6 +231,8 @@ esp_err_t ota_post_handler(httpd_req_t *req)
     err = esp_ota_end(ota_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_end failed: %s", esp_err_to_name(err));
+        ota_remove_overlay();
+        ota_restore_network();
         if (err == ESP_ERR_OTA_VALIDATE_FAILED) {
             httpd_resp_set_status(req, "400 Bad Request");
             httpd_resp_sendstr(req, "{\"error\":\"Firmware image validation failed\"}");
@@ -139,11 +245,14 @@ esp_err_t ota_post_handler(httpd_req_t *req)
     err = esp_ota_set_boot_partition(update_partition);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_set_boot_partition failed: %s", esp_err_to_name(err));
+        ota_remove_overlay();
+        ota_restore_network();
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
 
     ESP_LOGI(TAG, "OTA update successful (%d bytes), rebooting...", received_total);
+    ota_update_progress(100);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"success\":true}");
 

@@ -275,7 +275,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         }
         ws_toast(index, TOAST_INFO, "Sequence started");
         nina_event_log_add(EVENT_SEV_INFO, index, "Sequence started");
-        nina_session_stats_reset();
+        nina_session_stats_reset(index);
         ESP_LOGI(TAG, "WS[%d]: Sequence starting", index);
     }
     // GUIDER-DITHER: Flag dithering state

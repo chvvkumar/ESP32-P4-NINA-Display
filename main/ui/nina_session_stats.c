@@ -90,26 +90,26 @@ void nina_session_stats_record(int instance, float rms_total, float hfr,
     portEXIT_CRITICAL(&s_lock);
 }
 
-void nina_session_stats_reset(void) {
+void nina_session_stats_reset(int instance) {
+    if (instance < 0 || instance >= MAX_NINA_INSTANCES) return;
+
     portENTER_CRITICAL(&s_lock);
-    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
-        session_stats_t *st = &s_stats[i];
-        session_data_point_t *pts = st->points; /* Preserve allocation */
-        int cap = st->capacity;
+    session_stats_t *st = &s_stats[instance];
+    session_data_point_t *pts = st->points; /* Preserve allocation */
+    int cap = st->capacity;
 
-        if (pts) {
-            memset(pts, 0, cap * sizeof(session_data_point_t));
-        }
-
-        memset(st, 0, sizeof(session_stats_t));
-        st->points = pts;
-        st->capacity = cap;
-        st->rms_min = FLT_MAX;
-        st->hfr_min = FLT_MAX;
+    if (pts) {
+        memset(pts, 0, cap * sizeof(session_data_point_t));
     }
+
+    memset(st, 0, sizeof(session_stats_t));
+    st->points = pts;
+    st->capacity = cap;
+    st->rms_min = FLT_MAX;
+    st->hfr_min = FLT_MAX;
     portEXIT_CRITICAL(&s_lock);
 
-    ESP_LOGI(TAG, "Session stats reset");
+    ESP_LOGI(TAG, "Session stats reset for instance %d", instance);
 }
 
 const session_stats_t *nina_session_stats_get(int instance) {

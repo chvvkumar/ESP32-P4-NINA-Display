@@ -6,11 +6,15 @@
 #   .\build_firmware.ps1              # Normal (release) build
 #   .\build_firmware.ps1 -Perf        # Performance profiling build
 #   .\build_firmware.ps1 -FullClean   # Clean rebuild
+#   .\build_firmware.ps1 -OTA         # Build + OTA flash to device
+#   .\build_firmware.ps1 -OTA -DeviceIP 192.168.1.100
 
 param(
     [string]$IdfPath = "C:\Espressif\frameworks\esp-idf-v5.5.2",
     [switch]$FullClean,
-    [switch]$Perf
+    [switch]$Perf,
+    [switch]$OTA,
+    [string]$DeviceIP = "192.168.1.201"
 )
 
 $ErrorActionPreference = "Stop"
@@ -196,3 +200,21 @@ Write-Host "  OTA:     $OtaBin" -ForegroundColor Green
 Write-Host "           $OtaSizeMB MB ($OtaSize bytes)" -ForegroundColor Green
 Write-Host "`nFlash with: esptool.py --chip esp32p4 write_flash 0x0 `"$FactoryBin`"" -ForegroundColor Yellow
 Write-Host "OTA update: Upload `"$OtaBin`" via the web interface at http://<device-ip>/" -ForegroundColor Yellow
+
+# OTA flash to device if requested
+if ($OTA) {
+    $OtaUrl = "http://${DeviceIP}/api/ota"
+    Write-Host "`nUploading OTA firmware to $OtaUrl ..." -ForegroundColor Cyan
+
+    try {
+        $fileBytes = [System.IO.File]::ReadAllBytes($OtaBin)
+        $null = Invoke-WebRequest -Uri $OtaUrl -Method Post `
+            -Body $fileBytes `
+            -ContentType "application/octet-stream" `
+            -TimeoutSec 120
+        Write-Host "OTA update successful! Device is rebooting." -ForegroundColor Green
+    } catch {
+        Write-Error "OTA upload failed: $_"
+        exit 1
+    }
+}

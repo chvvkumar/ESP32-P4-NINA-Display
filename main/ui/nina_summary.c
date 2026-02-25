@@ -885,8 +885,18 @@ void summary_page_update(const nina_client_t *instances, int count) {
             }
         }
 
-        /* Time to flip */
-        if (d->meridian_flip[0]) {
+        /* Time to flip — format "HH:MM:SS" as "Xh XXm" */
+        if (d->meridian_flip[0] && strcmp(d->meridian_flip, "--") != 0
+            && strcmp(d->meridian_flip, "FLIPPING") != 0) {
+            int hh = 0, mm = 0;
+            if (sscanf(d->meridian_flip, "%d:%d", &hh, &mm) >= 2) {
+                char buf[16];
+                snprintf(buf, sizeof(buf), "%dh %02dm", hh, mm);
+                set_label_if_changed(sc->lbl_flip_val, buf);
+            } else {
+                set_label_if_changed(sc->lbl_flip_val, d->meridian_flip);
+            }
+        } else if (d->meridian_flip[0]) {
             set_label_if_changed(sc->lbl_flip_val, d->meridian_flip);
         } else {
             set_label_if_changed(sc->lbl_flip_val, "--");

@@ -61,6 +61,7 @@ static void stars_click_cb(lv_event_t *e);
 static void sequence_click_cb(lv_event_t *e);
 static void filter_click_cb(lv_event_t *e);
 static void autofocus_long_press_cb(lv_event_t *e);
+static void session_stats_click_cb(lv_event_t *e);
 
 /* Strip http(s)://, path, and domain from URL, then sentence case */
 void extract_host_from_url(const char *url, char *out, size_t out_size) {
@@ -424,7 +425,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_remove_style_all(box_rms);
     lv_obj_set_size(box_rms, LV_PCT(50), LV_PCT(100));
     lv_obj_set_flex_flow(box_rms, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(box_rms, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(box_rms, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_add_flag(box_rms, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(box_rms, rms_click_cb, LV_EVENT_CLICKED, NULL);
 
@@ -441,7 +442,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_remove_style_all(box_hfr);
     lv_obj_set_size(box_hfr, LV_PCT(50), LV_PCT(100));
     lv_obj_set_flex_flow(box_hfr, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(box_hfr, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(box_hfr, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_add_flag(box_hfr, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(box_hfr, hfr_click_cb, LV_EVENT_SHORT_CLICKED, NULL);
     lv_obj_add_event_cb(box_hfr, autofocus_long_press_cb, LV_EVENT_LONG_PRESSED, NULL);
@@ -477,15 +478,17 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_flex_flow(box_sat_stars, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(box_sat_stars, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(box_sat_stars, 8, 0);
+    lv_obj_set_style_pad_all(box_sat_stars, 10, 0);
 
     lv_obj_t *box_target_time = lv_obj_create(box_sat_stars);
     lv_obj_remove_style_all(box_target_time);
-    lv_obj_clear_flag(box_target_time, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(box_target_time, LV_PCT(50), LV_PCT(100));
     lv_obj_set_flex_flow(box_target_time, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(box_target_time, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(box_target_time, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_add_flag(box_target_time, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(box_target_time, session_stats_click_cb, LV_EVENT_CLICKED, NULL);
 
-    p->lbl_target_time_header = create_small_label(box_target_time, "TIME LEFT (H:M)");
+    p->lbl_target_time_header = create_small_label(box_target_time, "TIME LEFT");
     lv_obj_set_width(p->lbl_target_time_header, LV_PCT(100));
     lv_obj_set_style_text_align(p->lbl_target_time_header, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(p->lbl_target_time_header, lv_color_hex(current_theme->text_color), 0);
@@ -497,7 +500,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_remove_style_all(box_stars);
     lv_obj_set_size(box_stars, LV_PCT(50), LV_PCT(100));
     lv_obj_set_flex_flow(box_stars, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(box_stars, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(box_stars, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_add_flag(box_stars, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(box_stars, stars_click_cb, LV_EVENT_CLICKED, NULL);
 
@@ -525,7 +528,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
         lv_obj_set_flex_grow(p->box_pwr[i], 1);
         lv_obj_set_height(p->box_pwr[i], LV_PCT(100));
         lv_obj_set_flex_flow(p->box_pwr[i], LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_flex_align(p->box_pwr[i], LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_flex_align(p->box_pwr[i], LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
         p->lbl_pwr_title[i] = create_small_label(p->box_pwr[i], "--");
         lv_obj_set_width(p->lbl_pwr_title[i], LV_PCT(100));
@@ -684,6 +687,12 @@ static void filter_click_cb(lv_event_t *e) {
 static void autofocus_long_press_cb(lv_event_t *e) {
     LV_UNUSED(e);
     nina_info_overlay_show(INFO_OVERLAY_AUTOFOCUS, active_page);
+}
+
+/* Time remaining box: click to open session statistics overlay */
+static void session_stats_click_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    nina_info_overlay_show(INFO_OVERLAY_SESSION_STATS, active_page);
 }
 
 /* Set up the dashboard with one page per NINA instance */

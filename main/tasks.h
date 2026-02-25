@@ -17,6 +17,9 @@ extern volatile bool page_changed;
 /** Task handle for data_update_task — used by WebSocket to wake the task early. */
 extern TaskHandle_t data_task_handle;
 
+/** OTA in progress — data task suspends when true. Set by OTA handler. */
+extern volatile bool ota_in_progress;
+
 /** Page-change callback registered with the dashboard swipe gesture. */
 void on_page_changed(int new_page);
 

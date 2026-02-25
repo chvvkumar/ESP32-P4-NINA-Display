@@ -32,6 +32,8 @@ static const char* classify_condition(const char *name) {
         return "SETS IN";
     if (strstr(name, "Dawn") || strstr(name, "Twilight"))
         return "DAWN IN";
+    if (strstr(name, "Time"))
+        return "TIME LEFT";
     return "TIME LEFT";
 }
 
@@ -39,6 +41,7 @@ static const char* classify_condition(const char *name) {
 typedef struct {
     int min_seconds;          // Smallest RemainingTime found so far (-1 = none)
     const char *reason;       // Header label for the binding constraint
+    int condition_count;      // Total conditions found (including those without time)
 } earliest_condition_t;
 
 // Recursively scan all conditions with RemainingTime in a container tree,
@@ -51,6 +54,8 @@ static void find_earliest_condition(cJSON *container, earliest_condition_t *out)
     if (conditions && cJSON_IsArray(conditions)) {
         cJSON *cond = NULL;
         cJSON_ArrayForEach(cond, conditions) {
+            out->condition_count++;
+
             cJSON *rem = cJSON_GetObjectItem(cond, "RemainingTime");
             if (!rem || !rem->valuestring || rem->valuestring[0] == '\0') continue;
 
@@ -268,14 +273,15 @@ void fetch_sequence_counts_optional(const char *base_url, nina_client_t *data) {
                 // Find the earliest binding condition (time, horizon, dawn, etc.)
                 data->target_time_remaining[0] = '\0';
                 data->target_time_reason[0] = '\0';
-                earliest_condition_t earliest = { .min_seconds = -1, .reason = "TIME LEFT" };
+                earliest_condition_t earliest = { .min_seconds = -1, .reason = "TIME LEFT", .condition_count = 0 };
                 find_earliest_condition(target_container, &earliest);
+                data->target_condition_count = earliest.condition_count;
                 if (earliest.min_seconds >= 0) {
                     int h = earliest.min_seconds / 3600;
                     int m = (earliest.min_seconds % 3600) / 60;
                     snprintf(data->target_time_remaining,
                              sizeof(data->target_time_remaining),
-                             "%d:%02d", h, m);
+                             "%dh %02dm", h, m);
                     strlcpy(data->target_time_reason, earliest.reason,
                             sizeof(data->target_time_reason));
                     ESP_LOGI(TAG, "Earliest condition: %s %s (%s)",

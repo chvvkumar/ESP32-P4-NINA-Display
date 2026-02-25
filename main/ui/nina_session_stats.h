@@ -51,8 +51,8 @@ void nina_session_stats_init(void);
 void nina_session_stats_record(int instance, float rms_total, float hfr,
                                float temperature, int stars, float cooler_power);
 
-/** Reset all stats for all instances.  Thread-safe. */
-void nina_session_stats_reset(void);
+/** Reset stats for a specific instance.  Thread-safe. */
+void nina_session_stats_reset(int instance);
 
 /** Get read-only pointer to instance stats.  Caller should copy quickly. */
 const session_stats_t *nina_session_stats_get(int instance);

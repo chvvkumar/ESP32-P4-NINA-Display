@@ -125,21 +125,21 @@ void build_autofocus_content(lv_obj_t *content) {
 
     lbl_y_top = lv_label_create(y_label_col);
     lv_label_set_text(lbl_y_top, "");
-    lv_obj_set_style_text_font(lbl_y_top, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(lbl_y_top, &lv_font_montserrat_16, 0);
     if (current_theme)
         lv_obj_set_style_text_color(lbl_y_top,
             lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
 
     lbl_y_mid = lv_label_create(y_label_col);
     lv_label_set_text(lbl_y_mid, "");
-    lv_obj_set_style_text_font(lbl_y_mid, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(lbl_y_mid, &lv_font_montserrat_16, 0);
     if (current_theme)
         lv_obj_set_style_text_color(lbl_y_mid,
             lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
 
     lbl_y_bot = lv_label_create(y_label_col);
     lv_label_set_text(lbl_y_bot, "");
-    lv_obj_set_style_text_font(lbl_y_bot, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(lbl_y_bot, &lv_font_montserrat_16, 0);
     if (current_theme)
         lv_obj_set_style_text_color(lbl_y_bot,
             lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
@@ -147,7 +147,7 @@ void build_autofocus_content(lv_obj_t *content) {
     /* Floating title on chart (top center) */
     lbl_chart_title = lv_label_create(af_chart);
     lv_label_set_text(lbl_chart_title, "Autofocus Curve");
-    lv_obj_set_style_text_font(lbl_chart_title, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(lbl_chart_title, &lv_font_montserrat_22, 0);
     lv_obj_add_flag(lbl_chart_title, LV_OBJ_FLAG_FLOATING);
     lv_obj_clear_flag(lbl_chart_title, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_align(lbl_chart_title, LV_ALIGN_TOP_MID, 0, 6);
@@ -164,7 +164,7 @@ void build_autofocus_content(lv_obj_t *content) {
     /* Floating summary on chart (bottom center) */
     lbl_summary = lv_label_create(af_chart);
     lv_label_set_text(lbl_summary, "");
-    lv_obj_set_style_text_font(lbl_summary, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(lbl_summary, &lv_font_montserrat_22, 0);
     lv_obj_add_flag(lbl_summary, LV_OBJ_FLAG_FLOATING);
     lv_obj_clear_flag(lbl_summary, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_align(lbl_summary, LV_ALIGN_BOTTOM_MID, 0, -6);
@@ -182,7 +182,7 @@ void build_autofocus_content(lv_obj_t *content) {
     /* Loading label on chart */
     lbl_loading = lv_label_create(af_chart);
     lv_label_set_text(lbl_loading, "Waiting for autofocus data...");
-    lv_obj_set_style_text_font(lbl_loading, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(lbl_loading, &lv_font_montserrat_22, 0);
     lv_obj_add_flag(lbl_loading, LV_OBJ_FLAG_FLOATING);
     lv_obj_clear_flag(lbl_loading, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_align(lbl_loading, LV_ALIGN_CENTER, 0, 0);
@@ -203,21 +203,21 @@ void build_autofocus_content(lv_obj_t *content) {
 
     lbl_x_min = lv_label_create(x_label_row);
     lv_label_set_text(lbl_x_min, "");
-    lv_obj_set_style_text_font(lbl_x_min, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(lbl_x_min, &lv_font_montserrat_16, 0);
     if (current_theme)
         lv_obj_set_style_text_color(lbl_x_min,
             lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
 
     lbl_x_mid = lv_label_create(x_label_row);
     lv_label_set_text(lbl_x_mid, "");
-    lv_obj_set_style_text_font(lbl_x_mid, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(lbl_x_mid, &lv_font_montserrat_16, 0);
     if (current_theme)
         lv_obj_set_style_text_color(lbl_x_mid,
             lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
 
     lbl_x_max = lv_label_create(x_label_row);
     lv_label_set_text(lbl_x_max, "");
-    lv_obj_set_style_text_font(lbl_x_max, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(lbl_x_max, &lv_font_montserrat_16, 0);
     if (current_theme)
         lv_obj_set_style_text_color(lbl_x_max,
             lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
@@ -225,7 +225,7 @@ void build_autofocus_content(lv_obj_t *content) {
     /* ── X-axis title ── */
     lbl_x_title = lv_label_create(content);
     lv_label_set_text(lbl_x_title, "Focuser Position");
-    lv_obj_set_style_text_font(lbl_x_title, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(lbl_x_title, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_align(lbl_x_title, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_align(lbl_x_title, LV_ALIGN_CENTER);
     if (current_theme)
@@ -235,7 +235,7 @@ void build_autofocus_content(lv_obj_t *content) {
     /* ── Status row ── */
     lbl_af_status = lv_label_create(content);
     lv_label_set_text(lbl_af_status, "");
-    lv_obj_set_style_text_font(lbl_af_status, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(lbl_af_status, &lv_font_montserrat_18, 0);
     if (current_theme)
         lv_obj_set_style_text_color(lbl_af_status,
             lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);

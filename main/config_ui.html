@@ -396,7 +396,7 @@
     .card-chevron.collapsed { transform: rotate(-90deg); }
     .card-body-collapsible {
       overflow: hidden; transition: max-height 0.35s ease, opacity 0.25s ease;
-      max-height: 800px; opacity: 1;
+      max-height: 2000px; opacity: 1;
     }
     .card-body-collapsible.collapsed {
       max-height: 0; opacity: 0;
@@ -576,7 +576,11 @@
         </div>
       </div>
       <div class="card">
-        <div class="card-title">Data rates</div>
+        <div class="card-title card-title-collapsible" onclick="toggleCollapsible('dr')">
+          <span>Data rates</span>
+          <span class="card-chevron collapsed" id="dr_chevron">&#9660;</span>
+        </div>
+        <div class="card-body-collapsible collapsed" id="dr_body">
         <div class="field">
           <label class="field-label">Data update rate (seconds)</label>
           <input type="number" class="input" id="update_rate" min="1" max="10" value="2">
@@ -594,6 +598,7 @@
           <label class="field-label">Toast notification duration (seconds)</label>
           <input type="number" class="input" id="toast_duration" min="3" max="30" value="8">
           <div class="field-hint">How long toast notifications are shown on screen (errors show for 2x this value)</div>
+        </div>
         </div>
       </div>
     </div>
@@ -716,6 +721,18 @@
         <div class="flex-wrap-gap">
           <button class="btn btn-outline" onclick="saveAndReboot()">Reboot</button>
           <button class="btn btn-danger" onclick="factoryReset()">Factory Reset</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title card-title-collapsible" onclick="toggleCollapsible('ss')">
+          <span>Screenshot</span>
+          <span class="card-chevron collapsed" id="ss_chevron">&#9660;</span>
+        </div>
+        <div class="card-body-collapsible collapsed" id="ss_body">
+          <button class="btn btn-outline" id="ssBtn" onclick="takeScreenshot()" style="margin-bottom:16px">Capture screenshot</button>
+          <div id="ssContainer" style="display:none">
+            <img id="ssImage" style="width:100%;border-radius:var(--radius-sm);border:1px solid var(--border)">
+          </div>
         </div>
       </div>
     </div>
@@ -857,12 +874,15 @@
 
     function setPage(v){postJson('/api/page',{page:parseInt(v)})}
 
-    /* ---- Page Mode ---- */
-    function togglePageMode(){
-      var body=$('pm_body'), chev=$('pm_chevron');
+    /* ---- Collapsible sections ---- */
+    function toggleCollapsible(prefix){
+      var body=$(prefix+'_body'), chev=$(prefix+'_chevron');
       body.classList.toggle('collapsed');
       chev.classList.toggle('collapsed');
     }
+
+    /* ---- Page Mode ---- */
+    function togglePageMode(){ toggleCollapsible('pm'); }
 
     function updatePageModeSummary(){
       var mode=getPageMode();
@@ -1272,6 +1292,30 @@
       });
 
       xhr.send(file);
+    }
+
+    /* ---- Screenshot ---- */
+    function takeScreenshot(){
+      var btn=$('ssBtn');
+      btn.disabled=true;
+      btn.textContent='Capturing...';
+      fetch('/api/screenshot').then(function(r){
+        if(!r.ok) throw new Error('Screenshot failed');
+        return r.blob();
+      }).then(function(blob){
+        var url=URL.createObjectURL(blob);
+        var img=$('ssImage');
+        if(img._prevUrl) URL.revokeObjectURL(img._prevUrl);
+        img._prevUrl=url;
+        img.src=url;
+        $('ssContainer').style.display='block';
+        btn.textContent='Capture screenshot';
+        btn.disabled=false;
+      }).catch(function(e){
+        showToast('Screenshot failed','error');
+        btn.textContent='Capture screenshot';
+        btn.disabled=false;
+      });
     }
 
     /* ---- Dirty State Detection ---- */
