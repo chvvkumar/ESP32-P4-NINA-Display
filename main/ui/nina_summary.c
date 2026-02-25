@@ -918,8 +918,20 @@ void summary_page_update(const nina_client_t *instances, int count) {
                     "  |  %d stars", d->stars);
             }
             if (d->target_time_remaining[0] && len > 0) {
-                len += snprintf(detail + len, sizeof(detail) - len,
-                    "  |  %s left", d->target_time_remaining);
+                if (d->target_time_reason[0] &&
+                    strcmp(d->target_time_reason, "TIME LEFT") != 0) {
+                    // Show constraint-specific label: "sets in 2:30" / "dawn in 1:45"
+                    char reason_lower[16];
+                    strlcpy(reason_lower, d->target_time_reason, sizeof(reason_lower));
+                    for (int c = 0; reason_lower[c]; c++)
+                        if (reason_lower[c] >= 'A' && reason_lower[c] <= 'Z')
+                            reason_lower[c] += 32;
+                    len += snprintf(detail + len, sizeof(detail) - len,
+                        "  |  %s %s", reason_lower, d->target_time_remaining);
+                } else {
+                    len += snprintf(detail + len, sizeof(detail) - len,
+                        "  |  %s left", d->target_time_remaining);
+                }
             }
 
             set_label_if_changed(sc->lbl_detail, detail);

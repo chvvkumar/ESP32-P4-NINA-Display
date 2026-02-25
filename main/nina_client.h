@@ -59,7 +59,8 @@ typedef struct {
     // Image stats
     float hfr;
     int stars;
-    char target_time_remaining[16]; // Target remaining time "HH:MM" from Loop Until Time_Condition
+    char target_time_remaining[16]; // Earliest remaining time across all conditions (H:MM format)
+    char target_time_reason[16];    // Binding constraint label: "TIME LEFT", "SETS IN", "DAWN IN"
     
     // Mount
     char meridian_flip[16];

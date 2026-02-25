@@ -127,6 +127,7 @@ static void update_disconnected_state(dashboard_page_t *p, int page_index, int g
     set_label_if_changed(p->lbl_flip_value, "--");
     set_label_if_changed(p->lbl_stars_value, "--");
     set_label_if_changed(p->lbl_target_time_value, "--");
+    set_label_if_changed(p->lbl_target_time_header, "TIME LEFT (H:M)");
     for (int i = 0; i < MAX_POWER_WIDGETS; i++) {
         lv_obj_add_flag(p->box_pwr[i], LV_OBJ_FLAG_HIDDEN);
     }
@@ -333,6 +334,13 @@ static void update_mount_and_image_stats(dashboard_page_t *p, const nina_client_
 
     set_label_if_changed(p->lbl_target_time_value,
         d->target_time_remaining[0] != '\0' ? d->target_time_remaining : "--");
+
+    // Update header to reflect the binding constraint (horizon, dawn, time, etc.)
+    if (d->target_time_reason[0] != '\0') {
+        SET_LABEL_FMT_IF_CHANGED(p->lbl_target_time_header, 24, "%s (H:M)", d->target_time_reason);
+    } else {
+        set_label_if_changed(p->lbl_target_time_header, "TIME LEFT (H:M)");
+    }
 }
 
 static void update_power(dashboard_page_t *p, const nina_client_t *d) {

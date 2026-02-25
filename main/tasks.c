@@ -13,6 +13,7 @@
 #include "mqtt_ha.h"
 #include "ui/nina_dashboard.h"
 #include "ui/nina_summary.h"
+#include "ui/nina_sysinfo.h"
 #include "ui/nina_graph_overlay.h"
 #include "ui/nina_info_overlay.h"
 #include "ui/nina_safety.h"
@@ -390,6 +391,14 @@ void data_update_task(void *arg) {
 
             // Check WebSocket reconnection with exponential backoff
             nina_websocket_check_reconnect(i, url, &instances[i]);
+        }
+
+        /* Update sysinfo page when visible — refreshes at the same rate as data polling */
+        if (on_sysinfo) {
+            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                sysinfo_page_refresh();
+                bsp_display_unlock();
+            }
         }
 
         /* Update summary page when visible — lock each instance while reading */

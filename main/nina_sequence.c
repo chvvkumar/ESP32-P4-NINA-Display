@@ -15,24 +15,58 @@
 
 static const char *TAG = "nina_seq";
 
-// Recursively find Loop Until Time_Condition in a container or its RUNNING children
-static cJSON* find_time_condition(cJSON *container) {
-    if (!container) return NULL;
+// Parse "H:MM:SS" or "H:MM:" style RemainingTime string to total seconds.
+// Returns -1 on parse failure.
+static int parse_remaining_seconds(const char *str) {
+    int h = 0, m = 0, s = 0;
+    if (sscanf(str, "%d:%d:%d", &h, &m, &s) >= 2) {
+        return h * 3600 + m * 60 + s;
+    }
+    return -1;
+}
+
+// Classify a condition name into a short header label for the dashboard.
+static const char* classify_condition(const char *name) {
+    if (!name) return "TIME LEFT";
+    if (strstr(name, "Horizon") || strstr(name, "Altitude"))
+        return "SETS IN";
+    if (strstr(name, "Dawn") || strstr(name, "Twilight"))
+        return "DAWN IN";
+    return "TIME LEFT";
+}
+
+// State passed through the recursive search for the earliest condition.
+typedef struct {
+    int min_seconds;          // Smallest RemainingTime found so far (-1 = none)
+    const char *reason;       // Header label for the binding constraint
+} earliest_condition_t;
+
+// Recursively scan all conditions with RemainingTime in a container tree,
+// updating *out with the earliest (minimum) one found.
+static void find_earliest_condition(cJSON *container, earliest_condition_t *out) {
+    if (!container) return;
 
     // Check this container's conditions
     cJSON *conditions = cJSON_GetObjectItem(container, "Conditions");
     if (conditions && cJSON_IsArray(conditions)) {
         cJSON *cond = NULL;
         cJSON_ArrayForEach(cond, conditions) {
-            cJSON *cond_name = cJSON_GetObjectItem(cond, "Name");
-            if (cond_name && cond_name->valuestring &&
-                strcmp(cond_name->valuestring, "Loop Until Time_Condition") == 0) {
-                return cond;
+            cJSON *rem = cJSON_GetObjectItem(cond, "RemainingTime");
+            if (!rem || !rem->valuestring || rem->valuestring[0] == '\0') continue;
+
+            int secs = parse_remaining_seconds(rem->valuestring);
+            if (secs < 0) continue;
+
+            if (out->min_seconds < 0 || secs < out->min_seconds) {
+                out->min_seconds = secs;
+                cJSON *cond_name = cJSON_GetObjectItem(cond, "Name");
+                out->reason = classify_condition(
+                    cond_name ? cond_name->valuestring : NULL);
             }
         }
     }
 
-    // Search RUNNING child containers
+    // Recurse into RUNNING child containers
     cJSON *items = cJSON_GetObjectItem(container, "Items");
     if (items && cJSON_IsArray(items)) {
         cJSON *item = NULL;
@@ -41,12 +75,10 @@ static cJSON* find_time_condition(cJSON *container) {
             cJSON *child_items = cJSON_GetObjectItem(item, "Items");
             if (status && status->valuestring && child_items &&
                 strcmp(status->valuestring, "RUNNING") == 0) {
-                cJSON *found = find_time_condition(item);
-                if (found) return found;
+                find_earliest_condition(item, out);
             }
         }
     }
-    return NULL;
 }
 
 // Find the active target container (RUNNING preferred, otherwise last FINISHED)
@@ -233,20 +265,22 @@ void fetch_sequence_counts_optional(const char *base_url, nina_client_t *data) {
                     ESP_LOGI(TAG, "Active container: %s", data->container_name);
                 }
 
-                // Extract target remaining time
+                // Find the earliest binding condition (time, horizon, dawn, etc.)
                 data->target_time_remaining[0] = '\0';
-                cJSON *time_cond = find_time_condition(target_container);
-                if (time_cond) {
-                    cJSON *rem = cJSON_GetObjectItem(time_cond, "RemainingTime");
-                    if (rem && rem->valuestring) {
-                        int h = 0, m = 0;
-                        if (sscanf(rem->valuestring, "%d:%d:", &h, &m) >= 2) {
-                            snprintf(data->target_time_remaining,
-                                     sizeof(data->target_time_remaining),
-                                     "%d:%02d", h, m);
-                            ESP_LOGI(TAG, "Target time remaining: %s", data->target_time_remaining);
-                        }
-                    }
+                data->target_time_reason[0] = '\0';
+                earliest_condition_t earliest = { .min_seconds = -1, .reason = "TIME LEFT" };
+                find_earliest_condition(target_container, &earliest);
+                if (earliest.min_seconds >= 0) {
+                    int h = earliest.min_seconds / 3600;
+                    int m = (earliest.min_seconds % 3600) / 60;
+                    snprintf(data->target_time_remaining,
+                             sizeof(data->target_time_remaining),
+                             "%d:%02d", h, m);
+                    strlcpy(data->target_time_reason, earliest.reason,
+                            sizeof(data->target_time_reason));
+                    ESP_LOGI(TAG, "Earliest condition: %s %s (%s)",
+                             data->target_time_remaining, data->target_time_reason,
+                             earliest.reason);
                 }
 
                 // Find the currently running step
