@@ -126,16 +126,6 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
 
 Download the latest factory binary from the [Releases page](../../releases). Each release includes step-by-step flashing instructions.
 
-If you have the [GitHub CLI](https://cli.github.com/) installed, you can read the flashing instructions directly from your terminal:
-
-```bash
-# View the latest release notes (includes full flashing guide)
-gh release view --repo chvvkumar/ESP32-P4-NINA-Display
-
-# Download the factory binary
-gh release download --repo chvvkumar/ESP32-P4-NINA-Display --pattern "nina-display-factory.bin"
-```
-
 No build environment needed — just a Chromium-based browser and the [ESP Web Flasher](https://espressif.github.io/esptool-js/). Flash `nina-display-factory.bin` at address `0x0000`.
 
 > **Note:** If your board shows warnings about outdated `esp-hosted` co-processor firmware, flash `network_adapter.bin` at address `0x0000` to the ESP32-C6 coprocessor. A pre-built binary is included in the [`firmware/`](firmware/) folder of this repository.
@@ -144,12 +134,12 @@ No build environment needed — just a Chromium-based browser and the [ESP Web F
 
 ## First-Time Setup
 
-On first boot (or whenever WiFi is not connected), the device broadcasts a WiFi access point named **`AllSky-Config`** (password: `12345678`). Connect to it from your phone or laptop, then open `http://192.168.4.1` in a browser.
+On first boot (or whenever WiFi is not connected), the device broadcasts a WiFi access point named **`NINA-DISPLAY`** (password: `12345678`). Connect to it from your phone or laptop, then open `http://192.168.4.1` in a browser.
 
 Set at minimum:
 
 1. **WiFi credentials** — your observatory/home network where NINA runs.
-2. **NINA API URL(s)** — e.g. `http://192.168.1.50:1888/v2` for each instance you want to monitor. You can configure up to three.
+2. **NINA host(s)** — the IP or hostname of each NINA PC (e.g. `192.168.1.50`). The device builds the full API URL automatically. You can configure up to three instances.
 
 Save settings. The device reconnects to your network and starts polling immediately.
 
@@ -165,26 +155,54 @@ The first page shows glassmorphic cards for all configured NINA instances at a g
 
 ### Instance Pages
 
-Each NINA instance gets a dedicated 720x720 bento-box layout:
+Each NINA instance gets a dedicated 720x720 bento-box grid:
 
 | Section | Data shown |
 |---|---|
 | Header | Target name, profile name, WiFi signal bars, connection status dot |
+| Sequence | Container name, current step |
 | Exposure arc | Animated arc showing exposure progress; color follows the active filter |
 | Filter & timing | Active filter name, elapsed / remaining time, loop count |
-| Sequence | Container name, current step |
 | Guiding | Total RMS, RA RMS, Dec RMS (arcseconds); color shifts at configurable thresholds |
 | Image stats | HFR, star count |
 | Mount | Time to meridian flip |
+| Session | Target time, elapsed imaging time |
 | Power | Input voltage (V), current (A), power (W), PWM percentages for dew heaters |
-
-**Tap the header area** to pull a full-screen JPEG preview of the last captured image. The ESP32-P4's hardware JPEG decoder handles this. Tap anywhere to dismiss.
 
 A pulsing dot in the header indicates an active API request. When solid and colored, you're connected. Grey means NINA isn't reachable. After 30 seconds without data, an amber "Last update" warning appears. After 2 minutes, the page dims to indicate stale data.
 
+#### Touch interactions
+
+Every section on the instance page is tappable:
+
+| Tap area | Opens |
+|---|---|
+| Header | Full-screen JPEG preview of the last captured image (tap anywhere to dismiss) |
+| Sequence box | Sequence detail overlay (container, step, exposure counts) |
+| Exposure arc | Camera & weather overlay (camera name, temperature, dew point, humidity, pressure) |
+| Filter label (arc center) | Filter wheel overlay (current filter, available filters) |
+| RMS box | RMS history graph (up to 500 points, RA/Dec/Total series, threshold lines) |
+| HFR box (short tap) | HFR history graph (up to 500 points, threshold lines) |
+| HFR box (long press) | Autofocus overlay (V-curve, focus position) |
+| Flip time box | Mount overlay (RA/Dec, altitude, azimuth, meridian flip state) |
+| Session time box | Session statistics overlay (total exposures, imaging time, target altitude, dawn) |
+| Stars box | Image statistics overlay (star count, HFR, FWHM, eccentricity, SNR) |
+| Power row | Jump back to Summary page |
+
+### Settings Page
+
+On-device display settings accessible by swiping past the last instance page:
+
+- **Theme** — cycle through 14 built-in dark themes
+- **Backlight brightness** — slider (0–100%)
+- **Text/color brightness** — slider (0–100%) for dark-site dimming
+- **Update rate** — polling interval (1–10 s)
+- **Graph update interval** — how often graph data is sampled (2–30 s)
+- **Auto-rotate** — toggle, interval, transition effect (instant/fade/slide), skip disconnected
+
 ### System Info Page
 
-Swipe past the last instance page to see: device IP, hostname, WiFi SSID/RSSI, heap and PSRAM usage, chip info, IDF version, uptime, and task count.
+The last page shows: device IP, hostname, WiFi SSID/RSSI, heap and PSRAM usage, chip info, IDF version, uptime, and task count.
 
 ---
 
@@ -196,7 +214,7 @@ Swipe past the last instance page to see: device IP, hostname, WiFi SSID/RSSI, h
 - **Page indicator dots** at the bottom show NINA instance pages
 - **Active page override** in config to boot directly to a specific page
 
-Page order: Summary → NINA instances (1..N) → System Info.
+Page order: Summary → NINA instances (1..N) → Settings → System Info.
 
 ---
 

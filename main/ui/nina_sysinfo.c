@@ -317,7 +317,7 @@ void sysinfo_page_refresh(void) {
     /* ── Network ── */
     {
         /* Hostname from config (AP SSID serves as device name) */
-        lv_label_set_text(lbl_hostname_val, "AllSky-Config");
+        lv_label_set_text(lbl_hostname_val, "NINA-DISPLAY");
 
         /* STA IP */
         esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
