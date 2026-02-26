@@ -234,6 +234,8 @@ void app_main(void)
 
     nina_dashboard_set_page_change_cb(on_page_changed);
 
+    nina_client_init();  // DNS cache mutex — must be called before poll tasks spawn
+
     xTaskCreate(input_task,       "input_task", 4096,  NULL, 5, NULL);
     xTaskCreate(data_update_task, "data_task",  12288, NULL, 5, NULL);
 

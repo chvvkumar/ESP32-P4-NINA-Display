@@ -42,8 +42,12 @@ volatile bool ota_in_progress = false;
 volatile bool screen_touch_wake = false;
 volatile bool screen_asleep = false;
 TaskHandle_t data_task_handle = NULL;
+TaskHandle_t poll_task_handles[MAX_NINA_INSTANCES] = {NULL};
 static int64_t last_graph_fetch_ms = 0;  /* Timestamp of last graph data fetch */
 static bool hfr_graph_seeded = false;   /* True after initial API fetch for current HFR graph session */
+
+/* Per-instance poll contexts (shared between UI coordinator and poll tasks) */
+static instance_poll_ctx_t poll_contexts[MAX_NINA_INSTANCES];
 
 /**
  * @brief Swipe callback from the dashboard — signals the data task to re-tune polling.
@@ -53,6 +57,10 @@ static bool hfr_graph_seeded = false;   /* True after initial API fetch for curr
 void on_page_changed(int new_page) {
     page_changed = true;
     ESP_LOGI(TAG, "Swipe: switched to page %d", new_page);
+    /* Wake all poll tasks so the newly-active one can start full polling immediately */
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        if (poll_task_handles[i]) xTaskNotifyGive(poll_task_handles[i]);
+    }
 }
 
 void input_task(void *arg) {
@@ -101,6 +109,121 @@ void input_task(void *arg) {
     }
 }
 
+// =============================================================================
+// Per-Instance Poll Task — blocks independently on HTTP for its own instance
+// =============================================================================
+
+void instance_poll_task(void *arg) {
+    instance_poll_ctx_t *ctx = (instance_poll_ctx_t *)arg;
+    int idx = ctx->index;
+
+    // Wait for WiFi
+    xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
+
+    // Boot probe: check connectivity immediately
+    {
+        const char *url = app_config_get_instance_url(idx);
+        if (strlen(url) > 0 && app_config_is_instance_enabled(idx)) {
+            nina_connection_set_connecting(idx);
+            if (nina_client_dns_check(url)) {
+                nina_client_poll_heartbeat(url, ctx->client, idx);
+                ESP_LOGI(TAG, "Poll[%d]: boot probe connected=%d", idx + 1, ctx->client->connected);
+                // Start WebSocket after successful boot probe
+                if (nina_connection_is_connected(idx)) {
+                    nina_websocket_start(idx, url, ctx->client);
+                }
+            } else {
+                ESP_LOGW(TAG, "Poll[%d]: boot DNS failed for %s", idx + 1, url);
+                nina_connection_report_poll(idx, false);
+            }
+        }
+    }
+
+    while (!ctx->shutdown) {
+        // Suspend during OTA
+        while (ota_in_progress && !ctx->shutdown) {
+            vTaskDelay(pdMS_TO_TICKS(500));
+        }
+        if (ctx->shutdown) break;
+
+        const char *url = app_config_get_instance_url(idx);
+
+        // Skip disabled or unconfigured instances
+        if (strlen(url) == 0 || !app_config_is_instance_enabled(idx)) {
+            ctx->client->connected = false;
+            nina_connection_report_poll(idx, false);
+            vTaskDelay(pdMS_TO_TICKS(2000));
+            continue;
+        }
+
+        // Check deferred camera-disconnect alerts
+        nina_websocket_check_deferred_alerts(idx);
+
+        // DNS pre-check
+        if (!nina_client_dns_check(url)) {
+            ctx->client->connected = false;
+            nina_connection_report_poll(idx, false);
+            ESP_LOGD(TAG, "Poll[%d]: DNS failed, skipping", idx + 1);
+            vTaskDelay(pdMS_TO_TICKS(5000));
+            continue;
+        }
+
+        int64_t now_ms = esp_timer_get_time() / 1000;
+
+        // Poll based on active/background mode
+        if (ctx->is_active) {
+            nina_client_poll(url, ctx->client, ctx->poll_state, idx);
+            if (nina_connection_is_connected(idx))
+                ctx->client->last_successful_poll_ms = now_ms;
+            ESP_LOGI(TAG, "Poll[%d] (active): connected=%d, status=%s, target=%s, ws=%d",
+                idx + 1, ctx->client->connected, ctx->client->status,
+                ctx->client->target_name, ctx->client->websocket_connected);
+        } else {
+            if (now_ms - ctx->last_heartbeat_ms >= HEARTBEAT_INTERVAL_MS) {
+                nina_client_poll_background(url, ctx->client, ctx->poll_state, idx);
+                if (nina_connection_is_connected(idx))
+                    ctx->client->last_successful_poll_ms = now_ms;
+                ctx->last_heartbeat_ms = now_ms;
+                ESP_LOGD(TAG, "Poll[%d] (background): connected=%d", idx + 1, ctx->client->connected);
+            }
+        }
+
+        // Sync filters on first successful fetch
+        if (!ctx->filters_synced && ctx->client->filter_count > 0) {
+            const char *names[MAX_FILTERS];
+            for (int f = 0; f < ctx->client->filter_count; f++)
+                names[f] = ctx->client->filters[f].name;
+            app_config_sync_filters(names, ctx->client->filter_count, idx);
+            ctx->filters_synced = true;
+        }
+
+        // WebSocket reconnection with exponential backoff
+        nina_websocket_check_reconnect(idx, url, ctx->client);
+
+        // Sleep: active = update_rate_s cycle, background = heartbeat interval
+        uint16_t cycle_ms;
+        if (ctx->is_active) {
+            cycle_ms = (uint16_t)app_config_get()->update_rate_s * 1000;
+            if (cycle_ms < 1000) cycle_ms = 1000;
+        } else {
+            cycle_ms = HEARTBEAT_INTERVAL_MS;
+        }
+        // Use task notification to allow early wake (page change, WS event)
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(cycle_ms));
+    }
+
+    // Cleanup on shutdown — clear handle BEFORE stopping WS/deleting task
+    // to prevent TOCTOU race (WS handler could xTaskNotifyGive a stale handle).
+    poll_task_handles[idx] = NULL;
+    nina_websocket_stop(idx);
+    ESP_LOGI(TAG, "Poll[%d]: task shutdown", idx + 1);
+    vTaskDelete(NULL);
+}
+
+// =============================================================================
+// UI Coordinator Task — fast loop, never blocks on HTTP data polling
+// =============================================================================
+
 void data_update_task(void *arg) {
     data_task_handle = xTaskGetCurrentTaskHandle();
 
@@ -116,8 +239,6 @@ void data_update_task(void *arg) {
         return;
     }
 
-    bool filters_synced[MAX_NINA_INSTANCES] = {false};
-    int64_t last_heartbeat_ms[MAX_NINA_INSTANCES] = {0};
     int64_t last_rotate_ms = 0;
 
     /* Screen sleep state */
@@ -142,26 +263,21 @@ void data_update_task(void *arg) {
         return;
     }
 
+    /* Initialize per-instance poll contexts */
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        poll_contexts[i].index = i;
+        poll_contexts[i].client = &instances[i];
+        poll_contexts[i].poll_state = &poll_states[i];
+        poll_contexts[i].task_handle = NULL;
+        poll_contexts[i].is_active = false;
+        poll_contexts[i].shutdown = false;
+        poll_contexts[i].filters_synced = false;
+        poll_contexts[i].last_heartbeat_ms = 0;
+    }
+
     // Wait for WiFi
     xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
     ESP_LOGI(TAG, "WiFi Connected, waiting for time sync...");
-
-    /* ── Boot-time priority probe: check NINA connectivity immediately ── */
-    {
-        int boot_instance_count = app_config_get_instance_count();
-        for (int i = 0; i < boot_instance_count; i++) {
-            const char *url = app_config_get_instance_url(i);
-            if (strlen(url) == 0 || !app_config_is_instance_enabled(i)) continue;
-            nina_connection_set_connecting(i);
-            if (!nina_client_dns_check(url)) {
-                ESP_LOGW(TAG, "Boot probe instance %d: DNS failed for %s", i + 1, url);
-                nina_connection_report_poll(i, false);
-                continue;
-            }
-            nina_client_poll_heartbeat(url, &instances[i], i);
-            ESP_LOGI(TAG, "Boot probe instance %d: connected=%d", i + 1, instances[i].connected);
-        }
-    }
 
     // Check if time is already set; if not, SNTP will sync in the background
     {
@@ -181,13 +297,24 @@ void data_update_task(void *arg) {
     // Start MQTT if enabled
     mqtt_ha_start();
 
-    ESP_LOGI(TAG, "Starting data polling with %d instances", instance_count);
+    instance_count = app_config_get_instance_count();
+    ESP_LOGI(TAG, "Spawning %d per-instance poll tasks", instance_count);
 
-    // Start WebSocket for all configured instances concurrently
+    /* Spawn per-instance poll tasks (boot probe + WS start happen inside each task) */
     for (int i = 0; i < instance_count; i++) {
-        const char *url = app_config_get_instance_url(i);
-        if (strlen(url) > 0 && app_config_is_instance_enabled(i) && nina_client_dns_check(url)) {
-            nina_websocket_start(i, url, &instances[i]);
+        char name[16];
+        snprintf(name, sizeof(name), "poll_%d", i);
+        /* Use xTaskCreateStatic with PSRAM-allocated stack to save internal heap */
+        StackType_t *stack = heap_caps_malloc(8192, MALLOC_CAP_SPIRAM);
+        StaticTask_t *tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (stack && tcb) {
+            poll_contexts[i].task_handle = xTaskCreateStatic(
+                instance_poll_task, name, 8192, &poll_contexts[i], 4, stack, tcb);
+            poll_task_handles[i] = poll_contexts[i].task_handle;
+        } else {
+            ESP_LOGE(TAG, "Failed to allocate poll task %d stack from PSRAM", i);
+            if (stack) heap_caps_free(stack);
+            if (tcb) heap_caps_free(tcb);
         }
     }
 
@@ -243,20 +370,15 @@ void data_update_task(void *arg) {
             }
         }
 
-        // Handle page change: trigger immediate full poll for the new active page
-        // (WebSocket connections for all instances remain persistent)
+        // Handle page change
         if (page_changed) {
             page_changed = false;
-            /* Background polling keeps poll_states warm for all instances,
-             * so no need to reinitialize — pre-fetched data is preserved. */
             last_rotate_ms = esp_timer_get_time() / 1000;  // Reset auto-rotate timer on any page change
             ESP_LOGI(TAG, "Page switched to %d%s%s%s", current_active,
                      on_sysinfo ? " (sysinfo)" : "", on_settings ? " (settings)" : "",
                      on_summary ? " (summary)" : "");
 
-            /* Immediate summary render with cached data so the user sees
-             * connected-instance metrics instantly on page switch instead of
-             * waiting for the full poll cycle (which blocks on offline timeouts). */
+            /* Immediate summary render with cached data */
             if (on_summary) {
                 bool locked[MAX_NINA_INSTANCES];
                 for (int j = 0; j < instance_count; j++)
@@ -271,6 +393,18 @@ void data_update_task(void *arg) {
         }
 
         int64_t now_ms = esp_timer_get_time() / 1000;
+
+        /* Update active/background flags for poll tasks.
+         * On summary page all instances are active; on a NINA page only that instance is. */
+        for (int i = 0; i < instance_count; i++) {
+            bool should_active = (on_summary || i == active_nina_idx);
+            bool was_active = poll_contexts[i].is_active;
+            poll_contexts[i].is_active = should_active;
+            /* Wake poll task immediately when transitioning to active */
+            if (should_active && !was_active && poll_task_handles[i]) {
+                xTaskNotifyGive(poll_task_handles[i]);
+            }
+        }
 
         /* Auto-rotate logic — rotates between pages selected by auto_rotate_pages bitmask.
          *
@@ -357,153 +491,6 @@ void data_update_task(void *arg) {
                                              nina_connection_is_connected(active_nina_idx), true);
                 bsp_display_unlock();
             }
-        }
-
-        /* On summary page, poll connected instances first so their data
-         * appears quickly; disconnected instances (which timeout) come second. */
-        int poll_order[MAX_NINA_INSTANCES];
-        int connected_end = instance_count;
-        for (int i = 0; i < instance_count; i++) poll_order[i] = i;
-        if (on_summary) {
-            int wi = 0;
-            for (int i = 0; i < instance_count; i++)
-                if (nina_connection_is_connected(i)) poll_order[wi++] = i;
-            connected_end = wi;
-            for (int i = 0; i < instance_count; i++)
-                if (!nina_connection_is_connected(i)) poll_order[wi++] = i;
-        }
-
-        for (int pi = 0; pi < instance_count; pi++) {
-            /* After connected instances are polled, update summary immediately
-             * so the user sees fresh data before disconnected instances timeout. */
-            if (on_summary && pi == connected_end && connected_end > 0 && connected_end < instance_count) {
-                bool locked[MAX_NINA_INSTANCES];
-                for (int j = 0; j < instance_count; j++)
-                    locked[j] = nina_client_lock(&instances[j], 100);
-                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                    summary_page_update(instances, instance_count);
-                    bsp_display_unlock();
-                }
-                for (int j = 0; j < instance_count; j++)
-                    if (locked[j]) nina_client_unlock(&instances[j]);
-            }
-
-            /* Mid-loop auto-rotate check: offline instance timeouts can block
-             * the poll loop for many seconds, causing the rotate interval to
-             * be missed.  Re-check the timer between each instance poll. */
-            {
-                app_config_t *mr_cfg = app_config_get();
-                if (mr_cfg->auto_rotate_enabled && mr_cfg->auto_rotate_interval_s > 0) {
-                    int64_t mid_now = esp_timer_get_time() / 1000;
-                    if (mid_now - last_rotate_ms >= (int64_t)mr_cfg->auto_rotate_interval_s * 1000) {
-                        int total_mr = nina_dashboard_get_total_page_count();
-                        int cur_mr = nina_dashboard_get_active_page();
-                        uint8_t page_mask = mr_cfg->auto_rotate_pages;
-                        int ena_page_count_mr = total_mr - 3;
-                        int next_mr = cur_mr;
-                        for (int step = 1; step < total_mr; step++) {
-                            int cand = (cur_mr + step) % total_mr;
-                            bool in_mask = false;
-                            if (cand == 0)
-                                in_mask = (page_mask & 0x01) != 0;
-                            else if (cand >= 1 && cand <= ena_page_count_mr) {
-                                int inst = nina_dashboard_page_to_instance(cand - 1);
-                                if (inst >= 0)
-                                    in_mask = (page_mask & (1 << (inst + 1))) != 0;
-                            }
-                            else if (cand == ena_page_count_mr + 1)
-                                in_mask = (page_mask & 0x20) != 0;
-                            else if (cand == ena_page_count_mr + 2)
-                                in_mask = (page_mask & 0x10) != 0;
-                            if (!in_mask) continue;
-                            if (cand >= 1 && cand <= ena_page_count_mr) {
-                                int nina_idx = nina_dashboard_page_to_instance(cand - 1);
-                                if (nina_idx >= 0 && mr_cfg->auto_rotate_skip_disconnected
-                                    && !nina_connection_is_connected(nina_idx)) continue;
-                            }
-                            next_mr = cand;
-                            break;
-                        }
-                        if (next_mr != cur_mr) {
-                            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                                nina_dashboard_show_page_animated(next_mr, instance_count, mr_cfg->auto_rotate_effect);
-                                bsp_display_unlock();
-                            }
-                            page_changed = true;
-                            ESP_LOGI(TAG, "Auto-rotate: switched to page %d", next_mr);
-                            /* Update snapshot so remaining polls use the new active page */
-                            current_active = nina_dashboard_get_active_page();
-                            on_sysinfo = nina_dashboard_is_sysinfo_page();
-                            on_settings = nina_dashboard_is_settings_page();
-                            on_summary = nina_dashboard_is_summary_page();
-                            active_nina_idx = -1;
-                            active_page_idx = -1;
-                            if (!on_sysinfo && !on_settings && !on_summary && current_active >= 1) {
-                                active_page_idx = current_active - 1;
-                                active_nina_idx = nina_dashboard_page_to_instance(active_page_idx);
-                            }
-                        }
-                        last_rotate_ms = mid_now;
-                    }
-                }
-            }
-
-            int i = poll_order[pi];
-
-            // Check deferred camera-disconnect alerts (runs regardless of poll skip)
-            nina_websocket_check_deferred_alerts(i);
-
-            const char *url = app_config_get_instance_url(i);
-            if (strlen(url) == 0) continue;
-
-            /* Skip disabled instances — no connectivity check or data updates */
-            if (!app_config_is_instance_enabled(i)) {
-                instances[i].connected = false;
-                nina_connection_report_poll(i, false);
-                continue;
-            }
-
-            /* DNS pre-check: skip all HTTP/WS work if hostname doesn't resolve */
-            if (!nina_client_dns_check(url)) {
-                instances[i].connected = false;
-                nina_connection_report_poll(i, false);
-                ESP_LOGD(TAG, "Instance %d: DNS failed, skipping poll cycle", i + 1);
-                continue;
-            }
-
-            /* Full poll when: on summary page (all instances) or on this instance's NINA page */
-            if (on_summary || i == active_nina_idx) {
-                nina_client_poll(url, &instances[i], &poll_states[i], i);
-                if (nina_connection_is_connected(i))
-                    instances[i].last_successful_poll_ms = now_ms;
-                ESP_LOGI(TAG, "Instance %d (%s): connected=%d, status=%s, target=%s, ws=%d",
-                    i + 1, on_summary ? "summary" : "active",
-                    instances[i].connected, instances[i].status,
-                    instances[i].target_name, instances[i].websocket_connected);
-            } else {
-                // Background instance: pre-fetch slow-changing data (every 10s)
-                if (now_ms - last_heartbeat_ms[i] >= HEARTBEAT_INTERVAL_MS) {
-                    nina_client_poll_background(url, &instances[i], &poll_states[i], i);
-                    if (nina_connection_is_connected(i))
-                        instances[i].last_successful_poll_ms = now_ms;
-                    last_heartbeat_ms[i] = now_ms;
-                    ESP_LOGD(TAG, "Instance %d (background): connected=%d",
-                        i + 1, instances[i].connected);
-                }
-            }
-
-            // Sync filters on first successful fetch (foreground or background)
-            if (!filters_synced[i] && instances[i].filter_count > 0) {
-                const char *names[MAX_FILTERS];
-                for (int f = 0; f < instances[i].filter_count; f++) {
-                    names[f] = instances[i].filters[f].name;
-                }
-                app_config_sync_filters(names, instances[i].filter_count, i);
-                filters_synced[i] = true;
-            }
-
-            // Check WebSocket reconnection with exponential backoff
-            nina_websocket_check_reconnect(i, url, &instances[i]);
         }
 
         /* Update sysinfo page when visible — refreshes at the same rate as data polling */
@@ -759,37 +746,46 @@ void data_update_task(void *arg) {
         }
 
         // ── Session stats recording + safety monitor + RMS/HFR alerts ──
+        // Lock each instance briefly to read a consistent snapshot of scalar fields.
         for (int i = 0; i < instance_count; i++) {
             if (!nina_connection_is_connected(i)) continue;
 
-            // Record session stats (thread-safe, no LVGL)
-            nina_session_stats_record(i,
-                instances[i].guider.rms_total,
-                instances[i].hfr,
-                instances[i].camera.temp,
-                instances[i].stars,
-                instances[i].camera.cooler_power);
+            float rms_total, hfr, cam_temp, cooler_pwr;
+            int stars;
+            bool safety_conn, safety_safe;
 
-            // Safety state update (no display lock needed — state tracking only)
-            if (instances[i].safety_connected) {
-                nina_safety_update(true, instances[i].safety_is_safe);
+            if (nina_client_lock(&instances[i], 50)) {
+                rms_total  = instances[i].guider.rms_total;
+                hfr        = instances[i].hfr;
+                cam_temp   = instances[i].camera.temp;
+                stars      = instances[i].stars;
+                cooler_pwr = instances[i].camera.cooler_power;
+                safety_conn = instances[i].safety_connected;
+                safety_safe = instances[i].safety_is_safe;
+                nina_client_unlock(&instances[i]);
+            } else {
+                continue;  // Skip this instance if lock contended
             }
 
-            // RMS threshold alert (thread-safe via pending queue)
-            if (instances[i].guider.rms_total > 0.0f) {
+            nina_session_stats_record(i, rms_total, hfr, cam_temp, stars, cooler_pwr);
+
+            if (safety_conn) {
+                nina_safety_update(true, safety_safe);
+            }
+
+            if (rms_total > 0.0f) {
                 threshold_config_t rms_cfg;
                 app_config_get_rms_threshold_config(i, &rms_cfg);
-                if (rms_cfg.ok_max > 0.0f && instances[i].guider.rms_total > rms_cfg.ok_max) {
-                    nina_alert_trigger(ALERT_RMS, i, instances[i].guider.rms_total);
+                if (rms_cfg.ok_max > 0.0f && rms_total > rms_cfg.ok_max) {
+                    nina_alert_trigger(ALERT_RMS, i, rms_total);
                 }
             }
 
-            // HFR threshold alert (thread-safe via pending queue)
-            if (instances[i].hfr > 0.0f) {
+            if (hfr > 0.0f) {
                 threshold_config_t hfr_cfg;
                 app_config_get_hfr_threshold_config(i, &hfr_cfg);
-                if (hfr_cfg.ok_max > 0.0f && instances[i].hfr > hfr_cfg.ok_max) {
-                    nina_alert_trigger(ALERT_HFR, i, instances[i].hfr);
+                if (hfr_cfg.ok_max > 0.0f && hfr > hfr_cfg.ok_max) {
+                    nina_alert_trigger(ALERT_HFR, i, hfr);
                 }
             }
         }
@@ -855,16 +851,12 @@ void data_update_task(void *arg) {
             }
         }
 
-        // Calculate remaining delay to maintain consistent cycle
-        // (camera + guider poll every cycle; slow endpoints use absolute-time tiers)
+        // UI coordinator loop delay — no HTTP blocking, so this always fires on time.
+        // Use task notification to allow WS events to wake us for immediate UI refresh.
         {
             uint16_t cycle_ms = (uint16_t)app_config_get()->update_rate_s * 1000;
             if (cycle_ms < 1000) cycle_ms = 1000;
-            int64_t elapsed_ms = (esp_timer_get_time() / 1000) - now_ms;
-            int64_t delay_ms = cycle_ms - elapsed_ms;
-            if (delay_ms < 100) delay_ms = 100;  // Minimum 100ms breathing room
-            // Use ulTaskNotifyTake so WebSocket events can wake us early
-            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS((uint32_t)delay_ms));
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(cycle_ms));
         }
     }
 }

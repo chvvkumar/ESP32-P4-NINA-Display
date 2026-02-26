@@ -547,9 +547,13 @@ static void handle_websocket_message(int index, const char *payload, int len) {
 
     cJSON_Delete(json);
 
-    // Wake data task for immediate UI refresh
+    // Wake UI coordinator for immediate UI refresh
     if (data_task_handle) {
         xTaskNotifyGive(data_task_handle);
+    }
+    // Wake the relevant poll task for immediate re-poll (e.g., sequence_poll_needed)
+    if (index >= 0 && index < MAX_NINA_INSTANCES && poll_task_handles[index]) {
+        xTaskNotifyGive(poll_task_handles[index]);
     }
 }
 
