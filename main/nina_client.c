@@ -286,6 +286,15 @@ cJSON *http_get_json(const char *url) {
         return json;
     }
 
+    /* Extract host from URL for a clean log message */
+    const char *host = url;
+    const char *scheme_end = strstr(url, "://");
+    if (scheme_end) host = scheme_end + 3;
+    const char *host_end = strchr(host, ':');
+    if (!host_end) host_end = strchr(host, '/');
+    int host_len = host_end ? (int)(host_end - host) : (int)strlen(host);
+    ESP_LOGW(TAG, "%.*s unreachable", host_len, host);
+
     perf_counter_increment(&g_perf.http_failure_count);
     perf_timer_stop(&g_perf.http_request);
     return NULL;  // All attempts exhausted
