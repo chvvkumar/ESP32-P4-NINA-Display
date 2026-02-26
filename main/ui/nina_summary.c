@@ -166,8 +166,10 @@ static bool theme_forces_colors(void) {
 
 static void summary_card_click_cb(lv_event_t *e) {
     int instance_index = (int)(intptr_t)lv_event_get_user_data(e);
-    /* Page 0 is summary. Page 1..N are NINA instances. */
-    nina_dashboard_show_page(instance_index + 1, 0);
+    /* Map instance index to page index (returns 1-based, or -1 if disabled) */
+    int page = nina_dashboard_instance_to_page(instance_index);
+    if (page > 0)
+        nina_dashboard_show_page(page, 0);
 }
 
 static void init_glass_styles(void) {
@@ -258,17 +260,10 @@ static void create_card(summary_card_t *sc, lv_obj_t *parent, int instance_index
     lv_obj_add_event_cb(sc->card, summary_card_click_cb, LV_EVENT_CLICKED,
                         (void *)(intptr_t)instance_index);
 
-    /* ── Header row: instance name + filter badge ── */
-    lv_obj_t *header = lv_obj_create(sc->card);
-    lv_obj_remove_style_all(header);
-    lv_obj_set_width(header, LV_PCT(100));
-    lv_obj_set_height(header, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(header, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(header, LV_FLEX_ALIGN_SPACE_BETWEEN,
-                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-
-    /* Instance name */
-    sc->lbl_name = lv_label_create(header);
+    /* ── Instance name (full width, truncated with dots) ── */
+    sc->lbl_name = lv_label_create(sc->card);
+    lv_obj_set_width(sc->lbl_name, LV_PCT(100));
+    lv_label_set_long_mode(sc->lbl_name, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_font(sc->lbl_name, &lv_font_montserrat_20, 0);
     {
         const char *url = app_config_get_instance_url(instance_index);
@@ -277,8 +272,26 @@ static void create_card(summary_card_t *sc, lv_obj_t *parent, int instance_index
         lv_label_set_text(sc->lbl_name, host[0] ? host : "N.I.N.A.");
     }
 
-    /* Filter badge */
-    sc->filter_box = lv_obj_create(header);
+    /* ── Target name ── */
+    sc->lbl_target = lv_label_create(sc->card);
+    lv_obj_set_width(sc->lbl_target, LV_PCT(100));
+    lv_obj_set_style_text_align(sc->lbl_target, LV_TEXT_ALIGN_LEFT, 0);
+    lv_label_set_long_mode(sc->lbl_target, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_font(sc->lbl_target, &lv_font_montserrat_24, 0);
+    lv_label_set_text(sc->lbl_target, "----");
+
+    /* ── Progress bar row: filter | bar | pct ── */
+    lv_obj_t *bar_row = lv_obj_create(sc->card);
+    lv_obj_remove_style_all(bar_row);
+    lv_obj_set_width(bar_row, LV_PCT(100));
+    lv_obj_set_height(bar_row, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(bar_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(bar_row, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(bar_row, 10, 0);
+
+    /* Filter badge (left of progress bar) */
+    sc->filter_box = lv_obj_create(bar_row);
     lv_obj_remove_style_all(sc->filter_box);
     lv_obj_set_size(sc->filter_box, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_style_bg_opa(sc->filter_box, LV_OPA_50, 0);
@@ -290,24 +303,6 @@ static void create_card(summary_card_t *sc, lv_obj_t *parent, int instance_index
     sc->lbl_filter = lv_label_create(sc->filter_box);
     lv_obj_set_style_text_font(sc->lbl_filter, &lv_font_montserrat_14, 0);
     lv_label_set_text(sc->lbl_filter, "--");
-
-    /* ── Target name ── */
-    sc->lbl_target = lv_label_create(sc->card);
-    lv_obj_set_width(sc->lbl_target, LV_PCT(100));
-    lv_obj_set_style_text_align(sc->lbl_target, LV_TEXT_ALIGN_LEFT, 0);
-    lv_label_set_long_mode(sc->lbl_target, LV_LABEL_LONG_DOT);
-    lv_obj_set_style_text_font(sc->lbl_target, &lv_font_montserrat_24, 0);
-    lv_label_set_text(sc->lbl_target, "----");
-
-    /* ── Progress bar + percentage ── */
-    lv_obj_t *bar_row = lv_obj_create(sc->card);
-    lv_obj_remove_style_all(bar_row);
-    lv_obj_set_width(bar_row, LV_PCT(100));
-    lv_obj_set_height(bar_row, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(bar_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(bar_row, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(bar_row, 10, 0);
 
     sc->bar_progress = lv_bar_create(bar_row);
     lv_obj_set_flex_grow(sc->bar_progress, 1);
@@ -712,8 +707,16 @@ void summary_page_update(const nina_client_t *instances, int count) {
 
         if (!nina_connection_is_connected(i)) continue;
 
-        /* Instance name — use profile name if available */
-        if (d->profile_name[0]) {
+        /* Instance name — telescope + camera, fallback to profile, then host */
+        if (d->telescope_name[0] && d->camera_name[0]) {
+            char combined[128];
+            snprintf(combined, sizeof(combined), "%s | %s", d->telescope_name, d->camera_name);
+            set_label_if_changed(sc->lbl_name, combined);
+        } else if (d->telescope_name[0]) {
+            set_label_if_changed(sc->lbl_name, d->telescope_name);
+        } else if (d->camera_name[0]) {
+            set_label_if_changed(sc->lbl_name, d->camera_name);
+        } else if (d->profile_name[0]) {
             set_label_if_changed(sc->lbl_name, d->profile_name);
         } else {
             const char *url = app_config_get_instance_url(i);

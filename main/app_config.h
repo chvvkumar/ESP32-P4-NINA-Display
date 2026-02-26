@@ -12,7 +12,7 @@ extern "C" {
 #define MAX_NINA_INSTANCES 3
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 6
+#define APP_CONFIG_VERSION 8
 
 typedef struct {
     uint32_t config_version;        // Must be first field — used to detect legacy blobs
@@ -41,6 +41,8 @@ typedef struct {
     uint8_t  graph_update_interval_s;     // Graph overlay auto-refresh interval in seconds (2-30, default 5)
     uint8_t  connection_timeout_s;        // Seconds without successful poll before marking offline (2-30, default 6)
     uint8_t  toast_duration_s;           // Toast notification display duration in seconds (3-30, default 8)
+    bool     debug_mode;                // Runtime debug/perf profiling toggle (default false)
+    bool     instance_enabled[3];       // Per-instance enable flag (disabled = skip polling/WS)
 } app_config_t;
 
 // WiFi credentials are NOT stored in app_config_t. They are managed by
@@ -54,6 +56,8 @@ void app_config_save(const app_config_t *config);
 int app_config_get_instance_count(void);
 const char *app_config_get_instance_url(int index);
 void app_config_factory_reset(void);
+bool app_config_is_instance_enabled(int index);
+int app_config_get_enabled_instance_count(void);
 uint32_t app_config_get_filter_color(const char *filter_name, int instance_index);
 uint32_t app_config_get_rms_color(float rms_value, int instance_index);
 uint32_t app_config_get_hfr_color(float hfr_value, int instance_index);

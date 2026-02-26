@@ -30,6 +30,7 @@ dashboard_page_t pages[MAX_NINA_INSTANCES];
 int page_count = 0;
 int active_page = 0;
 const theme_t *current_theme = NULL;
+int page_instance_map[MAX_NINA_INSTANCES] = {0, 1, 2};
 
 /* Summary page — always first (index 0), excluded from indicators */
 static lv_obj_t *summary_obj = NULL;
@@ -275,15 +276,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_flex_flow(top_row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(top_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    lv_obj_t *left_cont = lv_obj_create(top_row);
-    lv_obj_remove_style_all(left_cont);
-    lv_obj_clear_flag(left_cont, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_size(left_cont, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(left_cont, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(left_cont, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(left_cont, 0, 0);
-
-    p->lbl_instance_name = lv_label_create(left_cont);
+    p->lbl_instance_name = lv_label_create(top_row);
     {
         uint32_t init_color = 0xf87171;
         if (current_theme && strcmp(current_theme->name, "Red Night") == 0) {
@@ -291,7 +284,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
         }
         lv_obj_set_style_text_color(p->lbl_instance_name, lv_color_hex(app_config_apply_brightness(init_color, app_config_get()->color_brightness)), 0);
     }
-    lv_obj_set_style_text_font(p->lbl_instance_name, &lv_font_montserrat_26, 0);
+    lv_obj_set_style_text_font(p->lbl_instance_name, &lv_font_montserrat_20, 0);
     {
         const char *init_url = app_config_get_instance_url(page_index);
         char host[64] = {0};
@@ -703,9 +696,16 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
 
     scr_dashboard = parent;
 
-    if (instance_count < 1) instance_count = 1;
-    if (instance_count > MAX_NINA_INSTANCES) instance_count = MAX_NINA_INSTANCES;
-    page_count = instance_count;
+    /* Build page-to-instance mapping: only enabled instances get pages */
+    page_count = 0;
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        const char *url = app_config_get_instance_url(i);
+        if (url[0] != '\0' && app_config_is_instance_enabled(i)) {
+            page_instance_map[page_count] = i;
+            page_count++;
+        }
+    }
+    if (page_count < 1) page_count = 1;  /* Always at least 1 page */
     active_page = 0;  /* Summary page is the default */
 
     main_cont = lv_obj_create(scr_dashboard);
@@ -718,9 +718,10 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     /* Summary page — always first (page index 0), visible by default */
     summary_obj = summary_page_create(main_cont, page_count);
 
-    /* NINA instance pages — page indices 1..page_count, hidden initially */
+    /* NINA instance pages — page indices 1..page_count, hidden initially.
+     * Each page maps to the actual instance via page_instance_map[]. */
     for (int i = 0; i < page_count; i++) {
-        create_dashboard_page(&pages[i], main_cont, i);
+        create_dashboard_page(&pages[i], main_cont, page_instance_map[i]);
         lv_obj_add_flag(pages[i].page, LV_OBJ_FLAG_HIDDEN);
     }
 
@@ -793,6 +794,18 @@ bool nina_dashboard_is_summary_page(void) {
 
 int nina_dashboard_get_total_page_count(void) {
     return total_page_count;
+}
+
+int nina_dashboard_page_to_instance(int page_idx) {
+    if (page_idx < 0 || page_idx >= page_count) return -1;
+    return page_instance_map[page_idx];
+}
+
+int nina_dashboard_instance_to_page(int instance_idx) {
+    for (int i = 0; i < page_count; i++) {
+        if (page_instance_map[i] == instance_idx) return i + 1;  /* 1-based page index */
+    }
+    return -1;
 }
 
 static int next_page_index = -1;

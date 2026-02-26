@@ -298,35 +298,31 @@ esp_err_t version_get_handler(httpd_req_t *req)
 // Handler for performance profiling data
 esp_err_t perf_get_handler(httpd_req_t *req)
 {
-#if PERF_MONITOR_ENABLED
+    httpd_resp_set_type(req, "application/json");
+    if (!g_perf.enabled) {
+        httpd_resp_sendstr(req, "{\"enabled\":false}");
+        return ESP_OK;
+    }
     perf_monitor_capture_memory();  // Get fresh memory snapshot
     char *json = perf_monitor_report_json();
     if (!json) {
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
-    httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, json);
     free(json);
     return ESP_OK;
-#else
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, "{\"error\":\"Profiling disabled\"}");
-    return ESP_OK;
-#endif
 }
 
 // Handler for resetting performance metrics
 esp_err_t perf_reset_post_handler(httpd_req_t *req)
 {
-#if PERF_MONITOR_ENABLED
-    perf_monitor_reset_all();
     httpd_resp_set_type(req, "application/json");
+    if (!g_perf.enabled) {
+        httpd_resp_sendstr(req, "{\"error\":\"Debug mode not enabled\"}");
+        return ESP_OK;
+    }
+    perf_monitor_reset_all();
     httpd_resp_sendstr(req, "{\"status\":\"reset\"}");
     return ESP_OK;
-#else
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, "{\"error\":\"Profiling disabled\"}");
-    return ESP_OK;
-#endif
 }

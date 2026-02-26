@@ -134,6 +134,20 @@ void nina_dashboard_hide_thumbnail(void);
  */
 bool nina_dashboard_thumbnail_visible(void);
 
+/**
+ * @brief Get the actual instance index for a given NINA page index
+ * @param page_idx 0-based page index within NINA pages (0..page_count-1)
+ * @return Actual instance index (0..MAX_NINA_INSTANCES-1), or -1 if invalid
+ */
+int nina_dashboard_page_to_instance(int page_idx);
+
+/**
+ * @brief Get the NINA page index for a given instance index
+ * @param instance_idx Actual instance index (0..MAX_NINA_INSTANCES-1)
+ * @return 1-based page index (1..page_count), or -1 if instance has no page
+ */
+int nina_dashboard_instance_to_page(int instance_idx);
+
 #ifdef __cplusplus
 }
 #endif

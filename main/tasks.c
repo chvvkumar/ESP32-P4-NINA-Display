@@ -126,7 +126,7 @@ void data_update_task(void *arg) {
         int boot_instance_count = app_config_get_instance_count();
         for (int i = 0; i < boot_instance_count; i++) {
             const char *url = app_config_get_instance_url(i);
-            if (strlen(url) == 0) continue;
+            if (strlen(url) == 0 || !app_config_is_instance_enabled(i)) continue;
             nina_connection_set_connecting(i);
             if (!nina_client_dns_check(url)) {
                 ESP_LOGW(TAG, "Boot probe instance %d: DNS failed for %s", i + 1, url);
@@ -166,7 +166,7 @@ void data_update_task(void *arg) {
     // Start WebSocket for all configured instances concurrently
     for (int i = 0; i < instance_count; i++) {
         const char *url = app_config_get_instance_url(i);
-        if (strlen(url) > 0 && nina_client_dns_check(url)) {
+        if (strlen(url) > 0 && app_config_is_instance_enabled(i) && nina_client_dns_check(url)) {
             nina_websocket_start(i, url, &instances[i]);
         }
     }
@@ -194,21 +194,34 @@ void data_update_task(void *arg) {
         bool on_summary = nina_dashboard_is_summary_page();
 
         /*
-         * Page index convention:
+         * Page index convention (page_count = enabled instances only):
          *   0                    = summary page
-         *   1 .. instance_count  = NINA instance pages (instance i at page i+1)
-         *   instance_count + 1   = settings page
-         *   instance_count + 2   = sysinfo page
+         *   1 .. page_count      = NINA instance pages (mapped via page_instance_map)
+         *   page_count + 1       = settings page
+         *   page_count + 2       = sysinfo page
          *
-         * active_nina_idx: the 0-based NINA instance index for the active page,
-         *   or -1 if on summary/settings/sysinfo.
+         * active_nina_idx: the actual instance index (0..MAX_NINA_INSTANCES-1)
+         *   for the active page, or -1 if on summary/settings/sysinfo.
          */
-        int active_nina_idx = -1;
-        if (!on_sysinfo && !on_settings && !on_summary && current_active >= 1)
-            active_nina_idx = current_active - 1;
+        int active_nina_idx = -1;   /* Actual instance index (for data access) */
+        int active_page_idx = -1;  /* 0-based page index into pages[] (for UI calls) */
+        if (!on_sysinfo && !on_settings && !on_summary && current_active >= 1) {
+            active_page_idx = current_active - 1;
+            active_nina_idx = nina_dashboard_page_to_instance(active_page_idx);
+        }
 
         // Re-read instance count from config so API URL changes take effect live
         instance_count = app_config_get_instance_count();
+
+        // Check for debug mode toggle
+        {
+            static bool last_debug_mode = false;
+            bool current_debug = app_config_get()->debug_mode;
+            if (current_debug != last_debug_mode) {
+                perf_monitor_set_enabled(current_debug);
+                last_debug_mode = current_debug;
+            }
+        }
 
         // Handle page change: trigger immediate full poll for the new active page
         // (WebSocket connections for all instances remain persistent)
@@ -257,29 +270,36 @@ void data_update_task(void *arg) {
                     uint8_t page_mask = r_cfg->auto_rotate_pages;
                     int total = nina_dashboard_get_total_page_count();
 
+                    int ena_page_count = total - 3;  /* enabled NINA pages only */
+
                     /* Find next page in rotation by stepping through candidates */
                     int next_page = current_active;
                     for (int step = 1; step < total; step++) {
                         int candidate = (current_active + step) % total;
 
-                        /* Check if this candidate is in the rotation bitmask */
+                        /* Check if this candidate is in the rotation bitmask.
+                         * Bitmask bits 1-3 refer to instance indices (not page indices),
+                         * so use the page-to-instance mapping for NINA pages. */
                         bool in_mask = false;
                         if (candidate == 0)
                             in_mask = (page_mask & 0x01) != 0;             /* Summary */
-                        else if (candidate >= 1 && candidate <= instance_count)
-                            in_mask = (page_mask & (1 << candidate)) != 0; /* NINA page */
-                        else if (candidate == instance_count + 1)
+                        else if (candidate >= 1 && candidate <= ena_page_count) {
+                            int inst = nina_dashboard_page_to_instance(candidate - 1);
+                            if (inst >= 0)
+                                in_mask = (page_mask & (1 << (inst + 1))) != 0; /* NINA page */
+                        }
+                        else if (candidate == ena_page_count + 1)
                             in_mask = (page_mask & 0x20) != 0;             /* Settings */
-                        else if (candidate == instance_count + 2)
+                        else if (candidate == ena_page_count + 2)
                             in_mask = (page_mask & 0x10) != 0;             /* Sysinfo */
 
                         if (!in_mask) continue;
 
                         /* Skip disconnected NINA instances if configured */
-                        if (r_cfg->auto_rotate_skip_disconnected
-                            && candidate >= 1 && candidate <= instance_count) {
-                            int nina_idx = candidate - 1;
-                            if (!nina_connection_is_connected(nina_idx)) continue;
+                        if (candidate >= 1 && candidate <= ena_page_count) {
+                            int nina_idx = nina_dashboard_page_to_instance(candidate - 1);
+                            if (nina_idx >= 0 && r_cfg->auto_rotate_skip_disconnected
+                                && !nina_connection_is_connected(nina_idx)) continue;
                         }
 
                         next_page = candidate;
@@ -311,9 +331,9 @@ void data_update_task(void *arg) {
         }
 
         /* Pulse connection dot on the active NINA page (not summary/sysinfo) */
-        if (active_nina_idx >= 0 && active_nina_idx < instance_count) {
+        if (active_nina_idx >= 0 && active_page_idx >= 0) {
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                nina_dashboard_update_status(active_nina_idx, rssi,
+                nina_dashboard_update_status(active_page_idx, rssi,
                                              nina_connection_is_connected(active_nina_idx), true);
                 bsp_display_unlock();
             }
@@ -355,6 +375,13 @@ void data_update_task(void *arg) {
 
             const char *url = app_config_get_instance_url(i);
             if (strlen(url) == 0) continue;
+
+            /* Skip disabled instances — no connectivity check or data updates */
+            if (!app_config_is_instance_enabled(i)) {
+                instances[i].connected = false;
+                nina_connection_report_poll(i, false);
+                continue;
+            }
 
             /* DNS pre-check: skip all HTTP/WS work if hostname doesn't resolve */
             if (!nina_client_dns_check(url)) {
@@ -414,13 +441,9 @@ void data_update_task(void *arg) {
                 locked[j] = nina_client_lock(&instances[j], 100);
 
             perf_timer_start(&g_perf.ui_update_total);
-#if PERF_MONITOR_ENABLED
-            int64_t lock_start = esp_timer_get_time();
-#endif
+            int64_t lock_start = g_perf.enabled ? esp_timer_get_time() : 0;
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-#if PERF_MONITOR_ENABLED
-                perf_timer_record(&g_perf.ui_lock_wait, esp_timer_get_time() - lock_start);
-#endif
+                if (g_perf.enabled) perf_timer_record(&g_perf.ui_lock_wait, esp_timer_get_time() - lock_start);
                 perf_timer_start(&g_perf.ui_summary_update);
                 summary_page_update(instances, instance_count);
                 perf_timer_stop(&g_perf.ui_summary_update);
@@ -434,33 +457,27 @@ void data_update_task(void *arg) {
         }
 
         /* Update active NINA page UI */
-        if (active_nina_idx >= 0 && active_nina_idx < instance_count) {
+        if (active_nina_idx >= 0 && active_page_idx >= 0) {
             nina_client_lock(&instances[active_nina_idx], 100);
 
             perf_timer_start(&g_perf.ui_update_total);
-#if PERF_MONITOR_ENABLED
-            int64_t lock_start2 = esp_timer_get_time();
-#endif
+            int64_t lock_start2 = g_perf.enabled ? esp_timer_get_time() : 0;
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-#if PERF_MONITOR_ENABLED
-                perf_timer_record(&g_perf.ui_lock_wait, esp_timer_get_time() - lock_start2);
-#endif
+                if (g_perf.enabled) perf_timer_record(&g_perf.ui_lock_wait, esp_timer_get_time() - lock_start2);
                 perf_timer_start(&g_perf.ui_dashboard_update);
-                update_nina_dashboard_page(active_nina_idx, &instances[active_nina_idx]);
+                update_nina_dashboard_page(active_page_idx, &instances[active_nina_idx]);
                 perf_timer_stop(&g_perf.ui_dashboard_update);
 
                 // Measure WS-to-UI latency if a recent event was received
-#if PERF_MONITOR_ENABLED
-                if (g_perf.last_ws_event_time_us > 0) {
+                if (g_perf.enabled && g_perf.last_ws_event_time_us > 0) {
                     int64_t latency = esp_timer_get_time() - g_perf.last_ws_event_time_us;
                     if (latency < 5000000) {  // Only if within 5 seconds (not stale)
                         perf_timer_record(&g_perf.latency_ws_to_ui, latency);
                     }
                     g_perf.last_ws_event_time_us = 0;  // Reset after measuring
                 }
-#endif
 
-                nina_dashboard_update_status(active_nina_idx, rssi,
+                nina_dashboard_update_status(active_page_idx, rssi,
                                              nina_connection_is_connected(active_nina_idx), false);
                 bsp_display_unlock();
             }
@@ -633,13 +650,13 @@ void data_update_task(void *arg) {
         }
 
         // ── Event-driven UI refresh: check if any WS event needs immediate UI update ──
-        if (active_nina_idx >= 0 && active_nina_idx < instance_count
+        if (active_nina_idx >= 0 && active_page_idx >= 0
             && instances[active_nina_idx].ui_refresh_needed) {
             instances[active_nina_idx].ui_refresh_needed = false;
             if (nina_client_lock(&instances[active_nina_idx], 50)) {
                 if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                    update_nina_dashboard_page(active_nina_idx, &instances[active_nina_idx]);
-                    nina_dashboard_update_status(active_nina_idx, rssi,
+                    update_nina_dashboard_page(active_page_idx, &instances[active_nina_idx]);
+                    nina_dashboard_update_status(active_page_idx, rssi,
                                                  nina_connection_is_connected(active_nina_idx), false);
                     bsp_display_unlock();
                 }
@@ -686,14 +703,14 @@ void data_update_task(void *arg) {
         // ── Perf: End cycle, capture memory, periodic report ──
         perf_timer_stop(&g_perf.poll_cycle_total);
         perf_monitor_capture_memory();
-#if PERF_MONITOR_ENABLED
-        g_perf.data_task_stack_hwm = uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t);
-        if (esp_timer_get_time() - g_perf.last_report_time_us >=
-            (int64_t)g_perf.report_interval_s * 1000000) {
-            perf_monitor_capture_cpu();
-            perf_monitor_report();
+        if (g_perf.enabled) {
+            g_perf.data_task_stack_hwm = uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t);
+            if (esp_timer_get_time() - g_perf.last_report_time_us >=
+                (int64_t)g_perf.report_interval_s * 1000000) {
+                perf_monitor_capture_cpu();
+                perf_monitor_report();
+            }
         }
-#endif
 
         // Calculate remaining delay to maintain consistent cycle
         // (camera + guider poll every cycle; slow endpoints use absolute-time tiers)

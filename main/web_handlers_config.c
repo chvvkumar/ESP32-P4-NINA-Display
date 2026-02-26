@@ -68,6 +68,10 @@ esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "graph_update_interval_s", cfg->graph_update_interval_s);
     cJSON_AddNumberToObject(root, "connection_timeout_s", cfg->connection_timeout_s);
     cJSON_AddNumberToObject(root, "toast_duration_s", cfg->toast_duration_s);
+    cJSON_AddBoolToObject(root, "debug_mode", cfg->debug_mode);
+    cJSON_AddBoolToObject(root, "instance_enabled_1", cfg->instance_enabled[0]);
+    cJSON_AddBoolToObject(root, "instance_enabled_2", cfg->instance_enabled[1]);
+    cJSON_AddBoolToObject(root, "instance_enabled_3", cfg->instance_enabled[2]);
 
     const char *json_str = cJSON_PrintUnformatted(root);
     if (json_str == NULL) {
@@ -311,6 +315,11 @@ esp_err_t config_post_handler(httpd_req_t *req)
         if (v > 30) v = 30;
         cfg->toast_duration_s = (uint8_t)v;
     }
+
+    JSON_TO_BOOL(root, "debug_mode", cfg->debug_mode);
+    JSON_TO_BOOL(root, "instance_enabled_1", cfg->instance_enabled[0]);
+    JSON_TO_BOOL(root, "instance_enabled_2", cfg->instance_enabled[1]);
+    JSON_TO_BOOL(root, "instance_enabled_3", cfg->instance_enabled[2]);
 
     app_config_save(cfg);
     free(cfg);

@@ -22,6 +22,7 @@ typedef struct {
     char target_name[64];
     char profile_name[64];
     char telescope_name[64];
+    char camera_name[64];
     
     struct {
         float temp;

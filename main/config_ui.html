@@ -171,6 +171,8 @@
     }
     .node-panel { display: none; }
     .node-panel.active { display: block; }
+    .sub-tab.disabled { opacity: 0.35; }
+    .node-panel.disabled { opacity: 0.4; pointer-events: none; }
 
     .save-bar {
       position: fixed; bottom: 0; left: 0; right: 0; z-index: 90;
@@ -601,6 +603,14 @@
         </div>
         </div>
       </div>
+      <div class="card">
+        <div class="card-title">Debug</div>
+        <div class="toggle-row">
+          <span class="toggle-label">Enable Debug Mode</span>
+          <label class="toggle"><input type="checkbox" id="debug_mode"><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint" style="margin-top:8px;">Enables performance profiling metrics, serial reports, and the /api/perf endpoint. Toggling resets all metrics.</div>
+      </div>
     </div>
     <div id="tab-network" class="tab-panel">
       <div class="card">
@@ -683,6 +693,21 @@
       <div class="field-hint hint-center">Reboot required after changing WiFi, NTP, timezone, or MQTT settings.</div>
     </div>
     <div id="tab-nina" class="tab-panel">
+      <div class="card" id="instance-overview">
+        <div class="card-title">Instances</div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label" id="inst_lbl_0">Node 1</span>
+          <label class="toggle"><input type="checkbox" id="instance_enabled_0" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label" id="inst_lbl_1">Node 2</span>
+          <label class="toggle"><input type="checkbox" id="instance_enabled_1" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label" id="inst_lbl_2">Node 3</span>
+          <label class="toggle"><input type="checkbox" id="instance_enabled_2" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+      </div>
       <div class="sub-tabs">
         <button class="sub-tab active" data-node="0">Node 1</button>
         <button class="sub-tab" data-node="1">Node 2</button>
@@ -947,20 +972,48 @@
         const lbl=$('arp_lbl'+n);
         if(lbl) lbl.textContent=urls[n-1]||'NINA '+n;
       }
+      for(let i=0;i<3;i++){
+        const lbl=$('inst_lbl_'+i);
+        if(lbl) lbl.textContent=urls[i]||'Node '+(i+1);
+      }
+      updateInstanceStates();
       updatePageSelectOptions();
+    }
+
+    function updateInstanceStates(){
+      for(let i=0;i<3;i++){
+        const en=$('instance_enabled_'+i).checked;
+        const tabs=$$('.sub-tab');
+        if(tabs[i]) tabs[i].classList.toggle('disabled',!en);
+        const panels=$$('.node-panel');
+        if(panels[i]) panels[i].classList.toggle('disabled',!en);
+        /* Dim auto-rotate checkbox for disabled instances */
+        const arpCb=$('arp_nina'+(i+1));
+        if(arpCb&&arpCb.parentElement) arpCb.parentElement.style.opacity=en?'':'0.35';
+      }
     }
 
     function updatePageSelectOptions(){
       const sel=$('active_page');
       if(!sel) return;
       const urls=[$('url1').value.trim(),$('url2').value.trim(),$('url3').value.trim()];
-      const cnt=urls.filter(u=>u.length>0).length||1;
+      const enabled=[$('instance_enabled_0').checked,$('instance_enabled_1').checked,$('instance_enabled_2').checked];
+      /* Count only enabled instances with a URL — mirrors device page layout */
+      let cnt=0;
+      for(let i=0;i<3;i++){if(urls[i].length>0&&enabled[i]) cnt++;}
+      cnt=cnt||1;
       const prev=sel.value;
       sel.innerHTML='';
       sel.add(new Option('Summary','0'));
-      for(let i=0;i<cnt;i++) sel.add(new Option(urls[i]||'NINA '+(i+1),''+(i+1)));
-      sel.add(new Option('Settings',''+(cnt+1)));
-      sel.add(new Option('System Info',''+(cnt+2)));
+      let pageIdx=1;
+      for(let i=0;i<3;i++){
+        if(urls[i].length>0&&enabled[i]){
+          sel.add(new Option(urls[i]||'NINA '+(i+1),''+pageIdx));
+          pageIdx++;
+        }
+      }
+      sel.add(new Option('Settings',''+pageIdx));
+      sel.add(new Option('System Info',''+(pageIdx+1)));
       if([...sel.options].some(o=>o.value===prev)) sel.value=prev;
       else sel.value='0';
     }
@@ -1045,7 +1098,11 @@
         update_rate_s:parseInt($('update_rate').value)||2,
         graph_update_interval_s:parseInt($('graph_interval').value)||5,
         connection_timeout_s:parseInt($('connection_timeout').value)||6,
-        toast_duration_s:parseInt($('toast_duration').value)||8
+        toast_duration_s:parseInt($('toast_duration').value)||8,
+        debug_mode:!!$('debug_mode').checked,
+        instance_enabled_1:!!$('instance_enabled_0').checked,
+        instance_enabled_2:!!$('instance_enabled_1').checked,
+        instance_enabled_3:!!$('instance_enabled_2').checked
       };
 
       const ssid=$('ssid').value.trim();
@@ -1087,6 +1144,10 @@
       $('graph_interval').value=data.graph_update_interval_s||5;
       $('connection_timeout').value=data.connection_timeout_s||6;
       $('toast_duration').value=data.toast_duration_s||8;
+      $('debug_mode').checked=!!data.debug_mode;
+      $('instance_enabled_0').checked=data.instance_enabled_1!==false;
+      $('instance_enabled_1').checked=data.instance_enabled_2!==false;
+      $('instance_enabled_2').checked=data.instance_enabled_3!==false;
 
       for(let i=0;i<3;i++){
         const key='filter_colors_'+(i+1);

@@ -58,8 +58,8 @@ static lv_obj_t *lbl_idf_val     = NULL;
 static lv_obj_t *lbl_uptime_val  = NULL;
 static lv_obj_t *lbl_tasks_val   = NULL;
 
-/* Performance card (only when profiling enabled) */
-#if PERF_MONITOR_ENABLED
+/* Performance card (debug mode) */
+static lv_obj_t *perf_card = NULL;
 static lv_obj_t *lbl_poll_cycle_val = NULL;
 static lv_obj_t *lbl_http_reqs_val  = NULL;
 static lv_obj_t *lbl_ws_events_val  = NULL;
@@ -67,7 +67,8 @@ static lv_obj_t *lbl_json_parses_val = NULL;
 static lv_obj_t *lbl_lock_wait_val  = NULL;
 static lv_obj_t *lbl_stack_hwm_val  = NULL;
 
-/* CPU card (only when profiling enabled) */
+/* CPU card (debug mode) */
+static lv_obj_t *cpu_card = NULL;
 static lv_obj_t *lbl_core0_val   = NULL;
 static lv_obj_t *bar_core0       = NULL;
 static lv_obj_t *lbl_core1_val   = NULL;
@@ -77,7 +78,6 @@ static lv_obj_t *bar_cputotal    = NULL;
 static lv_obj_t *lbl_headroom_val = NULL;
 static lv_obj_t *lbl_lvgl_fps_val = NULL;
 static lv_obj_t *lbl_top_task_val = NULL;
-#endif
 
 /* Red Night theme forces all colors to the red palette */
 static bool theme_forces_colors(void) {
@@ -265,22 +265,21 @@ lv_obj_t *sysinfo_page_create(lv_obj_t *parent) {
         bar_psram = make_bar(card);
     }
 
-    /* ── CPU Card (right, only when profiling enabled) ── */
-#if PERF_MONITOR_ENABLED
+    /* ── CPU Card (right, visible when debug mode enabled) ── */
     {
-        lv_obj_t *card = make_card(col_right);
-        make_section_title(card, "CPU");
-        make_kv_row(card, "Core 0", &lbl_core0_val);
-        bar_core0 = make_bar(card);
-        make_kv_row(card, "Core 1", &lbl_core1_val);
-        bar_core1 = make_bar(card);
-        make_kv_row(card, "Total", &lbl_cputotal_val);
-        bar_cputotal = make_bar(card);
-        make_kv_row(card, "Headroom", &lbl_headroom_val);
-        make_kv_row(card, "Render", &lbl_lvgl_fps_val);
-        make_kv_row(card, "Top Task", &lbl_top_task_val);
+        cpu_card = make_card(col_right);
+        make_section_title(cpu_card, "CPU");
+        make_kv_row(cpu_card, "Core 0", &lbl_core0_val);
+        bar_core0 = make_bar(cpu_card);
+        make_kv_row(cpu_card, "Core 1", &lbl_core1_val);
+        bar_core1 = make_bar(cpu_card);
+        make_kv_row(cpu_card, "Total", &lbl_cputotal_val);
+        bar_cputotal = make_bar(cpu_card);
+        make_kv_row(cpu_card, "Headroom", &lbl_headroom_val);
+        make_kv_row(cpu_card, "Render", &lbl_lvgl_fps_val);
+        make_kv_row(cpu_card, "Top Task", &lbl_top_task_val);
+        if (!g_perf.enabled) lv_obj_add_flag(cpu_card, LV_OBJ_FLAG_HIDDEN);
     }
-#endif
 
     /* ── System Card (right) ── */
     {
@@ -292,19 +291,18 @@ lv_obj_t *sysinfo_page_create(lv_obj_t *parent) {
         make_kv_row(card, "Tasks", &lbl_tasks_val);
     }
 
-    /* ── Performance Card (left, only when profiling enabled) ── */
-#if PERF_MONITOR_ENABLED
+    /* ── Performance Card (left, visible when debug mode enabled) ── */
     {
-        lv_obj_t *card = make_card(col_left);
-        make_section_title(card, "PERFORMANCE");
-        make_kv_row(card, "Poll Cycle", &lbl_poll_cycle_val);
-        make_kv_row(card, "HTTP Reqs", &lbl_http_reqs_val);
-        make_kv_row(card, "WS Events", &lbl_ws_events_val);
-        make_kv_row(card, "JSON Parses", &lbl_json_parses_val);
-        make_kv_row(card, "Lock Wait", &lbl_lock_wait_val);
-        make_kv_row(card, "Stack HWM", &lbl_stack_hwm_val);
+        perf_card = make_card(col_left);
+        make_section_title(perf_card, "PERFORMANCE");
+        make_kv_row(perf_card, "Poll Cycle", &lbl_poll_cycle_val);
+        make_kv_row(perf_card, "HTTP Reqs", &lbl_http_reqs_val);
+        make_kv_row(perf_card, "WS Events", &lbl_ws_events_val);
+        make_kv_row(perf_card, "JSON Parses", &lbl_json_parses_val);
+        make_kv_row(perf_card, "Lock Wait", &lbl_lock_wait_val);
+        make_kv_row(perf_card, "Stack HWM", &lbl_stack_hwm_val);
+        if (!g_perf.enabled) lv_obj_add_flag(perf_card, LV_OBJ_FLAG_HIDDEN);
     }
-#endif
 
     return si_page;
 }
@@ -448,9 +446,18 @@ void sysinfo_page_refresh(void) {
         lv_label_set_text(lbl_tasks_val, buf);
     }
 
+    /* ── Show/hide debug cards based on runtime toggle ── */
+    if (cpu_card) {
+        if (g_perf.enabled) lv_obj_clear_flag(cpu_card, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(cpu_card, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (perf_card) {
+        if (g_perf.enabled) lv_obj_clear_flag(perf_card, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(perf_card, LV_OBJ_FLAG_HIDDEN);
+    }
+
     /* ── CPU ── */
-#if PERF_MONITOR_ENABLED
-    {
+    if (g_perf.enabled && cpu_card) {
         if (g_perf.cpu.valid) {
             int core0_pct = (int)(g_perf.cpu.core_load[0] + 0.5f);
             int core1_pct = (int)(g_perf.cpu.core_load[1] + 0.5f);
@@ -507,11 +514,9 @@ void sysinfo_page_refresh(void) {
             lv_bar_set_value(bar_cputotal, 0, LV_ANIM_OFF);
         }
     }
-#endif
 
     /* ── Performance ── */
-#if PERF_MONITOR_ENABLED
-    {
+    if (g_perf.enabled && perf_card) {
         if (g_perf.poll_cycle_total.count > 0) {
             int64_t avg = g_perf.poll_cycle_total.total_us / g_perf.poll_cycle_total.count;
             snprintf(buf, sizeof(buf), "%lld ms (avg)", (long long)(avg / 1000));
@@ -543,7 +548,6 @@ void sysinfo_page_refresh(void) {
                  (unsigned long)g_perf.data_task_stack_hwm);
         lv_label_set_text(lbl_stack_hwm_val, buf);
     }
-#endif
 }
 
 /* ── Theme ───────────────────────────────────────────────────────────── */

@@ -181,15 +181,14 @@ esp_err_t page_post_handler(httpd_req_t *req)
     cJSON *val = cJSON_GetObjectItem(root, "page");
     if (cJSON_IsNumber(val)) {
         int page = val->valueint;
-        int cnt = app_config_get_instance_count();
-        int total = cnt + 3;  /* summary + NINA pages + settings + sysinfo */
+        int total = nina_dashboard_get_total_page_count();
         app_config_t *cfg = app_config_get();
 
         if (page >= 0 && page < total) {
             cfg->active_page_override = (int8_t)page;
             app_config_save(cfg);
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                nina_dashboard_show_page(page, cnt);
+                nina_dashboard_show_page(page, 0);
                 bsp_display_unlock();
             } else {
                 ESP_LOGW(TAG, "Display lock timeout (page switch)");

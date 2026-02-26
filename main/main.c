@@ -179,9 +179,8 @@ void app_main(void)
     app_config_init();
     nina_connection_init();
 
-#if PERF_MONITOR_ENABLED
-    perf_monitor_init(CONFIG_PERF_REPORT_INTERVAL_S);
-#endif
+    perf_monitor_init(30);
+    perf_monitor_set_enabled(app_config_get()->debug_mode);
 
     instance_count = app_config_get_instance_count();
     ESP_LOGI(TAG, "Configured instances: %d", instance_count);
@@ -223,9 +222,9 @@ void app_main(void)
             /* Apply persisted page override immediately on boot.
              * Override stores absolute page index: 0=summary, 1..N=NINA, N+1=settings, N+2=sysinfo */
             app_config_t *cfg = app_config_get();
-            int total = instance_count + 3;  /* summary + NINA pages + settings + sysinfo */
+            int total = nina_dashboard_get_total_page_count();
             if (cfg->active_page_override >= 0 && cfg->active_page_override < total) {
-                nina_dashboard_show_page(cfg->active_page_override, instance_count);
+                nina_dashboard_show_page(cfg->active_page_override, 0);
             }
         }
         bsp_display_unlock();
