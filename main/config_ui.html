@@ -385,6 +385,30 @@
     }
     .page-mode-details[hidden] { display: none; }
 
+    /* === SPRING-LOADED SEGMENTED CONTROL === */
+    .pm-segment-wrap {
+      position: relative; display: flex; background: rgba(0,0,0,0.5);
+      border-radius: 12px; padding: 4px; border: 1px solid rgba(255, 255, 255, 0.08);
+      margin-bottom: 20px;
+    }
+    .pm-slider {
+      position: absolute; top: 4px; bottom: 4px; width: calc(33.333% - 2.66px);
+      background: rgba(var(--accent-rgb), 0.15); border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2), inset 0 0 0 1px rgba(var(--accent-rgb), 0.3);
+      transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+      z-index: 1;
+    }
+    .pm-seg-btn {
+      flex: 1; text-align: center; padding: 10px; color: var(--text-muted);
+      font-size: 0.85rem; font-weight: 600; cursor: pointer; position: relative;
+      z-index: 2; transition: color 0.3s ease; border-radius: 8px;
+    }
+    .pm-seg-btn.active { color: var(--accent); }
+    .pm-content-box {
+      background: rgba(255, 255, 255, 0.01); border: 1px solid rgba(255, 255, 255, 0.04);
+      border-radius: var(--radius-sm); padding: 16px;
+    }
+
     /* === COLLAPSIBLE CARD === */
     .card-title-collapsible {
       display: flex; align-items: center; justify-content: space-between;
@@ -515,65 +539,56 @@
         </div>
         <div class="card-body-collapsible collapsed" id="pm_body">
 
-        <label class="page-mode-option" id="pm_auto_opt" onclick="setPageMode('auto')">
-          <input type="radio" name="page_mode" value="auto" class="page-mode-radio" id="pm_auto">
-          <div class="page-mode-body">
-            <div class="page-mode-title">Auto</div>
-            <div class="page-mode-desc">Start on Summary, navigate manually via swipe or button</div>
-          </div>
-        </label>
+        <div class="pm-segment-wrap">
+          <div class="pm-slider" id="pm_slider"></div>
+          <div class="pm-seg-btn active" data-mode="auto" onclick="setPageMode('auto')">Manual</div>
+          <div class="pm-seg-btn" data-mode="fixed" onclick="setPageMode('fixed')">Fixed</div>
+          <div class="pm-seg-btn" data-mode="rotate" onclick="setPageMode('rotate')">Rotate</div>
+        </div>
 
-        <label class="page-mode-option" id="pm_fixed_opt" onclick="setPageMode('fixed')">
-          <input type="radio" name="page_mode" value="fixed" class="page-mode-radio" id="pm_fixed">
-          <div class="page-mode-body">
-            <div class="page-mode-title">Fixed</div>
-            <div class="page-mode-desc">Pin display to a specific page on boot</div>
-            <div class="page-mode-details" id="pm_fixed_details" hidden>
-              <div class="field">
-                <label class="field-label">Page</label>
-                <select class="input" id="active_page" onchange="setPage(this.value)">
-                  <option value="0">Summary</option>
-                  <option value="1">NINA 1</option>
-                  <option value="2">NINA 2</option>
-                  <option value="3">NINA 3</option>
-                  <option value="4">Settings</option>
-                  <option value="5">System Info</option>
-                </select>
-              </div>
-            </div>
+        <div id="pm_auto_details" class="pm-content-box" style="display:none;">
+          <div style="font-size:0.8rem; color:var(--text-muted); text-align:center;">
+            Starts on Summary page. Navigate manually via swipe or bottom buttons.
           </div>
-        </label>
+        </div>
 
-        <label class="page-mode-option" id="pm_rotate_opt" onclick="setPageMode('rotate')">
-          <input type="radio" name="page_mode" value="rotate" class="page-mode-radio" id="pm_rotate">
-          <div class="page-mode-body">
-            <div class="page-mode-title">Rotate</div>
-            <div class="page-mode-desc">Automatically cycle through selected pages</div>
-            <div class="page-mode-details" id="pm_rotate_details" hidden>
-              <div class="field">
-                <label class="field-label">Interval (seconds)</label>
-                <input type="number" class="input" id="auto_rotate_interval" min="4" max="3600" value="30">
-              </div>
-              <div class="field">
-                <label class="field-label">Transition</label>
-                <select class="input" id="auto_rotate_effect">
-                  <option value="0">Instant</option>
-                  <option value="1">Fade</option>
-                  <option value="2">Slide Left</option>
-                  <option value="3">Slide Right</option>
-                </select>
-              </div>
-              <div class="toggle-row">
-                <span class="toggle-label">Skip disconnected nodes</span>
-                <label class="toggle"><input type="checkbox" id="auto_rotate_skip"><span class="toggle-track"></span></label>
-              </div>
-              <div style="margin-top:16px">
-                <label class="field-label">Pages in rotation</label>
-                <div class="flex-col-gap" id="arp-container" style="margin-top:8px"></div>
-              </div>
-            </div>
+        <div id="pm_fixed_details" class="pm-content-box" style="display:none;">
+          <div class="field" style="margin-bottom:0;">
+            <label class="field-label">Pinned Page</label>
+            <select class="input" id="active_page" onchange="setPage(this.value)">
+              <option value="0">Summary</option>
+              <option value="1">NINA 1</option>
+              <option value="2">NINA 2</option>
+              <option value="3">NINA 3</option>
+              <option value="4">Settings</option>
+              <option value="5">System Info</option>
+            </select>
           </div>
-        </label>
+        </div>
+
+        <div id="pm_rotate_details" class="pm-content-box" style="display:none;">
+          <div class="field">
+            <label class="field-label">Interval (seconds)</label>
+            <input type="number" class="input" id="auto_rotate_interval" min="4" max="3600" value="30">
+          </div>
+          <div class="field">
+            <label class="field-label">Transition</label>
+            <select class="input" id="auto_rotate_effect">
+              <option value="0">Instant</option>
+              <option value="1">Fade</option>
+              <option value="2">Slide Left</option>
+              <option value="3">Slide Right</option>
+            </select>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Skip disconnected nodes</span>
+            <label class="toggle"><input type="checkbox" id="auto_rotate_skip"><span class="toggle-track"></span></label>
+          </div>
+          <div style="margin-top:16px">
+            <label class="field-label">Pages in rotation</label>
+            <div class="flex-col-gap" id="arp-container" style="margin-top:8px"></div>
+          </div>
+        </div>
 
         </div>
       </div>
@@ -911,29 +926,39 @@
 
     function updatePageModeSummary(){
       var mode=getPageMode();
-      var labels={auto:'Auto',fixed:'Fixed',rotate:'Rotate'};
+      var labels={auto:'Manual',fixed:'Fixed',rotate:'Rotate'};
       $('pm_summary').textContent='\u2014 '+labels[mode];
     }
 
-    function setPageMode(mode){
-      $('pm_auto').checked=(mode==='auto');
-      $('pm_fixed').checked=(mode==='fixed');
-      $('pm_rotate').checked=(mode==='rotate');
+    let _currentPageMode = 'auto';
 
-      $$('.page-mode-option').forEach(o=>o.classList.remove('selected'));
-      $('pm_'+mode+'_opt').classList.add('selected');
+    function setPageMode(mode) {
+      _currentPageMode = mode;
 
-      $('pm_fixed_details').hidden=(mode!=='fixed');
-      $('pm_rotate_details').hidden=(mode!=='rotate');
+      // Update button active states
+      document.querySelectorAll('.pm-seg-btn').forEach(btn => btn.classList.remove('active'));
+      const activeBtn = document.querySelector(`.pm-seg-btn[data-mode="${mode}"]`);
+      if(activeBtn) activeBtn.classList.add('active');
+
+      // Move animated slider
+      const slider = document.getElementById('pm_slider');
+      if(slider) {
+        if(mode === 'auto') slider.style.transform = 'translateX(0%)';
+        if(mode === 'fixed') slider.style.transform = 'translateX(100%)';
+        if(mode === 'rotate') slider.style.transform = 'translateX(200%)';
+      }
+
+      // Show corresponding detail box
+      document.getElementById('pm_auto_details').style.display = (mode === 'auto') ? 'block' : 'none';
+      document.getElementById('pm_fixed_details').style.display = (mode === 'fixed') ? 'block' : 'none';
+      document.getElementById('pm_rotate_details').style.display = (mode === 'rotate') ? 'block' : 'none';
 
       updatePageModeSummary();
       checkDirty();
     }
 
-    function getPageMode(){
-      if($('pm_rotate').checked) return 'rotate';
-      if($('pm_fixed').checked) return 'fixed';
-      return 'auto';
+    function getPageMode() {
+      return _currentPageMode;
     }
 
     /* ---- Filter Colors ---- */
