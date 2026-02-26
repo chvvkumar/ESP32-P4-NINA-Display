@@ -235,7 +235,7 @@ void app_main(void)
     nina_dashboard_set_page_change_cb(on_page_changed);
 
     xTaskCreate(input_task,       "input_task", 4096,  NULL, 5, NULL);
-    xTaskCreate(data_update_task, "data_task",  20480, NULL, 5, NULL);
+    xTaskCreate(data_update_task, "data_task",  12288, NULL, 5, NULL);
 
     /* Mark this firmware as valid so the bootloader won't roll back.
      * This must come after successful init — if we crash before here,

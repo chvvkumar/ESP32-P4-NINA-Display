@@ -36,6 +36,7 @@ if ($PSBoundParameters.Count -eq 0) {
         Write-Host ""
     }
 
+    $OTA = $true  # Default to OTA enabled in interactive mode
     $menuLoop = $true
     while ($menuLoop) {
         Show-Menu -IdfPath $IdfPath -FullClean $FullClean -OTA $OTA -DeviceIP $DeviceIP
@@ -199,7 +200,7 @@ if ($OTA) {
         $null = Invoke-WebRequest -Uri $OtaUrl -Method Post `
             -Body $fileBytes `
             -ContentType "application/octet-stream" `
-            -TimeoutSec 120
+            -TimeoutSec 600
         Write-Host "OTA update successful! Device is rebooting." -ForegroundColor Green
     } catch {
         Write-Error "OTA upload failed: $_"

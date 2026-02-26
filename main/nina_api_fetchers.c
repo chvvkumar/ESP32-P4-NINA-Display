@@ -127,6 +127,28 @@ void fetch_filter_robust_ex(const char *base_url, nina_client_t *data, bool fetc
 }
 
 /**
+ * @brief Lightweight image count check via /image-history?count=true (~50 bytes).
+ * Returns the number of images, or -1 on error.
+ * Used as a change-detection gate to skip the full /image-history fetch
+ * when the image count hasn't changed (eliminates ~95% of redundant fetches).
+ */
+int fetch_image_count(const char *base_url) {
+    char url[256];
+    snprintf(url, sizeof(url), "%simage-history?count=true", base_url);
+
+    cJSON *json = http_get_json(url);
+    if (!json) return -1;
+
+    int count = -1;
+    cJSON *response = cJSON_GetObjectItem(json, "Response");
+    if (response && cJSON_IsNumber(response)) {
+        count = response->valueint;
+    }
+    cJSON_Delete(json);
+    return count;
+}
+
+/**
  * @brief Fetch image history - ALWAYS WORKS
  * Provides: TargetName, ExposureTime, Filter, HFR, Stars from last completed image
  */
@@ -1282,4 +1304,41 @@ void fetch_hfr_history(const char *base_url, graph_hfr_data_t *out, int max_poin
 
     ESP_LOGI(TAG, "HFR history: %d images", out->count);
     cJSON_Delete(json);
+}
+
+/**
+ * @brief Build HFR graph data from the local ring buffer (no HTTP fetch).
+ * Extracts the most recent entries from the per-instance HFR ring buffer
+ * populated by IMAGE-SAVE WebSocket events. Returns the data in oldest-first
+ * order matching the format expected by the graph overlay.
+ */
+void build_hfr_from_ring(const nina_client_t *client, graph_hfr_data_t *out, int max_points) {
+    if (!out || !client || !client->hfr_ring.hfr) return;
+    memset(out, 0, sizeof(graph_hfr_data_t));
+
+    int total = client->hfr_ring.count;
+    if (total <= 0) return;
+
+    /* Number of valid entries in the ring */
+    int available = (total < HFR_RING_SIZE) ? total : HFR_RING_SIZE;
+    int use = (available < max_points) ? available : max_points;
+    if (use > GRAPH_MAX_POINTS) use = GRAPH_MAX_POINTS;
+
+    /* Read oldest-first: start reading 'use' entries back from write_idx */
+    int read_start;
+    if (total < HFR_RING_SIZE) {
+        /* Ring hasn't wrapped yet — data starts at index 0 */
+        read_start = (available > use) ? (available - use) : 0;
+    } else {
+        /* Ring has wrapped — oldest valid entry is at write_idx */
+        read_start = (client->hfr_ring.write_idx + (available - use)) % HFR_RING_SIZE;
+    }
+
+    for (int i = 0; i < use; i++) {
+        int ring_idx = (read_start + i) % HFR_RING_SIZE;
+        out->hfr[i]   = client->hfr_ring.hfr[ring_idx];
+        out->stars[i]  = client->hfr_ring.stars[ring_idx];
+    }
+    out->count = use;
+    ESP_LOGI(TAG, "HFR from ring buffer: %d points (total captured: %d)", use, total);
 }

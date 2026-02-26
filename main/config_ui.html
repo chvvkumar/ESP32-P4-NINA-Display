@@ -619,6 +619,20 @@
         </div>
       </div>
       <div class="card">
+        <div class="card-title">Screen Sleep</div>
+        <div class="toggle-row">
+          <span class="toggle-label">Turn off screen when idle</span>
+          <label class="toggle"><input type="checkbox" id="screen_sleep_enabled"><span class="toggle-track"></span></label>
+        </div>
+        <div id="screen_sleep_details" style="margin-top:12px">
+          <div class="field">
+            <label class="field-label">Timeout (seconds)</label>
+            <input type="number" class="input" id="screen_sleep_timeout" min="10" max="3600" value="60">
+            <div class="field-hint">Seconds with no NINA connections before turning off the display. Touch or reconnection wakes it.</div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
         <div class="card-title">Debug</div>
         <div class="toggle-row">
           <span class="toggle-label">Enable Debug Mode</span>
@@ -1127,7 +1141,9 @@
         debug_mode:!!$('debug_mode').checked,
         instance_enabled_1:!!$('instance_enabled_0').checked,
         instance_enabled_2:!!$('instance_enabled_1').checked,
-        instance_enabled_3:!!$('instance_enabled_2').checked
+        instance_enabled_3:!!$('instance_enabled_2').checked,
+        screen_sleep_enabled:!!$('screen_sleep_enabled').checked,
+        screen_sleep_timeout_s:parseInt($('screen_sleep_timeout').value)||60
       };
 
       const ssid=$('ssid').value.trim();
@@ -1173,6 +1189,8 @@
       $('instance_enabled_0').checked=data.instance_enabled_1!==false;
       $('instance_enabled_1').checked=data.instance_enabled_2!==false;
       $('instance_enabled_2').checked=data.instance_enabled_3!==false;
+      $('screen_sleep_enabled').checked=!!data.screen_sleep_enabled;
+      $('screen_sleep_timeout').value=data.screen_sleep_timeout_s||60;
 
       for(let i=0;i<3;i++){
         const key='filter_colors_'+(i+1);

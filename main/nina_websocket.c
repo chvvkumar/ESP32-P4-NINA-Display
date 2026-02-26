@@ -220,6 +220,16 @@ static void handle_websocket_message(int index, const char *payload, int len) {
                 data->new_image_available = true;
                 data->ui_refresh_needed = true;
                 data->sequence_poll_needed = true;
+
+                // Append to local HFR ring buffer (used for graph auto-refresh)
+                if (data->hfr_ring.hfr && new_hfr > 0) {
+                    int idx = data->hfr_ring.write_idx;
+                    data->hfr_ring.hfr[idx]   = new_hfr;
+                    data->hfr_ring.stars[idx]  = new_stars;
+                    data->hfr_ring.write_idx   = (idx + 1) % HFR_RING_SIZE;
+                    data->hfr_ring.count++;
+                }
+
                 nina_client_unlock(data);
             } else {
                 ESP_LOGW(TAG, "WS[%d]: Could not acquire mutex for IMAGE-SAVE", index);
@@ -463,6 +473,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
     else if (strcmp(evt->valuestring, "PROFILE-CHANGED") == 0) {
         ESP_LOGI(TAG, "WS[%d]: Profile changed, will re-fetch static data", index);
         if (nina_client_lock(data, 50)) {
+            data->profile_refresh_needed = true;
             data->sequence_poll_needed = true;
             data->ui_refresh_needed = true;
             nina_client_unlock(data);

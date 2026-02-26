@@ -47,37 +47,81 @@ esp_err_t factory_reset_post_handler(httpd_req_t *req)
 
 static lv_obj_t *ota_overlay = NULL;
 static lv_obj_t *ota_progress_label = NULL;
+static lv_obj_t *ota_bar = NULL;
+static lv_obj_t *ota_bar_glow = NULL;
+
+/* Accent color for the progress bar */
+#define OTA_ACCENT       0x00D4FF   /* Cyan */
+#define OTA_ACCENT_DIM   0x005566   /* Dimmed cyan for track */
+#define OTA_GLOW_OPA     LV_OPA_40
 
 static void ota_show_overlay(const char *message) {
     if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+        /* ── Fullscreen black overlay ── */
         ota_overlay = lv_obj_create(lv_scr_act());
         lv_obj_remove_style_all(ota_overlay);
         lv_obj_set_size(ota_overlay, SCREEN_SIZE, SCREEN_SIZE);
         lv_obj_set_style_bg_color(ota_overlay, lv_color_hex(0x000000), 0);
         lv_obj_set_style_bg_opa(ota_overlay, LV_OPA_COVER, 0);
         lv_obj_center(ota_overlay);
-        lv_obj_set_flex_flow(ota_overlay, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_flex_align(ota_overlay, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_row(ota_overlay, 20, 0);
 
+        /* ── Title — upper third ── */
         lv_obj_t *title = lv_label_create(ota_overlay);
         lv_label_set_text(title, message);
         lv_obj_set_style_text_color(title, lv_color_hex(0xFFFFFF), 0);
         lv_obj_set_style_text_font(title, &lv_font_montserrat_36, 0);
         lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_width(title, LV_PCT(90));
+        lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 200);
 
+        /* ── Large percentage — center ── */
         ota_progress_label = lv_label_create(ota_overlay);
         lv_label_set_text(ota_progress_label, "0%");
-        lv_obj_set_style_text_color(ota_progress_label, lv_color_hex(0x888888), 0);
-        lv_obj_set_style_text_font(ota_progress_label, &lv_font_montserrat_28, 0);
+        lv_obj_set_style_text_color(ota_progress_label, lv_color_hex(OTA_ACCENT), 0);
+        lv_obj_set_style_text_font(ota_progress_label, &lv_font_montserrat_48, 0);
         lv_obj_set_style_text_align(ota_progress_label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_align(ota_progress_label, LV_ALIGN_CENTER, 0, 20);
 
+        /* ── "Do not power off" hint ── */
         lv_obj_t *hint = lv_label_create(ota_overlay);
         lv_label_set_text(hint, "Do not power off");
         lv_obj_set_style_text_color(hint, lv_color_hex(0x555555), 0);
         lv_obj_set_style_text_font(hint, &lv_font_montserrat_20, 0);
         lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_align(hint, LV_ALIGN_CENTER, 0, 70);
+
+        /* ── Glow layer behind progress bar (wider/taller, blurred look) ── */
+        ota_bar_glow = lv_bar_create(ota_overlay);
+        lv_obj_remove_style_all(ota_bar_glow);
+        lv_obj_set_size(ota_bar_glow, 580, 24);
+        lv_obj_align(ota_bar_glow, LV_ALIGN_BOTTOM_MID, 0, -90);
+        lv_bar_set_range(ota_bar_glow, 0, 100);
+        lv_bar_set_value(ota_bar_glow, 0, LV_ANIM_OFF);
+        /* Track: invisible */
+        lv_obj_set_style_bg_opa(ota_bar_glow, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_radius(ota_bar_glow, 12, LV_PART_MAIN);
+        /* Indicator: soft glow */
+        lv_obj_set_style_bg_color(ota_bar_glow, lv_color_hex(OTA_ACCENT), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_opa(ota_bar_glow, OTA_GLOW_OPA, LV_PART_INDICATOR);
+        lv_obj_set_style_radius(ota_bar_glow, 12, LV_PART_INDICATOR);
+
+        /* ── Main progress bar ── */
+        ota_bar = lv_bar_create(ota_overlay);
+        lv_obj_remove_style_all(ota_bar);
+        lv_obj_set_size(ota_bar, 560, 12);
+        lv_obj_align(ota_bar, LV_ALIGN_BOTTOM_MID, 0, -96);
+        lv_bar_set_range(ota_bar, 0, 100);
+        lv_bar_set_value(ota_bar, 0, LV_ANIM_OFF);
+        /* Track: dark rounded pill */
+        lv_obj_set_style_bg_color(ota_bar, lv_color_hex(OTA_ACCENT_DIM), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(ota_bar, LV_OPA_30, LV_PART_MAIN);
+        lv_obj_set_style_radius(ota_bar, 6, LV_PART_MAIN);
+        /* Indicator: bright accent with gradient */
+        lv_obj_set_style_bg_color(ota_bar, lv_color_hex(OTA_ACCENT), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_opa(ota_bar, LV_OPA_COVER, LV_PART_INDICATOR);
+        lv_obj_set_style_bg_grad_color(ota_bar, lv_color_hex(0x0088FF), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_grad_dir(ota_bar, LV_GRAD_DIR_HOR, LV_PART_INDICATOR);
+        lv_obj_set_style_radius(ota_bar, 6, LV_PART_INDICATOR);
 
         bsp_display_unlock();
     }
@@ -90,6 +134,12 @@ static void ota_update_progress(int percent) {
             snprintf(buf, sizeof(buf), "%d%%", percent);
             lv_label_set_text(ota_progress_label, buf);
         }
+        if (ota_bar) {
+            lv_bar_set_value(ota_bar, percent, LV_ANIM_ON);
+        }
+        if (ota_bar_glow) {
+            lv_bar_set_value(ota_bar_glow, percent, LV_ANIM_ON);
+        }
         bsp_display_unlock();
     }
 }
@@ -100,6 +150,8 @@ static void ota_remove_overlay(void) {
             lv_obj_delete(ota_overlay);
             ota_overlay = NULL;
             ota_progress_label = NULL;
+            ota_bar = NULL;
+            ota_bar_glow = NULL;
         }
         bsp_display_unlock();
     }
