@@ -9,6 +9,15 @@ on:
       - 'images/**'
       - 'LICENSE'
       - '.gitignore'
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main, snd]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'images/**'
+      - 'LICENSE'
+      - '.gitignore'
 
 env:
   IDF_VERSION: v5.5.2
@@ -17,11 +26,13 @@ env:
   CCACHE_MAXSIZE: 1G
   CCACHE_COMPRESSLEVEL: 6
 
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   build:
     runs-on: self-hosted
-    permissions:
-      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -420,3 +431,213 @@ jobs:
           git add version.txt
           git commit -m "chore: bump version to $NEW_VERSION [skip ci]"
           git push origin main
+
+  pr-commit-summary:
+    name: Generate PR Summary
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Collect commit information
+        id: collect
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Fetching commits for PR #${{ github.event.pull_request.number }}"
+
+          # Get detailed commit information
+          gh pr view ${{ github.event.pull_request.number }} --json commits \
+            --jq '.commits[] | "**Commit \(.oid[0:7])** by \(.authors[0].name // "Unknown")\nMessage: \(.messageHeadline)\n\(.messageBody // "")\n---"' \
+            > commits.txt
+
+          # Get changed files with stats
+          gh pr view ${{ github.event.pull_request.number }} --json files \
+            --jq '.files[] | "- `\(.path)` (+\(.additions)/-\(.deletions))"' \
+            > files.txt
+
+          # Get changed files excluding GitHub workflows (for AI summary)
+          gh pr view ${{ github.event.pull_request.number }} --json files \
+            --jq '.files[] | select(.path | startswith(".github/workflows/") | not) | "- `\(.path)` (+\(.additions)/-\(.deletions))"' \
+            > files_for_ai.txt
+
+          # Check if changes are only in GitHub Actions workflows
+          NON_WORKFLOW_CHANGES=$(gh pr view ${{ github.event.pull_request.number }} --json files \
+            --jq '[.files[] | select(.path | startswith(".github/workflows/") | not)] | length')
+
+          if [ "$NON_WORKFLOW_CHANGES" -eq 0 ]; then
+            echo "skip_summary=true" >> $GITHUB_OUTPUT
+            echo "Skipping AI summary - changes are only in GitHub Actions workflows"
+          else
+            echo "skip_summary=false" >> $GITHUB_OUTPUT
+            echo "Will generate AI summary for code changes (excluding workflow files)"
+          fi
+
+          # Get commit count
+          COMMIT_COUNT=$(gh pr view ${{ github.event.pull_request.number }} --json commits --jq '.commits | length')
+          echo "commit_count=$COMMIT_COUNT" >> $GITHUB_OUTPUT
+
+          echo "Collected $COMMIT_COUNT commits"
+
+      - name: Generate summary with Google Gemini
+        id: summarize
+        if: steps.collect.outputs.skip_summary == 'false'
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: |
+          set +e  # Don't exit immediately on error
+
+          # Read collected data
+          COMMITS=$(cat commits.txt)
+          FILES=$(cat files_for_ai.txt)
+
+          # Escape special characters for JSON
+          COMMITS_ESCAPED=$(echo "$COMMITS" | jq -Rs .)
+          FILES_ESCAPED=$(echo "$FILES" | jq -Rs .)
+          PR_TITLE=$(echo '${{ github.event.pull_request.title }}' | jq -Rs .)
+          PR_BODY=$(echo '${{ github.event.pull_request.body }}' | jq -Rs .)
+
+          # Build the prompt
+          read -r -d '' PROMPT << 'EOF'
+          You are a code review assistant. Analyze the following pull request and provide a categorized summary of changes.
+
+          **IMPORTANT:** Focus ONLY on the actual code changes listed below. Do NOT mention or summarize any GitHub Actions workflow files (.github/workflows/) as those have been filtered out.
+
+          ## Pull Request Details
+          **Title:** %PR_TITLE%
+          **Description:** %PR_BODY%
+
+          ## Commits in this PR
+          %COMMITS%
+
+          ## Files Changed (excluding workflow files)
+          %FILES%
+
+          ## Your Task
+          Provide ONLY the following section in clean markdown format:
+
+          ### Changes by Category
+          Group the changes into relevant categories such as:
+          - **Features**: New functionality added
+          - **Bug Fixes**: Issues resolved
+          - **Refactoring**: Code improvements without behavior changes
+          - **Documentation**: README, comments, docs updates
+          - **Tests**: Test additions or modifications
+          - **Dependencies**: Package or dependency changes
+          - **Configuration**: Config file changes
+
+          Only include categories that apply. Use bullet points for each change.
+          Do NOT include any other sections, headers, or conclusions.
+          EOF
+
+          # Replace placeholders (remove jq quotes)
+          PROMPT="${PROMPT//%PR_TITLE%/$(echo $PR_TITLE | jq -r .)}"
+          PROMPT="${PROMPT//%PR_BODY%/$(echo $PR_BODY | jq -r .)}"
+          PROMPT="${PROMPT//%COMMITS%/$(echo $COMMITS_ESCAPED | jq -r .)}"
+          PROMPT="${PROMPT//%FILES%/$(echo $FILES_ESCAPED | jq -r .)}"
+
+          # Make API request to Google Gemini
+          RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent" \
+            -H "Content-Type: application/json" \
+            -H "X-goog-api-key: $GOOGLE_API_KEY" \
+            -d "$(jq -n \
+              --arg prompt "$PROMPT" \
+              '{
+                contents: [
+                  {
+                    parts: [
+                      {
+                        text: $prompt
+                      }
+                    ]
+                  }
+                ],
+                generationConfig: {
+                  temperature: 0.3,
+                  maxOutputTokens: 8192
+                }
+              }')")
+
+          # Check for errors
+          if [ -z "$RESPONSE" ]; then
+            echo "Error: Empty response from API"
+            exit 1
+          fi
+
+          if echo "$RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
+            echo "Error from API:"
+            echo "$RESPONSE" | jq '.'
+            exit 1
+          fi
+
+          if ! echo "$RESPONSE" | jq -e '.candidates[0].content.parts[0].text' > /dev/null 2>&1; then
+            echo "Invalid response structure"
+            exit 1
+          fi
+
+          # Extract summary
+          echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text' > summary.md
+
+      - name: Update PR title and body with summary
+        if: steps.collect.outputs.skip_summary == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            // Read the generated summary
+            const summary = fs.readFileSync('summary.md', 'utf8');
+            const commitCount = '${{ steps.collect.outputs.commit_count }}';
+            const timestamp = new Date().toISOString();
+
+            // Get current PR details
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+
+            // Create PR body with only Changes by Category section
+            const newBody = `${summary}
+
+            ---
+            <sub>Analyzed **${commitCount}** commit(s) | Updated: ${timestamp} | Generated by GitHub Actions</sub>`;
+
+            // Generate title with emoji prefix (replace existing)
+            const titleLower = pr.title.toLowerCase();
+            let emoji = '✨'; // Default: sparkles for feature
+
+            if (titleLower.includes('fix') || titleLower.includes('bug')) {
+              emoji = '🐛';
+            } else if (titleLower.includes('doc')) {
+              emoji = '📚';
+            } else if (titleLower.includes('refactor') || titleLower.includes('cleanup')) {
+              emoji = '♻️';
+            } else if (titleLower.includes('test')) {
+              emoji = '✅';
+            } else if (titleLower.includes('config') || titleLower.includes('setting')) {
+              emoji = '⚙️';
+            } else if (titleLower.includes('security')) {
+              emoji = '🔒';
+            } else if (titleLower.includes('performance') || titleLower.includes('optim')) {
+              emoji = '⚡';
+            }
+
+            // Remove any existing emoji prefix and add new one
+            const cleanTitle = pr.title.replace(/^[\u{1F300}-\u{1F9FF}]\s*/u, '');
+            const newTitle = `${emoji} ${cleanTitle}`;
+
+            // Update the PR
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              title: newTitle,
+              body: newBody
+            });
+
+            console.log(`Updated PR #${context.issue.number}`);
+            console.log(`New title: ${newTitle}`);
