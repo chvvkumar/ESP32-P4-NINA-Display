@@ -11,6 +11,7 @@
 
 void fetch_camera_info_robust(const char *base_url, nina_client_t *data);
 void fetch_filter_robust_ex(const char *base_url, nina_client_t *data, bool fetch_available);
+int  fetch_image_count(const char *base_url);
 void fetch_image_history_robust(const char *base_url, nina_client_t *data);
 void fetch_profile_robust(const char *base_url, nina_client_t *data);
 void fetch_guider_robust(const char *base_url, nina_client_t *data);
@@ -42,3 +43,4 @@ void fetch_sequence_details(const char *base_url, sequence_detail_data_t *out);
 #include "graph_data_types.h"
 void fetch_guider_graph(const char *base_url, graph_rms_data_t *out, int max_points);
 void fetch_hfr_history(const char *base_url, graph_hfr_data_t *out, int max_points);
+void build_hfr_from_ring(const nina_client_t *client, graph_hfr_data_t *out, int max_points);

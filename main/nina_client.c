@@ -320,6 +320,7 @@ void nina_poll_state_init(nina_poll_state_t *state) {
         esp_http_client_cleanup((esp_http_client_handle_t)state->http_client);
     }
     memset(state, 0, sizeof(nina_poll_state_t));
+    state->cached_image_count = -1;  // Force initial full fetch
 }
 
 void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state_t *state, int instance) {
@@ -377,11 +378,21 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
 
     if (!data->connected) {
         state->static_fetched = false;
+        state->cached_image_count = -1;
         nina_connection_set_static_data_ready(instance, false);
         state->http_client = (void *)s_reuse_client;
         s_reuse_client = NULL;
         s_poll_mode = false;
         return;
+    }
+
+    // --- Handle PROFILE-CHANGED: invalidate cached static data ---
+    if (data->profile_refresh_needed) {
+        data->profile_refresh_needed = false;
+        state->static_fetched = false;
+        state->cached_image_count = -1;
+        nina_connection_set_static_data_ready(instance, false);
+        ESP_LOGI(TAG, "Profile changed — re-fetching static data for instance %d", instance);
     }
 
     // --- ONCE: Static data (profile, image history; filters/switch/safety handled by bundle) ---
@@ -439,9 +450,15 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
         perf_timer_stop(&g_perf.poll_guider);
 
         if (!data->websocket_connected) {
-            perf_timer_start(&g_perf.poll_image_history);
-            fetch_image_history_robust(base_url, data);
-            perf_timer_stop(&g_perf.poll_image_history);
+            /* Image count gate: only fetch full image-history if the count changed.
+             * Saves ~95% of fetches during long exposures (30-600s between changes). */
+            int img_count = fetch_image_count(base_url);
+            if (img_count >= 0 && img_count != state->cached_image_count) {
+                state->cached_image_count = img_count;
+                perf_timer_start(&g_perf.poll_image_history);
+                fetch_image_history_robust(base_url, data);
+                perf_timer_stop(&g_perf.poll_image_history);
+            }
             if (data->telescope_name[0] != '\0') {
                 snprintf(state->cached_telescope, sizeof(state->cached_telescope), "%s", data->telescope_name);
             }
@@ -472,9 +489,15 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
     } else {
         // --- BUNDLED: Only image history needs separate fetch (not in bundle) ---
         if (!data->websocket_connected) {
-            perf_timer_start(&g_perf.poll_image_history);
-            fetch_image_history_robust(base_url, data);
-            perf_timer_stop(&g_perf.poll_image_history);
+            /* Image count gate: lightweight count check (~50 bytes) before
+             * full image-history fetch (~400-800 bytes). */
+            int img_count = fetch_image_count(base_url);
+            if (img_count >= 0 && img_count != state->cached_image_count) {
+                state->cached_image_count = img_count;
+                perf_timer_start(&g_perf.poll_image_history);
+                fetch_image_history_robust(base_url, data);
+                perf_timer_stop(&g_perf.poll_image_history);
+            }
         }
         if (data->telescope_name[0] != '\0') {
             snprintf(state->cached_telescope, sizeof(state->cached_telescope), "%s", data->telescope_name);
@@ -540,19 +563,19 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
         data->filter_count = 0;
     }
 
-    // --- Equipment fetch (bundled or individual camera heartbeat) ---
-    if (!state->bundle_not_available) {
-        // Bundled: all equipment in one request (skip guider RMS for background)
-        int bundle_result = fetch_equipment_info_bundled(base_url, data, !state->static_fetched);
+    // --- Equipment fetch ---
+    // Use the full bundle only on first connect (to seed static data: filters, switch, etc.).
+    // Subsequent background polls use camera-only heartbeat (~1-2 KB vs ~10 KB bundle),
+    // reducing network traffic by ~80% for background instances.
+    if (!state->static_fetched && !state->bundle_not_available) {
+        int bundle_result = fetch_equipment_info_bundled(base_url, data, true);
         if (bundle_result == -2) {
             ESP_LOGW(TAG, "Background: /equipment/info not available, falling back");
             state->bundle_not_available = true;
-            // Fall through to legacy camera heartbeat
+            fetch_camera_info_robust(base_url, data);
         }
-    }
-
-    if (state->bundle_not_available) {
-        // Legacy: camera-only heartbeat
+    } else {
+        // Camera-only heartbeat for connection status
         fetch_camera_info_robust(base_url, data);
     }
 
@@ -561,11 +584,21 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
 
     if (!data->connected) {
         state->static_fetched = false;
+        state->cached_image_count = -1;
         nina_connection_set_static_data_ready(instance, false);
         state->http_client = (void *)s_reuse_client;
         s_reuse_client = NULL;
         s_poll_mode = false;
         return;
+    }
+
+    // --- Handle PROFILE-CHANGED: invalidate cached static data ---
+    if (data->profile_refresh_needed) {
+        data->profile_refresh_needed = false;
+        state->static_fetched = false;
+        state->cached_image_count = -1;
+        nina_connection_set_static_data_ready(instance, false);
+        ESP_LOGI(TAG, "Profile changed — re-fetching static data for background instance %d", instance);
     }
 
     // --- ONCE: Static data (profile, image history; filters/switch/safety from bundle) ---

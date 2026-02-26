@@ -40,6 +40,7 @@ volatile bool page_changed = false;
 volatile bool ota_in_progress = false;
 TaskHandle_t data_task_handle = NULL;
 static int64_t last_graph_fetch_ms = 0;  /* Timestamp of last graph data fetch */
+static bool hfr_graph_seeded = false;   /* True after initial API fetch for current HFR graph session */
 
 /**
  * @brief Swipe callback from the dashboard — signals the data task to re-tune polling.
@@ -95,8 +96,19 @@ void input_task(void *arg) {
 
 void data_update_task(void *arg) {
     data_task_handle = xTaskGetCurrentTaskHandle();
-    nina_client_t instances[MAX_NINA_INSTANCES] = {0};
-    nina_poll_state_t poll_states[MAX_NINA_INSTANCES] = {0};
+
+    /* Allocate large per-instance structs in PSRAM instead of the task stack
+     * to reduce internal heap usage (~7.6 KB saved, allowing smaller stack). */
+    nina_client_t *instances = heap_caps_calloc(MAX_NINA_INSTANCES, sizeof(nina_client_t), MALLOC_CAP_SPIRAM);
+    nina_poll_state_t *poll_states = heap_caps_calloc(MAX_NINA_INSTANCES, sizeof(nina_poll_state_t), MALLOC_CAP_SPIRAM);
+    if (!instances || !poll_states) {
+        ESP_LOGE(TAG, "Failed to allocate instance data from PSRAM");
+        if (instances) heap_caps_free(instances);
+        if (poll_states) heap_caps_free(poll_states);
+        vTaskDelete(NULL);
+        return;
+    }
+
     bool filters_synced[MAX_NINA_INSTANCES] = {false};
     int64_t last_heartbeat_ms[MAX_NINA_INSTANCES] = {0};
     int64_t last_rotate_ms = 0;
@@ -104,6 +116,9 @@ void data_update_task(void *arg) {
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         nina_poll_state_init(&poll_states[i]);
         nina_client_init_mutex(&instances[i]);
+        /* Allocate per-instance HFR ring buffer in PSRAM (~4 KB per instance) */
+        instances[i].hfr_ring.hfr   = heap_caps_calloc(HFR_RING_SIZE, sizeof(float), MALLOC_CAP_SPIRAM);
+        instances[i].hfr_ring.stars = heap_caps_calloc(HFR_RING_SIZE, sizeof(int),   MALLOC_CAP_SPIRAM);
     }
 
     /* Allocate graph data in PSRAM to avoid ~10 KB stack pressure */
@@ -509,6 +524,11 @@ void data_update_task(void *arg) {
                 }
             }
 
+            /* Reset HFR graph seed flag when graph is hidden */
+            if (!nina_graph_visible()) {
+                hfr_graph_seeded = false;
+            }
+
             /* Auto-refresh graph at defined interval while visible */
             if (nina_graph_visible() && !nina_graph_requested()) {
                 int64_t now_graph = esp_timer_get_time() / 1000;
@@ -535,7 +555,16 @@ void data_update_task(void *arg) {
                         }
                     } else {
                         memset(hfr_data, 0, sizeof(*hfr_data));
-                        fetch_hfr_history(graph_url, hfr_data, gpoints);
+                        /* HFR graph: initial open fetches from API to get historical data.
+                         * Auto-refreshes use the local ring buffer (populated by WS events),
+                         * eliminating the expensive /image-history?all=true fetch (50-400 KB). */
+                        if (!hfr_graph_seeded) {
+                            fetch_hfr_history(graph_url, hfr_data, gpoints);
+                            hfr_graph_seeded = true;
+                        } else if (nina_client_lock(&instances[active_nina_idx], 100)) {
+                            build_hfr_from_ring(&instances[active_nina_idx], hfr_data, gpoints);
+                            nina_client_unlock(&instances[active_nina_idx]);
+                        }
                         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                             nina_graph_set_hfr_data(hfr_data);
                             bsp_display_unlock();
@@ -618,7 +647,7 @@ void data_update_task(void *arg) {
                     } else if (itype == INFO_OVERLAY_FILTER) {
                         filter_detail_data_t filt_data = {0};
                         if (nina_client_lock(&instances[active_nina_idx], 100)) {
-                            strncpy(filt_data.current_filter, instances[active_nina_idx].current_filter, sizeof(filt_data.current_filter) - 1);
+                            snprintf(filt_data.current_filter, sizeof(filt_data.current_filter), "%s", instances[active_nina_idx].current_filter);
                             filt_data.filter_count = instances[active_nina_idx].filter_count;
                             for (int f = 0; f < filt_data.filter_count && f < 10; f++) {
                                 strncpy(filt_data.filters[f].name, instances[active_nina_idx].filters[f].name, sizeof(filt_data.filters[f].name) - 1);

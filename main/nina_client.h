@@ -8,6 +8,7 @@
 #include "ui/info_overlay_types.h"
 
 #define MAX_FILTERS 10
+#define HFR_RING_SIZE 500  // Matches GRAPH_MAX_POINTS for HFR graph overlay
 
 // Filter information
 typedef struct {
@@ -106,6 +107,10 @@ typedef struct {
     // sequence poll on next cycle.
     volatile bool sequence_poll_needed;
 
+    // Set by PROFILE-CHANGED WebSocket event to force re-fetch of cached
+    // static data (profile name, filters, telescope) on the next poll cycle.
+    volatile bool profile_refresh_needed;
+
     // Timestamp (ms from esp_timer_get_time/1000) of last successful poll.
     // Used by the UI to display a stale-data indicator.  0 = never polled.
     int64_t last_successful_poll_ms;
@@ -115,6 +120,16 @@ typedef struct {
 
     // Autofocus V-curve data (captured from WebSocket events)
     autofocus_data_t autofocus;
+
+    // Local HFR ring buffer — populated by IMAGE-SAVE WebSocket events.
+    // Used to serve HFR graph auto-refreshes without re-fetching /image-history?all=true.
+    // Allocated in PSRAM by the data task (pointer set after allocation).
+    struct {
+        float *hfr;       // HFR values [HFR_RING_SIZE], PSRAM-allocated
+        int   *stars;     // Star counts [HFR_RING_SIZE], PSRAM-allocated
+        int    count;     // Total entries written (may exceed HFR_RING_SIZE)
+        int    write_idx; // Next write position (wraps at HFR_RING_SIZE)
+    } hfr_ring;
 
     // Mutex for synchronizing access between WebSocket event handler and data task.
     // Must be created with nina_client_init_mutex() before use.
@@ -150,6 +165,10 @@ typedef struct {
 
     // Persistent HTTP client handle for keep-alive reuse (esp_http_client_handle_t)
     void *http_client;
+
+    // Cached image count for change-detection gating of /image-history.
+    // -1 = not yet fetched (forces initial full fetch).
+    int cached_image_count;
 
     // Set true if /equipment/info returned 404 (old ninaAPI); disables bundled fetch
     bool bundle_not_available;
