@@ -72,6 +72,8 @@ esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddBoolToObject(root, "instance_enabled_1", cfg->instance_enabled[0]);
     cJSON_AddBoolToObject(root, "instance_enabled_2", cfg->instance_enabled[1]);
     cJSON_AddBoolToObject(root, "instance_enabled_3", cfg->instance_enabled[2]);
+    cJSON_AddBoolToObject(root, "screen_sleep_enabled", cfg->screen_sleep_enabled);
+    cJSON_AddNumberToObject(root, "screen_sleep_timeout_s", cfg->screen_sleep_timeout_s);
 
     const char *json_str = cJSON_PrintUnformatted(root);
     if (json_str == NULL) {
@@ -320,6 +322,15 @@ esp_err_t config_post_handler(httpd_req_t *req)
     JSON_TO_BOOL(root, "instance_enabled_1", cfg->instance_enabled[0]);
     JSON_TO_BOOL(root, "instance_enabled_2", cfg->instance_enabled[1]);
     JSON_TO_BOOL(root, "instance_enabled_3", cfg->instance_enabled[2]);
+
+    JSON_TO_BOOL(root, "screen_sleep_enabled", cfg->screen_sleep_enabled);
+    cJSON *sst_item = cJSON_GetObjectItem(root, "screen_sleep_timeout_s");
+    if (cJSON_IsNumber(sst_item)) {
+        int v = sst_item->valueint;
+        if (v < 10) v = 10;
+        if (v > 3600) v = 3600;
+        cfg->screen_sleep_timeout_s = (uint16_t)v;
+    }
 
     app_config_save(cfg);
     free(cfg);

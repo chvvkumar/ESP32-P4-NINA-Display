@@ -10,6 +10,7 @@
 #include "cJSON.h"
 #include "bsp/esp-bsp.h"
 #include "bsp/display.h"
+#include "tasks.h"
 #include "ui/nina_dashboard.h"
 #include <string.h>
 #include <stdio.h>
@@ -226,8 +227,15 @@ static void handle_screen_command(const char *data, int len)
         if (cfg->brightness == 0) cfg->brightness = 50;
     }
 
-    bsp_display_brightness_set(cfg->brightness);
-    ESP_LOGI(TAG, "Screen brightness set to %d%% via MQTT", cfg->brightness);
+    /* Don't physically change backlight while screen-sleep is active —
+     * the sleep logic in data_update_task owns the backlight during sleep.
+     * The config value is still saved so the correct brightness is restored on wake. */
+    if (!screen_asleep) {
+        bsp_display_brightness_set(cfg->brightness);
+        ESP_LOGI(TAG, "Screen brightness set to %d%% via MQTT", cfg->brightness);
+    } else {
+        ESP_LOGI(TAG, "Screen brightness config updated to %d%% via MQTT (display sleeping)", cfg->brightness);
+    }
 
     cJSON_Delete(root);
     mqtt_ha_publish_state();

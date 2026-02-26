@@ -21,6 +21,7 @@
 #include "ui_styles.h"
 #include "app_config.h"
 #include "themes.h"
+#include "tasks.h"
 #include "lvgl.h"
 #include <stdio.h>
 #include <string.h>
@@ -603,6 +604,12 @@ void nina_dashboard_set_page_change_cb(nina_page_change_cb_t cb) {
     page_change_cb = cb;
 }
 
+/* Any touch on the screen — sets flag to wake from screen sleep */
+static void screen_press_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    screen_touch_wake = true;
+}
+
 /* Swipe left/right to change pages (cycles through NINA + sysinfo) */
 static void gesture_event_cb(lv_event_t *e) {
     if (total_page_count <= 1) return;
@@ -739,6 +746,7 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
 
     /* Always enable swipe gestures */
     lv_obj_add_event_cb(scr_dashboard, gesture_event_cb, LV_EVENT_GESTURE, NULL);
+    lv_obj_add_event_cb(scr_dashboard, screen_press_cb, LV_EVENT_PRESSED, NULL);
     lv_obj_clear_flag(scr_dashboard, LV_OBJ_FLAG_GESTURE_BUBBLE);
 
     // Graph overlay (on top of pages, below thumbnail)

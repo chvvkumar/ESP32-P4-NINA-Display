@@ -300,6 +300,38 @@ typedef struct {
     bool     debug_mode;
 } app_config_v7_t;
 
+/* ── Version 8 config struct — used only for NVS migration to v9 ────── */
+typedef struct {
+    uint32_t config_version;
+    char api_url[3][128];
+    char ntp_server[64];
+    char tz_string[64];
+    char filter_colors[3][512];
+    char rms_thresholds[3][256];
+    char hfr_thresholds[3][256];
+    int theme_index;
+    int brightness;
+    int color_brightness;
+    bool mqtt_enabled;
+    char mqtt_broker_url[128];
+    char mqtt_username[64];
+    char mqtt_password[64];
+    char mqtt_topic_prefix[64];
+    uint16_t mqtt_port;
+    int8_t   active_page_override;
+    bool     auto_rotate_enabled;
+    uint16_t auto_rotate_interval_s;
+    uint8_t  auto_rotate_effect;
+    bool     auto_rotate_skip_disconnected;
+    uint8_t  auto_rotate_pages;
+    uint8_t  update_rate_s;
+    uint8_t  graph_update_interval_s;
+    uint8_t  connection_timeout_s;
+    uint8_t  toast_duration_s;
+    bool     debug_mode;
+    bool     instance_enabled[3];
+} app_config_v8_t;
+
 static void set_defaults(app_config_t *cfg) {
     memset(cfg, 0, sizeof(app_config_t));
     cfg->config_version = APP_CONFIG_VERSION;
@@ -328,6 +360,8 @@ static void set_defaults(app_config_t *cfg) {
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         cfg->instance_enabled[i] = true;
     }
+    cfg->screen_sleep_enabled = false;
+    cfg->screen_sleep_timeout_s = 60;
     strcpy(cfg->mqtt_broker_url, "mqtt://192.168.1.250");
     strcpy(cfg->mqtt_topic_prefix, "ninadisplay");
     cfg->mqtt_port = 1883;
@@ -623,6 +657,46 @@ static void migrate_from_v7(const app_config_v7_t *old, app_config_t *cfg) {
 }
 
 /**
+ * @brief Migrate a v8 config blob into the current struct layout.
+ *
+ * v8 → v9 adds: screen_sleep_enabled, screen_sleep_timeout_s.
+ */
+static void migrate_from_v8(const app_config_v8_t *old, app_config_t *cfg) {
+    set_defaults(cfg);
+
+    memcpy(cfg->api_url, old->api_url, sizeof(cfg->api_url));
+    memcpy(cfg->ntp_server, old->ntp_server, sizeof(cfg->ntp_server));
+    memcpy(cfg->tz_string, old->tz_string, sizeof(cfg->tz_string));
+    memcpy(cfg->filter_colors, old->filter_colors, sizeof(cfg->filter_colors));
+    memcpy(cfg->rms_thresholds, old->rms_thresholds, sizeof(cfg->rms_thresholds));
+    memcpy(cfg->hfr_thresholds, old->hfr_thresholds, sizeof(cfg->hfr_thresholds));
+    cfg->theme_index = old->theme_index;
+    cfg->brightness = old->brightness;
+    cfg->color_brightness = old->color_brightness;
+    cfg->mqtt_enabled = old->mqtt_enabled;
+    memcpy(cfg->mqtt_broker_url, old->mqtt_broker_url, sizeof(cfg->mqtt_broker_url));
+    memcpy(cfg->mqtt_username, old->mqtt_username, sizeof(cfg->mqtt_username));
+    memcpy(cfg->mqtt_password, old->mqtt_password, sizeof(cfg->mqtt_password));
+    memcpy(cfg->mqtt_topic_prefix, old->mqtt_topic_prefix, sizeof(cfg->mqtt_topic_prefix));
+    cfg->mqtt_port = old->mqtt_port;
+    cfg->active_page_override = old->active_page_override;
+    cfg->auto_rotate_enabled = old->auto_rotate_enabled;
+    cfg->auto_rotate_interval_s = old->auto_rotate_interval_s;
+    cfg->auto_rotate_effect = old->auto_rotate_effect;
+    cfg->auto_rotate_skip_disconnected = old->auto_rotate_skip_disconnected;
+    cfg->auto_rotate_pages = old->auto_rotate_pages;
+    cfg->update_rate_s = old->update_rate_s;
+    cfg->graph_update_interval_s = old->graph_update_interval_s;
+    cfg->connection_timeout_s = old->connection_timeout_s;
+    cfg->toast_duration_s = old->toast_duration_s;
+    cfg->debug_mode = old->debug_mode;
+    memcpy(cfg->instance_enabled, old->instance_enabled, sizeof(cfg->instance_enabled));
+    /* screen_sleep: defaults from set_defaults() (disabled, 60s timeout) */
+
+    ESP_LOGI(TAG, "Migrated config from v8 → v%d", APP_CONFIG_VERSION);
+}
+
+/**
  * @brief Validate and clamp config fields to sane ranges.
  * @return true if any field was corrected.
  */
@@ -691,6 +765,10 @@ static bool validate_config(app_config_t *cfg) {
         cfg->toast_duration_s = 8;
         fixed = true;
     }
+    if (cfg->screen_sleep_timeout_s < 10 || cfg->screen_sleep_timeout_s > 3600) {
+        cfg->screen_sleep_timeout_s = 60;
+        fixed = true;
+    }
 
     return fixed;
 }
@@ -746,6 +824,15 @@ void app_config_init(void) {
             nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(handle);
         }
+    } else if (version_check == 8 && stored_size >= sizeof(app_config_v8_t)) {
+        /* Version 8 blob — migrate to v9 */
+        app_config_v8_t old;
+        memcpy(&old, raw, sizeof(app_config_v8_t));
+        migrate_from_v8(&old, &s_config);
+        validate_config(&s_config);
+
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 7 && stored_size >= sizeof(app_config_v7_t)) {
         /* Version 7 blob — migrate to v8 */
         app_config_v7_t old;

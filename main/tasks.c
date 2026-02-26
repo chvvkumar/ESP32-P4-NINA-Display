@@ -21,6 +21,7 @@
 #include "ui/nina_session_stats.h"
 #include "bsp/esp-bsp.h"
 #include "driver/gpio.h"
+#include "driver/ledc.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
@@ -38,6 +39,8 @@ static const char *TAG = "tasks";
 /* Signals the data task that a page switch occurred */
 volatile bool page_changed = false;
 volatile bool ota_in_progress = false;
+volatile bool screen_touch_wake = false;
+volatile bool screen_asleep = false;
 TaskHandle_t data_task_handle = NULL;
 static int64_t last_graph_fetch_ms = 0;  /* Timestamp of last graph data fetch */
 static bool hfr_graph_seeded = false;   /* True after initial API fetch for current HFR graph session */
@@ -72,7 +75,11 @@ void input_task(void *arg) {
             if (now_ms - last_press_ms > DEBOUNCE_MS) {
                 last_press_ms = now_ms;
 
-                {
+                /* Wake screen first if asleep — don't switch pages while dark */
+                if (screen_asleep) {
+                    screen_touch_wake = true;
+                    ESP_LOGI(TAG, "Button: waking screen");
+                } else {
                     int total = nina_dashboard_get_total_page_count();
                     int current = nina_dashboard_get_active_page();
                     int new_page = (current + 1) % total;
@@ -112,6 +119,9 @@ void data_update_task(void *arg) {
     bool filters_synced[MAX_NINA_INSTANCES] = {false};
     int64_t last_heartbeat_ms[MAX_NINA_INSTANCES] = {0};
     int64_t last_rotate_ms = 0;
+
+    /* Screen sleep state */
+    int64_t all_disconnected_since_ms = 0;  /* 0 = at least one connected recently */
 
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         nina_poll_state_init(&poll_states[i]);
@@ -153,24 +163,19 @@ void data_update_task(void *arg) {
         }
     }
 
-    // Wait for time to be set (up to 30 seconds)
-    time_t now = 0;
-    int retry = 0;
-    const int max_retry = 30;
-    while (now < 1577836800 && ++retry < max_retry) {  // Jan 1, 2020
-        ESP_LOGI(TAG, "Waiting for system time to be set... (%d/%d)", retry, max_retry);
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        time(&now);
-    }
-
-    if (now < 1577836800) {
-        ESP_LOGW(TAG, "Time not set after %d seconds, continuing anyway", max_retry);
-    } else {
-        char strftime_buf[64];
-        struct tm timeinfo;
-        localtime_r(&now, &timeinfo);
-        strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
-        ESP_LOGI(TAG, "System time set: %s", strftime_buf);
+    // Check if time is already set; if not, SNTP will sync in the background
+    {
+        time_t now_t = 0;
+        time(&now_t);
+        if (now_t >= 1577836800) {  // Jan 1, 2020
+            char strftime_buf[64];
+            struct tm timeinfo;
+            localtime_r(&now_t, &timeinfo);
+            strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
+            ESP_LOGI(TAG, "System time already set: %s", strftime_buf);
+        } else {
+            ESP_LOGI(TAG, "System time not yet set, SNTP will sync in background");
+        }
     }
 
     // Start MQTT if enabled
@@ -726,6 +731,55 @@ void data_update_task(void *arg) {
                 if (hfr_cfg.ok_max > 0.0f && instances[i].hfr > hfr_cfg.ok_max) {
                     nina_alert_trigger(ALERT_HFR, i, instances[i].hfr);
                 }
+            }
+        }
+
+        /* ── Screen sleep: turn off backlight when no NINA instances connected ── */
+        {
+            app_config_t *sl_cfg = app_config_get();
+            if (sl_cfg->screen_sleep_enabled) {
+                int connected = nina_connection_connected_count();
+
+                /* Touch wake — always check first, even if connections are back */
+                if (screen_asleep && screen_touch_wake) {
+                    bsp_display_brightness_set(sl_cfg->brightness);
+                    screen_asleep = false;
+                    screen_touch_wake = false;
+                    all_disconnected_since_ms = now_ms;  /* restart sleep timer */
+                    ESP_LOGI(TAG, "Screen wake: touch detected");
+                }
+
+                if (connected > 0) {
+                    all_disconnected_since_ms = 0;
+                    if (screen_asleep) {
+                        bsp_display_brightness_set(sl_cfg->brightness);
+                        screen_asleep = false;
+                        ESP_LOGI(TAG, "Screen wake: NINA connected");
+                    }
+                } else {
+                    /* All disconnected */
+                    if (all_disconnected_since_ms == 0) {
+                        all_disconnected_since_ms = now_ms;
+                    }
+                    if (!screen_asleep &&
+                        (now_ms - all_disconnected_since_ms >= (int64_t)sl_cfg->screen_sleep_timeout_s * 1000)) {
+                        /* Turn off backlight completely via direct LEDC.
+                         * BSP brightness_set(0) only dims to 47% due to offset mapping.
+                         * With output_invert=1, duty=0 → GPIO HIGH → backlight off
+                         * (backlight is active-low on this board). */
+                        ledc_set_duty(LEDC_LOW_SPEED_MODE, CONFIG_BSP_DISPLAY_BRIGHTNESS_LEDC_CH, 0);
+                        ledc_update_duty(LEDC_LOW_SPEED_MODE, CONFIG_BSP_DISPLAY_BRIGHTNESS_LEDC_CH);
+                        screen_asleep = true;
+                        ESP_LOGI(TAG, "Screen sleep: no NINA connections for %ds",
+                                 sl_cfg->screen_sleep_timeout_s);
+                    }
+                }
+            } else if (screen_asleep) {
+                /* Feature disabled while asleep — wake up */
+                bsp_display_brightness_set(sl_cfg->brightness);
+                screen_asleep = false;
+                all_disconnected_since_ms = 0;
+                ESP_LOGI(TAG, "Screen wake: sleep feature disabled");
             }
         }
 

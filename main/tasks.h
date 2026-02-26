@@ -20,6 +20,12 @@ extern TaskHandle_t data_task_handle;
 /** OTA in progress — data task suspends when true. Set by OTA handler. */
 extern volatile bool ota_in_progress;
 
+/** Screen touch detected — wakes display from screen sleep. Set by LVGL touch handler. */
+extern volatile bool screen_touch_wake;
+
+/** True while the display is in screen-sleep mode (backlight off). */
+extern volatile bool screen_asleep;
+
 /** Page-change callback registered with the dashboard swipe gesture. */
 void on_page_changed(int new_page);
 

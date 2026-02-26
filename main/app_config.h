@@ -12,7 +12,7 @@ extern "C" {
 #define MAX_NINA_INSTANCES 3
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 8
+#define APP_CONFIG_VERSION 9
 
 typedef struct {
     uint32_t config_version;        // Must be first field — used to detect legacy blobs
@@ -43,6 +43,8 @@ typedef struct {
     uint8_t  toast_duration_s;           // Toast notification display duration in seconds (3-30, default 8)
     bool     debug_mode;                // Runtime debug/perf profiling toggle (default false)
     bool     instance_enabled[3];       // Per-instance enable flag (disabled = skip polling/WS)
+    bool     screen_sleep_enabled;     // Turn off display when no NINA instances connected
+    uint16_t screen_sleep_timeout_s;   // Seconds with 0 connections before screen off (default 60)
 } app_config_t;
 
 // WiFi credentials are NOT stored in app_config_t. They are managed by

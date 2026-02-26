@@ -225,10 +225,13 @@ jobs:
           # Store current state
           CURRENT_BRANCH=${GITHUB_REF_NAME}
           CURRENT_COMMIT=$(git rev-parse HEAD)
-          
+
+          # Stash any working tree changes (e.g. firmware binaries from build)
+          git stash --include-untracked
+
           # Fetch badges branch if it exists, or create orphan
           git fetch origin badges:badges 2>/dev/null || git checkout --orphan badges
-          
+
           # Switch to badges branch
           if git show-ref --verify --quiet refs/heads/badges; then
             git checkout badges
@@ -249,6 +252,7 @@ jobs:
           # Return to original state
           git checkout $CURRENT_COMMIT
           git checkout $CURRENT_BRANCH
+          git stash pop 2>/dev/null || true
 
       - name: Upload firmware artifacts
         if: steps.check_skip.outputs.skip != 'true'
