@@ -146,8 +146,8 @@ static void wifi_init(void)
 
     wifi_config_t wifi_config_ap = {
         .ap = {
-            .ssid = "AllSky-Config",
-            .ssid_len = strlen("AllSky-Config"),
+            .ssid = "NINA-DISPLAY",
+            .ssid_len = strlen("NINA-DISPLAY"),
             .channel = 1,
             .password = "12345678",
             .max_connection = 4,
