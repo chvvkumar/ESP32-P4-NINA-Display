@@ -48,6 +48,8 @@ dependencies.lock
 bootloader.bin
 partition-table.bin
 ota_data_initial.bin
+firmware\nina-display-factory.bin
+firmware\nina-display-ota.bin
 
 # Compilation artifacts
 *.o

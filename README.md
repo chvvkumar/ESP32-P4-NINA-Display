@@ -67,7 +67,7 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
     <td align="center"><img src="images/HFR_history.jpg" alt="HFR History Graph" width="480"></td>
   </tr>
   <tr>
-    <td align="center"><img src="images/display_settings.jpeg" alt="Display Settings" width="480"></td>
+    <td align="center"><img src="images/display_settings.jpg" alt="Display Settings" width="480"></td>
     <td align="center"><img src="images/systemstats.jpg" alt="System Stats" width="480"></td>
   </tr>
 </table>
