@@ -18,9 +18,10 @@ extern const theme_t *current_theme;
 /* Layout constants */
 #define INFO_OUTER_PAD    16
 #define INFO_CARD_PAD     14
-#define INFO_CARD_ROW_GAP  6
+#define INFO_CARD_ROW_GAP  8
 #define INFO_BACK_BTN_W   84
 #define INFO_BACK_BTN_H   108
+#define INFO_BACK_BTN_ZONE (INFO_BACK_BTN_W + 8)  /* right-side exclusion for bottom rows */
 
 /* ── Shared widget state (defined in nina_info_overlay.c) ─────────── */
 extern lv_obj_t *info_overlay;
@@ -76,3 +77,7 @@ void populate_filter_data(const filter_detail_data_t *data);
 void build_autofocus_content(lv_obj_t *content);
 void populate_autofocus_data(const autofocus_data_t *data);
 void theme_autofocus_content(void);
+
+void build_session_stats_content(lv_obj_t *content);
+void populate_session_stats_data(int instance);
+void theme_session_stats_content(void);

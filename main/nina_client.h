@@ -22,6 +22,7 @@ typedef struct {
     char target_name[64];
     char profile_name[64];
     char telescope_name[64];
+    char camera_name[64];
     
     struct {
         float temp;
@@ -59,8 +60,10 @@ typedef struct {
     // Image stats
     float hfr;
     int stars;
-    char target_time_remaining[16]; // Target remaining time "HH:MM" from Loop Until Time_Condition
-    
+    char target_time_remaining[16]; // Earliest remaining time across all conditions (H:MM format)
+    char target_time_reason[16];    // Binding constraint label: "TIME LEFT", "SETS IN", "DAWN IN"
+    int  target_condition_count;    // Number of active loop conditions (for "+" indicator)
+
     // Mount
     char meridian_flip[16];
     float rotator_angle;

@@ -62,7 +62,7 @@ lv_obj_t *make_info_card(lv_obj_t *parent) {
 lv_obj_t *make_info_section(lv_obj_t *parent, const char *title) {
     lv_obj_t *lbl = lv_label_create(parent);
     lv_label_set_text(lbl, title);
-    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_letter_space(lbl, 2, 0);
     if (current_theme) {
         int gb = app_config_get()->color_brightness;
@@ -83,7 +83,7 @@ lv_obj_t *make_info_kv(lv_obj_t *parent, const char *key, lv_obj_t **out_val) {
 
     lv_obj_t *lbl_key = lv_label_create(row);
     lv_label_set_text(lbl_key, key);
-    lv_obj_set_style_text_font(lbl_key, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(lbl_key, &lv_font_montserrat_20, 0);
     if (current_theme) {
         int gb = app_config_get()->color_brightness;
         lv_obj_set_style_text_color(lbl_key,
@@ -92,7 +92,7 @@ lv_obj_t *make_info_kv(lv_obj_t *parent, const char *key, lv_obj_t **out_val) {
 
     lv_obj_t *lbl_val = lv_label_create(row);
     lv_label_set_text(lbl_val, "--");
-    lv_obj_set_style_text_font(lbl_val, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(lbl_val, &lv_font_montserrat_22, 0);
     if (current_theme) {
         int gb = app_config_get()->color_brightness;
         lv_obj_set_style_text_color(lbl_val,
@@ -105,8 +105,8 @@ lv_obj_t *make_info_kv(lv_obj_t *parent, const char *key, lv_obj_t **out_val) {
 
 lv_obj_t *make_info_kv_wide(lv_obj_t *parent, const char *key, lv_obj_t **out_val) {
     lv_obj_t *row = make_info_kv(parent, key, out_val);
-    /* Override value font to 24 for emphasis */
-    lv_obj_set_style_text_font(*out_val, &lv_font_montserrat_24, 0);
+    /* Override value font to 28 for emphasis */
+    lv_obj_set_style_text_font(*out_val, &lv_font_montserrat_28, 0);
     return row;
 }
 
@@ -127,6 +127,7 @@ static const char *overlay_titles[] = {
     "SEQUENCE DETAILS",
     "FILTER WHEEL",
     "AUTOFOCUS CURVE",
+    "SESSION STATISTICS",
 };
 
 /* ── Create overlay (once) ───────────────────────────────────────── */
@@ -166,7 +167,7 @@ void nina_info_overlay_create(lv_obj_t *parent) {
     lv_obj_clear_flag(info_title_bar, LV_OBJ_FLAG_SCROLLABLE);
 
     info_lbl_title = lv_label_create(info_title_bar);
-    lv_obj_set_style_text_font(info_lbl_title, &lv_font_montserrat_26, 0);
+    lv_obj_set_style_text_font(info_lbl_title, &lv_font_montserrat_28, 0);
     if (current_theme) {
         lv_obj_set_style_text_color(info_lbl_title,
             lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
@@ -174,7 +175,7 @@ void nina_info_overlay_create(lv_obj_t *parent) {
     lv_label_set_text(info_lbl_title, "INFO");
 
     info_lbl_instance = lv_label_create(info_title_bar);
-    lv_obj_set_style_text_font(info_lbl_instance, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(info_lbl_instance, &lv_font_montserrat_18, 0);
     if (current_theme) {
         lv_obj_set_style_text_color(info_lbl_instance,
             lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
@@ -193,7 +194,7 @@ void nina_info_overlay_create(lv_obj_t *parent) {
 
     /* ── Loading label (floating, centered in content) ── */
     info_loading_lbl = lv_label_create(info_content);
-    lv_obj_set_style_text_font(info_loading_lbl, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(info_loading_lbl, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(info_loading_lbl, lv_color_hex(info_get_text_color(gb)), 0);
     lv_label_set_text(info_loading_lbl, "Loading...");
     lv_obj_add_flag(info_loading_lbl, LV_OBJ_FLAG_FLOATING);
@@ -215,7 +216,7 @@ void nina_info_overlay_create(lv_obj_t *parent) {
 
     info_btn_back_lbl = lv_label_create(info_btn_back);
     lv_label_set_text(info_btn_back_lbl, LV_SYMBOL_LEFT);
-    lv_obj_set_style_text_font(info_btn_back_lbl, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(info_btn_back_lbl, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(info_btn_back_lbl, lv_color_hex(info_get_text_color(gb)), 0);
     lv_obj_center(info_btn_back_lbl);
 
@@ -257,7 +258,7 @@ void nina_info_overlay_show(info_overlay_type_t type, int page_index) {
         /* Re-create loading label since clean() destroyed it */
         int gb = app_config_get()->color_brightness;
         info_loading_lbl = lv_label_create(info_content);
-        lv_obj_set_style_text_font(info_loading_lbl, &lv_font_montserrat_20, 0);
+        lv_obj_set_style_text_font(info_loading_lbl, &lv_font_montserrat_24, 0);
         lv_obj_set_style_text_color(info_loading_lbl,
             lv_color_hex(info_get_text_color(gb)), 0);
         lv_label_set_text(info_loading_lbl, "Loading...");
@@ -271,7 +272,8 @@ void nina_info_overlay_show(info_overlay_type_t type, int page_index) {
         case INFO_OVERLAY_IMAGESTATS: build_imagestats_content(info_content); break;
         case INFO_OVERLAY_SEQUENCE:  build_sequence_content(info_content);  break;
         case INFO_OVERLAY_FILTER:    build_filter_content(info_content);    break;
-        case INFO_OVERLAY_AUTOFOCUS: build_autofocus_content(info_content); break;
+        case INFO_OVERLAY_AUTOFOCUS:      build_autofocus_content(info_content);      break;
+        case INFO_OVERLAY_SESSION_STATS:  build_session_stats_content(info_content); break;
         }
 
         /* Re-apply bottom padding — some builders call lv_obj_remove_style_all()
@@ -381,6 +383,14 @@ void nina_info_overlay_set_autofocus_data(const autofocus_data_t *data) {
     if (info_loading_lbl) lv_obj_add_flag(info_loading_lbl, LV_OBJ_FLAG_HIDDEN);
 }
 
+void nina_info_overlay_set_session_stats(int instance) {
+    if (!info_overlay) return;
+    if (lv_obj_has_flag(info_overlay, LV_OBJ_FLAG_HIDDEN)) return;
+    if (info_current_type != INFO_OVERLAY_SESSION_STATS) return;
+    populate_session_stats_data(instance);
+    if (info_loading_lbl) lv_obj_add_flag(info_loading_lbl, LV_OBJ_FLAG_HIDDEN);
+}
+
 /* ── Theme ───────────────────────────────────────────────────────── */
 
 void nina_info_overlay_apply_theme(void) {
@@ -425,7 +435,8 @@ void nina_info_overlay_apply_theme(void) {
         switch (info_current_type) {
         case INFO_OVERLAY_CAMERA:    theme_camera_content();    break;
         case INFO_OVERLAY_MOUNT:     theme_mount_content();     break;
-        case INFO_OVERLAY_AUTOFOCUS: theme_autofocus_content(); break;
+        case INFO_OVERLAY_AUTOFOCUS:      theme_autofocus_content();      break;
+        case INFO_OVERLAY_SESSION_STATS:  theme_session_stats_content();  break;
         default: break;
         }
     }

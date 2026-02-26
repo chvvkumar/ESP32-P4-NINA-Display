@@ -32,6 +32,11 @@ void fetch_camera_info_robust(const char *base_url, nina_client_t *data) {
     data->connected = true;
     cJSON *response = cJSON_GetObjectItem(json, "Response");
     if (response) {
+        // Camera name
+        cJSON *cam_name = cJSON_GetObjectItem(response, "Name");
+        if (cam_name && cam_name->valuestring && cam_name->valuestring[0] != '\0')
+            strncpy(data->camera_name, cam_name->valuestring, sizeof(data->camera_name) - 1);
+
         // Camera state
         cJSON *state = cJSON_GetObjectItem(response, "CameraState");
         if (state && state->valuestring) {
@@ -486,6 +491,10 @@ int fetch_equipment_info_bundled(const char *base_url, nina_client_t *data, bool
     cJSON *camera = cJSON_GetObjectItem(response, "Camera");
     if (camera) {
         data->connected = true;
+
+        cJSON *cam_name = cJSON_GetObjectItem(camera, "Name");
+        if (cam_name && cam_name->valuestring && cam_name->valuestring[0] != '\0')
+            strncpy(data->camera_name, cam_name->valuestring, sizeof(data->camera_name) - 1);
 
         cJSON *state = cJSON_GetObjectItem(camera, "CameraState");
         if (state && state->valuestring)

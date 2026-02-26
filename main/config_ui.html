@@ -171,6 +171,8 @@
     }
     .node-panel { display: none; }
     .node-panel.active { display: block; }
+    .sub-tab.disabled { opacity: 0.35; }
+    .node-panel.disabled { opacity: 0.4; pointer-events: none; }
 
     .save-bar {
       position: fixed; bottom: 0; left: 0; right: 0; z-index: 90;
@@ -383,6 +385,30 @@
     }
     .page-mode-details[hidden] { display: none; }
 
+    /* === SPRING-LOADED SEGMENTED CONTROL === */
+    .pm-segment-wrap {
+      position: relative; display: flex; background: rgba(0,0,0,0.5);
+      border-radius: 12px; padding: 4px; border: 1px solid rgba(255, 255, 255, 0.08);
+      margin-bottom: 20px;
+    }
+    .pm-slider {
+      position: absolute; top: 4px; bottom: 4px; width: calc(33.333% - 2.66px);
+      background: rgba(var(--accent-rgb), 0.15); border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2), inset 0 0 0 1px rgba(var(--accent-rgb), 0.3);
+      transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+      z-index: 1;
+    }
+    .pm-seg-btn {
+      flex: 1; text-align: center; padding: 10px; color: var(--text-muted);
+      font-size: 0.85rem; font-weight: 600; cursor: pointer; position: relative;
+      z-index: 2; transition: color 0.3s ease; border-radius: 8px;
+    }
+    .pm-seg-btn.active { color: var(--accent); }
+    .pm-content-box {
+      background: rgba(255, 255, 255, 0.01); border: 1px solid rgba(255, 255, 255, 0.04);
+      border-radius: var(--radius-sm); padding: 16px;
+    }
+
     /* === COLLAPSIBLE CARD === */
     .card-title-collapsible {
       display: flex; align-items: center; justify-content: space-between;
@@ -396,7 +422,7 @@
     .card-chevron.collapsed { transform: rotate(-90deg); }
     .card-body-collapsible {
       overflow: hidden; transition: max-height 0.35s ease, opacity 0.25s ease;
-      max-height: 800px; opacity: 1;
+      max-height: 2000px; opacity: 1;
     }
     .card-body-collapsible.collapsed {
       max-height: 0; opacity: 0;
@@ -513,70 +539,65 @@
         </div>
         <div class="card-body-collapsible collapsed" id="pm_body">
 
-        <label class="page-mode-option" id="pm_auto_opt" onclick="setPageMode('auto')">
-          <input type="radio" name="page_mode" value="auto" class="page-mode-radio" id="pm_auto">
-          <div class="page-mode-body">
-            <div class="page-mode-title">Auto</div>
-            <div class="page-mode-desc">Start on Summary, navigate manually via swipe or button</div>
-          </div>
-        </label>
+        <div class="pm-segment-wrap">
+          <div class="pm-slider" id="pm_slider"></div>
+          <div class="pm-seg-btn active" data-mode="auto" onclick="setPageMode('auto')">Manual</div>
+          <div class="pm-seg-btn" data-mode="fixed" onclick="setPageMode('fixed')">Fixed</div>
+          <div class="pm-seg-btn" data-mode="rotate" onclick="setPageMode('rotate')">Rotate</div>
+        </div>
 
-        <label class="page-mode-option" id="pm_fixed_opt" onclick="setPageMode('fixed')">
-          <input type="radio" name="page_mode" value="fixed" class="page-mode-radio" id="pm_fixed">
-          <div class="page-mode-body">
-            <div class="page-mode-title">Fixed</div>
-            <div class="page-mode-desc">Pin display to a specific page on boot</div>
-            <div class="page-mode-details" id="pm_fixed_details" hidden>
-              <div class="field">
-                <label class="field-label">Page</label>
-                <select class="input" id="active_page" onchange="setPage(this.value)">
-                  <option value="0">Summary</option>
-                  <option value="1">NINA 1</option>
-                  <option value="2">NINA 2</option>
-                  <option value="3">NINA 3</option>
-                  <option value="4">Settings</option>
-                  <option value="5">System Info</option>
-                </select>
-              </div>
-            </div>
+        <div id="pm_auto_details" class="pm-content-box" style="display:none;">
+          <div style="font-size:0.8rem; color:var(--text-muted); text-align:center;">
+            Starts on Summary page. Navigate manually via swipe or bottom buttons.
           </div>
-        </label>
+        </div>
 
-        <label class="page-mode-option" id="pm_rotate_opt" onclick="setPageMode('rotate')">
-          <input type="radio" name="page_mode" value="rotate" class="page-mode-radio" id="pm_rotate">
-          <div class="page-mode-body">
-            <div class="page-mode-title">Rotate</div>
-            <div class="page-mode-desc">Automatically cycle through selected pages</div>
-            <div class="page-mode-details" id="pm_rotate_details" hidden>
-              <div class="field">
-                <label class="field-label">Interval (seconds)</label>
-                <input type="number" class="input" id="auto_rotate_interval" min="4" max="3600" value="30">
-              </div>
-              <div class="field">
-                <label class="field-label">Transition</label>
-                <select class="input" id="auto_rotate_effect">
-                  <option value="0">Instant</option>
-                  <option value="1">Fade</option>
-                  <option value="2">Slide Left</option>
-                  <option value="3">Slide Right</option>
-                </select>
-              </div>
-              <div class="toggle-row">
-                <span class="toggle-label">Skip disconnected nodes</span>
-                <label class="toggle"><input type="checkbox" id="auto_rotate_skip"><span class="toggle-track"></span></label>
-              </div>
-              <div style="margin-top:16px">
-                <label class="field-label">Pages in rotation</label>
-                <div class="flex-col-gap" id="arp-container" style="margin-top:8px"></div>
-              </div>
-            </div>
+        <div id="pm_fixed_details" class="pm-content-box" style="display:none;">
+          <div class="field" style="margin-bottom:0;">
+            <label class="field-label">Pinned Page</label>
+            <select class="input" id="active_page" onchange="setPage(this.value)">
+              <option value="0">Summary</option>
+              <option value="1">NINA 1</option>
+              <option value="2">NINA 2</option>
+              <option value="3">NINA 3</option>
+              <option value="4">Settings</option>
+              <option value="5">System Info</option>
+            </select>
           </div>
-        </label>
+        </div>
+
+        <div id="pm_rotate_details" class="pm-content-box" style="display:none;">
+          <div class="field">
+            <label class="field-label">Interval (seconds)</label>
+            <input type="number" class="input" id="auto_rotate_interval" min="4" max="3600" value="30">
+          </div>
+          <div class="field">
+            <label class="field-label">Transition</label>
+            <select class="input" id="auto_rotate_effect">
+              <option value="0">Instant</option>
+              <option value="1">Fade</option>
+              <option value="2">Slide Left</option>
+              <option value="3">Slide Right</option>
+            </select>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Skip disconnected nodes</span>
+            <label class="toggle"><input type="checkbox" id="auto_rotate_skip"><span class="toggle-track"></span></label>
+          </div>
+          <div style="margin-top:16px">
+            <label class="field-label">Pages in rotation</label>
+            <div class="flex-col-gap" id="arp-container" style="margin-top:8px"></div>
+          </div>
+        </div>
 
         </div>
       </div>
       <div class="card">
-        <div class="card-title">Data rates</div>
+        <div class="card-title card-title-collapsible" onclick="toggleCollapsible('dr')">
+          <span>Data rates</span>
+          <span class="card-chevron collapsed" id="dr_chevron">&#9660;</span>
+        </div>
+        <div class="card-body-collapsible collapsed" id="dr_body">
         <div class="field">
           <label class="field-label">Data update rate (seconds)</label>
           <input type="number" class="input" id="update_rate" min="1" max="10" value="2">
@@ -595,6 +616,15 @@
           <input type="number" class="input" id="toast_duration" min="3" max="30" value="8">
           <div class="field-hint">How long toast notifications are shown on screen (errors show for 2x this value)</div>
         </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Debug</div>
+        <div class="toggle-row">
+          <span class="toggle-label">Enable Debug Mode</span>
+          <label class="toggle"><input type="checkbox" id="debug_mode"><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint" style="margin-top:8px;">Enables performance profiling metrics, serial reports, and the /api/perf endpoint. Toggling resets all metrics.</div>
       </div>
     </div>
     <div id="tab-network" class="tab-panel">
@@ -678,6 +708,21 @@
       <div class="field-hint hint-center">Reboot required after changing WiFi, NTP, timezone, or MQTT settings.</div>
     </div>
     <div id="tab-nina" class="tab-panel">
+      <div class="card" id="instance-overview">
+        <div class="card-title">Instances</div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label" id="inst_lbl_0">Node 1</span>
+          <label class="toggle"><input type="checkbox" id="instance_enabled_0" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label" id="inst_lbl_1">Node 2</span>
+          <label class="toggle"><input type="checkbox" id="instance_enabled_1" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label" id="inst_lbl_2">Node 3</span>
+          <label class="toggle"><input type="checkbox" id="instance_enabled_2" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+      </div>
       <div class="sub-tabs">
         <button class="sub-tab active" data-node="0">Node 1</button>
         <button class="sub-tab" data-node="1">Node 2</button>
@@ -716,6 +761,18 @@
         <div class="flex-wrap-gap">
           <button class="btn btn-outline" onclick="saveAndReboot()">Reboot</button>
           <button class="btn btn-danger" onclick="factoryReset()">Factory Reset</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title card-title-collapsible" onclick="toggleCollapsible('ss')">
+          <span>Screenshot</span>
+          <span class="card-chevron collapsed" id="ss_chevron">&#9660;</span>
+        </div>
+        <div class="card-body-collapsible collapsed" id="ss_body">
+          <button class="btn btn-outline" id="ssBtn" onclick="takeScreenshot()" style="margin-bottom:16px">Capture screenshot</button>
+          <div id="ssContainer" style="display:none">
+            <img id="ssImage" style="width:100%;border-radius:var(--radius-sm);border:1px solid var(--border)">
+          </div>
         </div>
       </div>
     </div>
@@ -857,38 +914,51 @@
 
     function setPage(v){postJson('/api/page',{page:parseInt(v)})}
 
-    /* ---- Page Mode ---- */
-    function togglePageMode(){
-      var body=$('pm_body'), chev=$('pm_chevron');
+    /* ---- Collapsible sections ---- */
+    function toggleCollapsible(prefix){
+      var body=$(prefix+'_body'), chev=$(prefix+'_chevron');
       body.classList.toggle('collapsed');
       chev.classList.toggle('collapsed');
     }
 
+    /* ---- Page Mode ---- */
+    function togglePageMode(){ toggleCollapsible('pm'); }
+
     function updatePageModeSummary(){
       var mode=getPageMode();
-      var labels={auto:'Auto',fixed:'Fixed',rotate:'Rotate'};
+      var labels={auto:'Manual',fixed:'Fixed',rotate:'Rotate'};
       $('pm_summary').textContent='\u2014 '+labels[mode];
     }
 
-    function setPageMode(mode){
-      $('pm_auto').checked=(mode==='auto');
-      $('pm_fixed').checked=(mode==='fixed');
-      $('pm_rotate').checked=(mode==='rotate');
+    let _currentPageMode = 'auto';
 
-      $$('.page-mode-option').forEach(o=>o.classList.remove('selected'));
-      $('pm_'+mode+'_opt').classList.add('selected');
+    function setPageMode(mode) {
+      _currentPageMode = mode;
 
-      $('pm_fixed_details').hidden=(mode!=='fixed');
-      $('pm_rotate_details').hidden=(mode!=='rotate');
+      // Update button active states
+      document.querySelectorAll('.pm-seg-btn').forEach(btn => btn.classList.remove('active'));
+      const activeBtn = document.querySelector(`.pm-seg-btn[data-mode="${mode}"]`);
+      if(activeBtn) activeBtn.classList.add('active');
+
+      // Move animated slider
+      const slider = document.getElementById('pm_slider');
+      if(slider) {
+        if(mode === 'auto') slider.style.transform = 'translateX(0%)';
+        if(mode === 'fixed') slider.style.transform = 'translateX(100%)';
+        if(mode === 'rotate') slider.style.transform = 'translateX(200%)';
+      }
+
+      // Show corresponding detail box
+      document.getElementById('pm_auto_details').style.display = (mode === 'auto') ? 'block' : 'none';
+      document.getElementById('pm_fixed_details').style.display = (mode === 'fixed') ? 'block' : 'none';
+      document.getElementById('pm_rotate_details').style.display = (mode === 'rotate') ? 'block' : 'none';
 
       updatePageModeSummary();
       checkDirty();
     }
 
-    function getPageMode(){
-      if($('pm_rotate').checked) return 'rotate';
-      if($('pm_fixed').checked) return 'fixed';
-      return 'auto';
+    function getPageMode() {
+      return _currentPageMode;
     }
 
     /* ---- Filter Colors ---- */
@@ -927,20 +997,48 @@
         const lbl=$('arp_lbl'+n);
         if(lbl) lbl.textContent=urls[n-1]||'NINA '+n;
       }
+      for(let i=0;i<3;i++){
+        const lbl=$('inst_lbl_'+i);
+        if(lbl) lbl.textContent=urls[i]||'Node '+(i+1);
+      }
+      updateInstanceStates();
       updatePageSelectOptions();
+    }
+
+    function updateInstanceStates(){
+      for(let i=0;i<3;i++){
+        const en=$('instance_enabled_'+i).checked;
+        const tabs=$$('.sub-tab');
+        if(tabs[i]) tabs[i].classList.toggle('disabled',!en);
+        const panels=$$('.node-panel');
+        if(panels[i]) panels[i].classList.toggle('disabled',!en);
+        /* Dim auto-rotate checkbox for disabled instances */
+        const arpCb=$('arp_nina'+(i+1));
+        if(arpCb&&arpCb.parentElement) arpCb.parentElement.style.opacity=en?'':'0.35';
+      }
     }
 
     function updatePageSelectOptions(){
       const sel=$('active_page');
       if(!sel) return;
       const urls=[$('url1').value.trim(),$('url2').value.trim(),$('url3').value.trim()];
-      const cnt=urls.filter(u=>u.length>0).length||1;
+      const enabled=[$('instance_enabled_0').checked,$('instance_enabled_1').checked,$('instance_enabled_2').checked];
+      /* Count only enabled instances with a URL — mirrors device page layout */
+      let cnt=0;
+      for(let i=0;i<3;i++){if(urls[i].length>0&&enabled[i]) cnt++;}
+      cnt=cnt||1;
       const prev=sel.value;
       sel.innerHTML='';
       sel.add(new Option('Summary','0'));
-      for(let i=0;i<cnt;i++) sel.add(new Option(urls[i]||'NINA '+(i+1),''+(i+1)));
-      sel.add(new Option('Settings',''+(cnt+1)));
-      sel.add(new Option('System Info',''+(cnt+2)));
+      let pageIdx=1;
+      for(let i=0;i<3;i++){
+        if(urls[i].length>0&&enabled[i]){
+          sel.add(new Option(urls[i]||'NINA '+(i+1),''+pageIdx));
+          pageIdx++;
+        }
+      }
+      sel.add(new Option('Settings',''+pageIdx));
+      sel.add(new Option('System Info',''+(pageIdx+1)));
       if([...sel.options].some(o=>o.value===prev)) sel.value=prev;
       else sel.value='0';
     }
@@ -1025,7 +1123,11 @@
         update_rate_s:parseInt($('update_rate').value)||2,
         graph_update_interval_s:parseInt($('graph_interval').value)||5,
         connection_timeout_s:parseInt($('connection_timeout').value)||6,
-        toast_duration_s:parseInt($('toast_duration').value)||8
+        toast_duration_s:parseInt($('toast_duration').value)||8,
+        debug_mode:!!$('debug_mode').checked,
+        instance_enabled_1:!!$('instance_enabled_0').checked,
+        instance_enabled_2:!!$('instance_enabled_1').checked,
+        instance_enabled_3:!!$('instance_enabled_2').checked
       };
 
       const ssid=$('ssid').value.trim();
@@ -1067,6 +1169,10 @@
       $('graph_interval').value=data.graph_update_interval_s||5;
       $('connection_timeout').value=data.connection_timeout_s||6;
       $('toast_duration').value=data.toast_duration_s||8;
+      $('debug_mode').checked=!!data.debug_mode;
+      $('instance_enabled_0').checked=data.instance_enabled_1!==false;
+      $('instance_enabled_1').checked=data.instance_enabled_2!==false;
+      $('instance_enabled_2').checked=data.instance_enabled_3!==false;
 
       for(let i=0;i<3;i++){
         const key='filter_colors_'+(i+1);
@@ -1272,6 +1378,30 @@
       });
 
       xhr.send(file);
+    }
+
+    /* ---- Screenshot ---- */
+    function takeScreenshot(){
+      var btn=$('ssBtn');
+      btn.disabled=true;
+      btn.textContent='Capturing...';
+      fetch('/api/screenshot').then(function(r){
+        if(!r.ok) throw new Error('Screenshot failed');
+        return r.blob();
+      }).then(function(blob){
+        var url=URL.createObjectURL(blob);
+        var img=$('ssImage');
+        if(img._prevUrl) URL.revokeObjectURL(img._prevUrl);
+        img._prevUrl=url;
+        img.src=url;
+        $('ssContainer').style.display='block';
+        btn.textContent='Capture screenshot';
+        btn.disabled=false;
+      }).catch(function(e){
+        showToast('Screenshot failed','error');
+        btn.textContent='Capture screenshot';
+        btn.disabled=false;
+      });
     }
 
     /* ---- Dirty State Detection ---- */

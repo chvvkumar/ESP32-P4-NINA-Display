@@ -1,17 +1,6 @@
 #pragma once
-#include "sdkconfig.h"
 #include <stdint.h>
 #include <stdbool.h>
-
-// Enable/disable profiling via Kconfig (idf.py menuconfig)
-#ifdef CONFIG_PERF_MONITOR_ENABLED
-#define PERF_MONITOR_ENABLED 1
-#else
-#define PERF_MONITOR_ENABLED 0
-#endif
-
-#if PERF_MONITOR_ENABLED
-
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -68,6 +57,9 @@ void perf_counter_reset_interval(perf_counter_t *c);
 // ── Global Profiling State ──────────────────────────────────────────
 
 typedef struct {
+    // Runtime toggle — when false, all perf functions are no-ops
+    bool enabled;
+
     // Poll cycle timing
     perf_timer_t poll_cycle_total;        // Total time for one full poll loop iteration
     perf_timer_t poll_camera;             // fetch_camera_info_robust duration
@@ -142,6 +134,9 @@ extern perf_state_t g_perf;
 // Initialize profiling state. Call once in app_main().
 void perf_monitor_init(uint32_t report_interval_s);
 
+// Enable or disable profiling at runtime. Resets metrics on enable.
+void perf_monitor_set_enabled(bool enable);
+
 // Capture memory and stack snapshots. Call periodically from data task.
 void perf_monitor_capture_memory(void);
 
@@ -159,21 +154,3 @@ char *perf_monitor_report_json(void);
 
 // Helper to manually record a duration (for intervals measured externally)
 void perf_timer_record(perf_timer_t *t, int64_t duration_us);
-
-#else  // !PERF_MONITOR_ENABLED
-
-// No-op stubs when profiling is disabled
-#define perf_timer_start(t)           ((void)0)
-#define perf_timer_stop(t)            ((void)0)
-#define perf_timer_reset(t)           ((void)0)
-#define perf_timer_record(t, d)       ((void)0)
-#define perf_counter_increment(c)     ((void)0)
-#define perf_counter_reset_interval(c)((void)0)
-#define perf_monitor_init(i)          ((void)0)
-#define perf_monitor_capture_memory() ((void)0)
-#define perf_monitor_capture_cpu()   ((void)0)
-#define perf_monitor_report()         ((void)0)
-#define perf_monitor_reset_all()      ((void)0)
-#define perf_monitor_report_json()    (NULL)
-
-#endif

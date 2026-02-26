@@ -284,6 +284,7 @@ void nina_client_get_data(const char *base_url, nina_client_t *data) {
     strcpy(data->current_filter, "--");
     strcpy(data->time_remaining, "--");
     data->target_time_remaining[0] = '\0';
+    data->target_time_reason[0] = '\0';
     data->filter_count = 0;
 
     ESP_LOGI(TAG, "=== Fetching NINA data (robust method) ===");

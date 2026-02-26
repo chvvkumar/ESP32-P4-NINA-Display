@@ -48,6 +48,7 @@ void nina_info_overlay_set_imagestats_data(const imagestats_detail_data_t *data)
 void nina_info_overlay_set_sequence_data(const sequence_detail_data_t *data);
 void nina_info_overlay_set_filter_data(const filter_detail_data_t *data);
 void nina_info_overlay_set_autofocus_data(const autofocus_data_t *data);
+void nina_info_overlay_set_session_stats(int instance);
 
 /** Apply current theme to the info overlay. */
 void nina_info_overlay_apply_theme(void);

@@ -8,7 +8,7 @@ idf_component_register(
          ui/nina_dashboard.c ui/nina_dashboard_update.c ui/nina_thumbnail.c ui/nina_graph_overlay.c ui/nina_graph_controls.c ui/nina_sysinfo.c ui/nina_summary.c ui/nina_settings.c ui/themes.c ui/ui_styles.c
          ui/nina_toast.c ui/nina_event_log.c ui/nina_alerts.c ui/nina_safety.c ui/nina_session_stats.c ui/lv_font_material_safety.c
          ui/nina_info_overlay.c ui/nina_info_camera.c ui/nina_info_mount.c
-         ui/nina_info_imagestats.c ui/nina_info_sequence.c ui/nina_info_filter.c ui/nina_info_autofocus.c
+         ui/nina_info_imagestats.c ui/nina_info_sequence.c ui/nina_info_filter.c ui/nina_info_autofocus.c ui/nina_info_session_stats.c
          ${LV_DEMOS_SOURCES}
     INCLUDE_DIRS . ui ${LV_DEMO_DIR}
     EMBED_TXTFILES config_ui.html)

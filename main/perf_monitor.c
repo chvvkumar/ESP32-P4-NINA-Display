@@ -1,7 +1,5 @@
 #include "perf_monitor.h"
 
-#if PERF_MONITOR_ENABLED
-
 #include <string.h>
 #include <stdlib.h>
 #include "esp_log.h"
@@ -41,6 +39,8 @@ static uint32_t ptr_hash(const perf_timer_t *p)
 
 void perf_timer_start(perf_timer_t *t)
 {
+    if (!g_perf.enabled) return;
+
     int64_t now = esp_timer_get_time();
     uint32_t idx = ptr_hash(t);
     // Linear probe to find an empty slot or existing key
@@ -58,6 +58,8 @@ void perf_timer_start(perf_timer_t *t)
 
 int64_t perf_timer_stop(perf_timer_t *t)
 {
+    if (!g_perf.enabled) return 0;
+
     int64_t now = esp_timer_get_time();
     int64_t start = 0;
     bool found = false;
@@ -77,7 +79,6 @@ int64_t perf_timer_stop(perf_timer_t *t)
     }
 
     if (!found) {
-        ESP_LOGW(TAG, "perf_timer_stop called without matching start");
         return 0;
     }
 
@@ -96,11 +97,14 @@ int64_t perf_timer_stop(perf_timer_t *t)
 
 void perf_timer_reset(perf_timer_t *t)
 {
+    if (!g_perf.enabled) return;
     memset(t, 0, sizeof(*t));
 }
 
 void perf_timer_record(perf_timer_t *t, int64_t duration_us)
 {
+    if (!g_perf.enabled) return;
+
     t->last_us = duration_us;
     t->total_us += duration_us;
     t->count++;
@@ -116,12 +120,14 @@ void perf_timer_record(perf_timer_t *t, int64_t duration_us)
 
 void perf_counter_increment(perf_counter_t *c)
 {
+    if (!g_perf.enabled) return;
     c->total++;
     c->per_interval++;
 }
 
 void perf_counter_reset_interval(perf_counter_t *c)
 {
+    if (!g_perf.enabled) return;
     c->per_interval = 0;
 }
 
@@ -133,13 +139,49 @@ void perf_monitor_init(uint32_t report_interval_s)
     memset(s_start_times, 0, sizeof(s_start_times));
     g_perf.report_interval_s = report_interval_s;
     g_perf.last_report_time_us = esp_timer_get_time();
+    // g_perf.enabled stays false until perf_monitor_set_enabled(true)
     ESP_LOGI(TAG, "Performance monitor initialized (report every %"PRIu32"s)", report_interval_s);
+}
+
+// ── CPU utilization capture ─────────────────────────────────────────
+
+// Previous snapshot for delta computation
+static TaskStatus_t s_prev_tasks[CPU_MAX_TRACKED_TASKS];
+static uint32_t     s_prev_total_runtime = 0;
+static uint8_t      s_prev_task_count = 0;
+static bool         s_cpu_first_sample = true;
+
+// ── Runtime enable/disable ──────────────────────────────────────────
+
+void perf_monitor_set_enabled(bool enable)
+{
+    if (enable && !g_perf.enabled) {
+        // Turning on: reset all metrics to start fresh
+        uint32_t interval = g_perf.report_interval_s;
+        memset(&g_perf, 0, sizeof(g_perf));
+        memset(s_start_times, 0, sizeof(s_start_times));
+        g_perf.report_interval_s = interval;
+        g_perf.last_report_time_us = esp_timer_get_time();
+        g_perf.enabled = true;
+        s_cpu_first_sample = true;
+        s_prev_task_count = 0;
+        s_prev_total_runtime = 0;
+        ESP_LOGI(TAG, "Performance monitor ENABLED");
+    } else if (!enable && g_perf.enabled) {
+        g_perf.enabled = false;
+        s_cpu_first_sample = true;
+        s_prev_task_count = 0;
+        s_prev_total_runtime = 0;
+        ESP_LOGI(TAG, "Performance monitor DISABLED");
+    }
 }
 
 // ── Memory capture ──────────────────────────────────────────────────
 
 void perf_monitor_capture_memory(void)
 {
+    if (!g_perf.enabled) return;
+
     // Internal heap
     g_perf.heap_free_bytes         = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     g_perf.heap_min_free_bytes     = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
@@ -158,12 +200,6 @@ void perf_monitor_capture_memory(void)
 
 // ── CPU utilization capture ─────────────────────────────────────────
 
-// Previous snapshot for delta computation
-static TaskStatus_t s_prev_tasks[CPU_MAX_TRACKED_TASKS];
-static uint32_t     s_prev_total_runtime = 0;
-static uint8_t      s_prev_task_count = 0;
-static bool         s_cpu_first_sample = true;
-
 // qsort comparator: sort by cpu_percent descending
 static int cmp_cpu_desc(const void *a, const void *b)
 {
@@ -176,6 +212,8 @@ static int cmp_cpu_desc(const void *a, const void *b)
 
 void perf_monitor_capture_cpu(void)
 {
+    if (!g_perf.enabled) return;
+
     // Allocate current snapshot on stack
     UBaseType_t task_count = uxTaskGetNumberOfTasks();
     if (task_count > CPU_MAX_TRACKED_TASKS) task_count = CPU_MAX_TRACKED_TASKS;
@@ -294,6 +332,8 @@ static void log_timer(const char *name, const perf_timer_t *t)
 
 void perf_monitor_report(void)
 {
+    if (!g_perf.enabled) return;
+
     ESP_LOGI(TAG, "╔══════════════════════════════════════════════════════════════╗");
     ESP_LOGI(TAG, "║              PERFORMANCE REPORT                             ║");
     ESP_LOGI(TAG, "╚══════════════════════════════════════════════════════════════╝");
@@ -403,10 +443,14 @@ void perf_monitor_report(void)
 
 void perf_monitor_reset_all(void)
 {
+    bool was_enabled = g_perf.enabled;
     uint32_t interval = g_perf.report_interval_s;
     memset(&g_perf, 0, sizeof(g_perf));
+    g_perf.enabled = was_enabled;
     g_perf.report_interval_s = interval;
     g_perf.last_report_time_us = esp_timer_get_time();
+    s_cpu_first_sample = true;
+    memset(s_start_times, 0, sizeof(s_start_times));
     ESP_LOGI(TAG, "All performance metrics reset");
 }
 
@@ -444,8 +488,12 @@ static cJSON *counter_to_json(const perf_counter_t *c)
 
 char *perf_monitor_report_json(void)
 {
+    if (!g_perf.enabled) return NULL;
+
     cJSON *root = cJSON_CreateObject();
     if (!root) return NULL;
+
+    cJSON_AddBoolToObject(root, "enabled", true);
 
     // Uptime
     int64_t now = esp_timer_get_time();
@@ -577,5 +625,3 @@ char *perf_monitor_report_json(void)
     cJSON_Delete(root);
     return json_str;
 }
-
-#endif  // PERF_MONITOR_ENABLED

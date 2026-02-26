@@ -148,6 +148,10 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 
+# Firmware binaries (keep network_adapter.bin)
+firmware/*
+!firmware/network_adapter.bin
+
 # Environment variables
 .env
 .env.local

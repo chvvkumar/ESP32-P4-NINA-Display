@@ -275,7 +275,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         }
         ws_toast(index, TOAST_INFO, "Sequence started");
         nina_event_log_add(EVENT_SEV_INFO, index, "Sequence started");
-        nina_session_stats_reset();
+        nina_session_stats_reset(index);
         ESP_LOGI(TAG, "WS[%d]: Sequence starting", index);
     }
     // GUIDER-DITHER: Flag dithering state
@@ -532,9 +532,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
     }
 
     // Record timestamp for WS-to-UI latency measurement
-#if PERF_MONITOR_ENABLED
-    g_perf.last_ws_event_time_us = esp_timer_get_time();
-#endif
+    if (g_perf.enabled) g_perf.last_ws_event_time_us = esp_timer_get_time();
 
     cJSON_Delete(json);
 

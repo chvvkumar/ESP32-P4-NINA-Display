@@ -19,6 +19,7 @@ typedef enum {
     INFO_OVERLAY_SEQUENCE,
     INFO_OVERLAY_FILTER,
     INFO_OVERLAY_AUTOFOCUS,
+    INFO_OVERLAY_SESSION_STATS,
 } info_overlay_type_t;
 
 /** Camera + weather detail data (fetched from /equipment/camera/info + /equipment/weather/info) */

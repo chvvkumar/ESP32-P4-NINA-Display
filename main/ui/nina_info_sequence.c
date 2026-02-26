@@ -56,7 +56,7 @@ static lv_obj_t *make_info_card(lv_obj_t *parent) {
     lv_obj_set_style_pad_all(card, 12, 0);
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_row(card, 6, 0);
+    lv_obj_set_style_pad_row(card, 8, 0);
     lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
     return card;
 }
@@ -64,7 +64,7 @@ static lv_obj_t *make_info_card(lv_obj_t *parent) {
 static void make_info_section(lv_obj_t *parent, const char *title) {
     lv_obj_t *lbl = lv_label_create(parent);
     lv_label_set_text(lbl, title);
-    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_letter_space(lbl, 2, 0);
     if (current_theme) {
         int gb = app_config_get()->color_brightness;
@@ -83,7 +83,7 @@ static lv_obj_t *make_info_kv(lv_obj_t *parent, const char *key) {
 
     lv_obj_t *lbl_key = lv_label_create(row);
     lv_label_set_text(lbl_key, key);
-    lv_obj_set_style_text_font(lbl_key, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(lbl_key, &lv_font_montserrat_18, 0);
     if (current_theme) {
         int gb = app_config_get()->color_brightness;
         lv_obj_set_style_text_color(lbl_key,
@@ -92,7 +92,7 @@ static lv_obj_t *make_info_kv(lv_obj_t *parent, const char *key) {
 
     lv_obj_t *lbl_val = lv_label_create(row);
     lv_label_set_text(lbl_val, "--");
-    lv_obj_set_style_text_font(lbl_val, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(lbl_val, &lv_font_montserrat_18, 0);
     if (current_theme) {
         int gb = app_config_get()->color_brightness;
         lv_obj_set_style_text_color(lbl_val,
@@ -131,7 +131,7 @@ void build_sequence_content(lv_obj_t *content) {
         /* Target name */
         lbl_target_name = lv_label_create(target_row);
         lv_label_set_text(lbl_target_name, "--");
-        lv_obj_set_style_text_font(lbl_target_name, &lv_font_montserrat_24, 0);
+        lv_obj_set_style_text_font(lbl_target_name, &lv_font_montserrat_28, 0);
         lv_label_set_long_mode(lbl_target_name, LV_LABEL_LONG_DOT);
         lv_obj_set_flex_grow(lbl_target_name, 1);
         if (current_theme)
@@ -148,7 +148,7 @@ void build_sequence_content(lv_obj_t *content) {
 
         lv_obj_t *lbl_rem_hdr = lv_label_create(time_block);
         lv_label_set_text(lbl_rem_hdr, "REMAINING");
-        lv_obj_set_style_text_font(lbl_rem_hdr, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_font(lbl_rem_hdr, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_letter_space(lbl_rem_hdr, 1, 0);
         if (current_theme)
             lv_obj_set_style_text_color(lbl_rem_hdr,
@@ -156,7 +156,7 @@ void build_sequence_content(lv_obj_t *content) {
 
         lbl_time_remaining = lv_label_create(time_block);
         lv_label_set_text(lbl_time_remaining, "--:--:--");
-        lv_obj_set_style_text_font(lbl_time_remaining, &lv_font_montserrat_20, 0);
+        lv_obj_set_style_text_font(lbl_time_remaining, &lv_font_montserrat_24, 0);
         if (current_theme)
             lv_obj_set_style_text_color(lbl_time_remaining,
                 lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
@@ -201,7 +201,7 @@ void build_sequence_content(lv_obj_t *content) {
         /* Progress row */
         lbl_current_progress = lv_label_create(card);
         lv_label_set_text(lbl_current_progress, "-- / --");
-        lv_obj_set_style_text_font(lbl_current_progress, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_font(lbl_current_progress, &lv_font_montserrat_22, 0);
         lv_obj_set_style_pad_top(lbl_current_progress, 6, 0);
         if (current_theme)
             lv_obj_set_style_text_color(lbl_current_progress,
@@ -236,7 +236,7 @@ void build_sequence_content(lv_obj_t *content) {
             lv_obj_t *row = lv_obj_create(card);
             lv_obj_remove_style_all(row);
             lv_obj_set_width(row, LV_PCT(100));
-            lv_obj_set_height(row, 32);
+            lv_obj_set_height(row, 36);
             lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
             lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
             lv_obj_set_style_pad_column(row, 8, 0);
@@ -247,8 +247,8 @@ void build_sequence_content(lv_obj_t *content) {
             /* Filter name (fixed width) */
             lv_obj_t *name = lv_label_create(row);
             lv_label_set_text(name, "");
-            lv_obj_set_style_text_font(name, &lv_font_montserrat_16, 0);
-            lv_obj_set_width(name, 50);
+            lv_obj_set_style_text_font(name, &lv_font_montserrat_18, 0);
+            lv_obj_set_width(name, 54);
             lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_RIGHT, 0);
             if (current_theme)
                 lv_obj_set_style_text_color(name,
@@ -276,8 +276,8 @@ void build_sequence_content(lv_obj_t *content) {
             /* Count label (fixed width) */
             lv_obj_t *count = lv_label_create(row);
             lv_label_set_text(count, "");
-            lv_obj_set_style_text_font(count, &lv_font_montserrat_14, 0);
-            lv_obj_set_width(count, 60);
+            lv_obj_set_style_text_font(count, &lv_font_montserrat_16, 0);
+            lv_obj_set_width(count, 64);
             if (current_theme)
                 lv_obj_set_style_text_color(count,
                     lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
@@ -296,9 +296,11 @@ void build_sequence_content(lv_obj_t *content) {
                               LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_set_style_pad_ver(totals_row, 4, 0);
 
+        lv_obj_set_style_pad_right(totals_row, 92, 0);
+
         lv_obj_t *lbl_total_hdr = lv_label_create(totals_row);
         lv_label_set_text(lbl_total_hdr, "TOTAL EXPOSURES");
-        lv_obj_set_style_text_font(lbl_total_hdr, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(lbl_total_hdr, &lv_font_montserrat_16, 0);
         lv_obj_set_style_text_letter_space(lbl_total_hdr, 2, 0);
         if (current_theme)
             lv_obj_set_style_text_color(lbl_total_hdr,
@@ -306,7 +308,7 @@ void build_sequence_content(lv_obj_t *content) {
 
         lbl_totals = lv_label_create(totals_row);
         lv_label_set_text(lbl_totals, "-- / --");
-        lv_obj_set_style_text_font(lbl_totals, &lv_font_montserrat_20, 0);
+        lv_obj_set_style_text_font(lbl_totals, &lv_font_montserrat_24, 0);
         if (current_theme)
             lv_obj_set_style_text_color(lbl_totals,
                 lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
@@ -315,7 +317,7 @@ void build_sequence_content(lv_obj_t *content) {
     /* ── No-data message ── */
     lbl_no_data = lv_label_create(content);
     lv_label_set_text(lbl_no_data, "No sequence data");
-    lv_obj_set_style_text_font(lbl_no_data, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(lbl_no_data, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_align(lbl_no_data, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_align(lbl_no_data, LV_ALIGN_CENTER);
     if (current_theme)

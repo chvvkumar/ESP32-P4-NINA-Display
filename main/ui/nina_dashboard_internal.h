@@ -85,10 +85,13 @@ typedef struct {
 
 /* Shared state — defined in nina_dashboard.c, used by update and thumbnail modules */
 extern dashboard_page_t pages[MAX_NINA_INSTANCES];
-extern int page_count;        /* Number of NINA instance pages */
+extern int page_count;        /* Number of NINA instance pages (only enabled instances) */
 extern int total_page_count;  /* page_count + 3 (summary + settings + sysinfo) */
 extern int active_page;
 extern const theme_t *current_theme;
+
+/* Page-to-instance mapping: pages[i] corresponds to instance page_instance_map[i] */
+extern int page_instance_map[MAX_NINA_INSTANCES];
 
 /* Thumbnail overlay state — defined in nina_thumbnail.c */
 extern lv_obj_t *thumbnail_overlay;

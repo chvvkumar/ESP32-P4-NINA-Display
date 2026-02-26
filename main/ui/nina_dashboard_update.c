@@ -29,6 +29,27 @@ static inline void set_label_if_changed(lv_obj_t *label, const char *text) {
     if (strcmp(_cur, _buf) != 0) lv_label_set_text(label, _buf); \
 } while (0)
 
+/* Pick the largest font that fits the label's parent width */
+static void auto_fit_value_font(lv_obj_t *label) {
+    static const lv_font_t *fonts[] = {
+        &lv_font_montserrat_48, &lv_font_montserrat_36,
+        &lv_font_montserrat_32, &lv_font_montserrat_28,
+    };
+    const char *text = lv_label_get_text(label);
+    uint32_t len = (uint32_t)strlen(text);
+    int32_t letter_space = lv_obj_get_style_text_letter_space(label, 0);
+    int32_t avail = lv_obj_get_content_width(lv_obj_get_parent(label));
+    const lv_font_t *pick = fonts[sizeof(fonts) / sizeof(fonts[0]) - 1];
+    for (int i = 0; i < (int)(sizeof(fonts) / sizeof(fonts[0])); i++) {
+        if (lv_text_get_width(text, len, fonts[i], letter_space) <= avail) {
+            pick = fonts[i];
+            break;
+        }
+    }
+    if (lv_obj_get_style_text_font(label, 0) != pick)
+        lv_obj_set_style_text_font(label, pick, 0);
+}
+
 /* Red Night theme forces all colors to the theme palette, ignoring filter/threshold overrides */
 static bool theme_forces_colors(void) {
     return current_theme && strcmp(current_theme->name, "Red Night") == 0;
@@ -94,12 +115,18 @@ static void animate_value(lv_obj_t *label, int32_t from, int32_t to,
 
 /* ---- Sub-functions for update_nina_dashboard_page() ---- */
 
-static void update_disconnected_state(dashboard_page_t *p, int page_index, int gb, nina_conn_state_t conn_state) {
-    const char *url = app_config_get_instance_url(page_index);
+static void update_disconnected_state(dashboard_page_t *p, int instance_idx, int gb, nina_conn_state_t conn_state) {
+    const char *url = app_config_get_instance_url(instance_idx);
     char host[64] = {0};
     extract_host_from_url(url, host, sizeof(host));
-    const char *state_text = (conn_state == NINA_CONN_UNKNOWN || conn_state == NINA_CONN_CONNECTING)
-                             ? "Connecting..." : "Not Connected";
+    const char *state_text;
+    if (!app_config_is_instance_enabled(instance_idx)) {
+        state_text = "Disabled";
+    } else if (conn_state == NINA_CONN_UNKNOWN || conn_state == NINA_CONN_CONNECTING) {
+        state_text = "Connecting...";
+    } else {
+        state_text = "Not Connected";
+    }
     if (host[0] != '\0') {
         char buf[96];
         snprintf(buf, sizeof(buf), "%s - %s", host, state_text);
@@ -127,14 +154,27 @@ static void update_disconnected_state(dashboard_page_t *p, int page_index, int g
     set_label_if_changed(p->lbl_flip_value, "--");
     set_label_if_changed(p->lbl_stars_value, "--");
     set_label_if_changed(p->lbl_target_time_value, "--");
+    auto_fit_value_font(p->lbl_target_time_value);
+    set_label_if_changed(p->lbl_target_time_header, "TIME LEFT");
     for (int i = 0; i < MAX_POWER_WIDGETS; i++) {
         lv_obj_add_flag(p->box_pwr[i], LV_OBJ_FLAG_HIDDEN);
     }
 }
 
 static void update_header(dashboard_page_t *p, const nina_client_t *d) {
-    set_label_if_changed(p->lbl_instance_name,
-        d->telescope_name[0] != '\0' ? d->telescope_name : "N.I.N.A.");
+    // Telescope + camera on one line
+    if (d->telescope_name[0] && d->camera_name[0]) {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "%s | %s", d->telescope_name, d->camera_name);
+        set_label_if_changed(p->lbl_instance_name, buf);
+    } else if (d->telescope_name[0]) {
+        set_label_if_changed(p->lbl_instance_name, d->telescope_name);
+    } else if (d->camera_name[0]) {
+        set_label_if_changed(p->lbl_instance_name, d->camera_name);
+    } else {
+        set_label_if_changed(p->lbl_instance_name, "N.I.N.A.");
+    }
+
     set_label_if_changed(p->lbl_target_name, d->target_name[0] != '\0' ? d->target_name : "----");
 }
 
@@ -146,10 +186,10 @@ static void update_sequence_info(dashboard_page_t *p, const nina_client_t *d) {
 }
 
 static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
-                                int page_index, int gb) {
+                                int instance_idx, int gb) {
     uint32_t filter_color = app_config_apply_brightness(current_theme->progress_color, gb);
     if (!theme_forces_colors() && d->current_filter[0] != '\0' && strcmp(d->current_filter, "--") != 0) {
-        filter_color = app_config_get_filter_color(d->current_filter, page_index);
+        filter_color = app_config_get_filter_color(d->current_filter, instance_idx);
     }
     lv_obj_set_style_arc_color(p->arc_exposure, lv_color_hex(filter_color), LV_PART_INDICATOR);
     lv_obj_set_style_shadow_color(p->arc_exposure, lv_color_hex(filter_color), LV_PART_INDICATOR);
@@ -238,13 +278,13 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
 }
 
 static void update_guider_stats(dashboard_page_t *p, const nina_client_t *d,
-                                int page_index, int gb) {
+                                int instance_idx, int gb) {
     /* ── RMS Total ── */
     if (d->guider.rms_total > 0) {
         int32_t new_val = (int32_t)(d->guider.rms_total * 100.0f + 0.5f);
         uint32_t rms_color = theme_forces_colors()
             ? app_config_apply_brightness(current_theme->rms_color, gb)
-            : app_config_get_rms_color(d->guider.rms_total, page_index);
+            : app_config_get_rms_color(d->guider.rms_total, instance_idx);
         lv_obj_set_style_text_color(p->lbl_rms_value, lv_color_hex(rms_color), 0);
 
         if (p->anim_rms_total_x100 > 0 && new_val != p->anim_rms_total_x100) {
@@ -302,7 +342,7 @@ static void update_guider_stats(dashboard_page_t *p, const nina_client_t *d,
         int32_t new_val = (int32_t)(d->hfr * 100.0f + 0.5f);
         uint32_t hfr_color = theme_forces_colors()
             ? app_config_apply_brightness(current_theme->hfr_color, gb)
-            : app_config_get_hfr_color(d->hfr, page_index);
+            : app_config_get_hfr_color(d->hfr, instance_idx);
         lv_obj_set_style_text_color(p->lbl_hfr_value, lv_color_hex(hfr_color), 0);
 
         if (p->anim_hfr_x100 > 0 && new_val != p->anim_hfr_x100) {
@@ -321,9 +361,20 @@ static void update_guider_stats(dashboard_page_t *p, const nina_client_t *d,
 }
 
 static void update_mount_and_image_stats(dashboard_page_t *p, const nina_client_t *d) {
-    set_label_if_changed(p->lbl_flip_value,
-        (d->meridian_flip[0] != '\0' && strcmp(d->meridian_flip, "--") != 0)
-            ? d->meridian_flip : "--");
+    // Format flip time from "HH:MM:SS" to "Xh XXm"
+    if (d->meridian_flip[0] != '\0' && strcmp(d->meridian_flip, "--") != 0
+        && strcmp(d->meridian_flip, "FLIPPING") != 0) {
+        int hh = 0, mm = 0;
+        if (sscanf(d->meridian_flip, "%d:%d", &hh, &mm) >= 2) {
+            SET_LABEL_FMT_IF_CHANGED(p->lbl_flip_value, 16, "%dh %02dm", hh, mm);
+        } else {
+            set_label_if_changed(p->lbl_flip_value, d->meridian_flip);
+        }
+    } else if (d->meridian_flip[0] != '\0' && strcmp(d->meridian_flip, "--") != 0) {
+        set_label_if_changed(p->lbl_flip_value, d->meridian_flip);
+    } else {
+        set_label_if_changed(p->lbl_flip_value, "--");
+    }
 
     if (d->stars >= 0) {
         SET_LABEL_FMT_IF_CHANGED(p->lbl_stars_value, 16, "%d", d->stars);
@@ -333,6 +384,19 @@ static void update_mount_and_image_stats(dashboard_page_t *p, const nina_client_
 
     set_label_if_changed(p->lbl_target_time_value,
         d->target_time_remaining[0] != '\0' ? d->target_time_remaining : "--");
+    auto_fit_value_font(p->lbl_target_time_value);
+
+    // Update header to reflect the binding constraint (horizon, dawn, time, etc.)
+    // Show "+" suffix when multiple conditions are active (e.g. time + horizon)
+    if (d->target_time_reason[0] != '\0') {
+        if (d->target_condition_count > 1) {
+            SET_LABEL_FMT_IF_CHANGED(p->lbl_target_time_header, 24, "%s+", d->target_time_reason);
+        } else {
+            SET_LABEL_FMT_IF_CHANGED(p->lbl_target_time_header, 24, "%s", d->target_time_reason);
+        }
+    } else {
+        set_label_if_changed(p->lbl_target_time_header, "TIME LEFT");
+    }
 }
 
 static void update_power(dashboard_page_t *p, const nina_client_t *d) {
@@ -462,21 +526,24 @@ void update_nina_dashboard_page(int page_index, const nina_client_t *data) {
     dashboard_page_t *p = &pages[page_index];
     if (!p->page) return;
 
+    /* Translate page array index to actual instance index for config lookups */
+    int inst = page_instance_map[page_index];
+
     int gb = app_config_get()->color_brightness;
 
     update_safety_icon(p, data);
 
     if (!data->connected) {
-        nina_conn_state_t conn_state = nina_connection_get_state(page_index);
-        update_disconnected_state(p, page_index, gb, conn_state);
+        nina_conn_state_t conn_state = nina_connection_get_state(inst);
+        update_disconnected_state(p, inst, gb, conn_state);
         update_stale_indicator(p, data);
         return;
     }
 
     update_header(p, data);
     update_sequence_info(p, data);
-    update_exposure_arc(p, data, page_index, gb);
-    update_guider_stats(p, data, page_index, gb);
+    update_exposure_arc(p, data, inst, gb);
+    update_guider_stats(p, data, inst, gb);
     update_mount_and_image_stats(p, data);
     update_power(p, data);
     update_stale_indicator(p, data);
