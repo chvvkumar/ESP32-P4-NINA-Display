@@ -57,7 +57,7 @@ jobs:
         run: |
           VERSION=$(cat version.txt | tr -d '[:space:]')
           SHORT_SHA=$(git rev-parse --short HEAD)
-          BRANCH=${GITHUB_REF_NAME}
+          BRANCH=${GITHUB_REF_NAME//\//-}
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
           echo "branch=$BRANCH" >> $GITHUB_OUTPUT
