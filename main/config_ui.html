@@ -543,12 +543,12 @@
           <div class="pm-slider" id="pm_slider"></div>
           <div class="pm-seg-btn active" data-mode="auto" onclick="setPageMode('auto')">Manual</div>
           <div class="pm-seg-btn" data-mode="fixed" onclick="setPageMode('fixed')">Fixed</div>
-          <div class="pm-seg-btn" data-mode="rotate" onclick="setPageMode('rotate')">Rotate</div>
+          <div class="pm-seg-btn" data-mode="rotate" onclick="setPageMode('rotate')">Cycle Pages</div>
         </div>
 
         <div id="pm_auto_details" class="pm-content-box" style="display:none;">
           <div style="font-size:0.8rem; color:var(--text-muted); text-align:center;">
-            Starts on Summary page. Navigate manually via swipe or bottom buttons.
+            Starts on Summary page. Navigate manually via swipe or physical button.
           </div>
         </div>
 
@@ -619,7 +619,11 @@
         </div>
       </div>
       <div class="card">
-        <div class="card-title">Screen Sleep</div>
+        <div class="card-title card-title-collapsible" onclick="toggleCollapsible('scrslp')">
+          Screen Sleep
+          <span class="card-chevron collapsed" id="scrslp_chevron">&#9660;</span>
+        </div>
+        <div class="card-body-collapsible collapsed" id="scrslp_body">
         <div class="toggle-row">
           <span class="toggle-label">Turn off screen when idle</span>
           <label class="toggle"><input type="checkbox" id="screen_sleep_enabled"><span class="toggle-track"></span></label>
@@ -631,14 +635,20 @@
             <div class="field-hint">Seconds with no NINA connections before turning off the display. Touch or reconnection wakes it.</div>
           </div>
         </div>
+        </div>
       </div>
       <div class="card">
-        <div class="card-title">Debug</div>
+        <div class="card-title card-title-collapsible" onclick="toggleCollapsible('dbg')">
+          Debug
+          <span class="card-chevron collapsed" id="dbg_chevron">&#9660;</span>
+        </div>
+        <div class="card-body-collapsible collapsed" id="dbg_body">
         <div class="toggle-row">
           <span class="toggle-label">Enable Debug Mode</span>
           <label class="toggle"><input type="checkbox" id="debug_mode"><span class="toggle-track"></span></label>
         </div>
         <div class="field-hint" style="margin-top:8px;">Enables performance profiling metrics, serial reports, and the /api/perf endpoint. Toggling resets all metrics.</div>
+        </div>
       </div>
     </div>
     <div id="tab-network" class="tab-panel">
@@ -940,7 +950,7 @@
 
     function updatePageModeSummary(){
       var mode=getPageMode();
-      var labels={auto:'Manual',fixed:'Fixed',rotate:'Rotate'};
+      var labels={auto:'Manual',fixed:'Fixed',rotate:'Cycle Pages'};
       $('pm_summary').textContent='\u2014 '+labels[mode];
     }
 

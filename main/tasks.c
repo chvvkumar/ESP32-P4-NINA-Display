@@ -388,6 +388,66 @@ void data_update_task(void *arg) {
                     if (locked[j]) nina_client_unlock(&instances[j]);
             }
 
+            /* Mid-loop auto-rotate check: offline instance timeouts can block
+             * the poll loop for many seconds, causing the rotate interval to
+             * be missed.  Re-check the timer between each instance poll. */
+            {
+                app_config_t *mr_cfg = app_config_get();
+                if (mr_cfg->auto_rotate_enabled && mr_cfg->auto_rotate_interval_s > 0) {
+                    int64_t mid_now = esp_timer_get_time() / 1000;
+                    if (mid_now - last_rotate_ms >= (int64_t)mr_cfg->auto_rotate_interval_s * 1000) {
+                        int total_mr = nina_dashboard_get_total_page_count();
+                        int cur_mr = nina_dashboard_get_active_page();
+                        uint8_t page_mask = mr_cfg->auto_rotate_pages;
+                        int ena_page_count_mr = total_mr - 3;
+                        int next_mr = cur_mr;
+                        for (int step = 1; step < total_mr; step++) {
+                            int cand = (cur_mr + step) % total_mr;
+                            bool in_mask = false;
+                            if (cand == 0)
+                                in_mask = (page_mask & 0x01) != 0;
+                            else if (cand >= 1 && cand <= ena_page_count_mr) {
+                                int inst = nina_dashboard_page_to_instance(cand - 1);
+                                if (inst >= 0)
+                                    in_mask = (page_mask & (1 << (inst + 1))) != 0;
+                            }
+                            else if (cand == ena_page_count_mr + 1)
+                                in_mask = (page_mask & 0x20) != 0;
+                            else if (cand == ena_page_count_mr + 2)
+                                in_mask = (page_mask & 0x10) != 0;
+                            if (!in_mask) continue;
+                            if (cand >= 1 && cand <= ena_page_count_mr) {
+                                int nina_idx = nina_dashboard_page_to_instance(cand - 1);
+                                if (nina_idx >= 0 && mr_cfg->auto_rotate_skip_disconnected
+                                    && !nina_connection_is_connected(nina_idx)) continue;
+                            }
+                            next_mr = cand;
+                            break;
+                        }
+                        if (next_mr != cur_mr) {
+                            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                                nina_dashboard_show_page_animated(next_mr, instance_count, mr_cfg->auto_rotate_effect);
+                                bsp_display_unlock();
+                            }
+                            page_changed = true;
+                            ESP_LOGI(TAG, "Auto-rotate: switched to page %d", next_mr);
+                            /* Update snapshot so remaining polls use the new active page */
+                            current_active = nina_dashboard_get_active_page();
+                            on_sysinfo = nina_dashboard_is_sysinfo_page();
+                            on_settings = nina_dashboard_is_settings_page();
+                            on_summary = nina_dashboard_is_summary_page();
+                            active_nina_idx = -1;
+                            active_page_idx = -1;
+                            if (!on_sysinfo && !on_settings && !on_summary && current_active >= 1) {
+                                active_page_idx = current_active - 1;
+                                active_nina_idx = nina_dashboard_page_to_instance(active_page_idx);
+                            }
+                        }
+                        last_rotate_ms = mid_now;
+                    }
+                }
+            }
+
             int i = poll_order[pi];
 
             // Check deferred camera-disconnect alerts (runs regardless of poll skip)
