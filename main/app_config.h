@@ -12,7 +12,7 @@ extern "C" {
 #define MAX_NINA_INSTANCES 3
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 9
+#define APP_CONFIG_VERSION 10
 
 typedef struct {
     uint32_t config_version;        // Must be first field — used to detect legacy blobs
@@ -45,6 +45,7 @@ typedef struct {
     bool     instance_enabled[3];       // Per-instance enable flag (disabled = skip polling/WS)
     bool     screen_sleep_enabled;     // Turn off display when no NINA instances connected
     uint16_t screen_sleep_timeout_s;   // Seconds with 0 connections before screen off (default 60)
+    bool     alert_flash_enabled;     // Enable border flash alerts for RMS/HFR/safety events (default true)
 } app_config_t;
 
 // WiFi credentials are NOT stored in app_config_t. They are managed by

@@ -414,7 +414,9 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         } else {
             ws_toast(index, TOAST_ERROR, "UNSAFE");
             nina_event_log_add(EVENT_SEV_ERROR, index, "Observatory UNSAFE!");
-            nina_alert_trigger(ALERT_SAFETY, index, 0);
+            if (app_config_get()->alert_flash_enabled) {
+                nina_alert_trigger(ALERT_SAFETY, index, 0);
+            }
         }
         /* Safety state update (no display lock needed — state tracking only) */
         nina_safety_update(true, safe);
@@ -547,9 +549,13 @@ static void handle_websocket_message(int index, const char *payload, int len) {
 
     cJSON_Delete(json);
 
-    // Wake data task for immediate UI refresh
+    // Wake UI coordinator for immediate UI refresh
     if (data_task_handle) {
         xTaskNotifyGive(data_task_handle);
+    }
+    // Wake the relevant poll task for immediate re-poll (e.g., sequence_poll_needed)
+    if (index >= 0 && index < MAX_NINA_INSTANCES && poll_task_handles[index]) {
+        xTaskNotifyGive(poll_task_handles[index]);
     }
 }
 

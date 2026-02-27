@@ -176,6 +176,12 @@ void app_main(void)
     cJSON_Hooks psram_hooks = { .malloc_fn = cjson_psram_malloc, .free_fn = free };
     cJSON_InitHooks(&psram_hooks);
 
+    /* Suppress verbose ESP-IDF HTTP/TLS transport errors — connection failures
+     * are already reported cleanly by nina_client as "unreachable" messages. */
+    esp_log_level_set("esp-tls", ESP_LOG_NONE);
+    esp_log_level_set("transport_base", ESP_LOG_NONE);
+    esp_log_level_set("HTTP_CLIENT", ESP_LOG_NONE);
+
     app_config_init();
     nina_connection_init();
 
@@ -233,6 +239,8 @@ void app_main(void)
     }
 
     nina_dashboard_set_page_change_cb(on_page_changed);
+
+    nina_client_init();  // DNS cache mutex — must be called before poll tasks spawn
 
     xTaskCreate(input_task,       "input_task", 4096,  NULL, 5, NULL);
     xTaskCreate(data_update_task, "data_task",  12288, NULL, 5, NULL);

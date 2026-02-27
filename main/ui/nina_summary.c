@@ -127,6 +127,8 @@ typedef struct {
     lv_obj_t *seq_row;          /* sequence info row (visible in 1-2 card mode) */
     lv_obj_t *lbl_seq_title;    /* "SEQUENCE" label */
     lv_obj_t *lbl_seq_name;
+    lv_obj_t *lbl_exp_title;    /* "EXPOSURES" label */
+    lv_obj_t *lbl_exp_val;      /* exposure count "X / Y" */
     lv_obj_t *lbl_step_title;   /* "STEP" label */
     lv_obj_t *lbl_seq_step;
     lv_obj_t *stats_row;
@@ -319,19 +321,24 @@ static void create_card(summary_card_t *sc, lv_obj_t *parent, int instance_index
     lv_label_set_text(sc->lbl_pct, "");
 
     /* ── Sequence info row (shown in 1-2 card mode) ── */
+    /* Three equal-width columns: SEQUENCE | EXPOSURES | STEP
+     * Each column has flex_grow=1 so they split width evenly,
+     * keeping the center column centered regardless of content. */
     sc->seq_row = lv_obj_create(sc->card);
     lv_obj_remove_style_all(sc->seq_row);
     lv_obj_set_width(sc->seq_row, LV_PCT(100));
     lv_obj_set_height(sc->seq_row, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(sc->seq_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(sc->seq_row, LV_FLEX_ALIGN_SPACE_BETWEEN,
+    lv_obj_set_flex_align(sc->seq_row, LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_add_flag(sc->seq_row, LV_OBJ_FLAG_HIDDEN); /* hidden by default */
 
+    /* Left column: SEQUENCE */
     lv_obj_t *seq_left = lv_obj_create(sc->seq_row);
     lv_obj_remove_style_all(seq_left);
     lv_obj_clear_flag(seq_left, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_size(seq_left, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_height(seq_left, LV_SIZE_CONTENT);
+    lv_obj_set_flex_grow(seq_left, 1);
     lv_obj_set_flex_flow(seq_left, LV_FLEX_FLOW_COLUMN);
 
     sc->lbl_seq_title = lv_label_create(seq_left);
@@ -348,10 +355,38 @@ static void create_card(summary_card_t *sc, lv_obj_t *parent, int instance_index
     lv_obj_set_style_text_font(sc->lbl_seq_name, &lv_font_montserrat_18, 0);
     lv_label_set_text(sc->lbl_seq_name, "----");
 
+    /* Center column: EXPOSURES */
+    lv_obj_t *seq_center = lv_obj_create(sc->seq_row);
+    lv_obj_remove_style_all(seq_center);
+    lv_obj_clear_flag(seq_center, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_height(seq_center, LV_SIZE_CONTENT);
+    lv_obj_set_flex_grow(seq_center, 1);
+    lv_obj_set_flex_flow(seq_center, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(seq_center, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    sc->lbl_exp_title = lv_label_create(seq_center);
+    lv_label_set_text(sc->lbl_exp_title, "EXPOSURES");
+    lv_obj_set_style_text_font(sc->lbl_exp_title, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_letter_space(sc->lbl_exp_title, 1, 0);
+    lv_obj_set_style_text_align(sc->lbl_exp_title, LV_TEXT_ALIGN_CENTER, 0);
+    if (current_theme) {
+        int gb = app_config_get()->color_brightness;
+        lv_obj_set_style_text_color(sc->lbl_exp_title,
+            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+    }
+
+    sc->lbl_exp_val = lv_label_create(seq_center);
+    lv_obj_set_style_text_font(sc->lbl_exp_val, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_align(sc->lbl_exp_val, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(sc->lbl_exp_val, "-- / --");
+
+    /* Right column: STEP */
     lv_obj_t *seq_right = lv_obj_create(sc->seq_row);
     lv_obj_remove_style_all(seq_right);
     lv_obj_clear_flag(seq_right, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_size(seq_right, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_height(seq_right, LV_SIZE_CONTENT);
+    lv_obj_set_flex_grow(seq_right, 1);
     lv_obj_set_flex_flow(seq_right, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(seq_right, LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
@@ -533,6 +568,8 @@ static void update_card_layout(summary_card_t *sc, int visible_count) {
         lv_obj_clear_flag(sc->seq_row, LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_style_text_font(sc->lbl_seq_title, p->seq_label, 0);
         lv_obj_set_style_text_font(sc->lbl_seq_name, p->seq_value, 0);
+        lv_obj_set_style_text_font(sc->lbl_exp_title, p->seq_label, 0);
+        lv_obj_set_style_text_font(sc->lbl_exp_val, p->seq_value, 0);
         lv_obj_set_style_text_font(sc->lbl_step_title, p->seq_label, 0);
         lv_obj_set_style_text_font(sc->lbl_seq_step, p->seq_value, 0);
     } else {
@@ -830,10 +867,21 @@ void summary_page_update(const nina_client_t *instances, int count) {
                 set_label_if_changed(sc->lbl_seq_step, "----");
             }
 
+            /* Exposure count */
+            if (d->exposure_iterations > 0) {
+                SET_LABEL_FMT_IF_CHANGED(sc->lbl_exp_val, 32, "%d / %d",
+                    d->exposure_count, d->exposure_iterations);
+            } else {
+                set_label_if_changed(sc->lbl_exp_val, "-- / --");
+            }
+
             if (current_theme) {
                 lv_obj_set_style_text_color(sc->lbl_seq_name,
                     lv_color_hex(app_config_apply_brightness(
                         current_theme->header_text_color, gb)), 0);
+                lv_obj_set_style_text_color(sc->lbl_exp_val,
+                    lv_color_hex(app_config_apply_brightness(
+                        current_theme->text_color, gb)), 0);
                 lv_obj_set_style_text_color(sc->lbl_seq_step,
                     lv_color_hex(app_config_apply_brightness(
                         current_theme->text_color, gb)), 0);
@@ -995,9 +1043,9 @@ void summary_page_apply_theme(void) {
         /* Stat labels + sequence title labels */
         lv_obj_t *labels[] = {
             sc->lbl_rms_label, sc->lbl_hfr_label, sc->lbl_flip_label,
-            sc->lbl_seq_title, sc->lbl_step_title
+            sc->lbl_seq_title, sc->lbl_exp_title, sc->lbl_step_title
         };
-        for (int j = 0; j < 5; j++) {
+        for (int j = 0; j < 6; j++) {
             if (labels[j]) {
                 lv_obj_set_style_text_color(labels[j],
                     lv_color_hex(app_config_apply_brightness(

@@ -493,10 +493,10 @@ static void update_stale_indicator(dashboard_page_t *p, const nina_client_t *d) 
 #define ICON_GPP_BAD        "\xef\x80\x92"  /* U+F012 — shield with X     */
 #define ICON_GPP_MAYBE      "\xef\x80\x94"  /* U+F014 — shield with ?     */
 
-static void update_safety_icon(dashboard_page_t *p, const nina_client_t *data) {
+static void update_safety_icon(dashboard_page_t *p, const nina_client_t *data, int inst) {
     if (!p->safety_icon) return;
 
-    if (!data->connected) {
+    if (!nina_connection_is_connected(inst)) {
         lv_obj_add_flag(p->safety_icon, LV_OBJ_FLAG_HIDDEN);
         return;
     }
@@ -531,10 +531,10 @@ void update_nina_dashboard_page(int page_index, const nina_client_t *data) {
 
     int gb = app_config_get()->color_brightness;
 
-    update_safety_icon(p, data);
+    update_safety_icon(p, data, inst);
 
-    if (!data->connected) {
-        nina_conn_state_t conn_state = nina_connection_get_state(inst);
+    nina_conn_state_t conn_state = nina_connection_get_state(inst);
+    if (conn_state != NINA_CONN_CONNECTED) {
         update_disconnected_state(p, inst, gb, conn_state);
         update_stale_indicator(p, data);
         return;

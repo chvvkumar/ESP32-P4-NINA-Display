@@ -15,6 +15,7 @@
 #include "nina_connection.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -27,11 +28,57 @@
 static const char *TAG = "nina_client";
 
 // =============================================================================
-// HTTP Client Reuse State (file-scoped, single-threaded access from data task)
+// Per-task HTTP poll context registry (replaces FreeRTOS TLS to avoid
+// index conflicts with LWIP/pthread which both claim TLS index 0)
 // =============================================================================
 
-static bool s_poll_mode = false;
-static esp_http_client_handle_t s_reuse_client = NULL;
+#include "app_config.h"  // MAX_NINA_INSTANCES
+
+typedef struct {
+    TaskHandle_t      task;
+    http_poll_ctx_t  *ctx;
+} poll_ctx_slot_t;
+
+/* One slot per poll task + one spare for safety */
+static poll_ctx_slot_t s_poll_ctx_registry[MAX_NINA_INSTANCES + 1];
+
+void http_poll_ctx_set(http_poll_ctx_t *ctx) {
+    TaskHandle_t self = xTaskGetCurrentTaskHandle();
+    if (ctx) {
+        /* Register: find empty slot or overwrite own entry */
+        for (int i = 0; i < MAX_NINA_INSTANCES + 1; i++) {
+            if (s_poll_ctx_registry[i].task == self || s_poll_ctx_registry[i].task == NULL) {
+                s_poll_ctx_registry[i].task = self;
+                s_poll_ctx_registry[i].ctx  = ctx;
+                return;
+            }
+        }
+    } else {
+        /* Unregister */
+        for (int i = 0; i < MAX_NINA_INSTANCES + 1; i++) {
+            if (s_poll_ctx_registry[i].task == self) {
+                s_poll_ctx_registry[i].task = NULL;
+                s_poll_ctx_registry[i].ctx  = NULL;
+                return;
+            }
+        }
+    }
+}
+
+http_poll_ctx_t *http_poll_ctx_get(void) {
+    TaskHandle_t self = xTaskGetCurrentTaskHandle();
+    for (int i = 0; i < MAX_NINA_INSTANCES + 1; i++) {
+        if (s_poll_ctx_registry[i].task == self)
+            return s_poll_ctx_registry[i].ctx;
+    }
+    return NULL;
+}
+
+// =============================================================================
+// DNS Cache Mutex (for concurrent poll tasks)
+// =============================================================================
+
+static SemaphoreHandle_t s_dns_mutex = NULL;
 
 // Retry delays between attempts (ms). Index 0 = delay before 2nd attempt, etc.
 static const int http_retry_delays_ms[] = {500};
@@ -132,6 +179,12 @@ time_t parse_iso8601(const char *str) {
 }
 
 cJSON *http_get_json(const char *url) {
+    /* Read per-task HTTP context from TLS (set by poll tasks).
+     * If no context is set, use standalone mode (no reuse, no keep-alive). */
+    http_poll_ctx_t *tls_ctx = http_poll_ctx_get();
+    bool poll_mode = tls_ctx ? tls_ctx->poll_mode : false;
+    esp_http_client_handle_t *reuse_slot = tls_ctx ? tls_ctx->client_handle : NULL;
+
     perf_timer_start(&g_perf.http_request);
     perf_counter_increment(&g_perf.http_request_count);
     for (int attempt = 0; attempt < HTTP_MAX_ATTEMPTS; attempt++) {
@@ -144,16 +197,16 @@ cJSON *http_get_json(const char *url) {
         }
 
         esp_http_client_handle_t client;
-        bool reusing = (s_poll_mode && s_reuse_client != NULL);
+        bool reusing = (poll_mode && reuse_slot && *reuse_slot != NULL);
 
         if (reusing) {
-            client = s_reuse_client;
+            client = *reuse_slot;
             esp_http_client_set_url(client, url);
         } else {
             esp_http_client_config_t cfg = {
                 .url = url,
                 .timeout_ms = 3000,
-                .keep_alive_enable = s_poll_mode,
+                .keep_alive_enable = poll_mode,
             };
             client = esp_http_client_init(&cfg);
             if (!client) continue;
@@ -161,23 +214,15 @@ cJSON *http_get_json(const char *url) {
 
         esp_err_t err = esp_http_client_open(client, 0);
         if (err != ESP_OK) {
-            if (reusing) {
-                esp_http_client_cleanup(client);
-                s_reuse_client = NULL;
-            } else {
-                esp_http_client_cleanup(client);
-            }
+            esp_http_client_cleanup(client);
+            if (reusing && reuse_slot) *reuse_slot = NULL;
             continue;  // Transport error — retryable
         }
 
         int content_length = esp_http_client_fetch_headers(client);
         if (content_length < 0) {
-            if (reusing) {
-                esp_http_client_cleanup(client);
-                s_reuse_client = NULL;
-            } else {
-                esp_http_client_cleanup(client);
-            }
+            esp_http_client_cleanup(client);
+            if (reusing && reuse_slot) *reuse_slot = NULL;
             continue;  // Transport error — retryable
         }
 
@@ -190,6 +235,7 @@ cJSON *http_get_json(const char *url) {
                 esp_http_client_cleanup(client);
             }
             if (status >= 500) continue;  // 5xx — retryable
+            perf_timer_stop(&g_perf.http_request);
             return NULL;  // 4xx — not retryable
         }
 
@@ -210,6 +256,7 @@ cJSON *http_get_json(const char *url) {
         if (!buffer) {
             if (reusing) esp_http_client_close(client);
             else esp_http_client_cleanup(client);
+            perf_timer_stop(&g_perf.http_request);
             return NULL;  // OOM — not retryable
         }
 
@@ -223,9 +270,9 @@ cJSON *http_get_json(const char *url) {
         buffer[total_read_len] = '\0';
 
         // Keep connection alive for reuse in poll mode; cleanup otherwise
-        if (s_poll_mode) {
+        if (poll_mode && reuse_slot) {
             esp_http_client_close(client);
-            s_reuse_client = client;
+            *reuse_slot = client;
         } else {
             esp_http_client_cleanup(client);
         }
@@ -238,6 +285,15 @@ cJSON *http_get_json(const char *url) {
         perf_timer_stop(&g_perf.http_request);
         return json;
     }
+
+    /* Extract host from URL for a clean log message */
+    const char *host = url;
+    const char *scheme_end = strstr(url, "://");
+    if (scheme_end) host = scheme_end + 3;
+    const char *host_end = strchr(host, ':');
+    if (!host_end) host_end = strchr(host, '/');
+    int host_len = host_end ? (int)(host_end - host) : (int)strlen(host);
+    ESP_LOGW(TAG, "%.*s unreachable", host_len, host);
 
     perf_counter_increment(&g_perf.http_failure_count);
     perf_timer_stop(&g_perf.http_request);
@@ -324,26 +380,17 @@ void nina_poll_state_init(nina_poll_state_t *state) {
 }
 
 void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state_t *state, int instance) {
-    // Enable HTTP client reuse for this poll cycle
-    s_poll_mode = true;
-    s_reuse_client = (esp_http_client_handle_t)state->http_client;
+    // Set per-task HTTP context for client reuse during this poll cycle
+    esp_http_client_handle_t reuse_handle = (esp_http_client_handle_t)state->http_client;
+    http_poll_ctx_t poll_ctx = { .client_handle = &reuse_handle, .poll_mode = true };
+    http_poll_ctx_set(&poll_ctx);
 
     int64_t now_ms = esp_timer_get_time() / 1000;
 
-    // Reset only volatile fields (preserve persistent data between polls)
+    // Mark disconnected before fetch — fetchers set connected=true on success.
+    // Don't reset display fields (status, time_remaining, etc.) here: with polling
+    // in a separate task, the UI would see the blank values during the HTTP fetch window.
     data->connected = false;
-    data->exposure_current = 0;
-    strcpy(data->status, "IDLE");
-    strcpy(data->time_remaining, "--");
-
-    // On very first call, set defaults for persistent fields
-    if (!state->static_fetched) {
-        strcpy(data->target_name, "No Target");
-        strcpy(data->meridian_flip, "--");
-        strcpy(data->profile_name, "NINA");
-        strcpy(data->current_filter, "--");
-        data->filter_count = 0;
-    }
 
     ESP_LOGI(TAG, "=== Polling NINA data (%s: %s) ===",
              state->bundle_not_available ? "tiered" : "bundled",
@@ -380,9 +427,8 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
         state->static_fetched = false;
         state->cached_image_count = -1;
         nina_connection_set_static_data_ready(instance, false);
-        state->http_client = (void *)s_reuse_client;
-        s_reuse_client = NULL;
-        s_poll_mode = false;
+        state->http_client = (void *)reuse_handle;
+        http_poll_ctx_set(NULL);
         return;
     }
 
@@ -520,9 +566,8 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
     fixup_exposure_timing(data);
 
     // Save persistent HTTP client for next poll cycle
-    state->http_client = (void *)s_reuse_client;
-    s_reuse_client = NULL;
-    s_poll_mode = false;
+    state->http_client = (void *)reuse_handle;
+    http_poll_ctx_set(NULL);
 
     ESP_LOGI(TAG, "=== Poll Summary ===");
     ESP_LOGI(TAG, "Connected: %d, Profile: %s", data->connected, data->profile_name);
@@ -542,26 +587,15 @@ void nina_client_poll_heartbeat(const char *base_url, nina_client_t *data, int i
 }
 
 void nina_client_poll_background(const char *base_url, nina_client_t *data, nina_poll_state_t *state, int instance) {
-    // Enable HTTP client reuse for this poll cycle
-    s_poll_mode = true;
-    s_reuse_client = (esp_http_client_handle_t)state->http_client;
+    // Set per-task HTTP context for client reuse during this poll cycle
+    esp_http_client_handle_t reuse_handle = (esp_http_client_handle_t)state->http_client;
+    http_poll_ctx_t poll_ctx = { .client_handle = &reuse_handle, .poll_mode = true };
+    http_poll_ctx_set(&poll_ctx);
 
     int64_t now_ms = esp_timer_get_time() / 1000;
 
-    // Reset only volatile fields (preserve persistent data between polls)
+    // Mark disconnected before fetch — fetchers set connected=true on success.
     data->connected = false;
-    data->exposure_current = 0;
-    strcpy(data->status, "IDLE");
-    strcpy(data->time_remaining, "--");
-
-    // On very first call, set defaults for persistent fields
-    if (!state->static_fetched) {
-        strcpy(data->target_name, "No Target");
-        strcpy(data->meridian_flip, "--");
-        strcpy(data->profile_name, "NINA");
-        strcpy(data->current_filter, "--");
-        data->filter_count = 0;
-    }
 
     // --- Equipment fetch ---
     // Use the full bundle only on first connect (to seed static data: filters, switch, etc.).
@@ -586,9 +620,8 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
         state->static_fetched = false;
         state->cached_image_count = -1;
         nina_connection_set_static_data_ready(instance, false);
-        state->http_client = (void *)s_reuse_client;
-        s_reuse_client = NULL;
-        s_poll_mode = false;
+        state->http_client = (void *)reuse_handle;
+        http_poll_ctx_set(NULL);
         return;
     }
 
@@ -653,9 +686,8 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
     }
 
     // Save persistent HTTP client for next poll cycle
-    state->http_client = (void *)s_reuse_client;
-    s_reuse_client = NULL;
-    s_poll_mode = false;
+    state->http_client = (void *)reuse_handle;
+    http_poll_ctx_set(NULL);
 
     ESP_LOGD(TAG, "Background poll: connected=%d, profile=%s, target=%s",
              data->connected, data->profile_name, data->target_name);
@@ -678,6 +710,12 @@ typedef struct {
 } dns_cache_entry_t;
 
 static dns_cache_entry_t s_dns_cache[3];  // One per instance (MAX_NINA_INSTANCES)
+
+void nina_client_init(void) {
+    if (!s_dns_mutex) {
+        s_dns_mutex = xSemaphoreCreateMutex();
+    }
+}
 
 bool nina_client_dns_check(const char *base_url) {
     if (!base_url) return false;
@@ -703,30 +741,37 @@ bool nina_client_dns_check(const char *base_url) {
 
     int64_t now_ms = esp_timer_get_time() / 1000;
 
+    if (s_dns_mutex) xSemaphoreTake(s_dns_mutex, portMAX_DELAY);
+
     // Check DNS cache for a valid (non-expired) entry
     for (int i = 0; i < 3; i++) {
         if (strcmp(s_dns_cache[i].hostname, hostname) == 0 &&
             s_dns_cache[i].resolved_ip[0] != '\0') {
             if (now_ms - s_dns_cache[i].resolve_time_ms < DNS_CACHE_TTL_MS) {
                 ESP_LOGD(TAG, "DNS cache hit for %s -> %s", hostname, s_dns_cache[i].resolved_ip);
+                if (s_dns_mutex) xSemaphoreGive(s_dns_mutex);
                 return true;
             }
             break;  // Found entry but expired — do fresh lookup
         }
     }
 
-    // Cache miss or expired — perform real DNS lookup
+    if (s_dns_mutex) xSemaphoreGive(s_dns_mutex);
+
+    // Cache miss or expired — perform real DNS lookup (outside mutex — can block)
     struct addrinfo hints = {0};
     hints.ai_family = AF_INET;
     struct addrinfo *result = NULL;
     int err = getaddrinfo(hostname, NULL, &hints, &result);
 
     if (err == 0 && result) {
-        // Lookup succeeded — update cache
+        // Lookup succeeded — update cache under mutex
         char ip_str[46] = {0};
         struct sockaddr_in *addr = (struct sockaddr_in *)result->ai_addr;
         inet_ntoa_r(addr->sin_addr, ip_str, sizeof(ip_str));
         freeaddrinfo(result);
+
+        if (s_dns_mutex) xSemaphoreTake(s_dns_mutex, portMAX_DELAY);
 
         // Find existing slot or first empty slot
         int slot = -1;
@@ -743,6 +788,8 @@ bool nina_client_dns_check(const char *base_url) {
         snprintf(s_dns_cache[slot].resolved_ip, sizeof(s_dns_cache[slot].resolved_ip), "%s", ip_str);
         s_dns_cache[slot].resolve_time_ms = now_ms;
 
+        if (s_dns_mutex) xSemaphoreGive(s_dns_mutex);
+
         ESP_LOGD(TAG, "DNS cached %s -> %s", hostname, ip_str);
         return true;
     }
@@ -750,14 +797,17 @@ bool nina_client_dns_check(const char *base_url) {
     if (result) freeaddrinfo(result);
 
     // Lookup failed — try stale cache as fallback
+    if (s_dns_mutex) xSemaphoreTake(s_dns_mutex, portMAX_DELAY);
     for (int i = 0; i < 3; i++) {
         if (strcmp(s_dns_cache[i].hostname, hostname) == 0 &&
             s_dns_cache[i].resolved_ip[0] != '\0') {
             ESP_LOGW(TAG, "DNS lookup failed for %s, using stale cache -> %s",
                      hostname, s_dns_cache[i].resolved_ip);
+            if (s_dns_mutex) xSemaphoreGive(s_dns_mutex);
             return true;
         }
     }
+    if (s_dns_mutex) xSemaphoreGive(s_dns_mutex);
 
     ESP_LOGD(TAG, "DNS check failed for %s (err %d), no cache available", hostname, err);
     return false;

@@ -71,7 +71,8 @@ static void find_earliest_condition(cJSON *container, earliest_condition_t *out)
         }
     }
 
-    // Recurse into RUNNING child containers
+    // Recurse into RUNNING or CREATED child containers
+    // (CREATED containers may have valid future time conditions)
     cJSON *items = cJSON_GetObjectItem(container, "Items");
     if (items && cJSON_IsArray(items)) {
         cJSON *item = NULL;
@@ -79,7 +80,8 @@ static void find_earliest_condition(cJSON *container, earliest_condition_t *out)
             cJSON *status = cJSON_GetObjectItem(item, "Status");
             cJSON *child_items = cJSON_GetObjectItem(item, "Items");
             if (status && status->valuestring && child_items &&
-                strcmp(status->valuestring, "RUNNING") == 0) {
+                (strcmp(status->valuestring, "RUNNING") == 0 ||
+                 strcmp(status->valuestring, "CREATED") == 0)) {
                 find_earliest_condition(item, out);
             }
         }

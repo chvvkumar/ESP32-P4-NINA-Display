@@ -136,6 +136,9 @@ typedef struct {
     SemaphoreHandle_t mutex;
 } nina_client_t;
 
+// One-time module init (creates DNS cache mutex). Call from app_main() before tasks.
+void nina_client_init(void);
+
 // Initialize the mutex for a nina_client_t instance. Call once after struct init.
 void nina_client_init_mutex(nina_client_t *client);
 
