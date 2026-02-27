@@ -414,7 +414,9 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         } else {
             ws_toast(index, TOAST_ERROR, "UNSAFE");
             nina_event_log_add(EVENT_SEV_ERROR, index, "Observatory UNSAFE!");
-            nina_alert_trigger(ALERT_SAFETY, index, 0);
+            if (app_config_get()->alert_flash_enabled) {
+                nina_alert_trigger(ALERT_SAFETY, index, 0);
+            }
         }
         /* Safety state update (no display lock needed — state tracking only) */
         nina_safety_update(true, safe);

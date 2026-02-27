@@ -74,6 +74,7 @@ esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddBoolToObject(root, "instance_enabled_3", cfg->instance_enabled[2]);
     cJSON_AddBoolToObject(root, "screen_sleep_enabled", cfg->screen_sleep_enabled);
     cJSON_AddNumberToObject(root, "screen_sleep_timeout_s", cfg->screen_sleep_timeout_s);
+    cJSON_AddBoolToObject(root, "alert_flash_enabled", cfg->alert_flash_enabled);
 
     const char *json_str = cJSON_PrintUnformatted(root);
     if (json_str == NULL) {
@@ -324,6 +325,7 @@ esp_err_t config_post_handler(httpd_req_t *req)
     JSON_TO_BOOL(root, "instance_enabled_3", cfg->instance_enabled[2]);
 
     JSON_TO_BOOL(root, "screen_sleep_enabled", cfg->screen_sleep_enabled);
+    JSON_TO_BOOL(root, "alert_flash_enabled", cfg->alert_flash_enabled);
     cJSON *sst_item = cJSON_GetObjectItem(root, "screen_sleep_timeout_s");
     if (cJSON_IsNumber(sst_item)) {
         int v = sst_item->valueint;

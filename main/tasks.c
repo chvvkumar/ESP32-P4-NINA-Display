@@ -773,19 +773,21 @@ void data_update_task(void *arg) {
                 nina_safety_update(true, safety_safe);
             }
 
-            if (rms_total > 0.0f) {
-                threshold_config_t rms_cfg;
-                app_config_get_rms_threshold_config(i, &rms_cfg);
-                if (rms_cfg.ok_max > 0.0f && rms_total > rms_cfg.ok_max) {
-                    nina_alert_trigger(ALERT_RMS, i, rms_total);
+            if (app_config_get()->alert_flash_enabled) {
+                if (rms_total > 0.0f) {
+                    threshold_config_t rms_cfg;
+                    app_config_get_rms_threshold_config(i, &rms_cfg);
+                    if (rms_cfg.ok_max > 0.0f && rms_total > rms_cfg.ok_max) {
+                        nina_alert_trigger(ALERT_RMS, i, rms_total);
+                    }
                 }
-            }
 
-            if (hfr > 0.0f) {
-                threshold_config_t hfr_cfg;
-                app_config_get_hfr_threshold_config(i, &hfr_cfg);
-                if (hfr_cfg.ok_max > 0.0f && hfr > hfr_cfg.ok_max) {
-                    nina_alert_trigger(ALERT_HFR, i, hfr);
+                if (hfr > 0.0f) {
+                    threshold_config_t hfr_cfg;
+                    app_config_get_hfr_threshold_config(i, &hfr_cfg);
+                    if (hfr_cfg.ok_max > 0.0f && hfr > hfr_cfg.ok_max) {
+                        nina_alert_trigger(ALERT_HFR, i, hfr);
+                    }
                 }
             }
         }

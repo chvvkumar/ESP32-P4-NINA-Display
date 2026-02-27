@@ -638,6 +638,19 @@
         </div>
       </div>
       <div class="card">
+        <div class="card-title card-title-collapsible" onclick="toggleCollapsible('alerts')">
+          Alerts
+          <span class="card-chevron collapsed" id="alerts_chevron">&#9660;</span>
+        </div>
+        <div class="card-body-collapsible collapsed" id="alerts_body">
+        <div class="toggle-row">
+          <span class="toggle-label">Border flash alerts</span>
+          <label class="toggle"><input type="checkbox" id="alert_flash_enabled" checked><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint" style="margin-top:4px">Flash the screen border when RMS, HFR, or safety thresholds are exceeded. Toasts and event log entries are unaffected.</div>
+        </div>
+      </div>
+      <div class="card">
         <div class="card-title card-title-collapsible" onclick="toggleCollapsible('dbg')">
           Debug
           <span class="card-chevron collapsed" id="dbg_chevron">&#9660;</span>
@@ -1153,7 +1166,8 @@
         instance_enabled_2:!!$('instance_enabled_1').checked,
         instance_enabled_3:!!$('instance_enabled_2').checked,
         screen_sleep_enabled:!!$('screen_sleep_enabled').checked,
-        screen_sleep_timeout_s:parseInt($('screen_sleep_timeout').value)||60
+        screen_sleep_timeout_s:parseInt($('screen_sleep_timeout').value)||60,
+        alert_flash_enabled:!!$('alert_flash_enabled').checked
       };
 
       const ssid=$('ssid').value.trim();
@@ -1201,6 +1215,7 @@
       $('instance_enabled_2').checked=data.instance_enabled_3!==false;
       $('screen_sleep_enabled').checked=!!data.screen_sleep_enabled;
       $('screen_sleep_timeout').value=data.screen_sleep_timeout_s||60;
+      $('alert_flash_enabled').checked=data.alert_flash_enabled!==false;
 
       for(let i=0;i<3;i++){
         const key='filter_colors_'+(i+1);

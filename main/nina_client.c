@@ -387,23 +387,10 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
 
     int64_t now_ms = esp_timer_get_time() / 1000;
 
-    // Reset volatile fields under mutex to prevent UI reading partial state.
-    // Keep lock brief — released before HTTP fetches.
-    if (nina_client_lock(data, 100)) {
-        data->connected = false;
-        data->exposure_current = 0;
-        strcpy(data->status, "IDLE");
-        strcpy(data->time_remaining, "--");
-
-        if (!state->static_fetched) {
-            strcpy(data->target_name, "No Target");
-            strcpy(data->meridian_flip, "--");
-            strcpy(data->profile_name, "NINA");
-            strcpy(data->current_filter, "--");
-            data->filter_count = 0;
-        }
-        nina_client_unlock(data);
-    }
+    // Mark disconnected before fetch — fetchers set connected=true on success.
+    // Don't reset display fields (status, time_remaining, etc.) here: with polling
+    // in a separate task, the UI would see the blank values during the HTTP fetch window.
+    data->connected = false;
 
     ESP_LOGI(TAG, "=== Polling NINA data (%s: %s) ===",
              state->bundle_not_available ? "tiered" : "bundled",
@@ -607,22 +594,8 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
 
     int64_t now_ms = esp_timer_get_time() / 1000;
 
-    // Reset volatile fields under mutex to prevent UI reading partial state.
-    if (nina_client_lock(data, 100)) {
-        data->connected = false;
-        data->exposure_current = 0;
-        strcpy(data->status, "IDLE");
-        strcpy(data->time_remaining, "--");
-
-        if (!state->static_fetched) {
-            strcpy(data->target_name, "No Target");
-            strcpy(data->meridian_flip, "--");
-            strcpy(data->profile_name, "NINA");
-            strcpy(data->current_filter, "--");
-            data->filter_count = 0;
-        }
-        nina_client_unlock(data);
-    }
+    // Mark disconnected before fetch — fetchers set connected=true on success.
+    data->connected = false;
 
     // --- Equipment fetch ---
     // Use the full bundle only on first connect (to seed static data: filters, switch, etc.).
