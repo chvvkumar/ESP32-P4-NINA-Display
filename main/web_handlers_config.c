@@ -50,6 +50,7 @@ esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddStringToObject(root, "hfr_thresholds_2", cfg->hfr_thresholds[1]);
     cJSON_AddStringToObject(root, "hfr_thresholds_3", cfg->hfr_thresholds[2]);
     cJSON_AddNumberToObject(root, "theme_index", cfg->theme_index);
+    cJSON_AddNumberToObject(root, "widget_style", cfg->widget_style);
     cJSON_AddNumberToObject(root, "brightness", cfg->brightness);
     cJSON_AddNumberToObject(root, "color_brightness", cfg->color_brightness);
     cJSON_AddBoolToObject(root, "mqtt_enabled", cfg->mqtt_enabled);
@@ -154,6 +155,13 @@ static app_config_t *parse_config_from_json(cJSON *root)
     JSON_TO_STRING(root, "ntp",            cfg->ntp_server);
     JSON_TO_STRING(root, "timezone",       cfg->tz_string);
     JSON_TO_INT   (root, "theme_index",    cfg->theme_index);
+    cJSON *ws_item = cJSON_GetObjectItem(root, "widget_style");
+    if (cJSON_IsNumber(ws_item)) {
+        int v = ws_item->valueint;
+        if (v < 0) v = 0;
+        if (v >= WIDGET_STYLE_COUNT) v = WIDGET_STYLE_COUNT - 1;
+        cfg->widget_style = (uint8_t)v;
+    }
     JSON_TO_STRING(root, "filter_colors_1", cfg->filter_colors[0]);
     JSON_TO_STRING(root, "filter_colors_2", cfg->filter_colors[1]);
     JSON_TO_STRING(root, "filter_colors_3", cfg->filter_colors[2]);

@@ -13,7 +13,9 @@ extern "C" {
 #define MAX_NINA_INSTANCES 3
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 11
+#define APP_CONFIG_VERSION 12
+
+#define WIDGET_STYLE_COUNT 7
 
 typedef struct {
     uint32_t config_version;        // Must be first field — used to detect legacy blobs
@@ -49,6 +51,7 @@ typedef struct {
     bool     alert_flash_enabled;     // Enable border flash alerts for RMS/HFR/safety events (default true)
     uint8_t  idle_poll_interval_s;   // Heartbeat poll interval while screen sleeping (5-120, default 30)
     bool     wifi_power_save;        // Enable WiFi modem sleep for power savings (default true)
+    uint8_t  widget_style;           // Widget panel style index (0-6, default 0)
 } app_config_t;
 
 // WiFi credentials are NOT stored in app_config_t. They are managed by

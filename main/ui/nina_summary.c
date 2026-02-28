@@ -174,27 +174,101 @@ static void summary_card_click_cb(lv_event_t *e) {
         nina_dashboard_show_page(page, 0);
 }
 
+static uint32_t darken_color_summary(uint32_t color, int pct) {
+    uint8_t r = (color >> 16) & 0xFF;
+    uint8_t g = (color >> 8) & 0xFF;
+    uint8_t b = color & 0xFF;
+    r = (uint8_t)(r * (100 - pct) / 100);
+    g = (uint8_t)(g * (100 - pct) / 100);
+    b = (uint8_t)(b * (100 - pct) / 100);
+    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+}
+
 static void init_glass_styles(void) {
     if (styles_initialized) return;
     styles_initialized = true;
 
     lv_style_init(&style_glass_card);
-    lv_style_set_radius(&style_glass_card, CARD_RADIUS);
-    lv_style_set_border_width(&style_glass_card, 1);
-
-    /* Colors are applied in apply_glass_theme() */
+    /* Geometry set in apply_glass_theme() based on widget_style */
 }
 
 static void apply_glass_theme(void) {
     if (!current_theme) return;
     int gb = app_config_get()->color_brightness;
+    int ws = app_config_get()->widget_style;
 
-    lv_style_set_bg_color(&style_glass_card,
-        lv_color_hex(app_config_apply_brightness(current_theme->bento_bg, gb)));
-    lv_style_set_bg_opa(&style_glass_card, LV_OPA_COVER);
-    lv_style_set_border_color(&style_glass_card,
-        lv_color_hex(app_config_apply_brightness(current_theme->bento_border, gb)));
-    lv_style_set_border_opa(&style_glass_card, LV_OPA_30);
+    lv_style_reset(&style_glass_card);
+    lv_style_init(&style_glass_card);
+    lv_style_set_pad_all(&style_glass_card, 16);
+
+    switch (ws) {
+    case 1: /* Subtle Border */
+        lv_style_set_bg_color(&style_glass_card,
+            lv_color_hex(app_config_apply_brightness(current_theme->bento_bg, gb)));
+        lv_style_set_bg_opa(&style_glass_card, LV_OPA_COVER);
+        lv_style_set_radius(&style_glass_card, 12);
+        lv_style_set_border_width(&style_glass_card, 1);
+        lv_style_set_border_color(&style_glass_card,
+            lv_color_hex(app_config_apply_brightness(current_theme->bento_border, gb)));
+        lv_style_set_border_opa(&style_glass_card, LV_OPA_COVER);
+        break;
+    case 2: /* Tech Wireframe */
+        lv_style_set_bg_opa(&style_glass_card, LV_OPA_TRANSP);
+        lv_style_set_radius(&style_glass_card, 0);
+        lv_style_set_border_width(&style_glass_card, 1);
+        lv_style_set_border_color(&style_glass_card,
+            lv_color_hex(app_config_apply_brightness(current_theme->progress_color, gb)));
+        lv_style_set_border_opa(&style_glass_card, LV_OPA_COVER);
+        break;
+    case 3: /* Soft Inset */
+        lv_style_set_bg_color(&style_glass_card,
+            lv_color_hex(darken_color_summary(current_theme->bento_bg, 30)));
+        lv_style_set_bg_opa(&style_glass_card, LV_OPA_COVER);
+        lv_style_set_radius(&style_glass_card, 12);
+        lv_style_set_border_width(&style_glass_card, 1);
+        lv_style_set_border_side(&style_glass_card, LV_BORDER_SIDE_TOP);
+        lv_style_set_border_color(&style_glass_card, lv_color_hex(0x000000));
+        lv_style_set_border_opa(&style_glass_card, LV_OPA_COVER);
+        break;
+    case 4: /* Frosted Glass */
+        lv_style_set_bg_color(&style_glass_card,
+            lv_color_hex(app_config_apply_brightness(current_theme->bento_bg, gb)));
+        lv_style_set_bg_opa(&style_glass_card, LV_OPA_40);
+        lv_style_set_radius(&style_glass_card, CARD_RADIUS);
+        lv_style_set_border_width(&style_glass_card, 1);
+        lv_style_set_border_color(&style_glass_card,
+            lv_color_hex(app_config_apply_brightness(current_theme->bento_border, gb)));
+        lv_style_set_border_opa(&style_glass_card, LV_OPA_20);
+        break;
+    case 5: /* Accent Bar */
+        lv_style_set_bg_color(&style_glass_card,
+            lv_color_hex(app_config_apply_brightness(current_theme->bento_bg, gb)));
+        lv_style_set_bg_opa(&style_glass_card, LV_OPA_COVER);
+        lv_style_set_radius(&style_glass_card, 12);
+        lv_style_set_border_width(&style_glass_card, 4);
+        lv_style_set_border_side(&style_glass_card, LV_BORDER_SIDE_LEFT);
+        lv_style_set_border_color(&style_glass_card,
+            lv_color_hex(app_config_apply_brightness(current_theme->progress_color, gb)));
+        lv_style_set_border_opa(&style_glass_card, LV_OPA_COVER);
+        break;
+    case 6: /* Chamfered */
+        lv_style_set_bg_color(&style_glass_card,
+            lv_color_hex(app_config_apply_brightness(current_theme->bento_bg, gb)));
+        lv_style_set_bg_opa(&style_glass_card, LV_OPA_COVER);
+        lv_style_set_radius(&style_glass_card, 0);
+        lv_style_set_border_width(&style_glass_card, 0);
+        break;
+    default: /* 0 = Default */
+        lv_style_set_bg_color(&style_glass_card,
+            lv_color_hex(app_config_apply_brightness(current_theme->bento_bg, gb)));
+        lv_style_set_bg_opa(&style_glass_card, LV_OPA_COVER);
+        lv_style_set_radius(&style_glass_card, CARD_RADIUS);
+        lv_style_set_border_width(&style_glass_card, 1);
+        lv_style_set_border_color(&style_glass_card,
+            lv_color_hex(app_config_apply_brightness(current_theme->bento_border, gb)));
+        lv_style_set_border_opa(&style_glass_card, LV_OPA_30);
+        break;
+    }
 }
 
 /**
@@ -246,6 +320,7 @@ static void create_card(summary_card_t *sc, lv_obj_t *parent, int instance_index
     sc->card = lv_obj_create(parent);
     lv_obj_remove_style_all(sc->card);
     lv_obj_add_style(sc->card, &style_glass_card, 0);
+    ui_styles_set_widget_draw_cbs(sc->card);
     lv_obj_set_width(sc->card, LV_PCT(100));
     lv_obj_set_flex_grow(sc->card, 1);
     lv_obj_set_flex_flow(sc->card, LV_FLEX_FLOW_COLUMN);
