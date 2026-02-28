@@ -660,7 +660,7 @@ void nina_websocket_start(int index, const char *base_url, nina_client_t *data) 
         .uri = ws_url,
         .reconnect_timeout_ms = 0,      // Disable auto-reconnect; managed externally with backoff
         .network_timeout_ms = 10000,
-        .buffer_size = 4096,            // IMAGE-SAVE events with ImageStatistics can exceed 1KB default
+        .buffer_size = 2048,            // Reduced from 4096 to save heap; largest WS events ~1.2KB
     };
 
     ws_clients[index] = esp_websocket_client_init(&ws_cfg);

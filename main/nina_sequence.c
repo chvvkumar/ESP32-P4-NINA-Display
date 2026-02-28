@@ -185,6 +185,8 @@ static void find_running_step_name(cJSON *parent, char *out, size_t out_size) {
                 if (out[0] == '\0') {
                     strncpy(out, item_name->valuestring, out_size - 1);
                     out[out_size - 1] = '\0';
+                    char *suffix = strstr(out, "_Container");
+                    if (suffix) *suffix = '\0';
                 }
             } else {
                 // Leaf instruction - this is the current step

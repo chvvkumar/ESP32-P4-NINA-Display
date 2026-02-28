@@ -105,6 +105,9 @@ void input_task(void *arg) {
             }
         }
         last_level = level;
+        if (g_perf.enabled) {
+            g_perf.input_task_stack_hwm = uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t);
+        }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
@@ -148,11 +151,17 @@ void instance_poll_task(void *arg) {
 
         const char *url = app_config_get_instance_url(idx);
 
-        // Skip disabled or unconfigured instances
+        // Skip disabled or unconfigured instances — release network resources
         if (strlen(url) == 0 || !app_config_is_instance_enabled(idx)) {
+            if (ctx->client->connected || ctx->client->websocket_connected) {
+                nina_websocket_stop(idx);
+                nina_poll_state_init(ctx->poll_state);
+                ctx->filters_synced = false;
+                ESP_LOGI(TAG, "Poll[%d]: instance disabled, resources released", idx + 1);
+            }
             ctx->client->connected = false;
             nina_connection_report_poll(idx, false);
-            vTaskDelay(pdMS_TO_TICKS(2000));
+            vTaskDelay(pdMS_TO_TICKS(5000));
             continue;
         }
 
@@ -175,9 +184,19 @@ void instance_poll_task(void *arg) {
             nina_client_poll(url, ctx->client, ctx->poll_state, idx);
             if (nina_connection_is_connected(idx))
                 ctx->client->last_successful_poll_ms = now_ms;
-            ESP_LOGI(TAG, "Poll[%d] (active): connected=%d, status=%s, target=%s, ws=%d",
-                idx + 1, ctx->client->connected, ctx->client->status,
-                ctx->client->target_name, ctx->client->websocket_connected);
+            if (app_config_get()->debug_mode) {
+                ESP_LOGI(TAG, "Poll[%d] (active): connected=%d, status=%s, target=%s, ws=%d",
+                    idx + 1, ctx->client->connected, ctx->client->status,
+                    ctx->client->target_name, ctx->client->websocket_connected);
+            } else if (ctx->client->connected) {
+                /* Extract hostname from URL for clean log output */
+                const char *host = strstr(url, "://");
+                host = host ? host + 3 : url;
+                const char *host_end = strchr(host, ':');
+                if (!host_end) host_end = strchr(host, '/');
+                int host_len = host_end ? (int)(host_end - host) : (int)strlen(host);
+                ESP_LOGI(TAG, "Poll[%d]: %.*s — data received", idx + 1, host_len, host);
+            }
         } else {
             if (now_ms - ctx->last_heartbeat_ms >= HEARTBEAT_INTERVAL_MS) {
                 nina_client_poll_background(url, ctx->client, ctx->poll_state, idx);
@@ -304,12 +323,13 @@ void data_update_task(void *arg) {
     for (int i = 0; i < instance_count; i++) {
         char name[16];
         snprintf(name, sizeof(name), "poll_%d", i);
-        /* Use xTaskCreateStatic with PSRAM-allocated stack to save internal heap */
-        StackType_t *stack = heap_caps_malloc(8192, MALLOC_CAP_SPIRAM);
+        /* Use xTaskCreateStaticPinnedToCore with PSRAM-allocated stack to save internal heap.
+         * Pin poll tasks to Core 0 (networking), leaving Core 1 for UI/LVGL. */
+        StackType_t *stack = heap_caps_malloc(8192 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
         StaticTask_t *tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         if (stack && tcb) {
-            poll_contexts[i].task_handle = xTaskCreateStatic(
-                instance_poll_task, name, 8192, &poll_contexts[i], 4, stack, tcb);
+            poll_contexts[i].task_handle = xTaskCreateStaticPinnedToCore(
+                instance_poll_task, name, 8192, &poll_contexts[i], 4, stack, tcb, 0);
             poll_task_handles[i] = poll_contexts[i].task_handle;
         } else {
             ESP_LOGE(TAG, "Failed to allocate poll task %d stack from PSRAM", i);
@@ -363,10 +383,17 @@ void data_update_task(void *arg) {
         // Check for debug mode toggle
         {
             static bool last_debug_mode = false;
+            static bool first_check = true;
             bool current_debug = app_config_get()->debug_mode;
-            if (current_debug != last_debug_mode) {
+            if (first_check || current_debug != last_debug_mode) {
                 perf_monitor_set_enabled(current_debug);
+                /* Suppress verbose per-poll INFO logs when not debugging */
+                esp_log_level_t lvl = current_debug ? ESP_LOG_INFO : ESP_LOG_WARN;
+                esp_log_level_set("nina_client", lvl);
+                esp_log_level_set("nina_fetch", lvl);
+                esp_log_level_set("nina_seq", lvl);
                 last_debug_mode = current_debug;
+                first_check = false;
             }
         }
 

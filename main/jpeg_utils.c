@@ -14,6 +14,13 @@
 
 static const char *TAG = "jpeg_utils";
 
+/* Minimum free internal DMA heap required before attempting hardware JPEG decode.
+ * The JPEG decoder engine allocates DMA tx/rx link descriptors from internal memory.
+ * If we let it try when memory is tight, the ESP-IDF cleanup path crashes on NULL
+ * dereference (IDF bug in jpeg_release_codec_handle).  Keep enough headroom for the
+ * SDIO WiFi driver which also needs internal DMA buffers. */
+#define JPEG_DMA_MIN_FREE_BYTES  (20 * 1024)
+
 bool fetch_and_show_thumbnail(const char *base_url) {
     size_t jpeg_size = 0;
     perf_timer_start(&g_perf.jpeg_fetch);
@@ -41,16 +48,23 @@ bool fetch_and_show_thumbnail(const char *base_url) {
         uint8_t *decode_buf = (uint8_t *)jpeg_alloc_decoder_mem(decode_buf_size, &mem_cfg, &allocated_size);
 
         if (decode_buf) {
+            /* Guard: only create the HW decoder when internal DMA heap has enough
+             * headroom.  This avoids both the ESP-IDF crash (buggy cleanup on alloc
+             * failure) and starving the SDIO WiFi driver of DMA buffers. */
+            size_t free_dma = heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+            if (free_dma < JPEG_DMA_MIN_FREE_BYTES) {
+                ESP_LOGW(TAG, "Skipping HW decode: low DMA heap (%d bytes)", (int)free_dma);
+                free(decode_buf);
+                free(jpeg_buf);
+                return false;
+            }
+
             jpeg_decoder_handle_t decoder = NULL;
             jpeg_decode_engine_cfg_t engine_cfg = {
                 .intr_priority = 0,
                 .timeout_ms = 5000,
             };
             err = jpeg_new_decoder_engine(&engine_cfg, &decoder);
-            if (err != ESP_OK) {
-                ESP_LOGE(TAG, "jpeg_new_decoder_engine failed: %s", esp_err_to_name(err));
-                ESP_LOGE(TAG, "Free Internal DMA Heap: %d bytes", (int)heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
-            }
             if (err == ESP_OK && decoder) {
                 jpeg_decode_cfg_t decode_cfg = {
                     .output_format = is_gray ? JPEG_DECODE_OUT_FORMAT_GRAY : JPEG_DECODE_OUT_FORMAT_RGB565,

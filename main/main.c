@@ -242,8 +242,32 @@ void app_main(void)
 
     nina_client_init();  // DNS cache mutex — must be called before poll tasks spawn
 
-    xTaskCreate(input_task,       "input_task", 4096,  NULL, 5, NULL);
-    xTaskCreate(data_update_task, "data_task",  12288, NULL, 5, NULL);
+    /* Allocate task stacks in PSRAM to save internal heap; TCBs stay internal */
+    {
+        StackType_t *input_stack = heap_caps_malloc(4096 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+        StaticTask_t *input_tcb  = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (input_stack && input_tcb) {
+            xTaskCreateStaticPinnedToCore(input_task, "input_task", 4096, NULL, 5,
+                                          input_stack, input_tcb, 0);
+        } else {
+            ESP_LOGE(TAG, "Failed to alloc input_task stack from PSRAM, falling back");
+            if (input_stack) heap_caps_free(input_stack);
+            if (input_tcb) heap_caps_free(input_tcb);
+            xTaskCreatePinnedToCore(input_task, "input_task", 4096, NULL, 5, NULL, 0);
+        }
+
+        StackType_t *data_stack = heap_caps_malloc(12288 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+        StaticTask_t *data_tcb  = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (data_stack && data_tcb) {
+            data_task_handle = xTaskCreateStaticPinnedToCore(data_update_task, "data_task", 12288, NULL, 5,
+                                                             data_stack, data_tcb, 1);
+        } else {
+            ESP_LOGE(TAG, "Failed to alloc data_task stack from PSRAM, falling back");
+            if (data_stack) heap_caps_free(data_stack);
+            if (data_tcb) heap_caps_free(data_tcb);
+            xTaskCreatePinnedToCore(data_update_task, "data_task", 12288, NULL, 5, &data_task_handle, 1);
+        }
+    }
 
     /* Mark this firmware as valid so the bootloader won't roll back.
      * This must come after successful init — if we crash before here,
