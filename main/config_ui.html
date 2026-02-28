@@ -791,13 +791,14 @@
           <label class="toggle"><input type="checkbox" id="auto_update_check" checked><span class="toggle-track"></span></label>
         </div>
         <div class="field-hint" style="margin-top:4px">Automatically check GitHub for new firmware releases when the device boots.</div>
-        <div class="field-row" style="margin-top:12px">
-          <label class="field-label" for="update_channel">Update channel</label>
-          <select id="update_channel" class="field-select" style="width:auto;min-width:140px">
+        <div class="field" style="margin-top:12px">
+          <label class="field-label">Update channel</label>
+          <select id="update_channel" class="input">
             <option value="0">Stable only</option>
             <option value="1">Include pre-releases</option>
           </select>
         </div>
+        <button class="btn btn-primary" style="margin-top:12px;width:100%" id="checkUpdateBtn" onclick="checkForUpdates()">Check for Updates</button>
         <div class="divider"></div>
         <div class="ota-bar">
           <label class="ota-label" id="otaFileLabel">
@@ -1454,6 +1455,18 @@
         label.appendChild(input);
         $('otaBtn').disabled=true;
       }
+    }
+
+    function checkForUpdates(){
+      const btn=$('checkUpdateBtn');
+      btn.disabled=true; btn.textContent='Checking...';
+      fetch('/api/check-update',{method:'POST'}).then(r=>{
+        btn.textContent='Check requested — see device screen';
+        setTimeout(()=>{ btn.disabled=false; btn.textContent='Check for Updates'; },5000);
+      }).catch(()=>{
+        btn.disabled=false; btn.textContent='Check for Updates';
+        alert('Failed to reach device');
+      });
     }
 
     function startOta(){

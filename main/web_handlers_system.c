@@ -25,6 +25,14 @@ esp_err_t reboot_post_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+// Handler for check-update (triggers on-demand OTA check on device)
+esp_err_t check_update_post_handler(httpd_req_t *req)
+{
+    ota_check_requested = true;
+    httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
 // Handler for factory reset
 esp_err_t factory_reset_post_handler(httpd_req_t *req)
 {
