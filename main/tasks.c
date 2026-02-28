@@ -353,7 +353,7 @@ void data_update_task(void *arg) {
         github_release_info_t *rel = heap_caps_calloc(1, sizeof(github_release_info_t), MALLOC_CAP_SPIRAM);
         if (rel) {
             bool include_pre = (app_config_get()->update_channel == 1);
-            const char *cur_ver = BUILD_GIT_TAG;
+            const char *cur_ver = ota_github_get_current_version();
             if (ota_github_check(include_pre, cur_ver, rel)) {
                 ESP_LOGI(TAG, "New firmware available: %s", rel->tag);
                 /* Show the update prompt overlay */
@@ -378,6 +378,7 @@ void data_update_task(void *arg) {
                     }
                     esp_err_t ota_err = ota_github_download(rel->ota_url, ota_progress_cb);
                     if (ota_err == ESP_OK) {
+                        ota_github_save_installed_version(rel->tag);
                         ESP_LOGI(TAG, "OTA download success, rebooting...");
                         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                             nina_ota_prompt_set_progress(100);
@@ -513,7 +514,7 @@ void data_update_task(void *arg) {
             github_release_info_t *rel = heap_caps_calloc(1, sizeof(github_release_info_t), MALLOC_CAP_SPIRAM);
             if (rel) {
                 bool include_pre = (app_config_get()->update_channel == 1);
-                const char *cur_ver = BUILD_GIT_TAG;
+                const char *cur_ver = ota_github_get_current_version();
                 if (ota_github_check(include_pre, cur_ver, rel)) {
                     ESP_LOGI(TAG, "New firmware available: %s", rel->tag);
                     if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
@@ -536,6 +537,7 @@ void data_update_task(void *arg) {
                         }
                         esp_err_t ota_err = ota_github_download(rel->ota_url, ota_progress_cb);
                         if (ota_err == ESP_OK) {
+                            ota_github_save_installed_version(rel->tag);
                             ESP_LOGI(TAG, "OTA download success, rebooting...");
                             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                                 nina_ota_prompt_set_progress(100);
