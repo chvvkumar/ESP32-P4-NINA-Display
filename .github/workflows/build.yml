@@ -525,18 +525,15 @@ jobs:
 
           TITLE: <a concise PR title following the rules below>
 
-          ### Changes by Category
-          Group the changes into relevant categories such as:
-          - **Features**: New functionality added
-          - **Bug Fixes**: Issues resolved
-          - **Refactoring**: Code improvements without behavior changes
-          - **Documentation**: README, comments, docs updates
-          - **Tests**: Test additions or modifications
-          - **Dependencies**: Package or dependency changes
-          - **Configuration**: Config file changes
+          ### Summary
+          <1-3 sentences in plain language explaining what this PR does and why. Focus on the user-visible impact or the problem being solved, not implementation details. A non-developer should be able to understand the gist.>
 
-          Only include categories that apply. Use bullet points for each change.
+          ### Changes
+          <Bullet list of specific changes. Group related items together. Each bullet should be one clear sentence. Use plain language — avoid jargon like "TOCTOU race" or "TLS-based HTTP context" unless there's no simpler way to say it. Focus on WHAT changed and WHY, not HOW.>
+
           Do NOT use emojis. Do NOT include any other sections, headers, or conclusions.
+          Do NOT use sub-categories like "Features:", "Bug Fixes:" etc. — just a flat bullet list.
+          Limit to at most 8 bullets. Combine trivial related changes into a single bullet.
 
           ## TITLE Rules (follow these strictly)
           - Identify the SINGLE most important or impactful change in this PR and use that as the title
