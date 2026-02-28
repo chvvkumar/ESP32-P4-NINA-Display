@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "esp_err.h"
 #include "display_defs.h"
 
 #ifdef __cplusplus
@@ -12,7 +13,7 @@ extern "C" {
 #define MAX_NINA_INSTANCES 3
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 10
+#define APP_CONFIG_VERSION 11
 
 typedef struct {
     uint32_t config_version;        // Must be first field — used to detect legacy blobs
@@ -46,6 +47,8 @@ typedef struct {
     bool     screen_sleep_enabled;     // Turn off display when no NINA instances connected
     uint16_t screen_sleep_timeout_s;   // Seconds with 0 connections before screen off (default 60)
     bool     alert_flash_enabled;     // Enable border flash alerts for RMS/HFR/safety events (default true)
+    uint8_t  idle_poll_interval_s;   // Heartbeat poll interval while screen sleeping (5-120, default 30)
+    bool     wifi_power_save;        // Enable WiFi modem sleep for power savings (default true)
 } app_config_t;
 
 // WiFi credentials are NOT stored in app_config_t. They are managed by
@@ -56,6 +59,9 @@ void app_config_init(void);
 app_config_t *app_config_get(void);
 app_config_t app_config_get_snapshot(void);
 void app_config_save(const app_config_t *config);
+void app_config_apply(const app_config_t *config);   // in-memory only, no NVS
+esp_err_t app_config_revert(void);                    // reload NVS into memory
+bool app_config_is_dirty(void);                       // true if apply called without save
 int app_config_get_instance_count(void);
 const char *app_config_get_instance_url(int index);
 void app_config_factory_reset(void);

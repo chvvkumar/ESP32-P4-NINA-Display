@@ -101,6 +101,16 @@ static void event_handler(void *arg, esp_event_base_t event_base,
             esp_sntp_init();
         }
 
+        /* Enable WiFi modem sleep if configured — C6 radio sleeps between
+         * DTIM beacons while maintaining AP association. Reduces radio power
+         * from ~115 mA to ~20-40 mA average with zero reconnection cost. */
+        if (app_config_get()->wifi_power_save) {
+            esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
+            ESP_LOGI(TAG, "WiFi modem sleep enabled");
+        } else {
+            esp_wifi_set_ps(WIFI_PS_NONE);
+        }
+
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
 }

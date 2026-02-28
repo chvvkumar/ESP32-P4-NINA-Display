@@ -75,6 +75,9 @@ esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddBoolToObject(root, "screen_sleep_enabled", cfg->screen_sleep_enabled);
     cJSON_AddNumberToObject(root, "screen_sleep_timeout_s", cfg->screen_sleep_timeout_s);
     cJSON_AddBoolToObject(root, "alert_flash_enabled", cfg->alert_flash_enabled);
+    cJSON_AddNumberToObject(root, "idle_poll_interval_s", cfg->idle_poll_interval_s);
+    cJSON_AddBoolToObject(root, "wifi_power_save", cfg->wifi_power_save);
+    cJSON_AddBoolToObject(root, "_dirty", app_config_is_dirty());
 
     const char *json_str = cJSON_PrintUnformatted(root);
     if (json_str == NULL) {
@@ -90,47 +93,12 @@ esp_err_t config_get_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-// Handler for saving config
-esp_err_t config_post_handler(httpd_req_t *req)
+/* ---- Shared config parsing helpers ---- */
+
+// Validate all config string field lengths and URL formats.
+// Returns true if valid; sends 400 and returns false if invalid.
+static bool validate_config_fields(cJSON *root, httpd_req_t *req)
 {
-    int remaining = req->content_len;
-
-    /* 3.3: Enforce max payload size */
-    if (remaining >= CONFIG_MAX_PAYLOAD) {
-        return send_400(req, "Payload too large");
-    }
-
-    char *buf = heap_caps_malloc(CONFIG_MAX_PAYLOAD, MALLOC_CAP_SPIRAM);
-    if (!buf) {
-        ESP_LOGE(TAG, "Config handler: malloc failed for payload buffer");
-        httpd_resp_send_500(req);
-        return ESP_OK;
-    }
-
-    int received = 0;
-    while (received < remaining) {
-        int ret = httpd_req_recv(req, buf + received, remaining - received);
-        if (ret <= 0) {
-            free(buf);
-            if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
-                ESP_LOGW(TAG, "Config handler: recv timeout (got %d/%d bytes)", received, remaining);
-                httpd_resp_send_408(req);
-                return ESP_OK;
-            }
-            ESP_LOGW(TAG, "Config handler: recv error %d (got %d/%d bytes)", ret, received, remaining);
-            return ESP_FAIL;
-        }
-        received += ret;
-    }
-    buf[received] = '\0';
-
-    cJSON *root = cJSON_Parse(buf);
-    free(buf);
-    if (!root) {
-        return send_400(req, "Invalid JSON");
-    }
-
-    /* 3.3: Validate string field lengths against buffer sizes */
     if (!validate_string_len(root, "url1", 128) ||
         !validate_string_len(root, "url2", 128) ||
         !validate_string_len(root, "url3", 128) ||
@@ -149,11 +117,10 @@ esp_err_t config_post_handler(httpd_req_t *req)
         !validate_string_len(root, "hfr_thresholds_1", 256) ||
         !validate_string_len(root, "hfr_thresholds_2", 256) ||
         !validate_string_len(root, "hfr_thresholds_3", 256)) {
-        cJSON_Delete(root);
-        return send_400(req, "String field exceeds maximum length");
+        send_400(req, "String field exceeds maximum length");
+        return false;
     }
 
-    /* 3.3: Validate URL formats */
     cJSON *url_items[] = {
         cJSON_GetObjectItem(root, "url1"),
         cJSON_GetObjectItem(root, "url2"),
@@ -162,51 +129,23 @@ esp_err_t config_post_handler(httpd_req_t *req)
     };
     for (int i = 0; i < 4; i++) {
         if (cJSON_IsString(url_items[i]) && !validate_url_format(url_items[i]->valuestring)) {
-            cJSON_Delete(root);
-            return send_400(req, "Invalid URL format");
+            send_400(req, "Invalid URL format");
+            return false;
         }
     }
+    return true;
+}
 
-    /*
-     * WiFi credentials: pass directly to ESP-IDF WiFi NVS (not stored in
-     * app_config).  The WiFi stack persists them automatically.
-     */
-    cJSON *ssid_item = cJSON_GetObjectItem(root, "ssid");
-    cJSON *pass_item = cJSON_GetObjectItem(root, "pass");
-    if (cJSON_IsString(ssid_item) && ssid_item->valuestring[0] != '\0') {
-        if (strlen(ssid_item->valuestring) >= 32) {
-            cJSON_Delete(root);
-            return send_400(req, "SSID too long (max 31 chars)");
-        }
-        if (cJSON_IsString(pass_item) && strlen(pass_item->valuestring) >= 64) {
-            cJSON_Delete(root);
-            return send_400(req, "WiFi password too long (max 63 chars)");
-        }
-
-        /* Read-modify-write: preserve current password if none provided */
-        wifi_config_t sta_cfg = {0};
-        esp_wifi_get_config(WIFI_IF_STA, &sta_cfg);
-        sta_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
-        strncpy((char *)sta_cfg.sta.ssid, ssid_item->valuestring,
-                sizeof(sta_cfg.sta.ssid) - 1);
-        if (cJSON_IsString(pass_item) && pass_item->valuestring[0] != '\0') {
-            memset(sta_cfg.sta.password, 0, sizeof(sta_cfg.sta.password));
-            strncpy((char *)sta_cfg.sta.password, pass_item->valuestring,
-                    sizeof(sta_cfg.sta.password) - 1);
-        }
-        /* else: password from esp_wifi_get_config is preserved */
-        esp_wifi_set_config(WIFI_IF_STA, &sta_cfg);
-        ESP_LOGI(TAG, "WiFi STA credentials updated via esp_wifi_set_config");
-    }
-
+// Parse JSON into a new app_config_t (heap-allocated).
+// Starts from a copy of the current config so missing fields are preserved.
+// Returns NULL on allocation failure.
+static app_config_t *parse_config_from_json(cJSON *root)
+{
     app_config_t *cfg = malloc(sizeof(app_config_t));
     if (!cfg) {
-        ESP_LOGE(TAG, "Config handler: malloc failed for app_config_t");
-        cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_OK;
+        ESP_LOGE(TAG, "parse_config_from_json: malloc failed");
+        return NULL;
     }
-    // Load current to preserve anything not sent
     memcpy(cfg, app_config_get(), sizeof(app_config_t));
 
     JSON_TO_STRING(root, "url1",           cfg->api_url[0]);
@@ -259,7 +198,7 @@ esp_err_t config_post_handler(httpd_req_t *req)
     if (cJSON_IsNumber(apo_item)) {
         int v = apo_item->valueint;
         if (v < -1) v = -1;
-        if (v > MAX_NINA_INSTANCES + 1) v = MAX_NINA_INSTANCES + 1;  /* max = sysinfo page */
+        if (v > MAX_NINA_INSTANCES + 1) v = MAX_NINA_INSTANCES + 1;
         cfg->active_page_override = (int8_t)v;
     }
 
@@ -283,7 +222,7 @@ esp_err_t config_post_handler(httpd_req_t *req)
     if (cJSON_IsNumber(arp_item)) {
         int v = arp_item->valueint;
         if (v < 0) v = 0;
-        if (v > 0x3F) v = 0x3F;  /* 6-bit mask (includes settings page) */
+        if (v > 0x3F) v = 0x3F;
         cfg->auto_rotate_pages = (uint8_t)v;
     }
 
@@ -334,12 +273,159 @@ esp_err_t config_post_handler(httpd_req_t *req)
         cfg->screen_sleep_timeout_s = (uint16_t)v;
     }
 
-    app_config_save(cfg);
-    free(cfg);
+    cJSON *ipi_item = cJSON_GetObjectItem(root, "idle_poll_interval_s");
+    if (cJSON_IsNumber(ipi_item)) {
+        int v = ipi_item->valueint;
+        if (v < 5) v = 5;
+        if (v > 120) v = 120;
+        cfg->idle_poll_interval_s = (uint8_t)v;
+    }
+
+    JSON_TO_BOOL(root, "wifi_power_save", cfg->wifi_power_save);
+
+    return cfg;
+}
+
+// Receive and parse JSON body from a POST request.
+// Returns parsed cJSON root on success, NULL on failure (error response already sent).
+static cJSON *receive_json_body(httpd_req_t *req)
+{
+    int remaining = req->content_len;
+    if (remaining >= CONFIG_MAX_PAYLOAD) {
+        send_400(req, "Payload too large");
+        return NULL;
+    }
+
+    char *buf = heap_caps_malloc(CONFIG_MAX_PAYLOAD, MALLOC_CAP_SPIRAM);
+    if (!buf) {
+        ESP_LOGE(TAG, "Config handler: malloc failed for payload buffer");
+        httpd_resp_send_500(req);
+        return NULL;
+    }
+
+    int received = 0;
+    while (received < remaining) {
+        int ret = httpd_req_recv(req, buf + received, remaining - received);
+        if (ret <= 0) {
+            free(buf);
+            if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+                ESP_LOGW(TAG, "Config handler: recv timeout (got %d/%d bytes)", received, remaining);
+                httpd_resp_send_408(req);
+            } else {
+                ESP_LOGW(TAG, "Config handler: recv error %d (got %d/%d bytes)", ret, received, remaining);
+            }
+            return NULL;
+        }
+        received += ret;
+    }
+    buf[received] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    free(buf);
+    if (!root) {
+        send_400(req, "Invalid JSON");
+        return NULL;
+    }
+    return root;
+}
+
+// Handler for saving config (persists to NVS)
+esp_err_t config_post_handler(httpd_req_t *req)
+{
+    cJSON *root = receive_json_body(req);
+    if (!root) return ESP_OK;
+
+    if (!validate_config_fields(root, req)) {
+        cJSON_Delete(root);
+        return ESP_OK;
+    }
+
+    // WiFi credentials: pass directly to ESP-IDF WiFi NVS
+    cJSON *ssid_item = cJSON_GetObjectItem(root, "ssid");
+    cJSON *pass_item = cJSON_GetObjectItem(root, "pass");
+    if (cJSON_IsString(ssid_item) && ssid_item->valuestring[0] != '\0') {
+        if (strlen(ssid_item->valuestring) >= 32) {
+            cJSON_Delete(root);
+            return send_400(req, "SSID too long (max 31 chars)");
+        }
+        if (cJSON_IsString(pass_item) && strlen(pass_item->valuestring) >= 64) {
+            cJSON_Delete(root);
+            return send_400(req, "WiFi password too long (max 63 chars)");
+        }
+
+        wifi_config_t sta_cfg = {0};
+        esp_wifi_get_config(WIFI_IF_STA, &sta_cfg);
+        sta_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+        strncpy((char *)sta_cfg.sta.ssid, ssid_item->valuestring,
+                sizeof(sta_cfg.sta.ssid) - 1);
+        if (cJSON_IsString(pass_item) && pass_item->valuestring[0] != '\0') {
+            memset(sta_cfg.sta.password, 0, sizeof(sta_cfg.sta.password));
+            strncpy((char *)sta_cfg.sta.password, pass_item->valuestring,
+                    sizeof(sta_cfg.sta.password) - 1);
+        }
+        esp_wifi_set_config(WIFI_IF_STA, &sta_cfg);
+        ESP_LOGI(TAG, "WiFi STA credentials updated via esp_wifi_set_config");
+    }
+
+    app_config_t *cfg = parse_config_from_json(root);
     cJSON_Delete(root);
+    if (!cfg) {
+        httpd_resp_send_500(req);
+        return ESP_OK;
+    }
+
+    app_config_t old_cfg = app_config_get_snapshot();
+    app_config_save(cfg);
+    config_trigger_side_effects(&old_cfg, cfg);
+    free(cfg);
 
     ESP_LOGI(TAG, "Config saved to NVS");
+    httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
 
+// Handler for live-applying config (in-memory only, no NVS)
+esp_err_t config_apply_handler(httpd_req_t *req)
+{
+    cJSON *root = receive_json_body(req);
+    if (!root) return ESP_OK;
+
+    if (!validate_config_fields(root, req)) {
+        cJSON_Delete(root);
+        return ESP_OK;
+    }
+
+    app_config_t *cfg = parse_config_from_json(root);
+    cJSON_Delete(root);
+    if (!cfg) {
+        httpd_resp_send_500(req);
+        return ESP_OK;
+    }
+
+    app_config_t old_cfg = app_config_get_snapshot();
+    app_config_apply(cfg);
+    config_trigger_side_effects(&old_cfg, cfg);
+    free(cfg);
+
+    httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+// Handler for reverting config to NVS-saved state
+esp_err_t config_revert_handler(httpd_req_t *req)
+{
+    app_config_t old_cfg = app_config_get_snapshot();
+
+    esp_err_t err = app_config_revert();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Config revert failed");
+        httpd_resp_send_500(req);
+        return ESP_OK;
+    }
+
+    config_trigger_side_effects(&old_cfg, app_config_get());
+
+    ESP_LOGI(TAG, "Config reverted from NVS");
     httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
