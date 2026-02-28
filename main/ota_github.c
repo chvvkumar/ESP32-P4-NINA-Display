@@ -23,7 +23,7 @@ static const char *TAG = "ota_github";
 /**
  * Compare two version strings (with optional 'v' prefix).
  * Returns >0 if v1 is newer, <0 if v2 is newer, 0 if equal.
- * Pre-release suffixes (e.g., "-snd.1") are treated as newer than
+ * Pre-release suffixes (e.g., "-dev.1") are treated as newer than
  * the same base version since this project's pre-release tags
  * use the latest main release as their base.
  */
@@ -221,10 +221,11 @@ bool ota_github_check(bool include_prereleases, const char *current_version, git
         cJSON *draft = cJSON_GetObjectItem(release, "draft");
         if (cJSON_IsTrue(draft)) continue;
 
-        /* Check pre-release flag */
+        /* Check pre-release flag — each channel only sees its own releases */
         cJSON *prerelease = cJSON_GetObjectItem(release, "prerelease");
         bool is_pre = cJSON_IsTrue(prerelease);
-        if (is_pre && !include_prereleases) continue;
+        if (is_pre && !include_prereleases) continue;   /* stable channel: skip pre-releases */
+        if (!is_pre && include_prereleases) continue;    /* pre-release channel: skip stable */
 
         /* Get tag name */
         cJSON *tag = cJSON_GetObjectItem(release, "tag_name");

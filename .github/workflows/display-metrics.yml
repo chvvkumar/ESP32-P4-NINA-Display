@@ -87,5 +87,5 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Badge URLs:**" >> $GITHUB_STEP_SUMMARY
           echo "- [Build Status (main)](https://github.com/chvvkumar/ESP32-P4-NINA-Display/actions/workflows/build.yml?query=branch%3Amain)" >> $GITHUB_STEP_SUMMARY
-          echo "- [Build Status (snd)](https://github.com/chvvkumar/ESP32-P4-NINA-Display/actions/workflows/build.yml?query=branch%3Asnd)" >> $GITHUB_STEP_SUMMARY
+          echo "- [Build Status (dev)](https://github.com/chvvkumar/ESP32-P4-NINA-Display/actions/workflows/build.yml?query=branch%3Adev)" >> $GITHUB_STEP_SUMMARY
           echo "- [Latest Release](https://github.com/chvvkumar/ESP32-P4-NINA-Display/releases/latest)" >> $GITHUB_STEP_SUMMARY

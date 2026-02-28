@@ -2,10 +2,10 @@ name: Build Firmware
 
 on:
   push:
-    branches: [main, snd]
+    branches: [main, dev]
   pull_request:
     types: [opened, synchronize, reopened]
-    branches: [main, snd]
+    branches: [main, dev]
 
 env:
   IDF_VERSION: v5.5.2
@@ -413,7 +413,7 @@ jobs:
           try:
               result = subprocess.run(
                   ["curl", "-s", "-X", "POST",
-                   "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+                   "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent",
                    "-H", "Content-Type: application/json",
                    "-H", f"X-goog-api-key: {api_key}",
                    "-d", payload],
@@ -728,7 +728,7 @@ jobs:
           PROMPT="${PROMPT//%FILES%/$(echo $FILES_ESCAPED | jq -r .)}"
 
           # Make API request to Google Gemini
-          RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent" \
+          RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent" \
             -H "Content-Type: application/json" \
             -H "X-goog-api-key: $GOOGLE_API_KEY" \
             -d "$(jq -n \
