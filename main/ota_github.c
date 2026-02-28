@@ -4,6 +4,8 @@
 #include "esp_ota_ops.h"
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
+#include "nvs_flash.h"
+#include "nvs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -499,7 +501,7 @@ done:
     vTaskDelete(NULL);
 }
 
-#define OTA_TASK_STACK_SIZE 10240
+#define OTA_TASK_STACK_SIZE 16384
 
 esp_err_t ota_github_download(const char *url, void (*progress_cb)(int percent)) {
     if (!url) return ESP_ERR_INVALID_ARG;
@@ -532,4 +534,35 @@ esp_err_t ota_github_download(const char *url, void (*progress_cb)(int percent))
     vSemaphoreDelete(ctx.done);
 
     return ctx.result;
+}
+
+/* ── NVS-backed OTA version tracking ─────────────────────────────── */
+
+#define OTA_NVS_NAMESPACE "ota_ver"
+#define OTA_NVS_KEY       "tag"
+
+void ota_github_save_installed_version(const char *tag) {
+    if (!tag || !tag[0]) return;
+    nvs_handle_t h;
+    if (nvs_open(OTA_NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_str(h, OTA_NVS_KEY, tag);
+        nvs_commit(h);
+        nvs_close(h);
+        ESP_LOGI(TAG, "Saved OTA installed version: %s", tag);
+    }
+}
+
+const char *ota_github_get_current_version(void) {
+    static char stored[64];
+    nvs_handle_t h;
+    if (nvs_open(OTA_NVS_NAMESPACE, NVS_READONLY, &h) == ESP_OK) {
+        size_t len = sizeof(stored);
+        if (nvs_get_str(h, OTA_NVS_KEY, stored, &len) == ESP_OK && stored[0]) {
+            nvs_close(h);
+            ESP_LOGI(TAG, "Using OTA-installed version for comparison: %s", stored);
+            return stored;
+        }
+        nvs_close(h);
+    }
+    return BUILD_GIT_TAG;
 }

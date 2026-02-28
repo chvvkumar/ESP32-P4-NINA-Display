@@ -1,0 +1,232 @@
+name: PR Summary
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main, dev]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  pr-commit-summary:
+    name: Generate PR Summary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Collect commit information
+        id: collect
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Fetching commits for PR #${{ github.event.pull_request.number }}"
+
+          # Get detailed commit information
+          gh pr view ${{ github.event.pull_request.number }} --json commits \
+            --jq '.commits[] | "**Commit \(.oid[0:7])** by \(.authors[0].name // "Unknown")\nMessage: \(.messageHeadline)\n\(.messageBody // "")\n---"' \
+            > commits.txt
+
+          # Get changed files with stats
+          gh pr view ${{ github.event.pull_request.number }} --json files \
+            --jq '.files[] | "- `\(.path)` (+\(.additions)/-\(.deletions))"' \
+            > files.txt
+
+          # Get changed files excluding GitHub workflows (for AI summary)
+          gh pr view ${{ github.event.pull_request.number }} --json files \
+            --jq '.files[] | select(.path | startswith(".github/workflows/") | not) | "- `\(.path)` (+\(.additions)/-\(.deletions))"' \
+            > files_for_ai.txt
+
+          # Check if changes are only in GitHub Actions workflows
+          NON_WORKFLOW_CHANGES=$(gh pr view ${{ github.event.pull_request.number }} --json files \
+            --jq '[.files[] | select(.path | startswith(".github/workflows/") | not)] | length')
+
+          if [ "$NON_WORKFLOW_CHANGES" -eq 0 ]; then
+            echo "skip_summary=true" >> $GITHUB_OUTPUT
+            echo "Skipping AI summary - changes are only in GitHub Actions workflows"
+          else
+            echo "skip_summary=false" >> $GITHUB_OUTPUT
+            echo "Will generate AI summary for code changes (excluding workflow files)"
+          fi
+
+          # Get commit count
+          COMMIT_COUNT=$(gh pr view ${{ github.event.pull_request.number }} --json commits --jq '.commits | length')
+          echo "commit_count=$COMMIT_COUNT" >> $GITHUB_OUTPUT
+
+          echo "Collected $COMMIT_COUNT commits"
+
+      - name: Generate summary with Google Gemini
+        id: summarize
+        if: steps.collect.outputs.skip_summary == 'false'
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          PR_TITLE_RAW: ${{ github.event.pull_request.title }}
+          PR_BODY_RAW: ${{ github.event.pull_request.body }}
+        run: |
+          set +e  # Don't exit immediately on error
+
+          # Read collected data
+          COMMITS=$(cat commits.txt)
+          FILES=$(cat files_for_ai.txt)
+
+          # Escape special characters for JSON (use env vars to avoid shell injection)
+          COMMITS_ESCAPED=$(echo "$COMMITS" | jq -Rs .)
+          FILES_ESCAPED=$(echo "$FILES" | jq -Rs .)
+          PR_TITLE=$(printenv PR_TITLE_RAW | jq -Rs .)
+          PR_BODY=$(printenv PR_BODY_RAW | jq -Rs .)
+
+          # Build the prompt
+          read -r -d '' PROMPT << 'EOF'
+          You are a code review assistant. Analyze the following pull request and provide a concise PR title and a categorized summary of changes.
+
+          **IMPORTANT:** Focus ONLY on the actual code changes listed below. Do NOT mention or summarize any GitHub Actions workflow files (.github/workflows/) as those have been filtered out. Do NOT use any emojis anywhere in your output.
+
+          ## Pull Request Details
+          **Title:** %PR_TITLE%
+          **Description:** %PR_BODY%
+
+          ## Commits in this PR
+          %COMMITS%
+
+          ## Files Changed (excluding workflow files)
+          %FILES%
+
+          ## Your Task
+          Provide your output in EXACTLY this format:
+
+          TITLE: <a concise PR title following the rules below>
+
+          ### Summary
+          <1-3 sentences in plain language explaining what this PR does and why. Focus on the user-visible impact or the problem being solved, not implementation details. A non-developer should be able to understand the gist.>
+
+          ### Changes
+          <Bullet list of specific changes. Group related items together. Each bullet should be one clear sentence. Use plain language — avoid jargon like "TOCTOU race" or "TLS-based HTTP context" unless there's no simpler way to say it. Focus on WHAT changed and WHY, not HOW.>
+
+          Do NOT use emojis. Do NOT include any other sections, headers, or conclusions.
+          Do NOT use sub-categories like "Features:", "Bug Fixes:" etc. — just a flat bullet list.
+          Limit to at most 8 bullets. Combine trivial related changes into a single bullet.
+
+          ## Writing Style Rules (follow strictly)
+          Write like a developer writing notes for other developers — direct and concise.
+          NEVER use these AI filler patterns:
+          - "This pull request..." or "This PR..." — just state what changed
+          - "Introduces", "enhances", "leverages", "utilizes", "facilitates"
+          - "Implemented logic to..." — just say what it does
+          - "...for improved/better/enhanced..." — say the specific outcome
+          - "...ensuring that..." or "...allowing the device to..."
+          - "Updated internal structures to support..." — say what the change actually is
+          - Passive voice like "was added", "has been implemented"
+          Write as if you're explaining to a teammate in a chat message, not writing marketing copy.
+          Good: "Screen now sleeps after 5 min of inactivity to save power"
+          Bad: "Implemented automatic screen sleep functionality to enable power-saving capabilities"
+
+          ## TITLE Rules (follow these strictly)
+          - Identify the SINGLE most important or impactful change in this PR and use that as the title
+          - Do NOT list multiple changes separated by commas or "and" — pick the one that matters most
+          - Keep it under 60 characters
+          - Use lowercase after the prefix
+          - Start with a conventional commit prefix: feat:, fix:, refactor:, docs:, perf:, chore:
+          - Be specific about WHAT changed, not vague (e.g. "feat: add screen sleep timeout" not "Add new feature and improvements")
+          - If the PR is truly about one bug fix and one feature, prefer the feature for the title
+          - Good examples: "feat: add MQTT Home Assistant integration", "fix: memory leak in WebSocket reconnect", "refactor: split polling logic into tiered stages"
+          - Bad examples: "Update UI, Fix Bugs, and Improve Config", "Various improvements and fixes", "Enhance app with new features"
+          EOF
+
+          # Replace placeholders (remove jq quotes)
+          PROMPT="${PROMPT//%PR_TITLE%/$(echo $PR_TITLE | jq -r .)}"
+          PROMPT="${PROMPT//%PR_BODY%/$(echo $PR_BODY | jq -r .)}"
+          PROMPT="${PROMPT//%COMMITS%/$(echo $COMMITS_ESCAPED | jq -r .)}"
+          PROMPT="${PROMPT//%FILES%/$(echo $FILES_ESCAPED | jq -r .)}"
+
+          # Make API request to Google Gemini
+          RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent" \
+            -H "Content-Type: application/json" \
+            -H "X-goog-api-key: $GOOGLE_API_KEY" \
+            -d "$(jq -n \
+              --arg prompt "$PROMPT" \
+              '{
+                contents: [
+                  {
+                    parts: [
+                      {
+                        text: $prompt
+                      }
+                    ]
+                  }
+                ],
+                generationConfig: {
+                  temperature: 0.3,
+                  maxOutputTokens: 8192
+                }
+              }')")
+
+          # Check for errors
+          if [ -z "$RESPONSE" ]; then
+            echo "Error: Empty response from API"
+            exit 1
+          fi
+
+          if echo "$RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
+            echo "Error from API:"
+            echo "$RESPONSE" | jq '.'
+            exit 1
+          fi
+
+          if ! echo "$RESPONSE" | jq -e '.candidates[0].content.parts[0].text' > /dev/null 2>&1; then
+            echo "Invalid response structure"
+            exit 1
+          fi
+
+          # Extract full response text
+          FULL_TEXT=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text')
+
+          # Extract title (first line matching "TITLE: ...")
+          echo "$FULL_TEXT" | grep '^TITLE:' | sed 's/^TITLE:\s*//' > ai_title.txt
+
+          # Extract body (everything after the TITLE line)
+          echo "$FULL_TEXT" | sed '1{/^TITLE:/d}' > summary.md
+
+      - name: Update PR title and body with summary
+        if: steps.collect.outputs.skip_summary == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            // Read the generated summary and AI title
+            const summary = fs.readFileSync('summary.md', 'utf8').trim();
+            const aiTitle = fs.readFileSync('ai_title.txt', 'utf8').trim();
+            const commitCount = '${{ steps.collect.outputs.commit_count }}';
+            const timestamp = new Date().toISOString();
+
+            // Get current PR details
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+
+            // Use AI-generated title if available, otherwise keep original
+            const newTitle = aiTitle || pr.title;
+
+            // Create PR body with Changes by Category section
+            const newBody = `${summary}
+
+            ---
+            <sub>Analyzed **${commitCount}** commit(s) | Updated: ${timestamp} | Generated by GitHub Actions</sub>`;
+
+            // Update the PR
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              title: newTitle,
+              body: newBody
+            });
+
+            console.log(`Updated PR #${context.issue.number}`);
+            console.log(`New title: ${newTitle}`);
