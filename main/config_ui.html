@@ -334,6 +334,25 @@
     .filter-dot:hover { transform: scale(1.08); }
     .filter-dot:active { transform: scale(0.95); }
 
+    .threshold-row {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
+    }
+    .threshold-row .threshold-label {
+      width: 56px; flex-shrink: 0; font-size: 0.75rem; color: #a1a1aa;
+    }
+    .threshold-row .threshold-hint {
+      font-size: 0.6rem; color: #71717a; display: block;
+    }
+    .threshold-row .input { flex: 1; min-width: 0; }
+    .threshold-row .threshold-dot {
+      width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
+      border: 1px solid rgba(255, 255, 255, 0.1); cursor: pointer; padding: 0;
+      background: none; transition: transform 0.15s ease, box-shadow 0.2s ease;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    }
+    .threshold-row .threshold-dot:hover { transform: scale(1.08); }
+    .threshold-row:last-child { margin-bottom: 0; }
+
     .row { display: flex; gap: 14px; align-items: flex-start; }
     .row > * { flex: 1; }
     @media (max-width: 768px) { .row.stack-mobile { flex-direction: column; } }
@@ -853,22 +872,25 @@
           '<div id="filters_'+i+'" class="filter-grid"></div></div>'+
           '<div class="row stack-mobile">'+
           '<div class="card"><div class="card-title">RMS thresholds</div>'+
-          mkThresholdFields('rms',i,'Target (optimal)','0.5','Warning (caution)','1.0')+
+          mkThresholdFields('rms',i,'0.5','1.0')+
           '</div>'+
           '<div class="card"><div class="card-title">HFR thresholds</div>'+
-          mkThresholdFields('hfr',i,'Target (optimal)','2.0','Warning (caution)','3.5')+
+          mkThresholdFields('hfr',i,'2.0','3.5')+
           '</div></div></div>'
         );
       }
-      function mkThresholdFields(pfx,i,lbl1,ph1,lbl2,ph2){
-        return '<div class="field"><label class="field-label">'+lbl1+'</label>'+
-          '<div class="row"><input type="text" class="input" id="'+pfx+'_good_max_'+i+'" placeholder="'+ph1+'">'+
-          '<input type="color" class="color-swatch" id="'+pfx+'_good_color_'+i+'" value="#10b981"></div></div>'+
-          '<div class="field"><label class="field-label">'+lbl2+'</label>'+
-          '<div class="row"><input type="text" class="input" id="'+pfx+'_ok_max_'+i+'" placeholder="'+ph2+'">'+
-          '<input type="color" class="color-swatch" id="'+pfx+'_ok_color_'+i+'" value="#eab308"></div></div>'+
-          '<div class="field"><label class="field-label">Critical</label>'+
-          '<input type="color" class="color-swatch" id="'+pfx+'_bad_color_'+i+'" value="#ef4444"></div>';
+      function mkThresholdFields(pfx,i,ph1,ph2){
+        return '<div class="threshold-row">'+
+          '<div class="threshold-label">Good<span class="threshold-hint">&lt; value</span></div>'+
+          '<input type="text" class="input" id="'+pfx+'_good_max_'+i+'" placeholder="'+ph1+'">'+
+          '<input type="color" class="threshold-dot" id="'+pfx+'_good_color_'+i+'" value="#10b981"></div>'+
+          '<div class="threshold-row">'+
+          '<div class="threshold-label">Warning<span class="threshold-hint">&lt; value</span></div>'+
+          '<input type="text" class="input" id="'+pfx+'_ok_max_'+i+'" placeholder="'+ph2+'">'+
+          '<input type="color" class="threshold-dot" id="'+pfx+'_ok_color_'+i+'" value="#eab308"></div>'+
+          '<div class="threshold-row">'+
+          '<div class="threshold-label">Bad<span class="threshold-hint">&ge; above</span></div>'+
+          '<input type="color" class="threshold-dot" id="'+pfx+'_bad_color_'+i+'" value="#ef4444"></div>';
       }
     })();
 
