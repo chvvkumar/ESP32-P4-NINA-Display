@@ -3,21 +3,9 @@ name: Build Firmware
 on:
   push:
     branches: [main, snd]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - 'images/**'
-      - 'LICENSE'
-      - '.gitignore'
   pull_request:
     types: [opened, synchronize, reopened]
     branches: [main, snd]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - 'images/**'
-      - 'LICENSE'
-      - '.gitignore'
 
 env:
   IDF_VERSION: v5.5.2
@@ -31,7 +19,44 @@ permissions:
   pull-requests: write
 
 jobs:
+  check-changes:
+    name: Check Changed Paths
+    runs-on: ubuntu-latest
+    outputs:
+      has_code_changes: ${{ steps.filter.outputs.has_code_changes }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if code files changed
+        id: filter
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE=${{ github.event.pull_request.base.sha }}
+            HEAD=${{ github.event.pull_request.head.sha }}
+          else
+            BASE=${{ github.event.before }}
+            HEAD=${{ github.sha }}
+          fi
+
+          # Get changed files, excluding docs/workflow/non-code files
+          CODE_CHANGES=$(git diff --name-only "$BASE" "$HEAD" -- \
+            ':!**/*.md' ':!docs/**' ':!images/**' ':!LICENSE' ':!.gitignore' ':!.github/workflows/**' \
+            | head -1)
+
+          if [ -n "$CODE_CHANGES" ]; then
+            echo "has_code_changes=true" >> $GITHUB_OUTPUT
+            echo "Code changes detected, build will run"
+          else
+            echo "has_code_changes=false" >> $GITHUB_OUTPUT
+            echo "Only docs/workflow/non-code changes, skipping build"
+          fi
+
   build:
+    needs: check-changes
+    if: needs.check-changes.outputs.has_code_changes == 'true'
     runs-on: self-hosted
     steps:
       - name: Checkout code
@@ -587,6 +612,8 @@ jobs:
         if: steps.collect.outputs.skip_summary == 'false'
         env:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          PR_TITLE_RAW: ${{ github.event.pull_request.title }}
+          PR_BODY_RAW: ${{ github.event.pull_request.body }}
         run: |
           set +e  # Don't exit immediately on error
 
@@ -594,11 +621,11 @@ jobs:
           COMMITS=$(cat commits.txt)
           FILES=$(cat files_for_ai.txt)
 
-          # Escape special characters for JSON
+          # Escape special characters for JSON (use env vars to avoid shell injection)
           COMMITS_ESCAPED=$(echo "$COMMITS" | jq -Rs .)
           FILES_ESCAPED=$(echo "$FILES" | jq -Rs .)
-          PR_TITLE=$(echo '${{ github.event.pull_request.title }}' | jq -Rs .)
-          PR_BODY=$(echo '${{ github.event.pull_request.body }}' | jq -Rs .)
+          PR_TITLE=$(printenv PR_TITLE_RAW | jq -Rs .)
+          PR_BODY=$(printenv PR_BODY_RAW | jq -Rs .)
 
           # Build the prompt
           read -r -d '' PROMPT << 'EOF'
