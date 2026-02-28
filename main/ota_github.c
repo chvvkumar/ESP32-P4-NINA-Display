@@ -23,7 +23,7 @@ static const char *TAG = "ota_github";
 /**
  * Compare two version strings (with optional 'v' prefix).
  * Returns >0 if v1 is newer, <0 if v2 is newer, 0 if equal.
- * Pre-release suffixes (e.g., "-snd.1") are treated as newer than
+ * Pre-release suffixes (e.g., "-dev.1") are treated as newer than
  * the same base version since this project's pre-release tags
  * use the latest main release as their base.
  */
