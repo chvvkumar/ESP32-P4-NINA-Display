@@ -3,21 +3,9 @@ name: Build Firmware
 on:
   push:
     branches: [main, snd]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - 'images/**'
-      - 'LICENSE'
-      - '.gitignore'
   pull_request:
     types: [opened, synchronize, reopened]
     branches: [main, snd]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - 'images/**'
-      - 'LICENSE'
-      - '.gitignore'
 
 env:
   IDF_VERSION: v5.5.2
@@ -31,7 +19,44 @@ permissions:
   pull-requests: write
 
 jobs:
+  check-changes:
+    name: Check Changed Paths
+    runs-on: ubuntu-latest
+    outputs:
+      has_code_changes: ${{ steps.filter.outputs.has_code_changes }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if code files changed
+        id: filter
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE=${{ github.event.pull_request.base.sha }}
+            HEAD=${{ github.event.pull_request.head.sha }}
+          else
+            BASE=${{ github.event.before }}
+            HEAD=${{ github.sha }}
+          fi
+
+          # Get changed files, excluding docs/workflow/non-code files
+          CODE_CHANGES=$(git diff --name-only "$BASE" "$HEAD" -- \
+            ':!**/*.md' ':!docs/**' ':!images/**' ':!LICENSE' ':!.gitignore' ':!.github/workflows/**' \
+            | head -1)
+
+          if [ -n "$CODE_CHANGES" ]; then
+            echo "has_code_changes=true" >> $GITHUB_OUTPUT
+            echo "Code changes detected, build will run"
+          else
+            echo "has_code_changes=false" >> $GITHUB_OUTPUT
+            echo "Only docs/workflow/non-code changes, skipping build"
+          fi
+
   build:
+    needs: check-changes
+    if: needs.check-changes.outputs.has_code_changes == 'true'
     runs-on: self-hosted
     steps:
       - name: Checkout code
@@ -303,8 +328,89 @@ jobs:
           else
             CHANGES=$(git log --pretty=format:"- %s (%h)" --no-merges -20)
           fi
-          echo "$CHANGES" > /tmp/changelog.txt
+          # Filter out noise commits (version bumps, skip ci)
+          echo "$CHANGES" | grep -v '\[skip ci\]' | grep -v 'chore: bump version' > /tmp/changelog.txt || true
+          # Keep unfiltered as fallback
+          echo "$CHANGES" > /tmp/changelog_raw.txt
           echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
+
+      - name: Summarize release changes with Gemini
+        if: steps.check_skip.outputs.skip != 'true'
+        id: release_summary
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: |
+          set +e
+
+          CHANGES=$(cat /tmp/changelog.txt)
+
+          # Skip if no meaningful changes or no API key
+          if [ -z "$CHANGES" ] || [ -z "$GOOGLE_API_KEY" ]; then
+            echo "ai_available=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          CHANGES_ESCAPED=$(echo "$CHANGES" | jq -Rs .)
+
+          read -r -d '' PROMPT << 'EOF'
+          You are writing release notes for an ESP32 astrophotography display firmware. Given the commit list below, produce TWO things:
+
+          1. A SUMMARY: 1-2 sentences in plain language describing what changed in this release and why it matters to users. Focus on user-visible impact.
+
+          2. A CHANGES list: One line per commit in this exact format:
+          - <plain language description of what the commit does> — <hash>
+
+          Rules for the CHANGES list:
+          - Each line must end with the original commit hash after a " — " separator
+          - Rewrite the commit message into clear, plain language (drop prefixes like "feat:", "fix:", "bugfix:")
+          - Focus on WHAT changed and WHY, not implementation details
+          - Keep each line under 100 characters (excluding the hash)
+          - Do NOT add, remove, or merge commits — output exactly one line per input commit
+          - Do NOT use emojis
+
+          ## Commits
+          %CHANGES%
+
+          ## Output format (follow exactly)
+          SUMMARY: <your summary here>
+
+          CHANGES:
+          - <description> — <hash>
+          - <description> — <hash>
+          EOF
+
+          PROMPT="${PROMPT//%CHANGES%/$(echo $CHANGES_ESCAPED | jq -r .)}"
+
+          RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent" \
+            -H "Content-Type: application/json" \
+            -H "X-goog-api-key: $GOOGLE_API_KEY" \
+            -d "$(jq -n \
+              --arg prompt "$PROMPT" \
+              '{
+                contents: [{ parts: [{ text: $prompt }] }],
+                generationConfig: { temperature: 0.3, maxOutputTokens: 4096 }
+              }')")
+
+          # Validate response
+          if [ -z "$RESPONSE" ] || ! echo "$RESPONSE" | jq -e '.candidates[0].content.parts[0].text' > /dev/null 2>&1; then
+            echo "AI summary failed, will use raw commits"
+            echo "ai_available=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          FULL_TEXT=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text')
+
+          # Extract summary line
+          echo "$FULL_TEXT" | grep '^SUMMARY:' | sed 's/^SUMMARY:\s*//' > /tmp/release_summary.txt
+
+          # Extract changes (everything after CHANGES: line)
+          echo "$FULL_TEXT" | sed -n '/^CHANGES:/,$ p' | tail -n +2 > /tmp/release_changes.txt
+
+          if [ -s /tmp/release_summary.txt ] && [ -s /tmp/release_changes.txt ]; then
+            echo "ai_available=true" >> $GITHUB_OUTPUT
+          else
+            echo "ai_available=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Check for network_adapter.bin
         if: steps.check_skip.outputs.skip != 'true'
@@ -333,7 +439,8 @@ jobs:
             COMPARE_URL=""
           fi
 
-          export TAG PREV_TAG VERSION BRANCH COMPARE_URL FACTORY_MB OTA_MB
+          AI_AVAILABLE="${{ steps.release_summary.outputs.ai_available }}"
+          export TAG PREV_TAG VERSION BRANCH COMPARE_URL FACTORY_MB OTA_MB AI_AVAILABLE
           python3 << 'PYEOF'
           import os, json
           tag = os.environ['TAG']
@@ -343,16 +450,30 @@ jobs:
           compare_url = os.environ.get('COMPARE_URL', '')
           factory_mb = os.environ.get('FACTORY_MB', 'N/A')
           ota_mb = os.environ.get('OTA_MB', 'N/A')
-          
+          ai_available = os.environ.get('AI_AVAILABLE', 'false') == 'true'
+
           # Load metrics if available
           try:
               with open('/tmp/firmware-metrics.json') as f:
                   metrics = json.load(f)
           except:
               metrics = {}
-          
-          with open('/tmp/changelog.txt') as f:
-              changes = f.read().strip()
+
+          # Load AI summary and changes if available, otherwise fall back to raw changelog
+          summary = ''
+          if ai_available:
+              try:
+                  with open('/tmp/release_summary.txt') as f:
+                      summary = f.read().strip()
+                  with open('/tmp/release_changes.txt') as f:
+                      changes = f.read().strip()
+              except:
+                  ai_available = False
+
+          if not ai_available:
+              with open('/tmp/changelog.txt') as f:
+                  changes = f.read().strip()
+
           since = f'### Changes since {prev_tag}' if prev_tag else '### Recent Changes'
           lines = [
               f'## NINA Display {tag}',
@@ -368,10 +489,10 @@ jobs:
               f'- **Factory Binary:** {factory_mb} MB',
               f'- **OTA Binary:** {ota_mb} MB',
               '',
-              since,
-              changes,
-              '',
           ]
+          if summary:
+              lines += ['### Summary', summary, '']
+          lines += [since, changes, '']
           if compare_url:
               lines.append(f'**Full Changelog**: {compare_url}')
               lines.append('')
@@ -491,6 +612,8 @@ jobs:
         if: steps.collect.outputs.skip_summary == 'false'
         env:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          PR_TITLE_RAW: ${{ github.event.pull_request.title }}
+          PR_BODY_RAW: ${{ github.event.pull_request.body }}
         run: |
           set +e  # Don't exit immediately on error
 
@@ -498,11 +621,11 @@ jobs:
           COMMITS=$(cat commits.txt)
           FILES=$(cat files_for_ai.txt)
 
-          # Escape special characters for JSON
+          # Escape special characters for JSON (use env vars to avoid shell injection)
           COMMITS_ESCAPED=$(echo "$COMMITS" | jq -Rs .)
           FILES_ESCAPED=$(echo "$FILES" | jq -Rs .)
-          PR_TITLE=$(echo '${{ github.event.pull_request.title }}' | jq -Rs .)
-          PR_BODY=$(echo '${{ github.event.pull_request.body }}' | jq -Rs .)
+          PR_TITLE=$(printenv PR_TITLE_RAW | jq -Rs .)
+          PR_BODY=$(printenv PR_BODY_RAW | jq -Rs .)
 
           # Build the prompt
           read -r -d '' PROMPT << 'EOF'
@@ -523,20 +646,28 @@ jobs:
           ## Your Task
           Provide your output in EXACTLY this format:
 
-          TITLE: <a short, descriptive PR title under 70 characters summarizing the overall changes>
+          TITLE: <a concise PR title following the rules below>
 
-          ### Changes by Category
-          Group the changes into relevant categories such as:
-          - **Features**: New functionality added
-          - **Bug Fixes**: Issues resolved
-          - **Refactoring**: Code improvements without behavior changes
-          - **Documentation**: README, comments, docs updates
-          - **Tests**: Test additions or modifications
-          - **Dependencies**: Package or dependency changes
-          - **Configuration**: Config file changes
+          ### Summary
+          <1-3 sentences in plain language explaining what this PR does and why. Focus on the user-visible impact or the problem being solved, not implementation details. A non-developer should be able to understand the gist.>
 
-          Only include categories that apply. Use bullet points for each change.
+          ### Changes
+          <Bullet list of specific changes. Group related items together. Each bullet should be one clear sentence. Use plain language — avoid jargon like "TOCTOU race" or "TLS-based HTTP context" unless there's no simpler way to say it. Focus on WHAT changed and WHY, not HOW.>
+
           Do NOT use emojis. Do NOT include any other sections, headers, or conclusions.
+          Do NOT use sub-categories like "Features:", "Bug Fixes:" etc. — just a flat bullet list.
+          Limit to at most 8 bullets. Combine trivial related changes into a single bullet.
+
+          ## TITLE Rules (follow these strictly)
+          - Identify the SINGLE most important or impactful change in this PR and use that as the title
+          - Do NOT list multiple changes separated by commas or "and" — pick the one that matters most
+          - Keep it under 60 characters
+          - Use lowercase after the prefix
+          - Start with a conventional commit prefix: feat:, fix:, refactor:, docs:, perf:, chore:
+          - Be specific about WHAT changed, not vague (e.g. "feat: add screen sleep timeout" not "Add new feature and improvements")
+          - If the PR is truly about one bug fix and one feature, prefer the feature for the title
+          - Good examples: "feat: add MQTT Home Assistant integration", "fix: memory leak in WebSocket reconnect", "refactor: split polling logic into tiered stages"
+          - Bad examples: "Update UI, Fix Bugs, and Improve Config", "Various improvements and fixes", "Enhance app with new features"
           EOF
 
           # Replace placeholders (remove jq quotes)

@@ -63,6 +63,8 @@ void start_web_server(void)
         { "/api/ota",              HTTP_POST, ota_post_handler, NULL },
         { "/api/perf",             HTTP_GET,  perf_get_handler, NULL },
         { "/api/perf/reset",       HTTP_POST, perf_reset_post_handler, NULL },
+        { "/api/config/apply",     HTTP_POST, config_apply_handler, NULL },
+        { "/api/config/revert",    HTTP_POST, config_revert_handler, NULL },
     };
 
     for (int i = 0; i < (int)(sizeof(routes)/sizeof(routes[0])); i++) {

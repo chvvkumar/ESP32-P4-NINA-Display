@@ -1,6 +1,7 @@
 #include "web_server_internal.h"
 #include "bsp/esp-bsp.h"
 #include "bsp/display.h"
+#include "display_defs.h"
 #include "ui/nina_dashboard.h"
 #include "ui/themes.h"
 #include "lvgl.h"
@@ -10,6 +11,20 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
+
+// Trigger hardware side effects when config fields change
+void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t *new_cfg) {
+    if (new_cfg->brightness != old_cfg->brightness) {
+        bsp_display_brightness_set(new_cfg->brightness);
+    }
+    if (new_cfg->theme_index != old_cfg->theme_index ||
+        new_cfg->color_brightness != old_cfg->color_brightness) {
+        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+            nina_dashboard_apply_theme(new_cfg->theme_index);
+            bsp_display_unlock();
+        }
+    }
+}
 
 // Handler for live brightness adjustment (no reboot needed)
 esp_err_t brightness_post_handler(httpd_req_t *req)
@@ -42,6 +57,7 @@ esp_err_t brightness_post_handler(httpd_req_t *req)
         int brightness = val->valueint;
         if (brightness < 0) brightness = 0;
         if (brightness > 100) brightness = 100;
+        app_config_get()->brightness = brightness;
         bsp_display_brightness_set(brightness);
         ESP_LOGI(TAG, "Brightness set to %d%%", brightness);
         mqtt_ha_publish_state();
@@ -85,7 +101,6 @@ esp_err_t color_brightness_post_handler(httpd_req_t *req)
         if (cb > 100) cb = 100;
         app_config_t *cfg = app_config_get();
         cfg->color_brightness = cb;
-        app_config_save(cfg);
 
         // Re-apply theme to update static text brightness
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
@@ -137,7 +152,6 @@ esp_err_t theme_post_handler(httpd_req_t *req)
         if (idx >= themes_get_count()) idx = themes_get_count() - 1;
         app_config_t *cfg = app_config_get();
         cfg->theme_index = idx;
-        app_config_save(cfg);
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
             nina_dashboard_apply_theme(idx);
             bsp_display_unlock();
@@ -186,17 +200,15 @@ esp_err_t page_post_handler(httpd_req_t *req)
 
         if (page >= 0 && page < total) {
             cfg->active_page_override = (int8_t)page;
-            app_config_save(cfg);
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                 nina_dashboard_show_page(page, 0);
                 bsp_display_unlock();
             } else {
                 ESP_LOGW(TAG, "Display lock timeout (page switch)");
             }
-            ESP_LOGI(TAG, "Page switched to %d via web, override saved", page);
+            ESP_LOGI(TAG, "Page switched to %d via web", page);
         } else if (page == -1) {
             cfg->active_page_override = -1;
-            app_config_save(cfg);
             ESP_LOGI(TAG, "Page override cleared via web");
         }
     }

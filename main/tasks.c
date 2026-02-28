@@ -179,8 +179,20 @@ void instance_poll_task(void *arg) {
 
         int64_t now_ms = esp_timer_get_time() / 1000;
 
-        // Poll based on active/background mode
-        if (ctx->is_active) {
+        // Poll based on active/background/idle mode
+        if (screen_asleep) {
+            /* Screen sleeping — lightweight heartbeat only to detect reconnection */
+            bool was_connected = nina_connection_is_connected(idx);
+            nina_client_poll_heartbeat(url, ctx->client, idx);
+            if (nina_connection_is_connected(idx)) {
+                ctx->client->last_successful_poll_ms = now_ms;
+                /* Wake the UI coordinator immediately so it can turn the screen on */
+                if (!was_connected && data_task_handle)
+                    xTaskNotifyGive(data_task_handle);
+            }
+            ctx->last_heartbeat_ms = now_ms;
+            ESP_LOGD(TAG, "Poll[%d] (idle): connected=%d", idx + 1, ctx->client->connected);
+        } else if (ctx->is_active) {
             nina_client_poll(url, ctx->client, ctx->poll_state, idx);
             if (nina_connection_is_connected(idx))
                 ctx->client->last_successful_poll_ms = now_ms;
@@ -216,13 +228,19 @@ void instance_poll_task(void *arg) {
             ctx->filters_synced = true;
         }
 
-        // WebSocket reconnection with exponential backoff
-        nina_websocket_check_reconnect(idx, url, ctx->client);
+        // WebSocket: skip reconnect while screen sleeping (saves network resources);
+        // reconnect will happen naturally when screen wakes and poll resumes.
+        if (!screen_asleep) {
+            nina_websocket_check_reconnect(idx, url, ctx->client);
+        }
 
-        // Sleep: active = update_rate_s cycle, background = heartbeat interval
-        uint16_t cycle_ms;
-        if (ctx->is_active) {
-            cycle_ms = (uint16_t)app_config_get()->update_rate_s * 1000;
+        // Sleep: active = update_rate_s, background = heartbeat, screen_asleep = idle_poll
+        uint32_t cycle_ms;
+        if (screen_asleep) {
+            cycle_ms = (uint32_t)app_config_get()->idle_poll_interval_s * 1000;
+            if (cycle_ms < 5000) cycle_ms = 5000;
+        } else if (ctx->is_active) {
+            cycle_ms = (uint32_t)app_config_get()->update_rate_s * 1000;
             if (cycle_ms < 1000) cycle_ms = 1000;
         } else {
             cycle_ms = HEARTBEAT_INTERVAL_MS;
@@ -394,6 +412,19 @@ void data_update_task(void *arg) {
                 esp_log_level_set("nina_seq", lvl);
                 last_debug_mode = current_debug;
                 first_check = false;
+            }
+        }
+
+        // Check for WiFi power save toggle
+        {
+            static bool last_wifi_ps = true;
+            static bool first_ps_check = true;
+            bool current_ps = app_config_get()->wifi_power_save;
+            if (first_ps_check || current_ps != last_wifi_ps) {
+                esp_wifi_set_ps(current_ps ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE);
+                ESP_LOGI(TAG, "WiFi power save %s", current_ps ? "enabled" : "disabled");
+                last_wifi_ps = current_ps;
+                first_ps_check = false;
             }
         }
 
@@ -831,6 +862,9 @@ void data_update_task(void *arg) {
                     screen_asleep = false;
                     screen_touch_wake = false;
                     all_disconnected_since_ms = now_ms;  /* restart sleep timer */
+                    /* Wake poll tasks so they resume full polling + WS reconnect */
+                    for (int i = 0; i < instance_count; i++)
+                        if (poll_task_handles[i]) xTaskNotifyGive(poll_task_handles[i]);
                     ESP_LOGI(TAG, "Screen wake: touch detected");
                 }
 
@@ -839,6 +873,9 @@ void data_update_task(void *arg) {
                     if (screen_asleep) {
                         bsp_display_brightness_set(sl_cfg->brightness);
                         screen_asleep = false;
+                        /* Wake poll tasks so they resume full polling + WS reconnect */
+                        for (int i = 0; i < instance_count; i++)
+                            if (poll_task_handles[i]) xTaskNotifyGive(poll_task_handles[i]);
                         ESP_LOGI(TAG, "Screen wake: NINA connected");
                     }
                 } else {
@@ -855,6 +892,9 @@ void data_update_task(void *arg) {
                         ledc_set_duty(LEDC_LOW_SPEED_MODE, CONFIG_BSP_DISPLAY_BRIGHTNESS_LEDC_CH, 0);
                         ledc_update_duty(LEDC_LOW_SPEED_MODE, CONFIG_BSP_DISPLAY_BRIGHTNESS_LEDC_CH);
                         screen_asleep = true;
+                        /* Disconnect WebSockets to save network resources while sleeping */
+                        for (int i = 0; i < instance_count; i++)
+                            nina_websocket_stop(i);
                         ESP_LOGI(TAG, "Screen sleep: no NINA connections for %ds",
                                  sl_cfg->screen_sleep_timeout_s);
                     }
@@ -864,6 +904,8 @@ void data_update_task(void *arg) {
                 bsp_display_brightness_set(sl_cfg->brightness);
                 screen_asleep = false;
                 all_disconnected_since_ms = 0;
+                for (int i = 0; i < instance_count; i++)
+                    if (poll_task_handles[i]) xTaskNotifyGive(poll_task_handles[i]);
                 ESP_LOGI(TAG, "Screen wake: sleep feature disabled");
             }
         }
@@ -881,10 +923,17 @@ void data_update_task(void *arg) {
         }
 
         // UI coordinator loop delay — no HTTP blocking, so this always fires on time.
-        // Use task notification to allow WS events to wake us for immediate UI refresh.
+        // Use task notification to allow WS events or screen wake to interrupt sleep.
         {
-            uint16_t cycle_ms = (uint16_t)app_config_get()->update_rate_s * 1000;
-            if (cycle_ms < 1000) cycle_ms = 1000;
+            uint32_t cycle_ms;
+            if (screen_asleep) {
+                /* No UI to render — match the idle poll interval */
+                cycle_ms = (uint32_t)app_config_get()->idle_poll_interval_s * 1000;
+                if (cycle_ms < 5000) cycle_ms = 5000;
+            } else {
+                cycle_ms = (uint32_t)app_config_get()->update_rate_s * 1000;
+                if (cycle_ms < 1000) cycle_ms = 1000;
+            }
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(cycle_ms));
         }
     }

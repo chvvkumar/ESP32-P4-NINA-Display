@@ -312,7 +312,7 @@
     }
     .color-swatch:hover { border-color: rgba(255, 255, 255, 0.2); }
 
-    .filter-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 10px; }
+    .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: 10px; }
     .filter-chip {
       display: flex; flex-direction: column; align-items: center; gap: 8px;
       padding: 12px 6px; border-radius: 10px;
@@ -333,6 +333,25 @@
     }
     .filter-dot:hover { transform: scale(1.08); }
     .filter-dot:active { transform: scale(0.95); }
+
+    .threshold-row {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
+    }
+    .threshold-row .threshold-label {
+      width: 56px; flex-shrink: 0; font-size: 0.75rem; color: #a1a1aa;
+    }
+    .threshold-row .threshold-hint {
+      font-size: 0.6rem; color: #71717a; display: block;
+    }
+    .threshold-row .input { flex: 1; min-width: 0; }
+    .threshold-row .threshold-dot {
+      width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
+      border: 1px solid rgba(255, 255, 255, 0.1); cursor: pointer; padding: 0;
+      background: none; transition: transform 0.15s ease, box-shadow 0.2s ease;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    }
+    .threshold-row .threshold-dot:hover { transform: scale(1.08); }
+    .threshold-row:last-child { margin-bottom: 0; }
 
     .row { display: flex; gap: 14px; align-items: flex-start; }
     .row > * { flex: 1; }
@@ -592,77 +611,6 @@
 
         </div>
       </div>
-      <div class="card">
-        <div class="card-title card-title-collapsible" onclick="toggleCollapsible('dr')">
-          <span>Data rates</span>
-          <span class="card-chevron collapsed" id="dr_chevron">&#9660;</span>
-        </div>
-        <div class="card-body-collapsible collapsed" id="dr_body">
-        <div class="field">
-          <label class="field-label">Data update rate (seconds)</label>
-          <input type="number" class="input" id="update_rate" min="1" max="10" value="2">
-        </div>
-        <div class="field">
-          <label class="field-label">Graph update rate (seconds)</label>
-          <input type="number" class="input" id="graph_interval" min="2" max="30" value="5">
-        </div>
-        <div class="field">
-          <label class="field-label">Connection timeout (seconds)</label>
-          <input type="number" class="input" id="connection_timeout" min="2" max="30" value="6">
-          <div class="field-hint">Time without a successful poll before a NINA instance is considered offline</div>
-        </div>
-        <div class="field">
-          <label class="field-label">Toast notification duration (seconds)</label>
-          <input type="number" class="input" id="toast_duration" min="3" max="30" value="8">
-          <div class="field-hint">How long toast notifications are shown on screen (errors show for 2x this value)</div>
-        </div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title card-title-collapsible" onclick="toggleCollapsible('scrslp')">
-          Screen Sleep
-          <span class="card-chevron collapsed" id="scrslp_chevron">&#9660;</span>
-        </div>
-        <div class="card-body-collapsible collapsed" id="scrslp_body">
-        <div class="toggle-row">
-          <span class="toggle-label">Turn off screen when idle</span>
-          <label class="toggle"><input type="checkbox" id="screen_sleep_enabled"><span class="toggle-track"></span></label>
-        </div>
-        <div id="screen_sleep_details" style="margin-top:12px">
-          <div class="field">
-            <label class="field-label">Timeout (seconds)</label>
-            <input type="number" class="input" id="screen_sleep_timeout" min="10" max="3600" value="60">
-            <div class="field-hint">Seconds with no NINA connections before turning off the display. Touch or reconnection wakes it.</div>
-          </div>
-        </div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title card-title-collapsible" onclick="toggleCollapsible('alerts')">
-          Alerts
-          <span class="card-chevron collapsed" id="alerts_chevron">&#9660;</span>
-        </div>
-        <div class="card-body-collapsible collapsed" id="alerts_body">
-        <div class="toggle-row">
-          <span class="toggle-label">Border flash alerts</span>
-          <label class="toggle"><input type="checkbox" id="alert_flash_enabled" checked><span class="toggle-track"></span></label>
-        </div>
-        <div class="field-hint" style="margin-top:4px">Flash the screen border when RMS, HFR, or safety thresholds are exceeded. Toasts and event log entries are unaffected.</div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title card-title-collapsible" onclick="toggleCollapsible('dbg')">
-          Debug
-          <span class="card-chevron collapsed" id="dbg_chevron">&#9660;</span>
-        </div>
-        <div class="card-body-collapsible collapsed" id="dbg_body">
-        <div class="toggle-row">
-          <span class="toggle-label">Enable Debug Mode</span>
-          <label class="toggle"><input type="checkbox" id="debug_mode"><span class="toggle-track"></span></label>
-        </div>
-        <div class="field-hint" style="margin-top:8px;">Enables performance profiling metrics, serial reports, and the /api/perf endpoint. Toggling resets all metrics.</div>
-        </div>
-      </div>
     </div>
     <div id="tab-network" class="tab-panel">
       <div class="card">
@@ -766,6 +714,45 @@
         <button class="sub-tab" data-node="2">Node 3</button>
       </div>
       <div id="node-panels"></div>
+      <div class="card">
+        <div class="card-title card-title-collapsible" onclick="toggleCollapsible('dr')">
+          <span>Data rates</span>
+          <span class="card-chevron collapsed" id="dr_chevron">&#9660;</span>
+        </div>
+        <div class="card-body-collapsible collapsed" id="dr_body">
+        <div class="field">
+          <label class="field-label">Data update rate (seconds)</label>
+          <input type="number" class="input" id="update_rate" min="1" max="10" value="2">
+        </div>
+        <div class="field">
+          <label class="field-label">Graph update rate (seconds)</label>
+          <input type="number" class="input" id="graph_interval" min="2" max="30" value="5">
+        </div>
+        <div class="field">
+          <label class="field-label">Connection timeout (seconds)</label>
+          <input type="number" class="input" id="connection_timeout" min="2" max="30" value="6">
+          <div class="field-hint">Time without a successful poll before a NINA instance is considered offline</div>
+        </div>
+        <div class="field">
+          <label class="field-label">Toast notification duration (seconds)</label>
+          <input type="number" class="input" id="toast_duration" min="3" max="30" value="8">
+          <div class="field-hint">How long toast notifications are shown on screen (errors show for 2x this value)</div>
+        </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title card-title-collapsible" onclick="toggleCollapsible('alerts')">
+          Alerts
+          <span class="card-chevron collapsed" id="alerts_chevron">&#9660;</span>
+        </div>
+        <div class="card-body-collapsible collapsed" id="alerts_body">
+        <div class="toggle-row">
+          <span class="toggle-label">Border flash alerts</span>
+          <label class="toggle"><input type="checkbox" id="alert_flash_enabled" checked><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint" style="margin-top:4px">Flash the screen border when RMS, HFR, or safety thresholds are exceeded. Toasts and event log entries are unaffected.</div>
+        </div>
+      </div>
     </div>
     <div id="tab-system" class="tab-panel">
       <div class="card">
@@ -798,6 +785,48 @@
         <div class="flex-wrap-gap">
           <button class="btn btn-outline" onclick="saveAndReboot()">Reboot</button>
           <button class="btn btn-danger" onclick="factoryReset()">Factory Reset</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title card-title-collapsible" onclick="toggleCollapsible('scrslp')">
+          Screen Sleep
+          <span class="card-chevron collapsed" id="scrslp_chevron">&#9660;</span>
+        </div>
+        <div class="card-body-collapsible collapsed" id="scrslp_body">
+        <div class="toggle-row">
+          <span class="toggle-label">Turn off screen when idle</span>
+          <label class="toggle"><input type="checkbox" id="screen_sleep_enabled"><span class="toggle-track"></span></label>
+        </div>
+        <div id="screen_sleep_details" style="margin-top:12px">
+          <div class="field">
+            <label class="field-label">Timeout (seconds)</label>
+            <input type="number" class="input" id="screen_sleep_timeout" min="10" max="3600" value="60">
+            <div class="field-hint">Seconds with no NINA connections before turning off the display. Touch or reconnection wakes it.</div>
+          </div>
+          <div class="field">
+            <label class="field-label">Idle poll interval (seconds)</label>
+            <input type="number" class="input" id="idle_poll_interval" min="5" max="120" value="30">
+            <div class="field-hint">How often to check for NINA instances while the screen is sleeping. Lower = faster wake, higher = less network activity.</div>
+          </div>
+          <div class="toggle-row" style="margin-top:8px">
+            <span class="toggle-label">WiFi power save</span>
+            <label class="toggle"><input type="checkbox" id="wifi_power_save" checked><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint" style="margin-top:4px">Enable WiFi modem sleep to reduce radio power between polls. The WiFi connection stays associated with zero reconnection delay.</div>
+        </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title card-title-collapsible" onclick="toggleCollapsible('dbg')">
+          Debug
+          <span class="card-chevron collapsed" id="dbg_chevron">&#9660;</span>
+        </div>
+        <div class="card-body-collapsible collapsed" id="dbg_body">
+        <div class="toggle-row">
+          <span class="toggle-label">Enable Debug Mode</span>
+          <label class="toggle"><input type="checkbox" id="debug_mode"><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint" style="margin-top:8px;">Enables performance profiling metrics, serial reports, and the /api/perf endpoint. Toggling resets all metrics.</div>
         </div>
       </div>
       <div class="card">
@@ -843,22 +872,25 @@
           '<div id="filters_'+i+'" class="filter-grid"></div></div>'+
           '<div class="row stack-mobile">'+
           '<div class="card"><div class="card-title">RMS thresholds</div>'+
-          mkThresholdFields('rms',i,'Target (optimal)','0.5','Warning (caution)','1.0')+
+          mkThresholdFields('rms',i,'0.5','1.0')+
           '</div>'+
           '<div class="card"><div class="card-title">HFR thresholds</div>'+
-          mkThresholdFields('hfr',i,'Target (optimal)','2.0','Warning (caution)','3.5')+
+          mkThresholdFields('hfr',i,'2.0','3.5')+
           '</div></div></div>'
         );
       }
-      function mkThresholdFields(pfx,i,lbl1,ph1,lbl2,ph2){
-        return '<div class="field"><label class="field-label">'+lbl1+'</label>'+
-          '<div class="row"><input type="text" class="input" id="'+pfx+'_good_max_'+i+'" placeholder="'+ph1+'">'+
-          '<input type="color" class="color-swatch" id="'+pfx+'_good_color_'+i+'" value="#10b981"></div></div>'+
-          '<div class="field"><label class="field-label">'+lbl2+'</label>'+
-          '<div class="row"><input type="text" class="input" id="'+pfx+'_ok_max_'+i+'" placeholder="'+ph2+'">'+
-          '<input type="color" class="color-swatch" id="'+pfx+'_ok_color_'+i+'" value="#eab308"></div></div>'+
-          '<div class="field"><label class="field-label">Critical</label>'+
-          '<input type="color" class="color-swatch" id="'+pfx+'_bad_color_'+i+'" value="#ef4444"></div>';
+      function mkThresholdFields(pfx,i,ph1,ph2){
+        return '<div class="threshold-row">'+
+          '<div class="threshold-label">Good<span class="threshold-hint">&lt; value</span></div>'+
+          '<input type="text" class="input" id="'+pfx+'_good_max_'+i+'" placeholder="'+ph1+'">'+
+          '<input type="color" class="threshold-dot" id="'+pfx+'_good_color_'+i+'" value="#10b981"></div>'+
+          '<div class="threshold-row">'+
+          '<div class="threshold-label">Warning<span class="threshold-hint">&lt; value</span></div>'+
+          '<input type="text" class="input" id="'+pfx+'_ok_max_'+i+'" placeholder="'+ph2+'">'+
+          '<input type="color" class="threshold-dot" id="'+pfx+'_ok_color_'+i+'" value="#eab308"></div>'+
+          '<div class="threshold-row">'+
+          '<div class="threshold-label">Bad<span class="threshold-hint">&ge; above</span></div>'+
+          '<input type="color" class="threshold-dot" id="'+pfx+'_bad_color_'+i+'" value="#ef4444"></div>';
       }
     })();
 
@@ -1167,6 +1199,8 @@
         instance_enabled_3:!!$('instance_enabled_2').checked,
         screen_sleep_enabled:!!$('screen_sleep_enabled').checked,
         screen_sleep_timeout_s:parseInt($('screen_sleep_timeout').value)||60,
+        idle_poll_interval_s:parseInt($('idle_poll_interval').value)||30,
+        wifi_power_save:!!$('wifi_power_save').checked,
         alert_flash_enabled:!!$('alert_flash_enabled').checked
       };
 
@@ -1215,6 +1249,8 @@
       $('instance_enabled_2').checked=data.instance_enabled_3!==false;
       $('screen_sleep_enabled').checked=!!data.screen_sleep_enabled;
       $('screen_sleep_timeout').value=data.screen_sleep_timeout_s||60;
+      $('idle_poll_interval').value=data.idle_poll_interval_s||30;
+      $('wifi_power_save').checked=data.wifi_power_save!==false;
       $('alert_flash_enabled').checked=data.alert_flash_enabled!==false;
 
       for(let i=0;i<3;i++){
@@ -1254,6 +1290,9 @@
       $('pass').value='';
       loadedConfig=JSON.stringify(getConfigData());
       _populating=false;
+      if(data._dirty){
+        loadedConfig='';  // Force dirty state — unsaved changes exist on device
+      }
       checkDirty();
     }
 
@@ -1330,8 +1369,11 @@
     }
 
     function reloadConfig(){
-      loadConfig();
-      $('saveBar').classList.remove('visible');
+      fetch('/api/config/revert',{method:'POST'}).then(r=>{
+        if(!r.ok) throw new Error('Revert failed');
+        loadConfig();
+        $('saveBar').classList.remove('visible');
+      }).catch(e=>showToast('Discard failed: '+e.message,'error'));
     }
 
     /* ---- Save and Reboot ---- */
@@ -1454,8 +1496,21 @@
       $('saveBar').classList.toggle('visible',dirty);
     }
 
-    document.querySelector('.content').addEventListener('input',checkDirty);
-    document.querySelector('.content').addEventListener('change',checkDirty);
+    /* ---- Live Apply (debounced) ---- */
+    let _applyTimer=null;
+    function liveApply(){
+      if(_populating) return;
+      clearTimeout(_applyTimer);
+      _applyTimer=setTimeout(()=>{
+        const data=getConfigData();
+        delete data.ssid;
+        delete data.pass;
+        postJson('/api/config/apply',data).catch(e=>console.error('Live apply failed:',e));
+      },400);
+    }
+
+    document.querySelector('.content').addEventListener('input',()=>{checkDirty();liveApply();});
+    document.querySelector('.content').addEventListener('change',()=>{checkDirty();liveApply();});
 
     /* ---- Init ---- */
     loadConfig();

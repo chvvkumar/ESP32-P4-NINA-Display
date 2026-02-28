@@ -44,8 +44,8 @@ typedef struct {
     int condition_count;      // Total conditions found (including those without time)
 } earliest_condition_t;
 
-// Recursively scan all conditions with RemainingTime in a container tree,
-// updating *out with the earliest (minimum) one found.
+// Recursively scan all conditions with RemainingTime or ExpectedDateTime in a
+// container tree, updating *out with the earliest (minimum) one found.
 static void find_earliest_condition(cJSON *container, earliest_condition_t *out) {
     if (!container) return;
 
@@ -56,10 +56,30 @@ static void find_earliest_condition(cJSON *container, earliest_condition_t *out)
         cJSON_ArrayForEach(cond, conditions) {
             out->condition_count++;
 
-            cJSON *rem = cJSON_GetObjectItem(cond, "RemainingTime");
-            if (!rem || !rem->valuestring || rem->valuestring[0] == '\0') continue;
+            int secs = -1;
 
-            int secs = parse_remaining_seconds(rem->valuestring);
+            // Try RemainingTime first (countdown string like "H:MM:SS")
+            cJSON *rem = cJSON_GetObjectItem(cond, "RemainingTime");
+            if (rem && rem->valuestring && rem->valuestring[0] != '\0') {
+                secs = parse_remaining_seconds(rem->valuestring);
+            }
+
+            // Fallback: compute remaining seconds from ExpectedDateTime
+            // (used by Altitude/Horizon conditions that lack RemainingTime)
+            if (secs < 0) {
+                cJSON *edt = cJSON_GetObjectItem(cond, "ExpectedDateTime");
+                if (edt && edt->valuestring && edt->valuestring[0] != '\0') {
+                    time_t expected = parse_iso8601(edt->valuestring);
+                    // Ignore sentinel values (year 1 / parse failure)
+                    if (expected > 86400) {
+                        time_t now = time(NULL);
+                        if (now > 0 && expected > now) {
+                            secs = (int)(expected - now);
+                        }
+                    }
+                }
+            }
+
             if (secs < 0) continue;
 
             if (out->min_seconds < 0 || secs < out->min_seconds) {
