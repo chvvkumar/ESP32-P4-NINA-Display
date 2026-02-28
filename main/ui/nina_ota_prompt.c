@@ -406,7 +406,26 @@ void nina_ota_prompt_show_error(const char *error_msg) {
     lv_obj_add_flag(progress_cont, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(error_cont, LV_OBJ_FLAG_HIDDEN);
 
+    lv_label_set_text(lbl_err_title, "Update Failed");
+    lv_obj_set_style_text_color(lbl_err_title, lv_color_hex(0xFF4444), 0);
     lv_label_set_text(lbl_error, error_msg ? error_msg : "Unknown error");
+}
+
+void nina_ota_prompt_show_status(const char *title, const char *message) {
+    if (!ota_overlay) return;
+    lv_obj_add_flag(info_cont, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(progress_cont, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(error_cont, LV_OBJ_FLAG_HIDDEN);
+
+    /* Use accent color for title instead of error red */
+    uint32_t accent = 0x3b82f6;
+    if (current_theme) {
+        int gb = app_config_get()->color_brightness;
+        accent = app_config_apply_brightness(current_theme->progress_color, gb);
+    }
+    lv_label_set_text(lbl_err_title, title ? title : "");
+    lv_obj_set_style_text_color(lbl_err_title, lv_color_hex(accent), 0);
+    lv_label_set_text(lbl_error, message ? message : "");
 }
 
 void nina_ota_prompt_apply_theme(void) {
