@@ -523,7 +523,7 @@ jobs:
           ## Your Task
           Provide your output in EXACTLY this format:
 
-          TITLE: <a short, descriptive PR title under 70 characters summarizing the overall changes>
+          TITLE: <a concise PR title following the rules below>
 
           ### Changes by Category
           Group the changes into relevant categories such as:
@@ -537,6 +537,17 @@ jobs:
 
           Only include categories that apply. Use bullet points for each change.
           Do NOT use emojis. Do NOT include any other sections, headers, or conclusions.
+
+          ## TITLE Rules (follow these strictly)
+          - Identify the SINGLE most important or impactful change in this PR and use that as the title
+          - Do NOT list multiple changes separated by commas or "and" — pick the one that matters most
+          - Keep it under 60 characters
+          - Use lowercase after the prefix
+          - Start with a conventional commit prefix: feat:, fix:, refactor:, docs:, perf:, chore:
+          - Be specific about WHAT changed, not vague (e.g. "feat: add screen sleep timeout" not "Add new feature and improvements")
+          - If the PR is truly about one bug fix and one feature, prefer the feature for the title
+          - Good examples: "feat: add MQTT Home Assistant integration", "fix: memory leak in WebSocket reconnect", "refactor: split polling logic into tiered stages"
+          - Bad examples: "Update UI, Fix Bugs, and Improve Config", "Various improvements and fixes", "Enhance app with new features"
           EOF
 
           # Replace placeholders (remove jq quotes)
