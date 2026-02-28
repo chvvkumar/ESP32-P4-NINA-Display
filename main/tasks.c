@@ -105,6 +105,9 @@ void input_task(void *arg) {
             }
         }
         last_level = level;
+        if (g_perf.enabled) {
+            g_perf.input_task_stack_hwm = uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t);
+        }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
@@ -320,12 +323,13 @@ void data_update_task(void *arg) {
     for (int i = 0; i < instance_count; i++) {
         char name[16];
         snprintf(name, sizeof(name), "poll_%d", i);
-        /* Use xTaskCreateStatic with PSRAM-allocated stack to save internal heap */
-        StackType_t *stack = heap_caps_malloc(8192, MALLOC_CAP_SPIRAM);
+        /* Use xTaskCreateStaticPinnedToCore with PSRAM-allocated stack to save internal heap.
+         * Pin poll tasks to Core 0 (networking), leaving Core 1 for UI/LVGL. */
+        StackType_t *stack = heap_caps_malloc(8192 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
         StaticTask_t *tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         if (stack && tcb) {
-            poll_contexts[i].task_handle = xTaskCreateStatic(
-                instance_poll_task, name, 8192, &poll_contexts[i], 4, stack, tcb);
+            poll_contexts[i].task_handle = xTaskCreateStaticPinnedToCore(
+                instance_poll_task, name, 8192, &poll_contexts[i], 4, stack, tcb, 0);
             poll_task_handles[i] = poll_contexts[i].task_handle;
         } else {
             ESP_LOGE(TAG, "Failed to allocate poll task %d stack from PSRAM", i);
