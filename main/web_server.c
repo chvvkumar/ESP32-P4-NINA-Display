@@ -40,7 +40,7 @@ void start_web_server(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 8192;
-    config.max_uri_handlers = 20;
+    config.max_uri_handlers = 21;
     httpd_handle_t server = NULL;
 
     if (httpd_start(&server, &config) != ESP_OK) {
@@ -55,6 +55,7 @@ void start_web_server(void)
         { "/api/brightness",       HTTP_POST, brightness_post_handler, NULL },
         { "/api/color-brightness", HTTP_POST, color_brightness_post_handler, NULL },
         { "/api/theme",            HTTP_POST, theme_post_handler, NULL },
+        { "/api/widget-style",     HTTP_POST, widget_style_post_handler, NULL },
         { "/api/reboot",           HTTP_POST, reboot_post_handler, NULL },
         { "/api/factory-reset",    HTTP_POST, factory_reset_post_handler, NULL },
         { "/api/screenshot",       HTTP_GET,  screenshot_get_handler, NULL },

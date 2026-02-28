@@ -98,6 +98,7 @@ lv_obj_t *create_bento_box(lv_obj_t *parent) {
     lv_obj_t *box = lv_obj_create(parent);
     lv_obj_remove_style_all(box);
     lv_obj_add_style(box, &style_bento_box, 0);
+    ui_styles_set_widget_draw_cbs(box);
     return box;
 }
 

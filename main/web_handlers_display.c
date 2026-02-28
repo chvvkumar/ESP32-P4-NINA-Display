@@ -18,7 +18,8 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
         bsp_display_brightness_set(new_cfg->brightness);
     }
     if (new_cfg->theme_index != old_cfg->theme_index ||
-        new_cfg->color_brightness != old_cfg->color_brightness) {
+        new_cfg->color_brightness != old_cfg->color_brightness ||
+        new_cfg->widget_style != old_cfg->widget_style) {
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
             nina_dashboard_apply_theme(new_cfg->theme_index);
             bsp_display_unlock();
@@ -159,6 +160,53 @@ esp_err_t theme_post_handler(httpd_req_t *req)
             ESP_LOGW(TAG, "Display lock timeout (theme switch)");
         }
         ESP_LOGI(TAG, "Theme set to %d", idx);
+    }
+
+    cJSON_Delete(root);
+    httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+// Handler for live widget style switching (no reboot needed)
+esp_err_t widget_style_post_handler(httpd_req_t *req)
+{
+    char buf[128];
+    int ret, remaining = req->content_len;
+
+    if (remaining >= (int)sizeof(buf)) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    ret = httpd_req_recv(req, buf, remaining);
+    if (ret <= 0) {
+        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+            httpd_resp_send_408(req);
+        }
+        return ESP_FAIL;
+    }
+    buf[ret] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    cJSON *val = cJSON_GetObjectItem(root, "widget_style");
+    if (cJSON_IsNumber(val)) {
+        int idx = val->valueint;
+        if (idx < 0) idx = 0;
+        if (idx >= WIDGET_STYLE_COUNT) idx = WIDGET_STYLE_COUNT - 1;
+        app_config_t *cfg = app_config_get();
+        cfg->widget_style = (uint8_t)idx;
+        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+            nina_dashboard_apply_theme(cfg->theme_index);
+            bsp_display_unlock();
+        } else {
+            ESP_LOGW(TAG, "Display lock timeout (widget style switch)");
+        }
+        ESP_LOGI(TAG, "Widget style set to %d", idx);
     }
 
     cJSON_Delete(root);

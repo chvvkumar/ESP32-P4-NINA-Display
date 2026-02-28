@@ -530,10 +530,30 @@
         <div class="field">
           <label class="field-label">Theme</label>
           <select class="input" id="theme_select" onchange="setTheme(this.value)">
-            <option value="0">Bento Default</option>
+            <option value="0">Default</option>
             <option value="1">Red Night</option>
             <option value="2">Monochrome</option>
             <option value="3">Midnight Industrial</option>
+            <option value="4">Night Vision Red</option>
+            <option value="5">Muted Forest</option>
+            <option value="6">Dark Violet</option>
+            <option value="7">Obsidian Gray</option>
+            <option value="8">Abyss Blue</option>
+            <option value="9">Mocha Night</option>
+            <option value="10">Twilight Rose</option>
+            <option value="11">Cyber Dusk</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label">Widget Style</label>
+          <select class="input" id="widget_style_select" onchange="setWidgetStyle(this.value)">
+            <option value="0">Default</option>
+            <option value="1">Subtle Border</option>
+            <option value="2">Wireframe</option>
+            <option value="3">Soft Inset</option>
+            <option value="4">Frosted Glass</option>
+            <option value="5">Accent Bar</option>
+            <option value="6">Chamfered</option>
           </select>
         </div>
         <div class="field">
@@ -966,6 +986,7 @@
     const postJson=(url,body)=>fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 
     function setTheme(v){postJson('/api/theme',{theme_index:parseInt(v)})}
+    function setWidgetStyle(v){postJson('/api/widget-style',{widget_style:parseInt(v)})}
 
     let _brightTimer=null;
     function setBrightness(v){
@@ -1166,6 +1187,7 @@
         ntp:$('ntp').value.trim(),
         timezone:$('timezone').value,
         theme_index:parseInt($('theme_select').value),
+        widget_style:parseInt($('widget_style_select').value),
         brightness:parseInt($('brightness').value),
         color_brightness:parseInt($('color_brightness').value),
         filter_colors_1:JSON.stringify(filterColorsArr[0]),
@@ -1233,6 +1255,7 @@
       $('url3').value=extractHost(data.url3);
 
       $('theme_select').value=data.theme_index||0;
+      $('widget_style_select').value=data.widget_style||0;
       const br=data.brightness!=null?data.brightness:80;
       $('brightness').value=br;
       $('brightness_val').textContent=br+'%';

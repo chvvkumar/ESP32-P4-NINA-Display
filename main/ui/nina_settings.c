@@ -28,6 +28,11 @@ static lv_obj_t *lbl_theme_name  = NULL;
 static lv_obj_t *btn_theme_prev  = NULL;
 static lv_obj_t *btn_theme_next  = NULL;
 
+/* ── Widget style card widgets ──────────────────────────────────────── */
+static lv_obj_t *lbl_widget_style_name = NULL;
+static lv_obj_t *btn_wstyle_prev       = NULL;
+static lv_obj_t *btn_wstyle_next       = NULL;
+
 /* ── Brightness card widgets ─────────────────────────────────────────── */
 static lv_obj_t *slider_backlight      = NULL;
 static lv_obj_t *lbl_backlight_val     = NULL;
@@ -64,6 +69,9 @@ static lv_obj_t *lbl_header_icon       = NULL;
 /* ── Effect names ────────────────────────────────────────────────────── */
 static const char *effect_names[] = {"Instant", "Fade", "Slide Left", "Slide Right"};
 #define EFFECT_COUNT 4
+
+/* ── Widget style names ──────────────────────────────────────────────── */
+static const char *widget_style_names[] = {"Default", "Subtle Border", "Wireframe", "Soft Inset", "Frosted Glass", "Accent Bar", "Chamfered"};
 
 /* ── Helpers ─────────────────────────────────────────────────────────── */
 
@@ -181,6 +189,26 @@ static void theme_next_cb(lv_event_t *e) {
     if (idx >= themes_get_count()) idx = 0;
     cfg->theme_index = idx;
     nina_dashboard_apply_theme(idx);
+    settings_page_refresh();
+}
+
+static void wstyle_prev_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    app_config_t *cfg = app_config_get();
+    int idx = (int)cfg->widget_style - 1;
+    if (idx < 0) idx = WIDGET_STYLE_COUNT - 1;
+    cfg->widget_style = (uint8_t)idx;
+    nina_dashboard_apply_theme(cfg->theme_index);
+    settings_page_refresh();
+}
+
+static void wstyle_next_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    app_config_t *cfg = app_config_get();
+    int idx = (int)cfg->widget_style + 1;
+    if (idx >= WIDGET_STYLE_COUNT) idx = 0;
+    cfg->widget_style = (uint8_t)idx;
+    nina_dashboard_apply_theme(cfg->theme_index);
     settings_page_refresh();
 }
 
@@ -379,6 +407,31 @@ lv_obj_t *settings_page_create(lv_obj_t *parent) {
 
         btn_theme_next = make_arrow_btn(row, LV_SYMBOL_RIGHT);
         lv_obj_add_event_cb(btn_theme_next, theme_next_cb, LV_EVENT_CLICKED, NULL);
+    }
+
+    /* ── Widget Style Row ── */
+    {
+        lv_obj_t *row = make_setting_row(st_page);
+        lv_obj_set_height(row, 54);
+
+        btn_wstyle_prev = make_arrow_btn(row, LV_SYMBOL_LEFT);
+        lv_obj_add_event_cb(btn_wstyle_prev, wstyle_prev_cb, LV_EVENT_CLICKED, NULL);
+
+        lbl_widget_style_name = lv_label_create(row);
+        lv_obj_set_style_text_font(lbl_widget_style_name, &lv_font_montserrat_20, 0);
+        lv_obj_set_flex_grow(lbl_widget_style_name, 1);
+        lv_obj_set_style_text_align(lbl_widget_style_name, LV_TEXT_ALIGN_CENTER, 0);
+        if (current_theme) {
+            lv_obj_set_style_text_color(lbl_widget_style_name, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+            int ws = app_config_get()->widget_style;
+            if (ws < 0 || ws >= WIDGET_STYLE_COUNT) ws = 0;
+            lv_label_set_text(lbl_widget_style_name, widget_style_names[ws]);
+        } else {
+            lv_label_set_text(lbl_widget_style_name, "--");
+        }
+
+        btn_wstyle_next = make_arrow_btn(row, LV_SYMBOL_RIGHT);
+        lv_obj_add_event_cb(btn_wstyle_next, wstyle_next_cb, LV_EVENT_CLICKED, NULL);
     }
 
     /* ── Divider ── */
@@ -729,6 +782,13 @@ void settings_page_refresh(void) {
     /* Theme name */
     if (lbl_theme_name && current_theme) {
         lv_label_set_text(lbl_theme_name, current_theme->name);
+    }
+
+    /* Widget style name */
+    if (lbl_widget_style_name) {
+        int ws = cfg->widget_style;
+        if (ws < 0 || ws >= WIDGET_STYLE_COUNT) ws = 0;
+        lv_label_set_text(lbl_widget_style_name, widget_style_names[ws]);
     }
 
     /* Sliders */
