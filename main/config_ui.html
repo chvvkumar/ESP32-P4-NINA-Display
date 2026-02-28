@@ -786,6 +786,19 @@
           <div class="fw-item"><div class="fw-label">Commit</div><div class="fw-value" id="fw_git_sha">--</div></div>
         </div>
         <div class="divider"></div>
+        <div class="toggle-row">
+          <span class="toggle-label">Check for updates on boot</span>
+          <label class="toggle"><input type="checkbox" id="auto_update_check" checked><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint" style="margin-top:4px">Automatically check GitHub for new firmware releases when the device boots.</div>
+        <div class="field-row" style="margin-top:12px">
+          <label class="field-label" for="update_channel">Update channel</label>
+          <select id="update_channel" class="field-select" style="width:auto;min-width:140px">
+            <option value="0">Stable only</option>
+            <option value="1">Include pre-releases</option>
+          </select>
+        </div>
+        <div class="divider"></div>
         <div class="ota-bar">
           <label class="ota-label" id="otaFileLabel">
             Choose firmware .bin file
@@ -1223,7 +1236,9 @@
         screen_sleep_timeout_s:parseInt($('screen_sleep_timeout').value)||60,
         idle_poll_interval_s:parseInt($('idle_poll_interval').value)||30,
         wifi_power_save:!!$('wifi_power_save').checked,
-        alert_flash_enabled:!!$('alert_flash_enabled').checked
+        alert_flash_enabled:!!$('alert_flash_enabled').checked,
+        auto_update_check:!!$('auto_update_check').checked,
+        update_channel:parseInt($('update_channel').value)||0
       };
 
       const ssid=$('ssid').value.trim();
@@ -1275,6 +1290,8 @@
       $('idle_poll_interval').value=data.idle_poll_interval_s||30;
       $('wifi_power_save').checked=data.wifi_power_save!==false;
       $('alert_flash_enabled').checked=data.alert_flash_enabled!==false;
+      $('auto_update_check').checked=data.auto_update_check!==false;
+      $('update_channel').value=data.update_channel||0;
 
       for(let i=0;i<3;i++){
         const key='filter_colors_'+(i+1);

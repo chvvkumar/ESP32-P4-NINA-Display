@@ -78,6 +78,8 @@ esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddBoolToObject(root, "alert_flash_enabled", cfg->alert_flash_enabled);
     cJSON_AddNumberToObject(root, "idle_poll_interval_s", cfg->idle_poll_interval_s);
     cJSON_AddBoolToObject(root, "wifi_power_save", cfg->wifi_power_save);
+    cJSON_AddBoolToObject(root, "auto_update_check", cfg->auto_update_check);
+    cJSON_AddNumberToObject(root, "update_channel", cfg->update_channel);
     cJSON_AddBoolToObject(root, "_dirty", app_config_is_dirty());
 
     const char *json_str = cJSON_PrintUnformatted(root);
@@ -290,6 +292,16 @@ static app_config_t *parse_config_from_json(cJSON *root)
     }
 
     JSON_TO_BOOL(root, "wifi_power_save", cfg->wifi_power_save);
+
+    cJSON *auto_update = cJSON_GetObjectItem(root, "auto_update_check");
+    if (cJSON_IsBool(auto_update)) {
+        cfg->auto_update_check = cJSON_IsTrue(auto_update) ? 1 : 0;
+    }
+    cJSON *update_ch = cJSON_GetObjectItem(root, "update_channel");
+    if (cJSON_IsNumber(update_ch)) {
+        int v = update_ch->valueint;
+        cfg->update_channel = (v == 1) ? 1 : 0;
+    }
 
     return cfg;
 }
