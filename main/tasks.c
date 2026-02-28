@@ -565,7 +565,7 @@ void data_update_task(void *arg) {
                     ESP_LOGI(TAG, "No firmware update available");
                     if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                         nina_ota_prompt_show("", cur_ver, NULL);
-                        nina_ota_prompt_show_error("You are running the latest firmware.");
+                        nina_ota_prompt_show_status("Up to Date", "You are running the latest firmware.");
                         bsp_display_unlock();
                     }
                     while (nina_ota_prompt_visible()) {
