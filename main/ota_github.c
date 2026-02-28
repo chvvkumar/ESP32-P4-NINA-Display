@@ -49,10 +49,21 @@ static int compare_versions(const char *v1, const char *v2) {
     if (suf1 && !suf2) return 1;   /* v1 is pre-release of same base → newer */
     if (!suf1 && suf2) return -1;  /* v2 is pre-release of same base → v2 newer */
 
-    /* Both have suffix — if different, treat release (v1) as newer.
-     * This handles git-describe versions (e.g., "-6-ga026865" from local
-     * builds) being offered the official release (e.g., "-dev.1"). */
-    if (suf1 && suf2) return strcmp(suf1, suf2) != 0 ? 1 : 0;
+    /* Both have suffix — compare numerically if same type (e.g. -dev.N) */
+    if (suf1 && suf2) {
+        const char *dot1 = strrchr(suf1, '.');
+        const char *dot2 = strrchr(suf2, '.');
+        if (dot1 && dot2) {
+            /* Same prefix (e.g. both "-dev") → compare trailing number */
+            size_t plen1 = (size_t)(dot1 - suf1);
+            size_t plen2 = (size_t)(dot2 - suf2);
+            if (plen1 == plen2 && strncmp(suf1, suf2, plen1) == 0) {
+                return atoi(dot1 + 1) - atoi(dot2 + 1);
+            }
+        }
+        /* Different suffix types (e.g. "-dev.2" vs "-6-ga026865") — no update */
+        return 0;
+    }
 
     return 0;  /* neither has suffix */
 }
