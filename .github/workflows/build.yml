@@ -575,6 +575,22 @@ jobs:
             --notes-file /tmp/release-notes.md \
             $PRERELEASE_FLAG
 
+      - name: Cleanup old pre-releases
+        if: steps.check_skip.outputs.skip != 'true' && steps.tag.outputs.is_prerelease == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CURRENT_TAG="${{ steps.tag.outputs.tag }}"
+          echo "Cleaning up old pre-releases (keeping latest 2)..."
+
+          # List all pre-releases sorted newest first, skip the 2 most recent, delete the rest
+          gh release list --limit 50 --json tagName,isPrerelease \
+            -q '[.[] | select(.isPrerelease)] | .[2:] | .[].tagName' | \
+          while read -r old_tag; do
+            echo "Deleting old pre-release: $old_tag"
+            gh release delete "$old_tag" --yes --cleanup-tag 2>/dev/null || true
+          done
+
       - name: Bump version for next release
         if: steps.check_skip.outputs.skip != 'true' && github.ref == 'refs/heads/main'
         env:
