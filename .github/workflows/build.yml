@@ -303,8 +303,89 @@ jobs:
           else
             CHANGES=$(git log --pretty=format:"- %s (%h)" --no-merges -20)
           fi
-          echo "$CHANGES" > /tmp/changelog.txt
+          # Filter out noise commits (version bumps, skip ci)
+          echo "$CHANGES" | grep -v '\[skip ci\]' | grep -v 'chore: bump version' > /tmp/changelog.txt || true
+          # Keep unfiltered as fallback
+          echo "$CHANGES" > /tmp/changelog_raw.txt
           echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
+
+      - name: Summarize release changes with Gemini
+        if: steps.check_skip.outputs.skip != 'true'
+        id: release_summary
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: |
+          set +e
+
+          CHANGES=$(cat /tmp/changelog.txt)
+
+          # Skip if no meaningful changes or no API key
+          if [ -z "$CHANGES" ] || [ -z "$GOOGLE_API_KEY" ]; then
+            echo "ai_available=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          CHANGES_ESCAPED=$(echo "$CHANGES" | jq -Rs .)
+
+          read -r -d '' PROMPT << 'EOF'
+          You are writing release notes for an ESP32 astrophotography display firmware. Given the commit list below, produce TWO things:
+
+          1. A SUMMARY: 1-2 sentences in plain language describing what changed in this release and why it matters to users. Focus on user-visible impact.
+
+          2. A CHANGES list: One line per commit in this exact format:
+          - <plain language description of what the commit does> — <hash>
+
+          Rules for the CHANGES list:
+          - Each line must end with the original commit hash after a " — " separator
+          - Rewrite the commit message into clear, plain language (drop prefixes like "feat:", "fix:", "bugfix:")
+          - Focus on WHAT changed and WHY, not implementation details
+          - Keep each line under 100 characters (excluding the hash)
+          - Do NOT add, remove, or merge commits — output exactly one line per input commit
+          - Do NOT use emojis
+
+          ## Commits
+          %CHANGES%
+
+          ## Output format (follow exactly)
+          SUMMARY: <your summary here>
+
+          CHANGES:
+          - <description> — <hash>
+          - <description> — <hash>
+          EOF
+
+          PROMPT="${PROMPT//%CHANGES%/$(echo $CHANGES_ESCAPED | jq -r .)}"
+
+          RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent" \
+            -H "Content-Type: application/json" \
+            -H "X-goog-api-key: $GOOGLE_API_KEY" \
+            -d "$(jq -n \
+              --arg prompt "$PROMPT" \
+              '{
+                contents: [{ parts: [{ text: $prompt }] }],
+                generationConfig: { temperature: 0.3, maxOutputTokens: 4096 }
+              }')")
+
+          # Validate response
+          if [ -z "$RESPONSE" ] || ! echo "$RESPONSE" | jq -e '.candidates[0].content.parts[0].text' > /dev/null 2>&1; then
+            echo "AI summary failed, will use raw commits"
+            echo "ai_available=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          FULL_TEXT=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text')
+
+          # Extract summary line
+          echo "$FULL_TEXT" | grep '^SUMMARY:' | sed 's/^SUMMARY:\s*//' > /tmp/release_summary.txt
+
+          # Extract changes (everything after CHANGES: line)
+          echo "$FULL_TEXT" | sed -n '/^CHANGES:/,$ p' | tail -n +2 > /tmp/release_changes.txt
+
+          if [ -s /tmp/release_summary.txt ] && [ -s /tmp/release_changes.txt ]; then
+            echo "ai_available=true" >> $GITHUB_OUTPUT
+          else
+            echo "ai_available=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Check for network_adapter.bin
         if: steps.check_skip.outputs.skip != 'true'
@@ -333,7 +414,8 @@ jobs:
             COMPARE_URL=""
           fi
 
-          export TAG PREV_TAG VERSION BRANCH COMPARE_URL FACTORY_MB OTA_MB
+          AI_AVAILABLE="${{ steps.release_summary.outputs.ai_available }}"
+          export TAG PREV_TAG VERSION BRANCH COMPARE_URL FACTORY_MB OTA_MB AI_AVAILABLE
           python3 << 'PYEOF'
           import os, json
           tag = os.environ['TAG']
@@ -343,16 +425,30 @@ jobs:
           compare_url = os.environ.get('COMPARE_URL', '')
           factory_mb = os.environ.get('FACTORY_MB', 'N/A')
           ota_mb = os.environ.get('OTA_MB', 'N/A')
-          
+          ai_available = os.environ.get('AI_AVAILABLE', 'false') == 'true'
+
           # Load metrics if available
           try:
               with open('/tmp/firmware-metrics.json') as f:
                   metrics = json.load(f)
           except:
               metrics = {}
-          
-          with open('/tmp/changelog.txt') as f:
-              changes = f.read().strip()
+
+          # Load AI summary and changes if available, otherwise fall back to raw changelog
+          summary = ''
+          if ai_available:
+              try:
+                  with open('/tmp/release_summary.txt') as f:
+                      summary = f.read().strip()
+                  with open('/tmp/release_changes.txt') as f:
+                      changes = f.read().strip()
+              except:
+                  ai_available = False
+
+          if not ai_available:
+              with open('/tmp/changelog.txt') as f:
+                  changes = f.read().strip()
+
           since = f'### Changes since {prev_tag}' if prev_tag else '### Recent Changes'
           lines = [
               f'## NINA Display {tag}',
@@ -368,10 +464,10 @@ jobs:
               f'- **Factory Binary:** {factory_mb} MB',
               f'- **OTA Binary:** {ota_mb} MB',
               '',
-              since,
-              changes,
-              '',
           ]
+          if summary:
+              lines += ['### Summary', summary, '']
+          lines += [since, changes, '']
           if compare_url:
               lines.append(f'**Full Changelog**: {compare_url}')
               lines.append('')
