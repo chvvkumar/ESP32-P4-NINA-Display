@@ -26,25 +26,36 @@ jobs:
       has_code_changes: ${{ steps.filter.outputs.has_code_changes }}
     steps:
       - name: Checkout code
+        if: github.event_name == 'push'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Check if code files changed
         id: filter
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            BASE=${{ github.event.pull_request.base.sha }}
-            HEAD=${{ github.event.pull_request.head.sha }}
+            # For PRs, use GitHub API to get only the PR's changed files (not full branch diff)
+            CODE_CHANGES=$(gh pr view ${{ github.event.pull_request.number }} \
+              --repo ${{ github.repository }} \
+              --json files --jq '[.files[].path | select(
+                (endswith(".md") | not) and
+                (startswith("docs/") | not) and
+                (startswith("images/") | not) and
+                (startswith(".github/workflows/") | not) and
+                (. != "LICENSE") and
+                (. != ".gitignore")
+              )] | first // empty')
           else
+            # For pushes, use git diff between previous and current commit
             BASE=${{ github.event.before }}
             HEAD=${{ github.sha }}
+            CODE_CHANGES=$(git diff --name-only "$BASE" "$HEAD" -- \
+              ':!**/*.md' ':!docs/**' ':!images/**' ':!LICENSE' ':!.gitignore' ':!.github/workflows/**' \
+              | head -1)
           fi
-
-          # Get changed files, excluding docs/workflow/non-code files
-          CODE_CHANGES=$(git diff --name-only "$BASE" "$HEAD" -- \
-            ':!**/*.md' ':!docs/**' ':!images/**' ':!LICENSE' ':!.gitignore' ':!.github/workflows/**' \
-            | head -1)
 
           if [ -n "$CODE_CHANGES" ]; then
             echo "has_code_changes=true" >> $GITHUB_OUTPUT
@@ -350,10 +361,19 @@ jobs:
             exit 0
           fi
 
-          CHANGES_ESCAPED=$(echo "$CHANGES" | jq -Rs .)
+          # Use python3 for JSON handling (jq not available on self-hosted runner)
+          python3 << 'PYEOF'
+          import json, os, re, subprocess, sys
 
-          read -r -d '' PROMPT << 'EOF'
-          You are writing release notes for an ESP32 astrophotography display firmware. Given the commit list below, produce TWO things:
+          with open('/tmp/changelog.txt') as f:
+              changes = f.read().strip()
+
+          api_key = os.environ.get('GOOGLE_API_KEY', '')
+          if not changes or not api_key:
+              print("No changes or API key, skipping")
+              sys.exit(0)
+
+          prompt = """You are writing release notes for an ESP32 astrophotography display firmware. Given the commit list below, produce TWO things:
 
           1. A SUMMARY: 1-2 sentences in plain language describing what changed in this release and why it matters to users. Focus on user-visible impact.
 
@@ -368,45 +388,62 @@ jobs:
           - Do NOT add, remove, or merge commits — output exactly one line per input commit
           - Do NOT use emojis
 
+          Writing style — write like a developer, NOT like AI marketing copy:
+          - NEVER use: "introduces", "enhances", "leverages", "utilizes", "facilitates", "ensures", "enables", "allows"
+          - NEVER use: "This release..." to start the summary
+          - Use direct, active voice: "Fixed X", "Added Y", "Screen now does Z"
+          - Good: "Fixed remaining time calculation being off by one exposure"
+          - Bad: "Resolved an issue where the target remaining time was calculated incorrectly"
+
           ## Commits
-          %CHANGES%
+          """ + changes + """
 
           ## Output format (follow exactly)
           SUMMARY: <your summary here>
 
           CHANGES:
           - <description> — <hash>
-          - <description> — <hash>
-          EOF
+          - <description> — <hash>"""
 
-          PROMPT="${PROMPT//%CHANGES%/$(echo $CHANGES_ESCAPED | jq -r .)}"
+          payload = json.dumps({
+              "contents": [{"parts": [{"text": prompt}]}],
+              "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4096}
+          })
 
-          RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent" \
-            -H "Content-Type: application/json" \
-            -H "X-goog-api-key: $GOOGLE_API_KEY" \
-            -d "$(jq -n \
-              --arg prompt "$PROMPT" \
-              '{
-                contents: [{ parts: [{ text: $prompt }] }],
-                generationConfig: { temperature: 0.3, maxOutputTokens: 4096 }
-              }')")
-
-          # Validate response
-          if [ -z "$RESPONSE" ] || ! echo "$RESPONSE" | jq -e '.candidates[0].content.parts[0].text' > /dev/null 2>&1; then
-            echo "AI summary failed, will use raw commits"
-            echo "ai_available=false" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          FULL_TEXT=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text')
+          try:
+              result = subprocess.run(
+                  ["curl", "-s", "-X", "POST",
+                   "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+                   "-H", "Content-Type: application/json",
+                   "-H", f"X-goog-api-key: {api_key}",
+                   "-d", payload],
+                  capture_output=True, text=True, timeout=30
+              )
+              response = json.loads(result.stdout)
+              full_text = response["candidates"][0]["content"]["parts"][0]["text"]
+          except Exception as e:
+              print(f"AI summary failed: {e}")
+              sys.exit(0)
 
           # Extract summary line
-          echo "$FULL_TEXT" | grep '^SUMMARY:' | sed 's/^SUMMARY:\s*//' > /tmp/release_summary.txt
-
+          summary_match = re.search(r'^SUMMARY:\s*(.+)$', full_text, re.MULTILINE)
           # Extract changes (everything after CHANGES: line)
-          echo "$FULL_TEXT" | sed -n '/^CHANGES:/,$ p' | tail -n +2 > /tmp/release_changes.txt
+          changes_match = re.search(r'^CHANGES:\s*\n([\s\S]+)', full_text, re.MULTILINE)
 
-          if [ -s /tmp/release_summary.txt ] && [ -s /tmp/release_changes.txt ]; then
+          if summary_match and changes_match:
+              with open('/tmp/release_summary.txt', 'w') as f:
+                  f.write(summary_match.group(1).strip())
+              with open('/tmp/release_changes.txt', 'w') as f:
+                  f.write(changes_match.group(1).strip())
+              # Signal success via a marker file
+              with open('/tmp/ai_available', 'w') as f:
+                  f.write('true')
+              print("AI summary generated successfully")
+          else:
+              print("Could not parse AI response")
+          PYEOF
+
+          if [ -f /tmp/ai_available ]; then
             echo "ai_available=true" >> $GITHUB_OUTPUT
           else
             echo "ai_available=false" >> $GITHUB_OUTPUT
@@ -657,6 +694,20 @@ jobs:
           Do NOT use emojis. Do NOT include any other sections, headers, or conclusions.
           Do NOT use sub-categories like "Features:", "Bug Fixes:" etc. — just a flat bullet list.
           Limit to at most 8 bullets. Combine trivial related changes into a single bullet.
+
+          ## Writing Style Rules (follow strictly)
+          Write like a developer writing notes for other developers — direct and concise.
+          NEVER use these AI filler patterns:
+          - "This pull request..." or "This PR..." — just state what changed
+          - "Introduces", "enhances", "leverages", "utilizes", "facilitates"
+          - "Implemented logic to..." — just say what it does
+          - "...for improved/better/enhanced..." — say the specific outcome
+          - "...ensuring that..." or "...allowing the device to..."
+          - "Updated internal structures to support..." — say what the change actually is
+          - Passive voice like "was added", "has been implemented"
+          Write as if you're explaining to a teammate in a chat message, not writing marketing copy.
+          Good: "Screen now sleeps after 5 min of inactivity to save power"
+          Bad: "Implemented automatic screen sleep functionality to enable power-saving capabilities"
 
           ## TITLE Rules (follow these strictly)
           - Identify the SINGLE most important or impactful change in this PR and use that as the title
