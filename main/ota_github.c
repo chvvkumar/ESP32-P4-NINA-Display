@@ -44,11 +44,15 @@ static int compare_versions(const char *v1, const char *v2) {
     const char *suf1 = strchr(v1, '-');
     const char *suf2 = strchr(v2, '-');
 
-    /* Both have suffix or neither: equal base */
     if (suf1 && !suf2) return 1;   /* v1 is pre-release of same base → newer */
     if (!suf1 && suf2) return -1;  /* v2 is pre-release of same base → v2 newer */
 
-    return 0;
+    /* Both have suffix — if different, treat release (v1) as newer.
+     * This handles git-describe versions (e.g., "-6-ga026865" from local
+     * builds) being offered the official release (e.g., "-dev.1"). */
+    if (suf1 && suf2) return strcmp(suf1, suf2) != 0 ? 1 : 0;
+
+    return 0;  /* neither has suffix */
 }
 
 /* ── Extract summary from release body ────────────────────────────── */
