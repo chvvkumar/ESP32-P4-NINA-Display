@@ -11,6 +11,7 @@
 #include "nina_dashboard.h"
 #include "app_config.h"
 #include "themes.h"
+#include "tasks.h"
 #include "bsp/esp-bsp.h"
 
 #include <stdio.h>
@@ -58,6 +59,10 @@ static lv_obj_t *lbl_effect_val        = NULL;
 static lv_obj_t *btn_effect_prev       = NULL;
 static lv_obj_t *btn_effect_next       = NULL;
 static lv_obj_t *sw_skip_disconnected  = NULL;
+
+/* ── Check for Updates button ────────────────────────────────────────── */
+static lv_obj_t *btn_check_update      = NULL;
+static lv_obj_t *lbl_check_update      = NULL;
 
 /* ── Save button ─────────────────────────────────────────────────────── */
 static lv_obj_t *btn_save              = NULL;
@@ -319,6 +324,12 @@ static void skip_disconnected_toggle_cb(lv_event_t *e) {
     LV_UNUSED(e);
     app_config_get()->auto_rotate_skip_disconnected =
         lv_obj_has_state(sw_skip_disconnected, LV_STATE_CHECKED);
+}
+
+static void check_update_btn_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    ota_check_requested = true;
+    if (lbl_check_update) lv_label_set_text(lbl_check_update, LV_SYMBOL_REFRESH "  Checking...");
 }
 
 static lv_timer_t *save_feedback_timer = NULL;
@@ -739,6 +750,34 @@ lv_obj_t *settings_page_create(lv_obj_t *parent) {
     /* ── Divider ── */
     make_divider(st_page);
 
+    /* ── Check for Updates Button (ghost outline) ── */
+    {
+        btn_check_update = lv_button_create(st_page);
+        lv_obj_set_width(btn_check_update, LV_PCT(100));
+        lv_obj_set_height(btn_check_update, 54);
+        lv_obj_set_style_radius(btn_check_update, 12, 0);
+        lv_obj_set_style_shadow_width(btn_check_update, 0, 0);
+        lv_obj_set_style_bg_opa(btn_check_update, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(btn_check_update, 1, 0);
+        if (current_theme) {
+            lv_obj_set_style_border_color(btn_check_update, lv_color_hex(current_theme->bento_border), 0);
+            lv_obj_set_style_bg_color(btn_check_update, lv_color_hex(current_theme->bento_border), LV_STATE_PRESSED);
+            lv_obj_set_style_bg_opa(btn_check_update, LV_OPA_40, LV_STATE_PRESSED);
+        }
+        lv_obj_set_style_border_opa(btn_check_update, LV_OPA_COVER, 0);
+
+        lbl_check_update = lv_label_create(btn_check_update);
+        lv_label_set_text(lbl_check_update, LV_SYMBOL_REFRESH "  Check for Updates");
+        lv_obj_set_style_text_font(lbl_check_update, &lv_font_montserrat_18, 0);
+        if (current_theme) {
+            int gb2 = app_config_get()->color_brightness;
+            lv_obj_set_style_text_color(lbl_check_update, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb2)), 0);
+        }
+        lv_obj_center(lbl_check_update);
+
+        lv_obj_add_event_cb(btn_check_update, check_update_btn_cb, LV_EVENT_CLICKED, NULL);
+    }
+
     /* ── Save Button (ghost outline) ── */
     {
         btn_save = lv_button_create(st_page);
@@ -832,6 +871,11 @@ void settings_page_refresh(void) {
         else
             lv_obj_remove_state(sw_skip_disconnected, LV_STATE_CHECKED);
     }
+
+    /* Reset "Check for Updates" button label if not currently checking */
+    if (lbl_check_update && !ota_check_requested) {
+        lv_label_set_text(lbl_check_update, LV_SYMBOL_REFRESH "  Check for Updates");
+    }
 }
 
 /* ── Theme Application ───────────────────────────────────────────────── */
@@ -843,8 +887,8 @@ static void apply_theme_to_widget(lv_obj_t *obj) {
     int gb = app_config_get()->color_brightness;
 
     if (lv_obj_check_type(obj, &lv_label_class)) {
-        if (obj == lbl_save) {
-            /* Save button label — muted label_color */
+        if (obj == lbl_save || obj == lbl_check_update) {
+            /* Button labels — muted label_color */
             lv_obj_set_style_text_color(obj, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
         } else if (obj == lbl_header_icon) {
             lv_obj_set_style_text_color(obj, lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
@@ -867,8 +911,8 @@ static void apply_theme_to_widget(lv_obj_t *obj) {
         lv_obj_set_style_bg_color(obj, lv_color_hex(current_theme->progress_color), LV_PART_INDICATOR | LV_STATE_CHECKED);
         lv_obj_set_style_bg_color(obj, lv_color_hex(current_theme->text_color), LV_PART_KNOB);
     } else if (lv_obj_check_type(obj, &lv_button_class)) {
-        if (obj == btn_save) {
-            /* Ghost outline save button */
+        if (obj == btn_save || obj == btn_check_update) {
+            /* Ghost outline buttons */
             lv_obj_set_style_border_color(obj, lv_color_hex(current_theme->bento_border), 0);
             lv_obj_set_style_bg_color(obj, lv_color_hex(current_theme->bento_border), LV_STATE_PRESSED);
         } else {

@@ -18,6 +18,7 @@
 #include "nina_event_log.h"
 #include "nina_alerts.h"
 #include "nina_safety.h"
+#include "nina_ota_prompt.h"
 #include "ui_styles.h"
 #include "app_config.h"
 #include "themes.h"
@@ -234,6 +235,7 @@ void nina_dashboard_apply_theme(int theme_index) {
     nina_event_log_apply_theme();
     nina_alerts_apply_theme();
     nina_safety_apply_theme();
+    nina_ota_prompt_apply_theme();
 
     update_indicators();
 
@@ -756,8 +758,11 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     // Info overlay (on top of pages, below thumbnail)
     nina_info_overlay_create(scr_dashboard);
 
-    // Thumbnail overlay (on top of everything)
+    // Thumbnail overlay (on top of pages)
     nina_thumbnail_create(scr_dashboard);
+
+    // OTA update prompt overlay (on top of everything)
+    nina_ota_prompt_create(scr_dashboard);
 
     // Make header box clickable on all pages to open thumbnail
     for (int i = 0; i < page_count; i++) {

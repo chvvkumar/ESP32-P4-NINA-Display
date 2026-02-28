@@ -19,6 +19,9 @@
 #include "ui/nina_safety.h"
 #include "ui/nina_alerts.h"
 #include "ui/nina_session_stats.h"
+#include "ui/nina_ota_prompt.h"
+#include "ota_github.h"
+#include "esp_ota_ops.h"
 #include "bsp/esp-bsp.h"
 #include "driver/gpio.h"
 #include "driver/ledc.h"
@@ -26,6 +29,7 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "esp_heap_caps.h"
+#include "esp_system.h"
 #include <time.h>
 #include "perf_monitor.h"
 
@@ -39,6 +43,7 @@ static const char *TAG = "tasks";
 /* Signals the data task that a page switch occurred */
 volatile bool page_changed = false;
 volatile bool ota_in_progress = false;
+volatile bool ota_check_requested = false;
 volatile bool screen_touch_wake = false;
 volatile bool screen_asleep = false;
 TaskHandle_t data_task_handle = NULL;
@@ -257,6 +262,14 @@ void instance_poll_task(void *arg) {
     vTaskDelete(NULL);
 }
 
+/* OTA progress callback — updates the LVGL progress bar from the download task */
+static void ota_progress_cb(int percent) {
+    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+        nina_ota_prompt_set_progress(percent);
+        bsp_display_unlock();
+    }
+}
+
 // =============================================================================
 // UI Coordinator Task — fast loop, never blocks on HTTP data polling
 // =============================================================================
@@ -333,6 +346,71 @@ void data_update_task(void *arg) {
 
     // Start MQTT if enabled
     mqtt_ha_start();
+
+    /* ── Boot-time firmware update check ── */
+    if (app_config_get()->auto_update_check) {
+        ESP_LOGI(TAG, "Checking for firmware updates...");
+        github_release_info_t *rel = heap_caps_calloc(1, sizeof(github_release_info_t), MALLOC_CAP_SPIRAM);
+        if (rel) {
+            bool include_pre = (app_config_get()->update_channel == 1);
+            const char *cur_ver = BUILD_GIT_TAG;
+            if (ota_github_check(include_pre, cur_ver, rel)) {
+                ESP_LOGI(TAG, "New firmware available: %s", rel->tag);
+                /* Show the update prompt overlay */
+                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                    nina_ota_prompt_show(rel->tag, cur_ver, rel->summary);
+                    bsp_display_unlock();
+                }
+                /* Wait for user to accept or skip (flags clear on read, so store result) */
+                bool accepted = false;
+                while (1) {
+                    if (nina_ota_prompt_update_accepted()) { accepted = true;  break; }
+                    if (nina_ota_prompt_skipped())          { accepted = false; break; }
+                    vTaskDelay(pdMS_TO_TICKS(200));
+                }
+                if (accepted) {
+                    /* Accepted — proceed with OTA download */
+                    ESP_LOGI(TAG, "User accepted OTA update to %s", rel->tag);
+                    ota_in_progress = true;
+                    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                        nina_ota_prompt_show_progress();
+                        bsp_display_unlock();
+                    }
+                    esp_err_t ota_err = ota_github_download(rel->ota_url, ota_progress_cb);
+                    if (ota_err == ESP_OK) {
+                        ESP_LOGI(TAG, "OTA download success, rebooting...");
+                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_ota_prompt_set_progress(100);
+                            bsp_display_unlock();
+                        }
+                        vTaskDelay(pdMS_TO_TICKS(1000));
+                        esp_restart();
+                    } else {
+                        ESP_LOGE(TAG, "OTA download failed: %s", esp_err_to_name(ota_err));
+                        ota_in_progress = false;
+                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_ota_prompt_show_error("Download failed. Please try again later.");
+                            bsp_display_unlock();
+                        }
+                        /* Wait for user to dismiss the error */
+                        while (nina_ota_prompt_visible()) {
+                            vTaskDelay(pdMS_TO_TICKS(200));
+                        }
+                    }
+                } else {
+                    /* Skipped */
+                    ESP_LOGI(TAG, "User skipped firmware update");
+                    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                        nina_ota_prompt_hide();
+                        bsp_display_unlock();
+                    }
+                }
+            } else {
+                ESP_LOGI(TAG, "No firmware update available");
+            }
+            heap_caps_free(rel);
+        }
+    }
 
     instance_count = app_config_get_instance_count();
     ESP_LOGI(TAG, "Spawning %d per-instance poll tasks", instance_count);
@@ -425,6 +503,76 @@ void data_update_task(void *arg) {
                 ESP_LOGI(TAG, "WiFi power save %s", current_ps ? "enabled" : "disabled");
                 last_wifi_ps = current_ps;
                 first_ps_check = false;
+            }
+        }
+
+        /* ── On-demand firmware update check (triggered from settings page) ── */
+        if (ota_check_requested) {
+            ota_check_requested = false;
+            ESP_LOGI(TAG, "On-demand firmware update check...");
+            github_release_info_t *rel = heap_caps_calloc(1, sizeof(github_release_info_t), MALLOC_CAP_SPIRAM);
+            if (rel) {
+                bool include_pre = (app_config_get()->update_channel == 1);
+                const char *cur_ver = BUILD_GIT_TAG;
+                if (ota_github_check(include_pre, cur_ver, rel)) {
+                    ESP_LOGI(TAG, "New firmware available: %s", rel->tag);
+                    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                        nina_ota_prompt_show(rel->tag, cur_ver, rel->summary);
+                        bsp_display_unlock();
+                    }
+                    /* Wait for user to accept or skip (flags clear on read, so store result) */
+                    bool accepted = false;
+                    while (1) {
+                        if (nina_ota_prompt_update_accepted()) { accepted = true;  break; }
+                        if (nina_ota_prompt_skipped())          { accepted = false; break; }
+                        vTaskDelay(pdMS_TO_TICKS(200));
+                    }
+                    if (accepted) {
+                        ESP_LOGI(TAG, "User accepted OTA update to %s", rel->tag);
+                        ota_in_progress = true;
+                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_ota_prompt_show_progress();
+                            bsp_display_unlock();
+                        }
+                        esp_err_t ota_err = ota_github_download(rel->ota_url, ota_progress_cb);
+                        if (ota_err == ESP_OK) {
+                            ESP_LOGI(TAG, "OTA download success, rebooting...");
+                            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                                nina_ota_prompt_set_progress(100);
+                                bsp_display_unlock();
+                            }
+                            vTaskDelay(pdMS_TO_TICKS(1000));
+                            esp_restart();
+                        } else {
+                            ESP_LOGE(TAG, "OTA download failed: %s", esp_err_to_name(ota_err));
+                            ota_in_progress = false;
+                            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                                nina_ota_prompt_show_error("Download failed. Please try again later.");
+                                bsp_display_unlock();
+                            }
+                            while (nina_ota_prompt_visible()) {
+                                vTaskDelay(pdMS_TO_TICKS(200));
+                            }
+                        }
+                    } else {
+                        ESP_LOGI(TAG, "User skipped firmware update");
+                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_ota_prompt_hide();
+                            bsp_display_unlock();
+                        }
+                    }
+                } else {
+                    ESP_LOGI(TAG, "No firmware update available");
+                    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                        nina_ota_prompt_show("", cur_ver, NULL);
+                        nina_ota_prompt_show_error("You are running the latest firmware.");
+                        bsp_display_unlock();
+                    }
+                    while (nina_ota_prompt_visible()) {
+                        vTaskDelay(pdMS_TO_TICKS(200));
+                    }
+                }
+                heap_caps_free(rel);
             }
         }
 

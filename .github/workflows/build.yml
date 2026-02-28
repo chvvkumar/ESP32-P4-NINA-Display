@@ -2,10 +2,10 @@ name: Build Firmware
 
 on:
   push:
-    branches: [main, snd]
+    branches: [main, dev]
   pull_request:
     types: [opened, synchronize, reopened]
-    branches: [main, snd]
+    branches: [main, dev]
 
 env:
   IDF_VERSION: v5.5.2
