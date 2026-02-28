@@ -26,25 +26,36 @@ jobs:
       has_code_changes: ${{ steps.filter.outputs.has_code_changes }}
     steps:
       - name: Checkout code
+        if: github.event_name == 'push'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Check if code files changed
         id: filter
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            BASE=${{ github.event.pull_request.base.sha }}
-            HEAD=${{ github.event.pull_request.head.sha }}
+            # For PRs, use GitHub API to get only the PR's changed files (not full branch diff)
+            CODE_CHANGES=$(gh pr view ${{ github.event.pull_request.number }} \
+              --repo ${{ github.repository }} \
+              --json files --jq '[.files[].path | select(
+                (endswith(".md") | not) and
+                (startswith("docs/") | not) and
+                (startswith("images/") | not) and
+                (startswith(".github/workflows/") | not) and
+                (. != "LICENSE") and
+                (. != ".gitignore")
+              )] | first // empty')
           else
+            # For pushes, use git diff between previous and current commit
             BASE=${{ github.event.before }}
             HEAD=${{ github.sha }}
+            CODE_CHANGES=$(git diff --name-only "$BASE" "$HEAD" -- \
+              ':!**/*.md' ':!docs/**' ':!images/**' ':!LICENSE' ':!.gitignore' ':!.github/workflows/**' \
+              | head -1)
           fi
-
-          # Get changed files, excluding docs/workflow/non-code files
-          CODE_CHANGES=$(git diff --name-only "$BASE" "$HEAD" -- \
-            ':!**/*.md' ':!docs/**' ':!images/**' ':!LICENSE' ':!.gitignore' ':!.github/workflows/**' \
-            | head -1)
 
           if [ -n "$CODE_CHANGES" ]; then
             echo "has_code_changes=true" >> $GITHUB_OUTPUT
