@@ -223,12 +223,25 @@ void app_main(void)
         .flags = {
             .buff_dma = true,
             .buff_spiram = true,
-            .sw_rotate = false,
+            .sw_rotate = true,
         }
     };
     bsp_display_start_with_config(&cfg);
     bsp_display_backlight_on();
     bsp_display_brightness_set(app_config_get()->brightness);
+
+    /* Apply saved screen rotation */
+    {
+        uint8_t rot = app_config_get()->screen_rotation;
+        if (rot > 0 && rot <= 3) {
+            lv_display_t *disp = lv_display_get_default();
+            if (disp) {
+                lvgl_port_lock(0);
+                lv_display_set_rotation(disp, rot);
+                lvgl_port_unlock();
+            }
+        }
+    }
 
     /* Initialize session stats (PSRAM allocation, no LVGL) */
     nina_session_stats_init();
