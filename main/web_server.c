@@ -60,6 +60,7 @@ void start_web_server(void)
         { "/api/factory-reset",    HTTP_POST, factory_reset_post_handler, NULL },
         { "/api/screenshot",       HTTP_GET,  screenshot_get_handler, NULL },
         { "/api/page",             HTTP_POST, page_post_handler, NULL },
+        { "/api/screen-rotation", HTTP_POST, screen_rotation_post_handler, NULL },
         { "/api/version",          HTTP_GET,  version_get_handler, NULL },
         { "/api/ota",              HTTP_POST, ota_post_handler, NULL },
         { "/api/perf",             HTTP_GET,  perf_get_handler, NULL },

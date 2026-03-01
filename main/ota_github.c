@@ -228,6 +228,21 @@ bool ota_github_check(bool include_prereleases, const char *current_version, git
         return false;
     }
 
+    /* Detect channel switch: current version type doesn't match target channel.
+     * When switching channels (e.g. pre-release → stable), the normal version
+     * comparison may reject the latest target release as "older".  In that case
+     * we skip the version check and offer the first (latest) matching release. */
+    const char *cv = current_version;
+    if (cv[0] == 'v' || cv[0] == 'V') cv++;
+    bool current_is_prerelease = (strchr(cv, '-') != NULL);
+    bool channel_switch = (current_is_prerelease && !include_prereleases) ||
+                          (!current_is_prerelease && include_prereleases);
+    if (channel_switch) {
+        ESP_LOGI(TAG, "Channel switch detected (%s → %s), will install latest from target channel",
+                 current_is_prerelease ? "pre-release" : "stable",
+                 include_prereleases ? "pre-release" : "stable");
+    }
+
     bool found = false;
     int count = cJSON_GetArraySize(releases);
     for (int i = 0; i < count && !found; i++) {
@@ -248,8 +263,9 @@ bool ota_github_check(bool include_prereleases, const char *current_version, git
         cJSON *tag = cJSON_GetObjectItem(release, "tag_name");
         if (!cJSON_IsString(tag) || !tag->valuestring) continue;
 
-        /* Compare versions */
-        if (compare_versions(tag->valuestring, current_version) <= 0) continue;
+        /* Compare versions — skip check when switching channels so the latest
+         * release from the target channel is always offered. */
+        if (!channel_switch && compare_versions(tag->valuestring, current_version) <= 0) continue;
 
         /* Find OTA asset */
         cJSON *assets = cJSON_GetObjectItem(release, "assets");

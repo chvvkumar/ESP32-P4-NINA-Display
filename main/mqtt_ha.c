@@ -36,6 +36,7 @@ static char s_topic_screen_state[128];
 static char s_topic_text_cmd[128];
 static char s_topic_text_state[128];
 static char s_topic_reboot_cmd[128];
+static char s_topic_uptime_state[128];
 static char s_topic_avail[128];
 
 static void build_topics(const char *prefix)
@@ -45,6 +46,7 @@ static void build_topics(const char *prefix)
     snprintf(s_topic_text_cmd, sizeof(s_topic_text_cmd), "%s/text/set", prefix);
     snprintf(s_topic_text_state, sizeof(s_topic_text_state), "%s/text/state", prefix);
     snprintf(s_topic_reboot_cmd, sizeof(s_topic_reboot_cmd), "%s/reboot/set", prefix);
+    snprintf(s_topic_uptime_state, sizeof(s_topic_uptime_state), "%s/uptime/state", prefix);
     snprintf(s_topic_avail, sizeof(s_topic_avail), "%s/status", prefix);
 }
 
@@ -174,6 +176,29 @@ static void publish_discovery(void)
     }
     cJSON_Delete(reboot);
 
+    // --- Uptime Diagnostic Sensor ---
+    snprintf(disc_topic, sizeof(disc_topic), "homeassistant/sensor/%s_uptime/config", prefix);
+    snprintf(uid_buf, sizeof(uid_buf), "ninadisplay_%s_uptime", s_device_id);
+
+    cJSON *uptime = cJSON_CreateObject();
+    cJSON_AddStringToObject(uptime, "name", "Uptime");
+    cJSON_AddStringToObject(uptime, "unique_id", uid_buf);
+    cJSON_AddStringToObject(uptime, "object_id", uid_buf);
+    cJSON_AddStringToObject(uptime, "state_topic", s_topic_uptime_state);
+    cJSON_AddStringToObject(uptime, "availability_topic", s_topic_avail);
+    cJSON_AddStringToObject(uptime, "device_class", "duration");
+    cJSON_AddStringToObject(uptime, "unit_of_measurement", "s");
+    cJSON_AddStringToObject(uptime, "icon", "mdi:timer-outline");
+    cJSON_AddStringToObject(uptime, "entity_category", "diagnostic");
+    cJSON_AddItemToObject(uptime, "device", create_device_object());
+
+    payload = cJSON_PrintUnformatted(uptime);
+    if (payload) {
+        esp_mqtt_client_publish(s_mqtt_client, disc_topic, payload, 0, 1, 1);
+        free(payload);
+    }
+    cJSON_Delete(uptime);
+
     ESP_LOGI(TAG, "HA discovery configs published");
 }
 
@@ -193,6 +218,12 @@ void mqtt_ha_publish_state(void)
         free(payload);
     }
     cJSON_Delete(screen_state);
+
+    // Uptime (seconds since boot)
+    int64_t uptime_us = esp_timer_get_time();
+    char uptime_str[24];
+    snprintf(uptime_str, sizeof(uptime_str), "%lld", (long long)(uptime_us / 1000000));
+    esp_mqtt_client_publish(s_mqtt_client, s_topic_uptime_state, uptime_str, 0, 0, 0);
 
     // Text brightness state
     cJSON *text_state = cJSON_CreateObject();

@@ -50,7 +50,7 @@ typedef struct {
 /** Page-change callback registered with the dashboard swipe gesture. */
 void on_page_changed(int new_page);
 
-/** FreeRTOS task: polls BOOT button to switch pages. */
+/** FreeRTOS task: handles BOOT button via GPIO ISR — page cycling, screen wake, long-press deep sleep. */
 void input_task(void *arg);
 
 /** FreeRTOS task: per-instance NINA data poller (one per configured instance). */

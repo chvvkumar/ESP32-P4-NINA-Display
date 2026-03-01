@@ -25,6 +25,12 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
             bsp_display_unlock();
         }
     }
+    if (new_cfg->screen_rotation != old_cfg->screen_rotation) {
+        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+            lv_display_set_rotation(lv_display_get_default(), new_cfg->screen_rotation);
+            bsp_display_unlock();
+        }
+    }
 }
 
 // Handler for live brightness adjustment (no reboot needed)
@@ -259,6 +265,53 @@ esp_err_t page_post_handler(httpd_req_t *req)
             cfg->active_page_override = -1;
             ESP_LOGI(TAG, "Page override cleared via web");
         }
+    }
+
+    cJSON_Delete(root);
+    httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+// Handler for live screen rotation adjustment (no reboot needed)
+esp_err_t screen_rotation_post_handler(httpd_req_t *req)
+{
+    char buf[64];
+    int ret, remaining = req->content_len;
+
+    if (remaining >= (int)sizeof(buf)) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    ret = httpd_req_recv(req, buf, remaining);
+    if (ret <= 0) {
+        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+            httpd_resp_send_408(req);
+        }
+        return ESP_FAIL;
+    }
+    buf[ret] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    cJSON *val = cJSON_GetObjectItem(root, "screen_rotation");
+    if (cJSON_IsNumber(val)) {
+        int rot = val->valueint;
+        if (rot < 0) rot = 0;
+        if (rot > 3) rot = 3;
+        app_config_t *cfg = app_config_get();
+        cfg->screen_rotation = (uint8_t)rot;
+        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+            lv_display_set_rotation(lv_display_get_default(), rot);
+            bsp_display_unlock();
+        } else {
+            ESP_LOGW(TAG, "Display lock timeout (screen rotation)");
+        }
+        ESP_LOGI(TAG, "Screen rotation set to %d", rot);
     }
 
     cJSON_Delete(root);

@@ -47,6 +47,7 @@
       min-height: 100dvh;
     }
 
+    /* === CARDS & LAYOUT === */
     .card {
       background: var(--glass-bg);
       backdrop-filter: blur(var(--glass-blur));
@@ -62,16 +63,13 @@
       border-color: rgba(255, 255, 255, 0.12);
       box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06);
     }
-
     .card-title {
       font-size: 0.7rem; font-weight: 700; color: var(--accent);
       text-transform: uppercase; letter-spacing: 0.08em;
       margin-bottom: 24px; opacity: 0.9;
       transition: color 0.4s ease;
     }
-
     .content { max-width: 960px; margin: 0 auto; padding: 28px 24px 100px; }
-
     .field { margin-bottom: 20px; }
     .field:last-child { margin-bottom: 0; }
     .field-label {
@@ -79,10 +77,9 @@
       margin-bottom: 8px; font-weight: 500; letter-spacing: 0.01em;
     }
     .field-hint { font-size: 0.72rem; color: #71717a; margin-top: 6px; opacity: 0.7; }
-
     .divider { border: none; border-top: 1px solid rgba(255, 255, 255, 0.06); margin: 24px 0; }
 
-    /* === NAVIGATION & LAYOUT === */
+    /* === NAVIGATION === */
     .top-nav {
       position: sticky; top: 0; z-index: 100;
       background: rgba(10, 10, 11, 0.7);
@@ -107,7 +104,7 @@
     .top-nav .tab-btn {
       background: none; border: none; color: #71717a; cursor: pointer;
       padding: 8px 18px; border-radius: 8px; font-size: 0.8rem; font-weight: 500;
-      transition: all 0.25s ease; white-space: nowrap; position: relative;
+      transition: all 0.25s ease; white-space: nowrap; position: relative; font-family: inherit;
     }
     .top-nav .tab-btn:hover { color: #f4f4f5; background: rgba(255, 255, 255, 0.04); }
     .top-nav .tab-btn.active {
@@ -121,7 +118,7 @@
       border-radius: 10px; transition: all 0.2s ease;
       background: rgba(255, 255, 255, 0.02);
     }
-    .top-nav .github-link:hover { color: #f4f4f5; border-color: rgba(var(--accent-rgb), 0.3); }
+    .top-nav .github-link:hover { color: #f4f4f5; border-color: rgba(var(--accent-rgb), 0.3); background: rgba(255, 255, 255, 0.04); }
 
     .bottom-nav {
       display: none; position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
@@ -137,7 +134,7 @@
       background: none; border: none; color: #71717a; cursor: pointer;
       display: flex; flex-direction: column; align-items: center; gap: 3px;
       padding: 8px 14px; border-radius: 10px; font-size: 0.65rem;
-      font-weight: 500; transition: all 0.25s ease; position: relative;
+      font-weight: 500; transition: all 0.25s ease; position: relative; font-family: inherit;
     }
     .bottom-nav .nav-btn svg { width: 20px; height: 20px; }
     .bottom-nav .nav-btn.active { color: var(--accent); }
@@ -154,58 +151,6 @@
     @keyframes fadeIn {
       from { opacity: 0; transform: translateY(8px); }
       to { opacity: 1; transform: translateY(0); }
-    }
-
-    .sub-tabs { display: flex; gap: 6px; margin-bottom: 24px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-    .sub-tab {
-      background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06);
-      color: #71717a; cursor: pointer; padding: 9px 18px; border-radius: 10px;
-      font-size: 0.8rem; font-weight: 500; white-space: nowrap;
-      transition: all 0.2s ease; font-family: inherit;
-    }
-    .sub-tab:hover { color: #f4f4f5; border-color: rgba(255, 255, 255, 0.12); }
-    .sub-tab.active {
-      color: #f4f4f5; background: rgba(var(--accent-rgb), 0.1);
-      border-color: rgba(var(--accent-rgb), 0.3);
-      box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.08);
-    }
-    .node-panel { display: none; }
-    .node-panel.active { display: block; }
-    .sub-tab.disabled { opacity: 0.35; }
-    .node-panel.disabled { opacity: 0.4; pointer-events: none; }
-
-    .save-bar {
-      position: fixed; bottom: 0; left: 0; right: 0; z-index: 90;
-      background: rgba(20, 20, 24, 0.85);
-      backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-      border-top: 1px solid rgba(var(--accent-rgb), 0.15);
-      padding: 10px 24px; display: flex; align-items: center;
-      justify-content: flex-end; gap: 12px; height: 64px;
-      transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.3);
-    }
-    .save-bar.visible { transform: translateY(0); }
-    .save-bar .changes-hint { font-size: 0.8rem; color: var(--accent); margin-right: auto; opacity: 0.8; }
-
-    .toast {
-      position: fixed; top: 76px; right: 24px; z-index: 200;
-      background: rgba(20, 20, 24, 0.9);
-      backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      padding: 14px 22px; border-radius: 16px; font-size: 0.85rem;
-      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
-      transform: translateX(120%); transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-    .toast.show { transform: translateX(0); }
-    .toast.success { border-left: 3px solid #10b981; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(16, 185, 129, 0.08); }
-    .toast.error { border-left: 3px solid #ef4444; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(239, 68, 68, 0.08); }
-
-    @media (max-width: 768px) {
-      .top-nav .tabs, .top-nav .github-link { display: none; }
-      .bottom-nav { display: block; }
-      .content { padding: 16px 16px calc(68px + 64px + 16px); }
-      .save-bar { bottom: 68px; }
-      .toast { top: auto; bottom: calc(68px + 64px + 16px); right: 16px; }
     }
 
     /* === COMPONENTS === */
@@ -246,7 +191,6 @@
       transform: translateX(22px); background: var(--accent);
       box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.4);
     }
-
     .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 14px 0; }
     .toggle-row .toggle-label { font-size: 0.875rem; }
 
@@ -305,19 +249,13 @@
       background: rgba(239, 68, 68, 0.06); box-shadow: 0 0 16px rgba(239, 68, 68, 0.1);
     }
 
-    .color-swatch {
-      width: 46px; height: 40px; padding: 0; border: 1px solid rgba(255, 255, 255, 0.1);
-      background: none; border-radius: 10px; cursor: pointer;
-      transition: border-color 0.2s, box-shadow 0.2s;
-    }
-    .color-swatch:hover { border-color: rgba(255, 255, 255, 0.2); }
-
+    /* === FILTER GRID === */
     .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: 10px; }
     .filter-chip {
       display: flex; flex-direction: column; align-items: center; gap: 8px;
       padding: 12px 6px; border-radius: 10px;
       background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.04);
-      transition: background 0.2s, border-color 0.2s;
+      transition: background 0.2s ease, border-color 0.2s ease;
     }
     .filter-chip:hover { background: rgba(255, 255, 255, 0.04); border-color: rgba(255, 255, 255, 0.08); }
     .filter-chip label {
@@ -334,77 +272,40 @@
     .filter-dot:hover { transform: scale(1.08); }
     .filter-dot:active { transform: scale(0.95); }
 
-    .threshold-row {
-      display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
+    /* === VISUAL THRESHOLD BAR === */
+    .threshold-section { margin-top: 16px; }
+    .threshold-section-title {
+      font-size: 0.75rem; font-weight: 700; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 12px;
     }
-    .threshold-row .threshold-label {
-      width: 56px; flex-shrink: 0; font-size: 0.75rem; color: #a1a1aa;
+    .visual-threshold-bar {
+      height: 12px; border-radius: 6px; display: flex; overflow: hidden;
+      box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
+      border: 1px solid rgba(255,255,255,0.1); margin-bottom: 6px;
     }
-    .threshold-row .threshold-hint {
-      font-size: 0.6rem; color: #71717a; display: block;
+    .thresh-seg { transition: flex 0.3s ease; }
+    .thresh-green { background: #10b981; }
+    .thresh-yellow { background: #f59e0b; }
+    .thresh-red { background: #ef4444; }
+    .thresh-labels {
+      display: flex; justify-content: space-between;
+      font-size: 0.65rem; color: #71717a; margin-bottom: 12px;
     }
-    .threshold-row .input { flex: 1; min-width: 0; }
-    .threshold-row .threshold-dot {
-      width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
-      border: 1px solid rgba(255, 255, 255, 0.1); cursor: pointer; padding: 0;
-      background: none; transition: transform 0.15s ease, box-shadow 0.2s ease;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    .thresh-edit-row { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
+    .thresh-edit-row:last-child { margin-bottom: 0; }
+    .thresh-edit-row .thresh-label-sm {
+      width: 56px; flex-shrink: 0; font-size: 0.72rem; color: var(--text-muted);
     }
-    .threshold-row .threshold-dot:hover { transform: scale(1.08); }
-    .threshold-row:last-child { margin-bottom: 0; }
+    .thresh-edit-row .input { flex: 1; min-width: 0; }
+    .thresh-edit-row .thresh-dot {
+      width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+      border: 1px solid rgba(255,255,255,0.1); cursor: pointer; padding: 0;
+      background: none; box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+      transition: transform 0.15s ease;
+    }
+    .thresh-edit-row .thresh-dot:hover { transform: scale(1.08); }
 
-    .row { display: flex; gap: 14px; align-items: flex-start; }
-    .row > * { flex: 1; }
-    @media (max-width: 768px) { .row.stack-mobile { flex-direction: column; } }
-
-    .flex-wrap-gap { display: flex; flex-wrap: wrap; gap: 12px; }
-    .flex-col-gap { display: flex; flex-direction: column; gap: 12px; }
-    .arp-label {
-      display: flex; align-items: center; gap: 12px; font-size: 0.875rem;
-      cursor: pointer; padding: 8px 12px; border-radius: 8px; transition: background 0.2s;
-    }
-    .arp-label:hover { background: rgba(255, 255, 255, 0.03); }
-    .arp-cb { accent-color: var(--accent); width: 18px; height: 18px; }
-
-    /* === PAGE MODE RADIO GROUP === */
-    .page-mode-option {
-      display: flex; align-items: flex-start; gap: 14px;
-      padding: 16px; border-radius: var(--radius-sm);
-      border: 1px solid rgba(255, 255, 255, 0.04);
-      background: rgba(255, 255, 255, 0.01);
-      cursor: pointer; transition: all 0.25s ease; margin-bottom: 8px;
-    }
-    .page-mode-option:last-child { margin-bottom: 0; }
-    .page-mode-option:hover { border-color: rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.025); }
-    .page-mode-option.selected {
-      border-color: rgba(var(--accent-rgb), 0.4);
-      background: rgba(var(--accent-rgb), 0.05);
-      box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.06);
-    }
-    .page-mode-radio {
-      appearance: none; -webkit-appearance: none; width: 20px; height: 20px;
-      border: 2px solid rgba(255, 255, 255, 0.15); border-radius: 50%;
-      background: transparent; cursor: pointer; flex-shrink: 0; margin-top: 2px;
-      transition: all 0.2s ease; position: relative;
-    }
-    .page-mode-radio:checked {
-      border-color: var(--accent); background: transparent;
-    }
-    .page-mode-radio:checked::after {
-      content: ''; position: absolute; top: 3px; left: 3px;
-      width: 10px; height: 10px; border-radius: 50%;
-      background: var(--accent); box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.4);
-    }
-    .page-mode-body { flex: 1; min-width: 0; }
-    .page-mode-title { font-size: 0.9rem; font-weight: 600; margin-bottom: 2px; }
-    .page-mode-desc { font-size: 0.75rem; color: var(--text-muted); line-height: 1.4; }
-    .page-mode-details {
-      margin-top: 16px; padding-top: 16px;
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
-    }
-    .page-mode-details[hidden] { display: none; }
-
-    /* === SPRING-LOADED SEGMENTED CONTROL === */
+    /* === PAGE MODE SEGMENTED CONTROL === */
     .pm-segment-wrap {
       position: relative; display: flex; background: rgba(0,0,0,0.5);
       border-radius: 12px; padding: 4px; border: 1px solid rgba(255, 255, 255, 0.08);
@@ -428,26 +329,8 @@
       border-radius: var(--radius-sm); padding: 16px;
     }
 
-    /* === COLLAPSIBLE CARD === */
-    .card-title-collapsible {
-      display: flex; align-items: center; justify-content: space-between;
-      cursor: pointer; user-select: none; -webkit-user-select: none;
-    }
-    .card-title-collapsible:hover { opacity: 1; }
-    .card-chevron {
-      font-size: 0.65rem; transition: transform 0.3s ease;
-      color: var(--text-muted); margin-left: 8px;
-    }
-    .card-chevron.collapsed { transform: rotate(-90deg); }
-    .card-body-collapsible {
-      overflow: hidden; transition: max-height 0.35s ease, opacity 0.25s ease;
-      max-height: 2000px; opacity: 1;
-    }
-    .card-body-collapsible.collapsed {
-      max-height: 0; opacity: 0;
-    }
-
     /* === FIRMWARE & OTA === */
+    .fw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-bottom: 24px; }
     .fw-item {
       background: rgba(255, 255, 255, 0.02); padding: 12px 14px;
       border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.05);
@@ -456,7 +339,6 @@
     .fw-item:hover { border-color: rgba(255, 255, 255, 0.1); }
     .fw-label { font-size: 0.65rem; color: #71717a; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
     .fw-value { font-size: 0.85rem; font-weight: 600; word-break: break-all; }
-    .fw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-bottom: 24px; }
     .ota-label {
       flex: 1; min-width: 200px; text-align: center;
       background: rgba(0, 0, 0, 0.2); border: 1px dashed rgba(255, 255, 255, 0.1);
@@ -478,22 +360,78 @@
     }
     .progress-status { font-size: 0.8rem; color: #a1a1aa; margin-top: 10px; text-align: center; }
 
+    /* === NODE CARD DISABLED === */
+    .node-card-disabled { opacity: 0.5; pointer-events: none; transition: opacity 0.3s ease; }
+
     /* === UTILITIES === */
+    .row { display: flex; gap: 14px; align-items: flex-start; }
+    .row > * { flex: 1; }
+    .flex-wrap-gap { display: flex; flex-wrap: wrap; gap: 12px; }
+    .flex-col-gap { display: flex; flex-direction: column; gap: 12px; }
+    .arp-label {
+      display: flex; align-items: center; gap: 12px; font-size: 0.875rem;
+      cursor: pointer; padding: 8px 12px; border-radius: 8px; transition: background 0.2s;
+    }
+    .arp-label:hover { background: rgba(255, 255, 255, 0.03); }
+    .arp-cb { accent-color: var(--accent); width: 18px; height: 18px; }
+    .color-swatch {
+      width: 46px; height: 40px; padding: 0; border: 1px solid rgba(255, 255, 255, 0.1);
+      background: none; border-radius: 10px; cursor: pointer;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .color-swatch:hover { border-color: rgba(255, 255, 255, 0.2); }
     .hint-center { text-align: center; padding: 10px 0; }
     .accent-link { color: var(--accent); text-decoration: none; transition: opacity 0.2s; }
     .accent-link:hover { opacity: 0.8; }
     .mono-link { color: var(--accent); text-decoration: none; font-family: monospace; transition: opacity 0.2s; }
     .mono-link:hover { opacity: 0.8; }
+
+    /* === SAVE BAR & TOAST === */
+    .save-bar {
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 90;
+      background: rgba(20, 20, 24, 0.85);
+      backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+      border-top: 1px solid rgba(var(--accent-rgb), 0.15);
+      padding: 10px 24px; display: flex; align-items: center;
+      justify-content: flex-end; gap: 12px; height: 64px;
+      transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.3);
+    }
+    .save-bar.visible { transform: translateY(0); }
+    .save-bar .changes-hint { font-size: 0.8rem; color: var(--accent); margin-right: auto; opacity: 0.8; }
+    .toast {
+      position: fixed; top: 76px; right: 24px; z-index: 200;
+      background: rgba(20, 20, 24, 0.9);
+      backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 14px 22px; border-radius: 16px; font-size: 0.85rem;
+      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+      transform: translateX(120%); transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .toast.show { transform: translateX(0); }
+    .toast.success { border-left: 3px solid #10b981; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(16, 185, 129, 0.08); }
+    .toast.error { border-left: 3px solid #ef4444; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(239, 68, 68, 0.08); }
+
+    /* === RESPONSIVE === */
+    @media (max-width: 768px) {
+      .top-nav .tabs, .top-nav .github-link { display: none; }
+      .bottom-nav { display: block; }
+      .content { padding: 16px 16px calc(68px + 64px + 16px); }
+      .save-bar { bottom: 68px; }
+      .toast { top: auto; bottom: calc(68px + 64px + 16px); right: 16px; }
+      .row.stack-mobile { flex-direction: column; }
+    }
   </style>
 </head>
 <body>
 
+  <!-- ======== TOP NAVIGATION ======== -->
   <nav class="top-nav">
     <div class="brand"><span class="dot"></span> NINA Display</div>
     <div class="tabs" id="topTabs">
-      <button class="tab-btn active" data-tab="main">Main</button>
-      <button class="tab-btn" data-tab="network">Network</button>
-      <button class="tab-btn" data-tab="nina">NINA</button>
+      <button class="tab-btn active" data-tab="display">Display</button>
+      <button class="tab-btn" data-tab="nodes">Nodes &amp; Data</button>
+      <button class="tab-btn" data-tab="behavior">Behavior</button>
       <button class="tab-btn" data-tab="system">System</button>
     </div>
     <a class="github-link" href="https://github.com/chvvkumar/ESP32-P4-NINA-Display" target="_blank" rel="noopener">
@@ -502,19 +440,20 @@
     </a>
   </nav>
 
+  <!-- ======== BOTTOM NAVIGATION (MOBILE) ======== -->
   <nav class="bottom-nav">
     <div class="nav-items" id="bottomTabs">
-      <button class="nav-btn active" data-tab="main">
+      <button class="nav-btn active" data-tab="display">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-        Main
+        Display
       </button>
-      <button class="nav-btn" data-tab="network">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0114.08 0M1.42 9a16 16 0 0121.16 0M8.53 16.11a6 6 0 016.95 0M12 20h.01"/></svg>
-        Network
-      </button>
-      <button class="nav-btn" data-tab="nina">
+      <button class="nav-btn" data-tab="nodes">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-        NINA
+        Nodes
+      </button>
+      <button class="nav-btn" data-tab="behavior">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        Behavior
       </button>
       <button class="nav-btn" data-tab="system">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
@@ -523,8 +462,12 @@
     </div>
   </nav>
 
+  <!-- ======== MAIN CONTENT ======== -->
   <main class="content">
-    <div id="tab-main" class="tab-panel active">
+
+    <!-- ==================== TAB 1: DISPLAY ==================== -->
+    <div id="tab-display" class="tab-panel active">
+
       <div class="card">
         <div class="card-title">Appearance</div>
         <div class="field">
@@ -557,13 +500,6 @@
           </select>
         </div>
         <div class="field">
-          <label class="field-label">Backlight</label>
-          <div class="slider-group">
-            <input type="range" class="slider" id="brightness" min="0" max="100" value="80" oninput="setBrightness(this.value)">
-            <span class="slider-val" id="brightness_val">80%</span>
-          </div>
-        </div>
-        <div class="field">
           <label class="field-label">Text brightness</label>
           <div class="slider-group">
             <input type="range" class="slider" id="color_brightness" min="0" max="100" value="80" oninput="setColorBrightness(this.value)">
@@ -571,53 +507,45 @@
           </div>
         </div>
       </div>
-      <div class="card">
-        <div class="card-title card-title-collapsible" onclick="togglePageMode()">
-          <span>Page mode <span id="pm_summary" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span></span>
-          <span class="card-chevron collapsed" id="pm_chevron">&#9660;</span>
-        </div>
-        <div class="card-body-collapsible collapsed" id="pm_body">
 
+      <div class="card">
+        <div class="card-title">Page Navigation <span id="pm_summary" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span></div>
         <div class="pm-segment-wrap">
           <div class="pm-slider" id="pm_slider"></div>
           <div class="pm-seg-btn active" data-mode="auto" onclick="setPageMode('auto')">Manual</div>
           <div class="pm-seg-btn" data-mode="fixed" onclick="setPageMode('fixed')">Fixed</div>
           <div class="pm-seg-btn" data-mode="rotate" onclick="setPageMode('rotate')">Cycle Pages</div>
         </div>
-
-        <div id="pm_auto_details" class="pm-content-box" style="display:none;">
-          <div style="font-size:0.8rem; color:var(--text-muted); text-align:center;">
-            Starts on Summary page. Navigate manually via swipe or physical button.
-          </div>
+        <div id="pm_auto_details" class="pm-content-box" style="display:none">
+          <div style="font-size:0.8rem;color:var(--text-muted);text-align:center;">Starts on Summary page. Navigate manually via swipe or physical button.</div>
         </div>
-
-        <div id="pm_fixed_details" class="pm-content-box" style="display:none;">
-          <div class="field" style="margin-bottom:0;">
+        <div id="pm_fixed_details" class="pm-content-box" style="display:none">
+          <div class="field" style="margin-bottom:0">
             <label class="field-label">Pinned Page</label>
             <select class="input" id="active_page" onchange="setPage(this.value)">
               <option value="0">Summary</option>
               <option value="1">NINA 1</option>
               <option value="2">NINA 2</option>
               <option value="3">NINA 3</option>
-              <option value="4">Settings</option>
               <option value="5">System Info</option>
             </select>
           </div>
         </div>
-
-        <div id="pm_rotate_details" class="pm-content-box" style="display:none;">
-          <div class="field">
-            <label class="field-label">Interval (seconds)</label>
-            <input type="number" class="input" id="auto_rotate_interval" min="4" max="3600" value="30">
-          </div>
-          <div class="field">
-            <label class="field-label">Transition</label>
-            <select class="input" id="auto_rotate_effect">
-              <option value="0">Instant</option>
-              <option value="1">Fade</option>
-              <option value="2">Slide Left</option>
-              <option value="3">Slide Right</option>
-            </select>
+        <div id="pm_rotate_details" class="pm-content-box" style="display:none">
+          <div class="row stack-mobile">
+            <div class="field">
+              <label class="field-label">Interval (seconds)</label>
+              <input type="number" class="input" id="auto_rotate_interval" min="4" max="3600" value="30">
+            </div>
+            <div class="field">
+              <label class="field-label">Transition</label>
+              <select class="input" id="auto_rotate_effect">
+                <option value="0">Instant</option>
+                <option value="1">Fade</option>
+                <option value="2">Slide Left</option>
+                <option value="3">Slide Right</option>
+              </select>
+            </div>
           </div>
           <div class="toggle-row">
             <span class="toggle-label">Skip disconnected nodes</span>
@@ -628,64 +556,194 @@
             <div class="flex-col-gap" id="arp-container" style="margin-top:8px"></div>
           </div>
         </div>
-
-        </div>
       </div>
     </div>
-    <div id="tab-network" class="tab-panel">
-      <div class="card">
-        <div class="card-title">WiFi</div>
-        <div class="field">
-          <label class="field-label">SSID</label>
-          <input type="text" class="input" id="ssid" placeholder="Network name">
+
+    <!-- ==================== TAB 2: NODES & DATA ==================== -->
+    <div id="tab-nodes" class="tab-panel">
+
+      <div class="card" id="instance-overview">
+        <div class="card-title">Active Instances</div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label" id="inst_lbl_0">Node 1</span>
+          <label class="toggle"><input type="checkbox" id="instance_enabled_0" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
         </div>
-        <div class="field">
-          <label class="field-label">Password</label>
-          <input type="password" class="input" id="pass" placeholder="Enter new password to change">
-          <div class="field-hint">Password is stored in WiFi hardware and not readable.</div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label" id="inst_lbl_1">Node 2</span>
+          <label class="toggle"><input type="checkbox" id="instance_enabled_1" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
         </div>
-      </div>
-      <div class="card">
-        <div class="card-title">Time</div>
-        <div class="field">
-          <label class="field-label">NTP server</label>
-          <input type="text" class="input" id="ntp" placeholder="pool.ntp.org">
-        </div>
-        <div class="field">
-          <label class="field-label">Timezone</label>
-          <select class="input" id="timezone">
-            <option value="">UTC (default)</option>
-            <option value="GMT0">GMT</option>
-            <option value="GMT0BST,M3.5.0/1,M10.5.0">UK (GMT/BST)</option>
-            <option value="CET-1CEST,M3.5.0,M10.5.0/3">Central Europe (CET/CEST)</option>
-            <option value="EET-2EEST,M3.5.0/3,M10.5.0/4">Eastern Europe (EET/EEST)</option>
-            <option value="EST5EDT,M3.2.0,M11.1.0">US Eastern (EST/EDT)</option>
-            <option value="CST6CDT,M3.2.0,M11.1.0">US Central (CST/CDT)</option>
-            <option value="MST7MDT,M3.2.0,M11.1.0">US Mountain (MST/MDT)</option>
-            <option value="MST7">US Arizona (MST, no DST)</option>
-            <option value="PST8PDT,M3.2.0,M11.1.0">US Pacific (PST/PDT)</option>
-            <option value="AKST9AKDT,M3.2.0,M11.1.0">US Alaska (AKST/AKDT)</option>
-            <option value="HST10">US Hawaii (HST, no DST)</option>
-            <option value="AEST-10AEDT,M10.1.0,M4.1.0/3">Australia Eastern (AEST/AEDT)</option>
-            <option value="ACST-9:30ACDT,M10.1.0,M4.1.0/3">Australia Central (ACST/ACDT)</option>
-            <option value="AWST-8">Australia Western (AWST, no DST)</option>
-            <option value="NZST-12NZDT,M9.5.0,M4.1.0/3">New Zealand (NZST/NZDT)</option>
-            <option value="JST-9">Japan (JST)</option>
-            <option value="CST-8">China (CST)</option>
-            <option value="IST-5:30">India (IST)</option>
-            <option value="<-03>3">Argentina (ART)</option>
-            <option value="<-03>3<-02>,M10.3.0/0,M2.3.0/0">Brazil (BRT/BRST)</option>
-            <option value="SAST-2">South Africa (SAST)</option>
-          </select>
+        <div class="toggle-row">
+          <span class="toggle-label" id="inst_lbl_2">Node 3</span>
+          <label class="toggle"><input type="checkbox" id="instance_enabled_2" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
         </div>
       </div>
+
+      <div id="node-cards"></div>
+    </div>
+
+    <!-- ==================== TAB 3: BEHAVIOR & ALERTS ==================== -->
+    <div id="tab-behavior" class="tab-panel">
+
+      <div class="card">
+        <div class="card-title">Hardware</div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Screen Rotation</label>
+            <select class="input" id="screen_rotation_select" onchange="setScreenRotation(this.value)">
+              <option value="0">0° (Default)</option>
+              <option value="1">90°</option>
+              <option value="2">180°</option>
+              <option value="3">270°</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field-label">Backlight</label>
+            <div class="slider-group">
+              <input type="range" class="slider" id="brightness" min="0" max="100" value="80" oninput="setBrightness(this.value)">
+              <span class="slider-val" id="brightness_val">80%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Power Management</div>
+        <div class="toggle-row">
+          <span class="toggle-label">Turn off screen when idle</span>
+          <label class="toggle"><input type="checkbox" id="screen_sleep_enabled"><span class="toggle-track"></span></label>
+        </div>
+        <div id="screen_sleep_details" style="margin-top:16px">
+          <div class="row stack-mobile">
+            <div class="field">
+              <label class="field-label">Timeout (seconds)</label>
+              <input type="number" class="input" id="screen_sleep_timeout" min="10" max="3600" value="60">
+            </div>
+            <div class="field">
+              <label class="field-label">Idle poll interval (s)</label>
+              <input type="number" class="input" id="idle_poll_interval" min="5" max="120" value="30">
+            </div>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">WiFi power save</span>
+            <label class="toggle"><input type="checkbox" id="wifi_power_save" checked><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Enable WiFi modem sleep between polls. Connection stays associated with zero reconnection delay.</div>
+        </div>
+        <hr class="divider">
+        <div class="toggle-row">
+          <span class="toggle-label">Enable deep sleep (long-press BOOT to power off)</span>
+          <label class="toggle"><input type="checkbox" id="deep_sleep_enabled"><span class="toggle-track"></span></label>
+        </div>
+        <div id="deep_sleep_details" style="margin-top:16px">
+          <div class="field">
+            <label class="field-label">Wake timer (hours)</label>
+            <input type="number" class="input" id="deep_sleep_wake_timer" min="0" max="72" step="1" value="0">
+            <div class="field-hint">Hours until auto-wake. 0 = stay asleep forever. Warning: with timer set to 0, the device must be physically rebooted to wake up — there is no manual wake from deep sleep.</div>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Auto power off when idle</span>
+            <label class="toggle"><input type="checkbox" id="deep_sleep_on_idle"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Enter deep sleep after extended disconnection from all NINA instances. The device must be physically rebooted to wake up if the wake timer is set to 0.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Polling &amp; Connectivity</div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Data update rate (s)</label>
+            <input type="number" class="input" id="update_rate" min="1" max="10" value="2">
+          </div>
+          <div class="field">
+            <label class="field-label">Graph update rate (s)</label>
+            <input type="number" class="input" id="graph_interval" min="2" max="30" value="5">
+          </div>
+        </div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Connection timeout (s)</label>
+            <input type="number" class="input" id="connection_timeout" min="2" max="30" value="6">
+            <div class="field-hint">Seconds without response before a NINA instance is offline</div>
+          </div>
+          <div class="field">
+            <label class="field-label">Toast duration (s)</label>
+            <input type="number" class="input" id="toast_duration" min="3" max="30" value="8">
+            <div class="field-hint">Errors show for 2x this value</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Notifications</div>
+        <div class="toggle-row">
+          <span class="toggle-label">Border flash alerts</span>
+          <label class="toggle"><input type="checkbox" id="alert_flash_enabled" checked><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint" style="margin-top:4px">Flash the screen border when RMS, HFR, or safety thresholds are exceeded.</div>
+      </div>
+    </div>
+
+    <!-- ==================== TAB 4: SYSTEM ==================== -->
+    <div id="tab-system" class="tab-panel">
+
+      <div class="card">
+        <div class="card-title">Network</div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">WiFi SSID</label>
+            <input type="text" class="input" id="ssid" placeholder="Network name">
+          </div>
+          <div class="field">
+            <label class="field-label">WiFi Password</label>
+            <input type="password" class="input" id="pass" placeholder="Enter new password to change">
+            <div class="field-hint">Password is stored in WiFi hardware and not readable.</div>
+          </div>
+        </div>
+        <hr class="divider">
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">NTP server</label>
+            <input type="text" class="input" id="ntp" placeholder="pool.ntp.org">
+          </div>
+          <div class="field">
+            <label class="field-label">Timezone</label>
+            <select class="input" id="timezone">
+              <option value="">UTC (default)</option>
+              <option value="GMT0">GMT</option>
+              <option value="GMT0BST,M3.5.0/1,M10.5.0">UK (GMT/BST)</option>
+              <option value="CET-1CEST,M3.5.0,M10.5.0/3">Central Europe (CET/CEST)</option>
+              <option value="EET-2EEST,M3.5.0/3,M10.5.0/4">Eastern Europe (EET/EEST)</option>
+              <option value="EST5EDT,M3.2.0,M11.1.0">US Eastern (EST/EDT)</option>
+              <option value="CST6CDT,M3.2.0,M11.1.0">US Central (CST/CDT)</option>
+              <option value="MST7MDT,M3.2.0,M11.1.0">US Mountain (MST/MDT)</option>
+              <option value="MST7">US Arizona (MST, no DST)</option>
+              <option value="PST8PDT,M3.2.0,M11.1.0">US Pacific (PST/PDT)</option>
+              <option value="AKST9AKDT,M3.2.0,M11.1.0">US Alaska (AKST/AKDT)</option>
+              <option value="HST10">US Hawaii (HST, no DST)</option>
+              <option value="AEST-10AEDT,M10.1.0,M4.1.0/3">Australia Eastern (AEST/AEDT)</option>
+              <option value="ACST-9:30ACDT,M10.1.0,M4.1.0/3">Australia Central (ACST/ACDT)</option>
+              <option value="AWST-8">Australia Western (AWST, no DST)</option>
+              <option value="NZST-12NZDT,M9.5.0,M4.1.0/3">New Zealand (NZST/NZDT)</option>
+              <option value="JST-9">Japan (JST)</option>
+              <option value="CST-8">China (CST)</option>
+              <option value="IST-5:30">India (IST)</option>
+              <option value="<-03>3">Argentina (ART)</option>
+              <option value="<-03>3<-02>,M10.3.0/0,M2.3.0/0">Brazil (BRT/BRST)</option>
+              <option value="SAST-2">South Africa (SAST)</option>
+            </select>
+          </div>
+        </div>
+        <div class="field-hint hint-center">Reboot required after changing WiFi, NTP, or timezone.</div>
+      </div>
+
       <div class="card">
         <div class="card-title">MQTT</div>
-        <div class="toggle-row">
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
           <span class="toggle-label">Enable MQTT</span>
           <label class="toggle"><input type="checkbox" id="mqtt_enabled"><span class="toggle-track"></span></label>
         </div>
-        <div class="field">
+        <div class="field" style="margin-top:16px">
           <label class="field-label">Broker host</label>
           <input type="text" class="input" id="mqtt_broker" placeholder="192.168.1.250">
         </div>
@@ -709,72 +767,9 @@
             <input type="password" class="input" id="mqtt_pass" placeholder="Password">
           </div>
         </div>
+        <div class="field-hint hint-center">Reboot required after changing MQTT settings.</div>
       </div>
-      <div class="field-hint hint-center">Reboot required after changing WiFi, NTP, timezone, or MQTT settings.</div>
-    </div>
-    <div id="tab-nina" class="tab-panel">
-      <div class="card" id="instance-overview">
-        <div class="card-title">Instances</div>
-        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label" id="inst_lbl_0">Node 1</span>
-          <label class="toggle"><input type="checkbox" id="instance_enabled_0" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
-        </div>
-        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label" id="inst_lbl_1">Node 2</span>
-          <label class="toggle"><input type="checkbox" id="instance_enabled_1" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
-        </div>
-        <div class="toggle-row">
-          <span class="toggle-label" id="inst_lbl_2">Node 3</span>
-          <label class="toggle"><input type="checkbox" id="instance_enabled_2" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
-        </div>
-      </div>
-      <div class="sub-tabs">
-        <button class="sub-tab active" data-node="0">Node 1</button>
-        <button class="sub-tab" data-node="1">Node 2</button>
-        <button class="sub-tab" data-node="2">Node 3</button>
-      </div>
-      <div id="node-panels"></div>
-      <div class="card">
-        <div class="card-title card-title-collapsible" onclick="toggleCollapsible('dr')">
-          <span>Data rates</span>
-          <span class="card-chevron collapsed" id="dr_chevron">&#9660;</span>
-        </div>
-        <div class="card-body-collapsible collapsed" id="dr_body">
-        <div class="field">
-          <label class="field-label">Data update rate (seconds)</label>
-          <input type="number" class="input" id="update_rate" min="1" max="10" value="2">
-        </div>
-        <div class="field">
-          <label class="field-label">Graph update rate (seconds)</label>
-          <input type="number" class="input" id="graph_interval" min="2" max="30" value="5">
-        </div>
-        <div class="field">
-          <label class="field-label">Connection timeout (seconds)</label>
-          <input type="number" class="input" id="connection_timeout" min="2" max="30" value="6">
-          <div class="field-hint">Time without a successful poll before a NINA instance is considered offline</div>
-        </div>
-        <div class="field">
-          <label class="field-label">Toast notification duration (seconds)</label>
-          <input type="number" class="input" id="toast_duration" min="3" max="30" value="8">
-          <div class="field-hint">How long toast notifications are shown on screen (errors show for 2x this value)</div>
-        </div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title card-title-collapsible" onclick="toggleCollapsible('alerts')">
-          Alerts
-          <span class="card-chevron collapsed" id="alerts_chevron">&#9660;</span>
-        </div>
-        <div class="card-body-collapsible collapsed" id="alerts_body">
-        <div class="toggle-row">
-          <span class="toggle-label">Border flash alerts</span>
-          <label class="toggle"><input type="checkbox" id="alert_flash_enabled" checked><span class="toggle-track"></span></label>
-        </div>
-        <div class="field-hint" style="margin-top:4px">Flash the screen border when RMS, HFR, or safety thresholds are exceeded. Toasts and event log entries are unaffected.</div>
-        </div>
-      </div>
-    </div>
-    <div id="tab-system" class="tab-panel">
+
       <div class="card">
         <div class="card-title">Firmware</div>
         <div class="fw-grid">
@@ -785,21 +780,21 @@
           <div class="fw-item"><div class="fw-label">Release</div><div class="fw-value" id="fw_git_tag">--</div></div>
           <div class="fw-item"><div class="fw-label">Commit</div><div class="fw-value" id="fw_git_sha">--</div></div>
         </div>
-        <div class="divider"></div>
-        <div class="toggle-row">
+        <hr class="divider">
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
           <span class="toggle-label">Check for updates on boot</span>
           <label class="toggle"><input type="checkbox" id="auto_update_check" checked><span class="toggle-track"></span></label>
         </div>
         <div class="field-hint" style="margin-top:4px">Automatically check GitHub for new firmware releases when the device boots.</div>
         <div class="field" style="margin-top:12px">
           <label class="field-label">Update channel</label>
-          <select id="update_channel" class="input">
+          <select class="input" id="update_channel">
             <option value="0">Stable only</option>
             <option value="1">Include pre-releases</option>
           </select>
         </div>
         <button class="btn btn-primary" style="margin-top:12px;width:100%" id="checkUpdateBtn" onclick="checkForUpdates()">Check for Updates</button>
-        <div class="divider"></div>
+        <hr class="divider">
         <div class="ota-bar">
           <label class="ota-label" id="otaFileLabel">
             Choose firmware .bin file
@@ -808,76 +803,32 @@
           <button class="btn btn-primary" id="otaBtn" disabled onclick="startOta()">Update</button>
         </div>
         <div id="otaProgress" style="display:none;margin-top:16px">
-          <div class="progress-bg">
-            <div id="otaProgressFill" class="progress-fill"></div>
-          </div>
+          <div class="progress-bg"><div id="otaProgressFill" class="progress-fill"></div></div>
           <div id="otaStatus" class="progress-status"></div>
         </div>
       </div>
+
       <div class="card">
         <div class="card-title">Device</div>
-        <div class="flex-wrap-gap">
-          <button class="btn btn-outline" onclick="saveAndReboot()">Reboot</button>
-          <button class="btn btn-danger" onclick="factoryReset()">Factory Reset</button>
+        <div class="row stack-mobile" style="margin-bottom:16px">
+          <button class="btn btn-outline" onclick="saveAndReboot()" style="flex:1">Reboot</button>
+          <button class="btn btn-danger" onclick="factoryReset()" style="flex:1">Factory Reset</button>
         </div>
-      </div>
-      <div class="card">
-        <div class="card-title card-title-collapsible" onclick="toggleCollapsible('scrslp')">
-          Screen Sleep
-          <span class="card-chevron collapsed" id="scrslp_chevron">&#9660;</span>
-        </div>
-        <div class="card-body-collapsible collapsed" id="scrslp_body">
-        <div class="toggle-row">
-          <span class="toggle-label">Turn off screen when idle</span>
-          <label class="toggle"><input type="checkbox" id="screen_sleep_enabled"><span class="toggle-track"></span></label>
-        </div>
-        <div id="screen_sleep_details" style="margin-top:12px">
-          <div class="field">
-            <label class="field-label">Timeout (seconds)</label>
-            <input type="number" class="input" id="screen_sleep_timeout" min="10" max="3600" value="60">
-            <div class="field-hint">Seconds with no NINA connections before turning off the display. Touch or reconnection wakes it.</div>
-          </div>
-          <div class="field">
-            <label class="field-label">Idle poll interval (seconds)</label>
-            <input type="number" class="input" id="idle_poll_interval" min="5" max="120" value="30">
-            <div class="field-hint">How often to check for NINA instances while the screen is sleeping. Lower = faster wake, higher = less network activity.</div>
-          </div>
-          <div class="toggle-row" style="margin-top:8px">
-            <span class="toggle-label">WiFi power save</span>
-            <label class="toggle"><input type="checkbox" id="wifi_power_save" checked><span class="toggle-track"></span></label>
-          </div>
-          <div class="field-hint" style="margin-top:4px">Enable WiFi modem sleep to reduce radio power between polls. The WiFi connection stays associated with zero reconnection delay.</div>
-        </div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title card-title-collapsible" onclick="toggleCollapsible('dbg')">
-          Debug
-          <span class="card-chevron collapsed" id="dbg_chevron">&#9660;</span>
-        </div>
-        <div class="card-body-collapsible collapsed" id="dbg_body">
-        <div class="toggle-row">
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
           <span class="toggle-label">Enable Debug Mode</span>
           <label class="toggle"><input type="checkbox" id="debug_mode"><span class="toggle-track"></span></label>
         </div>
-        <div class="field-hint" style="margin-top:8px;">Enables performance profiling metrics, serial reports, and the /api/perf endpoint. Toggling resets all metrics.</div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title card-title-collapsible" onclick="toggleCollapsible('ss')">
-          <span>Screenshot</span>
-          <span class="card-chevron collapsed" id="ss_chevron">&#9660;</span>
-        </div>
-        <div class="card-body-collapsible collapsed" id="ss_body">
-          <button class="btn btn-outline" id="ssBtn" onclick="takeScreenshot()" style="margin-bottom:16px">Capture screenshot</button>
-          <div id="ssContainer" style="display:none">
-            <img id="ssImage" style="width:100%;border-radius:var(--radius-sm);border:1px solid var(--border)">
-          </div>
+        <div class="field-hint" style="margin-top:4px;margin-bottom:16px">Performance profiling, serial reports, /api/perf endpoint.</div>
+        <button class="btn btn-outline" id="ssBtn" onclick="takeScreenshot()">Capture Screenshot</button>
+        <div id="ssContainer" style="display:none;margin-top:16px">
+          <img id="ssImage" style="width:100%;border-radius:var(--radius-sm);border:1px solid var(--border)">
         </div>
       </div>
     </div>
+
   </main>
 
+  <!-- ======== SAVE BAR & TOAST ======== -->
   <div class="save-bar" id="saveBar">
     <span class="changes-hint">Unsaved changes</span>
     <button class="btn btn-outline" onclick="reloadConfig()">Discard</button>
@@ -886,59 +837,79 @@
   <div class="toast" id="toast"></div>
 
   <script>
+    /* ============================================================
+       NINA Display — Config UI JavaScript
+       Tab IDs: display | nodes | behavior | system
+       ============================================================ */
+
+    /* === Utility Aliases === */
     const $=id=>document.getElementById(id);
     const $$=s=>document.querySelectorAll(s);
+    const postJson=(url,body)=>fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 
-    /* ---- Generate Node Panels ---- */
+    /* === Node Card Generation === */
     (function(){
-      const c=$('node-panels');
+      const container=$('node-cards');
+      if(!container) return;
       const placeholders=['192.168.1.100','192.168.1.101','192.168.1.102'];
       for(let i=0;i<3;i++){
-        const n=i,urlId='url'+(i+1);
-        const active=i===0?' active':'';
-        c.insertAdjacentHTML('beforeend',
-          '<div class="node-panel'+active+'" data-node-panel="'+i+'">'+
-          '<div class="card"><div class="card-title">Endpoint</div>'+
-          '<div class="field"><label class="field-label">Hostname / IP</label>'+
-          '<input type="text" class="input" id="'+urlId+'" placeholder="'+placeholders[i]+'" oninput="updateNodeLabels()">'+
-          '</div></div>'+
-          '<div class="card"><div class="card-title">Filter colors</div>'+
-          '<div id="filters_'+i+'" class="filter-grid"></div></div>'+
-          '<div class="row stack-mobile">'+
-          '<div class="card"><div class="card-title">RMS thresholds</div>'+
-          mkThresholdFields('rms',i,'0.5','1.0')+
-          '</div>'+
-          '<div class="card"><div class="card-title">HFR thresholds</div>'+
-          mkThresholdFields('hfr',i,'2.0','3.5')+
-          '</div></div></div>'
+        const urlId='url'+(i+1);
+        container.insertAdjacentHTML('beforeend',
+          '<div class="card node-config-card" id="node_card_'+i+'" data-node="'+i+'">'+
+            '<div class="card-title">Node '+(i+1)+' <span id="node_card_hostname_'+i+'" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span></div>'+
+            '<div class="field"><label class="field-label">Hostname / IP</label>'+
+            '<input type="text" class="input" id="'+urlId+'" placeholder="'+placeholders[i]+'" oninput="updateNodeLabels()"></div>'+
+            '<div class="field"><label class="field-label">Filter colors</label>'+
+            '<div id="filters_'+i+'" class="filter-grid"></div></div>'+
+            '<div class="row stack-mobile">'+
+            mkThresholdSection('rms',i)+
+            mkThresholdSection('hfr',i)+
+            '</div></div>'
         );
       }
-      function mkThresholdFields(pfx,i,ph1,ph2){
-        return '<div class="threshold-row">'+
-          '<div class="threshold-label">Good<span class="threshold-hint">&lt; value</span></div>'+
-          '<input type="text" class="input" id="'+pfx+'_good_max_'+i+'" placeholder="'+ph1+'">'+
-          '<input type="color" class="threshold-dot" id="'+pfx+'_good_color_'+i+'" value="#10b981"></div>'+
-          '<div class="threshold-row">'+
-          '<div class="threshold-label">Warning<span class="threshold-hint">&lt; value</span></div>'+
-          '<input type="text" class="input" id="'+pfx+'_ok_max_'+i+'" placeholder="'+ph2+'">'+
-          '<input type="color" class="threshold-dot" id="'+pfx+'_ok_color_'+i+'" value="#eab308"></div>'+
-          '<div class="threshold-row">'+
-          '<div class="threshold-label">Bad<span class="threshold-hint">&ge; above</span></div>'+
-          '<input type="color" class="threshold-dot" id="'+pfx+'_bad_color_'+i+'" value="#ef4444"></div>';
+      function mkThresholdSection(pfx,n){
+        var isRms=pfx==='rms';
+        var title=isRms?'RMS Thresholds':'HFR Thresholds';
+        var defGood=isRms?'0.5':'2.0';
+        var defOk=isRms?'1.0':'3.5';
+        return '<div class="threshold-section">'+
+          '<div class="threshold-section-title">'+title+'</div>'+
+          '<div class="visual-threshold-bar" id="'+pfx+'_bar_'+n+'">'+
+            '<div class="thresh-seg thresh-green" id="'+pfx+'_seg_good_'+n+'" style="flex:2"></div>'+
+            '<div class="thresh-seg thresh-yellow" id="'+pfx+'_seg_ok_'+n+'" style="flex:1.5"></div>'+
+            '<div class="thresh-seg thresh-red" id="'+pfx+'_seg_bad_'+n+'" style="flex:2"></div>'+
+          '</div>'+
+          '<div class="thresh-labels" id="'+pfx+'_labels_'+n+'">'+
+            '<span>0.0</span><span>'+defGood+' (Good)</span><span>'+defOk+' (Warn)</span><span>Bad</span>'+
+          '</div>'+
+          '<div class="thresh-edit-row">'+
+            '<div class="thresh-label-sm">Good<br><span style="font-size:0.6rem;color:#71717a">&lt; value</span></div>'+
+            '<input type="text" class="input" id="'+pfx+'_good_max_'+n+'" placeholder="'+defGood+'" oninput="updateThresholdBar(\''+pfx+'\','+n+')">'+
+            '<input type="color" class="thresh-dot" id="'+pfx+'_good_color_'+n+'" value="#10b981">'+
+          '</div>'+
+          '<div class="thresh-edit-row">'+
+            '<div class="thresh-label-sm">Warn<br><span style="font-size:0.6rem;color:#71717a">&lt; value</span></div>'+
+            '<input type="text" class="input" id="'+pfx+'_ok_max_'+n+'" placeholder="'+defOk+'" oninput="updateThresholdBar(\''+pfx+'\','+n+')">'+
+            '<input type="color" class="thresh-dot" id="'+pfx+'_ok_color_'+n+'" value="#eab308">'+
+          '</div>'+
+          '<div class="thresh-edit-row">'+
+            '<div class="thresh-label-sm">Bad<br><span style="font-size:0.6rem;color:#71717a">&ge; above</span></div>'+
+            '<input type="color" class="thresh-dot" id="'+pfx+'_bad_color_'+n+'" value="#ef4444">'+
+          '</div></div>';
       }
     })();
 
-    /* ---- Generate Rotation Page Checkboxes ---- */
+    /* === Rotation Page Checkbox Generation === */
     (function(){
-      const items=[
+      var items=[
         ['arp_summary','Summary'],
         ['arp_nina1','<span id="arp_lbl1">NINA 1</span>'],
         ['arp_nina2','<span id="arp_lbl2">NINA 2</span>'],
         ['arp_nina3','<span id="arp_lbl3">NINA 3</span>'],
-        ['arp_settings','Settings'],
         ['arp_sysinfo','System Info']
       ];
-      const c=$('arp-container');
+      var c=$('arp-container');
+      if(!c) return;
       items.forEach(function(it){
         c.insertAdjacentHTML('beforeend',
           '<label class="arp-label"><input type="checkbox" id="'+it[0]+'" class="arp-cb"> '+it[1]+'</label>'
@@ -946,26 +917,26 @@
       });
     })();
 
-    /* ---- Adaptive Accent Colors ---- */
+    /* === Tab Accent Colors === */
     const tabAccents={
-      main:   {color:'#14b8a6', rgb:'20, 184, 166'},
-      network:{color:'#3b82f6', rgb:'59, 130, 246'},
-      nina:   {color:'#8b5cf6', rgb:'139, 92, 246'},
-      system: {color:'#f43f5e', rgb:'244, 63, 94'}
+      display: {color:'#14b8a6', rgb:'20, 184, 166'},
+      nodes:   {color:'#10b981', rgb:'16, 185, 129'},
+      behavior:{color:'#8b5cf6', rgb:'139, 92, 246'},
+      system:  {color:'#f43f5e', rgb:'244, 63, 94'}
     };
 
     function setAccent(name){
-      const a=tabAccents[name]||tabAccents.main;
-      const r=document.documentElement.style;
+      var a=tabAccents[name]||tabAccents.display;
+      var r=document.documentElement.style;
       r.setProperty('--accent',a.color);
       r.setProperty('--accent-rgb',a.rgb);
     }
 
-    /* ---- Tab Navigation ---- */
-    function switchTab(name) {
+    /* === Tab Navigation === */
+    function switchTab(name){
       $$('.tab-panel').forEach(p=>p.classList.remove('active'));
       $$('.tab-btn, .nav-btn').forEach(b=>b.classList.remove('active'));
-      const panel=$('tab-'+name);
+      var panel=$('tab-'+name);
       if(panel) panel.classList.add('active');
       $$('[data-tab="'+name+'"]').forEach(b=>b.classList.add('active'));
       setAccent(name);
@@ -977,30 +948,15 @@
     });
 
     try{
-      const saved=localStorage.getItem('nina_tab');
+      var saved=localStorage.getItem('nina_tab');
       if(saved&&$('tab-'+saved)) switchTab(saved);
-      else setAccent('main');
-    }catch(e){}
+      else setAccent('display');
+    }catch(e){ setAccent('display'); }
 
-    /* ---- Node Sub-Tab Switching ---- */
-    function switchNode(idx) {
-      $$('.sub-tab').forEach(b=>b.classList.remove('active'));
-      $$('.node-panel').forEach(p=>p.classList.remove('active'));
-      const btn=document.querySelector('.sub-tab[data-node="'+idx+'"]');
-      const panel=document.querySelector('.node-panel[data-node-panel="'+idx+'"]');
-      if(btn) btn.classList.add('active');
-      if(panel) panel.classList.add('active');
-    }
-
-    $$('.sub-tab').forEach(btn=>{
-      btn.addEventListener('click',()=>switchNode(btn.dataset.node));
-    });
-
-    /* ---- Live API Controls ---- */
-    const postJson=(url,body)=>fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-
+    /* === Live API Controls === */
     function setTheme(v){postJson('/api/theme',{theme_index:parseInt(v)})}
     function setWidgetStyle(v){postJson('/api/widget-style',{widget_style:parseInt(v)})}
+    function setScreenRotation(v){postJson('/api/screen-rotation',{screen_rotation:parseInt(v)})}
 
     let _brightTimer=null;
     function setBrightness(v){
@@ -1018,136 +974,112 @@
 
     function setPage(v){postJson('/api/page',{page:parseInt(v)})}
 
-    /* ---- Collapsible sections ---- */
-    function toggleCollapsible(prefix){
-      var body=$(prefix+'_body'), chev=$(prefix+'_chevron');
-      body.classList.toggle('collapsed');
-      chev.classList.toggle('collapsed');
-    }
+    /* === Page Mode (Segmented Control) === */
+    let _currentPageMode='auto';
 
-    /* ---- Page Mode ---- */
-    function togglePageMode(){ toggleCollapsible('pm'); }
-
-    function updatePageModeSummary(){
-      var mode=getPageMode();
-      var labels={auto:'Manual',fixed:'Fixed',rotate:'Cycle Pages'};
-      $('pm_summary').textContent='\u2014 '+labels[mode];
-    }
-
-    let _currentPageMode = 'auto';
-
-    function setPageMode(mode) {
-      _currentPageMode = mode;
-
-      // Update button active states
-      document.querySelectorAll('.pm-seg-btn').forEach(btn => btn.classList.remove('active'));
-      const activeBtn = document.querySelector(`.pm-seg-btn[data-mode="${mode}"]`);
+    function setPageMode(mode){
+      _currentPageMode=mode;
+      $$('.pm-seg-btn').forEach(btn=>btn.classList.remove('active'));
+      var activeBtn=document.querySelector('.pm-seg-btn[data-mode="'+mode+'"]');
       if(activeBtn) activeBtn.classList.add('active');
-
-      // Move animated slider
-      const slider = document.getElementById('pm_slider');
-      if(slider) {
-        if(mode === 'auto') slider.style.transform = 'translateX(0%)';
-        if(mode === 'fixed') slider.style.transform = 'translateX(100%)';
-        if(mode === 'rotate') slider.style.transform = 'translateX(200%)';
+      var slider=$('pm_slider');
+      if(slider){
+        if(mode==='auto')   slider.style.transform='translateX(0%)';
+        if(mode==='fixed')  slider.style.transform='translateX(100%)';
+        if(mode==='rotate') slider.style.transform='translateX(200%)';
       }
-
-      // Show corresponding detail box
-      document.getElementById('pm_auto_details').style.display = (mode === 'auto') ? 'block' : 'none';
-      document.getElementById('pm_fixed_details').style.display = (mode === 'fixed') ? 'block' : 'none';
-      document.getElementById('pm_rotate_details').style.display = (mode === 'rotate') ? 'block' : 'none';
-
+      $('pm_auto_details').style.display   =(mode==='auto')?'block':'none';
+      $('pm_fixed_details').style.display  =(mode==='fixed')?'block':'none';
+      $('pm_rotate_details').style.display =(mode==='rotate')?'block':'none';
       updatePageModeSummary();
       checkDirty();
     }
 
-    function getPageMode() {
-      return _currentPageMode;
+    function getPageMode(){ return _currentPageMode; }
+
+    function updatePageModeSummary(){
+      var labels={auto:'Manual',fixed:'Fixed',rotate:'Cycle Pages'};
+      $('pm_summary').textContent='\u2014 '+(labels[_currentPageMode]||'Manual');
     }
 
-    /* ---- Filter Colors ---- */
+    /* === Filter Colors === */
     let filterColorsArr=[{},{},{}];
 
     function renderFilterColors(i){
-      const container=$('filters_'+i);
+      var container=$('filters_'+i);
       if(!container) return;
       container.innerHTML='';
-      const names=Object.keys(filterColorsArr[i]);
+      var names=Object.keys(filterColorsArr[i]);
       if(!names.length){
-        container.innerHTML='<i style="color:var(--text-muted);font-size:0.8rem">No filters</i>';
+        container.innerHTML='<i style="color:var(--text-muted);font-size:0.8rem">No filters detected</i>';
         return;
       }
       names.forEach(name=>{
-        const chip=document.createElement('div');
+        var chip=document.createElement('div');
         chip.className='filter-chip';
-        const lbl=document.createElement('label');
-        lbl.textContent=name;
-        const dot=document.createElement('input');
+        var dot=document.createElement('input');
         dot.type='color';
         dot.className='filter-dot';
         dot.value=filterColorsArr[i][name]||'#ffffff';
         dot.addEventListener('input',()=>{filterColorsArr[i][name]=dot.value;checkDirty();});
+        var lbl=document.createElement('label');
+        lbl.textContent=name;
         chip.appendChild(dot);
         chip.appendChild(lbl);
         container.appendChild(chip);
       });
     }
 
-    /* ---- Node Labels ---- */
+    /* === Node Labels & Instance States === */
     function updateNodeLabels(){
-      const urls=[$('url1').value.trim(),$('url2').value.trim(),$('url3').value.trim()];
-      $$('.sub-tab').forEach((btn,idx)=>{btn.textContent=urls[idx]||'Node '+(idx+1);});
-      for(let n=1;n<=3;n++){
-        const lbl=$('arp_lbl'+n);
-        if(lbl) lbl.textContent=urls[n-1]||'NINA '+n;
-      }
-      for(let i=0;i<3;i++){
-        const lbl=$('inst_lbl_'+i);
-        if(lbl) lbl.textContent=urls[i]||'Node '+(i+1);
+      var urls=[$('url1').value.trim(),$('url2').value.trim(),$('url3').value.trim()];
+      for(var i=0;i<3;i++){
+        var label=urls[i]||('Node '+(i+1));
+        var hostnameSpan=$('node_card_hostname_'+i);
+        if(hostnameSpan) hostnameSpan.textContent=urls[i]?urls[i]:'';
+        var instLbl=$('inst_lbl_'+i);
+        if(instLbl) instLbl.textContent=label;
+        var arpLbl=$('arp_lbl'+(i+1));
+        if(arpLbl) arpLbl.textContent=urls[i]||('NINA '+(i+1));
       }
       updateInstanceStates();
       updatePageSelectOptions();
     }
 
     function updateInstanceStates(){
-      for(let i=0;i<3;i++){
-        const en=$('instance_enabled_'+i).checked;
-        const tabs=$$('.sub-tab');
-        if(tabs[i]) tabs[i].classList.toggle('disabled',!en);
-        const panels=$$('.node-panel');
-        if(panels[i]) panels[i].classList.toggle('disabled',!en);
-        /* Dim auto-rotate checkbox for disabled instances */
-        const arpCb=$('arp_nina'+(i+1));
+      for(var i=0;i<3;i++){
+        var en=$('instance_enabled_'+i).checked;
+        var card=$('node_card_'+i);
+        if(card){
+          if(en) card.classList.remove('node-card-disabled');
+          else card.classList.add('node-card-disabled');
+        }
+        var arpCb=$('arp_nina'+(i+1));
         if(arpCb&&arpCb.parentElement) arpCb.parentElement.style.opacity=en?'':'0.35';
       }
     }
 
     function updatePageSelectOptions(){
-      const sel=$('active_page');
+      var sel=$('active_page');
       if(!sel) return;
-      const urls=[$('url1').value.trim(),$('url2').value.trim(),$('url3').value.trim()];
-      const enabled=[$('instance_enabled_0').checked,$('instance_enabled_1').checked,$('instance_enabled_2').checked];
-      /* Count only enabled instances with a URL — mirrors device page layout */
-      let cnt=0;
-      for(let i=0;i<3;i++){if(urls[i].length>0&&enabled[i]) cnt++;}
-      cnt=cnt||1;
-      const prev=sel.value;
+      var urls=[$('url1').value.trim(),$('url2').value.trim(),$('url3').value.trim()];
+      var enabled=[$('instance_enabled_0').checked,$('instance_enabled_1').checked,$('instance_enabled_2').checked];
+      var prev=sel.value;
       sel.innerHTML='';
       sel.add(new Option('Summary','0'));
-      let pageIdx=1;
-      for(let i=0;i<3;i++){
+      var pageIdx=1;
+      for(var i=0;i<3;i++){
         if(urls[i].length>0&&enabled[i]){
-          sel.add(new Option(urls[i]||'NINA '+(i+1),''+pageIdx));
+          sel.add(new Option(urls[i]||('NINA '+(i+1)),''+pageIdx));
           pageIdx++;
         }
       }
-      sel.add(new Option('Settings',''+pageIdx));
       sel.add(new Option('System Info',''+(pageIdx+1)));
       if([...sel.options].some(o=>o.value===prev)) sel.value=prev;
       else sel.value='0';
     }
 
-    /* ---- Threshold Helpers ---- */
+    /* === Threshold Helpers === */
     function getThreshObj(pfx,i,defGood,defOk){
       return {
         good_max:parseFloat($(pfx+'_good_max_'+i).value)||defGood,
@@ -1161,47 +1093,70 @@
     function getHfrObj(i){return getThreshObj('hfr',i,2.0,3.5)}
 
     function loadThresholds(data,nodeIdx,rmsKey,hfrKey){
-      const rmsDef={good_max:0.5,ok_max:1.0,good_color:'#10b981',ok_color:'#eab308',bad_color:'#ef4444'};
-      const hfrDef={good_max:2.0,ok_max:3.5,good_color:'#10b981',ok_color:'#eab308',bad_color:'#ef4444'};
-      let rms=rmsDef,hfr=hfrDef;
+      var rmsDef={good_max:0.5,ok_max:1.0,good_color:'#10b981',ok_color:'#eab308',bad_color:'#ef4444'};
+      var hfrDef={good_max:2.0,ok_max:3.5,good_color:'#10b981',ok_color:'#eab308',bad_color:'#ef4444'};
+      var rms=Object.assign({},rmsDef),hfr=Object.assign({},hfrDef);
       try{if(data[rmsKey]) rms=Object.assign({},rmsDef,JSON.parse(data[rmsKey]));}catch(e){}
       try{if(data[hfrKey]) hfr=Object.assign({},hfrDef,JSON.parse(data[hfrKey]));}catch(e){}
       ['good_max','ok_max','good_color','ok_color','bad_color'].forEach(k=>{
-        const re=$('rms_'+k+'_'+nodeIdx);
-        const he=$('hfr_'+k+'_'+nodeIdx);
+        var re=$('rms_'+k+'_'+nodeIdx);
+        var he=$('hfr_'+k+'_'+nodeIdx);
         if(re) re.value=rms[k];
         if(he) he.value=hfr[k];
       });
+      updateThresholdBar('rms',nodeIdx);
+      updateThresholdBar('hfr',nodeIdx);
     }
 
-    /* ---- Rotation Page Bitmask ---- */
-    const arpIds=['arp_summary','arp_nina1','arp_nina2','arp_nina3','arp_sysinfo','arp_settings'];
-    const arpBits=[0x01,0x02,0x04,0x08,0x10,0x20];
+    function updateThresholdBar(prefix,nodeIdx){
+      var isRms=prefix==='rms';
+      var defGood=isRms?0.5:2.0;
+      var defOk=isRms?1.0:3.5;
+      var goodVal=parseFloat($(prefix+'_good_max_'+nodeIdx).value)||defGood;
+      var okVal=parseFloat($(prefix+'_ok_max_'+nodeIdx).value)||defOk;
+      var greenFlex=Math.max(goodVal,0.01);
+      var yellowFlex=Math.max(okVal-goodVal,0.01);
+      var redFlex=Math.max(okVal*0.5,yellowFlex,0.01);
+      var segGood=$(prefix+'_seg_good_'+nodeIdx);
+      var segOk=$(prefix+'_seg_ok_'+nodeIdx);
+      var segBad=$(prefix+'_seg_bad_'+nodeIdx);
+      if(segGood) segGood.style.flex=''+greenFlex;
+      if(segOk)   segOk.style.flex=''+yellowFlex;
+      if(segBad)  segBad.style.flex=''+redFlex;
+      var labelsEl=$(prefix+'_labels_'+nodeIdx);
+      if(labelsEl){
+        labelsEl.innerHTML='<span>0.0</span><span>'+goodVal.toFixed(1)+' (Good)</span><span>'+okVal.toFixed(1)+' (Warn)</span><span>Bad</span>';
+      }
+    }
+
+    /* === Rotation Bitmask === */
+    const arpIds=['arp_summary','arp_nina1','arp_nina2','arp_nina3','arp_sysinfo'];
+    const arpBits=[0x01,0x02,0x04,0x08,0x10];
 
     function getRotatePages(){
-      let mask=0;
+      var mask=0;
       arpIds.forEach((id,i)=>{if($(id).checked) mask|=arpBits[i];});
       return mask;
     }
-
     function setRotatePages(mask){
       arpIds.forEach((id,i)=>{$(id).checked=!!(mask&arpBits[i]);});
     }
 
-    /* ---- Config Data Assembly ---- */
+    /* === Config Data Assembly === */
     function getConfigData(){
-      const host1=$('url1').value.trim();
-      const host2=$('url2').value.trim();
-      const host3=$('url3').value.trim();
-      const mqttHost=$('mqtt_broker').value.trim();
-      const mkUrl=h=>h?'http://'+h+':1888/v2/api/':'';
+      var host1=$('url1').value.trim();
+      var host2=$('url2').value.trim();
+      var host3=$('url3').value.trim();
+      var mqttHost=$('mqtt_broker').value.trim();
+      var mkUrl=h=>h?'http://'+h+':1888/v2/api/':'';
 
-      const data={
+      var data={
         url1:mkUrl(host1),url2:mkUrl(host2),url3:mkUrl(host3),
         ntp:$('ntp').value.trim(),
         timezone:$('timezone').value,
         theme_index:parseInt($('theme_select').value),
         widget_style:parseInt($('widget_style_select').value),
+        screen_rotation:parseInt($('screen_rotation_select').value),
         brightness:parseInt($('brightness').value),
         color_brightness:parseInt($('color_brightness').value),
         filter_colors_1:JSON.stringify(filterColorsArr[0]),
@@ -1237,20 +1192,22 @@
         screen_sleep_timeout_s:parseInt($('screen_sleep_timeout').value)||60,
         idle_poll_interval_s:parseInt($('idle_poll_interval').value)||30,
         wifi_power_save:!!$('wifi_power_save').checked,
+        deep_sleep_enabled:!!$('deep_sleep_enabled').checked,
+        deep_sleep_wake_timer_s:(parseInt($('deep_sleep_wake_timer').value)||0)*3600,
+        deep_sleep_on_idle:!!$('deep_sleep_on_idle').checked,
         alert_flash_enabled:!!$('alert_flash_enabled').checked,
         auto_update_check:!!$('auto_update_check').checked,
         update_channel:parseInt($('update_channel').value)||0
       };
 
-      const ssid=$('ssid').value.trim();
-      const pass=$('pass').value;
+      var ssid=$('ssid').value.trim();
+      var pass=$('pass').value;
       if(ssid) data.ssid=ssid;
       if(pass) data.pass=pass;
-
       return data;
     }
 
-    /* ---- Config Load ---- */
+    /* === Config Load === */
     let loadedConfig='';
     let _populating=false;
 
@@ -1262,7 +1219,7 @@
 
       function extractHost(url){
         if(!url) return '';
-        const m=url.match(/^https?:\/\/([^:/]+)/);
+        var m=url.match(/^https?:\/\/([^:/]+)/);
         return m?m[1]:'';
       }
 
@@ -1272,10 +1229,11 @@
 
       $('theme_select').value=data.theme_index||0;
       $('widget_style_select').value=data.widget_style||0;
-      const br=data.brightness!=null?data.brightness:80;
+      $('screen_rotation_select').value=data.screen_rotation||0;
+      var br=data.brightness!=null?data.brightness:80;
       $('brightness').value=br;
       $('brightness_val').textContent=br+'%';
-      const cb=data.color_brightness!=null?data.color_brightness:80;
+      var cb=data.color_brightness!=null?data.color_brightness:80;
       $('color_brightness').value=cb;
       $('color_brightness_val').textContent=cb+'%';
       $('update_rate').value=data.update_rate_s||2;
@@ -1290,12 +1248,15 @@
       $('screen_sleep_timeout').value=data.screen_sleep_timeout_s||60;
       $('idle_poll_interval').value=data.idle_poll_interval_s||30;
       $('wifi_power_save').checked=data.wifi_power_save!==false;
+      $('deep_sleep_enabled').checked=!!data.deep_sleep_enabled;
+      $('deep_sleep_wake_timer').value=Math.round((data.deep_sleep_wake_timer_s||0)/3600);
+      $('deep_sleep_on_idle').checked=!!data.deep_sleep_on_idle;
       $('alert_flash_enabled').checked=data.alert_flash_enabled!==false;
       $('auto_update_check').checked=data.auto_update_check!==false;
       $('update_channel').value=data.update_channel||0;
 
-      for(let i=0;i<3;i++){
-        const key='filter_colors_'+(i+1);
+      for(var i=0;i<3;i++){
+        var key='filter_colors_'+(i+1);
         try{filterColorsArr[i]=data[key]?JSON.parse(data[key]):{};}catch(e){filterColorsArr[i]={};}
         renderFilterColors(i);
       }
@@ -1304,8 +1265,8 @@
       loadThresholds(data,1,'rms_thresholds_2','hfr_thresholds_2');
       loadThresholds(data,2,'rms_thresholds_3','hfr_thresholds_3');
 
-      const mqttUrl=data.mqtt_broker_url||'';
-      const mqttMatch=mqttUrl.match(/^mqtt:\/\/(.+)/);
+      var mqttUrl=data.mqtt_broker_url||'';
+      var mqttMatch=mqttUrl.match(/^mqtt:\/\/(.+)/);
       $('mqtt_broker').value=mqttMatch?mqttMatch[1]:'';
       $('mqtt_port').value=data.mqtt_port||1883;
       $('mqtt_user').value=data.mqtt_username||'';
@@ -1313,7 +1274,6 @@
       $('mqtt_prefix').value=data.mqtt_topic_prefix||'';
       $('mqtt_enabled').checked=!!data.mqtt_enabled;
 
-      /* Page mode: derive from active_page_override + auto_rotate_enabled */
       var pageMode='auto';
       if(data.auto_rotate_enabled) pageMode='rotate';
       else if(data.active_page_override!=null&&data.active_page_override>=0) pageMode='fixed';
@@ -1332,7 +1292,7 @@
       loadedConfig=JSON.stringify(getConfigData());
       _populating=false;
       if(data._dirty){
-        loadedConfig='';  // Force dirty state — unsaved changes exist on device
+        loadedConfig='';
       }
       checkDirty();
     }
@@ -1341,7 +1301,7 @@
       fetch('/api/config').then(r=>r.json()).then(populateConfig).catch(e=>console.error('Failed to load config',e));
     }
 
-    /* ---- Version Load ---- */
+    /* === Version Load === */
     function loadVersion(){
       fetch('/api/version').then(r=>r.json()).then(data=>{
         $('fw_version').textContent=data.version||'--';
@@ -1349,29 +1309,25 @@
         $('fw_idf').textContent=data.idf_version||'--';
         $('fw_partition').textContent=data.partition||'--';
 
-        const ghBase='https://github.com/chvvkumar/ESP32-P4-NINA-Display/';
-        const tagEl=$('fw_git_tag');
+        var ghBase='https://github.com/chvvkumar/ESP32-P4-NINA-Display/';
+        var tagEl=$('fw_git_tag');
         tagEl.textContent='';
         if(data.git_tag&&data.git_tag!=='unknown'){
-          const a=document.createElement('a');
+          var a=document.createElement('a');
           a.href=ghBase+'releases/tag/'+encodeURIComponent(data.git_tag);
-          a.target='_blank';
-          a.rel='noopener';
-          a.className='accent-link';
+          a.target='_blank'; a.rel='noopener'; a.className='accent-link';
           a.textContent=data.git_tag;
           tagEl.appendChild(a);
         }else{
           tagEl.textContent=data.git_tag||'--';
         }
 
-        const shaEl=$('fw_git_sha');
+        var shaEl=$('fw_git_sha');
         shaEl.textContent='';
         if(data.git_sha&&data.git_sha!=='unknown'){
-          const a=document.createElement('a');
+          var a=document.createElement('a');
           a.href=ghBase+'commit/'+encodeURIComponent(data.git_sha);
-          a.target='_blank';
-          a.rel='noopener';
-          a.className='mono-link';
+          a.target='_blank'; a.rel='noopener'; a.className='mono-link';
           a.textContent=data.git_sha.substring(0,8);
           shaEl.appendChild(a);
         }else{
@@ -1380,20 +1336,19 @@
       }).catch(e=>console.error('Failed to load version',e));
     }
 
-    /* ---- Toast ---- */
+    /* === Toast === */
     function showToast(msg,type){
-      const t=$('toast');
+      var t=$('toast');
       t.textContent=msg;
       t.className='toast '+(type||'')+' show';
       clearTimeout(t._timer);
       t._timer=setTimeout(()=>{t.classList.remove('show');},3000);
     }
 
-    /* ---- Save ---- */
+    /* === Save / Discard / Reboot / Reset === */
     function save(){
-      const btn=$('saveBtn');
-      btn.disabled=true;
-      btn.textContent='Saving...';
+      var btn=$('saveBtn');
+      btn.disabled=true; btn.textContent='Saving...';
       postJson('/api/config',getConfigData()).then(r=>{
         if(!r.ok) throw new Error('Save failed');
         return r.text();
@@ -1404,8 +1359,7 @@
       }).catch(e=>{
         showToast('Save failed: '+e.message,'error');
       }).finally(()=>{
-        btn.disabled=false;
-        btn.textContent='Save';
+        btn.disabled=false; btn.textContent='Save';
       });
     }
 
@@ -1417,7 +1371,6 @@
       }).catch(e=>showToast('Discard failed: '+e.message,'error'));
     }
 
-    /* ---- Save and Reboot ---- */
     function saveAndReboot(){
       if(!confirm('Apply changes and reboot now?')) return;
       postJson('/api/config',getConfigData()).then(r=>{
@@ -1430,7 +1383,6 @@
       });
     }
 
-    /* ---- Factory Reset ---- */
     function factoryReset(){
       if(!confirm('Wipe all settings?')) return;
       if(!confirm('Confirm Reset?')) return;
@@ -1441,9 +1393,9 @@
       });
     }
 
-    /* ---- OTA ---- */
+    /* === OTA === */
     function otaFileSelected(input){
-      const label=$('otaFileLabel');
+      var label=$('otaFileLabel');
       if(input.files.length>0){
         label.textContent=input.files[0].name;
         label.classList.add('has-file');
@@ -1458,11 +1410,11 @@
     }
 
     function checkForUpdates(){
-      const btn=$('checkUpdateBtn');
+      var btn=$('checkUpdateBtn');
       btn.disabled=true; btn.textContent='Checking...';
-      fetch('/api/check-update',{method:'POST'}).then(r=>{
-        btn.textContent='Check requested — see device screen';
-        setTimeout(()=>{ btn.disabled=false; btn.textContent='Check for Updates'; },5000);
+      fetch('/api/check-update',{method:'POST'}).then(()=>{
+        btn.textContent='Check requested \u2014 see device screen';
+        setTimeout(()=>{btn.disabled=false;btn.textContent='Check for Updates';},5000);
       }).catch(()=>{
         btn.disabled=false; btn.textContent='Check for Updates';
         alert('Failed to reach device');
@@ -1470,33 +1422,28 @@
     }
 
     function startOta(){
-      const fileInput=$('otaFile');
+      var fileInput=$('otaFile');
       if(!fileInput.files.length) return;
       if(!confirm('Flash new firmware? The device will reboot after update.')) return;
-
-      const file=fileInput.files[0];
-      const progressDiv=$('otaProgress');
-      const fill=$('otaProgressFill');
-      const status=$('otaStatus');
-      const btn=$('otaBtn');
-
+      var file=fileInput.files[0];
+      var progressDiv=$('otaProgress');
+      var fill=$('otaProgressFill');
+      var status=$('otaStatus');
+      var btn=$('otaBtn');
       progressDiv.style.display='block';
       btn.disabled=true;
       fill.style.width='0%';
       status.textContent='Uploading...';
-
-      const xhr=new XMLHttpRequest();
+      var xhr=new XMLHttpRequest();
       xhr.open('POST','/api/ota',true);
       xhr.setRequestHeader('Content-Type','application/octet-stream');
-
       xhr.upload.addEventListener('progress',function(e){
         if(e.lengthComputable){
-          const pct=Math.round((e.loaded/e.total)*100);
+          var pct=Math.round((e.loaded/e.total)*100);
           fill.style.width=pct+'%';
           status.textContent='Uploading... '+pct+'%';
         }
       });
-
       xhr.addEventListener('load',function(){
         if(xhr.status>=200&&xhr.status<300){
           fill.style.width='100%';
@@ -1508,21 +1455,18 @@
           btn.disabled=false;
         }
       });
-
       xhr.addEventListener('error',function(){
         status.textContent='Upload error';
         showToast('OTA upload error','error');
         btn.disabled=false;
       });
-
       xhr.send(file);
     }
 
-    /* ---- Screenshot ---- */
+    /* === Screenshot === */
     function takeScreenshot(){
       var btn=$('ssBtn');
-      btn.disabled=true;
-      btn.textContent='Capturing...';
+      btn.disabled=true; btn.textContent='Capturing...';
       fetch('/api/screenshot').then(function(r){
         if(!r.ok) throw new Error('Screenshot failed');
         return r.blob();
@@ -1533,29 +1477,27 @@
         img._prevUrl=url;
         img.src=url;
         $('ssContainer').style.display='block';
-        btn.textContent='Capture screenshot';
-        btn.disabled=false;
+        btn.textContent='Capture Screenshot'; btn.disabled=false;
       }).catch(function(e){
         showToast('Screenshot failed','error');
-        btn.textContent='Capture screenshot';
-        btn.disabled=false;
+        btn.textContent='Capture Screenshot'; btn.disabled=false;
       });
     }
 
-    /* ---- Dirty State Detection ---- */
+    /* === Dirty State Detection === */
     function checkDirty(){
       if(_populating) return;
-      const dirty=JSON.stringify(getConfigData())!==loadedConfig;
+      var dirty=JSON.stringify(getConfigData())!==loadedConfig;
       $('saveBar').classList.toggle('visible',dirty);
     }
 
-    /* ---- Live Apply (debounced) ---- */
+    /* === Live Apply (Debounced) === */
     let _applyTimer=null;
     function liveApply(){
       if(_populating) return;
       clearTimeout(_applyTimer);
       _applyTimer=setTimeout(()=>{
-        const data=getConfigData();
+        var data=getConfigData();
         delete data.ssid;
         delete data.pass;
         postJson('/api/config/apply',data).catch(e=>console.error('Live apply failed:',e));
@@ -1565,7 +1507,7 @@
     document.querySelector('.content').addEventListener('input',()=>{checkDirty();liveApply();});
     document.querySelector('.content').addEventListener('change',()=>{checkDirty();liveApply();});
 
-    /* ---- Init ---- */
+    /* === Init === */
     loadConfig();
     loadVersion();
   </script>

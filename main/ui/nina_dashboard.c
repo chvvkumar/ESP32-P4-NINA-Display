@@ -13,7 +13,7 @@
 #include "nina_info_overlay.h"
 #include "nina_sysinfo.h"
 #include "nina_summary.h"
-#include "nina_settings.h"
+#include "nina_settings_tabview.h"
 #include "nina_toast.h"
 #include "nina_event_log.h"
 #include "nina_alerts.h"
@@ -146,7 +146,7 @@ static void show_page_at(int idx) {
         lv_obj_clear_flag(pages[idx - 1].page, LV_OBJ_FLAG_HIDDEN);
     else if (idx == page_count + 1 && settings_obj) {
         lv_obj_clear_flag(settings_obj, LV_OBJ_FLAG_HIDDEN);
-        settings_page_refresh();
+        settings_tabview_refresh();
     }
     else if (idx == page_count + 2 && sysinfo_obj) {
         lv_obj_clear_flag(sysinfo_obj, LV_OBJ_FLAG_HIDDEN);
@@ -227,7 +227,7 @@ void nina_dashboard_apply_theme(int theme_index) {
     }
 
     summary_page_apply_theme();
-    settings_page_apply_theme();
+    settings_tabview_apply_theme();
     sysinfo_page_apply_theme();
     nina_graph_overlay_apply_theme();
     nina_info_overlay_apply_theme();
@@ -627,10 +627,14 @@ static void gesture_event_cb(lv_event_t *e) {
     lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
     int new_page = active_page;
 
+    int settings_idx = page_count + 1;  /* settings page — skip in swipe navigation */
+
     if (dir == LV_DIR_LEFT) {
         new_page = (active_page + 1) % total_page_count;
+        if (new_page == settings_idx) new_page = (new_page + 1) % total_page_count;
     } else if (dir == LV_DIR_RIGHT) {
         new_page = (active_page - 1 + total_page_count) % total_page_count;
+        if (new_page == settings_idx) new_page = (new_page - 1 + total_page_count) % total_page_count;
     } else {
         return;
     }
@@ -736,7 +740,7 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     }
 
     /* Settings page — page index page_count+1, hidden initially */
-    settings_obj = settings_page_create(main_cont);
+    settings_obj = settings_tabview_create(main_cont);
     lv_obj_add_flag(settings_obj, LV_OBJ_FLAG_HIDDEN);
 
     /* System info page — always last (page index page_count+2), hidden initially */
