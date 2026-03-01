@@ -32,6 +32,7 @@
 #include "esp_system.h"
 #include <time.h>
 #include "perf_monitor.h"
+#include "power_mgmt.h"
 
 static const char *TAG = "tasks";
 
@@ -68,52 +69,105 @@ void on_page_changed(int new_page) {
     }
 }
 
+static void IRAM_ATTR boot_button_isr_handler(void *arg)
+{
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    vTaskNotifyGiveFromISR((TaskHandle_t)arg, &xHigherPriorityTaskWoken);
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
 void input_task(void *arg) {
     gpio_config_t io_conf = {
         .pin_bit_mask = (1ULL << BOOT_BUTTON_GPIO),
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_ENABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE
+        .intr_type = GPIO_INTR_NEGEDGE
     };
     gpio_config(&io_conf);
 
-    int last_level = 1;
-    int64_t last_press_ms = 0;
+    /* Install GPIO ISR service and register falling-edge handler */
+    gpio_install_isr_service(0);
+    gpio_isr_handler_add(BOOT_BUTTON_GPIO, boot_button_isr_handler, (void *)xTaskGetCurrentTaskHandle());
 
     while (1) {
-        int level = gpio_get_level(BOOT_BUTTON_GPIO);
-        if (level == 0 && last_level == 1) {
-            int64_t now_ms = esp_timer_get_time() / 1000;
-            if (now_ms - last_press_ms > DEBOUNCE_MS) {
-                last_press_ms = now_ms;
+        /* Block until button press ISR fires */
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
-                /* Wake screen first if asleep — don't switch pages while dark */
-                if (screen_asleep) {
-                    screen_touch_wake = true;
-                    ESP_LOGI(TAG, "Button: waking screen");
-                } else {
-                    int total = nina_dashboard_get_total_page_count();
-                    int current = nina_dashboard_get_active_page();
-                    int new_page = (current + 1) % total;
-                    ESP_LOGI(TAG, "Button: switching to page %d", new_page);
+        /* Debounce — wait 50ms then verify still pressed */
+        vTaskDelay(pdMS_TO_TICKS(50));
+        if (gpio_get_level(BOOT_BUTTON_GPIO) != 0) {
+            continue;  /* Noise, ignore */
+        }
 
-                    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                        nina_dashboard_show_page(new_page, total);
-                        bsp_display_unlock();
-                    } else {
-                        ESP_LOGW(TAG, "Display lock timeout (button page switch)");
-                    }
+        /* Check if screen is asleep — wake it */
+        if (screen_asleep) {
+            screen_touch_wake = true;
+            ESP_LOGI(TAG, "Button: waking screen");
+            /* Wait for button release */
+            while (gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
+                vTaskDelay(pdMS_TO_TICKS(50));
+            }
+            continue;
+        }
 
-                    page_changed = true;
-                }
+        /* Track press duration for long-press detection */
+        TickType_t press_start = xTaskGetTickCount();
+        bool long_pressed = false;
+
+        while (gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
+            vTaskDelay(pdMS_TO_TICKS(50));
+            if ((xTaskGetTickCount() - press_start) >= pdMS_TO_TICKS(3000)) {
+                long_pressed = true;
+                break;
             }
         }
-        last_level = level;
+
+        if (long_pressed && app_config_get()->deep_sleep_enabled) {
+            /* Long press — enter deep sleep */
+            ESP_LOGI(TAG, "Long press detected — entering deep sleep");
+
+            /* Get current page before sleeping */
+            int current_page = nina_dashboard_get_active_page();
+
+            /* Stop LVGL processing */
+            lvgl_port_lock(0);
+            lvgl_port_stop();
+            lvgl_port_unlock();
+
+            /* Turn off backlight — use LEDC directly for true 0% */
+            ledc_set_duty(LEDC_LOW_SPEED_MODE, CONFIG_BSP_DISPLAY_BRIGHTNESS_LEDC_CH, 0);
+            ledc_update_duty(LEDC_LOW_SPEED_MODE, CONFIG_BSP_DISPLAY_BRIGHTNESS_LEDC_CH);
+
+            /* Small delay for visual feedback */
+            vTaskDelay(pdMS_TO_TICKS(500));
+
+            /* Enter deep sleep — does not return */
+            power_mgmt_enter_deep_sleep(
+                app_config_get()->deep_sleep_wake_timer_s,
+                current_page
+            );
+        } else if (!long_pressed) {
+            /* Short press — cycle page */
+            int total = nina_dashboard_get_total_page_count();
+            int current = nina_dashboard_get_active_page();
+            int new_page = (current + 1) % total;
+            ESP_LOGI(TAG, "Button: switching to page %d", new_page);
+
+            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                nina_dashboard_show_page(new_page, total);
+                bsp_display_unlock();
+            } else {
+                ESP_LOGW(TAG, "Display lock timeout (button page switch)");
+            }
+
+            page_changed = true;
+        }
+
+        /* Record stack high water mark if perf monitoring is enabled */
         if (g_perf.enabled) {
             g_perf.input_task_stack_hwm = uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t);
         }
-        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 
@@ -1008,6 +1062,13 @@ void data_update_task(void *arg) {
 
                 /* Touch wake — always check first, even if connections are back */
                 if (screen_asleep && screen_touch_wake) {
+                    /* Restore WiFi power save mode */
+                    esp_wifi_set_ps(sl_cfg->wifi_power_save ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE);
+                    /* Resume LVGL processing */
+                    lvgl_port_lock(0);
+                    lvgl_port_resume();
+                    lv_obj_invalidate(lv_scr_act());
+                    lvgl_port_unlock();
                     bsp_display_brightness_set(sl_cfg->brightness);
                     screen_asleep = false;
                     screen_touch_wake = false;
@@ -1021,6 +1082,13 @@ void data_update_task(void *arg) {
                 if (connected > 0) {
                     all_disconnected_since_ms = 0;
                     if (screen_asleep) {
+                        /* Restore WiFi power save mode */
+                        esp_wifi_set_ps(sl_cfg->wifi_power_save ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE);
+                        /* Resume LVGL processing */
+                        lvgl_port_lock(0);
+                        lvgl_port_resume();
+                        lv_obj_invalidate(lv_scr_act());
+                        lvgl_port_unlock();
                         bsp_display_brightness_set(sl_cfg->brightness);
                         screen_asleep = false;
                         /* Wake poll tasks so they resume full polling + WS reconnect */
@@ -1045,18 +1113,48 @@ void data_update_task(void *arg) {
                         /* Disconnect WebSockets to save network resources while sleeping */
                         for (int i = 0; i < instance_count; i++)
                             nina_websocket_stop(i);
+                        /* Stop LVGL processing during screen sleep */
+                        lvgl_port_lock(0);
+                        lvgl_port_stop();
+                        lvgl_port_unlock();
+                        /* Deeper WiFi power save during screen sleep */
+                        esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
                         ESP_LOGI(TAG, "Screen sleep: no NINA connections for %ds",
                                  sl_cfg->screen_sleep_timeout_s);
                     }
                 }
             } else if (screen_asleep) {
                 /* Feature disabled while asleep — wake up */
+                /* Restore WiFi power save mode */
+                esp_wifi_set_ps(sl_cfg->wifi_power_save ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE);
+                /* Resume LVGL processing */
+                lvgl_port_lock(0);
+                lvgl_port_resume();
+                lv_obj_invalidate(lv_scr_act());
+                lvgl_port_unlock();
                 bsp_display_brightness_set(sl_cfg->brightness);
                 screen_asleep = false;
                 all_disconnected_since_ms = 0;
                 for (int i = 0; i < instance_count; i++)
                     if (poll_task_handles[i]) xTaskNotifyGive(poll_task_handles[i]);
                 ESP_LOGI(TAG, "Screen wake: sleep feature disabled");
+            }
+        }
+
+        /* ── Auto deep sleep when idle (if enabled) ── */
+        if (app_config_get()->deep_sleep_on_idle && app_config_get()->deep_sleep_enabled) {
+            if (screen_asleep && all_disconnected_since_ms > 0) {
+                uint32_t idle_duration_ms = (uint32_t)(esp_timer_get_time() / 1000) - (uint32_t)all_disconnected_since_ms;
+                uint32_t idle_threshold_ms = (uint32_t)app_config_get()->screen_sleep_timeout_s * 2 * 1000; /* 2x screen sleep timeout */
+                if (idle_duration_ms > idle_threshold_ms) {
+                    ESP_LOGI(TAG, "Auto deep sleep after extended idle (%lu ms)", (unsigned long)idle_duration_ms);
+                    int current_page = nina_dashboard_get_active_page();
+                    power_mgmt_enter_deep_sleep(
+                        app_config_get()->deep_sleep_wake_timer_s,
+                        current_page
+                    );
+                    /* Does not return */
+                }
             }
         }
 

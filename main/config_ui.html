@@ -557,6 +557,15 @@
           </select>
         </div>
         <div class="field">
+          <label class="field-label">Screen Rotation</label>
+          <select class="input" id="screen_rotation_select" onchange="setScreenRotation(this.value)">
+            <option value="0">0° (Default)</option>
+            <option value="1">90°</option>
+            <option value="2">180°</option>
+            <option value="3">270°</option>
+          </select>
+        </div>
+        <div class="field">
           <label class="field-label">Backlight</label>
           <div class="slider-group">
             <input type="range" class="slider" id="brightness" min="0" max="100" value="80" oninput="setBrightness(this.value)">
@@ -851,6 +860,30 @@
         </div>
       </div>
       <div class="card">
+        <div class="card-title card-title-collapsible" onclick="toggleCollapsible('dslp')">
+          Deep Sleep / Power Off
+          <span class="card-chevron collapsed" id="dslp_chevron">&#9660;</span>
+        </div>
+        <div class="card-body-collapsible collapsed" id="dslp_body">
+        <div class="toggle-row">
+          <span class="toggle-label">Enable deep sleep (long-press BOOT button to power off)</span>
+          <label class="toggle"><input type="checkbox" id="deep_sleep_enabled"><span class="toggle-track"></span></label>
+        </div>
+        <div id="deep_sleep_details" style="margin-top:12px">
+          <div class="field">
+            <label class="field-label">Wake timer (hours)</label>
+            <input type="number" class="input" id="deep_sleep_wake_timer" min="0" max="72" step="1" value="0">
+            <div class="field-hint">Hours until the device automatically wakes from deep sleep. Set to 0 to stay asleep until manually woken (e.g. by pressing BOOT button or power cycle).</div>
+          </div>
+          <div class="toggle-row" style="margin-top:8px">
+            <span class="toggle-label">Auto power off when idle</span>
+            <label class="toggle"><input type="checkbox" id="deep_sleep_on_idle"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint" style="margin-top:4px">Automatically enter deep sleep after extended disconnection from all NINA instances.</div>
+        </div>
+        </div>
+      </div>
+      <div class="card">
         <div class="card-title card-title-collapsible" onclick="toggleCollapsible('dbg')">
           Debug
           <span class="card-chevron collapsed" id="dbg_chevron">&#9660;</span>
@@ -1001,6 +1034,7 @@
 
     function setTheme(v){postJson('/api/theme',{theme_index:parseInt(v)})}
     function setWidgetStyle(v){postJson('/api/widget-style',{widget_style:parseInt(v)})}
+    function setScreenRotation(v){postJson('/api/screen-rotation',{screen_rotation:parseInt(v)})}
 
     let _brightTimer=null;
     function setBrightness(v){
@@ -1202,6 +1236,7 @@
         timezone:$('timezone').value,
         theme_index:parseInt($('theme_select').value),
         widget_style:parseInt($('widget_style_select').value),
+        screen_rotation:parseInt($('screen_rotation_select').value),
         brightness:parseInt($('brightness').value),
         color_brightness:parseInt($('color_brightness').value),
         filter_colors_1:JSON.stringify(filterColorsArr[0]),
@@ -1237,6 +1272,9 @@
         screen_sleep_timeout_s:parseInt($('screen_sleep_timeout').value)||60,
         idle_poll_interval_s:parseInt($('idle_poll_interval').value)||30,
         wifi_power_save:!!$('wifi_power_save').checked,
+        deep_sleep_enabled:!!$('deep_sleep_enabled').checked,
+        deep_sleep_wake_timer_s:(parseInt($('deep_sleep_wake_timer').value)||0)*3600,
+        deep_sleep_on_idle:!!$('deep_sleep_on_idle').checked,
         alert_flash_enabled:!!$('alert_flash_enabled').checked,
         auto_update_check:!!$('auto_update_check').checked,
         update_channel:parseInt($('update_channel').value)||0
@@ -1272,6 +1310,7 @@
 
       $('theme_select').value=data.theme_index||0;
       $('widget_style_select').value=data.widget_style||0;
+      $('screen_rotation_select').value=data.screen_rotation||0;
       const br=data.brightness!=null?data.brightness:80;
       $('brightness').value=br;
       $('brightness_val').textContent=br+'%';
@@ -1290,6 +1329,9 @@
       $('screen_sleep_timeout').value=data.screen_sleep_timeout_s||60;
       $('idle_poll_interval').value=data.idle_poll_interval_s||30;
       $('wifi_power_save').checked=data.wifi_power_save!==false;
+      $('deep_sleep_enabled').checked=!!data.deep_sleep_enabled;
+      $('deep_sleep_wake_timer').value=Math.round((data.deep_sleep_wake_timer_s||0)/3600);
+      $('deep_sleep_on_idle').checked=!!data.deep_sleep_on_idle;
       $('alert_flash_enabled').checked=data.alert_flash_enabled!==false;
       $('auto_update_check').checked=data.auto_update_check!==false;
       $('update_channel').value=data.update_channel||0;

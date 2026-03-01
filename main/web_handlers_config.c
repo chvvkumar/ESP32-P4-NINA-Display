@@ -78,8 +78,12 @@ esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddBoolToObject(root, "alert_flash_enabled", cfg->alert_flash_enabled);
     cJSON_AddNumberToObject(root, "idle_poll_interval_s", cfg->idle_poll_interval_s);
     cJSON_AddBoolToObject(root, "wifi_power_save", cfg->wifi_power_save);
+    cJSON_AddBoolToObject(root, "deep_sleep_enabled", cfg->deep_sleep_enabled);
+    cJSON_AddNumberToObject(root, "deep_sleep_wake_timer_s", cfg->deep_sleep_wake_timer_s);
+    cJSON_AddBoolToObject(root, "deep_sleep_on_idle", cfg->deep_sleep_on_idle);
     cJSON_AddBoolToObject(root, "auto_update_check", cfg->auto_update_check);
     cJSON_AddNumberToObject(root, "update_channel", cfg->update_channel);
+    cJSON_AddNumberToObject(root, "screen_rotation", cfg->screen_rotation);
     cJSON_AddBoolToObject(root, "_dirty", app_config_is_dirty());
 
     const char *json_str = cJSON_PrintUnformatted(root);
@@ -293,6 +297,17 @@ static app_config_t *parse_config_from_json(cJSON *root)
 
     JSON_TO_BOOL(root, "wifi_power_save", cfg->wifi_power_save);
 
+    JSON_TO_BOOL(root, "deep_sleep_enabled", cfg->deep_sleep_enabled);
+    JSON_TO_BOOL(root, "deep_sleep_on_idle", cfg->deep_sleep_on_idle);
+
+    cJSON *dswt_item = cJSON_GetObjectItem(root, "deep_sleep_wake_timer_s");
+    if (cJSON_IsNumber(dswt_item)) {
+        int v = dswt_item->valueint;
+        if (v < 0) v = 0;
+        if (v > 259200) v = 259200;  // max 72 hours in seconds
+        cfg->deep_sleep_wake_timer_s = (uint32_t)v;
+    }
+
     cJSON *auto_update = cJSON_GetObjectItem(root, "auto_update_check");
     if (cJSON_IsBool(auto_update)) {
         cfg->auto_update_check = cJSON_IsTrue(auto_update) ? 1 : 0;
@@ -301,6 +316,14 @@ static app_config_t *parse_config_from_json(cJSON *root)
     if (cJSON_IsNumber(update_ch)) {
         int v = update_ch->valueint;
         cfg->update_channel = (v == 1) ? 1 : 0;
+    }
+
+    cJSON *rot_item = cJSON_GetObjectItem(root, "screen_rotation");
+    if (cJSON_IsNumber(rot_item)) {
+        int v = rot_item->valueint;
+        if (v < 0) v = 0;
+        if (v > 3) v = 3;
+        cfg->screen_rotation = (uint8_t)v;
     }
 
     return cfg;
