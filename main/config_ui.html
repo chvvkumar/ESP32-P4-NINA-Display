@@ -557,6 +557,15 @@
           </select>
         </div>
         <div class="field">
+          <label class="field-label">Screen Rotation</label>
+          <select class="input" id="screen_rotation_select" onchange="setScreenRotation(this.value)">
+            <option value="0">0° (Default)</option>
+            <option value="1">90°</option>
+            <option value="2">180°</option>
+            <option value="3">270°</option>
+          </select>
+        </div>
+        <div class="field">
           <label class="field-label">Backlight</label>
           <div class="slider-group">
             <input type="range" class="slider" id="brightness" min="0" max="100" value="80" oninput="setBrightness(this.value)">
@@ -1025,6 +1034,7 @@
 
     function setTheme(v){postJson('/api/theme',{theme_index:parseInt(v)})}
     function setWidgetStyle(v){postJson('/api/widget-style',{widget_style:parseInt(v)})}
+    function setScreenRotation(v){postJson('/api/screen-rotation',{screen_rotation:parseInt(v)})}
 
     let _brightTimer=null;
     function setBrightness(v){
@@ -1226,6 +1236,7 @@
         timezone:$('timezone').value,
         theme_index:parseInt($('theme_select').value),
         widget_style:parseInt($('widget_style_select').value),
+        screen_rotation:parseInt($('screen_rotation_select').value),
         brightness:parseInt($('brightness').value),
         color_brightness:parseInt($('color_brightness').value),
         filter_colors_1:JSON.stringify(filterColorsArr[0]),
@@ -1299,6 +1310,7 @@
 
       $('theme_select').value=data.theme_index||0;
       $('widget_style_select').value=data.widget_style||0;
+      $('screen_rotation_select').value=data.screen_rotation||0;
       const br=data.brightness!=null?data.brightness:80;
       $('brightness').value=br;
       $('brightness_val').textContent=br+'%';
