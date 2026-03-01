@@ -151,7 +151,9 @@ void input_task(void *arg) {
             /* Short press — cycle page */
             int total = nina_dashboard_get_total_page_count();
             int current = nina_dashboard_get_active_page();
+            int settings_idx = total - 2;  /* settings page — skip in button navigation */
             int new_page = (current + 1) % total;
+            if (new_page == settings_idx) new_page = (new_page + 1) % total;
             ESP_LOGI(TAG, "Button: switching to page %d", new_page);
 
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
@@ -705,7 +707,7 @@ void data_update_task(void *arg) {
                                 in_mask = (page_mask & (1 << (inst + 1))) != 0; /* NINA page */
                         }
                         else if (candidate == ena_page_count + 1)
-                            in_mask = (page_mask & 0x20) != 0;             /* Settings */
+                            in_mask = false;                               /* Settings — never in rotation */
                         else if (candidate == ena_page_count + 2)
                             in_mask = (page_mask & 0x10) != 0;             /* Sysinfo */
 
@@ -1103,6 +1105,50 @@ void data_update_task(void *arg) {
                     }
                     if (!screen_asleep &&
                         (now_ms - all_disconnected_since_ms >= (int64_t)sl_cfg->screen_sleep_timeout_s * 1000)) {
+                        /* Show "Sleeping..." message briefly before turning off */
+                        lvgl_port_lock(0);
+                        {
+                            lv_obj_t *scr = lv_scr_act();
+                            /* Black overlay covers entire screen */
+                            lv_obj_t *overlay = lv_obj_create(scr);
+                            lv_obj_remove_style_all(overlay);
+                            lv_obj_set_size(overlay, 720, 720);
+                            lv_obj_set_style_bg_color(overlay, lv_color_black(), 0);
+                            lv_obj_set_style_bg_opa(overlay, LV_OPA_COVER, 0);
+                            lv_obj_center(overlay);
+                            /* "Sleeping..." label — same size as "No Connections",
+                             * same color as "Waiting for NINA connections" */
+                            lv_obj_t *lbl = lv_label_create(overlay);
+                            lv_label_set_text(lbl, "Sleeping...");
+                            lv_obj_set_style_text_font(lbl, &lv_font_montserrat_32, 0);
+                            const theme_t *th = nina_dashboard_get_current_theme();
+                            if (th) {
+                                int gb = sl_cfg->color_brightness;
+                                lv_obj_set_style_text_color(lbl,
+                                    lv_color_hex(app_config_apply_brightness(th->label_color, gb)), 0);
+                            } else {
+                                lv_obj_set_style_text_color(lbl, lv_color_hex(0x888888), 0);
+                            }
+                            lv_obj_center(lbl);
+                        }
+                        lvgl_port_unlock();
+
+                        /* Hold the message on screen for 2.5 seconds */
+                        vTaskDelay(pdMS_TO_TICKS(2500));
+
+                        /* Clean up the overlay before sleeping */
+                        lvgl_port_lock(0);
+                        {
+                            lv_obj_t *scr = lv_scr_act();
+                            /* Remove the last child (our overlay) */
+                            uint32_t cnt = lv_obj_get_child_count(scr);
+                            if (cnt > 0) {
+                                lv_obj_t *last = lv_obj_get_child(scr, cnt - 1);
+                                lv_obj_delete(last);
+                            }
+                        }
+                        lvgl_port_unlock();
+
                         /* Turn off backlight completely via direct LEDC.
                          * BSP brightness_set(0) only dims to 47% due to offset mapping.
                          * With output_invert=1, duty=0 → GPIO HIGH → backlight off

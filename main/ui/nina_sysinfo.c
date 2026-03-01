@@ -4,6 +4,7 @@
  */
 
 #include "nina_sysinfo.h"
+#include "nina_dashboard.h"
 #include "nina_dashboard_internal.h"
 #include "app_config.h"
 #include "themes.h"
@@ -171,6 +172,13 @@ static lv_obj_t *make_bar(lv_obj_t *parent) {
     return bar;
 }
 
+/* ── Gear Button → Settings ──────────────────────────────────────────── */
+
+static void gear_btn_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    nina_dashboard_show_page(page_count + 1, total_page_count);
+}
+
 /* ── Page Creation ───────────────────────────────────────────────────── */
 
 lv_obj_t *sysinfo_page_create(lv_obj_t *parent) {
@@ -191,24 +199,49 @@ lv_obj_t *sysinfo_page_create(lv_obj_t *parent) {
     lv_obj_set_height(hdr, LV_SIZE_CONTENT);
     lv_obj_set_style_pad_all(hdr, 14, 0);
     lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(hdr, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(hdr, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(hdr, 12, 0);
 
-    /* Gear icon — uses default font which includes LV_SYMBOL glyphs */
-    lv_obj_t *icon = lv_label_create(hdr);
+    /* Left side: icon + title grouped together */
+    lv_obj_t *hdr_left = lv_obj_create(hdr);
+    lv_obj_remove_style_all(hdr_left);
+    lv_obj_set_size(hdr_left, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(hdr_left, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(hdr_left, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(hdr_left, 12, 0);
+
+    lv_obj_t *icon = lv_label_create(hdr_left);
     lv_label_set_text(icon, LV_SYMBOL_SETTINGS);
     if (current_theme) {
         int gb = app_config_get()->color_brightness;
         lv_obj_set_style_text_color(icon, lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
     }
 
-    lbl_title = lv_label_create(hdr);
+    lbl_title = lv_label_create(hdr_left);
     lv_label_set_text(lbl_title, "System Info");
     lv_obj_set_style_text_font(lbl_title, &lv_font_montserrat_26, 0);
     if (current_theme) {
         int gb = app_config_get()->color_brightness;
         lv_obj_set_style_text_color(lbl_title, lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
     }
+
+    /* Right side: clickable gear icon button → navigates to settings */
+    lv_obj_t *btn_gear = lv_button_create(hdr);
+    lv_obj_set_size(btn_gear, 48, 48);
+    lv_obj_set_style_radius(btn_gear, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(btn_gear, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_opa(btn_gear, LV_OPA_20, LV_STATE_PRESSED);
+    lv_obj_set_style_border_width(btn_gear, 0, 0);
+    lv_obj_set_style_shadow_width(btn_gear, 0, 0);
+    lv_obj_t *gear_icon = lv_label_create(btn_gear);
+    lv_label_set_text(gear_icon, LV_SYMBOL_SETTINGS);
+    lv_obj_set_style_text_font(gear_icon, &lv_font_montserrat_22, 0);
+    if (current_theme) {
+        int gb = app_config_get()->color_brightness;
+        lv_obj_set_style_text_color(gear_icon, lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
+    }
+    lv_obj_center(gear_icon);
+    lv_obj_add_event_cb(btn_gear, gear_btn_cb, LV_EVENT_CLICKED, NULL);
 
     /* ── Two-column layout for cards ── */
     lv_obj_t *cols = lv_obj_create(si_page);
