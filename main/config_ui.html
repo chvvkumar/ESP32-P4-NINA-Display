@@ -527,7 +527,6 @@
               <option value="1">NINA 1</option>
               <option value="2">NINA 2</option>
               <option value="3">NINA 3</option>
-              <option value="4">Settings</option>
               <option value="5">System Info</option>
             </select>
           </div>
@@ -907,7 +906,6 @@
         ['arp_nina1','<span id="arp_lbl1">NINA 1</span>'],
         ['arp_nina2','<span id="arp_lbl2">NINA 2</span>'],
         ['arp_nina3','<span id="arp_lbl3">NINA 3</span>'],
-        ['arp_settings','Settings'],
         ['arp_sysinfo','System Info']
       ];
       var c=$('arp-container');
@@ -1076,7 +1074,6 @@
           pageIdx++;
         }
       }
-      sel.add(new Option('Settings',''+pageIdx));
       sel.add(new Option('System Info',''+(pageIdx+1)));
       if([...sel.options].some(o=>o.value===prev)) sel.value=prev;
       else sel.value='0';
@@ -1133,8 +1130,8 @@
     }
 
     /* === Rotation Bitmask === */
-    const arpIds=['arp_summary','arp_nina1','arp_nina2','arp_nina3','arp_sysinfo','arp_settings'];
-    const arpBits=[0x01,0x02,0x04,0x08,0x10,0x20];
+    const arpIds=['arp_summary','arp_nina1','arp_nina2','arp_nina3','arp_sysinfo'];
+    const arpBits=[0x01,0x02,0x04,0x08,0x10];
 
     function getRotatePages(){
       var mask=0;

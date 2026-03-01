@@ -151,7 +151,9 @@ void input_task(void *arg) {
             /* Short press — cycle page */
             int total = nina_dashboard_get_total_page_count();
             int current = nina_dashboard_get_active_page();
+            int settings_idx = total - 2;  /* settings page — skip in button navigation */
             int new_page = (current + 1) % total;
+            if (new_page == settings_idx) new_page = (new_page + 1) % total;
             ESP_LOGI(TAG, "Button: switching to page %d", new_page);
 
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
@@ -705,7 +707,7 @@ void data_update_task(void *arg) {
                                 in_mask = (page_mask & (1 << (inst + 1))) != 0; /* NINA page */
                         }
                         else if (candidate == ena_page_count + 1)
-                            in_mask = (page_mask & 0x20) != 0;             /* Settings */
+                            in_mask = false;                               /* Settings — never in rotation */
                         else if (candidate == ena_page_count + 2)
                             in_mask = (page_mask & 0x10) != 0;             /* Sysinfo */
 
