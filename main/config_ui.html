@@ -509,6 +509,83 @@
       </div>
 
       <div class="card">
+        <div class="card-title">Page Navigation <span id="pm_summary" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span></div>
+        <div class="pm-segment-wrap">
+          <div class="pm-slider" id="pm_slider"></div>
+          <div class="pm-seg-btn active" data-mode="auto" onclick="setPageMode('auto')">Manual</div>
+          <div class="pm-seg-btn" data-mode="fixed" onclick="setPageMode('fixed')">Fixed</div>
+          <div class="pm-seg-btn" data-mode="rotate" onclick="setPageMode('rotate')">Cycle Pages</div>
+        </div>
+        <div id="pm_auto_details" class="pm-content-box" style="display:none">
+          <div style="font-size:0.8rem;color:var(--text-muted);text-align:center;">Starts on Summary page. Navigate manually via swipe or physical button.</div>
+        </div>
+        <div id="pm_fixed_details" class="pm-content-box" style="display:none">
+          <div class="field" style="margin-bottom:0">
+            <label class="field-label">Pinned Page</label>
+            <select class="input" id="active_page" onchange="setPage(this.value)">
+              <option value="0">Summary</option>
+              <option value="1">NINA 1</option>
+              <option value="2">NINA 2</option>
+              <option value="3">NINA 3</option>
+              <option value="4">Settings</option>
+              <option value="5">System Info</option>
+            </select>
+          </div>
+        </div>
+        <div id="pm_rotate_details" class="pm-content-box" style="display:none">
+          <div class="row stack-mobile">
+            <div class="field">
+              <label class="field-label">Interval (seconds)</label>
+              <input type="number" class="input" id="auto_rotate_interval" min="4" max="3600" value="30">
+            </div>
+            <div class="field">
+              <label class="field-label">Transition</label>
+              <select class="input" id="auto_rotate_effect">
+                <option value="0">Instant</option>
+                <option value="1">Fade</option>
+                <option value="2">Slide Left</option>
+                <option value="3">Slide Right</option>
+              </select>
+            </div>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Skip disconnected nodes</span>
+            <label class="toggle"><input type="checkbox" id="auto_rotate_skip"><span class="toggle-track"></span></label>
+          </div>
+          <div style="margin-top:16px">
+            <label class="field-label">Pages in rotation</label>
+            <div class="flex-col-gap" id="arp-container" style="margin-top:8px"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== TAB 2: NODES & DATA ==================== -->
+    <div id="tab-nodes" class="tab-panel">
+
+      <div class="card" id="instance-overview">
+        <div class="card-title">Active Instances</div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label" id="inst_lbl_0">Node 1</span>
+          <label class="toggle"><input type="checkbox" id="instance_enabled_0" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label" id="inst_lbl_1">Node 2</span>
+          <label class="toggle"><input type="checkbox" id="instance_enabled_1" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label" id="inst_lbl_2">Node 3</span>
+          <label class="toggle"><input type="checkbox" id="instance_enabled_2" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+      </div>
+
+      <div id="node-cards"></div>
+    </div>
+
+    <!-- ==================== TAB 3: BEHAVIOR & ALERTS ==================== -->
+    <div id="tab-behavior" class="tab-panel">
+
+      <div class="card">
         <div class="card-title">Hardware</div>
         <div class="row stack-mobile">
           <div class="field">
@@ -562,90 +639,13 @@
           <div class="field">
             <label class="field-label">Wake timer (hours)</label>
             <input type="number" class="input" id="deep_sleep_wake_timer" min="0" max="72" step="1" value="0">
-            <div class="field-hint">Hours until auto-wake. 0 = stay asleep until manual wake.</div>
+            <div class="field-hint">Hours until auto-wake. 0 = stay asleep forever. Warning: with timer set to 0, the device must be physically rebooted to wake up — there is no manual wake from deep sleep.</div>
           </div>
           <div class="toggle-row">
             <span class="toggle-label">Auto power off when idle</span>
             <label class="toggle"><input type="checkbox" id="deep_sleep_on_idle"><span class="toggle-track"></span></label>
           </div>
-          <div class="field-hint">Enter deep sleep after extended disconnection from all NINA instances.</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ==================== TAB 2: NODES & DATA ==================== -->
-    <div id="tab-nodes" class="tab-panel">
-
-      <div class="card" id="instance-overview">
-        <div class="card-title">Active Instances</div>
-        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label" id="inst_lbl_0">Node 1</span>
-          <label class="toggle"><input type="checkbox" id="instance_enabled_0" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
-        </div>
-        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label" id="inst_lbl_1">Node 2</span>
-          <label class="toggle"><input type="checkbox" id="instance_enabled_1" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
-        </div>
-        <div class="toggle-row">
-          <span class="toggle-label" id="inst_lbl_2">Node 3</span>
-          <label class="toggle"><input type="checkbox" id="instance_enabled_2" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
-        </div>
-      </div>
-
-      <div id="node-cards"></div>
-    </div>
-
-    <!-- ==================== TAB 3: BEHAVIOR & ALERTS ==================== -->
-    <div id="tab-behavior" class="tab-panel">
-
-      <div class="card">
-        <div class="card-title">Page Navigation <span id="pm_summary" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span></div>
-        <div class="pm-segment-wrap">
-          <div class="pm-slider" id="pm_slider"></div>
-          <div class="pm-seg-btn active" data-mode="auto" onclick="setPageMode('auto')">Manual</div>
-          <div class="pm-seg-btn" data-mode="fixed" onclick="setPageMode('fixed')">Fixed</div>
-          <div class="pm-seg-btn" data-mode="rotate" onclick="setPageMode('rotate')">Cycle Pages</div>
-        </div>
-        <div id="pm_auto_details" class="pm-content-box" style="display:none">
-          <div style="font-size:0.8rem;color:var(--text-muted);text-align:center;">Starts on Summary page. Navigate manually via swipe or physical button.</div>
-        </div>
-        <div id="pm_fixed_details" class="pm-content-box" style="display:none">
-          <div class="field" style="margin-bottom:0">
-            <label class="field-label">Pinned Page</label>
-            <select class="input" id="active_page" onchange="setPage(this.value)">
-              <option value="0">Summary</option>
-              <option value="1">NINA 1</option>
-              <option value="2">NINA 2</option>
-              <option value="3">NINA 3</option>
-              <option value="4">Settings</option>
-              <option value="5">System Info</option>
-            </select>
-          </div>
-        </div>
-        <div id="pm_rotate_details" class="pm-content-box" style="display:none">
-          <div class="row stack-mobile">
-            <div class="field">
-              <label class="field-label">Interval (seconds)</label>
-              <input type="number" class="input" id="auto_rotate_interval" min="4" max="3600" value="30">
-            </div>
-            <div class="field">
-              <label class="field-label">Transition</label>
-              <select class="input" id="auto_rotate_effect">
-                <option value="0">Instant</option>
-                <option value="1">Fade</option>
-                <option value="2">Slide Left</option>
-                <option value="3">Slide Right</option>
-              </select>
-            </div>
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-label">Skip disconnected nodes</span>
-            <label class="toggle"><input type="checkbox" id="auto_rotate_skip"><span class="toggle-track"></span></label>
-          </div>
-          <div style="margin-top:16px">
-            <label class="field-label">Pages in rotation</label>
-            <div class="flex-col-gap" id="arp-container" style="margin-top:8px"></div>
-          </div>
+          <div class="field-hint">Enter deep sleep after extended disconnection from all NINA instances. The device must be physically rebooted to wake up if the wake timer is set to 0.</div>
         </div>
       </div>
 
