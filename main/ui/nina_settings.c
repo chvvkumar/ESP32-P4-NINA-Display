@@ -40,6 +40,11 @@ static lv_obj_t *lbl_backlight_val     = NULL;
 static lv_obj_t *slider_text_bright    = NULL;
 static lv_obj_t *lbl_text_bright_val   = NULL;
 
+/* ── Screen rotation card widgets ──────────────────────────────────── */
+static lv_obj_t *lbl_rotation_val     = NULL;
+static lv_obj_t *btn_rotation_prev    = NULL;
+static lv_obj_t *btn_rotation_next    = NULL;
+
 /* ── Update rate card widgets ────────────────────────────────────────── */
 static lv_obj_t *lbl_update_rate_val   = NULL;
 static lv_obj_t *btn_rate_minus        = NULL;
@@ -77,6 +82,10 @@ static const char *effect_names[] = {"Instant", "Fade", "Slide Left", "Slide Rig
 
 /* ── Widget style names ──────────────────────────────────────────────── */
 static const char *widget_style_names[] = {"Default", "Subtle Border", "Wireframe", "Soft Inset", "Frosted Glass", "Accent Bar", "Chamfered"};
+
+/* ── Rotation names ─────────────────────────────────────────────────── */
+static const char *rotation_names[] = {"0°", "90°", "180°", "270°"};
+#define ROTATION_COUNT 4
 
 /* ── Helpers ─────────────────────────────────────────────────────────── */
 
@@ -239,6 +248,26 @@ static void text_bright_changed_cb(lv_event_t *e) {
         lv_label_set_text_fmt(lbl_text_bright_val, "%d%%", val);
         nina_dashboard_apply_theme(app_config_get()->theme_index);
     }
+}
+
+static void rotation_prev_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    app_config_t *cfg = app_config_get();
+    int idx = (int)cfg->screen_rotation - 1;
+    if (idx < 0) idx = ROTATION_COUNT - 1;
+    cfg->screen_rotation = (uint8_t)idx;
+    lv_label_set_text(lbl_rotation_val, rotation_names[idx]);
+    lv_display_set_rotation(lv_display_get_default(), idx);
+}
+
+static void rotation_next_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    app_config_t *cfg = app_config_get();
+    int idx = (int)cfg->screen_rotation + 1;
+    if (idx >= ROTATION_COUNT) idx = 0;
+    cfg->screen_rotation = (uint8_t)idx;
+    lv_label_set_text(lbl_rotation_val, rotation_names[idx]);
+    lv_display_set_rotation(lv_display_get_default(), idx);
 }
 
 static void rate_minus_cb(lv_event_t *e) {
@@ -551,6 +580,45 @@ lv_obj_t *settings_page_create(lv_obj_t *parent) {
     /* ── Divider ── */
     make_divider(st_page);
 
+    /* ── Screen Rotation Row ── */
+    {
+        lv_obj_t *row = make_setting_row(st_page);
+
+        lv_obj_t *lbl = lv_label_create(row);
+        lv_label_set_text(lbl, "Rotation");
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
+        if (current_theme) {
+            lv_obj_set_style_text_color(lbl, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+        }
+
+        lv_obj_t *selector = lv_obj_create(row);
+        lv_obj_remove_style_all(selector);
+        lv_obj_set_size(selector, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(selector, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(selector, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_column(selector, 8, 0);
+
+        btn_rotation_prev = make_arrow_btn(selector, LV_SYMBOL_LEFT);
+        lv_obj_add_event_cb(btn_rotation_prev, rotation_prev_cb, LV_EVENT_CLICKED, NULL);
+
+        lbl_rotation_val = lv_label_create(selector);
+        lv_obj_set_style_text_font(lbl_rotation_val, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_min_width(lbl_rotation_val, 55, 0);
+        lv_obj_set_style_text_align(lbl_rotation_val, LV_TEXT_ALIGN_CENTER, 0);
+        if (current_theme) {
+            lv_obj_set_style_text_color(lbl_rotation_val, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+        }
+        int rot = app_config_get()->screen_rotation;
+        if (rot < 0 || rot >= ROTATION_COUNT) rot = 0;
+        lv_label_set_text(lbl_rotation_val, rotation_names[rot]);
+
+        btn_rotation_next = make_arrow_btn(selector, LV_SYMBOL_RIGHT);
+        lv_obj_add_event_cb(btn_rotation_next, rotation_next_cb, LV_EVENT_CLICKED, NULL);
+    }
+
+    /* ── Divider ── */
+    make_divider(st_page);
+
     /* ── Data Rate Row ── */
     {
         lv_obj_t *row = make_setting_row(st_page);
@@ -838,6 +906,13 @@ void settings_page_refresh(void) {
     if (slider_text_bright) {
         lv_slider_set_value(slider_text_bright, cfg->color_brightness, LV_ANIM_OFF);
         lv_label_set_text_fmt(lbl_text_bright_val, "%d%%", cfg->color_brightness);
+    }
+
+    /* Screen rotation */
+    if (lbl_rotation_val) {
+        int rot = cfg->screen_rotation;
+        if (rot < 0 || rot >= ROTATION_COUNT) rot = 0;
+        lv_label_set_text(lbl_rotation_val, rotation_names[rot]);
     }
 
     /* Update rate */
