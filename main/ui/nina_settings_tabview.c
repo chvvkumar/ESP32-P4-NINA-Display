@@ -634,6 +634,43 @@ lv_obj_t *settings_tabview_create(lv_obj_t *parent) {
 }
 
 /* ════════════════════════════════════════════════════════════════════════
+ *  Destroy — tear down all settings widgets to reclaim internal heap
+ * ════════════════════════════════════════════════════════════════════════ */
+
+void settings_tabview_destroy(void) {
+    /* Color picker is parented to lv_layer_top(), not st_root */
+    color_picker_hide();
+
+    /* Cancel any pending save feedback timer (not parented to any object) */
+    if (save_feedback_timer) {
+        lv_timer_delete(save_feedback_timer);
+        save_feedback_timer = NULL;
+    }
+
+    /* Tell each tab module to NULL out its static pointers */
+    settings_tab_display_destroy();
+    settings_tab_nodes_destroy();
+    settings_tab_behavior_destroy();
+    settings_tab_system_destroy();
+
+    /* Delete the root LVGL object — recursively frees tabview,
+     * keyboard, save bar, back button, and all tab contents */
+    if (st_root) {
+        lv_obj_delete(st_root);
+    }
+
+    /* NULL out all module-level statics */
+    st_root      = NULL;
+    tabview      = NULL;
+    keyboard     = NULL;
+    save_bar     = NULL;
+    lbl_save_btn = NULL;
+    kb_visible   = false;
+    needs_reboot = false;
+    dirty        = false;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
  *  Refresh
  * ════════════════════════════════════════════════════════════════════════ */
 

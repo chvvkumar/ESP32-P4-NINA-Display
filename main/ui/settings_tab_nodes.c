@@ -833,6 +833,12 @@ static void create_node_accordion(lv_obj_t *parent, int idx)
  *  Public API
  * ══════════════════════════════════════════════════════════════════════ */
 
+void settings_tab_nodes_destroy(void) {
+    tab_root = NULL;
+    expanded_node = -1;
+    memset(nodes, 0, sizeof(nodes));
+}
+
 void settings_tab_nodes_create(lv_obj_t *parent)
 {
     tab_root = parent;

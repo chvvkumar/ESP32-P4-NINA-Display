@@ -9,6 +9,9 @@
  */
 lv_obj_t *settings_tabview_create(lv_obj_t *parent);
 
+/** Destroy all settings widgets and free memory. Call when leaving settings page. */
+void settings_tabview_destroy(void);
+
 /** Refresh all tab contents from current config. */
 void settings_tabview_refresh(void);
 

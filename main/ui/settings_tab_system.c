@@ -793,6 +793,30 @@ static void factory_reset_btn_cb(lv_event_t *e) {
  *  Public API — Create
  * ════════════════════════════════════════════════════════════════════════ */
 
+void settings_tab_system_destroy(void) {
+    tab_root = NULL;
+    ta_ssid = NULL;
+    ta_password = NULL;
+    ta_ntp = NULL;
+    dd_timezone = NULL;
+    sw_mqtt_enabled = NULL;
+    cont_mqtt_fields = NULL;
+    ta_mqtt_broker = NULL;
+    lbl_mqtt_port = NULL;
+    ta_mqtt_prefix = NULL;
+    ta_mqtt_user = NULL;
+    ta_mqtt_pass = NULL;
+    lbl_fw_version = NULL;
+    lbl_fw_built = NULL;
+    lbl_fw_idf = NULL;
+    lbl_fw_partition = NULL;
+    sw_auto_update = NULL;
+    dd_update_channel = NULL;
+    btn_check_update = NULL;
+    lbl_check_update = NULL;
+    sw_debug_mode = NULL;
+}
+
 void settings_tab_system_create(lv_obj_t *parent) {
     tab_root = parent;
 

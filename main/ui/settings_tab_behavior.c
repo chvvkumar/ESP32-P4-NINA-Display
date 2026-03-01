@@ -318,6 +318,27 @@ static void make_labeled_stepper(lv_obj_t *card, const char *text,
  *  Tab Creation
  * ════════════════════════════════════════════════════════════════════════ */
 
+void settings_tab_behavior_destroy(void) {
+    tab_root = NULL;
+    dd_rotation = NULL;
+    slider_backlight = NULL;
+    lbl_backlight_val = NULL;
+    sw_screen_sleep = NULL;
+    cont_sleep_opts = NULL;
+    lbl_sleep_timeout = NULL;
+    lbl_idle_poll = NULL;
+    sw_wifi_power_save = NULL;
+    sw_deep_sleep = NULL;
+    cont_deep_sleep_opts = NULL;
+    lbl_wake_timer = NULL;
+    sw_auto_power_off = NULL;
+    lbl_data_rate = NULL;
+    lbl_graph_rate = NULL;
+    lbl_conn_timeout = NULL;
+    lbl_toast_duration = NULL;
+    sw_alert_flash = NULL;
+}
+
 void settings_tab_behavior_create(lv_obj_t *parent) {
     tab_root = parent;
     app_config_t *cfg = app_config_get();

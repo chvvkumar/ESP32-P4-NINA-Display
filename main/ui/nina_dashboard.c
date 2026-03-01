@@ -132,9 +132,10 @@ static void hide_page_at(int idx) {
         lv_obj_add_flag(summary_obj, LV_OBJ_FLAG_HIDDEN);
     else if (idx >= 1 && idx <= page_count)
         lv_obj_add_flag(pages[idx - 1].page, LV_OBJ_FLAG_HIDDEN);
-    else if (idx == page_count + 1 && settings_obj)
-        lv_obj_add_flag(settings_obj, LV_OBJ_FLAG_HIDDEN);
-    else if (idx == page_count + 2 && sysinfo_obj)
+    else if (idx == page_count + 1 && settings_obj) {
+        settings_tabview_destroy();
+        settings_obj = NULL;
+    } else if (idx == page_count + 2 && sysinfo_obj)
         lv_obj_add_flag(sysinfo_obj, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -144,7 +145,10 @@ static void show_page_at(int idx) {
         lv_obj_clear_flag(summary_obj, LV_OBJ_FLAG_HIDDEN);
     else if (idx >= 1 && idx <= page_count)
         lv_obj_clear_flag(pages[idx - 1].page, LV_OBJ_FLAG_HIDDEN);
-    else if (idx == page_count + 1 && settings_obj) {
+    else if (idx == page_count + 1) {
+        if (!settings_obj) {
+            settings_obj = settings_tabview_create(main_cont);
+        }
         lv_obj_clear_flag(settings_obj, LV_OBJ_FLAG_HIDDEN);
         settings_tabview_refresh();
     }
@@ -227,7 +231,7 @@ void nina_dashboard_apply_theme(int theme_index) {
     }
 
     summary_page_apply_theme();
-    settings_tabview_apply_theme();
+    if (settings_obj) settings_tabview_apply_theme();
     sysinfo_page_apply_theme();
     nina_graph_overlay_apply_theme();
     nina_info_overlay_apply_theme();
@@ -739,9 +743,9 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
         lv_obj_add_flag(pages[i].page, LV_OBJ_FLAG_HIDDEN);
     }
 
-    /* Settings page — page index page_count+1, hidden initially */
-    settings_obj = settings_tabview_create(main_cont);
-    lv_obj_add_flag(settings_obj, LV_OBJ_FLAG_HIDDEN);
+    /* Settings page — lazy-loaded on demand (page index page_count+1).
+     * NOT created at boot to save internal heap for OTA task. */
+    settings_obj = NULL;
 
     /* System info page — always last (page index page_count+2), hidden initially */
     sysinfo_obj = sysinfo_page_create(main_cont);

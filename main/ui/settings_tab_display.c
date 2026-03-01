@@ -642,6 +642,24 @@ static void page_checkbox_changed_cb(lv_event_t *e)
  *  Public API
  * ═══════════════════════════════════════════════════════════════════════ */
 
+void settings_tab_display_destroy(void) {
+    tab_root = NULL;
+    dd_theme = NULL;
+    dd_widget_style = NULL;
+    slider_text_bright = NULL;
+    lbl_text_bright_val = NULL;
+    seg_mode = NULL;
+    cont_fixed = NULL;
+    dd_pinned_page = NULL;
+    cont_cycle = NULL;
+    lbl_interval_val = NULL;
+    btn_interval_minus = NULL;
+    btn_interval_plus = NULL;
+    dd_transition = NULL;
+    sw_skip_offline = NULL;
+    memset(cb_pages, 0, sizeof(cb_pages));
+}
+
 void settings_tab_display_create(lv_obj_t *parent)
 {
     tab_root = parent;
