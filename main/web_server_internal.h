@@ -53,6 +53,7 @@ esp_err_t color_brightness_post_handler(httpd_req_t *req);
 esp_err_t theme_post_handler(httpd_req_t *req);
 esp_err_t widget_style_post_handler(httpd_req_t *req);
 esp_err_t page_post_handler(httpd_req_t *req);
+esp_err_t screen_rotation_post_handler(httpd_req_t *req);
 esp_err_t screenshot_get_handler(httpd_req_t *req);
 esp_err_t reboot_post_handler(httpd_req_t *req);
 esp_err_t factory_reset_post_handler(httpd_req_t *req);
