@@ -83,6 +83,7 @@ esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddBoolToObject(root, "deep_sleep_on_idle", cfg->deep_sleep_on_idle);
     cJSON_AddBoolToObject(root, "auto_update_check", cfg->auto_update_check);
     cJSON_AddNumberToObject(root, "update_channel", cfg->update_channel);
+    cJSON_AddNumberToObject(root, "screen_rotation", cfg->screen_rotation);
     cJSON_AddBoolToObject(root, "_dirty", app_config_is_dirty());
 
     const char *json_str = cJSON_PrintUnformatted(root);
@@ -315,6 +316,14 @@ static app_config_t *parse_config_from_json(cJSON *root)
     if (cJSON_IsNumber(update_ch)) {
         int v = update_ch->valueint;
         cfg->update_channel = (v == 1) ? 1 : 0;
+    }
+
+    cJSON *rot_item = cJSON_GetObjectItem(root, "screen_rotation");
+    if (cJSON_IsNumber(rot_item)) {
+        int v = rot_item->valueint;
+        if (v < 0) v = 0;
+        if (v > 3) v = 3;
+        cfg->screen_rotation = (uint8_t)v;
     }
 
     return cfg;
