@@ -66,6 +66,7 @@ void start_web_server(void)
         { "/api/perf/reset",       HTTP_POST, perf_reset_post_handler, NULL },
         { "/api/config/apply",     HTTP_POST, config_apply_handler, NULL },
         { "/api/config/revert",    HTTP_POST, config_revert_handler, NULL },
+        { "/api/check-update",     HTTP_POST, check_update_post_handler, NULL },
     };
 
     for (int i = 0; i < (int)(sizeof(routes)/sizeof(routes[0])); i++) {

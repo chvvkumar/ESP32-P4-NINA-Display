@@ -62,4 +62,5 @@ esp_err_t perf_get_handler(httpd_req_t *req);
 esp_err_t perf_reset_post_handler(httpd_req_t *req);
 esp_err_t config_apply_handler(httpd_req_t *req);
 esp_err_t config_revert_handler(httpd_req_t *req);
+esp_err_t check_update_post_handler(httpd_req_t *req);
 void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t *new_cfg);

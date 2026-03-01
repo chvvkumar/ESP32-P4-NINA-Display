@@ -26,6 +26,9 @@ extern TaskHandle_t poll_task_handles[MAX_NINA_INSTANCES];
 /** OTA in progress — data task suspends when true. Set by OTA handler. */
 extern volatile bool ota_in_progress;
 
+/** On-demand firmware update check — set by settings page button. */
+extern volatile bool ota_check_requested;
+
 /** Screen touch detected — wakes display from screen sleep. Set by LVGL touch handler. */
 extern volatile bool screen_touch_wake;
 
