@@ -13,7 +13,7 @@ extern "C" {
 #define MAX_NINA_INSTANCES 3
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 13
+#define APP_CONFIG_VERSION 14
 
 #define WIDGET_STYLE_COUNT 7
 
@@ -54,6 +54,11 @@ typedef struct {
     uint8_t  widget_style;           // Widget panel style index (0-6, default 0)
     uint8_t  auto_update_check;     // 0=disabled, 1=enabled (check GitHub for firmware updates on boot)
     uint8_t  update_channel;        // 0=stable releases only, 1=include pre-releases
+
+    // Deep sleep / power management
+    bool     deep_sleep_enabled;        // Enable long-press BOOT button to enter deep sleep
+    uint32_t deep_sleep_wake_timer_s;   // Timer wake duration in seconds (0 = no timer wake)
+    bool     deep_sleep_on_idle;        // Auto-enter deep sleep after screen sleep timeout
 } app_config_t;
 
 // WiFi credentials are NOT stored in app_config_t. They are managed by

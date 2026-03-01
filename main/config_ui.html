@@ -851,6 +851,30 @@
         </div>
       </div>
       <div class="card">
+        <div class="card-title card-title-collapsible" onclick="toggleCollapsible('dslp')">
+          Deep Sleep / Power Off
+          <span class="card-chevron collapsed" id="dslp_chevron">&#9660;</span>
+        </div>
+        <div class="card-body-collapsible collapsed" id="dslp_body">
+        <div class="toggle-row">
+          <span class="toggle-label">Enable deep sleep (long-press BOOT button to power off)</span>
+          <label class="toggle"><input type="checkbox" id="deep_sleep_enabled"><span class="toggle-track"></span></label>
+        </div>
+        <div id="deep_sleep_details" style="margin-top:12px">
+          <div class="field">
+            <label class="field-label">Wake timer (hours)</label>
+            <input type="number" class="input" id="deep_sleep_wake_timer" min="0" max="72" step="1" value="0">
+            <div class="field-hint">Hours until the device automatically wakes from deep sleep. Set to 0 to stay asleep until manually woken (e.g. by pressing BOOT button or power cycle).</div>
+          </div>
+          <div class="toggle-row" style="margin-top:8px">
+            <span class="toggle-label">Auto power off when idle</span>
+            <label class="toggle"><input type="checkbox" id="deep_sleep_on_idle"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint" style="margin-top:4px">Automatically enter deep sleep after extended disconnection from all NINA instances.</div>
+        </div>
+        </div>
+      </div>
+      <div class="card">
         <div class="card-title card-title-collapsible" onclick="toggleCollapsible('dbg')">
           Debug
           <span class="card-chevron collapsed" id="dbg_chevron">&#9660;</span>
@@ -1237,6 +1261,9 @@
         screen_sleep_timeout_s:parseInt($('screen_sleep_timeout').value)||60,
         idle_poll_interval_s:parseInt($('idle_poll_interval').value)||30,
         wifi_power_save:!!$('wifi_power_save').checked,
+        deep_sleep_enabled:!!$('deep_sleep_enabled').checked,
+        deep_sleep_wake_timer_s:(parseInt($('deep_sleep_wake_timer').value)||0)*3600,
+        deep_sleep_on_idle:!!$('deep_sleep_on_idle').checked,
         alert_flash_enabled:!!$('alert_flash_enabled').checked,
         auto_update_check:!!$('auto_update_check').checked,
         update_channel:parseInt($('update_channel').value)||0
@@ -1290,6 +1317,9 @@
       $('screen_sleep_timeout').value=data.screen_sleep_timeout_s||60;
       $('idle_poll_interval').value=data.idle_poll_interval_s||30;
       $('wifi_power_save').checked=data.wifi_power_save!==false;
+      $('deep_sleep_enabled').checked=!!data.deep_sleep_enabled;
+      $('deep_sleep_wake_timer').value=Math.round((data.deep_sleep_wake_timer_s||0)/3600);
+      $('deep_sleep_on_idle').checked=!!data.deep_sleep_on_idle;
       $('alert_flash_enabled').checked=data.alert_flash_enabled!==false;
       $('auto_update_check').checked=data.auto_update_check!==false;
       $('update_channel').value=data.update_channel||0;

@@ -31,6 +31,7 @@
 #include "cJSON.h"
 #include "perf_monitor.h"
 #include "nina_connection.h"
+#include "power_mgmt.h"
 
 static void *cjson_psram_malloc(size_t sz) { return heap_caps_malloc(sz, MALLOC_CAP_SPIRAM); }
 
@@ -193,6 +194,10 @@ void app_main(void)
     esp_log_level_set("HTTP_CLIENT", ESP_LOG_NONE);
 
     app_config_init();
+
+    // Check if we woke from deep sleep
+    esp_sleep_wakeup_cause_t wake_cause = power_mgmt_check_wake_cause();
+
     nina_connection_init();
 
     perf_monitor_init(30);
@@ -202,6 +207,10 @@ void app_main(void)
     ESP_LOGI(TAG, "Configured instances: %d", instance_count);
 
     wifi_init();
+
+    // Enable Dynamic Frequency Scaling — CPU scales 360 MHz (active) to 40 MHz (idle)
+    power_mgmt_init();
+
     start_web_server();
 
     /* Pre-allocate JPEG encoder DMA channel before display init claims DMA resources */
@@ -243,6 +252,14 @@ void app_main(void)
                 nina_dashboard_show_page(cfg->active_page_override, 0);
             }
         }
+
+        // Restore page from deep sleep if applicable
+        if (wake_cause != ESP_SLEEP_WAKEUP_UNDEFINED) {
+            int saved_page = power_mgmt_get_saved_page();
+            ESP_LOGI(TAG, "Restoring page %d from deep sleep", saved_page);
+            nina_dashboard_show_page(saved_page, 0);
+        }
+
         bsp_display_unlock();
     } else {
         ESP_LOGE(TAG, "Failed to acquire display lock during init!");
