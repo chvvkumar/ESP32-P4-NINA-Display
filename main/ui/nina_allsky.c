@@ -32,8 +32,8 @@ typedef struct {
     lv_obj_t *bar;
     lv_obj_t *lbl_sub1;
     lv_obj_t *lbl_sub2;
-    lv_obj_t *dot1;   /* AMBIENT only */
-    lv_obj_t *dot2;   /* AMBIENT only */
+    lv_obj_t *dot1;   /* THERMAL only — fan indicator */
+    lv_obj_t *dot2;   /* AMBIENT only — heater indicator */
 } allsky_quadrant_t;
 
 static lv_obj_t *allsky_page = NULL;
@@ -282,31 +282,38 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
             lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
     }
 
-    /* Indicator dots for AMBIENT quadrant */
-    if (quad_index == 2) {
-        lv_obj_t *dot_cont = lv_obj_create(title_row);
-        lv_obj_remove_style_all(dot_cont);
-        lv_obj_clear_flag(dot_cont, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_size(dot_cont, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-        lv_obj_set_flex_flow(dot_cont, LV_FLEX_FLOW_ROW);
-        lv_obj_set_style_pad_column(dot_cont, 6, 0);
-
-        for (int d = 0; d < 2; d++) {
-            lv_obj_t *dot = lv_obj_create(dot_cont);
-            lv_obj_remove_style_all(dot);
-            lv_obj_clear_flag(dot, LV_OBJ_FLAG_CLICKABLE);
-            lv_obj_set_size(dot, 20, 20);
-            lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-            lv_obj_set_style_border_width(dot, 2, 0);
-            lv_obj_set_style_bg_opa(dot, LV_OPA_TRANSP, 0);
-            if (current_theme) {
-                int gb = app_config_get()->color_brightness;
-                lv_obj_set_style_border_color(dot,
-                    lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-            }
-            if (d == 0) qd->dot1 = dot;
-            else        qd->dot2 = dot;
+    /* Fan indicator dot — top-right of THERMAL quadrant */
+    if (quad_index == 0) {
+        lv_obj_t *dot = lv_obj_create(title_row);
+        lv_obj_remove_style_all(dot);
+        lv_obj_clear_flag(dot, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_size(dot, 20, 20);
+        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_border_width(dot, 2, 0);
+        lv_obj_set_style_bg_opa(dot, LV_OPA_TRANSP, 0);
+        if (current_theme) {
+            int gb = app_config_get()->color_brightness;
+            lv_obj_set_style_border_color(dot,
+                lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
         }
+        qd->dot1 = dot;
+    }
+
+    /* Heater indicator dot — top-right of AMBIENT quadrant */
+    if (quad_index == 2) {
+        lv_obj_t *dot = lv_obj_create(title_row);
+        lv_obj_remove_style_all(dot);
+        lv_obj_clear_flag(dot, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_size(dot, 20, 20);
+        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_border_width(dot, 2, 0);
+        lv_obj_set_style_bg_opa(dot, LV_OPA_TRANSP, 0);
+        if (current_theme) {
+            int gb = app_config_get()->color_brightness;
+            lv_obj_set_style_border_color(dot,
+                lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+        }
+        qd->dot2 = dot;
     }
 
     /* 2. Main value (48px font scaled to ~54px: 54/48 = 1.125 → 288/256) */
@@ -582,33 +589,31 @@ void allsky_page_update(const allsky_data_t *data) {
             }
         }
 
-        /* Indicator dots (ambient quadrant) */
-        if (q == 2) {
-
-            /* Indicator dots */
-            if (qd->dot1) {
-                const char *dot1_val = data->field_values[ALLSKY_F_AMBIENT_DOT1];
-                bool dot1_on = (dot1_val[0] != '\0' && qcfg[2].dot1_on_value[0] != '\0'
-                                && strcmp(dot1_val, qcfg[2].dot1_on_value) == 0);
-                if (dot1_on && current_theme) {
-                    lv_obj_set_style_bg_color(qd->dot1,
-                        lv_color_hex(app_config_apply_brightness(current_theme->progress_color, gb)), 0);
-                    lv_obj_set_style_bg_opa(qd->dot1, LV_OPA_COVER, 0);
-                } else {
-                    lv_obj_set_style_bg_opa(qd->dot1, LV_OPA_TRANSP, 0);
-                }
+        /* Fan indicator dot (on thermal quadrant, data from ambient config) */
+        if (qd->dot1) {
+            const char *dot1_val = data->field_values[ALLSKY_F_AMBIENT_DOT1];
+            bool dot1_on = (dot1_val[0] != '\0' && qcfg[2].dot1_on_value[0] != '\0'
+                            && strcmp(dot1_val, qcfg[2].dot1_on_value) == 0);
+            if (dot1_on && current_theme) {
+                lv_obj_set_style_bg_color(qd->dot1,
+                    lv_color_hex(app_config_apply_brightness(current_theme->progress_color, gb)), 0);
+                lv_obj_set_style_bg_opa(qd->dot1, LV_OPA_COVER, 0);
+            } else {
+                lv_obj_set_style_bg_opa(qd->dot1, LV_OPA_TRANSP, 0);
             }
-            if (qd->dot2) {
-                const char *dot2_val = data->field_values[ALLSKY_F_AMBIENT_DOT2];
-                bool dot2_on = (dot2_val[0] != '\0' && qcfg[2].dot2_on_value[0] != '\0'
-                                && strcmp(dot2_val, qcfg[2].dot2_on_value) == 0);
-                if (dot2_on && current_theme) {
-                    lv_obj_set_style_bg_color(qd->dot2,
-                        lv_color_hex(app_config_apply_brightness(current_theme->progress_color, gb)), 0);
-                    lv_obj_set_style_bg_opa(qd->dot2, LV_OPA_COVER, 0);
-                } else {
-                    lv_obj_set_style_bg_opa(qd->dot2, LV_OPA_TRANSP, 0);
-                }
+        }
+
+        /* Heater indicator dot (on ambient quadrant) */
+        if (qd->dot2) {
+            const char *dot2_val = data->field_values[ALLSKY_F_AMBIENT_DOT2];
+            bool dot2_on = (dot2_val[0] != '\0' && qcfg[2].dot2_on_value[0] != '\0'
+                            && strcmp(dot2_val, qcfg[2].dot2_on_value) == 0);
+            if (dot2_on && current_theme) {
+                lv_obj_set_style_bg_color(qd->dot2,
+                    lv_color_hex(app_config_apply_brightness(current_theme->progress_color, gb)), 0);
+                lv_obj_set_style_bg_opa(qd->dot2, LV_OPA_COVER, 0);
+            } else {
+                lv_obj_set_style_bg_opa(qd->dot2, LV_OPA_TRANSP, 0);
             }
         }
     }
