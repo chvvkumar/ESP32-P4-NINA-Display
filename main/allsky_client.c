@@ -191,8 +191,7 @@ static void extract_fields(cJSON *api_data, const char *field_config_json, allsk
 
         const char *value = resolve_json_key(api_data, key_item->valuestring);
         if (value) {
-            strncpy(data->field_values[idx], value, sizeof(data->field_values[idx]) - 1);
-            data->field_values[idx][sizeof(data->field_values[idx]) - 1] = '\0';
+            snprintf(data->field_values[idx], sizeof(data->field_values[idx]), "%s", value);
         } else {
             data->field_values[idx][0] = '\0';
             ESP_LOGD(TAG, "Key '%s' not found in API response", key_item->valuestring);
