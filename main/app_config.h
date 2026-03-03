@@ -13,7 +13,7 @@ extern "C" {
 #define MAX_NINA_INSTANCES 3
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 15
+#define APP_CONFIG_VERSION 17
 
 #define WIDGET_STYLE_COUNT 7
 
@@ -34,12 +34,12 @@ typedef struct {
     char mqtt_password[64];         // MQTT broker password
     char mqtt_topic_prefix[64];     // MQTT topic prefix (default "ninadisplay")
     uint16_t mqtt_port;             // MQTT broker port (default 1883)
-    int8_t   active_page_override;          // -1 = auto, 0 = summary, 1..N = NINA instance, N+1 = sysinfo
+    int8_t   active_page_override;          // -1 = auto, 0 = allsky, 1 = summary, 2..N+1 = NINA, N+2 = settings, N+3 = sysinfo
     bool     auto_rotate_enabled;            // enable automatic page rotation
     uint16_t auto_rotate_interval_s;        // seconds between automatic page rotations
     uint8_t  auto_rotate_effect;            // 0 = instant, 1 = fade, 2 = slide-left, 3 = slide-right
     bool     auto_rotate_skip_disconnected; // skip pages where NINA is not connected during auto-rotate
-    uint8_t  auto_rotate_pages;            // bitmask: bit0=summary, bit1-3=NINA 1-3, bit4=sysinfo
+    uint8_t  auto_rotate_pages;            // bitmask: bit0=summary, bit1-3=NINA 1-3, bit4=sysinfo, bit5=allsky
     uint8_t  update_rate_s;                // UI/data update interval in seconds (1-10, default 2)
     uint8_t  graph_update_interval_s;     // Graph overlay auto-refresh interval in seconds (2-30, default 5)
     uint8_t  connection_timeout_s;        // Seconds without successful poll before marking offline (2-30, default 6)
@@ -60,6 +60,14 @@ typedef struct {
     uint32_t deep_sleep_wake_timer_s;   // Timer wake duration in seconds (0 = no timer wake)
     bool     deep_sleep_on_idle;        // Auto-enter deep sleep after screen sleep timeout
     uint8_t  screen_rotation;           // Display rotation: 0=0°, 1=90°, 2=180°, 3=270°
+    char     hostname[32];             // Device hostname for DHCP and MQTT HA (default "NINA-DISPLAY")
+
+    // AllSky integration
+    char     allsky_hostname[128];          // AllSky API host:port (e.g., "allskypi5.lan:8080")
+    uint16_t allsky_update_interval_s;      // Poll interval 1-300s (default 5)
+    float    allsky_dew_offset;             // °C above ambient for dew alert (default 5.0)
+    char     allsky_field_config[1536];     // JSON key mappings per quadrant
+    char     allsky_thresholds[1024];       // JSON threshold configs per field
 } app_config_t;
 
 // WiFi credentials are NOT stored in app_config_t. They are managed by

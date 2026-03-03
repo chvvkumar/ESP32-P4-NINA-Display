@@ -39,8 +39,8 @@ bool validate_url_format(const char *url) {
 void start_web_server(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.stack_size = 8192;
-    config.max_uri_handlers = 21;
+    config.stack_size = 16384;
+    config.max_uri_handlers = 25;
     httpd_handle_t server = NULL;
 
     if (httpd_start(&server, &config) != ESP_OK) {
@@ -50,6 +50,7 @@ void start_web_server(void)
 
     static const httpd_uri_t routes[] = {
         { "/",                     HTTP_GET,  root_get_handler, NULL },
+        { "/favicon.ico",          HTTP_GET,  favicon_get_handler, NULL },
         { "/api/config",           HTTP_GET,  config_get_handler, NULL },
         { "/api/config",           HTTP_POST, config_post_handler, NULL },
         { "/api/brightness",       HTTP_POST, brightness_post_handler, NULL },
@@ -68,6 +69,9 @@ void start_web_server(void)
         { "/api/config/apply",     HTTP_POST, config_apply_handler, NULL },
         { "/api/config/revert",    HTTP_POST, config_revert_handler, NULL },
         { "/api/check-update",     HTTP_POST, check_update_post_handler, NULL },
+        { "/api/allsky-config",    HTTP_GET,  allsky_config_get_handler, NULL },
+        { "/api/allsky-config",    HTTP_POST, allsky_config_post_handler, NULL },
+        { "/api/allsky-proxy",     HTTP_GET,  allsky_proxy_get_handler, NULL },
     };
 
     for (int i = 0; i < (int)(sizeof(routes)/sizeof(routes[0])); i++) {

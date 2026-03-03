@@ -6,6 +6,8 @@
 
 extern const uint8_t config_html_start[] asm("_binary_config_ui_html_start");
 extern const uint8_t config_html_end[]   asm("_binary_config_ui_html_end");
+extern const uint8_t favicon_png_start[] asm("_binary_favicon_png_start");
+extern const uint8_t favicon_png_end[]   asm("_binary_favicon_png_end");
 
 // Handler for root URL
 esp_err_t root_get_handler(httpd_req_t *req)
@@ -13,6 +15,16 @@ esp_err_t root_get_handler(httpd_req_t *req)
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, (const char *)config_html_start,
                     config_html_end - config_html_start);
+    return ESP_OK;
+}
+
+// Handler for favicon
+esp_err_t favicon_get_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "image/png");
+    httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=604800");
+    httpd_resp_send(req, (const char *)favicon_png_start,
+                    favicon_png_end - favicon_png_start);
     return ESP_OK;
 }
 
@@ -35,6 +47,7 @@ esp_err_t config_get_handler(httpd_req_t *req)
         cJSON_AddStringToObject(root, "ssid", "");
     }
 
+    cJSON_AddStringToObject(root, "hostname", cfg->hostname);
     cJSON_AddStringToObject(root, "url1", cfg->api_url[0]);
     cJSON_AddStringToObject(root, "url2", cfg->api_url[1]);
     cJSON_AddStringToObject(root, "url3", cfg->api_url[2]);
@@ -106,7 +119,8 @@ esp_err_t config_get_handler(httpd_req_t *req)
 // Returns true if valid; sends 400 and returns false if invalid.
 static bool validate_config_fields(cJSON *root, httpd_req_t *req)
 {
-    if (!validate_string_len(root, "url1", 128) ||
+    if (!validate_string_len(root, "hostname", 32) ||
+        !validate_string_len(root, "url1", 128) ||
         !validate_string_len(root, "url2", 128) ||
         !validate_string_len(root, "url3", 128) ||
         !validate_string_len(root, "ntp", 64) ||
@@ -155,6 +169,7 @@ static app_config_t *parse_config_from_json(cJSON *root)
     }
     memcpy(cfg, app_config_get(), sizeof(app_config_t));
 
+    JSON_TO_STRING(root, "hostname",       cfg->hostname);
     JSON_TO_STRING(root, "url1",           cfg->api_url[0]);
     JSON_TO_STRING(root, "url2",           cfg->api_url[1]);
     JSON_TO_STRING(root, "url3",           cfg->api_url[2]);
@@ -212,7 +227,7 @@ static app_config_t *parse_config_from_json(cJSON *root)
     if (cJSON_IsNumber(apo_item)) {
         int v = apo_item->valueint;
         if (v < -1) v = -1;
-        if (v > MAX_NINA_INSTANCES + 1) v = MAX_NINA_INSTANCES + 1;
+        if (v > MAX_NINA_INSTANCES + 3) v = MAX_NINA_INSTANCES + 3;
         cfg->active_page_override = (int8_t)v;
     }
 
@@ -417,9 +432,17 @@ esp_err_t config_post_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
-    app_config_t old_cfg = app_config_get_snapshot();
+    app_config_t *old_cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    if (!old_cfg) {
+        ESP_LOGE(TAG, "config_post: malloc failed for old_cfg");
+        free(cfg);
+        httpd_resp_send_500(req);
+        return ESP_OK;
+    }
+    memcpy(old_cfg, app_config_get(), sizeof(app_config_t));
     app_config_save(cfg);
-    config_trigger_side_effects(&old_cfg, cfg);
+    config_trigger_side_effects(old_cfg, cfg);
+    free(old_cfg);
     free(cfg);
 
     ESP_LOGI(TAG, "Config saved to NVS");
@@ -445,9 +468,17 @@ esp_err_t config_apply_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
-    app_config_t old_cfg = app_config_get_snapshot();
+    app_config_t *old_cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    if (!old_cfg) {
+        ESP_LOGE(TAG, "config_apply: malloc failed for old_cfg");
+        free(cfg);
+        httpd_resp_send_500(req);
+        return ESP_OK;
+    }
+    memcpy(old_cfg, app_config_get(), sizeof(app_config_t));
     app_config_apply(cfg);
-    config_trigger_side_effects(&old_cfg, cfg);
+    config_trigger_side_effects(old_cfg, cfg);
+    free(old_cfg);
     free(cfg);
 
     httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
@@ -457,16 +488,24 @@ esp_err_t config_apply_handler(httpd_req_t *req)
 // Handler for reverting config to NVS-saved state
 esp_err_t config_revert_handler(httpd_req_t *req)
 {
-    app_config_t old_cfg = app_config_get_snapshot();
+    app_config_t *old_cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    if (!old_cfg) {
+        ESP_LOGE(TAG, "config_revert: malloc failed for old_cfg");
+        httpd_resp_send_500(req);
+        return ESP_OK;
+    }
+    memcpy(old_cfg, app_config_get(), sizeof(app_config_t));
 
     esp_err_t err = app_config_revert();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Config revert failed");
+        free(old_cfg);
         httpd_resp_send_500(req);
         return ESP_OK;
     }
 
-    config_trigger_side_effects(&old_cfg, app_config_get());
+    config_trigger_side_effects(old_cfg, app_config_get());
+    free(old_cfg);
 
     ESP_LOGI(TAG, "Config reverted from NVS");
     httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);

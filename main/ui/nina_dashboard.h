@@ -80,6 +80,12 @@ typedef void (*nina_page_change_cb_t)(int new_page);
 void nina_dashboard_set_page_change_cb(nina_page_change_cb_t cb);
 
 /**
+ * @brief Check if the active page is the AllSky page
+ * @return true if the AllSky page is currently shown
+ */
+bool nina_dashboard_is_allsky_page(void);
+
+/**
  * @brief Check if the active page is the summary page
  * @return true if the summary page is currently shown
  */

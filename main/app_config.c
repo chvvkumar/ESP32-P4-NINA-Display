@@ -54,6 +54,33 @@ static const char *DEFAULT_HFR_THRESHOLDS =
     "{\"good_max\":2.0,\"ok_max\":3.5,"
     "\"good_color\":\"#15803d\",\"ok_color\":\"#ca8a04\",\"bad_color\":\"#b91c1c\"}";
 
+// Default AllSky field configuration — maps quadrant fields to AllSky API keys
+static const char *DEFAULT_ALLSKY_FIELD_CONFIG =
+    "{\"thermal\":{\"main\":{\"key\":\"pistatus.AS_CPUTEMP\",\"unit\":\"CPU TEMP\"},"
+    "\"sub1\":{\"label\":\"SSD\",\"key\":\"allskyfans.OTH_TEMPERATURE\",\"suffix\":\"\xC2\xB0""C\"}},"
+    "\"sqm\":{\"main\":{\"key\":\"allskytsl2591SQM.AS_MPSAS\",\"unit\":\"mag/arcsec\xC2\xB2\"},"
+    "\"sub1\":{\"label\":\"\",\"key\":\"allskymqttsubscribe.MQTT_Cloud_status\",\"suffix\":\"\"},"
+    "\"sub2\":{\"label\":\"Stars\",\"key\":\"\",\"suffix\":\"\"}},"
+    "\"ambient\":{\"main\":{\"key\":\"allskydew.AS_DEWCONTROLAMBIENT\",\"unit\":\"TEMP \xC2\xB0""C\"},"
+    "\"sub1\":{\"label\":\"HUM\",\"key\":\"allskydew.AS_DEWCONTROLHUMIDITY\",\"suffix\":\"%\"},"
+    "\"sub2\":{\"label\":\"DEW\",\"key\":\"allskydew.AS_DEWCONTROLDEW\",\"suffix\":\"\xC2\xB0""C\"},"
+    "\"dot1\":{\"key\":\"allskyfans.OTH_FANS\",\"on_value\":\"On\"},"
+    "\"dot2\":{\"key\":\"allskydew.AS_DEWCONTROLHEATER\",\"on_value\":\"On\"}},"
+    "\"power\":{\"main\":{\"key\":\"allskyina260.AS_INA260POWER\",\"unit\":\"WATTS\"},"
+    "\"sub1\":{\"label\":\"\",\"key\":\"allskyina260.AS_INA260VOLTAGE\",\"suffix\":\"V\"},"
+    "\"sub2\":{\"label\":\"\",\"key\":\"allskyina260.AS_INA260CURRENT\",\"suffix\":\"A\"}}}";
+
+// Default AllSky thresholds — min/max ranges with gradient colors per field
+// Keys use positional format: {quadrant}_{field} (e.g., thermal_main, ambient_sub1)
+static const char *DEFAULT_ALLSKY_THRESHOLDS =
+    "{\"thermal_main\":{\"min\":0,\"max\":80,\"color_min\":\"#3b82f6\",\"color_max\":\"#ef4444\"},"
+    "\"thermal_sub1\":{\"min\":0,\"max\":70,\"color_min\":\"#3b82f6\",\"color_max\":\"#ef4444\"},"
+    "\"sqm_main\":{\"min\":16,\"max\":22,\"color_min\":\"#ef4444\",\"color_max\":\"#22c55e\"},"
+    "\"ambient_main\":{\"min\":-30,\"max\":40,\"color_min\":\"#3b82f6\",\"color_max\":\"#ef4444\"},"
+    "\"ambient_sub1\":{\"min\":0,\"max\":100,\"color_min\":\"#22c55e\",\"color_max\":\"#3b82f6\"},"
+    "\"ambient_sub2\":{\"min\":-30,\"max\":30,\"color_min\":\"#3b82f6\",\"color_max\":\"#ef4444\"},"
+    "\"power_main\":{\"min\":0,\"max\":5,\"color_min\":\"#22c55e\",\"color_max\":\"#ef4444\"}}";
+
 // Default filter colors for common astrophotography filters
 static const struct {
     const char *name;
@@ -560,6 +587,95 @@ typedef struct {
     bool     deep_sleep_on_idle;
 } app_config_v14_t;
 
+/* ── Version 15 config struct — used only for NVS migration to v16 ────── */
+typedef struct {
+    uint32_t config_version;
+    char api_url[3][128];
+    char ntp_server[64];
+    char tz_string[64];
+    char filter_colors[3][512];
+    char rms_thresholds[3][256];
+    char hfr_thresholds[3][256];
+    int theme_index;
+    int brightness;
+    int color_brightness;
+    bool mqtt_enabled;
+    char mqtt_broker_url[128];
+    char mqtt_username[64];
+    char mqtt_password[64];
+    char mqtt_topic_prefix[64];
+    uint16_t mqtt_port;
+    int8_t   active_page_override;
+    bool     auto_rotate_enabled;
+    uint16_t auto_rotate_interval_s;
+    uint8_t  auto_rotate_effect;
+    bool     auto_rotate_skip_disconnected;
+    uint8_t  auto_rotate_pages;
+    uint8_t  update_rate_s;
+    uint8_t  graph_update_interval_s;
+    uint8_t  connection_timeout_s;
+    uint8_t  toast_duration_s;
+    bool     debug_mode;
+    bool     instance_enabled[3];
+    bool     screen_sleep_enabled;
+    uint16_t screen_sleep_timeout_s;
+    bool     alert_flash_enabled;
+    uint8_t  idle_poll_interval_s;
+    bool     wifi_power_save;
+    uint8_t  widget_style;
+    uint8_t  auto_update_check;
+    uint8_t  update_channel;
+    bool     deep_sleep_enabled;
+    uint32_t deep_sleep_wake_timer_s;
+    bool     deep_sleep_on_idle;
+    uint8_t  screen_rotation;
+} app_config_v15_t;
+
+/* ── Version 16 config struct — used only for NVS migration to v17 ────── */
+typedef struct {
+    uint32_t config_version;
+    char api_url[3][128];
+    char ntp_server[64];
+    char tz_string[64];
+    char filter_colors[3][512];
+    char rms_thresholds[3][256];
+    char hfr_thresholds[3][256];
+    int theme_index;
+    int brightness;
+    int color_brightness;
+    bool mqtt_enabled;
+    char mqtt_broker_url[128];
+    char mqtt_username[64];
+    char mqtt_password[64];
+    char mqtt_topic_prefix[64];
+    uint16_t mqtt_port;
+    int8_t   active_page_override;
+    bool     auto_rotate_enabled;
+    uint16_t auto_rotate_interval_s;
+    uint8_t  auto_rotate_effect;
+    bool     auto_rotate_skip_disconnected;
+    uint8_t  auto_rotate_pages;
+    uint8_t  update_rate_s;
+    uint8_t  graph_update_interval_s;
+    uint8_t  connection_timeout_s;
+    uint8_t  toast_duration_s;
+    bool     debug_mode;
+    bool     instance_enabled[3];
+    bool     screen_sleep_enabled;
+    uint16_t screen_sleep_timeout_s;
+    bool     alert_flash_enabled;
+    uint8_t  idle_poll_interval_s;
+    bool     wifi_power_save;
+    uint8_t  widget_style;
+    uint8_t  auto_update_check;
+    uint8_t  update_channel;
+    bool     deep_sleep_enabled;
+    uint32_t deep_sleep_wake_timer_s;
+    bool     deep_sleep_on_idle;
+    uint8_t  screen_rotation;
+    char     hostname[32];
+} app_config_v16_t;
+
 static void set_defaults(app_config_t *cfg) {
     memset(cfg, 0, sizeof(app_config_t));
     cfg->config_version = APP_CONFIG_VERSION;
@@ -600,9 +716,19 @@ static void set_defaults(app_config_t *cfg) {
     cfg->deep_sleep_wake_timer_s = 28800;  // 8 hours
     cfg->deep_sleep_on_idle = false;
     cfg->screen_rotation = 0;
+    strcpy(cfg->hostname, "NINA-DISPLAY");
     strcpy(cfg->mqtt_broker_url, "mqtt://192.168.1.250");
     strcpy(cfg->mqtt_topic_prefix, "ninadisplay");
     cfg->mqtt_port = 1883;
+
+    // AllSky defaults
+    cfg->allsky_hostname[0] = '\0';
+    cfg->allsky_update_interval_s = 5;
+    cfg->allsky_dew_offset = 5.0f;
+    strncpy(cfg->allsky_field_config, DEFAULT_ALLSKY_FIELD_CONFIG, sizeof(cfg->allsky_field_config) - 1);
+    cfg->allsky_field_config[sizeof(cfg->allsky_field_config) - 1] = '\0';
+    strncpy(cfg->allsky_thresholds, DEFAULT_ALLSKY_THRESHOLDS, sizeof(cfg->allsky_thresholds) - 1);
+    cfg->allsky_thresholds[sizeof(cfg->allsky_thresholds) - 1] = '\0';
 }
 
 /**
@@ -1210,6 +1336,111 @@ static void migrate_from_v14(const app_config_v14_t *old, app_config_t *cfg) {
 }
 
 /**
+ * @brief Migrate a v15 config blob into the current struct layout.
+ *
+ * v15 → v16 adds: hostname.
+ */
+static void migrate_from_v15(const app_config_v15_t *old, app_config_t *cfg) {
+    set_defaults(cfg);
+
+    memcpy(cfg->api_url, old->api_url, sizeof(cfg->api_url));
+    memcpy(cfg->ntp_server, old->ntp_server, sizeof(cfg->ntp_server));
+    memcpy(cfg->tz_string, old->tz_string, sizeof(cfg->tz_string));
+    memcpy(cfg->filter_colors, old->filter_colors, sizeof(cfg->filter_colors));
+    memcpy(cfg->rms_thresholds, old->rms_thresholds, sizeof(cfg->rms_thresholds));
+    memcpy(cfg->hfr_thresholds, old->hfr_thresholds, sizeof(cfg->hfr_thresholds));
+    cfg->theme_index = old->theme_index;
+    cfg->brightness = old->brightness;
+    cfg->color_brightness = old->color_brightness;
+    cfg->mqtt_enabled = old->mqtt_enabled;
+    memcpy(cfg->mqtt_broker_url, old->mqtt_broker_url, sizeof(cfg->mqtt_broker_url));
+    memcpy(cfg->mqtt_username, old->mqtt_username, sizeof(cfg->mqtt_username));
+    memcpy(cfg->mqtt_password, old->mqtt_password, sizeof(cfg->mqtt_password));
+    memcpy(cfg->mqtt_topic_prefix, old->mqtt_topic_prefix, sizeof(cfg->mqtt_topic_prefix));
+    cfg->mqtt_port = old->mqtt_port;
+    cfg->active_page_override = old->active_page_override;
+    cfg->auto_rotate_enabled = old->auto_rotate_enabled;
+    cfg->auto_rotate_interval_s = old->auto_rotate_interval_s;
+    cfg->auto_rotate_effect = old->auto_rotate_effect;
+    cfg->auto_rotate_skip_disconnected = old->auto_rotate_skip_disconnected;
+    cfg->auto_rotate_pages = old->auto_rotate_pages;
+    cfg->update_rate_s = old->update_rate_s;
+    cfg->graph_update_interval_s = old->graph_update_interval_s;
+    cfg->connection_timeout_s = old->connection_timeout_s;
+    cfg->toast_duration_s = old->toast_duration_s;
+    cfg->debug_mode = old->debug_mode;
+    memcpy(cfg->instance_enabled, old->instance_enabled, sizeof(cfg->instance_enabled));
+    cfg->screen_sleep_enabled = old->screen_sleep_enabled;
+    cfg->screen_sleep_timeout_s = old->screen_sleep_timeout_s;
+    cfg->alert_flash_enabled = old->alert_flash_enabled;
+    cfg->idle_poll_interval_s = old->idle_poll_interval_s;
+    cfg->wifi_power_save = old->wifi_power_save;
+    cfg->widget_style = old->widget_style;
+    cfg->auto_update_check = old->auto_update_check;
+    cfg->update_channel = old->update_channel;
+    cfg->deep_sleep_enabled = old->deep_sleep_enabled;
+    cfg->deep_sleep_wake_timer_s = old->deep_sleep_wake_timer_s;
+    cfg->deep_sleep_on_idle = old->deep_sleep_on_idle;
+    cfg->screen_rotation = old->screen_rotation;
+    /* hostname: defaults from set_defaults() */
+
+    ESP_LOGI(TAG, "Migrated config from v15 → v%d", APP_CONFIG_VERSION);
+}
+
+/**
+ * @brief Migrate a v16 config blob into the current struct layout.
+ *
+ * v16 → v17 adds: AllSky integration fields.
+ */
+static void migrate_from_v16(const app_config_v16_t *old, app_config_t *cfg) {
+    set_defaults(cfg);
+
+    memcpy(cfg->api_url, old->api_url, sizeof(cfg->api_url));
+    memcpy(cfg->ntp_server, old->ntp_server, sizeof(cfg->ntp_server));
+    memcpy(cfg->tz_string, old->tz_string, sizeof(cfg->tz_string));
+    memcpy(cfg->filter_colors, old->filter_colors, sizeof(cfg->filter_colors));
+    memcpy(cfg->rms_thresholds, old->rms_thresholds, sizeof(cfg->rms_thresholds));
+    memcpy(cfg->hfr_thresholds, old->hfr_thresholds, sizeof(cfg->hfr_thresholds));
+    cfg->theme_index = old->theme_index;
+    cfg->brightness = old->brightness;
+    cfg->color_brightness = old->color_brightness;
+    cfg->mqtt_enabled = old->mqtt_enabled;
+    memcpy(cfg->mqtt_broker_url, old->mqtt_broker_url, sizeof(cfg->mqtt_broker_url));
+    memcpy(cfg->mqtt_username, old->mqtt_username, sizeof(cfg->mqtt_username));
+    memcpy(cfg->mqtt_password, old->mqtt_password, sizeof(cfg->mqtt_password));
+    memcpy(cfg->mqtt_topic_prefix, old->mqtt_topic_prefix, sizeof(cfg->mqtt_topic_prefix));
+    cfg->mqtt_port = old->mqtt_port;
+    cfg->active_page_override = old->active_page_override;
+    cfg->auto_rotate_enabled = old->auto_rotate_enabled;
+    cfg->auto_rotate_interval_s = old->auto_rotate_interval_s;
+    cfg->auto_rotate_effect = old->auto_rotate_effect;
+    cfg->auto_rotate_skip_disconnected = old->auto_rotate_skip_disconnected;
+    cfg->auto_rotate_pages = old->auto_rotate_pages;
+    cfg->update_rate_s = old->update_rate_s;
+    cfg->graph_update_interval_s = old->graph_update_interval_s;
+    cfg->connection_timeout_s = old->connection_timeout_s;
+    cfg->toast_duration_s = old->toast_duration_s;
+    cfg->debug_mode = old->debug_mode;
+    memcpy(cfg->instance_enabled, old->instance_enabled, sizeof(cfg->instance_enabled));
+    cfg->screen_sleep_enabled = old->screen_sleep_enabled;
+    cfg->screen_sleep_timeout_s = old->screen_sleep_timeout_s;
+    cfg->alert_flash_enabled = old->alert_flash_enabled;
+    cfg->idle_poll_interval_s = old->idle_poll_interval_s;
+    cfg->wifi_power_save = old->wifi_power_save;
+    cfg->widget_style = old->widget_style;
+    cfg->auto_update_check = old->auto_update_check;
+    cfg->update_channel = old->update_channel;
+    cfg->deep_sleep_enabled = old->deep_sleep_enabled;
+    cfg->deep_sleep_wake_timer_s = old->deep_sleep_wake_timer_s;
+    cfg->deep_sleep_on_idle = old->deep_sleep_on_idle;
+    cfg->screen_rotation = old->screen_rotation;
+    memcpy(cfg->hostname, old->hostname, sizeof(cfg->hostname));
+    /* AllSky fields: defaults from set_defaults() */
+
+    ESP_LOGI(TAG, "Migrated config from v16 → v%d", APP_CONFIG_VERSION);
+}
+
+/**
  * @brief Validate and clamp config fields to sane ranges.
  * @return true if any field was corrected.
  */
@@ -1246,7 +1477,7 @@ static bool validate_config(app_config_t *cfg) {
         cfg->mqtt_port = 1883;
         fixed = true;
     }
-    if (cfg->active_page_override < -1 || cfg->active_page_override > MAX_NINA_INSTANCES + 2) {
+    if (cfg->active_page_override < -1 || cfg->active_page_override > MAX_NINA_INSTANCES + 3) {
         cfg->active_page_override = -1;
         fixed = true;
     }
@@ -1292,6 +1523,26 @@ static bool validate_config(app_config_t *cfg) {
     }
     if (cfg->screen_rotation > 3) {
         cfg->screen_rotation = 0;
+        fixed = true;
+    }
+    if (cfg->allsky_update_interval_s < 1 || cfg->allsky_update_interval_s > 300) {
+        cfg->allsky_update_interval_s = 5;
+        fixed = true;
+    }
+    if (cfg->allsky_dew_offset < -50.0f || cfg->allsky_dew_offset > 50.0f) {
+        cfg->allsky_dew_offset = 5.0f;
+        fixed = true;
+    }
+    if (cfg->allsky_field_config[0] == '\0') {
+        strncpy(cfg->allsky_field_config, DEFAULT_ALLSKY_FIELD_CONFIG, sizeof(cfg->allsky_field_config) - 1);
+        cfg->allsky_field_config[sizeof(cfg->allsky_field_config) - 1] = '\0';
+        fixed = true;
+    }
+    if (cfg->allsky_thresholds[0] == '\0' ||
+        strstr(cfg->allsky_thresholds, "thermal_main") == NULL) {
+        /* Empty or contains old-format keys (cpu_temp, sqm, etc.) — reset to new positional format */
+        strncpy(cfg->allsky_thresholds, DEFAULT_ALLSKY_THRESHOLDS, sizeof(cfg->allsky_thresholds) - 1);
+        cfg->allsky_thresholds[sizeof(cfg->allsky_thresholds) - 1] = '\0';
         fixed = true;
     }
 
@@ -1349,8 +1600,26 @@ void app_config_init(void) {
             nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(handle);
         }
+    } else if (version_check == 16 && stored_size >= sizeof(app_config_v16_t)) {
+        /* Version 16 blob — migrate to v17 */
+        app_config_v16_t old;
+        memcpy(&old, raw, sizeof(app_config_v16_t));
+        migrate_from_v16(&old, &s_config);
+        validate_config(&s_config);
+
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    } else if (version_check == 15 && stored_size >= sizeof(app_config_v15_t)) {
+        /* Version 15 blob — migrate to v17 */
+        app_config_v15_t old;
+        memcpy(&old, raw, sizeof(app_config_v15_t));
+        migrate_from_v15(&old, &s_config);
+        validate_config(&s_config);
+
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 14 && stored_size >= sizeof(app_config_v14_t)) {
-        /* Version 14 blob — migrate to v15 */
+        /* Version 14 blob — migrate to v16 */
         app_config_v14_t old;
         memcpy(&old, raw, sizeof(app_config_v14_t));
         migrate_from_v14(&old, &s_config);

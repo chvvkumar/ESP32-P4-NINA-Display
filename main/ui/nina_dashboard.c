@@ -13,6 +13,7 @@
 #include "nina_info_overlay.h"
 #include "nina_sysinfo.h"
 #include "nina_summary.h"
+#include "nina_allsky.h"
 #include "nina_settings_tabview.h"
 #include "nina_toast.h"
 #include "nina_event_log.h"
@@ -34,15 +35,18 @@ int active_page = 0;
 const theme_t *current_theme = NULL;
 int page_instance_map[MAX_NINA_INSTANCES] = {0, 1, 2};
 
-/* Summary page — always first (index 0), excluded from indicators */
+/* AllSky page — always first (index 0), excluded from indicators */
+lv_obj_t *allsky_obj = NULL;
+
+/* Summary page — index 1, excluded from indicators */
 static lv_obj_t *summary_obj = NULL;
 
-/* Settings page — before sysinfo (index page_count+1), excluded from indicators */
+/* Settings page — before sysinfo (index page_count+2), excluded from indicators */
 static lv_obj_t *settings_obj = NULL;
 
 /* System info page — always the last navigable page, excluded from indicators */
 static lv_obj_t *sysinfo_obj = NULL;
-int total_page_count = 0;   /* 1 (summary) + page_count (NINA) + 1 (settings) + 1 (sysinfo) */
+int total_page_count = 0;   /* 1 (allsky) + 1 (summary) + page_count (NINA) + 1 (settings) + 1 (sysinfo) */
 
 /* Private state */
 static lv_obj_t *scr_dashboard = NULL;
@@ -119,50 +123,56 @@ lv_obj_t *create_value_label(lv_obj_t *parent) {
 
 /*
  * Page index convention:
- *   0                     = summary page
- *   1 .. page_count       = NINA instance pages  (pages[idx-1])
- *   page_count + 1        = settings page
- *   page_count + 2        = sysinfo page
- *   total_page_count      = page_count + 3
+ *   0                     = AllSky page
+ *   1                     = summary page
+ *   2 .. page_count + 1   = NINA instance pages  (pages[idx-2])
+ *   page_count + 2        = settings page
+ *   page_count + 3        = sysinfo page
+ *   total_page_count      = page_count + 4
  */
 
 /* Hide the page object at the given index */
 static void hide_page_at(int idx) {
-    if (idx == 0 && summary_obj)
+    if (idx == 0 && allsky_obj)
+        lv_obj_add_flag(allsky_obj, LV_OBJ_FLAG_HIDDEN);
+    else if (idx == 1 && summary_obj)
         lv_obj_add_flag(summary_obj, LV_OBJ_FLAG_HIDDEN);
-    else if (idx >= 1 && idx <= page_count)
-        lv_obj_add_flag(pages[idx - 1].page, LV_OBJ_FLAG_HIDDEN);
-    else if (idx == page_count + 1 && settings_obj) {
+    else if (idx >= 2 && idx <= page_count + 1)
+        lv_obj_add_flag(pages[idx - 2].page, LV_OBJ_FLAG_HIDDEN);
+    else if (idx == page_count + 2 && settings_obj) {
         settings_tabview_destroy();
         settings_obj = NULL;
-    } else if (idx == page_count + 2 && sysinfo_obj)
+    } else if (idx == page_count + 3 && sysinfo_obj)
         lv_obj_add_flag(sysinfo_obj, LV_OBJ_FLAG_HIDDEN);
 }
 
 /* Show the page object at the given index */
 static void show_page_at(int idx) {
-    if (idx == 0 && summary_obj)
+    if (idx == 0 && allsky_obj)
+        lv_obj_clear_flag(allsky_obj, LV_OBJ_FLAG_HIDDEN);
+    else if (idx == 1 && summary_obj)
         lv_obj_clear_flag(summary_obj, LV_OBJ_FLAG_HIDDEN);
-    else if (idx >= 1 && idx <= page_count)
-        lv_obj_clear_flag(pages[idx - 1].page, LV_OBJ_FLAG_HIDDEN);
-    else if (idx == page_count + 1) {
+    else if (idx >= 2 && idx <= page_count + 1)
+        lv_obj_clear_flag(pages[idx - 2].page, LV_OBJ_FLAG_HIDDEN);
+    else if (idx == page_count + 2) {
         if (!settings_obj) {
             settings_obj = settings_tabview_create(main_cont);
         }
         lv_obj_clear_flag(settings_obj, LV_OBJ_FLAG_HIDDEN);
         settings_tabview_refresh();
     }
-    else if (idx == page_count + 2 && sysinfo_obj) {
+    else if (idx == page_count + 3 && sysinfo_obj) {
         lv_obj_clear_flag(sysinfo_obj, LV_OBJ_FLAG_HIDDEN);
         sysinfo_page_refresh();
     }
 }
 
 static lv_obj_t *get_page_obj(int idx) {
-    if (idx == 0 && summary_obj) return summary_obj;
-    if (idx >= 1 && idx <= page_count) return pages[idx - 1].page;
-    if (idx == page_count + 1 && settings_obj) return settings_obj;
-    if (idx == page_count + 2 && sysinfo_obj) return sysinfo_obj;
+    if (idx == 0 && allsky_obj) return allsky_obj;
+    if (idx == 1 && summary_obj) return summary_obj;
+    if (idx >= 2 && idx <= page_count + 1) return pages[idx - 2].page;
+    if (idx == page_count + 2 && settings_obj) return settings_obj;
+    if (idx == page_count + 3 && sysinfo_obj) return sysinfo_obj;
     return NULL;
 }
 
@@ -230,6 +240,7 @@ void nina_dashboard_apply_theme(int theme_index) {
         apply_theme_to_page(&pages[i]);
     }
 
+    allsky_page_apply_theme();
     summary_page_apply_theme();
     if (settings_obj) settings_tabview_apply_theme();
     sysinfo_page_apply_theme();
@@ -248,7 +259,7 @@ void nina_dashboard_apply_theme(int theme_index) {
 
 /* Go back to summary page when bottom row is clicked */
 static void bottom_row_click_cb(lv_event_t *e) {
-    nina_dashboard_show_page(0, 0);
+    nina_dashboard_show_page(1, 0);
 }
 
 /* Build all widgets for one dashboard page */
@@ -589,7 +600,7 @@ static void create_page_indicator(lv_obj_t *parent, int count) {
     lv_obj_set_flex_align(indicator_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(indicator_cont, 8, 0);
 
-    /* Start hidden — summary page (index 0) is the default boot page */
+    /* Start hidden — summary page (index 1) is the default boot page */
     lv_obj_add_flag(indicator_cont, LV_OBJ_FLAG_HIDDEN);
 
     int gb = app_config_get()->color_brightness;
@@ -626,12 +637,12 @@ static void gesture_event_cb(lv_event_t *e) {
 
     /* Block screen-level swipe on settings page — sliders need horizontal drag.
      * Only the header widget on the settings page handles page-switch gestures. */
-    if (active_page == page_count + 1) return;
+    if (active_page == page_count + 2) return;
 
     lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
     int new_page = active_page;
 
-    int settings_idx = page_count + 1;  /* settings page — skip in swipe navigation */
+    int settings_idx = page_count + 2;  /* settings page — skip in swipe navigation */
 
     if (dir == LV_DIR_LEFT) {
         new_page = (active_page + 1) % total_page_count;
@@ -724,7 +735,7 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
         }
     }
     if (page_count < 1) page_count = 1;  /* Always at least 1 page */
-    active_page = 0;  /* Summary page is the default */
+    active_page = 1;  /* Summary page is the default (index 1) */
 
     main_cont = lv_obj_create(scr_dashboard);
     lv_obj_remove_style_all(main_cont);
@@ -733,26 +744,30 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     lv_obj_set_style_bg_opa(main_cont, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(main_cont, OUTER_PADDING, 0);
 
-    /* Summary page — always first (page index 0), visible by default */
+    /* AllSky page — always first (page index 0), hidden initially */
+    allsky_obj = allsky_page_create(main_cont);
+    lv_obj_add_flag(allsky_obj, LV_OBJ_FLAG_HIDDEN);
+
+    /* Summary page — page index 1, visible by default */
     summary_obj = summary_page_create(main_cont, page_count);
 
-    /* NINA instance pages — page indices 1..page_count, hidden initially.
+    /* NINA instance pages — page indices 2..page_count+1, hidden initially.
      * Each page maps to the actual instance via page_instance_map[]. */
     for (int i = 0; i < page_count; i++) {
         create_dashboard_page(&pages[i], main_cont, page_instance_map[i]);
         lv_obj_add_flag(pages[i].page, LV_OBJ_FLAG_HIDDEN);
     }
 
-    /* Settings page — lazy-loaded on demand (page index page_count+1).
+    /* Settings page — lazy-loaded on demand (page index page_count+2).
      * NOT created at boot to save internal heap for OTA task. */
     settings_obj = NULL;
 
-    /* System info page — always last (page index page_count+2), hidden initially */
+    /* System info page — always last (page index page_count+3), hidden initially */
     sysinfo_obj = sysinfo_page_create(main_cont);
     lv_obj_add_flag(sysinfo_obj, LV_OBJ_FLAG_HIDDEN);
-    total_page_count = page_count + 3;  /* summary + NINA pages + settings + sysinfo */
+    total_page_count = page_count + 4;  /* allsky + summary + NINA pages + settings + sysinfo */
 
-    /* Page indicator dots — only for NINA pages (not summary or sysinfo) */
+    /* Page indicator dots — only for NINA pages (not summary, allsky, or sysinfo) */
     create_page_indicator(scr_dashboard, page_count);
 
     /* Always enable swipe gestures */
@@ -802,16 +817,20 @@ int nina_dashboard_get_active_page(void) {
     return active_page;
 }
 
-bool nina_dashboard_is_settings_page(void) {
-    return active_page == page_count + 1;
+bool nina_dashboard_is_allsky_page(void) {
+    return active_page == 0;
 }
 
-bool nina_dashboard_is_sysinfo_page(void) {
+bool nina_dashboard_is_settings_page(void) {
     return active_page == page_count + 2;
 }
 
+bool nina_dashboard_is_sysinfo_page(void) {
+    return active_page == page_count + 3;
+}
+
 bool nina_dashboard_is_summary_page(void) {
-    return active_page == 0;
+    return active_page == 1;
 }
 
 int nina_dashboard_get_total_page_count(void) {
@@ -825,7 +844,7 @@ int nina_dashboard_page_to_instance(int page_idx) {
 
 int nina_dashboard_instance_to_page(int instance_idx) {
     for (int i = 0; i < page_count; i++) {
-        if (page_instance_map[i] == instance_idx) return i + 1;  /* 1-based page index */
+        if (page_instance_map[i] == instance_idx) return i + 2;  /* page index (NINA pages start at 2) */
     }
     return -1;
 }
@@ -850,13 +869,13 @@ static void update_indicators(void)
     int gb = app_config_get()->color_brightness;
     for (int i = 0; i < page_count; i++) {
         if (indicator_dots[i]) {
-            uint32_t dot_color = (active_page == i + 1)
+            uint32_t dot_color = (active_page == i + 2)
                 ? app_config_apply_brightness(current_theme->text_color, gb)
                 : app_config_apply_brightness(current_theme->label_color, gb);
             lv_obj_set_style_bg_color(indicator_dots[i], lv_color_hex(dot_color), 0);
         }
     }
-    if (active_page >= 1 && active_page <= page_count)
+    if (active_page >= 2 && active_page <= page_count + 1)
         lv_obj_clear_flag(indicator_cont, LV_OBJ_FLAG_HIDDEN);
     else
         lv_obj_add_flag(indicator_cont, LV_OBJ_FLAG_HIDDEN);
