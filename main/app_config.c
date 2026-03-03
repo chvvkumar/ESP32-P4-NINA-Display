@@ -71,14 +71,15 @@ static const char *DEFAULT_ALLSKY_FIELD_CONFIG =
     "\"sub2\":{\"label\":\"\",\"key\":\"allskyina260.AS_INA260CURRENT\",\"suffix\":\"A\"}}}";
 
 // Default AllSky thresholds — min/max ranges with gradient colors per field
+// Keys use positional format: {quadrant}_{field} (e.g., thermal_main, ambient_sub1)
 static const char *DEFAULT_ALLSKY_THRESHOLDS =
-    "{\"cpu_temp\":{\"min\":0,\"max\":80,\"color_min\":\"#3b82f6\",\"color_max\":\"#ef4444\"},"
-    "\"ssd_temp\":{\"min\":0,\"max\":70,\"color_min\":\"#3b82f6\",\"color_max\":\"#ef4444\"},"
-    "\"sqm\":{\"min\":16,\"max\":22,\"color_min\":\"#ef4444\",\"color_max\":\"#22c55e\"},"
-    "\"ambient\":{\"min\":-30,\"max\":40,\"color_min\":\"#3b82f6\",\"color_max\":\"#ef4444\"},"
-    "\"humidity\":{\"min\":0,\"max\":100,\"color_min\":\"#22c55e\",\"color_max\":\"#3b82f6\"},"
-    "\"dew_point\":{\"min\":-30,\"max\":30,\"color_min\":\"#3b82f6\",\"color_max\":\"#ef4444\"},"
-    "\"amps\":{\"min\":0,\"max\":5,\"color_min\":\"#22c55e\",\"color_max\":\"#ef4444\"}}";
+    "{\"thermal_main\":{\"min\":0,\"max\":80,\"color_min\":\"#3b82f6\",\"color_max\":\"#ef4444\"},"
+    "\"thermal_sub1\":{\"min\":0,\"max\":70,\"color_min\":\"#3b82f6\",\"color_max\":\"#ef4444\"},"
+    "\"sqm_main\":{\"min\":16,\"max\":22,\"color_min\":\"#ef4444\",\"color_max\":\"#22c55e\"},"
+    "\"ambient_main\":{\"min\":-30,\"max\":40,\"color_min\":\"#3b82f6\",\"color_max\":\"#ef4444\"},"
+    "\"ambient_sub1\":{\"min\":0,\"max\":100,\"color_min\":\"#22c55e\",\"color_max\":\"#3b82f6\"},"
+    "\"ambient_sub2\":{\"min\":-30,\"max\":30,\"color_min\":\"#3b82f6\",\"color_max\":\"#ef4444\"},"
+    "\"power_main\":{\"min\":0,\"max\":5,\"color_min\":\"#22c55e\",\"color_max\":\"#ef4444\"}}";
 
 // Default filter colors for common astrophotography filters
 static const struct {
@@ -1537,7 +1538,9 @@ static bool validate_config(app_config_t *cfg) {
         cfg->allsky_field_config[sizeof(cfg->allsky_field_config) - 1] = '\0';
         fixed = true;
     }
-    if (cfg->allsky_thresholds[0] == '\0') {
+    if (cfg->allsky_thresholds[0] == '\0' ||
+        strstr(cfg->allsky_thresholds, "thermal_main") == NULL) {
+        /* Empty or contains old-format keys (cpu_temp, sqm, etc.) — reset to new positional format */
         strncpy(cfg->allsky_thresholds, DEFAULT_ALLSKY_THRESHOLDS, sizeof(cfg->allsky_thresholds) - 1);
         cfg->allsky_thresholds[sizeof(cfg->allsky_thresholds) - 1] = '\0';
         fixed = true;

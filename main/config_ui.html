@@ -862,22 +862,16 @@
             </select>
           </div>
           <div class="field">
-            <label class="field-label">Dew Point Offset (&deg;C above ambient)</label>
+            <label class="field-label">Dew Point Safety Margin (&deg;C)</label>
             <input type="number" class="input" id="allskyDewOffset" step="0.5" min="-50" max="50" value="5.0">
-            <div class="field-hint">Dew point colored safe when below ambient + this offset</div>
+            <div class="field-hint">Dew point colored safe when below ambient &minus; this offset</div>
           </div>
         </div>
       </div>
 
       <div class="card">
-        <div class="card-title">Thresholds &amp; Colors</div>
-        <div class="field-hint" style="margin-bottom:16px">Set min/max ranges and gradient colors for each sensor field. Values at min use the left color; values at max use the right color.</div>
-        <div id="allskyThresholds"></div>
-      </div>
-
-      <div class="card">
         <div class="card-title">Field Mappings</div>
-        <div class="field-hint" style="margin-bottom:16px">Configure which AllSky API JSON values appear in each display quadrant. Click a key path input, then click "Use" on a JSON leaf to fill it.</div>
+        <div class="field-hint" style="margin-bottom:16px">Configure which AllSky API JSON values appear in each display quadrant. Click a key path input, then click "Use" on a JSON leaf to fill it. Use the color controls to set gradient ranges per field.</div>
 
         <button onclick="fetchAllSkyJson()" class="btn btn-primary" id="fetchJsonBtn" style="width:100%;margin-bottom:16px">Fetch JSON from AllSky</button>
 
@@ -1582,100 +1576,55 @@
 
     /* === AllSky Configuration === */
 
-    var allskyThresholdDefs=[
-      {key:'cpu_temp',   label:'CPU Temp',  unit:'\u00b0C', defMin:30, defMax:80,  defMinColor:'#10b981', defMaxColor:'#ef4444'},
-      {key:'ssd_temp',   label:'SSD Temp',  unit:'\u00b0C', defMin:30, defMax:70,  defMinColor:'#10b981', defMaxColor:'#ef4444'},
-      {key:'sqm',        label:'SQM',       unit:'mag/\u2033\u00b2', defMin:18, defMax:22,  defMinColor:'#ef4444', defMaxColor:'#10b981'},
-      {key:'ambient',    label:'Ambient',    unit:'\u00b0C', defMin:-10,defMax:35,  defMinColor:'#3b82f6', defMaxColor:'#ef4444'},
-      {key:'humidity',   label:'Humidity',   unit:'%',  defMin:0,  defMax:100, defMinColor:'#10b981', defMaxColor:'#ef4444'},
-      {key:'dew_point',  label:'Dew Point',  unit:'\u00b0C', defMin:-10,defMax:25,  defMinColor:'#10b981', defMaxColor:'#ef4444'},
-      {key:'amps',       label:'Amps',       unit:'A',  defMin:0,  defMax:30,  defMinColor:'#10b981', defMaxColor:'#ef4444'}
-    ];
-
     var allskyFieldDefs=[
       {quad:'thermal', label:'Thermal', fields:[
-        {key:'main', label:'Main Value', inputs:['key','title','unit']},
-        {key:'sub1', label:'Sub Value 1', inputs:['key','label','suffix']},
+        {key:'main', label:'Main Value', inputs:['key','title','unit'], defMin:0, defMax:80, defMinColor:'#3b82f6', defMaxColor:'#ef4444'},
+        {key:'sub1', label:'Sub Value 1', inputs:['key','label','suffix'], defMin:0, defMax:70, defMinColor:'#3b82f6', defMaxColor:'#ef4444'},
         {key:'sub2', label:'Sub Value 2', inputs:['key','label','suffix']},
-        {key:'dot1', label:'Dot 1',       inputs:['key','label']},
-        {key:'dot2', label:'Dot 2',       inputs:['key','label']}
+        {key:'dot1', label:'Dot 1',       inputs:['key','label','on_value']},
+        {key:'dot2', label:'Dot 2',       inputs:['key','label','on_value']}
       ]},
       {quad:'sqm', label:'Sky Quality', fields:[
-        {key:'main', label:'Main Value', inputs:['key','title','unit']},
+        {key:'main', label:'Main Value', inputs:['key','title','unit'], defMin:16, defMax:22, defMinColor:'#ef4444', defMaxColor:'#22c55e'},
         {key:'sub1', label:'Sub Value 1', inputs:['key','label','suffix']},
         {key:'sub2', label:'Sub Value 2', inputs:['key','label','suffix']},
-        {key:'dot1', label:'Dot 1',       inputs:['key','label']},
-        {key:'dot2', label:'Dot 2',       inputs:['key','label']}
+        {key:'dot1', label:'Dot 1',       inputs:['key','label','on_value']},
+        {key:'dot2', label:'Dot 2',       inputs:['key','label','on_value']}
       ]},
       {quad:'ambient', label:'Ambient', fields:[
-        {key:'main', label:'Main Value', inputs:['key','title','unit']},
-        {key:'sub1', label:'Sub Value 1', inputs:['key','label','suffix']},
-        {key:'sub2', label:'Sub Value 2', inputs:['key','label','suffix']},
-        {key:'dot1', label:'Dot 1',       inputs:['key','label']},
-        {key:'dot2', label:'Dot 2',       inputs:['key','label']}
+        {key:'main', label:'Main Value', inputs:['key','title','unit'], defMin:-30, defMax:40, defMinColor:'#3b82f6', defMaxColor:'#ef4444'},
+        {key:'sub1', label:'Sub Value 1', inputs:['key','label','suffix'], defMin:0, defMax:100, defMinColor:'#22c55e', defMaxColor:'#3b82f6'},
+        {key:'sub2', label:'Sub Value 2', inputs:['key','label','suffix'], defMin:-30, defMax:30, defMinColor:'#3b82f6', defMaxColor:'#ef4444'},
+        {key:'dot1', label:'Dot 1',       inputs:['key','label','on_value']},
+        {key:'dot2', label:'Dot 2',       inputs:['key','label','on_value']}
       ]},
       {quad:'power', label:'Power', fields:[
-        {key:'main', label:'Main Value', inputs:['key','title','unit']},
+        {key:'main', label:'Main Value', inputs:['key','title','unit'], defMin:0, defMax:5, defMinColor:'#22c55e', defMaxColor:'#ef4444'},
         {key:'sub1', label:'Sub Value 1', inputs:['key','label','suffix']},
         {key:'sub2', label:'Sub Value 2', inputs:['key','label','suffix']},
-        {key:'dot1', label:'Dot 1',       inputs:['key','label']},
-        {key:'dot2', label:'Dot 2',       inputs:['key','label']}
+        {key:'dot1', label:'Dot 1',       inputs:['key','label','on_value']},
+        {key:'dot2', label:'Dot 2',       inputs:['key','label','on_value']}
       ]}
     ];
 
     var activeFieldInput=null;
 
-    function populateAllSkyThresholds(thresholds){
-      var container=$('allskyThresholds');
-      if(!container) return;
-      container.innerHTML='';
-      allskyThresholdDefs.forEach(function(def){
-        var t=thresholds[def.key]||{};
-        var minVal=t.min!=null?t.min:def.defMin;
-        var maxVal=t.max!=null?t.max:def.defMax;
-        var minColor=t.color_min||def.defMinColor;
-        var maxColor=t.color_max||def.defMaxColor;
-        var gradId='as_grad_'+def.key;
-        var row=document.createElement('div');
-        row.style.cssText='display:grid;grid-template-columns:100px 1fr 1fr 36px 36px 60px;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.04)';
-        row.innerHTML=
-          '<div style="font-size:0.8rem;font-weight:500;color:var(--text)">'+def.label+'<div style="font-size:0.65rem;color:#71717a;margin-top:2px">'+def.unit+'</div></div>'+
-          '<div><div style="font-size:0.65rem;color:#71717a;margin-bottom:4px">Min</div><input type="number" class="input" id="as_min_'+def.key+'" value="'+minVal+'" step="0.1" style="min-height:38px;padding:6px 10px;font-size:0.8rem" oninput="updateAllSkyGradient(\''+def.key+'\')"></div>'+
-          '<div><div style="font-size:0.65rem;color:#71717a;margin-bottom:4px">Max</div><input type="number" class="input" id="as_max_'+def.key+'" value="'+maxVal+'" step="0.1" style="min-height:38px;padding:6px 10px;font-size:0.8rem" oninput="updateAllSkyGradient(\''+def.key+'\')"></div>'+
-          '<input type="color" id="as_minc_'+def.key+'" value="'+minColor+'" style="width:32px;height:32px;border:none;background:none;cursor:pointer;border-radius:6px" oninput="updateAllSkyGradient(\''+def.key+'\')">'+
-          '<input type="color" id="as_maxc_'+def.key+'" value="'+maxColor+'" style="width:32px;height:32px;border:none;background:none;cursor:pointer;border-radius:6px" oninput="updateAllSkyGradient(\''+def.key+'\')">'+
-          '<div id="'+gradId+'" style="height:24px;border-radius:6px;border:1px solid rgba(255,255,255,0.08)"></div>';
-        container.appendChild(row);
-        updateAllSkyGradient(def.key);
-      });
-    }
-
-    function updateAllSkyGradient(key){
-      var minc=$('as_minc_'+key);
-      var maxc=$('as_maxc_'+key);
-      var grad=$('as_grad_'+key);
+    function updateFieldGradient(thrKey){
+      var minc=$('as_thr_'+thrKey+'_minc');
+      var maxc=$('as_thr_'+thrKey+'_maxc');
+      var grad=$('as_thr_'+thrKey+'_grad');
       if(minc&&maxc&&grad){
         grad.style.background='linear-gradient(to right,'+minc.value+','+maxc.value+')';
       }
     }
 
-    function gatherAllSkyThresholds(){
-      var result={};
-      allskyThresholdDefs.forEach(function(def){
-        result[def.key]={
-          min:parseFloat($('as_min_'+def.key).value)||def.defMin,
-          max:parseFloat($('as_max_'+def.key).value)||def.defMax,
-          color_min:$('as_minc_'+def.key).value,
-          color_max:$('as_maxc_'+def.key).value
-        };
-      });
-      return result;
-    }
+    function hasColorInputs(f){ return f.inputs.indexOf('unit')>=0||f.inputs.indexOf('suffix')>=0; }
 
-    function populateAllSkyFieldMappings(config){
+    function populateAllSkyFieldMappings(config,thresholds){
       var container=$('allskyFieldMappings');
       if(!container) return;
       container.innerHTML='';
+      thresholds=thresholds||{};
       allskyFieldDefs.forEach(function(quadDef){
         var qData=(config&&config[quadDef.quad])||{};
         var section=document.createElement('div');
@@ -1701,7 +1650,7 @@
             wrap.style.cssText='flex:1;min-width:100px';
             var inpLabel=document.createElement('div');
             inpLabel.style.cssText='font-size:0.6rem;color:#71717a;margin-bottom:3px;text-transform:uppercase;letter-spacing:0.05em';
-            inpLabel.textContent=inp==='key'?'JSON Key Path':inp.charAt(0).toUpperCase()+inp.slice(1);
+            inpLabel.textContent=inp==='key'?'JSON Key Path':inp==='on_value'?'On Value':inp.charAt(0).toUpperCase()+inp.slice(1);
             var input=document.createElement('input');
             input.type='text';
             input.className='input';
@@ -1730,17 +1679,90 @@
               wrap.style.maxWidth='80px';
               wrap.style.minWidth='60px';
               wrap.style.flex='0 0 auto';
+            } else if(inp==='on_value'){
+              input.placeholder='On, Yes, etc.';
+              wrap.style.maxWidth='100px';
+              wrap.style.minWidth='80px';
+              wrap.style.flex='0 0 auto';
             }
             wrap.appendChild(inpLabel);
             wrap.appendChild(input);
             row.appendChild(wrap);
           });
 
+          /* Inline threshold/color controls for fields with unit or suffix */
+          if(hasColorInputs(f)){
+            var thrKey=quadDef.quad+'_'+f.key;
+            var t=thresholds[thrKey]||{};
+            var minVal=t.min!=null?t.min:(f.defMin!=null?f.defMin:'');
+            var maxVal=t.max!=null?t.max:(f.defMax!=null?f.defMax:'');
+            var minColor=t.color_min||(f.defMinColor||'#10b981');
+            var maxColor=t.color_max||(f.defMaxColor||'#ef4444');
+
+            var sep=document.createElement('div');
+            sep.style.cssText='width:1px;height:28px;background:rgba(255,255,255,0.08);flex-shrink:0;margin:0 2px;align-self:center';
+            row.appendChild(sep);
+
+            var mkNum=function(id,lbl,val){
+              var w=document.createElement('div');
+              w.style.cssText='flex:0 0 auto;min-width:50px;max-width:60px';
+              var l=document.createElement('div');
+              l.style.cssText='font-size:0.55rem;color:#71717a;margin-bottom:3px;text-transform:uppercase;letter-spacing:0.05em';
+              l.textContent=lbl;
+              var inp=document.createElement('input');
+              inp.type='number';inp.className='input';inp.id=id;inp.step='0.1';
+              inp.value=val;
+              inp.style.cssText='min-height:36px;padding:4px 6px;font-size:0.75rem;width:100%';
+              inp.oninput=function(){updateFieldGradient(thrKey)};
+              w.appendChild(l);w.appendChild(inp);return w;
+            };
+            row.appendChild(mkNum('as_thr_'+thrKey+'_min','Min',minVal));
+            row.appendChild(mkNum('as_thr_'+thrKey+'_max','Max',maxVal));
+
+            var mkColor=function(id,val){
+              var inp=document.createElement('input');
+              inp.type='color';inp.id=id;inp.value=val;
+              inp.style.cssText='width:28px;height:28px;border:none;background:none;cursor:pointer;border-radius:4px;padding:0;align-self:center';
+              inp.oninput=function(){updateFieldGradient(thrKey)};
+              return inp;
+            };
+            row.appendChild(mkColor('as_thr_'+thrKey+'_minc',minColor));
+            row.appendChild(mkColor('as_thr_'+thrKey+'_maxc',maxColor));
+
+            var grad=document.createElement('div');
+            grad.id='as_thr_'+thrKey+'_grad';
+            grad.style.cssText='width:32px;height:20px;border-radius:4px;border:1px solid rgba(255,255,255,0.08);flex-shrink:0;align-self:center';
+            row.appendChild(grad);
+            setTimeout(function(){updateFieldGradient(thrKey)},0);
+          }
+
           section.appendChild(row);
         });
 
         container.appendChild(section);
       });
+    }
+
+    function gatherAllSkyThresholds(){
+      var result={};
+      allskyFieldDefs.forEach(function(quadDef){
+        quadDef.fields.forEach(function(f){
+          if(!hasColorInputs(f)) return;
+          var thrKey=quadDef.quad+'_'+f.key;
+          var elMin=$('as_thr_'+thrKey+'_min');
+          var elMax=$('as_thr_'+thrKey+'_max');
+          if(!elMin||!elMax) return;
+          var mn=elMin.value,mx=elMax.value;
+          if(mn===''&&mx==='') return;
+          result[thrKey]={
+            min:parseFloat(mn)||0,
+            max:parseFloat(mx)||0,
+            color_min:$('as_thr_'+thrKey+'_minc').value,
+            color_max:$('as_thr_'+thrKey+'_maxc').value
+          };
+        });
+      });
+      return result;
     }
 
     function gatherAllSkyFieldMappings(){
@@ -1774,15 +1796,13 @@
           $('allskyDewOffset').value=cfg.dew_offset!=null?cfg.dew_offset:5.0;
           var thresholds={};
           try{ thresholds=JSON.parse(cfg.thresholds||'{}'); }catch(e){}
-          populateAllSkyThresholds(thresholds);
           var fieldCfg={};
           try{ fieldCfg=JSON.parse(cfg.field_config||'{}'); }catch(e){}
-          populateAllSkyFieldMappings(fieldCfg);
+          populateAllSkyFieldMappings(fieldCfg,thresholds);
         })
         .catch(function(e){
           console.error('Failed to load AllSky config',e);
-          populateAllSkyThresholds({});
-          populateAllSkyFieldMappings({});
+          populateAllSkyFieldMappings({},{});
         });
     }
 

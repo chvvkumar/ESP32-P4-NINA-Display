@@ -1,6 +1,8 @@
 #include "web_server_internal.h"
+#include "nina_allsky.h"
 #include "esp_http_client.h"
 #include "esp_heap_caps.h"
+#include "esp_lvgl_port.h"
 #include <string.h>
 
 /* AllSky payloads can be larger than CONFIG_MAX_PAYLOAD (4096) because
@@ -106,6 +108,12 @@ esp_err_t allsky_config_post_handler(httpd_req_t *req)
 
     app_config_save(cfg);
     ESP_LOGI(TAG, "AllSky config saved to NVS");
+
+    /* Refresh the AllSky page's threshold/field config from updated NVS data */
+    if (lvgl_port_lock(100)) {
+        allsky_page_refresh_config();
+        lvgl_port_unlock();
+    }
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, "{\"status\":\"ok\"}", HTTPD_RESP_USE_STRLEN);
