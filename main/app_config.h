@@ -13,7 +13,7 @@ extern "C" {
 #define MAX_NINA_INSTANCES 3
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 15
+#define APP_CONFIG_VERSION 16
 
 #define WIDGET_STYLE_COUNT 7
 
@@ -60,6 +60,7 @@ typedef struct {
     uint32_t deep_sleep_wake_timer_s;   // Timer wake duration in seconds (0 = no timer wake)
     bool     deep_sleep_on_idle;        // Auto-enter deep sleep after screen sleep timeout
     uint8_t  screen_rotation;           // Display rotation: 0=0°, 1=90°, 2=180°, 3=270°
+    char     hostname[32];             // Device hostname for DHCP and MQTT HA (default "NINA-DISPLAY")
 } app_config_t;
 
 // WiFi credentials are NOT stored in app_config_t. They are managed by

@@ -35,6 +35,7 @@ esp_err_t config_get_handler(httpd_req_t *req)
         cJSON_AddStringToObject(root, "ssid", "");
     }
 
+    cJSON_AddStringToObject(root, "hostname", cfg->hostname);
     cJSON_AddStringToObject(root, "url1", cfg->api_url[0]);
     cJSON_AddStringToObject(root, "url2", cfg->api_url[1]);
     cJSON_AddStringToObject(root, "url3", cfg->api_url[2]);
@@ -106,7 +107,8 @@ esp_err_t config_get_handler(httpd_req_t *req)
 // Returns true if valid; sends 400 and returns false if invalid.
 static bool validate_config_fields(cJSON *root, httpd_req_t *req)
 {
-    if (!validate_string_len(root, "url1", 128) ||
+    if (!validate_string_len(root, "hostname", 32) ||
+        !validate_string_len(root, "url1", 128) ||
         !validate_string_len(root, "url2", 128) ||
         !validate_string_len(root, "url3", 128) ||
         !validate_string_len(root, "ntp", 64) ||
@@ -155,6 +157,7 @@ static app_config_t *parse_config_from_json(cJSON *root)
     }
     memcpy(cfg, app_config_get(), sizeof(app_config_t));
 
+    JSON_TO_STRING(root, "hostname",       cfg->hostname);
     JSON_TO_STRING(root, "url1",           cfg->api_url[0]);
     JSON_TO_STRING(root, "url2",           cfg->api_url[1]);
     JSON_TO_STRING(root, "url3",           cfg->api_url[2]);

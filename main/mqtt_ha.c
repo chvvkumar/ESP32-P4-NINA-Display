@@ -83,7 +83,8 @@ static cJSON *create_device_object(void)
     cJSON *ids = cJSON_CreateArray();
     cJSON_AddItemToArray(ids, cJSON_CreateString(uid));
     cJSON_AddItemToObject(dev, "identifiers", ids);
-    cJSON_AddStringToObject(dev, "name", "NINA Display");
+    const char *hostname = app_config_get()->hostname;
+    cJSON_AddStringToObject(dev, "name", hostname[0] ? hostname : "NINA Display");
     cJSON_AddStringToObject(dev, "model", "ESP32-P4-WIFI6-Touch-LCD-4B");
     cJSON_AddStringToObject(dev, "manufacturer", "Waveshare");
     const esp_app_desc_t *app_desc = esp_app_get_description();

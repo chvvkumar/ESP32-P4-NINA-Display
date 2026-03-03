@@ -122,8 +122,15 @@ static void wifi_init(void)
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_sta();
+    esp_netif_t *sta_netif = esp_netif_create_default_wifi_sta();
     esp_netif_create_default_wifi_ap();
+
+    /* Set device hostname for DHCP client (used by routers for device identification) */
+    const char *hostname = app_config_get()->hostname;
+    if (hostname[0] != '\0') {
+        esp_netif_set_hostname(sta_netif, hostname);
+        ESP_LOGI(TAG, "Hostname set to: %s", hostname);
+    }
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
@@ -157,14 +164,18 @@ static void wifi_init(void)
 
     wifi_config_t wifi_config_ap = {
         .ap = {
-            .ssid = "NINA-DISPLAY",
-            .ssid_len = strlen("NINA-DISPLAY"),
             .channel = 1,
             .password = "12345678",
             .max_connection = 4,
             .authmode = WIFI_AUTH_WPA_WPA2_PSK
         },
     };
+    /* Use configured hostname as AP SSID so the device is identifiable */
+    const char *ap_name = hostname[0] ? hostname : "NINA-DISPLAY";
+    size_t ap_len = strlen(ap_name);
+    if (ap_len > sizeof(wifi_config_ap.ap.ssid)) ap_len = sizeof(wifi_config_ap.ap.ssid);
+    memcpy(wifi_config_ap.ap.ssid, ap_name, ap_len);
+    wifi_config_ap.ap.ssid_len = ap_len;
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP,  &wifi_config_ap));
