@@ -9,11 +9,13 @@
 #include "nina_api_fetchers.h"
 #include "nina_websocket.h"
 #include "nina_connection.h"
+#include "allsky_client.h"
 #include "app_config.h"
 #include "mqtt_ha.h"
 #include "ui/nina_dashboard.h"
 #include "ui/nina_summary.h"
 #include "ui/nina_sysinfo.h"
+#include "ui/nina_allsky.h"
 #include "ui/nina_graph_overlay.h"
 #include "ui/nina_info_overlay.h"
 #include "ui/nina_safety.h"
@@ -54,6 +56,10 @@ static bool hfr_graph_seeded = false;   /* True after initial API fetch for curr
 
 /* Per-instance poll contexts (shared between UI coordinator and poll tasks) */
 static instance_poll_ctx_t poll_contexts[MAX_NINA_INSTANCES];
+
+/* AllSky polling state */
+static allsky_data_t allsky_data;
+static TaskHandle_t allsky_task_handle = NULL;
 
 /**
  * @brief Swipe callback from the dashboard — signals the data task to re-tune polling.
@@ -327,6 +333,28 @@ static void ota_progress_cb(int percent) {
 }
 
 // =============================================================================
+// AllSky Poll Task — independent poller pinned to Core 0
+// =============================================================================
+
+void allsky_poll_task(void *arg) {
+    ESP_LOGI(TAG, "AllSky poll task started");
+
+    while (1) {
+        app_config_t cfg = app_config_get_snapshot();
+
+        /* Only poll when hostname is configured */
+        if (cfg.allsky_hostname[0] != '\0') {
+            allsky_client_poll(cfg.allsky_hostname, cfg.allsky_field_config, &allsky_data);
+        }
+
+        /* Sleep for the configured interval (clamped 1-300s) */
+        uint32_t interval_ms = (uint32_t)cfg.allsky_update_interval_s * 1000;
+        if (interval_ms < 1000) interval_ms = 1000;
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(interval_ms));
+    }
+}
+
+// =============================================================================
 // UI Coordinator Task — fast loop, never blocks on HTTP data polling
 // =============================================================================
 
@@ -488,6 +516,22 @@ void data_update_task(void *arg) {
             ESP_LOGE(TAG, "Failed to allocate poll task %d stack from PSRAM", i);
             if (stack) heap_caps_free(stack);
             if (tcb) heap_caps_free(tcb);
+        }
+    }
+
+    /* Spawn AllSky poll task (pinned to Core 0, networking) */
+    allsky_data_init(&allsky_data);
+    {
+        StackType_t *as_stack = heap_caps_malloc(6144 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+        StaticTask_t *as_tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (as_stack && as_tcb) {
+            allsky_task_handle = xTaskCreateStaticPinnedToCore(
+                allsky_poll_task, "allsky", 6144, NULL, 3, as_stack, as_tcb, 0);
+            ESP_LOGI(TAG, "AllSky poll task spawned");
+        } else {
+            ESP_LOGE(TAG, "Failed to allocate AllSky poll task stack");
+            if (as_stack) heap_caps_free(as_stack);
+            if (as_tcb) heap_caps_free(as_tcb);
         }
     }
 
@@ -657,6 +701,17 @@ void data_update_task(void *arg) {
                 for (int j = 0; j < instance_count; j++)
                     if (locked[j]) nina_client_unlock(&instances[j]);
             }
+
+            /* Immediate AllSky render with cached data */
+            if (on_allsky) {
+                if (allsky_data_lock(&allsky_data, 100)) {
+                    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                        allsky_page_update(&allsky_data);
+                        bsp_display_unlock();
+                    }
+                    allsky_data_unlock(&allsky_data);
+                }
+            }
         }
 
         int64_t now_ms = esp_timer_get_time() / 1000;
@@ -784,6 +839,17 @@ void data_update_task(void *arg) {
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                 sysinfo_page_refresh();
                 bsp_display_unlock();
+            }
+        }
+
+        /* Update AllSky page when visible */
+        if (on_allsky) {
+            if (allsky_data_lock(&allsky_data, 100)) {
+                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                    allsky_page_update(&allsky_data);
+                    bsp_display_unlock();
+                }
+                allsky_data_unlock(&allsky_data);
             }
         }
 

@@ -56,5 +56,8 @@ void input_task(void *arg);
 /** FreeRTOS task: per-instance NINA data poller (one per configured instance). */
 void instance_poll_task(void *arg);
 
+/** FreeRTOS task: AllSky API poller — polls at allsky_update_interval_s rate. */
+void allsky_poll_task(void *arg);
+
 /** FreeRTOS task: UI coordinator — reads cached data, updates LVGL, handles auto-rotate. */
 void data_update_task(void *arg);
