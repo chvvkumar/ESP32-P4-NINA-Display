@@ -242,6 +242,7 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
 
     qd->box = create_bento_box(parent);
     lv_obj_set_flex_grow(qd->box, 1);
+    lv_obj_set_height(qd->box, LV_PCT(100));
     lv_obj_set_flex_flow(qd->box, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(qd->box, LV_FLEX_ALIGN_SPACE_BETWEEN,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
