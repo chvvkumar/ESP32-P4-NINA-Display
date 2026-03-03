@@ -23,6 +23,7 @@
 #include "mqtt_ha.h"
 #include "tasks.h"
 #include "esp_ota_ops.h"
+#include "driver/jpeg_decode.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -33,7 +34,29 @@
 #include "nina_connection.h"
 #include "power_mgmt.h"
 
+/* Embedded splash logo (JPEG, hardware-decoded at boot) */
+extern const uint8_t logo_jpg_start[] asm("_binary_logo_jpg_start");
+extern const uint8_t logo_jpg_end[]   asm("_binary_logo_jpg_end");
+
 static void *cjson_psram_malloc(size_t sz) { return heap_caps_malloc(sz, MALLOC_CAP_SPIRAM); }
+
+/* Splash screen animation helpers */
+static void splash_fade_cb(void *obj, int32_t v)
+{
+    lv_obj_set_style_opa((lv_obj_t *)obj, (lv_opa_t)v, 0);
+}
+
+static lv_image_dsc_t splash_dsc;
+
+static void splash_fade_done(lv_anim_t *a)
+{
+    lv_obj_delete((lv_obj_t *)a->var);
+    /* Free the hardware-decoded RGB565 buffer */
+    if (splash_dsc.data) {
+        free((void *)splash_dsc.data);
+        splash_dsc.data = NULL;
+    }
+}
 
 static const char *TAG = "main";
 
@@ -257,9 +280,90 @@ void app_main(void)
     /* Initialize session stats (PSRAM allocation, no LVGL) */
     nina_session_stats_init();
 
+    /* ── Splash: hardware JPEG decode (no LVGL needed) ── */
+    bool splash_ready = false;
+    {
+        const uint8_t *jpg_data = logo_jpg_start;
+        size_t jpg_size = (size_t)(logo_jpg_end - logo_jpg_start);
+
+        jpeg_decode_picture_info_t pic_info = {0};
+        esp_err_t err = jpeg_decoder_get_info(jpg_data, jpg_size, &pic_info);
+
+        if (err == ESP_OK && pic_info.width > 0) {
+            uint32_t out_w = ((pic_info.width + 15) / 16) * 16;
+            uint32_t out_h = ((pic_info.height + 15) / 16) * 16;
+
+            jpeg_decode_memory_alloc_cfg_t mem_cfg = {
+                .buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER,
+            };
+            size_t allocated = 0;
+            uint8_t *rgb_buf = (uint8_t *)jpeg_alloc_decoder_mem(out_w * out_h * 2, &mem_cfg, &allocated);
+
+            if (rgb_buf) {
+                jpeg_decoder_handle_t decoder = NULL;
+                jpeg_decode_engine_cfg_t engine_cfg = { .intr_priority = 0, .timeout_ms = 5000 };
+                err = jpeg_new_decoder_engine(&engine_cfg, &decoder);
+                if (err == ESP_OK && decoder) {
+                    jpeg_decode_cfg_t dec_cfg = {
+                        .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,
+                        .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
+                    };
+                    uint32_t out_size = 0;
+                    err = jpeg_decoder_process(decoder, &dec_cfg,
+                              jpg_data, jpg_size, rgb_buf, allocated, &out_size);
+                    jpeg_del_decoder_engine(decoder);
+
+                    if (err == ESP_OK && out_size > 0) {
+                        splash_dsc.header.magic  = LV_IMAGE_HEADER_MAGIC;
+                        splash_dsc.header.w      = (int32_t)out_w;
+                        splash_dsc.header.h      = (int32_t)out_h;
+                        splash_dsc.header.cf     = LV_COLOR_FORMAT_RGB565;
+                        splash_dsc.header.stride = out_w * 2;
+                        splash_dsc.data          = rgb_buf;
+                        splash_dsc.data_size     = out_size;
+                        splash_ready = true;
+                        ESP_LOGI(TAG, "Splash decoded: %lux%lu", (unsigned long)out_w, (unsigned long)out_h);
+                    } else {
+                        free(rgb_buf);
+                    }
+                } else {
+                    free(rgb_buf);
+                }
+            }
+        }
+    }
+
+    /* ── Build UI: dashboard behind splash, everything starts immediately ── */
     if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
         lv_obj_t *scr = lv_scr_act();
+        lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), 0);
+
         create_nina_dashboard(scr, instance_count);
+
+        /* Create splash ON TOP of dashboard — last child draws on top */
+        if (splash_ready) {
+            lv_obj_t *splash_cont = lv_obj_create(scr);
+            lv_obj_remove_style_all(splash_cont);
+            lv_obj_set_size(splash_cont, 720, 720);
+            lv_obj_set_style_bg_color(splash_cont, lv_color_hex(0x000000), 0);
+            lv_obj_set_style_bg_opa(splash_cont, LV_OPA_COVER, 0);
+            lv_obj_center(splash_cont);
+
+            lv_obj_t *img = lv_image_create(splash_cont);
+            lv_image_set_src(img, &splash_dsc);
+            lv_obj_center(img);
+
+            /* Delayed fade: hold 3 s, then fade out over 500 ms */
+            lv_anim_t a;
+            lv_anim_init(&a);
+            lv_anim_set_var(&a, splash_cont);
+            lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_TRANSP);
+            lv_anim_set_delay(&a, 3000);
+            lv_anim_set_duration(&a, 500);
+            lv_anim_set_exec_cb(&a, splash_fade_cb);
+            lv_anim_set_completed_cb(&a, splash_fade_done);
+            lv_anim_start(&a);
+        }
 
         /* Initialize notification overlays (must be after dashboard so they float on top) */
         nina_toast_init(scr);

@@ -1,4 +1,4 @@
-# ESP32-P4 NINA Display
+<h1><img src="images/logo.png" alt="logo" height="40" style="vertical-align: middle;"> ESP32-P4 NINA Display</h1>
 
 [![Build (main)](https://img.shields.io/github/actions/workflow/status/chvvkumar/ESP32-P4-NINA-Display/build.yml?branch=main&label=build%20(main)&logo=github)](https://github.com/chvvkumar/ESP32-P4-NINA-Display/actions/workflows/build.yml?query=branch%3Amain)
 [![Build (snd)](https://img.shields.io/github/actions/workflow/status/chvvkumar/ESP32-P4-NINA-Display/build.yml?branch=snd&label=build%20(snd)&logo=github)](https://github.com/chvvkumar/ESP32-P4-NINA-Display/actions/workflows/build.yml?query=branch%3Asnd)
