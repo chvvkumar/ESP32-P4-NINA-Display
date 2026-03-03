@@ -432,9 +432,17 @@ esp_err_t config_post_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
-    app_config_t old_cfg = app_config_get_snapshot();
+    app_config_t *old_cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    if (!old_cfg) {
+        ESP_LOGE(TAG, "config_post: malloc failed for old_cfg");
+        free(cfg);
+        httpd_resp_send_500(req);
+        return ESP_OK;
+    }
+    memcpy(old_cfg, app_config_get(), sizeof(app_config_t));
     app_config_save(cfg);
-    config_trigger_side_effects(&old_cfg, cfg);
+    config_trigger_side_effects(old_cfg, cfg);
+    free(old_cfg);
     free(cfg);
 
     ESP_LOGI(TAG, "Config saved to NVS");
@@ -460,9 +468,17 @@ esp_err_t config_apply_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
-    app_config_t old_cfg = app_config_get_snapshot();
+    app_config_t *old_cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    if (!old_cfg) {
+        ESP_LOGE(TAG, "config_apply: malloc failed for old_cfg");
+        free(cfg);
+        httpd_resp_send_500(req);
+        return ESP_OK;
+    }
+    memcpy(old_cfg, app_config_get(), sizeof(app_config_t));
     app_config_apply(cfg);
-    config_trigger_side_effects(&old_cfg, cfg);
+    config_trigger_side_effects(old_cfg, cfg);
+    free(old_cfg);
     free(cfg);
 
     httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
@@ -472,16 +488,24 @@ esp_err_t config_apply_handler(httpd_req_t *req)
 // Handler for reverting config to NVS-saved state
 esp_err_t config_revert_handler(httpd_req_t *req)
 {
-    app_config_t old_cfg = app_config_get_snapshot();
+    app_config_t *old_cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    if (!old_cfg) {
+        ESP_LOGE(TAG, "config_revert: malloc failed for old_cfg");
+        httpd_resp_send_500(req);
+        return ESP_OK;
+    }
+    memcpy(old_cfg, app_config_get(), sizeof(app_config_t));
 
     esp_err_t err = app_config_revert();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Config revert failed");
+        free(old_cfg);
         httpd_resp_send_500(req);
         return ESP_OK;
     }
 
-    config_trigger_side_effects(&old_cfg, app_config_get());
+    config_trigger_side_effects(old_cfg, app_config_get());
+    free(old_cfg);
 
     ESP_LOGI(TAG, "Config reverted from NVS");
     httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);

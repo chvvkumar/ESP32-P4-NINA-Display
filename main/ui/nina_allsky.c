@@ -66,6 +66,10 @@ typedef struct {
 
 static bar_threshold_t bar_thresholds[4];
 
+/* Cached dew point threshold colors (parsed once in parse_thresholds) */
+static uint32_t dew_safe_color  = 0x3b82f6;  /* blue (safe) */
+static uint32_t dew_warn_color  = 0xef4444;  /* red (warning) */
+
 /* Default threshold key per quadrant (fallback when bar_threshold not in config) */
 static const char *default_bar_threshold_keys[4] = {
     "cpu_temp",  /* thermal */
@@ -230,6 +234,19 @@ static void parse_thresholds(void) {
         }
     }
 
+    /* Cache dew_point threshold colors (avoids re-parsing JSON every update) */
+    dew_safe_color = 0x3b82f6;
+    dew_warn_color = 0xef4444;
+    cJSON *dew_thr = cJSON_GetObjectItem(root, "dew_point");
+    if (dew_thr) {
+        cJSON *cmin = cJSON_GetObjectItem(dew_thr, "color_min");
+        cJSON *cmax = cJSON_GetObjectItem(dew_thr, "color_max");
+        if (cmin && cJSON_IsString(cmin))
+            dew_safe_color = parse_hex_color(cmin->valuestring, dew_safe_color);
+        if (cmax && cJSON_IsString(cmax))
+            dew_warn_color = parse_hex_color(cmax->valuestring, dew_warn_color);
+    }
+
     cJSON_Delete(root);
 }
 
@@ -246,7 +263,7 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
     lv_obj_set_flex_flow(qd->box, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(qd->box, LV_FLEX_ALIGN_SPACE_BETWEEN,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_all(qd->box, 12, 0);
+    lv_obj_set_style_pad_all(qd->box, 16, 0);
     lv_obj_set_style_pad_row(qd->box, 4, 0);
 
     /* 1. Title row */
@@ -261,7 +278,7 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
 
     qd->lbl_title = lv_label_create(title_row);
     lv_label_set_text(qd->lbl_title, quad_titles[quad_index]);
-    lv_obj_set_style_text_font(qd->lbl_title, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(qd->lbl_title, &lv_font_montserrat_22, 0);
     lv_obj_set_style_text_letter_space(qd->lbl_title, 2, 0);
     if (current_theme) {
         int gb = app_config_get()->color_brightness;
@@ -282,9 +299,9 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
             lv_obj_t *dot = lv_obj_create(dot_cont);
             lv_obj_remove_style_all(dot);
             lv_obj_clear_flag(dot, LV_OBJ_FLAG_CLICKABLE);
-            lv_obj_set_size(dot, 10, 10);
+            lv_obj_set_size(dot, 14, 14);
             lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-            lv_obj_set_style_border_width(dot, 1, 0);
+            lv_obj_set_style_border_width(dot, 2, 0);
             lv_obj_set_style_bg_opa(dot, LV_OPA_TRANSP, 0);
             if (current_theme) {
                 int gb = app_config_get()->color_brightness;
@@ -310,7 +327,7 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
 
     /* 3. Unit label */
     qd->lbl_unit = lv_label_create(qd->box);
-    lv_obj_set_style_text_font(qd->lbl_unit, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(qd->lbl_unit, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_align(qd->lbl_unit, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_width(qd->lbl_unit, LV_PCT(100));
     lv_label_set_text(qd->lbl_unit, qcfg[quad_index].unit);
@@ -323,11 +340,11 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
     /* 4. Threshold bar */
     qd->bar = lv_bar_create(qd->box);
     lv_obj_set_width(qd->bar, LV_PCT(90));
-    lv_obj_set_height(qd->bar, 6);
+    lv_obj_set_height(qd->bar, 8);
     lv_bar_set_range(qd->bar, 0, 1000);
     lv_bar_set_value(qd->bar, 0, LV_ANIM_OFF);
-    lv_obj_set_style_radius(qd->bar, 3, 0);
-    lv_obj_set_style_radius(qd->bar, 3, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(qd->bar, 4, 0);
+    lv_obj_set_style_radius(qd->bar, 4, LV_PART_INDICATOR);
     if (current_theme) {
         lv_obj_set_style_bg_color(qd->bar,
             lv_color_hex(current_theme->bento_border), 0);
@@ -348,7 +365,7 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     qd->lbl_sub1 = lv_label_create(sub_row);
-    lv_obj_set_style_text_font(qd->lbl_sub1, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(qd->lbl_sub1, &lv_font_montserrat_28, 0);
     lv_label_set_text(qd->lbl_sub1, "--");
     if (current_theme) {
         int gb = app_config_get()->color_brightness;
@@ -357,7 +374,7 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
     }
 
     qd->lbl_sub2 = lv_label_create(sub_row);
-    lv_obj_set_style_text_font(qd->lbl_sub2, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(qd->lbl_sub2, &lv_font_montserrat_28, 0);
     lv_label_set_text(qd->lbl_sub2, "--");
     if (current_theme) {
         int gb = app_config_get()->color_brightness;
@@ -520,25 +537,7 @@ void allsky_page_update(const allsky_data_t *data) {
                 float ambient_val = strtof(ambient_str, NULL);
                 float dew_val     = strtof(dew_str, NULL);
 
-                /* Look up dew_point threshold colors */
-                uint32_t dew_safe_color = 0x3b82f6;   /* default blue (safe) */
-                uint32_t dew_warn_color = 0xef4444;    /* default red (warning) */
-
-                /* Try to find dew_point threshold in config */
-                cJSON *thr_root = cJSON_Parse(app_config_get()->allsky_thresholds);
-                if (thr_root) {
-                    cJSON *dew_thr = cJSON_GetObjectItem(thr_root, "dew_point");
-                    if (dew_thr) {
-                        cJSON *cmin = cJSON_GetObjectItem(dew_thr, "color_min");
-                        cJSON *cmax = cJSON_GetObjectItem(dew_thr, "color_max");
-                        if (cmin && cJSON_IsString(cmin))
-                            dew_safe_color = parse_hex_color(cmin->valuestring, dew_safe_color);
-                        if (cmax && cJSON_IsString(cmax))
-                            dew_warn_color = parse_hex_color(cmax->valuestring, dew_warn_color);
-                    }
-                    cJSON_Delete(thr_root);
-                }
-
+                /* Use cached dew_point threshold colors (parsed in parse_thresholds) */
                 uint32_t dew_color;
                 if (dew_val < ambient_val - dew_offset) {
                     dew_color = dew_safe_color;   /* safe — dew point well below ambient */

@@ -339,6 +339,9 @@ static void ota_progress_cb(int percent) {
 void allsky_poll_task(void *arg) {
     ESP_LOGI(TAG, "AllSky poll task started");
 
+    // Wait for WiFi before attempting any HTTP requests
+    xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
+
     while (1) {
         /* Read fields directly from config pointer — avoids copying the full
          * ~6.7 KB app_config_t onto this task's small stack. */
