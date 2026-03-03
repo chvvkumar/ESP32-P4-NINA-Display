@@ -670,6 +670,23 @@ void data_update_task(void *arg) {
             }
         }
 
+        /* If auto-rotate is active and we're on a NINA instance page but no instances
+         * are connected, fall back to the summary page automatically. */
+        if (app_config_get()->auto_rotate_enabled && !on_summary && !on_sysinfo && !on_settings) {
+            bool any_connected = false;
+            for (int i = 0; i < instance_count; i++) {
+                if (nina_connection_is_connected(i)) { any_connected = true; break; }
+            }
+            if (!any_connected) {
+                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                    nina_dashboard_show_page(0, instance_count);
+                    bsp_display_unlock();
+                }
+                page_changed = true;
+                ESP_LOGI(TAG, "No NINA connections — returning to summary page");
+            }
+        }
+
         /* Auto-rotate logic — rotates between pages selected by auto_rotate_pages bitmask.
          *
          * Page bitmask layout:
