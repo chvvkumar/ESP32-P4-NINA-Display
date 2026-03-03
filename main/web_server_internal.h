@@ -46,6 +46,7 @@ bool validate_url_format(const char *url);
 
 /* ---- Handler forward declarations (registered by start_web_server) ---- */
 esp_err_t root_get_handler(httpd_req_t *req);
+esp_err_t favicon_get_handler(httpd_req_t *req);
 esp_err_t config_get_handler(httpd_req_t *req);
 esp_err_t config_post_handler(httpd_req_t *req);
 esp_err_t brightness_post_handler(httpd_req_t *req);
@@ -64,4 +65,7 @@ esp_err_t perf_reset_post_handler(httpd_req_t *req);
 esp_err_t config_apply_handler(httpd_req_t *req);
 esp_err_t config_revert_handler(httpd_req_t *req);
 esp_err_t check_update_post_handler(httpd_req_t *req);
+esp_err_t allsky_config_get_handler(httpd_req_t *req);
+esp_err_t allsky_config_post_handler(httpd_req_t *req);
+esp_err_t allsky_proxy_get_handler(httpd_req_t *req);
 void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t *new_cfg);

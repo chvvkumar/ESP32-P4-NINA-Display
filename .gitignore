@@ -50,6 +50,7 @@ partition-table.bin
 ota_data_initial.bin
 firmware\nina-display-factory.bin
 firmware\nina-display-ota.bin
+.playwright-mcp/
 
 # Compilation artifacts
 *.o
