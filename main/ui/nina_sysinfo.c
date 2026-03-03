@@ -25,7 +25,7 @@
 
 /* ── Layout ──────────────────────────────────────────────────────────── */
 #define SI_PAD       16
-#define SI_GAP       12
+#define SI_GAP       10
 #define SI_RADIUS    24
 #define SI_ICON_SIZE 48
 
@@ -107,17 +107,17 @@ static lv_obj_t *make_card(lv_obj_t *parent) {
     lv_obj_add_style(card, &style_bento_box, 0);
     lv_obj_set_width(card, LV_PCT(100));
     lv_obj_set_height(card, LV_SIZE_CONTENT);
-    lv_obj_set_style_pad_all(card, 14, 0);
+    lv_obj_set_style_pad_all(card, 12, 0);
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_row(card, 6, 0);
+    lv_obj_set_style_pad_row(card, 4, 0);
     return card;
 }
 
 static lv_obj_t *make_section_title(lv_obj_t *parent, const char *text) {
     lv_obj_t *lbl = lv_label_create(parent);
     lv_label_set_text(lbl, text);
-    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_letter_space(lbl, 2, 0);
     if (current_theme) {
         int gb = app_config_get()->color_brightness;
@@ -137,7 +137,7 @@ static lv_obj_t *make_kv_row(lv_obj_t *parent, const char *key, lv_obj_t **out_v
 
     lv_obj_t *lbl_key = lv_label_create(row);
     lv_label_set_text(lbl_key, key);
-    lv_obj_set_style_text_font(lbl_key, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(lbl_key, &lv_font_montserrat_18, 0);
     if (current_theme) {
         int gb = app_config_get()->color_brightness;
         lv_obj_set_style_text_color(lbl_key, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
@@ -145,7 +145,7 @@ static lv_obj_t *make_kv_row(lv_obj_t *parent, const char *key, lv_obj_t **out_v
 
     lv_obj_t *lbl_val = lv_label_create(row);
     lv_label_set_text(lbl_val, "--");
-    lv_obj_set_style_text_font(lbl_val, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(lbl_val, &lv_font_montserrat_20, 0);
     if (current_theme) {
         int gb = app_config_get()->color_brightness;
         lv_obj_set_style_text_color(lbl_val, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
@@ -197,7 +197,7 @@ lv_obj_t *sysinfo_page_create(lv_obj_t *parent) {
     lv_obj_add_style(hdr, &style_header_gradient, 0);
     lv_obj_set_width(hdr, LV_PCT(100));
     lv_obj_set_height(hdr, LV_SIZE_CONTENT);
-    lv_obj_set_style_pad_all(hdr, 14, 0);
+    lv_obj_set_style_pad_all(hdr, 10, 0);
     lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(hdr, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(hdr, 12, 0);
@@ -219,7 +219,7 @@ lv_obj_t *sysinfo_page_create(lv_obj_t *parent) {
 
     lbl_title = lv_label_create(hdr_left);
     lv_label_set_text(lbl_title, "System Info");
-    lv_obj_set_style_text_font(lbl_title, &lv_font_montserrat_26, 0);
+    lv_obj_set_style_text_font(lbl_title, &lv_font_montserrat_28, 0);
     if (current_theme) {
         int gb = app_config_get()->color_brightness;
         lv_obj_set_style_text_color(lbl_title, lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
@@ -594,11 +594,13 @@ static void apply_theme_to_label(lv_obj_t *obj) {
 
     /* Section titles use label_color, value labels use text_color */
     const lv_font_t *font = lv_obj_get_style_text_font(obj, 0);
-    if (font == &lv_font_montserrat_14) {
+    if (font == &lv_font_montserrat_16) {
+        /* Section titles (e.g. "NETWORK", "WIFI") */
         lv_obj_set_style_text_color(obj, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    } else if (font == &lv_font_montserrat_26 || font == &lv_font_montserrat_28) {
+    } else if (font == &lv_font_montserrat_28 || font == &lv_font_montserrat_26) {
         lv_obj_set_style_text_color(obj, lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
-    } else if (font == &lv_font_montserrat_16) {
+    } else if (font == &lv_font_montserrat_18) {
+        /* Key labels (e.g. "Hostname", "STA IP") */
         lv_obj_set_style_text_color(obj, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
     } else {
         lv_obj_set_style_text_color(obj, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
