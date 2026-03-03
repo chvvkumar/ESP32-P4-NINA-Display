@@ -39,7 +39,7 @@ bool validate_url_format(const char *url) {
 void start_web_server(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.stack_size = 8192;
+    config.stack_size = 16384;
     config.max_uri_handlers = 25;
     httpd_handle_t server = NULL;
 

@@ -88,22 +88,23 @@ esp_err_t allsky_config_post_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
-    /* Apply fields onto a snapshot of the current config */
-    app_config_t cfg = app_config_get_snapshot();
+    /* Apply fields directly to the live config — avoids copying the full
+     * ~6.7 KB app_config_t onto the httpd task's stack. */
+    app_config_t *cfg = app_config_get();
 
-    JSON_TO_STRING(root, "hostname",     cfg.allsky_hostname);
-    JSON_TO_INT   (root, "update_interval_s", cfg.allsky_update_interval_s);
-    JSON_TO_STRING(root, "field_config", cfg.allsky_field_config);
-    JSON_TO_STRING(root, "thresholds",   cfg.allsky_thresholds);
+    JSON_TO_STRING(root, "hostname",     cfg->allsky_hostname);
+    JSON_TO_INT   (root, "update_interval_s", cfg->allsky_update_interval_s);
+    JSON_TO_STRING(root, "field_config", cfg->allsky_field_config);
+    JSON_TO_STRING(root, "thresholds",   cfg->allsky_thresholds);
 
     cJSON *item = cJSON_GetObjectItem(root, "dew_offset");
     if (cJSON_IsNumber(item)) {
-        cfg.allsky_dew_offset = (float)item->valuedouble;
+        cfg->allsky_dew_offset = (float)item->valuedouble;
     }
 
     cJSON_Delete(root);
 
-    app_config_save(&cfg);
+    app_config_save(cfg);
     ESP_LOGI(TAG, "AllSky config saved to NVS");
 
     httpd_resp_set_type(req, "application/json");
