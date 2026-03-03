@@ -313,9 +313,12 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
         }
     }
 
-    /* 2. Main value */
+    /* 2. Main value (48px font scaled to ~54px: 54/48 = 1.125 → 288/256) */
     qd->lbl_main_value = lv_label_create(qd->box);
     lv_obj_set_style_text_font(qd->lbl_main_value, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_transform_scale(qd->lbl_main_value, 288, 0);
+    lv_obj_set_style_transform_pivot_x(qd->lbl_main_value, LV_PCT(50), 0);
+    lv_obj_set_style_transform_pivot_y(qd->lbl_main_value, LV_PCT(50), 0);
     lv_obj_set_style_text_align(qd->lbl_main_value, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_width(qd->lbl_main_value, LV_PCT(100));
     lv_label_set_text(qd->lbl_main_value, "--");
