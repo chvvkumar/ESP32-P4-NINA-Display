@@ -280,26 +280,24 @@ void app_main(void)
     /* Initialize session stats (PSRAM allocation, no LVGL) */
     nina_session_stats_init();
 
-    /* ── Splash screen (hardware JPEG decode) ── */
-    lv_obj_t *splash_cont = NULL;
+    /* ── Splash: hardware JPEG decode (no LVGL needed) ── */
+    bool splash_ready = false;
     {
         const uint8_t *jpg_data = logo_jpg_start;
         size_t jpg_size = (size_t)(logo_jpg_end - logo_jpg_start);
 
         jpeg_decode_picture_info_t pic_info = {0};
         esp_err_t err = jpeg_decoder_get_info(jpg_data, jpg_size, &pic_info);
-        uint8_t *rgb_buf = NULL;
 
         if (err == ESP_OK && pic_info.width > 0) {
             uint32_t out_w = ((pic_info.width + 15) / 16) * 16;
             uint32_t out_h = ((pic_info.height + 15) / 16) * 16;
-            uint32_t buf_size = out_w * out_h * 2;  /* RGB565 */
 
             jpeg_decode_memory_alloc_cfg_t mem_cfg = {
                 .buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER,
             };
             size_t allocated = 0;
-            rgb_buf = (uint8_t *)jpeg_alloc_decoder_mem(buf_size, &mem_cfg, &allocated);
+            uint8_t *rgb_buf = (uint8_t *)jpeg_alloc_decoder_mem(out_w * out_h * 2, &mem_cfg, &allocated);
 
             if (rgb_buf) {
                 jpeg_decoder_handle_t decoder = NULL;
@@ -323,24 +321,28 @@ void app_main(void)
                         splash_dsc.header.stride = out_w * 2;
                         splash_dsc.data          = rgb_buf;
                         splash_dsc.data_size     = out_size;
+                        splash_ready = true;
                         ESP_LOGI(TAG, "Splash decoded: %lux%lu", (unsigned long)out_w, (unsigned long)out_h);
                     } else {
-                        ESP_LOGW(TAG, "Splash JPEG decode failed");
                         free(rgb_buf);
-                        rgb_buf = NULL;
                     }
                 } else {
                     free(rgb_buf);
-                    rgb_buf = NULL;
                 }
             }
         }
+    }
 
-        if (rgb_buf && bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-            lv_obj_t *scr = lv_scr_act();
-            lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), 0);
+    /* ── Build UI: dashboard behind splash, everything starts immediately ── */
+    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+        lv_obj_t *scr = lv_scr_act();
+        lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), 0);
 
-            splash_cont = lv_obj_create(scr);
+        create_nina_dashboard(scr, instance_count);
+
+        /* Create splash ON TOP of dashboard — last child draws on top */
+        if (splash_ready) {
+            lv_obj_t *splash_cont = lv_obj_create(scr);
             lv_obj_remove_style_all(splash_cont);
             lv_obj_set_size(splash_cont, 720, 720);
             lv_obj_set_style_bg_color(splash_cont, lv_color_hex(0x000000), 0);
@@ -351,23 +353,12 @@ void app_main(void)
             lv_image_set_src(img, &splash_dsc);
             lv_obj_center(img);
 
-            bsp_display_unlock();
-        }
-
-        /* Hold splash for 3 s */
-        vTaskDelay(pdMS_TO_TICKS(3000));
-    }
-
-    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-        lv_obj_t *scr = lv_scr_act();
-        create_nina_dashboard(scr, instance_count);
-
-        /* Fade out and delete the splash overlay */
-        if (splash_cont) {
+            /* Delayed fade: hold 3 s, then fade out over 500 ms */
             lv_anim_t a;
             lv_anim_init(&a);
             lv_anim_set_var(&a, splash_cont);
             lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_TRANSP);
+            lv_anim_set_delay(&a, 3000);
             lv_anim_set_duration(&a, 500);
             lv_anim_set_exec_cb(&a, splash_fade_cb);
             lv_anim_set_completed_cb(&a, splash_fade_done);
