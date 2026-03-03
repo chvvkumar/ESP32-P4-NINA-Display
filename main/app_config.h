@@ -13,7 +13,7 @@ extern "C" {
 #define MAX_NINA_INSTANCES 3
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 16
+#define APP_CONFIG_VERSION 17
 
 #define WIDGET_STYLE_COUNT 7
 
@@ -61,6 +61,13 @@ typedef struct {
     bool     deep_sleep_on_idle;        // Auto-enter deep sleep after screen sleep timeout
     uint8_t  screen_rotation;           // Display rotation: 0=0°, 1=90°, 2=180°, 3=270°
     char     hostname[32];             // Device hostname for DHCP and MQTT HA (default "NINA-DISPLAY")
+
+    // AllSky integration
+    char     allsky_hostname[128];          // AllSky API host:port (e.g., "allskypi5.lan:8080")
+    uint16_t allsky_update_interval_s;      // Poll interval 1-300s (default 5)
+    float    allsky_dew_offset;             // °C above ambient for dew alert (default 5.0)
+    char     allsky_field_config[1536];     // JSON key mappings per quadrant
+    char     allsky_thresholds[1024];       // JSON threshold configs per field
 } app_config_t;
 
 // WiFi credentials are NOT stored in app_config_t. They are managed by
