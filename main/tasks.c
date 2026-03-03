@@ -340,15 +340,17 @@ void allsky_poll_task(void *arg) {
     ESP_LOGI(TAG, "AllSky poll task started");
 
     while (1) {
-        app_config_t cfg = app_config_get_snapshot();
+        /* Read fields directly from config pointer — avoids copying the full
+         * ~6.7 KB app_config_t onto this task's small stack. */
+        const app_config_t *cfg = app_config_get();
 
         /* Only poll when hostname is configured */
-        if (cfg.allsky_hostname[0] != '\0') {
-            allsky_client_poll(cfg.allsky_hostname, cfg.allsky_field_config, &allsky_data);
+        if (cfg->allsky_hostname[0] != '\0') {
+            allsky_client_poll(cfg->allsky_hostname, cfg->allsky_field_config, &allsky_data);
         }
 
         /* Sleep for the configured interval (clamped 1-300s) */
-        uint32_t interval_ms = (uint32_t)cfg.allsky_update_interval_s * 1000;
+        uint32_t interval_ms = (uint32_t)cfg->allsky_update_interval_s * 1000;
         if (interval_ms < 1000) interval_ms = 1000;
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(interval_ms));
     }
