@@ -689,6 +689,12 @@
 
       <div class="card">
         <div class="card-title">Network</div>
+        <div class="field">
+          <label class="field-label">Device hostname</label>
+          <input type="text" class="input" id="hostname" placeholder="NINA-DISPLAY" maxlength="31" pattern="[A-Za-z0-9\-]+" style="max-width:320px">
+          <div class="field-hint">Used for DHCP, AP SSID, and Home Assistant device name.</div>
+        </div>
+        <hr class="divider">
         <div class="row stack-mobile">
           <div class="field">
             <label class="field-label">WiFi SSID</label>
@@ -734,7 +740,7 @@
             </select>
           </div>
         </div>
-        <div class="field-hint hint-center">Reboot required after changing WiFi, NTP, or timezone.</div>
+        <div class="field-hint hint-center">Reboot required after changing hostname, WiFi, NTP, or timezone.</div>
       </div>
 
       <div class="card">
@@ -1151,6 +1157,7 @@
       var mkUrl=h=>h?'http://'+h+':1888/v2/api/':'';
 
       var data={
+        hostname:$('hostname').value.trim(),
         url1:mkUrl(host1),url2:mkUrl(host2),url3:mkUrl(host3),
         ntp:$('ntp').value.trim(),
         timezone:$('timezone').value,
@@ -1213,6 +1220,7 @@
 
     function populateConfig(data){
       _populating=true;
+      $('hostname').value=data.hostname||'';
       $('ssid').value=data.ssid||'';
       $('ntp').value=data.ntp||'';
       $('timezone').value=data.timezone||'';

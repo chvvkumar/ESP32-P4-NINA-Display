@@ -349,8 +349,9 @@ void sysinfo_page_refresh(void) {
 
     /* ── Network ── */
     {
-        /* Hostname from config (AP SSID serves as device name) */
-        lv_label_set_text(lbl_hostname_val, "NINA-DISPLAY");
+        /* Hostname from config (used for DHCP, AP SSID, and HA device name) */
+        const char *hostname = app_config_get()->hostname;
+        lv_label_set_text(lbl_hostname_val, hostname[0] ? hostname : "NINA-DISPLAY");
 
         /* STA IP */
         esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
