@@ -83,10 +83,13 @@ typedef struct {
     int32_t anim_hfr_x100;
 } dashboard_page_t;
 
+/* AllSky page — defined in nina_dashboard.c */
+extern lv_obj_t *allsky_obj;
+
 /* Shared state — defined in nina_dashboard.c, used by update and thumbnail modules */
 extern dashboard_page_t pages[MAX_NINA_INSTANCES];
 extern int page_count;        /* Number of NINA instance pages (only enabled instances) */
-extern int total_page_count;  /* page_count + 3 (summary + settings + sysinfo) */
+extern int total_page_count;  /* page_count + 4 (allsky + summary + settings + sysinfo) */
 extern int active_page;
 extern const theme_t *current_theme;
 

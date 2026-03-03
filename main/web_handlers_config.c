@@ -227,7 +227,7 @@ static app_config_t *parse_config_from_json(cJSON *root)
     if (cJSON_IsNumber(apo_item)) {
         int v = apo_item->valueint;
         if (v < -1) v = -1;
-        if (v > MAX_NINA_INSTANCES + 1) v = MAX_NINA_INSTANCES + 1;
+        if (v > MAX_NINA_INSTANCES + 3) v = MAX_NINA_INSTANCES + 3;
         cfg->active_page_override = (int8_t)v;
     }
 

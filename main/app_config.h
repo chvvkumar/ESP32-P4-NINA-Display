@@ -34,12 +34,12 @@ typedef struct {
     char mqtt_password[64];         // MQTT broker password
     char mqtt_topic_prefix[64];     // MQTT topic prefix (default "ninadisplay")
     uint16_t mqtt_port;             // MQTT broker port (default 1883)
-    int8_t   active_page_override;          // -1 = auto, 0 = summary, 1..N = NINA instance, N+1 = sysinfo
+    int8_t   active_page_override;          // -1 = auto, 0 = allsky, 1 = summary, 2..N+1 = NINA, N+2 = settings, N+3 = sysinfo
     bool     auto_rotate_enabled;            // enable automatic page rotation
     uint16_t auto_rotate_interval_s;        // seconds between automatic page rotations
     uint8_t  auto_rotate_effect;            // 0 = instant, 1 = fade, 2 = slide-left, 3 = slide-right
     bool     auto_rotate_skip_disconnected; // skip pages where NINA is not connected during auto-rotate
-    uint8_t  auto_rotate_pages;            // bitmask: bit0=summary, bit1-3=NINA 1-3, bit4=sysinfo
+    uint8_t  auto_rotate_pages;            // bitmask: bit0=summary, bit1-3=NINA 1-3, bit4=sysinfo, bit5=allsky
     uint8_t  update_rate_s;                // UI/data update interval in seconds (1-10, default 2)
     uint8_t  graph_update_interval_s;     // Graph overlay auto-refresh interval in seconds (2-30, default 5)
     uint8_t  connection_timeout_s;        // Seconds without successful poll before marking offline (2-30, default 6)

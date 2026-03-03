@@ -43,7 +43,7 @@ static lv_obj_t *btn_interval_minus = NULL;
 static lv_obj_t *btn_interval_plus = NULL;
 static lv_obj_t *dd_transition = NULL;
 static lv_obj_t *sw_skip_offline = NULL;
-static lv_obj_t *cb_pages[5];
+static lv_obj_t *cb_pages[6];
 
 /* ── Segment button map ─────────────────────────────────────────────── */
 static const char *seg_map[] = {"Manual", "Fixed", "Cycle", ""};
@@ -305,6 +305,7 @@ static void create_page_nav_card(lv_obj_t *parent)
         dd_pinned_page = lv_dropdown_create(row);
         lv_obj_set_width(dd_pinned_page, 200);
         lv_dropdown_set_options(dd_pinned_page,
+                                "AllSky\n"
                                 "Summary\n"
                                 "NINA 1\n"
                                 "NINA 2\n"
@@ -430,7 +431,7 @@ static void create_page_nav_card(lv_obj_t *parent)
         }
 
         static const char *page_names[] = {
-            "Summary", "NINA 1", "NINA 2", "NINA 3", "SysInfo"
+            "Summary", "NINA 1", "NINA 2", "NINA 3", "SysInfo", "AllSky"
         };
 
         uint8_t mask = app_config_get()->auto_rotate_pages;
@@ -444,7 +445,7 @@ static void create_page_nav_card(lv_obj_t *parent)
         lv_obj_set_style_pad_column(cb_grid, 16, 0);
         lv_obj_set_style_pad_row(cb_grid, 8, 0);
 
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < 6; i++) {
             cb_pages[i] = lv_checkbox_create(cb_grid);
             lv_checkbox_set_text(cb_pages[i], page_names[i]);
             lv_obj_set_style_text_font(cb_pages[i], &lv_font_montserrat_16, 0);
@@ -741,7 +742,7 @@ void settings_tab_display_refresh(void)
 
     /* Page checkboxes */
     uint8_t mask = cfg->auto_rotate_pages;
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 6; i++) {
         if (cb_pages[i]) {
             if (mask & (1 << i)) {
                 lv_obj_add_state(cb_pages[i], LV_STATE_CHECKED);

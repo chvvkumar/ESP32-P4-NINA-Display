@@ -527,11 +527,12 @@
           <div class="field" style="margin-bottom:0">
             <label class="field-label">Pinned Page</label>
             <select class="input" id="active_page" onchange="setPage(this.value)">
-              <option value="0">Summary</option>
-              <option value="1">NINA 1</option>
-              <option value="2">NINA 2</option>
-              <option value="3">NINA 3</option>
-              <option value="5">System Info</option>
+              <option value="0">AllSky</option>
+              <option value="1">Summary</option>
+              <option value="2">NINA 1</option>
+              <option value="3">NINA 2</option>
+              <option value="4">NINA 3</option>
+              <option value="6">System Info</option>
             </select>
           </div>
         </div>
@@ -970,7 +971,8 @@
         ['arp_nina1','<span id="arp_lbl1">NINA 1</span>'],
         ['arp_nina2','<span id="arp_lbl2">NINA 2</span>'],
         ['arp_nina3','<span id="arp_lbl3">NINA 3</span>'],
-        ['arp_sysinfo','System Info']
+        ['arp_sysinfo','System Info'],
+        ['arp_allsky','AllSky']
       ];
       var c=$('arp-container');
       if(!c) return;
@@ -1131,8 +1133,9 @@
       var enabled=[$('instance_enabled_0').checked,$('instance_enabled_1').checked,$('instance_enabled_2').checked];
       var prev=sel.value;
       sel.innerHTML='';
-      sel.add(new Option('Summary','0'));
-      var pageIdx=1;
+      sel.add(new Option('AllSky','0'));
+      sel.add(new Option('Summary','1'));
+      var pageIdx=2;
       for(var i=0;i<3;i++){
         if(urls[i].length>0&&enabled[i]){
           sel.add(new Option(urls[i]||('NINA '+(i+1)),''+pageIdx));
@@ -1141,7 +1144,7 @@
       }
       sel.add(new Option('System Info',''+(pageIdx+1)));
       if([...sel.options].some(o=>o.value===prev)) sel.value=prev;
-      else sel.value='0';
+      else sel.value='1';
     }
 
     /* === Threshold Helpers === */
@@ -1195,8 +1198,8 @@
     }
 
     /* === Rotation Bitmask === */
-    const arpIds=['arp_summary','arp_nina1','arp_nina2','arp_nina3','arp_sysinfo'];
-    const arpBits=[0x01,0x02,0x04,0x08,0x10];
+    const arpIds=['arp_summary','arp_nina1','arp_nina2','arp_nina3','arp_sysinfo','arp_allsky'];
+    const arpBits=[0x01,0x02,0x04,0x08,0x10,0x20];
 
     function getRotatePages(){
       var mask=0;
@@ -1355,7 +1358,7 @@
 
       updateNodeLabels();
       updatePageSelectOptions();
-      $('active_page').value=(data.active_page_override!=null&&data.active_page_override>=0)?''+data.active_page_override:'0';
+      $('active_page').value=(data.active_page_override!=null&&data.active_page_override>=0)?''+data.active_page_override:'1';
       setPageMode(pageMode);
 
       $('pass').value='';

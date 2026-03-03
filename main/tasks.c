@@ -509,24 +509,26 @@ void data_update_task(void *arg) {
         perf_timer_start(&g_perf.poll_cycle_total);
 
         int current_active = nina_dashboard_get_active_page();  // Snapshot to avoid races
+        bool on_allsky = nina_dashboard_is_allsky_page();
         bool on_sysinfo = nina_dashboard_is_sysinfo_page();
         bool on_settings = nina_dashboard_is_settings_page();
         bool on_summary = nina_dashboard_is_summary_page();
 
         /*
          * Page index convention (page_count = enabled instances only):
-         *   0                    = summary page
-         *   1 .. page_count      = NINA instance pages (mapped via page_instance_map)
-         *   page_count + 1       = settings page
-         *   page_count + 2       = sysinfo page
+         *   0                    = AllSky page
+         *   1                    = summary page
+         *   2 .. page_count + 1  = NINA instance pages (mapped via page_instance_map)
+         *   page_count + 2       = settings page
+         *   page_count + 3       = sysinfo page
          *
          * active_nina_idx: the actual instance index (0..MAX_NINA_INSTANCES-1)
-         *   for the active page, or -1 if on summary/settings/sysinfo.
+         *   for the active page, or -1 if on allsky/summary/settings/sysinfo.
          */
         int active_nina_idx = -1;   /* Actual instance index (for data access) */
         int active_page_idx = -1;  /* 0-based page index into pages[] (for UI calls) */
-        if (!on_sysinfo && !on_settings && !on_summary && current_active >= 1) {
-            active_page_idx = current_active - 1;
+        if (!on_allsky && !on_sysinfo && !on_settings && !on_summary && current_active >= 2) {
+            active_page_idx = current_active - 2;
             active_nina_idx = nina_dashboard_page_to_instance(active_page_idx);
         }
 
@@ -638,7 +640,8 @@ void data_update_task(void *arg) {
         if (page_changed) {
             page_changed = false;
             last_rotate_ms = esp_timer_get_time() / 1000;  // Reset auto-rotate timer on any page change
-            ESP_LOGI(TAG, "Page switched to %d%s%s%s", current_active,
+            ESP_LOGI(TAG, "Page switched to %d%s%s%s%s", current_active,
+                     on_allsky ? " (allsky)" : "",
                      on_sysinfo ? " (sysinfo)" : "", on_settings ? " (settings)" : "",
                      on_summary ? " (summary)" : "");
 
@@ -672,14 +675,14 @@ void data_update_task(void *arg) {
 
         /* If auto-rotate is active and we're on a NINA instance page but no instances
          * are connected, fall back to the summary page automatically. */
-        if (app_config_get()->auto_rotate_enabled && !on_summary && !on_sysinfo && !on_settings) {
+        if (app_config_get()->auto_rotate_enabled && !on_summary && !on_sysinfo && !on_settings && !on_allsky) {
             bool any_connected = false;
             for (int i = 0; i < instance_count; i++) {
                 if (nina_connection_is_connected(i)) { any_connected = true; break; }
             }
             if (!any_connected) {
                 if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                    nina_dashboard_show_page(0, instance_count);
+                    nina_dashboard_show_page(1, instance_count);
                     bsp_display_unlock();
                 }
                 page_changed = true;
@@ -690,12 +693,12 @@ void data_update_task(void *arg) {
         /* Auto-rotate logic — rotates between pages selected by auto_rotate_pages bitmask.
          *
          * Page bitmask layout:
-         *   bit 0  = Summary page (page index 0)
-         *   bit 1  = NINA instance 1 (page index 1)
-         *   bit 2  = NINA instance 2 (page index 2)
-         *   bit 3  = NINA instance 3 (page index 3)
-         *   bit 4  = System Info page (page index instance_count + 2)
-         *   bit 5  = Settings page (page index instance_count + 1)
+         *   bit 0  = Summary page (page index 1)
+         *   bit 1  = NINA instance 1 (page index 2)
+         *   bit 2  = NINA instance 2 (page index 3)
+         *   bit 3  = NINA instance 3 (page index 4)
+         *   bit 4  = System Info page (page index instance_count + 3)
+         *   bit 5  = AllSky page (page index 0)
          */
         {
             app_config_t *r_cfg = app_config_get();
@@ -705,7 +708,7 @@ void data_update_task(void *arg) {
                     uint8_t page_mask = r_cfg->auto_rotate_pages;
                     int total = nina_dashboard_get_total_page_count();
 
-                    int ena_page_count = total - 3;  /* enabled NINA pages only */
+                    int ena_page_count = total - 4;  /* enabled NINA pages only */
 
                     /* Find next page in rotation by stepping through candidates */
                     int next_page = current_active;
@@ -717,22 +720,24 @@ void data_update_task(void *arg) {
                          * so use the page-to-instance mapping for NINA pages. */
                         bool in_mask = false;
                         if (candidate == 0)
-                            in_mask = (page_mask & 0x01) != 0;             /* Summary */
-                        else if (candidate >= 1 && candidate <= ena_page_count) {
-                            int inst = nina_dashboard_page_to_instance(candidate - 1);
+                            in_mask = (page_mask & 0x20) != 0;             /* AllSky (bit 5) */
+                        else if (candidate == 1)
+                            in_mask = (page_mask & 0x01) != 0;             /* Summary (bit 0) */
+                        else if (candidate >= 2 && candidate <= ena_page_count + 1) {
+                            int inst = nina_dashboard_page_to_instance(candidate - 2);
                             if (inst >= 0)
                                 in_mask = (page_mask & (1 << (inst + 1))) != 0; /* NINA page */
                         }
-                        else if (candidate == ena_page_count + 1)
-                            in_mask = false;                               /* Settings — never in rotation */
                         else if (candidate == ena_page_count + 2)
-                            in_mask = (page_mask & 0x10) != 0;             /* Sysinfo */
+                            in_mask = false;                               /* Settings — never in rotation */
+                        else if (candidate == ena_page_count + 3)
+                            in_mask = (page_mask & 0x10) != 0;             /* Sysinfo (bit 4) */
 
                         if (!in_mask) continue;
 
                         /* Skip disconnected NINA instances if configured */
-                        if (candidate >= 1 && candidate <= ena_page_count) {
-                            int nina_idx = nina_dashboard_page_to_instance(candidate - 1);
+                        if (candidate >= 2 && candidate <= ena_page_count + 1) {
+                            int nina_idx = nina_dashboard_page_to_instance(candidate - 2);
                             if (nina_idx >= 0 && r_cfg->auto_rotate_skip_disconnected
                                 && !nina_connection_is_connected(nina_idx)) continue;
                         }
