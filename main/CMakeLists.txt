@@ -12,7 +12,8 @@ idf_component_register(
          ui/nina_ota_prompt.c
          ${LV_DEMOS_SOURCES}
     INCLUDE_DIRS . ui ${LV_DEMO_DIR}
-    EMBED_TXTFILES config_ui.html)
+    EMBED_TXTFILES config_ui.html
+    EMBED_FILES favicon.png)
 
 idf_component_get_property(LVGL_LIB lvgl__lvgl COMPONENT_LIB)
 target_compile_options(

@@ -6,6 +6,8 @@
 
 extern const uint8_t config_html_start[] asm("_binary_config_ui_html_start");
 extern const uint8_t config_html_end[]   asm("_binary_config_ui_html_end");
+extern const uint8_t favicon_png_start[] asm("_binary_favicon_png_start");
+extern const uint8_t favicon_png_end[]   asm("_binary_favicon_png_end");
 
 // Handler for root URL
 esp_err_t root_get_handler(httpd_req_t *req)
@@ -13,6 +15,16 @@ esp_err_t root_get_handler(httpd_req_t *req)
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, (const char *)config_html_start,
                     config_html_end - config_html_start);
+    return ESP_OK;
+}
+
+// Handler for favicon
+esp_err_t favicon_get_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "image/png");
+    httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=604800");
+    httpd_resp_send(req, (const char *)favicon_png_start,
+                    favicon_png_end - favicon_png_start);
     return ESP_OK;
 }
 

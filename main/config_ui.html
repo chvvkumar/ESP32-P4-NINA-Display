@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>NINA Display</title>
+  <link rel="icon" type="image/png" href="/favicon.ico">
   <style>
     /* === FOUNDATION === */
     :root {
@@ -92,10 +93,8 @@
       font-size: 0.95rem; font-weight: 700; letter-spacing: -0.02em;
       display: flex; align-items: center; gap: 10px;
     }
-    .top-nav .brand .dot {
-      width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
-      box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.4);
-      transition: background 0.4s ease, box-shadow 0.4s ease;
+    .top-nav .brand .logo {
+      width: 24px; height: 24px; border-radius: 50%;
     }
     .top-nav .tabs {
       display: flex; gap: 4px; background: rgba(255, 255, 255, 0.04);
@@ -427,7 +426,7 @@
 
   <!-- ======== TOP NAVIGATION ======== -->
   <nav class="top-nav">
-    <div class="brand"><span class="dot"></span> NINA Display</div>
+    <div class="brand"><img class="logo" src="/favicon.ico" alt=""> <span id="brandName">NINA Display</span></div>
     <div class="tabs" id="topTabs">
       <button class="tab-btn active" data-tab="display">Display</button>
       <button class="tab-btn" data-tab="nodes">Nodes &amp; Data</button>
@@ -1221,6 +1220,9 @@
     function populateConfig(data){
       _populating=true;
       $('hostname').value=data.hostname||'';
+      var hn=data.hostname||'NINA Display';
+      $('brandName').textContent=hn;
+      document.title=hn;
       $('ssid').value=data.ssid||'';
       $('ntp').value=data.ntp||'';
       $('timezone').value=data.timezone||'';

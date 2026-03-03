@@ -40,7 +40,7 @@ void start_web_server(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 8192;
-    config.max_uri_handlers = 21;
+    config.max_uri_handlers = 22;
     httpd_handle_t server = NULL;
 
     if (httpd_start(&server, &config) != ESP_OK) {
@@ -50,6 +50,7 @@ void start_web_server(void)
 
     static const httpd_uri_t routes[] = {
         { "/",                     HTTP_GET,  root_get_handler, NULL },
+        { "/favicon.ico",          HTTP_GET,  favicon_get_handler, NULL },
         { "/api/config",           HTTP_GET,  config_get_handler, NULL },
         { "/api/config",           HTTP_POST, config_post_handler, NULL },
         { "/api/brightness",       HTTP_POST, brightness_post_handler, NULL },

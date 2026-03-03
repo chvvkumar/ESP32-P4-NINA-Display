@@ -46,6 +46,7 @@ bool validate_url_format(const char *url);
 
 /* ---- Handler forward declarations (registered by start_web_server) ---- */
 esp_err_t root_get_handler(httpd_req_t *req);
+esp_err_t favicon_get_handler(httpd_req_t *req);
 esp_err_t config_get_handler(httpd_req_t *req);
 esp_err_t config_post_handler(httpd_req_t *req);
 esp_err_t brightness_post_handler(httpd_req_t *req);
