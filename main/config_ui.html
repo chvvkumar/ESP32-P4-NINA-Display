@@ -432,6 +432,7 @@
       <button class="tab-btn" data-tab="nodes">Nodes &amp; Data</button>
       <button class="tab-btn" data-tab="behavior">Behavior</button>
       <button class="tab-btn" data-tab="system">System</button>
+      <button class="tab-btn" data-tab="allsky">AllSky</button>
     </div>
     <a class="github-link" href="https://github.com/chvvkumar/ESP32-P4-NINA-Display" target="_blank" rel="noopener">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
@@ -457,6 +458,10 @@
       <button class="nav-btn" data-tab="system">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
         System
+      </button>
+      <button class="nav-btn" data-tab="allsky">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41m11.32-11.32l1.41-1.41"/></svg>
+        AllSky
       </button>
     </div>
   </nav>
@@ -831,6 +836,60 @@
       </div>
     </div>
 
+    <!-- ==================== TAB 5: ALLSKY ==================== -->
+    <div id="tab-allsky" class="tab-panel">
+
+      <div class="card">
+        <div class="card-title">Connection</div>
+        <div class="field">
+          <label class="field-label">AllSky Hostname</label>
+          <input type="text" class="input" id="allskyHostname" placeholder="allskypi5.lan:8080">
+          <div class="field-hint">Host:port of the AllSky API (e.g., allskypi5.lan:8080)</div>
+        </div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Update Interval</label>
+            <select class="input" id="allskyInterval">
+              <option value="1">1 second</option>
+              <option value="2">2 seconds</option>
+              <option value="5" selected>5 seconds</option>
+              <option value="10">10 seconds</option>
+              <option value="30">30 seconds</option>
+              <option value="60">1 minute</option>
+              <option value="120">2 minutes</option>
+              <option value="300">5 minutes</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field-label">Dew Point Offset (&deg;C above ambient)</label>
+            <input type="number" class="input" id="allskyDewOffset" step="0.5" min="-50" max="50" value="5.0">
+            <div class="field-hint">Dew point colored safe when below ambient + this offset</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Thresholds &amp; Colors</div>
+        <div class="field-hint" style="margin-bottom:16px">Set min/max ranges and gradient colors for each sensor field. Values at min use the left color; values at max use the right color.</div>
+        <div id="allskyThresholds"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Field Mappings</div>
+        <div class="field-hint" style="margin-bottom:16px">Configure which AllSky API JSON values appear in each display quadrant. Click a key path input, then click "Use" on a JSON leaf to fill it.</div>
+
+        <button onclick="fetchAllSkyJson()" class="btn btn-primary" id="fetchJsonBtn" style="width:100%;margin-bottom:16px">Fetch JSON from AllSky</button>
+
+        <div id="allskyJsonTree" style="display:none; max-height:300px; overflow-y:auto; margin:0 0 16px; padding:12px; background:rgba(0,0,0,0.25); border-radius:var(--radius-sm); border:1px solid rgba(255,255,255,0.06); font-family:'SF Mono',Monaco,Consolas,monospace; font-size:0.75rem; line-height:1.6;"></div>
+
+        <div id="allskyFieldMappings"></div>
+      </div>
+
+      <div style="text-align:center; margin-top:16px; margin-bottom:20px">
+        <button onclick="saveAllSkyConfig()" class="btn btn-primary" style="min-width:200px">Save AllSky Settings</button>
+      </div>
+    </div>
+
   </main>
 
   <!-- ======== SAVE BAR & TOAST ======== -->
@@ -927,7 +986,8 @@
       display: {color:'#14b8a6', rgb:'20, 184, 166'},
       nodes:   {color:'#10b981', rgb:'16, 185, 129'},
       behavior:{color:'#8b5cf6', rgb:'139, 92, 246'},
-      system:  {color:'#f43f5e', rgb:'244, 63, 94'}
+      system:  {color:'#f43f5e', rgb:'244, 63, 94'},
+      allsky:  {color:'#3b82f6', rgb:'59, 130, 246'}
     };
 
     function setAccent(name){
@@ -1517,9 +1577,284 @@
     document.querySelector('.content').addEventListener('input',()=>{checkDirty();liveApply();});
     document.querySelector('.content').addEventListener('change',()=>{checkDirty();liveApply();});
 
+    /* === AllSky Configuration === */
+
+    var allskyThresholdDefs=[
+      {key:'cpu_temp',   label:'CPU Temp',  unit:'\u00b0C', defMin:30, defMax:80,  defMinColor:'#10b981', defMaxColor:'#ef4444'},
+      {key:'ssd_temp',   label:'SSD Temp',  unit:'\u00b0C', defMin:30, defMax:70,  defMinColor:'#10b981', defMaxColor:'#ef4444'},
+      {key:'sqm',        label:'SQM',       unit:'mag/\u2033\u00b2', defMin:18, defMax:22,  defMinColor:'#ef4444', defMaxColor:'#10b981'},
+      {key:'ambient',    label:'Ambient',    unit:'\u00b0C', defMin:-10,defMax:35,  defMinColor:'#3b82f6', defMaxColor:'#ef4444'},
+      {key:'humidity',   label:'Humidity',   unit:'%',  defMin:0,  defMax:100, defMinColor:'#10b981', defMaxColor:'#ef4444'},
+      {key:'dew_point',  label:'Dew Point',  unit:'\u00b0C', defMin:-10,defMax:25,  defMinColor:'#10b981', defMaxColor:'#ef4444'},
+      {key:'amps',       label:'Amps',       unit:'A',  defMin:0,  defMax:30,  defMinColor:'#10b981', defMaxColor:'#ef4444'}
+    ];
+
+    var allskyFieldDefs=[
+      {quad:'THERMAL', label:'Thermal', fields:[
+        {key:'main_value', label:'Main Value', inputs:['key','title','unit']},
+        {key:'sub1',       label:'Sub Value 1', inputs:['key','label','suffix']},
+        {key:'sub2',       label:'Sub Value 2', inputs:['key','label','suffix']},
+        {key:'dot1',       label:'Dot 1',       inputs:['key','label']},
+        {key:'dot2',       label:'Dot 2',       inputs:['key','label']}
+      ]},
+      {quad:'SQM', label:'Sky Quality', fields:[
+        {key:'main_value', label:'Main Value', inputs:['key','title','unit']},
+        {key:'sub1',       label:'Sub Value 1', inputs:['key','label','suffix']},
+        {key:'sub2',       label:'Sub Value 2', inputs:['key','label','suffix']},
+        {key:'dot1',       label:'Dot 1',       inputs:['key','label']},
+        {key:'dot2',       label:'Dot 2',       inputs:['key','label']}
+      ]},
+      {quad:'AMBIENT', label:'Ambient', fields:[
+        {key:'main_value', label:'Main Value', inputs:['key','title','unit']},
+        {key:'sub1',       label:'Sub Value 1', inputs:['key','label','suffix']},
+        {key:'sub2',       label:'Sub Value 2', inputs:['key','label','suffix']},
+        {key:'dot1',       label:'Dot 1',       inputs:['key','label']},
+        {key:'dot2',       label:'Dot 2',       inputs:['key','label']}
+      ]},
+      {quad:'POWER', label:'Power', fields:[
+        {key:'main_value', label:'Main Value', inputs:['key','title','unit']},
+        {key:'sub1',       label:'Sub Value 1', inputs:['key','label','suffix']},
+        {key:'sub2',       label:'Sub Value 2', inputs:['key','label','suffix']},
+        {key:'dot1',       label:'Dot 1',       inputs:['key','label']},
+        {key:'dot2',       label:'Dot 2',       inputs:['key','label']}
+      ]}
+    ];
+
+    var activeFieldInput=null;
+
+    function populateAllSkyThresholds(thresholds){
+      var container=$('allskyThresholds');
+      if(!container) return;
+      container.innerHTML='';
+      allskyThresholdDefs.forEach(function(def){
+        var t=thresholds[def.key]||{};
+        var minVal=t.min!=null?t.min:def.defMin;
+        var maxVal=t.max!=null?t.max:def.defMax;
+        var minColor=t.min_color||def.defMinColor;
+        var maxColor=t.max_color||def.defMaxColor;
+        var gradId='as_grad_'+def.key;
+        var row=document.createElement('div');
+        row.style.cssText='display:grid;grid-template-columns:100px 1fr 1fr 36px 36px 60px;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.04)';
+        row.innerHTML=
+          '<div style="font-size:0.8rem;font-weight:500;color:var(--text)">'+def.label+'<div style="font-size:0.65rem;color:#71717a;margin-top:2px">'+def.unit+'</div></div>'+
+          '<div><div style="font-size:0.65rem;color:#71717a;margin-bottom:4px">Min</div><input type="number" class="input" id="as_min_'+def.key+'" value="'+minVal+'" step="0.1" style="min-height:38px;padding:6px 10px;font-size:0.8rem" oninput="updateAllSkyGradient(\''+def.key+'\')"></div>'+
+          '<div><div style="font-size:0.65rem;color:#71717a;margin-bottom:4px">Max</div><input type="number" class="input" id="as_max_'+def.key+'" value="'+maxVal+'" step="0.1" style="min-height:38px;padding:6px 10px;font-size:0.8rem" oninput="updateAllSkyGradient(\''+def.key+'\')"></div>'+
+          '<input type="color" id="as_minc_'+def.key+'" value="'+minColor+'" style="width:32px;height:32px;border:none;background:none;cursor:pointer;border-radius:6px" oninput="updateAllSkyGradient(\''+def.key+'\')">'+
+          '<input type="color" id="as_maxc_'+def.key+'" value="'+maxColor+'" style="width:32px;height:32px;border:none;background:none;cursor:pointer;border-radius:6px" oninput="updateAllSkyGradient(\''+def.key+'\')">'+
+          '<div id="'+gradId+'" style="height:24px;border-radius:6px;border:1px solid rgba(255,255,255,0.08)"></div>';
+        container.appendChild(row);
+        updateAllSkyGradient(def.key);
+      });
+    }
+
+    function updateAllSkyGradient(key){
+      var minc=$('as_minc_'+key);
+      var maxc=$('as_maxc_'+key);
+      var grad=$('as_grad_'+key);
+      if(minc&&maxc&&grad){
+        grad.style.background='linear-gradient(to right,'+minc.value+','+maxc.value+')';
+      }
+    }
+
+    function gatherAllSkyThresholds(){
+      var result={};
+      allskyThresholdDefs.forEach(function(def){
+        result[def.key]={
+          min:parseFloat($('as_min_'+def.key).value)||def.defMin,
+          max:parseFloat($('as_max_'+def.key).value)||def.defMax,
+          min_color:$('as_minc_'+def.key).value,
+          max_color:$('as_maxc_'+def.key).value
+        };
+      });
+      return result;
+    }
+
+    function populateAllSkyFieldMappings(config){
+      var container=$('allskyFieldMappings');
+      if(!container) return;
+      container.innerHTML='';
+      allskyFieldDefs.forEach(function(quadDef){
+        var qData=(config&&config[quadDef.quad])||{};
+        var section=document.createElement('div');
+        section.style.cssText='margin-bottom:20px';
+        var header=document.createElement('div');
+        header.style.cssText='font-size:0.72rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.06)';
+        header.textContent=quadDef.label+' Quadrant';
+        section.appendChild(header);
+
+        quadDef.fields.forEach(function(f){
+          var fData=(qData[f.key])||{};
+          var fieldId='as_fm_'+quadDef.quad+'_'+f.key;
+          var row=document.createElement('div');
+          row.style.cssText='display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-bottom:10px;padding:8px 0';
+
+          var lbl=document.createElement('div');
+          lbl.style.cssText='width:80px;flex-shrink:0;font-size:0.75rem;color:var(--text-muted);font-weight:500;padding-bottom:6px';
+          lbl.textContent=f.label;
+          row.appendChild(lbl);
+
+          f.inputs.forEach(function(inp){
+            var wrap=document.createElement('div');
+            wrap.style.cssText='flex:1;min-width:100px';
+            var inpLabel=document.createElement('div');
+            inpLabel.style.cssText='font-size:0.6rem;color:#71717a;margin-bottom:3px;text-transform:uppercase;letter-spacing:0.05em';
+            inpLabel.textContent=inp==='key'?'JSON Key Path':inp.charAt(0).toUpperCase()+inp.slice(1);
+            var input=document.createElement('input');
+            input.type='text';
+            input.className='input';
+            input.id=fieldId+'_'+inp;
+            input.value=fData[inp]||'';
+            input.style.cssText='min-height:36px;padding:6px 10px;font-size:0.78rem';
+            if(inp==='key'){
+              input.placeholder='e.g., data.cpu_temp';
+              input.addEventListener('focus',function(){
+                if(activeFieldInput) activeFieldInput.style.boxShadow='';
+                activeFieldInput=this;
+                this.style.boxShadow='0 0 0 2px rgba(59,130,246,0.4)';
+              });
+              input.addEventListener('blur',function(){
+                var self=this;
+                setTimeout(function(){
+                  if(activeFieldInput===self){
+                    self.style.boxShadow='';
+                  }
+                },200);
+              });
+            } else if(inp==='title'||inp==='label'){
+              input.placeholder=inp==='title'?'Display title':'Label';
+            } else if(inp==='unit'||inp==='suffix'){
+              input.placeholder=inp==='unit'?'\u00b0C, %, etc.':'suffix';
+              wrap.style.maxWidth='80px';
+              wrap.style.minWidth='60px';
+              wrap.style.flex='0 0 auto';
+            }
+            wrap.appendChild(inpLabel);
+            wrap.appendChild(input);
+            row.appendChild(wrap);
+          });
+
+          section.appendChild(row);
+        });
+
+        container.appendChild(section);
+      });
+    }
+
+    function gatherAllSkyFieldMappings(){
+      var config={};
+      allskyFieldDefs.forEach(function(quadDef){
+        var qData={};
+        quadDef.fields.forEach(function(f){
+          var fieldId='as_fm_'+quadDef.quad+'_'+f.key;
+          var fData={};
+          var hasData=false;
+          f.inputs.forEach(function(inp){
+            var el=$(fieldId+'_'+inp);
+            if(el&&el.value.trim()){
+              fData[inp]=el.value.trim();
+              hasData=true;
+            }
+          });
+          if(hasData) qData[f.key]=fData;
+        });
+        if(Object.keys(qData).length>0) config[quadDef.quad]=qData;
+      });
+      return config;
+    }
+
+    function loadAllSkyConfig(){
+      fetch('/api/allsky-config')
+        .then(function(r){ return r.json(); })
+        .then(function(cfg){
+          $('allskyHostname').value=cfg.hostname||'';
+          $('allskyInterval').value=cfg.update_interval_s||5;
+          $('allskyDewOffset').value=cfg.dew_offset!=null?cfg.dew_offset:5.0;
+          var thresholds={};
+          try{ thresholds=JSON.parse(cfg.thresholds||'{}'); }catch(e){}
+          populateAllSkyThresholds(thresholds);
+          var fieldCfg={};
+          try{ fieldCfg=JSON.parse(cfg.field_config||'{}'); }catch(e){}
+          populateAllSkyFieldMappings(fieldCfg);
+        })
+        .catch(function(e){
+          console.error('Failed to load AllSky config',e);
+          populateAllSkyThresholds({});
+          populateAllSkyFieldMappings({});
+        });
+    }
+
+    function saveAllSkyConfig(){
+      var data={
+        hostname:$('allskyHostname').value.trim(),
+        update_interval_s:parseInt($('allskyInterval').value)||5,
+        dew_offset:parseFloat($('allskyDewOffset').value)||5.0,
+        thresholds:JSON.stringify(gatherAllSkyThresholds()),
+        field_config:JSON.stringify(gatherAllSkyFieldMappings())
+      };
+      postJson('/api/allsky-config',data)
+        .then(function(r){ if(!r.ok) throw new Error('Save failed'); showToast('AllSky settings saved','success'); })
+        .catch(function(e){ showToast('Save failed: '+e.message,'error'); });
+    }
+
+    function fetchAllSkyJson(){
+      var btn=$('fetchJsonBtn');
+      btn.disabled=true; btn.textContent='Fetching...';
+      fetch('/api/allsky-proxy')
+        .then(function(r){ if(!r.ok) throw new Error('Failed to reach AllSky (HTTP '+r.status+')'); return r.json(); })
+        .then(function(data){
+          var tree=$('allskyJsonTree');
+          tree.style.display='block';
+          tree.innerHTML=renderJsonTree(data,'');
+          btn.textContent='Refresh JSON';
+        })
+        .catch(function(e){ showToast('Failed: '+e.message,'error'); btn.textContent='Fetch JSON from AllSky'; })
+        .finally(function(){ btn.disabled=false; });
+    }
+
+    function renderJsonTree(obj,prefix){
+      var html='';
+      for(var key in obj){
+        if(!obj.hasOwnProperty(key)) continue;
+        var path=prefix?prefix+'.'+key:key;
+        var val=obj[key];
+        if(val!==null&&typeof val==='object'&&!Array.isArray(val)){
+          html+='<details><summary style="cursor:pointer;color:#93c5fd;padding:2px 0;user-select:none">'+escHtml(key)+'</summary>';
+          html+='<div style="padding-left:16px;border-left:1px solid rgba(255,255,255,0.06)">'+renderJsonTree(val,path)+'</div></details>';
+        } else {
+          var escapedPath=path.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+          html+='<div style="padding:3px 0;display:flex;justify-content:space-between;align-items:center;gap:8px">';
+          html+='<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span style="color:#d1d5db">'+escHtml(key)+'</span><span style="color:#71717a">: </span><span style="color:#fbbf24">'+escHtml(JSON.stringify(val))+'</span></span>';
+          html+='<button onclick="selectJsonKey(\''+escapedPath+'\')" style="flex-shrink:0;font-size:0.6rem;padding:2px 10px;background:rgba(59,130,246,0.2);border:1px solid rgba(59,130,246,0.35);border-radius:4px;color:#93c5fd;cursor:pointer;font-family:inherit;transition:background 0.15s" onmouseover="this.style.background=\'rgba(59,130,246,0.35)\'" onmouseout="this.style.background=\'rgba(59,130,246,0.2)\'">Use</button>';
+          html+='</div>';
+        }
+      }
+      return html;
+    }
+
+    function escHtml(s){
+      var d=document.createElement('div');
+      d.textContent=s;
+      return d.innerHTML;
+    }
+
+    function selectJsonKey(path){
+      if(activeFieldInput){
+        activeFieldInput.value=path;
+        activeFieldInput.style.borderColor='#22c55e';
+        activeFieldInput.style.boxShadow='0 0 0 2px rgba(34,197,94,0.3)';
+        setTimeout(function(){
+          activeFieldInput.style.borderColor='';
+          activeFieldInput.style.boxShadow='';
+        },1500);
+      } else {
+        showToast('Click a key path input field first, then click Use on a JSON value','info');
+      }
+    }
+
     /* === Init === */
     loadConfig();
     loadVersion();
+    loadAllSkyConfig();
   </script>
 </body>
 </html>
