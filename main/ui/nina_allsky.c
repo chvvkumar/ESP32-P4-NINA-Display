@@ -49,12 +49,11 @@ typedef struct {
     char sub2_suffix[16];
     char dot1_on_value[16];
     char dot2_on_value[16];
-    char bar_threshold[32]; /* key into allsky_thresholds JSON */
 } quadrant_config_t;
 
 static quadrant_config_t qcfg[4];
 
-/* ── Threshold cache per quadrant bar ────────────────────────────────── */
+/* ── Per-field threshold cache ───────────────────────────────────────── */
 
 typedef struct {
     bool  valid;
@@ -64,19 +63,18 @@ typedef struct {
     uint32_t color_max;
 } bar_threshold_t;
 
-static bar_threshold_t bar_thresholds[4];
+/* Indexed by [quad][field_type]: 0=main, 1=sub1, 2=sub2 */
+#define FIELD_MAIN 0
+#define FIELD_SUB1 1
+#define FIELD_SUB2 2
+static bar_threshold_t field_thresholds[4][3];
 
 /* Cached dew point threshold colors (parsed once in parse_thresholds) */
 static uint32_t dew_safe_color  = 0x3b82f6;  /* blue (safe) */
 static uint32_t dew_warn_color  = 0xef4444;  /* red (warning) */
 
-/* Default threshold key per quadrant (fallback when bar_threshold not in config) */
-static const char *default_bar_threshold_keys[4] = {
-    "cpu_temp",  /* thermal */
-    "sqm",       /* sqm */
-    "ambient",   /* ambient */
-    "amps",      /* power — maps to current draw */
-};
+/* Field names for building threshold lookup keys */
+static const char *field_names[3] = { "main", "sub1", "sub2" };
 
 /* Quadrant titles */
 static const char *quad_titles[4] = {
@@ -129,12 +127,6 @@ static uint32_t color_lerp(uint32_t c1, uint32_t c2, float t) {
 static void parse_field_config(void) {
     const app_config_t *cfg = app_config_get();
     memset(qcfg, 0, sizeof(qcfg));
-
-    /* Set default bar threshold keys */
-    for (int i = 0; i < 4; i++) {
-        strncpy(qcfg[i].bar_threshold, default_bar_threshold_keys[i],
-                sizeof(qcfg[i].bar_threshold) - 1);
-    }
 
     cJSON *root = cJSON_Parse(cfg->allsky_field_config);
     if (!root) {
@@ -191,11 +183,6 @@ static void parse_field_config(void) {
                 strncpy(qcfg[q].dot2_on_value, on->valuestring, sizeof(qcfg[q].dot2_on_value) - 1);
         }
 
-        /* bar_threshold override (optional) */
-        cJSON *bt = cJSON_GetObjectItem(quad, "bar_threshold");
-        if (bt && cJSON_IsString(bt) && bt->valuestring[0] != '\0') {
-            strncpy(qcfg[q].bar_threshold, bt->valuestring, sizeof(qcfg[q].bar_threshold) - 1);
-        }
     }
 
     cJSON_Delete(root);
@@ -203,7 +190,7 @@ static void parse_field_config(void) {
 
 static void parse_thresholds(void) {
     const app_config_t *cfg = app_config_get();
-    memset(bar_thresholds, 0, sizeof(bar_thresholds));
+    memset(field_thresholds, 0, sizeof(field_thresholds));
 
     cJSON *root = cJSON_Parse(cfg->allsky_thresholds);
     if (!root) {
@@ -211,44 +198,53 @@ static void parse_thresholds(void) {
         return;
     }
 
+    /* Parse per-field thresholds using positional keys: {quad}_{field} */
     for (int q = 0; q < 4; q++) {
-        const char *key = qcfg[q].bar_threshold;
-        if (key[0] == '\0') continue;
+        for (int f = 0; f < 3; f++) {
+            char key[32];
+            snprintf(key, sizeof(key), "%s_%s", quad_json_keys[q], field_names[f]);
 
-        cJSON *thr = cJSON_GetObjectItem(root, key);
-        if (!thr) continue;
+            cJSON *thr = cJSON_GetObjectItem(root, key);
+            if (!thr) continue;
 
-        cJSON *j_min = cJSON_GetObjectItem(thr, "min");
-        cJSON *j_max = cJSON_GetObjectItem(thr, "max");
-        cJSON *j_cmin = cJSON_GetObjectItem(thr, "color_min");
-        cJSON *j_cmax = cJSON_GetObjectItem(thr, "color_max");
+            cJSON *j_min  = cJSON_GetObjectItem(thr, "min");
+            cJSON *j_max  = cJSON_GetObjectItem(thr, "max");
+            cJSON *j_cmin = cJSON_GetObjectItem(thr, "color_min");
+            cJSON *j_cmax = cJSON_GetObjectItem(thr, "color_max");
 
-        if (j_min && j_max && cJSON_IsNumber(j_min) && cJSON_IsNumber(j_max)) {
-            bar_thresholds[q].valid = true;
-            bar_thresholds[q].min = (float)j_min->valuedouble;
-            bar_thresholds[q].max = (float)j_max->valuedouble;
-            bar_thresholds[q].color_min = parse_hex_color(
-                (j_cmin && cJSON_IsString(j_cmin)) ? j_cmin->valuestring : NULL, 0x3b82f6);
-            bar_thresholds[q].color_max = parse_hex_color(
-                (j_cmax && cJSON_IsString(j_cmax)) ? j_cmax->valuestring : NULL, 0xef4444);
+            if (j_min && j_max && cJSON_IsNumber(j_min) && cJSON_IsNumber(j_max)) {
+                field_thresholds[q][f].valid = true;
+                field_thresholds[q][f].min = (float)j_min->valuedouble;
+                field_thresholds[q][f].max = (float)j_max->valuedouble;
+                field_thresholds[q][f].color_min = parse_hex_color(
+                    (j_cmin && cJSON_IsString(j_cmin)) ? j_cmin->valuestring : NULL, 0x3b82f6);
+                field_thresholds[q][f].color_max = parse_hex_color(
+                    (j_cmax && cJSON_IsString(j_cmax)) ? j_cmax->valuestring : NULL, 0xef4444);
+            }
         }
     }
 
-    /* Cache dew_point threshold colors (avoids re-parsing JSON every update) */
+    /* Cache dew_point threshold colors from ambient_sub2 */
     dew_safe_color = 0x3b82f6;
     dew_warn_color = 0xef4444;
-    cJSON *dew_thr = cJSON_GetObjectItem(root, "dew_point");
-    if (dew_thr) {
-        cJSON *cmin = cJSON_GetObjectItem(dew_thr, "color_min");
-        cJSON *cmax = cJSON_GetObjectItem(dew_thr, "color_max");
-        if (cmin && cJSON_IsString(cmin))
-            dew_safe_color = parse_hex_color(cmin->valuestring, dew_safe_color);
-        if (cmax && cJSON_IsString(cmax))
-            dew_warn_color = parse_hex_color(cmax->valuestring, dew_warn_color);
+    bar_threshold_t *dew_bt = &field_thresholds[2][FIELD_SUB2]; /* ambient sub2 */
+    if (dew_bt->valid) {
+        dew_safe_color = dew_bt->color_min;
+        dew_warn_color = dew_bt->color_max;
     }
 
     cJSON_Delete(root);
 }
+
+/* ── Superscript font fallback ───────────────────────────────────────── */
+
+extern const lv_font_t lv_font_superscript_24;
+
+/* Mutable copy of montserrat_24 with superscript fallback attached.
+ * The built-in lv_font_montserrat_24 lives in const flash (DROM) on ESP32-P4
+ * so we cannot modify its fallback pointer in-place. */
+static lv_font_t montserrat_24_super;
+static bool montserrat_24_super_init = false;
 
 /* ── Quadrant creation helper ────────────────────────────────────────── */
 
@@ -299,7 +295,7 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
             lv_obj_t *dot = lv_obj_create(dot_cont);
             lv_obj_remove_style_all(dot);
             lv_obj_clear_flag(dot, LV_OBJ_FLAG_CLICKABLE);
-            lv_obj_set_size(dot, 14, 14);
+            lv_obj_set_size(dot, 20, 20);
             lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
             lv_obj_set_style_border_width(dot, 2, 0);
             lv_obj_set_style_bg_opa(dot, LV_OPA_TRANSP, 0);
@@ -328,9 +324,9 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
             lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
     }
 
-    /* 3. Unit label */
+    /* 3. Unit label (uses mutable font copy with superscript fallback) */
     qd->lbl_unit = lv_label_create(qd->box);
-    lv_obj_set_style_text_font(qd->lbl_unit, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_font(qd->lbl_unit, &montserrat_24_super, 0);
     lv_obj_set_style_text_align(qd->lbl_unit, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_width(qd->lbl_unit, LV_PCT(100));
     lv_label_set_text(qd->lbl_unit, qcfg[quad_index].unit);
@@ -389,6 +385,13 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
 /* ── Page creation ───────────────────────────────────────────────────── */
 
 lv_obj_t *allsky_page_create(lv_obj_t *parent) {
+    /* Create mutable font copy with superscript fallback for unit labels (², etc.) */
+    if (!montserrat_24_super_init) {
+        memcpy(&montserrat_24_super, &lv_font_montserrat_24, sizeof(lv_font_t));
+        montserrat_24_super.fallback = &lv_font_superscript_24;
+        montserrat_24_super_init = true;
+    }
+
     /* Parse config before building widgets */
     parse_field_config();
     parse_thresholds();
@@ -502,7 +505,7 @@ void allsky_page_update(const allsky_data_t *data) {
         set_text_if_changed(qd->lbl_sub2, sub_buf[0] ? sub_buf : "--");
 
         /* Bar + main value color from threshold gradient */
-        bar_threshold_t *bt = &bar_thresholds[q];
+        bar_threshold_t *bt = &field_thresholds[q][FIELD_MAIN];
         if (bt->valid && main_val[0] != '\0') {
             float fval = strtof(main_val, NULL);
             float range = bt->max - bt->min;
@@ -532,15 +535,29 @@ void allsky_page_update(const allsky_data_t *data) {
             }
         }
 
-        /* Dew point special coloring (ambient quadrant, sub2 = dew point) */
+        /* Sub1 gradient color from per-field threshold */
+        bar_threshold_t *bt_s1 = &field_thresholds[q][FIELD_SUB1];
+        if (bt_s1->valid && sub1_val[0] != '\0') {
+            float fval = strtof(sub1_val, NULL);
+            float range = bt_s1->max - bt_s1->min;
+            float pos = 0.0f;
+            if (range > 0.001f) pos = (fval - bt_s1->min) / range;
+            if (pos < 0.0f) pos = 0.0f;
+            if (pos > 1.0f) pos = 1.0f;
+            uint32_t sc = color_lerp(bt_s1->color_min, bt_s1->color_max, pos);
+            lv_obj_set_style_text_color(qd->lbl_sub1,
+                lv_color_hex(app_config_apply_brightness(sc, gb)), 0);
+        }
+
+        /* Sub2 color: dew point special logic for ambient, gradient for others */
         if (q == 2) {
+            /* Dew point special coloring (ambient quadrant, sub2 = dew point) */
             const char *ambient_str = data->field_values[ALLSKY_F_AMBIENT_MAIN];
             const char *dew_str     = data->field_values[ALLSKY_F_AMBIENT_SUB2];
             if (ambient_str[0] != '\0' && dew_str[0] != '\0') {
                 float ambient_val = strtof(ambient_str, NULL);
                 float dew_val     = strtof(dew_str, NULL);
 
-                /* Use cached dew_point threshold colors (parsed in parse_thresholds) */
                 uint32_t dew_color;
                 if (dew_val < ambient_val - dew_offset) {
                     dew_color = dew_safe_color;   /* safe — dew point well below ambient */
@@ -550,6 +567,23 @@ void allsky_page_update(const allsky_data_t *data) {
                 lv_obj_set_style_text_color(qd->lbl_sub2,
                     lv_color_hex(app_config_apply_brightness(dew_color, gb)), 0);
             }
+        } else {
+            bar_threshold_t *bt_s2 = &field_thresholds[q][FIELD_SUB2];
+            if (bt_s2->valid && sub2_val[0] != '\0') {
+                float fval = strtof(sub2_val, NULL);
+                float range = bt_s2->max - bt_s2->min;
+                float pos = 0.0f;
+                if (range > 0.001f) pos = (fval - bt_s2->min) / range;
+                if (pos < 0.0f) pos = 0.0f;
+                if (pos > 1.0f) pos = 1.0f;
+                uint32_t sc = color_lerp(bt_s2->color_min, bt_s2->color_max, pos);
+                lv_obj_set_style_text_color(qd->lbl_sub2,
+                    lv_color_hex(app_config_apply_brightness(sc, gb)), 0);
+            }
+        }
+
+        /* Indicator dots (ambient quadrant) */
+        if (q == 2) {
 
             /* Indicator dots */
             if (qd->dot1) {
