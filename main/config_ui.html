@@ -1593,33 +1593,33 @@
     ];
 
     var allskyFieldDefs=[
-      {quad:'THERMAL', label:'Thermal', fields:[
-        {key:'main_value', label:'Main Value', inputs:['key','title','unit']},
-        {key:'sub1',       label:'Sub Value 1', inputs:['key','label','suffix']},
-        {key:'sub2',       label:'Sub Value 2', inputs:['key','label','suffix']},
-        {key:'dot1',       label:'Dot 1',       inputs:['key','label']},
-        {key:'dot2',       label:'Dot 2',       inputs:['key','label']}
+      {quad:'thermal', label:'Thermal', fields:[
+        {key:'main', label:'Main Value', inputs:['key','title','unit']},
+        {key:'sub1', label:'Sub Value 1', inputs:['key','label','suffix']},
+        {key:'sub2', label:'Sub Value 2', inputs:['key','label','suffix']},
+        {key:'dot1', label:'Dot 1',       inputs:['key','label']},
+        {key:'dot2', label:'Dot 2',       inputs:['key','label']}
       ]},
-      {quad:'SQM', label:'Sky Quality', fields:[
-        {key:'main_value', label:'Main Value', inputs:['key','title','unit']},
-        {key:'sub1',       label:'Sub Value 1', inputs:['key','label','suffix']},
-        {key:'sub2',       label:'Sub Value 2', inputs:['key','label','suffix']},
-        {key:'dot1',       label:'Dot 1',       inputs:['key','label']},
-        {key:'dot2',       label:'Dot 2',       inputs:['key','label']}
+      {quad:'sqm', label:'Sky Quality', fields:[
+        {key:'main', label:'Main Value', inputs:['key','title','unit']},
+        {key:'sub1', label:'Sub Value 1', inputs:['key','label','suffix']},
+        {key:'sub2', label:'Sub Value 2', inputs:['key','label','suffix']},
+        {key:'dot1', label:'Dot 1',       inputs:['key','label']},
+        {key:'dot2', label:'Dot 2',       inputs:['key','label']}
       ]},
-      {quad:'AMBIENT', label:'Ambient', fields:[
-        {key:'main_value', label:'Main Value', inputs:['key','title','unit']},
-        {key:'sub1',       label:'Sub Value 1', inputs:['key','label','suffix']},
-        {key:'sub2',       label:'Sub Value 2', inputs:['key','label','suffix']},
-        {key:'dot1',       label:'Dot 1',       inputs:['key','label']},
-        {key:'dot2',       label:'Dot 2',       inputs:['key','label']}
+      {quad:'ambient', label:'Ambient', fields:[
+        {key:'main', label:'Main Value', inputs:['key','title','unit']},
+        {key:'sub1', label:'Sub Value 1', inputs:['key','label','suffix']},
+        {key:'sub2', label:'Sub Value 2', inputs:['key','label','suffix']},
+        {key:'dot1', label:'Dot 1',       inputs:['key','label']},
+        {key:'dot2', label:'Dot 2',       inputs:['key','label']}
       ]},
-      {quad:'POWER', label:'Power', fields:[
-        {key:'main_value', label:'Main Value', inputs:['key','title','unit']},
-        {key:'sub1',       label:'Sub Value 1', inputs:['key','label','suffix']},
-        {key:'sub2',       label:'Sub Value 2', inputs:['key','label','suffix']},
-        {key:'dot1',       label:'Dot 1',       inputs:['key','label']},
-        {key:'dot2',       label:'Dot 2',       inputs:['key','label']}
+      {quad:'power', label:'Power', fields:[
+        {key:'main', label:'Main Value', inputs:['key','title','unit']},
+        {key:'sub1', label:'Sub Value 1', inputs:['key','label','suffix']},
+        {key:'sub2', label:'Sub Value 2', inputs:['key','label','suffix']},
+        {key:'dot1', label:'Dot 1',       inputs:['key','label']},
+        {key:'dot2', label:'Dot 2',       inputs:['key','label']}
       ]}
     ];
 
@@ -1633,8 +1633,8 @@
         var t=thresholds[def.key]||{};
         var minVal=t.min!=null?t.min:def.defMin;
         var maxVal=t.max!=null?t.max:def.defMax;
-        var minColor=t.min_color||def.defMinColor;
-        var maxColor=t.max_color||def.defMaxColor;
+        var minColor=t.color_min||def.defMinColor;
+        var maxColor=t.color_max||def.defMaxColor;
         var gradId='as_grad_'+def.key;
         var row=document.createElement('div');
         row.style.cssText='display:grid;grid-template-columns:100px 1fr 1fr 36px 36px 60px;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.04)';
@@ -1665,8 +1665,8 @@
         result[def.key]={
           min:parseFloat($('as_min_'+def.key).value)||def.defMin,
           max:parseFloat($('as_max_'+def.key).value)||def.defMax,
-          min_color:$('as_minc_'+def.key).value,
-          max_color:$('as_maxc_'+def.key).value
+          color_min:$('as_minc_'+def.key).value,
+          color_max:$('as_maxc_'+def.key).value
         };
       });
       return result;
