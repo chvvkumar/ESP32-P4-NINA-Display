@@ -842,7 +842,12 @@
 
       <div class="card">
         <div class="card-title">Connection</div>
-        <div class="field">
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Enable AllSky</span>
+          <label class="toggle"><input type="checkbox" id="allsky_enabled" onchange="updateAllSkyEnabledUI()"><span class="toggle-track"></span></label>
+        </div>
+        <div id="allskyConnectionFields">
+        <div class="field" style="margin-top:16px">
           <label class="field-label">AllSky Hostname</label>
           <input type="text" class="input" id="allskyHostname" placeholder="allskypi5.lan:8080">
           <div class="field-hint">Host:port of the AllSky API (e.g., allskypi5.lan:8080)</div>
@@ -867,9 +872,10 @@
             <div class="field-hint">Dew point colored safe when below ambient &minus; this offset</div>
           </div>
         </div>
+        </div>
       </div>
 
-      <div class="card">
+      <div class="card" id="allskyFieldMappingsCard">
         <div class="card-title">Field Mappings</div>
         <div class="field-hint" style="margin-bottom:16px">Configure which AllSky API JSON values appear in each display quadrant. Click a key path input, then click "Use" on a JSON leaf to fill it. Use the color controls to set gradient ranges per field.</div>
 
@@ -1127,7 +1133,8 @@
       var enabled=[$('instance_enabled_0').checked,$('instance_enabled_1').checked,$('instance_enabled_2').checked];
       var prev=sel.value;
       sel.innerHTML='';
-      sel.add(new Option('AllSky','0'));
+      var allskyOn=$('allsky_enabled')?$('allsky_enabled').checked:false;
+      if(allskyOn) sel.add(new Option('AllSky','0'));
       sel.add(new Option('Summary','1'));
       var pageIdx=2;
       for(var i=0;i<3;i++){
@@ -1787,10 +1794,24 @@
       return config;
     }
 
+    function updateAllSkyEnabledUI(){
+      var on=$('allsky_enabled').checked;
+      var d=on?'':'none';
+      $('allskyConnectionFields').style.display=d;
+      $('allskyFieldMappingsCard').style.display=on?'block':'none';
+      var arpAllsky=$('arp_allsky');
+      if(arpAllsky){
+        var row=arpAllsky.parentNode;
+        if(row) row.style.display=on?'':'none';
+      }
+      updatePageSelectOptions();
+    }
+
     function loadAllSkyConfig(){
       fetch('/api/allsky-config')
         .then(function(r){ return r.json(); })
         .then(function(cfg){
+          $('allsky_enabled').checked=cfg.allsky_enabled!==false;
           $('allskyHostname').value=cfg.hostname||'';
           $('allskyInterval').value=cfg.update_interval_s||5;
           $('allskyDewOffset').value=cfg.dew_offset!=null?cfg.dew_offset:5.0;
@@ -1799,15 +1820,18 @@
           var fieldCfg={};
           try{ fieldCfg=JSON.parse(cfg.field_config||'{}'); }catch(e){}
           populateAllSkyFieldMappings(fieldCfg,thresholds);
+          updateAllSkyEnabledUI();
         })
         .catch(function(e){
           console.error('Failed to load AllSky config',e);
           populateAllSkyFieldMappings({},{});
+          updateAllSkyEnabledUI();
         });
     }
 
     function saveAllSkyConfig(){
       var data={
+        allsky_enabled:!!$('allsky_enabled').checked,
         hostname:$('allskyHostname').value.trim(),
         update_interval_s:parseInt($('allskyInterval').value)||5,
         dew_offset:parseFloat($('allskyDewOffset').value)||5.0,
