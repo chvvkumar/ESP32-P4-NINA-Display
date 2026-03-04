@@ -433,10 +433,9 @@ void data_update_task(void *arg) {
         }
     }
 
-    // Start MQTT if enabled
-    mqtt_ha_start();
-
     /* ── Boot-time firmware update check ── */
+    /* Done before MQTT to avoid concurrent TLS + MQTT traffic exhausting the
+     * esp_hosted SDIO receive buffer pool (sdio_rx_get_buffer assert). */
     if (app_config_get()->auto_update_check) {
         ESP_LOGI(TAG, "Checking for firmware updates...");
         github_release_info_t *rel = heap_caps_calloc(1, sizeof(github_release_info_t), MALLOC_CAP_SPIRAM);
@@ -501,6 +500,9 @@ void data_update_task(void *arg) {
             heap_caps_free(rel);
         }
     }
+
+    // Start MQTT if enabled
+    mqtt_ha_start();
 
     instance_count = app_config_get_instance_count();
     ESP_LOGI(TAG, "Spawning %d per-instance poll tasks", instance_count);
