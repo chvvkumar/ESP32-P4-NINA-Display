@@ -294,6 +294,18 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
         }
     }
 
+    /* GPS indicator symbol — top-right of SQM quadrant */
+    if (quad_index == 1) {
+        qd->dot1 = lv_label_create(title_row);
+        lv_label_set_text(qd->dot1, LV_SYMBOL_GPS);
+        lv_obj_set_style_text_font(qd->dot1, &lv_font_montserrat_22, 0);
+        if (current_theme) {
+            int gb = app_config_get()->color_brightness;
+            lv_obj_set_style_text_color(qd->dot1,
+                lv_color_hex(app_config_apply_brightness(current_theme->bento_border, gb)), 0);
+        }
+    }
+
     /* Heater indicator symbol — top-right of AMBIENT quadrant */
     if (quad_index == 2) {
         qd->dot2 = lv_label_create(title_row);
@@ -581,11 +593,21 @@ void allsky_page_update(const allsky_data_t *data) {
             }
         }
 
-        /* Fan indicator symbol (on thermal quadrant, data from ambient config) */
+        /* Dot 1 indicator: thermal=fan (ambient config), sqm=GPS (sqm config) */
         if (qd->dot1 && current_theme) {
-            const char *dot1_val = data->field_values[ALLSKY_F_AMBIENT_DOT1];
-            bool dot1_on = (dot1_val[0] != '\0' && qcfg[2].dot1_on_value[0] != '\0'
-                            && strcmp(dot1_val, qcfg[2].dot1_on_value) == 0);
+            const char *dot1_val;
+            bool dot1_on;
+            if (q == 1) {
+                /* SQM quadrant: use sqm.dot1 key/on_value */
+                dot1_val = data->field_values[ALLSKY_F_SQM_DOT1];
+                dot1_on = (dot1_val[0] != '\0' && qcfg[1].dot1_on_value[0] != '\0'
+                           && strcmp(dot1_val, qcfg[1].dot1_on_value) == 0);
+            } else {
+                /* Thermal quadrant: fan (controlled via ambient.dot1 config) */
+                dot1_val = data->field_values[ALLSKY_F_AMBIENT_DOT1];
+                dot1_on = (dot1_val[0] != '\0' && qcfg[2].dot1_on_value[0] != '\0'
+                           && strcmp(dot1_val, qcfg[2].dot1_on_value) == 0);
+            }
             uint32_t c = dot1_on ? current_theme->progress_color
                                  : current_theme->bento_border;
             lv_obj_set_style_text_color(qd->dot1,

@@ -31,6 +31,7 @@
 #define ALLSKY_F_POWER_MAIN    11
 #define ALLSKY_F_POWER_SUB1    12
 #define ALLSKY_F_POWER_SUB2    13
+#define ALLSKY_F_SQM_DOT1      14
 
 typedef struct {
     bool connected;

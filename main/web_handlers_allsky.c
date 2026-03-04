@@ -29,6 +29,7 @@ esp_err_t allsky_config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "dew_offset",       (double)cfg->allsky_dew_offset);
     cJSON_AddStringToObject(root, "field_config",     cfg->allsky_field_config);
     cJSON_AddStringToObject(root, "thresholds",       cfg->allsky_thresholds);
+    cJSON_AddBoolToObject(root, "allsky_enabled",    cfg->allsky_enabled);
 
     const char *json_str = cJSON_PrintUnformatted(root);
     if (json_str == NULL) {
@@ -102,6 +103,11 @@ esp_err_t allsky_config_post_handler(httpd_req_t *req)
     cJSON *item = cJSON_GetObjectItem(root, "dew_offset");
     if (cJSON_IsNumber(item)) {
         cfg->allsky_dew_offset = (float)item->valuedouble;
+    }
+
+    cJSON *ena = cJSON_GetObjectItem(root, "allsky_enabled");
+    if (cJSON_IsBool(ena)) {
+        cfg->allsky_enabled = cJSON_IsTrue(ena);
     }
 
     cJSON_Delete(root);
