@@ -1,4 +1,5 @@
 #include "web_server_internal.h"
+#include "nina_allsky.h"
 #include "bsp/esp-bsp.h"
 #include "bsp/display.h"
 #include "display_defs.h"
@@ -28,6 +29,18 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
     if (new_cfg->screen_rotation != old_cfg->screen_rotation) {
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
             lv_display_set_rotation(lv_display_get_default(), new_cfg->screen_rotation);
+            bsp_display_unlock();
+        }
+    }
+    if (new_cfg->allsky_enabled != old_cfg->allsky_enabled ||
+        strcmp(new_cfg->allsky_field_config, old_cfg->allsky_field_config) != 0 ||
+        strcmp(new_cfg->allsky_thresholds, old_cfg->allsky_thresholds) != 0 ||
+        strcmp(new_cfg->allsky_hostname, old_cfg->allsky_hostname) != 0 ||
+        new_cfg->allsky_update_interval_s != old_cfg->allsky_update_interval_s ||
+        new_cfg->allsky_dew_offset != old_cfg->allsky_dew_offset) {
+        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+            allsky_page_refresh_config();
+            nina_dashboard_set_allsky_enabled(new_cfg->allsky_enabled);
             bsp_display_unlock();
         }
     }

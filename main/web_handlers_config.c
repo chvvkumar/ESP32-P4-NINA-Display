@@ -97,6 +97,12 @@ esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddBoolToObject(root, "auto_update_check", cfg->auto_update_check);
     cJSON_AddNumberToObject(root, "update_channel", cfg->update_channel);
     cJSON_AddNumberToObject(root, "screen_rotation", cfg->screen_rotation);
+    cJSON_AddBoolToObject(root, "allsky_enabled", cfg->allsky_enabled);
+    cJSON_AddStringToObject(root, "allsky_hostname", cfg->allsky_hostname);
+    cJSON_AddNumberToObject(root, "allsky_update_interval_s", cfg->allsky_update_interval_s);
+    cJSON_AddNumberToObject(root, "allsky_dew_offset", (double)cfg->allsky_dew_offset);
+    cJSON_AddStringToObject(root, "allsky_field_config", cfg->allsky_field_config);
+    cJSON_AddStringToObject(root, "allsky_thresholds", cfg->allsky_thresholds);
     cJSON_AddBoolToObject(root, "_dirty", app_config_is_dirty());
 
     const char *json_str = cJSON_PrintUnformatted(root);
@@ -137,7 +143,10 @@ static bool validate_config_fields(cJSON *root, httpd_req_t *req)
         !validate_string_len(root, "rms_thresholds_3", 256) ||
         !validate_string_len(root, "hfr_thresholds_1", 256) ||
         !validate_string_len(root, "hfr_thresholds_2", 256) ||
-        !validate_string_len(root, "hfr_thresholds_3", 256)) {
+        !validate_string_len(root, "hfr_thresholds_3", 256) ||
+        !validate_string_len(root, "allsky_hostname", 128) ||
+        !validate_string_len(root, "allsky_field_config", 1536) ||
+        !validate_string_len(root, "allsky_thresholds", 1024)) {
         send_400(req, "String field exceeds maximum length");
         return false;
     }
@@ -339,6 +348,27 @@ static app_config_t *parse_config_from_json(cJSON *root)
         if (v < 0) v = 0;
         if (v > 3) v = 3;
         cfg->screen_rotation = (uint8_t)v;
+    }
+
+    JSON_TO_BOOL  (root, "allsky_enabled",      cfg->allsky_enabled);
+    JSON_TO_STRING(root, "allsky_hostname",      cfg->allsky_hostname);
+    JSON_TO_STRING(root, "allsky_field_config",  cfg->allsky_field_config);
+    JSON_TO_STRING(root, "allsky_thresholds",    cfg->allsky_thresholds);
+
+    cJSON *as_interval = cJSON_GetObjectItem(root, "allsky_update_interval_s");
+    if (cJSON_IsNumber(as_interval)) {
+        int v = as_interval->valueint;
+        if (v < 1) v = 1;
+        if (v > 300) v = 300;
+        cfg->allsky_update_interval_s = (uint16_t)v;
+    }
+
+    cJSON *as_dew = cJSON_GetObjectItem(root, "allsky_dew_offset");
+    if (cJSON_IsNumber(as_dew)) {
+        float v = (float)as_dew->valuedouble;
+        if (v < -50.0f) v = -50.0f;
+        if (v > 50.0f) v = 50.0f;
+        cfg->allsky_dew_offset = v;
     }
 
     return cfg;
