@@ -70,7 +70,6 @@ void start_web_server(void)
         { "/api/config/revert",    HTTP_POST, config_revert_handler, NULL },
         { "/api/check-update",     HTTP_POST, check_update_post_handler, NULL },
         { "/api/allsky-config",    HTTP_GET,  allsky_config_get_handler, NULL },
-        { "/api/allsky-config",    HTTP_POST, allsky_config_post_handler, NULL },
         { "/api/allsky-proxy",     HTTP_GET,  allsky_proxy_get_handler, NULL },
     };
 

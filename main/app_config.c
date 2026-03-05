@@ -54,32 +54,32 @@ static const char *DEFAULT_HFR_THRESHOLDS =
     "{\"good_max\":2.0,\"ok_max\":3.5,"
     "\"good_color\":\"#15803d\",\"ok_color\":\"#ca8a04\",\"bad_color\":\"#b91c1c\"}";
 
-// Default AllSky field configuration — maps quadrant fields to AllSky API keys
+// Default AllSky field configuration — empty structure, user must configure via web UI
 static const char *DEFAULT_ALLSKY_FIELD_CONFIG =
-    "{\"thermal\":{\"main\":{\"key\":\"pistatus.AS_CPUTEMP\",\"unit\":\"CPU TEMP\"},"
-    "\"sub1\":{\"label\":\"SSD\",\"key\":\"allskyfans.OTH_TEMPERATURE\",\"suffix\":\"\xC2\xB0""C\"}},"
-    "\"sqm\":{\"main\":{\"key\":\"allskytsl2591SQM.AS_MPSAS\",\"unit\":\"mag/arcsec\xC2\xB2\"},"
-    "\"sub1\":{\"label\":\"\",\"key\":\"allskymqttsubscribe.MQTT_Cloud_status\",\"suffix\":\"\"},"
-    "\"sub2\":{\"label\":\"Stars\",\"key\":\"\",\"suffix\":\"\"}},"
-    "\"ambient\":{\"main\":{\"key\":\"allskydew.AS_DEWCONTROLAMBIENT\",\"unit\":\"TEMP \xC2\xB0""C\"},"
-    "\"sub1\":{\"label\":\"HUM\",\"key\":\"allskydew.AS_DEWCONTROLHUMIDITY\",\"suffix\":\"%\"},"
-    "\"sub2\":{\"label\":\"DEW\",\"key\":\"allskydew.AS_DEWCONTROLDEW\",\"suffix\":\"\xC2\xB0""C\"},"
-    "\"dot1\":{\"key\":\"allskyfans.OTH_FANS\",\"on_value\":\"On\"},"
-    "\"dot2\":{\"key\":\"allskydew.AS_DEWCONTROLHEATER\",\"on_value\":\"On\"}},"
-    "\"power\":{\"main\":{\"key\":\"allskyina260.AS_INA260POWER\",\"unit\":\"WATTS\"},"
-    "\"sub1\":{\"label\":\"\",\"key\":\"allskyina260.AS_INA260VOLTAGE\",\"suffix\":\"V\"},"
-    "\"sub2\":{\"label\":\"\",\"key\":\"allskyina260.AS_INA260CURRENT\",\"suffix\":\"A\"}}}";
+    "{\"thermal\":{\"main\":{\"key\":\"\",\"unit\":\"\"},"
+    "\"sub1\":{\"label\":\"\",\"key\":\"\",\"suffix\":\"\"}},"
+    "\"sqm\":{\"main\":{\"key\":\"\",\"unit\":\"\"},"
+    "\"sub1\":{\"label\":\"\",\"key\":\"\",\"suffix\":\"\"},"
+    "\"sub2\":{\"label\":\"\",\"key\":\"\",\"suffix\":\"\"}},"
+    "\"ambient\":{\"main\":{\"key\":\"\",\"unit\":\"\"},"
+    "\"sub1\":{\"label\":\"\",\"key\":\"\",\"suffix\":\"\"},"
+    "\"sub2\":{\"label\":\"\",\"key\":\"\",\"suffix\":\"\"},"
+    "\"dot1\":{\"key\":\"\",\"on_value\":\"\"},"
+    "\"dot2\":{\"key\":\"\",\"on_value\":\"\"}},"
+    "\"power\":{\"main\":{\"key\":\"\",\"unit\":\"\"},"
+    "\"sub1\":{\"label\":\"\",\"key\":\"\",\"suffix\":\"\"},"
+    "\"sub2\":{\"label\":\"\",\"key\":\"\",\"suffix\":\"\"}}}";
 
 // Default AllSky thresholds — min/max ranges with gradient colors per field
 // Keys use positional format: {quadrant}_{field} (e.g., thermal_main, ambient_sub1)
 static const char *DEFAULT_ALLSKY_THRESHOLDS =
     "{\"thermal_main\":{\"min\":0,\"max\":80,\"color_min\":\"#3b82f6\",\"color_max\":\"#ef4444\"},"
     "\"thermal_sub1\":{\"min\":0,\"max\":70,\"color_min\":\"#3b82f6\",\"color_max\":\"#ef4444\"},"
-    "\"sqm_main\":{\"min\":16,\"max\":22,\"color_min\":\"#ef4444\",\"color_max\":\"#22c55e\"},"
+    "\"sqm_main\":{\"min\":16,\"max\":22,\"color_min\":\"#3b82f6\",\"color_max\":\"#ef4444\"},"
     "\"ambient_main\":{\"min\":-30,\"max\":40,\"color_min\":\"#3b82f6\",\"color_max\":\"#ef4444\"},"
-    "\"ambient_sub1\":{\"min\":0,\"max\":100,\"color_min\":\"#22c55e\",\"color_max\":\"#3b82f6\"},"
+    "\"ambient_sub1\":{\"min\":0,\"max\":100,\"color_min\":\"#3b82f6\",\"color_max\":\"#ef4444\"},"
     "\"ambient_sub2\":{\"min\":-30,\"max\":30,\"color_min\":\"#3b82f6\",\"color_max\":\"#ef4444\"},"
-    "\"power_main\":{\"min\":0,\"max\":5,\"color_min\":\"#22c55e\",\"color_max\":\"#ef4444\"}}";
+    "\"power_main\":{\"min\":0,\"max\":5,\"color_min\":\"#3b82f6\",\"color_max\":\"#ef4444\"}}";
 
 // Default filter colors for common astrophotography filters
 static const struct {
@@ -729,7 +729,7 @@ static void set_defaults(app_config_t *cfg) {
     cfg->allsky_field_config[sizeof(cfg->allsky_field_config) - 1] = '\0';
     strncpy(cfg->allsky_thresholds, DEFAULT_ALLSKY_THRESHOLDS, sizeof(cfg->allsky_thresholds) - 1);
     cfg->allsky_thresholds[sizeof(cfg->allsky_thresholds) - 1] = '\0';
-    cfg->allsky_enabled = true;
+    cfg->allsky_enabled = false;
 }
 
 /**
@@ -1441,7 +1441,7 @@ static void migrate_from_v17(const app_config_v17_t *old, app_config_t *cfg) {
     cfg->allsky_dew_offset = old->allsky_dew_offset;
     memcpy(cfg->allsky_field_config, old->allsky_field_config, sizeof(cfg->allsky_field_config));
     memcpy(cfg->allsky_thresholds, old->allsky_thresholds, sizeof(cfg->allsky_thresholds));
-    cfg->allsky_enabled = true;  /* new in v18 — default on for existing users */
+    cfg->allsky_enabled = false;  /* new in v18 — default off, user must configure fields first */
 
     ESP_LOGI(TAG, "Migrated config from v17 → v%d", APP_CONFIG_VERSION);
 }
@@ -1590,11 +1590,6 @@ static bool validate_config(app_config_t *cfg) {
     }
     if (cfg->allsky_dew_offset < -50.0f || cfg->allsky_dew_offset > 50.0f) {
         cfg->allsky_dew_offset = 5.0f;
-        fixed = true;
-    }
-    if (cfg->allsky_field_config[0] == '\0') {
-        strncpy(cfg->allsky_field_config, DEFAULT_ALLSKY_FIELD_CONFIG, sizeof(cfg->allsky_field_config) - 1);
-        cfg->allsky_field_config[sizeof(cfg->allsky_field_config) - 1] = '\0';
         fixed = true;
     }
     if (cfg->allsky_thresholds[0] == '\0' ||

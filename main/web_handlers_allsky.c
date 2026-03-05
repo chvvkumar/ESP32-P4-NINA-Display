@@ -1,14 +1,7 @@
 #include "web_server_internal.h"
-#include "nina_allsky.h"
-#include "nina_dashboard.h"
 #include "esp_http_client.h"
 #include "esp_heap_caps.h"
-#include "esp_lvgl_port.h"
 #include <string.h>
-
-/* AllSky payloads can be larger than CONFIG_MAX_PAYLOAD (4096) because
- * allsky_field_config alone is up to 1536 bytes.  Use a dedicated limit. */
-#define ALLSKY_CONFIG_MAX_PAYLOAD 8192
 
 /* Maximum response buffer for the AllSky proxy (allocated from PSRAM) */
 #define ALLSKY_PROXY_BUF_SIZE    16384
@@ -43,88 +36,6 @@ esp_err_t allsky_config_get_handler(httpd_req_t *req)
 
     free((void *)json_str);
     cJSON_Delete(root);
-    return ESP_OK;
-}
-
-/**
- * @brief POST /api/allsky-config  -- update AllSky-related config fields and persist to NVS.
- */
-esp_err_t allsky_config_post_handler(httpd_req_t *req)
-{
-    int remaining = req->content_len;
-    if (remaining >= ALLSKY_CONFIG_MAX_PAYLOAD) {
-        return send_400(req, "Payload too large");
-    }
-
-    char *buf = heap_caps_malloc(ALLSKY_CONFIG_MAX_PAYLOAD, MALLOC_CAP_SPIRAM);
-    if (!buf) {
-        ESP_LOGE(TAG, "allsky_config_post: malloc failed for payload buffer");
-        httpd_resp_send_500(req);
-        return ESP_OK;
-    }
-
-    int received = 0;
-    while (received < remaining) {
-        int ret = httpd_req_recv(req, buf + received, remaining - received);
-        if (ret <= 0) {
-            free(buf);
-            if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
-                httpd_resp_send_408(req);
-            }
-            return ESP_OK;
-        }
-        received += ret;
-    }
-    buf[received] = '\0';
-
-    cJSON *root = cJSON_Parse(buf);
-    free(buf);
-    if (!root) {
-        return send_400(req, "Invalid JSON");
-    }
-
-    /* Validate string field lengths */
-    if (!validate_string_len(root, "hostname", 128) ||
-        !validate_string_len(root, "field_config", 1536) ||
-        !validate_string_len(root, "thresholds", 1024)) {
-        send_400(req, "String field exceeds maximum length");
-        cJSON_Delete(root);
-        return ESP_OK;
-    }
-
-    /* Apply fields directly to the live config — avoids copying the full
-     * ~6.7 KB app_config_t onto the httpd task's stack. */
-    app_config_t *cfg = app_config_get();
-
-    JSON_TO_STRING(root, "hostname",     cfg->allsky_hostname);
-    JSON_TO_INT   (root, "update_interval_s", cfg->allsky_update_interval_s);
-    JSON_TO_STRING(root, "field_config", cfg->allsky_field_config);
-    JSON_TO_STRING(root, "thresholds",   cfg->allsky_thresholds);
-
-    cJSON *item = cJSON_GetObjectItem(root, "dew_offset");
-    if (cJSON_IsNumber(item)) {
-        cfg->allsky_dew_offset = (float)item->valuedouble;
-    }
-
-    cJSON *ena = cJSON_GetObjectItem(root, "allsky_enabled");
-    if (cJSON_IsBool(ena)) {
-        cfg->allsky_enabled = cJSON_IsTrue(ena);
-    }
-
-    cJSON_Delete(root);
-
-    app_config_save(cfg);
-    ESP_LOGI(TAG, "AllSky config saved to NVS");
-
-    /* Refresh the AllSky page's threshold/field config and enable/disable state */
-    if (lvgl_port_lock(100)) {
-        allsky_page_refresh_config();
-        nina_dashboard_set_allsky_enabled(cfg->allsky_enabled);
-        lvgl_port_unlock();
-    }
-
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, "{\"status\":\"ok\"}", HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
 
