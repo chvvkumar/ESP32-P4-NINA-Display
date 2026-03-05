@@ -886,9 +886,6 @@
         <div id="allskyFieldMappings"></div>
       </div>
 
-      <div style="text-align:center; margin-top:16px; margin-bottom:20px">
-        <button onclick="saveAllSkyConfig()" class="btn btn-primary" style="min-width:200px">Save AllSky Settings</button>
-      </div>
     </div>
 
   </main>
@@ -1267,7 +1264,13 @@
         deep_sleep_on_idle:!!$('deep_sleep_on_idle').checked,
         alert_flash_enabled:!!$('alert_flash_enabled').checked,
         auto_update_check:!!$('auto_update_check').checked,
-        update_channel:parseInt($('update_channel').value)||0
+        update_channel:parseInt($('update_channel').value)||0,
+        allsky_enabled:!!$('allsky_enabled').checked,
+        allsky_hostname:$('allskyHostname').value.trim(),
+        allsky_update_interval_s:parseInt($('allskyInterval').value)||5,
+        allsky_dew_offset:parseFloat($('allskyDewOffset').value)||5.0,
+        allsky_field_config:JSON.stringify(gatherAllSkyFieldMappings()),
+        allsky_thresholds:JSON.stringify(gatherAllSkyThresholds())
       };
 
       var ssid=$('ssid').value.trim();
@@ -1363,6 +1366,19 @@
       setPageMode(pageMode);
 
       $('pass').value='';
+
+      // AllSky fields
+      if($('allsky_enabled')) $('allsky_enabled').checked=!!data.allsky_enabled;
+      if($('allskyHostname')) $('allskyHostname').value=data.allsky_hostname||'';
+      if($('allskyInterval')) $('allskyInterval').value=data.allsky_update_interval_s||5;
+      if($('allskyDewOffset')) $('allskyDewOffset').value=data.allsky_dew_offset!=null?data.allsky_dew_offset:5.0;
+      var asThr={};
+      try{ asThr=JSON.parse(data.allsky_thresholds||'{}'); }catch(e){}
+      var asFields={};
+      try{ asFields=JSON.parse(data.allsky_field_config||'{}'); }catch(e){}
+      populateAllSkyFieldMappings(asFields,asThr);
+      updateAllSkyEnabledUI();
+
       loadedConfig=JSON.stringify(getConfigData());
       _populating=false;
       if(data._dirty){
@@ -1592,7 +1608,7 @@
         {key:'dot2', label:'Dot 2',       inputs:['key','label','on_value']}
       ]},
       {quad:'sqm', label:'Sky Quality', fields:[
-        {key:'main', label:'Main Value', inputs:['key','title','unit'], defMin:16, defMax:22, defMinColor:'#ef4444', defMaxColor:'#22c55e'},
+        {key:'main', label:'Main Value', inputs:['key','title','unit'], defMin:16, defMax:22, defMinColor:'#3b82f6', defMaxColor:'#ef4444'},
         {key:'sub1', label:'Sub Value 1', inputs:['key','label','suffix']},
         {key:'sub2', label:'Sub Value 2', inputs:['key','label','suffix']},
         {key:'dot1', label:'Dot 1',       inputs:['key','label','on_value']},
@@ -1600,13 +1616,13 @@
       ]},
       {quad:'ambient', label:'Ambient', fields:[
         {key:'main', label:'Main Value', inputs:['key','title','unit'], defMin:-30, defMax:40, defMinColor:'#3b82f6', defMaxColor:'#ef4444'},
-        {key:'sub1', label:'Sub Value 1', inputs:['key','label','suffix'], defMin:0, defMax:100, defMinColor:'#22c55e', defMaxColor:'#3b82f6'},
+        {key:'sub1', label:'Sub Value 1', inputs:['key','label','suffix'], defMin:0, defMax:100, defMinColor:'#3b82f6', defMaxColor:'#ef4444'},
         {key:'sub2', label:'Sub Value 2', inputs:['key','label','suffix'], defMin:-30, defMax:30, defMinColor:'#3b82f6', defMaxColor:'#ef4444'},
         {key:'dot1', label:'Dot 1',       inputs:['key','label','on_value']},
         {key:'dot2', label:'Dot 2',       inputs:['key','label','on_value']}
       ]},
       {quad:'power', label:'Power', fields:[
-        {key:'main', label:'Main Value', inputs:['key','title','unit'], defMin:0, defMax:5, defMinColor:'#22c55e', defMaxColor:'#ef4444'},
+        {key:'main', label:'Main Value', inputs:['key','title','unit'], defMin:0, defMax:5, defMinColor:'#3b82f6', defMaxColor:'#ef4444'},
         {key:'sub1', label:'Sub Value 1', inputs:['key','label','suffix']},
         {key:'sub2', label:'Sub Value 2', inputs:['key','label','suffix']},
         {key:'dot1', label:'Dot 1',       inputs:['key','label','on_value']},
@@ -1807,42 +1823,6 @@
       updatePageSelectOptions();
     }
 
-    function loadAllSkyConfig(){
-      fetch('/api/allsky-config')
-        .then(function(r){ return r.json(); })
-        .then(function(cfg){
-          $('allsky_enabled').checked=cfg.allsky_enabled!==false;
-          $('allskyHostname').value=cfg.hostname||'';
-          $('allskyInterval').value=cfg.update_interval_s||5;
-          $('allskyDewOffset').value=cfg.dew_offset!=null?cfg.dew_offset:5.0;
-          var thresholds={};
-          try{ thresholds=JSON.parse(cfg.thresholds||'{}'); }catch(e){}
-          var fieldCfg={};
-          try{ fieldCfg=JSON.parse(cfg.field_config||'{}'); }catch(e){}
-          populateAllSkyFieldMappings(fieldCfg,thresholds);
-          updateAllSkyEnabledUI();
-        })
-        .catch(function(e){
-          console.error('Failed to load AllSky config',e);
-          populateAllSkyFieldMappings({},{});
-          updateAllSkyEnabledUI();
-        });
-    }
-
-    function saveAllSkyConfig(){
-      var data={
-        allsky_enabled:!!$('allsky_enabled').checked,
-        hostname:$('allskyHostname').value.trim(),
-        update_interval_s:parseInt($('allskyInterval').value)||5,
-        dew_offset:parseFloat($('allskyDewOffset').value)||5.0,
-        thresholds:JSON.stringify(gatherAllSkyThresholds()),
-        field_config:JSON.stringify(gatherAllSkyFieldMappings())
-      };
-      postJson('/api/allsky-config',data)
-        .then(function(r){ if(!r.ok) throw new Error('Save failed'); showToast('AllSky settings saved','success'); })
-        .catch(function(e){ showToast('Save failed: '+e.message,'error'); });
-    }
-
     function fetchAllSkyJson(){
       var btn=$('fetchJsonBtn');
       btn.disabled=true; btn.textContent='Fetching...';
@@ -1901,7 +1881,6 @@
     /* === Init === */
     loadConfig();
     loadVersion();
-    loadAllSkyConfig();
   </script>
 </body>
 </html>
