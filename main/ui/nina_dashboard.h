@@ -86,6 +86,13 @@ void nina_dashboard_set_page_change_cb(nina_page_change_cb_t cb);
 bool nina_dashboard_is_allsky_page(void);
 
 /**
+ * @brief Enable or disable the AllSky page at runtime.
+ * When disabled, switches away if currently viewing and removes from navigation.
+ * Must be called with LVGL display lock held.
+ */
+void nina_dashboard_set_allsky_enabled(bool enabled);
+
+/**
  * @brief Check if the active page is the summary page
  * @return true if the summary page is currently shown
  */
