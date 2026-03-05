@@ -37,6 +37,7 @@ int page_instance_map[MAX_NINA_INSTANCES] = {0, 1, 2};
 
 /* AllSky page — always first (index 0), excluded from indicators */
 lv_obj_t *allsky_obj = NULL;
+static lv_obj_t *allsky_page_created = NULL;  /* Always holds the created page object */
 
 /* Summary page — index 1, excluded from indicators */
 static lv_obj_t *summary_obj = NULL;
@@ -240,7 +241,7 @@ void nina_dashboard_apply_theme(int theme_index) {
         apply_theme_to_page(&pages[i]);
     }
 
-    allsky_page_apply_theme();
+    if (allsky_obj) allsky_page_apply_theme();
     summary_page_apply_theme();
     if (settings_obj) settings_tabview_apply_theme();
     sysinfo_page_apply_theme();
@@ -643,13 +644,16 @@ static void gesture_event_cb(lv_event_t *e) {
     int new_page = active_page;
 
     int settings_idx = page_count + 2;  /* settings page — skip in swipe navigation */
+    int allsky_idx = (allsky_obj == NULL) ? 0 : -1;  /* allsky page — skip when disabled */
 
     if (dir == LV_DIR_LEFT) {
         new_page = (active_page + 1) % total_page_count;
         if (new_page == settings_idx) new_page = (new_page + 1) % total_page_count;
+        if (new_page == allsky_idx) new_page = (new_page + 1) % total_page_count;
     } else if (dir == LV_DIR_RIGHT) {
         new_page = (active_page - 1 + total_page_count) % total_page_count;
         if (new_page == settings_idx) new_page = (new_page - 1 + total_page_count) % total_page_count;
+        if (new_page == allsky_idx) new_page = (new_page - 1 + total_page_count) % total_page_count;
     } else {
         return;
     }
@@ -744,9 +748,11 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     lv_obj_set_style_bg_opa(main_cont, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(main_cont, OUTER_PADDING, 0);
 
-    /* AllSky page — always first (page index 0), hidden initially */
-    allsky_obj = allsky_page_create(main_cont);
-    lv_obj_add_flag(allsky_obj, LV_OBJ_FLAG_HIDDEN);
+    /* AllSky page — page index 0, always created but hidden initially.
+     * allsky_obj is set to NULL when disabled to remove from navigation. */
+    allsky_page_created = allsky_page_create(main_cont);
+    lv_obj_add_flag(allsky_page_created, LV_OBJ_FLAG_HIDDEN);
+    allsky_obj = app_config_get()->allsky_enabled ? allsky_page_created : NULL;
 
     /* Summary page — page index 1, visible by default */
     summary_obj = summary_page_create(main_cont, page_count);
@@ -800,6 +806,7 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
 
 void nina_dashboard_show_page(int page_index, int instance_count) {
     if (page_index < 0 || page_index >= total_page_count) return;
+    if (page_index == 0 && allsky_obj == NULL) return;  /* allsky disabled */
     if (page_index == active_page) return;
 
     hide_page_at(active_page);
@@ -818,7 +825,22 @@ int nina_dashboard_get_active_page(void) {
 }
 
 bool nina_dashboard_is_allsky_page(void) {
-    return active_page == 0;
+    return allsky_obj != NULL && active_page == 0;
+}
+
+void nina_dashboard_set_allsky_enabled(bool enabled) {
+    if (enabled) {
+        allsky_obj = allsky_page_created;
+    } else {
+        /* If currently viewing the AllSky page, switch to summary first */
+        if (active_page == 0 && allsky_obj != NULL) {
+            nina_dashboard_show_page(1, total_page_count);
+        }
+        if (allsky_page_created) {
+            lv_obj_add_flag(allsky_page_created, LV_OBJ_FLAG_HIDDEN);
+        }
+        allsky_obj = NULL;
+    }
 }
 
 bool nina_dashboard_is_settings_page(void) {
@@ -939,6 +961,7 @@ static void slide_new_ready_cb(lv_anim_t *a)
 void nina_dashboard_show_page_animated(int page_index, int instance_count, int effect)
 {
     if (page_index < 0 || page_index >= total_page_count) return;
+    if (page_index == 0 && allsky_obj == NULL) return;  /* allsky disabled */
     if (page_index == active_page) return;
 
     lv_obj_t *old_obj = get_page_obj(active_page);

@@ -34,6 +34,15 @@ typedef struct {
     lv_obj_t *lbl_sub2;
     lv_obj_t *dot1;   /* THERMAL only — fan symbol (LV_SYMBOL_REFRESH) */
     lv_obj_t *dot2;   /* AMBIENT only — heater symbol (LV_SYMBOL_CHARGE) */
+    /* Cached style values — only call lv_obj_set_style_* when changed to avoid
+     * unnecessary LVGL invalidations that trigger expensive full redraws. */
+    uint32_t cached_main_color;
+    uint32_t cached_sub1_color;
+    uint32_t cached_sub2_color;
+    uint32_t cached_dot1_color;
+    uint32_t cached_dot2_color;
+    uint32_t cached_bar_color;
+    int      cached_bar_value;
 } allsky_quadrant_t;
 
 static lv_obj_t *allsky_page = NULL;
@@ -100,6 +109,27 @@ static const char *quad_json_keys[4] = {
 static inline void set_text_if_changed(lv_obj_t *lbl, const char *text) {
     if (strcmp(lv_label_get_text(lbl), text) != 0) {
         lv_label_set_text(lbl, text);
+    }
+}
+
+static inline void set_color_if_changed(lv_obj_t *obj, uint32_t *cached, uint32_t color) {
+    if (*cached != color) {
+        *cached = color;
+        lv_obj_set_style_text_color(obj, lv_color_hex(color), 0);
+    }
+}
+
+static inline void set_bar_color_if_changed(lv_obj_t *bar, uint32_t *cached, uint32_t color) {
+    if (*cached != color) {
+        *cached = color;
+        lv_obj_set_style_bg_color(bar, lv_color_hex(color), LV_PART_INDICATOR);
+    }
+}
+
+static inline void set_bar_value_if_changed(lv_obj_t *bar, int *cached, int value) {
+    if (*cached != value) {
+        *cached = value;
+        lv_bar_set_value(bar, value, LV_ANIM_OFF);
     }
 }
 
@@ -294,6 +324,18 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
         }
     }
 
+    /* GPS indicator symbol — top-right of SQM quadrant */
+    if (quad_index == 1) {
+        qd->dot1 = lv_label_create(title_row);
+        lv_label_set_text(qd->dot1, LV_SYMBOL_GPS);
+        lv_obj_set_style_text_font(qd->dot1, &lv_font_montserrat_22, 0);
+        if (current_theme) {
+            int gb = app_config_get()->color_brightness;
+            lv_obj_set_style_text_color(qd->dot1,
+                lv_color_hex(app_config_apply_brightness(current_theme->bento_border, gb)), 0);
+        }
+    }
+
     /* Heater indicator symbol — top-right of AMBIENT quadrant */
     if (quad_index == 2) {
         qd->dot2 = lv_label_create(title_row);
@@ -306,12 +348,9 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
         }
     }
 
-    /* 2. Main value (48px font scaled to ~54px: 54/48 = 1.125 → 288/256) */
+    /* 2. Main value (48px font — no transform_scale to avoid expensive software rendering) */
     qd->lbl_main_value = lv_label_create(qd->box);
     lv_obj_set_style_text_font(qd->lbl_main_value, &lv_font_montserrat_48, 0);
-    lv_obj_set_style_transform_scale(qd->lbl_main_value, 288, 0);
-    lv_obj_set_style_transform_pivot_x(qd->lbl_main_value, LV_PCT(50), 0);
-    lv_obj_set_style_transform_pivot_y(qd->lbl_main_value, LV_PCT(50), 0);
     lv_obj_set_style_text_align(qd->lbl_main_value, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_width(qd->lbl_main_value, LV_PCT(100));
     lv_label_set_text(qd->lbl_main_value, "--");
@@ -468,21 +507,21 @@ void allsky_page_update(const allsky_data_t *data) {
             set_text_if_changed(qd->lbl_main_value, "--");
             set_text_if_changed(qd->lbl_sub1, "--");
             set_text_if_changed(qd->lbl_sub2, "--");
-            lv_bar_set_value(qd->bar, 0, LV_ANIM_OFF);
+            set_bar_value_if_changed(qd->bar, &qd->cached_bar_value, 0);
 
             if (current_theme) {
-                lv_obj_set_style_text_color(qd->lbl_main_value,
-                    lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+                uint32_t tc = app_config_apply_brightness(current_theme->text_color, gb);
+                set_color_if_changed(qd->lbl_main_value, &qd->cached_main_color, tc);
             }
 
             /* Reset indicator symbols to dim */
             if (qd->dot1 && current_theme) {
-                lv_obj_set_style_text_color(qd->dot1,
-                    lv_color_hex(app_config_apply_brightness(current_theme->bento_border, gb)), 0);
+                uint32_t dc = app_config_apply_brightness(current_theme->bento_border, gb);
+                set_color_if_changed(qd->dot1, &qd->cached_dot1_color, dc);
             }
             if (qd->dot2 && current_theme) {
-                lv_obj_set_style_text_color(qd->dot2,
-                    lv_color_hex(app_config_apply_brightness(current_theme->bento_border, gb)), 0);
+                uint32_t dc = app_config_apply_brightness(current_theme->bento_border, gb);
+                set_color_if_changed(qd->dot2, &qd->cached_dot2_color, dc);
             }
             continue;
         }
@@ -515,22 +554,20 @@ void allsky_page_update(const allsky_data_t *data) {
             if (position < 0.0f) position = 0.0f;
             if (position > 1.0f) position = 1.0f;
 
-            lv_bar_set_value(qd->bar, (int)(position * 1000), LV_ANIM_ON);
+            set_bar_value_if_changed(qd->bar, &qd->cached_bar_value, (int)(position * 1000));
 
             /* Gradient color for bar indicator and main value text */
             uint32_t grad_color = color_lerp(bt->color_min, bt->color_max, position);
             uint32_t dimmed = app_config_apply_brightness(grad_color, gb);
 
-            lv_obj_set_style_bg_color(qd->bar,
-                lv_color_hex(dimmed), LV_PART_INDICATOR);
-            lv_obj_set_style_text_color(qd->lbl_main_value,
-                lv_color_hex(dimmed), 0);
+            set_bar_color_if_changed(qd->bar, &qd->cached_bar_color, dimmed);
+            set_color_if_changed(qd->lbl_main_value, &qd->cached_main_color, dimmed);
         } else {
             /* No valid threshold — use default theme text color */
-            lv_bar_set_value(qd->bar, 0, LV_ANIM_OFF);
+            set_bar_value_if_changed(qd->bar, &qd->cached_bar_value, 0);
             if (current_theme) {
-                lv_obj_set_style_text_color(qd->lbl_main_value,
-                    lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+                uint32_t tc = app_config_apply_brightness(current_theme->text_color, gb);
+                set_color_if_changed(qd->lbl_main_value, &qd->cached_main_color, tc);
             }
         }
 
@@ -544,8 +581,8 @@ void allsky_page_update(const allsky_data_t *data) {
             if (pos < 0.0f) pos = 0.0f;
             if (pos > 1.0f) pos = 1.0f;
             uint32_t sc = color_lerp(bt_s1->color_min, bt_s1->color_max, pos);
-            lv_obj_set_style_text_color(qd->lbl_sub1,
-                lv_color_hex(app_config_apply_brightness(sc, gb)), 0);
+            set_color_if_changed(qd->lbl_sub1, &qd->cached_sub1_color,
+                                 app_config_apply_brightness(sc, gb));
         }
 
         /* Sub2 color: dew point special logic for ambient, gradient for others */
@@ -559,12 +596,12 @@ void allsky_page_update(const allsky_data_t *data) {
 
                 uint32_t dew_color;
                 if (dew_val < ambient_val - dew_offset) {
-                    dew_color = dew_safe_color;   /* safe — dew point well below ambient */
+                    dew_color = dew_safe_color;
                 } else {
-                    dew_color = dew_warn_color;   /* warning — approaching condensation */
+                    dew_color = dew_warn_color;
                 }
-                lv_obj_set_style_text_color(qd->lbl_sub2,
-                    lv_color_hex(app_config_apply_brightness(dew_color, gb)), 0);
+                set_color_if_changed(qd->lbl_sub2, &qd->cached_sub2_color,
+                                     app_config_apply_brightness(dew_color, gb));
             }
         } else {
             bar_threshold_t *bt_s2 = &field_thresholds[q][FIELD_SUB2];
@@ -576,20 +613,28 @@ void allsky_page_update(const allsky_data_t *data) {
                 if (pos < 0.0f) pos = 0.0f;
                 if (pos > 1.0f) pos = 1.0f;
                 uint32_t sc = color_lerp(bt_s2->color_min, bt_s2->color_max, pos);
-                lv_obj_set_style_text_color(qd->lbl_sub2,
-                    lv_color_hex(app_config_apply_brightness(sc, gb)), 0);
+                set_color_if_changed(qd->lbl_sub2, &qd->cached_sub2_color,
+                                     app_config_apply_brightness(sc, gb));
             }
         }
 
-        /* Fan indicator symbol (on thermal quadrant, data from ambient config) */
+        /* Dot 1 indicator: thermal=fan (ambient config), sqm=GPS (sqm config) */
         if (qd->dot1 && current_theme) {
-            const char *dot1_val = data->field_values[ALLSKY_F_AMBIENT_DOT1];
-            bool dot1_on = (dot1_val[0] != '\0' && qcfg[2].dot1_on_value[0] != '\0'
-                            && strcmp(dot1_val, qcfg[2].dot1_on_value) == 0);
+            const char *dot1_val;
+            bool dot1_on;
+            if (q == 1) {
+                dot1_val = data->field_values[ALLSKY_F_SQM_DOT1];
+                dot1_on = (dot1_val[0] != '\0' && qcfg[1].dot1_on_value[0] != '\0'
+                           && strcmp(dot1_val, qcfg[1].dot1_on_value) == 0);
+            } else {
+                dot1_val = data->field_values[ALLSKY_F_AMBIENT_DOT1];
+                dot1_on = (dot1_val[0] != '\0' && qcfg[2].dot1_on_value[0] != '\0'
+                           && strcmp(dot1_val, qcfg[2].dot1_on_value) == 0);
+            }
             uint32_t c = dot1_on ? current_theme->progress_color
                                  : current_theme->bento_border;
-            lv_obj_set_style_text_color(qd->dot1,
-                lv_color_hex(app_config_apply_brightness(c, gb)), 0);
+            set_color_if_changed(qd->dot1, &qd->cached_dot1_color,
+                                 app_config_apply_brightness(c, gb));
         }
 
         /* Heater indicator symbol (on ambient quadrant) */
@@ -599,8 +644,8 @@ void allsky_page_update(const allsky_data_t *data) {
                             && strcmp(dot2_val, qcfg[2].dot2_on_value) == 0);
             uint32_t c = dot2_on ? current_theme->progress_color
                                  : current_theme->bento_border;
-            lv_obj_set_style_text_color(qd->dot2,
-                lv_color_hex(app_config_apply_brightness(c, gb)), 0);
+            set_color_if_changed(qd->dot2, &qd->cached_dot2_color,
+                                 app_config_apply_brightness(c, gb));
         }
     }
 }
@@ -609,6 +654,17 @@ void allsky_page_update(const allsky_data_t *data) {
 
 void allsky_page_apply_theme(void) {
     if (!allsky_page || !current_theme) return;
+
+    /* Invalidate all cached colors so the next update re-applies everything */
+    for (int q = 0; q < 4; q++) {
+        quads[q].cached_main_color = UINT32_MAX;
+        quads[q].cached_sub1_color = UINT32_MAX;
+        quads[q].cached_sub2_color = UINT32_MAX;
+        quads[q].cached_dot1_color = UINT32_MAX;
+        quads[q].cached_dot2_color = UINT32_MAX;
+        quads[q].cached_bar_color  = UINT32_MAX;
+        quads[q].cached_bar_value  = -1;
+    }
 
     int gb = app_config_get()->color_brightness;
 

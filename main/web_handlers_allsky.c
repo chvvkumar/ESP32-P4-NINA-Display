@@ -1,5 +1,6 @@
 #include "web_server_internal.h"
 #include "nina_allsky.h"
+#include "nina_dashboard.h"
 #include "esp_http_client.h"
 #include "esp_heap_caps.h"
 #include "esp_lvgl_port.h"
@@ -29,6 +30,7 @@ esp_err_t allsky_config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "dew_offset",       (double)cfg->allsky_dew_offset);
     cJSON_AddStringToObject(root, "field_config",     cfg->allsky_field_config);
     cJSON_AddStringToObject(root, "thresholds",       cfg->allsky_thresholds);
+    cJSON_AddBoolToObject(root, "allsky_enabled",    cfg->allsky_enabled);
 
     const char *json_str = cJSON_PrintUnformatted(root);
     if (json_str == NULL) {
@@ -104,14 +106,20 @@ esp_err_t allsky_config_post_handler(httpd_req_t *req)
         cfg->allsky_dew_offset = (float)item->valuedouble;
     }
 
+    cJSON *ena = cJSON_GetObjectItem(root, "allsky_enabled");
+    if (cJSON_IsBool(ena)) {
+        cfg->allsky_enabled = cJSON_IsTrue(ena);
+    }
+
     cJSON_Delete(root);
 
     app_config_save(cfg);
     ESP_LOGI(TAG, "AllSky config saved to NVS");
 
-    /* Refresh the AllSky page's threshold/field config from updated NVS data */
+    /* Refresh the AllSky page's threshold/field config and enable/disable state */
     if (lvgl_port_lock(100)) {
         allsky_page_refresh_config();
+        nina_dashboard_set_allsky_enabled(cfg->allsky_enabled);
         lvgl_port_unlock();
     }
 

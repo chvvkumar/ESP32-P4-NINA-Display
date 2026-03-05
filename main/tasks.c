@@ -433,10 +433,9 @@ void data_update_task(void *arg) {
         }
     }
 
-    // Start MQTT if enabled
-    mqtt_ha_start();
-
     /* ── Boot-time firmware update check ── */
+    /* Done before MQTT to avoid concurrent TLS + MQTT traffic exhausting the
+     * esp_hosted SDIO receive buffer pool (sdio_rx_get_buffer assert). */
     if (app_config_get()->auto_update_check) {
         ESP_LOGI(TAG, "Checking for firmware updates...");
         github_release_info_t *rel = heap_caps_calloc(1, sizeof(github_release_info_t), MALLOC_CAP_SPIRAM);
@@ -502,6 +501,9 @@ void data_update_task(void *arg) {
         }
     }
 
+    // Start MQTT if enabled
+    mqtt_ha_start();
+
     instance_count = app_config_get_instance_count();
     ESP_LOGI(TAG, "Spawning %d per-instance poll tasks", instance_count);
 
@@ -526,7 +528,7 @@ void data_update_task(void *arg) {
 
     /* Spawn AllSky poll task (pinned to Core 0, networking) */
     allsky_data_init(&allsky_data);
-    {
+    if (app_config_get()->allsky_enabled) {
         StackType_t *as_stack = heap_caps_malloc(6144 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
         StaticTask_t *as_tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         if (as_stack && as_tcb) {
@@ -779,8 +781,10 @@ void data_update_task(void *arg) {
                          * Bitmask bits 1-3 refer to instance indices (not page indices),
                          * so use the page-to-instance mapping for NINA pages. */
                         bool in_mask = false;
-                        if (candidate == 0)
+                        if (candidate == 0) {
                             in_mask = (page_mask & 0x20) != 0;             /* AllSky (bit 5) */
+                            if (!app_config_get()->allsky_enabled) in_mask = false;
+                        }
                         else if (candidate == 1)
                             in_mask = (page_mask & 0x01) != 0;             /* Summary (bit 0) */
                         else if (candidate >= 2 && candidate <= ena_page_count + 1) {

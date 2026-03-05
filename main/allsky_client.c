@@ -135,6 +135,7 @@ static const field_map_entry_t s_field_map[] = {
     { "ambient", "sub2", ALLSKY_F_AMBIENT_SUB2  },
     { "ambient", "dot1", ALLSKY_F_AMBIENT_DOT1  },
     { "ambient", "dot2", ALLSKY_F_AMBIENT_DOT2  },
+    { "sqm",     "dot1", ALLSKY_F_SQM_DOT1      },
     { "power",   "main", ALLSKY_F_POWER_MAIN    },
     { "power",   "sub1", ALLSKY_F_POWER_SUB1    },
     { "power",   "sub2", ALLSKY_F_POWER_SUB2    },

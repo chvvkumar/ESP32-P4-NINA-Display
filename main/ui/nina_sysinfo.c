@@ -194,7 +194,7 @@ lv_obj_t *sysinfo_page_create(lv_obj_t *parent) {
     /* ── Title ── */
     lv_obj_t *hdr = lv_obj_create(si_page);
     lv_obj_remove_style_all(hdr);
-    lv_obj_add_style(hdr, &style_header_gradient, 0);
+    /* No gradient header — keep it transparent */
     lv_obj_set_width(hdr, LV_PCT(100));
     lv_obj_set_height(hdr, LV_SIZE_CONTENT);
     lv_obj_set_style_pad_all(hdr, 10, 0);
