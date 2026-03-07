@@ -9,6 +9,7 @@
 #else
 #include "lvgl.h"
 #endif
+#include "lvgl_private.h"
 
 #ifndef LV_FONT_SUPERSCRIPT_24
 #define LV_FONT_SUPERSCRIPT_24 1

@@ -12,6 +12,7 @@
 #include "app_config.h"
 #include "display_defs.h"
 #include "nina_dashboard_internal.h"
+#include "lvgl_private.h"
 
 #include <string.h>
 
@@ -110,8 +111,8 @@ static void widget_draw_cb(lv_event_t *e)
 
         lv_draw_triangle_dsc_t tri_dsc;
         lv_draw_triangle_dsc_init(&tri_dsc);
-        tri_dsc.bg_color = lv_color_hex(bg_color);
-        tri_dsc.bg_opa   = LV_OPA_COVER;
+        tri_dsc.color = lv_color_hex(bg_color);
+        tri_dsc.opa   = LV_OPA_COVER;
 
         /* Top-left */
         tri_dsc.p[0] = (lv_point_precise_t){x1, y1};

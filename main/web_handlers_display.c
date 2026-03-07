@@ -6,7 +6,6 @@
 #include "ui/nina_dashboard.h"
 #include "ui/themes.h"
 #include "lvgl.h"
-#include "src/others/snapshot/lv_snapshot.h"
 #include "driver/jpeg_encode.h"
 #include "mqtt_ha.h"
 #include "freertos/FreeRTOS.h"

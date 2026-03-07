@@ -36,12 +36,13 @@ static void auto_fit_value_font(lv_obj_t *label) {
         &lv_font_montserrat_32, &lv_font_montserrat_28,
     };
     const char *text = lv_label_get_text(label);
-    uint32_t len = (uint32_t)strlen(text);
     int32_t letter_space = lv_obj_get_style_text_letter_space(label, 0);
     int32_t avail = lv_obj_get_content_width(lv_obj_get_parent(label));
     const lv_font_t *pick = fonts[sizeof(fonts) / sizeof(fonts[0]) - 1];
     for (int i = 0; i < (int)(sizeof(fonts) / sizeof(fonts[0])); i++) {
-        if (lv_text_get_width(text, len, fonts[i], letter_space) <= avail) {
+        lv_point_t size;
+        lv_text_get_size(&size, text, fonts[i], letter_space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        if (size.x <= avail) {
             pick = fonts[i];
             break;
         }
