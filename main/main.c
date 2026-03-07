@@ -264,6 +264,47 @@ void app_main(void)
     bsp_display_backlight_on();
     bsp_display_brightness_set(app_config_get()->brightness);
 
+    /*
+     * DPI panels can't handle hardware swap_xy/mirror rotation commands.
+     * With avoid_tearing mode, the BSP forces sw_rotate=false and doesn't
+     * allocate the rotation buffer. Fix: set sw_rotate=true and allocate
+     * draw_buffs[2] so the flush callback performs SW pixel rotation.
+     * Uses ~1MB PSRAM for the full-screen rotation buffer.
+     */
+    {
+        lv_display_t *disp = lv_display_get_default();
+        if (disp) {
+            typedef struct {
+                int disp_type;
+                void *io_handle, *panel_handle, *control_handle;
+                struct { bool swap_xy, mirror_x, mirror_y; } rotation;
+                lv_color_t *draw_buffs[3];
+                uint8_t *oled_buffer;
+                void *disp_drv;
+                int current_rotation;
+                void *trans_sem, *rounder_cb;
+                struct {
+                    unsigned int monochrome: 1;
+                    unsigned int swap_bytes: 1;
+                    unsigned int full_refresh: 1;
+                    unsigned int direct_mode: 1;
+                    unsigned int sw_rotate: 1;
+                } flags;
+            } disp_ctx_compat_t;
+            disp_ctx_compat_t *ctx = (disp_ctx_compat_t *)lv_display_get_driver_data(disp);
+            if (ctx) {
+                ctx->flags.sw_rotate = 1;
+                ctx->draw_buffs[2] = heap_caps_malloc(
+                    BSP_LCD_H_RES * BSP_LCD_V_RES * sizeof(lv_color_t),
+                    MALLOC_CAP_SPIRAM);
+                if (!ctx->draw_buffs[2]) {
+                    ESP_LOGW(TAG, "No PSRAM for rotation buffer, SW rotation disabled");
+                    ctx->flags.sw_rotate = 0;
+                }
+            }
+        }
+    }
+
     /* Apply saved screen rotation */
     {
         uint8_t rot = app_config_get()->screen_rotation;

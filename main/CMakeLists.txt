@@ -21,7 +21,6 @@ target_compile_options(
     ${LVGL_LIB}
     PRIVATE
         -DLV_LVGL_H_INCLUDE_SIMPLE
-        -DLV_USE_DEMO_MUSIC
         -Wno-attributes      # conflicting section attrs in lv_color/lv_math (upstream LVGL issue)
         -Wno-unused-function  # unused atomic.h inlines in lv_freertos.c (upstream ESP-IDF issue)
 )

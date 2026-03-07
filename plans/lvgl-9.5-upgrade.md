@@ -93,12 +93,17 @@ Starting in 9.2.0 and enforced more strictly in 9.3+, internal LVGL APIs were se
 
 | Setting | Current Value | 9.5 Status | Action |
 |---------|--------------|------------|--------|
-| `CONFIG_LV_USE_PPA=n` | Disabled (720px stride not 128-byte aligned) | Still needed | Verify still set |
-| `CONFIG_LVGL_PORT_ENABLE_PPA=n` | Disabled | Still needed | Verify still set |
+| `CONFIG_LV_USE_PPA=y` | Enabled | PPA draw unit for fills + images | Enabled with DPI framebuffers |
+| `CONFIG_BSP_LCD_DPI_BUFFER_NUMS=2` | 2 framebuffers | Required for avoid_tearing | Set |
+| `CONFIG_BSP_DISPLAY_LVGL_AVOID_TEAR=y` | Enabled | Uses DPI framebuffers | Set |
+| `CONFIG_BSP_DISPLAY_LVGL_FULL_REFRESH=y` | Enabled | Full-screen rendering | Set |
+| `CONFIG_LV_DRAW_BUF_STRIDE_ALIGN=1` | No padding | Must match PPA's pic_w stride | Keep at 1 |
+| `CONFIG_LV_DRAW_BUF_ALIGN=128` | Cache-line aligned | Must equal CACHE_L2_CACHE_LINE_SIZE | Set |
+| `CONFIG_LVGL_PORT_ENABLE_PPA=n` | Disabled | Only for SW rotation (not used) | No change |
 | Dual draw units | Enabled | Still supported | No change |
 | 1000 Hz FreeRTOS tick | Set | Unaffected | No change |
 
-- [ ] **Run `idf.py menuconfig`** and verify PPA remains disabled
+- [x] **Enable PPA** with DPI framebuffer mode (avoid_tearing + full_refresh)
 - [ ] **Check for any new Kconfig defaults** that may have changed between 9.2 and 9.5
 - [ ] **Verify `sdkconfig` diff** is minimal and expected after build
 
