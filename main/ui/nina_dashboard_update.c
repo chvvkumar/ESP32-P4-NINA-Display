@@ -75,11 +75,14 @@ void nina_dashboard_update_status(int page_index, int rssi, bool nina_connected,
 
     p->nina_connected = nina_connected;
 
+    int gb = app_config_get()->color_brightness;
     uint32_t glow_color;
     if (theme_forces_colors()) {
-        glow_color = nina_connected ? current_theme->text_color : current_theme->bento_border;
+        glow_color = app_config_apply_brightness(
+            nina_connected ? current_theme->text_color : current_theme->bento_border, gb);
     } else {
-        glow_color = nina_connected ? 0x4ade80 : 0xf87171;
+        glow_color = app_config_apply_brightness(
+            nina_connected ? 0x4ade80 : 0xf87171, gb);
     }
 
     if (p->lbl_instance_name) {
@@ -520,19 +523,23 @@ static void update_safety_icon(dashboard_page_t *p, const nina_client_t *data, i
 
     lv_obj_clear_flag(p->safety_icon, LV_OBJ_FLAG_HIDDEN);
 
+    int gb = app_config_get()->color_brightness;
     if (data->safety_connected) {
         if (data->safety_is_safe) {
             set_label_if_changed(p->safety_icon, ICON_VERIFIED_USER);
             lv_obj_set_style_text_color(p->safety_icon,
-                lv_color_hex(theme_forces_colors() ? 0x7f1d1d : 0x4CAF50), 0);
+                lv_color_hex(app_config_apply_brightness(
+                    theme_forces_colors() ? 0x7f1d1d : 0x4CAF50, gb)), 0);
         } else {
             set_label_if_changed(p->safety_icon, ICON_GPP_BAD);
             lv_obj_set_style_text_color(p->safety_icon,
-                lv_color_hex(theme_forces_colors() ? 0xff0000 : 0xF44336), 0);
+                lv_color_hex(app_config_apply_brightness(
+                    theme_forces_colors() ? 0xff0000 : 0xF44336, gb)), 0);
         }
     } else {
         set_label_if_changed(p->safety_icon, ICON_GPP_MAYBE);
-        lv_obj_set_style_text_color(p->safety_icon, lv_color_hex(0x999999), 0);
+        lv_obj_set_style_text_color(p->safety_icon,
+            lv_color_hex(app_config_apply_brightness(0x999999, gb)), 0);
     }
 }
 

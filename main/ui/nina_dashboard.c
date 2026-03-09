@@ -186,9 +186,11 @@ static void apply_theme_to_page(dashboard_page_t *p) {
     if (p->lbl_instance_name) {
         uint32_t glow_color;
         if (strcmp(current_theme->name, "Red Night") == 0) {
-            glow_color = p->nina_connected ? current_theme->text_color : current_theme->label_color;
+            glow_color = app_config_apply_brightness(
+                p->nina_connected ? current_theme->text_color : current_theme->label_color, gb);
         } else {
-            glow_color = p->nina_connected ? 0x4ade80 : 0xf87171;
+            glow_color = app_config_apply_brightness(
+                p->nina_connected ? 0x4ade80 : 0xf87171, gb);
         }
         lv_obj_set_style_text_color(p->lbl_instance_name, lv_color_hex(glow_color), 0);
     }
