@@ -134,6 +134,37 @@ jobs:
           ccache --zero-stats
           ccache --show-config | grep -E "max_size|cache_dir|compression"
 
+      - name: Clean stale build if config changed
+        if: steps.check_skip.outputs.skip != 'true'
+        run: |
+          NEEDS_CLEAN=false
+
+          # Detect changes in build-critical files since last successful build
+          if [ -f build/.build_config_hash ]; then
+            OLD_HASH=$(cat build/.build_config_hash)
+            NEW_HASH=$(cat sdkconfig.defaults main/idf_component.yml main/CMakeLists.txt CMakeLists.txt 2>/dev/null | sha256sum | cut -d' ' -f1)
+            if [ "$OLD_HASH" != "$NEW_HASH" ]; then
+              echo "Build config changed, cleaning"
+              NEEDS_CLEAN=true
+            fi
+          else
+            echo "No previous build hash found, cleaning"
+            NEEDS_CLEAN=true
+          fi
+
+          if [ "$NEEDS_CLEAN" = "true" ]; then
+            rm -rf build managed_components
+            echo "Clean complete"
+          else
+            echo "Config unchanged, using incremental build"
+          fi
+
+      - name: Save build config hash
+        if: steps.check_skip.outputs.skip != 'true'
+        run: |
+          mkdir -p build
+          cat sdkconfig.defaults main/idf_component.yml main/CMakeLists.txt CMakeLists.txt 2>/dev/null | sha256sum | cut -d' ' -f1 > build/.build_config_hash
+
       - name: Build project
         if: steps.check_skip.outputs.skip != 'true'
         env:
