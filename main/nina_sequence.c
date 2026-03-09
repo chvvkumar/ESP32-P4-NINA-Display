@@ -27,14 +27,14 @@ static int parse_remaining_seconds(const char *str) {
 
 // Classify a condition name into a short header label for the dashboard.
 static const char* classify_condition(const char *name) {
-    if (!name) return "TIME LEFT";
+    if (!name) return "TIME LIMIT";
     if (strstr(name, "Horizon") || strstr(name, "Altitude"))
         return "SETS IN";
     if (strstr(name, "Dawn") || strstr(name, "Twilight"))
         return "DAWN IN";
     if (strstr(name, "Time"))
-        return "TIME LEFT";
-    return "TIME LEFT";
+        return "TIME LIMIT";
+    return "TIME LIMIT";
 }
 
 // State passed through the recursive search for the earliest condition.
@@ -297,7 +297,7 @@ void fetch_sequence_counts_optional(const char *base_url, nina_client_t *data) {
                 // Find the earliest binding condition (time, horizon, dawn, etc.)
                 data->target_time_remaining[0] = '\0';
                 data->target_time_reason[0] = '\0';
-                earliest_condition_t earliest = { .min_seconds = -1, .reason = "TIME LEFT", .condition_count = 0 };
+                earliest_condition_t earliest = { .min_seconds = -1, .reason = "TIME LIMIT", .condition_count = 0 };
                 find_earliest_condition(target_container, &earliest);
                 data->target_condition_count = earliest.condition_count;
                 if (earliest.min_seconds >= 0) {
