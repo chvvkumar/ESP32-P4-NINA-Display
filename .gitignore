@@ -107,8 +107,9 @@ cleanup_log_*.txt
 # secrets.h
 # credentials.h
 
-# Documentation (local only)
+# Documentation and plans (local only)
 docs/
+plans/
 
 # Python cache (if using Python scripts)
 __pycache__/

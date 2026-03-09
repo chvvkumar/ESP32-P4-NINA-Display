@@ -36,12 +36,13 @@ static void auto_fit_value_font(lv_obj_t *label) {
         &lv_font_montserrat_32, &lv_font_montserrat_28,
     };
     const char *text = lv_label_get_text(label);
-    uint32_t len = (uint32_t)strlen(text);
     int32_t letter_space = lv_obj_get_style_text_letter_space(label, 0);
     int32_t avail = lv_obj_get_content_width(lv_obj_get_parent(label));
     const lv_font_t *pick = fonts[sizeof(fonts) / sizeof(fonts[0]) - 1];
     for (int i = 0; i < (int)(sizeof(fonts) / sizeof(fonts[0])); i++) {
-        if (lv_text_get_width(text, len, fonts[i], letter_space) <= avail) {
+        lv_point_t size;
+        lv_text_get_size(&size, text, fonts[i], letter_space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        if (size.x <= avail) {
             pick = fonts[i];
             break;
         }
@@ -74,18 +75,15 @@ void nina_dashboard_update_status(int page_index, int rssi, bool nina_connected,
 
     p->nina_connected = nina_connected;
 
-    uint32_t text_color;
+    uint32_t glow_color;
     if (theme_forces_colors()) {
-        text_color = nina_connected ? current_theme->text_color : current_theme->bento_border;
+        glow_color = nina_connected ? current_theme->text_color : current_theme->bento_border;
     } else {
-        text_color = nina_connected ? 0x4ade80 : 0xf87171;
+        glow_color = nina_connected ? 0x4ade80 : 0xf87171;
     }
 
-    int gb = app_config_get()->color_brightness;
-    text_color = app_config_apply_brightness(text_color, gb);
-
     if (p->lbl_instance_name) {
-        lv_obj_set_style_text_color(p->lbl_instance_name, lv_color_hex(text_color), 0);
+        lv_obj_set_style_text_color(p->lbl_instance_name, lv_color_hex(glow_color), 0);
     }
 }
 
@@ -155,7 +153,7 @@ static void update_disconnected_state(dashboard_page_t *p, int instance_idx, int
     set_label_if_changed(p->lbl_stars_value, "--");
     set_label_if_changed(p->lbl_target_time_value, "--");
     auto_fit_value_font(p->lbl_target_time_value);
-    set_label_if_changed(p->lbl_target_time_header, "TIME LEFT");
+    set_label_if_changed(p->lbl_target_time_header, "TIME LIMIT");
     for (int i = 0; i < MAX_POWER_WIDGETS; i++) {
         lv_obj_add_flag(p->box_pwr[i], LV_OBJ_FLAG_HIDDEN);
     }
@@ -395,7 +393,7 @@ static void update_mount_and_image_stats(dashboard_page_t *p, const nina_client_
             SET_LABEL_FMT_IF_CHANGED(p->lbl_target_time_header, 24, "%s", d->target_time_reason);
         }
     } else {
-        set_label_if_changed(p->lbl_target_time_header, "TIME LEFT");
+        set_label_if_changed(p->lbl_target_time_header, "TIME LIMIT");
     }
 }
 
