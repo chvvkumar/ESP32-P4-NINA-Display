@@ -153,7 +153,7 @@ jobs:
           fi
 
           if [ "$NEEDS_CLEAN" = "true" ]; then
-            rm -rf build managed_components
+            rm -rf build managed_components sdkconfig
             echo "Clean complete"
           else
             echo "Config unchanged, using incremental build"
