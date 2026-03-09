@@ -3,7 +3,7 @@ dependencies:
   espressif/esp_wifi_remote: "0.*"
   espressif/esp_websocket_client: "1.*"
   lvgl/lvgl:
-    version: "9.2.0"
+    version: "~9.5.0"
     public: true
   waveshare/esp32_p4_wifi6_touch_lcd_4b:
     version: "*"
