@@ -1055,7 +1055,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
             }
             if (d->target_time_remaining[0] && len > 0) {
                 if (d->target_time_reason[0] &&
-                    strcmp(d->target_time_reason, "TIME LEFT") != 0) {
+                    strcmp(d->target_time_reason, "TIME LIMIT") != 0) {
                     // Show constraint-specific label: "sets in 2:30" / "dawn in 1:45"
                     char reason_lower[16];
                     strlcpy(reason_lower, d->target_time_reason, sizeof(reason_lower));

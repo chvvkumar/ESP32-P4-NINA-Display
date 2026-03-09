@@ -69,7 +69,17 @@
       text-transform: uppercase; letter-spacing: 0.08em;
       margin-bottom: 24px; opacity: 0.9;
       transition: color 0.4s ease;
+      cursor: pointer; user-select: none;
+      display: flex; align-items: center; justify-content: space-between;
     }
+    .card-title::after {
+      content: ''; display: inline-block; width: 8px; height: 8px; flex-shrink: 0;
+      border-right: 2px solid var(--text-muted); border-bottom: 2px solid var(--text-muted);
+      transform: rotate(45deg); transition: transform 0.3s ease; margin-left: 12px;
+    }
+    .card.collapsed .card-title { margin-bottom: 0; }
+    .card.collapsed .card-title::after { transform: rotate(-45deg); }
+    .card.collapsed > :not(.card-title) { display: none !important; }
     .content { max-width: 960px; margin: 0 auto; padding: 28px 24px 100px; }
     .field { margin-bottom: 20px; }
     .field:last-child { margin-bottom: 0; }
@@ -1877,6 +1887,48 @@
         showToast('Click a key path input field first, then click Use on a JSON value','info');
       }
     }
+
+    /* === Collapsible Cards === */
+    function getCardKey(card){
+      var title=card.querySelector('.card-title');
+      if(!title) return null;
+      var tab=card.closest('.tab-panel');
+      var tabId=tab?tab.id:'unknown';
+      var text=title.textContent.trim().replace(/\s+/g,'_').substring(0,40);
+      return 'nina_collapse_'+tabId+'_'+text;
+    }
+
+    function initCollapsibleCards(){
+      var saved={};
+      try{ saved=JSON.parse(localStorage.getItem('nina_collapse_state')||'{}'); }catch(e){}
+      document.querySelectorAll('.card').forEach(function(card){
+        var title=card.querySelector('.card-title');
+        if(!title) return;
+        var key=getCardKey(card);
+        if(!key) return;
+        // Default to collapsed unless explicitly expanded
+        if(saved[key]==='expanded') card.classList.remove('collapsed');
+        else card.classList.add('collapsed');
+        title.addEventListener('click',function(e){
+          // Don't toggle if clicking interactive elements inside title
+          if(e.target.tagName==='SELECT'||e.target.tagName==='INPUT'||e.target.tagName==='BUTTON') return;
+          card.classList.toggle('collapsed');
+          saveCollapseState();
+        });
+      });
+    }
+
+    function saveCollapseState(){
+      var state={};
+      document.querySelectorAll('.card').forEach(function(card){
+        var key=getCardKey(card);
+        if(!key) return;
+        state[key]=card.classList.contains('collapsed')?'collapsed':'expanded';
+      });
+      try{ localStorage.setItem('nina_collapse_state',JSON.stringify(state)); }catch(e){}
+    }
+
+    initCollapsibleCards();
 
     /* === Init === */
     loadConfig();

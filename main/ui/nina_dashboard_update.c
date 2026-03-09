@@ -153,7 +153,7 @@ static void update_disconnected_state(dashboard_page_t *p, int instance_idx, int
     set_label_if_changed(p->lbl_stars_value, "--");
     set_label_if_changed(p->lbl_target_time_value, "--");
     auto_fit_value_font(p->lbl_target_time_value);
-    set_label_if_changed(p->lbl_target_time_header, "TIME LEFT");
+    set_label_if_changed(p->lbl_target_time_header, "TIME LIMIT");
     for (int i = 0; i < MAX_POWER_WIDGETS; i++) {
         lv_obj_add_flag(p->box_pwr[i], LV_OBJ_FLAG_HIDDEN);
     }
@@ -393,7 +393,7 @@ static void update_mount_and_image_stats(dashboard_page_t *p, const nina_client_
             SET_LABEL_FMT_IF_CHANGED(p->lbl_target_time_header, 24, "%s", d->target_time_reason);
         }
     } else {
-        set_label_if_changed(p->lbl_target_time_header, "TIME LEFT");
+        set_label_if_changed(p->lbl_target_time_header, "TIME LIMIT");
     }
 }
 

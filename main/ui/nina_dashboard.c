@@ -502,7 +502,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_add_flag(box_target_time, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(box_target_time, session_stats_click_cb, LV_EVENT_CLICKED, NULL);
 
-    p->lbl_target_time_header = create_small_label(box_target_time, "TIME LEFT");
+    p->lbl_target_time_header = create_small_label(box_target_time, "TIME LIMIT");
     lv_obj_set_width(p->lbl_target_time_header, LV_PCT(100));
     lv_obj_set_style_text_align(p->lbl_target_time_header, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(p->lbl_target_time_header, lv_color_hex(current_theme->text_color), 0);
