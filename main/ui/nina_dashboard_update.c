@@ -135,10 +135,10 @@ static void update_disconnected_state(dashboard_page_t *p, int instance_idx, int
     set_label_if_changed(p->lbl_target_name, "----");
     set_label_if_changed(p->lbl_seq_container, "----");
     set_label_if_changed(p->lbl_seq_step, "----");
-    set_label_if_changed(p->lbl_exposure_current, "--");
     set_label_if_changed(p->lbl_exposure_total, "");
+    set_label_if_changed(p->lbl_loop_count, "");
+    set_label_if_changed(p->lbl_exposure_current, "--");
     lv_arc_set_value(p->arc_exposure, 0);
-    set_label_if_changed(p->lbl_loop_count, "-- / --");
     lv_obj_add_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
     lv_anim_delete(p->lbl_rms_value, arcsec_anim_exec);
     set_label_if_changed(p->lbl_rms_value, "--");
@@ -212,7 +212,7 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
         int total_sec = (int)total;
         SET_LABEL_FMT_IF_CHANGED(p->lbl_exposure_current, 16, "%ds", total_sec);
 
-        // Update filter label (below the duration)
+        // Update filter label (line 1, above the duration)
         if (d->current_filter[0] != '\0' && strcmp(d->current_filter, "--") != 0) {
             set_label_if_changed(p->lbl_exposure_total, d->current_filter);
             lv_obj_set_style_text_color(p->lbl_exposure_total, lv_color_hex(filter_color), 0);
@@ -262,25 +262,34 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
         }
 
         if (d->exposure_iterations > 0) {
-            SET_LABEL_FMT_IF_CHANGED(p->lbl_loop_count, 32, "%d / %d",
+            SET_LABEL_FMT_IF_CHANGED(p->lbl_loop_count, 32, "x %d/%d",
                 d->exposure_count, d->exposure_iterations);
         } else {
-            set_label_if_changed(p->lbl_loop_count, "-- / --");
+            set_label_if_changed(p->lbl_loop_count, "");
         }
 
         if (d->exposure_total_count > 0) {
-            SET_LABEL_FMT_IF_CHANGED(p->lbl_filter_total_count, 16, "%d", d->exposure_total_count);
-            lv_obj_set_style_text_color(p->lbl_filter_total_count, lv_color_hex(filter_color), 0);
+            int total_secs = (int)(d->exposure_total_count * d->exposure_total);
+            int h = total_secs / 3600;
+            int m = (total_secs % 3600) / 60;
+            if (h > 0) {
+                SET_LABEL_FMT_IF_CHANGED(p->lbl_filter_done_value, 32, "%d / %dh %02dm",
+                    d->exposure_total_count, h, m);
+            } else {
+                SET_LABEL_FMT_IF_CHANGED(p->lbl_filter_done_value, 32, "%d / %dm",
+                    d->exposure_total_count, m);
+            }
+            lv_obj_set_style_text_color(p->lbl_filter_done_value, lv_color_hex(filter_color), 0);
             lv_obj_clear_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
         } else {
             lv_obj_add_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
         }
     } else {
         p->interp_arc_target = 0;
-        set_label_if_changed(p->lbl_exposure_current, "--");
         set_label_if_changed(p->lbl_exposure_total, "");
+        set_label_if_changed(p->lbl_loop_count, "");
+        set_label_if_changed(p->lbl_exposure_current, "--");
         lv_arc_set_value(p->arc_exposure, 0);
-        set_label_if_changed(p->lbl_loop_count, "-- / --");
         lv_obj_add_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
     }
 }
