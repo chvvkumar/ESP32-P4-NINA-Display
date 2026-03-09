@@ -184,13 +184,13 @@ static void apply_theme_to_page(dashboard_page_t *p) {
     int gb = app_config_get()->color_brightness;
 
     if (p->lbl_instance_name) {
-        uint32_t conn_color;
+        uint32_t glow_color;
         if (strcmp(current_theme->name, "Red Night") == 0) {
-            conn_color = p->nina_connected ? current_theme->text_color : current_theme->label_color;
+            glow_color = p->nina_connected ? current_theme->text_color : current_theme->label_color;
         } else {
-            conn_color = p->nina_connected ? 0x4ade80 : 0xf87171;
+            glow_color = p->nina_connected ? 0x4ade80 : 0xf87171;
         }
-        lv_obj_set_style_text_color(p->lbl_instance_name, lv_color_hex(app_config_apply_brightness(conn_color, gb)), 0);
+        lv_obj_set_style_text_color(p->lbl_instance_name, lv_color_hex(glow_color), 0);
     }
 
     if (p->lbl_target_name) lv_obj_set_style_text_color(p->lbl_target_name, lv_color_hex(app_config_apply_brightness(current_theme->target_name_color, gb)), 0);
@@ -296,13 +296,14 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_flex_flow(top_row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(top_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
+    p->instance_name_glow = NULL;
     p->lbl_instance_name = lv_label_create(top_row);
     {
-        uint32_t init_color = 0xf87171;
+        uint32_t glow_color = 0xf87171;
         if (current_theme && strcmp(current_theme->name, "Red Night") == 0) {
-            init_color = current_theme->label_color;
+            glow_color = current_theme->label_color;
         }
-        lv_obj_set_style_text_color(p->lbl_instance_name, lv_color_hex(app_config_apply_brightness(init_color, app_config_get()->color_brightness)), 0);
+        lv_obj_set_style_text_color(p->lbl_instance_name, lv_color_hex(glow_color), 0);
     }
     lv_obj_set_style_text_font(p->lbl_instance_name, &lv_font_montserrat_20, 0);
     {

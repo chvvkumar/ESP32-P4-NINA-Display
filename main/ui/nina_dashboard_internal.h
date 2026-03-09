@@ -26,6 +26,7 @@ typedef struct {
 
     // Header
     lv_obj_t *header_box;
+    lv_obj_t *instance_name_glow;
     lv_obj_t *lbl_instance_name;
     lv_obj_t *lbl_target_name;
 

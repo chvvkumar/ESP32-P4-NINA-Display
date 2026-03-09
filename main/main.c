@@ -24,6 +24,8 @@
 #include "tasks.h"
 #include "esp_ota_ops.h"
 #include "driver/jpeg_decode.h"
+#include "display/lv_display_private.h"
+#include "draw/sw/lv_draw_sw_utils.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -37,6 +39,70 @@
 /* Embedded splash logo (JPEG, hardware-decoded at boot) */
 extern const uint8_t logo_jpg_start[] asm("_binary_logo_jpg_start");
 extern const uint8_t logo_jpg_end[]   asm("_binary_logo_jpg_end");
+
+/*
+ * ── SW rotation for DPI avoid-tearing mode ─────────────────────────
+ *
+ * The BSP disables sw_rotate when avoid_tearing is enabled because its
+ * flush callback only has a single rotation buffer — the DPI controller
+ * reads it while the next frame is being written, causing tearing.
+ *
+ * Fix: intercept the flush callback, rotate the full frame in-place
+ * (DPI buf → temp PSRAM buf → back to DPI buf), then let the BSP
+ * flush handle the normal DPI buffer swap.  The DPI controller only
+ * ever sees its own registered framebuffers — no flicker.
+ */
+static lv_color_t *rot_buf;              /* temp rotation buffer (PSRAM)    */
+static lv_display_flush_cb_t orig_flush; /* saved BSP flush callback        */
+
+/* Mirror of the BSP's private lvgl_port_display_ctx_t — only the fields we
+ * need for rotation.  Must match esp_lvgl_port v2.7.2 layout. */
+typedef struct {
+    int   disp_type;
+    void *io_handle, *panel_handle, *control_handle;
+    struct { bool swap_xy, mirror_x, mirror_y; } rotation;
+    lv_color_t *draw_buffs[3];
+    uint8_t    *oled_buffer;
+    void       *disp_drv;
+    int         current_rotation;
+    void       *trans_sem, *rounder_cb;
+#if CONFIG_LV_USE_PPA
+    void       *ppa_handle;
+#endif
+    struct {
+        unsigned int monochrome:  1;
+        unsigned int swap_bytes:  1;
+        unsigned int full_refresh:1;
+        unsigned int direct_mode: 1;
+        unsigned int sw_rotate:   1;
+    } flags;
+} disp_ctx_compat_t;
+
+static void rotated_flush_cb(lv_display_t *drv, const lv_area_t *area,
+                              uint8_t *color_map)
+{
+    int rot = lv_display_get_rotation(drv);
+    if (rot == LV_DISPLAY_ROTATION_0 || !rot_buf) {
+        orig_flush(drv, area, color_map);
+        return;
+    }
+
+    /* Rotate entire frame: DPI buffer → temp → back to DPI buffer.
+     * The DPI controller is reading the OTHER framebuffer right now,
+     * so overwriting this one is safe (no tearing). */
+    lv_color_format_t cf = lv_display_get_color_format(drv);
+    uint32_t stride = lv_draw_buf_width_to_stride(BSP_LCD_H_RES, cf);
+
+    lv_draw_sw_rotate(color_map, (uint8_t *)rot_buf,
+                      BSP_LCD_H_RES, BSP_LCD_V_RES,
+                      stride, stride, rot, cf);
+    memcpy(color_map, rot_buf, stride * BSP_LCD_V_RES);
+
+    /* BSP flush handles draw_bitmap + semaphore.  It checks
+     * sw_rotate && current_rotation > 0, but draw_buffs[2] == NULL
+     * so BSP skips its own rotation → straight to DPI buffer swap. */
+    orig_flush(drv, area, color_map);
+}
 
 static void *cjson_psram_malloc(size_t sz) { return heap_caps_malloc(sz, MALLOC_CAP_SPIRAM); }
 
@@ -257,60 +323,40 @@ void app_main(void)
         .flags = {
             .buff_dma = true,
             .buff_spiram = true,
-            .sw_rotate = true,
+            .sw_rotate = false,
         }
     };
     bsp_display_start_with_config(&cfg);
     bsp_display_backlight_on();
     bsp_display_brightness_set(app_config_get()->brightness);
 
-    /*
-     * DPI panels can't handle hardware swap_xy/mirror rotation commands.
-     * With avoid_tearing mode, the BSP forces sw_rotate=false and doesn't
-     * allocate the rotation buffer. Fix: set sw_rotate=true and allocate
-     * draw_buffs[2] so the flush callback performs SW pixel rotation.
-     * Uses ~1MB PSRAM for the full-screen rotation buffer.
-     */
+    /* ── SW rotation setup ──
+     * Allocate one temp PSRAM buffer for in-place rotation.  The flush
+     * callback rotates DPI buf → temp → back to DPI buf, then lets the
+     * BSP handle the normal DPI buffer swap. */
     {
         lv_display_t *disp = lv_display_get_default();
         if (disp) {
-            typedef struct {
-                int disp_type;
-                void *io_handle, *panel_handle, *control_handle;
-                struct { bool swap_xy, mirror_x, mirror_y; } rotation;
-                lv_color_t *draw_buffs[3];
-                uint8_t *oled_buffer;
-                void *disp_drv;
-                int current_rotation;
-                void *trans_sem, *rounder_cb;
-                struct {
-                    unsigned int monochrome: 1;
-                    unsigned int swap_bytes: 1;
-                    unsigned int full_refresh: 1;
-                    unsigned int direct_mode: 1;
-                    unsigned int sw_rotate: 1;
-                } flags;
-            } disp_ctx_compat_t;
-            disp_ctx_compat_t *ctx = (disp_ctx_compat_t *)lv_display_get_driver_data(disp);
-            if (ctx) {
-                ctx->flags.sw_rotate = 1;
-                ctx->draw_buffs[2] = heap_caps_malloc(
-                    BSP_LCD_H_RES * BSP_LCD_V_RES * sizeof(lv_color_t),
-                    MALLOC_CAP_SPIRAM);
-                if (!ctx->draw_buffs[2]) {
-                    ESP_LOGW(TAG, "No PSRAM for rotation buffer, SW rotation disabled");
-                    ctx->flags.sw_rotate = 0;
-                }
-            }
-        }
-    }
+            const size_t fb_size = BSP_LCD_H_RES * BSP_LCD_V_RES * sizeof(lv_color_t);
+            rot_buf = heap_caps_malloc(fb_size, MALLOC_CAP_SPIRAM);
+            if (!rot_buf) {
+                ESP_LOGW(TAG, "No PSRAM for rotation buffer, SW rotation disabled");
+            } else {
+                /* Enable sw_rotate in BSP context so LVGL handles coordinate
+                 * transforms and the BSP rotation-update returns early. */
+                disp_ctx_compat_t *ctx =
+                    (disp_ctx_compat_t *)lv_display_get_driver_data(disp);
+                if (ctx) ctx->flags.sw_rotate = 1;
 
-    /* Apply saved screen rotation */
-    {
-        uint8_t rot = app_config_get()->screen_rotation;
-        if (rot > 0 && rot <= 3) {
-            lv_display_t *disp = lv_display_get_default();
-            if (disp) {
+                orig_flush = disp->flush_cb;
+                lv_display_set_flush_cb(disp, rotated_flush_cb);
+                ESP_LOGI(TAG, "SW rotation ready (%.0f KB PSRAM)",
+                         fb_size / 1024.0);
+            }
+
+            /* Apply saved screen rotation */
+            uint8_t rot = app_config_get()->screen_rotation;
+            if (rot > 0 && rot <= 3) {
                 lvgl_port_lock(0);
                 lv_display_set_rotation(disp, rot);
                 lvgl_port_unlock();

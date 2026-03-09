@@ -75,18 +75,15 @@ void nina_dashboard_update_status(int page_index, int rssi, bool nina_connected,
 
     p->nina_connected = nina_connected;
 
-    uint32_t text_color;
+    uint32_t glow_color;
     if (theme_forces_colors()) {
-        text_color = nina_connected ? current_theme->text_color : current_theme->bento_border;
+        glow_color = nina_connected ? current_theme->text_color : current_theme->bento_border;
     } else {
-        text_color = nina_connected ? 0x4ade80 : 0xf87171;
+        glow_color = nina_connected ? 0x4ade80 : 0xf87171;
     }
 
-    int gb = app_config_get()->color_brightness;
-    text_color = app_config_apply_brightness(text_color, gb);
-
     if (p->lbl_instance_name) {
-        lv_obj_set_style_text_color(p->lbl_instance_name, lv_color_hex(text_color), 0);
+        lv_obj_set_style_text_color(p->lbl_instance_name, lv_color_hex(glow_color), 0);
     }
 }
 
