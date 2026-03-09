@@ -1,7 +1,6 @@
-<p align="center">
-  <img src="images/logo.png" alt="logo" height="40"><br>
-  <strong style="font-size: 2em;">ESP32-P4 NINA Display</strong>
-</p>
+<h1 align="center">
+  <img src="images/logo.png" alt="logo" height="40" style="vertical-align: middle;"> ESP32-P4 NINA Display
+</h1>
 
 <p align="center">
   <a href="https://github.com/chvvkumar/ESP32-P4-NINA-Display/actions/workflows/build.yml?query=branch%3Amain"><img src="https://img.shields.io/github/actions/workflow/status/chvvkumar/ESP32-P4-NINA-Display/build.yml?branch=main&label=build%20(main)&logo=github" alt="Build (main)"></a>
