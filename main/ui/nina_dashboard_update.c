@@ -139,6 +139,7 @@ static void update_disconnected_state(dashboard_page_t *p, int instance_idx, int
     set_label_if_changed(p->lbl_exposure_total, "");
     lv_arc_set_value(p->arc_exposure, 0);
     set_label_if_changed(p->lbl_loop_count, "-- / --");
+    lv_obj_add_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
     lv_anim_delete(p->lbl_rms_value, arcsec_anim_exec);
     set_label_if_changed(p->lbl_rms_value, "--");
     lv_obj_set_style_text_color(p->lbl_rms_value, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
@@ -266,12 +267,21 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
         } else {
             set_label_if_changed(p->lbl_loop_count, "-- / --");
         }
+
+        if (d->exposure_total_count > 0) {
+            SET_LABEL_FMT_IF_CHANGED(p->lbl_filter_total_count, 16, "%d", d->exposure_total_count);
+            lv_obj_set_style_text_color(p->lbl_filter_total_count, lv_color_hex(filter_color), 0);
+            lv_obj_clear_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
+        }
     } else {
         p->interp_arc_target = 0;
         set_label_if_changed(p->lbl_exposure_current, "--");
         set_label_if_changed(p->lbl_exposure_total, "");
         lv_arc_set_value(p->arc_exposure, 0);
         set_label_if_changed(p->lbl_loop_count, "-- / --");
+        lv_obj_add_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
     }
 }
 

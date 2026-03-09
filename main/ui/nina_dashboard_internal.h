@@ -35,6 +35,9 @@ typedef struct {
     lv_obj_t *lbl_exposure_current;
     lv_obj_t *lbl_exposure_total;
     lv_obj_t *lbl_loop_count;
+    lv_obj_t *lbl_filter_total_count;  // Bold number
+    lv_obj_t *lbl_filter_total_text;   // "Done" text
+    lv_obj_t *row_filter_total;        // Horizontal container
 
     // Sequence Info
     lv_obj_t *lbl_seq_container;

@@ -46,7 +46,8 @@ typedef struct {
     
     // Sequence info
     int exposure_count;         // Number of completed exposures for current filter (CompletedIterations)
-    int exposure_iterations;    // Total number of exposures planned for current filter (ExposureCount)
+    int exposure_iterations;    // Total number of exposures planned for current filter (Iterations)
+    int exposure_total_count;   // Cumulative exposures done for current filter (ExposureCount)
     float exposure_current;     // Elapsed time in current exposure (seconds)
     float exposure_total;       // Total duration of current exposure (seconds, from ExposureTime)
     int64_t exposure_end_epoch; // Absolute end time (Unix epoch seconds) for client-side interpolation
