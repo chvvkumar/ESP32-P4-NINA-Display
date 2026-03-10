@@ -56,7 +56,10 @@ static lv_color_t *rot_buf;              /* temp rotation buffer (PSRAM)    */
 static lv_display_flush_cb_t orig_flush; /* saved BSP flush callback        */
 
 /* Mirror of the BSP's private lvgl_port_display_ctx_t — only the fields we
- * need for rotation.  Must match esp_lvgl_port v2.7.2 layout. */
+ * need for rotation.  Must match esp_lvgl_port v2.7.2 layout.
+ * NOTE: BSP uses CONFIG_LVGL_PORT_ENABLE_PPA (not CONFIG_LV_USE_PPA) to
+ * conditionally include ppa_handle. Using the wrong guard shifts the flags
+ * field by 4 bytes, causing silent memory corruption. */
 typedef struct {
     int   disp_type;
     void *io_handle, *panel_handle, *control_handle;
@@ -66,7 +69,7 @@ typedef struct {
     void       *disp_drv;
     int         current_rotation;
     void       *trans_sem, *rounder_cb;
-#if CONFIG_LV_USE_PPA
+#if CONFIG_LVGL_PORT_ENABLE_PPA
     void       *ppa_handle;
 #endif
     struct {
