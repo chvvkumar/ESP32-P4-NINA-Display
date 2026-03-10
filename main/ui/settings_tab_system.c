@@ -8,6 +8,7 @@
  */
 
 #include "settings_tab_system.h"
+#include "build_version.h"
 #include "nina_settings_tabview.h"
 #include "nina_dashboard.h"
 #include "nina_dashboard_internal.h"

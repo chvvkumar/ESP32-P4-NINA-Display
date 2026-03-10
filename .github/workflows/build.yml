@@ -160,14 +160,6 @@ jobs:
             echo "Config unchanged, using incremental build"
           fi
 
-      - name: Force CMake reconfigure for fresh version metadata
-        if: steps.check_skip.outputs.skip != 'true'
-        run: |
-          . $IDF_PATH/export.sh
-          if [ -d build ]; then
-            idf.py reconfigure
-          fi
-
       - name: Build project
         if: steps.check_skip.outputs.skip != 'true'
         env:

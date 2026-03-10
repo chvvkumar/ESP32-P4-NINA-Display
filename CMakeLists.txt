@@ -6,28 +6,17 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
 file(STRINGS "version.txt" PROJECT_VER)
 
-# Git metadata for firmware version display
-execute_process(
-  COMMAND git describe --tags --always --dirty
-  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-  OUTPUT_VARIABLE GIT_TAG
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-  ERROR_QUIET
-)
-execute_process(
-  COMMAND git rev-parse --short HEAD
-  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-  OUTPUT_VARIABLE GIT_SHA
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-  ERROR_QUIET
-)
-execute_process(
-  COMMAND git rev-parse --abbrev-ref HEAD
-  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-  OUTPUT_VARIABLE GIT_BRANCH
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-  ERROR_QUIET
-)
-
 add_compile_options(-Wno-format)
 project(lvgl_demo_v9)
+
+# Build-time version header generation — runs git describe on every build.
+# configure_file() inside the script only writes if content changed,
+# so no unnecessary recompilation occurs when git state is unchanged.
+add_custom_target(generate_build_version ALL
+    COMMAND ${CMAKE_COMMAND}
+        -D SRC_DIR=${CMAKE_SOURCE_DIR}
+        -D DST_DIR=${CMAKE_BINARY_DIR}/generated
+        -P ${CMAKE_SOURCE_DIR}/generate_version.cmake
+    BYPRODUCTS ${CMAKE_BINARY_DIR}/generated/build_version.h
+    COMMENT "Generating build version header from git"
+)

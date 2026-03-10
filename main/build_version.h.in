@@ -1,0 +1,6 @@
+// Auto-generated at build time — do not edit.
+#pragma once
+#define BUILD_VERSION    "@PROJECT_VER@"
+#define BUILD_GIT_TAG    "@GIT_TAG@"
+#define BUILD_GIT_SHA    "@GIT_SHA@"
+#define BUILD_GIT_BRANCH "@GIT_BRANCH@"
