@@ -228,7 +228,7 @@ void instance_poll_task(void *arg) {
             }
             ctx->client->connected = false;
             nina_connection_report_poll(idx, false);
-            vTaskDelay(pdMS_TO_TICKS(5000));
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5000));
             continue;
         }
 

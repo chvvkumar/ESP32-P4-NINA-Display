@@ -9,6 +9,7 @@
 
 #include "nina_event_log.h"
 #include "nina_dashboard_internal.h"
+#include "app_config.h"
 #include "display_defs.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -138,14 +139,22 @@ void nina_event_log_overlay_create(lv_obj_t *screen) {
     s_title_label = lv_label_create(header);
     lv_label_set_text(s_title_label, "Event Log");
     lv_obj_set_style_text_font(s_title_label, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_color(s_title_label,
-        lv_color_hex(current_theme ? current_theme->text_color : 0xFFFFFF), 0);
+    {
+        int gb = app_config_get()->color_brightness;
+        lv_obj_set_style_text_color(s_title_label,
+            lv_color_hex(app_config_apply_brightness(
+                current_theme ? current_theme->text_color : 0xFFFFFF, gb)), 0);
+    }
 
     lv_obj_t *btn_close = lv_label_create(header);
     lv_label_set_text(btn_close, LV_SYMBOL_CLOSE);
     lv_obj_set_style_text_font(btn_close, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_color(btn_close,
-        lv_color_hex(current_theme ? current_theme->label_color : 0xAAAAAA), 0);
+    {
+        int gb = app_config_get()->color_brightness;
+        lv_obj_set_style_text_color(btn_close,
+            lv_color_hex(app_config_apply_brightness(
+                current_theme ? current_theme->label_color : 0xAAAAAA, gb)), 0);
+    }
     lv_obj_add_flag(btn_close, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_ext_click_area(btn_close, 20);
     lv_obj_add_event_cb(btn_close, close_cb, LV_EVENT_CLICKED, NULL);
@@ -187,8 +196,11 @@ void nina_event_log_show(void) {
     lv_obj_clean(s_scroll_cont);
 
     /* Theme colors */
-    uint32_t txt_color = current_theme ? current_theme->text_color : 0xFFFFFF;
-    uint32_t label_color = current_theme ? current_theme->label_color : 0x888888;
+    int gb = app_config_get()->color_brightness;
+    uint32_t txt_color = app_config_apply_brightness(
+        current_theme ? current_theme->text_color : 0xFFFFFF, gb);
+    uint32_t label_color = app_config_apply_brightness(
+        current_theme ? current_theme->label_color : 0x888888, gb);
 
     int64_t t = esp_timer_get_time() / 1000;
 
@@ -256,7 +268,9 @@ void nina_event_log_hide(void) {
 
 void nina_event_log_apply_theme(void) {
     if (!s_overlay) return;
-    uint32_t txt = current_theme ? current_theme->text_color : 0xFFFFFF;
+    int gb = app_config_get()->color_brightness;
+    uint32_t txt = app_config_apply_brightness(
+        current_theme ? current_theme->text_color : 0xFFFFFF, gb);
     if (s_title_label)
         lv_obj_set_style_text_color(s_title_label, lv_color_hex(txt), 0);
     /* Rows are recreated on each show(), so no need to restyle them */

@@ -1406,7 +1406,7 @@
       fetch('/api/version').then(r=>r.json()).then(data=>{
         $('fw_version').textContent=data.version||'--';
         $('fw_date').textContent=(data.date||'--')+' '+(data.time||'');
-        $('fw_idf').textContent=data.idf_version||'--';
+        $('fw_idf').textContent=data.idf||'--';
         $('fw_partition').textContent=data.partition||'--';
 
         var ghBase='https://github.com/chvvkumar/ESP32-P4-NINA-Display/';

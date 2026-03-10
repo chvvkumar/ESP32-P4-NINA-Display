@@ -1,4 +1,5 @@
 #include "mqtt_ha.h"
+#include "build_version.h"
 #include "app_config.h"
 #include "mqtt_client.h"
 #include "esp_log.h"

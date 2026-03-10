@@ -441,7 +441,7 @@ static void create_card(summary_card_t *sc, lv_obj_t *parent, int instance_index
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     sc->lbl_exp_title = lv_label_create(seq_center);
-    lv_label_set_text(sc->lbl_exp_title, "EXPOSURES");
+    lv_label_set_text(sc->lbl_exp_title, "COMPLETED");
     lv_obj_set_style_text_font(sc->lbl_exp_title, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_letter_space(sc->lbl_exp_title, 1, 0);
     lv_obj_set_style_text_align(sc->lbl_exp_title, LV_TEXT_ALIGN_CENTER, 0);
@@ -676,7 +676,7 @@ static void update_card_layout(summary_card_t *sc, int visible_count) {
 
 /* ── Card Transition Animations ────────────────────────────────────── */
 
-#define ANIM_DURATION_MS  400
+#define ANIM_DURATION_MS  1000
 
 static void anim_opa_cb(void *obj, int32_t v) {
     lv_obj_set_style_opa((lv_obj_t *)obj, v, 0);
@@ -766,12 +766,14 @@ void summary_page_update(const nina_client_t *instances, int count) {
     if (layout_changed) {
         /* ── FLIP animation: First, Last, Invert, Play ───────────── */
 
-        /* FIRST: snapshot current visibility and Y positions */
+        /* FIRST: snapshot current visibility, Y positions and heights */
         bool was_visible[MAX_NINA_INSTANCES];
         int32_t old_y[MAX_NINA_INSTANCES];
+        int32_t old_h[MAX_NINA_INSTANCES];
         for (int i = 0; i < card_count; i++) {
             was_visible[i] = !lv_obj_has_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
             old_y[i] = was_visible[i] ? lv_obj_get_y(cards[i].card) : 0;
+            old_h[i] = was_visible[i] ? lv_obj_get_height(cards[i].card) : 0;
         }
 
         /* LAST: apply show/hide and layout preset changes */
@@ -791,12 +793,28 @@ void summary_page_update(const nina_client_t *instances, int count) {
         for (int i = 0; i < card_count && i < count; i++) {
             if (!nina_connection_is_connected(i)) continue;
             int32_t new_y = lv_obj_get_y(cards[i].card);
+            int32_t new_h = lv_obj_get_height(cards[i].card);
             if (!was_visible[i]) {
                 /* New card — fade in + slide up */
                 animate_card_in(&cards[i]);
-            } else if (old_y[i] != new_y) {
-                /* Existing card moved — smooth glide to new position */
-                animate_card_move(&cards[i], old_y[i] - new_y);
+            } else {
+                /* Existing card — animate position if moved */
+                if (old_y[i] != new_y) {
+                    animate_card_move(&cards[i], old_y[i] - new_y);
+                }
+                /* Crossfade if height changed (flex handles actual resize) */
+                if (old_h[i] != new_h && old_h[i] > 0) {
+                    lv_anim_delete(cards[i].card, anim_opa_cb);
+                    lv_obj_set_style_opa(cards[i].card, LV_OPA_40, 0);
+                    lv_anim_t a;
+                    lv_anim_init(&a);
+                    lv_anim_set_var(&a, cards[i].card);
+                    lv_anim_set_values(&a, LV_OPA_40, LV_OPA_COVER);
+                    lv_anim_set_duration(&a, ANIM_DURATION_MS);
+                    lv_anim_set_exec_cb(&a, anim_opa_cb);
+                    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+                    lv_anim_start(&a);
+                }
             }
         }
     } else {
@@ -942,21 +960,38 @@ void summary_page_update(const nina_client_t *instances, int count) {
                 set_label_if_changed(sc->lbl_seq_step, "----");
             }
 
-            /* Exposure count */
-            if (d->exposure_iterations > 0) {
+            /* Completed filter exposures + integration time */
+            if (d->exposure_total_count > 0) {
+                int total_secs = (int)(d->exposure_total_count * d->exposure_total);
+                int h = total_secs / 3600;
+                int m = (total_secs % 3600) / 60;
+                if (h > 0) {
+                    SET_LABEL_FMT_IF_CHANGED(sc->lbl_exp_val, 32, "%d / %dh %02dm",
+                        d->exposure_total_count, h, m);
+                } else {
+                    SET_LABEL_FMT_IF_CHANGED(sc->lbl_exp_val, 32, "%d / %dm",
+                        d->exposure_total_count, m);
+                }
+            } else if (d->exposure_iterations > 0) {
                 SET_LABEL_FMT_IF_CHANGED(sc->lbl_exp_val, 32, "%d / %d",
                     d->exposure_count, d->exposure_iterations);
             } else {
-                set_label_if_changed(sc->lbl_exp_val, "-- / --");
+                set_label_if_changed(sc->lbl_exp_val, "--");
             }
 
             if (current_theme) {
                 lv_obj_set_style_text_color(sc->lbl_seq_name,
                     lv_color_hex(app_config_apply_brightness(
                         current_theme->header_text_color, gb)), 0);
+                /* Use filter color for completed count when available */
+                uint32_t exp_color = current_theme->text_color;
+                if (d->exposure_total_count > 0 && !theme_forces_colors() &&
+                    d->current_filter[0] && strcmp(d->current_filter, "--") != 0) {
+                    uint32_t fc = app_config_get_filter_color(d->current_filter, i);
+                    if (fc != 0) exp_color = fc;
+                }
                 lv_obj_set_style_text_color(sc->lbl_exp_val,
-                    lv_color_hex(app_config_apply_brightness(
-                        current_theme->text_color, gb)), 0);
+                    lv_color_hex(app_config_apply_brightness(exp_color, gb)), 0);
                 lv_obj_set_style_text_color(sc->lbl_seq_step,
                     lv_color_hex(app_config_apply_brightness(
                         current_theme->text_color, gb)), 0);
@@ -1044,7 +1079,18 @@ void summary_page_update(const nina_client_t *instances, int count) {
                     "%ds %s", (int)d->exposure_total,
                     d->current_filter[0] ? d->current_filter : "");
             }
-            if (d->exposure_iterations > 0 && len > 0) {
+            if (d->exposure_total_count > 0 && len > 0) {
+                int tsecs = (int)(d->exposure_total_count * d->exposure_total);
+                int th = tsecs / 3600;
+                int tm = (tsecs % 3600) / 60;
+                if (th > 0) {
+                    len += snprintf(detail + len, sizeof(detail) - len,
+                        "  |  %d / %dh %02dm", d->exposure_total_count, th, tm);
+                } else {
+                    len += snprintf(detail + len, sizeof(detail) - len,
+                        "  |  %d / %dm", d->exposure_total_count, tm);
+                }
+            } else if (d->exposure_iterations > 0 && len > 0) {
                 len += snprintf(detail + len, sizeof(detail) - len,
                     "  |  %d / %d exp",
                     d->exposure_count, d->exposure_iterations);
