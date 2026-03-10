@@ -1,5 +1,7 @@
 #include "web_server_internal.h"
 #include "nina_allsky.h"
+#include "nina_connection.h"
+#include "tasks.h"
 #include "bsp/esp-bsp.h"
 #include "bsp/display.h"
 #include "display_defs.h"
@@ -29,6 +31,17 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
             lv_display_set_rotation(lv_display_get_default(), new_cfg->screen_rotation);
             bsp_display_unlock();
+        }
+    }
+    /* Instance enable/disable — immediately wake poll tasks */
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        if (new_cfg->instance_enabled[i] != old_cfg->instance_enabled[i]) {
+            if (!new_cfg->instance_enabled[i]) {
+                nina_connection_report_poll(i, false);
+            }
+            if (poll_task_handles[i]) {
+                xTaskNotifyGive(poll_task_handles[i]);
+            }
         }
     }
     if (new_cfg->allsky_enabled != old_cfg->allsky_enabled ||

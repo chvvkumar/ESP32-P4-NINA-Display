@@ -766,12 +766,14 @@ void summary_page_update(const nina_client_t *instances, int count) {
     if (layout_changed) {
         /* ── FLIP animation: First, Last, Invert, Play ───────────── */
 
-        /* FIRST: snapshot current visibility and Y positions */
+        /* FIRST: snapshot current visibility, Y positions and heights */
         bool was_visible[MAX_NINA_INSTANCES];
         int32_t old_y[MAX_NINA_INSTANCES];
+        int32_t old_h[MAX_NINA_INSTANCES];
         for (int i = 0; i < card_count; i++) {
             was_visible[i] = !lv_obj_has_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
             old_y[i] = was_visible[i] ? lv_obj_get_y(cards[i].card) : 0;
+            old_h[i] = was_visible[i] ? lv_obj_get_height(cards[i].card) : 0;
         }
 
         /* LAST: apply show/hide and layout preset changes */
@@ -791,12 +793,28 @@ void summary_page_update(const nina_client_t *instances, int count) {
         for (int i = 0; i < card_count && i < count; i++) {
             if (!nina_connection_is_connected(i)) continue;
             int32_t new_y = lv_obj_get_y(cards[i].card);
+            int32_t new_h = lv_obj_get_height(cards[i].card);
             if (!was_visible[i]) {
                 /* New card — fade in + slide up */
                 animate_card_in(&cards[i]);
-            } else if (old_y[i] != new_y) {
-                /* Existing card moved — smooth glide to new position */
-                animate_card_move(&cards[i], old_y[i] - new_y);
+            } else {
+                /* Existing card — animate position if moved */
+                if (old_y[i] != new_y) {
+                    animate_card_move(&cards[i], old_y[i] - new_y);
+                }
+                /* Crossfade if height changed (flex handles actual resize) */
+                if (old_h[i] != new_h && old_h[i] > 0) {
+                    lv_anim_delete(cards[i].card, anim_opa_cb);
+                    lv_obj_set_style_opa(cards[i].card, LV_OPA_40, 0);
+                    lv_anim_t a;
+                    lv_anim_init(&a);
+                    lv_anim_set_var(&a, cards[i].card);
+                    lv_anim_set_values(&a, LV_OPA_40, LV_OPA_COVER);
+                    lv_anim_set_duration(&a, ANIM_DURATION_MS);
+                    lv_anim_set_exec_cb(&a, anim_opa_cb);
+                    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+                    lv_anim_start(&a);
+                }
             }
         }
     } else {
