@@ -143,7 +143,7 @@ jobs:
           # Hash is only saved after a successful build, so missing hash = no prior success
           if [ -f build/.build_config_hash ]; then
             OLD_HASH=$(cat build/.build_config_hash)
-            NEW_HASH=$(cat sdkconfig.defaults main/idf_component.yml main/CMakeLists.txt CMakeLists.txt 2>/dev/null | sha256sum | cut -d' ' -f1)
+            NEW_HASH=$(cat sdkconfig.defaults main/idf_component.yml main/CMakeLists.txt CMakeLists.txt version.txt 2>/dev/null | sha256sum | cut -d' ' -f1)
             if [ "$OLD_HASH" != "$NEW_HASH" ]; then
               echo "Build config changed, cleaning"
               NEEDS_CLEAN=true
@@ -160,6 +160,14 @@ jobs:
             echo "Config unchanged, using incremental build"
           fi
 
+      - name: Force CMake reconfigure for fresh version metadata
+        if: steps.check_skip.outputs.skip != 'true'
+        run: |
+          . $IDF_PATH/export.sh
+          if [ -d build ]; then
+            idf.py reconfigure
+          fi
+
       - name: Build project
         if: steps.check_skip.outputs.skip != 'true'
         env:
@@ -171,7 +179,7 @@ jobs:
       - name: Save build config hash
         if: steps.check_skip.outputs.skip != 'true'
         run: |
-          cat sdkconfig.defaults main/idf_component.yml main/CMakeLists.txt CMakeLists.txt 2>/dev/null | sha256sum | cut -d' ' -f1 > build/.build_config_hash
+          cat sdkconfig.defaults main/idf_component.yml main/CMakeLists.txt CMakeLists.txt version.txt 2>/dev/null | sha256sum | cut -d' ' -f1 > build/.build_config_hash
 
       - name: Show ccache stats
         if: steps.check_skip.outputs.skip != 'true'
