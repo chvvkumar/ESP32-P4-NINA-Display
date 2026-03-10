@@ -1,4 +1,5 @@
 #include "ota_github.h"
+#include "build_version.h"
 #include "esp_log.h"
 #include "esp_http_client.h"
 #include "esp_ota_ops.h"
@@ -528,7 +529,7 @@ done:
     vTaskDelete(NULL);
 }
 
-#define OTA_TASK_STACK_SIZE 16384
+#define OTA_TASK_STACK_SIZE 8192
 
 esp_err_t ota_github_download(const char *url, void (*progress_cb)(int percent)) {
     if (!url) return ESP_ERR_INVALID_ARG;

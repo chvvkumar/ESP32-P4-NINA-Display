@@ -334,6 +334,11 @@ void fetch_sequence_counts_optional(const char *base_url, nina_client_t *data) {
                         data->exposure_iterations = iterations->valueint;
                     }
 
+                    cJSON *exp_count = cJSON_GetObjectItem(running_exp, "ExposureCount");
+                    if (exp_count && cJSON_IsNumber(exp_count)) {
+                        data->exposure_total_count = exp_count->valueint;
+                    }
+
                     cJSON *exp_time = cJSON_GetObjectItem(running_exp, "ExposureTime");
                     if (exp_time && cJSON_IsNumber(exp_time)) {
                         data->exposure_total = (float)exp_time->valuedouble;

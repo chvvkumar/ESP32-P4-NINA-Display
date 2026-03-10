@@ -1,4 +1,5 @@
 #include "web_server_internal.h"
+#include "build_version.h"
 #include "esp_system.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"

@@ -186,9 +186,11 @@ static void apply_theme_to_page(dashboard_page_t *p) {
     if (p->lbl_instance_name) {
         uint32_t glow_color;
         if (strcmp(current_theme->name, "Red Night") == 0) {
-            glow_color = p->nina_connected ? current_theme->text_color : current_theme->label_color;
+            glow_color = app_config_apply_brightness(
+                p->nina_connected ? current_theme->text_color : current_theme->label_color, gb);
         } else {
-            glow_color = p->nina_connected ? 0x4ade80 : 0xf87171;
+            glow_color = app_config_apply_brightness(
+                p->nina_connected ? 0x4ade80 : 0xf87171, gb);
         }
         lv_obj_set_style_text_color(p->lbl_instance_name, lv_color_hex(glow_color), 0);
     }
@@ -203,6 +205,7 @@ static void apply_theme_to_page(dashboard_page_t *p) {
     }
 
     if (p->lbl_loop_count) lv_obj_set_style_text_color(p->lbl_loop_count, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+    if (p->lbl_filter_done_header) lv_obj_set_style_text_color(p->lbl_filter_done_header, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
 
     if (p->lbl_rms_title) lv_obj_set_style_text_color(p->lbl_rms_title, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
     if (p->lbl_hfr_title) lv_obj_set_style_text_color(p->lbl_hfr_title, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
@@ -408,25 +411,54 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_center(arc_center);
     lv_obj_set_flex_flow(arc_center, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(arc_center, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(arc_center, 10, 0);
 
-    p->lbl_exposure_current = lv_label_create(arc_center);
-    lv_obj_add_style(p->lbl_exposure_current, &style_value_large, 0);
-    lv_label_set_text(p->lbl_exposure_current, "----s");
+    // Line 1: Filter name × cycle progress (horizontal row)
+    lv_obj_t *row_filter_cycle = lv_obj_create(arc_center);
+    lv_obj_remove_style_all(row_filter_cycle);
+    lv_obj_set_size(row_filter_cycle, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(row_filter_cycle, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row_filter_cycle, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(row_filter_cycle, 6, 0);
+    lv_obj_set_style_margin_bottom(row_filter_cycle, -4, 0);
 
-    p->lbl_exposure_total = create_small_label(arc_center, "");
+    p->lbl_exposure_total = lv_label_create(row_filter_cycle);
     lv_obj_set_style_text_color(p->lbl_exposure_total, lv_color_hex(current_theme->filter_text_color), 0);
-    lv_obj_set_style_text_font(p->lbl_exposure_total, &lv_font_montserrat_28, 0);
-    lv_obj_set_style_pad_top(p->lbl_exposure_total, 14, 0);
+    lv_obj_set_style_text_font(p->lbl_exposure_total, &lv_font_montserrat_32, 0);
+    lv_label_set_text(p->lbl_exposure_total, "");
     lv_obj_add_flag(p->lbl_exposure_total, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(p->lbl_exposure_total, filter_click_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_clear_flag(p->lbl_exposure_total, LV_OBJ_FLAG_GESTURE_BUBBLE | LV_OBJ_FLAG_EVENT_BUBBLE);
 
-    p->lbl_loop_count = lv_label_create(arc_center);
+    p->lbl_loop_count = lv_label_create(row_filter_cycle);
     lv_obj_set_style_text_color(p->lbl_loop_count, lv_color_hex(current_theme->label_color), 0);
-    lv_obj_set_style_text_font(p->lbl_loop_count, &lv_font_montserrat_24, 0);
-    lv_obj_set_style_pad_top(p->lbl_loop_count, 8, 0);
+    lv_obj_set_style_text_font(p->lbl_loop_count, &lv_font_montserrat_28, 0);
     lv_label_set_text(p->lbl_loop_count, "-- / --");
 
+    // Line 2: Exposure duration
+    p->lbl_exposure_current = lv_label_create(arc_center);
+    lv_obj_add_style(p->lbl_exposure_current, &style_value_large, 0);
+    lv_label_set_text(p->lbl_exposure_current, "----s");
+
+    // Lines 3-4: Completed header + count/integration time
+    p->row_filter_total = lv_obj_create(arc_center);
+    lv_obj_remove_style_all(p->row_filter_total);
+    lv_obj_set_size(p->row_filter_total, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(p->row_filter_total, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(p->row_filter_total, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(p->row_filter_total, 0, 0);
+    lv_obj_set_style_margin_top(p->row_filter_total, 4, 0);
+    lv_obj_add_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
+
+    p->lbl_filter_done_header = lv_label_create(p->row_filter_total);
+    lv_obj_set_style_text_color(p->lbl_filter_done_header, lv_color_hex(current_theme->text_color), 0);
+    lv_obj_set_style_text_font(p->lbl_filter_done_header, &lv_font_montserrat_16, 0);
+    lv_label_set_text(p->lbl_filter_done_header, "COMPLETED");
+
+    p->lbl_filter_done_value = lv_label_create(p->row_filter_total);
+    lv_obj_set_style_text_color(p->lbl_filter_done_value, lv_color_hex(current_theme->filter_text_color), 0);
+    lv_obj_set_style_text_font(p->lbl_filter_done_value, &lv_font_montserrat_32, 0);
+    lv_label_set_text(p->lbl_filter_done_value, "");
 
     // RMS + HFR (col 1, row 2)
     lv_obj_t *box_rms_hfr = create_bento_box(p->page);

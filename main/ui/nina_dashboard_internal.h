@@ -35,6 +35,9 @@ typedef struct {
     lv_obj_t *lbl_exposure_current;
     lv_obj_t *lbl_exposure_total;
     lv_obj_t *lbl_loop_count;
+    lv_obj_t *lbl_filter_done_header;  // "Done:" header
+    lv_obj_t *lbl_filter_done_value;   // "11 / 0h 55m" count + integration time
+    lv_obj_t *row_filter_total;        // Container for done header + value
 
     // Sequence Info
     lv_obj_t *lbl_seq_container;

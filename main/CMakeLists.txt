@@ -29,21 +29,6 @@ target_compile_options(
 idf_component_get_property(JPEG_LIB esp_driver_jpeg COMPONENT_LIB)
 target_link_libraries(${COMPONENT_LIB} PRIVATE ${JPEG_LIB})
 
-# Inject git metadata as compile definitions
-if(GIT_TAG)
-  target_compile_definitions(${COMPONENT_LIB} PRIVATE BUILD_GIT_TAG="${GIT_TAG}")
-else()
-  target_compile_definitions(${COMPONENT_LIB} PRIVATE BUILD_GIT_TAG="unknown")
-endif()
-
-if(GIT_SHA)
-  target_compile_definitions(${COMPONENT_LIB} PRIVATE BUILD_GIT_SHA="${GIT_SHA}")
-else()
-  target_compile_definitions(${COMPONENT_LIB} PRIVATE BUILD_GIT_SHA="unknown")
-endif()
-
-if(GIT_BRANCH)
-  target_compile_definitions(${COMPONENT_LIB} PRIVATE BUILD_GIT_BRANCH="${GIT_BRANCH}")
-else()
-  target_compile_definitions(${COMPONENT_LIB} PRIVATE BUILD_GIT_BRANCH="unknown")
-endif()
+# Build-time generated version header (git tag, sha, branch)
+target_include_directories(${COMPONENT_LIB} PRIVATE ${CMAKE_BINARY_DIR}/generated)
+add_dependencies(${COMPONENT_LIB} generate_build_version)
