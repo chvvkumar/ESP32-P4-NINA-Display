@@ -205,6 +205,15 @@ jobs:
           # Copy app binary as OTA file
           cp "$APP_BIN" firmware/nina-display-ota.bin
 
+          # Copy ELF for crash backtrace decoding
+          APP_ELF=$(python3 -c "
+          import json
+          with open('build/project_description.json') as f:
+              d = json.load(f)
+          print('build/' + d['app_elf'])
+          ")
+          cp "$APP_ELF" firmware/nina-display.elf
+
           # Report sizes
           echo "Factory: $(du -h firmware/nina-display-factory.bin | cut -f1)"
           echo "OTA:     $(du -h firmware/nina-display-ota.bin | cut -f1)"
