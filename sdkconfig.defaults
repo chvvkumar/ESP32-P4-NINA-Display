@@ -60,3 +60,7 @@ CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
 CONFIG_BSP_LCD_DPI_BUFFER_NUMS=2
 CONFIG_BSP_DISPLAY_LVGL_AVOID_TEAR=y
 CONFIG_BSP_DISPLAY_LVGL_FULL_REFRESH=y
+
+# Use default malloc for mbedTLS (allows PSRAM) instead of internal-only,
+# which exhausts the ~69KB internal heap during TLS-heavy OTA downloads
+CONFIG_MBEDTLS_DEFAULT_MEM_ALLOC=y

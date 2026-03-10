@@ -529,7 +529,7 @@ done:
     vTaskDelete(NULL);
 }
 
-#define OTA_TASK_STACK_SIZE 16384
+#define OTA_TASK_STACK_SIZE 8192
 
 esp_err_t ota_github_download(const char *url, void (*progress_cb)(int percent)) {
     if (!url) return ESP_ERR_INVALID_ARG;
