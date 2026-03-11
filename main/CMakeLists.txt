@@ -4,7 +4,7 @@ file(GLOB_RECURSE LV_DEMOS_SOURCES ${LV_DEMO_DIR}/*.c)
 idf_component_register(
     SRCS main.c tasks.c power_mgmt.c jpeg_utils.c perf_monitor.c ota_github.c
          nina_connection.c nina_client.c nina_api_fetchers.c nina_sequence.c nina_websocket.c
-         allsky_client.c
+         allsky_client.c demo_data.c
          app_config.c web_server.c web_handlers_config.c web_handlers_display.c web_handlers_system.c web_handlers_allsky.c mqtt_ha.c
          ui/nina_dashboard.c ui/nina_dashboard_update.c ui/nina_thumbnail.c ui/nina_graph_overlay.c ui/nina_graph_controls.c ui/nina_sysinfo.c ui/nina_summary.c ui/nina_allsky.c ui/nina_settings_tabview.c ui/settings_tab_display.c ui/settings_tab_nodes.c ui/settings_tab_behavior.c ui/settings_tab_system.c ui/settings_color_picker.c ui/themes.c ui/ui_styles.c
          ui/nina_toast.c ui/nina_event_log.c ui/nina_alerts.c ui/nina_safety.c ui/nina_session_stats.c ui/lv_font_material_safety.c ui/lv_font_superscript_24.c
