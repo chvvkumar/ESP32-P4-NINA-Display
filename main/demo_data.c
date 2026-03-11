@@ -71,11 +71,11 @@ static const demo_profile_t profiles[3] = {
         .profile_name   = "Esprit 100 + ASI2600MM",
         .telescope_name = "Sky-Watcher Esprit 100ED",
         .camera_name    = "ZWO ASI2600MM Pro",
-        .target_name    = "NGC 6992 - Eastern Veil Nebula",
+        .target_name    = "Eastern Veil Nebula",
         .container_name = "SHO",
         .container_step = "Smart Exposure",
         .filter_names      = { "SII", "Ha", "OIII" },
-        .filter_exposure_s = { 600, 300, 300 },
+        .filter_exposure_s = { 30, 30, 30 },
         .filter_iterations = { 20, 30, 30 },
         .filter_count      = 3,
         .camera_temp       = -20.0f,
@@ -103,7 +103,7 @@ static const demo_profile_t profiles[3] = {
         .container_name = "LRGB",
         .container_step = "Smart Exposure",
         .filter_names      = { "L", "R", "G", "B" },
-        .filter_exposure_s = { 180, 120, 120, 120 },
+        .filter_exposure_s = { 90, 90, 90, 90 },
         .filter_iterations = { 40, 20, 20, 20 },
         .filter_count      = 4,
         .camera_temp       = -10.0f,
@@ -127,7 +127,7 @@ static const demo_profile_t profiles[3] = {
         .profile_name   = "FSQ-106 + QHY268M",
         .telescope_name = "Takahashi FSQ-106EDX4",
         .camera_name    = "QHY268M",
-        .target_name    = "IC 1396 - Elephant's Trunk Nebula",
+        .target_name    = "Elephant's Trunk Nebula",
         .container_name = "HOO",
         .container_step = "Smart Exposure",
         .filter_names      = { "Ha", "OIII" },
@@ -403,13 +403,9 @@ void demo_data_task(void *param)
             strncpy(d->power.watts_name, "Total Power", sizeof(d->power.watts_name) - 1);
             d->power.pwm[0] = st->dew_pwm;
             d->power.pwm[1] = st->dew_pwm * 0.8f;
-            d->power.pwm[2] = 0.0f;
-            d->power.pwm[3] = 0.0f;
             strncpy(d->power.pwm_names[0], "Dew Heater 1", sizeof(d->power.pwm_names[0]) - 1);
             strncpy(d->power.pwm_names[1], "Dew Heater 2", sizeof(d->power.pwm_names[1]) - 1);
-            strncpy(d->power.pwm_names[2], "Fan",          sizeof(d->power.pwm_names[2]) - 1);
-            strncpy(d->power.pwm_names[3], "Aux",          sizeof(d->power.pwm_names[3]) - 1);
-            d->power.pwm_count        = 4;
+            d->power.pwm_count        = 2;
             d->power.switch_connected = true;
 
             /* ── Dithering ───────────────────────────────────────── */
