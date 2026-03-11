@@ -424,6 +424,7 @@ void data_update_task(void *arg) {
         allsky_data_init(&allsky_data);
 
         instance_count = app_config_get_instance_count();
+        instance_count = 3;  /* demo mode always shows all 3 instance profiles */
 
         /* Prepare demo task parameters */
         demo_params.instances = instances;

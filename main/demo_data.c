@@ -10,6 +10,7 @@
 #include "freertos/task.h"
 #include <string.h>
 #include <math.h>
+#include <time.h>
 
 static const char *TAG = "demo_data";
 
@@ -82,7 +83,7 @@ static const demo_profile_t profiles[3] = {
         .focuser_base      = 22500,
         .rotator_angle     = 127.5f,
         .rotator_connected = true,
-        .moon_illumination = 0.15f,
+        .moon_illumination = 23.0f,
         .flip_start_s      = 8100,
         .flip_reset_s      = 16200,
         .power_voltage     = 12.2f,
@@ -110,7 +111,7 @@ static const demo_profile_t profiles[3] = {
         .focuser_base      = 15800,
         .rotator_angle     = 0.0f,
         .rotator_connected = false,
-        .moon_illumination = 0.42f,
+        .moon_illumination = 23.0f,
         .flip_start_s      = 0,
         .flip_reset_s      = 0,
         .power_voltage     = 13.2f,
@@ -138,7 +139,7 @@ static const demo_profile_t profiles[3] = {
         .focuser_base      = 31200,
         .rotator_angle     = 45.0f,
         .rotator_connected = true,
-        .moon_illumination = 0.08f,
+        .moon_illumination = 23.0f,
         .flip_start_s      = 2700,
         .flip_reset_s      = 10800,
         .power_voltage     = 12.0f,
@@ -265,7 +266,8 @@ void demo_data_task(void *param)
     /* ── Main loop — 2 second period ─────────────────────────────── */
     while (1) {
         int64_t now_ms = esp_timer_get_time() / 1000;
-        int64_t now_epoch = (int64_t)(now_ms / 1000); /* crude epoch approx */
+        time_t now_epoch;
+        time(&now_epoch);
 
         for (int i = 0; i < count; i++) {
             nina_client_t *d = &instances[i];
@@ -319,7 +321,7 @@ void demo_data_task(void *param)
 
             float remaining_in_exposure = d->exposure_total - d->exposure_current;
             if (remaining_in_exposure < 0) remaining_in_exposure = 0;
-            d->exposure_end_epoch = now_epoch + (int64_t)remaining_in_exposure;
+            d->exposure_end_epoch = (int64_t)now_epoch + (int64_t)remaining_in_exposure;
 
             /* ── Guider RMS ──────────────────────────────────────── */
             bool spike = (esp_random() % 100) < 5;
