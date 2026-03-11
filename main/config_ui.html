@@ -840,6 +840,9 @@
           <label class="toggle"><input type="checkbox" id="debug_mode"><span class="toggle-track"></span></label>
         </div>
         <div class="field-hint" style="margin-top:4px;margin-bottom:16px">Performance profiling, serial reports, /api/perf endpoint.</div>
+        <span class="toggle-label">Enable Demo Mode</span>
+        <label class="toggle"><input type="checkbox" id="demo_mode"><span class="toggle-track"></span></label>
+        <p style="color:#888;font-size:0.85em;margin:2px 0 8px 0;">Generates simulated astrophotography data. Reboots device.</p>
         <button class="btn btn-outline" id="ssBtn" onclick="takeScreenshot()">Capture Screenshot</button>
         <div id="ssContainer" style="display:none;margin-top:16px">
           <img id="ssImage" style="width:100%;border-radius:var(--radius-sm);border:1px solid var(--border)">
@@ -1262,6 +1265,7 @@
         connection_timeout_s:parseInt($('connection_timeout').value)||6,
         toast_duration_s:parseInt($('toast_duration').value)||8,
         debug_mode:!!$('debug_mode').checked,
+        demo_mode:!!$('demo_mode').checked,
         instance_enabled_1:!!$('instance_enabled_0').checked,
         instance_enabled_2:!!$('instance_enabled_1').checked,
         instance_enabled_3:!!$('instance_enabled_2').checked,
@@ -1328,6 +1332,7 @@
       $('connection_timeout').value=data.connection_timeout_s||6;
       $('toast_duration').value=data.toast_duration_s||8;
       $('debug_mode').checked=!!data.debug_mode;
+      $('demo_mode').checked=!!data.demo_mode;
       $('instance_enabled_0').checked=data.instance_enabled_1!==false;
       $('instance_enabled_1').checked=data.instance_enabled_2!==false;
       $('instance_enabled_2').checked=data.instance_enabled_3!==false;

@@ -83,6 +83,7 @@ esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "connection_timeout_s", cfg->connection_timeout_s);
     cJSON_AddNumberToObject(root, "toast_duration_s", cfg->toast_duration_s);
     cJSON_AddBoolToObject(root, "debug_mode", cfg->debug_mode);
+    cJSON_AddBoolToObject(root, "demo_mode", cfg->demo_mode);
     cJSON_AddBoolToObject(root, "instance_enabled_1", cfg->instance_enabled[0]);
     cJSON_AddBoolToObject(root, "instance_enabled_2", cfg->instance_enabled[1]);
     cJSON_AddBoolToObject(root, "instance_enabled_3", cfg->instance_enabled[2]);
@@ -297,6 +298,7 @@ static app_config_t *parse_config_from_json(cJSON *root)
     }
 
     JSON_TO_BOOL(root, "debug_mode", cfg->debug_mode);
+    JSON_TO_BOOL(root, "demo_mode", cfg->demo_mode);
     JSON_TO_BOOL(root, "instance_enabled_1", cfg->instance_enabled[0]);
     JSON_TO_BOOL(root, "instance_enabled_2", cfg->instance_enabled[1]);
     JSON_TO_BOOL(root, "instance_enabled_3", cfg->instance_enabled[2]);
