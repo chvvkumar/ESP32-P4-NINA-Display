@@ -250,6 +250,7 @@ void nina_dashboard_apply_theme(int theme_index) {
     sysinfo_page_apply_theme();
     nina_graph_overlay_apply_theme();
     nina_info_overlay_apply_theme();
+    nina_thumbnail_apply_theme();
     nina_toast_apply_theme();
     nina_event_log_apply_theme();
     nina_alerts_apply_theme();
