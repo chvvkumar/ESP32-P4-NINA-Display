@@ -133,6 +133,12 @@ static inline void set_bar_value_if_changed(lv_obj_t *bar, int *cached, int valu
     }
 }
 
+static inline bool is_red_theme(void) {
+    return current_theme &&
+           (strcmp(current_theme->name, "Red Night") == 0 ||
+            strcmp(current_theme->name, "Night Vision Red") == 0);
+}
+
 static uint32_t parse_hex_color(const char *str, uint32_t fallback) {
     if (!str || str[0] == '\0') return fallback;
     const char *p = str;
@@ -254,6 +260,18 @@ static void parse_thresholds(void) {
         }
     }
 
+    /* Override threshold gradient colors for red-spectrum themes */
+    if (is_red_theme()) {
+        for (int q = 0; q < 4; q++) {
+            for (int f = 0; f < 3; f++) {
+                if (field_thresholds[q][f].valid) {
+                    field_thresholds[q][f].color_min = current_theme->progress_color;
+                    field_thresholds[q][f].color_max = current_theme->text_color;
+                }
+            }
+        }
+    }
+
     /* Cache dew_point threshold colors from ambient_sub2 */
     dew_safe_color = 0x3b82f6;
     dew_warn_color = 0xef4444;
@@ -261,6 +279,12 @@ static void parse_thresholds(void) {
     if (dew_bt->valid) {
         dew_safe_color = dew_bt->color_min;
         dew_warn_color = dew_bt->color_max;
+    }
+
+    /* Override dew colors for red-spectrum themes */
+    if (is_red_theme()) {
+        dew_safe_color  = current_theme->progress_color;
+        dew_warn_color  = current_theme->text_color;
     }
 
     cJSON_Delete(root);
@@ -654,6 +678,9 @@ void allsky_page_update(const allsky_data_t *data) {
 
 void allsky_page_apply_theme(void) {
     if (!allsky_page || !current_theme) return;
+
+    /* Re-derive threshold colors for the new theme */
+    parse_thresholds();
 
     /* Invalidate all cached colors so the next update re-applies everything */
     for (int q = 0; q < 4; q++) {
