@@ -78,6 +78,7 @@ static lv_obj_t *lbl_check_update  = NULL;
 
 /* Device card */
 static lv_obj_t *sw_debug_mode = NULL;
+static lv_obj_t *sw_demo_mode = NULL;
 
 /* ── Forward Declarations ────────────────────────────────────────────── */
 static void ssid_defocus_cb(lv_event_t *e);
@@ -95,6 +96,7 @@ static void auto_update_cb(lv_event_t *e);
 static void update_channel_cb(lv_event_t *e);
 static void check_update_btn_cb(lv_event_t *e);
 static void debug_mode_cb(lv_event_t *e);
+static void demo_mode_cb(lv_event_t *e);
 static void reboot_btn_cb(lv_event_t *e);
 static void confirm_reboot_cb(lv_event_t *e);
 static void factory_reset_btn_cb(lv_event_t *e);
@@ -498,6 +500,14 @@ static void create_device_card(lv_obj_t *parent) {
 
     settings_make_divider(card);
 
+    /* Demo Mode toggle */
+    settings_make_toggle_row(card, "Demo Mode", &sw_demo_mode);
+    if (cfg->demo_mode) lv_obj_add_state(sw_demo_mode, LV_STATE_CHECKED);
+    else                lv_obj_remove_state(sw_demo_mode, LV_STATE_CHECKED);
+    lv_obj_add_event_cb(sw_demo_mode, demo_mode_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    settings_make_divider(card);
+
     /* Reboot button */
     {
         lv_obj_t *btn_lbl;
@@ -755,6 +765,14 @@ static void debug_mode_cb(lv_event_t *e) {
     settings_mark_dirty(false);
 }
 
+static void demo_mode_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    if (!sw_demo_mode) return;
+    app_config_t *cfg = app_config_get();
+    cfg->demo_mode = lv_obj_has_state(sw_demo_mode, LV_STATE_CHECKED);
+    settings_mark_dirty(true);  /* requires reboot */
+}
+
 static void confirm_reboot_cb(lv_event_t *e) {
     lv_obj_t *mbox = lv_event_get_user_data(e);
     lv_msgbox_close(mbox);
@@ -816,6 +834,7 @@ void settings_tab_system_destroy(void) {
     btn_check_update = NULL;
     lbl_check_update = NULL;
     sw_debug_mode = NULL;
+    sw_demo_mode = NULL;
 }
 
 void settings_tab_system_create(lv_obj_t *parent) {
@@ -933,6 +952,10 @@ void settings_tab_system_refresh(void) {
         } else {
             lv_obj_clear_state(sw_debug_mode, LV_STATE_CHECKED);
         }
+    }
+    if (sw_demo_mode) {
+        if (cfg->demo_mode) lv_obj_add_state(sw_demo_mode, LV_STATE_CHECKED);
+        else                lv_obj_remove_state(sw_demo_mode, LV_STATE_CHECKED);
     }
 }
 

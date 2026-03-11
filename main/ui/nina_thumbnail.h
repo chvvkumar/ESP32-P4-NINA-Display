@@ -29,3 +29,6 @@ void nina_dashboard_hide_thumbnail(void);
 
 /** Check if thumbnail overlay is currently visible. */
 bool nina_dashboard_thumbnail_visible(void);
+
+/** Apply current theme to thumbnail overlay (back button, labels). */
+void nina_thumbnail_apply_theme(void);

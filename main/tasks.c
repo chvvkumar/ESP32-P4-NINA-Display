@@ -35,6 +35,7 @@
 #include <time.h>
 #include "perf_monitor.h"
 #include "power_mgmt.h"
+#include "demo_data.h"
 
 static const char *TAG = "tasks";
 
@@ -60,6 +61,7 @@ static instance_poll_ctx_t poll_contexts[MAX_NINA_INSTANCES];
 /* AllSky polling state */
 static allsky_data_t allsky_data;
 static TaskHandle_t allsky_task_handle = NULL;
+static demo_task_params_t demo_params;
 
 /**
  * @brief Swipe callback from the dashboard — signals the data task to re-tune polling.
@@ -414,6 +416,37 @@ void data_update_task(void *arg) {
         poll_contexts[i].last_heartbeat_ms = 0;
     }
 
+    /* ── Demo mode: skip all network tasks, spawn demo data generator ── */
+    if (app_config_get()->demo_mode) {
+        ESP_LOGI(TAG, "DEMO MODE — skipping WiFi wait, polling, MQTT, WebSocket");
+
+        /* Initialize AllSky data struct (needed even in demo mode) */
+        allsky_data_init(&allsky_data);
+
+        instance_count = app_config_get_instance_count();
+        instance_count = 3;  /* demo mode always shows all 3 instance profiles */
+
+        /* Prepare demo task parameters */
+        demo_params.instances = instances;
+        demo_params.allsky = &allsky_data;
+        demo_params.instance_count = instance_count;
+
+        /* Spawn demo data generator on Core 0 */
+        StackType_t *demo_stack = heap_caps_malloc(6144 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+        StaticTask_t *demo_tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (demo_stack && demo_tcb) {
+            xTaskCreateStaticPinnedToCore(demo_data_task, "demo", 6144,
+                                          &demo_params, 4, demo_stack, demo_tcb, 0);
+            ESP_LOGI(TAG, "Demo data task spawned");
+        } else {
+            ESP_LOGE(TAG, "Failed to allocate demo task stack");
+            if (demo_stack) heap_caps_free(demo_stack);
+            if (demo_tcb) heap_caps_free(demo_tcb);
+        }
+
+        goto main_loop;
+    }
+
     // Wait for WiFi
     xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
     ESP_LOGI(TAG, "WiFi Connected, waiting for time sync...");
@@ -542,6 +575,7 @@ void data_update_task(void *arg) {
         }
     }
 
+main_loop:
     while (1) {
         /* Suspend polling during OTA update */
         while (ota_in_progress) {
