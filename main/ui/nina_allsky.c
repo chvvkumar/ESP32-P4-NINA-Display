@@ -105,6 +105,9 @@ static const char *quad_json_keys[4] = {
     "thermal", "sqm", "ambient", "power"
 };
 
+/* Forward declaration — defined below in Helpers section */
+static inline bool is_red_theme(void);
+
 /* ── Moon phase canvas ───────────────────────────────────────────────── */
 
 #define MOON_ICON_SIZE 64
@@ -130,6 +133,24 @@ static void render_moon_phase(float illum_pct) {
     const float cy = (S - 1) / 2.0f;
     const float f  = illum_pct / 100.0f;
     const float AA = 1.2f; /* antialiasing width in pixels */
+
+    /* Moon colors — red-only for red themes, warm yellow/white otherwise */
+    float lit_r, lit_g, lit_b;    /* lit portion base color */
+    float dark_r, dark_g, dark_b; /* dark portion base color */
+    if (is_red_theme()) {
+        /* Use theme text_color for lit portion, bento_border for dark */
+        uint32_t tc = current_theme->text_color;
+        lit_r = (float)((tc >> 16) & 0xFF);
+        lit_g = (float)((tc >>  8) & 0xFF);
+        lit_b = (float)( tc        & 0xFF);
+        uint32_t dc = current_theme->bento_border;
+        dark_r = (float)((dc >> 16) & 0xFF);
+        dark_g = (float)((dc >>  8) & 0xFF);
+        dark_b = (float)( dc        & 0xFF);
+    } else {
+        lit_r = 220.0f; lit_g = 200.0f; lit_b = 160.0f;
+        dark_r = 24.0f; dark_g = 24.0f; dark_b = 42.0f;
+    }
 
     lv_canvas_fill_bg(moon_canvas, lv_color_hex(0x000000), LV_OPA_TRANSP);
 
@@ -162,9 +183,9 @@ static void render_moon_phase(float illum_pct) {
             float limb = 1.0f - 0.25f * (r2 / (R * R));
 
             /* Blend lit and dark colors */
-            uint8_t rv = (uint8_t)(lit * 220 * limb + (1.0f - lit) * 24);
-            uint8_t gv = (uint8_t)(lit * 200 * limb + (1.0f - lit) * 24);
-            uint8_t bv = (uint8_t)(lit * 160 * limb + (1.0f - lit) * 42);
+            uint8_t rv = (uint8_t)(lit * lit_r * limb + (1.0f - lit) * dark_r);
+            uint8_t gv = (uint8_t)(lit * lit_g * limb + (1.0f - lit) * dark_g);
+            uint8_t bv = (uint8_t)(lit * lit_b * limb + (1.0f - lit) * dark_b);
 
             /* Final opacity: outer edge AA * base opacity (dark side is dimmer) */
             float base_opa = lit * 1.0f + (1.0f - lit) * 0.3f;
@@ -516,7 +537,8 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     qd->lbl_sub1 = lv_label_create(sub_row);
-    lv_obj_set_style_text_font(qd->lbl_sub1, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_font(qd->lbl_sub1,
+        (quad_index == 1) ? &lv_font_montserrat_22 : &lv_font_montserrat_28, 0);
     lv_label_set_text(qd->lbl_sub1, "--");
     if (current_theme) {
         int gb = app_config_get()->color_brightness;
@@ -786,6 +808,9 @@ void allsky_page_apply_theme(void) {
 
     /* Re-derive threshold colors for the new theme */
     parse_thresholds();
+
+    /* Force moon canvas re-render with new theme colors */
+    cached_moon_illum = -1.0f;
 
     /* Invalidate all cached colors so the next update re-applies everything */
     for (int q = 0; q < 4; q++) {
