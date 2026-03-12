@@ -86,6 +86,22 @@ static uint32_t dew_warn_color  = 0xef4444;  /* red (warning) */
 /* Field names for building threshold lookup keys */
 static const char *field_names[3] = { "main", "sub1", "sub2" };
 
+/* Glass theme per-quadrant accent colors (for shadow glow + icon badges) */
+static const uint32_t glass_quad_accent[4] = {
+    0x9333ea,  /* Thermal: purple */
+    0xd97706,  /* SQM: amber */
+    0x06b6d4,  /* Ambient: cyan */
+    0xea580c,  /* Power: orange */
+};
+
+/* Glass theme icon symbols per quadrant */
+static const char *glass_quad_icons[4] = {
+    LV_SYMBOL_WARNING,   /* Thermal: thermometer-like */
+    LV_SYMBOL_IMAGE,     /* SQM: moon/sky */
+    LV_SYMBOL_WIFI,      /* Ambient: cloud-like */
+    LV_SYMBOL_CHARGE,    /* Power: lightning */
+};
+
 /* Quadrant titles */
 static const char *quad_titles[4] = {
     "THERMAL", "SQM", "AMBIENT", "POWER"
@@ -230,6 +246,10 @@ static inline bool is_red_theme(void) {
     return current_theme &&
            (strcmp(current_theme->name, "Red Night") == 0 ||
             strcmp(current_theme->name, "Night Vision Red") == 0);
+}
+
+static inline bool is_glass_theme(void) {
+    return current_theme && strcmp(current_theme->name, "Glass") == 0;
 }
 
 static uint32_t parse_hex_color(const char *str, uint32_t fallback) {
@@ -419,6 +439,24 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
     lv_obj_set_flex_align(title_row, LV_FLEX_ALIGN_SPACE_BETWEEN,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
+    /* Glass theme: colored icon badge before title */
+    if (is_glass_theme()) {
+        lv_obj_t *icon_bg = lv_obj_create(title_row);
+        lv_obj_remove_style_all(icon_bg);
+        lv_obj_set_size(icon_bg, 40, 40);
+        lv_obj_set_style_radius(icon_bg, 10, 0);
+        lv_obj_set_style_bg_color(icon_bg, lv_color_hex(glass_quad_accent[quad_index]), 0);
+        lv_obj_set_style_bg_opa(icon_bg, LV_OPA_30, 0);
+        lv_obj_set_flex_flow(icon_bg, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(icon_bg, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_clear_flag(icon_bg, LV_OBJ_FLAG_SCROLLABLE);
+
+        lv_obj_t *icon_lbl = lv_label_create(icon_bg);
+        lv_label_set_text(icon_lbl, glass_quad_icons[quad_index]);
+        lv_obj_set_style_text_color(icon_lbl, lv_color_hex(glass_quad_accent[quad_index]), 0);
+        lv_obj_set_style_text_font(icon_lbl, &lv_font_montserrat_20, 0);
+    }
+
     qd->lbl_title = lv_label_create(title_row);
     lv_label_set_text(qd->lbl_title, quad_titles[quad_index]);
     lv_obj_set_style_text_font(qd->lbl_title, &lv_font_montserrat_22, 0);
@@ -554,6 +592,14 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
         lv_obj_set_style_text_color(qd->lbl_sub2,
             lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
     }
+
+    /* Glass theme: colored ambient glow shadow on each quadrant */
+    if (is_glass_theme()) {
+        lv_obj_set_style_shadow_width(qd->box, 40, 0);
+        lv_obj_set_style_shadow_color(qd->box, lv_color_hex(glass_quad_accent[quad_index]), 0);
+        lv_obj_set_style_shadow_opa(qd->box, LV_OPA_30, 0);
+        lv_obj_set_style_shadow_spread(qd->box, 5, 0);
+    }
 }
 
 /* ── Page creation ───────────────────────────────────────────────────── */
@@ -686,9 +732,9 @@ void allsky_page_update(const allsky_data_t *data) {
                          qcfg[q].sub2_label, sub2_val, qcfg[q].sub2_suffix);
         set_text_if_changed(qd->lbl_sub2, sub_buf[0] ? sub_buf : "--");
 
-        /* SQM quadrant: render moon phase canvas from illumination % */
-        if (q == 1 && sub2_val[0] != '\0') {
-            render_moon_phase(strtof(sub2_val, NULL));
+        /* SQM quadrant: render moon phase from directly-fetched illumination */
+        if (q == 1 && data->moon_illumination >= 0.0f) {
+            render_moon_phase(data->moon_illumination);
         }
 
         /* Bar + main value color from threshold gradient */
@@ -832,6 +878,20 @@ void allsky_page_apply_theme(void) {
         if (qd->lbl_title) {
             lv_obj_set_style_text_color(qd->lbl_title,
                 lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+        }
+
+        /* Glass theme: colored ambient glow per quadrant */
+        if (is_glass_theme()) {
+            lv_obj_set_style_shadow_width(qd->box, 40, 0);
+            lv_obj_set_style_shadow_color(qd->box, lv_color_hex(glass_quad_accent[q]), 0);
+            lv_obj_set_style_shadow_opa(qd->box, LV_OPA_30, 0);
+            lv_obj_set_style_shadow_spread(qd->box, 5, 0);
+        } else {
+            /* Let the widget style's shadow take effect */
+            lv_obj_remove_local_style_prop(qd->box, LV_STYLE_SHADOW_WIDTH, 0);
+            lv_obj_remove_local_style_prop(qd->box, LV_STYLE_SHADOW_COLOR, 0);
+            lv_obj_remove_local_style_prop(qd->box, LV_STYLE_SHADOW_OPA, 0);
+            lv_obj_remove_local_style_prop(qd->box, LV_STYLE_SHADOW_SPREAD, 0);
         }
 
         /* Unit labels */

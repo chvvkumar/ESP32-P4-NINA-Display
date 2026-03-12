@@ -26,6 +26,12 @@
 #define COLOR_TOTAL_RED 0xAA2222   /* muted red for total */
 #define COLOR_HFR_RED   0xCC0000   /* standard red for HFR */
 
+/* -- Glass theme series colors ------------------------------------------- */
+#define COLOR_RA_GLASS    0x3b82f6   /* blue */
+#define COLOR_DEC_GLASS   0xef4444   /* red */
+#define COLOR_TOTAL_GLASS 0x66BB6A   /* green */
+#define COLOR_HFR_GLASS   0xfb923c   /* amber/orange */
+
 /* -- History point options ----------------------------------------------- */
 const int point_options[] = {25, 50, 100, 200, 400};
 
@@ -107,21 +113,34 @@ bool is_red_night_theme(void) {
     return current_theme && strcmp(current_theme->name, "Red Night") == 0;
 }
 
+/* -- Glass theme detection ----------------------------------------------- */
+bool is_glass_theme(void) {
+    return current_theme && strcmp(current_theme->name, "Glass") == 0;
+}
+
 /* -- Theme-aware series colors ------------------------------------------- */
 uint32_t get_ra_color(void) {
-    return is_red_night_theme() ? COLOR_RA_RED : COLOR_RA;
+    if (is_red_night_theme()) return COLOR_RA_RED;
+    if (is_glass_theme()) return COLOR_RA_GLASS;
+    return COLOR_RA;
 }
 
 uint32_t get_dec_color(void) {
-    return is_red_night_theme() ? COLOR_DEC_RED : COLOR_DEC;
+    if (is_red_night_theme()) return COLOR_DEC_RED;
+    if (is_glass_theme()) return COLOR_DEC_GLASS;
+    return COLOR_DEC;
 }
 
 uint32_t get_total_color(void) {
-    return is_red_night_theme() ? COLOR_TOTAL_RED : COLOR_TOTAL;
+    if (is_red_night_theme()) return COLOR_TOTAL_RED;
+    if (is_glass_theme()) return COLOR_TOTAL_GLASS;
+    return COLOR_TOTAL;
 }
 
 uint32_t get_hfr_color(void) {
-    return is_red_night_theme() ? COLOR_HFR_RED : COLOR_HFR;
+    if (is_red_night_theme()) return COLOR_HFR_RED;
+    if (is_glass_theme()) return COLOR_HFR_GLASS;
+    return COLOR_HFR;
 }
 
 /* -- Theme-aware text color for controls (white normally, red for Red Night) */

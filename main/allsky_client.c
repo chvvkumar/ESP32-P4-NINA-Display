@@ -30,6 +30,7 @@ static const char *TAG = "allsky_client";
 void allsky_data_init(allsky_data_t *data) {
     memset(data, 0, sizeof(allsky_data_t));
     data->connected = false;
+    data->moon_illumination = -1.0f;
     data->last_poll_ms = 0;
     data->mutex = xSemaphoreCreateMutex();
 }
@@ -321,7 +322,20 @@ void allsky_client_poll(const char *hostname, const char *field_config_json, all
     /* Extract field values into a local copy, then copy under mutex */
     allsky_data_t local_data;
     memset(&local_data, 0, sizeof(local_data));
+    local_data.moon_illumination = -1.0f;
     extract_fields(json, field_config_json, &local_data);
+
+    /* Always extract moon illumination directly, independent of field config.
+     * The /all endpoint nests values under "env", so check env.AS_MOON_ILLUMINATION. */
+    cJSON *env_obj = cJSON_GetObjectItem(json, "env");
+    cJSON *moon_item = env_obj ? cJSON_GetObjectItem(env_obj, "AS_MOON_ILLUMINATION") : NULL;
+    if (moon_item) {
+        if (cJSON_IsNumber(moon_item)) {
+            local_data.moon_illumination = (float)moon_item->valuedouble;
+        } else if (cJSON_IsString(moon_item) && moon_item->valuestring[0] != '\0') {
+            local_data.moon_illumination = strtof(moon_item->valuestring, NULL);
+        }
+    }
 
     cJSON_Delete(json);
 
@@ -330,6 +344,7 @@ void allsky_client_poll(const char *hostname, const char *field_config_json, all
         data->connected = true;
         data->last_poll_ms = esp_timer_get_time() / 1000;
         memcpy(data->field_values, local_data.field_values, sizeof(data->field_values));
+        data->moon_illumination = local_data.moon_illumination;
         allsky_data_unlock(data);
         ESP_LOGD(TAG, "AllSky poll OK — %d bytes parsed", total_read);
     } else {

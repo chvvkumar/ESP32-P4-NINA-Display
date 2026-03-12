@@ -36,6 +36,7 @@
 typedef struct {
     bool connected;
     char field_values[ALLSKY_MAX_FIELDS][32];
+    float moon_illumination;   // AS_MOON_ILLUMINATION (0-100), always fetched directly; <0 = unavailable
     int64_t last_poll_ms;
     SemaphoreHandle_t mutex;
 } allsky_data_t;
