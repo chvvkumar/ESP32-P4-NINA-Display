@@ -14,6 +14,7 @@
 #include "ui_helpers.h"
 #include "cJSON.h"
 
+#include "esp_heap_caps.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -103,6 +104,77 @@ static const int field_map[4][3] = {
 static const char *quad_json_keys[4] = {
     "thermal", "sqm", "ambient", "power"
 };
+
+/* ── Moon phase canvas ───────────────────────────────────────────────── */
+
+#define MOON_ICON_SIZE 64
+
+static lv_obj_t *moon_canvas = NULL;
+static uint8_t  *moon_canvas_buf = NULL;
+static float     cached_moon_illum = -1.0f;
+
+/**
+ * Render a small moon phase icon on the canvas.
+ * Uses the terminator equation: for a point at (dx, dy) on the disk,
+ * the pixel is illuminated if dx > (1 - 2*f) * sqrt(R² - dy²),
+ * where f = illumination fraction (0–1).
+ */
+static void render_moon_phase(float illum_pct) {
+    if (!moon_canvas || !moon_canvas_buf) return;
+    if (fabsf(illum_pct - cached_moon_illum) < 0.5f) return;
+    cached_moon_illum = illum_pct;
+
+    const int S = MOON_ICON_SIZE;
+    const float R  = (S - 2) / 2.0f;
+    const float cx = (S - 1) / 2.0f;
+    const float cy = (S - 1) / 2.0f;
+    const float f  = illum_pct / 100.0f;
+    const float AA = 1.2f; /* antialiasing width in pixels */
+
+    lv_canvas_fill_bg(moon_canvas, lv_color_hex(0x000000), LV_OPA_TRANSP);
+
+    for (int py = 0; py < S; py++) {
+        float dy  = py - cy;
+        float dy2 = dy * dy;
+
+        for (int px = 0; px < S; px++) {
+            float dx = px - cx;
+            float r2 = dx * dx + dy2;
+            float dist = sqrtf(r2);
+
+            /* Outer edge alpha — smooth antialiased circle */
+            float edge_alpha = R - dist;
+            if (edge_alpha < 0.0f) continue;        /* fully outside */
+            if (edge_alpha > AA) edge_alpha = 1.0f;
+            else edge_alpha /= AA;                   /* fade 0→1 over AA pixels */
+
+            /* Terminator position at this scanline */
+            float max_x2 = R * R - dy2;
+            float semi_w = (max_x2 > 0.0f) ? sqrtf(max_x2) : 0.0f;
+            float term_x = (1.0f - 2.0f * f) * semi_w;
+
+            /* Terminator blend — smooth transition across AA pixels */
+            float lit = (dx - term_x) / AA;
+            if (lit < 0.0f) lit = 0.0f;
+            if (lit > 1.0f) lit = 1.0f;
+
+            /* Limb darkening */
+            float limb = 1.0f - 0.25f * (r2 / (R * R));
+
+            /* Blend lit and dark colors */
+            uint8_t rv = (uint8_t)(lit * 220 * limb + (1.0f - lit) * 24);
+            uint8_t gv = (uint8_t)(lit * 200 * limb + (1.0f - lit) * 24);
+            uint8_t bv = (uint8_t)(lit * 160 * limb + (1.0f - lit) * 42);
+
+            /* Final opacity: outer edge AA * base opacity (dark side is dimmer) */
+            float base_opa = lit * 1.0f + (1.0f - lit) * 0.3f;
+            uint8_t opa = (uint8_t)(edge_alpha * base_opa * 255.0f);
+
+            lv_canvas_set_px(moon_canvas, px, py,
+                             lv_color_make(rv, gv, bv), opa);
+        }
+    }
+}
 
 /* ── Helpers ─────────────────────────────────────────────────────────── */
 
@@ -348,8 +420,28 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
         }
     }
 
-    /* GPS indicator symbol — top-right of SQM quadrant */
+    /* Moon phase canvas — floating overlay on SQM quadrant (top-right) */
     if (quad_index == 1) {
+        if (!moon_canvas_buf) {
+            moon_canvas_buf = heap_caps_malloc(
+                LV_CANVAS_BUF_SIZE(MOON_ICON_SIZE, MOON_ICON_SIZE,
+                                   32, LV_DRAW_BUF_STRIDE_ALIGN),
+                MALLOC_CAP_SPIRAM);
+        }
+        if (moon_canvas_buf) {
+            moon_canvas = lv_canvas_create(qd->box);
+            lv_canvas_set_buffer(moon_canvas, moon_canvas_buf,
+                                 MOON_ICON_SIZE, MOON_ICON_SIZE,
+                                 LV_COLOR_FORMAT_ARGB8888);
+            lv_canvas_fill_bg(moon_canvas, lv_color_hex(0x000000), LV_OPA_TRANSP);
+            lv_obj_add_flag(moon_canvas, LV_OBJ_FLAG_FLOATING);
+            lv_obj_align(moon_canvas, LV_ALIGN_TOP_RIGHT, -4, 4);
+            cached_moon_illum = -1.0f;
+        }
+    }
+
+    /* GPS indicator symbol — top-right of POWER quadrant */
+    if (quad_index == 3) {
         qd->dot1 = lv_label_create(title_row);
         lv_label_set_text(qd->dot1, LV_SYMBOL_GPS);
         lv_obj_set_style_text_font(qd->dot1, &lv_font_montserrat_22, 0);
@@ -538,6 +630,12 @@ void allsky_page_update(const allsky_data_t *data) {
                 set_color_if_changed(qd->lbl_main_value, &qd->cached_main_color, tc);
             }
 
+            /* Clear moon canvas on disconnect */
+            if (q == 1 && moon_canvas && cached_moon_illum >= 0.0f) {
+                lv_canvas_fill_bg(moon_canvas, lv_color_hex(0x000000), LV_OPA_TRANSP);
+                cached_moon_illum = -1.0f;
+            }
+
             /* Reset indicator symbols to dim */
             if (qd->dot1 && current_theme) {
                 uint32_t dc = app_config_apply_brightness(current_theme->bento_border, gb);
@@ -565,6 +663,11 @@ void allsky_page_update(const allsky_data_t *data) {
         format_sub_value(sub_buf, sizeof(sub_buf),
                          qcfg[q].sub2_label, sub2_val, qcfg[q].sub2_suffix);
         set_text_if_changed(qd->lbl_sub2, sub_buf[0] ? sub_buf : "--");
+
+        /* SQM quadrant: render moon phase canvas from illumination % */
+        if (q == 1 && sub2_val[0] != '\0') {
+            render_moon_phase(strtof(sub2_val, NULL));
+        }
 
         /* Bar + main value color from threshold gradient */
         bar_threshold_t *bt = &field_thresholds[q][FIELD_MAIN];
@@ -642,15 +745,17 @@ void allsky_page_update(const allsky_data_t *data) {
             }
         }
 
-        /* Dot 1 indicator: thermal=fan (ambient config), sqm=GPS (sqm config) */
+        /* Dot 1 indicator: thermal=fan (ambient config), power=GPS (sqm config) */
         if (qd->dot1 && current_theme) {
             const char *dot1_val;
             bool dot1_on;
-            if (q == 1) {
+            if (q == 3) {
+                /* GPS indicator on POWER quadrant — uses SQM dot1 config */
                 dot1_val = data->field_values[ALLSKY_F_SQM_DOT1];
                 dot1_on = (dot1_val[0] != '\0' && qcfg[1].dot1_on_value[0] != '\0'
                            && strcmp(dot1_val, qcfg[1].dot1_on_value) == 0);
             } else {
+                /* Fan indicator on THERMAL quadrant — uses ambient config */
                 dot1_val = data->field_values[ALLSKY_F_AMBIENT_DOT1];
                 dot1_on = (dot1_val[0] != '\0' && qcfg[2].dot1_on_value[0] != '\0'
                            && strcmp(dot1_val, qcfg[2].dot1_on_value) == 0);
