@@ -258,18 +258,6 @@ static void apply_glass_theme(void) {
         lv_style_set_radius(&style_glass_card, 0);
         lv_style_set_border_width(&style_glass_card, 0);
         break;
-    case 7: /* Glass */
-        lv_style_set_bg_color(&style_glass_card, lv_color_hex(0x141420));
-        lv_style_set_bg_opa(&style_glass_card, LV_OPA_30);
-        lv_style_set_radius(&style_glass_card, 24);
-        lv_style_set_border_width(&style_glass_card, 1);
-        lv_style_set_border_color(&style_glass_card, lv_color_hex(0xffffff));
-        lv_style_set_border_opa(&style_glass_card, LV_OPA_20);
-        lv_style_set_shadow_width(&style_glass_card, 30);
-        lv_style_set_shadow_color(&style_glass_card, lv_color_hex(current_theme->progress_color));
-        lv_style_set_shadow_opa(&style_glass_card, LV_OPA_20);
-        lv_style_set_shadow_ofs_y(&style_glass_card, 5);
-        break;
     default: /* 0 = Default */
         lv_style_set_bg_color(&style_glass_card,
             lv_color_hex(app_config_apply_brightness(current_theme->bento_bg, gb)));

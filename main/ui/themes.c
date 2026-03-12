@@ -182,21 +182,6 @@ static const theme_t themes[] = {
         .rms_color = 0x507090,
         .hfr_color = 0x3d5c73,
     },
-    {
-        .name = "Glass",
-        .bg_main        = 0x0a0a0e,
-        .bento_bg       = 0x0d0d14,
-        .bento_border   = 0x1a1a24,
-        .label_color    = 0x6b7280,
-        .text_color     = 0xffffff,
-        .header_text_color = 0x06b6d4,
-        .header_grad_color = 0x12121a,
-        .target_name_color = 0xffffff,
-        .filter_text_color = 0xfb923c,
-        .progress_color    = 0x06b6d4,
-        .rms_color         = 0x3b82f6,
-        .hfr_color         = 0xfb923c,
-    }
 };
 
 int themes_get_count(void) {

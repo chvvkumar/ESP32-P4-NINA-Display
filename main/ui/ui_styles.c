@@ -2,7 +2,7 @@
  * @file ui_styles.c
  * @brief Shared LVGL style definitions and initialization.
  *
- * Supports multiple widget panel styles (0-7) selected via app_config.
+ * Supports multiple widget panel styles (0-6) selected via app_config.
  * Styles 2 (Wireframe) and 6 (Chamfered) use custom draw callbacks for
  * corner accents and chamfered corners respectively.
  */
@@ -218,19 +218,6 @@ void ui_styles_update(const void *theme_ptr)
         lv_style_set_radius(&style_bento_box, 0);
         lv_style_set_border_width(&style_bento_box, 0);
         break;
-
-    case 7: /* Glass — semi-transparent, subtle border, large radius, shadow */
-        lv_style_set_bg_color(&style_bento_box, lv_color_hex(0x141420));
-        lv_style_set_bg_opa(&style_bento_box, LV_OPA_30);
-        lv_style_set_radius(&style_bento_box, 24);
-        lv_style_set_border_width(&style_bento_box, 1);
-        lv_style_set_border_color(&style_bento_box, lv_color_hex(0xffffff));
-        lv_style_set_border_opa(&style_bento_box, LV_OPA_20);
-        lv_style_set_shadow_width(&style_bento_box, 30);
-        lv_style_set_shadow_color(&style_bento_box, lv_color_hex(0x000000));
-        lv_style_set_shadow_opa(&style_bento_box, LV_OPA_50);
-        lv_style_set_shadow_ofs_y(&style_bento_box, 10);
-        break;
     }
 
     /* --- style_label_small: unchanged --- */
@@ -239,10 +226,6 @@ void ui_styles_update(const void *theme_ptr)
     lv_style_set_text_color(&style_label_small, lv_color_hex(app_config_apply_brightness(theme->label_color, gb)));
     lv_style_set_text_font(&style_label_small, &lv_font_montserrat_16);
     lv_style_set_text_letter_space(&style_label_small, 1);
-    /* Glass theme: wider letter spacing for premium look */
-    if (theme && strcmp(theme->name, "Glass") == 0) {
-        lv_style_set_text_letter_space(&style_label_small, 3);
-    }
 
     /* --- style_value_large: unchanged --- */
     lv_style_reset(&style_value_large);
@@ -293,7 +276,6 @@ const char *ui_styles_get_widget_style_name(int index)
         "Frosted Glass",
         "Accent Bar",
         "Chamfered",
-        "Glass",
     };
     if (index >= 0 && index < WIDGET_STYLE_COUNT) return names[index];
     return "Default";

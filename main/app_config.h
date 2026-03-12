@@ -15,7 +15,7 @@ extern "C" {
 // Current config struct version — bump on every layout change.
 #define APP_CONFIG_VERSION 19
 
-#define WIDGET_STYLE_COUNT 8
+#define WIDGET_STYLE_COUNT 7
 
 typedef struct {
     uint32_t config_version;        // Must be first field — used to detect legacy blobs
@@ -51,7 +51,7 @@ typedef struct {
     bool     alert_flash_enabled;     // Enable border flash alerts for RMS/HFR/safety events (default true)
     uint8_t  idle_poll_interval_s;   // Heartbeat poll interval while screen sleeping (5-120, default 30)
     bool     wifi_power_save;        // Enable WiFi modem sleep for power savings (default true)
-    uint8_t  widget_style;           // Widget panel style index (0-7, default 0)
+    uint8_t  widget_style;           // Widget panel style index (0-6, default 0)
     uint8_t  auto_update_check;     // 0=disabled, 1=enabled (check GitHub for firmware updates on boot)
     uint8_t  update_channel;        // 0=stable releases only, 1=include pre-releases
 

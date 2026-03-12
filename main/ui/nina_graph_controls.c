@@ -28,27 +28,10 @@ void point_btn_cb(lv_event_t *e) {
     for (int i = 0; i < POINT_OPT_COUNT; i++) {
         lv_obj_t *lbl = lv_obj_get_child(btn_points[i], 0);
         if (i == idx) {
-            if (is_glass_theme()) {
-                lv_obj_set_style_bg_opa(btn_points[i], LV_OPA_COVER, 0);
-                lv_obj_set_style_bg_color(btn_points[i], lv_color_hex(0x164e63), 0);
-                lv_obj_set_style_shadow_width(btn_points[i], 10, 0);
-                lv_obj_set_style_shadow_color(btn_points[i], lv_color_hex(0x06b6d4), 0);
-                lv_obj_set_style_shadow_opa(btn_points[i], LV_OPA_50, 0);
-                lv_obj_set_style_border_width(btn_points[i], 0, 0);
-            } else {
-                lv_obj_set_style_bg_color(btn_points[i], lv_color_hex(current_theme->progress_color), 0);
-            }
-            if (lbl) lv_obj_set_style_text_color(lbl, lv_color_hex(is_glass_theme() ? 0xffffff : 0x000000), 0);
+            lv_obj_set_style_bg_color(btn_points[i], lv_color_hex(current_theme->progress_color), 0);
+            if (lbl) lv_obj_set_style_text_color(lbl, lv_color_hex(0x000000), 0);
         } else {
-            if (is_glass_theme()) {
-                lv_obj_set_style_bg_opa(btn_points[i], LV_OPA_10, 0);
-                lv_obj_set_style_shadow_width(btn_points[i], 0, 0);
-                lv_obj_set_style_border_width(btn_points[i], 1, 0);
-                lv_obj_set_style_border_color(btn_points[i], lv_color_hex(0xffffff), 0);
-                lv_obj_set_style_border_opa(btn_points[i], LV_OPA_10, 0);
-            } else {
-                lv_obj_set_style_bg_color(btn_points[i], lv_color_hex(app_config_apply_brightness(current_theme->bento_border, gb)), 0);
-            }
+            lv_obj_set_style_bg_color(btn_points[i], lv_color_hex(app_config_apply_brightness(current_theme->bento_border, gb)), 0);
             if (lbl) lv_obj_set_style_text_color(lbl, lv_color_hex(get_control_text_color(gb)), 0);
         }
     }
@@ -69,27 +52,10 @@ void scale_btn_cb(lv_event_t *e) {
     for (int i = 0; i < scale_btn_count; i++) {
         lv_obj_t *lbl = lv_obj_get_child(btn_scale[i], 0);
         if (i == idx) {
-            if (is_glass_theme()) {
-                lv_obj_set_style_bg_opa(btn_scale[i], LV_OPA_COVER, 0);
-                lv_obj_set_style_bg_color(btn_scale[i], lv_color_hex(0x164e63), 0);
-                lv_obj_set_style_shadow_width(btn_scale[i], 10, 0);
-                lv_obj_set_style_shadow_color(btn_scale[i], lv_color_hex(0x06b6d4), 0);
-                lv_obj_set_style_shadow_opa(btn_scale[i], LV_OPA_50, 0);
-                lv_obj_set_style_border_width(btn_scale[i], 0, 0);
-            } else {
-                lv_obj_set_style_bg_color(btn_scale[i], lv_color_hex(current_theme->progress_color), 0);
-            }
-            if (lbl) lv_obj_set_style_text_color(lbl, lv_color_hex(is_glass_theme() ? 0xffffff : 0x000000), 0);
+            lv_obj_set_style_bg_color(btn_scale[i], lv_color_hex(current_theme->progress_color), 0);
+            if (lbl) lv_obj_set_style_text_color(lbl, lv_color_hex(0x000000), 0);
         } else {
-            if (is_glass_theme()) {
-                lv_obj_set_style_bg_opa(btn_scale[i], LV_OPA_10, 0);
-                lv_obj_set_style_shadow_width(btn_scale[i], 0, 0);
-                lv_obj_set_style_border_width(btn_scale[i], 1, 0);
-                lv_obj_set_style_border_color(btn_scale[i], lv_color_hex(0xffffff), 0);
-                lv_obj_set_style_border_opa(btn_scale[i], LV_OPA_10, 0);
-            } else {
-                lv_obj_set_style_bg_color(btn_scale[i], lv_color_hex(app_config_apply_brightness(current_theme->bento_border, gb)), 0);
-            }
+            lv_obj_set_style_bg_color(btn_scale[i], lv_color_hex(app_config_apply_brightness(current_theme->bento_border, gb)), 0);
             if (lbl) lv_obj_set_style_text_color(lbl, lv_color_hex(get_control_text_color(gb)), 0);
         }
     }
@@ -141,23 +107,9 @@ lv_obj_t *make_pill_btn(lv_obj_t *parent, const char *text, bool selected,
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
 
     if (selected) {
-        if (is_glass_theme()) {
-            lv_obj_set_style_bg_color(btn, lv_color_hex(0x164e63), 0);
-            lv_obj_set_style_shadow_width(btn, 10, 0);
-            lv_obj_set_style_shadow_color(btn, lv_color_hex(0x06b6d4), 0);
-            lv_obj_set_style_shadow_opa(btn, LV_OPA_50, 0);
-        } else {
-            lv_obj_set_style_bg_color(btn, lv_color_hex(current_theme->progress_color), 0);
-        }
+        lv_obj_set_style_bg_color(btn, lv_color_hex(current_theme->progress_color), 0);
     } else {
-        if (is_glass_theme()) {
-            lv_obj_set_style_bg_opa(btn, LV_OPA_10, 0);
-            lv_obj_set_style_border_width(btn, 1, 0);
-            lv_obj_set_style_border_color(btn, lv_color_hex(0xffffff), 0);
-            lv_obj_set_style_border_opa(btn, LV_OPA_10, 0);
-        } else {
-            lv_obj_set_style_bg_color(btn, lv_color_hex(app_config_apply_brightness(current_theme->bento_border, gb)), 0);
-        }
+        lv_obj_set_style_bg_color(btn, lv_color_hex(app_config_apply_brightness(current_theme->bento_border, gb)), 0);
     }
     lv_obj_set_style_bg_color(btn, lv_color_hex(current_theme->progress_color), LV_STATE_PRESSED);
 
@@ -165,7 +117,7 @@ lv_obj_t *make_pill_btn(lv_obj_t *parent, const char *text, bool selected,
     lv_label_set_text(lbl, text);
     lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
     if (selected) {
-        lv_obj_set_style_text_color(lbl, lv_color_hex(is_glass_theme() ? 0xffffff : 0x000000), 0);
+        lv_obj_set_style_text_color(lbl, lv_color_hex(0x000000), 0);
     } else {
         lv_obj_set_style_text_color(lbl, lv_color_hex(get_control_text_color(gb)), 0);
     }

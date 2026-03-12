@@ -71,11 +71,6 @@ static void filter_click_cb(lv_event_t *e);
 static void autofocus_long_press_cb(lv_event_t *e);
 static void session_stats_click_cb(lv_event_t *e);
 
-/* Glass theme detection */
-static bool is_glass_theme(void) {
-    return current_theme && strcmp(current_theme->name, "Glass") == 0;
-}
-
 /* Strip http(s)://, path, and domain from URL, then sentence case */
 void extract_host_from_url(const char *url, char *out, size_t out_size) {
     if (out_size == 0) return;
@@ -207,16 +202,8 @@ static void apply_theme_to_page(dashboard_page_t *p) {
 
     if (p->arc_exposure) {
         lv_obj_set_style_arc_color(p->arc_exposure, lv_color_hex(current_theme->bg_main), LV_PART_MAIN);
-        /* Glass theme: glow on arc indicator */
-        if (is_glass_theme()) {
-            lv_obj_set_style_arc_opa(p->arc_exposure, LV_OPA_40, LV_PART_MAIN);
-            lv_obj_set_style_shadow_width(p->arc_exposure, 15, LV_PART_INDICATOR);
-            lv_obj_set_style_shadow_color(p->arc_exposure, lv_color_hex(current_theme->progress_color), LV_PART_INDICATOR);
-            lv_obj_set_style_shadow_opa(p->arc_exposure, LV_OPA_50, LV_PART_INDICATOR);
-        } else {
-            lv_obj_set_style_arc_opa(p->arc_exposure, LV_OPA_COVER, LV_PART_MAIN);
-            lv_obj_set_style_shadow_width(p->arc_exposure, 0, LV_PART_INDICATOR);
-        }
+        lv_obj_set_style_arc_opa(p->arc_exposure, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_shadow_width(p->arc_exposure, 0, LV_PART_INDICATOR);
     }
 
     if (p->lbl_loop_count) lv_obj_set_style_text_color(p->lbl_loop_count, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
@@ -235,20 +222,6 @@ static void apply_theme_to_page(dashboard_page_t *p) {
         if (p->lbl_pwr_title[i]) lv_obj_set_style_text_color(p->lbl_pwr_title[i], lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
     }
 
-    /* Glass theme: colored glow shadow on header box */
-    if (p->header_box) {
-        if (is_glass_theme()) {
-            lv_obj_set_style_shadow_width(p->header_box, 40, 0);
-            lv_obj_set_style_shadow_color(p->header_box, lv_color_hex(current_theme->progress_color), 0);
-            lv_obj_set_style_shadow_opa(p->header_box, LV_OPA_20, 0);
-            lv_obj_set_style_shadow_spread(p->header_box, 5, 0);
-        } else {
-            lv_obj_remove_local_style_prop(p->header_box, LV_STYLE_SHADOW_WIDTH, 0);
-            lv_obj_remove_local_style_prop(p->header_box, LV_STYLE_SHADOW_COLOR, 0);
-            lv_obj_remove_local_style_prop(p->header_box, LV_STYLE_SHADOW_OPA, 0);
-            lv_obj_remove_local_style_prop(p->header_box, LV_STYLE_SHADOW_SPREAD, 0);
-        }
-    }
 }
 
 const theme_t *nina_dashboard_get_current_theme(void) {
@@ -263,13 +236,6 @@ void nina_dashboard_apply_theme(int theme_index) {
 
     if (main_cont) {
         lv_obj_set_style_bg_color(main_cont, lv_color_hex(current_theme->bg_main), 0);
-        /* Glass theme: vertical gradient background */
-        if (is_glass_theme()) {
-            lv_obj_set_style_bg_grad_color(main_cont, lv_color_hex(0x1a1a2e), 0);
-            lv_obj_set_style_bg_grad_dir(main_cont, LV_GRAD_DIR_VER, 0);
-        } else {
-            lv_obj_set_style_bg_grad_dir(main_cont, LV_GRAD_DIR_NONE, 0);
-        }
     }
 
     lv_obj_report_style_change(&style_bento_box);
@@ -816,11 +782,6 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     lv_obj_remove_style_all(main_cont);
     lv_obj_set_size(main_cont, SCREEN_SIZE, SCREEN_SIZE);
     lv_obj_set_style_bg_color(main_cont, lv_color_hex(current_theme->bg_main), 0);
-    /* Glass theme: vertical gradient background */
-    if (is_glass_theme()) {
-        lv_obj_set_style_bg_grad_color(main_cont, lv_color_hex(0x1a1a2e), 0);
-        lv_obj_set_style_bg_grad_dir(main_cont, LV_GRAD_DIR_VER, 0);
-    }
     lv_obj_set_style_bg_opa(main_cont, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(main_cont, OUTER_PADDING, 0);
 

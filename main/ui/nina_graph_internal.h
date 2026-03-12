@@ -100,7 +100,6 @@ void update_threshold_lines(int y_min_x100, int y_max_x100);
 
 /* Theme-aware helpers */
 bool is_red_night_theme(void);
-bool is_glass_theme(void);
 uint32_t get_ra_color(void);
 uint32_t get_dec_color(void);
 uint32_t get_total_color(void);
