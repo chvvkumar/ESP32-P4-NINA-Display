@@ -40,7 +40,7 @@ void start_web_server(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 16384;
-    config.max_uri_handlers = 25;
+    config.max_uri_handlers = 32;
     httpd_handle_t server = NULL;
 
     if (httpd_start(&server, &config) != ESP_OK) {
@@ -71,6 +71,13 @@ void start_web_server(void)
         { "/api/check-update",     HTTP_POST, check_update_post_handler, NULL },
         { "/api/allsky-config",    HTTP_GET,  allsky_config_get_handler, NULL },
         { "/api/allsky-proxy",     HTTP_GET,  allsky_proxy_get_handler, NULL },
+        { "/api/spotify/config",         HTTP_GET,  spotify_config_get_handler, NULL },
+        { "/api/spotify/config",         HTTP_POST, spotify_config_post_handler, NULL },
+        { "/api/spotify/callback",       HTTP_GET,  spotify_callback_get_handler, NULL },
+        { "/api/spotify/token-exchange", HTTP_POST, spotify_token_exchange_post_handler, NULL },
+        { "/api/spotify/logout",         HTTP_POST, spotify_logout_post_handler, NULL },
+        { "/api/spotify/status",         HTTP_GET,  spotify_status_get_handler, NULL },
+        { "/api/spotify/control",        HTTP_POST, spotify_control_post_handler, NULL },
     };
 
     for (int i = 0; i < (int)(sizeof(routes)/sizeof(routes[0])); i++) {

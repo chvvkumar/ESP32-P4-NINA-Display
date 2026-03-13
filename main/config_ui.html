@@ -443,6 +443,7 @@
       <button class="tab-btn" data-tab="behavior">Behavior</button>
       <button class="tab-btn" data-tab="system">System</button>
       <button class="tab-btn" data-tab="allsky">AllSky</button>
+      <button class="tab-btn" data-tab="spotify">Spotify</button>
     </div>
     <a class="github-link" href="https://github.com/chvvkumar/ESP32-P4-NINA-Display" target="_blank" rel="noopener">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
@@ -472,6 +473,10 @@
       <button class="nav-btn" data-tab="allsky">
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41m11.32-11.32l1.41-1.41"/></svg>
         AllSky
+      </button>
+      <button class="nav-btn" data-tab="spotify">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>
+        Spotify
       </button>
     </div>
   </nav>
@@ -901,6 +906,69 @@
 
     </div>
 
+    <!-- ==================== TAB 6: SPOTIFY ==================== -->
+    <div id="tab-spotify" class="tab-panel">
+
+      <div class="card">
+        <div class="card-title">Connection</div>
+        <div style="background:rgba(var(--accent-rgb),0.08);border:1px solid rgba(var(--accent-rgb),0.2);border-radius:10px;padding:14px 16px;margin-bottom:16px;font-size:0.82rem;line-height:1.6;color:#d4d4d8">
+          <strong style="color:rgba(var(--accent-rgb),1)">Setup Instructions</strong>
+          <ol style="margin:8px 0 0;padding-left:20px">
+            <li>Go to <a href="https://developer.spotify.com" target="_blank" rel="noopener" style="color:rgba(var(--accent-rgb),1);text-decoration:underline">developer.spotify.com</a> and create a free app</li>
+            <li>Set the redirect URI in your Spotify app to: <code style="background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.78rem">http://127.0.0.1:8000/callback</code></li>
+            <li>Copy the <strong>Client ID</strong> from your Spotify app and paste it below</li>
+            <li>Click <strong>Save</strong> at the bottom of this page, then use the Login button in the Account section</li>
+          </ol>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Enable Spotify</span>
+          <label class="toggle"><input type="checkbox" id="spotify_enabled" onchange="updateSpotifyEnabledUI()"><span class="toggle-track"></span></label>
+        </div>
+        <div id="spotifyConnectionFields">
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Client ID</label>
+            <input type="text" class="input" id="spotifyClientId" placeholder="e.g. a1b2c3d4e5f6...">
+            <div class="field-hint">From your app at <a href="https://developer.spotify.com" target="_blank" rel="noopener" style="color:#71717a">developer.spotify.com</a></div>
+          </div>
+          <div class="field">
+            <label class="field-label">Poll Interval (ms)</label>
+            <input type="number" class="input" id="spotifyPollInterval" min="1000" max="30000" step="500" value="3000">
+            <div class="field-hint">How often to check playback state (1000 &ndash; 30000 ms)</div>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Show Progress Bar</span>
+            <label class="toggle"><input type="checkbox" id="spotify_show_progress_bar" checked><span class="toggle-track"></span></label>
+          </div>
+          <div class="field">
+            <label class="field-label">Overlay Timeout (s)</label>
+            <input type="number" class="input" id="spotifyOverlayTimeout" min="0" max="60" step="1" value="5">
+            <div class="field-hint">Seconds before playback overlay auto-hides (0 = always visible)</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" id="spotifyAccountCard">
+        <div class="card-title">Account</div>
+        <div class="field">
+          <label class="field-label">Status</label>
+          <div id="spotifyStatus" style="font-size:0.875rem;color:#71717a;margin-bottom:12px">Checking...</div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-primary" id="spotifyLoginBtn" onclick="spotifyLogin()" style="flex:1;min-width:120px">Login with Spotify</button>
+          <button class="btn btn-danger" id="spotifyLogoutBtn" onclick="spotifyLogout()" style="flex:1;min-width:120px;display:none">Logout</button>
+        </div>
+        <div id="spotifyPasteDiv" style="display:none;margin-top:16px">
+          <p style="font-size:0.82rem;color:#a1a1aa;margin:0 0 10px;line-height:1.5">After approving in Spotify, you'll see a "can't connect" page. Copy the <strong>full URL</strong> from the address bar and paste it below:</p>
+          <div class="field" style="margin-bottom:10px">
+            <label class="field-label">Redirect URL</label>
+            <input type="text" class="input" id="spotifyPasteUrl" placeholder="http://127.0.0.1:8000/callback?code=..." style="font-size:0.92rem;min-height:52px;border:1px solid rgba(var(--accent-rgb),0.35);background:rgba(0,0,0,0.45)">
+          </div>
+          <button class="btn btn-primary" id="spotifySubmitBtn" onclick="spotifySubmitCallback()" style="width:100%">Submit</button>
+        </div>
+      </div>
+
+    </div>
+
   </main>
 
   <!-- ======== SAVE BAR & TOAST ======== -->
@@ -982,7 +1050,8 @@
         ['arp_nina2','<span id="arp_lbl2">NINA 2</span>'],
         ['arp_nina3','<span id="arp_lbl3">NINA 3</span>'],
         ['arp_sysinfo','System Info'],
-        ['arp_allsky','AllSky']
+        ['arp_allsky','AllSky'],
+        ['arp_spotify','Spotify']
       ];
       var c=$('arp-container');
       if(!c) return;
@@ -999,7 +1068,8 @@
       nodes:   {color:'#10b981', rgb:'16, 185, 129'},
       behavior:{color:'#8b5cf6', rgb:'139, 92, 246'},
       system:  {color:'#f43f5e', rgb:'244, 63, 94'},
-      allsky:  {color:'#3b82f6', rgb:'59, 130, 246'}
+      allsky:  {color:'#3b82f6', rgb:'59, 130, 246'},
+      spotify: {color:'#1db954', rgb:'29, 185, 84'}
     };
 
     function setAccent(name){
@@ -1145,8 +1215,10 @@
       sel.innerHTML='';
       var allskyOn=$('allsky_enabled')?$('allsky_enabled').checked:false;
       if(allskyOn) sel.add(new Option('AllSky','0'));
-      sel.add(new Option('Summary','1'));
-      var pageIdx=2;
+      var spotifyOn=$('spotify_enabled')?$('spotify_enabled').checked:false;
+      if(spotifyOn) sel.add(new Option('Spotify','1'));
+      sel.add(new Option('Summary','2'));
+      var pageIdx=3;
       for(var i=0;i<3;i++){
         if(urls[i].length>0&&enabled[i]){
           sel.add(new Option(urls[i]||('NINA '+(i+1)),''+pageIdx));
@@ -1209,8 +1281,8 @@
     }
 
     /* === Rotation Bitmask === */
-    const arpIds=['arp_summary','arp_nina1','arp_nina2','arp_nina3','arp_sysinfo','arp_allsky'];
-    const arpBits=[0x01,0x02,0x04,0x08,0x10,0x20];
+    const arpIds=['arp_summary','arp_nina1','arp_nina2','arp_nina3','arp_sysinfo','arp_allsky','arp_spotify'];
+    const arpBits=[0x01,0x02,0x04,0x08,0x10,0x20,0x40];
 
     function getRotatePages(){
       var mask=0;
@@ -1284,7 +1356,12 @@
         allsky_update_interval_s:parseInt($('allskyInterval').value)||5,
         allsky_dew_offset:parseFloat($('allskyDewOffset').value)||5.0,
         allsky_field_config:JSON.stringify(gatherAllSkyFieldMappings()),
-        allsky_thresholds:JSON.stringify(gatherAllSkyThresholds())
+        allsky_thresholds:JSON.stringify(gatherAllSkyThresholds()),
+        spotify_enabled:!!$('spotify_enabled').checked,
+        spotify_client_id:$('spotifyClientId').value.trim(),
+        spotify_poll_interval_ms:parseInt($('spotifyPollInterval').value)||3000,
+        spotify_show_progress_bar:!!$('spotify_show_progress_bar').checked,
+        spotify_overlay_timeout_s:parseInt($('spotifyOverlayTimeout').value)||0
       };
 
       var ssid=$('ssid').value.trim();
@@ -1376,9 +1453,6 @@
       setRotatePages(data.auto_rotate_pages!=null?data.auto_rotate_pages:0x1F);
 
       updateNodeLabels();
-      updatePageSelectOptions();
-      $('active_page').value=(data.active_page_override!=null&&data.active_page_override>=0)?''+data.active_page_override:'1';
-      setPageMode(pageMode);
 
       $('pass').value='';
 
@@ -1393,6 +1467,19 @@
       try{ asFields=JSON.parse(data.allsky_field_config||'{}'); }catch(e){}
       populateAllSkyFieldMappings(asFields,asThr);
       updateAllSkyEnabledUI();
+
+      // Spotify fields
+      if($('spotify_enabled')) $('spotify_enabled').checked=!!data.spotify_enabled;
+      if($('spotifyClientId')) $('spotifyClientId').value=data.spotify_client_id||'';
+      if($('spotifyPollInterval')) $('spotifyPollInterval').value=data.spotify_poll_interval_ms||3000;
+      if($('spotify_show_progress_bar')) $('spotify_show_progress_bar').checked=data.spotify_show_progress_bar!=null?!!data.spotify_show_progress_bar:true;
+      if($('spotifyOverlayTimeout')) $('spotifyOverlayTimeout').value=data.spotify_overlay_timeout_s!=null?data.spotify_overlay_timeout_s:5;
+      updateSpotifyEnabledUI();
+
+      // Update page selector AFTER all enable checkboxes are populated
+      updatePageSelectOptions();
+      $('active_page').value=(data.active_page_override!=null&&data.active_page_override>=0)?''+data.active_page_override:'1';
+      setPageMode(pageMode);
 
       loadedConfig=JSON.stringify(getConfigData());
       _populating=false;
@@ -1611,6 +1698,178 @@
 
     document.querySelector('.content').addEventListener('input',()=>{checkDirty();liveApply();});
     document.querySelector('.content').addEventListener('change',()=>{checkDirty();liveApply();});
+
+    /* === Spotify Configuration === */
+
+    function generateRandomString(length){
+      var possible='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+      var values=crypto.getRandomValues(new Uint8Array(length));
+      return Array.from(values).map(function(x){return possible[x%possible.length]}).join('');
+    }
+
+    /* Pure-JS SHA-256 — works over plain HTTP (no crypto.subtle needed) */
+    function sha256(plain){
+      function rr(v,n){return(v>>>n)|(v<<(32-n))}
+      var K=[0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+        0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+        0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+        0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+        0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+        0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+        0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+        0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+      var H=[0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+      var enc=new TextEncoder(),bytes=enc.encode(plain),bl=bytes.length*8;
+      var pad=new Uint8Array(((bytes.length+9+63)&~63));
+      pad.set(bytes);pad[bytes.length]=0x80;
+      var dv=new DataView(pad.buffer);dv.setUint32(pad.length-4,bl,false);
+      for(var off=0;off<pad.length;off+=64){
+        var W=new Array(64),i;
+        for(i=0;i<16;i++)W[i]=dv.getUint32(off+i*4,false);
+        for(i=16;i<64;i++){var s0=rr(W[i-15],7)^rr(W[i-15],18)^(W[i-15]>>>3),s1=rr(W[i-2],17)^rr(W[i-2],19)^(W[i-2]>>>10);W[i]=(W[i-16]+s0+W[i-7]+s1)|0;}
+        var a=H[0],b=H[1],c=H[2],d=H[3],e=H[4],f=H[5],g=H[6],h=H[7];
+        for(i=0;i<64;i++){var S1=rr(e,6)^rr(e,11)^rr(e,25),ch=(e&f)^(~e&g),t1=(h+S1+ch+K[i]+W[i])|0,S0=rr(a,2)^rr(a,13)^rr(a,22),mj=(a&b)^(a&c)^(b&c),t2=(S0+mj)|0;h=g;g=f;f=e;e=(d+t1)|0;d=c;c=b;b=a;a=(t1+t2)|0;}
+        H[0]=(H[0]+a)|0;H[1]=(H[1]+b)|0;H[2]=(H[2]+c)|0;H[3]=(H[3]+d)|0;H[4]=(H[4]+e)|0;H[5]=(H[5]+f)|0;H[6]=(H[6]+g)|0;H[7]=(H[7]+h)|0;
+      }
+      var out=new Uint8Array(32);var ov=new DataView(out.buffer);
+      for(var j=0;j<8;j++)ov.setUint32(j*4,H[j],false);
+      return Promise.resolve(out.buffer);
+    }
+
+    function base64urlencode(arrayBuffer){
+      var str=String.fromCharCode.apply(null,new Uint8Array(arrayBuffer));
+      return btoa(str).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+    }
+
+    function spotifyLogin(){
+      var clientId=$('spotifyClientId').value.trim();
+      if(!clientId){showToast('Enter a Client ID first','error');return;}
+      /* Auto-save client ID to device so token exchange can find it */
+      fetch('/api/spotify/config',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({spotify_client_id:clientId,spotify_enabled:true})});
+      var codeVerifier=generateRandomString(128);
+      sessionStorage.setItem('spotify_code_verifier',codeVerifier);
+      /* Use http://127.0.0.1:8000/callback — Spotify allows http for loopback IPs.
+       * After auth, Spotify redirects to 127.0.0.1 which won't load — user pastes
+       * the resulting URL back here so we can extract the auth code. */
+      var redirectUri='http://127.0.0.1:8000/callback';
+      sessionStorage.setItem('spotify_redirect_uri',redirectUri);
+      sha256(codeVerifier).then(function(hashed){
+        var codeChallenge=base64urlencode(hashed);
+        var scopes='user-read-currently-playing user-read-playback-state user-modify-playback-state';
+        var state=generateRandomString(16);
+        sessionStorage.setItem('spotify_auth_state',state);
+        var params=new URLSearchParams({
+          response_type:'code',
+          client_id:clientId,
+          scope:scopes,
+          redirect_uri:redirectUri,
+          state:state,
+          code_challenge_method:'S256',
+          code_challenge:codeChallenge
+        });
+        window.open('https://accounts.spotify.com/authorize?'+params.toString(),'_blank');
+        /* Show the paste-URL field */
+        var pasteDiv=$('spotifyPasteDiv');
+        if(pasteDiv) pasteDiv.style.display='block';
+      });
+    }
+    function spotifySubmitCallback(){
+      var urlStr=$('spotifyPasteUrl').value.trim();
+      if(!urlStr){showToast('Paste the redirect URL first','error');return;}
+      try{
+        var u=new URL(urlStr);
+        var code=u.searchParams.get('code');
+        var cbState=u.searchParams.get('state');
+        var error=u.searchParams.get('error');
+        if(error){showToast('Spotify login denied: '+error,'error');return;}
+        var savedState=sessionStorage.getItem('spotify_auth_state');
+        if(cbState!==savedState){showToast('Auth state mismatch — please retry login','error');return;}
+        if(!code){showToast('No auth code found in URL','error');return;}
+        var cv=sessionStorage.getItem('spotify_code_verifier');
+        var ru=sessionStorage.getItem('spotify_redirect_uri');
+        $('spotifySubmitBtn').disabled=true;
+        $('spotifySubmitBtn').textContent='Connecting...';
+        fetch('/api/spotify/token-exchange',{
+          method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({code:code,code_verifier:cv,redirect_uri:ru})
+        }).then(function(r){return r.json()})
+          .then(function(j){
+            $('spotifySubmitBtn').disabled=false;
+            $('spotifySubmitBtn').textContent='Submit';
+            if(j.success){
+              showToast('Spotify connected!','success');
+              updateSpotifyStatus();
+              $('spotifyPasteDiv').style.display='none';
+              $('spotifyPasteUrl').value='';
+            } else showToast('Token exchange failed: '+(j.error||'unknown'),'error');
+          }).catch(function(e){
+            $('spotifySubmitBtn').disabled=false;
+            $('spotifySubmitBtn').textContent='Submit';
+            showToast('Login error: '+e.message,'error');
+          });
+        sessionStorage.removeItem('spotify_code_verifier');
+        sessionStorage.removeItem('spotify_auth_state');
+        sessionStorage.removeItem('spotify_redirect_uri');
+      }catch(e){showToast('Invalid URL — paste the full address bar URL','error');}
+    }
+
+    function spotifyLogout(){
+      fetch('/api/spotify/logout',{method:'POST'})
+        .then(function(r){
+          if(!r.ok) throw new Error('Logout failed');
+          showToast('Logged out of Spotify','info');
+          updateSpotifyStatus();
+        })
+        .catch(function(e){showToast('Logout failed: '+e.message,'error');});
+    }
+
+    function updateSpotifyStatus(){
+      fetch('/api/spotify/status')
+        .then(function(r){return r.json();})
+        .then(function(data){
+          var el=$('spotifyStatus');
+          var loginBtn=$('spotifyLoginBtn');
+          var logoutBtn=$('spotifyLogoutBtn');
+          if(!el) return;
+          if(data.state==='authorized'){
+            el.textContent='Connected';
+            el.style.color='#10b981';
+            if(loginBtn) loginBtn.style.display='none';
+            if(logoutBtn) logoutBtn.style.display='';
+          } else if(data.state==='error'){
+            el.textContent='Error: '+(data.error||'Token refresh failed');
+            el.style.color='#ef4444';
+            if(loginBtn) loginBtn.style.display='';
+            if(logoutBtn) logoutBtn.style.display='';
+          } else {
+            el.textContent='Not connected';
+            el.style.color='#71717a';
+            if(loginBtn) loginBtn.style.display='';
+            if(logoutBtn) logoutBtn.style.display='none';
+          }
+        })
+        .catch(function(){
+          var el=$('spotifyStatus');
+          if(el){el.textContent='Unable to check status';el.style.color='#71717a';}
+        });
+    }
+
+    function updateSpotifyEnabledUI(){
+      var on=$('spotify_enabled').checked;
+      var d=on?'':'none';
+      $('spotifyConnectionFields').style.display=d;
+      $('spotifyAccountCard').style.display=on?'block':'none';
+      var arpSpotify=$('arp_spotify');
+      if(arpSpotify){
+        var row=arpSpotify.parentNode;
+        if(row) row.style.display=on?'':'none';
+      }
+      if(on) updateSpotifyStatus();
+    }
+
+    /* Spotify OAuth callback is now handled via popup polling in spotifyLogin() —
+     * no on-page-load handler needed since we no longer redirect back to this page. */
 
     /* === AllSky Configuration === */
 

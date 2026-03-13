@@ -10,12 +10,16 @@
 #include "nina_websocket.h"
 #include "nina_connection.h"
 #include "allsky_client.h"
+#include "spotify_auth.h"
+#include "spotify_client.h"
 #include "app_config.h"
 #include "mqtt_ha.h"
 #include "ui/nina_dashboard.h"
+#include "ui/nina_dashboard_internal.h"
 #include "ui/nina_summary.h"
 #include "ui/nina_sysinfo.h"
 #include "ui/nina_allsky.h"
+#include "ui/nina_spotify.h"
 #include "ui/nina_graph_overlay.h"
 #include "ui/nina_info_overlay.h"
 #include "ui/nina_safety.h"
@@ -36,6 +40,7 @@
 #include "perf_monitor.h"
 #include "power_mgmt.h"
 #include "demo_data.h"
+#include "driver/jpeg_decode.h"
 
 static const char *TAG = "tasks";
 
@@ -47,6 +52,74 @@ static const char *TAG = "tasks";
 /* Signals the data task that a page switch occurred */
 volatile bool page_changed = false;
 volatile bool ota_in_progress = false;
+
+/**
+ * Strip JPEG COM (0xFFFE) markers in-place.
+ * The ESP32-P4 hardware JPEG decoder cannot handle COM markers in some images
+ * (e.g., Spotify CDN album art). COM markers are optional comment data and
+ * can be safely removed without affecting the image.
+ *
+ * Parses markers sequentially up to SOS (0xFFDA), skips any COM segments,
+ * then copies the rest (entropy data + EOI) verbatim.
+ *
+ * @return New data size after stripping (≤ original size).
+ */
+static size_t strip_jpeg_com_markers(uint8_t *data, size_t size)
+{
+    if (size < 4 || data[0] != 0xFF || data[1] != 0xD8) return size;
+
+    size_t rp = 2, wp = 2;  /* SOI already in place */
+
+    while (rp + 1 < size) {
+        if (data[rp] != 0xFF) break;   /* Not a marker — enter entropy data */
+
+        uint8_t marker = data[rp + 1];
+
+        /* SOS — everything after is entropy data, copy rest verbatim */
+        if (marker == 0xDA) break;
+
+        /* Standalone markers (no length field): SOI, EOI, RST0-7, TEM, padding */
+        if (marker == 0x00 || marker == 0x01 || marker == 0xD8 || marker == 0xD9 ||
+            (marker >= 0xD0 && marker <= 0xD7) || marker == 0xFF) {
+            if (wp != rp) data[wp] = data[rp];
+            wp++; rp++;
+            if (marker == 0xFF) continue;  /* FF padding — next byte is the real marker */
+            if (wp != rp) data[wp] = data[rp];
+            wp++; rp++;
+            continue;
+        }
+
+        /* Marker with length field */
+        if (rp + 3 >= size) break;
+        uint16_t seg_len = ((uint16_t)data[rp + 2] << 8) | data[rp + 3];
+        size_t total = 2 + seg_len;  /* marker (2 bytes) + segment data (seg_len includes length field) */
+        if (rp + total > size) break;
+
+        if (marker == 0xFE) {
+            /* COM marker — skip entirely */
+            ESP_LOGD("jpeg_strip", "Stripped COM marker (%u bytes)", seg_len);
+            rp += total;
+            continue;
+        }
+
+        /* Keep this marker segment */
+        if (wp != rp) memmove(data + wp, data + rp, total);
+        wp += total;
+        rp += total;
+    }
+
+    /* Copy remaining data (SOS header + entropy-coded data + EOI) */
+    size_t remaining = size - rp;
+    if (remaining > 0) {
+        if (wp != rp) memmove(data + wp, data + rp, remaining);
+        wp += remaining;
+    }
+
+    if (wp < size) {
+        ESP_LOGI("jpeg_strip", "Stripped %zu bytes of COM markers from JPEG", size - wp);
+    }
+    return wp;
+}
 volatile bool ota_check_requested = false;
 volatile bool screen_touch_wake = false;
 volatile bool screen_asleep = false;
@@ -57,6 +130,10 @@ static bool hfr_graph_seeded = false;   /* True after initial API fetch for curr
 
 /* Per-instance poll contexts (shared between UI coordinator and poll tasks) */
 static instance_poll_ctx_t poll_contexts[MAX_NINA_INSTANCES];
+
+/* Spotify task state */
+TaskHandle_t spotify_task_handle = NULL;
+volatile bool spotify_page_active = false;
 
 /* AllSky polling state */
 static allsky_data_t allsky_data;
@@ -159,9 +236,18 @@ void input_task(void *arg) {
             /* Short press — cycle page */
             int total = nina_dashboard_get_total_page_count();
             int current = nina_dashboard_get_active_page();
-            int settings_idx = total - 2;  /* settings page — skip in button navigation */
-            int new_page = (current + 1) % total;
-            if (new_page == settings_idx) new_page = (new_page + 1) % total;
+            /* Skip settings, disabled allsky, and disabled spotify in button cycling */
+            int new_page = current;
+            for (int step = 1; step < total; step++) {
+                int candidate = (current + step) % total;
+                if (candidate == SETTINGS_PAGE_IDX(page_count)) continue;
+                if (candidate == PAGE_IDX_ALLSKY && !nina_dashboard_is_allsky_page()
+                    && !app_config_get()->allsky_enabled) continue;
+                if (candidate == PAGE_IDX_SPOTIFY && !nina_dashboard_is_spotify_page()
+                    && !app_config_get()->spotify_enabled) continue;
+                new_page = candidate;
+                break;
+            }
             ESP_LOGI(TAG, "Button: switching to page %d", new_page);
 
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
@@ -212,8 +298,8 @@ void instance_poll_task(void *arg) {
     }
 
     while (!ctx->shutdown) {
-        // Suspend during OTA
-        while (ota_in_progress && !ctx->shutdown) {
+        // Suspend during OTA or while Spotify page is active
+        while ((ota_in_progress || spotify_page_active) && !ctx->shutdown) {
             vTaskDelay(pdMS_TO_TICKS(500));
         }
         if (ctx->shutdown) break;
@@ -345,6 +431,11 @@ void allsky_poll_task(void *arg) {
     xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
 
     while (1) {
+        /* Suspend during OTA or while Spotify page is active */
+        while (ota_in_progress || spotify_page_active) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+
         /* Read fields directly from config pointer — avoids copying the full
          * ~6.7 KB app_config_t onto this task's small stack. */
         const app_config_t *cfg = app_config_get();
@@ -358,6 +449,141 @@ void allsky_poll_task(void *arg) {
         uint32_t interval_ms = (uint32_t)cfg->allsky_update_interval_s * 1000;
         if (interval_ms < 1000) interval_ms = 1000;
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(interval_ms));
+    }
+}
+
+// =============================================================================
+// Spotify Poll Task — fetches currently-playing, album art on track change
+// =============================================================================
+
+void spotify_poll_task(void *arg)
+{
+    ESP_LOGI(TAG, "Spotify poll task started");
+
+    /* Wait for WiFi */
+    xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
+
+    char prev_track_id[SPOTIFY_MAX_TRACK_ID_LEN] = {0};
+
+    while (1) {
+        /* Suspend during OTA updates */
+        while (ota_in_progress) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+
+        app_config_t *cfg = app_config_get();
+        if (!cfg->spotify_enabled || spotify_auth_get_state() != SPOTIFY_AUTH_AUTHORIZED) {
+            vTaskDelay(pdMS_TO_TICKS(5000));
+            continue;
+        }
+
+        /* Drain action queue — process playback control requests */
+        if (spotify_action_queue) {
+            spotify_action_t action;
+            while (xQueueReceive(spotify_action_queue, &action, 0) == pdTRUE) {
+                switch (action) {
+                    case SPOTIFY_ACTION_PLAY:  spotify_client_play();     break;
+                    case SPOTIFY_ACTION_PAUSE: spotify_client_pause();    break;
+                    case SPOTIFY_ACTION_NEXT:  spotify_client_next();     break;
+                    case SPOTIFY_ACTION_PREV:  spotify_client_previous(); break;
+                }
+            }
+        }
+
+        spotify_playback_t pb;
+        esp_err_t err = spotify_client_get_currently_playing(&pb);
+
+        if (err == ESP_OK) {
+            /* Check if track changed — fetch new album art */
+            if (strcmp(pb.track_id, prev_track_id) != 0) {
+                bool art_ok = false;
+
+                if (pb.album_art_url[0] != '\0') {
+                    uint8_t *jpg_buf = NULL;
+                    size_t jpg_size = 0;
+                    if (spotify_client_fetch_album_art(pb.album_art_url, &jpg_buf, &jpg_size) == ESP_OK
+                        && jpg_buf && jpg_size > 0) {
+                        /* Strip COM markers that the HW JPEG decoder can't handle */
+                        jpg_size = strip_jpeg_com_markers(jpg_buf, jpg_size);
+
+                        /* Hardware JPEG decode to RGB565 — follows jpeg_utils.c pattern:
+                         * create decoder per use, DMA heap guard, round w and h to 16 */
+                        jpeg_decode_picture_info_t pic_info = {0};
+                        esp_err_t info_err = jpeg_decoder_get_info(jpg_buf, jpg_size, &pic_info);
+                        if (info_err == ESP_OK && pic_info.width > 0) {
+                            uint32_t out_w = ((pic_info.width + 15) / 16) * 16;
+                            uint32_t out_h = ((pic_info.height + 15) / 16) * 16;
+
+                            jpeg_decode_memory_alloc_cfg_t mem_cfg = {
+                                .buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER,
+                            };
+                            size_t allocated = 0;
+                            uint8_t *rgb_buf = (uint8_t *)jpeg_alloc_decoder_mem(
+                                out_w * out_h * 2, &mem_cfg, &allocated);
+
+                            if (rgb_buf) {
+                                jpeg_decoder_handle_t decoder = NULL;
+                                jpeg_decode_engine_cfg_t engine_cfg = {
+                                    .intr_priority = 0, .timeout_ms = 5000
+                                };
+                                esp_err_t dec_err = jpeg_new_decoder_engine(&engine_cfg, &decoder);
+                                if (dec_err == ESP_OK && decoder) {
+                                    jpeg_decode_cfg_t dec_cfg = {
+                                        .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,
+                                        .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
+                                    };
+                                    uint32_t out_size = 0;
+                                    dec_err = jpeg_decoder_process(decoder, &dec_cfg,
+                                        jpg_buf, jpg_size, rgb_buf, allocated, &out_size);
+                                    jpeg_del_decoder_engine(decoder);
+
+                                    if (dec_err == ESP_OK && out_size > 0) {
+                                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                                            nina_spotify_set_album_art(rgb_buf, out_w, out_h, out_size);
+                                            bsp_display_unlock();
+                                        }
+                                        art_ok = true;
+                                        /* Ownership transferred to UI — don't free rgb_buf */
+                                    } else {
+                                        ESP_LOGW(TAG, "JPEG decode failed for album art");
+                                        free(rgb_buf);
+                                    }
+                                } else {
+                                    free(rgb_buf);
+                                }
+                            }
+                        }
+                        free(jpg_buf);
+                    }
+                }
+
+                /* Only record track ID if art decoded OK (or no art URL).
+                 * If decode failed, leave prev_track_id stale so the next
+                 * poll cycle retries the art fetch for this track. */
+                if (art_ok || pb.album_art_url[0] == '\0') {
+                    snprintf(prev_track_id, sizeof(prev_track_id), "%s", pb.track_id);
+                }
+            }
+
+            /* Update UI (under LVGL lock) */
+            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                nina_spotify_update(&pb);
+                bsp_display_unlock();
+            }
+        } else if (err == ESP_ERR_NOT_FOUND) {
+            /* Nothing playing — update UI to show idle state */
+            prev_track_id[0] = '\0';
+            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                nina_spotify_set_idle();
+                bsp_display_unlock();
+            }
+        }
+
+        uint32_t interval = cfg->spotify_poll_interval_ms;
+        if (!spotify_page_active) {
+            interval = 10000; /* Background: poll every 10s */
+        }
+        vTaskDelay(pdMS_TO_TICKS(interval));
     }
 }
 
@@ -577,7 +803,7 @@ void data_update_task(void *arg) {
 
 main_loop:
     while (1) {
-        /* Suspend polling during OTA update */
+        /* Suspend polling during OTA */
         while (ota_in_progress) {
             vTaskDelay(pdMS_TO_TICKS(500));
         }
@@ -600,22 +826,28 @@ main_loop:
         bool on_summary = nina_dashboard_is_summary_page();
 
         /*
-         * Page index convention (page_count = enabled instances only):
-         *   0                    = AllSky page
-         *   1                    = summary page
-         *   2 .. page_count + 1  = NINA instance pages (mapped via page_instance_map)
-         *   page_count + 2       = settings page
-         *   page_count + 3       = sysinfo page
+         * Page index convention (see PAGE_IDX_* / NINA_PAGE_OFFSET / EXTRA_PAGES):
+         *   PAGE_IDX_ALLSKY  (0)                        = AllSky page
+         *   PAGE_IDX_SPOTIFY (1)                        = Spotify page
+         *   PAGE_IDX_SUMMARY (2)                        = summary page
+         *   NINA_PAGE_OFFSET .. NINA_PAGE_OFFSET+pc-1   = NINA instance pages
+         *   SETTINGS_PAGE_IDX(pc)                       = settings page
+         *   SYSINFO_PAGE_IDX(pc)                        = sysinfo page
          *
          * active_nina_idx: the actual instance index (0..MAX_NINA_INSTANCES-1)
-         *   for the active page, or -1 if on allsky/summary/settings/sysinfo.
+         *   for the active page, or -1 if on allsky/spotify/summary/settings/sysinfo.
          */
+        bool on_spotify = nina_dashboard_is_spotify_page();
         int active_nina_idx = -1;   /* Actual instance index (for data access) */
         int active_page_idx = -1;  /* 0-based page index into pages[] (for UI calls) */
-        if (!on_allsky && !on_sysinfo && !on_settings && !on_summary && current_active >= 2) {
-            active_page_idx = current_active - 2;
+        if (!on_allsky && !on_spotify && !on_sysinfo && !on_settings && !on_summary
+            && current_active >= NINA_PAGE_OFFSET) {
+            active_page_idx = current_active - NINA_PAGE_OFFSET;
             active_nina_idx = nina_dashboard_page_to_instance(active_page_idx);
         }
+
+        /* Update Spotify page activity flag for poll task */
+        spotify_page_active = on_spotify;
 
         // Re-read instance count from config so API URL changes take effect live
         instance_count = app_config_get_instance_count();
@@ -771,14 +1003,14 @@ main_loop:
 
         /* If auto-rotate is active and we're on a NINA instance page but no instances
          * are connected, fall back to the summary page automatically. */
-        if (app_config_get()->auto_rotate_enabled && !on_summary && !on_sysinfo && !on_settings && !on_allsky) {
+        if (app_config_get()->auto_rotate_enabled && !on_summary && !on_sysinfo && !on_settings && !on_allsky && !on_spotify) {
             bool any_connected = false;
             for (int i = 0; i < instance_count; i++) {
                 if (nina_connection_is_connected(i)) { any_connected = true; break; }
             }
             if (!any_connected) {
                 if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                    nina_dashboard_show_page(1, instance_count);
+                    nina_dashboard_show_page(PAGE_IDX_SUMMARY, instance_count);
                     bsp_display_unlock();
                 }
                 page_changed = true;
@@ -789,12 +1021,13 @@ main_loop:
         /* Auto-rotate logic — rotates between pages selected by auto_rotate_pages bitmask.
          *
          * Page bitmask layout:
-         *   bit 0  = Summary page (page index 1)
-         *   bit 1  = NINA instance 1 (page index 2)
-         *   bit 2  = NINA instance 2 (page index 3)
-         *   bit 3  = NINA instance 3 (page index 4)
-         *   bit 4  = System Info page (page index instance_count + 3)
-         *   bit 5  = AllSky page (page index 0)
+         *   bit 0  = Summary page (PAGE_IDX_SUMMARY)
+         *   bit 1  = NINA instance 1 (NINA_PAGE_OFFSET + 0)
+         *   bit 2  = NINA instance 2 (NINA_PAGE_OFFSET + 1)
+         *   bit 3  = NINA instance 3 (NINA_PAGE_OFFSET + 2)
+         *   bit 4  = System Info page (SYSINFO_PAGE_IDX)
+         *   bit 5  = AllSky page (PAGE_IDX_ALLSKY)
+         *   bit 6  = Spotify page (PAGE_IDX_SPOTIFY)
          */
         {
             app_config_t *r_cfg = app_config_get();
@@ -804,7 +1037,7 @@ main_loop:
                     uint8_t page_mask = r_cfg->auto_rotate_pages;
                     int total = nina_dashboard_get_total_page_count();
 
-                    int ena_page_count = total - 4;  /* enabled NINA pages only */
+                    int ena_page_count = total - EXTRA_PAGES;  /* enabled NINA pages only */
 
                     /* Find next page in rotation by stepping through candidates */
                     int next_page = current_active;
@@ -815,27 +1048,31 @@ main_loop:
                          * Bitmask bits 1-3 refer to instance indices (not page indices),
                          * so use the page-to-instance mapping for NINA pages. */
                         bool in_mask = false;
-                        if (candidate == 0) {
+                        if (candidate == PAGE_IDX_ALLSKY) {
                             in_mask = (page_mask & 0x20) != 0;             /* AllSky (bit 5) */
                             if (!app_config_get()->allsky_enabled) in_mask = false;
                         }
-                        else if (candidate == 1)
+                        else if (candidate == PAGE_IDX_SPOTIFY) {
+                            in_mask = (page_mask & 0x40) != 0;             /* Spotify (bit 6) */
+                            if (!app_config_get()->spotify_enabled) in_mask = false;
+                        }
+                        else if (candidate == PAGE_IDX_SUMMARY)
                             in_mask = (page_mask & 0x01) != 0;             /* Summary (bit 0) */
-                        else if (candidate >= 2 && candidate <= ena_page_count + 1) {
-                            int inst = nina_dashboard_page_to_instance(candidate - 2);
+                        else if (candidate >= NINA_PAGE_OFFSET && candidate < NINA_PAGE_OFFSET + ena_page_count) {
+                            int inst = nina_dashboard_page_to_instance(candidate - NINA_PAGE_OFFSET);
                             if (inst >= 0)
                                 in_mask = (page_mask & (1 << (inst + 1))) != 0; /* NINA page */
                         }
-                        else if (candidate == ena_page_count + 2)
+                        else if (candidate == SETTINGS_PAGE_IDX(ena_page_count))
                             in_mask = false;                               /* Settings — never in rotation */
-                        else if (candidate == ena_page_count + 3)
+                        else if (candidate == SYSINFO_PAGE_IDX(ena_page_count))
                             in_mask = (page_mask & 0x10) != 0;             /* Sysinfo (bit 4) */
 
                         if (!in_mask) continue;
 
                         /* Skip disconnected NINA instances if configured */
-                        if (candidate >= 2 && candidate <= ena_page_count + 1) {
-                            int nina_idx = nina_dashboard_page_to_instance(candidate - 2);
+                        if (candidate >= NINA_PAGE_OFFSET && candidate < NINA_PAGE_OFFSET + ena_page_count) {
+                            int nina_idx = nina_dashboard_page_to_instance(candidate - NINA_PAGE_OFFSET);
                             if (nina_idx >= 0 && r_cfg->auto_rotate_skip_disconnected
                                 && !nina_connection_is_connected(nina_idx)) continue;
                         }

@@ -60,7 +60,7 @@ static void ta_defocus_cb(lv_event_t *e);
 
 static void back_btn_cb(lv_event_t *e) {
     LV_UNUSED(e);
-    nina_dashboard_show_page(page_count + 2, total_page_count);
+    nina_dashboard_show_page(SYSINFO_PAGE_IDX(page_count), total_page_count);
 }
 
 /* ════════════════════════════════════════════════════════════════════════

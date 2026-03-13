@@ -14,6 +14,27 @@
 #include "themes.h"
 #include "ui_helpers.h"
 
+/* ── Page index constants ──
+ *
+ * Page index convention:
+ *   PAGE_IDX_ALLSKY   (0)  = AllSky page
+ *   PAGE_IDX_SPOTIFY  (1)  = Spotify page
+ *   PAGE_IDX_SUMMARY  (2)  = Summary page
+ *   NINA_PAGE_OFFSET  (3)  .. NINA_PAGE_OFFSET + page_count - 1 = NINA instance pages
+ *   page_count + NINA_PAGE_OFFSET     = settings page
+ *   page_count + NINA_PAGE_OFFSET + 1 = sysinfo page
+ *   total_page_count = page_count + EXTRA_PAGES
+ */
+#define PAGE_IDX_ALLSKY   0
+#define PAGE_IDX_SPOTIFY  1
+#define PAGE_IDX_SUMMARY  2
+#define NINA_PAGE_OFFSET  3   /* First NINA page index */
+#define EXTRA_PAGES       5   /* allsky + spotify + summary + settings + sysinfo */
+
+/* Derived page index helpers (use these instead of hardcoded arithmetic) */
+#define SETTINGS_PAGE_IDX(pc)  ((pc) + NINA_PAGE_OFFSET)
+#define SYSINFO_PAGE_IDX(pc)   ((pc) + NINA_PAGE_OFFSET + 1)
+
 /* Layout constants */
 #define OUTER_PADDING   16
 #define GRID_GAP        16
@@ -90,10 +111,13 @@ typedef struct {
 /* AllSky page — defined in nina_dashboard.c */
 extern lv_obj_t *allsky_obj;
 
+/* Spotify page — defined in nina_dashboard.c */
+extern lv_obj_t *spotify_obj;
+
 /* Shared state — defined in nina_dashboard.c, used by update and thumbnail modules */
 extern dashboard_page_t pages[MAX_NINA_INSTANCES];
 extern int page_count;        /* Number of NINA instance pages (only enabled instances) */
-extern int total_page_count;  /* page_count + 4 (allsky + summary + settings + sysinfo) */
+extern int total_page_count;  /* page_count + EXTRA_PAGES (allsky + spotify + summary + settings + sysinfo) */
 extern int active_page;
 extern const theme_t *current_theme;
 
