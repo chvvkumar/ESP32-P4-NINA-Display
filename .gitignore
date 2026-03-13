@@ -152,9 +152,10 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 
-# Firmware binaries (keep network_adapter.bin)
+# Firmware binaries (keep specific checked-in binaries)
 firmware/*
 !firmware/network_adapter.bin
+!firmware/host_performs_slave_ota.bin
 
 # Environment variables
 .env
