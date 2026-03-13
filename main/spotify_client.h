@@ -86,6 +86,13 @@ esp_err_t spotify_client_previous(void);
 esp_err_t spotify_client_fetch_album_art(const char *url, uint8_t **out_buf,
                                           size_t *out_size);
 
+/**
+ * Destroy the persistent keep-alive HTTP client, freeing its TLS session memory.
+ * Called when leaving the Spotify page to reclaim internal DMA heap for other
+ * TLS connections (NINA WebSockets, etc.). Will be lazily recreated on next poll.
+ */
+void spotify_client_destroy_connection(void);
+
 #ifdef __cplusplus
 }
 #endif

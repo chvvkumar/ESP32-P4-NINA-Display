@@ -1,12 +1,19 @@
 /**
  * @file nina_thumbnail.c
  * @brief Thumbnail overlay with zoom support for NINA dashboard.
+ *
+ * Uses PPA hardware accelerator for pre-scaling on zoom changes,
+ * so panning at zoomed levels is a fast 1:1 blit with no per-frame transform.
  */
 
 #include "nina_thumbnail.h"
 #include "nina_dashboard_internal.h"
+#include "jpeg_utils.h"
+#include "esp_log.h"
 #include <string.h>
 #include <stdlib.h>
+
+static const char *TAG = "thumbnail";
 
 /* Zoom levels */
 #define ZOOM_FIT  0
@@ -26,7 +33,9 @@ static lv_obj_t *zoom_badge_lbl = NULL;
 static lv_obj_t *btn_back = NULL;
 static lv_obj_t *btn_back_lbl = NULL;
 static lv_image_dsc_t thumbnail_dsc;
-static uint8_t *thumbnail_decoded_buf = NULL;
+static uint8_t *thumbnail_original_buf = NULL;   /* Original decoded image */
+static uint8_t *thumbnail_scaled_buf = NULL;     /* PPA-scaled for current zoom */
+static int scaled_zoom_level = -1;               /* Zoom level of scaled_buf */
 static volatile bool thumbnail_requested = false;
 
 /* Zoom state */
@@ -40,8 +49,19 @@ static uint32_t last_click_time = 0;
 /*  Zoom logic                                                        */
 /* ------------------------------------------------------------------ */
 
+static void update_image_descriptor(uint8_t *buf, uint32_t w, uint32_t h, size_t size) {
+    memset(&thumbnail_dsc, 0, sizeof(thumbnail_dsc));
+    thumbnail_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
+    thumbnail_dsc.header.w = w;
+    thumbnail_dsc.header.h = h;
+    thumbnail_dsc.header.stride = w * 2;
+    thumbnail_dsc.data = buf;
+    thumbnail_dsc.data_size = size;
+    lv_image_set_src(thumbnail_img, &thumbnail_dsc);
+}
+
 static void apply_zoom(void) {
-    if (!thumbnail_img || !img_container) return;
+    if (!thumbnail_img || !img_container || !thumbnail_original_buf) return;
 
     uint32_t scale;
     switch (current_zoom) {
@@ -50,14 +70,52 @@ static void apply_zoom(void) {
         default:       scale = fit_scale; break;
     }
 
-    lv_image_set_scale(thumbnail_img, scale);
-
     uint32_t disp_w = orig_w * scale / 256;
     uint32_t disp_h = orig_h * scale / 256;
+    bool using_sw_scale = false;
 
-    /* Explicitly set widget size so LVGL's scroll area accounts for the
-     * scaled dimensions (lv_image_set_scale only affects rendering, not
-     * the layout size used for scroll calculations). */
+    if (scale == 256) {
+        /* 1:1 — use original buffer directly, no scaling needed */
+        if (thumbnail_scaled_buf) {
+            free(thumbnail_scaled_buf);
+            thumbnail_scaled_buf = NULL;
+            scaled_zoom_level = -1;
+        }
+        update_image_descriptor(thumbnail_original_buf, orig_w, orig_h,
+                                orig_w * orig_h * 2);
+        lv_image_set_scale(thumbnail_img, 256);
+    } else if (scaled_zoom_level == current_zoom && thumbnail_scaled_buf) {
+        /* Already have the correct PPA-scaled buffer — just reuse it */
+        lv_image_set_scale(thumbnail_img, 256);
+    } else {
+        /* PPA pre-scale to target dimensions for smooth panning */
+        size_t ppa_size = 0;
+        uint8_t *scaled = ppa_scale_rgb565(thumbnail_original_buf,
+                                            orig_w, orig_h,
+                                            disp_w, disp_h, &ppa_size);
+        if (scaled) {
+            if (thumbnail_scaled_buf) free(thumbnail_scaled_buf);
+            thumbnail_scaled_buf = scaled;
+            scaled_zoom_level = current_zoom;
+            update_image_descriptor(scaled, disp_w, disp_h, ppa_size);
+            lv_image_set_scale(thumbnail_img, 256);
+            ESP_LOGI(TAG, "PPA zoom %dx: %lux%lu -> %lux%lu",
+                     (scale == 512) ? 2 : 1,
+                     (unsigned long)orig_w, (unsigned long)orig_h,
+                     (unsigned long)disp_w, (unsigned long)disp_h);
+        } else {
+            /* PPA failed — fall back to LVGL software scaling */
+            ESP_LOGW(TAG, "PPA scale failed, using SW fallback");
+            update_image_descriptor(thumbnail_original_buf, orig_w, orig_h,
+                                    orig_w * orig_h * 2);
+            lv_image_set_scale(thumbnail_img, scale);
+            using_sw_scale = true;
+        }
+    }
+
+    /* Layout: set widget size to display dimensions for scroll calculations.
+     * When PPA-scaled, the buffer IS disp_w x disp_h at scale 256.
+     * When SW-fallback, LVGL scales orig_w x orig_h by scale factor. */
     lv_obj_set_size(thumbnail_img, (int32_t)disp_w, (int32_t)disp_h);
 
     if (disp_w > SCREEN_SIZE || disp_h > SCREEN_SIZE) {
@@ -204,25 +262,22 @@ void nina_dashboard_set_thumbnail(const uint8_t *rgb565_data, uint32_t w, uint32
         return;
     }
 
-    /* Free previous buffer */
-    if (thumbnail_decoded_buf) {
-        free(thumbnail_decoded_buf);
-        thumbnail_decoded_buf = NULL;
+    /* Free previous buffers */
+    if (thumbnail_scaled_buf) {
+        free(thumbnail_scaled_buf);
+        thumbnail_scaled_buf = NULL;
+        scaled_zoom_level = -1;
+    }
+    if (thumbnail_original_buf) {
+        free(thumbnail_original_buf);
+        thumbnail_original_buf = NULL;
     }
 
     /* Take ownership of the buffer */
-    thumbnail_decoded_buf = (uint8_t *)rgb565_data;
+    thumbnail_original_buf = (uint8_t *)rgb565_data;
 
-    /* Set up LVGL image descriptor */
-    memset(&thumbnail_dsc, 0, sizeof(thumbnail_dsc));
-    thumbnail_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
-    thumbnail_dsc.header.w = w;
-    thumbnail_dsc.header.h = h;
-    thumbnail_dsc.header.stride = w * 2;
-    thumbnail_dsc.data = thumbnail_decoded_buf;
-    thumbnail_dsc.data_size = data_size;
-
-    lv_image_set_src(thumbnail_img, &thumbnail_dsc);
+    /* Set up LVGL image descriptor with original buffer */
+    update_image_descriptor(thumbnail_original_buf, w, h, data_size);
 
     /* Store original dimensions and compute fit scale */
     orig_w = w;
@@ -252,9 +307,14 @@ void nina_dashboard_hide_thumbnail(void) {
         lv_obj_add_flag(thumbnail_img, LV_OBJ_FLAG_HIDDEN);
         lv_image_set_src(thumbnail_img, NULL);
     }
-    if (thumbnail_decoded_buf) {
-        free(thumbnail_decoded_buf);
-        thumbnail_decoded_buf = NULL;
+    if (thumbnail_scaled_buf) {
+        free(thumbnail_scaled_buf);
+        thumbnail_scaled_buf = NULL;
+        scaled_zoom_level = -1;
+    }
+    if (thumbnail_original_buf) {
+        free(thumbnail_original_buf);
+        thumbnail_original_buf = NULL;
     }
     thumbnail_requested = false;
 

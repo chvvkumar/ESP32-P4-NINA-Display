@@ -8,11 +8,15 @@
 #include "ui/nina_dashboard.h"
 #include "bsp/esp-bsp.h"
 #include "driver/jpeg_decode.h"
+#include "driver/ppa.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "perf_monitor.h"
 
 static const char *TAG = "jpeg_utils";
+
+/* PPA SRM client for hardware image scaling (lazy-initialized) */
+static ppa_client_handle_t s_ppa_srm_client = NULL;
 
 /* Minimum free internal DMA heap required before attempting hardware JPEG decode.
  * The JPEG decoder engine allocates DMA tx/rx link descriptors from internal memory.
@@ -129,4 +133,84 @@ bool fetch_and_show_thumbnail(const char *base_url) {
 
     free(jpeg_buf);
     return success;
+}
+
+// =============================================================================
+// PPA Hardware Image Scaling
+// =============================================================================
+
+uint8_t *ppa_scale_rgb565(const uint8_t *src, uint32_t src_w, uint32_t src_h,
+                           uint32_t dst_w, uint32_t dst_h, size_t *out_size)
+{
+    if (!src || src_w == 0 || src_h == 0 || dst_w == 0 || dst_h == 0) return NULL;
+
+    /* Lazy-init PPA SRM client */
+    if (!s_ppa_srm_client) {
+        ppa_client_config_t cfg = {
+            .oper_type = PPA_OPERATION_SRM,
+            .max_pending_trans_num = 1,
+        };
+        if (ppa_register_client(&cfg, &s_ppa_srm_client) != ESP_OK) {
+            ESP_LOGE(TAG, "PPA SRM client registration failed");
+            return NULL;
+        }
+        ESP_LOGI(TAG, "PPA SRM client registered for image scaling");
+    }
+
+    /* Output buffer: 128-byte aligned address and size (L2 cache line requirement) */
+    size_t buf_size = dst_w * dst_h * 2;  /* RGB565 = 2 bytes/pixel */
+    buf_size = (buf_size + 127) & ~(size_t)127;
+
+    uint8_t *dst = heap_caps_aligned_calloc(128, 1, buf_size, MALLOC_CAP_SPIRAM);
+    if (!dst) {
+        ESP_LOGE(TAG, "Failed to allocate %zu bytes for PPA output", buf_size);
+        return NULL;
+    }
+
+    float scale_x = (float)dst_w / (float)src_w;
+    float scale_y = (float)dst_h / (float)src_h;
+
+    ppa_srm_oper_config_t srm = {
+        .in = {
+            .buffer = src,
+            .pic_w = src_w,
+            .pic_h = src_h,
+            .block_w = src_w,
+            .block_h = src_h,
+            .block_offset_x = 0,
+            .block_offset_y = 0,
+            .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
+        },
+        .out = {
+            .buffer = dst,
+            .buffer_size = buf_size,
+            .pic_w = dst_w,
+            .pic_h = dst_h,
+            .block_offset_x = 0,
+            .block_offset_y = 0,
+            .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
+        },
+        .rotation_angle = PPA_SRM_ROTATION_ANGLE_0,
+        .scale_x = scale_x,
+        .scale_y = scale_y,
+        .rgb_swap = false,
+        .byte_swap = false,
+        .mode = PPA_TRANS_MODE_BLOCKING,
+    };
+
+    esp_err_t err = ppa_do_scale_rotate_mirror(s_ppa_srm_client, &srm);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "PPA scale %lux%lu -> %lux%lu failed: %s",
+                 (unsigned long)src_w, (unsigned long)src_h,
+                 (unsigned long)dst_w, (unsigned long)dst_h,
+                 esp_err_to_name(err));
+        free(dst);
+        return NULL;
+    }
+
+    if (out_size) *out_size = buf_size;
+    ESP_LOGI(TAG, "PPA scaled %lux%lu -> %lux%lu (%.2fx)",
+             (unsigned long)src_w, (unsigned long)src_h,
+             (unsigned long)dst_w, (unsigned long)dst_h, scale_x);
+    return dst;
 }

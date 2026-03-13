@@ -64,6 +64,13 @@ void nina_spotify_on_show(void);
  */
 void nina_spotify_on_hide(void);
 
+/**
+ * Free the album art buffer to reclaim PSRAM.
+ * Called when leaving Spotify page so other features have memory headroom.
+ * Art will be re-fetched on next track change detection.
+ */
+void nina_spotify_free_art(void);
+
 #ifdef __cplusplus
 }
 #endif
