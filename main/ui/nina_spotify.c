@@ -103,6 +103,8 @@ lv_obj_t *spotify_page_create(lv_obj_t *parent)
 {
     spotify_page = lv_obj_create(parent);
     lv_obj_set_size(spotify_page, SCREEN_SIZE, SCREEN_SIZE);
+    /* Negate the parent's OUTER_PADDING so album art fills edge-to-edge */
+    lv_obj_set_pos(spotify_page, -OUTER_PADDING, -OUTER_PADDING);
     lv_obj_set_style_pad_all(spotify_page, 0, 0);
     lv_obj_set_style_border_width(spotify_page, 0, 0);
     lv_obj_set_style_radius(spotify_page, 0, 0);
@@ -565,4 +567,17 @@ void nina_spotify_on_hide(void)
 
     /* Restore normal refresh rate when leaving Spotify page */
     set_refr_period(REFR_PERIOD_ACTIVE_MS);
+}
+
+void nina_spotify_free_art(void)
+{
+    if (current_art_buf) {
+        if (img_album_art) {
+            lv_image_set_src(img_album_art, NULL);
+            lv_obj_add_flag(img_album_art, LV_OBJ_FLAG_HIDDEN);
+        }
+        free(current_art_buf);
+        current_art_buf = NULL;
+        ESP_LOGI(TAG, "Album art buffer freed");
+    }
 }

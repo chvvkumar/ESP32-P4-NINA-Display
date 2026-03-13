@@ -152,6 +152,11 @@ void on_page_changed(int new_page) {
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         if (poll_task_handles[i]) xTaskNotifyGive(poll_task_handles[i]);
     }
+    /* Wake data_update_task so page-transition cleanup (TLS teardown) runs
+     * immediately instead of waiting for the next poll cycle (2-3 s).
+     * Prevents internal DMA heap exhaustion when Spotify TLS races with
+     * still-open NINA WebSocket sessions. */
+    if (data_task_handle) xTaskNotifyGive(data_task_handle);
 }
 
 static void IRAM_ATTR boot_button_isr_handler(void *arg)
@@ -464,6 +469,9 @@ void spotify_poll_task(void *arg)
     xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
 
     char prev_track_id[SPOTIFY_MAX_TRACK_ID_LEN] = {0};
+    int consecutive_errors = 0;
+    int art_retries = 0;           /* retries for current track's album art */
+    #define ART_MAX_RETRIES 3      /* give up on art after this many failures */
 
     while (1) {
         /* Suspend during OTA updates */
@@ -474,6 +482,18 @@ void spotify_poll_task(void *arg)
         app_config_t *cfg = app_config_get();
         if (!cfg->spotify_enabled || spotify_auth_get_state() != SPOTIFY_AUTH_AUTHORIZED) {
             vTaskDelay(pdMS_TO_TICKS(5000));
+            continue;
+        }
+
+        /* Wait until the Spotify page is active.  data_update_task sets
+         * spotify_page_active AFTER it has torn down NINA WebSocket TLS
+         * sessions, so this gate ensures we don't open new TLS connections
+         * while internal DMA heap is still held by NINA resources. */
+        if (!spotify_page_active) {
+            /* Tear down our own TLS session while idle so it doesn't hold
+             * internal DMA memory that NINA or SDIO may need. */
+            spotify_client_destroy_connection();
+            vTaskDelay(pdMS_TO_TICKS(2000));
             continue;
         }
 
@@ -494,11 +514,21 @@ void spotify_poll_task(void *arg)
         esp_err_t err = spotify_client_get_currently_playing(&pb);
 
         if (err == ESP_OK) {
+            consecutive_errors = 0;
+
             /* Check if track changed — fetch new album art */
             if (strcmp(pb.track_id, prev_track_id) != 0) {
                 bool art_ok = false;
+                /* Don't reset art_retries here — we re-enter this block every
+                 * poll cycle until prev_track_id is set (after success or max
+                 * retries).  Resetting here made retries infinite. */
 
-                if (pb.album_art_url[0] != '\0') {
+                if (pb.album_art_url[0] != '\0' && art_retries < ART_MAX_RETRIES) {
+                    /* Free the persistent currently-playing TLS session before
+                     * opening a second one to the CDN — internal DMA heap can't
+                     * hold two concurrent AES contexts + SDIO WiFi buffers. */
+                    spotify_client_destroy_connection();
+
                     uint8_t *jpg_buf = NULL;
                     size_t jpg_size = 0;
                     if (spotify_client_fetch_album_art(pb.album_art_url, &jpg_buf, &jpg_size) == ESP_OK
@@ -538,12 +568,33 @@ void spotify_poll_task(void *arg)
                                     jpeg_del_decoder_engine(decoder);
 
                                     if (dec_err == ESP_OK && out_size > 0) {
+                                        /* Pre-scale to 720x720 using PPA hardware to
+                                         * eliminate per-frame LVGL software scaling */
+                                        uint8_t *final_buf = rgb_buf;
+                                        uint32_t final_w = out_w, final_h = out_h;
+                                        size_t final_size = out_size;
+
+                                        if (out_w != 720 || out_h != 720) {
+                                            size_t scaled_size = 0;
+                                            uint8_t *scaled = ppa_scale_rgb565(
+                                                rgb_buf, out_w, out_h, 720, 720, &scaled_size);
+                                            if (scaled) {
+                                                free(rgb_buf);
+                                                final_buf = scaled;
+                                                final_w = 720;
+                                                final_h = 720;
+                                                final_size = scaled_size;
+                                            }
+                                            /* If PPA fails, fall through with original —
+                                             * LVGL will SW-scale as before */
+                                        }
+
                                         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                                            nina_spotify_set_album_art(rgb_buf, out_w, out_h, out_size);
+                                            nina_spotify_set_album_art(final_buf, final_w, final_h, final_size);
                                             bsp_display_unlock();
                                         }
                                         art_ok = true;
-                                        /* Ownership transferred to UI — don't free rgb_buf */
+                                        /* Ownership transferred to UI — don't free final_buf */
                                     } else {
                                         ESP_LOGW(TAG, "JPEG decode failed for album art");
                                         free(rgb_buf);
@@ -554,14 +605,19 @@ void spotify_poll_task(void *arg)
                             }
                         }
                         free(jpg_buf);
+                    } else {
+                        art_retries++;
                     }
                 }
 
-                /* Only record track ID if art decoded OK (or no art URL).
-                 * If decode failed, leave prev_track_id stale so the next
-                 * poll cycle retries the art fetch for this track. */
-                if (art_ok || pb.album_art_url[0] == '\0') {
+                /* Record track ID if art succeeded, no art URL, or retries exhausted.
+                 * Prevents infinite retry loop when CDN is unreachable. */
+                if (art_ok || pb.album_art_url[0] == '\0' || art_retries >= ART_MAX_RETRIES) {
+                    if (art_retries >= ART_MAX_RETRIES) {
+                        ESP_LOGW(TAG, "Album art fetch failed after %d retries, skipping", ART_MAX_RETRIES);
+                    }
                     snprintf(prev_track_id, sizeof(prev_track_id), "%s", pb.track_id);
+                    art_retries = 0;
                 }
             }
 
@@ -572,16 +628,31 @@ void spotify_poll_task(void *arg)
             }
         } else if (err == ESP_ERR_NOT_FOUND) {
             /* Nothing playing — update UI to show idle state */
+            consecutive_errors = 0;
             prev_track_id[0] = '\0';
+            art_retries = 0;
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                 nina_spotify_set_idle();
                 bsp_display_unlock();
             }
+        } else {
+            /* Connection error — back off to avoid TLS handshake storm */
+            consecutive_errors++;
         }
 
         uint32_t interval = cfg->spotify_poll_interval_ms;
         if (!spotify_page_active) {
             interval = 10000; /* Background: poll every 10s */
+            /* When page goes inactive, clear prev_track_id so album art
+             * is re-fetched when returning (buffer was freed by page transition). */
+            prev_track_id[0] = '\0';
+            art_retries = 0;
+        }
+        /* Exponential backoff on errors: 2x, 4x, ... up to 30s */
+        if (consecutive_errors > 0) {
+            uint32_t backoff = interval * (1u << (consecutive_errors < 4 ? consecutive_errors : 4));
+            if (backoff > 30000) backoff = 30000;
+            interval = backoff;
         }
         vTaskDelay(pdMS_TO_TICKS(interval));
     }
@@ -610,6 +681,7 @@ void data_update_task(void *arg) {
 
     /* Screen sleep state */
     int64_t all_disconnected_since_ms = 0;  /* 0 = at least one connected recently */
+    int64_t spotify_idle_since_ms = 0;      /* 0 = Spotify playing or not on Spotify page */
 
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         nina_poll_state_init(&poll_states[i]);
@@ -846,7 +918,32 @@ main_loop:
             active_nina_idx = nina_dashboard_page_to_instance(active_page_idx);
         }
 
-        /* Update Spotify page activity flag for poll task */
+        /* Update Spotify page activity flag for poll task + cleanup on transitions.
+         * Free inactive context's TLS sessions and large buffers to prevent
+         * internal DMA heap exhaustion (esp-aes OOM during TLS handshake). */
+        {
+            static bool prev_on_spotify = false;
+            if (on_spotify && !prev_on_spotify) {
+                /* Entering Spotify — free NINA resources */
+                nina_websocket_stop_all();
+                /* Dismiss thumbnail overlay if open (frees original + scaled buffers) */
+                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                    if (nina_dashboard_thumbnail_visible())
+                        nina_dashboard_hide_thumbnail();
+                    bsp_display_unlock();
+                }
+                ESP_LOGI(TAG, "Entering Spotify: freed NINA WebSocket TLS sessions");
+            } else if (!on_spotify && prev_on_spotify) {
+                /* Leaving Spotify — free Spotify resources */
+                spotify_client_destroy_connection();
+                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                    nina_spotify_free_art();
+                    bsp_display_unlock();
+                }
+                ESP_LOGI(TAG, "Leaving Spotify: freed TLS session + album art buffer");
+            }
+            prev_on_spotify = on_spotify;
+        }
         spotify_page_active = on_spotify;
 
         // Re-read instance count from config so API URL changes take effect live
@@ -1424,11 +1521,10 @@ main_loop:
             }
         }
 
-        /* ── Screen sleep: turn off backlight when no NINA instances connected ── */
+        /* ── Screen sleep: turn off backlight when idle ── */
         {
             app_config_t *sl_cfg = app_config_get();
             if (sl_cfg->screen_sleep_enabled) {
-                int connected = nina_connection_connected_count();
 
                 /* Touch wake — always check first, even if connections are back */
                 if (screen_asleep && screen_touch_wake) {
@@ -1443,99 +1539,146 @@ main_loop:
                     screen_asleep = false;
                     screen_touch_wake = false;
                     all_disconnected_since_ms = now_ms;  /* restart sleep timer */
+                    spotify_idle_since_ms = now_ms;      /* restart Spotify sleep timer */
                     /* Wake poll tasks so they resume full polling + WS reconnect */
                     for (int i = 0; i < instance_count; i++)
                         if (poll_task_handles[i]) xTaskNotifyGive(poll_task_handles[i]);
                     ESP_LOGI(TAG, "Screen wake: touch detected");
                 }
 
-                if (connected > 0) {
-                    all_disconnected_since_ms = 0;
-                    if (screen_asleep) {
-                        /* Restore WiFi power save mode */
-                        esp_wifi_set_ps(sl_cfg->wifi_power_save ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE);
-                        /* Resume LVGL processing */
-                        lvgl_port_lock(0);
-                        lvgl_port_resume();
-                        lv_obj_invalidate(lv_scr_act());
-                        lvgl_port_unlock();
-                        bsp_display_brightness_set(sl_cfg->brightness);
-                        screen_asleep = false;
-                        /* Wake poll tasks so they resume full polling + WS reconnect */
-                        for (int i = 0; i < instance_count; i++)
-                            if (poll_task_handles[i]) xTaskNotifyGive(poll_task_handles[i]);
-                        ESP_LOGI(TAG, "Screen wake: NINA connected");
+                /* Determine if we should sleep or wake based on context:
+                 * - On Spotify page: sleep when not playing, wake when playing
+                 * - On other pages: sleep when all NINA disconnected, wake on reconnect */
+                bool should_sleep = false;
+                bool should_wake = false;
+                const char *wake_reason = NULL;
+                const char *sleep_reason = NULL;
+
+                if (on_spotify && sl_cfg->spotify_enabled) {
+                    /* Spotify page: sleep/wake based on playback state */
+                    spotify_playback_t spb;
+                    spotify_client_get_cached_playback(&spb);
+
+                    if (spb.is_playing) {
+                        spotify_idle_since_ms = 0;
+                        if (screen_asleep) {
+                            should_wake = true;
+                            wake_reason = "Spotify playing";
+                        }
+                    } else {
+                        /* Not playing — start/continue idle timer */
+                        if (spotify_idle_since_ms == 0) {
+                            spotify_idle_since_ms = now_ms;
+                        }
+                        if (!screen_asleep &&
+                            (now_ms - spotify_idle_since_ms >= (int64_t)sl_cfg->screen_sleep_timeout_s * 1000)) {
+                            should_sleep = true;
+                            sleep_reason = "Spotify idle";
+                        }
                     }
                 } else {
-                    /* All disconnected */
-                    if (all_disconnected_since_ms == 0) {
-                        all_disconnected_since_ms = now_ms;
-                    }
-                    if (!screen_asleep &&
-                        (now_ms - all_disconnected_since_ms >= (int64_t)sl_cfg->screen_sleep_timeout_s * 1000)) {
-                        /* Show "Sleeping..." message briefly before turning off */
-                        lvgl_port_lock(0);
-                        {
-                            lv_obj_t *scr = lv_scr_act();
-                            /* Black overlay covers entire screen */
-                            lv_obj_t *overlay = lv_obj_create(scr);
-                            lv_obj_remove_style_all(overlay);
-                            lv_obj_set_size(overlay, 720, 720);
-                            lv_obj_set_style_bg_color(overlay, lv_color_black(), 0);
-                            lv_obj_set_style_bg_opa(overlay, LV_OPA_COVER, 0);
-                            lv_obj_center(overlay);
-                            /* "Sleeping..." label — same size as "No Connections",
-                             * same color as "Waiting for NINA connections" */
-                            lv_obj_t *lbl = lv_label_create(overlay);
-                            lv_label_set_text(lbl, "Sleeping...");
-                            lv_obj_set_style_text_font(lbl, &lv_font_montserrat_32, 0);
-                            const theme_t *th = nina_dashboard_get_current_theme();
-                            if (th) {
-                                int gb = sl_cfg->color_brightness;
-                                lv_obj_set_style_text_color(lbl,
-                                    lv_color_hex(app_config_apply_brightness(th->label_color, gb)), 0);
-                            } else {
-                                lv_obj_set_style_text_color(lbl, lv_color_hex(0x888888), 0);
-                            }
-                            lv_obj_center(lbl);
+                    /* Not on Spotify — reset Spotify timer, use NINA logic */
+                    spotify_idle_since_ms = 0;
+                    int connected = nina_connection_connected_count();
+
+                    if (connected > 0) {
+                        all_disconnected_since_ms = 0;
+                        if (screen_asleep) {
+                            should_wake = true;
+                            wake_reason = "NINA connected";
                         }
-                        lvgl_port_unlock();
-
-                        /* Hold the message on screen for 2.5 seconds */
-                        vTaskDelay(pdMS_TO_TICKS(2500));
-
-                        /* Clean up the overlay before sleeping */
-                        lvgl_port_lock(0);
-                        {
-                            lv_obj_t *scr = lv_scr_act();
-                            /* Remove the last child (our overlay) */
-                            uint32_t cnt = lv_obj_get_child_count(scr);
-                            if (cnt > 0) {
-                                lv_obj_t *last = lv_obj_get_child(scr, cnt - 1);
-                                lv_obj_delete(last);
-                            }
+                    } else {
+                        /* All disconnected */
+                        if (all_disconnected_since_ms == 0) {
+                            all_disconnected_since_ms = now_ms;
                         }
-                        lvgl_port_unlock();
-
-                        /* Turn off backlight completely via direct LEDC.
-                         * BSP brightness_set(0) only dims to 47% due to offset mapping.
-                         * With output_invert=1, duty=0 → GPIO HIGH → backlight off
-                         * (backlight is active-low on this board). */
-                        ledc_set_duty(LEDC_LOW_SPEED_MODE, CONFIG_BSP_DISPLAY_BRIGHTNESS_LEDC_CH, 0);
-                        ledc_update_duty(LEDC_LOW_SPEED_MODE, CONFIG_BSP_DISPLAY_BRIGHTNESS_LEDC_CH);
-                        screen_asleep = true;
-                        /* Disconnect WebSockets to save network resources while sleeping */
-                        for (int i = 0; i < instance_count; i++)
-                            nina_websocket_stop(i);
-                        /* Stop LVGL processing during screen sleep */
-                        lvgl_port_lock(0);
-                        lvgl_port_stop();
-                        lvgl_port_unlock();
-                        /* Deeper WiFi power save during screen sleep */
-                        esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
-                        ESP_LOGI(TAG, "Screen sleep: no NINA connections for %ds",
-                                 sl_cfg->screen_sleep_timeout_s);
+                        if (!screen_asleep &&
+                            (now_ms - all_disconnected_since_ms >= (int64_t)sl_cfg->screen_sleep_timeout_s * 1000)) {
+                            should_sleep = true;
+                            sleep_reason = "no NINA connections";
+                        }
                     }
+                }
+
+                if (should_wake) {
+                    /* Restore WiFi power save mode */
+                    esp_wifi_set_ps(sl_cfg->wifi_power_save ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE);
+                    /* Resume LVGL processing */
+                    lvgl_port_lock(0);
+                    lvgl_port_resume();
+                    lv_obj_invalidate(lv_scr_act());
+                    lvgl_port_unlock();
+                    bsp_display_brightness_set(sl_cfg->brightness);
+                    screen_asleep = false;
+                    /* Wake poll tasks so they resume full polling + WS reconnect */
+                    for (int i = 0; i < instance_count; i++)
+                        if (poll_task_handles[i]) xTaskNotifyGive(poll_task_handles[i]);
+                    ESP_LOGI(TAG, "Screen wake: %s", wake_reason);
+                }
+
+                if (should_sleep) {
+                    /* Show "Sleeping..." message briefly before turning off */
+                    lvgl_port_lock(0);
+                    {
+                        lv_obj_t *scr = lv_scr_act();
+                        /* Black overlay covers entire screen */
+                        lv_obj_t *overlay = lv_obj_create(scr);
+                        lv_obj_remove_style_all(overlay);
+                        lv_obj_set_size(overlay, 720, 720);
+                        lv_obj_set_style_bg_color(overlay, lv_color_black(), 0);
+                        lv_obj_set_style_bg_opa(overlay, LV_OPA_COVER, 0);
+                        lv_obj_center(overlay);
+                        /* "Sleeping..." label — same size as "No Connections",
+                         * same color as "Waiting for NINA connections" */
+                        lv_obj_t *lbl = lv_label_create(overlay);
+                        lv_label_set_text(lbl, "Sleeping...");
+                        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_32, 0);
+                        const theme_t *th = nina_dashboard_get_current_theme();
+                        if (th) {
+                            int gb = sl_cfg->color_brightness;
+                            lv_obj_set_style_text_color(lbl,
+                                lv_color_hex(app_config_apply_brightness(th->label_color, gb)), 0);
+                        } else {
+                            lv_obj_set_style_text_color(lbl, lv_color_hex(0x888888), 0);
+                        }
+                        lv_obj_center(lbl);
+                    }
+                    lvgl_port_unlock();
+
+                    /* Hold the message on screen for 2.5 seconds */
+                    vTaskDelay(pdMS_TO_TICKS(2500));
+
+                    /* Clean up the overlay before sleeping */
+                    lvgl_port_lock(0);
+                    {
+                        lv_obj_t *scr = lv_scr_act();
+                        /* Remove the last child (our overlay) */
+                        uint32_t cnt = lv_obj_get_child_count(scr);
+                        if (cnt > 0) {
+                            lv_obj_t *last = lv_obj_get_child(scr, cnt - 1);
+                            lv_obj_delete(last);
+                        }
+                    }
+                    lvgl_port_unlock();
+
+                    /* Turn off backlight completely via direct LEDC.
+                     * BSP brightness_set(0) only dims to 47% due to offset mapping.
+                     * With output_invert=1, duty=0 → GPIO HIGH → backlight off
+                     * (backlight is active-low on this board). */
+                    ledc_set_duty(LEDC_LOW_SPEED_MODE, CONFIG_BSP_DISPLAY_BRIGHTNESS_LEDC_CH, 0);
+                    ledc_update_duty(LEDC_LOW_SPEED_MODE, CONFIG_BSP_DISPLAY_BRIGHTNESS_LEDC_CH);
+                    screen_asleep = true;
+                    /* Disconnect WebSockets to save network resources while sleeping */
+                    for (int i = 0; i < instance_count; i++)
+                        nina_websocket_stop(i);
+                    /* Stop LVGL processing during screen sleep */
+                    lvgl_port_lock(0);
+                    lvgl_port_stop();
+                    lvgl_port_unlock();
+                    /* Deeper WiFi power save during screen sleep */
+                    esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
+                    ESP_LOGI(TAG, "Screen sleep: %s for %ds",
+                             sleep_reason, sl_cfg->screen_sleep_timeout_s);
                 }
             } else if (screen_asleep) {
                 /* Feature disabled while asleep — wake up */
@@ -1549,6 +1692,7 @@ main_loop:
                 bsp_display_brightness_set(sl_cfg->brightness);
                 screen_asleep = false;
                 all_disconnected_since_ms = 0;
+                spotify_idle_since_ms = 0;
                 for (int i = 0; i < instance_count; i++)
                     if (poll_task_handles[i]) xTaskNotifyGive(poll_task_handles[i]);
                 ESP_LOGI(TAG, "Screen wake: sleep feature disabled");
@@ -1557,8 +1701,10 @@ main_loop:
 
         /* ── Auto deep sleep when idle (if enabled) ── */
         if (app_config_get()->deep_sleep_on_idle && app_config_get()->deep_sleep_enabled) {
-            if (screen_asleep && all_disconnected_since_ms > 0) {
-                uint32_t idle_duration_ms = (uint32_t)(esp_timer_get_time() / 1000) - (uint32_t)all_disconnected_since_ms;
+            int64_t idle_since = all_disconnected_since_ms > 0 ? all_disconnected_since_ms
+                               : spotify_idle_since_ms > 0     ? spotify_idle_since_ms : 0;
+            if (screen_asleep && idle_since > 0) {
+                uint32_t idle_duration_ms = (uint32_t)(esp_timer_get_time() / 1000) - (uint32_t)idle_since;
                 uint32_t idle_threshold_ms = (uint32_t)app_config_get()->screen_sleep_timeout_s * 2 * 1000; /* 2x screen sleep timeout */
                 if (idle_duration_ms > idle_threshold_ms) {
                     ESP_LOGI(TAG, "Auto deep sleep after extended idle (%lu ms)", (unsigned long)idle_duration_ms);

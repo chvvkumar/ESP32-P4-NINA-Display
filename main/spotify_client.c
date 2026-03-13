@@ -137,47 +137,100 @@ void spotify_client_init(void)
 }
 
 // =============================================================================
-// Public API — Get Currently Playing
+// Public API — Get Currently Playing (persistent keep-alive connection)
 // =============================================================================
+
+/* Persistent HTTP client for the currently-playing endpoint.
+ * Reusing the TLS session avoids a 2-5 second handshake on every poll. */
+static esp_http_client_handle_t s_player_client = NULL;
+
+static void player_client_destroy(void)
+{
+    if (s_player_client) {
+        esp_http_client_cleanup(s_player_client);
+        s_player_client = NULL;
+    }
+}
+
+static esp_http_client_handle_t player_client_get(void)
+{
+    if (s_player_client) return s_player_client;
+
+    esp_http_client_config_t http_cfg = {
+        .url = SPOTIFY_API_BASE "/currently-playing",
+        .timeout_ms = SPOTIFY_HTTP_TIMEOUT_MS,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+        .keep_alive_enable = true,
+    };
+
+    s_player_client = esp_http_client_init(&http_cfg);
+    if (s_player_client) {
+        ESP_LOGI(TAG, "Created persistent HTTP client for currently-playing");
+    }
+    return s_player_client;
+}
 
 esp_err_t spotify_client_get_currently_playing(spotify_playback_t *out)
 {
     if (!out) return ESP_ERR_INVALID_ARG;
 
-    const char *url = SPOTIFY_API_BASE "/currently-playing";
-
-    esp_http_client_config_t http_cfg = {
-        .url = url,
-        .timeout_ms = SPOTIFY_HTTP_TIMEOUT_MS,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .keep_alive_enable = false,
-    };
-
-    esp_http_client_handle_t client = esp_http_client_init(&http_cfg);
+    esp_http_client_handle_t client = player_client_get();
     if (!client) {
         ESP_LOGE(TAG, "Failed to init HTTP client for currently-playing");
         return ESP_FAIL;
     }
 
     if (set_auth_header(client) != ESP_OK) {
-        esp_http_client_cleanup(client);
         return ESP_FAIL;
     }
 
     esp_err_t err = esp_http_client_open(client, 0);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "HTTP open failed: %s", esp_err_to_name(err));
-        esp_http_client_cleanup(client);
-        return ESP_FAIL;
+        ESP_LOGW(TAG, "HTTP open failed: %s — reconnecting", esp_err_to_name(err));
+        /* Connection stale or dropped — destroy and retry once */
+        player_client_destroy();
+        client = player_client_get();
+        if (!client) return ESP_FAIL;
+        if (set_auth_header(client) != ESP_OK) return ESP_FAIL;
+        err = esp_http_client_open(client, 0);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "HTTP open retry failed: %s", esp_err_to_name(err));
+            player_client_destroy();
+            return ESP_FAIL;
+        }
     }
 
     int content_length = esp_http_client_fetch_headers(client);
     int status = esp_http_client_get_status_code(client);
 
-    /* 204 = nothing currently playing */
+    /* Status -1 means the server closed the keep-alive connection silently.
+     * Reconnect and retry once instead of wasting a poll cycle. */
+    if (status == -1) {
+        ESP_LOGW(TAG, "Stale keep-alive connection — reconnecting");
+        player_client_destroy();
+        client = player_client_get();
+        if (!client) return ESP_FAIL;
+        if (set_auth_header(client) != ESP_OK) return ESP_FAIL;
+        err = esp_http_client_open(client, 0);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "HTTP open retry failed: %s", esp_err_to_name(err));
+            player_client_destroy();
+            return ESP_FAIL;
+        }
+        content_length = esp_http_client_fetch_headers(client);
+        status = esp_http_client_get_status_code(client);
+        if (status == -1) {
+            player_client_destroy();
+            return ESP_FAIL;
+        }
+    }
+
+    /* 204 = nothing currently playing — drain and keep connection alive */
     if (status == 204) {
         ESP_LOGD(TAG, "No active playback (204)");
-        esp_http_client_cleanup(client);
+        /* Drain any residual body to keep the connection clean */
+        char drain[64];
+        while (esp_http_client_read(client, drain, sizeof(drain)) > 0) {}
 
         /* Update cached state to reflect nothing playing */
         if (xSemaphoreTake(s_mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
@@ -193,13 +246,13 @@ esp_err_t spotify_client_get_currently_playing(spotify_playback_t *out)
     if (status == 401) {
         ESP_LOGW(TAG, "HTTP 401 from currently-playing — invalidating token");
         spotify_auth_invalidate_token();
-        esp_http_client_cleanup(client);
+        player_client_destroy();
         return ESP_FAIL;
     }
 
     if (status != 200) {
         ESP_LOGW(TAG, "Unexpected HTTP %d from currently-playing", status);
-        esp_http_client_cleanup(client);
+        player_client_destroy();
         return ESP_FAIL;
     }
 
@@ -212,7 +265,7 @@ esp_err_t spotify_client_get_currently_playing(spotify_playback_t *out)
     char *buffer = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
     if (!buffer) {
         ESP_LOGE(TAG, "Failed to allocate %d bytes for response", buf_size);
-        esp_http_client_cleanup(client);
+        player_client_destroy();
         return ESP_FAIL;
     }
 
@@ -226,7 +279,7 @@ esp_err_t spotify_client_get_currently_playing(spotify_playback_t *out)
     }
     buffer[total_read] = '\0';
 
-    esp_http_client_cleanup(client);
+    /* Don't cleanup — keep connection alive for next poll */
 
     if (total_read == 0) {
         ESP_LOGW(TAG, "Empty response body from currently-playing");
@@ -458,4 +511,13 @@ esp_err_t spotify_client_fetch_album_art(const char *url, uint8_t **out_buf,
 
     ESP_LOGD(TAG, "Album art fetched: %zu bytes from %s", total_read, url);
     return ESP_OK;
+}
+
+// =============================================================================
+// Public API — Connection Cleanup
+// =============================================================================
+
+void spotify_client_destroy_connection(void)
+{
+    player_client_destroy();
 }
