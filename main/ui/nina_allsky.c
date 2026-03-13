@@ -14,6 +14,7 @@
 #include "ui_helpers.h"
 #include "cJSON.h"
 
+#include "esp_heap_caps.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -104,6 +105,98 @@ static const char *quad_json_keys[4] = {
     "thermal", "sqm", "ambient", "power"
 };
 
+/* Forward declaration — defined below in Helpers section */
+static inline bool is_red_theme(void);
+
+/* ── Moon phase canvas ───────────────────────────────────────────────── */
+
+#define MOON_ICON_SIZE 64
+
+static lv_obj_t *moon_canvas = NULL;
+static uint8_t  *moon_canvas_buf = NULL;
+static float     cached_moon_illum = -1.0f;
+
+/**
+ * Render a small moon phase icon on the canvas.
+ * Uses the terminator equation: for a point at (dx, dy) on the disk,
+ * the pixel is illuminated if dx > (1 - 2*f) * sqrt(R² - dy²),
+ * where f = illumination fraction (0–1).
+ */
+static void render_moon_phase(float illum_pct) {
+    if (!moon_canvas || !moon_canvas_buf) return;
+    if (fabsf(illum_pct - cached_moon_illum) < 0.5f) return;
+    cached_moon_illum = illum_pct;
+
+    const int S = MOON_ICON_SIZE;
+    const float R  = (S - 2) / 2.0f;
+    const float cx = (S - 1) / 2.0f;
+    const float cy = (S - 1) / 2.0f;
+    const float f  = illum_pct / 100.0f;
+    const float AA = 1.2f; /* antialiasing width in pixels */
+
+    /* Moon colors — red-only for red themes, warm yellow/white otherwise */
+    float lit_r, lit_g, lit_b;    /* lit portion base color */
+    float dark_r, dark_g, dark_b; /* dark portion base color */
+    if (is_red_theme()) {
+        /* Use theme text_color for lit portion, bento_border for dark */
+        uint32_t tc = current_theme->text_color;
+        lit_r = (float)((tc >> 16) & 0xFF);
+        lit_g = (float)((tc >>  8) & 0xFF);
+        lit_b = (float)( tc        & 0xFF);
+        uint32_t dc = current_theme->bento_border;
+        dark_r = (float)((dc >> 16) & 0xFF);
+        dark_g = (float)((dc >>  8) & 0xFF);
+        dark_b = (float)( dc        & 0xFF);
+    } else {
+        lit_r = 220.0f; lit_g = 200.0f; lit_b = 160.0f;
+        dark_r = 24.0f; dark_g = 24.0f; dark_b = 42.0f;
+    }
+
+    lv_canvas_fill_bg(moon_canvas, lv_color_hex(0x000000), LV_OPA_TRANSP);
+
+    for (int py = 0; py < S; py++) {
+        float dy  = py - cy;
+        float dy2 = dy * dy;
+
+        for (int px = 0; px < S; px++) {
+            float dx = px - cx;
+            float r2 = dx * dx + dy2;
+            float dist = sqrtf(r2);
+
+            /* Outer edge alpha — smooth antialiased circle */
+            float edge_alpha = R - dist;
+            if (edge_alpha < 0.0f) continue;        /* fully outside */
+            if (edge_alpha > AA) edge_alpha = 1.0f;
+            else edge_alpha /= AA;                   /* fade 0→1 over AA pixels */
+
+            /* Terminator position at this scanline */
+            float max_x2 = R * R - dy2;
+            float semi_w = (max_x2 > 0.0f) ? sqrtf(max_x2) : 0.0f;
+            float term_x = (1.0f - 2.0f * f) * semi_w;
+
+            /* Terminator blend — smooth transition across AA pixels */
+            float lit = (dx - term_x) / AA;
+            if (lit < 0.0f) lit = 0.0f;
+            if (lit > 1.0f) lit = 1.0f;
+
+            /* Limb darkening */
+            float limb = 1.0f - 0.25f * (r2 / (R * R));
+
+            /* Blend lit and dark colors */
+            uint8_t rv = (uint8_t)(lit * lit_r * limb + (1.0f - lit) * dark_r);
+            uint8_t gv = (uint8_t)(lit * lit_g * limb + (1.0f - lit) * dark_g);
+            uint8_t bv = (uint8_t)(lit * lit_b * limb + (1.0f - lit) * dark_b);
+
+            /* Final opacity: outer edge AA * base opacity (dark side is dimmer) */
+            float base_opa = lit * 1.0f + (1.0f - lit) * 0.3f;
+            uint8_t opa = (uint8_t)(edge_alpha * base_opa * 255.0f);
+
+            lv_canvas_set_px(moon_canvas, px, py,
+                             lv_color_make(rv, gv, bv), opa);
+        }
+    }
+}
+
 /* ── Helpers ─────────────────────────────────────────────────────────── */
 
 static inline void set_text_if_changed(lv_obj_t *lbl, const char *text) {
@@ -131,6 +224,12 @@ static inline void set_bar_value_if_changed(lv_obj_t *bar, int *cached, int valu
         *cached = value;
         lv_bar_set_value(bar, value, LV_ANIM_OFF);
     }
+}
+
+static inline bool is_red_theme(void) {
+    return current_theme &&
+           (strcmp(current_theme->name, "Red Night") == 0 ||
+            strcmp(current_theme->name, "Night Vision Red") == 0);
 }
 
 static uint32_t parse_hex_color(const char *str, uint32_t fallback) {
@@ -254,6 +353,18 @@ static void parse_thresholds(void) {
         }
     }
 
+    /* Override threshold gradient colors for red-spectrum themes */
+    if (is_red_theme()) {
+        for (int q = 0; q < 4; q++) {
+            for (int f = 0; f < 3; f++) {
+                if (field_thresholds[q][f].valid) {
+                    field_thresholds[q][f].color_min = current_theme->progress_color;
+                    field_thresholds[q][f].color_max = current_theme->text_color;
+                }
+            }
+        }
+    }
+
     /* Cache dew_point threshold colors from ambient_sub2 */
     dew_safe_color = 0x3b82f6;
     dew_warn_color = 0xef4444;
@@ -261,6 +372,12 @@ static void parse_thresholds(void) {
     if (dew_bt->valid) {
         dew_safe_color = dew_bt->color_min;
         dew_warn_color = dew_bt->color_max;
+    }
+
+    /* Override dew colors for red-spectrum themes */
+    if (is_red_theme()) {
+        dew_safe_color  = current_theme->progress_color;
+        dew_warn_color  = current_theme->text_color;
     }
 
     cJSON_Delete(root);
@@ -324,8 +441,28 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
         }
     }
 
-    /* GPS indicator symbol — top-right of SQM quadrant */
+    /* Moon phase canvas — floating overlay on SQM quadrant (top-right) */
     if (quad_index == 1) {
+        if (!moon_canvas_buf) {
+            moon_canvas_buf = heap_caps_malloc(
+                LV_CANVAS_BUF_SIZE(MOON_ICON_SIZE, MOON_ICON_SIZE,
+                                   32, LV_DRAW_BUF_STRIDE_ALIGN),
+                MALLOC_CAP_SPIRAM);
+        }
+        if (moon_canvas_buf) {
+            moon_canvas = lv_canvas_create(qd->box);
+            lv_canvas_set_buffer(moon_canvas, moon_canvas_buf,
+                                 MOON_ICON_SIZE, MOON_ICON_SIZE,
+                                 LV_COLOR_FORMAT_ARGB8888);
+            lv_canvas_fill_bg(moon_canvas, lv_color_hex(0x000000), LV_OPA_TRANSP);
+            lv_obj_add_flag(moon_canvas, LV_OBJ_FLAG_FLOATING);
+            lv_obj_align(moon_canvas, LV_ALIGN_TOP_RIGHT, -4, 4);
+            cached_moon_illum = -1.0f;
+        }
+    }
+
+    /* GPS indicator symbol — top-right of POWER quadrant */
+    if (quad_index == 3) {
         qd->dot1 = lv_label_create(title_row);
         lv_label_set_text(qd->dot1, LV_SYMBOL_GPS);
         lv_obj_set_style_text_font(qd->dot1, &lv_font_montserrat_22, 0);
@@ -400,7 +537,8 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     qd->lbl_sub1 = lv_label_create(sub_row);
-    lv_obj_set_style_text_font(qd->lbl_sub1, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_font(qd->lbl_sub1,
+        (quad_index == 1) ? &lv_font_montserrat_22 : &lv_font_montserrat_28, 0);
     lv_label_set_text(qd->lbl_sub1, "--");
     if (current_theme) {
         int gb = app_config_get()->color_brightness;
@@ -416,6 +554,7 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
         lv_obj_set_style_text_color(qd->lbl_sub2,
             lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
     }
+
 }
 
 /* ── Page creation ───────────────────────────────────────────────────── */
@@ -514,6 +653,12 @@ void allsky_page_update(const allsky_data_t *data) {
                 set_color_if_changed(qd->lbl_main_value, &qd->cached_main_color, tc);
             }
 
+            /* Clear moon canvas on disconnect */
+            if (q == 1 && moon_canvas && cached_moon_illum >= 0.0f) {
+                lv_canvas_fill_bg(moon_canvas, lv_color_hex(0x000000), LV_OPA_TRANSP);
+                cached_moon_illum = -1.0f;
+            }
+
             /* Reset indicator symbols to dim */
             if (qd->dot1 && current_theme) {
                 uint32_t dc = app_config_apply_brightness(current_theme->bento_border, gb);
@@ -541,6 +686,11 @@ void allsky_page_update(const allsky_data_t *data) {
         format_sub_value(sub_buf, sizeof(sub_buf),
                          qcfg[q].sub2_label, sub2_val, qcfg[q].sub2_suffix);
         set_text_if_changed(qd->lbl_sub2, sub_buf[0] ? sub_buf : "--");
+
+        /* SQM quadrant: render moon phase from directly-fetched illumination */
+        if (q == 1 && data->moon_illumination >= 0.0f) {
+            render_moon_phase(data->moon_illumination);
+        }
 
         /* Bar + main value color from threshold gradient */
         bar_threshold_t *bt = &field_thresholds[q][FIELD_MAIN];
@@ -618,15 +768,17 @@ void allsky_page_update(const allsky_data_t *data) {
             }
         }
 
-        /* Dot 1 indicator: thermal=fan (ambient config), sqm=GPS (sqm config) */
+        /* Dot 1 indicator: thermal=fan (ambient config), power=GPS (sqm config) */
         if (qd->dot1 && current_theme) {
             const char *dot1_val;
             bool dot1_on;
-            if (q == 1) {
+            if (q == 3) {
+                /* GPS indicator on POWER quadrant — uses SQM dot1 config */
                 dot1_val = data->field_values[ALLSKY_F_SQM_DOT1];
                 dot1_on = (dot1_val[0] != '\0' && qcfg[1].dot1_on_value[0] != '\0'
                            && strcmp(dot1_val, qcfg[1].dot1_on_value) == 0);
             } else {
+                /* Fan indicator on THERMAL quadrant — uses ambient config */
                 dot1_val = data->field_values[ALLSKY_F_AMBIENT_DOT1];
                 dot1_on = (dot1_val[0] != '\0' && qcfg[2].dot1_on_value[0] != '\0'
                            && strcmp(dot1_val, qcfg[2].dot1_on_value) == 0);
@@ -654,6 +806,12 @@ void allsky_page_update(const allsky_data_t *data) {
 
 void allsky_page_apply_theme(void) {
     if (!allsky_page || !current_theme) return;
+
+    /* Re-derive threshold colors for the new theme */
+    parse_thresholds();
+
+    /* Force moon canvas re-render with new theme colors */
+    cached_moon_illum = -1.0f;
 
     /* Invalidate all cached colors so the next update re-applies everything */
     for (int q = 0; q < 4; q++) {

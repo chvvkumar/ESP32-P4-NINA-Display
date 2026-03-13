@@ -59,5 +59,12 @@ void instance_poll_task(void *arg);
 /** FreeRTOS task: AllSky API poller — polls at allsky_update_interval_s rate. */
 void allsky_poll_task(void *arg);
 
+/** Spotify poll task handle and page-active flag — defined in tasks.c. */
+extern TaskHandle_t spotify_task_handle;
+extern volatile bool spotify_page_active;
+
+/** FreeRTOS task: Spotify API poller — fetches currently-playing, album art on track change. */
+void spotify_poll_task(void *arg);
+
 /** FreeRTOS task: UI coordinator — reads cached data, updates LVGL, handles auto-rotate. */
 void data_update_task(void *arg);

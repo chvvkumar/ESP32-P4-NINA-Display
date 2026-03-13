@@ -14,6 +14,7 @@
 #include "nina_sysinfo.h"
 #include "nina_summary.h"
 #include "nina_allsky.h"
+#include "nina_spotify.h"
 #include "nina_settings_tabview.h"
 #include "nina_toast.h"
 #include "nina_event_log.h"
@@ -35,19 +36,23 @@ int active_page = 0;
 const theme_t *current_theme = NULL;
 int page_instance_map[MAX_NINA_INSTANCES] = {0, 1, 2};
 
-/* AllSky page — always first (index 0), excluded from indicators */
+/* AllSky page — always at PAGE_IDX_ALLSKY (0), excluded from indicators */
 lv_obj_t *allsky_obj = NULL;
 static lv_obj_t *allsky_page_created = NULL;  /* Always holds the created page object */
 
-/* Summary page — index 1, excluded from indicators */
+/* Spotify page — always at PAGE_IDX_SPOTIFY (1), excluded from indicators */
+lv_obj_t *spotify_obj = NULL;
+static lv_obj_t *spotify_page_created = NULL;  /* Always holds the created page object */
+
+/* Summary page — at PAGE_IDX_SUMMARY (2), excluded from indicators */
 static lv_obj_t *summary_obj = NULL;
 
-/* Settings page — before sysinfo (index page_count+2), excluded from indicators */
+/* Settings page — at SETTINGS_PAGE_IDX(page_count), excluded from indicators */
 static lv_obj_t *settings_obj = NULL;
 
-/* System info page — always the last navigable page, excluded from indicators */
+/* System info page — at SYSINFO_PAGE_IDX(page_count), excluded from indicators */
 static lv_obj_t *sysinfo_obj = NULL;
-int total_page_count = 0;   /* 1 (allsky) + 1 (summary) + page_count (NINA) + 1 (settings) + 1 (sysinfo) */
+int total_page_count = 0;   /* page_count + EXTRA_PAGES (allsky + spotify + summary + settings + sysinfo) */
 
 /* Private state */
 static lv_obj_t *scr_dashboard = NULL;
@@ -123,57 +128,68 @@ lv_obj_t *create_value_label(lv_obj_t *parent) {
 }
 
 /*
- * Page index convention:
- *   0                     = AllSky page
- *   1                     = summary page
- *   2 .. page_count + 1   = NINA instance pages  (pages[idx-2])
- *   page_count + 2        = settings page
- *   page_count + 3        = sysinfo page
- *   total_page_count      = page_count + 4
+ * Page index convention (see PAGE_IDX_* / NINA_PAGE_OFFSET / EXTRA_PAGES in nina_dashboard_internal.h):
+ *   PAGE_IDX_ALLSKY  (0)                        = AllSky page
+ *   PAGE_IDX_SPOTIFY (1)                        = Spotify page
+ *   PAGE_IDX_SUMMARY (2)                        = summary page
+ *   NINA_PAGE_OFFSET .. NINA_PAGE_OFFSET+pc-1   = NINA instance pages  (pages[idx - NINA_PAGE_OFFSET])
+ *   SETTINGS_PAGE_IDX(pc)                       = settings page
+ *   SYSINFO_PAGE_IDX(pc)                        = sysinfo page
+ *   total_page_count                            = page_count + EXTRA_PAGES
  */
 
 /* Hide the page object at the given index */
 static void hide_page_at(int idx) {
-    if (idx == 0 && allsky_obj)
+    if (idx == PAGE_IDX_ALLSKY && allsky_obj)
         lv_obj_add_flag(allsky_obj, LV_OBJ_FLAG_HIDDEN);
-    else if (idx == 1 && summary_obj)
+    else if (idx == PAGE_IDX_SPOTIFY && spotify_obj) {
+        lv_obj_add_flag(spotify_obj, LV_OBJ_FLAG_HIDDEN);
+        nina_spotify_on_hide();
+    }
+    else if (idx == PAGE_IDX_SUMMARY && summary_obj)
         lv_obj_add_flag(summary_obj, LV_OBJ_FLAG_HIDDEN);
-    else if (idx >= 2 && idx <= page_count + 1)
-        lv_obj_add_flag(pages[idx - 2].page, LV_OBJ_FLAG_HIDDEN);
-    else if (idx == page_count + 2 && settings_obj) {
+    else if (idx >= NINA_PAGE_OFFSET && idx < NINA_PAGE_OFFSET + page_count)
+        lv_obj_add_flag(pages[idx - NINA_PAGE_OFFSET].page, LV_OBJ_FLAG_HIDDEN);
+    else if (idx == SETTINGS_PAGE_IDX(page_count) && settings_obj) {
         settings_tabview_destroy();
         settings_obj = NULL;
-    } else if (idx == page_count + 3 && sysinfo_obj)
+    } else if (idx == SYSINFO_PAGE_IDX(page_count) && sysinfo_obj)
         lv_obj_add_flag(sysinfo_obj, LV_OBJ_FLAG_HIDDEN);
 }
 
 /* Show the page object at the given index */
 static void show_page_at(int idx) {
-    if (idx == 0 && allsky_obj)
+    if (idx == PAGE_IDX_ALLSKY && allsky_obj)
         lv_obj_clear_flag(allsky_obj, LV_OBJ_FLAG_HIDDEN);
-    else if (idx == 1 && summary_obj)
+    else if (idx == PAGE_IDX_SPOTIFY && spotify_obj) {
+        lv_obj_clear_flag(spotify_obj, LV_OBJ_FLAG_HIDDEN);
+        nina_spotify_on_show();
+    }
+    else if (idx == PAGE_IDX_SUMMARY && summary_obj)
         lv_obj_clear_flag(summary_obj, LV_OBJ_FLAG_HIDDEN);
-    else if (idx >= 2 && idx <= page_count + 1)
-        lv_obj_clear_flag(pages[idx - 2].page, LV_OBJ_FLAG_HIDDEN);
-    else if (idx == page_count + 2) {
+    else if (idx >= NINA_PAGE_OFFSET && idx < NINA_PAGE_OFFSET + page_count)
+        lv_obj_clear_flag(pages[idx - NINA_PAGE_OFFSET].page, LV_OBJ_FLAG_HIDDEN);
+    else if (idx == SETTINGS_PAGE_IDX(page_count)) {
         if (!settings_obj) {
             settings_obj = settings_tabview_create(main_cont);
         }
         lv_obj_clear_flag(settings_obj, LV_OBJ_FLAG_HIDDEN);
         settings_tabview_refresh();
     }
-    else if (idx == page_count + 3 && sysinfo_obj) {
+    else if (idx == SYSINFO_PAGE_IDX(page_count) && sysinfo_obj) {
         lv_obj_clear_flag(sysinfo_obj, LV_OBJ_FLAG_HIDDEN);
         sysinfo_page_refresh();
     }
 }
 
 static lv_obj_t *get_page_obj(int idx) {
-    if (idx == 0 && allsky_obj) return allsky_obj;
-    if (idx == 1 && summary_obj) return summary_obj;
-    if (idx >= 2 && idx <= page_count + 1) return pages[idx - 2].page;
-    if (idx == page_count + 2 && settings_obj) return settings_obj;
-    if (idx == page_count + 3 && sysinfo_obj) return sysinfo_obj;
+    if (idx == PAGE_IDX_ALLSKY && allsky_obj) return allsky_obj;
+    if (idx == PAGE_IDX_SPOTIFY && spotify_obj) return spotify_obj;
+    if (idx == PAGE_IDX_SUMMARY && summary_obj) return summary_obj;
+    if (idx >= NINA_PAGE_OFFSET && idx < NINA_PAGE_OFFSET + page_count)
+        return pages[idx - NINA_PAGE_OFFSET].page;
+    if (idx == SETTINGS_PAGE_IDX(page_count) && settings_obj) return settings_obj;
+    if (idx == SYSINFO_PAGE_IDX(page_count) && sysinfo_obj) return sysinfo_obj;
     return NULL;
 }
 
@@ -202,6 +218,8 @@ static void apply_theme_to_page(dashboard_page_t *p) {
 
     if (p->arc_exposure) {
         lv_obj_set_style_arc_color(p->arc_exposure, lv_color_hex(current_theme->bg_main), LV_PART_MAIN);
+        lv_obj_set_style_arc_opa(p->arc_exposure, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_shadow_width(p->arc_exposure, 0, LV_PART_INDICATOR);
     }
 
     if (p->lbl_loop_count) lv_obj_set_style_text_color(p->lbl_loop_count, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
@@ -219,6 +237,7 @@ static void apply_theme_to_page(dashboard_page_t *p) {
     for (int i = 0; i < MAX_POWER_WIDGETS; i++) {
         if (p->lbl_pwr_title[i]) lv_obj_set_style_text_color(p->lbl_pwr_title[i], lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
     }
+
 }
 
 const theme_t *nina_dashboard_get_current_theme(void) {
@@ -245,11 +264,13 @@ void nina_dashboard_apply_theme(int theme_index) {
     }
 
     if (allsky_obj) allsky_page_apply_theme();
+    if (spotify_obj) spotify_page_apply_theme();
     summary_page_apply_theme();
     if (settings_obj) settings_tabview_apply_theme();
     sysinfo_page_apply_theme();
     nina_graph_overlay_apply_theme();
     nina_info_overlay_apply_theme();
+    nina_thumbnail_apply_theme();
     nina_toast_apply_theme();
     nina_event_log_apply_theme();
     nina_alerts_apply_theme();
@@ -263,7 +284,7 @@ void nina_dashboard_apply_theme(int theme_index) {
 
 /* Go back to summary page when bottom row is clicked */
 static void bottom_row_click_cb(lv_event_t *e) {
-    nina_dashboard_show_page(1, 0);
+    nina_dashboard_show_page(PAGE_IDX_SUMMARY, 0);
 }
 
 /* Build all widgets for one dashboard page */
@@ -671,22 +692,29 @@ static void gesture_event_cb(lv_event_t *e) {
 
     /* Block screen-level swipe on settings page — sliders need horizontal drag.
      * Only the header widget on the settings page handles page-switch gestures. */
-    if (active_page == page_count + 2) return;
+    if (active_page == SETTINGS_PAGE_IDX(page_count)) return;
 
     lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
     int new_page = active_page;
 
-    int settings_idx = page_count + 2;  /* settings page — skip in swipe navigation */
-    int allsky_idx = (allsky_obj == NULL) ? 0 : -1;  /* allsky page — skip when disabled */
-
     if (dir == LV_DIR_LEFT) {
-        new_page = (active_page + 1) % total_page_count;
-        if (new_page == settings_idx) new_page = (new_page + 1) % total_page_count;
-        if (new_page == allsky_idx) new_page = (new_page + 1) % total_page_count;
+        for (int step = 1; step < total_page_count; step++) {
+            int candidate = (active_page + step) % total_page_count;
+            if (candidate == SETTINGS_PAGE_IDX(page_count)) continue;
+            if (candidate == PAGE_IDX_ALLSKY && allsky_obj == NULL) continue;
+            if (candidate == PAGE_IDX_SPOTIFY && spotify_obj == NULL) continue;
+            new_page = candidate;
+            break;
+        }
     } else if (dir == LV_DIR_RIGHT) {
-        new_page = (active_page - 1 + total_page_count) % total_page_count;
-        if (new_page == settings_idx) new_page = (new_page - 1 + total_page_count) % total_page_count;
-        if (new_page == allsky_idx) new_page = (new_page - 1 + total_page_count) % total_page_count;
+        for (int step = 1; step < total_page_count; step++) {
+            int candidate = (active_page - step + total_page_count) % total_page_count;
+            if (candidate == SETTINGS_PAGE_IDX(page_count)) continue;
+            if (candidate == PAGE_IDX_ALLSKY && allsky_obj == NULL) continue;
+            if (candidate == PAGE_IDX_SPOTIFY && spotify_obj == NULL) continue;
+            new_page = candidate;
+            break;
+        }
     } else {
         return;
     }
@@ -772,7 +800,7 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
         }
     }
     if (page_count < 1) page_count = 1;  /* Always at least 1 page */
-    active_page = 1;  /* Summary page is the default (index 1) */
+    active_page = PAGE_IDX_SUMMARY;  /* Summary page is the default */
 
     main_cont = lv_obj_create(scr_dashboard);
     lv_obj_remove_style_all(main_cont);
@@ -781,32 +809,38 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     lv_obj_set_style_bg_opa(main_cont, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(main_cont, OUTER_PADDING, 0);
 
-    /* AllSky page — page index 0, always created but hidden initially.
+    /* AllSky page — PAGE_IDX_ALLSKY, always created but hidden initially.
      * allsky_obj is set to NULL when disabled to remove from navigation. */
     allsky_page_created = allsky_page_create(main_cont);
     lv_obj_add_flag(allsky_page_created, LV_OBJ_FLAG_HIDDEN);
     allsky_obj = app_config_get()->allsky_enabled ? allsky_page_created : NULL;
 
-    /* Summary page — page index 1, visible by default */
+    /* Spotify page — PAGE_IDX_SPOTIFY, always created but hidden initially.
+     * spotify_obj is set to NULL when disabled to remove from navigation. */
+    spotify_page_created = spotify_page_create(main_cont);
+    lv_obj_add_flag(spotify_page_created, LV_OBJ_FLAG_HIDDEN);
+    spotify_obj = app_config_get()->spotify_enabled ? spotify_page_created : NULL;
+
+    /* Summary page — PAGE_IDX_SUMMARY, visible by default */
     summary_obj = summary_page_create(main_cont, page_count);
 
-    /* NINA instance pages — page indices 2..page_count+1, hidden initially.
+    /* NINA instance pages — page indices NINA_PAGE_OFFSET..NINA_PAGE_OFFSET+page_count-1, hidden initially.
      * Each page maps to the actual instance via page_instance_map[]. */
     for (int i = 0; i < page_count; i++) {
         create_dashboard_page(&pages[i], main_cont, page_instance_map[i]);
         lv_obj_add_flag(pages[i].page, LV_OBJ_FLAG_HIDDEN);
     }
 
-    /* Settings page — lazy-loaded on demand (page index page_count+2).
+    /* Settings page — lazy-loaded on demand (SETTINGS_PAGE_IDX).
      * NOT created at boot to save internal heap for OTA task. */
     settings_obj = NULL;
 
-    /* System info page — always last (page index page_count+3), hidden initially */
+    /* System info page — always last (SYSINFO_PAGE_IDX), hidden initially */
     sysinfo_obj = sysinfo_page_create(main_cont);
     lv_obj_add_flag(sysinfo_obj, LV_OBJ_FLAG_HIDDEN);
-    total_page_count = page_count + 4;  /* allsky + summary + NINA pages + settings + sysinfo */
+    total_page_count = page_count + EXTRA_PAGES;  /* allsky + spotify + summary + NINA pages + settings + sysinfo */
 
-    /* Page indicator dots — only for NINA pages (not summary, allsky, or sysinfo) */
+    /* Page indicator dots — only for NINA pages (not allsky, spotify, summary, settings, or sysinfo) */
     create_page_indicator(scr_dashboard, page_count);
 
     /* Always enable swipe gestures */
@@ -839,7 +873,8 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
 
 void nina_dashboard_show_page(int page_index, int instance_count) {
     if (page_index < 0 || page_index >= total_page_count) return;
-    if (page_index == 0 && allsky_obj == NULL) return;  /* allsky disabled */
+    if (page_index == PAGE_IDX_ALLSKY && allsky_obj == NULL) return;  /* allsky disabled */
+    if (page_index == PAGE_IDX_SPOTIFY && spotify_obj == NULL) return;  /* spotify disabled */
     if (page_index == active_page) return;
 
     hide_page_at(active_page);
@@ -858,7 +893,7 @@ int nina_dashboard_get_active_page(void) {
 }
 
 bool nina_dashboard_is_allsky_page(void) {
-    return allsky_obj != NULL && active_page == 0;
+    return allsky_obj != NULL && active_page == PAGE_IDX_ALLSKY;
 }
 
 void nina_dashboard_set_allsky_enabled(bool enabled) {
@@ -866,8 +901,8 @@ void nina_dashboard_set_allsky_enabled(bool enabled) {
         allsky_obj = allsky_page_created;
     } else {
         /* If currently viewing the AllSky page, switch to summary first */
-        if (active_page == 0 && allsky_obj != NULL) {
-            nina_dashboard_show_page(1, total_page_count);
+        if (active_page == PAGE_IDX_ALLSKY && allsky_obj != NULL) {
+            nina_dashboard_show_page(PAGE_IDX_SUMMARY, total_page_count);
         }
         if (allsky_page_created) {
             lv_obj_add_flag(allsky_page_created, LV_OBJ_FLAG_HIDDEN);
@@ -876,16 +911,35 @@ void nina_dashboard_set_allsky_enabled(bool enabled) {
     }
 }
 
+bool nina_dashboard_is_spotify_page(void) {
+    return spotify_obj != NULL && active_page == PAGE_IDX_SPOTIFY;
+}
+
+void nina_dashboard_set_spotify_enabled(bool enabled) {
+    if (enabled) {
+        spotify_obj = spotify_page_created;
+    } else {
+        /* If currently viewing the Spotify page, switch to summary first */
+        if (active_page == PAGE_IDX_SPOTIFY && spotify_obj != NULL) {
+            nina_dashboard_show_page(PAGE_IDX_SUMMARY, total_page_count);
+        }
+        if (spotify_page_created) {
+            lv_obj_add_flag(spotify_page_created, LV_OBJ_FLAG_HIDDEN);
+        }
+        spotify_obj = NULL;
+    }
+}
+
 bool nina_dashboard_is_settings_page(void) {
-    return active_page == page_count + 2;
+    return active_page == SETTINGS_PAGE_IDX(page_count);
 }
 
 bool nina_dashboard_is_sysinfo_page(void) {
-    return active_page == page_count + 3;
+    return active_page == SYSINFO_PAGE_IDX(page_count);
 }
 
 bool nina_dashboard_is_summary_page(void) {
-    return active_page == 1;
+    return active_page == PAGE_IDX_SUMMARY;
 }
 
 int nina_dashboard_get_total_page_count(void) {
@@ -899,7 +953,7 @@ int nina_dashboard_page_to_instance(int page_idx) {
 
 int nina_dashboard_instance_to_page(int instance_idx) {
     for (int i = 0; i < page_count; i++) {
-        if (page_instance_map[i] == instance_idx) return i + 2;  /* page index (NINA pages start at 2) */
+        if (page_instance_map[i] == instance_idx) return i + NINA_PAGE_OFFSET;  /* page index */
     }
     return -1;
 }
@@ -924,13 +978,13 @@ static void update_indicators(void)
     int gb = app_config_get()->color_brightness;
     for (int i = 0; i < page_count; i++) {
         if (indicator_dots[i]) {
-            uint32_t dot_color = (active_page == i + 2)
+            uint32_t dot_color = (active_page == i + NINA_PAGE_OFFSET)
                 ? app_config_apply_brightness(current_theme->text_color, gb)
                 : app_config_apply_brightness(current_theme->label_color, gb);
             lv_obj_set_style_bg_color(indicator_dots[i], lv_color_hex(dot_color), 0);
         }
     }
-    if (active_page >= 2 && active_page <= page_count + 1)
+    if (active_page >= NINA_PAGE_OFFSET && active_page < NINA_PAGE_OFFSET + page_count)
         lv_obj_clear_flag(indicator_cont, LV_OBJ_FLAG_HIDDEN);
     else
         lv_obj_add_flag(indicator_cont, LV_OBJ_FLAG_HIDDEN);
@@ -994,7 +1048,8 @@ static void slide_new_ready_cb(lv_anim_t *a)
 void nina_dashboard_show_page_animated(int page_index, int instance_count, int effect)
 {
     if (page_index < 0 || page_index >= total_page_count) return;
-    if (page_index == 0 && allsky_obj == NULL) return;  /* allsky disabled */
+    if (page_index == PAGE_IDX_ALLSKY && allsky_obj == NULL) return;  /* allsky disabled */
+    if (page_index == PAGE_IDX_SPOTIFY && spotify_obj == NULL) return;  /* spotify disabled */
     if (page_index == active_page) return;
 
     lv_obj_t *old_obj = get_page_obj(active_page);

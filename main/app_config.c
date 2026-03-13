@@ -730,6 +730,14 @@ static void set_defaults(app_config_t *cfg) {
     strncpy(cfg->allsky_thresholds, DEFAULT_ALLSKY_THRESHOLDS, sizeof(cfg->allsky_thresholds) - 1);
     cfg->allsky_thresholds[sizeof(cfg->allsky_thresholds) - 1] = '\0';
     cfg->allsky_enabled = false;
+    cfg->demo_mode = false;
+
+    // Spotify defaults
+    cfg->spotify_enabled = false;
+    cfg->spotify_client_id[0] = '\0';
+    cfg->spotify_poll_interval_ms = 3000;
+    cfg->spotify_show_progress_bar = true;
+    cfg->spotify_overlay_timeout_s = 5;
 }
 
 /**
@@ -1447,6 +1455,187 @@ static void migrate_from_v17(const app_config_v17_t *old, app_config_t *cfg) {
 }
 
 /**
+ * v18 → v19 adds: demo_mode flag (default false).
+ */
+static void migrate_from_v18(const app_config_v18_t *old, app_config_t *cfg) {
+    set_defaults(cfg);
+
+    memcpy(cfg->api_url, old->api_url, sizeof(cfg->api_url));
+    memcpy(cfg->ntp_server, old->ntp_server, sizeof(cfg->ntp_server));
+    memcpy(cfg->tz_string, old->tz_string, sizeof(cfg->tz_string));
+    memcpy(cfg->filter_colors, old->filter_colors, sizeof(cfg->filter_colors));
+    memcpy(cfg->rms_thresholds, old->rms_thresholds, sizeof(cfg->rms_thresholds));
+    memcpy(cfg->hfr_thresholds, old->hfr_thresholds, sizeof(cfg->hfr_thresholds));
+    cfg->theme_index = old->theme_index;
+    cfg->brightness = old->brightness;
+    cfg->color_brightness = old->color_brightness;
+    cfg->mqtt_enabled = old->mqtt_enabled;
+    memcpy(cfg->mqtt_broker_url, old->mqtt_broker_url, sizeof(cfg->mqtt_broker_url));
+    memcpy(cfg->mqtt_username, old->mqtt_username, sizeof(cfg->mqtt_username));
+    memcpy(cfg->mqtt_password, old->mqtt_password, sizeof(cfg->mqtt_password));
+    memcpy(cfg->mqtt_topic_prefix, old->mqtt_topic_prefix, sizeof(cfg->mqtt_topic_prefix));
+    cfg->mqtt_port = old->mqtt_port;
+    cfg->active_page_override = old->active_page_override;
+    cfg->auto_rotate_enabled = old->auto_rotate_enabled;
+    cfg->auto_rotate_interval_s = old->auto_rotate_interval_s;
+    cfg->auto_rotate_effect = old->auto_rotate_effect;
+    cfg->auto_rotate_skip_disconnected = old->auto_rotate_skip_disconnected;
+    cfg->auto_rotate_pages = old->auto_rotate_pages;
+    cfg->update_rate_s = old->update_rate_s;
+    cfg->graph_update_interval_s = old->graph_update_interval_s;
+    cfg->connection_timeout_s = old->connection_timeout_s;
+    cfg->toast_duration_s = old->toast_duration_s;
+    cfg->debug_mode = old->debug_mode;
+    memcpy(cfg->instance_enabled, old->instance_enabled, sizeof(cfg->instance_enabled));
+    cfg->screen_sleep_enabled = old->screen_sleep_enabled;
+    cfg->screen_sleep_timeout_s = old->screen_sleep_timeout_s;
+    cfg->alert_flash_enabled = old->alert_flash_enabled;
+    cfg->idle_poll_interval_s = old->idle_poll_interval_s;
+    cfg->wifi_power_save = old->wifi_power_save;
+    cfg->widget_style = old->widget_style;
+    cfg->auto_update_check = old->auto_update_check;
+    cfg->update_channel = old->update_channel;
+    cfg->deep_sleep_enabled = old->deep_sleep_enabled;
+    cfg->deep_sleep_wake_timer_s = old->deep_sleep_wake_timer_s;
+    cfg->deep_sleep_on_idle = old->deep_sleep_on_idle;
+    cfg->screen_rotation = old->screen_rotation;
+    memcpy(cfg->hostname, old->hostname, sizeof(cfg->hostname));
+    memcpy(cfg->allsky_hostname, old->allsky_hostname, sizeof(cfg->allsky_hostname));
+    cfg->allsky_update_interval_s = old->allsky_update_interval_s;
+    cfg->allsky_dew_offset = old->allsky_dew_offset;
+    memcpy(cfg->allsky_field_config, old->allsky_field_config, sizeof(cfg->allsky_field_config));
+    memcpy(cfg->allsky_thresholds, old->allsky_thresholds, sizeof(cfg->allsky_thresholds));
+    cfg->allsky_enabled = old->allsky_enabled;
+    cfg->demo_mode = false;  /* new in v19 — default off */
+
+    ESP_LOGI(TAG, "Migrated config from v18 → v%d", APP_CONFIG_VERSION);
+}
+
+/**
+ * @brief Migrate a v19 config blob into the current struct layout.
+ *
+ * v19 → v20 adds: Spotify integration fields.
+ */
+static void migrate_from_v19(const app_config_v19_t *old, app_config_t *cfg) {
+    set_defaults(cfg);
+
+    memcpy(cfg->api_url, old->api_url, sizeof(cfg->api_url));
+    memcpy(cfg->ntp_server, old->ntp_server, sizeof(cfg->ntp_server));
+    memcpy(cfg->tz_string, old->tz_string, sizeof(cfg->tz_string));
+    memcpy(cfg->filter_colors, old->filter_colors, sizeof(cfg->filter_colors));
+    memcpy(cfg->rms_thresholds, old->rms_thresholds, sizeof(cfg->rms_thresholds));
+    memcpy(cfg->hfr_thresholds, old->hfr_thresholds, sizeof(cfg->hfr_thresholds));
+    cfg->theme_index = old->theme_index;
+    cfg->brightness = old->brightness;
+    cfg->color_brightness = old->color_brightness;
+    cfg->mqtt_enabled = old->mqtt_enabled;
+    memcpy(cfg->mqtt_broker_url, old->mqtt_broker_url, sizeof(cfg->mqtt_broker_url));
+    memcpy(cfg->mqtt_username, old->mqtt_username, sizeof(cfg->mqtt_username));
+    memcpy(cfg->mqtt_password, old->mqtt_password, sizeof(cfg->mqtt_password));
+    memcpy(cfg->mqtt_topic_prefix, old->mqtt_topic_prefix, sizeof(cfg->mqtt_topic_prefix));
+    cfg->mqtt_port = old->mqtt_port;
+    cfg->active_page_override = old->active_page_override;
+    cfg->auto_rotate_enabled = old->auto_rotate_enabled;
+    cfg->auto_rotate_interval_s = old->auto_rotate_interval_s;
+    cfg->auto_rotate_effect = old->auto_rotate_effect;
+    cfg->auto_rotate_skip_disconnected = old->auto_rotate_skip_disconnected;
+    cfg->auto_rotate_pages = old->auto_rotate_pages;
+    cfg->update_rate_s = old->update_rate_s;
+    cfg->graph_update_interval_s = old->graph_update_interval_s;
+    cfg->connection_timeout_s = old->connection_timeout_s;
+    cfg->toast_duration_s = old->toast_duration_s;
+    cfg->debug_mode = old->debug_mode;
+    memcpy(cfg->instance_enabled, old->instance_enabled, sizeof(cfg->instance_enabled));
+    cfg->screen_sleep_enabled = old->screen_sleep_enabled;
+    cfg->screen_sleep_timeout_s = old->screen_sleep_timeout_s;
+    cfg->alert_flash_enabled = old->alert_flash_enabled;
+    cfg->idle_poll_interval_s = old->idle_poll_interval_s;
+    cfg->wifi_power_save = old->wifi_power_save;
+    cfg->widget_style = old->widget_style;
+    cfg->auto_update_check = old->auto_update_check;
+    cfg->update_channel = old->update_channel;
+    cfg->deep_sleep_enabled = old->deep_sleep_enabled;
+    cfg->deep_sleep_wake_timer_s = old->deep_sleep_wake_timer_s;
+    cfg->deep_sleep_on_idle = old->deep_sleep_on_idle;
+    cfg->screen_rotation = old->screen_rotation;
+    memcpy(cfg->hostname, old->hostname, sizeof(cfg->hostname));
+    memcpy(cfg->allsky_hostname, old->allsky_hostname, sizeof(cfg->allsky_hostname));
+    cfg->allsky_update_interval_s = old->allsky_update_interval_s;
+    cfg->allsky_dew_offset = old->allsky_dew_offset;
+    memcpy(cfg->allsky_field_config, old->allsky_field_config, sizeof(cfg->allsky_field_config));
+    memcpy(cfg->allsky_thresholds, old->allsky_thresholds, sizeof(cfg->allsky_thresholds));
+    cfg->allsky_enabled = old->allsky_enabled;
+    cfg->demo_mode = old->demo_mode;
+    /* Spotify fields: new in v20 — defaults already set by set_defaults() */
+
+    ESP_LOGI(TAG, "Migrated config from v19 → v%d", APP_CONFIG_VERSION);
+}
+
+/**
+ * @brief Migrate a v20 config blob into the current struct layout.
+ *
+ * v20 → v21 adds: spotify_overlay_timeout_s.
+ */
+static void migrate_from_v20(const app_config_v20_t *old, app_config_t *cfg) {
+    set_defaults(cfg);
+
+    memcpy(cfg->api_url, old->api_url, sizeof(cfg->api_url));
+    memcpy(cfg->ntp_server, old->ntp_server, sizeof(cfg->ntp_server));
+    memcpy(cfg->tz_string, old->tz_string, sizeof(cfg->tz_string));
+    memcpy(cfg->filter_colors, old->filter_colors, sizeof(cfg->filter_colors));
+    memcpy(cfg->rms_thresholds, old->rms_thresholds, sizeof(cfg->rms_thresholds));
+    memcpy(cfg->hfr_thresholds, old->hfr_thresholds, sizeof(cfg->hfr_thresholds));
+    cfg->theme_index = old->theme_index;
+    cfg->brightness = old->brightness;
+    cfg->color_brightness = old->color_brightness;
+    cfg->mqtt_enabled = old->mqtt_enabled;
+    memcpy(cfg->mqtt_broker_url, old->mqtt_broker_url, sizeof(cfg->mqtt_broker_url));
+    memcpy(cfg->mqtt_username, old->mqtt_username, sizeof(cfg->mqtt_username));
+    memcpy(cfg->mqtt_password, old->mqtt_password, sizeof(cfg->mqtt_password));
+    memcpy(cfg->mqtt_topic_prefix, old->mqtt_topic_prefix, sizeof(cfg->mqtt_topic_prefix));
+    cfg->mqtt_port = old->mqtt_port;
+    cfg->active_page_override = old->active_page_override;
+    cfg->auto_rotate_enabled = old->auto_rotate_enabled;
+    cfg->auto_rotate_interval_s = old->auto_rotate_interval_s;
+    cfg->auto_rotate_effect = old->auto_rotate_effect;
+    cfg->auto_rotate_skip_disconnected = old->auto_rotate_skip_disconnected;
+    cfg->auto_rotate_pages = old->auto_rotate_pages;
+    cfg->update_rate_s = old->update_rate_s;
+    cfg->graph_update_interval_s = old->graph_update_interval_s;
+    cfg->connection_timeout_s = old->connection_timeout_s;
+    cfg->toast_duration_s = old->toast_duration_s;
+    cfg->debug_mode = old->debug_mode;
+    memcpy(cfg->instance_enabled, old->instance_enabled, sizeof(cfg->instance_enabled));
+    cfg->screen_sleep_enabled = old->screen_sleep_enabled;
+    cfg->screen_sleep_timeout_s = old->screen_sleep_timeout_s;
+    cfg->alert_flash_enabled = old->alert_flash_enabled;
+    cfg->idle_poll_interval_s = old->idle_poll_interval_s;
+    cfg->wifi_power_save = old->wifi_power_save;
+    cfg->widget_style = old->widget_style;
+    cfg->auto_update_check = old->auto_update_check;
+    cfg->update_channel = old->update_channel;
+    cfg->deep_sleep_enabled = old->deep_sleep_enabled;
+    cfg->deep_sleep_wake_timer_s = old->deep_sleep_wake_timer_s;
+    cfg->deep_sleep_on_idle = old->deep_sleep_on_idle;
+    cfg->screen_rotation = old->screen_rotation;
+    memcpy(cfg->hostname, old->hostname, sizeof(cfg->hostname));
+    memcpy(cfg->allsky_hostname, old->allsky_hostname, sizeof(cfg->allsky_hostname));
+    cfg->allsky_update_interval_s = old->allsky_update_interval_s;
+    cfg->allsky_dew_offset = old->allsky_dew_offset;
+    memcpy(cfg->allsky_field_config, old->allsky_field_config, sizeof(cfg->allsky_field_config));
+    memcpy(cfg->allsky_thresholds, old->allsky_thresholds, sizeof(cfg->allsky_thresholds));
+    cfg->allsky_enabled = old->allsky_enabled;
+    cfg->demo_mode = old->demo_mode;
+    cfg->spotify_enabled = old->spotify_enabled;
+    memcpy(cfg->spotify_client_id, old->spotify_client_id, sizeof(cfg->spotify_client_id));
+    cfg->spotify_poll_interval_ms = old->spotify_poll_interval_ms;
+    cfg->spotify_show_progress_bar = old->spotify_show_progress_bar;
+    /* spotify_overlay_timeout_s: new in v21 — defaults already set by set_defaults() */
+
+    ESP_LOGI(TAG, "Migrated config from v20 → v%d", APP_CONFIG_VERSION);
+}
+
+/**
  * @brief Migrate a v16 config blob into the current struct layout.
  *
  * v16 → v17 adds: AllSky integration fields.
@@ -1654,8 +1843,35 @@ void app_config_init(void) {
             nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(handle);
         }
+    } else if (version_check == 20 && stored_size >= sizeof(app_config_v20_t)) {
+        /* Version 20 blob — migrate to v21 */
+        app_config_v20_t old;
+        memcpy(&old, raw, sizeof(app_config_v20_t));
+        migrate_from_v20(&old, &s_config);
+        validate_config(&s_config);
+
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    } else if (version_check == 19 && stored_size >= sizeof(app_config_v19_t)) {
+        /* Version 19 blob — migrate to v21 */
+        app_config_v19_t old;
+        memcpy(&old, raw, sizeof(app_config_v19_t));
+        migrate_from_v19(&old, &s_config);
+        validate_config(&s_config);
+
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    } else if (version_check == 18 && stored_size >= sizeof(app_config_v18_t)) {
+        /* Version 18 blob — migrate to v20 */
+        app_config_v18_t old;
+        memcpy(&old, raw, sizeof(app_config_v18_t));
+        migrate_from_v18(&old, &s_config);
+        validate_config(&s_config);
+
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 17 && stored_size >= sizeof(app_config_v17_t)) {
-        /* Version 17 blob — migrate to v18 */
+        /* Version 17 blob — migrate to v20 */
         app_config_v17_t old;
         memcpy(&old, raw, sizeof(app_config_v17_t));
         migrate_from_v17(&old, &s_config);

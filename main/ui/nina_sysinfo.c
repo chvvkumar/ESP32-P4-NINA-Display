@@ -174,9 +174,11 @@ static lv_obj_t *make_bar(lv_obj_t *parent) {
 
 /* ── Gear Button → Settings ──────────────────────────────────────────── */
 
+/* Navigate from sysinfo to settings page — sysinfo is at SYSINFO_PAGE_IDX,
+ * settings is right before it at SETTINGS_PAGE_IDX. */
 static void gear_btn_cb(lv_event_t *e) {
     LV_UNUSED(e);
-    nina_dashboard_show_page(page_count + 1, total_page_count);
+    nina_dashboard_show_page(SETTINGS_PAGE_IDX(page_count), total_page_count);
 }
 
 /* ── Page Creation ───────────────────────────────────────────────────── */
