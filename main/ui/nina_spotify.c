@@ -38,7 +38,7 @@ static const char *TAG = "spotify_ui";
 #define DIM_OPACITY_IDLE    0         /* No overlay when idle (just album art) */
 #define SIDE_MARGIN         60        /* Left/right margin for progress bar */
 #define BTN_BOTTOM_MARGIN   48        /* Bottom margin for button row */
-#define PROGRESS_Y          540       /* Y position for progress bar */
+#define PROGRESS_Y          500       /* Y position for progress bar */
 #define REFR_PERIOD_IDLE_MS 5000      /* Slow LVGL refresh when showing static art */
 #define REFR_PERIOD_ACTIVE_MS 33      /* Normal ~30fps refresh when controls visible */
 
@@ -208,9 +208,10 @@ static void create_controls(void)
      * Prevents taps on progress bar, time labels, buttons, or gaps between
      * them from bubbling up to the page touch handler (which toggles overlay). */
     int zone_y = PROGRESS_Y - 16;   /* Start slightly above progress bar */
+    int zone_h = 236;              /* Enough for: progress bar + time labels + buttons */
     controls_zone = lv_obj_create(spotify_page);
     lv_obj_set_pos(controls_zone, 0, zone_y);
-    lv_obj_set_size(controls_zone, SCREEN_SIZE, SCREEN_SIZE - zone_y);
+    lv_obj_set_size(controls_zone, SCREEN_SIZE, zone_h);
     lv_obj_set_style_bg_opa(controls_zone, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(controls_zone, 0, 0);
     lv_obj_set_style_pad_all(controls_zone, 0, 0);
@@ -230,13 +231,13 @@ static void create_controls(void)
 
     /* Time labels below progress bar */
     lbl_time_elapsed = lv_label_create(controls_zone);
-    lv_obj_set_style_text_font(lbl_time_elapsed, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(lbl_time_elapsed, &lv_font_montserrat_22, 0);
     lv_obj_set_style_text_color(lbl_time_elapsed, lv_color_make(0x88, 0x88, 0x88), 0);
     lv_label_set_text(lbl_time_elapsed, "0:00");
     lv_obj_align_to(lbl_time_elapsed, bar_progress, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 6);
 
     lbl_time_total = lv_label_create(controls_zone);
-    lv_obj_set_style_text_font(lbl_time_total, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(lbl_time_total, &lv_font_montserrat_22, 0);
     lv_obj_set_style_text_color(lbl_time_total, lv_color_make(0x88, 0x88, 0x88), 0);
     lv_label_set_text(lbl_time_total, "0:00");
     lv_obj_align_to(lbl_time_total, bar_progress, LV_ALIGN_OUT_BOTTOM_RIGHT, 0, 6);
@@ -244,7 +245,7 @@ static void create_controls(void)
     /* Button row — centered at bottom of zone, no background card */
     btn_row = lv_obj_create(controls_zone);
     lv_obj_set_size(btn_row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_align(btn_row, LV_ALIGN_BOTTOM_MID, 0, -16);
+    lv_obj_align(btn_row, LV_ALIGN_BOTTOM_MID, 0, -BTN_BOTTOM_MARGIN);
     lv_obj_set_flex_flow(btn_row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(btn_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER);

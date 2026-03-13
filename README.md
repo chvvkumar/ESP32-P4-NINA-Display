@@ -34,6 +34,7 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
 - [Installation](#installation)
 - [First-Time Setup](#first-time-setup)
 - [Display Interface](#display-interface)
+- [Spotify Integration](#spotify-integration)
 - [Navigation](#navigation)
 - [Multi-Instance Support](#multi-instance-support)
 - [Themes & Filter Colors](#themes--filter-colors)
@@ -88,6 +89,15 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
   <tr>
     <td align="center"><img src="images/safe_safety_notifications.jpg" alt="Safe Notification" width="480"></td>
     <td align="center"><img src="images/unsafe_safety_notifications.jpg" alt="Unsafe Notification" width="480"></td>
+  </tr>
+</table>
+
+### Spotify Player
+
+<table align="center">
+  <tr>
+    <td align="center"><img src="images/Spotify_desk.jpg" alt="Spotify on two devices" width="480"></td>
+    <td align="center"><img src="images/Spotify_overlay.jpg" alt="Spotify overlay with controls" width="480"></td>
   </tr>
 </table>
 
@@ -212,6 +222,32 @@ The last page shows: device IP, hostname, WiFi SSID/RSSI, heap and PSRAM usage, 
 
 ---
 
+## Spotify Integration
+
+The display doubles as an immersive Spotify Now Playing screen, showing full-screen album art with playback controls.
+
+### Setup
+
+1. Create a free app at [developer.spotify.com](https://developer.spotify.com)
+2. Set the redirect URI in your Spotify app to `http://127.0.0.1:8000/callback`
+3. Copy the **Client ID** from your Spotify app into the web config (Spotify tab)
+4. **Save** the config, then click **Login with Spotify** in the Account section
+5. After approving in Spotify, you'll see a "can't connect" page — copy the full URL from the address bar and paste it into the redirect URL field
+
+### Features
+
+- **Full-screen album art** — hardware JPEG decoded and scaled to fill the 720x720 display
+- **Playback controls** — play/pause, next, previous via touch buttons
+- **Progress bar** — real-time track progress with elapsed and remaining time
+- **Track info** — scrolling title, artist, and album name
+- **Auto-hide overlay** — controls fade out after a configurable timeout; tap to show, tap again to dismiss
+- **Smart polling** — NINA and AllSky polling automatically suspends while the Spotify page is active, freeing network bandwidth for album art downloads
+- **Token management** — OAuth 2.0 PKCE flow with automatic token refresh
+
+The Spotify page is included in the page rotation and can be navigated to via swipe or auto-rotate.
+
+---
+
 ## Navigation
 
 - **Swipe** left/right to cycle through pages (wraps around)
@@ -220,7 +256,7 @@ The last page shows: device IP, hostname, WiFi SSID/RSSI, heap and PSRAM usage, 
 - **Page indicator dots** at the bottom show NINA instance pages
 - **Active page override** in config to boot directly to a specific page
 
-Page order: Summary → NINA instances (1..N) → Settings → System Info.
+Page order: AllSky (optional) → Summary → NINA instances (1..N) → Spotify (optional) → Settings → System Info.
 
 ---
 
