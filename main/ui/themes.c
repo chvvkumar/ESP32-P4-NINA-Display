@@ -181,7 +181,7 @@ static const theme_t themes[] = {
         .progress_color = 0x3d5c73,
         .rms_color = 0x507090,
         .hfr_color = 0x3d5c73,
-    }
+    },
 };
 
 int themes_get_count(void) {

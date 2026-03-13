@@ -104,6 +104,11 @@ esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "allsky_dew_offset", (double)cfg->allsky_dew_offset);
     cJSON_AddStringToObject(root, "allsky_field_config", cfg->allsky_field_config);
     cJSON_AddStringToObject(root, "allsky_thresholds", cfg->allsky_thresholds);
+    cJSON_AddBoolToObject(root, "spotify_enabled", cfg->spotify_enabled);
+    cJSON_AddStringToObject(root, "spotify_client_id", cfg->spotify_client_id);
+    cJSON_AddNumberToObject(root, "spotify_poll_interval_ms", cfg->spotify_poll_interval_ms);
+    cJSON_AddBoolToObject(root, "spotify_show_progress_bar", cfg->spotify_show_progress_bar);
+    cJSON_AddNumberToObject(root, "spotify_overlay_timeout_s", cfg->spotify_overlay_timeout_s);
     cJSON_AddBoolToObject(root, "_dirty", app_config_is_dirty());
 
     const char *json_str = cJSON_PrintUnformatted(root);
@@ -372,6 +377,12 @@ static app_config_t *parse_config_from_json(cJSON *root)
         if (v > 50.0f) v = 50.0f;
         cfg->allsky_dew_offset = v;
     }
+
+    JSON_TO_BOOL  (root, "spotify_enabled",           cfg->spotify_enabled);
+    JSON_TO_STRING(root, "spotify_client_id",          cfg->spotify_client_id);
+    JSON_TO_INT   (root, "spotify_poll_interval_ms",   cfg->spotify_poll_interval_ms);
+    JSON_TO_BOOL  (root, "spotify_show_progress_bar",  cfg->spotify_show_progress_bar);
+    JSON_TO_INT   (root, "spotify_overlay_timeout_s",  cfg->spotify_overlay_timeout_s);
 
     return cfg;
 }

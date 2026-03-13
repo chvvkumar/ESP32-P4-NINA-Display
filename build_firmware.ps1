@@ -5,14 +5,14 @@
 # Usage:
 #   .\build_firmware.ps1              # Normal build
 #   .\build_firmware.ps1 -FullClean   # Clean rebuild
-#   .\build_firmware.ps1 -OTA         # Build + OTA flash to device
-#   .\build_firmware.ps1 -OTA -DeviceIP 192.168.1.100
+#   .\build_firmware.ps1 -OTA         # Build + OTA flash to both devices
+#   .\build_firmware.ps1 -OTA -Devices "NinaDash1.lan","NinaDash2.lan"
 
 param(
     [string]$IdfPath = "C:\Espressif\frameworks\esp-idf-v5.5.2",
     [switch]$FullClean,
     [switch]$OTA,
-    [string]$DeviceIP = "192.168.1.201"
+    [string[]]$Devices = @("NinaDash1.lan", "NinaDash2.lan")
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,7 +20,7 @@ $ErrorActionPreference = "Stop"
 # Interactive menu when invoked without arguments
 if ($PSBoundParameters.Count -eq 0) {
     function Show-Menu {
-        param($IdfPath, $FullClean, $OTA, $DeviceIP)
+        param($IdfPath, $FullClean, $OTA, $Devices)
         Write-Host ""
         Write-Host "  ESP32-P4 NINA Display - Build Options" -ForegroundColor Cyan
         Write-Host "  ======================================" -ForegroundColor Cyan
@@ -31,7 +31,7 @@ if ($PSBoundParameters.Count -eq 0) {
         $otaColor = if ($OTA) { "Yellow" } else { "DarkGray" }
         Write-Host "  [1] Full Clean:  " -NoNewline; Write-Host $cleanLabel -ForegroundColor $cleanColor
         Write-Host "  [2] OTA Flash:   " -NoNewline; Write-Host $otaLabel -ForegroundColor $otaColor
-        Write-Host "  [3] Device IP:   " -NoNewline; Write-Host $DeviceIP -ForegroundColor White
+        Write-Host "  [3] Devices:     " -NoNewline; Write-Host ($Devices -join ", ") -ForegroundColor White
         Write-Host "  [4] IDF Path:    " -NoNewline; Write-Host $IdfPath -ForegroundColor White
         Write-Host ""
     }
@@ -39,7 +39,7 @@ if ($PSBoundParameters.Count -eq 0) {
     $OTA = $true  # Default to OTA enabled in interactive mode
     $menuLoop = $true
     while ($menuLoop) {
-        Show-Menu -IdfPath $IdfPath -FullClean $FullClean -OTA $OTA -DeviceIP $DeviceIP
+        Show-Menu -IdfPath $IdfPath -FullClean $FullClean -OTA $OTA -Devices $Devices
         $selection = Read-Host "  Enter option numbers to toggle (e.g. 1,2), or press Enter to build"
         if ([string]::IsNullOrWhiteSpace($selection)) {
             $menuLoop = $false
@@ -50,8 +50,8 @@ if ($PSBoundParameters.Count -eq 0) {
                 '1' { $FullClean = -not $FullClean }
                 '2' { $OTA = -not $OTA }
                 '3' {
-                    $newIP = Read-Host "  Device IP [$DeviceIP]"
-                    if (-not [string]::IsNullOrWhiteSpace($newIP)) { $DeviceIP = $newIP }
+                    $newDevices = Read-Host "  Devices (comma-separated) [$($Devices -join ', ')]"
+                    if (-not [string]::IsNullOrWhiteSpace($newDevices)) { $Devices = ($newDevices -split '[,\s]+') | ForEach-Object { $_.Trim() } | Where-Object { $_ } }
                 }
                 '4' {
                     $newPath = Read-Host "  IDF Path [$IdfPath]"
@@ -65,7 +65,7 @@ if ($PSBoundParameters.Count -eq 0) {
     # Show final summary
     $summary = @("Build")
     if ($FullClean) { $summary += "FullClean" }
-    if ($OTA) { $summary += "OTA -> $DeviceIP" }
+    if ($OTA) { $summary += "OTA -> $($Devices -join ', ')" }
     Write-Host ""
     Write-Host "  Building: $($summary -join ' + ')" -ForegroundColor Cyan
     Write-Host ""
@@ -190,20 +190,41 @@ Write-Host "           $OtaSizeMB MB ($OtaSize bytes)" -ForegroundColor Green
 Write-Host "`nFlash with: esptool.py --chip esp32p4 write_flash 0x0 `"$FactoryBin`"" -ForegroundColor Yellow
 Write-Host "OTA update: Upload `"$OtaBin`" via the web interface at http://<device-ip>/" -ForegroundColor Yellow
 
-# OTA flash to device if requested
+# OTA flash to devices if requested (parallel)
 if ($OTA) {
-    $OtaUrl = "http://${DeviceIP}/api/ota"
-    Write-Host "`nUploading OTA firmware to $OtaUrl ..." -ForegroundColor Cyan
+    Write-Host "`nUploading OTA firmware to $($Devices.Count) devices in parallel ..." -ForegroundColor Cyan
 
-    try {
-        $fileBytes = [System.IO.File]::ReadAllBytes($OtaBin)
-        $null = Invoke-WebRequest -Uri $OtaUrl -Method Post `
-            -Body $fileBytes `
-            -ContentType "application/octet-stream" `
-            -TimeoutSec 600
-        Write-Host "OTA update successful! Device is rebooting." -ForegroundColor Green
-    } catch {
-        Write-Error "OTA upload failed: $_"
+    $jobs = foreach ($Device in $Devices) {
+        Start-Job -ArgumentList $Device, $OtaBin -ScriptBlock {
+            param($Device, $OtaBin)
+            $OtaUrl = "http://${Device}/api/ota"
+            $fileBytes = [System.IO.File]::ReadAllBytes($OtaBin)
+            $null = Invoke-WebRequest -Uri $OtaUrl -Method Post `
+                -Body $fileBytes `
+                -ContentType "application/octet-stream" `
+                -TimeoutSec 600
+        }
+    }
+
+    $failed = @()
+    foreach ($job in $jobs) {
+        $device = $Devices[$jobs.IndexOf($job)]
+        Write-Host "  Waiting for $device ..." -ForegroundColor Gray -NoNewline
+        $null = $job | Wait-Job
+        if ($job.State -eq 'Completed') {
+            Write-Host " OK" -ForegroundColor Green
+        } else {
+            Write-Host " FAILED" -ForegroundColor Red
+            $job | Receive-Job -ErrorAction SilentlyContinue | Out-Null
+            Write-Host "    $($job.ChildJobs[0].JobStateInfo.Reason)" -ForegroundColor Red
+            $failed += $device
+        }
+        $job | Remove-Job
+    }
+
+    if ($failed.Count -gt 0) {
+        Write-Error "OTA failed for: $($failed -join ', ')"
         exit 1
     }
+    Write-Host "All devices updated successfully!" -ForegroundColor Green
 }

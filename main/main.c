@@ -35,6 +35,9 @@
 #include "perf_monitor.h"
 #include "nina_connection.h"
 #include "power_mgmt.h"
+#include "spotify_auth.h"
+#include "spotify_client.h"
+#include "ui/nina_spotify.h"
 
 /* Embedded splash logo (JPEG, hardware-decoded at boot) */
 extern const uint8_t logo_jpg_start[] asm("_binary_logo_jpg_start");
@@ -293,6 +296,7 @@ void app_main(void)
     /* Suppress verbose ESP-IDF HTTP/TLS transport errors — connection failures
      * are already reported cleanly by nina_client as "unreachable" messages. */
     esp_log_level_set("esp-tls", ESP_LOG_NONE);
+    esp_log_level_set("esp-x509-crt-bundle", ESP_LOG_WARN);
     esp_log_level_set("transport_base", ESP_LOG_NONE);
     esp_log_level_set("HTTP_CLIENT", ESP_LOG_NONE);
 
@@ -463,7 +467,7 @@ void app_main(void)
 
         {
             /* Apply persisted page override immediately on boot.
-             * Override stores absolute page index: 0=allsky, 1=summary, 2..N+1=NINA, N+2=settings, N+3=sysinfo */
+             * Override stores absolute page index: 0=allsky, 1=spotify, 2=summary, 3..N+2=NINA, N+3=settings, N+4=sysinfo */
             app_config_t *cfg = app_config_get();
             int total = nina_dashboard_get_total_page_count();
             if (cfg->active_page_override >= 0 && cfg->active_page_override < total) {
@@ -486,6 +490,10 @@ void app_main(void)
     nina_dashboard_set_page_change_cb(on_page_changed);
 
     nina_client_init();  // DNS cache mutex — must be called before poll tasks spawn
+
+    /* Spotify init — always called so web handlers (config, login) work even when disabled */
+    spotify_auth_init();
+    spotify_client_init();
 
     /* Allocate task stacks in PSRAM to save internal heap; TCBs stay internal */
     {
@@ -511,6 +519,23 @@ void app_main(void)
             if (data_stack) heap_caps_free(data_stack);
             if (data_tcb) heap_caps_free(data_tcb);
             xTaskCreatePinnedToCore(data_update_task, "data_task", 12288, NULL, 5, &data_task_handle, 1);
+        }
+    }
+
+    /* Spotify poll task — only when enabled (Core 0, 8KB PSRAM stack for HTTPS+JSON) */
+    if (app_config_get()->spotify_enabled) {
+        StackType_t *sp_stack = heap_caps_malloc(8192 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+        StaticTask_t *sp_tcb  = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (sp_stack && sp_tcb) {
+            spotify_task_handle = xTaskCreateStaticPinnedToCore(
+                spotify_poll_task, "spotify_poll", 8192, NULL, 4,
+                sp_stack, sp_tcb, 0);
+        } else {
+            ESP_LOGE(TAG, "Failed to alloc spotify_poll stack from PSRAM, falling back");
+            if (sp_stack) heap_caps_free(sp_stack);
+            if (sp_tcb) heap_caps_free(sp_tcb);
+            xTaskCreatePinnedToCore(spotify_poll_task, "spotify_poll", 8192, NULL, 4,
+                                    &spotify_task_handle, 0);
         }
     }
 
