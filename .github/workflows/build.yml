@@ -489,21 +489,29 @@ jobs:
 
           if [ -n "$PREV_TAG" ]; then
             # 1. Partition table changed (offsets, sizes, new/removed partitions)
-            if ! git diff --quiet "$PREV_TAG" -- partitions.csv 2>/dev/null; then
-              REASONS="${REASONS}Partition table layout changed since ${PREV_TAG}.\n"
+            PARTITION_DIFF=$(git diff "$PREV_TAG" -- partitions.csv 2>/dev/null | grep '^[+-]' | grep -v '^[+-][+-][+-]' | sed 's/^[+-]//' | tr -s ' ,' ' ' || true)
+            if [ -n "$PARTITION_DIFF" ]; then
+              # Extract changed partition names from the diff
+              CHANGED_PARTS=$(echo "$PARTITION_DIFF" | awk '{print $1}' | sort -u | paste -sd ', ')
+              REASONS="${REASONS}Partition table changed since ${PREV_TAG} (affected: ${CHANGED_PARTS}).\n"
             fi
 
             # 2. Bootloader-critical sdkconfig keys changed
             BOOTLOADER_KEYS="CONFIG_ESPTOOLPY_FLASHMODE|CONFIG_ESPTOOLPY_FLASHSIZE|CONFIG_ESPTOOLPY_FLASHFREQ|CONFIG_PARTITION_TABLE|CONFIG_BOOTLOADER_|CONFIG_SECURE_BOOT|CONFIG_FLASH_ENCRYPTION|CONFIG_SPIRAM_SPEED|CONFIG_CACHE_L2_CACHE"
             SDKCONFIG_DIFF=$(git diff "$PREV_TAG" -- sdkconfig.defaults 2>/dev/null | grep '^[+-]' | grep -v '^[+-][+-][+-]' | grep -E "$BOOTLOADER_KEYS" || true)
             if [ -n "$SDKCONFIG_DIFF" ]; then
-              REASONS="${REASONS}Bootloader or flash configuration changed in sdkconfig.defaults.\n"
+              # Extract the specific key names that changed
+              CHANGED_KEYS=$(echo "$SDKCONFIG_DIFF" | sed 's/^[+-]//' | grep -oE 'CONFIG_[A-Z_]+' | sort -u | paste -sd ', ')
+              REASONS="${REASONS}Bootloader/flash config changed in sdkconfig.defaults (${CHANGED_KEYS}).\n"
             fi
 
             # 3. NVS namespace or key renamed in app_config.c
-            NVS_DIFF=$(git diff "$PREV_TAG" -- main/app_config.c 2>/dev/null | grep '^[+-]' | grep -v '^[+-][+-][+-]' | grep -E 'NVS_NAMESPACE|nvs_open|nvs_get_blob.*"config"|nvs_set_blob.*"config"' || true)
-            if [ -n "$NVS_DIFF" ]; then
-              REASONS="${REASONS}NVS storage namespace or key may have changed.\n"
+            # Only fires when the string literals defining the namespace or key change,
+            # not when new call sites using the same values are added.
+            OLD_NS=$(git show "$PREV_TAG":main/app_config.c 2>/dev/null | sed -n 's/.*NVS_NAMESPACE *= *"\([^"]*\)".*/\1/p' | head -1 || true)
+            NEW_NS=$(sed -n 's/.*NVS_NAMESPACE *= *"\([^"]*\)".*/\1/p' main/app_config.c | head -1 || true)
+            if [ -n "$OLD_NS" ] && [ -n "$NEW_NS" ] && [ "$OLD_NS" != "$NEW_NS" ]; then
+              REASONS="${REASONS}NVS namespace changed: \"${OLD_NS}\" -> \"${NEW_NS}\" in app_config.c.\n"
             fi
           fi
 
