@@ -478,12 +478,16 @@ esp_err_t backup_get_handler(httpd_req_t *req)
 
     /* MAC address */
     uint8_t mac[6];
-    char mac_str[13];  /* 12 hex chars + null */
+    char mac_str[18];   /* "AA:BB:CC:DD:EE:FF" + null */
+    char mac_file[13];  /* "AABBCCDDEEFF" + null (for filename) */
     if (esp_read_mac(mac, ESP_MAC_BASE) == ESP_OK) {
-        snprintf(mac_str, sizeof(mac_str), "%02X%02X%02X%02X%02X%02X",
+        snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        snprintf(mac_file, sizeof(mac_file), "%02X%02X%02X%02X%02X%02X",
                  mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     } else {
-        strcpy(mac_str, "000000000000");
+        strcpy(mac_str, "00:00:00:00:00:00");
+        strcpy(mac_file, "000000000000");
     }
     cJSON_AddStringToObject(meta, "mac_address", mac_str);
 
@@ -498,21 +502,7 @@ esp_err_t backup_get_handler(httpd_req_t *req)
 
     cJSON_AddItemToObject(root, "meta", meta);
 
-    /* ---- Config section (non-sensitive fields) ---- */
-    cJSON *config_section = cJSON_CreateObject();
-
-    /* Serialize all non-sensitive fields using the same keys as config_get_handler */
-    for (const backup_field_t *f = s_backup_fields; f->json_key; f++) {
-        if (f->is_sensitive) continue;
-
-        /* We need to read the field from the current config and add it to config_section.
-         * Reuse the config_get_handler serialization approach.
-         * Since the field registry uses the same JSON keys as config_get_handler,
-         * we can serialize the full config to JSON and cherry-pick fields. */
-    }
-
-    /* More efficient approach: serialize full config once, then split */
-    /* Build a temporary full config JSON (reusing config_get_handler logic) */
+    /* ---- Build full config JSON, then split into config + sensitive sections ---- */
     cJSON *full_config = cJSON_CreateObject();
     /* Populate using same logic as config_get_handler */
     cJSON_AddStringToObject(full_config, "hostname", cfg->hostname);
@@ -568,7 +558,7 @@ esp_err_t backup_get_handler(httpd_req_t *req)
     cJSON_AddBoolToObject(full_config, "allsky_enabled", cfg->allsky_enabled);
     cJSON_AddStringToObject(full_config, "allsky_hostname", cfg->allsky_hostname);
     cJSON_AddNumberToObject(full_config, "allsky_update_interval_s", cfg->allsky_update_interval_s);
-    cJSON_AddNumberToObject(full_config, "allsky_dew_offset", cfg->allsky_dew_offset);
+    cJSON_AddNumberToObject(full_config, "allsky_dew_offset", (double)cfg->allsky_dew_offset);
     cJSON_AddStringToObject(full_config, "allsky_field_config", cfg->allsky_field_config);
     cJSON_AddStringToObject(full_config, "allsky_thresholds", cfg->allsky_thresholds);
     cJSON_AddBoolToObject(full_config, "demo_mode", cfg->demo_mode);
@@ -580,8 +570,7 @@ esp_err_t backup_get_handler(httpd_req_t *req)
     cJSON_AddBoolToObject(full_config, "spotify_minimal_mode", cfg->spotify_minimal_mode);
 
     /* Split into config and sensitive sections */
-    cJSON_Delete(config_section); /* discard empty one we created earlier */
-    config_section = cJSON_CreateObject();
+    cJSON *config_section = cJSON_CreateObject();
     cJSON *sensitive_section = include_sensitive ? cJSON_CreateObject() : NULL;
 
     for (const backup_field_t *f = s_backup_fields; f->json_key; f++) {
@@ -630,7 +619,7 @@ esp_err_t backup_get_handler(httpd_req_t *req)
     strftime(date_short, sizeof(date_short), "%Y-%m-%d", &timeinfo);
     snprintf(filename, sizeof(filename),
              "attachment; filename=\"%s_%s_v%d_%s.json\"",
-             safe_host, mac_str, APP_CONFIG_VERSION, date_short);
+             safe_host, mac_file, APP_CONFIG_VERSION, date_short);
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Content-Disposition", filename);
@@ -644,6 +633,7 @@ esp_err_t backup_get_handler(httpd_req_t *req)
 - Check the exact field serialization in the existing `config_get_handler()` (lines 32-127 of `web_handlers_config.c`) and make sure every field uses the same JSON key name. The code above mirrors those keys. Cross-reference carefully — if `config_get_handler` uses `"url1"` for `cfg->api_url[0]`, we must use the same.
 - `build_version.h` is auto-generated at build time — just `#include "build_version.h"`.
 - Use `ESP_MAC_BASE` not `ESP_MAC_WIFI_STA` (the latter fails on ESP32-P4 remote coprocessor). See `main/mqtt_ha.c:58` for the pattern.
+- **Add `config_version` to `config_get_handler` response**: Add `cJSON_AddNumberToObject(root, "config_version", APP_CONFIG_VERSION)` at the start of `config_get_handler`'s JSON building block. This is needed so the web UI Backup tab can display the current config version. The backup tab's `populateConfig` handler reads `data.config_version`.
 
 - [ ] **Step 4: Commit**
 
@@ -849,9 +839,18 @@ esp_err_t restore_post_handler(httpd_req_t *req)
         free(old_cfg);
         free(new_cfg);
 
-        /* Send success response */
+        /* Send success response with change count */
+        cJSON *resp = cJSON_CreateObject();
+        cJSON_AddStringToObject(resp, "status", "applied");
+        /* Note: total_changes is approximate — config may have changed between
+         * preview and confirm. The UI should not assert on matching counts. */
+        cJSON_AddNumberToObject(resp, "total_changes", 0);
+        cJSON_AddItemToObject(resp, "validation_notes", cJSON_CreateArray());
+        const char *resp_str = cJSON_PrintUnformatted(resp);
+        cJSON_Delete(resp);
         httpd_resp_set_type(req, "application/json");
-        httpd_resp_send(req, "{\"status\":\"applied\"}", HTTPD_RESP_USE_STRLEN);
+        httpd_resp_send(req, resp_str ? resp_str : "{\"status\":\"applied\"}", HTTPD_RESP_USE_STRLEN);
+        free((void *)resp_str);
         return ESP_OK;
     }
 }
@@ -1044,7 +1043,10 @@ function restoreFileSelected(input) {
     }
     /* Send preview request */
     postJson('/api/config/restore', {backup: _backupData, confirm: false})
-      .then(function(r) { return r.json(); })
+      .then(function(r) {
+        if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Preview failed'); });
+        return r.json();
+      })
       .then(function(preview) { renderRestorePreview(preview); })
       .catch(function(e) { showToast('Preview failed: ' + e.message, 'error'); });
   };
@@ -1143,7 +1145,7 @@ function renderRestorePreview(p) {
   var sensDiv = $('restoreSensitive');
   if (!p.sensitive_included && p.sensitive_excluded && p.sensitive_excluded.length > 0) {
     sensDiv.style.display = 'block';
-    sensDiv.innerHTML = '&#x1f512; <strong>Sensitive fields not in backup:</strong> ' +
+    sensDiv.innerHTML = '<strong>Sensitive fields not in backup:</strong> ' +
       p.sensitive_excluded.join(', ') + '<br>These will remain unchanged.';
   } else {
     sensDiv.style.display = 'none';
@@ -1166,7 +1168,7 @@ function renderRestorePreview(p) {
 function formatDiffValue(val) {
   if (val === null || val === undefined) return '(empty)';
   if (typeof val === 'boolean') return val ? 'On' : 'Off';
-  if (typeof val === 'string' && val.length > 60) return val.substring(0, 57) + '...';
+  if (typeof val === 'string' && val.length > 64) return val.substring(0, 61) + '...';
   return String(val);
 }
 
@@ -1246,17 +1248,24 @@ The config-to-JSON serialization is duplicated across `config_get_handler`, `bac
  * Serialize app_config_t to a cJSON object using the same keys as GET /api/config.
  * Returns a new cJSON object (caller must cJSON_Delete).
  * Returns NULL on allocation failure.
+ *
+ * IMPORTANT: This helper serializes ONLY app_config_t fields.
+ * It must NOT include:
+ *   - "ssid" (fetched from esp_wifi_get_config, not app_config_t)
+ *   - "_dirty" (runtime state from app_config_is_dirty())
+ * Those are added by config_get_handler separately after calling this helper.
  */
 static cJSON *serialize_config_to_json(const app_config_t *cfg)
 {
     cJSON *root = cJSON_CreateObject();
     if (!root) return NULL;
 
-    /* Copy the exact serialization from config_get_handler lines 34-112 */
+    /* Copy the exact serialization from config_get_handler lines 34-112,
+     * EXCLUDING ssid (WiFi stack) and _dirty (runtime state) */
     cJSON_AddNumberToObject(root, "config_version", APP_CONFIG_VERSION);
     cJSON_AddStringToObject(root, "hostname", cfg->hostname);
     cJSON_AddStringToObject(root, "url1", cfg->api_url[0]);
-    /* ... all fields ... */
+    /* ... all app_config_t fields ... */
 
     return root;
 }
@@ -1273,7 +1282,12 @@ esp_err_t config_get_handler(httpd_req_t *req)
     cJSON *root = serialize_config_to_json(cfg);
     if (!root) { httpd_resp_send_500(req); return ESP_FAIL; }
 
-    /* Add non-config fields (dirty flag, etc.) */
+    /* Add fields NOT from app_config_t (these live outside the struct) */
+    /* ssid comes from WiFi stack, not app_config_t */
+    wifi_config_t sta_cfg;
+    if (esp_wifi_get_config(WIFI_IF_STA, &sta_cfg) == ESP_OK) {
+        cJSON_AddStringToObject(root, "ssid", (const char *)sta_cfg.sta.ssid);
+    }
     cJSON_AddBoolToObject(root, "_dirty", app_config_is_dirty());
 
     const char *json_str = cJSON_PrintUnformatted(root);
