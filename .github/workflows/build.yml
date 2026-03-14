@@ -478,6 +478,59 @@ jobs:
             echo "included=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Check full erase requirement
+        if: steps.check_skip.outputs.skip != 'true'
+        id: erase_check
+        run: |
+          REASONS=""
+
+          # Find previous release tag to diff against
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          if [ -n "$PREV_TAG" ]; then
+            # 1. Partition table changed (offsets, sizes, new/removed partitions)
+            PARTITION_DIFF=$(git diff "$PREV_TAG" -- partitions.csv 2>/dev/null | grep '^[+-]' | grep -v '^[+-][+-][+-]' | sed 's/^[+-]//' | tr -s ' ,' ' ' || true)
+            if [ -n "$PARTITION_DIFF" ]; then
+              # Extract changed partition names from the diff
+              CHANGED_PARTS=$(echo "$PARTITION_DIFF" | awk '{print $1}' | sort -u | paste -sd ', ')
+              REASONS="${REASONS}Partition table changed since ${PREV_TAG} (affected: ${CHANGED_PARTS}).\n"
+            fi
+
+            # 2. Bootloader-critical sdkconfig keys changed
+            BOOTLOADER_KEYS="CONFIG_ESPTOOLPY_FLASHMODE|CONFIG_ESPTOOLPY_FLASHSIZE|CONFIG_ESPTOOLPY_FLASHFREQ|CONFIG_PARTITION_TABLE|CONFIG_BOOTLOADER_|CONFIG_SECURE_BOOT|CONFIG_FLASH_ENCRYPTION|CONFIG_SPIRAM_SPEED|CONFIG_CACHE_L2_CACHE"
+            SDKCONFIG_DIFF=$(git diff "$PREV_TAG" -- sdkconfig.defaults 2>/dev/null | grep '^[+-]' | grep -v '^[+-][+-][+-]' | grep -E "$BOOTLOADER_KEYS" || true)
+            if [ -n "$SDKCONFIG_DIFF" ]; then
+              # Extract the specific key names that changed
+              CHANGED_KEYS=$(echo "$SDKCONFIG_DIFF" | sed 's/^[+-]//' | grep -oE 'CONFIG_[A-Z_]+' | sort -u | paste -sd ', ')
+              REASONS="${REASONS}Bootloader/flash config changed in sdkconfig.defaults (${CHANGED_KEYS}).\n"
+            fi
+
+            # 3. NVS namespace or key renamed in app_config.c
+            # Only fires when the string literals defining the namespace or key change,
+            # not when new call sites using the same values are added.
+            OLD_NS=$(git show "$PREV_TAG":main/app_config.c 2>/dev/null | sed -n 's/.*NVS_NAMESPACE *= *"\([^"]*\)".*/\1/p' | head -1 || true)
+            NEW_NS=$(sed -n 's/.*NVS_NAMESPACE *= *"\([^"]*\)".*/\1/p' main/app_config.c | head -1 || true)
+            if [ -n "$OLD_NS" ] && [ -n "$NEW_NS" ] && [ "$OLD_NS" != "$NEW_NS" ]; then
+              REASONS="${REASONS}NVS namespace changed: \"${OLD_NS}\" -> \"${NEW_NS}\" in app_config.c.\n"
+            fi
+          fi
+
+          # 4. Manual override — FULL_ERASE_REQUIRED file always wins
+          if [ -f "FULL_ERASE_REQUIRED" ]; then
+            MANUAL_REASON=$(cat FULL_ERASE_REQUIRED | tr -d '\r' | head -5)
+            REASONS="${REASONS}${MANUAL_REASON}\n"
+          fi
+
+          if [ -n "$REASONS" ]; then
+            echo "required=true" >> $GITHUB_OUTPUT
+            echo "reason<<EOFR" >> $GITHUB_OUTPUT
+            echo -e "$REASONS" | sed '/^$/d' >> $GITHUB_OUTPUT
+            echo "EOFR" >> $GITHUB_OUTPUT
+          else
+            echo "required=false" >> $GITHUB_OUTPUT
+            echo "reason=" >> $GITHUB_OUTPUT
+          fi
+
       - name: Generate release notes
         if: steps.check_skip.outputs.skip != 'true'
         run: |
@@ -487,6 +540,8 @@ jobs:
           BRANCH=${GITHUB_REF_NAME}
           FACTORY_MB="${{ steps.metrics.outputs.factory_mb }}"
           OTA_MB="${{ steps.metrics.outputs.ota_mb }}"
+          FULL_ERASE="${{ steps.erase_check.outputs.required }}"
+          ERASE_REASON="${{ steps.erase_check.outputs.reason }}"
 
           if [ -n "$PREV_TAG" ]; then
             COMPARE_URL="https://github.com/chvvkumar/ESP32-P4-NINA-Display/compare/${PREV_TAG}...${TAG}"
@@ -495,7 +550,7 @@ jobs:
           fi
 
           AI_AVAILABLE="${{ steps.release_summary.outputs.ai_available }}"
-          export TAG PREV_TAG VERSION BRANCH COMPARE_URL FACTORY_MB OTA_MB AI_AVAILABLE
+          export TAG PREV_TAG VERSION BRANCH COMPARE_URL FACTORY_MB OTA_MB AI_AVAILABLE FULL_ERASE ERASE_REASON
           python3 << 'PYEOF'
           import os, json
           tag = os.environ['TAG']
@@ -506,6 +561,8 @@ jobs:
           factory_mb = os.environ.get('FACTORY_MB', 'N/A')
           ota_mb = os.environ.get('OTA_MB', 'N/A')
           ai_available = os.environ.get('AI_AVAILABLE', 'false') == 'true'
+          full_erase = os.environ.get('FULL_ERASE', 'false') == 'true'
+          erase_reason = os.environ.get('ERASE_REASON', '').strip()
 
           # Load metrics if available
           try:
@@ -537,6 +594,25 @@ jobs:
               f'**Version:** {version}',
               '**Built with:** ESP-IDF v5.5.2',
               '',
+          ]
+
+          # Full erase notice (prominent warning) or safe OTA note (subtle)
+          if full_erase:
+              lines += [
+                  '> [!CAUTION]',
+                  '> **FULL ERASE REQUIRED** — This release cannot be installed via OTA alone.',
+                  '> You must flash the **factory binary** (`nina-display-factory.bin`) at address `0x0000`.',
+                  f'> **Reason:** {erase_reason}' if erase_reason else '> Flash the factory binary to update.',
+                  '',
+              ]
+          else:
+              lines += [
+                  '### \u2705 OTA Safe',
+                  'This release can be installed via OTA update. No full erase needed.',
+                  '',
+              ]
+
+          lines += [
               '### Build Specifications',
               f'- **Target:** {metrics.get("target", "esp32p4")}',
               f'- **Flash Size:** {metrics.get("flash_size", "32MB")}',

@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "esp_timer.h"
+#include "esp_wifi_types.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -115,6 +116,28 @@ typedef struct {
     perf_timer_t jpeg_decode;
     perf_timer_t jpeg_fetch;
 
+    // Spotify metrics
+    perf_timer_t spotify_poll_cycle;          // Full spotify poll loop iteration
+    perf_timer_t spotify_api_fetch;           // spotify_client_get_currently_playing duration
+    perf_timer_t spotify_art_fetch;           // Album art HTTP download duration
+    perf_timer_t spotify_art_decode;          // JPEG decode + PPA scale for album art
+    perf_timer_t spotify_ui_update;           // nina_spotify_update under LVGL lock
+    perf_counter_t spotify_poll_count;        // Polls per interval
+    perf_counter_t spotify_error_count;       // Errors per interval
+    perf_counter_t spotify_art_fetch_count;   // Art fetches per interval
+    uint32_t spotify_task_stack_hwm;          // Stack high-water mark
+
+    // WiFi metrics
+    int8_t   wifi_rssi;              // Current RSSI (dBm)
+    int8_t   wifi_rssi_min;          // Minimum RSSI in interval
+    int8_t   wifi_rssi_max;          // Maximum RSSI in interval
+    int32_t  wifi_rssi_sum;          // Sum for average calculation
+    uint32_t wifi_rssi_samples;      // Sample count for average
+    uint8_t  wifi_channel;           // Current WiFi channel
+    char     wifi_ssid[33];          // Connected SSID
+    uint8_t  wifi_bssid[6];         // Connected AP BSSID
+    perf_counter_t wifi_disconnect_count; // Disconnection events per interval
+
     // CPU utilization (computed at report interval)
     cpu_stats_t cpu;
 
@@ -142,6 +165,9 @@ void perf_monitor_capture_memory(void);
 
 // Capture CPU utilization snapshot. Call at report interval from data task.
 void perf_monitor_capture_cpu(void);
+
+// Record WiFi signal metrics from an already-fetched ap_info.
+void perf_monitor_record_wifi(const wifi_ap_record_t *ap_info);
 
 // Print a formatted report to serial log. Called automatically at interval.
 void perf_monitor_report(void);

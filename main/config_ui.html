@@ -444,6 +444,7 @@
       <button class="tab-btn" data-tab="system">System</button>
       <button class="tab-btn" data-tab="allsky">AllSky</button>
       <button class="tab-btn" data-tab="spotify">Spotify</button>
+      <button class="tab-btn" data-tab="backup">Backup</button>
     </div>
     <a class="github-link" href="https://github.com/chvvkumar/ESP32-P4-NINA-Display" target="_blank" rel="noopener">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
@@ -477,6 +478,14 @@
       <button class="nav-btn" data-tab="spotify">
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>
         Spotify
+      </button>
+      <button class="nav-btn" data-tab="backup">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        Backup
       </button>
     </div>
   </nav>
@@ -936,6 +945,10 @@
             <div class="field-hint">How often to check playback state (1000 &ndash; 30000 ms)</div>
           </div>
           <div class="toggle-row">
+            <span class="toggle-label">Minimal Mode</span>
+            <label class="toggle"><input type="checkbox" id="spotify_minimal_mode"><span class="toggle-track"></span></label>
+          </div>
+          <div class="toggle-row">
             <span class="toggle-label">Show Progress Bar</span>
             <label class="toggle"><input type="checkbox" id="spotify_show_progress_bar" checked><span class="toggle-track"></span></label>
           </div>
@@ -967,6 +980,74 @@
         </div>
       </div>
 
+    </div>
+
+    <!-- ==================== TAB 7: BACKUP ==================== -->
+    <div id="tab-backup" class="tab-panel">
+      <!-- Export Card -->
+      <div class="card">
+        <div class="card-title">Export Configuration</div>
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;font-size:0.82rem;color:#a1a1aa">
+          <span>Config version: <strong style="color:#f4f4f5" id="backupCurrentVersion">--</strong></span>
+          <span>&middot;</span>
+          <span>Firmware: <strong style="color:#f4f4f5" id="backupFirmwareVersion">--</strong></span>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <div>
+            <span class="toggle-label">Include sensitive data</span>
+            <div class="field-hint" style="margin-top:2px">MQTT credentials, Spotify Client ID, Hostname</div>
+          </div>
+          <label class="toggle"><input type="checkbox" id="backupIncludeSensitive"><span class="toggle-track"></span></label>
+        </div>
+        <button class="btn btn-primary" id="backupDownloadBtn" onclick="downloadBackup()" style="margin-top:16px;width:100%">Download Backup</button>
+      </div>
+
+      <!-- Import Card -->
+      <div class="card">
+        <div class="card-title">Restore Configuration</div>
+        <div class="field">
+          <label class="ota-label" id="restoreFileLabel" style="display:block;text-align:center;cursor:pointer">
+            Choose backup .json file
+            <input type="file" id="restoreFileInput" accept=".json" onchange="restoreFileSelected(this)" style="display:none">
+          </label>
+        </div>
+
+        <!-- Preview Panel (hidden until file selected) -->
+        <div id="restorePreview" style="display:none;margin-top:16px">
+          <!-- Metadata Header -->
+          <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:14px 16px;margin-bottom:12px;font-size:0.82rem;color:#a1a1aa;line-height:1.8">
+            <div>Source: <strong style="color:#f4f4f5" id="restoreHostname">--</strong> (<span id="restoreMac">--</span>)</div>
+            <div>Firmware: <strong style="color:#f4f4f5" id="restoreFirmware">--</strong> &middot; Exported: <span id="restoreDate">--</span></div>
+          </div>
+
+          <!-- Version Warning Banner -->
+          <div id="restoreWarningBanner" style="border-radius:10px;padding:14px 16px;margin-bottom:12px;font-size:0.82rem;line-height:1.6;display:none"></div>
+
+          <!-- Changes Diff -->
+          <div id="restoreChanges" style="margin-bottom:12px"></div>
+
+          <!-- No Changes -->
+          <div id="restoreNoChanges" style="font-size:0.82rem;color:#71717a;margin-bottom:12px"></div>
+
+          <!-- Missing Fields Notice -->
+          <div id="restoreMissing" style="display:none;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.15);border-radius:10px;padding:12px 16px;margin-bottom:12px;font-size:0.8rem;color:#d4d4d8"></div>
+
+          <!-- Unknown Fields Notice -->
+          <div id="restoreUnknown" style="display:none;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.15);border-radius:10px;padding:12px 16px;margin-bottom:12px;font-size:0.8rem;color:#d4d4d8"></div>
+
+          <!-- Sensitive Excluded Notice -->
+          <div id="restoreSensitive" style="display:none;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:12px 16px;margin-bottom:12px;font-size:0.8rem;color:#71717a"></div>
+
+          <!-- Validation Notes -->
+          <div id="restoreValidation" style="display:none;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.15);border-radius:10px;padding:12px 16px;margin-bottom:12px;font-size:0.8rem;color:#d4d4d8"></div>
+
+          <!-- Action Buttons -->
+          <div style="display:flex;gap:10px;margin-top:16px">
+            <button class="btn btn-outline" onclick="cancelRestore()" style="flex:1">Cancel</button>
+            <button class="btn btn-primary" id="restoreConfirmBtn" onclick="confirmRestore()" style="flex:1">Restore</button>
+          </div>
+        </div>
+      </div>
     </div>
 
   </main>
@@ -1069,7 +1150,8 @@
       behavior:{color:'#8b5cf6', rgb:'139, 92, 246'},
       system:  {color:'#f43f5e', rgb:'244, 63, 94'},
       allsky:  {color:'#3b82f6', rgb:'59, 130, 246'},
-      spotify: {color:'#1db954', rgb:'29, 185, 84'}
+      spotify: {color:'#1db954', rgb:'29, 185, 84'},
+      backup:  {color:'#f59e0b', rgb:'245, 158, 11'}
     };
 
     function setAccent(name){
@@ -1361,6 +1443,7 @@
         spotify_client_id:$('spotifyClientId').value.trim(),
         spotify_poll_interval_ms:parseInt($('spotifyPollInterval').value)||3000,
         spotify_show_progress_bar:!!$('spotify_show_progress_bar').checked,
+        spotify_minimal_mode:!!$('spotify_minimal_mode').checked,
         spotify_overlay_timeout_s:parseInt($('spotifyOverlayTimeout').value)||0
       };
 
@@ -1473,8 +1556,17 @@
       if($('spotifyClientId')) $('spotifyClientId').value=data.spotify_client_id||'';
       if($('spotifyPollInterval')) $('spotifyPollInterval').value=data.spotify_poll_interval_ms||3000;
       if($('spotify_show_progress_bar')) $('spotify_show_progress_bar').checked=data.spotify_show_progress_bar!=null?!!data.spotify_show_progress_bar:true;
+      if($('spotify_minimal_mode')) $('spotify_minimal_mode').checked=!!data.spotify_minimal_mode;
       if($('spotifyOverlayTimeout')) $('spotifyOverlayTimeout').value=data.spotify_overlay_timeout_s!=null?data.spotify_overlay_timeout_s:5;
       updateSpotifyEnabledUI();
+
+      /* Backup tab version info */
+      if ($('backupCurrentVersion')) $('backupCurrentVersion').textContent = 'v' + (data.config_version || '?');
+      if ($('backupFirmwareVersion')) {
+        fetch('/api/version').then(function(r){return r.json()}).then(function(v){
+          $('backupFirmwareVersion').textContent = v.git_tag || '--';
+        }).catch(function(){});
+      }
 
       // Update page selector AFTER all enable checkboxes are populated
       updatePageSelectOptions();
@@ -2193,6 +2285,222 @@
     }
 
     initCollapsibleCards();
+
+    /* ---- Backup & Restore ---- */
+
+    var _backupData = null;  /* holds parsed backup JSON for confirm step */
+
+    function downloadBackup() {
+      var btn = $('backupDownloadBtn');
+      btn.disabled = true; btn.textContent = 'Downloading...';
+      var sensitive = $('backupIncludeSensitive').checked ? '1' : '0';
+      fetch('/api/config/backup?include_sensitive=' + sensitive)
+        .then(function(r) {
+          if (!r.ok) throw new Error('Download failed');
+          /* Get filename from Content-Disposition header */
+          var cd = r.headers.get('Content-Disposition') || '';
+          var match = cd.match(/filename="?([^"]+)"?/);
+          var filename = match ? match[1] : 'config-backup.json';
+          return r.blob().then(function(blob) { return {blob: blob, filename: filename}; });
+        })
+        .then(function(result) {
+          var a = document.createElement('a');
+          a.href = URL.createObjectURL(result.blob);
+          a.download = result.filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(a.href);
+          showToast('Backup downloaded', 'success');
+        })
+        .catch(function(e) { showToast('Backup failed: ' + e.message, 'error'); })
+        .finally(function() { btn.disabled = false; btn.textContent = 'Download Backup'; });
+    }
+
+    function restoreFileSelected(input) {
+      var label = $('restoreFileLabel');
+      if (!input.files.length) {
+        label.textContent = 'Choose backup .json file';
+        label.classList.remove('has-file');
+        label.appendChild(input);
+        $('restorePreview').style.display = 'none';
+        return;
+      }
+      label.textContent = input.files[0].name;
+      label.classList.add('has-file');
+      label.appendChild(input);
+
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          _backupData = JSON.parse(e.target.result);
+        } catch (err) {
+          showToast('Invalid JSON file', 'error');
+          return;
+        }
+        /* Send preview request */
+        postJson('/api/config/restore', {backup: _backupData, confirm: false})
+          .then(function(r) {
+            if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Preview failed'); });
+            return r.json();
+          })
+          .then(function(preview) { renderRestorePreview(preview); })
+          .catch(function(e) { showToast('Preview failed: ' + e.message, 'error'); });
+      };
+      reader.readAsText(input.files[0]);
+    }
+
+    function renderRestorePreview(p) {
+      if (p.error) {
+        showToast(p.error, 'error');
+        return;
+      }
+
+      $('restorePreview').style.display = 'block';
+
+      /* Metadata */
+      $('restoreHostname').textContent = p.backup_hostname || 'Unknown';
+      $('restoreMac').textContent = p.backup_mac || '--';
+      $('restoreFirmware').textContent = p.backup_firmware || '--';
+      $('restoreDate').textContent = p.export_date || '--';
+
+      /* Version warning banner */
+      var banner = $('restoreWarningBanner');
+      if (p.warnings && p.warnings.length > 0) {
+        var color;
+        if (p.version_match === 'exact')       color = {bg: 'rgba(16,185,129,0.08)', border: 'rgba(16,185,129,0.2)', text: '#10b981'};
+        else if (p.version_match === 'newer')  color = {bg: 'rgba(245,158,11,0.08)', border: 'rgba(245,158,11,0.2)', text: '#f59e0b'};
+        else if (p.version_match === 'much_older') color = {bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.2)', text: '#ef4444'};
+        else                                   color = {bg: 'rgba(245,158,11,0.08)', border: 'rgba(245,158,11,0.2)', text: '#f59e0b'};
+        banner.style.background = color.bg;
+        banner.style.border = '1px solid ' + color.border;
+        banner.style.color = color.text;
+        banner.style.display = 'block';
+        banner.innerHTML = '<div style="margin-bottom:4px"><strong>Version: v' + p.backup_version + ' &rarr; v' + p.current_version + '</strong></div>' +
+          p.warnings.map(function(w) { return '<div>' + w + '</div>'; }).join('');
+      } else {
+        banner.style.display = 'none';
+      }
+
+      /* Changes diff grouped by category */
+      var changesDiv = $('restoreChanges');
+      changesDiv.innerHTML = '';
+      if (p.changes && p.total_changes > 0) {
+        var cats = Object.keys(p.changes);
+        cats.forEach(function(cat) {
+          var items = p.changes[cat];
+          if (!items || !items.length) return;
+          var section = document.createElement('div');
+          section.style.cssText = 'background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:14px 16px;margin-bottom:8px';
+          var header = '<div style="font-size:0.85rem;font-weight:600;color:#f4f4f5;margin-bottom:8px;cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display===\'none\'?\'block\':\'none\'">' +
+            cat + ' <span style="color:#71717a;font-weight:400">(' + items.length + ' change' + (items.length > 1 ? 's' : '') + ')</span></div>';
+          var body = '<div>';
+          items.forEach(function(ch) {
+            var fromStr = formatDiffValue(ch.from);
+            var toStr = formatDiffValue(ch.to);
+            body += '<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:0.8rem;border-bottom:1px solid rgba(255,255,255,0.04)">' +
+              '<span style="color:#a1a1aa">' + ch.label + '</span>' +
+              '<span><span style="color:#71717a;text-decoration:line-through">' + fromStr + '</span> &rarr; <span style="color:var(--accent)">' + toStr + '</span></span>' +
+              '</div>';
+          });
+          body += '</div>';
+          section.innerHTML = header + body;
+          changesDiv.appendChild(section);
+        });
+      }
+
+      /* No changes categories */
+      var noChanges = $('restoreNoChanges');
+      if (p.no_changes && p.no_changes.length > 0) {
+        noChanges.textContent = 'No changes: ' + p.no_changes.join(', ');
+      } else {
+        noChanges.textContent = '';
+      }
+
+      /* Missing fields */
+      var missingDiv = $('restoreMissing');
+      if (p.missing_fields && p.missing_fields.length > 0) {
+        missingDiv.style.display = 'block';
+        missingDiv.innerHTML = '<strong style="color:#f59e0b">Missing from backup:</strong> ' +
+          p.missing_fields.join(', ') + '<br><span style="color:#71717a">These settings will keep their current values.</span>';
+      } else {
+        missingDiv.style.display = 'none';
+      }
+
+      /* Unknown fields */
+      var unknownDiv = $('restoreUnknown');
+      if (p.unknown_fields && p.unknown_fields.length > 0) {
+        unknownDiv.style.display = 'block';
+        unknownDiv.innerHTML = '<strong style="color:#f59e0b">Unknown fields (from newer firmware):</strong> ' +
+          p.unknown_fields.join(', ') + '<br><span style="color:#71717a">These will be skipped.</span>';
+      } else {
+        unknownDiv.style.display = 'none';
+      }
+
+      /* Sensitive excluded */
+      var sensDiv = $('restoreSensitive');
+      if (!p.sensitive_included && p.sensitive_excluded && p.sensitive_excluded.length > 0) {
+        sensDiv.style.display = 'block';
+        sensDiv.innerHTML = '<strong>Sensitive fields not in backup:</strong> ' +
+          p.sensitive_excluded.join(', ') + '<br>These will remain unchanged.';
+      } else {
+        sensDiv.style.display = 'none';
+      }
+
+      /* Validation notes */
+      var valDiv = $('restoreValidation');
+      if (p.validation_notes && p.validation_notes.length > 0) {
+        valDiv.style.display = 'block';
+        valDiv.innerHTML = '<strong style="color:#f59e0b">Adjusted values:</strong><br>' +
+          p.validation_notes.join('<br>');
+      } else {
+        valDiv.style.display = 'none';
+      }
+
+      /* Update confirm button text */
+      $('restoreConfirmBtn').textContent = 'Restore (' + p.total_changes + ' change' + (p.total_changes !== 1 ? 's' : '') + ')';
+    }
+
+    function formatDiffValue(val) {
+      if (val === null || val === undefined) return '(empty)';
+      if (typeof val === 'boolean') return val ? 'On' : 'Off';
+      if (typeof val === 'string' && val.length > 64) return val.substring(0, 61) + '...';
+      return String(val);
+    }
+
+    function cancelRestore() {
+      var input = $('restoreFileInput');
+      input.value = '';
+      $('restorePreview').style.display = 'none';
+      $('restoreFileLabel').textContent = 'Choose backup .json file';
+      $('restoreFileLabel').classList.remove('has-file');
+      $('restoreFileLabel').appendChild(input);
+      _backupData = null;
+    }
+
+    function confirmRestore() {
+      if (!_backupData) return;
+      var btn = $('restoreConfirmBtn');
+      btn.disabled = true; btn.textContent = 'Restoring...';
+
+      postJson('/api/config/restore', {backup: _backupData, confirm: true})
+        .then(function(r) {
+          if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Restore failed'); });
+          return r.json();
+        })
+        .then(function(result) {
+          showToast('Configuration restored successfully', 'success');
+          _backupData = null;
+          /* Reload config and reset UI after short delay */
+          setTimeout(function() { loadConfig(); cancelRestore(); }, 500);
+        })
+        .catch(function(e) {
+          showToast('Restore failed: ' + e.message, 'error');
+        })
+        .finally(function() {
+          btn.disabled = false; btn.textContent = 'Restore';
+        });
+    }
 
     /* === Init === */
     loadConfig();

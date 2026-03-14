@@ -12,7 +12,7 @@ param(
     [string]$IdfPath = "C:\Espressif\frameworks\esp-idf-v5.5.2",
     [switch]$FullClean,
     [switch]$OTA,
-    [string[]]$Devices = @("NinaDash1.lan", "NinaDash2.lan")
+    [string[]]$Devices = @("NinaDash2.lan")
 )
 
 $ErrorActionPreference = "Stop"
@@ -194,7 +194,7 @@ Write-Host "OTA update: Upload `"$OtaBin`" via the web interface at http://<devi
 if ($OTA) {
     Write-Host "`nUploading OTA firmware to $($Devices.Count) devices in parallel ..." -ForegroundColor Cyan
 
-    $jobs = foreach ($Device in $Devices) {
+    [array]$jobs = foreach ($Device in $Devices) {
         Start-Job -ArgumentList $Device, $OtaBin -ScriptBlock {
             param($Device, $OtaBin)
             $OtaUrl = "http://${Device}/api/ota"

@@ -29,6 +29,10 @@
 #include <string.h>
 #include <stdlib.h>
 
+/* Embedded Spotify logo PNG (linked via EMBED_FILES) */
+extern const uint8_t spotify_logo_png_start[] asm("_binary_spotify_logo_png_start");
+extern const uint8_t spotify_logo_png_end[]   asm("_binary_spotify_logo_png_end");
+
 static const char *TAG = "spotify_ui";
 
 /* ── Layout constants ────────────────────────────────────────────────── */
@@ -60,16 +64,28 @@ static lv_obj_t *bar_progress = NULL;
 static lv_obj_t *lbl_time_elapsed = NULL;
 static lv_obj_t *lbl_time_total = NULL;
 
+/* Minimal mode widgets (overlay content shown instead of controls when tapped) */
+static lv_obj_t *minimal_info_cont = NULL;     /* Centered flex container */
+static lv_obj_t *minimal_track_title = NULL;
+static lv_obj_t *minimal_artist_name = NULL;
+static lv_obj_t *minimal_album_name = NULL;
+static lv_obj_t *minimal_progress = NULL;      /* Optional thin progress bar */
+
+static lv_obj_t *loading_logo = NULL;      /* Spotify logo shown while loading */
+static lv_image_dsc_t logo_dsc;            /* Persistent descriptor for logo PNG */
+
 static lv_timer_t *idle_timer = NULL;
 static bool is_idle = true;
 static bool is_playing = false;
-static uint8_t *current_art_buf = NULL;   /* Owned RGB565 buffer */
-static lv_image_dsc_t art_dsc;            /* Persistent image descriptor */
+static bool has_art = false;               /* True once album art has been set */
+static uint8_t *current_art_buf = NULL;    /* Owned RGB565 buffer */
+static lv_image_dsc_t art_dsc;             /* Persistent image descriptor */
 
 /* ── Forward declarations ────────────────────────────────────────────── */
 
 static void create_track_info_container(void);
 static void create_controls(void);
+static void create_minimal_widgets(void);
 static void set_idle_state(bool idle);
 static void dim_anim_cb(void *var, int32_t value);
 static void idle_timer_cb(lv_timer_t *timer);
@@ -87,6 +103,32 @@ static void set_refr_period(uint32_t period_ms)
     if (timer) {
         lv_timer_set_period(timer, period_ms);
     }
+}
+
+/* Pulse animation: breathe opacity between 80 and 255 */
+static void pulse_opa_cb(void *var, int32_t value)
+{
+    lv_obj_set_style_image_opa((lv_obj_t *)var, (lv_opa_t)value, 0);
+}
+
+static void start_logo_pulse(void)
+{
+    if (!loading_logo) return;
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, loading_logo);
+    lv_anim_set_values(&a, 80, 255);
+    lv_anim_set_time(&a, 1500);
+    lv_anim_set_playback_time(&a, 1500);
+    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_exec_cb(&a, pulse_opa_cb);
+    lv_anim_start(&a);
+}
+
+static void stop_logo_pulse(void)
+{
+    if (!loading_logo) return;
+    lv_anim_delete(loading_logo, pulse_opa_cb);
 }
 
 /** Update label text only if it changed — avoids restarting scroll animation. */
@@ -118,6 +160,25 @@ lv_obj_t *spotify_page_create(lv_obj_t *parent)
     lv_image_set_pivot(img_album_art, 0, 0);
     lv_obj_add_flag(img_album_art, LV_OBJ_FLAG_HIDDEN); /* Hidden until art arrives */
 
+    /* 1b. Loading indicator — Spotify logo PNG, centered, pulsing.
+     * lodepng decoder (CONFIG_LV_USE_LODEPNG) handles decoding from
+     * the embedded binary.  We pass the raw PNG data as an lv_image_dsc_t. */
+    {
+        size_t png_size = (size_t)(spotify_logo_png_end - spotify_logo_png_start);
+        memset(&logo_dsc, 0, sizeof(logo_dsc));
+        logo_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
+        logo_dsc.header.cf = LV_COLOR_FORMAT_RAW;
+        logo_dsc.data = spotify_logo_png_start;
+        logo_dsc.data_size = (uint32_t)png_size;
+
+        loading_logo = lv_image_create(spotify_page);
+        lv_image_set_src(loading_logo, &logo_dsc);
+        lv_obj_center(loading_logo);
+        lv_obj_remove_flag(loading_logo, LV_OBJ_FLAG_CLICKABLE);
+        has_art = false;
+        start_logo_pulse();
+    }
+
     /* 2. Dim overlay (semi-transparent black, animated) */
     dim_overlay = lv_obj_create(spotify_page);
     lv_obj_set_size(dim_overlay, SCREEN_SIZE, SCREEN_SIZE);
@@ -133,6 +194,9 @@ lv_obj_t *spotify_page_create(lv_obj_t *parent)
 
     /* 4. Progress bar + time labels + buttons */
     create_controls();
+
+    /* 5. Minimal mode widgets (hidden by default) */
+    create_minimal_widgets();
 
     /* Touch handler on entire page */
     lv_obj_add_event_cb(spotify_page, page_touch_cb, LV_EVENT_CLICKED, NULL);
@@ -294,6 +358,77 @@ static void create_controls(void)
     lv_obj_add_event_cb(btn_next, next_click_cb, LV_EVENT_CLICKED, NULL);
 }
 
+/* ── Minimal mode widgets ────────────────────────────────────────────── */
+
+static void create_minimal_widgets(void)
+{
+    /* Centered flex container for track info (shown on tap in minimal mode) */
+    minimal_info_cont = lv_obj_create(spotify_page);
+    lv_obj_set_size(minimal_info_cont, 600, LV_SIZE_CONTENT);
+    lv_obj_align(minimal_info_cont, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_flex_flow(minimal_info_cont, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(minimal_info_cont, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(minimal_info_cont, 0, 0);
+    lv_obj_set_style_bg_opa(minimal_info_cont, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(minimal_info_cont, 0, 0);
+    lv_obj_remove_flag(minimal_info_cont, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(minimal_info_cont, LV_OBJ_FLAG_CLICKABLE);
+
+    /* Track title — large, white, tight tracking */
+    minimal_track_title = lv_label_create(minimal_info_cont);
+    lv_label_set_text(minimal_track_title, "");
+    lv_obj_set_style_text_font(minimal_track_title, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_text_color(minimal_track_title, lv_color_white(), 0);
+    lv_obj_set_style_text_align(minimal_track_title, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_letter_space(minimal_track_title, -2, 0);
+    lv_obj_set_width(minimal_track_title, 600);
+    lv_label_set_long_mode(minimal_track_title, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_set_style_anim_duration(minimal_track_title,
+        lv_anim_speed_clamped(60, 1000, 20000), 0);
+
+    /* Artist name — medium, light gray, slight letter spacing */
+    minimal_artist_name = lv_label_create(minimal_info_cont);
+    lv_label_set_text(minimal_artist_name, "");
+    lv_obj_set_style_text_font(minimal_artist_name, &lv_font_montserrat_36, 0);
+    lv_obj_set_style_text_color(minimal_artist_name, lv_color_make(0xD1, 0xD5, 0xDB), 0);
+    lv_obj_set_style_text_align(minimal_artist_name, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_letter_space(minimal_artist_name, 1, 0);
+    lv_obj_set_style_margin_top(minimal_artist_name, 20, 0);
+    lv_obj_set_width(minimal_artist_name, 600);
+    lv_label_set_long_mode(minimal_artist_name, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_set_style_anim_duration(minimal_artist_name,
+        lv_anim_speed_clamped(60, 1000, 20000), 0);
+
+    /* Album name — small, medium gray, very wide letter spacing, uppercase */
+    minimal_album_name = lv_label_create(minimal_info_cont);
+    lv_label_set_text(minimal_album_name, "");
+    lv_obj_set_style_text_font(minimal_album_name, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_color(minimal_album_name, lv_color_make(0x9C, 0xA3, 0xAF), 0);
+    lv_obj_set_style_text_align(minimal_album_name, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_letter_space(minimal_album_name, 7, 0);
+    lv_obj_set_style_margin_top(minimal_album_name, 15, 0);
+    lv_obj_set_width(minimal_album_name, 600);
+    lv_label_set_long_mode(minimal_album_name, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_set_style_anim_duration(minimal_album_name,
+        lv_anim_speed_clamped(60, 1000, 20000), 0);
+
+    /* Progress bar — pill-shaped, vibrant blue fill, below text block */
+    minimal_progress = lv_bar_create(spotify_page);
+    lv_obj_set_size(minimal_progress, 432, 10);
+    lv_obj_align_to(minimal_progress, minimal_info_cont, LV_ALIGN_OUT_BOTTOM_MID, 0, 50);
+    lv_obj_set_style_radius(minimal_progress, 5, 0);
+    lv_obj_set_style_radius(minimal_progress, 5, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(minimal_progress, lv_color_hex(0x1F2937), 0);
+    lv_obj_set_style_bg_color(minimal_progress, lv_color_hex(0x2563EB), LV_PART_INDICATOR);
+    lv_bar_set_range(minimal_progress, 0, 1000);
+    lv_bar_set_value(minimal_progress, 0, LV_ANIM_OFF);
+
+    /* Start minimal widgets hidden — shown by set_idle_state when tapped */
+    lv_obj_add_flag(minimal_info_cont, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(minimal_progress, LV_OBJ_FLAG_HIDDEN);
+}
+
 /* ── Idle / active state management ──────────────────────────────────── */
 
 static void dim_anim_cb(void *var, int32_t value)
@@ -317,16 +452,35 @@ static void set_idle_state(bool idle)
     lv_anim_set_exec_cb(&a, dim_anim_cb);
     lv_anim_start(&a);
 
-    /* Show/hide UI elements */
+    bool minimal = app_config_get()->spotify_minimal_mode;
+
+    /* Show/hide UI elements based on mode */
     if (idle) {
+        /* Hide all overlay content */
         lv_obj_add_flag(track_info_cont, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(controls_zone, LV_OBJ_FLAG_HIDDEN);
-        /* Throttle refresh rate when idle — static album art doesn't need 30fps */
-        set_refr_period(REFR_PERIOD_IDLE_MS);
+        lv_obj_add_flag(minimal_info_cont, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(minimal_progress, LV_OBJ_FLAG_HIDDEN);
+        /* Throttle refresh rate when idle — but only if we have album art.
+         * During loading (pulse animation), keep normal refresh rate. */
+        if (has_art) {
+            set_refr_period(REFR_PERIOD_IDLE_MS);
+        }
+    } else if (minimal) {
+        /* Minimal overlay: centered track info, optional progress bar */
+        lv_obj_add_flag(track_info_cont, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(controls_zone, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(minimal_info_cont, LV_OBJ_FLAG_HIDDEN);
+        if (app_config_get()->spotify_show_progress_bar) {
+            lv_obj_remove_flag(minimal_progress, LV_OBJ_FLAG_HIDDEN);
+        }
+        set_refr_period(REFR_PERIOD_ACTIVE_MS);
     } else {
+        /* Immersive overlay: full controls */
+        lv_obj_add_flag(minimal_info_cont, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(minimal_progress, LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(track_info_cont, LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(controls_zone, LV_OBJ_FLAG_HIDDEN);
-        /* Restore normal refresh rate for animations and controls */
         set_refr_period(REFR_PERIOD_ACTIVE_MS);
     }
 }
@@ -396,43 +550,73 @@ void nina_spotify_update(const spotify_playback_t *data)
 
     is_playing = data->is_playing;
 
-    /* Update track info labels — only if changed, to avoid restarting scroll */
-    label_set_text_if_changed(lbl_track_title, data->track_title);
-    label_set_text_if_changed(lbl_artist_name, data->artist_name);
-    label_set_text_if_changed(lbl_album_name, data->album_name);
+    bool minimal = app_config_get()->spotify_minimal_mode;
 
-    /* Update play/pause icon */
-    lv_obj_t *pp_label = lv_obj_get_child(btn_play_pause, 0);
-    if (pp_label) {
-        lv_label_set_text(pp_label, data->is_playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
-    }
+    if (minimal) {
+        /* Minimal mode: update minimal labels */
+        label_set_text_if_changed(minimal_track_title, data->track_title);
+        label_set_text_if_changed(minimal_artist_name, data->artist_name);
 
-    /* Update progress bar and time labels */
-    if (data->duration_ms > 0) {
-        /* Interpolate progress based on time since fetch */
-        int64_t now_ms = esp_timer_get_time() / 1000;
-        int64_t elapsed_since_fetch = now_ms - data->fetched_at_ms;
-        int current_progress = data->progress_ms;
-        if (data->is_playing && elapsed_since_fetch > 0) {
-            current_progress += (int)elapsed_since_fetch;
-            if (current_progress > data->duration_ms) {
-                current_progress = data->duration_ms;
+        /* Album name: uppercase for minimal mode */
+        char upper_album[128];
+        const char *src = data->album_name;
+        int i = 0;
+        for (; src[i] && i < (int)sizeof(upper_album) - 1; i++) {
+            upper_album[i] = (src[i] >= 'a' && src[i] <= 'z') ? src[i] - 32 : src[i];
+        }
+        upper_album[i] = '\0';
+        label_set_text_if_changed(minimal_album_name, upper_album);
+
+        /* Update minimal progress bar if enabled */
+        if (app_config_get()->spotify_show_progress_bar && data->duration_ms > 0) {
+            int64_t now_ms = esp_timer_get_time() / 1000;
+            int64_t elapsed_since_fetch = now_ms - data->fetched_at_ms;
+            int current_progress = data->progress_ms;
+            if (data->is_playing && elapsed_since_fetch > 0) {
+                current_progress += (int)elapsed_since_fetch;
+                if (current_progress > data->duration_ms) {
+                    current_progress = data->duration_ms;
+                }
             }
+            int bar_val = (int)((int64_t)current_progress * 1000 / data->duration_ms);
+            lv_bar_set_value(minimal_progress, bar_val, LV_ANIM_ON);
+        }
+    } else {
+        /* Immersive mode: update immersive labels (existing code) */
+        label_set_text_if_changed(lbl_track_title, data->track_title);
+        label_set_text_if_changed(lbl_artist_name, data->artist_name);
+        label_set_text_if_changed(lbl_album_name, data->album_name);
+
+        /* Update play/pause icon */
+        lv_obj_t *pp_label = lv_obj_get_child(btn_play_pause, 0);
+        if (pp_label) {
+            lv_label_set_text(pp_label, data->is_playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
         }
 
-        int bar_val = (int)((int64_t)current_progress * 1000 / data->duration_ms);
-        lv_bar_set_value(bar_progress, bar_val, LV_ANIM_ON);
+        /* Update progress bar and time labels */
+        if (data->duration_ms > 0) {
+            int64_t now_ms = esp_timer_get_time() / 1000;
+            int64_t elapsed_since_fetch = now_ms - data->fetched_at_ms;
+            int current_progress = data->progress_ms;
+            if (data->is_playing && elapsed_since_fetch > 0) {
+                current_progress += (int)elapsed_since_fetch;
+                if (current_progress > data->duration_ms) {
+                    current_progress = data->duration_ms;
+                }
+            }
 
-        /* Elapsed time label */
-        char buf[16];
-        int elapsed_s = current_progress / 1000;
-        snprintf(buf, sizeof(buf), "%d:%02d", elapsed_s / 60, elapsed_s % 60);
-        lv_label_set_text(lbl_time_elapsed, buf);
+            int bar_val = (int)((int64_t)current_progress * 1000 / data->duration_ms);
+            lv_bar_set_value(bar_progress, bar_val, LV_ANIM_ON);
 
-        /* Total time label */
-        int total_s = data->duration_ms / 1000;
-        snprintf(buf, sizeof(buf), "%d:%02d", total_s / 60, total_s % 60);
-        lv_label_set_text(lbl_time_total, buf);
+            char buf[16];
+            int elapsed_s = current_progress / 1000;
+            snprintf(buf, sizeof(buf), "%d:%02d", elapsed_s / 60, elapsed_s % 60);
+            lv_label_set_text(lbl_time_elapsed, buf);
+
+            int total_s = data->duration_ms / 1000;
+            snprintf(buf, sizeof(buf), "%d:%02d", total_s / 60, total_s % 60);
+            lv_label_set_text(lbl_time_total, buf);
+        }
     }
 }
 
@@ -471,6 +655,17 @@ void nina_spotify_set_album_art(const uint8_t *rgb565_data, uint32_t w, uint32_t
 
     lv_image_set_src(img_album_art, &art_dsc);
 
+    /* Hide loading logo now that we have album art */
+    if (loading_logo && !has_art) {
+        stop_logo_pulse();
+        lv_obj_add_flag(loading_logo, LV_OBJ_FLAG_HIDDEN);
+        has_art = true;
+        /* Now safe to throttle refresh if idle (logo animation no longer needed) */
+        if (is_idle) {
+            set_refr_period(REFR_PERIOD_IDLE_MS);
+        }
+    }
+
     /* Scale to fill 720x720 screen from top-left corner.
      * Pivot is (0,0) so scaling expands right and down, filling the screen.
      * lv_image_set_scale uses 256 = 1.0x. */
@@ -496,6 +691,12 @@ void nina_spotify_set_idle(void)
     lv_label_set_text(lbl_artist_name, "");
     lv_label_set_text(lbl_album_name, "");
 
+    /* Also clear minimal mode labels */
+    if (minimal_track_title) lv_label_set_text(minimal_track_title, "Not Playing");
+    if (minimal_artist_name) lv_label_set_text(minimal_artist_name, "");
+    if (minimal_album_name) lv_label_set_text(minimal_album_name, "");
+    if (minimal_progress) lv_bar_set_value(minimal_progress, 0, LV_ANIM_OFF);
+
     /* Reset progress */
     lv_bar_set_value(bar_progress, 0, LV_ANIM_OFF);
     lv_label_set_text(lbl_time_elapsed, "0:00");
@@ -508,12 +709,17 @@ void nina_spotify_set_idle(void)
         lv_label_set_text(pp_label, LV_SYMBOL_PLAY);
     }
 
-    /* Hide album art */
+    /* Hide album art, show loading logo */
     if (current_art_buf) {
         free(current_art_buf);
         current_art_buf = NULL;
     }
+    has_art = false;
     lv_obj_add_flag(img_album_art, LV_OBJ_FLAG_HIDDEN);
+    if (loading_logo) {
+        lv_obj_remove_flag(loading_logo, LV_OBJ_FLAG_HIDDEN);
+        start_logo_pulse();
+    }
 }
 
 /* ── Public API: theme ───────────────────────────────────────────────── */
@@ -526,6 +732,11 @@ void spotify_page_apply_theme(void)
      * so theme application is minimal. Apply theme accent to progress bar. */
     if (bar_progress) {
         lv_obj_set_style_bg_color(bar_progress,
+            lv_color_hex(current_theme->progress_color), LV_PART_INDICATOR);
+    }
+
+    if (minimal_progress) {
+        lv_obj_set_style_bg_color(minimal_progress,
             lv_color_hex(current_theme->progress_color), LV_PART_INDICATOR);
     }
 
@@ -547,11 +758,16 @@ void nina_spotify_on_show(void)
 
     ESP_LOGI(TAG, "Spotify page shown");
 
-    /* Start in idle state (just album art, no overlay) */
+    /* Start in idle state (just album art, no overlay) — works for both modes.
+     * set_idle_state will show the correct widgets when user taps. */
     is_idle = false; /* Force transition */
     set_idle_state(true);
 
-    /* If user taps, the touch handler will show overlay and start timer */
+    /* Restart loading logo pulse if art hasn't loaded yet */
+    if (!has_art && loading_logo) {
+        lv_obj_remove_flag(loading_logo, LV_OBJ_FLAG_HIDDEN);
+        start_logo_pulse();
+    }
 }
 
 void nina_spotify_on_hide(void)
@@ -569,6 +785,16 @@ void nina_spotify_on_hide(void)
     set_refr_period(REFR_PERIOD_ACTIVE_MS);
 }
 
+void nina_spotify_refresh_layout(void)
+{
+    if (!spotify_page) return;
+    /* If overlay is currently showing, re-run idle state to swap widgets */
+    if (!is_idle) {
+        is_idle = true;  /* Force re-transition */
+        set_idle_state(false);
+    }
+}
+
 void nina_spotify_free_art(void)
 {
     if (current_art_buf) {
@@ -578,6 +804,13 @@ void nina_spotify_free_art(void)
         }
         free(current_art_buf);
         current_art_buf = NULL;
+        has_art = false;
         ESP_LOGI(TAG, "Album art buffer freed");
+    }
+
+    /* Show loading logo again for next page entry */
+    if (loading_logo) {
+        lv_obj_remove_flag(loading_logo, LV_OBJ_FLAG_HIDDEN);
+        start_logo_pulse();
     }
 }

@@ -69,6 +69,30 @@ static int compare_versions(const char *v1, const char *v2) {
     return 0;  /* neither has suffix */
 }
 
+/* ── Strip markdown images ![alt](url) from a string in-place ─────── */
+
+static void strip_markdown_images(char *text) {
+    char *read = text, *write = text;
+    while (*read) {
+        if (read[0] == '!' && read[1] == '[') {
+            /* Find closing ] */
+            const char *alt_end = strchr(read + 2, ']');
+            if (alt_end && alt_end[1] == '(') {
+                /* Find closing ) */
+                const char *url_end = strchr(alt_end + 2, ')');
+                if (url_end) {
+                    read = (char *)(url_end + 1);
+                    /* Skip trailing whitespace/newlines left behind */
+                    while (*read == ' ' || *read == '\n' || *read == '\r') read++;
+                    continue;
+                }
+            }
+        }
+        *write++ = *read++;
+    }
+    *write = '\0';
+}
+
 /* ── Extract summary from release body ────────────────────────────── */
 
 static void extract_summary(const char *body, char *out, size_t out_size) {
@@ -102,6 +126,7 @@ static void extract_summary(const char *body, char *out, size_t out_size) {
             while (slen > 0 && (out[slen - 1] == '\n' || out[slen - 1] == '\r' || out[slen - 1] == ' ')) {
                 out[--slen] = '\0';
             }
+            strip_markdown_images(out);
             return;
         }
     }
@@ -112,6 +137,7 @@ static void extract_summary(const char *body, char *out, size_t out_size) {
     if (len >= out_size) len = out_size - 1;
     memcpy(out, body, len);
     out[len] = '\0';
+    strip_markdown_images(out);
 }
 
 /* ── HTTP event handler for reading response into buffer ──────────── */
