@@ -151,7 +151,7 @@ The restore uses **JSON field overlay**, not binary struct migration. This means
 2. For each field in the backup's `config` (and optionally `sensitive`) section, if the field name is recognized by the current firmware, overlay it.
 3. Unknown fields (from newer backups) are silently ignored but listed in `unknown_fields`.
 4. Missing fields (from older backups) keep their current values and are listed in `missing_fields`.
-5. Run `validate_config()` to clamp any out-of-range values; report clamped fields in `validation_notes`.
+5. Reuse `parse_config_from_json()` for the overlay — it already starts from a copy of current config and only overlays present fields, with built-in clamping. Report clamped fields in `validation_notes`.
 
 ### Warning Logic
 
@@ -159,7 +159,7 @@ The restore uses **JSON field overlay**, not binary struct migration. This means
 |----------|-----------------|---------------|---------|
 | Same version | `"exact"` | Green | "Config version matches (v22). All settings will be restored." |
 | Older backup (≤10 versions behind) | `"older"` | Amber | "Backup is from an older config version (v{X} → v{Y}). Settings added since v{X} will keep their current values." |
-| Much older backup (>10 versions behind) | `"much_older"` | Red/Amber | "Backup is from a much older version (v{X} → v{Y}). Only basic settings will be restored. Most settings will keep current values." |
+| Much older backup (>10 versions behind) | `"much_older"` | Red/Amber | "Backup is from a much older version (v{X} → v{Y}). Many settings may have been added since your backup version and will keep current values." |
 | Newer backup | `"newer"` | Amber | "Backup is from a newer firmware (v{X} → v{Y}). Some settings may not be recognized by this firmware and will be skipped." |
 | Invalid/missing version | — | Red | "Invalid backup file." (rejected) |
 
@@ -174,6 +174,41 @@ Fields grouped by the existing config UI tab structure for the diff display:
 - **AllSky:** `allsky_enabled`, `allsky_hostname`, `allsky_update_interval_s`, `allsky_dew_offset`, `allsky_field_config`, `allsky_thresholds`
 - **Spotify:** `spotify_enabled`, `spotify_poll_interval_ms`, `spotify_show_progress_bar`, `spotify_overlay_timeout_s`, `spotify_minimal_mode`
 - **MQTT:** `mqtt_enabled`, `mqtt_port`, `mqtt_topic_prefix`
+
+## Diff Computation Algorithm
+
+The restore handler computes the diff server-side using a **field registry** — a static array of structs that maps JSON keys to categories, labels, and comparison metadata:
+
+```c
+typedef struct {
+    const char *json_key;     // e.g., "theme_index"
+    const char *label;        // e.g., "Theme"
+    const char *category;     // e.g., "Display"
+    bool is_sensitive;        // true = only in "sensitive" section
+    bool is_large_string;    // true = truncate in diff display
+} backup_field_t;
+
+static const backup_field_t s_backup_fields[] = {
+    {"theme_index",    "Theme",       "Display",  false, false},
+    {"brightness",     "Brightness",  "Display",  false, false},
+    // ... all fields
+    {"mqtt_password",  "MQTT Password", "MQTT",   true,  false},
+    {NULL, NULL, NULL, false, false}  // sentinel
+};
+```
+
+**Algorithm:**
+
+1. Serialize the current config to JSON (reuse `config_get_handler` logic).
+2. Walk the backup's `config` (and `sensitive` if present) fields.
+3. For each field, look it up in `s_backup_fields`:
+   - **Found + value differs** → add to `changes[category]` with `{field, label, from, to}`.
+   - **Found + value same** → skip (no change).
+   - **Not found in registry** → add to `unknown_fields` list.
+4. Walk `s_backup_fields` and check which keys are absent from the backup → add to `missing_fields`.
+5. Group changes by category; categories with 0 changes go into `no_changes`.
+
+This registry-driven approach makes adding new config fields automatic — just add a row to `s_backup_fields`.
 
 ## Web UI — "Backup" Tab
 
@@ -218,7 +253,7 @@ All functionality fits within existing files. The backup/restore handlers follow
 ## Memory Considerations
 
 - Backup JSON is built with `cJSON` and sent in one response (config is ~6.8KB struct → ~4-8KB JSON).
-- Restore POST body can be up to ~16KB (backup JSON + `confirm` wrapper). The existing `receive_json_body()` uses an 8KB SPIRAM buffer — this needs to be increased to 16KB for the restore endpoint, or the backup JSON can be received as a multipart upload.
+- Restore POST body can be up to ~16KB (backup JSON + `confirm` wrapper). Add a `max_size` parameter to `receive_json_body()` — existing callers pass `CONFIG_MAX_PAYLOAD` (8192), the restore handler passes `CONFIG_MAX_RESTORE_PAYLOAD` (16384). This avoids increasing the buffer for all endpoints.
 - All temporary allocations use SPIRAM (`MALLOC_CAP_SPIRAM`).
 - The diff computation is done server-side to keep the HTML/JS lightweight.
 
@@ -230,7 +265,12 @@ All functionality fits within existing files. The backup/restore handlers follow
 4. **Backup from different device** → hostname/MAC differ — preview shows source device info for context.
 5. **User exports with sensitive, shares file** → sensitive fields clearly labeled in export UI so user knows what's in the file.
 6. **Restore then regret** → config is saved to NVS on confirm. User can factory reset but cannot auto-revert. Consider: should we auto-backup before restore? (Decision: no — keep it simple, user can manually export first.)
-7. **Large JSON string fields** (allsky_field_config, allsky_thresholds) → diff shows "Modified" with truncated preview rather than full JSON blob.
+7. **Large JSON string fields** (allsky_field_config, allsky_thresholds) → diff shows "Modified (N chars)" rather than full JSON blob. Truncate display at 64 characters.
 8. **Concurrent access** → config mutex protects read/write; restore is serialized with other config operations.
 9. **Browser refresh during preview** → preview is client-side state only, no server state to clean up.
-10. **POST body too large** → increase `receive_json_body()` buffer to 16KB for restore endpoint.
+10. **POST body too large** → `receive_json_body()` accepts `max_size` parameter; restore handler passes 16384.
+11. **Race between preview and confirm** → the confirm path re-reads current config and applies the overlay fresh. The `total_changes` in the apply response may differ from the preview if config changed between the two requests. This is acceptable — the UI should not assert on matching counts.
+12. **Truncated/corrupt JSON file** → `cJSON_Parse()` returns NULL → "Invalid backup file: JSON parse error".
+13. **Dirty config state** → if config has unsaved in-memory changes (`_dirty` is true) when restore is attempted, include a warning: "You have unsaved changes that will be overwritten by this restore."
+14. **MAC address unavailable** → if `esp_read_mac()` fails (WiFi not initialized), use `"000000000000"` as fallback.
+15. **Hostname with special characters** → sanitize hostname for filename (alphanumeric + hyphens only); full hostname preserved in `meta` JSON.
