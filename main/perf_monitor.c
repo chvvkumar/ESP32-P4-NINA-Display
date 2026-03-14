@@ -198,6 +198,28 @@ void perf_monitor_capture_memory(void)
     // We just capture what's been set.
 }
 
+// ── WiFi metrics capture ────────────────────────────────────────────
+
+void perf_monitor_record_wifi(const wifi_ap_record_t *ap_info)
+{
+    if (!g_perf.enabled || !ap_info) return;
+
+    int8_t rssi = ap_info->rssi;
+    g_perf.wifi_rssi = rssi;
+    g_perf.wifi_rssi_sum += rssi;
+    g_perf.wifi_rssi_samples++;
+    if (g_perf.wifi_rssi_samples == 1 || rssi < g_perf.wifi_rssi_min) {
+        g_perf.wifi_rssi_min = rssi;
+    }
+    if (g_perf.wifi_rssi_samples == 1 || rssi > g_perf.wifi_rssi_max) {
+        g_perf.wifi_rssi_max = rssi;
+    }
+    g_perf.wifi_channel = ap_info->primary;
+    memcpy(g_perf.wifi_ssid, ap_info->ssid, sizeof(g_perf.wifi_ssid) - 1);
+    g_perf.wifi_ssid[sizeof(g_perf.wifi_ssid) - 1] = '\0';
+    memcpy(g_perf.wifi_bssid, ap_info->bssid, 6);
+}
+
 // ── CPU utilization capture ─────────────────────────────────────────
 
 // qsort comparator: sort by cpu_percent descending
@@ -385,6 +407,36 @@ void perf_monitor_report(void)
     log_timer("jpeg_decode", &g_perf.jpeg_decode);
     log_timer("jpeg_fetch",  &g_perf.jpeg_fetch);
 
+    ESP_LOGI(TAG, "── Spotify ──");
+    log_timer("spotify_poll_cycle",  &g_perf.spotify_poll_cycle);
+    log_timer("spotify_api_fetch",   &g_perf.spotify_api_fetch);
+    log_timer("spotify_art_fetch",   &g_perf.spotify_art_fetch);
+    log_timer("spotify_art_decode",  &g_perf.spotify_art_decode);
+    log_timer("spotify_ui_update",   &g_perf.spotify_ui_update);
+    ESP_LOGI(TAG, "  Spotify polls:    %"PRIu32" (interval) / %"PRIu32" (total)",
+             g_perf.spotify_poll_count.per_interval, g_perf.spotify_poll_count.total);
+    ESP_LOGI(TAG, "  Spotify errors:   %"PRIu32" (interval) / %"PRIu32" (total)",
+             g_perf.spotify_error_count.per_interval, g_perf.spotify_error_count.total);
+    ESP_LOGI(TAG, "  Spotify art:      %"PRIu32" (interval) / %"PRIu32" (total)",
+             g_perf.spotify_art_fetch_count.per_interval, g_perf.spotify_art_fetch_count.total);
+
+    ESP_LOGI(TAG, "── WiFi ──");
+    if (g_perf.wifi_rssi_samples > 0) {
+        int8_t avg_rssi = (int8_t)(g_perf.wifi_rssi_sum / (int32_t)g_perf.wifi_rssi_samples);
+        ESP_LOGI(TAG, "  SSID: %s  BSSID: %02x:%02x:%02x:%02x:%02x:%02x  Ch: %d",
+                 g_perf.wifi_ssid,
+                 g_perf.wifi_bssid[0], g_perf.wifi_bssid[1], g_perf.wifi_bssid[2],
+                 g_perf.wifi_bssid[3], g_perf.wifi_bssid[4], g_perf.wifi_bssid[5],
+                 g_perf.wifi_channel);
+        ESP_LOGI(TAG, "  RSSI: cur=%d  avg=%d  min=%d  max=%d dBm  [n=%"PRIu32"]",
+                 g_perf.wifi_rssi, avg_rssi, g_perf.wifi_rssi_min, g_perf.wifi_rssi_max,
+                 g_perf.wifi_rssi_samples);
+    } else {
+        ESP_LOGI(TAG, "  (not connected)");
+    }
+    ESP_LOGI(TAG, "  Disconnects:    %"PRIu32" (interval) / %"PRIu32" (total)",
+             g_perf.wifi_disconnect_count.per_interval, g_perf.wifi_disconnect_count.total);
+
     ESP_LOGI(TAG, "── Memory ──");
     ESP_LOGI(TAG, "  Internal heap:  free=%"PRIu32"  min_ever=%"PRIu32"  largest_block=%"PRIu32,
              g_perf.heap_free_bytes, g_perf.heap_min_free_bytes, g_perf.heap_largest_free_block);
@@ -394,6 +446,7 @@ void perf_monitor_report(void)
     ESP_LOGI(TAG, "── Task Stacks ──");
     ESP_LOGI(TAG, "  data_task HWM:  %"PRIu32" bytes free", g_perf.data_task_stack_hwm);
     ESP_LOGI(TAG, "  input_task HWM: %"PRIu32" bytes free", g_perf.input_task_stack_hwm);
+    ESP_LOGI(TAG, "  spotify_task HWM: %"PRIu32" bytes free", g_perf.spotify_task_stack_hwm);
 
     // CPU utilization
     if (g_perf.cpu.valid) {
@@ -434,6 +487,12 @@ void perf_monitor_report(void)
     perf_counter_reset_interval(&g_perf.http_failure_count);
     perf_counter_reset_interval(&g_perf.ws_event_count);
     perf_counter_reset_interval(&g_perf.json_parse_count);
+    perf_counter_reset_interval(&g_perf.spotify_poll_count);
+    perf_counter_reset_interval(&g_perf.spotify_error_count);
+    perf_counter_reset_interval(&g_perf.spotify_art_fetch_count);
+    perf_counter_reset_interval(&g_perf.wifi_disconnect_count);
+    g_perf.wifi_rssi_sum = 0;
+    g_perf.wifi_rssi_samples = 0;
     g_perf.lvgl_render_count = 0;
 
     g_perf.last_report_time_us = esp_timer_get_time();
@@ -544,6 +603,25 @@ char *perf_monitor_report_json(void)
     cJSON_AddItemToObject(ui, "latency_ws_to_ui",   timer_to_json(&g_perf.latency_ws_to_ui));
     cJSON_AddItemToObject(root, "ui", ui);
 
+    // WiFi
+    cJSON *wifi = cJSON_CreateObject();
+    if (g_perf.wifi_rssi_samples > 0) {
+        cJSON_AddStringToObject(wifi, "ssid", g_perf.wifi_ssid);
+        char bssid_str[18];
+        snprintf(bssid_str, sizeof(bssid_str), "%02x:%02x:%02x:%02x:%02x:%02x",
+                 g_perf.wifi_bssid[0], g_perf.wifi_bssid[1], g_perf.wifi_bssid[2],
+                 g_perf.wifi_bssid[3], g_perf.wifi_bssid[4], g_perf.wifi_bssid[5]);
+        cJSON_AddStringToObject(wifi, "bssid", bssid_str);
+        cJSON_AddNumberToObject(wifi, "channel", g_perf.wifi_channel);
+        cJSON_AddNumberToObject(wifi, "rssi", g_perf.wifi_rssi);
+        cJSON_AddNumberToObject(wifi, "rssi_avg", (double)g_perf.wifi_rssi_sum / (double)g_perf.wifi_rssi_samples);
+        cJSON_AddNumberToObject(wifi, "rssi_min", g_perf.wifi_rssi_min);
+        cJSON_AddNumberToObject(wifi, "rssi_max", g_perf.wifi_rssi_max);
+        cJSON_AddNumberToObject(wifi, "rssi_samples", g_perf.wifi_rssi_samples);
+    }
+    cJSON_AddItemToObject(wifi, "disconnect_count", counter_to_json(&g_perf.wifi_disconnect_count));
+    cJSON_AddItemToObject(root, "wifi", wifi);
+
     // Memory
     cJSON *memory = cJSON_CreateObject();
     cJSON_AddNumberToObject(memory, "heap_free_bytes",         g_perf.heap_free_bytes);
@@ -558,6 +636,7 @@ char *perf_monitor_report_json(void)
     cJSON *tasks = cJSON_CreateObject();
     cJSON_AddNumberToObject(tasks, "data_task_stack_hwm",  g_perf.data_task_stack_hwm);
     cJSON_AddNumberToObject(tasks, "input_task_stack_hwm", g_perf.input_task_stack_hwm);
+    cJSON_AddNumberToObject(tasks, "spotify_task_stack_hwm", g_perf.spotify_task_stack_hwm);
     cJSON_AddItemToObject(root, "tasks", tasks);
 
     // JPEG
@@ -565,6 +644,18 @@ char *perf_monitor_report_json(void)
     cJSON_AddItemToObject(jpeg, "jpeg_decode", timer_to_json(&g_perf.jpeg_decode));
     cJSON_AddItemToObject(jpeg, "jpeg_fetch",  timer_to_json(&g_perf.jpeg_fetch));
     cJSON_AddItemToObject(root, "jpeg", jpeg);
+
+    // Spotify
+    cJSON *spotify = cJSON_CreateObject();
+    cJSON_AddItemToObject(spotify, "poll_cycle",  timer_to_json(&g_perf.spotify_poll_cycle));
+    cJSON_AddItemToObject(spotify, "api_fetch",   timer_to_json(&g_perf.spotify_api_fetch));
+    cJSON_AddItemToObject(spotify, "art_fetch",   timer_to_json(&g_perf.spotify_art_fetch));
+    cJSON_AddItemToObject(spotify, "art_decode",  timer_to_json(&g_perf.spotify_art_decode));
+    cJSON_AddItemToObject(spotify, "ui_update",   timer_to_json(&g_perf.spotify_ui_update));
+    cJSON_AddItemToObject(spotify, "poll_count",  counter_to_json(&g_perf.spotify_poll_count));
+    cJSON_AddItemToObject(spotify, "error_count", counter_to_json(&g_perf.spotify_error_count));
+    cJSON_AddItemToObject(spotify, "art_fetch_count", counter_to_json(&g_perf.spotify_art_fetch_count));
+    cJSON_AddItemToObject(root, "spotify", spotify);
 
     // CPU utilization
     if (g_perf.cpu.valid) {

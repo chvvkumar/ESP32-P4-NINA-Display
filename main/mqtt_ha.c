@@ -54,7 +54,13 @@ static void build_topics(const char *prefix)
 static void init_device_id(void)
 {
     uint8_t mac[6];
-    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    /* ESP_MAC_WIFI_STA fails on ESP32-P4 (remote coprocessor), use base MAC from eFuse */
+    if (esp_read_mac(mac, ESP_MAC_BASE) != ESP_OK) {
+        /* Fallback: derive from hostname so each device is still unique */
+        const char *host = app_config_get()->hostname;
+        snprintf(s_device_id, sizeof(s_device_id), "%.15s", host[0] ? host : "unknown");
+        return;
+    }
     snprintf(s_device_id, sizeof(s_device_id), "%02x%02x%02x", mac[3], mac[4], mac[5]);
 }
 
