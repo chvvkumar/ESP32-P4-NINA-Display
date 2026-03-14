@@ -992,8 +992,9 @@ esp_err_t backup_get_handler(httpd_req_t *req)
     char date_short[16];
     strftime(date_short, sizeof(date_short), "%Y-%m-%d", &timeinfo);
     snprintf(filename, sizeof(filename),
-             "attachment; filename=\"%s_%s_v%d_%s.json\"",
-             safe_host, mac_file, APP_CONFIG_VERSION, date_short);
+             "attachment; filename=\"%s_%s_v%d_%s%s.json\"",
+             safe_host, mac_file, APP_CONFIG_VERSION, date_short,
+             include_sensitive ? "_secrets" : "");
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Content-Disposition", filename);
