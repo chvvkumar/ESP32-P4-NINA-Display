@@ -2,6 +2,7 @@
 #include "mqtt_ha.h"
 #include "esp_wifi.h"
 #include <string.h>
+#include <time.h>
 #include "esp_heap_caps.h"
 #include "build_version.h"
 #include "esp_mac.h"
