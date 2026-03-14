@@ -404,7 +404,7 @@ static void create_minimal_widgets(void)
     minimal_album_name = lv_label_create(minimal_info_cont);
     lv_label_set_text(minimal_album_name, "");
     lv_obj_set_style_text_font(minimal_album_name, &lv_font_montserrat_28, 0);
-    lv_obj_set_style_text_color(minimal_album_name, lv_color_make(0x6B, 0x72, 0x80), 0);
+    lv_obj_set_style_text_color(minimal_album_name, lv_color_make(0x9C, 0xA3, 0xAF), 0);
     lv_obj_set_style_text_align(minimal_album_name, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_letter_space(minimal_album_name, 7, 0);
     lv_obj_set_style_margin_top(minimal_album_name, 15, 0);
@@ -783,6 +783,16 @@ void nina_spotify_on_hide(void)
 
     /* Restore normal refresh rate when leaving Spotify page */
     set_refr_period(REFR_PERIOD_ACTIVE_MS);
+}
+
+void nina_spotify_refresh_layout(void)
+{
+    if (!spotify_page) return;
+    /* If overlay is currently showing, re-run idle state to swap widgets */
+    if (!is_idle) {
+        is_idle = true;  /* Force re-transition */
+        set_idle_state(false);
+    }
 }
 
 void nina_spotify_free_art(void)
