@@ -40,7 +40,7 @@ void start_web_server(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 16384;
-    config.max_uri_handlers = 32;
+    config.max_uri_handlers = 36;
     httpd_handle_t server = NULL;
 
     if (httpd_start(&server, &config) != ESP_OK) {
@@ -78,6 +78,8 @@ void start_web_server(void)
         { "/api/spotify/logout",         HTTP_POST, spotify_logout_post_handler, NULL },
         { "/api/spotify/status",         HTTP_GET,  spotify_status_get_handler, NULL },
         { "/api/spotify/control",        HTTP_POST, spotify_control_post_handler, NULL },
+        { "/api/config/backup",          HTTP_GET,  backup_get_handler,   NULL },
+        { "/api/config/restore",         HTTP_POST, restore_post_handler, NULL },
     };
 
     for (int i = 0; i < (int)(sizeof(routes)/sizeof(routes[0])); i++) {

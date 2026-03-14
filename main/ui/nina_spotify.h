@@ -65,6 +65,13 @@ void nina_spotify_on_show(void);
 void nina_spotify_on_hide(void);
 
 /**
+ * Re-apply layout mode after config change (e.g. minimal_mode toggle).
+ * If overlay is visible, refreshes which widgets are shown.
+ * Must be called under LVGL display lock.
+ */
+void nina_spotify_refresh_layout(void);
+
+/**
  * Free the album art buffer to reclaim PSRAM.
  * Called when leaving Spotify page so other features have memory headroom.
  * Art will be re-fetched on next track change detection.
