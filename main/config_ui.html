@@ -936,6 +936,10 @@
             <div class="field-hint">How often to check playback state (1000 &ndash; 30000 ms)</div>
           </div>
           <div class="toggle-row">
+            <span class="toggle-label">Minimal Mode</span>
+            <label class="toggle"><input type="checkbox" id="spotify_minimal_mode"><span class="toggle-track"></span></label>
+          </div>
+          <div class="toggle-row">
             <span class="toggle-label">Show Progress Bar</span>
             <label class="toggle"><input type="checkbox" id="spotify_show_progress_bar" checked><span class="toggle-track"></span></label>
           </div>
@@ -1361,6 +1365,7 @@
         spotify_client_id:$('spotifyClientId').value.trim(),
         spotify_poll_interval_ms:parseInt($('spotifyPollInterval').value)||3000,
         spotify_show_progress_bar:!!$('spotify_show_progress_bar').checked,
+        spotify_minimal_mode:!!$('spotify_minimal_mode').checked,
         spotify_overlay_timeout_s:parseInt($('spotifyOverlayTimeout').value)||0
       };
 
@@ -1473,6 +1478,7 @@
       if($('spotifyClientId')) $('spotifyClientId').value=data.spotify_client_id||'';
       if($('spotifyPollInterval')) $('spotifyPollInterval').value=data.spotify_poll_interval_ms||3000;
       if($('spotify_show_progress_bar')) $('spotify_show_progress_bar').checked=data.spotify_show_progress_bar!=null?!!data.spotify_show_progress_bar:true;
+      if($('spotify_minimal_mode')) $('spotify_minimal_mode').checked=!!data.spotify_minimal_mode;
       if($('spotifyOverlayTimeout')) $('spotifyOverlayTimeout').value=data.spotify_overlay_timeout_s!=null?data.spotify_overlay_timeout_s:5;
       updateSpotifyEnabledUI();
 

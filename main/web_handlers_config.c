@@ -108,6 +108,7 @@ esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddStringToObject(root, "spotify_client_id", cfg->spotify_client_id);
     cJSON_AddNumberToObject(root, "spotify_poll_interval_ms", cfg->spotify_poll_interval_ms);
     cJSON_AddBoolToObject(root, "spotify_show_progress_bar", cfg->spotify_show_progress_bar);
+    cJSON_AddBoolToObject(root, "spotify_minimal_mode", cfg->spotify_minimal_mode);
     cJSON_AddNumberToObject(root, "spotify_overlay_timeout_s", cfg->spotify_overlay_timeout_s);
     cJSON_AddBoolToObject(root, "_dirty", app_config_is_dirty());
 
@@ -382,6 +383,7 @@ static app_config_t *parse_config_from_json(cJSON *root)
     JSON_TO_STRING(root, "spotify_client_id",          cfg->spotify_client_id);
     JSON_TO_INT   (root, "spotify_poll_interval_ms",   cfg->spotify_poll_interval_ms);
     JSON_TO_BOOL  (root, "spotify_show_progress_bar",  cfg->spotify_show_progress_bar);
+    JSON_TO_BOOL  (root, "spotify_minimal_mode",       cfg->spotify_minimal_mode);
     JSON_TO_INT   (root, "spotify_overlay_timeout_s",  cfg->spotify_overlay_timeout_s);
 
     return cfg;
