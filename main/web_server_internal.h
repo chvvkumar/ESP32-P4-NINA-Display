@@ -15,6 +15,7 @@ static const char *TAG __attribute__((unused)) = "web_server";
 
 /* Maximum accepted POST payload size for config endpoints */
 #define CONFIG_MAX_PAYLOAD 8192
+#define CONFIG_MAX_RESTORE_PAYLOAD 16384
 
 /* ---- JSON extraction macros ---- */
 #define JSON_TO_STRING(root, key, dest) do { \
@@ -74,4 +75,6 @@ esp_err_t spotify_token_exchange_post_handler(httpd_req_t *req);
 esp_err_t spotify_logout_post_handler(httpd_req_t *req);
 esp_err_t spotify_status_get_handler(httpd_req_t *req);
 esp_err_t spotify_control_post_handler(httpd_req_t *req);
+esp_err_t backup_get_handler(httpd_req_t *req);
+esp_err_t restore_post_handler(httpd_req_t *req);
 void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t *new_cfg);
