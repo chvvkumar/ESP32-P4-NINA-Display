@@ -493,6 +493,10 @@ void spotify_poll_task(void *arg)
             /* Tear down our own TLS session while idle so it doesn't hold
              * internal DMA memory that NINA or SDIO may need. */
             spotify_client_destroy_connection();
+            /* Clear prev_track_id so album art is re-fetched when the
+             * page becomes active again (the art buffer was freed). */
+            prev_track_id[0] = '\0';
+            art_retries = 0;
             vTaskDelay(pdMS_TO_TICKS(2000));
             continue;
         }
@@ -960,13 +964,15 @@ main_loop:
                 }
                 ESP_LOGI(TAG, "Entering Spotify: freed NINA WebSocket TLS sessions");
             } else if (!on_spotify && prev_on_spotify) {
-                /* Leaving Spotify — free Spotify resources */
-                spotify_client_destroy_connection();
+                /* Leaving Spotify — free art buffer.  Don't destroy the
+                 * Spotify HTTP client here: the spotify_poll_task may be
+                 * mid-request on Core 0.  It will see spotify_page_active
+                 * go false and clean up its own connection safely. */
                 if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                     nina_spotify_free_art();
                     bsp_display_unlock();
                 }
-                ESP_LOGI(TAG, "Leaving Spotify: freed TLS session + album art buffer");
+                ESP_LOGI(TAG, "Leaving Spotify: freed album art buffer");
             }
             prev_on_spotify = on_spotify;
         }
