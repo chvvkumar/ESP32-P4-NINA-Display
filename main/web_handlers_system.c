@@ -11,6 +11,7 @@
 #include "esp_heap_caps.h"
 #include "nina_websocket.h"
 #include "mqtt_ha.h"
+#include "spotify_client.h"
 #include "tasks.h"
 #include "bsp/esp-bsp.h"
 #include "lvgl.h"
@@ -172,8 +173,10 @@ static void ota_remove_overlay(void) {
  */
 static void ota_stop_network(void) {
     ota_in_progress = true;
-    /* Give the data task time to reach its suspend point */
+    /* Give tasks time to reach their suspend points */
     vTaskDelay(pdMS_TO_TICKS(200));
+    /* Free all TLS sessions to maximize bandwidth and DMA heap for OTA */
+    spotify_client_destroy_connection();
     nina_websocket_stop_all();
     mqtt_ha_stop();
 }

@@ -510,11 +510,25 @@ void spotify_poll_task(void *arg)
             }
         }
 
+        perf_timer_start(&g_perf.spotify_poll_cycle);
+
         spotify_playback_t pb;
+        perf_timer_start(&g_perf.spotify_api_fetch);
         esp_err_t err = spotify_client_get_currently_playing(&pb);
+        perf_timer_stop(&g_perf.spotify_api_fetch);
+        perf_counter_increment(&g_perf.spotify_poll_count);
 
         if (err == ESP_OK) {
             consecutive_errors = 0;
+
+            /* Update text UI immediately so the user sees new track info
+             * without waiting for the album art TLS handshake + download. */
+            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                perf_timer_start(&g_perf.spotify_ui_update);
+                nina_spotify_update(&pb);
+                perf_timer_stop(&g_perf.spotify_ui_update);
+                bsp_display_unlock();
+            }
 
             /* Check if track changed — fetch new album art */
             if (strcmp(pb.track_id, prev_track_id) != 0) {
@@ -531,13 +545,18 @@ void spotify_poll_task(void *arg)
 
                     uint8_t *jpg_buf = NULL;
                     size_t jpg_size = 0;
-                    if (spotify_client_fetch_album_art(pb.album_art_url, &jpg_buf, &jpg_size) == ESP_OK
-                        && jpg_buf && jpg_size > 0) {
+                    perf_timer_start(&g_perf.spotify_art_fetch);
+                    bool art_fetch_ok = (spotify_client_fetch_album_art(pb.album_art_url, &jpg_buf, &jpg_size) == ESP_OK
+                        && jpg_buf && jpg_size > 0);
+                    perf_timer_stop(&g_perf.spotify_art_fetch);
+                    perf_counter_increment(&g_perf.spotify_art_fetch_count);
+                    if (art_fetch_ok) {
                         /* Strip COM markers that the HW JPEG decoder can't handle */
                         jpg_size = strip_jpeg_com_markers(jpg_buf, jpg_size);
 
                         /* Hardware JPEG decode to RGB565 — follows jpeg_utils.c pattern:
                          * create decoder per use, DMA heap guard, round w and h to 16 */
+                        perf_timer_start(&g_perf.spotify_art_decode);
                         jpeg_decode_picture_info_t pic_info = {0};
                         esp_err_t info_err = jpeg_decoder_get_info(jpg_buf, jpg_size, &pic_info);
                         if (info_err == ESP_OK && pic_info.width > 0) {
@@ -589,6 +608,8 @@ void spotify_poll_task(void *arg)
                                              * LVGL will SW-scale as before */
                                         }
 
+                                        perf_timer_stop(&g_perf.spotify_art_decode);
+
                                         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                                             nina_spotify_set_album_art(final_buf, final_w, final_h, final_size);
                                             bsp_display_unlock();
@@ -596,13 +617,19 @@ void spotify_poll_task(void *arg)
                                         art_ok = true;
                                         /* Ownership transferred to UI — don't free final_buf */
                                     } else {
+                                        perf_timer_stop(&g_perf.spotify_art_decode);
                                         ESP_LOGW(TAG, "JPEG decode failed for album art");
                                         free(rgb_buf);
                                     }
                                 } else {
+                                    perf_timer_stop(&g_perf.spotify_art_decode);
                                     free(rgb_buf);
                                 }
+                            } else {
+                                perf_timer_stop(&g_perf.spotify_art_decode);
                             }
+                        } else {
+                            perf_timer_stop(&g_perf.spotify_art_decode);
                         }
                         free(jpg_buf);
                     } else {
@@ -620,12 +647,6 @@ void spotify_poll_task(void *arg)
                     art_retries = 0;
                 }
             }
-
-            /* Update UI (under LVGL lock) */
-            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                nina_spotify_update(&pb);
-                bsp_display_unlock();
-            }
         } else if (err == ESP_ERR_NOT_FOUND) {
             /* Nothing playing — update UI to show idle state */
             consecutive_errors = 0;
@@ -638,6 +659,7 @@ void spotify_poll_task(void *arg)
         } else {
             /* Connection error — back off to avoid TLS handshake storm */
             consecutive_errors++;
+            perf_counter_increment(&g_perf.spotify_error_count);
         }
 
         uint32_t interval = cfg->spotify_poll_interval_ms;
@@ -653,6 +675,10 @@ void spotify_poll_task(void *arg)
             uint32_t backoff = interval * (1u << (consecutive_errors < 4 ? consecutive_errors : 4));
             if (backoff > 30000) backoff = 30000;
             interval = backoff;
+        }
+        perf_timer_stop(&g_perf.spotify_poll_cycle);
+        if (g_perf.enabled) {
+            g_perf.spotify_task_stack_hwm = uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t);
         }
         vTaskDelay(pdMS_TO_TICKS(interval));
     }
@@ -1199,6 +1225,7 @@ main_loop:
             wifi_ap_record_t ap_info = {0};
             if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
                 rssi = ap_info.rssi;
+                perf_monitor_record_wifi(&ap_info);
             }
         }
 

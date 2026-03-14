@@ -153,6 +153,7 @@ static void event_handler(void *arg, esp_event_base_t event_base,
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        perf_counter_increment(&g_perf.wifi_disconnect_count);
         /* STA lost — re-enable the config AP so the user can reconfigure */
         wifi_mode_t mode;
         esp_wifi_get_mode(&mode);
@@ -271,6 +272,16 @@ static void wifi_init(void)
     if (ap_len > sizeof(wifi_config_ap.ap.ssid)) ap_len = sizeof(wifi_config_ap.ap.ssid);
     memcpy(wifi_config_ap.ap.ssid, ap_name, ap_len);
     wifi_config_ap.ap.ssid_len = ap_len;
+
+    /* Configure STA to scan all channels and connect to the strongest AP.
+     * In a mesh/multi-AP environment with the same SSID, this ensures the
+     * device always picks the best AP on connect and reconnect. */
+    wifi_config_t sta_cfg;
+    esp_wifi_get_config(WIFI_IF_STA, &sta_cfg);
+    sta_cfg.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    sta_cfg.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
+    sta_cfg.sta.threshold.rssi = -90;
+    esp_wifi_set_config(WIFI_IF_STA, &sta_cfg);
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP,  &wifi_config_ap));
@@ -497,16 +508,16 @@ void app_main(void)
 
     /* Allocate task stacks in PSRAM to save internal heap; TCBs stay internal */
     {
-        StackType_t *input_stack = heap_caps_malloc(4096 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+        StackType_t *input_stack = heap_caps_malloc(6144 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
         StaticTask_t *input_tcb  = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         if (input_stack && input_tcb) {
-            xTaskCreateStaticPinnedToCore(input_task, "input_task", 4096, NULL, 5,
+            xTaskCreateStaticPinnedToCore(input_task, "input_task", 6144, NULL, 5,
                                           input_stack, input_tcb, 0);
         } else {
             ESP_LOGE(TAG, "Failed to alloc input_task stack from PSRAM, falling back");
             if (input_stack) heap_caps_free(input_stack);
             if (input_tcb) heap_caps_free(input_tcb);
-            xTaskCreatePinnedToCore(input_task, "input_task", 4096, NULL, 5, NULL, 0);
+            xTaskCreatePinnedToCore(input_task, "input_task", 6144, NULL, 5, NULL, 0);
         }
 
         StackType_t *data_stack = heap_caps_malloc(12288 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);

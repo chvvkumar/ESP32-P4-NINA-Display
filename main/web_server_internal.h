@@ -11,7 +11,7 @@
 #include "app_config.h"
 
 /* Logging tag -- shared across all handler files */
-static const char *TAG = "web_server";
+static const char *TAG __attribute__((unused)) = "web_server";
 
 /* Maximum accepted POST payload size for config endpoints */
 #define CONFIG_MAX_PAYLOAD 8192
