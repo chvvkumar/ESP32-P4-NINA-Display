@@ -29,6 +29,10 @@
 #include <string.h>
 #include <stdlib.h>
 
+/* Embedded Spotify logo PNG (linked via EMBED_FILES) */
+extern const uint8_t spotify_logo_png_start[] asm("_binary_spotify_logo_png_start");
+extern const uint8_t spotify_logo_png_end[]   asm("_binary_spotify_logo_png_end");
+
 static const char *TAG = "spotify_ui";
 
 /* ── Layout constants ────────────────────────────────────────────────── */
@@ -60,11 +64,15 @@ static lv_obj_t *bar_progress = NULL;
 static lv_obj_t *lbl_time_elapsed = NULL;
 static lv_obj_t *lbl_time_total = NULL;
 
+static lv_obj_t *loading_logo = NULL;      /* Spotify logo shown while loading */
+static lv_image_dsc_t logo_dsc;            /* Persistent descriptor for logo PNG */
+
 static lv_timer_t *idle_timer = NULL;
 static bool is_idle = true;
 static bool is_playing = false;
-static uint8_t *current_art_buf = NULL;   /* Owned RGB565 buffer */
-static lv_image_dsc_t art_dsc;            /* Persistent image descriptor */
+static bool has_art = false;               /* True once album art has been set */
+static uint8_t *current_art_buf = NULL;    /* Owned RGB565 buffer */
+static lv_image_dsc_t art_dsc;             /* Persistent image descriptor */
 
 /* ── Forward declarations ────────────────────────────────────────────── */
 
@@ -87,6 +95,32 @@ static void set_refr_period(uint32_t period_ms)
     if (timer) {
         lv_timer_set_period(timer, period_ms);
     }
+}
+
+/* Pulse animation: breathe opacity between 80 and 255 */
+static void pulse_opa_cb(void *var, int32_t value)
+{
+    lv_obj_set_style_image_opa((lv_obj_t *)var, (lv_opa_t)value, 0);
+}
+
+static void start_logo_pulse(void)
+{
+    if (!loading_logo) return;
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, loading_logo);
+    lv_anim_set_values(&a, 80, 255);
+    lv_anim_set_time(&a, 1500);
+    lv_anim_set_playback_time(&a, 1500);
+    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_exec_cb(&a, pulse_opa_cb);
+    lv_anim_start(&a);
+}
+
+static void stop_logo_pulse(void)
+{
+    if (!loading_logo) return;
+    lv_anim_delete(loading_logo, pulse_opa_cb);
 }
 
 /** Update label text only if it changed — avoids restarting scroll animation. */
@@ -117,6 +151,25 @@ lv_obj_t *spotify_page_create(lv_obj_t *parent)
     lv_obj_set_pos(img_album_art, 0, 0);
     lv_image_set_pivot(img_album_art, 0, 0);
     lv_obj_add_flag(img_album_art, LV_OBJ_FLAG_HIDDEN); /* Hidden until art arrives */
+
+    /* 1b. Loading indicator — Spotify logo PNG, centered, pulsing.
+     * lodepng decoder (CONFIG_LV_USE_LODEPNG) handles decoding from
+     * the embedded binary.  We pass the raw PNG data as an lv_image_dsc_t. */
+    {
+        size_t png_size = (size_t)(spotify_logo_png_end - spotify_logo_png_start);
+        memset(&logo_dsc, 0, sizeof(logo_dsc));
+        logo_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
+        logo_dsc.header.cf = LV_COLOR_FORMAT_RAW;
+        logo_dsc.data = spotify_logo_png_start;
+        logo_dsc.data_size = (uint32_t)png_size;
+
+        loading_logo = lv_image_create(spotify_page);
+        lv_image_set_src(loading_logo, &logo_dsc);
+        lv_obj_center(loading_logo);
+        lv_obj_remove_flag(loading_logo, LV_OBJ_FLAG_CLICKABLE);
+        has_art = false;
+        start_logo_pulse();
+    }
 
     /* 2. Dim overlay (semi-transparent black, animated) */
     dim_overlay = lv_obj_create(spotify_page);
@@ -321,8 +374,11 @@ static void set_idle_state(bool idle)
     if (idle) {
         lv_obj_add_flag(track_info_cont, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(controls_zone, LV_OBJ_FLAG_HIDDEN);
-        /* Throttle refresh rate when idle — static album art doesn't need 30fps */
-        set_refr_period(REFR_PERIOD_IDLE_MS);
+        /* Throttle refresh rate when idle — but only if we have album art.
+         * During loading (pulse animation), keep normal refresh rate. */
+        if (has_art) {
+            set_refr_period(REFR_PERIOD_IDLE_MS);
+        }
     } else {
         lv_obj_remove_flag(track_info_cont, LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(controls_zone, LV_OBJ_FLAG_HIDDEN);
@@ -471,6 +527,17 @@ void nina_spotify_set_album_art(const uint8_t *rgb565_data, uint32_t w, uint32_t
 
     lv_image_set_src(img_album_art, &art_dsc);
 
+    /* Hide loading logo now that we have album art */
+    if (loading_logo && !has_art) {
+        stop_logo_pulse();
+        lv_obj_add_flag(loading_logo, LV_OBJ_FLAG_HIDDEN);
+        has_art = true;
+        /* Now safe to throttle refresh if idle (logo animation no longer needed) */
+        if (is_idle) {
+            set_refr_period(REFR_PERIOD_IDLE_MS);
+        }
+    }
+
     /* Scale to fill 720x720 screen from top-left corner.
      * Pivot is (0,0) so scaling expands right and down, filling the screen.
      * lv_image_set_scale uses 256 = 1.0x. */
@@ -508,12 +575,17 @@ void nina_spotify_set_idle(void)
         lv_label_set_text(pp_label, LV_SYMBOL_PLAY);
     }
 
-    /* Hide album art */
+    /* Hide album art, show loading logo */
     if (current_art_buf) {
         free(current_art_buf);
         current_art_buf = NULL;
     }
+    has_art = false;
     lv_obj_add_flag(img_album_art, LV_OBJ_FLAG_HIDDEN);
+    if (loading_logo) {
+        lv_obj_remove_flag(loading_logo, LV_OBJ_FLAG_HIDDEN);
+        start_logo_pulse();
+    }
 }
 
 /* ── Public API: theme ───────────────────────────────────────────────── */
@@ -551,6 +623,12 @@ void nina_spotify_on_show(void)
     is_idle = false; /* Force transition */
     set_idle_state(true);
 
+    /* Restart loading logo pulse if art hasn't loaded yet */
+    if (!has_art && loading_logo) {
+        lv_obj_remove_flag(loading_logo, LV_OBJ_FLAG_HIDDEN);
+        start_logo_pulse();
+    }
+
     /* If user taps, the touch handler will show overlay and start timer */
 }
 
@@ -578,6 +656,13 @@ void nina_spotify_free_art(void)
         }
         free(current_art_buf);
         current_art_buf = NULL;
+        has_art = false;
         ESP_LOGI(TAG, "Album art buffer freed");
+    }
+
+    /* Show loading logo again for next page entry */
+    if (loading_logo) {
+        lv_obj_remove_flag(loading_logo, LV_OBJ_FLAG_HIDDEN);
+        start_logo_pulse();
     }
 }

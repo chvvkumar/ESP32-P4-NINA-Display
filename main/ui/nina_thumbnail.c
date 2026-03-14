@@ -72,8 +72,6 @@ static void apply_zoom(void) {
 
     uint32_t disp_w = orig_w * scale / 256;
     uint32_t disp_h = orig_h * scale / 256;
-    bool using_sw_scale = false;
-
     if (scale == 256) {
         /* 1:1 — use original buffer directly, no scaling needed */
         if (thumbnail_scaled_buf) {
@@ -109,7 +107,6 @@ static void apply_zoom(void) {
             update_image_descriptor(thumbnail_original_buf, orig_w, orig_h,
                                     orig_w * orig_h * 2);
             lv_image_set_scale(thumbnail_img, scale);
-            using_sw_scale = true;
         }
     }
 
