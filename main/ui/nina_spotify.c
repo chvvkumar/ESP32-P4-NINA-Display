@@ -52,7 +52,7 @@ static lv_obj_t *spotify_page = NULL;
 static lv_obj_t *img_album_art = NULL;
 static lv_obj_t *dim_overlay = NULL;
 static lv_obj_t *track_info_cont = NULL;
-static lv_obj_t *lbl_track_title = NULL;     /* lv_spangroup */
+static lv_obj_t *lbl_track_title = NULL;
 static lv_obj_t *lbl_track_subtitle = NULL;
 static lv_obj_t *lbl_artist_name = NULL;
 static lv_obj_t *lbl_album_name = NULL;
@@ -67,7 +67,7 @@ static lv_obj_t *lbl_time_total = NULL;
 
 /* Minimal mode widgets (overlay content shown instead of controls when tapped) */
 static lv_obj_t *minimal_info_cont = NULL;     /* Centered flex container */
-static lv_obj_t *minimal_track_title = NULL;  /* lv_spangroup */
+static lv_obj_t *minimal_track_title = NULL;
 static lv_obj_t *minimal_track_subtitle = NULL;
 static lv_obj_t *minimal_artist_name = NULL;
 static lv_obj_t *minimal_album_name = NULL;
@@ -139,95 +139,6 @@ static void label_set_text_if_changed(lv_obj_t *label, const char *text)
     const char *cur = lv_label_get_text(label);
     if (cur && strcmp(cur, text) == 0) return;
     lv_label_set_text(label, text);
-}
-
-/* Forward declaration — defined after this function */
-static bool is_version_keyword(const char *start, size_t len);
-
-/** Helper: remove all spans from a spangroup. */
-static void spangroup_clear(lv_obj_t *spangroup)
-{
-    while (lv_spangroup_get_span_count(spangroup) > 0) {
-        lv_span_t *s = lv_spangroup_get_child(spangroup, 0);
-        if (!s) break;
-        lv_spangroup_delete_span(spangroup, s);
-    }
-}
-
-/** Helper: add a styled span to a spangroup. */
-static void spangroup_add_chunk(lv_obj_t *spangroup, const char *text, size_t len,
-                                 const lv_font_t *font, lv_color_t color)
-{
-    lv_span_t *span = lv_spangroup_add_span(spangroup);
-    if (!span) return;
-    char *buf = malloc(len + 1);
-    if (buf) {
-        memcpy(buf, text, len);
-        buf[len] = '\0';
-        lv_span_set_text(span, buf);
-        free(buf);
-    }
-    lv_style_t *style = lv_span_get_style(span);
-    lv_style_set_text_font(style, font);
-    lv_style_set_text_color(style, color);
-}
-
-/** Set spangroup text with parenthetical portions rendered smaller and dimmer.
- *  Non-parenthetical text uses main_font in white; text inside () or [] uses
- *  sub_font in gray.  Only applies styling to non-version-keyword parentheses
- *  (version keywords are handled by the subtitle label instead). */
-static void spangroup_set_styled_text(lv_obj_t *spangroup, const char *text,
-                                       const lv_font_t *main_font,
-                                       const lv_font_t *sub_font)
-{
-    if (!spangroup || !text) return;
-
-    /* Avoid redundant rebuilds — track last text per widget via user_data */
-    const char *prev = (const char *)lv_obj_get_user_data(spangroup);
-    if (prev && strcmp(prev, text) == 0) return;
-    char *copy = strdup(text);
-    if (copy) {
-        free((void *)lv_obj_get_user_data(spangroup));
-        lv_obj_set_user_data(spangroup, copy);
-    }
-
-    spangroup_clear(spangroup);
-
-    lv_color_t white = lv_color_white();
-    lv_color_t gray = lv_color_make(0xAA, 0xAA, 0xAA);
-
-    const char *p = text;
-    while (*p) {
-        if (*p == '(' || *p == '[') {
-            char close = (*p == '(') ? ')' : ']';
-            const char *end = strchr(p + 1, close);
-            if (end) {
-                size_t inner_len = (size_t)(end - p - 1);
-                size_t chunk_len = (size_t)(end + 1 - p);
-                if (is_version_keyword(p + 1, inner_len)) {
-                    /* Version keyword — render at main font (shouldn't normally
-                     * appear here since split_track_title strips them) */
-                    spangroup_add_chunk(spangroup, p, chunk_len, main_font, white);
-                } else {
-                    /* Title-part parens: render smaller and dimmer */
-                    spangroup_add_chunk(spangroup, p, chunk_len, sub_font, gray);
-                }
-                p = end + 1;
-            } else {
-                /* No closing bracket — render rest as normal */
-                spangroup_add_chunk(spangroup, p, strlen(p), main_font, white);
-                break;
-            }
-        } else {
-            /* Normal text — find next ( or [ or end */
-            const char *next = p;
-            while (*next && *next != '(' && *next != '[') next++;
-            spangroup_add_chunk(spangroup, p, (size_t)(next - p), main_font, white);
-            p = next;
-        }
-    }
-
-    lv_spangroup_refresh(spangroup);
 }
 
 /** Check if text inside parentheses/brackets contains a version/edition keyword.
@@ -342,10 +253,10 @@ static void apply_label_long_mode(void)
     lv_label_long_mode_t mode = scroll ? LV_LABEL_LONG_SCROLL_CIRCULAR
                                        : LV_LABEL_LONG_WRAP;
 
-    /* Immersive labels */
     if (lbl_track_title) {
-        lv_spangroup_set_mode(lbl_track_title, scroll ? LV_SPAN_MODE_EXPAND
-                                                       : LV_SPAN_MODE_BREAK);
+        lv_label_set_long_mode(lbl_track_title, mode);
+        if (scroll) lv_obj_set_style_anim_duration(lbl_track_title,
+            lv_anim_speed_clamped(60, 1000, 20000), 0);
     }
     if (lbl_track_subtitle) {
         lv_label_set_long_mode(lbl_track_subtitle, mode);
@@ -363,10 +274,10 @@ static void apply_label_long_mode(void)
             lv_anim_speed_clamped(60, 1000, 20000), 0);
     }
 
-    /* Minimal labels */
     if (minimal_track_title) {
-        lv_spangroup_set_mode(minimal_track_title, scroll ? LV_SPAN_MODE_EXPAND
-                                                           : LV_SPAN_MODE_BREAK);
+        lv_label_set_long_mode(minimal_track_title, mode);
+        if (scroll) lv_obj_set_style_anim_duration(minimal_track_title,
+            lv_anim_speed_clamped(60, 1000, 20000), 0);
     }
     if (minimal_track_subtitle) {
         lv_label_set_long_mode(minimal_track_subtitle, mode);
@@ -490,13 +401,13 @@ static void create_track_info_container(void)
     lv_obj_remove_flag(track_info_cont, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_remove_flag(track_info_cont, LV_OBJ_FLAG_CLICKABLE);
 
-    /* Track title (spangroup for mixed font sizes with parenthetical text) */
-    lbl_track_title = lv_spangroup_create(track_info_cont);
-    lv_spangroup_set_align(lbl_track_title, LV_TEXT_ALIGN_CENTER);
-    lv_spangroup_set_mode(lbl_track_title, LV_SPAN_MODE_BREAK);
-    lv_obj_set_size(lbl_track_title, 580, LV_SIZE_CONTENT);
+    /* Track title (large, white) */
+    lbl_track_title = lv_label_create(track_info_cont);
+    lv_label_set_text(lbl_track_title, "");
     lv_obj_set_style_text_font(lbl_track_title, &lv_font_montserrat_48, 0);
     lv_obj_set_style_text_color(lbl_track_title, lv_color_white(), 0);
+    lv_obj_set_style_text_align(lbl_track_title, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_width(lbl_track_title, 580);
 
     /* Track subtitle (smaller, for remaster/edition info in wrap mode) */
     lbl_track_subtitle = lv_label_create(track_info_cont);
@@ -636,14 +547,14 @@ static void create_minimal_widgets(void)
     lv_obj_remove_flag(minimal_info_cont, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_remove_flag(minimal_info_cont, LV_OBJ_FLAG_CLICKABLE);
 
-    /* Track title — spangroup for mixed font sizes with parenthetical text */
-    minimal_track_title = lv_spangroup_create(minimal_info_cont);
-    lv_spangroup_set_align(minimal_track_title, LV_TEXT_ALIGN_CENTER);
-    lv_spangroup_set_mode(minimal_track_title, LV_SPAN_MODE_BREAK);
-    lv_obj_set_size(minimal_track_title, 600, LV_SIZE_CONTENT);
+    /* Track title — large, white, tight tracking */
+    minimal_track_title = lv_label_create(minimal_info_cont);
+    lv_label_set_text(minimal_track_title, "");
     lv_obj_set_style_text_font(minimal_track_title, &lv_font_montserrat_48, 0);
     lv_obj_set_style_text_color(minimal_track_title, lv_color_white(), 0);
+    lv_obj_set_style_text_align(minimal_track_title, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_letter_space(minimal_track_title, -2, 0);
+    lv_obj_set_width(minimal_track_title, 600);
 
     /* Track subtitle (smaller, for remaster/edition info in wrap mode) */
     minimal_track_subtitle = lv_label_create(minimal_info_cont);
@@ -820,7 +731,7 @@ void nina_spotify_update(const spotify_playback_t *data)
         /* Minimal mode: update minimal labels */
         bool scroll = app_config_get()->spotify_scroll_text;
         if (scroll) {
-            spangroup_set_styled_text(minimal_track_title, data->track_title, &lv_font_montserrat_48, &lv_font_montserrat_36);
+            label_set_text_if_changed(minimal_track_title, data->track_title);
             if (minimal_track_subtitle) {
                 lv_label_set_text(minimal_track_subtitle, "");
                 lv_obj_add_flag(minimal_track_subtitle, LV_OBJ_FLAG_HIDDEN);
@@ -829,7 +740,7 @@ void nina_spotify_update(const spotify_playback_t *data)
             char main_buf[256], sub_buf[256];
             split_track_title(data->track_title, main_buf, sizeof(main_buf),
                               sub_buf, sizeof(sub_buf));
-            spangroup_set_styled_text(minimal_track_title, main_buf, &lv_font_montserrat_48, &lv_font_montserrat_36);
+            label_set_text_if_changed(minimal_track_title, main_buf);
             if (minimal_track_subtitle) {
                 if (sub_buf[0]) {
                     label_set_text_if_changed(minimal_track_subtitle, sub_buf);
@@ -874,7 +785,7 @@ void nina_spotify_update(const spotify_playback_t *data)
         /* Immersive mode: update immersive labels */
         bool scroll = app_config_get()->spotify_scroll_text;
         if (scroll) {
-            spangroup_set_styled_text(lbl_track_title, data->track_title, &lv_font_montserrat_48, &lv_font_montserrat_36);
+            label_set_text_if_changed(lbl_track_title, data->track_title);
             if (lbl_track_subtitle) {
                 lv_label_set_text(lbl_track_subtitle, "");
                 lv_obj_add_flag(lbl_track_subtitle, LV_OBJ_FLAG_HIDDEN);
@@ -884,7 +795,7 @@ void nina_spotify_update(const spotify_playback_t *data)
             char main_buf[256], sub_buf[256];
             split_track_title(data->track_title, main_buf, sizeof(main_buf),
                               sub_buf, sizeof(sub_buf));
-            spangroup_set_styled_text(lbl_track_title, main_buf, &lv_font_montserrat_48, &lv_font_montserrat_36);
+            label_set_text_if_changed(lbl_track_title, main_buf);
             if (lbl_track_subtitle) {
                 if (sub_buf[0]) {
                     label_set_text_if_changed(lbl_track_subtitle, sub_buf);
@@ -1000,7 +911,7 @@ void nina_spotify_set_idle(void)
     if (!spotify_page) return;
 
     /* Clear track info */
-    spangroup_set_styled_text(lbl_track_title, "Not Playing", &lv_font_montserrat_48, &lv_font_montserrat_36);
+    lv_label_set_text(lbl_track_title, "Not Playing");
     if (lbl_track_subtitle) {
         lv_label_set_text(lbl_track_subtitle, "");
         lv_obj_add_flag(lbl_track_subtitle, LV_OBJ_FLAG_HIDDEN);
@@ -1009,7 +920,7 @@ void nina_spotify_set_idle(void)
     lv_label_set_text(lbl_album_name, "");
 
     /* Also clear minimal mode labels */
-    if (minimal_track_title) spangroup_set_styled_text(minimal_track_title, "Not Playing", &lv_font_montserrat_48, &lv_font_montserrat_36);
+    if (minimal_track_title) lv_label_set_text(minimal_track_title, "Not Playing");
     if (minimal_track_subtitle) {
         lv_label_set_text(minimal_track_subtitle, "");
         lv_obj_add_flag(minimal_track_subtitle, LV_OBJ_FLAG_HIDDEN);
