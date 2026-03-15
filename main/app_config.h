@@ -13,7 +13,7 @@ extern "C" {
 #define MAX_NINA_INSTANCES 3
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 22
+#define APP_CONFIG_VERSION 23
 
 #define WIDGET_STYLE_COUNT 7
 
@@ -80,6 +80,7 @@ typedef struct {
 
     // Added after v21 — must stay at end to preserve NVS binary compatibility
     bool     spotify_minimal_mode;        // Minimal mode: centered text, no controls (default false)
+    bool     spotify_scroll_text;         // Scroll long text on Spotify overlay; false = wrap (default true)
 } app_config_t;
 
 // v17 snapshot — AllSky fields without allsky_enabled
@@ -291,6 +292,64 @@ typedef struct {
     bool     spotify_show_progress_bar;
     uint8_t  spotify_overlay_timeout_s;
 } app_config_v21_t;
+
+// v22 snapshot — layout before spotify_scroll_text was added
+typedef struct {
+    uint32_t config_version;
+    char api_url[3][128];
+    char ntp_server[64];
+    char tz_string[64];
+    char filter_colors[3][512];
+    char rms_thresholds[3][256];
+    char hfr_thresholds[3][256];
+    int theme_index;
+    int brightness;
+    int color_brightness;
+    bool mqtt_enabled;
+    char mqtt_broker_url[128];
+    char mqtt_username[64];
+    char mqtt_password[64];
+    char mqtt_topic_prefix[64];
+    uint16_t mqtt_port;
+    int8_t   active_page_override;
+    bool     auto_rotate_enabled;
+    uint16_t auto_rotate_interval_s;
+    uint8_t  auto_rotate_effect;
+    bool     auto_rotate_skip_disconnected;
+    uint8_t  auto_rotate_pages;
+    uint8_t  update_rate_s;
+    uint8_t  graph_update_interval_s;
+    uint8_t  connection_timeout_s;
+    uint8_t  toast_duration_s;
+    bool     debug_mode;
+    bool     instance_enabled[3];
+    bool     screen_sleep_enabled;
+    uint16_t screen_sleep_timeout_s;
+    bool     alert_flash_enabled;
+    uint8_t  idle_poll_interval_s;
+    bool     wifi_power_save;
+    uint8_t  widget_style;
+    uint8_t  auto_update_check;
+    uint8_t  update_channel;
+    bool     deep_sleep_enabled;
+    uint32_t deep_sleep_wake_timer_s;
+    bool     deep_sleep_on_idle;
+    uint8_t  screen_rotation;
+    char     hostname[32];
+    char     allsky_hostname[128];
+    uint16_t allsky_update_interval_s;
+    float    allsky_dew_offset;
+    char     allsky_field_config[1536];
+    char     allsky_thresholds[1024];
+    bool     allsky_enabled;
+    bool     demo_mode;
+    bool     spotify_enabled;
+    char     spotify_client_id[64];
+    uint16_t spotify_poll_interval_ms;
+    bool     spotify_show_progress_bar;
+    uint8_t  spotify_overlay_timeout_s;
+    bool     spotify_minimal_mode;
+} app_config_v22_t;
 
 // v20 snapshot — current layout without spotify_overlay_timeout_s
 typedef struct {
