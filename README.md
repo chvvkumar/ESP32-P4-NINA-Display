@@ -96,8 +96,15 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
 
 <table align="center">
   <tr>
-    <td align="center"><img src="images/Spotify_desk.jpg" alt="Spotify on two devices" width="480"></td>
+    <td align="center" colspan="2"><img src="images/Spotify_desk.jpg" alt="Spotify on two devices" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>With controls</em></td>
+    <td align="center"><em>Controls hidden</em></td>
+  </tr>
+  <tr>
     <td align="center"><img src="images/Spotify_overlay.jpg" alt="Spotify overlay with controls" width="480"></td>
+    <td align="center"><img src="images/Spotify_overlay_minimal.jpg" alt="Spotify minimal overlay" width="480"></td>
   </tr>
 </table>
 
