@@ -1931,12 +1931,12 @@
           var loginBtn=$('spotifyLoginBtn');
           var logoutBtn=$('spotifyLogoutBtn');
           if(!el) return;
-          if(data.state==='authorized'){
+          if(data.auth_state==='authorized'){
             el.textContent='Connected';
             el.style.color='#10b981';
             if(loginBtn) loginBtn.style.display='none';
             if(logoutBtn) logoutBtn.style.display='';
-          } else if(data.state==='error'){
+          } else if(data.auth_state==='error'){
             el.textContent='Error: '+(data.error||'Token refresh failed');
             el.style.color='#ef4444';
             if(loginBtn) loginBtn.style.display='';
