@@ -724,16 +724,25 @@
           <div class="field-hint">Used for DHCP, AP SSID, and Home Assistant device name.</div>
         </div>
         <hr class="divider">
-        <div class="row stack-mobile">
-          <div class="field">
-            <label class="field-label">WiFi SSID</label>
-            <input type="text" class="input" id="ssid" placeholder="Network name">
-          </div>
-          <div class="field">
-            <label class="field-label">WiFi Password</label>
-            <input type="password" class="input" id="pass" placeholder="Enter new password to change">
-            <div class="field-hint">Password is stored in WiFi hardware and not readable.</div>
-          </div>
+        <div class="field">
+          <div class="field-label" style="margin-top:16px;font-weight:600;color:var(--accent)">Network 1 (Primary)</div>
+          <label class="field-label">SSID</label>
+          <input type="text" class="input" id="ssid1" placeholder="Network name">
+          <label class="field-label">Password</label>
+          <input type="password" class="input" id="pass1" placeholder="Enter new password to change">
+          <div class="hint">Password is stored in device config and not readable</div>
+
+          <div class="field-label" style="margin-top:16px;font-weight:600;color:var(--accent)">Network 2</div>
+          <label class="field-label">SSID</label>
+          <input type="text" class="input" id="ssid2" placeholder="Network name">
+          <label class="field-label">Password</label>
+          <input type="password" class="input" id="pass2" placeholder="Enter new password to change">
+
+          <div class="field-label" style="margin-top:16px;font-weight:600;color:var(--accent)">Network 3</div>
+          <label class="field-label">SSID</label>
+          <input type="text" class="input" id="ssid3" placeholder="Network name">
+          <label class="field-label">Password</label>
+          <input type="password" class="input" id="pass3" placeholder="Enter new password to change">
         </div>
         <hr class="divider">
         <div class="row stack-mobile">
@@ -1453,10 +1462,15 @@
         spotify_overlay_timeout_s:parseInt($('spotifyOverlayTimeout').value)||0
       };
 
-      var ssid=$('ssid').value.trim();
-      var pass=$('pass').value;
-      if(ssid) data.ssid=ssid;
-      if(pass) data.pass=pass;
+      var nets=[];
+      for(var i=1;i<=3;i++){
+        var s=$('ssid'+i).value.trim();
+        var p=$('pass'+i).value;
+        var o={ssid:s};
+        if(p) o.pass=p;
+        nets.push(o);
+      }
+      data.wifi_networks=nets;
       return data;
     }
 
@@ -1470,7 +1484,18 @@
       var hn=data.hostname||'NINA Display';
       $('brandName').textContent=hn;
       document.title=hn;
-      $('ssid').value=data.ssid||'';
+      if(data.wifi_networks && data.wifi_networks.length) {
+        for(var i=0;i<3;i++) {
+          var n=data.wifi_networks[i]||{};
+          $('ssid'+(i+1)).value=n.ssid||'';
+          $('pass'+(i+1)).value='';
+        }
+      } else {
+        $('ssid1').value=data.ssid||'';
+        $('pass1').value='';
+        $('ssid2').value='';$('pass2').value='';
+        $('ssid3').value='';$('pass3').value='';
+      }
       $('ntp').value=data.ntp||'';
       $('timezone').value=data.timezone||'';
 
@@ -1543,7 +1568,7 @@
 
       updateNodeLabels();
 
-      $('pass').value='';
+      // passwords cleared in populateConfig wifi_networks block above
 
       // AllSky fields
       if($('allsky_enabled')) $('allsky_enabled').checked=!!data.allsky_enabled;
@@ -1789,6 +1814,9 @@
       clearTimeout(_applyTimer);
       _applyTimer=setTimeout(()=>{
         var data=getConfigData();
+        if(data.wifi_networks){
+          data.wifi_networks.forEach(function(n){delete n.pass;});
+        }
         delete data.ssid;
         delete data.pass;
         postJson('/api/config/apply',data).catch(e=>console.error('Live apply failed:',e));
@@ -1931,12 +1959,12 @@
           var loginBtn=$('spotifyLoginBtn');
           var logoutBtn=$('spotifyLogoutBtn');
           if(!el) return;
-          if(data.state==='authorized'){
+          if(data.auth_state==='authorized'){
             el.textContent='Connected';
             el.style.color='#10b981';
             if(loginBtn) loginBtn.style.display='none';
             if(logoutBtn) logoutBtn.style.display='';
-          } else if(data.state==='error'){
+          } else if(data.auth_state==='error'){
             el.textContent='Error: '+(data.error||'Token refresh failed');
             el.style.color='#ef4444';
             if(loginBtn) loginBtn.style.display='';

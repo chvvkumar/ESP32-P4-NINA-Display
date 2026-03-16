@@ -38,6 +38,8 @@
 #include "spotify_auth.h"
 #include "spotify_client.h"
 #include "ui/nina_spotify.h"
+#include "wifi_manager.h"
+#include "ui/nina_settings_tabview.h"
 
 /* Embedded splash logo (JPEG, hardware-decoded at boot) */
 extern const uint8_t logo_jpg_start[] asm("_binary_logo_jpg_start");
@@ -136,15 +138,124 @@ static const char *TAG = "main";
 EventGroupHandle_t s_wifi_event_group;
 int instance_count = 1;
 
-/* WiFi reconnection backoff */
-static int wifi_retry_count = 0;
+/* WiFi multi-network fallback */
+static int current_network_index = 0;
+static int wifi_attempt_count = 0;
+static bool manual_switch_pending = false;
+static int pending_switch_index = -1;
+static int networks_tried = 0;
 static esp_timer_handle_t wifi_reconnect_timer = NULL;
-static const int wifi_backoff_ms[] = {1000, 2000, 5000, 10000, 30000};
-#define WIFI_BACKOFF_STEPS (sizeof(wifi_backoff_ms) / sizeof(wifi_backoff_ms[0]))
+#define WIFI_RETRY_PER_NETWORK  2
+#define WIFI_FULL_CYCLE_DELAY_MS 30000
 
-static void wifi_reconnect_cb(void *arg) {
-    ESP_LOGI(TAG, "WiFi reconnect attempt %d", wifi_retry_count);
+static bool wifi_advance_to_next_network(void)
+{
+    const app_config_t *cfg = app_config_get();
+    for (int i = 1; i <= 3; i++) {
+        int idx = (current_network_index + i) % 3;
+        if (cfg->wifi_networks[idx].ssid[0] != '\0') {
+            current_network_index = idx;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void wifi_connect_to_slot(int index)
+{
+    const app_config_t *cfg = app_config_get();
+    wifi_config_t sta_cfg = {0};
+
+    sta_cfg.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    sta_cfg.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
+    sta_cfg.sta.threshold.rssi = -90;
+    if (cfg->wifi_networks[index].password[0] != '\0') {
+        sta_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    } else {
+        sta_cfg.sta.threshold.authmode = WIFI_AUTH_OPEN;
+    }
+
+    strlcpy((char *)sta_cfg.sta.ssid, cfg->wifi_networks[index].ssid,
+            sizeof(sta_cfg.sta.ssid));
+    strlcpy((char *)sta_cfg.sta.password, cfg->wifi_networks[index].password,
+            sizeof(sta_cfg.sta.password));
+
+    current_network_index = index;
+    esp_wifi_set_config(WIFI_IF_STA, &sta_cfg);
     esp_wifi_connect();
+    ESP_LOGI(TAG, "WiFi: connecting to network %d (%s)", index + 1,
+             cfg->wifi_networks[index].ssid);
+}
+
+void wifi_switch_to_network(int index)
+{
+    if (index < 0 || index > 2) return;
+    const app_config_t *cfg = app_config_get();
+    if (cfg->wifi_networks[index].ssid[0] == '\0') return;
+
+    ESP_LOGI(TAG, "WiFi: manual switch to network %d (%s)", index + 1,
+             cfg->wifi_networks[index].ssid);
+
+    manual_switch_pending = true;
+    wifi_attempt_count = 0;
+    networks_tried = 0;
+
+    pending_switch_index = index;
+    esp_timer_stop(wifi_reconnect_timer);
+    esp_wifi_disconnect();
+    /* Connection happens in disconnect handler when it sees manual_switch_pending */
+}
+
+int wifi_get_current_network_index(void)
+{
+    return current_network_index;
+}
+
+static void wifi_reconnect_cb(void *arg)
+{
+    if (manual_switch_pending) {
+        return;
+    }
+
+    const app_config_t *cfg = app_config_get();
+
+    if (wifi_attempt_count >= WIFI_RETRY_PER_NETWORK) {
+        wifi_attempt_count = 0;
+        networks_tried++;
+
+        int configured_count = 0;
+        for (int i = 0; i < 3; i++) {
+            if (cfg->wifi_networks[i].ssid[0] != '\0') configured_count++;
+        }
+
+        if (networks_tried >= configured_count) {
+            networks_tried = 0;
+            current_network_index = 0;
+            for (int i = 0; i < 3; i++) {
+                if (cfg->wifi_networks[i].ssid[0] != '\0') {
+                    current_network_index = i;
+                    break;
+                }
+            }
+            ESP_LOGW(TAG, "WiFi: all networks exhausted, retrying in %d s",
+                     WIFI_FULL_CYCLE_DELAY_MS / 1000);
+            esp_timer_start_once(wifi_reconnect_timer,
+                                 (uint64_t)WIFI_FULL_CYCLE_DELAY_MS * 1000ULL);
+            return;
+        }
+
+        if (!wifi_advance_to_next_network()) {
+            networks_tried = 0;
+            ESP_LOGW(TAG, "WiFi: no other networks configured, retrying in %d s",
+                     WIFI_FULL_CYCLE_DELAY_MS / 1000);
+            esp_timer_start_once(wifi_reconnect_timer,
+                                 (uint64_t)WIFI_FULL_CYCLE_DELAY_MS * 1000ULL);
+            return;
+        }
+    }
+
+    wifi_attempt_count++;
+    wifi_connect_to_slot(current_network_index);
 }
 
 static void event_handler(void *arg, esp_event_base_t event_base,
@@ -154,24 +265,37 @@ static void event_handler(void *arg, esp_event_base_t event_base,
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         perf_counter_increment(&g_perf.wifi_disconnect_count);
-        /* STA lost — re-enable the config AP so the user can reconfigure */
-        wifi_mode_t mode;
-        esp_wifi_get_mode(&mode);
-        if (mode == WIFI_MODE_STA) {
-            ESP_LOGI(TAG, "STA disconnected, re-enabling AP");
-            esp_wifi_set_mode(WIFI_MODE_APSTA);
+        esp_wifi_set_mode(WIFI_MODE_APSTA);
+
+        if (manual_switch_pending) {
+            manual_switch_pending = false;
+            if (pending_switch_index >= 0) {
+                wifi_connect_to_slot(pending_switch_index);
+                pending_switch_index = -1;
+            }
+            return;
         }
 
-        int idx = wifi_retry_count < (int)WIFI_BACKOFF_STEPS
-                  ? wifi_retry_count : (int)WIFI_BACKOFF_STEPS - 1;
-        int delay = wifi_backoff_ms[idx];
-        wifi_retry_count++;
-        ESP_LOGI(TAG, "WiFi disconnected, reconnecting in %d ms (attempt %d)", delay, wifi_retry_count);
-        esp_timer_start_once(wifi_reconnect_timer, (uint64_t)delay * 1000);
+        esp_timer_stop(wifi_reconnect_timer);
+        esp_timer_start_once(wifi_reconnect_timer, 1000000ULL);
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
-        wifi_retry_count = 0;
+        wifi_attempt_count = 0;
+        networks_tried = 0;
+
+        /* Show green toast with connected network name and refresh settings UI */
+        {
+            const app_config_t *cfg = app_config_get();
+            const char *ssid = cfg->wifi_networks[current_network_index].ssid;
+            if (ssid[0] != '\0') {
+                nina_toast_show_fmt(TOAST_SUCCESS, "Connected to %s", ssid);
+            }
+            if (lvgl_port_lock(100)) {
+                settings_tabview_refresh();
+                lvgl_port_unlock();
+            }
+        }
 
         /* STA connected — disable the config AP to keep the air clean */
         wifi_mode_t mode;
@@ -231,7 +355,7 @@ static void wifi_init(void)
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
-    // Create WiFi reconnection backoff timer
+    // Create WiFi reconnection timer (multi-network fallback)
     const esp_timer_create_args_t reconnect_timer_args = {
         .callback = wifi_reconnect_cb,
         .name = "wifi_reconnect",
@@ -252,10 +376,9 @@ static void wifi_init(void)
                                                         &instance_got_ip));
 
     /*
-     * STA credentials are NOT stored in app_config — they live in ESP-IDF's
-     * own WiFi NVS namespace (auto-persisted by esp_wifi_set_config and
-     * auto-restored on esp_wifi_start).  The web server POST handler calls
-     * esp_wifi_set_config directly when the user saves new credentials.
+     * STA credentials are stored in app_config wifi_networks[] array
+     * (up to 3 priority-ordered networks). The first non-empty slot is
+     * used at boot; fallback rotates through configured networks.
      */
 
     wifi_config_t wifi_config_ap = {
@@ -273,15 +396,26 @@ static void wifi_init(void)
     memcpy(wifi_config_ap.ap.ssid, ap_name, ap_len);
     wifi_config_ap.ap.ssid_len = ap_len;
 
-    /* Configure STA to scan all channels and connect to the strongest AP.
-     * In a mesh/multi-AP environment with the same SSID, this ensures the
-     * device always picks the best AP on connect and reconnect. */
-    wifi_config_t sta_cfg;
-    esp_wifi_get_config(WIFI_IF_STA, &sta_cfg);
-    sta_cfg.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
-    sta_cfg.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
-    sta_cfg.sta.threshold.rssi = -90;
-    esp_wifi_set_config(WIFI_IF_STA, &sta_cfg);
+    /* Load STA credentials from app_config wifi_networks[0] (highest priority) */
+    {
+        const app_config_t *cfg = app_config_get();
+        if (cfg->wifi_networks[0].ssid[0] != '\0') {
+            wifi_config_t sta_cfg = {0};
+            sta_cfg.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+            sta_cfg.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
+            sta_cfg.sta.threshold.rssi = -90;
+            if (cfg->wifi_networks[0].password[0] != '\0') {
+                sta_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+            } else {
+                sta_cfg.sta.threshold.authmode = WIFI_AUTH_OPEN;
+            }
+            strlcpy((char *)sta_cfg.sta.ssid, cfg->wifi_networks[0].ssid,
+                    sizeof(sta_cfg.sta.ssid));
+            strlcpy((char *)sta_cfg.sta.password, cfg->wifi_networks[0].password,
+                    sizeof(sta_cfg.sta.password));
+            esp_wifi_set_config(WIFI_IF_STA, &sta_cfg);
+        }
+    }
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP,  &wifi_config_ap));
@@ -326,6 +460,27 @@ void app_main(void)
 
     wifi_init();
 
+    /* One-time migration: copy WiFi credentials from ESP-IDF NVS to app_config
+     * wifi_networks[0] if it's empty (first boot after upgrade to v24). */
+    {
+        app_config_t *cfg = app_config_get();
+        if (cfg->wifi_networks[0].ssid[0] == '\0') {
+            wifi_config_t sta_cfg = {0};
+            if (esp_wifi_get_config(WIFI_IF_STA, &sta_cfg) == ESP_OK &&
+                sta_cfg.sta.ssid[0] != '\0') {
+                strlcpy(cfg->wifi_networks[0].ssid,
+                        (const char *)sta_cfg.sta.ssid,
+                        sizeof(cfg->wifi_networks[0].ssid));
+                strlcpy(cfg->wifi_networks[0].password,
+                        (const char *)sta_cfg.sta.password,
+                        sizeof(cfg->wifi_networks[0].password));
+                app_config_save(cfg);
+                ESP_LOGI(TAG, "Migrated WiFi credentials to wifi_networks[0]: %s",
+                         cfg->wifi_networks[0].ssid);
+            }
+        }
+    }
+
     // Enable Dynamic Frequency Scaling — CPU scales 360 MHz (active) to 40 MHz (idle)
     power_mgmt_init();
 
@@ -344,6 +499,7 @@ void app_main(void)
             .sw_rotate = false,
         }
     };
+    cfg.lvgl_port_cfg.task_stack = 10240; /* Default 7168 is too tight for settings page */
     bsp_display_start_with_config(&cfg);
     bsp_display_backlight_on();
     bsp_display_brightness_set(app_config_get()->brightness);

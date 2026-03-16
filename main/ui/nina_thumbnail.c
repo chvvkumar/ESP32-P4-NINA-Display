@@ -89,7 +89,7 @@ static void apply_zoom(void) {
         /* PPA pre-scale to target dimensions for smooth panning */
         size_t ppa_size = 0;
         uint8_t *scaled = ppa_scale_rgb565(thumbnail_original_buf,
-                                            orig_w, orig_h,
+                                            orig_w, orig_h, 0,
                                             disp_w, disp_h, &ppa_size);
         if (scaled) {
             if (thumbnail_scaled_buf) free(thumbnail_scaled_buf);

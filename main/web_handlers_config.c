@@ -1,6 +1,5 @@
 #include "web_server_internal.h"
 #include "mqtt_ha.h"
-#include "esp_wifi.h"
 #include <string.h>
 #include <time.h>
 #include "esp_heap_caps.h"
@@ -122,13 +121,16 @@ esp_err_t config_get_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    /* WiFi SSID: read from the WiFi stack (not stored in app_config).
-     * Password is never exposed via the API. */
-    wifi_config_t sta_cfg = {0};
-    if (esp_wifi_get_config(WIFI_IF_STA, &sta_cfg) == ESP_OK) {
-        cJSON_AddStringToObject(root, "ssid", (const char *)sta_cfg.sta.ssid);
-    } else {
-        cJSON_AddStringToObject(root, "ssid", "");
+    /* WiFi networks: serialize from app_config. Passwords never exposed. */
+    {
+        cJSON *wifi_arr = cJSON_AddArrayToObject(root, "wifi_networks");
+        for (int i = 0; i < 3; i++) {
+            cJSON *net = cJSON_CreateObject();
+            cJSON_AddStringToObject(net, "ssid", cfg->wifi_networks[i].ssid);
+            cJSON_AddItemToArray(wifi_arr, net);
+        }
+        /* Backward compat: expose primary SSID as top-level "ssid" */
+        cJSON_AddStringToObject(root, "ssid", cfg->wifi_networks[0].ssid);
     }
 
     cJSON_AddBoolToObject(root, "_dirty", app_config_is_dirty());
@@ -770,39 +772,88 @@ esp_err_t config_post_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
-    // WiFi credentials: pass directly to ESP-IDF WiFi NVS
-    cJSON *ssid_item = cJSON_GetObjectItem(root, "ssid");
-    cJSON *pass_item = cJSON_GetObjectItem(root, "pass");
-    if (cJSON_IsString(ssid_item) && ssid_item->valuestring[0] != '\0') {
-        if (strlen(ssid_item->valuestring) >= 32) {
-            cJSON_Delete(root);
-            return send_400(req, "SSID too long (max 31 chars)");
-        }
-        if (cJSON_IsString(pass_item) && strlen(pass_item->valuestring) >= 64) {
-            cJSON_Delete(root);
-            return send_400(req, "WiFi password too long (max 63 chars)");
-        }
-
-        wifi_config_t sta_cfg = {0};
-        esp_wifi_get_config(WIFI_IF_STA, &sta_cfg);
-        sta_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
-        strncpy((char *)sta_cfg.sta.ssid, ssid_item->valuestring,
-                sizeof(sta_cfg.sta.ssid) - 1);
-        if (cJSON_IsString(pass_item) && pass_item->valuestring[0] != '\0') {
-            memset(sta_cfg.sta.password, 0, sizeof(sta_cfg.sta.password));
-            strncpy((char *)sta_cfg.sta.password, pass_item->valuestring,
-                    sizeof(sta_cfg.sta.password) - 1);
-        }
-        esp_wifi_set_config(WIFI_IF_STA, &sta_cfg);
-        ESP_LOGI(TAG, "WiFi STA credentials updated via esp_wifi_set_config");
-    }
-
     app_config_t *cfg = parse_config_from_json(root);
-    cJSON_Delete(root);
     if (!cfg) {
+        cJSON_Delete(root);
         httpd_resp_send_500(req);
         return ESP_OK;
     }
+
+    /* WiFi networks: accept array or legacy single ssid/pass */
+    cJSON *wifi_arr = cJSON_GetObjectItem(root, "wifi_networks");
+    if (cJSON_IsArray(wifi_arr)) {
+        int count = cJSON_GetArraySize(wifi_arr);
+        if (count > 3) count = 3;
+        for (int i = 0; i < count; i++) {
+            cJSON *net = cJSON_GetArrayItem(wifi_arr, i);
+            if (!cJSON_IsObject(net)) continue;
+
+            cJSON *ssid_item = cJSON_GetObjectItem(net, "ssid");
+            cJSON *pass_item = cJSON_GetObjectItem(net, "pass");
+
+            if (cJSON_IsString(ssid_item)) {
+                if (strlen(ssid_item->valuestring) >= 32) {
+                    free(cfg);
+                    cJSON_Delete(root);
+                    return send_400(req, "SSID too long (max 31 chars)");
+                }
+                if (cJSON_IsString(pass_item) && strlen(pass_item->valuestring) >= 64) {
+                    free(cfg);
+                    cJSON_Delete(root);
+                    return send_400(req, "WiFi password too long (max 63 chars)");
+                }
+
+                if (ssid_item->valuestring[0] == '\0') {
+                    memset(&cfg->wifi_networks[i], 0, sizeof(wifi_network_t));
+                } else {
+                    bool ssid_changed = strcmp(cfg->wifi_networks[i].ssid,
+                                               ssid_item->valuestring) != 0;
+                    strncpy(cfg->wifi_networks[i].ssid, ssid_item->valuestring,
+                            sizeof(cfg->wifi_networks[i].ssid) - 1);
+                    cfg->wifi_networks[i].ssid[sizeof(cfg->wifi_networks[i].ssid) - 1] = '\0';
+
+                    if (cJSON_IsString(pass_item) && pass_item->valuestring[0] != '\0') {
+                        memset(cfg->wifi_networks[i].password, 0,
+                               sizeof(cfg->wifi_networks[i].password));
+                        strncpy(cfg->wifi_networks[i].password, pass_item->valuestring,
+                                sizeof(cfg->wifi_networks[i].password) - 1);
+                    } else if (ssid_changed) {
+                        memset(cfg->wifi_networks[i].password, 0,
+                               sizeof(cfg->wifi_networks[i].password));
+                    }
+                }
+            }
+        }
+        ESP_LOGI(TAG, "WiFi networks updated via wifi_networks array");
+    } else {
+        /* Legacy single ssid/pass → maps to wifi_networks[0] */
+        cJSON *ssid_item = cJSON_GetObjectItem(root, "ssid");
+        cJSON *pass_item = cJSON_GetObjectItem(root, "pass");
+        if (cJSON_IsString(ssid_item) && ssid_item->valuestring[0] != '\0') {
+            if (strlen(ssid_item->valuestring) >= 32) {
+                free(cfg);
+                cJSON_Delete(root);
+                return send_400(req, "SSID too long (max 31 chars)");
+            }
+            if (cJSON_IsString(pass_item) && strlen(pass_item->valuestring) >= 64) {
+                free(cfg);
+                cJSON_Delete(root);
+                return send_400(req, "WiFi password too long (max 63 chars)");
+            }
+            strncpy(cfg->wifi_networks[0].ssid, ssid_item->valuestring,
+                    sizeof(cfg->wifi_networks[0].ssid) - 1);
+            cfg->wifi_networks[0].ssid[sizeof(cfg->wifi_networks[0].ssid) - 1] = '\0';
+            if (cJSON_IsString(pass_item) && pass_item->valuestring[0] != '\0') {
+                memset(cfg->wifi_networks[0].password, 0,
+                       sizeof(cfg->wifi_networks[0].password));
+                strncpy(cfg->wifi_networks[0].password, pass_item->valuestring,
+                        sizeof(cfg->wifi_networks[0].password) - 1);
+            }
+            ESP_LOGI(TAG, "WiFi credentials updated via legacy ssid/pass");
+        }
+    }
+
+    cJSON_Delete(root);
 
     app_config_t *old_cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
     if (!old_cfg) {

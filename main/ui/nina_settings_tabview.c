@@ -581,27 +581,6 @@ lv_obj_t *settings_tabview_create(lv_obj_t *parent) {
     lv_obj_set_style_bg_opa(tabview, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(tabview, 0, 0);
 
-    /* ── Back Button (floating overlay — does NOT affect tab indexing) ── */
-    lv_obj_t *btn_back = lv_button_create(st_root);
-    lv_obj_add_flag(btn_back, LV_OBJ_FLAG_FLOATING);
-    lv_obj_set_size(btn_back, 44, TAB_BAR_H);
-    lv_obj_set_pos(btn_back, 0, 0);
-    lv_obj_set_style_bg_opa(btn_back, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(btn_back, 0, 0);
-    lv_obj_set_style_shadow_width(btn_back, 0, 0);
-    lv_obj_set_style_bg_color(btn_back, lv_color_hex(current_theme ? current_theme->bento_border : 0x333333), LV_STATE_PRESSED);
-    lv_obj_set_style_bg_opa(btn_back, LV_OPA_40, LV_STATE_PRESSED);
-
-    lv_obj_t *lbl_back = lv_label_create(btn_back);
-    lv_label_set_text(lbl_back, LV_SYMBOL_LEFT);
-    if (current_theme) {
-        lv_obj_set_style_text_color(lbl_back,
-            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-    }
-    lv_obj_center(lbl_back);
-
-    lv_obj_add_event_cb(btn_back, back_btn_cb, LV_EVENT_CLICKED, NULL);
-
     /* ── Delegate Tab Content to Modules ── */
     settings_tab_display_create(tab_display);
     settings_tab_nodes_create(tab_nodes);
@@ -629,6 +608,30 @@ lv_obj_t *settings_tabview_create(lv_obj_t *parent) {
     lv_obj_set_style_text_font(lbl_save_btn, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(lbl_save_btn, lv_color_white(), 0);
     lv_obj_center(lbl_save_btn);
+
+    /* ── Floating back button — bottom-right corner (like graph/sysinfo) ── */
+    lv_obj_t *btn_back = lv_button_create(st_root);
+    lv_obj_set_size(btn_back, 64, 64);
+    lv_obj_set_style_radius(btn_back, 14, 0);
+    lv_obj_set_style_bg_opa(btn_back, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(btn_back, lv_color_hex(current_theme ? current_theme->bento_border : 0x333333), 0);
+    lv_obj_set_style_bg_color(btn_back, lv_color_hex(current_theme ? current_theme->progress_color : 0x4FC3F7), LV_STATE_PRESSED);
+    lv_obj_set_style_border_width(btn_back, 0, 0);
+    lv_obj_set_style_shadow_width(btn_back, 0, 0);
+    lv_obj_add_flag(btn_back, LV_OBJ_FLAG_FLOATING | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(btn_back, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_align(btn_back, LV_ALIGN_BOTTOM_RIGHT, -10, -10);
+
+    lv_obj_t *lbl_back = lv_label_create(btn_back);
+    lv_label_set_text(lbl_back, LV_SYMBOL_LEFT);
+    lv_obj_set_style_text_font(lbl_back, &lv_font_montserrat_28, 0);
+    if (current_theme) {
+        lv_obj_set_style_text_color(lbl_back,
+            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+    }
+    lv_obj_center(lbl_back);
+
+    lv_obj_add_event_cb(btn_back, back_btn_cb, LV_EVENT_CLICKED, NULL);
 
     return st_root;
 }
