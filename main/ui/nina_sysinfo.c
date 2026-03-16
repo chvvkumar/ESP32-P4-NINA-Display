@@ -213,43 +213,13 @@ lv_obj_t *sysinfo_page_create(lv_obj_t *parent) {
     lv_obj_set_flex_align(hdr_left, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(hdr_left, 12, 0);
 
-    lv_obj_t *icon = lv_label_create(hdr_left);
-    lv_label_set_text(icon, LV_SYMBOL_SETTINGS);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(icon, lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
-    }
-
     lbl_title = lv_label_create(hdr_left);
-    lv_label_set_text(lbl_title, "System Info");
+    lv_label_set_text(lbl_title, "System");
     lv_obj_set_style_text_font(lbl_title, &lv_font_montserrat_28, 0);
     if (current_theme) {
         int gb = app_config_get()->color_brightness;
         lv_obj_set_style_text_color(lbl_title, lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
     }
-
-    /* Floating gear button — bottom-right corner (like graph back button) */
-    lv_obj_t *btn_gear = lv_button_create(si_page);
-    lv_obj_set_size(btn_gear, 96, 96);
-    lv_obj_set_style_radius(btn_gear, 14, 0);
-    lv_obj_set_style_bg_opa(btn_gear, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(btn_gear, lv_color_hex(current_theme ? current_theme->bento_border : 0x333333), 0);
-    lv_obj_set_style_bg_color(btn_gear, lv_color_hex(current_theme ? current_theme->progress_color : 0x4FC3F7), LV_STATE_PRESSED);
-    lv_obj_set_style_border_width(btn_gear, 0, 0);
-    lv_obj_set_style_shadow_width(btn_gear, 0, 0);
-    lv_obj_add_flag(btn_gear, LV_OBJ_FLAG_FLOATING | LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_remove_flag(btn_gear, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_align(btn_gear, LV_ALIGN_BOTTOM_RIGHT, -10, -10);
-    lv_obj_t *gear_icon = lv_label_create(btn_gear);
-    lv_label_set_text(gear_icon, LV_SYMBOL_SETTINGS);
-    lv_obj_set_style_text_font(gear_icon, &lv_font_montserrat_48, 0);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(gear_icon, lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
-    }
-    lv_obj_center(gear_icon);
-    lv_obj_add_event_cb(btn_gear, gear_btn_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_set_ext_click_area(btn_gear, 10);
 
     /* ── Two-column layout for cards ── */
     lv_obj_t *cols = lv_obj_create(si_page);
@@ -344,6 +314,29 @@ lv_obj_t *sysinfo_page_create(lv_obj_t *parent) {
         make_kv_row(perf_card, "Stack HWM", &lbl_stack_hwm_val);
         if (!g_perf.enabled) lv_obj_add_flag(perf_card, LV_OBJ_FLAG_HIDDEN);
     }
+
+    /* Floating gear button — bottom-right corner, created last for top z-order */
+    lv_obj_t *btn_gear = lv_button_create(si_page);
+    lv_obj_set_size(btn_gear, 96, 96);
+    lv_obj_set_style_radius(btn_gear, 14, 0);
+    lv_obj_set_style_bg_opa(btn_gear, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(btn_gear, lv_color_hex(current_theme ? current_theme->bento_border : 0x333333), 0);
+    lv_obj_set_style_bg_color(btn_gear, lv_color_hex(current_theme ? current_theme->progress_color : 0x4FC3F7), LV_STATE_PRESSED);
+    lv_obj_set_style_border_width(btn_gear, 0, 0);
+    lv_obj_set_style_shadow_width(btn_gear, 0, 0);
+    lv_obj_add_flag(btn_gear, LV_OBJ_FLAG_FLOATING | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(btn_gear, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_align(btn_gear, LV_ALIGN_BOTTOM_RIGHT, -10, -10);
+    lv_obj_t *gear_icon = lv_label_create(btn_gear);
+    lv_label_set_text(gear_icon, LV_SYMBOL_SETTINGS);
+    lv_obj_set_style_text_font(gear_icon, &lv_font_montserrat_48, 0);
+    if (current_theme) {
+        int gb = app_config_get()->color_brightness;
+        lv_obj_set_style_text_color(gear_icon, lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
+    }
+    lv_obj_center(gear_icon);
+    lv_obj_add_event_cb(btn_gear, gear_btn_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_set_ext_click_area(btn_gear, 10);
 
     return si_page;
 }

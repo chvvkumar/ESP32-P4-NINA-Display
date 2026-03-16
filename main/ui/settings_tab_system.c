@@ -240,8 +240,9 @@ static void create_network_card(lv_obj_t *parent) {
             lv_obj_center(label);
 
             if (!configured) {
-                lv_obj_add_state(wifi_net_btns[i], LV_STATE_DISABLED);
-                lv_obj_set_style_text_opa(label, LV_OPA_40, 0);
+                lv_obj_remove_flag(wifi_net_btns[i], LV_OBJ_FLAG_CLICKABLE);
+                lv_obj_set_style_bg_color(wifi_net_btns[i], lv_color_hex(0x111111), 0);
+                lv_obj_set_style_text_opa(label, LV_OPA_30, 0);
             }
 
             /* Highlight active network with green border */
@@ -874,15 +875,18 @@ void settings_tab_system_refresh(void) {
             const char *ssid = cfg->wifi_networks[i].ssid;
             bool configured = (ssid[0] != '\0');
 
+            uint32_t btn_bg = current_theme ? current_theme->bento_border : 0x333333;
             lv_obj_t *label = lv_obj_get_child(wifi_net_btns[i], 0);
             if (configured) {
                 lv_label_set_text(label, ssid);
-                lv_obj_clear_state(wifi_net_btns[i], LV_STATE_DISABLED);
+                lv_obj_add_flag(wifi_net_btns[i], LV_OBJ_FLAG_CLICKABLE);
+                lv_obj_set_style_bg_color(wifi_net_btns[i], lv_color_hex(btn_bg), 0);
                 lv_obj_set_style_text_opa(label, LV_OPA_COVER, 0);
             } else {
                 lv_label_set_text(label, "--");
-                lv_obj_add_state(wifi_net_btns[i], LV_STATE_DISABLED);
-                lv_obj_set_style_text_opa(label, LV_OPA_40, 0);
+                lv_obj_remove_flag(wifi_net_btns[i], LV_OBJ_FLAG_CLICKABLE);
+                lv_obj_set_style_bg_color(wifi_net_btns[i], lv_color_hex(0x111111), 0);
+                lv_obj_set_style_text_opa(label, LV_OPA_30, 0);
             }
 
             if (i == active && configured) {

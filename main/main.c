@@ -39,7 +39,7 @@
 #include "spotify_client.h"
 #include "ui/nina_spotify.h"
 #include "wifi_manager.h"
-#include "ui/nina_toast.h"
+#include "ui/nina_settings_tabview.h"
 
 /* Embedded splash logo (JPEG, hardware-decoded at boot) */
 extern const uint8_t logo_jpg_start[] asm("_binary_logo_jpg_start");
@@ -284,12 +284,16 @@ static void event_handler(void *arg, esp_event_base_t event_base,
         wifi_attempt_count = 0;
         networks_tried = 0;
 
-        /* Show green toast with connected network name */
+        /* Show green toast with connected network name and refresh settings UI */
         {
             const app_config_t *cfg = app_config_get();
             const char *ssid = cfg->wifi_networks[current_network_index].ssid;
             if (ssid[0] != '\0') {
                 nina_toast_show_fmt(TOAST_SUCCESS, "Connected to %s", ssid);
+            }
+            if (lvgl_port_lock(100)) {
+                settings_tabview_refresh();
+                lvgl_port_unlock();
             }
         }
 
