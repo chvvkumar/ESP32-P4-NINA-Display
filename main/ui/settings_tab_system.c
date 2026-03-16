@@ -16,8 +16,9 @@
 #include "themes.h"
 #include "ui_styles.h"
 #include "lvgl.h"
+#include "wifi_manager.h"
+#include "nina_toast.h"
 #include "esp_system.h"
-#include "esp_wifi.h"
 #include "esp_idf_version.h"
 #include "esp_ota_ops.h"
 
@@ -52,8 +53,7 @@ static const char *tz_values[] = {
 static lv_obj_t *tab_root = NULL;
 
 /* Network card */
-static lv_obj_t *ta_ssid       = NULL;
-static lv_obj_t *ta_password   = NULL;
+static lv_obj_t *wifi_net_btns[3] = {NULL, NULL, NULL};
 static lv_obj_t *ta_ntp        = NULL;
 static lv_obj_t *dd_timezone   = NULL;
 
@@ -81,8 +81,7 @@ static lv_obj_t *sw_debug_mode = NULL;
 static lv_obj_t *sw_demo_mode = NULL;
 
 /* ── Forward Declarations ────────────────────────────────────────────── */
-static void ssid_defocus_cb(lv_event_t *e);
-static void password_defocus_cb(lv_event_t *e);
+static void wifi_net_btn_cb(lv_event_t *e);
 static void ntp_defocus_cb(lv_event_t *e);
 static void timezone_change_cb(lv_event_t *e);
 static void mqtt_enabled_cb(lv_event_t *e);
@@ -198,25 +197,64 @@ static void create_network_card(lv_obj_t *parent) {
     int gb = app_config_get()->color_brightness;
     lv_obj_t *card = settings_make_card(parent, "NETWORK");
 
-    /* WiFi SSID */
-    settings_make_textarea_row(card, "WiFi SSID", "Network name", false, &ta_ssid);
+    /* WiFi network switch buttons — horizontal row */
     {
-        wifi_config_t wifi_cfg;
-        memset(&wifi_cfg, 0, sizeof(wifi_cfg));
-        if (esp_wifi_get_config(WIFI_IF_STA, &wifi_cfg) == ESP_OK) {
-            lv_textarea_set_text(ta_ssid, (const char *)wifi_cfg.sta.ssid);
+        lv_obj_t *btn_row = lv_obj_create(card);
+        lv_obj_remove_style_all(btn_row);
+        lv_obj_set_width(btn_row, LV_PCT(100));
+        lv_obj_set_height(btn_row, LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(btn_row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(btn_row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_column(btn_row, 8, 0);
+
+        const app_config_t *cfg_net = app_config_get();
+        int active = wifi_get_current_network_index();
+        uint32_t btn_bg = current_theme ? current_theme->bento_border : 0x333333;
+        uint32_t btn_pressed = current_theme ? current_theme->progress_color : 0x4FC3F7;
+
+        for (int i = 0; i < 3; i++) {
+            wifi_net_btns[i] = lv_button_create(btn_row);
+            lv_obj_set_flex_grow(wifi_net_btns[i], 1);
+            lv_obj_set_height(wifi_net_btns[i], 36);
+            lv_obj_set_style_radius(wifi_net_btns[i], 8, 0);
+            lv_obj_set_style_bg_opa(wifi_net_btns[i], LV_OPA_COVER, 0);
+            lv_obj_set_style_bg_color(wifi_net_btns[i], lv_color_hex(btn_bg), 0);
+            lv_obj_set_style_bg_color(wifi_net_btns[i], lv_color_hex(btn_pressed), LV_STATE_PRESSED);
+            lv_obj_set_style_border_width(wifi_net_btns[i], 0, 0);
+            lv_obj_set_style_shadow_width(wifi_net_btns[i], 0, 0);
+            lv_obj_set_style_pad_all(wifi_net_btns[i], 4, 0);
+
+            const char *ssid = cfg_net->wifi_networks[i].ssid;
+            bool configured = (ssid[0] != '\0');
+
+            lv_obj_t *label = lv_label_create(wifi_net_btns[i]);
+            lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+            if (configured) {
+                lv_label_set_text(label, ssid);
+            } else {
+                lv_label_set_text(label, "--");
+            }
+            lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+            lv_obj_set_width(label, LV_PCT(100));
+            lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+            lv_obj_center(label);
+
+            if (!configured) {
+                lv_obj_add_state(wifi_net_btns[i], LV_STATE_DISABLED);
+                lv_obj_set_style_text_opa(label, LV_OPA_40, 0);
+            }
+
+            /* Highlight active network with green border */
+            if (i == active && configured) {
+                lv_obj_set_style_border_width(wifi_net_btns[i], 2, 0);
+                lv_obj_set_style_border_color(wifi_net_btns[i],
+                    lv_palette_main(LV_PALETTE_GREEN), 0);
+            }
+
+            lv_obj_add_event_cb(wifi_net_btns[i], wifi_net_btn_cb,
+                                LV_EVENT_CLICKED, (void *)(intptr_t)i);
         }
     }
-    lv_obj_add_event_cb(ta_ssid, ssid_defocus_cb, LV_EVENT_DEFOCUSED, NULL);
-    lv_obj_add_event_cb(ta_ssid, ssid_defocus_cb, LV_EVENT_READY, NULL);
-
-    settings_make_divider(card);
-
-    /* WiFi Password */
-    settings_make_textarea_row(card, "WiFi Password", "Enter new password", true, &ta_password);
-    /* Never pre-populate password for security */
-    lv_obj_add_event_cb(ta_password, password_defocus_cb, LV_EVENT_DEFOCUSED, NULL);
-    lv_obj_add_event_cb(ta_password, password_defocus_cb, LV_EVENT_READY, NULL);
 
     settings_make_divider(card);
 
@@ -262,7 +300,7 @@ static void create_network_card(lv_obj_t *parent) {
 
     /* Hint label */
     lv_obj_t *hint = lv_label_create(card);
-    lv_label_set_text(hint, "Reboot required after WiFi/NTP changes");
+    lv_label_set_text(hint, "Configure networks via Web UI");
     lv_obj_set_style_text_font(hint, &lv_font_montserrat_16, 0);
     if (current_theme) {
         lv_obj_set_style_text_color(hint,
@@ -544,44 +582,17 @@ static void create_device_card(lv_obj_t *parent) {
  *  Event Callbacks — Network
  * ════════════════════════════════════════════════════════════════════════ */
 
-static void ssid_defocus_cb(lv_event_t *e) {
-    LV_UNUSED(e);
-    if (!ta_ssid) return;
+static void wifi_net_btn_cb(lv_event_t *e)
+{
+    int index = (int)(intptr_t)lv_event_get_user_data(e);
+    const app_config_t *cfg = app_config_get();
+    if (cfg->wifi_networks[index].ssid[0] == '\0') return;
 
-    const char *text = lv_textarea_get_text(ta_ssid);
-    if (!text || text[0] == '\0') return;
+    wifi_switch_to_network(index);
 
-    wifi_config_t wifi_cfg;
-    memset(&wifi_cfg, 0, sizeof(wifi_cfg));
-    esp_wifi_get_config(WIFI_IF_STA, &wifi_cfg);
-
-    /* Only update if changed */
-    if (strcmp((const char *)wifi_cfg.sta.ssid, text) != 0) {
-        strncpy((char *)wifi_cfg.sta.ssid, text, sizeof(wifi_cfg.sta.ssid) - 1);
-        wifi_cfg.sta.ssid[sizeof(wifi_cfg.sta.ssid) - 1] = '\0';
-        esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg);
-        settings_mark_dirty(true);
-    }
-}
-
-static void password_defocus_cb(lv_event_t *e) {
-    LV_UNUSED(e);
-    if (!ta_password) return;
-
-    const char *text = lv_textarea_get_text(ta_password);
-    if (!text || text[0] == '\0') return;  /* Don't store empty password */
-
-    wifi_config_t wifi_cfg;
-    memset(&wifi_cfg, 0, sizeof(wifi_cfg));
-    esp_wifi_get_config(WIFI_IF_STA, &wifi_cfg);
-
-    strncpy((char *)wifi_cfg.sta.password, text, sizeof(wifi_cfg.sta.password) - 1);
-    wifi_cfg.sta.password[sizeof(wifi_cfg.sta.password) - 1] = '\0';
-    esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg);
-
-    /* Clear the password field after storing */
-    lv_textarea_set_text(ta_password, "");
-    settings_mark_dirty(true);
+    char msg[64];
+    snprintf(msg, sizeof(msg), "Connecting to %s...", cfg->wifi_networks[index].ssid);
+    nina_toast_show(TOAST_INFO, msg);
 }
 
 static void ntp_defocus_cb(lv_event_t *e) {
@@ -814,8 +825,9 @@ static void factory_reset_btn_cb(lv_event_t *e) {
 
 void settings_tab_system_destroy(void) {
     tab_root = NULL;
-    ta_ssid = NULL;
-    ta_password = NULL;
+    wifi_net_btns[0] = NULL;
+    wifi_net_btns[1] = NULL;
+    wifi_net_btns[2] = NULL;
     ta_ntp = NULL;
     dd_timezone = NULL;
     sw_mqtt_enabled = NULL;
@@ -853,18 +865,34 @@ void settings_tab_system_create(lv_obj_t *parent) {
 void settings_tab_system_refresh(void) {
     app_config_t *cfg = app_config_get();
 
-    /* Network — WiFi SSID */
-    if (ta_ssid) {
-        wifi_config_t wifi_cfg;
-        memset(&wifi_cfg, 0, sizeof(wifi_cfg));
-        if (esp_wifi_get_config(WIFI_IF_STA, &wifi_cfg) == ESP_OK) {
-            lv_textarea_set_text(ta_ssid, (const char *)wifi_cfg.sta.ssid);
-        }
-    }
+    /* Update WiFi network buttons */
+    {
+        int active = wifi_get_current_network_index();
 
-    /* WiFi Password — never pre-populate */
-    if (ta_password) {
-        lv_textarea_set_text(ta_password, "");
+        for (int i = 0; i < 3; i++) {
+            if (!wifi_net_btns[i]) continue;
+            const char *ssid = cfg->wifi_networks[i].ssid;
+            bool configured = (ssid[0] != '\0');
+
+            lv_obj_t *label = lv_obj_get_child(wifi_net_btns[i], 0);
+            if (configured) {
+                lv_label_set_text(label, ssid);
+                lv_obj_clear_state(wifi_net_btns[i], LV_STATE_DISABLED);
+                lv_obj_set_style_text_opa(label, LV_OPA_COVER, 0);
+            } else {
+                lv_label_set_text(label, "--");
+                lv_obj_add_state(wifi_net_btns[i], LV_STATE_DISABLED);
+                lv_obj_set_style_text_opa(label, LV_OPA_40, 0);
+            }
+
+            if (i == active && configured) {
+                lv_obj_set_style_border_width(wifi_net_btns[i], 2, 0);
+                lv_obj_set_style_border_color(wifi_net_btns[i],
+                    lv_palette_main(LV_PALETTE_GREEN), 0);
+            } else {
+                lv_obj_set_style_border_width(wifi_net_btns[i], 0, 0);
+            }
+        }
     }
 
     /* NTP */

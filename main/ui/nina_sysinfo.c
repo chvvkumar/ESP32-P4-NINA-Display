@@ -203,6 +203,7 @@ lv_obj_t *sysinfo_page_create(lv_obj_t *parent) {
     lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(hdr, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(hdr, 12, 0);
+    lv_obj_remove_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
 
     /* Left side: icon + title grouped together */
     lv_obj_t *hdr_left = lv_obj_create(hdr);
@@ -227,23 +228,28 @@ lv_obj_t *sysinfo_page_create(lv_obj_t *parent) {
         lv_obj_set_style_text_color(lbl_title, lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
     }
 
-    /* Right side: clickable gear icon button → navigates to settings */
-    lv_obj_t *btn_gear = lv_button_create(hdr);
-    lv_obj_set_size(btn_gear, 48, 48);
-    lv_obj_set_style_radius(btn_gear, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_opa(btn_gear, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_bg_opa(btn_gear, LV_OPA_20, LV_STATE_PRESSED);
+    /* Floating gear button — bottom-right corner (like graph back button) */
+    lv_obj_t *btn_gear = lv_button_create(si_page);
+    lv_obj_set_size(btn_gear, 96, 96);
+    lv_obj_set_style_radius(btn_gear, 14, 0);
+    lv_obj_set_style_bg_opa(btn_gear, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(btn_gear, lv_color_hex(current_theme ? current_theme->bento_border : 0x333333), 0);
+    lv_obj_set_style_bg_color(btn_gear, lv_color_hex(current_theme ? current_theme->progress_color : 0x4FC3F7), LV_STATE_PRESSED);
     lv_obj_set_style_border_width(btn_gear, 0, 0);
     lv_obj_set_style_shadow_width(btn_gear, 0, 0);
+    lv_obj_add_flag(btn_gear, LV_OBJ_FLAG_FLOATING | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(btn_gear, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_align(btn_gear, LV_ALIGN_BOTTOM_RIGHT, -10, -10);
     lv_obj_t *gear_icon = lv_label_create(btn_gear);
     lv_label_set_text(gear_icon, LV_SYMBOL_SETTINGS);
-    lv_obj_set_style_text_font(gear_icon, &lv_font_montserrat_22, 0);
+    lv_obj_set_style_text_font(gear_icon, &lv_font_montserrat_48, 0);
     if (current_theme) {
         int gb = app_config_get()->color_brightness;
         lv_obj_set_style_text_color(gear_icon, lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
     }
     lv_obj_center(gear_icon);
     lv_obj_add_event_cb(btn_gear, gear_btn_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_set_ext_click_area(btn_gear, 10);
 
     /* ── Two-column layout for cards ── */
     lv_obj_t *cols = lv_obj_create(si_page);
