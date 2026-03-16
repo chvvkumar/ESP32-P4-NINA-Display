@@ -53,6 +53,7 @@ static lv_obj_t *img_album_art = NULL;
 static lv_obj_t *dim_overlay = NULL;
 static lv_obj_t *track_info_cont = NULL;
 static lv_obj_t *lbl_track_title = NULL;
+static lv_obj_t *lbl_track_subtitle = NULL;
 static lv_obj_t *lbl_artist_name = NULL;
 static lv_obj_t *lbl_album_name = NULL;
 static lv_obj_t *controls_zone = NULL;  /* Transparent click-absorber for bottom area */
@@ -67,6 +68,7 @@ static lv_obj_t *lbl_time_total = NULL;
 /* Minimal mode widgets (overlay content shown instead of controls when tapped) */
 static lv_obj_t *minimal_info_cont = NULL;     /* Centered flex container */
 static lv_obj_t *minimal_track_title = NULL;
+static lv_obj_t *minimal_track_subtitle = NULL;
 static lv_obj_t *minimal_artist_name = NULL;
 static lv_obj_t *minimal_album_name = NULL;
 static lv_obj_t *minimal_progress = NULL;      /* Optional thin progress bar */
@@ -137,6 +139,175 @@ static void label_set_text_if_changed(lv_obj_t *label, const char *text)
     const char *cur = lv_label_get_text(label);
     if (cur && strcmp(cur, text) == 0) return;
     lv_label_set_text(label, text);
+}
+
+/** Check if text inside parentheses/brackets contains a version/edition keyword.
+ *  Case-insensitive substring match against common Spotify metadata suffixes. */
+static bool is_version_keyword(const char *start, size_t len)
+{
+    static const char *keywords[] = {
+        "remaster", "remix", "live", "edit", "version", "deluxe", "mix",
+        "acoustic", "demo", "mono", "stereo", "anniversary", "bonus",
+        "extended", "radio", "single", "original", "alternate", "session",
+        "stripped", "instrumental", "explicit", "clean", "feat", NULL
+    };
+    /* Build a lowercase copy for case-insensitive search */
+    char lower[128];
+    size_t clen = len < sizeof(lower) - 1 ? len : sizeof(lower) - 1;
+    for (size_t i = 0; i < clen; i++) {
+        lower[i] = (start[i] >= 'A' && start[i] <= 'Z') ? start[i] + 32 : start[i];
+    }
+    lower[clen] = '\0';
+
+    for (const char **kw = keywords; *kw; kw++) {
+        if (strstr(lower, *kw)) return true;
+    }
+    return false;
+}
+
+/** Split track title at " - " or before "("/"[" (only if it contains a version keyword)
+ *  into main + subtitle buffers.  Parentheses that are part of the song name
+ *  (e.g., "Don't You (Forget About Me)") are left in the title. */
+static void split_track_title(const char *raw, char *main_out, size_t main_size,
+                               char *sub_out, size_t sub_size)
+{
+    if (!raw || !main_out || main_size == 0) return;
+    if (sub_out && sub_size > 0) sub_out[0] = '\0';
+
+    /* Rule 1: split at " - " (version/remaster separator) */
+    const char *sep = strstr(raw, " - ");
+    if (sep) {
+        size_t prefix_len = (size_t)(sep - raw);
+        if (prefix_len < main_size) {
+            memcpy(main_out, raw, prefix_len);
+            main_out[prefix_len] = '\0';
+            const char *after = sep + 3; /* skip " - " */
+            if (sub_out && sub_size > 0) {
+                strncpy(sub_out, after, sub_size - 1);
+                sub_out[sub_size - 1] = '\0';
+            }
+            return;
+        }
+    }
+
+    /* Rule 2: split before '(' or '[' only if contents match a version keyword */
+    const char *p = raw;
+    while (*p) {
+        if (*p == '(' || *p == '[') {
+            char close = (*p == '(') ? ')' : ']';
+            const char *end = strchr(p + 1, close);
+            size_t inner_len = end ? (size_t)(end - p - 1) : strlen(p + 1);
+            if (is_version_keyword(p + 1, inner_len)) {
+                size_t prefix_len = (size_t)(p - raw);
+                while (prefix_len > 0 && raw[prefix_len - 1] == ' ') prefix_len--;
+                if (prefix_len < main_size) {
+                    memcpy(main_out, raw, prefix_len);
+                    main_out[prefix_len] = '\0';
+                    if (sub_out && sub_size > 0) {
+                        strncpy(sub_out, p, sub_size - 1);
+                        sub_out[sub_size - 1] = '\0';
+                    }
+                    return;
+                }
+            }
+        }
+        p++;
+    }
+
+    /* Fallback: copy as-is, no subtitle */
+    strncpy(main_out, raw, main_size - 1);
+    main_out[main_size - 1] = '\0';
+}
+
+/** Split album name before "(" or "[" for wrapped display. */
+static void split_album_name(const char *raw, char *out, size_t out_size)
+{
+    if (!raw || !out || out_size == 0) return;
+
+    const char *p = raw;
+    while (*p && *p != '(' && *p != '[') p++;
+    if (*p) {
+        size_t prefix_len = (size_t)(p - raw);
+        while (prefix_len > 0 && raw[prefix_len - 1] == ' ') prefix_len--;
+        if (prefix_len + 1 < out_size) {
+            memcpy(out, raw, prefix_len);
+            out[prefix_len] = '\n';
+            size_t tail_len = strlen(p);
+            size_t remain = out_size - prefix_len - 1;
+            if (tail_len >= remain) tail_len = remain - 1;
+            memcpy(out + prefix_len + 1, p, tail_len);
+            out[prefix_len + 1 + tail_len] = '\0';
+            return;
+        }
+    }
+
+    strncpy(out, raw, out_size - 1);
+    out[out_size - 1] = '\0';
+}
+
+/** Apply scroll or wrap mode to all track info labels based on config. */
+static void apply_label_long_mode(void)
+{
+    bool scroll = app_config_get()->spotify_scroll_text;
+
+    lv_label_long_mode_t mode = scroll ? LV_LABEL_LONG_SCROLL_CIRCULAR
+                                       : LV_LABEL_LONG_WRAP;
+
+    if (lbl_track_title) {
+        lv_label_set_long_mode(lbl_track_title, mode);
+        if (scroll) lv_obj_set_style_anim_duration(lbl_track_title,
+            lv_anim_speed_clamped(60, 1000, 20000), 0);
+    }
+    if (lbl_track_subtitle) {
+        lv_label_set_long_mode(lbl_track_subtitle, mode);
+        if (scroll) lv_obj_set_style_anim_duration(lbl_track_subtitle,
+            lv_anim_speed_clamped(60, 1000, 20000), 0);
+    }
+    if (lbl_artist_name) {
+        lv_label_set_long_mode(lbl_artist_name, mode);
+        if (scroll) lv_obj_set_style_anim_duration(lbl_artist_name,
+            lv_anim_speed_clamped(60, 1000, 20000), 0);
+    }
+    if (lbl_album_name) {
+        lv_label_set_long_mode(lbl_album_name, mode);
+        if (scroll) lv_obj_set_style_anim_duration(lbl_album_name,
+            lv_anim_speed_clamped(60, 1000, 20000), 0);
+    }
+
+    if (minimal_track_title) {
+        lv_label_set_long_mode(minimal_track_title, mode);
+        if (scroll) lv_obj_set_style_anim_duration(minimal_track_title,
+            lv_anim_speed_clamped(60, 1000, 20000), 0);
+    }
+    if (minimal_track_subtitle) {
+        lv_label_set_long_mode(minimal_track_subtitle, mode);
+        if (scroll) lv_obj_set_style_anim_duration(minimal_track_subtitle,
+            lv_anim_speed_clamped(60, 1000, 20000), 0);
+    }
+    if (minimal_artist_name) {
+        lv_label_set_long_mode(minimal_artist_name, mode);
+        if (scroll) lv_obj_set_style_anim_duration(minimal_artist_name,
+            lv_anim_speed_clamped(60, 1000, 20000), 0);
+    }
+    if (minimal_album_name) {
+        lv_label_set_long_mode(minimal_album_name, mode);
+        if (scroll) lv_obj_set_style_anim_duration(minimal_album_name,
+            lv_anim_speed_clamped(60, 1000, 20000), 0);
+    }
+
+    /* Height overflow protection */
+    if (track_info_cont) {
+        if (scroll)
+            lv_obj_set_style_max_height(track_info_cont, LV_SIZE_CONTENT, 0);
+        else
+            lv_obj_set_style_max_height(track_info_cont, 300, 0);
+    }
+    if (minimal_info_cont) {
+        if (scroll)
+            lv_obj_set_style_max_height(minimal_info_cont, LV_SIZE_CONTENT, 0);
+        else
+            lv_obj_set_style_max_height(minimal_info_cont, 400, 0);
+    }
 }
 
 /* ── Page creation ───────────────────────────────────────────────────── */
@@ -230,17 +401,22 @@ static void create_track_info_container(void)
     lv_obj_remove_flag(track_info_cont, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_remove_flag(track_info_cont, LV_OBJ_FLAG_CLICKABLE);
 
-    /* Track title (large, white, bold) */
+    /* Track title (large, white) */
     lbl_track_title = lv_label_create(track_info_cont);
     lv_label_set_text(lbl_track_title, "");
     lv_obj_set_style_text_font(lbl_track_title, &lv_font_montserrat_48, 0);
     lv_obj_set_style_text_color(lbl_track_title, lv_color_white(), 0);
     lv_obj_set_style_text_align(lbl_track_title, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_width(lbl_track_title, 580);
-    lv_label_set_long_mode(lbl_track_title, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    /* Smooth scroll: 60 px/s, clamped 1-20s — avoids default jerky 40px/s */
-    lv_obj_set_style_anim_duration(lbl_track_title,
-        lv_anim_speed_clamped(60, 1000, 20000), 0);
+
+    /* Track subtitle (smaller, for remaster/edition info in wrap mode) */
+    lbl_track_subtitle = lv_label_create(track_info_cont);
+    lv_label_set_text(lbl_track_subtitle, "");
+    lv_obj_set_style_text_font(lbl_track_subtitle, &lv_font_montserrat_36, 0);
+    lv_obj_set_style_text_color(lbl_track_subtitle, lv_color_make(0xAA, 0xAA, 0xAA), 0);
+    lv_obj_set_style_text_align(lbl_track_subtitle, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_width(lbl_track_subtitle, 580);
+    lv_obj_add_flag(lbl_track_subtitle, LV_OBJ_FLAG_HIDDEN);  /* Hidden until needed */
 
     /* Artist name (medium, light gray) */
     lbl_artist_name = lv_label_create(track_info_cont);
@@ -249,9 +425,6 @@ static void create_track_info_container(void)
     lv_obj_set_style_text_color(lbl_artist_name, lv_color_make(0xAA, 0xAA, 0xAA), 0);
     lv_obj_set_style_text_align(lbl_artist_name, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_width(lbl_artist_name, 580);
-    lv_label_set_long_mode(lbl_artist_name, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_obj_set_style_anim_duration(lbl_artist_name,
-        lv_anim_speed_clamped(60, 1000, 20000), 0);
 
     /* Album name (same size as artist, dim gray, letter-spaced) */
     lbl_album_name = lv_label_create(track_info_cont);
@@ -261,9 +434,8 @@ static void create_track_info_container(void)
     lv_obj_set_style_text_align(lbl_album_name, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_letter_space(lbl_album_name, 2, 0);
     lv_obj_set_width(lbl_album_name, 580);
-    lv_label_set_long_mode(lbl_album_name, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_obj_set_style_anim_duration(lbl_album_name,
-        lv_anim_speed_clamped(60, 1000, 20000), 0);
+
+    apply_label_long_mode();
 }
 
 /* ── Progress bar + time labels + buttons ────────────────────────────── */
@@ -383,9 +555,16 @@ static void create_minimal_widgets(void)
     lv_obj_set_style_text_align(minimal_track_title, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_letter_space(minimal_track_title, -2, 0);
     lv_obj_set_width(minimal_track_title, 600);
-    lv_label_set_long_mode(minimal_track_title, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_obj_set_style_anim_duration(minimal_track_title,
-        lv_anim_speed_clamped(60, 1000, 20000), 0);
+
+    /* Track subtitle (smaller, for remaster/edition info in wrap mode) */
+    minimal_track_subtitle = lv_label_create(minimal_info_cont);
+    lv_label_set_text(minimal_track_subtitle, "");
+    lv_obj_set_style_text_font(minimal_track_subtitle, &lv_font_montserrat_36, 0);
+    lv_obj_set_style_text_color(minimal_track_subtitle, lv_color_make(0xAA, 0xAA, 0xAA), 0);
+    lv_obj_set_style_text_align(minimal_track_subtitle, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_letter_space(minimal_track_subtitle, -2, 0);
+    lv_obj_set_width(minimal_track_subtitle, 600);
+    lv_obj_add_flag(minimal_track_subtitle, LV_OBJ_FLAG_HIDDEN);
 
     /* Artist name — medium, light gray, slight letter spacing */
     minimal_artist_name = lv_label_create(minimal_info_cont);
@@ -396,9 +575,6 @@ static void create_minimal_widgets(void)
     lv_obj_set_style_text_letter_space(minimal_artist_name, 1, 0);
     lv_obj_set_style_margin_top(minimal_artist_name, 20, 0);
     lv_obj_set_width(minimal_artist_name, 600);
-    lv_label_set_long_mode(minimal_artist_name, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_obj_set_style_anim_duration(minimal_artist_name,
-        lv_anim_speed_clamped(60, 1000, 20000), 0);
 
     /* Album name — small, medium gray, very wide letter spacing, uppercase */
     minimal_album_name = lv_label_create(minimal_info_cont);
@@ -409,9 +585,8 @@ static void create_minimal_widgets(void)
     lv_obj_set_style_text_letter_space(minimal_album_name, 7, 0);
     lv_obj_set_style_margin_top(minimal_album_name, 15, 0);
     lv_obj_set_width(minimal_album_name, 600);
-    lv_label_set_long_mode(minimal_album_name, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_obj_set_style_anim_duration(minimal_album_name,
-        lv_anim_speed_clamped(60, 1000, 20000), 0);
+
+    apply_label_long_mode();
 
     /* Progress bar — pill-shaped, vibrant blue fill, below text block */
     minimal_progress = lv_bar_create(spotify_page);
@@ -554,18 +729,43 @@ void nina_spotify_update(const spotify_playback_t *data)
 
     if (minimal) {
         /* Minimal mode: update minimal labels */
-        label_set_text_if_changed(minimal_track_title, data->track_title);
+        bool scroll = app_config_get()->spotify_scroll_text;
+        if (scroll) {
+            label_set_text_if_changed(minimal_track_title, data->track_title);
+            if (minimal_track_subtitle) {
+                lv_label_set_text(minimal_track_subtitle, "");
+                lv_obj_add_flag(minimal_track_subtitle, LV_OBJ_FLAG_HIDDEN);
+            }
+        } else {
+            char main_buf[256], sub_buf[256];
+            split_track_title(data->track_title, main_buf, sizeof(main_buf),
+                              sub_buf, sizeof(sub_buf));
+            label_set_text_if_changed(minimal_track_title, main_buf);
+            if (minimal_track_subtitle) {
+                if (sub_buf[0]) {
+                    label_set_text_if_changed(minimal_track_subtitle, sub_buf);
+                    lv_obj_remove_flag(minimal_track_subtitle, LV_OBJ_FLAG_HIDDEN);
+                } else {
+                    lv_label_set_text(minimal_track_subtitle, "");
+                    lv_obj_add_flag(minimal_track_subtitle, LV_OBJ_FLAG_HIDDEN);
+                }
+            }
+        }
         label_set_text_if_changed(minimal_artist_name, data->artist_name);
 
-        /* Album name: uppercase for minimal mode */
-        char upper_album[128];
-        const char *src = data->album_name;
-        int i = 0;
-        for (; src[i] && i < (int)sizeof(upper_album) - 1; i++) {
-            upper_album[i] = (src[i] >= 'a' && src[i] <= 'z') ? src[i] - 32 : src[i];
+        /* Album name: split first (if wrap mode), then uppercase for minimal mode */
+        char album_buf[256];
+        if (scroll) {
+            strncpy(album_buf, data->album_name, sizeof(album_buf) - 1);
+            album_buf[sizeof(album_buf) - 1] = '\0';
+        } else {
+            split_album_name(data->album_name, album_buf, sizeof(album_buf));
         }
-        upper_album[i] = '\0';
-        label_set_text_if_changed(minimal_album_name, upper_album);
+        /* Uppercase transform */
+        for (int i = 0; album_buf[i]; i++) {
+            if (album_buf[i] >= 'a' && album_buf[i] <= 'z') album_buf[i] -= 32;
+        }
+        label_set_text_if_changed(minimal_album_name, album_buf);
 
         /* Update minimal progress bar if enabled */
         if (app_config_get()->spotify_show_progress_bar && data->duration_ms > 0) {
@@ -582,10 +782,34 @@ void nina_spotify_update(const spotify_playback_t *data)
             lv_bar_set_value(minimal_progress, bar_val, LV_ANIM_ON);
         }
     } else {
-        /* Immersive mode: update immersive labels (existing code) */
-        label_set_text_if_changed(lbl_track_title, data->track_title);
+        /* Immersive mode: update immersive labels */
+        bool scroll = app_config_get()->spotify_scroll_text;
+        if (scroll) {
+            label_set_text_if_changed(lbl_track_title, data->track_title);
+            if (lbl_track_subtitle) {
+                lv_label_set_text(lbl_track_subtitle, "");
+                lv_obj_add_flag(lbl_track_subtitle, LV_OBJ_FLAG_HIDDEN);
+            }
+            label_set_text_if_changed(lbl_album_name, data->album_name);
+        } else {
+            char main_buf[256], sub_buf[256];
+            split_track_title(data->track_title, main_buf, sizeof(main_buf),
+                              sub_buf, sizeof(sub_buf));
+            label_set_text_if_changed(lbl_track_title, main_buf);
+            if (lbl_track_subtitle) {
+                if (sub_buf[0]) {
+                    label_set_text_if_changed(lbl_track_subtitle, sub_buf);
+                    lv_obj_remove_flag(lbl_track_subtitle, LV_OBJ_FLAG_HIDDEN);
+                } else {
+                    lv_label_set_text(lbl_track_subtitle, "");
+                    lv_obj_add_flag(lbl_track_subtitle, LV_OBJ_FLAG_HIDDEN);
+                }
+            }
+            char split_buf[256];
+            split_album_name(data->album_name, split_buf, sizeof(split_buf));
+            label_set_text_if_changed(lbl_album_name, split_buf);
+        }
         label_set_text_if_changed(lbl_artist_name, data->artist_name);
-        label_set_text_if_changed(lbl_album_name, data->album_name);
 
         /* Update play/pause icon */
         lv_obj_t *pp_label = lv_obj_get_child(btn_play_pause, 0);
@@ -688,11 +912,19 @@ void nina_spotify_set_idle(void)
 
     /* Clear track info */
     lv_label_set_text(lbl_track_title, "Not Playing");
+    if (lbl_track_subtitle) {
+        lv_label_set_text(lbl_track_subtitle, "");
+        lv_obj_add_flag(lbl_track_subtitle, LV_OBJ_FLAG_HIDDEN);
+    }
     lv_label_set_text(lbl_artist_name, "");
     lv_label_set_text(lbl_album_name, "");
 
     /* Also clear minimal mode labels */
     if (minimal_track_title) lv_label_set_text(minimal_track_title, "Not Playing");
+    if (minimal_track_subtitle) {
+        lv_label_set_text(minimal_track_subtitle, "");
+        lv_obj_add_flag(minimal_track_subtitle, LV_OBJ_FLAG_HIDDEN);
+    }
     if (minimal_artist_name) lv_label_set_text(minimal_artist_name, "");
     if (minimal_album_name) lv_label_set_text(minimal_album_name, "");
     if (minimal_progress) lv_bar_set_value(minimal_progress, 0, LV_ANIM_OFF);
@@ -788,6 +1020,8 @@ void nina_spotify_on_hide(void)
 void nina_spotify_refresh_layout(void)
 {
     if (!spotify_page) return;
+    /* Update label long modes in case scroll/wrap config changed */
+    apply_label_long_mode();
     /* If overlay is currently showing, re-run idle state to swap widgets */
     if (!is_idle) {
         is_idle = true;  /* Force re-transition */

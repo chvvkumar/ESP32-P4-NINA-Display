@@ -558,8 +558,10 @@ void spotify_poll_task(void *arg)
                         /* Strip COM markers that the HW JPEG decoder can't handle */
                         jpg_size = strip_jpeg_com_markers(jpg_buf, jpg_size);
 
-                        /* Hardware JPEG decode to RGB565 — follows jpeg_utils.c pattern:
-                         * create decoder per use, DMA heap guard, round w and h to 16 */
+                        /* Hardware JPEG decode to RGB565.
+                         * Buffer always rounded to 16px — the ESP32-P4 HW decoder
+                         * outputs with 16-pixel MCU alignment regardless of subsampling.
+                         * PPA uses actual pic_info dimensions to crop MCU padding. */
                         perf_timer_start(&g_perf.spotify_art_decode);
                         jpeg_decode_picture_info_t pic_info = {0};
                         esp_err_t info_err = jpeg_decoder_get_info(jpg_buf, jpg_size, &pic_info);
@@ -597,10 +599,11 @@ void spotify_poll_task(void *arg)
                                         uint32_t final_w = out_w, final_h = out_h;
                                         size_t final_size = out_size;
 
-                                        if (out_w != 720 || out_h != 720) {
+                                        if (pic_info.width != 720 || pic_info.height != 720) {
                                             size_t scaled_size = 0;
                                             uint8_t *scaled = ppa_scale_rgb565(
-                                                rgb_buf, out_w, out_h, 720, 720, &scaled_size);
+                                                rgb_buf, pic_info.width, pic_info.height,
+                                                out_w, 720, 720, &scaled_size);
                                             if (scaled) {
                                                 free(rgb_buf);
                                                 final_buf = scaled;
@@ -622,18 +625,57 @@ void spotify_poll_task(void *arg)
                                         /* Ownership transferred to UI — don't free final_buf */
                                     } else {
                                         perf_timer_stop(&g_perf.spotify_art_decode);
-                                        ESP_LOGW(TAG, "JPEG decode failed for album art");
+                                        ESP_LOGW(TAG, "HW JPEG decode failed, trying SW fallback");
                                         free(rgb_buf);
+                                        rgb_buf = NULL;
+                                        /* SW fallback (stb_image) — handles CMYK and other unsupported formats */
+                                        goto sw_fallback;
                                     }
                                 } else {
                                     perf_timer_stop(&g_perf.spotify_art_decode);
+                                    ESP_LOGW(TAG, "HW decoder engine creation failed, trying SW");
                                     free(rgb_buf);
+                                    goto sw_fallback;
                                 }
                             } else {
                                 perf_timer_stop(&g_perf.spotify_art_decode);
+                                ESP_LOGW(TAG, "HW decoder mem alloc failed, trying SW");
+                                goto sw_fallback;
                             }
                         } else {
                             perf_timer_stop(&g_perf.spotify_art_decode);
+                        sw_fallback: ;
+                            uint8_t *sw_buf = NULL;
+                            uint32_t sw_w = 0, sw_h = 0;
+                            size_t sw_size = 0;
+                            perf_timer_start(&g_perf.spotify_art_decode);
+                            bool sw_ok = jpeg_sw_decode_rgb565(jpg_buf, jpg_size,
+                                &sw_buf, &sw_w, &sw_h, &sw_size);
+                            perf_timer_stop(&g_perf.spotify_art_decode);
+                            if (sw_ok && sw_buf) {
+                                uint8_t *final_buf = sw_buf;
+                                uint32_t final_w = sw_w, final_h = sw_h;
+                                size_t final_size = sw_size;
+                                if (sw_w != 720 || sw_h != 720) {
+                                    size_t scaled_size = 0;
+                                    uint8_t *scaled = ppa_scale_rgb565(
+                                        sw_buf, sw_w, sw_h, 0, 720, 720, &scaled_size);
+                                    if (scaled) {
+                                        free(sw_buf);
+                                        final_buf = scaled;
+                                        final_w = 720;
+                                        final_h = 720;
+                                        final_size = scaled_size;
+                                    }
+                                }
+                                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                                    nina_spotify_set_album_art(final_buf, final_w, final_h, final_size);
+                                    bsp_display_unlock();
+                                }
+                                art_ok = true;
+                            } else {
+                                ESP_LOGW(TAG, "SW JPEG decode also failed for album art");
+                            }
                         }
                         free(jpg_buf);
                     } else {

@@ -12,6 +12,8 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "perf_monitor.h"
+#include "stb_image.h"
+#include "esp_cache.h"
 
 static const char *TAG = "jpeg_utils";
 
@@ -39,7 +41,7 @@ bool fetch_and_show_thumbnail(const char *base_url) {
     esp_err_t err = jpeg_decoder_get_info(jpeg_buf, jpeg_size, &pic_info);
     if (err == ESP_OK && pic_info.width > 0 && pic_info.height > 0) {
         bool is_gray = (pic_info.sample_method == JPEG_DOWN_SAMPLING_GRAY);
-        // Output dimensions rounded up to multiples of 16 (JPEG MCU requirement)
+        // Output dimensions rounded up to 16 — HW decoder always uses 16px MCU alignment
         uint32_t out_w = ((pic_info.width + 15) / 16) * 16;
         uint32_t out_h = ((pic_info.height + 15) / 16) * 16;
         // Grayscale: 1 byte/pixel decode buffer; RGB565: 2 bytes/pixel
@@ -136,13 +138,77 @@ bool fetch_and_show_thumbnail(const char *base_url) {
 }
 
 // =============================================================================
+// Software JPEG Decode Fallback (stb_image)
+// =============================================================================
+
+bool jpeg_sw_decode_rgb565(const uint8_t *jpg_data, size_t jpg_size,
+                           uint8_t **out_buf, uint32_t *out_w, uint32_t *out_h,
+                           size_t *out_size)
+{
+    if (!jpg_data || !out_buf || !out_w || !out_h || !out_size) return false;
+
+    int w = 0, h = 0, channels = 0;
+    /* Force 3-channel RGB output — stb_image converts CMYK/YCCK internally */
+    uint8_t *rgb = stbi_load_from_memory(jpg_data, (int)jpg_size, &w, &h, &channels, 3);
+    if (!rgb || w <= 0 || h <= 0) {
+        ESP_LOGE(TAG, "stb_image decode failed (channels=%d)", channels);
+        if (rgb) stbi_image_free(rgb);
+        return false;
+    }
+
+    ESP_LOGI(TAG, "SW JPEG decoded: %dx%d (%d ch -> RGB)", w, h, channels);
+
+    /* stb_image outputs exact dimensions — no MCU rounding needed */
+    uint32_t ow = (uint32_t)w;
+    uint32_t oh = (uint32_t)h;
+    size_t buf_sz = (size_t)ow * oh * 2;
+
+    /* 128-byte aligned allocation required for PPA DMA (L2 cache line size) */
+    buf_sz = (buf_sz + 127) & ~(size_t)127;
+    uint8_t *rgb565 = heap_caps_aligned_calloc(128, 1, buf_sz, MALLOC_CAP_SPIRAM);
+    if (!rgb565) {
+        ESP_LOGE(TAG, "Failed to alloc %zu bytes for SW decode RGB565", buf_sz);
+        stbi_image_free(rgb);
+        return false;
+    }
+
+    /* Convert RGB888 to RGB565 (BGR byte order to match HW decoder output) */
+    uint16_t *dst = (uint16_t *)rgb565;
+
+    for (int y = 0; y < h; y++) {
+        const uint8_t *src_row = rgb + y * w * 3;
+        uint16_t *dst_row = dst + y * ow;
+        for (int x = 0; x < w; x++) {
+            uint8_t r = src_row[x * 3 + 0];
+            uint8_t g = src_row[x * 3 + 1];
+            uint8_t b = src_row[x * 3 + 2];
+            /* BGR565 to match JPEG_DEC_RGB_ELEMENT_ORDER_BGR */
+            dst_row[x] = ((b >> 3) << 11) | ((g >> 2) << 5) | (r >> 3);
+        }
+    }
+
+    stbi_image_free(rgb);
+
+    /* Flush CPU cache to PSRAM so PPA DMA reads correct data */
+    esp_cache_msync(rgb565, buf_sz, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+
+    *out_buf = rgb565;
+    *out_w = ow;
+    *out_h = oh;
+    *out_size = buf_sz;
+    return true;
+}
+
+// =============================================================================
 // PPA Hardware Image Scaling
 // =============================================================================
 
 uint8_t *ppa_scale_rgb565(const uint8_t *src, uint32_t src_w, uint32_t src_h,
+                           uint32_t src_stride,
                            uint32_t dst_w, uint32_t dst_h, size_t *out_size)
 {
     if (!src || src_w == 0 || src_h == 0 || dst_w == 0 || dst_h == 0) return NULL;
+    if (src_stride == 0) src_stride = src_w;
 
     /* Lazy-init PPA SRM client */
     if (!s_ppa_srm_client) {
@@ -173,7 +239,7 @@ uint8_t *ppa_scale_rgb565(const uint8_t *src, uint32_t src_w, uint32_t src_h,
     ppa_srm_oper_config_t srm = {
         .in = {
             .buffer = src,
-            .pic_w = src_w,
+            .pic_w = src_stride,
             .pic_h = src_h,
             .block_w = src_w,
             .block_h = src_h,
@@ -209,8 +275,14 @@ uint8_t *ppa_scale_rgb565(const uint8_t *src, uint32_t src_w, uint32_t src_h,
     }
 
     if (out_size) *out_size = buf_size;
-    ESP_LOGI(TAG, "PPA scaled %lux%lu -> %lux%lu (%.2fx)",
-             (unsigned long)src_w, (unsigned long)src_h,
-             (unsigned long)dst_w, (unsigned long)dst_h, scale_x);
+    if (src_stride != src_w) {
+        ESP_LOGI(TAG, "PPA scaled %lux%lu (stride %lu) -> %lux%lu (%.2fx)",
+                 (unsigned long)src_w, (unsigned long)src_h, (unsigned long)src_stride,
+                 (unsigned long)dst_w, (unsigned long)dst_h, scale_x);
+    } else {
+        ESP_LOGI(TAG, "PPA scaled %lux%lu -> %lux%lu (%.2fx)",
+                 (unsigned long)src_w, (unsigned long)src_h,
+                 (unsigned long)dst_w, (unsigned long)dst_h, scale_x);
+    }
     return dst;
 }

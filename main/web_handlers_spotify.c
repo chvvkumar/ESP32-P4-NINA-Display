@@ -20,6 +20,7 @@ esp_err_t spotify_config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "spotify_poll_interval_ms", cfg->spotify_poll_interval_ms);
     cJSON_AddBoolToObject(root, "spotify_show_progress_bar", cfg->spotify_show_progress_bar);
     cJSON_AddBoolToObject(root, "spotify_minimal_mode", cfg->spotify_minimal_mode);
+    cJSON_AddBoolToObject(root, "spotify_scroll_text", cfg->spotify_scroll_text);
     cJSON_AddNumberToObject(root, "spotify_overlay_timeout_s", cfg->spotify_overlay_timeout_s);
 
     const char *json_str = cJSON_PrintUnformatted(root);
@@ -66,6 +67,7 @@ esp_err_t spotify_config_post_handler(httpd_req_t *req)
     JSON_TO_INT(root, "spotify_poll_interval_ms", cfg->spotify_poll_interval_ms);
     JSON_TO_BOOL(root, "spotify_show_progress_bar", cfg->spotify_show_progress_bar);
     JSON_TO_BOOL(root, "spotify_minimal_mode", cfg->spotify_minimal_mode);
+    JSON_TO_BOOL(root, "spotify_scroll_text", cfg->spotify_scroll_text);
     JSON_TO_INT(root, "spotify_overlay_timeout_s", cfg->spotify_overlay_timeout_s);
 
     cJSON_Delete(root);

@@ -2,7 +2,7 @@ set(LV_DEMO_DIR ../managed_components/lvgl__lvgl/demos)
 file(GLOB_RECURSE LV_DEMOS_SOURCES ${LV_DEMO_DIR}/*.c)
 
 idf_component_register(
-    SRCS main.c tasks.c power_mgmt.c jpeg_utils.c perf_monitor.c ota_github.c
+    SRCS main.c tasks.c power_mgmt.c jpeg_utils.c stb_image.c perf_monitor.c ota_github.c
          nina_connection.c nina_client.c nina_api_fetchers.c nina_sequence.c nina_websocket.c
          allsky_client.c spotify_auth.c spotify_client.c demo_data.c
          app_config.c web_server.c web_handlers_config.c web_handlers_display.c web_handlers_system.c web_handlers_allsky.c web_handlers_spotify.c mqtt_ha.c

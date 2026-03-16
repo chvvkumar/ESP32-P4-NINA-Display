@@ -658,7 +658,7 @@ void nina_websocket_start(int index, const char *base_url, nina_client_t *data) 
 
     esp_websocket_client_config_t ws_cfg = {
         .uri = ws_url,
-        .reconnect_timeout_ms = 0,      // Disable auto-reconnect; managed externally with backoff
+        .reconnect_timeout_ms = 86400000, // Effectively disabled; reconnect managed externally with backoff
         .network_timeout_ms = 10000,
         .buffer_size = 2048,            // Reduced from 4096 to save heap; largest WS events ~1.2KB
     };
