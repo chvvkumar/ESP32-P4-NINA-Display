@@ -456,6 +456,10 @@ void app_main(void)
     perf_monitor_set_enabled(app_config_get()->debug_mode);
 
     instance_count = app_config_get_instance_count();
+    if (app_config_get()->demo_mode) {
+        instance_count = 3;  /* Demo mode always shows all 3 instance profiles */
+        ESP_LOGI(TAG, "Demo mode: forcing instance_count = 3");
+    }
     ESP_LOGI(TAG, "Configured instances: %d", instance_count);
 
     wifi_init();

@@ -32,6 +32,7 @@ static lv_obj_t *dd_theme = NULL;
 static lv_obj_t *dd_widget_style = NULL;
 static lv_obj_t *slider_text_bright = NULL;
 static lv_obj_t *lbl_text_bright_val = NULL;
+static lv_obj_t *sw_demo_mode = NULL;
 
 /* Page Navigation */
 static lv_obj_t *seg_mode = NULL;
@@ -52,6 +53,7 @@ static const char *seg_map[] = {"Manual", "Fixed", "Cycle", ""};
 static void theme_dd_changed_cb(lv_event_t *e);
 static void widget_style_dd_changed_cb(lv_event_t *e);
 static void text_bright_changed_cb(lv_event_t *e);
+static void demo_mode_changed_cb(lv_event_t *e);
 static void page_mode_changed_cb(lv_event_t *e);
 static void pinned_page_changed_cb(lv_event_t *e);
 static void interval_minus_cb(lv_event_t *e);
@@ -213,6 +215,22 @@ static void create_appearance_card(lv_obj_t *parent)
                 lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
         }
         lv_label_set_text_fmt(lbl_text_bright_val, "%d%%", app_config_get()->color_brightness);
+    }
+
+    settings_make_divider(card);
+
+    /* ── Demo mode toggle ── */
+    {
+        lv_obj_t *toggle_row = settings_make_toggle_row(card, "Demo Mode", &sw_demo_mode);
+        LV_UNUSED(toggle_row);
+
+        if (app_config_get()->demo_mode) {
+            lv_obj_add_state(sw_demo_mode, LV_STATE_CHECKED);
+        } else {
+            lv_obj_remove_state(sw_demo_mode, LV_STATE_CHECKED);
+        }
+
+        lv_obj_add_event_cb(sw_demo_mode, demo_mode_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
     }
 }
 
@@ -531,6 +549,14 @@ static void text_bright_changed_cb(lv_event_t *e)
     }
 }
 
+static void demo_mode_changed_cb(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    if (!sw_demo_mode) return;
+    app_config_get()->demo_mode = lv_obj_has_state(sw_demo_mode, LV_STATE_CHECKED);
+    settings_mark_dirty(true);  /* requires reboot — demo task is spawned at startup */
+}
+
 static void update_mode_visibility(uint32_t mode)
 {
     lv_obj_add_flag(cont_fixed, LV_OBJ_FLAG_HIDDEN);
@@ -649,6 +675,7 @@ void settings_tab_display_destroy(void) {
     dd_widget_style = NULL;
     slider_text_bright = NULL;
     lbl_text_bright_val = NULL;
+    sw_demo_mode = NULL;
     seg_mode = NULL;
     cont_fixed = NULL;
     dd_pinned_page = NULL;
@@ -698,6 +725,11 @@ void settings_tab_display_refresh(void)
     }
     if (lbl_text_bright_val) {
         lv_label_set_text_fmt(lbl_text_bright_val, "%d%%", cfg->color_brightness);
+    }
+
+    if (sw_demo_mode) {
+        if (cfg->demo_mode) lv_obj_add_state(sw_demo_mode, LV_STATE_CHECKED);
+        else                lv_obj_remove_state(sw_demo_mode, LV_STATE_CHECKED);
     }
 
     /* Page navigation — determine mode */

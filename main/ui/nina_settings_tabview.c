@@ -19,6 +19,7 @@
 #include "themes.h"
 #include "ui_styles.h"
 #include "display_defs.h"
+#include "esp_system.h"
 #include "lvgl.h"
 
 #include <stdio.h>
@@ -69,10 +70,15 @@ static void back_btn_cb(lv_event_t *e) {
 
 static void save_feedback_timer_cb(lv_timer_t *timer) {
     LV_UNUSED(timer);
+    save_feedback_timer = NULL;
+
+    if (needs_reboot) {
+        esp_restart();
+        return;  /* unreachable */
+    }
+
     if (save_bar) lv_obj_add_flag(save_bar, LV_OBJ_FLAG_HIDDEN);
     dirty = false;
-    needs_reboot = false;
-    save_feedback_timer = NULL;
 }
 
 static void save_btn_cb(lv_event_t *e) {
@@ -587,10 +593,12 @@ lv_obj_t *settings_tabview_create(lv_obj_t *parent) {
     settings_tab_behavior_create(tab_behavior);
     settings_tab_system_create(tab_system);
 
-    /* ── Save Bar (initially hidden) ── */
+    /* ── Save Bar (initially hidden, floating at bottom) ── */
     save_bar = lv_obj_create(st_root);
     lv_obj_remove_style_all(save_bar);
-    lv_obj_set_size(save_bar, LV_PCT(100), SAVE_BAR_H);
+    lv_obj_set_size(save_bar, LV_PCT(90), SAVE_BAR_H);
+    lv_obj_add_flag(save_bar, LV_OBJ_FLAG_FLOATING);
+    lv_obj_align(save_bar, LV_ALIGN_BOTTOM_MID, 0, -12);
     lv_obj_set_flex_flow(save_bar, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(save_bar, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);

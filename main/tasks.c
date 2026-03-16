@@ -1021,7 +1021,10 @@ main_loop:
         spotify_page_active = on_spotify;
 
         // Re-read instance count from config so API URL changes take effect live
-        instance_count = app_config_get_instance_count();
+        // In demo mode, keep instance_count at 3 (set during task init)
+        if (!app_config_get()->demo_mode) {
+            instance_count = app_config_get_instance_count();
+        }
 
         // Check for debug mode toggle
         {
