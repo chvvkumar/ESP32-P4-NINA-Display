@@ -177,19 +177,21 @@ class AlertMonitor:
                     error_rate, 1,
                 )
 
-        # 6. API latency p95
-        p95 = http.get("p95_ms", 0)
-        if phase == "stress" and p95 > 2000:
+        # 6. API latency (avg_ms — cumulative average, best steady-state proxy)
+        avg_latency = http.get("avg_ms", 0)
+        stress_latency_threshold = self.thresholds.get("api_latency_avg_stress_ms", 500)
+        soak_latency_threshold = self.thresholds.get("api_latency_avg_soak_ms", 200)
+        if phase == "stress" and avg_latency > stress_latency_threshold:
             await self._record_violation(
                 device, "api_latency_stress", Severity.HIGH,
-                f"API p95 latency {p95}ms during stress (>2000ms)",
-                p95, 2000,
+                f"API avg latency {avg_latency:.0f}ms during stress (>{stress_latency_threshold}ms)",
+                avg_latency, stress_latency_threshold,
             )
-        elif phase == "soak" and p95 > 500:
+        elif phase == "soak" and avg_latency > soak_latency_threshold:
             await self._record_violation(
                 device, "api_latency_soak", Severity.HIGH,
-                f"API p95 latency {p95}ms during soak (>500ms)",
-                p95, 500,
+                f"API avg latency {avg_latency:.0f}ms during soak (>{soak_latency_threshold}ms)",
+                avg_latency, soak_latency_threshold,
             )
 
         # 7. NINA instance down >60s

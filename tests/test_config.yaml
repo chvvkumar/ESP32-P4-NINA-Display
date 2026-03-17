@@ -42,8 +42,8 @@ thresholds:
   psram_min_free_bytes: 20971520
   http_failure_rate_stress: 0.05
   http_failure_rate_soak: 0.01
-  api_latency_p95_stress_ms: 2000
-  api_latency_p95_soak_ms: 500
+  api_latency_avg_stress_ms: 500
+  api_latency_avg_soak_ms: 200
   unreachable_timeout_s: 30
   nina_connect_timeout_s: 60
   memory_leak_rate_bytes_per_hour: 1024

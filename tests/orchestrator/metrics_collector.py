@@ -219,7 +219,7 @@ class MetricsCollector:
                     "failure_count": failure_count,
                     "retry_count": retry_count,
                     "avg_ms": avg_ms,
-                    "p95_ms": max_ms,  # Use max as p95 approximation
+                    "max_ms": max_ms,
                 }
                 metrics["http"] = http_metrics
 
