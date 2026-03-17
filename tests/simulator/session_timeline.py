@@ -45,7 +45,7 @@ INSTANCE_CONFIGS = [
 
 SPEED_PROFILES = {
     "fast": {
-        "exposure_times": [5, 5, 5],
+        "exposure_times": [15, 15, 15],
         "slew_duration_s": 1,
         "autofocus_point_interval_s": 0.5,
         "autofocus_settle_s": 0.5,
