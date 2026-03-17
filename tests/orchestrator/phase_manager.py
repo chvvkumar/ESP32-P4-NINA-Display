@@ -42,6 +42,9 @@ class PhaseManager:
 
         sim_cfg = config.get("simulator", {})
         self._sim_base_port = sim_cfg.get("base_port", 1888)
+        speed_profiles = sim_cfg.get("speed_profiles", {})
+        self._stress_profile = speed_profiles.get("stress", "fast")
+        self._soak_profile = speed_profiles.get("soak", "normal")
 
         os.makedirs("logs/saved_configs", exist_ok=True)
         os.makedirs("logs/violations", exist_ok=True)
@@ -100,6 +103,7 @@ class PhaseManager:
 
             # RECOVERY
             self._enter_phase(Phase.RECOVERY)
+            self.simulator.set_speed_profile(self._soak_profile)
             await self._run_recovery()
             await self._wait_phase(self._recovery_duration_s, total_duration_s)
 
@@ -272,17 +276,20 @@ class PhaseManager:
                     f"({connected_count}/{total_count} connected)"
                 )
 
-        # 8. Set all devices to first NINA instance page (page 3)
-        for device in self._devices:
-            host = device["host"]
-            try:
-                async with session.post(
-                    f"http://{host}/api/page", json={"page": 3}
-                ) as resp:
-                    if resp.status == 200:
-                        logger.info(f"{host} set to NINA page 3")
-            except Exception as e:
-                logger.warning(f"Failed to set page on {host}: {e}")
+        # 8. Set all devices to summary page (page 2)
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=10)
+        ) as page_session:
+            for device in self._devices:
+                host = device["host"]
+                try:
+                    async with page_session.post(
+                        f"http://{host}/api/page", json={"page": 2}
+                    ) as resp:
+                        if resp.status == 200:
+                            logger.info(f"{host} set to summary page")
+                except Exception as e:
+                    logger.warning(f"Failed to set page on {host}: {e}")
         await asyncio.sleep(2)
 
         # 9. Start metrics
@@ -336,6 +343,7 @@ class PhaseManager:
             if hour_counter >= burst_interval:
                 hour_counter = 0.0
                 logger.info("Mini stress burst during soak")
+                self.simulator.set_speed_profile(self._stress_profile)
                 self.influx_writer.write(
                     "test_annotation",
                     tags={"type": "mini_burst"},
@@ -346,6 +354,7 @@ class PhaseManager:
                 await asyncio.sleep(burst_duration)
                 await workload_manager.stop_all()
                 await workload_manager.start_all("soak")
+                self.simulator.set_speed_profile(self._soak_profile)
 
     async def _wait_phase(self, duration_s: float, total_limit_s: float):
         """Wait for a phase to complete, respecting total time limit."""

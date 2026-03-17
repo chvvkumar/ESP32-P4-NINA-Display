@@ -43,6 +43,51 @@ INSTANCE_CONFIGS = [
     },
 ]
 
+SPEED_PROFILES = {
+    "fast": {
+        "exposure_times": [5, 5, 5],
+        "slew_duration_s": 1,
+        "autofocus_point_interval_s": 0.5,
+        "autofocus_settle_s": 0.5,
+        "guiding_settle_s": 1,
+        "dither_duration_s": 1,
+        "filter_change_duration_s": 0.5,
+        "target_complete_duration_s": 0.5,
+        "exposures_per_filter_range": [2, 3],
+        "target_change_interval": 6,
+        "guider_ra_mean": 0.8,
+        "guider_ra_sigma": 0.3,
+        "guider_dec_mean": 0.5,
+        "guider_dec_sigma": 0.2,
+        "focuser_drift_per_s": 5.0 / 60.0,
+        "mount_flip_interval_s": 300,
+        "mount_flip_jitter_s": 60,
+        "safety_safe_duration_s": 120,
+        "safety_unsafe_duration_s": 30,
+    },
+    "normal": {
+        "exposure_times": [120, 60, 30],
+        "slew_duration_s": 2,
+        "autofocus_point_interval_s": 1.0,
+        "autofocus_settle_s": 1.0,
+        "guiding_settle_s": 2,
+        "dither_duration_s": 2,
+        "filter_change_duration_s": 1,
+        "target_complete_duration_s": 1,
+        "exposures_per_filter_range": [3, 6],
+        "target_change_interval": 10,
+        "guider_ra_mean": 0.5,
+        "guider_ra_sigma": 0.15,
+        "guider_dec_mean": 0.3,
+        "guider_dec_sigma": 0.1,
+        "focuser_drift_per_s": 1.0 / 60.0,
+        "mount_flip_interval_s": 3600,
+        "mount_flip_jitter_s": 300,
+        "safety_safe_duration_s": 7200,
+        "safety_unsafe_duration_s": 120,
+    },
+}
+
 
 class SessionPhase:
     CONNECTING = "connecting"
@@ -58,28 +103,40 @@ class SessionPhase:
 class SessionTimeline:
     """Drives a realistic astrophotography session for one simulator instance."""
 
-    def __init__(self, instance_index: int):
+    def __init__(self, instance_index: int, speed_profile: str = "normal"):
         cfg = INSTANCE_CONFIGS[instance_index]
+        self._profile = SPEED_PROFILES[speed_profile]
         self.instance_index = instance_index
         self.profile_name = cfg["profile_name"]
         self.telescope = cfg["telescope"]
-        self.exposure_time = cfg["exposure_time"]
+        self.exposure_time = self._profile["exposure_times"][instance_index]
 
         self.camera = CameraState(
             name=cfg["camera_name"],
-            exposure_time_s=cfg["exposure_time"],
+            exposure_time_s=self._profile["exposure_times"][instance_index],
         )
-        self.guider = GuiderState(is_guiding=True)  # Start guiding immediately
-        self.focuser = FocuserState()
+        self.guider = GuiderState(
+            is_guiding=True,
+            ra_mean=self._profile["guider_ra_mean"],
+            ra_sigma=self._profile["guider_ra_sigma"],
+            dec_mean=self._profile["guider_dec_mean"],
+            dec_sigma=self._profile["guider_dec_sigma"],
+        )
+        self.focuser = FocuserState(drift_per_s=self._profile["focuser_drift_per_s"])
         self.mount = MountState(
             tracking=True,
             time_to_flip_s=random.uniform(1800, 5400),
             ra=random.uniform(0, 24),
             dec=random.uniform(-30, 70),
+            flip_interval_s=self._profile["mount_flip_interval_s"],
+            flip_jitter_s=self._profile["mount_flip_jitter_s"],
         )
         self.filter_wheel = FilterWheelState(available_filters=list(cfg["filters"]))
         self.switch = SwitchState()
-        self.safety = SafetyMonitorState()
+        self.safety = SafetyMonitorState(
+            _safe_duration=self._profile["safety_safe_duration_s"],
+            _unsafe_duration=self._profile["safety_unsafe_duration_s"],
+        )
 
         # Start in CONNECTING but with fast transitions
         self.phase = SessionPhase.CONNECTING
@@ -87,7 +144,8 @@ class SessionTimeline:
         self._target_index: int = random.randint(0, len(TARGETS) - 1)
         self._current_target: str = TARGETS[self._target_index][0]
         self._exposures_this_filter: int = 0
-        self._exposures_per_filter: int = random.randint(3, 6)
+        epf = self._profile["exposures_per_filter_range"]
+        self._exposures_per_filter: int = random.randint(epf[0], epf[1])
         self._total_exposures: int = 0
         self._image_history: list[dict] = []
         self._af_points_sent: int = 0
@@ -124,7 +182,7 @@ class SessionTimeline:
                 self._transition(SessionPhase.SLEWING)
 
         elif self.phase == SessionPhase.SLEWING:
-            if self._phase_elapsed >= 2.0:  # 2s slew (was 5s)
+            if self._phase_elapsed >= self._profile["slew_duration_s"]:
                 target_name, ra, dec = TARGETS[self._target_index]
                 self._current_target = target_name
                 self.mount.slew_to(ra, dec)
@@ -145,7 +203,7 @@ class SessionTimeline:
                     events.append({"event": "AUTOFOCUS-STARTING"})
             # Send V-curve points quickly (1s apart instead of 3s)
             num_points = 7
-            point_interval = 1.0
+            point_interval = self._profile["autofocus_point_interval_s"]
             expected_point = int(self._phase_elapsed / point_interval)
             if expected_point > self._af_points_sent and self._af_points_sent < num_points:
                 focus_pos = self.focuser.position + (self._af_points_sent - 3) * 50
@@ -157,7 +215,7 @@ class SessionTimeline:
                 })
                 self._af_points_sent += 1
 
-            if self._phase_elapsed >= num_points * point_interval + 1:
+            if self._phase_elapsed >= num_points * point_interval + self._profile["autofocus_settle_s"]:
                 self.focuser.autofocus_jump()
                 events.append({
                     "event": "AUTOFOCUS-FINISHED",
@@ -167,7 +225,7 @@ class SessionTimeline:
                 self._transition(SessionPhase.GUIDING_START)
 
         elif self.phase == SessionPhase.GUIDING_START:
-            if self._phase_elapsed >= 2.0:  # 2s settle (was 5s)
+            if self._phase_elapsed >= self._profile["guiding_settle_s"]:
                 self.guider.is_guiding = True
                 events.append({"event": "GUIDER-START"})
                 self._transition(SessionPhase.EXPOSING)
@@ -204,7 +262,7 @@ class SessionTimeline:
                         self._transition(SessionPhase.DITHERING)
 
         elif self.phase == SessionPhase.DITHERING:
-            if self._phase_elapsed >= 2.0:  # 2s dither (was 3s)
+            if self._phase_elapsed >= self._profile["dither_duration_s"]:
                 events.append({"event": "GUIDER-DITHER"})
                 if self._exposures_this_filter >= self._exposures_per_filter:
                     self._transition(SessionPhase.FILTER_CHANGE)
@@ -213,23 +271,24 @@ class SessionTimeline:
                     self.camera.start_exposure()
 
         elif self.phase == SessionPhase.FILTER_CHANGE:
-            if self._phase_elapsed >= 1.0:  # 1s filter change (was 2s)
+            if self._phase_elapsed >= self._profile["filter_change_duration_s"]:
                 new_filter = self.filter_wheel.change_filter()
                 self._exposures_this_filter = 0
-                self._exposures_per_filter = random.randint(3, 6)
+                epf = self._profile["exposures_per_filter_range"]
+                self._exposures_per_filter = random.randint(epf[0], epf[1])
                 events.append({
                     "event": "FILTERWHEEL-CHANGED",
                     "Filter": new_filter,
                 })
                 # Move to next target every ~10 exposures
-                if self._total_exposures > 0 and self._total_exposures % 10 == 0:
+                if self._total_exposures > 0 and self._total_exposures % self._profile["target_change_interval"] == 0:
                     self._transition(SessionPhase.TARGET_COMPLETE)
                 else:
                     self._transition(SessionPhase.EXPOSING)
                     self.camera.start_exposure()
 
         elif self.phase == SessionPhase.TARGET_COMPLETE:
-            if self._phase_elapsed >= 1.0:
+            if self._phase_elapsed >= self._profile["target_complete_duration_s"]:
                 events.append({"event": "SEQUENCE-FINISHED"})
                 self._sequence_started = False
                 self._target_index = (self._target_index + 1) % len(TARGETS)
@@ -241,6 +300,28 @@ class SessionTimeline:
     def _transition(self, new_phase: str):
         self.phase = new_phase
         self._phase_elapsed = 0.0
+
+    def set_speed_profile(self, name: str):
+        """Switch to a different speed profile mid-run."""
+        self._profile = SPEED_PROFILES[name]
+        self.exposure_time = self._profile["exposure_times"][self.instance_index]
+        self.camera.exposure_time_s = self.exposure_time
+        epf = self._profile["exposures_per_filter_range"]
+        self._exposures_per_filter = random.randint(epf[0], epf[1])
+        # Propagate to equipment states
+        self.guider.ra_mean = self._profile["guider_ra_mean"]
+        self.guider.ra_sigma = self._profile["guider_ra_sigma"]
+        self.guider.dec_mean = self._profile["guider_dec_mean"]
+        self.guider.dec_sigma = self._profile["guider_dec_sigma"]
+        self.focuser.drift_per_s = self._profile["focuser_drift_per_s"]
+        self.mount.set_timing(
+            self._profile["mount_flip_interval_s"],
+            self._profile["mount_flip_jitter_s"],
+        )
+        self.safety.set_timing(
+            self._profile["safety_safe_duration_s"],
+            self._profile["safety_unsafe_duration_s"],
+        )
 
     # ── REST response builders ──
 

@@ -267,7 +267,7 @@ async def main():
     simulator = NinaSimulatorServer(
         bind_address=sim_cfg.get("bind_address", "0.0.0.0"),
         base_port=sim_cfg.get("base_port", 1888),
-        exposure_times=sim_cfg.get("exposure_times", [120, 60, 30]),
+        speed_profile=sim_cfg.get("speed_profiles", {}).get("stress", "fast"),
     )
 
     phase_manager = PhaseManager(config, simulator, influx_writer)

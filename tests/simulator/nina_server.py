@@ -25,10 +25,10 @@ class NinaSimulatorServer:
     """Runs 3 NINA API simulator instances on consecutive ports."""
 
     def __init__(self, bind_address: str = "0.0.0.0", base_port: int = 1888,
-                 exposure_times: list[int] | None = None):
+                 speed_profile: str = "normal"):
         self.bind_address = bind_address
         self.base_port = base_port
-        self.timelines = [SessionTimeline(i) for i in range(3)]
+        self.timelines = [SessionTimeline(i, speed_profile=speed_profile) for i in range(3)]
         self._ws_clients: list[set[web.WebSocketResponse]] = [set(), set(), set()]
         self._runners: list[web.AppRunner] = []
         self._advance_task: asyncio.Task | None = None
@@ -69,6 +69,12 @@ class NinaSimulatorServer:
             await runner.cleanup()
         self._runners.clear()
         logger.info("Simulator stopped")
+
+    def set_speed_profile(self, name: str):
+        """Switch all simulator instances to a new speed profile."""
+        for tl in self.timelines:
+            tl.set_speed_profile(name)
+        logger.info(f"Simulator speed profile → {name}")
 
     def _create_app(self, instance_idx: int) -> web.Application:
         """Create an aiohttp app for one simulator instance."""

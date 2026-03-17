@@ -65,11 +65,15 @@ class GuiderState:
     rms_dec: float = 0.3
     rms_total: float = 0.58
     settle_distance: float = 0.0
+    ra_mean: float = 0.5
+    ra_sigma: float = 0.15
+    dec_mean: float = 0.3
+    dec_sigma: float = 0.1
 
     def advance(self, dt_s: float) -> list[dict]:
         if self.is_guiding:
-            self.rms_ra = abs(random.gauss(0.5, 0.15))
-            self.rms_dec = abs(random.gauss(0.3, 0.1))
+            self.rms_ra = abs(random.gauss(self.ra_mean, self.ra_sigma))
+            self.rms_dec = abs(random.gauss(self.dec_mean, self.dec_sigma))
             self.rms_total = math.sqrt(self.rms_ra ** 2 + self.rms_dec ** 2)
             self.settle_distance = max(0, random.gauss(0.1, 0.05))
         return []
@@ -93,11 +97,12 @@ class FocuserState:
     position: int = 15000
     temperature: float = -5.0
     is_moving: bool = False
+    drift_per_s: float = 1.0 / 60.0
     _drift_accum: float = 0.0
 
     def advance(self, dt_s: float) -> list[dict]:
         self.temperature += random.gauss(0, 0.01)
-        self._drift_accum += dt_s / 60.0
+        self._drift_accum += self.drift_per_s * dt_s
         if self._drift_accum >= 1.0:
             self.position += random.choice([-1, 0, 1])
             self._drift_accum = 0.0
@@ -124,6 +129,8 @@ class MountState:
     ra: float = 0.0
     dec: float = 0.0
     connected: bool = True
+    flip_interval_s: float = 3600.0
+    flip_jitter_s: float = 300.0
     _flip_pending: bool = False
 
     def advance(self, dt_s: float) -> list[dict]:
@@ -133,7 +140,7 @@ class MountState:
             if self.time_to_flip_s <= 0 and not self._flip_pending:
                 self._flip_pending = True
                 self.side_of_pier = "West" if self.side_of_pier == "East" else "East"
-                self.time_to_flip_s = 3600.0 + random.uniform(-300, 300)
+                self.time_to_flip_s = self.flip_interval_s + random.uniform(-self.flip_jitter_s, self.flip_jitter_s)
                 self._flip_pending = False
                 events.append({"event": "MERIDIAN-FLIP"})
         return events
@@ -141,6 +148,10 @@ class MountState:
     def slew_to(self, ra: float, dec: float):
         self.ra = ra
         self.dec = dec
+
+    def set_timing(self, flip_interval_s: float, flip_jitter_s: float):
+        self.flip_interval_s = flip_interval_s
+        self.flip_jitter_s = flip_jitter_s
 
     def to_dict(self) -> dict:
         return {
@@ -231,6 +242,10 @@ class SafetyMonitorState:
                 events.append({"event": "SAFETY-CHANGED", "IsSafe": True})
 
         return events
+
+    def set_timing(self, safe_duration_s: float, unsafe_duration_s: float):
+        self._safe_duration = safe_duration_s
+        self._unsafe_duration = unsafe_duration_s
 
     def to_dict(self) -> dict:
         return {
