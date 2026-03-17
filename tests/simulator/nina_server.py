@@ -21,6 +21,11 @@ _TEST_JPEG = base64.b64decode(
 )
 
 
+def _wrap(data):
+    """Wrap response data in ninaAPI standard envelope."""
+    return {"Response": data, "Error": "", "StatusCode": 200, "Success": True, "Type": "API"}
+
+
 class NinaSimulatorServer:
     """Runs 3 NINA API simulator instances on consecutive ports."""
 
@@ -82,39 +87,39 @@ class NinaSimulatorServer:
         tl = self.timelines[instance_idx]
 
         async def camera_info(req):
-            return web.json_response(tl.get_camera_info())
+            return web.json_response(_wrap(tl.get_camera_info()))
 
         async def guider_info(req):
-            return web.json_response(tl.get_guider_info())
+            return web.json_response(_wrap(tl.get_guider_info()))
 
         async def focuser_info(req):
-            return web.json_response(tl.get_focuser_info())
+            return web.json_response(_wrap(tl.get_focuser_info()))
 
         async def mount_info(req):
-            return web.json_response(tl.get_mount_info())
+            return web.json_response(_wrap(tl.get_mount_info()))
 
         async def filter_info(req):
-            return web.json_response(tl.get_filter_info())
+            return web.json_response(_wrap(tl.get_filter_info()))
 
         async def switch_info(req):
-            return web.json_response(tl.get_switch_info())
+            return web.json_response(_wrap(tl.get_switch_info()))
 
         async def safety_info(req):
-            return web.json_response(tl.get_safety_info())
+            return web.json_response(_wrap(tl.get_safety_info()))
 
         async def equipment_info(req):
-            return web.json_response(tl.get_equipment_info())
+            return web.json_response(_wrap(tl.get_equipment_info()))
 
         async def profile_show(req):
-            return web.json_response(tl.get_profile())
+            return web.json_response(_wrap(tl.get_profile()))
 
         async def sequence_json(req):
-            return web.json_response(tl.get_sequence_json())
+            return web.json_response(_wrap(tl.get_sequence_json()))
 
         async def image_history(req):
             count_only = req.query.get("count", "").lower() == "true"
             result = tl.get_image_history(count_only=count_only)
-            return web.json_response(result)
+            return web.json_response(_wrap(result))
 
         async def prepared_image(req):
             tl.requests_served += 1

@@ -47,13 +47,15 @@ class CameraState:
         return {
             "Connected": self.connected,
             "Name": self.name,
-            "State": self.state,
+            "CameraState": self.state,
             "Temperature": round(self.temperature, 1),
             "CoolerOn": self.cooler_on,
             "CoolerPower": round(self.cooler_power, 1),
             "Gain": self.gain,
             "Offset": self.offset,
             "ExposureTime": self.exposure_time_s,
+            "IsExposing": self.state == "Exposing",
+            "ExposureEndTime": None,
         }
 
 
@@ -83,9 +85,9 @@ class GuiderState:
             "Connected": True,
             "IsGuiding": self.is_guiding,
             "RMSError": {
-                "RA": round(self.rms_ra, 3),
-                "Dec": round(self.rms_dec, 3),
-                "Total": round(self.rms_total, 3),
+                "RA": {"Arcseconds": round(self.rms_ra, 3)},
+                "Dec": {"Arcseconds": round(self.rms_dec, 3)},
+                "Total": {"Arcseconds": round(self.rms_total, 3)},
             },
             "SettleDistance": round(self.settle_distance, 3),
         }
@@ -154,11 +156,16 @@ class MountState:
         self.flip_jitter_s = flip_jitter_s
 
     def to_dict(self) -> dict:
+        flip_s = max(0, round(self.time_to_flip_s))
+        hours = flip_s // 3600
+        minutes = (flip_s % 3600) // 60
+        secs = flip_s % 60
         return {
             "Connected": self.connected,
             "Tracking": self.tracking,
             "SideOfPier": self.side_of_pier,
             "TimeToMeridianFlip": round(self.time_to_flip_s),
+            "TimeToMeridianFlipString": f"{hours:02d}:{minutes:02d}:{secs:02d}",
             "RightAscension": round(self.ra, 4),
             "Declination": round(self.dec, 4),
         }
@@ -181,9 +188,14 @@ class FilterWheelState:
     def to_dict(self) -> dict:
         return {
             "Connected": True,
-            "CurrentFilter": self.current_filter,
-            "Position": self.current_position,
-            "Filters": self.available_filters,
+            "SelectedFilter": {
+                "Name": self.current_filter,
+                "Id": self.current_position,
+            },
+            "AvailableFilters": [
+                {"Name": f, "Id": i}
+                for i, f in enumerate(self.available_filters)
+            ],
         }
 
 
@@ -211,10 +223,15 @@ class SwitchState:
     def to_dict(self) -> dict:
         return {
             "Connected": True,
-            "Voltage": round(self.voltage, 2),
-            "Amps": round(self.amps, 2),
-            "Watts": round(self.watts, 2),
-            "PWMChannels": self.pwm_channels,
+            "ReadonlySwitches": [
+                {"Name": "Input Voltage", "Description": "Volts", "Value": round(self.voltage, 2)},
+                {"Name": "Total Current", "Description": "Current", "Value": round(self.amps, 2)},
+                {"Name": "Total Power", "Description": "Watts", "Value": round(self.watts, 2)},
+            ] + [
+                {"Name": ch["Name"], "Description": "PWM power output", "Value": ch["Value"]}
+                for ch in self.pwm_channels
+            ],
+            "WritableSwitches": [],
         }
 
 

@@ -253,6 +253,7 @@ class SessionTimeline:
                         "HFR": round(hfr, 2),
                         "Stars": stars,
                         "Filter": self.filter_wheel.current_filter,
+                        "Target": self._current_target,
                         "Timestamp": time.time(),
                     })
                     # Start next exposure or transition
@@ -365,42 +366,54 @@ class SessionTimeline:
             "SafetyMonitor": self.safety.to_dict(),
         }
 
-    def get_profile(self) -> dict:
+    def get_profile(self) -> list:
         self.requests_served += 1
-        return {
+        return [{
             "Name": self.profile_name,
-            "Telescope": self.telescope,
-            "Camera": self.camera.name,
-        }
+            "IsActive": True,
+        }]
 
-    def get_sequence_json(self) -> dict:
+    def get_sequence_json(self) -> list:
         self.requests_served += 1
         filters = self.filter_wheel.available_filters
-        items = []
+        filter_items = []
         for i, f in enumerate(filters):
             completed = max(0, self._total_exposures // len(filters) - i)
             total = self._exposures_per_filter * 3
-            items.append({
-                "Name": f"{self._current_target} - {f}",
-                "Filter": f,
-                "ExposureTime": self.exposure_time,
-                "Completed": completed,
-                "Total": total,
-                "Progress": round(completed / max(total, 1) * 100, 1),
+            filter_items.append({
+                "Name": f"{f}_Container",
+                "Items": [{
+                    "Name": f"{f} Exposure",
+                    "ExposureCount": total,
+                    "ExposureCountCompleted": completed,
+                    "ExposureTime": self.exposure_time,
+                }],
             })
-        return {
-            "Name": f"Sequence - {self._current_target}",
-            "State": "Running" if self.phase == SessionPhase.EXPOSING else "Idle",
-            "CurrentTarget": self._current_target,
-            "Items": items,
-            "TotalExposures": self._total_exposures,
-        }
+        return [{
+            "Name": "Targets_Container",
+            "Items": [{
+                "Name": f"{self._current_target}_Container",
+                "Items": filter_items,
+                "Status": 2 if self.phase == "exposing" else 0,
+            }],
+        }]
 
     def get_image_history(self, count_only: bool = False):
         self.requests_served += 1
         if count_only:
             return len(self._image_history)
-        return self._image_history[-50:]  # Last 50 images
+        # Return in reverse order (newest first) with firmware-expected field names
+        result = []
+        for img in reversed(self._image_history[-50:]):
+            result.append({
+                "TargetName": img.get("Target", self._current_target),
+                "TelescopeName": self.telescope,
+                "ExposureTime": self.exposure_time,
+                "Filter": img.get("Filter", ""),
+                "HFR": img.get("HFR", 0),
+                "Stars": img.get("Stars", 0),
+            })
+        return result
 
     def get_stats(self) -> dict:
         return {
