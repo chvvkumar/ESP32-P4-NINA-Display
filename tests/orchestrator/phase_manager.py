@@ -168,7 +168,8 @@ class PhaseManager:
                     logger.error(f"Failed to save config for {host}: {e}")
 
             # 5-6. Disable Spotify/AllSky, set NINA URLs to simulator
-            pi_ip = self._get_local_ip()
+            pi_ip = self.config.get("simulator", {}).get("advertise_ip") or self._get_local_ip()
+            logger.info(f"Simulator IP for devices: {pi_ip}")
             for device in self._devices:
                 host = device["host"]
                 payload = {
