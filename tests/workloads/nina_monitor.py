@@ -97,8 +97,8 @@ class NinaMonitorWorkload(BaseWorkload):
                     "instance": str(idx),
                 },
                 fields={
-                    "connected": connected,
-                    "ws_connected": ws_connected,
+                    "connected": 1 if connected else 0,
+                    "ws_connected": 1 if ws_connected else 0,
                     "consecutive_failures": failures,
                     "last_poll_age_ms": last_poll_age_ms,
                 },

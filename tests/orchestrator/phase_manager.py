@@ -195,6 +195,38 @@ class PhaseManager:
                 except Exception as e:
                     logger.error(f"Failed to configure {host}: {e}")
 
+            # 6.5. Reboot all devices so they pick up new NINA instance URLs
+            for device in self._devices:
+                host = device["host"]
+                try:
+                    async with session.post(
+                        f"http://{host}/api/reboot"
+                    ) as resp:
+                        logger.info(f"Rebooting {host} (status {resp.status})")
+                except Exception:
+                    pass  # Connection will drop during reboot
+
+            # Wait for devices to come back online
+            logger.info("Waiting 15s for devices to reboot...")
+            await asyncio.sleep(15)
+            for device in self._devices:
+                host = device["host"]
+                back_online = False
+                for attempt in range(12):  # Up to 60s
+                    try:
+                        async with session.get(
+                            f"http://{host}/api/version"
+                        ) as resp:
+                            if resp.status == 200:
+                                back_online = True
+                                logger.info(f"{host} back online")
+                                break
+                    except Exception:
+                        pass
+                    await asyncio.sleep(5)
+                if not back_online:
+                    logger.error(f"{host} did not come back after reboot")
+
             # 7. Wait for all 9 connections
             timeout_s = self.config.get("thresholds", {}).get(
                 "nina_connect_timeout_s", 60
