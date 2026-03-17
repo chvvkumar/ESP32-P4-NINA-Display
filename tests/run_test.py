@@ -260,8 +260,7 @@ async def main():
         return
 
     # ── Initialize components ──
-    influx_cfg = config["influxdb"]
-    influx_writer = InfluxDBWriter(influx_cfg["url"], influx_cfg["database"])
+    influx_writer = InfluxDBWriter()
 
     sim_cfg = config["simulator"]
     simulator = NinaSimulatorServer(
@@ -308,7 +307,6 @@ async def main():
 
     # ── Run ──
     try:
-        await influx_writer.start()
         await alert_monitor.start()
 
         # Start control API
@@ -362,13 +360,7 @@ async def main():
         report = report_generator.generate()
         print("\n" + report)
 
-        # 6. Write final summary to InfluxDB
-        report_generator.write_influx_summary(influx_writer)
-
-        # 7. Stop InfluxDB writer (final flush)
-        await influx_writer.stop()
-
-        # 8. Final result
+        # 6. Final result
         if alert_monitor.has_critical_violations():
             logger.error(
                 f"TEST FAILED — {alert_monitor.get_critical_count()} "

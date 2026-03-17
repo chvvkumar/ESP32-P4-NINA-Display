@@ -271,7 +271,7 @@ class AlertMonitor:
         self.influx_writer.write(
             "test_violation",
             {"device": device, "check": check_name, "severity": severity.value},
-            {"message": message, "value": value, "threshold": threshold},
+            {"message": message, "value": float(value), "threshold": float(threshold)},
         )
 
     async def _capture_state_snapshot(self, device: str):

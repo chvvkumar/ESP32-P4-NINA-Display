@@ -11,9 +11,6 @@ simulator:
     stress: fast
     soak: normal
 
-influxdb:
-  url: "http://docker1.lan:8086"
-  database: "ninadash_testing"
 
 phases:
   startup_duration_s: 120
