@@ -117,10 +117,10 @@ class AlertMonitor:
             )
             await self._capture_state_snapshot(device)
 
-        # 2. Heap exhaustion
+        # 2. Heap exhaustion (skip if device unreachable — 0 is a failed read, not real)
         heap_free = metrics.get("heap_free", float("inf"))
         heap_threshold = self.thresholds.get("heap_min_free_bytes", 8192)
-        if heap_free < heap_threshold:
+        if 0 < heap_free < heap_threshold:
             await self._record_violation(
                 device, "heap_critical", Severity.CRITICAL,
                 f"Heap critically low: {heap_free} bytes",
@@ -128,10 +128,10 @@ class AlertMonitor:
             )
             await self._capture_state_snapshot(device)
 
-        # 3. PSRAM exhaustion
+        # 3. PSRAM exhaustion (skip if 0 — means failed read)
         psram_free = metrics.get("psram_free", float("inf"))
         psram_threshold = self.thresholds.get("psram_min_free_bytes", 20971520)
-        if psram_free < psram_threshold:
+        if 0 < psram_free < psram_threshold:
             await self._record_violation(
                 device, "psram_critical", Severity.CRITICAL,
                 f"PSRAM critically low: {psram_free} bytes",

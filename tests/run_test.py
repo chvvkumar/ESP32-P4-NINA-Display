@@ -27,6 +27,7 @@ from orchestrator.phase_manager import PhaseManager
 from orchestrator.metrics_collector import MetricsCollector
 from orchestrator.alert_monitor import AlertMonitor
 from orchestrator.report_generator import ReportGenerator
+from orchestrator.control_api import ControlAPI
 from workloads.http_stress import HttpStressWorkload
 from workloads.config_churn import ConfigChurnWorkload
 from workloads.page_cycle import PageCycleWorkload
@@ -228,6 +229,10 @@ async def main():
         "--log-level", default="INFO",
         help="Logging level (default: INFO)",
     )
+    parser.add_argument(
+        "--api-port", type=int, default=8880,
+        help="Control API port (default: 8880)",
+    )
 
     args = parser.parse_args()
     setup_logging(args.log_level)
@@ -294,10 +299,20 @@ async def main():
             # Windows doesn't support add_signal_handler
             pass
 
+    # ── Control API ──
+    control_api = ControlAPI(
+        phase_manager, workload_manager, metrics_collector,
+        alert_monitor, report_generator, influx_writer, simulator,
+        config, port=args.api_port,
+    )
+
     # ── Run ──
     try:
         await influx_writer.start()
         await alert_monitor.start()
+
+        # Start control API
+        await control_api.start(shutdown_event)
 
         # Save original workload configs
         async with aiohttp.ClientSession(
@@ -339,7 +354,8 @@ async def main():
         await alert_monitor.stop()
         await metrics_collector.stop()
 
-        # 4. Stop simulator
+        # 4. Stop control API and simulator
+        await control_api.stop()
         await simulator.stop()
 
         # 5. Generate report
