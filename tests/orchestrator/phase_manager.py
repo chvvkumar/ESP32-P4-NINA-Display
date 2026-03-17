@@ -272,7 +272,20 @@ class PhaseManager:
                     f"({connected_count}/{total_count} connected)"
                 )
 
-        # 8. Start metrics
+        # 8. Set all devices to first NINA instance page (page 3)
+        for device in self._devices:
+            host = device["host"]
+            try:
+                async with session.post(
+                    f"http://{host}/api/page", json={"page": 3}
+                ) as resp:
+                    if resp.status == 200:
+                        logger.info(f"{host} set to NINA page 3")
+            except Exception as e:
+                logger.warning(f"Failed to set page on {host}: {e}")
+        await asyncio.sleep(2)
+
+        # 9. Start metrics
         await metrics_collector.start()
         logger.info("STARTUP complete")
 
