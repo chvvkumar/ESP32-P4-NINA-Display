@@ -113,17 +113,17 @@ class MetricsCollector:
         boot_count = 0
 
         if status_data:
-            heap_free = status_data.get("heap_free", 0)
-            psram_free = status_data.get("psram_free", 0)
             uptime_s = status_data.get("uptime_ms", 0) / 1000.0
             boot_count = status_data.get("boot_count", 0)
 
         if perf_data and perf_data.get("enabled"):
             mem = perf_data.get("memory", {})
             if mem:
-                # Don't overwrite heap_free/psram_free — /api/status values are
-                # identical and already set above. Only grab min watermarks from perf.
+                # Use /api/perf for accurate memory — /api/status heap_free
+                # includes PSRAM on ESP32-P4 (esp_get_free_heap_size bug)
+                heap_free = mem.get("heap_free_bytes", 0)
                 heap_min = mem.get("heap_min_free_bytes", 0)
+                psram_free = mem.get("psram_free_bytes", 0)
                 psram_min = mem.get("psram_min_free_bytes", 0)
 
         metrics.update({
@@ -169,7 +169,7 @@ class MetricsCollector:
                 rssi = float(wifi.get("rssi", 0))
                 rssi_avg = float(wifi.get("rssi_avg", 0))
                 disc = wifi.get("disconnect_count", {})
-                disc_count = disc.get("count", 0) if isinstance(disc, dict) else 0
+                disc_count = disc.get("total", 0) if isinstance(disc, dict) else 0
 
                 metrics.update({
                     "rssi": rssi,

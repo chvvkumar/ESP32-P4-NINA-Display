@@ -160,8 +160,8 @@ class AlertMonitor:
 
         # 5. HTTP error rate
         http = metrics.get("http", {})
-        total_req = http.get("requests_total", 0)
-        total_err = http.get("errors_total", 0)
+        total_req = http.get("request_count", 0)
+        total_err = http.get("failure_count", 0)
         if total_req > 0:
             error_rate = (total_err / total_req) * 100
             if phase == "stress" and error_rate > 5:
@@ -178,7 +178,7 @@ class AlertMonitor:
                 )
 
         # 6. API latency p95
-        p95 = http.get("p95_latency_ms", 0)
+        p95 = http.get("p95_ms", 0)
         if phase == "stress" and p95 > 2000:
             await self._record_violation(
                 device, "api_latency_stress", Severity.HIGH,
@@ -193,11 +193,12 @@ class AlertMonitor:
             )
 
         # 7. NINA instance down >60s
-        instances = metrics.get("instances", [])
+        nina_status = metrics.get("nina_status", {})
+        instances = nina_status.get("instances", []) if isinstance(nina_status, dict) else []
         if device not in self._instance_down_since:
             self._instance_down_since[device] = {}
         for i, inst in enumerate(instances):
-            connected = inst.get("connected", False)
+            connected = inst.get("connection_state") == "connected"
             if not connected:
                 if i not in self._instance_down_since[device]:
                     self._instance_down_since[device][i] = now
@@ -211,8 +212,8 @@ class AlertMonitor:
             else:
                 self._instance_down_since[device].pop(i, None)
 
-        # 8. WiFi disconnect during soak
-        if phase == "soak" and not metrics.get("wifi_connected", True):
+        # 8. WiFi disconnect during soak (detect via disconnect_count increment)
+        if phase == "soak" and metrics.get("wifi_disconnect_count", 0) > 0:
             await self._record_violation(
                 device, "wifi_disconnect_soak", Severity.MEDIUM,
                 "WiFi disconnected during soak phase",
