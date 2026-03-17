@@ -174,12 +174,12 @@ class PhaseManager:
                 payload = {
                     "spotify_enabled": False,
                     "allsky_enabled": False,
-                    "api_url_0": f"http://{pi_ip}:{self._sim_base_port}",
-                    "api_url_1": f"http://{pi_ip}:{self._sim_base_port + 1}",
-                    "api_url_2": f"http://{pi_ip}:{self._sim_base_port + 2}",
-                    "instance_enabled_0": True,
+                    "url1": f"http://{pi_ip}:{self._sim_base_port}",
+                    "url2": f"http://{pi_ip}:{self._sim_base_port + 1}",
+                    "url3": f"http://{pi_ip}:{self._sim_base_port + 2}",
                     "instance_enabled_1": True,
                     "instance_enabled_2": True,
+                    "instance_enabled_3": True,
                 }
                 try:
                     async with session.post(

@@ -162,8 +162,8 @@ class MetricsCollector:
         if perf_data and perf_data.get("enabled"):
             wifi = perf_data.get("wifi", {})
             if wifi:
-                rssi = wifi.get("rssi", 0)
-                rssi_avg = wifi.get("rssi_avg", 0)
+                rssi = float(wifi.get("rssi", 0))
+                rssi_avg = float(wifi.get("rssi_avg", 0))
                 disc = wifi.get("disconnect_count", {})
                 disc_count = disc.get("count", 0) if isinstance(disc, dict) else 0
 
