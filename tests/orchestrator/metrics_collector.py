@@ -44,10 +44,14 @@ class MetricsCollector:
         return self._latest_metrics.get(device, {})
 
     async def _run(self):
-        """Main polling loop."""
+        """Main polling loop — polls devices sequentially to avoid socket exhaustion."""
         while self._running:
-            tasks = [self._poll_device(d) for d in self.devices]
-            await asyncio.gather(*tasks, return_exceptions=True)
+            for device in self.devices:
+                try:
+                    await self._poll_device(device)
+                except Exception as e:
+                    logger.debug(f"Poll failed for {device['host']}: {e}")
+                await asyncio.sleep(1)  # Brief gap between devices
             await asyncio.sleep(self._poll_interval_s)
 
     async def _poll_device(self, device: dict):

@@ -108,8 +108,8 @@ class AlertMonitor:
         now = time.time()
         phase = self.phase_manager.get_current_phase().value
 
-        # 1. Reboot detected
-        if metrics.get("reboot_detected", False):
+        # 1. Reboot detected (only if device is reachable — unreachable gives false 0 values)
+        if metrics.get("reachable", False) and metrics.get("reboot_detected", False):
             await self._record_violation(
                 device, "reboot_detected", Severity.CRITICAL,
                 "Device rebooted unexpectedly",
