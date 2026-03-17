@@ -227,6 +227,10 @@ class PhaseManager:
                 if not back_online:
                     logger.error(f"{host} did not come back after reboot")
 
+            # Brief settle time before starting tests
+            logger.info("Waiting 10s for devices to settle...")
+            await asyncio.sleep(10)
+
             # 7. Wait for all 9 connections
             timeout_s = self.config.get("thresholds", {}).get(
                 "nina_connect_timeout_s", 60

@@ -99,74 +99,90 @@ class MetricsCollector:
         }
 
         # -- device_health measurement --
-        if perf_data:
-            heap_free = perf_data.get("heap_free", 0)
-            psram_free = perf_data.get("psram_free", 0)
-            uptime_s = perf_data.get("uptime_s", 0)
-            core0_load = perf_data.get("core0_load", 0)
-            core1_load = perf_data.get("core1_load", 0)
-            task_count = perf_data.get("task_count", 0)
-            boot_count = perf_data.get("boot_count", 0)
+        # Primary source: /api/status (top-level heap_free, psram_free, uptime_ms, boot_count)
+        # Secondary source: /api/perf (memory.heap_free_bytes etc, nested under "memory")
+        heap_free = 0
+        psram_free = 0
+        heap_min = 0
+        psram_min = 0
+        uptime_s = 0.0
+        boot_count = 0
 
-            metrics.update({
-                "heap_free": heap_free,
-                "psram_free": psram_free,
-                "uptime_s": uptime_s,
-                "core0_load": core0_load,
-                "core1_load": core1_load,
-                "task_count": task_count,
-                "boot_count": boot_count,
-            })
+        if status_data:
+            heap_free = status_data.get("heap_free", 0)
+            psram_free = status_data.get("psram_free", 0)
+            uptime_s = status_data.get("uptime_ms", 0) / 1000.0
+            boot_count = status_data.get("boot_count", 0)
 
-            # Detect reboot
-            prev_boot = self._previous_boot_count.get(host)
-            if prev_boot is not None and boot_count > prev_boot:
-                metrics["reboot_detected"] = True
-                logger.warning("Reboot detected on %s (boot_count %d -> %d)",
-                               host, prev_boot, boot_count)
-            elif prev_boot is not None and uptime_s < 30:
-                # Uptime reset also suggests reboot
-                metrics["reboot_detected"] = True
-            else:
-                metrics["reboot_detected"] = False
-            self._previous_boot_count[host] = boot_count
+        if perf_data and perf_data.get("enabled"):
+            mem = perf_data.get("memory", {})
+            if mem:
+                heap_free = mem.get("heap_free_bytes", heap_free)
+                psram_free = mem.get("psram_free_bytes", psram_free)
+                heap_min = mem.get("heap_min_free_bytes", 0)
+                psram_min = mem.get("psram_min_free_bytes", 0)
 
+        metrics.update({
+            "heap_free": heap_free,
+            "psram_free": psram_free,
+            "heap_min": heap_min,
+            "psram_min": psram_min,
+            "uptime_s": uptime_s,
+            "boot_count": boot_count,
+        })
+
+        # Detect reboot
+        prev_boot = self._previous_boot_count.get(host)
+        if prev_boot is not None and boot_count > prev_boot:
+            metrics["reboot_detected"] = True
+            logger.warning("Reboot detected on %s (boot_count %d -> %d)",
+                           host, prev_boot, boot_count)
+        elif prev_boot is not None and uptime_s < 30:
+            metrics["reboot_detected"] = True
+        else:
+            metrics["reboot_detected"] = False
+        self._previous_boot_count[host] = boot_count
+
+        if heap_free > 0 or psram_free > 0:
             self.influx_writer.write(
                 "device_health",
                 tags,
                 {
                     "heap_free": heap_free,
+                    "heap_min": heap_min,
                     "psram_free": psram_free,
+                    "psram_min": psram_min,
                     "uptime_s": uptime_s,
-                    "core0_load": core0_load,
-                    "core1_load": core1_load,
-                    "task_count": task_count,
                     "boot_count": boot_count,
                     "phase": phase,
                 },
             )
 
-        # -- device_wifi measurement --
-        if status_data:
-            rssi = status_data.get("rssi", 0)
-            wifi_connected = status_data.get("wifi_connected", False)
-            ip = status_data.get("ip", "")
+        # -- device_wifi measurement (from perf.wifi) --
+        if perf_data and perf_data.get("enabled"):
+            wifi = perf_data.get("wifi", {})
+            if wifi:
+                rssi = wifi.get("rssi", 0)
+                rssi_avg = wifi.get("rssi_avg", 0)
+                disc = wifi.get("disconnect_count", {})
+                disc_count = disc.get("count", 0) if isinstance(disc, dict) else 0
 
-            metrics.update({
-                "rssi": rssi,
-                "wifi_connected": wifi_connected,
-                "ip": ip,
-            })
-
-            self.influx_writer.write(
-                "device_wifi",
-                tags,
-                {
+                metrics.update({
                     "rssi": rssi,
-                    "wifi_connected": 1 if wifi_connected else 0,
-                    "phase": phase,
-                },
-            )
+                    "rssi_avg": rssi_avg,
+                    "wifi_disconnect_count": disc_count,
+                })
+
+                self.influx_writer.write(
+                    "device_wifi",
+                    tags,
+                    {
+                        "rssi": rssi,
+                        "rssi_avg": rssi_avg,
+                        "disconnect_count": disc_count,
+                        "phase": phase,
+                    },
+                )
 
         # -- device_poll canary measurement --
         self.influx_writer.write(
@@ -179,34 +195,54 @@ class MetricsCollector:
             },
         )
 
-        # -- HTTP performance metrics --
-        if perf_data and "http" in perf_data:
-            http = perf_data["http"]
-            self.influx_writer.write(
-                "device_http",
-                tags,
-                {
-                    "requests_total": http.get("requests_total", 0),
-                    "errors_total": http.get("errors_total", 0),
-                    "avg_latency_ms": http.get("avg_latency_ms", 0),
-                    "p95_latency_ms": http.get("p95_latency_ms", 0),
-                    "phase": phase,
-                },
-            )
-            metrics["http"] = http
+        # -- HTTP performance metrics (from perf.network) --
+        if perf_data and perf_data.get("enabled"):
+            network = perf_data.get("network", {})
+            if network:
+                req_counter = network.get("http_request_count", {})
+                fail_counter = network.get("http_failure_count", {})
+                retry_counter = network.get("http_retry_count", {})
+                req_timer = network.get("http_request", {})
+
+                request_count = req_counter.get("total", 0)
+                failure_count = fail_counter.get("total", 0)
+                retry_count = retry_counter.get("total", 0)
+                avg_ms = req_timer.get("avg_ms", 0.0)
+                max_ms = req_timer.get("max_ms", 0.0)
+
+                http_metrics = {
+                    "request_count": request_count,
+                    "failure_count": failure_count,
+                    "retry_count": retry_count,
+                    "avg_ms": avg_ms,
+                    "p95_ms": max_ms,  # Use max as p95 approximation
+                }
+                metrics["http"] = http_metrics
+
+                self.influx_writer.write(
+                    "device_http",
+                    tags,
+                    {**http_metrics, "phase": phase},
+                )
 
         # -- nina_instance measurements --
         if nina_status_data:
             instances = nina_status_data.get("instances", [])
-            metrics["instances"] = instances
-            for i, inst in enumerate(instances):
+            metrics["nina_status"] = nina_status_data
+            for inst in instances:
+                idx = inst.get("index", 0)
+                is_connected = inst.get("connection_state") == "connected"
+                ws_connected = inst.get("websocket_connected", False)
+                poll_ms = inst.get("last_successful_poll_ms", 0)
+                age_ms = int(time.time() * 1000) - poll_ms if poll_ms > 0 else 0
                 self.influx_writer.write(
                     "nina_instance",
-                    {**tags, "instance": str(i)},
+                    {**tags, "instance": str(idx), "phase": phase},
                     {
-                        "connected": 1 if inst.get("connected", False) else 0,
-                        "state": inst.get("state", "unknown"),
-                        "phase": phase,
+                        "connected": 1 if is_connected else 0,
+                        "ws_connected": 1 if ws_connected else 0,
+                        "consecutive_failures": inst.get("consecutive_failures", 0),
+                        "last_poll_age_ms": age_ms,
                     },
                 )
 
