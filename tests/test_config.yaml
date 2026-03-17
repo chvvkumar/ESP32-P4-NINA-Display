@@ -6,6 +6,7 @@ devices:
 simulator:
   bind_address: "0.0.0.0"
   base_port: 1888
+  advertise_ip: "192.168.1.211"
   exposure_times: [120, 60, 30]
 
 influxdb:
