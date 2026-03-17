@@ -1,6 +1,8 @@
 """State machines for simulated NINA equipment."""
 import random
 import math
+import time
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 
 
@@ -39,6 +41,13 @@ class CameraState:
 
         return events
 
+    def _get_exposure_end_time(self) -> str | None:
+        if self.state != "Exposing":
+            return None
+        remaining = max(0, self.exposure_time_s - self._elapsed)
+        end_epoch = time.time() + remaining
+        return datetime.fromtimestamp(end_epoch, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
     def start_exposure(self):
         self.state = "Exposing"
         self._elapsed = 0.0
@@ -55,7 +64,7 @@ class CameraState:
             "Offset": self.offset,
             "ExposureTime": self.exposure_time_s,
             "IsExposing": self.state == "Exposing",
-            "ExposureEndTime": None,
+            "ExposureEndTime": self._get_exposure_end_time(),
         }
 
 
