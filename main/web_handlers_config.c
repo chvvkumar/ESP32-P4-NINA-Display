@@ -506,9 +506,9 @@ static bool validate_config_fields(cJSON *root, httpd_req_t *req)
 // Returns NULL on allocation failure.
 static app_config_t *parse_config_from_json(cJSON *root)
 {
-    app_config_t *cfg = malloc(sizeof(app_config_t));
+    app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
     if (!cfg) {
-        ESP_LOGE(TAG, "parse_config_from_json: malloc failed");
+        ESP_LOGE(TAG, "parse_config_from_json: PSRAM alloc failed");
         return NULL;
     }
     memcpy(cfg, app_config_get(), sizeof(app_config_t));

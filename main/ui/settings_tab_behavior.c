@@ -18,6 +18,7 @@
 #include "display_defs.h"
 #include "lvgl.h"
 #include "bsp/esp-bsp.h"
+#include "esp_wifi.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -146,8 +147,9 @@ static void idle_poll_plus_cb(lv_event_t *e) {
 
 static void wifi_power_save_toggle_cb(lv_event_t *e) {
     LV_UNUSED(e);
-    app_config_get()->wifi_power_save =
-        lv_obj_has_state(sw_wifi_power_save, LV_STATE_CHECKED);
+    bool on = lv_obj_has_state(sw_wifi_power_save, LV_STATE_CHECKED);
+    app_config_get()->wifi_power_save = on;
+    esp_wifi_set_ps(on ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE);
     settings_mark_dirty(false);
 }
 

@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <stdatomic.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "ui/info_overlay_types.h"
@@ -97,20 +98,20 @@ typedef struct {
 
     // Set true when a new image is saved (IMAGE-SAVE event or image-history change)
     // Consumer should clear after handling
-    volatile bool new_image_available;
+    _Atomic bool new_image_available;
 
     // Set true by WebSocket event handlers to request immediate UI refresh.
     // Data task checks this and refreshes UI without waiting for next poll cycle.
-    volatile bool ui_refresh_needed;
+    _Atomic bool ui_refresh_needed;
 
     // Set by WebSocket event handlers when a sequence-relevant event occurs
     // (IMAGE-SAVE, TS-NEWTARGETSTART, SEQUENCE-STARTING). Causes immediate
     // sequence poll on next cycle.
-    volatile bool sequence_poll_needed;
+    _Atomic bool sequence_poll_needed;
 
     // Set by PROFILE-CHANGED WebSocket event to force re-fetch of cached
     // static data (profile name, filters, telescope) on the next poll cycle.
-    volatile bool profile_refresh_needed;
+    _Atomic bool profile_refresh_needed;
 
     // Timestamp (ms from esp_timer_get_time/1000) of last successful poll.
     // Used by the UI to display a stale-data indicator.  0 = never polled.

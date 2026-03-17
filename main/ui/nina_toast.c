@@ -36,11 +36,6 @@ static const char *TAG = "toast";
 #define DOT_SIZE            14
 #define DOT_RADIUS          7
 
-/* Red Night theme forces all colors to the red palette */
-static bool theme_forces_colors(void) {
-    return current_theme && strcmp(current_theme->name, "Red Night") == 0;
-}
-
 /* Severity background colors (dark, muted) */
 static const uint32_t sev_bg_colors[] = {
     [TOAST_INFO]    = 0x0C3060,   /* Dark blue */
@@ -157,7 +152,7 @@ static void show_toast(toast_severity_t sev, const char *msg) {
     s_toast.active = true;
 
     /* Apply severity colors — use red palette in Red Night */
-    bool red_night = theme_forces_colors();
+    bool red_night = theme_is_red_night(current_theme);
     lv_obj_set_style_bg_color(s_toast.bar,
         lv_color_hex(red_night ? sev_bg_red[sev] : sev_bg_colors[sev]), 0);
     lv_obj_set_style_bg_color(s_toast.dot,
@@ -372,7 +367,7 @@ void nina_toast_apply_theme(void) {
     if (!s_toast.active || !s_toast.bar) return;
 
     /* Re-color active toast for current theme */
-    bool red_night = theme_forces_colors();
+    bool red_night = theme_is_red_night(current_theme);
     toast_severity_t sev = s_toast.sev;
     lv_obj_set_style_bg_color(s_toast.bar,
         lv_color_hex(red_night ? sev_bg_red[sev] : sev_bg_colors[sev]), 0);

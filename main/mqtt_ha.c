@@ -95,7 +95,7 @@ static cJSON *create_device_object(void)
     cJSON_AddStringToObject(dev, "model", "ESP32-P4-WIFI6-Touch-LCD-4B");
     cJSON_AddStringToObject(dev, "manufacturer", "Waveshare");
     const esp_app_desc_t *app_desc = esp_app_get_description();
-    char sw_ver[64];
+    char sw_ver[96];
     snprintf(sw_ver, sizeof(sw_ver), "%s (%s)", app_desc->version, BUILD_GIT_TAG);
     cJSON_AddStringToObject(dev, "sw_version", sw_ver);
 
@@ -276,6 +276,7 @@ static void handle_screen_command(const char *data, int len)
         ESP_LOGI(TAG, "Screen brightness config updated to %d%% via MQTT (display sleeping)", cfg->brightness);
     }
 
+    app_config_save(cfg);
     cJSON_Delete(root);
     mqtt_ha_publish_state();
 }
@@ -310,6 +311,7 @@ static void handle_text_command(const char *data, int len)
 
     ESP_LOGI(TAG, "Text brightness set to %d%% via MQTT", cfg->color_brightness);
 
+    app_config_save(cfg);
     cJSON_Delete(root);
     mqtt_ha_publish_state();
 }

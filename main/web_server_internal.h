@@ -77,4 +77,6 @@ esp_err_t spotify_status_get_handler(httpd_req_t *req);
 esp_err_t spotify_control_post_handler(httpd_req_t *req);
 esp_err_t backup_get_handler(httpd_req_t *req);
 esp_err_t restore_post_handler(httpd_req_t *req);
+esp_err_t status_get_handler(httpd_req_t *req);
+esp_err_t nina_status_get_handler(httpd_req_t *req);
 void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t *new_cfg);

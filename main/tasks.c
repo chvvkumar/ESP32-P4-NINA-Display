@@ -50,8 +50,8 @@ static const char *TAG = "tasks";
 /* Graph refresh interval read from config at runtime (graph_update_interval_s) */
 
 /* Signals the data task that a page switch occurred */
-volatile bool page_changed = false;
-volatile bool ota_in_progress = false;
+_Atomic bool page_changed = false;
+_Atomic bool ota_in_progress = false;
 
 /**
  * Strip JPEG COM (0xFFFE) markers in-place.
@@ -120,9 +120,9 @@ static size_t strip_jpeg_com_markers(uint8_t *data, size_t size)
     }
     return wp;
 }
-volatile bool ota_check_requested = false;
-volatile bool screen_touch_wake = false;
-volatile bool screen_asleep = false;
+_Atomic bool ota_check_requested = false;
+_Atomic bool screen_touch_wake = false;
+_Atomic bool screen_asleep = false;
 TaskHandle_t data_task_handle = NULL;
 TaskHandle_t poll_task_handles[MAX_NINA_INSTANCES] = {NULL};
 static int64_t last_graph_fetch_ms = 0;  /* Timestamp of last graph data fetch */
@@ -133,7 +133,7 @@ static instance_poll_ctx_t poll_contexts[MAX_NINA_INSTANCES];
 
 /* Spotify task state */
 TaskHandle_t spotify_task_handle = NULL;
-volatile bool spotify_page_active = false;
+_Atomic bool spotify_page_active = false;
 
 /* AllSky polling state */
 static allsky_data_t allsky_data;
@@ -1332,32 +1332,33 @@ main_loop:
 
         /* Update active NINA page UI */
         if (active_nina_idx >= 0 && active_page_idx >= 0) {
-            nina_client_lock(&instances[active_nina_idx], 100);
+            if (nina_client_lock(&instances[active_nina_idx], 100)) {
 
-            perf_timer_start(&g_perf.ui_update_total);
-            int64_t lock_start2 = g_perf.enabled ? esp_timer_get_time() : 0;
-            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                if (g_perf.enabled) perf_timer_record(&g_perf.ui_lock_wait, esp_timer_get_time() - lock_start2);
-                perf_timer_start(&g_perf.ui_dashboard_update);
-                update_nina_dashboard_page(active_page_idx, &instances[active_nina_idx]);
-                perf_timer_stop(&g_perf.ui_dashboard_update);
+                perf_timer_start(&g_perf.ui_update_total);
+                int64_t lock_start2 = g_perf.enabled ? esp_timer_get_time() : 0;
+                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                    if (g_perf.enabled) perf_timer_record(&g_perf.ui_lock_wait, esp_timer_get_time() - lock_start2);
+                    perf_timer_start(&g_perf.ui_dashboard_update);
+                    update_nina_dashboard_page(active_page_idx, &instances[active_nina_idx]);
+                    perf_timer_stop(&g_perf.ui_dashboard_update);
 
-                // Measure WS-to-UI latency if a recent event was received
-                if (g_perf.enabled && g_perf.last_ws_event_time_us > 0) {
-                    int64_t latency = esp_timer_get_time() - g_perf.last_ws_event_time_us;
-                    if (latency < 5000000) {  // Only if within 5 seconds (not stale)
-                        perf_timer_record(&g_perf.latency_ws_to_ui, latency);
+                    // Measure WS-to-UI latency if a recent event was received
+                    if (g_perf.enabled && g_perf.last_ws_event_time_us > 0) {
+                        int64_t latency = esp_timer_get_time() - g_perf.last_ws_event_time_us;
+                        if (latency < 5000000) {  // Only if within 5 seconds (not stale)
+                            perf_timer_record(&g_perf.latency_ws_to_ui, latency);
+                        }
+                        g_perf.last_ws_event_time_us = 0;  // Reset after measuring
                     }
-                    g_perf.last_ws_event_time_us = 0;  // Reset after measuring
+
+                    nina_dashboard_update_status(active_page_idx, rssi,
+                                                 nina_connection_is_connected(active_nina_idx), false);
+                    bsp_display_unlock();
                 }
+                perf_timer_stop(&g_perf.ui_update_total);
 
-                nina_dashboard_update_status(active_page_idx, rssi,
-                                             nina_connection_is_connected(active_nina_idx), false);
-                bsp_display_unlock();
+                nina_client_unlock(&instances[active_nina_idx]);
             }
-            perf_timer_stop(&g_perf.ui_update_total);
-
-            nina_client_unlock(&instances[active_nina_idx]);
 
             // Handle thumbnail: initial request or auto-refresh on new image
             bool want_thumbnail = nina_dashboard_thumbnail_requested();
@@ -1696,11 +1697,13 @@ main_loop:
 
                 if (should_sleep) {
                     /* Show "Sleeping..." message briefly before turning off */
+                    lv_obj_t *sleep_overlay = NULL;
                     lvgl_port_lock(0);
                     {
                         lv_obj_t *scr = lv_scr_act();
                         /* Black overlay covers entire screen */
                         lv_obj_t *overlay = lv_obj_create(scr);
+                        sleep_overlay = overlay;
                         lv_obj_remove_style_all(overlay);
                         lv_obj_set_size(overlay, 720, 720);
                         lv_obj_set_style_bg_color(overlay, lv_color_black(), 0);
@@ -1729,12 +1732,9 @@ main_loop:
                     /* Clean up the overlay before sleeping */
                     lvgl_port_lock(0);
                     {
-                        lv_obj_t *scr = lv_scr_act();
-                        /* Remove the last child (our overlay) */
-                        uint32_t cnt = lv_obj_get_child_count(scr);
-                        if (cnt > 0) {
-                            lv_obj_t *last = lv_obj_get_child(scr, cnt - 1);
-                            lv_obj_delete(last);
+                        if (sleep_overlay) {
+                            lv_obj_delete(sleep_overlay);
+                            sleep_overlay = NULL;
                         }
                     }
                     lvgl_port_unlock();

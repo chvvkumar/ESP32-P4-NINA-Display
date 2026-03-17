@@ -16,6 +16,10 @@
 #include "bsp/esp-bsp.h"
 #include "lvgl.h"
 #include "display_defs.h"
+#include "nvs.h"
+#include "esp_timer.h"
+#include "nina_connection.h"
+#include "ui/nina_dashboard.h"
 
 // Handler for reboot
 esp_err_t reboot_post_handler(httpd_req_t *req)
@@ -388,5 +392,92 @@ esp_err_t perf_reset_post_handler(httpd_req_t *req)
     }
     perf_monitor_reset_all();
     httpd_resp_sendstr(req, "{\"status\":\"reset\"}");
+    return ESP_OK;
+}
+
+// Handler for lightweight device status (test automation)
+esp_err_t status_get_handler(httpd_req_t *req)
+{
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    cJSON_AddNumberToObject(root, "uptime_ms", (double)(esp_timer_get_time() / 1000));
+
+    uint32_t boot_count = 0;
+    nvs_handle_t nvs;
+    if (nvs_open("system", NVS_READONLY, &nvs) == ESP_OK) {
+        nvs_get_u32(nvs, "boot_cnt", &boot_count);
+        nvs_close(nvs);
+    }
+    cJSON_AddNumberToObject(root, "boot_count", boot_count);
+    cJSON_AddNumberToObject(root, "active_page", nina_dashboard_get_active_page());
+    cJSON_AddNumberToObject(root, "instance_count", instance_count);
+    cJSON_AddNumberToObject(root, "heap_free", (double)esp_get_free_heap_size());
+    cJSON_AddNumberToObject(root, "psram_free", (double)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+
+    const char *json_str = cJSON_PrintUnformatted(root);
+    if (!json_str) {
+        cJSON_Delete(root);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
+    free((void *)json_str);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+// Handler for per-instance NINA connection health (test automation)
+esp_err_t nina_status_get_handler(httpd_req_t *req)
+{
+    const app_config_t *cfg = app_config_get();
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON *arr = cJSON_AddArrayToObject(root, "instances");
+    if (!root || !arr) {
+        if (root) cJSON_Delete(root);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        cJSON *inst = cJSON_CreateObject();
+        cJSON_AddNumberToObject(inst, "index", i);
+        cJSON_AddBoolToObject(inst, "enabled", app_config_is_instance_enabled(i));
+        cJSON_AddStringToObject(inst, "url", cfg->api_url[i]);
+
+        nina_conn_state_t st = nina_connection_get_state(i);
+        const char *state_str = "unknown";
+        switch (st) {
+            case NINA_CONN_CONNECTING:   state_str = "connecting";   break;
+            case NINA_CONN_CONNECTED:    state_str = "connected";    break;
+            case NINA_CONN_DISCONNECTED: state_str = "disconnected"; break;
+            default: break;
+        }
+        cJSON_AddStringToObject(inst, "connection_state", state_str);
+        cJSON_AddBoolToObject(inst, "websocket_connected", nina_connection_is_ws_connected(i));
+
+        const nina_conn_info_t *info = nina_connection_get_info(i);
+        cJSON_AddNumberToObject(inst, "consecutive_failures", info->consecutive_failures);
+        cJSON_AddNumberToObject(inst, "consecutive_successes", info->consecutive_successes);
+        cJSON_AddNumberToObject(inst, "last_successful_poll_ms", (double)info->last_connected_ms);
+
+        cJSON_AddItemToArray(arr, inst);
+    }
+
+    const char *json_str = cJSON_PrintUnformatted(root);
+    if (!json_str) {
+        cJSON_Delete(root);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
+    free((void *)json_str);
+    cJSON_Delete(root);
     return ESP_OK;
 }

@@ -1990,6 +1990,11 @@ static bool validate_config(app_config_t *cfg) {
         cfg->allsky_thresholds[sizeof(cfg->allsky_thresholds) - 1] = '\0';
         fixed = true;
     }
+    if (cfg->spotify_poll_interval_ms < 500 || cfg->spotify_poll_interval_ms > 30000) {
+        cfg->spotify_poll_interval_ms = 3000;
+        fixed = true;
+    }
+    /* spotify_overlay_timeout_s is uint8_t (0-255); 0 means never hide, all values valid */
 
     return fixed;
 }

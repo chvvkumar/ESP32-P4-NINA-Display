@@ -23,6 +23,10 @@ static const char *TAG = "allsky_client";
 /* HTTP timeout for AllSky requests */
 #define ALLSKY_HTTP_TIMEOUT_MS    10000
 
+/* Cached parsed field_config_json — avoids re-parsing on every poll cycle */
+static cJSON *s_cached_field_config = NULL;
+static char  *s_cached_field_config_str = NULL;
+
 // =============================================================================
 // Mutex Helpers
 // =============================================================================
@@ -156,15 +160,54 @@ static const field_map_entry_t s_field_map[] = {
  *   "power":   { "main": {"key":"..."}, ... }
  * }
  */
+void allsky_invalidate_field_config_cache(void) {
+    if (s_cached_field_config) {
+        cJSON_Delete(s_cached_field_config);
+        s_cached_field_config = NULL;
+    }
+    if (s_cached_field_config_str) {
+        free(s_cached_field_config_str);
+        s_cached_field_config_str = NULL;
+    }
+}
+
+static cJSON *get_field_config(const char *field_config_json) {
+    if (!field_config_json || field_config_json[0] == '\0') return NULL;
+
+    /* Cache hit — config string unchanged */
+    if (s_cached_field_config && s_cached_field_config_str &&
+        strcmp(s_cached_field_config_str, field_config_json) == 0) {
+        return s_cached_field_config;
+    }
+
+    /* Cache miss — invalidate and re-parse */
+    allsky_invalidate_field_config_cache();
+
+    s_cached_field_config = cJSON_Parse(field_config_json);
+    if (!s_cached_field_config) {
+        ESP_LOGW(TAG, "Failed to parse field_config_json");
+        return NULL;
+    }
+
+    s_cached_field_config_str = strdup(field_config_json);
+    if (!s_cached_field_config_str) {
+        cJSON_Delete(s_cached_field_config);
+        s_cached_field_config = NULL;
+        return NULL;
+    }
+
+    ESP_LOGD(TAG, "Field config cache updated");
+    return s_cached_field_config;
+}
+
 static void extract_fields(cJSON *api_data, const char *field_config_json, allsky_data_t *data) {
     if (!field_config_json || field_config_json[0] == '\0') {
         ESP_LOGD(TAG, "No field config JSON provided, skipping extraction");
         return;
     }
 
-    cJSON *config = cJSON_Parse(field_config_json);
+    cJSON *config = get_field_config(field_config_json);
     if (!config) {
-        ESP_LOGW(TAG, "Failed to parse field_config_json");
         return;
     }
 
@@ -200,7 +243,7 @@ static void extract_fields(cJSON *api_data, const char *field_config_json, allsk
         }
     }
 
-    cJSON_Delete(config);
+    /* config is owned by the cache — do not delete */
 }
 
 // =============================================================================
@@ -222,7 +265,10 @@ void allsky_client_poll(const char *hostname, const char *field_config_json, all
     esp_http_client_config_t http_cfg = {
         .url = url,
         .timeout_ms = ALLSKY_HTTP_TIMEOUT_MS,
-        .keep_alive_enable = false,
+        .keep_alive_enable = true,
+        .keep_alive_idle = 15,
+        .keep_alive_interval = 5,
+        .keep_alive_count = 3,
     };
     esp_http_client_handle_t client = esp_http_client_init(&http_cfg);
     if (!client) {

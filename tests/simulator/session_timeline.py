@@ -1,0 +1,327 @@
+"""Session timeline that drives a simulated imaging night."""
+import random
+import time
+from dataclasses import dataclass, field
+
+from .equipment_state import (
+    CameraState, GuiderState, FocuserState, MountState,
+    FilterWheelState, SwitchState, SafetyMonitorState,
+)
+
+TARGETS = [
+    ("M31 - Andromeda Galaxy", 0.7122, 41.2689),
+    ("M42 - Orion Nebula", 5.5881, -5.3911),
+    ("NGC 2244 - Rosette Nebula", 6.5317, 4.9528),
+    ("IC 1396 - Elephant Trunk", 21.6278, 57.4969),
+    ("NGC 7000 - North America Nebula", 20.9789, 44.3178),
+    ("M81 - Bode's Galaxy", 9.9256, 69.0653),
+    ("NGC 6992 - Eastern Veil", 20.8233, 31.7178),
+    ("M51 - Whirlpool Galaxy", 13.4983, 47.1953),
+]
+
+INSTANCE_CONFIGS = [
+    {
+        "profile_name": "Deep Sky Rig",
+        "telescope": "APM 140/1050",
+        "camera_name": "ZWO ASI2600MM Pro",
+        "exposure_time": 120,
+        "filters": ["Ha", "OIII", "SII"],
+    },
+    {
+        "profile_name": "Widefield Rig",
+        "telescope": "Samyang 135mm",
+        "camera_name": "ZWO ASI533MC Pro",
+        "exposure_time": 60,
+        "filters": ["L", "R", "G", "B"],
+    },
+    {
+        "profile_name": "Planetary Rig",
+        "telescope": "C11 EdgeHD",
+        "camera_name": "ZWO ASI294MM Pro",
+        "exposure_time": 30,
+        "filters": ["Ha", "L"],
+    },
+]
+
+
+class SessionPhase:
+    CONNECTING = "connecting"
+    SLEWING = "slewing"
+    AUTOFOCUS = "autofocus"
+    GUIDING_START = "guiding_start"
+    EXPOSING = "exposing"
+    DITHERING = "dithering"
+    FILTER_CHANGE = "filter_change"
+    TARGET_COMPLETE = "target_complete"
+
+
+class SessionTimeline:
+    """Drives a realistic astrophotography session for one simulator instance."""
+
+    def __init__(self, instance_index: int):
+        cfg = INSTANCE_CONFIGS[instance_index]
+        self.instance_index = instance_index
+        self.profile_name = cfg["profile_name"]
+        self.telescope = cfg["telescope"]
+        self.exposure_time = cfg["exposure_time"]
+
+        self.camera = CameraState(
+            name=cfg["camera_name"],
+            exposure_time_s=cfg["exposure_time"],
+        )
+        self.guider = GuiderState()
+        self.focuser = FocuserState()
+        self.mount = MountState(
+            time_to_flip_s=random.uniform(1800, 5400),
+            ra=random.uniform(0, 24),
+            dec=random.uniform(-30, 70),
+        )
+        self.filter_wheel = FilterWheelState(available_filters=list(cfg["filters"]))
+        self.switch = SwitchState()
+        self.safety = SafetyMonitorState()
+
+        self.phase = SessionPhase.CONNECTING
+        self._phase_elapsed: float = 0.0
+        self._target_index: int = random.randint(0, len(TARGETS) - 1)
+        self._current_target: str = TARGETS[self._target_index][0]
+        self._exposures_this_filter: int = 0
+        self._exposures_per_filter: int = random.randint(5, 10)
+        self._total_exposures: int = 0
+        self._image_history: list[dict] = []
+        self._af_points_sent: int = 0
+        self._sequence_started: bool = False
+
+        # Stats
+        self.requests_served: int = 0
+        self.ws_connections: int = 0
+        self.events_emitted: int = 0
+
+    def advance(self, dt_s: float) -> list[dict]:
+        """Advance all equipment states and the session timeline."""
+        events = []
+        self._phase_elapsed += dt_s
+
+        # Equipment state updates
+        cam_events = self.camera.advance(dt_s)
+        self.guider.advance(dt_s)
+        self.focuser.advance(dt_s)
+        mount_events = self.mount.advance(dt_s)
+        self.switch.advance(dt_s)
+        safety_events = self.safety.advance(dt_s)
+
+        events.extend(safety_events)
+        events.extend(mount_events)
+
+        # Phase state machine
+        if self.phase == SessionPhase.CONNECTING:
+            if self._phase_elapsed >= 3.0:
+                events.append({"event": "CAMERA-CONNECTED", "Name": self.camera.name})
+                events.append({"event": "MOUNT-CONNECTED", "Name": self.telescope})
+                self.camera.connected = True
+                self.mount.connected = True
+                self._transition(SessionPhase.SLEWING)
+
+        elif self.phase == SessionPhase.SLEWING:
+            if self._phase_elapsed >= 5.0:
+                target_name, ra, dec = TARGETS[self._target_index]
+                self._current_target = target_name
+                self.mount.slew_to(ra, dec)
+                events.append({
+                    "event": "TS-NEWTARGETSTART",
+                    "Name": target_name,
+                    "RA": ra,
+                    "Dec": dec,
+                })
+                if not self._sequence_started:
+                    events.append({"event": "SEQUENCE-STARTING"})
+                    self._sequence_started = True
+                self._transition(SessionPhase.AUTOFOCUS)
+
+        elif self.phase == SessionPhase.AUTOFOCUS:
+            if self._phase_elapsed < 1.0:
+                if self._af_points_sent == 0:
+                    events.append({"event": "AUTOFOCUS-STARTING"})
+            # Send V-curve points
+            num_points = 7
+            point_interval = 3.0
+            expected_point = int(self._phase_elapsed / point_interval)
+            if expected_point > self._af_points_sent and self._af_points_sent < num_points:
+                focus_pos = self.focuser.position + (self._af_points_sent - 3) * 50
+                hfr = 1.5 + abs(self._af_points_sent - 3) * 0.8 + random.gauss(0, 0.1)
+                events.append({
+                    "event": "AUTOFOCUS-POINT-ADDED",
+                    "Position": focus_pos,
+                    "HFR": round(hfr, 2),
+                })
+                self._af_points_sent += 1
+
+            if self._phase_elapsed >= num_points * point_interval + 2:
+                self.focuser.autofocus_jump()
+                events.append({
+                    "event": "AUTOFOCUS-FINISHED",
+                    "Position": self.focuser.position,
+                })
+                self._af_points_sent = 0
+                self._transition(SessionPhase.GUIDING_START)
+
+        elif self.phase == SessionPhase.GUIDING_START:
+            if self._phase_elapsed >= 5.0:
+                self.guider.is_guiding = True
+                events.append({"event": "GUIDER-START"})
+                self._transition(SessionPhase.EXPOSING)
+                self.camera.start_exposure()
+
+        elif self.phase == SessionPhase.EXPOSING:
+            for ev in cam_events:
+                if ev["event"] == "IMAGE-SAVE":
+                    self._total_exposures += 1
+                    self._exposures_this_filter += 1
+                    hfr = random.uniform(1.5, 3.5)
+                    stars = random.randint(80, 400)
+                    img_data = {
+                        "event": "IMAGE-SAVE",
+                        "HFR": round(hfr, 2),
+                        "Stars": stars,
+                        "Filter": self.filter_wheel.current_filter,
+                        "Temperature": round(self.camera.temperature, 1),
+                        "Gain": self.camera.gain,
+                        "ExposureTime": self.exposure_time,
+                        "Target": self._current_target,
+                    }
+                    events.append(img_data)
+                    self._image_history.append({
+                        "HFR": round(hfr, 2),
+                        "Stars": stars,
+                        "Filter": self.filter_wheel.current_filter,
+                        "Timestamp": time.time(),
+                    })
+                    # Start next exposure or transition
+                    if self._exposures_this_filter >= self._exposures_per_filter:
+                        self._transition(SessionPhase.DITHERING)
+                    else:
+                        self._transition(SessionPhase.DITHERING)
+
+        elif self.phase == SessionPhase.DITHERING:
+            if self._phase_elapsed >= 3.0:
+                events.append({"event": "GUIDER-DITHER"})
+                if self._exposures_this_filter >= self._exposures_per_filter:
+                    self._transition(SessionPhase.FILTER_CHANGE)
+                else:
+                    self._transition(SessionPhase.EXPOSING)
+                    self.camera.start_exposure()
+
+        elif self.phase == SessionPhase.FILTER_CHANGE:
+            if self._phase_elapsed >= 2.0:
+                new_filter = self.filter_wheel.change_filter()
+                self._exposures_this_filter = 0
+                self._exposures_per_filter = random.randint(5, 10)
+                events.append({
+                    "event": "FILTERWHEEL-CHANGED",
+                    "Filter": new_filter,
+                })
+                # Check if we should move to next target (every ~30 min cycle)
+                if self._total_exposures > 0 and self._total_exposures % 20 == 0:
+                    self._transition(SessionPhase.TARGET_COMPLETE)
+                else:
+                    self._transition(SessionPhase.EXPOSING)
+                    self.camera.start_exposure()
+
+        elif self.phase == SessionPhase.TARGET_COMPLETE:
+            if self._phase_elapsed >= 2.0:
+                events.append({"event": "SEQUENCE-FINISHED"})
+                self._sequence_started = False
+                self._target_index = (self._target_index + 1) % len(TARGETS)
+                self._transition(SessionPhase.SLEWING)
+
+        self.events_emitted += len(events)
+        return events
+
+    def _transition(self, new_phase: str):
+        self.phase = new_phase
+        self._phase_elapsed = 0.0
+
+    # ── REST response builders ──
+
+    def get_camera_info(self) -> dict:
+        self.requests_served += 1
+        return self.camera.to_dict()
+
+    def get_guider_info(self) -> dict:
+        self.requests_served += 1
+        return self.guider.to_dict()
+
+    def get_focuser_info(self) -> dict:
+        self.requests_served += 1
+        return self.focuser.to_dict()
+
+    def get_mount_info(self) -> dict:
+        self.requests_served += 1
+        return self.mount.to_dict()
+
+    def get_filter_info(self) -> dict:
+        self.requests_served += 1
+        return self.filter_wheel.to_dict()
+
+    def get_switch_info(self) -> dict:
+        self.requests_served += 1
+        return self.switch.to_dict()
+
+    def get_safety_info(self) -> dict:
+        self.requests_served += 1
+        return self.safety.to_dict()
+
+    def get_equipment_info(self) -> dict:
+        self.requests_served += 1
+        return {
+            "Camera": self.camera.to_dict(),
+            "Guider": self.guider.to_dict(),
+            "Focuser": self.focuser.to_dict(),
+            "Mount": self.mount.to_dict(),
+            "FilterWheel": self.filter_wheel.to_dict(),
+            "Switch": self.switch.to_dict(),
+            "SafetyMonitor": self.safety.to_dict(),
+        }
+
+    def get_profile(self) -> dict:
+        self.requests_served += 1
+        return {
+            "Name": self.profile_name,
+            "Telescope": self.telescope,
+            "Camera": self.camera.name,
+        }
+
+    def get_sequence_json(self) -> dict:
+        self.requests_served += 1
+        filters = self.filter_wheel.available_filters
+        items = []
+        for i, f in enumerate(filters):
+            completed = max(0, self._total_exposures // len(filters) - i)
+            total = self._exposures_per_filter * 3
+            items.append({
+                "Name": f"{self._current_target} - {f}",
+                "Filter": f,
+                "ExposureTime": self.exposure_time,
+                "Completed": completed,
+                "Total": total,
+                "Progress": round(completed / max(total, 1) * 100, 1),
+            })
+        return {
+            "Name": f"Sequence - {self._current_target}",
+            "State": "Running" if self.phase == SessionPhase.EXPOSING else "Idle",
+            "CurrentTarget": self._current_target,
+            "Items": items,
+            "TotalExposures": self._total_exposures,
+        }
+
+    def get_image_history(self, count_only: bool = False):
+        self.requests_served += 1
+        if count_only:
+            return len(self._image_history)
+        return self._image_history[-50:]  # Last 50 images
+
+    def get_stats(self) -> dict:
+        return {
+            "requests_served": self.requests_served,
+            "ws_connections": self.ws_connections,
+            "events_emitted": self.events_emitted,
+        }

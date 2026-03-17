@@ -9,9 +9,7 @@
 #include "lvgl.h"
 #include "themes.h"
 #include "app_config.h"
-
-/* current_theme is defined in nina_dashboard.c */
-extern const theme_t *current_theme;
+#include "nina_dashboard_internal.h"
 
 /* Layout constants */
 #define GR_HEADER_H     64
@@ -99,7 +97,6 @@ void update_y_labels(int y_min_x100, int y_max_x100);
 void update_threshold_lines(int y_min_x100, int y_max_x100);
 
 /* Theme-aware helpers */
-bool is_red_night_theme(void);
 uint32_t get_ra_color(void);
 uint32_t get_dec_color(void);
 uint32_t get_total_color(void);
