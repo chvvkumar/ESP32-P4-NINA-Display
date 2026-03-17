@@ -120,14 +120,8 @@ class PhaseManager:
 
     async def _run_startup(self, metrics_collector):
         """STARTUP phase: verify devices, save configs, configure for test."""
-        from influx.setup import ensure_database
 
-        influx_cfg = self.config.get("influxdb", {})
-
-        # 1. Ensure InfluxDB database
-        await ensure_database(influx_cfg["url"], influx_cfg["database"])
-
-        # 2. Start simulator
+        # 1. Start simulator
         await self.simulator.start()
 
         # 3. Verify all devices reachable
