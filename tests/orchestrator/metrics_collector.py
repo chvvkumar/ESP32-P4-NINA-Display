@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import time
+from collections import deque
 
 import aiohttp
 
@@ -21,6 +22,8 @@ class MetricsCollector:
         self._latest_metrics: dict[str, dict] = {}
         self._previous_boot_count: dict[str, int] = {}
         self._poll_interval_s = 10
+        # Ring buffer: 360 entries = 1 hour at 10s intervals per device
+        self._metrics_history: dict[str, deque] = {}
 
     async def start(self):
         """Start the metrics collection loop."""
@@ -42,6 +45,16 @@ class MetricsCollector:
     def get_latest_metrics(self, device: str) -> dict:
         """Return the latest collected metrics for a device host."""
         return self._latest_metrics.get(device, {})
+
+    def get_metrics_history(self, device: str) -> list[dict]:
+        """Return the metrics history for a device host as a list of dicts."""
+        if device in self._metrics_history:
+            return list(self._metrics_history[device])
+        return []
+
+    def get_all_latest_metrics(self) -> dict[str, dict]:
+        """Return latest metrics for all devices, keyed by host."""
+        return dict(self._latest_metrics)
 
     async def _run(self):
         """Main polling loop — polls devices sequentially to avoid socket exhaustion."""
@@ -249,5 +262,71 @@ class MetricsCollector:
                         "last_poll_age_ms": age_ms,
                     },
                 )
+
+        # -- Extended perf_data extraction --
+        if perf_data and perf_data.get("enabled"):
+            # Store raw perf_data for control API passthrough
+            metrics["_raw_perf"] = perf_data
+
+            # CPU metrics
+            cpu = perf_data.get("cpu", {})
+            if cpu:
+                core_load = cpu.get("core_load", [0.0, 0.0])
+                metrics["core0_load"] = core_load[0] if len(core_load) > 0 else 0.0
+                metrics["core1_load"] = core_load[1] if len(core_load) > 1 else 0.0
+                metrics["total_load"] = cpu.get("total_load", 0.0)
+                metrics["task_count"] = cpu.get("task_count", 0)
+                metrics["lvgl_render_avg_ms"] = cpu.get("lvgl_render_avg_ms", 0.0)
+
+                # Task stack HWMs — only tasks with cpu_percent > 0
+                tasks = cpu.get("tasks", [])
+                if tasks:
+                    metrics["tasks"] = [
+                        {
+                            "name": t.get("name", ""),
+                            "stack_hwm": t.get("stack_hwm", 0),
+                            "cpu_percent": t.get("cpu_percent", 0.0),
+                        }
+                        for t in tasks
+                        if t.get("cpu_percent", 0) > 0
+                    ]
+
+            # Memory largest free blocks
+            mem = perf_data.get("memory", {})
+            if mem:
+                metrics["heap_largest_free_block"] = mem.get("heap_largest_free_block", 0)
+                metrics["psram_largest_free_block"] = mem.get("psram_largest_free_block", 0)
+
+            # UI metrics
+            ui = perf_data.get("ui", {})
+            if ui:
+                lock_wait = ui.get("ui_lock_wait", {})
+                metrics["ui_lock_wait_avg_ms"] = lock_wait.get("avg_ms", 0.0)
+                metrics["ui_lock_wait_max_ms"] = lock_wait.get("max_ms", 0.0)
+
+            # Per-endpoint avg_ms (only endpoints with count > 0)
+            endpoints_raw = perf_data.get("endpoints", {})
+            if endpoints_raw:
+                endpoints = {}
+                for ep_name, ep_data in endpoints_raw.items():
+                    if isinstance(ep_data, dict) and ep_data.get("count", 0) > 0:
+                        endpoints[ep_name] = ep_data.get("avg_ms", 0.0)
+                if endpoints:
+                    metrics["endpoints"] = endpoints
+
+            # Poll cycle metrics
+            poll_cycle = perf_data.get("poll_cycle", {})
+            if poll_cycle:
+                metrics["poll_cycle_avg_ms"] = poll_cycle.get("avg_ms", 0.0)
+                metrics["poll_cycle_max_ms"] = poll_cycle.get("max_ms", 0.0)
+
+        # -- Append condensed snapshot to history ring buffer --
+        if host not in self._metrics_history:
+            self._metrics_history[host] = deque(maxlen=360)
+
+        # Build condensed snapshot (exclude bulky _raw_perf and nina_status)
+        snapshot = {k: v for k, v in metrics.items()
+                    if k not in ("_raw_perf", "nina_status")}
+        self._metrics_history[host].append(snapshot)
 
         self._latest_metrics[host] = metrics

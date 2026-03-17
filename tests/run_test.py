@@ -352,15 +352,42 @@ async def main():
         await alert_monitor.stop()
         await metrics_collector.stop()
 
-        # 4. Stop control API and simulator
-        await control_api.stop()
+        # 4. Stop simulator (keep control API alive for result retrieval)
         await simulator.stop()
 
-        # 5. Generate report
+        # 5. Generate report (also saves to logs/report_{timestamp}.txt)
         report = report_generator.generate()
         print("\n" + report)
 
-        # 6. Final result
+        # 6. Mark test as completed so control API serves final state
+        control_api.mark_completed(report)
+        logger.info(
+            "Test complete — control API still running on port "
+            f"{args.api_port} for result retrieval. "
+            "POST /api/stop or Ctrl+C to shut down."
+        )
+
+        # 7. Wait for explicit shutdown (POST /api/stop or second signal)
+        final_shutdown = asyncio.Event()
+
+        def handle_final_signal():
+            logger.info("Final shutdown signal received")
+            final_shutdown.set()
+
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.add_signal_handler(sig, handle_final_signal)
+            except NotImplementedError:
+                pass
+
+        control_api.set_shutdown_event(final_shutdown)
+        await final_shutdown.wait()
+
+        # 8. Now stop control API
+        await control_api.stop()
+        logger.info("Control API stopped")
+
+        # 9. Final result
         if alert_monitor.has_critical_violations():
             logger.error(
                 f"TEST FAILED — {alert_monitor.get_critical_count()} "

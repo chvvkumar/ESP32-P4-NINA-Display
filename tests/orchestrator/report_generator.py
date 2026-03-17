@@ -80,6 +80,57 @@ class ReportGenerator:
                     )
             lines.append("")
 
+        # -- Fleet Overview --
+        lines.append("-" * 72)
+        lines.append("  Fleet Overview")
+        lines.append("-" * 72)
+        all_metrics = []
+        for device in devices:
+            m = self.metrics_collector.get_latest_metrics(device["host"])
+            if m:
+                all_metrics.append(m)
+        if all_metrics:
+            total_http_req = sum(
+                m.get("http", {}).get("request_count", 0) for m in all_metrics
+            )
+            total_http_fail = sum(
+                m.get("http", {}).get("failure_count", 0) for m in all_metrics
+            )
+            avg_heap = sum(
+                m.get("heap_free", 0) for m in all_metrics
+            ) // len(all_metrics)
+            min_heap_min = min(
+                (m.get("heap_min", float("inf")) for m in all_metrics),
+                default=0,
+            )
+            avg_psram = sum(
+                m.get("psram_free", 0) for m in all_metrics
+            ) // len(all_metrics)
+            min_psram_min = min(
+                (m.get("psram_min", float("inf")) for m in all_metrics),
+                default=0,
+            )
+            fail_pct = (
+                (total_http_fail / total_http_req * 100)
+                if total_http_req > 0
+                else 0.0
+            )
+            lines.append(
+                f"  HTTP requests:     {total_http_req:,} total, "
+                f"{total_http_fail:,} failed ({fail_pct:.1f}%)"
+            )
+            lines.append(
+                f"  Avg heap free:     {avg_heap:,}  "
+                f"Min heap_min:  {min_heap_min:,}"
+            )
+            lines.append(
+                f"  Avg PSRAM free:    {avg_psram:,}  "
+                f"Min psram_min: {min_psram_min:,}"
+            )
+        else:
+            lines.append("  No metrics available from any device")
+        lines.append("")
+
         # -- Per-Device Summary --
         lines.append("-" * 72)
         lines.append("  Per-Device Summary")
@@ -93,16 +144,151 @@ class ReportGenerator:
             lines.append(f"  {name} ({host})")
             lines.append(f"    Violations: {len(dev_violations)}")
 
-            if metrics:
-                lines.append(f"    Last heap_free:  {metrics.get('heap_free', 'N/A')}")
-                lines.append(f"    Last psram_free: {metrics.get('psram_free', 'N/A')}")
-                lines.append(f"    Last uptime_s:   {metrics.get('uptime_s', 'N/A')}")
-                lines.append(f"    Last core0_load: {metrics.get('core0_load', 'N/A')}")
-                lines.append(f"    Last core1_load: {metrics.get('core1_load', 'N/A')}")
-                lines.append(f"    WiFi connected:  {metrics.get('wifi_connected', 'N/A')}")
-                lines.append(f"    RSSI:            {metrics.get('rssi', 'N/A')}")
-            else:
+            if not metrics:
                 lines.append("    No metrics available")
+                lines.append("")
+                continue
+
+            # Memory
+            lines.append("")
+            lines.append("    Memory:")
+            lines.append(
+                f"      Heap:   {metrics.get('heap_free', 0):,} free"
+                f" / {metrics.get('heap_min', 0):,} min"
+                f" / {metrics.get('heap_largest_free_block', 0):,} largest block"
+            )
+            lines.append(
+                f"      PSRAM:  {metrics.get('psram_free', 0):,} free"
+                f" / {metrics.get('psram_min', 0):,} min"
+                f" / {metrics.get('psram_largest_free_block', 0):,} largest block"
+            )
+
+            # CPU
+            lines.append("")
+            lines.append("    CPU:")
+            core0 = metrics.get("core0_load")
+            core1 = metrics.get("core1_load")
+            total = metrics.get("total_load")
+            lines.append(
+                f"      Core 0: {self._fmt_pct(core0)}  "
+                f"Core 1: {self._fmt_pct(core1)}  "
+                f"Total: {self._fmt_pct(total)}"
+            )
+            lines.append(
+                f"      Tasks: {metrics.get('task_count', 'N/A')}"
+            )
+
+            # Network
+            http = metrics.get("http", {})
+            http_req = http.get("request_count", 0)
+            http_fail = http.get("failure_count", 0)
+            http_retry = http.get("retry_count", 0)
+            http_fail_pct = (
+                (http_fail / http_req * 100) if http_req > 0 else 0.0
+            )
+            lines.append("")
+            lines.append("    Network:")
+            lines.append(
+                f"      HTTP requests: {http_req:,} total, "
+                f"{http_fail:,} failed ({http_fail_pct:.1f}%), "
+                f"{http_retry:,} retries"
+            )
+            lines.append(
+                f"      HTTP latency:  avg {http.get('avg_ms', 0):.0f}ms, "
+                f"max {http.get('max_ms', 0):.0f}ms"
+            )
+            rssi = metrics.get("rssi")
+            rssi_avg = metrics.get("rssi_avg")
+            wifi_disc = metrics.get("wifi_disconnect_count", 0)
+            rssi_str = f"{rssi} dBm" if rssi is not None else "N/A"
+            rssi_avg_str = f"avg {rssi_avg}" if rssi_avg is not None else ""
+            lines.append(
+                f"      WiFi RSSI:     {rssi_str}"
+                f"{' (' + rssi_avg_str + ')' if rssi_avg_str else ''}"
+                f", disconnects: {wifi_disc}"
+            )
+
+            # UI Performance
+            lvgl_avg = metrics.get("lvgl_render_avg_ms")
+            lock_avg = metrics.get("ui_lock_wait_avg_ms")
+            lock_max = metrics.get("ui_lock_wait_max_ms")
+            poll_avg = metrics.get("poll_cycle_avg_ms")
+            poll_max = metrics.get("poll_cycle_max_ms")
+            if any(v is not None for v in [lvgl_avg, lock_avg, poll_avg]):
+                lines.append("")
+                lines.append("    UI Performance:")
+                if lvgl_avg is not None:
+                    lines.append(
+                        f"      LVGL render:   avg {lvgl_avg:.0f}ms"
+                    )
+                if lock_avg is not None or lock_max is not None:
+                    parts = []
+                    if lock_avg is not None:
+                        parts.append(f"avg {lock_avg:.0f}ms")
+                    if lock_max is not None:
+                        parts.append(f"max {lock_max:.0f}ms")
+                    lines.append(
+                        f"      Lock wait:     {', '.join(parts)}"
+                    )
+                if poll_avg is not None or poll_max is not None:
+                    parts = []
+                    if poll_avg is not None:
+                        parts.append(f"avg {poll_avg:.0f}ms")
+                    if poll_max is not None:
+                        parts.append(f"max {poll_max:.0f}ms")
+                    lines.append(
+                        f"      Poll cycle:    {', '.join(parts)}"
+                    )
+
+            # Endpoint Latencies
+            ep_latencies = metrics.get("endpoints", {})
+            raw_perf = metrics.get("_raw_perf", {})
+            raw_endpoints = raw_perf.get("endpoints", {})
+            ep_with_data = {}
+            for ep_name, avg_ms in ep_latencies.items():
+                if avg_ms is not None and avg_ms > 0:
+                    count = raw_endpoints.get(ep_name, {}).get("count", 0)
+                    ep_with_data[ep_name] = (avg_ms, count)
+            if ep_with_data:
+                lines.append("")
+                lines.append("    Endpoint Latencies:")
+                # Sort by avg_ms descending
+                for ep_name, (avg_ms, count) in sorted(
+                    ep_with_data.items(), key=lambda x: x[1][0], reverse=True
+                ):
+                    count_str = f" ({count:,} calls)" if count > 0 else ""
+                    lines.append(
+                        f"      {ep_name + ':':25s} avg {avg_ms:.0f}ms{count_str}"
+                    )
+
+            # Top Tasks by CPU
+            top_tasks = metrics.get("tasks", [])
+            if top_tasks:
+                lines.append("")
+                lines.append("    Top Tasks by CPU:")
+                for task in top_tasks:
+                    t_name = task.get("name", "?")
+                    t_cpu = task.get("cpu_percent", 0.0)
+                    t_hwm = task.get("stack_hwm", 0)
+                    lines.append(
+                        f"      {t_name + ':':13s} {t_cpu:.2f}%"
+                        f"  (stack HWM: {t_hwm:,})"
+                    )
+
+            # NINA Instances
+            nina_status = metrics.get("nina_status", {})
+            instances = nina_status.get("instances", [])
+            if instances:
+                lines.append("")
+                lines.append("    NINA Instances:")
+                for i, inst in enumerate(instances):
+                    state = inst.get("connection_state", "unknown")
+                    ws = inst.get("websocket_connected", False)
+                    ws_str = f" (ws: {'yes' if ws else 'no'})"
+                    lines.append(
+                        f"      Instance {i}: {state}{ws_str}"
+                    )
+
             lines.append("")
 
         lines.append("=" * 72)
@@ -143,6 +329,13 @@ class ReportGenerator:
                 "device_count": len(self.metrics_collector.devices),
             },
         )
+
+    @staticmethod
+    def _fmt_pct(value) -> str:
+        """Format a percentage value with 1 decimal, or 'N/A'."""
+        if value is None:
+            return "N/A"
+        return f"{value:.1f}%"
 
     @staticmethod
     def _format_duration(seconds: float) -> str:
