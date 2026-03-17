@@ -175,9 +175,9 @@ class PhaseManager:
                 payload = {
                     "spotify_enabled": False,
                     "allsky_enabled": False,
-                    "url1": f"http://{pi_ip}:{self._sim_base_port}",
-                    "url2": f"http://{pi_ip}:{self._sim_base_port + 1}",
-                    "url3": f"http://{pi_ip}:{self._sim_base_port + 2}",
+                    "url1": f"http://{pi_ip}:{self._sim_base_port}/v2/api/",
+                    "url2": f"http://{pi_ip}:{self._sim_base_port + 1}/v2/api/",
+                    "url3": f"http://{pi_ip}:{self._sim_base_port + 2}/v2/api/",
                     "instance_enabled_1": True,
                     "instance_enabled_2": True,
                     "instance_enabled_3": True,
