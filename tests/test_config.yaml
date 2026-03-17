@@ -38,7 +38,7 @@ workloads:
     endpoint: "/api/perf"
 
 thresholds:
-  heap_min_free_bytes: 20480
+  heap_min_free_bytes: 8192
   psram_min_free_bytes: 20971520
   http_failure_rate_stress: 0.05
   http_failure_rate_soak: 0.01

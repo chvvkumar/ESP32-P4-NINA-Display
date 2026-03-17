@@ -236,8 +236,10 @@ class PhaseManager:
                 "nina_connect_timeout_s", 60
             )
             deadline = time.monotonic() + timeout_s
+            connections_ok = False
             while time.monotonic() < deadline:
-                all_connected = True
+                connected_count = 0
+                total_count = 0
                 for device in self._devices:
                     try:
                         async with session.get(
@@ -246,16 +248,28 @@ class PhaseManager:
                             if resp.status == 200:
                                 data = await resp.json()
                                 for inst in data.get("instances", []):
-                                    if inst.get("connection_state") != "connected":
-                                        all_connected = False
-                    except Exception:
-                        all_connected = False
-                if all_connected:
-                    logger.info("All 9 NINA connections established")
+                                    total_count += 1
+                                    if inst.get("connection_state") == "connected":
+                                        connected_count += 1
+                                    else:
+                                        logger.debug(
+                                            f"{device['host']} instance {inst.get('index')}: "
+                                            f"{inst.get('connection_state')} "
+                                            f"(url: {inst.get('url', '?')})"
+                                        )
+                    except Exception as e:
+                        logger.debug(f"nina/status poll failed for {device['host']}: {e}")
+                logger.info(f"NINA connections: {connected_count}/{total_count}")
+                if total_count > 0 and connected_count == total_count:
+                    connections_ok = True
+                    logger.info("All NINA connections established")
                     break
                 await asyncio.sleep(5)
-            else:
-                logger.warning("Timed out waiting for NINA connections")
+            if not connections_ok:
+                logger.warning(
+                    f"Timed out waiting for NINA connections "
+                    f"({connected_count}/{total_count} connected)"
+                )
 
         # 8. Start metrics
         await metrics_collector.start()

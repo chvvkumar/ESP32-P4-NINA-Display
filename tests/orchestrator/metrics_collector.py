@@ -117,8 +117,8 @@ class MetricsCollector:
         if perf_data and perf_data.get("enabled"):
             mem = perf_data.get("memory", {})
             if mem:
-                heap_free = mem.get("heap_free_bytes", heap_free)
-                psram_free = mem.get("psram_free_bytes", psram_free)
+                # Don't overwrite heap_free/psram_free — /api/status values are
+                # identical and already set above. Only grab min watermarks from perf.
                 heap_min = mem.get("heap_min_free_bytes", 0)
                 psram_min = mem.get("psram_min_free_bytes", 0)
 
