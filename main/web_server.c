@@ -41,6 +41,7 @@ void start_web_server(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 16384;
     config.max_uri_handlers = 38;
+    config.max_open_sockets = 16;
     httpd_handle_t server = NULL;
 
     if (httpd_start(&server, &config) != ESP_OK) {

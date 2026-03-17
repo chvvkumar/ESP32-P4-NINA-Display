@@ -65,6 +65,9 @@ CONFIG_BSP_DISPLAY_LVGL_FULL_REFRESH=y
 # which exhausts the ~69KB internal heap during TLS-heavy OTA downloads
 CONFIG_MBEDTLS_DEFAULT_MEM_ALLOC=y
 
+# Increase LWIP max sockets for concurrent NINA + test traffic
+CONFIG_LWIP_MAX_SOCKETS=24
+
 # Disable LVGL demo modules — saves ~100-200KB flash, never used in production
 CONFIG_LV_USE_DEMO_WIDGETS=n
 CONFIG_LV_USE_DEMO_BENCHMARK=n
