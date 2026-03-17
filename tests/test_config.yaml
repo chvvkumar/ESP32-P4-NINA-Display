@@ -22,20 +22,20 @@ phases:
 
 workloads:
   http_stress:
-    stress_rps: 0.5
+    stress_rps: 3
     soak_rps: 0.033
     endpoints: ["/api/perf", "/api/version", "/api/config"]
   config_churn:
-    stress_rps: 0.2
-    soak_rps: 0.017
-    fields: ["brightness", "theme", "color_brightness", "widget_style"]
+    stress_rps: 0.1
+    soak_rps: 0.01
+    fields: ["brightness", "color_brightness"]
   page_cycle:
-    stress_interval_s: 10
+    stress_interval_s: 15
     soak_interval_s: 30
-    dwell_s: 5
+    dwell_s: 10
   concurrent_conns:
-    stress_count: 2
-    soak_count: 1
+    stress_count: 5
+    soak_count: 2
     endpoint: "/api/perf"
 
 thresholds:
