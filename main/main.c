@@ -703,13 +703,13 @@ void app_main(void)
         StackType_t *data_stack = heap_caps_malloc(12288 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
         StaticTask_t *data_tcb  = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         if (data_stack && data_tcb) {
-            data_task_handle = xTaskCreateStaticPinnedToCore(data_update_task, "data_task", 12288, NULL, 5,
+            data_task_handle = xTaskCreateStaticPinnedToCore(data_update_task, "data_task", 12288, NULL, 4,
                                                              data_stack, data_tcb, 1);
         } else {
             ESP_LOGE(TAG, "Failed to alloc data_task stack from PSRAM, falling back");
             if (data_stack) heap_caps_free(data_stack);
             if (data_tcb) heap_caps_free(data_tcb);
-            xTaskCreatePinnedToCore(data_update_task, "data_task", 12288, NULL, 5, &data_task_handle, 1);
+            xTaskCreatePinnedToCore(data_update_task, "data_task", 12288, NULL, 4, &data_task_handle, 1);
         }
     }
 

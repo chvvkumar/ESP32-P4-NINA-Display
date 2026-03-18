@@ -41,8 +41,16 @@
 #include "power_mgmt.h"
 #include "demo_data.h"
 #include "driver/jpeg_decode.h"
+#include "freertos/queue.h"
+#include "ui/nina_thumbnail.h"
 
 static const char *TAG = "tasks";
+
+/* ── Async fetch queues (Core 0 worker ↔ Core 1 UI coordinator) ── */
+static QueueHandle_t s_fetch_queue = NULL;        /* fetch_request_t */
+static QueueHandle_t s_fetch_result_queue = NULL;  /* fetch_result_t */
+#define FETCH_QUEUE_LEN      4
+#define FETCH_RESULT_QUEUE_LEN 4
 
 #define BOOT_BUTTON_GPIO    GPIO_NUM_35
 #define DEBOUNCE_MS         200
@@ -731,6 +739,208 @@ void spotify_poll_task(void *arg)
 }
 
 // =============================================================================
+// Async Fetch Worker — runs HTTP fetches on Core 0 to keep Core 1 free for UI
+// =============================================================================
+
+void fetch_worker_task(void *arg) {
+    ESP_LOGI(TAG, "Fetch worker task started on core %d", xPortGetCoreID());
+
+    /* Allocate graph data buffers in PSRAM (reused across requests) */
+    graph_rms_data_t *rms_buf = heap_caps_calloc(1, sizeof(graph_rms_data_t), MALLOC_CAP_SPIRAM);
+    graph_hfr_data_t *hfr_buf = heap_caps_calloc(1, sizeof(graph_hfr_data_t), MALLOC_CAP_SPIRAM);
+
+    while (1) {
+        fetch_request_t req;
+        if (xQueueReceive(s_fetch_queue, &req, portMAX_DELAY) != pdTRUE) continue;
+
+        fetch_result_t result = {
+            .type = req.type,
+            .instance_idx = req.instance_idx,
+            .success = false,
+        };
+
+        switch (req.type) {
+        case FETCH_THUMBNAIL: {
+            size_t jpeg_size = 0;
+            perf_timer_start(&g_perf.jpeg_fetch);
+            uint8_t *jpeg_buf = nina_client_fetch_prepared_image(req.url, 720, 720, 70, &jpeg_size);
+            perf_timer_stop(&g_perf.jpeg_fetch);
+            if (!jpeg_buf || jpeg_size == 0) break;
+
+            jpeg_decode_picture_info_t pic_info = {0};
+            esp_err_t err = jpeg_decoder_get_info(jpeg_buf, jpeg_size, &pic_info);
+            if (err != ESP_OK || pic_info.width == 0 || pic_info.height == 0) {
+                free(jpeg_buf);
+                break;
+            }
+
+            bool is_gray = (pic_info.sample_method == JPEG_DOWN_SAMPLING_GRAY);
+            uint32_t out_w = ((pic_info.width + 15) / 16) * 16;
+            uint32_t out_h = ((pic_info.height + 15) / 16) * 16;
+            uint32_t decode_buf_size = out_w * out_h * (is_gray ? 1 : 2);
+
+            jpeg_decode_memory_alloc_cfg_t mem_cfg = {
+                .buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER,
+            };
+            size_t allocated_size = 0;
+            uint8_t *decode_buf = (uint8_t *)jpeg_alloc_decoder_mem(decode_buf_size, &mem_cfg, &allocated_size);
+            if (!decode_buf) { free(jpeg_buf); break; }
+
+            size_t free_dma = heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+            if (free_dma < 20 * 1024) {
+                ESP_LOGW(TAG, "Fetch worker: low DMA heap (%d bytes), skipping HW decode", (int)free_dma);
+                free(decode_buf);
+                free(jpeg_buf);
+                break;
+            }
+
+            jpeg_decoder_handle_t decoder = NULL;
+            jpeg_decode_engine_cfg_t engine_cfg = { .intr_priority = 0, .timeout_ms = 5000 };
+            err = jpeg_new_decoder_engine(&engine_cfg, &decoder);
+            if (err != ESP_OK || !decoder) { free(decode_buf); free(jpeg_buf); break; }
+
+            jpeg_decode_cfg_t decode_cfg = {
+                .output_format = is_gray ? JPEG_DECODE_OUT_FORMAT_GRAY : JPEG_DECODE_OUT_FORMAT_RGB565,
+                .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
+            };
+            uint32_t out_size = 0;
+            perf_timer_start(&g_perf.jpeg_decode);
+            err = jpeg_decoder_process(decoder, &decode_cfg, jpeg_buf, jpeg_size,
+                                       decode_buf, allocated_size, &out_size);
+            perf_timer_stop(&g_perf.jpeg_decode);
+            jpeg_del_decoder_engine(decoder);
+
+            if (err != ESP_OK || out_size == 0) {
+                free(decode_buf);
+                free(jpeg_buf);
+                break;
+            }
+
+            uint8_t *rgb_buf = decode_buf;
+            uint32_t rgb_size = out_size;
+
+            if (is_gray) {
+                uint32_t pixel_count = out_w * out_h;
+                rgb_size = pixel_count * 2;
+                rgb_buf = heap_caps_malloc(rgb_size, MALLOC_CAP_SPIRAM);
+                if (!rgb_buf) { free(decode_buf); free(jpeg_buf); break; }
+                uint16_t *dst = (uint16_t *)rgb_buf;
+                for (uint32_t i = 0; i < pixel_count; i++) {
+                    uint8_t g = decode_buf[i];
+                    dst[i] = ((g >> 3) << 11) | ((g >> 2) << 5) | (g >> 3);
+                }
+                free(decode_buf);
+            }
+
+            result.success = true;
+            result.thumbnail.rgb565_data = rgb_buf;
+            result.thumbnail.w = out_w;
+            result.thumbnail.h = out_h;
+            result.thumbnail.data_size = rgb_size;
+            free(jpeg_buf);
+            break;
+        }
+
+        case FETCH_GRAPH_RMS:
+            if (rms_buf) {
+                memset(rms_buf, 0, sizeof(*rms_buf));
+                fetch_guider_graph(req.url, rms_buf, req.max_points);
+                result.success = true;
+                result.data = rms_buf;  /* Pointer to worker-owned buffer, consumed before next request */
+            }
+            break;
+
+        case FETCH_GRAPH_HFR:
+            if (hfr_buf) {
+                memset(hfr_buf, 0, sizeof(*hfr_buf));
+                fetch_hfr_history(req.url, hfr_buf, req.max_points);
+                result.success = true;
+                result.data = hfr_buf;
+            }
+            break;
+
+        case FETCH_GRAPH_HFR_RING:
+            if (hfr_buf && req.client) {
+                memset(hfr_buf, 0, sizeof(*hfr_buf));
+                if (nina_client_lock(req.client, 50)) {
+                    build_hfr_from_ring(req.client, hfr_buf, req.max_points);
+                    nina_client_unlock(req.client);
+                    result.success = true;
+                    result.data = hfr_buf;
+                }
+            }
+            break;
+
+        case FETCH_INFO_CAMERA: {
+            camera_detail_data_t *cam = heap_caps_calloc(1, sizeof(camera_detail_data_t), MALLOC_CAP_SPIRAM);
+            if (cam) {
+                fetch_camera_details(req.url, cam);
+                fetch_weather_details(req.url, cam);
+                result.success = true;
+                result.data = cam;
+            }
+            break;
+        }
+
+        case FETCH_INFO_MOUNT: {
+            mount_detail_data_t *mnt = heap_caps_calloc(1, sizeof(mount_detail_data_t), MALLOC_CAP_SPIRAM);
+            if (mnt) {
+                fetch_mount_details(req.url, mnt);
+                result.success = true;
+                result.data = mnt;
+            }
+            break;
+        }
+
+        case FETCH_INFO_SEQUENCE: {
+            sequence_detail_data_t *seq = heap_caps_calloc(1, sizeof(sequence_detail_data_t), MALLOC_CAP_SPIRAM);
+            if (seq) {
+                fetch_sequence_details(req.url, seq);
+                result.success = true;
+                result.data = seq;
+            }
+            break;
+        }
+
+        case FETCH_INFO_FILTER: {
+            /* Filter data comes from nina_client_t, not HTTP — handled in UI coordinator */
+            break;
+        }
+
+        case FETCH_INFO_IMAGESTATS: {
+            /* Image stats come from WebSocket events — handled in UI coordinator */
+            break;
+        }
+
+        case FETCH_INFO_AUTOFOCUS: {
+            /* Autofocus data comes from WebSocket events — handled in UI coordinator */
+            break;
+        }
+        }
+
+        /* Post result (non-blocking — drop if queue full, next cycle will retry) */
+        if (result.success) {
+            if (xQueueSend(s_fetch_result_queue, &result, 0) != pdTRUE) {
+                /* Queue full — free any allocated result data */
+                if (result.type == FETCH_THUMBNAIL && result.thumbnail.rgb565_data) {
+                    free(result.thumbnail.rgb565_data);
+                } else if (result.type == FETCH_INFO_CAMERA || result.type == FETCH_INFO_MOUNT
+                           || result.type == FETCH_INFO_SEQUENCE) {
+                    heap_caps_free(result.data);
+                }
+                ESP_LOGW(TAG, "Fetch result queue full, dropping result type %d", result.type);
+            }
+        } else {
+            /* Post failure result so UI coordinator knows the fetch failed */
+            xQueueSend(s_fetch_result_queue, &result, 0);
+        }
+
+        /* Wake UI coordinator to process the result */
+        if (data_task_handle) xTaskNotifyGive(data_task_handle);
+    }
+}
+
+// =============================================================================
 // UI Coordinator Task — fast loop, never blocks on HTTP data polling
 // =============================================================================
 
@@ -763,7 +973,7 @@ void data_update_task(void *arg) {
         instances[i].hfr_ring.stars = heap_caps_calloc(HFR_RING_SIZE, sizeof(int),   MALLOC_CAP_SPIRAM);
     }
 
-    /* Allocate graph data in PSRAM to avoid ~10 KB stack pressure */
+    /* Allocate graph data in PSRAM for local use (overlays that don't go through fetch worker) */
     graph_rms_data_t *rms_data = heap_caps_calloc(1, sizeof(graph_rms_data_t), MALLOC_CAP_SPIRAM);
     graph_hfr_data_t *hfr_data = heap_caps_calloc(1, sizeof(graph_hfr_data_t), MALLOC_CAP_SPIRAM);
     if (!rms_data || !hfr_data) {
@@ -773,6 +983,18 @@ void data_update_task(void *arg) {
         vTaskDelete(NULL);
         return;
     }
+
+    /* Create async fetch queues (request/result between UI coordinator and fetch worker) */
+    s_fetch_queue = xQueueCreate(FETCH_QUEUE_LEN, sizeof(fetch_request_t));
+    s_fetch_result_queue = xQueueCreate(FETCH_RESULT_QUEUE_LEN, sizeof(fetch_result_t));
+    if (!s_fetch_queue || !s_fetch_result_queue) {
+        ESP_LOGE(TAG, "Failed to create fetch queues");
+    }
+
+    /* Track pending async fetch requests to avoid duplicate submissions */
+    bool fetch_thumbnail_pending = false;
+    bool fetch_graph_pending = false;
+    bool fetch_info_pending = false;
 
     /* Initialize per-instance poll contexts */
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
@@ -945,6 +1167,21 @@ void data_update_task(void *arg) {
         }
     }
 
+    /* Spawn async fetch worker (pinned to Core 0, networking) */
+    if (s_fetch_queue && s_fetch_result_queue) {
+        StackType_t *fw_stack = heap_caps_malloc(8192 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+        StaticTask_t *fw_tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (fw_stack && fw_tcb) {
+            xTaskCreateStaticPinnedToCore(
+                fetch_worker_task, "fetch_wk", 8192, NULL, 4, fw_stack, fw_tcb, 0);
+            ESP_LOGI(TAG, "Fetch worker task spawned on Core 0");
+        } else {
+            ESP_LOGE(TAG, "Failed to allocate fetch worker stack");
+            if (fw_stack) heap_caps_free(fw_stack);
+            if (fw_tcb) heap_caps_free(fw_tcb);
+        }
+    }
+
 main_loop:
     while (1) {
         /* Suspend polling during OTA */
@@ -962,6 +1199,95 @@ main_loop:
             prev_cycle_start = cycle_now;
         }
         perf_timer_start(&g_perf.poll_cycle_total);
+
+        /* ── Drain async fetch results from Core 0 worker ── */
+        {
+            fetch_result_t fres;
+            while (s_fetch_result_queue && xQueueReceive(s_fetch_result_queue, &fres, 0) == pdTRUE) {
+                switch (fres.type) {
+                case FETCH_THUMBNAIL:
+                    fetch_thumbnail_pending = false;
+                    if (fres.success && fres.thumbnail.rgb565_data) {
+                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_dashboard_set_thumbnail(fres.thumbnail.rgb565_data,
+                                fres.thumbnail.w, fres.thumbnail.h, fres.thumbnail.data_size);
+                            bsp_display_unlock();
+                            /* Ownership transferred to UI */
+                        } else {
+                            free(fres.thumbnail.rgb565_data);
+                        }
+                    } else if (!fres.success && nina_dashboard_thumbnail_requested()) {
+                        /* Fetch failed — hide loading overlay */
+                        nina_dashboard_clear_thumbnail_request();
+                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_dashboard_hide_thumbnail();
+                            bsp_display_unlock();
+                        }
+                    }
+                    break;
+
+                case FETCH_GRAPH_RMS:
+                    fetch_graph_pending = false;
+                    if (fres.success && fres.data) {
+                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_graph_set_rms_data((graph_rms_data_t *)fres.data);
+                            bsp_display_unlock();
+                        }
+                    }
+                    last_graph_fetch_ms = esp_timer_get_time() / 1000;
+                    break;
+
+                case FETCH_GRAPH_HFR:
+                case FETCH_GRAPH_HFR_RING:
+                    fetch_graph_pending = false;
+                    if (fres.success && fres.data) {
+                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_graph_set_hfr_data((graph_hfr_data_t *)fres.data);
+                            bsp_display_unlock();
+                        }
+                    }
+                    if (fres.type == FETCH_GRAPH_HFR) hfr_graph_seeded = true;
+                    last_graph_fetch_ms = esp_timer_get_time() / 1000;
+                    break;
+
+                case FETCH_INFO_CAMERA:
+                    fetch_info_pending = false;
+                    if (fres.success && fres.data) {
+                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_info_overlay_set_camera_data((camera_detail_data_t *)fres.data);
+                            bsp_display_unlock();
+                        }
+                        heap_caps_free(fres.data);
+                    }
+                    break;
+
+                case FETCH_INFO_MOUNT:
+                    fetch_info_pending = false;
+                    if (fres.success && fres.data) {
+                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_info_overlay_set_mount_data((mount_detail_data_t *)fres.data);
+                            bsp_display_unlock();
+                        }
+                        heap_caps_free(fres.data);
+                    }
+                    break;
+
+                case FETCH_INFO_SEQUENCE:
+                    fetch_info_pending = false;
+                    if (fres.success && fres.data) {
+                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_info_overlay_set_sequence_data((sequence_detail_data_t *)fres.data);
+                            bsp_display_unlock();
+                        }
+                        heap_caps_free(fres.data);
+                    }
+                    break;
+
+                default:
+                    break;
+                }
+            }
+        }
 
         int current_active = nina_dashboard_get_active_page();  // Snapshot to avoid races
         bool on_allsky = nina_dashboard_is_allsky_page();
@@ -1140,7 +1466,7 @@ main_loop:
             if (on_summary) {
                 bool locked[MAX_NINA_INSTANCES];
                 for (int j = 0; j < instance_count; j++)
-                    locked[j] = nina_client_lock(&instances[j], 100);
+                    locked[j] = nina_client_lock(&instances[j], 15);
                 if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                     summary_page_update(instances, instance_count);
                     bsp_display_unlock();
@@ -1151,7 +1477,7 @@ main_loop:
 
             /* Immediate AllSky render with cached data */
             if (on_allsky) {
-                if (allsky_data_lock(&allsky_data, 100)) {
+                if (allsky_data_lock(&allsky_data, 15)) {
                     if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                         allsky_page_update(&allsky_data);
                         bsp_display_unlock();
@@ -1280,39 +1606,30 @@ main_loop:
             }
         }
 
-        /* Pulse connection dot on the active NINA page (not summary/sysinfo) */
-        if (active_nina_idx >= 0 && active_page_idx >= 0) {
-            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                nina_dashboard_update_status(active_page_idx, rssi,
-                                             nina_connection_is_connected(active_nina_idx), true);
-                bsp_display_unlock();
-            }
-        }
+        /* ── Consolidated UI update: one LVGL lock section per active page type ──
+         * Pre-compute data outside the LVGL lock, then do all UI updates in a single
+         * lock/unlock to minimize contention with the LVGL render task. */
 
-        /* Update sysinfo page when visible — refreshes at the same rate as data polling */
         if (on_sysinfo) {
+            /* Sysinfo page — no external mutexes needed, single lock section */
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                 sysinfo_page_refresh();
                 bsp_display_unlock();
             }
-        }
-
-        /* Update AllSky page when visible */
-        if (on_allsky) {
-            if (allsky_data_lock(&allsky_data, 100)) {
+        } else if (on_allsky) {
+            /* AllSky page — pre-lock allsky data, then single LVGL lock */
+            if (allsky_data_lock(&allsky_data, 15)) {
                 if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                     allsky_page_update(&allsky_data);
                     bsp_display_unlock();
                 }
                 allsky_data_unlock(&allsky_data);
             }
-        }
-
-        /* Update summary page when visible — lock each instance while reading */
-        if (on_summary) {
+        } else if (on_summary) {
+            /* Summary page — pre-lock all instances with short timeout, then single LVGL lock */
             bool locked[MAX_NINA_INSTANCES];
             for (int j = 0; j < instance_count; j++)
-                locked[j] = nina_client_lock(&instances[j], 100);
+                locked[j] = nina_client_lock(&instances[j], 15);
 
             perf_timer_start(&g_perf.ui_update_total);
             int64_t lock_start = g_perf.enabled ? esp_timer_get_time() : 0;
@@ -1321,18 +1638,19 @@ main_loop:
                 perf_timer_start(&g_perf.ui_summary_update);
                 summary_page_update(instances, instance_count);
                 perf_timer_stop(&g_perf.ui_summary_update);
-
                 bsp_display_unlock();
             }
             perf_timer_stop(&g_perf.ui_update_total);
 
             for (int j = 0; j < instance_count; j++)
                 if (locked[j]) nina_client_unlock(&instances[j]);
-        }
 
-        /* Update active NINA page UI */
-        if (active_nina_idx >= 0 && active_page_idx >= 0) {
-            if (nina_client_lock(&instances[active_nina_idx], 100)) {
+            /* Yield to LVGL render task after summary update */
+            taskYIELD();
+        } else if (active_nina_idx >= 0 && active_page_idx >= 0) {
+            /* NINA instance page — pre-lock instance data, then single LVGL lock
+             * for dashboard update + status dot (combined, no separate lock) */
+            if (nina_client_lock(&instances[active_nina_idx], 15)) {
 
                 perf_timer_start(&g_perf.ui_update_total);
                 int64_t lock_start2 = g_perf.enabled ? esp_timer_get_time() : 0;
@@ -1351,8 +1669,9 @@ main_loop:
                         g_perf.last_ws_event_time_us = 0;  // Reset after measuring
                     }
 
+                    /* Status dot update combined in same lock section (was separate lock before) */
                     nina_dashboard_update_status(active_page_idx, rssi,
-                                                 nina_connection_is_connected(active_nina_idx), false);
+                                                 nina_connection_is_connected(active_nina_idx), true);
                     bsp_display_unlock();
                 }
                 perf_timer_stop(&g_perf.ui_update_total);
@@ -1360,26 +1679,28 @@ main_loop:
                 nina_client_unlock(&instances[active_nina_idx]);
             }
 
-            // Handle thumbnail: initial request or auto-refresh on new image
+            /* Yield to LVGL render task between UI update and fetch handling */
+            taskYIELD();
+
+            /* ── Async thumbnail fetch (offloaded to Core 0 fetch worker) ── */
             bool want_thumbnail = nina_dashboard_thumbnail_requested();
             bool auto_refresh = false;
-            if (nina_client_lock(&instances[active_nina_idx], 100)) {
+            if (nina_client_lock(&instances[active_nina_idx], 15)) {
                 auto_refresh = nina_dashboard_thumbnail_visible()
                                && instances[active_nina_idx].new_image_available;
                 if (auto_refresh) instances[active_nina_idx].new_image_available = false;
                 nina_client_unlock(&instances[active_nina_idx]);
             }
 
-            if (want_thumbnail || auto_refresh) {
+            if ((want_thumbnail || auto_refresh) && !fetch_thumbnail_pending) {
                 if (want_thumbnail) nina_dashboard_clear_thumbnail_request();
 
                 const char *thumb_url = app_config_get_instance_url(active_nina_idx);
-                if (strlen(thumb_url) > 0 && nina_connection_is_connected(active_nina_idx)) {
-                    if (!fetch_and_show_thumbnail(thumb_url) && want_thumbnail) {
-                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                            nina_dashboard_hide_thumbnail();
-                            bsp_display_unlock();
-                        }
+                if (strlen(thumb_url) > 0 && nina_connection_is_connected(active_nina_idx) && s_fetch_queue) {
+                    fetch_request_t req = { .type = FETCH_THUMBNAIL, .instance_idx = active_nina_idx };
+                    strlcpy(req.url, thumb_url, sizeof(req.url));
+                    if (xQueueSend(s_fetch_queue, &req, 0) == pdTRUE) {
+                        fetch_thumbnail_pending = true;
                     }
                 }
             }
@@ -1398,47 +1719,40 @@ main_loop:
                 }
             }
 
-            /* Handle graph overlay data fetch */
-            if (nina_graph_requested()) {
+            /* ── Async graph overlay data fetch (offloaded to Core 0) ── */
+            if (nina_graph_requested() && !fetch_graph_pending) {
                 nina_graph_clear_request();
                 const char *graph_url = app_config_get_instance_url(active_nina_idx);
-                if (strlen(graph_url) > 0 && nina_connection_is_connected(active_nina_idx)) {
+                if (strlen(graph_url) > 0 && nina_connection_is_connected(active_nina_idx) && s_fetch_queue) {
                     graph_type_t gtype = nina_graph_get_type();
                     int gpoints = nina_graph_get_requested_points();
 
+                    fetch_request_t req = {
+                        .instance_idx = active_nina_idx,
+                        .max_points = gpoints,
+                    };
+                    strlcpy(req.url, graph_url, sizeof(req.url));
+
                     if (gtype == GRAPH_TYPE_RMS) {
-                        memset(rms_data, 0, sizeof(*rms_data));
-                        fetch_guider_graph(graph_url, rms_data, gpoints);
-                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                            nina_graph_set_rms_data(rms_data);
-                            bsp_display_unlock();
-                        }
+                        req.type = FETCH_GRAPH_RMS;
+                    } else if (!hfr_graph_seeded) {
+                        req.type = FETCH_GRAPH_HFR;
                     } else {
-                        memset(hfr_data, 0, sizeof(*hfr_data));
-                        /* HFR graph: initial open fetches from API to get historical data.
-                         * Auto-refreshes use the local ring buffer (populated by WS events),
-                         * eliminating the expensive /image-history?all=true fetch (50-400 KB). */
-                        if (!hfr_graph_seeded) {
-                            fetch_hfr_history(graph_url, hfr_data, gpoints);
-                            hfr_graph_seeded = true;
-                        } else if (nina_client_lock(&instances[active_nina_idx], 100)) {
-                            build_hfr_from_ring(&instances[active_nina_idx], hfr_data, gpoints);
-                            nina_client_unlock(&instances[active_nina_idx]);
-                        }
-                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                            nina_graph_set_hfr_data(hfr_data);
-                            bsp_display_unlock();
-                        }
+                        req.type = FETCH_GRAPH_HFR_RING;
+                        req.client = &instances[active_nina_idx];
+                    }
+
+                    if (xQueueSend(s_fetch_queue, &req, 0) == pdTRUE) {
+                        fetch_graph_pending = true;
                     }
                 }
-                last_graph_fetch_ms = esp_timer_get_time() / 1000;
             }
 
-            /* Auto-refresh autofocus overlay while visible (data comes from WebSocket) */
+            /* Auto-refresh autofocus overlay while visible (data comes from WebSocket — no HTTP) */
             if (nina_info_overlay_visible()
                 && nina_info_overlay_get_type() == INFO_OVERLAY_AUTOFOCUS
                 && !nina_info_overlay_requested()) {
-                if (nina_client_lock(&instances[active_nina_idx], 100)) {
+                if (nina_client_lock(&instances[active_nina_idx], 15)) {
                     autofocus_data_t af_data = instances[active_nina_idx].autofocus;
                     nina_client_unlock(&instances[active_nina_idx]);
                     if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
@@ -1458,8 +1772,8 @@ main_loop:
                 }
             }
 
-            /* Handle info overlay data fetch */
-            if (nina_info_overlay_requested()) {
+            /* ── Async info overlay data fetch (HTTP types offloaded to Core 0) ── */
+            if (nina_info_overlay_requested() && !fetch_info_pending) {
                 nina_info_overlay_clear_request();
                 info_overlay_type_t itype = nina_info_overlay_get_type();
 
@@ -1469,72 +1783,62 @@ main_loop:
                         nina_info_overlay_set_session_stats(active_nina_idx);
                         bsp_display_unlock();
                     }
+                } else if (itype == INFO_OVERLAY_IMAGESTATS) {
+                    /* Image stats come from WebSocket events — read locally, no HTTP */
+                    if (nina_client_lock(&instances[active_nina_idx], 15)) {
+                        imagestats_detail_data_t stats = instances[active_nina_idx].last_image_stats;
+                        nina_client_unlock(&instances[active_nina_idx]);
+                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_info_overlay_set_imagestats_data(&stats);
+                            bsp_display_unlock();
+                        }
+                    }
+                } else if (itype == INFO_OVERLAY_FILTER) {
+                    /* Filter data comes from nina_client_t — read locally, no HTTP */
+                    filter_detail_data_t filt_data = {0};
+                    if (nina_client_lock(&instances[active_nina_idx], 15)) {
+                        snprintf(filt_data.current_filter, sizeof(filt_data.current_filter), "%s", instances[active_nina_idx].current_filter);
+                        filt_data.filter_count = instances[active_nina_idx].filter_count;
+                        for (int f = 0; f < filt_data.filter_count && f < 10; f++) {
+                            strncpy(filt_data.filters[f].name, instances[active_nina_idx].filters[f].name, sizeof(filt_data.filters[f].name) - 1);
+                            filt_data.filters[f].id = instances[active_nina_idx].filters[f].id;
+                            if (strcmp(filt_data.current_filter, filt_data.filters[f].name) == 0) {
+                                filt_data.current_position = filt_data.filters[f].id;
+                            }
+                        }
+                        filt_data.connected = true;
+                        nina_client_unlock(&instances[active_nina_idx]);
+                    }
+                    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                        nina_info_overlay_set_filter_data(&filt_data);
+                        bsp_display_unlock();
+                    }
+                } else if (itype == INFO_OVERLAY_AUTOFOCUS) {
+                    /* Autofocus data comes from WebSocket events — read locally */
+                    if (nina_client_lock(&instances[active_nina_idx], 15)) {
+                        autofocus_data_t af_data = instances[active_nina_idx].autofocus;
+                        nina_client_unlock(&instances[active_nina_idx]);
+                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_info_overlay_set_autofocus_data(&af_data);
+                            bsp_display_unlock();
+                        }
+                    }
                 } else {
-                const char *info_url = app_config_get_instance_url(active_nina_idx);
-                if (strlen(info_url) > 0 && nina_connection_is_connected(active_nina_idx)) {
+                    /* HTTP-requiring overlays: camera, mount, sequence — offload to Core 0 */
+                    const char *info_url = app_config_get_instance_url(active_nina_idx);
+                    if (strlen(info_url) > 0 && nina_connection_is_connected(active_nina_idx) && s_fetch_queue) {
+                        fetch_request_t req = { .instance_idx = active_nina_idx };
+                        strlcpy(req.url, info_url, sizeof(req.url));
 
-                    if (itype == INFO_OVERLAY_CAMERA) {
-                        camera_detail_data_t cam_data = {0};
-                        fetch_camera_details(info_url, &cam_data);
-                        fetch_weather_details(info_url, &cam_data);
-                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                            nina_info_overlay_set_camera_data(&cam_data);
-                            bsp_display_unlock();
-                        }
-                    } else if (itype == INFO_OVERLAY_MOUNT) {
-                        mount_detail_data_t mount_data = {0};
-                        fetch_mount_details(info_url, &mount_data);
-                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                            nina_info_overlay_set_mount_data(&mount_data);
-                            bsp_display_unlock();
-                        }
-                    } else if (itype == INFO_OVERLAY_IMAGESTATS) {
-                        if (nina_client_lock(&instances[active_nina_idx], 100)) {
-                            imagestats_detail_data_t stats = instances[active_nina_idx].last_image_stats;
-                            nina_client_unlock(&instances[active_nina_idx]);
-                            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                                nina_info_overlay_set_imagestats_data(&stats);
-                                bsp_display_unlock();
-                            }
-                        }
-                    } else if (itype == INFO_OVERLAY_SEQUENCE) {
-                        sequence_detail_data_t seq_data = {0};
-                        fetch_sequence_details(info_url, &seq_data);
-                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                            nina_info_overlay_set_sequence_data(&seq_data);
-                            bsp_display_unlock();
-                        }
-                    } else if (itype == INFO_OVERLAY_FILTER) {
-                        filter_detail_data_t filt_data = {0};
-                        if (nina_client_lock(&instances[active_nina_idx], 100)) {
-                            snprintf(filt_data.current_filter, sizeof(filt_data.current_filter), "%s", instances[active_nina_idx].current_filter);
-                            filt_data.filter_count = instances[active_nina_idx].filter_count;
-                            for (int f = 0; f < filt_data.filter_count && f < 10; f++) {
-                                strncpy(filt_data.filters[f].name, instances[active_nina_idx].filters[f].name, sizeof(filt_data.filters[f].name) - 1);
-                                filt_data.filters[f].id = instances[active_nina_idx].filters[f].id;
-                                if (strcmp(filt_data.current_filter, filt_data.filters[f].name) == 0) {
-                                    filt_data.current_position = filt_data.filters[f].id;
-                                }
-                            }
-                            filt_data.connected = true;
-                            nina_client_unlock(&instances[active_nina_idx]);
-                        }
-                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                            nina_info_overlay_set_filter_data(&filt_data);
-                            bsp_display_unlock();
-                        }
-                    } else if (itype == INFO_OVERLAY_AUTOFOCUS) {
-                        if (nina_client_lock(&instances[active_nina_idx], 100)) {
-                            autofocus_data_t af_data = instances[active_nina_idx].autofocus;
-                            nina_client_unlock(&instances[active_nina_idx]);
-                            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                                nina_info_overlay_set_autofocus_data(&af_data);
-                                bsp_display_unlock();
-                            }
+                        if (itype == INFO_OVERLAY_CAMERA) req.type = FETCH_INFO_CAMERA;
+                        else if (itype == INFO_OVERLAY_MOUNT) req.type = FETCH_INFO_MOUNT;
+                        else if (itype == INFO_OVERLAY_SEQUENCE) req.type = FETCH_INFO_SEQUENCE;
+
+                        if (xQueueSend(s_fetch_queue, &req, 0) == pdTRUE) {
+                            fetch_info_pending = true;
                         }
                     }
                 }
-                } /* else (non-session-stats overlay) */
             }
         }
 
@@ -1542,7 +1846,7 @@ main_loop:
         if (active_nina_idx >= 0 && active_page_idx >= 0
             && instances[active_nina_idx].ui_refresh_needed) {
             instances[active_nina_idx].ui_refresh_needed = false;
-            if (nina_client_lock(&instances[active_nina_idx], 50)) {
+            if (nina_client_lock(&instances[active_nina_idx], 15)) {
                 if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                     update_nina_dashboard_page(active_page_idx, &instances[active_nina_idx]);
                     nina_dashboard_update_status(active_page_idx, rssi,
@@ -1554,7 +1858,8 @@ main_loop:
         }
 
         // ── Session stats recording + safety monitor + RMS/HFR alerts ──
-        // Lock each instance briefly to read a consistent snapshot of scalar fields.
+        // Lock each instance briefly (trylock) to read a consistent snapshot of scalar fields.
+        // These are non-critical — if lock contended, skip this cycle.
         for (int i = 0; i < instance_count; i++) {
             if (!nina_connection_is_connected(i)) continue;
 
@@ -1562,7 +1867,7 @@ main_loop:
             int stars;
             bool safety_conn, safety_safe;
 
-            if (nina_client_lock(&instances[i], 50)) {
+            if (nina_client_lock(&instances[i], 0)) {
                 rms_total  = instances[i].guider.rms_total;
                 hfr        = instances[i].hfr;
                 cam_temp   = instances[i].camera.temp;

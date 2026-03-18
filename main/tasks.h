@@ -69,3 +69,45 @@ void spotify_poll_task(void *arg);
 
 /** FreeRTOS task: UI coordinator — reads cached data, updates LVGL, handles auto-rotate. */
 void data_update_task(void *arg);
+
+/* ── Async fetch worker (offloads HTTP fetches from Core 1 to Core 0) ── */
+
+/** Fetch request types */
+typedef enum {
+    FETCH_THUMBNAIL,
+    FETCH_GRAPH_RMS,
+    FETCH_GRAPH_HFR,
+    FETCH_GRAPH_HFR_RING,   /* Build from local ring buffer (no HTTP) */
+    FETCH_INFO_CAMERA,
+    FETCH_INFO_MOUNT,
+    FETCH_INFO_SEQUENCE,
+    FETCH_INFO_FILTER,
+    FETCH_INFO_IMAGESTATS,
+    FETCH_INFO_AUTOFOCUS,
+} fetch_type_t;
+
+/** Fetch request — posted to s_fetch_queue by data_update_task */
+typedef struct {
+    fetch_type_t type;
+    int          instance_idx;     /* NINA instance index */
+    char         url[128];         /* API base URL */
+    int          max_points;       /* For graph requests */
+    nina_client_t *client;         /* For ring buffer reads (FETCH_GRAPH_HFR_RING) */
+} fetch_request_t;
+
+/** Fetch result — posted to s_fetch_result_queue by fetch worker */
+typedef struct {
+    fetch_type_t type;
+    int          instance_idx;
+    bool         success;
+    union {
+        struct {
+            uint8_t *rgb565_data;
+            uint32_t w, h, data_size;
+        } thumbnail;
+        void *data;   /* graph_rms_data_t*, graph_hfr_data_t*, or overlay data */
+    };
+} fetch_result_t;
+
+/** FreeRTOS task: async fetch worker — runs HTTP fetches on Core 0. */
+void fetch_worker_task(void *arg);

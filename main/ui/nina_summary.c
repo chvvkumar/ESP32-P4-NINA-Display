@@ -41,6 +41,30 @@ static inline void set_bar_if_changed(lv_obj_t *bar, int32_t val, lv_anim_enable
     if (lv_bar_get_value(bar) != val) lv_bar_set_value(bar, val, anim);
 }
 
+/* Set text color only if cached value differs (avoids LVGL dirty-marking) */
+static inline void set_text_color_cached(lv_obj_t *obj, uint32_t *cached, uint32_t color) {
+    if (*cached != color) {
+        *cached = color;
+        lv_obj_set_style_text_color(obj, lv_color_hex(color), 0);
+    }
+}
+
+/* Set bg color only if cached value differs */
+static inline void set_bg_color_cached(lv_obj_t *obj, uint32_t *cached, uint32_t color, lv_style_selector_t sel) {
+    if (*cached != color) {
+        *cached = color;
+        lv_obj_set_style_bg_color(obj, lv_color_hex(color), sel);
+    }
+}
+
+/* Set bg opacity only if cached value differs */
+static inline void set_bg_opa_cached(lv_obj_t *obj, lv_opa_t *cached, lv_opa_t opa, lv_style_selector_t sel) {
+    if (*cached != opa) {
+        *cached = opa;
+        lv_obj_set_style_bg_opa(obj, opa, sel);
+    }
+}
+
 /* ── Safety icon glyphs (Material Symbols, UTF-8) ─────────────────── */
 #define ICON_VERIFIED_USER  "\xee\xa3\xa8"  /* U+E8E8 — shield + check */
 #define ICON_GPP_BAD        "\xef\x80\x92"  /* U+F012 — shield + X     */
@@ -142,6 +166,24 @@ typedef struct {
     lv_obj_t *lbl_detail;
     lv_obj_t *lbl_safety;       /* safety monitor icon (floating, bottom-left) */
     int instance_index;         /* which NINA instance this card represents */
+    /* Cached style values — only call lv_obj_set_style_* when changed to avoid
+     * unnecessary LVGL invalidations that trigger expensive full redraws. */
+    uint32_t cached_name_color;
+    uint32_t cached_filter_text_color;
+    uint32_t cached_filter_bg_color;
+    lv_opa_t cached_filter_bg_opa;
+    uint32_t cached_target_color;
+    uint32_t cached_bar_ind_color;
+    uint32_t cached_bar_bg_color;
+    uint32_t cached_pct_color;
+    uint32_t cached_seq_name_color;
+    uint32_t cached_exp_val_color;
+    uint32_t cached_seq_step_color;
+    uint32_t cached_rms_color;
+    uint32_t cached_hfr_color;
+    uint32_t cached_flip_color;
+    uint32_t cached_detail_color;
+    uint32_t cached_safety_color;
 } summary_card_t;
 
 /* ── Module state ──────────────────────────────────────────────────── */
@@ -310,6 +352,24 @@ static void create_stat_block(lv_obj_t *parent,
 static void create_card(summary_card_t *sc, lv_obj_t *parent, int instance_index) {
     memset(sc, 0, sizeof(summary_card_t));
     sc->instance_index = instance_index;
+
+    /* Invalidate all cached colors so the first update always applies */
+    sc->cached_name_color       = UINT32_MAX;
+    sc->cached_filter_text_color = UINT32_MAX;
+    sc->cached_filter_bg_color  = UINT32_MAX;
+    sc->cached_filter_bg_opa    = UINT8_MAX;
+    sc->cached_target_color     = UINT32_MAX;
+    sc->cached_bar_ind_color    = UINT32_MAX;
+    sc->cached_bar_bg_color     = UINT32_MAX;
+    sc->cached_pct_color        = UINT32_MAX;
+    sc->cached_seq_name_color   = UINT32_MAX;
+    sc->cached_exp_val_color    = UINT32_MAX;
+    sc->cached_seq_step_color   = UINT32_MAX;
+    sc->cached_rms_color        = UINT32_MAX;
+    sc->cached_hfr_color        = UINT32_MAX;
+    sc->cached_flip_color       = UINT32_MAX;
+    sc->cached_detail_color     = UINT32_MAX;
+    sc->cached_safety_color     = UINT32_MAX;
 
     /* ── Card container ── */
     sc->card = lv_obj_create(parent);
@@ -854,7 +914,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
         if (current_theme) {
             uint32_t name_color = app_config_apply_brightness(
                 current_theme->header_text_color, gb);
-            lv_obj_set_style_text_color(sc->lbl_name, lv_color_hex(name_color), 0);
+            set_text_color_cached(sc->lbl_name, &sc->cached_name_color, name_color);
         }
 
         /* Filter */
@@ -863,30 +923,26 @@ void summary_page_update(const nina_client_t *instances, int count) {
             uint32_t fc = theme_is_red_night(current_theme)
                 ? 0 : app_config_get_filter_color(d->current_filter, i);
             if (fc != 0) {
-                lv_obj_set_style_text_color(sc->lbl_filter,
-                    lv_color_hex(app_config_apply_brightness(fc, gb)), 0);
-                lv_obj_set_style_bg_color(sc->filter_box,
-                    lv_color_hex(app_config_apply_brightness(fc, gb)), 0);
-                lv_obj_set_style_bg_opa(sc->filter_box, LV_OPA_20, 0);
+                uint32_t dimmed_fc = app_config_apply_brightness(fc, gb);
+                set_text_color_cached(sc->lbl_filter, &sc->cached_filter_text_color, dimmed_fc);
+                set_bg_color_cached(sc->filter_box, &sc->cached_filter_bg_color, dimmed_fc, 0);
+                set_bg_opa_cached(sc->filter_box, &sc->cached_filter_bg_opa, LV_OPA_20, 0);
             } else if (current_theme) {
-                lv_obj_set_style_text_color(sc->lbl_filter,
-                    lv_color_hex(app_config_apply_brightness(
-                        current_theme->filter_text_color, gb)), 0);
-                lv_obj_set_style_bg_color(sc->filter_box,
-                    lv_color_hex(app_config_apply_brightness(
-                        current_theme->bento_border, gb)), 0);
-                lv_obj_set_style_bg_opa(sc->filter_box, LV_OPA_50, 0);
+                set_text_color_cached(sc->lbl_filter, &sc->cached_filter_text_color,
+                    app_config_apply_brightness(current_theme->filter_text_color, gb));
+                set_bg_color_cached(sc->filter_box, &sc->cached_filter_bg_color,
+                    app_config_apply_brightness(current_theme->bento_border, gb), 0);
+                set_bg_opa_cached(sc->filter_box, &sc->cached_filter_bg_opa, LV_OPA_50, 0);
             }
         } else {
             set_label_if_changed(sc->lbl_filter, "--");
             if (current_theme) {
-                lv_obj_set_style_text_color(sc->lbl_filter,
-                    lv_color_hex(app_config_apply_brightness(
-                        current_theme->label_color, gb)), 0);
+                set_text_color_cached(sc->lbl_filter, &sc->cached_filter_text_color,
+                    app_config_apply_brightness(current_theme->label_color, gb));
             }
-            lv_obj_set_style_bg_color(sc->filter_box,
-                lv_color_hex(current_theme ? current_theme->bento_bg : 0x000000), 0);
-            lv_obj_set_style_bg_opa(sc->filter_box, LV_OPA_50, 0);
+            set_bg_color_cached(sc->filter_box, &sc->cached_filter_bg_color,
+                current_theme ? current_theme->bento_bg : 0x000000, 0);
+            set_bg_opa_cached(sc->filter_box, &sc->cached_filter_bg_opa, LV_OPA_50, 0);
         }
 
         /* Target name */
@@ -899,7 +955,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
         if (current_theme) {
             uint32_t tgt_color = app_config_apply_brightness(
                 current_theme->target_name_color, gb);
-            lv_obj_set_style_text_color(sc->lbl_target, lv_color_hex(tgt_color), 0);
+            set_text_color_cached(sc->lbl_target, &sc->cached_target_color, tgt_color);
         }
 
         /* Progress bar + percentage */
@@ -925,21 +981,19 @@ void summary_page_update(const nina_client_t *instances, int count) {
                 bar_col = current_theme->progress_color;
             }
             if (bar_col != 0) {
-                lv_obj_set_style_bg_color(sc->bar_progress,
-                    lv_color_hex(app_config_apply_brightness(bar_col, gb)),
-                    LV_PART_INDICATOR);
+                set_bg_color_cached(sc->bar_progress, &sc->cached_bar_ind_color,
+                    app_config_apply_brightness(bar_col, gb), LV_PART_INDICATOR);
             }
             if (current_theme) {
-                lv_obj_set_style_bg_color(sc->bar_progress,
-                    lv_color_hex(current_theme->bento_border), 0);
+                set_bg_color_cached(sc->bar_progress, &sc->cached_bar_bg_color,
+                    current_theme->bento_border, 0);
             }
         }
 
         /* Percentage label color */
         if (current_theme) {
-            lv_obj_set_style_text_color(sc->lbl_pct,
-                lv_color_hex(app_config_apply_brightness(
-                    current_theme->text_color, gb)), 0);
+            set_text_color_cached(sc->lbl_pct, &sc->cached_pct_color,
+                app_config_apply_brightness(current_theme->text_color, gb));
         }
 
         /* Sequence info (visible in 1-2 card mode) */
@@ -975,9 +1029,8 @@ void summary_page_update(const nina_client_t *instances, int count) {
             }
 
             if (current_theme) {
-                lv_obj_set_style_text_color(sc->lbl_seq_name,
-                    lv_color_hex(app_config_apply_brightness(
-                        current_theme->header_text_color, gb)), 0);
+                set_text_color_cached(sc->lbl_seq_name, &sc->cached_seq_name_color,
+                    app_config_apply_brightness(current_theme->header_text_color, gb));
                 /* Use filter color for completed count when available */
                 uint32_t exp_color = current_theme->text_color;
                 if (d->exposure_total_count > 0 && !theme_is_red_night(current_theme) &&
@@ -985,11 +1038,10 @@ void summary_page_update(const nina_client_t *instances, int count) {
                     uint32_t fc = app_config_get_filter_color(d->current_filter, i);
                     if (fc != 0) exp_color = fc;
                 }
-                lv_obj_set_style_text_color(sc->lbl_exp_val,
-                    lv_color_hex(app_config_apply_brightness(exp_color, gb)), 0);
-                lv_obj_set_style_text_color(sc->lbl_seq_step,
-                    lv_color_hex(app_config_apply_brightness(
-                        current_theme->text_color, gb)), 0);
+                set_text_color_cached(sc->lbl_exp_val, &sc->cached_exp_val_color,
+                    app_config_apply_brightness(exp_color, gb));
+                set_text_color_cached(sc->lbl_seq_step, &sc->cached_seq_step_color,
+                    app_config_apply_brightness(current_theme->text_color, gb));
             }
         }
 
@@ -1001,19 +1053,17 @@ void summary_page_update(const nina_client_t *instances, int count) {
             uint32_t rms_col = theme_is_red_night(current_theme)
                 ? 0 : app_config_get_rms_color(d->guider.rms_total, i);
             if (rms_col != 0) {
-                lv_obj_set_style_text_color(sc->lbl_rms_val,
-                    lv_color_hex(app_config_apply_brightness(rms_col, gb)), 0);
+                set_text_color_cached(sc->lbl_rms_val, &sc->cached_rms_color,
+                    app_config_apply_brightness(rms_col, gb));
             } else if (current_theme) {
-                lv_obj_set_style_text_color(sc->lbl_rms_val,
-                    lv_color_hex(app_config_apply_brightness(
-                        current_theme->rms_color, gb)), 0);
+                set_text_color_cached(sc->lbl_rms_val, &sc->cached_rms_color,
+                    app_config_apply_brightness(current_theme->rms_color, gb));
             }
         } else {
             set_label_if_changed(sc->lbl_rms_val, "--");
             if (current_theme) {
-                lv_obj_set_style_text_color(sc->lbl_rms_val,
-                    lv_color_hex(app_config_apply_brightness(
-                        current_theme->text_color, gb)), 0);
+                set_text_color_cached(sc->lbl_rms_val, &sc->cached_rms_color,
+                    app_config_apply_brightness(current_theme->text_color, gb));
             }
         }
 
@@ -1025,19 +1075,17 @@ void summary_page_update(const nina_client_t *instances, int count) {
             uint32_t hfr_col = theme_is_red_night(current_theme)
                 ? 0 : app_config_get_hfr_color(d->hfr, i);
             if (hfr_col != 0) {
-                lv_obj_set_style_text_color(sc->lbl_hfr_val,
-                    lv_color_hex(app_config_apply_brightness(hfr_col, gb)), 0);
+                set_text_color_cached(sc->lbl_hfr_val, &sc->cached_hfr_color,
+                    app_config_apply_brightness(hfr_col, gb));
             } else if (current_theme) {
-                lv_obj_set_style_text_color(sc->lbl_hfr_val,
-                    lv_color_hex(app_config_apply_brightness(
-                        current_theme->hfr_color, gb)), 0);
+                set_text_color_cached(sc->lbl_hfr_val, &sc->cached_hfr_color,
+                    app_config_apply_brightness(current_theme->hfr_color, gb));
             }
         } else {
             set_label_if_changed(sc->lbl_hfr_val, "--");
             if (current_theme) {
-                lv_obj_set_style_text_color(sc->lbl_hfr_val,
-                    lv_color_hex(app_config_apply_brightness(
-                        current_theme->text_color, gb)), 0);
+                set_text_color_cached(sc->lbl_hfr_val, &sc->cached_hfr_color,
+                    app_config_apply_brightness(current_theme->text_color, gb));
             }
         }
 
@@ -1058,9 +1106,8 @@ void summary_page_update(const nina_client_t *instances, int count) {
             set_label_if_changed(sc->lbl_flip_val, "--");
         }
         if (current_theme) {
-            lv_obj_set_style_text_color(sc->lbl_flip_val,
-                lv_color_hex(app_config_apply_brightness(
-                    current_theme->text_color, gb)), 0);
+            set_text_color_cached(sc->lbl_flip_val, &sc->cached_flip_color,
+                app_config_apply_brightness(current_theme->text_color, gb));
         }
 
         /* Exposure detail line (1-card mode only) */
@@ -1114,9 +1161,8 @@ void summary_page_update(const nina_client_t *instances, int count) {
             set_label_if_changed(sc->lbl_detail, detail);
 
             if (current_theme) {
-                lv_obj_set_style_text_color(sc->lbl_detail,
-                    lv_color_hex(app_config_apply_brightness(
-                        current_theme->text_color, gb)), 0);
+                set_text_color_cached(sc->lbl_detail, &sc->cached_detail_color,
+                    app_config_apply_brightness(current_theme->text_color, gb));
             }
         }
 
@@ -1126,16 +1172,16 @@ void summary_page_update(const nina_client_t *instances, int count) {
             if (d->safety_connected) {
                 if (d->safety_is_safe) {
                     set_label_if_changed(sc->lbl_safety, ICON_VERIFIED_USER);
-                    lv_obj_set_style_text_color(sc->lbl_safety,
-                        lv_color_hex(theme_is_red_night(current_theme) ? 0x7f1d1d : 0x4CAF50), 0);
+                    set_text_color_cached(sc->lbl_safety, &sc->cached_safety_color,
+                        theme_is_red_night(current_theme) ? 0x7f1d1d : 0x4CAF50);
                 } else {
                     set_label_if_changed(sc->lbl_safety, ICON_GPP_BAD);
-                    lv_obj_set_style_text_color(sc->lbl_safety,
-                        lv_color_hex(theme_is_red_night(current_theme) ? 0xff0000 : 0xF44336), 0);
+                    set_text_color_cached(sc->lbl_safety, &sc->cached_safety_color,
+                        theme_is_red_night(current_theme) ? 0xff0000 : 0xF44336);
                 }
             } else {
                 set_label_if_changed(sc->lbl_safety, ICON_GPP_MAYBE);
-                lv_obj_set_style_text_color(sc->lbl_safety, lv_color_hex(0x999999), 0);
+                set_text_color_cached(sc->lbl_safety, &sc->cached_safety_color, 0x999999);
             }
         }
     }
@@ -1151,6 +1197,27 @@ void summary_page_apply_theme(void) {
     /* Update glass card style */
     apply_glass_theme();
     lv_obj_report_style_change(&style_glass_card);
+
+    /* Invalidate all cached colors so the next update re-applies everything */
+    for (int i = 0; i < card_count; i++) {
+        summary_card_t *sc = &cards[i];
+        sc->cached_name_color       = UINT32_MAX;
+        sc->cached_filter_text_color = UINT32_MAX;
+        sc->cached_filter_bg_color  = UINT32_MAX;
+        sc->cached_filter_bg_opa    = UINT8_MAX;
+        sc->cached_target_color     = UINT32_MAX;
+        sc->cached_bar_ind_color    = UINT32_MAX;
+        sc->cached_bar_bg_color     = UINT32_MAX;
+        sc->cached_pct_color        = UINT32_MAX;
+        sc->cached_seq_name_color   = UINT32_MAX;
+        sc->cached_exp_val_color    = UINT32_MAX;
+        sc->cached_seq_step_color   = UINT32_MAX;
+        sc->cached_rms_color        = UINT32_MAX;
+        sc->cached_hfr_color        = UINT32_MAX;
+        sc->cached_flip_color       = UINT32_MAX;
+        sc->cached_detail_color     = UINT32_MAX;
+        sc->cached_safety_color     = UINT32_MAX;
+    }
 
     /* Update per-card widgets */
     for (int i = 0; i < card_count; i++) {
