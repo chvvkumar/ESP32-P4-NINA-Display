@@ -110,9 +110,16 @@ class AlertMonitor:
 
         # 1. Reboot detected (only if device is reachable — unreachable gives false 0 values)
         if metrics.get("reachable", False) and metrics.get("reboot_detected", False):
+            reboot_msg = "Device rebooted unexpectedly"
+            # Try to fetch crash reason from the device
+            crash_reason = metrics.get("last_reset_reason")
+            if not crash_reason:
+                crash_reason = await self._fetch_crash_reason(device)
+            if crash_reason:
+                reboot_msg = f"Device rebooted unexpectedly (reason: {crash_reason})"
             await self._record_violation(
                 device, "reboot_detected", Severity.CRITICAL,
-                "Device rebooted unexpectedly",
+                reboot_msg,
                 metrics.get("boot_count", 0), 0,
             )
             await self._capture_state_snapshot(device)
@@ -275,6 +282,20 @@ class AlertMonitor:
             {"device": device, "check": check_name, "severity": severity.value},
             {"message": message, "value": float(value), "threshold": float(threshold)},
         )
+
+    async def _fetch_crash_reason(self, device: str) -> str | None:
+        """Fetch crash reason from the device's /api/crash endpoint."""
+        try:
+            async with aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=3)
+            ) as session:
+                async with session.get(f"http://{device}/api/crash") as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        return data.get("last_reset_reason")
+        except Exception:
+            pass
+        return None
 
     async def _capture_state_snapshot(self, device: str):
         """Capture perf data + screenshot on critical violation."""

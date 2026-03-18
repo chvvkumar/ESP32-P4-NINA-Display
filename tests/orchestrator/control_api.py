@@ -126,6 +126,11 @@ class ControlAPI:
             metrics = self.metrics_collector.get_latest_metrics(host)
             # Return all metrics except raw perf blob
             filtered = {k: v for k, v in metrics.items() if k != "_raw_perf"}
+            # Ensure crash info is surfaced at top level for convenience
+            if "crash_count" not in filtered and metrics.get("crash_count") is not None:
+                filtered["crash_count"] = metrics.get("crash_count", 0)
+            if "last_reset_reason" not in filtered and metrics.get("last_reset_reason") is not None:
+                filtered["last_reset_reason"] = metrics.get("last_reset_reason", "")
             devices[host] = filtered
         return web.json_response(devices)
 

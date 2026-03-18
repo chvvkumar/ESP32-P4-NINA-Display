@@ -289,6 +289,19 @@ class ReportGenerator:
                         f"      Instance {i}: {state}{ws_str}"
                     )
 
+            # Crash History
+            crash_count = metrics.get("crash_count")
+            if crash_count is not None:
+                lines.append("")
+                lines.append("    Crash History:")
+                lines.append(
+                    f"      Crash count:       {crash_count}"
+                )
+                last_reason = metrics.get("last_reset_reason", "N/A")
+                lines.append(
+                    f"      Last reset reason: {last_reason}"
+                )
+
             lines.append("")
 
         lines.append("=" * 72)

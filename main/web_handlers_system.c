@@ -20,6 +20,7 @@
 #include "esp_timer.h"
 #include "nina_connection.h"
 #include "ui/nina_dashboard.h"
+#include "power_mgmt.h"
 
 // Handler for reboot
 esp_err_t reboot_post_handler(httpd_req_t *req)
@@ -468,6 +469,57 @@ esp_err_t nina_status_get_handler(httpd_req_t *req)
 
         cJSON_AddItemToArray(arr, inst);
     }
+
+    const char *json_str = cJSON_PrintUnformatted(root);
+    if (!json_str) {
+        cJSON_Delete(root);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
+    free((void *)json_str);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+// Helper: map esp_reset_reason_t to human-readable string
+static const char *reset_reason_to_str(uint32_t reason)
+{
+    switch ((esp_reset_reason_t)reason) {
+        case ESP_RST_POWERON:   return "POWERON";
+        case ESP_RST_SW:        return "SW";
+        case ESP_RST_PANIC:     return "PANIC";
+        case ESP_RST_INT_WDT:   return "INT_WDT";
+        case ESP_RST_TASK_WDT:  return "TASK_WDT";
+        case ESP_RST_WDT:       return "WDT";
+        case ESP_RST_BROWNOUT:  return "BROWNOUT";
+        case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+        case ESP_RST_SDIO:      return "SDIO";
+        case ESP_RST_USB:       return "USB";
+        case ESP_RST_JTAG:      return "JTAG";
+        default:                return "UNKNOWN";
+    }
+}
+
+// Handler for crash info
+esp_err_t crash_get_handler(httpd_req_t *req)
+{
+    power_mgmt_crash_info_t info = power_mgmt_get_crash_info();
+
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    cJSON_AddNumberToObject(root, "crash_count", info.crash_count);
+    cJSON_AddStringToObject(root, "last_reset_reason",
+                            reset_reason_to_str(info.last_crash_reason));
+    cJSON_AddNumberToObject(root, "last_reset_reason_code", info.last_crash_reason);
+    cJSON_AddNumberToObject(root, "boot_count", info.boot_count);
+    cJSON_AddNumberToObject(root, "uptime_s",
+                            (double)esp_timer_get_time() / 1000000.0);
 
     const char *json_str = cJSON_PrintUnformatted(root);
     if (!json_str) {

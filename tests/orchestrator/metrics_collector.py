@@ -106,6 +106,18 @@ class MetricsCollector:
             except Exception as exc:
                 logger.debug("NINA status poll failed for %s: %s", host, exc)
 
+            # GET /api/crash (optional — may not exist on older firmware)
+            crash_data = None
+            try:
+                async with session.get(
+                    f"http://{host}/api/crash",
+                    timeout=aiohttp.ClientTimeout(total=3),
+                ) as resp:
+                    if resp.status == 200:
+                        crash_data = await resp.json()
+            except Exception:
+                pass  # Silently skip — endpoint may not exist
+
         request_latency_ms = (time.time() - request_start) * 1000
 
         metrics: dict = {
@@ -319,6 +331,13 @@ class MetricsCollector:
             if poll_cycle:
                 metrics["poll_cycle_avg_ms"] = poll_cycle.get("avg_ms", 0.0)
                 metrics["poll_cycle_max_ms"] = poll_cycle.get("max_ms", 0.0)
+
+        # -- Crash info (from /api/crash, optional endpoint) --
+        if crash_data:
+            metrics["crash_count"] = crash_data.get("crash_count", 0)
+            metrics["last_reset_reason"] = crash_data.get("last_reset_reason", "unknown")
+            metrics["last_reset_reason_code"] = crash_data.get("last_reset_reason_code", 0)
+            metrics["boot_count_crash"] = crash_data.get("boot_count", 0)
 
         # -- Append condensed snapshot to history ring buffer --
         if host not in self._metrics_history:

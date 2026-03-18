@@ -3,12 +3,16 @@
 #include "esp_log.h"
 #include "esp_pm.h"
 #include "esp_sleep.h"
+#include "esp_system.h"
 #include "esp_wifi.h"
+#include "nvs.h"
 
 static const char *TAG = "power_mgmt";
 
 RTC_DATA_ATTR static int  s_saved_page          = 0;
 RTC_DATA_ATTR static bool s_deep_sleep_intended  = false;
+RTC_DATA_ATTR static uint32_t s_crash_count        = 0;
+RTC_DATA_ATTR static uint32_t s_last_crash_reason  = 0;  /* esp_reset_reason_t */
 
 esp_err_t power_mgmt_init(void)
 {
@@ -72,4 +76,39 @@ esp_sleep_wakeup_cause_t power_mgmt_check_wake_cause(void)
 int power_mgmt_get_saved_page(void)
 {
     return s_saved_page;
+}
+
+void power_mgmt_check_crash(void)
+{
+    esp_reset_reason_t reason = esp_reset_reason();
+
+    if (reason == ESP_RST_POWERON) {
+        /* Fresh power-on clears crash history */
+        s_crash_count = 0;
+        s_last_crash_reason = 0;
+        ESP_LOGI(TAG, "Power-on reset — crash history cleared");
+    } else if (reason == ESP_RST_PANIC ||
+               reason == ESP_RST_INT_WDT ||
+               reason == ESP_RST_TASK_WDT) {
+        s_crash_count++;
+        s_last_crash_reason = (uint32_t)reason;
+        ESP_LOGW(TAG, "Crash reset detected: reason=%d, crash_count=%lu",
+                 (int)reason, (unsigned long)s_crash_count);
+    }
+}
+
+power_mgmt_crash_info_t power_mgmt_get_crash_info(void)
+{
+    uint32_t boot_count = 0;
+    nvs_handle_t nvs;
+    if (nvs_open("system", NVS_READONLY, &nvs) == ESP_OK) {
+        nvs_get_u32(nvs, "boot_cnt", &boot_count);
+        nvs_close(nvs);
+    }
+
+    return (power_mgmt_crash_info_t){
+        .crash_count       = s_crash_count,
+        .last_crash_reason = s_last_crash_reason,
+        .boot_count        = boot_count,
+    };
 }

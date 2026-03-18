@@ -166,7 +166,7 @@ void allsky_invalidate_field_config_cache(void) {
         s_cached_field_config = NULL;
     }
     if (s_cached_field_config_str) {
-        free(s_cached_field_config_str);
+        heap_caps_free(s_cached_field_config_str);
         s_cached_field_config_str = NULL;
     }
 }
@@ -189,7 +189,11 @@ static cJSON *get_field_config(const char *field_config_json) {
         return NULL;
     }
 
-    s_cached_field_config_str = strdup(field_config_json);
+    size_t len = strlen(field_config_json) + 1;
+    s_cached_field_config_str = heap_caps_malloc(len, MALLOC_CAP_SPIRAM);
+    if (s_cached_field_config_str) {
+        memcpy(s_cached_field_config_str, field_config_json, len);
+    }
     if (!s_cached_field_config_str) {
         cJSON_Delete(s_cached_field_config);
         s_cached_field_config = NULL;

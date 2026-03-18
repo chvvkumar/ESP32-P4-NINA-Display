@@ -464,6 +464,9 @@ void app_main(void)
     // Check if we woke from deep sleep
     esp_sleep_wakeup_cause_t wake_cause = power_mgmt_check_wake_cause();
 
+    // Track crash resets (PANIC, WDT) in RTC memory
+    power_mgmt_check_crash();
+
     nina_connection_init();
 
     perf_monitor_init(30);
