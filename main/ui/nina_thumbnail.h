@@ -32,3 +32,6 @@ bool nina_dashboard_thumbnail_visible(void);
 
 /** Apply current theme to thumbnail overlay (back button, labels). */
 void nina_thumbnail_apply_theme(void);
+
+/** Pre-allocate PSRAM buffer for zoom scaling. Call once at startup. */
+void nina_thumbnail_init(void);

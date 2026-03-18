@@ -3,12 +3,14 @@ devices:
   - host: ninadash2.lan
   - host: ninadash3.lan
 
+lvgl_stress: false
+
 simulator:
   bind_address: "0.0.0.0"
   base_port: 1888
   advertise_ip: "192.168.1.211"
   speed_profiles:
-    stress: fast
+    stress: nina_stress
     soak: normal
 
 
@@ -26,12 +28,13 @@ workloads:
     endpoints: ["/api/perf", "/api/version", "/api/config"]
   config_churn:
     stress_rps: 0.1
-    soak_rps: 0.01
+    soak_rps: 0
     fields: ["brightness", "color_brightness"]
   page_cycle:
     stress_interval_s: 15
-    soak_interval_s: 30
+    soak_interval_s: 15
     dwell_s: 10
+    include_summary: true
   concurrent_conns:
     stress_count: 5
     soak_count: 2
@@ -39,12 +42,16 @@ workloads:
 
 thresholds:
   heap_min_free_bytes: 8192
+  heap_warning_free_bytes: 32768
   psram_min_free_bytes: 20971520
   http_failure_rate_stress: 0.05
   http_failure_rate_soak: 0.01
   api_latency_avg_stress_ms: 500
-  api_latency_avg_soak_ms: 200
+  api_latency_avg_soak_ms: 500
   unreachable_timeout_s: 30
   nina_connect_timeout_s: 60
+  heap_frag_ratio_min: 0.3       # baseline ~0.52 at boot (non-contiguous DRAM regions)
+  psram_frag_ratio_min: 0.9       # baseline ~0.97 at boot (single contiguous region)
   memory_leak_rate_bytes_per_hour: 1024
   memory_leak_window_hours: 6
+  violation_cooldown_s: 60

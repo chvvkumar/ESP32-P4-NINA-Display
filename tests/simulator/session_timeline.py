@@ -64,6 +64,29 @@ SPEED_PROFILES = {
         "mount_flip_jitter_s": 60,
         "safety_safe_duration_s": 120,
         "safety_unsafe_duration_s": 30,
+        "download_time_s": 2.0,
+    },
+    "nina_stress": {
+        "exposure_times": [10, 10, 10],
+        "slew_duration_s": 0,
+        "autofocus_point_interval_s": 0.5,
+        "autofocus_settle_s": 0.5,
+        "guiding_settle_s": 0,
+        "dither_duration_s": 0,
+        "filter_change_duration_s": 0,
+        "target_complete_duration_s": 0,
+        "exposures_per_filter_range": [999, 999],
+        "target_change_interval": 9999,
+        "guider_ra_mean": 0.8,
+        "guider_ra_sigma": 0.3,
+        "guider_dec_mean": 0.5,
+        "guider_dec_sigma": 0.2,
+        "focuser_drift_per_s": 5.0 / 60.0,
+        "mount_flip_interval_s": 300,
+        "mount_flip_jitter_s": 60,
+        "safety_safe_duration_s": 120,
+        "safety_unsafe_duration_s": 30,
+        "download_time_s": 0.0,
     },
     "normal": {
         "exposure_times": [120, 60, 30],
@@ -85,6 +108,7 @@ SPEED_PROFILES = {
         "mount_flip_jitter_s": 300,
         "safety_safe_duration_s": 7200,
         "safety_unsafe_duration_s": 120,
+        "download_time_s": 2.0,
     },
 }
 
@@ -114,6 +138,7 @@ class SessionTimeline:
         self.camera = CameraState(
             name=cfg["camera_name"],
             exposure_time_s=self._profile["exposure_times"][instance_index],
+            download_time_s=self._profile.get("download_time_s", 2.0),
         )
         self.guider = GuiderState(
             is_guiding=True,
@@ -257,7 +282,10 @@ class SessionTimeline:
                         "Timestamp": time.time(),
                     })
                     # Start next exposure or transition
-                    if self._exposures_this_filter >= self._exposures_per_filter:
+                    if self._profile["dither_duration_s"] == 0:
+                        # No dither — immediately start next exposure
+                        self.camera.start_exposure()
+                    elif self._exposures_this_filter >= self._exposures_per_filter:
                         self._transition(SessionPhase.DITHERING)
                     else:
                         self._transition(SessionPhase.DITHERING)
@@ -307,6 +335,7 @@ class SessionTimeline:
         self._profile = SPEED_PROFILES[name]
         self.exposure_time = self._profile["exposure_times"][self.instance_index]
         self.camera.exposure_time_s = self.exposure_time
+        self.camera.download_time_s = self._profile.get("download_time_s", 2.0)
         epf = self._profile["exposures_per_filter_range"]
         self._exposures_per_filter = random.randint(epf[0], epf[1])
         # Propagate to equipment states

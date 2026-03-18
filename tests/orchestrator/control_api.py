@@ -95,8 +95,30 @@ class ControlAPI:
         return web.json_response(status)
 
     async def _handle_violations(self, request: web.Request) -> web.Response:
-        """GET /api/violations — list of all violations."""
+        """GET /api/violations — list of violations, sorted by severity.
+
+        Query params:
+            limit    — max violations to return (default 100)
+            severity — filter by severity level (CRITICAL, HIGH, MEDIUM, LOW)
+            device   — filter by device hostname
+        """
         violations = self.alert_monitor.get_violations()
+
+        # Optional filters
+        severity_filter = request.query.get("severity", "").upper()
+        device_filter = request.query.get("device", "")
+        if severity_filter:
+            violations = [v for v in violations if v.severity.value == severity_filter]
+        if device_filter:
+            violations = [v for v in violations if v.device == device_filter]
+
+        # Sort by severity priority (CRITICAL first), then most recent first
+        severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+        sorted_violations = sorted(
+            violations,
+            key=lambda v: (severity_order.get(v.severity.value, 99), -v.timestamp),
+        )
+
         limit = int(request.query.get("limit", 100))
         return web.json_response([
             {
@@ -108,7 +130,7 @@ class ControlAPI:
                 "value": v.value,
                 "threshold": v.threshold,
             }
-            for v in violations[-limit:]
+            for v in sorted_violations[:limit]
         ])
 
     async def _handle_report(self, request: web.Request) -> web.Response:

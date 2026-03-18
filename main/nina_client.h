@@ -202,6 +202,11 @@ void nina_client_get_data(const char *base_url, nina_client_t *data);
 // Use before polling to avoid expensive HTTP client setup for unreachable hosts.
 bool nina_client_dns_check(const char *base_url);
 
+// Pre-allocate persistent PSRAM buffer for image fetching.
+// Call once from app_main() before any image fetch.  Avoids PSRAM
+// fragmentation from repeated malloc/free during long sessions.
+void nina_client_init_image_buffers(void);
+
 // Fetch prepared image as JPEG from NINA API
 // Returns heap-allocated JPEG bytes (caller must free), or NULL on error
 // Uses: GET /prepared-image?resize=true&size=WxH&quality=Q&autoPrepare=true

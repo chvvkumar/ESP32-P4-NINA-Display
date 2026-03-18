@@ -57,8 +57,10 @@ class ReportGenerator:
 
         high_count = sum(1 for v in violations if v.severity.value == "HIGH")
         medium_count = sum(1 for v in violations if v.severity.value == "MEDIUM")
+        low_count = sum(1 for v in violations if v.severity.value == "LOW")
         lines.append(f"  High:                {high_count}")
         lines.append(f"  Medium:              {medium_count}")
+        lines.append(f"  Low:                 {low_count}")
         lines.append("")
 
         # -- Violation Timeline --
@@ -119,13 +121,33 @@ class ReportGenerator:
                 f"  HTTP requests:     {total_http_req:,} total, "
                 f"{total_http_fail:,} failed ({fail_pct:.1f}%)"
             )
+            min_heap_frag = min(
+                (m.get("heap_frag_ratio", float("inf")) for m in all_metrics),
+                default=0,
+            )
+            min_psram_frag = min(
+                (m.get("psram_frag_ratio", float("inf")) for m in all_metrics),
+                default=0,
+            )
+            heap_frag_str = (
+                f"  Worst frag: {min_heap_frag * 100:.1f}%"
+                if min_heap_frag != float("inf")
+                else ""
+            )
+            psram_frag_str = (
+                f"  Worst frag: {min_psram_frag * 100:.1f}%"
+                if min_psram_frag != float("inf")
+                else ""
+            )
             lines.append(
                 f"  Avg heap free:     {avg_heap:,}  "
                 f"Min heap_min:  {min_heap_min:,}"
+                f"{heap_frag_str}"
             )
             lines.append(
                 f"  Avg PSRAM free:    {avg_psram:,}  "
                 f"Min psram_min: {min_psram_min:,}"
+                f"{psram_frag_str}"
             )
         else:
             lines.append("  No metrics available from any device")
@@ -152,15 +174,29 @@ class ReportGenerator:
             # Memory
             lines.append("")
             lines.append("    Memory:")
+            heap_frag = metrics.get("heap_frag_ratio")
+            heap_frag_str = (
+                f" / frag={heap_frag * 100:.1f}%"
+                if heap_frag is not None
+                else ""
+            )
             lines.append(
                 f"      Heap:   {metrics.get('heap_free', 0):,} free"
                 f" / {metrics.get('heap_min', 0):,} min"
                 f" / {metrics.get('heap_largest_free_block', 0):,} largest block"
+                f"{heap_frag_str}"
+            )
+            psram_frag = metrics.get("psram_frag_ratio")
+            psram_frag_str = (
+                f" / frag={psram_frag * 100:.1f}%"
+                if psram_frag is not None
+                else ""
             )
             lines.append(
                 f"      PSRAM:  {metrics.get('psram_free', 0):,} free"
                 f" / {metrics.get('psram_min', 0):,} min"
                 f" / {metrics.get('psram_largest_free_block', 0):,} largest block"
+                f"{psram_frag_str}"
             )
 
             # CPU

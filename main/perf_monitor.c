@@ -186,11 +186,17 @@ void perf_monitor_capture_memory(void)
     g_perf.heap_free_bytes         = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     g_perf.heap_min_free_bytes     = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
     g_perf.heap_largest_free_block = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    g_perf.heap_frag_ratio         = (g_perf.heap_free_bytes > 0)
+        ? (float)g_perf.heap_largest_free_block / (float)g_perf.heap_free_bytes
+        : 0.0f;
 
     // PSRAM
     g_perf.psram_free_bytes         = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     g_perf.psram_min_free_bytes     = heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM);
     g_perf.psram_largest_free_block = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
+    g_perf.psram_frag_ratio         = (g_perf.psram_free_bytes > 0)
+        ? (float)g_perf.psram_largest_free_block / (float)g_perf.psram_free_bytes
+        : 0.0f;
 
     // Task stack high-water marks (if task handles are available)
     // These are set externally by the tasks themselves via:
@@ -438,10 +444,12 @@ void perf_monitor_report(void)
              g_perf.wifi_disconnect_count.per_interval, g_perf.wifi_disconnect_count.total);
 
     ESP_LOGI(TAG, "── Memory ──");
-    ESP_LOGI(TAG, "  Internal heap:  free=%"PRIu32"  min_ever=%"PRIu32"  largest_block=%"PRIu32,
-             g_perf.heap_free_bytes, g_perf.heap_min_free_bytes, g_perf.heap_largest_free_block);
-    ESP_LOGI(TAG, "  PSRAM:          free=%"PRIu32"  min_ever=%"PRIu32"  largest_block=%"PRIu32,
-             g_perf.psram_free_bytes, g_perf.psram_min_free_bytes, g_perf.psram_largest_free_block);
+    ESP_LOGI(TAG, "  Internal heap:  free=%"PRIu32"  min_ever=%"PRIu32"  largest_block=%"PRIu32"  frag_ratio=%.3f",
+             g_perf.heap_free_bytes, g_perf.heap_min_free_bytes, g_perf.heap_largest_free_block,
+             g_perf.heap_frag_ratio);
+    ESP_LOGI(TAG, "  PSRAM:          free=%"PRIu32"  min_ever=%"PRIu32"  largest_block=%"PRIu32"  frag_ratio=%.3f",
+             g_perf.psram_free_bytes, g_perf.psram_min_free_bytes, g_perf.psram_largest_free_block,
+             g_perf.psram_frag_ratio);
 
     ESP_LOGI(TAG, "── Task Stacks ──");
     ESP_LOGI(TAG, "  data_task HWM:  %"PRIu32" bytes free", g_perf.data_task_stack_hwm);
@@ -627,9 +635,11 @@ char *perf_monitor_report_json(void)
     cJSON_AddNumberToObject(memory, "heap_free_bytes",         g_perf.heap_free_bytes);
     cJSON_AddNumberToObject(memory, "heap_min_free_bytes",     g_perf.heap_min_free_bytes);
     cJSON_AddNumberToObject(memory, "heap_largest_free_block", g_perf.heap_largest_free_block);
+    cJSON_AddNumberToObject(memory, "heap_frag_ratio",        g_perf.heap_frag_ratio);
     cJSON_AddNumberToObject(memory, "psram_free_bytes",         g_perf.psram_free_bytes);
     cJSON_AddNumberToObject(memory, "psram_min_free_bytes",     g_perf.psram_min_free_bytes);
     cJSON_AddNumberToObject(memory, "psram_largest_free_block", g_perf.psram_largest_free_block);
+    cJSON_AddNumberToObject(memory, "psram_frag_ratio",        g_perf.psram_frag_ratio);
     cJSON_AddItemToObject(root, "memory", memory);
 
     // Tasks

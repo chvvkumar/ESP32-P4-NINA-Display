@@ -56,6 +56,26 @@ class MetricsCollector:
         """Return latest metrics for all devices, keyed by host."""
         return dict(self._latest_metrics)
 
+    def get_recent_avg_latency(self, host: str, window: int = 6) -> float | None:
+        """Compute average HTTP latency over the last *window* history samples.
+
+        Returns None if fewer than *window* samples are available or none
+        of them contain HTTP metrics.
+        """
+        history = self._metrics_history.get(host)
+        if not history or len(history) < window:
+            return None
+
+        recent = list(history)[-window:]
+        values = [
+            s["http"]["avg_ms"]
+            for s in recent
+            if "http" in s and s["http"].get("avg_ms", 0) > 0
+        ]
+        if not values:
+            return None
+        return sum(values) / len(values)
+
     async def _run(self):
         """Main polling loop — polls devices sequentially to avoid socket exhaustion."""
         while self._running:
@@ -134,6 +154,8 @@ class MetricsCollector:
         psram_free = 0
         heap_min = 0
         psram_min = 0
+        heap_frag_ratio = None
+        psram_frag_ratio = None
         uptime_s = 0.0
         boot_count = 0
 
@@ -150,6 +172,8 @@ class MetricsCollector:
                 heap_min = mem.get("heap_min_free_bytes", 0)
                 psram_free = mem.get("psram_free_bytes", 0)
                 psram_min = mem.get("psram_min_free_bytes", 0)
+                heap_frag_ratio = mem.get("heap_frag_ratio")
+                psram_frag_ratio = mem.get("psram_frag_ratio")
 
         metrics.update({
             "heap_free": heap_free,
@@ -159,6 +183,10 @@ class MetricsCollector:
             "uptime_s": uptime_s,
             "boot_count": boot_count,
         })
+        if heap_frag_ratio is not None:
+            metrics["heap_frag_ratio"] = heap_frag_ratio
+        if psram_frag_ratio is not None:
+            metrics["psram_frag_ratio"] = psram_frag_ratio
 
         # Detect reboot
         prev_boot = self._previous_boot_count.get(host)
@@ -184,6 +212,8 @@ class MetricsCollector:
                     "uptime_s": uptime_s,
                     "boot_count": boot_count,
                     "phase": phase,
+                    **({"heap_frag_ratio": heap_frag_ratio} if heap_frag_ratio is not None else {}),
+                    **({"psram_frag_ratio": psram_frag_ratio} if psram_frag_ratio is not None else {}),
                 },
             )
 

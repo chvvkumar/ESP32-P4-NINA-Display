@@ -83,6 +83,7 @@ static SemaphoreHandle_t s_dns_mutex = NULL;
 // Retry delays between attempts (ms). Index 0 = delay before 2nd attempt, etc.
 static const int http_retry_delays_ms[] = {500};
 #define HTTP_MAX_ATTEMPTS  2
+#define HTTP_JSON_MAX_SIZE (1024 * 1024)  // 1 MB cap for JSON API responses
 
 // =============================================================================
 // Mutex Helpers
@@ -243,6 +244,18 @@ cJSON *http_get_json(const char *url) {
         // NINA API always sends Content-Length; if absent, treat as error.
         if (content_length == 0) {
             ESP_LOGW(TAG, "No Content-Length for %s (chunked?), skipping", url);
+            if (reusing) {
+                esp_http_client_close(client);
+            } else {
+                esp_http_client_cleanup(client);
+            }
+            perf_timer_stop(&g_perf.http_request);
+            return NULL;
+        }
+
+        if (content_length > HTTP_JSON_MAX_SIZE) {
+            ESP_LOGW(TAG, "JSON response too large (%d bytes, max %d) for %s",
+                     content_length, HTTP_JSON_MAX_SIZE, url);
             if (reusing) {
                 esp_http_client_close(client);
             } else {
@@ -833,6 +846,24 @@ bool nina_client_dns_check(const char *base_url) {
 
 #define MAX_IMAGE_SIZE (4 * 1024 * 1024)  // 4 MB cap for image downloads
 
+/* Pre-allocated PSRAM buffer for image fetching — avoids repeated malloc/free
+ * that fragments PSRAM during long soak sessions.  Only one thumbnail fetch
+ * can be in-flight at a time (serialized by mutex). */
+#define IMAGE_FETCH_BUF_SIZE  (1024 * 1024)  // 1 MB pre-allocated fetch buffer
+
+static uint8_t *s_image_fetch_buf = NULL;
+static SemaphoreHandle_t s_image_mutex = NULL;
+
+void nina_client_init_image_buffers(void) {
+    s_image_fetch_buf = heap_caps_malloc(IMAGE_FETCH_BUF_SIZE, MALLOC_CAP_SPIRAM);
+    s_image_mutex = xSemaphoreCreateMutex();
+    if (!s_image_fetch_buf || !s_image_mutex) {
+        ESP_LOGE(TAG, "Failed to pre-allocate image fetch buffer");
+    } else {
+        ESP_LOGI(TAG, "Image fetch buffer pre-allocated: %dKB", IMAGE_FETCH_BUF_SIZE / 1024);
+    }
+}
+
 uint8_t *nina_client_fetch_prepared_image(const char *base_url, int width, int height, int quality, size_t *out_size) {
     char url[320];
     snprintf(url, sizeof(url),
@@ -866,18 +897,45 @@ uint8_t *nina_client_fetch_prepared_image(const char *base_url, int width, int h
     bool chunked = esp_http_client_is_chunked_response(client);
     ESP_LOGI(TAG, "Image response: content_length=%d, chunked=%d", content_length, chunked);
 
-    int buf_size = (content_length > 0) ? content_length : (256 * 1024);
-    uint8_t *buffer = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
+    // Use pre-allocated buffer when available to avoid PSRAM fragmentation
+    bool using_static = false;
+    uint8_t *buffer = NULL;
+    int buf_size = 0;
+
+    if (s_image_fetch_buf && s_image_mutex &&
+        xSemaphoreTake(s_image_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        int needed = (content_length > 0) ? content_length : (256 * 1024);
+        if (needed <= IMAGE_FETCH_BUF_SIZE) {
+            buffer = s_image_fetch_buf;
+            buf_size = IMAGE_FETCH_BUF_SIZE;
+            using_static = true;
+        } else {
+            xSemaphoreGive(s_image_mutex);
+        }
+    }
+
     if (!buffer) {
-        ESP_LOGE(TAG, "Failed to allocate %d bytes for image", buf_size);
-        esp_http_client_cleanup(client);
-        return NULL;
+        // Fallback to dynamic allocation
+        buf_size = (content_length > 0) ? content_length : (256 * 1024);
+        buffer = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
+        if (!buffer) {
+            ESP_LOGE(TAG, "Failed to allocate %d bytes for image", buf_size);
+            esp_http_client_cleanup(client);
+            return NULL;
+        }
     }
 
     int total_read = 0, read_len;
     while (1) {
         int to_read = buf_size - total_read;
         if (to_read <= 0) {
+            if (using_static) {
+                // Static buffer full — can't grow it, abort
+                ESP_LOGW(TAG, "Image exceeds pre-allocated buffer (%d bytes)", buf_size);
+                xSemaphoreGive(s_image_mutex);
+                esp_http_client_cleanup(client);
+                return NULL;
+            }
             int new_size = buf_size + (256 * 1024);
             if (new_size > MAX_IMAGE_SIZE) {
                 ESP_LOGW(TAG, "Image exceeds %d byte cap, aborting fetch", MAX_IMAGE_SIZE);
@@ -905,17 +963,32 @@ uint8_t *nina_client_fetch_prepared_image(const char *base_url, int width, int h
 
     if (total_read == 0) {
         ESP_LOGE(TAG, "No image data received");
-        free(buffer);
+        if (!using_static) free(buffer);
+        else xSemaphoreGive(s_image_mutex);
         return NULL;
     }
 
     if (!chunked && total_read < content_length) {
         ESP_LOGE(TAG, "Incomplete image read: %d/%d", total_read, content_length);
-        free(buffer);
+        if (!using_static) free(buffer);
+        else xSemaphoreGive(s_image_mutex);
         return NULL;
+    }
+
+    // If using static buffer, copy to a right-sized allocation for the caller
+    uint8_t *result = buffer;
+    if (using_static) {
+        result = heap_caps_malloc(total_read, MALLOC_CAP_SPIRAM);
+        if (!result) {
+            ESP_LOGE(TAG, "Failed to allocate %d bytes for image result", total_read);
+            xSemaphoreGive(s_image_mutex);
+            return NULL;
+        }
+        memcpy(result, s_image_fetch_buf, total_read);
+        xSemaphoreGive(s_image_mutex);
     }
 
     *out_size = (size_t)total_read;
     ESP_LOGI(TAG, "Image fetched: %d bytes", total_read);
-    return buffer;
+    return result;
 }

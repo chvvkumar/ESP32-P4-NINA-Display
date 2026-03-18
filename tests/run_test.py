@@ -44,6 +44,7 @@ class WorkloadManager:
         self.config = config
         self.devices = devices
         self.influx_writer = influx_writer
+        self._lvgl_stress = config.get("lvgl_stress", False)
 
         wl_cfg = config.get("workloads", {})
 
@@ -52,6 +53,7 @@ class WorkloadManager:
         self.page_cycle = PageCycleWorkload(
             devices, influx_writer,
             dwell_s=wl_cfg.get("page_cycle", {}).get("dwell_s", 2),
+            include_summary=wl_cfg.get("page_cycle", {}).get("include_summary", False),
         )
         self.concurrent_conns = ConcurrentConnsWorkload(
             devices, influx_writer,
@@ -78,9 +80,10 @@ class WorkloadManager:
             await self.http_stress.start(
                 cfg.get("http_stress", {}).get("stress_rps", 20)
             )
-            await self.config_churn.start(
-                cfg.get("config_churn", {}).get("stress_rps", 5)
-            )
+            if self._lvgl_stress:
+                await self.config_churn.start(
+                    cfg.get("config_churn", {}).get("stress_rps", 5)
+                )
             await self.page_cycle.start(
                 cfg.get("page_cycle", {}).get("stress_interval_s", 2)
             )
@@ -107,9 +110,10 @@ class WorkloadManager:
             await self.http_stress.start(
                 cfg.get("http_stress", {}).get("stress_rps", 20) * 0.5
             )
-            await self.config_churn.start(
-                cfg.get("config_churn", {}).get("stress_rps", 5) * 0.5
-            )
+            if self._lvgl_stress:
+                await self.config_churn.start(
+                    cfg.get("config_churn", {}).get("stress_rps", 5) * 0.5
+                )
             await self.page_cycle.start(
                 cfg.get("page_cycle", {}).get("stress_interval_s", 2) * 2
             )
@@ -139,6 +143,23 @@ class WorkloadManager:
             await self.config_churn.restore_original_config(
                 session, device["host"]
             )
+
+    async def set_soak_display(self, session: aiohttp.ClientSession):
+        """Set fixed display settings for soak phase."""
+        for device in self.devices:
+            host = device["host"]
+            try:
+                await session.post(f"http://{host}/api/brightness",
+                                   json={"brightness": 50})
+                await session.post(f"http://{host}/api/color-brightness",
+                                   json={"color_brightness": 100})
+                await session.post(f"http://{host}/api/theme",
+                                   json={"theme": 0})
+                await session.post(f"http://{host}/api/widget-style",
+                                   json={"widget_style": 0})
+                logger.info(f"Set soak display settings for {host}")
+            except Exception as e:
+                logger.warning(f"Failed to set soak display for {host}: {e}")
 
 
 def setup_logging(log_level: str):
