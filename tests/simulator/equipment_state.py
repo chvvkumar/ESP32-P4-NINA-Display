@@ -11,6 +11,7 @@ class CameraState:
     """Camera state: cycles IDLE → EXPOSING → DOWNLOADING → IDLE."""
     name: str = "ZWO ASI2600MM Pro"
     exposure_time_s: float = 120.0
+    download_time_s: float = 2.0
     state: str = "Idle"
     temperature: float = -20.0
     cooler_on: bool = True
@@ -34,7 +35,7 @@ class CameraState:
                 self.state = "Downloading"
                 self._elapsed = 0.0
         elif self.state == "Downloading":
-            if self._elapsed >= 2.0:
+            if self._elapsed >= self.download_time_s:
                 self.state = "Idle"
                 self._elapsed = 0.0
                 events.append({"event": "IMAGE-SAVE"})

@@ -65,6 +65,7 @@ firmware\nina-display-ota.bin
 *.su
 *.idb
 *.pdb
+*.log
 
 # Temporary files
 *~

@@ -110,8 +110,10 @@ class PhaseManager:
             if self.get_total_elapsed_s() >= total_duration_s:
                 break
 
-            # SOAK
+            # SOAK — set fixed display settings before starting
             self._enter_phase(Phase.SOAK)
+            async with aiohttp.ClientSession() as session:
+                await workload_manager.set_soak_display(session)
             await workload_manager.start_all("soak")
             await self._run_soak(workload_manager)
             await workload_manager.stop_all()
@@ -179,6 +181,10 @@ class PhaseManager:
                     "instance_enabled_1": True,
                     "instance_enabled_2": True,
                     "instance_enabled_3": True,
+                    "brightness": 50,
+                    "color_brightness": 100,
+                    "theme": 0,
+                    "widget_style": 0,
                 }
                 try:
                     async with session.post(

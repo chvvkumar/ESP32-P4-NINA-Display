@@ -3,12 +3,14 @@ devices:
   - host: ninadash2.lan
   - host: ninadash3.lan
 
+lvgl_stress: false
+
 simulator:
   bind_address: "0.0.0.0"
   base_port: 1888
   advertise_ip: "192.168.1.211"
   speed_profiles:
-    stress: fast
+    stress: nina_stress
     soak: normal
 
 
@@ -26,12 +28,13 @@ workloads:
     endpoints: ["/api/perf", "/api/version", "/api/config"]
   config_churn:
     stress_rps: 0.1
-    soak_rps: 0.01
+    soak_rps: 0
     fields: ["brightness", "color_brightness"]
   page_cycle:
     stress_interval_s: 15
-    soak_interval_s: 30
+    soak_interval_s: 15
     dwell_s: 10
+    include_summary: true
   concurrent_conns:
     stress_count: 5
     soak_count: 2

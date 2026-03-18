@@ -16,9 +16,11 @@ FIRST_NINA_PAGE = 3
 class PageCycleWorkload(BaseWorkload):
     """Cycles through NINA instance pages with configurable dwell time."""
 
-    def __init__(self, devices: list[dict], metrics_writer, dwell_s: float = 5.0):
+    def __init__(self, devices: list[dict], metrics_writer, dwell_s: float = 5.0,
+                 include_summary: bool = False):
         super().__init__("page_cycle", devices, metrics_writer)
         self.dwell_s = dwell_s
+        self.include_summary = include_summary
         self._nina_pages: dict[str, list[int]] = {}
 
     async def _run_loop(self, device: dict, intensity: float):
@@ -33,17 +35,23 @@ class PageCycleWorkload(BaseWorkload):
                     data = await resp.json()
                     instance_count = data.get("instance_count", 3)
                     # NINA pages are at indices 3 through 3+instance_count-1
-                    self._nina_pages[host] = list(
+                    nina_pages = list(
                         range(FIRST_NINA_PAGE, FIRST_NINA_PAGE + instance_count)
                     )
+                    # Optionally include summary page (index 2) in rotation
+                    if self.include_summary:
+                        self._nina_pages[host] = [2] + nina_pages
+                    else:
+                        self._nina_pages[host] = nina_pages
                     logger.info(
                         f"{host}: NINA pages {self._nina_pages[host]} "
                         f"({instance_count} instances)"
                     )
         except Exception:
-            self._nina_pages[host] = [3, 4, 5]  # Default: 3 instances
+            default = [2, 3, 4, 5] if self.include_summary else [3, 4, 5]
+            self._nina_pages[host] = default
 
-        pages = self._nina_pages.get(host, [3, 4, 5])
+        pages = self._nina_pages.get(host, [2, 3, 4, 5] if self.include_summary else [3, 4, 5])
         page_idx = 0
 
         while not self._stop_event.is_set():
