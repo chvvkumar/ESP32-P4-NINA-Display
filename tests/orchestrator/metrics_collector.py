@@ -56,6 +56,26 @@ class MetricsCollector:
         """Return latest metrics for all devices, keyed by host."""
         return dict(self._latest_metrics)
 
+    def get_recent_avg_latency(self, host: str, window: int = 6) -> float | None:
+        """Compute average HTTP latency over the last *window* history samples.
+
+        Returns None if fewer than *window* samples are available or none
+        of them contain HTTP metrics.
+        """
+        history = self._metrics_history.get(host)
+        if not history or len(history) < window:
+            return None
+
+        recent = list(history)[-window:]
+        values = [
+            s["http"]["avg_ms"]
+            for s in recent
+            if "http" in s and s["http"].get("avg_ms", 0) > 0
+        ]
+        if not values:
+            return None
+        return sum(values) / len(values)
+
     async def _run(self):
         """Main polling loop — polls devices sequentially to avoid socket exhaustion."""
         while self._running:

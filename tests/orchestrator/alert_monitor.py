@@ -56,6 +56,10 @@ class AlertMonitor:
         # Instance down tracking: {device: {instance_idx: first_down_ts}}
         self._instance_down_since: dict[str, dict[int, float]] = {}
 
+        # Violation cooldown: (device, check_name) → last recorded timestamp
+        self._violation_cooldowns: dict[tuple[str, str], float] = {}
+        self._violations_suppressed: int = 0
+
         os.makedirs("logs/violations", exist_ok=True)
 
     # ------------------------------------------------------------------
@@ -136,6 +140,15 @@ class AlertMonitor:
             )
             await self._capture_state_snapshot(device)
 
+        # 2b. Heap low-water warning (only if above critical threshold)
+        heap_warning = self.thresholds.get("heap_warning_free_bytes", 32768)
+        if heap_free >= heap_threshold and 0 < heap_free < heap_warning:
+            await self._record_violation(
+                device, "heap_warning", Severity.MEDIUM,
+                f"Heap low: {heap_free} bytes (warning threshold {heap_warning})",
+                heap_free, heap_warning,
+            )
+
         # 3. PSRAM exhaustion (skip if 0 — means failed read)
         psram_free = metrics.get("psram_free", float("inf"))
         psram_threshold = self.thresholds.get("psram_min_free_bytes", 20971520)
@@ -185,8 +198,10 @@ class AlertMonitor:
                     error_rate, 1,
                 )
 
-        # 6. API latency (avg_ms — cumulative average, best steady-state proxy)
-        avg_latency = http.get("avg_ms", 0)
+        # 6. API latency — prefer sliding-window average (last 60s) over
+        #    cumulative avg_ms which never recovers after a stress phase.
+        windowed_latency = self.metrics_collector.get_recent_avg_latency(device)
+        avg_latency = windowed_latency if windowed_latency is not None else http.get("avg_ms", 0)
         stress_latency_threshold = self.thresholds.get("api_latency_avg_stress_ms", 500)
         soak_latency_threshold = self.thresholds.get("api_latency_avg_soak_ms", 200)
         if phase == "stress" and avg_latency > stress_latency_threshold:
@@ -284,8 +299,18 @@ class AlertMonitor:
         self, device: str, check_name: str, severity: Severity,
         message: str, value: float, threshold: float,
     ):
+        now = time.time()
+        cooldown_s = self.thresholds.get("violation_cooldown_s", 60)
+        cooldown_key = (device, check_name)
+        last_recorded = self._violation_cooldowns.get(cooldown_key, 0)
+        if now - last_recorded < cooldown_s:
+            self._violations_suppressed += 1
+            return
+
+        self._violation_cooldowns[cooldown_key] = now
+
         v = Violation(
-            timestamp=time.time(),
+            timestamp=now,
             device=device,
             check_name=check_name,
             severity=severity,

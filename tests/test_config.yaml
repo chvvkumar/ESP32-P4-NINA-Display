@@ -42,6 +42,7 @@ workloads:
 
 thresholds:
   heap_min_free_bytes: 8192
+  heap_warning_free_bytes: 32768
   psram_min_free_bytes: 20971520
   http_failure_rate_stress: 0.05
   http_failure_rate_soak: 0.01
@@ -53,3 +54,4 @@ thresholds:
   psram_frag_ratio_min: 0.9       # baseline ~0.97 at boot (single contiguous region)
   memory_leak_rate_bytes_per_hour: 1024
   memory_leak_window_hours: 6
+  violation_cooldown_s: 60
