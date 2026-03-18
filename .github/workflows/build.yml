@@ -32,7 +32,7 @@ jobs:
           BASE=${{ github.event.before }}
           HEAD=${{ github.sha }}
           CODE_CHANGES=$(git diff --name-only "$BASE" "$HEAD" -- \
-            ':!**/*.md' ':!docs/**' ':!images/**' ':!LICENSE' ':!.gitignore' ':!.github/workflows/**' \
+            ':!**/*.md' ':!docs/**' ':!images/**' ':!tests/**' ':!LICENSE' ':!.gitignore' ':!.github/workflows/**' \
             | head -1)
 
           if [ -n "$CODE_CHANGES" ]; then

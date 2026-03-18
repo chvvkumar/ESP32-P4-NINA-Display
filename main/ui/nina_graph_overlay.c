@@ -102,31 +102,26 @@ bool legend_hfr_hidden = false;
 lv_obj_t *thresh_lines[MAX_THRESH_LINES];
 lv_point_precise_t thresh_line_pts[MAX_THRESH_LINES][2];
 
-/* -- Red Night theme detection ------------------------------------------- */
-bool is_red_night_theme(void) {
-    return current_theme && strcmp(current_theme->name, "Red Night") == 0;
-}
-
 /* -- Theme-aware series colors ------------------------------------------- */
 uint32_t get_ra_color(void) {
-    return is_red_night_theme() ? COLOR_RA_RED : COLOR_RA;
+    return theme_is_red_night(current_theme) ? COLOR_RA_RED : COLOR_RA;
 }
 
 uint32_t get_dec_color(void) {
-    return is_red_night_theme() ? COLOR_DEC_RED : COLOR_DEC;
+    return theme_is_red_night(current_theme) ? COLOR_DEC_RED : COLOR_DEC;
 }
 
 uint32_t get_total_color(void) {
-    return is_red_night_theme() ? COLOR_TOTAL_RED : COLOR_TOTAL;
+    return theme_is_red_night(current_theme) ? COLOR_TOTAL_RED : COLOR_TOTAL;
 }
 
 uint32_t get_hfr_color(void) {
-    return is_red_night_theme() ? COLOR_HFR_RED : COLOR_HFR;
+    return theme_is_red_night(current_theme) ? COLOR_HFR_RED : COLOR_HFR;
 }
 
 /* -- Theme-aware text color for controls (white normally, red for Red Night) */
 uint32_t get_control_text_color(int gb) {
-    if (is_red_night_theme()) {
+    if (theme_is_red_night(current_theme)) {
         return app_config_apply_brightness(current_theme->text_color, gb);
     }
     return app_config_apply_brightness(0xffffff, gb);
@@ -714,7 +709,7 @@ void apply_chart_theme(void) {
 
     /* Summary (floating inside chart) */
     if (lbl_summary) {
-        uint32_t sum_color = is_red_night_theme()
+        uint32_t sum_color = theme_is_red_night(current_theme)
             ? app_config_apply_brightness(current_theme->text_color, gb)
             : app_config_apply_brightness(0xaaaaaa, gb);
         lv_obj_set_style_text_color(lbl_summary, lv_color_hex(sum_color), 0);
@@ -737,7 +732,7 @@ void apply_chart_theme(void) {
 
     /* X-axis title */
     if (lbl_x_title) {
-        uint32_t x_color = is_red_night_theme()
+        uint32_t x_color = theme_is_red_night(current_theme)
             ? app_config_apply_brightness(current_theme->label_color, gb)
             : app_config_apply_brightness(0x888888, gb);
         lv_obj_set_style_text_color(lbl_x_title, lv_color_hex(x_color), 0);

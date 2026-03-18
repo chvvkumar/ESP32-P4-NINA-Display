@@ -6,7 +6,6 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
 file(STRINGS "version.txt" PROJECT_VER)
 
-add_compile_options(-Wno-format)
 project(lvgl_demo_v9)
 
 # Build-time version header generation — runs git describe on every build.

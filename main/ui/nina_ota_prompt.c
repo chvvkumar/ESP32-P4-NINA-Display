@@ -2,6 +2,7 @@
 #include "nina_dashboard_internal.h"
 #include "app_config.h"
 #include "display_defs.h"
+#include "esp_heap_caps.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -344,9 +345,14 @@ void nina_ota_prompt_show(const char *new_version, const char *current_version, 
 
     /* Set notes — clean up markdown for on-screen display */
     if (release_notes) {
-        char formatted[1024];
-        format_notes_for_display(release_notes, formatted, sizeof(formatted));
-        lv_label_set_text(lbl_notes, formatted[0] ? formatted : "No release notes available.");
+        char *formatted = heap_caps_calloc(1, 1024, MALLOC_CAP_SPIRAM);
+        if (!formatted) {
+            lv_label_set_text(lbl_notes, "No release notes available.");
+        } else {
+            format_notes_for_display(release_notes, formatted, 1024);
+            lv_label_set_text(lbl_notes, formatted[0] ? formatted : "No release notes available.");
+            free(formatted);
+        }
     } else {
         lv_label_set_text(lbl_notes, "No release notes available.");
     }

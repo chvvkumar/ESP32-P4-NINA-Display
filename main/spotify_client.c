@@ -44,6 +44,11 @@ static spotify_playback_t s_cached_playback;
 
 QueueHandle_t spotify_action_queue;
 
+/* Auth header buffer — allocated once from PSRAM to avoid 2.1KB stack usage
+ * per API call. Safe: all Spotify API calls run on the single poll task. */
+static char *s_auth_header_buf = NULL;
+#define AUTH_HEADER_BUF_SIZE 1100
+
 // =============================================================================
 // Helpers
 // =============================================================================
@@ -54,17 +59,26 @@ QueueHandle_t spotify_action_queue;
  */
 static esp_err_t set_auth_header(esp_http_client_handle_t client)
 {
-    char token[1024];
-    if (spotify_auth_get_access_token(token, sizeof(token)) != ESP_OK) {
+    /* Lazy-allocate PSRAM buffer on first use */
+    if (!s_auth_header_buf) {
+        s_auth_header_buf = heap_caps_malloc(AUTH_HEADER_BUF_SIZE, MALLOC_CAP_SPIRAM);
+        if (!s_auth_header_buf) {
+            ESP_LOGE(TAG, "Failed to allocate auth header buffer from PSRAM");
+            return ESP_FAIL;
+        }
+    }
+
+    /* Fetch token into the tail of the buffer, then prepend "Bearer " */
+    char *token_start = s_auth_header_buf + 7;  /* room for "Bearer " */
+    size_t token_max = AUTH_HEADER_BUF_SIZE - 7;
+    if (spotify_auth_get_access_token(token_start, token_max) != ESP_OK) {
         ESP_LOGW(TAG, "No valid access token available");
         return ESP_FAIL;
     }
 
-    /* Build "Bearer <token>" header value — stack-local for thread safety.
-     * esp_http_client_set_header duplicates the string internally. */
-    char auth_header[1100];
-    snprintf(auth_header, sizeof(auth_header), "Bearer %s", token);
-    esp_http_client_set_header(client, "Authorization", auth_header);
+    /* Prepend "Bearer " in-place */
+    memcpy(s_auth_header_buf, "Bearer ", 7);
+    esp_http_client_set_header(client, "Authorization", s_auth_header_buf);
     return ESP_OK;
 }
 

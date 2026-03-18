@@ -80,15 +80,10 @@ static lv_obj_t *lbl_headroom_val = NULL;
 static lv_obj_t *lbl_lvgl_fps_val = NULL;
 static lv_obj_t *lbl_top_task_val = NULL;
 
-/* Red Night theme forces all colors to the red palette */
-static bool theme_forces_colors(void) {
-    return current_theme && strcmp(current_theme->name, "Red Night") == 0;
-}
-
 /* Bar color helper: returns dim/medium/bright red when Red Night,
  * otherwise returns standard green/yellow/red based on percentage. */
 static uint32_t bar_level_color(int pct, int low_thresh, int high_thresh) {
-    if (theme_forces_colors()) {
+    if (theme_is_red_night(current_theme)) {
         /* Dim, medium, bright red levels */
         if (pct < low_thresh)  return 0x7f1d1d;  /* dim red */
         if (pct < high_thresh) return 0xcc0000;   /* medium red */

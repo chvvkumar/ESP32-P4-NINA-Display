@@ -53,7 +53,6 @@ lv_obj_t *make_info_kv(lv_obj_t *parent, const char *key, lv_obj_t **out_val);
 lv_obj_t *make_info_kv_wide(lv_obj_t *parent, const char *key, lv_obj_t **out_val);
 
 /* ── Theme helpers ────────────────────────────────────────────────── */
-bool info_is_red_night(void);
 uint32_t info_get_text_color(int gb);
 
 /* ── Content builder forward declarations (defined in per-type .c files) ─ */

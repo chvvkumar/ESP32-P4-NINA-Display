@@ -159,11 +159,6 @@ static lv_obj_t *empty_sub = NULL;
 static lv_style_t style_glass_card;
 static bool styles_initialized = false;
 
-/* Red Night theme forces all colors to the red palette */
-static bool theme_forces_colors(void) {
-    return current_theme && strcmp(current_theme->name, "Red Night") == 0;
-}
-
 /* ── Helpers ───────────────────────────────────────────────────────── */
 
 static void summary_card_click_cb(lv_event_t *e) {
@@ -865,7 +860,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
         /* Filter */
         if (d->current_filter[0]) {
             set_label_if_changed(sc->lbl_filter, d->current_filter);
-            uint32_t fc = theme_forces_colors()
+            uint32_t fc = theme_is_red_night(current_theme)
                 ? 0 : app_config_get_filter_color(d->current_filter, i);
             if (fc != 0) {
                 lv_obj_set_style_text_color(sc->lbl_filter,
@@ -923,7 +918,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
         /* Progress bar color: filter color or theme progress */
         {
             uint32_t bar_col = 0;
-            if (!theme_forces_colors() && d->current_filter[0]) {
+            if (!theme_is_red_night(current_theme) && d->current_filter[0]) {
                 bar_col = app_config_get_filter_color(d->current_filter, i);
             }
             if (bar_col == 0 && current_theme) {
@@ -985,7 +980,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
                         current_theme->header_text_color, gb)), 0);
                 /* Use filter color for completed count when available */
                 uint32_t exp_color = current_theme->text_color;
-                if (d->exposure_total_count > 0 && !theme_forces_colors() &&
+                if (d->exposure_total_count > 0 && !theme_is_red_night(current_theme) &&
                     d->current_filter[0] && strcmp(d->current_filter, "--") != 0) {
                     uint32_t fc = app_config_get_filter_color(d->current_filter, i);
                     if (fc != 0) exp_color = fc;
@@ -1003,7 +998,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
             char buf[16];
             snprintf(buf, sizeof(buf), "%.2f\"", d->guider.rms_total);
             set_label_if_changed(sc->lbl_rms_val, buf);
-            uint32_t rms_col = theme_forces_colors()
+            uint32_t rms_col = theme_is_red_night(current_theme)
                 ? 0 : app_config_get_rms_color(d->guider.rms_total, i);
             if (rms_col != 0) {
                 lv_obj_set_style_text_color(sc->lbl_rms_val,
@@ -1027,7 +1022,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
             char buf[16];
             snprintf(buf, sizeof(buf), "%.2f", d->hfr);
             set_label_if_changed(sc->lbl_hfr_val, buf);
-            uint32_t hfr_col = theme_forces_colors()
+            uint32_t hfr_col = theme_is_red_night(current_theme)
                 ? 0 : app_config_get_hfr_color(d->hfr, i);
             if (hfr_col != 0) {
                 lv_obj_set_style_text_color(sc->lbl_hfr_val,
@@ -1132,11 +1127,11 @@ void summary_page_update(const nina_client_t *instances, int count) {
                 if (d->safety_is_safe) {
                     set_label_if_changed(sc->lbl_safety, ICON_VERIFIED_USER);
                     lv_obj_set_style_text_color(sc->lbl_safety,
-                        lv_color_hex(theme_forces_colors() ? 0x7f1d1d : 0x4CAF50), 0);
+                        lv_color_hex(theme_is_red_night(current_theme) ? 0x7f1d1d : 0x4CAF50), 0);
                 } else {
                     set_label_if_changed(sc->lbl_safety, ICON_GPP_BAD);
                     lv_obj_set_style_text_color(sc->lbl_safety,
-                        lv_color_hex(theme_forces_colors() ? 0xff0000 : 0xF44336), 0);
+                        lv_color_hex(theme_is_red_night(current_theme) ? 0xff0000 : 0xF44336), 0);
                 }
             } else {
                 set_label_if_changed(sc->lbl_safety, ICON_GPP_MAYBE);

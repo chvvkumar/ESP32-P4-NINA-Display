@@ -349,10 +349,14 @@ bool ota_github_check(bool include_prereleases, const char *current_version, git
      * off — perform() completes at the 302 without chasing the redirect.
      */
     ESP_LOGI(TAG, "Resolving OTA download URL...");
-    char resolved_url[2048] = {0};
+    char *resolved_url = heap_caps_calloc(1, 2048, MALLOC_CAP_SPIRAM);
+    if (!resolved_url) {
+        ESP_LOGE(TAG, "Failed to allocate resolved_url");
+        return true;  /* URL still valid, just unresolved */
+    }
     redirect_ctx_t redir_ctx = {
         .url_buf = resolved_url,
-        .url_buf_size = sizeof(resolved_url),
+        .url_buf_size = 2048,
     };
     esp_http_client_config_t redir_cfg = {
         .url = out->ota_url,
@@ -382,6 +386,7 @@ bool ota_github_check(bool include_prereleases, const char *current_version, git
         esp_http_client_cleanup(hc);
     }
 
+    free(resolved_url);
     return true;
 }
 

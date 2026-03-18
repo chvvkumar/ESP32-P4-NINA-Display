@@ -434,6 +434,20 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
+    /* Increment boot counter in NVS */
+    {
+        nvs_handle_t nvs;
+        if (nvs_open("system", NVS_READWRITE, &nvs) == ESP_OK) {
+            uint32_t boot_cnt = 0;
+            nvs_get_u32(nvs, "boot_cnt", &boot_cnt);
+            boot_cnt++;
+            nvs_set_u32(nvs, "boot_cnt", boot_cnt);
+            nvs_commit(nvs);
+            nvs_close(nvs);
+            ESP_LOGI(TAG, "Boot count: %lu", (unsigned long)boot_cnt);
+        }
+    }
+
     /* Route all cJSON allocations to PSRAM to reduce internal heap pressure */
     cJSON_Hooks psram_hooks = { .malloc_fn = cjson_psram_malloc, .free_fn = free };
     cJSON_InitHooks(&psram_hooks);
@@ -450,12 +464,19 @@ void app_main(void)
     // Check if we woke from deep sleep
     esp_sleep_wakeup_cause_t wake_cause = power_mgmt_check_wake_cause();
 
+    // Track crash resets (PANIC, WDT) in RTC memory
+    power_mgmt_check_crash();
+
     nina_connection_init();
 
     perf_monitor_init(30);
     perf_monitor_set_enabled(app_config_get()->debug_mode);
 
     instance_count = app_config_get_instance_count();
+    if (app_config_get()->demo_mode) {
+        instance_count = 3;  /* Demo mode always shows all 3 instance profiles */
+        ESP_LOGI(TAG, "Demo mode: forcing instance_count = 3");
+    }
     ESP_LOGI(TAG, "Configured instances: %d", instance_count);
 
     wifi_init();

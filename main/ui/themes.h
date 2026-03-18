@@ -6,6 +6,7 @@ extern "C" {
 #endif
 
 #include <stdint.h>
+#include <stdbool.h>
 
 typedef struct {
     const char *name;
@@ -21,7 +22,12 @@ typedef struct {
     uint32_t progress_color;
     uint32_t rms_color;
     uint32_t hfr_color;
+    bool is_red_night;
 } theme_t;
+
+static inline bool theme_is_red_night(const theme_t *t) {
+    return t && t->is_red_night;
+}
 
 /**
  * @brief Get the total number of available themes

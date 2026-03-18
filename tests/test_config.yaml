@@ -1,0 +1,50 @@
+devices:
+  - host: ninadash1.lan
+  - host: ninadash2.lan
+  - host: ninadash3.lan
+
+simulator:
+  bind_address: "0.0.0.0"
+  base_port: 1888
+  advertise_ip: "192.168.1.211"
+  speed_profiles:
+    stress: fast
+    soak: normal
+
+
+phases:
+  startup_duration_s: 120
+  stress_duration_s: 1800
+  recovery_duration_s: 300
+  soak_duration_s: 82800
+  total_duration_days: 3
+
+workloads:
+  http_stress:
+    stress_rps: 3
+    soak_rps: 0.033
+    endpoints: ["/api/perf", "/api/version", "/api/config"]
+  config_churn:
+    stress_rps: 0.1
+    soak_rps: 0.01
+    fields: ["brightness", "color_brightness"]
+  page_cycle:
+    stress_interval_s: 15
+    soak_interval_s: 30
+    dwell_s: 10
+  concurrent_conns:
+    stress_count: 5
+    soak_count: 2
+    endpoint: "/api/perf"
+
+thresholds:
+  heap_min_free_bytes: 8192
+  psram_min_free_bytes: 20971520
+  http_failure_rate_stress: 0.05
+  http_failure_rate_soak: 0.01
+  api_latency_avg_stress_ms: 500
+  api_latency_avg_soak_ms: 200
+  unreachable_timeout_s: 30
+  nina_connect_timeout_s: 60
+  memory_leak_rate_bytes_per_hour: 1024
+  memory_leak_window_hours: 6

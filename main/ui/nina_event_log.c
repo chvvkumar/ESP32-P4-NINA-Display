@@ -18,15 +18,11 @@
 #include <string.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include "themes.h"
 
 static const char *TAG = "evtlog";
 
 #define EVENT_LOG_MAX_ENTRIES 100
-
-/* Red Night theme forces all colors to the red palette */
-static bool theme_forces_colors(void) {
-    return current_theme && strcmp(current_theme->name, "Red Night") == 0;
-}
 
 /* Severity colors (matching toast colors) */
 static const uint32_t sev_colors[] = {
@@ -56,7 +52,7 @@ typedef struct {
 static event_entry_t  s_entries[EVENT_LOG_MAX_ENTRIES];
 static int            s_count = 0;
 static int            s_write_index = 0;
-static portMUX_TYPE   s_spinlock = portMUX_INITIALIZER_UNLOCKED;
+static SemaphoreHandle_t s_log_mutex = NULL;
 
 /* Overlay UI widgets */
 static lv_obj_t      *s_overlay = NULL;
@@ -88,17 +84,22 @@ static void close_cb(lv_event_t *e) {
 void nina_event_log_add(event_severity_t sev, int instance, const char *message) {
     if (!message) return;
 
-    portENTER_CRITICAL(&s_spinlock);
-    event_entry_t *entry = &s_entries[s_write_index];
-    entry->sev = sev;
-    entry->instance = instance;
-    strncpy(entry->message, message, sizeof(entry->message) - 1);
-    entry->message[sizeof(entry->message) - 1] = '\0';
-    entry->timestamp_ms = esp_timer_get_time() / 1000;
+    if (!s_log_mutex) {
+        s_log_mutex = xSemaphoreCreateMutex();
+        if (!s_log_mutex) return;
+    }
+    if (xSemaphoreTake(s_log_mutex, pdMS_TO_TICKS(50))) {
+        event_entry_t *entry = &s_entries[s_write_index];
+        entry->sev = sev;
+        entry->instance = instance;
+        strncpy(entry->message, message, sizeof(entry->message) - 1);
+        entry->message[sizeof(entry->message) - 1] = '\0';
+        entry->timestamp_ms = esp_timer_get_time() / 1000;
 
-    s_write_index = (s_write_index + 1) % EVENT_LOG_MAX_ENTRIES;
-    if (s_count < EVENT_LOG_MAX_ENTRIES) s_count++;
-    portEXIT_CRITICAL(&s_spinlock);
+        s_write_index = (s_write_index + 1) % EVENT_LOG_MAX_ENTRIES;
+        if (s_count < EVENT_LOG_MAX_ENTRIES) s_count++;
+        xSemaphoreGive(s_log_mutex);
+    }
 
     ESP_LOGD(TAG, "[%d] %s", instance, message);
 }
@@ -180,17 +181,18 @@ void nina_event_log_show(void) {
     event_entry_t local[EVENT_LOG_MAX_ENTRIES];
     int local_count = 0;
 
-    portENTER_CRITICAL(&s_spinlock);
-    local_count = s_count;
-    if (local_count > 0) {
-        /* Copy entries in reverse chronological order */
-        int read_idx = (s_write_index - 1 + EVENT_LOG_MAX_ENTRIES) % EVENT_LOG_MAX_ENTRIES;
-        for (int i = 0; i < local_count; i++) {
-            local[i] = s_entries[read_idx];
-            read_idx = (read_idx - 1 + EVENT_LOG_MAX_ENTRIES) % EVENT_LOG_MAX_ENTRIES;
+    if (s_log_mutex && xSemaphoreTake(s_log_mutex, pdMS_TO_TICKS(50))) {
+        local_count = s_count;
+        if (local_count > 0) {
+            /* Copy entries in reverse chronological order */
+            int read_idx = (s_write_index - 1 + EVENT_LOG_MAX_ENTRIES) % EVENT_LOG_MAX_ENTRIES;
+            for (int i = 0; i < local_count; i++) {
+                local[i] = s_entries[read_idx];
+                read_idx = (read_idx - 1 + EVENT_LOG_MAX_ENTRIES) % EVENT_LOG_MAX_ENTRIES;
+            }
         }
+        xSemaphoreGive(s_log_mutex);
     }
-    portEXIT_CRITICAL(&s_spinlock);
 
     /* Clear existing rows */
     lv_obj_clean(s_scroll_cont);
@@ -223,7 +225,7 @@ void nina_event_log_show(void) {
         lv_obj_set_style_radius(dot, 4, 0);
         lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
         lv_obj_set_style_bg_color(dot, lv_color_hex(
-            theme_forces_colors() ? sev_colors_red[e->sev] : sev_colors[e->sev]), 0);
+            theme_is_red_night(current_theme) ? sev_colors_red[e->sev] : sev_colors[e->sev]), 0);
 
         /* Instance prefix + message */
         char text[160];

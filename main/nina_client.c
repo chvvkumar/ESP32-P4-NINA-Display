@@ -110,7 +110,7 @@ void nina_client_unlock(nina_client_t *client) {
 // =============================================================================
 
 static time_t my_timegm(struct tm *tm) {
-    long t = 0;
+    int64_t t = 0;
     int year = tm->tm_year + 1900;
     int mon = tm->tm_mon; // 0-11
 
@@ -267,6 +267,20 @@ cJSON *http_get_json(const char *url) {
             if (read_len <= 0) break;
             total_read_len += read_len;
         }
+        /* Check for partial read — truncated JSON could parse into
+         * a valid but incomplete tree, causing silent data loss. */
+        if (total_read_len < content_length) {
+            ESP_LOGW(TAG, "Partial HTTP read: %d/%d bytes for %s",
+                     total_read_len, content_length, url);
+            free(buffer);
+            if (poll_mode && reuse_slot) {
+                esp_http_client_close(client);
+                *reuse_slot = client;
+            } else {
+                esp_http_client_cleanup(client);
+            }
+            continue;  /* retry */
+        }
         buffer[total_read_len] = '\0';
 
         // Keep connection alive for reuse in poll mode; cleanup otherwise
@@ -387,10 +401,9 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
 
     int64_t now_ms = esp_timer_get_time() / 1000;
 
-    // Mark disconnected before fetch — fetchers set connected=true on success.
-    // Don't reset display fields (status, time_remaining, etc.) here: with polling
-    // in a separate task, the UI would see the blank values during the HTTP fetch window.
-    data->connected = false;
+    // Don't reset data->connected here — the fetcher sets it based on HTTP result,
+    // and the connection state machine below provides hysteresis. Pre-clearing it
+    // would race with WebSocket handlers that also write to the struct.
 
     ESP_LOGI(TAG, "=== Polling NINA data (%s: %s) ===",
              state->bundle_not_available ? "tiered" : "bundled",
@@ -421,7 +434,10 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
 
     // --- Connection check (both bundled and legacy paths) ---
     nina_conn_state_t conn_state = nina_connection_report_poll(instance, data->connected);
-    data->connected = (conn_state == NINA_CONN_CONNECTED);
+    if (nina_client_lock(data, 100)) {
+        data->connected = (conn_state == NINA_CONN_CONNECTED);
+        nina_client_unlock(data);
+    }
 
     if (!data->connected) {
         state->static_fetched = false;
@@ -577,11 +593,13 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
 }
 
 void nina_client_poll_heartbeat(const char *base_url, nina_client_t *data, int instance) {
-    data->connected = false;
     fetch_camera_info_robust(base_url, data);
 
     nina_conn_state_t conn_state = nina_connection_report_poll(instance, data->connected);
-    data->connected = (conn_state == NINA_CONN_CONNECTED);
+    if (nina_client_lock(data, 100)) {
+        data->connected = (conn_state == NINA_CONN_CONNECTED);
+        nina_client_unlock(data);
+    }
 
     ESP_LOGD(TAG, "Heartbeat: connected=%d", data->connected);
 }
@@ -741,7 +759,7 @@ bool nina_client_dns_check(const char *base_url) {
 
     int64_t now_ms = esp_timer_get_time() / 1000;
 
-    if (s_dns_mutex) xSemaphoreTake(s_dns_mutex, portMAX_DELAY);
+    if (s_dns_mutex) xSemaphoreTake(s_dns_mutex, pdMS_TO_TICKS(5000));
 
     // Check DNS cache for a valid (non-expired) entry
     for (int i = 0; i < 3; i++) {
@@ -771,7 +789,7 @@ bool nina_client_dns_check(const char *base_url) {
         inet_ntoa_r(addr->sin_addr, ip_str, sizeof(ip_str));
         freeaddrinfo(result);
 
-        if (s_dns_mutex) xSemaphoreTake(s_dns_mutex, portMAX_DELAY);
+        if (s_dns_mutex) xSemaphoreTake(s_dns_mutex, pdMS_TO_TICKS(5000));
 
         // Find existing slot or first empty slot
         int slot = -1;
@@ -797,7 +815,7 @@ bool nina_client_dns_check(const char *base_url) {
     if (result) freeaddrinfo(result);
 
     // Lookup failed — try stale cache as fallback
-    if (s_dns_mutex) xSemaphoreTake(s_dns_mutex, portMAX_DELAY);
+    if (s_dns_mutex) xSemaphoreTake(s_dns_mutex, pdMS_TO_TICKS(5000));
     for (int i = 0; i < 3; i++) {
         if (strcmp(s_dns_cache[i].hostname, hostname) == 0 &&
             s_dns_cache[i].resolved_ip[0] != '\0') {

@@ -7,6 +7,7 @@
 #include "app_config.h"
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdatomic.h>
 
 #define WIFI_CONNECTED_BIT BIT0
 
@@ -15,7 +16,7 @@ extern EventGroupHandle_t s_wifi_event_group;
 extern int instance_count;
 
 /* Signals the data task that a page switch occurred — defined in tasks.c */
-extern volatile bool page_changed;
+extern _Atomic bool page_changed;
 
 /** Task handle for data_update_task (UI coordinator) — used by WebSocket to wake for immediate UI refresh. */
 extern TaskHandle_t data_task_handle;
@@ -24,16 +25,16 @@ extern TaskHandle_t data_task_handle;
 extern TaskHandle_t poll_task_handles[MAX_NINA_INSTANCES];
 
 /** OTA in progress — data task suspends when true. Set by OTA handler. */
-extern volatile bool ota_in_progress;
+extern _Atomic bool ota_in_progress;
 
 /** On-demand firmware update check — set by settings page button. */
-extern volatile bool ota_check_requested;
+extern _Atomic bool ota_check_requested;
 
 /** Screen touch detected — wakes display from screen sleep. Set by LVGL touch handler. */
-extern volatile bool screen_touch_wake;
+extern _Atomic bool screen_touch_wake;
 
 /** True while the display is in screen-sleep mode (backlight off). */
-extern volatile bool screen_asleep;
+extern _Atomic bool screen_asleep;
 
 /* ── Per-instance poll task context ── */
 typedef struct {
@@ -61,7 +62,7 @@ void allsky_poll_task(void *arg);
 
 /** Spotify poll task handle and page-active flag — defined in tasks.c. */
 extern TaskHandle_t spotify_task_handle;
-extern volatile bool spotify_page_active;
+extern _Atomic bool spotify_page_active;
 
 /** FreeRTOS task: Spotify API poller — fetches currently-playing, album art on track change. */
 void spotify_poll_task(void *arg);

@@ -59,3 +59,6 @@ void allsky_data_unlock(allsky_data_t *data);
  * @param data             Output data struct (mutex-protected)
  */
 void allsky_client_poll(const char *hostname, const char *field_config_json, allsky_data_t *data);
+
+/** Invalidate the cached parsed field config. Call when config changes. */
+void allsky_invalidate_field_config_cache(void);

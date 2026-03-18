@@ -31,6 +31,7 @@ static const theme_t themes[] = {
         .progress_color = 0x7f1d1d,
         .rms_color = 0xcc0000,
         .hfr_color = 0x991b1b,
+        .is_red_night = true,
     },
     {
         .name = "Monochrome",

@@ -241,7 +241,7 @@ void build_mount_content(lv_obj_t *content) {
 /* ── Populate data ───────────────────────────────────────────────── */
 
 void populate_mount_data(const mount_detail_data_t *data) {
-    char buf[64];
+    char buf[80];
     int gb = app_config_get()->color_brightness;
 
     /* Hero coordinates */
@@ -270,7 +270,7 @@ void populate_mount_data(const mount_detail_data_t *data) {
         lv_label_set_text(lbl_track_enabled, data->tracking_enabled ? "Yes" : "No");
         if (current_theme) {
             uint32_t color = data->tracking_enabled ? 0x4ade80 : current_theme->label_color;
-            if (info_is_red_night()) color = current_theme->text_color;
+            if (theme_is_red_night(current_theme)) color = current_theme->text_color;
             lv_obj_set_style_text_color(lbl_track_enabled,
                 lv_color_hex(app_config_apply_brightness(color, gb)), 0);
         }
@@ -310,7 +310,7 @@ void populate_mount_data(const mount_detail_data_t *data) {
         lv_label_set_text(lbl_slewing, buf);
         if (current_theme) {
             uint32_t color = data->slewing ? 0xeab308 : current_theme->label_color;  /* yellow when slewing */
-            if (info_is_red_night()) color = current_theme->text_color;
+            if (theme_is_red_night(current_theme)) color = current_theme->text_color;
             lv_obj_set_style_text_color(lbl_slewing,
                 lv_color_hex(app_config_apply_brightness(color, gb)), 0);
         }

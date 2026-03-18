@@ -93,7 +93,7 @@ void build_autofocus_content(lv_obj_t *content) {
     }
 
     /* AF data series — Red Night gets muted red, normal gets orange */
-    uint32_t series_color = info_is_red_night()
+    uint32_t series_color = theme_is_red_night(current_theme)
         ? app_config_apply_brightness(AF_COLOR_RED, gb)
         : app_config_apply_brightness(AF_COLOR_NORMAL, gb);
     ser_af = lv_chart_add_series(af_chart, lv_color_hex(series_color), LV_CHART_AXIS_PRIMARY_Y);
@@ -326,7 +326,7 @@ void populate_autofocus_data(const autofocus_data_t *data) {
 
     /* Update series color — Red Night aware */
     {
-        uint32_t sc = info_is_red_night()
+        uint32_t sc = theme_is_red_night(current_theme)
             ? app_config_apply_brightness(AF_COLOR_RED, gb)
             : app_config_apply_brightness(AF_COLOR_NORMAL, gb);
         lv_chart_set_series_color(af_chart, ser_af, lv_color_hex(sc));
@@ -391,7 +391,7 @@ void theme_autofocus_content(void) {
     lv_obj_set_style_line_color(af_chart, lv_color_hex(current_theme->bento_border), LV_PART_MAIN);
 
     /* Series color — Red Night aware */
-    uint32_t sc = info_is_red_night()
+    uint32_t sc = theme_is_red_night(current_theme)
         ? app_config_apply_brightness(AF_COLOR_RED, gb)
         : app_config_apply_brightness(AF_COLOR_NORMAL, gb);
     lv_chart_set_series_color(af_chart, ser_af, lv_color_hex(sc));
@@ -421,7 +421,7 @@ void theme_autofocus_content(void) {
 
     /* Summary label */
     if (lbl_summary) {
-        uint32_t sum_color = info_is_red_night()
+        uint32_t sum_color = theme_is_red_night(current_theme)
             ? app_config_apply_brightness(current_theme->text_color, gb)
             : app_config_apply_brightness(0xaaaaaa, gb);
         lv_obj_set_style_text_color(lbl_summary, lv_color_hex(sum_color), 0);

@@ -32,12 +32,8 @@ static int built_content_type = -1;
 
 /* ── Theme helpers ───────────────────────────────────────────────── */
 
-bool info_is_red_night(void) {
-    return current_theme && strcmp(current_theme->name, "Red Night") == 0;
-}
-
 uint32_t info_get_text_color(int gb) {
-    if (info_is_red_night()) {
+    if (theme_is_red_night(current_theme)) {
         return app_config_apply_brightness(current_theme->text_color, gb);
     }
     return app_config_apply_brightness(0xffffff, gb);

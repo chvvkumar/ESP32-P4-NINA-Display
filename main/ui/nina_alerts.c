@@ -45,11 +45,6 @@ static lv_timer_t *s_flash_anim_timer = NULL;
 static int  s_flash_step = 0;       /* Current step in flash sequence */
 static int  s_flash_total = 0;      /* Total steps (FLASH_CYCLES * 2) */
 
-/* Red Night theme forces all colors to the red palette */
-static bool theme_forces_colors(void) {
-    return current_theme && strcmp(current_theme->name, "Red Night") == 0;
-}
-
 /* ── Helpers ────────────────────────────────────────────────────────── */
 static int64_t now_ms(void) {
     return esp_timer_get_time() / 1000;
@@ -73,7 +68,7 @@ static void flash_step_cb(lv_timer_t *timer) {
 
     /* Alternate red / white (or bright/dim red in Red Night) */
     uint32_t color;
-    if (theme_forces_colors()) {
+    if (theme_is_red_night(current_theme)) {
         color = (s_flash_step % 2 == 0) ? 0xff0000 : 0x7f1d1d;
     } else {
         color = (s_flash_step % 2 == 0) ? 0xFF0000 : 0xFFFFFF;
