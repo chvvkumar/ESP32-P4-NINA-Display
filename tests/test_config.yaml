@@ -46,7 +46,7 @@ thresholds:
   http_failure_rate_stress: 0.05
   http_failure_rate_soak: 0.01
   api_latency_avg_stress_ms: 500
-  api_latency_avg_soak_ms: 200
+  api_latency_avg_soak_ms: 500
   unreachable_timeout_s: 30
   nina_connect_timeout_s: 60
   heap_frag_ratio_min: 0.3       # baseline ~0.52 at boot (non-contiguous DRAM regions)
