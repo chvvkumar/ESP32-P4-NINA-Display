@@ -49,7 +49,7 @@ thresholds:
   api_latency_avg_soak_ms: 200
   unreachable_timeout_s: 30
   nina_connect_timeout_s: 60
-  heap_frag_ratio_min: 0.7
-  psram_frag_ratio_min: 0.8
+  heap_frag_ratio_min: 0.3       # baseline ~0.52 at boot (non-contiguous DRAM regions)
+  psram_frag_ratio_min: 0.9       # baseline ~0.97 at boot (single contiguous region)
   memory_leak_rate_bytes_per_hour: 1024
   memory_leak_window_hours: 6
