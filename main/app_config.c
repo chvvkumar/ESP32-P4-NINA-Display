@@ -679,10 +679,10 @@ typedef struct {
 static void set_defaults(app_config_t *cfg) {
     memset(cfg, 0, sizeof(app_config_t));
     cfg->config_version = APP_CONFIG_VERSION;
-    strcpy(cfg->api_url[0], "http://astromele2.lan:1888/v2/api/");
-    strcpy(cfg->api_url[1], "http://astromele3.lan:1888/v2/api/");
+    strcpy(cfg->api_url[0], "http://astromele1.lan:1888/v2/api/");
+    strcpy(cfg->api_url[1], "http://astromele2.lan:1888/v2/api/");
     strcpy(cfg->ntp_server, "pool.ntp.org");
-    cfg->tz_string[0] = '\0';  // Default: UTC (no offset)
+    strcpy(cfg->tz_string, "CST6CDT,M3.2.0,M11.1.0");
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         strcpy(cfg->filter_colors[i], "{}");
         strcpy(cfg->rms_thresholds[i], DEFAULT_RMS_THRESHOLDS);
@@ -696,8 +696,8 @@ static void set_defaults(app_config_t *cfg) {
     cfg->auto_rotate_effect = 0;
     cfg->auto_rotate_skip_disconnected = true;
     cfg->auto_rotate_pages = 0x0E;  // Default: all NINA instances (bits 1-3)
-    cfg->update_rate_s = 2;
-    cfg->graph_update_interval_s = 5;
+    cfg->update_rate_s = 5;
+    cfg->graph_update_interval_s = 10;
     cfg->connection_timeout_s = 6;
     cfg->toast_duration_s = 8;
     cfg->debug_mode = false;
@@ -722,7 +722,7 @@ static void set_defaults(app_config_t *cfg) {
     cfg->mqtt_port = 1883;
 
     // AllSky defaults
-    cfg->allsky_hostname[0] = '\0';
+    strcpy(cfg->allsky_hostname, "allskypi5.lan");
     cfg->allsky_update_interval_s = 5;
     cfg->allsky_dew_offset = 5.0f;
     strncpy(cfg->allsky_field_config, DEFAULT_ALLSKY_FIELD_CONFIG, sizeof(cfg->allsky_field_config) - 1);

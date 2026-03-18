@@ -17,6 +17,7 @@ class Severity(enum.Enum):
     CRITICAL = "CRITICAL"
     HIGH = "HIGH"
     MEDIUM = "MEDIUM"
+    LOW = "LOW"
 
 
 @dataclass
@@ -254,6 +255,26 @@ class AlertMonitor:
                     f"PSRAM leak detected: {abs(leak_rate):.0f} bytes/hr over 6h",
                     abs(leak_rate), 10240,
                 )
+
+        # 11. Heap fragmentation — ratio = largest_free_block / total_free; lower = more fragmented
+        heap_frag = metrics.get("heap_frag_ratio", 0)
+        heap_frag_min = self.thresholds.get("heap_frag_ratio_min", 0.7)
+        if 0 < heap_frag < heap_frag_min:
+            await self._record_violation(
+                device, "heap_frag_warning", Severity.MEDIUM,
+                f"Heap fragmentation high: ratio {heap_frag:.3f} (min {heap_frag_min})",
+                heap_frag, heap_frag_min,
+            )
+
+        # 12. PSRAM fragmentation (skip if 0 — means no data)
+        psram_frag = metrics.get("psram_frag_ratio", 0)
+        psram_frag_min = self.thresholds.get("psram_frag_ratio_min", 0.8)
+        if 0 < psram_frag < psram_frag_min:
+            await self._record_violation(
+                device, "psram_frag_warning", Severity.LOW,
+                f"PSRAM fragmentation high: ratio {psram_frag:.3f} (min {psram_frag_min})",
+                psram_frag, psram_frag_min,
+            )
 
     # ------------------------------------------------------------------
     # Helpers

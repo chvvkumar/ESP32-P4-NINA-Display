@@ -10,6 +10,7 @@
 #include "nina_dashboard_internal.h"
 #include "jpeg_utils.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -23,6 +24,9 @@ static const char *TAG = "thumbnail";
 /* Double-tap threshold in milliseconds */
 #define DOUBLE_TAP_MS 350
 
+/* Max scaled buffer: 2x zoom on 720x720 = 1440x1440 RGB565, 128-byte aligned */
+#define SCALED_BUF_MAX_SIZE  (((1440 * 1440 * 2) + 127) & ~(size_t)127)
+
 /* Thumbnail overlay state — shared via nina_dashboard_internal.h */
 lv_obj_t *thumbnail_overlay = NULL;
 static lv_obj_t *img_container = NULL;
@@ -34,7 +38,8 @@ static lv_obj_t *btn_back = NULL;
 static lv_obj_t *btn_back_lbl = NULL;
 static lv_image_dsc_t thumbnail_dsc;
 static uint8_t *thumbnail_original_buf = NULL;   /* Original decoded image */
-static uint8_t *thumbnail_scaled_buf = NULL;     /* PPA-scaled for current zoom */
+static uint8_t *thumbnail_scaled_buf = NULL;     /* Pre-allocated PPA-scaled buffer for zoom */
+static size_t thumbnail_scaled_buf_size = 0;     /* Size of pre-allocated scaled buffer */
 static int scaled_zoom_level = -1;               /* Zoom level of scaled_buf */
 static volatile bool thumbnail_requested = false;
 
@@ -44,6 +49,16 @@ static uint32_t fit_scale = 256;
 static uint32_t orig_w = 0;
 static uint32_t orig_h = 0;
 static uint32_t last_click_time = 0;
+
+void nina_thumbnail_init(void) {
+    thumbnail_scaled_buf = heap_caps_aligned_calloc(128, 1, SCALED_BUF_MAX_SIZE, MALLOC_CAP_SPIRAM);
+    if (thumbnail_scaled_buf) {
+        thumbnail_scaled_buf_size = SCALED_BUF_MAX_SIZE;
+        ESP_LOGI(TAG, "Thumbnail scaled buffer pre-allocated: %dKB", SCALED_BUF_MAX_SIZE / 1024);
+    } else {
+        ESP_LOGE(TAG, "Failed to pre-allocate thumbnail scaled buffer (%d bytes)", SCALED_BUF_MAX_SIZE);
+    }
+}
 
 /* ------------------------------------------------------------------ */
 /*  Zoom logic                                                        */
@@ -74,11 +89,7 @@ static void apply_zoom(void) {
     uint32_t disp_h = orig_h * scale / 256;
     if (scale == 256) {
         /* 1:1 — use original buffer directly, no scaling needed */
-        if (thumbnail_scaled_buf) {
-            free(thumbnail_scaled_buf);
-            thumbnail_scaled_buf = NULL;
-            scaled_zoom_level = -1;
-        }
+        scaled_zoom_level = -1;
         update_image_descriptor(thumbnail_original_buf, orig_w, orig_h,
                                 orig_w * orig_h * 2);
         lv_image_set_scale(thumbnail_img, 256);
@@ -88,12 +99,21 @@ static void apply_zoom(void) {
     } else {
         /* PPA pre-scale to target dimensions for smooth panning */
         size_t ppa_size = 0;
-        uint8_t *scaled = ppa_scale_rgb565(thumbnail_original_buf,
+        uint8_t *scaled = NULL;
+        if (thumbnail_scaled_buf && thumbnail_scaled_buf_size > 0) {
+            /* Use pre-allocated buffer */
+            scaled = ppa_scale_rgb565_into(thumbnail_original_buf,
                                             orig_w, orig_h, 0,
-                                            disp_w, disp_h, &ppa_size);
+                                            disp_w, disp_h,
+                                            thumbnail_scaled_buf, thumbnail_scaled_buf_size,
+                                            &ppa_size);
+        } else {
+            /* Fallback to dynamic allocation if pre-alloc failed at init */
+            scaled = ppa_scale_rgb565(thumbnail_original_buf,
+                                       orig_w, orig_h, 0,
+                                       disp_w, disp_h, &ppa_size);
+        }
         if (scaled) {
-            if (thumbnail_scaled_buf) free(thumbnail_scaled_buf);
-            thumbnail_scaled_buf = scaled;
             scaled_zoom_level = current_zoom;
             update_image_descriptor(scaled, disp_w, disp_h, ppa_size);
             lv_image_set_scale(thumbnail_img, 256);
@@ -259,12 +279,8 @@ void nina_dashboard_set_thumbnail(const uint8_t *rgb565_data, uint32_t w, uint32
         return;
     }
 
-    /* Free previous buffers */
-    if (thumbnail_scaled_buf) {
-        free(thumbnail_scaled_buf);
-        thumbnail_scaled_buf = NULL;
-        scaled_zoom_level = -1;
-    }
+    /* Reset scaled zoom level (pre-allocated buffer is kept) */
+    scaled_zoom_level = -1;
     if (thumbnail_original_buf) {
         free(thumbnail_original_buf);
         thumbnail_original_buf = NULL;
@@ -304,11 +320,7 @@ void nina_dashboard_hide_thumbnail(void) {
         lv_obj_add_flag(thumbnail_img, LV_OBJ_FLAG_HIDDEN);
         lv_image_set_src(thumbnail_img, NULL);
     }
-    if (thumbnail_scaled_buf) {
-        free(thumbnail_scaled_buf);
-        thumbnail_scaled_buf = NULL;
-        scaled_zoom_level = -1;
-    }
+    scaled_zoom_level = -1;
     if (thumbnail_original_buf) {
         free(thumbnail_original_buf);
         thumbnail_original_buf = NULL;

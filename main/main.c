@@ -40,6 +40,7 @@
 #include "ui/nina_spotify.h"
 #include "wifi_manager.h"
 #include "ui/nina_settings_tabview.h"
+#include "ui/nina_thumbnail.h"
 
 /* Embedded splash logo (JPEG, hardware-decoded at boot) */
 extern const uint8_t logo_jpg_start[] asm("_binary_logo_jpg_start");
@@ -678,6 +679,8 @@ void app_main(void)
     nina_dashboard_set_page_change_cb(on_page_changed);
 
     nina_client_init();  // DNS cache mutex — must be called before poll tasks spawn
+    nina_client_init_image_buffers();  // Pre-allocate PSRAM image fetch buffer
+    nina_thumbnail_init();  // Pre-allocate PSRAM zoom buffer
 
     /* Spotify init — always called so web handlers (config, login) work even when disabled */
     spotify_auth_init();

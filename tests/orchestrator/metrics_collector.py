@@ -134,6 +134,8 @@ class MetricsCollector:
         psram_free = 0
         heap_min = 0
         psram_min = 0
+        heap_frag_ratio = None
+        psram_frag_ratio = None
         uptime_s = 0.0
         boot_count = 0
 
@@ -150,6 +152,8 @@ class MetricsCollector:
                 heap_min = mem.get("heap_min_free_bytes", 0)
                 psram_free = mem.get("psram_free_bytes", 0)
                 psram_min = mem.get("psram_min_free_bytes", 0)
+                heap_frag_ratio = mem.get("heap_frag_ratio")
+                psram_frag_ratio = mem.get("psram_frag_ratio")
 
         metrics.update({
             "heap_free": heap_free,
@@ -159,6 +163,10 @@ class MetricsCollector:
             "uptime_s": uptime_s,
             "boot_count": boot_count,
         })
+        if heap_frag_ratio is not None:
+            metrics["heap_frag_ratio"] = heap_frag_ratio
+        if psram_frag_ratio is not None:
+            metrics["psram_frag_ratio"] = psram_frag_ratio
 
         # Detect reboot
         prev_boot = self._previous_boot_count.get(host)
@@ -184,6 +192,8 @@ class MetricsCollector:
                     "uptime_s": uptime_s,
                     "boot_count": boot_count,
                     "phase": phase,
+                    **({"heap_frag_ratio": heap_frag_ratio} if heap_frag_ratio is not None else {}),
+                    **({"psram_frag_ratio": psram_frag_ratio} if psram_frag_ratio is not None else {}),
                 },
             )
 

@@ -97,9 +97,11 @@ typedef struct {
     uint32_t heap_free_bytes;
     uint32_t heap_min_free_bytes;         // Minimum ever (highwater mark)
     uint32_t heap_largest_free_block;     // Largest contiguous free block (fragmentation)
+    float    heap_frag_ratio;             // largest_free_block / total_free (1.0 = no fragmentation)
     uint32_t psram_free_bytes;
     uint32_t psram_min_free_bytes;
     uint32_t psram_largest_free_block;
+    float    psram_frag_ratio;            // largest_free_block / total_free (1.0 = no fragmentation)
 
     // Task stack highwater marks
     uint32_t data_task_stack_hwm;         // Minimum free stack (bytes)

@@ -49,5 +49,7 @@ thresholds:
   api_latency_avg_soak_ms: 200
   unreachable_timeout_s: 30
   nina_connect_timeout_s: 60
+  heap_frag_ratio_min: 0.7
+  psram_frag_ratio_min: 0.8
   memory_leak_rate_bytes_per_hour: 1024
   memory_leak_window_hours: 6
