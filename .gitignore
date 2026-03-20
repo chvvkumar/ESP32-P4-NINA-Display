@@ -48,8 +48,6 @@ dependencies.lock
 bootloader.bin
 partition-table.bin
 ota_data_initial.bin
-firmware\nina-display-factory.bin
-firmware\nina-display-ota.bin
 .playwright-mcp/
 
 # Compilation artifacts
@@ -152,11 +150,6 @@ coverage.xml
 *.cover
 .hypothesis/
 .pytest_cache/
-
-# Firmware binaries (keep specific checked-in binaries)
-firmware/*
-!firmware/network_adapter.bin
-!firmware/host_performs_slave_ota.bin
 
 # Environment variables
 .env

@@ -344,7 +344,7 @@ lv_obj_t *spotify_page_create(lv_obj_t *parent)
 
         loading_logo = lv_image_create(spotify_page);
         lv_image_set_src(loading_logo, &logo_dsc);
-        lv_obj_center(loading_logo);
+        lv_obj_align(loading_logo, LV_ALIGN_CENTER, 0, 0);
         lv_obj_remove_flag(loading_logo, LV_OBJ_FLAG_CLICKABLE);
         has_art = false;
         start_logo_pulse();
@@ -920,7 +920,7 @@ void nina_spotify_set_idle(void)
     lv_label_set_text(lbl_album_name, "");
 
     /* Also clear minimal mode labels */
-    if (minimal_track_title) lv_label_set_text(minimal_track_title, "Not Playing");
+    if (minimal_track_title) lv_label_set_text(minimal_track_title, "Nothing Playing");
     if (minimal_track_subtitle) {
         lv_label_set_text(minimal_track_subtitle, "");
         lv_obj_add_flag(minimal_track_subtitle, LV_OBJ_FLAG_HIDDEN);
@@ -950,6 +950,8 @@ void nina_spotify_set_idle(void)
     lv_obj_add_flag(img_album_art, LV_OBJ_FLAG_HIDDEN);
     if (loading_logo) {
         lv_obj_remove_flag(loading_logo, LV_OBJ_FLAG_HIDDEN);
+        /* Position logo below the "Nothing Playing" text so the group is vertically centered */
+        lv_obj_align(loading_logo, LV_ALIGN_CENTER, 0, 30);
         start_logo_pulse();
     }
 }

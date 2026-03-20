@@ -41,6 +41,16 @@ static inline void set_bar_if_changed(lv_obj_t *bar, int32_t val, lv_anim_enable
     if (lv_bar_get_value(bar) != val) lv_bar_set_value(bar, val, anim);
 }
 
+/* ── Bar animation (matches arc easing on individual pages) ───────── */
+#define BAR_ANIM_NORMAL_MS   400   /* normal progress update */
+#define BAR_ANIM_FILL_MS     300   /* fill-to-100 on new exposure */
+
+static void bar_anim_exec(void *obj, int32_t v) {
+    lv_bar_set_value((lv_obj_t *)obj, v, LV_ANIM_OFF);
+}
+
+static void bar_fill_complete_cb(lv_anim_t *a);  /* defined after summary_card_t */
+
 /* Set text color only if cached value differs (avoids LVGL dirty-marking) */
 static inline void set_text_color_cached(lv_obj_t *obj, uint32_t *cached, uint32_t color) {
     if (*cached != color) {
@@ -166,6 +176,10 @@ typedef struct {
     lv_obj_t *lbl_detail;
     lv_obj_t *lbl_safety;       /* safety monitor icon (floating, bottom-left) */
     int instance_index;         /* which NINA instance this card represents */
+    /* Bar animation state (mirrors arc animation on individual pages) */
+    int prev_bar_progress;      /* previous progress value for new-exposure detection */
+    bool bar_completing;        /* true while fill-to-100 animation is in flight */
+    int pending_bar_progress;   /* progress value to apply after fill completes */
     /* Cached style values — only call lv_obj_set_style_* when changed to avoid
      * unnecessary LVGL invalidations that trigger expensive full redraws. */
     uint32_t cached_name_color;
@@ -185,6 +199,13 @@ typedef struct {
     uint32_t cached_detail_color;
     uint32_t cached_safety_color;
 } summary_card_t;
+
+static void bar_fill_complete_cb(lv_anim_t *a) {
+    summary_card_t *sc = (summary_card_t *)a->user_data;
+    if (!sc) return;
+    sc->bar_completing = false;
+    lv_bar_set_value(sc->bar_progress, sc->pending_bar_progress, LV_ANIM_OFF);
+}
 
 /* ── Module state ──────────────────────────────────────────────────── */
 static lv_obj_t *sum_page = NULL;
@@ -958,15 +979,58 @@ void summary_page_update(const nina_client_t *instances, int count) {
             set_text_color_cached(sc->lbl_target, &sc->cached_target_color, tgt_color);
         }
 
-        /* Progress bar + percentage */
+        /* Progress bar + percentage (animated like arc on individual pages) */
         if (d->exposure_total > 0) {
             int pct = (int)((d->exposure_current / d->exposure_total) * 100.0f);
             if (pct < 0) pct = 0;
             if (pct > 100) pct = 100;
-            set_bar_if_changed(sc->bar_progress, pct, LV_ANIM_ON);
+
+            int current_val = lv_bar_get_value(sc->bar_progress);
+            bool new_exposure = (sc->prev_bar_progress > 70 && pct < 30);
+            sc->prev_bar_progress = pct;
+
+            if (new_exposure && current_val > 0) {
+                /* New exposure started — fill bar to 100 first, then reset */
+                sc->bar_completing = true;
+                sc->pending_bar_progress = pct;
+
+                lv_anim_delete(sc->bar_progress, bar_anim_exec);
+                lv_anim_t a;
+                lv_anim_init(&a);
+                lv_anim_set_var(&a, sc->bar_progress);
+                lv_anim_set_values(&a, current_val, 100);
+                lv_anim_set_time(&a, BAR_ANIM_FILL_MS);
+                lv_anim_set_exec_cb(&a, bar_anim_exec);
+                lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+                a.user_data = sc;
+                lv_anim_set_ready_cb(&a, bar_fill_complete_cb);
+                lv_anim_start(&a);
+            } else if (sc->bar_completing) {
+                /* Still waiting for fill-to-100 to finish */
+                sc->pending_bar_progress = pct;
+                if (pct > 30) {
+                    sc->bar_completing = false;
+                    lv_anim_delete(sc->bar_progress, bar_anim_exec);
+                    lv_bar_set_value(sc->bar_progress, pct, LV_ANIM_OFF);
+                }
+            } else if (pct != current_val) {
+                /* Normal update — ease-out to new value */
+                lv_anim_delete(sc->bar_progress, bar_anim_exec);
+                lv_anim_t a;
+                lv_anim_init(&a);
+                lv_anim_set_var(&a, sc->bar_progress);
+                lv_anim_set_values(&a, current_val, pct);
+                lv_anim_set_time(&a, BAR_ANIM_NORMAL_MS);
+                lv_anim_set_exec_cb(&a, bar_anim_exec);
+                lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+                lv_anim_start(&a);
+            }
 
             SET_LABEL_FMT_IF_CHANGED(sc->lbl_pct, 8, "%d%%", pct);
         } else {
+            sc->prev_bar_progress = 0;
+            sc->bar_completing = false;
+            lv_anim_delete(sc->bar_progress, bar_anim_exec);
             set_bar_if_changed(sc->bar_progress, 0, LV_ANIM_OFF);
             set_label_if_changed(sc->lbl_pct, "");
         }
