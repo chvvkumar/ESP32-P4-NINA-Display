@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include "esp_heap_caps.h"
 #include "perf_monitor.h"
+#include "themes.h"
 
 static const char *TAG = "app_config";
 static app_config_t s_config;
@@ -1705,6 +1706,34 @@ static void migrate_from_v23(const app_config_v23_t *old, app_config_t *cfg) {
     ESP_LOGI(TAG, "Migrated config from v23 to v%d", APP_CONFIG_VERSION);
 }
 
+/* --- v24 → v25 migration (struct layout unchanged, theme/widget reindex) --- */
+typedef app_config_t app_config_v24_t;
+
+static void migrate_from_v24(const app_config_v24_t *old, app_config_t *cfg)
+{
+    memcpy(cfg, old, sizeof(app_config_t));
+    cfg->config_version = APP_CONFIG_VERSION;
+
+    /* Remap theme indices: old → new */
+    if (old->theme_index == 0 || old->theme_index == 1) {
+        cfg->theme_index = old->theme_index;
+    } else if (old->theme_index == 11) {
+        cfg->theme_index = 2;
+    } else {
+        cfg->theme_index = 0; /* Removed themes → Default */
+    }
+
+    /* Remap widget style indices: old → new */
+    switch (old->widget_style) {
+        case 0: cfg->widget_style = 0; break; /* Default */
+        case 1: cfg->widget_style = 1; break; /* Subtle Border */
+        case 3: cfg->widget_style = 2; break; /* Soft Inset */
+        case 4: cfg->widget_style = 3; break; /* Frosted Glass */
+        case 6: cfg->widget_style = 4; break; /* Chamfered */
+        default: cfg->widget_style = 0; break; /* Wireframe/Accent Bar → Default */
+    }
+}
+
 /**
  * @brief Migrate a v21 config blob into the current struct layout.
  *
@@ -1911,7 +1940,7 @@ static bool validate_config(app_config_t *cfg) {
         cfg->color_brightness = 100;
         fixed = true;
     }
-    if (cfg->theme_index < 0 || cfg->theme_index > 20) {
+    if (cfg->theme_index < 0 || cfg->theme_index >= themes_get_count()) {
         cfg->theme_index = 0;
         fixed = true;
     }
@@ -2050,6 +2079,14 @@ void app_config_init(void) {
             nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(handle);
         }
+    } else if (version_check == 24 && stored_size >= sizeof(app_config_v24_t)) {
+        /* Version 24 blob — migrate to v25 (theme/widget reindex) */
+        app_config_v24_t old;
+        memcpy(&old, raw, sizeof(app_config_v24_t));
+        migrate_from_v24(&old, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 23 && stored_size >= sizeof(app_config_v23_t)) {
         /* Version 23 blob — migrate to v24 */
         app_config_v23_t old;
