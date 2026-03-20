@@ -21,6 +21,7 @@ class MetricsCollector:
         self._task: asyncio.Task | None = None
         self._latest_metrics: dict[str, dict] = {}
         self._previous_boot_count: dict[str, int] = {}
+        self._baseline_boot_count: dict[str, int | None] = {}
         self._poll_interval_s = 10
         # Ring buffer: 360 entries = 1 hour at 10s intervals per device
         self._metrics_history: dict[str, deque] = {}
@@ -41,6 +42,17 @@ class MetricsCollector:
             except asyncio.CancelledError:
                 pass
         logger.info("Metrics collector stopped")
+
+    def set_baseline_boot_count(self, host: str, boot_count: int):
+        """Set the baseline boot_count for a device after startup.
+
+        Only reboots that increment beyond this baseline will be flagged.
+        Call this after the startup phase (including intentional reboots)
+        so pre-existing boot history doesn't trigger false positives.
+        """
+        self._baseline_boot_count[host] = boot_count
+        self._previous_boot_count[host] = boot_count
+        logger.info("Baseline boot_count for %s: %d", host, boot_count)
 
     def get_latest_metrics(self, device: str) -> dict:
         """Return the latest collected metrics for a device host."""
@@ -188,13 +200,21 @@ class MetricsCollector:
         if psram_frag_ratio is not None:
             metrics["psram_frag_ratio"] = psram_frag_ratio
 
-        # Detect reboot
+        # Detect reboot — only flag if boot_count exceeds the baseline
+        # established after startup (avoids false positives from pre-existing
+        # boot history or the intentional startup reboot).
         prev_boot = self._previous_boot_count.get(host)
-        if prev_boot is not None and boot_count > prev_boot:
+        baseline = self._baseline_boot_count.get(host)
+        if baseline is not None and boot_count > baseline:
+            # Real reboot during the test
             metrics["reboot_detected"] = True
-            logger.warning("Reboot detected on %s (boot_count %d -> %d)",
-                           host, prev_boot, boot_count)
-        elif prev_boot is not None and uptime_s < 30:
+            logger.warning("Reboot detected on %s (boot_count %d -> %d, baseline %d)",
+                           host, prev_boot, boot_count, baseline)
+            # Update baseline so the same reboot isn't flagged repeatedly
+            self._baseline_boot_count[host] = boot_count
+        elif baseline is None and prev_boot is not None and uptime_s < 30:
+            # No baseline yet (shouldn't happen after startup), fall back to
+            # uptime check for safety
             metrics["reboot_detected"] = True
         else:
             metrics["reboot_detected"] = False
