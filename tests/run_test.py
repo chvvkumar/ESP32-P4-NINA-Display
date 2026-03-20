@@ -3,7 +3,10 @@
 ESP32-P4 NINA Display — Automated Stress & Soak Test Suite
 
 Usage:
-    python run_test.py                          # Default 3-day test
+    python run_test.py                          # All devices, default 3-day test
+    python run_test.py --device ninadash2.lan   # Single device by hostname
+    python run_test.py --device 2               # Single device by number (1-indexed)
+    python run_test.py --device all             # Explicit all (default)
     python run_test.py --duration-days 7        # Custom duration
     python run_test.py --stress-only --duration-hours 2  # Stress only
     python run_test.py --restore-only           # Restore device configs after crash
@@ -247,6 +250,13 @@ async def main():
         help="Restore saved device configs and exit",
     )
     parser.add_argument(
+        "--device", default="all",
+        help=(
+            "Device(s) to test: hostname (e.g. ninadash2.lan), "
+            "1-indexed number (e.g. 2), or 'all' (default: all)"
+        ),
+    )
+    parser.add_argument(
         "--log-level", default="INFO",
         help="Logging level (default: INFO)",
     )
@@ -261,6 +271,41 @@ async def main():
     # Load config
     with open(args.config) as f:
         config = yaml.safe_load(f)
+
+    # Filter devices
+    if args.device.lower() != "all":
+        all_devices = config["devices"]
+        choice = args.device
+        matched = None
+        # Try as 1-indexed number
+        if choice.isdigit():
+            idx = int(choice) - 1
+            if 0 <= idx < len(all_devices):
+                matched = [all_devices[idx]]
+            else:
+                parser.error(
+                    f"Device number {choice} out of range "
+                    f"(1-{len(all_devices)})"
+                )
+        else:
+            # Try as hostname (exact or partial match)
+            matched = [d for d in all_devices if choice in d["host"]]
+            if not matched:
+                hosts = ", ".join(d["host"] for d in all_devices)
+                parser.error(
+                    f"No device matching '{choice}'. "
+                    f"Available: {hosts}"
+                )
+        config["devices"] = matched
+        logger.info(
+            f"Testing device(s): "
+            f"{', '.join(d['host'] for d in matched)}"
+        )
+    else:
+        logger.info(
+            f"Testing all devices: "
+            f"{', '.join(d['host'] for d in config['devices'])}"
+        )
 
     # Apply duration overrides
     if args.duration_days is not None:
