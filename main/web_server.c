@@ -42,6 +42,13 @@ void start_web_server(void)
     config.stack_size = 16384;
     config.max_uri_handlers = 39;
     config.max_open_sockets = 16;
+    config.lru_purge_enable = true;
+    config.keep_alive_enable = true;
+    config.keep_alive_idle = 5;
+    config.keep_alive_interval = 3;
+    config.keep_alive_count = 3;
+    config.enable_so_linger = true;
+    config.linger_timeout = 1;
     httpd_handle_t server = NULL;
 
     if (httpd_start(&server, &config) != ESP_OK) {

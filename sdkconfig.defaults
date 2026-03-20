@@ -72,6 +72,10 @@ CONFIG_MBEDTLS_DEFAULT_MEM_ALLOC=y
 # Increase LWIP max sockets for concurrent NINA + test traffic
 CONFIG_LWIP_MAX_SOCKETS=24
 
+# Faster TCP socket recycling — reduces TIME_WAIT from 2min to 20s
+CONFIG_LWIP_TCP_MSL=10000
+CONFIG_LWIP_TCP_FIN_WAIT_TIMEOUT=10000
+
 # Disable LVGL demo modules — saves ~100-200KB flash, never used in production
 CONFIG_LV_USE_DEMO_WIDGETS=n
 CONFIG_LV_USE_DEMO_BENCHMARK=n
