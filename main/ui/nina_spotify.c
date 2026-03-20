@@ -80,6 +80,7 @@ static lv_timer_t *idle_timer = NULL;
 static bool is_idle = true;
 static bool is_playing = false;
 static bool has_art = false;               /* True once album art has been set */
+static bool has_received_data = false;     /* True once first API response received */
 static uint8_t *current_art_buf = NULL;    /* Owned RGB565 buffer */
 static lv_image_dsc_t art_dsc;             /* Persistent image descriptor */
 
@@ -636,9 +637,21 @@ static void set_idle_state(bool idle)
         lv_obj_add_flag(controls_zone, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(minimal_info_cont, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(minimal_progress, LV_OBJ_FLAG_HIDDEN);
-        /* Throttle refresh rate when idle — but only if we have album art.
-         * During loading (pulse animation), keep normal refresh rate. */
-        if (has_art) {
+
+        /* If nothing is playing (no art, API already responded), show the
+         * "Nothing Playing" text so the user doesn't see a blank screen. */
+        if (!has_art && has_received_data) {
+            if (app_config_get()->spotify_minimal_mode) {
+                lv_obj_remove_flag(minimal_info_cont, LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_remove_flag(track_info_cont, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+
+        /* Throttle refresh rate when idle — safe when showing static content
+         * (album art or "nothing playing" text). Keep normal rate only during
+         * initial loading when pulse animation is active. */
+        if (has_art || has_received_data) {
             set_refr_period(REFR_PERIOD_IDLE_MS);
         }
     } else if (minimal) {
@@ -723,6 +736,7 @@ void nina_spotify_update(const spotify_playback_t *data)
 {
     if (!spotify_page || !data) return;
 
+    has_received_data = true;
     is_playing = data->is_playing;
 
     bool minimal = app_config_get()->spotify_minimal_mode;
@@ -941,18 +955,20 @@ void nina_spotify_set_idle(void)
         lv_label_set_text(pp_label, LV_SYMBOL_PLAY);
     }
 
-    /* Hide album art, show loading logo */
+    /* Hide album art */
     if (current_art_buf) {
         free(current_art_buf);
         current_art_buf = NULL;
     }
     has_art = false;
     lv_obj_add_flag(img_album_art, LV_OBJ_FLAG_HIDDEN);
+
+    /* Hide the loading logo — we've heard from the API, nothing is playing.
+     * The pulsing logo is only for the initial loading state before first data. */
+    has_received_data = true;
     if (loading_logo) {
-        lv_obj_remove_flag(loading_logo, LV_OBJ_FLAG_HIDDEN);
-        /* Position logo below the "Nothing Playing" text so the group is vertically centered */
-        lv_obj_align(loading_logo, LV_ALIGN_CENTER, 0, 30);
-        start_logo_pulse();
+        stop_logo_pulse();
+        lv_obj_add_flag(loading_logo, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
@@ -997,8 +1013,9 @@ void nina_spotify_on_show(void)
     is_idle = false; /* Force transition */
     set_idle_state(true);
 
-    /* Restart loading logo pulse if art hasn't loaded yet */
-    if (!has_art && loading_logo) {
+    /* Show loading logo pulse only if we haven't received any API data yet.
+     * Once we know "nothing playing", the logo stays hidden. */
+    if (!has_art && !has_received_data && loading_logo) {
         lv_obj_remove_flag(loading_logo, LV_OBJ_FLAG_HIDDEN);
         start_logo_pulse();
     }
@@ -1044,8 +1061,9 @@ void nina_spotify_free_art(void)
         ESP_LOGI(TAG, "Album art buffer freed");
     }
 
-    /* Show loading logo again for next page entry */
-    if (loading_logo) {
+    /* Show loading logo only if we haven't received API data yet.
+     * If data was received (nothing playing), keep logo hidden. */
+    if (loading_logo && !has_received_data) {
         lv_obj_remove_flag(loading_logo, LV_OBJ_FLAG_HIDDEN);
         start_logo_pulse();
     }
