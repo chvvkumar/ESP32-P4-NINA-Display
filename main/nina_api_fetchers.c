@@ -51,6 +51,12 @@ void fetch_camera_info_robust(const char *base_url, nina_client_t *data) {
         cJSON *cooler = cJSON_GetObjectItem(response, "CoolerPower");
         if (cooler) data->camera.cooler_power = (float)cooler->valuedouble;
 
+        // Exposure time (total length per frame)
+        cJSON *exp_time = cJSON_GetObjectItem(response, "ExposureTime");
+        if (exp_time && exp_time->valuedouble > 0) {
+            data->exposure_total = (float)exp_time->valuedouble;
+        }
+
         // Exposure status
         cJSON *is_exposing = cJSON_GetObjectItem(response, "IsExposing");
         cJSON *exp_end = cJSON_GetObjectItem(response, "ExposureEndTime");
@@ -527,6 +533,12 @@ int fetch_equipment_info_bundled(const char *base_url, nina_client_t *data, bool
 
         cJSON *cooler = cJSON_GetObjectItem(camera, "CoolerPower");
         if (cooler) data->camera.cooler_power = (float)cooler->valuedouble;
+
+        // Exposure time (total length per frame)
+        cJSON *exp_time_cam = cJSON_GetObjectItem(camera, "ExposureTime");
+        if (exp_time_cam && exp_time_cam->valuedouble > 0) {
+            data->exposure_total = (float)exp_time_cam->valuedouble;
+        }
 
         // Exposure timing (same logic as fetch_camera_info_robust)
         cJSON *is_exposing = cJSON_GetObjectItem(camera, "IsExposing");

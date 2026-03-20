@@ -251,7 +251,7 @@ void populate_camera_data(const camera_detail_data_t *data) {
             if (data->cooler_power < 50.0f) color = 0x4ade80;       /* green */
             else if (data->cooler_power < 80.0f) color = 0xeab308;  /* yellow */
             else color = 0xef4444;                                    /* red */
-            if (info_is_red_night()) color = current_theme->text_color;
+            if (theme_is_red_night(current_theme)) color = current_theme->text_color;
             lv_obj_set_style_text_color(lbl_cooler,
                 lv_color_hex(app_config_apply_brightness(color, gb)), 0);
         }
@@ -261,7 +261,7 @@ void populate_camera_data(const camera_detail_data_t *data) {
         lv_label_set_text(lbl_at_target, data->at_target ? "Yes" : "No");
         if (current_theme) {
             uint32_t color = data->at_target ? 0x4ade80 : current_theme->label_color;
-            if (info_is_red_night()) color = current_theme->text_color;
+            if (theme_is_red_night(current_theme)) color = current_theme->text_color;
             lv_obj_set_style_text_color(lbl_at_target,
                 lv_color_hex(app_config_apply_brightness(color, gb)), 0);
         }

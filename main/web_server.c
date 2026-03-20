@@ -40,7 +40,15 @@ void start_web_server(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 16384;
-    config.max_uri_handlers = 36;
+    config.max_uri_handlers = 39;
+    config.max_open_sockets = 16;
+    config.lru_purge_enable = true;
+    config.keep_alive_enable = true;
+    config.keep_alive_idle = 5;
+    config.keep_alive_interval = 3;
+    config.keep_alive_count = 3;
+    config.enable_so_linger = true;
+    config.linger_timeout = 1;
     httpd_handle_t server = NULL;
 
     if (httpd_start(&server, &config) != ESP_OK) {
@@ -80,6 +88,9 @@ void start_web_server(void)
         { "/api/spotify/control",        HTTP_POST, spotify_control_post_handler, NULL },
         { "/api/config/backup",          HTTP_GET,  backup_get_handler,   NULL },
         { "/api/config/restore",         HTTP_POST, restore_post_handler, NULL },
+        { "/api/status",                 HTTP_GET,  status_get_handler, NULL },
+        { "/api/nina/status",            HTTP_GET,  nina_status_get_handler, NULL },
+        { "/api/crash",                  HTTP_GET,  crash_get_handler, NULL },
     };
 
     for (int i = 0; i < (int)(sizeof(routes)/sizeof(routes[0])); i++) {

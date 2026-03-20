@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <stdatomic.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "ui/info_overlay_types.h"
@@ -97,20 +98,20 @@ typedef struct {
 
     // Set true when a new image is saved (IMAGE-SAVE event or image-history change)
     // Consumer should clear after handling
-    volatile bool new_image_available;
+    _Atomic bool new_image_available;
 
     // Set true by WebSocket event handlers to request immediate UI refresh.
     // Data task checks this and refreshes UI without waiting for next poll cycle.
-    volatile bool ui_refresh_needed;
+    _Atomic bool ui_refresh_needed;
 
     // Set by WebSocket event handlers when a sequence-relevant event occurs
     // (IMAGE-SAVE, TS-NEWTARGETSTART, SEQUENCE-STARTING). Causes immediate
     // sequence poll on next cycle.
-    volatile bool sequence_poll_needed;
+    _Atomic bool sequence_poll_needed;
 
     // Set by PROFILE-CHANGED WebSocket event to force re-fetch of cached
     // static data (profile name, filters, telescope) on the next poll cycle.
-    volatile bool profile_refresh_needed;
+    _Atomic bool profile_refresh_needed;
 
     // Timestamp (ms from esp_timer_get_time/1000) of last successful poll.
     // Used by the UI to display a stale-data indicator.  0 = never polled.
@@ -200,6 +201,11 @@ void nina_client_get_data(const char *base_url, nina_client_t *data);
 // Returns true if hostname resolves (or is an IP address), false on DNS failure.
 // Use before polling to avoid expensive HTTP client setup for unreachable hosts.
 bool nina_client_dns_check(const char *base_url);
+
+// Pre-allocate persistent PSRAM buffer for image fetching.
+// Call once from app_main() before any image fetch.  Avoids PSRAM
+// fragmentation from repeated malloc/free during long sessions.
+void nina_client_init_image_buffers(void);
 
 // Fetch prepared image as JPEG from NINA API
 // Returns heap-allocated JPEG bytes (caller must free), or NULL on error

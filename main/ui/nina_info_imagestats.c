@@ -5,6 +5,7 @@
 
 #include "nina_info_overlay.h"
 #include "info_overlay_types.h"
+#include "nina_dashboard_internal.h"
 #include "themes.h"
 #include "app_config.h"
 #include "ui_helpers.h"
@@ -12,9 +13,6 @@
 #include "lvgl.h"
 #include <stdio.h>
 #include <string.h>
-
-/* current_theme is defined in nina_dashboard.c */
-extern const theme_t *current_theme;
 
 /* ── Static widget references ──────────────────────────────────────── */
 

@@ -20,9 +20,6 @@
 #include <string.h>
 #include <float.h>
 
-/* current_theme is defined in nina_dashboard.c */
-extern const theme_t *current_theme;
-
 /* ── Static widget references ──────────────────────────────────────── */
 
 /* Hero card */

@@ -17,6 +17,7 @@
 #include "cJSON.h"
 #include <string.h>
 #include <stdarg.h>
+#include <stdatomic.h>
 #include "perf_monitor.h"
 #include "nina_connection.h"
 #include "tasks.h"
@@ -34,10 +35,10 @@ static const char *TAG = "nina_ws";
 static esp_websocket_client_handle_t ws_clients[MAX_NINA_INSTANCES];
 static nina_client_t *ws_client_data[MAX_NINA_INSTANCES];
 
-// Exponential backoff state per instance
-static int ws_backoff_ms[MAX_NINA_INSTANCES];
-static int64_t ws_disconnect_time_ms[MAX_NINA_INSTANCES];
-static bool ws_needs_reconnect[MAX_NINA_INSTANCES];
+// Exponential backoff state per instance (atomic: accessed from WS event handler + poll task)
+static _Atomic int ws_backoff_ms[MAX_NINA_INSTANCES];
+static _Atomic int64_t ws_disconnect_time_ms[MAX_NINA_INSTANCES];
+static _Atomic bool ws_needs_reconnect[MAX_NINA_INSTANCES];
 
 // Deferred camera-disconnect toast: suppress if CAMERA-CONNECTED follows quickly
 #define CAMERA_DISCONNECT_GRACE_MS 3000

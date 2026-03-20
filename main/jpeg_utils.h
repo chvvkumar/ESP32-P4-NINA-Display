@@ -46,3 +46,25 @@ bool jpeg_sw_decode_rgb565(const uint8_t *jpg_data, size_t jpg_size,
 uint8_t *ppa_scale_rgb565(const uint8_t *src, uint32_t src_w, uint32_t src_h,
                            uint32_t src_stride,
                            uint32_t dst_w, uint32_t dst_h, size_t *out_size);
+
+/**
+ * @brief Scale an RGB565 image into a pre-allocated output buffer using PPA hardware.
+ * Unlike ppa_scale_rgb565(), this does not allocate — caller provides the destination.
+ * Buffer must be 128-byte aligned and in PSRAM (DMA-accessible).
+ *
+ * @param src        Source RGB565 buffer
+ * @param src_w      Source content width in pixels
+ * @param src_h      Source content height in pixels
+ * @param src_stride Source buffer stride in pixels (0 = same as src_w)
+ * @param dst_w      Target width in pixels
+ * @param dst_h      Target height in pixels
+ * @param dst_buf    Pre-allocated destination buffer (must be 128-byte aligned, PSRAM)
+ * @param dst_buf_size Size of dst_buf in bytes
+ * @param out_size   Set to the actual used size on success
+ * @return dst_buf on success, NULL on failure
+ */
+uint8_t *ppa_scale_rgb565_into(const uint8_t *src, uint32_t src_w, uint32_t src_h,
+                                uint32_t src_stride,
+                                uint32_t dst_w, uint32_t dst_h,
+                                uint8_t *dst_buf, size_t dst_buf_size,
+                                size_t *out_size);

@@ -286,3 +286,82 @@ uint8_t *ppa_scale_rgb565(const uint8_t *src, uint32_t src_w, uint32_t src_h,
     }
     return dst;
 }
+
+uint8_t *ppa_scale_rgb565_into(const uint8_t *src, uint32_t src_w, uint32_t src_h,
+                                uint32_t src_stride,
+                                uint32_t dst_w, uint32_t dst_h,
+                                uint8_t *dst_buf, size_t dst_buf_size,
+                                size_t *out_size)
+{
+    if (!src || !dst_buf || src_w == 0 || src_h == 0 || dst_w == 0 || dst_h == 0) return NULL;
+    if (src_stride == 0) src_stride = src_w;
+
+    size_t needed = dst_w * dst_h * 2;
+    needed = (needed + 127) & ~(size_t)127;
+    if (needed > dst_buf_size) {
+        ESP_LOGE(TAG, "Pre-allocated buffer too small: need %zu, have %zu", needed, dst_buf_size);
+        return NULL;
+    }
+
+    /* Lazy-init PPA SRM client */
+    if (!s_ppa_srm_client) {
+        ppa_client_config_t cfg = {
+            .oper_type = PPA_OPERATION_SRM,
+            .max_pending_trans_num = 1,
+        };
+        if (ppa_register_client(&cfg, &s_ppa_srm_client) != ESP_OK) {
+            ESP_LOGE(TAG, "PPA SRM client registration failed");
+            return NULL;
+        }
+        ESP_LOGI(TAG, "PPA SRM client registered for image scaling");
+    }
+
+    /* Zero the destination to clear any stale data */
+    memset(dst_buf, 0, needed);
+
+    float scale_x = (float)dst_w / (float)src_w;
+    float scale_y = (float)dst_h / (float)src_h;
+
+    ppa_srm_oper_config_t srm = {
+        .in = {
+            .buffer = src,
+            .pic_w = src_stride,
+            .pic_h = src_h,
+            .block_w = src_w,
+            .block_h = src_h,
+            .block_offset_x = 0,
+            .block_offset_y = 0,
+            .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
+        },
+        .out = {
+            .buffer = dst_buf,
+            .buffer_size = needed,
+            .pic_w = dst_w,
+            .pic_h = dst_h,
+            .block_offset_x = 0,
+            .block_offset_y = 0,
+            .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
+        },
+        .rotation_angle = PPA_SRM_ROTATION_ANGLE_0,
+        .scale_x = scale_x,
+        .scale_y = scale_y,
+        .rgb_swap = false,
+        .byte_swap = false,
+        .mode = PPA_TRANS_MODE_BLOCKING,
+    };
+
+    esp_err_t err = ppa_do_scale_rotate_mirror(s_ppa_srm_client, &srm);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "PPA scale %lux%lu -> %lux%lu failed: %s",
+                 (unsigned long)src_w, (unsigned long)src_h,
+                 (unsigned long)dst_w, (unsigned long)dst_h,
+                 esp_err_to_name(err));
+        return NULL;
+    }
+
+    if (out_size) *out_size = needed;
+    ESP_LOGI(TAG, "PPA scaled %lux%lu -> %lux%lu into pre-allocated buffer",
+             (unsigned long)src_w, (unsigned long)src_h,
+             (unsigned long)dst_w, (unsigned long)dst_h);
+    return dst_buf;
+}

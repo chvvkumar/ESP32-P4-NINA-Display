@@ -2,9 +2,9 @@
  * @file ui_styles.c
  * @brief Shared LVGL style definitions and initialization.
  *
- * Supports multiple widget panel styles (0-6) selected via app_config.
- * Styles 2 (Wireframe) and 6 (Chamfered) use custom draw callbacks for
- * corner accents and chamfered corners respectively.
+ * Supports multiple widget panel styles (0-12) selected via app_config.
+ * Styles 4 (Chamfered), 8 (Scanline), and 10 (Stepped Edge) use custom
+ * draw callbacks for chamfered corners, scanlines, and accent bars respectively.
  */
 
 #include "ui_styles.h"
@@ -41,6 +41,17 @@ static uint32_t darken_color(uint32_t color, int pct)
     return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
 }
 
+static uint32_t lighten_color(uint32_t color, int pct)
+{
+    int r = (color >> 16) & 0xFF;
+    int g = (color >>  8) & 0xFF;
+    int b =  color        & 0xFF;
+    r = r + (255 - r) * pct / 100;
+    g = g + (255 - g) * pct / 100;
+    b = b + (255 - b) * pct / 100;
+    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+}
+
 /* ---------- custom draw callback ---------- */
 
 static void widget_draw_cb(lv_event_t *e)
@@ -48,8 +59,8 @@ static void widget_draw_cb(lv_event_t *e)
     const app_config_t *cfg = app_config_get();
     uint8_t ws = cfg->widget_style;
 
-    /* Only styles 2 and 6 need custom drawing */
-    if (ws != 2 && ws != 6) return;
+    /* Only styles 4, 8, and 10 need custom drawing */
+    if (ws != 4 && ws != 8 && ws != 10) return;
 
     lv_obj_t *obj = lv_event_get_target(e);
     lv_layer_t *layer = lv_event_get_layer(e);
@@ -62,49 +73,7 @@ static void widget_draw_cb(lv_event_t *e)
     int32_t x2 = coords.x2;
     int32_t y2 = coords.y2;
 
-    if (ws == 2) {
-        /* Wireframe: draw 2px thick, 8px long corner accent lines */
-        uint32_t accent_color = current_theme ? current_theme->progress_color : 0x00AAFF;
-
-        lv_draw_line_dsc_t line_dsc;
-        lv_draw_line_dsc_init(&line_dsc);
-        line_dsc.color = lv_color_hex(accent_color);
-        line_dsc.width = 2;
-        line_dsc.opa   = LV_OPA_COVER;
-
-        /* Top-left corner */
-        line_dsc.p1 = (lv_point_precise_t){x1, y1};
-        line_dsc.p2 = (lv_point_precise_t){x1 + 8, y1};
-        lv_draw_line(layer, &line_dsc);
-        line_dsc.p1 = (lv_point_precise_t){x1, y1};
-        line_dsc.p2 = (lv_point_precise_t){x1, y1 + 8};
-        lv_draw_line(layer, &line_dsc);
-
-        /* Top-right corner */
-        line_dsc.p1 = (lv_point_precise_t){x2, y1};
-        line_dsc.p2 = (lv_point_precise_t){x2 - 8, y1};
-        lv_draw_line(layer, &line_dsc);
-        line_dsc.p1 = (lv_point_precise_t){x2, y1};
-        line_dsc.p2 = (lv_point_precise_t){x2, y1 + 8};
-        lv_draw_line(layer, &line_dsc);
-
-        /* Bottom-left corner */
-        line_dsc.p1 = (lv_point_precise_t){x1, y2};
-        line_dsc.p2 = (lv_point_precise_t){x1 + 8, y2};
-        lv_draw_line(layer, &line_dsc);
-        line_dsc.p1 = (lv_point_precise_t){x1, y2};
-        line_dsc.p2 = (lv_point_precise_t){x1, y2 - 8};
-        lv_draw_line(layer, &line_dsc);
-
-        /* Bottom-right corner */
-        line_dsc.p1 = (lv_point_precise_t){x2, y2};
-        line_dsc.p2 = (lv_point_precise_t){x2 - 8, y2};
-        lv_draw_line(layer, &line_dsc);
-        line_dsc.p1 = (lv_point_precise_t){x2, y2};
-        line_dsc.p2 = (lv_point_precise_t){x2, y2 - 8};
-        lv_draw_line(layer, &line_dsc);
-
-    } else if (ws == 6) {
+    if (ws == 4) {
         /* Chamfered: draw filled triangles in bg_main at each corner (~26px) */
         uint32_t bg_color = current_theme ? current_theme->bg_main : 0x000000;
         int32_t sz = 26;
@@ -137,6 +106,42 @@ static void widget_draw_cb(lv_event_t *e)
         tri_dsc.p[1] = (lv_point_precise_t){x2 - sz, y2};
         tri_dsc.p[2] = (lv_point_precise_t){x2, y2 - sz};
         lv_draw_triangle(layer, &tri_dsc);
+
+    } else if (ws == 8) {
+        /* Scanline: draw subtle horizontal lines across widget */
+        uint32_t line_color_val = 0x000000;
+        int32_t h = y2 - y1;
+        int num_lines = 8;
+        if (h < 40) num_lines = 4;
+        int32_t spacing = h / (num_lines + 1);
+
+        lv_draw_line_dsc_t line_dsc;
+        lv_draw_line_dsc_init(&line_dsc);
+        line_dsc.color = lv_color_hex(line_color_val);
+        line_dsc.width = 1;
+        line_dsc.opa   = LV_OPA_10;
+
+        for (int i = 1; i <= num_lines; i++) {
+            int32_t ly = y1 + spacing * i;
+            line_dsc.p1 = (lv_point_precise_t){x1, ly};
+            line_dsc.p2 = (lv_point_precise_t){x2, ly};
+            lv_draw_line(layer, &line_dsc);
+        }
+
+    } else if (ws == 10) {
+        /* Stepped Edge: partial accent line on left edge */
+        uint32_t accent = current_theme ? current_theme->progress_color : 0x3b82f6;
+        int32_t h = y2 - y1;
+        int32_t bar_h = h * 40 / 100;
+
+        lv_draw_rect_dsc_t rect_dsc;
+        lv_draw_rect_dsc_init(&rect_dsc);
+        rect_dsc.bg_color = lv_color_hex(accent);
+        rect_dsc.bg_opa = LV_OPA_COVER;
+        rect_dsc.radius = 0;
+
+        lv_area_t bar_area = {x1, y1, x1 + 3, y1 + bar_h};
+        lv_draw_rect(layer, &rect_dsc, &bar_area);
     }
 }
 
@@ -175,15 +180,7 @@ void ui_styles_update(const void *theme_ptr)
         lv_style_set_border_opa(&style_bento_box, LV_OPA_COVER);
         break;
 
-    case 2: /* Tech Wireframe — transparent bg, 1px progress_color border, radius 0 */
-        lv_style_set_bg_opa(&style_bento_box, LV_OPA_TRANSP);
-        lv_style_set_radius(&style_bento_box, 0);
-        lv_style_set_border_width(&style_bento_box, 1);
-        lv_style_set_border_color(&style_bento_box, lv_color_hex(theme->progress_color));
-        lv_style_set_border_opa(&style_bento_box, LV_OPA_COVER);
-        break;
-
-    case 3: /* Soft Inset — darkened bg, 1px top-only black border, radius 12 */
+    case 2: /* Soft Inset — darkened bg, 1px top-only black border, radius 12 */
         lv_style_set_bg_color(&style_bento_box, lv_color_hex(darken_color(theme->bento_bg, 30)));
         lv_style_set_bg_opa(&style_bento_box, LV_OPA_COVER);
         lv_style_set_radius(&style_bento_box, 12);
@@ -193,7 +190,7 @@ void ui_styles_update(const void *theme_ptr)
         lv_style_set_border_side(&style_bento_box, LV_BORDER_SIDE_TOP);
         break;
 
-    case 4: /* Frosted Glass — semi-transparent bg, subtle border, radius 24 */
+    case 3: /* Frosted Glass — semi-transparent bg, subtle border, radius 24 */
         lv_style_set_bg_color(&style_bento_box, lv_color_hex(theme->bento_bg));
         lv_style_set_bg_opa(&style_bento_box, LV_OPA_40);
         lv_style_set_radius(&style_bento_box, BENTO_RADIUS);
@@ -202,21 +199,99 @@ void ui_styles_update(const void *theme_ptr)
         lv_style_set_border_opa(&style_bento_box, LV_OPA_20);
         break;
 
-    case 5: /* Accent Bar — solid panel, 4px left-only border in progress_color, radius 12 */
-        lv_style_set_bg_color(&style_bento_box, lv_color_hex(theme->bento_bg));
-        lv_style_set_bg_opa(&style_bento_box, LV_OPA_COVER);
-        lv_style_set_radius(&style_bento_box, 12);
-        lv_style_set_border_width(&style_bento_box, 4);
-        lv_style_set_border_color(&style_bento_box, lv_color_hex(theme->progress_color));
-        lv_style_set_border_opa(&style_bento_box, LV_OPA_COVER);
-        lv_style_set_border_side(&style_bento_box, LV_BORDER_SIDE_LEFT);
-        break;
-
-    case 6: /* Chamfered — solid panel, radius 0, no border */
+    case 4: /* Chamfered — solid panel, radius 0, no border */
         lv_style_set_bg_color(&style_bento_box, lv_color_hex(theme->bento_bg));
         lv_style_set_bg_opa(&style_bento_box, LV_OPA_COVER);
         lv_style_set_radius(&style_bento_box, 0);
         lv_style_set_border_width(&style_bento_box, 0);
+        break;
+
+    case 5: /* Double Border — bg with inner border + outer outline */
+        lv_style_set_bg_color(&style_bento_box, lv_color_hex(theme->bento_bg));
+        lv_style_set_bg_opa(&style_bento_box, LV_OPA_COVER);
+        lv_style_set_radius(&style_bento_box, 16);
+        lv_style_set_border_width(&style_bento_box, 1);
+        lv_style_set_border_color(&style_bento_box, lv_color_hex(theme->bento_border));
+        lv_style_set_border_opa(&style_bento_box, LV_OPA_COVER);
+        lv_style_set_outline_width(&style_bento_box, 1);
+        lv_style_set_outline_pad(&style_bento_box, 3);
+        lv_style_set_outline_color(&style_bento_box, lv_color_hex(darken_color(theme->bento_border, 30)));
+        lv_style_set_outline_opa(&style_bento_box, LV_OPA_COVER);
+        break;
+
+    case 6: /* Raised Slab — lightened bg, shadow, no border */
+        lv_style_set_bg_color(&style_bento_box, lv_color_hex(lighten_color(theme->bento_bg, 8)));
+        lv_style_set_bg_opa(&style_bento_box, LV_OPA_COVER);
+        lv_style_set_radius(&style_bento_box, 16);
+        lv_style_set_border_width(&style_bento_box, 0);
+        lv_style_set_shadow_width(&style_bento_box, 8);
+        lv_style_set_shadow_ofs_x(&style_bento_box, 2);
+        lv_style_set_shadow_ofs_y(&style_bento_box, 3);
+        lv_style_set_shadow_color(&style_bento_box, lv_color_hex(0x000000));
+        lv_style_set_shadow_opa(&style_bento_box, LV_OPA_70);
+        break;
+
+    case 7: /* Gradient Fade — vertical gradient bg, top border */
+        lv_style_set_bg_color(&style_bento_box, lv_color_hex(theme->bento_bg));
+        lv_style_set_bg_grad_color(&style_bento_box, lv_color_hex(darken_color(theme->bento_bg, 40)));
+        lv_style_set_bg_grad_dir(&style_bento_box, LV_GRAD_DIR_VER);
+        lv_style_set_bg_opa(&style_bento_box, LV_OPA_COVER);
+        lv_style_set_radius(&style_bento_box, 12);
+        lv_style_set_border_width(&style_bento_box, 1);
+        lv_style_set_border_color(&style_bento_box, lv_color_hex(theme->bento_border));
+        lv_style_set_border_opa(&style_bento_box, LV_OPA_COVER);
+        lv_style_set_border_side(&style_bento_box, LV_BORDER_SIDE_TOP);
+        break;
+
+    case 8: /* Scanline — solid bg with custom-drawn horizontal lines */
+        lv_style_set_bg_color(&style_bento_box, lv_color_hex(theme->bento_bg));
+        lv_style_set_bg_opa(&style_bento_box, LV_OPA_COVER);
+        lv_style_set_radius(&style_bento_box, 8);
+        lv_style_set_border_width(&style_bento_box, 1);
+        lv_style_set_border_color(&style_bento_box, lv_color_hex(theme->bento_border));
+        lv_style_set_border_opa(&style_bento_box, LV_OPA_COVER);
+        break;
+
+    case 9: /* Pillar — accent top+bottom borders */
+        lv_style_set_bg_color(&style_bento_box, lv_color_hex(theme->bento_bg));
+        lv_style_set_bg_opa(&style_bento_box, LV_OPA_COVER);
+        lv_style_set_radius(&style_bento_box, 0);
+        lv_style_set_border_width(&style_bento_box, 2);
+        lv_style_set_border_color(&style_bento_box, lv_color_hex(theme->progress_color));
+        lv_style_set_border_opa(&style_bento_box, LV_OPA_COVER);
+        lv_style_set_border_side(&style_bento_box, LV_BORDER_SIDE_TOP | LV_BORDER_SIDE_BOTTOM);
+        break;
+
+    case 10: /* Stepped Edge — solid bg with custom-drawn accent bar */
+        lv_style_set_bg_color(&style_bento_box, lv_color_hex(theme->bento_bg));
+        lv_style_set_bg_opa(&style_bento_box, LV_OPA_COVER);
+        lv_style_set_radius(&style_bento_box, 12);
+        lv_style_set_border_width(&style_bento_box, 1);
+        lv_style_set_border_color(&style_bento_box, lv_color_hex(theme->bento_border));
+        lv_style_set_border_opa(&style_bento_box, LV_OPA_COVER);
+        break;
+
+    case 11: /* Horizon Line — accent bottom border only */
+        lv_style_set_bg_color(&style_bento_box, lv_color_hex(theme->bento_bg));
+        lv_style_set_bg_opa(&style_bento_box, LV_OPA_COVER);
+        lv_style_set_radius(&style_bento_box, 8);
+        lv_style_set_border_width(&style_bento_box, 1);
+        lv_style_set_border_color(&style_bento_box, lv_color_hex(theme->progress_color));
+        lv_style_set_border_opa(&style_bento_box, LV_OPA_COVER);
+        lv_style_set_border_side(&style_bento_box, LV_BORDER_SIDE_BOTTOM);
+        break;
+
+    case 12: /* Ember Ring — lightened bg, colored shadow glow */
+        lv_style_set_bg_color(&style_bento_box, lv_color_hex(lighten_color(theme->bento_bg, 5)));
+        lv_style_set_bg_opa(&style_bento_box, LV_OPA_COVER);
+        lv_style_set_radius(&style_bento_box, 16);
+        lv_style_set_border_width(&style_bento_box, 0);
+        lv_style_set_shadow_width(&style_bento_box, 6);
+        lv_style_set_shadow_spread(&style_bento_box, 1);
+        lv_style_set_shadow_ofs_x(&style_bento_box, 0);
+        lv_style_set_shadow_ofs_y(&style_bento_box, 0);
+        lv_style_set_shadow_color(&style_bento_box, lv_color_hex(theme->progress_color));
+        lv_style_set_shadow_opa(&style_bento_box, LV_OPA_50);
         break;
     }
 
@@ -271,11 +346,17 @@ const char *ui_styles_get_widget_style_name(int index)
     static const char *names[] = {
         "Default",
         "Subtle Border",
-        "Wireframe",
         "Soft Inset",
         "Frosted Glass",
-        "Accent Bar",
         "Chamfered",
+        "Double Border",
+        "Raised Slab",
+        "Gradient Fade",
+        "Scanline",
+        "Pillar",
+        "Stepped Edge",
+        "Horizon Line",
+        "Ember Ring",
     };
     if (index >= 0 && index < WIDGET_STYLE_COUNT) return names[index];
     return "Default";

@@ -35,8 +35,10 @@ static const char *TAG = "spotify_auth";
 #define POST_BODY_BUF_SIZE      2048    /* URL-encoded POST body */
 
 static SemaphoreHandle_t s_mutex;
-static char s_access_token[1024];
-static char s_refresh_token[512];
+static char *s_access_token = NULL;
+static char *s_refresh_token = NULL;
+#define ACCESS_TOKEN_SIZE  1024
+#define REFRESH_TOKEN_SIZE 512
 static int64_t s_token_expiry_ms;       /* Monotonic ms when access token expires */
 static spotify_auth_state_t s_state = SPOTIFY_AUTH_NONE;
 
@@ -70,14 +72,14 @@ static void load_tokens_from_nvs(void) {
     size_t len;
 
     /* Refresh token */
-    len = sizeof(s_refresh_token);
+    len = REFRESH_TOKEN_SIZE;
     err = nvs_get_str(nvs, NVS_KEY_REFRESH, s_refresh_token, &len);
     if (err != ESP_OK) {
         s_refresh_token[0] = '\0';
     }
 
     /* Access token */
-    len = sizeof(s_access_token);
+    len = ACCESS_TOKEN_SIZE;
     err = nvs_get_str(nvs, NVS_KEY_ACCESS, s_access_token, &len);
     if (err != ESP_OK) {
         s_access_token[0] = '\0';
@@ -249,7 +251,7 @@ static esp_err_t do_token_request(const char *body, size_t body_len) {
 
     if (cJSON_IsString(access) && cJSON_IsNumber(expires_in)) {
         /* Update access token */
-        snprintf(s_access_token, sizeof(s_access_token), "%s", access->valuestring);
+        snprintf(s_access_token, ACCESS_TOKEN_SIZE, "%s", access->valuestring);
 
         /* Compute expiry in monotonic ms */
         int expires_s = expires_in->valueint;
@@ -259,7 +261,7 @@ static esp_err_t do_token_request(const char *body, size_t body_len) {
          * If present, update it; otherwise keep the existing one. */
         cJSON *refresh = cJSON_GetObjectItem(json, "refresh_token");
         if (cJSON_IsString(refresh) && refresh->valuestring[0] != '\0') {
-            snprintf(s_refresh_token, sizeof(s_refresh_token), "%s", refresh->valuestring);
+            snprintf(s_refresh_token, REFRESH_TOKEN_SIZE, "%s", refresh->valuestring);
         }
 
         s_state = SPOTIFY_AUTH_AUTHORIZED;
@@ -284,6 +286,14 @@ static esp_err_t do_token_request(const char *body, size_t body_len) {
 void spotify_auth_init(void) {
     s_mutex = xSemaphoreCreateMutex();
     configASSERT(s_mutex);
+
+    if (!s_access_token) {
+        s_access_token = heap_caps_calloc(1, ACCESS_TOKEN_SIZE, MALLOC_CAP_SPIRAM);
+    }
+    if (!s_refresh_token) {
+        s_refresh_token = heap_caps_calloc(1, REFRESH_TOKEN_SIZE, MALLOC_CAP_SPIRAM);
+    }
+    configASSERT(s_access_token && s_refresh_token);
 
     s_access_token[0] = '\0';
     s_refresh_token[0] = '\0';

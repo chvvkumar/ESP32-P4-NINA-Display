@@ -40,6 +40,7 @@
 #include "ui/nina_spotify.h"
 #include "wifi_manager.h"
 #include "ui/nina_settings_tabview.h"
+#include "ui/nina_thumbnail.h"
 
 /* Embedded splash logo (JPEG, hardware-decoded at boot) */
 extern const uint8_t logo_jpg_start[] asm("_binary_logo_jpg_start");
@@ -434,6 +435,20 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
+    /* Increment boot counter in NVS */
+    {
+        nvs_handle_t nvs;
+        if (nvs_open("system", NVS_READWRITE, &nvs) == ESP_OK) {
+            uint32_t boot_cnt = 0;
+            nvs_get_u32(nvs, "boot_cnt", &boot_cnt);
+            boot_cnt++;
+            nvs_set_u32(nvs, "boot_cnt", boot_cnt);
+            nvs_commit(nvs);
+            nvs_close(nvs);
+            ESP_LOGI(TAG, "Boot count: %lu", (unsigned long)boot_cnt);
+        }
+    }
+
     /* Route all cJSON allocations to PSRAM to reduce internal heap pressure */
     cJSON_Hooks psram_hooks = { .malloc_fn = cjson_psram_malloc, .free_fn = free };
     cJSON_InitHooks(&psram_hooks);
@@ -450,12 +465,19 @@ void app_main(void)
     // Check if we woke from deep sleep
     esp_sleep_wakeup_cause_t wake_cause = power_mgmt_check_wake_cause();
 
+    // Track crash resets (PANIC, WDT) in RTC memory
+    power_mgmt_check_crash();
+
     nina_connection_init();
 
     perf_monitor_init(30);
     perf_monitor_set_enabled(app_config_get()->debug_mode);
 
     instance_count = app_config_get_instance_count();
+    if (app_config_get()->demo_mode) {
+        instance_count = 3;  /* Demo mode always shows all 3 instance profiles */
+        ESP_LOGI(TAG, "Demo mode: forcing instance_count = 3");
+    }
     ESP_LOGI(TAG, "Configured instances: %d", instance_count);
 
     wifi_init();
@@ -657,6 +679,8 @@ void app_main(void)
     nina_dashboard_set_page_change_cb(on_page_changed);
 
     nina_client_init();  // DNS cache mutex — must be called before poll tasks spawn
+    nina_client_init_image_buffers();  // Pre-allocate PSRAM image fetch buffer
+    nina_thumbnail_init();  // Pre-allocate PSRAM zoom buffer
 
     /* Spotify init — always called so web handlers (config, login) work even when disabled */
     spotify_auth_init();
@@ -679,13 +703,13 @@ void app_main(void)
         StackType_t *data_stack = heap_caps_malloc(12288 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
         StaticTask_t *data_tcb  = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         if (data_stack && data_tcb) {
-            data_task_handle = xTaskCreateStaticPinnedToCore(data_update_task, "data_task", 12288, NULL, 5,
+            data_task_handle = xTaskCreateStaticPinnedToCore(data_update_task, "data_task", 12288, NULL, 4,
                                                              data_stack, data_tcb, 1);
         } else {
             ESP_LOGE(TAG, "Failed to alloc data_task stack from PSRAM, falling back");
             if (data_stack) heap_caps_free(data_stack);
             if (data_tcb) heap_caps_free(data_tcb);
-            xTaskCreatePinnedToCore(data_update_task, "data_task", 12288, NULL, 5, &data_task_handle, 1);
+            xTaskCreatePinnedToCore(data_update_task, "data_task", 12288, NULL, 4, &data_task_handle, 1);
         }
     }
 

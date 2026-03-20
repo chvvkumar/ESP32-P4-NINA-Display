@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include "esp_heap_caps.h"
 #include "perf_monitor.h"
+#include "themes.h"
 
 static const char *TAG = "app_config";
 static app_config_t s_config;
@@ -679,10 +680,10 @@ typedef struct {
 static void set_defaults(app_config_t *cfg) {
     memset(cfg, 0, sizeof(app_config_t));
     cfg->config_version = APP_CONFIG_VERSION;
-    strcpy(cfg->api_url[0], "http://astromele2.lan:1888/v2/api/");
-    strcpy(cfg->api_url[1], "http://astromele3.lan:1888/v2/api/");
+    strcpy(cfg->api_url[0], "http://astromele1.lan:1888/v2/api/");
+    strcpy(cfg->api_url[1], "http://astromele2.lan:1888/v2/api/");
     strcpy(cfg->ntp_server, "pool.ntp.org");
-    cfg->tz_string[0] = '\0';  // Default: UTC (no offset)
+    strcpy(cfg->tz_string, "CST6CDT,M3.2.0,M11.1.0");
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         strcpy(cfg->filter_colors[i], "{}");
         strcpy(cfg->rms_thresholds[i], DEFAULT_RMS_THRESHOLDS);
@@ -696,8 +697,8 @@ static void set_defaults(app_config_t *cfg) {
     cfg->auto_rotate_effect = 0;
     cfg->auto_rotate_skip_disconnected = true;
     cfg->auto_rotate_pages = 0x0E;  // Default: all NINA instances (bits 1-3)
-    cfg->update_rate_s = 2;
-    cfg->graph_update_interval_s = 5;
+    cfg->update_rate_s = 5;
+    cfg->graph_update_interval_s = 10;
     cfg->connection_timeout_s = 6;
     cfg->toast_duration_s = 8;
     cfg->debug_mode = false;
@@ -722,7 +723,7 @@ static void set_defaults(app_config_t *cfg) {
     cfg->mqtt_port = 1883;
 
     // AllSky defaults
-    cfg->allsky_hostname[0] = '\0';
+    strcpy(cfg->allsky_hostname, "allskypi5.lan");
     cfg->allsky_update_interval_s = 5;
     cfg->allsky_dew_offset = 5.0f;
     strncpy(cfg->allsky_field_config, DEFAULT_ALLSKY_FIELD_CONFIG, sizeof(cfg->allsky_field_config) - 1);
@@ -1705,6 +1706,34 @@ static void migrate_from_v23(const app_config_v23_t *old, app_config_t *cfg) {
     ESP_LOGI(TAG, "Migrated config from v23 to v%d", APP_CONFIG_VERSION);
 }
 
+/* --- v24 → v25 migration (struct layout unchanged, theme/widget reindex) --- */
+typedef app_config_t app_config_v24_t;
+
+static void migrate_from_v24(const app_config_v24_t *old, app_config_t *cfg)
+{
+    memcpy(cfg, old, sizeof(app_config_t));
+    cfg->config_version = APP_CONFIG_VERSION;
+
+    /* Remap theme indices: old → new */
+    if (old->theme_index == 0 || old->theme_index == 1) {
+        cfg->theme_index = old->theme_index;
+    } else if (old->theme_index == 11) {
+        cfg->theme_index = 2;
+    } else {
+        cfg->theme_index = 0; /* Removed themes → Default */
+    }
+
+    /* Remap widget style indices: old → new */
+    switch (old->widget_style) {
+        case 0: cfg->widget_style = 0; break; /* Default */
+        case 1: cfg->widget_style = 1; break; /* Subtle Border */
+        case 3: cfg->widget_style = 2; break; /* Soft Inset */
+        case 4: cfg->widget_style = 3; break; /* Frosted Glass */
+        case 6: cfg->widget_style = 4; break; /* Chamfered */
+        default: cfg->widget_style = 0; break; /* Wireframe/Accent Bar → Default */
+    }
+}
+
 /**
  * @brief Migrate a v21 config blob into the current struct layout.
  *
@@ -1911,7 +1940,7 @@ static bool validate_config(app_config_t *cfg) {
         cfg->color_brightness = 100;
         fixed = true;
     }
-    if (cfg->theme_index < 0 || cfg->theme_index > 20) {
+    if (cfg->theme_index < 0 || cfg->theme_index >= themes_get_count()) {
         cfg->theme_index = 0;
         fixed = true;
     }
@@ -1990,6 +2019,11 @@ static bool validate_config(app_config_t *cfg) {
         cfg->allsky_thresholds[sizeof(cfg->allsky_thresholds) - 1] = '\0';
         fixed = true;
     }
+    if (cfg->spotify_poll_interval_ms < 500 || cfg->spotify_poll_interval_ms > 30000) {
+        cfg->spotify_poll_interval_ms = 3000;
+        fixed = true;
+    }
+    /* spotify_overlay_timeout_s is uint8_t (0-255); 0 means never hide, all values valid */
 
     return fixed;
 }
@@ -2045,6 +2079,14 @@ void app_config_init(void) {
             nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(handle);
         }
+    } else if (version_check == 24 && stored_size >= sizeof(app_config_v24_t)) {
+        /* Version 24 blob — migrate to v25 (theme/widget reindex) */
+        app_config_v24_t old;
+        memcpy(&old, raw, sizeof(app_config_v24_t));
+        migrate_from_v24(&old, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 23 && stored_size >= sizeof(app_config_v23_t)) {
         /* Version 23 blob — migrate to v24 */
         app_config_v23_t old;

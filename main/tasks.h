@@ -7,6 +7,7 @@
 #include "app_config.h"
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdatomic.h>
 
 #define WIFI_CONNECTED_BIT BIT0
 
@@ -15,7 +16,7 @@ extern EventGroupHandle_t s_wifi_event_group;
 extern int instance_count;
 
 /* Signals the data task that a page switch occurred — defined in tasks.c */
-extern volatile bool page_changed;
+extern _Atomic bool page_changed;
 
 /** Task handle for data_update_task (UI coordinator) — used by WebSocket to wake for immediate UI refresh. */
 extern TaskHandle_t data_task_handle;
@@ -24,16 +25,16 @@ extern TaskHandle_t data_task_handle;
 extern TaskHandle_t poll_task_handles[MAX_NINA_INSTANCES];
 
 /** OTA in progress — data task suspends when true. Set by OTA handler. */
-extern volatile bool ota_in_progress;
+extern _Atomic bool ota_in_progress;
 
 /** On-demand firmware update check — set by settings page button. */
-extern volatile bool ota_check_requested;
+extern _Atomic bool ota_check_requested;
 
 /** Screen touch detected — wakes display from screen sleep. Set by LVGL touch handler. */
-extern volatile bool screen_touch_wake;
+extern _Atomic bool screen_touch_wake;
 
 /** True while the display is in screen-sleep mode (backlight off). */
-extern volatile bool screen_asleep;
+extern _Atomic bool screen_asleep;
 
 /* ── Per-instance poll task context ── */
 typedef struct {
@@ -61,10 +62,52 @@ void allsky_poll_task(void *arg);
 
 /** Spotify poll task handle and page-active flag — defined in tasks.c. */
 extern TaskHandle_t spotify_task_handle;
-extern volatile bool spotify_page_active;
+extern _Atomic bool spotify_page_active;
 
 /** FreeRTOS task: Spotify API poller — fetches currently-playing, album art on track change. */
 void spotify_poll_task(void *arg);
 
 /** FreeRTOS task: UI coordinator — reads cached data, updates LVGL, handles auto-rotate. */
 void data_update_task(void *arg);
+
+/* ── Async fetch worker (offloads HTTP fetches from Core 1 to Core 0) ── */
+
+/** Fetch request types */
+typedef enum {
+    FETCH_THUMBNAIL,
+    FETCH_GRAPH_RMS,
+    FETCH_GRAPH_HFR,
+    FETCH_GRAPH_HFR_RING,   /* Build from local ring buffer (no HTTP) */
+    FETCH_INFO_CAMERA,
+    FETCH_INFO_MOUNT,
+    FETCH_INFO_SEQUENCE,
+    FETCH_INFO_FILTER,
+    FETCH_INFO_IMAGESTATS,
+    FETCH_INFO_AUTOFOCUS,
+} fetch_type_t;
+
+/** Fetch request — posted to s_fetch_queue by data_update_task */
+typedef struct {
+    fetch_type_t type;
+    int          instance_idx;     /* NINA instance index */
+    char         url[128];         /* API base URL */
+    int          max_points;       /* For graph requests */
+    nina_client_t *client;         /* For ring buffer reads (FETCH_GRAPH_HFR_RING) */
+} fetch_request_t;
+
+/** Fetch result — posted to s_fetch_result_queue by fetch worker */
+typedef struct {
+    fetch_type_t type;
+    int          instance_idx;
+    bool         success;
+    union {
+        struct {
+            uint8_t *rgb565_data;
+            uint32_t w, h, data_size;
+        } thumbnail;
+        void *data;   /* graph_rms_data_t*, graph_hfr_data_t*, or overlay data */
+    };
+} fetch_result_t;
+
+/** FreeRTOS task: async fetch worker — runs HTTP fetches on Core 0. */
+void fetch_worker_task(void *arg);
