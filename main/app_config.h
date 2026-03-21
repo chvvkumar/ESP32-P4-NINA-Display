@@ -13,7 +13,7 @@ extern "C" {
 #define MAX_NINA_INSTANCES 3
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 25
+#define APP_CONFIG_VERSION 26
 
 #define WIDGET_STYLE_COUNT 13
 
@@ -89,6 +89,9 @@ typedef struct {
 
     // Added after v23 — must stay at end to preserve NVS binary compatibility
     wifi_network_t wifi_networks[3];      // Priority-ordered WiFi networks ([0] = highest)
+
+    // Added after v25 — must stay at end to preserve NVS binary compatibility
+    bool     spotify_overlay_visible;   // Force minimal overlay visible from web UI (default false)
 } app_config_t;
 
 // v17 snapshot — AllSky fields without allsky_enabled

@@ -612,6 +612,15 @@ static void dim_anim_cb(void *var, int32_t value)
     lv_obj_set_style_bg_opa((lv_obj_t *)var, (lv_opa_t)value, 0);
 }
 
+/* Called when the idle fade-out animation finishes — safe to throttle now */
+static void idle_anim_done_cb(lv_anim_t *a)
+{
+    (void)a;
+    if (is_idle && (has_art || has_received_data)) {
+        set_refr_period(REFR_PERIOD_IDLE_MS);
+    }
+}
+
 static void set_idle_state(bool idle)
 {
     if (is_idle == idle) return;
@@ -626,6 +635,11 @@ static void set_idle_state(bool idle)
     lv_anim_set_values(&a, lv_obj_get_style_bg_opa(dim_overlay, 0), target_opa);
     lv_anim_set_time(&a, 400);
     lv_anim_set_exec_cb(&a, dim_anim_cb);
+    if (idle) {
+        /* Defer refresh throttle until fade-out animation finishes,
+         * otherwise the 5 s idle period kills the smooth transition. */
+        lv_anim_set_completed_cb(&a, idle_anim_done_cb);
+    }
     lv_anim_start(&a);
 
     bool minimal = app_config_get()->spotify_minimal_mode;
@@ -646,13 +660,6 @@ static void set_idle_state(bool idle)
             } else {
                 lv_obj_remove_flag(track_info_cont, LV_OBJ_FLAG_HIDDEN);
             }
-        }
-
-        /* Throttle refresh rate when idle — safe when showing static content
-         * (album art or "nothing playing" text). Keep normal rate only during
-         * initial loading when pulse animation is active. */
-        if (has_art || has_received_data) {
-            set_refr_period(REFR_PERIOD_IDLE_MS);
         }
     } else if (minimal) {
         /* Minimal overlay: centered track info, optional progress bar */
@@ -1008,10 +1015,17 @@ void nina_spotify_on_show(void)
 
     ESP_LOGI(TAG, "Spotify page shown");
 
-    /* Start in idle state (just album art, no overlay) — works for both modes.
-     * set_idle_state will show the correct widgets when user taps. */
-    is_idle = false; /* Force transition */
-    set_idle_state(true);
+    bool force_overlay = app_config_get()->spotify_overlay_visible;
+    if (force_overlay) {
+        /* Config says show overlay — start with minimal overlay visible */
+        is_idle = true; /* Force transition */
+        set_idle_state(false);
+    } else {
+        /* Start in idle state (just album art, no overlay) — works for both modes.
+         * set_idle_state will show the correct widgets when user taps. */
+        is_idle = false; /* Force transition */
+        set_idle_state(true);
+    }
 
     /* Show loading logo pulse only if we haven't received any API data yet.
      * Once we know "nothing playing", the logo stays hidden. */
@@ -1041,8 +1055,16 @@ void nina_spotify_refresh_layout(void)
     if (!spotify_page) return;
     /* Update label long modes in case scroll/wrap config changed */
     apply_label_long_mode();
-    /* If overlay is currently showing, re-run idle state to swap widgets */
-    if (!is_idle) {
+
+    bool force_overlay = app_config_get()->spotify_overlay_visible;
+    if (force_overlay && is_idle) {
+        /* Config says show overlay but we're idle — force overlay on */
+        set_idle_state(false);
+    } else if (!force_overlay && !is_idle) {
+        /* Config says hide overlay but it's showing — force idle */
+        set_idle_state(true);
+    } else if (!is_idle) {
+        /* Overlay visible, re-run to swap widgets (e.g. minimal mode changed) */
         is_idle = true;  /* Force re-transition */
         set_idle_state(false);
     }

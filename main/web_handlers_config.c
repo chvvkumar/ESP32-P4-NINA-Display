@@ -107,6 +107,7 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
     cJSON_AddBoolToObject(obj, "spotify_minimal_mode", cfg->spotify_minimal_mode);
     cJSON_AddBoolToObject(obj, "spotify_scroll_text", cfg->spotify_scroll_text);
     cJSON_AddNumberToObject(obj, "spotify_overlay_timeout_s", cfg->spotify_overlay_timeout_s);
+    cJSON_AddBoolToObject(obj, "spotify_overlay_visible", cfg->spotify_overlay_visible);
 
     return obj;
 }
@@ -227,6 +228,7 @@ static const backup_field_t s_backup_fields[] = {
     {"spotify_overlay_timeout_s", "Overlay Timeout",      "Spotify", false, false},
     {"spotify_minimal_mode",      "Minimal Mode",         "Spotify", false, false},
     {"spotify_scroll_text",       "Scroll Text",          "Spotify", false, false},
+    {"spotify_overlay_visible",   "Show Overlay",         "Spotify", false, false},
 
     /* MQTT (non-sensitive) */
     {"mqtt_enabled",       "MQTT Enabled",       "MQTT", false, false},
@@ -714,6 +716,7 @@ static app_config_t *parse_config_from_json(cJSON *root)
     JSON_TO_BOOL  (root, "spotify_minimal_mode",       cfg->spotify_minimal_mode);
     JSON_TO_BOOL  (root, "spotify_scroll_text",        cfg->spotify_scroll_text);
     JSON_TO_INT   (root, "spotify_overlay_timeout_s",  cfg->spotify_overlay_timeout_s);
+    JSON_TO_BOOL  (root, "spotify_overlay_visible",   cfg->spotify_overlay_visible);
 
     return cfg;
 }

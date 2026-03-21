@@ -72,7 +72,6 @@ if ($PSBoundParameters.Count -eq 0) {
 }
 
 $ProjectDir = $PSScriptRoot
-$FirmwareDir = Join-Path $ProjectDir "firmware"
 $BuildDir = Join-Path $ProjectDir "build"
 
 # Verify ESP-IDF path exists
@@ -123,15 +122,6 @@ try {
     Pop-Location
 }
 
-# Create firmware output directory
-if (-not (Test-Path $FirmwareDir)) {
-    New-Item -ItemType Directory -Path $FirmwareDir | Out-Null
-}
-
-# Paths to build artifacts
-$Bootloader = Join-Path $BuildDir "bootloader" "bootloader.bin"
-$PartTable  = Join-Path $BuildDir "partition_table" "partition-table.bin"
-
 # Detect the app binary name from the CMake project name
 $ProjectDescJson = Join-Path $BuildDir "project_description.json"
 if (Test-Path $ProjectDescJson) {
@@ -145,60 +135,28 @@ if (Test-Path $ProjectDescJson) {
               Select-Object -First 1 -ExpandProperty FullName
 }
 
-# Verify all required binaries exist
-foreach ($bin in @($Bootloader, $PartTable, $AppBin)) {
-    if (-not $bin -or -not (Test-Path $bin)) {
-        Write-Error "Missing build artifact: $bin"
-        exit 1
-    }
-}
-Write-Host "App binary: $AppBin" -ForegroundColor Gray
-
-$FactoryBin = Join-Path $FirmwareDir "nina-display-factory.bin"
-$OtaBin     = Join-Path $FirmwareDir "nina-display-ota.bin"
-
-# Merge into a single factory binary using esptool
-# ESP32-P4 OTA layout: bootloader@0x2000, partition-table@0x8000, app@0x20000 (ota_0)
-Write-Host "`nMerging into factory firmware binary ..." -ForegroundColor Cyan
-python -m esptool --chip esp32p4 merge_bin `
-    --flash_mode dio `
-    --flash_size 32MB `
-    --flash_freq 80m `
-    -o $FactoryBin `
-    0x2000  $Bootloader `
-    0x8000  $PartTable `
-    0x20000 $AppBin
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Failed to merge firmware binary."
+if (-not $AppBin -or -not (Test-Path $AppBin)) {
+    Write-Error "Missing build artifact: $AppBin"
     exit 1
 }
 
-# Copy app binary as OTA update file (raw app image, no bootloader/partition table)
-Copy-Item -Path $AppBin -Destination $OtaBin -Force
-
-$FactorySize = (Get-Item $FactoryBin).Length
-$FactorySizeMB = [math]::Round($FactorySize / 1MB, 2)
-$OtaSize = (Get-Item $OtaBin).Length
+# The app binary is used directly for OTA; no separate firmware/ copy needed
+$OtaSize = (Get-Item $AppBin).Length
 $OtaSizeMB = [math]::Round($OtaSize / 1MB, 2)
 
-Write-Host "`nFirmware generated successfully!" -ForegroundColor Green
-Write-Host "  Factory: $FactoryBin" -ForegroundColor Green
-Write-Host "           $FactorySizeMB MB ($FactorySize bytes)" -ForegroundColor Green
-Write-Host "  OTA:     $OtaBin" -ForegroundColor Green
-Write-Host "           $OtaSizeMB MB ($OtaSize bytes)" -ForegroundColor Green
-Write-Host "`nFlash with: esptool.py --chip esp32p4 write_flash 0x0 `"$FactoryBin`"" -ForegroundColor Yellow
-Write-Host "OTA update: Upload `"$OtaBin`" via the web interface at http://<device-ip>/" -ForegroundColor Yellow
+Write-Host "`nBuild successful!" -ForegroundColor Green
+Write-Host "  App binary: $AppBin" -ForegroundColor Green
+Write-Host "              $OtaSizeMB MB ($OtaSize bytes)" -ForegroundColor Green
 
 # OTA flash to devices if requested (parallel)
 if ($OTA) {
     Write-Host "`nUploading OTA firmware to $($Devices.Count) devices in parallel ..." -ForegroundColor Cyan
 
     [array]$jobs = foreach ($Device in $Devices) {
-        Start-Job -ArgumentList $Device, $OtaBin -ScriptBlock {
-            param($Device, $OtaBin)
+        Start-Job -ArgumentList $Device, $AppBin -ScriptBlock {
+            param($Device, $AppBin)
             $OtaUrl = "http://${Device}/api/ota"
-            $fileBytes = [System.IO.File]::ReadAllBytes($OtaBin)
+            $fileBytes = [System.IO.File]::ReadAllBytes($AppBin)
             $null = Invoke-WebRequest -Uri $OtaUrl -Method Post `
                 -Body $fileBytes `
                 -ContentType "application/octet-stream" `

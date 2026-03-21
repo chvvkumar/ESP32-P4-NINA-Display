@@ -961,6 +961,11 @@
             <label class="toggle"><input type="checkbox" id="spotify_minimal_mode"><span class="toggle-track"></span></label>
           </div>
           <div class="toggle-row">
+            <span class="toggle-label">Show Overlay</span>
+            <label class="toggle"><input type="checkbox" id="spotify_overlay_visible"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Force the minimal overlay visible (same as tapping album art)</div>
+          <div class="toggle-row">
             <span class="toggle-label">Scroll Long Text</span>
             <label class="toggle"><input type="checkbox" id="spotify_scroll_text" checked><span class="toggle-track"></span></label>
           </div>
@@ -1461,6 +1466,7 @@
         spotify_poll_interval_ms:parseInt($('spotifyPollInterval').value)||3000,
         spotify_show_progress_bar:!!$('spotify_show_progress_bar').checked,
         spotify_minimal_mode:!!$('spotify_minimal_mode').checked,
+        spotify_overlay_visible:!!$('spotify_overlay_visible').checked,
         spotify_scroll_text:!!$('spotify_scroll_text').checked,
         spotify_overlay_timeout_s:parseInt($('spotifyOverlayTimeout').value)||0
       };
@@ -1591,6 +1597,7 @@
       if($('spotifyPollInterval')) $('spotifyPollInterval').value=data.spotify_poll_interval_ms||3000;
       if($('spotify_show_progress_bar')) $('spotify_show_progress_bar').checked=data.spotify_show_progress_bar!=null?!!data.spotify_show_progress_bar:true;
       if($('spotify_minimal_mode')) $('spotify_minimal_mode').checked=!!data.spotify_minimal_mode;
+      if($('spotify_overlay_visible')) $('spotify_overlay_visible').checked=!!data.spotify_overlay_visible;
       if($('spotify_scroll_text')) $('spotify_scroll_text').checked=data.spotify_scroll_text!=null?!!data.spotify_scroll_text:true;
       if($('spotifyOverlayTimeout')) $('spotifyOverlayTimeout').value=data.spotify_overlay_timeout_s!=null?data.spotify_overlay_timeout_s:5;
       updateSpotifyEnabledUI();
