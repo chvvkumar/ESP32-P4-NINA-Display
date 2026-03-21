@@ -866,6 +866,21 @@ static void handle_websocket_message(int index, const char *payload, int len) {
     else if (strcmp(evt->valuestring, "FLAT-DISCONNECTED") == 0) {
         record_disconnect_event(index, EQ_FLAT);
     }
+    else if (strcmp(evt->valuestring, "FLAT-LIGHT-TOGGLED") == 0) {
+        if (toast_allowed(index, 11))
+            ws_toast(index, TOAST_INFO, "Flat light toggled");
+        nina_event_log_add(EVENT_SEV_INFO, index, "Flat light toggled");
+    }
+    else if (strcmp(evt->valuestring, "FLAT-COVER-OPENED") == 0) {
+        if (toast_allowed(index, 11))
+            ws_toast(index, TOAST_INFO, "Flat cover opened");
+        nina_event_log_add(EVENT_SEV_INFO, index, "Flat cover opened");
+    }
+    else if (strcmp(evt->valuestring, "FLAT-COVER-CLOSED") == 0) {
+        if (toast_allowed(index, 11))
+            ws_toast(index, TOAST_INFO, "Flat cover closed");
+        nina_event_log_add(EVENT_SEV_INFO, index, "Flat cover closed");
+    }
     else if (strcmp(evt->valuestring, "SWITCH-CONNECTED") == 0) {
         record_connect_event(index, EQ_SWITCH);
     }
@@ -1096,6 +1111,11 @@ void nina_websocket_check_deferred_alerts(int index) {
     (void)index;
     // Legacy: camera disconnect grace period removed in toast overhaul.
     // Aggregation window now handles false disconnect→reconnect patterns.
+}
+
+bool nina_websocket_is_running(int index) {
+    if (index < 0 || index >= MAX_NINA_INSTANCES) return false;
+    return ws_clients[index] != NULL;
 }
 
 void nina_websocket_update_equipment_mask(int index, uint16_t connected_mask) {

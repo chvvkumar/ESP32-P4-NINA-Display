@@ -475,17 +475,17 @@ static void compact_and_promote(void) {
         lv_obj_move_foreground(ts->bar);
     }
 
-    /* Promote from backlog if there's a free slot */
-    if (n < TOAST_POOL_SIZE && s_bl_count > 0) {
+    /* Promote from backlog to fill all free slots */
+    while (n < TOAST_POOL_SIZE && s_bl_count > 0) {
         toast_severity_t sev;
         char msg[128];
-        if (backlog_pop(&sev, msg, sizeof(msg))) {
-            /* Find a free pool slot */
-            for (int i = 0; i < TOAST_POOL_SIZE; i++) {
-                if (!s_pool[i].active) {
-                    show_in_slot(i, sev, msg, n); /* n = next visual position (top) */
-                    break;
-                }
+        if (!backlog_pop(&sev, msg, sizeof(msg))) break;
+        /* Find a free pool slot */
+        for (int i = 0; i < TOAST_POOL_SIZE; i++) {
+            if (!s_pool[i].active) {
+                show_in_slot(i, sev, msg, n); /* n = next visual position (top) */
+                n++;
+                break;
             }
         }
     }

@@ -746,16 +746,16 @@
             <input type="number" class="input" id="connection_timeout" min="2" max="30" value="6">
             <div class="field-hint">Seconds without response before a NINA instance is offline</div>
           </div>
-          <div class="field">
-            <label class="field-label">Toast duration (s)</label>
-            <input type="number" class="input" id="toast_duration" min="3" max="30" value="8">
-            <div class="field-hint">Errors show for 2x this value</div>
-          </div>
         </div>
       </div>
 
       <div class="card">
         <div class="card-title">Notifications</div>
+        <div class="field" style="margin-bottom:16px">
+          <label class="field-label">Toast duration (s)</label>
+          <input type="number" class="input" id="toast_duration" min="3" max="30" value="8">
+          <div class="field-hint">Errors show for 2x this value</div>
+        </div>
         <div class="toggle-row">
           <span class="toggle-label">Border flash alerts</span>
           <label class="toggle"><input type="checkbox" id="alert_flash_enabled" checked><span class="toggle-track"></span></label>
@@ -773,6 +773,10 @@
         <hr class="divider">
         <div class="field-label" style="margin-bottom:12px">Event Categories</div>
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Error Events</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_8" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
           <span class="toggle-label">Equipment Connects</span>
           <label class="toggle"><input type="checkbox" id="notify_cat_0" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
         </div>
@@ -785,7 +789,7 @@
           <label class="toggle"><input type="checkbox" id="notify_cat_2" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
         </div>
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label">Autofocus</span>
+          <span class="toggle-label">Focuser</span>
           <label class="toggle"><input type="checkbox" id="notify_cat_3" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
         </div>
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
@@ -805,16 +809,16 @@
           <label class="toggle"><input type="checkbox" id="notify_cat_7" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
         </div>
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label">Error Events</span>
-          <label class="toggle"><input type="checkbox" id="notify_cat_8" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
-        </div>
-        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
           <span class="toggle-label">Profile Changes</span>
           <label class="toggle"><input type="checkbox" id="notify_cat_9" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
         </div>
-        <div class="toggle-row">
-          <span class="toggle-label">Dome/Flat Events</span>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Dome Events</span>
           <label class="toggle"><input type="checkbox" id="notify_cat_10" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">Flat Device Events</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_11" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
         </div>
       </div>
     </div>
@@ -1731,7 +1735,7 @@
         deep_sleep_on_idle:!!$('deep_sleep_on_idle').checked,
         alert_flash_enabled:!!$('alert_flash_enabled').checked,
         toast_aggregation_window_s:parseInt($('toast_aggregation_window').value)||0,
-        toast_notify_mask:(function(){var m=0;for(var i=0;i<11;i++){if($('notify_cat_'+i).checked) m|=(1<<i);}return m>>>0;})(),
+        toast_notify_mask:(function(){var m=0;for(var i=0;i<12;i++){if($('notify_cat_'+i).checked) m|=(1<<i);}return m>>>0;})(),
         toast_instance_muted_1:!!$('toast_instance_muted_0').checked,
         toast_instance_muted_2:!!$('toast_instance_muted_1').checked,
         toast_instance_muted_3:!!$('toast_instance_muted_2').checked,
@@ -1830,7 +1834,7 @@
       $('toast_aggregation_window').value=aggWin;
       updateAggregationLabel(aggWin);
       var mask=data.toast_notify_mask!=null?data.toast_notify_mask:0xFFFFFFFF;
-      for(var i=0;i<11;i++){$('notify_cat_'+i).checked=!!(mask&(1<<i));}
+      for(var i=0;i<12;i++){$('notify_cat_'+i).checked=!!(mask&(1<<i));}
       $('toast_instance_muted_0').checked=!!data.toast_instance_muted_1;
       $('toast_instance_muted_1').checked=!!data.toast_instance_muted_2;
       $('toast_instance_muted_2').checked=!!data.toast_instance_muted_3;

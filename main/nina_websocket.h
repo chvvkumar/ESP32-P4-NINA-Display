@@ -51,3 +51,8 @@ void nina_websocket_check_deferred_alerts(int index);
  *       5=Rotator, 6=Safety, 7=Dome, 8=Flat, 9=Switch, 10=Weather
  */
 void nina_websocket_update_equipment_mask(int index, uint16_t connected_mask);
+
+/**
+ * @brief Check if a WebSocket client exists (started) for this instance.
+ */
+bool nina_websocket_is_running(int index);
