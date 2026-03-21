@@ -40,9 +40,34 @@ static _Atomic int ws_backoff_ms[MAX_NINA_INSTANCES];
 static _Atomic int64_t ws_disconnect_time_ms[MAX_NINA_INSTANCES];
 static _Atomic bool ws_needs_reconnect[MAX_NINA_INSTANCES];
 
-// Deferred camera-disconnect toast: suppress if CAMERA-CONNECTED follows quickly
-#define CAMERA_DISCONNECT_GRACE_MS 3000
-static int64_t s_camera_disconnect_pending_ms[MAX_NINA_INSTANCES] = {0};
+/* ── Connect aggregation state ──────────────────────────────────────── */
+#define CONNECT_AGG_IDLE_TIMEOUT_MS 60000
+
+typedef enum {
+    EQ_CAMERA = 0, EQ_MOUNT, EQ_GUIDER, EQ_FOCUSER, EQ_FILTERWHEEL,
+    EQ_ROTATOR, EQ_SAFETY, EQ_DOME, EQ_FLAT, EQ_SWITCH, EQ_WEATHER,
+    EQ_COUNT
+} equipment_type_t;
+
+static const char *equipment_names[] = {
+    "Camera", "Mount", "Guider", "Focuser", "Filterwheel",
+    "Rotator", "Safety", "Dome", "Flat", "Switch", "Weather"
+};
+
+typedef struct {
+    int64_t  window_start_ms;       // 0 = no active window
+    int64_t  last_connect_ms;       // for 60s idle timeout
+    uint16_t connected_mask;        // bits for each equipment type
+    uint16_t disconnected_mask;     // bits for disconnect cancellation
+} connect_agg_state_t;
+
+static connect_agg_state_t s_agg[MAX_NINA_INSTANCES];
+static esp_timer_handle_t  s_agg_timers[MAX_NINA_INSTANCES];
+static portMUX_TYPE        s_agg_lock = portMUX_INITIALIZER_UNLOCKED;
+/* Track equipment that has connected at least once — suppress disconnect
+ * toasts for equipment we've never seen connect (e.g., no driver selected
+ * in NINA). NINA fires DISCONNECT for unconfigured equipment on startup. */
+static uint16_t            s_ever_connected[MAX_NINA_INSTANCES];
 
 /**
  * @brief Extract hostname from a NINA instance config URL.
@@ -89,6 +114,227 @@ static void ws_toast_fmt(int index, toast_severity_t sev, const char *fmt, ...) 
     vsnprintf(msg, sizeof(msg), fmt, ap);
     va_end(ap);
     ws_toast(index, sev, msg);
+}
+
+/* ── Aggregation timer callback ──────────────────────────────────────── */
+static void agg_timer_cb(void *arg) {
+    int index = (int)(intptr_t)arg;
+    if (index < 0 || index >= MAX_NINA_INSTANCES) return;
+
+    /* Snapshot aggregation state under spinlock, then reset */
+    portENTER_CRITICAL(&s_agg_lock);
+    uint16_t conn_mask = s_agg[index].connected_mask;
+    uint16_t disc_mask = s_agg[index].disconnected_mask;
+    s_agg[index].connected_mask = 0;
+    s_agg[index].disconnected_mask = 0;
+    s_agg[index].window_start_ms = 0;
+    portEXIT_CRITICAL(&s_agg_lock);
+
+    const app_config_t *cfg = app_config_get();
+
+    /* Masks already reflect final state (last event wins — connect clears disconnect
+     * bit and vice versa), so no cancellation logic needed here. */
+    uint16_t connect_final = conn_mask;
+    if (connect_final) {
+        /* Count connected equipment */
+        int count = 0;
+        for (int i = 0; i < EQ_COUNT; i++) {
+            if (connect_final & (1 << i)) count++;
+        }
+
+        char buf[128];
+        int pos = 0;
+        char host[48];
+        get_instance_hostname(index, host, sizeof(host));
+
+        if (count > 4) {
+            /* Many devices — show count to keep message short */
+            if (host[0])
+                snprintf(buf, sizeof(buf), "%s: %d devices connected", host, count);
+            else
+                snprintf(buf, sizeof(buf), "%d devices connected", count);
+        } else {
+            /* Few devices — list them by name */
+            if (host[0])
+                pos = snprintf(buf, sizeof(buf), "%s: Connected ", host);
+            else
+                pos = snprintf(buf, sizeof(buf), "Connected ");
+
+            bool first = true;
+            for (int i = 0; i < EQ_COUNT && pos < (int)sizeof(buf) - 2; i++) {
+                if (connect_final & (1 << i)) {
+                    if (!first) pos += snprintf(buf + pos, sizeof(buf) - pos, ", ");
+                    pos += snprintf(buf + pos, sizeof(buf) - pos, "%s", equipment_names[i]);
+                    first = false;
+                }
+            }
+        }
+
+        if ((cfg->toast_notify_mask & (1 << 0)) && !cfg->toast_instance_muted[index]) {
+            nina_toast_show(TOAST_SUCCESS, buf);
+        }
+    }
+
+    /* Show deferred disconnects — only for equipment we've seen connect before.
+     * NINA fires DISCONNECT for unconfigured equipment (no driver) on startup. */
+    uint16_t disc_final = disc_mask & s_ever_connected[index];
+    if (disc_final) {
+        /* Determine severity — need to check sequence status */
+        nina_client_t *data = ws_client_data[index];
+        bool seq_running = false;
+        if (data && nina_client_lock(data, 50)) {
+            seq_running = (strcmp(data->status, "RUNNING") == 0);
+            nina_client_unlock(data);
+        }
+
+        for (int i = 0; i < EQ_COUNT; i++) {
+            if (!(disc_final & (1 << i))) continue;
+
+            toast_severity_t sev = TOAST_WARNING;
+            if (i == EQ_SAFETY) sev = TOAST_ERROR;
+            else if (seq_running) sev = TOAST_ERROR;
+
+            if ((cfg->toast_notify_mask & (1 << 1)) && !cfg->toast_instance_muted[index]) {
+                ws_toast_fmt(index, sev, "%s disconnected", equipment_names[i]);
+            }
+            nina_event_log_add_fmt(sev == TOAST_ERROR ? EVENT_SEV_ERROR : EVENT_SEV_WARNING,
+                                   index, "%s disconnected", equipment_names[i]);
+        }
+    }
+}
+
+/* ── Record connect event (with aggregation) ────────────────────────── */
+static void record_connect_event(int index, equipment_type_t eq) {
+    const app_config_t *cfg = app_config_get();
+    int64_t now = esp_timer_get_time() / 1000;
+
+    // If aggregation disabled, show individual toast
+    if (cfg->toast_aggregation_window_s == 0) {
+        if ((cfg->toast_notify_mask & (1 << 0)) && !cfg->toast_instance_muted[index]) {
+            ws_toast(index, TOAST_SUCCESS, equipment_names[eq]);
+        }
+        nina_event_log_add_fmt(EVENT_SEV_INFO, index, "%s connected", equipment_names[eq]);
+        return;
+    }
+
+    bool start_timer = false;
+
+    portENTER_CRITICAL(&s_agg_lock);
+
+    connect_agg_state_t *agg = &s_agg[index];
+
+    // Check 60s idle timeout
+    if (agg->window_start_ms != 0 &&
+        (now - agg->last_connect_ms) > CONNECT_AGG_IDLE_TIMEOUT_MS) {
+        agg->window_start_ms = 0;
+        agg->connected_mask = 0;
+        agg->disconnected_mask = 0;
+    }
+
+    // Start new window if needed
+    if (agg->window_start_ms == 0) {
+        agg->window_start_ms = now;
+        agg->connected_mask = 0;
+        agg->disconnected_mask = 0;
+        start_timer = true;
+    }
+
+    agg->connected_mask |= (1 << eq);
+    agg->disconnected_mask &= ~(1 << eq);  /* Last event wins: connect clears disconnect */
+    s_ever_connected[index] |= (1 << eq);  /* Remember this equipment has connected */
+    agg->last_connect_ms = now;
+
+    portEXIT_CRITICAL(&s_agg_lock);
+
+    // Start timer outside critical section (esp_timer APIs are not ISR-safe)
+    if (start_timer) {
+        esp_timer_stop(s_agg_timers[index]);
+        esp_timer_start_once(s_agg_timers[index],
+                             (uint64_t)cfg->toast_aggregation_window_s * 1000000);
+    }
+
+    nina_event_log_add_fmt(EVENT_SEV_INFO, index, "%s connected", equipment_names[eq]);
+}
+
+/* ── Record disconnect event (with aggregation deferral) ──────────────
+ * NINA fires DISCONNECT before CONNECT during a fresh connect sequence.
+ * When aggregation is enabled, disconnects are deferred to the window
+ * boundary so they can cancel with subsequent reconnects. This prevents
+ * false disconnect toasts during NINA's connect handshake.
+ * ──────────────────────────────────────────────────────────────────── */
+static void record_disconnect_event(int index, equipment_type_t eq) {
+    const app_config_t *cfg = app_config_get();
+    int64_t now = esp_timer_get_time() / 1000;
+
+    /* When aggregation is enabled, defer disconnects to the window boundary */
+    if (cfg->toast_aggregation_window_s > 0) {
+        bool start_timer = false;
+
+        portENTER_CRITICAL(&s_agg_lock);
+
+        connect_agg_state_t *agg = &s_agg[index];
+
+        /* Check 60s idle timeout */
+        if (agg->window_start_ms != 0 &&
+            (now - agg->last_connect_ms) > CONNECT_AGG_IDLE_TIMEOUT_MS) {
+            agg->window_start_ms = 0;
+            agg->connected_mask = 0;
+            agg->disconnected_mask = 0;
+        }
+
+        /* Start a new window if needed (disconnect can start a window) */
+        if (agg->window_start_ms == 0) {
+            agg->window_start_ms = now;
+            agg->connected_mask = 0;
+            agg->disconnected_mask = 0;
+            start_timer = true;
+        }
+
+        agg->disconnected_mask |= (1 << eq);
+        agg->connected_mask &= ~(1 << eq);  /* Last event wins: disconnect clears connect */
+        agg->last_connect_ms = now;
+
+        portEXIT_CRITICAL(&s_agg_lock);
+
+        if (start_timer) {
+            esp_timer_stop(s_agg_timers[index]);
+            esp_timer_start_once(s_agg_timers[index],
+                                 (uint64_t)cfg->toast_aggregation_window_s * 1000000);
+        }
+
+        /* Always log immediately even when toast is deferred */
+        nina_event_log_add_fmt(EVENT_SEV_WARNING, index,
+                               "%s disconnected", equipment_names[eq]);
+        return;
+    }
+
+    /* Aggregation disabled — show disconnect toast immediately,
+     * but only for equipment we've previously seen connect */
+    if (!(s_ever_connected[index] & (1 << eq))) return;
+
+    toast_severity_t sev = TOAST_WARNING;
+    if (eq == EQ_SAFETY) {
+        sev = TOAST_ERROR;
+    } else {
+        nina_client_t *data = ws_client_data[index];
+        if (data && nina_client_lock(data, 50)) {
+            if (strcmp(data->status, "RUNNING") == 0) sev = TOAST_ERROR;
+            nina_client_unlock(data);
+        }
+    }
+
+    if ((cfg->toast_notify_mask & (1 << 1)) && !cfg->toast_instance_muted[index]) {
+        ws_toast_fmt(index, sev, "%s disconnected", equipment_names[eq]);
+    }
+    nina_event_log_add_fmt(sev == TOAST_ERROR ? EVENT_SEV_ERROR : EVENT_SEV_WARNING,
+                           index, "%s disconnected", equipment_names[eq]);
+}
+
+/* Check if a notification category is enabled for this instance */
+static bool toast_allowed(int index, int category_bit) {
+    const app_config_t *cfg = app_config_get();
+    return (cfg->toast_notify_mask & (1 << category_bit)) &&
+           !cfg->toast_instance_muted[index];
 }
 
 /**
@@ -271,7 +517,8 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             data->ui_refresh_needed = true;
             nina_client_unlock(data);
         }
-        ws_toast(index, TOAST_SUCCESS, "Sequence completed");
+        if (toast_allowed(index, 2))
+            ws_toast(index, TOAST_SUCCESS, "Sequence completed");
         nina_event_log_add(EVENT_SEV_SUCCESS, index, "Sequence completed");
         ESP_LOGI(TAG, "WS[%d]: Sequence finished", index);
     }
@@ -284,7 +531,8 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             data->sequence_poll_needed = true;
             nina_client_unlock(data);
         }
-        ws_toast(index, TOAST_INFO, "Sequence started");
+        if (toast_allowed(index, 2))
+            ws_toast(index, TOAST_INFO, "Sequence started");
         nina_event_log_add(EVENT_SEV_INFO, index, "Sequence started");
         nina_session_stats_reset(index);
         ESP_LOGI(TAG, "WS[%d]: Sequence starting", index);
@@ -356,7 +604,8 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             data->ui_refresh_needed = true;
             nina_client_unlock(data);
         }
-        ws_toast(index, TOAST_SUCCESS, "Autofocus complete");
+        if (toast_allowed(index, 3))
+            ws_toast(index, TOAST_SUCCESS, "Autofocus complete");
         nina_event_log_add_fmt(EVENT_SEV_SUCCESS, index,
             "Autofocus complete: pos %d, HFR %.2f",
             data->autofocus.best_position, data->autofocus.best_hfr);
@@ -410,10 +659,12 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         }
         /* Toast + event log (thread-safe, no lock needed) */
         if (safe) {
-            ws_toast(index, TOAST_SUCCESS, "Safe");
+            if (toast_allowed(index, 7))
+                ws_toast(index, TOAST_SUCCESS, "Safe");
             nina_event_log_add(EVENT_SEV_SUCCESS, index, "Observatory is safe");
         } else {
-            ws_toast(index, TOAST_ERROR, "UNSAFE");
+            if (toast_allowed(index, 7))
+                ws_toast(index, TOAST_ERROR, "UNSAFE");
             nina_event_log_add(EVENT_SEV_ERROR, index, "Observatory UNSAFE!");
             if (app_config_get()->alert_flash_enabled) {
                 nina_alert_trigger(ALERT_SAFETY, index, 0);
@@ -434,7 +685,8 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             data->ui_refresh_needed = true;
             nina_client_unlock(data);
         }
-        ws_toast(index, TOAST_INFO, "Waiting for next target");
+        if (toast_allowed(index, 2))
+            ws_toast(index, TOAST_INFO, "Waiting for next target");
         nina_event_log_add(EVENT_SEV_INFO, index, "Waiting for next target");
         ESP_LOGI(TAG, "WS[%d]: Waiting for next target", index);
     }
@@ -454,7 +706,8 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             data->ui_refresh_needed = true;
             nina_client_unlock(data);
         }
-        ws_toast(index, TOAST_INFO, "Meridian flip completed");
+        if (toast_allowed(index, 5))
+            ws_toast(index, TOAST_INFO, "Meridian flip completed");
         nina_event_log_add(EVENT_SEV_INFO, index, "Meridian flip completed");
         ESP_LOGI(TAG, "WS[%d]: Meridian flip completed", index);
     }
@@ -468,7 +721,8 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             data->ui_refresh_needed = true;
             nina_client_unlock(data);
         }
-        ws_toast(index, TOAST_WARNING, "Guider stopped");
+        if (toast_allowed(index, 6))
+            ws_toast(index, TOAST_WARNING, "Guider stopped");
         nina_event_log_add(EVENT_SEV_WARNING, index, "Guider stopped");
         ESP_LOGI(TAG, "WS[%d]: Guider stopped", index);
     }
@@ -481,7 +735,10 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             data->ui_refresh_needed = true;
             nina_client_unlock(data);
         }
-        ws_toast(index, TOAST_INFO, "Profile changed");
+        /* Reset equipment mask — new profile may have different equipment */
+        s_ever_connected[index] = 0;
+        if (toast_allowed(index, 9))
+            ws_toast(index, TOAST_INFO, "Profile changed");
         nina_event_log_add(EVENT_SEV_INFO, index, "Profile changed");
     }
     // AUTOFOCUS-FAILED: AF did not converge
@@ -491,55 +748,168 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             data->ui_refresh_needed = true;
             nina_client_unlock(data);
         }
-        ws_toast(index, TOAST_ERROR, "Autofocus failed");
+        if (toast_allowed(index, 3) || toast_allowed(index, 8))
+            ws_toast(index, TOAST_ERROR, "Autofocus failed");
         nina_event_log_add(EVENT_SEV_ERROR, index, "Autofocus failed");
         ESP_LOGW(TAG, "WS[%d]: Autofocus failed", index);
     }
-    // CAMERA-CONNECTED: Camera connected — cancel any pending disconnect toast
+    // CAMERA-CONNECTED: Camera connected — use aggregation
     else if (strcmp(evt->valuestring, "CAMERA-CONNECTED") == 0) {
-        s_camera_disconnect_pending_ms[index] = 0;
-        ws_toast(index, TOAST_SUCCESS, "Camera connected");
-        nina_event_log_add(EVENT_SEV_INFO, index, "Camera connected");
+        record_connect_event(index, EQ_CAMERA);
         ESP_LOGI(TAG, "WS[%d]: Camera connected", index);
     }
-    // CAMERA-DISCONNECTED: Defer toast — NINA fires this before CAMERA-CONNECTED
-    // during a fresh connect sequence. Only show if no connect follows within 3s.
+    // CAMERA-DISCONNECTED: Direct disconnect via aggregation system
     else if (strcmp(evt->valuestring, "CAMERA-DISCONNECTED") == 0) {
-        s_camera_disconnect_pending_ms[index] = esp_timer_get_time() / 1000;
-        ESP_LOGW(TAG, "WS[%d]: Camera disconnect pending (grace %dms)", index, CAMERA_DISCONNECT_GRACE_MS);
+        record_disconnect_event(index, EQ_CAMERA);
+        ESP_LOGW(TAG, "WS[%d]: Camera disconnected", index);
     }
     // MOUNT-SLEWING: Mount is slewing to target
     else if (strcmp(evt->valuestring, "MOUNT-SLEWING") == 0) {
-        ws_toast(index, TOAST_INFO, "Mount slewing to target");
+        if (toast_allowed(index, 4))
+            ws_toast(index, TOAST_INFO, "Mount slewing to target");
         ESP_LOGI(TAG, "WS[%d]: Mount slewing", index);
     }
     // MOUNT-PARKED: Mount parked
     else if (strcmp(evt->valuestring, "MOUNT-PARKED") == 0) {
-        ws_toast(index, TOAST_INFO, "Mount parked");
+        if (toast_allowed(index, 4))
+            ws_toast(index, TOAST_INFO, "Mount parked");
         nina_event_log_add(EVENT_SEV_INFO, index, "Mount parked");
         ESP_LOGI(TAG, "WS[%d]: Mount parked", index);
     }
     // MOUNT-HOMED: Mount homed
     else if (strcmp(evt->valuestring, "MOUNT-HOMED") == 0) {
-        ws_toast(index, TOAST_INFO, "Mount homed");
+        if (toast_allowed(index, 4))
+            ws_toast(index, TOAST_INFO, "Mount homed");
         ESP_LOGI(TAG, "WS[%d]: Mount homed", index);
     }
     // MOUNT-TRACKING-ON: Tracking started
     else if (strcmp(evt->valuestring, "MOUNT-TRACKING-ON") == 0) {
-        ws_toast(index, TOAST_SUCCESS, "Tracking started");
+        if (toast_allowed(index, 4))
+            ws_toast(index, TOAST_SUCCESS, "Tracking started");
         ESP_LOGI(TAG, "WS[%d]: Tracking started", index);
     }
     // MOUNT-TRACKING-OFF: Tracking stopped
     else if (strcmp(evt->valuestring, "MOUNT-TRACKING-OFF") == 0) {
-        ws_toast(index, TOAST_WARNING, "Tracking stopped");
+        if (toast_allowed(index, 4))
+            ws_toast(index, TOAST_WARNING, "Tracking stopped");
         nina_event_log_add(EVENT_SEV_WARNING, index, "Tracking stopped");
         ESP_LOGW(TAG, "WS[%d]: Tracking stopped", index);
     }
     // ERROR*: Any error event
     else if (strncmp(evt->valuestring, "ERROR", 5) == 0) {
-        ws_toast_fmt(index, TOAST_ERROR, "Error: %s", evt->valuestring);
+        if (toast_allowed(index, 8))
+            ws_toast_fmt(index, TOAST_ERROR, "Error: %s", evt->valuestring);
         nina_event_log_add_fmt(EVENT_SEV_ERROR, index, "Error: %s", evt->valuestring);
         ESP_LOGE(TAG, "WS[%d]: Error event: %s", index, evt->valuestring);
+    }
+    // Equipment connect events — aggregated
+    else if (strcmp(evt->valuestring, "GUIDER-CONNECTED") == 0) {
+        record_connect_event(index, EQ_GUIDER);
+    }
+    else if (strcmp(evt->valuestring, "GUIDER-DISCONNECTED") == 0) {
+        record_disconnect_event(index, EQ_GUIDER);
+    }
+    else if (strcmp(evt->valuestring, "MOUNT-CONNECTED") == 0) {
+        record_connect_event(index, EQ_MOUNT);
+    }
+    else if (strcmp(evt->valuestring, "MOUNT-DISCONNECTED") == 0) {
+        record_disconnect_event(index, EQ_MOUNT);
+    }
+    else if (strcmp(evt->valuestring, "MOUNT-UNPARKED") == 0) {
+        if (toast_allowed(index, 4))
+            ws_toast(index, TOAST_INFO, "Mount unparked");
+        nina_event_log_add(EVENT_SEV_INFO, index, "Mount unparked");
+    }
+    else if (strcmp(evt->valuestring, "FOCUSER-CONNECTED") == 0) {
+        record_connect_event(index, EQ_FOCUSER);
+    }
+    else if (strcmp(evt->valuestring, "FOCUSER-DISCONNECTED") == 0) {
+        record_disconnect_event(index, EQ_FOCUSER);
+    }
+    else if (strcmp(evt->valuestring, "FILTERWHEEL-CONNECTED") == 0) {
+        record_connect_event(index, EQ_FILTERWHEEL);
+    }
+    else if (strcmp(evt->valuestring, "FILTERWHEEL-DISCONNECTED") == 0) {
+        record_disconnect_event(index, EQ_FILTERWHEEL);
+    }
+    else if (strcmp(evt->valuestring, "ROTATOR-CONNECTED") == 0) {
+        record_connect_event(index, EQ_ROTATOR);
+    }
+    else if (strcmp(evt->valuestring, "ROTATOR-DISCONNECTED") == 0) {
+        record_disconnect_event(index, EQ_ROTATOR);
+    }
+    else if (strcmp(evt->valuestring, "SAFETY-CONNECTED") == 0) {
+        record_connect_event(index, EQ_SAFETY);
+    }
+    else if (strcmp(evt->valuestring, "SAFETY-DISCONNECTED") == 0) {
+        record_disconnect_event(index, EQ_SAFETY);
+    }
+    else if (strcmp(evt->valuestring, "DOME-CONNECTED") == 0) {
+        record_connect_event(index, EQ_DOME);
+    }
+    else if (strcmp(evt->valuestring, "DOME-DISCONNECTED") == 0) {
+        record_disconnect_event(index, EQ_DOME);
+    }
+    else if (strcmp(evt->valuestring, "DOME-SHUTTER-OPENED") == 0) {
+        if (toast_allowed(index, 10))
+            ws_toast(index, TOAST_INFO, "Dome shutter opened");
+        nina_event_log_add(EVENT_SEV_INFO, index, "Dome shutter opened");
+    }
+    else if (strcmp(evt->valuestring, "DOME-SHUTTER-CLOSED") == 0) {
+        if (toast_allowed(index, 10))
+            ws_toast(index, TOAST_INFO, "Dome shutter closed");
+        nina_event_log_add(EVENT_SEV_INFO, index, "Dome shutter closed");
+    }
+    else if (strcmp(evt->valuestring, "FLAT-CONNECTED") == 0) {
+        record_connect_event(index, EQ_FLAT);
+    }
+    else if (strcmp(evt->valuestring, "FLAT-DISCONNECTED") == 0) {
+        record_disconnect_event(index, EQ_FLAT);
+    }
+    else if (strcmp(evt->valuestring, "FLAT-LIGHT-TOGGLED") == 0) {
+        if (toast_allowed(index, 11))
+            ws_toast(index, TOAST_INFO, "Flat light toggled");
+        nina_event_log_add(EVENT_SEV_INFO, index, "Flat light toggled");
+    }
+    else if (strcmp(evt->valuestring, "FLAT-COVER-OPENED") == 0) {
+        if (toast_allowed(index, 11))
+            ws_toast(index, TOAST_INFO, "Flat cover opened");
+        nina_event_log_add(EVENT_SEV_INFO, index, "Flat cover opened");
+    }
+    else if (strcmp(evt->valuestring, "FLAT-COVER-CLOSED") == 0) {
+        if (toast_allowed(index, 11))
+            ws_toast(index, TOAST_INFO, "Flat cover closed");
+        nina_event_log_add(EVENT_SEV_INFO, index, "Flat cover closed");
+    }
+    else if (strcmp(evt->valuestring, "SWITCH-CONNECTED") == 0) {
+        record_connect_event(index, EQ_SWITCH);
+    }
+    else if (strcmp(evt->valuestring, "SWITCH-DISCONNECTED") == 0) {
+        record_disconnect_event(index, EQ_SWITCH);
+    }
+    else if (strcmp(evt->valuestring, "WEATHER-CONNECTED") == 0) {
+        record_connect_event(index, EQ_WEATHER);
+    }
+    else if (strcmp(evt->valuestring, "WEATHER-DISCONNECTED") == 0) {
+        record_disconnect_event(index, EQ_WEATHER);
+    }
+    else if (strcmp(evt->valuestring, "CAMERA-DOWNLOAD-TIMEOUT") == 0) {
+        if (toast_allowed(index, 1) || toast_allowed(index, 8))
+            ws_toast(index, TOAST_ERROR, "Camera download timeout");
+        nina_event_log_add(EVENT_SEV_ERROR, index, "Camera download timeout");
+    }
+    else if (strcmp(evt->valuestring, "SEQUENCE-ENTITY-FAILED") == 0) {
+        cJSON *entity = cJSON_GetObjectItem(response, "Entity");
+        cJSON *error_msg = cJSON_GetObjectItem(response, "Error");
+        char msg[128];
+        if (entity && entity->valuestring && error_msg && error_msg->valuestring) {
+            snprintf(msg, sizeof(msg), "%s: %s", entity->valuestring, error_msg->valuestring);
+        } else {
+            snprintf(msg, sizeof(msg), "Sequence entity failed");
+        }
+        if (toast_allowed(index, 2) || toast_allowed(index, 8))
+            ws_toast(index, TOAST_ERROR, msg);
+        nina_event_log_add_fmt(EVENT_SEV_ERROR, index, "Entity failed: %s", msg);
     }
     else {
         ESP_LOGD(TAG, "WS[%d]: Unhandled event: %s", index, evt->valuestring);
@@ -674,6 +1044,19 @@ void nina_websocket_start(int index, const char *base_url, nina_client_t *data) 
     esp_websocket_register_events(ws_clients[index], WEBSOCKET_EVENT_ANY,
                                    websocket_event_handler, (void *)(intptr_t)index);
     esp_websocket_client_start(ws_clients[index]);
+
+    // Create aggregation timer if not yet created
+    if (!s_agg_timers[index]) {
+        esp_timer_create_args_t timer_args = {
+            .callback = agg_timer_cb,
+            .arg = (void *)(intptr_t)index,
+            .name = "ws_agg"
+        };
+        esp_timer_create(&timer_args, &s_agg_timers[index]);
+    }
+    memset(&s_agg[index], 0, sizeof(connect_agg_state_t));
+    /* Don't reset s_ever_connected here — it's seeded by the poll task
+     * from /equipment/info and persists across WS reconnects. */
 }
 
 void nina_websocket_stop(int index) {
@@ -692,6 +1075,12 @@ void nina_websocket_stop(int index) {
         }
         ws_client_data[index] = NULL;
     }
+
+    // Stop aggregation timer and reset state
+    if (s_agg_timers[index]) {
+        esp_timer_stop(s_agg_timers[index]);
+    }
+    memset(&s_agg[index], 0, sizeof(connect_agg_state_t));
 }
 
 void nina_websocket_stop_all(void) {
@@ -719,14 +1108,20 @@ void nina_websocket_check_reconnect(int index, const char *base_url, nina_client
 }
 
 void nina_websocket_check_deferred_alerts(int index) {
-    if (index < 0 || index >= MAX_NINA_INSTANCES) return;
-    if (s_camera_disconnect_pending_ms[index] == 0) return;
+    (void)index;
+    // Legacy: camera disconnect grace period removed in toast overhaul.
+    // Aggregation window now handles false disconnect→reconnect patterns.
+}
 
-    int64_t now_ms = esp_timer_get_time() / 1000;
-    if (now_ms - s_camera_disconnect_pending_ms[index] >= CAMERA_DISCONNECT_GRACE_MS) {
-        s_camera_disconnect_pending_ms[index] = 0;
-        ws_toast(index, TOAST_ERROR, "Camera disconnected");
-        nina_event_log_add(EVENT_SEV_ERROR, index, "Camera disconnected");
-        ESP_LOGW(TAG, "WS[%d]: Camera disconnect confirmed (no reconnect within grace period)", index);
-    }
+bool nina_websocket_is_running(int index) {
+    if (index < 0 || index >= MAX_NINA_INSTANCES) return false;
+    return ws_clients[index] != NULL;
+}
+
+void nina_websocket_update_equipment_mask(int index, uint16_t connected_mask) {
+    if (index < 0 || index >= MAX_NINA_INSTANCES) return;
+    /* OR — accumulate bits. Equipment that was ever connected keeps its bit
+     * even after disconnecting, so deferred disconnect toasts still fire.
+     * Reset happens only on profile change or instance stop. */
+    s_ever_connected[index] |= connected_mask;
 }

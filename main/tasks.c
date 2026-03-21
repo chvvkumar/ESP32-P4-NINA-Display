@@ -399,6 +399,11 @@ void instance_poll_task(void *arg) {
         // WebSocket: skip reconnect while screen sleeping (saves network resources);
         // reconnect will happen naturally when screen wakes and poll resumes.
         if (!screen_asleep) {
+            // If WebSocket was never started (boot probe missed) but instance is
+            // now connected, start it. check_reconnect only handles post-disconnect.
+            if (!nina_websocket_is_running(idx) && nina_connection_is_connected(idx)) {
+                nina_websocket_start(idx, url, ctx->client);
+            }
             nina_websocket_check_reconnect(idx, url, ctx->client);
         }
 

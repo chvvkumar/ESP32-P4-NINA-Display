@@ -30,7 +30,8 @@ void fetch_safety_monitor_info(const char *base_url, nina_client_t *data);
  * @param fetch_filter_list If true, also parse AvailableFilters[] (use on first connect)
  * @return 0 on success, -1 on HTTP failure (offline), -2 if endpoint unavailable (404/error)
  */
-int fetch_equipment_info_bundled(const char *base_url, nina_client_t *data, bool fetch_filter_list);
+int fetch_equipment_info_bundled(const char *base_url, nina_client_t *data, bool fetch_filter_list,
+                                uint16_t *out_connected_mask);
 
 /* Info overlay detail fetchers — on-demand, not part of normal polling */
 #include "ui/info_overlay_types.h"

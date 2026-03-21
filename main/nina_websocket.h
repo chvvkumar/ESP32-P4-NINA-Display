@@ -37,9 +37,22 @@ void nina_websocket_stop_all(void);
 void nina_websocket_check_reconnect(int index, const char *base_url, nina_client_t *data);
 
 /**
- * @brief Check for deferred camera-disconnect alerts.
- * NINA fires CAMERA-DISCONNECTED before CAMERA-CONNECTED during a connect
- * sequence. This defers the disconnect toast by 3 s so it only shows for
- * true disconnects. Call periodically from the data task loop.
+ * @brief Legacy stub — camera disconnect grace period removed.
+ * Kept for API compatibility. Now a no-op.
  */
 void nina_websocket_check_deferred_alerts(int index);
+
+/**
+ * @brief Update the "ever connected" equipment mask for an instance.
+ * Call from the HTTP poll task after parsing /equipment/info to seed
+ * the mask from NINA's actual Connected state. This ensures disconnect
+ * toasts are only shown for equipment that has a driver selected.
+ * Bits: 0=Camera, 1=Mount, 2=Guider, 3=Focuser, 4=Filterwheel,
+ *       5=Rotator, 6=Safety, 7=Dome, 8=Flat, 9=Switch, 10=Weather
+ */
+void nina_websocket_update_equipment_mask(int index, uint16_t connected_mask);
+
+/**
+ * @brief Check if a WebSocket client exists (started) for this instance.
+ */
+bool nina_websocket_is_running(int index);

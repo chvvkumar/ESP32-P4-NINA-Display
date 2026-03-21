@@ -1,10 +1,12 @@
 /**
  * @file nina_toast.c
- * @brief Full-width severity-colored toast bar with thread-safe pending queue.
+ * @brief Pool of 3 stacked toast bars with 16-slot FIFO backlog queue.
  *
  * Architecture: nina_toast_show() writes to a spinlock-protected pending
  * queue and returns immediately.  An LVGL timer (tick_cb, 200 ms) drains
- * the queue in the LVGL context and creates/manages the toast bar widget.
+ * the queue in the LVGL context, manages 3 independent toast bar widgets
+ * stacked bottom-to-top, and promotes from a 16-slot backlog FIFO when
+ * a visible toast expires or is tapped to dismiss.
  */
 
 #include "nina_toast.h"
@@ -23,33 +25,71 @@
 static const char *TAG = "toast";
 
 /* ── Configuration ──────────────────────────────────────────────────── */
-#define TOAST_DEFAULT_MS    8000
-#define TOAST_ERROR_MS      15000
-#define TOAST_DEDUP_MS      5000
-#define PENDING_QUEUE_SIZE  4
+#define PENDING_QUEUE_SIZE  16
 #define TICK_INTERVAL_MS    200
+#define TOAST_POOL_SIZE     4
+#define BACKLOG_SIZE        16
 
 /* Toast bar dimensions */
 #define TOAST_RADIUS        18
 #define TOAST_MARGIN_X      12
-#define TOAST_BOTTOM_Y      -30   /* Offset from bottom, above page dots */
+#define TOAST_BOTTOM_Y      (-30)   /* Offset from bottom, above page dots */
+#define TOAST_BAR_HEIGHT    68      /* 16 pad + 28 font (2 lines) + 16 pad, room for wrapped hostnames */
+#define TOAST_STACK_GAP     6       /* Gap between stacked bars */
 #define DOT_SIZE            14
 #define DOT_RADIUS          7
 
-/* Severity background colors (dark, muted) */
+/* Animation durations */
+#define ANIM_ENTER_MS       300
+#define ANIM_EXIT_MS        200
+#define ANIM_SHIFT_MS       200
+
+/* Severity background colors (Tailwind -950 shades, 30% opacity for glass effect) */
 static const uint32_t sev_bg_colors[] = {
-    [TOAST_INFO]    = 0x0C3060,   /* Dark blue */
-    [TOAST_SUCCESS] = 0x1B5E20,   /* Dark green */
-    [TOAST_WARNING] = 0x4E342E,   /* Dark brown */
-    [TOAST_ERROR]   = 0x7F0000,   /* Dark red */
+    [TOAST_INFO]    = 0x082f49,   /* sky-950 */
+    [TOAST_SUCCESS] = 0x022c22,   /* emerald-950 */
+    [TOAST_WARNING] = 0x451a03,   /* amber-950 */
+    [TOAST_ERROR]   = 0x4c0519,   /* rose-950 */
 };
 
-/* Severity dot colors (bright accent) */
+/* Severity border colors (Tailwind -900 shades, 50% opacity) */
+static const uint32_t sev_border_colors[] = {
+    [TOAST_INFO]    = 0x0c4a6e,   /* sky-900 */
+    [TOAST_SUCCESS] = 0x064e3b,   /* emerald-900 */
+    [TOAST_WARNING] = 0x78350f,   /* amber-900 */
+    [TOAST_ERROR]   = 0x881337,   /* rose-900 */
+};
+
+/* Severity dot colors (Tailwind -500 shades) */
 static const uint32_t sev_dot_colors[] = {
-    [TOAST_INFO]    = 0x42A5F5,   /* Blue */
-    [TOAST_SUCCESS] = 0x4CAF50,   /* Green */
-    [TOAST_WARNING] = 0xFFA726,   /* Orange */
-    [TOAST_ERROR]   = 0xF44336,   /* Red */
+    [TOAST_INFO]    = 0x0ea5e9,   /* sky-500 */
+    [TOAST_SUCCESS] = 0x10b981,   /* emerald-500 */
+    [TOAST_WARNING] = 0xf59e0b,   /* amber-500 */
+    [TOAST_ERROR]   = 0xf43f5e,   /* rose-500 */
+};
+
+/* Severity age/timestamp colors (Tailwind -200 shades, rendered at 40% opa) */
+static const uint32_t sev_age_colors[] = {
+    [TOAST_INFO]    = 0xbae6fd,   /* sky-200 */
+    [TOAST_SUCCESS] = 0xa7f3d0,   /* emerald-200 */
+    [TOAST_WARNING] = 0xfde68a,   /* amber-200 */
+    [TOAST_ERROR]   = 0xfecdd3,   /* rose-200 */
+};
+
+/* Severity hostname colors (midpoint between -200/60 and zinc-100) */
+static const uint32_t sev_hostname_colors[] = {
+    [TOAST_INFO]    = 0xB2BFC7,   /* sky mid */
+    [TOAST_SUCCESS] = 0xACC3B9,   /* emerald mid */
+    [TOAST_WARNING] = 0xC6BFA4,   /* amber mid */
+    [TOAST_ERROR]   = 0xC6B7BA,   /* rose mid */
+};
+
+/* Severity accent colors for status keywords (Tailwind -400 shades) */
+static const uint32_t sev_accent_colors[] = {
+    [TOAST_INFO]    = 0x38bdf8,   /* sky-400 */
+    [TOAST_SUCCESS] = 0x34d399,   /* emerald-400 */
+    [TOAST_WARNING] = 0xfbbf24,   /* amber-400 */
+    [TOAST_ERROR]   = 0xfb7185,   /* rose-400 */
 };
 
 /* Red Night severity backgrounds — different red brightness levels */
@@ -60,6 +100,14 @@ static const uint32_t sev_bg_red[] = {
     [TOAST_ERROR]   = 0x7F0000,
 };
 
+/* Red Night severity borders */
+static const uint32_t sev_border_red[] = {
+    [TOAST_INFO]    = 0x4a0000,
+    [TOAST_SUCCESS] = 0x5c1010,
+    [TOAST_WARNING] = 0x7a1a1a,
+    [TOAST_ERROR]   = 0x991b1b,
+};
+
 /* Red Night severity dots — brighter red accents */
 static const uint32_t sev_dot_red[] = {
     [TOAST_INFO]    = 0x991b1b,
@@ -68,14 +116,14 @@ static const uint32_t sev_dot_red[] = {
     [TOAST_ERROR]   = 0xff0000,
 };
 
-/* ── Toast state ────────────────────────────────────────────────────── */
+/* ── Toast pool slot state ──────────────────────────────────────────── */
 typedef struct {
     lv_obj_t           *bar;        /* Full-width toast bar */
     lv_obj_t           *dot;        /* Severity dot */
     lv_obj_t           *lbl_msg;    /* Message label */
     lv_obj_t           *lbl_age;    /* Age counter */
     toast_severity_t    sev;
-    char                message[128];
+    char                message[128]; /* Original message (without dedup count) */
     int64_t             shown_ms;
     int                 lifetime_ms;
     int                 dedup_count;
@@ -89,17 +137,60 @@ typedef struct {
     bool             valid;
 } pending_toast_t;
 
+/* ── Backlog FIFO entry ─────────────────────────────────────────────── */
+typedef struct {
+    toast_severity_t sev;
+    char             message[128];
+} backlog_entry_t;
+
 /* ── Module state ───────────────────────────────────────────────────── */
 static lv_obj_t        *s_screen = NULL;
-static toast_state_t    s_toast = {0};
+static toast_state_t    s_pool[TOAST_POOL_SIZE];
 static lv_timer_t      *s_tick_timer = NULL;
 
+/* Pending queue (thread-safe, spinlock-protected) */
 static pending_toast_t  s_pending[PENDING_QUEUE_SIZE];
 static portMUX_TYPE     s_pending_lock = portMUX_INITIALIZER_UNLOCKED;
+
+/* Backlog FIFO ring buffer (LVGL context only, no lock needed) */
+static backlog_entry_t  s_backlog[BACKLOG_SIZE];
+static int              s_bl_head  = 0;  /* Next read position */
+static int              s_bl_tail  = 0;  /* Next write position */
+static int              s_bl_count = 0;
 
 /* ── Helpers ────────────────────────────────────────────────────────── */
 static int64_t now_ms(void) {
     return esp_timer_get_time() / 1000;
+}
+
+/** Count how many pool slots are currently active. */
+static int active_count(void) {
+    int n = 0;
+    for (int i = 0; i < TOAST_POOL_SIZE; i++) {
+        if (s_pool[i].active) n++;
+    }
+    return n;
+}
+
+/** Compute the Y translate value for a given visual stack position.
+ *  Position 0 = bottommost bar, 1 = middle, 2 = topmost.
+ *  Each bar sits at TOAST_BOTTOM_Y offset, then shifted up by
+ *  pos * (TOAST_BAR_HEIGHT + TOAST_STACK_GAP). */
+static int32_t y_for_position(int pos) {
+    return TOAST_BOTTOM_Y - pos * (TOAST_BAR_HEIGHT + TOAST_STACK_GAP);
+}
+
+/** Get the configured base duration in ms. */
+static int base_duration_ms(void) {
+    int cfg_dur_s = app_config_get()->toast_duration_s;
+    if (cfg_dur_s < 3 || cfg_dur_s > 30) cfg_dur_s = 8;
+    return cfg_dur_s * 1000;
+}
+
+/** Compute lifetime for a given severity. ERROR/WARNING get 2x. */
+static int lifetime_for_severity(toast_severity_t sev) {
+    int base = base_duration_ms();
+    return (sev == TOAST_ERROR || sev == TOAST_WARNING) ? (base * 2) : base;
 }
 
 /* ── Animation callbacks ───────────────────────────────────────────── */
@@ -111,110 +202,353 @@ static void anim_y_cb(void *obj, int32_t v) {
     lv_obj_set_style_translate_y((lv_obj_t *)obj, v, 0);
 }
 
+/** Called when a fade-out animation completes — hide the bar. */
 static void exit_anim_done_cb(lv_anim_t *a) {
     lv_obj_t *bar = (lv_obj_t *)a->var;
     lv_obj_add_flag(bar, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_opa(bar, LV_OPA_COVER, 0);
 }
 
-/* ── Dismiss current toast ──────────────────────────────────────────── */
-static void dismiss_toast(void) {
-    if (!s_toast.active || !s_toast.bar) return;
-
-    lv_anim_t a;
-    lv_anim_init(&a);
-    lv_anim_set_var(&a, s_toast.bar);
-    lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_TRANSP);
-    lv_anim_set_duration(&a, 200);
-    lv_anim_set_exec_cb(&a, anim_opa_cb);
-    lv_anim_set_completed_cb(&a, exit_anim_done_cb);
-    lv_anim_start(&a);
-
-    s_toast.active = false;
+/* ── Backlog ring buffer operations (LVGL context only) ─────────────── */
+static void backlog_push(toast_severity_t sev, const char *msg) {
+    if (s_bl_count >= BACKLOG_SIZE) {
+        /* Overflow: drop oldest entry */
+        ESP_LOGW(TAG, "Backlog overflow, dropping oldest: %s", s_backlog[s_bl_head].message);
+        s_bl_head = (s_bl_head + 1) % BACKLOG_SIZE;
+        s_bl_count--;
+    }
+    s_backlog[s_bl_tail].sev = sev;
+    strncpy(s_backlog[s_bl_tail].message, msg, sizeof(s_backlog[s_bl_tail].message) - 1);
+    s_backlog[s_bl_tail].message[sizeof(s_backlog[s_bl_tail].message) - 1] = '\0';
+    s_bl_tail = (s_bl_tail + 1) % BACKLOG_SIZE;
+    s_bl_count++;
 }
 
-/* ── Show a toast (LVGL context only) ───────────────────────────────── */
-static void show_toast(toast_severity_t sev, const char *msg) {
-    if (!s_toast.bar) return;
+static bool backlog_pop(toast_severity_t *sev, char *msg, size_t msg_sz) {
+    if (s_bl_count <= 0) return false;
+    *sev = s_backlog[s_bl_head].sev;
+    strncpy(msg, s_backlog[s_bl_head].message, msg_sz - 1);
+    msg[msg_sz - 1] = '\0';
+    s_bl_head = (s_bl_head + 1) % BACKLOG_SIZE;
+    s_bl_count--;
+    return true;
+}
 
-    /* Cancel any running animations */
-    lv_anim_delete(s_toast.bar, anim_opa_cb);
-    lv_anim_delete(s_toast.bar, anim_y_cb);
-
-    /* Configure state — use config duration, errors get 2x */
-    s_toast.sev = sev;
-    strncpy(s_toast.message, msg, sizeof(s_toast.message) - 1);
-    s_toast.shown_ms = now_ms();
-    int cfg_dur_s = app_config_get()->toast_duration_s;
-    if (cfg_dur_s < 3 || cfg_dur_s > 30) cfg_dur_s = 8;
-    s_toast.lifetime_ms = (sev == TOAST_ERROR) ? (cfg_dur_s * 2000) : (cfg_dur_s * 1000);
-    s_toast.dedup_count = 1;
-    s_toast.active = true;
-
-    /* Apply severity colors — use red palette in Red Night */
+/* ── Apply severity colors to a pool slot ───────────────────────────── */
+static void apply_colors(toast_state_t *ts) {
     bool red_night = theme_is_red_night(current_theme);
-    lv_obj_set_style_bg_color(s_toast.bar,
+    toast_severity_t sev = ts->sev;
+
+    /* Background: -950 shade, fully opaque */
+    lv_obj_set_style_bg_color(ts->bar,
         lv_color_hex(red_night ? sev_bg_red[sev] : sev_bg_colors[sev]), 0);
-    lv_obj_set_style_bg_color(s_toast.dot,
+    lv_obj_set_style_bg_opa(ts->bar, LV_OPA_COVER, 0);
+
+    /* Border: -900 shade at 50% opacity */
+    lv_obj_set_style_border_color(ts->bar,
+        lv_color_hex(red_night ? sev_border_red[sev] : sev_border_colors[sev]), 0);
+    lv_obj_set_style_border_opa(ts->bar, red_night ? LV_OPA_COVER : 128, 0); /* 50% */
+
+    /* Dot: -500 shade with glow */
+    lv_obj_set_style_bg_color(ts->dot,
         lv_color_hex(red_night ? sev_dot_red[sev] : sev_dot_colors[sev]), 0);
-    lv_obj_set_style_text_color(s_toast.lbl_msg,
-        lv_color_hex(red_night ? 0xcc0000 : 0xFFFFFF), 0);
-    lv_obj_set_style_text_color(s_toast.lbl_age,
-        lv_color_hex(red_night ? 0x991b1b : 0xBBBBBB), 0);
-    lv_label_set_text(s_toast.lbl_msg, msg);
+    lv_obj_set_style_shadow_color(ts->dot,
+        lv_color_hex(red_night ? sev_dot_red[sev] : sev_dot_colors[sev]), 0);
+    lv_obj_set_style_shadow_width(ts->dot, red_night ? 0 : 12, 0);
+    lv_obj_set_style_shadow_spread(ts->dot, red_night ? 0 : 2, 0);
+    lv_obj_set_style_shadow_opa(ts->dot, LV_OPA_60, 0);
+
+    /* Message text: zinc-100 (#f4f4f5) — bright neutral white */
+    lv_obj_set_style_text_color(ts->lbl_msg,
+        lv_color_hex(red_night ? 0xcc0000 : 0xf4f4f5), 0);
+
+    /* Age/countdown: -200 shade at 40% opacity */
+    lv_obj_set_style_text_color(ts->lbl_age,
+        lv_color_hex(red_night ? 0x991b1b : sev_age_colors[sev]), 0);
+    lv_obj_set_style_text_opa(ts->lbl_age, red_night ? LV_OPA_COVER : 102, 0); /* 40% = 102/255 */
+}
+
+/* ── Status keywords for recolor accent (longest first for greedy match) ── */
+static const char *s_status_keywords[] = {
+    "unexpectedly disconnected",
+    "disconnected", "Disconnected",
+    "connected", "Connected",
+    "devices connected",
+    "started", "Started",
+    "stopped", "Stopped",
+    "failed", "Failed",
+    "complete", "Complete",
+    "UNSAFE", "SAFE",
+    "timeout", "Timeout",
+    NULL
+};
+
+/* ── Update displayed message with recolor tags ─────────────────────── */
+static void update_label(toast_state_t *ts) {
+    bool red_night = theme_is_red_night(current_theme);
+    toast_severity_t sev = ts->sev;
+    uint32_t host_clr = red_night ? 0x991b1b : sev_hostname_colors[sev];
+    uint32_t accent_clr = red_night ? 0xcc0000 : sev_accent_colors[sev];
+
+    const char *msg = ts->message;
+    char buf[256];
+    int pos = 0;
+
+    /* 1. Find hostname prefix (before first ':') */
+    const char *colon = strchr(msg, ':');
+    const char *rest = msg;
+
+    if (colon && colon > msg) {
+        /* Hostname in muted severity color */
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "#%06x %.*s:#  ",
+                        (unsigned)host_clr, (int)(colon - msg), msg);
+        rest = colon + 1;
+        while (*rest == ' ') rest++;
+    }
+
+    /* 2. Find status keyword in remaining text */
+    const char *kw_start = NULL;
+    const char *kw = NULL;
+    for (int i = 0; s_status_keywords[i]; i++) {
+        const char *found = strstr(rest, s_status_keywords[i]);
+        if (found) {
+            kw_start = found;
+            kw = s_status_keywords[i];
+            break;
+        }
+    }
+
+    if (kw_start) {
+        /* Text before keyword (equipment name) — stays default label color (zinc-100) */
+        if (kw_start > rest) {
+            pos += snprintf(buf + pos, sizeof(buf) - pos, "%.*s",
+                            (int)(kw_start - rest), rest);
+        }
+        /* Status keyword in accent color */
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "#%06x %s#",
+                        (unsigned)accent_clr, kw);
+        /* Any text after keyword */
+        const char *after = kw_start + strlen(kw);
+        if (*after) {
+            pos += snprintf(buf + pos, sizeof(buf) - pos, "%s", after);
+        }
+    } else {
+        /* No keyword found — output rest as-is in default color */
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "%s", rest);
+    }
+
+    /* 3. Append dedup count */
+    if (ts->dedup_count > 1) {
+        snprintf(buf + pos, sizeof(buf) - pos, " (x%d)", ts->dedup_count);
+    }
+
+    lv_label_set_text(ts->lbl_msg, buf);
+}
+
+/* ── Show a toast in a specific pool slot (LVGL context) ────────────── */
+static void show_in_slot(int idx, toast_severity_t sev, const char *msg, int visual_pos) {
+    toast_state_t *ts = &s_pool[idx];
+
+    /* Cancel any running animations on this bar */
+    lv_anim_delete(ts->bar, anim_opa_cb);
+    lv_anim_delete(ts->bar, anim_y_cb);
+
+    /* Configure state */
+    ts->sev = sev;
+    strncpy(ts->message, msg, sizeof(ts->message) - 1);
+    ts->message[sizeof(ts->message) - 1] = '\0';
+    ts->shown_ms = now_ms();
+    ts->lifetime_ms = lifetime_for_severity(sev);
+    ts->dedup_count = 1;
+    ts->active = true;
+
+    /* Apply colors and label */
+    apply_colors(ts);
+    update_label(ts);
+
+    /* Set countdown */
     char countdown_buf[16];
-    snprintf(countdown_buf, sizeof(countdown_buf), "%ds", s_toast.lifetime_ms / 1000);
-    lv_label_set_text(s_toast.lbl_age, countdown_buf);
+    snprintf(countdown_buf, sizeof(countdown_buf), "%ds", ts->lifetime_ms / 1000);
+    lv_label_set_text(ts->lbl_age, countdown_buf);
+
+    /* Position at visual stack position */
+    int32_t target_y = y_for_position(visual_pos);
 
     /* Show and bring to front */
-    lv_obj_clear_flag(s_toast.bar, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(s_toast.bar);
-    lv_obj_set_style_opa(s_toast.bar, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(ts->bar, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(ts->bar);
 
-    /* Enter animation: slide up + fade in */
-    lv_obj_set_style_opa(s_toast.bar, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_translate_y(s_toast.bar, 20, 0);
+    /* Enter animation: slide down from above + fade in.
+     * New toasts drop into the top slot from above, which avoids conflicting
+     * with the shift-down animation of existing toasts below. */
+    lv_obj_set_style_opa(ts->bar, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_translate_y(ts->bar, target_y - 30, 0);
 
     lv_anim_t a_opa;
     lv_anim_init(&a_opa);
-    lv_anim_set_var(&a_opa, s_toast.bar);
+    lv_anim_set_var(&a_opa, ts->bar);
     lv_anim_set_values(&a_opa, LV_OPA_TRANSP, LV_OPA_COVER);
-    lv_anim_set_duration(&a_opa, 300);
+    lv_anim_set_duration(&a_opa, ANIM_ENTER_MS);
     lv_anim_set_path_cb(&a_opa, lv_anim_path_ease_out);
     lv_anim_set_exec_cb(&a_opa, anim_opa_cb);
     lv_anim_start(&a_opa);
 
     lv_anim_t a_y;
     lv_anim_init(&a_y);
-    lv_anim_set_var(&a_y, s_toast.bar);
-    lv_anim_set_values(&a_y, 20, 0);
-    lv_anim_set_duration(&a_y, 300);
+    lv_anim_set_var(&a_y, ts->bar);
+    lv_anim_set_values(&a_y, target_y - 30, target_y);
+    lv_anim_set_duration(&a_y, ANIM_ENTER_MS);
     lv_anim_set_path_cb(&a_y, lv_anim_path_ease_out);
     lv_anim_set_exec_cb(&a_y, anim_y_cb);
     lv_anim_start(&a_y);
 
-    ESP_LOGI(TAG, "Toast shown: [%d] %s", sev, msg);
+    ESP_LOGI(TAG, "Toast shown [slot %d, pos %d]: [%d] %s", idx, visual_pos, sev, msg);
 }
 
-/* ── Dedup: if same message already showing, bump counter ──────────── */
-static bool try_dedup(toast_severity_t sev, const char *msg) {
-    if (!s_toast.active) return false;
+/* ── Dismiss a pool slot (fade-out, mark inactive) ──────────────────── */
+static void dismiss_slot(int idx) {
+    toast_state_t *ts = &s_pool[idx];
+    if (!ts->active || !ts->bar) return;
 
-    int64_t deadline = now_ms() - TOAST_DEDUP_MS;
-    if (s_toast.sev == sev && s_toast.shown_ms >= deadline
-        && strcmp(s_toast.message, msg) == 0) {
-        s_toast.dedup_count++;
-        s_toast.shown_ms = now_ms(); /* Reset age */
-        /* Update message with count */
-        char buf[144];
-        snprintf(buf, sizeof(buf), "%s (x%d)", msg, s_toast.dedup_count);
-        lv_label_set_text(s_toast.lbl_msg, buf);
-        return true;
+    ts->active = false;
+
+    /* Cancel any running animations */
+    lv_anim_delete(ts->bar, anim_opa_cb);
+    lv_anim_delete(ts->bar, anim_y_cb);
+
+    /* Fade out */
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, ts->bar);
+    lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_TRANSP);
+    lv_anim_set_duration(&a, ANIM_EXIT_MS);
+    lv_anim_set_exec_cb(&a, anim_opa_cb);
+    lv_anim_set_completed_cb(&a, exit_anim_done_cb);
+    lv_anim_start(&a);
+
+    ESP_LOGD(TAG, "Toast dismissed [slot %d]", idx);
+}
+
+/* ── Compact pool and promote from backlog ──────────────────────────── */
+/**
+ * After one or more toasts are dismissed, rebuild the visual positions:
+ * - Collect all active slots, sorted by shown_ms (oldest first = pos 0).
+ * - Animate each to its correct Y position.
+ * - If backlog has items and there's a free slot, promote into top position.
+ */
+static void compact_and_promote(void) {
+    /* Gather active slot indices sorted by shown_ms (oldest first) */
+    int order[TOAST_POOL_SIZE];
+    int n = 0;
+    for (int i = 0; i < TOAST_POOL_SIZE; i++) {
+        if (s_pool[i].active) order[n++] = i;
+    }
+    /* Simple insertion sort by shown_ms ascending */
+    for (int i = 1; i < n; i++) {
+        int key = order[i];
+        int j = i - 1;
+        while (j >= 0 && s_pool[order[j]].shown_ms > s_pool[key].shown_ms) {
+            order[j + 1] = order[j];
+            j--;
+        }
+        order[j + 1] = key;
+    }
+
+    /* Animate each active toast to its correct visual position */
+    for (int pos = 0; pos < n; pos++) {
+        toast_state_t *ts = &s_pool[order[pos]];
+        int32_t target_y = y_for_position(pos);
+
+        /* Cancel any running Y animation */
+        lv_anim_delete(ts->bar, anim_y_cb);
+
+        lv_anim_t a_y;
+        lv_anim_init(&a_y);
+        lv_anim_set_var(&a_y, ts->bar);
+        lv_anim_set_values(&a_y, lv_obj_get_style_translate_y(ts->bar, 0), target_y);
+        lv_anim_set_duration(&a_y, ANIM_SHIFT_MS);
+        lv_anim_set_path_cb(&a_y, lv_anim_path_ease_out);
+        lv_anim_set_exec_cb(&a_y, anim_y_cb);
+        lv_anim_start(&a_y);
+
+        /* Ensure visible and in front */
+        lv_obj_move_foreground(ts->bar);
+    }
+
+    /* Promote from backlog to fill all free slots */
+    while (n < TOAST_POOL_SIZE && s_bl_count > 0) {
+        toast_severity_t sev;
+        char msg[128];
+        if (!backlog_pop(&sev, msg, sizeof(msg))) break;
+        /* Find a free pool slot */
+        for (int i = 0; i < TOAST_POOL_SIZE; i++) {
+            if (!s_pool[i].active) {
+                show_in_slot(i, sev, msg, n); /* n = next visual position (top) */
+                n++;
+                break;
+            }
+        }
+    }
+}
+
+/* ── Click handler for tap-to-dismiss ───────────────────────────────── */
+static void toast_click_cb(lv_event_t *e) {
+    lv_obj_t *bar = lv_event_get_target(e);
+
+    /* Find which pool slot this bar belongs to */
+    for (int i = 0; i < TOAST_POOL_SIZE; i++) {
+        if (s_pool[i].bar == bar && s_pool[i].active) {
+            ESP_LOGI(TAG, "Toast tapped [slot %d], dismissing", i);
+            dismiss_slot(i);
+            compact_and_promote();
+            return;
+        }
+    }
+}
+
+/* ── Dedup: check all active pool slots for matching message+severity ── */
+static bool try_dedup(toast_severity_t sev, const char *msg) {
+    for (int i = 0; i < TOAST_POOL_SIZE; i++) {
+        toast_state_t *ts = &s_pool[i];
+        if (!ts->active) continue;
+
+        if (ts->sev == sev && strcmp(ts->message, msg) == 0) {
+            /* Bump count and reset timer */
+            ts->dedup_count++;
+            ts->shown_ms = now_ms();
+            ts->lifetime_ms = lifetime_for_severity(sev);
+            update_label(ts);
+            /* Update countdown */
+            char countdown_buf[16];
+            snprintf(countdown_buf, sizeof(countdown_buf), "%ds", ts->lifetime_ms / 1000);
+            lv_label_set_text(ts->lbl_age, countdown_buf);
+            ESP_LOGD(TAG, "Toast dedup [slot %d]: %s (x%d)", i, msg, ts->dedup_count);
+            return true;
+        }
     }
     return false;
 }
 
-/* ── LVGL timer callback: drain pending queue + manage toast ────────── */
+/* ── Add a toast to pool or backlog (LVGL context) ──────────────────── */
+static void add_toast(toast_severity_t sev, const char *msg) {
+    /* Try dedup first */
+    if (try_dedup(sev, msg)) return;
+
+    /* Find an inactive pool slot */
+    int n_active = active_count();
+    for (int i = 0; i < TOAST_POOL_SIZE; i++) {
+        if (!s_pool[i].active) {
+            show_in_slot(i, sev, msg, n_active); /* Visual pos = current active count (top) */
+            return;
+        }
+    }
+
+    /* All pool slots full — add to backlog */
+    backlog_push(sev, msg);
+    ESP_LOGD(TAG, "Toast queued to backlog (%d items): %s", s_bl_count, msg);
+}
+
+/* ── LVGL timer callback: drain pending, manage pool, expire ────────── */
 static void tick_cb(lv_timer_t *timer) {
     (void)timer;
 
@@ -231,65 +565,77 @@ static void tick_cb(lv_timer_t *timer) {
     }
     portEXIT_CRITICAL(&s_pending_lock);
 
-    /* 2. Process pending — newest wins (replaces current toast) */
+    /* 2. Process pending toasts → add to pool or backlog */
     for (int i = 0; i < pending_count; i++) {
-        if (!try_dedup(local[i].sev, local[i].message)) {
-            show_toast(local[i].sev, local[i].message);
+        add_toast(local[i].sev, local[i].message);
+    }
+
+    /* 3. Check lifetimes, expire any that exceeded their lifetime */
+    int64_t t = now_ms();
+    bool any_expired = false;
+    for (int i = 0; i < TOAST_POOL_SIZE; i++) {
+        toast_state_t *ts = &s_pool[i];
+        if (!ts->active) continue;
+
+        int64_t elapsed = t - ts->shown_ms;
+        if (elapsed >= ts->lifetime_ms) {
+            dismiss_slot(i);
+            any_expired = true;
         }
     }
 
-    /* 3. Update countdown label and auto-dismiss */
-    if (s_toast.active && s_toast.bar) {
-        int64_t t = now_ms();
-        int64_t elapsed = t - s_toast.shown_ms;
+    /* 4. If anything expired, compact the pool and promote from backlog */
+    if (any_expired) {
+        compact_and_promote();
+    }
 
-        /* Auto-dismiss */
-        if (elapsed >= s_toast.lifetime_ms) {
-            dismiss_toast();
-            return;
-        }
+    /* 5. Update countdown labels for all active toasts */
+    for (int i = 0; i < TOAST_POOL_SIZE; i++) {
+        toast_state_t *ts = &s_pool[i];
+        if (!ts->active || !ts->lbl_age) continue;
 
-        /* Update countdown text */
-        if (s_toast.lbl_age) {
-            int remaining_s = (int)((s_toast.lifetime_ms - elapsed + 999) / 1000);
-            if (remaining_s < 0) remaining_s = 0;
-            char buf[16];
-            snprintf(buf, sizeof(buf), "%ds", remaining_s);
-            lv_label_set_text(s_toast.lbl_age, buf);
-        }
+        int64_t elapsed = now_ms() - ts->shown_ms;
+        int remaining_s = (int)((ts->lifetime_ms - elapsed + 999) / 1000);
+        if (remaining_s < 0) remaining_s = 0;
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%ds", remaining_s);
+        lv_label_set_text(ts->lbl_age, buf);
     }
 }
 
-/* ── Public API ─────────────────────────────────────────────────────── */
+/* ── Create a single toast bar widget (hidden initially) ────────────── */
+static void create_bar(int idx) {
+    toast_state_t *ts = &s_pool[idx];
 
-void nina_toast_init(lv_obj_t *screen) {
-    if (!screen) return;
-    s_screen = screen;
-
-    /* Create the persistent toast bar (hidden initially) */
-    lv_obj_t *bar = lv_obj_create(screen);
+    lv_obj_t *bar = lv_obj_create(s_screen);
     lv_obj_remove_style_all(bar);
     lv_obj_set_width(bar, SCREEN_SIZE - 2 * TOAST_MARGIN_X);
-    lv_obj_set_height(bar, LV_SIZE_CONTENT);
+    lv_obj_set_height(bar, TOAST_BAR_HEIGHT);
     lv_obj_set_align(bar, LV_ALIGN_BOTTOM_MID);
     lv_obj_set_style_translate_y(bar, TOAST_BOTTOM_Y, 0);
     lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(bar, lv_color_hex(0x1B5E20), 0);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(0x022c22), 0);
     lv_obj_set_style_radius(bar, TOAST_RADIUS, 0);
+    lv_obj_set_style_border_width(bar, 1, 0);
+    lv_obj_set_style_border_color(bar, lv_color_hex(0x064e3b), 0);
+    lv_obj_set_style_border_opa(bar, 128, 0);  /* 50% opacity */
     lv_obj_add_flag(bar, LV_OBJ_FLAG_FLOATING);
     lv_obj_add_flag(bar, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(bar, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(bar, LV_OBJ_FLAG_CLICKABLE);
 
     /* Row layout: dot | message | age */
     lv_obj_set_flex_flow(bar, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(bar, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_left(bar, 16, 0);
     lv_obj_set_style_pad_right(bar, 16, 0);
-    lv_obj_set_style_pad_top(bar, 12, 0);
-    lv_obj_set_style_pad_bottom(bar, 12, 0);
+    lv_obj_set_style_pad_top(bar, 16, 0);
+    lv_obj_set_style_pad_bottom(bar, 16, 0);
     lv_obj_set_style_pad_column(bar, 10, 0);
-    s_toast.bar = bar;
+    ts->bar = bar;
+
+    /* Tap-to-dismiss click event */
+    lv_obj_add_event_cb(bar, toast_click_cb, LV_EVENT_CLICKED, NULL);
 
     /* Severity dot */
     lv_obj_t *dot = lv_obj_create(bar);
@@ -299,38 +645,60 @@ void nina_toast_init(lv_obj_t *screen) {
     lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(dot, lv_color_hex(0x4CAF50), 0);
     lv_obj_clear_flag(dot, LV_OBJ_FLAG_CLICKABLE);
-    s_toast.dot = dot;
+    ts->dot = dot;
 
-    /* Message label (grows to fill available space, wraps long text) */
+    /* Message label (grows to fill available space, recolor enabled) */
     lv_obj_t *lbl_msg = lv_label_create(bar);
     lv_obj_set_style_text_font(lbl_msg, &lv_font_montserrat_28, 0);
-    lv_obj_set_style_text_color(lbl_msg, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_color(lbl_msg, lv_color_hex(0xf4f4f5), 0); /* zinc-100 default */
+    lv_label_set_recolor(lbl_msg, true);
     lv_label_set_text(lbl_msg, "");
-    lv_label_set_long_mode(lbl_msg, LV_LABEL_LONG_WRAP);
+    lv_label_set_long_mode(lbl_msg, LV_LABEL_LONG_DOT);
     lv_obj_set_flex_grow(lbl_msg, 1);
-    s_toast.lbl_msg = lbl_msg;
+    ts->lbl_msg = lbl_msg;
 
-    /* Age label (right-aligned, fixed minimum width so it never gets clipped) */
+    /* Age label (right-aligned, fixed minimum width) */
     lv_obj_t *lbl_age = lv_label_create(bar);
     lv_obj_set_style_text_font(lbl_age, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(lbl_age, lv_color_hex(0xBBBBBB), 0);
     lv_label_set_text(lbl_age, "");
     lv_obj_set_style_min_width(lbl_age, 48, 0);
     lv_obj_set_style_text_align(lbl_age, LV_TEXT_ALIGN_RIGHT, 0);
-    s_toast.lbl_age = lbl_age;
+    ts->lbl_age = lbl_age;
+
+    /* Initialize state */
+    ts->active = false;
+    ts->dedup_count = 0;
+    ts->message[0] = '\0';
+}
+
+/* ── Public API ─────────────────────────────────────────────────────── */
+
+void nina_toast_init(lv_obj_t *screen) {
+    if (!screen) return;
+    s_screen = screen;
+
+    /* Create 3 toast bar widgets (hidden initially) */
+    for (int i = 0; i < TOAST_POOL_SIZE; i++) {
+        create_bar(i);
+    }
 
     /* Clear pending queue */
     memset(s_pending, 0, sizeof(s_pending));
-    s_toast.active = false;
+
+    /* Clear backlog */
+    s_bl_head = 0;
+    s_bl_tail = 0;
+    s_bl_count = 0;
 
     /* Tick timer: 200 ms interval, runs in LVGL context */
     s_tick_timer = lv_timer_create(tick_cb, TICK_INTERVAL_MS, NULL);
 
-    ESP_LOGI(TAG, "Toast system initialized");
+    ESP_LOGI(TAG, "Toast system initialized (pool=%d, backlog=%d)", TOAST_POOL_SIZE, BACKLOG_SIZE);
 }
 
 void nina_toast_show(toast_severity_t sev, const char *msg) {
-    if (!msg || !s_toast.bar) return;
+    if (!msg || !s_pool[0].bar) return;
 
     /* Write to pending queue under spinlock — zero LVGL calls */
     portENTER_CRITICAL(&s_pending_lock);
@@ -341,7 +709,10 @@ void nina_toast_show(toast_severity_t sev, const char *msg) {
             break;
         }
     }
-    if (slot < 0) slot = 0;
+    if (slot < 0) {
+        /* Queue full — overwrite oldest (slot 0) */
+        slot = 0;
+    }
 
     s_pending[slot].sev = sev;
     strncpy(s_pending[slot].message, msg, sizeof(s_pending[slot].message) - 1);
@@ -360,21 +731,20 @@ void nina_toast_show_fmt(toast_severity_t sev, const char *fmt, ...) {
 }
 
 void nina_toast_dismiss_all(void) {
-    dismiss_toast();
+    for (int i = 0; i < TOAST_POOL_SIZE; i++) {
+        dismiss_slot(i);
+    }
+    /* Clear backlog too */
+    s_bl_head = 0;
+    s_bl_tail = 0;
+    s_bl_count = 0;
 }
 
 void nina_toast_apply_theme(void) {
-    if (!s_toast.active || !s_toast.bar) return;
-
-    /* Re-color active toast for current theme */
-    bool red_night = theme_is_red_night(current_theme);
-    toast_severity_t sev = s_toast.sev;
-    lv_obj_set_style_bg_color(s_toast.bar,
-        lv_color_hex(red_night ? sev_bg_red[sev] : sev_bg_colors[sev]), 0);
-    lv_obj_set_style_bg_color(s_toast.dot,
-        lv_color_hex(red_night ? sev_dot_red[sev] : sev_dot_colors[sev]), 0);
-    lv_obj_set_style_text_color(s_toast.lbl_msg,
-        lv_color_hex(red_night ? 0xcc0000 : 0xFFFFFF), 0);
-    lv_obj_set_style_text_color(s_toast.lbl_age,
-        lv_color_hex(red_night ? 0x991b1b : 0xBBBBBB), 0);
+    for (int i = 0; i < TOAST_POOL_SIZE; i++) {
+        if (s_pool[i].active && s_pool[i].bar) {
+            apply_colors(&s_pool[i]);
+            update_label(&s_pool[i]); /* Re-render recolor tags for new theme */
+        }
+    }
 }

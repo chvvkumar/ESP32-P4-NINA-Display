@@ -425,17 +425,20 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
     // --- BUNDLED: All equipment in one request (ninaAPI 2.2.15+) ---
     if (!state->bundle_not_available) {
         perf_timer_start(&g_perf.poll_equipment_bundle);
-        int bundle_result = fetch_equipment_info_bundled(base_url, data, !state->static_fetched);
+        uint16_t eq_mask = 0;
+        int bundle_result = fetch_equipment_info_bundled(base_url, data, !state->static_fetched, &eq_mask);
         perf_timer_stop(&g_perf.poll_equipment_bundle);
 
-        if (bundle_result == -2) {
+        if (bundle_result == 0) {
+            // Seed WebSocket equipment mask from actual NINA connected state
+            nina_websocket_update_equipment_mask(instance, eq_mask);
+        } else if (bundle_result == -2) {
             // Endpoint not available (old ninaAPI) — fall back to individual fetchers
             ESP_LOGW(TAG, "/equipment/info not available, falling back to individual fetchers");
             state->bundle_not_available = true;
             // Fall through to legacy path below
         }
         // bundle_result == -1: HTTP failure, data->connected stays false (set at line 332)
-        // bundle_result == 0: success, data->connected set by bundled parser
     }
 
     if (state->bundle_not_available) {
@@ -633,7 +636,7 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
     // Subsequent background polls use camera-only heartbeat (~1-2 KB vs ~10 KB bundle),
     // reducing network traffic by ~80% for background instances.
     if (!state->static_fetched && !state->bundle_not_available) {
-        int bundle_result = fetch_equipment_info_bundled(base_url, data, true);
+        int bundle_result = fetch_equipment_info_bundled(base_url, data, true, NULL);
         if (bundle_result == -2) {
             ESP_LOGW(TAG, "Background: /equipment/info not available, falling back");
             state->bundle_not_available = true;
