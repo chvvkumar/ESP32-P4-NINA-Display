@@ -13,6 +13,7 @@
 #include "mqtt_ha.h"
 #include "spotify_client.h"
 #include "tasks.h"
+#include "ota_github.h"
 #include "bsp/esp-bsp.h"
 #include "lvgl.h"
 #include "display_defs.h"
@@ -361,6 +362,99 @@ esp_err_t version_get_handler(httpd_req_t *req)
     httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
     free((void *)json_str);
     cJSON_Delete(root);
+    return ESP_OK;
+}
+
+// Handler for checking GitHub OTA updates (returns JSON result to web UI)
+esp_err_t check_update_json_handler(httpd_req_t *req)
+{
+    bool include_pre = (app_config_get()->update_channel == 1);
+    const char *cur_ver = ota_github_get_current_version();
+
+    github_release_info_t *rel = heap_caps_calloc(1, sizeof(github_release_info_t), MALLOC_CAP_SPIRAM);
+    if (!rel) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "current_version", cur_ver);
+
+    if (ota_github_check(include_pre, cur_ver, rel)) {
+        cJSON_AddBoolToObject(root, "update_available", true);
+        cJSON_AddStringToObject(root, "tag", rel->tag);
+        cJSON_AddStringToObject(root, "summary", rel->summary);
+        cJSON_AddBoolToObject(root, "is_prerelease", rel->is_prerelease);
+    } else {
+        cJSON_AddBoolToObject(root, "update_available", false);
+    }
+
+    heap_caps_free(rel);
+
+    const char *json_str = cJSON_PrintUnformatted(root);
+    if (!json_str) {
+        cJSON_Delete(root);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
+    free((void *)json_str);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+// Handler for GitHub OTA download (triggered from web UI)
+esp_err_t ota_github_post_handler(httpd_req_t *req)
+{
+    /* Read JSON body with release tag to install */
+    char body[64];
+    int received = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (received <= 0) {
+        return send_400(req, "No body");
+    }
+    body[received] = '\0';
+
+    /* Re-check GitHub for the release to get the OTA URL */
+    bool include_pre = (app_config_get()->update_channel == 1);
+    const char *cur_ver = ota_github_get_current_version();
+
+    github_release_info_t *rel = heap_caps_calloc(1, sizeof(github_release_info_t), MALLOC_CAP_SPIRAM);
+    if (!rel) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    if (!ota_github_check(include_pre, cur_ver, rel)) {
+        heap_caps_free(rel);
+        return send_400(req, "No update available");
+    }
+
+    /* Stop network and show OTA overlay on device */
+    ota_stop_network();
+    ota_show_overlay("OTA Update\nIn Progress");
+
+    /* Send response before starting download (connection will close on reboot) */
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"started\":true}");
+
+    /* Download and flash */
+    esp_err_t err = ota_github_download(rel->ota_url, ota_update_progress);
+    if (err == ESP_OK) {
+        ota_github_save_installed_version(rel->tag);
+        ESP_LOGI(TAG, "GitHub OTA success (%s), rebooting...", rel->tag);
+        ota_update_progress(100);
+        heap_caps_free(rel);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        esp_restart();
+    } else {
+        ESP_LOGE(TAG, "GitHub OTA failed: %s", esp_err_to_name(err));
+        ota_remove_overlay();
+        ota_restore_network();
+        heap_caps_free(rel);
+        /* Response already sent, can't send error — device will recover */
+    }
+
     return ESP_OK;
 }
 

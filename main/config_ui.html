@@ -746,21 +746,80 @@
             <input type="number" class="input" id="connection_timeout" min="2" max="30" value="6">
             <div class="field-hint">Seconds without response before a NINA instance is offline</div>
           </div>
-          <div class="field">
-            <label class="field-label">Toast duration (s)</label>
-            <input type="number" class="input" id="toast_duration" min="3" max="30" value="8">
-            <div class="field-hint">Errors show for 2x this value</div>
-          </div>
         </div>
       </div>
 
       <div class="card">
         <div class="card-title">Notifications</div>
+        <div class="field" style="margin-bottom:16px">
+          <label class="field-label">Toast duration (s)</label>
+          <input type="number" class="input" id="toast_duration" min="3" max="30" value="8">
+          <div class="field-hint">Errors show for 2x this value</div>
+        </div>
         <div class="toggle-row">
           <span class="toggle-label">Border flash alerts</span>
           <label class="toggle"><input type="checkbox" id="alert_flash_enabled" checked><span class="toggle-track"></span></label>
         </div>
         <div class="field-hint" style="margin-top:4px">Flash the screen border when RMS, HFR, or safety thresholds are exceeded.</div>
+        <hr class="divider">
+        <div class="field">
+          <label class="field-label">Aggregation Window</label>
+          <div class="slider-group">
+            <input type="range" class="slider" id="toast_aggregation_window" min="0" max="15" value="5" oninput="updateAggregationLabel(this.value);checkDirty()">
+            <span class="slider-val" id="toast_aggregation_val">5s</span>
+          </div>
+          <div class="field-hint">Combine rapid-fire notifications within this window. 0 = Off (show each individually).</div>
+        </div>
+        <hr class="divider">
+        <div class="field-label" style="margin-bottom:12px">Event Categories</div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Error Events</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_8" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Equipment Connects</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_0" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Equipment Disconnects</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_1" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Sequence Events</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_2" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Focuser</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_3" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Mount Events</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_4" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Meridian Flip</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_5" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Guider Events</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_6" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Safety Events</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_7" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Profile Changes</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_9" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Dome Events</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_10" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">Flat Device Events</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_11" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
       </div>
     </div>
 
@@ -889,6 +948,11 @@
           </select>
         </div>
         <button class="btn btn-primary" style="margin-top:12px;width:100%" id="checkUpdateBtn" onclick="checkForUpdates()">Check for Updates</button>
+        <div id="updateResult" style="display:none;margin-top:12px;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.03)">
+          <div id="updateResultText" style="font-size:0.85rem;color:var(--text-secondary)"></div>
+          <div id="updateSummary" style="display:none;margin-top:8px;font-size:0.78rem;color:var(--text-muted);max-height:120px;overflow-y:auto;white-space:pre-wrap"></div>
+          <button class="btn btn-primary" id="otaGithubBtn" style="display:none;margin-top:12px;width:100%" onclick="startGithubOta()">Install Update</button>
+        </div>
         <hr class="divider">
         <div class="ota-bar">
           <label class="ota-label" id="otaFileLabel">
@@ -1153,6 +1217,10 @@
             '<div class="card-title">Node '+(i+1)+' <span id="node_card_hostname_'+i+'" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span></div>'+
             '<div class="field"><label class="field-label">Hostname / IP</label>'+
             '<input type="text" class="input" id="'+urlId+'" placeholder="'+placeholders[i]+'" oninput="updateNodeLabels()"></div>'+
+            '<div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">'+
+            '<span class="toggle-label">Mute Notifications</span>'+
+            '<label class="toggle"><input type="checkbox" id="toast_instance_muted_'+i+'" onchange="checkDirty()"><span class="toggle-track"></span></label>'+
+            '</div>'+
             '<div class="field"><label class="field-label">Filter colors</label>'+
             '<div id="filters_'+i+'" class="filter-grid"></div></div>'+
             '<div class="row stack-mobile">'+
@@ -1367,6 +1435,10 @@
     function setTheme(v){postJson('/api/theme',{theme_index:parseInt(v)})}
     function setWidgetStyle(v){postJson('/api/widget-style',{widget_style:parseInt(v)})}
     function setScreenRotation(v){postJson('/api/screen-rotation',{screen_rotation:parseInt(v)})}
+
+    function updateAggregationLabel(v){
+      $('toast_aggregation_val').textContent=parseInt(v)===0?'Off':v+'s';
+    }
 
     let _brightTimer=null;
     function setBrightness(v){
@@ -1667,6 +1739,11 @@
         deep_sleep_wake_timer_s:(parseInt($('deep_sleep_wake_timer').value)||0)*3600,
         deep_sleep_on_idle:!!$('deep_sleep_on_idle').checked,
         alert_flash_enabled:!!$('alert_flash_enabled').checked,
+        toast_aggregation_window_s:parseInt($('toast_aggregation_window').value)||0,
+        toast_notify_mask:(function(){var m=0;for(var i=0;i<12;i++){if($('notify_cat_'+i).checked) m|=(1<<i);}return m>>>0;})(),
+        toast_instance_muted_1:!!$('toast_instance_muted_0').checked,
+        toast_instance_muted_2:!!$('toast_instance_muted_1').checked,
+        toast_instance_muted_3:!!$('toast_instance_muted_2').checked,
         auto_update_check:!!$('auto_update_check').checked,
         update_channel:parseInt($('update_channel').value)||0,
         allsky_enabled:!!$('allsky_enabled').checked,
@@ -1758,6 +1835,14 @@
       $('deep_sleep_wake_timer').value=Math.round((data.deep_sleep_wake_timer_s||0)/3600);
       $('deep_sleep_on_idle').checked=!!data.deep_sleep_on_idle;
       $('alert_flash_enabled').checked=data.alert_flash_enabled!==false;
+      var aggWin=data.toast_aggregation_window_s!=null?data.toast_aggregation_window_s:5;
+      $('toast_aggregation_window').value=aggWin;
+      updateAggregationLabel(aggWin);
+      var mask=data.toast_notify_mask!=null?data.toast_notify_mask:0xFFFFFFFF;
+      for(var i=0;i<12;i++){$('notify_cat_'+i).checked=!!(mask&(1<<i));}
+      $('toast_instance_muted_0').checked=!!data.toast_instance_muted_1;
+      $('toast_instance_muted_1').checked=!!data.toast_instance_muted_2;
+      $('toast_instance_muted_2').checked=!!data.toast_instance_muted_3;
       $('auto_update_check').checked=data.auto_update_check!==false;
       $('update_channel').value=data.update_channel||0;
 
@@ -1951,13 +2036,46 @@
 
     function checkForUpdates(){
       var btn=$('checkUpdateBtn');
+      var result=$('updateResult');
+      var resultText=$('updateResultText');
+      var summary=$('updateSummary');
+      var installBtn=$('otaGithubBtn');
       btn.disabled=true; btn.textContent='Checking...';
-      fetch('/api/check-update',{method:'POST'}).then(()=>{
-        btn.textContent='Check requested \u2014 see device screen';
-        setTimeout(()=>{btn.disabled=false;btn.textContent='Check for Updates';},5000);
-      }).catch(()=>{
+      result.style.display='none';
+      installBtn.style.display='none';
+      summary.style.display='none';
+      fetch('/api/check-update-json').then(function(r){return r.json();}).then(function(data){
         btn.disabled=false; btn.textContent='Check for Updates';
-        alert('Failed to reach device');
+        result.style.display='block';
+        if(data.update_available){
+          resultText.innerHTML='<span style="color:var(--accent)">Update available:</span> <strong>'+escHtml(data.tag)+'</strong>'+(data.is_prerelease?' <span style="color:#fbbf24;font-size:0.75rem">(pre-release)</span>':'');
+          if(data.summary){
+            summary.style.display='block';
+            summary.textContent=data.summary;
+          }
+          installBtn.style.display='block';
+        } else {
+          resultText.innerHTML='\u2705 You are running the latest firmware ('+escHtml(data.current_version)+')';
+        }
+      }).catch(function(){
+        btn.disabled=false; btn.textContent='Check for Updates';
+        result.style.display='block';
+        resultText.innerHTML='\u274c Failed to check for updates';
+      });
+    }
+
+    function startGithubOta(){
+      var btn=$('otaGithubBtn');
+      if(!confirm('Install the update? The device will reboot after flashing.')) return;
+      btn.disabled=true; btn.textContent='Installing...';
+      fetch('/api/ota-github',{method:'POST',body:'{}'}).then(function(r){return r.json();}).then(function(data){
+        if(data.started){
+          btn.textContent='Flashing \u2014 see device screen...';
+          $('updateResultText').innerHTML='OTA in progress. Device will reboot when complete.';
+        }
+      }).catch(function(){
+        btn.disabled=false; btn.textContent='Install Update';
+        alert('Failed to start OTA update');
       });
     }
 
@@ -2522,8 +2640,10 @@
         if(!title) return;
         var key=getCardKey(card);
         if(!key) return;
-        // Default to collapsed unless explicitly expanded
-        if(saved[key]==='expanded') card.classList.remove('collapsed');
+        // Appearance and Page Navigation default to expanded; others default to collapsed
+        var defaultExpanded = /Appearance|Page_Navigation/.test(key);
+        if(saved[key]==='expanded' || (defaultExpanded && saved[key]!=='collapsed'))
+          card.classList.remove('collapsed');
         else card.classList.add('collapsed');
         title.addEventListener('click',function(e){
           // Don't toggle if clicking interactive elements inside title

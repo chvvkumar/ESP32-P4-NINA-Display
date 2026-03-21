@@ -497,7 +497,10 @@ void fetch_safety_monitor_info(const char *base_url, nina_client_t *data) {
  *
  * @return 0 on success, -1 on HTTP failure (offline), -2 if endpoint unavailable
  */
-int fetch_equipment_info_bundled(const char *base_url, nina_client_t *data, bool fetch_filter_list) {
+int fetch_equipment_info_bundled(const char *base_url, nina_client_t *data, bool fetch_filter_list,
+                                uint16_t *out_connected_mask) {
+    if (out_connected_mask) *out_connected_mask = 0;
+
     char url[256];
     snprintf(url, sizeof(url), "%sequipment/info", base_url);
 
@@ -648,6 +651,30 @@ int fetch_equipment_info_bundled(const char *base_url, nina_client_t *data, bool
             cJSON *is_safe = cJSON_GetObjectItem(safety, "IsSafe");
             data->safety_is_safe = is_safe && cJSON_IsTrue(is_safe);
         }
+    }
+
+    /* Build equipment connected bitmask from Connected fields.
+     * Bit positions match equipment_type_t in nina_websocket.c:
+     * 0=Camera, 1=Mount, 2=Guider, 3=Focuser, 4=Filterwheel,
+     * 5=Rotator, 6=Safety, 7=Dome, 8=Flat, 9=Switch, 10=Weather */
+    if (out_connected_mask) {
+        uint16_t mask = 0;
+        static const struct { const char *key; int bit; } eq_map[] = {
+            {"Camera",        0}, {"Mount",         1}, {"Guider",       2},
+            {"Focuser",       3}, {"FilterWheel",   4}, {"Rotator",      5},
+            {"SafetyMonitor", 6}, {"Dome",          7}, {"FlatDevice",   8},
+            {"Switch",        9}, {"WeatherData",  10},
+        };
+        for (int i = 0; i < (int)(sizeof(eq_map) / sizeof(eq_map[0])); i++) {
+            cJSON *eq = cJSON_GetObjectItem(response, eq_map[i].key);
+            if (eq) {
+                cJSON *conn = cJSON_GetObjectItem(eq, "Connected");
+                if (conn && cJSON_IsTrue(conn)) {
+                    mask |= (1 << eq_map[i].bit);
+                }
+            }
+        }
+        *out_connected_mask = mask;
     }
 
     cJSON_Delete(json);

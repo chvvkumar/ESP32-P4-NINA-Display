@@ -746,6 +746,13 @@ static void set_defaults(app_config_t *cfg) {
     cfg->spotify_overlay_visible = false;
 
     memset(cfg->wifi_networks, 0, sizeof(cfg->wifi_networks));
+
+    // Toast notification overhaul defaults
+    cfg->toast_aggregation_window_s = 5;
+    cfg->toast_notify_mask = 0xFFFFFFFF;  // all categories enabled
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        cfg->toast_instance_muted[i] = false;
+    }
 }
 
 /**
@@ -1709,6 +1716,21 @@ static void migrate_from_v23(const app_config_v23_t *old, app_config_t *cfg) {
     ESP_LOGI(TAG, "Migrated config from v23 to v%d", APP_CONFIG_VERSION);
 }
 
+/* --- v27 → v28 migration (added toast notification overhaul fields) --- */
+static void migrate_from_v27(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_t) ? raw_size : sizeof(app_config_t);
+    memcpy(cfg, raw, copy);
+    cfg->toast_aggregation_window_s = 5;
+    cfg->toast_notify_mask = 0xFFFFFFFF;
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        cfg->toast_instance_muted[i] = false;
+    }
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v27 to v%d", APP_CONFIG_VERSION);
+}
+
 /* --- v26 → v27 migration (added auto_rotate_order) --- */
 static void migrate_from_v26(const void *raw, size_t raw_size, app_config_t *cfg)
 {
@@ -2115,6 +2137,12 @@ void app_config_init(void) {
             nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(handle);
         }
+    } else if (version_check == 27) {
+        /* v27 → v28: added toast notification overhaul fields */
+        migrate_from_v27(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 26) {
         /* v26 → v27: added auto_rotate_order at end */
         migrate_from_v26(raw, stored_size, &s_config);

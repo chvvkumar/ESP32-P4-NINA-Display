@@ -77,6 +77,8 @@ void start_web_server(void)
         { "/api/config/apply",     HTTP_POST, config_apply_handler, NULL },
         { "/api/config/revert",    HTTP_POST, config_revert_handler, NULL },
         { "/api/check-update",     HTTP_POST, check_update_post_handler, NULL },
+        { "/api/check-update-json", HTTP_GET, check_update_json_handler, NULL },
+        { "/api/ota-github",       HTTP_POST, ota_github_post_handler, NULL },
         { "/api/allsky-config",    HTTP_GET,  allsky_config_get_handler, NULL },
         { "/api/allsky-proxy",     HTTP_GET,  allsky_proxy_get_handler, NULL },
         { "/api/spotify/config",         HTTP_GET,  spotify_config_get_handler, NULL },
