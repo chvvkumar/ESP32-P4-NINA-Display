@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Page Navigation — 3 Mockups</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0a0a0b;
+    --card-bg: rgba(255, 255, 255, 0.035);
+    --card-border: rgba(255, 255, 255, 0.08);
+    --accent: #14b8a6;
+    --accent-rgb: 20, 184, 166;
+    --text: #f4f4f5;
+    --muted: #a1a1aa;
+    --input-bg: rgba(0, 0, 0, 0.3);
+    --input-border: rgba(255, 255, 255, 0.08);
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  body {
+    background: var(--bg);
+    font-family: var(--font);
+    color: var(--text);
+    padding: 32px 16px 80px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page-title {
+    text-align: center;
+    font-size: 1.4rem;
+    font-weight: 700;
+    margin-bottom: 6px;
+    color: var(--text);
+  }
+
+  .page-sub {
+    text-align: center;
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-bottom: 48px;
+    max-width: 500px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  /* Selector bar at top */
+  .selector-bar {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 40px;
+    position: sticky;
+    top: 0;
+    background: rgba(10, 10, 11, 0.9);
+    backdrop-filter: blur(12px);
+    padding: 16px 0;
+    z-index: 100;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+
+  .sel-btn {
+    padding: 8px 20px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.03);
+    color: var(--muted);
+    transition: all 0.25s ease;
+    text-decoration: none;
+  }
+
+  .sel-btn:hover { border-color: rgba(255,255,255,0.15); color: var(--text); }
+  .sel-btn.pick { background: rgba(var(--accent-rgb), 0.15); border-color: rgba(var(--accent-rgb), 0.4); color: var(--accent); }
+
+  .mockup-section {
+    max-width: 520px;
+    margin: 0 auto 64px;
+    scroll-margin-top: 80px;
+  }
+
+  .mockup-label {
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 6px;
+  }
+
+  .mockup-name {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  .mockup-desc {
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin-bottom: 20px;
+    line-height: 1.5;
+  }
+
+  /* ===== SHARED STYLES ===== */
+  .nav-card {
+    width: 100%;
+    background: var(--card-bg);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--card-border);
+    border-radius: 16px;
+    padding: 28px;
+  }
+
+  .nav-card-title {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 22px;
+  }
+
+  .field-label {
+    display: block;
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+
+  select, input[type="number"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 100%;
+    height: 42px;
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    border-radius: 10px;
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 0.85rem;
+    padding: 0 14px;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+
+  select {
+    padding-right: 36px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='7' fill='none'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23a1a1aa' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 14px center;
+    cursor: pointer;
+  }
+
+  select:focus, input[type="number"]:focus {
+    border-color: rgba(var(--accent-rgb), 0.45);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.1);
+  }
+
+  select option { background: #1a1a1c; color: var(--text); }
+  input[type="number"] { -moz-appearance: textfield; }
+
+  .divider { height: 1px; background: var(--card-border); margin: 22px 0; }
+
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; }
+  .toggle-label-text { font-size: 0.88rem; font-weight: 500; color: var(--text); }
+  .toggle-sublabel { font-size: 0.72rem; color: var(--muted); margin-top: 2px; }
+
+  .toggle { position: relative; width: 44px; height: 24px; flex-shrink: 0; }
+  .toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+  .toggle-track {
+    position: absolute; inset: 0;
+    background: rgba(255,255,255,0.1);
+    border-radius: 12px; cursor: pointer;
+    transition: background 0.25s;
+  }
+  .toggle-track::after {
+    content: ''; position: absolute; top: 3px; left: 3px;
+    width: 18px; height: 18px; background: #71717a;
+    border-radius: 50%; transition: transform 0.25s, background 0.25s, box-shadow 0.25s;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  }
+  .toggle input:checked + .toggle-track { background: rgba(var(--accent-rgb), 0.25); }
+  .toggle input:checked + .toggle-track::after {
+    transform: translateX(20px); background: var(--accent);
+    box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.4);
+  }
+
+  .inline-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .field-group { display: flex; flex-direction: column; }
+
+  /* ===== A: PILL STYLES ===== */
+  .pills-container { display: flex; flex-wrap: wrap; gap: 8px; }
+
+  .pill { position: relative; cursor: pointer; user-select: none; }
+  .pill input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .pill-visual {
+    display: inline-flex; align-items: center;
+    height: 32px; padding: 0 14px; border-radius: 16px;
+    font-size: 0.78rem; font-weight: 500;
+    border: 1px solid var(--input-border);
+    background: var(--input-bg); color: var(--muted);
+    transition: all 0.25s ease; white-space: nowrap;
+  }
+  .pill input:checked + .pill-visual {
+    background: rgba(var(--accent-rgb), 0.13);
+    border-color: rgba(var(--accent-rgb), 0.4);
+    color: var(--accent);
+    box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.15), inset 0 0 8px rgba(var(--accent-rgb), 0.06);
+  }
+  .pill:hover .pill-visual { border-color: rgba(255,255,255,0.15); }
+
+  .cycle-settings-a { margin-top: 20px; display: flex; flex-direction: column; gap: 18px; }
+  .option-row { display: flex; align-items: center; justify-content: space-between; }
+  .option-label { font-size: 0.85rem; color: var(--text); }
+  .pills-label { font-size: 0.8rem; font-weight: 500; color: var(--muted); margin-bottom: 10px; }
+
+  /* ===== B: TILE STYLES ===== */
+  .section-label { font-size: 0.72rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 12px; }
+  .tile-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+  .tile {
+    position: relative; width: 60px; height: 60px; border-radius: 12px;
+    background: rgba(255,255,255,0.025); border: 1.5px solid rgba(255,255,255,0.06);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    cursor: pointer; transition: all 0.25s ease; user-select: none;
+  }
+  .tile:hover { background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.12); }
+  .tile.selected {
+    background: rgba(var(--accent-rgb), 0.08);
+    border-color: rgba(var(--accent-rgb), 0.5);
+    box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.15), inset 0 0 12px rgba(var(--accent-rgb), 0.06);
+  }
+  .tile-icon { font-size: 20px; line-height: 1; margin-bottom: 1px; transition: filter 0.25s; }
+  .tile.selected .tile-icon { filter: drop-shadow(0 0 4px rgba(var(--accent-rgb), 0.4)); }
+  .tile-label-txt { font-size: 0.5rem; font-weight: 600; color: var(--muted); letter-spacing: 0.02em; text-align: center; transition: color 0.25s; max-width: 54px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tile.selected .tile-label-txt { color: var(--accent); }
+  .tile .pin-badge {
+    position: absolute; top: -5px; right: -5px; width: 16px; height: 16px;
+    border-radius: 50%; background: var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 8px; color: #0a0a0b; font-weight: 800;
+    box-shadow: 0 2px 6px rgba(var(--accent-rgb), 0.4);
+    opacity: 0; transform: scale(0.5); transition: all 0.25s; pointer-events: none;
+  }
+  .tile.selected .pin-badge { opacity: 1; transform: scale(1); }
+  .tile.excluded { opacity: 0.32; border-color: rgba(255,255,255,0.03); background: rgba(255,255,255,0.012); }
+  .tile.excluded:hover { opacity: 0.5; }
+
+  .b-divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.06) 20%, rgba(255,255,255,0.06) 80%, transparent);
+    margin: 22px 0;
+  }
+
+  .cycle-settings-b { margin-top: 18px; display: flex; flex-direction: column; gap: 16px; animation: fadeSlideIn 0.3s ease; }
+  @keyframes fadeSlideIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+  .b-inline-row { display: flex; gap: 12px; }
+  .b-inline-row > .b-field { flex: 1; }
+  .b-field label { display: block; font-size: 0.68rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+  .b-field input[type="number"], .b-field select { height: 38px; padding: 0 12px; font-size: 0.82rem; }
+  .toggle-row-label-small { font-size: 0.78rem; font-weight: 400; color: var(--muted); }
+  .sub-divider { height: 1px; background: rgba(255,255,255,0.04); margin: 2px 0; }
+  .rotation-section-label { font-size: 0.68rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px; }
+
+  /* ===== C: TIMELINE STYLES ===== */
+  .timeline-label { font-size: 0.65rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 12px; }
+  .timeline-container {
+    position: relative; overflow-x: auto; overflow-y: hidden;
+    padding-bottom: 8px; margin: 0 -4px;
+    scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.1) transparent;
+  }
+  .timeline-container::-webkit-scrollbar { height: 4px; }
+  .timeline-container::-webkit-scrollbar-track { background: transparent; }
+  .timeline-container::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+  .timeline-strip { display: flex; align-items: center; gap: 0; padding: 4px; width: max-content; }
+  .chip {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-width: 82px; height: 68px; padding: 8px 10px 6px;
+    border-radius: 12px; background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.06);
+    cursor: pointer; transition: all 0.25s ease; user-select: none;
+    position: relative; flex-shrink: 0;
+  }
+  .chip:hover { background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.12); }
+  .chip.active { background: rgba(var(--accent-rgb), 0.08); border-color: rgba(var(--accent-rgb), 0.25); }
+  .chip.active .chip-icon { color: var(--accent); }
+  .chip.active .chip-name { color: var(--text); }
+  .chip.disabled { opacity: 0.35; background: rgba(255,255,255,0.015); border-color: rgba(255,255,255,0.03); }
+  .chip.disabled .chip-name { text-decoration: line-through; text-decoration-color: rgba(255,255,255,0.3); }
+  .chip.disabled .chip-icon { color: #52525b; }
+  .chip-icon { font-size: 1.15rem; margin-bottom: 4px; color: var(--muted); transition: color 0.25s; line-height: 1; }
+  .chip-name { font-size: 0.6rem; font-weight: 600; color: var(--muted); letter-spacing: 0.02em; white-space: nowrap; transition: color 0.25s; }
+  .arrow { display: flex; align-items: center; justify-content: center; width: 20px; flex-shrink: 0; color: rgba(255,255,255,0.15); font-size: 0.65rem; }
+  .loop-back { display: flex; align-items: center; justify-content: center; margin-left: 4px; flex-shrink: 0; width: 32px; height: 68px; }
+  .loop-back svg { width: 28px; height: 52px; overflow: visible; }
+  .chip:active { transform: scale(0.95); }
+  .chip.active::before {
+    content: ''; position: absolute; bottom: -1px; left: 50%; transform: translateX(-50%);
+    width: 16px; height: 2px; background: var(--accent); border-radius: 1px;
+    box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.4);
+  }
+  .cycle-section { max-height: 0; overflow: hidden; opacity: 0; transition: max-height 0.4s cubic-bezier(0.4,0,0.2,1), opacity 0.3s ease, margin-top 0.3s ease; margin-top: 0; }
+  .cycle-section.open { max-height: 500px; opacity: 1; margin-top: 20px; }
+  .cycle-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 18px; }
+  .control-group label { display: block; font-size: 0.68rem; font-weight: 500; color: var(--muted); margin-bottom: 6px; }
+  .control-group select, .control-group input[type="number"] { height: 38px; padding: 0 12px; font-size: 0.8rem; }
+  .skip-row { margin-top: 16px; display: flex; align-items: center; justify-content: space-between; }
+  .skip-label { font-size: 0.78rem; color: var(--muted); }
+  .input-with-suffix { position: relative; }
+  .input-with-suffix input { padding-right: 30px !important; }
+  .input-suffix-c { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 0.7rem; color: #52525b; pointer-events: none; }
+
+  /* Pick button under each mockup */
+  .pick-btn {
+    display: block;
+    margin: 20px auto 0;
+    padding: 10px 28px;
+    border-radius: 10px;
+    border: 1px solid rgba(var(--accent-rgb), 0.3);
+    background: rgba(var(--accent-rgb), 0.08);
+    color: var(--accent);
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-family: var(--font);
+  }
+  .pick-btn:hover {
+    background: rgba(var(--accent-rgb), 0.15);
+    border-color: rgba(var(--accent-rgb), 0.5);
+    box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.15);
+  }
+  .pick-btn.picked {
+    background: var(--accent);
+    color: #0a0a0b;
+    border-color: var(--accent);
+  }
+</style>
+</head>
+<body>
+
+<div class="page-title">Page Navigation Redesign</div>
+<p class="page-sub">Three approaches — all replace the 3-mode segmented control with Start Page + Auto Cycle toggle. Same functionality, different visual treatment. Pick your favorite.</p>
+
+<nav class="selector-bar">
+  <a class="sel-btn" href="#mockup-a">A · Flat Pills</a>
+  <a class="sel-btn" href="#mockup-b">B · Visual Grid</a>
+  <a class="sel-btn" href="#mockup-c">C · Timeline</a>
+</nav>
+
+<!-- ============ MOCKUP A ============ -->
+<div class="mockup-section" id="mockup-a">
+  <div class="mockup-label">Approach A</div>
+  <div class="mockup-name">Unified Flat Card with Glowing Pills</div>
+  <div class="mockup-desc">Clean dropdown for Start Page. Auto Cycle settings inline. Pages in rotation as teal-glowing pill capsules. Maximum info density, minimum visual noise.</div>
+
+  <div class="nav-card">
+    <div class="nav-card-title">Page Navigation</div>
+
+    <div class="field-group">
+      <label class="field-label">Start Page</label>
+      <select>
+        <option selected>Summary</option>
+        <option>AllSky</option>
+        <option>Spotify</option>
+        <option>NINA 1</option>
+        <option>NINA 2</option>
+        <option>NINA 3</option>
+        <option>System Info</option>
+      </select>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="toggle-row">
+      <div>
+        <div class="toggle-label-text">Auto Cycle</div>
+        <div class="toggle-sublabel">Automatically rotate through pages</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" checked>
+        <span class="toggle-track"></span>
+      </label>
+    </div>
+
+    <div class="cycle-settings-a">
+      <div class="inline-fields">
+        <div class="field-group">
+          <label class="field-label">Interval (sec)</label>
+          <input type="number" value="30" min="5" max="300">
+        </div>
+        <div class="field-group">
+          <label class="field-label">Transition</label>
+          <select>
+            <option selected>Fade</option>
+            <option>Instant</option>
+            <option>Slide Left</option>
+            <option>Slide Right</option>
+          </select>
+        </div>
+      </div>
+      <div class="option-row">
+        <span class="option-label">Skip disconnected instances</span>
+        <label class="toggle"><input type="checkbox" checked><span class="toggle-track"></span></label>
+      </div>
+      <div>
+        <div class="pills-label">Pages in Rotation</div>
+        <div class="pills-container">
+          <label class="pill"><input type="checkbox" checked><span class="pill-visual">Summary</span></label>
+          <label class="pill"><input type="checkbox" checked><span class="pill-visual">AllSky</span></label>
+          <label class="pill"><input type="checkbox"><span class="pill-visual">Spotify</span></label>
+          <label class="pill"><input type="checkbox" checked><span class="pill-visual">NINA 1</span></label>
+          <label class="pill"><input type="checkbox" checked><span class="pill-visual">NINA 2</span></label>
+          <label class="pill"><input type="checkbox" checked><span class="pill-visual">NINA 3</span></label>
+          <label class="pill"><input type="checkbox"><span class="pill-visual">SysInfo</span></label>
+        </div>
+      </div>
+    </div>
+  </div>
+  <button class="pick-btn" onclick="pickMockup('a', this)">Pick this design</button>
+</div>
+
+<!-- ============ MOCKUP B ============ -->
+<div class="mockup-section" id="mockup-b">
+  <div class="mockup-label">Approach B</div>
+  <div class="mockup-name">Visual Page Grid with Glassmorphic Tiles</div>
+  <div class="mockup-desc">Pages as mini glassmorphic tiles with icons. Selected start page gets a star badge. Rotation uses same tiles as multi-select. Most tactile and visual.</div>
+
+  <div class="nav-card">
+    <div class="nav-card-title">Page Navigation</div>
+
+    <div class="section-label">Start Page</div>
+    <div class="tile-grid" id="startGrid">
+      <div class="tile" data-page="allsky" onclick="selectStart(this)"><span class="pin-badge">&#9733;</span><span class="tile-icon">&#128225;</span><span class="tile-label-txt">AllSky</span></div>
+      <div class="tile" data-page="spotify" onclick="selectStart(this)"><span class="pin-badge">&#9733;</span><span class="tile-icon">&#127925;</span><span class="tile-label-txt">Spotify</span></div>
+      <div class="tile selected" data-page="summary" onclick="selectStart(this)"><span class="pin-badge">&#9733;</span><span class="tile-icon">&#128202;</span><span class="tile-label-txt">Summary</span></div>
+      <div class="tile" data-page="nina1" onclick="selectStart(this)"><span class="pin-badge">&#9733;</span><span class="tile-icon">&#128301;</span><span class="tile-label-txt">NINA 1</span></div>
+      <div class="tile" data-page="nina2" onclick="selectStart(this)"><span class="pin-badge">&#9733;</span><span class="tile-icon">&#128301;</span><span class="tile-label-txt">NINA 2</span></div>
+      <div class="tile" data-page="nina3" onclick="selectStart(this)"><span class="pin-badge">&#9733;</span><span class="tile-icon">&#128301;</span><span class="tile-label-txt">NINA 3</span></div>
+      <div class="tile" data-page="system" onclick="selectStart(this)"><span class="pin-badge">&#9733;</span><span class="tile-icon">&#9881;&#65039;</span><span class="tile-label-txt">System</span></div>
+    </div>
+
+    <div class="b-divider"></div>
+
+    <div class="toggle-row">
+      <span class="toggle-label-text">Auto Cycle Pages</span>
+      <label class="toggle"><input type="checkbox" checked id="bCycleToggle" onchange="toggleB()"><span class="toggle-track"></span></label>
+    </div>
+
+    <div class="cycle-settings-b" id="bCycleSettings">
+      <div class="b-inline-row">
+        <div class="b-field"><label>Interval</label><input type="number" value="30" min="5" max="300"></div>
+        <div class="b-field"><label>Transition</label><select><option selected>Fade</option><option>Instant</option><option>Slide</option></select></div>
+      </div>
+      <div class="toggle-row">
+        <span class="toggle-row-label-small">Skip disconnected instances</span>
+        <label class="toggle"><input type="checkbox" checked><span class="toggle-track"></span></label>
+      </div>
+      <div class="sub-divider"></div>
+      <div class="rotation-section-label">Include in Rotation</div>
+      <div class="tile-grid" id="rotGrid">
+        <div class="tile selected" onclick="toggleRot(this)"><span class="tile-icon">&#128225;</span><span class="tile-label-txt">AllSky</span></div>
+        <div class="tile excluded" onclick="toggleRot(this)"><span class="tile-icon">&#127925;</span><span class="tile-label-txt">Spotify</span></div>
+        <div class="tile selected" onclick="toggleRot(this)"><span class="tile-icon">&#128202;</span><span class="tile-label-txt">Summary</span></div>
+        <div class="tile selected" onclick="toggleRot(this)"><span class="tile-icon">&#128301;</span><span class="tile-label-txt">NINA 1</span></div>
+        <div class="tile selected" onclick="toggleRot(this)"><span class="tile-icon">&#128301;</span><span class="tile-label-txt">NINA 2</span></div>
+        <div class="tile selected" onclick="toggleRot(this)"><span class="tile-icon">&#128301;</span><span class="tile-label-txt">NINA 3</span></div>
+        <div class="tile excluded" onclick="toggleRot(this)"><span class="tile-icon">&#9881;&#65039;</span><span class="tile-label-txt">System</span></div>
+      </div>
+    </div>
+  </div>
+  <button class="pick-btn" onclick="pickMockup('b', this)">Pick this design</button>
+</div>
+
+<!-- ============ MOCKUP C ============ -->
+<div class="mockup-section" id="mockup-c">
+  <div class="mockup-label">Approach C</div>
+  <div class="mockup-name">Carousel Timeline with Flow Arrows</div>
+  <div class="mockup-desc">Premium dropdown for Start Page. Horizontal scrollable timeline showing rotation order with arrows between chips and a loop-back curve. Click chips to toggle.</div>
+
+  <div class="nav-card">
+    <div class="nav-card-title">Page Navigation</div>
+
+    <div class="field-group">
+      <label class="field-label">Start Page</label>
+      <select>
+        <option selected>Auto (Summary)</option>
+        <option>AllSky</option>
+        <option>Spotify</option>
+        <option>Summary</option>
+        <option>NINA 1</option>
+        <option>NINA 2</option>
+        <option>NINA 3</option>
+        <option>System Info</option>
+      </select>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="toggle-row">
+      <div>
+        <div class="toggle-label-text">Auto Cycle</div>
+        <div class="toggle-sublabel">Rotate through pages automatically</div>
+      </div>
+      <label class="toggle" id="cCycleToggle">
+        <input type="checkbox" checked onchange="toggleC()">
+        <span class="toggle-track"></span>
+      </label>
+    </div>
+
+    <div class="cycle-section open" id="cCycleSection">
+      <div class="timeline-label">Rotation Order</div>
+      <div class="timeline-container">
+        <div class="timeline-strip">
+          <div class="chip active" onclick="toggleChip(this)"><span class="chip-icon">&#9638;</span><span class="chip-name">Summary</span></div>
+          <div class="arrow">&rsaquo;</div>
+          <div class="chip disabled" onclick="toggleChip(this)"><span class="chip-icon">&#9729;</span><span class="chip-name">AllSky</span></div>
+          <div class="arrow">&rsaquo;</div>
+          <div class="chip active" onclick="toggleChip(this)"><span class="chip-icon">&#9835;</span><span class="chip-name">Spotify</span></div>
+          <div class="arrow">&rsaquo;</div>
+          <div class="chip active" onclick="toggleChip(this)"><span class="chip-icon">&#9788;</span><span class="chip-name">NINA 1</span></div>
+          <div class="arrow">&rsaquo;</div>
+          <div class="chip active" onclick="toggleChip(this)"><span class="chip-icon">&#9788;</span><span class="chip-name">NINA 2</span></div>
+          <div class="arrow">&rsaquo;</div>
+          <div class="chip disabled" onclick="toggleChip(this)"><span class="chip-icon">&#9788;</span><span class="chip-name">NINA 3</span></div>
+          <div class="arrow">&rsaquo;</div>
+          <div class="chip active" onclick="toggleChip(this)"><span class="chip-icon">&#9881;</span><span class="chip-name">SysInfo</span></div>
+          <div class="loop-back">
+            <svg viewBox="0 0 28 52" fill="none">
+              <path d="M4 26 L4 6 Q4 2 8 2 L20 2 Q24 2 24 6 L24 46 Q24 50 20 50 L8 50 Q4 50 4 46 L4 30" stroke="rgba(255,255,255,0.12)" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+              <path d="M7 30 L4 26 L1 30" stroke="rgba(255,255,255,0.12)" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <div class="cycle-controls">
+        <div class="control-group">
+          <label>Interval</label>
+          <div class="input-with-suffix">
+            <input type="number" value="30" min="5" max="300" step="5">
+            <span class="input-suffix-c">s</span>
+          </div>
+        </div>
+        <div class="control-group">
+          <label>Transition</label>
+          <select><option selected>Fade</option><option>Instant</option><option>Slide Left</option><option>Slide Right</option></select>
+        </div>
+      </div>
+
+      <div class="skip-row">
+        <span class="skip-label">Skip disconnected instances</span>
+        <label class="toggle"><input type="checkbox" checked><span class="toggle-track"></span></label>
+      </div>
+    </div>
+  </div>
+  <button class="pick-btn" onclick="pickMockup('c', this)">Pick this design</button>
+</div>
+
+<script>
+  // Start page tile selection (B)
+  function selectStart(tile) {
+    document.getElementById('startGrid').querySelectorAll('.tile').forEach(t => t.classList.remove('selected'));
+    tile.classList.add('selected');
+  }
+
+  // Rotation tile toggle (B)
+  function toggleRot(tile) { tile.classList.toggle('selected'); tile.classList.toggle('excluded'); }
+
+  // Timeline chip toggle (C)
+  function toggleChip(chip) { chip.classList.toggle('active'); chip.classList.toggle('disabled'); }
+
+  // Cycle section toggles
+  function toggleB() {
+    document.getElementById('bCycleSettings').style.display = document.getElementById('bCycleToggle').checked ? '' : 'none';
+  }
+  function toggleC() {
+    var s = document.getElementById('cCycleSection');
+    s.classList.toggle('open', document.querySelector('#cCycleToggle input').checked);
+  }
+
+  // Pick mockup
+  function pickMockup(id, btn) {
+    document.querySelectorAll('.pick-btn').forEach(b => { b.classList.remove('picked'); b.textContent = 'Pick this design'; });
+    btn.classList.add('picked');
+    btn.textContent = 'Selected!';
+  }
+</script>
+</body>
+</html>

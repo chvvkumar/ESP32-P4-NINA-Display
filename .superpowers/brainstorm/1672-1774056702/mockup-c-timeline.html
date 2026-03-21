@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Page Navigation — Carousel Timeline</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #0a0a0b;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: #f4f4f5;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 16px;
+  }
+
+  .card {
+    width: 100%;
+    max-width: 500px;
+    background: rgba(255, 255, 255, 0.035);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    padding: 28px;
+  }
+
+  .card-title {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #14b8a6;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 22px;
+  }
+
+  /* ── Start Page Select ── */
+  .field-group { margin-bottom: 0; }
+
+  .field-label {
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: #a1a1aa;
+    margin-bottom: 8px;
+    display: block;
+  }
+
+  .select-wrap {
+    position: relative;
+  }
+
+  .select-wrap select {
+    width: 100%;
+    appearance: none;
+    -webkit-appearance: none;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    color: #f4f4f5;
+    font-family: inherit;
+    font-size: 0.85rem;
+    padding: 11px 40px 11px 14px;
+    cursor: pointer;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    outline: none;
+  }
+
+  .select-wrap select:focus {
+    border-color: rgba(20, 184, 166, 0.5);
+    box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.1), inset 0 0 0 1px rgba(20, 184, 166, 0.15);
+  }
+
+  .select-wrap select option {
+    background: #1a1a1d;
+    color: #f4f4f5;
+  }
+
+  .select-wrap::after {
+    content: '';
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 0; height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 5px solid #a1a1aa;
+    pointer-events: none;
+    transition: border-top-color 0.2s;
+  }
+
+  .select-wrap:focus-within::after {
+    border-top-color: #14b8a6;
+  }
+
+  /* ── Divider ── */
+  .divider {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.06);
+    margin: 22px 0;
+  }
+
+  /* ── Toggle Row ── */
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .toggle-row-label {
+    font-size: 0.88rem;
+    font-weight: 500;
+    color: #f4f4f5;
+  }
+
+  .toggle-row-sub {
+    font-size: 0.7rem;
+    color: #a1a1aa;
+    margin-top: 2px;
+  }
+
+  /* ── Toggle Switch ── */
+  .toggle {
+    position: relative;
+    width: 46px;
+    height: 26px;
+    flex-shrink: 0;
+  }
+
+  .toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+    position: absolute;
+  }
+
+  .toggle-track {
+    position: absolute;
+    inset: 0;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 13px;
+    cursor: pointer;
+    transition: background 0.25s ease;
+  }
+
+  .toggle-track::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 20px;
+    height: 20px;
+    background: #71717a;
+    border-radius: 50%;
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), background 0.25s ease, box-shadow 0.25s ease;
+  }
+
+  .toggle input:checked + .toggle-track {
+    background: rgba(20, 184, 166, 0.25);
+  }
+
+  .toggle input:checked + .toggle-track::after {
+    transform: translateX(20px);
+    background: #14b8a6;
+    box-shadow: 0 0 8px rgba(20, 184, 166, 0.4);
+  }
+
+  /* ── Cycle Section (collapsible) ── */
+  .cycle-section {
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease, margin-top 0.3s ease;
+    margin-top: 0;
+  }
+
+  .cycle-section.open {
+    max-height: 500px;
+    opacity: 1;
+    margin-top: 20px;
+  }
+
+  /* ── Timeline Strip ── */
+  .timeline-label {
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: #a1a1aa;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 12px;
+  }
+
+  .timeline-container {
+    position: relative;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 8px;
+    margin: 0 -4px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.1) transparent;
+  }
+
+  .timeline-container::-webkit-scrollbar {
+    height: 4px;
+  }
+  .timeline-container::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .timeline-container::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.1);
+    border-radius: 2px;
+  }
+
+  .timeline-strip {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    padding: 4px;
+    width: max-content;
+  }
+
+  /* ── Page Chip ── */
+  .chip {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-width: 82px;
+    height: 68px;
+    padding: 8px 10px 6px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    cursor: pointer;
+    transition: all 0.25s ease;
+    user-select: none;
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  .chip:hover {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+
+  .chip.active {
+    background: rgba(20, 184, 166, 0.08);
+    border-color: rgba(20, 184, 166, 0.25);
+  }
+
+  .chip.active .chip-icon {
+    color: #14b8a6;
+  }
+
+  .chip.active .chip-name {
+    color: #f4f4f5;
+  }
+
+  .chip.disabled {
+    opacity: 0.35;
+    background: rgba(255, 255, 255, 0.015);
+    border-color: rgba(255, 255, 255, 0.03);
+  }
+
+  .chip.disabled .chip-name {
+    text-decoration: line-through;
+    text-decoration-color: rgba(255, 255, 255, 0.3);
+  }
+
+  .chip.disabled .chip-icon {
+    color: #52525b;
+  }
+
+  .chip-icon {
+    font-size: 1.15rem;
+    margin-bottom: 4px;
+    color: #a1a1aa;
+    transition: color 0.25s;
+    line-height: 1;
+  }
+
+  .chip-name {
+    font-size: 0.6rem;
+    font-weight: 600;
+    color: #a1a1aa;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    transition: color 0.25s;
+  }
+
+  /* ── Arrows ── */
+  .arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    flex-shrink: 0;
+    color: rgba(255, 255, 255, 0.15);
+    font-size: 0.65rem;
+    font-weight: 300;
+  }
+
+  /* ── Loop-back arrow ── */
+  .loop-back {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 4px;
+    flex-shrink: 0;
+    width: 32px;
+    height: 68px;
+    position: relative;
+  }
+
+  .loop-back svg {
+    width: 28px;
+    height: 52px;
+    overflow: visible;
+  }
+
+  /* ── Cycle Controls ── */
+  .cycle-controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 18px;
+  }
+
+  .control-group label {
+    display: block;
+    font-size: 0.68rem;
+    font-weight: 500;
+    color: #a1a1aa;
+    margin-bottom: 6px;
+  }
+
+  .control-group select,
+  .control-group input[type="number"] {
+    width: 100%;
+    appearance: none;
+    -webkit-appearance: none;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    color: #f4f4f5;
+    font-family: inherit;
+    font-size: 0.8rem;
+    padding: 9px 12px;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+
+  .control-group select:focus,
+  .control-group input[type="number"]:focus {
+    border-color: rgba(20, 184, 166, 0.5);
+    box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.1);
+  }
+
+  .control-group .select-wrap::after {
+    right: 12px;
+  }
+
+  .skip-row {
+    margin-top: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .skip-label {
+    font-size: 0.78rem;
+    color: #a1a1aa;
+  }
+
+  .toggle-sm {
+    width: 38px;
+    height: 22px;
+  }
+
+  .toggle-sm .toggle-track::after {
+    width: 16px;
+    height: 16px;
+  }
+
+  .toggle-sm input:checked + .toggle-track::after {
+    transform: translateX(16px);
+  }
+
+  /* ── Chip click feedback ── */
+  .chip:active {
+    transform: scale(0.95);
+  }
+
+  .chip.active::before {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 16px;
+    height: 2px;
+    background: #14b8a6;
+    border-radius: 1px;
+    box-shadow: 0 0 6px rgba(20, 184, 166, 0.4);
+  }
+
+  /* ── Interval input with suffix ── */
+  .input-with-suffix {
+    position: relative;
+  }
+
+  .input-with-suffix input {
+    padding-right: 30px;
+  }
+
+  .input-suffix {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 0.7rem;
+    color: #52525b;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="card-title">Page Navigation</div>
+
+  <!-- Start Page -->
+  <div class="field-group">
+    <label class="field-label">Start Page</label>
+    <div class="select-wrap">
+      <select>
+        <option value="-1" selected>Auto (Summary)</option>
+        <option value="0">AllSky</option>
+        <option value="1">Spotify</option>
+        <option value="2">Summary</option>
+        <option value="3">NINA 1</option>
+        <option value="4">NINA 2</option>
+        <option value="5">NINA 3</option>
+        <option value="6">System Info</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Auto Cycle Toggle -->
+  <div class="toggle-row">
+    <div>
+      <div class="toggle-row-label">Auto Cycle</div>
+      <div class="toggle-row-sub">Rotate through pages automatically</div>
+    </div>
+    <label class="toggle" id="cycleToggle">
+      <input type="checkbox" checked>
+      <span class="toggle-track"></span>
+    </label>
+  </div>
+
+  <!-- Cycle Section (collapsible) -->
+  <div class="cycle-section open" id="cycleSection">
+
+    <!-- Timeline -->
+    <div class="timeline-label">Rotation Order</div>
+    <div class="timeline-container">
+      <div class="timeline-strip">
+
+        <div class="chip active" data-page="summary" onclick="toggleChip(this)">
+          <span class="chip-icon">&#9638;</span>
+          <span class="chip-name">Summary</span>
+        </div>
+
+        <div class="arrow">&rsaquo;</div>
+
+        <div class="chip disabled" data-page="allsky" onclick="toggleChip(this)">
+          <span class="chip-icon">&#9729;</span>
+          <span class="chip-name">AllSky</span>
+        </div>
+
+        <div class="arrow">&rsaquo;</div>
+
+        <div class="chip active" data-page="spotify" onclick="toggleChip(this)">
+          <span class="chip-icon">&#9835;</span>
+          <span class="chip-name">Spotify</span>
+        </div>
+
+        <div class="arrow">&rsaquo;</div>
+
+        <div class="chip active" data-page="nina1" onclick="toggleChip(this)">
+          <span class="chip-icon">&#9788;</span>
+          <span class="chip-name">NINA 1</span>
+        </div>
+
+        <div class="arrow">&rsaquo;</div>
+
+        <div class="chip active" data-page="nina2" onclick="toggleChip(this)">
+          <span class="chip-icon">&#9788;</span>
+          <span class="chip-name">NINA 2</span>
+        </div>
+
+        <div class="arrow">&rsaquo;</div>
+
+        <div class="chip disabled" data-page="nina3" onclick="toggleChip(this)">
+          <span class="chip-icon">&#9788;</span>
+          <span class="chip-name">NINA 3</span>
+        </div>
+
+        <div class="arrow">&rsaquo;</div>
+
+        <div class="chip active" data-page="sysinfo" onclick="toggleChip(this)">
+          <span class="chip-icon">&#9881;</span>
+          <span class="chip-name">SysInfo</span>
+        </div>
+
+        <!-- Loop-back arrow -->
+        <div class="loop-back">
+          <svg viewBox="0 0 28 52" fill="none">
+            <path d="M4 26 L4 6 Q4 2 8 2 L20 2 Q24 2 24 6 L24 46 Q24 50 20 50 L8 50 Q4 50 4 46 L4 30"
+                  stroke="rgba(255,255,255,0.12)" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+            <path d="M7 30 L4 26 L1 30" stroke="rgba(255,255,255,0.12)" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="cycle-controls">
+      <div class="control-group">
+        <label>Interval</label>
+        <div class="input-with-suffix">
+          <input type="number" value="30" min="5" max="300" step="5">
+          <span class="input-suffix">s</span>
+        </div>
+      </div>
+      <div class="control-group">
+        <label>Transition</label>
+        <div class="select-wrap">
+          <select>
+            <option value="fade" selected>Fade</option>
+            <option value="instant">Instant</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="skip-row">
+      <span class="skip-label">Skip disconnected instances</span>
+      <label class="toggle toggle-sm">
+        <input type="checkbox" checked>
+        <span class="toggle-track"></span>
+      </label>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  // Toggle cycle section visibility
+  const cycleToggle = document.querySelector('#cycleToggle input');
+  const cycleSection = document.getElementById('cycleSection');
+
+  cycleToggle.addEventListener('change', () => {
+    cycleSection.classList.toggle('open', cycleToggle.checked);
+  });
+
+  // Toggle chip active/disabled
+  function toggleChip(chip) {
+    chip.classList.toggle('active');
+    chip.classList.toggle('disabled');
+  }
+</script>
+
+</body>
+</html>
