@@ -115,6 +115,11 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
     cJSON_AddBoolToObject(obj, "spotify_scroll_text", cfg->spotify_scroll_text);
     cJSON_AddNumberToObject(obj, "spotify_overlay_timeout_s", cfg->spotify_overlay_timeout_s);
     cJSON_AddBoolToObject(obj, "spotify_overlay_visible", cfg->spotify_overlay_visible);
+    cJSON_AddNumberToObject(obj, "toast_aggregation_window_s", cfg->toast_aggregation_window_s);
+    cJSON_AddNumberToObject(obj, "toast_notify_mask", cfg->toast_notify_mask);
+    cJSON_AddBoolToObject(obj, "toast_instance_muted_1", cfg->toast_instance_muted[0]);
+    cJSON_AddBoolToObject(obj, "toast_instance_muted_2", cfg->toast_instance_muted[1]);
+    cJSON_AddBoolToObject(obj, "toast_instance_muted_3", cfg->toast_instance_muted[2]);
 
     return obj;
 }
@@ -188,6 +193,8 @@ static const backup_field_t s_backup_fields[] = {
     {"graph_update_interval_s",     "Graph Update Interval",    "Behavior", false, false},
     {"active_page_override",        "Active Page Override",     "Behavior", false, false},
     {"alert_flash_enabled",         "Alert Flash",              "Behavior", false, false},
+    {"toast_aggregation_window_s",  "Toast Aggregation Window","Behavior", false, false},
+    {"toast_notify_mask",           "Notification Categories", "Behavior", false, false},
     {"screen_sleep_enabled",        "Screen Sleep",             "Behavior", false, false},
     {"screen_sleep_timeout_s",      "Screen Sleep Timeout",     "Behavior", false, false},
 
@@ -198,6 +205,9 @@ static const backup_field_t s_backup_fields[] = {
     {"instance_enabled_1", "Instance 1 Enabled",  "Nodes & Data", false, false},
     {"instance_enabled_2", "Instance 2 Enabled",  "Nodes & Data", false, false},
     {"instance_enabled_3", "Instance 3 Enabled",  "Nodes & Data", false, false},
+    {"toast_instance_muted_1",      "Instance 1 Muted",       "Nodes & Data", false, false},
+    {"toast_instance_muted_2",      "Instance 2 Muted",       "Nodes & Data", false, false},
+    {"toast_instance_muted_3",      "Instance 3 Muted",       "Nodes & Data", false, false},
     {"filter_colors_1",    "Filter Colors 1",     "Nodes & Data", false, true},
     {"filter_colors_2",    "Filter Colors 2",     "Nodes & Data", false, true},
     {"filter_colors_3",    "Filter Colors 3",     "Nodes & Data", false, true},
@@ -739,6 +749,23 @@ static app_config_t *parse_config_from_json(cJSON *root)
     JSON_TO_BOOL  (root, "spotify_scroll_text",        cfg->spotify_scroll_text);
     JSON_TO_INT   (root, "spotify_overlay_timeout_s",  cfg->spotify_overlay_timeout_s);
     JSON_TO_BOOL  (root, "spotify_overlay_visible",   cfg->spotify_overlay_visible);
+
+    cJSON *taw_item = cJSON_GetObjectItem(root, "toast_aggregation_window_s");
+    if (cJSON_IsNumber(taw_item)) {
+        int v = taw_item->valueint;
+        if (v < 0) v = 0;
+        if (v > 15) v = 15;
+        cfg->toast_aggregation_window_s = (uint8_t)v;
+    }
+
+    cJSON *tnm_item = cJSON_GetObjectItem(root, "toast_notify_mask");
+    if (cJSON_IsNumber(tnm_item)) {
+        cfg->toast_notify_mask = (uint32_t)tnm_item->valuedouble;
+    }
+
+    JSON_TO_BOOL(root, "toast_instance_muted_1", cfg->toast_instance_muted[0]);
+    JSON_TO_BOOL(root, "toast_instance_muted_2", cfg->toast_instance_muted[1]);
+    JSON_TO_BOOL(root, "toast_instance_muted_3", cfg->toast_instance_muted[2]);
 
     return cfg;
 }

@@ -50,6 +50,7 @@ static lv_obj_t *lbl_toast_duration   = NULL;
 
 /* ── Notifications card ──────────────────────────────────────────────── */
 static lv_obj_t *sw_alert_flash       = NULL;
+static lv_obj_t *sw_instance_mute[3]  = {NULL, NULL, NULL};
 
 /* ── Rotation dropdown options ───────────────────────────────────────── */
 static const char *rotation_opts = "0\xc2\xb0\n90\xc2\xb0\n180\xc2\xb0\n270\xc2\xb0";
@@ -288,6 +289,14 @@ static void alert_flash_toggle_cb(lv_event_t *e) {
     settings_mark_dirty(false);
 }
 
+static void instance_mute_toggle_cb(lv_event_t *e) {
+    int index = (int)(intptr_t)lv_event_get_user_data(e);
+    if (index < 0 || index >= 3) return;
+    app_config_get()->toast_instance_muted[index] =
+        !lv_obj_has_state(sw_instance_mute[index], LV_STATE_CHECKED);
+    settings_mark_dirty(false);
+}
+
 /* ════════════════════════════════════════════════════════════════════════
  *  Helper — create a labeled stepper row inside a card
  * ════════════════════════════════════════════════════════════════════════ */
@@ -339,6 +348,7 @@ void settings_tab_behavior_destroy(void) {
     lbl_conn_timeout = NULL;
     lbl_toast_duration = NULL;
     sw_alert_flash = NULL;
+    for (int i = 0; i < 3; i++) sw_instance_mute[i] = NULL;
 }
 
 void settings_tab_behavior_create(lv_obj_t *parent) {
@@ -564,6 +574,33 @@ void settings_tab_behavior_create(lv_obj_t *parent) {
             lv_obj_add_state(sw_alert_flash, LV_STATE_CHECKED);
         }
         lv_obj_add_event_cb(sw_alert_flash, alert_flash_toggle_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+        /* Per-instance mute toggles — only show for enabled instances */
+        for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+            if (!cfg->instance_enabled[i]) continue;
+
+            settings_make_divider(card);
+
+            /* Try to extract hostname from URL for label */
+            char label[48];
+            const char *url = app_config_get_instance_url(i);
+            if (url && url[0]) {
+                const char *host = strstr(url, "://");
+                host = host ? host + 3 : url;
+                int len = 0;
+                while (host[len] && host[len] != ':' && host[len] != '/' && len < 30) len++;
+                snprintf(label, sizeof(label), "%.*s Alerts", len, host);
+            } else {
+                snprintf(label, sizeof(label), "Instance %d Alerts", i + 1);
+            }
+
+            settings_make_toggle_row(card, label, &sw_instance_mute[i]);
+            if (!cfg->toast_instance_muted[i]) {
+                lv_obj_add_state(sw_instance_mute[i], LV_STATE_CHECKED);
+            }
+            lv_obj_add_event_cb(sw_instance_mute[i], instance_mute_toggle_cb,
+                                LV_EVENT_VALUE_CHANGED, (void *)(intptr_t)i);
+        }
     }
 }
 
@@ -650,6 +687,14 @@ void settings_tab_behavior_refresh(void) {
             lv_obj_add_state(sw_alert_flash, LV_STATE_CHECKED);
         else
             lv_obj_remove_state(sw_alert_flash, LV_STATE_CHECKED);
+    }
+    for (int i = 0; i < 3; i++) {
+        if (sw_instance_mute[i]) {
+            if (!cfg->toast_instance_muted[i])
+                lv_obj_add_state(sw_instance_mute[i], LV_STATE_CHECKED);
+            else
+                lv_obj_remove_state(sw_instance_mute[i], LV_STATE_CHECKED);
+        }
     }
 }
 

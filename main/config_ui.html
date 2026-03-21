@@ -761,6 +761,61 @@
           <label class="toggle"><input type="checkbox" id="alert_flash_enabled" checked><span class="toggle-track"></span></label>
         </div>
         <div class="field-hint" style="margin-top:4px">Flash the screen border when RMS, HFR, or safety thresholds are exceeded.</div>
+        <hr class="divider">
+        <div class="field">
+          <label class="field-label">Aggregation Window</label>
+          <div class="slider-group">
+            <input type="range" class="slider" id="toast_aggregation_window" min="0" max="15" value="5" oninput="updateAggregationLabel(this.value);checkDirty()">
+            <span class="slider-val" id="toast_aggregation_val">5s</span>
+          </div>
+          <div class="field-hint">Combine rapid-fire notifications within this window. 0 = Off (show each individually).</div>
+        </div>
+        <hr class="divider">
+        <div class="field-label" style="margin-bottom:12px">Event Categories</div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Equipment Connects</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_0" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Equipment Disconnects</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_1" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Sequence Events</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_2" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Autofocus</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_3" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Mount Events</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_4" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Meridian Flip</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_5" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Guider Events</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_6" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Safety Events</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_7" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Error Events</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_8" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Profile Changes</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_9" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">Dome/Flat Events</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_10" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
       </div>
     </div>
 
@@ -1153,6 +1208,10 @@
             '<div class="card-title">Node '+(i+1)+' <span id="node_card_hostname_'+i+'" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span></div>'+
             '<div class="field"><label class="field-label">Hostname / IP</label>'+
             '<input type="text" class="input" id="'+urlId+'" placeholder="'+placeholders[i]+'" oninput="updateNodeLabels()"></div>'+
+            '<div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">'+
+            '<span class="toggle-label">Mute Notifications</span>'+
+            '<label class="toggle"><input type="checkbox" id="toast_instance_muted_'+i+'" onchange="checkDirty()"><span class="toggle-track"></span></label>'+
+            '</div>'+
             '<div class="field"><label class="field-label">Filter colors</label>'+
             '<div id="filters_'+i+'" class="filter-grid"></div></div>'+
             '<div class="row stack-mobile">'+
@@ -1367,6 +1426,10 @@
     function setTheme(v){postJson('/api/theme',{theme_index:parseInt(v)})}
     function setWidgetStyle(v){postJson('/api/widget-style',{widget_style:parseInt(v)})}
     function setScreenRotation(v){postJson('/api/screen-rotation',{screen_rotation:parseInt(v)})}
+
+    function updateAggregationLabel(v){
+      $('toast_aggregation_val').textContent=parseInt(v)===0?'Off':v+'s';
+    }
 
     let _brightTimer=null;
     function setBrightness(v){
@@ -1667,6 +1730,11 @@
         deep_sleep_wake_timer_s:(parseInt($('deep_sleep_wake_timer').value)||0)*3600,
         deep_sleep_on_idle:!!$('deep_sleep_on_idle').checked,
         alert_flash_enabled:!!$('alert_flash_enabled').checked,
+        toast_aggregation_window_s:parseInt($('toast_aggregation_window').value)||0,
+        toast_notify_mask:(function(){var m=0;for(var i=0;i<11;i++){if($('notify_cat_'+i).checked) m|=(1<<i);}return m>>>0;})(),
+        toast_instance_muted_1:!!$('toast_instance_muted_0').checked,
+        toast_instance_muted_2:!!$('toast_instance_muted_1').checked,
+        toast_instance_muted_3:!!$('toast_instance_muted_2').checked,
         auto_update_check:!!$('auto_update_check').checked,
         update_channel:parseInt($('update_channel').value)||0,
         allsky_enabled:!!$('allsky_enabled').checked,
@@ -1758,6 +1826,14 @@
       $('deep_sleep_wake_timer').value=Math.round((data.deep_sleep_wake_timer_s||0)/3600);
       $('deep_sleep_on_idle').checked=!!data.deep_sleep_on_idle;
       $('alert_flash_enabled').checked=data.alert_flash_enabled!==false;
+      var aggWin=data.toast_aggregation_window_s!=null?data.toast_aggregation_window_s:5;
+      $('toast_aggregation_window').value=aggWin;
+      updateAggregationLabel(aggWin);
+      var mask=data.toast_notify_mask!=null?data.toast_notify_mask:0xFFFFFFFF;
+      for(var i=0;i<11;i++){$('notify_cat_'+i).checked=!!(mask&(1<<i));}
+      $('toast_instance_muted_0').checked=!!data.toast_instance_muted_1;
+      $('toast_instance_muted_1').checked=!!data.toast_instance_muted_2;
+      $('toast_instance_muted_2').checked=!!data.toast_instance_muted_3;
       $('auto_update_check').checked=data.auto_update_check!==false;
       $('update_channel').value=data.update_channel||0;
 
