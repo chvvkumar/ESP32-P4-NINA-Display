@@ -948,6 +948,11 @@
           </select>
         </div>
         <button class="btn btn-primary" style="margin-top:12px;width:100%" id="checkUpdateBtn" onclick="checkForUpdates()">Check for Updates</button>
+        <div id="updateResult" style="display:none;margin-top:12px;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.03)">
+          <div id="updateResultText" style="font-size:0.85rem;color:var(--text-secondary)"></div>
+          <div id="updateSummary" style="display:none;margin-top:8px;font-size:0.78rem;color:var(--text-muted);max-height:120px;overflow-y:auto;white-space:pre-wrap"></div>
+          <button class="btn btn-primary" id="otaGithubBtn" style="display:none;margin-top:12px;width:100%" onclick="startGithubOta()">Install Update</button>
+        </div>
         <hr class="divider">
         <div class="ota-bar">
           <label class="ota-label" id="otaFileLabel">
@@ -2031,13 +2036,46 @@
 
     function checkForUpdates(){
       var btn=$('checkUpdateBtn');
+      var result=$('updateResult');
+      var resultText=$('updateResultText');
+      var summary=$('updateSummary');
+      var installBtn=$('otaGithubBtn');
       btn.disabled=true; btn.textContent='Checking...';
-      fetch('/api/check-update',{method:'POST'}).then(()=>{
-        btn.textContent='Check requested \u2014 see device screen';
-        setTimeout(()=>{btn.disabled=false;btn.textContent='Check for Updates';},5000);
-      }).catch(()=>{
+      result.style.display='none';
+      installBtn.style.display='none';
+      summary.style.display='none';
+      fetch('/api/check-update-json').then(function(r){return r.json();}).then(function(data){
         btn.disabled=false; btn.textContent='Check for Updates';
-        alert('Failed to reach device');
+        result.style.display='block';
+        if(data.update_available){
+          resultText.innerHTML='<span style="color:var(--accent)">Update available:</span> <strong>'+escHtml(data.tag)+'</strong>'+(data.is_prerelease?' <span style="color:#fbbf24;font-size:0.75rem">(pre-release)</span>':'');
+          if(data.summary){
+            summary.style.display='block';
+            summary.textContent=data.summary;
+          }
+          installBtn.style.display='block';
+        } else {
+          resultText.innerHTML='\u2705 You are running the latest firmware ('+escHtml(data.current_version)+')';
+        }
+      }).catch(function(){
+        btn.disabled=false; btn.textContent='Check for Updates';
+        result.style.display='block';
+        resultText.innerHTML='\u274c Failed to check for updates';
+      });
+    }
+
+    function startGithubOta(){
+      var btn=$('otaGithubBtn');
+      if(!confirm('Install the update? The device will reboot after flashing.')) return;
+      btn.disabled=true; btn.textContent='Installing...';
+      fetch('/api/ota-github',{method:'POST',body:'{}'}).then(function(r){return r.json();}).then(function(data){
+        if(data.started){
+          btn.textContent='Flashing \u2014 see device screen...';
+          $('updateResultText').innerHTML='OTA in progress. Device will reboot when complete.';
+        }
+      }).catch(function(){
+        btn.disabled=false; btn.textContent='Install Update';
+        alert('Failed to start OTA update');
       });
     }
 
