@@ -321,6 +321,7 @@
     .pn-pill {
       flex: 1 1 auto; min-width: 0; position: relative;
       cursor: pointer; user-select: none;
+      display: flex; flex-direction: column; align-items: center;
     }
     .pn-pill input { position: absolute; opacity: 0; width: 0; height: 0; }
     .pn-pill-visual {
@@ -384,6 +385,18 @@
       background: linear-gradient(90deg, transparent, rgba(255,255,255,0.06) 20%, rgba(255,255,255,0.06) 80%, transparent);
     }
     .pn-sub-divider { height: 1px; background: rgba(255,255,255,0.04); margin: 4px 0; }
+
+    /* Drag-to-reorder */
+    .pn-pill.dragging { opacity: 0.4; }
+    .pn-pill.drag-over { border-left: 2px solid var(--accent); margin-left: -2px; }
+    .pn-pill-grid.reorderable .pn-pill { cursor: grab; }
+    .pn-pill-grid.reorderable .pn-pill:active { cursor: grabbing; }
+    .pn-pill-grip {
+      display: flex; justify-content: center; width: 100%;
+      color: rgba(255,255,255,0.15); font-size: 0.55rem; line-height: 1;
+      pointer-events: none; transition: color 0.2s; margin-bottom: 2px; letter-spacing: 2px;
+    }
+    .pn-pill:hover .pn-pill-grip { color: rgba(255,255,255,0.35); }
 
     /* === FIRMWARE & OTA === */
     .fw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-bottom: 24px; }
@@ -619,7 +632,8 @@
           <div class="pn-sub-divider"></div>
           <div>
             <div class="pn-section-label">Pages in Rotation</div>
-            <div class="pn-pill-grid" id="arp-container"></div>
+            <div style="font-size:0.72rem;color:var(--text-muted);margin:-8px 0 10px;opacity:0.7">Drag to reorder</div>
+            <div class="pn-pill-grid reorderable" id="arp-container"></div>
           </div>
         </div>
       </div>
@@ -1192,12 +1206,123 @@
       ];
       var c=$('arp-container');
       if(!c) return;
-      items.forEach(function(it){
+      items.forEach(function(it,idx){
         c.insertAdjacentHTML('beforeend',
-          '<label class="pn-pill rotate-pill"><input type="checkbox" id="'+it[0]+'" onchange="checkDirty()"><span class="pn-pill-visual">'+it[1]+'</span></label>'
+          '<label class="pn-pill rotate-pill" draggable="true" data-arp-idx="'+idx+'">'+
+            '<span class="pn-pill-grip">\u2022\u2022\u2022</span>'+
+            '<input type="checkbox" id="'+it[0]+'" onchange="checkDirty()">'+
+            '<span class="pn-pill-visual">'+it[1]+'</span>'+
+          '</label>'
         );
       });
+      initPillDragReorder(c);
     })();
+
+    /* === Pill Drag-to-Reorder === */
+    function initPillDragReorder(container){
+      var dragSrc=null;
+
+      container.addEventListener('dragstart',function(e){
+        var pill=e.target.closest('.pn-pill');
+        if(!pill) return;
+        dragSrc=pill;
+        pill.classList.add('dragging');
+        e.dataTransfer.effectAllowed='move';
+        e.dataTransfer.setData('text/plain','');
+      });
+
+      container.addEventListener('dragover',function(e){
+        e.preventDefault();
+        e.dataTransfer.dropEffect='move';
+        var pill=e.target.closest('.pn-pill');
+        container.querySelectorAll('.pn-pill').forEach(function(p){p.classList.remove('drag-over');});
+        if(pill&&pill!==dragSrc) pill.classList.add('drag-over');
+      });
+
+      container.addEventListener('dragleave',function(e){
+        var pill=e.target.closest('.pn-pill');
+        if(pill) pill.classList.remove('drag-over');
+      });
+
+      container.addEventListener('drop',function(e){
+        e.preventDefault();
+        var target=e.target.closest('.pn-pill');
+        container.querySelectorAll('.pn-pill').forEach(function(p){p.classList.remove('drag-over');});
+        if(!target||!dragSrc||target===dragSrc) return;
+
+        /* Determine insertion position based on mouse position relative to target center */
+        var rect=target.getBoundingClientRect();
+        var midX=rect.left+rect.width/2;
+        if(e.clientX<midX){
+          container.insertBefore(dragSrc,target);
+        } else {
+          container.insertBefore(dragSrc,target.nextSibling);
+        }
+        checkDirty();
+      });
+
+      container.addEventListener('dragend',function(e){
+        var pill=e.target.closest('.pn-pill');
+        if(pill) pill.classList.remove('dragging');
+        container.querySelectorAll('.pn-pill').forEach(function(p){p.classList.remove('drag-over');});
+        dragSrc=null;
+      });
+
+      /* Touch support for mobile */
+      var touchSrc=null, touchClone=null, touchStartY=0, touchStartX=0;
+
+      container.addEventListener('touchstart',function(e){
+        var pill=e.target.closest('.pn-pill');
+        if(!pill) return;
+        touchSrc=pill;
+        var touch=e.touches[0];
+        touchStartX=touch.clientX;
+        touchStartY=touch.clientY;
+      },{passive:true});
+
+      container.addEventListener('touchmove',function(e){
+        if(!touchSrc) return;
+        var touch=e.touches[0];
+        var dx=Math.abs(touch.clientX-touchStartX);
+        var dy=Math.abs(touch.clientY-touchStartY);
+        if(dx<10&&dy<10) return;
+        e.preventDefault();
+        touchSrc.classList.add('dragging');
+
+        /* Find the pill under the touch point */
+        container.querySelectorAll('.pn-pill').forEach(function(p){p.classList.remove('drag-over');});
+        var elem=document.elementFromPoint(touch.clientX,touch.clientY);
+        if(elem){
+          var target=elem.closest('.pn-pill');
+          if(target&&target!==touchSrc) target.classList.add('drag-over');
+        }
+      },{passive:false});
+
+      container.addEventListener('touchend',function(e){
+        if(!touchSrc) return;
+        touchSrc.classList.remove('dragging');
+        container.querySelectorAll('.pn-pill').forEach(function(p){p.classList.remove('drag-over');});
+
+        if(e.changedTouches.length>0){
+          var touch=e.changedTouches[0];
+          var elem=document.elementFromPoint(touch.clientX,touch.clientY);
+          if(elem){
+            var target=elem.closest('.pn-pill');
+            if(target&&target!==touchSrc){
+              var rect=target.getBoundingClientRect();
+              var midX=rect.left+rect.width/2;
+              if(touch.clientX<midX){
+                container.insertBefore(touchSrc,target);
+              } else {
+                container.insertBefore(touchSrc,target.nextSibling);
+              }
+              checkDirty();
+            }
+          }
+        }
+        touchSrc=null;
+      });
+    }
 
     /* === Tab Accent Colors === */
     const tabAccents={
@@ -1270,7 +1395,7 @@
       var spotifyOn=$('spotify_enabled')?$('spotify_enabled').checked:false;
 
       var pages=[];
-      pages.push({value:'-1', label:'Summary'});
+      pages.push({value:'2', label:'Summary'});
       if(allskyOn) pages.push({value:'0', label:'AllSky'});
       if(spotifyOn) pages.push({value:'1', label:'Spotify'});
       var pageIdx=3;
@@ -1307,7 +1432,7 @@
 
     function onStartPageChange(){
       var v=getStartPageValue();
-      if(v>=0) postJson('/api/page',{page:v});
+      postJson('/api/page',{page:v});
       updatePageNavSummary();
     }
 
@@ -1321,14 +1446,12 @@
       var span=$('pm_summary');
       if(!span) return;
       var cycleOn=$('auto_cycle_toggle').checked;
-      var startVal=getStartPageValue();
       if(cycleOn) span.textContent='\u2014 Cycling';
-      else if(startVal>=0){
+      else {
         var checked=document.querySelector('input[name="start_page"]:checked');
         var label=checked?checked.nextElementSibling.textContent:'';
-        span.textContent='\u2014 '+label;
+        span.textContent='\u2014 '+(label||'Summary');
       }
-      else span.textContent='\u2014 Manual';
     }
 
     /* === Filter Colors === */
@@ -1461,6 +1584,32 @@
       arpIds.forEach((id,i)=>{$(id).checked=!!(mask&arpBits[i]);});
     }
 
+    function getRotateOrder(){
+      var pills=$('arp-container').querySelectorAll('.pn-pill[data-arp-idx]');
+      var order=[];
+      pills.forEach(function(p){ order.push(parseInt(p.getAttribute('data-arp-idx'))); });
+      return order;
+    }
+
+    function setRotateOrder(orderArr){
+      if(!orderArr||!orderArr.length) return;
+      var container=$('arp-container');
+      var pills=Array.from(container.querySelectorAll('.pn-pill[data-arp-idx]'));
+      /* Sort pills by order array */
+      var pillMap={};
+      pills.forEach(function(p){ pillMap[p.getAttribute('data-arp-idx')]=p; });
+      orderArr.forEach(function(idx){
+        var p=pillMap[idx];
+        if(p) container.appendChild(p);
+      });
+      /* Append any pills not mentioned in orderArr */
+      pills.forEach(function(p){
+        if(orderArr.indexOf(parseInt(p.getAttribute('data-arp-idx')))===-1){
+          container.appendChild(p);
+        }
+      });
+    }
+
     /* === Config Data Assembly === */
     function getConfigData(){
       var host1=$('url1').value.trim();
@@ -1500,6 +1649,7 @@
         auto_rotate_effect:parseInt($('auto_rotate_effect').value),
         auto_rotate_skip_disconnected:!!$('auto_rotate_skip').checked,
         auto_rotate_pages:getRotatePages(),
+        auto_rotate_order:getRotateOrder(),
         update_rate_s:parseInt($('update_rate').value)||2,
         graph_update_interval_s:parseInt($('graph_interval').value)||5,
         connection_timeout_s:parseInt($('connection_timeout').value)||6,
@@ -1637,6 +1787,7 @@
       $('auto_rotate_effect').value=data.auto_rotate_effect||0;
       $('auto_rotate_skip').checked=!!data.auto_rotate_skip_disconnected;
       setRotatePages(data.auto_rotate_pages!=null?data.auto_rotate_pages:0x1F);
+      if(data.auto_rotate_order) setRotateOrder(data.auto_rotate_order);
 
       updateNodeLabels();
 
@@ -1675,7 +1826,7 @@
 
       // Update page selector AFTER all enable checkboxes are populated
       buildStartPagePills();
-      setStartPageValue(data.active_page_override!=null?data.active_page_override:-1);
+      setStartPageValue(data.active_page_override!=null&&data.active_page_override>=0?data.active_page_override:2);
       updatePageNavSummary();
 
       loadedConfig=JSON.stringify(getConfigData());

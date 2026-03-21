@@ -74,6 +74,13 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
     cJSON_AddNumberToObject(obj, "auto_rotate_effect", cfg->auto_rotate_effect);
     cJSON_AddBoolToObject(obj, "auto_rotate_skip_disconnected", cfg->auto_rotate_skip_disconnected);
     cJSON_AddNumberToObject(obj, "auto_rotate_pages", cfg->auto_rotate_pages);
+    {
+        cJSON *order_arr = cJSON_CreateArray();
+        for (int i = 0; i < 7 && cfg->auto_rotate_order[i] != 0xFF; i++) {
+            cJSON_AddItemToArray(order_arr, cJSON_CreateNumber(cfg->auto_rotate_order[i]));
+        }
+        cJSON_AddItemToObject(obj, "auto_rotate_order", order_arr);
+    }
     cJSON_AddNumberToObject(obj, "update_rate_s", cfg->update_rate_s);
     cJSON_AddNumberToObject(obj, "graph_update_interval_s", cfg->graph_update_interval_s);
     cJSON_AddNumberToObject(obj, "connection_timeout_s", cfg->connection_timeout_s);
@@ -597,8 +604,23 @@ static app_config_t *parse_config_from_json(cJSON *root)
     if (cJSON_IsNumber(arp_item)) {
         int v = arp_item->valueint;
         if (v < 0) v = 0;
-        if (v > 0x3F) v = 0x3F;
+        if (v > 0x7F) v = 0x7F;
         cfg->auto_rotate_pages = (uint8_t)v;
+    }
+
+    cJSON *order_arr = cJSON_GetObjectItem(root, "auto_rotate_order");
+    if (cJSON_IsArray(order_arr)) {
+        int count = cJSON_GetArraySize(order_arr);
+        if (count > 7) count = 7;
+        for (int i = 0; i < count; i++) {
+            cJSON *item = cJSON_GetArrayItem(order_arr, i);
+            if (cJSON_IsNumber(item) && item->valueint >= 0 && item->valueint <= 6) {
+                cfg->auto_rotate_order[i] = (uint8_t)item->valueint;
+            }
+        }
+        for (int i = count; i < 7; i++) {
+            cfg->auto_rotate_order[i] = 0xFF;
+        }
     }
 
     cJSON *ur_item = cJSON_GetObjectItem(root, "update_rate_s");
