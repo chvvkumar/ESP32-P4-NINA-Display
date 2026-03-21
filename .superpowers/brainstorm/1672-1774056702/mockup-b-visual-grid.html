@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Page Navigation Card — Visual Grid</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0a0a0b;
+    --card-bg: rgba(255, 255, 255, 0.035);
+    --card-border: rgba(255, 255, 255, 0.08);
+    --accent: #14b8a6;
+    --accent-rgb: 20, 184, 166;
+    --text: #f4f4f5;
+    --muted: #a1a1aa;
+    --input-bg: rgba(0, 0, 0, 0.3);
+    --input-border: rgba(255, 255, 255, 0.08);
+    --radius-card: 16px;
+    --radius-input: 10px;
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  body {
+    background: var(--bg);
+    font-family: var(--font);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 16px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* ── Card ──────────────────────────────────────────── */
+  .card {
+    width: 100%;
+    max-width: 500px;
+    background: var(--card-bg);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-card);
+    padding: 28px;
+  }
+
+  .card-title {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 22px;
+  }
+
+  /* ── Section labels ────────────────────────────────── */
+  .section-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 12px;
+  }
+
+  /* ── Mini tile grid ────────────────────────────────── */
+  .tile-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .tile {
+    position: relative;
+    width: 60px;
+    height: 60px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.025);
+    border: 1.5px solid rgba(255, 255, 255, 0.06);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    user-select: none;
+  }
+
+  .tile:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+
+  .tile.selected {
+    background: rgba(var(--accent-rgb), 0.08);
+    border-color: rgba(var(--accent-rgb), 0.5);
+    box-shadow:
+      0 0 12px rgba(var(--accent-rgb), 0.15),
+      inset 0 0 12px rgba(var(--accent-rgb), 0.06);
+  }
+
+  .tile.selected .tile-icon {
+    filter: drop-shadow(0 0 4px rgba(var(--accent-rgb), 0.4));
+  }
+
+  .tile-icon {
+    font-size: 20px;
+    line-height: 1;
+    margin-bottom: 1px;
+    transition: filter 0.25s ease;
+  }
+
+  .tile-label {
+    font-size: 0.5rem;
+    font-weight: 600;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+    text-align: center;
+    line-height: 1.15;
+    max-width: 54px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: color 0.25s ease;
+  }
+
+  .tile.selected .tile-label {
+    color: var(--accent);
+  }
+
+  /* Pin badge on selected start page */
+  .tile .pin-badge {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 8px;
+    color: #0a0a0b;
+    font-weight: 800;
+    box-shadow: 0 2px 6px rgba(var(--accent-rgb), 0.4);
+    opacity: 0;
+    transform: scale(0.5);
+    transition: all 0.25s ease;
+    pointer-events: none;
+  }
+
+  .tile.selected .pin-badge {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  /* Dim / excluded state for rotation grid */
+  .tile.excluded {
+    opacity: 0.32;
+    border-color: rgba(255, 255, 255, 0.03);
+    background: rgba(255, 255, 255, 0.012);
+  }
+  .tile.excluded:hover {
+    opacity: 0.5;
+  }
+
+  /* ── Divider ───────────────────────────────────────── */
+  .divider {
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.06) 20%,
+      rgba(255, 255, 255, 0.06) 80%,
+      transparent
+    );
+    margin: 22px 0;
+  }
+
+  /* ── Toggle row ────────────────────────────────────── */
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
+  }
+
+  .toggle-row-label {
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .toggle-row-label-small {
+    font-size: 0.78rem;
+    font-weight: 400;
+    color: var(--muted);
+  }
+
+  /* Premium toggle switch */
+  .toggle {
+    position: relative;
+    width: 42px;
+    height: 24px;
+    flex-shrink: 0;
+  }
+
+  .toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+    position: absolute;
+  }
+
+  .toggle-track {
+    position: absolute;
+    inset: 0;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    cursor: pointer;
+    transition: all 0.3s ease;
+  }
+
+  .toggle-track::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #666;
+    transition: all 0.3s ease;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  }
+
+  .toggle input:checked + .toggle-track {
+    background: rgba(var(--accent-rgb), 0.25);
+    border-color: rgba(var(--accent-rgb), 0.4);
+  }
+
+  .toggle input:checked + .toggle-track::after {
+    transform: translateX(18px);
+    background: var(--accent);
+    box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.4);
+  }
+
+  /* ── Auto-cycle expanded settings ──────────────────── */
+  .cycle-settings {
+    margin-top: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    animation: fadeSlideIn 0.3s ease;
+  }
+
+  @keyframes fadeSlideIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .inline-row {
+    display: flex;
+    gap: 12px;
+  }
+
+  .inline-row > .field {
+    flex: 1;
+  }
+
+  .field label {
+    display: block;
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 6px;
+  }
+
+  .field input[type="number"],
+  .field select {
+    width: 100%;
+    height: 38px;
+    padding: 0 12px;
+    font-size: 0.82rem;
+    font-family: var(--font);
+    color: var(--text);
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    border-radius: var(--radius-input);
+    outline: none;
+    transition: border-color 0.2s ease;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  .field select {
+    background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%23a1a1aa' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 32px;
+  }
+
+  .field input[type="number"]:focus,
+  .field select:focus {
+    border-color: rgba(var(--accent-rgb), 0.5);
+  }
+
+  /* Remove number input spinners */
+  .field input[type="number"]::-webkit-inner-spin-button,
+  .field input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  .field input[type="number"] { -moz-appearance: textfield; }
+
+  .input-suffix {
+    display: flex;
+    align-items: center;
+    position: relative;
+  }
+
+  .input-suffix input {
+    padding-right: 32px !important;
+  }
+
+  .input-suffix span {
+    position: absolute;
+    right: 12px;
+    font-size: 0.72rem;
+    color: var(--muted);
+    pointer-events: none;
+  }
+
+  /* ── Sub-section ───────────────────────────────────── */
+  .sub-divider {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.04);
+    margin: 2px 0;
+  }
+
+  .rotation-section-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 10px;
+  }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="card-title">Page Navigation</div>
+
+  <!-- ── Start Page ─────────────────────────────── -->
+  <div class="section-label">Start Page</div>
+  <div class="tile-grid" id="startPageGrid">
+    <div class="tile" data-page="allsky" onclick="selectStartPage(this)">
+      <span class="pin-badge">&#9733;</span>
+      <span class="tile-icon">&#128225;</span>
+      <span class="tile-label">AllSky</span>
+    </div>
+    <div class="tile" data-page="spotify" onclick="selectStartPage(this)">
+      <span class="pin-badge">&#9733;</span>
+      <span class="tile-icon">&#127925;</span>
+      <span class="tile-label">Spotify</span>
+    </div>
+    <div class="tile selected" data-page="summary" onclick="selectStartPage(this)">
+      <span class="pin-badge">&#9733;</span>
+      <span class="tile-icon">&#128202;</span>
+      <span class="tile-label">Summary</span>
+    </div>
+    <div class="tile" data-page="nina1" onclick="selectStartPage(this)">
+      <span class="pin-badge">&#9733;</span>
+      <span class="tile-icon">&#128301;</span>
+      <span class="tile-label">NINA 1</span>
+    </div>
+    <div class="tile" data-page="nina2" onclick="selectStartPage(this)">
+      <span class="pin-badge">&#9733;</span>
+      <span class="tile-icon">&#128301;</span>
+      <span class="tile-label">NINA 2</span>
+    </div>
+    <div class="tile" data-page="nina3" onclick="selectStartPage(this)">
+      <span class="pin-badge">&#9733;</span>
+      <span class="tile-icon">&#128301;</span>
+      <span class="tile-label">NINA 3</span>
+    </div>
+    <div class="tile" data-page="system" onclick="selectStartPage(this)">
+      <span class="pin-badge">&#9733;</span>
+      <span class="tile-icon">&#9881;&#65039;</span>
+      <span class="tile-label">System</span>
+    </div>
+  </div>
+
+  <!-- ── Divider ────────────────────────────────── -->
+  <div class="divider"></div>
+
+  <!-- ── Auto Cycle ─────────────────────────────── -->
+  <div class="toggle-row">
+    <span class="toggle-row-label">Auto Cycle Pages</span>
+    <label class="toggle">
+      <input type="checkbox" id="autoCycleToggle" checked onchange="toggleCycleSettings()">
+      <span class="toggle-track"></span>
+    </label>
+  </div>
+
+  <!-- Expanded settings (shown when toggle is on) -->
+  <div class="cycle-settings" id="cycleSettings">
+
+    <div class="inline-row">
+      <div class="field">
+        <label>Interval</label>
+        <div class="input-suffix">
+          <input type="number" value="30" min="5" max="300">
+          <span>sec</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>Transition</label>
+        <select>
+          <option value="fade" selected>Fade</option>
+          <option value="instant">Instant</option>
+          <option value="slide">Slide</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="toggle-row">
+      <span class="toggle-row-label-small">Skip disconnected instances</span>
+      <label class="toggle">
+        <input type="checkbox" checked>
+        <span class="toggle-track"></span>
+      </label>
+    </div>
+
+    <div class="sub-divider"></div>
+
+    <div class="rotation-section-label">Include in Rotation</div>
+    <div class="tile-grid" id="rotationGrid">
+      <div class="tile selected" data-page="allsky" onclick="toggleRotation(this)">
+        <span class="tile-icon">&#128225;</span>
+        <span class="tile-label">AllSky</span>
+      </div>
+      <div class="tile excluded" data-page="spotify" onclick="toggleRotation(this)">
+        <span class="tile-icon">&#127925;</span>
+        <span class="tile-label">Spotify</span>
+      </div>
+      <div class="tile selected" data-page="summary" onclick="toggleRotation(this)">
+        <span class="tile-icon">&#128202;</span>
+        <span class="tile-label">Summary</span>
+      </div>
+      <div class="tile selected" data-page="nina1" onclick="toggleRotation(this)">
+        <span class="tile-icon">&#128301;</span>
+        <span class="tile-label">NINA 1</span>
+      </div>
+      <div class="tile selected" data-page="nina2" onclick="toggleRotation(this)">
+        <span class="tile-icon">&#128301;</span>
+        <span class="tile-label">NINA 2</span>
+      </div>
+      <div class="tile selected" data-page="nina3" onclick="toggleRotation(this)">
+        <span class="tile-icon">&#128301;</span>
+        <span class="tile-label">NINA 3</span>
+      </div>
+      <div class="tile excluded" data-page="system" onclick="toggleRotation(this)">
+        <span class="tile-icon">&#9881;&#65039;</span>
+        <span class="tile-label">System</span>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  function selectStartPage(tile) {
+    const grid = document.getElementById('startPageGrid');
+    grid.querySelectorAll('.tile').forEach(t => t.classList.remove('selected'));
+    tile.classList.add('selected');
+  }
+
+  function toggleRotation(tile) {
+    tile.classList.toggle('selected');
+    tile.classList.toggle('excluded');
+  }
+
+  function toggleCycleSettings() {
+    const settings = document.getElementById('cycleSettings');
+    const checked = document.getElementById('autoCycleToggle').checked;
+    settings.style.display = checked ? '' : 'none';
+  }
+</script>
+
+</body>
+</html>

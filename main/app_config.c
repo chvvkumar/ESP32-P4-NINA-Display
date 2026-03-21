@@ -697,6 +697,8 @@ static void set_defaults(app_config_t *cfg) {
     cfg->auto_rotate_effect = 0;
     cfg->auto_rotate_skip_disconnected = true;
     cfg->auto_rotate_pages = 0x0E;  // Default: all NINA instances (bits 1-3)
+    /* Default rotation order: Summary, AllSky, Spotify, NINA1, NINA2, NINA3, SysInfo */
+    for (int i = 0; i < 7; i++) cfg->auto_rotate_order[i] = (uint8_t)i;
     cfg->update_rate_s = 5;
     cfg->graph_update_interval_s = 10;
     cfg->connection_timeout_s = 6;
@@ -741,6 +743,7 @@ static void set_defaults(app_config_t *cfg) {
     cfg->spotify_minimal_mode = false;
     cfg->spotify_overlay_timeout_s = 5;
     cfg->spotify_scroll_text = true;
+    cfg->spotify_overlay_visible = false;
 
     memset(cfg->wifi_networks, 0, sizeof(cfg->wifi_networks));
 }
@@ -1706,32 +1709,60 @@ static void migrate_from_v23(const app_config_v23_t *old, app_config_t *cfg) {
     ESP_LOGI(TAG, "Migrated config from v23 to v%d", APP_CONFIG_VERSION);
 }
 
-/* --- v24 → v25 migration (struct layout unchanged, theme/widget reindex) --- */
-typedef app_config_t app_config_v24_t;
-
-static void migrate_from_v24(const app_config_v24_t *old, app_config_t *cfg)
+/* --- v26 → v27 migration (added auto_rotate_order) --- */
+static void migrate_from_v26(const void *raw, size_t raw_size, app_config_t *cfg)
 {
-    memcpy(cfg, old, sizeof(app_config_t));
+    set_defaults(cfg);
+    /* v26 blob is identical layout minus trailing auto_rotate_order[7].
+     * Copy old data — new trailing field stays at default from set_defaults(). */
+    size_t copy = raw_size < sizeof(app_config_t) ? raw_size : sizeof(app_config_t);
+    memcpy(cfg, raw, copy);
+    for (int i = 0; i < 7; i++) cfg->auto_rotate_order[i] = (uint8_t)i;
     cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v26 to v%d", APP_CONFIG_VERSION);
+}
+
+/* --- v25 → v26 migration (added spotify_overlay_visible) --- */
+static void migrate_from_v25(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    /* v25 blob is identical layout minus trailing spotify_overlay_visible.
+     * Copy old data — new trailing field stays at default from set_defaults(). */
+    size_t copy = raw_size < sizeof(app_config_t) ? raw_size : sizeof(app_config_t);
+    memcpy(cfg, raw, copy);
+    cfg->spotify_overlay_visible = false;
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v25 to v%d", APP_CONFIG_VERSION);
+}
+
+/* --- v24 → v26 migration (theme/widget reindex + added spotify_overlay_visible) --- */
+static void migrate_from_v24(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_t) ? raw_size : sizeof(app_config_t);
+    memcpy(cfg, raw, copy);
+    cfg->config_version = APP_CONFIG_VERSION;
+    cfg->spotify_overlay_visible = false;
 
     /* Remap theme indices: old → new */
-    if (old->theme_index == 0 || old->theme_index == 1) {
-        cfg->theme_index = old->theme_index;
-    } else if (old->theme_index == 11) {
+    uint8_t old_theme = cfg->theme_index;
+    if (old_theme == 0 || old_theme == 1) {
+        /* keep */
+    } else if (old_theme == 11) {
         cfg->theme_index = 2;
     } else {
         cfg->theme_index = 0; /* Removed themes → Default */
     }
 
     /* Remap widget style indices: old → new */
-    switch (old->widget_style) {
-        case 0: cfg->widget_style = 0; break; /* Default */
-        case 1: cfg->widget_style = 1; break; /* Subtle Border */
+    switch (cfg->widget_style) {
+        case 0: case 1: break; /* Default, Subtle Border — keep */
         case 3: cfg->widget_style = 2; break; /* Soft Inset */
         case 4: cfg->widget_style = 3; break; /* Frosted Glass */
         case 6: cfg->widget_style = 4; break; /* Chamfered */
         default: cfg->widget_style = 0; break; /* Wireframe/Accent Bar → Default */
     }
+    ESP_LOGI(TAG, "Migrated config from v24 to v%d", APP_CONFIG_VERSION);
 }
 
 /**
@@ -1972,6 +2003,11 @@ static bool validate_config(app_config_t *cfg) {
         cfg->auto_rotate_pages = 0x0E;  // Default: all NINA instances
         fixed = true;
     }
+    /* Validate rotation order — reset to default if first entry is 0xFF (uninitialised) */
+    if (cfg->auto_rotate_order[0] == 0xFF) {
+        for (int i = 0; i < 7; i++) cfg->auto_rotate_order[i] = (uint8_t)i;
+        fixed = true;
+    }
     if (cfg->update_rate_s < 1 || cfg->update_rate_s > 10) {
         cfg->update_rate_s = 2;
         fixed = true;
@@ -2079,11 +2115,21 @@ void app_config_init(void) {
             nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(handle);
         }
-    } else if (version_check == 24 && stored_size >= sizeof(app_config_v24_t)) {
-        /* Version 24 blob — migrate to v25 (theme/widget reindex) */
-        app_config_v24_t old;
-        memcpy(&old, raw, sizeof(app_config_v24_t));
-        migrate_from_v24(&old, &s_config);
+    } else if (version_check == 26) {
+        /* v26 → v27: added auto_rotate_order at end */
+        migrate_from_v26(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    } else if (version_check == 25) {
+        /* v25 → v26: added spotify_overlay_visible at end */
+        migrate_from_v25(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    } else if (version_check == 24) {
+        /* Version 24 blob — migrate to v26 (theme/widget reindex + overlay_visible) */
+        migrate_from_v24(raw, stored_size, &s_config);
         validate_config(&s_config);
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);

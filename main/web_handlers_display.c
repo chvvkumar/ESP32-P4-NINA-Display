@@ -49,7 +49,8 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
     if (new_cfg->spotify_minimal_mode != old_cfg->spotify_minimal_mode ||
         new_cfg->spotify_show_progress_bar != old_cfg->spotify_show_progress_bar ||
         new_cfg->spotify_overlay_timeout_s != old_cfg->spotify_overlay_timeout_s ||
-        new_cfg->spotify_scroll_text != old_cfg->spotify_scroll_text) {
+        new_cfg->spotify_scroll_text != old_cfg->spotify_scroll_text ||
+        new_cfg->spotify_overlay_visible != old_cfg->spotify_overlay_visible) {
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
             nina_spotify_refresh_layout();
             bsp_display_unlock();

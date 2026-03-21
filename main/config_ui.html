@@ -314,29 +314,89 @@
     }
     .thresh-edit-row .thresh-dot:hover { transform: scale(1.08); }
 
-    /* === PAGE MODE SEGMENTED CONTROL === */
-    .pm-segment-wrap {
-      position: relative; display: flex; background: rgba(0,0,0,0.5);
-      border-radius: 12px; padding: 4px; border: 1px solid rgba(255, 255, 255, 0.08);
-      margin-bottom: 20px;
+    /* === PAGE NAVIGATION PILLS === */
+    .pn-pill-grid {
+      display: flex; flex-wrap: wrap; gap: 8px;
     }
-    .pm-slider {
-      position: absolute; top: 4px; bottom: 4px; width: calc(33.333% - 2.66px);
-      background: rgba(var(--accent-rgb), 0.15); border-radius: 8px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.2), inset 0 0 0 1px rgba(var(--accent-rgb), 0.3);
-      transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-      z-index: 1;
+    .pn-pill {
+      flex: 1 1 auto; min-width: 0; position: relative;
+      cursor: pointer; user-select: none;
+      display: flex; flex-direction: column; align-items: center;
     }
-    .pm-seg-btn {
-      flex: 1; text-align: center; padding: 10px; color: var(--text-muted);
-      font-size: 0.85rem; font-weight: 600; cursor: pointer; position: relative;
-      z-index: 2; transition: color 0.3s ease; border-radius: 8px;
+    .pn-pill input { position: absolute; opacity: 0; width: 0; height: 0; }
+    .pn-pill-visual {
+      display: flex; align-items: center; justify-content: center;
+      width: 100%; height: 34px; padding: 0 14px; border-radius: 17px;
+      font-size: 0.8rem; font-weight: 500; letter-spacing: 0.01em;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(0, 0, 0, 0.3); color: var(--text-muted);
+      transition: all 0.25s ease; white-space: nowrap;
     }
-    .pm-seg-btn.active { color: var(--accent); }
-    .pm-content-box {
-      background: rgba(255, 255, 255, 0.01); border: 1px solid rgba(255, 255, 255, 0.04);
-      border-radius: var(--radius-sm); padding: 16px;
+    /* Start page: single-select with pin badge */
+    .pn-pill.start-pill input:checked + .pn-pill-visual {
+      background: rgba(var(--accent-rgb), 0.13);
+      border-color: rgba(var(--accent-rgb), 0.45);
+      color: var(--accent);
+      box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.15), inset 0 0 8px rgba(var(--accent-rgb), 0.06);
     }
+    .pn-pill .pin-badge {
+      position: absolute; top: -6px; right: -6px; width: 18px; height: 18px;
+      border-radius: 50%; background: var(--accent);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px; color: #0a0a0b; font-weight: 800;
+      box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.45);
+      opacity: 0; transform: scale(0.4);
+      transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+      pointer-events: none;
+    }
+    .pn-pill.start-pill input:checked ~ .pin-badge { opacity: 1; transform: scale(1); }
+    .pn-pill:hover .pn-pill-visual { border-color: rgba(255, 255, 255, 0.15); }
+    .pn-pill.start-pill:hover input:checked + .pn-pill-visual {
+      border-color: rgba(var(--accent-rgb), 0.6);
+      box-shadow: 0 0 18px rgba(var(--accent-rgb), 0.2), inset 0 0 10px rgba(var(--accent-rgb), 0.08);
+    }
+    /* Rotation pills: multi-select */
+    .pn-pill.rotate-pill input:checked + .pn-pill-visual {
+      background: rgba(var(--accent-rgb), 0.13);
+      border-color: rgba(var(--accent-rgb), 0.4);
+      color: var(--accent);
+      box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.15), inset 0 0 8px rgba(var(--accent-rgb), 0.06);
+    }
+    .pn-pill.rotate-pill input:not(:checked) + .pn-pill-visual { opacity: 0.45; }
+    .pn-pill.rotate-pill:hover input:not(:checked) + .pn-pill-visual { opacity: 0.7; }
+    .pn-pill.rotate-pill:hover input:checked + .pn-pill-visual {
+      border-color: rgba(var(--accent-rgb), 0.55);
+      box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.22), inset 0 0 8px rgba(var(--accent-rgb), 0.08);
+    }
+    .pn-section-label {
+      font-size: 0.72rem; font-weight: 600; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 12px;
+    }
+    .pn-cycle-settings {
+      margin-top: 20px; display: flex; flex-direction: column; gap: 18px;
+      animation: pnFadeIn 0.3s ease;
+    }
+    @keyframes pnFadeIn {
+      from { opacity: 0; transform: translateY(-8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .pn-divider {
+      height: 1px; margin: 22px 0;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.06) 20%, rgba(255,255,255,0.06) 80%, transparent);
+    }
+    .pn-sub-divider { height: 1px; background: rgba(255,255,255,0.04); margin: 4px 0; }
+
+    /* Drag-to-reorder */
+    .pn-pill.dragging { opacity: 0.4; }
+    .pn-pill.drag-over { border-left: 2px solid var(--accent); margin-left: -2px; }
+    .pn-pill-grid.reorderable .pn-pill { cursor: grab; }
+    .pn-pill-grid.reorderable .pn-pill:active { cursor: grabbing; }
+    .pn-pill-grip {
+      display: flex; justify-content: center; width: 100%;
+      color: rgba(255,255,255,0.15); font-size: 0.55rem; line-height: 1;
+      pointer-events: none; transition: color 0.2s; margin-bottom: 2px; letter-spacing: 2px;
+    }
+    .pn-pill:hover .pn-pill-grip { color: rgba(255,255,255,0.35); }
 
     /* === FIRMWARE & OTA === */
     .fw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-bottom: 24px; }
@@ -377,12 +437,6 @@
     .row > * { flex: 1; }
     .flex-wrap-gap { display: flex; flex-wrap: wrap; gap: 12px; }
     .flex-col-gap { display: flex; flex-direction: column; gap: 12px; }
-    .arp-label {
-      display: flex; align-items: center; gap: 12px; font-size: 0.875rem;
-      cursor: pointer; padding: 8px 12px; border-radius: 8px; transition: background 0.2s;
-    }
-    .arp-label:hover { background: rgba(255, 255, 255, 0.03); }
-    .arp-cb { accent-color: var(--accent); width: 18px; height: 18px; }
     .color-swatch {
       width: 46px; height: 40px; padding: 0; border: 1px solid rgba(255, 255, 255, 0.1);
       background: none; border-radius: 10px; cursor: pointer;
@@ -541,29 +595,21 @@
 
       <div class="card">
         <div class="card-title">Page Navigation <span id="pm_summary" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span></div>
-        <div class="pm-segment-wrap">
-          <div class="pm-slider" id="pm_slider"></div>
-          <div class="pm-seg-btn active" data-mode="auto" onclick="setPageMode('auto')">Manual</div>
-          <div class="pm-seg-btn" data-mode="fixed" onclick="setPageMode('fixed')">Fixed</div>
-          <div class="pm-seg-btn" data-mode="rotate" onclick="setPageMode('rotate')">Cycle Pages</div>
-        </div>
-        <div id="pm_auto_details" class="pm-content-box" style="display:none">
-          <div style="font-size:0.8rem;color:var(--text-muted);text-align:center;">Starts on Summary page. Navigate manually via swipe or physical button.</div>
-        </div>
-        <div id="pm_fixed_details" class="pm-content-box" style="display:none">
-          <div class="field" style="margin-bottom:0">
-            <label class="field-label">Pinned Page</label>
-            <select class="input" id="active_page" onchange="setPage(this.value)">
-              <option value="0">AllSky</option>
-              <option value="1">Summary</option>
-              <option value="2">NINA 1</option>
-              <option value="3">NINA 2</option>
-              <option value="4">NINA 3</option>
-              <option value="6">System Info</option>
-            </select>
+
+        <div class="pn-section-label">Start Page</div>
+        <div class="pn-pill-grid" id="start-page-pills"></div>
+
+        <div class="pn-divider"></div>
+
+        <div class="toggle-row">
+          <div>
+            <span class="toggle-label">Auto Cycle</span>
+            <div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">Rotate through pages automatically</div>
           </div>
+          <label class="toggle"><input type="checkbox" id="auto_cycle_toggle" onchange="toggleAutoCycle();checkDirty()"><span class="toggle-track"></span></label>
         </div>
-        <div id="pm_rotate_details" class="pm-content-box" style="display:none">
+
+        <div class="pn-cycle-settings" id="pn_cycle_settings" style="display:none">
           <div class="row stack-mobile">
             <div class="field">
               <label class="field-label">Interval (seconds)</label>
@@ -580,12 +626,14 @@
             </div>
           </div>
           <div class="toggle-row">
-            <span class="toggle-label">Skip disconnected nodes</span>
+            <span class="toggle-label" style="font-size:0.82rem;color:var(--text-muted)">Skip disconnected nodes</span>
             <label class="toggle"><input type="checkbox" id="auto_rotate_skip"><span class="toggle-track"></span></label>
           </div>
-          <div style="margin-top:16px">
-            <label class="field-label">Pages in rotation</label>
-            <div class="flex-col-gap" id="arp-container" style="margin-top:8px"></div>
+          <div class="pn-sub-divider"></div>
+          <div>
+            <div class="pn-section-label">Pages in Rotation</div>
+            <div style="font-size:0.72rem;color:var(--text-muted);margin:-8px 0 10px;opacity:0.7">Drag to reorder</div>
+            <div class="pn-pill-grid reorderable" id="arp-container"></div>
           </div>
         </div>
       </div>
@@ -961,6 +1009,11 @@
             <label class="toggle"><input type="checkbox" id="spotify_minimal_mode"><span class="toggle-track"></span></label>
           </div>
           <div class="toggle-row">
+            <span class="toggle-label">Show Overlay</span>
+            <label class="toggle"><input type="checkbox" id="spotify_overlay_visible"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Force the minimal overlay visible (same as tapping album art)</div>
+          <div class="toggle-row">
             <span class="toggle-label">Scroll Long Text</span>
             <label class="toggle"><input type="checkbox" id="spotify_scroll_text" checked><span class="toggle-track"></span></label>
           </div>
@@ -1140,25 +1193,136 @@
       }
     })();
 
-    /* === Rotation Page Checkbox Generation === */
+    /* === Rotation Page Pill Generation === */
     (function(){
       var items=[
         ['arp_summary','Summary'],
-        ['arp_nina1','<span id="arp_lbl1">NINA 1</span>'],
-        ['arp_nina2','<span id="arp_lbl2">NINA 2</span>'],
-        ['arp_nina3','<span id="arp_lbl3">NINA 3</span>'],
+        ['arp_nina1','NINA 1'],
+        ['arp_nina2','NINA 2'],
+        ['arp_nina3','NINA 3'],
         ['arp_sysinfo','System Info'],
         ['arp_allsky','AllSky'],
         ['arp_spotify','Spotify']
       ];
       var c=$('arp-container');
       if(!c) return;
-      items.forEach(function(it){
+      items.forEach(function(it,idx){
         c.insertAdjacentHTML('beforeend',
-          '<label class="arp-label"><input type="checkbox" id="'+it[0]+'" class="arp-cb"> '+it[1]+'</label>'
+          '<label class="pn-pill rotate-pill" draggable="true" data-arp-idx="'+idx+'">'+
+            '<span class="pn-pill-grip">\u2022\u2022\u2022</span>'+
+            '<input type="checkbox" id="'+it[0]+'" onchange="checkDirty()">'+
+            '<span class="pn-pill-visual">'+it[1]+'</span>'+
+          '</label>'
         );
       });
+      initPillDragReorder(c);
     })();
+
+    /* === Pill Drag-to-Reorder === */
+    function initPillDragReorder(container){
+      var dragSrc=null;
+
+      container.addEventListener('dragstart',function(e){
+        var pill=e.target.closest('.pn-pill');
+        if(!pill) return;
+        dragSrc=pill;
+        pill.classList.add('dragging');
+        e.dataTransfer.effectAllowed='move';
+        e.dataTransfer.setData('text/plain','');
+      });
+
+      container.addEventListener('dragover',function(e){
+        e.preventDefault();
+        e.dataTransfer.dropEffect='move';
+        var pill=e.target.closest('.pn-pill');
+        container.querySelectorAll('.pn-pill').forEach(function(p){p.classList.remove('drag-over');});
+        if(pill&&pill!==dragSrc) pill.classList.add('drag-over');
+      });
+
+      container.addEventListener('dragleave',function(e){
+        var pill=e.target.closest('.pn-pill');
+        if(pill) pill.classList.remove('drag-over');
+      });
+
+      container.addEventListener('drop',function(e){
+        e.preventDefault();
+        var target=e.target.closest('.pn-pill');
+        container.querySelectorAll('.pn-pill').forEach(function(p){p.classList.remove('drag-over');});
+        if(!target||!dragSrc||target===dragSrc) return;
+
+        /* Determine insertion position based on mouse position relative to target center */
+        var rect=target.getBoundingClientRect();
+        var midX=rect.left+rect.width/2;
+        if(e.clientX<midX){
+          container.insertBefore(dragSrc,target);
+        } else {
+          container.insertBefore(dragSrc,target.nextSibling);
+        }
+        checkDirty();
+      });
+
+      container.addEventListener('dragend',function(e){
+        var pill=e.target.closest('.pn-pill');
+        if(pill) pill.classList.remove('dragging');
+        container.querySelectorAll('.pn-pill').forEach(function(p){p.classList.remove('drag-over');});
+        dragSrc=null;
+      });
+
+      /* Touch support for mobile */
+      var touchSrc=null, touchClone=null, touchStartY=0, touchStartX=0;
+
+      container.addEventListener('touchstart',function(e){
+        var pill=e.target.closest('.pn-pill');
+        if(!pill) return;
+        touchSrc=pill;
+        var touch=e.touches[0];
+        touchStartX=touch.clientX;
+        touchStartY=touch.clientY;
+      },{passive:true});
+
+      container.addEventListener('touchmove',function(e){
+        if(!touchSrc) return;
+        var touch=e.touches[0];
+        var dx=Math.abs(touch.clientX-touchStartX);
+        var dy=Math.abs(touch.clientY-touchStartY);
+        if(dx<10&&dy<10) return;
+        e.preventDefault();
+        touchSrc.classList.add('dragging');
+
+        /* Find the pill under the touch point */
+        container.querySelectorAll('.pn-pill').forEach(function(p){p.classList.remove('drag-over');});
+        var elem=document.elementFromPoint(touch.clientX,touch.clientY);
+        if(elem){
+          var target=elem.closest('.pn-pill');
+          if(target&&target!==touchSrc) target.classList.add('drag-over');
+        }
+      },{passive:false});
+
+      container.addEventListener('touchend',function(e){
+        if(!touchSrc) return;
+        touchSrc.classList.remove('dragging');
+        container.querySelectorAll('.pn-pill').forEach(function(p){p.classList.remove('drag-over');});
+
+        if(e.changedTouches.length>0){
+          var touch=e.changedTouches[0];
+          var elem=document.elementFromPoint(touch.clientX,touch.clientY);
+          if(elem){
+            var target=elem.closest('.pn-pill');
+            if(target&&target!==touchSrc){
+              var rect=target.getBoundingClientRect();
+              var midX=rect.left+rect.width/2;
+              if(touch.clientX<midX){
+                container.insertBefore(touchSrc,target);
+              } else {
+                container.insertBefore(touchSrc,target.nextSibling);
+              }
+              checkDirty();
+            }
+          }
+        }
+        touchSrc=null;
+      });
+    }
 
     /* === Tab Accent Colors === */
     const tabAccents={
@@ -1220,32 +1384,74 @@
 
     function setPage(v){postJson('/api/page',{page:parseInt(v)})}
 
-    /* === Page Mode (Segmented Control) === */
-    let _currentPageMode='auto';
+    /* === Page Navigation (Start Page + Auto Cycle) === */
+    function buildStartPagePills(){
+      var c=$('start-page-pills');
+      if(!c) return;
+      c.innerHTML='';
+      var urls=[$('url1').value.trim(),$('url2').value.trim(),$('url3').value.trim()];
+      var enabled=[$('instance_enabled_0').checked,$('instance_enabled_1').checked,$('instance_enabled_2').checked];
+      var allskyOn=$('allsky_enabled')?$('allsky_enabled').checked:false;
+      var spotifyOn=$('spotify_enabled')?$('spotify_enabled').checked:false;
 
-    function setPageMode(mode){
-      _currentPageMode=mode;
-      $$('.pm-seg-btn').forEach(btn=>btn.classList.remove('active'));
-      var activeBtn=document.querySelector('.pm-seg-btn[data-mode="'+mode+'"]');
-      if(activeBtn) activeBtn.classList.add('active');
-      var slider=$('pm_slider');
-      if(slider){
-        if(mode==='auto')   slider.style.transform='translateX(0%)';
-        if(mode==='fixed')  slider.style.transform='translateX(100%)';
-        if(mode==='rotate') slider.style.transform='translateX(200%)';
+      var pages=[];
+      pages.push({value:'2', label:'Summary'});
+      if(allskyOn) pages.push({value:'0', label:'AllSky'});
+      if(spotifyOn) pages.push({value:'1', label:'Spotify'});
+      var pageIdx=3;
+      for(var i=0;i<3;i++){
+        if(urls[i].length>0&&enabled[i]){
+          pages.push({value:''+pageIdx, label:urls[i]||('NINA '+(i+1))});
+          pageIdx++;
+        }
       }
-      $('pm_auto_details').style.display   =(mode==='auto')?'block':'none';
-      $('pm_fixed_details').style.display  =(mode==='fixed')?'block':'none';
-      $('pm_rotate_details').style.display =(mode==='rotate')?'block':'none';
-      updatePageModeSummary();
-      checkDirty();
+      pages.push({value:''+(pageIdx+1), label:'System Info'});
+
+      pages.forEach(function(p){
+        c.insertAdjacentHTML('beforeend',
+          '<label class="pn-pill start-pill">'+
+            '<input type="radio" name="start_page" value="'+p.value+'" onchange="onStartPageChange();checkDirty()">'+
+            '<span class="pn-pill-visual">'+p.label+'</span>'+
+            '<span class="pin-badge">&#9733;</span>'+
+          '</label>'
+        );
+      });
     }
 
-    function getPageMode(){ return _currentPageMode; }
+    function getStartPageValue(){
+      var checked=document.querySelector('input[name="start_page"]:checked');
+      return checked?parseInt(checked.value):-1;
+    }
 
-    function updatePageModeSummary(){
-      var labels={auto:'Manual',fixed:'Fixed',rotate:'Cycle Pages'};
-      $('pm_summary').textContent='\u2014 '+(labels[_currentPageMode]||'Manual');
+    function setStartPageValue(val){
+      var radios=document.querySelectorAll('input[name="start_page"]');
+      var found=false;
+      radios.forEach(function(r){ if(parseInt(r.value)===val){r.checked=true;found=true;} });
+      if(!found&&radios.length>0) radios[0].checked=true;
+    }
+
+    function onStartPageChange(){
+      var v=getStartPageValue();
+      postJson('/api/page',{page:v});
+      updatePageNavSummary();
+    }
+
+    function toggleAutoCycle(){
+      var on=$('auto_cycle_toggle').checked;
+      $('pn_cycle_settings').style.display=on?'flex':'none';
+      updatePageNavSummary();
+    }
+
+    function updatePageNavSummary(){
+      var span=$('pm_summary');
+      if(!span) return;
+      var cycleOn=$('auto_cycle_toggle').checked;
+      if(cycleOn) span.textContent='\u2014 Cycling';
+      else {
+        var checked=document.querySelector('input[name="start_page"]:checked');
+        var label=checked?checked.nextElementSibling.textContent:'';
+        span.textContent='\u2014 '+(label||'Summary');
+      }
     }
 
     /* === Filter Colors === */
@@ -1285,8 +1491,11 @@
         if(hostnameSpan) hostnameSpan.textContent=urls[i]?urls[i]:'';
         var instLbl=$('inst_lbl_'+i);
         if(instLbl) instLbl.textContent=label;
-        var arpLbl=$('arp_lbl'+(i+1));
-        if(arpLbl) arpLbl.textContent=urls[i]||('NINA '+(i+1));
+        var arpCb=$('arp_nina'+(i+1));
+        if(arpCb){
+          var pillVisual=arpCb.nextElementSibling;
+          if(pillVisual) pillVisual.textContent=urls[i]||('NINA '+(i+1));
+        }
       }
       updateInstanceStates();
       updatePageSelectOptions();
@@ -1301,32 +1510,15 @@
           else card.classList.add('node-card-disabled');
         }
         var arpCb=$('arp_nina'+(i+1));
-        if(arpCb&&arpCb.parentElement) arpCb.parentElement.style.opacity=en?'':'0.35';
+        if(arpCb&&arpCb.parentElement) arpCb.parentElement.style.opacity=en?'':'0.45';
       }
     }
 
     function updatePageSelectOptions(){
-      var sel=$('active_page');
-      if(!sel) return;
-      var urls=[$('url1').value.trim(),$('url2').value.trim(),$('url3').value.trim()];
-      var enabled=[$('instance_enabled_0').checked,$('instance_enabled_1').checked,$('instance_enabled_2').checked];
-      var prev=sel.value;
-      sel.innerHTML='';
-      var allskyOn=$('allsky_enabled')?$('allsky_enabled').checked:false;
-      if(allskyOn) sel.add(new Option('AllSky','0'));
-      var spotifyOn=$('spotify_enabled')?$('spotify_enabled').checked:false;
-      if(spotifyOn) sel.add(new Option('Spotify','1'));
-      sel.add(new Option('Summary','2'));
-      var pageIdx=3;
-      for(var i=0;i<3;i++){
-        if(urls[i].length>0&&enabled[i]){
-          sel.add(new Option(urls[i]||('NINA '+(i+1)),''+pageIdx));
-          pageIdx++;
-        }
-      }
-      sel.add(new Option('System Info',''+(pageIdx+1)));
-      if([...sel.options].some(o=>o.value===prev)) sel.value=prev;
-      else sel.value='1';
+      var prev=getStartPageValue();
+      buildStartPagePills();
+      setStartPageValue(prev);
+      updatePageNavSummary();
     }
 
     /* === Threshold Helpers === */
@@ -1392,6 +1584,32 @@
       arpIds.forEach((id,i)=>{$(id).checked=!!(mask&arpBits[i]);});
     }
 
+    function getRotateOrder(){
+      var pills=$('arp-container').querySelectorAll('.pn-pill[data-arp-idx]');
+      var order=[];
+      pills.forEach(function(p){ order.push(parseInt(p.getAttribute('data-arp-idx'))); });
+      return order;
+    }
+
+    function setRotateOrder(orderArr){
+      if(!orderArr||!orderArr.length) return;
+      var container=$('arp-container');
+      var pills=Array.from(container.querySelectorAll('.pn-pill[data-arp-idx]'));
+      /* Sort pills by order array */
+      var pillMap={};
+      pills.forEach(function(p){ pillMap[p.getAttribute('data-arp-idx')]=p; });
+      orderArr.forEach(function(idx){
+        var p=pillMap[idx];
+        if(p) container.appendChild(p);
+      });
+      /* Append any pills not mentioned in orderArr */
+      pills.forEach(function(p){
+        if(orderArr.indexOf(parseInt(p.getAttribute('data-arp-idx')))===-1){
+          container.appendChild(p);
+        }
+      });
+    }
+
     /* === Config Data Assembly === */
     function getConfigData(){
       var host1=$('url1').value.trim();
@@ -1425,12 +1643,13 @@
         mqtt_username:$('mqtt_user').value,
         mqtt_password:$('mqtt_pass').value,
         mqtt_topic_prefix:$('mqtt_prefix').value.trim(),
-        active_page_override:getPageMode()==='fixed'?parseInt($('active_page').value):-1,
-        auto_rotate_enabled:getPageMode()==='rotate',
+        active_page_override:getStartPageValue(),
+        auto_rotate_enabled:!!$('auto_cycle_toggle').checked,
         auto_rotate_interval_s:parseInt($('auto_rotate_interval').value)||30,
         auto_rotate_effect:parseInt($('auto_rotate_effect').value),
         auto_rotate_skip_disconnected:!!$('auto_rotate_skip').checked,
         auto_rotate_pages:getRotatePages(),
+        auto_rotate_order:getRotateOrder(),
         update_rate_s:parseInt($('update_rate').value)||2,
         graph_update_interval_s:parseInt($('graph_interval').value)||5,
         connection_timeout_s:parseInt($('connection_timeout').value)||6,
@@ -1461,6 +1680,7 @@
         spotify_poll_interval_ms:parseInt($('spotifyPollInterval').value)||3000,
         spotify_show_progress_bar:!!$('spotify_show_progress_bar').checked,
         spotify_minimal_mode:!!$('spotify_minimal_mode').checked,
+        spotify_overlay_visible:!!$('spotify_overlay_visible').checked,
         spotify_scroll_text:!!$('spotify_scroll_text').checked,
         spotify_overlay_timeout_s:parseInt($('spotifyOverlayTimeout').value)||0
       };
@@ -1560,14 +1780,14 @@
       $('mqtt_prefix').value=data.mqtt_topic_prefix||'';
       $('mqtt_enabled').checked=!!data.mqtt_enabled;
 
-      var pageMode='auto';
-      if(data.auto_rotate_enabled) pageMode='rotate';
-      else if(data.active_page_override!=null&&data.active_page_override>=0) pageMode='fixed';
+      $('auto_cycle_toggle').checked=!!data.auto_rotate_enabled;
+      toggleAutoCycle();
 
       $('auto_rotate_interval').value=data.auto_rotate_interval_s||30;
       $('auto_rotate_effect').value=data.auto_rotate_effect||0;
       $('auto_rotate_skip').checked=!!data.auto_rotate_skip_disconnected;
       setRotatePages(data.auto_rotate_pages!=null?data.auto_rotate_pages:0x1F);
+      if(data.auto_rotate_order) setRotateOrder(data.auto_rotate_order);
 
       updateNodeLabels();
 
@@ -1591,6 +1811,7 @@
       if($('spotifyPollInterval')) $('spotifyPollInterval').value=data.spotify_poll_interval_ms||3000;
       if($('spotify_show_progress_bar')) $('spotify_show_progress_bar').checked=data.spotify_show_progress_bar!=null?!!data.spotify_show_progress_bar:true;
       if($('spotify_minimal_mode')) $('spotify_minimal_mode').checked=!!data.spotify_minimal_mode;
+      if($('spotify_overlay_visible')) $('spotify_overlay_visible').checked=!!data.spotify_overlay_visible;
       if($('spotify_scroll_text')) $('spotify_scroll_text').checked=data.spotify_scroll_text!=null?!!data.spotify_scroll_text:true;
       if($('spotifyOverlayTimeout')) $('spotifyOverlayTimeout').value=data.spotify_overlay_timeout_s!=null?data.spotify_overlay_timeout_s:5;
       updateSpotifyEnabledUI();
@@ -1604,9 +1825,9 @@
       }
 
       // Update page selector AFTER all enable checkboxes are populated
-      updatePageSelectOptions();
-      $('active_page').value=(data.active_page_override!=null&&data.active_page_override>=0)?''+data.active_page_override:'1';
-      setPageMode(pageMode);
+      buildStartPagePills();
+      setStartPageValue(data.active_page_override!=null&&data.active_page_override>=0?data.active_page_override:2);
+      updatePageNavSummary();
 
       loadedConfig=JSON.stringify(getConfigData());
       _populating=false;
@@ -1996,6 +2217,7 @@
         if(row) row.style.display=on?'':'none';
       }
       if(on) updateSpotifyStatus();
+      updatePageSelectOptions();
     }
 
     /* Spotify OAuth callback is now handled via popup polling in spotifyLogin() —
