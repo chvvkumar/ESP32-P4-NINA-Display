@@ -27,7 +27,7 @@ static const char *TAG = "toast";
 /* ── Configuration ──────────────────────────────────────────────────── */
 #define PENDING_QUEUE_SIZE  16
 #define TICK_INTERVAL_MS    200
-#define TOAST_POOL_SIZE     3
+#define TOAST_POOL_SIZE     4
 #define BACKLOG_SIZE        16
 
 /* Toast bar dimensions */
@@ -44,20 +44,52 @@ static const char *TAG = "toast";
 #define ANIM_EXIT_MS        200
 #define ANIM_SHIFT_MS       200
 
-/* Severity background colors (dark, muted) */
+/* Severity background colors (Tailwind -950 shades, 30% opacity for glass effect) */
 static const uint32_t sev_bg_colors[] = {
-    [TOAST_INFO]    = 0x0C3060,   /* Dark blue */
-    [TOAST_SUCCESS] = 0x0D3320,   /* Dark forest green */
-    [TOAST_WARNING] = 0x3D2E00,   /* Dark amber */
-    [TOAST_ERROR]   = 0x7F0000,   /* Dark red */
+    [TOAST_INFO]    = 0x082f49,   /* sky-950 */
+    [TOAST_SUCCESS] = 0x022c22,   /* emerald-950 */
+    [TOAST_WARNING] = 0x451a03,   /* amber-950 */
+    [TOAST_ERROR]   = 0x4c0519,   /* rose-950 */
 };
 
-/* Severity dot colors (bright accent) */
+/* Severity border colors (Tailwind -900 shades, 50% opacity) */
+static const uint32_t sev_border_colors[] = {
+    [TOAST_INFO]    = 0x0c4a6e,   /* sky-900 */
+    [TOAST_SUCCESS] = 0x064e3b,   /* emerald-900 */
+    [TOAST_WARNING] = 0x78350f,   /* amber-900 */
+    [TOAST_ERROR]   = 0x881337,   /* rose-900 */
+};
+
+/* Severity dot colors (Tailwind -500 shades) */
 static const uint32_t sev_dot_colors[] = {
-    [TOAST_INFO]    = 0x42A5F5,   /* Blue */
-    [TOAST_SUCCESS] = 0x4CAF50,   /* Green */
-    [TOAST_WARNING] = 0xFFA726,   /* Orange */
-    [TOAST_ERROR]   = 0xF44336,   /* Red */
+    [TOAST_INFO]    = 0x0ea5e9,   /* sky-500 */
+    [TOAST_SUCCESS] = 0x10b981,   /* emerald-500 */
+    [TOAST_WARNING] = 0xf59e0b,   /* amber-500 */
+    [TOAST_ERROR]   = 0xf43f5e,   /* rose-500 */
+};
+
+/* Severity age/timestamp colors (Tailwind -200 shades, rendered at 40% opa) */
+static const uint32_t sev_age_colors[] = {
+    [TOAST_INFO]    = 0xbae6fd,   /* sky-200 */
+    [TOAST_SUCCESS] = 0xa7f3d0,   /* emerald-200 */
+    [TOAST_WARNING] = 0xfde68a,   /* amber-200 */
+    [TOAST_ERROR]   = 0xfecdd3,   /* rose-200 */
+};
+
+/* Severity hostname colors (midpoint between -200/60 and zinc-100) */
+static const uint32_t sev_hostname_colors[] = {
+    [TOAST_INFO]    = 0xB2BFC7,   /* sky mid */
+    [TOAST_SUCCESS] = 0xACC3B9,   /* emerald mid */
+    [TOAST_WARNING] = 0xC6BFA4,   /* amber mid */
+    [TOAST_ERROR]   = 0xC6B7BA,   /* rose mid */
+};
+
+/* Severity accent colors for status keywords (Tailwind -400 shades) */
+static const uint32_t sev_accent_colors[] = {
+    [TOAST_INFO]    = 0x38bdf8,   /* sky-400 */
+    [TOAST_SUCCESS] = 0x34d399,   /* emerald-400 */
+    [TOAST_WARNING] = 0xfbbf24,   /* amber-400 */
+    [TOAST_ERROR]   = 0xfb7185,   /* rose-400 */
 };
 
 /* Red Night severity backgrounds — different red brightness levels */
@@ -66,6 +98,14 @@ static const uint32_t sev_bg_red[] = {
     [TOAST_SUCCESS] = 0x450a0a,
     [TOAST_WARNING] = 0x5c1010,
     [TOAST_ERROR]   = 0x7F0000,
+};
+
+/* Red Night severity borders */
+static const uint32_t sev_border_red[] = {
+    [TOAST_INFO]    = 0x4a0000,
+    [TOAST_SUCCESS] = 0x5c1010,
+    [TOAST_WARNING] = 0x7a1a1a,
+    [TOAST_ERROR]   = 0x991b1b,
 };
 
 /* Red Night severity dots — brighter red accents */
@@ -198,25 +238,111 @@ static bool backlog_pop(toast_severity_t *sev, char *msg, size_t msg_sz) {
 static void apply_colors(toast_state_t *ts) {
     bool red_night = theme_is_red_night(current_theme);
     toast_severity_t sev = ts->sev;
+
+    /* Background: -950 shade at 30% opacity for glassmorphic effect */
     lv_obj_set_style_bg_color(ts->bar,
         lv_color_hex(red_night ? sev_bg_red[sev] : sev_bg_colors[sev]), 0);
+    lv_obj_set_style_bg_opa(ts->bar, red_night ? LV_OPA_COVER : 77, 0);
+
+    /* Border: -900 shade at 50% opacity */
+    lv_obj_set_style_border_color(ts->bar,
+        lv_color_hex(red_night ? sev_border_red[sev] : sev_border_colors[sev]), 0);
+    lv_obj_set_style_border_opa(ts->bar, red_night ? LV_OPA_COVER : 128, 0); /* 50% */
+
+    /* Dot: -500 shade with glow */
     lv_obj_set_style_bg_color(ts->dot,
         lv_color_hex(red_night ? sev_dot_red[sev] : sev_dot_colors[sev]), 0);
+    lv_obj_set_style_shadow_color(ts->dot,
+        lv_color_hex(red_night ? sev_dot_red[sev] : sev_dot_colors[sev]), 0);
+    lv_obj_set_style_shadow_width(ts->dot, red_night ? 0 : 12, 0);
+    lv_obj_set_style_shadow_spread(ts->dot, red_night ? 0 : 2, 0);
+    lv_obj_set_style_shadow_opa(ts->dot, LV_OPA_60, 0);
+
+    /* Message text: zinc-100 (#f4f4f5) — bright neutral white */
     lv_obj_set_style_text_color(ts->lbl_msg,
-        lv_color_hex(red_night ? 0xcc0000 : 0xFFFFFF), 0);
+        lv_color_hex(red_night ? 0xcc0000 : 0xf4f4f5), 0);
+
+    /* Age/countdown: -200 shade at 40% opacity */
     lv_obj_set_style_text_color(ts->lbl_age,
-        lv_color_hex(red_night ? 0x991b1b : 0xBBBBBB), 0);
+        lv_color_hex(red_night ? 0x991b1b : sev_age_colors[sev]), 0);
+    lv_obj_set_style_text_opa(ts->lbl_age, red_night ? LV_OPA_COVER : 102, 0); /* 40% = 102/255 */
 }
 
-/* ── Update displayed message (includes dedup count if > 1) ─────────── */
+/* ── Status keywords for recolor accent (longest first for greedy match) ── */
+static const char *s_status_keywords[] = {
+    "unexpectedly disconnected",
+    "disconnected", "Disconnected",
+    "connected", "Connected",
+    "devices connected",
+    "started", "Started",
+    "stopped", "Stopped",
+    "failed", "Failed",
+    "complete", "Complete",
+    "UNSAFE", "SAFE",
+    "timeout", "Timeout",
+    NULL
+};
+
+/* ── Update displayed message with recolor tags ─────────────────────── */
 static void update_label(toast_state_t *ts) {
-    if (ts->dedup_count > 1) {
-        char buf[144];
-        snprintf(buf, sizeof(buf), "%s (x%d)", ts->message, ts->dedup_count);
-        lv_label_set_text(ts->lbl_msg, buf);
-    } else {
-        lv_label_set_text(ts->lbl_msg, ts->message);
+    bool red_night = theme_is_red_night(current_theme);
+    toast_severity_t sev = ts->sev;
+    uint32_t host_clr = red_night ? 0x991b1b : sev_hostname_colors[sev];
+    uint32_t accent_clr = red_night ? 0xcc0000 : sev_accent_colors[sev];
+
+    const char *msg = ts->message;
+    char buf[256];
+    int pos = 0;
+
+    /* 1. Find hostname prefix (before first ':') */
+    const char *colon = strchr(msg, ':');
+    const char *rest = msg;
+
+    if (colon && colon > msg) {
+        /* Hostname in muted severity color */
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "#%06x %.*s:#  ",
+                        (unsigned)host_clr, (int)(colon - msg), msg);
+        rest = colon + 1;
+        while (*rest == ' ') rest++;
     }
+
+    /* 2. Find status keyword in remaining text */
+    const char *kw_start = NULL;
+    const char *kw = NULL;
+    for (int i = 0; s_status_keywords[i]; i++) {
+        const char *found = strstr(rest, s_status_keywords[i]);
+        if (found) {
+            kw_start = found;
+            kw = s_status_keywords[i];
+            break;
+        }
+    }
+
+    if (kw_start) {
+        /* Text before keyword (equipment name) — stays default label color (zinc-100) */
+        if (kw_start > rest) {
+            pos += snprintf(buf + pos, sizeof(buf) - pos, "%.*s",
+                            (int)(kw_start - rest), rest);
+        }
+        /* Status keyword in accent color */
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "#%06x %s#",
+                        (unsigned)accent_clr, kw);
+        /* Any text after keyword */
+        const char *after = kw_start + strlen(kw);
+        if (*after) {
+            pos += snprintf(buf + pos, sizeof(buf) - pos, "%s", after);
+        }
+    } else {
+        /* No keyword found — output rest as-is in default color */
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "%s", rest);
+    }
+
+    /* 3. Append dedup count */
+    if (ts->dedup_count > 1) {
+        snprintf(buf + pos, sizeof(buf) - pos, " (x%d)", ts->dedup_count);
+    }
+
+    lv_label_set_text(ts->lbl_msg, buf);
 }
 
 /* ── Show a toast in a specific pool slot (LVGL context) ────────────── */
@@ -487,9 +613,12 @@ static void create_bar(int idx) {
     lv_obj_set_height(bar, TOAST_BAR_HEIGHT);
     lv_obj_set_align(bar, LV_ALIGN_BOTTOM_MID);
     lv_obj_set_style_translate_y(bar, TOAST_BOTTOM_Y, 0);
-    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(bar, lv_color_hex(0x1B5E20), 0);
+    lv_obj_set_style_bg_opa(bar, 77, 0);  /* 30% opacity glassmorphic */
+    lv_obj_set_style_bg_color(bar, lv_color_hex(0x022c22), 0);
     lv_obj_set_style_radius(bar, TOAST_RADIUS, 0);
+    lv_obj_set_style_border_width(bar, 1, 0);
+    lv_obj_set_style_border_color(bar, lv_color_hex(0x064e3b), 0);
+    lv_obj_set_style_border_opa(bar, 128, 0);  /* 50% opacity */
     lv_obj_add_flag(bar, LV_OBJ_FLAG_FLOATING);
     lv_obj_add_flag(bar, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(bar, LV_OBJ_FLAG_CLICKABLE);
@@ -518,10 +647,11 @@ static void create_bar(int idx) {
     lv_obj_clear_flag(dot, LV_OBJ_FLAG_CLICKABLE);
     ts->dot = dot;
 
-    /* Message label (grows to fill available space) */
+    /* Message label (grows to fill available space, recolor enabled) */
     lv_obj_t *lbl_msg = lv_label_create(bar);
     lv_obj_set_style_text_font(lbl_msg, &lv_font_montserrat_28, 0);
-    lv_obj_set_style_text_color(lbl_msg, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_color(lbl_msg, lv_color_hex(0xf4f4f5), 0); /* zinc-100 default */
+    lv_label_set_recolor(lbl_msg, true);
     lv_label_set_text(lbl_msg, "");
     lv_label_set_long_mode(lbl_msg, LV_LABEL_LONG_DOT);
     lv_obj_set_flex_grow(lbl_msg, 1);
@@ -614,6 +744,7 @@ void nina_toast_apply_theme(void) {
     for (int i = 0; i < TOAST_POOL_SIZE; i++) {
         if (s_pool[i].active && s_pool[i].bar) {
             apply_colors(&s_pool[i]);
+            update_label(&s_pool[i]); /* Re-render recolor tags for new theme */
         }
     }
 }
