@@ -239,10 +239,10 @@ static void apply_colors(toast_state_t *ts) {
     bool red_night = theme_is_red_night(current_theme);
     toast_severity_t sev = ts->sev;
 
-    /* Background: -950 shade at 30% opacity for glassmorphic effect */
+    /* Background: -950 shade, fully opaque */
     lv_obj_set_style_bg_color(ts->bar,
         lv_color_hex(red_night ? sev_bg_red[sev] : sev_bg_colors[sev]), 0);
-    lv_obj_set_style_bg_opa(ts->bar, red_night ? LV_OPA_COVER : 77, 0);
+    lv_obj_set_style_bg_opa(ts->bar, LV_OPA_COVER, 0);
 
     /* Border: -900 shade at 50% opacity */
     lv_obj_set_style_border_color(ts->bar,
@@ -613,7 +613,7 @@ static void create_bar(int idx) {
     lv_obj_set_height(bar, TOAST_BAR_HEIGHT);
     lv_obj_set_align(bar, LV_ALIGN_BOTTOM_MID);
     lv_obj_set_style_translate_y(bar, TOAST_BOTTOM_Y, 0);
-    lv_obj_set_style_bg_opa(bar, 77, 0);  /* 30% opacity glassmorphic */
+    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(bar, lv_color_hex(0x022c22), 0);
     lv_obj_set_style_radius(bar, TOAST_RADIUS, 0);
     lv_obj_set_style_border_width(bar, 1, 0);
