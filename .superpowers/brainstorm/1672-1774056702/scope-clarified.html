@@ -1,0 +1,48 @@
+<h2>Page Navigation Section — Web UI Config</h2>
+<p class="subtitle">Got it — we're redesigning the Page Navigation card on the web config page. Current design has a 3-way segmented control (Manual / Fixed / Cycle Pages) with conditional sub-panels. What's your main pain point?</p>
+
+<div class="mockup">
+  <div class="mockup-header">Current Design</div>
+  <div class="mockup-body" style="background: #1a1a2e; padding: 20px; border-radius: 8px;">
+    <div style="display:flex; align-items:center; margin-bottom:16px;">
+      <span style="color:#00b894; font-size:0.75rem; font-weight:700; letter-spacing:1px; text-transform:uppercase;">PAGE NAVIGATION</span>
+      <span style="color:#666; font-size:0.7rem; margin-left:auto;">— Fixed</span>
+      <span style="color:#666; margin-left:8px;">▾</span>
+    </div>
+    <div style="display:flex; background:rgba(0,0,0,0.5); border-radius:12px; padding:4px; border:1px solid rgba(255,255,255,0.08); margin-bottom:16px;">
+      <div style="flex:1; text-align:center; padding:10px; color:#888; font-size:0.85rem; font-weight:600; border-radius:8px;">Manual</div>
+      <div style="flex:1; text-align:center; padding:10px; color:#00b894; font-size:0.85rem; font-weight:600; border-radius:8px; background:rgba(0,184,148,0.15); box-shadow: inset 0 0 0 1px rgba(0,184,148,0.3);">Fixed</div>
+      <div style="flex:1; text-align:center; padding:10px; color:#888; font-size:0.85rem; font-weight:600; border-radius:8px;">Cycle Pages</div>
+    </div>
+    <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.04); border-radius:12px; padding:16px;">
+      <div style="font-size:0.75rem; color:#888; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">Pinned Page</div>
+      <div style="background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:10px 12px; color:#ccc; font-size:0.85rem;">Spotify ▾</div>
+    </div>
+  </div>
+</div>
+
+<h3 style="margin-top:32px;">What would you most like to improve?</h3>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Too Many Clicks / Too Hidden</h3>
+      <p>The 3-mode system (Manual/Fixed/Cycle) requires understanding what each mode does. Settings are hidden behind mode selection — you can't see everything at once.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Visual Design — Looks Generic</h3>
+      <p>The segmented control and dropdowns feel utilitarian. Want something more polished and visually distinctive that matches the dashboard's premium feel.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Both — Simplify AND Make It Beautiful</h3>
+      <p>Reduce cognitive load (fewer modes, more intuitive controls) AND level up the visual design to something slick and distinctive.</p>
+    </div>
+  </div>
+</div>

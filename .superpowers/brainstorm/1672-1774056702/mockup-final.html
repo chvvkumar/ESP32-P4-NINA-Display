@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Page Navigation — Final Design</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0a0a0b;
+    --card-bg: rgba(255, 255, 255, 0.035);
+    --card-border: rgba(255, 255, 255, 0.08);
+    --accent: #14b8a6;
+    --accent-rgb: 20, 184, 166;
+    --text: #f4f4f5;
+    --muted: #a1a1aa;
+    --input-bg: rgba(0, 0, 0, 0.3);
+    --input-border: rgba(255, 255, 255, 0.08);
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  body {
+    background: var(--bg);
+    font-family: var(--font);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 16px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .card {
+    width: 100%;
+    max-width: 500px;
+    background: var(--card-bg);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--card-border);
+    border-radius: 16px;
+    padding: 28px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.04);
+  }
+
+  .card-title {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 22px;
+  }
+
+  /* ── Section labels ── */
+  .section-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 12px;
+  }
+
+  /* ── Pill grid ── */
+  .pill-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: space-between;
+  }
+
+  .pill-grid::after {
+    content: '';
+    flex: auto;
+  }
+
+  .pill {
+    flex: 1 1 auto;
+    min-width: 0;
+    position: relative;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .pill .pill-visual {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .pill input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .pill-visual {
+    display: inline-flex;
+    align-items: center;
+    height: 34px;
+    padding: 0 16px;
+    border-radius: 17px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    border: 1px solid var(--input-border);
+    background: var(--input-bg);
+    color: var(--muted);
+    transition: all 0.25s ease;
+    white-space: nowrap;
+  }
+
+  /* Start page: single-select with pin badge */
+  .pill.start-pill .pill-visual {
+    padding-right: 16px;
+  }
+
+  .pill.start-pill input:checked + .pill-visual {
+    background: rgba(var(--accent-rgb), 0.13);
+    border-color: rgba(var(--accent-rgb), 0.45);
+    color: var(--accent);
+    box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.15), inset 0 0 8px rgba(var(--accent-rgb), 0.06);
+  }
+
+  .pill.start-pill .pin-badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    color: #0a0a0b;
+    font-weight: 800;
+    box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.45);
+    opacity: 0;
+    transform: scale(0.4);
+    transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    pointer-events: none;
+  }
+
+  .pill.start-pill input:checked ~ .pin-badge {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  .pill:hover .pill-visual {
+    border-color: rgba(255, 255, 255, 0.15);
+  }
+
+  .pill.start-pill:hover input:checked + .pill-visual {
+    border-color: rgba(var(--accent-rgb), 0.6);
+    box-shadow: 0 0 18px rgba(var(--accent-rgb), 0.2), inset 0 0 10px rgba(var(--accent-rgb), 0.08);
+  }
+
+  /* Rotation pills: multi-select toggle */
+  .pill.rotate-pill input:checked + .pill-visual {
+    background: rgba(var(--accent-rgb), 0.13);
+    border-color: rgba(var(--accent-rgb), 0.4);
+    color: var(--accent);
+    box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.15), inset 0 0 8px rgba(var(--accent-rgb), 0.06);
+  }
+
+  .pill.rotate-pill:not(:has(input:checked)) .pill-visual {
+    opacity: 0.45;
+  }
+
+  .pill.rotate-pill:hover:not(:has(input:checked)) .pill-visual {
+    opacity: 0.7;
+  }
+
+  .pill.rotate-pill:hover input:checked + .pill-visual {
+    border-color: rgba(var(--accent-rgb), 0.55);
+    box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.22), inset 0 0 8px rgba(var(--accent-rgb), 0.08);
+  }
+
+  /* ── Divider ── */
+  .divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.06) 20%, rgba(255,255,255,0.06) 80%, transparent);
+    margin: 22px 0;
+  }
+
+  /* ── Toggle row ── */
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .toggle-label-text {
+    font-size: 0.88rem;
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .toggle-sublabel {
+    font-size: 0.72rem;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  .toggle-row-small .toggle-label-text {
+    font-size: 0.82rem;
+    font-weight: 400;
+    color: var(--muted);
+  }
+
+  /* ── Toggle switch ── */
+  .toggle {
+    position: relative;
+    width: 44px;
+    height: 24px;
+    flex-shrink: 0;
+  }
+
+  .toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+    position: absolute;
+  }
+
+  .toggle-track {
+    position: absolute;
+    inset: 0;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    cursor: pointer;
+    transition: all 0.3s ease;
+  }
+
+  .toggle-track::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #666;
+    transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  }
+
+  .toggle input:checked + .toggle-track {
+    background: rgba(var(--accent-rgb), 0.25);
+    border-color: rgba(var(--accent-rgb), 0.4);
+  }
+
+  .toggle input:checked + .toggle-track::after {
+    transform: translateX(20px);
+    background: var(--accent);
+    box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.4);
+  }
+
+  /* ── Cycle settings ── */
+  .cycle-settings {
+    margin-top: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    animation: fadeSlideIn 0.3s ease;
+  }
+
+  @keyframes fadeSlideIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .inline-fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .field-group {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .field-label {
+    display: block;
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 6px;
+  }
+
+  select, input[type="number"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 100%;
+    height: 40px;
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    border-radius: 10px;
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 0.82rem;
+    padding: 0 14px;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+
+  select {
+    padding-right: 36px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='7' fill='none'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23a1a1aa' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 14px center;
+    cursor: pointer;
+  }
+
+  select:focus, input[type="number"]:focus {
+    border-color: rgba(var(--accent-rgb), 0.5);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.1);
+  }
+
+  select option { background: #1a1a1c; color: var(--text); }
+  input[type="number"] { -moz-appearance: textfield; }
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+
+  .sub-divider {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.04);
+    margin: 4px 0;
+  }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="card-title">Page Navigation</div>
+
+  <!-- ── Start Page ── -->
+  <div class="section-label">Start Page</div>
+  <div class="pill-grid" id="startPagePills">
+    <label class="pill start-pill">
+      <input type="radio" name="start-page" value="allsky">
+      <span class="pill-visual">AllSky</span>
+      <span class="pin-badge">&#9733;</span>
+    </label>
+    <label class="pill start-pill">
+      <input type="radio" name="start-page" value="spotify">
+      <span class="pill-visual">Spotify</span>
+      <span class="pin-badge">&#9733;</span>
+    </label>
+    <label class="pill start-pill">
+      <input type="radio" name="start-page" value="summary" checked>
+      <span class="pill-visual">Summary</span>
+      <span class="pin-badge">&#9733;</span>
+    </label>
+    <label class="pill start-pill">
+      <input type="radio" name="start-page" value="nina1">
+      <span class="pill-visual">NINA 1</span>
+      <span class="pin-badge">&#9733;</span>
+    </label>
+    <label class="pill start-pill">
+      <input type="radio" name="start-page" value="nina2">
+      <span class="pill-visual">NINA 2</span>
+      <span class="pin-badge">&#9733;</span>
+    </label>
+    <label class="pill start-pill">
+      <input type="radio" name="start-page" value="nina3">
+      <span class="pill-visual">NINA 3</span>
+      <span class="pin-badge">&#9733;</span>
+    </label>
+    <label class="pill start-pill">
+      <input type="radio" name="start-page" value="sysinfo">
+      <span class="pill-visual">System Info</span>
+      <span class="pin-badge">&#9733;</span>
+    </label>
+  </div>
+
+  <!-- ── Divider ── -->
+  <div class="divider"></div>
+
+  <!-- ── Auto Cycle ── -->
+  <div class="toggle-row">
+    <div>
+      <div class="toggle-label-text">Auto Cycle</div>
+      <div class="toggle-sublabel">Rotate through pages automatically</div>
+    </div>
+    <label class="toggle">
+      <input type="checkbox" id="autoCycleToggle" checked onchange="toggleCycle()">
+      <span class="toggle-track"></span>
+    </label>
+  </div>
+
+  <!-- ── Cycle Settings ── -->
+  <div class="cycle-settings" id="cycleSettings">
+
+    <div class="inline-fields">
+      <div class="field-group">
+        <label class="field-label">Interval (sec)</label>
+        <input type="number" value="30" min="4" max="3600">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Transition</label>
+        <select>
+          <option value="0">Instant</option>
+          <option value="1" selected>Fade</option>
+          <option value="2">Slide Left</option>
+          <option value="3">Slide Right</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="toggle-row toggle-row-small">
+      <span class="toggle-label-text">Skip disconnected instances</span>
+      <label class="toggle">
+        <input type="checkbox" checked>
+        <span class="toggle-track"></span>
+      </label>
+    </div>
+
+    <div class="sub-divider"></div>
+
+    <div>
+      <div class="section-label">Pages in Rotation</div>
+      <div class="pill-grid">
+        <label class="pill rotate-pill"><input type="checkbox" checked><span class="pill-visual">Summary</span></label>
+        <label class="pill rotate-pill"><input type="checkbox" checked><span class="pill-visual">AllSky</span></label>
+        <label class="pill rotate-pill"><input type="checkbox"><span class="pill-visual">Spotify</span></label>
+        <label class="pill rotate-pill"><input type="checkbox" checked><span class="pill-visual">NINA 1</span></label>
+        <label class="pill rotate-pill"><input type="checkbox" checked><span class="pill-visual">NINA 2</span></label>
+        <label class="pill rotate-pill"><input type="checkbox" checked><span class="pill-visual">NINA 3</span></label>
+        <label class="pill rotate-pill"><input type="checkbox"><span class="pill-visual">System Info</span></label>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  function toggleCycle() {
+    var settings = document.getElementById('cycleSettings');
+    settings.style.display = document.getElementById('autoCycleToggle').checked ? 'flex' : 'none';
+  }
+</script>
+</body>
+</html>

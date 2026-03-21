@@ -1539,46 +1539,51 @@ main_loop:
 
                     int ena_page_count = total - EXTRA_PAGES;  /* enabled NINA pages only */
 
-                    /* Find next page in rotation by stepping through candidates */
-                    int next_page = current_active;
-                    for (int step = 1; step < total; step++) {
-                        int candidate = (current_active + step) % total;
+                    /* Build ordered candidate list from custom rotation order */
+                    int ordered[7];
+                    int ordered_count = 0;
+                    for (int i = 0; i < 7 && r_cfg->auto_rotate_order[i] != 0xFF; i++) {
+                        int bit_idx = r_cfg->auto_rotate_order[i];
+                        if (bit_idx > 6) continue;
+                        /* Check if this page is enabled in bitmask */
+                        if (!(page_mask & (1 << bit_idx))) continue;
 
-                        /* Check if this candidate is in the rotation bitmask.
-                         * Bitmask bits 1-3 refer to instance indices (not page indices),
-                         * so use the page-to-instance mapping for NINA pages. */
-                        bool in_mask = false;
-                        if (candidate == PAGE_IDX_ALLSKY) {
-                            in_mask = (page_mask & 0x20) != 0;             /* AllSky (bit 5) */
-                            if (!app_config_get()->allsky_enabled) in_mask = false;
+                        /* Map bitmask bit index to actual page index */
+                        int page_idx = -1;
+                        switch (bit_idx) {
+                            case 0: page_idx = PAGE_IDX_SUMMARY; break;
+                            case 1: if (ena_page_count >= 1) page_idx = NINA_PAGE_OFFSET + 0; break;
+                            case 2: if (ena_page_count >= 2) page_idx = NINA_PAGE_OFFSET + 1; break;
+                            case 3: if (ena_page_count >= 3) page_idx = NINA_PAGE_OFFSET + 2; break;
+                            case 4: page_idx = SYSINFO_PAGE_IDX(ena_page_count); break;
+                            case 5:
+                                if (app_config_get()->allsky_enabled) page_idx = PAGE_IDX_ALLSKY;
+                                break;
+                            case 6:
+                                if (app_config_get()->spotify_enabled) page_idx = PAGE_IDX_SPOTIFY;
+                                break;
                         }
-                        else if (candidate == PAGE_IDX_SPOTIFY) {
-                            in_mask = (page_mask & 0x40) != 0;             /* Spotify (bit 6) */
-                            if (!app_config_get()->spotify_enabled) in_mask = false;
-                        }
-                        else if (candidate == PAGE_IDX_SUMMARY)
-                            in_mask = (page_mask & 0x01) != 0;             /* Summary (bit 0) */
-                        else if (candidate >= NINA_PAGE_OFFSET && candidate < NINA_PAGE_OFFSET + ena_page_count) {
-                            int inst = nina_dashboard_page_to_instance(candidate - NINA_PAGE_OFFSET);
-                            if (inst >= 0)
-                                in_mask = (page_mask & (1 << (inst + 1))) != 0; /* NINA page */
-                        }
-                        else if (candidate == SETTINGS_PAGE_IDX(ena_page_count))
-                            in_mask = false;                               /* Settings — never in rotation */
-                        else if (candidate == SYSINFO_PAGE_IDX(ena_page_count))
-                            in_mask = (page_mask & 0x10) != 0;             /* Sysinfo (bit 4) */
-
-                        if (!in_mask) continue;
+                        if (page_idx < 0) continue;
 
                         /* Skip disconnected NINA instances if configured */
-                        if (candidate >= NINA_PAGE_OFFSET && candidate < NINA_PAGE_OFFSET + ena_page_count) {
-                            int nina_idx = nina_dashboard_page_to_instance(candidate - NINA_PAGE_OFFSET);
+                        if (page_idx >= NINA_PAGE_OFFSET && page_idx < NINA_PAGE_OFFSET + ena_page_count) {
+                            int nina_idx = nina_dashboard_page_to_instance(page_idx - NINA_PAGE_OFFSET);
                             if (nina_idx >= 0 && r_cfg->auto_rotate_skip_disconnected
                                 && !nina_connection_is_connected(nina_idx)) continue;
                         }
 
-                        next_page = candidate;
-                        break;
+                        ordered[ordered_count++] = page_idx;
+                    }
+
+                    /* Find current page position in ordered list and advance */
+                    int next_page = current_active;
+                    if (ordered_count > 0) {
+                        int cur_pos = -1;
+                        for (int i = 0; i < ordered_count; i++) {
+                            if (ordered[i] == current_active) { cur_pos = i; break; }
+                        }
+                        /* Step to next in custom order (wrap around) */
+                        next_page = ordered[(cur_pos + 1) % ordered_count];
                     }
 
                     if (next_page != current_active) {

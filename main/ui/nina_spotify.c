@@ -80,6 +80,7 @@ static lv_timer_t *idle_timer = NULL;
 static bool is_idle = true;
 static bool is_playing = false;
 static bool has_art = false;               /* True once album art has been set */
+static bool has_received_data = false;     /* True once first API response received */
 static uint8_t *current_art_buf = NULL;    /* Owned RGB565 buffer */
 static lv_image_dsc_t art_dsc;             /* Persistent image descriptor */
 
@@ -611,6 +612,15 @@ static void dim_anim_cb(void *var, int32_t value)
     lv_obj_set_style_bg_opa((lv_obj_t *)var, (lv_opa_t)value, 0);
 }
 
+/* Called when the idle fade-out animation finishes — safe to throttle now */
+static void idle_anim_done_cb(lv_anim_t *a)
+{
+    (void)a;
+    if (is_idle && (has_art || has_received_data)) {
+        set_refr_period(REFR_PERIOD_IDLE_MS);
+    }
+}
+
 static void set_idle_state(bool idle)
 {
     if (is_idle == idle) return;
@@ -625,6 +635,11 @@ static void set_idle_state(bool idle)
     lv_anim_set_values(&a, lv_obj_get_style_bg_opa(dim_overlay, 0), target_opa);
     lv_anim_set_time(&a, 400);
     lv_anim_set_exec_cb(&a, dim_anim_cb);
+    if (idle) {
+        /* Defer refresh throttle until fade-out animation finishes,
+         * otherwise the 5 s idle period kills the smooth transition. */
+        lv_anim_set_completed_cb(&a, idle_anim_done_cb);
+    }
     lv_anim_start(&a);
 
     bool minimal = app_config_get()->spotify_minimal_mode;
@@ -636,10 +651,15 @@ static void set_idle_state(bool idle)
         lv_obj_add_flag(controls_zone, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(minimal_info_cont, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(minimal_progress, LV_OBJ_FLAG_HIDDEN);
-        /* Throttle refresh rate when idle — but only if we have album art.
-         * During loading (pulse animation), keep normal refresh rate. */
-        if (has_art) {
-            set_refr_period(REFR_PERIOD_IDLE_MS);
+
+        /* If nothing is playing (no art, API already responded), show the
+         * "Nothing Playing" text so the user doesn't see a blank screen. */
+        if (!has_art && has_received_data) {
+            if (app_config_get()->spotify_minimal_mode) {
+                lv_obj_remove_flag(minimal_info_cont, LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_remove_flag(track_info_cont, LV_OBJ_FLAG_HIDDEN);
+            }
         }
     } else if (minimal) {
         /* Minimal overlay: centered track info, optional progress bar */
@@ -723,6 +743,7 @@ void nina_spotify_update(const spotify_playback_t *data)
 {
     if (!spotify_page || !data) return;
 
+    has_received_data = true;
     is_playing = data->is_playing;
 
     bool minimal = app_config_get()->spotify_minimal_mode;
@@ -941,18 +962,20 @@ void nina_spotify_set_idle(void)
         lv_label_set_text(pp_label, LV_SYMBOL_PLAY);
     }
 
-    /* Hide album art, show loading logo */
+    /* Hide album art */
     if (current_art_buf) {
         free(current_art_buf);
         current_art_buf = NULL;
     }
     has_art = false;
     lv_obj_add_flag(img_album_art, LV_OBJ_FLAG_HIDDEN);
+
+    /* Hide the loading logo — we've heard from the API, nothing is playing.
+     * The pulsing logo is only for the initial loading state before first data. */
+    has_received_data = true;
     if (loading_logo) {
-        lv_obj_remove_flag(loading_logo, LV_OBJ_FLAG_HIDDEN);
-        /* Position logo below the "Nothing Playing" text so the group is vertically centered */
-        lv_obj_align(loading_logo, LV_ALIGN_CENTER, 0, 30);
-        start_logo_pulse();
+        stop_logo_pulse();
+        lv_obj_add_flag(loading_logo, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
@@ -992,13 +1015,21 @@ void nina_spotify_on_show(void)
 
     ESP_LOGI(TAG, "Spotify page shown");
 
-    /* Start in idle state (just album art, no overlay) — works for both modes.
-     * set_idle_state will show the correct widgets when user taps. */
-    is_idle = false; /* Force transition */
-    set_idle_state(true);
+    bool force_overlay = app_config_get()->spotify_overlay_visible;
+    if (force_overlay) {
+        /* Config says show overlay — start with minimal overlay visible */
+        is_idle = true; /* Force transition */
+        set_idle_state(false);
+    } else {
+        /* Start in idle state (just album art, no overlay) — works for both modes.
+         * set_idle_state will show the correct widgets when user taps. */
+        is_idle = false; /* Force transition */
+        set_idle_state(true);
+    }
 
-    /* Restart loading logo pulse if art hasn't loaded yet */
-    if (!has_art && loading_logo) {
+    /* Show loading logo pulse only if we haven't received any API data yet.
+     * Once we know "nothing playing", the logo stays hidden. */
+    if (!has_art && !has_received_data && loading_logo) {
         lv_obj_remove_flag(loading_logo, LV_OBJ_FLAG_HIDDEN);
         start_logo_pulse();
     }
@@ -1024,8 +1055,16 @@ void nina_spotify_refresh_layout(void)
     if (!spotify_page) return;
     /* Update label long modes in case scroll/wrap config changed */
     apply_label_long_mode();
-    /* If overlay is currently showing, re-run idle state to swap widgets */
-    if (!is_idle) {
+
+    bool force_overlay = app_config_get()->spotify_overlay_visible;
+    if (force_overlay && is_idle) {
+        /* Config says show overlay but we're idle — force overlay on */
+        set_idle_state(false);
+    } else if (!force_overlay && !is_idle) {
+        /* Config says hide overlay but it's showing — force idle */
+        set_idle_state(true);
+    } else if (!is_idle) {
+        /* Overlay visible, re-run to swap widgets (e.g. minimal mode changed) */
         is_idle = true;  /* Force re-transition */
         set_idle_state(false);
     }
@@ -1044,8 +1083,9 @@ void nina_spotify_free_art(void)
         ESP_LOGI(TAG, "Album art buffer freed");
     }
 
-    /* Show loading logo again for next page entry */
-    if (loading_logo) {
+    /* Show loading logo only if we haven't received API data yet.
+     * If data was received (nothing playing), keep logo hidden. */
+    if (loading_logo && !has_received_data) {
         lv_obj_remove_flag(loading_logo, LV_OBJ_FLAG_HIDDEN);
         start_logo_pulse();
     }

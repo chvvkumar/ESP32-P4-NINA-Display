@@ -22,6 +22,7 @@ esp_err_t spotify_config_get_handler(httpd_req_t *req)
     cJSON_AddBoolToObject(root, "spotify_minimal_mode", cfg->spotify_minimal_mode);
     cJSON_AddBoolToObject(root, "spotify_scroll_text", cfg->spotify_scroll_text);
     cJSON_AddNumberToObject(root, "spotify_overlay_timeout_s", cfg->spotify_overlay_timeout_s);
+    cJSON_AddBoolToObject(root, "spotify_overlay_visible", cfg->spotify_overlay_visible);
 
     const char *json_str = cJSON_PrintUnformatted(root);
     if (json_str == NULL) {
@@ -69,6 +70,7 @@ esp_err_t spotify_config_post_handler(httpd_req_t *req)
     JSON_TO_BOOL(root, "spotify_minimal_mode", cfg->spotify_minimal_mode);
     JSON_TO_BOOL(root, "spotify_scroll_text", cfg->spotify_scroll_text);
     JSON_TO_INT(root, "spotify_overlay_timeout_s", cfg->spotify_overlay_timeout_s);
+    JSON_TO_BOOL(root, "spotify_overlay_visible", cfg->spotify_overlay_visible);
 
     cJSON_Delete(root);
 

@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Page Navigation — Unified Flat Card</title>
+<style>
+  *, *::before, *::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  :root {
+    --bg: #0a0a0b;
+    --card-bg: rgba(255, 255, 255, 0.035);
+    --card-border: rgba(255, 255, 255, 0.08);
+    --accent: #14b8a6;
+    --accent-rgb: 20, 184, 166;
+    --text: #f4f4f5;
+    --muted: #a1a1aa;
+    --input-bg: rgba(0, 0, 0, 0.3);
+    --input-border: rgba(255, 255, 255, 0.08);
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  body {
+    background: var(--bg);
+    font-family: var(--font);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  .card {
+    width: 100%;
+    max-width: 500px;
+    background: var(--card-bg);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--card-border);
+    border-radius: 16px;
+    padding: 28px;
+  }
+
+  .card-title {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 24px;
+  }
+
+  /* ---- Shared form styles ---- */
+  label.field-label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+
+  select,
+  input[type="number"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 100%;
+    height: 42px;
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    border-radius: 10px;
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 0.85rem;
+    padding: 0 14px;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+
+  select {
+    padding-right: 36px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='7' fill='none'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23a1a1aa' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 14px center;
+    cursor: pointer;
+  }
+
+  select:focus,
+  input[type="number"]:focus {
+    border-color: rgba(var(--accent-rgb), 0.45);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.1);
+  }
+
+  select option {
+    background: #1a1a1c;
+    color: var(--text);
+  }
+
+  input[type="number"] {
+    -moz-appearance: textfield;
+  }
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    opacity: 1;
+    height: 30px;
+  }
+
+  /* ---- Divider ---- */
+  .divider {
+    height: 1px;
+    background: var(--card-border);
+    margin: 24px 0;
+  }
+
+  /* ---- Toggle row ---- */
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .toggle-row .toggle-label {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .toggle-row .toggle-sublabel {
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  /* Toggle switch */
+  .toggle {
+    position: relative;
+    width: 44px;
+    height: 24px;
+    flex-shrink: 0;
+  }
+
+  .toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+    position: absolute;
+  }
+
+  .toggle-track {
+    position: absolute;
+    inset: 0;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background 0.25s;
+  }
+
+  .toggle-track::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 18px;
+    height: 18px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.25s, background 0.25s;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  }
+
+  .toggle input:checked + .toggle-track {
+    background: var(--accent);
+  }
+
+  .toggle input:checked + .toggle-track::after {
+    transform: translateX(20px);
+  }
+
+  /* ---- Cycle settings area ---- */
+  .cycle-settings {
+    margin-top: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .inline-fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+
+  .field-group {
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ---- Skip disconnected row ---- */
+  .option-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .option-row .option-label {
+    font-size: 0.85rem;
+    color: var(--text);
+  }
+
+  /* ---- Page pills ---- */
+  .pills-label {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+
+  .pills-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .pill {
+    position: relative;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .pill input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .pill-visual {
+    display: inline-flex;
+    align-items: center;
+    height: 32px;
+    padding: 0 14px;
+    border-radius: 16px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    border: 1px solid var(--input-border);
+    background: var(--input-bg);
+    color: var(--muted);
+    transition: all 0.25s ease;
+    white-space: nowrap;
+  }
+
+  .pill input:checked + .pill-visual {
+    background: rgba(var(--accent-rgb), 0.13);
+    border-color: rgba(var(--accent-rgb), 0.4);
+    color: var(--accent);
+    box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.15), inset 0 0 8px rgba(var(--accent-rgb), 0.06);
+  }
+
+  .pill:hover .pill-visual {
+    border-color: rgba(255, 255, 255, 0.15);
+  }
+
+  .pill:hover input:checked + .pill-visual {
+    border-color: rgba(var(--accent-rgb), 0.55);
+    box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.22), inset 0 0 8px rgba(var(--accent-rgb), 0.08);
+  }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="card-title">Page Navigation</div>
+
+  <!-- Start Page -->
+  <div class="field-group">
+    <label class="field-label" for="start-page">Start Page</label>
+    <select id="start-page">
+      <option value="summary" selected>Summary</option>
+      <option value="allsky">AllSky</option>
+      <option value="spotify">Spotify</option>
+      <option value="nina1">NINA 1</option>
+      <option value="nina2">NINA 2</option>
+      <option value="nina3">NINA 3</option>
+      <option value="sysinfo">System Info</option>
+    </select>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Auto Cycle toggle -->
+  <div class="toggle-row">
+    <div>
+      <div class="toggle-label">Auto Cycle</div>
+      <div class="toggle-sublabel">Automatically rotate through pages</div>
+    </div>
+    <label class="toggle">
+      <input type="checkbox" id="auto-cycle" checked>
+      <span class="toggle-track"></span>
+    </label>
+  </div>
+
+  <!-- Cycle settings (shown when auto-cycle is on) -->
+  <div class="cycle-settings" id="cycle-settings">
+
+    <!-- Interval + Transition side by side -->
+    <div class="inline-fields">
+      <div class="field-group">
+        <label class="field-label" for="interval">Interval (sec)</label>
+        <input type="number" id="interval" value="30" min="5" max="300">
+      </div>
+      <div class="field-group">
+        <label class="field-label" for="transition">Transition</label>
+        <select id="transition">
+          <option value="fade" selected>Fade</option>
+          <option value="instant">Instant</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Skip Disconnected -->
+    <div class="option-row">
+      <span class="option-label">Skip disconnected instances</span>
+      <label class="toggle">
+        <input type="checkbox" checked>
+        <span class="toggle-track"></span>
+      </label>
+    </div>
+
+    <!-- Pages in Rotation -->
+    <div>
+      <div class="pills-label">Pages in Rotation</div>
+      <div class="pills-container">
+        <label class="pill">
+          <input type="checkbox" checked>
+          <span class="pill-visual">Summary</span>
+        </label>
+        <label class="pill">
+          <input type="checkbox" checked>
+          <span class="pill-visual">AllSky</span>
+        </label>
+        <label class="pill">
+          <input type="checkbox">
+          <span class="pill-visual">Spotify</span>
+        </label>
+        <label class="pill">
+          <input type="checkbox" checked>
+          <span class="pill-visual">NINA 1</span>
+        </label>
+        <label class="pill">
+          <input type="checkbox" checked>
+          <span class="pill-visual">NINA 2</span>
+        </label>
+        <label class="pill">
+          <input type="checkbox" checked>
+          <span class="pill-visual">NINA 3</span>
+        </label>
+        <label class="pill">
+          <input type="checkbox">
+          <span class="pill-visual">SysInfo</span>
+        </label>
+      </div>
+    </div>
+
+  </div><!-- /cycle-settings -->
+</div>
+
+<script>
+  // Toggle cycle settings visibility
+  const autoCycleToggle = document.getElementById('auto-cycle');
+  const cycleSettings = document.getElementById('cycle-settings');
+
+  function updateCycleVisibility() {
+    cycleSettings.style.display = autoCycleToggle.checked ? 'flex' : 'none';
+  }
+
+  autoCycleToggle.addEventListener('change', updateCycleVisibility);
+  // Start visible (checked by default)
+  updateCycleVisibility();
+</script>
+</body>
+</html>

@@ -292,7 +292,25 @@ class PhaseManager:
                     logger.warning(f"Failed to set page on {host}: {e}")
         await asyncio.sleep(2)
 
-        # 9. Start metrics
+        # 9. Seed baseline boot_count so pre-existing reboots aren't flagged
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=5)
+        ) as boot_session:
+            for device in self._devices:
+                host = device["host"]
+                try:
+                    async with boot_session.get(
+                        f"http://{host}/api/crash"
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            metrics_collector.set_baseline_boot_count(
+                                host, data.get("boot_count", 0)
+                            )
+                except Exception as e:
+                    logger.warning(f"Failed to read boot_count for {host}: {e}")
+
+        # 10. Start metrics
         await metrics_collector.start()
         logger.info("STARTUP complete")
 
