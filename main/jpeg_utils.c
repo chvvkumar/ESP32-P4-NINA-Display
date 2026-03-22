@@ -54,6 +54,7 @@ bool fetch_and_show_thumbnail(const char *base_url) {
         uint8_t *decode_buf = (uint8_t *)jpeg_alloc_decoder_mem(decode_buf_size, &mem_cfg, &allocated_size);
 
         if (decode_buf) {
+            memset(decode_buf, 0, allocated_size); /* Zero buffer so PPA edge interpolation reads black, not heap garbage */
             /* Guard: only create the HW decoder when internal DMA heap has enough
              * headroom.  This avoids both the ESP-IDF crash (buggy cleanup on alloc
              * failure) and starving the SDIO WiFi driver of DMA buffers. */

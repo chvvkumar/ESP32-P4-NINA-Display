@@ -590,6 +590,7 @@ void spotify_poll_task(void *arg)
                                 out_w * out_h * 2, &mem_cfg, &allocated);
 
                             if (rgb_buf) {
+                                memset(rgb_buf, 0, allocated); /* Zero buffer so PPA edge interpolation reads black, not heap garbage */
                                 jpeg_decoder_handle_t decoder = NULL;
                                 jpeg_decode_engine_cfg_t engine_cfg = {
                                     .intr_priority = 0, .timeout_ms = 5000
@@ -790,6 +791,7 @@ void fetch_worker_task(void *arg) {
             size_t allocated_size = 0;
             uint8_t *decode_buf = (uint8_t *)jpeg_alloc_decoder_mem(decode_buf_size, &mem_cfg, &allocated_size);
             if (!decode_buf) { free(jpeg_buf); break; }
+            memset(decode_buf, 0, allocated_size); /* Zero buffer so PPA edge interpolation reads black, not heap garbage */
 
             size_t free_dma = heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
             if (free_dma < 20 * 1024) {

@@ -583,6 +583,7 @@ void app_main(void)
             uint8_t *rgb_buf = (uint8_t *)jpeg_alloc_decoder_mem(out_w * out_h * 2, &mem_cfg, &allocated);
 
             if (rgb_buf) {
+                memset(rgb_buf, 0, allocated); /* Zero buffer so PPA edge interpolation reads black, not heap garbage */
                 jpeg_decoder_handle_t decoder = NULL;
                 jpeg_decode_engine_cfg_t engine_cfg = { .intr_priority = 0, .timeout_ms = 5000 };
                 err = jpeg_new_decoder_engine(&engine_cfg, &decoder);
