@@ -160,7 +160,7 @@ static lv_obj_t *make_stat_col(lv_obj_t *parent, const char *value_text,
     lv_obj_set_style_pad_row(col, 2, 0);
 
     *out_val = make_label(col, &lv_font_overpass_27, CLK_SECONDARY, 0, value_text);
-    make_label(col, &lv_font_overpass_16, CLK_DIM, 2, label_text);
+    make_label(col, &lv_font_overpass_16, CLK_DIM, 1, label_text);
 
     return col;
 }
@@ -199,9 +199,9 @@ lv_obj_t *clock_page_create(lv_obj_t *parent) {
     lv_obj_set_style_radius(clock_root, 0, 0);
     lv_obj_set_style_pad_all(clock_root, CLOCK_PADDING, 0);
     lv_obj_set_flex_flow(clock_root, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(clock_root, LV_FLEX_ALIGN_START,
+    lv_obj_set_flex_align(clock_root, LV_FLEX_ALIGN_SPACE_BETWEEN,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(clock_root, 12, 0);  /* Comfortable spacing between sections */
+    lv_obj_set_style_pad_row(clock_root, 0, 0);  /* justify-between handles spacing */
     lv_obj_remove_flag(clock_root, LV_OBJ_FLAG_SCROLLABLE);
 
     /* ── Header row (date left, weather right) ── */
@@ -217,7 +217,7 @@ lv_obj_t *clock_page_create(lv_obj_t *parent) {
     lv_obj_set_flex_flow(date_stack, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(date_stack, LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_row(date_stack, 2, 0);
+    lv_obj_set_style_pad_row(date_stack, 0, 0);
 
     lbl_day  = make_label(date_stack, &lv_font_overpass_27, CLK_TERTIARY, 2, "---");
     lbl_date = make_label(date_stack, &lv_font_overpass_27, CLK_TERTIARY, 2, "---");
@@ -241,28 +241,27 @@ lv_obj_t *clock_page_create(lv_obj_t *parent) {
 
     lbl_temp = make_label(temp_row, &lv_font_playfair_90, CLK_PRIMARY, 0, "");
     /* Degree symbol using overpass font — aligns inline at top of digits */
-    lbl_deg = make_label(temp_row, &lv_font_overpass_27, CLK_PRIMARY, 0, "\xc2\xb0");
-    lv_obj_set_style_pad_top(lbl_deg, 4, 0);
+    lbl_deg = make_label(temp_row, &lv_font_overpass_16, CLK_PRIMARY, 0, "\xc2\xb0");
+    lv_obj_set_style_pad_top(lbl_deg, 2, 0);
     lv_obj_add_flag(lbl_deg, LV_OBJ_FLAG_HIDDEN);  /* Hidden until weather data */
 
-    lbl_cond = make_label(weather_stack, &lv_font_overpass_27, CLK_CONDITION, 2, "--");
-    lbl_hilo = make_label(weather_stack, &lv_font_overpass_16, CLK_DIM, 0, "--");
+    lbl_cond = make_label(weather_stack, &lv_font_overpass_27, CLK_CONDITION, 1, "--");
+    lbl_hilo = make_label(weather_stack, &lv_font_overpass_16, CLK_DIM, 1, "--");
 
     /* ── Rule 1 ── */
     make_rule(clock_root);
 
-    /* ── Time container (centered, flex-grow) ── */
+    /* ── Time container (centered) ── */
     lv_obj_t *time_container = make_container(clock_root);
     lv_obj_set_size(time_container, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_grow(time_container, 1);
     lv_obj_set_flex_flow(time_container, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(time_container, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     lbl_time = make_label(time_container, &lv_font_playfair_228, CLK_PRIMARY, -4, "");
     lv_obj_set_style_text_line_space(lbl_time, 0, 0);
-    lbl_ampm = make_label(time_container, &lv_font_overpass_16, CLK_DIM, 8, "");
-    lv_obj_set_style_pad_top(lbl_ampm, 12, 0);
+    lbl_ampm = make_label(time_container, &lv_font_overpass_16, CLK_DIM, 3, "");
+    lv_obj_set_style_pad_top(lbl_ampm, 4, 0);
 
     /* ── Rule 2 ── */
     make_rule(clock_root);
@@ -273,7 +272,7 @@ lv_obj_t *clock_page_create(lv_obj_t *parent) {
     lv_obj_set_flex_flow(stats_strip, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(stats_strip, LV_FLEX_ALIGN_SPACE_EVENLY,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_ver(stats_strip, 20, 0);
+    lv_obj_set_style_pad_ver(stats_strip, 8, 0);
 
     make_stat_col(stats_strip, "--", "HUMID",  &lbl_humid_val);
     make_vdivider(stats_strip);
