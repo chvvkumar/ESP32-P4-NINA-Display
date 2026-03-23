@@ -323,7 +323,10 @@ static void create_page_nav_card(lv_obj_t *parent)
         dd_pinned_page = lv_dropdown_create(row);
         lv_obj_set_width(dd_pinned_page, 200);
         lv_dropdown_set_options(dd_pinned_page,
+                                "Auto\n"
                                 "AllSky\n"
+                                "Spotify\n"
+                                "Clock\n"
                                 "Summary\n"
                                 "NINA 1\n"
                                 "NINA 2\n"
@@ -340,10 +343,20 @@ static void create_page_nav_card(lv_obj_t *parent)
             lv_obj_set_style_border_width(dd_pinned_page, 1, 0);
         }
 
-        /* Set initial selection from config */
-        int8_t ov = app_config_get()->active_page_override;
-        if (ov >= 0) {
-            lv_dropdown_set_selected(dd_pinned_page, (uint32_t)ov);
+        /* Set initial selection from config.
+         * Dropdown mapping: 0=Auto(-1), 1=AllSky(0), 2=Spotify(1), 3=Clock(2),
+         * 4=Summary(3), 5=NINA1(4), 6=NINA2(5), 7=NINA3(6), 8=SysInfo(total-1) */
+        {
+            int8_t ov = app_config_get()->active_page_override;
+            int total = nina_dashboard_get_total_page_count();
+            int sysinfo_ov = total > 0 ? total - 1 : 8;
+            if (ov < 0) {
+                lv_dropdown_set_selected(dd_pinned_page, 0);  /* Auto */
+            } else if (ov >= sysinfo_ov) {
+                lv_dropdown_set_selected(dd_pinned_page, 8);  /* SysInfo */
+            } else {
+                lv_dropdown_set_selected(dd_pinned_page, (uint32_t)(ov + 1));
+            }
         }
 
         lv_obj_add_event_cb(dd_pinned_page, pinned_page_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
@@ -492,6 +505,12 @@ static void create_page_nav_card(lv_obj_t *parent)
         }
     }
 
+    /* Hint for cycle mode */
+    lv_obj_t *ar_hint = lv_label_create(cont_cycle);
+    lv_label_set_text(ar_hint, "When enabled, overrides idle page switching");
+    lv_obj_set_style_text_font(ar_hint, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(ar_hint, lv_color_hex(0x888888), 0);
+
     /* ── Determine initial mode from config ── */
     app_config_t *cfg = app_config_get();
     uint32_t initial_mode;
@@ -592,7 +611,15 @@ static void page_mode_changed_cb(lv_event_t *e)
         cfg->auto_rotate_enabled = false;
         /* Set override to the currently selected pinned page */
         if (dd_pinned_page) {
-            cfg->active_page_override = (int8_t)lv_dropdown_get_selected(dd_pinned_page);
+            uint32_t dd_sel = lv_dropdown_get_selected(dd_pinned_page);
+            if (dd_sel == 0) {
+                cfg->active_page_override = -1;
+            } else if (dd_sel == 8) {
+                int total = nina_dashboard_get_total_page_count();
+                cfg->active_page_override = (int8_t)(total > 0 ? total - 1 : 8);
+            } else {
+                cfg->active_page_override = (int8_t)(dd_sel - 1);
+            }
         }
     } else if (sel == 2) {
         /* Cycle */
@@ -607,7 +634,16 @@ static void pinned_page_changed_cb(lv_event_t *e)
 {
     LV_UNUSED(e);
     uint32_t sel = lv_dropdown_get_selected(dd_pinned_page);
-    app_config_get()->active_page_override = (int8_t)sel;
+    /* Dropdown mapping: 0=Auto(-1), 1=AllSky(0), 2=Spotify(1), 3=Clock(2),
+     * 4=Summary(3), 5=NINA1(4), 6=NINA2(5), 7=NINA3(6), 8=SysInfo */
+    if (sel == 0) {
+        app_config_get()->active_page_override = -1;  /* Auto */
+    } else if (sel == 8) {
+        int total = nina_dashboard_get_total_page_count();
+        app_config_get()->active_page_override = (int8_t)(total > 0 ? total - 1 : 8);
+    } else {
+        app_config_get()->active_page_override = (int8_t)(sel - 1);
+    }
     settings_mark_dirty(false);
 }
 
@@ -753,8 +789,17 @@ void settings_tab_display_refresh(void)
     update_mode_visibility(mode);
 
     /* Fixed sub-section */
-    if (dd_pinned_page && cfg->active_page_override >= 0) {
-        lv_dropdown_set_selected(dd_pinned_page, (uint32_t)cfg->active_page_override);
+    if (dd_pinned_page) {
+        int8_t ov = cfg->active_page_override;
+        int total = nina_dashboard_get_total_page_count();
+        int sysinfo_ov = total > 0 ? total - 1 : 8;
+        if (ov < 0) {
+            lv_dropdown_set_selected(dd_pinned_page, 0);  /* Auto */
+        } else if (ov >= sysinfo_ov) {
+            lv_dropdown_set_selected(dd_pinned_page, 8);  /* SysInfo */
+        } else {
+            lv_dropdown_set_selected(dd_pinned_page, (uint32_t)(ov + 1));
+        }
     }
 
     /* Cycle sub-section */

@@ -40,6 +40,7 @@
 #include "perf_monitor.h"
 #include "power_mgmt.h"
 #include "demo_data.h"
+#include "weather_client.h"
 #include "driver/jpeg_decode.h"
 #include "freertos/queue.h"
 #include "ui/nina_thumbnail.h"
@@ -148,6 +149,28 @@ static allsky_data_t allsky_data;
 static TaskHandle_t allsky_task_handle = NULL;
 static demo_task_params_t demo_params;
 
+/* ── Idle page override state ── */
+static bool idle_override_active = false;
+static bool idle_override_suppressed = false;  /* User navigated away — suppress until reconnect cycle */
+static int  idle_saved_page = -1;
+static int64_t idle_all_disconnected_since_us = 0;
+
+/**
+ * @brief Map semantic idle_target_t enum to actual page index at runtime.
+ * Accounts for which optional pages are currently enabled.
+ */
+static int idle_target_to_page_index(int8_t target)
+{
+    switch (target) {
+        case IDLE_TARGET_SUMMARY:  return PAGE_IDX_SUMMARY;
+        case IDLE_TARGET_CLOCK:    return PAGE_IDX_CLOCK;
+        case IDLE_TARGET_ALLSKY:   return PAGE_IDX_ALLSKY;
+        case IDLE_TARGET_SPOTIFY:  return PAGE_IDX_SPOTIFY;
+        case IDLE_TARGET_SYSINFO:  return SYSINFO_PAGE_IDX(page_count);
+        default:                   return PAGE_IDX_SUMMARY;
+    }
+}
+
 /**
  * @brief Swipe callback from the dashboard — signals the data task to re-tune polling.
  * Called from LVGL context (display lock already held by the gesture handler).
@@ -155,6 +178,17 @@ static demo_task_params_t demo_params;
  */
 void on_page_changed(int new_page) {
     page_changed = true;
+    /* If idle override is active and user navigates away, cancel the override
+     * so reconnect logic doesn't snap them back. Re-triggers on next disconnect cycle. */
+    if (idle_override_active) {
+        idle_override_active = false;
+        if (!app_config_get()->idle_page_persistent) {
+            idle_override_suppressed = true;  /* Suppress re-trigger until reconnect→disconnect cycle */
+        }
+        /* When persistent: idle_override_suppressed stays false, so it re-triggers after debounce */
+        ESP_LOGI(TAG, "Idle override: cancelled by user navigation (persistent=%d)",
+                 app_config_get()->idle_page_persistent);
+    }
     ESP_LOGI(TAG, "Swipe: switched to page %d", new_page);
     /* Wake all poll tasks so the newly-active one can start full polling immediately */
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
@@ -590,6 +624,7 @@ void spotify_poll_task(void *arg)
                                 out_w * out_h * 2, &mem_cfg, &allocated);
 
                             if (rgb_buf) {
+                                memset(rgb_buf, 0, allocated); /* Zero buffer so PPA edge interpolation reads black, not heap garbage */
                                 jpeg_decoder_handle_t decoder = NULL;
                                 jpeg_decode_engine_cfg_t engine_cfg = {
                                     .intr_priority = 0, .timeout_ms = 5000
@@ -790,6 +825,7 @@ void fetch_worker_task(void *arg) {
             size_t allocated_size = 0;
             uint8_t *decode_buf = (uint8_t *)jpeg_alloc_decoder_mem(decode_buf_size, &mem_cfg, &allocated_size);
             if (!decode_buf) { free(jpeg_buf); break; }
+            memset(decode_buf, 0, allocated_size); /* Zero buffer so PPA edge interpolation reads black, not heap garbage */
 
             size_t free_dma = heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
             if (free_dma < 20 * 1024) {
@@ -1304,13 +1340,14 @@ main_loop:
          * Page index convention (see PAGE_IDX_* / NINA_PAGE_OFFSET / EXTRA_PAGES):
          *   PAGE_IDX_ALLSKY  (0)                        = AllSky page
          *   PAGE_IDX_SPOTIFY (1)                        = Spotify page
-         *   PAGE_IDX_SUMMARY (2)                        = summary page
+         *   PAGE_IDX_CLOCK   (2)                        = Clock page (always present)
+         *   PAGE_IDX_SUMMARY (3)                        = summary page
          *   NINA_PAGE_OFFSET .. NINA_PAGE_OFFSET+pc-1   = NINA instance pages
          *   SETTINGS_PAGE_IDX(pc)                       = settings page
          *   SYSINFO_PAGE_IDX(pc)                        = sysinfo page
          *
          * active_nina_idx: the actual instance index (0..MAX_NINA_INSTANCES-1)
-         *   for the active page, or -1 if on allsky/spotify/summary/settings/sysinfo.
+         *   for the active page, or -1 if on allsky/spotify/clock/summary/settings/sysinfo.
          */
         bool on_spotify = nina_dashboard_is_spotify_page();
         int active_nina_idx = -1;   /* Actual instance index (for data access) */
@@ -1508,7 +1545,8 @@ main_loop:
 
         /* If auto-rotate is active and we're on a NINA instance page but no instances
          * are connected, fall back to the summary page automatically. */
-        if (app_config_get()->auto_rotate_enabled && !on_summary && !on_sysinfo && !on_settings && !on_allsky && !on_spotify) {
+        bool on_clock = nina_dashboard_is_clock_page();
+        if (app_config_get()->auto_rotate_enabled && !on_summary && !on_sysinfo && !on_settings && !on_allsky && !on_spotify && !on_clock) {
             bool any_connected = false;
             for (int i = 0; i < instance_count; i++) {
                 if (nina_connection_is_connected(i)) { any_connected = true; break; }
@@ -1533,6 +1571,7 @@ main_loop:
          *   bit 4  = System Info page (SYSINFO_PAGE_IDX)
          *   bit 5  = AllSky page (PAGE_IDX_ALLSKY)
          *   bit 6  = Spotify page (PAGE_IDX_SPOTIFY)
+         *   bit 7  = Clock page (PAGE_IDX_CLOCK)
          */
         {
             app_config_t *r_cfg = app_config_get();
@@ -1545,11 +1584,11 @@ main_loop:
                     int ena_page_count = total - EXTRA_PAGES;  /* enabled NINA pages only */
 
                     /* Build ordered candidate list from custom rotation order */
-                    int ordered[7];
+                    int ordered[8];
                     int ordered_count = 0;
-                    for (int i = 0; i < 7 && r_cfg->auto_rotate_order[i] != 0xFF; i++) {
+                    for (int i = 0; i < 8 && r_cfg->auto_rotate_order[i] != 0xFF; i++) {
                         int bit_idx = r_cfg->auto_rotate_order[i];
-                        if (bit_idx > 6) continue;
+                        if (bit_idx > 7) continue;
                         /* Check if this page is enabled in bitmask */
                         if (!(page_mask & (1 << bit_idx))) continue;
 
@@ -1567,6 +1606,7 @@ main_loop:
                             case 6:
                                 if (app_config_get()->spotify_enabled) page_idx = PAGE_IDX_SPOTIFY;
                                 break;
+                            case 7: page_idx = PAGE_IDX_CLOCK; break;
                         }
                         if (page_idx < 0) continue;
 
@@ -1912,6 +1952,74 @@ main_loop:
                         nina_alert_trigger(ALERT_HFR, i, hfr);
                     }
                 }
+            }
+        }
+
+        /* ── Idle page override: switch to target page when all NINA instances disconnected ──
+         * Only active when auto-rotate is disabled (auto-rotate takes priority per spec).
+         * Uses 5-second debounce to avoid flashing on transient disconnects. */
+        {
+            app_config_t *idle_cfg = app_config_get();
+            if (idle_cfg->idle_page_override_enabled && !idle_cfg->auto_rotate_enabled) {
+                /* Check if ALL enabled NINA instances are disconnected */
+                bool all_disc = true;
+                bool any_enabled = false;
+                for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+                    if (idle_cfg->instance_enabled[i]) {
+                        any_enabled = true;
+                        if (nina_connection_is_connected(i)) {
+                            all_disc = false;
+                            break;
+                        }
+                    }
+                }
+                if (!any_enabled) all_disc = true;
+
+                if (all_disc) {
+                    if (idle_all_disconnected_since_us == 0) {
+                        idle_all_disconnected_since_us = esp_timer_get_time();
+                    }
+                    int64_t elapsed_us = esp_timer_get_time() - idle_all_disconnected_since_us;
+                    if (!idle_override_active && !idle_override_suppressed && elapsed_us >= 5000000) {  /* 5 s debounce */
+                        idle_saved_page = current_active;
+                        int target = idle_target_to_page_index(idle_cfg->idle_page_override_target);
+                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_dashboard_show_page(target, instance_count);
+                            bsp_display_unlock();
+                        }
+                        idle_override_active = true;
+                        page_changed = true;
+                        ESP_LOGI(TAG, "Idle override: switching to page %d (saved %d)", target, idle_saved_page);
+                    }
+                } else {
+                    idle_all_disconnected_since_us = 0;
+                    idle_override_suppressed = false;  /* Reconnected — allow idle override on next disconnect */
+                    if (idle_override_active) {
+                        /* Reconnected — restore saved page (or summary if saved was a still-disconnected NINA page) */
+                        int restore = idle_saved_page;
+                        if (restore >= NINA_PAGE_OFFSET && restore < NINA_PAGE_OFFSET + page_count) {
+                            int inst = nina_dashboard_page_to_instance(restore - NINA_PAGE_OFFSET);
+                            if (inst >= 0 && inst < MAX_NINA_INSTANCES
+                                && idle_cfg->instance_enabled[inst]
+                                && !nina_connection_is_connected(inst)) {
+                                restore = PAGE_IDX_SUMMARY;
+                            }
+                        }
+                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_dashboard_show_page(restore, instance_count);
+                            bsp_display_unlock();
+                        }
+                        idle_override_active = false;
+                        page_changed = true;
+                        ESP_LOGI(TAG, "Idle override: restoring page %d", restore);
+                    }
+                }
+            }
+
+            /* Reset idle override state if feature disabled while active */
+            if (!idle_cfg->idle_page_override_enabled && idle_override_active) {
+                idle_override_active = false;
+                idle_all_disconnected_since_us = 0;
             }
         }
 

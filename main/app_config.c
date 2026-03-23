@@ -697,8 +697,8 @@ static void set_defaults(app_config_t *cfg) {
     cfg->auto_rotate_effect = 0;
     cfg->auto_rotate_skip_disconnected = true;
     cfg->auto_rotate_pages = 0x0E;  // Default: all NINA instances (bits 1-3)
-    /* Default rotation order: Summary, AllSky, Spotify, NINA1, NINA2, NINA3, SysInfo */
-    for (int i = 0; i < 7; i++) cfg->auto_rotate_order[i] = (uint8_t)i;
+    /* Default rotation order: Summary, AllSky, Spotify, Clock, NINA1, NINA2, NINA3, SysInfo */
+    for (int i = 0; i < 8; i++) cfg->auto_rotate_order[i] = (uint8_t)i;
     cfg->update_rate_s = 5;
     cfg->graph_update_interval_s = 10;
     cfg->connection_timeout_s = 6;
@@ -753,6 +753,19 @@ static void set_defaults(app_config_t *cfg) {
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         cfg->toast_instance_muted[i] = false;
     }
+
+    // Weather defaults
+    cfg->weather_provider = 0;
+    memset(cfg->weather_api_key, 0, sizeof(cfg->weather_api_key));
+    cfg->weather_lat = 0.0f;
+    cfg->weather_lon = 0.0f;
+    memset(cfg->weather_location_name, 0, sizeof(cfg->weather_location_name));
+    cfg->weather_poll_interval_s = 900;
+    cfg->weather_units = 0;
+    cfg->weather_time_format = 0;
+    cfg->idle_page_override_enabled = false;
+    cfg->idle_page_override_target = IDLE_TARGET_SUMMARY;
+    cfg->idle_page_persistent = false;
 }
 
 /**
@@ -1716,6 +1729,96 @@ static void migrate_from_v23(const app_config_v23_t *old, app_config_t *cfg) {
     ESP_LOGI(TAG, "Migrated config from v23 to v%d", APP_CONFIG_VERSION);
 }
 
+/* --- v28 → v29 migration (added weather/idle-override fields, clock page insertion) --- */
+static void migrate_from_v28(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    if (raw_size < sizeof(app_config_v28_t)) {
+        ESP_LOGW(TAG, "v28 blob too small (%d < %d)", (int)raw_size, (int)sizeof(app_config_v28_t));
+        return;
+    }
+    const app_config_v28_t *old = (const app_config_v28_t *)raw;
+
+    /* Copy all v28 fields */
+    memcpy(cfg->api_url, old->api_url, sizeof(cfg->api_url));
+    memcpy(cfg->ntp_server, old->ntp_server, sizeof(cfg->ntp_server));
+    memcpy(cfg->tz_string, old->tz_string, sizeof(cfg->tz_string));
+    memcpy(cfg->filter_colors, old->filter_colors, sizeof(cfg->filter_colors));
+    memcpy(cfg->rms_thresholds, old->rms_thresholds, sizeof(cfg->rms_thresholds));
+    memcpy(cfg->hfr_thresholds, old->hfr_thresholds, sizeof(cfg->hfr_thresholds));
+    cfg->theme_index = old->theme_index;
+    cfg->brightness = old->brightness;
+    cfg->color_brightness = old->color_brightness;
+    cfg->mqtt_enabled = old->mqtt_enabled;
+    memcpy(cfg->mqtt_broker_url, old->mqtt_broker_url, sizeof(cfg->mqtt_broker_url));
+    memcpy(cfg->mqtt_username, old->mqtt_username, sizeof(cfg->mqtt_username));
+    memcpy(cfg->mqtt_password, old->mqtt_password, sizeof(cfg->mqtt_password));
+    memcpy(cfg->mqtt_topic_prefix, old->mqtt_topic_prefix, sizeof(cfg->mqtt_topic_prefix));
+    cfg->mqtt_port = old->mqtt_port;
+
+    /* Migrate active_page_override: clock page inserted at index 2,
+     * so existing indices >= 2 shift up by 1. */
+    if (old->active_page_override >= 2) {
+        cfg->active_page_override = old->active_page_override + 1;
+    } else {
+        cfg->active_page_override = old->active_page_override;
+    }
+
+    cfg->auto_rotate_enabled = old->auto_rotate_enabled;
+    cfg->auto_rotate_interval_s = old->auto_rotate_interval_s;
+    cfg->auto_rotate_effect = old->auto_rotate_effect;
+    cfg->auto_rotate_skip_disconnected = old->auto_rotate_skip_disconnected;
+    cfg->auto_rotate_pages = old->auto_rotate_pages;
+    cfg->update_rate_s = old->update_rate_s;
+    cfg->graph_update_interval_s = old->graph_update_interval_s;
+    cfg->connection_timeout_s = old->connection_timeout_s;
+    cfg->toast_duration_s = old->toast_duration_s;
+    cfg->debug_mode = old->debug_mode;
+    memcpy(cfg->instance_enabled, old->instance_enabled, sizeof(cfg->instance_enabled));
+    cfg->screen_sleep_enabled = old->screen_sleep_enabled;
+    cfg->screen_sleep_timeout_s = old->screen_sleep_timeout_s;
+    cfg->alert_flash_enabled = old->alert_flash_enabled;
+    cfg->idle_poll_interval_s = old->idle_poll_interval_s;
+    cfg->wifi_power_save = old->wifi_power_save;
+    cfg->widget_style = old->widget_style;
+    cfg->auto_update_check = old->auto_update_check;
+    cfg->update_channel = old->update_channel;
+    cfg->deep_sleep_enabled = old->deep_sleep_enabled;
+    cfg->deep_sleep_wake_timer_s = old->deep_sleep_wake_timer_s;
+    cfg->deep_sleep_on_idle = old->deep_sleep_on_idle;
+    cfg->screen_rotation = old->screen_rotation;
+    memcpy(cfg->hostname, old->hostname, sizeof(cfg->hostname));
+    memcpy(cfg->allsky_hostname, old->allsky_hostname, sizeof(cfg->allsky_hostname));
+    cfg->allsky_update_interval_s = old->allsky_update_interval_s;
+    cfg->allsky_dew_offset = old->allsky_dew_offset;
+    memcpy(cfg->allsky_field_config, old->allsky_field_config, sizeof(cfg->allsky_field_config));
+    memcpy(cfg->allsky_thresholds, old->allsky_thresholds, sizeof(cfg->allsky_thresholds));
+    cfg->allsky_enabled = old->allsky_enabled;
+    cfg->demo_mode = old->demo_mode;
+    cfg->spotify_enabled = old->spotify_enabled;
+    memcpy(cfg->spotify_client_id, old->spotify_client_id, sizeof(cfg->spotify_client_id));
+    cfg->spotify_poll_interval_ms = old->spotify_poll_interval_ms;
+    cfg->spotify_show_progress_bar = old->spotify_show_progress_bar;
+    cfg->spotify_overlay_timeout_s = old->spotify_overlay_timeout_s;
+    cfg->spotify_minimal_mode = old->spotify_minimal_mode;
+    cfg->spotify_scroll_text = old->spotify_scroll_text;
+    memcpy(cfg->wifi_networks, old->wifi_networks, sizeof(cfg->wifi_networks));
+    cfg->spotify_overlay_visible = old->spotify_overlay_visible;
+
+    /* Copy 7 elements of auto_rotate_order, set 8th to 0 */
+    memcpy(cfg->auto_rotate_order, old->auto_rotate_order, 7);
+    cfg->auto_rotate_order[7] = 0;
+
+    cfg->toast_aggregation_window_s = old->toast_aggregation_window_s;
+    cfg->toast_notify_mask = old->toast_notify_mask;
+    memcpy(cfg->toast_instance_muted, old->toast_instance_muted, sizeof(cfg->toast_instance_muted));
+
+    /* New weather/idle fields stay at defaults from set_defaults() */
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v28 to v%d", APP_CONFIG_VERSION);
+}
+
 /* --- v27 → v28 migration (added toast notification overhaul fields) --- */
 static void migrate_from_v27(const void *raw, size_t raw_size, app_config_t *cfg)
 {
@@ -1739,7 +1842,7 @@ static void migrate_from_v26(const void *raw, size_t raw_size, app_config_t *cfg
      * Copy old data — new trailing field stays at default from set_defaults(). */
     size_t copy = raw_size < sizeof(app_config_t) ? raw_size : sizeof(app_config_t);
     memcpy(cfg, raw, copy);
-    for (int i = 0; i < 7; i++) cfg->auto_rotate_order[i] = (uint8_t)i;
+    for (int i = 0; i < 8; i++) cfg->auto_rotate_order[i] = (uint8_t)i;
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v26 to v%d", APP_CONFIG_VERSION);
 }
@@ -2027,7 +2130,7 @@ static bool validate_config(app_config_t *cfg) {
     }
     /* Validate rotation order — reset to default if first entry is 0xFF (uninitialised) */
     if (cfg->auto_rotate_order[0] == 0xFF) {
-        for (int i = 0; i < 7; i++) cfg->auto_rotate_order[i] = (uint8_t)i;
+        for (int i = 0; i < 8; i++) cfg->auto_rotate_order[i] = (uint8_t)i;
         fixed = true;
     }
     if (cfg->update_rate_s < 1 || cfg->update_rate_s > 10) {
@@ -2137,6 +2240,12 @@ void app_config_init(void) {
             nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(handle);
         }
+    } else if (version_check == 28) {
+        /* v28 → v29: added weather/idle-override fields, clock page insertion */
+        migrate_from_v28(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 27) {
         /* v27 → v28: added toast notification overhaul fields */
         migrate_from_v27(raw, stored_size, &s_config);

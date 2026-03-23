@@ -106,6 +106,12 @@ bool nina_dashboard_is_spotify_page(void);
 void nina_dashboard_set_spotify_enabled(bool enabled);
 
 /**
+ * @brief Check if the active page is the clock page
+ * @return true if the clock page is currently shown
+ */
+bool nina_dashboard_is_clock_page(void);
+
+/**
  * @brief Check if the active page is the summary page
  * @return true if the summary page is currently shown
  */

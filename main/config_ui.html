@@ -497,6 +497,7 @@
       <button class="tab-btn" data-tab="behavior">Behavior</button>
       <button class="tab-btn" data-tab="system">System</button>
       <button class="tab-btn" data-tab="allsky">AllSky</button>
+      <button class="tab-btn" data-tab="clock">Clock</button>
       <button class="tab-btn" data-tab="spotify">Spotify</button>
       <button class="tab-btn" data-tab="backup">Backup</button>
     </div>
@@ -528,6 +529,10 @@
       <button class="nav-btn" data-tab="allsky">
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41m11.32-11.32l1.41-1.41"/></svg>
         AllSky
+      </button>
+      <button class="nav-btn" data-tab="clock">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Clock
       </button>
       <button class="nav-btn" data-tab="spotify">
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>
@@ -605,6 +610,7 @@
           <div>
             <span class="toggle-label">Auto Cycle</span>
             <div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">Rotate through pages automatically</div>
+            <div class="field-hint" style="margin-top:2px">When enabled, overrides idle page switching</div>
           </div>
           <label class="toggle"><input type="checkbox" id="auto_cycle_toggle" onchange="toggleAutoCycle();checkDirty()"><span class="toggle-track"></span></label>
         </div>
@@ -634,6 +640,33 @@
             <div class="pn-section-label">Pages in Rotation</div>
             <div style="font-size:0.72rem;color:var(--text-muted);margin:-8px 0 10px;opacity:0.7">Drag to reorder</div>
             <div class="pn-pill-grid reorderable" id="arp-container"></div>
+          </div>
+        </div>
+
+        <div class="pn-divider"></div>
+
+        <div class="toggle-row">
+          <div>
+            <span class="toggle-label">Switch page when no connections</span>
+            <div class="field-hint" style="margin-top:2px">Automatically switches to the selected page when all NINA instances are disconnected. Disabled while auto-rotate is active.</div>
+          </div>
+          <label class="toggle"><input type="checkbox" id="idle_page_override_enabled" onchange="toggleIdleOverride();checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="field" id="idle_target_field" style="display:none;margin-top:12px">
+          <label class="field-label">Target page</label>
+          <select class="input" id="idle_page_override_target">
+            <option value="-1">No Connections (Summary)</option>
+            <option value="0">Clock</option>
+            <option value="1">AllSky</option>
+            <option value="2">Spotify</option>
+            <option value="3">System Info</option>
+          </select>
+          <div class="toggle-row" style="margin-top:12px">
+            <div>
+              <span class="toggle-label">Persistent idle page</span>
+              <div class="field-hint" style="margin-top:2px">Returns to the selected page after manual navigation while idle</div>
+            </div>
+            <label class="toggle"><input type="checkbox" id="idle_page_persistent" onchange="checkDirty()"><span class="toggle-track"></span></label>
           </div>
         </div>
       </div>
@@ -1039,7 +1072,87 @@
 
     </div>
 
-    <!-- ==================== TAB 6: SPOTIFY ==================== -->
+    <!-- ==================== TAB 6: CLOCK & WEATHER ==================== -->
+    <div id="tab-clock" class="tab-panel">
+
+      <div class="card">
+        <div class="card-title">Clock &amp; Weather</div>
+        <div class="field">
+          <label class="field-label">Weather Provider</label>
+          <select class="input" id="weather_provider" onchange="toggleWeatherApiKey();checkDirty()">
+            <option value="0">OpenWeatherMap</option>
+            <option value="1">Open-Meteo (no key needed)</option>
+            <option value="2">Weather Underground</option>
+          </select>
+        </div>
+        <div class="field" id="weather_api_key_field">
+          <label class="field-label">API Key</label>
+          <input type="text" class="input" id="weather_api_key" placeholder="Enter API key">
+        </div>
+        <div class="field" id="weather_city_lookup_field">
+          <label class="field-label">Location</label>
+          <div style="display:flex;gap:10px">
+            <input type="text" class="input" id="weather_location_search" placeholder="Search city name..." style="flex:1">
+            <button class="btn btn-outline" onclick="lookupCity()" type="button">Look up</button>
+          </div>
+          <div id="city_results" style="display:none;margin-top:6px;background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.08);border-radius:10px;max-height:200px;overflow-y:auto"></div>
+        </div>
+        <div class="field" id="weather_location_name_field">
+          <label class="field-label">Location Name</label>
+          <input type="text" class="input" id="weather_location_name" readonly placeholder="Auto-filled by lookup" style="opacity:0.7">
+        </div>
+        <div class="field" id="weather_station_id_field" style="display:none">
+          <label class="field-label">Station ID</label>
+          <input type="text" class="input" id="weather_station_id" placeholder="e.g. KMOOFAL42">
+          <div class="field-hint">Personal Weather Station ID for Weather Underground</div>
+        </div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Latitude</label>
+            <input type="number" class="input" id="weather_lat" step="0.0001" placeholder="0.0000">
+          </div>
+          <div class="field">
+            <label class="field-label">Longitude</label>
+            <input type="number" class="input" id="weather_lon" step="0.0001" placeholder="0.0000">
+          </div>
+        </div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Temperature Units</label>
+            <select class="input" id="weather_units">
+              <option value="0">&deg;F Imperial</option>
+              <option value="1">&deg;C Metric</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field-label">Time Format</label>
+            <select class="input" id="weather_time_format">
+              <option value="0">12-hour (AM/PM)</option>
+              <option value="1">24-hour</option>
+            </select>
+          </div>
+        </div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Update Interval</label>
+            <select class="input" id="weather_poll_interval_s">
+              <option value="900">15 minutes</option>
+              <option value="1200">20 minutes</option>
+              <option value="1800">30 minutes</option>
+              <option value="2700">45 minutes</option>
+              <option value="3600">60 minutes</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field-label">Timezone</label>
+            <select class="input" id="tz_string"></select>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ==================== TAB 7: SPOTIFY ==================== -->
     <div id="tab-spotify" class="tab-panel">
 
       <div class="card">
@@ -1270,7 +1383,8 @@
         ['arp_nina3','NINA 3'],
         ['arp_sysinfo','System Info'],
         ['arp_allsky','AllSky'],
-        ['arp_spotify','Spotify']
+        ['arp_spotify','Spotify'],
+        ['arp_clock','Clock']
       ];
       var c=$('arp-container');
       if(!c) return;
@@ -1399,6 +1513,7 @@
       behavior:{color:'#8b5cf6', rgb:'139, 92, 246'},
       system:  {color:'#f43f5e', rgb:'244, 63, 94'},
       allsky:  {color:'#3b82f6', rgb:'59, 130, 246'},
+      clock:   {color:'#e8e2d4', rgb:'232, 226, 212'},
       spotify: {color:'#1db954', rgb:'29, 185, 84'},
       backup:  {color:'#f59e0b', rgb:'245, 158, 11'}
     };
@@ -1467,10 +1582,11 @@
       var spotifyOn=$('spotify_enabled')?$('spotify_enabled').checked:false;
 
       var pages=[];
-      pages.push({value:'2', label:'Summary'});
+      pages.push({value:'3', label:'Summary'});
       if(allskyOn) pages.push({value:'0', label:'AllSky'});
       if(spotifyOn) pages.push({value:'1', label:'Spotify'});
-      var pageIdx=3;
+      pages.push({value:'2', label:'Clock'});
+      var pageIdx=4;
       for(var i=0;i<3;i++){
         if(urls[i].length>0&&enabled[i]){
           pages.push({value:''+pageIdx, label:urls[i]||('NINA '+(i+1))});
@@ -1644,8 +1760,8 @@
     }
 
     /* === Rotation Bitmask === */
-    const arpIds=['arp_summary','arp_nina1','arp_nina2','arp_nina3','arp_sysinfo','arp_allsky','arp_spotify'];
-    const arpBits=[0x01,0x02,0x04,0x08,0x10,0x20,0x40];
+    const arpIds=['arp_summary','arp_nina1','arp_nina2','arp_nina3','arp_sysinfo','arp_allsky','arp_spotify','arp_clock'];
+    const arpBits=[0x01,0x02,0x04,0x08,0x10,0x20,0x40,0x80];
 
     function getRotatePages(){
       var mask=0;
@@ -1759,7 +1875,19 @@
         spotify_minimal_mode:!!$('spotify_minimal_mode').checked,
         spotify_overlay_visible:!!$('spotify_overlay_visible').checked,
         spotify_scroll_text:!!$('spotify_scroll_text').checked,
-        spotify_overlay_timeout_s:parseInt($('spotifyOverlayTimeout').value)||0
+        spotify_overlay_timeout_s:parseInt($('spotifyOverlayTimeout').value)||0,
+        weather_provider:parseInt($('weather_provider').value)||0,
+        weather_api_key:$('weather_api_key').value.trim(),
+        weather_lat:parseFloat($('weather_lat').value)||0,
+        weather_lon:parseFloat($('weather_lon').value)||0,
+        weather_location_name:($('weather_provider').value==='2'?$('weather_station_id').value.trim():$('weather_location_name').value.trim()),
+        weather_poll_interval_s:parseInt($('weather_poll_interval_s').value)||900,
+        weather_units:parseInt($('weather_units').value)||0,
+        weather_time_format:parseInt($('weather_time_format').value)||0,
+        tz_string:$('tz_string').value,
+        idle_page_override_enabled:!!$('idle_page_override_enabled').checked,
+        idle_page_override_target:parseInt($('idle_page_override_target').value),
+        idle_page_persistent:!!$('idle_page_persistent').checked
       };
 
       var nets=[];
@@ -1901,6 +2029,25 @@
       if($('spotifyOverlayTimeout')) $('spotifyOverlayTimeout').value=data.spotify_overlay_timeout_s!=null?data.spotify_overlay_timeout_s:5;
       updateSpotifyEnabledUI();
 
+      // Clock & Weather fields
+      if($('weather_provider')) $('weather_provider').value=data.weather_provider||0;
+      if($('weather_api_key')) $('weather_api_key').value=data.weather_api_key||'';
+      if($('weather_lat')) $('weather_lat').value=data.weather_lat||'';
+      if($('weather_lon')) $('weather_lon').value=data.weather_lon||'';
+      if($('weather_location_name')) $('weather_location_name').value=data.weather_location_name||'';
+      if($('weather_station_id')) $('weather_station_id').value=(data.weather_provider==2)?(data.weather_location_name||''):'';
+      if($('weather_poll_interval_s')) $('weather_poll_interval_s').value=data.weather_poll_interval_s||900;
+      if($('weather_units')) $('weather_units').value=data.weather_units||0;
+      if($('weather_time_format')) $('weather_time_format').value=data.weather_time_format||0;
+      if($('tz_string')) $('tz_string').value=data.tz_string||'';
+      toggleWeatherApiKey();
+
+      // Idle override fields
+      if($('idle_page_override_enabled')) $('idle_page_override_enabled').checked=!!data.idle_page_override_enabled;
+      if($('idle_page_override_target')) $('idle_page_override_target').value=data.idle_page_override_target!=null?data.idle_page_override_target:-1;
+      if($('idle_page_persistent')) $('idle_page_persistent').checked=!!data.idle_page_persistent;
+      toggleIdleOverride();
+
       /* Backup tab version info */
       if ($('backupCurrentVersion')) $('backupCurrentVersion').textContent = 'v' + (data.config_version || '?');
       if ($('backupFirmwareVersion')) {
@@ -1920,6 +2067,134 @@
         loadedConfig='';
       }
       checkDirty();
+    }
+
+    /* === Timezone Data === */
+    const TIMEZONES = [
+      {label: "US/Eastern (EST/EDT)", value: "EST5EDT,M3.2.0,M11.1.0"},
+      {label: "US/Central (CST/CDT)", value: "CST6CDT,M3.2.0,M11.1.0"},
+      {label: "US/Mountain (MST/MDT)", value: "MST7MDT,M3.2.0,M11.1.0"},
+      {label: "US/Pacific (PST/PDT)", value: "PST8PDT,M3.2.0,M11.1.0"},
+      {label: "US/Alaska (AKST/AKDT)", value: "AKST9AKDT,M3.2.0,M11.1.0"},
+      {label: "US/Hawaii (HST)", value: "HST10"},
+      {label: "US/Arizona (MST, no DST)", value: "MST7"},
+      {label: "Canada/Atlantic (AST/ADT)", value: "AST4ADT,M3.2.0,M11.1.0"},
+      {label: "Canada/Newfoundland (NST/NDT)", value: "NST3:30NDT,M3.2.0,M11.1.0"},
+      {label: "Mexico/Central (CST/CDT)", value: "CST6CDT,M4.1.0,M10.5.0"},
+      {label: "Brazil/Sao Paulo (BRT)", value: "BRT3"},
+      {label: "Argentina (ART)", value: "ART3"},
+      {label: "Chile/Santiago (CLT/CLST)", value: "CLT4CLST,M10.2.6/24,M3.2.6/24"},
+      {label: "Colombia (COT)", value: "COT5"},
+      {label: "Europe/London (GMT/BST)", value: "GMT0BST,M3.5.0/1,M10.5.0"},
+      {label: "Europe/Paris (CET/CEST)", value: "CET-1CEST,M3.5.0,M10.5.0/3"},
+      {label: "Europe/Berlin (CET/CEST)", value: "CET-1CEST,M3.5.0,M10.5.0/3"},
+      {label: "Europe/Madrid (CET/CEST)", value: "CET-1CEST,M3.5.0,M10.5.0/3"},
+      {label: "Europe/Rome (CET/CEST)", value: "CET-1CEST,M3.5.0,M10.5.0/3"},
+      {label: "Europe/Amsterdam (CET/CEST)", value: "CET-1CEST,M3.5.0,M10.5.0/3"},
+      {label: "Europe/Stockholm (CET/CEST)", value: "CET-1CEST,M3.5.0,M10.5.0/3"},
+      {label: "Europe/Warsaw (CET/CEST)", value: "CET-1CEST,M3.5.0,M10.5.0/3"},
+      {label: "Europe/Athens (EET/EEST)", value: "EET-2EEST,M3.5.0/3,M10.5.0/4"},
+      {label: "Europe/Helsinki (EET/EEST)", value: "EET-2EEST,M3.5.0/3,M10.5.0/4"},
+      {label: "Europe/Bucharest (EET/EEST)", value: "EET-2EEST,M3.5.0/3,M10.5.0/4"},
+      {label: "Europe/Istanbul (TRT)", value: "TRT-3"},
+      {label: "Europe/Moscow (MSK)", value: "MSK-3"},
+      {label: "Asia/Dubai (GST)", value: "GST-4"},
+      {label: "Asia/Kolkata (IST)", value: "IST-5:30"},
+      {label: "Asia/Kathmandu (NPT)", value: "NPT-5:45"},
+      {label: "Asia/Dhaka (BST)", value: "BST-6"},
+      {label: "Asia/Bangkok (ICT)", value: "ICT-7"},
+      {label: "Asia/Ho Chi Minh (ICT)", value: "ICT-7"},
+      {label: "Asia/Shanghai (CST)", value: "CST-8"},
+      {label: "Asia/Hong Kong (HKT)", value: "HKT-8"},
+      {label: "Asia/Singapore (SGT)", value: "SGT-8"},
+      {label: "Asia/Taipei (CST)", value: "CST-8"},
+      {label: "Asia/Tokyo (JST)", value: "JST-9"},
+      {label: "Asia/Seoul (KST)", value: "KST-9"},
+      {label: "Australia/Perth (AWST)", value: "AWST-8"},
+      {label: "Australia/Adelaide (ACST/ACDT)", value: "ACST-9:30ACDT,M10.1.0,M4.1.0/3"},
+      {label: "Australia/Sydney (AEST/AEDT)", value: "AEST-10AEDT,M10.1.0,M4.1.0/3"},
+      {label: "Australia/Brisbane (AEST)", value: "AEST-10"},
+      {label: "Pacific/Auckland (NZST/NZDT)", value: "NZST-12NZDT,M9.5.0,M4.1.0/3"},
+      {label: "Africa/Cairo (EET)", value: "EET-2"},
+      {label: "Africa/Johannesburg (SAST)", value: "SAST-2"},
+      {label: "Africa/Lagos (WAT)", value: "WAT-1"},
+      {label: "Africa/Nairobi (EAT)", value: "EAT-3"},
+      {label: "UTC", value: "UTC0"}
+    ];
+
+    function populateTimezones(){
+      var sel=$('tz_string');
+      if(!sel) return;
+      sel.innerHTML='<option value="">Select timezone...</option>';
+      TIMEZONES.forEach(function(tz){
+        var opt=document.createElement('option');
+        opt.value=tz.value;
+        opt.textContent=tz.label;
+        sel.appendChild(opt);
+      });
+    }
+
+    /* === City Lookup === */
+    async function lookupCity(){
+      var query=$('weather_location_search').value.trim();
+      if(!query) return;
+      var resultsDiv=$('city_results');
+      resultsDiv.style.display='block';
+      resultsDiv.innerHTML='<div style="padding:8px;color:#888;">Searching...</div>';
+      try{
+        var resp=await fetch('https://geocoding-api.open-meteo.com/v1/search?name='+encodeURIComponent(query)+'&count=5&language=en');
+        var data=await resp.json();
+        if(!data.results||data.results.length===0){
+          resultsDiv.innerHTML='<div style="padding:8px;color:#888;">No results found</div>';
+          return;
+        }
+        resultsDiv.innerHTML='';
+        data.results.forEach(function(r){
+          var div=document.createElement('div');
+          div.style.cssText='padding:8px;cursor:pointer;border-bottom:1px solid #333;';
+          div.textContent=r.name+(r.admin1?', '+r.admin1:'')+', '+r.country;
+          div.onmouseover=function(){div.style.background='#333';};
+          div.onmouseout=function(){div.style.background='transparent';};
+          div.onclick=function(){
+            $('weather_lat').value=r.latitude.toFixed(4);
+            $('weather_lon').value=r.longitude.toFixed(4);
+            $('weather_location_name').value=r.name+(r.admin1?', '+r.admin1:'');
+            resultsDiv.style.display='none';
+            checkDirty();
+          };
+          resultsDiv.appendChild(div);
+        });
+      }catch(e){
+        resultsDiv.innerHTML='<div style="padding:8px;color:#f44;">Lookup failed: '+e.message+'</div>';
+      }
+    }
+
+    /* === Weather & Idle Toggle Helpers === */
+    var _lastProvider=null;
+    function toggleWeatherApiKey(clearFields){
+      var provider=$('weather_provider').value;
+      var isWU=(provider==='2');
+      var isOpenMeteo=(provider==='1');
+      $('weather_api_key_field').style.display=isOpenMeteo?'none':'';
+      $('weather_city_lookup_field').style.display=isWU?'none':'';
+      $('weather_location_name_field').style.display=isWU?'none':'';
+      $('weather_station_id_field').style.display=isWU?'':'none';
+      /* Clear provider-specific fields when switching providers */
+      if(_lastProvider!==null && _lastProvider!==provider){
+        $('weather_api_key').value='';
+        $('weather_location_name').value='';
+        $('weather_station_id').value='';
+        $('weather_lat').value='';
+        $('weather_lon').value='';
+        if($('city_results')) $('city_results').style.display='none';
+        if($('weather_location_search')) $('weather_location_search').value='';
+      }
+      _lastProvider=provider;
+    }
+
+    function toggleIdleOverride(){
+      var enabled=$('idle_page_override_enabled').checked;
+      $('idle_target_field').style.display=enabled?'':'none';
     }
 
     function loadConfig(){
@@ -2883,6 +3158,7 @@
     }
 
     /* === Init === */
+    populateTimezones();
     loadConfig();
     loadVersion();
   </script>
