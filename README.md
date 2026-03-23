@@ -108,6 +108,17 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
   </tr>
 </table>
 
+### Clock & Weather
+
+<table align="center">
+  <tr>
+    <td align="center"><img src="images/clock-face.jpg" alt="Clock Face with Weather" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Editorial dark clockface with live weather data, hourly forecast bars, and idle page override</em></td>
+  </tr>
+</table>
+
 ### Web Configuration UI
 
 <table align="center">
