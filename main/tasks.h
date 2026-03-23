@@ -64,6 +64,9 @@ void allsky_poll_task(void *arg);
 extern TaskHandle_t spotify_task_handle;
 extern _Atomic bool spotify_page_active;
 
+/** Weather poll task — spawned by weather_client_start() when location is configured. */
+/* (Task handle is internal to weather_client.c; no extern needed here.) */
+
 /** FreeRTOS task: Spotify API poller — fetches currently-playing, album art on track change. */
 void spotify_poll_task(void *arg);
 

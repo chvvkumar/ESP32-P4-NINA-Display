@@ -52,6 +52,11 @@ static lv_obj_t *lbl_toast_duration   = NULL;
 static lv_obj_t *sw_alert_flash       = NULL;
 static lv_obj_t *sw_instance_mute[3]  = {NULL, NULL, NULL};
 
+/* ── Idle Page card ─────────────────────────────────────────────────── */
+static lv_obj_t *sw_idle_override        = NULL;
+static lv_obj_t *dd_idle_target          = NULL;
+static lv_obj_t *idle_target_container   = NULL;
+
 /* ── Rotation dropdown options ───────────────────────────────────────── */
 static const char *rotation_opts = "0\xc2\xb0\n90\xc2\xb0\n180\xc2\xb0\n270\xc2\xb0";
 
@@ -298,6 +303,29 @@ static void instance_mute_toggle_cb(lv_event_t *e) {
 }
 
 /* ════════════════════════════════════════════════════════════════════════
+ *  Idle Page Card Callbacks
+ * ════════════════════════════════════════════════════════════════════════ */
+
+static void idle_override_toggle_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    app_config_t *cfg = app_config_get();
+    cfg->idle_page_override_enabled = lv_obj_has_state(sw_idle_override, LV_STATE_CHECKED);
+    if (cfg->idle_page_override_enabled) {
+        lv_obj_clear_flag(idle_target_container, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(idle_target_container, LV_OBJ_FLAG_HIDDEN);
+    }
+    settings_mark_dirty(false);
+}
+
+static void idle_target_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    app_config_t *cfg = app_config_get();
+    cfg->idle_page_override_target = (int8_t)(lv_dropdown_get_selected(dd_idle_target) - 1);
+    settings_mark_dirty(false);
+}
+
+/* ════════════════════════════════════════════════════════════════════════
  *  Helper — create a labeled stepper row inside a card
  * ════════════════════════════════════════════════════════════════════════ */
 
@@ -349,6 +377,9 @@ void settings_tab_behavior_destroy(void) {
     lbl_toast_duration = NULL;
     sw_alert_flash = NULL;
     for (int i = 0; i < 3; i++) sw_instance_mute[i] = NULL;
+    sw_idle_override = NULL;
+    dd_idle_target = NULL;
+    idle_target_container = NULL;
 }
 
 void settings_tab_behavior_create(lv_obj_t *parent) {
@@ -602,6 +633,73 @@ void settings_tab_behavior_create(lv_obj_t *parent) {
                                 LV_EVENT_VALUE_CHANGED, (void *)(intptr_t)i);
         }
     }
+
+    /* ── Idle Page Card ─────────────────────────────────────────────── */
+    {
+        lv_obj_t *idle_card = settings_make_card(parent, "IDLE PAGE");
+
+        settings_make_toggle_row(idle_card, "Switch page when idle", &sw_idle_override);
+        if (cfg->idle_page_override_enabled) {
+            lv_obj_add_state(sw_idle_override, LV_STATE_CHECKED);
+        }
+        lv_obj_add_event_cb(sw_idle_override, idle_override_toggle_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+        /* Target dropdown (in a container we can show/hide) */
+        idle_target_container = lv_obj_create(idle_card);
+        lv_obj_remove_style_all(idle_target_container);
+        lv_obj_set_width(idle_target_container, LV_PCT(100));
+        lv_obj_set_height(idle_target_container, LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(idle_target_container, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_style_pad_row(idle_target_container, 8, 0);
+        lv_obj_clear_flag(idle_target_container, LV_OBJ_FLAG_SCROLLABLE);
+
+        /* "Target page" label */
+        {
+            lv_obj_t *row = settings_make_row(idle_target_container);
+
+            lv_obj_t *target_lbl = lv_label_create(row);
+            lv_label_set_text(target_lbl, "Target page");
+            lv_obj_set_style_text_font(target_lbl, &lv_font_montserrat_20, 0);
+            if (current_theme) {
+                lv_obj_set_style_text_color(target_lbl,
+                    lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+            }
+
+            dd_idle_target = lv_dropdown_create(row);
+            lv_obj_set_width(dd_idle_target, 200);
+            lv_dropdown_set_options(dd_idle_target,
+                                    "Summary\n"
+                                    "Clock\n"
+                                    "AllSky\n"
+                                    "Spotify\n"
+                                    "System Info");
+
+            /* Map idle_target_t enum to dropdown index:
+             * IDLE_TARGET_SUMMARY(-1)=0, CLOCK(0)=1, ALLSKY(1)=2, SPOTIFY(2)=3, SYSINFO(3)=4 */
+            lv_dropdown_set_selected(dd_idle_target, (uint32_t)(cfg->idle_page_override_target + 1));
+
+            if (current_theme) {
+                lv_obj_set_style_text_color(dd_idle_target,
+                    lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+                lv_obj_set_style_bg_color(dd_idle_target, lv_color_hex(current_theme->bento_bg), 0);
+                lv_obj_set_style_bg_opa(dd_idle_target, LV_OPA_COVER, 0);
+                lv_obj_set_style_border_color(dd_idle_target, lv_color_hex(current_theme->bento_border), 0);
+                lv_obj_set_style_border_width(dd_idle_target, 1, 0);
+            }
+
+            lv_obj_add_event_cb(dd_idle_target, idle_target_cb, LV_EVENT_VALUE_CHANGED, NULL);
+        }
+
+        if (!cfg->idle_page_override_enabled) {
+            lv_obj_add_flag(idle_target_container, LV_OBJ_FLAG_HIDDEN);
+        }
+
+        /* Hint label */
+        lv_obj_t *idle_hint = lv_label_create(idle_card);
+        lv_label_set_text(idle_hint, "Disabled while auto-rotate is active");
+        lv_obj_set_style_text_font(idle_hint, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(idle_hint, lv_color_hex(0x888888), 0);
+    }
 }
 
 /* ════════════════════════════════════════════════════════════════════════
@@ -695,6 +793,20 @@ void settings_tab_behavior_refresh(void) {
             else
                 lv_obj_remove_state(sw_instance_mute[i], LV_STATE_CHECKED);
         }
+    }
+
+    /* Idle page override */
+    if (sw_idle_override) {
+        if (cfg->idle_page_override_enabled) {
+            lv_obj_add_state(sw_idle_override, LV_STATE_CHECKED);
+            if (idle_target_container) lv_obj_clear_flag(idle_target_container, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_remove_state(sw_idle_override, LV_STATE_CHECKED);
+            if (idle_target_container) lv_obj_add_flag(idle_target_container, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    if (dd_idle_target) {
+        lv_dropdown_set_selected(dd_idle_target, (uint32_t)(cfg->idle_page_override_target + 1));
     }
 }
 

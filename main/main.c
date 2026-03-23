@@ -37,6 +37,7 @@
 #include "power_mgmt.h"
 #include "spotify_auth.h"
 #include "spotify_client.h"
+#include "weather_client.h"
 #include "ui/nina_spotify.h"
 #include "wifi_manager.h"
 #include "ui/nina_settings_tabview.h"
@@ -617,6 +618,9 @@ void app_main(void)
         }
     }
 
+    /* Weather client init — creates mutex before dashboard (clock page timer fires immediately) */
+    weather_client_init();
+
     /* ── Build UI: dashboard behind splash, everything starts immediately ── */
     if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
         lv_obj_t *scr = lv_scr_act();
@@ -687,6 +691,8 @@ void app_main(void)
     spotify_auth_init();
     spotify_client_init();
 
+    /* weather_client_init() already called above, before dashboard creation */
+
     /* Allocate task stacks in PSRAM to save internal heap; TCBs stay internal */
     {
         StackType_t *input_stack = heap_caps_malloc(6144 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
@@ -730,6 +736,9 @@ void app_main(void)
                                     &spotify_task_handle, 0);
         }
     }
+
+    /* Weather poll task — always start; task sleeps when no location configured */
+    weather_client_start();
 
     /* Mark this firmware as valid so the bootloader won't roll back.
      * This must come after successful init — if we crash before here,

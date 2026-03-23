@@ -11,9 +11,13 @@
 #include "lvgl.h"
 #include "driver/jpeg_encode.h"
 #include "mqtt_ha.h"
+#include "weather_client.h"
+#include "ui/nina_clock.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
+#include <stdlib.h>
+#include <time.h>
 
 // Trigger hardware side effects when config fields change
 void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t *new_cfg) {
@@ -67,6 +71,27 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
             nina_dashboard_set_allsky_enabled(new_cfg->allsky_enabled);
             bsp_display_unlock();
         }
+    }
+    /* Weather config change — invalidate stale data and force refresh */
+    if (new_cfg->weather_provider != old_cfg->weather_provider ||
+        strcmp(new_cfg->weather_api_key, old_cfg->weather_api_key) != 0 ||
+        strcmp(new_cfg->weather_location_name, old_cfg->weather_location_name) != 0 ||
+        new_cfg->weather_lat != old_cfg->weather_lat ||
+        new_cfg->weather_lon != old_cfg->weather_lon ||
+        new_cfg->weather_poll_interval_s != old_cfg->weather_poll_interval_s ||
+        new_cfg->weather_units != old_cfg->weather_units) {
+        weather_client_invalidate();    /* Clear stale data immediately */
+        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+            clock_page_request_update(); /* Show placeholders immediately */
+            bsp_display_unlock();
+        }
+        weather_client_force_refresh(); /* Wake task to fetch from new provider */
+    }
+    /* Apply timezone immediately */
+    if (strcmp(new_cfg->tz_string, old_cfg->tz_string) != 0 &&
+        new_cfg->tz_string[0] != '\0') {
+        setenv("TZ", new_cfg->tz_string, 1);
+        tzset();
     }
 }
 
