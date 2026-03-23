@@ -28,9 +28,9 @@ static const char *TAG = "clock_ui";
 #define CLK_BG          0x121110  /* Warm near-black */
 #define CLK_PRIMARY     0xE8E2D4  /* Warm cream (time, temp) */
 #define CLK_SECONDARY   0xC8C2B4  /* Muted cream (stat values) */
-#define CLK_TERTIARY    0x7A746A  /* Warm gray (date) */
+#define CLK_TERTIARY    0x908A7E  /* Warm gray (date) */
 #define CLK_DIM         0x6A6458  /* Warm gray (labels, AM/PM, hi/lo) */
-#define CLK_CONDITION   0x7A746A  /* Warm gray (condition text) */
+#define CLK_CONDITION   0x908A7E  /* Warm gray (condition text) */
 #define CLK_RULE        0x2A2622  /* Barely visible warm divider */
 #define CLK_BAR_LABEL   0x5A5448  /* Forecast bar time labels */
 #define CLK_BAR_HOT     0xB86A3A  /* >75 F / >24 C */
@@ -38,7 +38,7 @@ static const char *TAG = "clock_ui";
 #define CLK_BAR_COOL    0x5A7A5A  /* 55-65 F / 13-18 C */
 #define CLK_BAR_COLD    0x4A6A7A  /* <55 F / <13 C */
 
-#define CLOCK_PADDING   60
+#define CLOCK_PADDING   40
 #define FORECAST_BARS   10
 #define BAR_WIDTH       22
 #define BAR_GAP         4
@@ -201,6 +201,7 @@ lv_obj_t *clock_page_create(lv_obj_t *parent) {
     lv_obj_set_flex_flow(clock_root, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(clock_root, LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(clock_root, 12, 0);  /* Comfortable spacing between sections */
     lv_obj_remove_flag(clock_root, LV_OBJ_FLAG_SCROLLABLE);
 
     /* ── Header row (date left, weather right) ── */
@@ -218,9 +219,9 @@ lv_obj_t *clock_page_create(lv_obj_t *parent) {
                           LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_row(date_stack, 2, 0);
 
-    lbl_day  = make_label(date_stack, &lv_font_overpass_16, CLK_TERTIARY, 2, "---");
-    lbl_date = make_label(date_stack, &lv_font_overpass_16, CLK_TERTIARY, 2, "---");
-    lbl_year = make_label(date_stack, &lv_font_overpass_16, CLK_TERTIARY, 2, "---");
+    lbl_day  = make_label(date_stack, &lv_font_overpass_27, CLK_TERTIARY, 2, "---");
+    lbl_date = make_label(date_stack, &lv_font_overpass_27, CLK_TERTIARY, 2, "---");
+    lbl_year = make_label(date_stack, &lv_font_overpass_27, CLK_TERTIARY, 2, "---");
 
     /* Weather stack (right) */
     lv_obj_t *weather_stack = make_container(header_row);
@@ -244,7 +245,7 @@ lv_obj_t *clock_page_create(lv_obj_t *parent) {
     lv_obj_set_style_pad_top(lbl_deg, 4, 0);
     lv_obj_add_flag(lbl_deg, LV_OBJ_FLAG_HIDDEN);  /* Hidden until weather data */
 
-    lbl_cond = make_label(weather_stack, &lv_font_overpass_16, CLK_CONDITION, 2, "--");
+    lbl_cond = make_label(weather_stack, &lv_font_overpass_27, CLK_CONDITION, 2, "--");
     lbl_hilo = make_label(weather_stack, &lv_font_overpass_16, CLK_DIM, 0, "--");
 
     /* ── Rule 1 ── */
