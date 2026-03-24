@@ -21,6 +21,7 @@
 #include <math.h>
 
 #include "esp_log.h"
+#include "nina_idle_indicator.h"
 static const char *TAG = "allsky_ui";
 
 /* ── Quadrant widget storage ─────────────────────────────────────────── */
@@ -607,6 +608,8 @@ lv_obj_t *allsky_page_create(lv_obj_t *parent) {
 
     create_quadrant(&quads[2], bot_row, 2); /* ambient */
     create_quadrant(&quads[3], bot_row, 3); /* power */
+
+    nina_idle_indicator_create(allsky_page, LV_ALIGN_TOP_MID, true);
 
     return allsky_page;
 }

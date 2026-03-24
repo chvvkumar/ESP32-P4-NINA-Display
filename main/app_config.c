@@ -766,6 +766,7 @@ static void set_defaults(app_config_t *cfg) {
     cfg->idle_page_override_enabled = false;
     cfg->idle_page_override_target = IDLE_TARGET_SUMMARY;
     cfg->idle_page_persistent = false;
+    cfg->idle_indicator_enabled = true;
 }
 
 /**
@@ -1729,6 +1730,20 @@ static void migrate_from_v23(const app_config_v23_t *old, app_config_t *cfg) {
     ESP_LOGI(TAG, "Migrated config from v23 to v%d", APP_CONFIG_VERSION);
 }
 
+/* --- v29 → v30 migration (added idle_indicator_enabled) --- */
+static void migrate_from_v29(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v29_t) ? raw_size : sizeof(app_config_v29_t);
+    memcpy(cfg, raw, copy);
+
+    /* New field gets its default from set_defaults() (true) */
+    cfg->idle_indicator_enabled = true;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v29 to v%d", APP_CONFIG_VERSION);
+}
+
 /* --- v28 → v29 migration (added weather/idle-override fields, clock page insertion) --- */
 static void migrate_from_v28(const void *raw, size_t raw_size, app_config_t *cfg)
 {
@@ -2240,6 +2255,12 @@ void app_config_init(void) {
             nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(handle);
         }
+    } else if (version_check == 29) {
+        /* v29 → v30: added idle_indicator_enabled */
+        migrate_from_v29(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 28) {
         /* v28 → v29: added weather/idle-override fields, clock page insertion */
         migrate_from_v28(raw, stored_size, &s_config);

@@ -1,0 +1,87 @@
+<h2>Idle Indicator: Visual Approaches</h2>
+<p class="subtitle">720×720 square display. Centered pill at bottom edge when idle override is active.</p>
+
+<div style="display:flex;gap:24px;flex-wrap:wrap;justify-content:center;margin-top:20px;">
+
+  <!-- Option A: Ghost Pill -->
+  <div class="card" data-choice="a" onclick="toggleSelect(this)" style="width:340px;">
+    <div class="card-image">
+      <div style="background:#121110;border-radius:8px;width:300px;height:300px;position:relative;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;margin:0 auto;">
+        <!-- Clock content -->
+        <div style="color:#908A7E;font-size:10px;letter-spacing:2px;margin-bottom:2px;">SUNDAY</div>
+        <div style="color:#E8E2D4;font-size:72px;font-family:Georgia,serif;letter-spacing:-3px;line-height:1;">10:42</div>
+        <div style="color:#6A6458;font-size:10px;margin-top:4px;letter-spacing:1px;">MARCH 23, 2026</div>
+        <!-- Stats row -->
+        <div style="position:absolute;bottom:48px;left:20px;right:20px;display:flex;justify-content:space-around;">
+          <div style="text-align:center;"><div style="color:#C8C2B4;font-size:11px;">62%</div><div style="color:#6A6458;font-size:8px;">HUMIDITY</div></div>
+          <div style="text-align:center;"><div style="color:#C8C2B4;font-size:11px;">48°</div><div style="color:#6A6458;font-size:8px;">DEW</div></div>
+          <div style="text-align:center;"><div style="color:#C8C2B4;font-size:11px;">5mph</div><div style="color:#6A6458;font-size:8px;">WIND</div></div>
+          <div style="text-align:center;"><div style="color:#C8C2B4;font-size:11px;">0</div><div style="color:#6A6458;font-size:8px;">UV</div></div>
+        </div>
+        <!-- Pill -->
+        <div style="position:absolute;bottom:10px;left:50%;transform:translateX(-50%);background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:20px;padding:3px 12px;display:flex;align-items:center;gap:5px;white-space:nowrap;">
+          <div style="width:5px;height:5px;border-radius:50%;background:#ef4444;box-shadow:0 0 6px #ef4444;flex-shrink:0;"></div>
+          <span style="color:rgba(255,255,255,0.35);font-size:9px;letter-spacing:0.5px;">No connections</span>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A: Ghost Pill</h3>
+      <p>Near-invisible frosted glass with tiny red dot. Maximum subtlety — blends into any page background.</p>
+    </div>
+  </div>
+
+  <!-- Option B: Warm Glow Pill -->
+  <div class="card" data-choice="b" onclick="toggleSelect(this)" style="width:340px;">
+    <div class="card-image">
+      <div style="background:#121110;border-radius:8px;width:300px;height:300px;position:relative;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;margin:0 auto;">
+        <div style="color:#908A7E;font-size:10px;letter-spacing:2px;margin-bottom:2px;">SUNDAY</div>
+        <div style="color:#E8E2D4;font-size:72px;font-family:Georgia,serif;letter-spacing:-3px;line-height:1;">10:42</div>
+        <div style="color:#6A6458;font-size:10px;margin-top:4px;letter-spacing:1px;">MARCH 23, 2026</div>
+        <div style="position:absolute;bottom:48px;left:20px;right:20px;display:flex;justify-content:space-around;">
+          <div style="text-align:center;"><div style="color:#C8C2B4;font-size:11px;">62%</div><div style="color:#6A6458;font-size:8px;">HUMIDITY</div></div>
+          <div style="text-align:center;"><div style="color:#C8C2B4;font-size:11px;">48°</div><div style="color:#6A6458;font-size:8px;">DEW</div></div>
+          <div style="text-align:center;"><div style="color:#C8C2B4;font-size:11px;">5mph</div><div style="color:#6A6458;font-size:8px;">WIND</div></div>
+          <div style="text-align:center;"><div style="color:#C8C2B4;font-size:11px;">0</div><div style="color:#6A6458;font-size:8px;">UV</div></div>
+        </div>
+        <!-- Pill -->
+        <div style="position:absolute;bottom:10px;left:50%;transform:translateX(-50%);background:rgba(127,0,0,0.15);border:1px solid rgba(239,68,68,0.2);border-radius:20px;padding:3px 12px;display:flex;align-items:center;gap:5px;white-space:nowrap;">
+          <div style="width:5px;height:5px;border-radius:50%;background:#ef4444;box-shadow:0 0 8px #ef4444;flex-shrink:0;"></div>
+          <span style="color:rgba(239,68,68,0.5);font-size:9px;letter-spacing:0.5px;">No connections</span>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B: Warm Glow Pill</h3>
+      <p>Red-tinted background with glowing dot. Slightly more noticeable — warm tint signals "something's off".</p>
+    </div>
+  </div>
+
+  <!-- Option C: Toast Pill -->
+  <div class="card" data-choice="c" onclick="toggleSelect(this)" style="width:340px;">
+    <div class="card-image">
+      <div style="background:#121110;border-radius:8px;width:300px;height:300px;position:relative;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;margin:0 auto;">
+        <div style="color:#908A7E;font-size:10px;letter-spacing:2px;margin-bottom:2px;">SUNDAY</div>
+        <div style="color:#E8E2D4;font-size:72px;font-family:Georgia,serif;letter-spacing:-3px;line-height:1;">10:42</div>
+        <div style="color:#6A6458;font-size:10px;margin-top:4px;letter-spacing:1px;">MARCH 23, 2026</div>
+        <div style="position:absolute;bottom:48px;left:20px;right:20px;display:flex;justify-content:space-around;">
+          <div style="text-align:center;"><div style="color:#C8C2B4;font-size:11px;">62%</div><div style="color:#6A6458;font-size:8px;">HUMIDITY</div></div>
+          <div style="text-align:center;"><div style="color:#C8C2B4;font-size:11px;">48°</div><div style="color:#6A6458;font-size:8px;">DEW</div></div>
+          <div style="text-align:center;"><div style="color:#C8C2B4;font-size:11px;">5mph</div><div style="color:#6A6458;font-size:8px;">WIND</div></div>
+          <div style="text-align:center;"><div style="color:#C8C2B4;font-size:11px;">0</div><div style="color:#6A6458;font-size:8px;">UV</div></div>
+        </div>
+        <!-- Pill -->
+        <div style="position:absolute;bottom:10px;left:50%;transform:translateX(-50%);background:#082f49;border:1px solid rgba(12,74,110,0.5);border-radius:20px;padding:3px 12px;display:flex;align-items:center;gap:5px;white-space:nowrap;">
+          <div style="width:5px;height:5px;border-radius:50%;background:#0ea5e9;box-shadow:0 0 8px #0ea5e9;flex-shrink:0;"></div>
+          <span style="color:#f4f4f5;font-size:9px;letter-spacing:0.5px;">No connections</span>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C: Toast Pill</h3>
+      <p>Uses the existing toast info color palette. Most visible, consistent with other notifications in the system.</p>
+    </div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top:20px;">All three transition to "Reconnecting to hostname..." when an instance reconnects, then disappear as the page restores.</p>

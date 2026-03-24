@@ -22,3 +22,9 @@ void clock_page_apply_theme(void);
 
 /** Schedule an immediate UI refresh on the next LVGL tick. Thread-safe. */
 void clock_page_request_update(void);
+
+/** Pause the clock timer (call when page is hidden). */
+void clock_page_on_hide(void);
+
+/** Resume the clock timer aligned to next minute boundary (call when page is shown). */
+void clock_page_on_show(void);

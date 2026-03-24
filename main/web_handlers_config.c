@@ -135,6 +135,7 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
     cJSON_AddBoolToObject(obj, "idle_page_override_enabled", cfg->idle_page_override_enabled);
     cJSON_AddNumberToObject(obj, "idle_page_override_target", cfg->idle_page_override_target);
     cJSON_AddBoolToObject(obj, "idle_page_persistent", cfg->idle_page_persistent);
+    cJSON_AddBoolToObject(obj, "idle_indicator_enabled", cfg->idle_indicator_enabled);
 
     return obj;
 }
@@ -280,6 +281,7 @@ static const backup_field_t s_backup_fields[] = {
     {"idle_page_override_enabled","Idle Override Enabled",  "Behavior", false, false},
     {"idle_page_override_target", "Idle Override Target",   "Behavior", false, false},
     {"idle_page_persistent",     "Idle Page Persistent",   "Behavior", false, false},
+    {"idle_indicator_enabled",   "Idle Indicator Enabled", "Behavior", false, false},
 
     /* Sensitive */
     {"weather_api_key",    "Weather API Key",    "Weather", true, false},
@@ -823,6 +825,7 @@ static app_config_t *parse_config_from_json(cJSON *root)
     JSON_TO_BOOL(root, "idle_page_override_enabled", cfg->idle_page_override_enabled);
     JSON_TO_INT(root, "idle_page_override_target", cfg->idle_page_override_target);
     JSON_TO_BOOL(root, "idle_page_persistent", cfg->idle_page_persistent);
+    JSON_TO_BOOL(root, "idle_indicator_enabled", cfg->idle_indicator_enabled);
 
     return cfg;
 }

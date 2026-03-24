@@ -21,6 +21,7 @@
 #include "nina_event_log.h"
 #include "nina_alerts.h"
 #include "nina_safety.h"
+#include "nina_idle_indicator.h"
 #include "nina_ota_prompt.h"
 #include "ui_styles.h"
 #include "app_config.h"
@@ -151,8 +152,10 @@ static void hide_page_at(int idx) {
         lv_obj_add_flag(spotify_obj, LV_OBJ_FLAG_HIDDEN);
         nina_spotify_on_hide();
     }
-    else if (idx == PAGE_IDX_CLOCK && clock_obj)
+    else if (idx == PAGE_IDX_CLOCK && clock_obj) {
         lv_obj_add_flag(clock_obj, LV_OBJ_FLAG_HIDDEN);
+        clock_page_on_hide();
+    }
     else if (idx == PAGE_IDX_SUMMARY && summary_obj)
         lv_obj_add_flag(summary_obj, LV_OBJ_FLAG_HIDDEN);
     else if (idx >= NINA_PAGE_OFFSET && idx < NINA_PAGE_OFFSET + page_count)
@@ -172,8 +175,10 @@ static void show_page_at(int idx) {
         lv_obj_clear_flag(spotify_obj, LV_OBJ_FLAG_HIDDEN);
         nina_spotify_on_show();
     }
-    else if (idx == PAGE_IDX_CLOCK && clock_obj)
+    else if (idx == PAGE_IDX_CLOCK && clock_obj) {
         lv_obj_clear_flag(clock_obj, LV_OBJ_FLAG_HIDDEN);
+        clock_page_on_show();
+    }
     else if (idx == PAGE_IDX_SUMMARY && summary_obj)
         lv_obj_clear_flag(summary_obj, LV_OBJ_FLAG_HIDDEN);
     else if (idx >= NINA_PAGE_OFFSET && idx < NINA_PAGE_OFFSET + page_count)
@@ -800,6 +805,9 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     update_styles();
 
     scr_dashboard = parent;
+
+    /* Clear stale idle indicator pointers before creating new pages */
+    nina_idle_indicator_reset();
 
     /* Build page-to-instance mapping: only enabled instances get pages */
     page_count = 0;

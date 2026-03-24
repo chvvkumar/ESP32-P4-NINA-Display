@@ -56,6 +56,7 @@ static lv_obj_t *sw_instance_mute[3]  = {NULL, NULL, NULL};
 static lv_obj_t *sw_idle_override        = NULL;
 static lv_obj_t *dd_idle_target          = NULL;
 static lv_obj_t *idle_target_container   = NULL;
+static lv_obj_t *sw_idle_indicator       = NULL;
 
 /* ── Rotation dropdown options ───────────────────────────────────────── */
 static const char *rotation_opts = "0\xc2\xb0\n90\xc2\xb0\n180\xc2\xb0\n270\xc2\xb0";
@@ -325,6 +326,13 @@ static void idle_target_cb(lv_event_t *e) {
     settings_mark_dirty(false);
 }
 
+static void idle_indicator_toggle_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    app_config_get()->idle_indicator_enabled =
+        lv_obj_has_state(sw_idle_indicator, LV_STATE_CHECKED);
+    settings_mark_dirty(false);
+}
+
 /* ════════════════════════════════════════════════════════════════════════
  *  Helper — create a labeled stepper row inside a card
  * ════════════════════════════════════════════════════════════════════════ */
@@ -380,6 +388,7 @@ void settings_tab_behavior_destroy(void) {
     sw_idle_override = NULL;
     dd_idle_target = NULL;
     idle_target_container = NULL;
+    sw_idle_indicator = NULL;
 }
 
 void settings_tab_behavior_create(lv_obj_t *parent) {
@@ -690,6 +699,13 @@ void settings_tab_behavior_create(lv_obj_t *parent) {
             lv_obj_add_event_cb(dd_idle_target, idle_target_cb, LV_EVENT_VALUE_CHANGED, NULL);
         }
 
+        /* Show idle indicator toggle */
+        settings_make_toggle_row(idle_target_container, "Show idle indicator", &sw_idle_indicator);
+        if (cfg->idle_indicator_enabled) {
+            lv_obj_add_state(sw_idle_indicator, LV_STATE_CHECKED);
+        }
+        lv_obj_add_event_cb(sw_idle_indicator, idle_indicator_toggle_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
         if (!cfg->idle_page_override_enabled) {
             lv_obj_add_flag(idle_target_container, LV_OBJ_FLAG_HIDDEN);
         }
@@ -807,6 +823,12 @@ void settings_tab_behavior_refresh(void) {
     }
     if (dd_idle_target) {
         lv_dropdown_set_selected(dd_idle_target, (uint32_t)(cfg->idle_page_override_target + 1));
+    }
+    if (sw_idle_indicator) {
+        if (cfg->idle_indicator_enabled)
+            lv_obj_add_state(sw_idle_indicator, LV_STATE_CHECKED);
+        else
+            lv_obj_remove_state(sw_idle_indicator, LV_STATE_CHECKED);
     }
 }
 

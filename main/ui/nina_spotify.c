@@ -28,6 +28,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include "nina_idle_indicator.h"
 
 /* Embedded Spotify logo PNG (linked via EMBED_FILES) */
 extern const uint8_t spotify_logo_png_start[] asm("_binary_spotify_logo_png_start");
@@ -382,6 +383,8 @@ lv_obj_t *spotify_page_create(lv_obj_t *parent)
 
     /* Start in idle state (overlay hidden, just album art) */
     set_idle_state(true);
+
+    nina_idle_indicator_create(spotify_page, LV_ALIGN_BOTTOM_MID, false);
 
     return spotify_page;
 }

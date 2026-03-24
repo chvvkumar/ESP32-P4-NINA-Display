@@ -13,6 +13,7 @@
 #include "mqtt_ha.h"
 #include "weather_client.h"
 #include "ui/nina_clock.h"
+#include "ui/nina_idle_indicator.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
@@ -86,6 +87,11 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
             bsp_display_unlock();
         }
         weather_client_force_refresh(); /* Wake task to fetch from new provider */
+    }
+    /* Idle indicator toggle — hide immediately when disabled;
+     * when re-enabled, tasks.c loop will show it on the next cycle */
+    if (!new_cfg->idle_indicator_enabled && old_cfg->idle_indicator_enabled) {
+        nina_idle_indicator_set_active(false);
     }
     /* Apply timezone immediately */
     if (strcmp(new_cfg->tz_string, old_cfg->tz_string) != 0 &&

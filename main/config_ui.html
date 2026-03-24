@@ -668,6 +668,13 @@
             </div>
             <label class="toggle"><input type="checkbox" id="idle_page_persistent" onchange="checkDirty()"><span class="toggle-track"></span></label>
           </div>
+          <div class="toggle-row" style="margin-top:12px">
+            <div>
+              <span class="toggle-label">Show idle indicator</span>
+              <div class="field-hint" style="margin-top:2px">Shows a small status dot on the idle page when all NINA instances are disconnected</div>
+            </div>
+            <label class="toggle"><input type="checkbox" id="idle_indicator_enabled" onchange="checkDirty()"><span class="toggle-track"></span></label>
+          </div>
         </div>
       </div>
     </div>
@@ -1887,7 +1894,8 @@
         tz_string:$('tz_string').value,
         idle_page_override_enabled:!!$('idle_page_override_enabled').checked,
         idle_page_override_target:parseInt($('idle_page_override_target').value),
-        idle_page_persistent:!!$('idle_page_persistent').checked
+        idle_page_persistent:!!$('idle_page_persistent').checked,
+        idle_indicator_enabled:!!$('idle_indicator_enabled').checked
       };
 
       var nets=[];
@@ -2046,6 +2054,7 @@
       if($('idle_page_override_enabled')) $('idle_page_override_enabled').checked=!!data.idle_page_override_enabled;
       if($('idle_page_override_target')) $('idle_page_override_target').value=data.idle_page_override_target!=null?data.idle_page_override_target:-1;
       if($('idle_page_persistent')) $('idle_page_persistent').checked=!!data.idle_page_persistent;
+      if($('idle_indicator_enabled')) $('idle_indicator_enabled').checked=data.idle_indicator_enabled!==false;
       toggleIdleOverride();
 
       /* Backup tab version info */
