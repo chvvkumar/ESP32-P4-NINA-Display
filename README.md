@@ -5,6 +5,9 @@
 <p align="center">
   <a href="https://github.com/chvvkumar/ESP32-P4-NINA-Display/actions/workflows/build.yml?query=branch%3Amain"><img src="https://img.shields.io/github/actions/workflow/status/chvvkumar/ESP32-P4-NINA-Display/build.yml?branch=main&label=build%20(main)&logo=github" alt="Build (main)"></a>
   <a href="https://github.com/chvvkumar/ESP32-P4-NINA-Display/actions/workflows/build.yml?query=branch%3Adev"><img src="https://img.shields.io/github/actions/workflow/status/chvvkumar/ESP32-P4-NINA-Display/build.yml?branch=dev&label=build%20(dev)&logo=github" alt="Build (dev)"></a>
+</p>
+
+<p align="center">
   <a href="https://github.com/chvvkumar/ESP32-P4-NINA-Display/releases/latest"><img src="https://img.shields.io/github/v/release/chvvkumar/ESP32-P4-NINA-Display?label=version&logo=semver&logoColor=white" alt="Version"></a>
   <a href="https://github.com/espressif/esp-idf/tree/v5.5.2"><img src="https://img.shields.io/badge/ESP--IDF-v5.5.2-blue?logo=espressif" alt="ESP-IDF"></a>
   <a href="https://lvgl.io/"><img src="https://img.shields.io/badge/LVGL-v9.2.0-red?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTEyIDJDNi40OCAyIDIgNi40OCAyIDEyczQuNDggMTAgMTAgMTAgMTAtNC40OCAxMC0xMFMxNy41MiAyIDEyIDJ6bTAgMThjLTQuNDEgMC04LTMuNTktOC04czMuNTktOCA4LTggOCAzLjU5IDggOC0zLjU5IDgtOCA4eiIvPjwvc3ZnPg==" alt="LVGL"></a>
@@ -148,9 +151,15 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
 - [N.I.N.A. Nighttime Imaging 'N' Astronomy](https://nighttime-imaging.eu/)
 - [ninaAPI Advanced plugin](https://github.com/christian-photo/ninaAPI) by Christian Palm — install it from N.I.N.A.'s plugin manager, then enable it. Required for operation.
 
+
 <p align="center">
-  <img src="images/NINA_Plugin.jpg" alt="NINA Plugin" width="1200">
+  <img src="images/NINA_Plugin.jpg" alt="NINA Plugin" width="800">
 </p>
+
+
+### Community
+
+- **[3D Printed Stand](https://www.thingiverse.com/thing:7321463)** — a printable stand for the Waveshare display, designed by [@chicago925](https://github.com/chicago925) ([#116](https://github.com/chvvkumar/ESP32-P4-NINA-Display/issues/116)).
 
 ---
 
@@ -373,3 +382,4 @@ Dependencies are managed via **IDF Component Manager** (`idf_component.yml`). Do
 | `main/ui/nina_sysinfo.h/.c` | System info page |
 | `main/ui/nina_thumbnail.h/.c` | Full-screen thumbnail overlay |
 | `main/ui/themes.h/.c` | 6 built-in dark themes |
+
