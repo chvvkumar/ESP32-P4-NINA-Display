@@ -263,20 +263,30 @@ static bool fetch_owm(const app_config_t *cfg, weather_data_t *out) {
     cJSON *list = cJSON_GetObjectItem(json, "list");
     if (list && cJSON_IsArray(list)) {
         int count = cJSON_GetArraySize(list);
-        if (count > 10) count = 10;
+        if (count > 9) count = 9;  /* Leave slot 0 for current */
+
+        /* Slot 0: current conditions (so the bar chart starts at "now") */
+        time_t now;
+        time(&now);
+        struct tm tm_now;
+        localtime_r(&now, &tm_now);
+        out->hourly_temps[0] = out->temp_current;
+        out->hourly_hours[0] = (uint8_t)tm_now.tm_hour;
+
+        /* Slots 1..9: 3-hour forecast entries */
         for (int i = 0; i < count; i++) {
             cJSON *entry = cJSON_GetArrayItem(list, i);
             cJSON *dt    = cJSON_GetObjectItem(entry, "dt");
             cJSON *m     = cJSON_GetObjectItem(entry, "main");
             cJSON *t     = m ? cJSON_GetObjectItem(m, "temp") : NULL;
             if (t) {
-                out->hourly_temps[i] = (float)t->valuedouble;
+                out->hourly_temps[i + 1] = (float)t->valuedouble;
             }
             if (dt) {
                 time_t ts = (time_t)dt->valuedouble;
                 struct tm tm_info;
                 localtime_r(&ts, &tm_info);
-                out->hourly_hours[i] = (uint8_t)tm_info.tm_hour;
+                out->hourly_hours[i + 1] = (uint8_t)tm_info.tm_hour;
             }
         }
     }

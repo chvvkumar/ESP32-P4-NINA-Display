@@ -257,7 +257,8 @@ lv_obj_t *clock_page_create(lv_obj_t *parent) {
     lv_obj_add_flag(lbl_deg, LV_OBJ_FLAG_HIDDEN);  /* Hidden until weather data */
 
     lbl_cond = make_label(weather_stack, &lv_font_overpass_27, CLK_CONDITION, 1, "--");
-    lbl_hilo = make_label(weather_stack, &lv_font_overpass_16, CLK_DIM, 1, "--");
+    lv_obj_set_style_pad_top(lbl_cond, 4, 0);
+    lbl_hilo = make_label(weather_stack, &lv_font_overpass_27, CLK_DIM, 1, "--");
 
     /* ── Rule 1 ── */
     make_rule(clock_root);
