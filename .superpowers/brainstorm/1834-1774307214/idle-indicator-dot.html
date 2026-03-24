@@ -1,0 +1,179 @@
+<h2>Idle Indicator: Dot-in-Circle</h2>
+<p class="subtitle">Minimal footprint — a small glowing dot inside a subtle circular ring at the very bottom center. Red = no connections, green = reconnected.</p>
+
+<div style="display:flex;gap:20px;flex-wrap:wrap;justify-content:center;margin-top:20px;">
+
+  <!-- Size options -->
+  <div style="text-align:center;">
+    <div style="background:#121110;border-radius:8px;width:300px;height:300px;position:relative;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;">
+      <!-- Clock content -->
+      <div style="color:#908A7E;font-size:9px;letter-spacing:2px;position:absolute;top:16px;left:20px;">MONDAY<br>MARCH 23<br>2026</div>
+      <div style="position:absolute;top:16px;right:20px;text-align:right;">
+        <div style="color:#C8C2B4;font-size:28px;font-family:Georgia,serif;line-height:1;">51<span style="font-size:12px;vertical-align:super;">°</span></div>
+        <div style="color:#908A7E;font-size:8px;letter-spacing:1px;">CLEAR SKY</div>
+      </div>
+      <div style="color:#E8E2D4;font-size:72px;font-family:Georgia,serif;letter-spacing:-3px;line-height:1;">6:21</div>
+      <div style="color:#6A6458;font-size:9px;margin-top:2px;letter-spacing:3px;">P M</div>
+      <!-- Stats row -->
+      <div style="position:absolute;bottom:42px;left:16px;right:16px;display:flex;justify-content:space-around;">
+        <div style="text-align:center;"><div style="color:#C8C2B4;font-size:10px;">41%</div><div style="color:#6A6458;font-size:7px;">HUMID</div></div>
+        <div style="text-align:center;"><div style="color:#C8C2B4;font-size:10px;">39°</div><div style="color:#6A6458;font-size:7px;">DEW PT</div></div>
+        <div style="text-align:center;"><div style="color:#C8C2B4;font-size:10px;">SE 7</div><div style="color:#6A6458;font-size:7px;">WIND</div></div>
+        <div style="text-align:center;"><div style="color:#C8C2B4;font-size:10px;">--</div><div style="color:#6A6458;font-size:7px;">UV IDX</div></div>
+      </div>
+      <!-- Forecast bars approximation -->
+      <div style="position:absolute;bottom:18px;left:50%;transform:translateX(-50%);display:flex;gap:3px;align-items:flex-end;">
+        <div style="width:8px;height:14px;background:#4A6A7A;border-radius:1px;"></div>
+        <div style="width:8px;height:12px;background:#4A6A7A;border-radius:1px;"></div>
+        <div style="width:8px;height:4px;background:#4A6A7A;border-radius:1px;"></div>
+        <div style="width:8px;height:3px;background:#4A6A7A;border-radius:1px;"></div>
+        <div style="width:8px;height:6px;background:#5A7A5A;border-radius:1px;"></div>
+        <div style="width:8px;height:10px;background:#5A7A5A;border-radius:1px;"></div>
+        <div style="width:8px;height:18px;background:#5A7A5A;border-radius:1px;"></div>
+        <div style="width:8px;height:16px;background:#5A7A5A;border-radius:1px;"></div>
+        <div style="width:8px;height:12px;background:#4A6A7A;border-radius:1px;"></div>
+        <div style="width:8px;height:8px;background:#4A6A7A;border-radius:1px;"></div>
+      </div>
+
+      <!-- DOT INDICATOR - disconnected (red) -->
+      <div style="position:absolute;bottom:4px;left:50%;transform:translateX(-50%);width:16px;height:16px;border-radius:50%;background:rgba(127,0,0,0.2);border:1px solid rgba(239,68,68,0.25);display:flex;align-items:center;justify-content:center;">
+        <div style="width:6px;height:6px;border-radius:50%;background:#ef4444;box-shadow:0 0 6px #ef4444;"></div>
+      </div>
+    </div>
+    <div style="color:#aaa;font-size:12px;margin-top:8px;font-weight:600;">Clock — Disconnected</div>
+    <div style="color:#666;font-size:10px;">Red dot = no NINA connections</div>
+  </div>
+
+  <!-- Clock - Connected -->
+  <div style="text-align:center;">
+    <div style="background:#121110;border-radius:8px;width:300px;height:300px;position:relative;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;">
+      <div style="color:#908A7E;font-size:9px;letter-spacing:2px;position:absolute;top:16px;left:20px;">MONDAY<br>MARCH 23<br>2026</div>
+      <div style="position:absolute;top:16px;right:20px;text-align:right;">
+        <div style="color:#C8C2B4;font-size:28px;font-family:Georgia,serif;line-height:1;">51<span style="font-size:12px;vertical-align:super;">°</span></div>
+        <div style="color:#908A7E;font-size:8px;letter-spacing:1px;">CLEAR SKY</div>
+      </div>
+      <div style="color:#E8E2D4;font-size:72px;font-family:Georgia,serif;letter-spacing:-3px;line-height:1;">6:21</div>
+      <div style="color:#6A6458;font-size:9px;margin-top:2px;letter-spacing:3px;">P M</div>
+      <div style="position:absolute;bottom:42px;left:16px;right:16px;display:flex;justify-content:space-around;">
+        <div style="text-align:center;"><div style="color:#C8C2B4;font-size:10px;">41%</div><div style="color:#6A6458;font-size:7px;">HUMID</div></div>
+        <div style="text-align:center;"><div style="color:#C8C2B4;font-size:10px;">39°</div><div style="color:#6A6458;font-size:7px;">DEW PT</div></div>
+        <div style="text-align:center;"><div style="color:#C8C2B4;font-size:10px;">SE 7</div><div style="color:#6A6458;font-size:7px;">WIND</div></div>
+        <div style="text-align:center;"><div style="color:#C8C2B4;font-size:10px;">--</div><div style="color:#6A6458;font-size:7px;">UV IDX</div></div>
+      </div>
+      <div style="position:absolute;bottom:18px;left:50%;transform:translateX(-50%);display:flex;gap:3px;align-items:flex-end;">
+        <div style="width:8px;height:14px;background:#4A6A7A;border-radius:1px;"></div>
+        <div style="width:8px;height:12px;background:#4A6A7A;border-radius:1px;"></div>
+        <div style="width:8px;height:4px;background:#4A6A7A;border-radius:1px;"></div>
+        <div style="width:8px;height:3px;background:#4A6A7A;border-radius:1px;"></div>
+        <div style="width:8px;height:6px;background:#5A7A5A;border-radius:1px;"></div>
+        <div style="width:8px;height:10px;background:#5A7A5A;border-radius:1px;"></div>
+        <div style="width:8px;height:18px;background:#5A7A5A;border-radius:1px;"></div>
+        <div style="width:8px;height:16px;background:#5A7A5A;border-radius:1px;"></div>
+        <div style="width:8px;height:12px;background:#4A6A7A;border-radius:1px;"></div>
+        <div style="width:8px;height:8px;background:#4A6A7A;border-radius:1px;"></div>
+      </div>
+
+      <!-- DOT INDICATOR - connected (green) -->
+      <div style="position:absolute;bottom:4px;left:50%;transform:translateX(-50%);width:16px;height:16px;border-radius:50%;background:rgba(2,44,34,0.3);border:1px solid rgba(16,185,129,0.25);display:flex;align-items:center;justify-content:center;">
+        <div style="width:6px;height:6px;border-radius:50%;background:#10b981;box-shadow:0 0 6px #10b981;"></div>
+      </div>
+    </div>
+    <div style="color:#aaa;font-size:12px;margin-top:8px;font-weight:600;">Clock — Connected</div>
+    <div style="color:#666;font-size:10px;">Green dot = NINA instance back</div>
+  </div>
+
+  <!-- AllSky - Disconnected -->
+  <div style="text-align:center;">
+    <div style="background:#050505;border-radius:8px;width:300px;height:300px;position:relative;overflow:hidden;padding:8px;box-sizing:border-box;">
+      <div style="display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:6px;height:100%;">
+        <div style="background:#0a0a0a;border:1px solid #222;border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4px;">
+          <div style="color:#6b7280;font-size:7px;letter-spacing:1px;">THERMAL</div>
+          <div style="color:#a3a3a3;font-size:24px;margin:4px 0;">44.4</div>
+          <div style="color:#6b7280;font-size:8px;">°C</div>
+          <div style="height:3px;width:70%;background:#222;border-radius:2px;margin-top:4px;"><div style="height:100%;width:80%;background:#d946ef;border-radius:2px;"></div></div>
+          <div style="display:flex;justify-content:space-between;width:80%;margin-top:4px;">
+            <span style="color:#6b7280;font-size:7px;">--</span>
+            <span style="color:#6b7280;font-size:7px;">--</span>
+          </div>
+        </div>
+        <div style="background:#0a0a0a;border:1px solid #222;border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4px;">
+          <div style="color:#6b7280;font-size:7px;letter-spacing:1px;">SQM</div>
+          <div style="color:#a3a3a3;font-size:24px;margin:4px 0;">4.82</div>
+          <div style="color:#6b7280;font-size:8px;">mag/arcsec²</div>
+          <div style="height:3px;width:70%;background:#222;border-radius:2px;margin-top:4px;"><div style="height:100%;width:25%;background:#6366f1;border-radius:2px;"></div></div>
+          <div style="display:flex;justify-content:space-between;width:80%;margin-top:4px;">
+            <span style="color:#6b7280;font-size:7px;">Mostly Cloudy</span>
+            <span style="color:#6b7280;font-size:7px;">72.61°</span>
+          </div>
+        </div>
+        <div style="background:#0a0a0a;border:1px solid #222;border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4px;">
+          <div style="color:#6b7280;font-size:7px;letter-spacing:1px;">AMBIENT</div>
+          <div style="color:#a3a3a3;font-size:24px;margin:4px 0;">15.46</div>
+          <div style="color:#6b7280;font-size:8px;">°C</div>
+          <div style="height:3px;width:70%;background:#222;border-radius:2px;margin-top:4px;"><div style="height:100%;width:55%;background:#d946ef;border-radius:2px;"></div></div>
+          <div style="display:flex;justify-content:space-between;width:80%;margin-top:4px;">
+            <span style="color:#a3a3a3;font-size:7px;">28.52%</span>
+            <span style="color:#a3a3a3;font-size:7px;">-2.7°C</span>
+          </div>
+        </div>
+        <div style="background:#0a0a0a;border:1px solid #222;border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4px;">
+          <div style="color:#6b7280;font-size:7px;letter-spacing:1px;">POWER</div>
+          <div style="color:#a3a3a3;font-size:24px;margin:4px 0;">6.09</div>
+          <div style="color:#6b7280;font-size:8px;">W</div>
+          <div style="height:3px;width:70%;background:#222;border-radius:2px;margin-top:4px;"><div style="height:100%;width:40%;background:#a3a312;border-radius:2px;"></div></div>
+          <div style="display:flex;justify-content:space-between;width:80%;margin-top:4px;">
+            <span style="color:#a3a3a3;font-size:7px;">12.002V</span>
+            <span style="color:#a3a3a3;font-size:7px;">0.506A</span>
+          </div>
+        </div>
+      </div>
+      <!-- DOT INDICATOR - disconnected -->
+      <div style="position:absolute;bottom:4px;left:50%;transform:translateX(-50%);width:16px;height:16px;border-radius:50%;background:rgba(127,0,0,0.2);border:1px solid rgba(239,68,68,0.25);display:flex;align-items:center;justify-content:center;z-index:10;">
+        <div style="width:6px;height:6px;border-radius:50%;background:#ef4444;box-shadow:0 0 6px #ef4444;"></div>
+      </div>
+    </div>
+    <div style="color:#aaa;font-size:12px;margin-top:8px;font-weight:600;">AllSky — Disconnected</div>
+    <div style="color:#666;font-size:10px;">Sits in the gap between quadrants</div>
+  </div>
+
+  <!-- Size comparison strip -->
+  <div style="width:100%;margin-top:16px;">
+    <h3 style="text-align:center;">Dot Size Options</h3>
+    <p class="subtitle" style="text-align:center;">Click to select preferred size</p>
+    <div class="options">
+      <div class="option" data-choice="small" onclick="toggleSelect(this)">
+        <div class="letter" style="padding:0;">
+          <div style="width:12px;height:12px;border-radius:50%;background:rgba(127,0,0,0.2);border:1px solid rgba(239,68,68,0.25);display:flex;align-items:center;justify-content:center;margin:0 auto;">
+            <div style="width:4px;height:4px;border-radius:50%;background:#ef4444;box-shadow:0 0 4px #ef4444;"></div>
+          </div>
+        </div>
+        <div class="content">
+          <h3>Small (12px ring, 4px dot)</h3>
+          <p>Barely there — easy to miss unless you know to look</p>
+        </div>
+      </div>
+      <div class="option" data-choice="medium" onclick="toggleSelect(this)">
+        <div class="letter" style="padding:0;">
+          <div style="width:18px;height:18px;border-radius:50%;background:rgba(127,0,0,0.2);border:1px solid rgba(239,68,68,0.25);display:flex;align-items:center;justify-content:center;margin:0 auto;">
+            <div style="width:6px;height:6px;border-radius:50%;background:#ef4444;box-shadow:0 0 6px #ef4444;"></div>
+          </div>
+        </div>
+        <div class="content">
+          <h3>Medium (18px ring, 6px dot)</h3>
+          <p>Noticeable at a glance without being intrusive. Used in mockups above.</p>
+        </div>
+      </div>
+      <div class="option" data-choice="large" onclick="toggleSelect(this)">
+        <div class="letter" style="padding:0;">
+          <div style="width:24px;height:24px;border-radius:50%;background:rgba(127,0,0,0.2);border:1px solid rgba(239,68,68,0.25);display:flex;align-items:center;justify-content:center;margin:0 auto;">
+            <div style="width:8px;height:8px;border-radius:50%;background:#ef4444;box-shadow:0 0 8px #ef4444;"></div>
+          </div>
+        </div>
+        <div class="content">
+          <h3>Large (24px ring, 8px dot)</h3>
+          <p>Clearly visible from across the room — similar scale to page indicator dots</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

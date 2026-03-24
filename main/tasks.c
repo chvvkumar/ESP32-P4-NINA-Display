@@ -26,6 +26,7 @@
 #include "ui/nina_alerts.h"
 #include "ui/nina_session_stats.h"
 #include "ui/nina_ota_prompt.h"
+#include "ui/nina_idle_indicator.h"
 #include "ota_github.h"
 #include "esp_ota_ops.h"
 #include "bsp/esp-bsp.h"
@@ -153,6 +154,7 @@ static demo_task_params_t demo_params;
 static bool idle_override_active = false;
 static bool idle_override_suppressed = false;  /* User navigated away — suppress until reconnect cycle */
 static int  idle_saved_page = -1;
+static int  idle_current_target = -1;          /* Track current idle target to detect config changes */
 static int64_t idle_all_disconnected_since_us = 0;
 
 /**
@@ -182,6 +184,8 @@ void on_page_changed(int new_page) {
      * so reconnect logic doesn't snap them back. Re-triggers on next disconnect cycle. */
     if (idle_override_active) {
         idle_override_active = false;
+        nina_idle_indicator_set_active(false);
+        idle_all_disconnected_since_us = 0;  /* Reset debounce so persistent re-trigger gets a clean 5s */
         if (!app_config_get()->idle_page_persistent) {
             idle_override_suppressed = true;  /* Suppress re-trigger until reconnect→disconnect cycle */
         }
@@ -1980,22 +1984,40 @@ main_loop:
                         idle_all_disconnected_since_us = esp_timer_get_time();
                     }
                     int64_t elapsed_us = esp_timer_get_time() - idle_all_disconnected_since_us;
+                    int target = idle_target_to_page_index(idle_cfg->idle_page_override_target);
+
                     if (!idle_override_active && !idle_override_suppressed && elapsed_us >= 5000000) {  /* 5 s debounce */
                         idle_saved_page = current_active;
-                        int target = idle_target_to_page_index(idle_cfg->idle_page_override_target);
                         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                             nina_dashboard_show_page(target, instance_count);
                             bsp_display_unlock();
                         }
                         idle_override_active = true;
+                        idle_current_target = idle_cfg->idle_page_override_target;
+                        nina_idle_indicator_set_active(true);
                         page_changed = true;
                         ESP_LOGI(TAG, "Idle override: switching to page %d (saved %d)", target, idle_saved_page);
+                    }
+                    /* Detect idle target change — works whether override is active or
+                     * was just re-activated after persistent user navigation */
+                    if (idle_override_active && idle_cfg->idle_page_override_target != idle_current_target) {
+                        idle_current_target = idle_cfg->idle_page_override_target;
+                        target = idle_target_to_page_index(idle_current_target);
+                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_dashboard_show_page(target, instance_count);
+                            bsp_display_unlock();
+                        }
+                        nina_idle_indicator_set_active(true);
+                        page_changed = true;
+                        ESP_LOGI(TAG, "Idle override: target changed, switching to page %d", target);
                     }
                 } else {
                     idle_all_disconnected_since_us = 0;
                     idle_override_suppressed = false;  /* Reconnected — allow idle override on next disconnect */
                     if (idle_override_active) {
-                        /* Reconnected — restore saved page (or summary if saved was a still-disconnected NINA page) */
+                        /* Reconnected — show green indicator briefly before restoring page */
+                        nina_idle_indicator_set_reconnecting();
+                        /* Restore saved page (or summary if saved was a still-disconnected NINA page) */
                         int restore = idle_saved_page;
                         if (restore >= NINA_PAGE_OFFSET && restore < NINA_PAGE_OFFSET + page_count) {
                             int inst = nina_dashboard_page_to_instance(restore - NINA_PAGE_OFFSET);
@@ -2010,6 +2032,7 @@ main_loop:
                             bsp_display_unlock();
                         }
                         idle_override_active = false;
+                        nina_idle_indicator_set_active(false);
                         page_changed = true;
                         ESP_LOGI(TAG, "Idle override: restoring page %d", restore);
                     }
@@ -2019,6 +2042,7 @@ main_loop:
             /* Reset idle override state if feature disabled while active */
             if (!idle_cfg->idle_page_override_enabled && idle_override_active) {
                 idle_override_active = false;
+                nina_idle_indicator_set_active(false);
                 idle_all_disconnected_since_us = 0;
             }
         }

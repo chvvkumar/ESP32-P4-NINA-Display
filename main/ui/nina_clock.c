@@ -9,6 +9,7 @@
 
 #include "nina_clock.h"
 #include "nina_dashboard_internal.h"
+#include "nina_idle_indicator.h"
 #include "display_defs.h"
 #include "app_config.h"
 #include "weather_client.h"
@@ -184,6 +185,16 @@ static lv_obj_t *make_vdivider(lv_obj_t *parent) {
 static void clock_timer_cb(lv_timer_t *timer) {
     (void)timer;
     clock_page_update();
+
+    /* Re-align timer to fire at the top of the next minute.
+     * This corrects for any drift and ensures the display
+     * always updates exactly when the minute changes. */
+    time_t now = time(NULL);
+    struct tm tm_now;
+    localtime_r(&now, &tm_now);
+    uint32_t ms_to_next_min = (uint32_t)(60 - tm_now.tm_sec) * 1000;
+    if (ms_to_next_min < 1000) ms_to_next_min = 60000;  /* Just ticked, wait full minute */
+    lv_timer_set_period(clock_timer, ms_to_next_min);
 }
 
 /* ── Page creation ───────────────────────────────────────────────────── */
@@ -246,7 +257,8 @@ lv_obj_t *clock_page_create(lv_obj_t *parent) {
     lv_obj_add_flag(lbl_deg, LV_OBJ_FLAG_HIDDEN);  /* Hidden until weather data */
 
     lbl_cond = make_label(weather_stack, &lv_font_overpass_27, CLK_CONDITION, 1, "--");
-    lbl_hilo = make_label(weather_stack, &lv_font_overpass_16, CLK_DIM, 1, "--");
+    lv_obj_set_style_pad_top(lbl_cond, 4, 0);
+    lbl_hilo = make_label(weather_stack, &lv_font_overpass_27, CLK_DIM, 1, "--");
 
     /* ── Rule 1 ── */
     make_rule(clock_root);
@@ -316,10 +328,24 @@ lv_obj_t *clock_page_create(lv_obj_t *parent) {
                                        CLK_BAR_LABEL, 0, "--");
     }
 
-    /* ── 60-second update timer (fires immediately on first tick) ── */
-    clock_timer = lv_timer_create(clock_timer_cb, 60000, NULL);
+    /* ── Idle connection indicator (floating overlay at top center) ── */
+    nina_idle_indicator_create(clock_root, LV_ALIGN_TOP_MID, true);
+
+    /* Compute delay until the top of the next minute so the first
+     * real tick aligns with the minute change.  Fire once immediately
+     * for the initial draw, then the callback re-aligns each tick. */
+    time_t t0 = time(NULL);
+    struct tm tm0;
+    localtime_r(&t0, &tm0);
+    uint32_t init_ms = (uint32_t)(60 - tm0.tm_sec) * 1000;
+    if (init_ms < 1000) init_ms = 60000;
+
+    clock_timer = lv_timer_create(clock_timer_cb, init_ms, NULL);
     lv_timer_set_repeat_count(clock_timer, -1);
-    lv_timer_ready(clock_timer);  /* Fire immediately */
+    lv_timer_ready(clock_timer);  /* Fire immediately for initial draw */
+
+    /* Start paused — timer runs only when the page is visible */
+    lv_timer_pause(clock_timer);
 
     ESP_LOGI(TAG, "Clock page created");
     return clock_root;
@@ -492,5 +518,25 @@ void clock_page_apply_theme(void) {
 void clock_page_request_update(void) {
     if (clock_timer) {
         lv_timer_ready(clock_timer);  /* Fire on next LVGL tick */
+    }
+}
+
+void clock_page_on_hide(void) {
+    if (clock_timer) {
+        lv_timer_pause(clock_timer);
+    }
+}
+
+void clock_page_on_show(void) {
+    if (clock_timer) {
+        /* Re-align to next minute boundary before resuming */
+        time_t now = time(NULL);
+        struct tm tm_now;
+        localtime_r(&now, &tm_now);
+        uint32_t ms_to_next_min = (uint32_t)(60 - tm_now.tm_sec) * 1000;
+        if (ms_to_next_min < 1000) ms_to_next_min = 60000;
+        lv_timer_set_period(clock_timer, ms_to_next_min);
+        lv_timer_resume(clock_timer);
+        lv_timer_ready(clock_timer);  /* Immediate refresh on show */
     }
 }
