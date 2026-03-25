@@ -2221,14 +2221,15 @@
         var ghBase='https://github.com/chvvkumar/ESP32-P4-NINA-Display/';
         var tagEl=$('fw_git_tag');
         tagEl.textContent='';
-        if(data.git_tag&&data.git_tag!=='unknown'){
+        var releaseTag=data.version?'v'+data.version:data.git_tag;
+        if(releaseTag&&releaseTag!=='unknown'){
           var a=document.createElement('a');
-          a.href=ghBase+'releases/tag/'+encodeURIComponent(data.git_tag);
+          a.href=ghBase+'releases/tag/'+encodeURIComponent(releaseTag);
           a.target='_blank'; a.rel='noopener'; a.className='accent-link';
-          a.textContent=data.git_tag;
+          a.textContent=releaseTag;
           tagEl.appendChild(a);
         }else{
-          tagEl.textContent=data.git_tag||'--';
+          tagEl.textContent=releaseTag||'--';
         }
 
         var shaEl=$('fw_git_sha');
