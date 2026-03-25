@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "perf_monitor.h"
+#include "nina_idle_indicator.h"
 
 /* ── Layout ──────────────────────────────────────────────────────────── */
 #define SI_PAD       16
@@ -332,6 +333,8 @@ lv_obj_t *sysinfo_page_create(lv_obj_t *parent) {
     lv_obj_center(gear_icon);
     lv_obj_add_event_cb(btn_gear, gear_btn_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_set_ext_click_area(btn_gear, 10);
+
+    nina_idle_indicator_create(si_page, LV_ALIGN_BOTTOM_MID, false);
 
     return si_page;
 }

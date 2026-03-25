@@ -76,7 +76,7 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
     cJSON_AddNumberToObject(obj, "auto_rotate_pages", cfg->auto_rotate_pages);
     {
         cJSON *order_arr = cJSON_CreateArray();
-        for (int i = 0; i < 7 && cfg->auto_rotate_order[i] != 0xFF; i++) {
+        for (int i = 0; i < 8 && cfg->auto_rotate_order[i] != 0xFF; i++) {
             cJSON_AddItemToArray(order_arr, cJSON_CreateNumber(cfg->auto_rotate_order[i]));
         }
         cJSON_AddItemToObject(obj, "auto_rotate_order", order_arr);
@@ -120,6 +120,22 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
     cJSON_AddBoolToObject(obj, "toast_instance_muted_1", cfg->toast_instance_muted[0]);
     cJSON_AddBoolToObject(obj, "toast_instance_muted_2", cfg->toast_instance_muted[1]);
     cJSON_AddBoolToObject(obj, "toast_instance_muted_3", cfg->toast_instance_muted[2]);
+
+    // Weather
+    cJSON_AddNumberToObject(obj, "weather_provider", cfg->weather_provider);
+    cJSON_AddStringToObject(obj, "weather_api_key", cfg->weather_api_key);
+    cJSON_AddNumberToObject(obj, "weather_lat", (double)cfg->weather_lat);
+    cJSON_AddNumberToObject(obj, "weather_lon", (double)cfg->weather_lon);
+    cJSON_AddStringToObject(obj, "weather_location_name", cfg->weather_location_name);
+    cJSON_AddNumberToObject(obj, "weather_poll_interval_s", cfg->weather_poll_interval_s);
+    cJSON_AddNumberToObject(obj, "weather_units", cfg->weather_units);
+    cJSON_AddNumberToObject(obj, "weather_time_format", cfg->weather_time_format);
+
+    // Idle override
+    cJSON_AddBoolToObject(obj, "idle_page_override_enabled", cfg->idle_page_override_enabled);
+    cJSON_AddNumberToObject(obj, "idle_page_override_target", cfg->idle_page_override_target);
+    cJSON_AddBoolToObject(obj, "idle_page_persistent", cfg->idle_page_persistent);
+    cJSON_AddBoolToObject(obj, "idle_indicator_enabled", cfg->idle_indicator_enabled);
 
     return obj;
 }
@@ -252,7 +268,23 @@ static const backup_field_t s_backup_fields[] = {
     {"mqtt_port",          "MQTT Port",          "MQTT", false, false},
     {"mqtt_topic_prefix",  "MQTT Topic Prefix",  "MQTT", false, false},
 
+    /* Weather */
+    {"weather_provider",          "Weather Provider",       "Weather", false, false},
+    {"weather_location_name",     "Weather Location",       "Weather", false, false},
+    {"weather_lat",               "Weather Latitude",       "Weather", false, false},
+    {"weather_lon",               "Weather Longitude",      "Weather", false, false},
+    {"weather_poll_interval_s",   "Weather Poll Interval",  "Weather", false, false},
+    {"weather_units",             "Weather Units",          "Weather", false, false},
+    {"weather_time_format",       "Time Format",            "Weather", false, false},
+
+    /* Idle Override */
+    {"idle_page_override_enabled","Idle Override Enabled",  "Behavior", false, false},
+    {"idle_page_override_target", "Idle Override Target",   "Behavior", false, false},
+    {"idle_page_persistent",     "Idle Page Persistent",   "Behavior", false, false},
+    {"idle_indicator_enabled",   "Idle Indicator Enabled", "Behavior", false, false},
+
     /* Sensitive */
+    {"weather_api_key",    "Weather API Key",    "Weather", true, false},
     {"mqtt_username",      "MQTT Username",      "MQTT",    true, false},
     {"mqtt_password",      "MQTT Password",      "MQTT",    true, false},
     {"mqtt_broker_url",    "MQTT Broker URL",    "MQTT",    true, false},
@@ -614,21 +646,21 @@ static app_config_t *parse_config_from_json(cJSON *root)
     if (cJSON_IsNumber(arp_item)) {
         int v = arp_item->valueint;
         if (v < 0) v = 0;
-        if (v > 0x7F) v = 0x7F;
+        if (v > 0xFF) v = 0xFF;
         cfg->auto_rotate_pages = (uint8_t)v;
     }
 
     cJSON *order_arr = cJSON_GetObjectItem(root, "auto_rotate_order");
     if (cJSON_IsArray(order_arr)) {
         int count = cJSON_GetArraySize(order_arr);
-        if (count > 7) count = 7;
+        if (count > 8) count = 8;
         for (int i = 0; i < count; i++) {
             cJSON *item = cJSON_GetArrayItem(order_arr, i);
-            if (cJSON_IsNumber(item) && item->valueint >= 0 && item->valueint <= 6) {
+            if (cJSON_IsNumber(item) && item->valueint >= 0 && item->valueint <= 7) {
                 cfg->auto_rotate_order[i] = (uint8_t)item->valueint;
             }
         }
-        for (int i = count; i < 7; i++) {
+        for (int i = count; i < 8; i++) {
             cfg->auto_rotate_order[i] = 0xFF;
         }
     }
@@ -766,6 +798,34 @@ static app_config_t *parse_config_from_json(cJSON *root)
     JSON_TO_BOOL(root, "toast_instance_muted_1", cfg->toast_instance_muted[0]);
     JSON_TO_BOOL(root, "toast_instance_muted_2", cfg->toast_instance_muted[1]);
     JSON_TO_BOOL(root, "toast_instance_muted_3", cfg->toast_instance_muted[2]);
+
+    // Weather
+    JSON_TO_INT(root, "weather_provider", cfg->weather_provider);
+    JSON_TO_STRING(root, "weather_api_key", cfg->weather_api_key);
+
+    cJSON *jlat = cJSON_GetObjectItem(root, "weather_lat");
+    if (jlat && cJSON_IsNumber(jlat)) cfg->weather_lat = (float)jlat->valuedouble;
+    cJSON *jlon = cJSON_GetObjectItem(root, "weather_lon");
+    if (jlon && cJSON_IsNumber(jlon)) cfg->weather_lon = (float)jlon->valuedouble;
+
+    JSON_TO_STRING(root, "weather_location_name", cfg->weather_location_name);
+
+    cJSON *wpi_item = cJSON_GetObjectItem(root, "weather_poll_interval_s");
+    if (cJSON_IsNumber(wpi_item)) {
+        int v = wpi_item->valueint;
+        if (v < 900) v = 900;
+        if (v > 3600) v = 3600;
+        cfg->weather_poll_interval_s = (uint16_t)v;
+    }
+
+    JSON_TO_INT(root, "weather_units", cfg->weather_units);
+    JSON_TO_INT(root, "weather_time_format", cfg->weather_time_format);
+
+    // Idle override
+    JSON_TO_BOOL(root, "idle_page_override_enabled", cfg->idle_page_override_enabled);
+    JSON_TO_INT(root, "idle_page_override_target", cfg->idle_page_override_target);
+    JSON_TO_BOOL(root, "idle_page_persistent", cfg->idle_page_persistent);
+    JSON_TO_BOOL(root, "idle_indicator_enabled", cfg->idle_indicator_enabled);
 
     return cfg;
 }

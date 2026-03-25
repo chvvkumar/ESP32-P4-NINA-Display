@@ -1,0 +1,155 @@
+<h2>Warm Glow Pill: Across Pages & States</h2>
+<p class="subtitle">How the indicator adapts to each page style, plus the reconnecting transition state.</p>
+
+<div style="display:flex;gap:20px;flex-wrap:wrap;justify-content:center;margin-top:20px;">
+
+  <!-- Clock page -->
+  <div style="text-align:center;">
+    <div style="background:#121110;border-radius:8px;width:260px;height:260px;position:relative;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;">
+      <div style="color:#908A7E;font-size:9px;letter-spacing:2px;margin-bottom:2px;">SUNDAY</div>
+      <div style="color:#E8E2D4;font-size:60px;font-family:Georgia,serif;letter-spacing:-3px;line-height:1;">10:42</div>
+      <div style="color:#6A6458;font-size:9px;margin-top:4px;letter-spacing:1px;">MARCH 23, 2026</div>
+      <div style="position:absolute;bottom:36px;left:16px;right:16px;display:flex;justify-content:space-around;">
+        <div style="text-align:center;"><div style="color:#C8C2B4;font-size:9px;">62%</div><div style="color:#6A6458;font-size:7px;">HUMIDITY</div></div>
+        <div style="text-align:center;"><div style="color:#C8C2B4;font-size:9px;">48°</div><div style="color:#6A6458;font-size:7px;">DEW</div></div>
+        <div style="text-align:center;"><div style="color:#C8C2B4;font-size:9px;">5mph</div><div style="color:#6A6458;font-size:7px;">WIND</div></div>
+        <div style="text-align:center;"><div style="color:#C8C2B4;font-size:9px;">0</div><div style="color:#6A6458;font-size:7px;">UV</div></div>
+      </div>
+      <div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);background:rgba(127,0,0,0.15);border:1px solid rgba(239,68,68,0.2);border-radius:20px;padding:3px 11px;display:flex;align-items:center;gap:5px;white-space:nowrap;">
+        <div style="width:5px;height:5px;border-radius:50%;background:#ef4444;box-shadow:0 0 8px #ef4444;flex-shrink:0;"></div>
+        <span style="color:rgba(239,68,68,0.5);font-size:8px;letter-spacing:0.5px;">No connections</span>
+      </div>
+    </div>
+    <div style="color:#aaa;font-size:12px;margin-top:8px;font-weight:600;">Clock</div>
+    <div style="color:#666;font-size:10px;">Fixed editorial palette</div>
+  </div>
+
+  <!-- AllSky page -->
+  <div style="text-align:center;">
+    <div style="background:#050505;border-radius:8px;width:260px;height:260px;position:relative;overflow:hidden;padding:8px;box-sizing:border-box;">
+      <!-- 2x2 grid -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:6px;height:calc(100% - 24px);">
+        <div style="background:#0a0a0a;border:1px solid #222;border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4px;">
+          <div style="color:#6b7280;font-size:7px;letter-spacing:1px;">THERMAL</div>
+          <div style="color:#a3a3a3;font-size:22px;margin:2px 0;">-2.1°</div>
+          <div style="height:3px;width:70%;background:#222;border-radius:2px;"><div style="height:100%;width:35%;background:#2563eb;border-radius:2px;"></div></div>
+        </div>
+        <div style="background:#0a0a0a;border:1px solid #222;border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4px;">
+          <div style="color:#6b7280;font-size:7px;letter-spacing:1px;">SQM</div>
+          <div style="color:#a3a3a3;font-size:22px;margin:2px 0;">21.4</div>
+          <div style="height:3px;width:70%;background:#222;border-radius:2px;"><div style="height:100%;width:80%;background:#2563eb;border-radius:2px;"></div></div>
+        </div>
+        <div style="background:#0a0a0a;border:1px solid #222;border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4px;">
+          <div style="color:#6b7280;font-size:7px;letter-spacing:1px;">AMBIENT</div>
+          <div style="color:#a3a3a3;font-size:22px;margin:2px 0;">12.5°</div>
+          <div style="height:3px;width:70%;background:#222;border-radius:2px;"><div style="height:100%;width:55%;background:#2563eb;border-radius:2px;"></div></div>
+        </div>
+        <div style="background:#0a0a0a;border:1px solid #222;border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4px;">
+          <div style="color:#6b7280;font-size:7px;letter-spacing:1px;">POWER</div>
+          <div style="color:#a3a3a3;font-size:22px;margin:2px 0;">13.8V</div>
+          <div style="height:3px;width:70%;background:#222;border-radius:2px;"><div style="height:100%;width:90%;background:#2563eb;border-radius:2px;"></div></div>
+        </div>
+      </div>
+      <div style="position:absolute;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(127,0,0,0.15);border:1px solid rgba(239,68,68,0.2);border-radius:20px;padding:3px 11px;display:flex;align-items:center;gap:5px;white-space:nowrap;">
+        <div style="width:5px;height:5px;border-radius:50%;background:#ef4444;box-shadow:0 0 8px #ef4444;flex-shrink:0;"></div>
+        <span style="color:rgba(239,68,68,0.5);font-size:8px;letter-spacing:0.5px;">No connections</span>
+      </div>
+    </div>
+    <div style="color:#aaa;font-size:12px;margin-top:8px;font-weight:600;">AllSky</div>
+    <div style="color:#666;font-size:10px;">Theme-dependent colors</div>
+  </div>
+
+  <!-- Spotify page -->
+  <div style="text-align:center;">
+    <div style="background:#000;border-radius:8px;width:260px;height:260px;position:relative;overflow:hidden;">
+      <!-- Fake album art bg -->
+      <div style="position:absolute;inset:0;background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);"></div>
+      <!-- Dim overlay -->
+      <div style="position:absolute;inset:0;background:rgba(0,0,0,0.7);"></div>
+      <!-- Track info -->
+      <div style="position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:20px;box-sizing:border-box;">
+        <div style="color:#fff;font-size:16px;font-weight:600;">Stargazer</div>
+        <div style="color:#aaa;font-size:11px;margin-top:2px;">Rainbow</div>
+        <div style="color:#777;font-size:9px;margin-top:1px;letter-spacing:1px;">RISING</div>
+        <!-- Progress bar -->
+        <div style="position:absolute;bottom:52px;left:24px;right:24px;">
+          <div style="height:2px;background:#444;border-radius:1px;"><div style="height:100%;width:40%;background:#fff;border-radius:1px;"></div></div>
+          <div style="display:flex;justify-content:space-between;margin-top:2px;"><span style="color:#888;font-size:7px;">3:22</span><span style="color:#888;font-size:7px;">8:27</span></div>
+        </div>
+        <!-- Controls -->
+        <div style="position:absolute;bottom:28px;display:flex;gap:20px;align-items:center;">
+          <span style="color:#aaa;font-size:14px;">&#9664;&#9664;</span>
+          <span style="color:#fff;font-size:18px;">&#9654;</span>
+          <span style="color:#aaa;font-size:14px;">&#9654;&#9654;</span>
+        </div>
+      </div>
+      <div style="position:absolute;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(127,0,0,0.15);border:1px solid rgba(239,68,68,0.2);border-radius:20px;padding:3px 11px;display:flex;align-items:center;gap:5px;white-space:nowrap;">
+        <div style="width:5px;height:5px;border-radius:50%;background:#ef4444;box-shadow:0 0 8px #ef4444;flex-shrink:0;"></div>
+        <span style="color:rgba(239,68,68,0.5);font-size:8px;letter-spacing:0.5px;">No connections</span>
+      </div>
+    </div>
+    <div style="color:#aaa;font-size:12px;margin-top:8px;font-weight:600;">Spotify</div>
+    <div style="color:#666;font-size:10px;">Over dim overlay</div>
+  </div>
+
+  <!-- SysInfo page -->
+  <div style="text-align:center;">
+    <div style="background:#050505;border-radius:8px;width:260px;height:260px;position:relative;overflow:hidden;padding:10px;box-sizing:border-box;">
+      <!-- Header -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <div><div style="color:#a3a3a3;font-size:9px;">192.168.1.50</div><div style="color:#6b7280;font-size:7px;">NINA-DISPLAY</div></div>
+        <div style="text-align:right;"><div style="color:#a3a3a3;font-size:9px;">-52 dBm</div><div style="color:#6b7280;font-size:7px;">02:14:33</div></div>
+      </div>
+      <!-- Cards grid -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;">
+        <div style="background:#0a0a0a;border:1px solid #222;border-radius:5px;padding:6px;text-align:center;">
+          <div style="color:#6b7280;font-size:7px;letter-spacing:1px;">CORE 0</div>
+          <div style="color:#a3a3a3;font-size:16px;">3.2%</div>
+        </div>
+        <div style="background:#0a0a0a;border:1px solid #222;border-radius:5px;padding:6px;text-align:center;">
+          <div style="color:#6b7280;font-size:7px;letter-spacing:1px;">CORE 1</div>
+          <div style="color:#a3a3a3;font-size:16px;">7.1%</div>
+        </div>
+        <div style="background:#0a0a0a;border:1px solid #222;border-radius:5px;padding:6px;text-align:center;">
+          <div style="color:#6b7280;font-size:7px;letter-spacing:1px;">HEAP</div>
+          <div style="color:#a3a3a3;font-size:16px;">142K</div>
+        </div>
+        <div style="background:#0a0a0a;border:1px solid #222;border-radius:5px;padding:6px;text-align:center;">
+          <div style="color:#6b7280;font-size:7px;letter-spacing:1px;">PSRAM</div>
+          <div style="color:#a3a3a3;font-size:16px;">5.2M</div>
+        </div>
+      </div>
+      <div style="position:absolute;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(127,0,0,0.15);border:1px solid rgba(239,68,68,0.2);border-radius:20px;padding:3px 11px;display:flex;align-items:center;gap:5px;white-space:nowrap;">
+        <div style="width:5px;height:5px;border-radius:50%;background:#ef4444;box-shadow:0 0 8px #ef4444;flex-shrink:0;"></div>
+        <span style="color:rgba(239,68,68,0.5);font-size:8px;letter-spacing:0.5px;">No connections</span>
+      </div>
+    </div>
+    <div style="color:#aaa;font-size:12px;margin-top:8px;font-weight:600;">System Info</div>
+    <div style="color:#666;font-size:10px;">Theme-dependent colors</div>
+  </div>
+
+  <!-- Reconnecting state -->
+  <div style="text-align:center;">
+    <div style="background:#121110;border-radius:8px;width:260px;height:260px;position:relative;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;">
+      <div style="color:#908A7E;font-size:9px;letter-spacing:2px;margin-bottom:2px;">SUNDAY</div>
+      <div style="color:#E8E2D4;font-size:60px;font-family:Georgia,serif;letter-spacing:-3px;line-height:1;">10:42</div>
+      <div style="color:#6A6458;font-size:9px;margin-top:4px;letter-spacing:1px;">MARCH 23, 2026</div>
+      <div style="position:absolute;bottom:36px;left:16px;right:16px;display:flex;justify-content:space-around;">
+        <div style="text-align:center;"><div style="color:#C8C2B4;font-size:9px;">62%</div><div style="color:#6A6458;font-size:7px;">HUMIDITY</div></div>
+        <div style="text-align:center;"><div style="color:#C8C2B4;font-size:9px;">48°</div><div style="color:#6A6458;font-size:7px;">DEW</div></div>
+        <div style="text-align:center;"><div style="color:#C8C2B4;font-size:9px;">5mph</div><div style="color:#6A6458;font-size:7px;">WIND</div></div>
+        <div style="text-align:center;"><div style="color:#C8C2B4;font-size:9px;">0</div><div style="color:#6A6458;font-size:7px;">UV</div></div>
+      </div>
+      <!-- Reconnecting pill - green tint -->
+      <div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);background:rgba(2,44,34,0.4);border:1px solid rgba(16,185,129,0.25);border-radius:20px;padding:3px 11px;display:flex;align-items:center;gap:5px;white-space:nowrap;">
+        <div style="width:5px;height:5px;border-radius:50%;background:#10b981;box-shadow:0 0 8px #10b981;flex-shrink:0;"></div>
+        <span style="color:rgba(16,185,129,0.6);font-size:8px;letter-spacing:0.5px;">Reconnecting to ASTRO-PC...</span>
+      </div>
+    </div>
+    <div style="color:#aaa;font-size:12px;margin-top:8px;font-weight:600;">Reconnecting State</div>
+    <div style="color:#666;font-size:10px;">Green tint, then page restores</div>
+  </div>
+
+</div>
+
+<p class="subtitle" style="margin-top:20px;">The pill uses the same warm-glow style on every page. On reconnect, it transitions to green before the idle override restores the previous page.</p>

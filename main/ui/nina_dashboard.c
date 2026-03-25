@@ -15,11 +15,13 @@
 #include "nina_summary.h"
 #include "nina_allsky.h"
 #include "nina_spotify.h"
+#include "nina_clock.h"
 #include "nina_settings_tabview.h"
 #include "nina_toast.h"
 #include "nina_event_log.h"
 #include "nina_alerts.h"
 #include "nina_safety.h"
+#include "nina_idle_indicator.h"
 #include "nina_ota_prompt.h"
 #include "ui_styles.h"
 #include "app_config.h"
@@ -44,7 +46,10 @@ static lv_obj_t *allsky_page_created = NULL;  /* Always holds the created page o
 lv_obj_t *spotify_obj = NULL;
 static lv_obj_t *spotify_page_created = NULL;  /* Always holds the created page object */
 
-/* Summary page — at PAGE_IDX_SUMMARY (2), excluded from indicators */
+/* Clock page — always at PAGE_IDX_CLOCK (2), always present */
+lv_obj_t *clock_obj = NULL;
+
+/* Summary page — at PAGE_IDX_SUMMARY (3), excluded from indicators */
 static lv_obj_t *summary_obj = NULL;
 
 /* Settings page — at SETTINGS_PAGE_IDX(page_count), excluded from indicators */
@@ -52,7 +57,7 @@ static lv_obj_t *settings_obj = NULL;
 
 /* System info page — at SYSINFO_PAGE_IDX(page_count), excluded from indicators */
 static lv_obj_t *sysinfo_obj = NULL;
-int total_page_count = 0;   /* page_count + EXTRA_PAGES (allsky + spotify + summary + settings + sysinfo) */
+int total_page_count = 0;   /* page_count + EXTRA_PAGES (allsky + spotify + clock + summary + settings + sysinfo) */
 
 /* Private state */
 static lv_obj_t *scr_dashboard = NULL;
@@ -131,7 +136,8 @@ lv_obj_t *create_value_label(lv_obj_t *parent) {
  * Page index convention (see PAGE_IDX_* / NINA_PAGE_OFFSET / EXTRA_PAGES in nina_dashboard_internal.h):
  *   PAGE_IDX_ALLSKY  (0)                        = AllSky page
  *   PAGE_IDX_SPOTIFY (1)                        = Spotify page
- *   PAGE_IDX_SUMMARY (2)                        = summary page
+ *   PAGE_IDX_CLOCK   (2)                        = Clock page (always present)
+ *   PAGE_IDX_SUMMARY (3)                        = summary page
  *   NINA_PAGE_OFFSET .. NINA_PAGE_OFFSET+pc-1   = NINA instance pages  (pages[idx - NINA_PAGE_OFFSET])
  *   SETTINGS_PAGE_IDX(pc)                       = settings page
  *   SYSINFO_PAGE_IDX(pc)                        = sysinfo page
@@ -145,6 +151,10 @@ static void hide_page_at(int idx) {
     else if (idx == PAGE_IDX_SPOTIFY && spotify_obj) {
         lv_obj_add_flag(spotify_obj, LV_OBJ_FLAG_HIDDEN);
         nina_spotify_on_hide();
+    }
+    else if (idx == PAGE_IDX_CLOCK && clock_obj) {
+        lv_obj_add_flag(clock_obj, LV_OBJ_FLAG_HIDDEN);
+        clock_page_on_hide();
     }
     else if (idx == PAGE_IDX_SUMMARY && summary_obj)
         lv_obj_add_flag(summary_obj, LV_OBJ_FLAG_HIDDEN);
@@ -164,6 +174,10 @@ static void show_page_at(int idx) {
     else if (idx == PAGE_IDX_SPOTIFY && spotify_obj) {
         lv_obj_clear_flag(spotify_obj, LV_OBJ_FLAG_HIDDEN);
         nina_spotify_on_show();
+    }
+    else if (idx == PAGE_IDX_CLOCK && clock_obj) {
+        lv_obj_clear_flag(clock_obj, LV_OBJ_FLAG_HIDDEN);
+        clock_page_on_show();
     }
     else if (idx == PAGE_IDX_SUMMARY && summary_obj)
         lv_obj_clear_flag(summary_obj, LV_OBJ_FLAG_HIDDEN);
@@ -185,6 +199,7 @@ static void show_page_at(int idx) {
 static lv_obj_t *get_page_obj(int idx) {
     if (idx == PAGE_IDX_ALLSKY && allsky_obj) return allsky_obj;
     if (idx == PAGE_IDX_SPOTIFY && spotify_obj) return spotify_obj;
+    if (idx == PAGE_IDX_CLOCK && clock_obj) return clock_obj;
     if (idx == PAGE_IDX_SUMMARY && summary_obj) return summary_obj;
     if (idx >= NINA_PAGE_OFFSET && idx < NINA_PAGE_OFFSET + page_count)
         return pages[idx - NINA_PAGE_OFFSET].page;
@@ -265,6 +280,7 @@ void nina_dashboard_apply_theme(int theme_index) {
 
     if (allsky_obj) allsky_page_apply_theme();
     if (spotify_obj) spotify_page_apply_theme();
+    clock_page_apply_theme();
     summary_page_apply_theme();
     if (settings_obj) settings_tabview_apply_theme();
     sysinfo_page_apply_theme();
@@ -790,6 +806,9 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
 
     scr_dashboard = parent;
 
+    /* Clear stale idle indicator pointers before creating new pages */
+    nina_idle_indicator_reset();
+
     /* Build page-to-instance mapping: only enabled instances get pages */
     page_count = 0;
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
@@ -821,6 +840,10 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     lv_obj_add_flag(spotify_page_created, LV_OBJ_FLAG_HIDDEN);
     spotify_obj = app_config_get()->spotify_enabled ? spotify_page_created : NULL;
 
+    /* Clock page — PAGE_IDX_CLOCK, always present, hidden initially */
+    clock_obj = clock_page_create(main_cont);
+    lv_obj_add_flag(clock_obj, LV_OBJ_FLAG_HIDDEN);
+
     /* Summary page — PAGE_IDX_SUMMARY, visible by default */
     summary_obj = summary_page_create(main_cont, page_count);
 
@@ -838,7 +861,7 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     /* System info page — always last (SYSINFO_PAGE_IDX), hidden initially */
     sysinfo_obj = sysinfo_page_create(main_cont);
     lv_obj_add_flag(sysinfo_obj, LV_OBJ_FLAG_HIDDEN);
-    total_page_count = page_count + EXTRA_PAGES;  /* allsky + spotify + summary + NINA pages + settings + sysinfo */
+    total_page_count = page_count + EXTRA_PAGES;  /* allsky + spotify + clock + summary + NINA pages + settings + sysinfo */
 
     /* Page indicator dots — only for NINA pages (not allsky, spotify, summary, settings, or sysinfo) */
     create_page_indicator(scr_dashboard, page_count);
@@ -928,6 +951,10 @@ void nina_dashboard_set_spotify_enabled(bool enabled) {
         }
         spotify_obj = NULL;
     }
+}
+
+bool nina_dashboard_is_clock_page(void) {
+    return active_page == PAGE_IDX_CLOCK;
 }
 
 bool nina_dashboard_is_settings_page(void) {
