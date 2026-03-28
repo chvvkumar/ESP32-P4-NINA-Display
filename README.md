@@ -118,7 +118,7 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
     <td align="center"><img src="images/clock-face.jpg" alt="Clock Face with Weather" width="480"></td>
   </tr>
   <tr>
-    <td align="center"><em> Clockface with weather data, hourly forecast bars</em></td>
+    <td align="center"><em> Clockface with weather data, forecast bars</em></td>
   </tr>
 </table>
 
