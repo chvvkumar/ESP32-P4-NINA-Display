@@ -60,9 +60,12 @@ void instance_poll_task(void *arg);
 /** FreeRTOS task: AllSky API poller — polls at allsky_update_interval_s rate. */
 void allsky_poll_task(void *arg);
 
-/** Spotify poll task handle and page-active flag — defined in tasks.c. */
+/** Feature poll task handles and page-active flags — defined in tasks.c. */
 extern TaskHandle_t spotify_task_handle;
 extern _Atomic bool spotify_page_active;
+extern _Atomic bool allsky_page_active;
+extern _Atomic bool clock_page_active;
+extern _Atomic bool nina_pages_active;
 
 /** Weather poll task — spawned by weather_client_start() when location is configured. */
 /* (Task handle is internal to weather_client.c; no extern needed here.) */

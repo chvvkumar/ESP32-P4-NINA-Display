@@ -586,9 +586,9 @@ static void weather_poll_task(void *arg) {
     ESP_LOGI(TAG, "WiFi connected, starting weather polling");
 
     while (1) {
-        /* Suspend during OTA updates */
-        while (ota_in_progress) {
-            vTaskDelay(pdMS_TO_TICKS(1000));
+        /* Suspend during OTA updates or when Clock page is not visible */
+        while (ota_in_progress || !clock_page_active) {
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
         }
 
         app_config_t cfg_snap = app_config_get_snapshot();
