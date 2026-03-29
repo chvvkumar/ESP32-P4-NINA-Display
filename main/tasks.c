@@ -141,9 +141,14 @@ static bool hfr_graph_seeded = false;   /* True after initial API fetch for curr
 /* Per-instance poll contexts (shared between UI coordinator and poll tasks) */
 static instance_poll_ctx_t poll_contexts[MAX_NINA_INSTANCES];
 
-/* Spotify task state */
+/* Feature task state and page-active flags.
+ * Each flag is set by data_update_task and read by the corresponding poll task.
+ * When false, the poll task suspends and frees resources. */
 TaskHandle_t spotify_task_handle = NULL;
 _Atomic bool spotify_page_active = false;
+_Atomic bool allsky_page_active  = false;
+_Atomic bool clock_page_active   = false;
+_Atomic bool nina_pages_active   = false;
 
 /* AllSky polling state */
 static allsky_data_t allsky_data;
@@ -227,6 +232,12 @@ void input_task(void *arg) {
     gpio_isr_handler_add(BOOT_BUTTON_GPIO, boot_button_isr_handler, (void *)xTaskGetCurrentTaskHandle());
 
     while (1) {
+        /* Record stack HWM unconditionally — measurement inside the button
+         * handler never executes if no button is pressed. */
+        if (g_perf.enabled) {
+            g_perf.input_task_stack_hwm = uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t);
+        }
+
         /* Block until button press ISR fires */
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
@@ -310,11 +321,6 @@ void input_task(void *arg) {
 
             page_changed = true;
         }
-
-        /* Record stack high water mark if perf monitoring is enabled */
-        if (g_perf.enabled) {
-            g_perf.input_task_stack_hwm = uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t);
-        }
     }
 }
 
@@ -349,8 +355,8 @@ void instance_poll_task(void *arg) {
     }
 
     while (!ctx->shutdown) {
-        // Suspend during OTA or while Spotify page is active
-        while ((ota_in_progress || spotify_page_active) && !ctx->shutdown) {
+        // Suspend during OTA
+        while (ota_in_progress && !ctx->shutdown) {
             vTaskDelay(pdMS_TO_TICKS(500));
         }
         if (ctx->shutdown) break;
@@ -398,6 +404,17 @@ void instance_poll_task(void *arg) {
             }
             ctx->last_heartbeat_ms = now_ms;
             ESP_LOGD(TAG, "Poll[%d] (idle): connected=%d", idx + 1, ctx->client->connected);
+        } else if (!nina_pages_active) {
+            /* Non-NINA page active — heartbeat-only for liveness detection.
+             * WebSockets are already torn down by data_update_task.
+             * Full/background polling is skipped to free resources. */
+            if (now_ms - ctx->last_heartbeat_ms >= (int64_t)app_config_get()->idle_poll_interval_s * 1000) {
+                nina_client_poll_heartbeat(url, ctx->client, idx);
+                if (nina_connection_is_connected(idx))
+                    ctx->client->last_successful_poll_ms = now_ms;
+                ctx->last_heartbeat_ms = now_ms;
+                ESP_LOGD(TAG, "Poll[%d] (page-idle): connected=%d", idx + 1, ctx->client->connected);
+            }
         } else if (ctx->is_active) {
             nina_client_poll(url, ctx->client, ctx->poll_state, idx);
             if (nina_connection_is_connected(idx))
@@ -436,7 +453,7 @@ void instance_poll_task(void *arg) {
 
         // WebSocket: skip reconnect while screen sleeping (saves network resources);
         // reconnect will happen naturally when screen wakes and poll resumes.
-        if (!screen_asleep) {
+        if (!screen_asleep && nina_pages_active) {
             // If WebSocket was never started (boot probe missed) but instance is
             // now connected, start it. check_reconnect only handles post-disconnect.
             if (!nina_websocket_is_running(idx) && nina_connection_is_connected(idx)) {
@@ -447,7 +464,7 @@ void instance_poll_task(void *arg) {
 
         // Sleep: active = update_rate_s, background = heartbeat, screen_asleep = idle_poll
         uint32_t cycle_ms;
-        if (screen_asleep) {
+        if (screen_asleep || !nina_pages_active) {
             cycle_ms = (uint32_t)app_config_get()->idle_poll_interval_s * 1000;
             if (cycle_ms < 5000) cycle_ms = 5000;
         } else if (ctx->is_active) {
@@ -487,9 +504,9 @@ void allsky_poll_task(void *arg) {
     xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
 
     while (1) {
-        /* Suspend during OTA or while Spotify page is active */
-        while (ota_in_progress || spotify_page_active) {
-            vTaskDelay(pdMS_TO_TICKS(1000));
+        /* Suspend during OTA or when AllSky page is not visible */
+        while (ota_in_progress || !allsky_page_active) {
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
         }
 
         /* Read fields directly from config pointer — avoids copying the full
@@ -525,6 +542,13 @@ void spotify_poll_task(void *arg)
     #define ART_MAX_RETRIES 3      /* give up on art after this many failures */
 
     while (1) {
+        /* Record stack HWM unconditionally — the measurement at the end of
+         * the poll cycle is unreachable when the task is suspended by the
+         * page-gate or when Spotify is not configured. */
+        if (g_perf.enabled) {
+            g_perf.spotify_task_stack_hwm = uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t);
+        }
+
         /* Suspend during OTA updates */
         while (ota_in_progress) {
             vTaskDelay(pdMS_TO_TICKS(1000));
@@ -548,7 +572,7 @@ void spotify_poll_task(void *arg)
              * page becomes active again (the art buffer was freed). */
             prev_track_id[0] = '\0';
             art_retries = 0;
-            vTaskDelay(pdMS_TO_TICKS(2000));
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(2000));
             continue;
         }
 
@@ -775,9 +799,6 @@ void spotify_poll_task(void *arg)
             interval = backoff;
         }
         perf_timer_stop(&g_perf.spotify_poll_cycle);
-        if (g_perf.enabled) {
-            g_perf.spotify_task_stack_hwm = uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t);
-        }
         vTaskDelay(pdMS_TO_TICKS(interval));
     }
 }
@@ -1339,6 +1360,7 @@ main_loop:
         bool on_sysinfo = nina_dashboard_is_sysinfo_page();
         bool on_settings = nina_dashboard_is_settings_page();
         bool on_summary = nina_dashboard_is_summary_page();
+        bool on_clock = nina_dashboard_is_clock_page();
 
         /*
          * Page index convention (see PAGE_IDX_* / NINA_PAGE_OFFSET / EXTRA_PAGES):
@@ -1362,13 +1384,17 @@ main_loop:
             active_nina_idx = nina_dashboard_page_to_instance(active_page_idx);
         }
 
-        /* Update Spotify page activity flag for poll task + cleanup on transitions.
-         * Free inactive context's TLS sessions and large buffers to prevent
-         * internal DMA heap exhaustion (esp-aes OOM during TLS handshake). */
+        /* ── Page-gate flags and resource lifecycle ──
+         * Each feature's poll task checks its page-active flag and suspends when
+         * inactive.  WebSocket TLS is torn down whenever leaving NINA/Summary pages
+         * to free internal DMA heap for SDIO WiFi transport buffers. */
         {
-            static bool prev_on_spotify = false;
-            if (on_spotify && !prev_on_spotify) {
-                /* Entering Spotify — free NINA resources */
+            bool now_nina_active = (on_summary || active_nina_idx >= 0);
+
+            /* NINA WebSocket lifecycle — tear down when leaving NINA pages,
+             * poll tasks will reconnect naturally when nina_pages_active goes true */
+            static bool prev_nina_active = true;  /* Assume NINA active on boot */
+            if (!now_nina_active && prev_nina_active) {
                 nina_websocket_stop_all();
                 /* Dismiss thumbnail overlay if open (frees original + scaled buffers) */
                 if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
@@ -1376,21 +1402,42 @@ main_loop:
                         nina_dashboard_hide_thumbnail();
                     bsp_display_unlock();
                 }
-                ESP_LOGI(TAG, "Entering Spotify: freed NINA WebSocket TLS sessions");
+                ESP_LOGI(TAG, "Left NINA pages: freed WebSocket TLS sessions");
+            } else if (now_nina_active && !prev_nina_active) {
+                ESP_LOGI(TAG, "Entered NINA pages: poll tasks will reconnect");
+            }
+            prev_nina_active = now_nina_active;
+            nina_pages_active = now_nina_active;
+
+            /* Spotify lifecycle — wake on entry, free art on leave */
+            static bool prev_on_spotify = false;
+            if (on_spotify && !prev_on_spotify && spotify_task_handle) {
+                xTaskNotifyGive(spotify_task_handle);
             } else if (!on_spotify && prev_on_spotify) {
-                /* Leaving Spotify — free art buffer.  Don't destroy the
-                 * Spotify HTTP client here: the spotify_poll_task may be
-                 * mid-request on Core 0.  It will see spotify_page_active
-                 * go false and clean up its own connection safely. */
                 if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                     nina_spotify_free_art();
                     bsp_display_unlock();
                 }
-                ESP_LOGI(TAG, "Leaving Spotify: freed album art buffer");
+                ESP_LOGI(TAG, "Left Spotify: freed album art buffer");
             }
             prev_on_spotify = on_spotify;
+            spotify_page_active = on_spotify;
+
+            /* AllSky and Clock flags — wake tasks immediately on page entry */
+            static bool prev_on_allsky = false;
+            if (on_allsky && !prev_on_allsky && allsky_task_handle) {
+                xTaskNotifyGive(allsky_task_handle);
+            }
+            prev_on_allsky = on_allsky;
+            allsky_page_active = on_allsky;
+
+            static bool prev_on_clock = false;
+            if (on_clock && !prev_on_clock) {
+                weather_client_force_refresh();  /* Wakes weather task via xTaskNotifyGive */
+            }
+            prev_on_clock = on_clock;
+            clock_page_active = on_clock;
         }
-        spotify_page_active = on_spotify;
 
         // Re-read instance count from config so API URL changes take effect live
         // In demo mode, keep instance_count at 3 (set during task init)
@@ -1549,7 +1596,6 @@ main_loop:
 
         /* If auto-rotate is active and we're on a NINA instance page but no instances
          * are connected, fall back to the summary page automatically. */
-        bool on_clock = nina_dashboard_is_clock_page();
         if (app_config_get()->auto_rotate_enabled && !on_summary && !on_sysinfo && !on_settings && !on_allsky && !on_spotify && !on_clock) {
             bool any_connected = false;
             for (int i = 0; i < instance_count; i++) {
