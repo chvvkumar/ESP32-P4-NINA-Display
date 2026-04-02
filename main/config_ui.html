@@ -1095,6 +1095,10 @@
         <div class="field" id="weather_api_key_field">
           <label class="field-label">API Key</label>
           <input type="text" class="input" id="weather_api_key" placeholder="Enter API key">
+          <div class="field-hint" id="weather_api_key_hint">
+            <span id="owm_link">Get a free API key at <a href="https://home.openweathermap.org/api_keys" target="_blank" rel="noopener" style="color:#7eb8da">openweathermap.org</a></span>
+            <span id="wunderground_link" style="display:none">Get an API key at <a href="https://www.wunderground.com/member/api-keys" target="_blank" rel="noopener" style="color:#7eb8da">wunderground.com</a></span>
+          </div>
         </div>
         <div class="field" id="weather_city_lookup_field">
           <label class="field-label">Location</label>
@@ -2185,6 +2189,8 @@
       var isWU=(provider==='2');
       var isOpenMeteo=(provider==='1');
       $('weather_api_key_field').style.display=isOpenMeteo?'none':'';
+      $('owm_link').style.display=(!isOpenMeteo&&!isWU)?'':'none';
+      $('wunderground_link').style.display=isWU?'':'none';
       $('weather_city_lookup_field').style.display=isWU?'none':'';
       $('weather_location_name_field').style.display=isWU?'none':'';
       $('weather_station_id_field').style.display=isWU?'':'none';
