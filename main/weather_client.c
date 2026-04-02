@@ -526,50 +526,149 @@ static bool fetch_wunderground(const app_config_t *cfg, weather_data_t *out) {
     /* WU current doesn't include condition text — leave blank */
     out->condition[0] = '\0';
 
-    /* High/low and UV not in PWS current — set defaults */
+    /* UV is at the top level of the PWS observation */
+    cJSON *uv = cJSON_GetObjectItem(obs0, "uv");
+    out->uv_index = (uv && cJSON_IsNumber(uv)) ? (float)uv->valuedouble : -1.0f;
+
+    /* High/low not in PWS current — set defaults, updated by forecast below */
     out->temp_high = out->temp_current;
     out->temp_low  = out->temp_current;
-    out->uv_index  = -1.0f;
 
     cJSON_Delete(json);
 
-    /* ── Hourly forecast ── */
+    /* ── Hourly forecast ──
+     * Try the Weather.com v3 forecast endpoint first (works with paid WU keys).
+     * If that fails (free WU keys only cover v2/pws endpoints), fall back to
+     * Open-Meteo which is free and always available.
+     */
+    bool got_forecast = false;
+
+    /* Attempt 1: Weather.com v3 hourly forecast */
     snprintf(url, sizeof(url),
              "https://api.weather.com/v3/wx/forecast/hourly/12hour?"
-             "geocode=%.4f,%.4f&apiKey=%s&units=%s&format=json",
+             "geocode=%.4f,%.4f&apiKey=%s&units=%s&language=en-US&format=json",
              cfg->weather_lat, cfg->weather_lon, cfg->weather_api_key, units_code);
 
     body = http_get_body(url);
-    if (!body) return true;  /* current succeeded, forecast optional */
+    if (body) {
+        json = cJSON_Parse(body);
+        free(body);
+        if (json) {
+            cJSON *temps = cJSON_GetObjectItem(json, "temperature");
+            if (temps && cJSON_IsArray(temps)) {
+                int count = cJSON_GetArraySize(temps);
+                if (count > 10) count = 10;
 
-    json = cJSON_Parse(body);
-    free(body);
-    if (!json) return true;
+                time_t now;
+                time(&now);
+                struct tm tm_now;
+                localtime_r(&now, &tm_now);
 
-    cJSON *temps = cJSON_GetObjectItem(json, "temperature");
-    if (temps && cJSON_IsArray(temps)) {
-        int count = cJSON_GetArraySize(temps);
-        if (count > 10) count = 10;
+                for (int i = 0; i < count; i++) {
+                    cJSON *tv = cJSON_GetArrayItem(temps, i);
+                    if (tv) out->hourly_temps[i] = (float)tv->valuedouble;
+                    out->hourly_hours[i] = (uint8_t)((tm_now.tm_hour + i) % 24);
+                }
 
-        time_t now;
-        time(&now);
-        struct tm tm_now;
-        localtime_r(&now, &tm_now);
-
-        for (int i = 0; i < count; i++) {
-            cJSON *tv = cJSON_GetArrayItem(temps, i);
-            if (tv) out->hourly_temps[i] = (float)tv->valuedouble;
-            out->hourly_hours[i] = (uint8_t)((tm_now.tm_hour + i) % 24);
-        }
-
-        /* Update high/low from forecast */
-        for (int i = 0; i < count; i++) {
-            if (out->hourly_temps[i] > out->temp_high) out->temp_high = out->hourly_temps[i];
-            if (out->hourly_temps[i] < out->temp_low)  out->temp_low  = out->hourly_temps[i];
+                /* Update high/low from forecast */
+                for (int i = 0; i < count; i++) {
+                    if (out->hourly_temps[i] > out->temp_high) out->temp_high = out->hourly_temps[i];
+                    if (out->hourly_temps[i] < out->temp_low)  out->temp_low  = out->hourly_temps[i];
+                }
+                got_forecast = true;
+            }
+            cJSON_Delete(json);
         }
     }
 
-    cJSON_Delete(json);
+    /* Attempt 2: Open-Meteo fallback (free, no API key) */
+    if (!got_forecast && cfg->weather_lat != 0.0f && cfg->weather_lon != 0.0f) {
+        ESP_LOGI(TAG, "WU v3 forecast unavailable, falling back to Open-Meteo");
+
+        const char *temp_unit = (cfg->weather_units == 0) ? "fahrenheit" : "celsius";
+        snprintf(url, sizeof(url),
+                 "https://api.open-meteo.com/v1/forecast?"
+                 "latitude=%.4f&longitude=%.4f"
+                 "&hourly=temperature_2m,uv_index"
+                 "&daily=temperature_2m_max,temperature_2m_min"
+                 "&temperature_unit=%s&forecast_days=2&timezone=auto",
+                 cfg->weather_lat, cfg->weather_lon, temp_unit);
+
+        body = http_get_body(url);
+        if (body) {
+            json = cJSON_Parse(body);
+            free(body);
+            if (json) {
+                cJSON *hourly = cJSON_GetObjectItem(json, "hourly");
+                if (hourly) {
+                    cJSON *h_time = cJSON_GetObjectItem(hourly, "time");
+                    cJSON *h_temp = cJSON_GetObjectItem(hourly, "temperature_2m");
+                    cJSON *h_uv   = cJSON_GetObjectItem(hourly, "uv_index");
+                    int h_count = h_time ? cJSON_GetArraySize(h_time) : 0;
+
+                    /* Find current hour in the hourly array */
+                    time_t now;
+                    time(&now);
+                    struct tm tm_now;
+                    localtime_r(&now, &tm_now);
+
+                    int start_idx = -1;
+                    for (int i = 0; i < h_count; i++) {
+                        cJSON *t_item = cJSON_GetArrayItem(h_time, i);
+                        if (!t_item || !cJSON_IsString(t_item)) continue;
+                        const char *ts = t_item->valuestring;
+                        int len = strlen(ts);
+                        if (len < 13) continue;
+                        int h = (ts[11] - '0') * 10 + (ts[12] - '0');
+                        int d = (ts[8] - '0') * 10 + (ts[9] - '0');
+                        if (d == tm_now.tm_mday && h == tm_now.tm_hour) {
+                            start_idx = i;
+                            break;
+                        }
+                    }
+
+                    if (start_idx >= 0 && h_temp) {
+                        for (int i = 0; i < 10 && (start_idx + i) < h_count; i++) {
+                            cJSON *tv = cJSON_GetArrayItem(h_temp, start_idx + i);
+                            if (tv) out->hourly_temps[i] = (float)tv->valuedouble;
+
+                            cJSON *ti = cJSON_GetArrayItem(h_time, start_idx + i);
+                            if (ti && cJSON_IsString(ti) && strlen(ti->valuestring) >= 13) {
+                                out->hourly_hours[i] = (uint8_t)(
+                                    (ti->valuestring[11] - '0') * 10 +
+                                    (ti->valuestring[12] - '0'));
+                            }
+                        }
+                        got_forecast = true;
+                    }
+
+                    /* UV index from Open-Meteo */
+                    if (h_uv && start_idx >= 0) {
+                        cJSON *uv_item = cJSON_GetArrayItem(h_uv, start_idx);
+                        if (uv_item) out->uv_index = (float)uv_item->valuedouble;
+                    }
+                }
+
+                /* Daily high/low from Open-Meteo */
+                cJSON *daily = cJSON_GetObjectItem(json, "daily");
+                if (daily) {
+                    cJSON *d_max = cJSON_GetObjectItem(daily, "temperature_2m_max");
+                    cJSON *d_min = cJSON_GetObjectItem(daily, "temperature_2m_min");
+                    if (d_max && cJSON_IsArray(d_max) && cJSON_GetArraySize(d_max) > 0) {
+                        cJSON *v = cJSON_GetArrayItem(d_max, 0);
+                        if (v) out->temp_high = (float)v->valuedouble;
+                    }
+                    if (d_min && cJSON_IsArray(d_min) && cJSON_GetArraySize(d_min) > 0) {
+                        cJSON *v = cJSON_GetArrayItem(d_min, 0);
+                        if (v) out->temp_low = (float)v->valuedouble;
+                    }
+                }
+
+                cJSON_Delete(json);
+            }
+        }
+    }
+
     return true;
 }
 
