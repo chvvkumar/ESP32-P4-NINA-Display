@@ -26,6 +26,7 @@
 // Handler for reboot
 esp_err_t reboot_post_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     httpd_resp_send(req, "Rebooting...", HTTPD_RESP_USE_STRLEN);
     // Delay slightly to let the response go out
     vTaskDelay(pdMS_TO_TICKS(100));
@@ -36,6 +37,7 @@ esp_err_t reboot_post_handler(httpd_req_t *req)
 // Handler for check-update (triggers on-demand OTA check on device)
 esp_err_t check_update_post_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     ota_check_requested = true;
     httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
@@ -44,6 +46,7 @@ esp_err_t check_update_post_handler(httpd_req_t *req)
 // Handler for factory reset
 esp_err_t factory_reset_post_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     ESP_LOGW(TAG, "Factory reset requested via web interface");
     httpd_resp_send(req, "Factory reset initiated...", HTTPD_RESP_USE_STRLEN);
 
@@ -202,6 +205,7 @@ static void ota_restore_network(void) {
 
 esp_err_t ota_post_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     ESP_LOGI(TAG, "OTA update started, content length: %d", req->content_len);
 
     if (req->content_len <= 0) {
@@ -407,6 +411,7 @@ esp_err_t check_update_json_handler(httpd_req_t *req)
 // Handler for GitHub OTA download (triggered from web UI)
 esp_err_t ota_github_post_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     /* Read JSON body with release tag to install */
     char body[64];
     int received = httpd_req_recv(req, body, sizeof(body) - 1);
@@ -461,6 +466,7 @@ esp_err_t ota_github_post_handler(httpd_req_t *req)
 // Handler for performance profiling data
 esp_err_t perf_get_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     httpd_resp_set_type(req, "application/json");
     if (!g_perf.enabled) {
         httpd_resp_sendstr(req, "{\"enabled\":false}");
@@ -480,6 +486,7 @@ esp_err_t perf_get_handler(httpd_req_t *req)
 // Handler for resetting performance metrics
 esp_err_t perf_reset_post_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     httpd_resp_set_type(req, "application/json");
     if (!g_perf.enabled) {
         httpd_resp_sendstr(req, "{\"error\":\"Debug mode not enabled\"}");
@@ -529,6 +536,7 @@ esp_err_t status_get_handler(httpd_req_t *req)
 // Handler for per-instance NINA connection health (test automation)
 esp_err_t nina_status_get_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     const app_config_t *cfg = app_config_get();
 
     cJSON *root = cJSON_CreateObject();
@@ -625,5 +633,90 @@ esp_err_t crash_get_handler(httpd_req_t *req)
     httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
     free((void *)json_str);
     cJSON_Delete(root);
+    return ESP_OK;
+}
+
+// Handler for changing the admin password. Requires the current password.
+esp_err_t admin_password_post_handler(httpd_req_t *req)
+{
+    REQUIRE_AUTH(req);
+
+    int remaining = req->content_len;
+    if (remaining <= 0 || remaining > 512) {
+        return send_400(req, "Invalid payload size");
+    }
+    char *buf = heap_caps_malloc(remaining + 1, MALLOC_CAP_SPIRAM);
+    if (!buf) {
+        httpd_resp_send_500(req);
+        return ESP_OK;
+    }
+    int received = 0;
+    while (received < remaining) {
+        int ret = httpd_req_recv(req, buf + received, remaining - received);
+        if (ret <= 0) {
+            free(buf);
+            httpd_resp_send_408(req);
+            return ESP_OK;
+        }
+        received += ret;
+    }
+    buf[received] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    free(buf);
+    if (!root) return send_400(req, "Invalid JSON");
+
+    cJSON *cur_item = cJSON_GetObjectItem(root, "current");
+    cJSON *new_item = cJSON_GetObjectItem(root, "new");
+    if (!cJSON_IsString(cur_item) || !cJSON_IsString(new_item)) {
+        cJSON_Delete(root);
+        return send_400(req, "Missing 'current' or 'new' string");
+    }
+    const char *cur_pw = cur_item->valuestring;
+    const char *new_pw = new_item->valuestring;
+
+    /* Validate new password length (4-32 chars) */
+    size_t new_len = strlen(new_pw);
+    if (new_len < 4 || new_len > 32) {
+        cJSON_Delete(root);
+        return send_400(req, "New password must be 4-32 characters");
+    }
+
+    /* Constant-time compare of current against stored */
+    const app_config_t *live = app_config_get();
+    size_t a = strlen(cur_pw);
+    size_t b = strlen(live->admin_password);
+    unsigned char diff = (a != b) ? 1 : 0;
+    size_t n = (a < b) ? a : b;
+    for (size_t i = 0; i < n; i++) {
+        diff |= (unsigned char)cur_pw[i] ^ (unsigned char)live->admin_password[i];
+    }
+    if (diff != 0) {
+        cJSON_Delete(root);
+        httpd_resp_set_status(req, "403 Forbidden");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"current password incorrect\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    /* Apply + persist */
+    app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    if (!cfg) {
+        cJSON_Delete(root);
+        httpd_resp_send_500(req);
+        return ESP_OK;
+    }
+    memcpy(cfg, live, sizeof(app_config_t));
+    memset(cfg->admin_password, 0, sizeof(cfg->admin_password));
+    strncpy(cfg->admin_password, new_pw, sizeof(cfg->admin_password) - 1);
+
+    app_config_apply(cfg);
+    app_config_save(cfg);
+    free(cfg);
+    cJSON_Delete(root);
+
+    ESP_LOGI(TAG, "Admin password updated");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"ok\":true}", HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }

@@ -14,6 +14,7 @@ extern const uint8_t favicon_png_end[]   asm("_binary_favicon_png_end");
 // Handler for root URL
 esp_err_t root_get_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, (const char *)config_html_start,
                     config_html_end - config_html_start);
@@ -137,12 +138,16 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
     cJSON_AddBoolToObject(obj, "idle_page_persistent", cfg->idle_page_persistent);
     cJSON_AddBoolToObject(obj, "idle_indicator_enabled", cfg->idle_indicator_enabled);
 
+    // Authentication
+    cJSON_AddBoolToObject(obj, "auth_enabled", cfg->auth_enabled);
+
     return obj;
 }
 
 // Handler for getting config
 esp_err_t config_get_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     app_config_t *cfg = app_config_get();
     cJSON *root = serialize_config_to_json(cfg);
     if (root == NULL) {
@@ -150,16 +155,35 @@ esp_err_t config_get_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    /* WiFi networks: serialize from app_config. Passwords never exposed. */
+    /* Redact secrets. Real values are never exposed via GET /api/config.
+     * The UI round-trips the "********" sentinel via POST and the server
+     * preserves the existing NVS value when it sees that sentinel. */
+    #define REDACT_STRING_FIELD(key) do { \
+        cJSON_DeleteItemFromObject(root, #key); \
+        if (cfg->key[0] != '\0') cJSON_AddStringToObject(root, #key, "********"); \
+        else                     cJSON_AddStringToObject(root, #key, ""); \
+    } while (0)
+    REDACT_STRING_FIELD(mqtt_password);
+    REDACT_STRING_FIELD(spotify_client_id);
+    #undef REDACT_STRING_FIELD
+    /* admin_password is never serialized by serialize_config_to_json() at all. */
+
+    /* WiFi networks: serialize from app_config. SSIDs exposed; passwords
+     * replaced with "********" (sentinel) when present so the UI can
+     * round-trip without knowing the real value. */
     {
         cJSON *wifi_arr = cJSON_AddArrayToObject(root, "wifi_networks");
         for (int i = 0; i < 3; i++) {
             cJSON *net = cJSON_CreateObject();
             cJSON_AddStringToObject(net, "ssid", cfg->wifi_networks[i].ssid);
+            cJSON_AddStringToObject(net, "password",
+                cfg->wifi_networks[i].password[0] != '\0' ? "********" : "");
             cJSON_AddItemToArray(wifi_arr, net);
         }
         /* Backward compat: expose primary SSID as top-level "ssid" */
         cJSON_AddStringToObject(root, "ssid", cfg->wifi_networks[0].ssid);
+        cJSON_AddStringToObject(root, "wifi_password",
+            cfg->wifi_networks[0].password[0] != '\0' ? "********" : "");
     }
 
     cJSON_AddBoolToObject(root, "_dirty", app_config_is_dirty());
@@ -282,6 +306,7 @@ static const backup_field_t s_backup_fields[] = {
     {"idle_page_override_target", "Idle Override Target",   "Behavior", false, false},
     {"idle_page_persistent",     "Idle Page Persistent",   "Behavior", false, false},
     {"idle_indicator_enabled",   "Idle Indicator Enabled", "Behavior", false, false},
+    {"auth_enabled",             "Authentication Enabled", "System",   false, false},
 
     /* Sensitive */
     {"weather_api_key",    "Weather API Key",    "Weather", true, false},
@@ -590,7 +615,14 @@ static app_config_t *parse_config_from_json(cJSON *root)
     JSON_TO_BOOL  (root, "mqtt_enabled",   cfg->mqtt_enabled);
     JSON_TO_STRING(root, "mqtt_broker_url", cfg->mqtt_broker_url);
     JSON_TO_STRING(root, "mqtt_username",  cfg->mqtt_username);
-    JSON_TO_STRING(root, "mqtt_password",  cfg->mqtt_password);
+    /* mqtt_password: skip write if value equals "********" sentinel */
+    {
+        cJSON *_mp = cJSON_GetObjectItem(root, "mqtt_password");
+        if (cJSON_IsString(_mp) && strcmp(_mp->valuestring, "********") != 0) {
+            strncpy(cfg->mqtt_password, _mp->valuestring, sizeof(cfg->mqtt_password) - 1);
+            cfg->mqtt_password[sizeof(cfg->mqtt_password) - 1] = '\0';
+        }
+    }
     JSON_TO_STRING(root, "mqtt_topic_prefix", cfg->mqtt_topic_prefix);
 
     // Clamped int fields
@@ -774,7 +806,15 @@ static app_config_t *parse_config_from_json(cJSON *root)
     }
 
     JSON_TO_BOOL  (root, "spotify_enabled",           cfg->spotify_enabled);
-    JSON_TO_STRING(root, "spotify_client_id",          cfg->spotify_client_id);
+    /* spotify_client_id: skip write if value equals "********" sentinel */
+    {
+        cJSON *_scid = cJSON_GetObjectItem(root, "spotify_client_id");
+        if (cJSON_IsString(_scid) && strcmp(_scid->valuestring, "********") != 0) {
+            strncpy(cfg->spotify_client_id, _scid->valuestring, sizeof(cfg->spotify_client_id) - 1);
+            cfg->spotify_client_id[sizeof(cfg->spotify_client_id) - 1] = '\0';
+        }
+    }
+    /* admin_password is never accepted via /api/config — use /api/admin-password. */
     JSON_TO_INT   (root, "spotify_poll_interval_ms",   cfg->spotify_poll_interval_ms);
     JSON_TO_BOOL  (root, "spotify_show_progress_bar",  cfg->spotify_show_progress_bar);
     JSON_TO_BOOL  (root, "spotify_minimal_mode",       cfg->spotify_minimal_mode);
@@ -827,6 +867,9 @@ static app_config_t *parse_config_from_json(cJSON *root)
     JSON_TO_BOOL(root, "idle_page_persistent", cfg->idle_page_persistent);
     JSON_TO_BOOL(root, "idle_indicator_enabled", cfg->idle_indicator_enabled);
 
+    // Authentication toggle
+    JSON_TO_BOOL(root, "auth_enabled", cfg->auth_enabled);
+
     return cfg;
 }
 
@@ -876,6 +919,7 @@ static cJSON *receive_json_body(httpd_req_t *req, int max_size)
 // Handler for saving config (persists to NVS)
 esp_err_t config_post_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     cJSON *root = receive_json_body(req, CONFIG_MAX_PAYLOAD);
     if (!root) return ESP_OK;
 
@@ -924,11 +968,15 @@ esp_err_t config_post_handler(httpd_req_t *req)
                             sizeof(cfg->wifi_networks[i].ssid) - 1);
                     cfg->wifi_networks[i].ssid[sizeof(cfg->wifi_networks[i].ssid) - 1] = '\0';
 
-                    if (cJSON_IsString(pass_item) && pass_item->valuestring[0] != '\0') {
+                    if (cJSON_IsString(pass_item) && pass_item->valuestring[0] != '\0' &&
+                        strcmp(pass_item->valuestring, "********") != 0) {
                         memset(cfg->wifi_networks[i].password, 0,
                                sizeof(cfg->wifi_networks[i].password));
                         strncpy(cfg->wifi_networks[i].password, pass_item->valuestring,
                                 sizeof(cfg->wifi_networks[i].password) - 1);
+                    } else if (cJSON_IsString(pass_item) &&
+                               strcmp(pass_item->valuestring, "********") == 0) {
+                        /* Sentinel: preserve existing password. */
                     } else if (ssid_changed) {
                         memset(cfg->wifi_networks[i].password, 0,
                                sizeof(cfg->wifi_networks[i].password));
@@ -955,7 +1003,8 @@ esp_err_t config_post_handler(httpd_req_t *req)
             strncpy(cfg->wifi_networks[0].ssid, ssid_item->valuestring,
                     sizeof(cfg->wifi_networks[0].ssid) - 1);
             cfg->wifi_networks[0].ssid[sizeof(cfg->wifi_networks[0].ssid) - 1] = '\0';
-            if (cJSON_IsString(pass_item) && pass_item->valuestring[0] != '\0') {
+            if (cJSON_IsString(pass_item) && pass_item->valuestring[0] != '\0' &&
+                strcmp(pass_item->valuestring, "********") != 0) {
                 memset(cfg->wifi_networks[0].password, 0,
                        sizeof(cfg->wifi_networks[0].password));
                 strncpy(cfg->wifi_networks[0].password, pass_item->valuestring,
@@ -988,6 +1037,7 @@ esp_err_t config_post_handler(httpd_req_t *req)
 // Handler for live-applying config (in-memory only, no NVS)
 esp_err_t config_apply_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     cJSON *root = receive_json_body(req, CONFIG_MAX_PAYLOAD);
     if (!root) return ESP_OK;
 
@@ -1023,6 +1073,7 @@ esp_err_t config_apply_handler(httpd_req_t *req)
 // Handler for reverting config to NVS-saved state
 esp_err_t config_revert_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     app_config_t *old_cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
     if (!old_cfg) {
         ESP_LOGE(TAG, "config_revert: malloc failed for old_cfg");
@@ -1049,6 +1100,7 @@ esp_err_t config_revert_handler(httpd_req_t *req)
 
 esp_err_t backup_get_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     /* Check include_sensitive query param */
     bool include_sensitive = false;
     {
@@ -1061,6 +1113,16 @@ esp_err_t backup_get_handler(httpd_req_t *req)
         }
     }
 
+    /* Safety rail: if authentication is disabled, secrets must NEVER be
+     * returned in any API response — including this backup endpoint. A caller
+     * that explicitly requests include_sensitive=1 on an open device still
+     * gets a redacted backup. */
+    app_config_t *cfg = app_config_get();
+    if (!cfg->auth_enabled && include_sensitive) {
+        ESP_LOGI(TAG, "backup: include_sensitive forced off (auth disabled)");
+        include_sensitive = false;
+    }
+
     /* Build root JSON */
     cJSON *root = cJSON_CreateObject();
     if (!root) { httpd_resp_send_500(req); return ESP_FAIL; }
@@ -1070,9 +1132,6 @@ esp_err_t backup_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(meta, "config_version", APP_CONFIG_VERSION);
     cJSON_AddStringToObject(meta, "firmware_version", BUILD_GIT_TAG);
     cJSON_AddStringToObject(meta, "git_sha", BUILD_GIT_SHA);
-
-    /* Hostname */
-    app_config_t *cfg = app_config_get();
     cJSON_AddStringToObject(meta, "hostname", cfg->hostname);
 
     /* MAC address */
@@ -1126,6 +1185,33 @@ esp_err_t backup_get_handler(httpd_req_t *req)
         }
     }
 
+    /* Inject fields that serialize_config_to_json() does NOT emit (admin_password,
+     * wifi_networks array, wifi_password legacy). Without these, a restore from
+     * a "full" backup would wipe device credentials. Only included when
+     * include_sensitive=1 (matches the existing sensitive-section gating). */
+    if (sensitive_section) {
+        cJSON_AddStringToObject(sensitive_section, "admin_password", cfg->admin_password);
+        /* mqtt_password, spotify_client_id, weather_api_key already emitted by
+         * serialize_config_to_json() and routed into sensitive_section by the
+         * s_backup_fields registry above. */
+
+        /* wifi_networks: full array with real ssid + password per entry */
+        cJSON *wifi_arr = cJSON_CreateArray();
+        for (int i = 0; i < 3; i++) {
+            cJSON *net = cJSON_CreateObject();
+            cJSON_AddStringToObject(net, "ssid", cfg->wifi_networks[i].ssid);
+            cJSON_AddStringToObject(net, "password", cfg->wifi_networks[i].password);
+            /* Mirror as "pass" too — config_post handler reads "pass" key */
+            cJSON_AddStringToObject(net, "pass", cfg->wifi_networks[i].password);
+            cJSON_AddItemToArray(wifi_arr, net);
+        }
+        cJSON_AddItemToObject(sensitive_section, "wifi_networks", wifi_arr);
+
+        /* Legacy top-level wifi_password = wifi_networks[0].password */
+        cJSON_AddStringToObject(sensitive_section, "wifi_password",
+                                cfg->wifi_networks[0].password);
+    }
+
     cJSON_AddItemToObject(root, "config", config_section);
     if (sensitive_section) {
         cJSON_AddItemToObject(root, "sensitive", sensitive_section);
@@ -1171,6 +1257,7 @@ esp_err_t backup_get_handler(httpd_req_t *req)
 
 esp_err_t restore_post_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     cJSON *root = receive_json_body(req, CONFIG_MAX_RESTORE_PAYLOAD);
     if (!root) return ESP_OK;  /* error already sent */
 
@@ -1245,6 +1332,14 @@ esp_err_t restore_post_handler(httpd_req_t *req)
                 for (const backup_field_t *f = s_backup_fields; f->json_key; f++) {
                     if (strcmp(f->json_key, item->string) == 0) { known = true; break; }
                 }
+                /* Also allow credential fields not in the registry (admin_password,
+                 * wifi_networks array, wifi_password legacy compat). */
+                if (!known && item->string &&
+                    (strcmp(item->string, "admin_password") == 0 ||
+                     strcmp(item->string, "wifi_networks") == 0 ||
+                     strcmp(item->string, "wifi_password") == 0)) {
+                    known = true;
+                }
                 if (known) {
                     cJSON_DeleteItemFromObject(merged, item->string);
                     cJSON_AddItemToObject(merged, item->string, cJSON_Duplicate(item, true));
@@ -1261,13 +1356,73 @@ esp_err_t restore_post_handler(httpd_req_t *req)
 
         /* Parse into config struct using existing parse_config_from_json */
         app_config_t *new_cfg = parse_config_from_json(merged);
-        cJSON_Delete(merged);
-        cJSON_Delete(root);
 
         if (!new_cfg) {
+            cJSON_Delete(merged);
+            cJSON_Delete(root);
             httpd_resp_send_500(req);
             return ESP_OK;
         }
+
+        /* parse_config_from_json() does not handle admin_password or the
+         * wifi_networks[] array. Apply them here from the merged backup. */
+        {
+            cJSON *ap = cJSON_GetObjectItem(merged, "admin_password");
+            if (cJSON_IsString(ap) && ap->valuestring[0] != '\0' &&
+                strcmp(ap->valuestring, "********") != 0) {
+                strncpy(new_cfg->admin_password, ap->valuestring,
+                        sizeof(new_cfg->admin_password) - 1);
+                new_cfg->admin_password[sizeof(new_cfg->admin_password) - 1] = '\0';
+            }
+
+            cJSON *warr = cJSON_GetObjectItem(merged, "wifi_networks");
+            if (cJSON_IsArray(warr)) {
+                int count = cJSON_GetArraySize(warr);
+                if (count > 3) count = 3;
+                for (int i = 0; i < count; i++) {
+                    cJSON *net = cJSON_GetArrayItem(warr, i);
+                    if (!cJSON_IsObject(net)) continue;
+                    cJSON *sid = cJSON_GetObjectItem(net, "ssid");
+                    /* Accept either "password" (backup format) or "pass" (legacy). */
+                    cJSON *pwd = cJSON_GetObjectItem(net, "password");
+                    if (!cJSON_IsString(pwd)) pwd = cJSON_GetObjectItem(net, "pass");
+
+                    if (cJSON_IsString(sid)) {
+                        if (sid->valuestring[0] == '\0') {
+                            memset(&new_cfg->wifi_networks[i], 0,
+                                   sizeof(wifi_network_t));
+                        } else {
+                            strncpy(new_cfg->wifi_networks[i].ssid,
+                                    sid->valuestring,
+                                    sizeof(new_cfg->wifi_networks[i].ssid) - 1);
+                            new_cfg->wifi_networks[i].ssid[
+                                sizeof(new_cfg->wifi_networks[i].ssid) - 1] = '\0';
+                            if (cJSON_IsString(pwd) &&
+                                strcmp(pwd->valuestring, "********") != 0) {
+                                memset(new_cfg->wifi_networks[i].password, 0,
+                                       sizeof(new_cfg->wifi_networks[i].password));
+                                strncpy(new_cfg->wifi_networks[i].password,
+                                        pwd->valuestring,
+                                        sizeof(new_cfg->wifi_networks[i].password) - 1);
+                            }
+                        }
+                    }
+                }
+            } else {
+                /* Legacy top-level wifi_password (maps to wifi_networks[0]) */
+                cJSON *wp = cJSON_GetObjectItem(merged, "wifi_password");
+                if (cJSON_IsString(wp) && wp->valuestring[0] != '\0' &&
+                    strcmp(wp->valuestring, "********") != 0) {
+                    memset(new_cfg->wifi_networks[0].password, 0,
+                           sizeof(new_cfg->wifi_networks[0].password));
+                    strncpy(new_cfg->wifi_networks[0].password, wp->valuestring,
+                            sizeof(new_cfg->wifi_networks[0].password) - 1);
+                }
+            }
+        }
+
+        cJSON_Delete(merged);
+        cJSON_Delete(root);
 
         /* Save to NVS and trigger side effects */
         app_config_t *old_cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);

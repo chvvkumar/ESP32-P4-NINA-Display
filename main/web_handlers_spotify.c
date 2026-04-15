@@ -8,6 +8,7 @@
  */
 esp_err_t spotify_config_get_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     app_config_t *cfg = app_config_get();
     cJSON *root = cJSON_CreateObject();
     if (root == NULL) {
@@ -43,6 +44,7 @@ esp_err_t spotify_config_get_handler(httpd_req_t *req)
  */
 esp_err_t spotify_config_post_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     char buf[CONFIG_MAX_PAYLOAD];
     int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (received <= 0) {
@@ -139,6 +141,7 @@ esp_err_t spotify_callback_get_handler(httpd_req_t *req)
  */
 esp_err_t spotify_token_exchange_post_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     char buf[CONFIG_MAX_PAYLOAD];
     int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (received <= 0) {
@@ -181,6 +184,7 @@ esp_err_t spotify_token_exchange_post_handler(httpd_req_t *req)
  */
 esp_err_t spotify_logout_post_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     spotify_auth_logout();
 
     httpd_resp_set_type(req, "application/json");
@@ -193,6 +197,7 @@ esp_err_t spotify_logout_post_handler(httpd_req_t *req)
  */
 esp_err_t spotify_status_get_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     cJSON *root = cJSON_CreateObject();
     if (root == NULL) {
         httpd_resp_send_500(req);
@@ -233,6 +238,7 @@ esp_err_t spotify_status_get_handler(httpd_req_t *req)
  */
 esp_err_t spotify_control_post_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     char buf[256];
     int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (received <= 0) {

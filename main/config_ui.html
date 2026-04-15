@@ -1026,6 +1026,43 @@
           <img id="ssImage" style="width:100%;border-radius:var(--radius-sm);border:1px solid var(--border)">
         </div>
       </div>
+
+      <div class="card">
+        <div class="card-title">Authentication</div>
+        <div class="toggle-row">
+          <span class="toggle-label">Require login to access the web UI</span>
+          <label class="toggle"><input type="checkbox" id="auth_enabled"><span class="toggle-track"></span></label>
+        </div>
+        <p style="color:#888;font-size:0.85em;margin:8px 0 0 0;">
+          When disabled, anyone on the network can control the device (reboot, factory reset, OTA, config change).
+          Secrets (passwords, API keys, tokens) remain redacted in API responses either way.
+        </p>
+        <button class="btn btn-primary" style="margin-top:12px" onclick="saveAuthEnabled()">Save</button>
+        <div id="auth_enabled_status" style="margin-top:10px;font-size:0.9em;"></div>
+      </div>
+
+      <div class="card" id="adminPasswordCard">
+        <div class="card-title">Admin Password</div>
+        <p style="color:#888;font-size:0.85em;margin:2px 0 12px 0;">
+          Default password is <code>changeme123!</code>. Change it now to secure this device's web interface.
+        </p>
+        <div class="field">
+          <label for="admin_pw_current">Current password</label>
+          <input type="password" id="admin_pw_current" autocomplete="current-password">
+        </div>
+        <div class="field">
+          <label for="admin_pw_new">New password (4-32 chars)</label>
+          <input type="password" id="admin_pw_new" autocomplete="new-password">
+        </div>
+        <div class="field">
+          <label for="admin_pw_confirm">Confirm new password</label>
+          <input type="password" id="admin_pw_confirm" autocomplete="new-password">
+        </div>
+        <button class="btn btn-primary" onclick="changeAdminPassword()">Save Password</button>
+        <div id="admin_pw_status" style="margin-top:10px;font-size:0.9em;"></div>
+        <hr style="border:0;border-top:1px solid var(--border);margin:16px 0">
+        <button class="btn" id="signOutBtn" onclick="signOut()">Sign out</button>
+      </div>
     </div>
 
     <!-- ==================== TAB 5: ALLSKY ==================== -->
@@ -2061,6 +2098,11 @@
       if($('idle_indicator_enabled')) $('idle_indicator_enabled').checked=data.idle_indicator_enabled!==false;
       toggleIdleOverride();
 
+      // Authentication toggle — reflect in UI and hide sign-out button when off
+      var authOn = (data.auth_enabled!==false);
+      if($('auth_enabled')) $('auth_enabled').checked = authOn;
+      if($('signOutBtn')) $('signOutBtn').style.display = authOn ? '' : 'none';
+
       /* Backup tab version info */
       if ($('backupCurrentVersion')) $('backupCurrentVersion').textContent = 'v' + (data.config_version || '?');
       if ($('backupFirmwareVersion')) {
@@ -2299,6 +2341,59 @@
       });
     }
 
+    function saveAuthEnabled(){
+      var cb=$('auth_enabled');
+      var status=$('auth_enabled_status');
+      if(!cb) return;
+      if(status){ status.textContent=''; status.style.color=''; }
+      var want = !!cb.checked;
+      if(!want){
+        if(!confirm('Disable authentication?\n\nAnyone on your network will be able to reboot, reconfigure, and update this device. Secrets will remain redacted.\n\nContinue?')){
+          cb.checked = true;
+          return;
+        }
+      }
+      fetch('/api/config',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({auth_enabled:want})
+      }).then(function(r){
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        if(status){
+          status.textContent = want ? 'Authentication enabled.' : 'Authentication disabled.';
+          status.style.color = '#6c6';
+        }
+        if($('signOutBtn')) $('signOutBtn').style.display = want ? '' : 'none';
+        showToast(want ? 'Authentication enabled' : 'Authentication disabled','success');
+      }).catch(function(e){
+        if(status){ status.textContent='Save failed: '+e.message; status.style.color='#f66'; }
+        showToast('Save failed: '+e.message,'error');
+      });
+    }
+
+    function signOut(){
+      fetch('/api/logout',{method:'POST'}).then(function(){
+        window.location='/login';
+      }).catch(function(){
+        window.location='/login';
+      });
+    }
+
+    /* Global fetch wrapper: redirect to /login on any 401 from protected APIs. */
+    (function(){
+      var _fetch=window.fetch;
+      window.fetch=function(input,init){
+        var url='';
+        try{ url=(typeof input==='string')?input:(input&&input.url)||''; }catch(e){}
+        return _fetch.call(this,input,init).then(function(resp){
+          if(resp && resp.status===401 && url.indexOf('/api/login')===-1){
+            window.location='/login';
+          }
+          return resp;
+        });
+      };
+    })();
+
     function factoryReset(){
       if(!confirm('Wipe all settings?')) return;
       if(!confirm('Confirm Reset?')) return;
@@ -2306,6 +2401,39 @@
         showToast('Factory reset. Rebooting...','success');
       }).catch(e=>{
         showToast('Reset failed: '+e.message,'error');
+      });
+    }
+
+    function changeAdminPassword(){
+      var cur=$('admin_pw_current').value;
+      var nw=$('admin_pw_new').value;
+      var cf=$('admin_pw_confirm').value;
+      var status=$('admin_pw_status');
+      status.textContent='';
+      if(!cur){ status.textContent='Enter current password.'; status.style.color='#f66'; return; }
+      if(nw.length<4||nw.length>32){ status.textContent='New password must be 4-32 characters.'; status.style.color='#f66'; return; }
+      if(nw!==cf){ status.textContent='New passwords do not match.'; status.style.color='#f66'; return; }
+      fetch('/api/admin-password',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({current:cur, new:nw})
+      }).then(r=>r.json().then(j=>({ok:r.ok,status:r.status,body:j}))).then(res=>{
+        if(res.ok){
+          status.textContent='Password updated. Existing session remains active; new sign-ins require the new password.';
+          status.style.color='#6c6';
+          $('admin_pw_current').value='';
+          $('admin_pw_new').value='';
+          $('admin_pw_confirm').value='';
+          showToast('Admin password updated','success');
+        }else{
+          var msg=(res.body&&res.body.error)?res.body.error:('HTTP '+res.status);
+          status.textContent='Failed: '+msg;
+          status.style.color='#f66';
+          showToast('Password change failed: '+msg,'error');
+        }
+      }).catch(e=>{
+        status.textContent='Error: '+e.message;
+        status.style.color='#f66';
       });
     }
 

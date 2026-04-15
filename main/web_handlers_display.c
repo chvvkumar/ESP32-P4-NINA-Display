@@ -104,6 +104,7 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
 // Handler for live brightness adjustment (no reboot needed)
 esp_err_t brightness_post_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     char buf[128];
     int ret, remaining = req->content_len;
 
@@ -146,6 +147,7 @@ esp_err_t brightness_post_handler(httpd_req_t *req)
 // Handler for live color brightness adjustment (no reboot needed)
 esp_err_t color_brightness_post_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     char buf[128];
     int ret, remaining = req->content_len;
 
@@ -197,6 +199,7 @@ esp_err_t color_brightness_post_handler(httpd_req_t *req)
 // Handler for live theme switching (no reboot needed)
 esp_err_t theme_post_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     char buf[128];
     int ret, remaining = req->content_len;
 
@@ -244,6 +247,7 @@ esp_err_t theme_post_handler(httpd_req_t *req)
 // Handler for live widget style switching (no reboot needed)
 esp_err_t widget_style_post_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     char buf[128];
     int ret, remaining = req->content_len;
 
@@ -291,6 +295,7 @@ esp_err_t widget_style_post_handler(httpd_req_t *req)
 // Handler for live page switching (saves override and switches immediately)
 esp_err_t page_post_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     char buf[64];
     int ret, remaining = req->content_len;
 
@@ -343,6 +348,7 @@ esp_err_t page_post_handler(httpd_req_t *req)
 // Handler for live screen rotation adjustment (no reboot needed)
 esp_err_t screen_rotation_post_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     char buf[64];
     int ret, remaining = req->content_len;
 
@@ -411,6 +417,7 @@ void screenshot_encoder_init(void)
 // Handler for screenshot capture - serves a JPEG image via hardware encoder
 esp_err_t screenshot_get_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     ESP_LOGI(TAG, "Screenshot requested");
 
     if (!s_jpeg_encoder) {

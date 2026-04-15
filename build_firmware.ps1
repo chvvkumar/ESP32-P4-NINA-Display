@@ -8,11 +8,14 @@
 #   .\build_firmware.ps1 -OTA         # Build + OTA flash to both devices
 #   .\build_firmware.ps1 -OTA -Devices "NinaDash1.lan","NinaDash2.lan"
 
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', 'Password',
+    Justification='Dev tool: password sourced from env var or interactive prompt; not persisted.')]
 param(
     [string]$IdfPath = "C:\Espressif\frameworks\esp-idf-v5.5.2",
     [switch]$FullClean,
     [switch]$OTA,
-    [string[]]$Devices = @("NinaDash2.lan")
+    [string[]]$Devices = @("NinaDash2.lan"),
+    [string]$Password = $(if ($env:NINADASH_PASSWORD) { $env:NINADASH_PASSWORD } else { "changeme123!" })
 )
 
 $ErrorActionPreference = "Stop"
@@ -150,17 +153,47 @@ Write-Host "              $OtaSizeMB MB ($OtaSize bytes)" -ForegroundColor Green
 
 # OTA flash to devices if requested (parallel)
 if ($OTA) {
+    # Device auth: /api/ota requires a valid session cookie.
+    if ([string]::IsNullOrEmpty($Password)) {
+        $sec = Read-Host -Prompt "Admin password for $($Devices -join ', ')" -AsSecureString
+        $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)
+        try { $Password = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
+        finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+    }
+
     Write-Host "`nUploading OTA firmware to $($Devices.Count) devices in parallel ..." -ForegroundColor Cyan
 
     [array]$jobs = foreach ($Device in $Devices) {
-        Start-Job -ArgumentList $Device, $AppBin -ScriptBlock {
-            param($Device, $AppBin)
+        Start-Job -ArgumentList $Device, $AppBin, $Password -ScriptBlock {
+            param($Device, $AppBin, $Password)
+
+            # 1. Login to get session cookie
+            $LoginUrl = "http://${Device}/api/login"
+            $loginBody = @{ password = $Password } | ConvertTo-Json -Compress
+            $loginResp = Invoke-WebRequest -Uri $LoginUrl -Method Post `
+                -Body $loginBody -ContentType "application/json" -TimeoutSec 15 `
+                -UseBasicParsing
+            if ($loginResp.StatusCode -ne 200) {
+                throw "login failed: HTTP $($loginResp.StatusCode)"
+            }
+            $setCookie = $loginResp.Headers['Set-Cookie']
+            if ($setCookie -is [array]) { $setCookie = $setCookie[0] }
+            if (-not $setCookie -or $setCookie -notmatch 'session=([^;]+)') {
+                throw "login succeeded but no session cookie returned"
+            }
+            $sessionCookie = "session=$($Matches[1])"
+
+            # 2. Upload firmware with session cookie
             $OtaUrl = "http://${Device}/api/ota"
             $fileBytes = [System.IO.File]::ReadAllBytes($AppBin)
-            $null = Invoke-WebRequest -Uri $OtaUrl -Method Post `
+            $otaResp = Invoke-WebRequest -Uri $OtaUrl -Method Post `
                 -Body $fileBytes `
                 -ContentType "application/octet-stream" `
-                -TimeoutSec 600
+                -Headers @{ Cookie = $sessionCookie } `
+                -TimeoutSec 600 -UseBasicParsing
+            if ($otaResp.StatusCode -lt 200 -or $otaResp.StatusCode -ge 300) {
+                throw "ota upload failed: HTTP $($otaResp.StatusCode)"
+            }
         }
     }
 

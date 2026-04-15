@@ -190,6 +190,23 @@ Save settings. The device reconnects to your network and starts polling immediat
 
 ---
 
+## Security
+
+The device web interface uses a session cookie for authentication. Open the web UI and you will be redirected to a login page. Enter the admin password (default: `changeme123!`). There is no username, only a password. Sessions expire after 12 hours.
+
+- Default admin password: `changeme123!`
+- Change the password on first boot. Open the web UI, navigate to Settings, select the System tab, and use the Admin Password section. The same section includes a Sign out button.
+- Authentication covers `/` and all configuration, reboot, factory reset, OTA, and secret-returning endpoints.
+- Unauthenticated entry points: `/login`, `/api/login`.
+- Other unauthenticated endpoints: `/favicon.ico`, `/api/version`, `/api/status`, `/api/nina/status`, `/api/check-update-json`, `/api/spotify/callback` (OAuth redirect target), `/api/allsky-proxy`, `/api/screenshot`, `/api/crash`.
+- Unauthenticated HTML requests to protected paths redirect to `/login`. Unauthenticated `/api/*` requests return HTTP 401 with a JSON body, and the UI redirects the browser to `/login`.
+- The admin password is stored in NVS. The transport is HTTP, not HTTPS. Treat the LAN segment as the trust boundary. Session tokens are 256-bit random values held in RAM and cleared on reboot.
+- Secrets (WiFi password, MQTT password, Spotify client ID) are redacted in `GET /api/config` and returned as `********`. The configuration backup endpoint returns real values to authenticated users.
+- The password field accepts 4 to 32 characters. Changing the password requires the current password.
+- Authentication can be disabled. Settings, System tab, Authentication card contains a "Require login to access the web UI" toggle. Default is enabled. When disabled, every endpoint becomes open to any client on the LAN, which includes reboot, factory reset, OTA, and configuration change. Secrets remain redacted in every API response regardless of the toggle state: `GET /api/config` returns `********` for sensitive fields, and `GET /api/config/backup?include_sensitive=1` is downgraded to a redacted backup when authentication is off. Use this only on trusted networks.
+
+---
+
 ## Display Interface
 
 ### Summary Page
