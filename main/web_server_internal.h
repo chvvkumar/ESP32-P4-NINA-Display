@@ -45,6 +45,24 @@ esp_err_t send_400(httpd_req_t *req, const char *message);
 bool validate_string_len(cJSON *root, const char *key, size_t max_len);
 bool validate_url_format(const char *url);
 
+/* ---- Session cookie auth (defined in web_server.c) ---- */
+bool check_session(httpd_req_t *req);
+esp_err_t send_auth_required(httpd_req_t *req);
+
+/* Session API used by login/logout handlers */
+const char *session_create(void);
+bool session_valid(const char *token);
+void session_destroy(const char *token);
+/* Extract session token from the request's Cookie header. Returns true if present.
+ * out buffer must hold at least 65 bytes (64 hex + NUL). */
+bool session_extract_cookie(httpd_req_t *req, char *out, size_t out_len);
+
+/**
+ * @brief Guard handler entry with session auth. Returns 401/302 if missing/invalid.
+ * Must be the first statement in the handler body.
+ */
+#define REQUIRE_AUTH(req) do { if (!check_session(req)) return send_auth_required(req); } while (0)
+
 /* ---- Handler forward declarations (registered by start_web_server) ---- */
 esp_err_t root_get_handler(httpd_req_t *req);
 esp_err_t favicon_get_handler(httpd_req_t *req);
@@ -82,4 +100,8 @@ esp_err_t restore_post_handler(httpd_req_t *req);
 esp_err_t status_get_handler(httpd_req_t *req);
 esp_err_t nina_status_get_handler(httpd_req_t *req);
 esp_err_t crash_get_handler(httpd_req_t *req);
+esp_err_t admin_password_post_handler(httpd_req_t *req);
+esp_err_t login_page_get_handler(httpd_req_t *req);
+esp_err_t login_post_handler(httpd_req_t *req);
+esp_err_t logout_post_handler(httpd_req_t *req);
 void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t *new_cfg);

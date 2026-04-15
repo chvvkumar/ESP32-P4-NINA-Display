@@ -767,6 +767,12 @@ static void set_defaults(app_config_t *cfg) {
     cfg->idle_page_override_target = IDLE_TARGET_SUMMARY;
     cfg->idle_page_persistent = false;
     cfg->idle_indicator_enabled = true;
+
+    // Admin password default — change via web UI on first boot
+    strcpy(cfg->admin_password, "changeme123!");
+
+    // Auth is on by default — protects device from open-LAN access
+    cfg->auth_enabled = true;
 }
 
 /**
@@ -1730,15 +1736,47 @@ static void migrate_from_v23(const app_config_v23_t *old, app_config_t *cfg) {
     ESP_LOGI(TAG, "Migrated config from v23 to v%d", APP_CONFIG_VERSION);
 }
 
-/* --- v29 → v30 migration (added idle_indicator_enabled) --- */
+/* --- v31 → v32 migration (added auth_enabled) --- */
+static void migrate_from_v31(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v31_t) ? raw_size : sizeof(app_config_v31_t);
+    memcpy(cfg, raw, copy);
+
+    /* auth_enabled: existing devices default to ON so upgrade stays locked down */
+    cfg->auth_enabled = true;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v31 to v%d", APP_CONFIG_VERSION);
+}
+
+/* --- v30 → v32 migration (added admin_password, auth_enabled) --- */
+static void migrate_from_v30(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v30_t) ? raw_size : sizeof(app_config_v30_t);
+    memcpy(cfg, raw, copy);
+
+    /* admin_password gets default ("changeme123!") from set_defaults() */
+    strcpy(cfg->admin_password, "changeme123!");
+    /* auth_enabled defaults to true from set_defaults() */
+    cfg->auth_enabled = true;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v30 to v%d", APP_CONFIG_VERSION);
+}
+
+/* --- v29 → v32 migration (added idle_indicator_enabled, admin_password, auth_enabled) --- */
 static void migrate_from_v29(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
     size_t copy = raw_size < sizeof(app_config_v29_t) ? raw_size : sizeof(app_config_v29_t);
     memcpy(cfg, raw, copy);
 
-    /* New field gets its default from set_defaults() (true) */
+    /* New fields get their defaults from set_defaults() */
     cfg->idle_indicator_enabled = true;
+    strcpy(cfg->admin_password, "changeme123!");
+    cfg->auth_enabled = true;
 
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v29 to v%d", APP_CONFIG_VERSION);
@@ -2255,8 +2293,20 @@ void app_config_init(void) {
             nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(handle);
         }
+    } else if (version_check == 31) {
+        /* v31 → v32: added auth_enabled */
+        migrate_from_v31(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    } else if (version_check == 30) {
+        /* v30 → v32: added admin_password, auth_enabled */
+        migrate_from_v30(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 29) {
-        /* v29 → v30: added idle_indicator_enabled */
+        /* v29 → v32: added idle_indicator_enabled, admin_password, auth_enabled */
         migrate_from_v29(raw, stored_size, &s_config);
         validate_config(&s_config);
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
@@ -2514,6 +2564,12 @@ void app_config_init(void) {
 
     free(raw);
     nvs_close(handle);
+
+    /* Warn at boot if admin password is still the factory default. */
+    if (strcmp(s_config.admin_password, "changeme123!") == 0) {
+        ESP_LOGW(TAG, "Admin password is set to factory default. "
+                      "Change it via the web UI (Settings -> System -> Admin Password).");
+    }
 }
 
 app_config_t *app_config_get(void) {
