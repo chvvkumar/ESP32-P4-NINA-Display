@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign in - NINA Display</title>
+<style>
+  html,body{margin:0;padding:0;height:100%;background:#0b0f17;color:#e5e7eb;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  body{display:flex;align-items:center;justify-content:center;min-height:100vh}
+  .card{background:#111827;border:1px solid #1f2937;border-radius:10px;padding:28px 28px 24px;width:320px;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+  h1{font-size:18px;margin:0 0 4px;font-weight:600;letter-spacing:.2px}
+  .sub{font-size:12px;color:#9ca3af;margin:0 0 20px}
+  label{display:block;font-size:12px;color:#9ca3af;margin:0 0 6px}
+  input[type=password]{width:100%;box-sizing:border-box;background:#0b0f17;color:#e5e7eb;border:1px solid #273142;border-radius:6px;padding:10px 12px;font-size:14px;outline:none}
+  input[type=password]:focus{border-color:#3b82f6}
+  button{margin-top:14px;width:100%;background:#2563eb;color:#fff;border:0;border-radius:6px;padding:10px 12px;font-size:14px;font-weight:600;cursor:pointer}
+  button:hover{background:#1d4ed8}
+  button:disabled{background:#374151;cursor:not-allowed}
+  .err{color:#f87171;font-size:12px;margin-top:10px;min-height:16px}
+</style>
+</head>
+<body>
+  <form class="card" id="f" autocomplete="on">
+    <h1>NINA Display</h1>
+    <p class="sub">Sign in to access the configuration interface.</p>
+    <label for="p">Password</label>
+    <input id="p" type="password" autocomplete="current-password" autofocus required>
+    <button id="b" type="submit">Sign in</button>
+    <div class="err" id="e"></div>
+  </form>
+<script>
+(function(){
+  var f=document.getElementById('f'),p=document.getElementById('p'),
+      b=document.getElementById('b'),e=document.getElementById('e');
+  f.addEventListener('submit',function(ev){
+    ev.preventDefault();
+    e.textContent='';
+    b.disabled=true;
+    fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({password:p.value})})
+      .then(function(r){
+        if(r.ok){window.location='/';return;}
+        if(r.status===401){e.textContent='Incorrect password';}
+        else{e.textContent='Sign in failed (HTTP '+r.status+')';}
+        b.disabled=false;
+        p.select();
+      })
+      .catch(function(){e.textContent='Network error';b.disabled=false;});
+  });
+})();
+</script>
+</body>
+</html>
