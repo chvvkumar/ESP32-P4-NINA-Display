@@ -95,7 +95,7 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
   </tr>
 </table>
 
-### Spotify Player
+### Spotify Slbum Art Display
 
 <table align="center">
   <tr>
