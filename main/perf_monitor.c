@@ -390,6 +390,8 @@ void perf_monitor_report(void)
              g_perf.http_retry_count.per_interval, g_perf.http_retry_count.total);
     ESP_LOGI(TAG, "  HTTP failures:  %"PRIu32" (interval) / %"PRIu32" (total)",
              g_perf.http_failure_count.per_interval, g_perf.http_failure_count.total);
+    ESP_LOGI(TAG, "  HTTP unreachable:%"PRIu32" (interval) / %"PRIu32" (total)",
+             g_perf.http_unreachable_count.per_interval, g_perf.http_unreachable_count.total);
     ESP_LOGI(TAG, "  WS events:      %"PRIu32" (interval) / %"PRIu32" (total)",
              g_perf.ws_event_count.per_interval, g_perf.ws_event_count.total);
 
@@ -493,6 +495,7 @@ void perf_monitor_report(void)
     perf_counter_reset_interval(&g_perf.http_request_count);
     perf_counter_reset_interval(&g_perf.http_retry_count);
     perf_counter_reset_interval(&g_perf.http_failure_count);
+    perf_counter_reset_interval(&g_perf.http_unreachable_count);
     perf_counter_reset_interval(&g_perf.ws_event_count);
     perf_counter_reset_interval(&g_perf.json_parse_count);
     perf_counter_reset_interval(&g_perf.spotify_poll_count);
@@ -591,6 +594,7 @@ char *perf_monitor_report_json(void)
     cJSON_AddItemToObject(network, "http_request_count", counter_to_json(&g_perf.http_request_count));
     cJSON_AddItemToObject(network, "http_retry_count",   counter_to_json(&g_perf.http_retry_count));
     cJSON_AddItemToObject(network, "http_failure_count", counter_to_json(&g_perf.http_failure_count));
+    cJSON_AddItemToObject(network, "http_unreachable_count", counter_to_json(&g_perf.http_unreachable_count));
     cJSON_AddItemToObject(network, "ws_event_count",     counter_to_json(&g_perf.ws_event_count));
     cJSON_AddItemToObject(root, "network", network);
 
