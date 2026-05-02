@@ -188,6 +188,7 @@ cJSON *http_get_json(const char *url) {
 
     perf_timer_start(&g_perf.http_request);
     perf_counter_increment(&g_perf.http_request_count);
+    bool ever_connected = false;
     for (int attempt = 0; attempt < HTTP_MAX_ATTEMPTS; attempt++) {
         if (attempt > 0) {
             perf_counter_increment(&g_perf.http_retry_count);
@@ -219,6 +220,7 @@ cJSON *http_get_json(const char *url) {
             if (reusing && reuse_slot) *reuse_slot = NULL;
             continue;  // Transport error — retryable
         }
+        ever_connected = true;
 
         int content_length = esp_http_client_fetch_headers(client);
         if (content_length < 0) {
@@ -322,7 +324,11 @@ cJSON *http_get_json(const char *url) {
     int host_len = host_end ? (int)(host_end - host) : (int)strlen(host);
     ESP_LOGW(TAG, "%.*s unreachable", host_len, host);
 
-    perf_counter_increment(&g_perf.http_failure_count);
+    if (ever_connected) {
+        perf_counter_increment(&g_perf.http_failure_count);
+    } else {
+        perf_counter_increment(&g_perf.http_unreachable_count);
+    }
     perf_timer_stop(&g_perf.http_request);
     return NULL;  // All attempts exhausted
 }

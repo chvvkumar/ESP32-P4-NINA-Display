@@ -84,7 +84,8 @@ typedef struct {
     perf_timer_t http_request;            // Individual HTTP request duration (per-request)
     perf_counter_t http_request_count;    // Total HTTP requests per reporting interval
     perf_counter_t http_retry_count;      // HTTP retries per interval
-    perf_counter_t http_failure_count;    // HTTP failures per interval
+    perf_counter_t http_failure_count;    // HTTP failures per interval (connected but failed)
+    perf_counter_t http_unreachable_count;// Host unreachable (connection refused/timeout)
     perf_counter_t ws_event_count;        // WebSocket events received per interval
 
     // JSON parsing
