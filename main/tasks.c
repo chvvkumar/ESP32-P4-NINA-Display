@@ -804,6 +804,30 @@ void spotify_poll_task(void *arg)
 }
 
 // =============================================================================
+// Spotify task lifecycle
+// =============================================================================
+
+void spotify_ensure_task_running(void)
+{
+    if (spotify_task_handle != NULL) return;
+
+    StackType_t  *sp_stack = heap_caps_malloc(10240 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+    StaticTask_t *sp_tcb   = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (sp_stack && sp_tcb) {
+        spotify_task_handle = xTaskCreateStaticPinnedToCore(
+            spotify_poll_task, "spotify_poll", 10240, NULL, 4,
+            sp_stack, sp_tcb, 0);
+    } else {
+        ESP_LOGE(TAG, "Failed to alloc spotify_poll stack from PSRAM, falling back");
+        if (sp_stack) heap_caps_free(sp_stack);
+        if (sp_tcb) heap_caps_free(sp_tcb);
+        xTaskCreatePinnedToCore(spotify_poll_task, "spotify_poll", 10240, NULL, 4,
+                                &spotify_task_handle, 0);
+    }
+    ESP_LOGI(TAG, "Spotify poll task created dynamically");
+}
+
+// =============================================================================
 // Async Fetch Worker — runs HTTP fetches on Core 0 to keep Core 1 free for UI
 // =============================================================================
 
