@@ -40,7 +40,6 @@ build/
 build/
 sdkconfig
 sdkconfig.old
-dependencies.lock
 
 # ESP32 specific
 *.elf

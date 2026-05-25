@@ -1,7 +1,8 @@
 ## IDF Component Manager Manifest File
 dependencies:
-  espressif/esp_wifi_remote: "0.*"
-  espressif/esp_websocket_client: "1.*"
+  espressif/esp_hosted: ">=2.12.3,<2.12.4"
+  espressif/esp_wifi_remote: "~0.16.3"
+  espressif/esp_websocket_client: "~1.6.1"
   lvgl/lvgl:
     version: "~9.5.0"
     public: true
