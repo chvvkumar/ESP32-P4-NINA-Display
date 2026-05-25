@@ -1,6 +1,7 @@
 #include "web_server_internal.h"
 #include "spotify_auth.h"
 #include "spotify_client.h"
+#include "tasks.h"
 #include <string.h>
 
 /**
@@ -77,6 +78,10 @@ esp_err_t spotify_config_post_handler(httpd_req_t *req)
     cJSON_Delete(root);
 
     app_config_save(cfg);
+
+    if (cfg->spotify_enabled) {
+        spotify_ensure_task_running();
+    }
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);

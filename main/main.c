@@ -722,19 +722,7 @@ void app_main(void)
 
     /* Spotify poll task — only when enabled (Core 0, 10KB PSRAM stack for HTTPS+JSON) */
     if (app_config_get()->spotify_enabled) {
-        StackType_t *sp_stack = heap_caps_malloc(10240 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
-        StaticTask_t *sp_tcb  = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        if (sp_stack && sp_tcb) {
-            spotify_task_handle = xTaskCreateStaticPinnedToCore(
-                spotify_poll_task, "spotify_poll", 10240, NULL, 4,
-                sp_stack, sp_tcb, 0);
-        } else {
-            ESP_LOGE(TAG, "Failed to alloc spotify_poll stack from PSRAM, falling back");
-            if (sp_stack) heap_caps_free(sp_stack);
-            if (sp_tcb) heap_caps_free(sp_tcb);
-            xTaskCreatePinnedToCore(spotify_poll_task, "spotify_poll", 10240, NULL, 4,
-                                    &spotify_task_handle, 0);
-        }
+        spotify_ensure_task_running();
     }
 
     /* Weather poll task — always start; task sleeps when no location configured */
