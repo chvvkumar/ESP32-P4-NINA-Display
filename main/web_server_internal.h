@@ -104,4 +104,8 @@ esp_err_t admin_password_post_handler(httpd_req_t *req);
 esp_err_t login_page_get_handler(httpd_req_t *req);
 esp_err_t login_post_handler(httpd_req_t *req);
 esp_err_t logout_post_handler(httpd_req_t *req);
+esp_err_t wifi_scan_get_handler(httpd_req_t *req);
+esp_err_t wifi_setup_post_handler(httpd_req_t *req);
+esp_err_t wifi_status_get_handler(httpd_req_t *req);
+esp_err_t auth_status_get_handler(httpd_req_t *req);
 void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t *new_cfg);

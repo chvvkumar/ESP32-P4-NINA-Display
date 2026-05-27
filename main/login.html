@@ -27,11 +27,16 @@
     <input id="p" type="password" autocomplete="current-password" autofocus required>
     <button id="b" type="submit">Sign in</button>
     <div class="err" id="e"></div>
+    <div id="hint" style="display:none;font-size:12px;color:#9ca3af;margin-top:10px">Default password: <code style="color:#d1d5db;background:#1f2937;padding:2px 6px;border-radius:3px;font-size:12px">changeme123!</code></div>
   </form>
 <script>
 (function(){
   var f=document.getElementById('f'),p=document.getElementById('p'),
-      b=document.getElementById('b'),e=document.getElementById('e');
+      b=document.getElementById('b'),e=document.getElementById('e'),
+      h=document.getElementById('hint');
+  fetch('/api/auth/status').then(function(r){return r.json()}).then(function(d){
+    if(d.default_password) h.style.display='';
+  }).catch(function(){});
   f.addEventListener('submit',function(ev){
     ev.preventDefault();
     e.textContent='';

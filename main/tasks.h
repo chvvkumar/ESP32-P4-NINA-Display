@@ -73,6 +73,9 @@ extern _Atomic bool nina_pages_active;
 /** FreeRTOS task: Spotify API poller — fetches currently-playing, album art on track change. */
 void spotify_poll_task(void *arg);
 
+/** Create the Spotify poll task if it isn't already running. Safe to call multiple times. */
+void spotify_ensure_task_running(void);
+
 /** FreeRTOS task: UI coordinator — reads cached data, updates LVGL, handles auto-rotate. */
 void data_update_task(void *arg);
 

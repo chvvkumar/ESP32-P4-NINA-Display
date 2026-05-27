@@ -40,7 +40,6 @@ build/
 build/
 sdkconfig
 sdkconfig.old
-dependencies.lock
 
 # ESP32 specific
 *.elf
@@ -49,6 +48,7 @@ bootloader.bin
 partition-table.bin
 ota_data_initial.bin
 .playwright-mcp/
+.superpowers/
 
 # Compilation artifacts
 *.o
@@ -109,6 +109,9 @@ cleanup_log_*.txt
 # Documentation and plans (local only)
 docs/
 plans/
+
+# Generated tool output
+repomix-output.xml
 
 # Python cache (if using Python scripts)
 __pycache__/

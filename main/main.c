@@ -42,6 +42,7 @@
 #include "wifi_manager.h"
 #include "ui/nina_settings_tabview.h"
 #include "ui/nina_thumbnail.h"
+#include "ui/nina_setup_screen.h"
 
 /* Embedded splash logo (JPEG, hardware-decoded at boot) */
 extern const uint8_t logo_jpg_start[] asm("_binary_logo_jpg_start");
@@ -163,7 +164,7 @@ static bool wifi_advance_to_next_network(void)
     return false;
 }
 
-static void wifi_connect_to_slot(int index)
+void wifi_connect_to_slot(int index)
 {
     const app_config_t *cfg = app_config_get();
     wifi_config_t sta_cfg = {0};
@@ -307,6 +308,34 @@ static void event_handler(void *arg, esp_event_base_t event_base,
             esp_wifi_set_mode(WIFI_MODE_STA);
         }
 
+        if (is_setup_mode()) {
+            set_setup_mode(false);
+            ESP_LOGI(TAG, "WiFi connected during setup — transitioning to dashboard");
+            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                nina_setup_screen_destroy();
+                lv_obj_t *scr = lv_scr_act();
+                create_nina_dashboard(scr, instance_count);
+                nina_toast_init(scr);
+                nina_event_log_overlay_create(scr);
+                nina_alerts_init(scr);
+                nina_safety_create(scr);
+                bsp_display_unlock();
+            }
+            nina_dashboard_set_page_change_cb(on_page_changed);
+            nina_client_init();
+            nina_client_init_image_buffers();
+            nina_thumbnail_init();
+            spotify_auth_init();
+            spotify_client_init();
+
+            xTaskCreatePinnedToCore(input_task, "input_task", 6144, NULL, 5, NULL, 0);
+            xTaskCreatePinnedToCore(data_update_task, "data_task", 12288, NULL, 4, &data_task_handle, 1);
+            if (app_config_get()->spotify_enabled) {
+                spotify_ensure_task_running();
+            }
+            weather_client_start();
+        }
+
         /* Apply timezone before SNTP so localtime_r works as soon as time is set */
         const char *tz = app_config_get()->tz_string;
         if (tz[0] != '\0') {
@@ -398,11 +427,13 @@ static void wifi_init(void)
     memcpy(wifi_config_ap.ap.ssid, ap_name, ap_len);
     wifi_config_ap.ap.ssid_len = ap_len;
 
-    /* Load STA credentials from app_config wifi_networks[0] (highest priority) */
+    /* Load STA credentials from app_config wifi_networks[0] (highest priority).
+     * Always call esp_wifi_set_config to override any credentials the C6
+     * coprocessor may have stored in its own NVS. */
     {
         const app_config_t *cfg = app_config_get();
+        wifi_config_t sta_cfg = {0};
         if (cfg->wifi_networks[0].ssid[0] != '\0') {
-            wifi_config_t sta_cfg = {0};
             sta_cfg.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
             sta_cfg.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
             sta_cfg.sta.threshold.rssi = -90;
@@ -415,8 +446,8 @@ static void wifi_init(void)
                     sizeof(sta_cfg.sta.ssid));
             strlcpy((char *)sta_cfg.sta.password, cfg->wifi_networks[0].password,
                     sizeof(sta_cfg.sta.password));
-            esp_wifi_set_config(WIFI_IF_STA, &sta_cfg);
         }
+        esp_wifi_set_config(WIFI_IF_STA, &sta_cfg);
     }
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
@@ -483,26 +514,6 @@ void app_main(void)
 
     wifi_init();
 
-    /* One-time migration: copy WiFi credentials from ESP-IDF NVS to app_config
-     * wifi_networks[0] if it's empty (first boot after upgrade to v24). */
-    {
-        app_config_t *cfg = app_config_get();
-        if (cfg->wifi_networks[0].ssid[0] == '\0') {
-            wifi_config_t sta_cfg = {0};
-            if (esp_wifi_get_config(WIFI_IF_STA, &sta_cfg) == ESP_OK &&
-                sta_cfg.sta.ssid[0] != '\0') {
-                strlcpy(cfg->wifi_networks[0].ssid,
-                        (const char *)sta_cfg.sta.ssid,
-                        sizeof(cfg->wifi_networks[0].ssid));
-                strlcpy(cfg->wifi_networks[0].password,
-                        (const char *)sta_cfg.sta.password,
-                        sizeof(cfg->wifi_networks[0].password));
-                app_config_save(cfg);
-                ESP_LOGI(TAG, "Migrated WiFi credentials to wifi_networks[0]: %s",
-                         cfg->wifi_networks[0].ssid);
-            }
-        }
-    }
 
     // Enable Dynamic Frequency Scaling — CPU scales 360 MHz (active) to 40 MHz (idle)
     power_mgmt_init();
@@ -511,6 +522,12 @@ void app_main(void)
 
     /* Pre-allocate JPEG encoder DMA channel before display init claims DMA resources */
     screenshot_encoder_init();
+
+    bool setup_mode = (app_config_get()->wifi_networks[0].ssid[0] == '\0');
+    if (setup_mode) {
+        set_setup_mode(true);
+        ESP_LOGI(TAG, "No WiFi configured — entering setup mode");
+    }
 
     bsp_display_cfg_t cfg = {
         .lvgl_port_cfg = ESP_LVGL_PORT_INIT_CONFIG(),
@@ -626,9 +643,12 @@ void app_main(void)
         lv_obj_t *scr = lv_scr_act();
         lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), 0);
 
-        create_nina_dashboard(scr, instance_count);
+        if (setup_mode) {
+            nina_setup_screen_create(scr);
+        } else {
+            create_nina_dashboard(scr, instance_count);
 
-        /* Create splash ON TOP of dashboard — last child draws on top */
+            /* Create splash ON TOP of dashboard — last child draws on top */
         if (splash_ready) {
             lv_obj_t *splash_cont = lv_obj_create(scr);
             lv_obj_remove_style_all(splash_cont);
@@ -676,69 +696,61 @@ void app_main(void)
             nina_dashboard_show_page(saved_page, 0);
         }
 
+        } /* end else (normal mode) */
+
         bsp_display_unlock();
     } else {
         ESP_LOGE(TAG, "Failed to acquire display lock during init!");
     }
 
-    nina_dashboard_set_page_change_cb(on_page_changed);
+    if (!setup_mode) {
+        nina_dashboard_set_page_change_cb(on_page_changed);
 
-    nina_client_init();  // DNS cache mutex — must be called before poll tasks spawn
-    nina_client_init_image_buffers();  // Pre-allocate PSRAM image fetch buffer
-    nina_thumbnail_init();  // Pre-allocate PSRAM zoom buffer
+        nina_client_init();  // DNS cache mutex — must be called before poll tasks spawn
+        nina_client_init_image_buffers();  // Pre-allocate PSRAM image fetch buffer
+        nina_thumbnail_init();  // Pre-allocate PSRAM zoom buffer
 
-    /* Spotify init — always called so web handlers (config, login) work even when disabled */
-    spotify_auth_init();
-    spotify_client_init();
+        /* Spotify init — always called so web handlers (config, login) work even when disabled */
+        spotify_auth_init();
+        spotify_client_init();
 
-    /* weather_client_init() already called above, before dashboard creation */
+        /* weather_client_init() already called above, before dashboard creation */
 
-    /* Allocate task stacks in PSRAM to save internal heap; TCBs stay internal */
-    {
-        StackType_t *input_stack = heap_caps_malloc(6144 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
-        StaticTask_t *input_tcb  = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        if (input_stack && input_tcb) {
-            xTaskCreateStaticPinnedToCore(input_task, "input_task", 6144, NULL, 5,
-                                          input_stack, input_tcb, 0);
-        } else {
-            ESP_LOGE(TAG, "Failed to alloc input_task stack from PSRAM, falling back");
-            if (input_stack) heap_caps_free(input_stack);
-            if (input_tcb) heap_caps_free(input_tcb);
-            xTaskCreatePinnedToCore(input_task, "input_task", 6144, NULL, 5, NULL, 0);
+        /* Allocate task stacks in PSRAM to save internal heap; TCBs stay internal */
+        {
+            StackType_t *input_stack = heap_caps_malloc(6144 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+            StaticTask_t *input_tcb  = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+            if (input_stack && input_tcb) {
+                xTaskCreateStaticPinnedToCore(input_task, "input_task", 6144, NULL, 5,
+                                              input_stack, input_tcb, 0);
+            } else {
+                ESP_LOGE(TAG, "Failed to alloc input_task stack from PSRAM, falling back");
+                if (input_stack) heap_caps_free(input_stack);
+                if (input_tcb) heap_caps_free(input_tcb);
+                xTaskCreatePinnedToCore(input_task, "input_task", 6144, NULL, 5, NULL, 0);
+            }
+
+            StackType_t *data_stack = heap_caps_malloc(12288 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+            StaticTask_t *data_tcb  = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+            if (data_stack && data_tcb) {
+                data_task_handle = xTaskCreateStaticPinnedToCore(data_update_task, "data_task", 12288, NULL, 4,
+                                                                 data_stack, data_tcb, 1);
+            } else {
+                ESP_LOGE(TAG, "Failed to alloc data_task stack from PSRAM, falling back");
+                if (data_stack) heap_caps_free(data_stack);
+                if (data_tcb) heap_caps_free(data_tcb);
+                xTaskCreatePinnedToCore(data_update_task, "data_task", 12288, NULL, 4, &data_task_handle, 1);
+            }
         }
 
-        StackType_t *data_stack = heap_caps_malloc(12288 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
-        StaticTask_t *data_tcb  = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        if (data_stack && data_tcb) {
-            data_task_handle = xTaskCreateStaticPinnedToCore(data_update_task, "data_task", 12288, NULL, 4,
-                                                             data_stack, data_tcb, 1);
-        } else {
-            ESP_LOGE(TAG, "Failed to alloc data_task stack from PSRAM, falling back");
-            if (data_stack) heap_caps_free(data_stack);
-            if (data_tcb) heap_caps_free(data_tcb);
-            xTaskCreatePinnedToCore(data_update_task, "data_task", 12288, NULL, 4, &data_task_handle, 1);
+        /* Spotify poll task — only when enabled (Core 0, 10KB PSRAM stack for HTTPS+JSON) */
+        if (app_config_get()->spotify_enabled) {
+            spotify_ensure_task_running();
         }
-    }
 
-    /* Spotify poll task — only when enabled (Core 0, 10KB PSRAM stack for HTTPS+JSON) */
-    if (app_config_get()->spotify_enabled) {
-        StackType_t *sp_stack = heap_caps_malloc(10240 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
-        StaticTask_t *sp_tcb  = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        if (sp_stack && sp_tcb) {
-            spotify_task_handle = xTaskCreateStaticPinnedToCore(
-                spotify_poll_task, "spotify_poll", 10240, NULL, 4,
-                sp_stack, sp_tcb, 0);
-        } else {
-            ESP_LOGE(TAG, "Failed to alloc spotify_poll stack from PSRAM, falling back");
-            if (sp_stack) heap_caps_free(sp_stack);
-            if (sp_tcb) heap_caps_free(sp_tcb);
-            xTaskCreatePinnedToCore(spotify_poll_task, "spotify_poll", 10240, NULL, 4,
-                                    &spotify_task_handle, 0);
-        }
-    }
-
-    /* Weather poll task — always start; task sleeps when no location configured */
-    weather_client_start();
+        /* Weather poll task — always start; task sleeps when no location configured */
+        weather_client_start();
+    } /* end if (!setup_mode) */
 
     /* Mark this firmware as valid so the bootloader won't roll back.
      * This must come after successful init — if we crash before here,
