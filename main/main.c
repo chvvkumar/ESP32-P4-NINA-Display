@@ -398,11 +398,13 @@ static void wifi_init(void)
     memcpy(wifi_config_ap.ap.ssid, ap_name, ap_len);
     wifi_config_ap.ap.ssid_len = ap_len;
 
-    /* Load STA credentials from app_config wifi_networks[0] (highest priority) */
+    /* Load STA credentials from app_config wifi_networks[0] (highest priority).
+     * Always call esp_wifi_set_config to override any credentials the C6
+     * coprocessor may have stored in its own NVS. */
     {
         const app_config_t *cfg = app_config_get();
+        wifi_config_t sta_cfg = {0};
         if (cfg->wifi_networks[0].ssid[0] != '\0') {
-            wifi_config_t sta_cfg = {0};
             sta_cfg.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
             sta_cfg.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
             sta_cfg.sta.threshold.rssi = -90;
@@ -415,8 +417,8 @@ static void wifi_init(void)
                     sizeof(sta_cfg.sta.ssid));
             strlcpy((char *)sta_cfg.sta.password, cfg->wifi_networks[0].password,
                     sizeof(sta_cfg.sta.password));
-            esp_wifi_set_config(WIFI_IF_STA, &sta_cfg);
         }
+        esp_wifi_set_config(WIFI_IF_STA, &sta_cfg);
     }
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
@@ -483,26 +485,6 @@ void app_main(void)
 
     wifi_init();
 
-    /* One-time migration: copy WiFi credentials from ESP-IDF NVS to app_config
-     * wifi_networks[0] if it's empty (first boot after upgrade to v24). */
-    {
-        app_config_t *cfg = app_config_get();
-        if (cfg->wifi_networks[0].ssid[0] == '\0') {
-            wifi_config_t sta_cfg = {0};
-            if (esp_wifi_get_config(WIFI_IF_STA, &sta_cfg) == ESP_OK &&
-                sta_cfg.sta.ssid[0] != '\0') {
-                strlcpy(cfg->wifi_networks[0].ssid,
-                        (const char *)sta_cfg.sta.ssid,
-                        sizeof(cfg->wifi_networks[0].ssid));
-                strlcpy(cfg->wifi_networks[0].password,
-                        (const char *)sta_cfg.sta.password,
-                        sizeof(cfg->wifi_networks[0].password));
-                app_config_save(cfg);
-                ESP_LOGI(TAG, "Migrated WiFi credentials to wifi_networks[0]: %s",
-                         cfg->wifi_networks[0].ssid);
-            }
-        }
-    }
 
     // Enable Dynamic Frequency Scaling — CPU scales 360 MHz (active) to 40 MHz (idle)
     power_mgmt_init();
