@@ -5,15 +5,24 @@
 #include "esp_heap_caps.h"
 #include "build_version.h"
 #include "esp_mac.h"
+#include "ui/nina_setup_screen.h"
 
 extern const uint8_t config_html_start[] asm("_binary_config_ui_html_start");
 extern const uint8_t config_html_end[]   asm("_binary_config_ui_html_end");
+extern const uint8_t setup_html_start[] asm("_binary_setup_ui_html_start");
+extern const uint8_t setup_html_end[]   asm("_binary_setup_ui_html_end");
 extern const uint8_t favicon_png_start[] asm("_binary_favicon_png_start");
 extern const uint8_t favicon_png_end[]   asm("_binary_favicon_png_end");
 
 // Handler for root URL
 esp_err_t root_get_handler(httpd_req_t *req)
 {
+    if (is_setup_mode()) {
+        httpd_resp_set_type(req, "text/html");
+        httpd_resp_send(req, (const char *)setup_html_start,
+                        setup_html_end - setup_html_start);
+        return ESP_OK;
+    }
     REQUIRE_AUTH(req);
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, (const char *)config_html_start,

@@ -28,6 +28,21 @@ esp_err_t login_page_get_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+esp_err_t auth_status_get_handler(httpd_req_t *req)
+{
+    const app_config_t *cfg = app_config_get();
+    bool is_default = (strcmp(cfg->admin_password, "changeme123!") == 0);
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "default_password", is_default);
+    char *json = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
 /* POST /api/login — verify password, issue session cookie. Unauthenticated. */
 esp_err_t login_post_handler(httpd_req_t *req)
 {
