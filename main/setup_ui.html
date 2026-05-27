@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WiFi Setup - NINA Display</title>
+<style>
+  html,body{margin:0;padding:0;height:100%;background:#0b0f17;color:#e5e7eb;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  body{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:16px;box-sizing:border-box}
+  .card{background:#111827;border:1px solid #1f2937;border-radius:10px;padding:28px;width:100%;max-width:420px;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+  h1{font-size:18px;margin:0 0 4px;font-weight:600;letter-spacing:.2px}
+  .sub{font-size:14px;color:#9ca3af;margin:0 0 20px}
+
+  /* Scan panel */
+  .scan-panel{background:#0b0f17;border:1px solid #1f2937;border-radius:8px;margin-bottom:20px;overflow:hidden}
+  .scan-header{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid #1f2937}
+  .scan-label{font-size:13px;font-weight:600;color:#e5e7eb}
+  .btn-rescan{background:transparent;color:#3b82f6;border:1px solid #3b82f6;border-radius:5px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:.3px}
+  .btn-rescan:hover{background:rgba(59,130,246,.1)}
+  .btn-rescan:disabled{opacity:.5;cursor:not-allowed}
+  .scan-list{max-height:260px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#273142 transparent}
+  .scan-list::-webkit-scrollbar{width:6px}
+  .scan-list::-webkit-scrollbar-track{background:transparent}
+  .scan-list::-webkit-scrollbar-thumb{background:#273142;border-radius:3px}
+  .scan-empty{padding:20px;text-align:center;color:#9ca3af;font-size:13px}
+  .scan-footer{padding:8px 14px;border-top:1px solid #1f2937;font-size:11px;color:#6b7280;text-align:center}
+
+  /* Spinner */
+  .spinner-wrap{display:flex;align-items:center;justify-content:center;padding:24px;gap:10px;color:#9ca3af;font-size:13px}
+  .spinner{width:18px;height:18px;border:2px solid #273142;border-top-color:#3b82f6;border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* Network row */
+  .net-row{display:flex;align-items:center;padding:10px 14px;border-bottom:1px solid #1a1f2e;gap:10px;transition:background .15s}
+  .net-row:last-child{border-bottom:none}
+  .net-row:hover{background:rgba(59,130,246,.04)}
+  .net-row.incompatible{opacity:.45}
+  .net-row.incompatible:hover{background:transparent}
+  .net-info{flex:1;min-width:0}
+  .net-ssid{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .net-ssid.struck{text-decoration:line-through}
+  .net-meta{font-size:11px;color:#6b7280;margin-top:2px}
+  .badge-incompat{display:inline-block;background:rgba(244,67,54,.15);color:#f44336;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;text-transform:uppercase;letter-spacing:.3px;margin-left:6px;vertical-align:middle}
+  .btn-select{background:#3b82f6;color:#0b0f17;border:none;border-radius:5px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:.3px;flex-shrink:0;white-space:nowrap}
+  .btn-select:hover{background:#60a5fa}
+
+  /* Signal bars */
+  .signal-bars{display:flex;align-items:flex-end;gap:2px;flex-shrink:0;width:18px;height:16px}
+  .signal-bars .bar{width:3px;border-radius:1px;background:#273142}
+  .signal-bars .bar:nth-child(1){height:4px}
+  .signal-bars .bar:nth-child(2){height:7px}
+  .signal-bars .bar:nth-child(3){height:11px}
+  .signal-bars .bar:nth-child(4){height:16px}
+  .signal-bars.bars-4 .bar{background:#4caf50}
+  .signal-bars.bars-3 .bar:nth-child(1),.signal-bars.bars-3 .bar:nth-child(2),.signal-bars.bars-3 .bar:nth-child(3){background:#ff9800}
+  .signal-bars.bars-2 .bar:nth-child(1),.signal-bars.bars-2 .bar:nth-child(2){background:#f44336}
+
+  /* Form */
+  .form-group{margin-bottom:14px}
+  .form-group label{display:block;font-size:12px;color:#9ca3af;margin-bottom:6px}
+  .form-group input{width:100%;box-sizing:border-box;background:#0b0f17;color:#e5e7eb;border:1px solid #273142;border-radius:6px;padding:10px 12px;font-size:14px;outline:none;font-family:inherit}
+  .form-group input:focus{border-color:#3b82f6}
+  .btn-connect{margin-top:6px;width:100%;background:#2563eb;color:#fff;border:0;border-radius:6px;padding:10px 12px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit}
+  .btn-connect:hover{background:#1d4ed8}
+  .btn-connect:disabled{background:#374151;cursor:not-allowed}
+
+  /* Status area */
+  .status-area{margin-top:16px;text-align:center;display:none}
+  .status-connecting{display:flex;align-items:center;justify-content:center;gap:10px;color:#9ca3af;font-size:13px;padding:8px 0}
+  .status-success{color:#4caf50;font-size:14px;font-weight:500}
+  .status-success .ip{display:block;font-size:12px;color:#9ca3af;margin-top:4px;font-weight:400}
+  .status-success a{display:inline-block;margin-top:12px;color:#3b82f6;font-size:13px;font-weight:600;text-decoration:none}
+  .status-success a:hover{text-decoration:underline}
+  .status-fail{color:#f87171;font-size:13px}
+  .btn-retry{margin-top:10px;background:transparent;color:#3b82f6;border:1px solid #3b82f6;border-radius:6px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}
+  .btn-retry:hover{background:rgba(59,130,246,.1)}
+  .err{color:#f87171;font-size:12px;margin-top:8px;min-height:16px;text-align:center}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>NINA Display</h1>
+    <p class="sub">WiFi Setup</p>
+
+    <!-- Scan panel -->
+    <div class="scan-panel">
+      <div class="scan-header">
+        <span class="scan-label">Available Networks</span>
+        <button class="btn-rescan" id="btnRescan" type="button">Rescan</button>
+      </div>
+      <div id="scanBody">
+        <div class="spinner-wrap"><div class="spinner"></div>Scanning...</div>
+      </div>
+      <div class="scan-footer" id="scanFooter" style="display:none"></div>
+    </div>
+
+    <!-- Network form -->
+    <form id="wifiForm" autocomplete="off">
+      <div class="form-group">
+        <label for="ssid">SSID</label>
+        <input id="ssid" type="text" autocomplete="off" placeholder="Network name" required>
+      </div>
+      <div class="form-group">
+        <label for="pass">Password</label>
+        <input id="pass" type="password" autocomplete="off" placeholder="Network password">
+      </div>
+      <button class="btn-connect" id="btnConnect" type="submit">Connect</button>
+      <div class="err" id="formErr"></div>
+    </form>
+
+    <!-- Status area -->
+    <div class="status-area" id="statusArea">
+      <div class="status-connecting" id="statusConnecting">
+        <div class="spinner"></div>Connecting...
+      </div>
+      <div class="status-success" id="statusSuccess" style="display:none"></div>
+      <div class="status-fail" id="statusFail" style="display:none"></div>
+    </div>
+  </div>
+
+<script>
+(function(){
+  var btnRescan=document.getElementById('btnRescan');
+  var scanBody=document.getElementById('scanBody');
+  var scanFooter=document.getElementById('scanFooter');
+  var wifiForm=document.getElementById('wifiForm');
+  var ssidInput=document.getElementById('ssid');
+  var passInput=document.getElementById('pass');
+  var btnConnect=document.getElementById('btnConnect');
+  var formErr=document.getElementById('formErr');
+  var statusArea=document.getElementById('statusArea');
+  var statusConnecting=document.getElementById('statusConnecting');
+  var statusSuccess=document.getElementById('statusSuccess');
+  var statusFail=document.getElementById('statusFail');
+  var pollTimer=null;
+  var pollStart=0;
+
+  function escHtml(s){
+    var d=document.createElement('div');
+    d.appendChild(document.createTextNode(s));
+    return d.innerHTML;
+  }
+
+  function getSignalBars(rssi,compatible){
+    var bars;
+    if(rssi>=-50) bars=4;
+    else if(rssi>=-70) bars=3;
+    else bars=2;
+    var cls='signal-bars';
+    if(compatible) cls+=' bars-'+bars;
+    return '<div class="'+cls+'">'
+      +'<div class="bar"></div><div class="bar"></div>'
+      +'<div class="bar"></div><div class="bar"></div></div>';
+  }
+
+  function selectNetwork(ssid){
+    ssidInput.value=ssid;
+    passInput.value='';
+    passInput.focus();
+    formErr.textContent='';
+  }
+
+  function renderResults(data){
+    var networks=data.networks||data||[];
+    if(!networks.length){
+      scanBody.innerHTML='<div class="scan-empty">No networks found</div>';
+      scanFooter.style.display='none';
+      return;
+    }
+    // Sort: compatible first, then by RSSI descending
+    networks.sort(function(a,b){
+      var ac=a.compatible!==false?1:0;
+      var bc=b.compatible!==false?1:0;
+      if(ac!==bc) return bc-ac;
+      return(b.rssi||0)-(a.rssi||0);
+    });
+    var total=networks.length;
+    var incompat=0;
+    var list=document.createElement('div');
+    list.className='scan-list';
+    for(var i=0;i<networks.length;i++){
+      var n=networks[i];
+      var compat=n.compatible!==false;
+      if(!compat) incompat++;
+      var row=document.createElement('div');
+      row.className='net-row'+(compat?'':' incompatible');
+      // Signal bars
+      var barsDiv=document.createElement('span');
+      barsDiv.innerHTML=getSignalBars(n.rssi||0,compat);
+      row.appendChild(barsDiv.firstChild);
+      // Info
+      var info=document.createElement('div');
+      info.className='net-info';
+      var ssidSpan=document.createElement('div');
+      ssidSpan.className='net-ssid'+(compat?'':' struck');
+      ssidSpan.textContent=n.ssid||'(hidden)';
+      if(!compat){
+        var badge=document.createElement('span');
+        badge.className='badge-incompat';
+        badge.textContent='INCOMPATIBLE';
+        ssidSpan.appendChild(badge);
+      }
+      info.appendChild(ssidSpan);
+      var meta=document.createElement('div');
+      meta.className='net-meta';
+      var parts=[];
+      if(n.auth!==undefined) parts.push(escHtml(String(n.auth)));
+      if(n.channel!==undefined) parts.push('Ch '+n.channel);
+      if(n.rssi!==undefined) parts.push(n.rssi+' dBm');
+      meta.innerHTML=parts.join(' &middot; ');
+      info.appendChild(meta);
+      row.appendChild(info);
+      // Select button (only for compatible)
+      if(compat){
+        var btn=document.createElement('button');
+        btn.className='btn-select';
+        btn.type='button';
+        btn.textContent='Select';
+        (function(ssid){
+          btn.addEventListener('click',function(){selectNetwork(ssid);});
+        })(n.ssid||'');
+        row.appendChild(btn);
+      }
+      list.appendChild(row);
+    }
+    scanBody.innerHTML='';
+    scanBody.appendChild(list);
+    var footerText=total+' network'+(total!==1?'s':'')+' found';
+    if(incompat>0) footerText+=' · '+incompat+' incompatible';
+    scanFooter.textContent=footerText;
+    scanFooter.style.display='';
+  }
+
+  function scanWifi(){
+    btnRescan.disabled=true;
+    scanBody.innerHTML='<div class="spinner-wrap"><div class="spinner"></div>Scanning...</div>';
+    scanFooter.style.display='none';
+    fetch('/api/wifi/scan').then(function(r){
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      return r.json();
+    }).then(function(data){
+      renderResults(data);
+      btnRescan.disabled=false;
+    }).catch(function(e){
+      scanBody.innerHTML='<div class="scan-empty">Scan failed: '+escHtml(e.message)+'</div>';
+      scanFooter.style.display='none';
+      btnRescan.disabled=false;
+    });
+  }
+
+  function resetForm(){
+    statusArea.style.display='none';
+    statusConnecting.style.display='';
+    statusSuccess.style.display='none';
+    statusFail.style.display='none';
+    wifiForm.style.display='';
+    btnConnect.disabled=false;
+    formErr.textContent='';
+    if(pollTimer){clearInterval(pollTimer);pollTimer=null;}
+  }
+
+  function pollStatus(){
+    fetch('/api/wifi/status').then(function(r){
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      return r.json();
+    }).then(function(d){
+      if(d.connected){
+        if(pollTimer){clearInterval(pollTimer);pollTimer=null;}
+        statusConnecting.style.display='none';
+        var ip=escHtml(d.ip||'');
+        var ssid=escHtml(d.ssid||ssidInput.value);
+        statusSuccess.innerHTML='Connected to '+ssid+'!'
+          +'<span class="ip">IP Address: '+ip+'</span>'
+          +'<a href="http://'+ip+'/">Open NINA Display &rarr;</a>';
+        statusSuccess.style.display='';
+      } else if(Date.now()-pollStart>=15000){
+        if(pollTimer){clearInterval(pollTimer);pollTimer=null;}
+        statusConnecting.style.display='none';
+        statusFail.innerHTML='Connection failed.';
+        var retryBtn=document.createElement('button');
+        retryBtn.className='btn-retry';
+        retryBtn.type='button';
+        retryBtn.textContent='Try Again';
+        retryBtn.addEventListener('click',function(){resetForm();});
+        statusFail.appendChild(document.createElement('br'));
+        statusFail.appendChild(retryBtn);
+        statusFail.style.display='';
+      }
+    }).catch(function(){
+      // Network error during poll: keep trying until timeout
+      if(Date.now()-pollStart>=15000){
+        if(pollTimer){clearInterval(pollTimer);pollTimer=null;}
+        statusConnecting.style.display='none';
+        statusFail.innerHTML='Connection failed.';
+        var retryBtn=document.createElement('button');
+        retryBtn.className='btn-retry';
+        retryBtn.type='button';
+        retryBtn.textContent='Try Again';
+        retryBtn.addEventListener('click',function(){resetForm();});
+        statusFail.appendChild(document.createElement('br'));
+        statusFail.appendChild(retryBtn);
+        statusFail.style.display='';
+      }
+    });
+  }
+
+  function connectWifi(){
+    var ssid=ssidInput.value.trim();
+    if(!ssid){
+      formErr.textContent='Enter a network name.';
+      ssidInput.focus();
+      return;
+    }
+    formErr.textContent='';
+    btnConnect.disabled=true;
+    wifiForm.style.display='none';
+    statusArea.style.display='';
+    statusConnecting.style.display='';
+    statusSuccess.style.display='none';
+    statusFail.style.display='none';
+    fetch('/api/wifi/setup',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ssid:ssid,password:passInput.value})
+    }).then(function(r){
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      pollStart=Date.now();
+      pollTimer=setInterval(pollStatus,2000);
+    }).catch(function(e){
+      statusConnecting.style.display='none';
+      statusFail.innerHTML='Setup request failed: '+escHtml(e.message);
+      var retryBtn=document.createElement('button');
+      retryBtn.className='btn-retry';
+      retryBtn.type='button';
+      retryBtn.textContent='Try Again';
+      retryBtn.addEventListener('click',function(){resetForm();});
+      statusFail.appendChild(document.createElement('br'));
+      statusFail.appendChild(retryBtn);
+      statusFail.style.display='';
+    });
+  }
+
+  wifiForm.addEventListener('submit',function(ev){
+    ev.preventDefault();
+    connectWifi();
+  });
+  btnRescan.addEventListener('click',function(){scanWifi();});
+
+  // Auto-scan on load
+  scanWifi();
+})();
+</script>
+</body>
+</html>

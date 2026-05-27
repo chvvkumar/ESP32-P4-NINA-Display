@@ -42,6 +42,7 @@
 #include "wifi_manager.h"
 #include "ui/nina_settings_tabview.h"
 #include "ui/nina_thumbnail.h"
+#include "ui/nina_setup_screen.h"
 
 /* Embedded splash logo (JPEG, hardware-decoded at boot) */
 extern const uint8_t logo_jpg_start[] asm("_binary_logo_jpg_start");
@@ -163,7 +164,7 @@ static bool wifi_advance_to_next_network(void)
     return false;
 }
 
-static void wifi_connect_to_slot(int index)
+void wifi_connect_to_slot(int index)
 {
     const app_config_t *cfg = app_config_get();
     wifi_config_t sta_cfg = {0};
@@ -305,6 +306,34 @@ static void event_handler(void *arg, esp_event_base_t event_base,
         if (mode == WIFI_MODE_APSTA) {
             ESP_LOGI(TAG, "STA connected, disabling AP");
             esp_wifi_set_mode(WIFI_MODE_STA);
+        }
+
+        if (is_setup_mode()) {
+            set_setup_mode(false);
+            ESP_LOGI(TAG, "WiFi connected during setup — transitioning to dashboard");
+            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                nina_setup_screen_destroy();
+                lv_obj_t *scr = lv_scr_act();
+                create_nina_dashboard(scr, instance_count);
+                nina_toast_init(scr);
+                nina_event_log_overlay_create(scr);
+                nina_alerts_init(scr);
+                nina_safety_create(scr);
+                bsp_display_unlock();
+            }
+            nina_dashboard_set_page_change_cb(on_page_changed);
+            nina_client_init();
+            nina_client_init_image_buffers();
+            nina_thumbnail_init();
+            spotify_auth_init();
+            spotify_client_init();
+
+            xTaskCreatePinnedToCore(input_task, "input_task", 6144, NULL, 5, NULL, 0);
+            xTaskCreatePinnedToCore(data_update_task, "data_task", 12288, NULL, 4, &data_task_handle, 1);
+            if (app_config_get()->spotify_enabled) {
+                spotify_ensure_task_running();
+            }
+            weather_client_start();
         }
 
         /* Apply timezone before SNTP so localtime_r works as soon as time is set */
@@ -494,6 +523,12 @@ void app_main(void)
     /* Pre-allocate JPEG encoder DMA channel before display init claims DMA resources */
     screenshot_encoder_init();
 
+    bool setup_mode = (app_config_get()->wifi_networks[0].ssid[0] == '\0');
+    if (setup_mode) {
+        set_setup_mode(true);
+        ESP_LOGI(TAG, "No WiFi configured — entering setup mode");
+    }
+
     bsp_display_cfg_t cfg = {
         .lvgl_port_cfg = ESP_LVGL_PORT_INIT_CONFIG(),
         .buffer_size = BSP_LCD_DRAW_BUFF_SIZE,
@@ -608,9 +643,12 @@ void app_main(void)
         lv_obj_t *scr = lv_scr_act();
         lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), 0);
 
-        create_nina_dashboard(scr, instance_count);
+        if (setup_mode) {
+            nina_setup_screen_create(scr);
+        } else {
+            create_nina_dashboard(scr, instance_count);
 
-        /* Create splash ON TOP of dashboard — last child draws on top */
+            /* Create splash ON TOP of dashboard — last child draws on top */
         if (splash_ready) {
             lv_obj_t *splash_cont = lv_obj_create(scr);
             lv_obj_remove_style_all(splash_cont);
@@ -658,57 +696,61 @@ void app_main(void)
             nina_dashboard_show_page(saved_page, 0);
         }
 
+        } /* end else (normal mode) */
+
         bsp_display_unlock();
     } else {
         ESP_LOGE(TAG, "Failed to acquire display lock during init!");
     }
 
-    nina_dashboard_set_page_change_cb(on_page_changed);
+    if (!setup_mode) {
+        nina_dashboard_set_page_change_cb(on_page_changed);
 
-    nina_client_init();  // DNS cache mutex — must be called before poll tasks spawn
-    nina_client_init_image_buffers();  // Pre-allocate PSRAM image fetch buffer
-    nina_thumbnail_init();  // Pre-allocate PSRAM zoom buffer
+        nina_client_init();  // DNS cache mutex — must be called before poll tasks spawn
+        nina_client_init_image_buffers();  // Pre-allocate PSRAM image fetch buffer
+        nina_thumbnail_init();  // Pre-allocate PSRAM zoom buffer
 
-    /* Spotify init — always called so web handlers (config, login) work even when disabled */
-    spotify_auth_init();
-    spotify_client_init();
+        /* Spotify init — always called so web handlers (config, login) work even when disabled */
+        spotify_auth_init();
+        spotify_client_init();
 
-    /* weather_client_init() already called above, before dashboard creation */
+        /* weather_client_init() already called above, before dashboard creation */
 
-    /* Allocate task stacks in PSRAM to save internal heap; TCBs stay internal */
-    {
-        StackType_t *input_stack = heap_caps_malloc(6144 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
-        StaticTask_t *input_tcb  = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        if (input_stack && input_tcb) {
-            xTaskCreateStaticPinnedToCore(input_task, "input_task", 6144, NULL, 5,
-                                          input_stack, input_tcb, 0);
-        } else {
-            ESP_LOGE(TAG, "Failed to alloc input_task stack from PSRAM, falling back");
-            if (input_stack) heap_caps_free(input_stack);
-            if (input_tcb) heap_caps_free(input_tcb);
-            xTaskCreatePinnedToCore(input_task, "input_task", 6144, NULL, 5, NULL, 0);
+        /* Allocate task stacks in PSRAM to save internal heap; TCBs stay internal */
+        {
+            StackType_t *input_stack = heap_caps_malloc(6144 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+            StaticTask_t *input_tcb  = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+            if (input_stack && input_tcb) {
+                xTaskCreateStaticPinnedToCore(input_task, "input_task", 6144, NULL, 5,
+                                              input_stack, input_tcb, 0);
+            } else {
+                ESP_LOGE(TAG, "Failed to alloc input_task stack from PSRAM, falling back");
+                if (input_stack) heap_caps_free(input_stack);
+                if (input_tcb) heap_caps_free(input_tcb);
+                xTaskCreatePinnedToCore(input_task, "input_task", 6144, NULL, 5, NULL, 0);
+            }
+
+            StackType_t *data_stack = heap_caps_malloc(12288 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+            StaticTask_t *data_tcb  = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+            if (data_stack && data_tcb) {
+                data_task_handle = xTaskCreateStaticPinnedToCore(data_update_task, "data_task", 12288, NULL, 4,
+                                                                 data_stack, data_tcb, 1);
+            } else {
+                ESP_LOGE(TAG, "Failed to alloc data_task stack from PSRAM, falling back");
+                if (data_stack) heap_caps_free(data_stack);
+                if (data_tcb) heap_caps_free(data_tcb);
+                xTaskCreatePinnedToCore(data_update_task, "data_task", 12288, NULL, 4, &data_task_handle, 1);
+            }
         }
 
-        StackType_t *data_stack = heap_caps_malloc(12288 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
-        StaticTask_t *data_tcb  = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        if (data_stack && data_tcb) {
-            data_task_handle = xTaskCreateStaticPinnedToCore(data_update_task, "data_task", 12288, NULL, 4,
-                                                             data_stack, data_tcb, 1);
-        } else {
-            ESP_LOGE(TAG, "Failed to alloc data_task stack from PSRAM, falling back");
-            if (data_stack) heap_caps_free(data_stack);
-            if (data_tcb) heap_caps_free(data_tcb);
-            xTaskCreatePinnedToCore(data_update_task, "data_task", 12288, NULL, 4, &data_task_handle, 1);
+        /* Spotify poll task — only when enabled (Core 0, 10KB PSRAM stack for HTTPS+JSON) */
+        if (app_config_get()->spotify_enabled) {
+            spotify_ensure_task_running();
         }
-    }
 
-    /* Spotify poll task — only when enabled (Core 0, 10KB PSRAM stack for HTTPS+JSON) */
-    if (app_config_get()->spotify_enabled) {
-        spotify_ensure_task_running();
-    }
-
-    /* Weather poll task — always start; task sleeps when no location configured */
-    weather_client_start();
+        /* Weather poll task — always start; task sleeps when no location configured */
+        weather_client_start();
+    } /* end if (!setup_mode) */
 
     /* Mark this firmware as valid so the bootloader won't roll back.
      * This must come after successful init — if we crash before here,

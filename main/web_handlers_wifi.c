@@ -2,6 +2,8 @@
 #include "esp_wifi.h"
 #include "esp_heap_caps.h"
 #include <string.h>
+#include "esp_netif.h"
+#include "ui/nina_setup_screen.h"
 
 #define MAX_SCAN_AP_RECORDS  30
 #define MAX_SCAN_RESULTS     20
@@ -47,7 +49,9 @@ static int compare_rssi_desc(const void *a, const void *b)
 
 esp_err_t wifi_scan_get_handler(httpd_req_t *req)
 {
-    REQUIRE_AUTH(req);
+    if (!is_setup_mode()) {
+        REQUIRE_AUTH(req);
+    }
 
     wifi_scan_config_t scan_cfg = {
         .ssid = NULL,
@@ -146,5 +150,83 @@ esp_err_t wifi_scan_get_handler(httpd_req_t *req)
     free(json);
     cJSON_Delete(root);
     heap_caps_free(ap_records);
+    return ESP_OK;
+}
+
+esp_err_t wifi_setup_post_handler(httpd_req_t *req)
+{
+    if (!is_setup_mode()) {
+        REQUIRE_AUTH(req);
+    }
+
+    char buf[256] = {0};
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret <= 0) return send_400(req, "Empty request body");
+
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) return send_400(req, "Invalid JSON");
+
+    cJSON *ssid_item = cJSON_GetObjectItem(root, "ssid");
+    cJSON *pass_item = cJSON_GetObjectItem(root, "password");
+
+    if (!cJSON_IsString(ssid_item) || ssid_item->valuestring[0] == '\0') {
+        cJSON_Delete(root);
+        return send_400(req, "SSID is required");
+    }
+
+    app_config_t *cfg = app_config_get();
+    strlcpy(cfg->wifi_networks[0].ssid, ssid_item->valuestring,
+            sizeof(cfg->wifi_networks[0].ssid));
+    if (cJSON_IsString(pass_item)) {
+        strlcpy(cfg->wifi_networks[0].password, pass_item->valuestring,
+                sizeof(cfg->wifi_networks[0].password));
+    } else {
+        cfg->wifi_networks[0].password[0] = '\0';
+    }
+    app_config_save(cfg);
+
+    cJSON_Delete(root);
+
+    extern void wifi_connect_to_slot(int index);
+    esp_wifi_disconnect();
+    wifi_connect_to_slot(0);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"ok\":true}");
+    return ESP_OK;
+}
+
+esp_err_t wifi_status_get_handler(httpd_req_t *req)
+{
+    if (!is_setup_mode()) {
+        REQUIRE_AUTH(req);
+    }
+
+    esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    esp_netif_ip_info_t ip_info = {0};
+    bool connected = false;
+    char ip_str[16] = "";
+    char ssid_str[33] = "";
+
+    if (sta && esp_netif_get_ip_info(sta, &ip_info) == ESP_OK && ip_info.ip.addr != 0) {
+        connected = true;
+        snprintf(ip_str, sizeof(ip_str), IPSTR, IP2STR(&ip_info.ip));
+
+        wifi_config_t wcfg = {0};
+        if (esp_wifi_get_config(WIFI_IF_STA, &wcfg) == ESP_OK) {
+            strlcpy(ssid_str, (const char *)wcfg.sta.ssid, sizeof(ssid_str));
+        }
+    }
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "connected", connected);
+    cJSON_AddStringToObject(root, "ssid", ssid_str);
+    cJSON_AddStringToObject(root, "ip", ip_str);
+
+    char *json = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(root);
     return ESP_OK;
 }
