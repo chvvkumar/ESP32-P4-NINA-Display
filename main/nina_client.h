@@ -52,6 +52,7 @@ typedef struct {
     float exposure_current;     // Elapsed time in current exposure (seconds)
     float exposure_total;       // Total duration of current exposure (seconds, from ExposureTime)
     int64_t exposure_end_epoch; // Absolute end time (Unix epoch seconds) for client-side interpolation
+    bool is_exposing;           // True when camera is actively exposing (from IsExposing API field)
     char current_filter[32];    // Current filter name (e.g., "Ha", "Sii", "L")
     char container_name[64];    // Running container name (e.g., "LRGBSHO") - stripped of "_Container"
     char container_step[64];    // Currently running step/instruction name (e.g., "Smart Exposure", "Auto Focus")
