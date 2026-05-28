@@ -430,6 +430,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_arc_set_rotation(p->arc_exposure, 270);
     lv_arc_set_bg_angles(p->arc_exposure, 0, 360);
     lv_arc_set_value(p->arc_exposure, 0);
+    lv_arc_set_range(p->arc_exposure, 0, ARC_RANGE);
     lv_obj_remove_style(p->arc_exposure, NULL, LV_PART_KNOB);
     lv_obj_set_style_arc_color(p->arc_exposure, lv_color_hex(current_theme->bg_main), LV_PART_MAIN);
     lv_obj_set_style_arc_width(p->arc_exposure, 12, LV_PART_MAIN);
@@ -653,10 +654,10 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_style_bg_opa(p->stale_overlay, LV_OPA_40, 0);
     lv_obj_add_flag(p->stale_overlay, LV_OBJ_FLAG_HIDDEN);
 
-    p->prev_target_progress = 0;
-    p->pending_arc_progress = 0;
-    p->interp_arc_target = 0;
     p->arc_completing = false;
+    p->cached_end_epoch = 0;
+    p->cached_total = 0;
+    p->gap_start_epoch = 0;
 }
 
 /* Page indicator dots at the bottom */
@@ -852,6 +853,11 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     for (int i = 0; i < page_count; i++) {
         create_dashboard_page(&pages[i], main_cont, page_instance_map[i]);
         lv_obj_add_flag(pages[i].page, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    /* Create 200ms LVGL timers for smooth arc interpolation on each page */
+    for (int i = 0; i < page_count; i++) {
+        pages[i].arc_timer = lv_timer_create(arc_interp_timer_cb, ARC_TIMER_MS, &pages[i]);
     }
 
     /* Settings page — lazy-loaded on demand (SETTINGS_PAGE_IDX).

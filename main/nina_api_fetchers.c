@@ -61,22 +61,25 @@ void fetch_camera_info_robust(const char *base_url, nina_client_t *data) {
         cJSON *is_exposing = cJSON_GetObjectItem(response, "IsExposing");
         cJSON *exp_end = cJSON_GetObjectItem(response, "ExposureEndTime");
 
-        if (is_exposing && cJSON_IsTrue(is_exposing) && exp_end && exp_end->valuestring) {
+        data->is_exposing = (is_exposing && cJSON_IsTrue(is_exposing));
+
+        if (data->is_exposing && exp_end && exp_end->valuestring) {
             time_t end_time = parse_iso8601(exp_end->valuestring);
             time_t now = time(NULL);
 
-            if (now > 1577836800 && end_time > 0) {  // Year 2020+
+            if (now > 1577836800 && end_time > 0) {
                 double remaining = difftime(end_time, now);
-                if (remaining >= 0 && remaining <= 7200) {  // Sanity check: 0-2 hours
-                    // Store negative remaining time (will be fixed after getting total exposure)
+                if (remaining >= 0 && remaining <= 7200) {
                     data->exposure_current = -remaining;
                     data->exposure_end_epoch = (int64_t)end_time;
+                    if (data->exposure_total == 0 && remaining > 0.5) {
+                        data->exposure_total = (float)remaining;
+                    }
                     ESP_LOGI(TAG, "Camera exposing: %.1fs remaining", remaining);
                 }
             }
-        } else {
-            data->exposure_end_epoch = 0;  // Not exposing — clear for interpolation timer
         }
+        // Do NOT clear exposure_end_epoch when !is_exposing -- UI uses it to detect completion
     }
 
     cJSON_Delete(json);
@@ -543,10 +546,13 @@ int fetch_equipment_info_bundled(const char *base_url, nina_client_t *data, bool
             data->exposure_total = (float)exp_time_cam->valuedouble;
         }
 
-        // Exposure timing (same logic as fetch_camera_info_robust)
+        // Exposure timing
         cJSON *is_exposing = cJSON_GetObjectItem(camera, "IsExposing");
         cJSON *exp_end = cJSON_GetObjectItem(camera, "ExposureEndTime");
-        if (is_exposing && cJSON_IsTrue(is_exposing) && exp_end && exp_end->valuestring) {
+
+        data->is_exposing = (is_exposing && cJSON_IsTrue(is_exposing));
+
+        if (data->is_exposing && exp_end && exp_end->valuestring) {
             time_t end_time = parse_iso8601(exp_end->valuestring);
             time_t now = time(NULL);
             if (now > 1577836800 && end_time > 0) {
@@ -554,10 +560,11 @@ int fetch_equipment_info_bundled(const char *base_url, nina_client_t *data, bool
                 if (remaining >= 0 && remaining <= 7200) {
                     data->exposure_current = -remaining;
                     data->exposure_end_epoch = (int64_t)end_time;
+                    if (data->exposure_total == 0 && remaining > 0.5) {
+                        data->exposure_total = (float)remaining;
+                    }
                 }
             }
-        } else {
-            data->exposure_end_epoch = 0;
         }
     }
 

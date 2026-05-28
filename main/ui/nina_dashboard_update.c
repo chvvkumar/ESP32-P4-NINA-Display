@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <sys/time.h>
 
 #define STALE_WARN_MS   30000   /* 30 s: show "Last update" label */
 #define STALE_DIM_MS   120000   /* 2 min: dim the entire page */
@@ -69,16 +70,42 @@ static void auto_fit_value_font(lv_obj_t *label) {
         lv_obj_set_style_text_font(label, pick, 0);
 }
 
-// Arc animation callback
-static void arc_fill_complete_cb(lv_anim_t *a) {
-    dashboard_page_t *p = (dashboard_page_t *)a->user_data;
-    if (!p) return;
+void arc_interp_timer_cb(lv_timer_t *timer) {
+    dashboard_page_t *p = (dashboard_page_t *)lv_timer_get_user_data(timer);
+    if (!p || !p->arc_exposure || p->arc_completing) return;
+    if (p->cached_end_epoch == 0 || p->cached_total <= 0) return;
 
-    /* Reset arc to 0 instantly (visually invisible since it was just at 100)
-     * and let the interpolation timer ramp it up smoothly on its next tick. */
-    lv_arc_set_value(p->arc_exposure, 0);
-    p->interp_arc_target = 0;
-    p->arc_completing = false;
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    double now = (double)tv.tv_sec + (double)tv.tv_usec / 1000000.0;
+    double remaining = (double)p->cached_end_epoch - now;
+
+    if (remaining <= 0) {
+        if (p->cached_is_exposing && lv_arc_get_value(p->arc_exposure) != ARC_RANGE)
+            lv_arc_set_value(p->arc_exposure, ARC_RANGE);
+        return;
+    }
+
+    if (!p->cached_is_exposing) return;
+
+    double elapsed = (double)p->cached_total - remaining;
+    if (elapsed < 0) elapsed = 0;
+
+    int progress = (int)((elapsed * ARC_RANGE) / (double)p->cached_total);
+    if (progress > ARC_RANGE) progress = ARC_RANGE;
+    if (progress < 0) progress = 0;
+
+    int current = lv_arc_get_value(p->arc_exposure);
+    if (progress != current) {
+        lv_anim_t a;
+        lv_anim_init(&a);
+        lv_anim_set_var(&a, p->arc_exposure);
+        lv_anim_set_values(&a, current, progress);
+        lv_anim_set_time(&a, ARC_TIMER_MS);
+        lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_arc_set_value);
+        lv_anim_set_path_cb(&a, lv_anim_path_linear);
+        lv_anim_start(&a);
+    }
 }
 
 void nina_dashboard_update_status(int page_index, int rssi, bool nina_connected, bool api_active) {
@@ -200,6 +227,12 @@ static void update_sequence_info(dashboard_page_t *p, const nina_client_t *d) {
         d->container_step[0] != '\0' ? d->container_step : "----");
 }
 
+static void arc_transition_complete_cb(lv_anim_t *a) {
+    dashboard_page_t *p = (dashboard_page_t *)a->user_data;
+    if (!p) return;
+    p->arc_completing = false;
+}
+
 static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
                                 int instance_idx, int gb) {
     uint32_t filter_color = app_config_apply_brightness(current_theme->progress_color, gb);
@@ -209,26 +242,29 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
     set_arc_color_if_changed(p->arc_exposure, lv_color_hex(filter_color), LV_PART_INDICATOR);
     set_shadow_color_if_changed(p->arc_exposure, lv_color_hex(filter_color), LV_PART_INDICATOR);
 
-    // Detect filter change — reset arc animation state to avoid stale progress/color
+    // Detect filter change — reset arc state
     if (d->current_filter[0] != '\0' && strcmp(p->prev_filter, d->current_filter) != 0) {
         lv_anim_delete(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
         p->arc_completing = false;
-        p->prev_target_progress = 0;
-        p->pending_arc_progress = 0;
-        p->interp_arc_target = 0;
+        p->cached_end_epoch = 0;
+        p->cached_total = 0;
+        p->gap_start_epoch = 0;
         lv_arc_set_value(p->arc_exposure, 0);
         snprintf(p->prev_filter, sizeof(p->prev_filter), "%s", d->current_filter);
     }
 
+    time_t now = time(NULL);
+    p->cached_is_exposing = d->is_exposing;
+
     if (d->exposure_total > 0 && d->exposure_end_epoch > 0) {
-        float elapsed = d->exposure_current;
-        float total = d->exposure_total;
+        // We have valid exposure data from the API
+        p->gap_start_epoch = 0;  // Clear any gap timer
 
         // Show total exposure duration inside the arc
-        int total_sec = (int)total;
+        int total_sec = (int)d->exposure_total;
         SET_LABEL_FMT_IF_CHANGED(p->lbl_exposure_current, 16, "%ds", total_sec);
 
-        // Update filter label (line 1, above the duration)
+        // Update filter label
         if (d->current_filter[0] != '\0' && strcmp(d->current_filter, "--") != 0) {
             set_label_if_changed(p->lbl_exposure_total, d->current_filter);
             set_text_color_if_changed(p->lbl_exposure_total, lv_color_hex(filter_color), 0);
@@ -236,47 +272,68 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
             set_label_if_changed(p->lbl_exposure_total, "");
         }
 
-        int progress = (int)((elapsed * 100) / total);
-        if (progress > 100) progress = 100;
-        if (progress < 0) progress = 0;
+        // Detect new exposure by end_epoch change
+        bool new_exposure = (d->exposure_end_epoch != p->cached_end_epoch
+                             && d->exposure_end_epoch > (int64_t)now);
 
-        int current_val = lv_arc_get_value(p->arc_exposure);
-        bool new_exposure = (p->prev_target_progress > 70 && progress < 30);
-        p->prev_target_progress = progress;
+        // Update cached values for the timer
+        p->cached_end_epoch = d->exposure_end_epoch;
+        p->cached_total = d->exposure_total;
 
-        if (new_exposure && current_val > 0) {
-            p->arc_completing = true;
-            p->pending_arc_progress = progress;
+        if (new_exposure && !p->arc_completing) {
+            int current_val = lv_arc_get_value(p->arc_exposure);
 
-            lv_anim_t a;
-            lv_anim_init(&a);
-            lv_anim_set_var(&a, p->arc_exposure);
-            lv_anim_set_values(&a, current_val, 100);
-            lv_anim_set_time(&a, 300);
-            lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_arc_set_value);
-            lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
-            a.user_data = p;
-            lv_anim_set_ready_cb(&a, arc_fill_complete_cb);
-            lv_anim_start(&a);
-        } else if (p->arc_completing) {
-            p->pending_arc_progress = progress;
-            if (progress > 30) {
-                p->arc_completing = false;
-                lv_arc_set_value(p->arc_exposure, progress);
+            // Calculate where the new exposure currently is
+            double remaining = difftime((time_t)d->exposure_end_epoch, now);
+            double elapsed = (double)d->exposure_total - remaining;
+            if (elapsed < 0) elapsed = 0;
+            int new_progress = (int)((elapsed * ARC_RANGE) / (double)d->exposure_total);
+            if (new_progress > ARC_RANGE) new_progress = ARC_RANGE;
+            if (new_progress < 0) new_progress = 0;
+
+            if (current_val > ARC_RANGE / 2) {
+                // Arc is in upper half — animate to full, then shrink to new progress
+                p->arc_completing = true;
+
+                lv_anim_t a_fill;
+                lv_anim_init(&a_fill);
+                lv_anim_set_var(&a_fill, p->arc_exposure);
+                lv_anim_set_values(&a_fill, current_val, ARC_RANGE);
+                lv_anim_set_time(&a_fill, ARC_TRANSITION_MS / 2);
+                lv_anim_set_exec_cb(&a_fill, (lv_anim_exec_xcb_t)lv_arc_set_value);
+                lv_anim_set_path_cb(&a_fill, lv_anim_path_ease_out);
+                lv_anim_start(&a_fill);
+
+                lv_anim_t a_shrink;
+                lv_anim_init(&a_shrink);
+                lv_anim_set_var(&a_shrink, p->arc_exposure);
+                lv_anim_set_values(&a_shrink, ARC_RANGE, new_progress);
+                lv_anim_set_time(&a_shrink, ARC_TRANSITION_MS / 2);
+                lv_anim_set_delay(&a_shrink, ARC_TRANSITION_MS / 2);
+                lv_anim_set_exec_cb(&a_shrink, (lv_anim_exec_xcb_t)lv_arc_set_value);
+                lv_anim_set_path_cb(&a_shrink, lv_anim_path_ease_in);
+                a_shrink.user_data = p;
+                lv_anim_set_ready_cb(&a_shrink, arc_transition_complete_cb);
+                lv_anim_start(&a_shrink);
+            } else {
+                // Arc is in lower half — animate directly to new progress
+                p->arc_completing = true;
+
+                lv_anim_t a;
+                lv_anim_init(&a);
+                lv_anim_set_var(&a, p->arc_exposure);
+                lv_anim_set_values(&a, current_val, new_progress);
+                lv_anim_set_time(&a, ARC_TRANSITION_MS);
+                lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_arc_set_value);
+                lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+                a.user_data = p;
+                lv_anim_set_ready_cb(&a, arc_transition_complete_cb);
+                lv_anim_start(&a);
             }
-        } else if (progress != p->interp_arc_target) {
-            // Normal update — animate arc to the API-reported progress
-            p->interp_arc_target = progress;
-            lv_anim_t a;
-            lv_anim_init(&a);
-            lv_anim_set_var(&a, p->arc_exposure);
-            lv_anim_set_values(&a, current_val, progress);
-            lv_anim_set_time(&a, 400);
-            lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_arc_set_value);
-            lv_anim_set_path_cb(&a, lv_anim_path_linear);
-            lv_anim_start(&a);
         }
+        // Normal progress updates are handled by the 200ms timer (arc_interp_timer_cb)
 
+        // Update exposure count labels
         if (d->exposure_iterations > 0) {
             SET_LABEL_FMT_IF_CHANGED(p->lbl_loop_count, 32, "x %d/%d",
                 d->exposure_count, d->exposure_iterations);
@@ -301,12 +358,46 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
             lv_obj_add_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
         }
     } else {
-        p->interp_arc_target = 0;
-        set_label_if_changed(p->lbl_exposure_total, "");
-        set_label_if_changed(p->lbl_loop_count, "");
-        set_label_if_changed(p->lbl_exposure_current, "--");
-        lv_arc_set_value(p->arc_exposure, 0);
-        lv_obj_add_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
+        // No active exposure data — handle inter-exposure gap or idle state
+
+        if (p->cached_end_epoch > 0 && p->cached_total > 0) {
+            // Was recently exposing — hold arc position during gap
+            if (p->gap_start_epoch == 0) {
+                p->gap_start_epoch = (int64_t)now;
+            }
+
+            int64_t gap_duration = (int64_t)now - p->gap_start_epoch;
+            if (gap_duration > ARC_GAP_GRACE_S) {
+                // Grace period expired — transition to idle
+                p->cached_end_epoch = 0;
+                p->cached_total = 0;
+                p->gap_start_epoch = 0;
+                set_label_if_changed(p->lbl_exposure_total, "");
+                set_label_if_changed(p->lbl_loop_count, "");
+                set_label_if_changed(p->lbl_exposure_current, "--");
+                lv_anim_delete(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
+
+                lv_anim_t a;
+                lv_anim_init(&a);
+                lv_anim_set_var(&a, p->arc_exposure);
+                lv_anim_set_values(&a, lv_arc_get_value(p->arc_exposure), 0);
+                lv_anim_set_time(&a, 500);
+                lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_arc_set_value);
+                lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+                lv_anim_start(&a);
+
+                lv_obj_add_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
+            }
+            // else: within grace period — do nothing, arc stays where it is
+        } else {
+            // Genuinely idle — no recent exposure data
+            p->gap_start_epoch = 0;
+            set_label_if_changed(p->lbl_exposure_total, "");
+            set_label_if_changed(p->lbl_loop_count, "");
+            set_label_if_changed(p->lbl_exposure_current, "--");
+            lv_arc_set_value(p->arc_exposure, 0);
+            lv_obj_add_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
+        }
     }
 }
 

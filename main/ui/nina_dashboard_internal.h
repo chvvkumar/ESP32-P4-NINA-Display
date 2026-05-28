@@ -44,6 +44,13 @@
 
 #define MAX_POWER_WIDGETS 8
 
+#define ARC_RANGE           3600
+#define ARC_TIMER_MS        200
+#define ARC_TRANSITION_MS   300
+#define ARC_GAP_GRACE_S     60
+
+void arc_interp_timer_cb(lv_timer_t *timer);
+
 typedef struct {
     lv_obj_t *page;
 
@@ -93,12 +100,13 @@ typedef struct {
     lv_obj_t *stale_overlay;    // Semi-transparent dimming overlay (> 2 min stale)
 
     // Arc animation state
-    int prev_target_progress;
-    int pending_arc_progress;
-    bool arc_completing;
-    char prev_filter[32];       // Track previous filter for change detection
-
-    int      interp_arc_target;     // Last animation target (avoid restarts)
+    int64_t  cached_end_epoch;      // Last-known exposure_end_epoch from poll data
+    float    cached_total;          // Last-known exposure_total from poll data
+    lv_timer_t *arc_timer;          // 200ms LVGL timer for real-time arc progress
+    int64_t  gap_start_epoch;       // When the inter-exposure gap began (0 = not in gap)
+    bool     arc_completing;        // True during completion/transition animation
+    bool     cached_is_exposing;    // Last-known is_exposing state from poll data
+    char     prev_filter[32];       // Track previous filter for change detection
 
     // Connection state (tracked for theme reapplication)
     bool nina_connected;
