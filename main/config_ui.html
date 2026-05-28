@@ -18,7 +18,8 @@
       --accent-hover: #0d9488;
       --accent-glow: rgba(var(--accent-rgb), 0.15);
       --text: #f4f4f5;
-      --text-muted: #a1a1aa;
+      --text-muted: #c4c4cc;
+      --text-hint: #9a9aa6;
       --danger: #ef4444;
       --danger-hover: #dc2626;
       --warning: #f59e0b;
@@ -87,7 +88,7 @@
       display: block; font-size: 0.82rem; color: var(--text-muted);
       margin-bottom: 8px; font-weight: 500; letter-spacing: 0.01em;
     }
-    .field-hint { font-size: 0.72rem; color: #71717a; margin-top: 6px; opacity: 0.7; }
+    .field-hint { font-size: 0.72rem; color: var(--text-hint); margin-top: 6px; opacity: 0.7; }
     .divider { border: none; border-top: 1px solid rgba(255, 255, 255, 0.06); margin: 24px 0; }
 
     /* === NAVIGATION === */
@@ -111,7 +112,7 @@
       padding: 4px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.04);
     }
     .top-nav .tab-btn {
-      background: none; border: none; color: #71717a; cursor: pointer;
+      background: none; border: none; color: var(--text-hint); cursor: pointer;
       padding: 8px 18px; border-radius: 8px; font-size: 0.8rem; font-weight: 500;
       transition: all 0.25s ease; white-space: nowrap; position: relative; font-family: inherit;
     }
@@ -121,7 +122,7 @@
       box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.08);
     }
     .top-nav .github-link {
-      color: #71717a; text-decoration: none; font-size: 0.75rem;
+      color: var(--text-hint); text-decoration: none; font-size: 0.75rem;
       display: flex; align-items: center; gap: 6px;
       padding: 7px 12px; border: 1px solid rgba(255, 255, 255, 0.06);
       border-radius: 10px; transition: all 0.2s ease;
@@ -134,18 +135,23 @@
       background: rgba(20, 20, 24, 0.85);
       backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
       border-top: 1px solid rgba(255, 255, 255, 0.06);
-      height: 68px; padding: 0 8px;
+      height: auto; min-height: 68px; padding: 0 8px;
+      padding-bottom: env(safe-area-inset-bottom, 0px);
     }
     .bottom-nav .nav-items {
-      display: flex; height: 100%; align-items: center; justify-content: space-around;
+      display: flex; height: 100%; align-items: center; justify-content: flex-start; gap: 2px;
+      overflow-x: auto; -webkit-overflow-scrolling: touch; padding: 0 4px;
+      -ms-overflow-style: none; scrollbar-width: none;
     }
+    .bottom-nav .nav-items::-webkit-scrollbar { display: none; }
     .bottom-nav .nav-btn {
-      background: none; border: none; color: #71717a; cursor: pointer;
+      background: none; border: none; color: var(--text-hint); cursor: pointer;
       display: flex; flex-direction: column; align-items: center; gap: 3px;
-      padding: 8px 14px; border-radius: 10px; font-size: 0.65rem;
+      padding: 8px 12px; border-radius: 10px; font-size: 0.78rem;
       font-weight: 500; transition: all 0.25s ease; position: relative; font-family: inherit;
+      flex-shrink: 0;
     }
-    .bottom-nav .nav-btn svg { width: 20px; height: 20px; }
+    .bottom-nav .nav-btn svg { width: 22px; height: 22px; }
     .bottom-nav .nav-btn.active { color: var(--accent); }
     .bottom-nav .nav-btn.active::after {
       content: ''; position: absolute; bottom: 2px; left: 50%;
@@ -176,7 +182,7 @@
       box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.1), 0 0 20px rgba(var(--accent-rgb), 0.05);
       background: rgba(0, 0, 0, 0.4);
     }
-    .input::placeholder { color: #71717a; opacity: 0.6; }
+    .input::placeholder { color: var(--text-hint); opacity: 0.6; }
     select.input { cursor: pointer; appearance: none; -webkit-appearance: none; }
 
     .toggle { position: relative; display: inline-block; width: 48px; height: 26px; flex-shrink: 0; }
@@ -228,7 +234,7 @@
       box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.3), 0 2px 8px rgba(0, 0, 0, 0.4);
     }
     .slider-val {
-      font-size: 0.8rem; color: #a1a1aa; width: 40px; text-align: right;
+      font-size: 0.8rem; color: var(--text-muted); width: 40px; text-align: right;
       flex-shrink: 0; font-variant-numeric: tabular-nums;
     }
 
@@ -268,7 +274,7 @@
     }
     .filter-chip:hover { background: rgba(255, 255, 255, 0.04); border-color: rgba(255, 255, 255, 0.08); }
     .filter-chip label {
-      font-size: 0.65rem; color: #a1a1aa;
+      font-size: 0.65rem; color: var(--text-muted);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       max-width: 100%; text-align: center;
     }
@@ -298,7 +304,7 @@
     .thresh-red { background: #ef4444; }
     .thresh-labels {
       display: flex; justify-content: space-between;
-      font-size: 0.65rem; color: #71717a; margin-bottom: 12px;
+      font-size: 0.65rem; color: var(--text-hint); margin-bottom: 12px;
     }
     .thresh-edit-row { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
     .thresh-edit-row:last-child { margin-bottom: 0; }
@@ -406,12 +412,12 @@
       transition: border-color 0.2s;
     }
     .fw-item:hover { border-color: rgba(255, 255, 255, 0.1); }
-    .fw-label { font-size: 0.65rem; color: #71717a; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+    .fw-label { font-size: 0.65rem; color: var(--text-hint); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
     .fw-value { font-size: 0.85rem; font-weight: 600; word-break: break-all; }
     .ota-label {
       flex: 1; min-width: 200px; text-align: center;
       background: rgba(0, 0, 0, 0.2); border: 1px dashed rgba(255, 255, 255, 0.1);
-      color: #71717a; padding: 14px 20px; border-radius: 10px; cursor: pointer;
+      color: var(--text-hint); padding: 14px 20px; border-radius: 10px; cursor: pointer;
       font-size: 0.85rem; transition: all 0.2s;
     }
     .ota-label:hover { border-color: rgba(var(--accent-rgb), 0.4); color: #f4f4f5; }
@@ -479,10 +485,49 @@
     @media (max-width: 768px) {
       .top-nav .tabs, .top-nav .github-link { display: none; }
       .bottom-nav { display: block; }
-      .content { padding: 16px 16px calc(68px + 64px + 16px); }
-      .save-bar { bottom: 68px; }
-      .toast { top: auto; bottom: calc(68px + 64px + 16px); right: 16px; }
+      .content { padding: 16px 16px calc(var(--bottom-nav-height) + var(--save-bar-height) + env(safe-area-inset-bottom, 0px) + 16px); }
+      .save-bar { bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom, 0px)); }
+      .toast { top: auto; bottom: calc(var(--bottom-nav-height) + var(--save-bar-height) + env(safe-area-inset-bottom, 0px) + 16px); right: 16px; }
       .row.stack-mobile { flex-direction: column; }
+
+      /* Card titles */
+      .card-title { font-size: 0.9rem; }
+      /* Field labels */
+      .field-label { font-size: 1rem; }
+      /* Field hints */
+      .field-hint { font-size: 0.88rem; }
+      /* Input fields */
+      .input { font-size: 1rem; }
+      /* Toggle labels */
+      .toggle-row .toggle-label { font-size: 1rem; }
+      /* Buttons */
+      .btn { font-size: 1rem; }
+      /* Slider value display */
+      .slider-val { font-size: 0.95rem; }
+      /* Filter chip labels */
+      .filter-chip label { font-size: 0.82rem; }
+      /* Threshold labels */
+      .thresh-labels { font-size: 0.82rem; }
+      .thresh-edit-row .thresh-label-sm { font-size: 0.88rem; }
+      .threshold-section-title { font-size: 0.9rem; }
+      /* Page nav pills */
+      .pn-pill-visual { font-size: 0.95rem; }
+      .pn-section-label { font-size: 0.88rem; }
+      /* Firmware grid */
+      .fw-label { font-size: 0.82rem; }
+      .fw-value { font-size: 1rem; }
+      /* Progress text */
+      .progress-status { font-size: 0.95rem; }
+      /* Save bar hint */
+      .save-bar .changes-hint { font-size: 0.95rem; }
+      /* WiFi scan text */
+      .wifi-scan-ssid { font-size: 0.95rem; }
+      .wifi-scan-meta { font-size: 0.82rem; }
+      .wifi-scan-select { font-size: 0.82rem; }
+      .wifi-scan-title { font-size: 0.95rem; }
+      .wifi-scan-status { font-size: 0.88rem; }
+      .wifi-scan-footer { font-size: 0.82rem; }
+      .wifi-scan-badge { font-size: 0.78rem; }
     }
 
     /* === WIFI SCAN PANEL === */
@@ -1258,7 +1303,7 @@
           <div class="field" style="margin-top:16px">
             <label class="field-label">Client ID</label>
             <input type="text" class="input" id="spotifyClientId" placeholder="e.g. a1b2c3d4e5f6...">
-            <div class="field-hint">From your app at <a href="https://developer.spotify.com" target="_blank" rel="noopener" style="color:#71717a">developer.spotify.com</a></div>
+            <div class="field-hint">From your app at <a href="https://developer.spotify.com" target="_blank" rel="noopener" style="color:var(--text-hint)">developer.spotify.com</a></div>
           </div>
           <div class="field">
             <label class="field-label">Poll Interval (ms)</label>
@@ -1295,7 +1340,7 @@
         <div class="card-title">Account</div>
         <div class="field">
           <label class="field-label">Status</label>
-          <div id="spotifyStatus" style="font-size:0.875rem;color:#71717a;margin-bottom:12px">Checking...</div>
+          <div id="spotifyStatus" style="font-size:0.875rem;color:var(--text-hint);margin-bottom:12px">Checking...</div>
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <button class="btn btn-primary" id="spotifyLoginBtn" onclick="spotifyLogin()" style="flex:1;min-width:120px">Login with Spotify</button>
@@ -1358,7 +1403,7 @@
           <div id="restoreChanges" style="margin-bottom:12px"></div>
 
           <!-- No Changes -->
-          <div id="restoreNoChanges" style="font-size:0.82rem;color:#71717a;margin-bottom:12px"></div>
+          <div id="restoreNoChanges" style="font-size:0.82rem;color:var(--text-hint);margin-bottom:12px"></div>
 
           <!-- Missing Fields Notice -->
           <div id="restoreMissing" style="display:none;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.15);border-radius:10px;padding:12px 16px;margin-bottom:12px;font-size:0.8rem;color:#d4d4d8"></div>
@@ -1367,7 +1412,7 @@
           <div id="restoreUnknown" style="display:none;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.15);border-radius:10px;padding:12px 16px;margin-bottom:12px;font-size:0.8rem;color:#d4d4d8"></div>
 
           <!-- Sensitive Excluded Notice -->
-          <div id="restoreSensitive" style="display:none;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:12px 16px;margin-bottom:12px;font-size:0.8rem;color:#71717a"></div>
+          <div id="restoreSensitive" style="display:none;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:12px 16px;margin-bottom:12px;font-size:0.8rem;color:var(--text-hint)"></div>
 
           <!-- Validation Notes -->
           <div id="restoreValidation" style="display:none;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.15);border-radius:10px;padding:12px 16px;margin-bottom:12px;font-size:0.8rem;color:#d4d4d8"></div>
@@ -1442,17 +1487,17 @@
             '<span>0.0</span><span>'+defGood+' (Good)</span><span>'+defOk+' (Warn)</span><span>Bad</span>'+
           '</div>'+
           '<div class="thresh-edit-row">'+
-            '<div class="thresh-label-sm">Good<br><span style="font-size:0.6rem;color:#71717a">&lt; value</span></div>'+
+            '<div class="thresh-label-sm">Good<br><span style="font-size:0.6rem;color:var(--text-hint)">&lt; value</span></div>'+
             '<input type="text" class="input" id="'+pfx+'_good_max_'+n+'" placeholder="'+defGood+'" oninput="updateThresholdBar(\''+pfx+'\','+n+')">'+
             '<input type="color" class="thresh-dot" id="'+pfx+'_good_color_'+n+'" value="#10b981">'+
           '</div>'+
           '<div class="thresh-edit-row">'+
-            '<div class="thresh-label-sm">Warn<br><span style="font-size:0.6rem;color:#71717a">&lt; value</span></div>'+
+            '<div class="thresh-label-sm">Warn<br><span style="font-size:0.6rem;color:var(--text-hint)">&lt; value</span></div>'+
             '<input type="text" class="input" id="'+pfx+'_ok_max_'+n+'" placeholder="'+defOk+'" oninput="updateThresholdBar(\''+pfx+'\','+n+')">'+
             '<input type="color" class="thresh-dot" id="'+pfx+'_ok_color_'+n+'" value="#eab308">'+
           '</div>'+
           '<div class="thresh-edit-row">'+
-            '<div class="thresh-label-sm">Bad<br><span style="font-size:0.6rem;color:#71717a">&ge; above</span></div>'+
+            '<div class="thresh-label-sm">Bad<br><span style="font-size:0.6rem;color:var(--text-hint)">&ge; above</span></div>'+
             '<input type="color" class="thresh-dot" id="'+pfx+'_bad_color_'+n+'" value="#ef4444">'+
           '</div></div>';
       }
@@ -1593,13 +1638,13 @@
     /* === Tab Accent Colors === */
     const tabAccents={
       display: {color:'#14b8a6', rgb:'20, 184, 166'},
-      nodes:   {color:'#10b981', rgb:'16, 185, 129'},
-      behavior:{color:'#8b5cf6', rgb:'139, 92, 246'},
-      system:  {color:'#f43f5e', rgb:'244, 63, 94'},
-      allsky:  {color:'#3b82f6', rgb:'59, 130, 246'},
+      nodes:   {color:'#34d399', rgb:'52, 211, 153'},
+      behavior:{color:'#a78bfa', rgb:'167, 139, 250'},
+      system:  {color:'#fb7185', rgb:'251, 113, 133'},
+      allsky:  {color:'#60a5fa', rgb:'96, 165, 250'},
       clock:   {color:'#e8e2d4', rgb:'232, 226, 212'},
-      spotify: {color:'#1db954', rgb:'29, 185, 84'},
-      backup:  {color:'#f59e0b', rgb:'245, 158, 11'}
+      spotify: {color:'#4ade80', rgb:'74, 222, 128'},
+      backup:  {color:'#fbbf24', rgb:'251, 191, 36'}
     };
 
     function setAccent(name){
@@ -2858,14 +2903,14 @@
             if(logoutBtn) logoutBtn.style.display='';
           } else {
             el.textContent='Not connected';
-            el.style.color='#71717a';
+            el.style.color='var(--text-hint)';
             if(loginBtn) loginBtn.style.display='';
             if(logoutBtn) logoutBtn.style.display='none';
           }
         })
         .catch(function(){
           var el=$('spotifyStatus');
-          if(el){el.textContent='Unable to check status';el.style.color='#71717a';}
+          if(el){el.textContent='Unable to check status';el.style.color='var(--text-hint)';}
         });
     }
 
@@ -2961,7 +3006,7 @@
             var wrap=document.createElement('div');
             wrap.style.cssText='flex:1;min-width:100px';
             var inpLabel=document.createElement('div');
-            inpLabel.style.cssText='font-size:0.6rem;color:#71717a;margin-bottom:3px;text-transform:uppercase;letter-spacing:0.05em';
+            inpLabel.style.cssText='font-size:0.6rem;color:var(--text-hint);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.05em';
             inpLabel.textContent=inp==='key'?'JSON Key Path':inp==='on_value'?'On Value':inp.charAt(0).toUpperCase()+inp.slice(1);
             var input=document.createElement('input');
             input.type='text';
@@ -3019,7 +3064,7 @@
               var w=document.createElement('div');
               w.style.cssText='flex:0 0 auto;min-width:50px;max-width:60px';
               var l=document.createElement('div');
-              l.style.cssText='font-size:0.55rem;color:#71717a;margin-bottom:3px;text-transform:uppercase;letter-spacing:0.05em';
+              l.style.cssText='font-size:0.55rem;color:var(--text-hint);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.05em';
               l.textContent=lbl;
               var inp=document.createElement('input');
               inp.type='number';inp.className='input';inp.id=id;inp.step='0.1';
