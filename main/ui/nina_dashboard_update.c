@@ -256,8 +256,8 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
     time_t now = time(NULL);
     p->cached_is_exposing = d->is_exposing;
 
-    if (d->exposure_total > 0 && d->exposure_end_epoch > 0) {
-        // We have valid exposure data from the API
+    if (d->exposure_total > 0 && d->exposure_end_epoch > 0 && d->is_exposing) {
+        // Camera is actively exposing
         p->gap_start_epoch = 0;  // Clear any gap timer
 
         // Show total exposure duration inside the arc
@@ -362,12 +362,16 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
 
         if (p->cached_end_epoch > 0 && p->cached_total > 0) {
             // Was recently exposing — hold arc position during gap
+            bool camera_idle = (strcmp(d->status, "Idle") == 0
+                             || strcmp(d->status, "NoState") == 0
+                             || strcmp(d->status, "OFFLINE") == 0);
+
             if (p->gap_start_epoch == 0) {
                 p->gap_start_epoch = (int64_t)now;
             }
 
             int64_t gap_duration = (int64_t)now - p->gap_start_epoch;
-            if (gap_duration > ARC_GAP_GRACE_S) {
+            if (camera_idle || gap_duration > ARC_GAP_GRACE_S) {
                 // Grace period expired — transition to idle
                 p->cached_end_epoch = 0;
                 p->cached_total = 0;
