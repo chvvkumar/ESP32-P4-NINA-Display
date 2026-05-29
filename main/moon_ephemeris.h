@@ -10,6 +10,7 @@ extern "C" {
 
 typedef struct {
     float       illum;        /* illuminated fraction 0..1 */
+    float       cycle;        /* synodic cycle fraction 0..1 (0=new, 0.5=full) */
     bool        waxing;       /* true = waxing (Moon east of Sun) */
     uint8_t     phase_index;  /* 0..7: New, WaxCres, FirstQ, WaxGib, Full, WanGib, LastQ, WanCres */
     const char *phase_name;   /* human-readable phase name */
@@ -24,6 +25,11 @@ typedef struct {
  * lat/lon in degrees. If lat==0 && lon==0 they are treated as unset and a
  * north-up convention orientation is returned (have_location=false). */
 void moon_compute(time_t utc, double lat, double lon, moon_state_t *out);
+
+/* Build a moon_state_t from a synodic cycle fraction (0=new, 0.5=full) and a
+ * supplied orientation, without any ephemeris computation. Used for animating
+ * through the moon cycle. */
+void moon_state_from_cycle(double cycle, float orient_rad, moon_state_t *out);
 
 #ifdef __cplusplus
 }

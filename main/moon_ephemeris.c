@@ -14,6 +14,18 @@ static const char *PHASE_NAMES[8] = {
 
 static double rev(double x){ x = fmod(x, 360.0); return x < 0 ? x + 360.0 : x; }
 
+static uint8_t phase_index_from_cycle(double cyc)
+{
+    if      (cyc < 0.0335 || cyc >= 0.9665) return 0;
+    else if (cyc < 0.2165) return 1;
+    else if (cyc < 0.2835) return 2;
+    else if (cyc < 0.4665) return 3;
+    else if (cyc < 0.5335) return 4;
+    else if (cyc < 0.7165) return 5;
+    else if (cyc < 0.7835) return 6;
+    else                   return 7;
+}
+
 void moon_compute(time_t utc, double lat, double lon, moon_state_t *out)
 {
     out->have_location = !(lat == 0.0 && lon == 0.0);
@@ -111,15 +123,8 @@ void moon_compute(time_t utc, double lat, double lon, moon_state_t *out)
 
     /* Phase index from elongation fraction of the synodic cycle. */
     double cyc = dlon / 360.0;  /* 0=new .. 0.5=full .. 1=new */
-    uint8_t pi;
-    if      (cyc < 0.0335 || cyc >= 0.9665) pi = 0;
-    else if (cyc < 0.2165) pi = 1;
-    else if (cyc < 0.2835) pi = 2;
-    else if (cyc < 0.4665) pi = 3;
-    else if (cyc < 0.5335) pi = 4;
-    else if (cyc < 0.7165) pi = 5;
-    else if (cyc < 0.7835) pi = 6;
-    else                   pi = 7;
+    out->cycle = (float)cyc;
+    uint8_t pi = phase_index_from_cycle(cyc);
     out->phase_index = pi;
     out->phase_name  = PHASE_NAMES[pi];
 
@@ -151,4 +156,21 @@ void moon_compute(time_t utc, double lat, double lon, moon_state_t *out)
      * renderer's rotation: rotate the north-up disc by (chi - q - 90deg). */
     double zenith_pa = chi - q;                     /* radians, from zenith, eastward */
     out->orient_rad = (float)(zenith_pa - M_PI/2.0);
+}
+
+void moon_state_from_cycle(double cycle, float orient_rad, moon_state_t *out)
+{
+    cycle = fmod(cycle, 1.0);
+    if (cycle < 0.0) cycle += 1.0;
+    double k = (1.0 - cos(2.0 * M_PI * cycle)) / 2.0;
+    if (k < 0.0) k = 0.0;
+    if (k > 1.0) k = 1.0;
+    out->illum         = (float)k;
+    out->waxing        = (cycle < 0.5);
+    out->cycle         = (float)cycle;
+    uint8_t pi         = phase_index_from_cycle(cycle);
+    out->phase_index   = pi;
+    out->phase_name    = PHASE_NAMES[pi];
+    out->orient_rad    = orient_rad;
+    out->have_location = true;
 }

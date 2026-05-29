@@ -15,10 +15,19 @@
 #include "nina_dashboard_internal.h"
 #include "app_config.h"
 #include "display_defs.h"
+#include "tasks.h"          /* goes_task_handle, moon_anim_request */
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include <stdatomic.h>      /* atomic_store */
 #include <string.h>
 #include <time.h>
+
+/* moon_anim_request is owned by another task and normally declared in tasks.h.
+ * Provide a guarded fallback extern in case that declaration is not yet present
+ * so this translation unit still compiles. */
+#ifndef MOON_ANIM_REQUEST_DECLARED
+extern _Atomic bool moon_anim_request;
+#endif
 
 static const char *TAG = "image_display";
 
@@ -110,6 +119,15 @@ static void crossfade_done_cb(lv_anim_t *a)
     crossfade_active = false;
 }
 
+static void moon_tap_cb(lv_event_t *e)
+{
+    (void)e;
+    /* Only the Moon source animates; ignore taps on the GOES image. */
+    if (app_config_get()->image_display_source != 1) return;
+    atomic_store(&moon_anim_request, true);
+    if (goes_task_handle) xTaskNotifyGive(goes_task_handle);
+}
+
 lv_obj_t *nina_image_display_create(lv_obj_t *parent)
 {
     page_container = lv_obj_create(parent);
@@ -122,6 +140,12 @@ lv_obj_t *nina_image_display_create(lv_obj_t *parent)
     lv_obj_set_style_bg_color(page_container, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(page_container, LV_OPA_COVER, 0);
     lv_obj_clear_flag(page_container, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* Tap (short click) on the page triggers the moon-cycle animation. Use
+     * SHORT_CLICKED (not CLICKED) so it does not fire on the swipe gesture used
+     * for page navigation. The handler is a no-op when the source is not Moon. */
+    lv_obj_add_flag(page_container, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(page_container, moon_tap_cb, LV_EVENT_SHORT_CLICKED, NULL);
 
     init_image_dsc(&img_dsc_a);
     init_image_dsc(&img_dsc_b);
