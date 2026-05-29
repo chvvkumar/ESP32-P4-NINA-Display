@@ -206,11 +206,13 @@ void nina_image_display_update(goes_data_t *data)
         goes_data_unlock(data);
         return;
     }
-    /* The software JPEG decoder feeding this page produces a vertically
-     * flipped buffer relative to the hardware decode path (Spotify art / NINA
-     * thumbnails), which render correctly. Copy it row-reversed (mirror
-     * top<->bottom, columns unchanged) so it renders upright. A full end-to-end
-     * reversal would also mirror left<->right, so flip rows only. */
+    /* The software JPEG decoder feeding this page produces a vertically flipped
+     * buffer (top<->bottom) relative to the hardware decode path used by
+     * Spotify art / NINA thumbnails, which render correctly. Confirmed via the
+     * device /api/screenshot (logical, rotation-independent): without this the
+     * caption/logo render at the top. Copy row-reversed so the logical buffer
+     * is upright and matches the hardware convention; the panel rotation then
+     * handles physical orientation uniformly, as it does for the other pages. */
     {
         size_t row_bytes = (size_t)w * 2;
         for (uint32_t y = 0; y < h; y++) {
