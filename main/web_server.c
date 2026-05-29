@@ -244,6 +244,8 @@ void start_web_server(void)
         { "/api/spotify/logout",         HTTP_POST, spotify_logout_post_handler, NULL },
         { "/api/spotify/status",         HTTP_GET,  spotify_status_get_handler, NULL },
         { "/api/spotify/control",        HTTP_POST, spotify_control_post_handler, NULL },
+        { "/api/image-display-config",   HTTP_GET,  image_display_config_get_handler, NULL },
+        { "/api/image-display-config",   HTTP_POST, image_display_config_post_handler, NULL },
         { "/api/config/backup",          HTTP_GET,  backup_get_handler,   NULL },
         { "/api/config/restore",         HTTP_POST, restore_post_handler, NULL },
         { "/api/status",                 HTTP_GET,  status_get_handler, NULL },

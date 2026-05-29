@@ -106,6 +106,19 @@ bool nina_dashboard_is_spotify_page(void);
 void nina_dashboard_set_spotify_enabled(bool enabled);
 
 /**
+ * @brief Check if the active page is the Image Display page
+ * @return true if the Image Display page is currently shown
+ */
+bool nina_dashboard_is_image_display_page(void);
+
+/**
+ * @brief Enable or disable the Image Display page at runtime.
+ * When disabled, switches away if currently viewing and removes from navigation.
+ * Must be called with LVGL display lock held.
+ */
+void nina_dashboard_set_image_display_enabled(bool enabled);
+
+/**
  * @brief Check if the active page is the clock page
  * @return true if the clock page is currently shown
  */

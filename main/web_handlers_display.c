@@ -6,6 +6,7 @@
 #include "bsp/display.h"
 #include "display_defs.h"
 #include "ui/nina_dashboard.h"
+#include "ui/nina_image_display.h"
 #include "ui/nina_spotify.h"
 #include "ui/themes.h"
 #include "lvgl.h"
@@ -71,6 +72,20 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
             allsky_page_refresh_config();
             nina_dashboard_set_allsky_enabled(new_cfg->allsky_enabled);
             bsp_display_unlock();
+        }
+    }
+    /* Image Display (GOES) enable/overlay/region/interval change */
+    if (new_cfg->image_display_enabled != old_cfg->image_display_enabled ||
+        new_cfg->image_display_show_overlay != old_cfg->image_display_show_overlay ||
+        strcmp(new_cfg->goes_region, old_cfg->goes_region) != 0 ||
+        new_cfg->goes_update_interval_s != old_cfg->goes_update_interval_s) {
+        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+            nina_dashboard_set_image_display_enabled(new_cfg->image_display_enabled);
+            nina_image_display_set_overlay_visible(new_cfg->image_display_show_overlay);
+            bsp_display_unlock();
+        }
+        if (new_cfg->image_display_enabled) {
+            goes_ensure_task_running();
         }
     }
     /* Weather config change — invalidate stale data and force refresh */

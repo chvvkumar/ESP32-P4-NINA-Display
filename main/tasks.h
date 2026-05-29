@@ -5,6 +5,7 @@
 #include "freertos/event_groups.h"
 #include "nina_client.h"
 #include "app_config.h"
+#include "goes_client.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdatomic.h>
@@ -67,6 +68,11 @@ extern _Atomic bool allsky_page_active;
 extern _Atomic bool clock_page_active;
 extern _Atomic bool nina_pages_active;
 
+/** GOES / Image Display poll task handle, page-active flag, and shared data. */
+extern TaskHandle_t goes_task_handle;
+extern _Atomic bool image_display_page_active;
+extern goes_data_t goes_data;
+
 /** Weather poll task — spawned by weather_client_start() when location is configured. */
 /* (Task handle is internal to weather_client.c; no extern needed here.) */
 
@@ -75,6 +81,12 @@ void spotify_poll_task(void *arg);
 
 /** Create the Spotify poll task if it isn't already running. Safe to call multiple times. */
 void spotify_ensure_task_running(void);
+
+/** FreeRTOS task: GOES Image Display poller — fetches satellite imagery at goes_update_interval_s rate. */
+void goes_poll_task(void *arg);
+
+/** Create the GOES poll task if it isn't already running. Safe to call multiple times. */
+void goes_ensure_task_running(void);
 
 /** FreeRTOS task: UI coordinator — reads cached data, updates LVGL, handles auto-rotate. */
 void data_update_task(void *arg);

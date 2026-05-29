@@ -111,7 +111,7 @@ docs/
 plans/
 
 # Generated tool output
-repomix-output.xml
+repomix-output.*
 
 # Python cache (if using Python scripts)
 __pycache__/
