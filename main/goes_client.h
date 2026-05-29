@@ -12,6 +12,7 @@ typedef struct {
     uint8_t          *image_buf;
     uint16_t          image_w;
     uint16_t          image_h;
+    bool              vflip;        /* true: buffer is vertically flipped (sw JPEG) */
     SemaphoreHandle_t mutex;
 } goes_data_t;
 

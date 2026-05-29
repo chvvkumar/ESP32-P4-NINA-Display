@@ -11,6 +11,9 @@
 #include "nina_connection.h"
 #include "allsky_client.h"
 #include "goes_client.h"
+#include "moon_render.h"
+#include "moon_ephemeris.h"
+#include <math.h>           /* acos() for seamless anim start cycle */
 #include "spotify_auth.h"
 #include "spotify_client.h"
 #include "app_config.h"
@@ -542,12 +545,27 @@ void allsky_poll_task(void *arg) {
 // GOES Image Display Poll Task — independent poller pinned to Core 0
 // =============================================================================
 
+/* Last-computed moon state, written only by goes_poll_task (single writer) and
+ * read by moon_caption() from the UI task. The fields are slow-changing and the
+ * read is benign (pointer + float), so a lock is intentionally omitted. */
+static moon_state_t s_moon_state;
+
+/* One-shot tap-animation request. Set by the moon-page tap handler (UI/Core 1),
+ * consumed once by goes_poll_task via atomic_exchange. Declared extern in tasks.h. */
+_Atomic bool moon_anim_request = false;
+
+/* Provide the caption text for the Image Display page when the Moon source is
+ * active. Declared (extern) in nina_image_display.c. */
+void moon_caption(char *name_out, size_t name_sz, char *pct_out, size_t pct_sz)
+{
+    /* Lock-free read is acceptable here (slow-changing, single writer). */
+    snprintf(name_out, name_sz, "%s", s_moon_state.phase_name ? s_moon_state.phase_name : "Moon");
+    snprintf(pct_out, pct_sz, "%d%%", (int)(s_moon_state.illum * 100.0f + 0.5f));
+}
+
 void goes_poll_task(void *arg)
 {
     ESP_LOGI(TAG, "GOES poll task started");
-
-    // Wait for WiFi before attempting any HTTP requests
-    xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
 
     while (1) {
         /* Suspend during OTA or when the Image Display page is not visible */
@@ -558,6 +576,111 @@ void goes_poll_task(void *arg)
         /* Read fields directly from config pointer — avoids copying the full
          * app_config_t onto this task's small stack. */
         const app_config_t *cfg = app_config_get();
+
+        /* Moon source: render locally on-device, no network. The result is
+         * pushed into the same goes_data RGB565 sink the crossfade page reads. */
+        if (cfg->image_display_source == 1) {
+            time_t now; time(&now);
+            /* The moon phase/orientation needs a correct wall clock. Before SNTP
+             * sets the time (near-epoch at boot), rendering would show the wrong
+             * phase, e.g. a half-lit disc, until the next recompute. Skip the
+             * render until the clock is valid and retry quickly so the correct
+             * moon appears as soon as time syncs; then settle to ~60s. */
+            bool time_valid = (now > (time_t)1577836800);  /* >= 2020-01-01 UTC */
+            if (time_valid && moon_render_init()) {
+                double lat = cfg->moon_lat, lon = cfg->moon_lon;
+                if (lat == 0.0 && lon == 0.0) { lat = cfg->weather_lat; lon = cfg->weather_lon; }
+                moon_state_t live;
+                moon_compute(now, lat, lon, &live);
+
+                /* One-shot tap animation: ~4s eased sweep through a full synodic
+                 * cycle plus a full bright-limb spin, rendered at reduced size for
+                 * smoothness. Consume the request atomically so a single tap fires
+                 * once. Both phase and orientation are periodic over the sweep, so
+                 * t=1 lands back on the live values with no visible jump. */
+                if (atomic_exchange(&moon_anim_request, false)) {
+                    const int     ASZ    = 300;        /* reduced anim resolution   */
+                    const int64_t DUR_US = 4000000;    /* ~4s total sweep           */
+                    /* Start the sweep from the cycle fraction that reproduces the
+                     * live illumination exactly. moon_state_from_cycle() uses the
+                     * mean (1-cos)/2 mapping while moon_compute() uses the true
+                     * phase angle, so seeding from live.cycle would pop a few %
+                     * at the start/end. Inverting live.illum makes frame t=0 and
+                     * t=1 match the accurate resting frame — seamless both ends. */
+                    double illum_arg = 1.0 - 2.0 * (double)live.illum;
+                    if (illum_arg < -1.0) illum_arg = -1.0;
+                    if (illum_arg >  1.0) illum_arg =  1.0;
+                    double half = acos(illum_arg) / 6.283185307179586;   /* [0,0.5] */
+                    double start_cycle  = live.waxing ? half : (1.0 - half);
+                    float  start_orient = live.orient_rad;
+                    int64_t t0 = esp_timer_get_time();
+                    for (;;) {
+                        /* Abort cleanly if the page is hidden or the source changed. */
+                        if (!image_display_page_active || cfg->image_display_source != 1) break;
+                        int64_t el = esp_timer_get_time() - t0;
+                        if (el >= DUR_US) break;
+                        float tt = (float)el / (float)DUR_US;        /* 0..1            */
+                        float te = tt * tt * (3.0f - 2.0f * tt);     /* smoothstep ease */
+                        moon_state_t anim;
+                        moon_state_from_cycle(start_cycle + (double)te,
+                                              start_orient + 6.2831853f * te, &anim);
+                        uint16_t *aimg = moon_render(ASZ, ASZ, &anim, cfg->moon_bg_style);
+                        if (aimg) {
+                            if (goes_data_lock(&goes_data, 1000)) {
+                                if (goes_data.image_buf) heap_caps_free(goes_data.image_buf);
+                                goes_data.image_buf = (uint8_t *)aimg;
+                                goes_data.image_w = ASZ;
+                                goes_data.image_h = ASZ;
+                                goes_data.vflip = false;
+                                goes_data.connected = true;
+                                goes_data.last_poll_ms = esp_timer_get_time() / 1000;
+                                goes_data_unlock(&goes_data);
+                                /* Push the frame using the same locked-update idiom
+                                 * as data_update_task; render happened unlocked. */
+                                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                                    nina_image_display_update(&goes_data);
+                                    bsp_display_unlock();
+                                }
+                            } else {
+                                heap_caps_free(aimg);
+                            }
+                        }
+                        /* Pace ~30fps and yield to the Core 0 idle task (watchdog). */
+                        vTaskDelay(pdMS_TO_TICKS(5));
+                    }
+                    /* Resync to the live current phase after the sweep. */
+                    time(&now);
+                    moon_compute(now, lat, lon, &live);
+                }
+
+                /* Normal full-res render of the live current phase. Runs whether or
+                 * not an animation played; the caption reads the resting state. */
+                s_moon_state = live;
+                const int MOON_SZ = 600;
+                uint16_t *img = moon_render(MOON_SZ, MOON_SZ, &live, cfg->moon_bg_style);
+                if (img) {
+                    if (goes_data_lock(&goes_data, 1000)) {
+                        if (goes_data.image_buf) heap_caps_free(goes_data.image_buf);
+                        goes_data.image_buf = (uint8_t *)img;
+                        goes_data.image_w = MOON_SZ;
+                        goes_data.image_h = MOON_SZ;
+                        goes_data.vflip = false;
+                        goes_data.connected = true;
+                        goes_data.last_poll_ms = esp_timer_get_time() / 1000;
+                        goes_data_unlock(&goes_data);
+                    } else {
+                        heap_caps_free(img);
+                    }
+                }
+            }
+            /* Recompute ~every 60s once time is valid so orientation tracks the
+             * sky; poll every ~3s while waiting for the clock to sync. */
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(time_valid ? 60000 : 3000));
+            continue;
+        }
+
+        /* GOES needs network — wait for WiFi before attempting any HTTP requests. */
+        xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
 
         /* Only poll when a region is configured */
         if (cfg->goes_region[0] != '\0') {
@@ -1566,6 +1689,7 @@ main_loop:
                     bsp_display_unlock();
                 }
                 goes_client_cleanup(&goes_data);
+                moon_render_deinit();   /* release the cached moon texture */
                 ESP_LOGI(TAG, "Left Image Display: freed buffers");
             }
             prev_on_image_display = on_image_display;

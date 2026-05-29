@@ -26,6 +26,10 @@ esp_err_t image_display_config_get_handler(httpd_req_t *req)
     cJSON_AddBoolToObject(root, "image_display_show_overlay", cfg->image_display_show_overlay);
     cJSON_AddStringToObject(root, "goes_region", cfg->goes_region);
     cJSON_AddNumberToObject(root, "goes_update_interval_s", cfg->goes_update_interval_s);
+    cJSON_AddNumberToObject(root, "image_display_source", cfg->image_display_source);
+    cJSON_AddNumberToObject(root, "moon_bg_style", cfg->moon_bg_style);
+    cJSON_AddNumberToObject(root, "moon_lat", cfg->moon_lat);
+    cJSON_AddNumberToObject(root, "moon_lon", cfg->moon_lon);
 
     const char *json_str = cJSON_PrintUnformatted(root);
     if (json_str == NULL) {
@@ -78,6 +82,15 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
         if (v > 7200) v = 7200;
         cfg->goes_update_interval_s = (uint16_t)v;
     }
+
+    cJSON *src = cJSON_GetObjectItem(root, "image_display_source");
+    if (cJSON_IsNumber(src)) cfg->image_display_source = (src->valueint == 1) ? 1 : 0;
+    cJSON *bg = cJSON_GetObjectItem(root, "moon_bg_style");
+    if (cJSON_IsNumber(bg)) { int v = bg->valueint; cfg->moon_bg_style = (v >= 0 && v <= 3) ? (uint8_t)v : 0; }
+    cJSON *mlat = cJSON_GetObjectItem(root, "moon_lat");
+    if (cJSON_IsNumber(mlat)) cfg->moon_lat = (float)mlat->valuedouble;
+    cJSON *mlon = cJSON_GetObjectItem(root, "moon_lon");
+    if (cJSON_IsNumber(mlon)) cfg->moon_lon = (float)mlon->valuedouble;
 
     cJSON_Delete(root);
 

@@ -73,6 +73,10 @@ extern TaskHandle_t goes_task_handle;
 extern _Atomic bool image_display_page_active;
 extern goes_data_t goes_data;
 
+/** Set by the moon-page tap handler to request a one-shot cycle+spin animation.
+ *  Consumed (cleared) once by goes_poll_task via atomic_exchange. */
+extern _Atomic bool moon_anim_request;
+
 /** Weather poll task — spawned by weather_client_start() when location is configured. */
 /* (Task handle is internal to weather_client.c; no extern needed here.) */
 
