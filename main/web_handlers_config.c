@@ -129,6 +129,10 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
     cJSON_AddBoolToObject(obj, "image_display_show_overlay", cfg->image_display_show_overlay);
     cJSON_AddStringToObject(obj, "goes_region", cfg->goes_region);
     cJSON_AddNumberToObject(obj, "goes_update_interval_s", cfg->goes_update_interval_s);
+    cJSON_AddNumberToObject(obj, "image_display_source", cfg->image_display_source);
+    cJSON_AddNumberToObject(obj, "moon_bg_style", cfg->moon_bg_style);
+    cJSON_AddNumberToObject(obj, "moon_lat", (double)cfg->moon_lat);
+    cJSON_AddNumberToObject(obj, "moon_lon", (double)cfg->moon_lon);
     cJSON_AddNumberToObject(obj, "toast_aggregation_window_s", cfg->toast_aggregation_window_s);
     cJSON_AddNumberToObject(obj, "toast_notify_mask", cfg->toast_notify_mask);
     cJSON_AddBoolToObject(obj, "toast_instance_muted_1", cfg->toast_instance_muted[0]);
@@ -305,6 +309,10 @@ static const backup_field_t s_backup_fields[] = {
     {"image_display_show_overlay", "Show Overlay",         "Image Display", false, false},
     {"goes_region",                "GOES Region",          "Image Display", false, false},
     {"goes_update_interval_s",     "GOES Update Interval", "Image Display", false, false},
+    {"image_display_source",       "Image Source",         "Image Display", false, false},
+    {"moon_bg_style",              "Moon Background Style", "Image Display", false, false},
+    {"moon_lat",                   "Moon Latitude",        "Image Display", false, false},
+    {"moon_lon",                   "Moon Longitude",       "Image Display", false, false},
 
     /* MQTT (non-sensitive) */
     {"mqtt_enabled",       "MQTT Enabled",       "MQTT", false, false},
@@ -853,6 +861,14 @@ static app_config_t *parse_config_from_json(cJSON *root)
         if (v > 7200) v = 7200;
         cfg->goes_update_interval_s = (uint16_t)v;
     }
+
+    JSON_TO_INT(root, "image_display_source", cfg->image_display_source);
+    JSON_TO_INT(root, "moon_bg_style",        cfg->moon_bg_style);
+
+    cJSON *jmoonlat = cJSON_GetObjectItem(root, "moon_lat");
+    if (jmoonlat && cJSON_IsNumber(jmoonlat)) cfg->moon_lat = (float)jmoonlat->valuedouble;
+    cJSON *jmoonlon = cJSON_GetObjectItem(root, "moon_lon");
+    if (jmoonlon && cJSON_IsNumber(jmoonlon)) cfg->moon_lon = (float)jmoonlon->valuedouble;
 
     cJSON *taw_item = cJSON_GetObjectItem(root, "toast_aggregation_window_s");
     if (cJSON_IsNumber(taw_item)) {

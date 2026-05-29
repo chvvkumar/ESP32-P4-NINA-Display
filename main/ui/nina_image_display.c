@@ -213,13 +213,15 @@ void nina_image_display_update(goes_data_t *data)
      * caption/logo render at the top. Copy row-reversed so the logical buffer
      * is upright and matches the hardware convention; the panel rotation then
      * handles physical orientation uniformly, as it does for the other pages. */
-    {
+    if (data->vflip) {
         size_t row_bytes = (size_t)w * 2;
         for (uint32_t y = 0; y < h; y++) {
             memcpy((uint8_t *)copy + (size_t)y * row_bytes,
                    data->image_buf + (size_t)(h - 1 - y) * row_bytes,
                    row_bytes);
         }
+    } else {
+        memcpy(copy, data->image_buf, buf_size);
     }
     int64_t poll_ms = data->last_poll_ms;
     goes_data_unlock(data);
@@ -279,15 +281,19 @@ void nina_image_display_update(goes_data_t *data)
     }
 
     const app_config_t *cfg = app_config_get();
-    lv_label_set_text(lbl_region, region_code_to_name(cfg->goes_region));
-
-    time_t now;
-    struct tm ti;
-    time(&now);
-    localtime_r(&now, &ti);
-    char ts[32];
-    strftime(ts, sizeof(ts), "Updated %H:%M", &ti);
-    lv_label_set_text(lbl_timestamp, ts);
+    if (cfg->image_display_source == 1) {           /* Moon */
+        extern void moon_caption(char *name_out, size_t name_sz,
+                                 char *pct_out, size_t pct_sz);
+        char name[24], pct[16];
+        moon_caption(name, sizeof(name), pct, sizeof(pct));
+        lv_label_set_text(lbl_region, name);
+        lv_label_set_text(lbl_timestamp, pct);
+    } else {                                         /* GOES */
+        lv_label_set_text(lbl_region, region_code_to_name(cfg->goes_region));
+        time_t now; struct tm ti; time(&now); localtime_r(&now, &ti);
+        char ts[32]; strftime(ts, sizeof(ts), "Updated %H:%M", &ti);
+        lv_label_set_text(lbl_timestamp, ts);
+    }
 }
 
 void nina_image_display_cleanup(void)

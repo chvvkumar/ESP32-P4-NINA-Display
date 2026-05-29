@@ -190,6 +190,7 @@ esp_err_t goes_client_poll(const char *region, goes_data_t *data)
         data->image_buf = rgb565;
         data->image_w = (uint16_t)out_w;
         data->image_h = (uint16_t)out_h;
+        data->vflip = true;
         data->connected = true;
         data->last_poll_ms = esp_timer_get_time() / 1000;
         goes_data_unlock(data);

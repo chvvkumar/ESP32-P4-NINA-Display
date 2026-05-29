@@ -11,6 +11,8 @@
 #include "nina_connection.h"
 #include "allsky_client.h"
 #include "goes_client.h"
+#include "moon_render.h"
+#include "moon_ephemeris.h"
 #include "spotify_auth.h"
 #include "spotify_client.h"
 #include "app_config.h"
@@ -542,12 +544,23 @@ void allsky_poll_task(void *arg) {
 // GOES Image Display Poll Task — independent poller pinned to Core 0
 // =============================================================================
 
+/* Last-computed moon state, written only by goes_poll_task (single writer) and
+ * read by moon_caption() from the UI task. The fields are slow-changing and the
+ * read is benign (pointer + float), so a lock is intentionally omitted. */
+static moon_state_t s_moon_state;
+
+/* Provide the caption text for the Image Display page when the Moon source is
+ * active. Declared (extern) in nina_image_display.c. */
+void moon_caption(char *name_out, size_t name_sz, char *pct_out, size_t pct_sz)
+{
+    /* Lock-free read is acceptable here (slow-changing, single writer). */
+    snprintf(name_out, name_sz, "%s", s_moon_state.phase_name ? s_moon_state.phase_name : "Moon");
+    snprintf(pct_out, pct_sz, "%d%%", (int)(s_moon_state.illum * 100.0f + 0.5f));
+}
+
 void goes_poll_task(void *arg)
 {
     ESP_LOGI(TAG, "GOES poll task started");
-
-    // Wait for WiFi before attempting any HTTP requests
-    xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
 
     while (1) {
         /* Suspend during OTA or when the Image Display page is not visible */
@@ -558,6 +571,41 @@ void goes_poll_task(void *arg)
         /* Read fields directly from config pointer — avoids copying the full
          * app_config_t onto this task's small stack. */
         const app_config_t *cfg = app_config_get();
+
+        /* Moon source: render locally on-device, no network. The result is
+         * pushed into the same goes_data RGB565 sink the crossfade page reads. */
+        if (cfg->image_display_source == 1) {
+            if (moon_render_init()) {
+                double lat = cfg->moon_lat, lon = cfg->moon_lon;
+                if (lat == 0.0 && lon == 0.0) { lat = cfg->weather_lat; lon = cfg->weather_lon; }
+                time_t now; time(&now);
+                moon_state_t st;
+                moon_compute(now, lat, lon, &st);
+                s_moon_state = st;
+                const int MOON_SZ = 600;
+                uint16_t *img = moon_render(MOON_SZ, MOON_SZ, &st, cfg->moon_bg_style);
+                if (img) {
+                    if (goes_data_lock(&goes_data, 1000)) {
+                        if (goes_data.image_buf) heap_caps_free(goes_data.image_buf);
+                        goes_data.image_buf = (uint8_t *)img;
+                        goes_data.image_w = MOON_SZ;
+                        goes_data.image_h = MOON_SZ;
+                        goes_data.vflip = false;
+                        goes_data.connected = true;
+                        goes_data.last_poll_ms = esp_timer_get_time() / 1000;
+                        goes_data_unlock(&goes_data);
+                    } else {
+                        heap_caps_free(img);
+                    }
+                }
+            }
+            /* Recompute ~every 60s so orientation tracks the sky; wake early on notify. */
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(60000));
+            continue;
+        }
+
+        /* GOES needs network — wait for WiFi before attempting any HTTP requests. */
+        xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
 
         /* Only poll when a region is configured */
         if (cfg->goes_region[0] != '\0') {
@@ -1566,6 +1614,7 @@ main_loop:
                     bsp_display_unlock();
                 }
                 goes_client_cleanup(&goes_data);
+                moon_render_deinit();   /* release the cached moon texture */
                 ESP_LOGI(TAG, "Left Image Display: freed buffers");
             }
             prev_on_image_display = on_image_display;

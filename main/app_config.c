@@ -777,6 +777,12 @@ static void set_defaults(app_config_t *cfg) {
     strcpy(cfg->goes_region, "umv");
     cfg->goes_update_interval_s = 600;
 
+    // Moon phase defaults
+    cfg->image_display_source = 0;   // 0=GOES, 1=Moon
+    cfg->moon_bg_style = 0;          // 0=black, 1=stars, 2=glow
+    cfg->moon_lat = 0.0f;            // unset until configured / prefilled from weather
+    cfg->moon_lon = 0.0f;
+
     // Auth is on by default — protects device from open-LAN access
     cfg->auth_enabled = true;
 }
@@ -1743,6 +1749,23 @@ static void migrate_from_v23(const app_config_v23_t *old, app_config_t *cfg) {
 }
 
 /* --- v32 → v33 migration (added Image Display fields; IDLE_TARGET_SYSINFO 3→4) --- */
+/* --- v33 → v34 migration (added Moon phase fields) --- */
+static void migrate_from_v33(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v33_t) ? raw_size : sizeof(app_config_v33_t);
+    memcpy(cfg, raw, copy);
+
+    /* Moon phase fields: new in v34 — defaults already set by set_defaults() */
+    cfg->image_display_source = 0;
+    cfg->moon_bg_style = 0;
+    cfg->moon_lat = cfg->weather_lat;   /* prefill from weather */
+    cfg->moon_lon = cfg->weather_lon;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v33 to v%d", APP_CONFIG_VERSION);
+}
+
 static void migrate_from_v32(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
@@ -2277,6 +2300,14 @@ static bool validate_config(app_config_t *cfg) {
         strcpy(cfg->goes_region, "umv");
         fixed = true;
     }
+    if (cfg->image_display_source > 1) {
+        cfg->image_display_source = 0;
+        fixed = true;
+    }
+    if (cfg->moon_bg_style > 2) {
+        cfg->moon_bg_style = 0;
+        fixed = true;
+    }
     if (cfg->allsky_thresholds[0] == '\0' ||
         strstr(cfg->allsky_thresholds, "thermal_main") == NULL) {
         /* Empty or contains old-format keys (cpu_temp, sqm, etc.) — reset to new positional format */
@@ -2344,6 +2375,12 @@ void app_config_init(void) {
             nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(handle);
         }
+    } else if (version_check == 33) {
+        /* v33 → v34: added Moon phase fields (prefill moon lat/lon from weather) */
+        migrate_from_v33(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 32) {
         /* v32 → v33: added Image Display fields; IDLE_TARGET_SYSINFO 3→4 */
         migrate_from_v32(raw, stored_size, &s_config);

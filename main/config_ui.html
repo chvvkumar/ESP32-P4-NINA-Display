@@ -1375,6 +1375,19 @@
         </div>
         <div id="imageDisplayFields">
           <div class="field" style="margin-top:16px">
+            <label class="field-label">Source</label>
+            <select class="input" id="imageSource" onchange="updateImageSourceUI()">
+              <option value="0">GOES Satellite</option>
+              <option value="1">Moon Phase</option>
+            </select>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Show Overlay</span>
+            <label class="toggle"><input type="checkbox" id="image_display_show_overlay" checked><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Region/phase name and update time overlay on the display</div>
+          <div id="goesGroup">
+          <div class="field" style="margin-top:16px">
             <label class="field-label">Region</label>
             <select class="input" id="goesRegion">
               <option value="umv">Upper Mississippi Valley</option>
@@ -1413,16 +1426,31 @@
               <option value="7200">2 hours</option>
             </select>
           </div>
-          <div class="toggle-row">
-            <span class="toggle-label">Show Overlay</span>
-            <label class="toggle"><input type="checkbox" id="image_display_show_overlay" checked><span class="toggle-track"></span></label>
-          </div>
-          <div class="field-hint">Region name and update time overlay on the display</div>
           <div class="field" style="margin-top:16px">
             <button onclick="fetchGoesPreview()" class="btn btn-primary" id="goesPreviewBtn" style="width:100%">Fetch Preview</button>
           </div>
           <div id="goesPreviewContainer" style="display:none;margin-top:12px;text-align:center">
             <img id="goesPreviewImg" style="max-width:100%;border-radius:10px;border:1px solid rgba(255,255,255,0.1)" />
+          </div>
+          </div>
+          <div id="moonGroup" style="display:none">
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Background</label>
+            <select class="input" id="moonBg">
+              <option value="0">Plain black</option>
+              <option value="1">Starfield</option>
+              <option value="2">Soft glow</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field-label">Latitude</label>
+            <input class="input" id="moonLat" type="number" step="0.0001" placeholder="e.g. 40.7128">
+          </div>
+          <div class="field">
+            <label class="field-label">Longitude</label>
+            <input class="input" id="moonLon" type="number" step="0.0001" placeholder="e.g. -74.0060">
+            <div class="field-hint" id="moonLocHint">Set your location for accurate moon orientation. Prefilled from Weather when available.</div>
+          </div>
           </div>
         </div>
       </div>
@@ -2082,6 +2110,10 @@
         image_display_show_overlay:!!$('image_display_show_overlay').checked,
         goes_region:$('goesRegion').value,
         goes_update_interval_s:parseInt($('goesInterval').value)||600,
+        image_display_source:parseInt($('imageSource').value,10)||0,
+        moon_bg_style:parseInt($('moonBg').value,10)||0,
+        moon_lat:parseFloat($('moonLat').value)||0,
+        moon_lon:parseFloat($('moonLon').value)||0,
         weather_provider:parseInt($('weather_provider').value)||0,
         weather_api_key:$('weather_api_key').value.trim(),
         weather_lat:parseFloat($('weather_lat').value)||0,
@@ -2241,7 +2273,15 @@
       if($('image_display_show_overlay')) $('image_display_show_overlay').checked=data.image_display_show_overlay!=null?!!data.image_display_show_overlay:true;
       if($('goesRegion')) $('goesRegion').value=data.goes_region||'umv';
       if($('goesInterval')) $('goesInterval').value=data.goes_update_interval_s||600;
+      if($('imageSource')) $('imageSource').value=String(data.image_display_source||0);
+      if($('moonBg')) $('moonBg').value=String(data.moon_bg_style||0);
+      var mlat=data.moon_lat, mlon=data.moon_lon;
+      // Prefill from weather location when moon coords are unset
+      if((!mlat && !mlon) && (data.weather_lat || data.weather_lon)){ mlat=data.weather_lat; mlon=data.weather_lon; }
+      if($('moonLat')) $('moonLat').value=mlat||'';
+      if($('moonLon')) $('moonLon').value=mlon||'';
       updateImageDisplayEnabledUI();
+      updateImageSourceUI();
 
       // Clock & Weather fields
       if($('weather_provider')) $('weather_provider').value=data.weather_provider||0;
@@ -3232,6 +3272,12 @@
       var on=$('image_display_enabled').checked;
       $('imageDisplayFields').style.display=on?'':'none';
       updatePageSelectOptions();
+    }
+
+    function updateImageSourceUI(){
+      var s=$('imageSource')?$('imageSource').value:'0';
+      if($('goesGroup')) $('goesGroup').style.display=(s==='1')?'none':'';
+      if($('moonGroup')) $('moonGroup').style.display=(s==='1')?'':'none';
     }
 
     function fetchGoesPreview(){
