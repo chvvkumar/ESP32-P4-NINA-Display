@@ -17,21 +17,23 @@
 /* ── Page index constants ──
  *
  * Page index convention:
- *   PAGE_IDX_ALLSKY   (0)  = AllSky page
- *   PAGE_IDX_SPOTIFY  (1)  = Spotify page
- *   PAGE_IDX_CLOCK    (2)  = Clock page (always present)
- *   PAGE_IDX_SUMMARY  (3)  = Summary page
- *   NINA_PAGE_OFFSET  (4)  .. NINA_PAGE_OFFSET + page_count - 1 = NINA instance pages
+ *   PAGE_IDX_ALLSKY         (0)  = AllSky page
+ *   PAGE_IDX_SPOTIFY        (1)  = Spotify page
+ *   PAGE_IDX_CLOCK          (2)  = Clock page (always present)
+ *   PAGE_IDX_IMAGE_DISPLAY  (3)  = Image Display page
+ *   PAGE_IDX_SUMMARY        (4)  = Summary page
+ *   NINA_PAGE_OFFSET        (5)  .. NINA_PAGE_OFFSET + page_count - 1 = NINA instance pages
  *   page_count + NINA_PAGE_OFFSET     = settings page
  *   page_count + NINA_PAGE_OFFSET + 1 = sysinfo page
  *   total_page_count = page_count + EXTRA_PAGES
  */
-#define PAGE_IDX_ALLSKY   0
-#define PAGE_IDX_SPOTIFY  1
-#define PAGE_IDX_CLOCK    2
-#define PAGE_IDX_SUMMARY  3
-#define NINA_PAGE_OFFSET  4   /* First NINA page index */
-#define EXTRA_PAGES       6   /* allsky + spotify + clock + summary + settings + sysinfo */
+#define PAGE_IDX_ALLSKY          0
+#define PAGE_IDX_SPOTIFY         1
+#define PAGE_IDX_CLOCK           2
+#define PAGE_IDX_IMAGE_DISPLAY   3
+#define PAGE_IDX_SUMMARY         4
+#define NINA_PAGE_OFFSET         5   /* First NINA page index */
+#define EXTRA_PAGES              7   /* allsky + spotify + clock + image_display + summary + settings + sysinfo */
 
 /* Derived page index helpers (use these instead of hardcoded arithmetic) */
 #define SETTINGS_PAGE_IDX(pc)  ((pc) + NINA_PAGE_OFFSET)
@@ -126,6 +128,9 @@ extern lv_obj_t *spotify_obj;
 
 /* Clock page — defined in nina_dashboard.c */
 extern lv_obj_t *clock_obj;
+
+/* Image Display page — defined in nina_dashboard.c */
+extern lv_obj_t *image_display_obj;
 
 /* Shared state — defined in nina_dashboard.c, used by update and thumbnail modules */
 extern dashboard_page_t pages[MAX_NINA_INSTANCES];

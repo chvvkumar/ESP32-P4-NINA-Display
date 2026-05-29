@@ -571,6 +571,7 @@
       <button class="tab-btn" data-tab="allsky">AllSky</button>
       <button class="tab-btn" data-tab="clock">Clock</button>
       <button class="tab-btn" data-tab="spotify">Spotify</button>
+      <button class="tab-btn" data-tab="image-display">Image Display</button>
       <button class="tab-btn" data-tab="backup">Backup</button>
     </div>
     <a class="github-link" href="https://github.com/chvvkumar/ESP32-P4-NINA-Display" target="_blank" rel="noopener">
@@ -609,6 +610,10 @@
       <button class="nav-btn" data-tab="spotify">
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>
         Spotify
+      </button>
+      <button class="nav-btn" data-tab="image-display">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+        Image
       </button>
       <button class="nav-btn" data-tab="backup">
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -731,7 +736,8 @@
             <option value="0">Clock</option>
             <option value="1">AllSky</option>
             <option value="2">Spotify</option>
-            <option value="3">System Info</option>
+            <option value="3">Image Display</option>
+            <option value="4">System Info</option>
           </select>
           <div class="toggle-row" style="margin-top:12px">
             <div>
@@ -1358,6 +1364,71 @@
 
     </div>
 
+    <!-- ==================== TAB: IMAGE DISPLAY ==================== -->
+    <div id="tab-image-display" class="tab-panel">
+
+      <div class="card">
+        <div class="card-title">GOES Satellite Imagery</div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Enable Image Display</span>
+          <label class="toggle"><input type="checkbox" id="image_display_enabled" onchange="updateImageDisplayEnabledUI()"><span class="toggle-track"></span></label>
+        </div>
+        <div id="imageDisplayFields">
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Region</label>
+            <select class="input" id="goesRegion">
+              <option value="umv">Upper Mississippi Valley</option>
+              <option value="cgl">Great Lakes</option>
+              <option value="ne">Northeast</option>
+              <option value="se">Southeast</option>
+              <option value="smv">Southern Mississippi Valley</option>
+              <option value="sp">Southern Plains</option>
+              <option value="nr">Northern Rockies</option>
+              <option value="sr">Southern Rockies</option>
+              <option value="pnw">Pacific Northwest</option>
+              <option value="psw">Pacific Southwest</option>
+              <option value="eus">U.S. Atlantic Coast</option>
+              <option value="pr">Puerto Rico</option>
+              <option value="mex">Mexico</option>
+              <option value="cam">Central America</option>
+              <option value="car">Caribbean</option>
+              <option value="ga">Gulf of America</option>
+              <option value="can">Canada</option>
+              <option value="na">Northern Atlantic</option>
+              <option value="taw">Tropical Atlantic</option>
+              <option value="eep">Eastern Pacific</option>
+              <option value="nsa">South America (North)</option>
+              <option value="ssa">South America (South)</option>
+            </select>
+            <div class="field-hint">GOES-19 GEOCOLOR sector for satellite imagery</div>
+          </div>
+          <div class="field">
+            <label class="field-label">Update Interval</label>
+            <select class="input" id="goesInterval">
+              <option value="300">5 minutes</option>
+              <option value="600" selected>10 minutes</option>
+              <option value="900">15 minutes</option>
+              <option value="1800">30 minutes</option>
+              <option value="3600">1 hour</option>
+              <option value="7200">2 hours</option>
+            </select>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Show Overlay</span>
+            <label class="toggle"><input type="checkbox" id="image_display_show_overlay" checked><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Region name and update time overlay on the display</div>
+          <div class="field" style="margin-top:16px">
+            <button onclick="fetchGoesPreview()" class="btn btn-primary" id="goesPreviewBtn" style="width:100%">Fetch Preview</button>
+          </div>
+          <div id="goesPreviewContainer" style="display:none;margin-top:12px;text-align:center">
+            <img id="goesPreviewImg" style="max-width:100%;border-radius:10px;border:1px solid rgba(255,255,255,0.1)" />
+          </div>
+        </div>
+      </div>
+
+    </div>
+
     <!-- ==================== TAB 7: BACKUP ==================== -->
     <div id="tab-backup" class="tab-panel">
       <!-- Export Card -->
@@ -1709,13 +1780,15 @@
       var enabled=[$('instance_enabled_0').checked,$('instance_enabled_1').checked,$('instance_enabled_2').checked];
       var allskyOn=$('allsky_enabled')?$('allsky_enabled').checked:false;
       var spotifyOn=$('spotify_enabled')?$('spotify_enabled').checked:false;
+      var imageDisplayOn=$('image_display_enabled')?$('image_display_enabled').checked:false;
 
       var pages=[];
-      pages.push({value:'3', label:'Summary'});
+      pages.push({value:'4', label:'Summary'});
       if(allskyOn) pages.push({value:'0', label:'AllSky'});
       if(spotifyOn) pages.push({value:'1', label:'Spotify'});
       pages.push({value:'2', label:'Clock'});
-      var pageIdx=4;
+      if(imageDisplayOn) pages.push({value:'3', label:'Image Display'});
+      var pageIdx=5;
       for(var i=0;i<3;i++){
         if(urls[i].length>0&&enabled[i]){
           pages.push({value:''+pageIdx, label:urls[i]||('NINA '+(i+1))});
@@ -2005,6 +2078,10 @@
         spotify_overlay_visible:!!$('spotify_overlay_visible').checked,
         spotify_scroll_text:!!$('spotify_scroll_text').checked,
         spotify_overlay_timeout_s:parseInt($('spotifyOverlayTimeout').value)||0,
+        image_display_enabled:!!$('image_display_enabled').checked,
+        image_display_show_overlay:!!$('image_display_show_overlay').checked,
+        goes_region:$('goesRegion').value,
+        goes_update_interval_s:parseInt($('goesInterval').value)||600,
         weather_provider:parseInt($('weather_provider').value)||0,
         weather_api_key:$('weather_api_key').value.trim(),
         weather_lat:parseFloat($('weather_lat').value)||0,
@@ -2158,6 +2235,13 @@
       if($('spotify_scroll_text')) $('spotify_scroll_text').checked=data.spotify_scroll_text!=null?!!data.spotify_scroll_text:true;
       if($('spotifyOverlayTimeout')) $('spotifyOverlayTimeout').value=data.spotify_overlay_timeout_s!=null?data.spotify_overlay_timeout_s:5;
       updateSpotifyEnabledUI();
+
+      // Image Display fields
+      if($('image_display_enabled')) $('image_display_enabled').checked=!!data.image_display_enabled;
+      if($('image_display_show_overlay')) $('image_display_show_overlay').checked=data.image_display_show_overlay!=null?!!data.image_display_show_overlay:true;
+      if($('goesRegion')) $('goesRegion').value=data.goes_region||'umv';
+      if($('goesInterval')) $('goesInterval').value=data.goes_update_interval_s||600;
+      updateImageDisplayEnabledUI();
 
       // Clock & Weather fields
       if($('weather_provider')) $('weather_provider').value=data.weather_provider||0;
@@ -3142,6 +3226,38 @@
         if(Object.keys(qData).length>0) config[quadDef.quad]=qData;
       });
       return config;
+    }
+
+    function updateImageDisplayEnabledUI(){
+      var on=$('image_display_enabled').checked;
+      $('imageDisplayFields').style.display=on?'':'none';
+      updatePageSelectOptions();
+    }
+
+    function fetchGoesPreview(){
+      var btn=$('goesPreviewBtn');
+      var region=$('goesRegion').value;
+      var previewSizes={
+        umv:'300x300',cgl:'300x300',ne:'300x300',se:'300x300',smv:'300x300',
+        sp:'300x300',nr:'300x300',sr:'300x300',pnw:'300x300',psw:'300x300',pr:'300x300',
+        eus:'250x250',cam:'250x250',car:'250x250',mex:'250x250',ga:'250x250',
+        na:'450x270',ssa:'450x270',eep:'450x270',taw:'450x270',nsa:'450x270',
+        can:'280x140'
+      };
+      var psize=previewSizes[region]||'300x300';
+      btn.disabled=true;btn.textContent='Loading...';
+      var img=$('goesPreviewImg');
+      var container=$('goesPreviewContainer');
+      img.onload=function(){
+        container.style.display='block';
+        btn.disabled=false;btn.textContent='Fetch Preview';
+      };
+      img.onerror=function(){
+        container.style.display='none';
+        btn.disabled=false;btn.textContent='Fetch Preview';
+        showToast('Failed to load preview image','error');
+      };
+      img.src='https://cdn.star.nesdis.noaa.gov/GOES19/ABI/SECTOR/'+region+'/GEOCOLOR/'+psize+'.jpg?t='+Date.now();
     }
 
     function updateAllSkyEnabledUI(){

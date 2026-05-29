@@ -125,6 +125,10 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
     cJSON_AddBoolToObject(obj, "spotify_scroll_text", cfg->spotify_scroll_text);
     cJSON_AddNumberToObject(obj, "spotify_overlay_timeout_s", cfg->spotify_overlay_timeout_s);
     cJSON_AddBoolToObject(obj, "spotify_overlay_visible", cfg->spotify_overlay_visible);
+    cJSON_AddBoolToObject(obj, "image_display_enabled", cfg->image_display_enabled);
+    cJSON_AddBoolToObject(obj, "image_display_show_overlay", cfg->image_display_show_overlay);
+    cJSON_AddStringToObject(obj, "goes_region", cfg->goes_region);
+    cJSON_AddNumberToObject(obj, "goes_update_interval_s", cfg->goes_update_interval_s);
     cJSON_AddNumberToObject(obj, "toast_aggregation_window_s", cfg->toast_aggregation_window_s);
     cJSON_AddNumberToObject(obj, "toast_notify_mask", cfg->toast_notify_mask);
     cJSON_AddBoolToObject(obj, "toast_instance_muted_1", cfg->toast_instance_muted[0]);
@@ -295,6 +299,12 @@ static const backup_field_t s_backup_fields[] = {
     {"spotify_minimal_mode",      "Minimal Mode",         "Spotify", false, false},
     {"spotify_scroll_text",       "Scroll Text",          "Spotify", false, false},
     {"spotify_overlay_visible",   "Show Overlay",         "Spotify", false, false},
+
+    /* Image Display */
+    {"image_display_enabled",      "Image Display Enabled","Image Display", false, false},
+    {"image_display_show_overlay", "Show Overlay",         "Image Display", false, false},
+    {"goes_region",                "GOES Region",          "Image Display", false, false},
+    {"goes_update_interval_s",     "GOES Update Interval", "Image Display", false, false},
 
     /* MQTT (non-sensitive) */
     {"mqtt_enabled",       "MQTT Enabled",       "MQTT", false, false},
@@ -566,7 +576,8 @@ static bool validate_config_fields(cJSON *root, httpd_req_t *req)
         !validate_string_len(root, "hfr_thresholds_3", 256) ||
         !validate_string_len(root, "allsky_hostname", 128) ||
         !validate_string_len(root, "allsky_field_config", 1536) ||
-        !validate_string_len(root, "allsky_thresholds", 1024)) {
+        !validate_string_len(root, "allsky_thresholds", 1024) ||
+        !validate_string_len(root, "goes_region", sizeof(((app_config_t *)0)->goes_region))) {
         send_400(req, "String field exceeds maximum length");
         return false;
     }
@@ -830,6 +841,18 @@ static app_config_t *parse_config_from_json(cJSON *root)
     JSON_TO_BOOL  (root, "spotify_scroll_text",        cfg->spotify_scroll_text);
     JSON_TO_INT   (root, "spotify_overlay_timeout_s",  cfg->spotify_overlay_timeout_s);
     JSON_TO_BOOL  (root, "spotify_overlay_visible",   cfg->spotify_overlay_visible);
+
+    JSON_TO_BOOL  (root, "image_display_enabled",       cfg->image_display_enabled);
+    JSON_TO_BOOL  (root, "image_display_show_overlay",   cfg->image_display_show_overlay);
+    JSON_TO_STRING(root, "goes_region",                  cfg->goes_region);
+
+    cJSON *goes_interval = cJSON_GetObjectItem(root, "goes_update_interval_s");
+    if (cJSON_IsNumber(goes_interval)) {
+        int v = goes_interval->valueint;
+        if (v < 300) v = 300;
+        if (v > 7200) v = 7200;
+        cfg->goes_update_interval_s = (uint16_t)v;
+    }
 
     cJSON *taw_item = cJSON_GetObjectItem(root, "toast_aggregation_window_s");
     if (cJSON_IsNumber(taw_item)) {
