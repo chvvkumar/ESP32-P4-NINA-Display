@@ -141,7 +141,7 @@ typedef struct {
 
     // Added after v33 — must stay at end to preserve NVS binary compatibility
     uint8_t  image_display_source;   // 0=GOES (default), 1=Moon
-    uint8_t  moon_bg_style;          // 0=black, 1=stars, 2=glow
+    uint8_t  moon_bg_style;          // 0=black, 1=stars, 2=glow, 3=stars+glow
     float    moon_lat;               // observer latitude (deg), 0=unset
     float    moon_lon;               // observer longitude (deg), 0=unset
 } app_config_t;

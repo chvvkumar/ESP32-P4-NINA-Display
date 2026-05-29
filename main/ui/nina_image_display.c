@@ -248,15 +248,32 @@ void nina_image_display_update(goes_data_t *data)
     lv_obj_clear_flag(img_back, LV_OBJ_FLAG_HIDDEN);
 
     bool first_image = (displayed_poll_ms == 0);
+    /* The Moon source re-posts a near-identical frame every ~60s; a crossfade
+     * dips brightness at its midpoint (two ~50% copies over black) and reads as
+     * a once-a-minute flicker. Swap instantly for the moon (and the first image). */
+    bool instant = first_image || (app_config_get()->image_display_source == 1);
     displayed_poll_ms = poll_ms;
 
-    if (first_image) {
-        /* No previous image to fade from: just show it and swap slots. */
+    if (instant) {
+        /* Show the new image at full opacity and retire the old one immediately.
+         * Mirrors crossfade_done_cb so the previous buffer is freed, not leaked.
+         * On the first image old_dsc->data is NULL, so the free is a no-op. */
         lv_obj_set_style_opa(img_back, LV_OPA_COVER, 0);
+        lv_image_dsc_t *old_dsc = front_is_a ? &img_dsc_a : &img_dsc_b;
+        lv_obj_add_flag(img_front, LV_OBJ_FLAG_HIDDEN);
+        lv_image_set_src(img_front, NULL);
+        if (old_dsc->data) {
+            heap_caps_free((void *)old_dsc->data);
+            old_dsc->data      = NULL;
+            old_dsc->data_size = 0;
+            old_dsc->header.w  = 0;
+            old_dsc->header.h  = 0;
+        }
         front_is_a = !front_is_a;
-        lv_obj_t *tmp = img_front;
-        img_front = img_back;
-        img_back  = tmp;
+        img_front  = front_is_a ? lv_obj_get_child(page_container, 0)
+                                : lv_obj_get_child(page_container, 1);
+        img_back   = front_is_a ? lv_obj_get_child(page_container, 1)
+                                : lv_obj_get_child(page_container, 0);
     } else {
         crossfade_active = true;
 

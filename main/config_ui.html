@@ -1371,25 +1371,31 @@
         <div class="card-title">GOES Satellite Imagery</div>
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
           <span class="toggle-label">Enable Image Display</span>
-          <label class="toggle"><input type="checkbox" id="image_display_enabled" onchange="updateImageDisplayEnabledUI()"><span class="toggle-track"></span></label>
+          <label class="toggle"><input type="checkbox" id="image_display_enabled" onchange="updateImageDisplayEnabledUI();applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
         </div>
         <div id="imageDisplayFields">
           <div class="field" style="margin-top:16px">
             <label class="field-label">Source</label>
-            <select class="input" id="imageSource" onchange="updateImageSourceUI()">
-              <option value="0">GOES Satellite</option>
-              <option value="1">Moon Phase</option>
-            </select>
+            <div class="pn-pill-grid">
+              <label class="pn-pill rotate-pill">
+                <input type="radio" name="imageSourceSel" id="imageSource0" value="0" onchange="updateImageSourceUI();applyImageDisplay();checkDirty()">
+                <span class="pn-pill-visual">GOES Satellite</span>
+              </label>
+              <label class="pn-pill rotate-pill">
+                <input type="radio" name="imageSourceSel" id="imageSource1" value="1" onchange="updateImageSourceUI();applyImageDisplay();checkDirty()">
+                <span class="pn-pill-visual">Moon Phase</span>
+              </label>
+            </div>
           </div>
           <div class="toggle-row">
             <span class="toggle-label">Show Overlay</span>
-            <label class="toggle"><input type="checkbox" id="image_display_show_overlay" checked><span class="toggle-track"></span></label>
+            <label class="toggle"><input type="checkbox" id="image_display_show_overlay" onchange="applyImageDisplay();checkDirty()" checked><span class="toggle-track"></span></label>
           </div>
           <div class="field-hint">Region/phase name and update time overlay on the display</div>
           <div id="goesGroup">
           <div class="field" style="margin-top:16px">
             <label class="field-label">Region</label>
-            <select class="input" id="goesRegion">
+            <select class="input" id="goesRegion" onchange="applyImageDisplay();checkDirty()">
               <option value="umv">Upper Mississippi Valley</option>
               <option value="cgl">Great Lakes</option>
               <option value="ne">Northeast</option>
@@ -1417,7 +1423,7 @@
           </div>
           <div class="field">
             <label class="field-label">Update Interval</label>
-            <select class="input" id="goesInterval">
+            <select class="input" id="goesInterval" onchange="applyImageDisplay();checkDirty()">
               <option value="300">5 minutes</option>
               <option value="600" selected>10 minutes</option>
               <option value="900">15 minutes</option>
@@ -1436,19 +1442,20 @@
           <div id="moonGroup" style="display:none">
           <div class="field" style="margin-top:16px">
             <label class="field-label">Background</label>
-            <select class="input" id="moonBg">
+            <select class="input" id="moonBg" onchange="applyImageDisplay();checkDirty()">
               <option value="0">Plain black</option>
               <option value="1">Starfield</option>
               <option value="2">Soft glow</option>
+              <option value="3">Starfield + Glow</option>
             </select>
           </div>
           <div class="field">
             <label class="field-label">Latitude</label>
-            <input class="input" id="moonLat" type="number" step="0.0001" placeholder="e.g. 40.7128">
+            <input class="input" id="moonLat" type="number" step="0.0001" placeholder="e.g. 40.7128" onchange="applyImageDisplay();checkDirty()">
           </div>
           <div class="field">
             <label class="field-label">Longitude</label>
-            <input class="input" id="moonLon" type="number" step="0.0001" placeholder="e.g. -74.0060">
+            <input class="input" id="moonLon" type="number" step="0.0001" placeholder="e.g. -74.0060" onchange="applyImageDisplay();checkDirty()">
             <div class="field-hint" id="moonLocHint">Set your location for accurate moon orientation. Prefilled from Weather when available.</div>
           </div>
           </div>
@@ -2110,7 +2117,7 @@
         image_display_show_overlay:!!$('image_display_show_overlay').checked,
         goes_region:$('goesRegion').value,
         goes_update_interval_s:parseInt($('goesInterval').value)||600,
-        image_display_source:parseInt($('imageSource').value,10)||0,
+        image_display_source:getImageSource(),
         moon_bg_style:parseInt($('moonBg').value,10)||0,
         moon_lat:parseFloat($('moonLat').value)||0,
         moon_lon:parseFloat($('moonLon').value)||0,
@@ -2273,7 +2280,9 @@
       if($('image_display_show_overlay')) $('image_display_show_overlay').checked=data.image_display_show_overlay!=null?!!data.image_display_show_overlay:true;
       if($('goesRegion')) $('goesRegion').value=data.goes_region||'umv';
       if($('goesInterval')) $('goesInterval').value=data.goes_update_interval_s||600;
-      if($('imageSource')) $('imageSource').value=String(data.image_display_source||0);
+      var imgSrc=parseInt(data.image_display_source||0,10)||0;
+      if($('imageSource0')) $('imageSource0').checked=(imgSrc===0);
+      if($('imageSource1')) $('imageSource1').checked=(imgSrc===1);
       if($('moonBg')) $('moonBg').value=String(data.moon_bg_style||0);
       var mlat=data.moon_lat, mlon=data.moon_lon;
       // Prefill from weather location when moon coords are unset
@@ -3274,10 +3283,28 @@
       updatePageSelectOptions();
     }
 
+    function getImageSource(){
+      var sel=document.querySelector('input[name="imageSourceSel"]:checked');
+      return sel?parseInt(sel.value,10):0;
+    }
+
     function updateImageSourceUI(){
-      var s=$('imageSource')?$('imageSource').value:'0';
-      if($('goesGroup')) $('goesGroup').style.display=(s==='1')?'none':'';
-      if($('moonGroup')) $('moonGroup').style.display=(s==='1')?'':'none';
+      var s=getImageSource();
+      if($('goesGroup')) $('goesGroup').style.display=(s===1)?'none':'';
+      if($('moonGroup')) $('moonGroup').style.display=(s===1)?'':'none';
+    }
+
+    function applyImageDisplay(){
+      postJson('/api/image-display-config', {
+        image_display_enabled: !!$('image_display_enabled').checked,
+        image_display_show_overlay: !!$('image_display_show_overlay').checked,
+        goes_region: $('goesRegion').value,
+        goes_update_interval_s: parseInt($('goesInterval').value,10)||600,
+        image_display_source: getImageSource(),
+        moon_bg_style: parseInt($('moonBg').value,10)||0,
+        moon_lat: parseFloat($('moonLat').value)||0,
+        moon_lon: parseFloat($('moonLon').value)||0
+      });
     }
 
     function fetchGoesPreview(){

@@ -575,10 +575,16 @@ void goes_poll_task(void *arg)
         /* Moon source: render locally on-device, no network. The result is
          * pushed into the same goes_data RGB565 sink the crossfade page reads. */
         if (cfg->image_display_source == 1) {
-            if (moon_render_init()) {
+            time_t now; time(&now);
+            /* The moon phase/orientation needs a correct wall clock. Before SNTP
+             * sets the time (near-epoch at boot), rendering would show the wrong
+             * phase, e.g. a half-lit disc, until the next recompute. Skip the
+             * render until the clock is valid and retry quickly so the correct
+             * moon appears as soon as time syncs; then settle to ~60s. */
+            bool time_valid = (now > (time_t)1577836800);  /* >= 2020-01-01 UTC */
+            if (time_valid && moon_render_init()) {
                 double lat = cfg->moon_lat, lon = cfg->moon_lon;
                 if (lat == 0.0 && lon == 0.0) { lat = cfg->weather_lat; lon = cfg->weather_lon; }
-                time_t now; time(&now);
                 moon_state_t st;
                 moon_compute(now, lat, lon, &st);
                 s_moon_state = st;
@@ -599,8 +605,9 @@ void goes_poll_task(void *arg)
                     }
                 }
             }
-            /* Recompute ~every 60s so orientation tracks the sky; wake early on notify. */
-            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(60000));
+            /* Recompute ~every 60s once time is valid so orientation tracks the
+             * sky; poll every ~3s while waiting for the clock to sync. */
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(time_valid ? 60000 : 3000));
             continue;
         }
 

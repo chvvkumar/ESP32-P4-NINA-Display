@@ -86,7 +86,7 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     cJSON *src = cJSON_GetObjectItem(root, "image_display_source");
     if (cJSON_IsNumber(src)) cfg->image_display_source = (src->valueint == 1) ? 1 : 0;
     cJSON *bg = cJSON_GetObjectItem(root, "moon_bg_style");
-    if (cJSON_IsNumber(bg)) { int v = bg->valueint; cfg->moon_bg_style = (v >= 0 && v <= 2) ? (uint8_t)v : 0; }
+    if (cJSON_IsNumber(bg)) { int v = bg->valueint; cfg->moon_bg_style = (v >= 0 && v <= 3) ? (uint8_t)v : 0; }
     cJSON *mlat = cJSON_GetObjectItem(root, "moon_lat");
     if (cJSON_IsNumber(mlat)) cfg->moon_lat = (float)mlat->valuedouble;
     cJSON *mlon = cJSON_GetObjectItem(root, "moon_lon");

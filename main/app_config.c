@@ -2304,7 +2304,7 @@ static bool validate_config(app_config_t *cfg) {
         cfg->image_display_source = 0;
         fixed = true;
     }
-    if (cfg->moon_bg_style > 2) {
+    if (cfg->moon_bg_style > 3) {
         cfg->moon_bg_style = 0;
         fixed = true;
     }
