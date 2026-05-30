@@ -8,27 +8,30 @@
   <style>
     /* === FOUNDATION === */
     :root {
-      --bg: #0a0a0b;
-      --surface: rgba(255, 255, 255, 0.035);
-      --surface-hover: rgba(255, 255, 255, 0.06);
-      --border: rgba(255, 255, 255, 0.08);
+      --bg: #080a10;
+      --surface: rgba(30, 35, 48, 0.96);
+      --surface-hover: rgba(40, 46, 62, 0.96);
+      --border: rgba(255, 255, 255, 0.12);
       --border-focus: rgba(var(--accent-rgb), 0.5);
-      --accent: #14b8a6;
-      --accent-rgb: 20, 184, 166;
-      --accent-hover: #0d9488;
+      --accent: #7aa2f7;
+      --accent-rgb: 122, 162, 247;
+      --accent-hover: #9dbcff;
       --accent-glow: rgba(var(--accent-rgb), 0.15);
-      --text: #f4f4f5;
-      --text-muted: #c4c4cc;
-      --text-hint: #9a9aa6;
-      --danger: #ef4444;
-      --danger-hover: #dc2626;
-      --warning: #f59e0b;
-      --success: #10b981;
+      --text: #e2e8f0;
+      --text-muted: #94a3b8;
+      --text-hint: #7a8ba4;
+      --danger: #f87171;
+      --danger-hover: #ef4444;
+      --warning: #fbbf24;
+      --success: #4ade80;
       --radius: 16px;
       --radius-sm: 10px;
       --glass-blur: 20px;
-      --glass-bg: rgba(255, 255, 255, 0.035);
-      --glass-border: rgba(255, 255, 255, 0.08);
+      --glass-bg: rgba(30, 35, 48, 0.96);
+      --glass-border: rgba(255, 255, 255, 0.14);
+      --elevated: rgba(48, 54, 72, 0.96);
+      --border-em: rgba(255, 255, 255, 0.20);
+      --input-bg: rgba(12, 14, 20, 0.92);
       --nav-height: 60px;
       --bottom-nav-height: 68px;
       --save-bar-height: 64px;
@@ -40,9 +43,9 @@
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: var(--bg);
       background-image:
-        radial-gradient(ellipse at 20% 0%, rgba(20, 184, 166, 0.06) 0%, transparent 50%),
-        radial-gradient(ellipse at 80% 100%, rgba(139, 92, 246, 0.04) 0%, transparent 50%),
-        linear-gradient(180deg, #0d0d12 0%, #0a0a0b 100%);
+        radial-gradient(ellipse at 20% 0%, rgba(122, 162, 247, 0.05) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 100%, rgba(124, 141, 240, 0.04) 0%, transparent 50%),
+        linear-gradient(135deg, #0a0c14 0%, #0f1320 100%);
       color: var(--text);
       line-height: 1.5;
       overflow-x: hidden;
@@ -58,12 +61,12 @@
       border-radius: var(--radius);
       padding: 28px;
       margin-bottom: 20px;
-      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      box-shadow: 0 10px 36px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06);
       transition: border-color 0.3s ease, box-shadow 0.3s ease;
     }
     .card:hover {
-      border-color: rgba(255, 255, 255, 0.12);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      border-color: var(--border-em);
+      box-shadow: 0 14px 44px rgba(0, 0, 0, 0.65), 0 2px 8px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08);
     }
     .card-title {
       font-size: 0.7rem; font-weight: 700; color: var(--accent);
@@ -170,7 +173,7 @@
 
     /* === COMPONENTS === */
     .input {
-      background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.06);
+      background: var(--input-bg); border: 1px solid rgba(255, 255, 255, 0.06);
       color: #f4f4f5; padding: 11px 16px; border-radius: 10px;
       width: 100%; font-size: 0.875rem; min-height: 46px;
       transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
@@ -269,10 +272,10 @@
     .filter-chip {
       display: flex; flex-direction: column; align-items: center; gap: 8px;
       padding: 12px 6px; border-radius: 10px;
-      background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.04);
+      background: var(--elevated); border: 1px solid var(--border);
       transition: background 0.2s ease, border-color 0.2s ease;
     }
-    .filter-chip:hover { background: rgba(255, 255, 255, 0.04); border-color: rgba(255, 255, 255, 0.08); }
+    .filter-chip:hover { background: var(--surface-hover); border-color: var(--border-em); }
     .filter-chip label {
       font-size: 0.65rem; color: var(--text-muted);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -407,11 +410,11 @@
     /* === FIRMWARE & OTA === */
     .fw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-bottom: 24px; }
     .fw-item {
-      background: rgba(255, 255, 255, 0.02); padding: 12px 14px;
-      border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.05);
+      background: var(--elevated); padding: 12px 14px;
+      border-radius: 10px; border: 1px solid var(--border);
       transition: border-color 0.2s;
     }
-    .fw-item:hover { border-color: rgba(255, 255, 255, 0.1); }
+    .fw-item:hover { border-color: var(--border-em); }
     .fw-label { font-size: 0.65rem; color: var(--text-hint); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
     .fw-value { font-size: 0.85rem; font-weight: 600; word-break: break-all; }
     .ota-label {
@@ -470,9 +473,9 @@
     .save-bar .changes-hint { font-size: 0.8rem; color: var(--accent); margin-right: auto; opacity: 0.8; }
     .toast {
       position: fixed; top: 76px; right: 24px; z-index: 200;
-      background: rgba(20, 20, 24, 0.9);
+      background: var(--elevated);
       backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--border);
       padding: 14px 22px; border-radius: 16px; font-size: 0.85rem;
       box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
       transform: translateX(120%); transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
@@ -1385,6 +1388,10 @@
                 <input type="radio" name="imageSourceSel" id="imageSource1" value="1" onchange="updateImageSourceUI();applyImageDisplay();checkDirty()">
                 <span class="pn-pill-visual">Moon Phase</span>
               </label>
+              <label class="pn-pill rotate-pill">
+                <input type="radio" name="imageSourceSel" id="imageSource2" value="2" onchange="updateImageSourceUI();applyImageDisplay();checkDirty()">
+                <span class="pn-pill-visual">Solar (SDO)</span>
+              </label>
             </div>
           </div>
           <div class="toggle-row">
@@ -1392,6 +1399,23 @@
             <label class="toggle"><input type="checkbox" id="image_display_show_overlay" onchange="applyImageDisplay();checkDirty()" checked><span class="toggle-track"></span></label>
           </div>
           <div class="field-hint">Region/phase name and update time overlay on the display</div>
+          <div class="toggle-row">
+            <span class="toggle-label">Fill (crop borders)</span>
+            <label class="toggle"><input type="checkbox" id="image_display_crop" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Zoom the disc to fill the screen and hide the image's timestamp/label. Not applied to the Moon.</div>
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Update Interval</label>
+            <select class="input" id="goesInterval" onchange="applyImageDisplay();checkDirty()">
+              <option value="300">5 minutes</option>
+              <option value="600" selected>10 minutes</option>
+              <option value="900">15 minutes</option>
+              <option value="1800">30 minutes</option>
+              <option value="3600">1 hour</option>
+              <option value="7200">2 hours</option>
+            </select>
+            <div class="field-hint">How often GOES and Solar images refresh. The Moon updates continuously.</div>
+          </div>
           <div id="goesGroup">
           <div class="field" style="margin-top:16px">
             <label class="field-label">Region</label>
@@ -1421,17 +1445,6 @@
             </select>
             <div class="field-hint">GOES-19 GEOCOLOR sector for satellite imagery</div>
           </div>
-          <div class="field">
-            <label class="field-label">Update Interval</label>
-            <select class="input" id="goesInterval" onchange="applyImageDisplay();checkDirty()">
-              <option value="300">5 minutes</option>
-              <option value="600" selected>10 minutes</option>
-              <option value="900">15 minutes</option>
-              <option value="1800">30 minutes</option>
-              <option value="3600">1 hour</option>
-              <option value="7200">2 hours</option>
-            </select>
-          </div>
           <div class="field" style="margin-top:16px">
             <button onclick="fetchGoesPreview()" class="btn btn-primary" id="goesPreviewBtn" style="width:100%">Fetch Preview</button>
           </div>
@@ -1457,6 +1470,32 @@
             <label class="field-label">Longitude</label>
             <input class="input" id="moonLon" type="number" step="0.0001" placeholder="e.g. -74.0060" onchange="applyImageDisplay();checkDirty()">
             <div class="field-hint" id="moonLocHint">Set your location for accurate moon orientation. Prefilled from Weather when available.</div>
+          </div>
+          </div>
+          <div id="solarGroup" style="display:none">
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Band</label>
+            <select class="input" id="solarBand" onchange="applyImageDisplay();checkDirty()">
+              <option value="0">AIA 94 (Fe XVIII)</option>
+              <option value="1">AIA 131 (Fe XX)</option>
+              <option value="2">AIA 171 (Fe IX/X)</option>
+              <option value="3">AIA 193 (Fe XII)</option>
+              <option value="4">AIA 211 (Fe XIV)</option>
+              <option value="5">AIA 304 (He II)</option>
+              <option value="6">AIA 335 (Fe XVI)</option>
+              <option value="7">AIA 1600 (C IV+cont)</option>
+              <option value="8">AIA 1700 (continuum)</option>
+              <option value="9">AIA 4500 (continuum)</option>
+              <option value="10">LASCO C2 (coronagraph)</option>
+              <option value="11">LASCO C3 (coronagraph)</option>
+              <option value="12">SOHO EIT 171</option>
+              <option value="13">SOHO EIT 195</option>
+              <option value="14">SOHO EIT 284</option>
+              <option value="15">SOHO EIT 304</option>
+              <option value="16">SDO/HMI Continuum</option>
+              <option value="17">SDO/HMI Magnetogram</option>
+            </select>
+            <div class="field-hint">NASA SDO/AIA and SOHO realtime (LASCO, EIT, HMI)</div>
           </div>
           </div>
         </div>
@@ -1743,14 +1782,14 @@
 
     /* === Tab Accent Colors === */
     const tabAccents={
-      display: {color:'#14b8a6', rgb:'20, 184, 166'},
-      nodes:   {color:'#34d399', rgb:'52, 211, 153'},
-      behavior:{color:'#a78bfa', rgb:'167, 139, 250'},
-      system:  {color:'#fb7185', rgb:'251, 113, 133'},
-      allsky:  {color:'#60a5fa', rgb:'96, 165, 250'},
-      clock:   {color:'#e8e2d4', rgb:'232, 226, 212'},
-      spotify: {color:'#4ade80', rgb:'74, 222, 128'},
-      backup:  {color:'#fbbf24', rgb:'251, 191, 36'}
+      display: {color:'#7aa2f7', rgb:'122, 162, 247'},
+      nodes:   {color:'#7aa2f7', rgb:'122, 162, 247'},
+      behavior:{color:'#7aa2f7', rgb:'122, 162, 247'},
+      system:  {color:'#7aa2f7', rgb:'122, 162, 247'},
+      allsky:  {color:'#7aa2f7', rgb:'122, 162, 247'},
+      clock:   {color:'#7aa2f7', rgb:'122, 162, 247'},
+      spotify: {color:'#7aa2f7', rgb:'122, 162, 247'},
+      backup:  {color:'#7aa2f7', rgb:'122, 162, 247'}
     };
 
     function setAccent(name){
@@ -2115,10 +2154,12 @@
         spotify_overlay_timeout_s:parseInt($('spotifyOverlayTimeout').value)||0,
         image_display_enabled:!!$('image_display_enabled').checked,
         image_display_show_overlay:!!$('image_display_show_overlay').checked,
+        image_display_crop:!!$('image_display_crop').checked,
         goes_region:$('goesRegion').value,
         goes_update_interval_s:parseInt($('goesInterval').value)||600,
         image_display_source:getImageSource(),
         moon_bg_style:parseInt($('moonBg').value,10)||0,
+        solar_band:parseInt($('solarBand').value,10)||0,
         moon_lat:parseFloat($('moonLat').value)||0,
         moon_lon:parseFloat($('moonLon').value)||0,
         weather_provider:parseInt($('weather_provider').value)||0,
@@ -2278,12 +2319,15 @@
       // Image Display fields
       if($('image_display_enabled')) $('image_display_enabled').checked=!!data.image_display_enabled;
       if($('image_display_show_overlay')) $('image_display_show_overlay').checked=data.image_display_show_overlay!=null?!!data.image_display_show_overlay:true;
+      if($('image_display_crop')) $('image_display_crop').checked=!!data.image_display_crop;
       if($('goesRegion')) $('goesRegion').value=data.goes_region||'umv';
       if($('goesInterval')) $('goesInterval').value=data.goes_update_interval_s||600;
       var imgSrc=parseInt(data.image_display_source||0,10)||0;
       if($('imageSource0')) $('imageSource0').checked=(imgSrc===0);
       if($('imageSource1')) $('imageSource1').checked=(imgSrc===1);
+      if($('imageSource2')) $('imageSource2').checked=(imgSrc===2);
       if($('moonBg')) $('moonBg').value=String(data.moon_bg_style||0);
+      if($('solarBand')) $('solarBand').value=String(data.solar_band||0);
       var mlat=data.moon_lat, mlon=data.moon_lon;
       // Prefill from weather location when moon coords are unset
       if((!mlat && !mlon) && (data.weather_lat || data.weather_lon)){ mlat=data.weather_lat; mlon=data.weather_lon; }
@@ -3290,20 +3334,23 @@
 
     function updateImageSourceUI(){
       var s=getImageSource();
-      if($('goesGroup')) $('goesGroup').style.display=(s===1)?'none':'';
-      if($('moonGroup')) $('moonGroup').style.display=(s===1)?'':'none';
+      if($('goesGroup'))  $('goesGroup').style.display =(s===0)?'':'none';
+      if($('moonGroup'))  $('moonGroup').style.display =(s===1)?'':'none';
+      if($('solarGroup')) $('solarGroup').style.display=(s===2)?'':'none';
     }
 
     function applyImageDisplay(){
       postJson('/api/image-display-config', {
         image_display_enabled: !!$('image_display_enabled').checked,
         image_display_show_overlay: !!$('image_display_show_overlay').checked,
+        image_display_crop: !!$('image_display_crop').checked,
         goes_region: $('goesRegion').value,
         goes_update_interval_s: parseInt($('goesInterval').value,10)||600,
         image_display_source: getImageSource(),
         moon_bg_style: parseInt($('moonBg').value,10)||0,
         moon_lat: parseFloat($('moonLat').value)||0,
-        moon_lon: parseFloat($('moonLon').value)||0
+        moon_lon: parseFloat($('moonLon').value)||0,
+        solar_band: parseInt($('solarBand').value,10)||0
       });
     }
 

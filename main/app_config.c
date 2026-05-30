@@ -782,6 +782,8 @@ static void set_defaults(app_config_t *cfg) {
     cfg->moon_bg_style = 0;          // 0=black, 1=stars, 2=glow
     cfg->moon_lat = 0.0f;            // unset until configured / prefilled from weather
     cfg->moon_lon = 0.0f;
+    cfg->solar_band = 0;             // SDO/AIA band index 0..9
+    cfg->image_display_crop = false; // crop/zoom image to fill & hide baked-in labels
 
     // Auth is on by default — protects device from open-LAN access
     cfg->auth_enabled = true;
@@ -1750,6 +1752,32 @@ static void migrate_from_v23(const app_config_v23_t *old, app_config_t *cfg) {
 
 /* --- v32 → v33 migration (added Image Display fields; IDLE_TARGET_SYSINFO 3→4) --- */
 /* --- v33 → v34 migration (added Moon phase fields) --- */
+static void migrate_from_v35(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v35_t) ? raw_size : sizeof(app_config_v35_t);
+    memcpy(cfg, raw, copy);
+
+    /* image_display_crop field: new in v36 — defaults already set by set_defaults() */
+    cfg->image_display_crop = false;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v35 to v%d", APP_CONFIG_VERSION);
+}
+
+static void migrate_from_v34(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v34_t) ? raw_size : sizeof(app_config_v34_t);
+    memcpy(cfg, raw, copy);
+
+    /* Solar band field: new in v35 — defaults already set by set_defaults() */
+    cfg->solar_band = 0;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v34 to v%d", APP_CONFIG_VERSION);
+}
+
 static void migrate_from_v33(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
@@ -2300,12 +2328,16 @@ static bool validate_config(app_config_t *cfg) {
         strcpy(cfg->goes_region, "umv");
         fixed = true;
     }
-    if (cfg->image_display_source > 1) {
+    if (cfg->image_display_source > 2) {
         cfg->image_display_source = 0;
         fixed = true;
     }
     if (cfg->moon_bg_style > 3) {
         cfg->moon_bg_style = 0;
+        fixed = true;
+    }
+    if (cfg->solar_band > 17) {
+        cfg->solar_band = 0;
         fixed = true;
     }
     if (cfg->allsky_thresholds[0] == '\0' ||
@@ -2375,6 +2407,18 @@ void app_config_init(void) {
             nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(handle);
         }
+    } else if (version_check == 35) {
+        /* v35 → v36: added image_display_crop */
+        migrate_from_v35(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    } else if (version_check == 34) {
+        /* v34 → v35: added solar_band */
+        migrate_from_v34(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 33) {
         /* v33 → v34: added Moon phase fields (prefill moon lat/lon from weather) */
         migrate_from_v33(raw, stored_size, &s_config);

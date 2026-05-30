@@ -5,18 +5,34 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Sign in - NINA Display</title>
 <style>
-  html,body{margin:0;padding:0;height:100%;background:#0b0f17;color:#e5e7eb;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-  body{display:flex;align-items:center;justify-content:center;min-height:100vh}
-  .card{background:#111827;border:1px solid #1f2937;border-radius:10px;padding:28px 28px 24px;width:320px;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+  :root{
+    --bg:#0a0c14;
+    --surface:#14171f;
+    --elevated:#181b26;
+    --input-bg:#0c0e14;
+    --border:rgba(255,255,255,0.08);
+    --border-em:rgba(255,255,255,0.15);
+    --text:#e2e8f0;
+    --text-muted:#94a3b8;
+    --text-hint:#7a8ba4;
+    --accent:#7aa2f7;
+    --accent-hover:#9dbcff;
+    --accent-strong:#5a86e8;
+    --accent-strong-hover:#4a72d8;
+    --danger:#f87171;
+  }
+  html,body{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  body{display:flex;align-items:center;justify-content:center;min-height:100vh;background-image:linear-gradient(135deg,#0a0c14 0%,#0f1320 100%)}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:28px 28px 24px;width:320px;box-shadow:0 8px 32px rgba(0,0,0,0.4)}
   h1{font-size:18px;margin:0 0 4px;font-weight:600;letter-spacing:.2px}
-  .sub{font-size:12px;color:#9ca3af;margin:0 0 20px}
-  label{display:block;font-size:12px;color:#9ca3af;margin:0 0 6px}
-  input[type=password]{width:100%;box-sizing:border-box;background:#0b0f17;color:#e5e7eb;border:1px solid #273142;border-radius:6px;padding:10px 12px;font-size:14px;outline:none}
-  input[type=password]:focus{border-color:#3b82f6}
-  button{margin-top:14px;width:100%;background:#2563eb;color:#fff;border:0;border-radius:6px;padding:10px 12px;font-size:14px;font-weight:600;cursor:pointer}
-  button:hover{background:#1d4ed8}
+  .sub{font-size:12px;color:var(--text-muted);margin:0 0 20px}
+  label{display:block;font-size:12px;color:var(--text-muted);margin:0 0 6px}
+  input[type=password]{width:100%;box-sizing:border-box;background:var(--input-bg);color:var(--text);border:1px solid var(--border-em);border-radius:6px;padding:10px 12px;font-size:14px;outline:none}
+  input[type=password]:focus{border-color:var(--accent)}
+  button{margin-top:14px;width:100%;background:var(--accent-strong);color:#fff;border:0;border-radius:6px;padding:10px 12px;font-size:14px;font-weight:600;cursor:pointer}
+  button:hover{background:var(--accent-strong-hover)}
   button:disabled{background:#374151;cursor:not-allowed}
-  .err{color:#f87171;font-size:12px;margin-top:10px;min-height:16px}
+  .err{color:var(--danger);font-size:12px;margin-top:10px;min-height:16px}
 </style>
 </head>
 <body>
@@ -27,7 +43,7 @@
     <input id="p" type="password" autocomplete="current-password" autofocus required>
     <button id="b" type="submit">Sign in</button>
     <div class="err" id="e"></div>
-    <div id="hint" style="display:none;font-size:12px;color:#9ca3af;margin-top:10px">Default password: <code style="color:#d1d5db;background:#1f2937;padding:2px 6px;border-radius:3px;font-size:12px">changeme123!</code></div>
+    <div id="hint" style="display:none;font-size:12px;color:var(--text-muted);margin-top:10px">Default password: <code style="color:var(--text-muted);background:var(--elevated);padding:2px 6px;border-radius:3px;font-size:12px">changeme123!</code></div>
   </form>
 <script>
 (function(){
