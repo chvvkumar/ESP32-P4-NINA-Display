@@ -682,8 +682,11 @@ void goes_poll_task(void *arg)
         /* GOES needs network — wait for WiFi before attempting any HTTP requests. */
         xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
 
-        /* Only poll when a region is configured */
-        if (cfg->goes_region[0] != '\0') {
+        if (cfg->image_display_source == 2) {                       /* Solar (SDO/AIA) */
+            const char *url = solar_band_url(cfg->solar_band);
+            /* All solar bands need a vertical flip to display upright (see solar_band_vflip). */
+            if (url && url[0]) goes_client_poll_url(url, &goes_data, solar_band_vflip(cfg->solar_band));
+        } else if (cfg->goes_region[0] != '\0') {                   /* GOES */
             goes_client_poll(cfg->goes_region, &goes_data);
         }
 

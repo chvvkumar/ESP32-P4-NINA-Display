@@ -1388,6 +1388,10 @@
                 <input type="radio" name="imageSourceSel" id="imageSource1" value="1" onchange="updateImageSourceUI();applyImageDisplay();checkDirty()">
                 <span class="pn-pill-visual">Moon Phase</span>
               </label>
+              <label class="pn-pill rotate-pill">
+                <input type="radio" name="imageSourceSel" id="imageSource2" value="2" onchange="updateImageSourceUI();applyImageDisplay();checkDirty()">
+                <span class="pn-pill-visual">Solar (SDO)</span>
+              </label>
             </div>
           </div>
           <div class="toggle-row">
@@ -1395,6 +1399,23 @@
             <label class="toggle"><input type="checkbox" id="image_display_show_overlay" onchange="applyImageDisplay();checkDirty()" checked><span class="toggle-track"></span></label>
           </div>
           <div class="field-hint">Region/phase name and update time overlay on the display</div>
+          <div class="toggle-row">
+            <span class="toggle-label">Fill (crop borders)</span>
+            <label class="toggle"><input type="checkbox" id="image_display_crop" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Zoom the disc to fill the screen and hide the image's timestamp/label. Not applied to the Moon.</div>
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Update Interval</label>
+            <select class="input" id="goesInterval" onchange="applyImageDisplay();checkDirty()">
+              <option value="300">5 minutes</option>
+              <option value="600" selected>10 minutes</option>
+              <option value="900">15 minutes</option>
+              <option value="1800">30 minutes</option>
+              <option value="3600">1 hour</option>
+              <option value="7200">2 hours</option>
+            </select>
+            <div class="field-hint">How often GOES and Solar images refresh. The Moon updates continuously.</div>
+          </div>
           <div id="goesGroup">
           <div class="field" style="margin-top:16px">
             <label class="field-label">Region</label>
@@ -1424,17 +1445,6 @@
             </select>
             <div class="field-hint">GOES-19 GEOCOLOR sector for satellite imagery</div>
           </div>
-          <div class="field">
-            <label class="field-label">Update Interval</label>
-            <select class="input" id="goesInterval" onchange="applyImageDisplay();checkDirty()">
-              <option value="300">5 minutes</option>
-              <option value="600" selected>10 minutes</option>
-              <option value="900">15 minutes</option>
-              <option value="1800">30 minutes</option>
-              <option value="3600">1 hour</option>
-              <option value="7200">2 hours</option>
-            </select>
-          </div>
           <div class="field" style="margin-top:16px">
             <button onclick="fetchGoesPreview()" class="btn btn-primary" id="goesPreviewBtn" style="width:100%">Fetch Preview</button>
           </div>
@@ -1460,6 +1470,32 @@
             <label class="field-label">Longitude</label>
             <input class="input" id="moonLon" type="number" step="0.0001" placeholder="e.g. -74.0060" onchange="applyImageDisplay();checkDirty()">
             <div class="field-hint" id="moonLocHint">Set your location for accurate moon orientation. Prefilled from Weather when available.</div>
+          </div>
+          </div>
+          <div id="solarGroup" style="display:none">
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Band</label>
+            <select class="input" id="solarBand" onchange="applyImageDisplay();checkDirty()">
+              <option value="0">AIA 94 (Fe XVIII)</option>
+              <option value="1">AIA 131 (Fe XX)</option>
+              <option value="2">AIA 171 (Fe IX/X)</option>
+              <option value="3">AIA 193 (Fe XII)</option>
+              <option value="4">AIA 211 (Fe XIV)</option>
+              <option value="5">AIA 304 (He II)</option>
+              <option value="6">AIA 335 (Fe XVI)</option>
+              <option value="7">AIA 1600 (C IV+cont)</option>
+              <option value="8">AIA 1700 (continuum)</option>
+              <option value="9">AIA 4500 (continuum)</option>
+              <option value="10">LASCO C2 (coronagraph)</option>
+              <option value="11">LASCO C3 (coronagraph)</option>
+              <option value="12">SOHO EIT 171</option>
+              <option value="13">SOHO EIT 195</option>
+              <option value="14">SOHO EIT 284</option>
+              <option value="15">SOHO EIT 304</option>
+              <option value="16">SDO/HMI Continuum</option>
+              <option value="17">SDO/HMI Magnetogram</option>
+            </select>
+            <div class="field-hint">NASA SDO/AIA and SOHO realtime (LASCO, EIT, HMI), 1024px, updated every few minutes</div>
           </div>
           </div>
         </div>
@@ -2118,10 +2154,12 @@
         spotify_overlay_timeout_s:parseInt($('spotifyOverlayTimeout').value)||0,
         image_display_enabled:!!$('image_display_enabled').checked,
         image_display_show_overlay:!!$('image_display_show_overlay').checked,
+        image_display_crop:!!$('image_display_crop').checked,
         goes_region:$('goesRegion').value,
         goes_update_interval_s:parseInt($('goesInterval').value)||600,
         image_display_source:getImageSource(),
         moon_bg_style:parseInt($('moonBg').value,10)||0,
+        solar_band:parseInt($('solarBand').value,10)||0,
         moon_lat:parseFloat($('moonLat').value)||0,
         moon_lon:parseFloat($('moonLon').value)||0,
         weather_provider:parseInt($('weather_provider').value)||0,
@@ -2281,12 +2319,15 @@
       // Image Display fields
       if($('image_display_enabled')) $('image_display_enabled').checked=!!data.image_display_enabled;
       if($('image_display_show_overlay')) $('image_display_show_overlay').checked=data.image_display_show_overlay!=null?!!data.image_display_show_overlay:true;
+      if($('image_display_crop')) $('image_display_crop').checked=!!data.image_display_crop;
       if($('goesRegion')) $('goesRegion').value=data.goes_region||'umv';
       if($('goesInterval')) $('goesInterval').value=data.goes_update_interval_s||600;
       var imgSrc=parseInt(data.image_display_source||0,10)||0;
       if($('imageSource0')) $('imageSource0').checked=(imgSrc===0);
       if($('imageSource1')) $('imageSource1').checked=(imgSrc===1);
+      if($('imageSource2')) $('imageSource2').checked=(imgSrc===2);
       if($('moonBg')) $('moonBg').value=String(data.moon_bg_style||0);
+      if($('solarBand')) $('solarBand').value=String(data.solar_band||0);
       var mlat=data.moon_lat, mlon=data.moon_lon;
       // Prefill from weather location when moon coords are unset
       if((!mlat && !mlon) && (data.weather_lat || data.weather_lon)){ mlat=data.weather_lat; mlon=data.weather_lon; }
@@ -3293,20 +3334,23 @@
 
     function updateImageSourceUI(){
       var s=getImageSource();
-      if($('goesGroup')) $('goesGroup').style.display=(s===1)?'none':'';
-      if($('moonGroup')) $('moonGroup').style.display=(s===1)?'':'none';
+      if($('goesGroup'))  $('goesGroup').style.display =(s===0)?'':'none';
+      if($('moonGroup'))  $('moonGroup').style.display =(s===1)?'':'none';
+      if($('solarGroup')) $('solarGroup').style.display=(s===2)?'':'none';
     }
 
     function applyImageDisplay(){
       postJson('/api/image-display-config', {
         image_display_enabled: !!$('image_display_enabled').checked,
         image_display_show_overlay: !!$('image_display_show_overlay').checked,
+        image_display_crop: !!$('image_display_crop').checked,
         goes_region: $('goesRegion').value,
         goes_update_interval_s: parseInt($('goesInterval').value,10)||600,
         image_display_source: getImageSource(),
         moon_bg_style: parseInt($('moonBg').value,10)||0,
         moon_lat: parseFloat($('moonLat').value)||0,
-        moon_lon: parseFloat($('moonLon').value)||0
+        moon_lon: parseFloat($('moonLon').value)||0,
+        solar_band: parseInt($('solarBand').value,10)||0
       });
     }
 

@@ -217,11 +217,29 @@ void nina_image_display_update(goes_data_t *data)
     /* Copy the RGB565 source into a freshly allocated PSRAM buffer so we can
      * release the goes mutex before running the (asynchronous) crossfade and
      * so this page owns its display buffers independently of the poller. */
-    uint16_t w = data->image_w, h = data->image_h;
-    if (w == 0 || h == 0) {
+    uint16_t sw = data->image_w, sh = data->image_h;
+    if (sw == 0 || sh == 0) {
         goes_data_unlock(data);
         return;
     }
+
+    /* Optional center-crop: keep the central ~88% so the solar/satellite disc
+     * zooms to fill the panel and the timestamp/label baked into the source
+     * border is cropped off. Skipped for the Moon (source 1): it has no text
+     * and is already framed to fill. */
+    const app_config_t *cfg = app_config_get();
+    uint16_t w = sw, h = sh, ox = 0, oy = 0;
+    /* Crop only when enabled, not the Moon, and (for Solar) not a frame-filling
+     * band (LASCO/HMI) whose disc would be clipped. */
+    extern bool solar_band_croppable(uint8_t idx);
+    bool croppable = (cfg->image_display_source != 2) || solar_band_croppable(cfg->solar_band);
+    if (cfg->image_display_crop && cfg->image_display_source != 1 && croppable) {
+        w  = (uint16_t)((uint32_t)sw * 88 / 100);
+        h  = (uint16_t)((uint32_t)sh * 88 / 100);
+        ox = (uint16_t)((sw - w) / 2);
+        oy = (uint16_t)((sh - h) / 2);
+    }
+
     size_t   buf_size = (size_t)w * h * 2;
     uint8_t *copy = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
     if (!copy) {
@@ -230,22 +248,17 @@ void nina_image_display_update(goes_data_t *data)
         goes_data_unlock(data);
         return;
     }
-    /* The software JPEG decoder feeding this page produces a vertically flipped
-     * buffer (top<->bottom) relative to the hardware decode path used by
-     * Spotify art / NINA thumbnails, which render correctly. Confirmed via the
-     * device /api/screenshot (logical, rotation-independent): without this the
-     * caption/logo render at the top. Copy row-reversed so the logical buffer
-     * is upright and matches the hardware convention; the panel rotation then
-     * handles physical orientation uniformly, as it does for the other pages. */
-    if (data->vflip) {
-        size_t row_bytes = (size_t)w * 2;
-        for (uint32_t y = 0; y < h; y++) {
-            memcpy((uint8_t *)copy + (size_t)y * row_bytes,
-                   data->image_buf + (size_t)(h - 1 - y) * row_bytes,
-                   row_bytes);
-        }
-    } else {
-        memcpy(copy, data->image_buf, buf_size);
+    /* Copy the (optionally cropped) source row-by-row. The software JPEG decoder
+     * path sets vflip=true (its buffer is top<->bottom relative to the hardware
+     * decode path); reverse the source row index in that case so the logical
+     * buffer is upright. ox/oy apply the center-crop. */
+    size_t src_stride = (size_t)sw * 2;
+    size_t dst_stride = (size_t)w * 2;
+    for (uint32_t y = 0; y < h; y++) {
+        uint32_t src_y = data->vflip ? (uint32_t)(sh - 1 - (oy + y)) : (uint32_t)(oy + y);
+        memcpy((uint8_t *)copy + (size_t)y * dst_stride,
+               data->image_buf + (size_t)src_y * src_stride + (size_t)ox * 2,
+               dst_stride);
     }
     int64_t poll_ms = data->last_poll_ms;
     goes_data_unlock(data);
@@ -321,7 +334,7 @@ void nina_image_display_update(goes_data_t *data)
         lv_anim_start(&a_out);
     }
 
-    const app_config_t *cfg = app_config_get();
+    /* cfg is already fetched above (crop check). */
     if (cfg->image_display_source == 1) {           /* Moon */
         extern void moon_caption(char *name_out, size_t name_sz,
                                  char *pct_out, size_t pct_sz);
@@ -329,6 +342,12 @@ void nina_image_display_update(goes_data_t *data)
         moon_caption(name, sizeof(name), pct, sizeof(pct));
         lv_label_set_text(lbl_region, name);
         lv_label_set_text(lbl_timestamp, pct);
+    } else if (cfg->image_display_source == 2) {     /* Solar (SDO/AIA) */
+        extern const char *solar_band_label(uint8_t idx);
+        lv_label_set_text(lbl_region, solar_band_label(cfg->solar_band));
+        time_t now; struct tm ti; time(&now); localtime_r(&now, &ti);
+        char ts[32]; strftime(ts, sizeof(ts), "Updated %H:%M", &ti);
+        lv_label_set_text(lbl_timestamp, ts);
     } else {                                         /* GOES */
         lv_label_set_text(lbl_region, region_code_to_name(cfg->goes_region));
         time_t now; struct tm ti; time(&now); localtime_r(&now, &ti);

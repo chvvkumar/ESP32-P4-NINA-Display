@@ -20,4 +20,10 @@ void      goes_data_init(goes_data_t *data);
 bool      goes_data_lock(goes_data_t *data, int timeout_ms);
 void      goes_data_unlock(goes_data_t *data);
 esp_err_t goes_client_poll(const char *region, goes_data_t *data);
+esp_err_t goes_client_poll_url(const char *url, goes_data_t *data, bool vflip);
 void      goes_client_cleanup(goes_data_t *data);
+
+const char *solar_band_url(uint8_t idx);
+const char *solar_band_label(uint8_t idx);
+bool        solar_band_vflip(uint8_t idx);
+bool        solar_band_croppable(uint8_t idx);
