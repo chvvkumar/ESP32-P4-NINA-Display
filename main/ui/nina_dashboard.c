@@ -24,6 +24,7 @@
 #include "nina_safety.h"
 #include "nina_idle_indicator.h"
 #include "nina_ota_prompt.h"
+#include "nina_wait_overlay.h"
 #include "ui_styles.h"
 #include "app_config.h"
 #include "themes.h"
@@ -304,6 +305,7 @@ void nina_dashboard_apply_theme(int theme_index) {
     nina_alerts_apply_theme();
     nina_safety_apply_theme();
     nina_ota_prompt_apply_theme();
+    nina_wait_overlay_apply_theme();
 
     update_indicators();
 
@@ -908,6 +910,9 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
 
     // OTA update prompt overlay (on top of everything)
     nina_ota_prompt_create(scr_dashboard);
+
+    // Generic wait/loading overlay (created last so it sits on top)
+    nina_wait_overlay_create(scr_dashboard);
 
     // Make header box clickable on all pages to open thumbnail
     for (int i = 0; i < page_count; i++) {

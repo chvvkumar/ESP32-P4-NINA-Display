@@ -9,7 +9,7 @@
 
 static const char *TAG = "goes_client";
 
-#define GOES_JPEG_MAX_SIZE   (512 * 1024)
+#define GOES_JPEG_MAX_SIZE   (1024 * 1024)   /* 1MB: fits SOHO LASCO C3 1024 (~815KB) */
 #define GOES_HTTP_BUF_SIZE   4096
 #define GOES_HTTP_TIMEOUT_MS 30000
 
@@ -71,6 +71,77 @@ static const char *goes_region_size(const char *region)
     return "600x600";
 }
 
+/* Solar imagery: SDO/AIA 1024px JPEGs (NASA SDO) plus SOHO realtime 1024px JPEGs
+ * (SOHO/EIT, LASCO coronagraphs, SDO/HMI). All 1024px; LASCO C3 is ~815KB, so
+ * GOES_JPEG_MAX_SIZE is 1MB to fit them. Index 0..17. */
+#define SOLAR_BAND_COUNT 18
+static const char *SOLAR_URLS[SOLAR_BAND_COUNT] = {
+    "https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0094.jpg",
+    "https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0131.jpg",
+    "https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0171.jpg",
+    "https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0193.jpg",
+    "https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0211.jpg",
+    "https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0304.jpg",
+    "https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0335.jpg",
+    "https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_1600.jpg",
+    "https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_1700.jpg",
+    "https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_4500.jpg",
+    "https://soho.nascom.nasa.gov/data/realtime/c2/1024/latest.jpg",
+    "https://soho.nascom.nasa.gov/data/realtime/c3/1024/latest.jpg",
+    "https://soho.nascom.nasa.gov/data/realtime/eit_171/1024/latest.jpg",
+    "https://soho.nascom.nasa.gov/data/realtime/eit_195/1024/latest.jpg",
+    "https://soho.nascom.nasa.gov/data/realtime/eit_284/1024/latest.jpg",
+    "https://soho.nascom.nasa.gov/data/realtime/eit_304/1024/latest.jpg",
+    "https://soho.nascom.nasa.gov/data/realtime/hmi_igr/1024/latest.jpg",
+    "https://soho.nascom.nasa.gov/data/realtime/hmi_mag/1024/latest.jpg",
+};
+static const char *SOLAR_LABELS[SOLAR_BAND_COUNT] = {
+    "AIA 94","AIA 131","AIA 171","AIA 193","AIA 211","AIA 304","AIA 335","AIA 1600","AIA 1700","AIA 4500",
+    "LASCO C2","LASCO C3","SOHO EIT 171","SOHO EIT 195","SOHO EIT 284","SOHO EIT 304",
+    "HMI Continuum","HMI Magnetogram"
+};
+
+const char *solar_band_url(uint8_t idx)   { return idx < SOLAR_BAND_COUNT ? SOLAR_URLS[idx]   : SOLAR_URLS[0]; }
+const char *solar_band_label(uint8_t idx) { return idx < SOLAR_BAND_COUNT ? SOLAR_LABELS[idx] : SOLAR_LABELS[0]; }
+
+/* All solar imagery (SDO/AIA and SOHO) needs a vertical flip to display upright
+ * on this panel, same as the GOES path. */
+bool solar_band_vflip(uint8_t idx) { (void)idx; return true; }
+
+/* Per-band center-crop percentage (100 = no crop). AIA (0..9) and SOHO EIT
+ * (12..15) have a wide source border, so 88% zooms past the timestamp/label.
+ * HMI continuum/magnetogram (16,17) have only a ~4.2% black margin around a
+ * ~91.5%-diameter disc, so 92% trims the caption border while leaving a thin
+ * black ring (disc NOT clipped). LASCO C2/C3 (10,11) fill the frame edge-to-edge
+ * with a burned-in timestamp at the very bottom (~3.5% up); 90% (~5%/side) crops
+ * it off, sacrificing some outer corona (acceptable) and avoiding a blend patch. */
+uint8_t solar_band_crop_pct(uint8_t idx)
+{
+    if (idx == 10 || idx == 11) return 90;   /* LASCO: crop off the burned-in timestamp */
+    if (idx == 16 || idx == 17) return 92;   /* HMI: trim to disc edge */
+    return 88;                               /* AIA / SOHO EIT */
+}
+
+/* Upright-full-image fractional rect (0..1, origin top-left, y down) covering a
+ * caption that the crop alone does not remove. Returns false when no mask is
+ * needed. The HMI rect is below the disc bottom (~row 0.97) and normally cropped
+ * away (belt-and-suspenders for a taller-than-expected future caption). LASCO is
+ * cropped instead of masked, so it returns false here. */
+bool solar_band_text_mask(uint8_t idx, float *x0, float *y0, float *x1, float *y1)
+{
+    float a, b, c, d;
+    switch (idx) {
+        case 16:
+        case 17: a = 0.0f; b = 0.97f; c = 0.50f; d = 1.0f; break;  /* HMI */
+        default: return false;  /* LASCO (10,11) now cropped, not masked */
+    }
+    if (x0) *x0 = a;
+    if (y0) *y0 = b;
+    if (x1) *x1 = c;
+    if (y1) *y1 = d;
+    return true;
+}
+
 esp_err_t goes_client_poll(const char *region, goes_data_t *data)
 {
     if (!region || !data) return ESP_ERR_INVALID_ARG;
@@ -80,6 +151,14 @@ esp_err_t goes_client_poll(const char *region, goes_data_t *data)
     snprintf(url, sizeof(url),
              "https://cdn.star.nesdis.noaa.gov/GOES19/ABI/SECTOR/%s/GEOCOLOR/%s.jpg",
              region, size);
+
+    /* NESDIS GOES JPEGs decode upside-down on this panel; flip them. */
+    return goes_client_poll_url(url, data, true);
+}
+
+esp_err_t goes_client_poll_url(const char *url, goes_data_t *data, bool vflip)
+{
+    if (!url || !data) return ESP_ERR_INVALID_ARG;
 
     ESP_LOGI(TAG, "Fetching %s", url);
 
@@ -190,7 +269,7 @@ esp_err_t goes_client_poll(const char *region, goes_data_t *data)
         data->image_buf = rgb565;
         data->image_w = (uint16_t)out_w;
         data->image_h = (uint16_t)out_h;
-        data->vflip = true;
+        data->vflip = vflip;
         data->connected = true;
         data->last_poll_ms = esp_timer_get_time() / 1000;
         goes_data_unlock(data);

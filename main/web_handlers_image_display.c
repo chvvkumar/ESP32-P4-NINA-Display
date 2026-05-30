@@ -24,12 +24,14 @@ esp_err_t image_display_config_get_handler(httpd_req_t *req)
 
     cJSON_AddBoolToObject(root, "image_display_enabled", cfg->image_display_enabled);
     cJSON_AddBoolToObject(root, "image_display_show_overlay", cfg->image_display_show_overlay);
+    cJSON_AddBoolToObject(root, "image_display_crop", cfg->image_display_crop);
     cJSON_AddStringToObject(root, "goes_region", cfg->goes_region);
     cJSON_AddNumberToObject(root, "goes_update_interval_s", cfg->goes_update_interval_s);
     cJSON_AddNumberToObject(root, "image_display_source", cfg->image_display_source);
     cJSON_AddNumberToObject(root, "moon_bg_style", cfg->moon_bg_style);
     cJSON_AddNumberToObject(root, "moon_lat", cfg->moon_lat);
     cJSON_AddNumberToObject(root, "moon_lon", cfg->moon_lon);
+    cJSON_AddNumberToObject(root, "solar_band", cfg->solar_band);
 
     const char *json_str = cJSON_PrintUnformatted(root);
     if (json_str == NULL) {
@@ -71,8 +73,19 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
 
     app_config_t *cfg = app_config_get();
 
+    /* Capture the current source/band/region/crop so we can tell, after saving,
+     * whether the change needs a new image (source/band/region -> re-download +
+     * wait overlay) or only a crop/full toggle (-> local re-render of the cached
+     * frame, no download). */
+    uint8_t prev_source = cfg->image_display_source;
+    uint8_t prev_band   = cfg->solar_band;
+    bool    prev_crop   = cfg->image_display_crop;
+    char    prev_region[sizeof(cfg->goes_region)];
+    strlcpy(prev_region, cfg->goes_region, sizeof(prev_region));
+
     JSON_TO_BOOL(root, "image_display_enabled", cfg->image_display_enabled);
     JSON_TO_BOOL(root, "image_display_show_overlay", cfg->image_display_show_overlay);
+    JSON_TO_BOOL(root, "image_display_crop", cfg->image_display_crop);
     JSON_TO_STRING(root, "goes_region", cfg->goes_region);
 
     cJSON *interval = cJSON_GetObjectItem(root, "goes_update_interval_s");
@@ -84,13 +97,15 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     }
 
     cJSON *src = cJSON_GetObjectItem(root, "image_display_source");
-    if (cJSON_IsNumber(src)) cfg->image_display_source = (src->valueint == 1) ? 1 : 0;
+    if (cJSON_IsNumber(src)) { int v = src->valueint; cfg->image_display_source = (v >= 0 && v <= 2) ? (uint8_t)v : 0; }
     cJSON *bg = cJSON_GetObjectItem(root, "moon_bg_style");
     if (cJSON_IsNumber(bg)) { int v = bg->valueint; cfg->moon_bg_style = (v >= 0 && v <= 3) ? (uint8_t)v : 0; }
     cJSON *mlat = cJSON_GetObjectItem(root, "moon_lat");
     if (cJSON_IsNumber(mlat)) cfg->moon_lat = (float)mlat->valuedouble;
     cJSON *mlon = cJSON_GetObjectItem(root, "moon_lon");
     if (cJSON_IsNumber(mlon)) cfg->moon_lon = (float)mlon->valuedouble;
+    cJSON *sb = cJSON_GetObjectItem(root, "solar_band");
+    if (cJSON_IsNumber(sb)) { int v = sb->valueint; cfg->solar_band = (v >= 0 && v <= 17) ? (uint8_t)v : 0; }
 
     cJSON_Delete(root);
 
@@ -103,9 +118,35 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     }
 
     if (cfg->image_display_enabled) {
-        goes_ensure_task_running();
-        if (goes_task_handle) {
-            xTaskNotifyGive(goes_task_handle);
+        bool source_band_region_changed =
+            cfg->image_display_source != prev_source ||
+            cfg->solar_band != prev_band ||
+            strcmp(cfg->goes_region, prev_region) != 0;
+        bool crop_changed = cfg->image_display_crop != prev_crop;
+
+        if (source_band_region_changed) {
+            /* Source/band/region needs a genuinely new image: flag the next
+             * fetch as manual so goes_poll_task shows the wait overlay during
+             * the re-download/decode, then wake the task. If crop also changed,
+             * the re-download path re-applies the new crop, so no separate local
+             * re-render is needed. */
+            atomic_store(&image_display_manual_fetch, true);
+            goes_ensure_task_running();
+            if (goes_task_handle) {
+                xTaskNotifyGive(goes_task_handle);
+            }
+        } else if (crop_changed) {
+            /* Crop/full toggle only: re-render the already-decoded frame locally
+             * instead of re-downloading. nina_image_display_update() locks
+             * goes_data internally but REQUIRES the display lock held by the
+             * caller (see tasks.c), so wrap both calls in bsp_display_lock. The
+             * force-redraw gate is a safe no-op if no image is cached or the page
+             * is not on the image path. */
+            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                nina_image_display_force_redraw();
+                nina_image_display_update(&goes_data);
+                bsp_display_unlock();
+            }
         }
     }
 

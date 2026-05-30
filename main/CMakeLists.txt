@@ -12,6 +12,7 @@ idf_component_register(
          ui/nina_info_overlay.c ui/nina_info_camera.c ui/nina_info_mount.c
          ui/nina_info_imagestats.c ui/nina_info_sequence.c ui/nina_info_filter.c ui/nina_info_autofocus.c ui/nina_info_session_stats.c
          ui/nina_ota_prompt.c
+         ui/nina_wait_overlay.c
          ${LV_DEMOS_SOURCES}
     INCLUDE_DIRS . ui ${LV_DEMO_DIR}
     EMBED_TXTFILES config_ui.html login.html setup_ui.html

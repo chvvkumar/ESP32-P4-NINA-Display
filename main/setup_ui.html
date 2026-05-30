@@ -5,76 +5,94 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>WiFi Setup - NINA Display</title>
 <style>
-  html,body{margin:0;padding:0;height:100%;background:#0b0f17;color:#e5e7eb;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-  body{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:16px;box-sizing:border-box}
-  .card{background:#111827;border:1px solid #1f2937;border-radius:10px;padding:28px;width:100%;max-width:420px;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+  :root{
+    --bg:#0a0c14;
+    --surface:#14171f;
+    --elevated:#181b26;
+    --input-bg:#0c0e14;
+    --border:rgba(255,255,255,0.08);
+    --border-em:rgba(255,255,255,0.15);
+    --text:#e2e8f0;
+    --text-muted:#94a3b8;
+    --text-hint:#7a8ba4;
+    --accent:#7aa2f7;
+    --accent-hover:#9dbcff;
+    --accent-strong:#5a86e8;
+    --accent-strong-hover:#4a72d8;
+    --danger:#f87171;
+    --success:#4ade80;
+    --warning:#fbbf24;
+  }
+  html,body{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  body{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:16px;box-sizing:border-box;background-image:linear-gradient(135deg,#0a0c14 0%,#0f1320 100%)}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:28px;width:100%;max-width:420px;box-shadow:0 8px 32px rgba(0,0,0,0.4)}
   h1{font-size:18px;margin:0 0 4px;font-weight:600;letter-spacing:.2px}
-  .sub{font-size:14px;color:#9ca3af;margin:0 0 20px}
+  .sub{font-size:14px;color:var(--text-muted);margin:0 0 20px}
 
   /* Scan panel */
-  .scan-panel{background:#0b0f17;border:1px solid #1f2937;border-radius:8px;margin-bottom:20px;overflow:hidden}
-  .scan-header{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid #1f2937}
-  .scan-label{font-size:13px;font-weight:600;color:#e5e7eb}
-  .btn-rescan{background:transparent;color:#3b82f6;border:1px solid #3b82f6;border-radius:5px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:.3px}
-  .btn-rescan:hover{background:rgba(59,130,246,.1)}
+  .scan-panel{background:var(--elevated);border:1px solid var(--border);border-radius:8px;margin-bottom:20px;overflow:hidden}
+  .scan-header{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--border)}
+  .scan-label{font-size:13px;font-weight:600;color:var(--text)}
+  .btn-rescan{background:transparent;color:var(--accent);border:1px solid var(--accent);border-radius:5px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:.3px}
+  .btn-rescan:hover{background:rgba(122,162,247,.1)}
   .btn-rescan:disabled{opacity:.5;cursor:not-allowed}
-  .scan-list{max-height:260px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#273142 transparent}
+  .scan-list{max-height:260px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,0.10) transparent}
   .scan-list::-webkit-scrollbar{width:6px}
   .scan-list::-webkit-scrollbar-track{background:transparent}
-  .scan-list::-webkit-scrollbar-thumb{background:#273142;border-radius:3px}
-  .scan-empty{padding:20px;text-align:center;color:#9ca3af;font-size:13px}
-  .scan-footer{padding:8px 14px;border-top:1px solid #1f2937;font-size:11px;color:#6b7280;text-align:center}
+  .scan-list::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.10);border-radius:3px}
+  .scan-empty{padding:20px;text-align:center;color:var(--text-muted);font-size:13px}
+  .scan-footer{padding:8px 14px;border-top:1px solid var(--border);font-size:11px;color:var(--text-hint);text-align:center}
 
   /* Spinner */
-  .spinner-wrap{display:flex;align-items:center;justify-content:center;padding:24px;gap:10px;color:#9ca3af;font-size:13px}
-  .spinner{width:18px;height:18px;border:2px solid #273142;border-top-color:#3b82f6;border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0}
+  .spinner-wrap{display:flex;align-items:center;justify-content:center;padding:24px;gap:10px;color:var(--text-muted);font-size:13px}
+  .spinner{width:18px;height:18px;border:2px solid rgba(255,255,255,0.10);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0}
   @keyframes spin{to{transform:rotate(360deg)}}
 
   /* Network row */
-  .net-row{display:flex;align-items:center;padding:10px 14px;border-bottom:1px solid #1a1f2e;gap:10px;transition:background .15s}
+  .net-row{display:flex;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border);gap:10px;transition:background .15s}
   .net-row:last-child{border-bottom:none}
-  .net-row:hover{background:rgba(59,130,246,.04)}
+  .net-row:hover{background:rgba(122,162,247,.04)}
   .net-row.incompatible{opacity:.45}
   .net-row.incompatible:hover{background:transparent}
   .net-info{flex:1;min-width:0}
   .net-ssid{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .net-ssid.struck{text-decoration:line-through}
-  .net-meta{font-size:11px;color:#6b7280;margin-top:2px}
-  .badge-incompat{display:inline-block;background:rgba(244,67,54,.15);color:#f44336;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;text-transform:uppercase;letter-spacing:.3px;margin-left:6px;vertical-align:middle}
-  .btn-select{background:#3b82f6;color:#0b0f17;border:none;border-radius:5px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:.3px;flex-shrink:0;white-space:nowrap}
-  .btn-select:hover{background:#60a5fa}
+  .net-meta{font-size:11px;color:var(--text-hint);margin-top:2px}
+  .badge-incompat{display:inline-block;background:rgba(248,113,113,.15);color:var(--danger);font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;text-transform:uppercase;letter-spacing:.3px;margin-left:6px;vertical-align:middle}
+  .btn-select{background:var(--accent);color:#0a0c14;border:none;border-radius:5px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;text-transform:uppercase;letter-spacing:.3px;flex-shrink:0;white-space:nowrap}
+  .btn-select:hover{background:var(--accent-hover)}
 
   /* Signal bars */
   .signal-bars{display:flex;align-items:flex-end;gap:2px;flex-shrink:0;width:18px;height:16px}
-  .signal-bars .bar{width:3px;border-radius:1px;background:#273142}
+  .signal-bars .bar{width:3px;border-radius:1px;background:rgba(255,255,255,0.10)}
   .signal-bars .bar:nth-child(1){height:4px}
   .signal-bars .bar:nth-child(2){height:7px}
   .signal-bars .bar:nth-child(3){height:11px}
   .signal-bars .bar:nth-child(4){height:16px}
-  .signal-bars.bars-4 .bar{background:#4caf50}
-  .signal-bars.bars-3 .bar:nth-child(1),.signal-bars.bars-3 .bar:nth-child(2),.signal-bars.bars-3 .bar:nth-child(3){background:#ff9800}
-  .signal-bars.bars-2 .bar:nth-child(1),.signal-bars.bars-2 .bar:nth-child(2){background:#f44336}
+  .signal-bars.bars-4 .bar{background:var(--success)}
+  .signal-bars.bars-3 .bar:nth-child(1),.signal-bars.bars-3 .bar:nth-child(2),.signal-bars.bars-3 .bar:nth-child(3){background:var(--warning)}
+  .signal-bars.bars-2 .bar:nth-child(1),.signal-bars.bars-2 .bar:nth-child(2){background:var(--danger)}
 
   /* Form */
   .form-group{margin-bottom:14px}
-  .form-group label{display:block;font-size:12px;color:#9ca3af;margin-bottom:6px}
-  .form-group input{width:100%;box-sizing:border-box;background:#0b0f17;color:#e5e7eb;border:1px solid #273142;border-radius:6px;padding:10px 12px;font-size:14px;outline:none;font-family:inherit}
-  .form-group input:focus{border-color:#3b82f6}
-  .btn-connect{margin-top:6px;width:100%;background:#2563eb;color:#fff;border:0;border-radius:6px;padding:10px 12px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit}
-  .btn-connect:hover{background:#1d4ed8}
+  .form-group label{display:block;font-size:12px;color:var(--text-muted);margin-bottom:6px}
+  .form-group input{width:100%;box-sizing:border-box;background:var(--input-bg);color:var(--text);border:1px solid var(--border-em);border-radius:6px;padding:10px 12px;font-size:14px;outline:none;font-family:inherit}
+  .form-group input:focus{border-color:var(--accent)}
+  .btn-connect{margin-top:6px;width:100%;background:var(--accent-strong);color:#fff;border:0;border-radius:6px;padding:10px 12px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit}
+  .btn-connect:hover{background:var(--accent-strong-hover)}
   .btn-connect:disabled{background:#374151;cursor:not-allowed}
 
   /* Status area */
   .status-area{margin-top:16px;text-align:center;display:none}
-  .status-connecting{display:flex;align-items:center;justify-content:center;gap:10px;color:#9ca3af;font-size:13px;padding:8px 0}
-  .status-success{color:#4caf50;font-size:14px;font-weight:500}
-  .status-success .ip{display:block;font-size:12px;color:#9ca3af;margin-top:4px;font-weight:400}
-  .status-success a{display:inline-block;margin-top:12px;color:#3b82f6;font-size:13px;font-weight:600;text-decoration:none}
+  .status-connecting{display:flex;align-items:center;justify-content:center;gap:10px;color:var(--text-muted);font-size:13px;padding:8px 0}
+  .status-success{color:var(--success);font-size:14px;font-weight:500}
+  .status-success .ip{display:block;font-size:12px;color:var(--text-muted);margin-top:4px;font-weight:400}
+  .status-success a{display:inline-block;margin-top:12px;color:var(--accent);font-size:13px;font-weight:600;text-decoration:none}
   .status-success a:hover{text-decoration:underline}
-  .status-fail{color:#f87171;font-size:13px}
-  .btn-retry{margin-top:10px;background:transparent;color:#3b82f6;border:1px solid #3b82f6;border-radius:6px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}
-  .btn-retry:hover{background:rgba(59,130,246,.1)}
-  .err{color:#f87171;font-size:12px;margin-top:8px;min-height:16px;text-align:center}
+  .status-fail{color:var(--danger);font-size:13px}
+  .btn-retry{margin-top:10px;background:transparent;color:var(--accent);border:1px solid var(--accent);border-radius:6px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}
+  .btn-retry:hover{background:rgba(122,162,247,.1)}
+  .err{color:var(--danger);font-size:12px;margin-top:8px;min-height:16px;text-align:center}
 </style>
 </head>
 <body>
