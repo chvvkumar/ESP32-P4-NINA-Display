@@ -173,7 +173,8 @@ bool jpeg_sw_decode_rgb565(const uint8_t *jpg_data, size_t jpg_size,
         return false;
     }
 
-    /* Convert RGB888 to RGB565 (BGR byte order to match HW decoder output) */
+    /* Convert RGB888 to standard RGB565 (R high, B low) — same in-memory layout
+     * the HW decoder produces, which the panel/LVGL pipeline renders correctly. */
     uint16_t *dst = (uint16_t *)rgb565;
 
     for (int y = 0; y < h; y++) {
@@ -183,8 +184,11 @@ bool jpeg_sw_decode_rgb565(const uint8_t *jpg_data, size_t jpg_size,
             uint8_t r = src_row[x * 3 + 0];
             uint8_t g = src_row[x * 3 + 1];
             uint8_t b = src_row[x * 3 + 2];
-            /* BGR565 to match JPEG_DEC_RGB_ELEMENT_ORDER_BGR */
-            dst_row[x] = ((b >> 3) << 11) | ((g >> 2) << 5) | (r >> 3);
+            /* Standard RGB565 (R high, B low). This matches the in-memory layout
+             * the panel/LVGL pipeline expects — the same result the HW decoder
+             * produces with JPEG_DEC_RGB_ELEMENT_ORDER_BGR. Packing B into the
+             * high bits here swaps red and blue (sodium lights render blue). */
+            dst_row[x] = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
         }
     }
 

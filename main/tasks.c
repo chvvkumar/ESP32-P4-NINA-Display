@@ -10,6 +10,10 @@
 #include "nina_websocket.h"
 #include "nina_connection.h"
 #include "allsky_client.h"
+#include "goes_client.h"
+#include "moon_render.h"
+#include "moon_ephemeris.h"
+#include <math.h>           /* acos() for seamless anim start cycle */
 #include "spotify_auth.h"
 #include "spotify_client.h"
 #include "app_config.h"
@@ -27,6 +31,7 @@
 #include "ui/nina_session_stats.h"
 #include "ui/nina_ota_prompt.h"
 #include "ui/nina_idle_indicator.h"
+#include "ui/nina_image_display.h"
 #include "ota_github.h"
 #include "esp_ota_ops.h"
 #include "bsp/esp-bsp.h"
@@ -153,6 +158,13 @@ _Atomic bool nina_pages_active   = false;
 /* AllSky polling state */
 static allsky_data_t allsky_data;
 static TaskHandle_t allsky_task_handle = NULL;
+
+/* GOES / Image Display polling state.
+ * Non-static: tasks.h externs these and web handlers use goes_task_handle /
+ * goes_ensure_task_running to spawn/wake the task on runtime enable. */
+TaskHandle_t goes_task_handle = NULL;
+_Atomic bool image_display_page_active = false;
+goes_data_t goes_data;
 static demo_task_params_t demo_params;
 
 /* ── Idle page override state ── */
@@ -173,6 +185,7 @@ static int idle_target_to_page_index(int8_t target)
         case IDLE_TARGET_CLOCK:    return PAGE_IDX_CLOCK;
         case IDLE_TARGET_ALLSKY:   return PAGE_IDX_ALLSKY;
         case IDLE_TARGET_SPOTIFY:  return PAGE_IDX_SPOTIFY;
+        case IDLE_TARGET_IMAGE_DISPLAY:  return PAGE_IDX_IMAGE_DISPLAY;
         case IDLE_TARGET_SYSINFO:  return SYSINFO_PAGE_IDX(page_count);
         default:                   return PAGE_IDX_SUMMARY;
     }
@@ -298,7 +311,8 @@ void input_task(void *arg) {
             /* Short press — cycle page */
             int total = nina_dashboard_get_total_page_count();
             int current = nina_dashboard_get_active_page();
-            /* Skip settings, disabled allsky, and disabled spotify in button cycling */
+            /* Skip settings, disabled allsky, disabled spotify, and disabled
+             * image display in button cycling */
             int new_page = current;
             for (int step = 1; step < total; step++) {
                 int candidate = (current + step) % total;
@@ -307,6 +321,8 @@ void input_task(void *arg) {
                     && !app_config_get()->allsky_enabled) continue;
                 if (candidate == PAGE_IDX_SPOTIFY && !nina_dashboard_is_spotify_page()
                     && !app_config_get()->spotify_enabled) continue;
+                if (candidate == PAGE_IDX_IMAGE_DISPLAY && !nina_dashboard_is_image_display_page()
+                    && !app_config_get()->image_display_enabled) continue;
                 new_page = candidate;
                 break;
             }
@@ -522,6 +538,192 @@ void allsky_poll_task(void *arg) {
         uint32_t interval_ms = (uint32_t)cfg->allsky_update_interval_s * 1000;
         if (interval_ms < 1000) interval_ms = 1000;
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(interval_ms));
+    }
+}
+
+// =============================================================================
+// GOES Image Display Poll Task — independent poller pinned to Core 0
+// =============================================================================
+
+/* Last-computed moon state, written only by goes_poll_task (single writer) and
+ * read by moon_caption() from the UI task. The fields are slow-changing and the
+ * read is benign (pointer + float), so a lock is intentionally omitted. */
+static moon_state_t s_moon_state;
+
+/* One-shot tap-animation request. Set by the moon-page tap handler (UI/Core 1),
+ * consumed once by goes_poll_task via atomic_exchange. Declared extern in tasks.h. */
+_Atomic bool moon_anim_request = false;
+
+/* Provide the caption text for the Image Display page when the Moon source is
+ * active. Declared (extern) in nina_image_display.c. */
+void moon_caption(char *name_out, size_t name_sz, char *pct_out, size_t pct_sz)
+{
+    /* Lock-free read is acceptable here (slow-changing, single writer). */
+    snprintf(name_out, name_sz, "%s", s_moon_state.phase_name ? s_moon_state.phase_name : "Moon");
+    snprintf(pct_out, pct_sz, "%d%%", (int)(s_moon_state.illum * 100.0f + 0.5f));
+}
+
+void goes_poll_task(void *arg)
+{
+    ESP_LOGI(TAG, "GOES poll task started");
+
+    while (1) {
+        /* Suspend during OTA or when the Image Display page is not visible */
+        while (ota_in_progress || !image_display_page_active) {
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
+        }
+
+        /* Read fields directly from config pointer — avoids copying the full
+         * app_config_t onto this task's small stack. */
+        const app_config_t *cfg = app_config_get();
+
+        /* Moon source: render locally on-device, no network. The result is
+         * pushed into the same goes_data RGB565 sink the crossfade page reads. */
+        if (cfg->image_display_source == 1) {
+            time_t now; time(&now);
+            /* The moon phase/orientation needs a correct wall clock. Before SNTP
+             * sets the time (near-epoch at boot), rendering would show the wrong
+             * phase, e.g. a half-lit disc, until the next recompute. Skip the
+             * render until the clock is valid and retry quickly so the correct
+             * moon appears as soon as time syncs; then settle to ~60s. */
+            bool time_valid = (now > (time_t)1577836800);  /* >= 2020-01-01 UTC */
+            if (time_valid && moon_render_init()) {
+                double lat = cfg->moon_lat, lon = cfg->moon_lon;
+                if (lat == 0.0 && lon == 0.0) { lat = cfg->weather_lat; lon = cfg->weather_lon; }
+                moon_state_t live;
+                moon_compute(now, lat, lon, &live);
+
+                /* One-shot tap animation: ~4s eased sweep through a full synodic
+                 * cycle plus a full bright-limb spin, rendered at reduced size for
+                 * smoothness. Consume the request atomically so a single tap fires
+                 * once. Both phase and orientation are periodic over the sweep, so
+                 * t=1 lands back on the live values with no visible jump. */
+                if (atomic_exchange(&moon_anim_request, false)) {
+                    const int     ASZ    = 300;        /* reduced anim resolution   */
+                    const int64_t DUR_US = 4000000;    /* ~4s total sweep           */
+                    /* Start the sweep from the cycle fraction that reproduces the
+                     * live illumination exactly. moon_state_from_cycle() uses the
+                     * mean (1-cos)/2 mapping while moon_compute() uses the true
+                     * phase angle, so seeding from live.cycle would pop a few %
+                     * at the start/end. Inverting live.illum makes frame t=0 and
+                     * t=1 match the accurate resting frame — seamless both ends. */
+                    double illum_arg = 1.0 - 2.0 * (double)live.illum;
+                    if (illum_arg < -1.0) illum_arg = -1.0;
+                    if (illum_arg >  1.0) illum_arg =  1.0;
+                    double half = acos(illum_arg) / 6.283185307179586;   /* [0,0.5] */
+                    double start_cycle  = live.waxing ? half : (1.0 - half);
+                    float  start_orient = live.orient_rad;
+                    int64_t t0 = esp_timer_get_time();
+                    for (;;) {
+                        /* Abort cleanly if the page is hidden or the source changed. */
+                        if (!image_display_page_active || cfg->image_display_source != 1) break;
+                        int64_t el = esp_timer_get_time() - t0;
+                        if (el >= DUR_US) break;
+                        float tt = (float)el / (float)DUR_US;        /* 0..1            */
+                        float te = tt * tt * (3.0f - 2.0f * tt);     /* smoothstep ease */
+                        moon_state_t anim;
+                        moon_state_from_cycle(start_cycle + (double)te,
+                                              start_orient + 6.2831853f * te, &anim);
+                        uint16_t *aimg = moon_render(ASZ, ASZ, &anim, cfg->moon_bg_style);
+                        if (aimg) {
+                            if (goes_data_lock(&goes_data, 1000)) {
+                                if (goes_data.image_buf) heap_caps_free(goes_data.image_buf);
+                                goes_data.image_buf = (uint8_t *)aimg;
+                                goes_data.image_w = ASZ;
+                                goes_data.image_h = ASZ;
+                                goes_data.vflip = false;
+                                goes_data.connected = true;
+                                goes_data.last_poll_ms = esp_timer_get_time() / 1000;
+                                goes_data_unlock(&goes_data);
+                                /* Push the frame using the same locked-update idiom
+                                 * as data_update_task; render happened unlocked. */
+                                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                                    nina_image_display_update(&goes_data);
+                                    bsp_display_unlock();
+                                }
+                            } else {
+                                heap_caps_free(aimg);
+                            }
+                        }
+                        /* Pace ~30fps and yield to the Core 0 idle task (watchdog). */
+                        vTaskDelay(pdMS_TO_TICKS(5));
+                    }
+                    /* Resync to the live current phase after the sweep. */
+                    time(&now);
+                    moon_compute(now, lat, lon, &live);
+                }
+
+                /* Normal full-res render of the live current phase. Runs whether or
+                 * not an animation played; the caption reads the resting state. */
+                s_moon_state = live;
+                const int MOON_SZ = 600;
+                uint16_t *img = moon_render(MOON_SZ, MOON_SZ, &live, cfg->moon_bg_style);
+                if (img) {
+                    if (goes_data_lock(&goes_data, 1000)) {
+                        if (goes_data.image_buf) heap_caps_free(goes_data.image_buf);
+                        goes_data.image_buf = (uint8_t *)img;
+                        goes_data.image_w = MOON_SZ;
+                        goes_data.image_h = MOON_SZ;
+                        goes_data.vflip = false;
+                        goes_data.connected = true;
+                        goes_data.last_poll_ms = esp_timer_get_time() / 1000;
+                        goes_data_unlock(&goes_data);
+                    } else {
+                        heap_caps_free(img);
+                    }
+                }
+            }
+            /* Recompute ~every 60s once time is valid so orientation tracks the
+             * sky; poll every ~3s while waiting for the clock to sync. */
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(time_valid ? 60000 : 3000));
+            continue;
+        }
+
+        /* GOES needs network — wait for WiFi before attempting any HTTP requests. */
+        xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
+
+        /* Only poll when a region is configured */
+        if (cfg->goes_region[0] != '\0') {
+            goes_client_poll(cfg->goes_region, &goes_data);
+        }
+
+        /* Sleep for the configured interval (clamped 5min-2h to respect the
+         * satellite image cadence and avoid hammering the source). */
+        uint32_t interval_ms = (uint32_t)cfg->goes_update_interval_s * 1000;
+        if (interval_ms < 300000) interval_ms = 300000;
+        if (interval_ms > 7200000) interval_ms = 7200000;
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(interval_ms));
+    }
+}
+
+// =============================================================================
+// GOES task lifecycle
+// =============================================================================
+
+void goes_ensure_task_running(void)
+{
+    /* Guard check-and-assign against a double-spawn race: this may be called
+     * concurrently from the boot task and an httpd task (runtime enable). */
+    static portMUX_TYPE goes_spawn_mux = portMUX_INITIALIZER_UNLOCKED;
+    portENTER_CRITICAL(&goes_spawn_mux);
+    bool already = (goes_task_handle != NULL);
+    portEXIT_CRITICAL(&goes_spawn_mux);
+    if (already) return;
+
+    /* 12288 words: TLS handshake + software JPEG decode headroom (matches/
+     * exceeds the spotify TLS task). */
+    StackType_t  *stack = heap_caps_malloc(12288 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+    StaticTask_t *tcb   = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (stack && tcb) {
+        portENTER_CRITICAL(&goes_spawn_mux);
+        goes_task_handle = xTaskCreateStaticPinnedToCore(
+            goes_poll_task, "goes", 12288, NULL, 3, stack, tcb, 0);
+        portEXIT_CRITICAL(&goes_spawn_mux);
+        ESP_LOGI(TAG, "GOES poll task spawned");
+    } else {
+        ESP_LOGE(TAG, "Failed to allocate GOES poll task stack");
+        if (stack) heap_caps_free(stack);
+        if (tcb) heap_caps_free(tcb);
     }
 }
 
@@ -1104,6 +1306,9 @@ void data_update_task(void *arg) {
 
         /* Initialize AllSky data struct (needed even in demo mode) */
         allsky_data_init(&allsky_data);
+        /* Initialize GOES data struct so its mutex exists even in demo mode
+         * (a later web-handler enable + page entry would otherwise NULL-deref). */
+        goes_data_init(&goes_data);
 
         instance_count = app_config_get_instance_count();
         instance_count = 3;  /* demo mode always shows all 3 instance profiles */
@@ -1257,6 +1462,14 @@ void data_update_task(void *arg) {
         }
     }
 
+    /* GOES / Image Display poll task.
+     * goes_data_init must run UNCONDITIONALLY so the mutex exists before any
+     * later web-handler-triggered enable + page entry. */
+    goes_data_init(&goes_data);
+    if (app_config_get()->image_display_enabled) {
+        goes_ensure_task_running();
+    }
+
     /* Spawn async fetch worker (pinned to Core 0, networking) */
     if (s_fetch_queue && s_fetch_result_queue) {
         StackType_t *fw_stack = heap_caps_malloc(8192 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
@@ -1385,13 +1598,15 @@ main_loop:
         bool on_settings = nina_dashboard_is_settings_page();
         bool on_summary = nina_dashboard_is_summary_page();
         bool on_clock = nina_dashboard_is_clock_page();
+        bool on_image_display = nina_dashboard_is_image_display_page();
 
         /*
          * Page index convention (see PAGE_IDX_* / NINA_PAGE_OFFSET / EXTRA_PAGES):
-         *   PAGE_IDX_ALLSKY  (0)                        = AllSky page
-         *   PAGE_IDX_SPOTIFY (1)                        = Spotify page
-         *   PAGE_IDX_CLOCK   (2)                        = Clock page (always present)
-         *   PAGE_IDX_SUMMARY (3)                        = summary page
+         *   PAGE_IDX_ALLSKY        (0)                  = AllSky page
+         *   PAGE_IDX_SPOTIFY       (1)                  = Spotify page
+         *   PAGE_IDX_CLOCK         (2)                  = Clock page (always present)
+         *   PAGE_IDX_IMAGE_DISPLAY (3)                  = Image Display page
+         *   PAGE_IDX_SUMMARY       (4)                  = summary page
          *   NINA_PAGE_OFFSET .. NINA_PAGE_OFFSET+pc-1   = NINA instance pages
          *   SETTINGS_PAGE_IDX(pc)                       = settings page
          *   SYSINFO_PAGE_IDX(pc)                        = sysinfo page
@@ -1461,6 +1676,23 @@ main_loop:
             }
             prev_on_clock = on_clock;
             clock_page_active = on_clock;
+
+            /* Image Display lifecycle — wake on entry, free buffers on leave */
+            static bool prev_on_image_display = false;
+            if (on_image_display && !prev_on_image_display && goes_task_handle) {
+                xTaskNotifyGive(goes_task_handle);
+            }
+            image_display_page_active = on_image_display;   /* gate poll task BEFORE cleanup */
+            if (!on_image_display && prev_on_image_display) {
+                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                    nina_image_display_cleanup();
+                    bsp_display_unlock();
+                }
+                goes_client_cleanup(&goes_data);
+                moon_render_deinit();   /* release the cached moon texture */
+                ESP_LOGI(TAG, "Left Image Display: freed buffers");
+            }
+            prev_on_image_display = on_image_display;
         }
 
         // Re-read instance count from config so API URL changes take effect live
@@ -1748,6 +1980,14 @@ main_loop:
                     bsp_display_unlock();
                 }
                 allsky_data_unlock(&allsky_data);
+            }
+        } else if (on_image_display) {
+            /* Image Display page — repaint when a new GOES image has arrived.
+             * nina_image_display_update locks goes_data internally; it must be
+             * called with the display lock held. */
+            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                nina_image_display_update(&goes_data);
+                bsp_display_unlock();
             }
         } else if (on_summary) {
             /* Summary page — pre-lock all instances with short timeout, then single LVGL lock */

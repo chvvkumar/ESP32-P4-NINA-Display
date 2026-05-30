@@ -681,7 +681,8 @@ void app_main(void)
 
         {
             /* Apply persisted page override immediately on boot.
-             * Override stores absolute page index: 0=allsky, 1=spotify, 2=summary, 3..N+2=NINA, N+3=settings, N+4=sysinfo */
+             * Override stores absolute page index: 0=allsky, 1=spotify, 2=clock,
+             * 3=image_display, 4=summary, 5..N+4=NINA, then settings, then sysinfo */
             app_config_t *cfg = app_config_get();
             int total = nina_dashboard_get_total_page_count();
             if (cfg->active_page_override >= 0 && cfg->active_page_override < total) {

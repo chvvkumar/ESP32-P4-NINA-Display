@@ -681,10 +681,11 @@ void settings_tab_behavior_create(lv_obj_t *parent) {
                                     "Clock\n"
                                     "AllSky\n"
                                     "Spotify\n"
+                                    "Image Display\n"
                                     "System Info");
 
             /* Map idle_target_t enum to dropdown index:
-             * IDLE_TARGET_SUMMARY(-1)=0, CLOCK(0)=1, ALLSKY(1)=2, SPOTIFY(2)=3, SYSINFO(3)=4 */
+             * IDLE_TARGET_SUMMARY(-1)=0, CLOCK(0)=1, ALLSKY(1)=2, SPOTIFY(2)=3, IMAGE_DISPLAY(3)=4, SYSINFO(4)=5 */
             lv_dropdown_set_selected(dd_idle_target, (uint32_t)(cfg->idle_page_override_target + 1));
 
             if (current_theme) {

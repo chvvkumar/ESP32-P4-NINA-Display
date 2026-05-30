@@ -18,9 +18,7 @@
 #define STBI_REALLOC(p, newsz) heap_caps_realloc(p, newsz, MALLOC_CAP_SPIRAM)
 #define STBI_FREE(p)           free(p)
 
-/* Only need JPEG support */
-#define STBI_ONLY_JPEG
-#define STBI_NO_PNG
+/* Need JPEG (album/satellite art) + PNG (moon texture); disable the rest */
 #define STBI_NO_BMP
 #define STBI_NO_PSD
 #define STBI_NO_TGA

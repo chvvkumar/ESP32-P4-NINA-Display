@@ -16,6 +16,7 @@
 #include "nina_allsky.h"
 #include "nina_spotify.h"
 #include "nina_clock.h"
+#include "nina_image_display.h"
 #include "nina_settings_tabview.h"
 #include "nina_toast.h"
 #include "nina_event_log.h"
@@ -49,7 +50,11 @@ static lv_obj_t *spotify_page_created = NULL;  /* Always holds the created page 
 /* Clock page — always at PAGE_IDX_CLOCK (2), always present */
 lv_obj_t *clock_obj = NULL;
 
-/* Summary page — at PAGE_IDX_SUMMARY (3), excluded from indicators */
+/* Image Display page — always at PAGE_IDX_IMAGE_DISPLAY (3), excluded from indicators */
+lv_obj_t *image_display_obj = NULL;
+static lv_obj_t *image_display_page_created = NULL;
+
+/* Summary page — at PAGE_IDX_SUMMARY (4), excluded from indicators */
 static lv_obj_t *summary_obj = NULL;
 
 /* Settings page — at SETTINGS_PAGE_IDX(page_count), excluded from indicators */
@@ -134,10 +139,11 @@ lv_obj_t *create_value_label(lv_obj_t *parent) {
 
 /*
  * Page index convention (see PAGE_IDX_* / NINA_PAGE_OFFSET / EXTRA_PAGES in nina_dashboard_internal.h):
- *   PAGE_IDX_ALLSKY  (0)                        = AllSky page
- *   PAGE_IDX_SPOTIFY (1)                        = Spotify page
- *   PAGE_IDX_CLOCK   (2)                        = Clock page (always present)
- *   PAGE_IDX_SUMMARY (3)                        = summary page
+ *   PAGE_IDX_ALLSKY        (0)                  = AllSky page
+ *   PAGE_IDX_SPOTIFY       (1)                  = Spotify page
+ *   PAGE_IDX_CLOCK         (2)                  = Clock page (always present)
+ *   PAGE_IDX_IMAGE_DISPLAY (3)                  = Image Display page
+ *   PAGE_IDX_SUMMARY       (4)                  = summary page
  *   NINA_PAGE_OFFSET .. NINA_PAGE_OFFSET+pc-1   = NINA instance pages  (pages[idx - NINA_PAGE_OFFSET])
  *   SETTINGS_PAGE_IDX(pc)                       = settings page
  *   SYSINFO_PAGE_IDX(pc)                        = sysinfo page
@@ -156,6 +162,8 @@ static void hide_page_at(int idx) {
         lv_obj_add_flag(clock_obj, LV_OBJ_FLAG_HIDDEN);
         clock_page_on_hide();
     }
+    else if (idx == PAGE_IDX_IMAGE_DISPLAY && image_display_obj)
+        lv_obj_add_flag(image_display_obj, LV_OBJ_FLAG_HIDDEN);
     else if (idx == PAGE_IDX_SUMMARY && summary_obj)
         lv_obj_add_flag(summary_obj, LV_OBJ_FLAG_HIDDEN);
     else if (idx >= NINA_PAGE_OFFSET && idx < NINA_PAGE_OFFSET + page_count)
@@ -179,6 +187,8 @@ static void show_page_at(int idx) {
         lv_obj_clear_flag(clock_obj, LV_OBJ_FLAG_HIDDEN);
         clock_page_on_show();
     }
+    else if (idx == PAGE_IDX_IMAGE_DISPLAY && image_display_obj)
+        lv_obj_clear_flag(image_display_obj, LV_OBJ_FLAG_HIDDEN);
     else if (idx == PAGE_IDX_SUMMARY && summary_obj)
         lv_obj_clear_flag(summary_obj, LV_OBJ_FLAG_HIDDEN);
     else if (idx >= NINA_PAGE_OFFSET && idx < NINA_PAGE_OFFSET + page_count)
@@ -200,6 +210,7 @@ static lv_obj_t *get_page_obj(int idx) {
     if (idx == PAGE_IDX_ALLSKY && allsky_obj) return allsky_obj;
     if (idx == PAGE_IDX_SPOTIFY && spotify_obj) return spotify_obj;
     if (idx == PAGE_IDX_CLOCK && clock_obj) return clock_obj;
+    if (idx == PAGE_IDX_IMAGE_DISPLAY && image_display_obj) return image_display_obj;
     if (idx == PAGE_IDX_SUMMARY && summary_obj) return summary_obj;
     if (idx >= NINA_PAGE_OFFSET && idx < NINA_PAGE_OFFSET + page_count)
         return pages[idx - NINA_PAGE_OFFSET].page;
@@ -281,6 +292,7 @@ void nina_dashboard_apply_theme(int theme_index) {
     if (allsky_obj) allsky_page_apply_theme();
     if (spotify_obj) spotify_page_apply_theme();
     clock_page_apply_theme();
+    if (image_display_obj) nina_image_display_apply_theme();
     summary_page_apply_theme();
     if (settings_obj) settings_tabview_apply_theme();
     sysinfo_page_apply_theme();
@@ -672,7 +684,7 @@ static void create_page_indicator(lv_obj_t *parent, int count) {
     lv_obj_set_flex_align(indicator_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(indicator_cont, 8, 0);
 
-    /* Start hidden — summary page (index 1) is the default boot page */
+    /* Start hidden — summary page (PAGE_IDX_SUMMARY) is the default boot page */
     lv_obj_add_flag(indicator_cont, LV_OBJ_FLAG_HIDDEN);
 
     int gb = app_config_get()->color_brightness;
@@ -720,6 +732,7 @@ static void gesture_event_cb(lv_event_t *e) {
             if (candidate == SETTINGS_PAGE_IDX(page_count)) continue;
             if (candidate == PAGE_IDX_ALLSKY && allsky_obj == NULL) continue;
             if (candidate == PAGE_IDX_SPOTIFY && spotify_obj == NULL) continue;
+            if (candidate == PAGE_IDX_IMAGE_DISPLAY && image_display_obj == NULL) continue;
             new_page = candidate;
             break;
         }
@@ -729,6 +742,7 @@ static void gesture_event_cb(lv_event_t *e) {
             if (candidate == SETTINGS_PAGE_IDX(page_count)) continue;
             if (candidate == PAGE_IDX_ALLSKY && allsky_obj == NULL) continue;
             if (candidate == PAGE_IDX_SPOTIFY && spotify_obj == NULL) continue;
+            if (candidate == PAGE_IDX_IMAGE_DISPLAY && image_display_obj == NULL) continue;
             new_page = candidate;
             break;
         }
@@ -845,6 +859,12 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     clock_obj = clock_page_create(main_cont);
     lv_obj_add_flag(clock_obj, LV_OBJ_FLAG_HIDDEN);
 
+    /* Image Display page — PAGE_IDX_IMAGE_DISPLAY, always created but hidden initially.
+     * image_display_obj is set to NULL when disabled to remove from navigation. */
+    image_display_page_created = nina_image_display_create(main_cont);
+    lv_obj_add_flag(image_display_page_created, LV_OBJ_FLAG_HIDDEN);
+    image_display_obj = app_config_get()->image_display_enabled ? image_display_page_created : NULL;
+
     /* Summary page — PAGE_IDX_SUMMARY, visible by default */
     summary_obj = summary_page_create(main_cont, page_count);
 
@@ -904,6 +924,7 @@ void nina_dashboard_show_page(int page_index, int instance_count) {
     if (page_index < 0 || page_index >= total_page_count) return;
     if (page_index == PAGE_IDX_ALLSKY && allsky_obj == NULL) return;  /* allsky disabled */
     if (page_index == PAGE_IDX_SPOTIFY && spotify_obj == NULL) return;  /* spotify disabled */
+    if (page_index == PAGE_IDX_IMAGE_DISPLAY && image_display_obj == NULL) return;  /* image display disabled */
     if (page_index == active_page) return;
 
     hide_page_at(active_page);
@@ -956,6 +977,25 @@ void nina_dashboard_set_spotify_enabled(bool enabled) {
             lv_obj_add_flag(spotify_page_created, LV_OBJ_FLAG_HIDDEN);
         }
         spotify_obj = NULL;
+    }
+}
+
+bool nina_dashboard_is_image_display_page(void) {
+    return image_display_obj != NULL && active_page == PAGE_IDX_IMAGE_DISPLAY;
+}
+
+void nina_dashboard_set_image_display_enabled(bool enabled) {
+    if (enabled) {
+        image_display_obj = image_display_page_created;
+    } else {
+        /* If currently viewing the Image Display page, switch to summary first */
+        if (active_page == PAGE_IDX_IMAGE_DISPLAY && image_display_obj != NULL) {
+            nina_dashboard_show_page(PAGE_IDX_SUMMARY, total_page_count);
+        }
+        if (image_display_page_created) {
+            lv_obj_add_flag(image_display_page_created, LV_OBJ_FLAG_HIDDEN);
+        }
+        image_display_obj = NULL;
     }
 }
 
@@ -1083,6 +1123,7 @@ void nina_dashboard_show_page_animated(int page_index, int instance_count, int e
     if (page_index < 0 || page_index >= total_page_count) return;
     if (page_index == PAGE_IDX_ALLSKY && allsky_obj == NULL) return;  /* allsky disabled */
     if (page_index == PAGE_IDX_SPOTIFY && spotify_obj == NULL) return;  /* spotify disabled */
+    if (page_index == PAGE_IDX_IMAGE_DISPLAY && image_display_obj == NULL) return;  /* image display disabled */
     if (page_index == active_page) return;
 
     lv_obj_t *old_obj = get_page_obj(active_page);

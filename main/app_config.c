@@ -771,6 +771,18 @@ static void set_defaults(app_config_t *cfg) {
     // Admin password default — change via web UI on first boot
     strcpy(cfg->admin_password, "changeme123!");
 
+    // Image Display defaults
+    cfg->image_display_enabled = false;
+    cfg->image_display_show_overlay = true;
+    strcpy(cfg->goes_region, "umv");
+    cfg->goes_update_interval_s = 600;
+
+    // Moon phase defaults
+    cfg->image_display_source = 0;   // 0=GOES, 1=Moon
+    cfg->moon_bg_style = 0;          // 0=black, 1=stars, 2=glow
+    cfg->moon_lat = 0.0f;            // unset until configured / prefilled from weather
+    cfg->moon_lon = 0.0f;
+
     // Auth is on by default — protects device from open-LAN access
     cfg->auth_enabled = true;
 }
@@ -1736,7 +1748,42 @@ static void migrate_from_v23(const app_config_v23_t *old, app_config_t *cfg) {
     ESP_LOGI(TAG, "Migrated config from v23 to v%d", APP_CONFIG_VERSION);
 }
 
-/* --- v31 → v32 migration (added auth_enabled) --- */
+/* --- v32 → v33 migration (added Image Display fields; IDLE_TARGET_SYSINFO 3→4) --- */
+/* --- v33 → v34 migration (added Moon phase fields) --- */
+static void migrate_from_v33(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v33_t) ? raw_size : sizeof(app_config_v33_t);
+    memcpy(cfg, raw, copy);
+
+    /* Moon phase fields: new in v34 — defaults already set by set_defaults() */
+    cfg->image_display_source = 0;
+    cfg->moon_bg_style = 0;
+    cfg->moon_lat = cfg->weather_lat;   /* prefill from weather */
+    cfg->moon_lon = cfg->weather_lon;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v33 to v%d", APP_CONFIG_VERSION);
+}
+
+static void migrate_from_v32(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v32_t) ? raw_size : sizeof(app_config_v32_t);
+    memcpy(cfg, raw, copy);
+
+    /* Image Display fields: new in v33 — defaults already set by set_defaults() */
+
+    /* v32→v33: IDLE_TARGET_SYSINFO shifted from 3 to 4 */
+    if (cfg->idle_page_override_target == 3) {
+        cfg->idle_page_override_target = IDLE_TARGET_SYSINFO;  // now 4
+    }
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v32 to v%d", APP_CONFIG_VERSION);
+}
+
+/* --- v31 → v33 migration (added auth_enabled) --- */
 static void migrate_from_v31(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
@@ -1746,11 +1793,16 @@ static void migrate_from_v31(const void *raw, size_t raw_size, app_config_t *cfg
     /* auth_enabled: existing devices default to ON so upgrade stays locked down */
     cfg->auth_enabled = true;
 
+    /* v32→v33: IDLE_TARGET_SYSINFO shifted from 3 to 4 */
+    if (cfg->idle_page_override_target == 3) {
+        cfg->idle_page_override_target = IDLE_TARGET_SYSINFO;  // now 4
+    }
+
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v31 to v%d", APP_CONFIG_VERSION);
 }
 
-/* --- v30 → v32 migration (added admin_password, auth_enabled) --- */
+/* --- v30 → v33 migration (added admin_password, auth_enabled) --- */
 static void migrate_from_v30(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
@@ -1762,11 +1814,16 @@ static void migrate_from_v30(const void *raw, size_t raw_size, app_config_t *cfg
     /* auth_enabled defaults to true from set_defaults() */
     cfg->auth_enabled = true;
 
+    /* v32→v33: IDLE_TARGET_SYSINFO shifted from 3 to 4 */
+    if (cfg->idle_page_override_target == 3) {
+        cfg->idle_page_override_target = IDLE_TARGET_SYSINFO;  // now 4
+    }
+
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v30 to v%d", APP_CONFIG_VERSION);
 }
 
-/* --- v29 → v32 migration (added idle_indicator_enabled, admin_password, auth_enabled) --- */
+/* --- v29 → v33 migration (added idle_indicator_enabled, admin_password, auth_enabled) --- */
 static void migrate_from_v29(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
@@ -1777,6 +1834,11 @@ static void migrate_from_v29(const void *raw, size_t raw_size, app_config_t *cfg
     cfg->idle_indicator_enabled = true;
     strcpy(cfg->admin_password, "changeme123!");
     cfg->auth_enabled = true;
+
+    /* v32→v33: IDLE_TARGET_SYSINFO shifted from 3 to 4 */
+    if (cfg->idle_page_override_target == 3) {
+        cfg->idle_page_override_target = IDLE_TARGET_SYSINFO;  // now 4
+    }
 
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v29 to v%d", APP_CONFIG_VERSION);
@@ -1876,7 +1938,7 @@ static void migrate_from_v28(const void *raw, size_t raw_size, app_config_t *cfg
 static void migrate_from_v27(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
-    size_t copy = raw_size < sizeof(app_config_t) ? raw_size : sizeof(app_config_t);
+    size_t copy = raw_size < sizeof(app_config_v27_t) ? raw_size : sizeof(app_config_v27_t);
     memcpy(cfg, raw, copy);
     cfg->toast_aggregation_window_s = 5;
     cfg->toast_notify_mask = 0xFFFFFFFF;
@@ -1892,8 +1954,11 @@ static void migrate_from_v26(const void *raw, size_t raw_size, app_config_t *cfg
 {
     set_defaults(cfg);
     /* v26 blob is identical layout minus trailing auto_rotate_order[7].
-     * Copy old data — new trailing field stays at default from set_defaults(). */
-    size_t copy = raw_size < sizeof(app_config_t) ? raw_size : sizeof(app_config_t);
+     * Copy old data — new trailing field stays at default from set_defaults().
+     * No app_config_v26_t snapshot exists, so bound the copy by the largest
+     * pre-v33 layout (app_config_v32_t) to ensure the v33 image_display fields
+     * always come from set_defaults(), never from copied blob bytes. */
+    size_t copy = raw_size < sizeof(app_config_v32_t) ? raw_size : sizeof(app_config_v32_t);
     memcpy(cfg, raw, copy);
     for (int i = 0; i < 8; i++) cfg->auto_rotate_order[i] = (uint8_t)i;
     cfg->config_version = APP_CONFIG_VERSION;
@@ -2226,6 +2291,23 @@ static bool validate_config(app_config_t *cfg) {
         cfg->allsky_dew_offset = 5.0f;
         fixed = true;
     }
+    if (cfg->goes_update_interval_s < 300 || cfg->goes_update_interval_s > 7200) {
+        cfg->goes_update_interval_s = 600;
+        fixed = true;
+    }
+    cfg->goes_region[sizeof(cfg->goes_region) - 1] = '\0';
+    if (cfg->goes_region[0] == '\0') {
+        strcpy(cfg->goes_region, "umv");
+        fixed = true;
+    }
+    if (cfg->image_display_source > 1) {
+        cfg->image_display_source = 0;
+        fixed = true;
+    }
+    if (cfg->moon_bg_style > 3) {
+        cfg->moon_bg_style = 0;
+        fixed = true;
+    }
     if (cfg->allsky_thresholds[0] == '\0' ||
         strstr(cfg->allsky_thresholds, "thermal_main") == NULL) {
         /* Empty or contains old-format keys (cpu_temp, sqm, etc.) — reset to new positional format */
@@ -2293,6 +2375,18 @@ void app_config_init(void) {
             nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(handle);
         }
+    } else if (version_check == 33) {
+        /* v33 → v34: added Moon phase fields (prefill moon lat/lon from weather) */
+        migrate_from_v33(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    } else if (version_check == 32) {
+        /* v32 → v33: added Image Display fields; IDLE_TARGET_SYSINFO 3→4 */
+        migrate_from_v32(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 31) {
         /* v31 → v32: added auth_enabled */
         migrate_from_v31(raw, stored_size, &s_config);
