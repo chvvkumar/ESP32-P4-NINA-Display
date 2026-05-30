@@ -32,6 +32,8 @@
 #include "ui/nina_ota_prompt.h"
 #include "ui/nina_idle_indicator.h"
 #include "ui/nina_image_display.h"
+#include "ui/nina_wait_overlay.h"
+#include "ui/nina_toast.h"
 #include "ota_github.h"
 #include "esp_ota_ops.h"
 #include "bsp/esp-bsp.h"
@@ -554,6 +556,11 @@ static moon_state_t s_moon_state;
  * consumed once by goes_poll_task via atomic_exchange. Declared extern in tasks.h. */
 _Atomic bool moon_anim_request = false;
 
+/* Set by the Image Display config POST handler on a user source/band change,
+ * consumed once by goes_poll_task to gate the wait overlay. Declared extern in
+ * tasks.h. */
+_Atomic bool image_display_manual_fetch = false;
+
 /* Provide the caption text for the Image Display page when the Moon source is
  * active. Declared (extern) in nina_image_display.c. */
 void moon_caption(char *name_out, size_t name_sz, char *pct_out, size_t pct_sz)
@@ -682,12 +689,56 @@ void goes_poll_task(void *arg)
         /* GOES needs network — wait for WiFi before attempting any HTTP requests. */
         xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
 
+        /* Show the full-screen wait overlay only for a user-initiated source/
+         * band change (manual flag), and only while the Image Display page is
+         * actually visible — a takeover on an unrelated page would be jarring.
+         * Periodic refreshes and page-entry refreshes leave the flag clear, so
+         * they never trigger the overlay. The overlay is hidden again when the
+         * new image is committed in nina_image_display_update(), or below on a
+         * fetch error. */
+        bool manual_fetch = atomic_exchange(&image_display_manual_fetch, false);
+        bool show_wait = false;
+        if (manual_fetch && image_display_page_active) {
+            const char *band_name = (cfg->image_display_source == 2)
+                                        ? solar_band_label(cfg->solar_band) : NULL;
+            /* Only treat the overlay as shown if the lock was acquired and the
+             * show actually ran — otherwise the error-hide below would be a
+             * spurious no-op against an overlay that never appeared. */
+            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                nina_wait_overlay_show("Loading image...", band_name);
+                nina_wait_overlay_set_progress(-1);   /* indeterminate */
+                bsp_display_unlock();
+                show_wait = true;
+            }
+        }
+
+        esp_err_t fetch_err = ESP_OK;
         if (cfg->image_display_source == 2) {                       /* Solar (SDO/AIA) */
             const char *url = solar_band_url(cfg->solar_band);
             /* All solar bands need a vertical flip to display upright (see solar_band_vflip). */
-            if (url && url[0]) goes_client_poll_url(url, &goes_data, solar_band_vflip(cfg->solar_band));
+            if (url && url[0]) {
+                fetch_err = goes_client_poll_url(url, &goes_data, solar_band_vflip(cfg->solar_band));
+            } else {
+                fetch_err = ESP_ERR_INVALID_ARG;
+            }
         } else if (cfg->goes_region[0] != '\0') {                   /* GOES */
-            goes_client_poll(cfg->goes_region, &goes_data);
+            fetch_err = goes_client_poll(cfg->goes_region, &goes_data);
+        } else {
+            /* No region configured: nothing is fetched, so the new image never
+             * arrives. Mark as failed so the error-hide below clears any
+             * manual-fetch overlay instead of leaving it stuck. */
+            fetch_err = ESP_FAIL;
+        }
+
+        /* On a failed manual fetch the new image never arrives, so
+         * nina_image_display_update() will not hide the overlay — clear it here
+         * so it never gets stuck. */
+        if (show_wait && fetch_err != ESP_OK) {
+            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                nina_wait_overlay_hide();
+                bsp_display_unlock();
+            }
+            nina_toast_show(TOAST_WARNING, "Failed to load image");
         }
 
         /* Sleep for the configured interval (clamped 5min-2h to respect the
@@ -1689,6 +1740,9 @@ main_loop:
             if (!on_image_display && prev_on_image_display) {
                 if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                     nina_image_display_cleanup();
+                    /* If a manual fetch was still in flight when the user left,
+                     * clear its loading overlay so it can't linger off-page. */
+                    nina_wait_overlay_hide();
                     bsp_display_unlock();
                 }
                 goes_client_cleanup(&goes_data);

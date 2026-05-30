@@ -77,6 +77,12 @@ extern goes_data_t goes_data;
  *  Consumed (cleared) once by goes_poll_task via atomic_exchange. */
 extern _Atomic bool moon_anim_request;
 
+/** Set by the Image Display config POST handler when the user changes the
+ *  source/band, so goes_poll_task can show the wait overlay only for a
+ *  user-initiated fetch (not routine periodic polling or page-entry refresh).
+ *  Consumed (cleared) once by goes_poll_task via atomic_exchange. */
+extern _Atomic bool image_display_manual_fetch;
+
 /** Weather poll task — spawned by weather_client_start() when location is configured. */
 /* (Task handle is internal to weather_client.c; no extern needed here.) */
 

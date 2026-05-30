@@ -108,10 +108,39 @@ const char *solar_band_label(uint8_t idx) { return idx < SOLAR_BAND_COUNT ? SOLA
  * on this panel, same as the GOES path. */
 bool solar_band_vflip(uint8_t idx) { (void)idx; return true; }
 
-/* Bands whose disc/field fills the frame edge-to-edge must NOT be center-cropped
- * or the disc gets clipped: LASCO C2/C3 (10,11) and SDO/HMI continuum/magnetogram
- * (16,17). AIA (0..9) and SOHO EIT (12..15) have margin and crop cleanly. */
-bool solar_band_croppable(uint8_t idx) { return !(idx == 10 || idx == 11 || idx == 16 || idx == 17); }
+/* Per-band center-crop percentage (100 = no crop). AIA (0..9) and SOHO EIT
+ * (12..15) have a wide source border, so 88% zooms past the timestamp/label.
+ * HMI continuum/magnetogram (16,17) have only a ~4.2% black margin around a
+ * ~91.5%-diameter disc, so 92% trims the caption border while leaving a thin
+ * black ring (disc NOT clipped). LASCO C2/C3 (10,11) fill the frame edge-to-edge
+ * with a burned-in timestamp at the very bottom (~3.5% up); 90% (~5%/side) crops
+ * it off, sacrificing some outer corona (acceptable) and avoiding a blend patch. */
+uint8_t solar_band_crop_pct(uint8_t idx)
+{
+    if (idx == 10 || idx == 11) return 90;   /* LASCO: crop off the burned-in timestamp */
+    if (idx == 16 || idx == 17) return 92;   /* HMI: trim to disc edge */
+    return 88;                               /* AIA / SOHO EIT */
+}
+
+/* Upright-full-image fractional rect (0..1, origin top-left, y down) covering a
+ * caption that the crop alone does not remove. Returns false when no mask is
+ * needed. The HMI rect is below the disc bottom (~row 0.97) and normally cropped
+ * away (belt-and-suspenders for a taller-than-expected future caption). LASCO is
+ * cropped instead of masked, so it returns false here. */
+bool solar_band_text_mask(uint8_t idx, float *x0, float *y0, float *x1, float *y1)
+{
+    float a, b, c, d;
+    switch (idx) {
+        case 16:
+        case 17: a = 0.0f; b = 0.97f; c = 0.50f; d = 1.0f; break;  /* HMI */
+        default: return false;  /* LASCO (10,11) now cropped, not masked */
+    }
+    if (x0) *x0 = a;
+    if (y0) *y0 = b;
+    if (x1) *x1 = c;
+    if (y1) *y1 = d;
+    return true;
+}
 
 esp_err_t goes_client_poll(const char *region, goes_data_t *data)
 {

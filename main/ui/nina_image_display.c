@@ -12,6 +12,7 @@
  */
 
 #include "nina_image_display.h"
+#include "nina_wait_overlay.h"
 #include "nina_dashboard_internal.h"
 #include "app_config.h"
 #include "display_defs.h"
@@ -51,6 +52,12 @@ static lv_image_dsc_t img_dsc_b;
 static bool front_is_a = true;
 static int64_t displayed_poll_ms;
 static bool crossfade_active = false;
+/* Set by nina_image_display_force_redraw() to make the NEXT update() re-render
+ * the already-cached frame even though last_poll_ms hasn't advanced. Consumed
+ * (cleared) on the next update() once the new-image gate has been bypassed.
+ * Used for a crop/full-mode toggle so the page re-crops the cached image
+ * locally instead of forcing an HTTP re-download. */
+static bool force_redraw = false;
 
 /* NESDIS sector code -> human-readable region name. */
 static const struct { const char *code; const char *name; } region_labels[] = {
@@ -209,7 +216,14 @@ void nina_image_display_update(goes_data_t *data)
     if (crossfade_active) return;
     if (!goes_data_lock(data, 100)) return;
 
-    if (!data->image_buf || data->last_poll_ms <= displayed_poll_ms) {
+    /* Consume the force-redraw request: a crop/full toggle re-renders the cached
+     * frame, so bypass the "new image" half of the gate this once. Still bail if
+     * nothing is cached (!image_buf). The flag is read-and-cleared here under the
+     * goes lock; the actual swap below is forced instant (no crossfade) since a
+     * crossfade between two crops of the same frame is pointless. */
+    bool forced = force_redraw;
+    force_redraw = false;
+    if (!data->image_buf || (!forced && data->last_poll_ms <= displayed_poll_ms)) {
         goes_data_unlock(data);
         return;
     }
@@ -220,22 +234,28 @@ void nina_image_display_update(goes_data_t *data)
     uint16_t sw = data->image_w, sh = data->image_h;
     if (sw == 0 || sh == 0) {
         goes_data_unlock(data);
+        /* New-image gate passed but the image is unusable — release any
+         * manual-fetch wait overlay so it can't get stuck. */
+        nina_wait_overlay_hide();
         return;
     }
 
-    /* Optional center-crop: keep the central ~88% so the solar/satellite disc
+    /* Optional center-crop: keep the central portion so the solar/satellite disc
      * zooms to fill the panel and the timestamp/label baked into the source
      * border is cropped off. Skipped for the Moon (source 1): it has no text
-     * and is already framed to fill. */
+     * and is already framed to fill. The crop percentage is per-band for Solar
+     * (source 2): 88% for AIA/EIT, 92% for HMI (trims to the disc edge), 100%
+     * (no crop) for LASCO. Non-solar sources keep the historic 88% (e.g. GOES). */
+    extern uint8_t solar_band_crop_pct(uint8_t idx);
+    extern bool    solar_band_text_mask(uint8_t idx, float *x0, float *y0, float *x1, float *y1);
     const app_config_t *cfg = app_config_get();
     uint16_t w = sw, h = sh, ox = 0, oy = 0;
-    /* Crop only when enabled, not the Moon, and (for Solar) not a frame-filling
-     * band (LASCO/HMI) whose disc would be clipped. */
-    extern bool solar_band_croppable(uint8_t idx);
-    bool croppable = (cfg->image_display_source != 2) || solar_band_croppable(cfg->solar_band);
-    if (cfg->image_display_crop && cfg->image_display_source != 1 && croppable) {
-        w  = (uint16_t)((uint32_t)sw * 88 / 100);
-        h  = (uint16_t)((uint32_t)sh * 88 / 100);
+    uint8_t crop_pct = (cfg->image_display_source == 2)
+                           ? solar_band_crop_pct(cfg->solar_band)
+                           : 88;
+    if (cfg->image_display_crop && cfg->image_display_source != 1 && crop_pct < 100) {
+        w  = (uint16_t)((uint32_t)sw * crop_pct / 100);
+        h  = (uint16_t)((uint32_t)sh * crop_pct / 100);
         ox = (uint16_t)((sw - w) / 2);
         oy = (uint16_t)((sh - h) / 2);
     }
@@ -246,6 +266,9 @@ void nina_image_display_update(goes_data_t *data)
         ESP_LOGE(TAG, "PSRAM alloc failed for crossfade buffer (%u bytes)",
                  (unsigned)buf_size);
         goes_data_unlock(data);
+        /* New-image gate passed but the display copy failed — release any
+         * manual-fetch wait overlay so it can't get stuck. */
+        nina_wait_overlay_hide();
         return;
     }
     /* Copy the (optionally cropped) source row-by-row. The software JPEG decoder
@@ -254,11 +277,60 @@ void nina_image_display_update(goes_data_t *data)
      * buffer is upright. ox/oy apply the center-crop. */
     size_t src_stride = (size_t)sw * 2;
     size_t dst_stride = (size_t)w * 2;
+
+    /* Optional caption mask (Solar bands only). The mask rect is in upright-full
+     * image fractional coords; convert to a pixel rect [mx0..mx1, my0..my1]. For
+     * masked pixels we composite a color-sampled blend: per row, sample one
+     * source pixel just to the RIGHT of the mask (col mx1+PAD) at the same
+     * upright row and stretch it across the masked span. This extends the
+     * neighbouring background (black margin for HMI -> seamless; corona for
+     * LASCO -> blends) horizontally over the burned-in timestamp. */
+    bool  mask_on = false;
+    int   mx0 = 0, mx1 = 0, my0 = 0, my1 = 0, sample_col = 0;
+    /* Gate the caption mask on the same crop/clean toggle as the crop, so turning
+     * the toggle off shows the raw frame (incl. burned-in timestamp). */
+    if (cfg->image_display_crop && cfg->image_display_source == 2) {
+        float fx0, fy0, fx1, fy1;
+        if (solar_band_text_mask(cfg->solar_band, &fx0, &fy0, &fx1, &fy1)) {
+            mask_on = true;
+            mx0 = (int)(fx0 * sw);
+            mx1 = (int)(fx1 * sw);
+            my0 = (int)(fy0 * sh);
+            my1 = (int)(fy1 * sh);
+            const int PAD = 8;
+            sample_col = mx1 + PAD;
+            if (sample_col > sw - 1) sample_col = sw - 1;  /* clamp into bounds */
+        }
+    }
+
     for (uint32_t y = 0; y < h; y++) {
         uint32_t src_y = data->vflip ? (uint32_t)(sh - 1 - (oy + y)) : (uint32_t)(oy + y);
         memcpy((uint8_t *)copy + (size_t)y * dst_stride,
                data->image_buf + (size_t)src_y * src_stride + (size_t)ox * 2,
                dst_stride);
+
+        if (!mask_on) continue;
+
+        /* Upright-full row for this dst row. Mask rect is in upright coords. */
+        int uY = (int)oy + (int)y;
+        if (uY < my0 || uY >= my1) continue;  /* row outside the mask band */
+
+        /* Sample the per-row replacement color ONCE (right of the mask, same
+         * upright row, same vflip mapping the copy uses). */
+        const uint8_t *src_px = data->image_buf
+                                + (size_t)src_y * src_stride
+                                + (size_t)sample_col * 2;
+        uint8_t lo = src_px[0], hi = src_px[1];
+
+        /* Overwrite the masked columns in this dst row. dst col x maps to
+         * upright col (ox + x); paint where ox+x is within [mx0, mx1). */
+        for (uint32_t x = 0; x < w; x++) {
+            int uX = (int)ox + (int)x;
+            if (uX < mx0 || uX >= mx1) continue;
+            uint8_t *dst_px = (uint8_t *)copy + (size_t)y * dst_stride + (size_t)x * 2;
+            dst_px[0] = lo;
+            dst_px[1] = hi;
+        }
     }
     int64_t poll_ms = data->last_poll_ms;
     goes_data_unlock(data);
@@ -287,8 +359,14 @@ void nina_image_display_update(goes_data_t *data)
     bool first_image = (displayed_poll_ms == 0);
     /* The Moon source re-posts a near-identical frame every ~60s; a crossfade
      * dips brightness at its midpoint (two ~50% copies over black) and reads as
-     * a once-a-minute flicker. Swap instantly for the moon (and the first image). */
-    bool instant = first_image || (app_config_get()->image_display_source == 1);
+     * a once-a-minute flicker. Swap instantly for the moon (and the first image).
+     * A forced re-crop also swaps instantly: crossfading two crops of the same
+     * frame is pointless and, since displayed_poll_ms == poll_ms here, would not
+     * key as first_image. */
+    bool instant = first_image || forced || (app_config_get()->image_display_source == 1);
+    /* poll_ms == displayed_poll_ms on a forced re-crop (same cached frame), so
+     * this assignment leaves displayed_poll_ms unchanged and a later real
+     * download (higher last_poll_ms) still passes the new-image gate. */
     displayed_poll_ms = poll_ms;
 
     if (instant) {
@@ -354,6 +432,22 @@ void nina_image_display_update(goes_data_t *data)
         char ts[32]; strftime(ts, sizeof(ts), "Updated %H:%M", &ti);
         lv_label_set_text(lbl_timestamp, ts);
     }
+
+    /* The new image is now committed (swap done, overlay labels updated). Hide
+     * the wait overlay if it was shown for a manual source/band change. This is
+     * a no-op when the overlay is already hidden. We hold the display lock (the
+     * caller does), so call directly — matching this module's convention. */
+    nina_wait_overlay_hide();
+}
+
+void nina_image_display_force_redraw(void)
+{
+    /* Request that the next nina_image_display_update() re-render the cached
+     * frame even though last_poll_ms has not advanced. The flag is a plain bool
+     * touched only here (httpd task, display lock held by caller) and in
+     * update() under the goes lock; the caller wraps both this and the following
+     * update() in bsp_display_lock, so no extra synchronization is needed. */
+    force_redraw = true;
 }
 
 void nina_image_display_cleanup(void)

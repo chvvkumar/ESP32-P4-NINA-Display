@@ -26,4 +26,11 @@ void      goes_client_cleanup(goes_data_t *data);
 const char *solar_band_url(uint8_t idx);
 const char *solar_band_label(uint8_t idx);
 bool        solar_band_vflip(uint8_t idx);
-bool        solar_band_croppable(uint8_t idx);
+
+/* Per-band center-crop percentage (100 = no crop). */
+uint8_t     solar_band_crop_pct(uint8_t idx);
+
+/* Fills an upright-full-image fractional rect [x0,y0,x1,y1] (0..1, origin
+ * top-left, y down) for a band whose caption needs masking; returns false
+ * when no mask is needed. Any of the out pointers may be NULL. */
+bool        solar_band_text_mask(uint8_t idx, float *x0, float *y0, float *x1, float *y1);
