@@ -267,6 +267,10 @@ static void event_handler(void *arg, esp_event_base_t event_base,
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        wifi_event_sta_disconnected_t *disc =
+            (wifi_event_sta_disconnected_t *)event_data;
+        ESP_LOGW(TAG, "WiFi disconnected from '%s' reason=%d rssi=%d",
+                 disc->ssid, disc->reason, disc->rssi);
         perf_counter_increment(&g_perf.wifi_disconnect_count);
         esp_wifi_set_mode(WIFI_MODE_APSTA);
 
