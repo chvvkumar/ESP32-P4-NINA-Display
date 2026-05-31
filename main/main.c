@@ -261,12 +261,63 @@ static void wifi_reconnect_cb(void *arg)
     wifi_connect_to_slot(current_network_index);
 }
 
+/* Plain-text name for a WiFi disconnect reason code (wifi_err_reason_t),
+ * plus a short hint at the likely root cause for the codes we actually
+ * see in the field. Keeps the serial log self-explanatory. */
+static const char *wifi_disconnect_reason_str(uint8_t reason)
+{
+    switch (reason) {
+        case WIFI_REASON_UNSPECIFIED:              return "UNSPECIFIED";
+        case WIFI_REASON_AUTH_EXPIRE:              return "AUTH_EXPIRE (AP aged us out / steering)";
+        case WIFI_REASON_AUTH_LEAVE:               return "AUTH_LEAVE";
+        case WIFI_REASON_ASSOC_EXPIRE:             return "ASSOC_EXPIRE";
+        case WIFI_REASON_ASSOC_TOOMANY:            return "ASSOC_TOOMANY (AP client limit)";
+        case WIFI_REASON_NOT_AUTHED:               return "NOT_AUTHED";
+        case WIFI_REASON_NOT_ASSOCED:              return "NOT_ASSOCED";
+        case WIFI_REASON_ASSOC_LEAVE:              return "ASSOC_LEAVE (AP deauthed us / band steering)";
+        case WIFI_REASON_ASSOC_NOT_AUTHED:         return "ASSOC_NOT_AUTHED";
+        case WIFI_REASON_DISASSOC_PWRCAP_BAD:      return "DISASSOC_PWRCAP_BAD";
+        case WIFI_REASON_DISASSOC_SUPCHAN_BAD:     return "DISASSOC_SUPCHAN_BAD";
+        case WIFI_REASON_IE_INVALID:               return "IE_INVALID";
+        case WIFI_REASON_MIC_FAILURE:              return "MIC_FAILURE (wrong key / encryption)";
+        case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:   return "4WAY_HANDSHAKE_TIMEOUT (wrong password or PMF mismatch)";
+        case WIFI_REASON_GROUP_KEY_UPDATE_TIMEOUT: return "GROUP_KEY_UPDATE_TIMEOUT";
+        case WIFI_REASON_IE_IN_4WAY_DIFFERS:       return "IE_IN_4WAY_DIFFERS (PMF/WPA3 negotiation)";
+        case WIFI_REASON_GROUP_CIPHER_INVALID:     return "GROUP_CIPHER_INVALID (TKIP/AES mismatch)";
+        case WIFI_REASON_PAIRWISE_CIPHER_INVALID:  return "PAIRWISE_CIPHER_INVALID (TKIP/AES mismatch)";
+        case WIFI_REASON_AKMP_INVALID:             return "AKMP_INVALID (WPA2 vs WPA3 mismatch)";
+        case WIFI_REASON_UNSUPP_RSN_IE_VERSION:    return "UNSUPP_RSN_IE_VERSION";
+        case WIFI_REASON_INVALID_RSN_IE_CAP:       return "INVALID_RSN_IE_CAP";
+        case WIFI_REASON_802_1X_AUTH_FAILED:       return "802_1X_AUTH_FAILED";
+        case WIFI_REASON_CIPHER_SUITE_REJECTED:    return "CIPHER_SUITE_REJECTED";
+        case WIFI_REASON_BEACON_TIMEOUT:           return "BEACON_TIMEOUT (signal lost / out of range)";
+        case WIFI_REASON_NO_AP_FOUND:              return "NO_AP_FOUND (SSID not seen / weak signal)";
+        case WIFI_REASON_AUTH_FAIL:                return "AUTH_FAIL (wrong password)";
+        case WIFI_REASON_ASSOC_FAIL:               return "ASSOC_FAIL (AP rejected association)";
+        case WIFI_REASON_HANDSHAKE_TIMEOUT:        return "HANDSHAKE_TIMEOUT (PMF / WPA3 / 802.11ax issue)";
+        case WIFI_REASON_CONNECTION_FAIL:          return "CONNECTION_FAIL (AP rejected, often 802.11ax on 2.4 GHz)";
+        case WIFI_REASON_AP_TSF_RESET:             return "AP_TSF_RESET";
+        case WIFI_REASON_ROAMING:                  return "ROAMING";
+        default:                                   return "(see esp_wifi_types.h)";
+    }
+}
+
 static void event_handler(void *arg, esp_event_base_t event_base,
                           int32_t event_id, void *event_data)
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        wifi_event_sta_disconnected_t *disc =
+            (wifi_event_sta_disconnected_t *)event_data;
+        ESP_LOGW(TAG,
+                 "WiFi disconnected from '%s' [%02x:%02x:%02x:%02x:%02x:%02x] "
+                 "reason=%d (%s) rssi=%d dBm",
+                 disc->ssid,
+                 disc->bssid[0], disc->bssid[1], disc->bssid[2],
+                 disc->bssid[3], disc->bssid[4], disc->bssid[5],
+                 disc->reason, wifi_disconnect_reason_str(disc->reason),
+                 disc->rssi);
         perf_counter_increment(&g_perf.wifi_disconnect_count);
         esp_wifi_set_mode(WIFI_MODE_APSTA);
 
