@@ -689,26 +689,31 @@ void goes_poll_task(void *arg)
         /* GOES needs network — wait for WiFi before attempting any HTTP requests. */
         xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
 
-        /* Show the full-screen wait overlay only for a user-initiated source/
-         * band change (manual flag), and only while the Image Display page is
-         * actually visible — a takeover on an unrelated page would be jarring.
-         * Periodic refreshes and page-entry refreshes leave the flag clear, so
-         * they never trigger the overlay. The overlay is hidden again when the
-         * new image is committed in nina_image_display_update(), or below on a
-         * fetch error. */
+        /* Show the full-screen wait overlay while the Image Display page is
+         * visible and either (a) the user changed the source/band (manual flag)
+         * or (b) nothing is on screen yet — which is the case on page (re)entry
+         * because the buffers are freed on leave, so has_image() is false on the
+         * first refresh after entry. Periodic background refreshes keep the
+         * current image on screen (has_image() true) and skip the overlay so it
+         * never flickers over a good frame. A takeover on an unrelated page
+         * would be jarring, so it stays gated on image_display_page_active. The
+         * overlay is hidden again when the new image is committed in
+         * nina_image_display_update(), or below on a fetch error. */
         bool manual_fetch = atomic_exchange(&image_display_manual_fetch, false);
         bool show_wait = false;
-        if (manual_fetch && image_display_page_active) {
+        if (image_display_page_active) {
             const char *band_name = (cfg->image_display_source == 2)
                                         ? solar_band_label(cfg->solar_band) : NULL;
             /* Only treat the overlay as shown if the lock was acquired and the
              * show actually ran — otherwise the error-hide below would be a
              * spurious no-op against an overlay that never appeared. */
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                nina_wait_overlay_show("Loading image...", band_name);
-                nina_wait_overlay_set_progress(-1);   /* indeterminate */
+                if (manual_fetch || !nina_image_display_has_image()) {
+                    nina_wait_overlay_show("Loading image...", band_name);
+                    nina_wait_overlay_set_progress(-1);   /* indeterminate */
+                    show_wait = true;
+                }
                 bsp_display_unlock();
-                show_wait = true;
             }
         }
 
