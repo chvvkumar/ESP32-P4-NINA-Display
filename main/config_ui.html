@@ -84,6 +84,23 @@
     .card.collapsed .card-title { margin-bottom: 0; }
     .card.collapsed .card-title::after { transform: rotate(-45deg); }
     .card.collapsed > :not(.card-title) { display: none !important; }
+    /* Non-collapsible cards (e.g. Logs): no chevron, no pointer affordance */
+    .card.nocollapse > .card-title { cursor: default; }
+    .card.nocollapse > .card-title::after { display: none; }
+    /* Logs tab: break out wider than the 960px content column */
+    #tab-logs .card { width: min(1180px, 94vw); margin-left: 50%; transform: translateX(-50%); }
+    .logs-layout { display: flex; gap: 18px; align-items: stretch; }
+    .logs-controls { flex: 0 0 220px; display: flex; flex-direction: column; gap: 12px; }
+    .logs-controls .btn { width: 100%; }
+    .logs-view {
+      flex: 1; min-width: 0; margin: 0;
+      height: calc(100vh - 240px); min-height: 420px; overflow: auto;
+      white-space: pre-wrap; word-break: break-word;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.72rem; line-height: 1.4; color: var(--text-secondary);
+      background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 12px;
+    }
     .content { max-width: 960px; margin: 0 auto; padding: 28px 24px 100px; }
     .field { margin-bottom: 20px; }
     .field:last-child { margin-bottom: 0; }
@@ -105,7 +122,7 @@
     }
     .top-nav .brand {
       font-size: 0.95rem; font-weight: 700; letter-spacing: -0.02em;
-      display: flex; align-items: center; gap: 10px;
+      display: flex; align-items: center; gap: 10px; flex: 1 1 0;
     }
     .top-nav .brand .logo {
       width: 36px; height: 36px;
@@ -124,6 +141,9 @@
       color: #f4f4f5; background: rgba(var(--accent-rgb), 0.12);
       box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.08);
     }
+    .top-nav .nav-right {
+      display: flex; align-items: center; gap: 10px; flex: 1 1 0; justify-content: flex-end;
+    }
     .top-nav .github-link {
       color: var(--text-hint); text-decoration: none; font-size: 0.75rem;
       display: flex; align-items: center; gap: 6px;
@@ -132,6 +152,15 @@
       background: rgba(255, 255, 255, 0.02);
     }
     .top-nav .github-link:hover { color: #f4f4f5; border-color: rgba(var(--accent-rgb), 0.3); background: rgba(255, 255, 255, 0.04); }
+    .top-nav .update-pill {
+      color: var(--accent); font-family: inherit; font-size: 0.72rem; font-weight: 600;
+      display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+      padding: 6px 12px; border: 1px solid rgba(var(--accent-rgb), 0.4);
+      border-radius: 10px; transition: all 0.2s ease;
+      background: rgba(var(--accent-rgb), 0.1);
+      box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.12);
+    }
+    .top-nav .update-pill:hover { color: #f4f4f5; border-color: rgba(var(--accent-rgb), 0.6); background: rgba(var(--accent-rgb), 0.18); box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.25); }
 
     .bottom-nav {
       display: none; position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
@@ -186,7 +215,9 @@
       background: rgba(0, 0, 0, 0.4);
     }
     .input::placeholder { color: var(--text-hint); opacity: 0.6; }
-    select.input { cursor: pointer; appearance: none; -webkit-appearance: none; }
+    select.input { cursor: pointer; appearance: none; -webkit-appearance: none; color-scheme: dark; }
+    select.input option, select.input optgroup { background: #14171f; color: #f4f4f5; }
+    select.input option:checked { background: rgba(var(--accent-rgb), 0.35); }
 
     .toggle { position: relative; display: inline-block; width: 48px; height: 26px; flex-shrink: 0; }
     .toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
@@ -265,6 +296,50 @@
     .btn-danger:hover {
       border-color: rgba(239, 68, 68, 0.4); color: #ef4444;
       background: rgba(239, 68, 68, 0.06); box-shadow: 0 0 16px rgba(239, 68, 68, 0.1);
+    }
+
+    /* === UPDATE CHANGELOG MODAL === */
+    .changelog-backdrop {
+      position: fixed; inset: 0; z-index: 300;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    }
+    .changelog-modal {
+      width: min(640px, 92vw); max-height: 80vh;
+      display: flex; flex-direction: column;
+      background: var(--elevated); border: 1px solid var(--border);
+      border-radius: 16px; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+    }
+    .changelog-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 20px; border-bottom: 1px solid var(--border);
+      font-weight: 600; font-size: 1.05rem;
+    }
+    .changelog-close {
+      background: none; border: none; color: var(--text-hint); cursor: pointer;
+      font-size: 1.6rem; line-height: 1; padding: 0 4px; transition: color 0.2s ease;
+    }
+    .changelog-close:hover { color: var(--accent); }
+    .changelog-body { overflow: auto; padding: 16px 20px; }
+    .cl-version {
+      color: var(--accent); font-weight: 700; font-size: 0.95rem;
+      margin: 14px 0 6px; display: flex; align-items: center; gap: 8px;
+    }
+    .changelog-body .cl-version:first-child { margin-top: 0; }
+    .cl-section-title { font-weight: 600; font-size: 0.8rem; color: #f4f4f5; margin: 8px 0 2px; }
+    .cl-notes {
+      white-space: pre-wrap; font-size: 0.85rem; line-height: 1.5;
+      color: var(--text-hint);
+    }
+    .cl-prerelease {
+      font-size: 0.7rem; font-weight: 600; color: #fbbf24;
+      border: 1px solid rgba(251, 191, 36, 0.4); border-radius: 6px;
+      padding: 1px 6px;
+    }
+    .changelog-foot {
+      display: flex; justify-content: flex-end; gap: 10px;
+      padding: 14px 20px; border-top: 1px solid var(--border);
     }
 
     /* === FILTER GRID === */
@@ -478,20 +553,27 @@
       border: 1px solid var(--border);
       padding: 14px 22px; border-radius: 16px; font-size: 0.85rem;
       box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
-      transform: translateX(120%); transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+      visibility: hidden; pointer-events: none;
+      transform: translateX(120%); transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), visibility 0s linear 0.35s;
     }
-    .toast.show { transform: translateX(0); }
+    .toast.show { visibility: visible; pointer-events: auto; transform: translateX(0); transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), visibility 0s linear 0s; }
     .toast.success { border-left: 3px solid #10b981; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(16, 185, 129, 0.08); }
     .toast.error { border-left: 3px solid #ef4444; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(239, 68, 68, 0.08); }
 
     /* === RESPONSIVE === */
     @media (max-width: 768px) {
-      .top-nav .tabs, .top-nav .github-link { display: none; }
+      .top-nav .tabs, .top-nav .nav-right { display: none; }
       .bottom-nav { display: block; }
       .content { padding: 16px 16px calc(var(--bottom-nav-height) + var(--save-bar-height) + env(safe-area-inset-bottom, 0px) + 16px); }
       .save-bar { bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom, 0px)); }
       .toast { top: auto; bottom: calc(var(--bottom-nav-height) + var(--save-bar-height) + env(safe-area-inset-bottom, 0px) + 16px); right: 16px; }
       .row.stack-mobile { flex-direction: column; }
+
+      /* Logs: stack controls above the viewer on narrow screens, drop the breakout */
+      #tab-logs .card { width: auto; margin-left: 0; transform: none; }
+      .logs-layout { flex-direction: column; }
+      .logs-controls { flex: 0 0 auto; }
+      .logs-view { height: 60vh; min-height: 300px; }
 
       /* Card titles */
       .card-title { font-size: 0.9rem; }
@@ -567,40 +649,32 @@
   <nav class="top-nav">
     <div class="brand"><img class="logo" src="/favicon.ico" alt=""> <span id="brandName">NINA Display</span></div>
     <div class="tabs" id="topTabs">
-      <button class="tab-btn active" data-tab="display">Display</button>
-      <button class="tab-btn" data-tab="nodes">Nodes &amp; Data</button>
-      <button class="tab-btn" data-tab="behavior">Behavior</button>
-      <button class="tab-btn" data-tab="system">System</button>
+      <button class="tab-btn active" data-tab="nodes">N.I.N.A.</button>
       <button class="tab-btn" data-tab="allsky">AllSky</button>
       <button class="tab-btn" data-tab="clock">Clock</button>
       <button class="tab-btn" data-tab="spotify">Spotify</button>
       <button class="tab-btn" data-tab="image-display">Image Display</button>
+      <button class="tab-btn" data-tab="display">Display</button>
+      <button class="tab-btn" data-tab="behavior">Behavior</button>
+      <button class="tab-btn" data-tab="system">System</button>
+      <button class="tab-btn" data-tab="logs">Logs</button>
       <button class="tab-btn" data-tab="backup">Backup</button>
     </div>
-    <a class="github-link" href="https://github.com/chvvkumar/ESP32-P4-NINA-Display" target="_blank" rel="noopener">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-      GitHub
-    </a>
+    <div class="nav-right">
+      <button class="update-pill" id="updatePill" style="display:none" title="Update available - click to install"></button>
+      <a class="github-link" href="https://github.com/chvvkumar/ESP32-P4-NINA-Display" target="_blank" rel="noopener">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        GitHub
+      </a>
+    </div>
   </nav>
 
   <!-- ======== BOTTOM NAVIGATION (MOBILE) ======== -->
   <nav class="bottom-nav">
     <div class="nav-items" id="bottomTabs">
-      <button class="nav-btn active" data-tab="display">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-        Display
-      </button>
-      <button class="nav-btn" data-tab="nodes">
+      <button class="nav-btn active" data-tab="nodes">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-        Nodes
-      </button>
-      <button class="nav-btn" data-tab="behavior">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-        Behavior
-      </button>
-      <button class="nav-btn" data-tab="system">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
-        System
+        N.I.N.A.
       </button>
       <button class="nav-btn" data-tab="allsky">
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41m11.32-11.32l1.41-1.41"/></svg>
@@ -618,6 +692,22 @@
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
         Image
       </button>
+      <button class="nav-btn" data-tab="display">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        Display
+      </button>
+      <button class="nav-btn" data-tab="behavior">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        Behavior
+      </button>
+      <button class="nav-btn" data-tab="system">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
+        System
+      </button>
+      <button class="nav-btn" data-tab="logs">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><line x1="8" y1="9" x2="10" y2="9"/></svg>
+        Logs
+      </button>
       <button class="nav-btn" data-tab="backup">
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -632,8 +722,384 @@
   <!-- ======== MAIN CONTENT ======== -->
   <main class="content">
 
+    <!-- ==================== TAB 2: NODES & DATA ==================== -->
+    <div id="tab-nodes" class="tab-panel active">
+
+      <div class="card" id="instance-overview">
+        <div class="card-title">Active N.I.N.A. Instances</div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label" id="inst_lbl_0">N.I.N.A. 1</span>
+          <label class="toggle"><input type="checkbox" id="instance_enabled_0" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label" id="inst_lbl_1">N.I.N.A. 2</span>
+          <label class="toggle"><input type="checkbox" id="instance_enabled_1" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label" id="inst_lbl_2">N.I.N.A. 3</span>
+          <label class="toggle"><input type="checkbox" id="instance_enabled_2" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+      </div>
+
+      <div id="node-cards"></div>
+    </div>
+
+    <!-- ==================== TAB 5: ALLSKY ==================== -->
+    <div id="tab-allsky" class="tab-panel">
+
+      <div class="card">
+        <div class="card-title">Connection</div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Enable AllSky</span>
+          <label class="toggle"><input type="checkbox" id="allsky_enabled" onchange="updateAllSkyEnabledUI()"><span class="toggle-track"></span></label>
+        </div>
+        <div id="allskyConnectionFields">
+        <div class="field" style="margin-top:16px">
+          <label class="field-label">AllSky Hostname</label>
+          <input type="text" class="input" id="allskyHostname" placeholder="allskypi5.lan:8080">
+          <div class="field-hint">Host:port of the AllSky API (e.g., allskypi5.lan:8080)</div>
+        </div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Update Interval</label>
+            <select class="input" id="allskyInterval">
+              <option value="1">1 second</option>
+              <option value="2">2 seconds</option>
+              <option value="5" selected>5 seconds</option>
+              <option value="10">10 seconds</option>
+              <option value="30">30 seconds</option>
+              <option value="60">1 minute</option>
+              <option value="120">2 minutes</option>
+              <option value="300">5 minutes</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field-label">Dew Point Safety Margin (&deg;C)</label>
+            <input type="number" class="input" id="allskyDewOffset" step="0.5" min="-50" max="50" value="5.0">
+            <div class="field-hint">Dew point colored safe when below ambient &minus; this offset</div>
+          </div>
+        </div>
+        </div>
+      </div>
+
+      <div class="card" id="allskyFieldMappingsCard">
+        <div class="card-title">Field Mappings</div>
+        <div class="field-hint" style="margin-bottom:16px">Configure which AllSky API JSON values appear in each display quadrant. Click a key path input, then click "Use" on a JSON leaf to fill it. Use the color controls to set gradient ranges per field.</div>
+
+        <button onclick="fetchAllSkyJson()" class="btn btn-primary" id="fetchJsonBtn" style="width:100%;margin-bottom:16px">Fetch JSON from AllSky</button>
+
+        <div id="allskyJsonTree" style="display:none; max-height:300px; overflow-y:auto; margin:0 0 16px; padding:12px; background:rgba(0,0,0,0.25); border-radius:var(--radius-sm); border:1px solid rgba(255,255,255,0.06); font-family:'SF Mono',Monaco,Consolas,monospace; font-size:0.75rem; line-height:1.6;"></div>
+
+        <div id="allskyFieldMappings"></div>
+      </div>
+
+    </div>
+
+    <!-- ==================== TAB 6: CLOCK & WEATHER ==================== -->
+    <div id="tab-clock" class="tab-panel">
+
+      <div class="card">
+        <div class="card-title">Clock &amp; Weather</div>
+        <div class="field">
+          <label class="field-label">Weather Provider</label>
+          <select class="input" id="weather_provider" onchange="toggleWeatherApiKey();checkDirty()">
+            <option value="0">OpenWeatherMap</option>
+            <option value="1">Open-Meteo (no key needed)</option>
+            <option value="2">Weather Underground</option>
+          </select>
+        </div>
+        <div class="field" id="weather_api_key_field">
+          <label class="field-label">API Key</label>
+          <input type="text" class="input" id="weather_api_key" placeholder="Enter API key">
+          <div class="field-hint" id="weather_api_key_hint">
+            <span id="owm_link">Get a free API key at <a href="https://home.openweathermap.org/api_keys" target="_blank" rel="noopener" style="color:#7eb8da">openweathermap.org</a></span>
+            <span id="wunderground_link" style="display:none">Get an API key at <a href="https://www.wunderground.com/member/api-keys" target="_blank" rel="noopener" style="color:#7eb8da">wunderground.com</a></span>
+          </div>
+        </div>
+        <div class="field" id="weather_city_lookup_field">
+          <label class="field-label">Location</label>
+          <div style="display:flex;gap:10px">
+            <input type="text" class="input" id="weather_location_search" placeholder="Search city name..." style="flex:1">
+            <button class="btn btn-outline" onclick="lookupCity()" type="button">Look up</button>
+          </div>
+          <div id="city_results" style="display:none;margin-top:6px;background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.08);border-radius:10px;max-height:200px;overflow-y:auto"></div>
+        </div>
+        <div class="field" id="weather_location_name_field">
+          <label class="field-label">Location Name</label>
+          <input type="text" class="input" id="weather_location_name" readonly placeholder="Auto-filled by lookup" style="opacity:0.7">
+        </div>
+        <div class="field" id="weather_station_id_field" style="display:none">
+          <label class="field-label">Station ID</label>
+          <input type="text" class="input" id="weather_station_id" placeholder="e.g. KMOOFAL42">
+          <div class="field-hint">Personal Weather Station ID for Weather Underground</div>
+        </div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Latitude</label>
+            <input type="number" class="input" id="weather_lat" step="0.0001" placeholder="0.0000">
+          </div>
+          <div class="field">
+            <label class="field-label">Longitude</label>
+            <input type="number" class="input" id="weather_lon" step="0.0001" placeholder="0.0000">
+          </div>
+        </div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Temperature Units</label>
+            <select class="input" id="weather_units">
+              <option value="0">&deg;F Imperial</option>
+              <option value="1">&deg;C Metric</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field-label">Time Format</label>
+            <select class="input" id="weather_time_format">
+              <option value="0">12-hour (AM/PM)</option>
+              <option value="1">24-hour</option>
+            </select>
+          </div>
+        </div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Update Interval</label>
+            <select class="input" id="weather_poll_interval_s">
+              <option value="900">15 minutes</option>
+              <option value="1200">20 minutes</option>
+              <option value="1800">30 minutes</option>
+              <option value="2700">45 minutes</option>
+              <option value="3600">60 minutes</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field-label">Timezone</label>
+            <select class="input" id="tz_string"></select>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ==================== TAB 7: SPOTIFY ==================== -->
+    <div id="tab-spotify" class="tab-panel">
+
+      <div class="card">
+        <div class="card-title">Connection</div>
+        <div style="background:rgba(var(--accent-rgb),0.08);border:1px solid rgba(var(--accent-rgb),0.2);border-radius:10px;padding:14px 16px;margin-bottom:16px;font-size:0.82rem;line-height:1.6;color:#d4d4d8">
+          <strong style="color:rgba(var(--accent-rgb),1)">Setup Instructions</strong>
+          <ol style="margin:8px 0 0;padding-left:20px">
+            <li>Go to <a href="https://developer.spotify.com" target="_blank" rel="noopener" style="color:rgba(var(--accent-rgb),1);text-decoration:underline">developer.spotify.com</a> and create a free app</li>
+            <li>Set the redirect URI in your Spotify app to: <code style="background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.78rem">http://127.0.0.1:8000/callback</code></li>
+            <li>Copy the <strong>Client ID</strong> from your Spotify app and paste it below</li>
+            <li>Click <strong>Save</strong> at the bottom of this page</li>
+            <li>In the <strong>Account</strong> section below, click <strong>Login with Spotify</strong> and approve access in the popup</li>
+            <li>After approving, Spotify redirects to <code style="background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.78rem">http://127.0.0.1:8000/callback?code=...</code> and your browser shows a "can't connect" / "site can't be reached" page. This is expected.</li>
+            <li>Copy the <strong>full URL</strong> from that page's address bar (it must include the <code style="background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.78rem">?code=</code> part)</li>
+            <li>Paste it into the <strong>Redirect URL</strong> field in the Account section and click <strong>Submit</strong></li>
+          </ol>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Enable Spotify</span>
+          <label class="toggle"><input type="checkbox" id="spotify_enabled" onchange="updateSpotifyEnabledUI()"><span class="toggle-track"></span></label>
+        </div>
+        <div id="spotifyConnectionFields">
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Client ID</label>
+            <input type="text" class="input" id="spotifyClientId" placeholder="e.g. a1b2c3d4e5f6...">
+            <div class="field-hint">From your app at <a href="https://developer.spotify.com" target="_blank" rel="noopener" style="color:var(--text-hint)">developer.spotify.com</a></div>
+          </div>
+          <div class="field">
+            <label class="field-label">Poll Interval (ms)</label>
+            <input type="number" class="input" id="spotifyPollInterval" min="1000" max="30000" step="500" value="3000">
+            <div class="field-hint">How often to check playback state (1000 &ndash; 30000 ms)</div>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Minimal Mode</span>
+            <label class="toggle"><input type="checkbox" id="spotify_minimal_mode"><span class="toggle-track"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Show Overlay</span>
+            <label class="toggle"><input type="checkbox" id="spotify_overlay_visible"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Force the minimal overlay visible (same as tapping album art)</div>
+          <div class="toggle-row">
+            <span class="toggle-label">Scroll Long Text</span>
+            <label class="toggle"><input type="checkbox" id="spotify_scroll_text" checked><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">When off, long text wraps to multiple lines</div>
+          <div class="toggle-row">
+            <span class="toggle-label">Show Progress Bar</span>
+            <label class="toggle"><input type="checkbox" id="spotify_show_progress_bar" checked><span class="toggle-track"></span></label>
+          </div>
+          <div class="field">
+            <label class="field-label">Overlay Timeout (s)</label>
+            <input type="number" class="input" id="spotifyOverlayTimeout" min="0" max="60" step="1" value="5">
+            <div class="field-hint">Seconds before playback overlay auto-hides (0 = always visible)</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" id="spotifyAccountCard">
+        <div class="card-title">Account</div>
+        <div class="field">
+          <label class="field-label">Status</label>
+          <div id="spotifyStatus" style="font-size:0.875rem;color:var(--text-hint);margin-bottom:12px">Checking...</div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-primary" id="spotifyLoginBtn" onclick="spotifyLogin()" style="flex:1;min-width:120px">Login with Spotify</button>
+          <button class="btn btn-danger" id="spotifyLogoutBtn" onclick="spotifyLogout()" style="flex:1;min-width:120px;display:none">Logout</button>
+        </div>
+        <div id="spotifyPasteDiv" style="display:none;margin-top:16px">
+          <p style="font-size:0.82rem;color:#a1a1aa;margin:0 0 10px;line-height:1.5">After approving in Spotify, you'll see a "can't connect" page. Copy the <strong>full URL</strong> from the address bar and paste it below:</p>
+          <div class="field" style="margin-bottom:10px">
+            <label class="field-label">Redirect URL</label>
+            <input type="text" class="input" id="spotifyPasteUrl" placeholder="http://127.0.0.1:8000/callback?code=..." style="font-size:0.92rem;min-height:52px;border:1px solid rgba(var(--accent-rgb),0.35);background:rgba(0,0,0,0.45)">
+          </div>
+          <button class="btn btn-primary" id="spotifySubmitBtn" onclick="spotifySubmitCallback()" style="width:100%">Submit</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ==================== TAB: IMAGE DISPLAY ==================== -->
+    <div id="tab-image-display" class="tab-panel">
+
+      <div class="card">
+        <div class="card-title">GOES Satellite Imagery</div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Enable Image Display</span>
+          <label class="toggle"><input type="checkbox" id="image_display_enabled" onchange="updateImageDisplayEnabledUI();applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div id="imageDisplayFields">
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Source</label>
+            <div class="pn-pill-grid">
+              <label class="pn-pill rotate-pill">
+                <input type="radio" name="imageSourceSel" id="imageSource0" value="0" onchange="updateImageSourceUI();applyImageDisplay();checkDirty()">
+                <span class="pn-pill-visual">GOES Satellite</span>
+              </label>
+              <label class="pn-pill rotate-pill">
+                <input type="radio" name="imageSourceSel" id="imageSource1" value="1" onchange="updateImageSourceUI();applyImageDisplay();checkDirty()">
+                <span class="pn-pill-visual">Moon Phase</span>
+              </label>
+              <label class="pn-pill rotate-pill">
+                <input type="radio" name="imageSourceSel" id="imageSource2" value="2" onchange="updateImageSourceUI();applyImageDisplay();checkDirty()">
+                <span class="pn-pill-visual">Solar (SDO)</span>
+              </label>
+            </div>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Show Overlay</span>
+            <label class="toggle"><input type="checkbox" id="image_display_show_overlay" onchange="applyImageDisplay();checkDirty()" checked><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Region/phase name and update time overlay on the display</div>
+          <div id="discOptions">
+          <div class="toggle-row">
+            <span class="toggle-label">Fill (crop borders)</span>
+            <label class="toggle"><input type="checkbox" id="image_display_crop" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Zoom the disc to fill the screen and hide the image's timestamp/label.</div>
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Update Interval</label>
+            <select class="input" id="goesInterval" onchange="applyImageDisplay();checkDirty()">
+              <option value="300">5 minutes</option>
+              <option value="600" selected>10 minutes</option>
+              <option value="900">15 minutes</option>
+              <option value="1800">30 minutes</option>
+              <option value="3600">1 hour</option>
+              <option value="7200">2 hours</option>
+            </select>
+            <div class="field-hint">How often the image refreshes.</div>
+          </div>
+          </div>
+          <div id="goesGroup">
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Region</label>
+            <select class="input" id="goesRegion" onchange="applyImageDisplay();checkDirty()">
+              <option value="umv">Upper Mississippi Valley</option>
+              <option value="cgl">Great Lakes</option>
+              <option value="ne">Northeast</option>
+              <option value="se">Southeast</option>
+              <option value="smv">Southern Mississippi Valley</option>
+              <option value="sp">Southern Plains</option>
+              <option value="nr">Northern Rockies</option>
+              <option value="sr">Southern Rockies</option>
+              <option value="pnw">Pacific Northwest</option>
+              <option value="psw">Pacific Southwest</option>
+              <option value="eus">U.S. Atlantic Coast</option>
+              <option value="pr">Puerto Rico</option>
+              <option value="mex">Mexico</option>
+              <option value="cam">Central America</option>
+              <option value="car">Caribbean</option>
+              <option value="ga">Gulf of America</option>
+              <option value="can">Canada</option>
+              <option value="na">Northern Atlantic</option>
+              <option value="taw">Tropical Atlantic</option>
+              <option value="eep">Eastern Pacific</option>
+              <option value="nsa">South America (North)</option>
+              <option value="ssa">South America (South)</option>
+            </select>
+            <div class="field-hint">GOES-19 GEOCOLOR sector for satellite imagery</div>
+          </div>
+          <div class="field" style="margin-top:16px">
+            <button onclick="fetchGoesPreview()" class="btn btn-primary" id="goesPreviewBtn" style="width:100%">Fetch Preview</button>
+          </div>
+          <div id="goesPreviewContainer" style="display:none;margin-top:12px;text-align:center">
+            <img id="goesPreviewImg" style="max-width:100%;border-radius:10px;border:1px solid rgba(255,255,255,0.1)" />
+          </div>
+          </div>
+          <div id="moonGroup" style="display:none">
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Background</label>
+            <select class="input" id="moonBg" onchange="applyImageDisplay();checkDirty()">
+              <option value="0">Plain black</option>
+              <option value="1">Starfield</option>
+              <option value="2">Soft glow</option>
+              <option value="3">Starfield + Glow</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field-label">Latitude</label>
+            <input class="input" id="moonLat" type="number" step="0.0001" placeholder="e.g. 40.7128" onchange="applyImageDisplay();checkDirty()">
+          </div>
+          <div class="field">
+            <label class="field-label">Longitude</label>
+            <input class="input" id="moonLon" type="number" step="0.0001" placeholder="e.g. -74.0060" onchange="applyImageDisplay();checkDirty()">
+            <div class="field-hint" id="moonLocHint">Set your location for accurate moon orientation. Prefilled from Weather when available.</div>
+          </div>
+          </div>
+          <div id="solarGroup" style="display:none">
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Band</label>
+            <select class="input" id="solarBand" onchange="applyImageDisplay();checkDirty()">
+              <option value="0">AIA 94 (Fe XVIII)</option>
+              <option value="1">AIA 131 (Fe XX)</option>
+              <option value="2">AIA 171 (Fe IX/X)</option>
+              <option value="3">AIA 193 (Fe XII)</option>
+              <option value="4">AIA 211 (Fe XIV)</option>
+              <option value="5">AIA 304 (He II)</option>
+              <option value="6">AIA 335 (Fe XVI)</option>
+              <option value="7">AIA 1600 (C IV+cont)</option>
+              <option value="8">AIA 1700 (continuum)</option>
+              <option value="9">AIA 4500 (continuum)</option>
+              <option value="10">LASCO C2 (coronagraph)</option>
+              <option value="11">LASCO C3 (coronagraph)</option>
+              <option value="12">SOHO EIT 171</option>
+              <option value="13">SOHO EIT 195</option>
+              <option value="14">SOHO EIT 284</option>
+              <option value="15">SOHO EIT 304</option>
+              <option value="16">SDO/HMI Continuum</option>
+              <option value="17">SDO/HMI Magnetogram</option>
+            </select>
+            <div class="field-hint">NASA SDO/AIA and SOHO realtime (LASCO, EIT, HMI)</div>
+          </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
     <!-- ==================== TAB 1: DISPLAY ==================== -->
-    <div id="tab-display" class="tab-panel active">
+    <div id="tab-display" class="tab-panel">
 
       <div class="card">
         <div class="card-title">Appearance</div>
@@ -758,28 +1224,6 @@
           </div>
         </div>
       </div>
-    </div>
-
-    <!-- ==================== TAB 2: NODES & DATA ==================== -->
-    <div id="tab-nodes" class="tab-panel">
-
-      <div class="card" id="instance-overview">
-        <div class="card-title">Active Instances</div>
-        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label" id="inst_lbl_0">Node 1</span>
-          <label class="toggle"><input type="checkbox" id="instance_enabled_0" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
-        </div>
-        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label" id="inst_lbl_1">Node 2</span>
-          <label class="toggle"><input type="checkbox" id="instance_enabled_1" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
-        </div>
-        <div class="toggle-row">
-          <span class="toggle-label" id="inst_lbl_2">Node 3</span>
-          <label class="toggle"><input type="checkbox" id="instance_enabled_2" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
-        </div>
-      </div>
-
-      <div id="node-cards"></div>
     </div>
 
     <!-- ==================== TAB 3: BEHAVIOR & ALERTS ==================== -->
@@ -1117,7 +1561,7 @@
         </div>
       </div>
 
-      <div class="card">
+      <div class="card" id="adminPasswordCard">
         <div class="card-title">Authentication</div>
         <div class="toggle-row">
           <span class="toggle-label">Require login to access the web UI</span>
@@ -1129,10 +1573,8 @@
         </p>
         <button class="btn btn-primary" style="margin-top:12px" onclick="saveAuthEnabled()">Save</button>
         <div id="auth_enabled_status" style="margin-top:10px;font-size:0.9em;"></div>
-      </div>
-
-      <div class="card" id="adminPasswordCard">
-        <div class="card-title">Admin Password</div>
+        <hr style="border:0;border-top:1px solid var(--border);margin:16px 0">
+        <div style="font-weight:600;color:var(--text);text-transform:uppercase;letter-spacing:0.04em;font-size:0.8rem;margin-bottom:8px">Admin Password</div>
         <p style="color:#888;font-size:0.85em;margin:2px 0 12px 0;">
           Default password is <code>changeme123!</code>. Change it now to secure this device's web interface.
         </p>
@@ -1155,352 +1597,35 @@
       </div>
     </div>
 
-    <!-- ==================== TAB 5: ALLSKY ==================== -->
-    <div id="tab-allsky" class="tab-panel">
+    <!-- ==================== TAB: LOGS ==================== -->
+    <div id="tab-logs" class="tab-panel">
 
-      <div class="card">
-        <div class="card-title">Connection</div>
-        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label">Enable AllSky</span>
-          <label class="toggle"><input type="checkbox" id="allsky_enabled" onchange="updateAllSkyEnabledUI()"><span class="toggle-track"></span></label>
-        </div>
-        <div id="allskyConnectionFields">
-        <div class="field" style="margin-top:16px">
-          <label class="field-label">AllSky Hostname</label>
-          <input type="text" class="input" id="allskyHostname" placeholder="allskypi5.lan:8080">
-          <div class="field-hint">Host:port of the AllSky API (e.g., allskypi5.lan:8080)</div>
-        </div>
-        <div class="row stack-mobile">
-          <div class="field">
-            <label class="field-label">Update Interval</label>
-            <select class="input" id="allskyInterval">
-              <option value="1">1 second</option>
-              <option value="2">2 seconds</option>
-              <option value="5" selected>5 seconds</option>
-              <option value="10">10 seconds</option>
-              <option value="30">30 seconds</option>
-              <option value="60">1 minute</option>
-              <option value="120">2 minutes</option>
-              <option value="300">5 minutes</option>
-            </select>
-          </div>
-          <div class="field">
-            <label class="field-label">Dew Point Safety Margin (&deg;C)</label>
-            <input type="number" class="input" id="allskyDewOffset" step="0.5" min="-50" max="50" value="5.0">
-            <div class="field-hint">Dew point colored safe when below ambient &minus; this offset</div>
-          </div>
-        </div>
-        </div>
-      </div>
-
-      <div class="card" id="allskyFieldMappingsCard">
-        <div class="card-title">Field Mappings</div>
-        <div class="field-hint" style="margin-bottom:16px">Configure which AllSky API JSON values appear in each display quadrant. Click a key path input, then click "Use" on a JSON leaf to fill it. Use the color controls to set gradient ranges per field.</div>
-
-        <button onclick="fetchAllSkyJson()" class="btn btn-primary" id="fetchJsonBtn" style="width:100%;margin-bottom:16px">Fetch JSON from AllSky</button>
-
-        <div id="allskyJsonTree" style="display:none; max-height:300px; overflow-y:auto; margin:0 0 16px; padding:12px; background:rgba(0,0,0,0.25); border-radius:var(--radius-sm); border:1px solid rgba(255,255,255,0.06); font-family:'SF Mono',Monaco,Consolas,monospace; font-size:0.75rem; line-height:1.6;"></div>
-
-        <div id="allskyFieldMappings"></div>
-      </div>
-
-    </div>
-
-    <!-- ==================== TAB 6: CLOCK & WEATHER ==================== -->
-    <div id="tab-clock" class="tab-panel">
-
-      <div class="card">
-        <div class="card-title">Clock &amp; Weather</div>
-        <div class="field">
-          <label class="field-label">Weather Provider</label>
-          <select class="input" id="weather_provider" onchange="toggleWeatherApiKey();checkDirty()">
-            <option value="0">OpenWeatherMap</option>
-            <option value="1">Open-Meteo (no key needed)</option>
-            <option value="2">Weather Underground</option>
-          </select>
-        </div>
-        <div class="field" id="weather_api_key_field">
-          <label class="field-label">API Key</label>
-          <input type="text" class="input" id="weather_api_key" placeholder="Enter API key">
-          <div class="field-hint" id="weather_api_key_hint">
-            <span id="owm_link">Get a free API key at <a href="https://home.openweathermap.org/api_keys" target="_blank" rel="noopener" style="color:#7eb8da">openweathermap.org</a></span>
-            <span id="wunderground_link" style="display:none">Get an API key at <a href="https://www.wunderground.com/member/api-keys" target="_blank" rel="noopener" style="color:#7eb8da">wunderground.com</a></span>
-          </div>
-        </div>
-        <div class="field" id="weather_city_lookup_field">
-          <label class="field-label">Location</label>
-          <div style="display:flex;gap:10px">
-            <input type="text" class="input" id="weather_location_search" placeholder="Search city name..." style="flex:1">
-            <button class="btn btn-outline" onclick="lookupCity()" type="button">Look up</button>
-          </div>
-          <div id="city_results" style="display:none;margin-top:6px;background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.08);border-radius:10px;max-height:200px;overflow-y:auto"></div>
-        </div>
-        <div class="field" id="weather_location_name_field">
-          <label class="field-label">Location Name</label>
-          <input type="text" class="input" id="weather_location_name" readonly placeholder="Auto-filled by lookup" style="opacity:0.7">
-        </div>
-        <div class="field" id="weather_station_id_field" style="display:none">
-          <label class="field-label">Station ID</label>
-          <input type="text" class="input" id="weather_station_id" placeholder="e.g. KMOOFAL42">
-          <div class="field-hint">Personal Weather Station ID for Weather Underground</div>
-        </div>
-        <div class="row stack-mobile">
-          <div class="field">
-            <label class="field-label">Latitude</label>
-            <input type="number" class="input" id="weather_lat" step="0.0001" placeholder="0.0000">
-          </div>
-          <div class="field">
-            <label class="field-label">Longitude</label>
-            <input type="number" class="input" id="weather_lon" step="0.0001" placeholder="0.0000">
-          </div>
-        </div>
-        <div class="row stack-mobile">
-          <div class="field">
-            <label class="field-label">Temperature Units</label>
-            <select class="input" id="weather_units">
-              <option value="0">&deg;F Imperial</option>
-              <option value="1">&deg;C Metric</option>
-            </select>
-          </div>
-          <div class="field">
-            <label class="field-label">Time Format</label>
-            <select class="input" id="weather_time_format">
-              <option value="0">12-hour (AM/PM)</option>
-              <option value="1">24-hour</option>
-            </select>
-          </div>
-        </div>
-        <div class="row stack-mobile">
-          <div class="field">
-            <label class="field-label">Update Interval</label>
-            <select class="input" id="weather_poll_interval_s">
-              <option value="900">15 minutes</option>
-              <option value="1200">20 minutes</option>
-              <option value="1800">30 minutes</option>
-              <option value="2700">45 minutes</option>
-              <option value="3600">60 minutes</option>
-            </select>
-          </div>
-          <div class="field">
-            <label class="field-label">Timezone</label>
-            <select class="input" id="tz_string"></select>
-          </div>
-        </div>
-      </div>
-
-    </div>
-
-    <!-- ==================== TAB 7: SPOTIFY ==================== -->
-    <div id="tab-spotify" class="tab-panel">
-
-      <div class="card">
-        <div class="card-title">Connection</div>
-        <div style="background:rgba(var(--accent-rgb),0.08);border:1px solid rgba(var(--accent-rgb),0.2);border-radius:10px;padding:14px 16px;margin-bottom:16px;font-size:0.82rem;line-height:1.6;color:#d4d4d8">
-          <strong style="color:rgba(var(--accent-rgb),1)">Setup Instructions</strong>
-          <ol style="margin:8px 0 0;padding-left:20px">
-            <li>Go to <a href="https://developer.spotify.com" target="_blank" rel="noopener" style="color:rgba(var(--accent-rgb),1);text-decoration:underline">developer.spotify.com</a> and create a free app</li>
-            <li>Set the redirect URI in your Spotify app to: <code style="background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.78rem">http://127.0.0.1:8000/callback</code></li>
-            <li>Copy the <strong>Client ID</strong> from your Spotify app and paste it below</li>
-            <li>Click <strong>Save</strong> at the bottom of this page, then use the Login button in the Account section</li>
-          </ol>
-        </div>
-        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label">Enable Spotify</span>
-          <label class="toggle"><input type="checkbox" id="spotify_enabled" onchange="updateSpotifyEnabledUI()"><span class="toggle-track"></span></label>
-        </div>
-        <div id="spotifyConnectionFields">
-          <div class="field" style="margin-top:16px">
-            <label class="field-label">Client ID</label>
-            <input type="text" class="input" id="spotifyClientId" placeholder="e.g. a1b2c3d4e5f6...">
-            <div class="field-hint">From your app at <a href="https://developer.spotify.com" target="_blank" rel="noopener" style="color:var(--text-hint)">developer.spotify.com</a></div>
-          </div>
-          <div class="field">
-            <label class="field-label">Poll Interval (ms)</label>
-            <input type="number" class="input" id="spotifyPollInterval" min="1000" max="30000" step="500" value="3000">
-            <div class="field-hint">How often to check playback state (1000 &ndash; 30000 ms)</div>
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-label">Minimal Mode</span>
-            <label class="toggle"><input type="checkbox" id="spotify_minimal_mode"><span class="toggle-track"></span></label>
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-label">Show Overlay</span>
-            <label class="toggle"><input type="checkbox" id="spotify_overlay_visible"><span class="toggle-track"></span></label>
-          </div>
-          <div class="field-hint">Force the minimal overlay visible (same as tapping album art)</div>
-          <div class="toggle-row">
-            <span class="toggle-label">Scroll Long Text</span>
-            <label class="toggle"><input type="checkbox" id="spotify_scroll_text" checked><span class="toggle-track"></span></label>
-          </div>
-          <div class="field-hint">When off, long text wraps to multiple lines</div>
-          <div class="toggle-row">
-            <span class="toggle-label">Show Progress Bar</span>
-            <label class="toggle"><input type="checkbox" id="spotify_show_progress_bar" checked><span class="toggle-track"></span></label>
-          </div>
-          <div class="field">
-            <label class="field-label">Overlay Timeout (s)</label>
-            <input type="number" class="input" id="spotifyOverlayTimeout" min="0" max="60" step="1" value="5">
-            <div class="field-hint">Seconds before playback overlay auto-hides (0 = always visible)</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card" id="spotifyAccountCard">
-        <div class="card-title">Account</div>
-        <div class="field">
-          <label class="field-label">Status</label>
-          <div id="spotifyStatus" style="font-size:0.875rem;color:var(--text-hint);margin-bottom:12px">Checking...</div>
-        </div>
-        <div style="display:flex;gap:10px;flex-wrap:wrap">
-          <button class="btn btn-primary" id="spotifyLoginBtn" onclick="spotifyLogin()" style="flex:1;min-width:120px">Login with Spotify</button>
-          <button class="btn btn-danger" id="spotifyLogoutBtn" onclick="spotifyLogout()" style="flex:1;min-width:120px;display:none">Logout</button>
-        </div>
-        <div id="spotifyPasteDiv" style="display:none;margin-top:16px">
-          <p style="font-size:0.82rem;color:#a1a1aa;margin:0 0 10px;line-height:1.5">After approving in Spotify, you'll see a "can't connect" page. Copy the <strong>full URL</strong> from the address bar and paste it below:</p>
-          <div class="field" style="margin-bottom:10px">
-            <label class="field-label">Redirect URL</label>
-            <input type="text" class="input" id="spotifyPasteUrl" placeholder="http://127.0.0.1:8000/callback?code=..." style="font-size:0.92rem;min-height:52px;border:1px solid rgba(var(--accent-rgb),0.35);background:rgba(0,0,0,0.45)">
-          </div>
-          <button class="btn btn-primary" id="spotifySubmitBtn" onclick="spotifySubmitCallback()" style="width:100%">Submit</button>
-        </div>
-      </div>
-
-    </div>
-
-    <!-- ==================== TAB: IMAGE DISPLAY ==================== -->
-    <div id="tab-image-display" class="tab-panel">
-
-      <div class="card">
-        <div class="card-title">GOES Satellite Imagery</div>
-        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label">Enable Image Display</span>
-          <label class="toggle"><input type="checkbox" id="image_display_enabled" onchange="updateImageDisplayEnabledUI();applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
-        </div>
-        <div id="imageDisplayFields">
-          <div class="field" style="margin-top:16px">
-            <label class="field-label">Source</label>
-            <div class="pn-pill-grid">
-              <label class="pn-pill rotate-pill">
-                <input type="radio" name="imageSourceSel" id="imageSource0" value="0" onchange="updateImageSourceUI();applyImageDisplay();checkDirty()">
-                <span class="pn-pill-visual">GOES Satellite</span>
-              </label>
-              <label class="pn-pill rotate-pill">
-                <input type="radio" name="imageSourceSel" id="imageSource1" value="1" onchange="updateImageSourceUI();applyImageDisplay();checkDirty()">
-                <span class="pn-pill-visual">Moon Phase</span>
-              </label>
-              <label class="pn-pill rotate-pill">
-                <input type="radio" name="imageSourceSel" id="imageSource2" value="2" onchange="updateImageSourceUI();applyImageDisplay();checkDirty()">
-                <span class="pn-pill-visual">Solar (SDO)</span>
-              </label>
+      <div class="card nocollapse">
+        <div class="card-title">Device Logs</div>
+        <div class="logs-layout">
+          <div class="logs-controls">
+            <div class="field-hint" style="margin:0 0 4px">Console output captured since boot (in-memory, 512 KB ring buffer, oldest lines dropped when full).</div>
+            <button class="btn btn-outline" id="refreshLogsBtn" onclick="refreshLogs()">Refresh</button>
+            <a class="btn btn-outline" href="/api/logs" style="text-align:center">Download</a>
+            <button class="btn btn-outline" id="clearLogsBtn" onclick="clearLogs()">Clear</button>
+            <div class="toggle-row" style="margin-top:6px">
+              <span class="toggle-label">Auto-refresh</span>
+              <label class="toggle"><input type="checkbox" id="logsAutoRefresh"><span class="toggle-track"></span></label>
             </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+              <span class="field-hint" style="margin:0">Interval</span>
+              <select class="input" id="logsRefreshInterval" style="max-width:90px">
+                <option value="2">2s</option>
+                <option value="5" selected>5s</option>
+                <option value="10">10s</option>
+                <option value="30">30s</option>
+              </select>
+            </div>
+            <div class="field-hint" id="logsStatus" style="margin:4px 0 0">Not loaded yet.</div>
           </div>
-          <div class="toggle-row">
-            <span class="toggle-label">Show Overlay</span>
-            <label class="toggle"><input type="checkbox" id="image_display_show_overlay" onchange="applyImageDisplay();checkDirty()" checked><span class="toggle-track"></span></label>
-          </div>
-          <div class="field-hint">Region/phase name and update time overlay on the display</div>
-          <div class="toggle-row">
-            <span class="toggle-label">Fill (crop borders)</span>
-            <label class="toggle"><input type="checkbox" id="image_display_crop" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
-          </div>
-          <div class="field-hint">Zoom the disc to fill the screen and hide the image's timestamp/label. Not applied to the Moon.</div>
-          <div class="field" style="margin-top:16px">
-            <label class="field-label">Update Interval</label>
-            <select class="input" id="goesInterval" onchange="applyImageDisplay();checkDirty()">
-              <option value="300">5 minutes</option>
-              <option value="600" selected>10 minutes</option>
-              <option value="900">15 minutes</option>
-              <option value="1800">30 minutes</option>
-              <option value="3600">1 hour</option>
-              <option value="7200">2 hours</option>
-            </select>
-            <div class="field-hint">How often GOES and Solar images refresh. The Moon updates continuously.</div>
-          </div>
-          <div id="goesGroup">
-          <div class="field" style="margin-top:16px">
-            <label class="field-label">Region</label>
-            <select class="input" id="goesRegion" onchange="applyImageDisplay();checkDirty()">
-              <option value="umv">Upper Mississippi Valley</option>
-              <option value="cgl">Great Lakes</option>
-              <option value="ne">Northeast</option>
-              <option value="se">Southeast</option>
-              <option value="smv">Southern Mississippi Valley</option>
-              <option value="sp">Southern Plains</option>
-              <option value="nr">Northern Rockies</option>
-              <option value="sr">Southern Rockies</option>
-              <option value="pnw">Pacific Northwest</option>
-              <option value="psw">Pacific Southwest</option>
-              <option value="eus">U.S. Atlantic Coast</option>
-              <option value="pr">Puerto Rico</option>
-              <option value="mex">Mexico</option>
-              <option value="cam">Central America</option>
-              <option value="car">Caribbean</option>
-              <option value="ga">Gulf of America</option>
-              <option value="can">Canada</option>
-              <option value="na">Northern Atlantic</option>
-              <option value="taw">Tropical Atlantic</option>
-              <option value="eep">Eastern Pacific</option>
-              <option value="nsa">South America (North)</option>
-              <option value="ssa">South America (South)</option>
-            </select>
-            <div class="field-hint">GOES-19 GEOCOLOR sector for satellite imagery</div>
-          </div>
-          <div class="field" style="margin-top:16px">
-            <button onclick="fetchGoesPreview()" class="btn btn-primary" id="goesPreviewBtn" style="width:100%">Fetch Preview</button>
-          </div>
-          <div id="goesPreviewContainer" style="display:none;margin-top:12px;text-align:center">
-            <img id="goesPreviewImg" style="max-width:100%;border-radius:10px;border:1px solid rgba(255,255,255,0.1)" />
-          </div>
-          </div>
-          <div id="moonGroup" style="display:none">
-          <div class="field" style="margin-top:16px">
-            <label class="field-label">Background</label>
-            <select class="input" id="moonBg" onchange="applyImageDisplay();checkDirty()">
-              <option value="0">Plain black</option>
-              <option value="1">Starfield</option>
-              <option value="2">Soft glow</option>
-              <option value="3">Starfield + Glow</option>
-            </select>
-          </div>
-          <div class="field">
-            <label class="field-label">Latitude</label>
-            <input class="input" id="moonLat" type="number" step="0.0001" placeholder="e.g. 40.7128" onchange="applyImageDisplay();checkDirty()">
-          </div>
-          <div class="field">
-            <label class="field-label">Longitude</label>
-            <input class="input" id="moonLon" type="number" step="0.0001" placeholder="e.g. -74.0060" onchange="applyImageDisplay();checkDirty()">
-            <div class="field-hint" id="moonLocHint">Set your location for accurate moon orientation. Prefilled from Weather when available.</div>
-          </div>
-          </div>
-          <div id="solarGroup" style="display:none">
-          <div class="field" style="margin-top:16px">
-            <label class="field-label">Band</label>
-            <select class="input" id="solarBand" onchange="applyImageDisplay();checkDirty()">
-              <option value="0">AIA 94 (Fe XVIII)</option>
-              <option value="1">AIA 131 (Fe XX)</option>
-              <option value="2">AIA 171 (Fe IX/X)</option>
-              <option value="3">AIA 193 (Fe XII)</option>
-              <option value="4">AIA 211 (Fe XIV)</option>
-              <option value="5">AIA 304 (He II)</option>
-              <option value="6">AIA 335 (Fe XVI)</option>
-              <option value="7">AIA 1600 (C IV+cont)</option>
-              <option value="8">AIA 1700 (continuum)</option>
-              <option value="9">AIA 4500 (continuum)</option>
-              <option value="10">LASCO C2 (coronagraph)</option>
-              <option value="11">LASCO C3 (coronagraph)</option>
-              <option value="12">SOHO EIT 171</option>
-              <option value="13">SOHO EIT 195</option>
-              <option value="14">SOHO EIT 284</option>
-              <option value="15">SOHO EIT 304</option>
-              <option value="16">SDO/HMI Continuum</option>
-              <option value="17">SDO/HMI Magnetogram</option>
-            </select>
-            <div class="field-hint">NASA SDO/AIA and SOHO realtime (LASCO, EIT, HMI)</div>
-          </div>
-          </div>
+          <pre id="logsView" class="logs-view"></pre>
         </div>
       </div>
-
     </div>
 
     <!-- ==================== TAB 7: BACKUP ==================== -->
@@ -1581,6 +1706,21 @@
   </div>
   <div class="toast" id="toast"></div>
 
+  <!-- ======== UPDATE CHANGELOG MODAL ======== -->
+  <div class="changelog-backdrop" id="changelogBackdrop" style="display:none">
+    <div class="changelog-modal" role="dialog" aria-modal="true">
+      <div class="changelog-head">
+        <span id="changelogTitle">Update</span>
+        <button class="changelog-close" id="changelogClose" title="Close">&times;</button>
+      </div>
+      <div class="changelog-body" id="changelogBody"></div>
+      <div class="changelog-foot">
+        <button class="btn btn-outline" id="changelogCancel">Close</button>
+        <button class="btn btn-primary" id="changelogInstall">Install</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     /* ============================================================
        NINA Display — Config UI JavaScript
@@ -1601,7 +1741,7 @@
         const urlId='url'+(i+1);
         container.insertAdjacentHTML('beforeend',
           '<div class="card node-config-card" id="node_card_'+i+'" data-node="'+i+'">'+
-            '<div class="card-title">Node '+(i+1)+' <span id="node_card_hostname_'+i+'" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span></div>'+
+            '<div class="card-title">N.I.N.A. '+(i+1)+' <span id="node_card_hostname_'+i+'" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span></div>'+
             '<div class="field"><label class="field-label">Hostname / IP</label>'+
             '<input type="text" class="input" id="'+urlId+'" placeholder="'+placeholders[i]+'" oninput="updateNodeLabels()"></div>'+
             '<div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">'+
@@ -1786,6 +1926,7 @@
       nodes:   {color:'#7aa2f7', rgb:'122, 162, 247'},
       behavior:{color:'#7aa2f7', rgb:'122, 162, 247'},
       system:  {color:'#7aa2f7', rgb:'122, 162, 247'},
+      logs:    {color:'#7aa2f7', rgb:'122, 162, 247'},
       allsky:  {color:'#7aa2f7', rgb:'122, 162, 247'},
       clock:   {color:'#7aa2f7', rgb:'122, 162, 247'},
       spotify: {color:'#7aa2f7', rgb:'122, 162, 247'},
@@ -1808,6 +1949,12 @@
       $$('[data-tab="'+name+'"]').forEach(b=>b.classList.add('active'));
       setAccent(name);
       try{localStorage.setItem('nina_tab',name);}catch(e){}
+      if(name==='logs'){
+        if(typeof refreshLogs==='function') refreshLogs();
+        if(typeof syncLogsAutoRefresh==='function') syncLogsAutoRefresh();
+      } else {
+        if(typeof stopLogsAutoRefresh==='function') stopLogsAutoRefresh();
+      }
     }
 
     $$('.tab-btn, .nav-btn').forEach(btn=>{
@@ -1817,8 +1964,8 @@
     try{
       var saved=localStorage.getItem('nina_tab');
       if(saved&&$('tab-'+saved)) switchTab(saved);
-      else setAccent('display');
-    }catch(e){ setAccent('display'); }
+      else setAccent('nodes');
+    }catch(e){ setAccent('nodes'); }
 
     /* === Live API Controls === */
     function setTheme(v){postJson('/api/theme',{theme_index:parseInt(v)})}
@@ -1950,7 +2097,7 @@
     function updateNodeLabels(){
       var urls=[$('url1').value.trim(),$('url2').value.trim(),$('url3').value.trim()];
       for(var i=0;i<3;i++){
-        var label=urls[i]||('Node '+(i+1));
+        var label=urls[i]||('N.I.N.A. '+(i+1));
         var hostnameSpan=$('node_card_hostname_'+i);
         if(hostnameSpan) hostnameSpan.textContent=urls[i]?urls[i]:'';
         var instLbl=$('inst_lbl_'+i);
@@ -2831,6 +2978,127 @@
       });
     }
 
+    /* Update info from the passive badge check; consumed by the changelog modal. */
+    var _updateInfo=null;
+
+    /* Passive update indicator in top nav. Silent on any failure. */
+    function checkUpdateBadge(){
+      var pill=$('updatePill');
+      if(!pill) return;
+      fetch('/api/check-update-json').then(function(r){return r.json();}).then(function(data){
+        if(data&&data.update_available){
+          _updateInfo=data;
+          pill.innerHTML=escHtml(data.tag)+' \u2191';
+          pill.style.display='inline-flex';
+        }
+      }).catch(function(){});
+    }
+
+    function openChangelogModal(){
+      if(!_updateInfo) return;
+      var title=escHtml(_updateInfo.current_version)+' \u2192 '+escHtml(_updateInfo.tag);
+      if(_updateInfo.is_prerelease) title+=' <span class="cl-prerelease">pre-release</span>';
+      $('changelogTitle').innerHTML=title;
+      $('changelogInstall').textContent='Install '+_updateInfo.tag;
+      $('changelogInstall').disabled=false;
+      $('changelogBody').textContent='Loading changelog\u2026';
+      $('changelogBackdrop').style.display='flex';
+      loadChangelog();
+    }
+
+    function clGrabSection(body, prefixLower){
+      // prefixLower e.g. '### summary' or '### changes since'
+      var lower=body.toLowerCase();
+      var idx=lower.indexOf(prefixLower);
+      if(idx===-1) return null;
+      var nl=body.indexOf('\n', idx);
+      var titleLine, contentStart;
+      if(nl===-1){ titleLine=body.slice(idx); contentStart=body.length; }
+      else { titleLine=body.slice(idx, nl); contentStart=nl+1; }
+      titleLine=titleLine.replace(/^#+\s*/,'').replace(/\s+$/,'');
+      var a=body.indexOf('\n### ', contentStart);
+      var b=body.indexOf('\n## ', contentStart);
+      var end=body.length;
+      if(a!==-1&&a<end) end=a;
+      if(b!==-1&&b<end) end=b;
+      var content=body.slice(contentStart, end).replace(/^\s+|\s+$/g,'');
+      return {title:titleLine, content:content};
+    }
+
+    function loadChangelog(){
+      var channel=parseInt($('update_channel').value)||0;
+      fetch('https://api.github.com/repos/chvvkumar/ESP32-P4-NINA-Display/releases?per_page=30')
+        .then(function(r){return r.json();})
+        .then(function(releases){
+          if(!Array.isArray(releases)) throw new Error('bad response');
+          var html='';
+          var count=0;
+          for(var i=0;i<releases.length;i++){
+            var rel=releases[i];
+            if(rel.draft===true) continue;
+            var isPre=rel.prerelease===true;
+            if(channel===1){ if(!isPre) continue; }   // pre-release channel: only pre-releases
+            else { if(isPre) continue; }              // stable channel: only stable releases
+            if(rel.tag_name===_updateInfo.current_version) break;
+            if(count>=20) break;
+            var head=escHtml(rel.tag_name);
+            if(rel.prerelease) head+=' <span class="cl-prerelease">pre-release</span>';
+            var rawBody=(rel.body||'').replace(/!\[[^\]]*\]\([^)]*\)/g,'');
+            html+='<div class="cl-version">'+head+'</div>';
+            var secs=[];
+            var s1=clGrabSection(rawBody,'### summary');
+            var s2=clGrabSection(rawBody,'### changes since');
+            if(s1) secs.push(s1);
+            if(s2) secs.push(s2);
+            if(secs.length){
+              for(var s=0;s<secs.length;s++){
+                html+='<div class="cl-section-title">'+escHtml(secs[s].title)+'</div>';
+                html+='<div class="cl-notes">'+escHtml(secs[s].content)+'</div>';
+              }
+            } else {
+              html+='<div class="cl-notes">No summary available.</div>';
+            }
+            count++;
+          }
+          if(!count) html='<div class="cl-notes">No release notes found.</div>';
+          $('changelogBody').innerHTML=html;
+        })
+        .catch(function(){
+          $('changelogBody').innerHTML='<div class="cl-notes">Could not load changelog. '+
+            '<a href="https://github.com/chvvkumar/ESP32-P4-NINA-Display/releases" target="_blank" rel="noopener" style="color:var(--accent)">View releases on GitHub</a></div>';
+        });
+    }
+
+    function closeChangelogModal(){
+      $('changelogBackdrop').style.display='none';
+    }
+
+    function installFromModal(){
+      if(!confirm('Install the update? The device will reboot after flashing.')) return;
+      var btn=$('changelogInstall');
+      var label=btn.textContent;
+      btn.disabled=true; btn.textContent='Installing\u2026';
+      fetch('/api/ota-github',{method:'POST',body:'{}'}).then(function(r){return r.json();}).then(function(data){
+        if(data.started){
+          btn.textContent='Flashing \u2014 see device screen\u2026';
+          $('changelogBody').innerHTML='<div class="cl-notes">OTA in progress. Device will reboot when complete.</div>';
+        }
+      }).catch(function(){
+        btn.disabled=false; btn.textContent=label;
+        alert('Failed to start OTA update');
+      });
+    }
+
+    (function(){
+      var pill=$('updatePill');
+      if(pill) pill.addEventListener('click',openChangelogModal);
+      var bd=$('changelogBackdrop');
+      if(bd) bd.addEventListener('click',function(e){ if(e.target===bd) closeChangelogModal(); });
+      var c1=$('changelogClose'); if(c1) c1.addEventListener('click',closeChangelogModal);
+      var c2=$('changelogCancel'); if(c2) c2.addEventListener('click',closeChangelogModal);
+      var ins=$('changelogInstall'); if(ins) ins.addEventListener('click',installFromModal);
+    })();
+
     function startGithubOta(){
       var btn=$('otaGithubBtn');
       if(!confirm('Install the update? The device will reboot after flashing.')) return;
@@ -3334,6 +3602,7 @@
 
     function updateImageSourceUI(){
       var s=getImageSource();
+      if($('discOptions')) $('discOptions').style.display=(s===1)?'none':'';
       if($('goesGroup'))  $('goesGroup').style.display =(s===0)?'':'none';
       if($('moonGroup'))  $('moonGroup').style.display =(s===1)?'':'none';
       if($('solarGroup')) $('solarGroup').style.display=(s===2)?'':'none';
@@ -3464,6 +3733,7 @@
       document.querySelectorAll('.card').forEach(function(card){
         var title=card.querySelector('.card-title');
         if(!title) return;
+        if(card.classList.contains('nocollapse')) return;  // always-expanded cards (e.g. Logs)
         var key=getCardKey(card);
         if(!key) return;
         // Appearance and Page Navigation default to expanded; others default to collapsed
@@ -3491,6 +3761,98 @@
     }
 
     initCollapsibleCards();
+
+    /* ---- Diagnostic Logs ---- */
+
+    var _logsTimer=null;
+
+    function logsTabActive(){
+      var p=$('tab-logs');
+      return !!(p && p.classList.contains('active'));
+    }
+
+    function refreshLogs(){
+      var view=$('logsView');
+      if(!view) return;
+      var btn=$('refreshLogsBtn');
+      if(btn) btn.disabled=true;
+      /* Was the view scrolled to (near) the bottom before we replaced content? */
+      var nearBottom = (view.scrollHeight - view.scrollTop - view.clientHeight) < 40;
+      fetch('/api/logs')
+        .then(function(r){
+          if(!r.ok) throw new Error('HTTP '+r.status);
+          return r.text();
+        })
+        .then(function(text){
+          view.textContent=text;
+          if(nearBottom) view.scrollTop=view.scrollHeight;
+          var kb=(text.length/1024).toFixed(1);
+          $('logsStatus').textContent='Updated '+new Date().toLocaleTimeString()+' · '+text.length+' bytes ('+kb+' KB)';
+        })
+        .catch(function(e){
+          showToast('Load logs failed: '+e.message,'error');
+          $('logsStatus').textContent='Load failed at '+new Date().toLocaleTimeString()+': '+e.message;
+        })
+        .finally(function(){ if(btn) btn.disabled=false; });
+    }
+
+    function logsAutoRefreshTick(){
+      /* Skip polling when the tab is not visible or the document is hidden,
+         to avoid pulling the whole 512 KB buffer needlessly. */
+      if(document.hidden || !logsTabActive()) return;
+      refreshLogs();
+    }
+
+    function startLogsAutoRefresh(){
+      stopLogsAutoRefresh();
+      var sel=$('logsRefreshInterval');
+      var secs=sel?parseInt(sel.value,10):5;
+      if(!secs||secs<1) secs=5;
+      _logsTimer=setInterval(logsAutoRefreshTick,secs*1000);
+    }
+
+    function stopLogsAutoRefresh(){
+      if(_logsTimer){ clearInterval(_logsTimer); _logsTimer=null; }
+    }
+
+    function syncLogsAutoRefresh(){
+      var cb=$('logsAutoRefresh');
+      if(cb && cb.checked) startLogsAutoRefresh();
+      else stopLogsAutoRefresh();
+    }
+
+    (function(){
+      var cb=$('logsAutoRefresh');
+      var sel=$('logsRefreshInterval');
+      if(cb) cb.addEventListener('change',syncLogsAutoRefresh);
+      if(sel) sel.addEventListener('change',function(){
+        /* Restart with the new interval only if auto-refresh is on. */
+        if(cb && cb.checked) startLogsAutoRefresh();
+      });
+      /* If Logs is the restored active tab on page load, the early switchTab()
+         ran before these functions existed (guarded by typeof), so populate now. */
+      if(logsTabActive()){ refreshLogs(); syncLogsAutoRefresh(); }
+    })();
+
+    /* Pause auto-refresh when the page is hidden; resume when visible on Logs tab. */
+    document.addEventListener('visibilitychange',function(){
+      if(document.hidden){ stopLogsAutoRefresh(); }
+      else { syncLogsAutoRefresh(); }
+    });
+
+    function clearLogs(){
+      if(!confirm('Clear the captured device logs? This cannot be undone.')) return;
+      var btn=$('clearLogsBtn');
+      btn.disabled=true; var prev=btn.textContent; btn.textContent='Clearing...';
+      fetch('/api/logs/clear',{method:'POST'})
+        .then(function(r){
+          if(!r.ok) throw new Error('Clear failed');
+          showToast('Logs cleared','success');
+          refreshLogs();
+        })
+        .catch(function(e){ showToast('Clear logs failed: '+e.message,'error'); })
+        .finally(function(){ btn.disabled=false; btn.textContent=prev; });
+    }
 
     /* ---- Backup & Restore ---- */
 
@@ -3712,6 +4074,7 @@
     populateTimezones();
     loadConfig();
     loadVersion();
+    checkUpdateBadge();
   </script>
 </body>
 </html>

@@ -9,6 +9,14 @@
 
 static const char *TAG = "moon_render";
 
+/* 4x4 Bayer ordered-dither threshold matrix (0..15). */
+static const uint8_t s_bayer4[4][4] = {
+    { 0,  8,  2, 10},
+    {12,  4, 14,  6},
+    { 3, 11,  1,  9},
+    {15,  7, 13,  5}
+};
+
 /* Embedded PNG (see CMakeLists EMBED_FILES). */
 extern const uint8_t moon_png_start[] asm("_binary_moon_texture_png_start");
 extern const uint8_t moon_png_end[]   asm("_binary_moon_texture_png_end");
@@ -168,7 +176,11 @@ uint16_t *moon_render(int w, int h, const moon_state_t *st, uint8_t bg_style)
                 int r = ((c>>11)&0x1F)*255/31 + add;
                 int g = ((c>>5)&0x3F)*255/63 + add*9/10;
                 int b = (c&0x1F)*255/31 + add*7/10;
-                row[px] = rgb565(r,g,b);
+                /* Ordered dither fills rgb565 truncation slack (kills rings). */
+                int dr = s_bayer4[py & 3][px & 3] >> 1;  /* 0..7, red step 8 */
+                int dg = s_bayer4[py & 3][px & 3] >> 2;  /* 0..3, green step 4 */
+                int db = dr;                             /* 0..7, blue step 8 */
+                row[px] = rgb565(r + dr, g + dg, b + db);
             }
         }
     }

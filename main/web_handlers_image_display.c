@@ -80,6 +80,7 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     uint8_t prev_source = cfg->image_display_source;
     uint8_t prev_band   = cfg->solar_band;
     bool    prev_crop   = cfg->image_display_crop;
+    uint8_t prev_bg     = cfg->moon_bg_style;
     char    prev_region[sizeof(cfg->goes_region)];
     strlcpy(prev_region, cfg->goes_region, sizeof(prev_region));
 
@@ -131,6 +132,28 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
              * the re-download path re-applies the new crop, so no separate local
              * re-render is needed. */
             atomic_store(&image_display_manual_fetch, true);
+            goes_ensure_task_running();
+            if (goes_task_handle) {
+                xTaskNotifyGive(goes_task_handle);
+            }
+        } else if (cfg->image_display_source == 1 && cfg->moon_bg_style != prev_bg) {
+            /* Moon background style changed only (source unchanged, so the
+             * source_band_region_changed branch above did not fire): wake the
+             * image-display task so its Moon branch re-renders moon_render() with
+             * the new cfg->moon_bg_style and commits it via goes_set_image() /
+             * nina_image_display_update(). The Moon branch (image_display_source
+             * == 1 in goes_poll_task) is purely local — it renders, commits, and
+             * `continue`s before ever reaching the manual-fetch / wait-overlay
+             * block, so it never shows the "Loading image..." overlay and never
+             * consumes image_display_manual_fetch. A bare task notify is therefore
+             * sufficient: do NOT set image_display_manual_fetch here, since the
+             * Moon branch would not clear it and it could leak a spurious overlay
+             * onto a later GOES/Solar fetch. A background-only change leaves moon
+             * illumination/orientation unchanged, so moon_anim_request stays clear
+             * and only a single still re-render occurs. This branch is mutually
+             * exclusive with the source-change branch above (that one runs only
+             * when source/band/region changed), so the task is woken at most once
+             * per request. */
             goes_ensure_task_running();
             if (goes_task_handle) {
                 xTaskNotifyGive(goes_task_handle);

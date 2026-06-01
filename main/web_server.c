@@ -196,7 +196,7 @@ void start_web_server(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 16384;
-    config.max_uri_handlers = 47;
+    config.max_uri_handlers = 49;
     config.max_open_sockets = 16;
     config.lru_purge_enable = true;
     config.keep_alive_enable = true;
@@ -259,6 +259,8 @@ void start_web_server(void)
         { "/api/wifi/setup",         HTTP_POST, wifi_setup_post_handler, NULL },
         { "/api/wifi/status",        HTTP_GET,  wifi_status_get_handler, NULL },
         { "/api/auth/status",        HTTP_GET,  auth_status_get_handler, NULL },
+        { "/api/logs",               HTTP_GET,  logs_get_handler, NULL },
+        { "/api/logs/clear",         HTTP_POST, logs_clear_post_handler, NULL },
     };
 
     for (int i = 0; i < (int)(sizeof(routes)/sizeof(routes[0])); i++) {
