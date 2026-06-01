@@ -1303,7 +1303,11 @@
             <li>Go to <a href="https://developer.spotify.com" target="_blank" rel="noopener" style="color:rgba(var(--accent-rgb),1);text-decoration:underline">developer.spotify.com</a> and create a free app</li>
             <li>Set the redirect URI in your Spotify app to: <code style="background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.78rem">http://127.0.0.1:8000/callback</code></li>
             <li>Copy the <strong>Client ID</strong> from your Spotify app and paste it below</li>
-            <li>Click <strong>Save</strong> at the bottom of this page, then use the Login button in the Account section</li>
+            <li>Click <strong>Save</strong> at the bottom of this page</li>
+            <li>In the <strong>Account</strong> section below, click <strong>Login with Spotify</strong> and approve access in the popup</li>
+            <li>After approving, Spotify redirects to <code style="background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.78rem">http://127.0.0.1:8000/callback?code=...</code> and your browser shows a "can't connect" / "site can't be reached" page. This is expected.</li>
+            <li>Copy the <strong>full URL</strong> from that page's address bar (it must include the <code style="background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.78rem">?code=</code> part)</li>
+            <li>Paste it into the <strong>Redirect URL</strong> field in the Account section and click <strong>Submit</strong></li>
           </ol>
         </div>
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
