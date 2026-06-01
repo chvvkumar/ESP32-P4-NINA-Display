@@ -84,6 +84,23 @@
     .card.collapsed .card-title { margin-bottom: 0; }
     .card.collapsed .card-title::after { transform: rotate(-45deg); }
     .card.collapsed > :not(.card-title) { display: none !important; }
+    /* Non-collapsible cards (e.g. Logs): no chevron, no pointer affordance */
+    .card.nocollapse > .card-title { cursor: default; }
+    .card.nocollapse > .card-title::after { display: none; }
+    /* Logs tab: break out wider than the 960px content column */
+    #tab-logs .card { width: min(1180px, 94vw); margin-left: 50%; transform: translateX(-50%); }
+    .logs-layout { display: flex; gap: 18px; align-items: stretch; }
+    .logs-controls { flex: 0 0 220px; display: flex; flex-direction: column; gap: 12px; }
+    .logs-controls .btn { width: 100%; }
+    .logs-view {
+      flex: 1; min-width: 0; margin: 0;
+      height: calc(100vh - 240px); min-height: 420px; overflow: auto;
+      white-space: pre-wrap; word-break: break-word;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.72rem; line-height: 1.4; color: var(--text-secondary);
+      background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 12px;
+    }
     .content { max-width: 960px; margin: 0 auto; padding: 28px 24px 100px; }
     .field { margin-bottom: 20px; }
     .field:last-child { margin-bottom: 0; }
@@ -105,7 +122,7 @@
     }
     .top-nav .brand {
       font-size: 0.95rem; font-weight: 700; letter-spacing: -0.02em;
-      display: flex; align-items: center; gap: 10px;
+      display: flex; align-items: center; gap: 10px; flex: 1 1 0;
     }
     .top-nav .brand .logo {
       width: 36px; height: 36px;
@@ -124,6 +141,9 @@
       color: #f4f4f5; background: rgba(var(--accent-rgb), 0.12);
       box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.08);
     }
+    .top-nav .nav-right {
+      display: flex; align-items: center; gap: 10px; flex: 1 1 0; justify-content: flex-end;
+    }
     .top-nav .github-link {
       color: var(--text-hint); text-decoration: none; font-size: 0.75rem;
       display: flex; align-items: center; gap: 6px;
@@ -132,6 +152,15 @@
       background: rgba(255, 255, 255, 0.02);
     }
     .top-nav .github-link:hover { color: #f4f4f5; border-color: rgba(var(--accent-rgb), 0.3); background: rgba(255, 255, 255, 0.04); }
+    .top-nav .update-pill {
+      color: var(--accent); font-family: inherit; font-size: 0.72rem; font-weight: 600;
+      display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+      padding: 6px 12px; border: 1px solid rgba(var(--accent-rgb), 0.4);
+      border-radius: 10px; transition: all 0.2s ease;
+      background: rgba(var(--accent-rgb), 0.1);
+      box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.12);
+    }
+    .top-nav .update-pill:hover { color: #f4f4f5; border-color: rgba(var(--accent-rgb), 0.6); background: rgba(var(--accent-rgb), 0.18); box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.25); }
 
     .bottom-nav {
       display: none; position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
@@ -267,6 +296,50 @@
     .btn-danger:hover {
       border-color: rgba(239, 68, 68, 0.4); color: #ef4444;
       background: rgba(239, 68, 68, 0.06); box-shadow: 0 0 16px rgba(239, 68, 68, 0.1);
+    }
+
+    /* === UPDATE CHANGELOG MODAL === */
+    .changelog-backdrop {
+      position: fixed; inset: 0; z-index: 300;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    }
+    .changelog-modal {
+      width: min(640px, 92vw); max-height: 80vh;
+      display: flex; flex-direction: column;
+      background: var(--elevated); border: 1px solid var(--border);
+      border-radius: 16px; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+    }
+    .changelog-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 20px; border-bottom: 1px solid var(--border);
+      font-weight: 600; font-size: 1.05rem;
+    }
+    .changelog-close {
+      background: none; border: none; color: var(--text-hint); cursor: pointer;
+      font-size: 1.6rem; line-height: 1; padding: 0 4px; transition: color 0.2s ease;
+    }
+    .changelog-close:hover { color: var(--accent); }
+    .changelog-body { overflow: auto; padding: 16px 20px; }
+    .cl-version {
+      color: var(--accent); font-weight: 700; font-size: 0.95rem;
+      margin: 14px 0 6px; display: flex; align-items: center; gap: 8px;
+    }
+    .changelog-body .cl-version:first-child { margin-top: 0; }
+    .cl-section-title { font-weight: 600; font-size: 0.8rem; color: #f4f4f5; margin: 8px 0 2px; }
+    .cl-notes {
+      white-space: pre-wrap; font-size: 0.85rem; line-height: 1.5;
+      color: var(--text-hint);
+    }
+    .cl-prerelease {
+      font-size: 0.7rem; font-weight: 600; color: #fbbf24;
+      border: 1px solid rgba(251, 191, 36, 0.4); border-radius: 6px;
+      padding: 1px 6px;
+    }
+    .changelog-foot {
+      display: flex; justify-content: flex-end; gap: 10px;
+      padding: 14px 20px; border-top: 1px solid var(--border);
     }
 
     /* === FILTER GRID === */
@@ -480,20 +553,27 @@
       border: 1px solid var(--border);
       padding: 14px 22px; border-radius: 16px; font-size: 0.85rem;
       box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
-      transform: translateX(120%); transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+      visibility: hidden; pointer-events: none;
+      transform: translateX(120%); transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), visibility 0s linear 0.35s;
     }
-    .toast.show { transform: translateX(0); }
+    .toast.show { visibility: visible; pointer-events: auto; transform: translateX(0); transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), visibility 0s linear 0s; }
     .toast.success { border-left: 3px solid #10b981; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(16, 185, 129, 0.08); }
     .toast.error { border-left: 3px solid #ef4444; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(239, 68, 68, 0.08); }
 
     /* === RESPONSIVE === */
     @media (max-width: 768px) {
-      .top-nav .tabs, .top-nav .github-link { display: none; }
+      .top-nav .tabs, .top-nav .nav-right { display: none; }
       .bottom-nav { display: block; }
       .content { padding: 16px 16px calc(var(--bottom-nav-height) + var(--save-bar-height) + env(safe-area-inset-bottom, 0px) + 16px); }
       .save-bar { bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom, 0px)); }
       .toast { top: auto; bottom: calc(var(--bottom-nav-height) + var(--save-bar-height) + env(safe-area-inset-bottom, 0px) + 16px); right: 16px; }
       .row.stack-mobile { flex-direction: column; }
+
+      /* Logs: stack controls above the viewer on narrow screens, drop the breakout */
+      #tab-logs .card { width: auto; margin-left: 0; transform: none; }
+      .logs-layout { flex-direction: column; }
+      .logs-controls { flex: 0 0 auto; }
+      .logs-view { height: 60vh; min-height: 300px; }
 
       /* Card titles */
       .card-title { font-size: 0.9rem; }
@@ -569,40 +649,32 @@
   <nav class="top-nav">
     <div class="brand"><img class="logo" src="/favicon.ico" alt=""> <span id="brandName">NINA Display</span></div>
     <div class="tabs" id="topTabs">
-      <button class="tab-btn active" data-tab="display">Display</button>
-      <button class="tab-btn" data-tab="nodes">N.I.N.A.</button>
-      <button class="tab-btn" data-tab="behavior">Behavior</button>
-      <button class="tab-btn" data-tab="system">System</button>
+      <button class="tab-btn active" data-tab="nodes">N.I.N.A.</button>
       <button class="tab-btn" data-tab="allsky">AllSky</button>
       <button class="tab-btn" data-tab="clock">Clock</button>
       <button class="tab-btn" data-tab="spotify">Spotify</button>
       <button class="tab-btn" data-tab="image-display">Image Display</button>
+      <button class="tab-btn" data-tab="display">Display</button>
+      <button class="tab-btn" data-tab="behavior">Behavior</button>
+      <button class="tab-btn" data-tab="system">System</button>
+      <button class="tab-btn" data-tab="logs">Logs</button>
       <button class="tab-btn" data-tab="backup">Backup</button>
     </div>
-    <a class="github-link" href="https://github.com/chvvkumar/ESP32-P4-NINA-Display" target="_blank" rel="noopener">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-      GitHub
-    </a>
+    <div class="nav-right">
+      <button class="update-pill" id="updatePill" style="display:none" title="Update available - click to install"></button>
+      <a class="github-link" href="https://github.com/chvvkumar/ESP32-P4-NINA-Display" target="_blank" rel="noopener">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        GitHub
+      </a>
+    </div>
   </nav>
 
   <!-- ======== BOTTOM NAVIGATION (MOBILE) ======== -->
   <nav class="bottom-nav">
     <div class="nav-items" id="bottomTabs">
-      <button class="nav-btn active" data-tab="display">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-        Display
-      </button>
-      <button class="nav-btn" data-tab="nodes">
+      <button class="nav-btn active" data-tab="nodes">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
         N.I.N.A.
-      </button>
-      <button class="nav-btn" data-tab="behavior">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-        Behavior
-      </button>
-      <button class="nav-btn" data-tab="system">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
-        System
       </button>
       <button class="nav-btn" data-tab="allsky">
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41m11.32-11.32l1.41-1.41"/></svg>
@@ -620,6 +692,22 @@
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
         Image
       </button>
+      <button class="nav-btn" data-tab="display">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        Display
+      </button>
+      <button class="nav-btn" data-tab="behavior">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        Behavior
+      </button>
+      <button class="nav-btn" data-tab="system">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
+        System
+      </button>
+      <button class="nav-btn" data-tab="logs">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><line x1="8" y1="9" x2="10" y2="9"/></svg>
+        Logs
+      </button>
       <button class="nav-btn" data-tab="backup">
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -634,136 +722,8 @@
   <!-- ======== MAIN CONTENT ======== -->
   <main class="content">
 
-    <!-- ==================== TAB 1: DISPLAY ==================== -->
-    <div id="tab-display" class="tab-panel active">
-
-      <div class="card">
-        <div class="card-title">Appearance</div>
-        <div class="field">
-          <label class="field-label">Theme</label>
-          <select class="input" id="theme_select" onchange="setTheme(this.value)">
-            <option value="0">Default</option>
-            <option value="1">Red Night</option>
-            <option value="2">Cyber Dusk</option>
-            <option value="3">Stellar Ember</option>
-            <option value="4">Arctic Steel</option>
-            <option value="5">Oxidized Copper</option>
-            <option value="6">Solar Flare</option>
-            <option value="7">Phantom Green</option>
-            <option value="8">Bloodmoon</option>
-          </select>
-        </div>
-        <div class="field">
-          <label class="field-label">Widget Style</label>
-          <select class="input" id="widget_style_select" onchange="setWidgetStyle(this.value)">
-            <option value="0">Default</option>
-            <option value="1">Subtle Border</option>
-            <option value="2">Soft Inset</option>
-            <option value="3">Frosted Glass</option>
-            <option value="4">Chamfered</option>
-            <option value="5">Double Border</option>
-            <option value="6">Raised Slab</option>
-            <option value="7">Gradient Fade</option>
-            <option value="8">Scanline</option>
-            <option value="9">Pillar</option>
-            <option value="10">Stepped Edge</option>
-            <option value="11">Horizon Line</option>
-            <option value="12">Ember Ring</option>
-          </select>
-        </div>
-        <div class="field">
-          <label class="field-label">Text brightness</label>
-          <div class="slider-group">
-            <input type="range" class="slider" id="color_brightness" min="0" max="100" value="80" oninput="setColorBrightness(this.value)">
-            <span class="slider-val" id="color_brightness_val">80%</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">Page Navigation <span id="pm_summary" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span></div>
-
-        <div class="pn-section-label">Start Page</div>
-        <div class="pn-pill-grid" id="start-page-pills"></div>
-
-        <div class="pn-divider"></div>
-
-        <div class="toggle-row">
-          <div>
-            <span class="toggle-label">Auto Cycle</span>
-            <div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">Rotate through pages automatically</div>
-            <div class="field-hint" style="margin-top:2px">When enabled, overrides idle page switching</div>
-          </div>
-          <label class="toggle"><input type="checkbox" id="auto_cycle_toggle" onchange="toggleAutoCycle();checkDirty()"><span class="toggle-track"></span></label>
-        </div>
-
-        <div class="pn-cycle-settings" id="pn_cycle_settings" style="display:none">
-          <div class="row stack-mobile">
-            <div class="field">
-              <label class="field-label">Interval (seconds)</label>
-              <input type="number" class="input" id="auto_rotate_interval" min="4" max="3600" value="30">
-            </div>
-            <div class="field">
-              <label class="field-label">Transition</label>
-              <select class="input" id="auto_rotate_effect">
-                <option value="0">Instant</option>
-                <option value="1">Fade</option>
-                <option value="2">Slide Left</option>
-                <option value="3">Slide Right</option>
-              </select>
-            </div>
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-label" style="font-size:0.82rem;color:var(--text-muted)">Skip disconnected nodes</span>
-            <label class="toggle"><input type="checkbox" id="auto_rotate_skip"><span class="toggle-track"></span></label>
-          </div>
-          <div class="pn-sub-divider"></div>
-          <div>
-            <div class="pn-section-label">Pages in Rotation</div>
-            <div style="font-size:0.72rem;color:var(--text-muted);margin:-8px 0 10px;opacity:0.7">Drag to reorder</div>
-            <div class="pn-pill-grid reorderable" id="arp-container"></div>
-          </div>
-        </div>
-
-        <div class="pn-divider"></div>
-
-        <div class="toggle-row">
-          <div>
-            <span class="toggle-label">Switch page when no connections</span>
-            <div class="field-hint" style="margin-top:2px">Automatically switches to the selected page when all NINA instances are disconnected. Disabled while auto-rotate is active.</div>
-          </div>
-          <label class="toggle"><input type="checkbox" id="idle_page_override_enabled" onchange="toggleIdleOverride();checkDirty()"><span class="toggle-track"></span></label>
-        </div>
-        <div class="field" id="idle_target_field" style="display:none;margin-top:12px">
-          <label class="field-label">Target page</label>
-          <select class="input" id="idle_page_override_target">
-            <option value="-1">No Connections (Summary)</option>
-            <option value="0">Clock</option>
-            <option value="1">AllSky</option>
-            <option value="2">Spotify</option>
-            <option value="3">Image Display</option>
-            <option value="4">System Info</option>
-          </select>
-          <div class="toggle-row" style="margin-top:12px">
-            <div>
-              <span class="toggle-label">Persistent idle page</span>
-              <div class="field-hint" style="margin-top:2px">Returns to the selected page after manual navigation while idle</div>
-            </div>
-            <label class="toggle"><input type="checkbox" id="idle_page_persistent" onchange="checkDirty()"><span class="toggle-track"></span></label>
-          </div>
-          <div class="toggle-row" style="margin-top:12px">
-            <div>
-              <span class="toggle-label">Show idle indicator</span>
-              <div class="field-hint" style="margin-top:2px">Shows a small status dot on the idle page when all NINA instances are disconnected</div>
-            </div>
-            <label class="toggle"><input type="checkbox" id="idle_indicator_enabled" onchange="checkDirty()"><span class="toggle-track"></span></label>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <!-- ==================== TAB 2: NODES & DATA ==================== -->
-    <div id="tab-nodes" class="tab-panel">
+    <div id="tab-nodes" class="tab-panel active">
 
       <div class="card" id="instance-overview">
         <div class="card-title">Active N.I.N.A. Instances</div>
@@ -782,379 +742,6 @@
       </div>
 
       <div id="node-cards"></div>
-    </div>
-
-    <!-- ==================== TAB 3: BEHAVIOR & ALERTS ==================== -->
-    <div id="tab-behavior" class="tab-panel">
-
-      <div class="card">
-        <div class="card-title">Hardware</div>
-        <div class="row stack-mobile">
-          <div class="field">
-            <label class="field-label">Screen Rotation</label>
-            <select class="input" id="screen_rotation_select" onchange="setScreenRotation(this.value)">
-              <option value="0">0° (Default)</option>
-              <option value="1">90°</option>
-              <option value="2">180°</option>
-              <option value="3">270°</option>
-            </select>
-          </div>
-          <div class="field">
-            <label class="field-label">Backlight</label>
-            <div class="slider-group">
-              <input type="range" class="slider" id="brightness" min="0" max="100" value="80" oninput="setBrightness(this.value)">
-              <span class="slider-val" id="brightness_val">80%</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">Power Management</div>
-        <div class="toggle-row">
-          <span class="toggle-label">Turn off screen when idle</span>
-          <label class="toggle"><input type="checkbox" id="screen_sleep_enabled"><span class="toggle-track"></span></label>
-        </div>
-        <div id="screen_sleep_details" style="margin-top:16px">
-          <div class="row stack-mobile">
-            <div class="field">
-              <label class="field-label">Timeout (seconds)</label>
-              <input type="number" class="input" id="screen_sleep_timeout" min="10" max="3600" value="60">
-            </div>
-            <div class="field">
-              <label class="field-label">Idle poll interval (s)</label>
-              <input type="number" class="input" id="idle_poll_interval" min="5" max="120" value="30">
-            </div>
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-label">WiFi power save</span>
-            <label class="toggle"><input type="checkbox" id="wifi_power_save" checked><span class="toggle-track"></span></label>
-          </div>
-          <div class="field-hint">Enable WiFi modem sleep between polls. Connection stays associated with zero reconnection delay.</div>
-        </div>
-        <hr class="divider">
-        <div class="toggle-row">
-          <span class="toggle-label">Enable deep sleep (long-press BOOT to power off)</span>
-          <label class="toggle"><input type="checkbox" id="deep_sleep_enabled"><span class="toggle-track"></span></label>
-        </div>
-        <div id="deep_sleep_details" style="margin-top:16px">
-          <div class="field">
-            <label class="field-label">Wake timer (hours)</label>
-            <input type="number" class="input" id="deep_sleep_wake_timer" min="0" max="72" step="1" value="0">
-            <div class="field-hint">Hours until auto-wake. 0 = stay asleep forever. Warning: with timer set to 0, the device must be physically rebooted to wake up — there is no manual wake from deep sleep.</div>
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-label">Auto power off when idle</span>
-            <label class="toggle"><input type="checkbox" id="deep_sleep_on_idle"><span class="toggle-track"></span></label>
-          </div>
-          <div class="field-hint">Enter deep sleep after extended disconnection from all NINA instances. The device must be physically rebooted to wake up if the wake timer is set to 0.</div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">Polling &amp; Connectivity</div>
-        <div class="row stack-mobile">
-          <div class="field">
-            <label class="field-label">Data update rate (s)</label>
-            <input type="number" class="input" id="update_rate" min="1" max="10" value="2">
-          </div>
-          <div class="field">
-            <label class="field-label">Graph update rate (s)</label>
-            <input type="number" class="input" id="graph_interval" min="2" max="30" value="5">
-          </div>
-        </div>
-        <div class="row stack-mobile">
-          <div class="field">
-            <label class="field-label">Connection timeout (s)</label>
-            <input type="number" class="input" id="connection_timeout" min="2" max="30" value="6">
-            <div class="field-hint">Seconds without response before a NINA instance is offline</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">Notifications</div>
-        <div class="field" style="margin-bottom:16px">
-          <label class="field-label">Toast duration (s)</label>
-          <input type="number" class="input" id="toast_duration" min="3" max="30" value="8">
-          <div class="field-hint">Errors show for 2x this value</div>
-        </div>
-        <div class="toggle-row">
-          <span class="toggle-label">Border flash alerts</span>
-          <label class="toggle"><input type="checkbox" id="alert_flash_enabled" checked><span class="toggle-track"></span></label>
-        </div>
-        <div class="field-hint" style="margin-top:4px">Flash the screen border when RMS, HFR, or safety thresholds are exceeded.</div>
-        <hr class="divider">
-        <div class="field">
-          <label class="field-label">Aggregation Window</label>
-          <div class="slider-group">
-            <input type="range" class="slider" id="toast_aggregation_window" min="0" max="15" value="5" oninput="updateAggregationLabel(this.value);checkDirty()">
-            <span class="slider-val" id="toast_aggregation_val">5s</span>
-          </div>
-          <div class="field-hint">Combine rapid-fire notifications within this window. 0 = Off (show each individually).</div>
-        </div>
-        <hr class="divider">
-        <div class="field-label" style="margin-bottom:12px">Event Categories</div>
-        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label">Error Events</span>
-          <label class="toggle"><input type="checkbox" id="notify_cat_8" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
-        </div>
-        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label">Equipment Connects</span>
-          <label class="toggle"><input type="checkbox" id="notify_cat_0" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
-        </div>
-        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label">Equipment Disconnects</span>
-          <label class="toggle"><input type="checkbox" id="notify_cat_1" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
-        </div>
-        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label">Sequence Events</span>
-          <label class="toggle"><input type="checkbox" id="notify_cat_2" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
-        </div>
-        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label">Focuser</span>
-          <label class="toggle"><input type="checkbox" id="notify_cat_3" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
-        </div>
-        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label">Mount Events</span>
-          <label class="toggle"><input type="checkbox" id="notify_cat_4" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
-        </div>
-        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label">Meridian Flip</span>
-          <label class="toggle"><input type="checkbox" id="notify_cat_5" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
-        </div>
-        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label">Guider Events</span>
-          <label class="toggle"><input type="checkbox" id="notify_cat_6" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
-        </div>
-        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label">Safety Events</span>
-          <label class="toggle"><input type="checkbox" id="notify_cat_7" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
-        </div>
-        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label">Profile Changes</span>
-          <label class="toggle"><input type="checkbox" id="notify_cat_9" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
-        </div>
-        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label">Dome Events</span>
-          <label class="toggle"><input type="checkbox" id="notify_cat_10" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
-        </div>
-        <div class="toggle-row">
-          <span class="toggle-label">Flat Device Events</span>
-          <label class="toggle"><input type="checkbox" id="notify_cat_11" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
-        </div>
-      </div>
-    </div>
-
-    <!-- ==================== TAB 4: SYSTEM ==================== -->
-    <div id="tab-system" class="tab-panel">
-
-      <div class="card">
-        <div class="card-title">Network</div>
-        <div class="wifi-scan-panel" id="wifiScanPanel">
-          <div class="wifi-scan-header" onclick="toggleScanPanel()">
-            <span class="wifi-scan-title"><span class="chevron" id="scanChevron">&#x25BC;</span> Available Networks</span>
-            <span class="wifi-scan-rescan" id="scanRescanBtn" onclick="event.stopPropagation();scanWifi()">&#x21bb; Rescan</span>
-          </div>
-          <div class="wifi-scan-list" id="wifiScanList">
-            <div class="wifi-scan-status" id="wifiScanStatus">Scanning for networks...</div>
-          </div>
-        </div>
-        <div class="field">
-          <label class="field-label">Device hostname</label>
-          <input type="text" class="input" id="hostname" placeholder="NINA-DISPLAY" maxlength="31" pattern="[A-Za-z0-9\-]+" style="max-width:320px">
-          <div class="field-hint">Used for DHCP, AP SSID, and Home Assistant device name.</div>
-        </div>
-        <hr class="divider">
-        <div class="field">
-          <div class="field-label" style="margin-top:16px;font-weight:600;color:var(--accent)">Network 1 (Primary)</div>
-          <label class="field-label">SSID</label>
-          <input type="text" class="input" id="ssid1" placeholder="Network name">
-          <label class="field-label">Password</label>
-          <input type="password" class="input" id="pass1" placeholder="Enter new password to change">
-          <div class="hint">Password is stored in device config and not readable</div>
-
-          <div class="field-label" style="margin-top:16px;font-weight:600;color:var(--accent)">Network 2</div>
-          <label class="field-label">SSID</label>
-          <input type="text" class="input" id="ssid2" placeholder="Network name">
-          <label class="field-label">Password</label>
-          <input type="password" class="input" id="pass2" placeholder="Enter new password to change">
-
-          <div class="field-label" style="margin-top:16px;font-weight:600;color:var(--accent)">Network 3</div>
-          <label class="field-label">SSID</label>
-          <input type="text" class="input" id="ssid3" placeholder="Network name">
-          <label class="field-label">Password</label>
-          <input type="password" class="input" id="pass3" placeholder="Enter new password to change">
-        </div>
-        <hr class="divider">
-        <div class="row stack-mobile">
-          <div class="field">
-            <label class="field-label">NTP server</label>
-            <input type="text" class="input" id="ntp" placeholder="pool.ntp.org">
-          </div>
-          <div class="field">
-            <label class="field-label">Timezone</label>
-            <select class="input" id="timezone">
-              <option value="">UTC (default)</option>
-              <option value="GMT0">GMT</option>
-              <option value="GMT0BST,M3.5.0/1,M10.5.0">UK (GMT/BST)</option>
-              <option value="CET-1CEST,M3.5.0,M10.5.0/3">Central Europe (CET/CEST)</option>
-              <option value="EET-2EEST,M3.5.0/3,M10.5.0/4">Eastern Europe (EET/EEST)</option>
-              <option value="EST5EDT,M3.2.0,M11.1.0">US Eastern (EST/EDT)</option>
-              <option value="CST6CDT,M3.2.0,M11.1.0">US Central (CST/CDT)</option>
-              <option value="MST7MDT,M3.2.0,M11.1.0">US Mountain (MST/MDT)</option>
-              <option value="MST7">US Arizona (MST, no DST)</option>
-              <option value="PST8PDT,M3.2.0,M11.1.0">US Pacific (PST/PDT)</option>
-              <option value="AKST9AKDT,M3.2.0,M11.1.0">US Alaska (AKST/AKDT)</option>
-              <option value="HST10">US Hawaii (HST, no DST)</option>
-              <option value="AEST-10AEDT,M10.1.0,M4.1.0/3">Australia Eastern (AEST/AEDT)</option>
-              <option value="ACST-9:30ACDT,M10.1.0,M4.1.0/3">Australia Central (ACST/ACDT)</option>
-              <option value="AWST-8">Australia Western (AWST, no DST)</option>
-              <option value="NZST-12NZDT,M9.5.0,M4.1.0/3">New Zealand (NZST/NZDT)</option>
-              <option value="JST-9">Japan (JST)</option>
-              <option value="CST-8">China (CST)</option>
-              <option value="IST-5:30">India (IST)</option>
-              <option value="<-03>3">Argentina (ART)</option>
-              <option value="<-03>3<-02>,M10.3.0/0,M2.3.0/0">Brazil (BRT/BRST)</option>
-              <option value="SAST-2">South Africa (SAST)</option>
-            </select>
-          </div>
-        </div>
-        <div class="field-hint hint-center">Reboot required after changing hostname, WiFi, NTP, or timezone.</div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">MQTT</div>
-        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label">Enable MQTT</span>
-          <label class="toggle"><input type="checkbox" id="mqtt_enabled"><span class="toggle-track"></span></label>
-        </div>
-        <div class="field" style="margin-top:16px">
-          <label class="field-label">Broker host</label>
-          <input type="text" class="input" id="mqtt_broker" placeholder="192.168.1.250">
-        </div>
-        <div class="row stack-mobile">
-          <div class="field">
-            <label class="field-label">Port</label>
-            <input type="text" class="input" id="mqtt_port" placeholder="1883">
-          </div>
-          <div class="field">
-            <label class="field-label">Topic prefix</label>
-            <input type="text" class="input" id="mqtt_prefix" placeholder="ninadisplay">
-          </div>
-        </div>
-        <div class="row stack-mobile">
-          <div class="field">
-            <label class="field-label">Username</label>
-            <input type="text" class="input" id="mqtt_user" placeholder="Username">
-          </div>
-          <div class="field">
-            <label class="field-label">Password</label>
-            <input type="password" class="input" id="mqtt_pass" placeholder="Password">
-          </div>
-        </div>
-        <div class="field-hint hint-center">Reboot required after changing MQTT settings.</div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">Firmware</div>
-        <div class="fw-grid">
-          <div class="fw-item"><div class="fw-label">Version</div><div class="fw-value" id="fw_version">--</div></div>
-          <div class="fw-item"><div class="fw-label">Built</div><div class="fw-value" id="fw_date">--</div></div>
-          <div class="fw-item"><div class="fw-label">IDF</div><div class="fw-value" id="fw_idf">--</div></div>
-          <div class="fw-item"><div class="fw-label">Partition</div><div class="fw-value" id="fw_partition">--</div></div>
-          <div class="fw-item"><div class="fw-label">Release</div><div class="fw-value" id="fw_git_tag">--</div></div>
-          <div class="fw-item"><div class="fw-label">Commit</div><div class="fw-value" id="fw_git_sha">--</div></div>
-        </div>
-        <hr class="divider">
-        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label">Check for updates on boot</span>
-          <label class="toggle"><input type="checkbox" id="auto_update_check" checked><span class="toggle-track"></span></label>
-        </div>
-        <div class="field-hint" style="margin-top:4px">Automatically check GitHub for new firmware releases when the device boots.</div>
-        <div class="field" style="margin-top:12px">
-          <label class="field-label">Update channel</label>
-          <select class="input" id="update_channel">
-            <option value="0">Stable only</option>
-            <option value="1">Include pre-releases</option>
-          </select>
-        </div>
-        <button class="btn btn-primary" style="margin-top:12px;width:100%" id="checkUpdateBtn" onclick="checkForUpdates()">Check for Updates</button>
-        <div id="updateResult" style="display:none;margin-top:12px;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.03)">
-          <div id="updateResultText" style="font-size:0.85rem;color:var(--text-secondary)"></div>
-          <div id="updateSummary" style="display:none;margin-top:8px;font-size:0.78rem;color:var(--text-muted);max-height:120px;overflow-y:auto;white-space:pre-wrap"></div>
-          <button class="btn btn-primary" id="otaGithubBtn" style="display:none;margin-top:12px;width:100%" onclick="startGithubOta()">Install Update</button>
-        </div>
-        <hr class="divider">
-        <div class="ota-bar">
-          <label class="ota-label" id="otaFileLabel">
-            Choose firmware .bin file
-            <input type="file" id="otaFile" accept=".bin" style="display:none" onchange="otaFileSelected(this)">
-          </label>
-          <button class="btn btn-primary" id="otaBtn" disabled onclick="startOta()">Update</button>
-        </div>
-        <div id="otaProgress" style="display:none;margin-top:16px">
-          <div class="progress-bg"><div id="otaProgressFill" class="progress-fill"></div></div>
-          <div id="otaStatus" class="progress-status"></div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">Device</div>
-        <div class="row stack-mobile" style="margin-bottom:16px">
-          <button class="btn btn-outline" onclick="saveAndReboot()" style="flex:1">Reboot</button>
-          <button class="btn btn-danger" onclick="factoryReset()" style="flex:1">Factory Reset</button>
-        </div>
-        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label">Enable Debug Mode</span>
-          <label class="toggle"><input type="checkbox" id="debug_mode"><span class="toggle-track"></span></label>
-        </div>
-        <div class="field-hint" style="margin-top:4px;margin-bottom:16px">Performance profiling, serial reports, /api/perf endpoint.</div>
-        <span class="toggle-label">Enable Demo Mode</span>
-        <label class="toggle"><input type="checkbox" id="demo_mode"><span class="toggle-track"></span></label>
-        <p style="color:#888;font-size:0.85em;margin:2px 0 8px 0;">Generates simulated astrophotography data. Reboots device.</p>
-        <button class="btn btn-outline" id="ssBtn" onclick="takeScreenshot()">Capture Screenshot</button>
-        <div id="ssContainer" style="display:none;margin-top:16px">
-          <img id="ssImage" style="width:100%;border-radius:var(--radius-sm);border:1px solid var(--border)">
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">Authentication</div>
-        <div class="toggle-row">
-          <span class="toggle-label">Require login to access the web UI</span>
-          <label class="toggle"><input type="checkbox" id="auth_enabled"><span class="toggle-track"></span></label>
-        </div>
-        <p style="color:#888;font-size:0.85em;margin:8px 0 0 0;">
-          When disabled, anyone on the network can control the device (reboot, factory reset, OTA, config change).
-          Secrets (passwords, API keys, tokens) remain redacted in API responses either way.
-        </p>
-        <button class="btn btn-primary" style="margin-top:12px" onclick="saveAuthEnabled()">Save</button>
-        <div id="auth_enabled_status" style="margin-top:10px;font-size:0.9em;"></div>
-      </div>
-
-      <div class="card" id="adminPasswordCard">
-        <div class="card-title">Admin Password</div>
-        <p style="color:#888;font-size:0.85em;margin:2px 0 12px 0;">
-          Default password is <code>changeme123!</code>. Change it now to secure this device's web interface.
-        </p>
-        <div class="field">
-          <label for="admin_pw_current">Current password</label>
-          <input type="password" id="admin_pw_current" autocomplete="current-password">
-        </div>
-        <div class="field">
-          <label for="admin_pw_new">New password (4-32 chars)</label>
-          <input type="password" id="admin_pw_new" autocomplete="new-password">
-        </div>
-        <div class="field">
-          <label for="admin_pw_confirm">Confirm new password</label>
-          <input type="password" id="admin_pw_confirm" autocomplete="new-password">
-        </div>
-        <button class="btn btn-primary" onclick="changeAdminPassword()">Save Password</button>
-        <div id="admin_pw_status" style="margin-top:10px;font-size:0.9em;"></div>
-        <hr style="border:0;border-top:1px solid var(--border);margin:16px 0">
-        <button class="btn" id="signOutBtn" onclick="signOut()">Sign out</button>
-      </div>
     </div>
 
     <!-- ==================== TAB 5: ALLSKY ==================== -->
@@ -1511,6 +1098,536 @@
 
     </div>
 
+    <!-- ==================== TAB 1: DISPLAY ==================== -->
+    <div id="tab-display" class="tab-panel">
+
+      <div class="card">
+        <div class="card-title">Appearance</div>
+        <div class="field">
+          <label class="field-label">Theme</label>
+          <select class="input" id="theme_select" onchange="setTheme(this.value)">
+            <option value="0">Default</option>
+            <option value="1">Red Night</option>
+            <option value="2">Cyber Dusk</option>
+            <option value="3">Stellar Ember</option>
+            <option value="4">Arctic Steel</option>
+            <option value="5">Oxidized Copper</option>
+            <option value="6">Solar Flare</option>
+            <option value="7">Phantom Green</option>
+            <option value="8">Bloodmoon</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label">Widget Style</label>
+          <select class="input" id="widget_style_select" onchange="setWidgetStyle(this.value)">
+            <option value="0">Default</option>
+            <option value="1">Subtle Border</option>
+            <option value="2">Soft Inset</option>
+            <option value="3">Frosted Glass</option>
+            <option value="4">Chamfered</option>
+            <option value="5">Double Border</option>
+            <option value="6">Raised Slab</option>
+            <option value="7">Gradient Fade</option>
+            <option value="8">Scanline</option>
+            <option value="9">Pillar</option>
+            <option value="10">Stepped Edge</option>
+            <option value="11">Horizon Line</option>
+            <option value="12">Ember Ring</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label">Text brightness</label>
+          <div class="slider-group">
+            <input type="range" class="slider" id="color_brightness" min="0" max="100" value="80" oninput="setColorBrightness(this.value)">
+            <span class="slider-val" id="color_brightness_val">80%</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Page Navigation <span id="pm_summary" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span></div>
+
+        <div class="pn-section-label">Start Page</div>
+        <div class="pn-pill-grid" id="start-page-pills"></div>
+
+        <div class="pn-divider"></div>
+
+        <div class="toggle-row">
+          <div>
+            <span class="toggle-label">Auto Cycle</span>
+            <div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">Rotate through pages automatically</div>
+            <div class="field-hint" style="margin-top:2px">When enabled, overrides idle page switching</div>
+          </div>
+          <label class="toggle"><input type="checkbox" id="auto_cycle_toggle" onchange="toggleAutoCycle();checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+
+        <div class="pn-cycle-settings" id="pn_cycle_settings" style="display:none">
+          <div class="row stack-mobile">
+            <div class="field">
+              <label class="field-label">Interval (seconds)</label>
+              <input type="number" class="input" id="auto_rotate_interval" min="4" max="3600" value="30">
+            </div>
+            <div class="field">
+              <label class="field-label">Transition</label>
+              <select class="input" id="auto_rotate_effect">
+                <option value="0">Instant</option>
+                <option value="1">Fade</option>
+                <option value="2">Slide Left</option>
+                <option value="3">Slide Right</option>
+              </select>
+            </div>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label" style="font-size:0.82rem;color:var(--text-muted)">Skip disconnected nodes</span>
+            <label class="toggle"><input type="checkbox" id="auto_rotate_skip"><span class="toggle-track"></span></label>
+          </div>
+          <div class="pn-sub-divider"></div>
+          <div>
+            <div class="pn-section-label">Pages in Rotation</div>
+            <div style="font-size:0.72rem;color:var(--text-muted);margin:-8px 0 10px;opacity:0.7">Drag to reorder</div>
+            <div class="pn-pill-grid reorderable" id="arp-container"></div>
+          </div>
+        </div>
+
+        <div class="pn-divider"></div>
+
+        <div class="toggle-row">
+          <div>
+            <span class="toggle-label">Switch page when no connections</span>
+            <div class="field-hint" style="margin-top:2px">Automatically switches to the selected page when all NINA instances are disconnected. Disabled while auto-rotate is active.</div>
+          </div>
+          <label class="toggle"><input type="checkbox" id="idle_page_override_enabled" onchange="toggleIdleOverride();checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="field" id="idle_target_field" style="display:none;margin-top:12px">
+          <label class="field-label">Target page</label>
+          <select class="input" id="idle_page_override_target">
+            <option value="-1">No Connections (Summary)</option>
+            <option value="0">Clock</option>
+            <option value="1">AllSky</option>
+            <option value="2">Spotify</option>
+            <option value="3">Image Display</option>
+            <option value="4">System Info</option>
+          </select>
+          <div class="toggle-row" style="margin-top:12px">
+            <div>
+              <span class="toggle-label">Persistent idle page</span>
+              <div class="field-hint" style="margin-top:2px">Returns to the selected page after manual navigation while idle</div>
+            </div>
+            <label class="toggle"><input type="checkbox" id="idle_page_persistent" onchange="checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="toggle-row" style="margin-top:12px">
+            <div>
+              <span class="toggle-label">Show idle indicator</span>
+              <div class="field-hint" style="margin-top:2px">Shows a small status dot on the idle page when all NINA instances are disconnected</div>
+            </div>
+            <label class="toggle"><input type="checkbox" id="idle_indicator_enabled" onchange="checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== TAB 3: BEHAVIOR & ALERTS ==================== -->
+    <div id="tab-behavior" class="tab-panel">
+
+      <div class="card">
+        <div class="card-title">Hardware</div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Screen Rotation</label>
+            <select class="input" id="screen_rotation_select" onchange="setScreenRotation(this.value)">
+              <option value="0">0° (Default)</option>
+              <option value="1">90°</option>
+              <option value="2">180°</option>
+              <option value="3">270°</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field-label">Backlight</label>
+            <div class="slider-group">
+              <input type="range" class="slider" id="brightness" min="0" max="100" value="80" oninput="setBrightness(this.value)">
+              <span class="slider-val" id="brightness_val">80%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Power Management</div>
+        <div class="toggle-row">
+          <span class="toggle-label">Turn off screen when idle</span>
+          <label class="toggle"><input type="checkbox" id="screen_sleep_enabled"><span class="toggle-track"></span></label>
+        </div>
+        <div id="screen_sleep_details" style="margin-top:16px">
+          <div class="row stack-mobile">
+            <div class="field">
+              <label class="field-label">Timeout (seconds)</label>
+              <input type="number" class="input" id="screen_sleep_timeout" min="10" max="3600" value="60">
+            </div>
+            <div class="field">
+              <label class="field-label">Idle poll interval (s)</label>
+              <input type="number" class="input" id="idle_poll_interval" min="5" max="120" value="30">
+            </div>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">WiFi power save</span>
+            <label class="toggle"><input type="checkbox" id="wifi_power_save" checked><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Enable WiFi modem sleep between polls. Connection stays associated with zero reconnection delay.</div>
+        </div>
+        <hr class="divider">
+        <div class="toggle-row">
+          <span class="toggle-label">Enable deep sleep (long-press BOOT to power off)</span>
+          <label class="toggle"><input type="checkbox" id="deep_sleep_enabled"><span class="toggle-track"></span></label>
+        </div>
+        <div id="deep_sleep_details" style="margin-top:16px">
+          <div class="field">
+            <label class="field-label">Wake timer (hours)</label>
+            <input type="number" class="input" id="deep_sleep_wake_timer" min="0" max="72" step="1" value="0">
+            <div class="field-hint">Hours until auto-wake. 0 = stay asleep forever. Warning: with timer set to 0, the device must be physically rebooted to wake up — there is no manual wake from deep sleep.</div>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Auto power off when idle</span>
+            <label class="toggle"><input type="checkbox" id="deep_sleep_on_idle"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Enter deep sleep after extended disconnection from all NINA instances. The device must be physically rebooted to wake up if the wake timer is set to 0.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Polling &amp; Connectivity</div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Data update rate (s)</label>
+            <input type="number" class="input" id="update_rate" min="1" max="10" value="2">
+          </div>
+          <div class="field">
+            <label class="field-label">Graph update rate (s)</label>
+            <input type="number" class="input" id="graph_interval" min="2" max="30" value="5">
+          </div>
+        </div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Connection timeout (s)</label>
+            <input type="number" class="input" id="connection_timeout" min="2" max="30" value="6">
+            <div class="field-hint">Seconds without response before a NINA instance is offline</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Notifications</div>
+        <div class="field" style="margin-bottom:16px">
+          <label class="field-label">Toast duration (s)</label>
+          <input type="number" class="input" id="toast_duration" min="3" max="30" value="8">
+          <div class="field-hint">Errors show for 2x this value</div>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">Border flash alerts</span>
+          <label class="toggle"><input type="checkbox" id="alert_flash_enabled" checked><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint" style="margin-top:4px">Flash the screen border when RMS, HFR, or safety thresholds are exceeded.</div>
+        <hr class="divider">
+        <div class="field">
+          <label class="field-label">Aggregation Window</label>
+          <div class="slider-group">
+            <input type="range" class="slider" id="toast_aggregation_window" min="0" max="15" value="5" oninput="updateAggregationLabel(this.value);checkDirty()">
+            <span class="slider-val" id="toast_aggregation_val">5s</span>
+          </div>
+          <div class="field-hint">Combine rapid-fire notifications within this window. 0 = Off (show each individually).</div>
+        </div>
+        <hr class="divider">
+        <div class="field-label" style="margin-bottom:12px">Event Categories</div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Error Events</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_8" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Equipment Connects</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_0" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Equipment Disconnects</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_1" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Sequence Events</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_2" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Focuser</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_3" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Mount Events</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_4" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Meridian Flip</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_5" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Guider Events</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_6" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Safety Events</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_7" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Profile Changes</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_9" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Dome Events</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_10" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">Flat Device Events</span>
+          <label class="toggle"><input type="checkbox" id="notify_cat_11" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== TAB 4: SYSTEM ==================== -->
+    <div id="tab-system" class="tab-panel">
+
+      <div class="card">
+        <div class="card-title">Network</div>
+        <div class="wifi-scan-panel" id="wifiScanPanel">
+          <div class="wifi-scan-header" onclick="toggleScanPanel()">
+            <span class="wifi-scan-title"><span class="chevron" id="scanChevron">&#x25BC;</span> Available Networks</span>
+            <span class="wifi-scan-rescan" id="scanRescanBtn" onclick="event.stopPropagation();scanWifi()">&#x21bb; Rescan</span>
+          </div>
+          <div class="wifi-scan-list" id="wifiScanList">
+            <div class="wifi-scan-status" id="wifiScanStatus">Scanning for networks...</div>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label">Device hostname</label>
+          <input type="text" class="input" id="hostname" placeholder="NINA-DISPLAY" maxlength="31" pattern="[A-Za-z0-9\-]+" style="max-width:320px">
+          <div class="field-hint">Used for DHCP, AP SSID, and Home Assistant device name.</div>
+        </div>
+        <hr class="divider">
+        <div class="field">
+          <div class="field-label" style="margin-top:16px;font-weight:600;color:var(--accent)">Network 1 (Primary)</div>
+          <label class="field-label">SSID</label>
+          <input type="text" class="input" id="ssid1" placeholder="Network name">
+          <label class="field-label">Password</label>
+          <input type="password" class="input" id="pass1" placeholder="Enter new password to change">
+          <div class="hint">Password is stored in device config and not readable</div>
+
+          <div class="field-label" style="margin-top:16px;font-weight:600;color:var(--accent)">Network 2</div>
+          <label class="field-label">SSID</label>
+          <input type="text" class="input" id="ssid2" placeholder="Network name">
+          <label class="field-label">Password</label>
+          <input type="password" class="input" id="pass2" placeholder="Enter new password to change">
+
+          <div class="field-label" style="margin-top:16px;font-weight:600;color:var(--accent)">Network 3</div>
+          <label class="field-label">SSID</label>
+          <input type="text" class="input" id="ssid3" placeholder="Network name">
+          <label class="field-label">Password</label>
+          <input type="password" class="input" id="pass3" placeholder="Enter new password to change">
+        </div>
+        <hr class="divider">
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">NTP server</label>
+            <input type="text" class="input" id="ntp" placeholder="pool.ntp.org">
+          </div>
+          <div class="field">
+            <label class="field-label">Timezone</label>
+            <select class="input" id="timezone">
+              <option value="">UTC (default)</option>
+              <option value="GMT0">GMT</option>
+              <option value="GMT0BST,M3.5.0/1,M10.5.0">UK (GMT/BST)</option>
+              <option value="CET-1CEST,M3.5.0,M10.5.0/3">Central Europe (CET/CEST)</option>
+              <option value="EET-2EEST,M3.5.0/3,M10.5.0/4">Eastern Europe (EET/EEST)</option>
+              <option value="EST5EDT,M3.2.0,M11.1.0">US Eastern (EST/EDT)</option>
+              <option value="CST6CDT,M3.2.0,M11.1.0">US Central (CST/CDT)</option>
+              <option value="MST7MDT,M3.2.0,M11.1.0">US Mountain (MST/MDT)</option>
+              <option value="MST7">US Arizona (MST, no DST)</option>
+              <option value="PST8PDT,M3.2.0,M11.1.0">US Pacific (PST/PDT)</option>
+              <option value="AKST9AKDT,M3.2.0,M11.1.0">US Alaska (AKST/AKDT)</option>
+              <option value="HST10">US Hawaii (HST, no DST)</option>
+              <option value="AEST-10AEDT,M10.1.0,M4.1.0/3">Australia Eastern (AEST/AEDT)</option>
+              <option value="ACST-9:30ACDT,M10.1.0,M4.1.0/3">Australia Central (ACST/ACDT)</option>
+              <option value="AWST-8">Australia Western (AWST, no DST)</option>
+              <option value="NZST-12NZDT,M9.5.0,M4.1.0/3">New Zealand (NZST/NZDT)</option>
+              <option value="JST-9">Japan (JST)</option>
+              <option value="CST-8">China (CST)</option>
+              <option value="IST-5:30">India (IST)</option>
+              <option value="<-03>3">Argentina (ART)</option>
+              <option value="<-03>3<-02>,M10.3.0/0,M2.3.0/0">Brazil (BRT/BRST)</option>
+              <option value="SAST-2">South Africa (SAST)</option>
+            </select>
+          </div>
+        </div>
+        <div class="field-hint hint-center">Reboot required after changing hostname, WiFi, NTP, or timezone.</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">MQTT</div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Enable MQTT</span>
+          <label class="toggle"><input type="checkbox" id="mqtt_enabled"><span class="toggle-track"></span></label>
+        </div>
+        <div class="field" style="margin-top:16px">
+          <label class="field-label">Broker host</label>
+          <input type="text" class="input" id="mqtt_broker" placeholder="192.168.1.250">
+        </div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Port</label>
+            <input type="text" class="input" id="mqtt_port" placeholder="1883">
+          </div>
+          <div class="field">
+            <label class="field-label">Topic prefix</label>
+            <input type="text" class="input" id="mqtt_prefix" placeholder="ninadisplay">
+          </div>
+        </div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Username</label>
+            <input type="text" class="input" id="mqtt_user" placeholder="Username">
+          </div>
+          <div class="field">
+            <label class="field-label">Password</label>
+            <input type="password" class="input" id="mqtt_pass" placeholder="Password">
+          </div>
+        </div>
+        <div class="field-hint hint-center">Reboot required after changing MQTT settings.</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Firmware</div>
+        <div class="fw-grid">
+          <div class="fw-item"><div class="fw-label">Version</div><div class="fw-value" id="fw_version">--</div></div>
+          <div class="fw-item"><div class="fw-label">Built</div><div class="fw-value" id="fw_date">--</div></div>
+          <div class="fw-item"><div class="fw-label">IDF</div><div class="fw-value" id="fw_idf">--</div></div>
+          <div class="fw-item"><div class="fw-label">Partition</div><div class="fw-value" id="fw_partition">--</div></div>
+          <div class="fw-item"><div class="fw-label">Release</div><div class="fw-value" id="fw_git_tag">--</div></div>
+          <div class="fw-item"><div class="fw-label">Commit</div><div class="fw-value" id="fw_git_sha">--</div></div>
+        </div>
+        <hr class="divider">
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Check for updates on boot</span>
+          <label class="toggle"><input type="checkbox" id="auto_update_check" checked><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint" style="margin-top:4px">Automatically check GitHub for new firmware releases when the device boots.</div>
+        <div class="field" style="margin-top:12px">
+          <label class="field-label">Update channel</label>
+          <select class="input" id="update_channel">
+            <option value="0">Stable only</option>
+            <option value="1">Include pre-releases</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" style="margin-top:12px;width:100%" id="checkUpdateBtn" onclick="checkForUpdates()">Check for Updates</button>
+        <div id="updateResult" style="display:none;margin-top:12px;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.03)">
+          <div id="updateResultText" style="font-size:0.85rem;color:var(--text-secondary)"></div>
+          <div id="updateSummary" style="display:none;margin-top:8px;font-size:0.78rem;color:var(--text-muted);max-height:120px;overflow-y:auto;white-space:pre-wrap"></div>
+          <button class="btn btn-primary" id="otaGithubBtn" style="display:none;margin-top:12px;width:100%" onclick="startGithubOta()">Install Update</button>
+        </div>
+        <hr class="divider">
+        <div class="ota-bar">
+          <label class="ota-label" id="otaFileLabel">
+            Choose firmware .bin file
+            <input type="file" id="otaFile" accept=".bin" style="display:none" onchange="otaFileSelected(this)">
+          </label>
+          <button class="btn btn-primary" id="otaBtn" disabled onclick="startOta()">Update</button>
+        </div>
+        <div id="otaProgress" style="display:none;margin-top:16px">
+          <div class="progress-bg"><div id="otaProgressFill" class="progress-fill"></div></div>
+          <div id="otaStatus" class="progress-status"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Device</div>
+        <div class="row stack-mobile" style="margin-bottom:16px">
+          <button class="btn btn-outline" onclick="saveAndReboot()" style="flex:1">Reboot</button>
+          <button class="btn btn-danger" onclick="factoryReset()" style="flex:1">Factory Reset</button>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Enable Debug Mode</span>
+          <label class="toggle"><input type="checkbox" id="debug_mode"><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint" style="margin-top:4px;margin-bottom:16px">Performance profiling, serial reports, /api/perf endpoint.</div>
+        <span class="toggle-label">Enable Demo Mode</span>
+        <label class="toggle"><input type="checkbox" id="demo_mode"><span class="toggle-track"></span></label>
+        <p style="color:#888;font-size:0.85em;margin:2px 0 8px 0;">Generates simulated astrophotography data. Reboots device.</p>
+        <button class="btn btn-outline" id="ssBtn" onclick="takeScreenshot()">Capture Screenshot</button>
+        <div id="ssContainer" style="display:none;margin-top:16px">
+          <img id="ssImage" style="width:100%;border-radius:var(--radius-sm);border:1px solid var(--border)">
+        </div>
+      </div>
+
+      <div class="card" id="adminPasswordCard">
+        <div class="card-title">Authentication</div>
+        <div class="toggle-row">
+          <span class="toggle-label">Require login to access the web UI</span>
+          <label class="toggle"><input type="checkbox" id="auth_enabled"><span class="toggle-track"></span></label>
+        </div>
+        <p style="color:#888;font-size:0.85em;margin:8px 0 0 0;">
+          When disabled, anyone on the network can control the device (reboot, factory reset, OTA, config change).
+          Secrets (passwords, API keys, tokens) remain redacted in API responses either way.
+        </p>
+        <button class="btn btn-primary" style="margin-top:12px" onclick="saveAuthEnabled()">Save</button>
+        <div id="auth_enabled_status" style="margin-top:10px;font-size:0.9em;"></div>
+        <hr style="border:0;border-top:1px solid var(--border);margin:16px 0">
+        <div style="font-weight:600;color:var(--text);text-transform:uppercase;letter-spacing:0.04em;font-size:0.8rem;margin-bottom:8px">Admin Password</div>
+        <p style="color:#888;font-size:0.85em;margin:2px 0 12px 0;">
+          Default password is <code>changeme123!</code>. Change it now to secure this device's web interface.
+        </p>
+        <div class="field">
+          <label for="admin_pw_current">Current password</label>
+          <input type="password" id="admin_pw_current" autocomplete="current-password">
+        </div>
+        <div class="field">
+          <label for="admin_pw_new">New password (4-32 chars)</label>
+          <input type="password" id="admin_pw_new" autocomplete="new-password">
+        </div>
+        <div class="field">
+          <label for="admin_pw_confirm">Confirm new password</label>
+          <input type="password" id="admin_pw_confirm" autocomplete="new-password">
+        </div>
+        <button class="btn btn-primary" onclick="changeAdminPassword()">Save Password</button>
+        <div id="admin_pw_status" style="margin-top:10px;font-size:0.9em;"></div>
+        <hr style="border:0;border-top:1px solid var(--border);margin:16px 0">
+        <button class="btn" id="signOutBtn" onclick="signOut()">Sign out</button>
+      </div>
+    </div>
+
+    <!-- ==================== TAB: LOGS ==================== -->
+    <div id="tab-logs" class="tab-panel">
+
+      <div class="card nocollapse">
+        <div class="card-title">Device Logs</div>
+        <div class="logs-layout">
+          <div class="logs-controls">
+            <div class="field-hint" style="margin:0 0 4px">Console output captured since boot (in-memory, 512 KB ring buffer, oldest lines dropped when full).</div>
+            <button class="btn btn-outline" id="refreshLogsBtn" onclick="refreshLogs()">Refresh</button>
+            <a class="btn btn-outline" href="/api/logs" style="text-align:center">Download</a>
+            <button class="btn btn-outline" id="clearLogsBtn" onclick="clearLogs()">Clear</button>
+            <div class="toggle-row" style="margin-top:6px">
+              <span class="toggle-label">Auto-refresh</span>
+              <label class="toggle"><input type="checkbox" id="logsAutoRefresh"><span class="toggle-track"></span></label>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+              <span class="field-hint" style="margin:0">Interval</span>
+              <select class="input" id="logsRefreshInterval" style="max-width:90px">
+                <option value="2">2s</option>
+                <option value="5" selected>5s</option>
+                <option value="10">10s</option>
+                <option value="30">30s</option>
+              </select>
+            </div>
+            <div class="field-hint" id="logsStatus" style="margin:4px 0 0">Not loaded yet.</div>
+          </div>
+          <pre id="logsView" class="logs-view"></pre>
+        </div>
+      </div>
+    </div>
+
     <!-- ==================== TAB 7: BACKUP ==================== -->
     <div id="tab-backup" class="tab-panel">
       <!-- Export Card -->
@@ -1588,6 +1705,21 @@
     <button class="btn btn-primary" id="saveBtn" onclick="save()">Save</button>
   </div>
   <div class="toast" id="toast"></div>
+
+  <!-- ======== UPDATE CHANGELOG MODAL ======== -->
+  <div class="changelog-backdrop" id="changelogBackdrop" style="display:none">
+    <div class="changelog-modal" role="dialog" aria-modal="true">
+      <div class="changelog-head">
+        <span id="changelogTitle">Update</span>
+        <button class="changelog-close" id="changelogClose" title="Close">&times;</button>
+      </div>
+      <div class="changelog-body" id="changelogBody"></div>
+      <div class="changelog-foot">
+        <button class="btn btn-outline" id="changelogCancel">Close</button>
+        <button class="btn btn-primary" id="changelogInstall">Install</button>
+      </div>
+    </div>
+  </div>
 
   <script>
     /* ============================================================
@@ -1794,6 +1926,7 @@
       nodes:   {color:'#7aa2f7', rgb:'122, 162, 247'},
       behavior:{color:'#7aa2f7', rgb:'122, 162, 247'},
       system:  {color:'#7aa2f7', rgb:'122, 162, 247'},
+      logs:    {color:'#7aa2f7', rgb:'122, 162, 247'},
       allsky:  {color:'#7aa2f7', rgb:'122, 162, 247'},
       clock:   {color:'#7aa2f7', rgb:'122, 162, 247'},
       spotify: {color:'#7aa2f7', rgb:'122, 162, 247'},
@@ -1816,6 +1949,12 @@
       $$('[data-tab="'+name+'"]').forEach(b=>b.classList.add('active'));
       setAccent(name);
       try{localStorage.setItem('nina_tab',name);}catch(e){}
+      if(name==='logs'){
+        if(typeof refreshLogs==='function') refreshLogs();
+        if(typeof syncLogsAutoRefresh==='function') syncLogsAutoRefresh();
+      } else {
+        if(typeof stopLogsAutoRefresh==='function') stopLogsAutoRefresh();
+      }
     }
 
     $$('.tab-btn, .nav-btn').forEach(btn=>{
@@ -1825,8 +1964,8 @@
     try{
       var saved=localStorage.getItem('nina_tab');
       if(saved&&$('tab-'+saved)) switchTab(saved);
-      else setAccent('display');
-    }catch(e){ setAccent('display'); }
+      else setAccent('nodes');
+    }catch(e){ setAccent('nodes'); }
 
     /* === Live API Controls === */
     function setTheme(v){postJson('/api/theme',{theme_index:parseInt(v)})}
@@ -2839,6 +2978,127 @@
       });
     }
 
+    /* Update info from the passive badge check; consumed by the changelog modal. */
+    var _updateInfo=null;
+
+    /* Passive update indicator in top nav. Silent on any failure. */
+    function checkUpdateBadge(){
+      var pill=$('updatePill');
+      if(!pill) return;
+      fetch('/api/check-update-json').then(function(r){return r.json();}).then(function(data){
+        if(data&&data.update_available){
+          _updateInfo=data;
+          pill.innerHTML=escHtml(data.tag)+' \u2191';
+          pill.style.display='inline-flex';
+        }
+      }).catch(function(){});
+    }
+
+    function openChangelogModal(){
+      if(!_updateInfo) return;
+      var title=escHtml(_updateInfo.current_version)+' \u2192 '+escHtml(_updateInfo.tag);
+      if(_updateInfo.is_prerelease) title+=' <span class="cl-prerelease">pre-release</span>';
+      $('changelogTitle').innerHTML=title;
+      $('changelogInstall').textContent='Install '+_updateInfo.tag;
+      $('changelogInstall').disabled=false;
+      $('changelogBody').textContent='Loading changelog\u2026';
+      $('changelogBackdrop').style.display='flex';
+      loadChangelog();
+    }
+
+    function clGrabSection(body, prefixLower){
+      // prefixLower e.g. '### summary' or '### changes since'
+      var lower=body.toLowerCase();
+      var idx=lower.indexOf(prefixLower);
+      if(idx===-1) return null;
+      var nl=body.indexOf('\n', idx);
+      var titleLine, contentStart;
+      if(nl===-1){ titleLine=body.slice(idx); contentStart=body.length; }
+      else { titleLine=body.slice(idx, nl); contentStart=nl+1; }
+      titleLine=titleLine.replace(/^#+\s*/,'').replace(/\s+$/,'');
+      var a=body.indexOf('\n### ', contentStart);
+      var b=body.indexOf('\n## ', contentStart);
+      var end=body.length;
+      if(a!==-1&&a<end) end=a;
+      if(b!==-1&&b<end) end=b;
+      var content=body.slice(contentStart, end).replace(/^\s+|\s+$/g,'');
+      return {title:titleLine, content:content};
+    }
+
+    function loadChangelog(){
+      var channel=parseInt($('update_channel').value)||0;
+      fetch('https://api.github.com/repos/chvvkumar/ESP32-P4-NINA-Display/releases?per_page=30')
+        .then(function(r){return r.json();})
+        .then(function(releases){
+          if(!Array.isArray(releases)) throw new Error('bad response');
+          var html='';
+          var count=0;
+          for(var i=0;i<releases.length;i++){
+            var rel=releases[i];
+            if(rel.draft===true) continue;
+            var isPre=rel.prerelease===true;
+            if(channel===1){ if(!isPre) continue; }   // pre-release channel: only pre-releases
+            else { if(isPre) continue; }              // stable channel: only stable releases
+            if(rel.tag_name===_updateInfo.current_version) break;
+            if(count>=20) break;
+            var head=escHtml(rel.tag_name);
+            if(rel.prerelease) head+=' <span class="cl-prerelease">pre-release</span>';
+            var rawBody=(rel.body||'').replace(/!\[[^\]]*\]\([^)]*\)/g,'');
+            html+='<div class="cl-version">'+head+'</div>';
+            var secs=[];
+            var s1=clGrabSection(rawBody,'### summary');
+            var s2=clGrabSection(rawBody,'### changes since');
+            if(s1) secs.push(s1);
+            if(s2) secs.push(s2);
+            if(secs.length){
+              for(var s=0;s<secs.length;s++){
+                html+='<div class="cl-section-title">'+escHtml(secs[s].title)+'</div>';
+                html+='<div class="cl-notes">'+escHtml(secs[s].content)+'</div>';
+              }
+            } else {
+              html+='<div class="cl-notes">No summary available.</div>';
+            }
+            count++;
+          }
+          if(!count) html='<div class="cl-notes">No release notes found.</div>';
+          $('changelogBody').innerHTML=html;
+        })
+        .catch(function(){
+          $('changelogBody').innerHTML='<div class="cl-notes">Could not load changelog. '+
+            '<a href="https://github.com/chvvkumar/ESP32-P4-NINA-Display/releases" target="_blank" rel="noopener" style="color:var(--accent)">View releases on GitHub</a></div>';
+        });
+    }
+
+    function closeChangelogModal(){
+      $('changelogBackdrop').style.display='none';
+    }
+
+    function installFromModal(){
+      if(!confirm('Install the update? The device will reboot after flashing.')) return;
+      var btn=$('changelogInstall');
+      var label=btn.textContent;
+      btn.disabled=true; btn.textContent='Installing\u2026';
+      fetch('/api/ota-github',{method:'POST',body:'{}'}).then(function(r){return r.json();}).then(function(data){
+        if(data.started){
+          btn.textContent='Flashing \u2014 see device screen\u2026';
+          $('changelogBody').innerHTML='<div class="cl-notes">OTA in progress. Device will reboot when complete.</div>';
+        }
+      }).catch(function(){
+        btn.disabled=false; btn.textContent=label;
+        alert('Failed to start OTA update');
+      });
+    }
+
+    (function(){
+      var pill=$('updatePill');
+      if(pill) pill.addEventListener('click',openChangelogModal);
+      var bd=$('changelogBackdrop');
+      if(bd) bd.addEventListener('click',function(e){ if(e.target===bd) closeChangelogModal(); });
+      var c1=$('changelogClose'); if(c1) c1.addEventListener('click',closeChangelogModal);
+      var c2=$('changelogCancel'); if(c2) c2.addEventListener('click',closeChangelogModal);
+      var ins=$('changelogInstall'); if(ins) ins.addEventListener('click',installFromModal);
+    })();
+
     function startGithubOta(){
       var btn=$('otaGithubBtn');
       if(!confirm('Install the update? The device will reboot after flashing.')) return;
@@ -3473,6 +3733,7 @@
       document.querySelectorAll('.card').forEach(function(card){
         var title=card.querySelector('.card-title');
         if(!title) return;
+        if(card.classList.contains('nocollapse')) return;  // always-expanded cards (e.g. Logs)
         var key=getCardKey(card);
         if(!key) return;
         // Appearance and Page Navigation default to expanded; others default to collapsed
@@ -3500,6 +3761,98 @@
     }
 
     initCollapsibleCards();
+
+    /* ---- Diagnostic Logs ---- */
+
+    var _logsTimer=null;
+
+    function logsTabActive(){
+      var p=$('tab-logs');
+      return !!(p && p.classList.contains('active'));
+    }
+
+    function refreshLogs(){
+      var view=$('logsView');
+      if(!view) return;
+      var btn=$('refreshLogsBtn');
+      if(btn) btn.disabled=true;
+      /* Was the view scrolled to (near) the bottom before we replaced content? */
+      var nearBottom = (view.scrollHeight - view.scrollTop - view.clientHeight) < 40;
+      fetch('/api/logs')
+        .then(function(r){
+          if(!r.ok) throw new Error('HTTP '+r.status);
+          return r.text();
+        })
+        .then(function(text){
+          view.textContent=text;
+          if(nearBottom) view.scrollTop=view.scrollHeight;
+          var kb=(text.length/1024).toFixed(1);
+          $('logsStatus').textContent='Updated '+new Date().toLocaleTimeString()+' · '+text.length+' bytes ('+kb+' KB)';
+        })
+        .catch(function(e){
+          showToast('Load logs failed: '+e.message,'error');
+          $('logsStatus').textContent='Load failed at '+new Date().toLocaleTimeString()+': '+e.message;
+        })
+        .finally(function(){ if(btn) btn.disabled=false; });
+    }
+
+    function logsAutoRefreshTick(){
+      /* Skip polling when the tab is not visible or the document is hidden,
+         to avoid pulling the whole 512 KB buffer needlessly. */
+      if(document.hidden || !logsTabActive()) return;
+      refreshLogs();
+    }
+
+    function startLogsAutoRefresh(){
+      stopLogsAutoRefresh();
+      var sel=$('logsRefreshInterval');
+      var secs=sel?parseInt(sel.value,10):5;
+      if(!secs||secs<1) secs=5;
+      _logsTimer=setInterval(logsAutoRefreshTick,secs*1000);
+    }
+
+    function stopLogsAutoRefresh(){
+      if(_logsTimer){ clearInterval(_logsTimer); _logsTimer=null; }
+    }
+
+    function syncLogsAutoRefresh(){
+      var cb=$('logsAutoRefresh');
+      if(cb && cb.checked) startLogsAutoRefresh();
+      else stopLogsAutoRefresh();
+    }
+
+    (function(){
+      var cb=$('logsAutoRefresh');
+      var sel=$('logsRefreshInterval');
+      if(cb) cb.addEventListener('change',syncLogsAutoRefresh);
+      if(sel) sel.addEventListener('change',function(){
+        /* Restart with the new interval only if auto-refresh is on. */
+        if(cb && cb.checked) startLogsAutoRefresh();
+      });
+      /* If Logs is the restored active tab on page load, the early switchTab()
+         ran before these functions existed (guarded by typeof), so populate now. */
+      if(logsTabActive()){ refreshLogs(); syncLogsAutoRefresh(); }
+    })();
+
+    /* Pause auto-refresh when the page is hidden; resume when visible on Logs tab. */
+    document.addEventListener('visibilitychange',function(){
+      if(document.hidden){ stopLogsAutoRefresh(); }
+      else { syncLogsAutoRefresh(); }
+    });
+
+    function clearLogs(){
+      if(!confirm('Clear the captured device logs? This cannot be undone.')) return;
+      var btn=$('clearLogsBtn');
+      btn.disabled=true; var prev=btn.textContent; btn.textContent='Clearing...';
+      fetch('/api/logs/clear',{method:'POST'})
+        .then(function(r){
+          if(!r.ok) throw new Error('Clear failed');
+          showToast('Logs cleared','success');
+          refreshLogs();
+        })
+        .catch(function(e){ showToast('Clear logs failed: '+e.message,'error'); })
+        .finally(function(){ btn.disabled=false; btn.textContent=prev; });
+    }
 
     /* ---- Backup & Restore ---- */
 
@@ -3721,6 +4074,7 @@
     populateTimezones();
     loadConfig();
     loadVersion();
+    checkUpdateBadge();
   </script>
 </body>
 </html>
