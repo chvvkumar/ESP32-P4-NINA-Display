@@ -84,6 +84,23 @@
     .card.collapsed .card-title { margin-bottom: 0; }
     .card.collapsed .card-title::after { transform: rotate(-45deg); }
     .card.collapsed > :not(.card-title) { display: none !important; }
+    /* Non-collapsible cards (e.g. Logs): no chevron, no pointer affordance */
+    .card.nocollapse > .card-title { cursor: default; }
+    .card.nocollapse > .card-title::after { display: none; }
+    /* Logs tab: break out wider than the 960px content column */
+    #tab-logs .card { width: min(1180px, 94vw); margin-left: 50%; transform: translateX(-50%); }
+    .logs-layout { display: flex; gap: 18px; align-items: stretch; }
+    .logs-controls { flex: 0 0 220px; display: flex; flex-direction: column; gap: 12px; }
+    .logs-controls .btn { width: 100%; }
+    .logs-view {
+      flex: 1; min-width: 0; margin: 0;
+      height: calc(100vh - 240px); min-height: 420px; overflow: auto;
+      white-space: pre-wrap; word-break: break-word;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.72rem; line-height: 1.4; color: var(--text-secondary);
+      background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 12px;
+    }
     .content { max-width: 960px; margin: 0 auto; padding: 28px 24px 100px; }
     .field { margin-bottom: 20px; }
     .field:last-child { margin-bottom: 0; }
@@ -552,6 +569,12 @@
       .toast { top: auto; bottom: calc(var(--bottom-nav-height) + var(--save-bar-height) + env(safe-area-inset-bottom, 0px) + 16px); right: 16px; }
       .row.stack-mobile { flex-direction: column; }
 
+      /* Logs: stack controls above the viewer on narrow screens, drop the breakout */
+      #tab-logs .card { width: auto; margin-left: 0; transform: none; }
+      .logs-layout { flex-direction: column; }
+      .logs-controls { flex: 0 0 auto; }
+      .logs-view { height: 60vh; min-height: 300px; }
+
       /* Card titles */
       .card-title { font-size: 0.9rem; }
       /* Field labels */
@@ -630,6 +653,7 @@
       <button class="tab-btn" data-tab="nodes">N.I.N.A.</button>
       <button class="tab-btn" data-tab="behavior">Behavior</button>
       <button class="tab-btn" data-tab="system">System</button>
+      <button class="tab-btn" data-tab="logs">Logs</button>
       <button class="tab-btn" data-tab="allsky">AllSky</button>
       <button class="tab-btn" data-tab="clock">Clock</button>
       <button class="tab-btn" data-tab="spotify">Spotify</button>
@@ -663,6 +687,10 @@
       <button class="nav-btn" data-tab="system">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
         System
+      </button>
+      <button class="nav-btn" data-tab="logs">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><line x1="8" y1="9" x2="10" y2="9"/></svg>
+        Logs
       </button>
       <button class="nav-btn" data-tab="allsky">
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41m11.32-11.32l1.41-1.41"/></svg>
@@ -1179,15 +1207,6 @@
         </div>
       </div>
 
-      <div class="card">
-        <div class="card-title">Diagnostic Logs</div>
-        <div class="field-hint" style="margin-top:0;margin-bottom:12px">Device log output captured since boot (in-memory, 512 KB ring buffer).</div>
-        <div class="row stack-mobile">
-          <a class="btn btn-outline" href="/api/logs" style="flex:1;text-align:center">Download Logs</a>
-          <button class="btn btn-outline" id="clearLogsBtn" onclick="clearLogs()" style="flex:1">Clear Logs</button>
-        </div>
-      </div>
-
       <div class="card" id="adminPasswordCard">
         <div class="card-title">Authentication</div>
         <div class="toggle-row">
@@ -1221,6 +1240,37 @@
         <div id="admin_pw_status" style="margin-top:10px;font-size:0.9em;"></div>
         <hr style="border:0;border-top:1px solid var(--border);margin:16px 0">
         <button class="btn" id="signOutBtn" onclick="signOut()">Sign out</button>
+      </div>
+    </div>
+
+    <!-- ==================== TAB: LOGS ==================== -->
+    <div id="tab-logs" class="tab-panel">
+
+      <div class="card nocollapse">
+        <div class="card-title">Device Logs</div>
+        <div class="logs-layout">
+          <div class="logs-controls">
+            <div class="field-hint" style="margin:0 0 4px">Console output captured since boot (in-memory, 512 KB ring buffer, oldest lines dropped when full).</div>
+            <button class="btn btn-outline" id="refreshLogsBtn" onclick="refreshLogs()">Refresh</button>
+            <a class="btn btn-outline" href="/api/logs" style="text-align:center">Download</a>
+            <button class="btn btn-outline" id="clearLogsBtn" onclick="clearLogs()">Clear</button>
+            <div class="toggle-row" style="margin-top:6px">
+              <span class="toggle-label">Auto-refresh</span>
+              <label class="toggle"><input type="checkbox" id="logsAutoRefresh"><span class="toggle-track"></span></label>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+              <span class="field-hint" style="margin:0">Interval</span>
+              <select class="input" id="logsRefreshInterval" style="max-width:90px">
+                <option value="2">2s</option>
+                <option value="5" selected>5s</option>
+                <option value="10">10s</option>
+                <option value="30">30s</option>
+              </select>
+            </div>
+            <div class="field-hint" id="logsStatus" style="margin:4px 0 0">Not loaded yet.</div>
+          </div>
+          <pre id="logsView" class="logs-view"></pre>
+        </div>
       </div>
     </div>
 
@@ -1876,6 +1926,7 @@
       nodes:   {color:'#7aa2f7', rgb:'122, 162, 247'},
       behavior:{color:'#7aa2f7', rgb:'122, 162, 247'},
       system:  {color:'#7aa2f7', rgb:'122, 162, 247'},
+      logs:    {color:'#7aa2f7', rgb:'122, 162, 247'},
       allsky:  {color:'#7aa2f7', rgb:'122, 162, 247'},
       clock:   {color:'#7aa2f7', rgb:'122, 162, 247'},
       spotify: {color:'#7aa2f7', rgb:'122, 162, 247'},
@@ -1898,6 +1949,12 @@
       $$('[data-tab="'+name+'"]').forEach(b=>b.classList.add('active'));
       setAccent(name);
       try{localStorage.setItem('nina_tab',name);}catch(e){}
+      if(name==='logs'){
+        if(typeof refreshLogs==='function') refreshLogs();
+        if(typeof syncLogsAutoRefresh==='function') syncLogsAutoRefresh();
+      } else {
+        if(typeof stopLogsAutoRefresh==='function') stopLogsAutoRefresh();
+      }
     }
 
     $$('.tab-btn, .nav-btn').forEach(btn=>{
@@ -3676,6 +3733,7 @@
       document.querySelectorAll('.card').forEach(function(card){
         var title=card.querySelector('.card-title');
         if(!title) return;
+        if(card.classList.contains('nocollapse')) return;  // always-expanded cards (e.g. Logs)
         var key=getCardKey(card);
         if(!key) return;
         // Appearance and Page Navigation default to expanded; others default to collapsed
@@ -3706,17 +3764,94 @@
 
     /* ---- Diagnostic Logs ---- */
 
+    var _logsTimer=null;
+
+    function logsTabActive(){
+      var p=$('tab-logs');
+      return !!(p && p.classList.contains('active'));
+    }
+
+    function refreshLogs(){
+      var view=$('logsView');
+      if(!view) return;
+      var btn=$('refreshLogsBtn');
+      if(btn) btn.disabled=true;
+      /* Was the view scrolled to (near) the bottom before we replaced content? */
+      var nearBottom = (view.scrollHeight - view.scrollTop - view.clientHeight) < 40;
+      fetch('/api/logs')
+        .then(function(r){
+          if(!r.ok) throw new Error('HTTP '+r.status);
+          return r.text();
+        })
+        .then(function(text){
+          view.textContent=text;
+          if(nearBottom) view.scrollTop=view.scrollHeight;
+          var kb=(text.length/1024).toFixed(1);
+          $('logsStatus').textContent='Updated '+new Date().toLocaleTimeString()+' · '+text.length+' bytes ('+kb+' KB)';
+        })
+        .catch(function(e){
+          showToast('Load logs failed: '+e.message,'error');
+          $('logsStatus').textContent='Load failed at '+new Date().toLocaleTimeString()+': '+e.message;
+        })
+        .finally(function(){ if(btn) btn.disabled=false; });
+    }
+
+    function logsAutoRefreshTick(){
+      /* Skip polling when the tab is not visible or the document is hidden,
+         to avoid pulling the whole 512 KB buffer needlessly. */
+      if(document.hidden || !logsTabActive()) return;
+      refreshLogs();
+    }
+
+    function startLogsAutoRefresh(){
+      stopLogsAutoRefresh();
+      var sel=$('logsRefreshInterval');
+      var secs=sel?parseInt(sel.value,10):5;
+      if(!secs||secs<1) secs=5;
+      _logsTimer=setInterval(logsAutoRefreshTick,secs*1000);
+    }
+
+    function stopLogsAutoRefresh(){
+      if(_logsTimer){ clearInterval(_logsTimer); _logsTimer=null; }
+    }
+
+    function syncLogsAutoRefresh(){
+      var cb=$('logsAutoRefresh');
+      if(cb && cb.checked) startLogsAutoRefresh();
+      else stopLogsAutoRefresh();
+    }
+
+    (function(){
+      var cb=$('logsAutoRefresh');
+      var sel=$('logsRefreshInterval');
+      if(cb) cb.addEventListener('change',syncLogsAutoRefresh);
+      if(sel) sel.addEventListener('change',function(){
+        /* Restart with the new interval only if auto-refresh is on. */
+        if(cb && cb.checked) startLogsAutoRefresh();
+      });
+      /* If Logs is the restored active tab on page load, the early switchTab()
+         ran before these functions existed (guarded by typeof), so populate now. */
+      if(logsTabActive()){ refreshLogs(); syncLogsAutoRefresh(); }
+    })();
+
+    /* Pause auto-refresh when the page is hidden; resume when visible on Logs tab. */
+    document.addEventListener('visibilitychange',function(){
+      if(document.hidden){ stopLogsAutoRefresh(); }
+      else { syncLogsAutoRefresh(); }
+    });
+
     function clearLogs(){
       if(!confirm('Clear the captured device logs? This cannot be undone.')) return;
       var btn=$('clearLogsBtn');
-      btn.disabled=true; btn.textContent='Clearing...';
+      btn.disabled=true; var prev=btn.textContent; btn.textContent='Clearing...';
       fetch('/api/logs/clear',{method:'POST'})
         .then(function(r){
           if(!r.ok) throw new Error('Clear failed');
           showToast('Logs cleared','success');
+          refreshLogs();
         })
         .catch(function(e){ showToast('Clear logs failed: '+e.message,'error'); })
-        .finally(function(){ btn.disabled=false; btn.textContent='Clear Logs'; });
+        .finally(function(){ btn.disabled=false; btn.textContent=prev; });
     }
 
     /* ---- Backup & Restore ---- */
