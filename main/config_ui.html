@@ -281,6 +281,50 @@
       background: rgba(239, 68, 68, 0.06); box-shadow: 0 0 16px rgba(239, 68, 68, 0.1);
     }
 
+    /* === UPDATE CHANGELOG MODAL === */
+    .changelog-backdrop {
+      position: fixed; inset: 0; z-index: 300;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    }
+    .changelog-modal {
+      width: min(640px, 92vw); max-height: 80vh;
+      display: flex; flex-direction: column;
+      background: var(--elevated); border: 1px solid var(--border);
+      border-radius: 16px; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+    }
+    .changelog-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 20px; border-bottom: 1px solid var(--border);
+      font-weight: 600; font-size: 1.05rem;
+    }
+    .changelog-close {
+      background: none; border: none; color: var(--text-hint); cursor: pointer;
+      font-size: 1.6rem; line-height: 1; padding: 0 4px; transition: color 0.2s ease;
+    }
+    .changelog-close:hover { color: var(--accent); }
+    .changelog-body { overflow: auto; padding: 16px 20px; }
+    .cl-version {
+      color: var(--accent); font-weight: 700; font-size: 0.95rem;
+      margin: 14px 0 6px; display: flex; align-items: center; gap: 8px;
+    }
+    .changelog-body .cl-version:first-child { margin-top: 0; }
+    .cl-section-title { font-weight: 600; font-size: 0.8rem; color: #f4f4f5; margin: 8px 0 2px; }
+    .cl-notes {
+      white-space: pre-wrap; font-size: 0.85rem; line-height: 1.5;
+      color: var(--text-hint);
+    }
+    .cl-prerelease {
+      font-size: 0.7rem; font-weight: 600; color: #fbbf24;
+      border: 1px solid rgba(251, 191, 36, 0.4); border-radius: 6px;
+      padding: 1px 6px;
+    }
+    .changelog-foot {
+      display: flex; justify-content: flex-end; gap: 10px;
+      padding: 14px 20px; border-top: 1px solid var(--border);
+    }
+
     /* === FILTER GRID === */
     .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: 10px; }
     .filter-chip {
@@ -1605,6 +1649,21 @@
   </div>
   <div class="toast" id="toast"></div>
 
+  <!-- ======== UPDATE CHANGELOG MODAL ======== -->
+  <div class="changelog-backdrop" id="changelogBackdrop" style="display:none">
+    <div class="changelog-modal" role="dialog" aria-modal="true">
+      <div class="changelog-head">
+        <span id="changelogTitle">Update</span>
+        <button class="changelog-close" id="changelogClose" title="Close">&times;</button>
+      </div>
+      <div class="changelog-body" id="changelogBody"></div>
+      <div class="changelog-foot">
+        <button class="btn btn-outline" id="changelogCancel">Close</button>
+        <button class="btn btn-primary" id="changelogInstall">Install</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     /* ============================================================
        NINA Display — Config UI JavaScript
@@ -2855,27 +2914,125 @@
       });
     }
 
+    /* Update info from the passive badge check; consumed by the changelog modal. */
+    var _updateInfo=null;
+
     /* Passive update indicator in top nav. Silent on any failure. */
     function checkUpdateBadge(){
       var pill=$('updatePill');
       if(!pill) return;
       fetch('/api/check-update-json').then(function(r){return r.json();}).then(function(data){
         if(data&&data.update_available){
+          _updateInfo=data;
           pill.innerHTML=escHtml(data.tag)+' \u2191';
           pill.style.display='inline-flex';
         }
       }).catch(function(){});
     }
 
-    function showUpdateFromBadge(){
-      switchTab('system');
-      var el=$('checkUpdateBtn');
-      if(el) el.scrollIntoView({behavior:'smooth'});
+    function openChangelogModal(){
+      if(!_updateInfo) return;
+      var title=escHtml(_updateInfo.current_version)+' \u2192 '+escHtml(_updateInfo.tag);
+      if(_updateInfo.is_prerelease) title+=' <span class="cl-prerelease">pre-release</span>';
+      $('changelogTitle').innerHTML=title;
+      $('changelogInstall').textContent='Install '+_updateInfo.tag;
+      $('changelogInstall').disabled=false;
+      $('changelogBody').textContent='Loading changelog\u2026';
+      $('changelogBackdrop').style.display='flex';
+      loadChangelog();
+    }
+
+    function clGrabSection(body, prefixLower){
+      // prefixLower e.g. '### summary' or '### changes since'
+      var lower=body.toLowerCase();
+      var idx=lower.indexOf(prefixLower);
+      if(idx===-1) return null;
+      var nl=body.indexOf('\n', idx);
+      var titleLine, contentStart;
+      if(nl===-1){ titleLine=body.slice(idx); contentStart=body.length; }
+      else { titleLine=body.slice(idx, nl); contentStart=nl+1; }
+      titleLine=titleLine.replace(/^#+\s*/,'').replace(/\s+$/,'');
+      var a=body.indexOf('\n### ', contentStart);
+      var b=body.indexOf('\n## ', contentStart);
+      var end=body.length;
+      if(a!==-1&&a<end) end=a;
+      if(b!==-1&&b<end) end=b;
+      var content=body.slice(contentStart, end).replace(/^\s+|\s+$/g,'');
+      return {title:titleLine, content:content};
+    }
+
+    function loadChangelog(){
+      var channel=parseInt($('update_channel').value)||0;
+      fetch('https://api.github.com/repos/chvvkumar/ESP32-P4-NINA-Display/releases?per_page=30')
+        .then(function(r){return r.json();})
+        .then(function(releases){
+          if(!Array.isArray(releases)) throw new Error('bad response');
+          var html='';
+          var count=0;
+          for(var i=0;i<releases.length;i++){
+            var rel=releases[i];
+            if(rel.draft===true) continue;
+            var isPre=rel.prerelease===true;
+            if(channel===1){ if(!isPre) continue; }   // pre-release channel: only pre-releases
+            else { if(isPre) continue; }              // stable channel: only stable releases
+            if(rel.tag_name===_updateInfo.current_version) break;
+            if(count>=20) break;
+            var head=escHtml(rel.tag_name);
+            if(rel.prerelease) head+=' <span class="cl-prerelease">pre-release</span>';
+            var rawBody=(rel.body||'').replace(/!\[[^\]]*\]\([^)]*\)/g,'');
+            html+='<div class="cl-version">'+head+'</div>';
+            var secs=[];
+            var s1=clGrabSection(rawBody,'### summary');
+            var s2=clGrabSection(rawBody,'### changes since');
+            if(s1) secs.push(s1);
+            if(s2) secs.push(s2);
+            if(secs.length){
+              for(var s=0;s<secs.length;s++){
+                html+='<div class="cl-section-title">'+escHtml(secs[s].title)+'</div>';
+                html+='<div class="cl-notes">'+escHtml(secs[s].content)+'</div>';
+              }
+            } else {
+              html+='<div class="cl-notes">No summary available.</div>';
+            }
+            count++;
+          }
+          if(!count) html='<div class="cl-notes">No release notes found.</div>';
+          $('changelogBody').innerHTML=html;
+        })
+        .catch(function(){
+          $('changelogBody').innerHTML='<div class="cl-notes">Could not load changelog. '+
+            '<a href="https://github.com/chvvkumar/ESP32-P4-NINA-Display/releases" target="_blank" rel="noopener" style="color:var(--accent)">View releases on GitHub</a></div>';
+        });
+    }
+
+    function closeChangelogModal(){
+      $('changelogBackdrop').style.display='none';
+    }
+
+    function installFromModal(){
+      if(!confirm('Install the update? The device will reboot after flashing.')) return;
+      var btn=$('changelogInstall');
+      var label=btn.textContent;
+      btn.disabled=true; btn.textContent='Installing\u2026';
+      fetch('/api/ota-github',{method:'POST',body:'{}'}).then(function(r){return r.json();}).then(function(data){
+        if(data.started){
+          btn.textContent='Flashing \u2014 see device screen\u2026';
+          $('changelogBody').innerHTML='<div class="cl-notes">OTA in progress. Device will reboot when complete.</div>';
+        }
+      }).catch(function(){
+        btn.disabled=false; btn.textContent=label;
+        alert('Failed to start OTA update');
+      });
     }
 
     (function(){
       var pill=$('updatePill');
-      if(pill) pill.addEventListener('click',showUpdateFromBadge);
+      if(pill) pill.addEventListener('click',openChangelogModal);
+      var bd=$('changelogBackdrop');
+      if(bd) bd.addEventListener('click',function(e){ if(e.target===bd) closeChangelogModal(); });
+      var c1=$('changelogClose'); if(c1) c1.addEventListener('click',closeChangelogModal);
+      var c2=$('changelogCancel'); if(c2) c2.addEventListener('click',closeChangelogModal);
+      var ins=$('changelogInstall'); if(ins) ins.addEventListener('click',installFromModal);
     })();
 
     function startGithubOta(){
