@@ -568,7 +568,7 @@
     <div class="brand"><img class="logo" src="/favicon.ico" alt=""> <span id="brandName">NINA Display</span></div>
     <div class="tabs" id="topTabs">
       <button class="tab-btn active" data-tab="display">Display</button>
-      <button class="tab-btn" data-tab="nodes">Nodes &amp; Data</button>
+      <button class="tab-btn" data-tab="nodes">N.I.N.A.</button>
       <button class="tab-btn" data-tab="behavior">Behavior</button>
       <button class="tab-btn" data-tab="system">System</button>
       <button class="tab-btn" data-tab="allsky">AllSky</button>
@@ -592,7 +592,7 @@
       </button>
       <button class="nav-btn" data-tab="nodes">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-        Nodes
+        N.I.N.A.
       </button>
       <button class="nav-btn" data-tab="behavior">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
@@ -764,17 +764,17 @@
     <div id="tab-nodes" class="tab-panel">
 
       <div class="card" id="instance-overview">
-        <div class="card-title">Active Instances</div>
+        <div class="card-title">Active N.I.N.A. Instances</div>
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label" id="inst_lbl_0">Node 1</span>
+          <span class="toggle-label" id="inst_lbl_0">N.I.N.A. 1</span>
           <label class="toggle"><input type="checkbox" id="instance_enabled_0" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
         </div>
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label" id="inst_lbl_1">Node 2</span>
+          <span class="toggle-label" id="inst_lbl_1">N.I.N.A. 2</span>
           <label class="toggle"><input type="checkbox" id="instance_enabled_1" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
         </div>
         <div class="toggle-row">
-          <span class="toggle-label" id="inst_lbl_2">Node 3</span>
+          <span class="toggle-label" id="inst_lbl_2">N.I.N.A. 3</span>
           <label class="toggle"><input type="checkbox" id="instance_enabled_2" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
         </div>
       </div>
@@ -1601,7 +1601,7 @@
         const urlId='url'+(i+1);
         container.insertAdjacentHTML('beforeend',
           '<div class="card node-config-card" id="node_card_'+i+'" data-node="'+i+'">'+
-            '<div class="card-title">Node '+(i+1)+' <span id="node_card_hostname_'+i+'" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span></div>'+
+            '<div class="card-title">N.I.N.A. '+(i+1)+' <span id="node_card_hostname_'+i+'" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span></div>'+
             '<div class="field"><label class="field-label">Hostname / IP</label>'+
             '<input type="text" class="input" id="'+urlId+'" placeholder="'+placeholders[i]+'" oninput="updateNodeLabels()"></div>'+
             '<div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">'+
@@ -1950,7 +1950,7 @@
     function updateNodeLabels(){
       var urls=[$('url1').value.trim(),$('url2').value.trim(),$('url3').value.trim()];
       for(var i=0;i<3;i++){
-        var label=urls[i]||('Node '+(i+1));
+        var label=urls[i]||('N.I.N.A. '+(i+1));
         var hostnameSpan=$('node_card_hostname_'+i);
         if(hostnameSpan) hostnameSpan.textContent=urls[i]?urls[i]:'';
         var instLbl=$('inst_lbl_'+i);
