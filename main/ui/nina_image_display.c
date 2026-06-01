@@ -450,6 +450,14 @@ void nina_image_display_force_redraw(void)
     force_redraw = true;
 }
 
+bool nina_image_display_has_image(void)
+{
+    /* True once a frame has been committed to the page; reset to 0 by
+     * nina_image_display_cleanup() on page leave and at create. Read under the
+     * display lock held by the caller, matching this module's convention. */
+    return displayed_poll_ms != 0;
+}
+
 void nina_image_display_cleanup(void)
 {
     if (!page_container) return;
