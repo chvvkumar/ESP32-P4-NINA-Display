@@ -19,6 +19,7 @@
 #include "ui/nina_safety.h"
 #include "ui/nina_session_stats.h"
 #include "app_config.h"
+#include "log_capture.h"
 #include "web_server.h"
 #include "mqtt_ha.h"
 #include "tasks.h"
@@ -542,6 +543,10 @@ void app_main(void)
     esp_log_level_set("esp-x509-crt-bundle", ESP_LOG_WARN);
     esp_log_level_set("transport_base", ESP_LOG_NONE);
     esp_log_level_set("HTTP_CLIENT", ESP_LOG_NONE);
+
+    /* Install the boot log capture hook early so subsequent init output is
+     * recorded into the PSRAM ring (chains to the console vprintf). */
+    log_capture_init();
 
     app_config_init();
 

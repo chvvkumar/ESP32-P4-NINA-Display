@@ -1180,6 +1180,15 @@
       </div>
 
       <div class="card">
+        <div class="card-title">Diagnostic Logs</div>
+        <div class="field-hint" style="margin-top:0;margin-bottom:12px">Device log output captured since boot (in-memory, 512 KB ring buffer).</div>
+        <div class="row stack-mobile">
+          <a class="btn btn-outline" href="/api/logs" style="flex:1;text-align:center">Download Logs</a>
+          <button class="btn btn-outline" id="clearLogsBtn" onclick="clearLogs()" style="flex:1">Clear Logs</button>
+        </div>
+      </div>
+
+      <div class="card" id="adminPasswordCard">
         <div class="card-title">Authentication</div>
         <div class="toggle-row">
           <span class="toggle-label">Require login to access the web UI</span>
@@ -1191,10 +1200,8 @@
         </p>
         <button class="btn btn-primary" style="margin-top:12px" onclick="saveAuthEnabled()">Save</button>
         <div id="auth_enabled_status" style="margin-top:10px;font-size:0.9em;"></div>
-      </div>
-
-      <div class="card" id="adminPasswordCard">
-        <div class="card-title">Admin Password</div>
+        <hr style="border:0;border-top:1px solid var(--border);margin:16px 0">
+        <div style="font-weight:600;color:var(--text);text-transform:uppercase;letter-spacing:0.04em;font-size:0.8rem;margin-bottom:8px">Admin Password</div>
         <p style="color:#888;font-size:0.85em;margin:2px 0 12px 0;">
           Default password is <code>changeme123!</code>. Change it now to secure this device's web interface.
         </p>
@@ -3696,6 +3703,21 @@
     }
 
     initCollapsibleCards();
+
+    /* ---- Diagnostic Logs ---- */
+
+    function clearLogs(){
+      if(!confirm('Clear the captured device logs? This cannot be undone.')) return;
+      var btn=$('clearLogsBtn');
+      btn.disabled=true; btn.textContent='Clearing...';
+      fetch('/api/logs/clear',{method:'POST'})
+        .then(function(r){
+          if(!r.ok) throw new Error('Clear failed');
+          showToast('Logs cleared','success');
+        })
+        .catch(function(e){ showToast('Clear logs failed: '+e.message,'error'); })
+        .finally(function(){ btn.disabled=false; btn.textContent='Clear Logs'; });
+    }
 
     /* ---- Backup & Restore ---- */
 
