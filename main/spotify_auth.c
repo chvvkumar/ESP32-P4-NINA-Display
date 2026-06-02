@@ -304,6 +304,7 @@ void spotify_auth_init(void) {
 }
 
 spotify_auth_state_t spotify_auth_get_state(void) {
+    if (!s_mutex) return SPOTIFY_AUTH_NONE;
     spotify_auth_state_t state;
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     state = s_state;
@@ -313,6 +314,7 @@ spotify_auth_state_t spotify_auth_get_state(void) {
 
 esp_err_t spotify_auth_exchange_code(const char *code, const char *code_verifier,
                                       const char *redirect_uri) {
+    if (!s_mutex) return ESP_ERR_INVALID_STATE;
     if (!code || !code_verifier || !redirect_uri) {
         ESP_LOGE(TAG, "exchange_code: NULL parameter");
         return ESP_ERR_INVALID_ARG;
@@ -365,6 +367,7 @@ esp_err_t spotify_auth_exchange_code(const char *code, const char *code_verifier
 }
 
 esp_err_t spotify_auth_get_access_token(char *buf, size_t buf_size) {
+    if (!s_mutex) return ESP_ERR_INVALID_STATE;
     if (!buf || buf_size == 0) return ESP_ERR_INVALID_ARG;
 
     buf[0] = '\0';
@@ -436,6 +439,7 @@ esp_err_t spotify_auth_get_access_token(char *buf, size_t buf_size) {
 }
 
 void spotify_auth_invalidate_token(void) {
+    if (!s_mutex) return;
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     s_access_token[0] = '\0';
     s_token_expiry_ms = 0;
@@ -444,6 +448,7 @@ void spotify_auth_invalidate_token(void) {
 }
 
 void spotify_auth_logout(void) {
+    if (!s_mutex) return;
     xSemaphoreTake(s_mutex, portMAX_DELAY);
 
     s_access_token[0] = '\0';
@@ -459,6 +464,7 @@ void spotify_auth_logout(void) {
 }
 
 bool spotify_auth_has_tokens(void) {
+    if (!s_mutex) return false;
     bool has;
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     has = (s_refresh_token[0] != '\0');

@@ -46,5 +46,17 @@ http_poll_ctx_t *http_poll_ctx_get(void);
  * Uses per-task poll context for client reuse when available. */
 cJSON *http_get_json(const char *url);
 
+/* NINA Advanced API envelope helpers. The API wraps every response in
+ * { "Response": ..., "Success": bool, ... }. These honor the application-level
+ * Success flag so callers can treat Success!=true as "API unavailable" even when
+ * the HTTP transport succeeded. Neither helper deletes the envelope — caller owns it. */
+
+/* True iff envelope != NULL and its "Success" field is true. */
+bool nina_api_envelope_ok(cJSON *envelope);
+
+/* Returns the inner "Response" item ONLY if the envelope is OK (Success true);
+ * else NULL. */
+cJSON *nina_api_response(cJSON *envelope);
+
 /* Parse ISO-8601 datetime string to time_t (UTC). Returns 0 on failure. */
 time_t parse_iso8601(const char *str);

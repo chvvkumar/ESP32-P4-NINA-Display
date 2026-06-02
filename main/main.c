@@ -363,6 +363,9 @@ static void event_handler(void *arg, esp_event_base_t event_base,
         if (is_setup_mode()) {
             set_setup_mode(false);
             ESP_LOGI(TAG, "WiFi connected during setup — transitioning to dashboard");
+            /* Create Spotify auth mutex before dashboard build so the Spotify page's
+             * spotify_status_refresh() (spotify_auth_get_state) is safe. No display lock needed. */
+            spotify_auth_init();
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                 nina_setup_screen_destroy();
                 lv_obj_t *scr = lv_scr_act();
@@ -377,7 +380,7 @@ static void event_handler(void *arg, esp_event_base_t event_base,
             nina_client_init();
             nina_client_init_image_buffers();
             nina_thumbnail_init();
-            spotify_auth_init();
+            /* spotify_auth_init() already ran before dashboard creation above. */
             spotify_client_init();
 
             xTaskCreatePinnedToCore(input_task, "input_task", 6144, NULL, 5, NULL, 0);
@@ -694,6 +697,13 @@ void app_main(void)
     /* Weather client init — creates mutex before dashboard (clock page timer fires immediately) */
     weather_client_init();
 
+    /* Spotify auth init — creates its mutex before dashboard so the Spotify page's
+     * spotify_status_refresh() (calls spotify_auth_get_state) is safe during page build.
+     * Only creates a mutex and loads NVS tokens; needs no display lock. */
+    if (!setup_mode) {
+        spotify_auth_init();
+    }
+
     /* ── Build UI: dashboard behind splash, everything starts immediately ── */
     if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
         lv_obj_t *scr = lv_scr_act();
@@ -767,8 +777,8 @@ void app_main(void)
         nina_client_init_image_buffers();  // Pre-allocate PSRAM image fetch buffer
         nina_thumbnail_init();  // Pre-allocate PSRAM zoom buffer
 
-        /* Spotify init — always called so web handlers (config, login) work even when disabled */
-        spotify_auth_init();
+        /* Spotify init — always called so web handlers (config, login) work even when disabled.
+         * spotify_auth_init() already ran before dashboard creation above. */
         spotify_client_init();
 
         /* weather_client_init() already called above, before dashboard creation */

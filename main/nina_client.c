@@ -333,6 +333,25 @@ cJSON *http_get_json(const char *url) {
     return NULL;  // All attempts exhausted
 }
 
+/* ── NINA API envelope helpers ──
+ * The Advanced API wraps every response in an envelope:
+ *   { "Response": ..., "Error": "", "StatusCode": 200, "Success": true, "Type": "API" }
+ * http_get_json() already returns NULL on transport failure / non-2xx / empty /
+ * partial bodies, so NULL is a reliable "unreachable" signal. These helpers add the
+ * application-level Success check so connectivity reflects the CURRENT poll's
+ * envelope rather than a latched side-effect. Neither helper deletes the
+ * envelope — the caller owns it. */
+
+bool nina_api_envelope_ok(cJSON *envelope) {
+    if (!envelope) return false;
+    return cJSON_IsTrue(cJSON_GetObjectItem(envelope, "Success"));
+}
+
+cJSON *nina_api_response(cJSON *envelope) {
+    if (!nina_api_envelope_ok(envelope)) return NULL;
+    return cJSON_GetObjectItem(envelope, "Response");
+}
+
 // =============================================================================
 // Exposure Timing Fixup
 // =============================================================================
@@ -420,9 +439,13 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
 
     int64_t now_ms = esp_timer_get_time() / 1000;
 
-    // Don't reset data->connected here — the fetcher sets it based on HTTP result,
-    // and the connection state machine below provides hysteresis. Pre-clearing it
-    // would race with WebSocket handlers that also write to the struct.
+    // No need to pre-clear data->connected here: the fetchers now explicitly set
+    // data->connected = false on every failure path (unreachable, Success!=true,
+    // missing Response) and = true only on an OK envelope, so connectivity is
+    // recomputed fresh each poll. The WebSocket handlers do NOT write data->connected
+    // (they only write websocket_connected / rotator_connected / safety_connected),
+    // so there is no struct race to worry about. The connection state machine below
+    // adds hysteresis on top of this per-poll value.
 
     ESP_LOGI(TAG, "=== Polling NINA data (%s: %s) ===",
              state->bundle_not_available ? "tiered" : "bundled",
@@ -444,7 +467,8 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
             state->bundle_not_available = true;
             // Fall through to legacy path below
         }
-        // bundle_result == -1: HTTP failure, data->connected stays false (set at line 332)
+        // bundle_result == -1: API unreachable or Success!=true — the fetcher already
+        // set data->connected = false, so the connection check below sees a failed poll.
     }
 
     if (state->bundle_not_available) {
