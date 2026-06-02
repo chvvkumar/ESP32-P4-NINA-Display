@@ -1194,7 +1194,7 @@
         <div class="toggle-row">
           <div>
             <span class="toggle-label">Switch page when no connections</span>
-            <div class="field-hint" style="margin-top:2px">Automatically switches to the selected page when all NINA instances are disconnected. Disabled while auto-rotate is active.</div>
+            <div class="field-hint" style="margin-top:2px">Automatically switches to the selected page when all NINA instances are disconnected, then resumes auto-rotate (if enabled) on reconnect.</div>
           </div>
           <label class="toggle"><input type="checkbox" id="idle_page_override_enabled" onchange="toggleIdleOverride();checkDirty()"><span class="toggle-track"></span></label>
         </div>
@@ -1207,6 +1207,9 @@
             <option value="2">Spotify</option>
             <option value="3">Image Display</option>
             <option value="4">System Info</option>
+            <option value="5">NINA Instance 1</option>
+            <option value="6">NINA Instance 2</option>
+            <option value="7">NINA Instance 3</option>
           </select>
           <div class="toggle-row" style="margin-top:12px">
             <div>

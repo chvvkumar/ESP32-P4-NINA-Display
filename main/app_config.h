@@ -24,6 +24,9 @@ typedef enum {
     IDLE_TARGET_SPOTIFY        =  2,
     IDLE_TARGET_IMAGE_DISPLAY  =  3,
     IDLE_TARGET_SYSINFO        =  4,
+    IDLE_TARGET_NINA1          =  5,
+    IDLE_TARGET_NINA2          =  6,
+    IDLE_TARGET_NINA3          =  7,
 } idle_target_t;
 
 typedef struct {

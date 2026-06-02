@@ -220,6 +220,13 @@ static lv_obj_t *get_page_obj(int idx) {
     return NULL;
 }
 
+bool nina_dashboard_page_is_available(int page_idx) {
+    /* A page is available iff its backing object exists. Optional pages
+     * (AllSky/Spotify/Image Display) have NULL objects when disabled, and NINA
+     * indices beyond page_count resolve to NULL as well. */
+    return get_page_obj(page_idx) != NULL;
+}
+
 /* Set theme colors on all widgets in a page */
 static void apply_theme_to_page(dashboard_page_t *p) {
     if (!p->page || !current_theme) return;
