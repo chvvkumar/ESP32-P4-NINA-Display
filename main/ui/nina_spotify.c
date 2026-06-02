@@ -19,6 +19,7 @@
 #include "display_defs.h"
 #include "themes.h"
 #include "app_config.h"
+#include "spotify_auth.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -29,10 +30,6 @@
 #include <string.h>
 #include <stdlib.h>
 #include "nina_idle_indicator.h"
-
-/* Embedded Spotify logo PNG (linked via EMBED_FILES) */
-extern const uint8_t spotify_logo_png_start[] asm("_binary_spotify_logo_png_start");
-extern const uint8_t spotify_logo_png_end[]   asm("_binary_spotify_logo_png_end");
 
 static const char *TAG = "spotify_ui";
 
@@ -74,8 +71,11 @@ static lv_obj_t *minimal_artist_name = NULL;
 static lv_obj_t *minimal_album_name = NULL;
 static lv_obj_t *minimal_progress = NULL;      /* Optional thin progress bar */
 
-static lv_obj_t *loading_logo = NULL;      /* Spotify logo shown while loading */
-static lv_image_dsc_t logo_dsc;            /* Persistent descriptor for logo PNG */
+/* Status panel — text-based setup/connecting indicator (replaces logo).
+ * Page-owned so it persists as the empty/connecting state; drawn on top. */
+static lv_obj_t *status_panel = NULL;
+static lv_obj_t *status_title = NULL;
+static lv_obj_t *status_subtitle = NULL;
 
 static lv_timer_t *idle_timer = NULL;
 static bool is_idle = true;
@@ -90,6 +90,10 @@ static lv_image_dsc_t art_dsc;             /* Persistent image descriptor */
 static void create_track_info_container(void);
 static void create_controls(void);
 static void create_minimal_widgets(void);
+static void create_status_panel(void);
+static void spotify_status_set(const char *title, const char *subtitle);
+static void spotify_status_hide(void);
+static void spotify_status_refresh(void);
 static void set_idle_state(bool idle);
 static void dim_anim_cb(void *var, int32_t value);
 static void idle_timer_cb(lv_timer_t *timer);
@@ -109,30 +113,72 @@ static void set_refr_period(uint32_t period_ms)
     }
 }
 
-/* Pulse animation: breathe opacity between 80 and 255 */
-static void pulse_opa_cb(void *var, int32_t value)
+/* ── Status panel (setup / connecting state) ─────────────────────────── */
+
+/** Show the status panel with the given title and (optional) subtitle.
+ *  A NULL/empty subtitle hides the subtitle label. Panel is brought to the
+ *  foreground so it draws above album art and the dim overlay. */
+static void spotify_status_set(const char *title, const char *subtitle)
 {
-    lv_obj_set_style_image_opa((lv_obj_t *)var, (lv_opa_t)value, 0);
+    if (!status_panel) return;
+    if (status_title) lv_label_set_text(status_title, title ? title : "");
+    if (status_subtitle) {
+        if (subtitle && subtitle[0]) {
+            lv_label_set_text(status_subtitle, subtitle);
+            lv_obj_remove_flag(status_subtitle, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_label_set_text(status_subtitle, "");
+            lv_obj_add_flag(status_subtitle, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    lv_obj_remove_flag(status_panel, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(status_panel);
 }
 
-static void start_logo_pulse(void)
+static void spotify_status_hide(void)
 {
-    if (!loading_logo) return;
-    lv_anim_t a;
-    lv_anim_init(&a);
-    lv_anim_set_var(&a, loading_logo);
-    lv_anim_set_values(&a, 80, 255);
-    lv_anim_set_time(&a, 1500);
-    lv_anim_set_playback_time(&a, 1500);
-    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_exec_cb(&a, pulse_opa_cb);
-    lv_anim_start(&a);
+    if (status_panel) lv_obj_add_flag(status_panel, LV_OBJ_FLAG_HIDDEN);
 }
 
-static void stop_logo_pulse(void)
+/** Compute the current setup/connection state from auth + config and either
+ *  show the matching status text or hide the panel (when art is showing or
+ *  authorized playback data has arrived). */
+static void spotify_status_refresh(void)
 {
-    if (!loading_logo) return;
-    lv_anim_delete(loading_logo, pulse_opa_cb);
+    if (!status_panel) return;
+
+    /* Art present, or data received while playing -> nothing to announce. */
+    if (has_art) {
+        spotify_status_hide();
+        return;
+    }
+
+    const app_config_t *cfg = app_config_get();
+    spotify_auth_state_t state = spotify_auth_get_state();
+
+    if (cfg->spotify_client_id[0] == '\0') {
+        spotify_status_set("Spotify Not Set Up", "Add your Client ID in the web UI");
+        return;
+    }
+
+    switch (state) {
+        case SPOTIFY_AUTH_NONE:
+            spotify_status_set("Spotify Not Connected", "Link your account in the web UI");
+            return;
+        case SPOTIFY_AUTH_ERROR:
+            spotify_status_set("Spotify Sign-In Needed", "Re-link your account in the web UI");
+            return;
+        case SPOTIFY_AUTH_AUTHORIZED:
+        default:
+            if (!has_received_data) {
+                spotify_status_set("Connecting to Spotify\xE2\x80\xA6", "");
+                return;
+            }
+            /* Authorized and data has arrived (nothing-playing handled by the
+             * existing track_info_cont path) — keep the panel hidden. */
+            spotify_status_hide();
+            return;
+    }
 }
 
 /** Update label text only if it changed — avoids restarting scroll animation. */
@@ -333,24 +379,7 @@ lv_obj_t *spotify_page_create(lv_obj_t *parent)
     lv_image_set_pivot(img_album_art, 0, 0);
     lv_obj_add_flag(img_album_art, LV_OBJ_FLAG_HIDDEN); /* Hidden until art arrives */
 
-    /* 1b. Loading indicator — Spotify logo PNG, centered, pulsing.
-     * lodepng decoder (CONFIG_LV_USE_LODEPNG) handles decoding from
-     * the embedded binary.  We pass the raw PNG data as an lv_image_dsc_t. */
-    {
-        size_t png_size = (size_t)(spotify_logo_png_end - spotify_logo_png_start);
-        memset(&logo_dsc, 0, sizeof(logo_dsc));
-        logo_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
-        logo_dsc.header.cf = LV_COLOR_FORMAT_RAW;
-        logo_dsc.data = spotify_logo_png_start;
-        logo_dsc.data_size = (uint32_t)png_size;
-
-        loading_logo = lv_image_create(spotify_page);
-        lv_image_set_src(loading_logo, &logo_dsc);
-        lv_obj_align(loading_logo, LV_ALIGN_CENTER, 0, 0);
-        lv_obj_remove_flag(loading_logo, LV_OBJ_FLAG_CLICKABLE);
-        has_art = false;
-        start_logo_pulse();
-    }
+    has_art = false;
 
     /* 2. Dim overlay (semi-transparent black, animated) */
     dim_overlay = lv_obj_create(spotify_page);
@@ -371,6 +400,10 @@ lv_obj_t *spotify_page_create(lv_obj_t *parent)
     /* 5. Minimal mode widgets (hidden by default) */
     create_minimal_widgets();
 
+    /* 6. Status panel — text-based setup/connecting indicator, created last so
+     * it draws above album art and the dim overlay. Hidden until needed. */
+    create_status_panel();
+
     /* Touch handler on entire page */
     lv_obj_add_event_cb(spotify_page, page_touch_cb, LV_EVENT_CLICKED, NULL);
 
@@ -385,6 +418,9 @@ lv_obj_t *spotify_page_create(lv_obj_t *parent)
     set_idle_state(true);
 
     nina_idle_indicator_create(spotify_page, LV_ALIGN_BOTTOM_MID, false);
+
+    /* Show the correct setup/connecting status immediately. */
+    spotify_status_refresh();
 
     return spotify_page;
 }
@@ -606,6 +642,46 @@ static void create_minimal_widgets(void)
     /* Start minimal widgets hidden — shown by set_idle_state when tapped */
     lv_obj_add_flag(minimal_info_cont, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(minimal_progress, LV_OBJ_FLAG_HIDDEN);
+}
+
+/* ── Status panel (setup / connecting) creation ──────────────────────── */
+
+static void create_status_panel(void)
+{
+    /* Full-screen centered container, themed background so it isn't a blank
+     * black screen. Mirrors the wait-overlay layout (centered title/subtitle). */
+    status_panel = lv_obj_create(spotify_page);
+    lv_obj_remove_style_all(status_panel);
+    lv_obj_set_size(status_panel, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_pos(status_panel, 0, 0);
+    lv_obj_set_style_bg_color(status_panel,
+        lv_color_hex(current_theme ? current_theme->bg_main : 0x000000), 0);
+    lv_obj_set_style_bg_opa(status_panel, LV_OPA_COVER, 0);
+    lv_obj_set_flex_flow(status_panel, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(status_panel, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(status_panel, 16, 0);
+    lv_obj_remove_flag(status_panel, LV_OBJ_FLAG_SCROLLABLE);
+    /* Let taps/swipes pass through to the page so navigation still works. */
+    lv_obj_remove_flag(status_panel, LV_OBJ_FLAG_CLICKABLE);
+
+    status_title = lv_label_create(status_panel);
+    lv_label_set_text(status_title, "");
+    lv_obj_set_style_text_font(status_title, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_text_color(status_title,
+        lv_color_hex(current_theme ? current_theme->text_color : 0xFFFFFF), 0);
+    lv_obj_set_style_text_align(status_title, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_width(status_title, LV_PCT(85));
+
+    status_subtitle = lv_label_create(status_panel);
+    lv_label_set_text(status_subtitle, "");
+    lv_obj_set_style_text_font(status_subtitle, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_color(status_subtitle,
+        lv_color_hex(current_theme ? current_theme->label_color : 0x999999), 0);
+    lv_obj_set_style_text_align(status_subtitle, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_width(status_subtitle, LV_PCT(85));
+
+    lv_obj_add_flag(status_panel, LV_OBJ_FLAG_HIDDEN);
 }
 
 /* ── Idle / active state management ──────────────────────────────────── */
@@ -903,12 +979,11 @@ void nina_spotify_set_album_art(const uint8_t *rgb565_data, uint32_t w, uint32_t
 
     lv_image_set_src(img_album_art, &art_dsc);
 
-    /* Hide loading logo now that we have album art */
-    if (loading_logo && !has_art) {
-        stop_logo_pulse();
-        lv_obj_add_flag(loading_logo, LV_OBJ_FLAG_HIDDEN);
+    /* Hide status panel now that we have album art */
+    if (!has_art) {
+        spotify_status_hide();
         has_art = true;
-        /* Now safe to throttle refresh if idle (logo animation no longer needed) */
+        /* Now safe to throttle refresh if idle */
         if (is_idle) {
             set_refr_period(REFR_PERIOD_IDLE_MS);
         }
@@ -973,13 +1048,11 @@ void nina_spotify_set_idle(void)
     has_art = false;
     lv_obj_add_flag(img_album_art, LV_OBJ_FLAG_HIDDEN);
 
-    /* Hide the loading logo — we've heard from the API, nothing is playing.
-     * The pulsing logo is only for the initial loading state before first data. */
+    /* Hide the status panel — we've heard from the API, nothing is playing.
+     * The "Nothing Playing" text (track_info_cont / minimal_info_cont) is shown
+     * by set_idle_state instead. */
     has_received_data = true;
-    if (loading_logo) {
-        stop_logo_pulse();
-        lv_obj_add_flag(loading_logo, LV_OBJ_FLAG_HIDDEN);
-    }
+    spotify_status_hide();
 }
 
 /* ── Public API: theme ───────────────────────────────────────────────── */
@@ -998,6 +1071,20 @@ void spotify_page_apply_theme(void)
     if (minimal_progress) {
         lv_obj_set_style_bg_color(minimal_progress,
             lv_color_hex(current_theme->progress_color), LV_PART_INDICATOR);
+    }
+
+    /* Status panel inherits theme colors (themed background + title/subtitle). */
+    if (status_panel) {
+        lv_obj_set_style_bg_color(status_panel,
+            lv_color_hex(current_theme->bg_main), 0);
+    }
+    if (status_title) {
+        lv_obj_set_style_text_color(status_title,
+            lv_color_hex(current_theme->text_color), 0);
+    }
+    if (status_subtitle) {
+        lv_obj_set_style_text_color(status_subtitle,
+            lv_color_hex(current_theme->label_color), 0);
     }
 
     lv_obj_invalidate(spotify_page);
@@ -1030,12 +1117,9 @@ void nina_spotify_on_show(void)
         set_idle_state(true);
     }
 
-    /* Show loading logo pulse only if we haven't received any API data yet.
-     * Once we know "nothing playing", the logo stays hidden. */
-    if (!has_art && !has_received_data && loading_logo) {
-        lv_obj_remove_flag(loading_logo, LV_OBJ_FLAG_HIDDEN);
-        start_logo_pulse();
-    }
+    /* Show the correct setup/connecting status (or hide it if art/data present)
+     * so the right state appears immediately when landing on the page. */
+    spotify_status_refresh();
 }
 
 void nina_spotify_on_hide(void)
@@ -1086,10 +1170,15 @@ void nina_spotify_free_art(void)
         ESP_LOGI(TAG, "Album art buffer freed");
     }
 
-    /* Show loading logo only if we haven't received API data yet.
-     * If data was received (nothing playing), keep logo hidden. */
-    if (loading_logo && !has_received_data) {
-        lv_obj_remove_flag(loading_logo, LV_OBJ_FLAG_HIDDEN);
-        start_logo_pulse();
-    }
+    /* Re-evaluate the status panel: if no API data yet, show the
+     * setup/connecting state; otherwise it stays hidden. */
+    spotify_status_refresh();
+}
+
+/* ── Public API: status panel refresh ────────────────────────────────── */
+
+void nina_spotify_refresh_status(void)
+{
+    if (!spotify_page) return;
+    spotify_status_refresh();
 }

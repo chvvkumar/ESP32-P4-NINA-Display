@@ -78,6 +78,14 @@ void nina_spotify_refresh_layout(void);
  */
 void nina_spotify_free_art(void);
 
+/**
+ * Recompute and display the connection/setup status panel from the current
+ * Spotify auth state and config (Client ID). Hidden when album art is showing
+ * or playback data has arrived. No-op if the page has not been created.
+ * Must be called under LVGL display lock.
+ */
+void nina_spotify_refresh_status(void);
+
 #ifdef __cplusplus
 }
 #endif
