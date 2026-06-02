@@ -25,13 +25,33 @@ void fetch_camera_info_robust(const char *base_url, nina_client_t *data) {
 
     cJSON *json = http_get_json(url);
     if (!json) {
+        // Transport failure / non-2xx / empty body — API unreachable.
+        data->connected = false;
+        strcpy(data->status, "OFFLINE");
+        return;
+    }
+
+    // Honor the application-level Success flag: connectivity requires Success==true,
+    // not merely a non-NULL body. Recomputed every poll so a stuck `true` can't latch.
+    if (!nina_api_envelope_ok(json)) {
+        cJSON_Delete(json);
+        data->connected = false;
+        strcpy(data->status, "OFFLINE");
+        return;
+    }
+
+    cJSON *response = nina_api_response(json);
+    if (!response) {
+        // Envelope OK but no Response object — treat as offline this poll
+        // (symmetric with fetch_equipment_info_bundled).
+        cJSON_Delete(json);
+        data->connected = false;
         strcpy(data->status, "OFFLINE");
         return;
     }
 
     data->connected = true;
-    cJSON *response = cJSON_GetObjectItem(json, "Response");
-    if (response) {
+    {
         // Camera name
         cJSON *cam_name = cJSON_GetObjectItem(response, "Name");
         if (cam_name && cam_name->valuestring && cam_name->valuestring[0] != '\0')
@@ -509,23 +529,36 @@ int fetch_equipment_info_bundled(const char *base_url, nina_client_t *data, bool
 
     cJSON *json = http_get_json(url);
     if (!json) {
+        // Transport failure / non-2xx / empty body — API unreachable.
+        data->connected = false;
         strcpy(data->status, "OFFLINE");
         return -1;
     }
 
-    cJSON *response = cJSON_GetObjectItem(json, "Response");
-    if (!response) {
-        // No Response object — may be a 404 or unsupported endpoint
+    // Honor the application-level Success flag: a 2xx body with Success!=true
+    // means the API is up but reported a failure — treat as offline this poll.
+    if (!nina_api_envelope_ok(json)) {
         cJSON_Delete(json);
+        data->connected = false;
+        strcpy(data->status, "OFFLINE");
+        return -1;
+    }
+
+    cJSON *response = nina_api_response(json);
+    if (!response) {
+        // Envelope OK but no Response object — may be a 404 or unsupported endpoint
+        cJSON_Delete(json);
+        data->connected = false;
         strcpy(data->status, "OFFLINE");
         return -2;
     }
 
+    // Envelope is OK with a Response object — the API is reachable this poll.
+    data->connected = true;
+
     // ── Camera ──
     cJSON *camera = cJSON_GetObjectItem(response, "Camera");
     if (camera) {
-        data->connected = true;
-
         cJSON *cam_name = cJSON_GetObjectItem(camera, "Name");
         if (cam_name && cam_name->valuestring && cam_name->valuestring[0] != '\0')
             strncpy(data->camera_name, cam_name->valuestring, sizeof(data->camera_name) - 1);
