@@ -828,6 +828,13 @@ void spotify_poll_task(void *arg)
 
         app_config_t *cfg = app_config_get();
         if (!cfg->spotify_enabled || spotify_auth_get_state() != SPOTIFY_AUTH_AUTHORIZED) {
+            /* Push the current setup/connection status to the UI so it updates
+             * live (e.g. when the user links the account or a token error
+             * occurs). Cheap — just sets label text. */
+            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                nina_spotify_refresh_status();
+                bsp_display_unlock();
+            }
             vTaskDelay(pdMS_TO_TICKS(5000));
             continue;
         }
