@@ -149,6 +149,18 @@ bool nina_dashboard_is_sysinfo_page(void);
 int nina_dashboard_get_total_page_count(void);
 
 /**
+ * @brief Check whether a page index currently maps to an existing, navigable page.
+ *
+ * Returns false for optional pages that are disabled (AllSky, Spotify, Image
+ * Display) and for NINA instance indices beyond the enabled instance count.
+ * Used to validate idle/park targets so the screen never goes blank.
+ *
+ * @param page_idx Absolute page index (e.g. PAGE_IDX_SUMMARY, NINA_PAGE_OFFSET+n)
+ * @return true if the page object exists and can be shown
+ */
+bool nina_dashboard_page_is_available(int page_idx);
+
+/**
  * @brief Check if a thumbnail image has been requested (target name was clicked)
  * @return true if thumbnail fetch is needed
  */

@@ -182,15 +182,26 @@ static int64_t idle_all_disconnected_since_us = 0;
  */
 static int idle_target_to_page_index(int8_t target)
 {
+    int idx;
     switch (target) {
-        case IDLE_TARGET_SUMMARY:  return PAGE_IDX_SUMMARY;
-        case IDLE_TARGET_CLOCK:    return PAGE_IDX_CLOCK;
-        case IDLE_TARGET_ALLSKY:   return PAGE_IDX_ALLSKY;
-        case IDLE_TARGET_SPOTIFY:  return PAGE_IDX_SPOTIFY;
-        case IDLE_TARGET_IMAGE_DISPLAY:  return PAGE_IDX_IMAGE_DISPLAY;
-        case IDLE_TARGET_SYSINFO:  return SYSINFO_PAGE_IDX(page_count);
-        default:                   return PAGE_IDX_SUMMARY;
+        case IDLE_TARGET_SUMMARY:  idx = PAGE_IDX_SUMMARY; break;
+        case IDLE_TARGET_CLOCK:    idx = PAGE_IDX_CLOCK; break;
+        case IDLE_TARGET_ALLSKY:   idx = PAGE_IDX_ALLSKY; break;
+        case IDLE_TARGET_SPOTIFY:  idx = PAGE_IDX_SPOTIFY; break;
+        case IDLE_TARGET_IMAGE_DISPLAY:  idx = PAGE_IDX_IMAGE_DISPLAY; break;
+        case IDLE_TARGET_SYSINFO:  idx = SYSINFO_PAGE_IDX(page_count); break;
+        /* NINA instance pages — mirror auto-rotate's bitmask mapping. */
+        case IDLE_TARGET_NINA1:    idx = (page_count >= 1) ? NINA_PAGE_OFFSET + 0 : PAGE_IDX_SUMMARY; break;
+        case IDLE_TARGET_NINA2:    idx = (page_count >= 2) ? NINA_PAGE_OFFSET + 1 : PAGE_IDX_SUMMARY; break;
+        case IDLE_TARGET_NINA3:    idx = (page_count >= 3) ? NINA_PAGE_OFFSET + 2 : PAGE_IDX_SUMMARY; break;
+        default:                   idx = PAGE_IDX_SUMMARY; break;
     }
+    /* Availability guard: optional pages (AllSky/Spotify/Image Display) may be
+     * disabled. Falling back to Summary (always present) prevents a blank screen. */
+    if (!nina_dashboard_page_is_available(idx)) {
+        idx = PAGE_IDX_SUMMARY;
+    }
+    return idx;
 }
 
 /**
@@ -1914,7 +1925,8 @@ main_loop:
 
         /* If auto-rotate is active and we're on a NINA instance page but no instances
          * are connected, fall back to the summary page automatically. */
-        if (app_config_get()->auto_rotate_enabled && !on_summary && !on_sysinfo && !on_settings && !on_allsky && !on_spotify && !on_clock) {
+        if (app_config_get()->auto_rotate_enabled && !app_config_get()->idle_page_override_enabled
+            && !on_summary && !on_sysinfo && !on_settings && !on_allsky && !on_spotify && !on_clock) {
             bool any_connected = false;
             for (int i = 0; i < instance_count; i++) {
                 if (nina_connection_is_connected(i)) { any_connected = true; break; }
@@ -1943,7 +1955,9 @@ main_loop:
          */
         {
             app_config_t *r_cfg = app_config_get();
-            if (r_cfg->auto_rotate_enabled && r_cfg->auto_rotate_interval_s > 0) {
+            /* Pause rotation while the idle override has parked the device on its
+             * target page — rotation resumes after reconnect clears the override. */
+            if (r_cfg->auto_rotate_enabled && r_cfg->auto_rotate_interval_s > 0 && !idle_override_active) {
                 if (last_rotate_ms == 0) last_rotate_ms = now_ms;
                 if (now_ms - last_rotate_ms >= (int64_t)r_cfg->auto_rotate_interval_s * 1000) {
                     uint8_t page_mask = r_cfg->auto_rotate_pages;
@@ -2332,11 +2346,12 @@ main_loop:
         }
 
         /* ── Idle page override: switch to target page when all NINA instances disconnected ──
-         * Only active when auto-rotate is disabled (auto-rotate takes priority per spec).
+         * Coexists with auto-rotate: while parked on the idle target, rotation is
+         * paused; on reconnect the override clears and auto-rotate resumes.
          * Uses 5-second debounce to avoid flashing on transient disconnects. */
         {
             app_config_t *idle_cfg = app_config_get();
-            if (idle_cfg->idle_page_override_enabled && !idle_cfg->auto_rotate_enabled) {
+            if (idle_cfg->idle_page_override_enabled) {
                 /* Check if ALL enabled NINA instances are disconnected */
                 bool all_disc = true;
                 bool any_enabled = false;
@@ -2405,6 +2420,9 @@ main_loop:
                         }
                         idle_override_active = false;
                         nina_idle_indicator_set_active(false);
+                        /* Resume auto-rotate cleanly: wait a full interval before the
+                         * next advance instead of jumping immediately on un-pause. */
+                        last_rotate_ms = now_ms;
                         page_changed = true;
                         ESP_LOGI(TAG, "Idle override: restoring page %d", restore);
                     }

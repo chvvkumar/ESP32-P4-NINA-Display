@@ -682,10 +682,14 @@ void settings_tab_behavior_create(lv_obj_t *parent) {
                                     "AllSky\n"
                                     "Spotify\n"
                                     "Image Display\n"
-                                    "System Info");
+                                    "System Info\n"
+                                    "NINA Instance 1\n"
+                                    "NINA Instance 2\n"
+                                    "NINA Instance 3");
 
-            /* Map idle_target_t enum to dropdown index:
-             * IDLE_TARGET_SUMMARY(-1)=0, CLOCK(0)=1, ALLSKY(1)=2, SPOTIFY(2)=3, IMAGE_DISPLAY(3)=4, SYSINFO(4)=5 */
+            /* Map idle_target_t enum to dropdown index (index = enum + 1):
+             * SUMMARY(-1)=0, CLOCK(0)=1, ALLSKY(1)=2, SPOTIFY(2)=3, IMAGE_DISPLAY(3)=4,
+             * SYSINFO(4)=5, NINA1(5)=6, NINA2(6)=7, NINA3(7)=8 */
             lv_dropdown_set_selected(dd_idle_target, (uint32_t)(cfg->idle_page_override_target + 1));
 
             if (current_theme) {
