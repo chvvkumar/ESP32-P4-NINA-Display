@@ -1074,8 +1074,8 @@
             </select>
             <div class="field-hint">How the Moon is lit while you drag to rotate it. True phase keeps the real terminator; Explore lights the whole surface.</div>
           </div>
-          <hr class="divider">
-          <div class="field-label" style="margin-bottom:12px">Moon orientation</div>
+          <div class="card">
+            <div class="card-title">Moon Orientation</div>
           <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
             <span class="toggle-label">Keep Moon upright (north-up)</span>
             <label class="toggle"><input type="checkbox" id="moon_north_up" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
@@ -1111,8 +1111,23 @@
             </div>
             <div class="field-hint">Deviation from default. Defaults are 0&deg; for all axes.</div>
           </div>
+          <hr class="divider">
+          <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+            <span class="toggle-label">Free-spin mode</span>
+            <label class="toggle"><input type="checkbox" id="moon_spin_mode" onchange="updateMoonSpinUI();applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint" style="margin-bottom:12px">Off: dragged disc snaps back to the live sky immediately (rubber band). On: the disc holds your spin, then eases back after the timeout below.</div>
+          <div class="field" style="margin-top:16px" id="moonSpinReturnField">
+            <label class="field-label">Return to live view after</label>
+            <div class="slider-group">
+              <input type="range" class="slider" id="moon_spin_return_s" min="3" max="60" step="1" value="10" oninput="updateMoonOrientReadout('moon_spin_return');applyImageDisplay();checkDirty()">
+              <span class="slider-val" id="moon_spin_return_val">10s</span>
+            </div>
+            <div class="field-hint">Only applies in free-spin mode.</div>
+          </div>
           <div class="field" style="margin-top:16px">
             <button onclick="resetMoonOrientation()" class="btn" id="moonOrientResetBtn" style="width:100%">Reset orientation</button>
+          </div>
           </div>
           </div>
           <div id="solarGroup" style="display:none">
@@ -2367,6 +2382,8 @@
         moon_roll_offset:parseFloat($('moon_roll_offset').value)||0,
         moon_yaw_offset:parseFloat($('moon_yaw_offset').value)||0,
         moon_pitch_offset:parseFloat($('moon_pitch_offset').value)||0,
+        moon_spin_mode:$('moon_spin_mode').checked?1:0,
+        moon_spin_return_s:parseInt($('moon_spin_return_s').value,10)||10,
         weather_provider:parseInt($('weather_provider').value)||0,
         weather_api_key:$('weather_api_key').value.trim(),
         weather_lat:parseFloat($('weather_lat').value)||0,
@@ -2545,9 +2562,13 @@
       if($('moon_roll_offset')) $('moon_roll_offset').value=data.moon_roll_offset!=null?data.moon_roll_offset:0;
       if($('moon_yaw_offset')) $('moon_yaw_offset').value=data.moon_yaw_offset!=null?data.moon_yaw_offset:0;
       if($('moon_pitch_offset')) $('moon_pitch_offset').value=data.moon_pitch_offset!=null?data.moon_pitch_offset:0;
+      if($('moon_spin_mode')) $('moon_spin_mode').checked=!!data.moon_spin_mode;
+      if($('moon_spin_return_s')) $('moon_spin_return_s').value=data.moon_spin_return_s!=null?data.moon_spin_return_s:10;
       updateMoonOrientReadout('moon_roll');
       updateMoonOrientReadout('moon_yaw');
       updateMoonOrientReadout('moon_pitch');
+      updateMoonOrientReadout('moon_spin_return');
+      updateMoonSpinUI();
       updateImageDisplayEnabledUI();
       updateImageSourceUI();
 
@@ -3694,13 +3715,28 @@
         moon_roll_offset: parseFloat($('moon_roll_offset').value)||0,
         moon_yaw_offset: parseFloat($('moon_yaw_offset').value)||0,
         moon_pitch_offset: parseFloat($('moon_pitch_offset').value)||0,
+        moon_spin_mode: $('moon_spin_mode').checked?1:0,
+        moon_spin_return_s: parseInt($('moon_spin_return_s').value,10)||10,
         solar_band: parseInt($('solarBand').value,10)||0
       });
     }
 
     function updateMoonOrientReadout(which){
+      if(which==='moon_spin_return'){
+        var sEl=$('moon_spin_return_s'); var sOut=$('moon_spin_return_val');
+        if(sEl&&sOut) sOut.innerHTML=(parseInt(sEl.value,10)||10)+'s';
+        return;
+      }
       var el=$(which+'_offset'); var out=$(which+'_val');
       if(el&&out) out.innerHTML=(parseFloat(el.value)||0)+'&deg;';
+    }
+
+    function updateMoonSpinUI(){
+      var on=$('moon_spin_mode')&&$('moon_spin_mode').checked;
+      var field=$('moonSpinReturnField');
+      var slider=$('moon_spin_return_s');
+      if(field) field.style.opacity=on?'1':'0.4';
+      if(slider) slider.disabled=!on;
     }
 
     function resetMoonOrientation(){

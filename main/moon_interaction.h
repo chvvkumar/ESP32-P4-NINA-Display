@@ -1,5 +1,6 @@
 #pragma once
 #include <stdbool.h>
+#include <stdint.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -9,7 +10,7 @@ extern "C" {
  * toward TARGET (set by the finger; driven home on release for snap-back). */
 void moon_drag_begin(float x_px, float y_px);   /* finger down: snapshot start    */
 void moon_drag_move(float x_px, float y_px);     /* finger move: set target yaw/pitch */
-void moon_drag_end(void);                        /* finger up: target -> 0 (snap-back) */
+void moon_drag_end(void);                        /* finger up: rubber band -> target 0, or free spin -> hold + arm return */
 void moon_drag_advance(float alpha);             /* render frame: ease current -> target */
 /* Hard-reset all drag state (active/target/current -> home). Call on Image Display
  * page leave so a visit that ends mid-settle does not carry a stale orientation
@@ -24,6 +25,18 @@ bool moon_drag_settled(void);
  * rotate (so the page-swipe handler should NOT also change pages). Reading it
  * does not clear it; it resets on the next moon_drag_begin. */
 bool moon_drag_was_rotate(void);
+/* Free-spin support (moon_spin_mode == 1). After a rotate-release in free-spin
+ * mode, moon_drag_end() leaves the disc at its spun orientation and arms a
+ * pending return. The render loop polls moon_drag_freespin_pending() to know a
+ * hold is active, then moon_drag_freespin_elapsed() (passing the configured
+ * moon_spin_return_s) to learn when the hold window has expired, and finally
+ * moon_drag_trigger_return() to start the eased snap-back home. A new
+ * moon_drag_begin() (re-touch) or moon_drag_reset() (page leave) clears the
+ * pending state. */
+bool moon_drag_freespin_pending(void);           /* true while a free-spin hold is armed */
+bool moon_drag_freespin_converged(void);         /* true once a held disc has eased onto its spun target */
+bool moon_drag_freespin_elapsed(uint8_t return_s);/* true once >= return_s elapsed since release */
+void moon_drag_trigger_return(void);              /* drive target -> 0 and disarm the hold */
 #ifdef __cplusplus
 }
 #endif

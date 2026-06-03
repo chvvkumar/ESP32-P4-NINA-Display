@@ -730,6 +730,11 @@ void goes_poll_task(void *arg)
                  * iterations: once any drag frame has run it stays true, so the grace
                  * window fires after every drag including re-grabs. */
                 bool ran_drag = false;
+                /* Set when the inner render loop breaks because a free-spin hold is
+                 * active (finger up, disc held at its spun orientation). Drives the
+                 * dedicated hold-wait block below instead of the normal resting commit.
+                 * Re-evaluated each outer iteration. */
+                bool freespin_hold = false;
                 if (!moon_drag_settled()) {
                     /* Lazy one-time allocation of the drag scratch + PPA output
                      * (PSRAM, 128-byte aligned for the cache line). The color buffer
@@ -789,6 +794,7 @@ void goes_poll_task(void *arg)
                  * in one-time alloc latency. Re-seeded each outer iteration so a
                  * re-touch's first settle frame gets a true dt. */
                 int64_t prev_frame_us = esp_timer_get_time();
+                freespin_hold = false;   /* re-evaluated for this outer iteration */
                 while (!moon_drag_settled()) {
                     if (!image_display_page_active || cfg->image_display_source != 1) break;
                     ran_drag = true;   /* a drag frame is about to be shown */
@@ -816,6 +822,21 @@ void goes_poll_task(void *arg)
                     prev_frame_us = frame_t0;
                     moon_drag_advance(alpha);
                     float yaw, pitch; moon_drag_get(&yaw, &pitch);
+
+                    /* Free-spin hold: after a rotate-release in free-spin mode the
+                     * disc holds its spun orientation, so moon_drag_settled() never
+                     * becomes true and this loop would busy-render an identical frame
+                     * for the whole hold window. Wait until the eased CURRENT has
+                     * actually converged onto the spun TARGET (moon_drag_advance, run
+                     * above each frame, is still easing it there) before breaking;
+                     * otherwise we would lock in a half-eased orientation as the crisp
+                     * held frame and the disc would visibly snap after lift. Once
+                     * converged, break to the hold-wait below (which sleeps instead of
+                     * re-rendering). */
+                    if (!active && moon_drag_freespin_converged()) {
+                        freespin_hold = true;
+                        break;
+                    }
 
                     /* 2. Lighting for this frame. Active frames use the explore/config
                      * lighting for free exploration; settle frames force TRUE_PHASE so
@@ -913,6 +934,65 @@ void goes_poll_task(void *arg)
                     }
                 }
 
+                /* FREE-SPIN HOLD. In free-spin mode (moon_spin_mode == 1) a
+                 * rotate-release leaves the disc at its spun orientation instead of
+                 * snapping home. Render that held orientation ONCE as a crisp native-720
+                 * frame (the inner loop only ever showed the 240px PPA-upscaled version),
+                 * then sleep-poll — NOT busy-render — until either a new finger-down
+                 * re-enters the drag loop (cancels the pending return) or the configured
+                 * moon_spin_return_s elapses, at which point we trigger the eased return
+                 * home and `continue` so the inner settle loop runs the snap-back +
+                 * resting commit exactly as the rubber-band path does. */
+                if (freespin_hold) {
+                    /* One crisp held-orientation frame at native 720. moon_sphere_render_ex
+                     * owns its own PSRAM buffer; update() takes ownership and crossfades. */
+                    float hy, hp; moon_drag_get(&hy, &hp);
+                    uint16_t *hold_img = moon_sphere_render_ex(SCREEN_SIZE, SCREEN_SIZE, &live,
+                                                               96, 48, cfg->moon_bg_style,
+                                                               hy, hp, MOON_LIGHT_TRUE_PHASE);
+                    if (hold_img && image_display_page_active && cfg->image_display_source == 1 &&
+                        !moon_drag_active()) {
+                        if (goes_data_lock(&goes_data, 1000)) {
+                            if (goes_data.image_buf) heap_caps_free(goes_data.image_buf);
+                            goes_data.image_buf = (uint8_t *)hold_img;
+                            goes_data.image_w = SCREEN_SIZE;
+                            goes_data.image_h = SCREEN_SIZE;
+                            goes_data.vflip = false;
+                            goes_data.connected = true;
+                            goes_data.last_poll_ms = esp_timer_get_time() / 1000;
+                            goes_data_unlock(&goes_data);
+                            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                                nina_image_display_force_redraw();
+                                nina_image_display_update(&goes_data);
+                                bsp_display_unlock();
+                            }
+                        } else {
+                            heap_caps_free(hold_img);
+                        }
+                    } else if (hold_img) {
+                        heap_caps_free(hold_img);
+                    }
+
+                    /* Sleep-poll the hold window. The configured seconds are read each
+                     * iteration so a live web-UI change takes effect within one poll step. */
+                    for (;;) {
+                        if (!image_display_page_active || cfg->image_display_source != 1) break;
+                        if (moon_drag_active()) break;   /* re-touch: outer continue re-enters the drag loop */
+                        /* Mode switched to rubber band mid-hold, or the hold was cleared:
+                         * resolve by snapping home (acceptable per spec). */
+                        if (!moon_drag_freespin_pending()) {
+                            moon_drag_trigger_return();
+                            break;
+                        }
+                        if (moon_drag_freespin_elapsed(cfg->moon_spin_return_s)) {
+                            moon_drag_trigger_return();   /* target -> 0: ease home next iteration */
+                            break;
+                        }
+                        vTaskDelay(pdMS_TO_TICKS(20));
+                    }
+                    continue;   /* re-enter outer loop: re-touch resumes drag, else snap-back eases home */
+                }
+
                 /* GRACE / idle hold before committing the resting render. Poll in
                  * small steps; if a new touch begins, restart the outer loop so the
                  * drag while-loop re-tracks the finger immediately (no rest render,
@@ -1000,14 +1080,13 @@ void goes_poll_task(void *arg)
                          * this resting frame). Push this OWNED native-720 resting frame
                          * now so it REPLACES that frame, rather than waiting on the UI
                          * cadence whose new-image gate could tie on an equal-millisecond
-                         * timestamp. force_redraw bypasses that gate; set_moon_crossfade_once
-                         * makes the swap a ~500ms dissolve (overrides force_redraw's normal
-                         * instant) so the resolution sharpen-up is gentle, not a pop. */
+                         * timestamp. force_redraw bypasses that gate; the swap is instant
+                         * (matching every other moon frame) so there is no midpoint
+                         * brightness dip as the crisp resting frame comes in. */
                         if (ran_drag && image_display_page_active &&
                             cfg->image_display_source == 1) {
                             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                                 nina_image_display_force_redraw();
-                                nina_image_display_set_moon_crossfade_once();
                                 nina_image_display_update(&goes_data);
                                 bsp_display_unlock();
                             }
