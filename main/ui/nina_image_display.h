@@ -22,11 +22,6 @@ void      nina_image_display_show_scaled(const uint16_t *buf, int w, int h);
  * valid until the next show_borrowed/show_scaled/update swaps it out. Call under
  * the display lock held by the caller. No-op if a crossfade is in flight. */
 void      nina_image_display_show_borrowed(const uint16_t *buf, int w, int h);
-/* Arm a one-shot crossfade so the NEXT nina_image_display_update() dissolves the
- * new frame in even for the Moon source (which otherwise swaps instantly). Used to
- * smoothly hand the drag-settle frame off to the crisp full-res resting frame.
- * Call under the display lock held by the caller. */
-void      nina_image_display_set_moon_crossfade_once(void);
 /* Force the next nina_image_display_update() to re-render the already-cached
  * frame (e.g. re-apply a crop change locally) without an HTTP re-download. Call
  * it immediately before nina_image_display_update(&goes_data), both under the

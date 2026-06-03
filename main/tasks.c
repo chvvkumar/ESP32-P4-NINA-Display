@@ -963,7 +963,6 @@ void goes_poll_task(void *arg)
                             goes_data_unlock(&goes_data);
                             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                                 nina_image_display_force_redraw();
-                                nina_image_display_set_moon_crossfade_once();
                                 nina_image_display_update(&goes_data);
                                 bsp_display_unlock();
                             }
@@ -1081,14 +1080,13 @@ void goes_poll_task(void *arg)
                          * this resting frame). Push this OWNED native-720 resting frame
                          * now so it REPLACES that frame, rather than waiting on the UI
                          * cadence whose new-image gate could tie on an equal-millisecond
-                         * timestamp. force_redraw bypasses that gate; set_moon_crossfade_once
-                         * makes the swap a ~500ms dissolve (overrides force_redraw's normal
-                         * instant) so the resolution sharpen-up is gentle, not a pop. */
+                         * timestamp. force_redraw bypasses that gate; the swap is instant
+                         * (matching every other moon frame) so there is no midpoint
+                         * brightness dip as the crisp resting frame comes in. */
                         if (ran_drag && image_display_page_active &&
                             cfg->image_display_source == 1) {
                             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                                 nina_image_display_force_redraw();
-                                nina_image_display_set_moon_crossfade_once();
                                 nina_image_display_update(&goes_data);
                                 bsp_display_unlock();
                             }
