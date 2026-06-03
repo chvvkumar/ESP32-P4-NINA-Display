@@ -135,6 +135,7 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
     cJSON_AddNumberToObject(obj, "moon_lat", (double)cfg->moon_lat);
     cJSON_AddNumberToObject(obj, "moon_lon", (double)cfg->moon_lon);
     cJSON_AddNumberToObject(obj, "solar_band", cfg->solar_band);
+    cJSON_AddNumberToObject(obj, "moon_drag_light_mode", cfg->moon_drag_light_mode);
     cJSON_AddNumberToObject(obj, "toast_aggregation_window_s", cfg->toast_aggregation_window_s);
     cJSON_AddNumberToObject(obj, "toast_notify_mask", cfg->toast_notify_mask);
     cJSON_AddBoolToObject(obj, "toast_instance_muted_1", cfg->toast_instance_muted[0]);
@@ -317,6 +318,7 @@ static const backup_field_t s_backup_fields[] = {
     {"moon_lat",                   "Moon Latitude",        "Image Display", false, false},
     {"moon_lon",                   "Moon Longitude",       "Image Display", false, false},
     {"solar_band",                 "Solar Band",           "Image Display", false, false},
+    {"moon_drag_light_mode",       "Moon Drag Lighting",   "Image Display", false, false},
 
     /* MQTT (non-sensitive) */
     {"mqtt_enabled",       "MQTT Enabled",       "MQTT", false, false},
@@ -876,6 +878,7 @@ static app_config_t *parse_config_from_json(cJSON *root)
     if (jmoonlon && cJSON_IsNumber(jmoonlon)) cfg->moon_lon = (float)jmoonlon->valuedouble;
 
     JSON_TO_INT(root, "solar_band", cfg->solar_band);
+    JSON_TO_INT(root, "moon_drag_light_mode", cfg->moon_drag_light_mode);
 
     cJSON *taw_item = cJSON_GetObjectItem(root, "toast_aggregation_window_s");
     if (cJSON_IsNumber(taw_item)) {

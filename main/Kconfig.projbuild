@@ -1,2 +1,1 @@
 # Performance monitoring is now a runtime toggle (debug_mode in web config).
-# This file is intentionally empty — kept for future Kconfig options.

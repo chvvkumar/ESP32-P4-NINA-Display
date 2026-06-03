@@ -292,11 +292,15 @@ uint8_t *ppa_scale_rgb565(const uint8_t *src, uint32_t src_w, uint32_t src_h,
     return dst;
 }
 
-uint8_t *ppa_scale_rgb565_into(const uint8_t *src, uint32_t src_w, uint32_t src_h,
-                                uint32_t src_stride,
-                                uint32_t dst_w, uint32_t dst_h,
-                                uint8_t *dst_buf, size_t dst_buf_size,
-                                size_t *out_size)
+/* Shared core for the two into-a-buffer scalers. `clear_dst` zeroes the
+ * destination before the transfer (needed when the output is not fully covered,
+ * e.g. a non-integer ratio leaves a remainder strip); `quiet` suppresses the
+ * per-call INFO log (the moon drag loop calls this every frame). */
+static uint8_t *ppa_scale_rgb565_into_core(const uint8_t *src, uint32_t src_w, uint32_t src_h,
+                                           uint32_t src_stride,
+                                           uint32_t dst_w, uint32_t dst_h,
+                                           uint8_t *dst_buf, size_t dst_buf_size,
+                                           size_t *out_size, bool clear_dst, bool quiet)
 {
     if (!src || !dst_buf || src_w == 0 || src_h == 0 || dst_w == 0 || dst_h == 0) return NULL;
     if (src_stride == 0) src_stride = src_w;
@@ -321,8 +325,10 @@ uint8_t *ppa_scale_rgb565_into(const uint8_t *src, uint32_t src_w, uint32_t src_
         ESP_LOGI(TAG, "PPA SRM client registered for image scaling");
     }
 
-    /* Zero the destination to clear any stale data */
-    memset(dst_buf, 0, needed);
+    /* Zero the destination to clear any stale data. Skippable when the caller
+     * guarantees the transfer overwrites every output pixel (exact integer
+     * ratio), avoiding a ~1MB/frame memset in the moon drag path. */
+    if (clear_dst) memset(dst_buf, 0, needed);
 
     float scale_x = (float)dst_w / (float)src_w;
     float scale_y = (float)dst_h / (float)src_h;
@@ -365,8 +371,37 @@ uint8_t *ppa_scale_rgb565_into(const uint8_t *src, uint32_t src_w, uint32_t src_
     }
 
     if (out_size) *out_size = needed;
-    ESP_LOGI(TAG, "PPA scaled %lux%lu -> %lux%lu into pre-allocated buffer",
-             (unsigned long)src_w, (unsigned long)src_h,
-             (unsigned long)dst_w, (unsigned long)dst_h);
+    if (!quiet) {
+        ESP_LOGI(TAG, "PPA scaled %lux%lu -> %lux%lu into pre-allocated buffer",
+                 (unsigned long)src_w, (unsigned long)src_h,
+                 (unsigned long)dst_w, (unsigned long)dst_h);
+    }
     return dst_buf;
+}
+
+uint8_t *ppa_scale_rgb565_into(const uint8_t *src, uint32_t src_w, uint32_t src_h,
+                                uint32_t src_stride,
+                                uint32_t dst_w, uint32_t dst_h,
+                                uint8_t *dst_buf, size_t dst_buf_size,
+                                size_t *out_size)
+{
+    /* Clears the destination (existing GOES/thumbnail callers rely on this for
+     * non-integer ratios). */
+    return ppa_scale_rgb565_into_core(src, src_w, src_h, src_stride,
+                                      dst_w, dst_h, dst_buf, dst_buf_size,
+                                      out_size, true, false);
+}
+
+uint8_t *ppa_scale_rgb565_into_noclear(const uint8_t *src, uint32_t src_w, uint32_t src_h,
+                                        uint32_t src_stride,
+                                        uint32_t dst_w, uint32_t dst_h,
+                                        uint8_t *dst_buf, size_t dst_buf_size,
+                                        size_t *out_size)
+{
+    /* No destination memset and no per-call INFO log: for the moon drag loop,
+     * which scales at an EXACT integer ratio (240->720 = 3.0x) so every output
+     * pixel is written, and calls this every frame. */
+    return ppa_scale_rgb565_into_core(src, src_w, src_h, src_stride,
+                                      dst_w, dst_h, dst_buf, dst_buf_size,
+                                      out_size, false, true);
 }

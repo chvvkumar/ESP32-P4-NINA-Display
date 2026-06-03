@@ -14,11 +14,13 @@
 #include "nina_image_display.h"
 #include "nina_wait_overlay.h"
 #include "nina_dashboard_internal.h"
+#include "moon_interaction.h"
 #include "app_config.h"
 #include "display_defs.h"
 #include "tasks.h"          /* goes_task_handle, moon_anim_request */
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"      /* esp_timer_get_time for displayed_poll_ms stamp */
 #include <stdatomic.h>      /* atomic_store */
 #include <string.h>
 #include <time.h>
@@ -49,9 +51,33 @@ static lv_obj_t *lbl_timestamp;
  * incoming/copy buffer during a crossfade. */
 static lv_image_dsc_t img_dsc_a;
 static lv_image_dsc_t img_dsc_b;
+/* True when a slot's descriptor points at a buffer this module must NOT free in
+ * the normal per-image free paths: the persistent moon-drag copy buffers
+ * (moon_copy_buf[], reused every frame and freed only in cleanup). The free paths
+ * (instant swap, crossfade_done_cb, update) skip freeing these so the buffers
+ * survive for reuse; cleanup frees them explicitly. (A regular GOES/Solar frame
+ * is module-owned and NOT flagged, so it is freed normally when retired.) */
+static bool dsc_a_borrowed = false;
+static bool dsc_b_borrowed = false;
 static bool front_is_a = true;
 static int64_t displayed_poll_ms;
 static bool crossfade_active = false;
+/* One-shot: when set, the NEXT nina_image_display_update() is allowed to crossfade
+ * even for the Moon source (which normally swaps instantly). Used for the smooth
+ * settle->resting dissolve at the end of a drag. Consumed (cleared) in update(). */
+static bool moon_crossfade_once = false;
+/* Owned, reused copy buffers for the moon-drag SOFTWARE-SCALE FALLBACK (used only
+ * when PPA hardware upscale is unavailable). The render task hands us a small 240px
+ * RGB565 buffer it overwrites each frame; we COPY it here so the LVGL descriptor
+ * never points at memory the next frame mutates (no tearing race), then software-
+ * scale the copy to fill the panel. Two buffers ping-pong in lockstep with the A/B
+ * image slots: the new frame is copied into the slot that is NOT currently on
+ * screen, so overwriting never touches the buffer LVGL is flushing. Lazy-allocated
+ * once on the first fallback call of a page visit (the PPA happy path never touches
+ * these, so they stay NULL there) and reused across frames thereafter (no per-frame
+ * alloc). Freed on cleanup. */
+static uint16_t *moon_copy_buf[2] = { NULL, NULL };
+static size_t    moon_copy_cap[2] = { 0, 0 };
 /* Set by nina_image_display_force_redraw() to make the NEXT update() re-render
  * the already-cached frame even though last_poll_ms hasn't advanced. Consumed
  * (cleared) on the next update() once the new-image gate has been bypassed.
@@ -90,6 +116,23 @@ static void init_image_dsc(lv_image_dsc_t *dsc)
     dsc->header.cf    = LV_COLOR_FORMAT_RGB565;
 }
 
+/* Release a slot's descriptor: free the backing buffer ONLY if this module owns
+ * it (not borrowed), then clear the descriptor and the borrowed flag. `is_a`
+ * selects which slot's borrowed flag to clear. Borrowed buffers belong to the
+ * moon-drag scratch in tasks.c and are freed there on page leave. */
+static void release_dsc(lv_image_dsc_t *dsc, bool is_a)
+{
+    bool *borrowed = is_a ? &dsc_a_borrowed : &dsc_b_borrowed;
+    if (dsc->data && !*borrowed) {
+        heap_caps_free((void *)dsc->data);
+    }
+    dsc->data       = NULL;
+    dsc->data_size  = 0;
+    dsc->header.w   = 0;
+    dsc->header.h   = 0;
+    *borrowed       = false;
+}
+
 static void anim_opa_cb(void *obj, int32_t v)
 {
     lv_obj_set_style_opa((lv_obj_t *)obj, (lv_opa_t)v, 0);
@@ -107,16 +150,47 @@ static void crossfade_done_cb(lv_anim_t *a)
     lv_image_dsc_t *old_dsc = front_is_a ? &img_dsc_a : &img_dsc_b;
 
     /* Detach the source BEFORE freeing the buffer so LVGL never dereferences a
-     * freed descriptor. */
+     * freed descriptor. release_dsc() skips the free for a borrowed buffer. */
     lv_obj_add_flag(img_front, LV_OBJ_FLAG_HIDDEN);
     lv_image_set_src(img_front, NULL);
-    if (old_dsc->data) {
-        heap_caps_free((void *)old_dsc->data);
-        old_dsc->data       = NULL;
-        old_dsc->data_size  = 0;
-        old_dsc->header.w   = 0;
-        old_dsc->header.h   = 0;
-    }
+    release_dsc(old_dsc, front_is_a);
+
+    front_is_a = !front_is_a;
+    img_front  = front_is_a ? lv_obj_get_child(page_container, 0)
+                            : lv_obj_get_child(page_container, 1);
+    img_back   = front_is_a ? lv_obj_get_child(page_container, 1)
+                            : lv_obj_get_child(page_container, 0);
+    crossfade_active = false;
+}
+
+/* Cancel an in-flight settle->resting crossfade and finalize it immediately, so a
+ * fresh moon-drag frame can take over instead of being dropped. Stops both fade
+ * anims (so they never run their exec/completed callbacks against stale state),
+ * then performs the SAME retirement crossfade_done_cb would do: the new frame
+ * (img_back, faded partway in) is forced fully opaque and becomes the front; the
+ * old frame (img_front, faded partway out) is hidden and its buffer retired via
+ * release_dsc() (which skips borrowed buffers and frees owned ones — no double-free,
+ * no leak). Leaves crossfade_active false with consistent front/back bookkeeping so
+ * the next show_borrowed starts clean. Caller holds the display lock. */
+static void cancel_moon_crossfade(void)
+{
+    /* Stop both anims BEFORE touching the descriptors so neither callback fires
+     * against state we are about to flip. lv_anim_delete with the exec cb removes
+     * the running fade and prevents crossfade_done_cb from running later. NOTE:
+     * lv_anim_delete invokes only the anim's deleted_cb (we set none), NOT its
+     * completed_cb, so crossfade_done_cb does NOT run here — the retirement below
+     * is the single cleanup, with no double-cleanup. */
+    lv_anim_delete(img_back,  anim_opa_cb);
+    lv_anim_delete(img_front, anim_opa_cb);
+
+    /* Promote the incoming frame to fully visible (it was mid fade-in). */
+    lv_obj_set_style_opa(img_back, LV_OPA_COVER, 0);
+
+    /* Retire the old front frame exactly as crossfade_done_cb does. */
+    lv_image_dsc_t *old_dsc = front_is_a ? &img_dsc_a : &img_dsc_b;
+    lv_obj_add_flag(img_front, LV_OBJ_FLAG_HIDDEN);
+    lv_image_set_src(img_front, NULL);
+    release_dsc(old_dsc, front_is_a);   /* skips borrowed, frees owned */
 
     front_is_a = !front_is_a;
     img_front  = front_is_a ? lv_obj_get_child(page_container, 0)
@@ -132,6 +206,54 @@ static void moon_tap_cb(lv_event_t *e)
     /* Only the Moon source animates; ignore taps on the GOES image. */
     if (app_config_get()->image_display_source != 1) return;
     atomic_store(&moon_anim_request, true);
+    if (goes_task_handle) xTaskNotifyGive(goes_task_handle);
+}
+
+/* Single-finger drag-to-rotate (Moon source only). PRESSED/PRESSING/RELEASED
+ * feed moon_interaction's accumulated yaw/pitch; the render (poll) task reads
+ * that state and rebuilds the sphere. Each handler early-returns on non-Moon
+ * sources so GOES/Solar pages are unaffected. The render task is nudged on
+ * move/release via goes_task_handle (same notify moon_tap_cb uses). */
+static bool moon_indev_point(lv_point_t *p)
+{
+    lv_indev_t *indev = lv_indev_get_act();
+    if (!indev) return false;
+    lv_indev_get_point(indev, p);
+    return true;
+}
+
+static void moon_drag_pressed_cb(lv_event_t *e)
+{
+    (void)e;
+    if (app_config_get()->image_display_source != 1) return;   /* Moon only */
+    lv_point_t p;
+    if (!moon_indev_point(&p)) return;
+    moon_drag_begin((float)p.x, (float)p.y);
+    /* Wake the render loop to START the realtime drag frames. It then self-spins
+     * (loops on moon_drag_settled()) for the whole gesture, so no per-move notify
+     * is needed; RELEASED notifies again to ensure the eased snap-back finishes. */
+    if (goes_task_handle) xTaskNotifyGive(goes_task_handle);
+}
+
+static void moon_drag_pressing_cb(lv_event_t *e)
+{
+    (void)e;
+    if (app_config_get()->image_display_source != 1) return;   /* Moon only */
+    lv_point_t p;
+    if (!moon_indev_point(&p)) return;
+    moon_drag_move((float)p.x, (float)p.y);
+    /* No xTaskNotifyGive here: the render loop self-spins for the whole drag
+     * (it loops on moon_drag_settled() without waiting on notifications), so a
+     * per-move notify is a dead no-op. PRESSED wakes the loop to start; RELEASED
+     * is what lets it run the eased snap-back to completion. moon_drag_move()
+     * just updates the shared target the spinning loop already reads each frame. */
+}
+
+static void moon_drag_released_cb(lv_event_t *e)
+{
+    (void)e;
+    if (app_config_get()->image_display_source != 1) return;   /* Moon only */
+    moon_drag_end();
     if (goes_task_handle) xTaskNotifyGive(goes_task_handle);
 }
 
@@ -154,6 +276,13 @@ lv_obj_t *nina_image_display_create(lv_obj_t *parent)
     lv_obj_add_flag(page_container, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(page_container, moon_tap_cb, LV_EVENT_SHORT_CLICKED, NULL);
 
+    /* Single-finger drag-to-rotate for the Moon source. These handlers no-op on
+     * GOES/Solar sources (checked inside each cb). PRESSED snapshots the start
+     * point, PRESSING accumulates yaw/pitch, RELEASED ends the drag. */
+    lv_obj_add_event_cb(page_container, moon_drag_pressed_cb,  LV_EVENT_PRESSED,  NULL);
+    lv_obj_add_event_cb(page_container, moon_drag_pressing_cb, LV_EVENT_PRESSING, NULL);
+    lv_obj_add_event_cb(page_container, moon_drag_released_cb, LV_EVENT_RELEASED, NULL);
+
     init_image_dsc(&img_dsc_a);
     init_image_dsc(&img_dsc_b);
 
@@ -175,6 +304,24 @@ lv_obj_t *nina_image_display_create(lv_obj_t *parent)
     lv_obj_set_pos(img_b, 0, 0);
     lv_image_set_pivot(img_b, 0, 0);
     lv_obj_add_flag(img_b, LV_OBJ_FLAG_HIDDEN);
+
+    /* Drag-to-rotate must not also scroll/pan. page_container is non-scrollable,
+     * but LVGL scroll-chains the drag up to the scrollable main_cont parent,
+     * which then pans the image. Clear SCROLLABLE and the SCROLL_CHAIN_HOR/VER
+     * flags on the container AND both image objects (the press target can resolve
+     * to an image) so the gesture is consumed here and never bubbles to main_cont.
+     * This only affects the Image Display / Moon page objects, not main_cont or
+     * other pages, and is independent of the LV_EVENT_GESTURE page-swipe on
+     * scr_dashboard. */
+    lv_obj_clear_flag(page_container, LV_OBJ_FLAG_SCROLLABLE |
+                                      LV_OBJ_FLAG_SCROLL_CHAIN_HOR |
+                                      LV_OBJ_FLAG_SCROLL_CHAIN_VER);
+    lv_obj_clear_flag(img_a, LV_OBJ_FLAG_SCROLLABLE |
+                             LV_OBJ_FLAG_SCROLL_CHAIN_HOR |
+                             LV_OBJ_FLAG_SCROLL_CHAIN_VER);
+    lv_obj_clear_flag(img_b, LV_OBJ_FLAG_SCROLLABLE |
+                             LV_OBJ_FLAG_SCROLL_CHAIN_HOR |
+                             LV_OBJ_FLAG_SCROLL_CHAIN_VER);
 
     img_front = img_a;
     img_back  = img_b;
@@ -335,9 +482,12 @@ void nina_image_display_update(goes_data_t *data)
     int64_t poll_ms = data->last_poll_ms;
     goes_data_unlock(data);
 
-    /* Point the BACK slot's descriptor at the new copy. */
+    /* Point the BACK slot's descriptor at the new copy. release_dsc() frees the
+     * previous buffer unless it was borrowed (moon-drag), and clears that flag —
+     * this owned copy is not borrowed. */
+    bool back_is_a = !front_is_a;
     lv_image_dsc_t *back_dsc = front_is_a ? &img_dsc_b : &img_dsc_a;
-    if (back_dsc->data) heap_caps_free((void *)back_dsc->data);
+    release_dsc(back_dsc, back_is_a);
     back_dsc->data          = copy;
     back_dsc->data_size     = buf_size;
     back_dsc->header.magic  = LV_IMAGE_HEADER_MAGIC;
@@ -362,8 +512,19 @@ void nina_image_display_update(goes_data_t *data)
      * a once-a-minute flicker. Swap instantly for the moon (and the first image).
      * A forced re-crop also swaps instantly: crossfading two crops of the same
      * frame is pointless and, since displayed_poll_ms == poll_ms here, would not
-     * key as first_image. */
-    bool instant = first_image || forced || (app_config_get()->image_display_source == 1);
+     * key as first_image.
+     *
+     * The settle->resting handoff is the one moon exception: moon_crossfade_once
+     * dissolves the crisp 600px resting frame in over the last 300px settle frame
+     * so the resolution/lighting change is not an abrupt pop. It is one-shot and
+     * deliberately OVERRIDES `forced` (the resting commit still sets force_redraw to
+     * bypass the same-millisecond new-image gate, but wants a crossfade not an
+     * instant swap). first_image still forces instant (nothing to fade from). */
+    bool moon_xf = (app_config_get()->image_display_source == 1) && moon_crossfade_once
+                   && !first_image;   /* nothing to fade from on the first image */
+    moon_crossfade_once = false;
+    bool instant = first_image ||
+                   (!moon_xf && (forced || (app_config_get()->image_display_source == 1)));
     /* poll_ms == displayed_poll_ms on a forced re-crop (same cached frame), so
      * this assignment leaves displayed_poll_ms unchanged and a later real
      * download (higher last_poll_ms) still passes the new-image gate. */
@@ -377,13 +538,7 @@ void nina_image_display_update(goes_data_t *data)
         lv_image_dsc_t *old_dsc = front_is_a ? &img_dsc_a : &img_dsc_b;
         lv_obj_add_flag(img_front, LV_OBJ_FLAG_HIDDEN);
         lv_image_set_src(img_front, NULL);
-        if (old_dsc->data) {
-            heap_caps_free((void *)old_dsc->data);
-            old_dsc->data      = NULL;
-            old_dsc->data_size = 0;
-            old_dsc->header.w  = 0;
-            old_dsc->header.h  = 0;
-        }
+        release_dsc(old_dsc, front_is_a);   /* skips free if borrowed */
         front_is_a = !front_is_a;
         img_front  = front_is_a ? lv_obj_get_child(page_container, 0)
                                 : lv_obj_get_child(page_container, 1);
@@ -440,6 +595,152 @@ void nina_image_display_update(goes_data_t *data)
     nina_wait_overlay_hide();
 }
 
+void nina_image_display_show_scaled(const uint16_t *buf, int w, int h)
+{
+    if (!buf || !page_container || w <= 0 || h <= 0) return;
+    /* A settle->resting crossfade may still be in flight when a SW-fallback drag
+     * frame arrives. Cancel and finalize it (matching show_borrowed) so this fresh
+     * frame takes over immediately instead of being dropped (which froze the disc
+     * until the fade finished, then jumped). cancel_moon_crossfade() retires buffers
+     * exactly as crossfade_done_cb would, so ownership stays consistent for the swap
+     * below. */
+    if (crossfade_active) cancel_moon_crossfade();
+
+    /* COPY the small render into our OWNED, reused buffer, then software-scale it
+     * to fill the panel. The render task overwrites its source buffer next frame,
+     * so pointing the LVGL descriptor straight at it would let the flush task read
+     * a half-written frame (tearing). Copying here de-couples the two: the per-frame
+     * memcpy (~115-180KB) is negligible against the ~50-70ms render. We copy into the
+     * buffer that pairs with the BACK slot (the one NOT on screen), so the overwrite
+     * never touches the buffer the front image is still flushing. */
+    bool back_is_a = !front_is_a;
+    int  ci = back_is_a ? 0 : 1;
+    size_t need = (size_t)w * h * 2;
+    if (moon_copy_cap[ci] < need) {
+        if (moon_copy_buf[ci]) heap_caps_free(moon_copy_buf[ci]);
+        moon_copy_buf[ci] = heap_caps_aligned_alloc(128, need, MALLOC_CAP_SPIRAM);
+        moon_copy_cap[ci] = moon_copy_buf[ci] ? need : 0;
+        if (!moon_copy_buf[ci]) {
+            ESP_LOGE(TAG, "moon scaled copy alloc failed (%u bytes)", (unsigned)need);
+            return;
+        }
+    }
+    memcpy(moon_copy_buf[ci], buf, need);
+
+    /* Point the BACK slot at the owned copy. release_dsc() frees any prior OWNED
+     * buffer; these copy buffers are module-owned and persistent, so we mark the
+     * slot "borrowed" (release_dsc then skips the free) and free them ourselves in
+     * cleanup. */
+    lv_image_dsc_t *back_dsc = front_is_a ? &img_dsc_b : &img_dsc_a;
+    release_dsc(back_dsc, back_is_a);          /* free prior OWNED buffer if any */
+    back_dsc->data          = (const uint8_t *)moon_copy_buf[ci];
+    back_dsc->data_size     = need;
+    back_dsc->header.magic  = LV_IMAGE_HEADER_MAGIC;
+    back_dsc->header.cf     = LV_COLOR_FORMAT_RGB565;
+    back_dsc->header.w      = w;
+    back_dsc->header.h      = h;
+    back_dsc->header.stride = w * 2;
+    if (back_is_a) dsc_a_borrowed = true; else dsc_b_borrowed = true;
+
+    /* Software-scale the small copy to fill the panel width (256 = 1.0x), the same
+     * proven-clean path nina_image_display_update() uses. */
+    uint16_t scale = (uint16_t)(((uint32_t)SCREEN_SIZE * 256 + w / 2) / w);
+    lv_image_set_src(img_back, back_dsc);
+    lv_image_set_scale(img_back, scale);
+    lv_obj_set_style_opa(img_back, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(img_back, LV_OBJ_FLAG_HIDDEN);
+
+    /* Instant swap (no crossfade): retire the old front and flip designations,
+     * mirroring the instant branch of nina_image_display_update(). release_dsc()
+     * frees the old front only if this module owned it. */
+    lv_image_dsc_t *old_dsc = front_is_a ? &img_dsc_a : &img_dsc_b;
+    lv_obj_add_flag(img_front, LV_OBJ_FLAG_HIDDEN);
+    lv_image_set_src(img_front, NULL);
+    release_dsc(old_dsc, front_is_a);
+
+    front_is_a = !front_is_a;
+    img_front  = front_is_a ? lv_obj_get_child(page_container, 0)
+                            : lv_obj_get_child(page_container, 1);
+    img_back   = front_is_a ? lv_obj_get_child(page_container, 1)
+                            : lv_obj_get_child(page_container, 0);
+
+    /* Mark a frame as displayed (mirrors update()), and update the moon caption
+     * so the phase/illumination text stays live during the drag. */
+    displayed_poll_ms = esp_timer_get_time() / 1000;
+    extern void moon_caption(char *name_out, size_t name_sz,
+                             char *pct_out, size_t pct_sz);
+    char name[24], pct[16];
+    moon_caption(name, sizeof(name), pct, sizeof(pct));
+    lv_label_set_text(lbl_region, name);
+    lv_label_set_text(lbl_timestamp, pct);
+
+    nina_wait_overlay_hide();
+}
+
+void nina_image_display_show_borrowed(const uint16_t *buf, int w, int h)
+{
+    if (!buf || !page_container || w <= 0 || h <= 0) return;
+    /* A settle->resting crossfade may still be in flight when a new drag frame
+     * arrives (rapid re-swipe right at the grace boundary). Rather than DROP this
+     * frame (which froze the disc until the fade finished, then jumped — the
+     * artifact), CANCEL the crossfade and finalize it so this fresh frame takes
+     * over immediately. cancel_moon_crossfade() retires buffers exactly as
+     * crossfade_done_cb would, so ownership stays consistent for the swap below. */
+    if (crossfade_active) cancel_moon_crossfade();
+
+    /* Point the BACK slot's descriptor straight at the caller's buffer — NO copy.
+     * The caller (moon drag loop) ping-pongs two 720 PPA-output buffers and hands
+     * us the one NOT currently on screen, so nothing the front image is still
+     * flushing is ever overwritten. Flag the slot "borrowed" so release_dsc()
+     * skips freeing it (the caller owns it and frees on page leave). Free any
+     * PRIOR owned buffer this slot held first. */
+    bool back_is_a = !front_is_a;
+    lv_image_dsc_t *back_dsc = front_is_a ? &img_dsc_b : &img_dsc_a;
+    release_dsc(back_dsc, back_is_a);          /* free prior OWNED buffer if any */
+    size_t need = (size_t)w * h * 2;
+    back_dsc->data          = (const uint8_t *)buf;
+    back_dsc->data_size     = need;
+    back_dsc->header.magic  = LV_IMAGE_HEADER_MAGIC;
+    back_dsc->header.cf     = LV_COLOR_FORMAT_RGB565;
+    back_dsc->header.w      = w;
+    back_dsc->header.h      = h;
+    back_dsc->header.stride = w * 2;
+    if (back_is_a) dsc_a_borrowed = true; else dsc_b_borrowed = true;
+
+    /* Full-panel buffer (720): display 1:1 (256 = 1.0x), no software scale. */
+    uint16_t scale = (w > 0) ? (uint16_t)(((uint32_t)SCREEN_SIZE * 256 + w / 2) / w) : 256;
+    lv_image_set_src(img_back, back_dsc);
+    lv_image_set_scale(img_back, scale);
+    lv_obj_set_style_opa(img_back, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(img_back, LV_OBJ_FLAG_HIDDEN);
+
+    /* Instant swap: retire the old front and flip designations, mirroring the
+     * instant branch of nina_image_display_update(). release_dsc() frees the old
+     * front only if this module owned it (skips a prior borrowed buffer). */
+    lv_image_dsc_t *old_dsc = front_is_a ? &img_dsc_a : &img_dsc_b;
+    lv_obj_add_flag(img_front, LV_OBJ_FLAG_HIDDEN);
+    lv_image_set_src(img_front, NULL);
+    release_dsc(old_dsc, front_is_a);
+
+    front_is_a = !front_is_a;
+    img_front  = front_is_a ? lv_obj_get_child(page_container, 0)
+                            : lv_obj_get_child(page_container, 1);
+    img_back   = front_is_a ? lv_obj_get_child(page_container, 1)
+                            : lv_obj_get_child(page_container, 0);
+
+    /* Mark a frame as displayed (mirrors update()) and keep the moon caption live
+     * during the drag. */
+    displayed_poll_ms = esp_timer_get_time() / 1000;
+    extern void moon_caption(char *name_out, size_t name_sz,
+                             char *pct_out, size_t pct_sz);
+    char name[24], pct[16];
+    moon_caption(name, sizeof(name), pct, sizeof(pct));
+    lv_label_set_text(lbl_region, name);
+    lv_label_set_text(lbl_timestamp, pct);
+
+    nina_wait_overlay_hide();
+}
+
 void nina_image_display_force_redraw(void)
 {
     /* Request that the next nina_image_display_update() re-render the cached
@@ -448,6 +749,15 @@ void nina_image_display_force_redraw(void)
      * update() under the goes lock; the caller wraps both this and the following
      * update() in bsp_display_lock, so no extra synchronization is needed. */
     force_redraw = true;
+}
+
+void nina_image_display_set_moon_crossfade_once(void)
+{
+    /* Arm a one-shot crossfade for the NEXT update() even on the Moon source. Used
+     * by the drag-settle path to dissolve the crisp resting frame in over the last
+     * settle frame instead of an instant pop. Plain bool, touched only under the
+     * display lock the caller holds (same as force_redraw). */
+    moon_crossfade_once = true;
 }
 
 bool nina_image_display_has_image(void)
@@ -473,12 +783,20 @@ void nina_image_display_cleanup(void)
     lv_obj_add_flag(child0, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(child1, LV_OBJ_FLAG_HIDDEN);
 
-    if (img_dsc_a.data) { heap_caps_free((void *)img_dsc_a.data); img_dsc_a.data = NULL; }
-    if (img_dsc_b.data) { heap_caps_free((void *)img_dsc_b.data); img_dsc_b.data = NULL; }
-    img_dsc_a.data_size = 0;
-    img_dsc_b.data_size = 0;
-    img_dsc_a.header.w = img_dsc_a.header.h = 0;
-    img_dsc_b.header.w = img_dsc_b.header.h = 0;
+    /* release_dsc() skips freeing a borrowed (moon-drag) buffer — that scratch is
+     * owned by tasks.c and freed there via moon_drag_buffers_free() on page leave,
+     * so this avoids a double-free of the borrowed 720x720 buffer. */
+    release_dsc(&img_dsc_a, true);
+    release_dsc(&img_dsc_b, false);
+
+    /* Free the owned moon-drag copy buffers (release_dsc skipped them via the
+     * borrowed flag). After this both descriptors are cleared, so no dangling
+     * reference remains. */
+    for (int i = 0; i < 2; i++) {
+        if (moon_copy_buf[i]) { heap_caps_free(moon_copy_buf[i]); moon_copy_buf[i] = NULL; }
+        moon_copy_cap[i] = 0;
+    }
+    moon_crossfade_once = false;
 
     displayed_poll_ms = 0;
     front_is_a = true;

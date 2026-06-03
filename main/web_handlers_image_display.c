@@ -32,6 +32,7 @@ esp_err_t image_display_config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "moon_lat", cfg->moon_lat);
     cJSON_AddNumberToObject(root, "moon_lon", cfg->moon_lon);
     cJSON_AddNumberToObject(root, "solar_band", cfg->solar_band);
+    cJSON_AddNumberToObject(root, "moon_drag_light_mode", cfg->moon_drag_light_mode);
 
     const char *json_str = cJSON_PrintUnformatted(root);
     if (json_str == NULL) {
@@ -107,6 +108,8 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     if (cJSON_IsNumber(mlon)) cfg->moon_lon = (float)mlon->valuedouble;
     cJSON *sb = cJSON_GetObjectItem(root, "solar_band");
     if (cJSON_IsNumber(sb)) { int v = sb->valueint; cfg->solar_band = (v >= 0 && v <= 17) ? (uint8_t)v : 0; }
+    cJSON *dlm = cJSON_GetObjectItem(root, "moon_drag_light_mode");
+    if (cJSON_IsNumber(dlm)) { int v = dlm->valueint; cfg->moon_drag_light_mode = (v >= 0 && v <= 1) ? (uint8_t)v : 0; }
 
     cJSON_Delete(root);
 
