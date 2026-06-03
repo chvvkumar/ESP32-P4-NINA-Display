@@ -18,8 +18,10 @@
  */
 
 #include "moon_interaction.h"
+#include "app_config.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/portmacro.h"
+#include "esp_timer.h"
 #include <math.h>
 
 /* Sensitivity: degrees of rotation per pixel of finger travel. */
@@ -59,12 +61,23 @@ static float s_start_y    = 0.0f;
 static bool  s_active     = false;
 /* True once the current/last gesture moved far enough to be a rotate. */
 static bool  s_was_rotate = false;
+/* Free-spin (moon_spin_mode == 1): once armed by moon_drag_end() after a
+ * rotate-release, the disc holds its spun orientation and s_return_at_us marks
+ * the deadline (release time + moon_spin_return_s) after which the render loop
+ * triggers the eased return home. Cleared on re-touch (begin), reset, or once
+ * the return is triggered. */
+static bool    s_return_pending = false;
+static int64_t s_release_us     = 0;
 
 void moon_drag_begin(float x_px, float y_px)
 {
     portENTER_CRITICAL(&s_lock);
     s_active     = true;
     s_was_rotate = false;
+    /* A new finger-down cancels any armed free-spin return (the gesture re-anchors
+     * on the held orientation below, so the disc stays put and the countdown is
+     * dropped until the next release). */
+    s_return_pending = false;
     s_start_x    = x_px;
     s_start_y    = y_px;
     /* Anchor the gesture on the CURRENT eased orientation so picking the disc
@@ -98,13 +111,34 @@ void moon_drag_move(float x_px, float y_px)
 
 void moon_drag_end(void)
 {
+    /* Read config OUTSIDE the spinlock (app_config_get() takes its own locks) and
+     * sample the release timestamp before entering the critical section, per the
+     * "no esp_timer/app_config inside the lock" discipline. */
+    uint8_t spin_mode = app_config_get()->moon_spin_mode;
+    int64_t now_us    = esp_timer_get_time();
+
     portENTER_CRITICAL(&s_lock);
     s_active = false;
-    /* Snap-back: drive the target home and let the render task ease CURRENT back
-     * to the live sky orientation. Do NOT touch s_cur_* — the eased advance does
-     * that, and zeroing it here would cause an abrupt jump. */
-    s_target_yaw   = 0.0f;
-    s_target_pitch = 0.0f;
+    /* Free-spin only applies to an actual rotate; a tap (or any non-rotate touch)
+     * always rubber-bands home so tap handling (thumbnail/info) is unaffected. */
+    if (spin_mode == 1 && s_was_rotate) {
+        /* Free spin: leave the TARGET where the finger last set it (do NOT zero it,
+         * and do NOT collapse it onto the lagging CURRENT — keeping the finger's
+         * target lets the render loop ease the last few degrees of follow-through to
+         * exactly where the finger pointed). Arm a pending return; the render loop
+         * waits for CURRENT to converge on TARGET, commits the crisp held frame,
+         * then triggers moon_drag_trigger_return() once moon_spin_return_s has
+         * elapsed since this release. */
+        s_return_pending = true;
+        s_release_us     = now_us;
+    } else {
+        /* Rubber band (default): drive the target home and let the render task ease
+         * CURRENT back to the live sky orientation. Do NOT touch s_cur_* — the
+         * eased advance does that, and zeroing it here would cause an abrupt jump. */
+        s_target_yaw   = 0.0f;
+        s_target_pitch = 0.0f;
+        s_return_pending = false;
+    }
     portEXIT_CRITICAL(&s_lock);
 }
 
@@ -122,6 +156,8 @@ void moon_drag_reset(void)
     s_cur_pitch    = 0.0f;
     s_target_yaw   = 0.0f;
     s_target_pitch = 0.0f;
+    /* Drop any armed free-spin hold so a fresh page visit starts at the live view. */
+    s_return_pending = false;
     portEXIT_CRITICAL(&s_lock);
 }
 
@@ -177,4 +213,52 @@ bool moon_drag_was_rotate(void)
     bool was = s_was_rotate;
     portEXIT_CRITICAL(&s_lock);
     return was;
+}
+
+bool moon_drag_freespin_pending(void)
+{
+    portENTER_CRITICAL(&s_lock);
+    /* A hold is only active while the finger is up; a re-touch clears it in
+     * moon_drag_begin(), but guard on !s_active too for clarity. */
+    bool pending = s_return_pending && !s_active;
+    portEXIT_CRITICAL(&s_lock);
+    return pending;
+}
+
+bool moon_drag_freespin_converged(void)
+{
+    portENTER_CRITICAL(&s_lock);
+    /* A held disc is "converged" once the eased CURRENT orientation has reached
+     * the spun TARGET (within the same dead-band the advance uses). The render
+     * loop waits for this before committing the crisp held frame so it never
+     * locks in a half-eased orientation on the first post-release frame. */
+    bool converged = s_return_pending && !s_active &&
+                     fabsf(s_cur_yaw   - s_target_yaw)   < MOON_DRAG_DEADBAND_DEG &&
+                     fabsf(s_cur_pitch - s_target_pitch) < MOON_DRAG_DEADBAND_DEG;
+    portEXIT_CRITICAL(&s_lock);
+    return converged;
+}
+
+bool moon_drag_freespin_elapsed(uint8_t return_s)
+{
+    /* Sample the timer OUTSIDE the spinlock, then capture release time/flag inside. */
+    int64_t now_us = esp_timer_get_time();
+    portENTER_CRITICAL(&s_lock);
+    bool    pending    = s_return_pending && !s_active;
+    int64_t release_us = s_release_us;
+    portEXIT_CRITICAL(&s_lock);
+    if (!pending) return false;
+    return (now_us - release_us) >= (int64_t)return_s * 1000000LL;
+}
+
+void moon_drag_trigger_return(void)
+{
+    portENTER_CRITICAL(&s_lock);
+    /* Begin the eased snap-back home and disarm the hold. The render loop's
+     * existing settle path takes over from here (target == 0 -> ease CURRENT
+     * home, then moon_drag_settled() true -> crisp resting render). */
+    s_target_yaw     = 0.0f;
+    s_target_pitch   = 0.0f;
+    s_return_pending = false;
+    portEXIT_CRITICAL(&s_lock);
 }
