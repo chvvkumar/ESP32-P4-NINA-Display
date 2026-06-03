@@ -1066,6 +1066,54 @@
             <input class="input" id="moonLon" type="number" step="0.0001" placeholder="e.g. -74.0060" onchange="applyImageDisplay();checkDirty()">
             <div class="field-hint" id="moonLocHint">Set your location for accurate moon orientation. Prefilled from Weather when available.</div>
           </div>
+          <div class="field">
+            <label class="field-label">Moon drag lighting</label>
+            <select class="input" id="moonDragLight" onchange="applyImageDisplay();checkDirty()">
+              <option value="0">True phase</option>
+              <option value="1">Explore (full-lit)</option>
+            </select>
+            <div class="field-hint">How the Moon is lit while you drag to rotate it. True phase keeps the real terminator; Explore lights the whole surface.</div>
+          </div>
+          <hr class="divider">
+          <div class="field-label" style="margin-bottom:12px">Moon orientation</div>
+          <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+            <span class="toggle-label">Keep Moon upright (north-up)</span>
+            <label class="toggle"><input type="checkbox" id="moon_north_up" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint" style="margin-bottom:12px">On: Moon's north pole stays up like apps/NASA. Off: tilts to match the real sky as the Moon moves.</div>
+          <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+            <span class="toggle-label">Flip horizontal (U)</span>
+            <label class="toggle"><input type="checkbox" id="moon_flip_u" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Flip vertical (V)</span>
+            <label class="toggle"><input type="checkbox" id="moon_flip_v" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Roll offset</label>
+            <div class="slider-group">
+              <input type="range" class="slider" id="moon_roll_offset" min="-180" max="180" step="1" value="0" oninput="updateMoonOrientReadout('moon_roll');applyImageDisplay();checkDirty()">
+              <span class="slider-val" id="moon_roll_val">0&deg;</span>
+            </div>
+          </div>
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Yaw offset</label>
+            <div class="slider-group">
+              <input type="range" class="slider" id="moon_yaw_offset" min="-180" max="180" step="1" value="0" oninput="updateMoonOrientReadout('moon_yaw');applyImageDisplay();checkDirty()">
+              <span class="slider-val" id="moon_yaw_val">0&deg;</span>
+            </div>
+          </div>
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Pitch offset</label>
+            <div class="slider-group">
+              <input type="range" class="slider" id="moon_pitch_offset" min="-90" max="90" step="1" value="0" oninput="updateMoonOrientReadout('moon_pitch');applyImageDisplay();checkDirty()">
+              <span class="slider-val" id="moon_pitch_val">0&deg;</span>
+            </div>
+            <div class="field-hint">Deviation from default. Defaults are 0&deg; for all axes.</div>
+          </div>
+          <div class="field" style="margin-top:16px">
+            <button onclick="resetMoonOrientation()" class="btn" id="moonOrientResetBtn" style="width:100%">Reset orientation</button>
+          </div>
           </div>
           <div id="solarGroup" style="display:none">
           <div class="field" style="margin-top:16px">
@@ -2309,9 +2357,16 @@
         goes_update_interval_s:parseInt($('goesInterval').value)||600,
         image_display_source:getImageSource(),
         moon_bg_style:parseInt($('moonBg').value,10)||0,
+        moon_drag_light_mode:parseInt($('moonDragLight').value,10)||0,
         solar_band:parseInt($('solarBand').value,10)||0,
         moon_lat:parseFloat($('moonLat').value)||0,
         moon_lon:parseFloat($('moonLon').value)||0,
+        moon_north_up:$('moon_north_up').checked?1:0,
+        moon_flip_u:$('moon_flip_u').checked?1:0,
+        moon_flip_v:$('moon_flip_v').checked?1:0,
+        moon_roll_offset:parseFloat($('moon_roll_offset').value)||0,
+        moon_yaw_offset:parseFloat($('moon_yaw_offset').value)||0,
+        moon_pitch_offset:parseFloat($('moon_pitch_offset').value)||0,
         weather_provider:parseInt($('weather_provider').value)||0,
         weather_api_key:$('weather_api_key').value.trim(),
         weather_lat:parseFloat($('weather_lat').value)||0,
@@ -2477,12 +2532,22 @@
       if($('imageSource1')) $('imageSource1').checked=(imgSrc===1);
       if($('imageSource2')) $('imageSource2').checked=(imgSrc===2);
       if($('moonBg')) $('moonBg').value=String(data.moon_bg_style||0);
+      if($('moonDragLight')) $('moonDragLight').value=String(data.moon_drag_light_mode||0);
       if($('solarBand')) $('solarBand').value=String(data.solar_band||0);
       var mlat=data.moon_lat, mlon=data.moon_lon;
       // Prefill from weather location when moon coords are unset
       if((!mlat && !mlon) && (data.weather_lat || data.weather_lon)){ mlat=data.weather_lat; mlon=data.weather_lon; }
       if($('moonLat')) $('moonLat').value=mlat||'';
       if($('moonLon')) $('moonLon').value=mlon||'';
+      if($('moon_north_up')) $('moon_north_up').checked = (data.moon_north_up==null) ? true : !!data.moon_north_up;
+      if($('moon_flip_u')) $('moon_flip_u').checked=!!data.moon_flip_u;
+      if($('moon_flip_v')) $('moon_flip_v').checked=!!data.moon_flip_v;
+      if($('moon_roll_offset')) $('moon_roll_offset').value=data.moon_roll_offset!=null?data.moon_roll_offset:0;
+      if($('moon_yaw_offset')) $('moon_yaw_offset').value=data.moon_yaw_offset!=null?data.moon_yaw_offset:0;
+      if($('moon_pitch_offset')) $('moon_pitch_offset').value=data.moon_pitch_offset!=null?data.moon_pitch_offset:0;
+      updateMoonOrientReadout('moon_roll');
+      updateMoonOrientReadout('moon_yaw');
+      updateMoonOrientReadout('moon_pitch');
       updateImageDisplayEnabledUI();
       updateImageSourceUI();
 
@@ -3620,10 +3685,34 @@
         goes_update_interval_s: parseInt($('goesInterval').value,10)||600,
         image_display_source: getImageSource(),
         moon_bg_style: parseInt($('moonBg').value,10)||0,
+        moon_drag_light_mode: parseInt($('moonDragLight').value,10)||0,
         moon_lat: parseFloat($('moonLat').value)||0,
         moon_lon: parseFloat($('moonLon').value)||0,
+        moon_north_up: $('moon_north_up').checked?1:0,
+        moon_flip_u: $('moon_flip_u').checked?1:0,
+        moon_flip_v: $('moon_flip_v').checked?1:0,
+        moon_roll_offset: parseFloat($('moon_roll_offset').value)||0,
+        moon_yaw_offset: parseFloat($('moon_yaw_offset').value)||0,
+        moon_pitch_offset: parseFloat($('moon_pitch_offset').value)||0,
         solar_band: parseInt($('solarBand').value,10)||0
       });
+    }
+
+    function updateMoonOrientReadout(which){
+      var el=$(which+'_offset'); var out=$(which+'_val');
+      if(el&&out) out.innerHTML=(parseFloat(el.value)||0)+'&deg;';
+    }
+
+    function resetMoonOrientation(){
+      if($('moon_flip_u')) $('moon_flip_u').checked=false;
+      if($('moon_flip_v')) $('moon_flip_v').checked=false;
+      if($('moon_roll_offset')) $('moon_roll_offset').value=0;
+      if($('moon_yaw_offset')) $('moon_yaw_offset').value=0;
+      if($('moon_pitch_offset')) $('moon_pitch_offset').value=0;
+      updateMoonOrientReadout('moon_roll');
+      updateMoonOrientReadout('moon_yaw');
+      updateMoonOrientReadout('moon_pitch');
+      applyImageDisplay();checkDirty();
     }
 
     function fetchGoesPreview(){

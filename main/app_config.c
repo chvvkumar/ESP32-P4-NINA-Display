@@ -784,6 +784,15 @@ static void set_defaults(app_config_t *cfg) {
     cfg->moon_lon = 0.0f;
     cfg->solar_band = 0;             // SDO/AIA band index 0..9
     cfg->image_display_crop = false; // crop/zoom image to fill & hide baked-in labels
+    cfg->moon_drag_light_mode = 0;   // 0=true phase, 1=explore (moon drag-to-rotate lighting)
+
+    // Moon sphere orientation tuning defaults
+    cfg->moon_flip_u = 0;            // mirror texture longitude E<->W
+    cfg->moon_flip_v = 1;            // flip texture latitude N<->S (default 1: corrects N-S for the NASA equirect map)
+    cfg->moon_roll_offset = 0.0f;    // degrees, clamp [-180,180]
+    cfg->moon_yaw_offset = 0.0f;     // degrees, clamp [-180,180]
+    cfg->moon_pitch_offset = 0.0f;   // degrees, clamp [-90,90]
+    cfg->moon_north_up = 1;          // 0=true sky tilt, 1=always upright/north-up
 
     // Auth is on by default — protects device from open-LAN access
     cfg->auth_enabled = true;
@@ -1752,6 +1761,62 @@ static void migrate_from_v23(const app_config_v23_t *old, app_config_t *cfg) {
 
 /* --- v32 → v33 migration (added Image Display fields; IDLE_TARGET_SYSINFO 3→4) --- */
 /* --- v33 → v34 migration (added Moon phase fields) --- */
+static void migrate_from_v37(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v37_t) ? raw_size : sizeof(app_config_v37_t);
+    memcpy(cfg, raw, copy);
+
+    /* Moon orientation tuning fields: new in v38 — defaults already set by set_defaults() */
+    cfg->moon_flip_u = 0;
+    cfg->moon_flip_v = 1;
+    cfg->moon_roll_offset = 0.0f;
+    cfg->moon_yaw_offset = 0.0f;
+    cfg->moon_pitch_offset = 0.0f;
+
+    /* moon_north_up field: new in v39 — default already set by set_defaults() */
+    cfg->moon_north_up = 1;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v37 to v%d", APP_CONFIG_VERSION);
+}
+
+static void migrate_from_v38(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v38_t) ? raw_size : sizeof(app_config_v38_t);
+    memcpy(cfg, raw, copy);
+
+    /* moon_north_up field: new in v39 — default already set by set_defaults() */
+    cfg->moon_north_up = 1;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v38 to v%d", APP_CONFIG_VERSION);
+}
+
+static void migrate_from_v36(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v36_t) ? raw_size : sizeof(app_config_v36_t);
+    memcpy(cfg, raw, copy);
+
+    /* moon_drag_light_mode field: new in v37 — defaults already set by set_defaults() */
+    cfg->moon_drag_light_mode = 0;
+
+    /* Moon orientation tuning fields: new in v38 — defaults already set by set_defaults() */
+    cfg->moon_flip_u = 0;
+    cfg->moon_flip_v = 1;
+    cfg->moon_roll_offset = 0.0f;
+    cfg->moon_yaw_offset = 0.0f;
+    cfg->moon_pitch_offset = 0.0f;
+
+    /* moon_north_up field: new in v39 — default already set by set_defaults() */
+    cfg->moon_north_up = 1;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v36 to v%d", APP_CONFIG_VERSION);
+}
+
 static void migrate_from_v35(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
@@ -2340,6 +2405,37 @@ static bool validate_config(app_config_t *cfg) {
         cfg->solar_band = 0;
         fixed = true;
     }
+    if (cfg->moon_drag_light_mode > 1) {
+        cfg->moon_drag_light_mode = 0;
+        fixed = true;
+    }
+    if (cfg->moon_flip_u > 1) {
+        cfg->moon_flip_u = (cfg->moon_flip_u != 0) ? 1 : 0;
+        fixed = true;
+    }
+    if (cfg->moon_flip_v > 1) {
+        cfg->moon_flip_v = (cfg->moon_flip_v != 0) ? 1 : 0;
+        fixed = true;
+    }
+    if (cfg->moon_roll_offset < -180.0f || cfg->moon_roll_offset > 180.0f) {
+        if (cfg->moon_roll_offset < -180.0f) cfg->moon_roll_offset = -180.0f;
+        else cfg->moon_roll_offset = 180.0f;
+        fixed = true;
+    }
+    if (cfg->moon_yaw_offset < -180.0f || cfg->moon_yaw_offset > 180.0f) {
+        if (cfg->moon_yaw_offset < -180.0f) cfg->moon_yaw_offset = -180.0f;
+        else cfg->moon_yaw_offset = 180.0f;
+        fixed = true;
+    }
+    if (cfg->moon_pitch_offset < -90.0f || cfg->moon_pitch_offset > 90.0f) {
+        if (cfg->moon_pitch_offset < -90.0f) cfg->moon_pitch_offset = -90.0f;
+        else cfg->moon_pitch_offset = 90.0f;
+        fixed = true;
+    }
+    if (cfg->moon_north_up > 1) {
+        cfg->moon_north_up = (cfg->moon_north_up != 0) ? 1 : 0;
+        fixed = true;
+    }
     if (cfg->allsky_thresholds[0] == '\0' ||
         strstr(cfg->allsky_thresholds, "thermal_main") == NULL) {
         /* Empty or contains old-format keys (cpu_temp, sqm, etc.) — reset to new positional format */
@@ -2407,6 +2503,24 @@ void app_config_init(void) {
             nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(handle);
         }
+    } else if (version_check == 38) {
+        /* v38 → v39: added moon_north_up */
+        migrate_from_v38(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    } else if (version_check == 37) {
+        /* v37 → v38: added moon orientation tuning fields */
+        migrate_from_v37(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    } else if (version_check == 36) {
+        /* v36 → v38: added moon_drag_light_mode + moon orientation tuning */
+        migrate_from_v36(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 35) {
         /* v35 → v36: added image_display_crop */
         migrate_from_v35(raw, stored_size, &s_config);

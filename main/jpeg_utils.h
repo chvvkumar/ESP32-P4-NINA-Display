@@ -68,3 +68,20 @@ uint8_t *ppa_scale_rgb565_into(const uint8_t *src, uint32_t src_w, uint32_t src_
                                 uint32_t dst_w, uint32_t dst_h,
                                 uint8_t *dst_buf, size_t dst_buf_size,
                                 size_t *out_size);
+
+/**
+ * @brief Like ppa_scale_rgb565_into() but does NOT clear the destination first
+ * and emits no per-call INFO log.
+ * Use only when the scale is an EXACT integer ratio so every output pixel is
+ * overwritten by the transfer (otherwise stale data shows in the uncovered
+ * remainder). Intended for the moon drag loop (240->720 = 3.0x, per frame), to
+ * avoid a ~1MB/frame memset. Same buffer/alignment requirements as
+ * ppa_scale_rgb565_into().
+ *
+ * @return dst_buf on success, NULL on failure
+ */
+uint8_t *ppa_scale_rgb565_into_noclear(const uint8_t *src, uint32_t src_w, uint32_t src_h,
+                                        uint32_t src_stride,
+                                        uint32_t dst_w, uint32_t dst_h,
+                                        uint8_t *dst_buf, size_t dst_buf_size,
+                                        size_t *out_size);

@@ -153,6 +153,12 @@ coverage.xml
 *.cover
 .hypothesis/
 .pytest_cache/
+# tgx software 3D renderer (moon sphere). Vendor only the component sources;
+# the upstream validation/ examples/ docs/ trees are ~300M and unused by the build.
+components/tgx/*
+!components/tgx/src/
+!components/tgx/CMakeLists.txt
+!components/tgx/LICENSE
 
 # Environment variables
 .env

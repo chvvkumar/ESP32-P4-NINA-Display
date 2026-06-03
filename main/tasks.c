@@ -12,6 +12,8 @@
 #include "allsky_client.h"
 #include "goes_client.h"
 #include "moon_render.h"
+#include "moon_sphere.h"   /* tgx sphere renderer for the Moon page */
+#include "moon_interaction.h"  /* drag-to-rotate touch state */
 #include "moon_ephemeris.h"
 #include <math.h>           /* acos() for seamless anim start cycle */
 #include "spotify_auth.h"
@@ -43,8 +45,10 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "esp_heap_caps.h"
+#include "esp_cache.h"        /* esp_cache_msync — flush PPA-source guard rows once */
 #include "esp_system.h"
 #include <time.h>
+#include <math.h>          /* expf — framerate-independent settle ease */
 #include "perf_monitor.h"
 #include "power_mgmt.h"
 #include "demo_data.h"
@@ -572,6 +576,83 @@ _Atomic bool moon_anim_request = false;
  * tasks.h. */
 _Atomic bool image_display_manual_fetch = false;
 
+/* ── Moon drag-to-rotate scratch + PPA output buffers ────────────────────────
+ * Persistent PSRAM buffers reused across every drag frame so the realtime loop
+ * does ZERO per-frame heap alloc. Lazily allocated on the first drag of a moon-
+ * page visit and freed on page leave via moon_drag_buffers_free(). Owned solely
+ * by goes_poll_task.
+ *
+ * Touch-frame pipeline (per frame):
+ *   1. moon_sphere_render_into() the sphere at MOON_DRAG_SZ_TOUCH (240) into the
+ *      small color/z scratch (s_drag_color / s_drag_zbuf), CPU-written;
+ *   2. ppa_scale_rgb565_into_noclear() hardware-upscales 240->720 (an EXACT 3.0x
+ *      ratio: 720/240=3, representable on PPA's 1/16 scale grid so the whole 720
+ *      output is filled with no edge-streak remainder, and no per-frame memset)
+ *      into the ping-pong output buffer s_ppa_out[ping];
+ *   3. nina_image_display_show_borrowed(s_ppa_out[ping], 720, 720) points the
+ *      LVGL descriptor straight at it (no copy) at scale 1.0; then flip ping.
+ * The PPA driver handles cache coherency for the BLOCKING transfer in BOTH
+ * directions, so the output is coherent for LVGL read when the call returns — no
+ * manual esp_cache_msync. The output is DOUBLE-BUFFERED (s_ppa_out[0]/[1]); PPA
+ * writes the buffer NOT currently on screen so it never tears with the LVGL flush.
+ *
+ * 240->720 is the SINGLE touch render size for the whole interaction (active drag
+ * AND the post-release settle ease). 240 was chosen because 720/240 = 3.0x is an
+ * exact integer ratio on PPA (11520 % 240 == 0); 300 (the prior settle size) maps
+ * to 2.40x which PPA truncates to 2.375x, leaving a ~8px unfilled streak.
+ *
+ * GUARD ROWS (required): SRM bilinear UPSCALE over-reads the source bottom edge.
+ * At 3.0x the last output row (719) maps to source y≈239.67, so the sampler reads
+ * source row 240 — one past the 240 valid rows. The driver does NOT clamp or
+ * bounds-check the INPUT sampling, so without padding that read lands in adjacent
+ * heap and renders as a colored garbage band along the bottom of the disc. This is
+ * INDEPENDENT of the exact-ratio fix: 3.0x kills the fill STREAK (Gotcha 4), the
+ * guard rows kill this OVER-READ. Allocating MOON_DRAG_GUARD_ROWS extra zeroed rows
+ * below the valid region makes that boundary sample read our own black memory. The
+ * rows are zeroed + flushed to PSRAM (C2M) ONCE at alloc; the per-frame render
+ * writes only rows 0..239, so they stay zeroed (no per-frame memset/msync). PPA
+ * in.pic_h/block_h stay 240 (the buffer is just taller). The right edge needs no
+ * guard (col 240 wraps to col 0 of the next row, in-bounds; the last row's wrap
+ * lands in the guard). This matches existing project practice — the GOES/decode PPA
+ * paths in this file already memset their PPA source ("Zero buffer so PPA edge
+ * interpolation reads black, not heap garbage"). See reference_lvgl_ppa_scale_limitation.md
+ * (Gotcha 3/4): a clean PPA upscale needs BOTH the exact n/16 ratio AND guard rows.
+ *
+ *   - s_drag_color: (MOON_DRAG_SZ_TOUCH + GUARD_ROWS) * MOON_DRAG_SZ_TOUCH * 2  (CPU-written + guard)
+ *   - s_drag_zbuf:  MOON_DRAG_SZ_TOUCH^2 * 2  depth buffer (not DMA-read by PPA; no guard needed)
+ *   - s_ppa_out[2]: 720*720*2 each            PPA upscale output, ping-pong
+ * If PPA scale fails or a buffer didn't allocate, the loop falls back to the
+ * software-scale path (moon_sphere_render + nina_image_display_show_scaled) so it
+ * degrades gracefully instead of crashing. */
+#define MOON_DRAG_SZ_TOUCH  240          /* render size for the whole touch interaction (240->720 = exact 3.0x) */
+#define MOON_DRAG_GUARD_ROWS 8           /* zeroed rows below s_drag_color: catch PPA upscale bottom over-read */
+#define MOON_DRAG_SECTORS   96           /* tessellation: longitude bands (kills quad faceting) */
+#define MOON_DRAG_STACKS    48           /* tessellation: latitude bands */
+/* Active-drag easing is per-frame exponential (responsive to the finger). The
+ * release settle uses a TIME-based ease (see below) so it reads smooth regardless
+ * of the achieved framerate (~14-19fps) instead of finishing in 2-3 jumpy frames. */
+#define MOON_DRAG_EASE_A    0.35f        /* per-frame easing alpha while dragging */
+#define MOON_DRAG_SETTLE_MS 450          /* target duration of the release ease-back */
+#define MOON_DRAG_FRAME_US  22000        /* target frame period (cap; render usually dominates) */
+#define MOON_DRAG_REST_GRACE_MS 250      /* idle hold after settle before committing the crisp resting render; a new touch within this window re-enters the drag instead (avoids the eager reset / blocking-render stall on rapid re-swipe) */
+static uint16_t *s_drag_color  = NULL;
+static uint16_t *s_drag_zbuf   = NULL;
+static uint16_t *s_ppa_out[2]  = { NULL, NULL };   /* 720x720 PPA-output ping-pong */
+static int       s_ppa_ping    = 0;                /* index PPA writes next (flips each frame) */
+
+/* Free the moon-drag scratch and PPA output buffers and NULL them. Called on
+ * Image Display page leave. Safe to call when the buffers were never allocated
+ * (NULL frees are no-ops). The page's own software-scale copy buffers are freed
+ * separately in nina_image_display_cleanup(). */
+static void moon_drag_buffers_free(void)
+{
+    if (s_drag_color) { heap_caps_free(s_drag_color); s_drag_color = NULL; }
+    if (s_drag_zbuf)  { heap_caps_free(s_drag_zbuf);  s_drag_zbuf  = NULL; }
+    if (s_ppa_out[0]) { heap_caps_free(s_ppa_out[0]); s_ppa_out[0] = NULL; }
+    if (s_ppa_out[1]) { heap_caps_free(s_ppa_out[1]); s_ppa_out[1] = NULL; }
+    s_ppa_ping = 0;
+}
+
 /* Provide the caption text for the Image Display page when the Moon source is
  * active. Declared (extern) in nina_image_display.c. */
 void moon_caption(char *name_out, size_t name_sz, char *pct_out, size_t pct_sz)
@@ -605,11 +686,258 @@ void goes_poll_task(void *arg)
              * render until the clock is valid and retry quickly so the correct
              * moon appears as soon as time syncs; then settle to ~60s. */
             bool time_valid = (now > (time_t)1577836800);  /* >= 2020-01-01 UTC */
-            if (time_valid && moon_render_init()) {
+            /* tgx path prepares its own texture lazily in moon_sphere_render();
+             * gate only on a valid clock (the flat PNG decode is not used). */
+            bool moon_ready = moon_sphere_init();
+            if (time_valid && moon_ready) {
                 double lat = cfg->moon_lat, lon = cfg->moon_lon;
                 if (lat == 0.0 && lon == 0.0) { lat = cfg->weather_lat; lon = cfg->weather_lon; }
                 moon_state_t live;
                 moon_compute(now, lat, lon, &live);
+
+                /* Interactive drag-to-rotate: while a finger is down OR the disc is
+                 * still easing back to the live sky orientation after release, render
+                 * small frames in realtime and PPA hardware-upscale them to fill the
+                 * panel. The touch handlers in nina_image_display.c notify this task on
+                 * press/release, so the outer ulTaskNotifyTake wakes us; this inner
+                 * loop owns the realtime frames and SELF-SPINS (it does not wait on
+                 * notifications) until moon_drag_settled() — i.e. the finger is up AND
+                 * the eased orientation is home — then falls through to the crisp
+                 * full-res resting render (crossfaded in for a smooth handoff).
+                 *
+                 * Architecture (per-frame, zero heap alloc):
+                 *   1. ease current orientation toward the finger target (per-frame
+                 *      exp while dragging; TIME-based ease-out during the settle so it
+                 *      reads smooth at any framerate instead of jumping home);
+                 *   2. render the sphere at the single touch size (240px, 96x48
+                 *      tessellation) into PERSISTENT scratch (no alloc);
+                 *   3. PPA hardware-upscale 240->720 (exact 3.0x) into a ping-pong
+                 *      output buffer, then show_borrowed it at scale 1.0 (no copy),
+                 *      taking the display lock only around the LVGL swap.
+                 * The render + PPA run OUTSIDE the display lock so the UI task is
+                 * blocked for the minimum time. To dissolve the lighting/phase pop on
+                 * release, SETTLE frames render in TRUE_PHASE lighting (the resting
+                 * mode) so as the orientation eases home they converge on the resting
+                 * appearance; the final crisp native-720 frame is then crossfaded in
+                 * (set below). If PPA or the buffers are unavailable, the loop falls
+                 * back to a software-scaled render so it degrades instead of crashing. */
+                /* Whether the drag loop body actually ran. Sampling moon_drag_settled()
+                 * up front is unreliable: a press+release can complete before this task
+                 * wakes, leaving settled() already true so the loop never executes. We
+                 * set this inside the loop instead, so the post-settle resting commit
+                 * fires whenever a drag frame was actually put on screen. Declared
+                 * OUTSIDE the for(;;) below so it intentionally persists across outer
+                 * iterations: once any drag frame has run it stays true, so the grace
+                 * window fires after every drag including re-grabs. */
+                bool ran_drag = false;
+                if (!moon_drag_settled()) {
+                    /* Lazy one-time allocation of the drag scratch + PPA output
+                     * (PSRAM, 128-byte aligned for the cache line). The color buffer
+                     * is 240+GUARD_ROWS tall (the guard rows absorb the SRM bottom-edge
+                     * upscale over-read; see the buffer-block comment above); the zbuf
+                     * is plain 240px (not DMA-read by PPA). The two 720x720 PPA-output
+                     * buffers ping-pong. All freed on page leave via
+                     * moon_drag_buffers_free(). This runs ONCE on entry (before the
+                     * for(;;) below); the inner "if any buffer NULL" guard makes it a
+                     * no-op when the buffers already exist, so a re-grab that loops back
+                     * into the drag while-loop never re-allocates. */
+                    if (!s_drag_color || !s_drag_zbuf || !s_ppa_out[0] || !s_ppa_out[1]) {
+                        size_t row_bytes  = (size_t)MOON_DRAG_SZ_TOUCH * 2;
+                        size_t color_sz   = ((size_t)MOON_DRAG_SZ_TOUCH + MOON_DRAG_GUARD_ROWS) * row_bytes;
+                        color_sz = (color_sz + 127) & ~(size_t)127;   /* 248*480=119040, already 128-aligned */
+                        size_t zbuf_sz    = (size_t)MOON_DRAG_SZ_TOUCH * row_bytes;
+                        zbuf_sz  = (zbuf_sz + 127) & ~(size_t)127;
+                        size_t out_sz     = (size_t)SCREEN_SIZE * SCREEN_SIZE * 2;   /* 720*720*2 = 128-aligned */
+                        moon_drag_buffers_free();   /* drop any partial alloc first */
+                        s_drag_color = (uint16_t *)heap_caps_aligned_alloc(128, color_sz, MALLOC_CAP_SPIRAM);
+                        s_drag_zbuf  = (uint16_t *)heap_caps_aligned_alloc(128, zbuf_sz, MALLOC_CAP_SPIRAM);
+                        s_ppa_out[0] = (uint16_t *)heap_caps_aligned_alloc(128, out_sz, MALLOC_CAP_SPIRAM);
+                        s_ppa_out[1] = (uint16_t *)heap_caps_aligned_alloc(128, out_sz, MALLOC_CAP_SPIRAM);
+                        if (!s_drag_color || !s_drag_zbuf || !s_ppa_out[0] || !s_ppa_out[1]) {
+                            ESP_LOGE(TAG, "moon drag buffer alloc failed; falling back to software scale");
+                            moon_drag_buffers_free();   /* drop the partial set; loop uses the SW fallback */
+                        } else {
+                            /* Zero the guard rows below the 240 valid rows and flush
+                             * them to PSRAM ONCE (C2M) so the SRM bottom-edge over-read
+                             * samples our own black memory, not adjacent heap. The
+                             * per-frame render writes only rows 0..239, so the guard
+                             * rows stay zeroed and this never repeats. Offset/length
+                             * are both 128-aligned (115200 / 3840). */
+                            uint8_t *guard = (uint8_t *)s_drag_color +
+                                             (size_t)MOON_DRAG_SZ_TOUCH * row_bytes;
+                            size_t   guard_bytes = (size_t)MOON_DRAG_GUARD_ROWS * row_bytes;
+                            memset(guard, 0, guard_bytes);
+                            esp_cache_msync(guard, guard_bytes, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+                        }
+                    }
+                }
+
+                /* Outer loop wraps the drag/settle while-loop and a post-settle GRACE
+                 * window. The grace hold (MOON_DRAG_REST_GRACE_MS) makes the reset less
+                 * eager: after the disc eases home we wait briefly, and if the user
+                 * starts a NEW touch within that window we `continue` to re-enter the
+                 * drag while-loop and track the finger immediately, SKIPPING the
+                 * expensive crisp resting render + crossfade entirely. Only when the
+                 * full grace window elapses with no re-touch do we break out to commit
+                 * the resting frame (genuine rest -> smooth eased settle + crossfade is
+                 * preserved). A new touch makes moon_drag_settled() false again, so
+                 * re-entering the while-loop resumes tracking with no special-casing. */
+                for (;;) {
+                /* Seed the per-frame dt clock for the time-based settle ease. Keep
+                 * this immediately before the loop (after the scratch alloc above) so
+                 * the first settle frame's dt is a true frame interval and never folds
+                 * in one-time alloc latency. Re-seeded each outer iteration so a
+                 * re-touch's first settle frame gets a true dt. */
+                int64_t prev_frame_us = esp_timer_get_time();
+                while (!moon_drag_settled()) {
+                    if (!image_display_page_active || cfg->image_display_source != 1) break;
+                    ran_drag = true;   /* a drag frame is about to be shown */
+                    int64_t frame_t0 = esp_timer_get_time();
+
+                    /* 1. Ease current orientation toward the finger target. While the
+                     * finger is down, use the responsive per-frame alpha. After release
+                     * (settle), derive a framerate-independent ease-out alpha from the
+                     * frame dt so the snap-back always takes ~MOON_DRAG_SETTLE_MS and
+                     * reads smooth even at ~14fps (a fixed per-frame alpha would finish
+                     * in 2-3 frames and look like a jump). */
+                    bool active = moon_drag_active();
+                    float alpha;
+                    if (active) {
+                        alpha = MOON_DRAG_EASE_A;
+                    } else {
+                        /* tau so ~95% of the distance is covered in SETTLE_MS:
+                         * alpha = 1 - exp(-dt/tau), tau = SETTLE_MS/3. */
+                        float dt_ms = (float)(frame_t0 - prev_frame_us) / 1000.0f;
+                        float tau   = (float)MOON_DRAG_SETTLE_MS / 3.0f;
+                        alpha = 1.0f - expf(-dt_ms / tau);
+                        if (alpha < 0.02f) alpha = 0.02f;   /* never fully stall */
+                        if (alpha > 1.0f)  alpha = 1.0f;
+                    }
+                    prev_frame_us = frame_t0;
+                    moon_drag_advance(alpha);
+                    float yaw, pitch; moon_drag_get(&yaw, &pitch);
+
+                    /* 2. Lighting for this frame. Active frames use the explore/config
+                     * lighting for free exploration; settle frames force TRUE_PHASE so
+                     * the terminator shadow dissolves back in as the disc returns home
+                     * (matching the resting render). The render SIZE is the single
+                     * touch size (240) for the whole interaction — active and settle —
+                     * because 240->720 is an exact 3.0x PPA ratio. */
+                    moon_light_mode_t light = active
+                        ? (moon_light_mode_t)cfg->moon_drag_light_mode
+                        : MOON_LIGHT_TRUE_PHASE;
+
+                    bool shown = false;
+                    if (s_drag_color && s_drag_zbuf && s_ppa_out[0] && s_ppa_out[1]) {
+                        /* Render 240px into persistent scratch — NO per-frame alloc. */
+                        uint16_t *fimg = moon_sphere_render_into(
+                            MOON_DRAG_SZ_TOUCH, MOON_DRAG_SZ_TOUCH, &live,
+                            MOON_DRAG_SECTORS, MOON_DRAG_STACKS, cfg->moon_bg_style,
+                            yaw, pitch, light, s_drag_color, s_drag_zbuf);
+                        if (fimg) {
+                            /* PPA hardware-upscale 240->720 (exact 3.0x) into the
+                             * ping-pong output buffer NOT currently on screen. No
+                             * memset (every output pixel is written) and the blocking
+                             * PPA handles cache coherency both ways, so the buffer is
+                             * coherent for LVGL read on return. */
+                            int ping = s_ppa_ping;
+                            uint8_t *out = ppa_scale_rgb565_into_noclear(
+                                (const uint8_t *)fimg, MOON_DRAG_SZ_TOUCH, MOON_DRAG_SZ_TOUCH,
+                                MOON_DRAG_SZ_TOUCH /* stride in pixels */,
+                                SCREEN_SIZE, SCREEN_SIZE,
+                                (uint8_t *)s_ppa_out[ping],
+                                (size_t)SCREEN_SIZE * SCREEN_SIZE * 2, NULL);
+                            if (out) {
+                                /* Point the LVGL descriptor straight at the 720 buffer
+                                 * (no copy) at scale 1.0. Lock held only around the
+                                 * swap. The ping-pong guarantees we never overwrite the
+                                 * buffer LVGL is flushing. */
+                                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                                    nina_image_display_show_borrowed(s_ppa_out[ping], SCREEN_SIZE, SCREEN_SIZE);
+                                    bsp_display_unlock();
+                                }
+                                s_ppa_ping ^= 1;   /* flip: PPA writes the other buffer next frame */
+                                shown = true;
+                            }
+                            /* PPA failed: fall through to the software-scale fallback
+                             * below using the SAME already-rendered 240px scratch. */
+                            if (!shown && bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                                nina_image_display_show_scaled(fimg, MOON_DRAG_SZ_TOUCH, MOON_DRAG_SZ_TOUCH);
+                                bsp_display_unlock();
+                                shown = true;
+                            }
+                        }
+                    }
+
+                    if (!shown) {
+                        /* Buffers unavailable (alloc failed): render to a fresh PSRAM
+                         * buffer and let nina_image_display_update() software-scale it.
+                         * Degrades gracefully. NOTE: unlike the PPA happy path, this
+                         * exceptional fallback does ~2 allocs/frame (the fresh
+                         * moon_sphere_render_ex color/z here, plus update()'s owned-copy
+                         * alloc); the "zero per-frame heap alloc" guarantee applies only
+                         * to the PPA path, not this degraded fallback. */
+                        uint16_t *fimg = moon_sphere_render_ex(MOON_DRAG_SZ_TOUCH, MOON_DRAG_SZ_TOUCH, &live,
+                                                               MOON_DRAG_SECTORS, MOON_DRAG_STACKS,
+                                                               cfg->moon_bg_style, yaw, pitch, light);
+                        if (fimg) {
+                            if (goes_data_lock(&goes_data, 1000)) {
+                                if (goes_data.image_buf) heap_caps_free(goes_data.image_buf);
+                                goes_data.image_buf = (uint8_t *)fimg;
+                                goes_data.image_w = MOON_DRAG_SZ_TOUCH;
+                                goes_data.image_h = MOON_DRAG_SZ_TOUCH;
+                                goes_data.vflip = false;
+                                goes_data.connected = true;
+                                goes_data.last_poll_ms = esp_timer_get_time() / 1000;
+                                goes_data_unlock(&goes_data);
+                                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                                    nina_image_display_update(&goes_data);
+                                    bsp_display_unlock();
+                                }
+                            } else {
+                                heap_caps_free(fimg);
+                            }
+                        }
+                    }
+
+                    /* Delay only the remainder to hit the target frame period. If the
+                     * frame overran (the usual case; the PPA upscale is cheap but the
+                     * 240px tgx render dominates), just yield so we don't starve
+                     * idle/UI but also don't add latency. */
+                    int64_t spent = esp_timer_get_time() - frame_t0;
+                    int64_t remain_us = (int64_t)MOON_DRAG_FRAME_US - spent;
+                    if (remain_us > 1000) {
+                        vTaskDelay(pdMS_TO_TICKS((uint32_t)(remain_us / 1000)));
+                    } else {
+                        vTaskDelay(1);
+                    }
+                }
+
+                /* GRACE / idle hold before committing the resting render. Poll in
+                 * small steps; if a new touch begins, restart the outer loop so the
+                 * drag while-loop re-tracks the finger immediately (no rest render,
+                 * no crossfade). Bail the whole interaction if the page/source changed.
+                 * Only a fully-elapsed grace window (no re-touch) falls through to the
+                 * resting commit below. */
+                bool regrabbed = false;
+                if (ran_drag) {
+                    int waited_ms = 0;
+                    while (waited_ms < MOON_DRAG_REST_GRACE_MS) {
+                        if (!image_display_page_active || cfg->image_display_source != 1) break;
+                        if (moon_drag_active()) { regrabbed = true; break; }
+                        vTaskDelay(pdMS_TO_TICKS(20));
+                        waited_ms += 20;
+                    }
+                }
+                if (regrabbed) continue;   /* re-enter the drag while-loop */
+                break;                     /* genuine rest: commit the resting frame */
+                } /* end outer for(;;) */
+
+                /* Drag settled: the last 240px settle frame (TRUE_PHASE, PPA-upscaled)
+                 * is still on screen. The full-res resting render below commits an
+                 * OWNED native-720 frame and crossfades it in over that settle frame
+                 * for a smooth sharpen-up. The render scratch / PPA buffers are freed
+                 * on page leave, not here, so the next drag reuses them. */
 
                 /* One-shot tap animation: ~4s eased sweep through a full synodic
                  * cycle plus a full bright-limb spin, rendered at reduced size for
@@ -617,65 +945,46 @@ void goes_poll_task(void *arg)
                  * once. Both phase and orientation are periodic over the sweep, so
                  * t=1 lands back on the live values with no visible jump. */
                 if (atomic_exchange(&moon_anim_request, false)) {
-                    const int     ASZ    = 300;        /* reduced anim resolution   */
-                    const int64_t DUR_US = 4000000;    /* ~4s total sweep           */
-                    /* Start the sweep from the cycle fraction that reproduces the
-                     * live illumination exactly. moon_state_from_cycle() uses the
-                     * mean (1-cos)/2 mapping while moon_compute() uses the true
-                     * phase angle, so seeding from live.cycle would pop a few %
-                     * at the start/end. Inverting live.illum makes frame t=0 and
-                     * t=1 match the accurate resting frame — seamless both ends. */
-                    double illum_arg = 1.0 - 2.0 * (double)live.illum;
-                    if (illum_arg < -1.0) illum_arg = -1.0;
-                    if (illum_arg >  1.0) illum_arg =  1.0;
-                    double half = acos(illum_arg) / 6.283185307179586;   /* [0,0.5] */
-                    double start_cycle  = live.waxing ? half : (1.0 - half);
-                    float  start_orient = live.orient_rad;
-                    int64_t t0 = esp_timer_get_time();
-                    for (;;) {
-                        /* Abort cleanly if the page is hidden or the source changed. */
-                        if (!image_display_page_active || cfg->image_display_source != 1) break;
-                        int64_t el = esp_timer_get_time() - t0;
-                        if (el >= DUR_US) break;
-                        float tt = (float)el / (float)DUR_US;        /* 0..1            */
-                        float te = tt * tt * (3.0f - 2.0f * tt);     /* smoothstep ease */
-                        moon_state_t anim;
-                        moon_state_from_cycle(start_cycle + (double)te,
-                                              start_orient + 6.2831853f * te, &anim);
-                        uint16_t *aimg = moon_render(ASZ, ASZ, &anim, cfg->moon_bg_style);
-                        if (aimg) {
-                            if (goes_data_lock(&goes_data, 1000)) {
-                                if (goes_data.image_buf) heap_caps_free(goes_data.image_buf);
-                                goes_data.image_buf = (uint8_t *)aimg;
-                                goes_data.image_w = ASZ;
-                                goes_data.image_h = ASZ;
-                                goes_data.vflip = false;
-                                goes_data.connected = true;
-                                goes_data.last_poll_ms = esp_timer_get_time() / 1000;
-                                goes_data_unlock(&goes_data);
-                                /* Push the frame using the same locked-update idiom
-                                 * as data_update_task; render happened unlocked. */
-                                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                                    nina_image_display_update(&goes_data);
-                                    bsp_display_unlock();
-                                }
-                            } else {
-                                heap_caps_free(aimg);
-                            }
-                        }
-                        /* Pace ~30fps and yield to the Core 0 idle task (watchdog). */
-                        vTaskDelay(pdMS_TO_TICKS(5));
-                    }
-                    /* Resync to the live current phase after the sweep. */
-                    time(&now);
-                    moon_compute(now, lat, lon, &live);
+                    /* tgx tap-animation is a later phase; consume the tap (above)
+                     * and otherwise no-op, so the resting tgx frame renders below. */
                 }
 
                 /* Normal full-res render of the live current phase. Runs whether or
-                 * not an animation played; the caption reads the resting state. */
+                 * not an animation played; the caption reads the resting state.
+                 * Rendered at NATIVE 720 so it displays 1:1 (no software scale) and is
+                 * the sharpest possible resting frame; the ~297ms cost is a one-shot at
+                 * rest (not per-frame), so it is fine. update() copies it into an owned
+                 * buffer and crossfades it in at scale 1.0. */
                 s_moon_state = live;
-                const int MOON_SZ = 600;
-                uint16_t *img = moon_render(MOON_SZ, MOON_SZ, &live, cfg->moon_bg_style);
+                const int MOON_SZ = SCREEN_SIZE;
+
+                /* ABORT-IF-TOUCH-RESUMED backstop. The grace window above makes this
+                 * rare, but a touch can land right at the grace boundary, AFTER we
+                 * broke out of the outer loop. A single moon_sphere_render(720) blocks
+                 * ~297ms and cannot be interrupted mid-call, so the guard MUST be
+                 * BEFORE it: if a finger is down now, skip the resting render + crossfade
+                 * commit entirely and `continue` the task loop. moon_drag_active() makes
+                 * moon_drag_settled() false, so re-entering the moon block immediately
+                 * re-enters the drag loop and tracks the finger with no blocking stall
+                 * and no dropped frame. */
+                if (moon_drag_active()) continue;
+
+                /* Render with tgx and log timing. When debug_mode is on, also
+                 * sweep candidate sizes so the size/fps tradeoff is visible on
+                 * serial for evaluation. */
+                if (cfg->debug_mode && !moon_drag_active()) {
+                    const int sizes[3] = {240, 300, 400};
+                    for (int si = 0; si < 3; si++) {
+                        int64_t te0 = esp_timer_get_time();
+                        uint16_t *tmp = moon_sphere_render(sizes[si], sizes[si], &live, 96, 48, cfg->moon_bg_style);
+                        int64_t te = esp_timer_get_time() - te0;
+                        ESP_LOGI(TAG, "tgx moon %dx%d render %lld ms", sizes[si], sizes[si], te/1000);
+                        if (tmp) heap_caps_free(tmp);
+                    }
+                }
+                int64_t t0 = esp_timer_get_time();
+                uint16_t *img = moon_sphere_render(MOON_SZ, MOON_SZ, &live, 96, 48, cfg->moon_bg_style);
+                ESP_LOGI(TAG, "tgx moon %dx%d render %lld ms", MOON_SZ, MOON_SZ, (esp_timer_get_time()-t0)/1000);
                 if (img) {
                     if (goes_data_lock(&goes_data, 1000)) {
                         if (goes_data.image_buf) heap_caps_free(goes_data.image_buf);
@@ -686,6 +995,23 @@ void goes_poll_task(void *arg)
                         goes_data.connected = true;
                         goes_data.last_poll_ms = esp_timer_get_time() / 1000;
                         goes_data_unlock(&goes_data);
+                        /* After a drag the on-screen image is the last settle frame
+                         * (240px @ TRUE_PHASE, PPA-upscaled, already visually close to
+                         * this resting frame). Push this OWNED native-720 resting frame
+                         * now so it REPLACES that frame, rather than waiting on the UI
+                         * cadence whose new-image gate could tie on an equal-millisecond
+                         * timestamp. force_redraw bypasses that gate; set_moon_crossfade_once
+                         * makes the swap a ~500ms dissolve (overrides force_redraw's normal
+                         * instant) so the resolution sharpen-up is gentle, not a pop. */
+                        if (ran_drag && image_display_page_active &&
+                            cfg->image_display_source == 1) {
+                            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                                nina_image_display_force_redraw();
+                                nina_image_display_set_moon_crossfade_once();
+                                nina_image_display_update(&goes_data);
+                                bsp_display_unlock();
+                            }
+                        }
                     } else {
                         heap_caps_free(img);
                     }
@@ -1770,6 +2096,15 @@ main_loop:
                 }
                 goes_client_cleanup(&goes_data);
                 moon_render_deinit();   /* release the cached moon texture */
+                /* Free the moon drag-to-rotate render scratch (color/z). The page's
+                 * own software-scale copy buffers are freed inside
+                 * nina_image_display_cleanup() above, so each side frees only what it
+                 * owns — no leak, no double-free. */
+                moon_drag_buffers_free();
+                /* Reset drag orientation so a visit that ended mid-settle does not
+                 * carry a stale s_cur_* into the next visit (which would snap the
+                 * disc home on the first frame). */
+                moon_drag_reset();
                 ESP_LOGI(TAG, "Left Image Display: freed buffers");
             }
             prev_on_image_display = on_image_display;

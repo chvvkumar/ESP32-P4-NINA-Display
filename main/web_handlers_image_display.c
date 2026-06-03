@@ -32,6 +32,13 @@ esp_err_t image_display_config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "moon_lat", cfg->moon_lat);
     cJSON_AddNumberToObject(root, "moon_lon", cfg->moon_lon);
     cJSON_AddNumberToObject(root, "solar_band", cfg->solar_band);
+    cJSON_AddNumberToObject(root, "moon_drag_light_mode", cfg->moon_drag_light_mode);
+    cJSON_AddNumberToObject(root, "moon_flip_u", cfg->moon_flip_u);
+    cJSON_AddNumberToObject(root, "moon_flip_v", cfg->moon_flip_v);
+    cJSON_AddNumberToObject(root, "moon_roll_offset", cfg->moon_roll_offset);
+    cJSON_AddNumberToObject(root, "moon_yaw_offset", cfg->moon_yaw_offset);
+    cJSON_AddNumberToObject(root, "moon_pitch_offset", cfg->moon_pitch_offset);
+    cJSON_AddNumberToObject(root, "moon_north_up", cfg->moon_north_up);
 
     const char *json_str = cJSON_PrintUnformatted(root);
     if (json_str == NULL) {
@@ -81,6 +88,12 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     uint8_t prev_band   = cfg->solar_band;
     bool    prev_crop   = cfg->image_display_crop;
     uint8_t prev_bg     = cfg->moon_bg_style;
+    uint8_t prev_flip_u = cfg->moon_flip_u;
+    uint8_t prev_flip_v = cfg->moon_flip_v;
+    float   prev_roll   = cfg->moon_roll_offset;
+    float   prev_yaw    = cfg->moon_yaw_offset;
+    float   prev_pitch  = cfg->moon_pitch_offset;
+    uint8_t prev_north_up = cfg->moon_north_up;
     char    prev_region[sizeof(cfg->goes_region)];
     strlcpy(prev_region, cfg->goes_region, sizeof(prev_region));
 
@@ -107,6 +120,20 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     if (cJSON_IsNumber(mlon)) cfg->moon_lon = (float)mlon->valuedouble;
     cJSON *sb = cJSON_GetObjectItem(root, "solar_band");
     if (cJSON_IsNumber(sb)) { int v = sb->valueint; cfg->solar_band = (v >= 0 && v <= 17) ? (uint8_t)v : 0; }
+    cJSON *dlm = cJSON_GetObjectItem(root, "moon_drag_light_mode");
+    if (cJSON_IsNumber(dlm)) { int v = dlm->valueint; cfg->moon_drag_light_mode = (v >= 0 && v <= 1) ? (uint8_t)v : 0; }
+    cJSON *fu = cJSON_GetObjectItem(root, "moon_flip_u");
+    if (cJSON_IsNumber(fu)) { cfg->moon_flip_u = (fu->valueint != 0) ? 1 : 0; }
+    cJSON *fv = cJSON_GetObjectItem(root, "moon_flip_v");
+    if (cJSON_IsNumber(fv)) { cfg->moon_flip_v = (fv->valueint != 0) ? 1 : 0; }
+    cJSON *mro = cJSON_GetObjectItem(root, "moon_roll_offset");
+    if (cJSON_IsNumber(mro)) { float v = (float)mro->valuedouble; if (v < -180.0f) v = -180.0f; if (v > 180.0f) v = 180.0f; cfg->moon_roll_offset = v; }
+    cJSON *myo = cJSON_GetObjectItem(root, "moon_yaw_offset");
+    if (cJSON_IsNumber(myo)) { float v = (float)myo->valuedouble; if (v < -180.0f) v = -180.0f; if (v > 180.0f) v = 180.0f; cfg->moon_yaw_offset = v; }
+    cJSON *mpo = cJSON_GetObjectItem(root, "moon_pitch_offset");
+    if (cJSON_IsNumber(mpo)) { float v = (float)mpo->valuedouble; if (v < -90.0f) v = -90.0f; if (v > 90.0f) v = 90.0f; cfg->moon_pitch_offset = v; }
+    cJSON *mnu = cJSON_GetObjectItem(root, "moon_north_up");
+    if (cJSON_IsNumber(mnu)) { cfg->moon_north_up = (mnu->valueint != 0) ? 1 : 0; }
 
     cJSON_Delete(root);
 
@@ -136,7 +163,14 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
             if (goes_task_handle) {
                 xTaskNotifyGive(goes_task_handle);
             }
-        } else if (cfg->image_display_source == 1 && cfg->moon_bg_style != prev_bg) {
+        } else if (cfg->image_display_source == 1 &&
+                   (cfg->moon_bg_style != prev_bg ||
+                    cfg->moon_flip_u != prev_flip_u ||
+                    cfg->moon_flip_v != prev_flip_v ||
+                    cfg->moon_roll_offset != prev_roll ||
+                    cfg->moon_yaw_offset != prev_yaw ||
+                    cfg->moon_pitch_offset != prev_pitch ||
+                    cfg->moon_north_up != prev_north_up)) {
             /* Moon background style changed only (source unchanged, so the
              * source_band_region_changed branch above did not fire): wake the
              * image-display task so its Moon branch re-renders moon_render() with

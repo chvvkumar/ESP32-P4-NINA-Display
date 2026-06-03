@@ -17,6 +17,7 @@
 #include "nina_spotify.h"
 #include "nina_clock.h"
 #include "nina_image_display.h"
+#include "moon_interaction.h"
 #include "nina_settings_tabview.h"
 #include "nina_toast.h"
 #include "nina_event_log.h"
@@ -727,6 +728,16 @@ static void gesture_event_cb(lv_event_t *e) {
     if (thumbnail_overlay && !lv_obj_has_flag(thumbnail_overlay, LV_OBJ_FLAG_HIDDEN)) return;
     if (nina_graph_visible()) return;
     if (nina_info_overlay_visible()) return;
+
+    /* On the Moon page, a deliberate drag-to-rotate must not also flip pages.
+     * The Moon touch handlers (nina_image_display.c) only run when the active
+     * page is the Image Display page AND the source is Moon, so moon_drag_was_rotate()
+     * can only be true in that case. A clean quick flick (little finger travel)
+     * leaves was_rotate false and still navigates. */
+    if (active_page == PAGE_IDX_IMAGE_DISPLAY && image_display_obj != NULL &&
+        app_config_get()->image_display_source == 1 && moon_drag_was_rotate()) {
+        return;
+    }
 
     /* Block screen-level swipe on settings page — sliders need horizontal drag.
      * Only the header widget on the settings page handles page-switch gestures. */
