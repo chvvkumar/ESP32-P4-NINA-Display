@@ -784,6 +784,7 @@ static void set_defaults(app_config_t *cfg) {
     cfg->moon_lon = 0.0f;
     cfg->solar_band = 0;             // SDO/AIA band index 0..9
     cfg->image_display_crop = false; // crop/zoom image to fill & hide baked-in labels
+    cfg->moon_drag_light_mode = 0;   // 0=true phase, 1=explore (moon drag-to-rotate lighting)
 
     // Auth is on by default — protects device from open-LAN access
     cfg->auth_enabled = true;
@@ -1752,6 +1753,19 @@ static void migrate_from_v23(const app_config_v23_t *old, app_config_t *cfg) {
 
 /* --- v32 → v33 migration (added Image Display fields; IDLE_TARGET_SYSINFO 3→4) --- */
 /* --- v33 → v34 migration (added Moon phase fields) --- */
+static void migrate_from_v36(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v36_t) ? raw_size : sizeof(app_config_v36_t);
+    memcpy(cfg, raw, copy);
+
+    /* moon_drag_light_mode field: new in v37 — defaults already set by set_defaults() */
+    cfg->moon_drag_light_mode = 0;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v36 to v%d", APP_CONFIG_VERSION);
+}
+
 static void migrate_from_v35(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
@@ -2340,6 +2354,10 @@ static bool validate_config(app_config_t *cfg) {
         cfg->solar_band = 0;
         fixed = true;
     }
+    if (cfg->moon_drag_light_mode > 1) {
+        cfg->moon_drag_light_mode = 0;
+        fixed = true;
+    }
     if (cfg->allsky_thresholds[0] == '\0' ||
         strstr(cfg->allsky_thresholds, "thermal_main") == NULL) {
         /* Empty or contains old-format keys (cpu_temp, sqm, etc.) — reset to new positional format */
@@ -2407,6 +2425,12 @@ void app_config_init(void) {
             nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(handle);
         }
+    } else if (version_check == 36) {
+        /* v36 → v37: added moon_drag_light_mode */
+        migrate_from_v36(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 35) {
         /* v35 → v36: added image_display_crop */
         migrate_from_v35(raw, stored_size, &s_config);

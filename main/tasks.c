@@ -13,6 +13,7 @@
 #include "goes_client.h"
 #include "moon_render.h"
 #include "moon_sphere.h"   /* tgx sphere renderer for the Moon page */
+#include "moon_interaction.h"  /* drag-to-rotate touch state */
 #include "moon_ephemeris.h"
 #include <math.h>           /* acos() for seamless anim start cycle */
 #include "spotify_auth.h"
@@ -615,6 +616,80 @@ void goes_poll_task(void *arg)
                 moon_state_t live;
                 moon_compute(now, lat, lon, &live);
 
+                /* Interactive drag-to-rotate: while a finger is down, render small
+                 * frames that follow the touch in realtime. The touch handlers in
+                 * nina_image_display.c notify this task on press/move/release, so the
+                 * outer ulTaskNotifyTake keeps waking us; this inner loop owns the
+                 * realtime frames until the drag ends, then snaps back to the live
+                 * sky orientation and falls through to the crisp full-res render. */
+                const int DRAG_SZ = 300;          /* reduced size for interactivity */
+                while (moon_drag_active()) {
+                    if (!image_display_page_active || cfg->image_display_source != 1) break;
+                    float yaw, pitch; moon_drag_get(&yaw, &pitch);
+                    uint16_t *fimg = moon_sphere_render_ex(DRAG_SZ, DRAG_SZ, &live,
+                                                           48, 24, cfg->moon_bg_style,
+                                                           yaw, pitch,
+                                                           (moon_light_mode_t)cfg->moon_drag_light_mode);
+                    if (fimg) {
+                        if (goes_data_lock(&goes_data, 1000)) {
+                            if (goes_data.image_buf) heap_caps_free(goes_data.image_buf);
+                            goes_data.image_buf = (uint8_t *)fimg;
+                            goes_data.image_w = DRAG_SZ;
+                            goes_data.image_h = DRAG_SZ;
+                            goes_data.vflip = false;
+                            goes_data.connected = true;
+                            goes_data.last_poll_ms = esp_timer_get_time() / 1000;
+                            goes_data_unlock(&goes_data);
+                            /* Repaint immediately so the disc tracks the finger
+                             * instead of waiting for the UI task's slow cadence. */
+                            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                                nina_image_display_update(&goes_data);
+                                bsp_display_unlock();
+                            }
+                        } else {
+                            heap_caps_free(fimg);
+                        }
+                    }
+                    vTaskDelay(pdMS_TO_TICKS(20));   /* ~30-45fps pacing; yields to UI/idle */
+                }
+
+                /* Snap-back on release: ease the accumulated yaw/pitch back to 0 over
+                 * ~300ms so the disc settles to the live sky orientation, then clear
+                 * the drag state and fall through to the full-res resting render. */
+                float yaw0, pitch0; moon_drag_get(&yaw0, &pitch0);
+                if (fabsf(yaw0) > 0.5f || fabsf(pitch0) > 0.5f) {
+                    const int STEPS = 10;
+                    for (int s = 1; s <= STEPS; s++) {
+                        if (!image_display_page_active || cfg->image_display_source != 1) break;
+                        float t = (float)s / (float)STEPS;
+                        float e = 1.0f - (t*t*(3.0f-2.0f*t));   /* smoothstep ease-out from 1->0 */
+                        uint16_t *eimg = moon_sphere_render_ex(DRAG_SZ, DRAG_SZ, &live, 48, 24,
+                                                               cfg->moon_bg_style,
+                                                               yaw0*e, pitch0*e,
+                                                               (moon_light_mode_t)cfg->moon_drag_light_mode);
+                        if (eimg) {
+                            if (goes_data_lock(&goes_data, 1000)) {
+                                if (goes_data.image_buf) heap_caps_free(goes_data.image_buf);
+                                goes_data.image_buf = (uint8_t *)eimg;
+                                goes_data.image_w = DRAG_SZ;
+                                goes_data.image_h = DRAG_SZ;
+                                goes_data.vflip = false;
+                                goes_data.connected = true;
+                                goes_data.last_poll_ms = esp_timer_get_time() / 1000;
+                                goes_data_unlock(&goes_data);
+                                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                                    nina_image_display_update(&goes_data);
+                                    bsp_display_unlock();
+                                }
+                            } else {
+                                heap_caps_free(eimg);
+                            }
+                        }
+                        vTaskDelay(pdMS_TO_TICKS(16));
+                    }
+                }
+                moon_drag_set(0.0f, 0.0f);   /* reset accumulated rotation */
+
                 /* One-shot tap animation: ~4s eased sweep through a full synodic
                  * cycle plus a full bright-limb spin, rendered at reduced size for
                  * smoothness. Consume the request atomically so a single tap fires
@@ -632,7 +707,7 @@ void goes_poll_task(void *arg)
                 /* Render with tgx and log timing. When debug_mode is on, also
                  * sweep candidate sizes so the size/fps tradeoff is visible on
                  * serial for evaluation. */
-                if (cfg->debug_mode) {
+                if (cfg->debug_mode && !moon_drag_active()) {
                     const int sizes[3] = {240, 300, 400};
                     for (int si = 0; si < 3; si++) {
                         int64_t te0 = esp_timer_get_time();

@@ -1066,6 +1066,14 @@
             <input class="input" id="moonLon" type="number" step="0.0001" placeholder="e.g. -74.0060" onchange="applyImageDisplay();checkDirty()">
             <div class="field-hint" id="moonLocHint">Set your location for accurate moon orientation. Prefilled from Weather when available.</div>
           </div>
+          <div class="field">
+            <label class="field-label">Moon drag lighting</label>
+            <select class="input" id="moonDragLight" onchange="applyImageDisplay();checkDirty()">
+              <option value="0">True phase</option>
+              <option value="1">Explore (full-lit)</option>
+            </select>
+            <div class="field-hint">How the Moon is lit while you drag to rotate it. True phase keeps the real terminator; Explore lights the whole surface.</div>
+          </div>
           </div>
           <div id="solarGroup" style="display:none">
           <div class="field" style="margin-top:16px">
@@ -2309,6 +2317,7 @@
         goes_update_interval_s:parseInt($('goesInterval').value)||600,
         image_display_source:getImageSource(),
         moon_bg_style:parseInt($('moonBg').value,10)||0,
+        moon_drag_light_mode:parseInt($('moonDragLight').value,10)||0,
         solar_band:parseInt($('solarBand').value,10)||0,
         moon_lat:parseFloat($('moonLat').value)||0,
         moon_lon:parseFloat($('moonLon').value)||0,
@@ -2477,6 +2486,7 @@
       if($('imageSource1')) $('imageSource1').checked=(imgSrc===1);
       if($('imageSource2')) $('imageSource2').checked=(imgSrc===2);
       if($('moonBg')) $('moonBg').value=String(data.moon_bg_style||0);
+      if($('moonDragLight')) $('moonDragLight').value=String(data.moon_drag_light_mode||0);
       if($('solarBand')) $('solarBand').value=String(data.solar_band||0);
       var mlat=data.moon_lat, mlon=data.moon_lon;
       // Prefill from weather location when moon coords are unset
@@ -3620,6 +3630,7 @@
         goes_update_interval_s: parseInt($('goesInterval').value,10)||600,
         image_display_source: getImageSource(),
         moon_bg_style: parseInt($('moonBg').value,10)||0,
+        moon_drag_light_mode: parseInt($('moonDragLight').value,10)||0,
         moon_lat: parseFloat($('moonLat').value)||0,
         moon_lon: parseFloat($('moonLon').value)||0,
         solar_band: parseInt($('solarBand').value,10)||0

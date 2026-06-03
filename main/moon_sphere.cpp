@@ -330,9 +330,11 @@ static const Shader LOADED_SHADERS =
     SHADER_ORTHO | SHADER_ZBUFFER | SHADER_FLAT |
     SHADER_TEXTURE_BILINEAR | SHADER_TEXTURE_WRAP_POW2;
 
-extern "C" uint16_t *moon_sphere_render(int w, int h, const moon_state_t *st,
-                                        int nb_sectors, int nb_stacks,
-                                        uint8_t bg_style)
+extern "C" uint16_t *moon_sphere_render_ex(int w, int h, const moon_state_t *st,
+                                           int nb_sectors, int nb_stacks,
+                                           uint8_t bg_style,
+                                           float yaw_deg, float pitch_deg,
+                                           moon_light_mode_t light_mode)
 {
     if (w <= 0 || h <= 0 || st == nullptr) return nullptr;
 
@@ -506,6 +508,10 @@ extern "C" uint16_t *moon_sphere_render(int w, int h, const moon_state_t *st,
     float lib_lon_deg = 0.0f;
     float lib_lat_deg = 0.0f;
     float roll_deg    = 0.0f;
+    /* Geocentric debug exposes the clean base view: also ignore the user
+     * drag-to-rotate so yaw/pitch cannot perturb the reference orientation. */
+    yaw_deg   = 0.0f;
+    pitch_deg = 0.0f;
 #else
     const float RAD2DEG = 57.2957795131f;
     float lib_lon_deg = st->lib_lon * RAD2DEG;
@@ -513,15 +519,31 @@ extern "C" uint16_t *moon_sphere_render(int w, int h, const moon_state_t *st,
     float roll_deg    = (float)(MOON_ROLL_SIGN) * st->roll * RAD2DEG;
 #endif
 
-    fMat4 R;   /* rotation-only (orientation), reused for the light */
-    R.setIdentity();
-    R.multRotate(lib_lon_deg,  fVec3(0.0f, 1.0f, 0.0f)); /* longitude libration */
-    R.multRotate(-lib_lat_deg, fVec3(0.0f, 0.0f, 1.0f)); /* latitude libration  */
-    R.multRotate(180.0f,       fVec3(1.0f, 0.0f, 0.0f)); /* base: flip v (north up) */
-    R.multRotate(90.0f,        fVec3(0.0f, 1.0f, 0.0f)); /* base: sub-Earth -> +Z   */
-    R.multRotate(roll_deg,     fVec3(0.0f, 0.0f, 1.0f)); /* parallactic roll        */
+    /* R_sky: the SKY orientation rotation (libration + base + parallactic roll).
+     * This is rotation-only and is used UNCHANGED to place the sub-solar light
+     * into world space, so the sun stays fixed in the sky regardless of the
+     * user's drag-to-rotate yaw/pitch. */
+    fMat4 R_sky;   /* rotation-only (sky orientation), reused for the light */
+    R_sky.setIdentity();
+    R_sky.multRotate(lib_lon_deg,  fVec3(0.0f, 1.0f, 0.0f)); /* longitude libration */
+    R_sky.multRotate(-lib_lat_deg, fVec3(0.0f, 0.0f, 1.0f)); /* latitude libration  */
+    R_sky.multRotate(180.0f,       fVec3(1.0f, 0.0f, 0.0f)); /* base: flip v (north up) */
+    R_sky.multRotate(90.0f,        fVec3(0.0f, 1.0f, 0.0f)); /* base: sub-Earth -> +Z   */
+    R_sky.multRotate(roll_deg,     fVec3(0.0f, 0.0f, 1.0f)); /* parallactic roll        */
 
-    fMat4 M = R;
+    /* M_rot: the MODEL rotation = R_sky with the user drag-to-rotate applied
+     * OUTERMOST. After the full sky orientation the world axes coincide with the
+     * screen axes (camera looks -Z, +Y up, +X right). multRotate PRE-multiplies
+     * (the first call is applied to the vertex first / innermost), so appending
+     * pitch then yaw AFTER the sky-orientation calls makes them the LAST
+     * (outermost) transforms on the vertex: pitch about screen-horizontal (+X),
+     * yaw about screen-vertical (+Y). The light is built from R_sky only, so the
+     * features rotate under a fixed sub-solar point in TRUE_PHASE. */
+    fMat4 M_rot = R_sky;
+    M_rot.multRotate(pitch_deg, fVec3(1.0f, 0.0f, 0.0f)); /* drag: pitch (screen-horiz) */
+    M_rot.multRotate(yaw_deg,   fVec3(0.0f, 1.0f, 0.0f)); /* drag: yaw   (screen-vert)  */
+
+    fMat4 M = M_rot;
     /* Push the unit sphere down -Z so it lands between zNear (0.1) and zFar (10),
      * centered at z = -2 (camera at origin looking toward -Z). */
     M.multTranslate(fVec3(0.0f, 0.0f, -2.0f));
@@ -545,11 +567,29 @@ extern "C" uint16_t *moon_sphere_render(int w, int h, const moon_state_t *st,
     fVec3 sun_body(clat * cosf(st->sun_lon),
                    sinf(st->sun_lat),
                    clat * sinf(st->sun_lon));
-    fVec4 sun_w4 = R.mult0(sun_body);          /* rotate dir into world space */
+    /* Light depends ONLY on the SKY orientation R_sky (NOT the user yaw/pitch),
+     * so in TRUE_PHASE the sun stays fixed in the sky while the features spin
+     * under it as the user drags. */
+    fVec4 sun_w4 = R_sky.mult0(sun_body);      /* rotate dir into world space */
     fVec3 sun_w(sun_w4.x, sun_w4.y, sun_w4.z);
     float n = sqrtf(sun_w.x * sun_w.x + sun_w.y * sun_w.y + sun_w.z * sun_w.z);
     if (n > 1e-6f) { sun_w.x /= n; sun_w.y /= n; sun_w.z /= n; }
-    renderer.setLightDirection(fVec3(sun_w.x, sun_w.y, sun_w.z));
+
+    if (light_mode == MOON_LIGHT_EXPLORE) {
+        /* Explore view: light the whole disc so the user can inspect the far
+         * side while spinning. Raise ambient near full and drop diffuse to a
+         * gentle view-aligned headlight (direction along the view axis, -Z) for
+         * mild shading with no dark/night side. The sky light vector computed
+         * above is intentionally NOT used here; only the material/light params
+         * are overridden. */
+        renderer.setMaterialAmbiantStrength(0.95f);
+        renderer.setMaterialDiffuseStrength(0.15f);
+        renderer.setLightDirection(fVec3(0.0f, 0.0f, -1.0f));
+    } else {
+        /* True sub-solar phase: keep the directional sub-solar light so the real
+         * phase terminator shows (material/light defaults set above). */
+        renderer.setLightDirection(fVec3(sun_w.x, sun_w.y, sun_w.z));
+    }
 
     /* ----- Draw the textured sphere -------------------------------------- */
     renderer.drawSphere(nb_sectors, nb_stacks, &s_tex);
@@ -557,4 +597,14 @@ extern "C" uint16_t *moon_sphere_render(int w, int h, const moon_state_t *st,
     /* z-buffer no longer needed; return only the color buffer. */
     heap_caps_free(zbuf);
     return color_buf;
+}
+
+/* Thin wrapper: the original sub-solar-lit, no-user-rotation render. Identical
+ * output to the pre-refactor moon_sphere_render() (yaw=pitch=0, TRUE_PHASE). */
+extern "C" uint16_t *moon_sphere_render(int w, int h, const moon_state_t *st,
+                                        int nb_sectors, int nb_stacks,
+                                        uint8_t bg_style)
+{
+    return moon_sphere_render_ex(w, h, st, nb_sectors, nb_stacks, bg_style,
+                                 0.0f, 0.0f, MOON_LIGHT_TRUE_PHASE);
 }

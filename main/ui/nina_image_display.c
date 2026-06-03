@@ -14,6 +14,7 @@
 #include "nina_image_display.h"
 #include "nina_wait_overlay.h"
 #include "nina_dashboard_internal.h"
+#include "moon_interaction.h"
 #include "app_config.h"
 #include "display_defs.h"
 #include "tasks.h"          /* goes_task_handle, moon_anim_request */
@@ -135,6 +136,47 @@ static void moon_tap_cb(lv_event_t *e)
     if (goes_task_handle) xTaskNotifyGive(goes_task_handle);
 }
 
+/* Single-finger drag-to-rotate (Moon source only). PRESSED/PRESSING/RELEASED
+ * feed moon_interaction's accumulated yaw/pitch; the render (poll) task reads
+ * that state and rebuilds the sphere. Each handler early-returns on non-Moon
+ * sources so GOES/Solar pages are unaffected. The render task is nudged on
+ * move/release via goes_task_handle (same notify moon_tap_cb uses). */
+static bool moon_indev_point(lv_point_t *p)
+{
+    lv_indev_t *indev = lv_indev_get_act();
+    if (!indev) return false;
+    lv_indev_get_point(indev, p);
+    return true;
+}
+
+static void moon_drag_pressed_cb(lv_event_t *e)
+{
+    (void)e;
+    if (app_config_get()->image_display_source != 1) return;   /* Moon only */
+    lv_point_t p;
+    if (!moon_indev_point(&p)) return;
+    moon_drag_begin((float)p.x, (float)p.y);
+}
+
+static void moon_drag_pressing_cb(lv_event_t *e)
+{
+    (void)e;
+    if (app_config_get()->image_display_source != 1) return;   /* Moon only */
+    lv_point_t p;
+    if (!moon_indev_point(&p)) return;
+    moon_drag_move((float)p.x, (float)p.y);
+    /* Re-render promptly so the rotation tracks the finger. */
+    if (goes_task_handle) xTaskNotifyGive(goes_task_handle);
+}
+
+static void moon_drag_released_cb(lv_event_t *e)
+{
+    (void)e;
+    if (app_config_get()->image_display_source != 1) return;   /* Moon only */
+    moon_drag_end();
+    if (goes_task_handle) xTaskNotifyGive(goes_task_handle);
+}
+
 lv_obj_t *nina_image_display_create(lv_obj_t *parent)
 {
     page_container = lv_obj_create(parent);
@@ -153,6 +195,13 @@ lv_obj_t *nina_image_display_create(lv_obj_t *parent)
      * for page navigation. The handler is a no-op when the source is not Moon. */
     lv_obj_add_flag(page_container, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(page_container, moon_tap_cb, LV_EVENT_SHORT_CLICKED, NULL);
+
+    /* Single-finger drag-to-rotate for the Moon source. These handlers no-op on
+     * GOES/Solar sources (checked inside each cb). PRESSED snapshots the start
+     * point, PRESSING accumulates yaw/pitch, RELEASED ends the drag. */
+    lv_obj_add_event_cb(page_container, moon_drag_pressed_cb,  LV_EVENT_PRESSED,  NULL);
+    lv_obj_add_event_cb(page_container, moon_drag_pressing_cb, LV_EVENT_PRESSING, NULL);
+    lv_obj_add_event_cb(page_container, moon_drag_released_cb, LV_EVENT_RELEASED, NULL);
 
     init_image_dsc(&img_dsc_a);
     init_image_dsc(&img_dsc_b);
@@ -175,6 +224,24 @@ lv_obj_t *nina_image_display_create(lv_obj_t *parent)
     lv_obj_set_pos(img_b, 0, 0);
     lv_image_set_pivot(img_b, 0, 0);
     lv_obj_add_flag(img_b, LV_OBJ_FLAG_HIDDEN);
+
+    /* Drag-to-rotate must not also scroll/pan. page_container is non-scrollable,
+     * but LVGL scroll-chains the drag up to the scrollable main_cont parent,
+     * which then pans the image. Clear SCROLLABLE and the SCROLL_CHAIN_HOR/VER
+     * flags on the container AND both image objects (the press target can resolve
+     * to an image) so the gesture is consumed here and never bubbles to main_cont.
+     * This only affects the Image Display / Moon page objects, not main_cont or
+     * other pages, and is independent of the LV_EVENT_GESTURE page-swipe on
+     * scr_dashboard. */
+    lv_obj_clear_flag(page_container, LV_OBJ_FLAG_SCROLLABLE |
+                                      LV_OBJ_FLAG_SCROLL_CHAIN_HOR |
+                                      LV_OBJ_FLAG_SCROLL_CHAIN_VER);
+    lv_obj_clear_flag(img_a, LV_OBJ_FLAG_SCROLLABLE |
+                             LV_OBJ_FLAG_SCROLL_CHAIN_HOR |
+                             LV_OBJ_FLAG_SCROLL_CHAIN_VER);
+    lv_obj_clear_flag(img_b, LV_OBJ_FLAG_SCROLLABLE |
+                             LV_OBJ_FLAG_SCROLL_CHAIN_HOR |
+                             LV_OBJ_FLAG_SCROLL_CHAIN_VER);
 
     img_front = img_a;
     img_back  = img_b;
