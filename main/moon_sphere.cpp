@@ -322,43 +322,43 @@ extern "C" bool moon_sphere_init(void)
 }
 
 /* Shaders compiled into the renderer for this evaluation:
- * orthographic projection + z-buffer + flat (Lambert/diffuse) shading +
- * bilinear texture sampling with power-of-two wrapping. Specular is off
- * (no SHADER_GOURAUD needed for a diffuse-only look; FLAT does per-face
- * Lambert which is sufficient and cheaper). */
+ * orthographic projection + z-buffer + Gouraud (per-vertex Lambert/diffuse)
+ * shading + bilinear texture sampling with power-of-two wrapping.
+ *
+ * GOURAUD (not FLAT) is used so the sphere is lit per-vertex with the normals
+ * interpolated across each triangle. FLAT shading gives one normal per facet,
+ * so every quad of the 96x48 tessellation was uniformly lit and the facet
+ * boundaries showed up as a faint lat/long grid across the disc (visible once
+ * the resting render went to native 720). drawSphere() supplies the surface
+ * vertex POSITIONS as the per-vertex NORMALS (the sphere is unit-radius and
+ * centered at the origin, so position == analytic outward normal); see
+ * Renderer3D.inl drawTriangle/drawQuad calls that pass &P1,&P3,&P2 as both
+ * positions and normals. The rasterizer has an explicit GOURAUD+TEXTURE path
+ * (Shaders.h ~L333) that multiplies the interpolated per-vertex shade into the
+ * sampled texel, so smooth lighting and the texture coexist. SHADER_GOURAUD is
+ * bit 5 (ShaderParams.h L55) and lives in TGX_SHADER_MASK_SHADING with FLAT, so
+ * it is a drop-in replacement. It MUST be present in LOADED_SHADERS (the
+ * template list) AND selected via setShaders() (Renderer3D.h L84-87: a draw
+ * that needs a shader absent from LOADED_SHADERS fails). */
 static const Shader LOADED_SHADERS =
-    SHADER_ORTHO | SHADER_ZBUFFER | SHADER_FLAT |
+    SHADER_ORTHO | SHADER_ZBUFFER | SHADER_GOURAUD |
     SHADER_TEXTURE_BILINEAR | SHADER_TEXTURE_WRAP_POW2;
 
-extern "C" uint16_t *moon_sphere_render_ex(int w, int h, const moon_state_t *st,
-                                           int nb_sectors, int nb_stacks,
-                                           uint8_t bg_style,
-                                           float yaw_deg, float pitch_deg,
-                                           moon_light_mode_t light_mode)
+/* Core sphere renderer. Rasterizes into `color_buf` (RGB565) using `zbuf` as the
+ * depth buffer; both must be w*h uint16 and 128-byte aligned (PPA / cache line).
+ * The caller owns both buffers and their lifetime — this function neither
+ * allocates nor frees them. moon_sphere_render_ex() wraps this with a per-call
+ * alloc/free (the resting full-res path), while the drag loop passes persistent
+ * scratch buffers so no per-frame heap churn occurs. */
+static uint16_t *moon_sphere_render_core(int w, int h, const moon_state_t *st,
+                                         int nb_sectors, int nb_stacks,
+                                         uint8_t bg_style,
+                                         float yaw_deg, float pitch_deg,
+                                         moon_light_mode_t light_mode,
+                                         uint16_t *color_buf, uint16_t *zbuf)
 {
-    if (w <= 0 || h <= 0 || st == nullptr) return nullptr;
-
-    /* Lazy init of the texture, mirroring how moon_render_init() is invoked
-     * inline before first use in the flat path. */
-    if (!moon_sphere_init()) return nullptr;
-
     const size_t npix      = (size_t)w * (size_t)h;
     const size_t color_sz  = npix * sizeof(uint16_t);
-    const size_t z_sz      = npix * sizeof(uint16_t);
-
-    /* Color + z-buffer in PSRAM, 128-byte aligned (PPA / cache line). */
-    uint16_t *color_buf =
-        (uint16_t *)heap_caps_aligned_alloc(128, color_sz, MALLOC_CAP_SPIRAM);
-    uint16_t *zbuf =
-        (uint16_t *)heap_caps_aligned_alloc(128, z_sz, MALLOC_CAP_SPIRAM);
-
-    if (!color_buf || !zbuf) {
-        ESP_LOGE(TAG, "PSRAM alloc failed (color=%p z=%p, %dx%d)",
-                 (void *)color_buf, (void *)zbuf, w, h);
-        if (color_buf) heap_caps_free(color_buf);
-        if (zbuf)      heap_caps_free(zbuf);
-        return nullptr;   /* caller keeps previous frame */
-    }
 
     /* ----- Background ----------------------------------------------------
      * Drawn DIRECTLY into color_buf BEFORE the sphere is rasterized. The
@@ -443,7 +443,7 @@ extern "C" uint16_t *moon_sphere_render_ex(int w, int h, const moon_state_t *st,
      * (terminator), diffuse high, specular off. Warm tint (matches the old flat
      * renderer's tint_r/g/b ~ 1.0/0.96/0.86) so the lit moon reads warm-gray
      * rather than neutral; the texture grayscale still shows through. */
-    renderer.setShaders(SHADER_FLAT | SHADER_TEXTURE_BILINEAR | SHADER_TEXTURE_WRAP_POW2);
+    renderer.setShaders(SHADER_GOURAUD | SHADER_TEXTURE_BILINEAR | SHADER_TEXTURE_WRAP_POW2);
     renderer.setMaterialColor(RGBf(1.0f, 0.96f, 0.86f));
     renderer.setMaterialAmbiantStrength(0.06f);
     renderer.setMaterialDiffuseStrength(1.0f);
@@ -594,7 +594,65 @@ extern "C" uint16_t *moon_sphere_render_ex(int w, int h, const moon_state_t *st,
     /* ----- Draw the textured sphere -------------------------------------- */
     renderer.drawSphere(nb_sectors, nb_stacks, &s_tex);
 
-    /* z-buffer no longer needed; return only the color buffer. */
+    /* Both buffers are caller-owned; do NOT free here. Return the color buffer
+     * so callers can treat the result like the previous alloc-and-return API. */
+    return color_buf;
+}
+
+/* Render into CALLER-PROVIDED color + z buffers (no per-frame alloc/free). Both
+ * must be w*h uint16 and 128-byte aligned (PPA / cache line). Returns color_buf
+ * on success, nullptr on bad args. Used by the drag loop with persistent scratch
+ * buffers so realtime frames cause zero heap churn. */
+extern "C" uint16_t *moon_sphere_render_into(int w, int h, const moon_state_t *st,
+                                             int nb_sectors, int nb_stacks,
+                                             uint8_t bg_style,
+                                             float yaw_deg, float pitch_deg,
+                                             moon_light_mode_t light_mode,
+                                             uint16_t *color_buf, uint16_t *zbuf)
+{
+    if (w <= 0 || h <= 0 || st == nullptr || color_buf == nullptr || zbuf == nullptr)
+        return nullptr;
+    if (!moon_sphere_init()) return nullptr;
+    return moon_sphere_render_core(w, h, st, nb_sectors, nb_stacks, bg_style,
+                                   yaw_deg, pitch_deg, light_mode, color_buf, zbuf);
+}
+
+extern "C" uint16_t *moon_sphere_render_ex(int w, int h, const moon_state_t *st,
+                                           int nb_sectors, int nb_stacks,
+                                           uint8_t bg_style,
+                                           float yaw_deg, float pitch_deg,
+                                           moon_light_mode_t light_mode)
+{
+    if (w <= 0 || h <= 0 || st == nullptr) return nullptr;
+
+    /* Lazy init of the texture, mirroring how moon_render_init() is invoked
+     * inline before first use in the flat path. */
+    if (!moon_sphere_init()) return nullptr;
+
+    const size_t npix      = (size_t)w * (size_t)h;
+    const size_t color_sz  = npix * sizeof(uint16_t);
+    const size_t z_sz      = npix * sizeof(uint16_t);
+
+    /* Color + z-buffer in PSRAM, 128-byte aligned (PPA / cache line). */
+    uint16_t *color_buf =
+        (uint16_t *)heap_caps_aligned_alloc(128, color_sz, MALLOC_CAP_SPIRAM);
+    uint16_t *zbuf =
+        (uint16_t *)heap_caps_aligned_alloc(128, z_sz, MALLOC_CAP_SPIRAM);
+
+    if (!color_buf || !zbuf) {
+        ESP_LOGE(TAG, "PSRAM alloc failed (color=%p z=%p, %dx%d)",
+                 (void *)color_buf, (void *)zbuf, w, h);
+        if (color_buf) heap_caps_free(color_buf);
+        if (zbuf)      heap_caps_free(zbuf);
+        return nullptr;   /* caller keeps previous frame */
+    }
+
+    moon_sphere_render_core(w, h, st, nb_sectors, nb_stacks,
+                            bg_style, yaw_deg, pitch_deg,
+                            light_mode, color_buf, zbuf);
+
+    /* z-buffer no longer needed; return only the color buffer (caller frees).
+     * render_core always succeeds once color_buf/zbuf are valid (no error path). */
     heap_caps_free(zbuf);
     return color_buf;
 }

@@ -24,6 +24,16 @@ uint16_t *moon_sphere_render_ex(int w, int h, const moon_state_t *st,
                                 int nb_sectors, int nb_stacks, uint8_t bg_style,
                                 float yaw_deg, float pitch_deg,
                                 moon_light_mode_t light_mode);
+
+/* Same as moon_sphere_render_ex() but renders into CALLER-PROVIDED color + z
+ * buffers (no per-frame heap alloc/free). Both must be w*h uint16 and 128-byte
+ * aligned (PPA / cache line). Returns color_buf on success or NULL on bad args.
+ * Used by the drag-to-rotate loop with persistent scratch buffers. */
+uint16_t *moon_sphere_render_into(int w, int h, const moon_state_t *st,
+                                  int nb_sectors, int nb_stacks, uint8_t bg_style,
+                                  float yaw_deg, float pitch_deg,
+                                  moon_light_mode_t light_mode,
+                                  uint16_t *color_buf, uint16_t *zbuf);
 #ifdef __cplusplus
 }
 #endif
