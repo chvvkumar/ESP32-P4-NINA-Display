@@ -122,6 +122,29 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
   </tr>
 </table>
 
+### Moon Phase Display
+
+Real-time 3D rendered Moon with accurate phase, libration, and sub-solar lighting. Optional glow halo and starfield background.
+
+<table align="center">
+  <tr>
+    <td align="center"><img src="images/moon.jpg" alt="Moon phase" width="480"></td>
+    <td align="center"><img src="images/moon_glow.jpg" alt="Moon with glow halo" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Default</em></td>
+    <td align="center"><em>Glow halo</em></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="images/moon_stars.jpg" alt="Moon with starfield" width="480"></td>
+    <td align="center"><img src="images/moon_glow_stars.jpg" alt="Moon with glow and starfield" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Starfield background</em></td>
+    <td align="center"><em>Glow and starfield</em></td>
+  </tr>
+</table>
+
 ### Web Configuration UI
 
 <table align="center">

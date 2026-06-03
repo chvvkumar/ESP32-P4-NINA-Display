@@ -39,6 +39,8 @@ esp_err_t image_display_config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "moon_yaw_offset", cfg->moon_yaw_offset);
     cJSON_AddNumberToObject(root, "moon_pitch_offset", cfg->moon_pitch_offset);
     cJSON_AddNumberToObject(root, "moon_north_up", cfg->moon_north_up);
+    cJSON_AddNumberToObject(root, "moon_spin_mode", cfg->moon_spin_mode);
+    cJSON_AddNumberToObject(root, "moon_spin_return_s", cfg->moon_spin_return_s);
 
     const char *json_str = cJSON_PrintUnformatted(root);
     if (json_str == NULL) {
@@ -94,6 +96,8 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     float   prev_yaw    = cfg->moon_yaw_offset;
     float   prev_pitch  = cfg->moon_pitch_offset;
     uint8_t prev_north_up = cfg->moon_north_up;
+    uint8_t prev_spin_mode   = cfg->moon_spin_mode;
+    uint8_t prev_spin_return = cfg->moon_spin_return_s;
     char    prev_region[sizeof(cfg->goes_region)];
     strlcpy(prev_region, cfg->goes_region, sizeof(prev_region));
 
@@ -134,6 +138,10 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     if (cJSON_IsNumber(mpo)) { float v = (float)mpo->valuedouble; if (v < -90.0f) v = -90.0f; if (v > 90.0f) v = 90.0f; cfg->moon_pitch_offset = v; }
     cJSON *mnu = cJSON_GetObjectItem(root, "moon_north_up");
     if (cJSON_IsNumber(mnu)) { cfg->moon_north_up = (mnu->valueint != 0) ? 1 : 0; }
+    cJSON *msm = cJSON_GetObjectItem(root, "moon_spin_mode");
+    if (cJSON_IsNumber(msm)) { cfg->moon_spin_mode = (msm->valueint != 0) ? 1 : 0; }
+    cJSON *msr = cJSON_GetObjectItem(root, "moon_spin_return_s");
+    if (cJSON_IsNumber(msr)) { int v = msr->valueint; if (v < 3) v = 3; if (v > 60) v = 60; cfg->moon_spin_return_s = (uint8_t)v; }
 
     cJSON_Delete(root);
 
@@ -170,7 +178,9 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
                     cfg->moon_roll_offset != prev_roll ||
                     cfg->moon_yaw_offset != prev_yaw ||
                     cfg->moon_pitch_offset != prev_pitch ||
-                    cfg->moon_north_up != prev_north_up)) {
+                    cfg->moon_north_up != prev_north_up ||
+                    cfg->moon_spin_mode != prev_spin_mode ||
+                    cfg->moon_spin_return_s != prev_spin_return)) {
             /* Moon background style changed only (source unchanged, so the
              * source_band_region_changed branch above did not fire): wake the
              * image-display task so its Moon branch re-renders moon_render() with

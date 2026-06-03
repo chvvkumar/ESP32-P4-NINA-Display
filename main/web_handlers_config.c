@@ -142,6 +142,8 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
     cJSON_AddNumberToObject(obj, "moon_yaw_offset", (double)cfg->moon_yaw_offset);
     cJSON_AddNumberToObject(obj, "moon_pitch_offset", (double)cfg->moon_pitch_offset);
     cJSON_AddNumberToObject(obj, "moon_north_up", cfg->moon_north_up);
+    cJSON_AddNumberToObject(obj, "moon_spin_mode", cfg->moon_spin_mode);
+    cJSON_AddNumberToObject(obj, "moon_spin_return_s", cfg->moon_spin_return_s);
     cJSON_AddNumberToObject(obj, "toast_aggregation_window_s", cfg->toast_aggregation_window_s);
     cJSON_AddNumberToObject(obj, "toast_notify_mask", cfg->toast_notify_mask);
     cJSON_AddBoolToObject(obj, "toast_instance_muted_1", cfg->toast_instance_muted[0]);
@@ -331,6 +333,8 @@ static const backup_field_t s_backup_fields[] = {
     {"moon_yaw_offset",            "Moon Yaw Offset",      "Image Display", false, false},
     {"moon_pitch_offset",          "Moon Pitch Offset",    "Image Display", false, false},
     {"moon_north_up",              "Moon North-Up",        "Image Display", false, false},
+    {"moon_spin_mode",             "Moon Spin Mode",       "Image Display", false, false},
+    {"moon_spin_return_s",         "Moon Spin Return (s)", "Image Display", false, false},
 
     /* MQTT (non-sensitive) */
     {"mqtt_enabled",       "MQTT Enabled",       "MQTT", false, false},
@@ -919,6 +923,15 @@ static app_config_t *parse_config_from_json(cJSON *root)
     }
     cJSON *jnorthup = cJSON_GetObjectItem(root, "moon_north_up");
     if (jnorthup && cJSON_IsNumber(jnorthup)) cfg->moon_north_up = (jnorthup->valueint != 0) ? 1 : 0;
+    cJSON *jspinmode = cJSON_GetObjectItem(root, "moon_spin_mode");
+    if (jspinmode && cJSON_IsNumber(jspinmode)) cfg->moon_spin_mode = (jspinmode->valueint != 0) ? 1 : 0;
+    cJSON *jspinret = cJSON_GetObjectItem(root, "moon_spin_return_s");
+    if (jspinret && cJSON_IsNumber(jspinret)) {
+        int v = jspinret->valueint;
+        if (v < 3) v = 3;
+        if (v > 60) v = 60;
+        cfg->moon_spin_return_s = (uint8_t)v;
+    }
 
     cJSON *taw_item = cJSON_GetObjectItem(root, "toast_aggregation_window_s");
     if (cJSON_IsNumber(taw_item)) {

@@ -62,10 +62,6 @@ static bool dsc_b_borrowed = false;
 static bool front_is_a = true;
 static int64_t displayed_poll_ms;
 static bool crossfade_active = false;
-/* One-shot: when set, the NEXT nina_image_display_update() is allowed to crossfade
- * even for the Moon source (which normally swaps instantly). Used for the smooth
- * settle->resting dissolve at the end of a drag. Consumed (cleared) in update(). */
-static bool moon_crossfade_once = false;
 /* Owned, reused copy buffers for the moon-drag SOFTWARE-SCALE FALLBACK (used only
  * when PPA hardware upscale is unavailable). The render task hands us a small 240px
  * RGB565 buffer it overwrites each frame; we COPY it here so the LVGL descriptor
@@ -514,17 +510,11 @@ void nina_image_display_update(goes_data_t *data)
      * frame is pointless and, since displayed_poll_ms == poll_ms here, would not
      * key as first_image.
      *
-     * The settle->resting handoff is the one moon exception: moon_crossfade_once
-     * dissolves the crisp 600px resting frame in over the last 300px settle frame
-     * so the resolution/lighting change is not an abrupt pop. It is one-shot and
-     * deliberately OVERRIDES `forced` (the resting commit still sets force_redraw to
-     * bypass the same-millisecond new-image gate, but wants a crossfade not an
-     * instant swap). first_image still forces instant (nothing to fade from). */
-    bool moon_xf = (app_config_get()->image_display_source == 1) && moon_crossfade_once
-                   && !first_image;   /* nothing to fade from on the first image */
-    moon_crossfade_once = false;
+     * The settle->resting handoff (drag end) also swaps instantly: a crossfade
+     * there hit the same midpoint brightness dip, reading as a visible jump as the
+     * crisp resting frame faded in. Instant matches every other moon frame swap. */
     bool instant = first_image ||
-                   (!moon_xf && (forced || (app_config_get()->image_display_source == 1)));
+                   forced || (app_config_get()->image_display_source == 1);
     /* poll_ms == displayed_poll_ms on a forced re-crop (same cached frame), so
      * this assignment leaves displayed_poll_ms unchanged and a later real
      * download (higher last_poll_ms) still passes the new-image gate. */
@@ -751,15 +741,6 @@ void nina_image_display_force_redraw(void)
     force_redraw = true;
 }
 
-void nina_image_display_set_moon_crossfade_once(void)
-{
-    /* Arm a one-shot crossfade for the NEXT update() even on the Moon source. Used
-     * by the drag-settle path to dissolve the crisp resting frame in over the last
-     * settle frame instead of an instant pop. Plain bool, touched only under the
-     * display lock the caller holds (same as force_redraw). */
-    moon_crossfade_once = true;
-}
-
 bool nina_image_display_has_image(void)
 {
     /* True once a frame has been committed to the page; reset to 0 by
@@ -796,7 +777,6 @@ void nina_image_display_cleanup(void)
         if (moon_copy_buf[i]) { heap_caps_free(moon_copy_buf[i]); moon_copy_buf[i] = NULL; }
         moon_copy_cap[i] = 0;
     }
-    moon_crossfade_once = false;
 
     displayed_poll_ms = 0;
     front_is_a = true;
