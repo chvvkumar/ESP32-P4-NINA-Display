@@ -135,7 +135,44 @@ void moon_compute(time_t utc, double lat, double lon, moon_state_t *out)
                        sin(Dec_s*DEG) * cos(Dec_m*DEG)
                        - cos(Dec_s*DEG) * sin(Dec_m*DEG) * cos(dRA)); /* radians */
 
+    /* ---- Libration (Meeus ch.53, optical) ---- */
+    const double I = 1.54242 * DEG;
+    double Wl   = (mlon - Nm) * DEG;
+    double beta = mlat * DEG;
+    double sb = sin(beta), cb = cos(beta);
+    double bprime = asin(-sin(Wl)*cb*sin(I) - sb*cos(I));
+    double Acol   = atan2(sin(Wl)*cb*cos(I) - sb*sin(I), cos(Wl)*cb);
+    double lprime = Acol - F*DEG;
+    while (lprime >  M_PI) lprime -= 2*M_PI;
+    while (lprime < -M_PI) lprime += 2*M_PI;
+    out->lib_lon = (float)lprime;
+    out->lib_lat = (float)bprime;
+    /* Position angle of the axis P (Meeus 53). */
+    double Vp = Nm * DEG;
+    double xP = sin(I)*sin(Vp);
+    double yP = sin(I)*cos(Vp)*cos(oblecl) - cos(I)*sin(oblecl);
+    double wP = atan2(xP, yP);
+    double Pang = asin( sqrt(xP*xP + yP*yP) * cos(RA_m*DEG - wP) / cos(bprime) );
+    out->axis_P = (float)Pang;
+
+    /* ---- Sub-solar point (Sun's selenographic coords), SIMPLIFIED ----
+     * Treats the Sun as anti-solar from the Moon (lambdaH = slon + 180) and the
+     * Sun's ecliptic latitude as 0. This omits the Moon's parallax (~0.95 deg) and
+     * the Moon/Sun ecliptic-latitude contribution, so sun_lon carries up to ~1 deg
+     * error -> the lit-fraction terminator longitude inherits that error. Adequate
+     * for Phase 1; to be refined with the Meeus ch.53 colongitude term in Phase 2. */
+    double lambdaH = slon*DEG + M_PI;   /* Sun direction from the Moon, approx */
+    double WlS = lambdaH - Nm*DEG;
+    double bS  = asin(-sin(WlS)*sin(I));
+    double AS  = atan2(sin(WlS)*cos(I), cos(WlS));
+    double lS  = AS - F*DEG;
+    while (lS >  M_PI) lS -= 2*M_PI;
+    while (lS < -M_PI) lS += 2*M_PI;
+    out->sun_lon = (float)lS;
+    out->sun_lat = (float)bS;
+
     if (!out->have_location) {
+        out->roll = out->axis_P;
         /* North-up convention: lit-on-right (waxing) means bright limb at +90deg.
          * Render expects orient_rad=0 for that convention, so collapse to 0. */
         out->orient_rad = 0.0f;
@@ -156,6 +193,7 @@ void moon_compute(time_t utc, double lat, double lon, moon_state_t *out)
      * renderer's rotation: rotate the north-up disc by (chi - q - 90deg). */
     double zenith_pa = chi - q;                     /* radians, from zenith, eastward */
     out->orient_rad = (float)(zenith_pa - M_PI/2.0);
+    out->roll = (float)(Pang - q);
 }
 
 void moon_state_from_cycle(double cycle, float orient_rad, moon_state_t *out)
@@ -172,5 +210,11 @@ void moon_state_from_cycle(double cycle, float orient_rad, moon_state_t *out)
     out->phase_index   = pi;
     out->phase_name    = PHASE_NAMES[pi];
     out->orient_rad    = orient_rad;
+    out->lib_lon       = 0.0f;
+    out->lib_lat       = 0.0f;
+    out->sun_lon       = 0.0f;
+    out->sun_lat       = 0.0f;
+    out->roll          = orient_rad;
+    out->axis_P        = 0.0f;
     out->have_location = true;
 }

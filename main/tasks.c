@@ -12,6 +12,7 @@
 #include "allsky_client.h"
 #include "goes_client.h"
 #include "moon_render.h"
+#include "moon_sphere.h"   /* tgx sphere renderer for the Moon page */
 #include "moon_ephemeris.h"
 #include <math.h>           /* acos() for seamless anim start cycle */
 #include "spotify_auth.h"
@@ -605,7 +606,10 @@ void goes_poll_task(void *arg)
              * render until the clock is valid and retry quickly so the correct
              * moon appears as soon as time syncs; then settle to ~60s. */
             bool time_valid = (now > (time_t)1577836800);  /* >= 2020-01-01 UTC */
-            if (time_valid && moon_render_init()) {
+            /* tgx path prepares its own texture lazily in moon_sphere_render();
+             * gate only on a valid clock (the flat PNG decode is not used). */
+            bool moon_ready = moon_sphere_init();
+            if (time_valid && moon_ready) {
                 double lat = cfg->moon_lat, lon = cfg->moon_lon;
                 if (lat == 0.0 && lon == 0.0) { lat = cfg->weather_lat; lon = cfg->weather_lon; }
                 moon_state_t live;
@@ -617,65 +621,30 @@ void goes_poll_task(void *arg)
                  * once. Both phase and orientation are periodic over the sweep, so
                  * t=1 lands back on the live values with no visible jump. */
                 if (atomic_exchange(&moon_anim_request, false)) {
-                    const int     ASZ    = 300;        /* reduced anim resolution   */
-                    const int64_t DUR_US = 4000000;    /* ~4s total sweep           */
-                    /* Start the sweep from the cycle fraction that reproduces the
-                     * live illumination exactly. moon_state_from_cycle() uses the
-                     * mean (1-cos)/2 mapping while moon_compute() uses the true
-                     * phase angle, so seeding from live.cycle would pop a few %
-                     * at the start/end. Inverting live.illum makes frame t=0 and
-                     * t=1 match the accurate resting frame — seamless both ends. */
-                    double illum_arg = 1.0 - 2.0 * (double)live.illum;
-                    if (illum_arg < -1.0) illum_arg = -1.0;
-                    if (illum_arg >  1.0) illum_arg =  1.0;
-                    double half = acos(illum_arg) / 6.283185307179586;   /* [0,0.5] */
-                    double start_cycle  = live.waxing ? half : (1.0 - half);
-                    float  start_orient = live.orient_rad;
-                    int64_t t0 = esp_timer_get_time();
-                    for (;;) {
-                        /* Abort cleanly if the page is hidden or the source changed. */
-                        if (!image_display_page_active || cfg->image_display_source != 1) break;
-                        int64_t el = esp_timer_get_time() - t0;
-                        if (el >= DUR_US) break;
-                        float tt = (float)el / (float)DUR_US;        /* 0..1            */
-                        float te = tt * tt * (3.0f - 2.0f * tt);     /* smoothstep ease */
-                        moon_state_t anim;
-                        moon_state_from_cycle(start_cycle + (double)te,
-                                              start_orient + 6.2831853f * te, &anim);
-                        uint16_t *aimg = moon_render(ASZ, ASZ, &anim, cfg->moon_bg_style);
-                        if (aimg) {
-                            if (goes_data_lock(&goes_data, 1000)) {
-                                if (goes_data.image_buf) heap_caps_free(goes_data.image_buf);
-                                goes_data.image_buf = (uint8_t *)aimg;
-                                goes_data.image_w = ASZ;
-                                goes_data.image_h = ASZ;
-                                goes_data.vflip = false;
-                                goes_data.connected = true;
-                                goes_data.last_poll_ms = esp_timer_get_time() / 1000;
-                                goes_data_unlock(&goes_data);
-                                /* Push the frame using the same locked-update idiom
-                                 * as data_update_task; render happened unlocked. */
-                                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                                    nina_image_display_update(&goes_data);
-                                    bsp_display_unlock();
-                                }
-                            } else {
-                                heap_caps_free(aimg);
-                            }
-                        }
-                        /* Pace ~30fps and yield to the Core 0 idle task (watchdog). */
-                        vTaskDelay(pdMS_TO_TICKS(5));
-                    }
-                    /* Resync to the live current phase after the sweep. */
-                    time(&now);
-                    moon_compute(now, lat, lon, &live);
+                    /* tgx tap-animation is a later phase; consume the tap (above)
+                     * and otherwise no-op, so the resting tgx frame renders below. */
                 }
 
                 /* Normal full-res render of the live current phase. Runs whether or
                  * not an animation played; the caption reads the resting state. */
                 s_moon_state = live;
                 const int MOON_SZ = 600;
-                uint16_t *img = moon_render(MOON_SZ, MOON_SZ, &live, cfg->moon_bg_style);
+                /* Render with tgx and log timing. When debug_mode is on, also
+                 * sweep candidate sizes so the size/fps tradeoff is visible on
+                 * serial for evaluation. */
+                if (cfg->debug_mode) {
+                    const int sizes[3] = {240, 300, 400};
+                    for (int si = 0; si < 3; si++) {
+                        int64_t te0 = esp_timer_get_time();
+                        uint16_t *tmp = moon_sphere_render(sizes[si], sizes[si], &live, 96, 48, cfg->moon_bg_style);
+                        int64_t te = esp_timer_get_time() - te0;
+                        ESP_LOGI(TAG, "tgx moon %dx%d render %lld ms", sizes[si], sizes[si], te/1000);
+                        if (tmp) heap_caps_free(tmp);
+                    }
+                }
+                int64_t t0 = esp_timer_get_time();
+                uint16_t *img = moon_sphere_render(MOON_SZ, MOON_SZ, &live, 96, 48, cfg->moon_bg_style);
+                ESP_LOGI(TAG, "tgx moon %dx%d render %lld ms", MOON_SZ, MOON_SZ, (esp_timer_get_time()-t0)/1000);
                 if (img) {
                     if (goes_data_lock(&goes_data, 1000)) {
                         if (goes_data.image_buf) heap_caps_free(goes_data.image_buf);

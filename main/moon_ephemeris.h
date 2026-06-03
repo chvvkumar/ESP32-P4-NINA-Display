@@ -17,6 +17,12 @@ typedef struct {
     float       orient_rad;   /* rotation to apply to a north-up disc so the lit limb
                                  points to the correct sky direction (radians, CCW+).
                                  0 = north-up convention (lit-on-right for waxing). */
+    float       lib_lon;      /* optical libration in longitude l' (radians, +E) */
+    float       lib_lat;      /* optical libration in latitude  b' (radians, +N) */
+    float       sun_lon;      /* sub-solar selenographic longitude (radians) */
+    float       sun_lat;      /* sub-solar selenographic latitude  (radians) */
+    float       roll;         /* disc roll for renderer (radians, CCW+): P-q located, P north-up */
+    float       axis_P;       /* position angle of lunar axis P (radians), pre-parallactic */
     bool        have_location;/* false => lat/lon were unset; orient_rad is the
                                  north-up fallback */
 } moon_state_t;
