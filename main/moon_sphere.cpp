@@ -40,6 +40,10 @@ extern "C" {
 #include "stb_image.h"
 }
 
+/* Runtime orientation config (moon_flip_u/v, moon_roll/yaw/pitch_offset). The
+ * header self-guards with its own extern "C", so include it at file scope. */
+#include "app_config.h"
+
 using namespace tgx;
 
 static const char *TAG = "moon_sphere";
@@ -48,28 +52,35 @@ static const char *TAG = "moon_sphere";
  * Orientation tunables (compile-time). Defaults are reasoned from the tgx
  * sphere conventions documented in moon_sphere_render() below and yield the
  * STANDARD near-side naked-eye view: north up, selenographic EAST (Mare Crisium,
- * +lon) on the RIGHT, lunar south (Tycho) at the BOTTOM. Flip exactly one of
- * these in one edit if the device shows a residual error:
+ * +lon) on the RIGHT, lunar south (Tycho) at the BOTTOM.
+ *
+ * The texture U/V flips and the roll/yaw/pitch trims are now RUNTIME config
+ * (app_config_t: moon_flip_u, moon_flip_v, moon_roll_offset, moon_yaw_offset,
+ * moon_pitch_offset), tunable live from the web UI; all default to 0, so the
+ * default behavior matches this base orientation:
  *
  *   - If features/terminator are mirrored EAST<->WEST (left-right): set
- *     MOON_TEX_FLIP_U to 1. (Mirrors the texture longitude only.)
- *   - If the disc is upside-down (NORTH<->SOUTH): set MOON_TEX_FLIP_V to 1.
- *   - If the disc rolls the WRONG way (parallactic angle sense reversed): set
- *     MOON_ROLL_SIGN to -1.
- *   - To verify the BASE orientation against a north-up near-side reference
- *     photo, set MOON_DEBUG_GEOCENTRIC to 1: this forces roll=0 AND
- *     libration=0 while keeping lighting correct, so the rendered disc should
- *     be exactly north-up / east-right / south-bottom.
+ *     moon_flip_u (mirrors the texture longitude only).
+ *   - If the disc is upside-down (NORTH<->SOUTH): set moon_flip_v.
+ *   - To trim parallactic roll / drag yaw / drag pitch: use moon_roll_offset /
+ *     moon_yaw_offset / moon_pitch_offset (degrees).
  *
- * MOON_TEX_FLIP_U / _V are applied to the texture buffer at decode time (the
- * tgx drawSphere computes UVs internally, so the only deterministic place to
- * flip u/v is the texture image itself).
+ * The MOON_TEX_FLIP_U / _V / MOON_ROLL_SIGN #defines below are now unused
+ * fallbacks kept for reference; the live path reads config instead. To verify
+ * the BASE orientation against a north-up near-side reference photo, set
+ * MOON_DEBUG_GEOCENTRIC to 1: this forces roll=0 AND libration=0 (and ignores
+ * yaw/pitch/offsets) while keeping lighting correct, so the rendered disc should
+ * be exactly north-up / east-right / south-bottom.
+ *
+ * The runtime flips are applied to the texture buffer at decode time (the tgx
+ * drawSphere computes UVs internally, so the only deterministic place to flip
+ * u/v is the texture image itself); a flip change re-decodes the texture live.
  * --------------------------------------------------------------------------*/
 #ifndef MOON_TEX_FLIP_U
-#define MOON_TEX_FLIP_U     0   /* 1 = mirror texture longitude (east<->west) */
+#define MOON_TEX_FLIP_U     0   /* unused fallback: runtime flip now from config */
 #endif
 #ifndef MOON_TEX_FLIP_V
-#define MOON_TEX_FLIP_V     0   /* 1 = flip texture latitude (north<->south)  */
+#define MOON_TEX_FLIP_V     0   /* unused fallback: runtime flip now from config */
 #endif
 #ifndef MOON_ROLL_SIGN
 #define MOON_ROLL_SIGN      (+1) /* flip to -1 if the disc rolls the wrong way */
@@ -131,6 +142,12 @@ static Image<RGB565>    s_tex;                  /* wraps s_tex_buf              
 static bool             s_inited = false;
 static SemaphoreHandle_t s_init_mtx = nullptr;
 
+/* Runtime flip state actually baked into s_tex_buf. Used to detect a config
+ * change in render_core and trigger a texture re-decode so flip toggles from
+ * the web UI take effect live. -1 = "no texture decoded yet". */
+static int              s_applied_flip_u = -1;
+static int              s_applied_flip_v = -1;
+
 /* Simple value-noise-ish banding + a few darker "maria" blobs, grayscale.
  * All float math; runs once at init so cost is irrelevant. */
 static void generate_placeholder_texture()
@@ -187,6 +204,12 @@ static void generate_placeholder_texture()
  * Returns true on success and sets s_tex_w/s_tex_h. */
 static bool alloc_texture(int w, int h)
 {
+    /* Free any previously decoded buffer so re-decode (flip toggle) does not
+     * leak PSRAM. On the first call s_tex_buf is NULL and this is a no-op. */
+    if (s_tex_buf) {
+        heap_caps_free(s_tex_buf);
+        s_tex_buf = nullptr;
+    }
     size_t bytes = (size_t)w * (size_t)h * sizeof(uint16_t);
     s_tex_buf = (uint16_t *)heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
     if (!s_tex_buf) {
@@ -201,36 +224,46 @@ static bool alloc_texture(int w, int h)
     return true;
 }
 
-/* Apply the MOON_TEX_FLIP_U / MOON_TEX_FLIP_V escape-hatch mirrors to the
- * already-filled texture buffer (s_tex_buf, s_tex_w x s_tex_h, RGB565).
- *  - FLIP_U mirrors columns (x -> w-1-x): east<->west longitude swap.
- *  - FLIP_V mirrors rows    (y -> h-1-y): north<->south latitude swap.
- * Both default OFF; the base orientation is already correct without them.
- * Compiled out entirely when the corresponding flag is 0 so there is no
- * per-pixel cost on the default path. */
+/* Apply the RUNTIME texture mirrors to the already-filled texture buffer
+ * (s_tex_buf, s_tex_w x s_tex_h, RGB565). The flip state comes from the live
+ * config (cfg->moon_flip_u / cfg->moon_flip_v), NOT the compile-time #defines:
+ *  - flip_u mirrors columns (x -> w-1-x): east<->west longitude swap.
+ *  - flip_v mirrors rows    (y -> h-1-y): north<->south latitude swap.
+ * Both default OFF (config defaults 0), so the base orientation is unchanged on
+ * defaults. Records the applied state in s_applied_flip_u/v so render_core can
+ * detect a later config change and re-decode. Mirroring runs unconditionally
+ * based on the runtime booleans (no #if) so toggling from the web UI works. */
 static void apply_texture_flips(void)
 {
-#if MOON_TEX_FLIP_U
-    for (int y = 0; y < s_tex_h; y++) {
-        uint16_t *row = s_tex_buf + (size_t)y * (size_t)s_tex_w;
-        for (int x = 0; x < s_tex_w / 2; x++) {
-            uint16_t t = row[x];
-            row[x] = row[s_tex_w - 1 - x];
-            row[s_tex_w - 1 - x] = t;
+    const app_config_t *cfg = app_config_get();
+    int flip_u = (cfg && cfg->moon_flip_u) ? 1 : 0;
+    int flip_v = (cfg && cfg->moon_flip_v) ? 1 : 0;
+
+    if (flip_u) {
+        for (int y = 0; y < s_tex_h; y++) {
+            uint16_t *row = s_tex_buf + (size_t)y * (size_t)s_tex_w;
+            for (int x = 0; x < s_tex_w / 2; x++) {
+                uint16_t t = row[x];
+                row[x] = row[s_tex_w - 1 - x];
+                row[s_tex_w - 1 - x] = t;
+            }
         }
     }
-#endif
-#if MOON_TEX_FLIP_V
-    for (int y = 0; y < s_tex_h / 2; y++) {
-        uint16_t *a = s_tex_buf + (size_t)y * (size_t)s_tex_w;
-        uint16_t *b = s_tex_buf + (size_t)(s_tex_h - 1 - y) * (size_t)s_tex_w;
-        for (int x = 0; x < s_tex_w; x++) {
-            uint16_t t = a[x];
-            a[x] = b[x];
-            b[x] = t;
+    if (flip_v) {
+        for (int y = 0; y < s_tex_h / 2; y++) {
+            uint16_t *a = s_tex_buf + (size_t)y * (size_t)s_tex_w;
+            uint16_t *b = s_tex_buf + (size_t)(s_tex_h - 1 - y) * (size_t)s_tex_w;
+            for (int x = 0; x < s_tex_w; x++) {
+                uint16_t t = a[x];
+                a[x] = b[x];
+                b[x] = t;
+            }
         }
     }
-#endif
+
+    /* Remember what is now baked into the buffer for live re-decode detection. */
+    s_applied_flip_u = flip_u;
+    s_applied_flip_v = flip_v;
 }
 
 /* Build the procedural placeholder texture (fallback when the real JPEG fails
@@ -266,9 +299,9 @@ static bool init_real_texture(void)
     }
 
     int w = 0, h = 0, ch = 0;
-    /* Force 1 channel (grayscale). req_comp=1 => stb returns 1 byte per pixel. */
+    /* Force 3 channels (RGB). req_comp=3 => stb returns 3 bytes per pixel (R,G,B). */
     unsigned char *img = stbi_load_from_memory(moon_equirect_jpg_start,
-                                               (int)len, &w, &h, &ch, 1);
+                                               (int)len, &w, &h, &ch, 3);
     if (img == nullptr) {
         ESP_LOGW(TAG, "stbi decode of moon_equirect.jpg failed: %s",
                  stbi_failure_reason() ? stbi_failure_reason() : "unknown");
@@ -286,15 +319,16 @@ static bool init_real_texture(void)
         return false;
     }
 
-    /* Convert each grayscale byte to RGB565. Grayscale => R=G=B, so the packed
-     * value is identical regardless of channel bit order. Pack manually:
-     * R5 = g>>3, G6 = g>>2, B5 = g>>3. */
+    /* Convert each RGB triplet to RGB565: R5 = r>>3, G6 = g>>2, B5 = b>>3.
+     * stb returned 3 bytes/pixel in R,G,B order (req_comp=3). */
     const unsigned char *src = img;
     for (int y = 0; y < h; y++) {
         uint16_t *dst = s_tex_buf + (size_t)y * (size_t)w;
         for (int x = 0; x < w; x++) {
+            unsigned int r = *src++;
             unsigned int g = *src++;
-            dst[x] = (uint16_t)(((g & 0xF8) << 8) | ((g & 0xFC) << 3) | (g >> 3));
+            unsigned int b = *src++;
+            dst[x] = (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
         }
     }
 
@@ -319,6 +353,29 @@ extern "C" bool moon_sphere_init(void)
 
     if (s_init_mtx) xSemaphoreGive(s_init_mtx);
     return s_inited;
+}
+
+/* Re-decode the texture if the live flip config differs from what is currently
+ * baked into s_tex_buf. Re-runs the real (or placeholder) decode, which calls
+ * apply_texture_flips() with the CURRENT config, so flip toggles from the web UI
+ * take effect on the next render. Guarded by the init mutex; alloc_texture()
+ * frees the old buffer before re-allocating, so there is no leak. No-op when the
+ * flip state already matches (the common case, zero cost on the steady path). */
+static void moon_sphere_reflip_if_changed(void)
+{
+    const app_config_t *cfg = app_config_get();
+    int want_u = (cfg && cfg->moon_flip_u) ? 1 : 0;
+    int want_v = (cfg && cfg->moon_flip_v) ? 1 : 0;
+    if (want_u == s_applied_flip_u && want_v == s_applied_flip_v) return;
+
+    if (s_init_mtx) xSemaphoreTake(s_init_mtx, portMAX_DELAY);
+    /* Re-check under the lock in case another task already re-decoded. */
+    if (want_u != s_applied_flip_u || want_v != s_applied_flip_v) {
+        /* init_real_texture() / init_placeholder_texture() re-alloc (freeing the
+         * old buffer) and re-apply the now-current flips. */
+        if (!init_real_texture()) init_placeholder_texture();
+    }
+    if (s_init_mtx) xSemaphoreGive(s_init_mtx);
 }
 
 /* Shaders compiled into the renderer for this evaluation:
@@ -359,6 +416,16 @@ static uint16_t *moon_sphere_render_core(int w, int h, const moon_state_t *st,
 {
     const size_t npix      = (size_t)w * (size_t)h;
     const size_t color_sz  = npix * sizeof(uint16_t);
+
+    /* Live orientation config, read once. Controls the runtime texture flips and
+     * the roll/yaw/pitch offsets applied below. Defaults are all 0 so default
+     * behavior matches the pre-config render exactly. */
+    const app_config_t *cfg = app_config_get();
+
+    /* If the flip config changed since the texture was last decoded, re-decode
+     * now (frees + re-allocs the buffer with the current flips applied) so web-UI
+     * flip toggles take effect live. No-op when the flip state is unchanged. */
+    moon_sphere_reflip_if_changed();
 
     /* ----- Background ----------------------------------------------------
      * Drawn DIRECTLY into color_buf BEFORE the sphere is rasterized. The
@@ -516,7 +583,19 @@ static uint16_t *moon_sphere_render_core(int w, int h, const moon_state_t *st,
     const float RAD2DEG = 57.2957795131f;
     float lib_lon_deg = st->lib_lon * RAD2DEG;
     float lib_lat_deg = st->lib_lat * RAD2DEG;
-    float roll_deg    = (float)(MOON_ROLL_SIGN) * st->roll * RAD2DEG;
+    /* moon_north_up: when set, ignore the parallactic/topocentric tilt (st->roll)
+     * and keep the disc upright/north-up; libration, phase, and the live roll trim
+     * offset still apply. When clear, use the true sky tilt. */
+    float roll_deg    = ((cfg && cfg->moon_north_up) ? 0.0f
+                         : (float)(MOON_ROLL_SIGN) * st->roll * RAD2DEG)
+                        + (cfg ? cfg->moon_roll_offset : 0.0f); /* north-up forces 0 tilt; offset still applies */
+    /* Live yaw/pitch offsets from config, added to the drag-supplied yaw/pitch.
+     * Inside the #else (normal) branch so the MOON_DEBUG_GEOCENTRIC override
+     * (which zeroes yaw/pitch) still wins when debug is enabled. */
+    if (cfg) {
+        yaw_deg   += cfg->moon_yaw_offset;
+        pitch_deg += cfg->moon_pitch_offset;
+    }
 #endif
 
     /* R_sky: the SKY orientation rotation (libration + base + parallactic roll).
