@@ -136,6 +136,12 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
     cJSON_AddNumberToObject(obj, "moon_lon", (double)cfg->moon_lon);
     cJSON_AddNumberToObject(obj, "solar_band", cfg->solar_band);
     cJSON_AddNumberToObject(obj, "moon_drag_light_mode", cfg->moon_drag_light_mode);
+    cJSON_AddNumberToObject(obj, "moon_flip_u", cfg->moon_flip_u);
+    cJSON_AddNumberToObject(obj, "moon_flip_v", cfg->moon_flip_v);
+    cJSON_AddNumberToObject(obj, "moon_roll_offset", (double)cfg->moon_roll_offset);
+    cJSON_AddNumberToObject(obj, "moon_yaw_offset", (double)cfg->moon_yaw_offset);
+    cJSON_AddNumberToObject(obj, "moon_pitch_offset", (double)cfg->moon_pitch_offset);
+    cJSON_AddNumberToObject(obj, "moon_north_up", cfg->moon_north_up);
     cJSON_AddNumberToObject(obj, "toast_aggregation_window_s", cfg->toast_aggregation_window_s);
     cJSON_AddNumberToObject(obj, "toast_notify_mask", cfg->toast_notify_mask);
     cJSON_AddBoolToObject(obj, "toast_instance_muted_1", cfg->toast_instance_muted[0]);
@@ -319,6 +325,12 @@ static const backup_field_t s_backup_fields[] = {
     {"moon_lon",                   "Moon Longitude",       "Image Display", false, false},
     {"solar_band",                 "Solar Band",           "Image Display", false, false},
     {"moon_drag_light_mode",       "Moon Drag Lighting",   "Image Display", false, false},
+    {"moon_flip_u",                "Moon Flip U",          "Image Display", false, false},
+    {"moon_flip_v",                "Moon Flip V",          "Image Display", false, false},
+    {"moon_roll_offset",           "Moon Roll Offset",     "Image Display", false, false},
+    {"moon_yaw_offset",            "Moon Yaw Offset",      "Image Display", false, false},
+    {"moon_pitch_offset",          "Moon Pitch Offset",    "Image Display", false, false},
+    {"moon_north_up",              "Moon North-Up",        "Image Display", false, false},
 
     /* MQTT (non-sensitive) */
     {"mqtt_enabled",       "MQTT Enabled",       "MQTT", false, false},
@@ -879,6 +891,34 @@ static app_config_t *parse_config_from_json(cJSON *root)
 
     JSON_TO_INT(root, "solar_band", cfg->solar_band);
     JSON_TO_INT(root, "moon_drag_light_mode", cfg->moon_drag_light_mode);
+
+    cJSON *jflipu = cJSON_GetObjectItem(root, "moon_flip_u");
+    if (jflipu && cJSON_IsNumber(jflipu)) cfg->moon_flip_u = (jflipu->valueint != 0) ? 1 : 0;
+    cJSON *jflipv = cJSON_GetObjectItem(root, "moon_flip_v");
+    if (jflipv && cJSON_IsNumber(jflipv)) cfg->moon_flip_v = (jflipv->valueint != 0) ? 1 : 0;
+    cJSON *jroll = cJSON_GetObjectItem(root, "moon_roll_offset");
+    if (jroll && cJSON_IsNumber(jroll)) {
+        float v = (float)jroll->valuedouble;
+        if (v < -180.0f) v = -180.0f;
+        if (v > 180.0f) v = 180.0f;
+        cfg->moon_roll_offset = v;
+    }
+    cJSON *jyaw = cJSON_GetObjectItem(root, "moon_yaw_offset");
+    if (jyaw && cJSON_IsNumber(jyaw)) {
+        float v = (float)jyaw->valuedouble;
+        if (v < -180.0f) v = -180.0f;
+        if (v > 180.0f) v = 180.0f;
+        cfg->moon_yaw_offset = v;
+    }
+    cJSON *jpitch = cJSON_GetObjectItem(root, "moon_pitch_offset");
+    if (jpitch && cJSON_IsNumber(jpitch)) {
+        float v = (float)jpitch->valuedouble;
+        if (v < -90.0f) v = -90.0f;
+        if (v > 90.0f) v = 90.0f;
+        cfg->moon_pitch_offset = v;
+    }
+    cJSON *jnorthup = cJSON_GetObjectItem(root, "moon_north_up");
+    if (jnorthup && cJSON_IsNumber(jnorthup)) cfg->moon_north_up = (jnorthup->valueint != 0) ? 1 : 0;
 
     cJSON *taw_item = cJSON_GetObjectItem(root, "toast_aggregation_window_s");
     if (cJSON_IsNumber(taw_item)) {
