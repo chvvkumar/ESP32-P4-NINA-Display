@@ -87,20 +87,66 @@
     /* Non-collapsible cards (e.g. Logs): no chevron, no pointer affordance */
     .card.nocollapse > .card-title { cursor: default; }
     .card.nocollapse > .card-title::after { display: none; }
-    /* Logs tab: break out wider than the 960px content column */
-    #tab-logs .card { width: min(1180px, 94vw); margin-left: 50%; transform: translateX(-50%); }
+    /* Logs tab: break out wider than the 960px content column, and fit the window
+       as a flex column so only the viewport scrolls (not the page). */
+    #tab-logs .card {
+      width: min(1180px, 94vw); margin-left: 50%; transform: translateX(-50%);
+      display: flex; flex-direction: column; box-sizing: border-box;
+      max-height: calc(100vh - 208px);
+    }
     .logs-layout { display: flex; gap: 18px; align-items: stretch; }
     .logs-controls { flex: 0 0 220px; display: flex; flex-direction: column; gap: 12px; }
     .logs-controls .btn { width: 100%; }
+    /* Logs card: horizontal toolbar layout */
+    .logs-toolbar {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+      margin: 0 0 12px;
+    }
+    .logs-toolbar .btn {
+      width: auto;
+      min-height: 0; padding: 7px 18px;
+      font-size: 0.8rem; font-weight: 500;
+      border-radius: var(--radius-sm);
+      text-decoration: none;
+    }
+    .logs-toolbar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .logs-toolbar-slot { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+    /* Segmented source toggle (Device | Crash) */
+    .log-seg {
+      display: inline-flex; border: 1px solid var(--border);
+      border-radius: var(--radius-sm); overflow: hidden; margin: 0;
+    }
+    /* Meta row: hint left, status right; sits between toolbar and viewport. */
+    .logs-meta {
+      display: flex; flex-wrap: wrap; align-items: baseline;
+      gap: 4px 14px; margin: 0 0 10px;
+    }
+    .logs-meta .field-hint { margin: 0; }
+    #logsStatus, #crashlogStatus { margin-left: auto; }
+    .log-seg-btn {
+      background: none; border: none; cursor: pointer; font-family: inherit;
+      color: var(--text-secondary); padding: 7px 18px; font-size: 0.8rem;
+      font-weight: 500; transition: all 0.2s ease; white-space: nowrap;
+    }
+    .log-seg-btn + .log-seg-btn { border-left: 1px solid var(--border); }
+    .log-seg-btn:hover { color: var(--text); background: rgba(var(--accent-rgb), 0.08); }
+    .log-seg-btn.active {
+      color: #f4f4f5; background: rgba(var(--accent-rgb), 0.18);
+      box-shadow: inset 0 0 12px rgba(var(--accent-rgb), 0.12);
+    }
     .logs-view {
-      flex: 1; min-width: 0; margin: 0;
-      height: calc(100vh - 240px); min-height: 420px; overflow: auto;
+      min-width: 0; margin: 0; overflow: auto;
+      flex: 1 1 auto; min-height: 0;
       white-space: pre-wrap; word-break: break-word;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 0.72rem; line-height: 1.4; color: var(--text-secondary);
       background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border);
       border-radius: var(--radius-sm); padding: 12px;
     }
+    /* Both viewports fill the leftover flex space and scroll internally. */
+    #logsView.logs-view { height: auto; min-height: 0; }
+    #crashlogView.logs-view { max-height: none; min-height: 0; }
+    .logs-view.hidden { display: none; }
     .content { max-width: 960px; margin: 0 auto; padding: 28px 24px 100px; }
     .field { margin-bottom: 20px; }
     .field:last-child { margin-bottom: 0; }
@@ -569,11 +615,14 @@
       .toast { top: auto; bottom: calc(var(--bottom-nav-height) + var(--save-bar-height) + env(safe-area-inset-bottom, 0px) + 16px); right: 16px; }
       .row.stack-mobile { flex-direction: column; }
 
-      /* Logs: stack controls above the viewer on narrow screens, drop the breakout */
-      #tab-logs .card { width: auto; margin-left: 0; transform: none; }
+      /* Logs: stack controls above the viewer on narrow screens, drop the breakout.
+         Page scroll is acceptable on mobile, so the card is a plain block here. */
+      #tab-logs .card { width: auto; margin-left: 0; transform: none; max-height: none; display: block; }
       .logs-layout { flex-direction: column; }
       .logs-controls { flex: 0 0 auto; }
-      .logs-view { height: 60vh; min-height: 300px; }
+      .logs-toolbar-slot { margin-left: 0; }
+      #logsView.logs-view { height: 60vh; min-height: 300px; }
+      #crashlogView.logs-view { height: auto; max-height: 60vh; }
 
       /* Card titles */
       .card-title { font-size: 0.9rem; }
@@ -649,7 +698,7 @@
   <nav class="top-nav">
     <div class="brand"><img class="logo" src="/favicon.ico" alt=""> <span id="brandName">NINA Display</span></div>
     <div class="tabs" id="topTabs">
-      <button class="tab-btn active" data-tab="nodes">N.I.N.A.</button>
+      <button class="tab-btn" data-tab="nodes">N.I.N.A.</button>
       <button class="tab-btn" data-tab="allsky">AllSky</button>
       <button class="tab-btn" data-tab="clock">Clock</button>
       <button class="tab-btn" data-tab="spotify">Spotify</button>
@@ -723,7 +772,7 @@
   <main class="content">
 
     <!-- ==================== TAB 2: NODES & DATA ==================== -->
-    <div id="tab-nodes" class="tab-panel active">
+    <div id="tab-nodes" class="tab-panel">
 
       <div class="card" id="instance-overview">
         <div class="card-title">Active N.I.N.A. Instances</div>
@@ -1120,8 +1169,8 @@
           <div class="field" style="margin-top:16px" id="moonSpinReturnField">
             <label class="field-label">Return to live view after</label>
             <div class="slider-group">
-              <input type="range" class="slider" id="moon_spin_return_s" min="3" max="60" step="1" value="10" oninput="updateMoonOrientReadout('moon_spin_return');applyImageDisplay();checkDirty()">
-              <span class="slider-val" id="moon_spin_return_val">10s</span>
+              <input type="range" class="slider" id="moon_spin_return_s" min="3" max="60" step="1" value="3" oninput="updateMoonOrientReadout('moon_spin_return');applyImageDisplay();checkDirty()">
+              <span class="slider-val" id="moon_spin_return_val">3s</span>
             </div>
             <div class="field-hint">Only applies in free-spin mode.</div>
           </div>
@@ -1667,30 +1716,58 @@
     <div id="tab-logs" class="tab-panel">
 
       <div class="card nocollapse">
-        <div class="card-title">Device Logs</div>
-        <div class="logs-layout">
-          <div class="logs-controls">
-            <div class="field-hint" style="margin:0 0 4px">Console output captured since boot (in-memory, 512 KB ring buffer, oldest lines dropped when full).</div>
-            <button class="btn btn-outline" id="refreshLogsBtn" onclick="refreshLogs()">Refresh</button>
-            <a class="btn btn-outline" href="/api/logs" style="text-align:center">Download</a>
-            <button class="btn btn-outline" id="clearLogsBtn" onclick="clearLogs()">Clear</button>
-            <div class="toggle-row" style="margin-top:6px">
-              <span class="toggle-label">Auto-refresh</span>
-              <label class="toggle"><input type="checkbox" id="logsAutoRefresh"><span class="toggle-track"></span></label>
+        <div class="card-title">Logs</div>
+
+        <div class="logs-toolbar">
+          <div class="log-seg" role="tablist">
+            <button class="log-seg-btn active" id="logSegDevice" onclick="setLogSource('device')">Device</button>
+            <button class="log-seg-btn" id="logSegCrash" onclick="setLogSource('crash')">Crash</button>
+          </div>
+          <div class="logs-toolbar-actions">
+            <button class="btn btn-outline" id="logsRefreshBtn" onclick="logsRefreshActive()">Refresh</button>
+            <a class="btn btn-outline" id="logsDownloadLink" href="/api/logs" style="text-align:center">Download</a>
+            <button class="btn btn-outline" id="logsClearBtn" onclick="logsClearActive()">Clear</button>
+          </div>
+          <div class="logs-toolbar-slot">
+            <!-- Device source controls -->
+            <div id="logsDeviceCtl" style="display:flex;flex-wrap:wrap;align-items:center;gap:14px">
+              <div class="toggle-row" style="margin:0;border:0;padding:0">
+                <span class="toggle-label">Auto-refresh</span>
+                <label class="toggle"><input type="checkbox" id="logsAutoRefresh"><span class="toggle-track"></span></label>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <span class="field-hint" style="margin:0">Interval</span>
+                <select class="input" id="logsRefreshInterval" style="max-width:90px">
+                  <option value="2">2s</option>
+                  <option value="5" selected>5s</option>
+                  <option value="10">10s</option>
+                  <option value="30">30s</option>
+                </select>
+              </div>
             </div>
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
-              <span class="field-hint" style="margin:0">Interval</span>
-              <select class="input" id="logsRefreshInterval" style="max-width:90px">
-                <option value="2">2s</option>
-                <option value="5" selected>5s</option>
-                <option value="10">10s</option>
-                <option value="30">30s</option>
+            <!-- Crash source controls -->
+            <div id="logsCrashCtl" style="display:none;align-items:center;gap:8px">
+              <span class="field-hint" style="margin:0">Auto-clear after</span>
+              <select class="input" id="crashlog_retention" style="max-width:110px">
+                <option value="0">Never</option>
+                <option value="7">7 days</option>
+                <option value="14">14 days</option>
+                <option value="30">30 days</option>
+                <option value="60">60 days</option>
+                <option value="90">90 days</option>
               </select>
             </div>
-            <div class="field-hint" id="logsStatus" style="margin:4px 0 0">Not loaded yet.</div>
           </div>
-          <pre id="logsView" class="logs-view"></pre>
         </div>
+
+        <div class="logs-meta">
+          <span class="field-hint" id="logsHint">Console output captured since boot (in-memory, 512 KB ring buffer, oldest lines dropped when full).</span>
+          <span class="field-hint" id="logsStatus">Not loaded yet.</span>
+          <span class="field-hint" id="crashlogStatus" style="display:none">Not loaded yet.</span>
+        </div>
+
+        <pre id="logsView" class="logs-view"></pre>
+        <div id="crashlogView" class="logs-view hidden"></div>
       </div>
     </div>
 
@@ -2016,8 +2093,10 @@
       setAccent(name);
       try{localStorage.setItem('nina_tab',name);}catch(e){}
       if(name==='logs'){
-        if(typeof refreshLogs==='function') refreshLogs();
-        if(typeof syncLogsAutoRefresh==='function') syncLogsAutoRefresh();
+        /* Re-enter the currently selected source; refreshes it and (for device)
+           resumes auto-refresh. Falls back to direct calls if not yet defined. */
+        if(typeof setLogSource==='function') setLogSource(typeof activeLogSource!=='undefined'?activeLogSource:'device');
+        else if(typeof refreshLogs==='function') refreshLogs();
       } else {
         if(typeof stopLogsAutoRefresh==='function') stopLogsAutoRefresh();
       }
@@ -2030,8 +2109,8 @@
     try{
       var saved=localStorage.getItem('nina_tab');
       if(saved&&$('tab-'+saved)) switchTab(saved);
-      else setAccent('nodes');
-    }catch(e){ setAccent('nodes'); }
+      else switchTab('nodes');
+    }catch(e){ switchTab('nodes'); }
 
     /* === Live API Controls === */
     function setTheme(v){postJson('/api/theme',{theme_index:parseInt(v)})}
@@ -2383,7 +2462,7 @@
         moon_yaw_offset:parseFloat($('moon_yaw_offset').value)||0,
         moon_pitch_offset:parseFloat($('moon_pitch_offset').value)||0,
         moon_spin_mode:$('moon_spin_mode').checked?1:0,
-        moon_spin_return_s:parseInt($('moon_spin_return_s').value,10)||10,
+        moon_spin_return_s:parseInt($('moon_spin_return_s').value,10)||3,
         weather_provider:parseInt($('weather_provider').value)||0,
         weather_api_key:$('weather_api_key').value.trim(),
         weather_lat:parseFloat($('weather_lat').value)||0,
@@ -2396,7 +2475,8 @@
         idle_page_override_enabled:!!$('idle_page_override_enabled').checked,
         idle_page_override_target:parseInt($('idle_page_override_target').value),
         idle_page_persistent:!!$('idle_page_persistent').checked,
-        idle_indicator_enabled:!!$('idle_indicator_enabled').checked
+        idle_indicator_enabled:!!$('idle_indicator_enabled').checked,
+        crash_log_retention_days:parseInt($('crashlog_retention').value,10)||0
       };
 
       var nets=[];
@@ -2563,7 +2643,7 @@
       if($('moon_yaw_offset')) $('moon_yaw_offset').value=data.moon_yaw_offset!=null?data.moon_yaw_offset:0;
       if($('moon_pitch_offset')) $('moon_pitch_offset').value=data.moon_pitch_offset!=null?data.moon_pitch_offset:0;
       if($('moon_spin_mode')) $('moon_spin_mode').checked=!!data.moon_spin_mode;
-      if($('moon_spin_return_s')) $('moon_spin_return_s').value=data.moon_spin_return_s!=null?data.moon_spin_return_s:10;
+      if($('moon_spin_return_s')) $('moon_spin_return_s').value=data.moon_spin_return_s!=null?data.moon_spin_return_s:3;
       updateMoonOrientReadout('moon_roll');
       updateMoonOrientReadout('moon_yaw');
       updateMoonOrientReadout('moon_pitch');
@@ -2591,6 +2671,9 @@
       if($('idle_page_persistent')) $('idle_page_persistent').checked=!!data.idle_page_persistent;
       if($('idle_indicator_enabled')) $('idle_indicator_enabled').checked=data.idle_indicator_enabled!==false;
       toggleIdleOverride();
+
+      // Crash log retention (days; 0 = never). Default 30 when absent.
+      if($('crashlog_retention')) $('crashlog_retention').value=(data.crash_log_retention_days!=null?data.crash_log_retention_days:30);
 
       // Authentication toggle — reflect in UI and hide sign-out button when off
       var authOn = (data.auth_enabled!==false);
@@ -3716,7 +3799,7 @@
         moon_yaw_offset: parseFloat($('moon_yaw_offset').value)||0,
         moon_pitch_offset: parseFloat($('moon_pitch_offset').value)||0,
         moon_spin_mode: $('moon_spin_mode').checked?1:0,
-        moon_spin_return_s: parseInt($('moon_spin_return_s').value,10)||10,
+        moon_spin_return_s: parseInt($('moon_spin_return_s').value,10)||3,
         solar_band: parseInt($('solarBand').value,10)||0
       });
     }
@@ -3893,16 +3976,66 @@
     /* ---- Diagnostic Logs ---- */
 
     var _logsTimer=null;
+    var activeLogSource='device';
 
     function logsTabActive(){
       var p=$('tab-logs');
       return !!(p && p.classList.contains('active'));
     }
 
+    /* Hint text per source (no em dashes in user-facing strings). */
+    var LOG_HINTS={
+      device:'Console output captured since boot (in-memory, 512 KB ring buffer, oldest lines dropped when full).',
+      crash:'Persistent crash history (survives reboot). Reset reason for every abnormal restart, with serial panic text when available. Newest 20 records kept.'
+    };
+
+    /* Switch the unified Logs card between the device and crash sources. Toggles
+       segment buttons, viewports, control groups, status lines, hint, the shared
+       Download href, and refreshes the now-active source. */
+    function setLogSource(src){
+      if(src!=='crash') src='device';
+      activeLogSource=src;
+      var dev=(src==='device');
+
+      var segDev=$('logSegDevice'), segCrash=$('logSegCrash');
+      if(segDev) segDev.classList.toggle('active',dev);
+      if(segCrash) segCrash.classList.toggle('active',!dev);
+
+      var lv=$('logsView'), cv=$('crashlogView');
+      if(lv) lv.classList.toggle('hidden',!dev);
+      if(cv) cv.classList.toggle('hidden',dev);
+
+      var devCtl=$('logsDeviceCtl'), crashCtl=$('logsCrashCtl');
+      if(devCtl) devCtl.style.display=dev?'flex':'none';
+      if(crashCtl) crashCtl.style.display=dev?'none':'flex';
+
+      var ls=$('logsStatus'), cs=$('crashlogStatus');
+      if(ls) ls.style.display=dev?'':'none';
+      if(cs) cs.style.display=dev?'none':'';
+
+      var hint=$('logsHint');
+      if(hint) hint.textContent=LOG_HINTS[src];
+
+      var dl=$('logsDownloadLink');
+      if(dl) dl.href=dev?'/api/logs':'/api/crashlog';
+
+      /* Auto-refresh only applies to the device source. */
+      if(dev){ syncLogsAutoRefresh(); refreshLogs(); }
+      else { stopLogsAutoRefresh(); refreshCrashlog(); }
+    }
+
+    /* Shared toolbar buttons route to the active source. */
+    function logsRefreshActive(){
+      if(activeLogSource==='crash') refreshCrashlog(); else refreshLogs();
+    }
+    function logsClearActive(){
+      if(activeLogSource==='crash') clearCrashlog(); else clearLogs();
+    }
+
     function refreshLogs(){
       var view=$('logsView');
       if(!view) return;
-      var btn=$('refreshLogsBtn');
+      var btn=(activeLogSource==='device')?$('logsRefreshBtn'):null;
       if(btn) btn.disabled=true;
       /* Was the view scrolled to (near) the bottom before we replaced content? */
       var nearBottom = (view.scrollHeight - view.scrollTop - view.clientHeight) < 40;
@@ -3925,9 +4058,9 @@
     }
 
     function logsAutoRefreshTick(){
-      /* Skip polling when the tab is not visible or the document is hidden,
-         to avoid pulling the whole 512 KB buffer needlessly. */
-      if(document.hidden || !logsTabActive()) return;
+      /* Skip polling when the tab is not visible, the document is hidden, or the
+         crash source is showing, to avoid pulling the whole 512 KB buffer needlessly. */
+      if(document.hidden || !logsTabActive() || activeLogSource!=='device') return;
       refreshLogs();
     }
 
@@ -3958,8 +4091,10 @@
         if(cb && cb.checked) startLogsAutoRefresh();
       });
       /* If Logs is the restored active tab on page load, the early switchTab()
-         ran before these functions existed (guarded by typeof), so populate now. */
-      if(logsTabActive()){ refreshLogs(); syncLogsAutoRefresh(); }
+         ran before these functions existed (guarded by typeof), so populate now.
+         setLogSource('device') wires up the default source and refreshes it; crash
+         data loads lazily the first time the user switches to the crash source. */
+      if(logsTabActive()){ setLogSource('device'); }
     })();
 
     /* Pause auto-refresh when the page is hidden; resume when visible on Logs tab. */
@@ -3970,7 +4105,7 @@
 
     function clearLogs(){
       if(!confirm('Clear the captured device logs? This cannot be undone.')) return;
-      var btn=$('clearLogsBtn');
+      var btn=$('logsClearBtn');
       btn.disabled=true; var prev=btn.textContent; btn.textContent='Clearing...';
       fetch('/api/logs/clear',{method:'POST'})
         .then(function(r){
@@ -3979,6 +4114,125 @@
           refreshLogs();
         })
         .catch(function(e){ showToast('Clear logs failed: '+e.message,'error'); })
+        .finally(function(){ btn.disabled=false; btn.textContent=prev; });
+    }
+
+    /* ---- Crash Logs ---- */
+
+    /* Format a crash record's timestamp: wall-clock when ts>0, else uptime note. */
+    function crashWhen(rec){
+      if(rec.ts && rec.ts>0){
+        try{ return new Date(rec.ts*1000).toLocaleString(); }catch(e){}
+        return 'ts '+rec.ts;
+      }
+      var u=(rec.uptime_s!=null)?rec.uptime_s:0;
+      return 'uptime '+u+'s (no clock)';
+    }
+
+    /* Build one crash entry as DOM nodes (textContent avoids HTML injection from
+       the captured panic text). */
+    function buildCrashEntry(rec){
+      var wrap=document.createElement('div');
+      wrap.style.cssText='border:1px solid var(--border);border-radius:var(--radius-sm);'
+        +'padding:10px 12px;margin-bottom:10px;background:rgba(0,0,0,0.25)';
+
+      var head=document.createElement('div');
+      head.style.cssText='display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;'
+        +'font-family:inherit;color:var(--text)';
+
+      var reason=document.createElement('strong');
+      reason.textContent=rec.reason_str||('reason '+(rec.reason!=null?rec.reason:'?'));
+      reason.style.cssText='font-size:0.82rem';
+      head.appendChild(reason);
+
+      var when=document.createElement('span');
+      when.textContent=crashWhen(rec);
+      when.style.cssText='color:var(--text-secondary);font-size:0.75rem';
+      head.appendChild(when);
+
+      var counts=document.createElement('span');
+      var c=(rec.crash_count!=null)?rec.crash_count:'?';
+      var b=(rec.boot_count!=null)?rec.boot_count:'?';
+      counts.textContent='crash #'+c+' · boot #'+b;
+      counts.style.cssText='color:var(--text-hint);font-size:0.72rem';
+      head.appendChild(counts);
+
+      wrap.appendChild(head);
+
+      var panic=(rec.panic||'').trim();
+      if(panic){
+        var det=document.createElement('details');
+        det.style.cssText='margin-top:6px';
+        var sum=document.createElement('summary');
+        sum.textContent='Panic text';
+        sum.style.cssText='cursor:pointer;font-size:0.74rem;color:var(--text-secondary)';
+        det.appendChild(sum);
+        var pre=document.createElement('pre');
+        pre.textContent=panic;
+        pre.style.cssText='margin:6px 0 0;white-space:pre-wrap;word-break:break-word;'
+          +'font-size:0.7rem;line-height:1.35;max-height:260px;overflow:auto;'
+          +'color:var(--text-secondary)';
+        det.appendChild(pre);
+        wrap.appendChild(det);
+      } else {
+        var none=document.createElement('div');
+        none.textContent='No panic text captured (reset-reason only).';
+        none.style.cssText='margin-top:4px;font-size:0.72rem;color:var(--text-hint)';
+        wrap.appendChild(none);
+      }
+      return wrap;
+    }
+
+    function refreshCrashlog(){
+      var view=$('crashlogView');
+      if(!view) return;
+      var btn=(activeLogSource==='crash')?$('logsRefreshBtn'):null;
+      if(btn) btn.disabled=true;
+      fetch('/api/crashlog')
+        .then(function(r){
+          if(!r.ok) throw new Error('HTTP '+r.status);
+          return r.text();
+        })
+        .then(function(text){
+          view.textContent='';
+          var lines=text.split('\n');
+          var recs=[];
+          for(var i=0;i<lines.length;i++){
+            var ln=lines[i].trim();
+            if(!ln) continue;
+            try{ recs.push(JSON.parse(ln)); }catch(e){ /* skip malformed line */ }
+          }
+          if(recs.length===0){
+            var empty=document.createElement('div');
+            empty.textContent='No crashes recorded.';
+            empty.style.cssText='color:var(--text-hint);font-size:0.8rem';
+            view.appendChild(empty);
+            $('crashlogStatus').textContent='Updated '+new Date().toLocaleTimeString()+' · 0 records';
+            return;
+          }
+          /* Newest first for display (file is newest-last). */
+          recs.reverse();
+          recs.forEach(function(rec){ view.appendChild(buildCrashEntry(rec)); });
+          $('crashlogStatus').textContent='Updated '+new Date().toLocaleTimeString()+' · '+recs.length+' record'+(recs.length===1?'':'s');
+        })
+        .catch(function(e){
+          showToast('Load crash logs failed: '+e.message,'error');
+          $('crashlogStatus').textContent='Load failed at '+new Date().toLocaleTimeString()+': '+e.message;
+        })
+        .finally(function(){ if(btn) btn.disabled=false; });
+    }
+
+    function clearCrashlog(){
+      if(!confirm('Clear the crash history? This cannot be undone.')) return;
+      var btn=$('logsClearBtn');
+      btn.disabled=true; var prev=btn.textContent; btn.textContent='Clearing...';
+      fetch('/api/crashlog/clear',{method:'POST'})
+        .then(function(r){
+          if(!r.ok) throw new Error('Clear failed');
+          showToast('Crash logs cleared','success');
+          refreshCrashlog();
+        })
+        .catch(function(e){ showToast('Clear crash logs failed: '+e.message,'error'); })
         .finally(function(){ btn.disabled=false; btn.textContent=prev; });
     }
 

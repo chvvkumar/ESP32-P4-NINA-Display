@@ -607,6 +607,7 @@ static const char *reset_reason_to_str(uint32_t reason)
 // Handler for crash info
 esp_err_t crash_get_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     power_mgmt_crash_info_t info = power_mgmt_get_crash_info();
 
     cJSON *root = cJSON_CreateObject();

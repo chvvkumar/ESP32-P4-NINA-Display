@@ -169,6 +169,9 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
     // Authentication
     cJSON_AddBoolToObject(obj, "auth_enabled", cfg->auth_enabled);
 
+    // Crash log
+    cJSON_AddNumberToObject(obj, "crash_log_retention_days", cfg->crash_log_retention_days);
+
     return obj;
 }
 
@@ -297,6 +300,7 @@ static const backup_field_t s_backup_fields[] = {
     {"deep_sleep_wake_timer_s","Deep Sleep Timer",   "System", false, false},
     {"deep_sleep_on_idle",   "Sleep on Idle",        "System", false, false},
     {"wifi_power_save",      "WiFi Power Save",      "System", false, false},
+    {"crash_log_retention_days","Crash Log Retention","System", false, false},
 
     /* AllSky */
     {"allsky_enabled",            "AllSky Enabled",       "AllSky", false, false},
@@ -980,6 +984,15 @@ static app_config_t *parse_config_from_json(cJSON *root)
 
     // Authentication toggle
     JSON_TO_BOOL(root, "auth_enabled", cfg->auth_enabled);
+
+    // Crash log retention (days; 0 = never, clamp to common preset range)
+    cJSON *clr_item = cJSON_GetObjectItem(root, "crash_log_retention_days");
+    if (cJSON_IsNumber(clr_item)) {
+        int v = clr_item->valueint;
+        if (v < 0) v = 0;
+        if (v > 255) v = 255;
+        cfg->crash_log_retention_days = (uint8_t)v;
+    }
 
     return cfg;
 }

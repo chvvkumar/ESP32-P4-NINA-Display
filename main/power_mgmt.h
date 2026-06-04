@@ -3,6 +3,7 @@
 #include "esp_err.h"
 #include "esp_sleep.h"
 #include <stdint.h>
+#include <stdbool.h>
 
 /**
  * Initialize power management — enables Dynamic Frequency Scaling.
@@ -53,3 +54,23 @@ void power_mgmt_check_crash(void);
  * Get crash info (crash count, last reason, boot count).
  */
 power_mgmt_crash_info_t power_mgmt_get_crash_info(void);
+
+/**
+ * Map an esp_reset_reason_t value to a short human-readable string.
+ * Always returns a valid non-NULL static string.
+ */
+const char *power_mgmt_reset_reason_str(uint32_t reason);
+
+/**
+ * Return true if the given reset reason represents an abnormal reset
+ * worth recording as a crash (PANIC, INT_WDT, TASK_WDT, WDT, BROWNOUT,
+ * CPU_LOCKUP). Normal resets (power-on, software restart, deep-sleep
+ * wake, external pin) return false.
+ */
+bool power_mgmt_reset_is_abnormal(uint32_t reason);
+
+/**
+ * Convenience wrapper around esp_reset_reason() returning the raw value
+ * as uint32_t (the value latched at this boot).
+ */
+uint32_t power_mgmt_get_last_reset_reason(void);

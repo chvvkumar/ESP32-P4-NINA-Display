@@ -786,17 +786,20 @@ static void set_defaults(app_config_t *cfg) {
     cfg->image_display_crop = false; // crop/zoom image to fill & hide baked-in labels
     cfg->moon_drag_light_mode = 0;   // 0=true phase, 1=explore (moon drag-to-rotate lighting)
 
-    // Moon sphere orientation tuning defaults
+    // Moon sphere orientation tuning defaults (tuned baseline from a reference device)
     cfg->moon_flip_u = 0;            // mirror texture longitude E<->W
-    cfg->moon_flip_v = 1;            // flip texture latitude N<->S (default 1: corrects N-S for the NASA equirect map)
-    cfg->moon_roll_offset = 0.0f;    // degrees, clamp [-180,180]
+    cfg->moon_flip_v = 0;            // flip texture latitude N<->S
+    cfg->moon_roll_offset = -7.0f;   // degrees, clamp [-180,180]
     cfg->moon_yaw_offset = 0.0f;     // degrees, clamp [-180,180]
-    cfg->moon_pitch_offset = 0.0f;   // degrees, clamp [-90,90]
+    cfg->moon_pitch_offset = -5.0f;  // degrees, clamp [-90,90]
     cfg->moon_north_up = 1;          // 0=true sky tilt, 1=always upright/north-up
 
     // Moon touch-spin return behavior defaults
     cfg->moon_spin_mode = 0;         // 0=rubber band snap-back (preserves existing behavior)
-    cfg->moon_spin_return_s = 10;    // free-spin hold before auto-return, clamp [3,60]
+    cfg->moon_spin_return_s = 3;     // free-spin hold before auto-return, clamp [3,60]
+
+    // Crash log defaults
+    cfg->crash_log_retention_days = 30;  // auto-purge crash records older than 30 days (0 = never)
 
     // Auth is on by default — protects device from open-LAN access
     cfg->auth_enabled = true;
@@ -1772,17 +1775,20 @@ static void migrate_from_v37(const void *raw, size_t raw_size, app_config_t *cfg
 
     /* Moon orientation tuning fields: new in v38 — defaults already set by set_defaults() */
     cfg->moon_flip_u = 0;
-    cfg->moon_flip_v = 1;
-    cfg->moon_roll_offset = 0.0f;
+    cfg->moon_flip_v = 0;
+    cfg->moon_roll_offset = -7.0f;
     cfg->moon_yaw_offset = 0.0f;
-    cfg->moon_pitch_offset = 0.0f;
+    cfg->moon_pitch_offset = -5.0f;
 
     /* moon_north_up field: new in v39 — default already set by set_defaults() */
     cfg->moon_north_up = 1;
 
     /* Moon touch-spin fields: new in v40 — defaults already set by set_defaults() */
     cfg->moon_spin_mode = 0;
-    cfg->moon_spin_return_s = 10;
+    cfg->moon_spin_return_s = 3;
+
+    /* crash_log_retention_days: new in v41 — default already set by set_defaults() */
+    cfg->crash_log_retention_days = 30;
 
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v37 to v%d", APP_CONFIG_VERSION);
@@ -1799,7 +1805,10 @@ static void migrate_from_v38(const void *raw, size_t raw_size, app_config_t *cfg
 
     /* Moon touch-spin fields: new in v40 — defaults already set by set_defaults() */
     cfg->moon_spin_mode = 0;
-    cfg->moon_spin_return_s = 10;
+    cfg->moon_spin_return_s = 3;
+
+    /* crash_log_retention_days: new in v41 — default already set by set_defaults() */
+    cfg->crash_log_retention_days = 30;
 
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v38 to v%d", APP_CONFIG_VERSION);
@@ -1813,10 +1822,26 @@ static void migrate_from_v39(const void *raw, size_t raw_size, app_config_t *cfg
 
     /* Moon touch-spin fields: new in v40 — defaults already set by set_defaults() */
     cfg->moon_spin_mode = 0;
-    cfg->moon_spin_return_s = 10;
+    cfg->moon_spin_return_s = 3;
+
+    /* crash_log_retention_days: new in v41 — default already set by set_defaults() */
+    cfg->crash_log_retention_days = 30;
 
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v39 to v%d", APP_CONFIG_VERSION);
+}
+
+static void migrate_from_v40(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v40_t) ? raw_size : sizeof(app_config_v40_t);
+    memcpy(cfg, raw, copy);
+
+    /* crash_log_retention_days: new in v41 — default already set by set_defaults() */
+    cfg->crash_log_retention_days = 30;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v40 to v%d", APP_CONFIG_VERSION);
 }
 
 static void migrate_from_v36(const void *raw, size_t raw_size, app_config_t *cfg)
@@ -1825,22 +1850,30 @@ static void migrate_from_v36(const void *raw, size_t raw_size, app_config_t *cfg
     size_t copy = raw_size < sizeof(app_config_v36_t) ? raw_size : sizeof(app_config_v36_t);
     memcpy(cfg, raw, copy);
 
+    /* NOTE: this and the older migrations below only memcpy `copy` bytes — the
+     * size of their snapshot struct. Any field appended to app_config_t *after*
+     * that snapshot struct ends (e.g. crash_log_retention_days, added in v41)
+     * lies past `copy`, so it is never overwritten and keeps the value
+     * set_defaults() assigned. Those trailing fields therefore need no explicit
+     * per-migration assignment here. The newer migrations (v37+) set them
+     * explicitly only for documentation. */
+
     /* moon_drag_light_mode field: new in v37 — defaults already set by set_defaults() */
     cfg->moon_drag_light_mode = 0;
 
     /* Moon orientation tuning fields: new in v38 — defaults already set by set_defaults() */
     cfg->moon_flip_u = 0;
-    cfg->moon_flip_v = 1;
-    cfg->moon_roll_offset = 0.0f;
+    cfg->moon_flip_v = 0;
+    cfg->moon_roll_offset = -7.0f;
     cfg->moon_yaw_offset = 0.0f;
-    cfg->moon_pitch_offset = 0.0f;
+    cfg->moon_pitch_offset = -5.0f;
 
     /* moon_north_up field: new in v39 — default already set by set_defaults() */
     cfg->moon_north_up = 1;
 
     /* Moon touch-spin fields: new in v40 — defaults already set by set_defaults() */
     cfg->moon_spin_mode = 0;
-    cfg->moon_spin_return_s = 10;
+    cfg->moon_spin_return_s = 3;
 
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v36 to v%d", APP_CONFIG_VERSION);
@@ -2541,14 +2574,20 @@ void app_config_init(void) {
             nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(handle);
         }
+    } else if (version_check == 40) {
+        /* v40 → v41: added crash_log_retention_days */
+        migrate_from_v40(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 39) {
-        /* v39 → v40: added moon_spin_mode + moon_spin_return_s */
+        /* v39 → v41: added moon_spin fields + crash_log_retention_days */
         migrate_from_v39(raw, stored_size, &s_config);
         validate_config(&s_config);
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
     } else if (version_check == 38) {
-        /* v38 → v40: added moon_north_up + moon touch-spin fields */
+        /* v38 → v41: added moon_north_up + moon touch-spin + crash_log_retention_days */
         migrate_from_v38(raw, stored_size, &s_config);
         validate_config(&s_config);
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));

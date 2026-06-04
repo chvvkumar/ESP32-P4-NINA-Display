@@ -5,7 +5,7 @@ idf_component_register(
     SRCS main.c tasks.c power_mgmt.c jpeg_utils.c stb_image.c perf_monitor.c ota_github.c
          nina_connection.c nina_client.c nina_api_fetchers.c nina_sequence.c nina_websocket.c
          allsky_client.c goes_client.c weather_client.c moon_ephemeris.c moon_render.c moon_sphere.cpp moon_interaction.c spotify_auth.c spotify_client.c demo_data.c
-         app_config.c web_server.c web_handlers_config.c web_handlers_display.c web_handlers_system.c web_handlers_allsky.c web_handlers_spotify.c web_handlers_image_display.c web_handlers_auth.c web_handlers_wifi.c web_handlers_logs.c log_capture.c mqtt_ha.c
+         app_config.c web_server.c web_handlers_config.c web_handlers_display.c web_handlers_system.c web_handlers_allsky.c web_handlers_spotify.c web_handlers_image_display.c web_handlers_auth.c web_handlers_wifi.c web_handlers_logs.c log_capture.c crash_log.c mqtt_ha.c
          ui/nina_dashboard.c ui/nina_dashboard_update.c ui/nina_thumbnail.c ui/nina_graph_overlay.c ui/nina_graph_controls.c ui/nina_sysinfo.c ui/nina_summary.c ui/nina_allsky.c ui/nina_image_display.c ui/nina_clock.c ui/nina_spotify.c ui/nina_settings_tabview.c ui/settings_tab_display.c ui/settings_tab_nodes.c ui/settings_tab_behavior.c ui/settings_tab_system.c ui/settings_color_picker.c ui/themes.c ui/ui_styles.c
          ui/nina_toast.c ui/nina_event_log.c ui/nina_alerts.c ui/nina_safety.c ui/nina_session_stats.c ui/lv_font_material_safety.c ui/lv_font_superscript_24.c ui/lv_font_playfair_228.c ui/lv_font_playfair_90.c ui/lv_font_overpass_27.c ui/lv_font_overpass_16.c
          ui/nina_setup_screen.c ui/nina_idle_indicator.c
@@ -36,6 +36,11 @@ target_link_libraries(${COMPONENT_LIB} PRIVATE ${JPEG_LIB})
 # line here would disable that and drop driver/ppa.h, esp_http_server.h, etc.).
 idf_component_get_property(TGX_LIB tgx COMPONENT_LIB)
 target_link_libraries(${COMPONENT_LIB} PRIVATE ${TGX_LIB})
+
+# Crash-text capture (Layer B): wrap the panic output character path so the
+# panic banner/backtrace is mirrored into an RTC_NOINIT ring before reboot.
+# __wrap_panic_print_char / __real_panic_print_char live in crash_log.c.
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=panic_print_char")
 
 # Build-time generated version header (git tag, sha, branch)
 target_include_directories(${COMPONENT_LIB} PRIVATE ${CMAKE_BINARY_DIR}/generated)

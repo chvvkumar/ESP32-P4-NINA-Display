@@ -87,14 +87,64 @@ void power_mgmt_check_crash(void)
         s_crash_count = 0;
         s_last_crash_reason = 0;
         ESP_LOGI(TAG, "Power-on reset — crash history cleared");
-    } else if (reason == ESP_RST_PANIC ||
-               reason == ESP_RST_INT_WDT ||
-               reason == ESP_RST_TASK_WDT) {
+    } else if (power_mgmt_reset_is_abnormal((uint32_t)reason)) {
         s_crash_count++;
         s_last_crash_reason = (uint32_t)reason;
-        ESP_LOGW(TAG, "Crash reset detected: reason=%d, crash_count=%lu",
-                 (int)reason, (unsigned long)s_crash_count);
+        ESP_LOGW(TAG, "Crash reset detected: reason=%d (%s), crash_count=%lu",
+                 (int)reason, power_mgmt_reset_reason_str((uint32_t)reason),
+                 (unsigned long)s_crash_count);
     }
+}
+
+const char *power_mgmt_reset_reason_str(uint32_t reason)
+{
+    switch ((esp_reset_reason_t)reason) {
+        case ESP_RST_UNKNOWN:    return "Unknown";
+        case ESP_RST_POWERON:    return "Power-on";
+        case ESP_RST_EXT:        return "External pin";
+        case ESP_RST_SW:         return "Software restart";
+        case ESP_RST_PANIC:      return "Panic / exception";
+        case ESP_RST_INT_WDT:    return "Interrupt watchdog";
+        case ESP_RST_TASK_WDT:   return "Task watchdog";
+        case ESP_RST_WDT:        return "Other watchdog";
+        case ESP_RST_DEEPSLEEP:  return "Deep sleep wake";
+        case ESP_RST_BROWNOUT:   return "Brownout / power loss";
+        case ESP_RST_SDIO:       return "SDIO reset";
+        case ESP_RST_USB:        return "USB peripheral reset";
+        case ESP_RST_JTAG:       return "JTAG reset";
+#if defined(ESP_RST_EFUSE)
+        case ESP_RST_EFUSE:      return "eFuse error";
+#endif
+#if defined(ESP_RST_PWR_GLITCH)
+        case ESP_RST_PWR_GLITCH: return "Power glitch";
+#endif
+#if defined(ESP_RST_CPU_LOCKUP)
+        case ESP_RST_CPU_LOCKUP: return "CPU lockup";
+#endif
+        default:                 return "Unknown";
+    }
+}
+
+bool power_mgmt_reset_is_abnormal(uint32_t reason)
+{
+    switch ((esp_reset_reason_t)reason) {
+        case ESP_RST_PANIC:
+        case ESP_RST_INT_WDT:
+        case ESP_RST_TASK_WDT:
+        case ESP_RST_WDT:
+        case ESP_RST_BROWNOUT:
+#if defined(ESP_RST_CPU_LOCKUP)
+        case ESP_RST_CPU_LOCKUP:
+#endif
+            return true;
+        default:
+            return false;
+    }
+}
+
+uint32_t power_mgmt_get_last_reset_reason(void)
+{
+    return (uint32_t)esp_reset_reason();
 }
 
 power_mgmt_crash_info_t power_mgmt_get_crash_info(void)
