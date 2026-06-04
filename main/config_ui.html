@@ -698,7 +698,7 @@
   <nav class="top-nav">
     <div class="brand"><img class="logo" src="/favicon.ico" alt=""> <span id="brandName">NINA Display</span></div>
     <div class="tabs" id="topTabs">
-      <button class="tab-btn active" data-tab="nodes">N.I.N.A.</button>
+      <button class="tab-btn" data-tab="nodes">N.I.N.A.</button>
       <button class="tab-btn" data-tab="allsky">AllSky</button>
       <button class="tab-btn" data-tab="clock">Clock</button>
       <button class="tab-btn" data-tab="spotify">Spotify</button>
@@ -772,7 +772,7 @@
   <main class="content">
 
     <!-- ==================== TAB 2: NODES & DATA ==================== -->
-    <div id="tab-nodes" class="tab-panel active">
+    <div id="tab-nodes" class="tab-panel">
 
       <div class="card" id="instance-overview">
         <div class="card-title">Active N.I.N.A. Instances</div>
@@ -2109,8 +2109,8 @@
     try{
       var saved=localStorage.getItem('nina_tab');
       if(saved&&$('tab-'+saved)) switchTab(saved);
-      else setAccent('nodes');
-    }catch(e){ setAccent('nodes'); }
+      else switchTab('nodes');
+    }catch(e){ switchTab('nodes'); }
 
     /* === Live API Controls === */
     function setTheme(v){postJson('/api/theme',{theme_index:parseInt(v)})}
