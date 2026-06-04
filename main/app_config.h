@@ -171,7 +171,7 @@ typedef struct {
     // Added after v39 — must stay at end to preserve NVS binary compatibility
     // Moon touch-spin return behavior
     uint8_t  moon_spin_mode;         // 0=rubber band snap-back (default), 1=free spin (hold then return)
-    uint8_t  moon_spin_return_s;     // free-spin hold before auto-return, clamp [3,60] (default 10)
+    uint8_t  moon_spin_return_s;     // free-spin hold before auto-return, clamp [3,60] (default 3)
 
     // Added after v40 — must stay at end to preserve NVS binary compatibility
     uint8_t  crash_log_retention_days; // Auto-purge crash records older than N days (0 = never, default 30)

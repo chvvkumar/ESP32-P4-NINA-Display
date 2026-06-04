@@ -796,7 +796,7 @@ static void set_defaults(app_config_t *cfg) {
 
     // Moon touch-spin return behavior defaults
     cfg->moon_spin_mode = 0;         // 0=rubber band snap-back (preserves existing behavior)
-    cfg->moon_spin_return_s = 10;    // free-spin hold before auto-return, clamp [3,60]
+    cfg->moon_spin_return_s = 3;     // free-spin hold before auto-return, clamp [3,60]
 
     // Crash log defaults
     cfg->crash_log_retention_days = 30;  // auto-purge crash records older than 30 days (0 = never)
@@ -1785,7 +1785,7 @@ static void migrate_from_v37(const void *raw, size_t raw_size, app_config_t *cfg
 
     /* Moon touch-spin fields: new in v40 — defaults already set by set_defaults() */
     cfg->moon_spin_mode = 0;
-    cfg->moon_spin_return_s = 10;
+    cfg->moon_spin_return_s = 3;
 
     /* crash_log_retention_days: new in v41 — default already set by set_defaults() */
     cfg->crash_log_retention_days = 30;
@@ -1805,7 +1805,7 @@ static void migrate_from_v38(const void *raw, size_t raw_size, app_config_t *cfg
 
     /* Moon touch-spin fields: new in v40 — defaults already set by set_defaults() */
     cfg->moon_spin_mode = 0;
-    cfg->moon_spin_return_s = 10;
+    cfg->moon_spin_return_s = 3;
 
     /* crash_log_retention_days: new in v41 — default already set by set_defaults() */
     cfg->crash_log_retention_days = 30;
@@ -1822,7 +1822,7 @@ static void migrate_from_v39(const void *raw, size_t raw_size, app_config_t *cfg
 
     /* Moon touch-spin fields: new in v40 — defaults already set by set_defaults() */
     cfg->moon_spin_mode = 0;
-    cfg->moon_spin_return_s = 10;
+    cfg->moon_spin_return_s = 3;
 
     /* crash_log_retention_days: new in v41 — default already set by set_defaults() */
     cfg->crash_log_retention_days = 30;
@@ -1873,7 +1873,7 @@ static void migrate_from_v36(const void *raw, size_t raw_size, app_config_t *cfg
 
     /* Moon touch-spin fields: new in v40 — defaults already set by set_defaults() */
     cfg->moon_spin_mode = 0;
-    cfg->moon_spin_return_s = 10;
+    cfg->moon_spin_return_s = 3;
 
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v36 to v%d", APP_CONFIG_VERSION);

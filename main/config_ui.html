@@ -1120,8 +1120,8 @@
           <div class="field" style="margin-top:16px" id="moonSpinReturnField">
             <label class="field-label">Return to live view after</label>
             <div class="slider-group">
-              <input type="range" class="slider" id="moon_spin_return_s" min="3" max="60" step="1" value="10" oninput="updateMoonOrientReadout('moon_spin_return');applyImageDisplay();checkDirty()">
-              <span class="slider-val" id="moon_spin_return_val">10s</span>
+              <input type="range" class="slider" id="moon_spin_return_s" min="3" max="60" step="1" value="3" oninput="updateMoonOrientReadout('moon_spin_return');applyImageDisplay();checkDirty()">
+              <span class="slider-val" id="moon_spin_return_val">3s</span>
             </div>
             <div class="field-hint">Only applies in free-spin mode.</div>
           </div>
@@ -2409,7 +2409,7 @@
         moon_yaw_offset:parseFloat($('moon_yaw_offset').value)||0,
         moon_pitch_offset:parseFloat($('moon_pitch_offset').value)||0,
         moon_spin_mode:$('moon_spin_mode').checked?1:0,
-        moon_spin_return_s:parseInt($('moon_spin_return_s').value,10)||10,
+        moon_spin_return_s:parseInt($('moon_spin_return_s').value,10)||3,
         weather_provider:parseInt($('weather_provider').value)||0,
         weather_api_key:$('weather_api_key').value.trim(),
         weather_lat:parseFloat($('weather_lat').value)||0,
@@ -2590,7 +2590,7 @@
       if($('moon_yaw_offset')) $('moon_yaw_offset').value=data.moon_yaw_offset!=null?data.moon_yaw_offset:0;
       if($('moon_pitch_offset')) $('moon_pitch_offset').value=data.moon_pitch_offset!=null?data.moon_pitch_offset:0;
       if($('moon_spin_mode')) $('moon_spin_mode').checked=!!data.moon_spin_mode;
-      if($('moon_spin_return_s')) $('moon_spin_return_s').value=data.moon_spin_return_s!=null?data.moon_spin_return_s:10;
+      if($('moon_spin_return_s')) $('moon_spin_return_s').value=data.moon_spin_return_s!=null?data.moon_spin_return_s:3;
       updateMoonOrientReadout('moon_roll');
       updateMoonOrientReadout('moon_yaw');
       updateMoonOrientReadout('moon_pitch');
@@ -3746,7 +3746,7 @@
         moon_yaw_offset: parseFloat($('moon_yaw_offset').value)||0,
         moon_pitch_offset: parseFloat($('moon_pitch_offset').value)||0,
         moon_spin_mode: $('moon_spin_mode').checked?1:0,
-        moon_spin_return_s: parseInt($('moon_spin_return_s').value,10)||10,
+        moon_spin_return_s: parseInt($('moon_spin_return_s').value,10)||3,
         solar_band: parseInt($('solarBand').value,10)||0
       });
     }
