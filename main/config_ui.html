@@ -87,20 +87,66 @@
     /* Non-collapsible cards (e.g. Logs): no chevron, no pointer affordance */
     .card.nocollapse > .card-title { cursor: default; }
     .card.nocollapse > .card-title::after { display: none; }
-    /* Logs tab: break out wider than the 960px content column */
-    #tab-logs .card { width: min(1180px, 94vw); margin-left: 50%; transform: translateX(-50%); }
+    /* Logs tab: break out wider than the 960px content column, and fit the window
+       as a flex column so only the viewport scrolls (not the page). */
+    #tab-logs .card {
+      width: min(1180px, 94vw); margin-left: 50%; transform: translateX(-50%);
+      display: flex; flex-direction: column; box-sizing: border-box;
+      max-height: calc(100vh - 208px);
+    }
     .logs-layout { display: flex; gap: 18px; align-items: stretch; }
     .logs-controls { flex: 0 0 220px; display: flex; flex-direction: column; gap: 12px; }
     .logs-controls .btn { width: 100%; }
+    /* Logs card: horizontal toolbar layout */
+    .logs-toolbar {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+      margin: 0 0 12px;
+    }
+    .logs-toolbar .btn {
+      width: auto;
+      min-height: 0; padding: 7px 18px;
+      font-size: 0.8rem; font-weight: 500;
+      border-radius: var(--radius-sm);
+      text-decoration: none;
+    }
+    .logs-toolbar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .logs-toolbar-slot { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+    /* Segmented source toggle (Device | Crash) */
+    .log-seg {
+      display: inline-flex; border: 1px solid var(--border);
+      border-radius: var(--radius-sm); overflow: hidden; margin: 0;
+    }
+    /* Meta row: hint left, status right; sits between toolbar and viewport. */
+    .logs-meta {
+      display: flex; flex-wrap: wrap; align-items: baseline;
+      gap: 4px 14px; margin: 0 0 10px;
+    }
+    .logs-meta .field-hint { margin: 0; }
+    #logsStatus, #crashlogStatus { margin-left: auto; }
+    .log-seg-btn {
+      background: none; border: none; cursor: pointer; font-family: inherit;
+      color: var(--text-secondary); padding: 7px 18px; font-size: 0.8rem;
+      font-weight: 500; transition: all 0.2s ease; white-space: nowrap;
+    }
+    .log-seg-btn + .log-seg-btn { border-left: 1px solid var(--border); }
+    .log-seg-btn:hover { color: var(--text); background: rgba(var(--accent-rgb), 0.08); }
+    .log-seg-btn.active {
+      color: #f4f4f5; background: rgba(var(--accent-rgb), 0.18);
+      box-shadow: inset 0 0 12px rgba(var(--accent-rgb), 0.12);
+    }
     .logs-view {
-      flex: 1; min-width: 0; margin: 0;
-      height: calc(100vh - 240px); min-height: 420px; overflow: auto;
+      min-width: 0; margin: 0; overflow: auto;
+      flex: 1 1 auto; min-height: 0;
       white-space: pre-wrap; word-break: break-word;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 0.72rem; line-height: 1.4; color: var(--text-secondary);
       background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border);
       border-radius: var(--radius-sm); padding: 12px;
     }
+    /* Both viewports fill the leftover flex space and scroll internally. */
+    #logsView.logs-view { height: auto; min-height: 0; }
+    #crashlogView.logs-view { max-height: none; min-height: 0; }
+    .logs-view.hidden { display: none; }
     .content { max-width: 960px; margin: 0 auto; padding: 28px 24px 100px; }
     .field { margin-bottom: 20px; }
     .field:last-child { margin-bottom: 0; }
@@ -569,11 +615,14 @@
       .toast { top: auto; bottom: calc(var(--bottom-nav-height) + var(--save-bar-height) + env(safe-area-inset-bottom, 0px) + 16px); right: 16px; }
       .row.stack-mobile { flex-direction: column; }
 
-      /* Logs: stack controls above the viewer on narrow screens, drop the breakout */
-      #tab-logs .card { width: auto; margin-left: 0; transform: none; }
+      /* Logs: stack controls above the viewer on narrow screens, drop the breakout.
+         Page scroll is acceptable on mobile, so the card is a plain block here. */
+      #tab-logs .card { width: auto; margin-left: 0; transform: none; max-height: none; display: block; }
       .logs-layout { flex-direction: column; }
       .logs-controls { flex: 0 0 auto; }
-      .logs-view { height: 60vh; min-height: 300px; }
+      .logs-toolbar-slot { margin-left: 0; }
+      #logsView.logs-view { height: 60vh; min-height: 300px; }
+      #crashlogView.logs-view { height: auto; max-height: 60vh; }
 
       /* Card titles */
       .card-title { font-size: 0.9rem; }
@@ -1667,41 +1716,37 @@
     <div id="tab-logs" class="tab-panel">
 
       <div class="card nocollapse">
-        <div class="card-title">Device Logs</div>
-        <div class="logs-layout">
-          <div class="logs-controls">
-            <div class="field-hint" style="margin:0 0 4px">Console output captured since boot (in-memory, 512 KB ring buffer, oldest lines dropped when full).</div>
-            <button class="btn btn-outline" id="refreshLogsBtn" onclick="refreshLogs()">Refresh</button>
-            <a class="btn btn-outline" href="/api/logs" style="text-align:center">Download</a>
-            <button class="btn btn-outline" id="clearLogsBtn" onclick="clearLogs()">Clear</button>
-            <div class="toggle-row" style="margin-top:6px">
-              <span class="toggle-label">Auto-refresh</span>
-              <label class="toggle"><input type="checkbox" id="logsAutoRefresh"><span class="toggle-track"></span></label>
-            </div>
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
-              <span class="field-hint" style="margin:0">Interval</span>
-              <select class="input" id="logsRefreshInterval" style="max-width:90px">
-                <option value="2">2s</option>
-                <option value="5" selected>5s</option>
-                <option value="10">10s</option>
-                <option value="30">30s</option>
-              </select>
-            </div>
-            <div class="field-hint" id="logsStatus" style="margin:4px 0 0">Not loaded yet.</div>
-          </div>
-          <pre id="logsView" class="logs-view"></pre>
-        </div>
-      </div>
+        <div class="card-title">Logs</div>
 
-      <div class="card nocollapse">
-        <div class="card-title">Crash Logs</div>
-        <div class="logs-layout">
-          <div class="logs-controls">
-            <div class="field-hint" style="margin:0 0 4px">Persistent crash history (survives reboot). Reset reason for every abnormal restart, with serial panic text when available. Newest 20 records kept.</div>
-            <button class="btn btn-outline" id="refreshCrashlogBtn" onclick="refreshCrashlog()">Refresh</button>
-            <a class="btn btn-outline" href="/api/crashlog" style="text-align:center">Download</a>
-            <button class="btn btn-outline" id="clearCrashlogBtn" onclick="clearCrashlog()">Clear</button>
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:6px">
+        <div class="logs-toolbar">
+          <div class="log-seg" role="tablist">
+            <button class="log-seg-btn active" id="logSegDevice" onclick="setLogSource('device')">Device</button>
+            <button class="log-seg-btn" id="logSegCrash" onclick="setLogSource('crash')">Crash</button>
+          </div>
+          <div class="logs-toolbar-actions">
+            <button class="btn btn-outline" id="logsRefreshBtn" onclick="logsRefreshActive()">Refresh</button>
+            <a class="btn btn-outline" id="logsDownloadLink" href="/api/logs" style="text-align:center">Download</a>
+            <button class="btn btn-outline" id="logsClearBtn" onclick="logsClearActive()">Clear</button>
+          </div>
+          <div class="logs-toolbar-slot">
+            <!-- Device source controls -->
+            <div id="logsDeviceCtl" style="display:flex;flex-wrap:wrap;align-items:center;gap:14px">
+              <div class="toggle-row" style="margin:0;border:0;padding:0">
+                <span class="toggle-label">Auto-refresh</span>
+                <label class="toggle"><input type="checkbox" id="logsAutoRefresh"><span class="toggle-track"></span></label>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <span class="field-hint" style="margin:0">Interval</span>
+                <select class="input" id="logsRefreshInterval" style="max-width:90px">
+                  <option value="2">2s</option>
+                  <option value="5" selected>5s</option>
+                  <option value="10">10s</option>
+                  <option value="30">30s</option>
+                </select>
+              </div>
+            </div>
+            <!-- Crash source controls -->
+            <div id="logsCrashCtl" style="display:none;align-items:center;gap:8px">
               <span class="field-hint" style="margin:0">Auto-clear after</span>
               <select class="input" id="crashlog_retention" style="max-width:110px">
                 <option value="0">Never</option>
@@ -1712,10 +1757,17 @@
                 <option value="90">90 days</option>
               </select>
             </div>
-            <div class="field-hint" id="crashlogStatus" style="margin:4px 0 0">Not loaded yet.</div>
           </div>
-          <div id="crashlogView" class="logs-view"></div>
         </div>
+
+        <div class="logs-meta">
+          <span class="field-hint" id="logsHint">Console output captured since boot (in-memory, 512 KB ring buffer, oldest lines dropped when full).</span>
+          <span class="field-hint" id="logsStatus">Not loaded yet.</span>
+          <span class="field-hint" id="crashlogStatus" style="display:none">Not loaded yet.</span>
+        </div>
+
+        <pre id="logsView" class="logs-view"></pre>
+        <div id="crashlogView" class="logs-view hidden"></div>
       </div>
     </div>
 
@@ -2041,9 +2093,10 @@
       setAccent(name);
       try{localStorage.setItem('nina_tab',name);}catch(e){}
       if(name==='logs'){
-        if(typeof refreshLogs==='function') refreshLogs();
-        if(typeof syncLogsAutoRefresh==='function') syncLogsAutoRefresh();
-        if(typeof refreshCrashlog==='function') refreshCrashlog();
+        /* Re-enter the currently selected source; refreshes it and (for device)
+           resumes auto-refresh. Falls back to direct calls if not yet defined. */
+        if(typeof setLogSource==='function') setLogSource(typeof activeLogSource!=='undefined'?activeLogSource:'device');
+        else if(typeof refreshLogs==='function') refreshLogs();
       } else {
         if(typeof stopLogsAutoRefresh==='function') stopLogsAutoRefresh();
       }
@@ -3923,16 +3976,66 @@
     /* ---- Diagnostic Logs ---- */
 
     var _logsTimer=null;
+    var activeLogSource='device';
 
     function logsTabActive(){
       var p=$('tab-logs');
       return !!(p && p.classList.contains('active'));
     }
 
+    /* Hint text per source (no em dashes in user-facing strings). */
+    var LOG_HINTS={
+      device:'Console output captured since boot (in-memory, 512 KB ring buffer, oldest lines dropped when full).',
+      crash:'Persistent crash history (survives reboot). Reset reason for every abnormal restart, with serial panic text when available. Newest 20 records kept.'
+    };
+
+    /* Switch the unified Logs card between the device and crash sources. Toggles
+       segment buttons, viewports, control groups, status lines, hint, the shared
+       Download href, and refreshes the now-active source. */
+    function setLogSource(src){
+      if(src!=='crash') src='device';
+      activeLogSource=src;
+      var dev=(src==='device');
+
+      var segDev=$('logSegDevice'), segCrash=$('logSegCrash');
+      if(segDev) segDev.classList.toggle('active',dev);
+      if(segCrash) segCrash.classList.toggle('active',!dev);
+
+      var lv=$('logsView'), cv=$('crashlogView');
+      if(lv) lv.classList.toggle('hidden',!dev);
+      if(cv) cv.classList.toggle('hidden',dev);
+
+      var devCtl=$('logsDeviceCtl'), crashCtl=$('logsCrashCtl');
+      if(devCtl) devCtl.style.display=dev?'flex':'none';
+      if(crashCtl) crashCtl.style.display=dev?'none':'flex';
+
+      var ls=$('logsStatus'), cs=$('crashlogStatus');
+      if(ls) ls.style.display=dev?'':'none';
+      if(cs) cs.style.display=dev?'none':'';
+
+      var hint=$('logsHint');
+      if(hint) hint.textContent=LOG_HINTS[src];
+
+      var dl=$('logsDownloadLink');
+      if(dl) dl.href=dev?'/api/logs':'/api/crashlog';
+
+      /* Auto-refresh only applies to the device source. */
+      if(dev){ syncLogsAutoRefresh(); refreshLogs(); }
+      else { stopLogsAutoRefresh(); refreshCrashlog(); }
+    }
+
+    /* Shared toolbar buttons route to the active source. */
+    function logsRefreshActive(){
+      if(activeLogSource==='crash') refreshCrashlog(); else refreshLogs();
+    }
+    function logsClearActive(){
+      if(activeLogSource==='crash') clearCrashlog(); else clearLogs();
+    }
+
     function refreshLogs(){
       var view=$('logsView');
       if(!view) return;
-      var btn=$('refreshLogsBtn');
+      var btn=(activeLogSource==='device')?$('logsRefreshBtn'):null;
       if(btn) btn.disabled=true;
       /* Was the view scrolled to (near) the bottom before we replaced content? */
       var nearBottom = (view.scrollHeight - view.scrollTop - view.clientHeight) < 40;
@@ -3955,9 +4058,9 @@
     }
 
     function logsAutoRefreshTick(){
-      /* Skip polling when the tab is not visible or the document is hidden,
-         to avoid pulling the whole 512 KB buffer needlessly. */
-      if(document.hidden || !logsTabActive()) return;
+      /* Skip polling when the tab is not visible, the document is hidden, or the
+         crash source is showing, to avoid pulling the whole 512 KB buffer needlessly. */
+      if(document.hidden || !logsTabActive() || activeLogSource!=='device') return;
       refreshLogs();
     }
 
@@ -3988,8 +4091,10 @@
         if(cb && cb.checked) startLogsAutoRefresh();
       });
       /* If Logs is the restored active tab on page load, the early switchTab()
-         ran before these functions existed (guarded by typeof), so populate now. */
-      if(logsTabActive()){ refreshLogs(); syncLogsAutoRefresh(); refreshCrashlog(); }
+         ran before these functions existed (guarded by typeof), so populate now.
+         setLogSource('device') wires up the default source and refreshes it; crash
+         data loads lazily the first time the user switches to the crash source. */
+      if(logsTabActive()){ setLogSource('device'); }
     })();
 
     /* Pause auto-refresh when the page is hidden; resume when visible on Logs tab. */
@@ -4000,7 +4105,7 @@
 
     function clearLogs(){
       if(!confirm('Clear the captured device logs? This cannot be undone.')) return;
-      var btn=$('clearLogsBtn');
+      var btn=$('logsClearBtn');
       btn.disabled=true; var prev=btn.textContent; btn.textContent='Clearing...';
       fetch('/api/logs/clear',{method:'POST'})
         .then(function(r){
@@ -4081,7 +4186,7 @@
     function refreshCrashlog(){
       var view=$('crashlogView');
       if(!view) return;
-      var btn=$('refreshCrashlogBtn');
+      var btn=(activeLogSource==='crash')?$('logsRefreshBtn'):null;
       if(btn) btn.disabled=true;
       fetch('/api/crashlog')
         .then(function(r){
@@ -4119,7 +4224,7 @@
 
     function clearCrashlog(){
       if(!confirm('Clear the crash history? This cannot be undone.')) return;
-      var btn=$('clearCrashlogBtn');
+      var btn=$('logsClearBtn');
       btn.disabled=true; var prev=btn.textContent; btn.textContent='Clearing...';
       fetch('/api/crashlog/clear',{method:'POST'})
         .then(function(r){
