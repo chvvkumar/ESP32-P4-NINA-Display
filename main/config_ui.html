@@ -1692,6 +1692,31 @@
           <pre id="logsView" class="logs-view"></pre>
         </div>
       </div>
+
+      <div class="card nocollapse">
+        <div class="card-title">Crash Logs</div>
+        <div class="logs-layout">
+          <div class="logs-controls">
+            <div class="field-hint" style="margin:0 0 4px">Persistent crash history (survives reboot). Reset reason for every abnormal restart, with serial panic text when available. Newest 20 records kept.</div>
+            <button class="btn btn-outline" id="refreshCrashlogBtn" onclick="refreshCrashlog()">Refresh</button>
+            <a class="btn btn-outline" href="/api/crashlog" style="text-align:center">Download</a>
+            <button class="btn btn-outline" id="clearCrashlogBtn" onclick="clearCrashlog()">Clear</button>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:6px">
+              <span class="field-hint" style="margin:0">Auto-clear after</span>
+              <select class="input" id="crashlog_retention" style="max-width:110px">
+                <option value="0">Never</option>
+                <option value="7">7 days</option>
+                <option value="14">14 days</option>
+                <option value="30">30 days</option>
+                <option value="60">60 days</option>
+                <option value="90">90 days</option>
+              </select>
+            </div>
+            <div class="field-hint" id="crashlogStatus" style="margin:4px 0 0">Not loaded yet.</div>
+          </div>
+          <div id="crashlogView" class="logs-view"></div>
+        </div>
+      </div>
     </div>
 
     <!-- ==================== TAB 7: BACKUP ==================== -->
@@ -2018,6 +2043,7 @@
       if(name==='logs'){
         if(typeof refreshLogs==='function') refreshLogs();
         if(typeof syncLogsAutoRefresh==='function') syncLogsAutoRefresh();
+        if(typeof refreshCrashlog==='function') refreshCrashlog();
       } else {
         if(typeof stopLogsAutoRefresh==='function') stopLogsAutoRefresh();
       }
@@ -2396,7 +2422,8 @@
         idle_page_override_enabled:!!$('idle_page_override_enabled').checked,
         idle_page_override_target:parseInt($('idle_page_override_target').value),
         idle_page_persistent:!!$('idle_page_persistent').checked,
-        idle_indicator_enabled:!!$('idle_indicator_enabled').checked
+        idle_indicator_enabled:!!$('idle_indicator_enabled').checked,
+        crash_log_retention_days:parseInt($('crashlog_retention').value,10)||0
       };
 
       var nets=[];
@@ -2591,6 +2618,9 @@
       if($('idle_page_persistent')) $('idle_page_persistent').checked=!!data.idle_page_persistent;
       if($('idle_indicator_enabled')) $('idle_indicator_enabled').checked=data.idle_indicator_enabled!==false;
       toggleIdleOverride();
+
+      // Crash log retention (days; 0 = never). Default 30 when absent.
+      if($('crashlog_retention')) $('crashlog_retention').value=(data.crash_log_retention_days!=null?data.crash_log_retention_days:30);
 
       // Authentication toggle — reflect in UI and hide sign-out button when off
       var authOn = (data.auth_enabled!==false);
@@ -3959,7 +3989,7 @@
       });
       /* If Logs is the restored active tab on page load, the early switchTab()
          ran before these functions existed (guarded by typeof), so populate now. */
-      if(logsTabActive()){ refreshLogs(); syncLogsAutoRefresh(); }
+      if(logsTabActive()){ refreshLogs(); syncLogsAutoRefresh(); refreshCrashlog(); }
     })();
 
     /* Pause auto-refresh when the page is hidden; resume when visible on Logs tab. */
@@ -3979,6 +4009,125 @@
           refreshLogs();
         })
         .catch(function(e){ showToast('Clear logs failed: '+e.message,'error'); })
+        .finally(function(){ btn.disabled=false; btn.textContent=prev; });
+    }
+
+    /* ---- Crash Logs ---- */
+
+    /* Format a crash record's timestamp: wall-clock when ts>0, else uptime note. */
+    function crashWhen(rec){
+      if(rec.ts && rec.ts>0){
+        try{ return new Date(rec.ts*1000).toLocaleString(); }catch(e){}
+        return 'ts '+rec.ts;
+      }
+      var u=(rec.uptime_s!=null)?rec.uptime_s:0;
+      return 'uptime '+u+'s (no clock)';
+    }
+
+    /* Build one crash entry as DOM nodes (textContent avoids HTML injection from
+       the captured panic text). */
+    function buildCrashEntry(rec){
+      var wrap=document.createElement('div');
+      wrap.style.cssText='border:1px solid var(--border);border-radius:var(--radius-sm);'
+        +'padding:10px 12px;margin-bottom:10px;background:rgba(0,0,0,0.25)';
+
+      var head=document.createElement('div');
+      head.style.cssText='display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;'
+        +'font-family:inherit;color:var(--text)';
+
+      var reason=document.createElement('strong');
+      reason.textContent=rec.reason_str||('reason '+(rec.reason!=null?rec.reason:'?'));
+      reason.style.cssText='font-size:0.82rem';
+      head.appendChild(reason);
+
+      var when=document.createElement('span');
+      when.textContent=crashWhen(rec);
+      when.style.cssText='color:var(--text-secondary);font-size:0.75rem';
+      head.appendChild(when);
+
+      var counts=document.createElement('span');
+      var c=(rec.crash_count!=null)?rec.crash_count:'?';
+      var b=(rec.boot_count!=null)?rec.boot_count:'?';
+      counts.textContent='crash #'+c+' · boot #'+b;
+      counts.style.cssText='color:var(--text-hint);font-size:0.72rem';
+      head.appendChild(counts);
+
+      wrap.appendChild(head);
+
+      var panic=(rec.panic||'').trim();
+      if(panic){
+        var det=document.createElement('details');
+        det.style.cssText='margin-top:6px';
+        var sum=document.createElement('summary');
+        sum.textContent='Panic text';
+        sum.style.cssText='cursor:pointer;font-size:0.74rem;color:var(--text-secondary)';
+        det.appendChild(sum);
+        var pre=document.createElement('pre');
+        pre.textContent=panic;
+        pre.style.cssText='margin:6px 0 0;white-space:pre-wrap;word-break:break-word;'
+          +'font-size:0.7rem;line-height:1.35;max-height:260px;overflow:auto;'
+          +'color:var(--text-secondary)';
+        det.appendChild(pre);
+        wrap.appendChild(det);
+      } else {
+        var none=document.createElement('div');
+        none.textContent='No panic text captured (reset-reason only).';
+        none.style.cssText='margin-top:4px;font-size:0.72rem;color:var(--text-hint)';
+        wrap.appendChild(none);
+      }
+      return wrap;
+    }
+
+    function refreshCrashlog(){
+      var view=$('crashlogView');
+      if(!view) return;
+      var btn=$('refreshCrashlogBtn');
+      if(btn) btn.disabled=true;
+      fetch('/api/crashlog')
+        .then(function(r){
+          if(!r.ok) throw new Error('HTTP '+r.status);
+          return r.text();
+        })
+        .then(function(text){
+          view.textContent='';
+          var lines=text.split('\n');
+          var recs=[];
+          for(var i=0;i<lines.length;i++){
+            var ln=lines[i].trim();
+            if(!ln) continue;
+            try{ recs.push(JSON.parse(ln)); }catch(e){ /* skip malformed line */ }
+          }
+          if(recs.length===0){
+            var empty=document.createElement('div');
+            empty.textContent='No crashes recorded.';
+            empty.style.cssText='color:var(--text-hint);font-size:0.8rem';
+            view.appendChild(empty);
+            $('crashlogStatus').textContent='Updated '+new Date().toLocaleTimeString()+' · 0 records';
+            return;
+          }
+          /* Newest first for display (file is newest-last). */
+          recs.reverse();
+          recs.forEach(function(rec){ view.appendChild(buildCrashEntry(rec)); });
+          $('crashlogStatus').textContent='Updated '+new Date().toLocaleTimeString()+' · '+recs.length+' record'+(recs.length===1?'':'s');
+        })
+        .catch(function(e){
+          showToast('Load crash logs failed: '+e.message,'error');
+          $('crashlogStatus').textContent='Load failed at '+new Date().toLocaleTimeString()+': '+e.message;
+        })
+        .finally(function(){ if(btn) btn.disabled=false; });
+    }
+
+    function clearCrashlog(){
+      if(!confirm('Clear the crash history? This cannot be undone.')) return;
+      var btn=$('clearCrashlogBtn');
+      btn.disabled=true; var prev=btn.textContent; btn.textContent='Clearing...';
+      fetch('/api/crashlog/clear',{method:'POST'})
+        .then(function(r){
+          if(!r.ok) throw new Error('Clear failed');
+          showToast('Crash logs cleared','success');
+          refreshCrashlog();
+        })
+        .catch(function(e){ showToast('Clear crash logs failed: '+e.message,'error'); })
         .finally(function(){ btn.disabled=false; btn.textContent=prev; });
     }
 

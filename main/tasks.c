@@ -51,6 +51,7 @@
 #include <math.h>          /* expf — framerate-independent settle ease */
 #include "perf_monitor.h"
 #include "power_mgmt.h"
+#include "crash_log.h"
 #include "demo_data.h"
 #include "weather_client.h"
 #include "driver/jpeg_decode.h"
@@ -1734,6 +1735,7 @@ void data_update_task(void *arg) {
     }
 
     int64_t last_rotate_ms = 0;
+    int64_t last_crash_purge_ms = 0;  /* daily crash-log retention purge tick */
 
     /* Screen sleep state */
     int64_t all_disconnected_since_ms = 0;  /* 0 = at least one connected recently */
@@ -2331,6 +2333,16 @@ main_loop:
         }
 
         int64_t now_ms = esp_timer_get_time() / 1000;
+
+        /* Once-daily crash-log retention purge (piggybacked on this loop — no
+         * dedicated task). First pass runs ~24 h after boot; the boot-time purge
+         * inside crash_log_init() covers the startup case. */
+        if (last_crash_purge_ms == 0) {
+            last_crash_purge_ms = now_ms;
+        } else if (now_ms - last_crash_purge_ms >= (int64_t)86400 * 1000) {
+            crash_log_purge_old(app_config_get()->crash_log_retention_days);
+            last_crash_purge_ms = now_ms;
+        }
 
         /* Update active/background flags for poll tasks.
          * On summary page all instances are active; on a NINA page only that instance is. */
