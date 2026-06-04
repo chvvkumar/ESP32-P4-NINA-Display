@@ -224,44 +224,55 @@ static bool alloc_texture(int w, int h)
     return true;
 }
 
-/* Apply the RUNTIME texture mirrors to the already-filled texture buffer
+/* RUNTIME texture mirrors applied in place to the already-filled texture buffer
  * (s_tex_buf, s_tex_w x s_tex_h, RGB565). The flip state comes from the live
  * config (cfg->moon_flip_u / cfg->moon_flip_v), NOT the compile-time #defines:
  *  - flip_u mirrors columns (x -> w-1-x): east<->west longitude swap.
  *  - flip_v mirrors rows    (y -> h-1-y): north<->south latitude swap.
  * Both default OFF (config defaults 0), so the base orientation is unchanged on
- * defaults. Records the applied state in s_applied_flip_u/v so render_core can
- * detect a later config change and re-decode. Mirroring runs unconditionally
- * based on the runtime booleans (no #if) so toggling from the web UI works. */
+ * defaults. apply_texture_flips() records the applied state in s_applied_flip_u/v
+ * so render_core can detect a later config change and re-flip the buffer in place
+ * (no JPEG re-decode). The mirror helpers are self-inverse, so toggling an axis
+ * from the web UI is just one more mirror of that axis. */
+/* Mirror the decoded texture columns in place (east<->west, the flip_u axis).
+ * Self-inverse: calling it again restores the original. */
+static void mirror_texture_u(void)
+{
+    for (int y = 0; y < s_tex_h; y++) {
+        uint16_t *row = s_tex_buf + (size_t)y * (size_t)s_tex_w;
+        for (int x = 0; x < s_tex_w / 2; x++) {
+            uint16_t t = row[x];
+            row[x] = row[s_tex_w - 1 - x];
+            row[s_tex_w - 1 - x] = t;
+        }
+    }
+}
+
+/* Mirror the decoded texture rows in place (north<->south, the flip_v axis).
+ * Self-inverse. */
+static void mirror_texture_v(void)
+{
+    for (int y = 0; y < s_tex_h / 2; y++) {
+        uint16_t *a = s_tex_buf + (size_t)y * (size_t)s_tex_w;
+        uint16_t *b = s_tex_buf + (size_t)(s_tex_h - 1 - y) * (size_t)s_tex_w;
+        for (int x = 0; x < s_tex_w; x++) {
+            uint16_t t = a[x];
+            a[x] = b[x];
+            b[x] = t;
+        }
+    }
+}
+
 static void apply_texture_flips(void)
 {
     const app_config_t *cfg = app_config_get();
     int flip_u = (cfg && cfg->moon_flip_u) ? 1 : 0;
     int flip_v = (cfg && cfg->moon_flip_v) ? 1 : 0;
 
-    if (flip_u) {
-        for (int y = 0; y < s_tex_h; y++) {
-            uint16_t *row = s_tex_buf + (size_t)y * (size_t)s_tex_w;
-            for (int x = 0; x < s_tex_w / 2; x++) {
-                uint16_t t = row[x];
-                row[x] = row[s_tex_w - 1 - x];
-                row[s_tex_w - 1 - x] = t;
-            }
-        }
-    }
-    if (flip_v) {
-        for (int y = 0; y < s_tex_h / 2; y++) {
-            uint16_t *a = s_tex_buf + (size_t)y * (size_t)s_tex_w;
-            uint16_t *b = s_tex_buf + (size_t)(s_tex_h - 1 - y) * (size_t)s_tex_w;
-            for (int x = 0; x < s_tex_w; x++) {
-                uint16_t t = a[x];
-                a[x] = b[x];
-                b[x] = t;
-            }
-        }
-    }
+    if (flip_u) mirror_texture_u();
+    if (flip_v) mirror_texture_v();
 
-    /* Remember what is now baked into the buffer for live re-decode detection. */
+    /* Remember what is now baked into the buffer for live re-flip detection. */
     s_applied_flip_u = flip_u;
     s_applied_flip_v = flip_v;
 }
@@ -355,12 +366,14 @@ extern "C" bool moon_sphere_init(void)
     return s_inited;
 }
 
-/* Re-decode the texture if the live flip config differs from what is currently
- * baked into s_tex_buf. Re-runs the real (or placeholder) decode, which calls
- * apply_texture_flips() with the CURRENT config, so flip toggles from the web UI
- * take effect on the next render. Guarded by the init mutex; alloc_texture()
- * frees the old buffer before re-allocating, so there is no leak. No-op when the
- * flip state already matches (the common case, zero cost on the steady path). */
+/* Apply a live flip-config change to the EXISTING decoded texture buffer in
+ * place, with no JPEG re-decode. A flip is a row/column mirror, which is its own
+ * inverse, so toggling an axis = mirroring that axis once. This avoids the large
+ * (~1.5MB) PSRAM decode spike that init_real_texture() incurs; that spike landed
+ * mid-render (on top of the live 720x720 color+z scratch) and could fail with
+ * outofmem under concurrent load (e.g. an OTA check), falling back to the ugly
+ * placeholder. Guarded by the init mutex. No-op when the flip state already
+ * matches (the common steady-state path, zero cost). */
 static void moon_sphere_reflip_if_changed(void)
 {
     const app_config_t *cfg = app_config_get();
@@ -369,11 +382,25 @@ static void moon_sphere_reflip_if_changed(void)
     if (want_u == s_applied_flip_u && want_v == s_applied_flip_v) return;
 
     if (s_init_mtx) xSemaphoreTake(s_init_mtx, portMAX_DELAY);
-    /* Re-check under the lock in case another task already re-decoded. */
+    /* Re-check under the lock in case another task already re-flipped. */
     if (want_u != s_applied_flip_u || want_v != s_applied_flip_v) {
-        /* init_real_texture() / init_placeholder_texture() re-alloc (freeing the
-         * old buffer) and re-apply the now-current flips. */
-        if (!init_real_texture()) init_placeholder_texture();
+        if (s_tex_buf == nullptr) {
+            /* No texture decoded yet (shouldn't happen post-init): do a full
+             * decode, which applies the current flips itself. */
+            if (!init_real_texture()) init_placeholder_texture();
+        } else {
+            /* Apply only the delta in place. Column/row mirrors commute and are
+             * self-inverse, so mirroring the changed axis once reaches the target
+             * state from any prior state. */
+            if (want_u != s_applied_flip_u) {
+                mirror_texture_u();
+                s_applied_flip_u = want_u;
+            }
+            if (want_v != s_applied_flip_v) {
+                mirror_texture_v();
+                s_applied_flip_v = want_v;
+            }
+        }
     }
     if (s_init_mtx) xSemaphoreGive(s_init_mtx);
 }

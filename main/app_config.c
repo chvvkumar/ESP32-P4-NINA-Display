@@ -786,12 +786,12 @@ static void set_defaults(app_config_t *cfg) {
     cfg->image_display_crop = false; // crop/zoom image to fill & hide baked-in labels
     cfg->moon_drag_light_mode = 0;   // 0=true phase, 1=explore (moon drag-to-rotate lighting)
 
-    // Moon sphere orientation tuning defaults
+    // Moon sphere orientation tuning defaults (tuned baseline from a reference device)
     cfg->moon_flip_u = 0;            // mirror texture longitude E<->W
-    cfg->moon_flip_v = 1;            // flip texture latitude N<->S (default 1: corrects N-S for the NASA equirect map)
-    cfg->moon_roll_offset = 0.0f;    // degrees, clamp [-180,180]
+    cfg->moon_flip_v = 0;            // flip texture latitude N<->S
+    cfg->moon_roll_offset = -7.0f;   // degrees, clamp [-180,180]
     cfg->moon_yaw_offset = 0.0f;     // degrees, clamp [-180,180]
-    cfg->moon_pitch_offset = 0.0f;   // degrees, clamp [-90,90]
+    cfg->moon_pitch_offset = -5.0f;  // degrees, clamp [-90,90]
     cfg->moon_north_up = 1;          // 0=true sky tilt, 1=always upright/north-up
 
     // Moon touch-spin return behavior defaults
@@ -1775,10 +1775,10 @@ static void migrate_from_v37(const void *raw, size_t raw_size, app_config_t *cfg
 
     /* Moon orientation tuning fields: new in v38 — defaults already set by set_defaults() */
     cfg->moon_flip_u = 0;
-    cfg->moon_flip_v = 1;
-    cfg->moon_roll_offset = 0.0f;
+    cfg->moon_flip_v = 0;
+    cfg->moon_roll_offset = -7.0f;
     cfg->moon_yaw_offset = 0.0f;
-    cfg->moon_pitch_offset = 0.0f;
+    cfg->moon_pitch_offset = -5.0f;
 
     /* moon_north_up field: new in v39 — default already set by set_defaults() */
     cfg->moon_north_up = 1;
@@ -1863,10 +1863,10 @@ static void migrate_from_v36(const void *raw, size_t raw_size, app_config_t *cfg
 
     /* Moon orientation tuning fields: new in v38 — defaults already set by set_defaults() */
     cfg->moon_flip_u = 0;
-    cfg->moon_flip_v = 1;
-    cfg->moon_roll_offset = 0.0f;
+    cfg->moon_flip_v = 0;
+    cfg->moon_roll_offset = -7.0f;
     cfg->moon_yaw_offset = 0.0f;
-    cfg->moon_pitch_offset = 0.0f;
+    cfg->moon_pitch_offset = -5.0f;
 
     /* moon_north_up field: new in v39 — default already set by set_defaults() */
     cfg->moon_north_up = 1;

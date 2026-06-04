@@ -663,6 +663,137 @@ void moon_caption(char *name_out, size_t name_sz, char *pct_out, size_t pct_sz)
     snprintf(pct_out, pct_sz, "%d%%", (int)(s_moon_state.illum * 100.0f + 0.5f));
 }
 
+/* Cached rise/set results — recomputed at most once per 30 s or on location
+ * change.  Avoids running the 457-sample scan on every drag frame. */
+static time_t s_rs_calc_at  = 0;
+static time_t s_rs_rise     = 0;
+static time_t s_rs_set      = 0;
+static bool   s_rs_rise_v   = false;
+static bool   s_rs_set_v    = false;
+static double s_rs_lat      = 1e9;
+static double s_rs_lon      = 1e9;
+
+/* Return the signed difference in LOCAL calendar days between evt and now.
+ * Normalises both instants to local noon before subtracting so DST transitions
+ * within the interval do not produce off-by-one errors. */
+static int local_day_delta(time_t evt, time_t ref)
+{
+    struct tm ta, tb;
+    localtime_r(&evt, &ta);
+    localtime_r(&ref, &tb);
+    ta.tm_hour = 12; ta.tm_min = 0; ta.tm_sec = 0; ta.tm_isdst = -1;
+    tb.tm_hour = 12; tb.tm_min = 0; tb.tm_sec = 0; tb.tm_isdst = -1;
+    time_t na = mktime(&ta);
+    time_t nb = mktime(&tb);
+    return (int)lround((double)(na - nb) / 86400.0);
+}
+
+/* Format a single moon event (rise or set) into `out[sz]`.
+ * Output examples (all fit within 20 bytes including NUL):
+ *   "Rise 14:32"       24h, same day
+ *   "Rise 2:34am +1"   12h, next day
+ *   "Set 09:02 -1"     24h, previous day
+ *   "Rise --:--"       invalid */
+static void fmt_moon_event(char *out, size_t sz, const char *label,
+                           time_t evt, bool valid, time_t now_t, bool use_24h)
+{
+    if (!valid) {
+        snprintf(out, sz, "%s --:--", label);
+        return;
+    }
+
+    struct tm lt;
+    localtime_r(&evt, &lt);
+
+    /* Time string: 5 chars for 24h "HH:MM", up to 7 for 12h "12:34pm". */
+    char tbuf[10];
+    if (use_24h) {
+        strftime(tbuf, sizeof(tbuf), "%H:%M", &lt);
+    } else {
+        int hr = lt.tm_hour % 12;
+        if (hr == 0) hr = 12;
+        snprintf(tbuf, sizeof(tbuf), "%d:%02d%s",
+                 hr, lt.tm_min, lt.tm_hour < 12 ? "am" : "pm");
+    }
+
+    /* Day-offset suffix: "" / " +N" / " -N". Sized for the full int range so
+     * -Werror=format-truncation is satisfied (delta is realistically +/-1..2). */
+    char sfx[16] = "";
+    int  delta   = local_day_delta(evt, now_t);
+    if (delta > 0) {
+        snprintf(sfx, sizeof(sfx), " +%d", delta);
+    } else if (delta < 0) {
+        snprintf(sfx, sizeof(sfx), " %d", delta);   /* "-N" via %d with negative */
+    }
+
+    /* Longest possible result: "Rise 12:34pm +1\0" = 16 chars — fits in 20. */
+    snprintf(out, sz, "%s %s%s", label, tbuf, sfx);
+}
+
+/* Fills the four moon-overlay corner strings.  All buffers must be non-NULL.
+ *   age:  "Age 11.2d"
+ *   next: "Full in 3d" or "New in 18d" (whichever lunar event is sooner);
+ *         "Full <1d" / "New <1d" when less than one day away.
+ *   rise: "Rise 14:32"  or  "Rise --:--" (24h when cfg->weather_time_format==1,
+ *         12h e.g. "Rise 2:34am" otherwise).  A day-offset suffix " +N" / " -N"
+ *         is appended when the event falls on a different local calendar day.
+ *   set:  same format as rise.
+ * Reads cached s_moon_state (lock-free, single writer) for age/next; calls
+ * moon_rise_set() at most once per 30 s (throttled) for the rise/set times. */
+void moon_overlay_info(char *age,  size_t age_sz,
+                       char *next, size_t next_sz,
+                       char *rise, size_t rise_sz,
+                       char *set,  size_t set_sz)
+{
+    const double SYNODIC = 29.530588853;
+
+    /* --- Age --- */
+    double cycle = (double)s_moon_state.cycle;
+    double age_days = cycle * SYNODIC;
+    snprintf(age, age_sz, "Age %.1fd", age_days);
+
+    /* --- Next phase (Full or New, whichever is sooner) --- */
+    double days_to_full = fmod(0.5 - cycle + 1.0, 1.0) * SYNODIC;
+    double days_to_new  = fmod(1.0 - cycle,        1.0) * SYNODIC;
+    /* fmod(1.0 - 0.0, 1.0) == 0.0, which means "already new"; push to a full
+     * cycle so we report "New in 29.5d" rather than "New in 0d". */
+    if (days_to_new < 0.01) days_to_new = SYNODIC;
+
+    if (days_to_full <= days_to_new) {
+        if (days_to_full < 1.0)
+            snprintf(next, next_sz, "Full <1d");
+        else
+            snprintf(next, next_sz, "Full in %.0fd", days_to_full);
+    } else {
+        if (days_to_new < 1.0)
+            snprintf(next, next_sz, "New <1d");
+        else
+            snprintf(next, next_sz, "New in %.0fd", days_to_new);
+    }
+
+    /* --- Rise / Set (throttled) --- */
+    const app_config_t *cfg = app_config_get();
+    double lat = cfg->moon_lat, lon = cfg->moon_lon;
+    if (lat == 0.0 && lon == 0.0) { lat = cfg->weather_lat; lon = cfg->weather_lon; }
+
+    time_t now;
+    time(&now);
+
+    /* Recompute only when the cache is stale (>= 30 s old) or location changed. */
+    if (s_rs_calc_at == 0 || (now - s_rs_calc_at) >= 30 ||
+        lat != s_rs_lat  || lon != s_rs_lon) {
+        moon_rise_set(now, lat, lon, &s_rs_rise, &s_rs_rise_v, &s_rs_set, &s_rs_set_v);
+        s_rs_calc_at = now;
+        s_rs_lat     = lat;
+        s_rs_lon     = lon;
+    }
+
+    bool use_24h = (cfg->weather_time_format == 1);
+
+    fmt_moon_event(rise, rise_sz, "Rise", s_rs_rise, s_rs_rise_v, now, use_24h);
+    fmt_moon_event(set,  set_sz,  "Set",  s_rs_set,  s_rs_set_v,  now, use_24h);
+}
+
 void goes_poll_task(void *arg)
 {
     ESP_LOGI(TAG, "GOES poll task started");
@@ -1076,15 +1207,20 @@ void goes_poll_task(void *arg)
                         goes_data.connected = true;
                         goes_data.last_poll_ms = esp_timer_get_time() / 1000;
                         goes_data_unlock(&goes_data);
-                        /* After a drag the on-screen image is the last settle frame
-                         * (240px @ TRUE_PHASE, PPA-upscaled, already visually close to
-                         * this resting frame). Push this OWNED native-720 resting frame
-                         * now so it REPLACES that frame, rather than waiting on the UI
-                         * cadence whose new-image gate could tie on an equal-millisecond
-                         * timestamp. force_redraw bypasses that gate; the swap is instant
-                         * (matching every other moon frame) so there is no midpoint
-                         * brightness dip as the crisp resting frame comes in. */
-                        if (ran_drag && image_display_page_active &&
+                        /* Push this OWNED native-720 resting frame to the panel
+                         * immediately rather than waiting on the periodic UI cadence
+                         * (data_update_task, up to update_rate_s away) to notice the new
+                         * goes_data timestamp via its new-image gate. This makes
+                         * config-driven re-renders (flip / background / orientation
+                         * toggles from the web UI, which wake this task via
+                         * xTaskNotifyGive) appear as soon as the render completes,
+                         * matching the snappiness of the other live settings. It also
+                         * still REPLACES the post-drag 240px settle frame, whose
+                         * equal-millisecond timestamp the cadence gate could otherwise
+                         * tie on and skip. force_redraw bypasses that gate; the swap is
+                         * instant (matching every other moon frame) so there is no
+                         * midpoint brightness dip. */
+                        if (image_display_page_active &&
                             cfg->image_display_source == 1) {
                             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                                 nina_image_display_force_redraw();

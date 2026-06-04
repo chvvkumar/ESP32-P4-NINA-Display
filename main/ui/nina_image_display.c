@@ -34,9 +34,13 @@ extern _Atomic bool moon_anim_request;
 
 static const char *TAG = "image_display";
 
-/* Overlay label font — overpass_27 is unconditionally compiled into the
- * firmware (see main/CMakeLists.txt), so it avoids any dependency on the
- * LV_FONT_MONTSERRAT_* Kconfig toggles. */
+/* Overlay label font — unconditionally compiled into the firmware
+ * (see main/CMakeLists.txt), so it avoids any dependency on the
+ * LV_FONT_MONTSERRAT_* Kconfig toggles.  All overlay labels (bottom phase /
+ * timestamp and the four moon-corner info labels) use overpass_27 for
+ * readability at desk distance.  At this size the longest strings reach past
+ * the inscribed moon disc; each label's translucent chip background keeps the
+ * text legible where it overlaps the moon. */
 extern const lv_font_t lv_font_overpass_27;
 
 static lv_obj_t *page_container;
@@ -45,6 +49,14 @@ static lv_obj_t *img_back;
 static lv_obj_t *overlay_bar;
 static lv_obj_t *lbl_region;
 static lv_obj_t *lbl_timestamp;
+
+/* Moon-only corner info labels (top-left pair: age/next; top-right pair: rise/set).
+ * NULL-initialised; created lazily inside nina_image_display_create() and guarded
+ * before every access.  Only shown when source==1 AND overlay is visible. */
+static lv_obj_t *lbl_moon_age  = NULL;
+static lv_obj_t *lbl_moon_next = NULL;
+static lv_obj_t *lbl_moon_rise = NULL;
+static lv_obj_t *lbl_moon_set  = NULL;
 
 /* One persistent RGB565 descriptor per image slot. The slot whose image is
  * currently "front" owns the displayed buffer; the "back" slot owns the
@@ -253,6 +265,70 @@ static void moon_drag_released_cb(lv_event_t *e)
     if (goes_task_handle) xTaskNotifyGive(goes_task_handle);
 }
 
+/* Apply the "chip" style to a label: small translucent rounded background that
+ * keeps text legible when the main overlay bar is nearly transparent.
+ * bg_opa=120 (~47%), corner radius=8, horizontal pad=8, vertical pad=3.
+ * The label's own bg colour is set to black; text colour is always white so it
+ * is never inadvertently overridden by apply_theme() later. */
+static void apply_chip_style(lv_obj_t *lbl)
+{
+    lv_obj_set_style_bg_color(lbl,   lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(lbl,     120,              0);
+    lv_obj_set_style_radius(lbl,     8,                0);
+    lv_obj_set_style_pad_left(lbl,   8,                0);
+    lv_obj_set_style_pad_right(lbl,  8,                0);
+    lv_obj_set_style_pad_top(lbl,    3,                0);
+    lv_obj_set_style_pad_bottom(lbl, 3,                0);
+    lv_obj_set_style_text_color(lbl, lv_color_white(), 0);
+}
+
+/* extern declaration for moon_overlay_info — owned by moon_ephemeris.c,
+ * parallel to the existing moon_caption() extern declarations scattered at each
+ * call site.  Placed here so all three call sites below can share one decl. */
+extern void moon_overlay_info(char *age,  size_t age_sz,
+                              char *next, size_t next_sz,
+                              char *rise, size_t rise_sz,
+                              char *set,  size_t set_sz);
+
+static void hide_moon_corner_labels(void);
+
+/* Show the four moon corner labels and populate them from moon_overlay_info().
+ * Called from every moon update path.  Guards against NULL in case the labels
+ * were not yet created or have already been cleaned up. */
+static void update_moon_corner_labels(void)
+{
+    if (!lbl_moon_age) return;
+    /* The corner labels track overlay visibility. overlay_bar's HIDDEN flag is the
+     * single source of truth (set by the initial config check and by
+     * nina_image_display_set_overlay_visible). Without this guard the live drag
+     * paths (show_scaled / show_borrowed) would re-show the labels on every frame
+     * even while the overlay is turned off. */
+    if (overlay_bar && lv_obj_has_flag(overlay_bar, LV_OBJ_FLAG_HIDDEN)) {
+        hide_moon_corner_labels();
+        return;
+    }
+    char age[20], next[20], rise[20], set[20];
+    moon_overlay_info(age, sizeof(age), next, sizeof(next),
+                      rise, sizeof(rise), set, sizeof(set));
+    lv_label_set_text(lbl_moon_age,  age);
+    lv_label_set_text(lbl_moon_next, next);
+    lv_label_set_text(lbl_moon_rise, rise);
+    lv_label_set_text(lbl_moon_set,  set);
+    lv_obj_clear_flag(lbl_moon_age,  LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(lbl_moon_next, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(lbl_moon_rise, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(lbl_moon_set,  LV_OBJ_FLAG_HIDDEN);
+}
+
+/* Hide the four moon corner labels (non-Moon sources and overlay-off state). */
+static void hide_moon_corner_labels(void)
+{
+    if (lbl_moon_age)  lv_obj_add_flag(lbl_moon_age,  LV_OBJ_FLAG_HIDDEN);
+    if (lbl_moon_next) lv_obj_add_flag(lbl_moon_next, LV_OBJ_FLAG_HIDDEN);
+    if (lbl_moon_rise) lv_obj_add_flag(lbl_moon_rise, LV_OBJ_FLAG_HIDDEN);
+    if (lbl_moon_set)  lv_obj_add_flag(lbl_moon_set,  LV_OBJ_FLAG_HIDDEN);
+}
+
 lv_obj_t *nina_image_display_create(lv_obj_t *parent)
 {
     page_container = lv_obj_create(parent);
@@ -329,26 +405,65 @@ lv_obj_t *nina_image_display_create(lv_obj_t *parent)
     lv_obj_remove_style_all(overlay_bar);
     lv_obj_set_size(overlay_bar, SCREEN_SIZE, 68);
     lv_obj_align(overlay_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_style_bg_color(overlay_bar, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(overlay_bar, 210, 0);
-    lv_obj_set_style_pad_left(overlay_bar, 18, 0);
-    lv_obj_set_style_pad_right(overlay_bar, 18, 0);
+    /* No bar background: each bottom label carries its own translucent chip
+     * (apply_chip_style), so overlay_bar is just an invisible positioning
+     * container for lbl_region / lbl_timestamp. */
+    lv_obj_set_style_bg_opa(overlay_bar, LV_OPA_TRANSP, 0);
+    /* No edge padding — the bottom labels sit flush in the screen corners so they
+     * stay clear of the inscribed moon disc. */
+    lv_obj_set_style_pad_left(overlay_bar, 0, 0);
+    lv_obj_set_style_pad_right(overlay_bar, 0, 0);
     lv_obj_clear_flag(overlay_bar, LV_OBJ_FLAG_SCROLLABLE);
 
     lbl_region = lv_label_create(overlay_bar);
-    lv_obj_set_style_text_color(lbl_region, lv_color_white(), 0);
     lv_obj_set_style_text_font(lbl_region, &lv_font_overpass_27, 0);
-    lv_obj_align(lbl_region, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_align(lbl_region, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    apply_chip_style(lbl_region);   /* white text + translucent chip bg */
     lv_label_set_text(lbl_region, "");
 
     lbl_timestamp = lv_label_create(overlay_bar);
-    lv_obj_set_style_text_color(lbl_timestamp, lv_color_hex(0xE8E8E8), 0);
     lv_obj_set_style_text_font(lbl_timestamp, &lv_font_overpass_27, 0);
-    lv_obj_align(lbl_timestamp, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_align(lbl_timestamp, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    apply_chip_style(lbl_timestamp);
     lv_label_set_text(lbl_timestamp, "");
+
+    /* Moon corner labels: children of page_container (NOT overlay_bar) so they
+     * sit at the TOP corners above the image.  Created after overlay_bar so their
+     * z-order keeps them on top.  Shown only for Moon source; start hidden. */
+    lbl_moon_age = lv_label_create(page_container);
+    lv_obj_set_style_text_font(lbl_moon_age, &lv_font_overpass_27, 0);
+    apply_chip_style(lbl_moon_age);
+    lv_obj_align(lbl_moon_age, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_label_set_text(lbl_moon_age, "");
+    lv_obj_add_flag(lbl_moon_age, LV_OBJ_FLAG_HIDDEN);
+
+    lbl_moon_next = lv_label_create(page_container);
+    lv_obj_set_style_text_font(lbl_moon_next, &lv_font_overpass_27, 0);
+    apply_chip_style(lbl_moon_next);
+    /* Stack flush below lbl_moon_age. At 27px the chip is line_height(39)+pad(6) =
+     * 45px tall, so the second row sits at y = 45 (chips touch, no gap). */
+    lv_obj_align(lbl_moon_next, LV_ALIGN_TOP_LEFT, 0, 45);
+    lv_label_set_text(lbl_moon_next, "");
+    lv_obj_add_flag(lbl_moon_next, LV_OBJ_FLAG_HIDDEN);
+
+    lbl_moon_rise = lv_label_create(page_container);
+    lv_obj_set_style_text_font(lbl_moon_rise, &lv_font_overpass_27, 0);
+    apply_chip_style(lbl_moon_rise);
+    lv_obj_align(lbl_moon_rise, LV_ALIGN_TOP_RIGHT, 0, 0);
+    lv_label_set_text(lbl_moon_rise, "");
+    lv_obj_add_flag(lbl_moon_rise, LV_OBJ_FLAG_HIDDEN);
+
+    lbl_moon_set = lv_label_create(page_container);
+    lv_obj_set_style_text_font(lbl_moon_set, &lv_font_overpass_27, 0);
+    apply_chip_style(lbl_moon_set);
+    lv_obj_align(lbl_moon_set, LV_ALIGN_TOP_RIGHT, 0, 45);
+    lv_label_set_text(lbl_moon_set, "");
+    lv_obj_add_flag(lbl_moon_set, LV_OBJ_FLAG_HIDDEN);
 
     if (!app_config_get()->image_display_show_overlay) {
         lv_obj_add_flag(overlay_bar, LV_OBJ_FLAG_HIDDEN);
+        /* Corner labels also start hidden when the overlay is off. */
+        hide_moon_corner_labels();
     }
     return page_container;
 }
@@ -565,17 +680,20 @@ void nina_image_display_update(goes_data_t *data)
         moon_caption(name, sizeof(name), pct, sizeof(pct));
         lv_label_set_text(lbl_region, name);
         lv_label_set_text(lbl_timestamp, pct);
+        update_moon_corner_labels();
     } else if (cfg->image_display_source == 2) {     /* Solar (SDO/AIA) */
         extern const char *solar_band_label(uint8_t idx);
         lv_label_set_text(lbl_region, solar_band_label(cfg->solar_band));
         time_t now; struct tm ti; time(&now); localtime_r(&now, &ti);
         char ts[32]; strftime(ts, sizeof(ts), "Updated %H:%M", &ti);
         lv_label_set_text(lbl_timestamp, ts);
+        hide_moon_corner_labels();
     } else {                                         /* GOES */
         lv_label_set_text(lbl_region, region_code_to_name(cfg->goes_region));
         time_t now; struct tm ti; time(&now); localtime_r(&now, &ti);
         char ts[32]; strftime(ts, sizeof(ts), "Updated %H:%M", &ti);
         lv_label_set_text(lbl_timestamp, ts);
+        hide_moon_corner_labels();
     }
 
     /* The new image is now committed (swap done, overlay labels updated). Hide
@@ -663,6 +781,7 @@ void nina_image_display_show_scaled(const uint16_t *buf, int w, int h)
     moon_caption(name, sizeof(name), pct, sizeof(pct));
     lv_label_set_text(lbl_region, name);
     lv_label_set_text(lbl_timestamp, pct);
+    update_moon_corner_labels();
 
     nina_wait_overlay_hide();
 }
@@ -727,6 +846,7 @@ void nina_image_display_show_borrowed(const uint16_t *buf, int w, int h)
     moon_caption(name, sizeof(name), pct, sizeof(pct));
     lv_label_set_text(lbl_region, name);
     lv_label_set_text(lbl_timestamp, pct);
+    update_moon_corner_labels();
 
     nina_wait_overlay_hide();
 }
@@ -789,13 +909,22 @@ void nina_image_display_set_overlay_visible(bool visible)
     if (!overlay_bar) return;
     if (visible) lv_obj_clear_flag(overlay_bar, LV_OBJ_FLAG_HIDDEN);
     else         lv_obj_add_flag(overlay_bar, LV_OBJ_FLAG_HIDDEN);
+
+    /* Corner labels follow the overlay visibility, but only ever show for Moon.
+     * When making visible, restore them only if we are actually on the Moon source;
+     * when hiding, always hide unconditionally. */
+    if (visible && app_config_get()->image_display_source == 1) {
+        update_moon_corner_labels();
+    } else {
+        hide_moon_corner_labels();
+    }
 }
 
 void nina_image_display_apply_theme(void)
 {
-    if (!overlay_bar || !current_theme) return;
-    int gb = app_config_get()->color_brightness;
-    lv_obj_set_style_text_color(
-        lbl_region,
-        lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+    /* lbl_region text colour is now enforced white by apply_chip_style() so the
+     * phase name remains legible regardless of theme.  The function is kept for
+     * future per-theme customisation of this page and for callers that invoke it
+     * unconditionally. */
+    (void)current_theme;
 }
