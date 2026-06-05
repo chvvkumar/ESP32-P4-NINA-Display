@@ -208,6 +208,34 @@
     }
     .top-nav .update-pill:hover { color: #f4f4f5; border-color: rgba(var(--accent-rgb), 0.6); background: rgba(var(--accent-rgb), 0.18); box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.25); }
 
+    /* Device status metric cards (top of the System tab). Responsive grid so
+       they wrap cleanly instead of cramming into the top bar. */
+    .sys-metrics {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 14px; margin-bottom: 20px;
+    }
+    .sys-metric {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 14px; padding: 16px 18px;
+      display: flex; flex-direction: column; gap: 10px;
+      transition: border-color 0.25s ease;
+    }
+    .sys-metric:hover { border-color: rgba(var(--accent-rgb), 0.3); }
+    .sys-metric .sm-label {
+      display: flex; align-items: center; gap: 8px;
+      color: var(--text-hint); font-size: 0.7rem; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.06em;
+    }
+    .sys-metric .sm-label svg { width: 15px; height: 15px; opacity: 0.7; flex-shrink: 0; }
+    .sys-metric .sm-value {
+      color: #f4f4f5; font-size: 1.5rem; font-weight: 700; line-height: 1;
+      font-variant-numeric: tabular-nums;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .sys-metric .bars { display: inline-flex; align-items: flex-end; gap: 3px; height: 22px; }
+    .sys-metric .bars span { width: 5px; border-radius: 1px; }
+
     .bottom-nav {
       display: none; position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
       background: rgba(20, 20, 24, 0.85);
@@ -1506,6 +1534,29 @@
     <!-- ==================== TAB 4: SYSTEM ==================== -->
     <div id="tab-system" class="tab-panel">
 
+      <div class="sys-metrics">
+          <div class="sys-metric m-temp">
+            <div class="sm-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></svg> Temperature</div>
+            <div class="sm-value"><span class="mv" id="mTemp">--</span></div>
+          </div>
+          <div class="sys-metric m-up">
+            <div class="sm-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> Uptime</div>
+            <div class="sm-value"><span class="mv" id="mUptime">--</span></div>
+          </div>
+          <div class="sys-metric m-mem">
+            <div class="sm-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="6" width="16" height="12" rx="2"/><path d="M8 6V4m4 2V4m4 2V4M8 18v2m4-2v2m4-2v2"/></svg> Internal Heap</div>
+            <div class="sm-value"><span class="mv" id="mMem">--</span></div>
+          </div>
+          <div class="sys-metric m-psram">
+            <div class="sm-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/></svg> PSRAM</div>
+            <div class="sm-value"><span class="mv" id="mPsram">--</span></div>
+          </div>
+          <div class="sys-metric m-wifi">
+            <div class="sm-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/></svg> WiFi Signal</div>
+            <div class="sm-value"><span class="bars" id="mWifiBars"></span><span class="mv" id="mWifi">--</span></div>
+          </div>
+      </div>
+
       <div class="card">
         <div class="card-title">Network</div>
         <div class="wifi-scan-panel" id="wifiScanPanel">
@@ -2100,6 +2151,9 @@
       } else {
         if(typeof stopLogsAutoRefresh==='function') stopLogsAutoRefresh();
       }
+      // Pull fresh device metrics the moment the System tab is opened so the
+      // status widgets populate instantly instead of waiting for the next poll.
+      if(name==='system' && typeof refreshNavMetrics==='function') refreshNavMetrics();
     }
 
     $$('.tab-btn, .nav-btn').forEach(btn=>{
@@ -3154,6 +3208,76 @@
     var _updateInfo=null;
 
     /* Passive update indicator in top nav. Silent on any failure. */
+    /* === Live nav metrics (polls /api/status every 5s) === */
+    function navMetricBars(rssi){
+      var bars=rssi>=-50?4:rssi>=-60?3:rssi>=-70?2:1;
+      var color=bars>=3?'#4caf50':bars>=2?'#ff9800':'#f44336';
+      var inactive='rgba(255,255,255,0.15)';
+      var heights=[8,13,17,22];
+      var html='';
+      for(var i=0;i<4;i++){
+        html+='<span style="height:'+heights[i]+'px;background:'+(i<bars?color:inactive)+'"></span>';
+      }
+      return html;
+    }
+    function humanizeUptime(ms){
+      if(!ms||ms<0) return '--';
+      var s=Math.floor(ms/1000);
+      var d=Math.floor(s/86400); s-=d*86400;
+      var h=Math.floor(s/3600);  s-=h*3600;
+      var m=Math.floor(s/60);
+      if(d>0) return d+'d '+h+'h';
+      if(h>0) return h+'h '+m+'m';
+      if(m>0) return m+'m';
+      return '<1m';
+    }
+    function refreshNavMetrics(){
+      fetch('/api/status').then(function(r){return r.json();}).then(function(d){
+        if(!d) return;
+        // Temperature (1 decimal, null -> --)
+        var t=$('mTemp');
+        if(t) t.textContent=(typeof d.temperature_c==='number')?(d.temperature_c.toFixed(1)+'°'):'--';
+        // Uptime, humanized
+        var up=$('mUptime');
+        if(up) up.textContent=humanizeUptime(d.uptime_ms);
+        // Internal heap: used % on the chip, actual free/total (KB) on hover.
+        // Use heap_internal_free (MALLOC_CAP_INTERNAL) so it matches heap_total
+        // (internal); heap_free counts all regions incl. PSRAM and would skew it.
+        var mem=$('mMem');
+        if(mem){
+          if(typeof d.heap_internal_free==='number'&&typeof d.heap_total==='number'&&d.heap_total>0){
+            var heapUsed=Math.round((d.heap_total-d.heap_internal_free)/d.heap_total*100);
+            mem.textContent=heapUsed+'%';
+            mem.closest('.sys-metric').title='Internal heap: '+Math.round(d.heap_internal_free/1024)+'K free / '+Math.round(d.heap_total/1024)+'K total ('+heapUsed+'% used)';
+          }else{
+            mem.textContent='--';
+            mem.closest('.sys-metric').title='Free internal heap';
+          }
+        }
+        // PSRAM: used % on the chip, actual free/total (MB) on hover
+        var ps=$('mPsram');
+        if(ps){
+          if(typeof d.psram_free==='number'&&typeof d.psram_total==='number'&&d.psram_total>0){
+            var psUsed=Math.round((d.psram_total-d.psram_free)/d.psram_total*100);
+            ps.textContent=psUsed+'%';
+            ps.closest('.sys-metric').title='PSRAM: '+(d.psram_free/1048576).toFixed(1)+'M free / '+(d.psram_total/1048576).toFixed(1)+'M total ('+psUsed+'% used)';
+          }else{
+            ps.textContent='--';
+            ps.closest('.sys-metric').title='Free PSRAM';
+          }
+        }
+        // WiFi: RSSI dBm + signal bars
+        var w=$('mWifi'), wb=$('mWifiBars');
+        if(typeof d.wifi_rssi==='number'){
+          if(w) w.textContent=d.wifi_rssi+'dBm';
+          if(wb) wb.innerHTML=navMetricBars(d.wifi_rssi);
+        }else{
+          if(w) w.textContent='--';
+          if(wb) wb.innerHTML=navMetricBars(-100);
+        }
+      }).catch(function(){ /* keep last values */ });
+    }
+
     function checkUpdateBadge(){
       var pill=$('updatePill');
       if(!pill) return;
@@ -4457,6 +4581,8 @@
     loadConfig();
     loadVersion();
     checkUpdateBadge();
+    refreshNavMetrics();
+    setInterval(refreshNavMetrics, 5000);
   </script>
 </body>
 </html>
