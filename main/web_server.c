@@ -196,7 +196,7 @@ void start_web_server(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 16384;
-    config.max_uri_handlers = 49;
+    config.max_uri_handlers = 52;
     config.max_open_sockets = 16;
     config.lru_purge_enable = true;
     config.keep_alive_enable = true;
@@ -261,7 +261,15 @@ void start_web_server(void)
         { "/api/auth/status",        HTTP_GET,  auth_status_get_handler, NULL },
         { "/api/logs",               HTTP_GET,  logs_get_handler, NULL },
         { "/api/logs/clear",         HTTP_POST, logs_clear_post_handler, NULL },
+        { "/api/crashlog",           HTTP_GET,  crashlog_get_handler, NULL },
+        { "/api/crashlog/clear",     HTTP_POST, crashlog_clear_post_handler, NULL },
     };
+
+    /* Keep config.max_uri_handlers (set to 52 above) in sync with the route
+     * table; a route that overflows it would be silently dropped at
+     * registration. Bump both together when adding routes. */
+    _Static_assert(sizeof(routes) / sizeof(routes[0]) <= 52,
+                   "max_uri_handlers too small for route table");
 
     for (int i = 0; i < (int)(sizeof(routes)/sizeof(routes[0])); i++) {
         httpd_register_uri_handler(server, &routes[i]);

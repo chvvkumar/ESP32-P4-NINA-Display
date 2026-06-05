@@ -36,6 +36,7 @@
 #include "perf_monitor.h"
 #include "nina_connection.h"
 #include "power_mgmt.h"
+#include "crash_log.h"
 #include "spotify_auth.h"
 #include "spotify_client.h"
 #include "weather_client.h"
@@ -558,6 +559,10 @@ void app_main(void)
 
     // Track crash resets (PANIC, WDT) in RTC memory
     power_mgmt_check_crash();
+
+    // Persist a crash record if this boot followed an abnormal reset (mounts
+    // SPIFFS, reads reset reason + RTC panic text, enforces ring + retention).
+    crash_log_init();
 
     nina_connection_init();
 
