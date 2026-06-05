@@ -22,6 +22,8 @@
 #include "nina_connection.h"
 #include "ui/nina_dashboard.h"
 #include "power_mgmt.h"
+#include "esp_wifi.h"
+#include "driver/temperature_sensor.h"
 
 // Handler for reboot
 esp_err_t reboot_post_handler(httpd_req_t *req)
@@ -518,7 +520,40 @@ esp_err_t status_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "active_page", nina_dashboard_get_active_page());
     cJSON_AddNumberToObject(root, "instance_count", instance_count);
     cJSON_AddNumberToObject(root, "heap_free", (double)esp_get_free_heap_size());
+    cJSON_AddNumberToObject(root, "heap_internal_free", (double)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+    cJSON_AddNumberToObject(root, "heap_total", (double)heap_caps_get_total_size(MALLOC_CAP_INTERNAL));
     cJSON_AddNumberToObject(root, "psram_free", (double)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    cJSON_AddNumberToObject(root, "psram_total", (double)heap_caps_get_total_size(MALLOC_CAP_SPIRAM));
+
+    // ESP32-P4 internal SoC temperature. Install + enable the sensor once and
+    // keep the handle static so repeated GETs reuse it.
+    static temperature_sensor_handle_t s_tsens = NULL;
+    static bool s_tsens_ready = false;
+    if (!s_tsens_ready) {
+        temperature_sensor_config_t tsens_cfg = TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 80);
+        if (temperature_sensor_install(&tsens_cfg, &s_tsens) == ESP_OK &&
+            temperature_sensor_enable(s_tsens) == ESP_OK) {
+            s_tsens_ready = true;
+        } else {
+            s_tsens = NULL;
+        }
+    }
+    float temp_c = 0.0f;
+    if (s_tsens_ready && temperature_sensor_get_celsius(s_tsens, &temp_c) == ESP_OK) {
+        cJSON_AddNumberToObject(root, "temperature_c", temp_c);
+    } else {
+        cJSON_AddNullToObject(root, "temperature_c");
+    }
+
+    // WiFi station signal + SSID (null/empty when not associated).
+    wifi_ap_record_t ap_info;
+    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+        cJSON_AddNumberToObject(root, "wifi_rssi", ap_info.rssi);
+        cJSON_AddStringToObject(root, "wifi_ssid", (const char *)ap_info.ssid);
+    } else {
+        cJSON_AddNullToObject(root, "wifi_rssi");
+        cJSON_AddStringToObject(root, "wifi_ssid", "");
+    }
 
     const char *json_str = cJSON_PrintUnformatted(root);
     if (!json_str) {
