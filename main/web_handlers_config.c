@@ -83,11 +83,18 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
     cJSON_AddNumberToObject(obj, "auto_rotate_interval_s", cfg->auto_rotate_interval_s);
     cJSON_AddNumberToObject(obj, "auto_rotate_effect", cfg->auto_rotate_effect);
     cJSON_AddBoolToObject(obj, "auto_rotate_skip_disconnected", cfg->auto_rotate_skip_disconnected);
-    cJSON_AddNumberToObject(obj, "auto_rotate_pages", cfg->auto_rotate_pages);
+    cJSON_AddNumberToObject(obj, "auto_rotate_pages",
+        (int)cfg->auto_rotate_pages | ((int)cfg->auto_rotate_pages_hi << 8));
     {
         cJSON *order_arr = cJSON_CreateArray();
-        for (int i = 0; i < 8 && cfg->auto_rotate_order[i] != 0xFF; i++) {
-            cJSON_AddItemToArray(order_arr, cJSON_CreateNumber(cfg->auto_rotate_order[i]));
+        /* 9 rotation-order slots: the 8-element array plus auto_rotate_order_ext. */
+        for (int i = 0; i < 9; i++) {
+            uint8_t v = (i < 8) ? cfg->auto_rotate_order[i] : cfg->auto_rotate_order_ext;
+            if (v == 0xFF) {
+                if (i < 8) break;   /* terminator in the main array */
+                else continue;      /* ext slot unused */
+            }
+            cJSON_AddItemToArray(order_arr, cJSON_CreateNumber(v));
         }
         cJSON_AddItemToObject(obj, "auto_rotate_order", order_arr);
     }
@@ -732,23 +739,26 @@ static app_config_t *parse_config_from_json(cJSON *root)
     if (cJSON_IsNumber(arp_item)) {
         int v = arp_item->valueint;
         if (v < 0) v = 0;
-        if (v > 0xFF) v = 0xFF;
-        cfg->auto_rotate_pages = (uint8_t)v;
+        if (v > 0x1FF) v = 0x1FF;   /* bits 0-8 valid (bit8 = Image Display) */
+        cfg->auto_rotate_pages = (uint8_t)(v & 0xFF);
+        cfg->auto_rotate_pages_hi = (uint8_t)((v >> 8) & 0xFF);
     }
 
     cJSON *order_arr = cJSON_GetObjectItem(root, "auto_rotate_order");
     if (cJSON_IsArray(order_arr)) {
         int count = cJSON_GetArraySize(order_arr);
-        if (count > 8) count = 8;
+        if (count > 9) count = 9;   /* 9 rotation-order slots (8 array + ext) */
         for (int i = 0; i < count; i++) {
             cJSON *item = cJSON_GetArrayItem(order_arr, i);
-            if (cJSON_IsNumber(item) && item->valueint >= 0 && item->valueint <= 7) {
-                cfg->auto_rotate_order[i] = (uint8_t)item->valueint;
+            if (cJSON_IsNumber(item) && item->valueint >= 0 && item->valueint <= 8) {
+                if (i < 8) cfg->auto_rotate_order[i] = (uint8_t)item->valueint;
+                else       cfg->auto_rotate_order_ext = (uint8_t)item->valueint;
             }
         }
         for (int i = count; i < 8; i++) {
             cfg->auto_rotate_order[i] = 0xFF;
         }
+        if (count < 9) cfg->auto_rotate_order_ext = 0xFF;
     }
 
     cJSON *ur_item = cJSON_GetObjectItem(root, "update_rate_s");

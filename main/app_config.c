@@ -697,8 +697,10 @@ static void set_defaults(app_config_t *cfg) {
     cfg->auto_rotate_effect = 0;
     cfg->auto_rotate_skip_disconnected = true;
     cfg->auto_rotate_pages = 0x0E;  // Default: all NINA instances (bits 1-3)
+    cfg->auto_rotate_pages_hi = 0;  // bits 8-15 off by default (Image Display opt-in, like AllSky/Spotify/Clock)
     /* Default rotation order: Summary, AllSky, Spotify, Clock, NINA1, NINA2, NINA3, SysInfo */
     for (int i = 0; i < 8; i++) cfg->auto_rotate_order[i] = (uint8_t)i;
+    cfg->auto_rotate_order_ext = 8;  // 9th slot = bit index 8 (Image Display)
     cfg->update_rate_s = 5;
     cfg->graph_update_interval_s = 10;
     cfg->connection_timeout_s = 6;
@@ -1844,6 +1846,22 @@ static void migrate_from_v40(const void *raw, size_t raw_size, app_config_t *cfg
     ESP_LOGI(TAG, "Migrated config from v40 to v%d", APP_CONFIG_VERSION);
 }
 
+static void migrate_from_v41(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v41_t) ? raw_size : sizeof(app_config_v41_t);
+    memcpy(cfg, raw, copy);
+
+    /* auto_rotate_pages_hi / auto_rotate_order_ext: new in v42, appended past the
+     * v41 snapshot — keep the set_defaults() values (Image Display bit off, 9th
+     * order slot = bit 8). */
+    cfg->auto_rotate_pages_hi = 0;
+    cfg->auto_rotate_order_ext = 8;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v41 to v%d", APP_CONFIG_VERSION);
+}
+
 static void migrate_from_v36(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
@@ -2404,6 +2422,7 @@ static bool validate_config(app_config_t *cfg) {
     /* Validate rotation order — reset to default if first entry is 0xFF (uninitialised) */
     if (cfg->auto_rotate_order[0] == 0xFF) {
         for (int i = 0; i < 8; i++) cfg->auto_rotate_order[i] = (uint8_t)i;
+        cfg->auto_rotate_order_ext = 8;  // 9th slot = Image Display bit index
         fixed = true;
     }
     if (cfg->update_rate_s < 1 || cfg->update_rate_s > 10) {
@@ -2574,8 +2593,14 @@ void app_config_init(void) {
             nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(handle);
         }
+    } else if (version_check == 41) {
+        /* v41 → v42: added auto_rotate_pages_hi + auto_rotate_order_ext (Image Display in rotation) */
+        migrate_from_v41(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 40) {
-        /* v40 → v41: added crash_log_retention_days */
+        /* v40 → v42: added crash_log_retention_days, then Image Display rotation fields */
         migrate_from_v40(raw, stored_size, &s_config);
         validate_config(&s_config);
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
