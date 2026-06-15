@@ -2493,9 +2493,13 @@ main_loop:
         }
 
         /* If auto-rotate is active and we're on a NINA instance page but no instances
-         * are connected, fall back to the summary page automatically. */
+         * are connected, fall back to the summary page automatically.
+         * Gate positively on "parked on a real NINA instance page" (active_nina_idx >= 0)
+         * so non-NINA pages (clock/allsky/spotify/image display/etc.) are never force-
+         * navigated away — enumerating non-NINA pages with negations silently broke when
+         * the Image Display page was added (on_image_display was missing from the list). */
         if (app_config_get()->auto_rotate_enabled && !app_config_get()->idle_page_override_enabled
-            && !on_summary && !on_sysinfo && !on_settings && !on_allsky && !on_spotify && !on_clock) {
+            && active_nina_idx >= 0) {
             bool any_connected = false;
             for (int i = 0; i < instance_count; i++) {
                 if (nina_connection_is_connected(i)) { any_connected = true; break; }
@@ -2521,6 +2525,11 @@ main_loop:
          *   bit 5  = AllSky page (PAGE_IDX_ALLSKY)
          *   bit 6  = Spotify page (PAGE_IDX_SPOTIFY)
          *   bit 7  = Clock page (PAGE_IDX_CLOCK)
+         *   bit 8  = Image Display page (PAGE_IDX_IMAGE_DISPLAY)
+         *
+         * Bits 0-7 live in cfg->auto_rotate_pages; bit 8 lives in
+         * cfg->auto_rotate_pages_hi. The custom order has 9 slots: the
+         * 8-element auto_rotate_order[] array plus auto_rotate_order_ext.
          */
         {
             app_config_t *r_cfg = app_config_get();
@@ -2529,17 +2538,24 @@ main_loop:
             if (r_cfg->auto_rotate_enabled && r_cfg->auto_rotate_interval_s > 0 && !idle_override_active) {
                 if (last_rotate_ms == 0) last_rotate_ms = now_ms;
                 if (now_ms - last_rotate_ms >= (int64_t)r_cfg->auto_rotate_interval_s * 1000) {
-                    uint8_t page_mask = r_cfg->auto_rotate_pages;
+                    uint16_t page_mask = (uint16_t)r_cfg->auto_rotate_pages
+                                       | ((uint16_t)r_cfg->auto_rotate_pages_hi << 8);
                     int total = nina_dashboard_get_total_page_count();
 
                     int ena_page_count = total - EXTRA_PAGES;  /* enabled NINA pages only */
 
-                    /* Build ordered candidate list from custom rotation order */
-                    int ordered[8];
+                    /* Build ordered candidate list from custom rotation order. The
+                     * order has 9 slots: auto_rotate_order[0..7] + auto_rotate_order_ext. */
+                    int ordered[9];
                     int ordered_count = 0;
-                    for (int i = 0; i < 8 && r_cfg->auto_rotate_order[i] != 0xFF; i++) {
-                        int bit_idx = r_cfg->auto_rotate_order[i];
-                        if (bit_idx > 7) continue;
+                    for (int i = 0; i < 9; i++) {
+                        int bit_idx = (i < 8) ? r_cfg->auto_rotate_order[i]
+                                              : r_cfg->auto_rotate_order_ext;
+                        if (bit_idx == 0xFF) {
+                            if (i < 8) break;   /* terminator in the main array */
+                            else continue;      /* ext slot unused */
+                        }
+                        if (bit_idx > 8) continue;
                         /* Check if this page is enabled in bitmask */
                         if (!(page_mask & (1 << bit_idx))) continue;
 
@@ -2558,6 +2574,9 @@ main_loop:
                                 if (app_config_get()->spotify_enabled) page_idx = PAGE_IDX_SPOTIFY;
                                 break;
                             case 7: page_idx = PAGE_IDX_CLOCK; break;
+                            case 8:
+                                if (app_config_get()->image_display_enabled) page_idx = PAGE_IDX_IMAGE_DISPLAY;
+                                break;
                         }
                         if (page_idx < 0) continue;
 

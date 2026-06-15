@@ -547,7 +547,10 @@
     /* Drag-to-reorder */
     .pn-pill.dragging { opacity: 0.4; }
     .pn-pill.drag-over { border-left: 2px solid var(--accent); margin-left: -2px; }
-    .pn-pill-grid.reorderable .pn-pill { cursor: grab; }
+    .pn-pill-grid.reorderable { justify-content: flex-start; }
+    /* Wrapped reorder pills keep natural width and left-align instead of stretching */
+    .pn-pill-grid.reorderable .pn-pill { flex: 0 0 auto; cursor: grab; }
+    .pn-pill-grid.reorderable .pn-pill-visual { width: auto; }
     .pn-pill-grid.reorderable .pn-pill:active { cursor: grabbing; }
     .pn-pill-grip {
       display: flex; justify-content: center; width: 100%;
@@ -1992,7 +1995,8 @@
         ['arp_sysinfo','System Info'],
         ['arp_allsky','AllSky'],
         ['arp_spotify','Spotify'],
-        ['arp_clock','Clock']
+        ['arp_clock','Clock'],
+        ['arp_image_display','Image Display']
       ];
       var c=$('arp-container');
       if(!c) return;
@@ -2382,8 +2386,8 @@
     }
 
     /* === Rotation Bitmask === */
-    const arpIds=['arp_summary','arp_nina1','arp_nina2','arp_nina3','arp_sysinfo','arp_allsky','arp_spotify','arp_clock'];
-    const arpBits=[0x01,0x02,0x04,0x08,0x10,0x20,0x40,0x80];
+    const arpIds=['arp_summary','arp_nina1','arp_nina2','arp_nina3','arp_sysinfo','arp_allsky','arp_spotify','arp_clock','arp_image_display'];
+    const arpBits=[0x01,0x02,0x04,0x08,0x10,0x20,0x40,0x80,0x100];
 
     function getRotatePages(){
       var mask=0;
