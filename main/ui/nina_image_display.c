@@ -93,29 +93,9 @@ static size_t    moon_copy_cap[2] = { 0, 0 };
  * locally instead of forcing an HTTP re-download. */
 static bool force_redraw = false;
 
-/* NESDIS sector code -> human-readable region name. */
-static const struct { const char *code; const char *name; } region_labels[] = {
-    {"umv","Upper Mississippi Valley"}, {"cgl","Great Lakes"},
-    {"ne","Northeast"},                 {"se","Southeast"},
-    {"smv","Southern Mississippi Valley"},{"sp","Southern Plains"},
-    {"nr","Northern Rockies"},          {"sr","Southern Rockies"},
-    {"pnw","Pacific Northwest"},        {"psw","Pacific Southwest"},
-    {"pr","Puerto Rico"},               {"eus","U.S. Atlantic Coast"},
-    {"cam","Central America"},          {"car","Caribbean"},
-    {"mex","Mexico"},                   {"ga","Gulf of America"},
-    {"na","Northern Atlantic"},         {"ssa","South America (South)"},
-    {"eep","Eastern Pacific"},          {"taw","Tropical Atlantic"},
-    {"nsa","South America (North)"},    {"can","Canada"},
-    {NULL,NULL}
-};
-
-static const char *region_code_to_name(const char *code)
-{
-    for (int i = 0; region_labels[i].code; i++) {
-        if (!strcmp(region_labels[i].code, code)) return region_labels[i].name;
-    }
-    return code;
-}
+/* Region-code -> human-readable name lookup now lives in goes_client.c
+ * (goes_region_name); the page reads the label captured into goes_data at
+ * fetch time so the on-screen text can never desync from image_buf. */
 
 static void init_image_dsc(lv_image_dsc_t *dsc)
 {
@@ -591,6 +571,11 @@ void nina_image_display_update(goes_data_t *data)
         }
     }
     int64_t poll_ms = data->last_poll_ms;
+    /* Capture the label this buffer was fetched for UNDER the same lock so the
+     * on-screen text is coupled to image_buf and cannot desync if a config
+     * change lands between fetches (issue #166). */
+    char label_copy[48];
+    strlcpy(label_copy, data->label, sizeof(label_copy));
     goes_data_unlock(data);
 
     /* Point the BACK slot's descriptor at the new copy. release_dsc() frees the
@@ -682,14 +667,13 @@ void nina_image_display_update(goes_data_t *data)
         lv_label_set_text(lbl_timestamp, pct);
         update_moon_corner_labels();
     } else if (cfg->image_display_source == 2) {     /* Solar (SDO/AIA) */
-        extern const char *solar_band_label(uint8_t idx);
-        lv_label_set_text(lbl_region, solar_band_label(cfg->solar_band));
+        lv_label_set_text(lbl_region, label_copy);
         time_t now; struct tm ti; time(&now); localtime_r(&now, &ti);
         char ts[32]; strftime(ts, sizeof(ts), "Updated %H:%M", &ti);
         lv_label_set_text(lbl_timestamp, ts);
         hide_moon_corner_labels();
     } else {                                         /* GOES */
-        lv_label_set_text(lbl_region, region_code_to_name(cfg->goes_region));
+        lv_label_set_text(lbl_region, label_copy);
         time_t now; struct tm ti; time(&now); localtime_r(&now, &ti);
         char ts[32]; strftime(ts, sizeof(ts), "Updated %H:%M", &ti);
         lv_label_set_text(lbl_timestamp, ts);
