@@ -1040,6 +1040,7 @@ void goes_poll_task(void *arg)
                                 goes_data.image_w = MOON_DRAG_SZ_TOUCH;
                                 goes_data.image_h = MOON_DRAG_SZ_TOUCH;
                                 goes_data.vflip = false;
+                                goes_data.label[0] = '\0';
                                 goes_data.connected = true;
                                 goes_data.last_poll_ms = esp_timer_get_time() / 1000;
                                 goes_data_unlock(&goes_data);
@@ -1090,6 +1091,7 @@ void goes_poll_task(void *arg)
                             goes_data.image_w = SCREEN_SIZE;
                             goes_data.image_h = SCREEN_SIZE;
                             goes_data.vflip = false;
+                            goes_data.label[0] = '\0';
                             goes_data.connected = true;
                             goes_data.last_poll_ms = esp_timer_get_time() / 1000;
                             goes_data_unlock(&goes_data);
@@ -1204,6 +1206,7 @@ void goes_poll_task(void *arg)
                         goes_data.image_w = MOON_SZ;
                         goes_data.image_h = MOON_SZ;
                         goes_data.vflip = false;
+                        goes_data.label[0] = '\0';
                         goes_data.connected = true;
                         goes_data.last_poll_ms = esp_timer_get_time() / 1000;
                         goes_data_unlock(&goes_data);
@@ -1275,7 +1278,7 @@ void goes_poll_task(void *arg)
             const char *url = solar_band_url(cfg->solar_band);
             /* All solar bands need a vertical flip to display upright (see solar_band_vflip). */
             if (url && url[0]) {
-                fetch_err = goes_client_poll_url(url, &goes_data, solar_band_vflip(cfg->solar_band));
+                fetch_err = goes_client_poll_url(url, &goes_data, solar_band_vflip(cfg->solar_band), solar_band_label(cfg->solar_band));
             } else {
                 fetch_err = ESP_ERR_INVALID_ARG;
             }

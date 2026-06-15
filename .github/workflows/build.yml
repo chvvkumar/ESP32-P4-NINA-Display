@@ -3,6 +3,7 @@ name: Build Firmware
 on:
   push:
     branches: [main, dev]
+  workflow_dispatch:
 
 env:
   IDF_VERSION: v5.5.2
@@ -29,6 +30,13 @@ jobs:
       - name: Check if code files changed
         id: filter
         run: |
+          # A manual run (workflow_dispatch) always builds; github.event.before is
+          # unset there, so short-circuit before the diff to avoid an empty BASE.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "has_code_changes=true" >> $GITHUB_OUTPUT
+            echo "Manual run requested, build will run"
+            exit 0
+          fi
           BASE=${{ github.event.before }}
           HEAD=${{ github.sha }}
           CODE_CHANGES=$(git diff --name-only "$BASE" "$HEAD" -- \
@@ -45,7 +53,7 @@ jobs:
 
   build:
     needs: check-changes
-    if: needs.check-changes.outputs.has_code_changes == 'true'
+    if: needs.check-changes.outputs.has_code_changes == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: self-hosted
     steps:
       - name: Checkout code
@@ -134,30 +142,39 @@ jobs:
           ccache --zero-stats
           ccache --show-config | grep -E "max_size|cache_dir|compression"
 
-      - name: Clean stale build if config changed
+      - name: Clean build state (always rebuild config)
         if: steps.check_skip.outputs.skip != 'true'
         run: |
-          NEEDS_CLEAN=false
-
-          # Detect changes in build-critical files since last successful build
-          # Hash is only saved after a successful build, so missing hash = no prior success
+          # Decide whether managed_components also needs purging BEFORE removing
+          # build/, since the comparison hash lives in build/.build_config_hash.
+          NEEDS_DEPS_CLEAN=false
           if [ -f build/.build_config_hash ]; then
             OLD_HASH=$(cat build/.build_config_hash)
             NEW_HASH=$(cat sdkconfig.defaults main/idf_component.yml main/CMakeLists.txt CMakeLists.txt dependencies.lock 2>/dev/null | sha256sum | cut -d' ' -f1)
             if [ "$OLD_HASH" != "$NEW_HASH" ]; then
-              echo "Build config changed, cleaning"
-              NEEDS_CLEAN=true
+              echo "Build config changed, will also purge managed_components"
+              NEEDS_DEPS_CLEAN=true
             fi
           else
-            echo "No previous successful build hash found, cleaning"
-            NEEDS_CLEAN=true
+            echo "No previous successful build hash found, will also purge managed_components"
+            NEEDS_DEPS_CLEAN=true
           fi
 
-          if [ "$NEEDS_CLEAN" = "true" ]; then
-            rm -rf build managed_components sdkconfig
-            echo "Clean complete"
+          # Always purge build/ and sdkconfig: a stale sdkconfig selects the wrong
+          # display pipeline and a stale build/ keeps a stale build_version.h and
+          # object files. ccache (separate CCACHE_DIR) is untouched, so recompiles
+          # stay fast.
+          rm -rf build sdkconfig
+          echo "Removed build and sdkconfig"
+
+          # Only re-download managed_components when the dependency/config hash
+          # changed: it is pinned by dependencies.lock, and re-fetching from the
+          # component registry every run adds a network failure point.
+          if [ "$NEEDS_DEPS_CLEAN" = "true" ]; then
+            rm -rf managed_components
+            echo "Removed managed_components"
           else
-            echo "Config unchanged, using incremental build"
+            echo "Config unchanged, reusing managed_components"
           fi
 
       - name: Build project
