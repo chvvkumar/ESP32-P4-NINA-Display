@@ -142,6 +142,31 @@ bool solar_band_text_mask(uint8_t idx, float *x0, float *y0, float *x1, float *y
     return true;
 }
 
+/* NESDIS sector code -> human-readable region name. Single source of truth
+ * (moved out of nina_image_display.c). Returns the code itself if no match. */
+const char *goes_region_name(const char *code)
+{
+    static const struct { const char *code; const char *name; } region_labels[] = {
+        {"umv","Upper Mississippi Valley"}, {"cgl","Great Lakes"},
+        {"ne","Northeast"},                 {"se","Southeast"},
+        {"smv","Southern Mississippi Valley"},{"sp","Southern Plains"},
+        {"nr","Northern Rockies"},          {"sr","Southern Rockies"},
+        {"pnw","Pacific Northwest"},        {"psw","Pacific Southwest"},
+        {"pr","Puerto Rico"},               {"eus","U.S. Atlantic Coast"},
+        {"cam","Central America"},          {"car","Caribbean"},
+        {"mex","Mexico"},                   {"ga","Gulf of America"},
+        {"na","Northern Atlantic"},         {"ssa","South America (South)"},
+        {"eep","Eastern Pacific"},          {"taw","Tropical Atlantic"},
+        {"nsa","South America (North)"},    {"can","Canada"},
+        {NULL,NULL}
+    };
+    if (!code) return "";
+    for (int i = 0; region_labels[i].code; i++) {
+        if (!strcmp(region_labels[i].code, code)) return region_labels[i].name;
+    }
+    return code;
+}
+
 esp_err_t goes_client_poll(const char *region, goes_data_t *data)
 {
     if (!region || !data) return ESP_ERR_INVALID_ARG;
@@ -152,11 +177,14 @@ esp_err_t goes_client_poll(const char *region, goes_data_t *data)
              "https://cdn.star.nesdis.noaa.gov/GOES19/ABI/SECTOR/%s/GEOCOLOR/%s.jpg",
              region, size);
 
-    /* NESDIS GOES JPEGs decode upside-down on this panel; flip them. */
-    return goes_client_poll_url(url, data, true);
+    /* The decode+render pipeline on this panel applies a net vertical flip, so the
+     * NESDIS GOES JPEG must be flipped (vflip=true) to display north-up. This matches
+     * the Solar path, which also uses vflip=true. Verified on-device: vflip=false
+     * renders the image upside-down (issue #166 regression). */
+    return goes_client_poll_url(url, data, true, goes_region_name(region));
 }
 
-esp_err_t goes_client_poll_url(const char *url, goes_data_t *data, bool vflip)
+esp_err_t goes_client_poll_url(const char *url, goes_data_t *data, bool vflip, const char *label)
 {
     if (!url || !data) return ESP_ERR_INVALID_ARG;
 
@@ -270,6 +298,8 @@ esp_err_t goes_client_poll_url(const char *url, goes_data_t *data, bool vflip)
         data->image_w = (uint16_t)out_w;
         data->image_h = (uint16_t)out_h;
         data->vflip = vflip;
+        if (label) { strlcpy(data->label, label, sizeof(data->label)); }
+        else       { data->label[0] = '\0'; }
         data->connected = true;
         data->last_poll_ms = esp_timer_get_time() / 1000;
         goes_data_unlock(data);
