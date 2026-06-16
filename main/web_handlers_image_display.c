@@ -32,6 +32,8 @@ esp_err_t image_display_config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "moon_lat", cfg->moon_lat);
     cJSON_AddNumberToObject(root, "moon_lon", cfg->moon_lon);
     cJSON_AddNumberToObject(root, "solar_band", cfg->solar_band);
+    cJSON_AddNumberToObject(root, "goes_orientation", cfg->goes_orientation);
+    cJSON_AddNumberToObject(root, "solar_orientation", cfg->solar_orientation);
     cJSON_AddNumberToObject(root, "moon_drag_light_mode", cfg->moon_drag_light_mode);
     cJSON_AddNumberToObject(root, "moon_flip_u", cfg->moon_flip_u);
     cJSON_AddNumberToObject(root, "moon_flip_v", cfg->moon_flip_v);
@@ -98,6 +100,8 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     uint8_t prev_north_up = cfg->moon_north_up;
     uint8_t prev_spin_mode   = cfg->moon_spin_mode;
     uint8_t prev_spin_return = cfg->moon_spin_return_s;
+    uint8_t prev_goes_orient  = cfg->goes_orientation;
+    uint8_t prev_solar_orient = cfg->solar_orientation;
     char    prev_region[sizeof(cfg->goes_region)];
     strlcpy(prev_region, cfg->goes_region, sizeof(prev_region));
 
@@ -124,6 +128,10 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     if (cJSON_IsNumber(mlon)) cfg->moon_lon = (float)mlon->valuedouble;
     cJSON *sb = cJSON_GetObjectItem(root, "solar_band");
     if (cJSON_IsNumber(sb)) { int v = sb->valueint; cfg->solar_band = (v >= 0 && v <= 17) ? (uint8_t)v : 0; }
+    cJSON *go = cJSON_GetObjectItem(root, "goes_orientation");
+    if (cJSON_IsNumber(go)) { int v = go->valueint; cfg->goes_orientation = (v >= 0 && v <= 3) ? (uint8_t)v : 0; }
+    cJSON *so = cJSON_GetObjectItem(root, "solar_orientation");
+    if (cJSON_IsNumber(so)) { int v = so->valueint; cfg->solar_orientation = (v >= 0 && v <= 3) ? (uint8_t)v : 0; }
     cJSON *dlm = cJSON_GetObjectItem(root, "moon_drag_light_mode");
     if (cJSON_IsNumber(dlm)) { int v = dlm->valueint; cfg->moon_drag_light_mode = (v >= 0 && v <= 1) ? (uint8_t)v : 0; }
     cJSON *fu = cJSON_GetObjectItem(root, "moon_flip_u");
@@ -159,6 +167,8 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
             cfg->solar_band != prev_band ||
             strcmp(cfg->goes_region, prev_region) != 0;
         bool crop_changed = cfg->image_display_crop != prev_crop;
+        bool orient_changed = (cfg->goes_orientation != prev_goes_orient) ||
+                              (cfg->solar_orientation != prev_solar_orient);
 
         if (source_band_region_changed) {
             /* Source/band/region needs a genuinely new image: flag the next
@@ -202,8 +212,9 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
             if (goes_task_handle) {
                 xTaskNotifyGive(goes_task_handle);
             }
-        } else if (crop_changed) {
-            /* Crop/full toggle only: re-render the already-decoded frame locally
+        } else if (crop_changed || orient_changed) {
+            /* Crop/full toggle or orientation change only: re-render the
+             * already-decoded frame locally
              * instead of re-downloading. nina_image_display_update() locks
              * goes_data internally but REQUIRES the display lock held by the
              * caller (see tasks.c), so wrap both calls in bsp_display_lock. The

@@ -803,6 +803,10 @@ static void set_defaults(app_config_t *cfg) {
     // Crash log defaults
     cfg->crash_log_retention_days = 30;  // auto-purge crash records older than 30 days (0 = never)
 
+    // Per-source Image Display render rotation (0=0°,1=90°,2=180°,3=270° clockwise)
+    cfg->goes_orientation = 0;
+    cfg->solar_orientation = 0;
+
     // Auth is on by default — protects device from open-LAN access
     cfg->auth_enabled = true;
 }
@@ -1862,6 +1866,21 @@ static void migrate_from_v41(const void *raw, size_t raw_size, app_config_t *cfg
     ESP_LOGI(TAG, "Migrated config from v41 to v%d", APP_CONFIG_VERSION);
 }
 
+static void migrate_from_v42(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v42_t) ? raw_size : sizeof(app_config_v42_t);
+    memcpy(cfg, raw, copy);
+
+    /* goes_orientation / solar_orientation: new in v43, appended past the v42
+     * snapshot — keep the set_defaults() values (both 0 = 0° rotation). */
+    cfg->goes_orientation = 0;
+    cfg->solar_orientation = 0;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v42 to v%d", APP_CONFIG_VERSION);
+}
+
 static void migrate_from_v36(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
@@ -2593,6 +2612,12 @@ void app_config_init(void) {
             nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(handle);
         }
+    } else if (version_check == 42) {
+        /* v42 → v43: added goes_orientation + solar_orientation (per-source Image Display rotation) */
+        migrate_from_v42(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 41) {
         /* v41 → v42: added auto_rotate_pages_hi + auto_rotate_order_ext (Image Display in rotation) */
         migrate_from_v41(raw, stored_size, &s_config);
