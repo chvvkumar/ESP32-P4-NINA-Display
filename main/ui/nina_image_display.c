@@ -578,6 +578,68 @@ void nina_image_display_update(goes_data_t *data)
     strlcpy(label_copy, data->label, sizeof(label_copy));
     goes_data_unlock(data);
 
+    /* Per-source logical rotation pass. Rotates the decoded RGB565 pixel buffer
+     * (NOT via an LVGL transform) so it is independent of display rotation and
+     * runs on the upright `copy` produced above (after vflip + caption mask).
+     * orient: 0/1/2/3 = 0/90/180/270 degrees CLOCKWISE. Moon (source 1) never
+     * rotates. 90/270 swap width<->height. */
+    uint8_t orient = (cfg->image_display_source == 0)   ? cfg->goes_orientation
+                     : (cfg->image_display_source == 2) ? cfg->solar_orientation
+                                                        : 0;
+    if (orient != 0) {
+        uint16_t rw, rh;
+        if (orient == 2) {            /* 180deg: same dims */
+            rw = w;  rh = h;
+        } else {                       /* 90/270: dims swap */
+            rw = h;  rh = w;
+        }
+        size_t   rot_size = (size_t)rw * rh * 2;
+        uint8_t *rot = heap_caps_malloc(rot_size, MALLOC_CAP_SPIRAM);
+        if (!rot) {
+            ESP_LOGE(TAG, "PSRAM alloc failed for rotation buffer (%u bytes)",
+                     (unsigned)rot_size);
+            heap_caps_free(copy);
+            /* goes lock already released above; just retire the wait overlay. */
+            nina_wait_overlay_hide();
+            return;
+        }
+        const uint16_t *src = (const uint16_t *)copy;
+        uint16_t       *dst = (uint16_t *)rot;
+        if (orient == 2) {
+            /* rot[x,y] = copy[w-1-x, h-1-y] */
+            for (uint32_t Y = 0; Y < rh; Y++) {
+                for (uint32_t X = 0; X < rw; X++) {
+                    uint32_t sx = (uint32_t)w - 1 - X;
+                    uint32_t sy = (uint32_t)h - 1 - Y;
+                    dst[(size_t)Y * rw + X] = src[(size_t)sy * w + sx];
+                }
+            }
+        } else if (orient == 1) {
+            /* 90deg CW: rot[X,Y] = copy[Y, h-1-X], dims rw=h, rh=w */
+            for (uint32_t Y = 0; Y < rh; Y++) {           /* Y in [0,w) */
+                for (uint32_t X = 0; X < rw; X++) {       /* X in [0,h) */
+                    uint32_t sx = Y;
+                    uint32_t sy = (uint32_t)h - 1 - X;
+                    dst[(size_t)Y * rw + X] = src[(size_t)sy * w + sx];
+                }
+            }
+        } else {  /* orient == 3 */
+            /* 270deg CW: rot[X,Y] = copy[w-1-Y, X], dims rw=h, rh=w */
+            for (uint32_t Y = 0; Y < rh; Y++) {           /* Y in [0,w) */
+                for (uint32_t X = 0; X < rw; X++) {       /* X in [0,h) */
+                    uint32_t sx = (uint32_t)w - 1 - Y;
+                    uint32_t sy = X;
+                    dst[(size_t)Y * rw + X] = src[(size_t)sy * w + sx];
+                }
+            }
+        }
+        heap_caps_free(copy);
+        copy     = rot;
+        w        = rw;
+        h        = rh;
+        buf_size = rot_size;
+    }
+
     /* Point the BACK slot's descriptor at the new copy. release_dsc() frees the
      * previous buffer unless it was borrowed (moon-drag), and clears that flag —
      * this owned copy is not borrowed. */
