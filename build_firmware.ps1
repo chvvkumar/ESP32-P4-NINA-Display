@@ -107,6 +107,13 @@ if ($FullClean) {
     Push-Location $ProjectDir
     try {
         idf.py fullclean
+        # fullclean only removes build/; delete sdkconfig too so it regenerates
+        # from sdkconfig.defaults. Otherwise a stale local sdkconfig overrides the
+        # defaults (the build drifts from CI and can keep the wrong panel type).
+        if (Test-Path sdkconfig) {
+            Remove-Item -Force sdkconfig
+            Write-Host "Removed stale sdkconfig (regenerates from sdkconfig.defaults)" -ForegroundColor Yellow
+        }
     } finally {
         Pop-Location
     }

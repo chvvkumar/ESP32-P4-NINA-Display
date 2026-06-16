@@ -1121,6 +1121,16 @@
             <div class="field-hint">GOES-19 GEOCOLOR sector for satellite imagery</div>
           </div>
           <div class="field" style="margin-top:16px">
+            <label class="field-label">GOES Rotation</label>
+            <select class="input" id="goesOrientation" onchange="applyImageDisplay();checkDirty()">
+              <option value="0">0&deg;</option>
+              <option value="1">90&deg;</option>
+              <option value="2">180&deg;</option>
+              <option value="3">270&deg;</option>
+            </select>
+            <div class="field-hint">Rotate the satellite image clockwise.</div>
+          </div>
+          <div class="field" style="margin-top:16px">
             <button onclick="fetchGoesPreview()" class="btn btn-primary" id="goesPreviewBtn" style="width:100%">Fetch Preview</button>
           </div>
           <div id="goesPreviewContainer" style="display:none;margin-top:12px;text-align:center">
@@ -1234,6 +1244,16 @@
               <option value="17">SDO/HMI Magnetogram</option>
             </select>
             <div class="field-hint">NASA SDO/AIA and SOHO realtime (LASCO, EIT, HMI)</div>
+          </div>
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Solar Rotation</label>
+            <select class="input" id="solarOrientation" onchange="applyImageDisplay();checkDirty()">
+              <option value="0">0&deg;</option>
+              <option value="1">90&deg;</option>
+              <option value="2">180&deg;</option>
+              <option value="3">270&deg;</option>
+            </select>
+            <div class="field-hint">Rotate the solar image clockwise.</div>
           </div>
           </div>
         </div>
@@ -2511,6 +2531,8 @@
         moon_bg_style:parseInt($('moonBg').value,10)||0,
         moon_drag_light_mode:parseInt($('moonDragLight').value,10)||0,
         solar_band:parseInt($('solarBand').value,10)||0,
+        goes_orientation:parseInt($('goesOrientation').value,10)||0,
+        solar_orientation:parseInt($('solarOrientation').value,10)||0,
         moon_lat:parseFloat($('moonLat').value)||0,
         moon_lon:parseFloat($('moonLon').value)||0,
         moon_north_up:$('moon_north_up').checked?1:0,
@@ -2689,6 +2711,8 @@
       if($('moonBg')) $('moonBg').value=String(data.moon_bg_style||0);
       if($('moonDragLight')) $('moonDragLight').value=String(data.moon_drag_light_mode||0);
       if($('solarBand')) $('solarBand').value=String(data.solar_band||0);
+      if($('goesOrientation')) $('goesOrientation').value=String(data.goes_orientation||0);
+      if($('solarOrientation')) $('solarOrientation').value=String(data.solar_orientation||0);
       var mlat=data.moon_lat, mlon=data.moon_lon;
       // Prefill from weather location when moon coords are unset
       if((!mlat && !mlon) && (data.weather_lat || data.weather_lon)){ mlat=data.weather_lat; mlon=data.weather_lon; }
@@ -3928,7 +3952,9 @@
         moon_pitch_offset: parseFloat($('moon_pitch_offset').value)||0,
         moon_spin_mode: $('moon_spin_mode').checked?1:0,
         moon_spin_return_s: parseInt($('moon_spin_return_s').value,10)||3,
-        solar_band: parseInt($('solarBand').value,10)||0
+        solar_band: parseInt($('solarBand').value,10)||0,
+        goes_orientation: parseInt($('goesOrientation').value,10)||0,
+        solar_orientation: parseInt($('solarOrientation').value,10)||0
       });
     }
 
@@ -3951,6 +3977,8 @@
     }
 
     function resetMoonOrientation(){
+      if($('goesOrientation')) $('goesOrientation').value='0';
+      if($('solarOrientation')) $('solarOrientation').value='0';
       if($('moon_flip_u')) $('moon_flip_u').checked=false;
       if($('moon_flip_v')) $('moon_flip_v').checked=false;
       if($('moon_roll_offset')) $('moon_roll_offset').value=0;

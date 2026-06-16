@@ -66,6 +66,11 @@ CONFIG_BSP_LCD_DPI_BUFFER_NUMS=2
 CONFIG_BSP_DISPLAY_LVGL_AVOID_TEAR=y
 CONFIG_BSP_DISPLAY_LVGL_FULL_REFRESH=y
 
+# Panel is the 4-inch 720x720 variant (Waveshare ESP32-P4-WIFI6-Touch-LCD-4B).
+# Pin it explicitly: the BSP choice otherwise defaults to 800x800 (3.4-inch),
+# which mismatches SCREEN_SIZE=720 and the display-pipeline geometry.
+CONFIG_BSP_LCD_TYPE_720_720_4_INCH=y
+
 # Use default malloc for mbedTLS (allows PSRAM) instead of internal-only,
 # which exhausts the ~69KB internal heap during TLS-heavy OTA downloads
 CONFIG_MBEDTLS_DEFAULT_MEM_ALLOC=y
