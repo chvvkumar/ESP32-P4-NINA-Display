@@ -549,12 +549,6 @@ void settings_tab_behavior_create(lv_obj_t *parent) {
                              &lbl_sleep_timeout);
         update_sleep_timeout_label();
 
-        /* Idle poll rate stepper */
-        make_labeled_stepper(cont_sleep_opts, "Idle Poll",
-                             idle_poll_minus_cb, idle_poll_plus_cb,
-                             &lbl_idle_poll);
-        lv_label_set_text_fmt(lbl_idle_poll, "%d s", cfg->idle_poll_interval_s);
-
         settings_make_divider(card);
 
         /* WiFi power save toggle */
@@ -612,6 +606,14 @@ void settings_tab_behavior_create(lv_obj_t *parent) {
                              data_rate_minus_cb, data_rate_plus_cb,
                              &lbl_data_rate);
         lv_label_set_text_fmt(lbl_data_rate, "%d s", cfg->update_rate_s);
+
+        settings_make_divider(card);
+
+        /* Idle poll rate stepper (offline rig re-check; idle_poll_interval_s) */
+        make_labeled_stepper(card, "Idle Poll",
+                             idle_poll_minus_cb, idle_poll_plus_cb,
+                             &lbl_idle_poll);
+        lv_label_set_text_fmt(lbl_idle_poll, "%d s", cfg->idle_poll_interval_s);
 
         settings_make_divider(card);
 

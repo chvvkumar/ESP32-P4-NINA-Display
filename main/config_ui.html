@@ -1429,10 +1429,6 @@
               <label class="field-label">Timeout (seconds)</label>
               <input type="number" class="input" id="screen_sleep_timeout" min="10" max="3600" value="60">
             </div>
-            <div class="field">
-              <label class="field-label">Idle poll interval (s)</label>
-              <input type="number" class="input" id="idle_poll_interval" min="5" max="120" value="30">
-            </div>
           </div>
           <div class="toggle-row">
             <span class="toggle-label">WiFi power save</span>
@@ -1476,6 +1472,11 @@
             <label class="field-label">Connection timeout (s)</label>
             <input type="number" class="input" id="connection_timeout" min="2" max="30" value="6">
             <div class="field-hint">Seconds without response before a NINA instance is offline</div>
+          </div>
+          <div class="field">
+            <label class="field-label">Idle poll interval (s)</label>
+            <input type="number" class="input" id="idle_poll_interval" min="5" max="120" value="30">
+            <div class="field-hint">How often an offline rig is re-checked while you are on a non-NINA page</div>
           </div>
         </div>
       </div>
