@@ -24,6 +24,7 @@
 #include "nina_alerts.h"
 #include "nina_safety.h"
 #include "nina_idle_indicator.h"
+#include "nina_nav_arbiter.h"
 #include "nina_ota_prompt.h"
 #include "nina_wait_overlay.h"
 #include "ui_styles.h"
@@ -31,6 +32,7 @@
 #include "themes.h"
 #include "tasks.h"
 #include "lvgl.h"
+#include "esp_timer.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -186,6 +188,8 @@ static void hide_page_at(int idx) {
     else if (idx == SETTINGS_PAGE_IDX(page_count) && settings_obj) {
         settings_tabview_destroy();
         settings_obj = NULL;
+        /* Settings is a modal surface — unfreeze the arbiter on destroy. */
+        nav_arbiter_notify_modal_close(esp_timer_get_time() / 1000);
     } else if (idx == SYSINFO_PAGE_IDX(page_count) && sysinfo_obj)
         lv_obj_add_flag(sysinfo_obj, LV_OBJ_FLAG_HIDDEN);
 }
@@ -214,6 +218,9 @@ static void show_page_at(int idx) {
     else if (idx == SETTINGS_PAGE_IDX(page_count)) {
         if (!settings_obj) {
             settings_obj = settings_tabview_create(main_cont);
+            /* Settings is a modal surface — freeze the arbiter on create.
+             * Paired with the close in hide_page_at()'s destroy branch. */
+            nav_arbiter_notify_modal_open();
         }
         lv_obj_clear_flag(settings_obj, LV_OBJ_FLAG_HIDDEN);
         settings_tabview_refresh();
@@ -798,7 +805,12 @@ static void gesture_event_cb(lv_event_t *e) {
         return;
     }
 
-    nina_dashboard_show_page(new_page, total_page_count);
+    /* Task 4.1: route USER nav through the arbiter. Commit immediately for
+     * instant swipe feedback AND record a USER claim so the grace window
+     * (nav_grace_s) protects this page from lower-priority sources until the
+     * next resolve(). */
+    nina_dashboard_show_page_animated(new_page, 0, 0);
+    nav_arbiter_submit_user(new_page, esp_timer_get_time() / 1000);
 }
 
 /* Target name: click to request thumbnail */

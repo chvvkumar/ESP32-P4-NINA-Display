@@ -8,9 +8,11 @@
 
 #include "nina_thumbnail.h"
 #include "nina_dashboard_internal.h"
+#include "nina_nav_arbiter.h"
 #include "jpeg_utils.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -314,7 +316,13 @@ void nina_dashboard_set_thumbnail(const uint8_t *rgb565_data, uint32_t w, uint32
 
 void nina_dashboard_hide_thumbnail(void) {
     if (thumbnail_overlay) {
+        /* Unfreeze the arbiter only on the visible->hidden edge to pair with
+         * the modal-open raised in nina_thumbnail_request(). */
+        bool was_visible = !lv_obj_has_flag(thumbnail_overlay, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(thumbnail_overlay, LV_OBJ_FLAG_HIDDEN);
+        if (was_visible) {
+            nav_arbiter_notify_modal_close(esp_timer_get_time() / 1000);
+        }
     }
     if (thumbnail_img) {
         lv_obj_add_flag(thumbnail_img, LV_OBJ_FLAG_HIDDEN);
@@ -340,6 +348,12 @@ bool nina_dashboard_thumbnail_visible(void) {
 /* Called from nina_dashboard.c when the header box is clicked */
 void nina_thumbnail_request(void) {
     if (!thumbnail_overlay) return;
+
+    /* Freeze the arbiter only on the hidden->visible edge so the modal-open
+     * pairs with the close in nina_dashboard_hide_thumbnail(). */
+    if (lv_obj_has_flag(thumbnail_overlay, LV_OBJ_FLAG_HIDDEN)) {
+        nav_arbiter_notify_modal_open();
+    }
 
     lv_obj_clear_flag(thumbnail_overlay, LV_OBJ_FLAG_HIDDEN);
     if (thumbnail_loading_lbl) {
