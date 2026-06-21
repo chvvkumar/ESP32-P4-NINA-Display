@@ -133,9 +133,10 @@ void arc_interp_timer_cb(lv_timer_t *timer) {
     }
 }
 
-void nina_dashboard_update_status(int page_index, int rssi, bool nina_connected, bool api_active) {
-    if (page_index < 0 || page_index >= page_count) return;
-    dashboard_page_t *p = &pages[page_index];
+void nina_dashboard_update_status(int instance, int rssi, bool nina_connected, bool api_active) {
+    if (instance < 0 || instance >= MAX_NINA_INSTANCES) return;
+    if (!nina_slot_available[instance]) return;
+    dashboard_page_t *p = &pages[instance];
     if (!p->page) return;
 
     p->nina_connected = nina_connected;
@@ -649,15 +650,15 @@ static void update_safety_icon(dashboard_page_t *p, const nina_client_t *data, i
     }
 }
 
-void update_nina_dashboard_page(int page_index, const nina_client_t *data) {
-    if (page_index < 0 || page_index >= page_count) return;
+void update_nina_dashboard_page(int instance, const nina_client_t *data) {
+    if (instance < 0 || instance >= MAX_NINA_INSTANCES) return;
     if (!data) return;
+    if (!nina_slot_available[instance]) return;
 
-    dashboard_page_t *p = &pages[page_index];
+    dashboard_page_t *p = &pages[instance];
     if (!p->page) return;
 
-    /* Translate page array index to actual instance index for config lookups */
-    int inst = page_instance_map[page_index];
+    int inst = instance;     /* config lookups use the instance index directly */
 
     int gb = app_config_get()->color_brightness;
 

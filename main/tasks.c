@@ -2250,11 +2250,14 @@ main_loop:
          */
         bool on_spotify = nina_dashboard_is_spotify_page();
         int active_nina_idx = -1;   /* Actual instance index (for data access) */
-        int active_page_idx = -1;  /* 0-based page index into pages[] (for UI calls) */
+        int active_page_idx = -1;  /* ABSOLUTE page index (for UI calls) */
         if (!on_allsky && !on_spotify && !on_sysinfo && !on_settings && !on_summary
             && current_active >= NINA_PAGE_OFFSET) {
-            active_page_idx = current_active - NINA_PAGE_OFFSET;
-            active_nina_idx = nina_dashboard_page_to_instance(active_page_idx);
+            active_page_idx = current_active;  /* absolute index */
+            active_nina_idx = nina_dashboard_page_to_instance(current_active);
+            /* Mapping is pure-offset; gate on slot availability explicitly. */
+            if (active_nina_idx >= 0 && !nina_slot_available[active_nina_idx])
+                active_nina_idx = -1;
         }
 
         /* ── Page-gate flags and resource lifecycle ──
@@ -2596,7 +2599,7 @@ main_loop:
 
                         /* Skip disconnected NINA instances if configured */
                         if (page_idx >= NINA_PAGE_OFFSET && page_idx < NINA_PAGE_OFFSET + ena_page_count) {
-                            int nina_idx = nina_dashboard_page_to_instance(page_idx - NINA_PAGE_OFFSET);
+                            int nina_idx = nina_dashboard_page_to_instance(page_idx);
                             if (nina_idx >= 0 && r_cfg->auto_rotate_skip_disconnected
                                 && !nina_connection_is_connected(nina_idx)) continue;
                         }
@@ -2699,7 +2702,7 @@ main_loop:
                 if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                     if (g_perf.enabled) perf_timer_record(&g_perf.ui_lock_wait, esp_timer_get_time() - lock_start2);
                     perf_timer_start(&g_perf.ui_dashboard_update);
-                    update_nina_dashboard_page(active_page_idx, &instances[active_nina_idx]);
+                    update_nina_dashboard_page(active_nina_idx, &instances[active_nina_idx]);
                     perf_timer_stop(&g_perf.ui_dashboard_update);
 
                     // Measure WS-to-UI latency if a recent event was received
@@ -2712,7 +2715,7 @@ main_loop:
                     }
 
                     /* Status dot update combined in same lock section (was separate lock before) */
-                    nina_dashboard_update_status(active_page_idx, rssi,
+                    nina_dashboard_update_status(active_nina_idx, rssi,
                                                  nina_connection_is_connected(active_nina_idx), true);
                     bsp_display_unlock();
                 }
@@ -2890,8 +2893,8 @@ main_loop:
             instances[active_nina_idx].ui_refresh_needed = false;
             if (nina_client_lock(&instances[active_nina_idx], 15)) {
                 if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                    update_nina_dashboard_page(active_page_idx, &instances[active_nina_idx]);
-                    nina_dashboard_update_status(active_page_idx, rssi,
+                    update_nina_dashboard_page(active_nina_idx, &instances[active_nina_idx]);
+                    nina_dashboard_update_status(active_nina_idx, rssi,
                                                  nina_connection_is_connected(active_nina_idx), false);
                     bsp_display_unlock();
                 }
@@ -3009,7 +3012,7 @@ main_loop:
                         /* Restore saved page (or summary if saved was a still-disconnected NINA page) */
                         int restore = idle_saved_page;
                         if (restore >= NINA_PAGE_OFFSET && restore < NINA_PAGE_OFFSET + page_count) {
-                            int inst = nina_dashboard_page_to_instance(restore - NINA_PAGE_OFFSET);
+                            int inst = nina_dashboard_page_to_instance(restore);
                             if (inst >= 0 && inst < MAX_NINA_INSTANCES
                                 && idle_cfg->instance_enabled[inst]
                                 && !nina_connection_is_connected(inst)) {

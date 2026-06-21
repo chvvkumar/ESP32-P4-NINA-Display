@@ -19,10 +19,10 @@ void create_nina_dashboard(lv_obj_t * parent, int instance_count);
 
 /**
  * @brief Update a single dashboard page with live NINA client data
- * @param page_index Index of the page to update (0-2)
- * @param data Pointer to the NINA client data for this page
+ * @param instance NINA instance index (0..MAX_NINA_INSTANCES-1); gates on nina_slot_available[instance]
+ * @param data Pointer to the NINA client data for this instance
  */
-void update_nina_dashboard_page(int page_index, const nina_client_t *data);
+void update_nina_dashboard_page(int instance, const nina_client_t *data);
 
 /**
  * @brief Switch the visible dashboard page (instant)
@@ -60,12 +60,12 @@ void nina_dashboard_apply_theme(int theme_index);
  * Call this both before an API request (api_active=true, starts pulse) and
  * after (api_active=false, stops pulse).  Safe to call under the display lock.
  *
- * @param page_index     Dashboard page to update (0-based)
+ * @param instance       NINA instance index (0..MAX_NINA_INSTANCES-1); gates on nina_slot_available[instance]
  * @param rssi           Current WiFi RSSI in dBm; -100 when unknown
  * @param nina_connected true when the NINA HTTP API is reachable
  * @param api_active     true while an HTTP request is in-flight
  */
-void nina_dashboard_update_status(int page_index, int rssi, bool nina_connected, bool api_active);
+void nina_dashboard_update_status(int instance, int rssi, bool nina_connected, bool api_active);
 
 /**
  * @brief Callback type for page change events (triggered by swipe gestures)
@@ -160,6 +160,13 @@ int nina_dashboard_get_total_page_count(void);
  */
 bool nina_dashboard_page_is_available(int page_idx);
 
+/** Recompute availability for one NINA instance and create/destroy its page
+ *  one slot at a time. No full dashboard teardown. Call under display lock. */
+void nina_dashboard_rebuild_slot(int instance);
+
+/** True iff NINA instance `instance` currently has an allocated, navigable page. */
+bool nina_dashboard_slot_available(int instance);
+
 /**
  * @brief Check if a thumbnail image has been requested (target name was clicked)
  * @return true if thumbnail fetch is needed
@@ -192,16 +199,27 @@ void nina_dashboard_hide_thumbnail(void);
 bool nina_dashboard_thumbnail_visible(void);
 
 /**
- * @brief Get the actual instance index for a given NINA page index
- * @param page_idx 0-based page index within NINA pages (0..page_count-1)
- * @return Actual instance index (0..MAX_NINA_INSTANCES-1), or -1 if invalid
+ * @brief Map an ABSOLUTE page index to its NINA instance index.
+ *
+ * Pure offset (abs - NINA_PAGE_OFFSET) over the reserved NINA band; exact
+ * inverse of nina_dashboard_instance_to_page. Availability is NOT folded in:
+ * an index inside the band maps even for an unavailable slot. Test availability
+ * separately (e.g. nina_slot_available[]).
+ *
+ * @param abs_page_idx Absolute page index
+ * @return Instance index (0..MAX_NINA_INSTANCES-1), or -1 if outside the band
  */
-int nina_dashboard_page_to_instance(int page_idx);
+int nina_dashboard_page_to_instance(int abs_page_idx);
 
 /**
- * @brief Get the NINA page index for a given instance index
- * @param instance_idx Actual instance index (0..MAX_NINA_INSTANCES-1)
- * @return 1-based page index (1..page_count), or -1 if instance has no page
+ * @brief Map a NINA instance index to its ABSOLUTE page index.
+ *
+ * Pure offset (NINA_PAGE_OFFSET + instance) over the reserved NINA band; exact
+ * inverse of nina_dashboard_page_to_instance. Returns the index regardless of
+ * slot availability. Test availability separately (e.g. nina_slot_available[]).
+ *
+ * @param instance_idx Instance index (0..MAX_NINA_INSTANCES-1)
+ * @return Absolute page index, or -1 only for an out-of-range instance index
  */
 int nina_dashboard_instance_to_page(int instance_idx);
 

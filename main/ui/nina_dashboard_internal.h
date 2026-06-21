@@ -134,7 +134,13 @@ extern lv_obj_t *image_display_obj;
 
 /* Shared state — defined in nina_dashboard.c, used by update and thumbnail modules */
 extern dashboard_page_t pages[MAX_NINA_INSTANCES];
-extern int page_count;        /* Number of NINA instance pages (only enabled instances) */
+/* Per-slot availability: slot i corresponds to NINA instance i (fixed identity,
+ * no compaction). True iff instance i is enabled AND has a non-empty URL. The
+ * backing LVGL page object pages[i].page is allocated only while available. */
+extern bool nina_slot_available[MAX_NINA_INSTANCES];
+/* Number of currently-available NINA slots (indicator dots + summary only). */
+extern int nina_available_count;
+extern int page_count;        /* RESERVED NINA band width = MAX_NINA_INSTANCES (constant). Keeps SETTINGS/SYSINFO indices fixed. */
 extern int total_page_count;  /* page_count + EXTRA_PAGES (allsky + spotify + summary + settings + sysinfo) */
 extern int active_page;
 extern const theme_t *current_theme;

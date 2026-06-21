@@ -6,15 +6,26 @@
 /**
  * @brief Create the summary page showing connected NINA instances at a glance.
  *
- * Pre-creates cards for all configured instances (hidden by default).
- * Cards are shown/hidden dynamically based on connectivity in summary_page_update().
+ * Pre-creates cards for ALL MAX_NINA_INSTANCES fixed-identity slots (hidden by
+ * default). cards[i] always corresponds to NINA instance i, regardless of which
+ * slots are currently enabled. Visibility is driven at runtime by
+ * nina_slot_available[] and live connection state in summary_page_update().
  * An empty-state message is displayed when no instances are connected.
  *
  * @param parent Parent LVGL container (main_cont)
- * @param instance_count Number of configured NINA instances
  * @return The page object (caller hides it initially if needed)
  */
-lv_obj_t *summary_page_create(lv_obj_t *parent, int instance_count);
+lv_obj_t *summary_page_create(lv_obj_t *parent);
+
+/**
+ * @brief Re-evaluate card visibility for the current nina_slot_available[] set.
+ *
+ * Hides cards for unavailable slots and resets the layout epoch so the next
+ * summary_page_update() forces a full layout pass. Must be called under the
+ * LVGL display lock. Called by nina_dashboard_rebuild_slot (Task 1.4) after a
+ * slot is created or destroyed.
+ */
+void summary_page_rebuild(void);
 
 /**
  * @brief Update summary cards with live NINA data.
