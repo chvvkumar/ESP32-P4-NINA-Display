@@ -753,7 +753,7 @@ void settings_tab_behavior_create(lv_obj_t *parent) {
         /* Manual-nav grace window stepper (10-300s, step 10).
          * After a user navigation, lower-priority sources are held off for this
          * window before the navigation arbiter resolves back to the home/idle page. */
-        make_labeled_stepper(idle_card, "Manual Grace",
+        make_labeled_stepper(idle_card, "Stay On Page",
                              nav_grace_minus_cb, nav_grace_plus_cb,
                              &lbl_nav_grace);
         lv_label_set_text_fmt(lbl_nav_grace, "%d s", cfg->nav_grace_s);

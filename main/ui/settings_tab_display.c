@@ -507,7 +507,7 @@ static void create_page_nav_card(lv_obj_t *parent)
 
     /* Hint for cycle mode */
     lv_obj_t *ar_hint = lv_label_create(cont_cycle);
-    lv_label_set_text(ar_hint, "When enabled, overrides idle page switching");
+    lv_label_set_text(ar_hint, "When enabled, overrides \"Switch page when idle\"");
     lv_obj_set_style_text_font(ar_hint, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(ar_hint, lv_color_hex(0x888888), 0);
 

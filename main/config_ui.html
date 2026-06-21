@@ -1320,7 +1320,7 @@
           <div>
             <span class="toggle-label">Auto Cycle</span>
             <div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">Rotate through pages automatically</div>
-            <div class="field-hint" style="margin-top:2px">When enabled, overrides idle page switching</div>
+            <div class="field-hint" style="margin-top:2px">When enabled, overrides "Switch page when no connections" below</div>
           </div>
           <label class="toggle"><input type="checkbox" id="auto_cycle_toggle" onchange="toggleAutoCycle();checkDirty()"><span class="toggle-track"></span></label>
         </div>
@@ -1354,9 +1354,9 @@
         </div>
 
         <div class="field" style="margin-top:12px">
-          <label class="field-label">Manual navigation grace (seconds)</label>
+          <label class="field-label">Stay on selected page (seconds)</label>
           <input type="number" class="input" id="nav_grace_s" min="10" max="300" value="10">
-          <div class="field-hint" style="margin-top:2px">How long a manual page selection is honored before auto-resolve resumes.</div>
+          <div class="field-hint" style="margin-top:2px">After you swipe or tap to a page, the display keeps showing it for this long, then returns on its own to the page it would normally show (the connected rig, or your Home page).</div>
         </div>
 
         <div class="pn-divider"></div>
