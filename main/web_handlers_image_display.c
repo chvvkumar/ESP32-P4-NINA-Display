@@ -133,7 +133,7 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     cJSON *so = cJSON_GetObjectItem(root, "solar_orientation");
     if (cJSON_IsNumber(so)) { int v = so->valueint; cfg->solar_orientation = (v >= 0 && v <= 3) ? (uint8_t)v : 0; }
     cJSON *dlm = cJSON_GetObjectItem(root, "moon_drag_light_mode");
-    if (cJSON_IsNumber(dlm)) { int v = dlm->valueint; cfg->moon_drag_light_mode = (v >= 0 && v <= 1) ? (uint8_t)v : 0; }
+    if (cJSON_IsNumber(dlm)) { int v = dlm->valueint; cfg->moon_drag_light_mode = (v >= 0 && v <= 2) ? (uint8_t)v : 0; }
     cJSON *fu = cJSON_GetObjectItem(root, "moon_flip_u");
     if (cJSON_IsNumber(fu)) { cfg->moon_flip_u = (fu->valueint != 0) ? 1 : 0; }
     cJSON *fv = cJSON_GetObjectItem(root, "moon_flip_v");

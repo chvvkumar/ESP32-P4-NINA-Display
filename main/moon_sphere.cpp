@@ -681,6 +681,24 @@ static uint16_t *moon_sphere_render_core(int w, int h, const moon_state_t *st,
     float n = sqrtf(sun_w.x * sun_w.x + sun_w.y * sun_w.y + sun_w.z * sun_w.z);
     if (n > 1e-6f) { sun_w.x /= n; sun_w.y /= n; sun_w.z /= n; }
 
+    /* Surface-locked lighting: apply the SAME outermost user-drag rotation that
+     * the vertices receive (lines above: M_rot = R_sky then pitch about +X then
+     * yaw about +Y). R_sky is already in sun_w, so add ONLY the drag part here:
+     * pitch about X then yaw about Y, in the identical order/sign as the vertex
+     * M_rot. This rotates the sun vector together with the features, pinning the
+     * terminator to the lunar surface as the user swipes. Real diffuse/ambient
+     * and terminator are kept (mode 2 falls through the else branch below). */
+    if (light_mode == MOON_LIGHT_SURFACE_LOCKED) {
+        fMat4 R_drag;
+        R_drag.setIdentity();
+        R_drag.multRotate(pitch_deg, fVec3(1.0f, 0.0f, 0.0f)); /* drag: pitch (screen-horiz) */
+        R_drag.multRotate(yaw_deg,   fVec3(0.0f, 1.0f, 0.0f)); /* drag: yaw   (screen-vert)  */
+        fVec4 sun_d4 = R_drag.mult0(sun_w);
+        sun_w.x = sun_d4.x; sun_w.y = sun_d4.y; sun_w.z = sun_d4.z;
+        float nd = sqrtf(sun_w.x * sun_w.x + sun_w.y * sun_w.y + sun_w.z * sun_w.z);
+        if (nd > 1e-6f) { sun_w.x /= nd; sun_w.y /= nd; sun_w.z /= nd; }
+    }
+
     if (light_mode == MOON_LIGHT_EXPLORE) {
         /* Explore view: light the whole disc so the user can inspect the far
          * side while spinning. Raise ambient near full and drop diffuse to a

@@ -971,14 +971,25 @@ void goes_poll_task(void *arg)
                     }
 
                     /* 2. Lighting for this frame. Active frames use the explore/config
-                     * lighting for free exploration; settle frames force TRUE_PHASE so
-                     * the terminator shadow dissolves back in as the disc returns home
-                     * (matching the resting render). The render SIZE is the single
-                     * touch size (240) for the whole interaction — active and settle —
-                     * because 240->720 is an exact 3.0x PPA ratio. */
-                    moon_light_mode_t light = active
-                        ? (moon_light_mode_t)cfg->moon_drag_light_mode
-                        : MOON_LIGHT_TRUE_PHASE;
+                     * lighting for free exploration. On settle, true-phase/explore force
+                     * TRUE_PHASE so the terminator shadow dissolves back in as the disc
+                     * returns home (matching the resting render). SURFACE_LOCKED keeps its
+                     * mode through the ease-back: its sun = R_drag(yaw,pitch)*R_sky*sun_body,
+                     * which at yaw=pitch=0 equals true-phase exactly, so the terminator
+                     * stays pinned to the surface and converges with no pop (forcing
+                     * TRUE_PHASE here would flash full-bright/dark on the first large-yaw
+                     * settle frame). The render SIZE is the single touch size (240) for the
+                     * whole interaction — active and settle — because 240->720 is an exact
+                     * 3.0x PPA ratio. */
+                    moon_light_mode_t cfg_light = (moon_light_mode_t)cfg->moon_drag_light_mode;
+                    moon_light_mode_t light;
+                    if (active) {
+                        light = cfg_light;                 /* finger down: use configured mode */
+                    } else if (cfg_light == MOON_LIGHT_SURFACE_LOCKED) {
+                        light = MOON_LIGHT_SURFACE_LOCKED; /* settle: keep terminator pinned; converges to true phase at yaw=pitch=0 */
+                    } else {
+                        light = MOON_LIGHT_TRUE_PHASE;     /* settle for true-phase/explore: dissolve terminator back in */
+                    }
 
                     bool shown = false;
                     if (s_drag_color && s_drag_zbuf && s_ppa_out[0] && s_ppa_out[1]) {
@@ -1082,7 +1093,7 @@ void goes_poll_task(void *arg)
                     float hy, hp; moon_drag_get(&hy, &hp);
                     uint16_t *hold_img = moon_sphere_render_ex(SCREEN_SIZE, SCREEN_SIZE, &live,
                                                                96, 48, cfg->moon_bg_style,
-                                                               hy, hp, MOON_LIGHT_TRUE_PHASE);
+                                                               hy, hp, (moon_light_mode_t)cfg->moon_drag_light_mode);
                     if (hold_img && image_display_page_active && cfg->image_display_source == 1 &&
                         !moon_drag_active()) {
                         if (goes_data_lock(&goes_data, 1000)) {

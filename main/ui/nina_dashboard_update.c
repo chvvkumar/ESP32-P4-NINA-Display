@@ -70,6 +70,30 @@ static void auto_fit_value_font(lv_obj_t *label) {
         lv_obj_set_style_text_font(label, pick, 0);
 }
 
+/* Pick the largest font that fits the label's parent width (wider ladder for target names) */
+static void auto_fit_target_name_font(lv_obj_t *label) {
+    static const lv_font_t *fonts[] = {
+        &lv_font_montserrat_48, &lv_font_montserrat_36,
+        &lv_font_montserrat_32, &lv_font_montserrat_28,
+        &lv_font_montserrat_24, &lv_font_montserrat_20,
+        &lv_font_montserrat_16,
+    };
+    const char *text = lv_label_get_text(label);
+    int32_t letter_space = lv_obj_get_style_text_letter_space(label, 0);
+    int32_t avail = lv_obj_get_content_width(lv_obj_get_parent(label));
+    const lv_font_t *pick = fonts[sizeof(fonts) / sizeof(fonts[0]) - 1];
+    for (int i = 0; i < (int)(sizeof(fonts) / sizeof(fonts[0])); i++) {
+        lv_point_t size;
+        lv_text_get_size(&size, text, fonts[i], letter_space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        if (size.x <= avail) {
+            pick = fonts[i];
+            break;
+        }
+    }
+    if (lv_obj_get_style_text_font(label, 0) != pick)
+        lv_obj_set_style_text_font(label, pick, 0);
+}
+
 static void arc_start_exposure_anim(dashboard_page_t *p);
 
 void arc_interp_timer_cb(lv_timer_t *timer) {
@@ -177,6 +201,7 @@ static void update_disconnected_state(dashboard_page_t *p, int instance_idx, int
         set_label_if_changed(p->lbl_instance_name, state_text);
     }
     set_label_if_changed(p->lbl_target_name, "----");
+    auto_fit_target_name_font(p->lbl_target_name);
     set_label_if_changed(p->lbl_seq_container, "----");
     set_label_if_changed(p->lbl_seq_step, "----");
     set_label_if_changed(p->lbl_exposure_total, "");
@@ -219,6 +244,7 @@ static void update_header(dashboard_page_t *p, const nina_client_t *d) {
     }
 
     set_label_if_changed(p->lbl_target_name, d->target_name[0] != '\0' ? d->target_name : "----");
+    auto_fit_target_name_font(p->lbl_target_name);
 }
 
 static void update_sequence_info(dashboard_page_t *p, const nina_client_t *d) {
