@@ -312,7 +312,7 @@ static void create_page_nav_card(lv_obj_t *parent)
         lv_obj_t *row = settings_make_row(cont_fixed);
 
         lv_obj_t *lbl = lv_label_create(row);
-        lv_label_set_text(lbl, "Pinned Page");
+        lv_label_set_text(lbl, "Home Page");
         lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
         if (current_theme) {
             int gb = app_config_get()->color_brightness;
@@ -625,7 +625,12 @@ static void page_mode_changed_cb(lv_event_t *e)
         /* Cycle */
         cfg->active_page_override = -1;
         cfg->auto_rotate_enabled = true;
+        cfg->idle_page_override_enabled = false;   /* exclusivity: auto-rotate wins */
     }
+
+    /* Centralized exclusivity rule (auto-rotate wins). The behavior tab's
+     * idle-override switch picks up the cleared flag on its next refresh. */
+    app_config_normalize_nav_exclusivity(cfg);
 
     settings_mark_dirty(false);
 }

@@ -57,6 +57,7 @@ static lv_obj_t *sw_idle_override        = NULL;
 static lv_obj_t *dd_idle_target          = NULL;
 static lv_obj_t *idle_target_container   = NULL;
 static lv_obj_t *sw_idle_indicator       = NULL;
+static lv_obj_t *lbl_nav_grace           = NULL;
 
 /* ── Rotation dropdown options ───────────────────────────────────────── */
 static const char *rotation_opts = "0\xc2\xb0\n90\xc2\xb0\n180\xc2\xb0\n270\xc2\xb0";
@@ -312,9 +313,20 @@ static void idle_override_toggle_cb(lv_event_t *e) {
     app_config_t *cfg = app_config_get();
     cfg->idle_page_override_enabled = lv_obj_has_state(sw_idle_override, LV_STATE_CHECKED);
     if (cfg->idle_page_override_enabled) {
+        cfg->auto_rotate_enabled = false;          /* but normalize makes auto-rotate win */
         lv_obj_clear_flag(idle_target_container, LV_OBJ_FLAG_HIDDEN);
     } else {
         lv_obj_add_flag(idle_target_container, LV_OBJ_FLAG_HIDDEN);
+    }
+    app_config_normalize_nav_exclusivity(cfg);
+    /* Reflect the normalized result back into the switch in case auto-rotate won.
+     * The display tab's seg_mode picks up auto_rotate_enabled on its next refresh. */
+    if (cfg->idle_page_override_enabled != lv_obj_has_state(sw_idle_override, LV_STATE_CHECKED)) {
+        if (cfg->idle_page_override_enabled) lv_obj_add_state(sw_idle_override, LV_STATE_CHECKED);
+        else                                 lv_obj_remove_state(sw_idle_override, LV_STATE_CHECKED);
+        /* Keep the target container visibility consistent with the corrected state. */
+        if (cfg->idle_page_override_enabled) lv_obj_clear_flag(idle_target_container, LV_OBJ_FLAG_HIDDEN);
+        else                                 lv_obj_add_flag(idle_target_container, LV_OBJ_FLAG_HIDDEN);
     }
     settings_mark_dirty(false);
 }
@@ -330,6 +342,26 @@ static void idle_indicator_toggle_cb(lv_event_t *e) {
     LV_UNUSED(e);
     app_config_get()->idle_indicator_enabled =
         lv_obj_has_state(sw_idle_indicator, LV_STATE_CHECKED);
+    settings_mark_dirty(false);
+}
+
+static void nav_grace_minus_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    app_config_t *cfg = app_config_get();
+    int val = (int)cfg->nav_grace_s - 10;
+    if (val < 10) val = 10;
+    cfg->nav_grace_s = (uint16_t)val;
+    lv_label_set_text_fmt(lbl_nav_grace, "%d s", val);
+    settings_mark_dirty(false);
+}
+
+static void nav_grace_plus_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    app_config_t *cfg = app_config_get();
+    int val = (int)cfg->nav_grace_s + 10;
+    if (val > 300) val = 300;
+    cfg->nav_grace_s = (uint16_t)val;
+    lv_label_set_text_fmt(lbl_nav_grace, "%d s", val);
     settings_mark_dirty(false);
 }
 
@@ -389,6 +421,7 @@ void settings_tab_behavior_destroy(void) {
     dd_idle_target = NULL;
     idle_target_container = NULL;
     sw_idle_indicator = NULL;
+    lbl_nav_grace = NULL;
 }
 
 void settings_tab_behavior_create(lv_obj_t *parent) {
@@ -715,6 +748,16 @@ void settings_tab_behavior_create(lv_obj_t *parent) {
             lv_obj_add_flag(idle_target_container, LV_OBJ_FLAG_HIDDEN);
         }
 
+        settings_make_divider(idle_card);
+
+        /* Manual-nav grace window stepper (10-300s, step 10).
+         * After a user navigation, lower-priority sources are held off for this
+         * window before the navigation arbiter resolves back to the home/idle page. */
+        make_labeled_stepper(idle_card, "Manual Grace",
+                             nav_grace_minus_cb, nav_grace_plus_cb,
+                             &lbl_nav_grace);
+        lv_label_set_text_fmt(lbl_nav_grace, "%d s", cfg->nav_grace_s);
+
         /* Hint label */
         lv_obj_t *idle_hint = lv_label_create(idle_card);
         lv_label_set_text(idle_hint, "Disabled while auto-rotate is active");
@@ -834,6 +877,9 @@ void settings_tab_behavior_refresh(void) {
             lv_obj_add_state(sw_idle_indicator, LV_STATE_CHECKED);
         else
             lv_obj_remove_state(sw_idle_indicator, LV_STATE_CHECKED);
+    }
+    if (lbl_nav_grace) {
+        lv_label_set_text_fmt(lbl_nav_grace, "%d s", cfg->nav_grace_s);
     }
 }
 

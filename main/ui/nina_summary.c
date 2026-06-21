@@ -15,11 +15,14 @@
 #include "nina_dashboard_internal.h"
 #include "nina_dashboard.h"
 #include "nina_connection.h"
+#include "nina_nav_arbiter.h"
 #include "app_config.h"
 #include "themes.h"
 
 #include <stdio.h>
 #include <string.h>
+
+#include "esp_timer.h"
 
 /* ── Change-detection helpers ──────────────────────────────────────── */
 /* Set label text only if it actually changed (avoids marking objects dirty) */
@@ -230,8 +233,10 @@ static void summary_card_click_cb(lv_event_t *e) {
      * Availability is a separate query — only navigate to available slots. */
     int page = nina_dashboard_instance_to_page(instance_index);
     if (page >= 0 && instance_index >= 0 && instance_index < MAX_NINA_INSTANCES
-        && nina_slot_available[instance_index])
-        nina_dashboard_show_page(page, 0);
+        && nina_slot_available[instance_index]) {
+        nina_dashboard_show_page_animated(page, 0, 0);
+        nav_arbiter_submit_user(page, esp_timer_get_time() / 1000);
+    }
 }
 
 static uint32_t darken_color_summary(uint32_t color, int pct) {

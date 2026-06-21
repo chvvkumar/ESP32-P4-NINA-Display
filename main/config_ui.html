@@ -1311,7 +1311,7 @@
       <div class="card">
         <div class="card-title">Page Navigation <span id="pm_summary" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span></div>
 
-        <div class="pn-section-label">Start Page</div>
+        <div class="pn-section-label">Home Page</div>
         <div class="pn-pill-grid" id="start-page-pills"></div>
 
         <div class="pn-divider"></div>
@@ -1353,6 +1353,12 @@
           </div>
         </div>
 
+        <div class="field" style="margin-top:12px">
+          <label class="field-label">Manual navigation grace (seconds)</label>
+          <input type="number" class="input" id="nav_grace_s" min="10" max="300" value="10">
+          <div class="field-hint" style="margin-top:2px">How long a manual page selection is honored before auto-resolve resumes.</div>
+        </div>
+
         <div class="pn-divider"></div>
 
         <div class="toggle-row">
@@ -1375,13 +1381,6 @@
             <option value="6">NINA Instance 2</option>
             <option value="7">NINA Instance 3</option>
           </select>
-          <div class="toggle-row" style="margin-top:12px">
-            <div>
-              <span class="toggle-label">Persistent idle page</span>
-              <div class="field-hint" style="margin-top:2px">Returns to the selected page after manual navigation while idle</div>
-            </div>
-            <label class="toggle"><input type="checkbox" id="idle_page_persistent" onchange="checkDirty()"><span class="toggle-track"></span></label>
-          </div>
           <div class="toggle-row" style="margin-top:12px">
             <div>
               <span class="toggle-label">Show idle indicator</span>
@@ -2273,6 +2272,9 @@
 
     function toggleAutoCycle(){
       var on=$('auto_cycle_toggle').checked;
+      if(on && $('idle_page_override_enabled') && $('idle_page_override_enabled').checked){
+        $('idle_page_override_enabled').checked=false; toggleIdleOverride();
+      }
       $('pn_cycle_settings').style.display=on?'flex':'none';
       updatePageNavSummary();
     }
@@ -2406,41 +2408,40 @@
       }
     }
 
-    /* === Rotation Bitmask === */
-    const arpIds=['arp_summary','arp_nina1','arp_nina2','arp_nina3','arp_sysinfo','arp_allsky','arp_spotify','arp_clock','arp_image_display'];
-    const arpBits=[0x01,0x02,0x04,0x08,0x10,0x20,0x40,0x80,0x100];
-
-    function getRotatePages(){
-      var mask=0;
-      arpIds.forEach((id,i)=>{if($(id).checked) mask|=arpBits[i];});
-      return mask;
-    }
-    function setRotatePages(mask){
-      arpIds.forEach((id,i)=>{$(id).checked=!!(mask&arpBits[i]);});
-    }
-
+    /* === Rotation slideshow list === */
+    /* Single ordered slideshow list: membership == order.
+       data-arp-idx equals the page's rotation bit index (0..8).
+       Saved array holds the bit indices of CHECKED pills in on-screen order,
+       padded to 9 slots with 0xFF (255 = unused). Slot 9 is auto_rotate_order_ext. */
     function getRotateOrder(){
       var pills=$('arp-container').querySelectorAll('.pn-pill[data-arp-idx]');
       var order=[];
-      pills.forEach(function(p){ order.push(parseInt(p.getAttribute('data-arp-idx'))); });
-      return order;
+      pills.forEach(function(p){
+        var cb=p.querySelector('input[type="checkbox"]');
+        if(cb&&cb.checked) order.push(parseInt(p.getAttribute('data-arp-idx')));
+      });
+      while(order.length<9) order.push(255);
+      return order.slice(0,9);
     }
 
     function setRotateOrder(orderArr){
-      if(!orderArr||!orderArr.length) return;
+      if(!orderArr) return;
       var container=$('arp-container');
       var pills=Array.from(container.querySelectorAll('.pn-pill[data-arp-idx]'));
-      /* Sort pills by order array */
       var pillMap={};
       pills.forEach(function(p){ pillMap[p.getAttribute('data-arp-idx')]=p; });
-      orderArr.forEach(function(idx){
+      /* Members (in order) = entries that are not the 0xFF/255 sentinel. */
+      var members=orderArr.map(function(v){return parseInt(v);}).filter(function(v){return !isNaN(v)&&v>=0&&v!==255&&v<pills.length;});
+      /* Reorder members to the front in saved order, set their checkbox on. */
+      members.forEach(function(idx){
         var p=pillMap[idx];
-        if(p) container.appendChild(p);
+        if(p){ container.appendChild(p); var cb=p.querySelector('input[type="checkbox"]'); if(cb) cb.checked=true; }
       });
-      /* Append any pills not mentioned in orderArr */
+      /* Append non-members after, uncheck them. */
       pills.forEach(function(p){
-        if(orderArr.indexOf(parseInt(p.getAttribute('data-arp-idx')))===-1){
+        if(members.indexOf(parseInt(p.getAttribute('data-arp-idx')))===-1){
           container.appendChild(p);
+          var cb=p.querySelector('input[type="checkbox"]'); if(cb) cb.checked=false;
         }
       });
     }
@@ -2483,8 +2484,8 @@
         auto_rotate_interval_s:parseInt($('auto_rotate_interval').value)||30,
         auto_rotate_effect:parseInt($('auto_rotate_effect').value),
         auto_rotate_skip_disconnected:!!$('auto_rotate_skip').checked,
-        auto_rotate_pages:getRotatePages(),
         auto_rotate_order:getRotateOrder(),
+        nav_grace_s:parseInt($('nav_grace_s').value)||10,
         update_rate_s:parseInt($('update_rate').value)||2,
         graph_update_interval_s:parseInt($('graph_interval').value)||5,
         connection_timeout_s:parseInt($('connection_timeout').value)||6,
@@ -2555,7 +2556,6 @@
         tz_string:$('tz_string').value,
         idle_page_override_enabled:!!$('idle_page_override_enabled').checked,
         idle_page_override_target:parseInt($('idle_page_override_target').value),
-        idle_page_persistent:!!$('idle_page_persistent').checked,
         idle_indicator_enabled:!!$('idle_indicator_enabled').checked,
         crash_log_retention_days:parseInt($('crashlog_retention').value,10)||0
       };
@@ -2669,7 +2669,7 @@
       $('auto_rotate_interval').value=data.auto_rotate_interval_s||30;
       $('auto_rotate_effect').value=data.auto_rotate_effect||0;
       $('auto_rotate_skip').checked=!!data.auto_rotate_skip_disconnected;
-      setRotatePages(data.auto_rotate_pages!=null?data.auto_rotate_pages:0x1F);
+      if($('nav_grace_s')) $('nav_grace_s').value=(data.nav_grace_s||10);
       if(data.auto_rotate_order) setRotateOrder(data.auto_rotate_order);
 
       updateNodeLabels();
@@ -2751,7 +2751,6 @@
       // Idle override fields
       if($('idle_page_override_enabled')) $('idle_page_override_enabled').checked=!!data.idle_page_override_enabled;
       if($('idle_page_override_target')) $('idle_page_override_target').value=data.idle_page_override_target!=null?data.idle_page_override_target:-1;
-      if($('idle_page_persistent')) $('idle_page_persistent').checked=!!data.idle_page_persistent;
       if($('idle_indicator_enabled')) $('idle_indicator_enabled').checked=data.idle_indicator_enabled!==false;
       toggleIdleOverride();
 
@@ -2911,6 +2910,9 @@
 
     function toggleIdleOverride(){
       var enabled=$('idle_page_override_enabled').checked;
+      if(enabled && $('auto_cycle_toggle') && $('auto_cycle_toggle').checked){
+        $('auto_cycle_toggle').checked=false; toggleAutoCycle();
+      }
       $('idle_target_field').style.display=enabled?'':'none';
     }
 
