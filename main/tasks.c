@@ -32,7 +32,6 @@
 #include "ui/nina_alerts.h"
 #include "ui/nina_session_stats.h"
 #include "ui/nina_ota_prompt.h"
-#include "ui/nina_idle_indicator.h"
 #include "ui/nina_nav_arbiter.h"
 #include "ui/nina_image_display.h"
 #include "ui/nina_wait_overlay.h"
@@ -276,7 +275,15 @@ void input_task(void *arg) {
                 app_config_get()->deep_sleep_wake_timer_s
             );
         } else if (!long_pressed) {
-            /* Short press — cycle page */
+            /* Short press — cycle page.
+             * Modal guard: match the swipe path (gesture_event_cb in
+             * nina_dashboard.c) — when a detail overlay is open, do not change
+             * the page underneath it. */
+            if (nina_dashboard_thumbnail_visible()
+                || nina_graph_visible()
+                || nina_info_overlay_visible()) {
+                continue;
+            }
             int total = nina_dashboard_get_total_page_count();
             int current = nina_dashboard_get_active_page();
             /* Skip settings, disabled allsky, disabled spotify, and disabled

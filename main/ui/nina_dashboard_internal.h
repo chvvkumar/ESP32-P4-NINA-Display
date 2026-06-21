@@ -145,9 +145,6 @@ extern int total_page_count;  /* page_count + EXTRA_PAGES (allsky + spotify + su
 extern int active_page;
 extern const theme_t *current_theme;
 
-/* Page-to-instance mapping: pages[i] corresponds to instance page_instance_map[i] */
-extern int page_instance_map[MAX_NINA_INSTANCES];
-
 /* Thumbnail overlay state — defined in nina_thumbnail.c */
 extern lv_obj_t *thumbnail_overlay;
 

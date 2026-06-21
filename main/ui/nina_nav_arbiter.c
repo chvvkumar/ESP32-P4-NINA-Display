@@ -22,7 +22,6 @@ static struct {
     int64_t  user_stamp_ms;        /* when the USER claim was stamped */
     bool     topology_dirty;       /* rebuild requested */
     int      modal_depth;          /* >0 = a modal surface is open */
-    int      slideshow_index;      /* position in the ordered membership list */
     bool     slideshow_advance;    /* interval timer fired since last resolve */
     bool     idle_claim_active;    /* IDLE was the resolved source last commit */
     int      current_committed;    /* last page the arbiter committed */
@@ -33,7 +32,6 @@ void nav_arbiter_init(void) {
     s_arb.user_stamp_ms = 0;
     s_arb.topology_dirty = false;
     s_arb.modal_depth = 0;
-    s_arb.slideshow_index = 0;
     s_arb.slideshow_advance = false;
     s_arb.idle_claim_active = false;
     s_arb.current_committed = nina_dashboard_get_active_page();
@@ -82,7 +80,14 @@ static int home_page(void) {
 /** SESSION target: pinned rig online -> that rig; else lone online rig -> it;
  *  else 2+ online -> Summary; else -1 (SESSION does not claim). */
 static int session_target(void) {
-    int online = nina_connection_connected_count();
+    /* Count only instances that are BOTH slot-available AND connected, matching
+     * the pinned/lone scans below. nina_connection_connected_count() ignores
+     * slot availability, so a stale-CONNECTED disabled instance could otherwise
+     * inflate the count and force a single online rig to resolve to Summary. */
+    int online = 0;
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        if (nina_dashboard_slot_available(i) && nina_connection_is_connected(i)) online++;
+    }
     if (online <= 0) return -1;                     /* SESSION does not claim */
     int hp = app_config_get()->active_page_override;
     /* Pinned rig: Home Page is a NINA page whose instance is online */

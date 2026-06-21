@@ -41,7 +41,6 @@ dashboard_page_t pages[MAX_NINA_INSTANCES];
 int page_count = 0;
 int active_page = 0;
 const theme_t *current_theme = NULL;
-int page_instance_map[MAX_NINA_INSTANCES] = {0, 1, 2};
 bool nina_slot_available[MAX_NINA_INSTANCES] = { false, false, false };
 int  nina_available_count = 0;
 
@@ -347,7 +346,13 @@ void nina_dashboard_apply_theme(int theme_index) {
 
 /* Go back to summary page when bottom row is clicked */
 static void bottom_row_click_cb(lv_event_t *e) {
-    nina_dashboard_show_page(PAGE_IDX_SUMMARY, 0);
+    LV_UNUSED(e);
+    /* Task 4.1 / 6.1: route this USER tap through the arbiter like the other
+     * USER-nav sites (swipe, button, /api/page, summary card). Commit
+     * immediately for instant feedback AND record a USER claim so the grace
+     * window protects it from being overridden by the next resolve(). */
+    nina_dashboard_show_page_animated(PAGE_IDX_SUMMARY, 0, 0);
+    nav_arbiter_submit_user(PAGE_IDX_SUMMARY, esp_timer_get_time() / 1000);
 }
 
 /* Build all widgets for one dashboard page */
@@ -900,7 +905,6 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     nina_available_count = 0;
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         nina_slot_available[i] = slot_is_available_cfg(i);
-        page_instance_map[i] = i;           /* identity map, kept for legacy readers */
         if (nina_slot_available[i]) nina_available_count++;
     }
     active_page = PAGE_IDX_SUMMARY;         /* Summary is the boot default */
