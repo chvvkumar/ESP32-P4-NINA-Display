@@ -769,6 +769,7 @@ static void set_defaults(app_config_t *cfg) {
     cfg->idle_page_override_target = IDLE_TARGET_SUMMARY;
     cfg->idle_page_persistent = false;
     cfg->idle_indicator_enabled = true;
+    cfg->nav_grace_s = 10;             // manual-nav grace window (10-300s, default 10)
 
     // Admin password default — change via web UI on first boot
     strcpy(cfg->admin_password, "changeme123!");
@@ -1881,6 +1882,68 @@ static void migrate_from_v42(const void *raw, size_t raw_size, app_config_t *cfg
     ESP_LOGI(TAG, "Migrated config from v42 to v%d", APP_CONFIG_VERSION);
 }
 
+/* --- v43 → v44 migration: rename active_page_override semantics to "Home Page";
+ *     collapse slideshow mask+order into one ordered list; add nav_grace_s;
+ *     drop idle_page_persistent; normalize mode exclusivity. --- */
+static void migrate_from_v43(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v43_t) ? raw_size : sizeof(app_config_v43_t);
+    memcpy(cfg, raw, copy);
+
+    const app_config_v43_t *old = (const app_config_v43_t *)raw;
+
+    /* Home Page = old active_page_override. -1 (auto) maps to Summary, matching
+     * the prior boot default (active_page = PAGE_IDX_SUMMARY when override < 0).
+     * PAGE_IDX_SUMMARY == 4 per nina_dashboard_internal.h (not includable here). */
+    if (old->active_page_override < 0) {
+        cfg->active_page_override = 4;   /* PAGE_IDX_SUMMARY */
+    } else {
+        cfg->active_page_override = old->active_page_override;
+    }
+
+    /* Derive the single ordered slideshow list: walk the old 9-slot order
+     * (auto_rotate_order[0..7] + auto_rotate_order_ext), keep each entry whose
+     * bit is set in the old effective mask, drop 0xFF terminators and bits > 8.
+     * Result is written back into auto_rotate_order[] + auto_rotate_order_ext as
+     * the new membership-equals-order list (bit-index values, 0xFF padded). */
+    uint16_t eff_mask = (uint16_t)old->auto_rotate_pages
+                      | ((uint16_t)old->auto_rotate_pages_hi << 8);
+    uint8_t derived[9];
+    int dn = 0;
+    for (int i = 0; i < 9; i++) {
+        uint8_t bit = (i < 8) ? old->auto_rotate_order[i] : old->auto_rotate_order_ext;
+        if (bit == 0xFF) continue;
+        if (bit > 8) continue;
+        if (!(eff_mask & (1u << bit))) continue;
+        /* de-dup */
+        bool seen = false;
+        for (int k = 0; k < dn; k++) if (derived[k] == bit) { seen = true; break; }
+        if (seen) continue;
+        derived[dn++] = bit;
+    }
+    for (int i = 0; i < 8; i++) cfg->auto_rotate_order[i] = (i < dn) ? derived[i] : 0xFF;
+    cfg->auto_rotate_order_ext = (dn > 8) ? derived[8] : 0xFF;
+
+    /* nav_grace_s default. */
+    cfg->nav_grace_s = 10;
+
+    /* Idle target + idle enabled carried forward (already memcpy'd). */
+    /* idle_page_persistent dropped: its "return to idle" job is now the grace window. */
+    cfg->idle_page_persistent = false;
+
+    /* Exclusivity: auto-rotate wins the tie-break. */
+    app_config_normalize_nav_exclusivity(cfg);
+
+    cfg->config_version = APP_CONFIG_VERSION;
+
+    /* Single migration summary line. */
+    ESP_LOGI(TAG,
+        "Migrated config v43->v44: HomePage=%d, slideshow=[%d slots], "
+        "nav_grace_s=%d, dropped idle_page_persistent, dropped rotation bitmask",
+        (int)cfg->active_page_override, dn, (int)cfg->nav_grace_s);
+}
+
 static void migrate_from_v36(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
@@ -2422,7 +2485,13 @@ static bool validate_config(app_config_t *cfg) {
         cfg->mqtt_port = 1883;
         fixed = true;
     }
-    if (cfg->active_page_override < -1 || cfg->active_page_override > MAX_NINA_INSTANCES + 3) {
+    /* Home Page value space: -1 (Auto = Summary) or any page index 0..SYSINFO,
+     * excluding Settings (Settings is filtered out by home_page() / the pickers,
+     * not here). The upper bound is the sysinfo index = total navigable pages - 1.
+     * EXTRA_PAGES is not includable in app_config.c; per nina_dashboard_internal.h
+     * MAX_NINA_INSTANCES=3 + EXTRA_PAGES=7, so max_home = 9. */
+    int max_home = (MAX_NINA_INSTANCES + 7) - 1;   /* = SYSINFO index (EXTRA_PAGES=7) */
+    if (cfg->active_page_override < -1 || cfg->active_page_override > max_home) {
         cfg->active_page_override = -1;
         fixed = true;
     }
@@ -2612,6 +2681,12 @@ void app_config_init(void) {
             nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(handle);
         }
+    } else if (version_check == 43) {
+        /* v43 → v44: Home Page rename, single slideshow list, nav_grace_s, drop persistent */
+        migrate_from_v43(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 42) {
         /* v42 → v43: added goes_orientation + solar_orientation (per-source Image Display rotation) */
         migrate_from_v42(raw, stored_size, &s_config);
@@ -2961,12 +3036,20 @@ app_config_t *app_config_get(void) {
     return &s_config;
 }
 
+void app_config_normalize_nav_exclusivity(app_config_t *cfg) {
+    if (cfg->auto_rotate_enabled && cfg->idle_page_override_enabled) {
+        cfg->idle_page_override_enabled = false;
+    }
+}
+
 void app_config_save(const app_config_t *config) {
     xSemaphoreTake(s_config_mutex, portMAX_DELAY);
     invalidate_json_caches();
 
     memcpy(&s_config, config, sizeof(app_config_t));
     s_config.config_version = APP_CONFIG_VERSION;  // Always stamp current version
+
+    app_config_normalize_nav_exclusivity(&s_config);
 
     nvs_handle_t my_handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &my_handle);
