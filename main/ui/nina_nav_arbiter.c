@@ -19,7 +19,10 @@ static const char *TAG = "nav_arb";
 
 static struct {
     int      user_page;            /* last USER claim target, -1 if none */
-    int64_t  user_stamp_ms;        /* when the USER claim was stamped */
+    _Atomic int64_t user_stamp_ms; /* when the USER claim was stamped; atomic to
+                                    * close the cross-core torn-read window between
+                                    * submit_user (LVGL/web task) and resolve
+                                    * (data task) on this 64-bit field */
     bool     topology_dirty;       /* rebuild requested */
     int      modal_depth;          /* >0 = a modal surface is open */
     bool     slideshow_advance;    /* interval timer fired since last resolve */
@@ -235,14 +238,17 @@ void nav_arbiter_resolve(int64_t now_ms) {
         nina_idle_indicator_set_active(now_idle && app_config_get()->idle_indicator_enabled);
     }
 
-    /* Commit only on change. Single path: animated switch always fires the cb. */
+    /* Commit only on change. Single path: animated switch always fires the cb.
+     * Mark the page committed ONLY on a successful lock+switch; a lock timeout
+     * leaves current_committed unchanged so the next resolve retries (otherwise
+     * desired==current_committed would suppress the retry forever). */
     if (desired != s_arb.current_committed) {
         int effect = (src == NAV_SRC_SLIDESHOW) ? c->auto_rotate_effect : 0;
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
             nina_dashboard_show_page_animated(desired, 0, effect);
             bsp_display_unlock();
+            s_arb.current_committed = desired;
+            ESP_LOGI(TAG, "commit page=%d src=%d", desired, (int)src);
         }
-        s_arb.current_committed = desired;
-        ESP_LOGI(TAG, "commit page=%d src=%d", desired, (int)src);
     }
 }
