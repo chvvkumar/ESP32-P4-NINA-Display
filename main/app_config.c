@@ -786,7 +786,7 @@ static void set_defaults(app_config_t *cfg) {
     cfg->moon_lon = 0.0f;
     cfg->solar_band = 0;             // SDO/AIA band index 0..9
     cfg->image_display_crop = false; // crop/zoom image to fill & hide baked-in labels
-    cfg->moon_drag_light_mode = 0;   // 0=true phase, 1=explore (moon drag-to-rotate lighting)
+    cfg->moon_drag_light_mode = 2;   // 0=true phase, 1=explore, 2=locked to surface (default) (moon drag-to-rotate lighting)
 
     // Moon sphere orientation tuning defaults (tuned baseline from a reference device)
     cfg->moon_flip_u = 0;            // mirror texture longitude E<->W
@@ -1896,7 +1896,7 @@ static void migrate_from_v36(const void *raw, size_t raw_size, app_config_t *cfg
      * explicitly only for documentation. */
 
     /* moon_drag_light_mode field: new in v37 — defaults already set by set_defaults() */
-    cfg->moon_drag_light_mode = 0;
+    cfg->moon_drag_light_mode = 2;
 
     /* Moon orientation tuning fields: new in v38 — defaults already set by set_defaults() */
     cfg->moon_flip_u = 0;
@@ -2505,7 +2505,7 @@ static bool validate_config(app_config_t *cfg) {
         cfg->solar_band = 0;
         fixed = true;
     }
-    if (cfg->moon_drag_light_mode > 1) {
+    if (cfg->moon_drag_light_mode > 2) {
         cfg->moon_drag_light_mode = 0;
         fixed = true;
     }

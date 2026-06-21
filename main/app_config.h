@@ -158,7 +158,7 @@ typedef struct {
     bool     image_display_crop;     // crop/zoom image to fill & hide baked-in labels (default false)
 
     // Added after v36 — must stay at end to preserve NVS binary compatibility
-    uint8_t  moon_drag_light_mode;   // 0=true phase, 1=explore (moon drag-to-rotate lighting)
+    uint8_t  moon_drag_light_mode;   // 0=true phase, 1=explore, 2=locked to surface (moon drag-to-rotate lighting)
 
     // Added after v37 — must stay at end to preserve NVS binary compatibility
     // Moon sphere orientation tuning

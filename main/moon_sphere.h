@@ -12,7 +12,7 @@ bool moon_sphere_init(void);
 uint16_t *moon_sphere_render(int w, int h, const moon_state_t *st,
                              int nb_sectors, int nb_stacks, uint8_t bg_style);
 
-typedef enum { MOON_LIGHT_TRUE_PHASE = 0, MOON_LIGHT_EXPLORE = 1 } moon_light_mode_t;
+typedef enum { MOON_LIGHT_TRUE_PHASE = 0, MOON_LIGHT_EXPLORE = 1, MOON_LIGHT_SURFACE_LOCKED = 2 } moon_light_mode_t;
 
 /* Render with an additional user rotation (drag-to-rotate) on top of the sky
  * orientation in `st`. yaw_deg rotates the disc about the screen-vertical axis,

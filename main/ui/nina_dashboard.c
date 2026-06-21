@@ -384,6 +384,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     p->lbl_target_name = lv_label_create(p->header_box);
     lv_obj_add_style(p->lbl_target_name, &style_value_large, 0);
     lv_obj_set_width(p->lbl_target_name, LV_PCT(100));
+    lv_label_set_long_mode(p->lbl_target_name, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_align(p->lbl_target_name, LV_TEXT_ALIGN_RIGHT, 0);
     lv_label_set_text(p->lbl_target_name, "----");
 
