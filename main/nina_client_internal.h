@@ -46,6 +46,18 @@ http_poll_ctx_t *http_poll_ctx_get(void);
  * Uses per-task poll context for client reuse when available. */
 cJSON *http_get_json(const char *url);
 
+/* Resolve an IPv4 hostname to its dotted-quad string using the app-level
+ * DNS cache (60s TTL, stale fallback). On a hit, copies the cached IP into
+ * ip_out and returns true; on a miss, performs a fresh getaddrinfo(), caches
+ * the result, and returns true. Returns false (ip_out untouched/empty) only
+ * when resolution fails and no cached entry exists.
+ *
+ * A numeric-IP host is returned verbatim (no DNS). ip_out should be at least
+ * 16 bytes (INET_ADDRSTRLEN) for IPv4. This lets the request path replace a
+ * .lan mDNS hostname with a numeric IP so esp_http_client skips getaddrinfo()
+ * on the hot path, while the original hostname is still sent in the Host header. */
+bool nina_client_resolve_host(const char *host, char *ip_out, size_t ip_len);
+
 /* NINA Advanced API envelope helpers. The API wraps every response in
  * { "Response": ..., "Success": bool, ... }. These honor the application-level
  * Success flag so callers can treat Success!=true as "API unavailable" even when

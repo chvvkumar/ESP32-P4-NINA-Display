@@ -387,6 +387,9 @@ void perf_monitor_report(void)
 
     ESP_LOGI(TAG, "── Network ──");
     log_timer("http_request",    &g_perf.http_request);
+    log_timer("http_connect",    &g_perf.http_connect);
+    log_timer("http_ttfb",       &g_perf.http_ttfb);
+    log_timer("http_body",       &g_perf.http_body);
     ESP_LOGI(TAG, "  HTTP requests:  %"PRIu32" (interval) / %"PRIu32" (total)",
              g_perf.http_request_count.per_interval, g_perf.http_request_count.total);
     ESP_LOGI(TAG, "  HTTP retries:   %"PRIu32" (interval) / %"PRIu32" (total)",
@@ -395,6 +398,8 @@ void perf_monitor_report(void)
              g_perf.http_failure_count.per_interval, g_perf.http_failure_count.total);
     ESP_LOGI(TAG, "  HTTP unreachable:%"PRIu32" (interval) / %"PRIu32" (total)",
              g_perf.http_unreachable_count.per_interval, g_perf.http_unreachable_count.total);
+    ESP_LOGI(TAG, "  HTTP attempt0 fail:%"PRIu32" (interval) / %"PRIu32" (total)",
+             g_perf.http_attempt0_fail_count.per_interval, g_perf.http_attempt0_fail_count.total);
     ESP_LOGI(TAG, "  WS events:      %"PRIu32" (interval) / %"PRIu32" (total)",
              g_perf.ws_event_count.per_interval, g_perf.ws_event_count.total);
 
@@ -499,6 +504,7 @@ void perf_monitor_report(void)
     perf_counter_reset_interval(&g_perf.http_retry_count);
     perf_counter_reset_interval(&g_perf.http_failure_count);
     perf_counter_reset_interval(&g_perf.http_unreachable_count);
+    perf_counter_reset_interval(&g_perf.http_attempt0_fail_count);
     perf_counter_reset_interval(&g_perf.ws_event_count);
     perf_counter_reset_interval(&g_perf.json_parse_count);
     perf_counter_reset_interval(&g_perf.spotify_poll_count);
@@ -594,10 +600,14 @@ char *perf_monitor_report_json(void)
     // Network
     cJSON *network = cJSON_CreateObject();
     cJSON_AddItemToObject(network, "http_request",      timer_to_json(&g_perf.http_request));
+    cJSON_AddItemToObject(network, "http_connect",      timer_to_json(&g_perf.http_connect));
+    cJSON_AddItemToObject(network, "http_ttfb",         timer_to_json(&g_perf.http_ttfb));
+    cJSON_AddItemToObject(network, "http_body",         timer_to_json(&g_perf.http_body));
     cJSON_AddItemToObject(network, "http_request_count", counter_to_json(&g_perf.http_request_count));
     cJSON_AddItemToObject(network, "http_retry_count",   counter_to_json(&g_perf.http_retry_count));
     cJSON_AddItemToObject(network, "http_failure_count", counter_to_json(&g_perf.http_failure_count));
     cJSON_AddItemToObject(network, "http_unreachable_count", counter_to_json(&g_perf.http_unreachable_count));
+    cJSON_AddItemToObject(network, "http_attempt0_fail_count", counter_to_json(&g_perf.http_attempt0_fail_count));
     cJSON_AddItemToObject(network, "ws_event_count",     counter_to_json(&g_perf.ws_event_count));
     cJSON_AddItemToObject(root, "network", network);
 

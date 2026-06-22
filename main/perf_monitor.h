@@ -87,6 +87,11 @@ typedef struct {
     perf_counter_t http_failure_count;    // HTTP failures per interval (connected but failed)
     perf_counter_t http_unreachable_count;// Host unreachable (connection refused/timeout)
     perf_counter_t ws_event_count;        // WebSocket events received per interval
+    // Per-phase HTTP timing (for resolve-once / numeric-IP latency diagnosis)
+    perf_timer_t http_connect;            // esp_http_client_open: DNS + TCP connect
+    perf_timer_t http_ttfb;               // fetch_headers: request sent -> response headers
+    perf_timer_t http_body;               // body read loop
+    perf_counter_t http_attempt0_fail_count; // request succeeded only on a retry (first attempt failed though host reachable)
 
     // JSON parsing
     perf_timer_t json_parse;              // cJSON_Parse duration (per-parse)

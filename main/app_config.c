@@ -713,7 +713,7 @@ static void set_defaults(app_config_t *cfg) {
     cfg->screen_sleep_timeout_s = 60;
     cfg->alert_flash_enabled = true;
     cfg->idle_poll_interval_s = 30;
-    cfg->wifi_power_save = true;
+    cfg->wifi_power_save = false;  /* mains-powered display: WIFI_PS_NONE cuts DTIM modem-sleep latency */
     cfg->widget_style = 0;
     cfg->auto_update_check = 1;
     cfg->update_channel = 0;
