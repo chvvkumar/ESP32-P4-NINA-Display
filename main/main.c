@@ -7,6 +7,8 @@
 #include "esp_err.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
+#include "esp_hosted.h"
+#include "esp_hosted_host_fw_ver.h"
 #include "esp_sntp.h"
 #include "esp_timer.h"
 #include "bsp/esp-bsp.h"
@@ -580,6 +582,22 @@ void app_main(void)
     ESP_LOGI(TAG, "Configured instances: %d", instance_count);
 
     wifi_init();
+
+    /* Log esp-hosted host + C6 coprocessor firmware versions (diagnostic; readable
+     * via /api/logs). A host/slave version mismatch is the top cause of SDIO
+     * transport instability on the P4+C6. */
+    ESP_LOGI(TAG, "esp-hosted host fw: %d.%d.%d",
+             ESP_HOSTED_VERSION_MAJOR_1, ESP_HOSTED_VERSION_MINOR_1, ESP_HOSTED_VERSION_PATCH_1);
+    {
+        esp_hosted_coprocessor_fwver_t cpver = {0};
+        if (esp_hosted_get_coprocessor_fwversion(&cpver) == ESP_OK) {
+            ESP_LOGI(TAG, "esp-hosted C6 coprocessor fw: %u.%u.%u (rev %d)",
+                     (unsigned)cpver.major1, (unsigned)cpver.minor1, (unsigned)cpver.patch1,
+                     (int)cpver.revision);
+        } else {
+            ESP_LOGW(TAG, "esp-hosted: failed to read C6 coprocessor fw version");
+        }
+    }
 
 
     // Enable Dynamic Frequency Scaling — CPU scales 360 MHz (active) to 40 MHz (idle)

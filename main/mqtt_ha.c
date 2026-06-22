@@ -346,55 +346,57 @@ void mqtt_ha_process_pending(void)
 {
     if (!s_cmd_queue) return;
 
-    bool screen_changed = false;
-    bool text_changed = false;
+    bool brightness_applied = false;
     bool reboot_requested = false;
 
     mqtt_cmd_t cmd;
     while (xQueueReceive(s_cmd_queue, &cmd, 0) == pdTRUE) {
         switch (cmd.type) {
         case MQTT_CMD_SCREEN_BRIGHTNESS: {
-            /* Snapshot+save: never mutate live &s_config field-by-field. */
-            app_config_t cfg = app_config_get_snapshot();
+            /* LIVE-ONLY: never persist MQTT brightness. NVS writes run with the
+             * CPU cache disabled, which can starve the esp-hosted SDIO transport
+             * and trigger a host restart. An HA lux automation publishes these
+             * commands very frequently, so we apply live and never save. Manual
+             * UI / web changes still persist via their own handlers. */
             int newv = cmd.value;
             if (newv < 0) {  /* "ON" with no value: restore a sane default if off */
-                newv = (cfg.brightness == 0) ? 50 : cfg.brightness;
+                int cur = app_config_get()->brightness;  /* scalar read, no save */
+                newv = (cur == 0) ? 50 : cur;
             }
-            if (newv != cfg.brightness) {
-                cfg.brightness = newv;
-                app_config_save(&cfg);  /* only persist on change (flash wear) */
-                screen_changed = true;
-            }
-            /* Apply backlight live unless screen-sleep owns it. data_update_task
-             * (this task) restores the saved brightness on wake. */
+            /* Apply backlight live unless screen-sleep owns it. The backlight set
+             * is config-independent and works without any config write. */
             if (!screen_asleep) {
                 bsp_display_brightness_set(newv);
-                ESP_LOGI(TAG, "Screen brightness set to %d%% via MQTT", newv);
+                ESP_LOGI(TAG, "Screen brightness set to %d%% via MQTT (live, not saved)", newv);
             } else {
-                ESP_LOGI(TAG, "Screen brightness config updated to %d%% via MQTT (display sleeping)", newv);
+                ESP_LOGI(TAG, "Screen brightness %d%% via MQTT ignored (display sleeping, live-only)", newv);
             }
+            brightness_applied = true;
             break;
         }
         case MQTT_CMD_TEXT_BRIGHTNESS: {
-            app_config_t cfg = app_config_get_snapshot();
+            /* LIVE-ONLY: never persist. The rendered theme reads color_brightness
+             * from the live app_config (apply_theme_to_page() in nina_dashboard.c),
+             * so the live effect requires the in-memory value to be visible to the
+             * theme code. Replicate the web UI live-preview (color_brightness_post_handler
+             * in web_handlers_display.c): write the single scalar field on the live
+             * config, then re-apply the theme — but skip app_config_save(). A single
+             * aligned int store is the same mechanism the UI uses; no torn-write race. */
+            app_config_t *cfg = app_config_get();
             int newv = cmd.value;
             if (newv < 0) {  /* "ON" with no value */
-                newv = (cfg.color_brightness == 0) ? 100 : cfg.color_brightness;
+                newv = (cfg->color_brightness == 0) ? 100 : cfg->color_brightness;
             }
-            int theme_index = cfg.theme_index;
-            if (newv != cfg.color_brightness) {
-                cfg.color_brightness = newv;
-                app_config_save(&cfg);
-                text_changed = true;
-            }
+            cfg->color_brightness = newv;  /* live scalar write, NOT saved */
             /* Re-apply theme so the new color brightness takes effect live. */
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                nina_dashboard_apply_theme(theme_index);
+                nina_dashboard_apply_theme(cfg->theme_index);
                 bsp_display_unlock();
             } else {
                 ESP_LOGW(TAG, "Display lock timeout (MQTT theme apply)");
             }
-            ESP_LOGI(TAG, "Text brightness set to %d%% via MQTT", newv);
+            ESP_LOGI(TAG, "Text brightness set to %d%% via MQTT (live, not saved)", newv);
+            brightness_applied = true;
             break;
         }
         case MQTT_CMD_REBOOT:
@@ -403,7 +405,9 @@ void mqtt_ha_process_pending(void)
         }
     }
 
-    if (screen_changed || text_changed) {
+    /* Publish current (live) state so HA optimistic state stays in sync. Nothing
+     * is persisted; this only reflects the value we just applied in memory. */
+    if (brightness_applied) {
         mqtt_ha_publish_state();
     }
 
