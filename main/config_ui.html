@@ -4643,7 +4643,7 @@
       if (p.missing_fields && p.missing_fields.length > 0) {
         missingDiv.style.display = 'block';
         missingDiv.innerHTML = '<strong style="color:#f59e0b">Missing from backup:</strong> ' +
-          p.missing_fields.join(', ') + '<br><span style="color:#71717a">These settings will keep their current values.</span>';
+          p.missing_fields.map(escHtml).join(', ') + '<br><span style="color:#71717a">These settings will keep their current values.</span>';
       } else {
         missingDiv.style.display = 'none';
       }
@@ -4653,7 +4653,7 @@
       if (p.unknown_fields && p.unknown_fields.length > 0) {
         unknownDiv.style.display = 'block';
         unknownDiv.innerHTML = '<strong style="color:#f59e0b">Unknown fields (from newer firmware):</strong> ' +
-          p.unknown_fields.join(', ') + '<br><span style="color:#71717a">These will be skipped.</span>';
+          p.unknown_fields.map(escHtml).join(', ') + '<br><span style="color:#71717a">These will be skipped.</span>';
       } else {
         unknownDiv.style.display = 'none';
       }
@@ -4668,18 +4668,45 @@
         sensDiv.style.display = 'none';
       }
 
-      /* Validation notes */
+      /* Validation notes (array of {severity, message}) */
       var valDiv = $('restoreValidation');
-      if (p.validation_notes && p.validation_notes.length > 0) {
+      var notes = p.validation_notes || [];
+      var errs = [], warns = [];
+      for (var i = 0; i < notes.length; i++) {
+        var n = notes[i];
+        if (n && n.severity === 'error') errs.push(n.message);
+        else if (n) warns.push(n.message);
+      }
+      function escHtml(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;');
+      }
+      if (errs.length > 0 || warns.length > 0) {
         valDiv.style.display = 'block';
-        valDiv.innerHTML = '<strong style="color:#f59e0b">Adjusted values:</strong><br>' +
-          p.validation_notes.join('<br>');
+        var html = '';
+        if (errs.length > 0) {
+          html += '<strong style="color:#f87171">Problems that must be fixed:</strong><br>' +
+            errs.map(escHtml).join('<br>');
+        }
+        if (warns.length > 0) {
+          if (html) html += '<br><br>';
+          html += '<strong style="color:#f59e0b">Adjusted values:</strong><br>' +
+            warns.map(escHtml).join('<br>');
+        }
+        valDiv.innerHTML = html;
       } else {
         valDiv.style.display = 'none';
       }
 
-      /* Update confirm button text */
-      $('restoreConfirmBtn').textContent = 'Restore (' + p.total_changes + ' change' + (p.total_changes !== 1 ? 's' : '') + ')';
+      /* Update confirm button — block restore when there are hard errors */
+      var rcBtn = $('restoreConfirmBtn');
+      if (p.restore_blocked) {
+        rcBtn.disabled = true;
+        rcBtn.textContent = 'Resolve errors to restore';
+      } else {
+        rcBtn.disabled = false;
+        rcBtn.textContent = 'Restore (' + p.total_changes + ' change' + (p.total_changes !== 1 ? 's' : '') + ')';
+      }
     }
 
     function formatDiffValue(val) {
@@ -4696,12 +4723,15 @@
       $('restoreFileLabel').textContent = 'Choose backup .json file';
       $('restoreFileLabel').classList.remove('has-file');
       $('restoreFileLabel').appendChild(input);
+      var rcBtn = $('restoreConfirmBtn');
+      if (rcBtn) { rcBtn.disabled = false; rcBtn.textContent = 'Restore'; }
       _backupData = null;
     }
 
     function confirmRestore() {
       if (!_backupData) return;
       var btn = $('restoreConfirmBtn');
+      if (btn.disabled) return;  /* blocked by validation errors */
       btn.disabled = true; btn.textContent = 'Restoring...';
 
       postJson('/api/config/restore', {backup: _backupData, confirm: true})

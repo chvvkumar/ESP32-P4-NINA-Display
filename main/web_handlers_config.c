@@ -398,6 +398,201 @@ static bool cjson_values_equal(const cJSON *a, const cJSON *b)
     return false;  /* objects/arrays not compared field-by-field */
 }
 
+/* ---- Restore-preview validation tables ---- */
+
+/* String fields with a maximum length. Mirrors validate_config_fields()
+ * (web_handlers_config.c) exactly; validate_string_len() flags when
+ * strlen >= max, so the limit is "max - 1" usable characters. */
+typedef struct { const char *json_key; size_t max_len; } restore_strmax_t;
+static const restore_strmax_t s_restore_strmax[] = {
+    {"hostname",            32},
+    {"url1",                128},
+    {"url2",                128},
+    {"url3",                128},
+    {"ntp",                 64},
+    {"timezone",            64},
+    {"mqtt_broker_url",     128},
+    {"mqtt_username",       64},
+    {"mqtt_password",       64},
+    {"mqtt_topic_prefix",   64},
+    {"filter_colors_1",     512},
+    {"filter_colors_2",     512},
+    {"filter_colors_3",     512},
+    {"rms_thresholds_1",    256},
+    {"rms_thresholds_2",    256},
+    {"rms_thresholds_3",    256},
+    {"hfr_thresholds_1",    256},
+    {"hfr_thresholds_2",    256},
+    {"hfr_thresholds_3",    256},
+    {"allsky_hostname",     128},
+    {"allsky_field_config", 1536},
+    {"allsky_thresholds",   1024},
+    /* goes_region max sourced from the struct field size at runtime below */
+    {NULL, 0}
+};
+
+/* Numeric fields with a confirmable [min,max] clamp. Ranges sourced directly
+ * from app_config.c validate_config() (line refs in comments). is_float marks
+ * fields clamped as floats so the message formats sensibly. Out-of-range
+ * values are silently clamped on restore, so these are WARNINGS only. */
+typedef struct { const char *json_key; double min; double max; bool is_float; } restore_numrange_t;
+static const restore_numrange_t s_restore_numrange[] = {
+    {"color_brightness",        0,    100,   false},  /* app_config.c:2468 */
+    {"brightness",              0,    100,   false},  /* app_config.c:2476 */
+    {"auto_rotate_interval_s",  1,    3600,  false},  /* app_config.c:2498 (0 invalid) */
+    {"auto_rotate_effect",      0,    3,     false},  /* app_config.c:2502 */
+    {"update_rate_s",           1,    10,    false},  /* app_config.c:2516 */
+    {"graph_update_interval_s", 2,    30,    false},  /* app_config.c:2520 */
+    {"connection_timeout_s",    2,    30,    false},  /* app_config.c:2524 */
+    {"toast_duration_s",        3,    30,    false},  /* app_config.c:2528 */
+    {"screen_sleep_timeout_s",  10,   3600,  false},  /* app_config.c:2532 */
+    {"idle_poll_interval_s",    5,    120,   false},  /* app_config.c:2536 */
+    {"screen_rotation",         0,    3,     false},  /* app_config.c:2544 */
+    {"allsky_update_interval_s",1,    300,   false},  /* app_config.c:2548 */
+    {"allsky_dew_offset",       -50,  50,    true},   /* app_config.c:2552 */
+    {"goes_update_interval_s",  300,  7200,  false},  /* app_config.c:2556 */
+    {"image_display_source",    0,    2,     false},  /* app_config.c:2565 */
+    {"moon_bg_style",           0,    3,     false},  /* app_config.c:2569 */
+    {"solar_band",              0,    17,    false},  /* app_config.c:2573 */
+    {"moon_drag_light_mode",    0,    2,     false},  /* app_config.c:2577 */
+    {"moon_roll_offset",        -180, 180,   true},   /* app_config.c:2589 */
+    {"moon_yaw_offset",         -180, 180,   true},   /* app_config.c:2594 */
+    {"moon_pitch_offset",       -90,  90,    true},   /* app_config.c:2599 */
+    {"moon_spin_return_s",      3,    60,    false},  /* app_config.c:2608 */
+    {"nav_grace_s",             10,   300,   false},  /* app_config.c:2624 */
+    {"spotify_poll_interval_ms",1000, 30000, false},  /* app_config.c:2626 */
+    {NULL, 0, 0, false}
+};
+
+/* Append a {severity, message} object to the validation_notes array.
+ * Sets *blocked = true when severity is "error". */
+static void add_validation_note(cJSON *notes, bool *blocked,
+                                const char *severity, const char *message)
+{
+    cJSON *note = cJSON_CreateObject();
+    if (!note) return;
+    cJSON_AddStringToObject(note, "severity", severity);
+    cJSON_AddStringToObject(note, "message", message);
+    cJSON_AddItemToArray(notes, note);
+    if (strcmp(severity, "error") == 0 && blocked) *blocked = true;
+}
+
+/* Run the per-field restore validation checks for one backup field.
+ * backup_value is guaranteed non-NULL; current_value may be NULL. */
+static void check_restore_field(const backup_field_t *f,
+                                const cJSON *backup_value,
+                                const cJSON *current_value,
+                                cJSON *notes, bool *blocked)
+{
+    char msg[256];
+
+    /* 1. Malformed JSON in large (JSON-encoded) string fields -> ERROR */
+    if (f->is_large && cJSON_IsString(backup_value)) {
+        cJSON *t = cJSON_Parse(backup_value->valuestring);
+        if (t == NULL) {
+            snprintf(msg, sizeof(msg),
+                     "%s: contains invalid JSON and cannot be restored.", f->label);
+            add_validation_note(notes, blocked, "error", msg);
+        }
+        cJSON_Delete(t);
+    }
+
+    /* 2. Type mismatch vs current firmware -> ERROR */
+    if (current_value) {
+        int bk = cJSON_IsString(backup_value) ? 1 :
+                 cJSON_IsNumber(backup_value) ? 2 :
+                 cJSON_IsBool(backup_value)   ? 3 : 0;
+        int ck = cJSON_IsString(current_value) ? 1 :
+                 cJSON_IsNumber(current_value) ? 2 :
+                 cJSON_IsBool(current_value)   ? 3 : 0;
+        if (bk != 0 && ck != 0 && bk != ck) {
+            snprintf(msg, sizeof(msg),
+                     "%s: value type does not match this firmware and cannot be restored.",
+                     f->label);
+            add_validation_note(notes, blocked, "error", msg);
+        }
+    }
+
+    /* 3. String too long -> ERROR (mirror validate_config_fields boundary) */
+    if (cJSON_IsString(backup_value)) {
+        size_t max_len = 0;
+        bool have_max = false;
+        if (strcmp(f->json_key, "goes_region") == 0) {
+            max_len = sizeof(((app_config_t *)0)->goes_region);
+            have_max = true;
+        } else {
+            for (const restore_strmax_t *s = s_restore_strmax; s->json_key; s++) {
+                if (strcmp(s->json_key, f->json_key) == 0) {
+                    max_len = s->max_len;
+                    have_max = true;
+                    break;
+                }
+            }
+        }
+        if (have_max && strlen(backup_value->valuestring) >= max_len) {
+            snprintf(msg, sizeof(msg),
+                     "%s: value is too long (maximum %d characters).",
+                     f->label, (int)(max_len - 1));
+            add_validation_note(notes, blocked, "error", msg);
+        }
+    }
+
+    /* 4. Invalid URL -> ERROR */
+    if (cJSON_IsString(backup_value) && backup_value->valuestring[0] != '\0') {
+        if ((strcmp(f->json_key, "url1") == 0 ||
+             strcmp(f->json_key, "url2") == 0 ||
+             strcmp(f->json_key, "url3") == 0 ||
+             strcmp(f->json_key, "mqtt_broker_url") == 0) &&
+            !validate_url_format(backup_value->valuestring)) {
+            snprintf(msg, sizeof(msg), "%s: is not a valid URL.", f->label);
+            add_validation_note(notes, blocked, "error", msg);
+        }
+    }
+
+    /* 5. Numeric out of range -> WARNING (only when the value actually changed) */
+    if (cJSON_IsNumber(backup_value) &&
+        !cjson_values_equal(backup_value, current_value)) {
+        for (const restore_numrange_t *n = s_restore_numrange; n->json_key; n++) {
+            if (strcmp(n->json_key, f->json_key) != 0) continue;
+            double v = backup_value->valuedouble;
+            if (v < n->min || v > n->max) {
+                if (n->is_float) {
+                    snprintf(msg, sizeof(msg),
+                             "%s: value %g is outside the supported range %g to %g "
+                             "and will be adjusted on restore.",
+                             f->label, v, n->min, n->max);
+                } else {
+                    snprintf(msg, sizeof(msg),
+                             "%s: value %lld is outside the supported range %lld to %lld "
+                             "and will be adjusted on restore.",
+                             f->label, (long long)v, (long long)n->min, (long long)n->max);
+                }
+                add_validation_note(notes, blocked, "warning", msg);
+            }
+            break;
+        }
+    }
+
+    /* 6. Hostname format -> WARNING */
+    if (strcmp(f->json_key, "hostname") == 0 &&
+        cJSON_IsString(backup_value) && backup_value->valuestring[0] != '\0') {
+        bool bad = false;
+        for (const char *c = backup_value->valuestring; *c; c++) {
+            char ch = *c;
+            if (!((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+                  (ch >= '0' && ch <= '9') || ch == '-')) {
+                bad = true;
+                break;
+            }
+        }
+        if (bad) {
+            add_validation_note(notes, blocked, "warning",
+                "Hostname contains characters that may not work as a network name; "
+                "use only letters, numbers, and hyphens.");
+        }
+    }
+}
+
 /*
  * Build restore preview response.
  * backup_root: the parsed backup JSON (contains "meta", "config", optionally "sensitive")
@@ -488,6 +683,7 @@ static cJSON *build_restore_preview(const cJSON *backup_root, const cJSON *curre
     cJSON *no_changes_arr = cJSON_CreateArray();
     int total_changes = 0;
     bool sensitive_included = (backup_sensitive != NULL);
+    bool restore_blocked = false;
 
     /* Track which categories have changes */
     const char *categories[] = {"Display", "Behavior", "Nodes & Data", "System", "AllSky", "Spotify", "MQTT"};
@@ -518,6 +714,11 @@ static cJSON *build_restore_preview(const cJSON *backup_root, const cJSON *curre
 
         /* Compare with current value */
         const cJSON *current_value = cJSON_GetObjectItem(current_json, f->json_key);
+
+        /* Pre-restore validation (runs whether or not the value changed; the
+         * numeric range check itself only fires on changed values). */
+        check_restore_field(f, backup_value, current_value, validation_notes, &restore_blocked);
+
         if (cjson_values_equal(backup_value, current_value)) {
             continue;  /* No change */
         }
@@ -587,6 +788,7 @@ static cJSON *build_restore_preview(const cJSON *backup_root, const cJSON *curre
     cJSON_AddItemToObject(resp, "missing_fields", missing_fields);
     cJSON_AddItemToObject(resp, "unknown_fields", unknown_fields);
     cJSON_AddItemToObject(resp, "validation_notes", validation_notes);
+    cJSON_AddBoolToObject(resp, "restore_blocked", restore_blocked);
     cJSON_AddBoolToObject(resp, "sensitive_included", sensitive_included);
     cJSON_AddItemToObject(resp, "sensitive_excluded", sensitive_excluded);
     cJSON_AddItemToObject(resp, "changes", changes);
