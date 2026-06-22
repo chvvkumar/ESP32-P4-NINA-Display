@@ -852,11 +852,18 @@ void summary_page_update(const nina_client_t *instances, int count) {
 
     int gb = app_config_get()->color_brightness;
 
-    /* Count connected instances (use centralized connection state) */
-    int connected_count = nina_connection_connected_count();
+    /* Count visible cards using the SAME predicate as the per-card show/hide
+     * loop below (slot-available AND within count AND connected). Using the
+     * raw nina_connection_connected_count() here would ignore slot
+     * availability and could desync the empty-state test and the layout tier
+     * from what the cards actually show. */
+    int visible = 0;
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        if (nina_slot_available[i] && i < count && nina_connection_is_connected(i)) visible++;
+    }
 
-    /* Empty state: show message when nothing is connected */
-    if (connected_count == 0) {
+    /* Empty state: show message when nothing is visible */
+    if (visible == 0) {
         for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
             lv_obj_add_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
         }
@@ -872,7 +879,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
         lv_obj_add_flag(empty_cont, LV_OBJ_FLAG_HIDDEN);
     }
 
-    bool layout_changed = (connected_count != prev_visible_count);
+    bool layout_changed = (visible != prev_visible_count);
 
     if (layout_changed) {
         /* ── FLIP animation: First, Last, Invert, Play ───────────── */
@@ -893,7 +900,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
         for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
             if (nina_slot_available[i] && i < count && nina_connection_is_connected(i)) {
                 lv_obj_clear_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
-                update_card_layout(&cards[i], connected_count);
+                update_card_layout(&cards[i], visible);
             } else {
                 lv_obj_add_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
             }
@@ -942,7 +949,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
         }
     }
 
-    prev_visible_count = connected_count;
+    prev_visible_count = visible;
 
     /* ── Update card data ────────────────────────────────────────── */
     for (int i = 0; i < MAX_NINA_INSTANCES && i < count; i++) {
@@ -1099,7 +1106,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
         }
 
         /* Sequence info (visible in 1-2 card mode) */
-        if (connected_count <= 2 && !lv_obj_has_flag(sc->seq_row, LV_OBJ_FLAG_HIDDEN)) {
+        if (visible <= 2 && !lv_obj_has_flag(sc->seq_row, LV_OBJ_FLAG_HIDDEN)) {
             if (d->container_name[0]) {
                 set_label_if_changed(sc->lbl_seq_name, d->container_name);
             } else {
@@ -1213,7 +1220,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
         }
 
         /* Exposure detail line (1-card mode only) */
-        if (connected_count <= 1 &&
+        if (visible <= 1 &&
             !lv_obj_has_flag(sc->detail_row, LV_OBJ_FLAG_HIDDEN)) {
             char detail[128] = "";
             int len = 0;

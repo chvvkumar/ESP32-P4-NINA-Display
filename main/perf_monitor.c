@@ -293,6 +293,9 @@ void perf_monitor_capture_cpu(void)
 
         uint32_t runtime_delta = current_tasks[i].ulRunTimeCounter - prev_runtime;
         float pct = (float)runtime_delta / (float)total_delta * 100.0f;
+        // Clamp: runtime counter wrap can produce pct > 100 (or < 0)
+        if (pct < 0.0f) pct = 0.0f;
+        if (pct > 100.0f) pct = 100.0f;
 
         // Check if this is an idle task (per-core idle tracking)
         if (strncmp(current_tasks[i].pcTaskName, "IDLE", 4) == 0) {

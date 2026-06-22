@@ -1090,11 +1090,23 @@ static app_config_t *parse_config_from_json(cJSON *root)
         }
     }
     /* admin_password is never accepted via /api/config — use /api/admin-password. */
-    JSON_TO_INT   (root, "spotify_poll_interval_ms",   cfg->spotify_poll_interval_ms);
+    cJSON *spi_item = cJSON_GetObjectItem(root, "spotify_poll_interval_ms");
+    if (cJSON_IsNumber(spi_item)) {
+        int v = spi_item->valueint;
+        if (v < 1000) v = 1000;
+        if (v > 30000) v = 30000;
+        cfg->spotify_poll_interval_ms = (uint16_t)v;
+    }
     JSON_TO_BOOL  (root, "spotify_show_progress_bar",  cfg->spotify_show_progress_bar);
     JSON_TO_BOOL  (root, "spotify_minimal_mode",       cfg->spotify_minimal_mode);
     JSON_TO_BOOL  (root, "spotify_scroll_text",        cfg->spotify_scroll_text);
-    JSON_TO_INT   (root, "spotify_overlay_timeout_s",  cfg->spotify_overlay_timeout_s);
+    cJSON *sot_item = cJSON_GetObjectItem(root, "spotify_overlay_timeout_s");
+    if (cJSON_IsNumber(sot_item)) {
+        int v = sot_item->valueint;
+        if (v < 0) v = 0;
+        if (v > 255) v = 255;   /* uint8_t; 0 = never hide */
+        cfg->spotify_overlay_timeout_s = (uint8_t)v;
+    }
     JSON_TO_BOOL  (root, "spotify_overlay_visible",   cfg->spotify_overlay_visible);
 
     JSON_TO_BOOL  (root, "image_display_enabled",       cfg->image_display_enabled);
@@ -1168,7 +1180,11 @@ static app_config_t *parse_config_from_json(cJSON *root)
 
     cJSON *tnm_item = cJSON_GetObjectItem(root, "toast_notify_mask");
     if (cJSON_IsNumber(tnm_item)) {
-        cfg->toast_notify_mask = (uint32_t)tnm_item->valuedouble;
+        /* Bound to defined notification-category bits (highest used bit = 11).
+         * Mask to 20 bits for headroom; rejects garbage high-bit values. */
+        double d = tnm_item->valuedouble;
+        if (d < 0) d = 0;
+        cfg->toast_notify_mask = (uint32_t)d & 0xFFFFFu;
     }
 
     JSON_TO_BOOL(root, "toast_instance_muted_1", cfg->toast_instance_muted[0]);
@@ -1194,12 +1210,25 @@ static app_config_t *parse_config_from_json(cJSON *root)
         cfg->weather_poll_interval_s = (uint16_t)v;
     }
 
-    JSON_TO_INT(root, "weather_units", cfg->weather_units);
-    JSON_TO_INT(root, "weather_time_format", cfg->weather_time_format);
+    cJSON *wu_item = cJSON_GetObjectItem(root, "weather_units");
+    if (cJSON_IsNumber(wu_item)) {
+        cfg->weather_units = (wu_item->valueint != 0) ? 1 : 0;  /* 0=imperial, 1=metric */
+    }
+    cJSON *wtf_item = cJSON_GetObjectItem(root, "weather_time_format");
+    if (cJSON_IsNumber(wtf_item)) {
+        cfg->weather_time_format = (wtf_item->valueint != 0) ? 1 : 0;  /* 0=12h, 1=24h */
+    }
 
     // Idle override
     JSON_TO_BOOL(root, "idle_page_override_enabled", cfg->idle_page_override_enabled);
-    JSON_TO_INT(root, "idle_page_override_target", cfg->idle_page_override_target);
+    /* idle_page_override_target: idle_target_t enum, valid range -1 (Summary) .. 7 (NINA3) */
+    cJSON *ipt_item = cJSON_GetObjectItem(root, "idle_page_override_target");
+    if (cJSON_IsNumber(ipt_item)) {
+        int v = ipt_item->valueint;
+        if (v < IDLE_TARGET_SUMMARY) v = IDLE_TARGET_SUMMARY;
+        if (v > IDLE_TARGET_NINA3) v = IDLE_TARGET_NINA3;
+        cfg->idle_page_override_target = (int8_t)v;
+    }
     JSON_TO_BOOL(root, "idle_indicator_enabled", cfg->idle_indicator_enabled);
 
     // Manual navigation grace window (seconds). Clamp 10-300.
@@ -1228,7 +1257,8 @@ static app_config_t *parse_config_from_json(cJSON *root)
 
 // Receive and parse JSON body from a POST request.
 // Returns parsed cJSON root on success, NULL on failure (error response already sent).
-static cJSON *receive_json_body(httpd_req_t *req, int max_size)
+// Non-static: shared with other web_handlers_*.c via web_server_internal.h.
+cJSON *receive_json_body(httpd_req_t *req, int max_size)
 {
     int remaining = req->content_len;
     if (remaining >= max_size) {

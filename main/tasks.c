@@ -2187,6 +2187,11 @@ main_loop:
             }
         }
 
+        /* ── Apply any pending MQTT commands (brightness/text/theme/reboot) ──
+         * The MQTT event callback only parses+enqueues; the blocking apply
+         * (display lock, backlight, config save) happens here in UI context. */
+        mqtt_ha_process_pending();
+
         int current_active = nina_dashboard_get_active_page();  // Snapshot to avoid races
         bool on_allsky = nina_dashboard_is_allsky_page();
         bool on_sysinfo = nina_dashboard_is_sysinfo_page();

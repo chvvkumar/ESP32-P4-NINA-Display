@@ -20,6 +20,7 @@
 #include "freertos/queue.h"
 #include <string.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 static const char *TAG = "spotify_client";
 
@@ -494,6 +495,7 @@ esp_err_t spotify_client_fetch_album_art(const char *url, uint8_t **out_buf,
     }
 
     /* Stream response into buffer */
+    bool had_content_length = (content_length > 0);
     size_t total_read = 0;
     int read_len;
     while (total_read < buf_size) {
@@ -501,6 +503,22 @@ esp_err_t spotify_client_fetch_album_art(const char *url, uint8_t **out_buf,
                                          buf_size - total_read);
         if (read_len <= 0) break;
         total_read += read_len;
+    }
+
+    /* INTEG-7: With no Content-Length the buffer is sized to the cap. If it
+     * filled exactly, the image may be larger than the cap and silently
+     * truncated. Probe one more byte: if more data is available the source
+     * exceeded SPOTIFY_ART_MAX_SIZE — reject rather than decode a partial JPEG. */
+    if (!had_content_length && total_read == buf_size) {
+        char probe;
+        int extra = esp_http_client_read(client, &probe, 1);
+        if (extra > 0) {
+            ESP_LOGW(TAG, "Album art exceeds %d byte cap (no content-length) — rejecting",
+                     (int)SPOTIFY_ART_MAX_SIZE);
+            esp_http_client_cleanup(client);
+            free(buffer);
+            return ESP_FAIL;
+        }
     }
 
     esp_http_client_cleanup(client);

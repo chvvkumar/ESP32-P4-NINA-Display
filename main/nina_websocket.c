@@ -429,9 +429,6 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             if (filter && filter->valuestring)
                 strncpy(img_stats.filter, filter->valuestring, sizeof(img_stats.filter) - 1);
 
-            if (new_target)
-                strncpy(img_stats.camera_name, "", sizeof(img_stats.camera_name) - 1);
-
             cJSON *camera_name = cJSON_GetObjectItem(stats, "CameraName");
             if (camera_name && camera_name->valuestring)
                 strncpy(img_stats.camera_name, camera_name->valuestring, sizeof(img_stats.camera_name) - 1);
@@ -449,6 +446,10 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             cJSON *filename = cJSON_GetObjectItem(stats, "Filename");
             if (filename && filename->valuestring)
                 strncpy(img_stats.filename, filename->valuestring, sizeof(img_stats.filename) - 1);
+
+            // Snapshots for post-unlock logging (avoid racing reads of data->)
+            int log_exposure_count = 0;
+            char log_target_name[64] = {0};
 
             // Short critical section: write parsed values into the shared struct
             if (nina_client_lock(data, 50)) {
@@ -477,6 +478,9 @@ static void handle_websocket_message(int index, const char *payload, int len) {
                     data->hfr_ring.count++;
                 }
 
+                log_exposure_count = data->exposure_count;
+                snprintf(log_target_name, sizeof(log_target_name), "%s", data->target_name);
+
                 nina_client_unlock(data);
             } else {
                 ESP_LOGW(TAG, "WS[%d]: Could not acquire mutex for IMAGE-SAVE", index);
@@ -484,12 +488,12 @@ static void handle_websocket_message(int index, const char *payload, int len) {
 
             nina_event_log_add_fmt(EVENT_SEV_INFO, index,
                 "Image #%d: %s, HFR %.2f, %d stars",
-                data->exposure_count, img_stats.filter, new_hfr, new_stars);
+                log_exposure_count, img_stats.filter, new_hfr, new_stars);
             nina_session_stats_add_exposure(index, new_exp_total);
 
             ESP_LOGI(TAG, "WS[%d]: HFR=%.2f Stars=%d Filter=%s Target=%s",
                 index, new_hfr, new_stars,
-                img_stats.filter, data->target_name);
+                img_stats.filter, log_target_name);
         }
     }
     // FILTERWHEEL-CHANGED: Replaces fetch_filter_robust_ex for current filter
@@ -506,7 +510,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
                 }
                 nina_event_log_add_fmt(EVENT_SEV_INFO, index,
                     "Filter changed to %s", name->valuestring);
-                ESP_LOGI(TAG, "WS[%d]: Filter changed to %s", index, data->current_filter);
+                ESP_LOGI(TAG, "WS[%d]: Filter changed to %s", index, name->valuestring);
             }
         }
     }
@@ -588,11 +592,12 @@ static void handle_websocket_message(int index, const char *payload, int len) {
     }
     // AUTOFOCUS-FINISHED: Mark AF complete, find best point
     else if (strcmp(evt->valuestring, "AUTOFOCUS-FINISHED") == 0) {
+        float best_hfr = 999.0f;
+        int best_pos = 0;
+        int af_count = 0;
         if (nina_client_lock(data, 50)) {
             data->autofocus.af_running = false;
             // Find best (minimum HFR) point
-            float best_hfr = 999.0f;
-            int best_pos = 0;
             for (int i = 0; i < data->autofocus.count; i++) {
                 if (data->autofocus.points[i].hfr < best_hfr) {
                     best_hfr = data->autofocus.points[i].hfr;
@@ -601,6 +606,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             }
             data->autofocus.best_hfr = best_hfr;
             data->autofocus.best_position = best_pos;
+            af_count = data->autofocus.count;
             data->ui_refresh_needed = true;
             nina_client_unlock(data);
         }
@@ -608,8 +614,8 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             ws_toast(index, TOAST_SUCCESS, "Autofocus complete");
         nina_event_log_add_fmt(EVENT_SEV_SUCCESS, index,
             "Autofocus complete: pos %d, HFR %.2f",
-            data->autofocus.best_position, data->autofocus.best_hfr);
-        ESP_LOGI(TAG, "WS[%d]: Autofocus finished (%d points)", index, data->autofocus.count);
+            best_pos, best_hfr);
+        ESP_LOGI(TAG, "WS[%d]: Autofocus finished (%d points)", index, af_count);
     }
     // AUTOFOCUS-POINT-ADDED: Add V-curve data point {Position, HFR}
     else if (strcmp(evt->valuestring, "AUTOFOCUS-POINT-ADDED") == 0) {
@@ -619,6 +625,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         if (position && af_hfr) {
             int pos = position->valueint;
             float hfr_val = (float)af_hfr->valuedouble;
+            int af_count = 0;
 
             if (nina_client_lock(data, 50)) {
                 if (data->autofocus.count < MAX_AF_POINTS) {
@@ -627,11 +634,12 @@ static void handle_websocket_message(int index, const char *payload, int len) {
                     data->autofocus.points[idx].hfr = hfr_val;
                     data->autofocus.count++;
                 }
+                af_count = data->autofocus.count;
                 data->ui_refresh_needed = true;
                 nina_client_unlock(data);
             }
             ESP_LOGI(TAG, "WS[%d]: AF point: pos=%d HFR=%.2f (%d/%d)",
-                     index, pos, hfr_val, data->autofocus.count, MAX_AF_POINTS);
+                     index, pos, hfr_val, af_count, MAX_AF_POINTS);
         }
     }
     // ROTATOR-MOVED / ROTATOR-MOVED-MECHANICAL: Update rotator angle from WS

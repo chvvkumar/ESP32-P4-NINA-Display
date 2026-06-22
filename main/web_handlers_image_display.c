@@ -64,16 +64,9 @@ esp_err_t image_display_config_get_handler(httpd_req_t *req)
 esp_err_t image_display_config_post_handler(httpd_req_t *req)
 {
     REQUIRE_AUTH(req);
-    char buf[CONFIG_MAX_PAYLOAD];
-    int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (received <= 0) {
-        return send_400(req, "Empty request body");
-    }
-    buf[received] = '\0';
-
-    cJSON *root = cJSON_Parse(buf);
+    cJSON *root = receive_json_body(req, CONFIG_MAX_PAYLOAD);
     if (root == NULL) {
-        return send_400(req, "Invalid JSON");
+        return ESP_OK;  /* error response already sent */
     }
 
     /* Validate string lengths */
@@ -82,93 +75,97 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
         return send_400(req, "goes_region too long");
     }
 
-    app_config_t *cfg = app_config_get();
+    /* Work on a mutex-protected snapshot copy; never field-write the live config. */
+    app_config_t cfg = app_config_get_snapshot();
 
     /* Capture the current source/band/region/crop so we can tell, after saving,
      * whether the change needs a new image (source/band/region -> re-download +
      * wait overlay) or only a crop/full toggle (-> local re-render of the cached
      * frame, no download). */
-    uint8_t prev_source = cfg->image_display_source;
-    uint8_t prev_band   = cfg->solar_band;
-    bool    prev_crop   = cfg->image_display_crop;
-    uint8_t prev_bg     = cfg->moon_bg_style;
-    uint8_t prev_flip_u = cfg->moon_flip_u;
-    uint8_t prev_flip_v = cfg->moon_flip_v;
-    float   prev_roll   = cfg->moon_roll_offset;
-    float   prev_yaw    = cfg->moon_yaw_offset;
-    float   prev_pitch  = cfg->moon_pitch_offset;
-    uint8_t prev_north_up = cfg->moon_north_up;
-    uint8_t prev_spin_mode   = cfg->moon_spin_mode;
-    uint8_t prev_spin_return = cfg->moon_spin_return_s;
-    uint8_t prev_goes_orient  = cfg->goes_orientation;
-    uint8_t prev_solar_orient = cfg->solar_orientation;
-    char    prev_region[sizeof(cfg->goes_region)];
-    strlcpy(prev_region, cfg->goes_region, sizeof(prev_region));
+    uint8_t prev_source = cfg.image_display_source;
+    uint8_t prev_band   = cfg.solar_band;
+    bool    prev_crop   = cfg.image_display_crop;
+    uint8_t prev_bg     = cfg.moon_bg_style;
+    uint8_t prev_flip_u = cfg.moon_flip_u;
+    uint8_t prev_flip_v = cfg.moon_flip_v;
+    float   prev_roll   = cfg.moon_roll_offset;
+    float   prev_yaw    = cfg.moon_yaw_offset;
+    float   prev_pitch  = cfg.moon_pitch_offset;
+    uint8_t prev_north_up = cfg.moon_north_up;
+    uint8_t prev_spin_mode   = cfg.moon_spin_mode;
+    uint8_t prev_spin_return = cfg.moon_spin_return_s;
+    uint8_t prev_goes_orient  = cfg.goes_orientation;
+    uint8_t prev_solar_orient = cfg.solar_orientation;
+    char    prev_region[sizeof(cfg.goes_region)];
+    strlcpy(prev_region, cfg.goes_region, sizeof(prev_region));
 
-    JSON_TO_BOOL(root, "image_display_enabled", cfg->image_display_enabled);
-    JSON_TO_BOOL(root, "image_display_show_overlay", cfg->image_display_show_overlay);
-    JSON_TO_BOOL(root, "image_display_crop", cfg->image_display_crop);
-    JSON_TO_STRING(root, "goes_region", cfg->goes_region);
+    JSON_TO_BOOL(root, "image_display_enabled", cfg.image_display_enabled);
+    JSON_TO_BOOL(root, "image_display_show_overlay", cfg.image_display_show_overlay);
+    JSON_TO_BOOL(root, "image_display_crop", cfg.image_display_crop);
+    JSON_TO_STRING(root, "goes_region", cfg.goes_region);
 
     cJSON *interval = cJSON_GetObjectItem(root, "goes_update_interval_s");
     if (cJSON_IsNumber(interval)) {
         int v = interval->valueint;
         if (v < 300) v = 300;
         if (v > 7200) v = 7200;
-        cfg->goes_update_interval_s = (uint16_t)v;
+        cfg.goes_update_interval_s = (uint16_t)v;
     }
 
     cJSON *src = cJSON_GetObjectItem(root, "image_display_source");
-    if (cJSON_IsNumber(src)) { int v = src->valueint; cfg->image_display_source = (v >= 0 && v <= 2) ? (uint8_t)v : 0; }
+    if (cJSON_IsNumber(src)) { int v = src->valueint; cfg.image_display_source = (v >= 0 && v <= 2) ? (uint8_t)v : 0; }
     cJSON *bg = cJSON_GetObjectItem(root, "moon_bg_style");
-    if (cJSON_IsNumber(bg)) { int v = bg->valueint; cfg->moon_bg_style = (v >= 0 && v <= 3) ? (uint8_t)v : 0; }
+    if (cJSON_IsNumber(bg)) { int v = bg->valueint; cfg.moon_bg_style = (v >= 0 && v <= 3) ? (uint8_t)v : 0; }
     cJSON *mlat = cJSON_GetObjectItem(root, "moon_lat");
-    if (cJSON_IsNumber(mlat)) cfg->moon_lat = (float)mlat->valuedouble;
+    if (cJSON_IsNumber(mlat)) cfg.moon_lat = (float)mlat->valuedouble;
     cJSON *mlon = cJSON_GetObjectItem(root, "moon_lon");
-    if (cJSON_IsNumber(mlon)) cfg->moon_lon = (float)mlon->valuedouble;
+    if (cJSON_IsNumber(mlon)) cfg.moon_lon = (float)mlon->valuedouble;
     cJSON *sb = cJSON_GetObjectItem(root, "solar_band");
-    if (cJSON_IsNumber(sb)) { int v = sb->valueint; cfg->solar_band = (v >= 0 && v <= 17) ? (uint8_t)v : 0; }
+    if (cJSON_IsNumber(sb)) { int v = sb->valueint; cfg.solar_band = (v >= 0 && v <= 17) ? (uint8_t)v : 0; }
     cJSON *go = cJSON_GetObjectItem(root, "goes_orientation");
-    if (cJSON_IsNumber(go)) { int v = go->valueint; cfg->goes_orientation = (v >= 0 && v <= 3) ? (uint8_t)v : 0; }
+    if (cJSON_IsNumber(go)) { int v = go->valueint; cfg.goes_orientation = (v >= 0 && v <= 3) ? (uint8_t)v : 0; }
     cJSON *so = cJSON_GetObjectItem(root, "solar_orientation");
-    if (cJSON_IsNumber(so)) { int v = so->valueint; cfg->solar_orientation = (v >= 0 && v <= 3) ? (uint8_t)v : 0; }
+    if (cJSON_IsNumber(so)) { int v = so->valueint; cfg.solar_orientation = (v >= 0 && v <= 3) ? (uint8_t)v : 0; }
     cJSON *dlm = cJSON_GetObjectItem(root, "moon_drag_light_mode");
-    if (cJSON_IsNumber(dlm)) { int v = dlm->valueint; cfg->moon_drag_light_mode = (v >= 0 && v <= 2) ? (uint8_t)v : 0; }
+    if (cJSON_IsNumber(dlm)) { int v = dlm->valueint; cfg.moon_drag_light_mode = (v >= 0 && v <= 2) ? (uint8_t)v : 0; }
     cJSON *fu = cJSON_GetObjectItem(root, "moon_flip_u");
-    if (cJSON_IsNumber(fu)) { cfg->moon_flip_u = (fu->valueint != 0) ? 1 : 0; }
+    if (cJSON_IsNumber(fu)) { cfg.moon_flip_u = (fu->valueint != 0) ? 1 : 0; }
     cJSON *fv = cJSON_GetObjectItem(root, "moon_flip_v");
-    if (cJSON_IsNumber(fv)) { cfg->moon_flip_v = (fv->valueint != 0) ? 1 : 0; }
+    if (cJSON_IsNumber(fv)) { cfg.moon_flip_v = (fv->valueint != 0) ? 1 : 0; }
     cJSON *mro = cJSON_GetObjectItem(root, "moon_roll_offset");
-    if (cJSON_IsNumber(mro)) { float v = (float)mro->valuedouble; if (v < -180.0f) v = -180.0f; if (v > 180.0f) v = 180.0f; cfg->moon_roll_offset = v; }
+    if (cJSON_IsNumber(mro)) { float v = (float)mro->valuedouble; if (v < -180.0f) v = -180.0f; if (v > 180.0f) v = 180.0f; cfg.moon_roll_offset = v; }
     cJSON *myo = cJSON_GetObjectItem(root, "moon_yaw_offset");
-    if (cJSON_IsNumber(myo)) { float v = (float)myo->valuedouble; if (v < -180.0f) v = -180.0f; if (v > 180.0f) v = 180.0f; cfg->moon_yaw_offset = v; }
+    if (cJSON_IsNumber(myo)) { float v = (float)myo->valuedouble; if (v < -180.0f) v = -180.0f; if (v > 180.0f) v = 180.0f; cfg.moon_yaw_offset = v; }
     cJSON *mpo = cJSON_GetObjectItem(root, "moon_pitch_offset");
-    if (cJSON_IsNumber(mpo)) { float v = (float)mpo->valuedouble; if (v < -90.0f) v = -90.0f; if (v > 90.0f) v = 90.0f; cfg->moon_pitch_offset = v; }
+    if (cJSON_IsNumber(mpo)) { float v = (float)mpo->valuedouble; if (v < -90.0f) v = -90.0f; if (v > 90.0f) v = 90.0f; cfg.moon_pitch_offset = v; }
     cJSON *mnu = cJSON_GetObjectItem(root, "moon_north_up");
-    if (cJSON_IsNumber(mnu)) { cfg->moon_north_up = (mnu->valueint != 0) ? 1 : 0; }
+    if (cJSON_IsNumber(mnu)) { cfg.moon_north_up = (mnu->valueint != 0) ? 1 : 0; }
     cJSON *msm = cJSON_GetObjectItem(root, "moon_spin_mode");
-    if (cJSON_IsNumber(msm)) { cfg->moon_spin_mode = (msm->valueint != 0) ? 1 : 0; }
+    if (cJSON_IsNumber(msm)) { cfg.moon_spin_mode = (msm->valueint != 0) ? 1 : 0; }
     cJSON *msr = cJSON_GetObjectItem(root, "moon_spin_return_s");
-    if (cJSON_IsNumber(msr)) { int v = msr->valueint; if (v < 3) v = 3; if (v > 60) v = 60; cfg->moon_spin_return_s = (uint8_t)v; }
+    if (cJSON_IsNumber(msr)) { int v = msr->valueint; if (v < 3) v = 3; if (v > 60) v = 60; cfg.moon_spin_return_s = (uint8_t)v; }
 
     cJSON_Delete(root);
 
-    app_config_save(cfg);
+    /* Single atomic memcpy under mutex + NVS persist. */
+    app_config_save(&cfg);
 
+    /* Live apply (preview): push display/task state immediately from the saved
+     * snapshot so changes take effect without waiting for a reload. */
     if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-        nina_dashboard_set_image_display_enabled(cfg->image_display_enabled);
-        nina_image_display_set_overlay_visible(cfg->image_display_show_overlay);
+        nina_dashboard_set_image_display_enabled(cfg.image_display_enabled);
+        nina_image_display_set_overlay_visible(cfg.image_display_show_overlay);
         bsp_display_unlock();
     }
 
-    if (cfg->image_display_enabled) {
+    if (cfg.image_display_enabled) {
         bool source_band_region_changed =
-            cfg->image_display_source != prev_source ||
-            cfg->solar_band != prev_band ||
-            strcmp(cfg->goes_region, prev_region) != 0;
-        bool crop_changed = cfg->image_display_crop != prev_crop;
-        bool orient_changed = (cfg->goes_orientation != prev_goes_orient) ||
-                              (cfg->solar_orientation != prev_solar_orient);
+            cfg.image_display_source != prev_source ||
+            cfg.solar_band != prev_band ||
+            strcmp(cfg.goes_region, prev_region) != 0;
+        bool crop_changed = cfg.image_display_crop != prev_crop;
+        bool orient_changed = (cfg.goes_orientation != prev_goes_orient) ||
+                              (cfg.solar_orientation != prev_solar_orient);
 
         if (source_band_region_changed) {
             /* Source/band/region needs a genuinely new image: flag the next
@@ -181,16 +178,16 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
             if (goes_task_handle) {
                 xTaskNotifyGive(goes_task_handle);
             }
-        } else if (cfg->image_display_source == 1 &&
-                   (cfg->moon_bg_style != prev_bg ||
-                    cfg->moon_flip_u != prev_flip_u ||
-                    cfg->moon_flip_v != prev_flip_v ||
-                    cfg->moon_roll_offset != prev_roll ||
-                    cfg->moon_yaw_offset != prev_yaw ||
-                    cfg->moon_pitch_offset != prev_pitch ||
-                    cfg->moon_north_up != prev_north_up ||
-                    cfg->moon_spin_mode != prev_spin_mode ||
-                    cfg->moon_spin_return_s != prev_spin_return)) {
+        } else if (cfg.image_display_source == 1 &&
+                   (cfg.moon_bg_style != prev_bg ||
+                    cfg.moon_flip_u != prev_flip_u ||
+                    cfg.moon_flip_v != prev_flip_v ||
+                    cfg.moon_roll_offset != prev_roll ||
+                    cfg.moon_yaw_offset != prev_yaw ||
+                    cfg.moon_pitch_offset != prev_pitch ||
+                    cfg.moon_north_up != prev_north_up ||
+                    cfg.moon_spin_mode != prev_spin_mode ||
+                    cfg.moon_spin_return_s != prev_spin_return)) {
             /* Moon background style changed only (source unchanged, so the
              * source_band_region_changed branch above did not fire): wake the
              * image-display task so its Moon branch re-renders moon_render() with
