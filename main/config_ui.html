@@ -167,7 +167,7 @@
     .help-btn svg { width:14px; height:14px; display:block; pointer-events:none; }
     .help-popover {
       display:none; margin:-10px 0 22px; padding:14px 16px;
-      background:var(--input-bg); border:1px solid var(--border); border-left:3px solid var(--accent);
+      background:var(--input-bg); border:1px solid var(--border);
       border-radius:var(--radius-sm); font-size:0.8rem; line-height:1.55; color:var(--text);
       text-transform:none; letter-spacing:normal; font-weight:400;
     }
@@ -175,6 +175,10 @@
     .help-popover-title { font-weight:600; color:var(--text); margin:0 0 6px; font-size:0.82rem; }
     .help-popover p { margin:0 0 8px; color:var(--text-muted); }
     .help-popover p:last-child { margin-bottom:0; }
+    .help-popover ul { margin:6px 0 8px; padding-left:18px; color:var(--text-muted); }
+    .help-popover li { margin:0 0 5px; }
+    .help-popover li:last-child { margin-bottom:0; }
+    .help-popover strong { color:var(--text); font-weight:600; }
     .divider { border: none; border-top: 1px solid rgba(255, 255, 255, 0.06); margin: 24px 0; }
 
     /* === NAVIGATION === */
@@ -827,7 +831,7 @@
 
       <div class="card" id="instance-overview">
         <div class="card-title"><span class="card-title-label">Active N.I.N.A. Instances <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
-        <div class="help-popover"><div class="help-popover-title">Active N.I.N.A. Instances</div><p>Selects which of the three N.I.N.A. instance slots the device polls and shows as pages. A disabled instance is not contacted and its page is skipped, but the slot keeps its fixed position so the other instances do not shift.</p><p>Each enabled instance gets its own dashboard page and a configuration card below. The device updates the page you are viewing in full and checks the other instances less often in the background.</p><p>Example: enable N.I.N.A. 1 and N.I.N.A. 2 for a two-rig setup and leave N.I.N.A. 3 off; only two node cards and two instance pages appear.</p></div>
+        <div class="help-popover"><div class="help-popover-title">Active N.I.N.A. Instances</div><p>Selects which of the three N.I.N.A. instance slots the device polls and shows as pages. A disabled instance is not contacted and its page is skipped, but the slot keeps its fixed position so the other instances do not shift.</p><p>Each enabled instance gets its own dashboard page and a configuration card below. The device updates the page you are viewing in full and checks the other instances less often in the background.</p><p>Example: enable N.I.N.A. 1 and N.I.N.A. 2 for a two-instance setup and leave N.I.N.A. 3 off; only two node cards and two instance pages appear.</p></div>
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
           <span class="toggle-label" id="inst_lbl_0">N.I.N.A. 1</span>
           <label class="toggle"><input type="checkbox" id="instance_enabled_0" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
@@ -853,7 +857,7 @@
 
       <div class="card">
         <div class="card-title"><span class="card-title-label">Connection <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
-        <div class="help-popover"><div class="help-popover-title">AllSky Connection</div><p>Points the device at an AllSky camera's API and sets how often it reads data. AllSky updates run on their own schedule, independent of N.I.N.A. polling, so this interval does not affect rig updates.</p><p>The dew-point safety margin controls when the dew reading is colored as safe. The reading is treated as safe while the dew point sits below ambient temperature minus this margin.</p><p>Example: set the hostname to allskypi5.lan:8080, the interval to 5 seconds, and a 5 C margin so dew is flagged unsafe once the dew point rises to within 5 C of ambient.</p></div>
+        <div class="help-popover"><div class="help-popover-title">AllSky Connection</div><p>Points the device at an AllSky camera's API and sets how often it reads data. AllSky updates run on their own schedule, independent of N.I.N.A. polling, so this interval does not affect N.I.N.A. updates.</p><p>The dew-point safety margin controls when the dew reading is colored as safe. The reading is treated as safe while the dew point sits below ambient temperature minus this margin.</p><p>Example: set the hostname to allskypi5.lan:8080, the interval to 5 seconds, and a 5 C margin so dew is flagged unsafe once the dew point rises to within 5 C of ambient.</p></div>
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
           <span class="toggle-label">Enable AllSky</span>
           <label class="toggle"><input type="checkbox" id="allsky_enabled" onchange="updateAllSkyEnabledUI()"><span class="toggle-track"></span></label>
@@ -1367,11 +1371,11 @@
 
       <div class="card">
         <div class="card-title"><span class="card-title-label">Page Navigation <span id="pm_summary" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span> <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
-        <div class="help-popover"><div class="help-popover-title">Page Navigation</div><p>The display chooses which page to show on its own, following a few rules in order. A page you swiped or tapped to recently stays put for the stay-on-page time. If Auto Cycle is on, the display rotates through the pages you chose. Otherwise it follows a connected NINA rig. If all rigs are disconnected and you have turned on the no-connections page, it shows that page. When none of those apply, it rests on your Home Page.</p><p>Home Page is where the display settles when nothing else applies. You can set it to Summary, Clock, System Info, or any page or NINA instance you have enabled. When Home Page is set to a NINA instance, the display also returns to that instance during an imaging session. Changing Home Page navigates there at once.</p><p>Auto Cycle and Home Page behavior are mutually exclusive. Turning Auto Cycle on makes the display rotate through the selected pages instead of following a rig or resting on the Home Page. Turning it off returns to the resting behavior.</p><p>Example: set Home Page to NINA Instance 1 and leave Auto Cycle off. The display rests on Instance 1, follows it while it is imaging, and you can still swipe to any other page for the stay-on-page duration before it returns on its own.</p></div>
+        <div class="help-popover"><div class="help-popover-title">Page Navigation</div><p>The display picks which page to show on its own, based on a few simple rules. You can always swipe or tap to take over for a while; after the stay-on-page time passes, the display goes back to deciding on its own.</p><p>There are two main controls. <strong>Home Page</strong> is where the display settles when nothing else is happening. If you set Home Page to a NINA instance, the display also returns there while that instance is imaging. <strong>Auto Cycle</strong> rotates through the pages you pick. Turning Auto Cycle on replaces the resting-on-Home-Page behavior, so only one of the two is active at a time.</p><p>Examples:</p><ul><li><strong>Home Page set to a NINA instance, Auto Cycle off:</strong> the display rests on that instance and returns to it while it is imaging.</li><li><strong>Auto Cycle on with a few pages selected:</strong> the display rotates through just those pages, one after another.</li><li><strong>You swipe to another page:</strong> it stays on that page for the stay-on-page time, then returns to its automatic choice.</li><li><strong>All NINA instances disconnected, no-connections page turned on:</strong> the display switches to the page you chose for that situation.</li><li><strong>Home Page set to Clock or Summary, nothing imaging:</strong> the display rests on that page.</li></ul></div>
 
         <div class="pn-section-label">Home Page</div>
         <div class="pn-pill-grid" id="start-page-pills"></div>
-        <div class="field-hint">The page the display settles on; when set to a NINA instance, the display also returns to that rig during an imaging session.</div>
+        <div class="field-hint">The page the display settles on; when set to a NINA instance, the display also returns to that instance during an imaging session.</div>
 
         <div class="pn-divider"></div>
 
@@ -1406,7 +1410,7 @@
             <span class="toggle-label" style="font-size:0.82rem;color:var(--text-muted)">Skip disconnected nodes</span>
             <label class="toggle"><input type="checkbox" id="auto_rotate_skip"><span class="toggle-track"></span></label>
           </div>
-          <div class="field-hint">During Auto Cycle, skip NINA instance pages whose rig is not connected.</div>
+          <div class="field-hint">During Auto Cycle, skip NINA instance pages that are not connected.</div>
           <div class="pn-sub-divider"></div>
           <div>
             <div class="pn-section-label">Pages in Rotation</div>
@@ -1419,7 +1423,7 @@
         <div class="field" style="margin-top:12px">
           <label class="field-label">Stay on selected page (seconds)</label>
           <input type="number" class="input" id="nav_grace_s" min="10" max="300" value="10">
-          <div class="field-hint" style="margin-top:2px">After you swipe or tap to a page, the display keeps showing it for this long, then returns on its own to the page it would normally show (the connected rig, or your Home page).</div>
+          <div class="field-hint" style="margin-top:2px">After you swipe or tap to a page, the display keeps showing it for this long, then returns on its own to the page it would normally show (the connected instance, or your Home page).</div>
         </div>
 
         <div class="pn-divider"></div>
@@ -1528,7 +1532,7 @@
 
       <div class="card">
         <div class="card-title"><span class="card-title-label">Polling &amp; Connectivity <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
-        <div class="help-popover"><div class="help-popover-title">Polling and Connectivity</div><p>Sets how often the device contacts the NINA API and how patient it is before declaring a rig offline. Data update rate is the base polling interval for the active page; faster values refresh the display sooner but generate more API traffic. Graph update rate controls how often the RMS and HFR history graphs add a point.</p><p>Connection timeout is how long a request waits for a response before that instance is marked offline. Idle poll interval is the slower, occasional check used to re-test an offline rig while you are viewing a non-NINA page, which avoids contacting a rig that is not running too often.</p><p>Example: set Data update rate to 2 seconds for a responsive display, raise Connection timeout to 10 seconds on a slow or distant network, and leave Idle poll interval at 30 seconds.</p></div>
+        <div class="help-popover"><div class="help-popover-title">Polling and Connectivity</div><p>Sets how often the device contacts the NINA API and how patient it is before declaring an instance offline. Data update rate is the base polling interval for the active page; faster values refresh the display sooner but generate more API traffic. Graph update rate controls how often the RMS and HFR history graphs add a point.</p><p>Connection timeout is how long a request waits for a response before that instance is marked offline. Idle poll interval is the slower, occasional check used to re-test an offline instance while you are viewing a non-NINA page, which avoids contacting an instance that is not running too often.</p><p>Example: set Data update rate to 2 seconds for a responsive display, raise Connection timeout to 10 seconds on a slow or distant network, and leave Idle poll interval at 30 seconds.</p></div>
         <div class="row stack-mobile">
           <div class="field">
             <label class="field-label">Data update rate (s)</label>
@@ -1550,7 +1554,7 @@
           <div class="field">
             <label class="field-label">Idle poll interval (s)</label>
             <input type="number" class="input" id="idle_poll_interval" min="5" max="120" value="30">
-            <div class="field-hint">How often an offline rig is re-checked while you are on a non-NINA page</div>
+            <div class="field-hint">How often an offline instance is re-checked while you are on a non-NINA page</div>
           </div>
         </div>
       </div>
@@ -1824,7 +1828,7 @@
 
       <div class="card">
         <div class="card-title"><span class="card-title-label">Device <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
-        <div class="help-popover"><div class="help-popover-title">Device actions and modes</div><p>Reboot restarts the device and applies pending reboot-required settings. Factory Reset erases all saved settings and returns every setting to defaults, including WiFi, so plan to reconnect over the device's own setup WiFi network afterward.</p><p>Debug Mode enables extra performance and diagnostic info; leave it off for normal use. Demo Mode generates simulated session data so the dashboard can be used with no live NINA connection. Reboot the device for the change to fully take effect. Capture Screenshot pulls a JPEG of the current display.</p><p>Example: enable Demo Mode to preview the dashboard layout before any telescope rig is online, then disable it to return to live data.</p></div>
+        <div class="help-popover"><div class="help-popover-title">Device actions and modes</div><p>Reboot restarts the device and applies pending reboot-required settings. Factory Reset erases all saved settings and returns every setting to defaults, including WiFi, so plan to reconnect over the device's own setup WiFi network afterward.</p><p>Debug Mode enables extra performance and diagnostic info; leave it off for normal use. Demo Mode generates simulated session data so the dashboard can be used with no live NINA connection. Reboot the device for the change to fully take effect. Capture Screenshot pulls a JPEG of the current display.</p><p>Example: enable Demo Mode to preview the dashboard layout before any N.I.N.A. instance is online, then disable it to return to live data.</p></div>
         <div class="row stack-mobile" style="margin-bottom:16px">
           <button class="btn btn-outline" onclick="saveAndReboot()" style="flex:1">Reboot</button>
           <button class="btn btn-danger" onclick="factoryReset()" style="flex:1">Factory Reset</button>
@@ -2059,7 +2063,7 @@
         container.insertAdjacentHTML('beforeend',
           '<div class="card node-config-card" id="node_card_'+i+'" data-node="'+i+'">'+
             '<div class="card-title"><span class="card-title-label">N.I.N.A. '+(i+1)+' <span id="node_card_hostname_'+i+'" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span> <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>'+
-            '<div class="help-popover"><div class="help-popover-title">N.I.N.A. Node</div><p>Configures one N.I.N.A. instance: where to reach it, whether its notifications are muted, the color shown per filter, and the color bands applied to guider RMS and HFR values on its dashboard page.</p><p>The hostname is the only required field. The remaining settings change how this instance\'s data is colored and whether it shows pop-up notifications.</p><p>Example: enter the IP of your imaging PC, mute notifications on a secondary rig you are not watching, and set the RMS bands so values under 0.5 show green and values over 1.0 show red.</p></div>'+
+            '<div class="help-popover"><div class="help-popover-title">N.I.N.A. Node</div><p>Configures one N.I.N.A. instance: where to reach it, whether its notifications are muted, the color shown per filter, and the color bands applied to guider RMS and HFR values on its dashboard page.</p><p>The hostname is the only required field. The remaining settings change how this instance\'s data is colored and whether it shows pop-up notifications.</p><p>Example: enter the IP of your imaging PC, mute notifications on a secondary instance you are not watching, and set the RMS bands so values under 0.5 show green and values over 1.0 show red.</p></div>'+
             '<div class="field"><label class="field-label">Hostname / IP</label>'+
             '<input type="text" class="input" id="'+urlId+'" placeholder="'+placeholders[i]+'" oninput="updateNodeLabels()">'+
             '<div class="field-hint">Host or IP of the N.I.N.A. computer running the Advanced API plugin; the web page adds port 1888 and the /v2/api/ path before saving (e.g. 192.168.1.100 becomes http://192.168.1.100:1888/v2/api/).</div></div>'+
