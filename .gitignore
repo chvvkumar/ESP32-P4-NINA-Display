@@ -49,6 +49,8 @@ partition-table.bin
 ota_data_initial.bin
 .playwright-mcp/
 .superpowers/
+.agents/
+skills-lock.json
 
 # Compilation artifacts
 *.o
