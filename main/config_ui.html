@@ -2876,7 +2876,7 @@
 
       // Update page selector AFTER all enable checkboxes are populated
       buildStartPagePills();
-      setStartPageValue(data.active_page_override!=null&&data.active_page_override>=0?data.active_page_override:2);
+      setStartPageValue(data.active_page_override!=null&&data.active_page_override>=0?data.active_page_override:4); // -1/legacy -> Summary, matches firmware home_page()
       updatePageNavSummary();
 
       loadedConfig=JSON.stringify(getConfigData());

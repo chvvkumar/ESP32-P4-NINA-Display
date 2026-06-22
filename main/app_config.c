@@ -2621,7 +2621,9 @@ static bool validate_config(app_config_t *cfg) {
         cfg->allsky_thresholds[sizeof(cfg->allsky_thresholds) - 1] = '\0';
         fixed = true;
     }
-    if (cfg->spotify_poll_interval_ms < 500 || cfg->spotify_poll_interval_ms > 30000) {
+    if (cfg->nav_grace_s < 10)  { cfg->nav_grace_s = 10;  fixed = true; }
+    if (cfg->nav_grace_s > 300) { cfg->nav_grace_s = 300; fixed = true; }
+    if (cfg->spotify_poll_interval_ms < 1000 || cfg->spotify_poll_interval_ms > 30000) {
         cfg->spotify_poll_interval_ms = 3000;
         fixed = true;
     }
