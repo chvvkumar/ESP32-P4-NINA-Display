@@ -62,7 +62,7 @@ CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
 
 # PPA requires full-screen DPI framebuffers (avoid_tearing mode)
 # Partial buffers (720*50*2=72000) are not cache-line aligned (72000%128!=0)
-CONFIG_BSP_LCD_DPI_BUFFER_NUMS=3
+CONFIG_BSP_LCD_DPI_BUFFER_NUMS=2
 CONFIG_BSP_DISPLAY_LVGL_AVOID_TEAR=y
 CONFIG_BSP_DISPLAY_LVGL_FULL_REFRESH=y
 
