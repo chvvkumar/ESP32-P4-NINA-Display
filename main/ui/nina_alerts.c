@@ -153,17 +153,18 @@ void nina_alerts_init(lv_obj_t *screen) {
 void nina_alert_trigger(alert_type_t type, int instance, float value) {
     if (type < 0 || type > ALERT_SAFETY) return;
 
-    /* Cooldown check (read-only, minor race is acceptable) */
+    /* Cooldown read-modify-write of the 64-bit timestamp and the pending-slot
+     * write must be atomic together, else two tasks can both pass the cooldown
+     * gate or tear the 64-bit timestamp. esp_timer_get_time() is safe in a
+     * critical section. */
     int64_t t = now_ms();
+    portENTER_CRITICAL(&s_alert_lock);
     if (t - s_last_flash_ms[type] < ALERT_COOLDOWN_MS) {
+        portEXIT_CRITICAL(&s_alert_lock);
         return;
     }
-
-    /* Update cooldown timestamp */
     s_last_flash_ms[type] = t;
 
-    /* Write to pending slot under spinlock */
-    portENTER_CRITICAL(&s_alert_lock);
     s_pending_alert.type = type;
     s_pending_alert.instance = instance;
     s_pending_alert.value = value;

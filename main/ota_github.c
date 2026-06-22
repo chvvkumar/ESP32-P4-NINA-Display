@@ -513,7 +513,8 @@ static void ota_download_task(void *arg) {
             }
 
             received += len;
-            int pct = (received * 100) / total_size;
+            /* 64-bit math: received*100 overflows int32 above ~21MB */
+            int pct = (int)(((int64_t)received * 100) / total_size);
             if (pct > 100) pct = 100;
             if (pct != last_pct) {
                 last_pct = pct;

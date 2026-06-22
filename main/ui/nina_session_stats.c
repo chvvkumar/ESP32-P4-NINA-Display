@@ -117,6 +117,14 @@ const session_stats_t *nina_session_stats_get(int instance) {
     return &s_stats[instance];
 }
 
+bool nina_session_stats_get_copy(int instance, session_stats_t *out) {
+    if (instance < 0 || instance >= MAX_NINA_INSTANCES || !out) return false;
+    portENTER_CRITICAL(&s_lock);
+    *out = s_stats[instance];   /* shallow copy of scalars; points not dereffed by consumer */
+    portEXIT_CRITICAL(&s_lock);
+    return true;
+}
+
 void nina_session_stats_add_exposure(int instance, float exposure_time_s) {
     if (instance < 0 || instance >= MAX_NINA_INSTANCES) return;
 

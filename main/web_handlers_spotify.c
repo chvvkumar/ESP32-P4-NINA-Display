@@ -46,16 +46,9 @@ esp_err_t spotify_config_get_handler(httpd_req_t *req)
 esp_err_t spotify_config_post_handler(httpd_req_t *req)
 {
     REQUIRE_AUTH(req);
-    char buf[CONFIG_MAX_PAYLOAD];
-    int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (received <= 0) {
-        return send_400(req, "Empty request body");
-    }
-    buf[received] = '\0';
-
-    cJSON *root = cJSON_Parse(buf);
+    cJSON *root = receive_json_body(req, CONFIG_MAX_PAYLOAD);
     if (root == NULL) {
-        return send_400(req, "Invalid JSON");
+        return ESP_OK;  /* error response already sent */
     }
 
     /* Validate string lengths */
@@ -64,22 +57,38 @@ esp_err_t spotify_config_post_handler(httpd_req_t *req)
         return send_400(req, "spotify_client_id too long");
     }
 
-    app_config_t *cfg = app_config_get();
+    /* Work on a mutex-protected snapshot copy; never field-write the live config. */
+    app_config_t cfg = app_config_get_snapshot();
 
-    JSON_TO_BOOL(root, "spotify_enabled", cfg->spotify_enabled);
-    JSON_TO_STRING(root, "spotify_client_id", cfg->spotify_client_id);
-    JSON_TO_INT(root, "spotify_poll_interval_ms", cfg->spotify_poll_interval_ms);
-    JSON_TO_BOOL(root, "spotify_show_progress_bar", cfg->spotify_show_progress_bar);
-    JSON_TO_BOOL(root, "spotify_minimal_mode", cfg->spotify_minimal_mode);
-    JSON_TO_BOOL(root, "spotify_scroll_text", cfg->spotify_scroll_text);
-    JSON_TO_INT(root, "spotify_overlay_timeout_s", cfg->spotify_overlay_timeout_s);
-    JSON_TO_BOOL(root, "spotify_overlay_visible", cfg->spotify_overlay_visible);
+    JSON_TO_BOOL(root, "spotify_enabled", cfg.spotify_enabled);
+    JSON_TO_STRING(root, "spotify_client_id", cfg.spotify_client_id);
+    cJSON *spi_item = cJSON_GetObjectItem(root, "spotify_poll_interval_ms");
+    if (cJSON_IsNumber(spi_item)) {
+        int v = spi_item->valueint;
+        if (v < 1000) v = 1000;
+        if (v > 30000) v = 30000;
+        cfg.spotify_poll_interval_ms = (uint16_t)v;
+    }
+    JSON_TO_BOOL(root, "spotify_show_progress_bar", cfg.spotify_show_progress_bar);
+    JSON_TO_BOOL(root, "spotify_minimal_mode", cfg.spotify_minimal_mode);
+    JSON_TO_BOOL(root, "spotify_scroll_text", cfg.spotify_scroll_text);
+    cJSON *sot_item = cJSON_GetObjectItem(root, "spotify_overlay_timeout_s");
+    if (cJSON_IsNumber(sot_item)) {
+        int v = sot_item->valueint;
+        if (v < 0) v = 0;
+        if (v > 255) v = 255;   /* uint8_t; 0 = never hide */
+        cfg.spotify_overlay_timeout_s = (uint8_t)v;
+    }
+    JSON_TO_BOOL(root, "spotify_overlay_visible", cfg.spotify_overlay_visible);
 
     cJSON_Delete(root);
 
-    app_config_save(cfg);
+    /* Single atomic memcpy under mutex + NVS persist. */
+    app_config_save(&cfg);
 
-    if (cfg->spotify_enabled) {
+    /* Live apply: the poll task reads the live config (now updated by save) on
+     * its next cycle; ensure it is running when the feature is enabled. */
+    if (cfg.spotify_enabled) {
         spotify_ensure_task_running();
     }
 
@@ -147,16 +156,9 @@ esp_err_t spotify_callback_get_handler(httpd_req_t *req)
 esp_err_t spotify_token_exchange_post_handler(httpd_req_t *req)
 {
     REQUIRE_AUTH(req);
-    char buf[CONFIG_MAX_PAYLOAD];
-    int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (received <= 0) {
-        return send_400(req, "Empty request body");
-    }
-    buf[received] = '\0';
-
-    cJSON *root = cJSON_Parse(buf);
+    cJSON *root = receive_json_body(req, CONFIG_MAX_PAYLOAD);
     if (root == NULL) {
-        return send_400(req, "Invalid JSON");
+        return ESP_OK;  /* error response already sent */
     }
 
     cJSON *code_item = cJSON_GetObjectItem(root, "code");

@@ -101,12 +101,17 @@ void arc_interp_timer_cb(lv_timer_t *timer) {
     if (!p || !p->arc_exposure || p->arc_completing) return;
     if (p->cached_end_epoch == 0 || p->cached_total <= 0) return;
 
+    /* Compute the remaining time as an int64 millisecond difference first.
+     * Epoch seconds (~1.7e9) exceed float's 24-bit integer precision, so a
+     * direct (float)tv.tv_sec would lose ~100s of seconds. Differencing in
+     * int64 ms keeps full precision; the small result converts to float
+     * safely for the P4 single-precision FPU. */
     struct timeval tv;
     gettimeofday(&tv, NULL);
-    double now = (double)tv.tv_sec + (double)tv.tv_usec / 1000000.0;
-    double remaining = (double)p->cached_end_epoch - now;
+    int64_t now_ms = (int64_t)tv.tv_sec * 1000 + (int64_t)tv.tv_usec / 1000;
+    int64_t remaining_ms = p->cached_end_epoch * 1000 - now_ms;
 
-    if (remaining <= 0) {
+    if (remaining_ms <= 0) {
         lv_anim_delete(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
         if (p->cached_is_exposing && lv_arc_get_value(p->arc_exposure) != ARC_RANGE)
             lv_arc_set_value(p->arc_exposure, ARC_RANGE);
@@ -118,9 +123,10 @@ void arc_interp_timer_cb(lv_timer_t *timer) {
         return;
     }
 
-    double elapsed = (double)p->cached_total - remaining;
+    float remaining = (float)remaining_ms / 1000.0f;
+    float elapsed = p->cached_total - remaining;
     if (elapsed < 0) elapsed = 0;
-    int expected = (int)((elapsed * ARC_RANGE) / (double)p->cached_total);
+    int expected = (int)((elapsed * (float)ARC_RANGE) / p->cached_total);
     if (expected > ARC_RANGE) expected = ARC_RANGE;
     if (expected < 0) expected = 0;
 
@@ -258,14 +264,15 @@ static void update_sequence_info(dashboard_page_t *p, const nina_client_t *d) {
 static void arc_start_exposure_anim(dashboard_page_t *p) {
     if (p->cached_end_epoch == 0 || p->cached_total <= 0 || !p->cached_is_exposing) return;
 
+    /* int64 ms difference to preserve epoch precision (see arc_interp_timer_cb). */
     struct timeval tv;
     gettimeofday(&tv, NULL);
-    double now = (double)tv.tv_sec + (double)tv.tv_usec / 1000000.0;
-    double remaining = (double)p->cached_end_epoch - now;
-    if (remaining <= 0.1) return;
+    int64_t now_ms = (int64_t)tv.tv_sec * 1000 + (int64_t)tv.tv_usec / 1000;
+    int64_t remaining_ms64 = p->cached_end_epoch * 1000 - now_ms;
+    if (remaining_ms64 <= 100) return;
 
     int current = lv_arc_get_value(p->arc_exposure);
-    int remaining_ms = (int)(remaining * 1000);
+    int remaining_ms = (int)remaining_ms64;
 
     lv_anim_t a;
     lv_anim_init(&a);

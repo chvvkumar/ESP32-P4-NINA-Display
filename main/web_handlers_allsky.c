@@ -45,8 +45,10 @@ esp_err_t allsky_config_get_handler(httpd_req_t *req)
  */
 esp_err_t allsky_proxy_get_handler(httpd_req_t *req)
 {
-    app_config_t *cfg = app_config_get();
-    if (cfg->allsky_hostname[0] == '\0') {
+    /* Snapshot the hostname into a local under the config mutex so the live
+     * config is not read field-by-field during the (slow) outbound fetch. */
+    app_config_t cfg = app_config_get_snapshot();
+    if (cfg.allsky_hostname[0] == '\0') {
         httpd_resp_set_status(req, "400 Bad Request");
         httpd_resp_set_type(req, "application/json");
         httpd_resp_send(req, "{\"error\":\"AllSky hostname not configured\"}", HTTPD_RESP_USE_STRLEN);
@@ -55,11 +57,13 @@ esp_err_t allsky_proxy_get_handler(httpd_req_t *req)
 
     /* Build URL: http://<hostname>/all */
     char url[192];
-    snprintf(url, sizeof(url), "http://%s/all", cfg->allsky_hostname);
+    snprintf(url, sizeof(url), "http://%s/all", cfg.allsky_hostname);
 
     esp_http_client_config_t http_cfg = {
         .url = url,
-        .timeout_ms = 10000,
+        /* 3s outbound timeout: keep an httpd worker from blocking on a slow or
+         * unreachable AllSky host. */
+        .timeout_ms = 3000,
         .buffer_size = 2048,
     };
     esp_http_client_handle_t client = esp_http_client_init(&http_cfg);

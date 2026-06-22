@@ -57,6 +57,13 @@ void nina_session_stats_reset(int instance);
 /** Get read-only pointer to instance stats.  Caller should copy quickly. */
 const session_stats_t *nina_session_stats_get(int instance);
 
+/**
+ * Copy instance stats into @p out under the lock (torn-read safe).
+ * Copies scalars only; @c out->points is the live pointer and must not be
+ * dereferenced by the caller. Returns false on bad instance/null out.
+ */
+bool nina_session_stats_get_copy(int instance, session_stats_t *out);
+
 /** Add exposure time.  Thread-safe. */
 void nina_session_stats_add_exposure(int instance, float exposure_time_s);
 

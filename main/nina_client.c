@@ -186,6 +186,52 @@ cJSON *http_get_json(const char *url) {
     bool poll_mode = tls_ctx ? tls_ctx->poll_mode : false;
     esp_http_client_handle_t *reuse_slot = tls_ctx ? tls_ctx->client_handle : NULL;
 
+    /* ── mDNS-bypass URL rewrite ──
+     * NINA hostnames are typically .lan (mDNS), and esp_http_client does a fresh
+     * getaddrinfo() on every connect — that DNS+connect is ~42% of avg HTTP latency
+     * and the multi-second tail. Resolve the host ONCE via the app DNS cache, rebuild
+     * the request URL with the numeric IP (so connect skips getaddrinfo), and send the
+     * ORIGINAL hostname in the Host header so NINA's HTTP routing is unaffected.
+     * On a resolve miss we fall through to the original hostname URL (current
+     * behavior) — a resolve miss never breaks a request. */
+    const char *req_url = url;          /* URL actually handed to esp_http_client */
+    const char *host_hdr = NULL;        /* original hostname for the Host header, or NULL */
+    char rewritten_url[288];
+    char host_buf[128];
+    {
+        const char *scheme_end = strstr(url, "://");
+        if (scheme_end) {
+            const char *hstart = scheme_end + 3;
+            const char *hend = hstart;
+            while (*hend && *hend != ':' && *hend != '/') hend++;
+            size_t hlen = (size_t)(hend - hstart);
+            /* Only rewrite non-numeric hosts (a numeric host is already DNS-free). */
+            if (hlen > 0 && hlen < sizeof(host_buf) &&
+                !(hstart[0] >= '0' && hstart[0] <= '9')) {
+                memcpy(host_buf, hstart, hlen);
+                host_buf[hlen] = '\0';
+                /* Always carry the original hostname in Host (even on resolve
+                 * miss): a reused handle may have an explicit Host set from a
+                 * prior request, so we must re-assert the correct one every time
+                 * rather than leave a stale value behind. */
+                host_hdr = host_buf;
+                char ip_str[16];  /* INET_ADDRSTRLEN for IPv4 */
+                if (nina_client_resolve_host(host_buf, ip_str, sizeof(ip_str)) &&
+                    ip_str[0] != '\0') {
+                    /* Rebuild: <scheme://><ip><:port/path...>  (hend points at ':' or '/') */
+                    int n = snprintf(rewritten_url, sizeof(rewritten_url),
+                                     "%.*s%s%s",
+                                     (int)(hstart - url), url, ip_str, hend);
+                    if (n > 0 && n < (int)sizeof(rewritten_url)) {
+                        req_url = rewritten_url;  /* connect to IP, skip getaddrinfo */
+                    }
+                    /* else: rebuild overflowed — fall back to hostname URL, Host
+                     * still set to the same hostname (harmless, self-consistent). */
+                }
+            }
+        }
+    }
+
     perf_timer_start(&g_perf.http_request);
     perf_counter_increment(&g_perf.http_request_count);
     bool ever_connected = false;
@@ -203,10 +249,10 @@ cJSON *http_get_json(const char *url) {
 
         if (reusing) {
             client = *reuse_slot;
-            esp_http_client_set_url(client, url);
+            esp_http_client_set_url(client, req_url);
         } else {
             esp_http_client_config_t cfg = {
-                .url = url,
+                .url = req_url,
                 .timeout_ms = 3000,
                 .keep_alive_enable = poll_mode,
             };
@@ -214,7 +260,19 @@ cJSON *http_get_json(const char *url) {
             if (!client) continue;
         }
 
+        /* When the URL carries a numeric IP (mDNS bypass), the Host header must
+         * always carry the original hostname so NINA routes correctly. Re-set it
+         * every request: a reused handle may have served a different host, and
+         * set_url() does not update an explicitly-set Host header. When no rewrite
+         * happened (host_hdr == NULL) leave esp_http_client to derive Host from the
+         * URL as usual. */
+        if (host_hdr) {
+            esp_http_client_set_header(client, "Host", host_hdr);
+        }
+
+        perf_timer_start(&g_perf.http_connect);
         esp_err_t err = esp_http_client_open(client, 0);
+        perf_timer_stop(&g_perf.http_connect);
         if (err != ESP_OK) {
             esp_http_client_cleanup(client);
             if (reusing && reuse_slot) *reuse_slot = NULL;
@@ -222,7 +280,9 @@ cJSON *http_get_json(const char *url) {
         }
         ever_connected = true;
 
+        perf_timer_start(&g_perf.http_ttfb);
         int content_length = esp_http_client_fetch_headers(client);
+        perf_timer_stop(&g_perf.http_ttfb);
         if (content_length < 0) {
             esp_http_client_cleanup(client);
             if (reusing && reuse_slot) *reuse_slot = NULL;
@@ -276,12 +336,14 @@ cJSON *http_get_json(const char *url) {
         }
 
         int total_read_len = 0, read_len;
+        perf_timer_start(&g_perf.http_body);
         while (total_read_len < content_length) {
             read_len = esp_http_client_read(client, buffer + total_read_len,
                                             content_length - total_read_len);
             if (read_len <= 0) break;
             total_read_len += read_len;
         }
+        perf_timer_stop(&g_perf.http_body);
         /* Check for partial read — truncated JSON could parse into
          * a valid but incomplete tree, causing silent data loss. */
         if (total_read_len < content_length) {
@@ -312,6 +374,7 @@ cJSON *http_get_json(const char *url) {
         perf_counter_increment(&g_perf.json_parse_count);
         free(buffer);
         perf_timer_stop(&g_perf.http_request);
+        if (attempt > 0) perf_counter_increment(&g_perf.http_attempt0_fail_count);
         return json;
     }
 
@@ -781,6 +844,103 @@ void nina_client_init(void) {
     }
 }
 
+/* Resolve a hostname to a dotted-quad IPv4 string via the app-level DNS cache.
+ * Returns true and fills ip_out on success (cache hit, fresh lookup, or stale
+ * fallback); false (ip_out left empty) only when resolution fails with no cache.
+ * Shared by nina_client_dns_check() (connectivity pre-check) and http_get_json()
+ * (per-request URL rewrite to skip per-connect getaddrinfo on .lan hosts). */
+bool nina_client_resolve_host(const char *host, char *ip_out, size_t ip_len) {
+    if (!host || !ip_out || ip_len == 0) return false;
+    ip_out[0] = '\0';
+
+    size_t host_len = strlen(host);
+    if (host_len == 0 || host_len >= 128) return false;
+
+    // Numeric IPv4 host — return verbatim, no DNS needed.
+    if (host[0] >= '0' && host[0] <= '9') {
+        if (host_len >= ip_len) return false;
+        memcpy(ip_out, host, host_len + 1);
+        return true;
+    }
+
+    int64_t now_ms = esp_timer_get_time() / 1000;
+
+    if (s_dns_mutex) xSemaphoreTake(s_dns_mutex, pdMS_TO_TICKS(5000));
+
+    // Check DNS cache for a valid (non-expired) entry
+    for (int i = 0; i < 3; i++) {
+        if (strcmp(s_dns_cache[i].hostname, host) == 0 &&
+            s_dns_cache[i].resolved_ip[0] != '\0') {
+            if (now_ms - s_dns_cache[i].resolve_time_ms < DNS_CACHE_TTL_MS) {
+                snprintf(ip_out, ip_len, "%s", s_dns_cache[i].resolved_ip);
+                ESP_LOGD(TAG, "DNS cache hit for %s -> %s", host, ip_out);
+                if (s_dns_mutex) xSemaphoreGive(s_dns_mutex);
+                return true;
+            }
+            break;  // Found entry but expired — do fresh lookup
+        }
+    }
+
+    if (s_dns_mutex) xSemaphoreGive(s_dns_mutex);
+
+    // Cache miss or expired — perform real DNS lookup (outside mutex — can block)
+    struct addrinfo hints = {0};
+    hints.ai_family = AF_INET;
+    struct addrinfo *result = NULL;
+    int err = getaddrinfo(host, NULL, &hints, &result);
+
+    if (err == 0 && result) {
+        // Lookup succeeded — update cache under mutex
+        char ip_str[46] = {0};
+        struct sockaddr_in *addr = (struct sockaddr_in *)result->ai_addr;
+        inet_ntoa_r(addr->sin_addr, ip_str, sizeof(ip_str));
+        freeaddrinfo(result);
+
+        if (s_dns_mutex) xSemaphoreTake(s_dns_mutex, pdMS_TO_TICKS(5000));
+
+        // Find existing slot or first empty slot
+        int slot = -1;
+        for (int i = 0; i < 3; i++) {
+            if (strcmp(s_dns_cache[i].hostname, host) == 0 ||
+                s_dns_cache[i].hostname[0] == '\0') {
+                slot = i;
+                break;
+            }
+        }
+        if (slot < 0) slot = 0;  // Evict first slot if all full
+
+        snprintf(s_dns_cache[slot].hostname, sizeof(s_dns_cache[slot].hostname), "%s", host);
+        snprintf(s_dns_cache[slot].resolved_ip, sizeof(s_dns_cache[slot].resolved_ip), "%s", ip_str);
+        s_dns_cache[slot].resolve_time_ms = now_ms;
+
+        snprintf(ip_out, ip_len, "%s", ip_str);
+
+        if (s_dns_mutex) xSemaphoreGive(s_dns_mutex);
+
+        ESP_LOGD(TAG, "DNS cached %s -> %s", host, ip_str);
+        return true;
+    }
+
+    if (result) freeaddrinfo(result);
+
+    // Lookup failed — try stale cache as fallback
+    if (s_dns_mutex) xSemaphoreTake(s_dns_mutex, pdMS_TO_TICKS(5000));
+    for (int i = 0; i < 3; i++) {
+        if (strcmp(s_dns_cache[i].hostname, host) == 0 &&
+            s_dns_cache[i].resolved_ip[0] != '\0') {
+            snprintf(ip_out, ip_len, "%s", s_dns_cache[i].resolved_ip);
+            ESP_LOGW(TAG, "DNS lookup failed for %s, using stale cache -> %s",
+                     host, ip_out);
+            if (s_dns_mutex) xSemaphoreGive(s_dns_mutex);
+            return true;
+        }
+    }
+    if (s_dns_mutex) xSemaphoreGive(s_dns_mutex);
+
+    ESP_LOGD(TAG, "DNS check failed for %s (err %d), no cache available", host, err);
+    return false;
+}
+
 bool nina_client_dns_check(const char *base_url) {
     if (!base_url) return false;
 
@@ -800,81 +960,8 @@ bool nina_client_dns_check(const char *base_url) {
     memcpy(hostname, host_start, host_len);
     hostname[host_len] = '\0';
 
-    // IP addresses don't need DNS resolution
-    if (hostname[0] >= '0' && hostname[0] <= '9') return true;
-
-    int64_t now_ms = esp_timer_get_time() / 1000;
-
-    if (s_dns_mutex) xSemaphoreTake(s_dns_mutex, pdMS_TO_TICKS(5000));
-
-    // Check DNS cache for a valid (non-expired) entry
-    for (int i = 0; i < 3; i++) {
-        if (strcmp(s_dns_cache[i].hostname, hostname) == 0 &&
-            s_dns_cache[i].resolved_ip[0] != '\0') {
-            if (now_ms - s_dns_cache[i].resolve_time_ms < DNS_CACHE_TTL_MS) {
-                ESP_LOGD(TAG, "DNS cache hit for %s -> %s", hostname, s_dns_cache[i].resolved_ip);
-                if (s_dns_mutex) xSemaphoreGive(s_dns_mutex);
-                return true;
-            }
-            break;  // Found entry but expired — do fresh lookup
-        }
-    }
-
-    if (s_dns_mutex) xSemaphoreGive(s_dns_mutex);
-
-    // Cache miss or expired — perform real DNS lookup (outside mutex — can block)
-    struct addrinfo hints = {0};
-    hints.ai_family = AF_INET;
-    struct addrinfo *result = NULL;
-    int err = getaddrinfo(hostname, NULL, &hints, &result);
-
-    if (err == 0 && result) {
-        // Lookup succeeded — update cache under mutex
-        char ip_str[46] = {0};
-        struct sockaddr_in *addr = (struct sockaddr_in *)result->ai_addr;
-        inet_ntoa_r(addr->sin_addr, ip_str, sizeof(ip_str));
-        freeaddrinfo(result);
-
-        if (s_dns_mutex) xSemaphoreTake(s_dns_mutex, pdMS_TO_TICKS(5000));
-
-        // Find existing slot or first empty slot
-        int slot = -1;
-        for (int i = 0; i < 3; i++) {
-            if (strcmp(s_dns_cache[i].hostname, hostname) == 0 ||
-                s_dns_cache[i].hostname[0] == '\0') {
-                slot = i;
-                break;
-            }
-        }
-        if (slot < 0) slot = 0;  // Evict first slot if all full
-
-        snprintf(s_dns_cache[slot].hostname, sizeof(s_dns_cache[slot].hostname), "%s", hostname);
-        snprintf(s_dns_cache[slot].resolved_ip, sizeof(s_dns_cache[slot].resolved_ip), "%s", ip_str);
-        s_dns_cache[slot].resolve_time_ms = now_ms;
-
-        if (s_dns_mutex) xSemaphoreGive(s_dns_mutex);
-
-        ESP_LOGD(TAG, "DNS cached %s -> %s", hostname, ip_str);
-        return true;
-    }
-
-    if (result) freeaddrinfo(result);
-
-    // Lookup failed — try stale cache as fallback
-    if (s_dns_mutex) xSemaphoreTake(s_dns_mutex, pdMS_TO_TICKS(5000));
-    for (int i = 0; i < 3; i++) {
-        if (strcmp(s_dns_cache[i].hostname, hostname) == 0 &&
-            s_dns_cache[i].resolved_ip[0] != '\0') {
-            ESP_LOGW(TAG, "DNS lookup failed for %s, using stale cache -> %s",
-                     hostname, s_dns_cache[i].resolved_ip);
-            if (s_dns_mutex) xSemaphoreGive(s_dns_mutex);
-            return true;
-        }
-    }
-    if (s_dns_mutex) xSemaphoreGive(s_dns_mutex);
-
-    ESP_LOGD(TAG, "DNS check failed for %s (err %d), no cache available", hostname, err);
-    return false;
+    char ip_str[46];
+    return nina_client_resolve_host(hostname, ip_str, sizeof(ip_str));
 }
 
 #define MAX_IMAGE_SIZE (4 * 1024 * 1024)  // 4 MB cap for image downloads

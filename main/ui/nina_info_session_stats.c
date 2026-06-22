@@ -277,7 +277,14 @@ void build_session_stats_content(lv_obj_t *content) {
 void populate_session_stats_data(int instance) {
     if (!content_root) return;
 
-    const session_stats_t *st = nina_session_stats_get(instance);
+    /* Copy stats under the collector's lock to avoid torn reads (the recorder
+     * mutates s_stats[] from other tasks). Only scalars are read below;
+     * stats_copy.points is the live pointer and is never dereferenced here. */
+    session_stats_t stats_copy;
+    const session_stats_t *st = NULL;
+    if (nina_session_stats_get_copy(instance, &stats_copy)) {
+        st = &stats_copy;
+    }
 
     if (!st || st->total_exposures == 0) {
         /* Show no-data, hide everything else */
