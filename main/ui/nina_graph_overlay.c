@@ -10,6 +10,8 @@
 
 #include "nina_graph_internal.h"
 #include "nina_dashboard.h"
+#include "nina_nav_arbiter.h"
+#include "esp_timer.h"
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -470,6 +472,12 @@ void nina_graph_overlay_create(lv_obj_t *parent) {
 void nina_graph_show(graph_type_t type, int page_index) {
     if (!overlay) return;
 
+    /* Freeze the arbiter only on the hidden->visible edge so the modal-open
+     * pairs with the close in nina_graph_hide(). */
+    if (lv_obj_has_flag(overlay, LV_OBJ_FLAG_HIDDEN)) {
+        nav_arbiter_notify_modal_open();
+    }
+
     current_type = type;
     return_page_index = page_index;
     selected_scale_idx = 0;  /* Reset to auto scale */
@@ -505,7 +513,12 @@ void nina_graph_show(graph_type_t type, int page_index) {
 
 void nina_graph_hide(void) {
     if (overlay) {
+        /* Unfreeze only on the visible->hidden edge to pair with show(). */
+        bool was_visible = !lv_obj_has_flag(overlay, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(overlay, LV_OBJ_FLAG_HIDDEN);
+        if (was_visible) {
+            nav_arbiter_notify_modal_close(esp_timer_get_time() / 1000);
+        }
     }
     graph_requested = false;
 }

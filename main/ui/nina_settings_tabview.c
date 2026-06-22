@@ -14,12 +14,19 @@
 #include "settings_tab_system.h"
 #include "settings_color_picker.h"
 #include "nina_dashboard.h"
-#include "nina_dashboard_internal.h"
+#include "nina_dashboard_internal.h"   /* PAGE_IDX_SUMMARY, SETTINGS_PAGE_IDX, MAX_NINA_INSTANCES */
+#include "nina_nav_arbiter.h"          /* topology notify + Home Page USER claim */
+#include "nina_connection.h"           /* nina_connection_report_poll */
+#include "tasks.h"                     /* poll_task_handles */
+#include "bsp/esp-bsp.h"               /* bsp_display_lock/unlock */
 #include "app_config.h"
 #include "themes.h"
 #include "ui_styles.h"
 #include "display_defs.h"
 #include "esp_system.h"
+#include "esp_timer.h"                 /* esp_timer_get_time — USER claim stamp */
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"             /* xTaskNotifyGive */
 #include "lvgl.h"
 
 #include <stdio.h>
@@ -81,9 +88,59 @@ static void save_feedback_timer_cb(lv_timer_t *timer) {
     dirty = false;
 }
 
+/* Mirror the web config_trigger_side_effects topology/Home-Page live behavior for
+ * the on-device save path. Diffs the just-saved live config against the snapshot
+ * taken when settings opened (config_snapshot). Mirrors web_handlers_display.c
+ * (instance enable/URL -> rebuild slot + topology notify) and
+ * web_handlers_config.c (Home Page change -> USER claim, -1 -> Summary). */
+static void apply_nav_side_effects(const app_config_t *old_cfg, const app_config_t *new_cfg) {
+    /* Instance enable/disable or URL change — wake poll tasks, rebuild the
+     * affected NINA slot, and raise the arbiter topology flag. */
+    bool topology_changed = false;
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        bool enable_changed = (new_cfg->instance_enabled[i] != old_cfg->instance_enabled[i]);
+        bool url_changed = (strcmp(new_cfg->api_url[i], old_cfg->api_url[i]) != 0);
+        if (enable_changed || url_changed) {
+            if (!new_cfg->instance_enabled[i]) {
+                nina_connection_report_poll(i, false);
+            }
+            if (poll_task_handles[i]) {
+                xTaskNotifyGive(poll_task_handles[i]);
+            }
+            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                nina_dashboard_rebuild_slot(i);
+                bsp_display_unlock();
+            }
+            topology_changed = true;
+        }
+    }
+    if (topology_changed) {
+        nav_arbiter_notify_topology_changed();
+    }
+
+    /* Home Page (active_page_override) change — navigate there now via a USER
+     * claim. -1 (Auto) resolves to the Summary page; skip the Settings page. */
+    if (new_cfg->active_page_override != old_cfg->active_page_override) {
+        int hp = new_cfg->active_page_override;
+        int claim = (hp < 0) ? PAGE_IDX_SUMMARY : hp;   /* -1 (Auto) -> Summary */
+        int total = nina_dashboard_get_total_page_count();
+        if (claim >= 0 && claim < total &&
+            claim != SETTINGS_PAGE_IDX(page_count)) {
+            nav_arbiter_submit_user(claim, esp_timer_get_time() / 1000);
+        }
+    }
+}
+
 static void save_btn_cb(lv_event_t *e) {
     LV_UNUSED(e);
     app_config_save(app_config_get());
+
+    /* Apply live topology / Home Page side effects, diffing the just-saved
+     * config against the snapshot taken when settings opened. Matches the web
+     * config path so enabling/disabling a rig or changing Home Page on-device
+     * takes effect without a reboot. */
+    apply_nav_side_effects(&config_snapshot, app_config_get());
+    config_snapshot = *app_config_get();   /* re-baseline for further edits */
 
     if (lbl_save_btn) {
         lv_label_set_text(lbl_save_btn, LV_SYMBOL_OK " Saved!");
