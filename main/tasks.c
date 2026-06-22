@@ -32,7 +32,7 @@
 #include "ui/nina_alerts.h"
 #include "ui/nina_session_stats.h"
 #include "ui/nina_ota_prompt.h"
-#include "ui/nina_idle_indicator.h"
+#include "ui/nina_nav_arbiter.h"
 #include "ui/nina_image_display.h"
 #include "ui/nina_wait_overlay.h"
 #include "ui/nina_toast.h"
@@ -174,62 +174,15 @@ _Atomic bool image_display_page_active = false;
 goes_data_t goes_data;
 static demo_task_params_t demo_params;
 
-/* ── Idle page override state ── */
-static bool idle_override_active = false;
-static bool idle_override_suppressed = false;  /* User navigated away — suppress until reconnect cycle */
-static int  idle_saved_page = -1;
-static int  idle_current_target = -1;          /* Track current idle target to detect config changes */
-static int64_t idle_all_disconnected_since_us = 0;
-
 /**
- * @brief Map semantic idle_target_t enum to actual page index at runtime.
- * Accounts for which optional pages are currently enabled.
- */
-static int idle_target_to_page_index(int8_t target)
-{
-    int idx;
-    switch (target) {
-        case IDLE_TARGET_SUMMARY:  idx = PAGE_IDX_SUMMARY; break;
-        case IDLE_TARGET_CLOCK:    idx = PAGE_IDX_CLOCK; break;
-        case IDLE_TARGET_ALLSKY:   idx = PAGE_IDX_ALLSKY; break;
-        case IDLE_TARGET_SPOTIFY:  idx = PAGE_IDX_SPOTIFY; break;
-        case IDLE_TARGET_IMAGE_DISPLAY:  idx = PAGE_IDX_IMAGE_DISPLAY; break;
-        case IDLE_TARGET_SYSINFO:  idx = SYSINFO_PAGE_IDX(page_count); break;
-        /* NINA instance pages — mirror auto-rotate's bitmask mapping. */
-        case IDLE_TARGET_NINA1:    idx = (page_count >= 1) ? NINA_PAGE_OFFSET + 0 : PAGE_IDX_SUMMARY; break;
-        case IDLE_TARGET_NINA2:    idx = (page_count >= 2) ? NINA_PAGE_OFFSET + 1 : PAGE_IDX_SUMMARY; break;
-        case IDLE_TARGET_NINA3:    idx = (page_count >= 3) ? NINA_PAGE_OFFSET + 2 : PAGE_IDX_SUMMARY; break;
-        default:                   idx = PAGE_IDX_SUMMARY; break;
-    }
-    /* Availability guard: optional pages (AllSky/Spotify/Image Display) may be
-     * disabled. Falling back to Summary (always present) prevents a blank screen. */
-    if (!nina_dashboard_page_is_available(idx)) {
-        idx = PAGE_IDX_SUMMARY;
-    }
-    return idx;
-}
-
-/**
- * @brief Swipe callback from the dashboard — signals the data task to re-tune polling.
+ * @brief Page-change callback from the dashboard — signals the data task to re-tune polling.
  * Called from LVGL context (display lock already held by the gesture handler).
  * The dashboard has already updated its active_page before calling this.
+ * Navigation decisions live in the arbiter now; this only wakes the poll tasks.
  */
 void on_page_changed(int new_page) {
     page_changed = true;
-    /* If idle override is active and user navigates away, cancel the override
-     * so reconnect logic doesn't snap them back. Re-triggers on next disconnect cycle. */
-    if (idle_override_active) {
-        idle_override_active = false;
-        nina_idle_indicator_set_active(false);
-        idle_all_disconnected_since_us = 0;  /* Reset debounce so persistent re-trigger gets a clean 5s */
-        if (!app_config_get()->idle_page_persistent) {
-            idle_override_suppressed = true;  /* Suppress re-trigger until reconnect→disconnect cycle */
-        }
-        /* When persistent: idle_override_suppressed stays false, so it re-triggers after debounce */
-        ESP_LOGI(TAG, "Idle override: cancelled by user navigation (persistent=%d)",
-                 app_config_get()->idle_page_persistent);
-    }
-    ESP_LOGI(TAG, "Swipe: switched to page %d", new_page);
+    ESP_LOGI(TAG, "Page changed to %d", new_page);
     /* Wake all poll tasks so the newly-active one can start full polling immediately */
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         if (poll_task_handles[i]) xTaskNotifyGive(poll_task_handles[i]);
@@ -305,9 +258,6 @@ void input_task(void *arg) {
             /* Long press — enter deep sleep */
             ESP_LOGI(TAG, "Long press detected — entering deep sleep");
 
-            /* Get current page before sleeping */
-            int current_page = nina_dashboard_get_active_page();
-
             /* Stop LVGL processing */
             lvgl_port_lock(0);
             lvgl_port_stop();
@@ -322,11 +272,18 @@ void input_task(void *arg) {
 
             /* Enter deep sleep — does not return */
             power_mgmt_enter_deep_sleep(
-                app_config_get()->deep_sleep_wake_timer_s,
-                current_page
+                app_config_get()->deep_sleep_wake_timer_s
             );
         } else if (!long_pressed) {
-            /* Short press — cycle page */
+            /* Short press — cycle page.
+             * Modal guard: match the swipe path (gesture_event_cb in
+             * nina_dashboard.c) — when a detail overlay is open, do not change
+             * the page underneath it. */
+            if (nina_dashboard_thumbnail_visible()
+                || nina_graph_visible()
+                || nina_info_overlay_visible()) {
+                continue;
+            }
             int total = nina_dashboard_get_total_page_count();
             int current = nina_dashboard_get_active_page();
             /* Skip settings, disabled allsky, disabled spotify, and disabled
@@ -346,12 +303,16 @@ void input_task(void *arg) {
             }
             ESP_LOGI(TAG, "Button: switching to page %d", new_page);
 
+            /* Task 4.1: route USER nav through the arbiter. Commit immediately
+             * for instant button feedback AND record a USER claim so the grace
+             * window (nav_grace_s) protects this page until the next resolve(). */
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                nina_dashboard_show_page(new_page, total);
+                nina_dashboard_show_page_animated(new_page, 0, 0);
                 bsp_display_unlock();
             } else {
                 ESP_LOGW(TAG, "Display lock timeout (button page switch)");
             }
+            nav_arbiter_submit_user(new_page, esp_timer_get_time() / 1000);
 
             page_changed = true;
         }
@@ -2250,11 +2211,14 @@ main_loop:
          */
         bool on_spotify = nina_dashboard_is_spotify_page();
         int active_nina_idx = -1;   /* Actual instance index (for data access) */
-        int active_page_idx = -1;  /* 0-based page index into pages[] (for UI calls) */
+        int active_page_idx = -1;  /* ABSOLUTE page index (for UI calls) */
         if (!on_allsky && !on_spotify && !on_sysinfo && !on_settings && !on_summary
             && current_active >= NINA_PAGE_OFFSET) {
-            active_page_idx = current_active - NINA_PAGE_OFFSET;
-            active_nina_idx = nina_dashboard_page_to_instance(active_page_idx);
+            active_page_idx = current_active;  /* absolute index */
+            active_nina_idx = nina_dashboard_page_to_instance(current_active);
+            /* Mapping is pure-offset; gate on slot availability explicitly. */
+            if (active_nina_idx >= 0 && !nina_slot_available[active_nina_idx])
+                active_nina_idx = -1;
         }
 
         /* ── Page-gate flags and resource lifecycle ──
@@ -2506,127 +2470,19 @@ main_loop:
             }
         }
 
-        /* If auto-rotate is active and we're on a NINA instance page but no instances
-         * are connected, fall back to the summary page automatically.
-         * Gate positively on "parked on a real NINA instance page" (active_nina_idx >= 0)
-         * so non-NINA pages (clock/allsky/spotify/image display/etc.) are never force-
-         * navigated away — enumerating non-NINA pages with negations silently broke when
-         * the Image Display page was added (on_image_display was missing from the list). */
-        if (app_config_get()->auto_rotate_enabled && !app_config_get()->idle_page_override_enabled
-            && active_nina_idx >= 0) {
-            bool any_connected = false;
-            for (int i = 0; i < instance_count; i++) {
-                if (nina_connection_is_connected(i)) { any_connected = true; break; }
-            }
-            if (!any_connected) {
-                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                    nina_dashboard_show_page(PAGE_IDX_SUMMARY, instance_count);
-                    bsp_display_unlock();
-                }
-                page_changed = true;
-                ESP_LOGI(TAG, "No NINA connections — returning to summary page");
-            }
-        }
-
-        /* Auto-rotate logic — rotates between pages selected by auto_rotate_pages bitmask.
-         *
-         * Page bitmask layout:
-         *   bit 0  = Summary page (PAGE_IDX_SUMMARY)
-         *   bit 1  = NINA instance 1 (NINA_PAGE_OFFSET + 0)
-         *   bit 2  = NINA instance 2 (NINA_PAGE_OFFSET + 1)
-         *   bit 3  = NINA instance 3 (NINA_PAGE_OFFSET + 2)
-         *   bit 4  = System Info page (SYSINFO_PAGE_IDX)
-         *   bit 5  = AllSky page (PAGE_IDX_ALLSKY)
-         *   bit 6  = Spotify page (PAGE_IDX_SPOTIFY)
-         *   bit 7  = Clock page (PAGE_IDX_CLOCK)
-         *   bit 8  = Image Display page (PAGE_IDX_IMAGE_DISPLAY)
-         *
-         * Bits 0-7 live in cfg->auto_rotate_pages; bit 8 lives in
-         * cfg->auto_rotate_pages_hi. The custom order has 9 slots: the
-         * 8-element auto_rotate_order[] array plus auto_rotate_order_ext.
-         */
+        /* Slideshow-interval edge feeder. The navigation arbiter owns the actual
+         * page advance; tasks.c only fires the tick when the configured interval
+         * elapses. resolve() (called once near the end of this cycle) consumes it. */
         {
             app_config_t *r_cfg = app_config_get();
-            /* Pause rotation while the idle override has parked the device on its
-             * target page — rotation resumes after reconnect clears the override. */
-            if (r_cfg->auto_rotate_enabled && r_cfg->auto_rotate_interval_s > 0 && !idle_override_active) {
+            if (r_cfg->auto_rotate_enabled && r_cfg->auto_rotate_interval_s > 0) {
                 if (last_rotate_ms == 0) last_rotate_ms = now_ms;
                 if (now_ms - last_rotate_ms >= (int64_t)r_cfg->auto_rotate_interval_s * 1000) {
-                    uint16_t page_mask = (uint16_t)r_cfg->auto_rotate_pages
-                                       | ((uint16_t)r_cfg->auto_rotate_pages_hi << 8);
-                    int total = nina_dashboard_get_total_page_count();
-
-                    int ena_page_count = total - EXTRA_PAGES;  /* enabled NINA pages only */
-
-                    /* Build ordered candidate list from custom rotation order. The
-                     * order has 9 slots: auto_rotate_order[0..7] + auto_rotate_order_ext. */
-                    int ordered[9];
-                    int ordered_count = 0;
-                    for (int i = 0; i < 9; i++) {
-                        int bit_idx = (i < 8) ? r_cfg->auto_rotate_order[i]
-                                              : r_cfg->auto_rotate_order_ext;
-                        if (bit_idx == 0xFF) {
-                            if (i < 8) break;   /* terminator in the main array */
-                            else continue;      /* ext slot unused */
-                        }
-                        if (bit_idx > 8) continue;
-                        /* Check if this page is enabled in bitmask */
-                        if (!(page_mask & (1 << bit_idx))) continue;
-
-                        /* Map bitmask bit index to actual page index */
-                        int page_idx = -1;
-                        switch (bit_idx) {
-                            case 0: page_idx = PAGE_IDX_SUMMARY; break;
-                            case 1: if (ena_page_count >= 1) page_idx = NINA_PAGE_OFFSET + 0; break;
-                            case 2: if (ena_page_count >= 2) page_idx = NINA_PAGE_OFFSET + 1; break;
-                            case 3: if (ena_page_count >= 3) page_idx = NINA_PAGE_OFFSET + 2; break;
-                            case 4: page_idx = SYSINFO_PAGE_IDX(ena_page_count); break;
-                            case 5:
-                                if (app_config_get()->allsky_enabled) page_idx = PAGE_IDX_ALLSKY;
-                                break;
-                            case 6:
-                                if (app_config_get()->spotify_enabled) page_idx = PAGE_IDX_SPOTIFY;
-                                break;
-                            case 7: page_idx = PAGE_IDX_CLOCK; break;
-                            case 8:
-                                if (app_config_get()->image_display_enabled) page_idx = PAGE_IDX_IMAGE_DISPLAY;
-                                break;
-                        }
-                        if (page_idx < 0) continue;
-
-                        /* Skip disconnected NINA instances if configured */
-                        if (page_idx >= NINA_PAGE_OFFSET && page_idx < NINA_PAGE_OFFSET + ena_page_count) {
-                            int nina_idx = nina_dashboard_page_to_instance(page_idx - NINA_PAGE_OFFSET);
-                            if (nina_idx >= 0 && r_cfg->auto_rotate_skip_disconnected
-                                && !nina_connection_is_connected(nina_idx)) continue;
-                        }
-
-                        ordered[ordered_count++] = page_idx;
-                    }
-
-                    /* Find current page position in ordered list and advance */
-                    int next_page = current_active;
-                    if (ordered_count > 0) {
-                        int cur_pos = -1;
-                        for (int i = 0; i < ordered_count; i++) {
-                            if (ordered[i] == current_active) { cur_pos = i; break; }
-                        }
-                        /* Step to next in custom order (wrap around) */
-                        next_page = ordered[(cur_pos + 1) % ordered_count];
-                    }
-
-                    if (next_page != current_active) {
-                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                            nina_dashboard_show_page_animated(next_page, instance_count, r_cfg->auto_rotate_effect);
-                            bsp_display_unlock();
-                        } else {
-                            ESP_LOGW(TAG, "Display lock timeout (auto-rotate)");
-                        }
-                        page_changed = true;
-                        ESP_LOGI(TAG, "Auto-rotate: switched to page %d", next_page);
-                    }
+                    nav_arbiter_notify_slideshow_tick();
                     last_rotate_ms = now_ms;
                 }
+            } else {
+                last_rotate_ms = 0;
             }
         }
 
@@ -2699,7 +2555,7 @@ main_loop:
                 if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                     if (g_perf.enabled) perf_timer_record(&g_perf.ui_lock_wait, esp_timer_get_time() - lock_start2);
                     perf_timer_start(&g_perf.ui_dashboard_update);
-                    update_nina_dashboard_page(active_page_idx, &instances[active_nina_idx]);
+                    update_nina_dashboard_page(active_nina_idx, &instances[active_nina_idx]);
                     perf_timer_stop(&g_perf.ui_dashboard_update);
 
                     // Measure WS-to-UI latency if a recent event was received
@@ -2712,7 +2568,7 @@ main_loop:
                     }
 
                     /* Status dot update combined in same lock section (was separate lock before) */
-                    nina_dashboard_update_status(active_page_idx, rssi,
+                    nina_dashboard_update_status(active_nina_idx, rssi,
                                                  nina_connection_is_connected(active_nina_idx), true);
                     bsp_display_unlock();
                 }
@@ -2890,8 +2746,8 @@ main_loop:
             instances[active_nina_idx].ui_refresh_needed = false;
             if (nina_client_lock(&instances[active_nina_idx], 15)) {
                 if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                    update_nina_dashboard_page(active_page_idx, &instances[active_nina_idx]);
-                    nina_dashboard_update_status(active_page_idx, rssi,
+                    update_nina_dashboard_page(active_nina_idx, &instances[active_nina_idx]);
+                    nina_dashboard_update_status(active_nina_idx, rssi,
                                                  nina_connection_is_connected(active_nina_idx), false);
                     bsp_display_unlock();
                 }
@@ -2947,97 +2803,14 @@ main_loop:
             }
         }
 
-        /* ── Idle page override: switch to target page when all NINA instances disconnected ──
-         * Coexists with auto-rotate: while parked on the idle target, rotation is
-         * paused; on reconnect the override clears and auto-rotate resumes.
-         * Uses 5-second debounce to avoid flashing on transient disconnects. */
-        {
-            app_config_t *idle_cfg = app_config_get();
-            if (idle_cfg->idle_page_override_enabled) {
-                /* Check if ALL enabled NINA instances are disconnected */
-                bool all_disc = true;
-                bool any_enabled = false;
-                for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
-                    if (idle_cfg->instance_enabled[i]) {
-                        any_enabled = true;
-                        if (nina_connection_is_connected(i)) {
-                            all_disc = false;
-                            break;
-                        }
-                    }
-                }
-                if (!any_enabled) all_disc = true;
-
-                if (all_disc) {
-                    if (idle_all_disconnected_since_us == 0) {
-                        idle_all_disconnected_since_us = esp_timer_get_time();
-                    }
-                    int64_t elapsed_us = esp_timer_get_time() - idle_all_disconnected_since_us;
-                    int target = idle_target_to_page_index(idle_cfg->idle_page_override_target);
-
-                    if (!idle_override_active && !idle_override_suppressed && elapsed_us >= 5000000) {  /* 5 s debounce */
-                        idle_saved_page = current_active;
-                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                            nina_dashboard_show_page(target, instance_count);
-                            bsp_display_unlock();
-                        }
-                        idle_override_active = true;
-                        idle_current_target = idle_cfg->idle_page_override_target;
-                        nina_idle_indicator_set_active(true);
-                        page_changed = true;
-                        ESP_LOGI(TAG, "Idle override: switching to page %d (saved %d)", target, idle_saved_page);
-                    }
-                    /* Detect idle target change — works whether override is active or
-                     * was just re-activated after persistent user navigation */
-                    if (idle_override_active && idle_cfg->idle_page_override_target != idle_current_target) {
-                        idle_current_target = idle_cfg->idle_page_override_target;
-                        target = idle_target_to_page_index(idle_current_target);
-                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                            nina_dashboard_show_page(target, instance_count);
-                            bsp_display_unlock();
-                        }
-                        nina_idle_indicator_set_active(true);
-                        page_changed = true;
-                        ESP_LOGI(TAG, "Idle override: target changed, switching to page %d", target);
-                    }
-                } else {
-                    idle_all_disconnected_since_us = 0;
-                    idle_override_suppressed = false;  /* Reconnected — allow idle override on next disconnect */
-                    if (idle_override_active) {
-                        /* Reconnected — show green indicator briefly before restoring page */
-                        nina_idle_indicator_set_reconnecting();
-                        /* Restore saved page (or summary if saved was a still-disconnected NINA page) */
-                        int restore = idle_saved_page;
-                        if (restore >= NINA_PAGE_OFFSET && restore < NINA_PAGE_OFFSET + page_count) {
-                            int inst = nina_dashboard_page_to_instance(restore - NINA_PAGE_OFFSET);
-                            if (inst >= 0 && inst < MAX_NINA_INSTANCES
-                                && idle_cfg->instance_enabled[inst]
-                                && !nina_connection_is_connected(inst)) {
-                                restore = PAGE_IDX_SUMMARY;
-                            }
-                        }
-                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                            nina_dashboard_show_page(restore, instance_count);
-                            bsp_display_unlock();
-                        }
-                        idle_override_active = false;
-                        nina_idle_indicator_set_active(false);
-                        /* Resume auto-rotate cleanly: wait a full interval before the
-                         * next advance instead of jumping immediately on un-pause. */
-                        last_rotate_ms = now_ms;
-                        page_changed = true;
-                        ESP_LOGI(TAG, "Idle override: restoring page %d", restore);
-                    }
-                }
-            }
-
-            /* Reset idle override state if feature disabled while active */
-            if (!idle_cfg->idle_page_override_enabled && idle_override_active) {
-                idle_override_active = false;
-                nina_idle_indicator_set_active(false);
-                idle_all_disconnected_since_us = 0;
-            }
-        }
+        /* ── Navigation arbiter: resolve the page-commit ladder once per cycle ──
+         * Runs AFTER per-page UI updates and the slideshow-tick feeder, OUTSIDE
+         * any LVGL lock (the arbiter takes the lock itself around the commit).
+         * This is the single owner of the navigation decision; it also drives the
+         * idle indicator via nav_arbiter_idle_active() inside its commit. A user
+         * wake (xTaskNotifyGive from on_page_changed) produces a resolve within
+         * one cycle. */
+        nav_arbiter_resolve(esp_timer_get_time() / 1000);
 
         /* ── Screen sleep: turn off backlight when idle ── */
         {
@@ -3225,10 +2998,8 @@ main_loop:
                 uint32_t idle_threshold_ms = (uint32_t)app_config_get()->screen_sleep_timeout_s * 2 * 1000; /* 2x screen sleep timeout */
                 if (idle_duration_ms > idle_threshold_ms) {
                     ESP_LOGI(TAG, "Auto deep sleep after extended idle (%lu ms)", (unsigned long)idle_duration_ms);
-                    int current_page = nina_dashboard_get_active_page();
                     power_mgmt_enter_deep_sleep(
-                        app_config_get()->deep_sleep_wake_timer_s,
-                        current_page
+                        app_config_get()->deep_sleep_wake_timer_s
                     );
                     /* Does not return */
                 }

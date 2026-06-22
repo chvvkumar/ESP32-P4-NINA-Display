@@ -45,6 +45,7 @@
 #include "ui/nina_settings_tabview.h"
 #include "ui/nina_thumbnail.h"
 #include "ui/nina_setup_screen.h"
+#include "ui/nina_nav_arbiter.h"
 
 /* Embedded splash logo (JPEG, hardware-decoded at boot) */
 extern const uint8_t logo_jpg_start[] asm("_binary_logo_jpg_start");
@@ -554,8 +555,10 @@ void app_main(void)
 
     app_config_init();
 
-    // Check if we woke from deep sleep
-    esp_sleep_wakeup_cause_t wake_cause = power_mgmt_check_wake_cause();
+    // Check if we woke from deep sleep (logs cause, clears intended flag).
+    // The wake cause no longer drives navigation — the arbiter resolves the
+    // page from current state on boot — so the result is intentionally unused.
+    (void)power_mgmt_check_wake_cause();
 
     // Track crash resets (PANIC, WDT) in RTC memory
     power_mgmt_check_crash();
@@ -750,23 +753,11 @@ void app_main(void)
         nina_alerts_init(scr);
         nina_safety_create(scr);
 
-        {
-            /* Apply persisted page override immediately on boot.
-             * Override stores absolute page index: 0=allsky, 1=spotify, 2=clock,
-             * 3=image_display, 4=summary, 5..N+4=NINA, then settings, then sysinfo */
-            app_config_t *cfg = app_config_get();
-            int total = nina_dashboard_get_total_page_count();
-            if (cfg->active_page_override >= 0 && cfg->active_page_override < total) {
-                nina_dashboard_show_page(cfg->active_page_override, 0);
-            }
-        }
-
-        // Restore page from deep sleep if applicable
-        if (wake_cause != ESP_SLEEP_WAKEUP_UNDEFINED) {
-            int saved_page = power_mgmt_get_saved_page();
-            ESP_LOGI(TAG, "Restoring page %d from deep sleep", saved_page);
-            nina_dashboard_show_page(saved_page, 0);
-        }
+        /* Navigation is owned by the arbiter. Boot does not force-navigate:
+         * active_page_override is the Home Page (DEFAULT rung), not a boot
+         * override, and deep-sleep no longer restores a stale saved page.
+         * The arbiter resolves the correct page from current state below. */
+        nav_arbiter_init();
 
         } /* end else (normal mode) */
 
@@ -777,6 +768,10 @@ void app_main(void)
 
     if (!setup_mode) {
         nina_dashboard_set_page_change_cb(on_page_changed);
+
+        /* Fresh first resolution — let the arbiter pick the page from current
+         * state instead of force-navigating on boot. */
+        nav_arbiter_resolve(esp_timer_get_time() / 1000);
 
         nina_client_init();  // DNS cache mutex — must be called before poll tasks spawn
         nina_client_init_image_buffers();  // Pre-allocate PSRAM image fetch buffer

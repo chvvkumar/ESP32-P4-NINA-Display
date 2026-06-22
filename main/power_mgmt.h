@@ -14,11 +14,12 @@ esp_err_t power_mgmt_init(void);
 
 /**
  * Enter deep sleep with timer wake source from config.
- * Saves state to RTC memory before sleeping.
  * This function does NOT return — the chip reboots on wake.
  * Caller should stop LVGL, turn off backlight, and show toast before calling.
+ * The page is not persisted: the nav arbiter resolves the correct page from
+ * current state on wake.
  */
-void power_mgmt_enter_deep_sleep(uint32_t wake_timer_s, int current_page);
+void power_mgmt_enter_deep_sleep(uint32_t wake_timer_s);
 
 /**
  * Check if we woke from deep sleep.
@@ -26,12 +27,6 @@ void power_mgmt_enter_deep_sleep(uint32_t wake_timer_s, int current_page);
  * Returns the wake cause (ESP_SLEEP_WAKEUP_UNDEFINED if normal boot).
  */
 esp_sleep_wakeup_cause_t power_mgmt_check_wake_cause(void);
-
-/**
- * Get the page index saved before deep sleep.
- * Only meaningful when power_mgmt_check_wake_cause() != ESP_SLEEP_WAKEUP_UNDEFINED.
- */
-int power_mgmt_get_saved_page(void);
 
 /**
  * Crash info returned by power_mgmt_get_crash_info().

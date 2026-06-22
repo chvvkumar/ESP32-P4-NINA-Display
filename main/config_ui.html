@@ -155,6 +155,26 @@
       margin-bottom: 8px; font-weight: 500; letter-spacing: 0.01em;
     }
     .field-hint { font-size: 0.72rem; color: var(--text-hint); margin-top: 6px; opacity: 0.7; }
+    /* Section help popover (inline expandable, toggled by info icon in card title) */
+    .card-title-label { display:inline-flex; align-items:center; min-width:0; }
+    .help-btn {
+      display:inline-flex; align-items:center; justify-content:center;
+      width:18px; height:18px; padding:0; margin-left:8px; flex-shrink:0;
+      border:none; background:transparent; cursor:pointer; color:var(--text-muted);
+      border-radius:50%; vertical-align:middle; transition:color 0.2s ease, background 0.2s ease;
+    }
+    .help-btn:hover { color:var(--accent); background:var(--accent-glow); }
+    .help-btn svg { width:14px; height:14px; display:block; pointer-events:none; }
+    .help-popover {
+      display:none; margin:-10px 0 22px; padding:14px 16px;
+      background:var(--input-bg); border:1px solid var(--border); border-left:3px solid var(--accent);
+      border-radius:var(--radius-sm); font-size:0.8rem; line-height:1.55; color:var(--text);
+      text-transform:none; letter-spacing:normal; font-weight:400;
+    }
+    .help-popover.open { display:block; }
+    .help-popover-title { font-weight:600; color:var(--text); margin:0 0 6px; font-size:0.82rem; }
+    .help-popover p { margin:0 0 8px; color:var(--text-muted); }
+    .help-popover p:last-child { margin-bottom:0; }
     .divider { border: none; border-top: 1px solid rgba(255, 255, 255, 0.06); margin: 24px 0; }
 
     /* === NAVIGATION === */
@@ -806,19 +826,23 @@
     <div id="tab-nodes" class="tab-panel">
 
       <div class="card" id="instance-overview">
-        <div class="card-title">Active N.I.N.A. Instances</div>
+        <div class="card-title"><span class="card-title-label">Active N.I.N.A. Instances <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Active N.I.N.A. Instances</div><p>Selects which of the three N.I.N.A. instance slots the device polls and shows as pages. A disabled instance is not contacted and its page is skipped, but the slot keeps its fixed position so the other instances do not shift.</p><p>Each enabled instance gets its own dashboard page and a configuration card below. The device updates the page you are viewing in full and checks the other instances less often in the background.</p><p>Example: enable N.I.N.A. 1 and N.I.N.A. 2 for a two-rig setup and leave N.I.N.A. 3 off; only two node cards and two instance pages appear.</p></div>
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
           <span class="toggle-label" id="inst_lbl_0">N.I.N.A. 1</span>
           <label class="toggle"><input type="checkbox" id="instance_enabled_0" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
         </div>
+        <div class="field-hint">Polls this instance and shows its page; turn off to stop contacting it and hide its page.</div>
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
           <span class="toggle-label" id="inst_lbl_1">N.I.N.A. 2</span>
           <label class="toggle"><input type="checkbox" id="instance_enabled_1" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
         </div>
+        <div class="field-hint">Polls this instance and shows its page; turn off to stop contacting it and hide its page.</div>
         <div class="toggle-row">
           <span class="toggle-label" id="inst_lbl_2">N.I.N.A. 3</span>
           <label class="toggle"><input type="checkbox" id="instance_enabled_2" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
         </div>
+        <div class="field-hint">Polls this instance and shows its page; turn off to stop contacting it and hide its page.</div>
       </div>
 
       <div id="node-cards"></div>
@@ -828,11 +852,13 @@
     <div id="tab-allsky" class="tab-panel">
 
       <div class="card">
-        <div class="card-title">Connection</div>
+        <div class="card-title"><span class="card-title-label">Connection <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">AllSky Connection</div><p>Points the device at an AllSky camera's API and sets how often it reads data. AllSky updates run on their own schedule, independent of N.I.N.A. polling, so this interval does not affect rig updates.</p><p>The dew-point safety margin controls when the dew reading is colored as safe. The reading is treated as safe while the dew point sits below ambient temperature minus this margin.</p><p>Example: set the hostname to allskypi5.lan:8080, the interval to 5 seconds, and a 5 C margin so dew is flagged unsafe once the dew point rises to within 5 C of ambient.</p></div>
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
           <span class="toggle-label">Enable AllSky</span>
           <label class="toggle"><input type="checkbox" id="allsky_enabled" onchange="updateAllSkyEnabledUI()"><span class="toggle-track"></span></label>
         </div>
+        <div class="field-hint">Turns on the AllSky page and starts reading AllSky data; off hides the page and stops reading.</div>
         <div id="allskyConnectionFields">
         <div class="field" style="margin-top:16px">
           <label class="field-label">AllSky Hostname</label>
@@ -852,6 +878,7 @@
               <option value="120">2 minutes</option>
               <option value="300">5 minutes</option>
             </select>
+            <div class="field-hint">How often the device reads the AllSky API; longer intervals reduce load on the AllSky host.</div>
           </div>
           <div class="field">
             <label class="field-label">Dew Point Safety Margin (&deg;C)</label>
@@ -863,8 +890,9 @@
       </div>
 
       <div class="card" id="allskyFieldMappingsCard">
-        <div class="card-title">Field Mappings</div>
-        <div class="field-hint" style="margin-bottom:16px">Configure which AllSky API JSON values appear in each display quadrant. Click a key path input, then click "Use" on a JSON leaf to fill it. Use the color controls to set gradient ranges per field.</div>
+        <div class="card-title"><span class="card-title-label">Field Mappings <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">AllSky Field Mappings</div><p>Maps values from the AllSky API JSON to the four display quadrants: Thermal, Sky Quality, Ambient, and Power. Each quadrant has a main value, two sub values, and two status dots, and each is filled by entering the JSON key path for that value.</p><p>Use Fetch JSON from AllSky to load the live response, click a Key Path input to make it active, then click Use on a value to copy its path in. Value fields that show a unit also have color controls that set the gradient range between their low and high bounds.</p><p>Example: map the Thermal main value to data.cpu_temp with a 0 to 80 range so the reading shifts from blue toward red as the camera warms.</p></div>
+        <div class="field-hint" style="margin-bottom:16px">Configure which AllSky API JSON values appear in each display quadrant. Click a value's path input, then click "Use" on a value to fill it. Use the color controls to set gradient ranges per field.</div>
 
         <button onclick="fetchAllSkyJson()" class="btn btn-primary" id="fetchJsonBtn" style="width:100%;margin-bottom:16px">Fetch JSON from AllSky</button>
 
@@ -879,7 +907,8 @@
     <div id="tab-clock" class="tab-panel">
 
       <div class="card">
-        <div class="card-title">Clock &amp; Weather</div>
+        <div class="card-title"><span class="card-title-label">Clock &amp; Weather <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Clock and weather data</div><p>Drives the weather overlay shown on the Clock page and sets the timezone used to format the on-screen clock. Pick a provider, supply credentials if the provider needs them, then set a location either by city lookup or by entering latitude and longitude directly. Open-Meteo needs no API key; OpenWeatherMap and Weather Underground each require a key.</p><p>The timezone controls only how the clock and times are displayed, it does not change the actual moment. Example: selecting America/Denver shows 03:12 UTC as 21:12 the previous evening. The Time Format option switches the same time between 14:30 and 2:30 PM.</p><p>Example: choose Open-Meteo, run Look up for "Denver", accept a result to fill latitude 39.74 and longitude -104.99, set units to degrees C, and the Clock page shows local conditions refreshed on the chosen interval.</p></div>
         <div class="field">
           <label class="field-label">Weather Provider</label>
           <select class="input" id="weather_provider" onchange="toggleWeatherApiKey();checkDirty()">
@@ -887,6 +916,7 @@
             <option value="1">Open-Meteo (no key needed)</option>
             <option value="2">Weather Underground</option>
           </select>
+          <div class="field-hint">Open-Meteo works without a key; OpenWeatherMap and Weather Underground require an API key.</div>
         </div>
         <div class="field" id="weather_api_key_field">
           <label class="field-label">API Key</label>
@@ -903,10 +933,12 @@
             <button class="btn btn-outline" onclick="lookupCity()" type="button">Look up</button>
           </div>
           <div id="city_results" style="display:none;margin-top:6px;background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.08);border-radius:10px;max-height:200px;overflow-y:auto"></div>
+          <div class="field-hint">Type a city name and select Look up to auto-fill latitude, longitude, and location name.</div>
         </div>
         <div class="field" id="weather_location_name_field">
           <label class="field-label">Location Name</label>
           <input type="text" class="input" id="weather_location_name" readonly placeholder="Auto-filled by lookup" style="opacity:0.7">
+          <div class="field-hint">Read-only; set automatically by the city lookup above.</div>
         </div>
         <div class="field" id="weather_station_id_field" style="display:none">
           <label class="field-label">Station ID</label>
@@ -917,10 +949,12 @@
           <div class="field">
             <label class="field-label">Latitude</label>
             <input type="number" class="input" id="weather_lat" step="0.0001" placeholder="0.0000">
+            <div class="field-hint">Decimal degrees, positive north (e.g. 39.7392); needed when not using city lookup.</div>
           </div>
           <div class="field">
             <label class="field-label">Longitude</label>
             <input type="number" class="input" id="weather_lon" step="0.0001" placeholder="0.0000">
+            <div class="field-hint">Decimal degrees, positive east, negative west (e.g. -104.9903).</div>
           </div>
         </div>
         <div class="row stack-mobile">
@@ -930,6 +964,7 @@
               <option value="0">&deg;F Imperial</option>
               <option value="1">&deg;C Metric</option>
             </select>
+            <div class="field-hint">Switches all weather temperatures between degrees F and degrees C.</div>
           </div>
           <div class="field">
             <label class="field-label">Time Format</label>
@@ -937,6 +972,7 @@
               <option value="0">12-hour (AM/PM)</option>
               <option value="1">24-hour</option>
             </select>
+            <div class="field-hint">Switches the clock between 12-hour (2:30 PM) and 24-hour (14:30) display.</div>
           </div>
         </div>
         <div class="row stack-mobile">
@@ -949,10 +985,12 @@
               <option value="2700">45 minutes</option>
               <option value="3600">60 minutes</option>
             </select>
+            <div class="field-hint">How often the device fetches new weather data from the provider.</div>
           </div>
           <div class="field">
             <label class="field-label">Timezone</label>
             <select class="input" id="tz_string"></select>
+            <div class="field-hint">Display timezone for the clock; underlying time stays UTC, only the shown value changes.</div>
           </div>
         </div>
       </div>
@@ -963,7 +1001,8 @@
     <div id="tab-spotify" class="tab-panel">
 
       <div class="card">
-        <div class="card-title">Connection</div>
+        <div class="card-title"><span class="card-title-label">Connection <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Spotify connection and player layout</div><p>Enables the Spotify page and controls how the immersive player renders. After creating a Spotify app and pasting the Client ID, complete the one-time login in the Account card below. The numbered Setup Instructions box walks through registering the redirect URI and pasting the callback URL.</p><p>Poll interval sets how often the device queries Spotify for the current track and playback position. Lower values update the progress bar and track changes faster but make more API calls. Example: 3000 ms updates roughly every 3 seconds; 10000 ms reduces traffic at the cost of a laggier progress bar.</p><p>Minimal Mode replaces the full player layout with centered track text, dimming the album art to a background and hiding the transport controls. Show Overlay forces the playback overlay visible, the same as tapping the album art; Overlay Timeout sets how long it stays before auto-hiding, with 0 keeping it on permanently.</p></div>
         <div style="background:rgba(var(--accent-rgb),0.08);border:1px solid rgba(var(--accent-rgb),0.2);border-radius:10px;padding:14px 16px;margin-bottom:16px;font-size:0.82rem;line-height:1.6;color:#d4d4d8">
           <strong style="color:rgba(var(--accent-rgb),1)">Setup Instructions</strong>
           <ol style="margin:8px 0 0;padding-left:20px">
@@ -981,6 +1020,7 @@
           <span class="toggle-label">Enable Spotify</span>
           <label class="toggle"><input type="checkbox" id="spotify_enabled" onchange="updateSpotifyEnabledUI()"><span class="toggle-track"></span></label>
         </div>
+        <div class="field-hint">Turns the Spotify page on and starts checking your playback.</div>
         <div id="spotifyConnectionFields">
           <div class="field" style="margin-top:16px">
             <label class="field-label">Client ID</label>
@@ -996,6 +1036,7 @@
             <span class="toggle-label">Minimal Mode</span>
             <label class="toggle"><input type="checkbox" id="spotify_minimal_mode"><span class="toggle-track"></span></label>
           </div>
+          <div class="field-hint">Shows centered track text, with the album art dimmed to a background and the transport controls hidden.</div>
           <div class="toggle-row">
             <span class="toggle-label">Show Overlay</span>
             <label class="toggle"><input type="checkbox" id="spotify_overlay_visible"><span class="toggle-track"></span></label>
@@ -1010,6 +1051,7 @@
             <span class="toggle-label">Show Progress Bar</span>
             <label class="toggle"><input type="checkbox" id="spotify_show_progress_bar" checked><span class="toggle-track"></span></label>
           </div>
+          <div class="field-hint">Shows the track elapsed and remaining progress bar on the player.</div>
           <div class="field">
             <label class="field-label">Overlay Timeout (s)</label>
             <input type="number" class="input" id="spotifyOverlayTimeout" min="0" max="60" step="1" value="5">
@@ -1019,7 +1061,8 @@
       </div>
 
       <div class="card" id="spotifyAccountCard">
-        <div class="card-title">Account</div>
+        <div class="card-title"><span class="card-title-label">Account <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Spotify account login</div><p>Completes the OAuth login that authorizes the device to read your playback. Select Login with Spotify, approve access in the popup, then copy the full redirect URL from the resulting "site can't be reached" page and paste it into the Redirect URL field. The device exchanges that code for tokens stored on-device, so this is a one-time step per account.</p><p>Status shows whether the device currently holds valid credentials. Use Logout to clear the stored tokens. Example: after a successful submit, Status changes from "Checking..." to a logged-in state and the Logout button appears.</p></div>
         <div class="field">
           <label class="field-label">Status</label>
           <div id="spotifyStatus" style="font-size:0.875rem;color:var(--text-hint);margin-bottom:12px">Checking...</div>
@@ -1033,6 +1076,7 @@
           <div class="field" style="margin-bottom:10px">
             <label class="field-label">Redirect URL</label>
             <input type="text" class="input" id="spotifyPasteUrl" placeholder="http://127.0.0.1:8000/callback?code=..." style="font-size:0.92rem;min-height:52px;border:1px solid rgba(var(--accent-rgb),0.35);background:rgba(0,0,0,0.45)">
+            <div class="field-hint">Paste the entire callback URL from the address bar; it must contain the ?code= portion.</div>
           </div>
           <button class="btn btn-primary" id="spotifySubmitBtn" onclick="spotifySubmitCallback()" style="width:100%">Submit</button>
         </div>
@@ -1044,11 +1088,13 @@
     <div id="tab-image-display" class="tab-panel">
 
       <div class="card">
-        <div class="card-title">GOES Satellite Imagery</div>
+        <div class="card-title"><span class="card-title-label">GOES Satellite Imagery <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Full-screen image page</div><p>Renders one full-screen image source on its own page: a GOES-19 GEOCOLOR satellite sector, a 3D-rendered moon phase, or SDO/SOHO solar imagery. Pick the source with the Source selector; the fields below change to match the chosen source. Show Overlay applies to all sources; the update interval applies to GOES and Solar (the moon is drawn on the device and has no fetch interval).</p><p>Fill (crop borders) zooms the disc to fill the 720x720 panel and cuts off the timestamp and label baked into the source image border. It applies to GOES and Solar; the Moon has no border text and is not cropped. Example: with Fill off, a GOES sector shows letterboxed with its caption; with Fill on, the disc fills the screen and the caption is hidden.</p><p>In some firmware versions the image may appear rotated, which is why each source has its own rotation control. If the satellite, moon, or sun appears upside down or sideways, set the matching rotation to correct it.</p></div>
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
           <span class="toggle-label">Enable Image Display</span>
           <label class="toggle"><input type="checkbox" id="image_display_enabled" onchange="updateImageDisplayEnabledUI();applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
         </div>
+        <div class="field-hint">Adds the full-screen image page and starts fetching the selected source.</div>
         <div id="imageDisplayFields">
           <div class="field" style="margin-top:16px">
             <label class="field-label">Source</label>
@@ -1066,6 +1112,7 @@
                 <span class="pn-pill-visual">Solar (SDO)</span>
               </label>
             </div>
+            <div class="field-hint">Chooses GOES satellite, Moon phase, or Solar; the options below switch to match.</div>
           </div>
           <div class="toggle-row">
             <span class="toggle-label">Show Overlay</span>
@@ -1146,6 +1193,7 @@
               <option value="2">Soft glow</option>
               <option value="3">Starfield + Glow</option>
             </select>
+            <div class="field-hint">Sets what renders behind the moon disc (plain black, starfield, soft glow, or both).</div>
           </div>
           <div class="field">
             <label class="field-label">Latitude</label>
@@ -1166,7 +1214,8 @@
             <div class="field-hint">How the Moon is lit while you drag to rotate it. True phase keeps the real terminator; Explore lights the whole surface.</div>
           </div>
           <div class="card">
-            <div class="card-title">Moon Orientation</div>
+            <div class="card-title"><span class="card-title-label">Moon Orientation <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+          <div class="help-popover"><div class="help-popover-title">Moon appearance and orientation</div><p>Corrects how the rendered moon is oriented and how it responds to dragging. Keep Moon upright (north-up) holds the moon's north pole at the top like phone apps and NASA imagery; turning it off tilts the disc to match how the real moon sits in your local sky as it moves. Set the Latitude and Longitude above for an accurate sky-tilt and terminator.</p><p>Flip horizontal (U) and Flip vertical (V) mirror the image for displays or mounts that reverse it. The Roll, Yaw, and Pitch offset sliders nudge the moon from its standard orientation, and Reset orientation returns them to that standard view.</p><p>Free-spin mode changes drag behavior. Off, the disc rubber-bands back to the live sky as soon as you release it. On, the disc holds your spin and eases back after the Return to live view timeout (3 to 60 seconds). Example: enable Free-spin, set the return to 15s, drag to inspect the far limb, and the view holds for 15 seconds before returning to live.</p></div>
           <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
             <span class="toggle-label">Keep Moon upright (north-up)</span>
             <label class="toggle"><input type="checkbox" id="moon_north_up" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
@@ -1176,16 +1225,19 @@
             <span class="toggle-label">Flip horizontal (U)</span>
             <label class="toggle"><input type="checkbox" id="moon_flip_u" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
           </div>
+          <div class="field-hint">Mirrors the moon left-to-right for reversed displays or mounts.</div>
           <div class="toggle-row">
             <span class="toggle-label">Flip vertical (V)</span>
             <label class="toggle"><input type="checkbox" id="moon_flip_v" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
           </div>
+          <div class="field-hint">Mirrors the moon top-to-bottom.</div>
           <div class="field" style="margin-top:16px">
             <label class="field-label">Roll offset</label>
             <div class="slider-group">
               <input type="range" class="slider" id="moon_roll_offset" min="-180" max="180" step="1" value="0" oninput="updateMoonOrientReadout('moon_roll');applyImageDisplay();checkDirty()">
               <span class="slider-val" id="moon_roll_val">0&deg;</span>
             </div>
+            <div class="field-hint">Rotates the moon in the screen plane, -180 to 180 degrees from default.</div>
           </div>
           <div class="field" style="margin-top:16px">
             <label class="field-label">Yaw offset</label>
@@ -1193,6 +1245,7 @@
               <input type="range" class="slider" id="moon_yaw_offset" min="-180" max="180" step="1" value="0" oninput="updateMoonOrientReadout('moon_yaw');applyImageDisplay();checkDirty()">
               <span class="slider-val" id="moon_yaw_val">0&deg;</span>
             </div>
+            <div class="field-hint">Turns the moon left/right about its vertical axis, -180 to 180 degrees from default.</div>
           </div>
           <div class="field" style="margin-top:16px">
             <label class="field-label">Pitch offset</label>
@@ -1200,7 +1253,7 @@
               <input type="range" class="slider" id="moon_pitch_offset" min="-90" max="90" step="1" value="0" oninput="updateMoonOrientReadout('moon_pitch');applyImageDisplay();checkDirty()">
               <span class="slider-val" id="moon_pitch_val">0&deg;</span>
             </div>
-            <div class="field-hint">Deviation from default. Defaults are 0&deg; for all axes.</div>
+            <div class="field-hint">Tilts the moon up or down, from -90 to 90 degrees relative to its standard orientation.</div>
           </div>
           <hr class="divider">
           <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
@@ -1266,7 +1319,8 @@
     <div id="tab-display" class="tab-panel">
 
       <div class="card">
-        <div class="card-title">Appearance</div>
+        <div class="card-title"><span class="card-title-label">Appearance <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Appearance</div><p>Controls the look of the dashboard: the color theme, the visual style applied to widget panels, and the brightness of on-screen text. All three apply live as you change them and persist when you save.</p><p>Theme sets the color palette across every page. Widget Style changes only how the dashboard panels are drawn (borders, glass, inset, and similar). Text brightness scales the foreground text color, separate from the backlight on the Behavior tab.</p><p>Example: pick the Red Night theme to preserve dark adaptation at the telescope, then lower Text brightness to 50% if labels are still too bright.</p></div>
         <div class="field">
           <label class="field-label">Theme</label>
           <select class="input" id="theme_select" onchange="setTheme(this.value)">
@@ -1280,6 +1334,7 @@
             <option value="7">Phantom Green</option>
             <option value="8">Bloodmoon</option>
           </select>
+          <div class="field-hint">Color palette applied across all pages; changes preview immediately.</div>
         </div>
         <div class="field">
           <label class="field-label">Widget Style</label>
@@ -1298,6 +1353,7 @@
             <option value="11">Horizon Line</option>
             <option value="12">Ember Ring</option>
           </select>
+          <div class="field-hint">Visual treatment of the dashboard panels only, with no effect on colors or layout.</div>
         </div>
         <div class="field">
           <label class="field-label">Text brightness</label>
@@ -1305,14 +1361,17 @@
             <input type="range" class="slider" id="color_brightness" min="0" max="100" value="80" oninput="setColorBrightness(this.value)">
             <span class="slider-val" id="color_brightness_val">80%</span>
           </div>
+          <div class="field-hint">Scales on-screen text brightness, independent of the backlight set on the Behavior tab.</div>
         </div>
       </div>
 
       <div class="card">
-        <div class="card-title">Page Navigation <span id="pm_summary" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span></div>
+        <div class="card-title"><span class="card-title-label">Page Navigation <span id="pm_summary" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span> <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Page Navigation</div><p>The display chooses which page to show on its own, following a few rules in order. A page you swiped or tapped to recently stays put for the stay-on-page time. If Auto Cycle is on, the display rotates through the pages you chose. Otherwise it follows a connected NINA rig. If all rigs are disconnected and you have turned on the no-connections page, it shows that page. When none of those apply, it rests on your Home Page.</p><p>Home Page is where the display settles when nothing else applies. You can set it to Summary, Clock, System Info, or any page or NINA instance you have enabled. When Home Page is set to a NINA instance, the display also returns to that instance during an imaging session. Changing Home Page navigates there at once.</p><p>Auto Cycle and Home Page behavior are mutually exclusive. Turning Auto Cycle on makes the display rotate through the selected pages instead of following a rig or resting on the Home Page. Turning it off returns to the resting behavior.</p><p>Example: set Home Page to NINA Instance 1 and leave Auto Cycle off. The display rests on Instance 1, follows it while it is imaging, and you can still swipe to any other page for the stay-on-page duration before it returns on its own.</p></div>
 
-        <div class="pn-section-label">Start Page</div>
+        <div class="pn-section-label">Home Page</div>
         <div class="pn-pill-grid" id="start-page-pills"></div>
+        <div class="field-hint">The page the display settles on; when set to a NINA instance, the display also returns to that rig during an imaging session.</div>
 
         <div class="pn-divider"></div>
 
@@ -1320,7 +1379,7 @@
           <div>
             <span class="toggle-label">Auto Cycle</span>
             <div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">Rotate through pages automatically</div>
-            <div class="field-hint" style="margin-top:2px">When enabled, overrides idle page switching</div>
+            <div class="field-hint" style="margin-top:2px">When enabled, overrides "Switch page when no connections" below</div>
           </div>
           <label class="toggle"><input type="checkbox" id="auto_cycle_toggle" onchange="toggleAutoCycle();checkDirty()"><span class="toggle-track"></span></label>
         </div>
@@ -1330,6 +1389,7 @@
             <div class="field">
               <label class="field-label">Interval (seconds)</label>
               <input type="number" class="input" id="auto_rotate_interval" min="4" max="3600" value="30">
+              <div class="field-hint">Seconds each page is shown before Auto Cycle advances to the next one, from 4 to 3600.</div>
             </div>
             <div class="field">
               <label class="field-label">Transition</label>
@@ -1339,18 +1399,27 @@
                 <option value="2">Slide Left</option>
                 <option value="3">Slide Right</option>
               </select>
+              <div class="field-hint">Animation used when Auto Cycle changes pages.</div>
             </div>
           </div>
           <div class="toggle-row">
             <span class="toggle-label" style="font-size:0.82rem;color:var(--text-muted)">Skip disconnected nodes</span>
             <label class="toggle"><input type="checkbox" id="auto_rotate_skip"><span class="toggle-track"></span></label>
           </div>
+          <div class="field-hint">During Auto Cycle, skip NINA instance pages whose rig is not connected.</div>
           <div class="pn-sub-divider"></div>
           <div>
             <div class="pn-section-label">Pages in Rotation</div>
             <div style="font-size:0.72rem;color:var(--text-muted);margin:-8px 0 10px;opacity:0.7">Drag to reorder</div>
             <div class="pn-pill-grid reorderable" id="arp-container"></div>
+            <div class="field-hint">The ordered set of pages Auto Cycle moves through; drag the pills to set the order.</div>
           </div>
+        </div>
+
+        <div class="field" style="margin-top:12px">
+          <label class="field-label">Stay on selected page (seconds)</label>
+          <input type="number" class="input" id="nav_grace_s" min="10" max="300" value="10">
+          <div class="field-hint" style="margin-top:2px">After you swipe or tap to a page, the display keeps showing it for this long, then returns on its own to the page it would normally show (the connected rig, or your Home page).</div>
         </div>
 
         <div class="pn-divider"></div>
@@ -1375,13 +1444,7 @@
             <option value="6">NINA Instance 2</option>
             <option value="7">NINA Instance 3</option>
           </select>
-          <div class="toggle-row" style="margin-top:12px">
-            <div>
-              <span class="toggle-label">Persistent idle page</span>
-              <div class="field-hint" style="margin-top:2px">Returns to the selected page after manual navigation while idle</div>
-            </div>
-            <label class="toggle"><input type="checkbox" id="idle_page_persistent" onchange="checkDirty()"><span class="toggle-track"></span></label>
-          </div>
+          <div class="field-hint">Page shown while every enabled NINA instance is confirmed disconnected.</div>
           <div class="toggle-row" style="margin-top:12px">
             <div>
               <span class="toggle-label">Show idle indicator</span>
@@ -1397,7 +1460,8 @@
     <div id="tab-behavior" class="tab-panel">
 
       <div class="card">
-        <div class="card-title">Hardware</div>
+        <div class="card-title"><span class="card-title-label">Hardware <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Hardware</div><p>Physical display controls: how the image is rotated on the panel and the backlight level. Both apply live and persist when you save.</p><p>Screen Rotation reorients the entire UI in 90-degree steps for sideways or upside-down mounting. Backlight sets the panel brightness, separate from the Text brightness control on the Display tab.</p><p>Example: if the device is mounted with the USB port facing up, set Screen Rotation to 180 degrees so the dashboard reads right-side up.</p></div>
         <div class="row stack-mobile">
           <div class="field">
             <label class="field-label">Screen Rotation</label>
@@ -1407,6 +1471,7 @@
               <option value="2">180°</option>
               <option value="3">270°</option>
             </select>
+            <div class="field-hint">Rotates the whole UI in 90-degree steps to match the physical mounting.</div>
           </div>
           <div class="field">
             <label class="field-label">Backlight</label>
@@ -1414,43 +1479,44 @@
               <input type="range" class="slider" id="brightness" min="0" max="100" value="80" oninput="setBrightness(this.value)">
               <span class="slider-val" id="brightness_val">80%</span>
             </div>
+            <div class="field-hint">Panel backlight level, separate from Text brightness on the Display tab.</div>
           </div>
         </div>
       </div>
 
       <div class="card">
-        <div class="card-title">Power Management</div>
+        <div class="card-title"><span class="card-title-label">Power Management <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Power Management</div><p>Reduces power draw in two ways. Screen-off-when-idle blanks the backlight after a period with no touch, while the firmware keeps running and wakes the screen on the next touch. Deep sleep powers the device down on a long-press of the BOOT button or after extended disconnection, and resumes only on the wake timer or a physical reboot.</p><p>WiFi power save lets the WiFi radio rest between updates; the device stays connected, so there is no reconnect delay. The wake timer sets how many hours pass before the device wakes itself from deep sleep; a value of 0 means it stays asleep until physically rebooted.</p><p>Example: set Turn off screen when idle on with a 120 second timeout for an always-mounted display, and leave deep sleep off so the dashboard stays reachable over the network.</p></div>
         <div class="toggle-row">
           <span class="toggle-label">Turn off screen when idle</span>
           <label class="toggle"><input type="checkbox" id="screen_sleep_enabled"><span class="toggle-track"></span></label>
         </div>
+        <div class="field-hint" style="margin-top:4px">Blanks the backlight after the timeout while the firmware keeps running; touch wakes the screen.</div>
         <div id="screen_sleep_details" style="margin-top:16px">
           <div class="row stack-mobile">
             <div class="field">
               <label class="field-label">Timeout (seconds)</label>
               <input type="number" class="input" id="screen_sleep_timeout" min="10" max="3600" value="60">
-            </div>
-            <div class="field">
-              <label class="field-label">Idle poll interval (s)</label>
-              <input type="number" class="input" id="idle_poll_interval" min="5" max="120" value="30">
+              <div class="field-hint">Idle time with no touch before the screen blanks, from 10 to 3600 seconds.</div>
             </div>
           </div>
           <div class="toggle-row">
             <span class="toggle-label">WiFi power save</span>
             <label class="toggle"><input type="checkbox" id="wifi_power_save" checked><span class="toggle-track"></span></label>
           </div>
-          <div class="field-hint">Enable WiFi modem sleep between polls. Connection stays associated with zero reconnection delay.</div>
+          <div class="field-hint">Lets the WiFi radio rest between updates to save power. The device stays connected, so there is no reconnect delay.</div>
         </div>
         <hr class="divider">
         <div class="toggle-row">
           <span class="toggle-label">Enable deep sleep (long-press BOOT to power off)</span>
           <label class="toggle"><input type="checkbox" id="deep_sleep_enabled"><span class="toggle-track"></span></label>
         </div>
+        <div class="field-hint" style="margin-top:4px">Allows a long-press of the BOOT button to power the device into deep sleep.</div>
         <div id="deep_sleep_details" style="margin-top:16px">
           <div class="field">
             <label class="field-label">Wake timer (hours)</label>
             <input type="number" class="input" id="deep_sleep_wake_timer" min="0" max="72" step="1" value="0">
-            <div class="field-hint">Hours until auto-wake. 0 = stay asleep forever. Warning: with timer set to 0, the device must be physically rebooted to wake up — there is no manual wake from deep sleep.</div>
+            <div class="field-hint">Hours until auto-wake. 0 = stay asleep forever. Warning: with timer set to 0, the device must be physically rebooted to wake up; there is no manual wake from deep sleep.</div>
           </div>
           <div class="toggle-row">
             <span class="toggle-label">Auto power off when idle</span>
@@ -1461,15 +1527,18 @@
       </div>
 
       <div class="card">
-        <div class="card-title">Polling &amp; Connectivity</div>
+        <div class="card-title"><span class="card-title-label">Polling &amp; Connectivity <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Polling and Connectivity</div><p>Sets how often the device contacts the NINA API and how patient it is before declaring a rig offline. Data update rate is the base polling interval for the active page; faster values refresh the display sooner but generate more API traffic. Graph update rate controls how often the RMS and HFR history graphs add a point.</p><p>Connection timeout is how long a request waits for a response before that instance is marked offline. Idle poll interval is the slower, occasional check used to re-test an offline rig while you are viewing a non-NINA page, which avoids contacting a rig that is not running too often.</p><p>Example: set Data update rate to 2 seconds for a responsive display, raise Connection timeout to 10 seconds on a slow or distant network, and leave Idle poll interval at 30 seconds.</p></div>
         <div class="row stack-mobile">
           <div class="field">
             <label class="field-label">Data update rate (s)</label>
             <input type="number" class="input" id="update_rate" min="1" max="10" value="2">
+            <div class="field-hint">Base polling interval for the active page, from 1 to 10 seconds; lower is more responsive but adds API traffic.</div>
           </div>
           <div class="field">
             <label class="field-label">Graph update rate (s)</label>
             <input type="number" class="input" id="graph_interval" min="2" max="30" value="5">
+            <div class="field-hint">How often the RMS and HFR history graphs record a new data point, from 2 to 30 seconds.</div>
           </div>
         </div>
         <div class="row stack-mobile">
@@ -1478,15 +1547,21 @@
             <input type="number" class="input" id="connection_timeout" min="2" max="30" value="6">
             <div class="field-hint">Seconds without response before a NINA instance is offline</div>
           </div>
+          <div class="field">
+            <label class="field-label">Idle poll interval (s)</label>
+            <input type="number" class="input" id="idle_poll_interval" min="5" max="120" value="30">
+            <div class="field-hint">How often an offline rig is re-checked while you are on a non-NINA page</div>
+          </div>
         </div>
       </div>
 
       <div class="card">
-        <div class="card-title">Notifications</div>
+        <div class="card-title"><span class="card-title-label">Notifications <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Notifications</div><p>Controls on-screen pop-up notifications, the border-flash alerts, and which event categories produce notifications. Notification duration sets how long a normal pop-up stays visible; error and warning pop-ups show for twice that time. Border flash alerts flash the screen edge when an RMS, HFR, or safety threshold is exceeded.</p><p>The aggregation window combines a burst of notifications that arrive close together into one, which reduces clutter during noisy events; set it to 0 to show every notification individually. The Event Categories toggles decide which kinds of events generate notifications at all; turning a category off suppresses its notifications.</p><p>Example: keep Error Events and Safety Events on, turn Focuser and Guider Events off to cut routine chatter, and set the aggregation window to 5 seconds so rapid sequence updates collapse into a single notification.</p></div>
         <div class="field" style="margin-bottom:16px">
           <label class="field-label">Toast duration (s)</label>
           <input type="number" class="input" id="toast_duration" min="3" max="30" value="8">
-          <div class="field-hint">Errors show for 2x this value</div>
+          <div class="field-hint">Errors and warnings show for 2x this value</div>
         </div>
         <div class="toggle-row">
           <span class="toggle-label">Border flash alerts</span>
@@ -1582,7 +1657,8 @@
       </div>
 
       <div class="card">
-        <div class="card-title">Network</div>
+        <div class="card-title"><span class="card-title-label">Network <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Network and time</div><p>The device connects to your WiFi and also broadcasts its own setup WiFi network at the same time. It joins one of the three configured networks to reach your NINA computers; its own setup network uses the device hostname as the network name with password 12345678, so you can reach the settings for first-time setup without a separate screen. The three networks are priority-ordered: Network 1 is tried first, then 2, then 3.</p><p>Hostname is used on your network, as the setup network name, and as the Home Assistant device name. NTP server and timezone set the clock used on the clock page and in timestamps; the timezone list carries the correct local-time and daylight-saving rules.</p><p>Example: hostname ninadash1 produces access point SSID ninadash1 and the device is reachable at ninadash1.lan. Changes here take effect after a reboot.</p></div>
         <div class="wifi-scan-panel" id="wifiScanPanel">
           <div class="wifi-scan-header" onclick="toggleScanPanel()">
             <span class="wifi-scan-title"><span class="chevron" id="scanChevron">&#x25BC;</span> Available Networks</span>
@@ -1595,13 +1671,14 @@
         <div class="field">
           <label class="field-label">Device hostname</label>
           <input type="text" class="input" id="hostname" placeholder="NINA-DISPLAY" maxlength="31" pattern="[A-Za-z0-9\-]+" style="max-width:320px">
-          <div class="field-hint">Used for DHCP, AP SSID, and Home Assistant device name.</div>
+          <div class="field-hint">Used on your network, as the setup WiFi network name, and as the Home Assistant device name.</div>
         </div>
         <hr class="divider">
         <div class="field">
           <div class="field-label" style="margin-top:16px;font-weight:600;color:var(--accent)">Network 1 (Primary)</div>
           <label class="field-label">SSID</label>
           <input type="text" class="input" id="ssid1" placeholder="Network name">
+          <div class="field-hint">Highest-priority network; the device connects to this one first when it is in range.</div>
           <label class="field-label">Password</label>
           <input type="password" class="input" id="pass1" placeholder="Enter new password to change">
           <div class="hint">Password is stored in device config and not readable</div>
@@ -1609,12 +1686,14 @@
           <div class="field-label" style="margin-top:16px;font-weight:600;color:var(--accent)">Network 2</div>
           <label class="field-label">SSID</label>
           <input type="text" class="input" id="ssid2" placeholder="Network name">
+          <div class="field-hint">Fallback joined only when Network 1 is unavailable.</div>
           <label class="field-label">Password</label>
           <input type="password" class="input" id="pass2" placeholder="Enter new password to change">
 
           <div class="field-label" style="margin-top:16px;font-weight:600;color:var(--accent)">Network 3</div>
           <label class="field-label">SSID</label>
           <input type="text" class="input" id="ssid3" placeholder="Network name">
+          <div class="field-hint">Second fallback joined only when Networks 1 and 2 are unavailable.</div>
           <label class="field-label">Password</label>
           <input type="password" class="input" id="pass3" placeholder="Enter new password to change">
         </div>
@@ -1623,6 +1702,7 @@
           <div class="field">
             <label class="field-label">NTP server</label>
             <input type="text" class="input" id="ntp" placeholder="pool.ntp.org">
+            <div class="field-hint">Hostname of the time server used to set the clock; pool.ntp.org works for most locations.</div>
           </div>
           <div class="field">
             <label class="field-label">Timezone</label>
@@ -1650,46 +1730,55 @@
               <option value="<-03>3<-02>,M10.3.0/0,M2.3.0/0">Brazil (BRT/BRST)</option>
               <option value="SAST-2">South Africa (SAST)</option>
             </select>
+            <div class="field-hint">Select your region so local time and daylight-saving transitions are applied to displayed times.</div>
           </div>
         </div>
         <div class="field-hint hint-center">Reboot required after changing hostname, WiFi, NTP, or timezone.</div>
       </div>
 
       <div class="card">
-        <div class="card-title">MQTT</div>
+        <div class="card-title"><span class="card-title-label">MQTT <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">MQTT publishing</div><p>Publishes this device's own state to an MQTT broker and exposes it in Home Assistant. It does not republish N.I.N.A. session data. Auto-discovery config messages are sent so Home Assistant creates the entities automatically, with no manual setup: screen brightness and text brightness (both controllable), a reboot button, and an uptime sensor.</p><p>Broker host and port point at your MQTT server. Topic prefix is added to the front of every topic the device sends, so multiple displays can share one broker without collision. Username and password are sent only if your broker requires authentication; leave them blank for anonymous brokers.</p><p>Example: broker host 192.168.1.250, port 1883, topic prefix ninadisplay publishes under ninadisplay/... and appears in Home Assistant as a device named after the hostname.</p></div>
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
           <span class="toggle-label">Enable MQTT</span>
           <label class="toggle"><input type="checkbox" id="mqtt_enabled"><span class="toggle-track"></span></label>
         </div>
+        <div class="field-hint" style="margin-top:4px">Turn on publishing of the device's own state and Home Assistant auto-discovery to the broker.</div>
         <div class="field" style="margin-top:16px">
           <label class="field-label">Broker host</label>
           <input type="text" class="input" id="mqtt_broker" placeholder="192.168.1.250">
+          <div class="field-hint">IP address or hostname of your MQTT broker.</div>
         </div>
         <div class="row stack-mobile">
           <div class="field">
             <label class="field-label">Port</label>
             <input type="text" class="input" id="mqtt_port" placeholder="1883">
+            <div class="field-hint">Broker TCP port; 1883 for plain MQTT is the common default.</div>
           </div>
           <div class="field">
             <label class="field-label">Topic prefix</label>
             <input type="text" class="input" id="mqtt_prefix" placeholder="ninadisplay">
+            <div class="field-hint">Added to the front of every topic the device sends; use a unique value per device.</div>
           </div>
         </div>
         <div class="row stack-mobile">
           <div class="field">
             <label class="field-label">Username</label>
             <input type="text" class="input" id="mqtt_user" placeholder="Username">
+            <div class="field-hint">Leave blank if the broker allows anonymous connections.</div>
           </div>
           <div class="field">
             <label class="field-label">Password</label>
             <input type="password" class="input" id="mqtt_pass" placeholder="Password">
+            <div class="field-hint">Leave blank if the broker allows anonymous connections.</div>
           </div>
         </div>
         <div class="field-hint hint-center">Reboot required after changing MQTT settings.</div>
       </div>
 
       <div class="card">
-        <div class="card-title">Firmware</div>
+        <div class="card-title"><span class="card-title-label">Firmware <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Firmware and updates</div><p>The info grid is read-only build detail: running version and build date, the ESP-IDF version, and the exact release version. Updates are pulled from GitHub releases; the device keeps the previous firmware so a failed or bad update can roll back automatically.</p><p>Check for updates on boot queries GitHub at startup. Update channel selects which releases qualify: Stable only ignores pre-releases, Include pre-releases also offers beta builds. Check for Updates queries now and, if a newer build exists, shows release notes and an Install button. The file picker below it flashes a local .bin you supply instead of downloading from GitHub.</p><p>Example: set Update channel to Stable only and leave Check for updates on boot enabled to be notified of tagged releases without receiving test builds.</p></div>
         <div class="fw-grid">
           <div class="fw-item"><div class="fw-label">Version</div><div class="fw-value" id="fw_version">--</div></div>
           <div class="fw-item"><div class="fw-label">Built</div><div class="fw-value" id="fw_date">--</div></div>
@@ -1710,6 +1799,7 @@
             <option value="0">Stable only</option>
             <option value="1">Include pre-releases</option>
           </select>
+          <div class="field-hint">Stable only skips pre-release builds; Include pre-releases also offers beta firmware.</div>
         </div>
         <button class="btn btn-primary" style="margin-top:12px;width:100%" id="checkUpdateBtn" onclick="checkForUpdates()">Check for Updates</button>
         <div id="updateResult" style="display:none;margin-top:12px;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.03)">
@@ -1725,6 +1815,7 @@
           </label>
           <button class="btn btn-primary" id="otaBtn" disabled onclick="startOta()">Update</button>
         </div>
+        <div class="field-hint" style="margin-top:4px">Flash a firmware .bin you provide directly instead of downloading from GitHub.</div>
         <div id="otaProgress" style="display:none;margin-top:16px">
           <div class="progress-bg"><div id="otaProgressFill" class="progress-fill"></div></div>
           <div id="otaStatus" class="progress-status"></div>
@@ -1732,7 +1823,8 @@
       </div>
 
       <div class="card">
-        <div class="card-title">Device</div>
+        <div class="card-title"><span class="card-title-label">Device <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Device actions and modes</div><p>Reboot restarts the device and applies pending reboot-required settings. Factory Reset erases all saved settings and returns every setting to defaults, including WiFi, so plan to reconnect over the device's own setup WiFi network afterward.</p><p>Debug Mode enables extra performance and diagnostic info; leave it off for normal use. Demo Mode generates simulated session data so the dashboard can be used with no live NINA connection. Reboot the device for the change to fully take effect. Capture Screenshot pulls a JPEG of the current display.</p><p>Example: enable Demo Mode to preview the dashboard layout before any telescope rig is online, then disable it to return to live data.</p></div>
         <div class="row stack-mobile" style="margin-bottom:16px">
           <button class="btn btn-outline" onclick="saveAndReboot()" style="flex:1">Reboot</button>
           <button class="btn btn-danger" onclick="factoryReset()" style="flex:1">Factory Reset</button>
@@ -1741,10 +1833,10 @@
           <span class="toggle-label">Enable Debug Mode</span>
           <label class="toggle"><input type="checkbox" id="debug_mode"><span class="toggle-track"></span></label>
         </div>
-        <div class="field-hint" style="margin-top:4px;margin-bottom:16px">Performance profiling, serial reports, /api/perf endpoint.</div>
+        <div class="field-hint" style="margin-top:4px;margin-bottom:16px">Shows extra performance and diagnostic info.</div>
         <span class="toggle-label">Enable Demo Mode</span>
         <label class="toggle"><input type="checkbox" id="demo_mode"><span class="toggle-track"></span></label>
-        <p style="color:#888;font-size:0.85em;margin:2px 0 8px 0;">Generates simulated astrophotography data. Reboots device.</p>
+        <p style="color:#888;font-size:0.85em;margin:2px 0 8px 0;">Generates simulated astrophotography data. Reboot for the change to fully take effect.</p>
         <button class="btn btn-outline" id="ssBtn" onclick="takeScreenshot()">Capture Screenshot</button>
         <div id="ssContainer" style="display:none;margin-top:16px">
           <img id="ssImage" style="width:100%;border-radius:var(--radius-sm);border:1px solid var(--border)">
@@ -1752,7 +1844,8 @@
       </div>
 
       <div class="card" id="adminPasswordCard">
-        <div class="card-title">Authentication</div>
+        <div class="card-title"><span class="card-title-label">Authentication <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Web UI access control</div><p>Require login asks for a username and password before the web settings will open, and is on by default. When it is off, anyone on the network can reboot, factory-reset, flash, or reconfigure the device; secrets such as passwords, API keys, and tokens stay redacted in API responses either way.</p><p>The admin password defaults to changeme123!. To change it, enter the current password, then the new password twice (4 to 32 characters). Sign out clears your current browser session.</p><p>Example: keep Require login enabled and change the password from the default before exposing the device beyond your local network.</p></div>
         <div class="toggle-row">
           <span class="toggle-label">Require login to access the web UI</span>
           <label class="toggle"><input type="checkbox" id="auth_enabled"><span class="toggle-track"></span></label>
@@ -1771,14 +1864,17 @@
         <div class="field">
           <label for="admin_pw_current">Current password</label>
           <input type="password" id="admin_pw_current" autocomplete="current-password">
+          <div class="field-hint">Enter the password in use now to authorize the change.</div>
         </div>
         <div class="field">
           <label for="admin_pw_new">New password (4-32 chars)</label>
           <input type="password" id="admin_pw_new" autocomplete="new-password">
+          <div class="field-hint">Choose a password 4 to 32 characters long.</div>
         </div>
         <div class="field">
           <label for="admin_pw_confirm">Confirm new password</label>
           <input type="password" id="admin_pw_confirm" autocomplete="new-password">
+          <div class="field-hint">Re-enter the new password exactly to confirm.</div>
         </div>
         <button class="btn btn-primary" onclick="changeAdminPassword()">Save Password</button>
         <div id="admin_pw_status" style="margin-top:10px;font-size:0.9em;"></div>
@@ -1791,7 +1887,8 @@
     <div id="tab-logs" class="tab-panel">
 
       <div class="card nocollapse">
-        <div class="card-title">Logs</div>
+        <div class="card-title"><span class="card-title-label">Logs <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Device and crash logs</div><p>Two sources share this card. Device shows console output captured since boot and kept in memory; only a limited amount is kept, so the oldest lines drop off as new ones arrive, and it is cleared on reboot. Crash shows saved crash history: the device records unexpected restarts and crashes, with details attached when available. Crash records survive reboots and power loss.</p><p>Refresh reloads the active source. Download saves the current source to a file. Clear empties it. For Device, Auto-refresh reloads on the chosen Interval. For Crash, Auto-clear after drops records older than the selected age, and Never keeps them indefinitely.</p><p>Example: switch to Crash and use Download to attach a crash record when reporting an unexpected reboot.</p></div>
 
         <div class="logs-toolbar">
           <div class="log-seg" role="tablist">
@@ -1836,7 +1933,7 @@
         </div>
 
         <div class="logs-meta">
-          <span class="field-hint" id="logsHint">Console output captured since boot (in-memory, 512 KB ring buffer, oldest lines dropped when full).</span>
+          <span class="field-hint" id="logsHint">Console output captured since boot (kept in memory; oldest lines drop off as new ones arrive).</span>
           <span class="field-hint" id="logsStatus">Not loaded yet.</span>
           <span class="field-hint" id="crashlogStatus" style="display:none">Not loaded yet.</span>
         </div>
@@ -1850,7 +1947,8 @@
     <div id="tab-backup" class="tab-panel">
       <!-- Export Card -->
       <div class="card">
-        <div class="card-title">Export Configuration</div>
+        <div class="card-title"><span class="card-title-label">Export Configuration <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Export configuration</div><p>Downloads the device configuration as a JSON file for backup or for cloning settings to another unit. The header shows the configuration version and running firmware version embedded in the file; the restore screen uses these to flag version mismatches.</p><p>Include sensitive data controls whether secrets are written to the file. With it off, the export omits every secret: the weather API key, MQTT username, password, and broker URL, the Spotify Client ID, the hostname, your saved WiFi passwords, and the admin password. Turn it on only for a private full backup that can restore those values.</p><p>Example: leave Include sensitive data off when sharing a configuration as a template, and turn it on only for a private full backup of one device.</p></div>
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;font-size:0.82rem;color:#a1a1aa">
           <span>Config version: <strong style="color:#f4f4f5" id="backupCurrentVersion">--</strong></span>
           <span>&middot;</span>
@@ -1859,7 +1957,7 @@
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
           <div>
             <span class="toggle-label">Include sensitive data</span>
-            <div class="field-hint" style="margin-top:2px">MQTT credentials, Spotify Client ID, Hostname</div>
+            <div class="field-hint" style="margin-top:2px">Weather and MQTT credentials, Spotify Client ID, hostname, WiFi and admin passwords</div>
           </div>
           <label class="toggle"><input type="checkbox" id="backupIncludeSensitive"><span class="toggle-track"></span></label>
         </div>
@@ -1868,7 +1966,8 @@
 
       <!-- Import Card -->
       <div class="card">
-        <div class="card-title">Restore Configuration</div>
+        <div class="card-title"><span class="card-title-label">Restore Configuration <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Restore configuration</div><p>Loads a previously exported JSON file and previews the effect before applying it. The metadata header shows the source hostname and MAC, the firmware version the file came from, and the export date. A version warning appears when the backup's configuration version differs from this device.</p><p>The preview lists each setting that would change, plus notices for settings missing from the backup, settings this firmware does not recognize, sensitive values that were excluded from the file, and any validation issues. Nothing is written until you press Restore; Cancel discards the file.</p><p>Example: restoring a file exported without sensitive data leaves the current MQTT password and other secrets in place, shown as excluded in the preview.</p></div>
         <div class="field">
           <label class="ota-label" id="restoreFileLabel" style="display:block;text-align:center;cursor:pointer">
             Choose backup .json file
@@ -1959,15 +2058,19 @@
         const urlId='url'+(i+1);
         container.insertAdjacentHTML('beforeend',
           '<div class="card node-config-card" id="node_card_'+i+'" data-node="'+i+'">'+
-            '<div class="card-title">N.I.N.A. '+(i+1)+' <span id="node_card_hostname_'+i+'" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span></div>'+
+            '<div class="card-title"><span class="card-title-label">N.I.N.A. '+(i+1)+' <span id="node_card_hostname_'+i+'" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span> <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>'+
+            '<div class="help-popover"><div class="help-popover-title">N.I.N.A. Node</div><p>Configures one N.I.N.A. instance: where to reach it, whether its notifications are muted, the color shown per filter, and the color bands applied to guider RMS and HFR values on its dashboard page.</p><p>The hostname is the only required field. The remaining settings change how this instance\'s data is colored and whether it shows pop-up notifications.</p><p>Example: enter the IP of your imaging PC, mute notifications on a secondary rig you are not watching, and set the RMS bands so values under 0.5 show green and values over 1.0 show red.</p></div>'+
             '<div class="field"><label class="field-label">Hostname / IP</label>'+
-            '<input type="text" class="input" id="'+urlId+'" placeholder="'+placeholders[i]+'" oninput="updateNodeLabels()"></div>'+
+            '<input type="text" class="input" id="'+urlId+'" placeholder="'+placeholders[i]+'" oninput="updateNodeLabels()">'+
+            '<div class="field-hint">Host or IP of the N.I.N.A. computer running the Advanced API plugin; the web page adds port 1888 and the /v2/api/ path before saving (e.g. 192.168.1.100 becomes http://192.168.1.100:1888/v2/api/).</div></div>'+
             '<div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">'+
             '<span class="toggle-label">Mute Notifications</span>'+
             '<label class="toggle"><input type="checkbox" id="toast_instance_muted_'+i+'" onchange="checkDirty()"><span class="toggle-track"></span></label>'+
             '</div>'+
+            '<div class="field-hint">Suppresses all on-screen pop-up notifications from this instance, including connect and disconnect events.</div>'+
             '<div class="field"><label class="field-label">Filter colors</label>'+
-            '<div id="filters_'+i+'" class="filter-grid"></div></div>'+
+            '<div id="filters_'+i+'" class="filter-grid"></div>'+
+            '<div class="field-hint">Sets the color used for the exposure arc and labels when each filter is active; detected filters appear after the instance connects.</div></div>'+
             '<div class="row stack-mobile">'+
             mkThresholdSection('rms',i)+
             mkThresholdSection('hfr',i)+
@@ -2273,6 +2376,9 @@
 
     function toggleAutoCycle(){
       var on=$('auto_cycle_toggle').checked;
+      if(on && $('idle_page_override_enabled') && $('idle_page_override_enabled').checked){
+        $('idle_page_override_enabled').checked=false; toggleIdleOverride();
+      }
       $('pn_cycle_settings').style.display=on?'flex':'none';
       updatePageNavSummary();
     }
@@ -2406,41 +2512,40 @@
       }
     }
 
-    /* === Rotation Bitmask === */
-    const arpIds=['arp_summary','arp_nina1','arp_nina2','arp_nina3','arp_sysinfo','arp_allsky','arp_spotify','arp_clock','arp_image_display'];
-    const arpBits=[0x01,0x02,0x04,0x08,0x10,0x20,0x40,0x80,0x100];
-
-    function getRotatePages(){
-      var mask=0;
-      arpIds.forEach((id,i)=>{if($(id).checked) mask|=arpBits[i];});
-      return mask;
-    }
-    function setRotatePages(mask){
-      arpIds.forEach((id,i)=>{$(id).checked=!!(mask&arpBits[i]);});
-    }
-
+    /* === Rotation slideshow list === */
+    /* Single ordered slideshow list: membership == order.
+       data-arp-idx equals the page's rotation bit index (0..8).
+       Saved array holds the bit indices of CHECKED pills in on-screen order,
+       padded to 9 slots with 0xFF (255 = unused). Slot 9 is auto_rotate_order_ext. */
     function getRotateOrder(){
       var pills=$('arp-container').querySelectorAll('.pn-pill[data-arp-idx]');
       var order=[];
-      pills.forEach(function(p){ order.push(parseInt(p.getAttribute('data-arp-idx'))); });
-      return order;
+      pills.forEach(function(p){
+        var cb=p.querySelector('input[type="checkbox"]');
+        if(cb&&cb.checked) order.push(parseInt(p.getAttribute('data-arp-idx')));
+      });
+      while(order.length<9) order.push(255);
+      return order.slice(0,9);
     }
 
     function setRotateOrder(orderArr){
-      if(!orderArr||!orderArr.length) return;
+      if(!orderArr) return;
       var container=$('arp-container');
       var pills=Array.from(container.querySelectorAll('.pn-pill[data-arp-idx]'));
-      /* Sort pills by order array */
       var pillMap={};
       pills.forEach(function(p){ pillMap[p.getAttribute('data-arp-idx')]=p; });
-      orderArr.forEach(function(idx){
+      /* Members (in order) = entries that are not the 0xFF/255 sentinel. */
+      var members=orderArr.map(function(v){return parseInt(v);}).filter(function(v){return !isNaN(v)&&v>=0&&v!==255&&v<pills.length;});
+      /* Reorder members to the front in saved order, set their checkbox on. */
+      members.forEach(function(idx){
         var p=pillMap[idx];
-        if(p) container.appendChild(p);
+        if(p){ container.appendChild(p); var cb=p.querySelector('input[type="checkbox"]'); if(cb) cb.checked=true; }
       });
-      /* Append any pills not mentioned in orderArr */
+      /* Append non-members after, uncheck them. */
       pills.forEach(function(p){
-        if(orderArr.indexOf(parseInt(p.getAttribute('data-arp-idx')))===-1){
+        if(members.indexOf(parseInt(p.getAttribute('data-arp-idx')))===-1){
           container.appendChild(p);
+          var cb=p.querySelector('input[type="checkbox"]'); if(cb) cb.checked=false;
         }
       });
     }
@@ -2483,8 +2588,8 @@
         auto_rotate_interval_s:parseInt($('auto_rotate_interval').value)||30,
         auto_rotate_effect:parseInt($('auto_rotate_effect').value),
         auto_rotate_skip_disconnected:!!$('auto_rotate_skip').checked,
-        auto_rotate_pages:getRotatePages(),
         auto_rotate_order:getRotateOrder(),
+        nav_grace_s:parseInt($('nav_grace_s').value)||10,
         update_rate_s:parseInt($('update_rate').value)||2,
         graph_update_interval_s:parseInt($('graph_interval').value)||5,
         connection_timeout_s:parseInt($('connection_timeout').value)||6,
@@ -2555,7 +2660,6 @@
         tz_string:$('tz_string').value,
         idle_page_override_enabled:!!$('idle_page_override_enabled').checked,
         idle_page_override_target:parseInt($('idle_page_override_target').value),
-        idle_page_persistent:!!$('idle_page_persistent').checked,
         idle_indicator_enabled:!!$('idle_indicator_enabled').checked,
         crash_log_retention_days:parseInt($('crashlog_retention').value,10)||0
       };
@@ -2669,7 +2773,7 @@
       $('auto_rotate_interval').value=data.auto_rotate_interval_s||30;
       $('auto_rotate_effect').value=data.auto_rotate_effect||0;
       $('auto_rotate_skip').checked=!!data.auto_rotate_skip_disconnected;
-      setRotatePages(data.auto_rotate_pages!=null?data.auto_rotate_pages:0x1F);
+      if($('nav_grace_s')) $('nav_grace_s').value=(data.nav_grace_s||10);
       if(data.auto_rotate_order) setRotateOrder(data.auto_rotate_order);
 
       updateNodeLabels();
@@ -2751,7 +2855,6 @@
       // Idle override fields
       if($('idle_page_override_enabled')) $('idle_page_override_enabled').checked=!!data.idle_page_override_enabled;
       if($('idle_page_override_target')) $('idle_page_override_target').value=data.idle_page_override_target!=null?data.idle_page_override_target:-1;
-      if($('idle_page_persistent')) $('idle_page_persistent').checked=!!data.idle_page_persistent;
       if($('idle_indicator_enabled')) $('idle_indicator_enabled').checked=data.idle_indicator_enabled!==false;
       toggleIdleOverride();
 
@@ -2773,7 +2876,7 @@
 
       // Update page selector AFTER all enable checkboxes are populated
       buildStartPagePills();
-      setStartPageValue(data.active_page_override!=null&&data.active_page_override>=0?data.active_page_override:2);
+      setStartPageValue(data.active_page_override!=null&&data.active_page_override>=0?data.active_page_override:4); // -1/legacy -> Summary, matches firmware home_page()
       updatePageNavSummary();
 
       loadedConfig=JSON.stringify(getConfigData());
@@ -2911,6 +3014,9 @@
 
     function toggleIdleOverride(){
       var enabled=$('idle_page_override_enabled').checked;
+      if(enabled && $('auto_cycle_toggle') && $('auto_cycle_toggle').checked){
+        $('auto_cycle_toggle').checked=false; toggleAutoCycle();
+      }
       $('idle_target_field').style.display=enabled?'':'none';
     }
 
@@ -4095,6 +4201,14 @@
       return 'nina_collapse_'+tabId+'_'+text;
     }
 
+    function toggleHelp(e, btn){
+      if(e) e.stopPropagation();
+      var ct = btn.closest('.card-title');
+      if(!ct) return;
+      var pop = ct.nextElementSibling;
+      if(pop && pop.classList.contains('help-popover')) pop.classList.toggle('open');
+    }
+
     function initCollapsibleCards(){
       var saved={};
       try{ saved=JSON.parse(localStorage.getItem('nina_collapse_state')||'{}'); }catch(e){}
@@ -4142,8 +4256,8 @@
 
     /* Hint text per source (no em dashes in user-facing strings). */
     var LOG_HINTS={
-      device:'Console output captured since boot (in-memory, 512 KB ring buffer, oldest lines dropped when full).',
-      crash:'Persistent crash history (survives reboot). Reset reason for every abnormal restart, with serial panic text when available. Newest 20 records kept.'
+      device:'Console output captured since boot (kept in memory; oldest lines drop off as new ones arrive).',
+      crash:'Saved crash history (survives reboot). Records unexpected restarts and crashes, with details when available. Newest 20 records kept.'
     };
 
     /* Switch the unified Logs card between the device and crash sources. Toggles
@@ -4529,7 +4643,7 @@
       if (p.missing_fields && p.missing_fields.length > 0) {
         missingDiv.style.display = 'block';
         missingDiv.innerHTML = '<strong style="color:#f59e0b">Missing from backup:</strong> ' +
-          p.missing_fields.join(', ') + '<br><span style="color:#71717a">These settings will keep their current values.</span>';
+          p.missing_fields.map(escHtml).join(', ') + '<br><span style="color:#71717a">These settings will keep their current values.</span>';
       } else {
         missingDiv.style.display = 'none';
       }
@@ -4539,7 +4653,7 @@
       if (p.unknown_fields && p.unknown_fields.length > 0) {
         unknownDiv.style.display = 'block';
         unknownDiv.innerHTML = '<strong style="color:#f59e0b">Unknown fields (from newer firmware):</strong> ' +
-          p.unknown_fields.join(', ') + '<br><span style="color:#71717a">These will be skipped.</span>';
+          p.unknown_fields.map(escHtml).join(', ') + '<br><span style="color:#71717a">These will be skipped.</span>';
       } else {
         unknownDiv.style.display = 'none';
       }
@@ -4554,18 +4668,45 @@
         sensDiv.style.display = 'none';
       }
 
-      /* Validation notes */
+      /* Validation notes (array of {severity, message}) */
       var valDiv = $('restoreValidation');
-      if (p.validation_notes && p.validation_notes.length > 0) {
+      var notes = p.validation_notes || [];
+      var errs = [], warns = [];
+      for (var i = 0; i < notes.length; i++) {
+        var n = notes[i];
+        if (n && n.severity === 'error') errs.push(n.message);
+        else if (n) warns.push(n.message);
+      }
+      function escHtml(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;');
+      }
+      if (errs.length > 0 || warns.length > 0) {
         valDiv.style.display = 'block';
-        valDiv.innerHTML = '<strong style="color:#f59e0b">Adjusted values:</strong><br>' +
-          p.validation_notes.join('<br>');
+        var html = '';
+        if (errs.length > 0) {
+          html += '<strong style="color:#f87171">Problems that must be fixed:</strong><br>' +
+            errs.map(escHtml).join('<br>');
+        }
+        if (warns.length > 0) {
+          if (html) html += '<br><br>';
+          html += '<strong style="color:#f59e0b">Adjusted values:</strong><br>' +
+            warns.map(escHtml).join('<br>');
+        }
+        valDiv.innerHTML = html;
       } else {
         valDiv.style.display = 'none';
       }
 
-      /* Update confirm button text */
-      $('restoreConfirmBtn').textContent = 'Restore (' + p.total_changes + ' change' + (p.total_changes !== 1 ? 's' : '') + ')';
+      /* Update confirm button — block restore when there are hard errors */
+      var rcBtn = $('restoreConfirmBtn');
+      if (p.restore_blocked) {
+        rcBtn.disabled = true;
+        rcBtn.textContent = 'Resolve errors to restore';
+      } else {
+        rcBtn.disabled = false;
+        rcBtn.textContent = 'Restore (' + p.total_changes + ' change' + (p.total_changes !== 1 ? 's' : '') + ')';
+      }
     }
 
     function formatDiffValue(val) {
@@ -4582,12 +4723,15 @@
       $('restoreFileLabel').textContent = 'Choose backup .json file';
       $('restoreFileLabel').classList.remove('has-file');
       $('restoreFileLabel').appendChild(input);
+      var rcBtn = $('restoreConfirmBtn');
+      if (rcBtn) { rcBtn.disabled = false; rcBtn.textContent = 'Restore'; }
       _backupData = null;
     }
 
     function confirmRestore() {
       if (!_backupData) return;
       var btn = $('restoreConfirmBtn');
+      if (btn.disabled) return;  /* blocked by validation errors */
       btn.disabled = true; btn.textContent = 'Restoring...';
 
       postJson('/api/config/restore', {backup: _backupData, confirm: true})

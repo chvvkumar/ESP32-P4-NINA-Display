@@ -24,6 +24,7 @@
 #include "nina_alerts.h"
 #include "nina_safety.h"
 #include "nina_idle_indicator.h"
+#include "nina_nav_arbiter.h"
 #include "nina_ota_prompt.h"
 #include "nina_wait_overlay.h"
 #include "ui_styles.h"
@@ -31,6 +32,7 @@
 #include "themes.h"
 #include "tasks.h"
 #include "lvgl.h"
+#include "esp_timer.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -39,7 +41,8 @@ dashboard_page_t pages[MAX_NINA_INSTANCES];
 int page_count = 0;
 int active_page = 0;
 const theme_t *current_theme = NULL;
-int page_instance_map[MAX_NINA_INSTANCES] = {0, 1, 2};
+bool nina_slot_available[MAX_NINA_INSTANCES] = { false, false, false };
+int  nina_available_count = 0;
 
 /* AllSky page — always at PAGE_IDX_ALLSKY (0), excluded from indicators */
 lv_obj_t *allsky_obj = NULL;
@@ -152,6 +155,14 @@ lv_obj_t *create_value_label(lv_obj_t *parent) {
  *   total_page_count                            = page_count + EXTRA_PAGES
  */
 
+/* Absolute page index -> NINA instance index, or -1 if not a NINA page.
+ * Fixed identity: page NINA_PAGE_OFFSET + i is always instance i. */
+static int abs_page_to_instance(int idx) {
+    int inst = idx - NINA_PAGE_OFFSET;
+    if (inst < 0 || inst >= MAX_NINA_INSTANCES) return -1;
+    return inst;
+}
+
 /* Hide the page object at the given index */
 static void hide_page_at(int idx) {
     if (idx == PAGE_IDX_ALLSKY && allsky_obj)
@@ -168,11 +179,16 @@ static void hide_page_at(int idx) {
         lv_obj_add_flag(image_display_obj, LV_OBJ_FLAG_HIDDEN);
     else if (idx == PAGE_IDX_SUMMARY && summary_obj)
         lv_obj_add_flag(summary_obj, LV_OBJ_FLAG_HIDDEN);
-    else if (idx >= NINA_PAGE_OFFSET && idx < NINA_PAGE_OFFSET + page_count)
-        lv_obj_add_flag(pages[idx - NINA_PAGE_OFFSET].page, LV_OBJ_FLAG_HIDDEN);
+    else if (abs_page_to_instance(idx) >= 0) {
+        int inst = abs_page_to_instance(idx);
+        if (nina_slot_available[inst] && pages[inst].page)
+            lv_obj_add_flag(pages[inst].page, LV_OBJ_FLAG_HIDDEN);
+    }
     else if (idx == SETTINGS_PAGE_IDX(page_count) && settings_obj) {
         settings_tabview_destroy();
         settings_obj = NULL;
+        /* Settings is a modal surface — unfreeze the arbiter on destroy. */
+        nav_arbiter_notify_modal_close(esp_timer_get_time() / 1000);
     } else if (idx == SYSINFO_PAGE_IDX(page_count) && sysinfo_obj)
         lv_obj_add_flag(sysinfo_obj, LV_OBJ_FLAG_HIDDEN);
 }
@@ -193,11 +209,17 @@ static void show_page_at(int idx) {
         lv_obj_clear_flag(image_display_obj, LV_OBJ_FLAG_HIDDEN);
     else if (idx == PAGE_IDX_SUMMARY && summary_obj)
         lv_obj_clear_flag(summary_obj, LV_OBJ_FLAG_HIDDEN);
-    else if (idx >= NINA_PAGE_OFFSET && idx < NINA_PAGE_OFFSET + page_count)
-        lv_obj_clear_flag(pages[idx - NINA_PAGE_OFFSET].page, LV_OBJ_FLAG_HIDDEN);
+    else if (abs_page_to_instance(idx) >= 0) {
+        int inst = abs_page_to_instance(idx);
+        if (nina_slot_available[inst] && pages[inst].page)
+            lv_obj_clear_flag(pages[inst].page, LV_OBJ_FLAG_HIDDEN);
+    }
     else if (idx == SETTINGS_PAGE_IDX(page_count)) {
         if (!settings_obj) {
             settings_obj = settings_tabview_create(main_cont);
+            /* Settings is a modal surface — freeze the arbiter on create.
+             * Paired with the close in hide_page_at()'s destroy branch. */
+            nav_arbiter_notify_modal_open();
         }
         lv_obj_clear_flag(settings_obj, LV_OBJ_FLAG_HIDDEN);
         settings_tabview_refresh();
@@ -214,8 +236,10 @@ static lv_obj_t *get_page_obj(int idx) {
     if (idx == PAGE_IDX_CLOCK && clock_obj) return clock_obj;
     if (idx == PAGE_IDX_IMAGE_DISPLAY && image_display_obj) return image_display_obj;
     if (idx == PAGE_IDX_SUMMARY && summary_obj) return summary_obj;
-    if (idx >= NINA_PAGE_OFFSET && idx < NINA_PAGE_OFFSET + page_count)
-        return pages[idx - NINA_PAGE_OFFSET].page;
+    if (abs_page_to_instance(idx) >= 0) {
+        int inst = abs_page_to_instance(idx);
+        return (nina_slot_available[inst] && pages[inst].page) ? pages[inst].page : NULL;
+    }
     if (idx == SETTINGS_PAGE_IDX(page_count) && settings_obj) return settings_obj;
     if (idx == SYSINFO_PAGE_IDX(page_count) && sysinfo_obj) return sysinfo_obj;
     return NULL;
@@ -322,7 +346,13 @@ void nina_dashboard_apply_theme(int theme_index) {
 
 /* Go back to summary page when bottom row is clicked */
 static void bottom_row_click_cb(lv_event_t *e) {
-    nina_dashboard_show_page(PAGE_IDX_SUMMARY, 0);
+    LV_UNUSED(e);
+    /* Task 4.1 / 6.1: route this USER tap through the arbiter like the other
+     * USER-nav sites (swipe, button, /api/page, summary card). Commit
+     * immediately for instant feedback AND record a USER claim so the grace
+     * window protects it from being overridden by the next resolve(). */
+    nina_dashboard_show_page_animated(PAGE_IDX_SUMMARY, 0, 0);
+    nav_arbiter_submit_user(PAGE_IDX_SUMMARY, esp_timer_get_time() / 1000);
 }
 
 /* Build all widgets for one dashboard page */
@@ -685,6 +715,15 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
 
 /* Page indicator dots at the bottom */
 static void create_page_indicator(lv_obj_t *parent, int count) {
+    /* Idempotent on re-call: tear down any prior strip first so repeated
+     * enable/disable cycles do not leak internal heap. Deleting indicator_cont
+     * deletes its child dots in one call. */
+    if (indicator_cont) {
+        lv_obj_delete(indicator_cont);   /* deletes children dots too */
+        indicator_cont = NULL;
+        for (int i = 0; i < MAX_NINA_INSTANCES; i++) indicator_dots[i] = NULL;
+    }
+
     if (count <= 1) return;
 
     indicator_cont = lv_obj_create(parent);
@@ -771,7 +810,12 @@ static void gesture_event_cb(lv_event_t *e) {
         return;
     }
 
-    nina_dashboard_show_page(new_page, total_page_count);
+    /* Task 4.1: route USER nav through the arbiter. Commit immediately for
+     * instant swipe feedback AND record a USER claim so the grace window
+     * (nav_grace_s) protects this page from lower-priority sources until the
+     * next resolve(). */
+    nina_dashboard_show_page_animated(new_page, 0, 0);
+    nav_arbiter_submit_user(new_page, esp_timer_get_time() / 1000);
 }
 
 /* Target name: click to request thumbnail */
@@ -834,6 +878,13 @@ static void session_stats_click_cb(lv_event_t *e) {
     nina_info_overlay_show(INFO_OVERLAY_SESSION_STATS, active_page);
 }
 
+/* True iff NINA instance has a non-empty URL and is enabled in config */
+static bool slot_is_available_cfg(int instance) {
+    if (instance < 0 || instance >= MAX_NINA_INSTANCES) return false;
+    const char *url = app_config_get_instance_url(instance);
+    return (url[0] != '\0') && app_config_is_instance_enabled(instance);
+}
+
 /* Set up the dashboard with one page per NINA instance */
 void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     app_config_t *cfg = app_config_get();
@@ -845,17 +896,18 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     /* Clear stale idle indicator pointers before creating new pages */
     nina_idle_indicator_reset();
 
-    /* Build page-to-instance mapping: only enabled instances get pages */
-    page_count = 0;
+    /* Reserved fixed NINA index band: the band is always MAX_NINA_INSTANCES wide.
+     * Slot i always maps to instance i at absolute index NINA_PAGE_OFFSET + i.
+     * page_count is the constant band width so SETTINGS_PAGE_IDX / SYSINFO_PAGE_IDX
+     * never shift with the enabled count. There is NO floor to 1; a disabled or
+     * URL-less instance simply has an unavailable (NULL) slot. */
+    page_count = MAX_NINA_INSTANCES;        /* constant band width */
+    nina_available_count = 0;
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
-        const char *url = app_config_get_instance_url(i);
-        if (url[0] != '\0' && app_config_is_instance_enabled(i)) {
-            page_instance_map[page_count] = i;
-            page_count++;
-        }
+        nina_slot_available[i] = slot_is_available_cfg(i);
+        if (nina_slot_available[i]) nina_available_count++;
     }
-    if (page_count < 1) page_count = 1;  /* Always at least 1 page */
-    active_page = PAGE_IDX_SUMMARY;  /* Summary page is the default */
+    active_page = PAGE_IDX_SUMMARY;         /* Summary is the boot default */
 
     main_cont = lv_obj_create(scr_dashboard);
     lv_obj_remove_style_all(main_cont);
@@ -887,17 +939,22 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     image_display_obj = app_config_get()->image_display_enabled ? image_display_page_created : NULL;
 
     /* Summary page — PAGE_IDX_SUMMARY, visible by default */
-    summary_obj = summary_page_create(main_cont, page_count);
+    summary_obj = summary_page_create(main_cont);
 
-    /* NINA instance pages — page indices NINA_PAGE_OFFSET..NINA_PAGE_OFFSET+page_count-1, hidden initially.
-     * Each page maps to the actual instance via page_instance_map[]. */
-    for (int i = 0; i < page_count; i++) {
-        create_dashboard_page(&pages[i], main_cont, page_instance_map[i]);
+    /* NINA instance pages — absolute index NINA_PAGE_OFFSET + i, hidden initially.
+     * Slot i maps to instance i (fixed identity). Index positions are reserved,
+     * but the LVGL page object is created ONLY for an available slot; an
+     * unavailable slot is left NULL so the internal-heap footprint stays
+     * proportional to enabled instances. The arc timer is created only when the
+     * page exists. */
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        if (!nina_slot_available[i]) {
+            pages[i].page = NULL;
+            pages[i].arc_timer = NULL;
+            continue;
+        }
+        create_dashboard_page(&pages[i], main_cont, i);
         lv_obj_add_flag(pages[i].page, LV_OBJ_FLAG_HIDDEN);
-    }
-
-    /* Create 200ms LVGL timers for smooth arc interpolation on each page */
-    for (int i = 0; i < page_count; i++) {
         pages[i].arc_timer = lv_timer_create(arc_interp_timer_cb, ARC_TIMER_MS, &pages[i]);
     }
 
@@ -910,8 +967,8 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     lv_obj_add_flag(sysinfo_obj, LV_OBJ_FLAG_HIDDEN);
     total_page_count = page_count + EXTRA_PAGES;  /* allsky + spotify + clock + summary + NINA pages + settings + sysinfo */
 
-    /* Page indicator dots — only for NINA pages (not allsky, spotify, summary, settings, or sysinfo) */
-    create_page_indicator(scr_dashboard, page_count);
+    /* Page indicator dots — one dot per available NINA slot (not allsky, spotify, summary, settings, or sysinfo) */
+    create_page_indicator(scr_dashboard, nina_available_count);
 
     /* Always enable swipe gestures */
     lv_obj_add_event_cb(scr_dashboard, gesture_event_cb, LV_EVENT_GESTURE, NULL);
@@ -933,15 +990,65 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     // Generic wait/loading overlay (created last so it sits on top)
     nina_wait_overlay_create(scr_dashboard);
 
-    // Make header box clickable on all pages to open thumbnail
-    for (int i = 0; i < page_count; i++) {
-        if (pages[i].header_box) {
+    // Make header box clickable on available pages to open thumbnail
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        if (pages[i].page && pages[i].header_box) {
             lv_obj_add_flag(pages[i].header_box, LV_OBJ_FLAG_CLICKABLE);
             lv_obj_add_event_cb(pages[i].header_box, target_name_click_cb, LV_EVENT_CLICKED, NULL);
         }
     }
 
     nina_dashboard_apply_theme(cfg->theme_index);
+}
+
+bool nina_dashboard_slot_available(int instance) {
+    if (instance < 0 || instance >= MAX_NINA_INSTANCES) return false;
+    return nina_slot_available[instance];
+}
+
+void nina_dashboard_rebuild_slot(int instance) {
+    if (instance < 0 || instance >= MAX_NINA_INSTANCES) return;
+    bool want = slot_is_available_cfg(instance);
+    bool have = nina_slot_available[instance];
+    if (want == have) return;                 /* nothing to do */
+
+    if (want && !have) {
+        /* Create the slot's page + arc timer */
+        create_dashboard_page(&pages[instance], main_cont, instance);
+        lv_obj_add_flag(pages[instance].page, LV_OBJ_FLAG_HIDDEN);
+        pages[instance].arc_timer =
+            lv_timer_create(arc_interp_timer_cb, ARC_TIMER_MS, &pages[instance]);
+        if (pages[instance].header_box) {
+            lv_obj_add_flag(pages[instance].header_box, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_add_event_cb(pages[instance].header_box,
+                                target_name_click_cb, LV_EVENT_CLICKED, NULL);
+        }
+        nina_slot_available[instance] = true;
+        nina_available_count++;
+    } else {
+        /* Destroy the slot's page + arc timer */
+        if (active_page == NINA_PAGE_OFFSET + instance) {
+            /* Pre-move off the dying page; the arbiter re-resolves next tick. */
+            nina_dashboard_show_page(PAGE_IDX_SUMMARY, total_page_count);
+        }
+        if (pages[instance].arc_timer) {
+            lv_timer_delete(pages[instance].arc_timer);
+            pages[instance].arc_timer = NULL;
+        }
+        if (pages[instance].page) {
+            lv_obj_delete(pages[instance].page);
+            pages[instance].page = NULL;
+        }
+        nina_slot_available[instance] = false;
+        if (nina_available_count > 0) nina_available_count--;
+    }
+
+    /* page_count (band width) and total_page_count are CONSTANT under the
+     * reserved band, so SETTINGS/SYSINFO indices do not move. Only the dot
+     * strip (sized to the available count) and the summary need a refresh. */
+    create_page_indicator(scr_dashboard, nina_available_count);  /* rebuilds dots */
+    summary_page_rebuild();                                      /* Task 1.3c */
+    update_indicators();
 }
 
 void nina_dashboard_show_page(int page_index, int instance_count) {
@@ -1043,16 +1150,20 @@ int nina_dashboard_get_total_page_count(void) {
     return total_page_count;
 }
 
-int nina_dashboard_page_to_instance(int page_idx) {
-    if (page_idx < 0 || page_idx >= page_count) return -1;
-    return page_instance_map[page_idx];
+/* Pure-offset inverse of instance_to_page. Input is an ABSOLUTE page index.
+ * Availability is a SEPARATE query (nina_slot_available[]); this maps the index
+ * even for an unavailable slot so callers can map then test availability. */
+int nina_dashboard_page_to_instance(int abs_page_idx) {
+    int inst = abs_page_idx - NINA_PAGE_OFFSET;
+    if (inst < 0 || inst >= MAX_NINA_INSTANCES) return -1;
+    return inst;
 }
 
+/* Pure-offset inverse of page_to_instance. Returns the ABSOLUTE page index for
+ * an instance, or -1 only for an out-of-range instance index. */
 int nina_dashboard_instance_to_page(int instance_idx) {
-    for (int i = 0; i < page_count; i++) {
-        if (page_instance_map[i] == instance_idx) return i + NINA_PAGE_OFFSET;  /* page index */
-    }
-    return -1;
+    if (instance_idx < 0 || instance_idx >= MAX_NINA_INSTANCES) return -1;
+    return NINA_PAGE_OFFSET + instance_idx;
 }
 
 static int next_page_index = -1;
@@ -1073,18 +1184,22 @@ static void update_indicators(void)
     if (!indicator_cont) return;
 
     int gb = app_config_get()->color_brightness;
-    for (int i = 0; i < page_count; i++) {
-        if (indicator_dots[i]) {
-            uint32_t dot_color = (active_page == i + NINA_PAGE_OFFSET)
+    /* Dots are created one per AVAILABLE NINA slot (nina_available_count). Walk
+     * the fixed-identity slots and map each created dot to its instance. */
+    int dot = 0;
+    for (int inst = 0; inst < MAX_NINA_INSTANCES; inst++) {
+        if (!nina_slot_available[inst]) continue;
+        if (indicator_dots[dot]) {
+            uint32_t dot_color = (active_page == NINA_PAGE_OFFSET + inst)
                 ? app_config_apply_brightness(current_theme->text_color, gb)
                 : app_config_apply_brightness(current_theme->label_color, gb);
-            lv_obj_set_style_bg_color(indicator_dots[i], lv_color_hex(dot_color), 0);
+            lv_obj_set_style_bg_color(indicator_dots[dot], lv_color_hex(dot_color), 0);
         }
+        dot++;
     }
-    if (active_page >= NINA_PAGE_OFFSET && active_page < NINA_PAGE_OFFSET + page_count)
-        lv_obj_clear_flag(indicator_cont, LV_OBJ_FLAG_HIDDEN);
-    else
-        lv_obj_add_flag(indicator_cont, LV_OBJ_FLAG_HIDDEN);
+    bool on_nina = (abs_page_to_instance(active_page) >= 0);
+    if (on_nina) lv_obj_clear_flag(indicator_cont, LV_OBJ_FLAG_HIDDEN);
+    else         lv_obj_add_flag(indicator_cont, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void fade_out_ready_cb(lv_anim_t * a)
@@ -1104,6 +1219,8 @@ static void fade_out_ready_cb(lv_anim_t * a)
 
     /* Update indicators for the new page */
     update_indicators();
+
+    if (page_change_cb) page_change_cb(active_page);
 
     /* Fade-in the new page */
     lv_obj_t *new_obj = get_page_obj(active_page);
@@ -1140,6 +1257,8 @@ static void slide_new_ready_cb(lv_anim_t *a)
     }
 
     update_indicators();
+
+    if (page_change_cb) page_change_cb(active_page);
 }
 
 void nina_dashboard_show_page_animated(int page_index, int instance_count, int effect)
@@ -1249,5 +1368,7 @@ instant:
         }
 
         update_indicators();
+
+        if (page_change_cb) page_change_cb(active_page);
     }
 }
