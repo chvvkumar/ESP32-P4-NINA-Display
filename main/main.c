@@ -26,6 +26,7 @@
 #include "mqtt_ha.h"
 #include "tasks.h"
 #include "esp_ota_ops.h"
+#include "ota_github.h"
 #include "driver/jpeg_decode.h"
 #include "display/lv_display_private.h"
 #include "draw/sw/lv_draw_sw_utils.h"
@@ -845,5 +846,15 @@ void app_main(void)
     /* Mark this firmware as valid so the bootloader won't roll back.
      * This must come after successful init — if we crash before here,
      * the bootloader will revert to the previous OTA partition. */
+    /* Determine whether this is the first boot of a freshly-OTA'd image.
+     * Only then is a pending OTA version promoted to the confirmed installed
+     * version; a rollback/normal boot discards the stale pending stamp. */
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    esp_ota_img_states_t ota_state;
+    bool first_boot_new_image =
+        (esp_ota_get_state_partition(running, &ota_state) == ESP_OK &&
+         ota_state == ESP_OTA_IMG_PENDING_VERIFY);
+    ota_github_reconcile_version(first_boot_new_image);
+
     esp_ota_mark_app_valid_cancel_rollback();
 }

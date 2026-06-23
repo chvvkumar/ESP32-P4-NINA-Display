@@ -598,32 +598,71 @@ esp_err_t ota_github_download(const char *url, void (*progress_cb)(int percent))
 }
 
 /* ── NVS-backed OTA version tracking ─────────────────────────────── */
+/* Three keys in the "ota_ver" namespace:
+ *   tag     — confirmed release tag of the image that is ACTUALLY running.
+ *   build   — BUILD_GIT_TAG that the stored `tag` belongs to (identity guard).
+ *   pending — release tag an in-flight OTA intends to install; promoted to
+ *             `tag` only after that image boots and is confirmed valid.
+ * The `tag` key is never written at OTA-apply time, so a downloaded-but-not-
+ * booted image (rollback / slot mismatch) cannot poison the version banner. */
+#define OTA_NVS_NAMESPACE   "ota_ver"
+#define OTA_NVS_KEY         "tag"
+#define OTA_NVS_KEY_BUILD   "build"
+#define OTA_NVS_KEY_PENDING "pending"
 
-#define OTA_NVS_NAMESPACE "ota_ver"
-#define OTA_NVS_KEY       "tag"
-
-void ota_github_save_installed_version(const char *tag) {
+void ota_github_save_pending_version(const char *tag) {
     if (!tag || !tag[0]) return;
     nvs_handle_t h;
     if (nvs_open(OTA_NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
-        nvs_set_str(h, OTA_NVS_KEY, tag);
+        nvs_set_str(h, OTA_NVS_KEY_PENDING, tag);
         nvs_commit(h);
         nvs_close(h);
-        ESP_LOGI(TAG, "Saved OTA installed version: %s", tag);
+        ESP_LOGI(TAG, "OTA pending version stamped: %s (confirmed on next boot)", tag);
     }
 }
 
+void ota_github_reconcile_version(bool first_boot_new_image) {
+    nvs_handle_t h;
+    if (nvs_open(OTA_NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK) return;
+
+    char pending[64] = {0};
+    size_t len = sizeof(pending);
+    bool have_pending = (nvs_get_str(h, OTA_NVS_KEY_PENDING, pending, &len) == ESP_OK && pending[0]);
+
+    if (first_boot_new_image && have_pending) {
+        /* The OTA image actually booted — promote intent to confirmed state and
+         * bind it to the running build so the read path can validate it later. */
+        nvs_set_str(h, OTA_NVS_KEY, pending);
+        nvs_set_str(h, OTA_NVS_KEY_BUILD, BUILD_GIT_TAG);
+        nvs_erase_key(h, OTA_NVS_KEY_PENDING);
+        ESP_LOGI(TAG, "OTA confirmed booted: installed=%s build=%s", pending, BUILD_GIT_TAG);
+    } else if (have_pending) {
+        /* Normal boot or rollback to the old image — the pending stamp is stale. */
+        nvs_erase_key(h, OTA_NVS_KEY_PENDING);
+        ESP_LOGW(TAG, "Discarded stale pending OTA version %s (image did not take)", pending);
+    }
+
+    nvs_commit(h);
+    nvs_close(h);
+}
+
 const char *ota_github_get_current_version(void) {
-    static char stored[64];
+    static char tag[64];
     nvs_handle_t h;
     if (nvs_open(OTA_NVS_NAMESPACE, NVS_READONLY, &h) == ESP_OK) {
-        size_t len = sizeof(stored);
-        if (nvs_get_str(h, OTA_NVS_KEY, stored, &len) == ESP_OK && stored[0]) {
-            nvs_close(h);
-            ESP_LOGI(TAG, "Using OTA-installed version for comparison: %s", stored);
-            return stored;
-        }
+        char build[64];
+        size_t tl = sizeof(tag);
+        size_t bl = sizeof(build);
+        bool ok_tag   = (nvs_get_str(h, OTA_NVS_KEY,       tag,   &tl) == ESP_OK && tag[0]);
+        bool ok_build = (nvs_get_str(h, OTA_NVS_KEY_BUILD, build, &bl) == ESP_OK && build[0]);
         nvs_close(h);
+        /* Only trust the stored release tag if it belongs to the build that is
+         * actually running. A mismatch means the stored tag is stale (e.g. an OTA
+         * that never booted, or a manual flash) — fall back to the truth. */
+        if (ok_tag && ok_build && strcmp(build, BUILD_GIT_TAG) == 0) {
+            ESP_LOGI(TAG, "Using OTA-installed version for comparison: %s", tag);
+            return tag;
+        }
     }
     return BUILD_GIT_TAG;
 }

@@ -449,7 +449,7 @@ esp_err_t ota_github_post_handler(httpd_req_t *req)
     /* Download and flash */
     esp_err_t err = ota_github_download(rel->ota_url, ota_update_progress);
     if (err == ESP_OK) {
-        ota_github_save_installed_version(rel->tag);
+        ota_github_save_pending_version(rel->tag);
         ESP_LOGI(TAG, "GitHub OTA success (%s), rebooting...", rel->tag);
         ota_update_progress(100);
         heap_caps_free(rel);
