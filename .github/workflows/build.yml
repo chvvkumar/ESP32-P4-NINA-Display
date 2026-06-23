@@ -351,6 +351,12 @@ jobs:
             VERSION=$(cat version.txt | tr -d '[:space:]')
             TAG="v${VERSION}"
           else
+            # Make the local tag set authoritative: pull every tag created by
+            # prior release runs (a shallow/persistent runner workspace otherwise
+            # lags the remote, which previously caused the number to collide and
+            # silently clobber an existing pre-release).
+            git fetch --force --tags origin
+
             # Use latest main release version so pre-releases sort correctly
             LATEST_MAIN_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | grep -v '-' | head -1)
             if [ -n "$LATEST_MAIN_TAG" ]; then
@@ -358,11 +364,18 @@ jobs:
             else
               BASE_VERSION=$(cat version.txt | tr -d '[:space:]')
             fi
-            # Count existing tags with this prefix to auto-increment
+
+            # Next number = highest existing dev.N + 1 (use the max, not a count,
+            # so gaps from deleted/withdrawn tags never cause a reuse), then skip
+            # any number whose tag already exists as a final race/lag safeguard.
             PREFIX="v${BASE_VERSION}-${BRANCH}."
-            EXISTING=$(git tag -l "${PREFIX}*" | wc -l)
-            NEXT=$((EXISTING + 1))
-            TAG="v${BASE_VERSION}-${BRANCH}.${NEXT}"
+            LAST=$(git tag -l "${PREFIX}*" | sed "s|^${PREFIX}||" | grep -E '^[0-9]+$' | sort -n | tail -1)
+            NEXT=$(( ${LAST:-0} + 1 ))
+            TAG="${PREFIX}${NEXT}"
+            while git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null 2>&1; do
+              NEXT=$(( NEXT + 1 ))
+              TAG="${PREFIX}${NEXT}"
+            done
           fi
 
           echo "tag=$TAG" >> $GITHUB_OUTPUT
@@ -778,12 +791,17 @@ jobs:
           git tag -f "$TAG"
           git push origin "$TAG" --force
 
-          # Delete existing release if present, then create fresh
+          # Delete only a release for THIS exact tag (e.g. a re-run of the same
+          # commit). Robust numbering above guarantees $TAG is otherwise fresh,
+          # so this never clobbers a different commit's release.
           gh release delete "$TAG" --yes 2>/dev/null || true
+          # --target pins the release (and a not-yet-existing tag) to the commit
+          # actually built, so the tag can never point at the default branch.
           gh release create "$TAG" \
             firmware/nina-display-factory.bin \
             firmware/nina-display-ota.bin \
             firmware/nina-display.elf \
+            --target "$GITHUB_SHA" \
             --title "$TAG" \
             --notes-file /tmp/release-notes.md \
             $PRERELEASE_FLAG
