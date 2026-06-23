@@ -222,11 +222,9 @@ jobs:
           # Copy app binary as OTA file
           cp "$APP_BIN" firmware/nina-display-ota.bin
 
-          # Keep bootloader + partition table on disk (build/ tree) so the erase
-          # check can hash them. They are NOT uploaded as release assets anymore:
-          # the OTA-safe vs full-erase baseline is carried as SHA256 markers in the
-          # release body (see "Check full erase requirement" / "Generate release
-          # notes"). Staging copies kept for local inspection only.
+          # Stage bootloader + partition table as standalone assets. The release
+          # uploads these so the next build can hash them against this baseline to
+          # decide OTA-safe vs full-erase (see "Check full erase requirement").
           cp build/bootloader/bootloader.bin firmware/bootloader.bin
           cp build/partition_table/partition-table.bin firmware/partition-table.bin
 
@@ -510,49 +508,52 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Detection is artifact-primary: hash the freshly built partition table
-          # and bootloader, then compare against the previous same-lineage
-          # release's SHA256 markers carried in its release body (no bin assets
-          # are downloaded). The source-diff rules below are SECONDARY
-          # corroboration. Bias toward false-positive (require erase) over
-          # false-negative (silent OTA-break).
+          # and bootloader against the previous release's uploaded baseline. The
+          # source-diff rules below are SECONDARY corroboration. Bias toward
+          # false-positive (require erase) over false-negative (silent OTA-break).
           REASONS=""
           REQUIRED=false
 
           # Find previous release tag to diff/compare against.
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
 
-          # --- PRIMARY: built-artifact hash vs previous release body markers ---
-          # Freshly built hashes (also re-emitted into THIS release's body by the
-          # release-notes step so the next run can read them).
+          # --- PRIMARY: built-artifact hash comparison vs previous release ----
           NEW_PT="build/partition_table/partition-table.bin"
           NEW_BL="build/bootloader/bootloader.bin"
-          PT_SHA=$(sha256sum "$NEW_PT" | cut -d' ' -f1)
-          BL_SHA=$(sha256sum "$NEW_BL" | cut -d' ' -f1)
 
           if [ -z "$PREV_TAG" ]; then
             # First release ever: no baseline to compare. Cannot prove OTA-safe.
             REASONS="${REASONS}No previous release baseline to compare; flash factory binary.\n"
             REQUIRED=true
           else
-            # Read the previous release body and pull out its hash markers.
-            # Tolerate failure: prev release may be missing or predate this scheme.
-            PREV_BODY=$(gh release view "$PREV_TAG" --json body -q .body 2>/dev/null || true)
-            OLD_PT_SHA=$(echo "$PREV_BODY" | grep -oE 'nina:pt_sha=[0-9a-f]+' | head -1 | sed 's/.*nina:pt_sha=//')
-            OLD_BL_SHA=$(echo "$PREV_BODY" | grep -oE 'nina:bl_sha=[0-9a-f]+' | head -1 | sed 's/.*nina:bl_sha=//')
+            BASE_DIR=$(mktemp -d)
+            # Tolerate absence: previous release may predate asset upload.
+            gh release download "$PREV_TAG" \
+              -p partition-table.bin -p bootloader.bin \
+              -D "$BASE_DIR" 2>/dev/null || true
 
-            if [ -z "$OLD_PT_SHA" ]; then
-              # Previous release predates this marker scheme (or body unreadable).
+            OLD_PT="$BASE_DIR/partition-table.bin"
+            OLD_BL="$BASE_DIR/bootloader.bin"
+
+            if [ ! -f "$OLD_PT" ] || [ ! -f "$OLD_BL" ]; then
+              # Previous release predates baseline asset upload, or partial upload.
               REASONS="${REASONS}No previous release baseline to compare; flash factory binary.\n"
               REQUIRED=true
             else
-              if [ "$PT_SHA" != "$OLD_PT_SHA" ]; then
+              NEW_PT_HASH=$(sha256sum "$NEW_PT" | cut -d' ' -f1)
+              OLD_PT_HASH=$(sha256sum "$OLD_PT" | cut -d' ' -f1)
+              if [ "$NEW_PT_HASH" != "$OLD_PT_HASH" ]; then
                 REASONS="${REASONS}Partition table changed since ${PREV_TAG}.\n"
                 REQUIRED=true
               fi
 
-              if [ "$BL_SHA" != "$OLD_BL_SHA" ]; then
-                # A bootloader hash change is flagged. Prefer safety: treat as
-                # required and recommend a manual factory flash.
+              NEW_BL_HASH=$(sha256sum "$NEW_BL" | cut -d' ' -f1)
+              OLD_BL_HASH=$(sha256sum "$OLD_BL" | cut -d' ' -f1)
+              if [ "$NEW_BL_HASH" != "$OLD_BL_HASH" ]; then
+                # A bootloader.bin hash change is flagged. Confirming MANDATORY
+                # would require diffing the previous release's resolved sdkconfig
+                # for security/target/MMU keys, which we cannot fetch reliably
+                # from the release. Prefer safety: treat as required.
                 REASONS="${REASONS}Bootloader changed since ${PREV_TAG} (manual flash recommended).\n"
                 REQUIRED=true
               fi
@@ -615,12 +616,6 @@ jobs:
             REQUIRED=true
           fi
 
-          # Hashes of the freshly built baseline. The release-notes step emits
-          # these into THIS release's body as nina:pt_sha / nina:bl_sha markers
-          # so the next run can read them back (always present, both verdicts).
-          echo "pt_sha=$PT_SHA" >> $GITHUB_OUTPUT
-          echo "bl_sha=$BL_SHA" >> $GITHUB_OUTPUT
-
           if [ "$REQUIRED" = "true" ]; then
             echo "required=true" >> $GITHUB_OUTPUT
             echo "reason<<EOFR" >> $GITHUB_OUTPUT
@@ -642,8 +637,6 @@ jobs:
           OTA_MB="${{ steps.metrics.outputs.ota_mb }}"
           FULL_ERASE="${{ steps.erase_check.outputs.required }}"
           ERASE_REASON="${{ steps.erase_check.outputs.reason }}"
-          PT_SHA="${{ steps.erase_check.outputs.pt_sha }}"
-          BL_SHA="${{ steps.erase_check.outputs.bl_sha }}"
 
           if [ -n "$PREV_TAG" ]; then
             COMPARE_URL="https://github.com/chvvkumar/ESP32-P4-NINA-Display/compare/${PREV_TAG}...${TAG}"
@@ -652,7 +645,7 @@ jobs:
           fi
 
           AI_AVAILABLE="${{ steps.release_summary.outputs.ai_available }}"
-          export TAG PREV_TAG VERSION BRANCH COMPARE_URL FACTORY_MB OTA_MB AI_AVAILABLE FULL_ERASE ERASE_REASON PT_SHA BL_SHA
+          export TAG PREV_TAG VERSION BRANCH COMPARE_URL FACTORY_MB OTA_MB AI_AVAILABLE FULL_ERASE ERASE_REASON
           python3 << 'PYEOF'
           import os, json
           tag = os.environ['TAG']
@@ -665,8 +658,6 @@ jobs:
           ai_available = os.environ.get('AI_AVAILABLE', 'false') == 'true'
           full_erase = os.environ.get('FULL_ERASE', 'false') == 'true'
           erase_reason = os.environ.get('ERASE_REASON', '').strip()
-          pt_sha = os.environ.get('PT_SHA', '').strip()
-          bl_sha = os.environ.get('BL_SHA', '').strip()
 
           # Load metrics if available
           try:
@@ -696,15 +687,8 @@ jobs:
           # factory flash; "nina:full_erase=0" means OTA-safe. Emitted from the
           # same final verdict that drives the caution/OTA-safe block below.
           erase_marker = '<!-- nina:full_erase=1 -->' if full_erase else '<!-- nina:full_erase=0 -->'
-          # Hidden baseline markers, always present (both verdicts). The NEXT
-          # run reads these from this release's body to decide OTA-safe vs
-          # full-erase by comparing freshly built hashes against them.
-          pt_marker = f'<!-- nina:pt_sha={pt_sha} -->'
-          bl_marker = f'<!-- nina:bl_sha={bl_sha} -->'
           lines = [
               erase_marker,
-              pt_marker,
-              bl_marker,
               f'## NINA Display {tag}',
               '',
               f'**Branch:** {branch}',
@@ -750,7 +734,6 @@ jobs:
               '|------|-------------|',
               '| `nina-display-factory.bin` | Full factory image (flash at 0x0000) |',
               '| `nina-display-ota.bin` | OTA update binary (upload via web UI) |',
-              '| `nina-display.elf` | Firmware ELF (for decoding core dumps) |',
               '',
               '### Flashing',
               '- **Factory:** Use [ESP Web Flasher](https://espressif.github.io/esptool-js/) — flash at address `0x0000`',
@@ -783,7 +766,8 @@ jobs:
           gh release create "$TAG" \
             firmware/nina-display-factory.bin \
             firmware/nina-display-ota.bin \
-            firmware/nina-display.elf \
+            firmware/bootloader.bin \
+            firmware/partition-table.bin \
             --title "$TAG" \
             --notes-file /tmp/release-notes.md \
             $PRERELEASE_FLAG

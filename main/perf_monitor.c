@@ -5,7 +5,6 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
-#include "esp_rom_sys.h"   // esp_rom_printf — lock-free, allocation-free console output
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "cJSON.h"
@@ -14,40 +13,6 @@ static const char *TAG = "perf";
 
 // Global singleton
 perf_state_t g_perf;
-
-// ── Failed-allocation catcher ───────────────────────────────────────
-//
-// Counter is incremented inside the failed-alloc hook, which runs in the
-// context of the failing allocation (possibly the SDIO RX task with the heap
-// lock held, possibly high-IRQ context). The hook MUST stay lock-free and
-// allocation-free: it only does a plain volatile increment and one
-// esp_rom_printf (which writes directly to the ROM UART and takes no heap
-// lock). No heap_caps_* queries, no malloc, no ESP_LOGx here.
-static volatile uint32_t s_alloc_fail_count = 0;
-
-static void perf_alloc_failed_hook(size_t size, uint32_t caps, const char *function_name)
-{
-    s_alloc_fail_count++;  // plain increment, no lock
-    esp_rom_printf("[ALLOC-FAIL] size=%u caps=0x%x fn=%s dma_capable=%d\n",
-                   (unsigned)size, (unsigned)caps,
-                   function_name ? function_name : "?",
-                   (caps & MALLOC_CAP_DMA) ? 1 : 0);
-}
-
-void perf_monitor_register_alloc_fail_hook(void)
-{
-    esp_err_t err = heap_caps_register_failed_alloc_callback(perf_alloc_failed_hook);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "failed-alloc hook registration failed: %s", esp_err_to_name(err));
-    } else {
-        ESP_LOGI(TAG, "failed-alloc catcher registered");
-    }
-}
-
-uint32_t perf_get_alloc_fail_count(void)
-{
-    return s_alloc_fail_count;
-}
 
 // ── Start-time storage ──────────────────────────────────────────────
 // Simple hash table to store start times, indexed by pointer hash.
@@ -225,14 +190,6 @@ void perf_monitor_capture_memory(void)
         ? (float)g_perf.heap_largest_free_block / (float)g_perf.heap_free_bytes
         : 0.0f;
 
-    // DMA-capable internal heap subset — the pool the esp-hosted SDIO RX path
-    // allocates from. These heap_caps queries allocate nothing.
-    const uint32_t dma_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT;
-    g_perf.dma_free_bytes          = heap_caps_get_free_size(dma_caps);
-    g_perf.dma_min_free_bytes      = heap_caps_get_minimum_free_size(dma_caps);
-    g_perf.dma_largest_free_block  = heap_caps_get_largest_free_block(dma_caps);
-    g_perf.internal8_free_bytes    = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-
     // PSRAM
     g_perf.psram_free_bytes         = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     g_perf.psram_min_free_bytes     = heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM);
@@ -388,87 +345,6 @@ void perf_monitor_capture_cpu(void)
     s_prev_task_count = (uint8_t)filled;
 }
 
-// ── Low-DMA-heap watchdog ───────────────────────────────────────────
-//
-// Catches transient exhaustion of the DMA-capable internal heap (the pool
-// that esp-hosted's sdio_rx_get_buffer allocates from). Fires regardless of
-// g_perf.enabled because it is a safety diagnostic, not a profiling metric.
-// Allocates nothing from the internal heap: all heap_caps_* queries and
-// heap_caps_print_heap_info() are read-only / print directly to the console,
-// and the stack-HWM dump reads the already-captured cpu_stats snapshot.
-
-bool perf_monitor_dma_heap_watchdog(void)
-{
-    const uint32_t dma_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT;
-
-    uint32_t dma_largest = heap_caps_get_largest_free_block(dma_caps);
-    if (dma_largest >= PERF_DMA_HEAP_WARN_THRESHOLD) {
-        return false;  // healthy — fast path, no logging
-    }
-
-    // Threshold crossed: count every crossing (cheap, for trend frequency).
-    g_perf.dma_heap_warn_count++;
-
-    // Rate-limit the verbose WARN block so a sustained low condition does not
-    // spam the log. Static timestamp survives across calls; no heap use.
-    static int64_t s_last_warn_us = 0;
-    int64_t now = esp_timer_get_time();
-    if (s_last_warn_us != 0 &&
-        (now - s_last_warn_us) < (int64_t)PERF_DMA_HEAP_WARN_MIN_INTERVAL_S * 1000000) {
-        return true;  // counted, but suppress the noisy block
-    }
-    s_last_warn_us = now;
-
-    uint32_t dma_free      = heap_caps_get_free_size(dma_caps);
-    uint32_t dma_min_free  = heap_caps_get_minimum_free_size(dma_caps);
-    uint32_t int_free      = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-    uint32_t int_largest   = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
-    uint32_t int8_free     = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    uint32_t psram_free    = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-
-    ESP_LOGW(TAG, "╔═══════════ LOW DMA-CAPABLE HEAP WARNING ═══════════╗");
-    ESP_LOGW(TAG, "  DMA-capable internal pool near exhaustion "
-                  "(SDIO RX alloc at risk)");
-    ESP_LOGW(TAG, "  dma_largest=%"PRIu32" B  < threshold=%d B",
-             dma_largest, PERF_DMA_HEAP_WARN_THRESHOLD);
-    ESP_LOGW(TAG, "  dma_free=%"PRIu32"  dma_min_free=%"PRIu32"  dma_largest=%"PRIu32,
-             dma_free, dma_min_free, dma_largest);
-    ESP_LOGW(TAG, "  internal_free=%"PRIu32"  internal_largest=%"PRIu32"  internal8_free=%"PRIu32,
-             int_free, int_largest, int8_free);
-    ESP_LOGW(TAG, "  psram_free=%"PRIu32"  warn_count=%"PRIu32,
-             psram_free, g_perf.dma_heap_warn_count);
-
-    // Per-capability heap dumps (print to console, allocate nothing).
-    ESP_LOGW(TAG, "  -- heap_caps_print_heap_info(INTERNAL|DMA|8BIT) --");
-    heap_caps_print_heap_info(dma_caps);
-    ESP_LOGW(TAG, "  -- heap_caps_print_heap_info(INTERNAL) --");
-    heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
-
-    // All-task stack HWM list from the existing cpu_stats snapshot — shows
-    // which task is closest to overflow. No uxTaskGetSystemState call here
-    // (that would allocate); we read what perf_monitor_capture_cpu() captured.
-    const cpu_stats_t *cpu = &g_perf.cpu;
-    if (cpu->task_info_count > 0) {
-        ESP_LOGW(TAG, "  -- task stack HWM (free bytes, from last snapshot) --");
-        for (uint8_t i = 0; i < cpu->task_info_count; i++) {
-            const cpu_task_info_t *t = &cpu->tasks[i];
-            const char *core_str = "any";
-            char core_buf[4];
-            if (t->core_id < 2) {
-                snprintf(core_buf, sizeof(core_buf), "%d", t->core_id);
-                core_str = core_buf;
-            }
-            ESP_LOGW(TAG, "    %-16s core=%-3s stack_hwm=%"PRIu32" B",
-                     t->name, core_str, t->stack_hwm_bytes);
-        }
-    } else {
-        ESP_LOGW(TAG, "  (no cpu_stats snapshot yet — stack HWM list unavailable)");
-    }
-    ESP_LOGW(TAG, "╚════════════════════════════════════════════════════╝");
-
-    return true;
-}
-
 // ── Serial log report ───────────────────────────────────────────────
 
 static void log_timer(const char *name, const perf_timer_t *t)
@@ -581,9 +457,6 @@ void perf_monitor_report(void)
     ESP_LOGI(TAG, "  Internal heap:  free=%"PRIu32"  min_ever=%"PRIu32"  largest_block=%"PRIu32"  frag_ratio=%.3f",
              g_perf.heap_free_bytes, g_perf.heap_min_free_bytes, g_perf.heap_largest_free_block,
              g_perf.heap_frag_ratio);
-    ESP_LOGI(TAG, "  DMA-capable:    free=%"PRIu32"  min_ever=%"PRIu32"  largest_block=%"PRIu32"  internal8_free=%"PRIu32"  warn_count=%"PRIu32,
-             g_perf.dma_free_bytes, g_perf.dma_min_free_bytes, g_perf.dma_largest_free_block,
-             g_perf.internal8_free_bytes, g_perf.dma_heap_warn_count);
     ESP_LOGI(TAG, "  PSRAM:          free=%"PRIu32"  min_ever=%"PRIu32"  largest_block=%"PRIu32"  frag_ratio=%.3f",
              g_perf.psram_free_bytes, g_perf.psram_min_free_bytes, g_perf.psram_largest_free_block,
              g_perf.psram_frag_ratio);
@@ -625,11 +498,6 @@ void perf_monitor_report(void)
                      t->name, t->cpu_percent, core_str, t->stack_hwm_bytes);
         }
     }
-
-    // Low-DMA-heap watchdog: check after capture_memory()/capture_cpu() so the
-    // metrics and stack-HWM snapshot it reports are fresh. Runs every report
-    // cycle; the WARN block itself is rate-limited inside the function.
-    perf_monitor_dma_heap_watchdog();
 
     // Reset per-interval counters
     perf_counter_reset_interval(&g_perf.http_request_count);
@@ -695,104 +563,6 @@ static cJSON *counter_to_json(const perf_counter_t *c)
     cJSON_AddNumberToObject(obj, "total", c->total);
     cJSON_AddNumberToObject(obj, "per_interval", c->per_interval);
     return obj;
-}
-
-static const char *task_state_str(eTaskState state)
-{
-    switch (state) {
-        case eRunning:   return "running";
-        case eReady:     return "ready";
-        case eBlocked:   return "blocked";
-        case eSuspended: return "suspended";
-        case eDeleted:   return "deleted";
-        default:         return "unknown";
-    }
-}
-
-// Build the "tasks_detail" array plus min_stack_hwm_bytes / min_stack_task on
-// the supplied `tasks` object.
-//
-// Stack high-water mark is a point-in-time value: it needs no CPU-delta cycle,
-// unlike cpu_percent. The g_perf.cpu snapshot is only refreshed every
-// report_interval_s (30s) by the data task, and is empty (task_info_count==0,
-// valid==false) until two capture_cpu() passes have run — which is why this
-// previously returned min_stack_hwm_bytes=0 and an empty tasks_detail on the
-// /api/perf request path. Run a FRESH uxTaskGetSystemState pass here instead so
-// the values always reflect the real current smallest stack headroom.
-//
-// The required TaskStatus_t array is allocated from PSRAM (MALLOC_CAP_SPIRAM)
-// to avoid internal-heap pressure. This runs only on the /api/perf request
-// path, never in the failed-alloc hook. usStackHighWaterMark is in words on
-// this port, so multiply by sizeof(StackType_t) to get BYTES — matching how
-// cpu_task_info_t.stack_hwm_bytes is computed in perf_monitor_capture_cpu().
-static void build_tasks_detail(cJSON *tasks)
-{
-    cJSON *tasks_detail = cJSON_CreateArray();
-    if (!tasks_detail) return;
-
-    uint32_t min_stack_hwm = 0;
-    bool min_stack_seen = false;
-    char min_stack_task[16] = "";
-
-    UBaseType_t n = uxTaskGetNumberOfTasks();
-    TaskStatus_t *snap = NULL;
-    UBaseType_t filled = 0;
-    if (n > 0) {
-        snap = heap_caps_malloc(n * sizeof(TaskStatus_t), MALLOC_CAP_SPIRAM);
-        if (snap) {
-            filled = uxTaskGetSystemState(snap, n, NULL);
-        }
-    }
-
-    if (snap && filled > 0) {
-        // Fresh pass succeeded — authoritative current stack HWM for every task.
-        for (UBaseType_t i = 0; i < filled; i++) {
-            uint32_t hwm_bytes = (uint32_t)snap[i].usStackHighWaterMark * sizeof(StackType_t);
-            cJSON *tobj = cJSON_CreateObject();
-            if (tobj) {
-                cJSON_AddStringToObject(tobj, "name", snap[i].pcTaskName);
-                cJSON_AddNumberToObject(tobj, "stack_hwm_bytes", hwm_bytes);
-                cJSON_AddStringToObject(tobj, "state", task_state_str(snap[i].eCurrentState));
-                cJSON_AddNumberToObject(tobj, "core",
-                    snap[i].xCoreID == (BaseType_t)tskNO_AFFINITY ? -1 : (int)snap[i].xCoreID);
-                cJSON_AddItemToArray(tasks_detail, tobj);
-            }
-            if (!min_stack_seen || hwm_bytes < min_stack_hwm) {
-                min_stack_hwm = hwm_bytes;
-                min_stack_seen = true;
-                strncpy(min_stack_task, snap[i].pcTaskName, sizeof(min_stack_task) - 1);
-                min_stack_task[sizeof(min_stack_task) - 1] = '\0';
-            }
-        }
-    } else {
-        // Fallback: PSRAM alloc or uxTaskGetSystemState failed — use whatever the
-        // last cpu snapshot captured (may be empty on a very early request).
-        for (uint8_t i = 0; i < g_perf.cpu.task_info_count; i++) {
-            const cpu_task_info_t *t = &g_perf.cpu.tasks[i];
-            cJSON *tobj = cJSON_CreateObject();
-            if (tobj) {
-                cJSON_AddStringToObject(tobj, "name", t->name);
-                cJSON_AddNumberToObject(tobj, "stack_hwm_bytes", t->stack_hwm_bytes);
-                cJSON_AddStringToObject(tobj, "state", task_state_str(t->state));
-                cJSON_AddNumberToObject(tobj, "core", t->core_id == 0xFF ? -1 : (int)t->core_id);
-                cJSON_AddItemToArray(tasks_detail, tobj);
-            }
-            if (!min_stack_seen || t->stack_hwm_bytes < min_stack_hwm) {
-                min_stack_hwm = t->stack_hwm_bytes;
-                min_stack_seen = true;
-                strncpy(min_stack_task, t->name, sizeof(min_stack_task) - 1);
-                min_stack_task[sizeof(min_stack_task) - 1] = '\0';
-            }
-        }
-    }
-
-    if (snap) {
-        heap_caps_free(snap);
-    }
-
-    cJSON_AddItemToObject(tasks, "tasks_detail", tasks_detail);
-    cJSON_AddNumberToObject(tasks, "min_stack_hwm_bytes", min_stack_hwm);
-    cJSON_AddStringToObject(tasks, "min_stack_task", min_stack_task);
 }
 
 char *perf_monitor_report_json(void)
@@ -883,16 +653,6 @@ char *perf_monitor_report_json(void)
     cJSON_AddNumberToObject(memory, "heap_min_free_bytes",     g_perf.heap_min_free_bytes);
     cJSON_AddNumberToObject(memory, "heap_largest_free_block", g_perf.heap_largest_free_block);
     cJSON_AddNumberToObject(memory, "heap_frag_ratio",        g_perf.heap_frag_ratio);
-    // DMA-capable internal heap subset (the SDIO RX pool that actually fails)
-    cJSON_AddNumberToObject(memory, "dma_free_bytes",          g_perf.dma_free_bytes);
-    cJSON_AddNumberToObject(memory, "dma_min_free_bytes",      g_perf.dma_min_free_bytes);
-    cJSON_AddNumberToObject(memory, "dma_largest_free_block",  g_perf.dma_largest_free_block);
-    cJSON_AddNumberToObject(memory, "internal8_free_bytes",    g_perf.internal8_free_bytes);
-    cJSON_AddNumberToObject(memory, "dma_heap_warn_count",     g_perf.dma_heap_warn_count);
-    // Cumulative failed-allocation count from the heap failed-alloc hook (the
-    // deterministic OOM catcher; nonzero means at least one heap_caps_* alloc
-    // returned NULL since boot — see the [ALLOC-FAIL] serial lines).
-    cJSON_AddNumberToObject(memory, "alloc_fail_count",        perf_get_alloc_fail_count());
     cJSON_AddNumberToObject(memory, "psram_free_bytes",         g_perf.psram_free_bytes);
     cJSON_AddNumberToObject(memory, "psram_min_free_bytes",     g_perf.psram_min_free_bytes);
     cJSON_AddNumberToObject(memory, "psram_largest_free_block", g_perf.psram_largest_free_block);
@@ -904,11 +664,6 @@ char *perf_monitor_report_json(void)
     cJSON_AddNumberToObject(tasks, "data_task_stack_hwm",  g_perf.data_task_stack_hwm);
     cJSON_AddNumberToObject(tasks, "input_task_stack_hwm", g_perf.input_task_stack_hwm);
     cJSON_AddNumberToObject(tasks, "spotify_task_stack_hwm", g_perf.spotify_task_stack_hwm);
-
-    // All-task stack HWM detail + worst (smallest headroom) task. Built from a
-    // FRESH uxTaskGetSystemState pass (PSRAM-backed) so it is valid even on the
-    // very first /api/perf request, before the periodic cpu snapshot populates.
-    build_tasks_detail(tasks);
     cJSON_AddItemToObject(root, "tasks", tasks);
 
     // JPEG

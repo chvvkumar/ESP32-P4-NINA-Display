@@ -573,11 +573,6 @@ void app_main(void)
 
     perf_monitor_init(30);
     perf_monitor_set_enabled(app_config_get()->debug_mode);
-    // Deterministic OOM catcher: fires on EVERY failed heap allocation,
-    // including the sub-second transient SDIO RX DMA-SRAM exhaustion that the
-    // 30s perf sampling misses. Lock-free / allocation-free hook. Registered
-    // before tasks spawn so it is armed for all subsequent allocations.
-    perf_monitor_register_alloc_fail_hook();
 
     instance_count = app_config_get_instance_count();
     if (app_config_get()->demo_mode) {
