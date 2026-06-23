@@ -475,6 +475,15 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
         break;
 
     case MQTT_EVENT_DATA:
+        /* Ignore retained command messages. The screen/text/reboot topics are
+         * Home Assistant command topics (momentary light-set / button-press); a
+         * retained payload is a stale command the broker redelivers on every
+         * (re)connect. Acting on a retained reboot boot-loops the device (one
+         * reboot per MQTT connect). Only live commands represent real intent. */
+        if (event->retain) {
+            ESP_LOGW(TAG, "Ignoring retained MQTT command on subscribed topic");
+            break;
+        }
         if (event->topic && event->topic_len > 0) {
             if (event->topic_len == (int)strlen(s_topic_screen_cmd) &&
                 strncmp(event->topic, s_topic_screen_cmd, event->topic_len) == 0) {
