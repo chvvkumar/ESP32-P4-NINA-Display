@@ -28,6 +28,7 @@
 #include "esp_spiffs.h"
 #include "esp_heap_caps.h"
 #include "esp_attr.h"
+#include "esp_core_dump.h"
 #include "cJSON.h"
 
 #include <string.h>
@@ -134,10 +135,11 @@ static bool ensure_mounted(void)
         return true;
     }
 
-    /* The "storage" partition ships unformatted; format on first mount. */
+    /* The "crashlog" partition (128KB) ships unformatted; format on first mount.
+     * It is small, so the format completes quickly. */
     esp_vfs_spiffs_conf_t conf = {
         .base_path              = CRASH_LOG_MOUNT_POINT,
-        .partition_label        = "storage",
+        .partition_label        = "crashlog",
         .max_files              = 4,
         .format_if_mount_failed = true,
     };
@@ -146,7 +148,7 @@ static bool ensure_mounted(void)
     if (err == ESP_OK) {
         s_mounted = true;
         size_t total = 0, used = 0;
-        if (esp_spiffs_info("storage", &total, &used) == ESP_OK) {
+        if (esp_spiffs_info("crashlog", &total, &used) == ESP_OK) {
             ESP_LOGI(TAG, "SPIFFS mounted: %u/%u bytes used", (unsigned)used, (unsigned)total);
         }
         return true;
@@ -329,6 +331,13 @@ static void append_crash_record(uint32_t reason, const char *panic_text)
     cJSON_AddNumberToObject(o, "crash_count", (double)info.crash_count);
     cJSON_AddNumberToObject(o, "boot_count", (double)info.boot_count);
     cJSON_AddStringToObject(o, "panic", panic_text ? panic_text : "");
+
+    /* Whether an ELF core dump was saved to the coredump partition for this
+     * crash. esp_core_dump_image_get() returns ESP_OK only when a valid image
+     * is present in flash. */
+    size_t cd_addr = 0, cd_size = 0;
+    bool coredump_present = (esp_core_dump_image_get(&cd_addr, &cd_size) == ESP_OK);
+    cJSON_AddBoolToObject(o, "coredump_present", coredump_present);
 
     char *line = cJSON_PrintUnformatted(o);
     cJSON_Delete(o);

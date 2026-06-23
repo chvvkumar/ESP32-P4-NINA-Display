@@ -3046,7 +3046,19 @@ main_loop:
             if (esp_timer_get_time() - g_perf.last_report_time_us >=
                 (int64_t)g_perf.report_interval_s * 1000000) {
                 perf_monitor_capture_cpu();
-                perf_monitor_report();
+                perf_monitor_report();  // report() also runs the DMA-heap watchdog
+            }
+        } else {
+            // Perf profiling disabled, but the low-DMA-heap watchdog is a safety
+            // diagnostic that must fire regardless of debug_mode/perf state. Run
+            // it on the same ~report cadence. Allocates nothing from any heap.
+            static int64_t s_last_wd_us = 0;
+            uint32_t wd_interval_s = g_perf.report_interval_s ? g_perf.report_interval_s : 30;
+            int64_t now_wd = esp_timer_get_time();
+            if (s_last_wd_us == 0 ||
+                (now_wd - s_last_wd_us) >= (int64_t)wd_interval_s * 1000000) {
+                s_last_wd_us = now_wd;
+                perf_monitor_dma_heap_watchdog();
             }
         }
 
