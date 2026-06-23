@@ -1964,6 +1964,13 @@
 
         <pre id="logsView" class="logs-view"></pre>
         <div id="crashlogView" class="logs-view hidden"></div>
+
+        <!-- Core dump diagnostics: hidden unless a crash dump is saved in flash -->
+        <div id="coredumpCard" class="logs-meta" style="display:none;margin-top:12px;align-items:center;gap:12px">
+          <span class="field-hint" id="coredumpInfo" style="margin:0">Crash dump present.</span>
+          <a class="btn btn-outline" id="coredumpDownloadLink" href="/api/coredump" style="text-align:center">Download dump</a>
+          <button type="button" class="btn btn-outline" id="coredumpClearBtn" onclick="clearCoredump()">Clear dump</button>
+        </div>
       </div>
     </div>
 
@@ -4357,9 +4364,13 @@
       var dl=$('logsDownloadLink');
       if(dl) dl.href=dev?'/api/logs':'/api/crashlog';
 
+      /* Core dump card is only relevant alongside crash history. */
+      var cd=$('coredumpCard');
+      if(cd) cd.style.display='none';
+
       /* Auto-refresh only applies to the device source. */
       if(dev){ syncLogsAutoRefresh(); refreshLogs(); }
-      else { stopLogsAutoRefresh(); refreshCrashlog(); }
+      else { stopLogsAutoRefresh(); refreshCrashlog(); if(typeof refreshCoredumpInfo==='function') refreshCoredumpInfo(); }
     }
 
     /* Shared toolbar buttons route to the active source. */
@@ -4571,6 +4582,44 @@
           refreshCrashlog();
         })
         .catch(function(e){ showToast('Clear crash logs failed: '+e.message,'error'); })
+        .finally(function(){ btn.disabled=false; btn.textContent=prev; });
+    }
+
+    /* ---- Core dump ---- */
+
+    /* Query /api/coredump/info and show the dump card only when a dump is saved. */
+    function refreshCoredumpInfo(){
+      var card=$('coredumpCard');
+      if(!card) return;
+      fetch('/api/coredump/info')
+        .then(function(r){
+          if(!r.ok) throw new Error('HTTP '+r.status);
+          return r.json();
+        })
+        .then(function(d){
+          if(d && d.present){
+            var kb=Math.round((d.size||0)/1024);
+            var info=$('coredumpInfo');
+            if(info) info.textContent='Crash dump present ('+kb+' KB)';
+            card.style.display='flex';
+          } else {
+            card.style.display='none';
+          }
+        })
+        .catch(function(){ card.style.display='none'; });
+    }
+
+    function clearCoredump(){
+      if(!confirm('Clear the saved crash dump? This cannot be undone.')) return;
+      var btn=$('coredumpClearBtn');
+      btn.disabled=true; var prev=btn.textContent; btn.textContent='Clearing...';
+      fetch('/api/coredump/clear',{method:'POST'})
+        .then(function(r){
+          if(!r.ok) throw new Error('Clear failed');
+          showToast('Crash dump cleared','success');
+          refreshCoredumpInfo();
+        })
+        .catch(function(e){ showToast('Clear crash dump failed: '+e.message,'error'); })
         .finally(function(){ btn.disabled=false; btn.textContent=prev; });
     }
 

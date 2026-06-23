@@ -27,6 +27,13 @@ target_compile_options(
         -Wno-unused-function  # unused atomic.h inlines in lv_freertos.c (upstream ESP-IDF issue)
 )
 
+# Custom LVGL malloc backend (routes lv_malloc -> PSRAM). Must be compiled INTO the
+# LVGL library, not main: lv_mem.c (inside liblvgl) references lv_*_core, and liblvgl
+# is linked after libmain. A single-pass linker would not extract these symbols from
+# libmain.a (nothing needs them yet when main is processed), leaving them undefined.
+# Building it into liblvgl resolves the reference within the same archive.
+target_sources(${LVGL_LIB} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/lv_mem_psram.c)
+
 # Add hardware JPEG decoder for thumbnail feature
 idf_component_get_property(JPEG_LIB esp_driver_jpeg COMPONENT_LIB)
 target_link_libraries(${COMPONENT_LIB} PRIVATE ${JPEG_LIB})
