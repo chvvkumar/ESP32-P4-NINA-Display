@@ -1959,6 +1959,20 @@ void data_update_task(void *arg) {
             const char *cur_ver = ota_github_get_current_version();
             if (ota_github_check(include_pre, cur_ver, rel)) {
                 ESP_LOGI(TAG, "New firmware available: %s", rel->tag);
+                if (rel->requires_full_erase) {
+                    /* This release cannot be installed over WiFi — show a
+                     * blocking warning and wait only for dismissal. */
+                    ESP_LOGW(TAG, "Firmware %s requires manual USB erase+flash", rel->tag);
+                    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                        nina_ota_prompt_show_manual_flash(rel->tag);
+                        bsp_display_unlock();
+                    }
+                    while (nina_ota_prompt_visible()) {
+                        vTaskDelay(pdMS_TO_TICKS(200));
+                    }
+                    heap_caps_free(rel);
+                    goto boot_update_check_done;
+                }
                 /* Show the update prompt overlay */
                 if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                     nina_ota_prompt_show(rel->tag, cur_ver, rel->summary);
@@ -2016,6 +2030,7 @@ void data_update_task(void *arg) {
         }
     }
 
+boot_update_check_done:
     // Start MQTT if enabled
     mqtt_ha_start();
 
@@ -2354,7 +2369,19 @@ main_loop:
             if (rel) {
                 bool include_pre = (app_config_get()->update_channel == 1);
                 const char *cur_ver = ota_github_get_current_version();
-                if (ota_github_check(include_pre, cur_ver, rel)) {
+                bool update_found = ota_github_check(include_pre, cur_ver, rel);
+                if (update_found && rel->requires_full_erase) {
+                    /* This release cannot be installed over WiFi — show a
+                     * blocking warning and wait only for dismissal. */
+                    ESP_LOGW(TAG, "Firmware %s requires manual USB erase+flash", rel->tag);
+                    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                        nina_ota_prompt_show_manual_flash(rel->tag);
+                        bsp_display_unlock();
+                    }
+                    while (nina_ota_prompt_visible()) {
+                        vTaskDelay(pdMS_TO_TICKS(200));
+                    }
+                } else if (update_found) {
                     ESP_LOGI(TAG, "New firmware available: %s", rel->tag);
                     if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                         nina_ota_prompt_show(rel->tag, cur_ver, rel->summary);

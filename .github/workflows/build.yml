@@ -222,6 +222,12 @@ jobs:
           # Copy app binary as OTA file
           cp "$APP_BIN" firmware/nina-display-ota.bin
 
+          # Stage bootloader + partition table as standalone assets. The release
+          # uploads these so the next build can hash them against this baseline to
+          # decide OTA-safe vs full-erase (see "Check full erase requirement").
+          cp build/bootloader/bootloader.bin firmware/bootloader.bin
+          cp build/partition_table/partition-table.bin firmware/partition-table.bin
+
           # Copy ELF for crash backtrace decoding
           APP_ELF=$(python3 -c "
           import json
@@ -498,47 +504,119 @@ jobs:
       - name: Check full erase requirement
         if: steps.check_skip.outputs.skip != 'true'
         id: erase_check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Detection is artifact-primary: hash the freshly built partition table
+          # and bootloader against the previous release's uploaded baseline. The
+          # source-diff rules below are SECONDARY corroboration. Bias toward
+          # false-positive (require erase) over false-negative (silent OTA-break).
           REASONS=""
+          REQUIRED=false
 
-          # Find previous release tag to diff against
+          # Find previous release tag to diff/compare against.
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
 
+          # --- PRIMARY: built-artifact hash comparison vs previous release ----
+          NEW_PT="build/partition_table/partition-table.bin"
+          NEW_BL="build/bootloader/bootloader.bin"
+
+          if [ -z "$PREV_TAG" ]; then
+            # First release ever: no baseline to compare. Cannot prove OTA-safe.
+            REASONS="${REASONS}No previous release baseline to compare; flash factory binary.\n"
+            REQUIRED=true
+          else
+            BASE_DIR=$(mktemp -d)
+            # Tolerate absence: previous release may predate asset upload.
+            gh release download "$PREV_TAG" \
+              -p partition-table.bin -p bootloader.bin \
+              -D "$BASE_DIR" 2>/dev/null || true
+
+            OLD_PT="$BASE_DIR/partition-table.bin"
+            OLD_BL="$BASE_DIR/bootloader.bin"
+
+            if [ ! -f "$OLD_PT" ] || [ ! -f "$OLD_BL" ]; then
+              # Previous release predates baseline asset upload, or partial upload.
+              REASONS="${REASONS}No previous release baseline to compare; flash factory binary.\n"
+              REQUIRED=true
+            else
+              NEW_PT_HASH=$(sha256sum "$NEW_PT" | cut -d' ' -f1)
+              OLD_PT_HASH=$(sha256sum "$OLD_PT" | cut -d' ' -f1)
+              if [ "$NEW_PT_HASH" != "$OLD_PT_HASH" ]; then
+                REASONS="${REASONS}Partition table changed since ${PREV_TAG}.\n"
+                REQUIRED=true
+              fi
+
+              NEW_BL_HASH=$(sha256sum "$NEW_BL" | cut -d' ' -f1)
+              OLD_BL_HASH=$(sha256sum "$OLD_BL" | cut -d' ' -f1)
+              if [ "$NEW_BL_HASH" != "$OLD_BL_HASH" ]; then
+                # A bootloader.bin hash change is flagged. Confirming MANDATORY
+                # would require diffing the previous release's resolved sdkconfig
+                # for security/target/MMU keys, which we cannot fetch reliably
+                # from the release. Prefer safety: treat as required.
+                REASONS="${REASONS}Bootloader changed since ${PREV_TAG} (manual flash recommended).\n"
+                REQUIRED=true
+              fi
+            fi
+          fi
+
+          # --- SECONDARY: source-diff corroboration (resolved sdkconfig) -------
+          # Diff the resolved/generated sdkconfig (build product), not
+          # sdkconfig.defaults, so it reflects what was actually built.
           if [ -n "$PREV_TAG" ]; then
-            # 1. Partition table changed (offsets, sizes, new/removed partitions)
+            # 1. Partition table CSV changed (offsets, sizes, new/removed parts).
             PARTITION_DIFF=$(git diff "$PREV_TAG" -- partitions.csv 2>/dev/null | grep '^[+-]' | grep -v '^[+-][+-][+-]' | sed 's/^[+-]//' | tr -s ' ,' ' ' || true)
             if [ -n "$PARTITION_DIFF" ]; then
-              # Extract changed partition names from the diff
               CHANGED_PARTS=$(echo "$PARTITION_DIFF" | awk '{print $1}' | sort -u | paste -sd ', ')
-              REASONS="${REASONS}Partition table changed since ${PREV_TAG} (affected: ${CHANGED_PARTS}).\n"
+              REASONS="${REASONS}Partition layout (partitions.csv) changed since ${PREV_TAG} (affected: ${CHANGED_PARTS}).\n"
+              REQUIRED=true
             fi
 
-            # 2. Bootloader-critical sdkconfig keys changed
-            BOOTLOADER_KEYS="CONFIG_ESPTOOLPY_FLASHMODE|CONFIG_ESPTOOLPY_FLASHSIZE|CONFIG_ESPTOOLPY_FLASHFREQ|CONFIG_PARTITION_TABLE|CONFIG_BOOTLOADER_|CONFIG_SECURE_BOOT|CONFIG_FLASH_ENCRYPTION|CONFIG_SPIRAM_SPEED|CONFIG_CACHE_L2_CACHE"
-            SDKCONFIG_DIFF=$(git diff "$PREV_TAG" -- sdkconfig.defaults 2>/dev/null | grep '^[+-]' | grep -v '^[+-][+-][+-]' | grep -E "$BOOTLOADER_KEYS" || true)
-            if [ -n "$SDKCONFIG_DIFF" ]; then
-              # Extract the specific key names that changed
-              CHANGED_KEYS=$(echo "$SDKCONFIG_DIFF" | sed 's/^[+-]//' | grep -oE 'CONFIG_[A-Z_]+' | sort -u | paste -sd ', ')
-              REASONS="${REASONS}Bootloader/flash config changed in sdkconfig.defaults (${CHANGED_KEYS}).\n"
+            # 2. Security / target / MMU / partition-offset keys in the RESOLVED
+            #    sdkconfig. Match only ENABLE/value symbols that actually force a
+            #    full erase. Deliberately excludes:
+            #      - CONFIG_BOOTLOADER_* prefix (matches log level etc.)
+            #      - *_SUPPORTED capability flags
+            #      - FLASHMODE/FLASHFREQ/FLASHSIZE (app header reconfigures flash
+            #        at boot; these are OTA-safe)
+            RESOLVED_SDKCONFIG=""
+            if [ -f sdkconfig ]; then
+              RESOLVED_SDKCONFIG="sdkconfig"
+            elif [ -f build/config/sdkconfig.json ]; then
+              RESOLVED_SDKCONFIG="build/config/sdkconfig.json"
+            fi
+            WATCH_KEYS='^(CONFIG_SECURE_BOOT=y|CONFIG_SECURE_BOOT_ENABLED=y|CONFIG_SECURE_FLASH_ENC_ENABLED=y|CONFIG_FLASH_ENCRYPTION_ENABLED=y|CONFIG_IDF_TARGET=|CONFIG_MMU_PAGE_SIZE|CONFIG_PARTITION_TABLE_OFFSET=|CONFIG_PARTITION_TABLE_MD5)'
+            if [ -n "$RESOLVED_SDKCONFIG" ] && [ "$RESOLVED_SDKCONFIG" = "sdkconfig" ]; then
+              OLD_SDKCONFIG=$(git show "$PREV_TAG":sdkconfig 2>/dev/null || true)
+              if [ -n "$OLD_SDKCONFIG" ]; then
+                OLD_WATCH=$(echo "$OLD_SDKCONFIG" | grep -E "$WATCH_KEYS" | sort || true)
+                NEW_WATCH=$(grep -E "$WATCH_KEYS" sdkconfig | sort || true)
+                if [ "$OLD_WATCH" != "$NEW_WATCH" ]; then
+                  CHANGED_KEYS=$( (echo "$OLD_WATCH"; echo "$NEW_WATCH") | grep -oE 'CONFIG_[A-Z0-9_]+' | sort -u | paste -sd ', ')
+                  REASONS="${REASONS}Security/target/MMU config changed since ${PREV_TAG} (${CHANGED_KEYS}).\n"
+                  REQUIRED=true
+                fi
+              fi
             fi
 
-            # 3. NVS namespace or key renamed in app_config.c
-            # Only fires when the string literals defining the namespace or key change,
-            # not when new call sites using the same values are added.
+            # 3. NVS namespace renamed in app_config.c. Fires only when the string
+            #    literal defining the namespace changes.
             OLD_NS=$(git show "$PREV_TAG":main/app_config.c 2>/dev/null | sed -n 's/.*NVS_NAMESPACE *= *"\([^"]*\)".*/\1/p' | head -1 || true)
             NEW_NS=$(sed -n 's/.*NVS_NAMESPACE *= *"\([^"]*\)".*/\1/p' main/app_config.c | head -1 || true)
             if [ -n "$OLD_NS" ] && [ -n "$NEW_NS" ] && [ "$OLD_NS" != "$NEW_NS" ]; then
               REASONS="${REASONS}NVS namespace changed: \"${OLD_NS}\" -> \"${NEW_NS}\" in app_config.c.\n"
+              REQUIRED=true
             fi
           fi
 
-          # 4. Manual override — FULL_ERASE_REQUIRED file always wins
+          # --- Manual override — FULL_ERASE_REQUIRED file always wins ----------
           if [ -f "FULL_ERASE_REQUIRED" ]; then
             MANUAL_REASON=$(cat FULL_ERASE_REQUIRED | tr -d '\r' | head -5)
             REASONS="${REASONS}${MANUAL_REASON}\n"
+            REQUIRED=true
           fi
 
-          if [ -n "$REASONS" ]; then
+          if [ "$REQUIRED" = "true" ]; then
             echo "required=true" >> $GITHUB_OUTPUT
             echo "reason<<EOFR" >> $GITHUB_OUTPUT
             echo -e "$REASONS" | sed '/^$/d' >> $GITHUB_OUTPUT
@@ -604,7 +682,13 @@ jobs:
                   changes = f.read().strip()
 
           since = f'### Changes since {prev_tag}' if prev_tag else '### Recent Changes'
+          # Machine-readable verdict marker as the very first line, always present.
+          # The device matches the substring "nina:full_erase=1" to require a USB
+          # factory flash; "nina:full_erase=0" means OTA-safe. Emitted from the
+          # same final verdict that drives the caution/OTA-safe block below.
+          erase_marker = '<!-- nina:full_erase=1 -->' if full_erase else '<!-- nina:full_erase=0 -->'
           lines = [
+              erase_marker,
               f'## NINA Display {tag}',
               '',
               f'**Branch:** {branch}',
@@ -682,6 +766,8 @@ jobs:
           gh release create "$TAG" \
             firmware/nina-display-factory.bin \
             firmware/nina-display-ota.bin \
+            firmware/bootloader.bin \
+            firmware/partition-table.bin \
             --title "$TAG" \
             --notes-file /tmp/release-notes.md \
             $PRERELEASE_FLAG

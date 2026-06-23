@@ -327,6 +327,7 @@ bool ota_github_check(bool include_prereleases, const char *current_version, git
         extract_summary(body_str, out->summary, sizeof(out->summary));
         strncpy(out->ota_url, ota_url, sizeof(out->ota_url) - 1);
         out->is_prerelease = is_pre;
+        out->requires_full_erase = (strstr(body_str, "nina:full_erase=1") != NULL);
 
         ESP_LOGI(TAG, "Update available: %s (pre-release: %s)", out->tag, is_pre ? "yes" : "no");
         found = true;
