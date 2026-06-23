@@ -745,9 +745,29 @@
     .wifi-scan-signal span{width:3px;border-radius:1px}
     .wifi-scan-status{color:var(--text-muted);font-size:0.75rem;text-align:center;padding:16px 0}
     .wifi-scan-footer{color:#555;font-size:0.68rem;margin-top:6px;padding-left:2px}
+    /* Full-erase (manual update) caution styling - amber accent */
+    .erase-caution{border:1px solid rgba(251,191,36,0.45);background:rgba(251,191,36,0.08);border-radius:10px;padding:12px 14px;font-size:0.82rem;line-height:1.6;color:#fde68a}
+    .erase-caution .erase-caution-title{display:block;font-weight:700;color:#fbbf24;margin-bottom:4px}
+    .erase-caution a{color:#fbbf24;text-decoration:underline}
+    /* Dismissible global banner for a manual-update release */
+    #fullEraseBanner{display:none;position:sticky;top:0;left:0;right:0;z-index:1200;border-bottom:1px solid rgba(251,191,36,0.45);background:rgba(45,33,8,0.97);color:#fde68a;padding:12px 18px;font-size:0.84rem;line-height:1.55;box-shadow:0 2px 12px rgba(0,0,0,0.4)}
+    #fullEraseBanner .erase-banner-inner{display:flex;align-items:flex-start;gap:12px;max-width:1100px;margin:0 auto}
+    #fullEraseBanner .erase-banner-text{flex:1}
+    #fullEraseBanner strong{color:#fbbf24}
+    #fullEraseBanner a{color:#fbbf24;text-decoration:underline}
+    #fullEraseBanner .erase-banner-close{flex-shrink:0;background:none;border:none;color:#fbbf24;font-size:1.4rem;line-height:1;cursor:pointer;padding:0 4px}
+    #fullEraseBanner .erase-banner-close:hover{color:#fff}
   </style>
 </head>
 <body>
+
+  <!-- ======== MANUAL-UPDATE (FULL ERASE) BANNER ======== -->
+  <div id="fullEraseBanner">
+    <div class="erase-banner-inner">
+      <div class="erase-banner-text" id="fullEraseBannerText"></div>
+      <button type="button" class="erase-banner-close" id="fullEraseBannerClose" title="Dismiss" aria-label="Dismiss">&times;</button>
+    </div>
+  </div>
 
   <!-- ======== TOP NAVIGATION ======== -->
   <nav class="top-nav">
@@ -3313,6 +3333,27 @@
       }
     }
 
+    /* Build the manual-update (full-erase) caution copy as HTML.
+       `data` is a /api/check-update-json response; `tag` is substituted live. */
+    function fullEraseCautionHtml(data){
+      var tag=escHtml((data&&data.tag)||'');
+      var relUrl=(data&&(data.release_url||data.html_url))||'https://github.com/chvvkumar/ESP32-P4-NINA-Display/releases';
+      relUrl=escHtml(relUrl);
+      return 'Firmware <strong>'+tag+'</strong> requires a manual update. It cannot be installed over the air. '+
+        'First back up your settings on the Backup tab (Download Backup). '+
+        'Then flash nina-display-factory.bin at address 0x0000 using the '+
+        '<a href="https://espressif.github.io/esptool-js/" target="_blank" rel="noopener">ESP Web Flasher</a>. '+
+        '<a href="'+relUrl+'" target="_blank" rel="noopener">View release</a>.';
+    }
+
+    /* Reveal the dismissible global banner for a manual-update release. */
+    function showFullEraseBanner(data){
+      var banner=$('fullEraseBanner');
+      if(!banner) return;
+      $('fullEraseBannerText').innerHTML='⚠ '+fullEraseCautionHtml(data);
+      banner.style.display='block';
+    }
+
     function checkForUpdates(){
       var btn=$('checkUpdateBtn');
       var result=$('updateResult');
@@ -3327,12 +3368,19 @@
         btn.disabled=false; btn.textContent='Check for Updates';
         result.style.display='block';
         if(data.update_available){
-          resultText.innerHTML='<span style="color:var(--accent)">Update available:</span> <strong>'+escHtml(data.tag)+'</strong>'+(data.is_prerelease?' <span style="color:#fbbf24;font-size:0.75rem">(pre-release)</span>':'');
-          if(data.summary){
-            summary.style.display='block';
-            summary.textContent=data.summary;
+          if(data.requires_full_erase){
+            // Manual-update release: block GitHub OTA, show caution copy instead of the install button.
+            installBtn.style.display='none';
+            summary.style.display='none';
+            resultText.innerHTML='<div class="erase-caution"><span class="erase-caution-title">⚠ Manual update required</span>'+fullEraseCautionHtml(data)+'</div>';
+          } else {
+            resultText.innerHTML='<span style="color:var(--accent)">Update available:</span> <strong>'+escHtml(data.tag)+'</strong>'+(data.is_prerelease?' <span style="color:#fbbf24;font-size:0.75rem">(pre-release)</span>':'');
+            if(data.summary){
+              summary.style.display='block';
+              summary.textContent=data.summary;
+            }
+            installBtn.style.display='block';
           }
-          installBtn.style.display='block';
         } else {
           resultText.innerHTML='\u2705 You are running the latest firmware ('+escHtml(data.current_version)+')';
         }
@@ -3425,6 +3473,9 @@
           _updateInfo=data;
           pill.innerHTML=escHtml(data.tag)+' \u2191';
           pill.style.display='inline-flex';
+          if(data.requires_full_erase){
+            showFullEraseBanner(data);
+          }
         }
       }).catch(function(){});
     }
@@ -3434,8 +3485,18 @@
       var title=escHtml(_updateInfo.current_version)+' \u2192 '+escHtml(_updateInfo.tag);
       if(_updateInfo.is_prerelease) title+=' <span class="cl-prerelease">pre-release</span>';
       $('changelogTitle').innerHTML=title;
-      $('changelogInstall').textContent='Install '+_updateInfo.tag;
-      $('changelogInstall').disabled=false;
+      var installBtn=$('changelogInstall');
+      if(_updateInfo.requires_full_erase){
+        // Manual-update release: block GitHub OTA from the modal, show caution copy.
+        installBtn.style.display='none';
+        installBtn.disabled=true;
+        $('changelogBody').innerHTML='<div class="erase-caution"><span class="erase-caution-title">\u26a0 Manual update required</span>'+fullEraseCautionHtml(_updateInfo)+'</div>';
+        $('changelogBackdrop').style.display='flex';
+        return;
+      }
+      installBtn.style.display='';
+      installBtn.textContent='Install '+_updateInfo.tag;
+      installBtn.disabled=false;
       $('changelogBody').textContent='Loading changelog\u2026';
       $('changelogBackdrop').style.display='flex';
       loadChangelog();
@@ -3532,6 +3593,8 @@
       var c1=$('changelogClose'); if(c1) c1.addEventListener('click',closeChangelogModal);
       var c2=$('changelogCancel'); if(c2) c2.addEventListener('click',closeChangelogModal);
       var ins=$('changelogInstall'); if(ins) ins.addEventListener('click',installFromModal);
+      var ebc=$('fullEraseBannerClose');
+      if(ebc) ebc.addEventListener('click',function(){ var b=$('fullEraseBanner'); if(b) b.style.display='none'; });
     })();
 
     function startGithubOta(){

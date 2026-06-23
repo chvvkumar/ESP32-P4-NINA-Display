@@ -12,6 +12,7 @@ typedef struct {
     char summary[1024];        // Release summary text (just the description, no commit details)
     char ota_url[2048];        // Pre-signed S3 URL can be ~1KB with auth tokens
     bool is_prerelease;
+    bool requires_full_erase;  // Release requires manual USB erase+flash (cannot OTA)
 } github_release_info_t;
 
 /**
