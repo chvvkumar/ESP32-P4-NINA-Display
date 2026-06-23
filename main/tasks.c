@@ -1995,7 +1995,7 @@ void data_update_task(void *arg) {
                     }
                     esp_err_t ota_err = ota_github_download(rel->ota_url, ota_progress_cb);
                     if (ota_err == ESP_OK) {
-                        ota_github_save_installed_version(rel->tag);
+                        ota_github_save_pending_version(rel->tag);
                         ESP_LOGI(TAG, "OTA download success, rebooting...");
                         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                             nina_ota_prompt_set_progress(100);
@@ -2403,7 +2403,7 @@ main_loop:
                         }
                         esp_err_t ota_err = ota_github_download(rel->ota_url, ota_progress_cb);
                         if (ota_err == ESP_OK) {
-                            ota_github_save_installed_version(rel->tag);
+                            ota_github_save_pending_version(rel->tag);
                             ESP_LOGI(TAG, "OTA download success, rebooting...");
                             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                                 nina_ota_prompt_set_progress(100);
