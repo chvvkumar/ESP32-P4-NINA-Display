@@ -21,6 +21,7 @@
 #include "ui/nina_safety.h"
 #include "ui/nina_session_stats.h"
 #include "app_config.h"
+#include "axi_qos.h"
 #include "log_capture.h"
 #include "web_server.h"
 #include "mqtt_ha.h"
@@ -634,6 +635,12 @@ void app_main(void)
     bsp_display_start_with_config(&cfg);
     bsp_display_backlight_on();
     bsp_display_brightness_set(app_config_get()->brightness);
+
+    /* Raise DW-GDMA (DSI scanout) PSRAM read priority above Cache/CPU so the
+     * MIPI-DSI framebuffer fetch is not starved by LVGL/PPA traffic. Fixes the
+     * brief blue-screen flashes (scanout FIFO underrun). Must run after the DPI
+     * panel + its DW-GDMA channel exist. */
+    board_boost_dsi_axi_qos();
 
     /* ── SW rotation setup ──
      * Allocate one temp PSRAM buffer for in-place rotation.  The flush

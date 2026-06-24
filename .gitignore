@@ -168,3 +168,6 @@ components/tgx/*
 .env.development.local
 .env.test.local
 .env.production.local
+
+# Local serial-console DSI underrun watcher (not part of the build)
+watch_underrun.ps1
