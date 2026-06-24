@@ -106,6 +106,8 @@ typedef struct {
     float    cached_total;          // Last-known exposure_total from poll data
     lv_timer_t *arc_timer;          // 200ms LVGL timer for real-time arc progress
     int64_t  gap_start_epoch;       // When the inter-exposure gap began (0 = not in gap)
+    int64_t  exp_anchor_us;         // esp_timer_get_time() at exposure-start anchor (0 = no active anchor)
+    float    exp_anchor_elapsed;    // Elapsed seconds already done at the anchor moment (seed)
     bool     arc_completing;        // True during completion/transition animation
     bool     cached_is_exposing;    // Last-known is_exposing state from poll data
     char     prev_filter[32];       // Track previous filter for change detection
