@@ -271,7 +271,7 @@ void fetch_sequence_counts_optional(const char *base_url, nina_client_t *data) {
                 cJSON *target_container = find_active_target_container(item);
                 if (!target_container) target_container = cJSON_GetArrayItem(items, 0);
 
-                // Use container name as fallback target name
+                // Resolve target name from the active target container.
                 cJSON *target_name_json = cJSON_GetObjectItem(target_container, "Name");
                 if (target_name_json && target_name_json->valuestring) {
                     char temp_name[64];
@@ -280,9 +280,22 @@ void fetch_sequence_counts_optional(const char *base_url, nina_client_t *data) {
                     char *suffix = strstr(temp_name, "_Container");
                     if (suffix) *suffix = '\0';
 
-                    if (temp_name[0] != '\0' &&
-                        (data->target_name[0] == '\0' ||
-                         strcmp(data->target_name, "No Target") == 0)) {
+                    // Is the chosen container actually RUNNING? (find_active_target_container can
+                    // return a FINISHED container as fallback; only a RUNNING one is a real active target.)
+                    cJSON *tc_status = cJSON_GetObjectItem(target_container, "Status");
+                    bool tc_running = (tc_status && tc_status->valuestring &&
+                                       strcmp(tc_status->valuestring, "RUNNING") == 0);
+
+                    if (temp_name[0] != '\0' && tc_running &&
+                        strcmp(temp_name, data->prev_target_container) != 0) {
+                        // New RUNNING target container detected -> authoritative update at sequence/target start
+                        strlcpy(data->target_name, temp_name, sizeof(data->target_name));
+                        strlcpy(data->prev_target_container, temp_name, sizeof(data->prev_target_container));
+                        ESP_LOGI(TAG, "Target (new RUNNING container): %s", data->target_name);
+                    } else if (temp_name[0] != '\0' &&
+                               (data->target_name[0] == '\0' ||
+                                strcmp(data->target_name, "No Target") == 0)) {
+                        // Existing fallback: fill when we have no name yet (idle/CREATED/boot)
                         strlcpy(data->target_name, temp_name, sizeof(data->target_name));
                         ESP_LOGI(TAG, "Target (fallback from sequence): %s", data->target_name);
                     }

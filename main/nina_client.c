@@ -552,6 +552,7 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
         state->static_fetched = false;
         state->cached_image_count = -1;
         nina_connection_set_static_data_ready(instance, false);
+        data->prev_target_container[0] = '\0';
         state->http_client = (void *)reuse_handle;
         http_poll_ctx_set(NULL);
         return;
