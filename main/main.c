@@ -7,6 +7,8 @@
 #include "esp_err.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
+#include "esp_hosted.h"
+#include "esp_hosted_host_fw_ver.h"
 #include "esp_sntp.h"
 #include "esp_timer.h"
 #include "bsp/esp-bsp.h"
@@ -19,11 +21,13 @@
 #include "ui/nina_safety.h"
 #include "ui/nina_session_stats.h"
 #include "app_config.h"
+#include "axi_qos.h"
 #include "log_capture.h"
 #include "web_server.h"
 #include "mqtt_ha.h"
 #include "tasks.h"
 #include "esp_ota_ops.h"
+#include "ota_github.h"
 #include "driver/jpeg_decode.h"
 #include "display/lv_display_private.h"
 #include "draw/sw/lv_draw_sw_utils.h"
@@ -45,6 +49,7 @@
 #include "ui/nina_settings_tabview.h"
 #include "ui/nina_thumbnail.h"
 #include "ui/nina_setup_screen.h"
+#include "ui/nina_nav_arbiter.h"
 
 /* Embedded splash logo (JPEG, hardware-decoded at boot) */
 extern const uint8_t logo_jpg_start[] asm("_binary_logo_jpg_start");
@@ -554,8 +559,10 @@ void app_main(void)
 
     app_config_init();
 
-    // Check if we woke from deep sleep
-    esp_sleep_wakeup_cause_t wake_cause = power_mgmt_check_wake_cause();
+    // Check if we woke from deep sleep (logs cause, clears intended flag).
+    // The wake cause no longer drives navigation — the arbiter resolves the
+    // page from current state on boot — so the result is intentionally unused.
+    (void)power_mgmt_check_wake_cause();
 
     // Track crash resets (PANIC, WDT) in RTC memory
     power_mgmt_check_crash();
@@ -568,6 +575,11 @@ void app_main(void)
 
     perf_monitor_init(30);
     perf_monitor_set_enabled(app_config_get()->debug_mode);
+    // Deterministic OOM catcher: fires on EVERY failed heap allocation,
+    // including the sub-second transient SDIO RX DMA-SRAM exhaustion that the
+    // 30s perf sampling misses. Lock-free / allocation-free hook. Registered
+    // before tasks spawn so it is armed for all subsequent allocations.
+    perf_monitor_register_alloc_fail_hook();
 
     instance_count = app_config_get_instance_count();
     if (app_config_get()->demo_mode) {
@@ -577,6 +589,22 @@ void app_main(void)
     ESP_LOGI(TAG, "Configured instances: %d", instance_count);
 
     wifi_init();
+
+    /* Log esp-hosted host + C6 coprocessor firmware versions (diagnostic; readable
+     * via /api/logs). A host/slave version mismatch is the top cause of SDIO
+     * transport instability on the P4+C6. */
+    ESP_LOGI(TAG, "esp-hosted host fw: %d.%d.%d",
+             ESP_HOSTED_VERSION_MAJOR_1, ESP_HOSTED_VERSION_MINOR_1, ESP_HOSTED_VERSION_PATCH_1);
+    {
+        esp_hosted_coprocessor_fwver_t cpver = {0};
+        if (esp_hosted_get_coprocessor_fwversion(&cpver) == ESP_OK) {
+            ESP_LOGI(TAG, "esp-hosted C6 coprocessor fw: %u.%u.%u (rev %d)",
+                     (unsigned)cpver.major1, (unsigned)cpver.minor1, (unsigned)cpver.patch1,
+                     (int)cpver.revision);
+        } else {
+            ESP_LOGW(TAG, "esp-hosted: failed to read C6 coprocessor fw version");
+        }
+    }
 
 
     // Enable Dynamic Frequency Scaling — CPU scales 360 MHz (active) to 40 MHz (idle)
@@ -607,6 +635,12 @@ void app_main(void)
     bsp_display_start_with_config(&cfg);
     bsp_display_backlight_on();
     bsp_display_brightness_set(app_config_get()->brightness);
+
+    /* Raise DW-GDMA (DSI scanout) PSRAM read priority above Cache/CPU so the
+     * MIPI-DSI framebuffer fetch is not starved by LVGL/PPA traffic. Fixes the
+     * brief blue-screen flashes (scanout FIFO underrun). Must run after the DPI
+     * panel + its DW-GDMA channel exist. */
+    board_boost_dsi_axi_qos();
 
     /* ── SW rotation setup ──
      * Allocate one temp PSRAM buffer for in-place rotation.  The flush
@@ -750,23 +784,11 @@ void app_main(void)
         nina_alerts_init(scr);
         nina_safety_create(scr);
 
-        {
-            /* Apply persisted page override immediately on boot.
-             * Override stores absolute page index: 0=allsky, 1=spotify, 2=clock,
-             * 3=image_display, 4=summary, 5..N+4=NINA, then settings, then sysinfo */
-            app_config_t *cfg = app_config_get();
-            int total = nina_dashboard_get_total_page_count();
-            if (cfg->active_page_override >= 0 && cfg->active_page_override < total) {
-                nina_dashboard_show_page(cfg->active_page_override, 0);
-            }
-        }
-
-        // Restore page from deep sleep if applicable
-        if (wake_cause != ESP_SLEEP_WAKEUP_UNDEFINED) {
-            int saved_page = power_mgmt_get_saved_page();
-            ESP_LOGI(TAG, "Restoring page %d from deep sleep", saved_page);
-            nina_dashboard_show_page(saved_page, 0);
-        }
+        /* Navigation is owned by the arbiter. Boot does not force-navigate:
+         * active_page_override is the Home Page (DEFAULT rung), not a boot
+         * override, and deep-sleep no longer restores a stale saved page.
+         * The arbiter resolves the correct page from current state below. */
+        nav_arbiter_init();
 
         } /* end else (normal mode) */
 
@@ -777,6 +799,10 @@ void app_main(void)
 
     if (!setup_mode) {
         nina_dashboard_set_page_change_cb(on_page_changed);
+
+        /* Fresh first resolution — let the arbiter pick the page from current
+         * state instead of force-navigating on boot. */
+        nav_arbiter_resolve(esp_timer_get_time() / 1000);
 
         nina_client_init();  // DNS cache mutex — must be called before poll tasks spawn
         nina_client_init_image_buffers();  // Pre-allocate PSRAM image fetch buffer
@@ -827,5 +853,15 @@ void app_main(void)
     /* Mark this firmware as valid so the bootloader won't roll back.
      * This must come after successful init — if we crash before here,
      * the bootloader will revert to the previous OTA partition. */
+    /* Determine whether this is the first boot of a freshly-OTA'd image.
+     * Only then is a pending OTA version promoted to the confirmed installed
+     * version; a rollback/normal boot discards the stale pending stamp. */
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    esp_ota_img_states_t ota_state;
+    bool first_boot_new_image =
+        (esp_ota_get_state_partition(running, &ota_state) == ESP_OK &&
+         ota_state == ESP_OTA_IMG_PENDING_VERIFY);
+    ota_github_reconcile_version(first_boot_new_image);
+
     esp_ota_mark_app_valid_cancel_rollback();
 }

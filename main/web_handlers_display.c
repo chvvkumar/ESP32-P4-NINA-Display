@@ -6,6 +6,8 @@
 #include "bsp/display.h"
 #include "display_defs.h"
 #include "ui/nina_dashboard.h"
+#include "ui/nina_dashboard_internal.h"
+#include "ui/nina_nav_arbiter.h"
 #include "ui/nina_image_display.h"
 #include "ui/nina_spotify.h"
 #include "ui/themes.h"
@@ -17,6 +19,7 @@
 #include "ui/nina_idle_indicator.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_timer.h"
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
@@ -40,16 +43,32 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
             bsp_display_unlock();
         }
     }
-    /* Instance enable/disable — immediately wake poll tasks */
+    /* Instance enable/disable or URL change — immediately wake poll tasks,
+     * rebuild the affected NINA slot, and raise the arbiter topology flag so
+     * the next resolve re-evaluates targets against the new slot set. */
+    bool topology_changed = false;
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
-        if (new_cfg->instance_enabled[i] != old_cfg->instance_enabled[i]) {
+        bool enable_changed = (new_cfg->instance_enabled[i] != old_cfg->instance_enabled[i]);
+        bool url_changed = (strcmp(new_cfg->api_url[i], old_cfg->api_url[i]) != 0);
+        if (enable_changed || url_changed) {
             if (!new_cfg->instance_enabled[i]) {
                 nina_connection_report_poll(i, false);
             }
             if (poll_task_handles[i]) {
                 xTaskNotifyGive(poll_task_handles[i]);
             }
+            /* Lazily create/destroy the slot to match the new config. */
+            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                nina_dashboard_rebuild_slot(i);
+                bsp_display_unlock();
+            }
+            topology_changed = true;
         }
+    }
+    /* Demo mode is a connection/data override (issue 12): a live toggle changes
+     * the connection picture, so force a topology re-resolve on the next tick. */
+    if (new_cfg->demo_mode != old_cfg->demo_mode) {
+        topology_changed = true;
     }
     /* Spotify layout mode change — refresh overlay if visible */
     if (new_cfg->spotify_minimal_mode != old_cfg->spotify_minimal_mode ||
@@ -73,6 +92,9 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
             nina_dashboard_set_allsky_enabled(new_cfg->allsky_enabled);
             bsp_display_unlock();
         }
+        if (new_cfg->allsky_enabled != old_cfg->allsky_enabled) {
+            topology_changed = true;  /* optional page appeared/disappeared */
+        }
     }
     /* Image Display (GOES) enable/overlay/region/interval change */
     if (new_cfg->image_display_enabled != old_cfg->image_display_enabled ||
@@ -86,6 +108,9 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
         }
         if (new_cfg->image_display_enabled) {
             goes_ensure_task_running();
+        }
+        if (new_cfg->image_display_enabled != old_cfg->image_display_enabled) {
+            topology_changed = true;  /* optional page appeared/disappeared */
         }
     }
     /* Weather config change — invalidate stale data and force refresh */
@@ -113,6 +138,11 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
         new_cfg->tz_string[0] != '\0') {
         setenv("TZ", new_cfg->tz_string, 1);
         tzset();
+    }
+    /* Topology change (instance enable/URL, optional-page enables, demo toggle):
+     * raise the flag once so the next nav_arbiter_resolve re-evaluates targets. */
+    if (topology_changed) {
+        nav_arbiter_notify_topology_changed();
     }
 }
 
@@ -334,24 +364,22 @@ esp_err_t page_post_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
+    /* Task 4.1: /api/page is the pure immediate-navigation USER path; it no
+     * longer touches the Home Page field (active_page_override); that moves to
+     * the config save path (Task 5.2). A -1 (Auto/Summary radio) maps to a USER
+     * claim to the Summary page so the existing web radio keeps working. */
     cJSON *val = cJSON_GetObjectItem(root, "page");
     if (cJSON_IsNumber(val)) {
         int page = val->valueint;
         int total = nina_dashboard_get_total_page_count();
-        app_config_t *cfg = app_config_get();
-
+        if (page < 0) page = PAGE_IDX_SUMMARY;          /* -1 (Auto) -> Summary USER claim */
         if (page >= 0 && page < total) {
-            cfg->active_page_override = (int8_t)page;
+            nav_arbiter_submit_user(page, esp_timer_get_time() / 1000);
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                nina_dashboard_show_page(page, 0);
+                nina_dashboard_show_page_animated(page, 0, 0);
                 bsp_display_unlock();
-            } else {
-                ESP_LOGW(TAG, "Display lock timeout (page switch)");
             }
-            ESP_LOGI(TAG, "Page switched to %d via web", page);
-        } else if (page == -1) {
-            cfg->active_page_override = -1;
-            ESP_LOGI(TAG, "Page override cleared via web");
+            ESP_LOGI(TAG, "Page switched to %d via web (USER claim)", page);
         }
     }
 

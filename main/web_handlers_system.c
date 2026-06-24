@@ -391,6 +391,7 @@ esp_err_t check_update_json_handler(httpd_req_t *req)
         cJSON_AddStringToObject(root, "tag", rel->tag);
         cJSON_AddStringToObject(root, "summary", rel->summary);
         cJSON_AddBoolToObject(root, "is_prerelease", rel->is_prerelease);
+        cJSON_AddBoolToObject(root, "requires_full_erase", rel->requires_full_erase);
     } else {
         cJSON_AddBoolToObject(root, "update_available", false);
     }
@@ -448,7 +449,7 @@ esp_err_t ota_github_post_handler(httpd_req_t *req)
     /* Download and flash */
     esp_err_t err = ota_github_download(rel->ota_url, ota_update_progress);
     if (err == ESP_OK) {
-        ota_github_save_installed_version(rel->tag);
+        ota_github_save_pending_version(rel->tag);
         ESP_LOGI(TAG, "GitHub OTA success (%s), rebooting...", rel->tag);
         ota_update_progress(100);
         heap_caps_free(rel);

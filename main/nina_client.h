@@ -22,6 +22,7 @@ typedef struct {
     bool connected;
     char status[32];
     char target_name[64];
+    char prev_target_container[64];   // last RUNNING target container Name (stripped) — for new-target detection
     char profile_name[64];
     char telescope_name[64];
     char camera_name[64];

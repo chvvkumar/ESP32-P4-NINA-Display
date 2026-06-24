@@ -85,14 +85,14 @@ static void load_tokens_from_nvs(void) {
         s_access_token[0] = '\0';
     }
 
-    /* Expiry — stored as int64 but NVS only has i32/u64. Use blob. */
-    len = sizeof(s_token_expiry_ms);
-    err = nvs_get_blob(nvs, NVS_KEY_EXPIRY, &s_token_expiry_ms, &len);
-    if (err != ESP_OK) {
-        s_token_expiry_ms = 0;
-    }
-
     nvs_close(nvs);
+
+    /* INTEG-1: The access-token expiry is a boot-relative esp_timer ms value.
+     * After a reboot esp_timer restarts at ~0, so a persisted expiry would make
+     * a long-expired access token look valid. Never trust the monotonic expiry
+     * across boots — force it to 0 so the first get_access_token() refreshes.
+     * Only the refresh token is meaningfully persistent. */
+    s_token_expiry_ms = 0;
 
     if (s_refresh_token[0] != '\0') {
         s_state = SPOTIFY_AUTH_AUTHORIZED;

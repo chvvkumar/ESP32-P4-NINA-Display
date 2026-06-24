@@ -710,8 +710,12 @@ void nina_toast_show(toast_severity_t sev, const char *msg) {
         }
     }
     if (slot < 0) {
-        /* Queue full — overwrite oldest (slot 0) */
-        slot = 0;
+        /* Queue full — drop the new toast. The pending array is not a FIFO
+         * ring, so there is no reliable "oldest" slot to overwrite; clobbering
+         * slot 0 would destroy an arbitrary valid entry. Dropping under backlog
+         * is acceptable backpressure (the queue drains on the next tick). */
+        portEXIT_CRITICAL(&s_pending_lock);
+        return;
     }
 
     s_pending[slot].sev = sev;

@@ -45,6 +45,14 @@ esp_err_t send_400(httpd_req_t *req, const char *message);
 bool validate_string_len(cJSON *root, const char *key, size_t max_len);
 bool validate_url_format(const char *url);
 
+/* Receive and parse a JSON request body using a PSRAM-backed buffer.
+ * Loops httpd_req_recv() until content_len bytes are read (handles
+ * multi-segment bodies); rejects bodies >= max_size. On any error the
+ * appropriate HTTP response is already sent and NULL is returned.
+ * On success returns a cJSON root the caller must cJSON_Delete().
+ * Defined in web_handlers_config.c. */
+cJSON *receive_json_body(httpd_req_t *req, int max_size);
+
 /* ---- Session cookie auth (defined in web_server.c) ---- */
 bool check_session(httpd_req_t *req);
 esp_err_t send_auth_required(httpd_req_t *req);
@@ -114,4 +122,7 @@ esp_err_t logs_get_handler(httpd_req_t *req);
 esp_err_t logs_clear_post_handler(httpd_req_t *req);
 esp_err_t crashlog_get_handler(httpd_req_t *req);
 esp_err_t crashlog_clear_post_handler(httpd_req_t *req);
+esp_err_t coredump_info_get_handler(httpd_req_t *req);
+esp_err_t coredump_get_handler(httpd_req_t *req);
+esp_err_t coredump_clear_post_handler(httpd_req_t *req);
 void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t *new_cfg);

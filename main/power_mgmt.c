@@ -9,7 +9,6 @@
 
 static const char *TAG = "power_mgmt";
 
-RTC_DATA_ATTR static int  s_saved_page          = 0;
 RTC_DATA_ATTR static bool s_deep_sleep_intended  = false;
 RTC_DATA_ATTR static uint32_t s_crash_count        = 0;
 RTC_DATA_ATTR static uint32_t s_last_crash_reason  = 0;  /* esp_reset_reason_t */
@@ -35,18 +34,18 @@ esp_err_t power_mgmt_init(void)
     return err;
 }
 
-void power_mgmt_enter_deep_sleep(uint32_t wake_timer_s, int current_page)
+void power_mgmt_enter_deep_sleep(uint32_t wake_timer_s)
 {
-    /* Persist state to RTC memory so we can restore after wake */
-    s_saved_page         = current_page;
+    /* Mark intent so wake-cause logging can distinguish intentional sleep.
+     * The page is no longer saved — the arbiter resolves it fresh on wake. */
     s_deep_sleep_intended = true;
 
     if (wake_timer_s > 0) {
         esp_sleep_enable_timer_wakeup((uint64_t)wake_timer_s * 1000000ULL);
-        ESP_LOGI(TAG, "Entering deep sleep with timer wakeup in %lu s (page %d saved)",
-                 (unsigned long)wake_timer_s, current_page);
+        ESP_LOGI(TAG, "Entering deep sleep with timer wakeup in %lu s",
+                 (unsigned long)wake_timer_s);
     } else {
-        ESP_LOGI(TAG, "Entering deep sleep with NO timer wakeup (page %d saved)", current_page);
+        ESP_LOGI(TAG, "Entering deep sleep with NO timer wakeup");
     }
 
     /* Cleanly shut down WiFi before sleeping */
@@ -61,21 +60,15 @@ esp_sleep_wakeup_cause_t power_mgmt_check_wake_cause(void)
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
 
     if (cause != ESP_SLEEP_WAKEUP_UNDEFINED) {
-        ESP_LOGI(TAG, "Woke from deep sleep: cause=%d, intentional=%s, saved_page=%d",
+        ESP_LOGI(TAG, "Woke from deep sleep: cause=%d, intentional=%s",
                  (int)cause,
-                 s_deep_sleep_intended ? "yes" : "no",
-                 s_saved_page);
+                 s_deep_sleep_intended ? "yes" : "no");
     }
 
     /* Clear the flag after reading so subsequent queries reflect reality */
     s_deep_sleep_intended = false;
 
     return cause;
-}
-
-int power_mgmt_get_saved_page(void)
-{
-    return s_saved_page;
 }
 
 void power_mgmt_check_crash(void)

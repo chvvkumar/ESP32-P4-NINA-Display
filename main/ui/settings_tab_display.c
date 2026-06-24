@@ -63,6 +63,102 @@ static void skip_offline_changed_cb(lv_event_t *e);
 static void page_checkbox_changed_cb(lv_event_t *e);
 static void update_mode_visibility(uint32_t mode);
 
+/* Home-page dropdown <-> absolute page index map.
+ * Dropdown rows: 0=Auto, 1=AllSky, 2=Spotify, 3=Clock, 4=Summary,
+ *                5=NINA1, 6=NINA2, 7=NINA3, 8=SysInfo.
+ * Absolute indices: AllSky=0, Spotify=1, Clock=2, Summary=4,
+ *                   NINA i = NINA_PAGE_OFFSET+i, SysInfo=SYSINFO_PAGE_IDX.
+ * Auto (row 0) maps to active_page_override = -1. */
+static int home_dd_sel_to_abs(uint32_t sel)
+{
+    switch (sel) {
+        case 0: return -1;                          /* Auto */
+        case 1: return PAGE_IDX_ALLSKY;             /* 0 */
+        case 2: return PAGE_IDX_SPOTIFY;            /* 1 */
+        case 3: return PAGE_IDX_CLOCK;             /* 2 */
+        case 4: return PAGE_IDX_SUMMARY;           /* 4 */
+        case 5: return NINA_PAGE_OFFSET + 0;       /* 5 */
+        case 6: return NINA_PAGE_OFFSET + 1;       /* 6 */
+        case 7: return NINA_PAGE_OFFSET + 2;       /* 7 */
+        case 8: return SYSINFO_PAGE_IDX(page_count);
+        default: return -1;
+    }
+}
+
+/* Inverse of home_dd_sel_to_abs: absolute page index -> dropdown row. */
+static uint32_t home_abs_to_dd_sel(int ov)
+{
+    if (ov < 0) return 0;                                  /* Auto */
+    if (ov == PAGE_IDX_ALLSKY) return 1;
+    if (ov == PAGE_IDX_SPOTIFY) return 2;
+    if (ov == PAGE_IDX_CLOCK) return 3;
+    if (ov == PAGE_IDX_SUMMARY) return 4;
+    if (ov == NINA_PAGE_OFFSET + 0) return 5;
+    if (ov == NINA_PAGE_OFFSET + 1) return 6;
+    if (ov == NINA_PAGE_OFFSET + 2) return 7;
+    if (ov == SYSINFO_PAGE_IDX(page_count)) return 8;
+    return 4;   /* PAGE_IDX_IMAGE_DISPLAY (3) and any stray value -> Summary */
+}
+
+/* ── Slideshow order-list helpers (canonical membership) ──
+ *
+ * The nav arbiter slideshow reads ONLY auto_rotate_order[0..7] +
+ * auto_rotate_order_ext (9 slots). Each slot holds a "bit code" page id:
+ *   0=Summary, 1=NINA1, 2=NINA2, 3=NINA3, 4=SysInfo,
+ *   5=AllSky, 6=Spotify, 7=Clock, 8=ImageDisplay; 0xFF = empty.
+ * The on-device checkbox table exposes only codes 0..5 (page_names below);
+ * codes 6/7/8 are preserved across edits since this UI cannot express them. */
+
+#define AR_ORDER_SLOTS  9   /* 8 in auto_rotate_order[] + 1 ext */
+
+/* Read slot i (0..8) of the canonical order list from cfg. */
+static uint8_t ar_order_get(const app_config_t *cfg, int i)
+{
+    return (i < 8) ? cfg->auto_rotate_order[i] : cfg->auto_rotate_order_ext;
+}
+
+/* Write slot i (0..8) of the canonical order list in cfg. */
+static void ar_order_set(app_config_t *cfg, int i, uint8_t v)
+{
+    if (i < 8) cfg->auto_rotate_order[i] = v;
+    else       cfg->auto_rotate_order_ext = v;
+}
+
+/* True if bit-code page is present anywhere in the order list. */
+static bool ar_order_contains(const app_config_t *cfg, uint8_t code)
+{
+    for (int i = 0; i < AR_ORDER_SLOTS; i++) {
+        if (ar_order_get(cfg, i) == code) return true;
+    }
+    return false;
+}
+
+/* Add a bit-code page to the order list (append into first empty slot),
+ * preserving existing order. No-op if already present or list is full. */
+static void ar_order_add(app_config_t *cfg, uint8_t code)
+{
+    if (ar_order_contains(cfg, code)) return;
+    for (int i = 0; i < AR_ORDER_SLOTS; i++) {
+        if (ar_order_get(cfg, i) == 0xFF) { ar_order_set(cfg, i, code); return; }
+    }
+}
+
+/* Remove a bit-code page from the order list and compact remaining entries
+ * forward so order is preserved and trailing slots become 0xFF. */
+static void ar_order_remove(app_config_t *cfg, uint8_t code)
+{
+    uint8_t kept[AR_ORDER_SLOTS];
+    int n = 0;
+    for (int i = 0; i < AR_ORDER_SLOTS; i++) {
+        uint8_t v = ar_order_get(cfg, i);
+        if (v == 0xFF || v == code) continue;
+        kept[n++] = v;
+    }
+    for (int i = 0; i < AR_ORDER_SLOTS; i++) {
+        ar_order_set(cfg, i, (i < n) ? kept[i] : 0xFF);
+    }
+}
+
 /* ═══════════════════════════════════════════════════════════════════════
  *  Appearance Card — Theme / Widget Style / Text Brightness
  * ═══════════════════════════════════════════════════════════════════════ */
@@ -312,7 +408,7 @@ static void create_page_nav_card(lv_obj_t *parent)
         lv_obj_t *row = settings_make_row(cont_fixed);
 
         lv_obj_t *lbl = lv_label_create(row);
-        lv_label_set_text(lbl, "Pinned Page");
+        lv_label_set_text(lbl, "Home Page");
         lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
         if (current_theme) {
             int gb = app_config_get()->color_brightness;
@@ -343,21 +439,9 @@ static void create_page_nav_card(lv_obj_t *parent)
             lv_obj_set_style_border_width(dd_pinned_page, 1, 0);
         }
 
-        /* Set initial selection from config.
-         * Dropdown mapping: 0=Auto(-1), 1=AllSky(0), 2=Spotify(1), 3=Clock(2),
-         * 4=Summary(3), 5=NINA1(4), 6=NINA2(5), 7=NINA3(6), 8=SysInfo(total-1) */
-        {
-            int8_t ov = app_config_get()->active_page_override;
-            int total = nina_dashboard_get_total_page_count();
-            int sysinfo_ov = total > 0 ? total - 1 : 8;
-            if (ov < 0) {
-                lv_dropdown_set_selected(dd_pinned_page, 0);  /* Auto */
-            } else if (ov >= sysinfo_ov) {
-                lv_dropdown_set_selected(dd_pinned_page, 8);  /* SysInfo */
-            } else {
-                lv_dropdown_set_selected(dd_pinned_page, (uint32_t)(ov + 1));
-            }
-        }
+        /* Set initial selection from config (absolute page index -> row). */
+        lv_dropdown_set_selected(dd_pinned_page,
+                                 home_abs_to_dd_sel(app_config_get()->active_page_override));
 
         lv_obj_add_event_cb(dd_pinned_page, pinned_page_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
     }
@@ -461,11 +545,13 @@ static void create_page_nav_card(lv_obj_t *parent)
                 lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
         }
 
+        /* Checkbox index i maps directly to canonical order-list bit code i:
+         * 0=Summary, 1=NINA1, 2=NINA2, 3=NINA3, 4=SysInfo, 5=AllSky. */
         static const char *page_names[] = {
             "Summary", "NINA 1", "NINA 2", "NINA 3", "SysInfo", "AllSky"
         };
 
-        uint8_t mask = app_config_get()->auto_rotate_pages;
+        const app_config_t *cfg_cb = app_config_get();
 
         /* Wrap container for checkboxes (2 columns) */
         lv_obj_t *cb_grid = lv_obj_create(cont_cycle);
@@ -482,7 +568,7 @@ static void create_page_nav_card(lv_obj_t *parent)
             lv_obj_set_style_text_font(cb_pages[i], &lv_font_montserrat_16, 0);
             lv_obj_set_style_min_width(cb_pages[i], 130, 0);
 
-            if (mask & (1 << i)) {
+            if (ar_order_contains(cfg_cb, (uint8_t)i)) {
                 lv_obj_add_state(cb_pages[i], LV_STATE_CHECKED);
             }
 
@@ -507,7 +593,7 @@ static void create_page_nav_card(lv_obj_t *parent)
 
     /* Hint for cycle mode */
     lv_obj_t *ar_hint = lv_label_create(cont_cycle);
-    lv_label_set_text(ar_hint, "When enabled, overrides idle page switching");
+    lv_label_set_text(ar_hint, "When enabled, overrides \"Switch page when idle\"");
     lv_obj_set_style_text_font(ar_hint, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(ar_hint, lv_color_hex(0x888888), 0);
 
@@ -609,23 +695,21 @@ static void page_mode_changed_cb(lv_event_t *e)
     } else if (sel == 1) {
         /* Fixed */
         cfg->auto_rotate_enabled = false;
-        /* Set override to the currently selected pinned page */
+        /* Set override to the currently selected pinned page (absolute index) */
         if (dd_pinned_page) {
             uint32_t dd_sel = lv_dropdown_get_selected(dd_pinned_page);
-            if (dd_sel == 0) {
-                cfg->active_page_override = -1;
-            } else if (dd_sel == 8) {
-                int total = nina_dashboard_get_total_page_count();
-                cfg->active_page_override = (int8_t)(total > 0 ? total - 1 : 8);
-            } else {
-                cfg->active_page_override = (int8_t)(dd_sel - 1);
-            }
+            cfg->active_page_override = (int8_t)home_dd_sel_to_abs(dd_sel);
         }
     } else if (sel == 2) {
         /* Cycle */
         cfg->active_page_override = -1;
         cfg->auto_rotate_enabled = true;
+        cfg->idle_page_override_enabled = false;   /* exclusivity: auto-rotate wins */
     }
+
+    /* Centralized exclusivity rule (auto-rotate wins). The behavior tab's
+     * idle-override switch picks up the cleared flag on its next refresh. */
+    app_config_normalize_nav_exclusivity(cfg);
 
     settings_mark_dirty(false);
 }
@@ -634,16 +718,7 @@ static void pinned_page_changed_cb(lv_event_t *e)
 {
     LV_UNUSED(e);
     uint32_t sel = lv_dropdown_get_selected(dd_pinned_page);
-    /* Dropdown mapping: 0=Auto(-1), 1=AllSky(0), 2=Spotify(1), 3=Clock(2),
-     * 4=Summary(3), 5=NINA1(4), 6=NINA2(5), 7=NINA3(6), 8=SysInfo */
-    if (sel == 0) {
-        app_config_get()->active_page_override = -1;  /* Auto */
-    } else if (sel == 8) {
-        int total = nina_dashboard_get_total_page_count();
-        app_config_get()->active_page_override = (int8_t)(total > 0 ? total - 1 : 8);
-    } else {
-        app_config_get()->active_page_override = (int8_t)(sel - 1);
-    }
+    app_config_get()->active_page_override = (int8_t)home_dd_sel_to_abs(sel);
     settings_mark_dirty(false);
 }
 
@@ -689,15 +764,25 @@ static void skip_offline_changed_cb(lv_event_t *e)
 
 static void page_checkbox_changed_cb(lv_event_t *e)
 {
-    int bit = (int)(uintptr_t)lv_event_get_user_data(e);
+    int bit = (int)(uintptr_t)lv_event_get_user_data(e);   /* canonical order code */
     lv_obj_t *cb = lv_event_get_target(e);
-    app_config_t *cfg = app_config_get();
+    bool checked = lv_obj_has_state(cb, LV_STATE_CHECKED);
 
-    if (lv_obj_has_state(cb, LV_STATE_CHECKED)) {
-        cfg->auto_rotate_pages |= (1 << bit);
-    } else {
-        cfg->auto_rotate_pages &= ~(1 << bit);
-    }
+    /* Mutate the live config so the nav arbiter slideshow sees the new
+     * membership immediately, preserving existing order. Checked pages are
+     * appended; unchecked pages are removed and the list is compacted.
+     * Codes 6/7/8 (Spotify/Clock/ImageDisplay) are not in this checkbox set
+     * and are preserved untouched. */
+    app_config_t *cfg = app_config_get();
+    if (checked) ar_order_add(cfg, (uint8_t)bit);
+    else         ar_order_remove(cfg, (uint8_t)bit);
+
+    /* Persist the canonical list to NVS (snapshot pattern). */
+    app_config_t snap = app_config_get_snapshot();
+    memcpy(snap.auto_rotate_order, cfg->auto_rotate_order, sizeof(snap.auto_rotate_order));
+    snap.auto_rotate_order_ext = cfg->auto_rotate_order_ext;
+    app_config_save(&snap);
+
     settings_mark_dirty(false);
 }
 
@@ -788,18 +873,10 @@ void settings_tab_display_refresh(void)
     }
     update_mode_visibility(mode);
 
-    /* Fixed sub-section */
+    /* Fixed sub-section (absolute page index -> dropdown row) */
     if (dd_pinned_page) {
-        int8_t ov = cfg->active_page_override;
-        int total = nina_dashboard_get_total_page_count();
-        int sysinfo_ov = total > 0 ? total - 1 : 8;
-        if (ov < 0) {
-            lv_dropdown_set_selected(dd_pinned_page, 0);  /* Auto */
-        } else if (ov >= sysinfo_ov) {
-            lv_dropdown_set_selected(dd_pinned_page, 8);  /* SysInfo */
-        } else {
-            lv_dropdown_set_selected(dd_pinned_page, (uint32_t)(ov + 1));
-        }
+        lv_dropdown_set_selected(dd_pinned_page,
+                                 home_abs_to_dd_sel(cfg->active_page_override));
     }
 
     /* Cycle sub-section */
@@ -817,11 +894,11 @@ void settings_tab_display_refresh(void)
         }
     }
 
-    /* Page checkboxes */
-    uint8_t mask = cfg->auto_rotate_pages;
+    /* Page checkboxes — membership read from canonical order list.
+     * Checkbox index i maps directly to order-list bit code i. */
     for (int i = 0; i < 6; i++) {
         if (cb_pages[i]) {
-            if (mask & (1 << i)) {
+            if (ar_order_contains(cfg, (uint8_t)i)) {
                 lv_obj_add_state(cb_pages[i], LV_STATE_CHECKED);
             } else {
                 lv_obj_remove_state(cb_pages[i], LV_STATE_CHECKED);

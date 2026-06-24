@@ -25,6 +25,15 @@ void     perf_timer_reset(perf_timer_t *t);
 
 #define CPU_MAX_TRACKED_TASKS 24
 
+// Low-DMA-heap watchdog: when the largest contiguous DMA-capable internal
+// block (MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA|MALLOC_CAP_8BIT) drops below this,
+// the esp-hosted SDIO RX allocation is at risk of failing. Emit a WARN block.
+#define PERF_DMA_HEAP_WARN_THRESHOLD 8192
+
+// Minimum seconds between low-DMA-heap WARN blocks (rate-limit so a sustained
+// low-heap condition does not spam the log).
+#define PERF_DMA_HEAP_WARN_MIN_INTERVAL_S 10
+
 typedef struct {
     char       name[16];          // Task name (configMAX_TASK_NAME_LEN)
     uint8_t    core_id;           // 0, 1, or 0xFF (no affinity)
@@ -87,6 +96,11 @@ typedef struct {
     perf_counter_t http_failure_count;    // HTTP failures per interval (connected but failed)
     perf_counter_t http_unreachable_count;// Host unreachable (connection refused/timeout)
     perf_counter_t ws_event_count;        // WebSocket events received per interval
+    // Per-phase HTTP timing (for resolve-once / numeric-IP latency diagnosis)
+    perf_timer_t http_connect;            // esp_http_client_open: DNS + TCP connect
+    perf_timer_t http_ttfb;               // fetch_headers: request sent -> response headers
+    perf_timer_t http_body;               // body read loop
+    perf_counter_t http_attempt0_fail_count; // request succeeded only on a retry (first attempt failed though host reachable)
 
     // JSON parsing
     perf_timer_t json_parse;              // cJSON_Parse duration (per-parse)
@@ -99,6 +113,15 @@ typedef struct {
     uint32_t heap_min_free_bytes;         // Minimum ever (highwater mark)
     uint32_t heap_largest_free_block;     // Largest contiguous free block (fragmentation)
     float    heap_frag_ratio;             // largest_free_block / total_free (1.0 = no fragmentation)
+    // DMA-capable internal heap subset (the pool that the esp-hosted SDIO RX
+    // path allocates from; OOM here crashes sdio_rx_get_buffer). This is a
+    // subset of MALLOC_CAP_INTERNAL and is what actually fails, so track it
+    // separately from the generic internal-heap numbers above.
+    uint32_t dma_free_bytes;              // free(MALLOC_CAP_INTERNAL|DMA|8BIT)
+    uint32_t dma_min_free_bytes;          // min-ever free of the DMA-capable pool
+    uint32_t dma_largest_free_block;      // largest contiguous DMA-capable block
+    uint32_t internal8_free_bytes;        // free(MALLOC_CAP_INTERNAL|8BIT)
+    uint32_t dma_heap_warn_count;         // times the low-DMA-heap threshold was crossed
     uint32_t psram_free_bytes;
     uint32_t psram_min_free_bytes;
     uint32_t psram_largest_free_block;
@@ -175,6 +198,15 @@ void perf_monitor_record_wifi(const wifi_ap_record_t *ap_info);
 // Print a formatted report to serial log. Called automatically at interval.
 void perf_monitor_report(void);
 
+// Low-DMA-heap watchdog. Checks the largest contiguous DMA-capable internal
+// block; if it is below PERF_DMA_HEAP_WARN_THRESHOLD, increments
+// dma_heap_warn_count and (rate-limited) emits an ungated WARN diagnostic
+// block: DMA/internal/psram heap summary, per-capability heap dumps, and the
+// all-task stack HWM list from the existing cpu_stats snapshot. Allocates
+// nothing from the internal heap. Safe to call regardless of g_perf.enabled.
+// Returns true if the threshold was crossed on this call.
+bool perf_monitor_dma_heap_watchdog(void);
+
 // Reset all metrics (call between profiling runs to get clean data).
 void perf_monitor_reset_all(void);
 
@@ -183,3 +215,15 @@ char *perf_monitor_report_json(void);
 
 // Helper to manually record a duration (for intervals measured externally)
 void perf_timer_record(perf_timer_t *t, int64_t duration_us);
+
+// ── Failed-allocation catcher ───────────────────────────────────────
+//
+// Registers an ESP-IDF heap failed-alloc hook that prints one compact,
+// lock-free / allocation-free line on EVERY failed heap_caps_* allocation
+// (the deterministic catcher for the transient internal DMA-SRAM exhaustion
+// that crashes sdio_rx_get_buffer). Call once at startup, after log init and
+// before tasks spawn. Safe to call regardless of g_perf.enabled.
+void perf_monitor_register_alloc_fail_hook(void);
+
+// Cumulative count of failed allocations seen by the hook since boot.
+uint32_t perf_get_alloc_fail_count(void);

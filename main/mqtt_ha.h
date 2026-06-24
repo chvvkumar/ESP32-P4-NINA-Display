@@ -28,6 +28,17 @@ void mqtt_ha_publish_state(void);
  */
 bool mqtt_ha_is_connected(void);
 
+/**
+ * @brief Apply any pending MQTT commands (brightness, text brightness, theme,
+ *        reboot) queued by the MQTT event callback.
+ *
+ * Must be called from a UI-context task that may take the display lock
+ * (e.g. data_update_task). The MQTT event callback only parses and enqueues;
+ * the actual apply and config persist happen here so the esp-mqtt event loop
+ * is never blocked. Safe to call when MQTT is disabled (no-op).
+ */
+void mqtt_ha_process_pending(void);
+
 #ifdef __cplusplus
 }
 #endif

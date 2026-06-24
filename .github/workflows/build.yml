@@ -222,6 +222,14 @@ jobs:
           # Copy app binary as OTA file
           cp "$APP_BIN" firmware/nina-display-ota.bin
 
+          # Keep bootloader + partition table on disk (build/ tree) so the erase
+          # check can hash them. They are NOT uploaded as release assets anymore:
+          # the OTA-safe vs full-erase baseline is carried as SHA256 markers in the
+          # release body (see "Check full erase requirement" / "Generate release
+          # notes"). Staging copies kept for local inspection only.
+          cp build/bootloader/bootloader.bin firmware/bootloader.bin
+          cp build/partition_table/partition-table.bin firmware/partition-table.bin
+
           # Copy ELF for crash backtrace decoding
           APP_ELF=$(python3 -c "
           import json
@@ -343,6 +351,12 @@ jobs:
             VERSION=$(cat version.txt | tr -d '[:space:]')
             TAG="v${VERSION}"
           else
+            # Make the local tag set authoritative: pull every tag created by
+            # prior release runs (a shallow/persistent runner workspace otherwise
+            # lags the remote, which previously caused the number to collide and
+            # silently clobber an existing pre-release).
+            git fetch --force --tags origin
+
             # Use latest main release version so pre-releases sort correctly
             LATEST_MAIN_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | grep -v '-' | head -1)
             if [ -n "$LATEST_MAIN_TAG" ]; then
@@ -350,11 +364,18 @@ jobs:
             else
               BASE_VERSION=$(cat version.txt | tr -d '[:space:]')
             fi
-            # Count existing tags with this prefix to auto-increment
+
+            # Next number = highest existing dev.N + 1 (use the max, not a count,
+            # so gaps from deleted/withdrawn tags never cause a reuse), then skip
+            # any number whose tag already exists as a final race/lag safeguard.
             PREFIX="v${BASE_VERSION}-${BRANCH}."
-            EXISTING=$(git tag -l "${PREFIX}*" | wc -l)
-            NEXT=$((EXISTING + 1))
-            TAG="v${BASE_VERSION}-${BRANCH}.${NEXT}"
+            LAST=$(git tag -l "${PREFIX}*" | sed "s|^${PREFIX}||" | grep -E '^[0-9]+$' | sort -n | tail -1)
+            NEXT=$(( ${LAST:-0} + 1 ))
+            TAG="${PREFIX}${NEXT}"
+            while git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null 2>&1; do
+              NEXT=$(( NEXT + 1 ))
+              TAG="${PREFIX}${NEXT}"
+            done
           fi
 
           echo "tag=$TAG" >> $GITHUB_OUTPUT
@@ -498,47 +519,122 @@ jobs:
       - name: Check full erase requirement
         if: steps.check_skip.outputs.skip != 'true'
         id: erase_check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Detection is artifact-primary: hash the freshly built partition table
+          # and bootloader, then compare against the previous same-lineage
+          # release's SHA256 markers carried in its release body (no bin assets
+          # are downloaded). The source-diff rules below are SECONDARY
+          # corroboration. Bias toward false-positive (require erase) over
+          # false-negative (silent OTA-break).
           REASONS=""
+          REQUIRED=false
 
-          # Find previous release tag to diff against
+          # Find previous release tag to diff/compare against.
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
 
+          # --- PRIMARY: built-artifact hash vs previous release body markers ---
+          # Freshly built hashes (also re-emitted into THIS release's body by the
+          # release-notes step so the next run can read them).
+          NEW_PT="build/partition_table/partition-table.bin"
+          NEW_BL="build/bootloader/bootloader.bin"
+          PT_SHA=$(sha256sum "$NEW_PT" | cut -d' ' -f1)
+          BL_SHA=$(sha256sum "$NEW_BL" | cut -d' ' -f1)
+
+          if [ -z "$PREV_TAG" ]; then
+            # First release ever: no baseline to compare. Cannot prove OTA-safe.
+            REASONS="${REASONS}No previous release baseline to compare; flash factory binary.\n"
+            REQUIRED=true
+          else
+            # Read the previous release body and pull out its hash markers.
+            # Tolerate failure: prev release may be missing or predate this scheme.
+            PREV_BODY=$(gh release view "$PREV_TAG" --json body -q .body 2>/dev/null || true)
+            OLD_PT_SHA=$(echo "$PREV_BODY" | grep -oE 'nina:pt_sha=[0-9a-f]+' | head -1 | sed 's/.*nina:pt_sha=//')
+            OLD_BL_SHA=$(echo "$PREV_BODY" | grep -oE 'nina:bl_sha=[0-9a-f]+' | head -1 | sed 's/.*nina:bl_sha=//')
+
+            if [ -z "$OLD_PT_SHA" ]; then
+              # Previous release predates this marker scheme (or body unreadable).
+              REASONS="${REASONS}No previous release baseline to compare; flash factory binary.\n"
+              REQUIRED=true
+            else
+              if [ "$PT_SHA" != "$OLD_PT_SHA" ]; then
+                REASONS="${REASONS}Partition table changed since ${PREV_TAG}.\n"
+                REQUIRED=true
+              fi
+
+              if [ "$BL_SHA" != "$OLD_BL_SHA" ]; then
+                # A bootloader hash change is flagged. Prefer safety: treat as
+                # required and recommend a manual factory flash.
+                REASONS="${REASONS}Bootloader changed since ${PREV_TAG} (manual flash recommended).\n"
+                REQUIRED=true
+              fi
+            fi
+          fi
+
+          # --- SECONDARY: source-diff corroboration (resolved sdkconfig) -------
+          # Diff the resolved/generated sdkconfig (build product), not
+          # sdkconfig.defaults, so it reflects what was actually built.
           if [ -n "$PREV_TAG" ]; then
-            # 1. Partition table changed (offsets, sizes, new/removed partitions)
+            # 1. Partition table CSV changed (offsets, sizes, new/removed parts).
             PARTITION_DIFF=$(git diff "$PREV_TAG" -- partitions.csv 2>/dev/null | grep '^[+-]' | grep -v '^[+-][+-][+-]' | sed 's/^[+-]//' | tr -s ' ,' ' ' || true)
             if [ -n "$PARTITION_DIFF" ]; then
-              # Extract changed partition names from the diff
               CHANGED_PARTS=$(echo "$PARTITION_DIFF" | awk '{print $1}' | sort -u | paste -sd ', ')
-              REASONS="${REASONS}Partition table changed since ${PREV_TAG} (affected: ${CHANGED_PARTS}).\n"
+              REASONS="${REASONS}Partition layout (partitions.csv) changed since ${PREV_TAG} (affected: ${CHANGED_PARTS}).\n"
+              REQUIRED=true
             fi
 
-            # 2. Bootloader-critical sdkconfig keys changed
-            BOOTLOADER_KEYS="CONFIG_ESPTOOLPY_FLASHMODE|CONFIG_ESPTOOLPY_FLASHSIZE|CONFIG_ESPTOOLPY_FLASHFREQ|CONFIG_PARTITION_TABLE|CONFIG_BOOTLOADER_|CONFIG_SECURE_BOOT|CONFIG_FLASH_ENCRYPTION|CONFIG_SPIRAM_SPEED|CONFIG_CACHE_L2_CACHE"
-            SDKCONFIG_DIFF=$(git diff "$PREV_TAG" -- sdkconfig.defaults 2>/dev/null | grep '^[+-]' | grep -v '^[+-][+-][+-]' | grep -E "$BOOTLOADER_KEYS" || true)
-            if [ -n "$SDKCONFIG_DIFF" ]; then
-              # Extract the specific key names that changed
-              CHANGED_KEYS=$(echo "$SDKCONFIG_DIFF" | sed 's/^[+-]//' | grep -oE 'CONFIG_[A-Z_]+' | sort -u | paste -sd ', ')
-              REASONS="${REASONS}Bootloader/flash config changed in sdkconfig.defaults (${CHANGED_KEYS}).\n"
+            # 2. Security / target / MMU / partition-offset keys in the RESOLVED
+            #    sdkconfig. Match only ENABLE/value symbols that actually force a
+            #    full erase. Deliberately excludes:
+            #      - CONFIG_BOOTLOADER_* prefix (matches log level etc.)
+            #      - *_SUPPORTED capability flags
+            #      - FLASHMODE/FLASHFREQ/FLASHSIZE (app header reconfigures flash
+            #        at boot; these are OTA-safe)
+            RESOLVED_SDKCONFIG=""
+            if [ -f sdkconfig ]; then
+              RESOLVED_SDKCONFIG="sdkconfig"
+            elif [ -f build/config/sdkconfig.json ]; then
+              RESOLVED_SDKCONFIG="build/config/sdkconfig.json"
+            fi
+            WATCH_KEYS='^(CONFIG_SECURE_BOOT=y|CONFIG_SECURE_BOOT_ENABLED=y|CONFIG_SECURE_FLASH_ENC_ENABLED=y|CONFIG_FLASH_ENCRYPTION_ENABLED=y|CONFIG_IDF_TARGET=|CONFIG_MMU_PAGE_SIZE|CONFIG_PARTITION_TABLE_OFFSET=|CONFIG_PARTITION_TABLE_MD5)'
+            if [ -n "$RESOLVED_SDKCONFIG" ] && [ "$RESOLVED_SDKCONFIG" = "sdkconfig" ]; then
+              OLD_SDKCONFIG=$(git show "$PREV_TAG":sdkconfig 2>/dev/null || true)
+              if [ -n "$OLD_SDKCONFIG" ]; then
+                OLD_WATCH=$(echo "$OLD_SDKCONFIG" | grep -E "$WATCH_KEYS" | sort || true)
+                NEW_WATCH=$(grep -E "$WATCH_KEYS" sdkconfig | sort || true)
+                if [ "$OLD_WATCH" != "$NEW_WATCH" ]; then
+                  CHANGED_KEYS=$( (echo "$OLD_WATCH"; echo "$NEW_WATCH") | grep -oE 'CONFIG_[A-Z0-9_]+' | sort -u | paste -sd ', ')
+                  REASONS="${REASONS}Security/target/MMU config changed since ${PREV_TAG} (${CHANGED_KEYS}).\n"
+                  REQUIRED=true
+                fi
+              fi
             fi
 
-            # 3. NVS namespace or key renamed in app_config.c
-            # Only fires when the string literals defining the namespace or key change,
-            # not when new call sites using the same values are added.
+            # 3. NVS namespace renamed in app_config.c. Fires only when the string
+            #    literal defining the namespace changes.
             OLD_NS=$(git show "$PREV_TAG":main/app_config.c 2>/dev/null | sed -n 's/.*NVS_NAMESPACE *= *"\([^"]*\)".*/\1/p' | head -1 || true)
             NEW_NS=$(sed -n 's/.*NVS_NAMESPACE *= *"\([^"]*\)".*/\1/p' main/app_config.c | head -1 || true)
             if [ -n "$OLD_NS" ] && [ -n "$NEW_NS" ] && [ "$OLD_NS" != "$NEW_NS" ]; then
               REASONS="${REASONS}NVS namespace changed: \"${OLD_NS}\" -> \"${NEW_NS}\" in app_config.c.\n"
+              REQUIRED=true
             fi
           fi
 
-          # 4. Manual override — FULL_ERASE_REQUIRED file always wins
+          # --- Manual override — FULL_ERASE_REQUIRED file always wins ----------
           if [ -f "FULL_ERASE_REQUIRED" ]; then
             MANUAL_REASON=$(cat FULL_ERASE_REQUIRED | tr -d '\r' | head -5)
             REASONS="${REASONS}${MANUAL_REASON}\n"
+            REQUIRED=true
           fi
 
-          if [ -n "$REASONS" ]; then
+          # Hashes of the freshly built baseline. The release-notes step emits
+          # these into THIS release's body as nina:pt_sha / nina:bl_sha markers
+          # so the next run can read them back (always present, both verdicts).
+          echo "pt_sha=$PT_SHA" >> $GITHUB_OUTPUT
+          echo "bl_sha=$BL_SHA" >> $GITHUB_OUTPUT
+
+          if [ "$REQUIRED" = "true" ]; then
             echo "required=true" >> $GITHUB_OUTPUT
             echo "reason<<EOFR" >> $GITHUB_OUTPUT
             echo -e "$REASONS" | sed '/^$/d' >> $GITHUB_OUTPUT
@@ -559,6 +655,8 @@ jobs:
           OTA_MB="${{ steps.metrics.outputs.ota_mb }}"
           FULL_ERASE="${{ steps.erase_check.outputs.required }}"
           ERASE_REASON="${{ steps.erase_check.outputs.reason }}"
+          PT_SHA="${{ steps.erase_check.outputs.pt_sha }}"
+          BL_SHA="${{ steps.erase_check.outputs.bl_sha }}"
 
           if [ -n "$PREV_TAG" ]; then
             COMPARE_URL="https://github.com/chvvkumar/ESP32-P4-NINA-Display/compare/${PREV_TAG}...${TAG}"
@@ -567,7 +665,7 @@ jobs:
           fi
 
           AI_AVAILABLE="${{ steps.release_summary.outputs.ai_available }}"
-          export TAG PREV_TAG VERSION BRANCH COMPARE_URL FACTORY_MB OTA_MB AI_AVAILABLE FULL_ERASE ERASE_REASON
+          export TAG PREV_TAG VERSION BRANCH COMPARE_URL FACTORY_MB OTA_MB AI_AVAILABLE FULL_ERASE ERASE_REASON PT_SHA BL_SHA
           python3 << 'PYEOF'
           import os, json
           tag = os.environ['TAG']
@@ -580,6 +678,8 @@ jobs:
           ai_available = os.environ.get('AI_AVAILABLE', 'false') == 'true'
           full_erase = os.environ.get('FULL_ERASE', 'false') == 'true'
           erase_reason = os.environ.get('ERASE_REASON', '').strip()
+          pt_sha = os.environ.get('PT_SHA', '').strip()
+          bl_sha = os.environ.get('BL_SHA', '').strip()
 
           # Load metrics if available
           try:
@@ -604,7 +704,20 @@ jobs:
                   changes = f.read().strip()
 
           since = f'### Changes since {prev_tag}' if prev_tag else '### Recent Changes'
+          # Machine-readable verdict marker as the very first line, always present.
+          # The device matches the substring "nina:full_erase=1" to require a USB
+          # factory flash; "nina:full_erase=0" means OTA-safe. Emitted from the
+          # same final verdict that drives the caution/OTA-safe block below.
+          erase_marker = '<!-- nina:full_erase=1 -->' if full_erase else '<!-- nina:full_erase=0 -->'
+          # Hidden baseline markers, always present (both verdicts). The NEXT
+          # run reads these from this release's body to decide OTA-safe vs
+          # full-erase by comparing freshly built hashes against them.
+          pt_marker = f'<!-- nina:pt_sha={pt_sha} -->'
+          bl_marker = f'<!-- nina:bl_sha={bl_sha} -->'
           lines = [
+              erase_marker,
+              pt_marker,
+              bl_marker,
               f'## NINA Display {tag}',
               '',
               f'**Branch:** {branch}',
@@ -650,6 +763,7 @@ jobs:
               '|------|-------------|',
               '| `nina-display-factory.bin` | Full factory image (flash at 0x0000) |',
               '| `nina-display-ota.bin` | OTA update binary (upload via web UI) |',
+              '| `nina-display.elf` | Firmware ELF (for decoding core dumps) |',
               '',
               '### Flashing',
               '- **Factory:** Use [ESP Web Flasher](https://espressif.github.io/esptool-js/) — flash at address `0x0000`',
@@ -677,11 +791,17 @@ jobs:
           git tag -f "$TAG"
           git push origin "$TAG" --force
 
-          # Delete existing release if present, then create fresh
+          # Delete only a release for THIS exact tag (e.g. a re-run of the same
+          # commit). Robust numbering above guarantees $TAG is otherwise fresh,
+          # so this never clobbers a different commit's release.
           gh release delete "$TAG" --yes 2>/dev/null || true
+          # --target pins the release (and a not-yet-existing tag) to the commit
+          # actually built, so the tag can never point at the default branch.
           gh release create "$TAG" \
             firmware/nina-display-factory.bin \
             firmware/nina-display-ota.bin \
+            firmware/nina-display.elf \
+            --target "$GITHUB_SHA" \
             --title "$TAG" \
             --notes-file /tmp/release-notes.md \
             $PRERELEASE_FLAG

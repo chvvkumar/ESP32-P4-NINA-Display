@@ -12,6 +12,7 @@ typedef struct {
     char summary[1024];        // Release summary text (just the description, no commit details)
     char ota_url[2048];        // Pre-signed S3 URL can be ~1KB with auth tokens
     bool is_prerelease;
+    bool requires_full_erase;  // Release requires manual USB erase+flash (cannot OTA)
 } github_release_info_t;
 
 /**
@@ -33,14 +34,24 @@ bool ota_github_check(bool include_prereleases, const char *current_version, git
 esp_err_t ota_github_download(const char *url, void (*progress_cb)(int percent));
 
 /**
- * Save the version tag of a successfully installed OTA update to NVS.
- * Called after OTA download succeeds, before reboot.
+ * Record the release tag an OTA update intends to install (pending state).
+ * Stamped at apply time, before reboot. Promoted to the confirmed installed
+ * version only after that image actually boots (see ota_github_reconcile_version).
  */
-void ota_github_save_installed_version(const char *tag);
+void ota_github_save_pending_version(const char *tag);
+
+/**
+ * Reconcile OTA version state once at boot.
+ * If first_boot_new_image is true, promote the pending OTA tag to the confirmed
+ * installed version (bound to the running build); otherwise discard a stale
+ * pending stamp left by an OTA image that never booted (rollback/slot mismatch).
+ */
+void ota_github_reconcile_version(bool first_boot_new_image);
 
 /**
  * Get the effective current version for OTA comparison.
- * Returns the NVS-stored OTA version if present, otherwise BUILD_GIT_TAG.
+ * Returns the NVS-stored OTA version only if it belongs to the running build,
+ * otherwise BUILD_GIT_TAG.
  * The returned pointer is valid until the next call to this function.
  */
 const char *ota_github_get_current_version(void);

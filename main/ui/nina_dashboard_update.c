@@ -13,6 +13,7 @@
 #include <string.h>
 #include <time.h>
 #include <sys/time.h>
+#include <math.h>
 
 #define STALE_WARN_MS   30000   /* 30 s: show "Last update" label */
 #define STALE_DIM_MS   120000   /* 2 min: dim the entire page */
@@ -99,43 +100,46 @@ static void arc_start_exposure_anim(dashboard_page_t *p);
 void arc_interp_timer_cb(lv_timer_t *timer) {
     dashboard_page_t *p = (dashboard_page_t *)lv_timer_get_user_data(timer);
     if (!p || !p->arc_exposure || p->arc_completing) return;
-    if (p->cached_end_epoch == 0 || p->cached_total <= 0) return;
+    if (p->exp_anchor_us == 0 || p->cached_total <= 0) return;
 
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    double now = (double)tv.tv_sec + (double)tv.tv_usec / 1000000.0;
-    double remaining = (double)p->cached_end_epoch - now;
+    /* Completion is handled on the IsExposing edge in update_exposure_arc.
+     * Do not delete the anim here; just stop driving it while not exposing. */
+    if (!p->cached_is_exposing) return;
 
-    if (remaining <= 0) {
-        lv_anim_delete(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
-        if (p->cached_is_exposing && lv_arc_get_value(p->arc_exposure) != ARC_RANGE)
-            lv_arc_set_value(p->arc_exposure, ARC_RANGE);
+    /* Monotonic elapsed: esp_timer is microseconds since boot, never skews and
+     * never goes backward. This is the smooth source of truth. */
+    float elapsed = p->exp_anchor_elapsed +
+                    (float)(esp_timer_get_time() - p->exp_anchor_us) / 1e6f;
+
+    /* Backward-only wall correction. Epoch seconds (~1.7e9) exceed float's
+     * 24-bit integer precision, so difference in int64 first, then cast the
+     * small result to float for the P4 single-precision FPU. If NINA is
+     * genuinely slower than our anchor predicted (paused / dither / meridian
+     * flip extended the sub), the wall clock shows less elapsed than us — only
+     * then re-anchor backward. Never pull forward on wall drift. */
+    int64_t remaining_wall_ms = (p->cached_end_epoch - (int64_t)time(NULL)) * 1000;
+    float elapsed_wall = p->cached_total - (float)remaining_wall_ms / 1000.0f;
+
+    if (elapsed_wall < elapsed - 1.0f) {
+        p->exp_anchor_us = esp_timer_get_time();
+        p->exp_anchor_elapsed = (elapsed_wall > 0.0f) ? elapsed_wall : 0.0f;
+        arc_start_exposure_anim(p);
         return;
     }
 
-    if (!p->cached_is_exposing) {
-        lv_anim_delete(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
-        return;
-    }
-
-    double elapsed = (double)p->cached_total - remaining;
-    if (elapsed < 0) elapsed = 0;
-    int expected = (int)((elapsed * ARC_RANGE) / (double)p->cached_total);
-    if (expected > ARC_RANGE) expected = ARC_RANGE;
-    if (expected < 0) expected = 0;
-
-    int current = lv_arc_get_value(p->arc_exposure);
+    /* The long linear anim is the smooth source of truth; do NOT restart on
+     * small drift. Only restart if no anim is running (e.g. a prior shorter
+     * estimate ended the anim early) and we still have time left. */
     lv_anim_t *existing = lv_anim_get(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
-
-    int drift = abs(current - expected);
-    if (!existing || drift > 20) {
+    if (!existing && elapsed < p->cached_total) {
         arc_start_exposure_anim(p);
     }
 }
 
-void nina_dashboard_update_status(int page_index, int rssi, bool nina_connected, bool api_active) {
-    if (page_index < 0 || page_index >= page_count) return;
-    dashboard_page_t *p = &pages[page_index];
+void nina_dashboard_update_status(int instance, int rssi, bool nina_connected, bool api_active) {
+    if (instance < 0 || instance >= MAX_NINA_INSTANCES) return;
+    if (!nina_slot_available[instance]) return;
+    dashboard_page_t *p = &pages[instance];
     if (!p->page) return;
 
     p->nina_connected = nina_connected;
@@ -207,6 +211,16 @@ static void update_disconnected_state(dashboard_page_t *p, int instance_idx, int
     set_label_if_changed(p->lbl_exposure_total, "");
     set_label_if_changed(p->lbl_loop_count, "");
     set_label_if_changed(p->lbl_exposure_current, "--");
+    /* Drop any active exposure anchor so a stale anchor can't keep the 200ms
+     * timer driving the arc while this instance is disconnected. */
+    lv_anim_delete(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
+    p->exp_anchor_us = 0;
+    p->exp_anchor_elapsed = 0;
+    p->cached_is_exposing = false;
+    p->arc_completing = false;
+    p->cached_end_epoch = 0;
+    p->cached_total = 0;
+    p->gap_start_epoch = 0;
     lv_arc_set_value(p->arc_exposure, 0);
     lv_obj_add_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
     lv_anim_delete(p->lbl_rms_value, arcsec_anim_exec);
@@ -255,21 +269,23 @@ static void update_sequence_info(dashboard_page_t *p, const nina_client_t *d) {
 }
 
 static void arc_start_exposure_anim(dashboard_page_t *p) {
-    if (p->cached_end_epoch == 0 || p->cached_total <= 0 || !p->cached_is_exposing) return;
+    if (p->exp_anchor_us == 0 || p->cached_total <= 0 || !p->cached_is_exposing) return;
 
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    double now = (double)tv.tv_sec + (double)tv.tv_usec / 1000000.0;
-    double remaining = (double)p->cached_end_epoch - now;
-    if (remaining <= 0.1) return;
+    /* Drive remaining time from the monotonic anchor (esp_timer), never wall
+     * clock. The device SNTP clock is skewed vs the NINA-PC clock that stamped
+     * ExposureEndTime, so wall-clock progress mistracks (worst near the end). */
+    float since_anchor_s = (float)(esp_timer_get_time() - p->exp_anchor_us) / 1e6f;
+    float remaining_s = p->cached_total - (p->exp_anchor_elapsed + since_anchor_s);
+    if (remaining_s <= 0.1f) return;   /* <=100ms: completion edge will fill it */
 
     int current = lv_arc_get_value(p->arc_exposure);
-    int remaining_ms = (int)(remaining * 1000);
+    int remaining_ms = (int)(remaining_s * 1000.0f);
 
+    /* Never reach full while exposing; only the IsExposing edge fills the circle. */
     lv_anim_t a;
     lv_anim_init(&a);
     lv_anim_set_var(&a, p->arc_exposure);
-    lv_anim_set_values(&a, current, ARC_RANGE);
+    lv_anim_set_values(&a, current, ARC_RANGE - 1);
     lv_anim_set_time(&a, remaining_ms);
     lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_arc_set_value);
     lv_anim_set_path_cb(&a, lv_anim_path_linear);
@@ -292,12 +308,37 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
         p->cached_end_epoch = 0;
         p->cached_total = 0;
         p->gap_start_epoch = 0;
+        p->exp_anchor_us = 0;
+        p->exp_anchor_elapsed = 0;
         lv_arc_set_value(p->arc_exposure, 0);
         snprintf(p->prev_filter, sizeof(p->prev_filter), "%s", d->current_filter);
     }
 
     time_t now = time(NULL);
+
+    /* Detect the IsExposing true->false edge BEFORE updating cached_is_exposing.
+     * NINA flips IsExposing->false at sub end and the poll usually sees that
+     * before remaining hits zero, so this edge (not a wall-clock timeout) is
+     * what drives the satisfying snap-to-full completion. */
+    bool finished_edge = (p->cached_is_exposing && !d->is_exposing && p->exp_anchor_us != 0);
     p->cached_is_exposing = d->is_exposing;
+
+    if (finished_edge) {
+        /* Snap the arc to a full circle for a polished completion, then let the
+         * inter-exposure gap logic below hold/fade it before the next sub. */
+        lv_anim_delete(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
+        p->arc_completing = true;
+        p->exp_anchor_us = 0;
+        int current_fill = lv_arc_get_value(p->arc_exposure);
+        lv_anim_t a;
+        lv_anim_init(&a);
+        lv_anim_set_var(&a, p->arc_exposure);
+        lv_anim_set_values(&a, current_fill, ARC_RANGE);
+        lv_anim_set_time(&a, ARC_TRANSITION_MS);
+        lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_arc_set_value);
+        lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+        lv_anim_start(&a);
+    }
 
     if (d->exposure_total > 0 && d->exposure_end_epoch > 0 && d->is_exposing) {
         // Camera is actively exposing
@@ -315,19 +356,84 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
             set_label_if_changed(p->lbl_exposure_total, "");
         }
 
-        // Detect new exposure by end_epoch change
+        // Detect new exposure by end_epoch change, or idle->exposing with no anchor
         bool new_exposure = (d->exposure_end_epoch != p->cached_end_epoch
-                             && d->exposure_end_epoch > (int64_t)now);
+                             && d->exposure_end_epoch > (int64_t)now)
+                            || (p->exp_anchor_us == 0);
+
+        /* Detect a material exposure_total change on the SAME ongoing exposure
+         * (e.g. stale image-history total replaced by the real sequence total a
+         * few seconds after boot). Computed against the OLD cached_* values, so
+         * this must run BEFORE the cache assignments below. */
+        bool same_exposure = (p->exp_anchor_us != 0
+                              && d->exposure_end_epoch == p->cached_end_epoch);
+        bool total_changed = (same_exposure && p->cached_total > 0.0f
+                              && fabsf(p->cached_total - d->exposure_total) > 1.0f);
 
         // Update cached values for the timer
         p->cached_end_epoch = d->exposure_end_epoch;
         p->cached_total = d->exposure_total;
 
         if (new_exposure) {
-            lv_anim_delete(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
+            /* Anchor the monotonic clock at this moment. Seed exp_anchor_elapsed
+             * with a ONE-TIME wall estimate of how far into the sub we already
+             * are (detection can land mid-sub on page switch / first connect).
+             * Difference the epochs in int64 first to preserve precision, then
+             * cast the small result to float for the P4 single-precision FPU. */
+            int64_t remaining_seed_ms = (d->exposure_end_epoch - (int64_t)now) * 1000;
+            float seed = d->exposure_total - (float)remaining_seed_ms / 1000.0f;
+            if (seed < 0.0f) seed = 0.0f;
+            if (seed > d->exposure_total) seed = d->exposure_total;
+
+            p->exp_anchor_us = esp_timer_get_time();
+            p->exp_anchor_elapsed = seed;
             p->arc_completing = false;
-            lv_arc_set_value(p->arc_exposure, 0);
+
+            lv_anim_delete(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
+            /* Seed the arc value from the elapsed estimate so a mid-sub detection
+             * does not snap back to zero. */
+            int seed_val = (int)((seed * (float)ARC_RANGE) / d->exposure_total);
+            if (seed_val < 0) seed_val = 0;
+            if (seed_val > ARC_RANGE - 1) seed_val = ARC_RANGE - 1;
+            lv_arc_set_value(p->arc_exposure, seed_val);
+
+            /* Start one long linear anim toward (ARC_RANGE-1) over the monotonic
+             * remaining time. arc_start_exposure_anim skips if <=100ms remain
+             * (the completion edge fills it). */
             arc_start_exposure_anim(p);
+        } else if (total_changed) {
+            /* Same ongoing sub, but exposure_total was corrected (stale
+             * image-history length replaced by the real sequence length).
+             * Re-anchor against the corrected total and smoothly animate the
+             * one-time position correction instead of hard-jumping the arc. */
+            int64_t remaining_seed_ms = (d->exposure_end_epoch - (int64_t)now) * 1000;
+            float seed = d->exposure_total - (float)remaining_seed_ms / 1000.0f;
+            if (seed < 0.0f) seed = 0.0f;
+            if (seed > d->exposure_total) seed = d->exposure_total;
+
+            p->exp_anchor_us = esp_timer_get_time();
+            p->exp_anchor_elapsed = seed;
+
+            int target_val = (int)((seed * (float)ARC_RANGE) / d->exposure_total);
+            if (target_val < 0) target_val = 0;
+            if (target_val > ARC_RANGE - 1) target_val = ARC_RANGE - 1;
+            int cur_val = lv_arc_get_value(p->arc_exposure);
+
+            lv_anim_delete(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
+            /* Smoothly move from the (mis-seeded) current value to the corrected
+             * position; the long linear anim takes over toward ARC_RANGE-1 once
+             * this short correction anim ends. Do NOT call
+             * arc_start_exposure_anim here — it would delete this correction
+             * anim. The 200ms arc_interp_timer_cb restarts the long progress
+             * anim when no anim is running and elapsed < cached_total. */
+            lv_anim_t a;
+            lv_anim_init(&a);
+            lv_anim_set_var(&a, p->arc_exposure);
+            lv_anim_set_values(&a, cur_val, target_val);
+            lv_anim_set_time(&a, ARC_TRANSITION_MS);
+            lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_arc_set_value);
+            lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+            lv_anim_start(&a);
         }
         // Normal progress updates are handled by the 200ms timer (arc_interp_timer_cb)
 
@@ -374,6 +480,9 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
                 p->cached_end_epoch = 0;
                 p->cached_total = 0;
                 p->gap_start_epoch = 0;
+                p->exp_anchor_us = 0;
+                p->exp_anchor_elapsed = 0;
+                p->arc_completing = false;
                 set_label_if_changed(p->lbl_exposure_total, "");
                 set_label_if_changed(p->lbl_loop_count, "");
                 set_label_if_changed(p->lbl_exposure_current, "--");
@@ -394,6 +503,8 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
         } else {
             // Genuinely idle — no recent exposure data
             p->gap_start_epoch = 0;
+            p->exp_anchor_us = 0;
+            p->exp_anchor_elapsed = 0;
             set_label_if_changed(p->lbl_exposure_total, "");
             set_label_if_changed(p->lbl_loop_count, "");
             set_label_if_changed(p->lbl_exposure_current, "--");
@@ -649,15 +760,15 @@ static void update_safety_icon(dashboard_page_t *p, const nina_client_t *data, i
     }
 }
 
-void update_nina_dashboard_page(int page_index, const nina_client_t *data) {
-    if (page_index < 0 || page_index >= page_count) return;
+void update_nina_dashboard_page(int instance, const nina_client_t *data) {
+    if (instance < 0 || instance >= MAX_NINA_INSTANCES) return;
     if (!data) return;
+    if (!nina_slot_available[instance]) return;
 
-    dashboard_page_t *p = &pages[page_index];
+    dashboard_page_t *p = &pages[instance];
     if (!p->page) return;
 
-    /* Translate page array index to actual instance index for config lookups */
-    int inst = page_instance_map[page_index];
+    int inst = instance;     /* config lookups use the instance index directly */
 
     int gb = app_config_get()->color_brightness;
 

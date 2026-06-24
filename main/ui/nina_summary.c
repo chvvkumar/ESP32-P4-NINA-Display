@@ -15,11 +15,14 @@
 #include "nina_dashboard_internal.h"
 #include "nina_dashboard.h"
 #include "nina_connection.h"
+#include "nina_nav_arbiter.h"
 #include "app_config.h"
 #include "themes.h"
 
 #include <stdio.h>
 #include <string.h>
+
+#include "esp_timer.h"
 
 /* ── Change-detection helpers ──────────────────────────────────────── */
 /* Set label text only if it actually changed (avoids marking objects dirty) */
@@ -226,10 +229,14 @@ static bool styles_initialized = false;
 
 static void summary_card_click_cb(lv_event_t *e) {
     int instance_index = (int)(intptr_t)lv_event_get_user_data(e);
-    /* Map instance index to page index (returns 1-based, or -1 if disabled) */
+    /* Pure-offset map to the ABSOLUTE page index (or -1 for a bad index).
+     * Availability is a separate query — only navigate to available slots. */
     int page = nina_dashboard_instance_to_page(instance_index);
-    if (page > 0)
-        nina_dashboard_show_page(page, 0);
+    if (page >= 0 && instance_index >= 0 && instance_index < MAX_NINA_INSTANCES
+        && nina_slot_available[instance_index]) {
+        nina_dashboard_show_page_animated(page, 0, 0);
+        nav_arbiter_submit_user(page, esp_timer_get_time() / 1000);
+    }
 }
 
 static uint32_t darken_color_summary(uint32_t color, int pct) {
@@ -643,7 +650,7 @@ static void create_empty_state(lv_obj_t *parent) {
 
 /* ── Page Creation ─────────────────────────────────────────────────── */
 
-lv_obj_t *summary_page_create(lv_obj_t *parent, int instance_count) {
+lv_obj_t *summary_page_create(lv_obj_t *parent) {
     init_glass_styles();
     apply_glass_theme();
 
@@ -657,12 +664,14 @@ lv_obj_t *summary_page_create(lv_obj_t *parent, int instance_count) {
     lv_obj_set_style_pad_row(sum_page, CARD_GAP, 0);
     lv_obj_clear_flag(sum_page, LV_OBJ_FLAG_SCROLLABLE);
 
-    card_count = instance_count;
-    if (card_count > MAX_NINA_INSTANCES) card_count = MAX_NINA_INSTANCES;
+    /* Build one card per fixed-identity slot (full reserved band width).
+     * card_count is always MAX_NINA_INSTANCES so cards[i] == instance i. */
+    card_count = MAX_NINA_INSTANCES;
 
-    for (int i = 0; i < card_count; i++) {
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         create_card(&cards[i], sum_page, i);
-        /* Start hidden — will be shown by summary_page_update for connected instances */
+        /* All cards start hidden; summary_page_rebuild / summary_page_update
+         * control visibility based on nina_slot_available[] and connectivity. */
         lv_obj_add_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
     }
 
@@ -672,6 +681,32 @@ lv_obj_t *summary_page_create(lv_obj_t *parent, int instance_count) {
     prev_visible_count = -1;
 
     return sum_page;
+}
+
+/**
+ * @brief Re-evaluate card visibility for the current nina_slot_available[] set.
+ *
+ * Must be called under the LVGL display lock. Hides cards for unavailable slots
+ * and resets prev_visible_count so the next summary_page_update forces a full
+ * layout pass. Task 1.4 (nina_dashboard_rebuild_slot) calls this after a slot
+ * is created or destroyed.
+ */
+void summary_page_rebuild(void) {
+    if (!sum_page) return;
+
+    /* Hide cards for unavailable slots; leave available slots for
+     * summary_page_update to show/hide based on live connection state. */
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        if (!nina_slot_available[i]) {
+            lv_obj_add_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
+            /* Invalidate bar animation state so a re-enabled card starts clean */
+            cards[i].prev_bar_progress = 0;
+            cards[i].bar_completing    = false;
+        }
+    }
+
+    /* Force the next summary_page_update call to redo layout presets */
+    prev_visible_count = -1;
 }
 
 /* ── Layout Update ─────────────────────────────────────────────────── */
@@ -817,12 +852,19 @@ void summary_page_update(const nina_client_t *instances, int count) {
 
     int gb = app_config_get()->color_brightness;
 
-    /* Count connected instances (use centralized connection state) */
-    int connected_count = nina_connection_connected_count();
+    /* Count visible cards using the SAME predicate as the per-card show/hide
+     * loop below (slot-available AND within count AND connected). Using the
+     * raw nina_connection_connected_count() here would ignore slot
+     * availability and could desync the empty-state test and the layout tier
+     * from what the cards actually show. */
+    int visible = 0;
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        if (nina_slot_available[i] && i < count && nina_connection_is_connected(i)) visible++;
+    }
 
-    /* Empty state: show message when nothing is connected */
-    if (connected_count == 0) {
-        for (int i = 0; i < card_count; i++) {
+    /* Empty state: show message when nothing is visible */
+    if (visible == 0) {
+        for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
             lv_obj_add_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
         }
         if (empty_cont) {
@@ -837,7 +879,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
         lv_obj_add_flag(empty_cont, LV_OBJ_FLAG_HIDDEN);
     }
 
-    bool layout_changed = (connected_count != prev_visible_count);
+    bool layout_changed = (visible != prev_visible_count);
 
     if (layout_changed) {
         /* ── FLIP animation: First, Last, Invert, Play ───────────── */
@@ -846,17 +888,19 @@ void summary_page_update(const nina_client_t *instances, int count) {
         bool was_visible[MAX_NINA_INSTANCES];
         int32_t old_y[MAX_NINA_INSTANCES];
         int32_t old_h[MAX_NINA_INSTANCES];
-        for (int i = 0; i < card_count; i++) {
+        for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
             was_visible[i] = !lv_obj_has_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
             old_y[i] = was_visible[i] ? lv_obj_get_y(cards[i].card) : 0;
             old_h[i] = was_visible[i] ? lv_obj_get_height(cards[i].card) : 0;
         }
 
-        /* LAST: apply show/hide and layout preset changes */
-        for (int i = 0; i < card_count && i < count; i++) {
-            if (nina_connection_is_connected(i)) {
+        /* LAST: apply show/hide and layout preset changes.
+         * Only available slots (nina_slot_available[i]) can ever be shown;
+         * unavailable slots are always kept hidden regardless of connection. */
+        for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+            if (nina_slot_available[i] && i < count && nina_connection_is_connected(i)) {
                 lv_obj_clear_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
-                update_card_layout(&cards[i], connected_count);
+                update_card_layout(&cards[i], visible);
             } else {
                 lv_obj_add_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
             }
@@ -866,8 +910,8 @@ void summary_page_update(const nina_client_t *instances, int count) {
         lv_obj_update_layout(sum_page);
 
         /* INVERT + PLAY: animate transitions */
-        for (int i = 0; i < card_count && i < count; i++) {
-            if (!nina_connection_is_connected(i)) continue;
+        for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+            if (!nina_slot_available[i] || i >= count || !nina_connection_is_connected(i)) continue;
             int32_t new_y = lv_obj_get_y(cards[i].card);
             int32_t new_h = lv_obj_get_height(cards[i].card);
             if (!was_visible[i]) {
@@ -894,9 +938,10 @@ void summary_page_update(const nina_client_t *instances, int count) {
             }
         }
     } else {
-        /* No layout change — just ensure correct visibility */
-        for (int i = 0; i < card_count && i < count; i++) {
-            if (nina_connection_is_connected(i)) {
+        /* No layout change — just ensure correct visibility.
+         * Unavailable slots stay hidden regardless of connection state. */
+        for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+            if (nina_slot_available[i] && i < count && nina_connection_is_connected(i)) {
                 lv_obj_clear_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
             } else {
                 lv_obj_add_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
@@ -904,14 +949,14 @@ void summary_page_update(const nina_client_t *instances, int count) {
         }
     }
 
-    prev_visible_count = connected_count;
+    prev_visible_count = visible;
 
     /* ── Update card data ────────────────────────────────────────── */
-    for (int i = 0; i < card_count && i < count; i++) {
+    for (int i = 0; i < MAX_NINA_INSTANCES && i < count; i++) {
         summary_card_t *sc = &cards[i];
         const nina_client_t *d = &instances[i];
 
-        if (!nina_connection_is_connected(i)) continue;
+        if (!nina_slot_available[i] || !nina_connection_is_connected(i)) continue;
 
         /* Instance name — telescope + camera, fallback to profile, then host */
         if (d->telescope_name[0] && d->camera_name[0]) {
@@ -1061,7 +1106,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
         }
 
         /* Sequence info (visible in 1-2 card mode) */
-        if (connected_count <= 2 && !lv_obj_has_flag(sc->seq_row, LV_OBJ_FLAG_HIDDEN)) {
+        if (visible <= 2 && !lv_obj_has_flag(sc->seq_row, LV_OBJ_FLAG_HIDDEN)) {
             if (d->container_name[0]) {
                 set_label_if_changed(sc->lbl_seq_name, d->container_name);
             } else {
@@ -1175,7 +1220,7 @@ void summary_page_update(const nina_client_t *instances, int count) {
         }
 
         /* Exposure detail line (1-card mode only) */
-        if (connected_count <= 1 &&
+        if (visible <= 1 &&
             !lv_obj_has_flag(sc->detail_row, LV_OBJ_FLAG_HIDDEN)) {
             char detail[128] = "";
             int len = 0;
@@ -1263,7 +1308,7 @@ void summary_page_apply_theme(void) {
     lv_obj_report_style_change(&style_glass_card);
 
     /* Invalidate all cached colors so the next update re-applies everything */
-    for (int i = 0; i < card_count; i++) {
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         summary_card_t *sc = &cards[i];
         sc->cached_name_color       = UINT32_MAX;
         sc->cached_filter_text_color = UINT32_MAX;
@@ -1284,7 +1329,7 @@ void summary_page_apply_theme(void) {
     }
 
     /* Update per-card widgets */
-    for (int i = 0; i < card_count; i++) {
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         summary_card_t *sc = &cards[i];
 
         /* Stat labels + sequence title labels */

@@ -10,6 +10,8 @@
 
 #include "nina_graph_internal.h"
 #include "nina_dashboard.h"
+#include "nina_nav_arbiter.h"
+#include "esp_timer.h"
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -28,6 +30,12 @@
 
 /* -- History point options ----------------------------------------------- */
 const int point_options[] = {25, 50, 100, 200, 400};
+
+/* Max points actually drawn on the chart. The chart is ~720px wide, so more
+ * than this yields sub-pixel polyline segments with no visible difference.
+ * Decimating the displayed set (storage stays GRAPH_MAX_POINTS) roughly halves
+ * the per-point loop and polyline segment count for the heavy locked redraw. */
+#define GRAPH_MAX_DISPLAY_POINTS 360
 
 /* -- Y-scale options for RMS (arcseconds x 100) ------------------------- */
 const int rms_scale_values[] = {0, 100, 200, 400, 800, 1600};  /* 0 = auto */
@@ -470,6 +478,12 @@ void nina_graph_overlay_create(lv_obj_t *parent) {
 void nina_graph_show(graph_type_t type, int page_index) {
     if (!overlay) return;
 
+    /* Freeze the arbiter only on the hidden->visible edge so the modal-open
+     * pairs with the close in nina_graph_hide(). */
+    if (lv_obj_has_flag(overlay, LV_OBJ_FLAG_HIDDEN)) {
+        nav_arbiter_notify_modal_open();
+    }
+
     current_type = type;
     return_page_index = page_index;
     selected_scale_idx = 0;  /* Reset to auto scale */
@@ -505,7 +519,12 @@ void nina_graph_show(graph_type_t type, int page_index) {
 
 void nina_graph_hide(void) {
     if (overlay) {
+        /* Unfreeze only on the visible->hidden edge to pair with show(). */
+        bool was_visible = !lv_obj_has_flag(overlay, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(overlay, LV_OBJ_FLAG_HIDDEN);
+        if (was_visible) {
+            nav_arbiter_notify_modal_close(esp_timer_get_time() / 1000);
+        }
     }
     graph_requested = false;
 }
@@ -553,8 +572,18 @@ void nina_graph_set_rms_data(const graph_rms_data_t *data) {
     }
     if (count > GRAPH_MAX_POINTS) count = GRAPH_MAX_POINTS;
 
+    /* Decimate the displayed set to the chart's pixel width. When the source
+     * has more samples than the chart can resolve, subsample with an integer
+     * stride so the polyline draws far fewer segments under the display lock. */
+    int disp_count = count;
+    int stride = 1;
+    if (count > GRAPH_MAX_DISPLAY_POINTS) {
+        stride = (count + GRAPH_MAX_DISPLAY_POINTS - 1) / GRAPH_MAX_DISPLAY_POINTS;
+        disp_count = (count + stride - 1) / stride;
+    }
+
     /* Configure chart */
-    lv_chart_set_point_count(chart, count);
+    lv_chart_set_point_count(chart, disp_count);
 
     /* Hide HFR series, show RMS series (respecting legend toggle) */
     lv_chart_hide_series(chart, ser_hfr, true);
@@ -590,8 +619,9 @@ void nina_graph_set_rms_data(const graph_rms_data_t *data) {
     lv_chart_set_range(chart, LV_CHART_AXIS_PRIMARY_Y, -range, range);
     update_y_labels(-range, range);
 
-    /* Populate series data (values are x100 for int precision) */
-    for (int i = 0; i < count; i++) {
+    /* Populate series data (values are x100 for int precision).
+     * Stride through the source so exactly disp_count points are pushed. */
+    for (int i = 0; i < count; i += stride) {
         lv_chart_set_next_value(chart, ser_ra, (int32_t)(data->ra[i] * 100.0f));
         lv_chart_set_next_value(chart, ser_dec, (int32_t)(data->dec[i] * 100.0f));
         float total_i = sqrtf(data->ra[i] * data->ra[i] + data->dec[i] * data->dec[i]);
@@ -601,7 +631,8 @@ void nina_graph_set_rms_data(const graph_rms_data_t *data) {
     /* Show threshold lines at configured good/ok boundaries */
     update_threshold_lines(-range, range);
 
-    lv_chart_refresh(chart);
+    /* No explicit lv_chart_refresh: set_next_value already invalidated the
+     * chart; let the normal refresh timer coalesce the redraw. */
 
     /* Update summary */
     if (lbl_summary) {
@@ -628,8 +659,16 @@ void nina_graph_set_hfr_data(const graph_hfr_data_t *data) {
     }
     if (count > GRAPH_MAX_POINTS) count = GRAPH_MAX_POINTS;
 
+    /* Decimate the displayed set to the chart's pixel width (see RMS path). */
+    int disp_count = count;
+    int stride = 1;
+    if (count > GRAPH_MAX_DISPLAY_POINTS) {
+        stride = (count + GRAPH_MAX_DISPLAY_POINTS - 1) / GRAPH_MAX_DISPLAY_POINTS;
+        disp_count = (count + stride - 1) / stride;
+    }
+
     /* Configure chart */
-    lv_chart_set_point_count(chart, count);
+    lv_chart_set_point_count(chart, disp_count);
 
     /* Hide RMS series, show HFR series (respecting legend toggle) */
     lv_chart_hide_series(chart, ser_ra, true);
@@ -663,15 +702,17 @@ void nina_graph_set_hfr_data(const graph_hfr_data_t *data) {
     lv_chart_set_range(chart, LV_CHART_AXIS_PRIMARY_Y, 0, range);
     update_y_labels(0, range);
 
-    /* Populate series data (values are x100) */
-    for (int i = 0; i < count; i++) {
+    /* Populate series data (values are x100).
+     * Stride through the source so exactly disp_count points are pushed. */
+    for (int i = 0; i < count; i += stride) {
         lv_chart_set_next_value(chart, ser_hfr, (int32_t)(data->hfr[i] * 100.0f));
     }
 
     /* Show threshold lines at configured good/ok boundaries */
     update_threshold_lines(0, range);
 
-    lv_chart_refresh(chart);
+    /* No explicit lv_chart_refresh: set_next_value already invalidated the
+     * chart; let the normal refresh timer coalesce the redraw. */
 
     /* Update summary */
     if (lbl_summary) {

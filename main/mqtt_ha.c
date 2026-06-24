@@ -13,12 +13,36 @@
 #include "bsp/display.h"
 #include "tasks.h"
 #include "ui/nina_dashboard.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdbool.h>
 #include <inttypes.h>
 
 static const char *TAG = "mqtt_ha";
+
+/* ── Deferred command handoff (INTEG-2/3/4) ─────────────────────────────────
+ * The MQTT event callback runs in the esp-mqtt event task and must stay fast
+ * and non-blocking — it must not take the display lock, drive the backlight,
+ * mutate live config, or write NVS (all of which can block and stall the MQTT
+ * keepalive). The callback only PARSES a command and enqueues the requested
+ * change here. mqtt_ha_process_pending(), called from the UI-context
+ * data_update_task each cycle, applies the change under the display lock and
+ * persists config via the snapshot+save pattern. */
+typedef enum {
+    MQTT_CMD_SCREEN_BRIGHTNESS,  /* value = 0..100 backlight brightness */
+    MQTT_CMD_TEXT_BRIGHTNESS,    /* value = 0..100 color (text) brightness */
+    MQTT_CMD_REBOOT,             /* deferred restart */
+} mqtt_cmd_type_t;
+
+typedef struct {
+    mqtt_cmd_type_t type;
+    int value;  /* clamped 0..100 for brightness commands; unused for reboot */
+} mqtt_cmd_t;
+
+#define MQTT_CMD_QUEUE_LEN 8
+static QueueHandle_t s_cmd_queue = NULL;
 
 // Exponential backoff for MQTT reconnection
 #define MQTT_BACKOFF_INITIAL_MS  5000   // 5 seconds
@@ -245,40 +269,43 @@ void mqtt_ha_publish_state(void)
     cJSON_Delete(text_state);
 }
 
+/* Non-blocking enqueue from the MQTT event task. Drops the command if the
+ * queue is full rather than blocking the event loop. */
+static void enqueue_cmd(mqtt_cmd_type_t type, int value)
+{
+    if (!s_cmd_queue) return;
+    mqtt_cmd_t cmd = { .type = type, .value = value };
+    if (xQueueSend(s_cmd_queue, &cmd, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "MQTT command queue full — dropping command %d", (int)type);
+    }
+}
+
+/* Parse-only: resolve the requested brightness from the JSON payload and hand
+ * it off. Runs in the MQTT event task — no config writes, no display lock. */
 static void handle_screen_command(const char *data, int len)
 {
     cJSON *root = cJSON_ParseWithLength(data, len);
     if (!root) return;
 
-    app_config_t *cfg = app_config_get();
-
     cJSON *state = cJSON_GetObjectItem(root, "state");
     cJSON *brightness = cJSON_GetObjectItem(root, "brightness");
 
+    int val = -1;  /* -1 = "ON with no explicit value" sentinel */
     if (cJSON_IsString(state) && strcmp(state->valuestring, "OFF") == 0) {
-        cfg->brightness = 0;
+        val = 0;
     } else if (cJSON_IsNumber(brightness)) {
-        int val = brightness->valueint;
+        val = brightness->valueint;
         if (val < 0) val = 0;
         if (val > 100) val = 100;
-        cfg->brightness = val;
     } else if (cJSON_IsString(state) && strcmp(state->valuestring, "ON") == 0) {
-        if (cfg->brightness == 0) cfg->brightness = 50;
-    }
-
-    /* Don't physically change backlight while screen-sleep is active —
-     * the sleep logic in data_update_task owns the backlight during sleep.
-     * The config value is still saved so the correct brightness is restored on wake. */
-    if (!screen_asleep) {
-        bsp_display_brightness_set(cfg->brightness);
-        ESP_LOGI(TAG, "Screen brightness set to %d%% via MQTT", cfg->brightness);
+        val = -1;  /* consumer turns a 0 brightness back on at a default */
     } else {
-        ESP_LOGI(TAG, "Screen brightness config updated to %d%% via MQTT (display sleeping)", cfg->brightness);
+        cJSON_Delete(root);
+        return;  /* nothing actionable */
     }
 
-    app_config_save(cfg);
+    enqueue_cmd(MQTT_CMD_SCREEN_BRIGHTNESS, val);
     cJSON_Delete(root);
-    mqtt_ha_publish_state();
 }
 
 static void handle_text_command(const char *data, int len)
@@ -286,40 +313,106 @@ static void handle_text_command(const char *data, int len)
     cJSON *root = cJSON_ParseWithLength(data, len);
     if (!root) return;
 
-    app_config_t *cfg = app_config_get();
-
     cJSON *state = cJSON_GetObjectItem(root, "state");
     cJSON *brightness = cJSON_GetObjectItem(root, "brightness");
 
+    int val = -1;  /* -1 = "ON with no explicit value" sentinel */
     if (cJSON_IsString(state) && strcmp(state->valuestring, "OFF") == 0) {
-        cfg->color_brightness = 0;
+        val = 0;
     } else if (cJSON_IsNumber(brightness)) {
-        int val = brightness->valueint;
+        val = brightness->valueint;
         if (val < 0) val = 0;
         if (val > 100) val = 100;
-        cfg->color_brightness = val;
     } else if (cJSON_IsString(state) && strcmp(state->valuestring, "ON") == 0) {
-        if (cfg->color_brightness == 0) cfg->color_brightness = 100;
-    }
-
-    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-        nina_dashboard_apply_theme(cfg->theme_index);
-        bsp_display_unlock();
+        val = -1;
     } else {
-        ESP_LOGW(TAG, "Display lock timeout (MQTT theme apply)");
+        cJSON_Delete(root);
+        return;
     }
 
-    ESP_LOGI(TAG, "Text brightness set to %d%% via MQTT", cfg->color_brightness);
-
-    app_config_save(cfg);
+    enqueue_cmd(MQTT_CMD_TEXT_BRIGHTNESS, val);
     cJSON_Delete(root);
-    mqtt_ha_publish_state();
 }
 
 static void handle_reboot_command(const char *data, int len)
 {
     if (len >= 5 && strncmp(data, "PRESS", 5) == 0) {
-        ESP_LOGW(TAG, "Reboot requested via MQTT");
+        ESP_LOGW(TAG, "Reboot requested via MQTT (deferred)");
+        enqueue_cmd(MQTT_CMD_REBOOT, 0);
+    }
+}
+
+void mqtt_ha_process_pending(void)
+{
+    if (!s_cmd_queue) return;
+
+    bool brightness_applied = false;
+    bool reboot_requested = false;
+
+    mqtt_cmd_t cmd;
+    while (xQueueReceive(s_cmd_queue, &cmd, 0) == pdTRUE) {
+        switch (cmd.type) {
+        case MQTT_CMD_SCREEN_BRIGHTNESS: {
+            /* LIVE-ONLY: never persist MQTT brightness. NVS writes run with the
+             * CPU cache disabled, which can starve the esp-hosted SDIO transport
+             * and trigger a host restart. An HA lux automation publishes these
+             * commands very frequently, so we apply live and never save. Manual
+             * UI / web changes still persist via their own handlers. */
+            int newv = cmd.value;
+            if (newv < 0) {  /* "ON" with no value: restore a sane default if off */
+                int cur = app_config_get()->brightness;  /* scalar read, no save */
+                newv = (cur == 0) ? 50 : cur;
+            }
+            /* Apply backlight live unless screen-sleep owns it. The backlight set
+             * is config-independent and works without any config write. */
+            if (!screen_asleep) {
+                bsp_display_brightness_set(newv);
+                ESP_LOGI(TAG, "Screen brightness set to %d%% via MQTT (live, not saved)", newv);
+            } else {
+                ESP_LOGI(TAG, "Screen brightness %d%% via MQTT ignored (display sleeping, live-only)", newv);
+            }
+            brightness_applied = true;
+            break;
+        }
+        case MQTT_CMD_TEXT_BRIGHTNESS: {
+            /* LIVE-ONLY: never persist. The rendered theme reads color_brightness
+             * from the live app_config (apply_theme_to_page() in nina_dashboard.c),
+             * so the live effect requires the in-memory value to be visible to the
+             * theme code. Replicate the web UI live-preview (color_brightness_post_handler
+             * in web_handlers_display.c): write the single scalar field on the live
+             * config, then re-apply the theme — but skip app_config_save(). A single
+             * aligned int store is the same mechanism the UI uses; no torn-write race. */
+            app_config_t *cfg = app_config_get();
+            int newv = cmd.value;
+            if (newv < 0) {  /* "ON" with no value */
+                newv = (cfg->color_brightness == 0) ? 100 : cfg->color_brightness;
+            }
+            cfg->color_brightness = newv;  /* live scalar write, NOT saved */
+            /* Re-apply theme so the new color brightness takes effect live. */
+            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                nina_dashboard_apply_theme(cfg->theme_index);
+                bsp_display_unlock();
+            } else {
+                ESP_LOGW(TAG, "Display lock timeout (MQTT theme apply)");
+            }
+            ESP_LOGI(TAG, "Text brightness set to %d%% via MQTT (live, not saved)", newv);
+            brightness_applied = true;
+            break;
+        }
+        case MQTT_CMD_REBOOT:
+            reboot_requested = true;
+            break;
+        }
+    }
+
+    /* Publish current (live) state so HA optimistic state stays in sync. Nothing
+     * is persisted; this only reflects the value we just applied in memory. */
+    if (brightness_applied) {
+        mqtt_ha_publish_state();
+    }
+
+    if (reboot_requested) {
+        ESP_LOGW(TAG, "Rebooting now (MQTT request)");
         esp_restart();
     }
 }
@@ -382,6 +475,15 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
         break;
 
     case MQTT_EVENT_DATA:
+        /* Ignore retained command messages. The screen/text/reboot topics are
+         * Home Assistant command topics (momentary light-set / button-press); a
+         * retained payload is a stale command the broker redelivers on every
+         * (re)connect. Acting on a retained reboot boot-loops the device (one
+         * reboot per MQTT connect). Only live commands represent real intent. */
+        if (event->retain) {
+            ESP_LOGW(TAG, "Ignoring retained MQTT command on subscribed topic");
+            break;
+        }
         if (event->topic && event->topic_len > 0) {
             if (event->topic_len == (int)strlen(s_topic_screen_cmd) &&
                 strncmp(event->topic, s_topic_screen_cmd, event->topic_len) == 0) {
@@ -421,6 +523,16 @@ void mqtt_ha_start(void)
 
     init_device_id();
     build_topics(cfg->mqtt_topic_prefix);
+
+    /* Command handoff queue: written by the MQTT event task, drained by the
+     * UI-context data_update_task via mqtt_ha_process_pending(). */
+    if (!s_cmd_queue) {
+        s_cmd_queue = xQueueCreate(MQTT_CMD_QUEUE_LEN, sizeof(mqtt_cmd_t));
+        if (!s_cmd_queue) {
+            ESP_LOGE(TAG, "Failed to create MQTT command queue");
+            return;
+        }
+    }
 
     // Create reconnect timer (one-shot, managed by backoff logic)
     if (!s_reconnect_timer) {

@@ -10,6 +10,8 @@
 #include "nina_info_internal.h"
 #include "nina_dashboard.h"
 #include "nina_dashboard_internal.h"
+#include "nina_nav_arbiter.h"
+#include "esp_timer.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -226,6 +228,14 @@ void nina_info_overlay_create(lv_obj_t *parent) {
 void nina_info_overlay_show(info_overlay_type_t type, int page_index) {
     if (!info_overlay) return;
 
+    /* Freeze the arbiter only on the hidden->visible edge so the modal-open and
+     * modal-close notifications stay paired even if show() is re-invoked for a
+     * different overlay type while already visible. */
+    bool was_hidden = lv_obj_has_flag(info_overlay, LV_OBJ_FLAG_HIDDEN);
+    if (was_hidden) {
+        nav_arbiter_notify_modal_open();
+    }
+
     info_current_type = type;
     info_return_page  = page_index;
 
@@ -298,7 +308,12 @@ void nina_info_overlay_show(info_overlay_type_t type, int page_index) {
 
 void nina_info_overlay_hide(void) {
     if (info_overlay) {
+        /* Unfreeze only on the visible->hidden edge to pair with show(). */
+        bool was_visible = !lv_obj_has_flag(info_overlay, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(info_overlay, LV_OBJ_FLAG_HIDDEN);
+        if (was_visible) {
+            nav_arbiter_notify_modal_close(esp_timer_get_time() / 1000);
+        }
     }
     info_requested = false;
 }

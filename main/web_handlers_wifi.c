@@ -174,16 +174,18 @@ esp_err_t wifi_setup_post_handler(httpd_req_t *req)
         return send_400(req, "SSID is required");
     }
 
-    app_config_t *cfg = app_config_get();
-    strlcpy(cfg->wifi_networks[0].ssid, ssid_item->valuestring,
-            sizeof(cfg->wifi_networks[0].ssid));
+    /* Work on a mutex-protected snapshot copy; never field-write the live config. */
+    app_config_t cfg = app_config_get_snapshot();
+    strlcpy(cfg.wifi_networks[0].ssid, ssid_item->valuestring,
+            sizeof(cfg.wifi_networks[0].ssid));
     if (cJSON_IsString(pass_item)) {
-        strlcpy(cfg->wifi_networks[0].password, pass_item->valuestring,
-                sizeof(cfg->wifi_networks[0].password));
+        strlcpy(cfg.wifi_networks[0].password, pass_item->valuestring,
+                sizeof(cfg.wifi_networks[0].password));
     } else {
-        cfg->wifi_networks[0].password[0] = '\0';
+        cfg.wifi_networks[0].password[0] = '\0';
     }
-    app_config_save(cfg);
+    /* Single atomic memcpy under mutex + NVS persist. */
+    app_config_save(&cfg);
 
     cJSON_Delete(root);
 
