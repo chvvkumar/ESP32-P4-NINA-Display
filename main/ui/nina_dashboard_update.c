@@ -13,6 +13,7 @@
 #include <string.h>
 #include <time.h>
 #include <sys/time.h>
+#include <math.h>
 
 #define STALE_WARN_MS   30000   /* 30 s: show "Last update" label */
 #define STALE_DIM_MS   120000   /* 2 min: dim the entire page */
@@ -360,6 +361,15 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
                              && d->exposure_end_epoch > (int64_t)now)
                             || (p->exp_anchor_us == 0);
 
+        /* Detect a material exposure_total change on the SAME ongoing exposure
+         * (e.g. stale image-history total replaced by the real sequence total a
+         * few seconds after boot). Computed against the OLD cached_* values, so
+         * this must run BEFORE the cache assignments below. */
+        bool same_exposure = (p->exp_anchor_us != 0
+                              && d->exposure_end_epoch == p->cached_end_epoch);
+        bool total_changed = (same_exposure && p->cached_total > 0.0f
+                              && fabsf(p->cached_total - d->exposure_total) > 1.0f);
+
         // Update cached values for the timer
         p->cached_end_epoch = d->exposure_end_epoch;
         p->cached_total = d->exposure_total;
@@ -391,6 +401,39 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
              * remaining time. arc_start_exposure_anim skips if <=100ms remain
              * (the completion edge fills it). */
             arc_start_exposure_anim(p);
+        } else if (total_changed) {
+            /* Same ongoing sub, but exposure_total was corrected (stale
+             * image-history length replaced by the real sequence length).
+             * Re-anchor against the corrected total and smoothly animate the
+             * one-time position correction instead of hard-jumping the arc. */
+            int64_t remaining_seed_ms = (d->exposure_end_epoch - (int64_t)now) * 1000;
+            float seed = d->exposure_total - (float)remaining_seed_ms / 1000.0f;
+            if (seed < 0.0f) seed = 0.0f;
+            if (seed > d->exposure_total) seed = d->exposure_total;
+
+            p->exp_anchor_us = esp_timer_get_time();
+            p->exp_anchor_elapsed = seed;
+
+            int target_val = (int)((seed * (float)ARC_RANGE) / d->exposure_total);
+            if (target_val < 0) target_val = 0;
+            if (target_val > ARC_RANGE - 1) target_val = ARC_RANGE - 1;
+            int cur_val = lv_arc_get_value(p->arc_exposure);
+
+            lv_anim_delete(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
+            /* Smoothly move from the (mis-seeded) current value to the corrected
+             * position; the long linear anim takes over toward ARC_RANGE-1 once
+             * this short correction anim ends. Do NOT call
+             * arc_start_exposure_anim here — it would delete this correction
+             * anim. The 200ms arc_interp_timer_cb restarts the long progress
+             * anim when no anim is running and elapsed < cached_total. */
+            lv_anim_t a;
+            lv_anim_init(&a);
+            lv_anim_set_var(&a, p->arc_exposure);
+            lv_anim_set_values(&a, cur_val, target_val);
+            lv_anim_set_time(&a, ARC_TRANSITION_MS);
+            lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_arc_set_value);
+            lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+            lv_anim_start(&a);
         }
         // Normal progress updates are handled by the 200ms timer (arc_interp_timer_cb)
 

@@ -599,6 +599,10 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
         nina_connection_set_static_data_ready(instance, true);
         state->last_slow_poll_ms = now_ms;
         state->last_sequence_poll_ms = now_ms;
+        /* Force a sequence poll this same cycle so exposure_total reflects the
+         * real current-sub length (not the stale image-history total) before the
+         * UI seeds the exposure arc on first connect. */
+        data->sequence_poll_needed = true;
     } else {
         snprintf(data->profile_name, sizeof(data->profile_name), "%s", state->cached_profile);
         if (state->cached_telescope[0] != '\0') {
