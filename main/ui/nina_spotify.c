@@ -171,7 +171,7 @@ static void spotify_status_refresh(void)
         case SPOTIFY_AUTH_AUTHORIZED:
         default:
             if (!has_received_data) {
-                spotify_status_set("Connecting to Spotify\xE2\x80\xA6", "");
+                spotify_status_set("Connecting to Spotify...", "");
                 return;
             }
             /* Authorized and data has arrived (nothing-playing handled by the
@@ -197,7 +197,7 @@ static bool is_version_keyword(const char *start, size_t len)
         "remaster", "remix", "live", "edit", "version", "deluxe", "mix",
         "acoustic", "demo", "mono", "stereo", "anniversary", "bonus",
         "extended", "radio", "single", "original", "alternate", "session",
-        "stripped", "instrumental", "explicit", "clean", "feat", NULL
+        "stripped", "instrumental", "explicit", "clean", "feat", "from", NULL
     };
     /* Build a lowercase copy for case-insensitive search */
     char lower[128];
