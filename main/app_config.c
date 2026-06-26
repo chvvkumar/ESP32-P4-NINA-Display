@@ -808,6 +808,11 @@ static void set_defaults(app_config_t *cfg) {
     cfg->goes_orientation = 0;
     cfg->solar_orientation = 0;
 
+    // Custom Image URL source (Image Display source index 3)
+    strcpy(cfg->custom_image_url, "https://picsum.photos/720");
+    cfg->custom_orientation = 0;          // 0=0°,1=90°,2=180°,3=270° clockwise
+    cfg->custom_update_interval_s = 60;   // poll interval (10-7200s)
+
     // Auth is on by default — protects device from open-LAN access
     cfg->auth_enabled = true;
 }
@@ -1944,6 +1949,24 @@ static void migrate_from_v43(const void *raw, size_t raw_size, app_config_t *cfg
         (int)cfg->active_page_override, dn, (int)cfg->nav_grace_s);
 }
 
+/* --- v44 → v45 migration: add Custom Image URL source (Image Display source
+ *     index 3) — custom_image_url, custom_orientation, custom_update_interval_s. --- */
+static void migrate_from_v44(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v44_t) ? raw_size : sizeof(app_config_v44_t);
+    memcpy(cfg, raw, copy);
+
+    /* custom_image_url / custom_orientation / custom_update_interval_s: new in
+     * v45, appended past the v44 snapshot — apply the set_defaults() values. */
+    strlcpy(cfg->custom_image_url, "https://picsum.photos/720", sizeof(cfg->custom_image_url));
+    cfg->custom_orientation = 0;
+    cfg->custom_update_interval_s = 60;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v44 to v%d", APP_CONFIG_VERSION);
+}
+
 static void migrate_from_v36(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
@@ -2562,7 +2585,17 @@ static bool validate_config(app_config_t *cfg) {
         strcpy(cfg->goes_region, "umv");
         fixed = true;
     }
-    if (cfg->image_display_source > 2) {
+    /* Custom Image URL source (Image Display source index 3) */
+    cfg->custom_image_url[sizeof(cfg->custom_image_url) - 1] = '\0';
+    if (cfg->custom_orientation > 3) {
+        cfg->custom_orientation = 0;
+        fixed = true;
+    }
+    if (cfg->custom_update_interval_s < 10 || cfg->custom_update_interval_s > 7200) {
+        cfg->custom_update_interval_s = 60;
+        fixed = true;
+    }
+    if (cfg->image_display_source > 3) {   /* 0=GOES, 1=Moon, 2=Solar, 3=Custom URL */
         cfg->image_display_source = 0;
         fixed = true;
     }
@@ -2683,6 +2716,12 @@ void app_config_init(void) {
             nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(handle);
         }
+    } else if (version_check == 44) {
+        /* v44 → v45: added Custom Image URL source (custom_image_url, custom_orientation, custom_update_interval_s) */
+        migrate_from_v44(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 43) {
         /* v43 → v44: Home Page rename, single slideshow list, nav_grace_s, drop persistent */
         migrate_from_v43(raw, stored_size, &s_config);

@@ -34,6 +34,9 @@ esp_err_t image_display_config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "solar_band", cfg->solar_band);
     cJSON_AddNumberToObject(root, "goes_orientation", cfg->goes_orientation);
     cJSON_AddNumberToObject(root, "solar_orientation", cfg->solar_orientation);
+    cJSON_AddStringToObject(root, "custom_image_url", cfg->custom_image_url);
+    cJSON_AddNumberToObject(root, "custom_orientation", cfg->custom_orientation);
+    cJSON_AddNumberToObject(root, "custom_update_interval_s", cfg->custom_update_interval_s);
     cJSON_AddNumberToObject(root, "moon_drag_light_mode", cfg->moon_drag_light_mode);
     cJSON_AddNumberToObject(root, "moon_flip_u", cfg->moon_flip_u);
     cJSON_AddNumberToObject(root, "moon_flip_v", cfg->moon_flip_v);
@@ -74,6 +77,22 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
         cJSON_Delete(root);
         return send_400(req, "goes_region too long");
     }
+    if (!validate_string_len(root, "custom_image_url", sizeof(((app_config_t *)0)->custom_image_url))) {
+        cJSON_Delete(root);
+        return send_400(req, "custom_image_url too long");
+    }
+    /* A custom URL, when present, must be an http(s) URL. validate_url_format
+     * also accepts mqtt(s) schemes, so additionally require http/https here.
+     * An empty string is allowed (clears the URL / "not configured" state). */
+    cJSON *custom_url_item = cJSON_GetObjectItem(root, "custom_image_url");
+    if (cJSON_IsString(custom_url_item) && custom_url_item->valuestring[0] != '\0') {
+        const char *u = custom_url_item->valuestring;
+        bool http_scheme = (strncmp(u, "http://", 7) == 0 || strncmp(u, "https://", 8) == 0);
+        if (!http_scheme || !validate_url_format(u)) {
+            cJSON_Delete(root);
+            return send_400(req, "custom_image_url must start with http:// or https://");
+        }
+    }
 
     /* Work on a mutex-protected snapshot copy; never field-write the live config. */
     app_config_t cfg = app_config_get_snapshot();
@@ -96,8 +115,11 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     uint8_t prev_spin_return = cfg.moon_spin_return_s;
     uint8_t prev_goes_orient  = cfg.goes_orientation;
     uint8_t prev_solar_orient = cfg.solar_orientation;
+    uint8_t prev_custom_orient = cfg.custom_orientation;
     char    prev_region[sizeof(cfg.goes_region)];
     strlcpy(prev_region, cfg.goes_region, sizeof(prev_region));
+    char    prev_custom_url[sizeof(cfg.custom_image_url)];
+    strlcpy(prev_custom_url, cfg.custom_image_url, sizeof(prev_custom_url));
 
     JSON_TO_BOOL(root, "image_display_enabled", cfg.image_display_enabled);
     JSON_TO_BOOL(root, "image_display_show_overlay", cfg.image_display_show_overlay);
@@ -113,7 +135,7 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     }
 
     cJSON *src = cJSON_GetObjectItem(root, "image_display_source");
-    if (cJSON_IsNumber(src)) { int v = src->valueint; cfg.image_display_source = (v >= 0 && v <= 2) ? (uint8_t)v : 0; }
+    if (cJSON_IsNumber(src)) { int v = src->valueint; cfg.image_display_source = (v >= 0 && v <= 3) ? (uint8_t)v : 0; }
     cJSON *bg = cJSON_GetObjectItem(root, "moon_bg_style");
     if (cJSON_IsNumber(bg)) { int v = bg->valueint; cfg.moon_bg_style = (v >= 0 && v <= 3) ? (uint8_t)v : 0; }
     cJSON *mlat = cJSON_GetObjectItem(root, "moon_lat");
@@ -126,6 +148,13 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     if (cJSON_IsNumber(go)) { int v = go->valueint; cfg.goes_orientation = (v >= 0 && v <= 3) ? (uint8_t)v : 0; }
     cJSON *so = cJSON_GetObjectItem(root, "solar_orientation");
     if (cJSON_IsNumber(so)) { int v = so->valueint; cfg.solar_orientation = (v >= 0 && v <= 3) ? (uint8_t)v : 0; }
+    /* Custom image URL: length + scheme already validated above; copy bounded
+     * into the 256-byte field. */
+    JSON_TO_STRING(root, "custom_image_url", cfg.custom_image_url);
+    cJSON *co = cJSON_GetObjectItem(root, "custom_orientation");
+    if (cJSON_IsNumber(co)) { int v = co->valueint; cfg.custom_orientation = (v >= 0 && v <= 3) ? (uint8_t)v : 0; }
+    cJSON *ci = cJSON_GetObjectItem(root, "custom_update_interval_s");
+    if (cJSON_IsNumber(ci)) { int v = ci->valueint; if (v < 10) v = 10; if (v > 7200) v = 7200; cfg.custom_update_interval_s = (uint16_t)v; }
     cJSON *dlm = cJSON_GetObjectItem(root, "moon_drag_light_mode");
     if (cJSON_IsNumber(dlm)) { int v = dlm->valueint; cfg.moon_drag_light_mode = (v >= 0 && v <= 2) ? (uint8_t)v : 0; }
     cJSON *fu = cJSON_GetObjectItem(root, "moon_flip_u");
@@ -145,6 +174,12 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     cJSON *msr = cJSON_GetObjectItem(root, "moon_spin_return_s");
     if (cJSON_IsNumber(msr)) { int v = msr->valueint; if (v < 3) v = 3; if (v > 60) v = 60; cfg.moon_spin_return_s = (uint8_t)v; }
 
+    /* Preview button: force an immediate re-fetch even when no field changed
+     * (re-clicking Preview with the same URL must still refresh the device). */
+    bool force_fetch = false;
+    cJSON *ff = cJSON_GetObjectItem(root, "force_fetch");
+    if (cJSON_IsBool(ff)) { force_fetch = cJSON_IsTrue(ff); }
+
     cJSON_Delete(root);
 
     /* Single atomic memcpy under mutex + NVS persist. */
@@ -162,10 +197,14 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
         bool source_band_region_changed =
             cfg.image_display_source != prev_source ||
             cfg.solar_band != prev_band ||
-            strcmp(cfg.goes_region, prev_region) != 0;
+            strcmp(cfg.goes_region, prev_region) != 0 ||
+            (cfg.image_display_source == 3 &&
+             strcmp(cfg.custom_image_url, prev_custom_url) != 0) ||
+            (force_fetch && cfg.image_display_source == 3);
         bool crop_changed = cfg.image_display_crop != prev_crop;
         bool orient_changed = (cfg.goes_orientation != prev_goes_orient) ||
-                              (cfg.solar_orientation != prev_solar_orient);
+                              (cfg.solar_orientation != prev_solar_orient) ||
+                              (cfg.custom_orientation != prev_custom_orient);
 
         if (source_band_region_changed) {
             /* Source/band/region needs a genuinely new image: flag the next
@@ -225,7 +264,33 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
         }
     }
 
+    /* Surface the last-known fetch failure reason (if any) so the web UI can
+     * toast it. error_msg reflects the most recent completed fetch; a refetch
+     * triggered above runs asynchronously on the poll task. */
+    char err_copy[sizeof(((goes_data_t *)0)->error_msg)] = {0};
+    if (goes_data_lock(&goes_data, 200)) {
+        strlcpy(err_copy, goes_data.error_msg, sizeof(err_copy));
+        goes_data_unlock(&goes_data);
+    }
+
+    cJSON *resp = cJSON_CreateObject();
+    if (resp == NULL) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+    cJSON_AddBoolToObject(resp, "success", true);
+    if (err_copy[0] != '\0') {
+        cJSON_AddStringToObject(resp, "error_msg", err_copy);
+    }
+    const char *resp_str = cJSON_PrintUnformatted(resp);
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
+    if (resp_str != NULL) {
+        httpd_resp_send(req, resp_str, HTTPD_RESP_USE_STRLEN);
+        free((void *)resp_str);
+    } else {
+        httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
+    }
+    cJSON_Delete(resp);
     return ESP_OK;
 }

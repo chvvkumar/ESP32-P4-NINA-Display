@@ -142,6 +142,22 @@ bool fetch_and_show_thumbnail(const char *base_url) {
 // Software JPEG Decode Fallback (stb_image)
 // =============================================================================
 
+bool jpeg_probe_dimensions(const uint8_t *jpg_data, size_t jpg_size,
+                           uint32_t *out_w, uint32_t *out_h)
+{
+    if (!jpg_data || !out_w || !out_h || jpg_size == 0) return false;
+
+    int w = 0, h = 0, comp = 0;
+    /* Header-only probe: reads dimensions without decoding pixel data. */
+    if (!stbi_info_from_memory(jpg_data, (int)jpg_size, &w, &h, &comp) ||
+        w <= 0 || h <= 0) {
+        return false;
+    }
+    *out_w = (uint32_t)w;
+    *out_h = (uint32_t)h;
+    return true;
+}
+
 bool jpeg_sw_decode_rgb565(const uint8_t *jpg_data, size_t jpg_size,
                            uint8_t **out_buf, uint32_t *out_w, uint32_t *out_h,
                            size_t *out_size)
