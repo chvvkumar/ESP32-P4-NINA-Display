@@ -1135,8 +1135,12 @@
                 <input type="radio" name="imageSourceSel" id="imageSource2" value="2" onchange="updateImageSourceUI();applyImageDisplay();checkDirty()">
                 <span class="pn-pill-visual">Solar (SDO)</span>
               </label>
+              <label class="pn-pill rotate-pill">
+                <input type="radio" name="imageSourceSel" id="imageSource3" value="3" onchange="updateImageSourceUI();applyImageDisplay();checkDirty()">
+                <span class="pn-pill-visual">Custom URL</span>
+              </label>
             </div>
-            <div class="field-hint">Chooses GOES satellite, Moon phase, or Solar; the options below switch to match.</div>
+            <div class="field-hint">Chooses GOES satellite, Moon phase, Solar, or a custom image URL; the options below switch to match.</div>
           </div>
           <div class="toggle-row">
             <span class="toggle-label">Show Overlay</span>
@@ -1332,6 +1336,40 @@
               <option value="3">270&deg;</option>
             </select>
             <div class="field-hint">Rotate the solar image clockwise.</div>
+          </div>
+          </div>
+          <div id="customGroup" style="display:none">
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Image URL</label>
+            <input class="input" id="customImageUrl" type="url" placeholder="https://picsum.photos/720" onchange="applyImageDisplay();checkDirty()">
+            <div class="field-hint">JPEG only. Max 1024x1024 pixels, max 1 MB. PNG and WebP are not supported.</div>
+          </div>
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Custom Rotation</label>
+            <select class="input" id="customOrientation" onchange="applyImageDisplay();checkDirty()">
+              <option value="0">0&deg;</option>
+              <option value="1">90&deg;</option>
+              <option value="2">180&deg;</option>
+              <option value="3">270&deg;</option>
+            </select>
+            <div class="field-hint">Rotate the custom image clockwise.</div>
+          </div>
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Update Interval</label>
+            <select class="input" id="customInterval" onchange="applyImageDisplay();checkDirty()">
+              <option value="10">10 seconds</option>
+              <option value="30">30 seconds</option>
+              <option value="60" selected>1 minute</option>
+              <option value="300">5 minutes</option>
+              <option value="600">10 minutes</option>
+              <option value="1800">30 minutes</option>
+              <option value="3600">1 hour</option>
+              <option value="7200">2 hours</option>
+            </select>
+            <div class="field-hint">How often the custom image refreshes.</div>
+          </div>
+          <div class="field" style="margin-top:16px">
+            <button onclick="fetchCustomPreview()" class="btn btn-primary" id="customPreviewBtn" style="width:100%">Refresh on Device</button>
           </div>
           </div>
         </div>
@@ -2670,6 +2708,9 @@
         solar_band:parseInt($('solarBand').value,10)||0,
         goes_orientation:parseInt($('goesOrientation').value,10)||0,
         solar_orientation:parseInt($('solarOrientation').value,10)||0,
+        custom_image_url:$('customImageUrl')?$('customImageUrl').value.trim():'',
+        custom_orientation:$('customOrientation')?parseInt($('customOrientation').value,10)||0:0,
+        custom_update_interval_s:$('customInterval')?parseInt($('customInterval').value,10)||60:60,
         moon_lat:parseFloat($('moonLat').value)||0,
         moon_lon:parseFloat($('moonLon').value)||0,
         moon_north_up:$('moon_north_up').checked?1:0,
@@ -2844,6 +2885,10 @@
       if($('imageSource0')) $('imageSource0').checked=(imgSrc===0);
       if($('imageSource1')) $('imageSource1').checked=(imgSrc===1);
       if($('imageSource2')) $('imageSource2').checked=(imgSrc===2);
+      if($('imageSource3')) $('imageSource3').checked=(imgSrc===3);
+      if($('customImageUrl')) $('customImageUrl').value=data.custom_image_url||'';
+      if($('customOrientation')) $('customOrientation').value=String(data.custom_orientation||0);
+      if($('customInterval')) $('customInterval').value=String(data.custom_update_interval_s||60);
       if($('moonBg')) $('moonBg').value=String(data.moon_bg_style||0);
       if($('moonDragLight')) $('moonDragLight').value=String(data.moon_drag_light_mode||0);
       if($('solarBand')) $('solarBand').value=String(data.solar_band||0);
@@ -4107,14 +4152,18 @@
 
     function updateImageSourceUI(){
       var s=getImageSource();
-      if($('discOptions')) $('discOptions').style.display=(s===1)?'none':'';
+      // The shared disc options (GOES/Solar update interval + crop) do not apply
+      // to Moon (rendered locally) or Custom (its own interval, no crop).
+      if($('discOptions')) $('discOptions').style.display=(s===1||s===3)?'none':'';
       if($('goesGroup'))  $('goesGroup').style.display =(s===0)?'':'none';
       if($('moonGroup'))  $('moonGroup').style.display =(s===1)?'':'none';
       if($('solarGroup')) $('solarGroup').style.display=(s===2)?'':'none';
+      if($('customGroup')) $('customGroup').style.display=(s===3)?'':'none';
     }
 
-    function applyImageDisplay(){
-      postJson('/api/image-display-config', {
+    function applyImageDisplay(force){
+      return postJson('/api/image-display-config', {
+        force_fetch: !!force,
         image_display_enabled: !!$('image_display_enabled').checked,
         image_display_show_overlay: !!$('image_display_show_overlay').checked,
         image_display_crop: !!$('image_display_crop').checked,
@@ -4135,8 +4184,16 @@
         moon_spin_return_s: parseInt($('moon_spin_return_s').value,10)||3,
         solar_band: parseInt($('solarBand').value,10)||0,
         goes_orientation: parseInt($('goesOrientation').value,10)||0,
-        solar_orientation: parseInt($('solarOrientation').value,10)||0
-      });
+        solar_orientation: parseInt($('solarOrientation').value,10)||0,
+        custom_image_url: $('customImageUrl')?$('customImageUrl').value.trim():'',
+        custom_orientation: $('customOrientation')?parseInt($('customOrientation').value,10)||0:0,
+        custom_update_interval_s: $('customInterval')?parseInt($('customInterval').value,10)||60:60
+      }).then(function(r){
+        if(!r.ok){ showToast('Failed to save image settings','error'); return; }
+        return r.json().then(function(d){
+          if(d&&d.error_msg) showToast(d.error_msg,'error');
+        }).catch(function(){});
+      }).catch(function(){});
     }
 
     function updateMoonOrientReadout(which){
@@ -4195,6 +4252,21 @@
         showToast('Failed to load preview image','error');
       };
       img.src='https://cdn.star.nesdis.noaa.gov/GOES19/ABI/SECTOR/'+region+'/GEOCOLOR/'+psize+'.jpg?t='+Date.now();
+    }
+
+    function fetchCustomPreview(){
+      var url=$('customImageUrl')?$('customImageUrl').value.trim():'';
+      if(!url){ showToast('Enter an image URL first','error'); return; }
+      if(!/^https?:\/\//i.test(url)){ showToast('URL must start with http:// or https://','error'); return; }
+      var btn=$('customPreviewBtn');
+      btn.disabled=true; btn.textContent='Refreshing...';
+      // Push to the device and FORCE an immediate re-fetch so the screen
+      // refreshes now, even if the URL is unchanged since the last POST.
+      applyImageDisplay(true).then(function(){
+        btn.disabled=false; btn.textContent='Refresh on Device';
+      }).catch(function(){
+        btn.disabled=false; btn.textContent='Refresh on Device';
+      });
     }
 
     function updateAllSkyEnabledUI(){

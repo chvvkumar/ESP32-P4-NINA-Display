@@ -461,6 +461,29 @@ void nina_image_display_update(goes_data_t *data)
      * crossfade between two crops of the same frame is pointless. */
     bool forced = force_redraw;
     force_redraw = false;
+
+    /* Custom Image URL (source 3) error overlay. A failed fetch sets
+     * goes_data.error_msg to a reason string and leaves no fresh frame
+     * (last_poll_ms not advanced), so the new-image gate below would return
+     * early and the page would show a blank or stale panel with no explanation.
+     * Read error_msg under the goes lock (like every other goes_data read here),
+     * and when the active source is Custom AND a reason is present, render it as
+     * the caption text and bail. A successful fetch clears error_msg, so the
+     * normal swap path below runs and overwrites the caption — no stale error.
+     * Scoped to source 3, so GOES/Solar/Moon are visually unchanged. */
+    if (app_config_get()->image_display_source == 3 && data->error_msg[0] != '\0') {
+        char err_copy[48];
+        strlcpy(err_copy, data->error_msg, sizeof(err_copy));
+        goes_data_unlock(data);
+        lv_label_set_text(lbl_region, err_copy);
+        lv_label_set_text(lbl_timestamp, "");
+        hide_moon_corner_labels();
+        /* Release any manual-fetch wait overlay so it cannot get stuck on the
+         * error path (mirrors the other early-exit overlay-hide sites). */
+        nina_wait_overlay_hide();
+        return;
+    }
+
     if (!data->image_buf || (!forced && data->last_poll_ms <= displayed_poll_ms)) {
         goes_data_unlock(data);
         return;
@@ -491,7 +514,10 @@ void nina_image_display_update(goes_data_t *data)
     uint8_t crop_pct = (cfg->image_display_source == 2)
                            ? solar_band_crop_pct(cfg->solar_band)
                            : 88;
-    if (cfg->image_display_crop && cfg->image_display_source != 1 && crop_pct < 100) {
+    /* Custom Image URL (source 3) is arbitrary user content: never center-crop
+     * it (treat like Moon source 1 — show the full image, width-fit). */
+    if (cfg->image_display_crop && cfg->image_display_source != 1 &&
+        cfg->image_display_source != 3 && crop_pct < 100) {
         w  = (uint16_t)((uint32_t)sw * crop_pct / 100);
         h  = (uint16_t)((uint32_t)sh * crop_pct / 100);
         ox = (uint16_t)((sw - w) / 2);
@@ -585,6 +611,7 @@ void nina_image_display_update(goes_data_t *data)
      * rotates. 90/270 swap width<->height. */
     uint8_t orient = (cfg->image_display_source == 0)   ? cfg->goes_orientation
                      : (cfg->image_display_source == 2) ? cfg->solar_orientation
+                     : (cfg->image_display_source == 3) ? cfg->custom_orientation
                                                         : 0;
     if (orient != 0) {
         uint16_t rw, rh;

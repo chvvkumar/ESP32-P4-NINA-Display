@@ -1246,7 +1246,21 @@ void goes_poll_task(void *arg)
         }
 
         esp_err_t fetch_err = ESP_OK;
-        if (cfg->image_display_source == 2) {                       /* Solar (SDO/AIA) */
+        if (cfg->image_display_source == 3) {                       /* Custom image URL */
+            if (cfg->custom_image_url[0] == '\0') {
+                /* No URL configured: skip the fetch and surface the reason so the
+                 * page shows why nothing loads instead of a stuck overlay. */
+                if (goes_data_lock(&goes_data, 200)) {
+                    strlcpy(goes_data.error_msg, "No URL configured", sizeof(goes_data.error_msg));
+                    goes_data_unlock(&goes_data);
+                }
+                fetch_err = ESP_ERR_INVALID_ARG;
+            } else {
+                /* Custom uses the same software JPEG decode path as GOES/Solar,
+                 * which needs a vertical flip to display upright. */
+                fetch_err = goes_client_poll_url(cfg->custom_image_url, &goes_data, true, "Custom");
+            }
+        } else if (cfg->image_display_source == 2) {                /* Solar (SDO/AIA) */
             const char *url = solar_band_url(cfg->solar_band);
             /* All solar bands need a vertical flip to display upright (see solar_band_vflip). */
             if (url && url[0]) {
@@ -1274,11 +1288,19 @@ void goes_poll_task(void *arg)
             nina_toast_show(TOAST_WARNING, "Failed to load image");
         }
 
-        /* Sleep for the configured interval (clamped 5min-2h to respect the
-         * satellite image cadence and avoid hammering the source). */
-        uint32_t interval_ms = (uint32_t)cfg->goes_update_interval_s * 1000;
-        if (interval_ms < 300000) interval_ms = 300000;
-        if (interval_ms > 7200000) interval_ms = 7200000;
+        /* Sleep for the configured interval. The satellite sources (GOES/Solar)
+         * clamp to 5min-2h to respect the image cadence; the custom source uses
+         * its own interval (10s-2h) since the user controls the endpoint. */
+        uint32_t interval_ms;
+        if (cfg->image_display_source == 3) {
+            interval_ms = (uint32_t)cfg->custom_update_interval_s * 1000;
+            if (interval_ms < 10000) interval_ms = 10000;
+            if (interval_ms > 7200000) interval_ms = 7200000;
+        } else {
+            interval_ms = (uint32_t)cfg->goes_update_interval_s * 1000;
+            if (interval_ms < 300000) interval_ms = 300000;
+            if (interval_ms > 7200000) interval_ms = 7200000;
+        }
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(interval_ms));
     }
 }

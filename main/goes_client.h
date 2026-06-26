@@ -14,6 +14,7 @@ typedef struct {
     uint16_t          image_h;
     bool              vflip;        /* true: buffer is vertically flipped (sw JPEG) */
     char              label[48];    /* human-readable name of the source this buffer holds (region/band); rendered verbatim by the page so it can never desync from image_buf */
+    char              error_msg[48]; /* human-readable failure reason shown on-screen when a fetch fails; "" when last fetch succeeded */
     SemaphoreHandle_t mutex;
 } goes_data_t;
 

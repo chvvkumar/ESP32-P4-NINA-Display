@@ -142,6 +142,9 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
     cJSON_AddStringToObject(obj, "goes_region", cfg->goes_region);
     cJSON_AddNumberToObject(obj, "goes_update_interval_s", cfg->goes_update_interval_s);
     cJSON_AddNumberToObject(obj, "image_display_source", cfg->image_display_source);
+    cJSON_AddStringToObject(obj, "custom_image_url", cfg->custom_image_url);
+    cJSON_AddNumberToObject(obj, "custom_orientation", cfg->custom_orientation);
+    cJSON_AddNumberToObject(obj, "custom_update_interval_s", cfg->custom_update_interval_s);
     cJSON_AddNumberToObject(obj, "moon_bg_style", cfg->moon_bg_style);
     cJSON_AddNumberToObject(obj, "moon_lat", (double)cfg->moon_lat);
     cJSON_AddNumberToObject(obj, "moon_lon", (double)cfg->moon_lon);
@@ -339,6 +342,9 @@ static const backup_field_t s_backup_fields[] = {
     {"goes_region",                "GOES Region",          "Image Display", false, false},
     {"goes_update_interval_s",     "GOES Update Interval", "Image Display", false, false},
     {"image_display_source",       "Image Source",         "Image Display", false, false},
+    {"custom_image_url",           "Custom Image URL",     "Image Display", false, false},
+    {"custom_orientation",         "Custom Orientation",   "Image Display", false, false},
+    {"custom_update_interval_s",   "Custom Update Interval","Image Display", false, false},
     {"moon_bg_style",              "Moon Background Style", "Image Display", false, false},
     {"moon_lat",                   "Moon Latitude",        "Image Display", false, false},
     {"moon_lon",                   "Moon Longitude",       "Image Display", false, false},
@@ -427,6 +433,7 @@ static const restore_strmax_t s_restore_strmax[] = {
     {"allsky_hostname",     128},
     {"allsky_field_config", 1536},
     {"allsky_thresholds",   1024},
+    {"custom_image_url",    256},
     /* goes_region max sourced from the struct field size at runtime below */
     {NULL, 0}
 };
@@ -451,7 +458,9 @@ static const restore_numrange_t s_restore_numrange[] = {
     {"allsky_update_interval_s",1,    300,   false},  /* app_config.c:2548 */
     {"allsky_dew_offset",       -50,  50,    true},   /* app_config.c:2552 */
     {"goes_update_interval_s",  300,  7200,  false},  /* app_config.c:2556 */
-    {"image_display_source",    0,    2,     false},  /* app_config.c:2565 */
+    {"image_display_source",    0,    3,     false},  /* app_config.c:2598 (0=GOES,1=Moon,2=Solar,3=Custom URL) */
+    {"custom_orientation",      0,    3,     false},  /* app_config.c:2590 */
+    {"custom_update_interval_s",10,   7200,  false},  /* app_config.c:2594 */
     {"moon_bg_style",           0,    3,     false},  /* app_config.c:2569 */
     {"solar_band",              0,    17,    false},  /* app_config.c:2573 */
     {"moon_drag_light_mode",    0,    2,     false},  /* app_config.c:2577 */
@@ -826,7 +835,8 @@ static bool validate_config_fields(cJSON *root, httpd_req_t *req)
         !validate_string_len(root, "allsky_hostname", 128) ||
         !validate_string_len(root, "allsky_field_config", 1536) ||
         !validate_string_len(root, "allsky_thresholds", 1024) ||
-        !validate_string_len(root, "goes_region", sizeof(((app_config_t *)0)->goes_region))) {
+        !validate_string_len(root, "goes_region", sizeof(((app_config_t *)0)->goes_region)) ||
+        !validate_string_len(root, "custom_image_url", sizeof(((app_config_t *)0)->custom_image_url))) {
         send_400(req, "String field exceeds maximum length");
         return false;
     }
@@ -1123,6 +1133,21 @@ static app_config_t *parse_config_from_json(cJSON *root)
     }
 
     JSON_TO_INT(root, "image_display_source", cfg->image_display_source);
+
+    JSON_TO_STRING(root, "custom_image_url", cfg->custom_image_url);
+    cJSON *custom_orient = cJSON_GetObjectItem(root, "custom_orientation");
+    if (cJSON_IsNumber(custom_orient)) {
+        int v = custom_orient->valueint;
+        cfg->custom_orientation = (v >= 0 && v <= 3) ? (uint8_t)v : 0;
+    }
+    cJSON *custom_interval = cJSON_GetObjectItem(root, "custom_update_interval_s");
+    if (cJSON_IsNumber(custom_interval)) {
+        int v = custom_interval->valueint;
+        if (v < 10) v = 10;
+        if (v > 7200) v = 7200;
+        cfg->custom_update_interval_s = (uint16_t)v;
+    }
+
     JSON_TO_INT(root, "moon_bg_style",        cfg->moon_bg_style);
 
     cJSON *jmoonlat = cJSON_GetObjectItem(root, "moon_lat");

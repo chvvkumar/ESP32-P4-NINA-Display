@@ -29,6 +29,20 @@ bool jpeg_sw_decode_rgb565(const uint8_t *jpg_data, size_t jpg_size,
                            size_t *out_size);
 
 /**
+ * @brief Probe a JPEG's pixel dimensions from its header WITHOUT decoding it.
+ * Wraps stbi_info_from_memory(); reads only the header, allocates nothing for
+ * pixel data. Use to reject oversized images before the full decode allocation.
+ *
+ * @param jpg_data  JPEG compressed data
+ * @param jpg_size  Size in bytes
+ * @param out_w     Receives image width in pixels
+ * @param out_h     Receives image height in pixels
+ * @return true if dimensions were read successfully
+ */
+bool jpeg_probe_dimensions(const uint8_t *jpg_data, size_t jpg_size,
+                           uint32_t *out_w, uint32_t *out_h);
+
+/**
  * @brief Scale an RGB565 image buffer using the PPA hardware accelerator.
  * Allocates a new 128-byte-aligned output buffer in PSRAM.
  * Caller takes ownership of the returned buffer (free with free()).
