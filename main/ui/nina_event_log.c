@@ -81,13 +81,17 @@ static void close_cb(lv_event_t *e) {
 
 /* ── Public API: Data path (thread-safe) ────────────────────────────── */
 
-void nina_event_log_add(event_severity_t sev, int instance, const char *message) {
-    if (!message) return;
-
+void nina_event_log_init(void) {
+    /* Boot-path only: create the mutex once before any task/HTTP handler can
+     * reach the log, so add()/clear()/copy_entries() never race on creation. */
     if (!s_log_mutex) {
         s_log_mutex = xSemaphoreCreateMutex();
-        if (!s_log_mutex) return;
     }
+}
+
+void nina_event_log_add(event_severity_t sev, int instance, const char *message) {
+    if (!message || !s_log_mutex) return;
+
     if (xSemaphoreTake(s_log_mutex, pdMS_TO_TICKS(50))) {
         event_entry_t *entry = &s_entries[s_write_index];
         entry->sev = sev;
@@ -111,6 +115,39 @@ void nina_event_log_add_fmt(event_severity_t sev, int instance, const char *fmt,
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
     nina_event_log_add(sev, instance, buf);
+}
+
+int nina_event_log_copy_entries(nina_event_log_entry_t *out, int max_out) {
+    if (!out || max_out <= 0) return 0;
+
+    int written = 0;
+    if (s_log_mutex && xSemaphoreTake(s_log_mutex, pdMS_TO_TICKS(50))) {
+        int avail = s_count;
+        if (avail > max_out) avail = max_out;
+        /* Copy newest-first */
+        int read_idx = (s_write_index - 1 + EVENT_LOG_MAX_ENTRIES) % EVENT_LOG_MAX_ENTRIES;
+        for (int i = 0; i < avail; i++) {
+            const event_entry_t *e = &s_entries[read_idx];
+            out[i].sev = e->sev;
+            out[i].instance = e->instance;
+            strncpy(out[i].message, e->message, sizeof(out[i].message) - 1);
+            out[i].message[sizeof(out[i].message) - 1] = '\0';
+            out[i].timestamp_ms = e->timestamp_ms;
+            read_idx = (read_idx - 1 + EVENT_LOG_MAX_ENTRIES) % EVENT_LOG_MAX_ENTRIES;
+        }
+        written = avail;
+        xSemaphoreGive(s_log_mutex);
+    }
+    return written;
+}
+
+void nina_event_log_clear(void) {
+    if (!s_log_mutex) return;
+    if (xSemaphoreTake(s_log_mutex, pdMS_TO_TICKS(50))) {
+        s_count = 0;
+        s_write_index = 0;
+        xSemaphoreGive(s_log_mutex);
+    }
 }
 
 /* ── Public API: UI path (LVGL context only) ────────────────────────── */

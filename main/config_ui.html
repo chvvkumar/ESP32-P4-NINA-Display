@@ -181,6 +181,89 @@
     .help-popover strong { color:var(--text); font-weight:600; }
     .divider { border: none; border-top: 1px solid rgba(255, 255, 255, 0.06); margin: 24px 0; }
 
+    /* === API DOCUMENTATION TAB === */
+    .api-intro { font-size: 0.82rem; color: var(--text-muted); line-height: 1.6; }
+    .api-intro p { margin: 0 0 10px; }
+    .api-intro p:last-child { margin-bottom: 0; }
+    .api-intro strong { color: var(--text); font-weight: 600; }
+    .api-ep { padding: 16px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+    .api-ep:first-of-type { padding-top: 0; }
+    .api-ep:last-child { border-bottom: none; padding-bottom: 0; }
+    .api-ep-head {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 8px;
+    }
+    .api-method {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em;
+      padding: 3px 8px; border-radius: 6px; white-space: nowrap;
+      background: rgba(var(--accent-rgb), 0.16); color: var(--accent);
+      border: 1px solid rgba(var(--accent-rgb), 0.3);
+    }
+    .api-path {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.82rem; color: #f4f4f5; word-break: break-all;
+    }
+    .api-badge {
+      font-size: 0.62rem; font-weight: 700; letter-spacing: 0.06em;
+      text-transform: uppercase; padding: 3px 8px; border-radius: 6px; white-space: nowrap;
+    }
+    .api-badge.public {
+      background: rgba(74, 222, 128, 0.12); color: var(--success);
+      border: 1px solid rgba(74, 222, 128, 0.28);
+    }
+    .api-badge.auth {
+      background: rgba(251, 191, 36, 0.12); color: var(--warning);
+      border: 1px solid rgba(251, 191, 36, 0.28);
+    }
+    .api-purpose { font-size: 0.8rem; color: var(--text-muted); margin: 0 0 10px; line-height: 1.5; }
+    .api-snip-label {
+      font-size: 0.68rem; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+      color: var(--text-hint); margin: 10px 0 4px;
+    }
+    .api-snip { position: relative; margin: 0 0 4px; }
+    .api-snip pre {
+      margin: 0; overflow-x: auto;
+      background: rgba(0, 0, 0, 0.4); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 12px 44px 12px 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.74rem; line-height: 1.45; color: var(--text-secondary);
+      white-space: pre; word-break: normal;
+    }
+    .api-copy {
+      position: absolute; top: 8px; right: 8px;
+      background: rgba(255, 255, 255, 0.06); border: 1px solid var(--border);
+      color: var(--text-muted); cursor: pointer; font-family: inherit;
+      font-size: 0.66rem; font-weight: 600; padding: 4px 8px; border-radius: 6px;
+      transition: all 0.2s ease;
+    }
+    .api-copy:hover { color: #f4f4f5; border-color: rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.1); }
+    .api-copy.copied { color: var(--success); border-color: rgba(74, 222, 128, 0.4); }
+    .api-note {
+      font-size: 0.78rem; color: var(--text-muted); line-height: 1.55;
+      background: rgba(var(--accent-rgb), 0.06); border: 1px solid rgba(var(--accent-rgb), 0.18);
+      border-radius: var(--radius-sm); padding: 10px 14px; margin: 10px 0;
+    }
+    .api-note strong { color: var(--text); font-weight: 600; }
+    .api-table-wrap { overflow-x: auto; margin: 8px 0 4px; }
+    .api-table {
+      width: 100%; border-collapse: collapse;
+      font-size: 0.74rem; color: var(--text-secondary);
+    }
+    .api-table th, .api-table td {
+      text-align: left; padding: 7px 10px; vertical-align: top;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .api-table th {
+      color: var(--text-hint); font-weight: 600; letter-spacing: 0.04em;
+      text-transform: uppercase; font-size: 0.66rem; white-space: nowrap;
+    }
+    .api-table td:first-child {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: #f4f4f5; white-space: nowrap;
+    }
+    .api-table td:nth-child(2), .api-table td:nth-child(3) { white-space: nowrap; color: var(--text-muted); }
+    .api-table tr:last-child td { border-bottom: none; }
+
     /* === NAVIGATION === */
     .top-nav {
       position: sticky; top: 0; z-index: 100;
@@ -787,6 +870,7 @@
       <button class="tab-btn" data-tab="system">System</button>
       <button class="tab-btn" data-tab="logs">Logs</button>
       <button class="tab-btn" data-tab="backup">Backup</button>
+      <button class="tab-btn" data-tab="api">API</button>
     </div>
     <div class="nav-right">
       <button class="update-pill" id="updatePill" style="display:none" title="Update available - click to install"></button>
@@ -843,6 +927,13 @@
           <line x1="12" y1="15" x2="12" y2="3"/>
         </svg>
         Backup
+      </button>
+      <button class="nav-btn" data-tab="api">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="16 18 22 12 16 6"/>
+          <polyline points="8 6 2 12 8 18"/>
+        </svg>
+        API
       </button>
     </div>
   </nav>
@@ -2078,6 +2169,829 @@
       </div>
     </div>
 
+    <!-- ==================== TAB 8: API ==================== -->
+    <div id="tab-api" class="tab-panel">
+
+      <!-- Overview / Authentication -->
+      <div class="card nocollapse">
+        <div class="card-title"><span class="card-title-label">HTTP API</span></div>
+        <div class="api-intro">
+          <p>This page documents every HTTP endpoint the device serves. Examples use this device's address (<strong id="apiHostLabel">window.location.host</strong>). For protected endpoints, run the login command first to create cookies.txt.</p>
+          <p>Authentication uses a session cookie. <strong>POST /api/login</strong> with a JSON body <code>{"password":"..."}</code> sets a <code>session</code> cookie valid for 12 hours. Reuse the cookie on later requests. When <code>auth_enabled</code> is false, every endpoint is open and no cookie is required; secrets stay redacted in responses regardless.</p>
+          <p>Each endpoint carries a badge: <span class="api-badge public">Public</span> needs no session, <span class="api-badge auth">Auth</span> requires a valid session cookie when authentication is enabled.</p>
+          <p>Create the cookie once:</p>
+          <div class="api-snip" data-curl="curl -c cookies.txt -X POST http://HOST/api/login -d '{&quot;password&quot;:&quot;YOUR_PASSWORD&quot;}'">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -c cookies.txt -X POST http://<span class="api-host">HOST</span>/api/login -d '{"password":"YOUR_PASSWORD"}'</pre>
+          </div>
+          <p>Then pass <code>-b cookies.txt</code> on every protected request shown below.</p>
+        </div>
+      </div>
+
+      <!-- Authentication -->
+      <div class="card collapsed">
+        <div class="card-title"><span class="card-title-label">Authentication</span></div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/login</span><span class="api-badge public">Public</span></div>
+          <p class="api-purpose">Verify the admin password and set the session cookie.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -c cookies.txt -X POST http://HOST/api/login -d '{&quot;password&quot;:&quot;YOUR_PASSWORD&quot;}'">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -c cookies.txt -X POST http://<span class="api-host">HOST</span>/api/login -d '{"password":"YOUR_PASSWORD"}'</pre>
+          </div>
+          <div class="api-snip-label">Response</div>
+          <div class="api-snip"><pre>{"status":"ok"}</pre></div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/logout</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Destroy the current session.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/logout">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/logout</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/auth/status</span><span class="api-badge public">Public</span></div>
+          <p class="api-purpose">Report whether the admin password is still the factory default.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl http://HOST/api/auth/status">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl http://<span class="api-host">HOST</span>/api/auth/status</pre>
+          </div>
+          <div class="api-snip-label">Response</div>
+          <div class="api-snip"><pre>{"default_password":true}</pre></div>
+        </div>
+      </div>
+
+      <!-- Config & Backup -->
+      <div class="card collapsed">
+        <div class="card-title"><span class="card-title-label">Config &amp; Backup</span></div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/config</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Read the full configuration as JSON. Secrets (passwords, API keys, tokens) are redacted.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt http://HOST/api/config">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt http://<span class="api-host">HOST</span>/api/config</pre>
+          </div>
+          <div class="api-snip-label">Response (truncated)</div>
+          <div class="api-snip"><pre>{"hostname":"NinaDash2","theme_index":0,"brightness":80,"update_rate_s":2,"api_url1":"http://astromele1.lan:1888/v2/api/","instance1_enabled":true,"admin_password":"********", ...}</pre></div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/config</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Write the full configuration blob. Fields are validated and clamped before saving.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/config -H 'Content-Type: application/json' -d @config.json">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/config -H 'Content-Type: application/json' -d @config.json</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/config/apply</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Apply staged configuration as a live preview without persisting it.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/config/apply">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/config/apply</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/config/revert</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Discard the staged configuration and restore the saved values.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/config/revert">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/config/revert</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/config/backup</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Download the configuration as config.json. Add the query parameter include_sensitive=1 to include secrets.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -o config.json 'http://HOST/api/config/backup?include_sensitive=0'">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -o config.json 'http://<span class="api-host">HOST</span>/api/config/backup?include_sensitive=0'</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/config/restore</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Upload a config.json. Send confirm:false first to preview the changes, then confirm:true to apply.</p>
+          <div class="api-snip-label">Request (preview)</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/config/restore -H 'Content-Type: application/json' --data-binary @config.json">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/config/restore -H 'Content-Type: application/json' --data-binary @config.json</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/admin-password</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Change the admin password.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/admin-password -d '{&quot;password&quot;:&quot;NEW_PASSWORD&quot;}'">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/admin-password -d '{"password":"NEW_PASSWORD"}'</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- Display -->
+      <div class="card collapsed">
+        <div class="card-title"><span class="card-title-label">Display</span></div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/brightness</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Set the screen backlight (0 to 100).</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/brightness -d '{&quot;value&quot;:80}'">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/brightness -d '{"value":80}'</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/color-brightness</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Set the text and color brightness (0 to 100).</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/color-brightness -d '{&quot;value&quot;:70}'">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/color-brightness -d '{"value":70}'</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/theme</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Select a color theme by index.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/theme -d '{&quot;theme_index&quot;:2}'">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/theme -d '{"theme_index":2}'</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/widget-style</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Select the widget style by index.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/widget-style -d '{&quot;widget_style&quot;:1}'">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/widget-style -d '{"widget_style":1}'</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/screen-rotation</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Set the LVGL screen rotation by index.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/screen-rotation -d '{&quot;screen_rotation&quot;:0}'">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/screen-rotation -d '{"screen_rotation":0}'</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/screenshot</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Capture a JPEG of the current display.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -o screenshot.jpg http://HOST/api/screenshot">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -o screenshot.jpg http://<span class="api-host">HOST</span>/api/screenshot</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- Navigation -->
+      <div class="card collapsed">
+        <div class="card-title"><span class="card-title-label">Navigation</span></div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/page</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Navigate to a page by legacy page index.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/page -d '{&quot;page&quot;:4}'">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/page -d '{"page":4}'</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/pages</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Enumerate the page registry. Returns id, slug, label, kind, category, targetable, and current availability for every page.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt http://HOST/api/pages">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt http://<span class="api-host">HOST</span>/api/pages</pre>
+          </div>
+          <div class="api-snip-label">Response</div>
+          <div class="api-snip"><pre>[{"id":4,"slug":"summary","label":"Summary","kind":"page","category":"","targetable":true,"available":true}, ...]</pre></div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">GET</span> <span class="api-method">POST</span><span class="api-path">/api/navigate</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Navigate by page slug (?ref=) or page id (?id=). The page must be targetable and currently available.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt 'http://HOST/api/navigate?ref=summary'">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt 'http://<span class="api-host">HOST</span>/api/navigate?ref=summary'</pre>
+          </div>
+          <div class="api-snip-label">Response</div>
+          <div class="api-snip"><pre>OK</pre></div>
+        </div>
+      </div>
+
+      <!-- System & OTA -->
+      <div class="card collapsed">
+        <div class="card-title"><span class="card-title-label">System &amp; OTA</span></div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/status</span><span class="api-badge public">Public</span></div>
+          <p class="api-purpose">Read a live device sample: uptime, heap, PSRAM, temperature, WiFi, and active page.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl http://HOST/api/status">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl http://<span class="api-host">HOST</span>/api/status</pre>
+          </div>
+          <div class="api-snip-label">Response</div>
+          <div class="api-snip"><pre>{"uptime_ms":36619476,"boot_count":145,"active_page":2,"instance_count":3,"heap_free":20355548,"heap_internal_free":198455,"heap_total":387867,"psram_free":20172872,"psram_total":29944064,"temperature_c":33.5,"wifi_rssi":-34,"wifi_ssid":"IoT"}</pre></div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/version</span><span class="api-badge public">Public</span></div>
+          <p class="api-purpose">Read firmware version, build, IDF version, partition, and git metadata.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl http://HOST/api/version">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl http://<span class="api-host">HOST</span>/api/version</pre>
+          </div>
+          <div class="api-snip-label">Response</div>
+          <div class="api-snip"><pre>{"version":"1.0.53","date":"","time":"","idf":"v5.5.2","partition":"ota_0","git_tag":"v1.0.53","git_sha":"598ab9a","git_branch":"HEAD"}</pre></div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/check-update</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Trigger a firmware update check against GitHub releases.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/check-update">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/check-update</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/check-update-json</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Read the result of the last update check.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt http://HOST/api/check-update-json">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt http://<span class="api-host">HOST</span>/api/check-update-json</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/ota-github</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Download and flash the latest GitHub release.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/ota-github">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/ota-github</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/ota</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Upload a firmware .bin for a manual OTA flash.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/ota --data-binary @firmware.bin">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/ota --data-binary @firmware.bin</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/perf</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Read performance metrics. Available only when debug_mode is enabled in config.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt http://HOST/api/perf">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt http://<span class="api-host">HOST</span>/api/perf</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/perf/reset</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Zero the performance counters.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/perf/reset">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/perf/reset</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/reboot</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Soft-reboot the device.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/reboot">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/reboot</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/factory-reset</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Erase NVS and reboot. All settings return to defaults.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/factory-reset">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/factory-reset</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- Logs & Diagnostics -->
+      <div class="card collapsed">
+        <div class="card-title"><span class="card-title-label">Logs &amp; Diagnostics</span></div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/logs</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Download the serial-log ring buffer held in PSRAM since boot.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -o device.log http://HOST/api/logs">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -o device.log http://<span class="api-host">HOST</span>/api/logs</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/logs/clear</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Clear the serial log buffer.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/logs/clear">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/logs/clear</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/crashlog</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Read the reboot-reason history.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt http://HOST/api/crashlog">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt http://<span class="api-host">HOST</span>/api/crashlog</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/crashlog/clear</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Erase the crash log.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/crashlog/clear">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/crashlog/clear</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/coredump</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Download the raw core dump (raw flash format). Decode with esp-coredump using the matching .elf.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -o coredump.bin http://HOST/api/coredump">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -o coredump.bin http://<span class="api-host">HOST</span>/api/coredump</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/coredump/info</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Read core dump metadata (presence and size).</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt http://HOST/api/coredump/info">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt http://<span class="api-host">HOST</span>/api/coredump/info</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/coredump/clear</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Erase the stored core dump.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/coredump/clear">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/coredump/clear</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- WiFi -->
+      <div class="card collapsed">
+        <div class="card-title"><span class="card-title-label">WiFi</span></div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/wifi/scan</span><span class="api-badge public">Public</span> <span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">List nearby networks with signal strength. Public during first-run setup, otherwise requires a session.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt http://HOST/api/wifi/scan">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt http://<span class="api-host">HOST</span>/api/wifi/scan</pre>
+          </div>
+          <div class="api-snip-label">Response</div>
+          <div class="api-snip"><pre>{"networks":[{"ssid":"IoT","rssi":-34,"channel":6,"auth":"WPA2-PSK","compatible":true}],"count":1,"incompatible_count":0}</pre></div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/wifi/status</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Read the current station connection state.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt http://HOST/api/wifi/status">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt http://<span class="api-host">HOST</span>/api/wifi/status</pre>
+          </div>
+          <div class="api-snip-label">Response</div>
+          <div class="api-snip"><pre>{"connected":true,"ssid":"IoT","ip":"192.168.1.42"}</pre></div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/wifi/setup</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Save network credentials (SSID and password).</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/wifi/setup -d '{&quot;ssid&quot;:&quot;IoT&quot;,&quot;password&quot;:&quot;WIFI_PASSWORD&quot;}'">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/wifi/setup -d '{"ssid":"IoT","password":"WIFI_PASSWORD"}'</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- NINA -->
+      <div class="card collapsed">
+        <div class="card-title"><span class="card-title-label">NINA</span></div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/nina/status</span><span class="api-badge public">Public</span></div>
+          <p class="api-purpose">Read per-instance NINA connection state, WebSocket status, and poll counters.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl http://HOST/api/nina/status">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl http://<span class="api-host">HOST</span>/api/nina/status</pre>
+          </div>
+          <div class="api-snip-label">Response</div>
+          <div class="api-snip"><pre>{"instances":[{"index":0,"enabled":true,"url":"http://astromele1.lan:1888/v2/api/","connection_state":"disconnected","websocket_connected":false,"consecutive_failures":7275,"consecutive_successes":0,"last_successful_poll_ms":0}]}</pre></div>
+        </div>
+      </div>
+
+      <!-- Spotify -->
+      <div class="card collapsed">
+        <div class="card-title"><span class="card-title-label">Spotify</span></div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/spotify/config</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Read Spotify settings.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt http://HOST/api/spotify/config">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt http://<span class="api-host">HOST</span>/api/spotify/config</pre>
+          </div>
+          <div class="api-snip-label">Response</div>
+          <div class="api-snip"><pre>{"spotify_enabled":true,"spotify_client_id":"...","spotify_poll_interval_ms":3000,"spotify_show_progress_bar":true,"spotify_minimal_mode":false,"spotify_scroll_text":true,"spotify_overlay_timeout_s":10,"spotify_overlay_visible":true}</pre></div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/spotify/config</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Update Spotify settings.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/spotify/config -d '{&quot;spotify_enabled&quot;:true}'">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/spotify/config -d '{"spotify_enabled":true}'</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/spotify/status</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Read the current authentication and playback state.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt http://HOST/api/spotify/status">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt http://<span class="api-host">HOST</span>/api/spotify/status</pre>
+          </div>
+          <div class="api-snip-label">Response</div>
+          <div class="api-snip"><pre>{"auth_state":"authenticated","is_playing":true,"track":"Song Title","artist":"Artist Name"}</pre></div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/spotify/control</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Send a playback command: play, pause, next, or previous.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/spotify/control -d '{&quot;action&quot;:&quot;next&quot;}'">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/spotify/control -d '{"action":"next"}'</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/spotify/callback</span><span class="api-badge public">Public</span></div>
+          <p class="api-purpose">OAuth redirect target. Spotify calls this with the authorization code; not invoked manually.</p>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/spotify/token-exchange</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Complete the PKCE token exchange.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/spotify/token-exchange">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/spotify/token-exchange</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/spotify/logout</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Clear the stored Spotify token.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/spotify/logout">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/spotify/logout</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- AllSky -->
+      <div class="card collapsed">
+        <div class="card-title"><span class="card-title-label">AllSky</span></div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/allsky-config</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Read AllSky settings.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt http://HOST/api/allsky-config">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt http://<span class="api-host">HOST</span>/api/allsky-config</pre>
+          </div>
+          <div class="api-snip-label">Response</div>
+          <div class="api-snip"><pre>{"hostname":"allsky.lan","update_interval_s":30,"dew_offset":2.0,"field_config":"{...}","thresholds":"{...}","allsky_enabled":true}</pre></div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/allsky-proxy</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Proxy the remote AllSky /all endpoint to bypass CORS. Returns the upstream JSON payload.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt http://HOST/api/allsky-proxy">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt http://<span class="api-host">HOST</span>/api/allsky-proxy</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- Image Display -->
+      <div class="card collapsed">
+        <div class="card-title"><span class="card-title-label">Image Display</span></div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/image-display-config</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Read the Image Display settings. Returns the full current value of every persisted parameter listed in the POST table below (force_fetch is not part of the output).</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt http://HOST/api/image-display-config">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt http://<span class="api-host">HOST</span>/api/image-display-config</pre>
+          </div>
+          <div class="api-snip-label">Response</div>
+          <div class="api-snip"><pre>{"image_display_enabled":true,"image_display_show_overlay":true,"image_display_crop":false,"goes_region":"FD","goes_update_interval_s":600,"image_display_source":0,"moon_bg_style":0,"moon_lat":30,"moon_lon":-97,"solar_band":0,"goes_orientation":0,"solar_orientation":0,"custom_image_url":"","custom_orientation":0,"custom_update_interval_s":600,"moon_drag_light_mode":0,"moon_flip_u":0,"moon_flip_v":0,"moon_roll_offset":0,"moon_yaw_offset":0,"moon_pitch_offset":0,"moon_north_up":0,"moon_spin_mode":0,"moon_spin_return_s":10}</pre></div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/image-display-config</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Update Image Display settings. Each setting takes effect as a live preview and persists to NVS.</p>
+          <div class="api-note">
+            <strong>Partial merge.</strong> The handler loads the current full configuration, overwrites only the keys present in the request body, then saves. POST a single key to change one setting; any key you omit keeps its current value.
+          </div>
+          <div class="api-snip-label">Request (single key)</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/image-display-config -d '{&quot;image_display_source&quot;:1}'">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/image-display-config -d '{"image_display_source":1}'</pre>
+          </div>
+          <div class="api-snip-label">Request (force a refresh)</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/image-display-config -d '{&quot;force_fetch&quot;:true}'">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/image-display-config -d '{"force_fetch":true}'</pre>
+          </div>
+          <div class="api-snip-label">Parameters</div>
+          <div class="api-table-wrap">
+            <table class="api-table">
+              <thead><tr><th>Param</th><th>Type</th><th>Range / Values</th><th>Notes</th></tr></thead>
+              <tbody>
+                <tr><td>image_display_enabled</td><td>bool</td><td>true / false</td><td>Master enable for the Image Display page.</td></tr>
+                <tr><td>image_display_show_overlay</td><td>bool</td><td>true / false</td><td>Show the info overlay.</td></tr>
+                <tr><td>image_display_crop</td><td>bool</td><td>true / false</td><td>Crop vs full-frame. Toggling re-renders the cached frame locally (no re-download).</td></tr>
+                <tr><td>image_display_source</td><td>int</td><td>0=GOES, 1=Moon, 2=Solar, 3=Custom</td><td>Active image source. An invalid value falls back to 0.</td></tr>
+                <tr><td>goes_region</td><td>string</td><td>region code</td><td>GOES region id.</td></tr>
+                <tr><td>goes_update_interval_s</td><td>int</td><td>300 to 7200 (clamped)</td><td>GOES refresh interval in seconds.</td></tr>
+                <tr><td>goes_orientation</td><td>int</td><td>0 to 3</td><td>Rotation quadrant (0/90/180/270 degrees).</td></tr>
+                <tr><td>solar_band</td><td>int</td><td>0 to 17</td><td>Solar / SDO / SOHO band index. An invalid value falls back to 0.</td></tr>
+                <tr><td>solar_orientation</td><td>int</td><td>0 to 3</td><td>Rotation quadrant.</td></tr>
+                <tr><td>custom_image_url</td><td>string (max 256)</td><td>must start with http:// or https:// (empty string clears it)</td><td>Custom image source URL. Validated server-side.</td></tr>
+                <tr><td>custom_orientation</td><td>int</td><td>0 to 3</td><td>Rotation quadrant.</td></tr>
+                <tr><td>custom_update_interval_s</td><td>int</td><td>10 to 7200 (clamped)</td><td>Custom image refresh interval in seconds.</td></tr>
+                <tr><td>moon_bg_style</td><td>int</td><td>0 to 3</td><td>Moon page background style. An invalid value falls back to 0.</td></tr>
+                <tr><td>moon_lat</td><td>float</td><td>latitude</td><td>Observer latitude for moon libration.</td></tr>
+                <tr><td>moon_lon</td><td>float</td><td>longitude</td><td>Observer longitude.</td></tr>
+                <tr><td>moon_drag_light_mode</td><td>int</td><td>0 to 2</td><td>Drag lighting mode.</td></tr>
+                <tr><td>moon_flip_u</td><td>int</td><td>0 or 1</td><td>Flip texture horizontally.</td></tr>
+                <tr><td>moon_flip_v</td><td>int</td><td>0 or 1</td><td>Flip texture vertically.</td></tr>
+                <tr><td>moon_roll_offset</td><td>float</td><td>-180 to 180 (clamped)</td><td>Roll orientation offset in degrees.</td></tr>
+                <tr><td>moon_yaw_offset</td><td>float</td><td>-180 to 180 (clamped)</td><td>Yaw orientation offset in degrees.</td></tr>
+                <tr><td>moon_pitch_offset</td><td>float</td><td>-90 to 90 (clamped)</td><td>Pitch orientation offset in degrees.</td></tr>
+                <tr><td>moon_north_up</td><td>int</td><td>0 or 1</td><td>Force north-up.</td></tr>
+                <tr><td>moon_spin_mode</td><td>int</td><td>0 or 1</td><td>Enable spin interaction.</td></tr>
+                <tr><td>moon_spin_return_s</td><td>int</td><td>3 to 60 (clamped)</td><td>Seconds before spin returns to rest.</td></tr>
+                <tr><td>force_fetch</td><td>bool</td><td>true / false</td><td>Action only, not persisted. Forces an immediate re-fetch (used by the Preview / Refresh button). Forces a download only for the Custom source; for GOES and Solar a fetch happens automatically when source, band, or region changed.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="api-note">
+            Changing source, band, or region triggers a re-download with a loading overlay. Crop-only or orientation-only changes re-render the cached frame locally without downloading.
+          </div>
+          <div class="api-snip-label">Response</div>
+          <div class="api-snip"><pre>{"success":true}</pre></div>
+          <p class="api-purpose" style="margin-top:8px">The response may also include "error_msg" carrying the reason of the last completed fetch failure, for example: {"success":true,"error_msg":"HTTP 404"}.</p>
+        </div>
+      </div>
+
+      <!-- Weather -->
+      <div class="card collapsed">
+        <div class="card-title"><span class="card-title-label">Weather</span></div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/weather</span><span class="api-badge public">Public</span></div>
+          <p class="api-purpose">Read the latest weather sample. Returns available:false when no data has been fetched yet. The hourly array always holds 10 entries.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl http://HOST/api/weather">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl http://<span class="api-host">HOST</span>/api/weather</pre>
+          </div>
+          <div class="api-snip-label">Response (no data)</div>
+          <div class="api-snip"><pre>{"available":false}</pre></div>
+          <div class="api-snip-label">Response (valid)</div>
+          <div class="api-snip"><pre>{"available":true,"temp_current":72.4,"temp_high":78.0,"temp_low":61.0,"humidity":54.0,"dew_point":55.2,"wind_speed":8.5,"wind_dir":"NW","uv_index":4.0,"condition":"Partly Cloudy","last_update_ts":1751049600,"units":"imperial","location_name":"Austin, TX","hourly":[{"hour":14,"temp":72.4},{"hour":15,"temp":73.1}]}</pre></div>
+        </div>
+      </div>
+
+      <!-- Events -->
+      <div class="card collapsed">
+        <div class="card-title"><span class="card-title-label">Events</span></div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/events</span><span class="api-badge public">Public</span></div>
+          <p class="api-purpose">Read the on-device UI event log. Newest first, maximum 100 entries. Severity is one of info, success, warning, error. timestamp_ms is boot-relative monotonic milliseconds.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl http://HOST/api/events">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl http://<span class="api-host">HOST</span>/api/events</pre>
+          </div>
+          <div class="api-snip-label">Response</div>
+          <div class="api-snip"><pre>{"count":2,"events":[{"severity":"warning","instance":0,"message":"Guider lost star","timestamp_ms":1234567},{"severity":"info","instance":1,"message":"Sequence started","timestamp_ms":1230000}]}</pre></div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/events/clear</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Clear the UI event log.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/events/clear">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/events/clear</pre>
+          </div>
+          <div class="api-snip-label">Response</div>
+          <div class="api-snip"><pre>{"status":"ok"}</pre></div>
+        </div>
+      </div>
+
+      <!-- Control API -->
+      <div class="card collapsed">
+        <div class="card-title"><span class="card-title-label">Control API</span></div>
+
+        <div class="api-intro" style="margin-bottom:4px">
+          <p>A generic control surface for reading and changing device settings from single HTTP requests. Six control endpoints plus an image-refresh action, all backed by a live registry. Useful for any HTTP client, for example macro keypads, API Ninja, or Home Assistant.</p>
+          <p>This page does not hand-list every controllable item. Call <strong>GET /api/control/list</strong> for the full live catalog of items the device exposes.</p>
+        </div>
+
+        <div class="api-note">
+          <strong>Stateless authentication.</strong> Besides the session cookie, every auth-gated endpoint on the device (not only Control API) also accepts the admin password in the request header <code>X-Auth-Password: YOUR_PASSWORD</code>. This lets clients that cannot perform the cookie login flow authenticate on every request. It is rate-limited: it shares the login lockout, so repeated wrong passwords trigger a temporary lockout. Send it as a header, not a URL query, so it is not written to the device logs.
+        </div>
+        <div class="api-snip-label">Header authentication example</div>
+        <div class="api-snip" data-curl="curl -H 'X-Auth-Password: YOUR_PASSWORD' http://HOST/api/control/list">
+          <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+          <pre>curl -H 'X-Auth-Password: YOUR_PASSWORD' http://<span class="api-host">HOST</span>/api/control/list</pre>
+        </div>
+
+        <div class="api-note">
+          <strong>Item object shape.</strong> Every read and write returns a uniform item object: <code>name</code> (the config field name), <code>type</code> (bool, enum, or int), <code>value</code>, <code>label</code> (a human-readable string: an enum gets its name, a bool gets On or Off, an int gets the value), and <code>min</code>, <code>max</code>, <code>step</code>. An unknown name, an operation that does not match the item type, or a missing parameter returns HTTP 400.
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/control/list</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Enumerate every controllable item with its current value and range. This is the live catalog of available item names.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -H 'X-Auth-Password: YOUR_PASSWORD' http://HOST/api/control/list">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -H 'X-Auth-Password: YOUR_PASSWORD' http://<span class="api-host">HOST</span>/api/control/list</pre>
+          </div>
+          <div class="api-snip-label">Response</div>
+          <div class="api-snip"><pre>[{"name":"brightness","type":"int","value":80,"label":"80","min":0,"max":100,"step":5},{"name":"theme","type":"enum","value":2,"label":"Nord","min":0,"max":8,"step":1}]</pre></div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/control/get?name=&lt;name&gt;</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Read one item by name.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -H 'X-Auth-Password: YOUR_PASSWORD' 'http://HOST/api/control/get?name=image_display_source'">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -H 'X-Auth-Password: YOUR_PASSWORD' 'http://<span class="api-host">HOST</span>/api/control/get?name=image_display_source'</pre>
+          </div>
+          <div class="api-snip-label">Response</div>
+          <div class="api-snip"><pre>{"name":"image_display_source","type":"enum","value":1,"label":"Moon","min":0,"max":3,"step":1}</pre></div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/control/toggle?name=&lt;name&gt;</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Flip a bool item. Returns HTTP 400 for non-bool items.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST 'http://HOST/api/control/toggle?name=image_display_crop'">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST 'http://<span class="api-host">HOST</span>/api/control/toggle?name=image_display_crop'</pre>
+          </div>
+          <div class="api-snip-label">Response</div>
+          <div class="api-snip"><pre>{"name":"image_display_crop","type":"bool","value":false,"label":"Off","min":0,"max":1,"step":1}</pre></div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/control/cycle?name=&lt;name&gt;</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Advance an enum or int item by its step. Wraps from max back to min.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST 'http://HOST/api/control/cycle?name=image_display_source'">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST 'http://<span class="api-host">HOST</span>/api/control/cycle?name=image_display_source'</pre>
+          </div>
+          <div class="api-snip-label">Response</div>
+          <div class="api-snip"><pre>{"name":"image_display_source","type":"enum","value":2,"label":"Solar","min":0,"max":3,"step":1}</pre></div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/control/set?name=&lt;name&gt;&amp;value=&lt;v&gt;</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Set an exact value. The value is clamped to the item range.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST 'http://HOST/api/control/set?name=brightness&amp;value=50'">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST 'http://<span class="api-host">HOST</span>/api/control/set?name=brightness&amp;value=50'</pre>
+          </div>
+          <div class="api-snip-label">Response</div>
+          <div class="api-snip"><pre>{"name":"brightness","type":"int","value":50,"label":"50","min":0,"max":100,"step":5}</pre></div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/control/adjust?name=&lt;name&gt;&amp;delta=&lt;d&gt;</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Add a delta to the current value. The result is clamped to the item range and does not wrap.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST 'http://HOST/api/control/adjust?name=brightness&amp;delta=-10'">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST 'http://<span class="api-host">HOST</span>/api/control/adjust?name=brightness&amp;delta=-10'</pre>
+          </div>
+          <div class="api-snip-label">Response</div>
+          <div class="api-snip"><pre>{"name":"brightness","type":"int","value":40,"label":"40","min":0,"max":100,"step":5}</pre></div>
+        </div>
+
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/image-display/refresh</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Force an immediate re-fetch of the current image source. This works for all sources, unlike the force_fetch flag on /api/image-display-config which forces a download only for the Custom source.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST http://HOST/api/image-display/refresh">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST http://<span class="api-host">HOST</span>/api/image-display/refresh</pre>
+          </div>
+          <div class="api-snip-label">Response</div>
+          <div class="api-snip"><pre>{"success":true}</pre></div>
+          <p class="api-purpose" style="margin-top:8px">The response may include "error_msg" carrying the reason of the last completed fetch failure.</p>
+        </div>
+
+        <div class="api-note">
+          <strong>Behavior notes.</strong> cycle wraps from max to min; set and adjust clamp to the range; toggle works on bool items only. The special item name <code>page</code> controls the current page and is the one item that navigates rather than saving config: cycle moves to the next available page, and set selects a page by id. Item names match the config field names used elsewhere in this documentation.
+        </div>
+
+        <div class="api-snip-label">Worked example: cycle the image source and read the label</div>
+        <div class="api-snip" data-curl="curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST http://HOST/api/control/cycle?name=image_display_source">
+          <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+          <pre>curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST http://<span class="api-host">HOST</span>/api/control/cycle?name=image_display_source</pre>
+        </div>
+        <p class="api-purpose">Each call advances the source and returns the new item object. The response <code>label</code> (for example "Solar") can be shown on a key face so the keypad always reflects the current state.</p>
+      </div>
+
+    </div>
+
   </main>
 
   <!-- ======== SAVE BAR & TOAST ======== -->
@@ -2383,7 +3297,8 @@
       allsky:  {color:'#7aa2f7', rgb:'122, 162, 247'},
       clock:   {color:'#7aa2f7', rgb:'122, 162, 247'},
       spotify: {color:'#7aa2f7', rgb:'122, 162, 247'},
-      backup:  {color:'#7aa2f7', rgb:'122, 162, 247'}
+      backup:  {color:'#7aa2f7', rgb:'122, 162, 247'},
+      api:     {color:'#7aa2f7', rgb:'122, 162, 247'}
     };
 
     function setAccent(name){
@@ -2413,6 +3328,7 @@
       // Pull fresh device metrics the moment the System tab is opened so the
       // status widgets populate instantly instead of waiting for the next poll.
       if(name==='system' && typeof refreshNavMetrics==='function') refreshNavMetrics();
+      if(name==='api' && typeof apiInjectHost==='function') apiInjectHost();
     }
 
     $$('.tab-btn, .nav-btn').forEach(btn=>{
@@ -4465,6 +5381,53 @@
       try{ localStorage.setItem('nina_collapse_state',JSON.stringify(state)); }catch(e){}
     }
 
+    /* === API documentation: live host injection + copy helper === */
+    function apiInjectHost(){
+      var host=window.location.host||'HOST';
+      // Replace visible HOST placeholders in example URLs.
+      $$('.api-host').forEach(function(el){ el.textContent=host; });
+      var lbl=$('apiHostLabel');
+      if(lbl) lbl.textContent=host;
+      // Rewrite the data-curl source used by the copy button.
+      $$('.api-snip[data-curl]').forEach(function(el){
+        if(!el.dataset.curlBase) el.dataset.curlBase=el.dataset.curl;
+        el.dataset.curl=el.dataset.curlBase.split('HOST').join(host);
+      });
+    }
+
+    function apiCopy(btn){
+      var snip=btn.closest('.api-snip');
+      if(!snip) return;
+      var text=snip.dataset.curl;
+      if(!text){
+        var pre=snip.querySelector('pre');
+        text=pre?pre.textContent:'';
+      }
+      var done=function(){
+        var prev=btn.textContent;
+        btn.textContent='Copied';
+        btn.classList.add('copied');
+        setTimeout(function(){ btn.textContent=prev; btn.classList.remove('copied'); },1500);
+      };
+      if(navigator.clipboard&&navigator.clipboard.writeText){
+        navigator.clipboard.writeText(text).then(done).catch(function(){ apiCopyFallback(text,done); });
+      } else {
+        apiCopyFallback(text,done);
+      }
+    }
+
+    function apiCopyFallback(text,done){
+      try{
+        var ta=document.createElement('textarea');
+        ta.value=text; ta.style.position='fixed'; ta.style.opacity='0';
+        document.body.appendChild(ta); ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        done();
+      }catch(e){}
+    }
+
+    apiInjectHost();
     initCollapsibleCards();
 
     /* ---- Diagnostic Logs ---- */

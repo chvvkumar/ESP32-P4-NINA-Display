@@ -17,6 +17,54 @@ static portMUX_TYPE s_login_mux = portMUX_INITIALIZER_UNLOCKED;
 extern const uint8_t login_html_start[] asm("_binary_login_html_start");
 extern const uint8_t login_html_end[]   asm("_binary_login_html_end");
 
+/* ---- Shared login lockout helpers ----
+ * These let other auth paths (e.g. the X-Auth-Password header in check_session)
+ * feed the SAME global rate limiter as the cookie-login form, so a stateless
+ * header is not an unthrottled brute-force bypass. All lockout state lives here. */
+
+/* True if currently inside the lockout window. Auth disabled => never locked. */
+bool auth_is_locked_out(void)
+{
+    const app_config_t *cfg = app_config_get();
+    if (cfg && !cfg->auth_enabled) return false;
+    int64_t now_us = esp_timer_get_time();
+    bool locked = false;
+    portENTER_CRITICAL(&s_login_mux);
+    locked = (now_us < s_login_lockout_until_us);
+    portEXIT_CRITICAL(&s_login_mux);
+    return locked;
+}
+
+/* Record a failed authentication: bump counter, engage lockout at threshold.
+ * Skipped when auth is disabled (no security value). */
+void auth_note_failure(void)
+{
+    const app_config_t *cfg = app_config_get();
+    if (cfg && !cfg->auth_enabled) return;
+    bool engaged = false;
+    portENTER_CRITICAL(&s_login_mux);
+    s_login_failures++;
+    if (s_login_failures >= LOGIN_MAX_FAILURES) {
+        s_login_lockout_until_us =
+            esp_timer_get_time() + (int64_t)LOGIN_LOCKOUT_SEC * 1000000LL;
+        s_login_failures = 0;
+        engaged = true;
+    }
+    portEXIT_CRITICAL(&s_login_mux);
+    if (engaged) {
+        ESP_LOGW(TAG, "login lockout engaged for %d seconds", LOGIN_LOCKOUT_SEC);
+    }
+}
+
+/* Record a successful authentication: clear failure counter and any lockout. */
+void auth_note_success(void)
+{
+    portENTER_CRITICAL(&s_login_mux);
+    s_login_failures = 0;
+    s_login_lockout_until_us = 0;
+    portEXIT_CRITICAL(&s_login_mux);
+}
+
 /* GET /login — serves the static login page (unauthenticated). */
 esp_err_t login_page_get_handler(httpd_req_t *req)
 {
@@ -109,31 +157,22 @@ esp_err_t login_post_handler(httpd_req_t *req)
     const char *pw = pw_item->valuestring;
     const app_config_t *cfg = app_config_get();
 
-    /* Constant-time compare */
+    /* Constant-time compare: iterate over max(a,b) with clamped indexing so
+     * the loop count does not depend on the submitted password length. */
     size_t a = strlen(pw);
     size_t b = strlen(cfg->admin_password);
     unsigned char diff = (a != b) ? 1 : 0;
-    size_t n = (a < b) ? a : b;
-    for (size_t i = 0; i < n; i++) {
-        diff |= (unsigned char)pw[i] ^ (unsigned char)cfg->admin_password[i];
+    size_t maxn = (a > b) ? a : b;
+    for (size_t i = 0; i < maxn; i++) {
+        unsigned char ca = (i < a) ? (unsigned char)pw[i] : 0;
+        unsigned char cb = (i < b) ? (unsigned char)cfg->admin_password[i] : 0;
+        diff |= ca ^ cb;
     }
     cJSON_Delete(root);
 
     if (diff != 0 || cfg->admin_password[0] == '\0') {
         /* Failed attempt: bump counter, engage lockout at threshold. */
-        bool engaged = false;
-        portENTER_CRITICAL(&s_login_mux);
-        s_login_failures++;
-        if (s_login_failures >= LOGIN_MAX_FAILURES) {
-            s_login_lockout_until_us =
-                esp_timer_get_time() + (int64_t)LOGIN_LOCKOUT_SEC * 1000000LL;
-            s_login_failures = 0;
-            engaged = true;
-        }
-        portEXIT_CRITICAL(&s_login_mux);
-        if (engaged) {
-            ESP_LOGW(TAG, "login lockout engaged for %d seconds", LOGIN_LOCKOUT_SEC);
-        }
+        auth_note_failure();
         httpd_resp_set_status(req, "401 Unauthorized");
         httpd_resp_set_type(req, "application/json");
         httpd_resp_send(req, "{\"error\":\"invalid password\"}", HTTPD_RESP_USE_STRLEN);
@@ -141,10 +180,7 @@ esp_err_t login_post_handler(httpd_req_t *req)
     }
 
     /* Successful login: clear failure counter and any lockout. */
-    portENTER_CRITICAL(&s_login_mux);
-    s_login_failures = 0;
-    s_login_lockout_until_us = 0;
-    portEXIT_CRITICAL(&s_login_mux);
+    auth_note_success();
 
     const char *token = session_create();
     char cookie[160];

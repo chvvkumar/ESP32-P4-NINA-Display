@@ -24,6 +24,8 @@
 #include "power_mgmt.h"
 #include "esp_wifi.h"
 #include "driver/temperature_sensor.h"
+#include "weather_client.h"
+#include "ui/nina_event_log.h"
 
 // Handler for reboot
 esp_err_t reboot_post_handler(httpd_req_t *req)
@@ -755,5 +757,134 @@ esp_err_t admin_password_post_handler(httpd_req_t *req)
     ESP_LOGI(TAG, "Admin password updated");
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, "{\"ok\":true}", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+// Handler for current weather data (public, no auth)
+esp_err_t weather_get_handler(httpd_req_t *req)
+{
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    if (!weather_client_has_valid_data()) {
+        cJSON_AddBoolToObject(root, "available", false);
+    } else {
+        weather_data_t wx;
+        weather_client_get_data(&wx);
+
+        if (!wx.valid) {
+            cJSON_AddBoolToObject(root, "available", false);
+        } else {
+            cJSON_AddBoolToObject(root, "available", true);
+            cJSON_AddNumberToObject(root, "temp_current", wx.temp_current);
+            cJSON_AddNumberToObject(root, "temp_high", wx.temp_high);
+            cJSON_AddNumberToObject(root, "temp_low", wx.temp_low);
+            cJSON_AddNumberToObject(root, "humidity", wx.humidity);
+            cJSON_AddNumberToObject(root, "dew_point", wx.dew_point);
+            cJSON_AddNumberToObject(root, "wind_speed", wx.wind_speed);
+            cJSON_AddStringToObject(root, "wind_dir", wx.wind_dir);
+            cJSON_AddNumberToObject(root, "uv_index", wx.uv_index);
+            cJSON_AddStringToObject(root, "condition", wx.condition);
+            cJSON_AddNumberToObject(root, "last_update_ts", (double)wx.last_update_ts);
+
+            const app_config_t *cfg = app_config_get();
+            cJSON_AddStringToObject(root, "units",
+                                    cfg->weather_units == 1 ? "metric" : "imperial");
+            cJSON_AddStringToObject(root, "location_name", cfg->weather_location_name);
+
+            cJSON *hourly = cJSON_AddArrayToObject(root, "hourly");
+            if (hourly) {
+                for (int i = 0; i < 10; i++) {
+                    cJSON *h = cJSON_CreateObject();
+                    if (!h) continue;
+                    cJSON_AddNumberToObject(h, "hour", wx.hourly_hours[i]);
+                    cJSON_AddNumberToObject(h, "temp", wx.hourly_temps[i]);
+                    cJSON_AddItemToArray(hourly, h);
+                }
+            }
+        }
+    }
+
+    const char *json_str = cJSON_PrintUnformatted(root);
+    if (!json_str) {
+        cJSON_Delete(root);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
+    free((void *)json_str);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+// Handler for the on-device UI event log ring (public, no auth)
+#define EVENTS_MAX_SNAPSHOT 100
+
+esp_err_t events_get_handler(httpd_req_t *req)
+{
+    nina_event_log_entry_t *snap =
+        heap_caps_malloc(sizeof(nina_event_log_entry_t) * EVENTS_MAX_SNAPSHOT,
+                         MALLOC_CAP_SPIRAM);
+    if (!snap) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    int n = nina_event_log_copy_entries(snap, EVENTS_MAX_SNAPSHOT);
+
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        heap_caps_free(snap);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    cJSON_AddNumberToObject(root, "count", n);
+    cJSON *arr = cJSON_AddArrayToObject(root, "events");
+    if (arr) {
+        for (int i = 0; i < n; i++) {
+            cJSON *e = cJSON_CreateObject();
+            if (!e) continue;
+            const char *sev_str = "info";
+            switch (snap[i].sev) {
+                case EVENT_SEV_SUCCESS: sev_str = "success"; break;
+                case EVENT_SEV_WARNING: sev_str = "warning"; break;
+                case EVENT_SEV_ERROR:   sev_str = "error";   break;
+                case EVENT_SEV_INFO:    /* fallthrough */
+                default:                sev_str = "info";    break;
+            }
+            cJSON_AddStringToObject(e, "severity", sev_str);
+            cJSON_AddNumberToObject(e, "instance", snap[i].instance);
+            cJSON_AddStringToObject(e, "message", snap[i].message);
+            cJSON_AddNumberToObject(e, "timestamp_ms", (double)snap[i].timestamp_ms);
+            cJSON_AddItemToArray(arr, e);
+        }
+    }
+
+    heap_caps_free(snap);
+
+    const char *json_str = cJSON_PrintUnformatted(root);
+    if (!json_str) {
+        cJSON_Delete(root);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
+    free((void *)json_str);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+// Handler for clearing the on-device UI event log (auth required)
+esp_err_t events_clear_post_handler(httpd_req_t *req)
+{
+    REQUIRE_AUTH(req);
+    nina_event_log_clear();
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"status\":\"ok\"}", HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }

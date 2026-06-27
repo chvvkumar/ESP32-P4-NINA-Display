@@ -2,6 +2,7 @@
 
 #include "lvgl.h"
 #include "goes_client.h"
+#include "app_config.h"
 #include <stdbool.h>
 
 lv_obj_t *nina_image_display_create(lv_obj_t *parent);
@@ -33,3 +34,24 @@ bool      nina_image_display_has_image(void);
 void      nina_image_display_cleanup(void);
 void      nina_image_display_set_overlay_visible(bool visible);
 void      nina_image_display_apply_theme(void);
+
+/**
+ * @brief Apply Image Display config changes live (preview), comparing @p prev to @p cur.
+ *
+ * Performs the same live-apply the Image Display config POST handler does after a
+ * save: pushes the enable/overlay state to the dashboard, then branches on what
+ * changed between @p prev and @p cur:
+ *   - source / solar_band / goes_region changed (or a custom-URL change while the
+ *     active source is Custom, or @p force_fetch with the Custom source): flag the
+ *     next fetch as manual (wait overlay) and wake goes_poll_task to re-download.
+ *   - Moon-only parameters changed (source == Moon): wake goes_poll_task so its
+ *     local Moon branch re-renders (no manual-fetch flag, no overlay).
+ *   - crop / orientation only: re-render the already-decoded frame locally under
+ *     the display lock (no HTTP re-download).
+ * All re-fetch/re-render work is gated on cur->image_display_enabled.
+ *
+ * @param prev        Full config snapshot taken BEFORE the field writes.
+ * @param cur         Saved config snapshot (post-write).
+ * @param force_fetch Force a re-fetch for the Custom source even if no field changed.
+ */
+void image_display_apply_live(const app_config_t *prev, const app_config_t *cur, bool force_fetch);
