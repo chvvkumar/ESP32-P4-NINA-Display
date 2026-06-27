@@ -9,9 +9,11 @@
 #include "nina_nav_arbiter.h"
 #include "nina_dashboard.h"
 #include "nina_dashboard_internal.h"   /* page-index constants */
+#include "page_registry.h"             /* page_ref_resolve / page_ref_t */
 #include "app_config.h"
 #include "nina_connection.h"
 #include "nina_idle_indicator.h"
+#include "nina_wait_overlay.h"
 #include "bsp/esp-bsp.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -22,6 +24,8 @@ static const char *TAG = "nav_arb";
 
 static struct {
     int      user_page;            /* last USER claim target, -1 if none */
+    int8_t   user_img_source;      /* image source the USER claim pins (0-3), or -1
+                                    * for a non-image target (clears the override) */
     _Atomic int64_t user_stamp_ms; /* when the USER claim was stamped; atomic to
                                     * close the cross-core torn-read window between
                                     * submit_user (LVGL/web task) and resolve
@@ -41,6 +45,7 @@ static struct {
 
 void nav_arbiter_init(void) {
     s_arb.user_page = -1;
+    s_arb.user_img_source = -1;
     s_arb.user_stamp_ms = 0;
     s_arb.topology_dirty = false;
     s_arb.modal_depth = 0;
@@ -53,14 +58,23 @@ void nav_arbiter_init(void) {
     ESP_LOGI(TAG, "nav arbiter init (committed page=%d)", s_arb.current_committed);
 }
 
-void nav_arbiter_submit_user(int abs_page, int64_t now_ms) {
+void nav_arbiter_submit_user(int abs_page, int64_t now_ms, int8_t img_src) {
     s_arb.user_page = abs_page;
+    s_arb.user_img_source = img_src;
     s_arb.user_stamp_ms = now_ms;
-    /* Manual navigation to the Image Display page shows the persisted default
-     * source, not whatever the slideshow last set. Clear the runtime override
-     * and forget the last committed slideshow source so the commit block treats
-     * this as an image-source change and re-applies the default. */
-    if (abs_page == PAGE_IDX_IMAGE_DISPLAY) {
+    /* Wake the data task so the arbiter resolves this claim on the next loop
+     * iteration instead of waiting up to a full update_rate_s cycle. Idempotent
+     * and harmless: swipe/BOOT already moved the LVGL page directly. */
+    if (data_task_handle) {
+        xTaskNotifyGive(data_task_handle);
+    }
+    /* Manual navigation to the Image Display page with no pinned source (img_src
+     * == -1) shows the persisted default, not whatever the slideshow last set.
+     * Clear the runtime override and forget the last committed slideshow source
+     * so the commit block treats this as an image-source change and re-applies
+     * the default. When img_src pins a concrete source (0-3), the USER rung
+     * carries it through pending_img_source, so do not clear here. */
+    if (abs_page == PAGE_IDX_IMAGE_DISPLAY && img_src < 0) {
         image_source_set_override(-1);
         s_arb.current_committed_img_source = -1;
     }
@@ -87,17 +101,33 @@ bool nav_arbiter_idle_active(void) { return s_arb.idle_claim_active; }
  * takes the lock only around the committed page transition.
  */
 
+/** Home Page (with image source): resolve the configured active_page_override
+ *  (a page_ref id) to an absolute page index plus its image source (0-3, or -1).
+ *  Never Settings, never out of range, never unavailable: any of those fall back
+ *  to Summary with *img_src_out = -1. page_ref_resolve() folds in the
+ *  availability/enable checks, so an unresolvable id maps to Summary too. */
+static int home_page_with_src(int8_t *img_src_out) {
+    page_ref_t id = (page_ref_t)app_config_get()->active_page_override;
+    int idx = -1;
+    int8_t src = -1;
+    if (!page_ref_resolve(id, &idx, &src)) {
+        *img_src_out = -1;
+        return PAGE_IDX_SUMMARY;
+    }
+    if (idx == SETTINGS_PAGE_IDX(page_count)) {
+        *img_src_out = -1;
+        return PAGE_IDX_SUMMARY;
+    }
+    *img_src_out = src;
+    return idx;
+}
+
 /** Home Page: the configured active_page_override, validated. Never Settings,
- *  never out of range, never unavailable. -1 (Auto) maps to Summary. This is the
- *  single place that translates the -1 = Auto value. */
+ *  never out of range, never unavailable. Unresolvable maps to Summary. Thin
+ *  wrapper over home_page_with_src() that discards the image source. */
 static int home_page(void) {
-    int hp = app_config_get()->active_page_override;   /* "Home Page" value */
-    int total = nina_dashboard_get_total_page_count();
-    if (hp < 0) return PAGE_IDX_SUMMARY;               /* -1 = Auto = Summary */
-    if (hp >= total) return PAGE_IDX_SUMMARY;
-    if (hp == SETTINGS_PAGE_IDX(page_count)) return PAGE_IDX_SUMMARY;
-    if (!nina_dashboard_page_is_available(hp)) return PAGE_IDX_SUMMARY;
-    return hp;
+    int8_t src = -1;
+    return home_page_with_src(&src);
 }
 
 /** SESSION target: pinned rig online -> that rig; else lone online rig -> it;
@@ -112,9 +142,17 @@ static int session_target(void) {
         if (nina_dashboard_slot_available(i) && nina_connection_is_connected(i)) online++;
     }
     if (online <= 0) return -1;                     /* SESSION does not claim */
-    int hp = app_config_get()->active_page_override;
+    /* active_page_override now persists a page_ref id (NINA1/2/3 = 1/2/3), not a
+     * raw page index. Map the id DIRECTLY to an instance: page_ref_resolve() would
+     * gate on availability and suppress a valid pin for a momentarily-offline rig,
+     * whereas the old code derived the index regardless of online state (the
+     * online/available guard below is the sole gate). Use the direct-id mapping
+     * PAGE_REF_NINA1..NINA3 -> instance 0..2; any non-NINA home id yields a
+     * pin_inst outside [0, MAX_NINA_INSTANCES) and is rejected by the guard,
+     * falling through to the lone-online / Summary logic exactly as before. */
+    page_ref_t home_id = (page_ref_t)app_config_get()->active_page_override;
+    int pin_inst = (int)home_id - (int)PAGE_REF_NINA1;
     /* Pinned rig: Home Page is a NINA page whose instance is online */
-    int pin_inst = hp - NINA_PAGE_OFFSET;
     if (pin_inst >= 0 && pin_inst < MAX_NINA_INSTANCES
         && nina_dashboard_slot_available(pin_inst)
         && nina_connection_is_connected(pin_inst)) {
@@ -143,24 +181,20 @@ static bool idle_condition(void) {
     return any_enabled;   /* all available rigs CONFIRMED down */
 }
 
-/** Map the configured idle target (idle_target_t) to an absolute page index,
- *  falling back to Summary when the target page is unavailable. Local copy of
- *  tasks.c's idle_target_to_page_index using slot/page availability. */
-static int idle_target_page(void) {
-    const app_config_t *c = app_config_get();
-    int idx;
-    switch (c->idle_page_override_target) {
-        case IDLE_TARGET_CLOCK:         idx = PAGE_IDX_CLOCK; break;
-        case IDLE_TARGET_ALLSKY:        idx = PAGE_IDX_ALLSKY; break;
-        case IDLE_TARGET_SPOTIFY:       idx = PAGE_IDX_SPOTIFY; break;
-        case IDLE_TARGET_IMAGE_DISPLAY: idx = PAGE_IDX_IMAGE_DISPLAY; break;
-        case IDLE_TARGET_SYSINFO:       idx = SYSINFO_PAGE_IDX(page_count); break;
-        case IDLE_TARGET_NINA1:         idx = nina_dashboard_slot_available(0) ? NINA_PAGE_OFFSET+0 : PAGE_IDX_SUMMARY; break;
-        case IDLE_TARGET_NINA2:         idx = nina_dashboard_slot_available(1) ? NINA_PAGE_OFFSET+1 : PAGE_IDX_SUMMARY; break;
-        case IDLE_TARGET_NINA3:         idx = nina_dashboard_slot_available(2) ? NINA_PAGE_OFFSET+2 : PAGE_IDX_SUMMARY; break;
-        default:                        idx = PAGE_IDX_SUMMARY; break;
+/** Resolve the configured idle target (idle_page_override_target, a page_ref id)
+ *  to an absolute page index plus its image source (0-3, or -1). Falls back to
+ *  Summary with *img_src_out = -1 when the id is unknown or its page is
+ *  unavailable: page_ref_resolve() enforces availability and returns false in
+ *  that case, preserving the old idle-target Summary fallback. */
+static int idle_target_resolve(int8_t *img_src_out) {
+    page_ref_t id = (page_ref_t)app_config_get()->idle_page_override_target;
+    int idx = -1;
+    int8_t src = -1;
+    if (!page_ref_resolve(id, &idx, &src)) {
+        *img_src_out = -1;
+        return PAGE_IDX_SUMMARY;
     }
-    if (!nina_dashboard_page_is_available(idx)) idx = PAGE_IDX_SUMMARY;
+    *img_src_out = src;
     return idx;
 }
 
@@ -180,29 +214,11 @@ static int slideshow_build_candidates(int cand_out[ARP_ORDER_CAPACITY],
         if (bit == 0xFF || bit >= ARP_IDX_MAX) continue;
         int p = -1;
         int8_t img_src = -1;
-        switch (bit) {
-            case 0: p = PAGE_IDX_SUMMARY; break;
-            case 1: p = nina_dashboard_slot_available(0) ? NINA_PAGE_OFFSET+0 : -1; break;
-            case 2: p = nina_dashboard_slot_available(1) ? NINA_PAGE_OFFSET+1 : -1; break;
-            case 3: p = nina_dashboard_slot_available(2) ? NINA_PAGE_OFFSET+2 : -1; break;
-            case 4: p = SYSINFO_PAGE_IDX(page_count); break;
-            case 5: p = c->allsky_enabled ? PAGE_IDX_ALLSKY : -1; break;
-            case 6: p = c->spotify_enabled ? PAGE_IDX_SPOTIFY : -1; break;
-            case 7: p = PAGE_IDX_CLOCK; break;
-            case 8: p = c->image_display_enabled ? PAGE_IDX_IMAGE_DISPLAY : -1; img_src = 0; break;
-            case 9: p = c->image_display_enabled ? PAGE_IDX_IMAGE_DISPLAY : -1; img_src = 1; break;
-            case 10: p = c->image_display_enabled ? PAGE_IDX_IMAGE_DISPLAY : -1; img_src = 2; break;
-            case 11: {
-                if (c->image_display_enabled && c->custom_image_url[0] != '\0') {
-                    p = PAGE_IDX_IMAGE_DISPLAY;
-                    img_src = 3;
-                } else {
-                    p = -1;
-                }
-                break;
-            }
-        }
-        if (p < 0 || !nina_dashboard_page_is_available(p)) continue;
+        /* page_ref ids 0..11 are identical to ARP_IDX_* and to the slideshow
+         * stop encoding. page_ref_resolve() folds in the same availability +
+         * enable checks the old inline switch did (slot/allsky/spotify/custom),
+         * returning false when the stop is unavailable. */
+        if (!page_ref_resolve((page_ref_t)bit, &p, &img_src)) continue;
         int inst = p - NINA_PAGE_OFFSET;
         if (inst >= 0 && inst < MAX_NINA_INSTANCES
             && c->auto_rotate_skip_disconnected
@@ -307,6 +323,10 @@ void nav_arbiter_resolve(int64_t now_ms) {
 
     if (user_active) {
         desired = s_arb.user_page; src = NAV_SRC_USER;
+        /* Pin the user's chosen image source (0-3) so the commit block does not
+         * clobber the override back to the persisted default. -1 for non-image
+         * targets, which correctly clears the override. */
+        s_arb.pending_img_source = s_arb.user_img_source;
     } else if (auto_rotate) {
         if (s_arb.slideshow_advance) {
             s_arb.slideshow_advance = false;
@@ -322,15 +342,26 @@ void nav_arbiter_resolve(int64_t now_ms) {
         int st = session_target();
         if (st >= 0) { desired = st; src = NAV_SRC_SESSION; }
         else if (idle_condition()) {
-            desired = idle_target_page();
+            int8_t is = -1;
+            desired = idle_target_resolve(&is);
+            s_arb.pending_img_source = is;   /* idle target image source pins it */
             src = NAV_SRC_IDLE;
-        } else { desired = home_page(); src = NAV_SRC_DEFAULT; }
+        } else {
+            int8_t hs = -1;
+            desired = home_page_with_src(&hs);
+            s_arb.pending_img_source = hs;    /* home target image source pins it */
+            src = NAV_SRC_DEFAULT;
+        }
     }
 
-    /* Validate vs Page Model: available and not Settings, else Home Page. */
+    /* Validate vs Page Model: available and not Settings, else Home Page. Recompute
+     * the pending image source from Home too, so a re-home does not leave a stale
+     * non-(-1) source from the rung that was just rejected. */
     if (desired == SETTINGS_PAGE_IDX(page_count)
         || !nina_dashboard_page_is_available(desired)) {
-        desired = home_page();
+        int8_t hs = -1;
+        desired = home_page_with_src(&hs);
+        s_arb.pending_img_source = hs;
     }
 
     /* Idle indicator coupling. */
@@ -356,8 +387,22 @@ void nav_arbiter_resolve(int64_t now_ms) {
         if (desired == PAGE_IDX_IMAGE_DISPLAY && goes_task_handle) {
             xTaskNotifyGive(goes_task_handle);   /* wake fetch for new source */
         }
+        /* Manual navigation to the image page (USER claim) shows the loading
+         * animation and forces a fresh foreground fetch (bypassing any warm
+         * prefetch buffer). Auto-cycle/session/idle/default arrivals stay seamless:
+         * they rely on the prefetch swap and never animate. */
+        if (desired == PAGE_IDX_IMAGE_DISPLAY && src == NAV_SRC_USER) {
+            image_display_request_manual_fetch();
+        }
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
             nina_dashboard_show_page_animated(desired, 0, effect);
+            /* Cover any stale previous image the instant the page appears, before the
+             * fetch task can show the overlay on its next cycle. Manual nav only;
+             * auto-cycle stays seamless via prefetch. */
+            if (desired == PAGE_IDX_IMAGE_DISPLAY && src == NAV_SRC_USER) {
+                nina_wait_overlay_show("Loading image...", NULL);
+                nina_wait_overlay_set_progress(-1);
+            }
             bsp_display_unlock();
             s_arb.current_committed = desired;
             s_arb.current_committed_img_source = s_arb.pending_img_source;

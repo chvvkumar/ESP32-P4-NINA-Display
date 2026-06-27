@@ -13,6 +13,7 @@
 #include "nina_settings_tabview.h"
 #include "nina_dashboard.h"
 #include "nina_dashboard_internal.h"
+#include "page_registry.h"
 #include "app_config.h"
 #include "themes.h"
 #include "display_defs.h"
@@ -58,6 +59,13 @@ static lv_obj_t *dd_idle_target          = NULL;
 static lv_obj_t *idle_target_container   = NULL;
 static lv_obj_t *sw_idle_indicator       = NULL;
 static lv_obj_t *lbl_nav_grace           = NULL;
+
+/* Idle target dropdown <-> page_registry mapping.
+ * The dropdown lists only targetable PAGE / IMAGE_SOURCE registry entries, so
+ * the option index is NOT the page_ref id. idle_target_ids[option_index] holds
+ * the page_ref id stored in idle_page_override_target for that option. */
+static page_ref_t idle_target_ids[PAGE_REF_ID_MAX];
+static int        idle_target_count = 0;
 
 /* ── Rotation dropdown options ───────────────────────────────────────── */
 static const char *rotation_opts = "0\xc2\xb0\n90\xc2\xb0\n180\xc2\xb0\n270\xc2\xb0";
@@ -331,10 +339,46 @@ static void idle_override_toggle_cb(lv_event_t *e) {
     settings_mark_dirty(false);
 }
 
+/* Build the idle-target dropdown options string from the page registry and
+ * populate idle_target_ids[]. Only targetable PAGE / IMAGE_SOURCE entries are
+ * listed, in registry order. @p out must hold at least @p out_sz bytes. */
+static void idle_target_build_options(char *out, size_t out_sz) {
+    size_t pos = 0;
+    int n = page_ref_count();
+    idle_target_count = 0;
+    out[0] = '\0';
+    for (int i = 0; i < n && idle_target_count < PAGE_REF_ID_MAX; i++) {
+        const page_ref_entry_t *ent = page_ref_get(i);
+        if (ent == NULL) continue;
+        if (!ent->targetable) continue;
+        if (ent->kind != PAGE_REF_KIND_PAGE && ent->kind != PAGE_REF_KIND_IMAGE_SOURCE) continue;
+        const char *sep = (idle_target_count > 0) ? "\n" : "";
+        int w = snprintf(out + pos, out_sz - pos, "%s%s", sep, ent->label);
+        if (w < 0 || (size_t)w >= out_sz - pos) break;
+        pos += (size_t)w;
+        idle_target_ids[idle_target_count] = ent->id;
+        idle_target_count++;
+    }
+}
+
+/* Return the dropdown option index whose mapped id == @p id, or the option
+ * index for Summary (falling back to 0) if @p id is not in the list. */
+static uint32_t idle_target_index_for_id(page_ref_t id) {
+    int summary_idx = 0;
+    for (int i = 0; i < idle_target_count; i++) {
+        if (idle_target_ids[i] == id) return (uint32_t)i;
+        if (idle_target_ids[i] == PAGE_REF_SUMMARY) summary_idx = i;
+    }
+    return (uint32_t)summary_idx;
+}
+
 static void idle_target_cb(lv_event_t *e) {
     LV_UNUSED(e);
     app_config_t *cfg = app_config_get();
-    cfg->idle_page_override_target = (int8_t)(lv_dropdown_get_selected(dd_idle_target) - 1);
+    uint32_t sel = lv_dropdown_get_selected(dd_idle_target);
+    if (sel < (uint32_t)idle_target_count) {
+        cfg->idle_page_override_target = (int8_t)idle_target_ids[sel];
+    }
     settings_mark_dirty(false);
 }
 
@@ -711,21 +755,18 @@ void settings_tab_behavior_create(lv_obj_t *parent) {
 
             dd_idle_target = lv_dropdown_create(row);
             lv_obj_set_width(dd_idle_target, 200);
-            lv_dropdown_set_options(dd_idle_target,
-                                    "Summary\n"
-                                    "Clock\n"
-                                    "AllSky\n"
-                                    "Spotify\n"
-                                    "Image Display\n"
-                                    "System Info\n"
-                                    "NINA Instance 1\n"
-                                    "NINA Instance 2\n"
-                                    "NINA Instance 3");
 
-            /* Map idle_target_t enum to dropdown index (index = enum + 1):
-             * SUMMARY(-1)=0, CLOCK(0)=1, ALLSKY(1)=2, SPOTIFY(2)=3, IMAGE_DISPLAY(3)=4,
-             * SYSINFO(4)=5, NINA1(5)=6, NINA2(6)=7, NINA3(7)=8 */
-            lv_dropdown_set_selected(dd_idle_target, (uint32_t)(cfg->idle_page_override_target + 1));
+            /* Options come from the page registry (single source of truth):
+             * targetable PAGE / IMAGE_SOURCE entries in registry order. The
+             * option index is mapped to a page_ref id via idle_target_ids[]. */
+            char idle_opts[PAGE_REF_ID_MAX * 24];
+            idle_target_build_options(idle_opts, sizeof(idle_opts));
+            lv_dropdown_set_options(dd_idle_target, idle_opts);
+
+            /* Select the option whose mapped id == the stored target id;
+             * fall back to Summary if the stored id is not in the list. */
+            lv_dropdown_set_selected(dd_idle_target,
+                idle_target_index_for_id((page_ref_t)cfg->idle_page_override_target));
 
             if (current_theme) {
                 lv_obj_set_style_text_color(dd_idle_target,
@@ -872,7 +913,8 @@ void settings_tab_behavior_refresh(void) {
         }
     }
     if (dd_idle_target) {
-        lv_dropdown_set_selected(dd_idle_target, (uint32_t)(cfg->idle_page_override_target + 1));
+        lv_dropdown_set_selected(dd_idle_target,
+            idle_target_index_for_id((page_ref_t)cfg->idle_page_override_target));
     }
     if (sw_idle_indicator) {
         if (cfg->idle_indicator_enabled)

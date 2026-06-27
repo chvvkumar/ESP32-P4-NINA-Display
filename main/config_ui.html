@@ -545,6 +545,10 @@
       box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.15), inset 0 0 8px rgba(var(--accent-rgb), 0.06);
     }
     .pn-pill.rotate-pill input:not(:checked) + .pn-pill-visual { opacity: 0.45; }
+    /* Home Page pills that point at a page not currently available stay
+       selectable but render dimmed (the page may become available later). */
+    .pn-pill.pn-pill-unavailable .pn-pill-visual { opacity: 0.5; }
+    .pn-pill.pn-pill-unavailable input:checked + .pn-pill-visual { opacity: 0.85; }
     .pn-pill.rotate-pill:hover input:not(:checked) + .pn-pill-visual { opacity: 0.7; }
     .pn-pill.rotate-pill:hover input:checked + .pn-pill-visual {
       border-color: rgba(var(--accent-rgb), 0.55);
@@ -1496,17 +1500,8 @@
         </div>
         <div class="field" id="idle_target_field" style="display:none;margin-top:12px">
           <label class="field-label">Target page</label>
-          <select class="input" id="idle_page_override_target">
-            <option value="-1">No Connections (Summary)</option>
-            <option value="0">Clock</option>
-            <option value="1">AllSky</option>
-            <option value="2">Spotify</option>
-            <option value="3">Image Display</option>
-            <option value="4">System Info</option>
-            <option value="5">NINA Instance 1</option>
-            <option value="6">NINA Instance 2</option>
-            <option value="7">NINA Instance 3</option>
-          </select>
+          <!-- Options populated dynamically from the device page registry (GET /api/pages) by populatePageControls(). -->
+          <select class="input" id="idle_page_override_target"></select>
           <div class="field-hint">Page shown while every enabled NINA instance is confirmed disconnected.</div>
           <div class="toggle-row" style="margin-top:12px">
             <div>
@@ -2119,6 +2114,69 @@
     const $$=s=>document.querySelectorAll(s);
     const postJson=(url,body)=>fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 
+    /* === Page Registry (single source of truth for page identity) ===
+       Loaded from GET /api/pages. Both the Home Page pills and the idle
+       "no connections" target dropdown are built from this list so their
+       values are page-registry numeric ids. */
+    var _pageRegistry=[];
+    function fetchPageRegistry(){
+      return fetch('/api/pages').then(function(r){
+        return r.ok?r.json():[];
+      }).then(function(j){
+        _pageRegistry=Array.isArray(j)?j:[];
+      }).catch(function(){
+        _pageRegistry=[];
+      });
+    }
+    /* Pages the user may target as a Home Page or idle page. */
+    function targetablePages(){
+      return _pageRegistry.filter(function(p){
+        return p.targetable && (p.kind==='page' || p.kind==='image_source');
+      });
+    }
+    /* Stable category display order, derived from the data: first-seen wins. */
+    function targetablePagesOrdered(){
+      var pages=targetablePages();
+      var catOrder=[];
+      pages.forEach(function(p){
+        var cat=p.category||'';
+        if(catOrder.indexOf(cat)===-1) catOrder.push(cat);
+      });
+      var out=[];
+      catOrder.forEach(function(cat){
+        pages.forEach(function(p){
+          if((p.category||'')===cat) out.push(p);
+        });
+      });
+      return out;
+    }
+    /* Build both page-driven controls (Home Page pills + idle target dropdown)
+       from _pageRegistry. Must run AFTER fetchPageRegistry() resolves and
+       BEFORE any value-set so the options/pills exist first. */
+    function populatePageControls(){
+      buildStartPagePills();
+      var sel=$('idle_page_override_target');
+      if(sel){
+        sel.innerHTML='';
+        var pages=targetablePagesOrdered();
+        var lastCat=null, group=null;
+        pages.forEach(function(p){
+          var cat=p.category||'';
+          if(cat!==lastCat){
+            group=document.createElement('optgroup');
+            group.label=cat||'Pages';
+            sel.appendChild(group);
+            lastCat=cat;
+          }
+          var opt=document.createElement('option');
+          opt.value=p.id;
+          opt.text=(p.available?'':'(unavailable) ')+p.label;
+          if(!p.available) opt.className='pn-opt-unavailable';
+          (group||sel).appendChild(opt);
+        });
+      }
+    }
+
     /* === Node Card Generation === */
     (function(){
       const container=$('node-cards');
@@ -2397,31 +2455,16 @@
       var c=$('start-page-pills');
       if(!c) return;
       c.innerHTML='';
-      var urls=[$('url1').value.trim(),$('url2').value.trim(),$('url3').value.trim()];
-      var enabled=[$('instance_enabled_0').checked,$('instance_enabled_1').checked,$('instance_enabled_2').checked];
-      var allskyOn=$('allsky_enabled')?$('allsky_enabled').checked:false;
-      var spotifyOn=$('spotify_enabled')?$('spotify_enabled').checked:false;
-      var imageDisplayOn=$('image_display_enabled')?$('image_display_enabled').checked:false;
-
-      var pages=[];
-      pages.push({value:'4', label:'Summary'});
-      if(allskyOn) pages.push({value:'0', label:'AllSky'});
-      if(spotifyOn) pages.push({value:'1', label:'Spotify'});
-      pages.push({value:'2', label:'Clock'});
-      if(imageDisplayOn) pages.push({value:'3', label:'Image Display'});
-      var pageIdx=5;
-      for(var i=0;i<3;i++){
-        if(urls[i].length>0&&enabled[i]){
-          pages.push({value:''+pageIdx, label:urls[i]||('NINA '+(i+1))});
-          pageIdx++;
-        }
-      }
-      pages.push({value:''+(pageIdx+1), label:'System Info'});
-
+      /* Pills are built from the device page registry (single source of truth).
+         Each pill value = registry id (integer); grouped by category in the
+         registry's first-seen order. Unavailable pages stay selectable but
+         show dimmed so a page that becomes available later can still be picked. */
+      var pages=targetablePagesOrdered();
       pages.forEach(function(p){
+        var cls='pn-pill start-pill'+(p.available?'':' pn-pill-unavailable');
         c.insertAdjacentHTML('beforeend',
-          '<label class="pn-pill start-pill">'+
-            '<input type="radio" name="start_page" value="'+p.value+'" onchange="onStartPageChange();checkDirty()">'+
+          '<label class="'+cls+'">'+
+            '<input type="radio" name="start_page" value="'+p.id+'" onchange="onStartPageChange();checkDirty()">'+
             '<span class="pn-pill-visual">'+p.label+'</span>'+
             '<span class="pin-badge">&#9733;</span>'+
           '</label>'
@@ -2443,7 +2486,10 @@
 
     function onStartPageChange(){
       var v=getStartPageValue();
-      postJson('/api/page',{page:v});
+      /* Live preview: navigate by registry id so image-source Home Pages
+         (Moon, Solar, etc.) route correctly. Value still persists via
+         getConfigData() on Save. */
+      if(v>=0) fetch('/api/navigate?id='+v).catch(function(){});
       updatePageNavSummary();
     }
 
@@ -2773,8 +2819,15 @@
     let loadedConfig='';
     let _populating=false;
 
-    function populateConfig(data){
+    async function populateConfig(data){
       _populating=true;
+      /* Async ordering: load the page registry FIRST so the Home Page pills and
+         the idle target dropdown options exist before any value-set runs.
+         populateConfig is awaited by loadConfig(); every value-set below this
+         line (including the idle target and active_page_override pills near the
+         end) can safely assume the registry-driven controls are populated. */
+      await fetchPageRegistry();
+      populatePageControls();
       $('hostname').value=data.hostname||'';
       var hn=data.hostname||'NINA Display';
       $('brandName').textContent=hn;
@@ -2953,7 +3006,7 @@
 
       // Idle override fields
       if($('idle_page_override_enabled')) $('idle_page_override_enabled').checked=!!data.idle_page_override_enabled;
-      if($('idle_page_override_target')) $('idle_page_override_target').value=data.idle_page_override_target!=null?data.idle_page_override_target:-1;
+      if($('idle_page_override_target')) $('idle_page_override_target').value=data.idle_page_override_target!=null?data.idle_page_override_target:0;
       if($('idle_indicator_enabled')) $('idle_indicator_enabled').checked=data.idle_indicator_enabled!==false;
       toggleIdleOverride();
 
@@ -2973,9 +3026,10 @@
         }).catch(function(){});
       }
 
-      // Update page selector AFTER all enable checkboxes are populated
-      buildStartPagePills();
-      setStartPageValue(data.active_page_override!=null&&data.active_page_override>=0?data.active_page_override:4); // -1/legacy -> Summary, matches firmware home_page()
+      // Home Page pills are already built from the page registry (populatePageControls
+      // ran near the top). active_page_override is a registry id after migration
+      // (never -1); default to 0 if absent.
+      setStartPageValue(data.active_page_override!=null?data.active_page_override:0);
       updatePageNavSummary();
 
       loadedConfig=JSON.stringify(getConfigData());

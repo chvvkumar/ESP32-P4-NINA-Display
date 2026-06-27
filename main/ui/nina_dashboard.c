@@ -352,7 +352,7 @@ static void bottom_row_click_cb(lv_event_t *e) {
      * immediately for instant feedback AND record a USER claim so the grace
      * window protects it from being overridden by the next resolve(). */
     nina_dashboard_show_page_animated(PAGE_IDX_SUMMARY, 0, 0);
-    nav_arbiter_submit_user(PAGE_IDX_SUMMARY, esp_timer_get_time() / 1000);
+    nav_arbiter_submit_user(PAGE_IDX_SUMMARY, esp_timer_get_time() / 1000, -1);
 }
 
 /* Build all widgets for one dashboard page */
@@ -823,7 +823,7 @@ static void gesture_event_cb(lv_event_t *e) {
         image_source_set_override(-1);
     }
     nina_dashboard_show_page_animated(new_page, 0, 0);
-    nav_arbiter_submit_user(new_page, esp_timer_get_time() / 1000);
+    nav_arbiter_submit_user(new_page, esp_timer_get_time() / 1000, -1);
 }
 
 /* Target name: click to request thumbnail */

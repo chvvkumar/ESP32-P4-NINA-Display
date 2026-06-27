@@ -266,6 +266,9 @@ void start_web_server(void)
         { "/api/coredump",           HTTP_GET,  coredump_get_handler,        NULL },
         { "/api/coredump/info",      HTTP_GET,  coredump_info_get_handler,   NULL },
         { "/api/coredump/clear",     HTTP_POST, coredump_clear_post_handler, NULL },
+        { "/api/pages",              HTTP_GET,  pages_get_handler,     NULL },
+        { "/api/navigate",           HTTP_GET,  navigate_post_handler, NULL },
+        { "/api/navigate",           HTTP_POST, navigate_post_handler, NULL },
     };
 
     /* Keep config.max_uri_handlers (set to 56 above) in sync with the route
