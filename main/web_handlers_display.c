@@ -374,7 +374,7 @@ esp_err_t page_post_handler(httpd_req_t *req)
         int total = nina_dashboard_get_total_page_count();
         if (page < 0) page = PAGE_IDX_SUMMARY;          /* -1 (Auto) -> Summary USER claim */
         if (page >= 0 && page < total) {
-            nav_arbiter_submit_user(page, esp_timer_get_time() / 1000);
+            nav_arbiter_submit_user(page, esp_timer_get_time() / 1000, -1);
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                 nina_dashboard_show_page_animated(page, 0, 0);
                 bsp_display_unlock();

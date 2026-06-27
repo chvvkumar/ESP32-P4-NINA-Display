@@ -227,6 +227,19 @@ void image_source_trigger_prefetch(int8_t src)
     }
 }
 
+/* Forces the Image Display page to show the "Loading image..." animation and
+ * fetch a fresh image on the next poll cycle. Used for manual navigation to the
+ * page (swipe, BOOT, summary tap, web goto, Home Page change): the prefetch swap
+ * fast path is bypassed while this flag is pending so a real foreground fetch
+ * runs and the overlay is visible. Mirrors image_source_trigger_prefetch's wake. */
+void image_display_request_manual_fetch(void)
+{
+    atomic_store(&image_display_manual_fetch, true);
+    if (goes_task_handle) {
+        xTaskNotifyGive(goes_task_handle);
+    }
+}
+
 /**
  * @brief Page-change callback from the dashboard — signals the data task to re-tune polling.
  * Called from LVGL context (display lock already held by the gesture handler).
@@ -365,7 +378,7 @@ void input_task(void *arg) {
             } else {
                 ESP_LOGW(TAG, "Display lock timeout (button page switch)");
             }
-            nav_arbiter_submit_user(new_page, esp_timer_get_time() / 1000);
+            nav_arbiter_submit_user(new_page, esp_timer_get_time() / 1000, -1);
 
             page_changed = true;
         }
@@ -920,6 +933,13 @@ void goes_poll_task(void *arg)
          * cannot make the fetch dispatch and the interval/label logic disagree. */
         int8_t eff_src = image_source_get_effective();
 
+        /* A manual navigation/config change requests a fresh foreground fetch +
+         * loading animation. Peek the flag here WITHOUT consuming it (the single
+         * atomic_exchange consume-point is the overlay block below): when pending,
+         * the prefetch swap fast path must NOT short-circuit to sleep, so a real
+         * fetch runs this iteration and the overlay is shown. */
+        bool manual_fetch_pending = atomic_load(&image_display_manual_fetch);
+
         /* ── Prefetch SWAP CONSUMER (Phase 4) ───────────────────────────────────
          * The producer (end of this loop) may have fetched/rendered the NEXT
          * slideshow image source into goes_prefetch_data ahead of time. When the
@@ -1003,6 +1023,15 @@ void goes_poll_task(void *arg)
             }
         }
 
+        /* A pending manual fetch always forces a fresh foreground fetch this
+         * iteration, even when the swap installed the right source: the manual
+         * path must download a new frame and show the loading animation. The swap
+         * above still ran (buffer ownership/leak invariants preserved); we only
+         * suppress the sleep-without-fetch fast path here. */
+        if (manual_fetch_pending) {
+            swap_satisfies_eff = false;
+        }
+
         /* The swap already installed the frame for the current effective source —
          * skip the foreground fetch/render this iteration and just sleep until the
          * next refresh tick. A prefetch for a DIFFERENT source (swap_satisfies_eff
@@ -1027,6 +1056,13 @@ void goes_poll_task(void *arg)
         /* Moon source: render locally on-device, no network. The result is
          * pushed into the same goes_data RGB565 sink the crossfade page reads. */
         if (eff_src == 1) {
+            /* The moon renders locally and has its own animation; it never uses the
+             * "Loading image..." overlay or the network fetch path below. Consume a
+             * pending manual-fetch request here so a Moon-targeted manual navigation
+             * does not leave the flag stuck (it is only otherwise consumed by the
+             * GOES/Solar/Custom overlay block). The local re-render below already
+             * refreshes the frame. */
+            atomic_exchange(&image_display_manual_fetch, false);
             time_t now; time(&now);
             /* The moon phase/orientation needs a correct wall clock. Before SNTP
              * sets the time (near-epoch at boot), rendering would show the wrong
@@ -1497,7 +1533,10 @@ void goes_poll_task(void *arg)
              * show actually ran — otherwise the error-hide below would be a
              * spurious no-op against an overlay that never appeared. */
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                if (manual_fetch || !nina_image_display_has_image()) {
+                /* manual_fetch (config change OR manual nav) always animates. The
+                 * bare cold-image trigger is suppressed while auto-cycle is ON so a
+                 * slideshow prefetch miss stays seamless (no overlay flash). */
+                if (manual_fetch || (!nina_image_display_has_image() && !cfg->auto_rotate_enabled)) {
                     nina_wait_overlay_show("Loading image...", band_name);
                     nina_wait_overlay_set_progress(-1);   /* indeterminate */
                     show_wait = true;

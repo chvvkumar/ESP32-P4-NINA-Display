@@ -105,6 +105,8 @@ esp_err_t spotify_status_get_handler(httpd_req_t *req);
 esp_err_t spotify_control_post_handler(httpd_req_t *req);
 esp_err_t image_display_config_get_handler(httpd_req_t *req);
 esp_err_t image_display_config_post_handler(httpd_req_t *req);
+esp_err_t pages_get_handler(httpd_req_t *req);
+esp_err_t navigate_post_handler(httpd_req_t *req);
 esp_err_t backup_get_handler(httpd_req_t *req);
 esp_err_t restore_post_handler(httpd_req_t *req);
 esp_err_t status_get_handler(httpd_req_t *req);

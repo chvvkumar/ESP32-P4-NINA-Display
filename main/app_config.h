@@ -46,10 +46,12 @@ extern "C" {
 #define ARP_ORDER_CAPACITY 16   /* size of auto_rotate_order2[] */
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 46
+#define APP_CONFIG_VERSION 47
 
 #define WIDGET_STYLE_COUNT 13
 
+/* RETIRED v47: idle_page_override_target now stores a page_ref_t registry id
+ * (see page_registry.h). Enum kept temporarily for migration reference. */
 typedef enum {
     IDLE_TARGET_SUMMARY        = -1,
     IDLE_TARGET_CLOCK          =  0,
@@ -84,7 +86,7 @@ typedef struct {
     char mqtt_password[64];         // MQTT broker password
     char mqtt_topic_prefix[64];     // MQTT topic prefix (default "ninadisplay")
     uint16_t mqtt_port;             // MQTT broker port (default 1883)
-    int8_t   active_page_override;          // -1 = auto, 0 = allsky, 1 = summary, 2..N+1 = NINA, N+2 = settings, N+3 = sysinfo
+    int8_t   active_page_override;          // page_ref_t registry id (see ui/page_registry.h)
     bool     auto_rotate_enabled;            // enable automatic page rotation
     uint16_t auto_rotate_interval_s;        // seconds between automatic page rotations
     uint8_t  auto_rotate_effect;            // 0 = instant, 1 = fade, 2 = slide-left, 3 = slide-right
@@ -163,7 +165,7 @@ typedef struct {
 
     // Idle page override
     bool     idle_page_override_enabled;
-    int8_t   idle_page_override_target; // idle_target_t enum value
+    int8_t   idle_page_override_target; // page_ref_t registry id (see ui/page_registry.h)
     bool     idle_page_persistent;      // Return to idle page after manual navigation
                                         // RETIRED in v44 — reserved; no longer read. Job moved to nav_grace_s.
     bool     idle_indicator_enabled;    // Show idle indicator on display (default true)
@@ -588,6 +590,121 @@ _Static_assert(offsetof(app_config_t, auto_rotate_order2) ==
                    offsetof(app_config_v45_t, custom_update_interval_s) +
                        sizeof(((app_config_v45_t *)0)->custom_update_interval_s),
                "app_config_v45_t snapshot drifted from app_config_t layout");
+
+/* ── Version 46 config struct — used only for NVS migration to v47 ────── */
+/* Layout-identical to app_config_t. v47 changes no field layout — it only    */
+/* remaps the stored VALUES of active_page_override and                       */
+/* idle_page_override_target onto page_registry.h ids — so this snapshot is a  */
+/* verbatim copy of the current struct body.                                  */
+typedef struct {
+    uint32_t config_version;
+    char api_url[3][128];
+    char ntp_server[64];
+    char tz_string[64];
+    char filter_colors[3][512];
+    char rms_thresholds[3][256];
+    char hfr_thresholds[3][256];
+    int theme_index;
+    int brightness;
+    int color_brightness;
+    bool mqtt_enabled;
+    char mqtt_broker_url[128];
+    char mqtt_username[64];
+    char mqtt_password[64];
+    char mqtt_topic_prefix[64];
+    uint16_t mqtt_port;
+    int8_t   active_page_override;
+    bool     auto_rotate_enabled;
+    uint16_t auto_rotate_interval_s;
+    uint8_t  auto_rotate_effect;
+    bool     auto_rotate_skip_disconnected;
+    uint8_t  auto_rotate_pages;
+    uint8_t  update_rate_s;
+    uint8_t  graph_update_interval_s;
+    uint8_t  connection_timeout_s;
+    uint8_t  toast_duration_s;
+    bool     debug_mode;
+    bool     instance_enabled[3];
+    bool     screen_sleep_enabled;
+    uint16_t screen_sleep_timeout_s;
+    bool     alert_flash_enabled;
+    uint8_t  idle_poll_interval_s;
+    bool     wifi_power_save;
+    uint8_t  widget_style;
+    uint8_t  auto_update_check;
+    uint8_t  update_channel;
+    bool     deep_sleep_enabled;
+    uint32_t deep_sleep_wake_timer_s;
+    bool     deep_sleep_on_idle;
+    uint8_t  screen_rotation;
+    char     hostname[32];
+    char     allsky_hostname[128];
+    uint16_t allsky_update_interval_s;
+    float    allsky_dew_offset;
+    char     allsky_field_config[1536];
+    char     allsky_thresholds[1024];
+    bool     allsky_enabled;
+    bool     demo_mode;
+    bool     spotify_enabled;
+    char     spotify_client_id[64];
+    uint16_t spotify_poll_interval_ms;
+    bool     spotify_show_progress_bar;
+    uint8_t  spotify_overlay_timeout_s;
+    bool     spotify_minimal_mode;
+    bool     spotify_scroll_text;
+    wifi_network_t wifi_networks[3];
+    bool     spotify_overlay_visible;
+    uint8_t  auto_rotate_order[8];
+    uint8_t  toast_aggregation_window_s;
+    uint32_t toast_notify_mask;
+    bool     toast_instance_muted[3];
+    uint8_t  weather_provider;
+    char     weather_api_key[64];
+    float    weather_lat;
+    float    weather_lon;
+    char     weather_location_name[64];
+    uint16_t weather_poll_interval_s;
+    uint8_t  weather_units;
+    uint8_t  weather_time_format;
+    bool     idle_page_override_enabled;
+    int8_t   idle_page_override_target;
+    bool     idle_page_persistent;
+    bool     idle_indicator_enabled;
+    char     admin_password[33];
+    bool     auth_enabled;
+    bool     image_display_enabled;
+    bool     image_display_show_overlay;
+    char     goes_region[16];
+    uint16_t goes_update_interval_s;
+    uint8_t  image_display_source;
+    uint8_t  moon_bg_style;
+    float    moon_lat;
+    float    moon_lon;
+    uint8_t  solar_band;
+    bool     image_display_crop;
+    uint8_t  moon_drag_light_mode;
+    uint8_t  moon_flip_u;
+    uint8_t  moon_flip_v;
+    float    moon_roll_offset;
+    float    moon_yaw_offset;
+    float    moon_pitch_offset;
+    uint8_t  moon_north_up;
+    uint8_t  moon_spin_mode;
+    uint8_t  moon_spin_return_s;
+    uint8_t  crash_log_retention_days;
+    uint8_t  auto_rotate_pages_hi;
+    uint8_t  auto_rotate_order_ext;
+    uint8_t  goes_orientation;
+    uint8_t  solar_orientation;
+    uint16_t nav_grace_s;
+    char     custom_image_url[256];
+    uint8_t  custom_orientation;
+    uint16_t custom_update_interval_s;
+    uint8_t  auto_rotate_order2[16];
+} app_config_v46_t;
+
+_Static_assert(sizeof(app_config_v46_t) == sizeof(app_config_t),
+               "app_config_v46_t snapshot drifted from app_config_t layout");
 
 // v17 snapshot — AllSky fields without allsky_enabled
 typedef struct {

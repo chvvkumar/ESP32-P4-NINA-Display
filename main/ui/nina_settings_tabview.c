@@ -126,7 +126,7 @@ static void apply_nav_side_effects(const app_config_t *old_cfg, const app_config
         int total = nina_dashboard_get_total_page_count();
         if (claim >= 0 && claim < total &&
             claim != SETTINGS_PAGE_IDX(page_count)) {
-            nav_arbiter_submit_user(claim, esp_timer_get_time() / 1000);
+            nav_arbiter_submit_user(claim, esp_timer_get_time() / 1000, -1);
         }
     }
 }

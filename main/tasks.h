@@ -87,6 +87,12 @@ int8_t image_source_get_effective(void);
  *  Stores the requested source and wakes goes_poll_task. */
 void image_source_trigger_prefetch(int8_t src);
 
+/** Force the Image Display page to show the loading animation and fetch a fresh
+ *  image on the next poll cycle. Used for manual navigation to the page so a
+ *  warm prefetch buffer does not suppress the fetch/overlay. Sets
+ *  image_display_manual_fetch and wakes goes_poll_task. */
+void image_display_request_manual_fetch(void);
+
 /** Set by the moon-page tap handler to request a one-shot cycle+spin animation.
  *  Consumed (cleared) once by goes_poll_task via atomic_exchange. */
 extern _Atomic bool moon_anim_request;

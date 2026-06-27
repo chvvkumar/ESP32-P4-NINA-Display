@@ -10,6 +10,7 @@
 #include "ui/nina_dashboard.h"          /* nina_dashboard_get_total_page_count() */
 #include "ui/nina_dashboard_internal.h" /* PAGE_IDX_SUMMARY, SETTINGS_PAGE_IDX, SYSINFO_PAGE_IDX page-index macros */
 #include "ui/nina_nav_arbiter.h"        /* nav_arbiter_submit_user — live Home Page USER claim */
+#include "ui/page_registry.h"           /* page_ref_navigate, PAGE_REF_ID_MAX, PAGE_REF_SETTINGS */
 
 extern const uint8_t config_html_start[] asm("_binary_config_ui_html_start");
 extern const uint8_t config_html_end[]   asm("_binary_config_ui_html_end");
@@ -941,19 +942,15 @@ static app_config_t *parse_config_from_json(cJSON *root)
     JSON_TO_BOOL(root, "auto_rotate_enabled", cfg->auto_rotate_enabled);
     JSON_TO_BOOL(root, "auto_rotate_skip_disconnected", cfg->auto_rotate_skip_disconnected);
 
-    /* Home Page value space (matches validate_config in app_config.c): -1 (Auto =
-     * Summary) or any navigable page index 0..SYSINFO, excluding the Settings page
-     * (never a valid Home Page). Upper bound = SYSINFO index = SYSINFO_PAGE_IDX(
-     * MAX_NINA_INSTANCES) = 9; Settings index = SETTINGS_PAGE_IDX(MAX_NINA_INSTANCES)
-     * = 8. Out-of-range or the Settings index falls back to -1 (Auto). The reserved-
-     * band macros come from nina_dashboard_internal.h (via nina_dashboard.h). */
+    /* Home Page now stores a page_ref registry id (0..PAGE_REF_ID_MAX-1). The web
+     * UI always sends a concrete id (never -1). Reject out-of-range ids and the
+     * Settings page (never a valid Home Page target) by falling back to 0
+     * (Summary). PAGE_REF_ID_MAX/PAGE_REF_SETTINGS come from ui/page_registry.h. */
     cJSON *apo_item = cJSON_GetObjectItem(root, "active_page_override");
     if (cJSON_IsNumber(apo_item)) {
         int v = apo_item->valueint;
-        if (v < -1 ||
-            v > SYSINFO_PAGE_IDX(MAX_NINA_INSTANCES) ||
-            v == SETTINGS_PAGE_IDX(MAX_NINA_INSTANCES)) {
-            v = -1;   /* Auto/Summary */
+        if (v < 0 || v >= PAGE_REF_ID_MAX || v == PAGE_REF_SETTINGS) {
+            v = 0;   /* Summary */
         }
         cfg->active_page_override = (int8_t)v;
     }
@@ -1279,12 +1276,13 @@ static app_config_t *parse_config_from_json(cJSON *root)
 
     // Idle override
     JSON_TO_BOOL(root, "idle_page_override_enabled", cfg->idle_page_override_enabled);
-    /* idle_page_override_target: idle_target_t enum, valid range -1 (Summary) .. 7 (NINA3) */
+    /* idle_page_override_target now stores a page_ref registry id
+     * (0..PAGE_REF_ID_MAX-1). Out-of-range falls back to 0 (Summary).
+     * PAGE_REF_ID_MAX comes from ui/page_registry.h. */
     cJSON *ipt_item = cJSON_GetObjectItem(root, "idle_page_override_target");
     if (cJSON_IsNumber(ipt_item)) {
         int v = ipt_item->valueint;
-        if (v < IDLE_TARGET_SUMMARY) v = IDLE_TARGET_SUMMARY;
-        if (v > IDLE_TARGET_NINA3) v = IDLE_TARGET_NINA3;
+        if (v < 0 || v >= PAGE_REF_ID_MAX) v = 0;
         cfg->idle_page_override_target = (int8_t)v;
     }
     JSON_TO_BOOL(root, "idle_indicator_enabled", cfg->idle_indicator_enabled);
@@ -1468,18 +1466,12 @@ esp_err_t config_post_handler(httpd_req_t *req)
     app_config_save(cfg);   /* applies app_config_normalize_nav_exclusivity() internally */
     config_trigger_side_effects(old_cfg, cfg);
 
-    /* Home Page live (Q7): if active_page_override changed, navigate there now via
-     * a USER claim. -1 (Auto) resolves to the Summary page. Skip the Settings page
-     * (never a valid Home Page target). nina_dashboard.h pulls in the page-index
-     * macros transitively via nina_dashboard_internal.h. */
+    /* Home Page live (Q7): if active_page_override changed, navigate there now.
+     * The field is a page_ref registry id; page_ref_navigate() resolves the id,
+     * sets the image-source override for image-source ids (which the old direct
+     * page-index claim did not), and issues the USER-claim navigation. */
     if (cfg->active_page_override != old_cfg->active_page_override) {
-        int hp = cfg->active_page_override;
-        int claim = (hp < 0) ? PAGE_IDX_SUMMARY : hp;   /* -1 (Auto) -> Summary */
-        int total = nina_dashboard_get_total_page_count();
-        if (claim >= 0 && claim < total &&
-            claim != SETTINGS_PAGE_IDX(MAX_NINA_INSTANCES)) {
-            nav_arbiter_submit_user(claim, esp_timer_get_time() / 1000);
-        }
+        page_ref_navigate((page_ref_t)cfg->active_page_override);
     }
 
     free(old_cfg);

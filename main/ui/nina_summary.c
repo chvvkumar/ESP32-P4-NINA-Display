@@ -235,7 +235,7 @@ static void summary_card_click_cb(lv_event_t *e) {
     if (page >= 0 && instance_index >= 0 && instance_index < MAX_NINA_INSTANCES
         && nina_slot_available[instance_index]) {
         nina_dashboard_show_page_animated(page, 0, 0);
-        nav_arbiter_submit_user(page, esp_timer_get_time() / 1000);
+        nav_arbiter_submit_user(page, esp_timer_get_time() / 1000, -1);
     }
 }
 
