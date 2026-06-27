@@ -41,6 +41,11 @@ static struct {
                                         * stop wants (0-3), or -1 if not an image stop */
     int8_t   current_committed_img_source; /* image source last committed to the
                                         * Image Display page, or -1 */
+    _Atomic bool pinned;           /* in-memory navigation pin: hold the USER page,
+                                    * skip the automatic ladder; resets on reboot.
+                                    * Atomic: written by the web/LVGL task
+                                    * (set_pin), read by the data task (resolve),
+                                    * mirroring user_stamp_ms's cross-core guard. */
 } s_arb;
 
 void nav_arbiter_init(void) {
@@ -54,6 +59,7 @@ void nav_arbiter_init(void) {
     s_arb.idle_claim_active = false;
     s_arb.pending_img_source = -1;
     s_arb.current_committed_img_source = -1;
+    s_arb.pinned = false;
     s_arb.current_committed = nina_dashboard_get_active_page();
     ESP_LOGI(TAG, "nav arbiter init (committed page=%d)", s_arb.current_committed);
 }
@@ -93,6 +99,31 @@ void nav_arbiter_notify_modal_close(int64_t now_ms) {
 void nav_arbiter_notify_slideshow_tick(void) { s_arb.slideshow_advance = true; }
 
 bool nav_arbiter_idle_active(void) { return s_arb.idle_claim_active; }
+
+void nav_arbiter_set_pin(bool on, int abs_page, int8_t img_src, int64_t now_ms) {
+    if (on) {
+        s_arb.pinned = true;
+        if (abs_page >= 0) {
+            s_arb.user_page = abs_page;
+            s_arb.user_img_source = img_src;
+        } else if (s_arb.user_page < 0) {
+            s_arb.user_page = s_arb.current_committed;
+            s_arb.user_img_source = s_arb.current_committed_img_source;
+        }
+    } else {
+        s_arb.pinned = false;
+        /* Restamp grace so the current page holds for nav_grace_s before the
+         * automatic ladder resumes (no jarring instant jump). */
+        s_arb.user_stamp_ms = now_ms;
+    }
+    /* Wake the data task so the arbiter re-resolves promptly (mirrors
+     * nav_arbiter_submit_user's wake). */
+    if (data_task_handle) {
+        xTaskNotifyGive(data_task_handle);
+    }
+}
+
+bool nav_arbiter_is_pinned(void) { return s_arb.pinned; }
 
 /* ── Ladder helpers (Task 3.2) ──
  *
@@ -321,7 +352,19 @@ void nav_arbiter_resolve(int64_t now_ms) {
      * a non-slideshow arrival at the image page shows the persisted default. */
     s_arb.pending_img_source = -1;
 
-    if (user_active) {
+    if (s_arb.pinned) {
+        /* PIN rung: hold the USER selection with no grace expiry; slideshow,
+         * session, idle, and default are all skipped. Manual navigation while
+         * pinned updates s_arb.user_page via nav_arbiter_submit_user(), so the
+         * held page follows manual nav and persists until the pin is cleared. */
+        if (s_arb.user_page < 0) {
+            s_arb.user_page = s_arb.current_committed;
+            s_arb.user_img_source = s_arb.current_committed_img_source;
+        }
+        desired = s_arb.user_page;
+        src = NAV_SRC_USER;
+        s_arb.pending_img_source = s_arb.user_img_source;
+    } else if (user_active) {
         desired = s_arb.user_page; src = NAV_SRC_USER;
         /* Pin the user's chosen image source (0-3) so the commit block does not
          * clobber the override back to the persisted default. -1 for non-image

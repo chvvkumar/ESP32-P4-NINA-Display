@@ -2978,6 +2978,32 @@
           <p class="api-purpose" style="margin-top:8px">The response may include "error_msg" carrying the reason of the last completed fetch failure.</p>
         </div>
 
+        <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/nav/pin</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Pin the displayed page. While pinned, all automatic page changes are suspended (auto-rotate, session auto-follow, idle, and default re-home) and the current page is held until cleared. Manual navigation still works while pinned, and the chosen page persists. The pin is in-memory only and resets on reboot. It does not change the auto-rotate setting, it only suspends it while active.</p>
+          <div class="api-note">
+            Query parameters: <code>on</code> = 1 to pin, 0 to clear (required). Optional <code>id</code> = a page id from /api/pages to navigate to that page and pin it in one call.
+          </div>
+          <div class="api-snip-label">Request (pin current page)</div>
+          <div class="api-snip" data-curl="curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST 'http://HOST/api/nav/pin?on=1'">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST 'http://<span class="api-host">HOST</span>/api/nav/pin?on=1'</pre>
+          </div>
+          <div class="api-snip-label">Request (go to a page by id and pin)</div>
+          <div class="api-snip" data-curl="curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST 'http://HOST/api/nav/pin?on=1&amp;id=7'">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST 'http://<span class="api-host">HOST</span>/api/nav/pin?on=1&amp;id=7'</pre>
+          </div>
+          <div class="api-snip-label">Request (clear, resume automation)</div>
+          <div class="api-snip" data-curl="curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST 'http://HOST/api/nav/pin?on=0'">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST 'http://<span class="api-host">HOST</span>/api/nav/pin?on=0'</pre>
+          </div>
+          <div class="api-snip-label">Response</div>
+          <div class="api-snip"><pre>{"pinned":true}</pre></div>
+          <p class="api-purpose" style="margin-top:8px">The same state is exposed as the <code>nav_pinned</code> Control item: GET /api/control/get?name=nav_pinned returns {"name":"nav_pinned","type":"bool","value":false,"label":"Off",...}. Toggle or set it like any bool (for example toggle?name=nav_pinned), so a macro key can show Pinned or Auto (On or Off) and flip it. The pin overrides auto-rotate while active.</p>
+        </div>
+
         <div class="api-note">
           <strong>Behavior notes.</strong> cycle wraps from max to min; set and adjust clamp to the range; toggle works on bool items only. The special item name <code>page</code> controls the current page and is the one item that navigates rather than saving config: cycle moves to the next available page, and set selects a page by id. Item names match the config field names used elsewhere in this documentation.
         </div>

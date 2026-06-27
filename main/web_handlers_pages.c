@@ -1,9 +1,12 @@
 #include "web_server_internal.h"
 #include "ui/page_registry.h"
+#include "ui/nina_nav_arbiter.h"
 #include "cJSON.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include <string.h>
+#include <strings.h>   /* strcasecmp */
 #include <stdlib.h>
 
 static const char *PAGES_TAG __attribute__((unused)) = "web_pages";
@@ -114,5 +117,75 @@ esp_err_t navigate_post_handler(httpd_req_t *req)
 
     page_ref_navigate(entry->id);
     httpd_resp_sendstr(req, "OK");
+    return ESP_OK;
+}
+
+/* POST /api/nav/pin?on=<1|0|true|false>[&id=<page_ref id>]
+ * Engage or release the in-memory navigation pin. While pinned the arbiter holds
+ * the selected page and suspends all automatic page changes. RUNTIME ONLY: the
+ * pin resets to off on reboot (no config field). Optional id selects the page to
+ * pin (resolved via page_ref_navigate); omitted pins the current page. */
+esp_err_t nav_pin_post_handler(httpd_req_t *req)
+{
+    REQUIRE_AUTH(req);
+
+    char qbuf[160] = {0};
+    char onbuf[16] = {0};
+    char idbuf[16] = {0};
+    bool have_on = false;
+    bool have_id = false;
+
+    if (httpd_req_get_url_query_str(req, qbuf, sizeof(qbuf)) == ESP_OK) {
+        if (httpd_query_key_value(qbuf, "on", onbuf, sizeof(onbuf)) == ESP_OK &&
+            onbuf[0] != '\0') {
+            have_on = true;
+        }
+        if (httpd_query_key_value(qbuf, "id", idbuf, sizeof(idbuf)) == ESP_OK &&
+            idbuf[0] != '\0') {
+            have_id = true;
+        }
+    }
+
+    if (!have_on) {
+        return send_400(req, "missing on");
+    }
+
+    bool on;
+    if (strcasecmp(onbuf, "true") == 0 || strcmp(onbuf, "1") == 0) {
+        on = true;
+    } else if (strcasecmp(onbuf, "false") == 0 || strcmp(onbuf, "0") == 0) {
+        on = false;
+    } else {
+        return send_400(req, "invalid on");
+    }
+
+    int64_t now_ms = esp_timer_get_time() / 1000;
+
+    if (on) {
+        if (have_id) {
+            /* Bounds-checked parse: reject non-numeric (endptr) and out-of-range
+             * ids before casting to page_ref_t. Mirrors ctrl_parse_int's strtol
+             * style; atoi() would treat garbage as 0 and is UB on overflow. */
+            char *end = NULL;
+            long idv = strtol(idbuf, &end, 10);
+            if (end == idbuf || *end != '\0' || idv < 0 ||
+                idv >= (long)PAGE_REF_ID_MAX) {
+                return send_400(req, "invalid id");
+            }
+            /* Move the USER selection to the requested page first, then pin it. */
+            if (!page_ref_navigate((page_ref_t)idv)) {
+                return send_400(req, "page not available");
+            }
+        }
+        nav_arbiter_set_pin(true, -1, -1, now_ms);
+    } else {
+        nav_arbiter_set_pin(false, -1, -1, now_ms);
+    }
+
+    char resp[24];
+    snprintf(resp, sizeof(resp), "{\"pinned\":%s}",
+             nav_arbiter_is_pinned() ? "true" : "false");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, resp);
     return ESP_OK;
 }

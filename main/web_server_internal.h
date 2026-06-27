@@ -115,6 +115,7 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req);
 esp_err_t image_display_refresh_post_handler(httpd_req_t *req);
 esp_err_t pages_get_handler(httpd_req_t *req);
 esp_err_t navigate_post_handler(httpd_req_t *req);
+esp_err_t nav_pin_post_handler(httpd_req_t *req);
 esp_err_t control_list_get_handler(httpd_req_t *req);
 esp_err_t control_get_get_handler(httpd_req_t *req);
 esp_err_t control_toggle_post_handler(httpd_req_t *req);
