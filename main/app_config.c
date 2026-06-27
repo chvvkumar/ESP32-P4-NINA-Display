@@ -701,6 +701,12 @@ static void set_defaults(app_config_t *cfg) {
     /* Default rotation order: Summary, AllSky, Spotify, Clock, NINA1, NINA2, NINA3, SysInfo */
     for (int i = 0; i < 8; i++) cfg->auto_rotate_order[i] = (uint8_t)i;
     cfg->auto_rotate_order_ext = 8;  // 9th slot = bit index 8 (Image Display)
+    /* Default flat slideshow order (auto_rotate_order2): ARP_IDX_* values 0..7
+     * only. Image Display (ARP_IDX_IMG_GOES, index 8) stays OPT-IN, excluded from
+     * the fresh-install default rotation. memset() above already cleared the
+     * array, so set the explicit defaults and pad the tail (8..15) with 0xFF. */
+    for (int i = 0; i < 8; i++) cfg->auto_rotate_order2[i] = (uint8_t)i;   // 0..7 (Clock is last)
+    for (int i = 8; i < ARP_ORDER_CAPACITY; i++) cfg->auto_rotate_order2[i] = 0xFF;
     cfg->update_rate_s = 5;
     cfg->graph_update_interval_s = 10;
     cfg->connection_timeout_s = 6;
@@ -1890,6 +1896,38 @@ static void migrate_from_v42(const void *raw, size_t raw_size, app_config_t *cfg
 /* --- v43 → v44 migration: rename active_page_override semantics to "Home Page";
  *     collapse slideshow mask+order into one ordered list; add nav_grace_s;
  *     drop idle_page_persistent; normalize mode exclusivity. --- */
+/* Build the flat auto_rotate_order2[] list from the legacy 9-slot order
+ * already present in cfg (auto_rotate_order[0..7] + auto_rotate_order_ext).
+ * Bit-indices 0-7 copy through unchanged; the single legacy Image Display
+ * stop (bit-index 8) maps to the per-source ARP_IDX_IMG_* matching
+ * cfg->image_display_source (0->GOES,1->Moon,2->Solar,3->Custom). 0xFF
+ * terminators are skipped; order is preserved; the result is 0xFF-padded. */
+static void build_order2_from_legacy(app_config_t *cfg)
+{
+    for (int i = 0; i < ARP_ORDER_CAPACITY; i++) cfg->auto_rotate_order2[i] = 0xFF;
+
+    int dn = 0;
+    for (int i = 0; i < 9 && dn < ARP_ORDER_CAPACITY; i++) {
+        uint8_t v = (i < 8) ? cfg->auto_rotate_order[i] : cfg->auto_rotate_order_ext;
+        if (v == 0xFF) continue;
+        uint8_t mapped;
+        if (v == 8) {
+            /* Legacy single Image Display stop -> per-source stop. */
+            switch (cfg->image_display_source) {
+                case 1:  mapped = ARP_IDX_IMG_MOON;   break;
+                case 2:  mapped = ARP_IDX_IMG_SOLAR;  break;
+                case 3:  mapped = ARP_IDX_IMG_CUSTOM; break;
+                default: mapped = ARP_IDX_IMG_GOES;   break;
+            }
+        } else if (v <= 7) {
+            mapped = v;   /* indices 0-7 are identical across schemes */
+        } else {
+            continue;     /* skip invalid legacy index (9-254) */
+        }
+        cfg->auto_rotate_order2[dn++] = mapped;
+    }
+}
+
 static void migrate_from_v43(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
@@ -1930,6 +1968,12 @@ static void migrate_from_v43(const void *raw, size_t raw_size, app_config_t *cfg
     for (int i = 0; i < 8; i++) cfg->auto_rotate_order[i] = (i < dn) ? derived[i] : 0xFF;
     cfg->auto_rotate_order_ext = (dn > 8) ? derived[8] : 0xFF;
 
+    /* Translate the derived legacy 9-slot order into the flat auto_rotate_order2[]
+     * list so v43 users keep their saved slideshow order (consistent with
+     * v44/v45). build_order2_from_legacy() splits the single Image Display stop
+     * into the per-source ARP_IDX_IMG_* matching this device's image_display_source. */
+    build_order2_from_legacy(cfg);
+
     /* nav_grace_s default. */
     cfg->nav_grace_s = 10;
 
@@ -1949,7 +1993,7 @@ static void migrate_from_v43(const void *raw, size_t raw_size, app_config_t *cfg
         (int)cfg->active_page_override, dn, (int)cfg->nav_grace_s);
 }
 
-/* --- v44 → v45 migration: add Custom Image URL source (Image Display source
+/* --- v44 → v46 migration: add Custom Image URL source (Image Display source
  *     index 3) — custom_image_url, custom_orientation, custom_update_interval_s. --- */
 static void migrate_from_v44(const void *raw, size_t raw_size, app_config_t *cfg)
 {
@@ -1963,8 +2007,34 @@ static void migrate_from_v44(const void *raw, size_t raw_size, app_config_t *cfg
     cfg->custom_orientation = 0;
     cfg->custom_update_interval_s = 60;
 
+    /* The legacy 9-slot order (auto_rotate_order[0..7] + auto_rotate_order_ext)
+     * lives at this struct offset and was already copied above. Translate it
+     * into the new flat auto_rotate_order2[] list, splitting the single
+     * Image Display stop into the per-source ARP_IDX_IMG_* matching this
+     * device's saved image_display_source. */
+    build_order2_from_legacy(cfg);
+
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v44 to v%d", APP_CONFIG_VERSION);
+}
+
+/* --- v45 → v46 migration: append auto_rotate_order2[16] (each image source is
+ *     now its own distinct slideshow stop). The legacy auto_rotate_order[8] +
+ *     auto_rotate_order_ext encoding is preserved for binary stability but no
+ *     longer drives the slideshow. --- */
+static void migrate_from_v45(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v45_t) ? raw_size : sizeof(app_config_v45_t);
+    memcpy(cfg, raw, copy);
+
+    /* Translate the old 9-slot order into the new flat auto_rotate_order2[],
+     * mapping the single old Image Display stop (bit-index 8) to the matching
+     * per-source ARP_IDX_IMG_* based on cfg->image_display_source. */
+    build_order2_from_legacy(cfg);
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v45 to v%d", APP_CONFIG_VERSION);
 }
 
 static void migrate_from_v36(const void *raw, size_t raw_size, app_config_t *cfg)
@@ -2536,6 +2606,15 @@ static bool validate_config(app_config_t *cfg) {
         cfg->auto_rotate_order_ext = 8;  // 9th slot = Image Display bit index
         fixed = true;
     }
+    /* Validate the flat slideshow order: any entry that is not the 0xFF
+     * terminator and out of ARP_IDX_* range is dropped to 0xFF. */
+    for (int i = 0; i < ARP_ORDER_CAPACITY; i++) {
+        if (cfg->auto_rotate_order2[i] != 0xFF &&
+            cfg->auto_rotate_order2[i] >= ARP_IDX_MAX) {
+            cfg->auto_rotate_order2[i] = 0xFF;
+            fixed = true;
+        }
+    }
     if (cfg->update_rate_s < 1 || cfg->update_rate_s > 10) {
         cfg->update_rate_s = 2;
         fixed = true;
@@ -2716,8 +2795,14 @@ void app_config_init(void) {
             nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(handle);
         }
+    } else if (version_check == 45) {
+        /* v45 → v46: added auto_rotate_order2 (each image source is a distinct slideshow stop) */
+        migrate_from_v45(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 44) {
-        /* v44 → v45: added Custom Image URL source (custom_image_url, custom_orientation, custom_update_interval_s) */
+        /* v44 → v46: added Custom Image URL source, then auto_rotate_order2 */
         migrate_from_v44(raw, stored_size, &s_config);
         validate_config(&s_config);
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));

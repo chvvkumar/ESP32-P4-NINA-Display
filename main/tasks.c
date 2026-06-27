@@ -172,7 +172,60 @@ static TaskHandle_t allsky_task_handle = NULL;
 TaskHandle_t goes_task_handle = NULL;
 _Atomic bool image_display_page_active = false;
 goes_data_t goes_data;
+/* Spare buffer the slideshow prefetch loads the NEXT source into (Phase 4).
+ * static: tasks.c is the sole writer/reader; narrowing scope prevents accidental
+ * unlocked cross-task access (no extern in tasks.h). */
+static goes_data_t goes_prefetch_data;
+
+/* Runtime image-source override (RAM only — never persisted to NVS).
+ * -1 = no override (use the persisted cfg->image_display_source);
+ * 0-3 = the slideshow-selected source (GOES/Moon/Solar/Custom).
+ * Written by the navigation arbiter (another task), read by goes_poll_task and
+ * the Image Display UI — int8 atomics are lock-free, so a plain load/store is
+ * the correct cross-task pattern. */
+static _Atomic int8_t s_image_source_override = -1;
+/* Source the background prefetch should load (set by image_source_trigger_prefetch,
+ * consumed in Phase 4). -1 = nothing pending. */
+static _Atomic int8_t s_prefetch_source = -1;
+/* Phase 4 prefetch hand-off. s_prefetch_ready is set by the prefetch PRODUCER in
+ * goes_poll_task once a NEXT-source frame has been fetched/rendered into
+ * goes_prefetch_data, and cleared by the SWAP CONSUMER at the top of the loop the
+ * moment it installs that buffer into goes_data. s_prefetch_ready_src records which
+ * image source (0=GOES,1=Moon,2=Solar,3=Custom) the ready buffer holds so the
+ * consumer can tell whether the swap already satisfies the current effective source
+ * and skip a redundant foreground fetch this iteration. Both are written ONLY by
+ * goes_poll_task (single writer); the atomics make the producer-then-consumer
+ * publish/consume safe within that one task across loop iterations. */
+static _Atomic bool   s_prefetch_ready = false;
+static _Atomic int8_t s_prefetch_ready_src = -1;
+
 static demo_task_params_t demo_params;
+
+/* ── Image-source override / prefetch plumbing ──
+ * The persisted default lives in cfg->image_display_source and is only changed
+ * by the web config POST handler. The slideshow drives the RAM-only override
+ * above so rotation never touches NVS. */
+void image_source_set_override(int8_t src)
+{
+    atomic_store(&s_image_source_override, src);
+}
+
+int8_t image_source_get_effective(void)
+{
+    int8_t ov = atomic_load(&s_image_source_override);
+    if (ov >= 0) {
+        return ov;
+    }
+    return (int8_t)app_config_get()->image_display_source;
+}
+
+void image_source_trigger_prefetch(int8_t src)
+{
+    atomic_store(&s_prefetch_source, src);
+    if (goes_task_handle) {
+        xTaskNotifyGive(goes_task_handle);
+    }
+}
 
 /**
  * @brief Page-change callback from the dashboard — signals the data task to re-tune polling.
@@ -755,6 +808,99 @@ void moon_overlay_info(char *age,  size_t age_sz,
     fmt_moon_event(set,  set_sz,  "Set",  s_rs_set,  s_rs_set_v,  now, use_24h);
 }
 
+/* ── Prefetch PRODUCER (Phase 4) ────────────────────────────────────────────
+ * Consume any pending prefetch request (s_prefetch_source, set by the arbiter via
+ * image_source_trigger_prefetch) and build that source's frame INTO
+ * goes_prefetch_data — never goes_data — so a later rotation to it can swap in a
+ * ready buffer with no network round-trip. Runs at the END of each goes_poll_task
+ * foreground iteration (both the moon path and the network path call it), so it
+ * only ever executes in the single goes_poll_task context that owns both structs.
+ *
+ * On success it sets s_prefetch_ready + s_prefetch_ready_src so the swap consumer
+ * at the top of the loop can install the buffer and decide whether it satisfies the
+ * then-current effective source. A failure (or an empty/invalid Custom URL) leaves
+ * s_prefetch_ready false, so the consumer simply does a normal foreground fetch
+ * later — the existing "Loading image..." graceful-miss path, no new code.
+ *
+ * MEMORY: every frame written here is heap_caps_malloc'd in PSRAM by the fetch/
+ * render helper (goes_client_poll* allocate the decoded RGB565; moon_sphere_render
+ * allocates the rendered RGB565). The buffer is owned by goes_prefetch_data until
+ * EITHER the swap consumer moves it into goes_data (and NULLs prefetch.image_buf),
+ * OR a subsequent prefetch overwrites it — so this helper frees any unconsumed
+ * prefetch frame before installing a new one, preventing a leak when two prefetch
+ * requests land without an intervening swap. */
+static void image_prefetch_run(const app_config_t *cfg)
+{
+    int8_t pf = atomic_exchange(&s_prefetch_source, -1);
+    if (pf < 0) return;
+
+    /* A prior prefetch frame that was never swapped in would leak when the new
+     * fetch below replaces the pointer (goes_client_poll* free the OLD buffer they
+     * find in the target, but the moon render assigns directly), so clear it here
+     * under the prefetch lock and drop the stale ready flag. */
+    if (goes_data_lock(&goes_prefetch_data, 1000)) {
+        if (goes_prefetch_data.image_buf) {
+            heap_caps_free(goes_prefetch_data.image_buf);
+            goes_prefetch_data.image_buf = NULL;
+        }
+        goes_data_unlock(&goes_prefetch_data);
+    }
+    atomic_store(&s_prefetch_ready, false);
+    atomic_store(&s_prefetch_ready_src, -1);
+
+    esp_err_t err = ESP_FAIL;
+    if (pf == 1) {
+        /* Moon: render locally (synchronous, ~300ms). Skip until the clock is
+         * valid so the phase/orientation is correct. */
+        time_t now; time(&now);
+        bool time_valid = (now > (time_t)1577836800);
+        if (time_valid && moon_sphere_init()) {
+            double lat = cfg->moon_lat, lon = cfg->moon_lon;
+            if (lat == 0.0 && lon == 0.0) { lat = cfg->weather_lat; lon = cfg->weather_lon; }
+            moon_state_t live;
+            moon_compute(now, lat, lon, &live);
+            uint16_t *img = moon_sphere_render(SCREEN_SIZE, SCREEN_SIZE, &live,
+                                               96, 48, cfg->moon_bg_style);
+            if (img) {
+                if (goes_data_lock(&goes_prefetch_data, 1000)) {
+                    goes_prefetch_data.image_buf    = (uint8_t *)img;
+                    goes_prefetch_data.image_w      = SCREEN_SIZE;
+                    goes_prefetch_data.image_h      = SCREEN_SIZE;
+                    goes_prefetch_data.vflip        = false;
+                    goes_prefetch_data.label[0]     = '\0';
+                    goes_prefetch_data.src_kind     = 1;   /* Moon */
+                    goes_prefetch_data.error_msg[0] = '\0';
+                    goes_prefetch_data.connected    = true;
+                    goes_prefetch_data.last_poll_ms = esp_timer_get_time() / 1000;
+                    goes_data_unlock(&goes_prefetch_data);
+                    err = ESP_OK;
+                } else {
+                    heap_caps_free(img);
+                }
+            }
+        }
+    } else if (pf == 3) {                                       /* Custom image URL */
+        if (cfg->custom_image_url[0] != '\0') {
+            err = goes_client_poll_url(cfg->custom_image_url, &goes_prefetch_data, true, "Custom", 3 /* Custom */);
+        }
+    } else if (pf == 2) {                                       /* Solar (SDO/AIA) */
+        const char *url = solar_band_url(cfg->solar_band);
+        if (url && url[0]) {
+            err = goes_client_poll_url(url, &goes_prefetch_data,
+                                       solar_band_vflip(cfg->solar_band),
+                                       solar_band_label(cfg->solar_band),
+                                       2 /* Solar */);
+        }
+    } else if (pf == 0 && cfg->goes_region[0] != '\0') {        /* GOES */
+        err = goes_client_poll(cfg->goes_region, &goes_prefetch_data);
+    }
+
+    if (err == ESP_OK) {
+        atomic_store(&s_prefetch_ready_src, pf);
+        atomic_store(&s_prefetch_ready, true);
+    }
+}
+
 void goes_poll_task(void *arg)
 {
     ESP_LOGI(TAG, "GOES poll task started");
@@ -769,9 +915,118 @@ void goes_poll_task(void *arg)
          * app_config_t onto this task's small stack. */
         const app_config_t *cfg = app_config_get();
 
+        /* Effective source for THIS iteration: the slideshow override if active,
+         * else the persisted default. Read ONCE so a mid-iteration arbiter change
+         * cannot make the fetch dispatch and the interval/label logic disagree. */
+        int8_t eff_src = image_source_get_effective();
+
+        /* ── Prefetch SWAP CONSUMER (Phase 4) ───────────────────────────────────
+         * The producer (end of this loop) may have fetched/rendered the NEXT
+         * slideshow image source into goes_prefetch_data ahead of time. When the
+         * arbiter then rotates to that source, install the pre-built buffer into
+         * goes_data here — instantly, with no network round-trip and no "Loading
+         * image..." overlay — instead of fetching it in the foreground below.
+         *
+         * Lock order is goes_data FIRST, then goes_prefetch_data, matching the
+         * single-writer invariant (only this task touches either struct) and the
+         * reader contract (nina_image_display_update locks goes_data, never the
+         * prefetch struct). Holding goes_data's lock across the buffer pointer move
+         * means the UI reader never sees a torn buffer. After the move the prefetch
+         * struct's image_buf is NULLed so ownership is transferred and a later
+         * prefetch re-mallocs cleanly (no double-free).
+         *
+         * swap_satisfies_eff records whether the swapped-in buffer is the source we
+         * are about to display this iteration. If it is, we skip the redundant
+         * foreground fetch (the screen already shows the right frame); if it is not
+         * (the prefetch was for a different source, e.g. the user manually navigated
+         * away from the slideshow's predicted next stop), the swap is discarded-in-
+         * place by leaving it installed but still falling through to fetch eff_src. */
+        bool swap_satisfies_eff = false;
+        {
+            bool ready = atomic_exchange(&s_prefetch_ready, false);
+            int8_t swapped_src = atomic_exchange(&s_prefetch_ready_src, -1);
+            if (ready && goes_prefetch_data.image_buf) {
+                bool moved = false;
+                if (goes_data_lock(&goes_data, 1000)) {
+                    if (goes_data_lock(&goes_prefetch_data, 1000)) {
+                        /* Free the frame being displaced, then move ownership of the
+                         * prefetched frame + its metadata into goes_data. */
+                        if (goes_data.image_buf) heap_caps_free(goes_data.image_buf);
+                        goes_data.image_buf    = goes_prefetch_data.image_buf;
+                        goes_data.image_w      = goes_prefetch_data.image_w;
+                        goes_data.image_h      = goes_prefetch_data.image_h;
+                        goes_data.vflip        = goes_prefetch_data.vflip;
+                        goes_data.src_kind     = goes_prefetch_data.src_kind;
+                        goes_data.connected    = goes_prefetch_data.connected;
+                        goes_data.last_poll_ms = esp_timer_get_time() / 1000;
+                        strlcpy(goes_data.label, goes_prefetch_data.label, sizeof(goes_data.label));
+                        goes_data.error_msg[0] = '\0';   /* a successful prefetch clears any stale error */
+                        goes_prefetch_data.image_buf = NULL;   /* ownership transferred */
+                        goes_data_unlock(&goes_prefetch_data);
+                        moved = true;
+                    }
+                    goes_data_unlock(&goes_data);
+                }
+
+                if (moved) {
+                    /* Signal the UI exactly like the moon resting commit does: push
+                     * the swapped frame to the panel immediately under the display
+                     * lock (force_redraw bypasses the new-image timestamp gate so a
+                     * same-millisecond stamp can't be skipped), and wake
+                     * data_update_task so its periodic image refresh also re-runs. */
+                    if (image_display_page_active) {
+                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_image_display_force_redraw();
+                            nina_image_display_update(&goes_data);
+                            bsp_display_unlock();
+                        }
+                    }
+                    if (data_task_handle) xTaskNotifyGive(data_task_handle);
+
+                    /* Only claim the foreground fetch is unnecessary when the frame
+                     * actually landed in goes_data AND it is the source we display
+                     * this iteration. A lock-miss (moved == false) falls through to a
+                     * normal foreground fetch — the graceful-miss path. */
+                    swap_satisfies_eff = (swapped_src == eff_src);
+                }
+
+                /* Lock-miss recovery: the ready flags were already cleared by the
+                 * atomic_exchange above, but a lock timeout (moved == false) left the
+                 * ~1MB prefetched PSRAM buffer stranded in goes_prefetch_data. Re-arm
+                 * the ready state so the next loop iteration retries the swap instead
+                 * of orphaning the buffer for the rest of the session (a leak if
+                 * rotation later stops and no further prefetch ever runs). */
+                if (!moved) {
+                    atomic_store(&s_prefetch_ready_src, swapped_src);
+                    atomic_store(&s_prefetch_ready, true);
+                }
+            }
+        }
+
+        /* The swap already installed the frame for the current effective source —
+         * skip the foreground fetch/render this iteration and just sleep until the
+         * next refresh tick. A prefetch for a DIFFERENT source (swap_satisfies_eff
+         * false) falls through to fetch eff_src normally (graceful miss). */
+        if (swap_satisfies_eff) {
+            uint32_t interval_ms;
+            if (eff_src == 3) {
+                interval_ms = (uint32_t)cfg->custom_update_interval_s * 1000;
+                if (interval_ms < 10000)   interval_ms = 10000;
+                if (interval_ms > 7200000) interval_ms = 7200000;
+            } else if (eff_src == 1) {
+                interval_ms = 60000;   /* moon recompute cadence */
+            } else {
+                interval_ms = (uint32_t)cfg->goes_update_interval_s * 1000;
+                if (interval_ms < 300000)  interval_ms = 300000;
+                if (interval_ms > 7200000) interval_ms = 7200000;
+            }
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(interval_ms));
+            continue;
+        }
+
         /* Moon source: render locally on-device, no network. The result is
          * pushed into the same goes_data RGB565 sink the crossfade page reads. */
-        if (cfg->image_display_source == 1) {
+        if (eff_src == 1) {
             time_t now; time(&now);
             /* The moon phase/orientation needs a correct wall clock. Before SNTP
              * sets the time (near-epoch at boot), rendering would show the wrong
@@ -889,7 +1144,7 @@ void goes_poll_task(void *arg)
                 int64_t prev_frame_us = esp_timer_get_time();
                 freespin_hold = false;   /* re-evaluated for this outer iteration */
                 while (!moon_drag_settled()) {
-                    if (!image_display_page_active || cfg->image_display_source != 1) break;
+                    if (!image_display_page_active || eff_src != 1) break;
                     ran_drag = true;   /* a drag frame is about to be shown */
                     int64_t frame_t0 = esp_timer_get_time();
 
@@ -1013,6 +1268,7 @@ void goes_poll_task(void *arg)
                                 goes_data.image_h = MOON_DRAG_SZ_TOUCH;
                                 goes_data.vflip = false;
                                 goes_data.label[0] = '\0';
+                                goes_data.src_kind = 1;   /* Moon */
                                 goes_data.connected = true;
                                 goes_data.last_poll_ms = esp_timer_get_time() / 1000;
                                 goes_data_unlock(&goes_data);
@@ -1055,7 +1311,7 @@ void goes_poll_task(void *arg)
                     uint16_t *hold_img = moon_sphere_render_ex(SCREEN_SIZE, SCREEN_SIZE, &live,
                                                                96, 48, cfg->moon_bg_style,
                                                                hy, hp, (moon_light_mode_t)cfg->moon_drag_light_mode);
-                    if (hold_img && image_display_page_active && cfg->image_display_source == 1 &&
+                    if (hold_img && image_display_page_active && eff_src == 1 &&
                         !moon_drag_active()) {
                         if (goes_data_lock(&goes_data, 1000)) {
                             if (goes_data.image_buf) heap_caps_free(goes_data.image_buf);
@@ -1064,6 +1320,7 @@ void goes_poll_task(void *arg)
                             goes_data.image_h = SCREEN_SIZE;
                             goes_data.vflip = false;
                             goes_data.label[0] = '\0';
+                            goes_data.src_kind = 1;   /* Moon */
                             goes_data.connected = true;
                             goes_data.last_poll_ms = esp_timer_get_time() / 1000;
                             goes_data_unlock(&goes_data);
@@ -1082,7 +1339,7 @@ void goes_poll_task(void *arg)
                     /* Sleep-poll the hold window. The configured seconds are read each
                      * iteration so a live web-UI change takes effect within one poll step. */
                     for (;;) {
-                        if (!image_display_page_active || cfg->image_display_source != 1) break;
+                        if (!image_display_page_active || eff_src != 1) break;
                         if (moon_drag_active()) break;   /* re-touch: outer continue re-enters the drag loop */
                         /* Mode switched to rubber band mid-hold, or the hold was cleared:
                          * resolve by snapping home (acceptable per spec). */
@@ -1109,7 +1366,7 @@ void goes_poll_task(void *arg)
                 if (ran_drag) {
                     int waited_ms = 0;
                     while (waited_ms < MOON_DRAG_REST_GRACE_MS) {
-                        if (!image_display_page_active || cfg->image_display_source != 1) break;
+                        if (!image_display_page_active || eff_src != 1) break;
                         if (moon_drag_active()) { regrabbed = true; break; }
                         vTaskDelay(pdMS_TO_TICKS(20));
                         waited_ms += 20;
@@ -1179,6 +1436,7 @@ void goes_poll_task(void *arg)
                         goes_data.image_h = MOON_SZ;
                         goes_data.vflip = false;
                         goes_data.label[0] = '\0';
+                        goes_data.src_kind = 1;   /* Moon */
                         goes_data.connected = true;
                         goes_data.last_poll_ms = esp_timer_get_time() / 1000;
                         goes_data_unlock(&goes_data);
@@ -1196,7 +1454,7 @@ void goes_poll_task(void *arg)
                          * instant (matching every other moon frame) so there is no
                          * midpoint brightness dip. */
                         if (image_display_page_active &&
-                            cfg->image_display_source == 1) {
+                            eff_src == 1) {
                             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                                 nina_image_display_force_redraw();
                                 nina_image_display_update(&goes_data);
@@ -1208,6 +1466,9 @@ void goes_poll_task(void *arg)
                     }
                 }
             }
+            /* Prefetch the NEXT slideshow image source (if the arbiter scheduled
+             * one) before sleeping, so a rotation to it swaps in instantly. */
+            image_prefetch_run(cfg);
             /* Recompute ~every 60s once time is valid so orientation tracks the
              * sky; poll every ~3s while waiting for the clock to sync. */
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(time_valid ? 60000 : 3000));
@@ -1230,7 +1491,7 @@ void goes_poll_task(void *arg)
         bool manual_fetch = atomic_exchange(&image_display_manual_fetch, false);
         bool show_wait = false;
         if (image_display_page_active) {
-            const char *band_name = (cfg->image_display_source == 2)
+            const char *band_name = (eff_src == 2)
                                         ? solar_band_label(cfg->solar_band) : NULL;
             /* Only treat the overlay as shown if the lock was acquired and the
              * show actually ran — otherwise the error-hide below would be a
@@ -1246,7 +1507,7 @@ void goes_poll_task(void *arg)
         }
 
         esp_err_t fetch_err = ESP_OK;
-        if (cfg->image_display_source == 3) {                       /* Custom image URL */
+        if (eff_src == 3) {                                         /* Custom image URL */
             if (cfg->custom_image_url[0] == '\0') {
                 /* No URL configured: skip the fetch and surface the reason so the
                  * page shows why nothing loads instead of a stuck overlay. */
@@ -1258,13 +1519,13 @@ void goes_poll_task(void *arg)
             } else {
                 /* Custom uses the same software JPEG decode path as GOES/Solar,
                  * which needs a vertical flip to display upright. */
-                fetch_err = goes_client_poll_url(cfg->custom_image_url, &goes_data, true, "Custom");
+                fetch_err = goes_client_poll_url(cfg->custom_image_url, &goes_data, true, "Custom", 3 /* Custom */);
             }
-        } else if (cfg->image_display_source == 2) {                /* Solar (SDO/AIA) */
+        } else if (eff_src == 2) {                                  /* Solar (SDO/AIA) */
             const char *url = solar_band_url(cfg->solar_band);
             /* All solar bands need a vertical flip to display upright (see solar_band_vflip). */
             if (url && url[0]) {
-                fetch_err = goes_client_poll_url(url, &goes_data, solar_band_vflip(cfg->solar_band), solar_band_label(cfg->solar_band));
+                fetch_err = goes_client_poll_url(url, &goes_data, solar_band_vflip(cfg->solar_band), solar_band_label(cfg->solar_band), 2 /* Solar */);
             } else {
                 fetch_err = ESP_ERR_INVALID_ARG;
             }
@@ -1288,11 +1549,16 @@ void goes_poll_task(void *arg)
             nina_toast_show(TOAST_WARNING, "Failed to load image");
         }
 
+        /* Prefetch the NEXT slideshow image source (if the arbiter scheduled one)
+         * after the foreground fetch and before sleeping, so a rotation to it swaps
+         * in instantly. No-op when nothing is pending. */
+        image_prefetch_run(cfg);
+
         /* Sleep for the configured interval. The satellite sources (GOES/Solar)
          * clamp to 5min-2h to respect the image cadence; the custom source uses
          * its own interval (10s-2h) since the user controls the endpoint. */
         uint32_t interval_ms;
-        if (cfg->image_display_source == 3) {
+        if (eff_src == 3) {
             interval_ms = (uint32_t)cfg->custom_update_interval_s * 1000;
             if (interval_ms < 10000) interval_ms = 10000;
             if (interval_ms > 7200000) interval_ms = 7200000;
@@ -1926,6 +2192,7 @@ void data_update_task(void *arg) {
         /* Initialize GOES data struct so its mutex exists even in demo mode
          * (a later web-handler enable + page entry would otherwise NULL-deref). */
         goes_data_init(&goes_data);
+        goes_data_init(&goes_prefetch_data);
 
         instance_count = app_config_get_instance_count();
         instance_count = 3;  /* demo mode always shows all 3 instance profiles */
@@ -2098,6 +2365,7 @@ boot_update_check_done:
      * goes_data_init must run UNCONDITIONALLY so the mutex exists before any
      * later web-handler-triggered enable + page entry. */
     goes_data_init(&goes_data);
+    goes_data_init(&goes_prefetch_data);
     if (app_config_get()->image_display_enabled) {
         goes_ensure_task_running();
     }

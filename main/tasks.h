@@ -73,6 +73,20 @@ extern TaskHandle_t goes_task_handle;
 extern _Atomic bool image_display_page_active;
 extern goes_data_t goes_data;
 
+/** Runtime image-source override (RAM only — never persisted).
+ *  The slideshow/arbiter sets this so the Image Display page can rotate through
+ *  GOES/Moon/Solar/Custom without writing the persisted image_display_source.
+ *  src -1 clears the override (revert to the configured default). */
+void image_source_set_override(int8_t src);
+
+/** Effective image source: the override if set (>=0), otherwise the persisted
+ *  config value (app_config_get()->image_display_source). */
+int8_t image_source_get_effective(void);
+
+/** Request a background prefetch of image source @p src (Phase 4 consumes it).
+ *  Stores the requested source and wakes goes_poll_task. */
+void image_source_trigger_prefetch(int8_t src);
+
 /** Set by the moon-page tap handler to request a one-shot cycle+spin animation.
  *  Consumed (cleared) once by goes_poll_task via atomic_exchange. */
 extern _Atomic bool moon_anim_request;

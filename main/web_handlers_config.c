@@ -102,6 +102,18 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
         }
         cJSON_AddItemToObject(obj, "auto_rotate_order", order_arr);
     }
+    {
+        /* New flat slideshow list: 16 ARP_IDX_* slots, 0xFF terminates/skips. */
+        cJSON *order2_arr = cJSON_CreateArray();
+        for (int i = 0; i < ARP_ORDER_CAPACITY; i++) {
+            uint8_t v = cfg->auto_rotate_order2[i];
+            if (v == 0xFF) {
+                continue;   /* unused slot */
+            }
+            cJSON_AddItemToArray(order2_arr, cJSON_CreateNumber(v));
+        }
+        cJSON_AddItemToObject(obj, "auto_rotate_order2", order2_arr);
+    }
     cJSON_AddNumberToObject(obj, "update_rate_s", cfg->update_rate_s);
     cJSON_AddNumberToObject(obj, "graph_update_interval_s", cfg->graph_update_interval_s);
     cJSON_AddNumberToObject(obj, "connection_timeout_s", cfg->connection_timeout_s);
@@ -980,6 +992,27 @@ static app_config_t *parse_config_from_json(cJSON *root)
             cfg->auto_rotate_order[i] = 0xFF;
         }
         if (count < 9) cfg->auto_rotate_order_ext = 0xFF;
+    }
+
+    /* New flat slideshow list: 16 ARP_IDX_* slots. When present it is the
+     * authoritative source for auto_rotate_order2[]; the legacy parse above
+     * still populates the deprecated auto_rotate_order[] harmlessly. */
+    cJSON *order2_arr = cJSON_GetObjectItem(root, "auto_rotate_order2");
+    if (cJSON_IsArray(order2_arr)) {
+        int count2 = cJSON_GetArraySize(order2_arr);
+        if (count2 > ARP_ORDER_CAPACITY) count2 = ARP_ORDER_CAPACITY;
+        for (int i = 0; i < count2; i++) {
+            cJSON *item2 = cJSON_GetArrayItem(order2_arr, i);
+            uint8_t v = 0xFF;
+            if (cJSON_IsNumber(item2) &&
+                item2->valueint >= 0 && item2->valueint < ARP_IDX_MAX) {
+                v = (uint8_t)item2->valueint;
+            }
+            cfg->auto_rotate_order2[i] = v;
+        }
+        for (int i = count2; i < ARP_ORDER_CAPACITY; i++) {
+            cfg->auto_rotate_order2[i] = 0xFF;
+        }
     }
 
     cJSON *ur_item = cJSON_GetObjectItem(root, "update_rate_s");
