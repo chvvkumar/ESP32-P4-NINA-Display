@@ -1341,7 +1341,7 @@
           <div id="customGroup" style="display:none">
           <div class="field" style="margin-top:16px">
             <label class="field-label">Image URL</label>
-            <input class="input" id="customImageUrl" type="url" placeholder="https://picsum.photos/720" onchange="applyImageDisplay();checkDirty()">
+            <input class="input" id="customImageUrl" type="url" placeholder="https://picsum.photos/720" onchange="applyImageDisplay();updateImgCustomPillHint();checkDirty()">
             <div class="field-hint">JPEG only. Max 1024x1024 pixels, max 1 MB. PNG and WebP are not supported.</div>
           </div>
           <div class="field" style="margin-top:16px">
@@ -1474,7 +1474,7 @@
             <div class="pn-section-label">Pages in Rotation</div>
             <div style="font-size:0.72rem;color:var(--text-muted);margin:-8px 0 10px;opacity:0.7">Drag to reorder</div>
             <div class="pn-pill-grid reorderable" id="arp-container"></div>
-            <div class="field-hint">The ordered set of pages Auto Cycle moves through; drag the pills to set the order.</div>
+            <div class="field-hint">Pick which pages and image sources rotate, and drag to set the order.</div>
           </div>
         </div>
 
@@ -2189,7 +2189,10 @@
         ['arp_allsky','AllSky'],
         ['arp_spotify','Spotify'],
         ['arp_clock','Clock'],
-        ['arp_image_display','Image Display']
+        ['arp_img_goes','Img: GOES'],
+        ['arp_img_moon','Img: Moon'],
+        ['arp_img_solar','Img: Solar'],
+        ['arp_img_custom','Img: Custom']
       ];
       var c=$('arp-container');
       if(!c) return;
@@ -2583,9 +2586,9 @@
 
     /* === Rotation slideshow list === */
     /* Single ordered slideshow list: membership == order.
-       data-arp-idx equals the page's rotation bit index (0..8).
-       Saved array holds the bit indices of CHECKED pills in on-screen order,
-       padded to 9 slots with 0xFF (255 = unused). Slot 9 is auto_rotate_order_ext. */
+       data-arp-idx equals the page/image-source rotation index (0..11).
+       Saved array holds the indices of CHECKED pills in on-screen order,
+       padded to 16 slots with 0xFF (255 = unused). */
     function getRotateOrder(){
       var pills=$('arp-container').querySelectorAll('.pn-pill[data-arp-idx]');
       var order=[];
@@ -2593,8 +2596,8 @@
         var cb=p.querySelector('input[type="checkbox"]');
         if(cb&&cb.checked) order.push(parseInt(p.getAttribute('data-arp-idx')));
       });
-      while(order.length<9) order.push(255);
-      return order.slice(0,9);
+      while(order.length<16/* keep in sync with ARP_ORDER_CAPACITY in app_config.h */) order.push(255);
+      return order.slice(0,16/* keep in sync with ARP_ORDER_CAPACITY in app_config.h */);
     }
 
     function setRotateOrder(orderArr){
@@ -2603,8 +2606,8 @@
       var pills=Array.from(container.querySelectorAll('.pn-pill[data-arp-idx]'));
       var pillMap={};
       pills.forEach(function(p){ pillMap[p.getAttribute('data-arp-idx')]=p; });
-      /* Members (in order) = entries that are not the 0xFF/255 sentinel. */
-      var members=orderArr.map(function(v){return parseInt(v);}).filter(function(v){return !isNaN(v)&&v>=0&&v!==255&&v<pills.length;});
+      /* Members (in order) = valid indices 0..11 that are not the 0xFF/255 sentinel. */
+      var members=orderArr.map(function(v){return parseInt(v);}).filter(function(v){return !isNaN(v)&&v>=0&&v!==255&&v<12/* keep in sync with ARP_IDX_MAX in app_config.h */;});
       /* Reorder members to the front in saved order, set their checkbox on. */
       members.forEach(function(idx){
         var p=pillMap[idx];
@@ -2617,6 +2620,23 @@
           var cb=p.querySelector('input[type="checkbox"]'); if(cb) cb.checked=false;
         }
       });
+    }
+
+    /* Cosmetic hint on the Img: Custom pill when no custom URL is configured.
+       The pill stays selectable; the device skips it at runtime when empty. */
+    function updateImgCustomPillHint(){
+      var c=$('arp-container');
+      if(!c) return;
+      var pill=c.querySelector('.pn-pill[data-arp-idx="11"]');
+      if(!pill) return;
+      var u=$('customImageUrl')?$('customImageUrl').value.trim():'';
+      if(u){
+        pill.style.opacity='';
+        pill.removeAttribute('title');
+      } else {
+        pill.style.opacity='0.55';
+        pill.title='No custom URL configured';
+      }
     }
 
     /* === Config Data Assembly === */
@@ -2657,7 +2677,7 @@
         auto_rotate_interval_s:parseInt($('auto_rotate_interval').value)||30,
         auto_rotate_effect:parseInt($('auto_rotate_effect').value),
         auto_rotate_skip_disconnected:!!$('auto_rotate_skip').checked,
-        auto_rotate_order:getRotateOrder(),
+        auto_rotate_order2:getRotateOrder(),
         nav_grace_s:parseInt($('nav_grace_s').value)||10,
         update_rate_s:parseInt($('update_rate').value)||2,
         graph_update_interval_s:parseInt($('graph_interval').value)||5,
@@ -2846,7 +2866,8 @@
       $('auto_rotate_effect').value=data.auto_rotate_effect||0;
       $('auto_rotate_skip').checked=!!data.auto_rotate_skip_disconnected;
       if($('nav_grace_s')) $('nav_grace_s').value=(data.nav_grace_s||10);
-      if(data.auto_rotate_order) setRotateOrder(data.auto_rotate_order);
+      if(data.auto_rotate_order2) setRotateOrder(data.auto_rotate_order2);
+      else if(data.auto_rotate_order) setRotateOrder(data.auto_rotate_order);
 
       updateNodeLabels();
 
@@ -2887,6 +2908,7 @@
       if($('imageSource2')) $('imageSource2').checked=(imgSrc===2);
       if($('imageSource3')) $('imageSource3').checked=(imgSrc===3);
       if($('customImageUrl')) $('customImageUrl').value=data.custom_image_url||'';
+      updateImgCustomPillHint();
       if($('customOrientation')) $('customOrientation').value=String(data.custom_orientation||0);
       if($('customInterval')) $('customInterval').value=String(data.custom_update_interval_s||60);
       if($('moonBg')) $('moonBg').value=String(data.moon_bg_style||0);

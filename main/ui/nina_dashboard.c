@@ -775,7 +775,7 @@ static void gesture_event_cb(lv_event_t *e) {
      * can only be true in that case. A clean quick flick (little finger travel)
      * leaves was_rotate false and still navigates. */
     if (active_page == PAGE_IDX_IMAGE_DISPLAY && image_display_obj != NULL &&
-        app_config_get()->image_display_source == 1 && moon_drag_was_rotate()) {
+        image_source_get_effective() == 1 && moon_drag_was_rotate()) {
         return;
     }
 
@@ -814,6 +814,14 @@ static void gesture_event_cb(lv_event_t *e) {
      * instant swipe feedback AND record a USER claim so the grace window
      * (nav_grace_s) protects this page from lower-priority sources until the
      * next resolve(). */
+    if (new_page == PAGE_IDX_IMAGE_DISPLAY) {
+        /* Clear any stale slideshow image-source override BEFORE the page
+         * becomes active, so the image page renders the correct source on the
+         * very first goes_poll_task iteration. nav_arbiter_submit_user() below
+         * also clears it, but only after the page is already visible, leaving a
+         * one-frame window of the wrong source. */
+        image_source_set_override(-1);
+    }
     nina_dashboard_show_page_animated(new_page, 0, 0);
     nav_arbiter_submit_user(new_page, esp_timer_get_time() / 1000);
 }

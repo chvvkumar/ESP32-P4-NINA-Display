@@ -13,8 +13,40 @@ extern "C" {
 // Maximum number of NINA instances supported
 #define MAX_NINA_INSTANCES 3
 
+/* Auto-rotate slideshow stop indices (auto_rotate_order2[] entries).
+ * Each value names a distinct slideshow stop. Indices 0-7 match the legacy
+ * auto_rotate bitmask bit positions exactly; indices 8-11 split the former
+ * single "Image Display" stop (old bit-index 8) into one stop per image source.
+ *   0  ARP_IDX_SUMMARY    -> PAGE_IDX_SUMMARY (4)
+ *   1  ARP_IDX_NINA1      -> NINA_PAGE_OFFSET+0 (5)
+ *   2  ARP_IDX_NINA2      -> NINA_PAGE_OFFSET+1 (6)
+ *   3  ARP_IDX_NINA3      -> NINA_PAGE_OFFSET+2 (7)
+ *   4  ARP_IDX_SYSINFO    -> SYSINFO_PAGE_IDX
+ *   5  ARP_IDX_ALLSKY     -> PAGE_IDX_ALLSKY (0)
+ *   6  ARP_IDX_SPOTIFY    -> PAGE_IDX_SPOTIFY (1)
+ *   7  ARP_IDX_CLOCK      -> PAGE_IDX_CLOCK (2)
+ *   8  ARP_IDX_IMG_GOES   -> PAGE_IDX_IMAGE_DISPLAY (3), image source 0
+ *   9  ARP_IDX_IMG_MOON   -> PAGE_IDX_IMAGE_DISPLAY (3), image source 1
+ *  10  ARP_IDX_IMG_SOLAR  -> PAGE_IDX_IMAGE_DISPLAY (3), image source 2
+ *  11  ARP_IDX_IMG_CUSTOM -> PAGE_IDX_IMAGE_DISPLAY (3), image source 3
+ */
+#define ARP_IDX_SUMMARY     0
+#define ARP_IDX_NINA1       1
+#define ARP_IDX_NINA2       2
+#define ARP_IDX_NINA3       3
+#define ARP_IDX_SYSINFO     4
+#define ARP_IDX_ALLSKY      5
+#define ARP_IDX_SPOTIFY     6
+#define ARP_IDX_CLOCK       7
+#define ARP_IDX_IMG_GOES    8
+#define ARP_IDX_IMG_MOON    9
+#define ARP_IDX_IMG_SOLAR  10
+#define ARP_IDX_IMG_CUSTOM 11
+#define ARP_IDX_MAX        12   /* exclusive validation bound */
+#define ARP_ORDER_CAPACITY 16   /* size of auto_rotate_order2[] */
+
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 45
+#define APP_CONFIG_VERSION 46
 
 #define WIDGET_STYLE_COUNT 13
 
@@ -210,6 +242,12 @@ typedef struct {
     char     custom_image_url[256];      // user-supplied JPEG image URL
     uint8_t  custom_orientation;         // render rotation: 0=0°,1=90°,2=180°,3=270° CW (mirrors solar_orientation)
     uint16_t custom_update_interval_s;   // poll interval in seconds (10-7200, default 60)
+
+    // Added after v45 — must stay at end to preserve NVS binary compatibility
+    // Ordered slideshow stop list: array of ARP_IDX_* values, 0xFF terminator.
+    // Replaces the legacy auto_rotate_order[8] + auto_rotate_order_ext encoding;
+    // each image source is now its own distinct stop (see ARP_IDX_* above).
+    uint8_t  auto_rotate_order2[16];
 } app_config_t;
 
 /* ── Version 43 config struct — used only for NVS migration to v44 ────── */
@@ -432,6 +470,124 @@ _Static_assert(offsetof(app_config_t, custom_image_url) ==
                    offsetof(app_config_v44_t, nav_grace_s) +
                        sizeof(((app_config_v44_t *)0)->nav_grace_s),
                "app_config_v44_t snapshot drifted from app_config_t layout");
+
+/* ── Version 45 config struct — used only for NVS migration to v46 ────── */
+/* Byte-identical to app_config_t minus the trailing auto_rotate_order2[].  */
+typedef struct {
+    uint32_t config_version;
+    char api_url[3][128];
+    char ntp_server[64];
+    char tz_string[64];
+    char filter_colors[3][512];
+    char rms_thresholds[3][256];
+    char hfr_thresholds[3][256];
+    int theme_index;
+    int brightness;
+    int color_brightness;
+    bool mqtt_enabled;
+    char mqtt_broker_url[128];
+    char mqtt_username[64];
+    char mqtt_password[64];
+    char mqtt_topic_prefix[64];
+    uint16_t mqtt_port;
+    int8_t   active_page_override;
+    bool     auto_rotate_enabled;
+    uint16_t auto_rotate_interval_s;
+    uint8_t  auto_rotate_effect;
+    bool     auto_rotate_skip_disconnected;
+    uint8_t  auto_rotate_pages;
+    uint8_t  update_rate_s;
+    uint8_t  graph_update_interval_s;
+    uint8_t  connection_timeout_s;
+    uint8_t  toast_duration_s;
+    bool     debug_mode;
+    bool     instance_enabled[3];
+    bool     screen_sleep_enabled;
+    uint16_t screen_sleep_timeout_s;
+    bool     alert_flash_enabled;
+    uint8_t  idle_poll_interval_s;
+    bool     wifi_power_save;
+    uint8_t  widget_style;
+    uint8_t  auto_update_check;
+    uint8_t  update_channel;
+    bool     deep_sleep_enabled;
+    uint32_t deep_sleep_wake_timer_s;
+    bool     deep_sleep_on_idle;
+    uint8_t  screen_rotation;
+    char     hostname[32];
+    char     allsky_hostname[128];
+    uint16_t allsky_update_interval_s;
+    float    allsky_dew_offset;
+    char     allsky_field_config[1536];
+    char     allsky_thresholds[1024];
+    bool     allsky_enabled;
+    bool     demo_mode;
+    bool     spotify_enabled;
+    char     spotify_client_id[64];
+    uint16_t spotify_poll_interval_ms;
+    bool     spotify_show_progress_bar;
+    uint8_t  spotify_overlay_timeout_s;
+    bool     spotify_minimal_mode;
+    bool     spotify_scroll_text;
+    wifi_network_t wifi_networks[3];
+    bool     spotify_overlay_visible;
+    uint8_t  auto_rotate_order[8];
+    uint8_t  toast_aggregation_window_s;
+    uint32_t toast_notify_mask;
+    bool     toast_instance_muted[3];
+    uint8_t  weather_provider;
+    char     weather_api_key[64];
+    float    weather_lat;
+    float    weather_lon;
+    char     weather_location_name[64];
+    uint16_t weather_poll_interval_s;
+    uint8_t  weather_units;
+    uint8_t  weather_time_format;
+    bool     idle_page_override_enabled;
+    int8_t   idle_page_override_target;
+    bool     idle_page_persistent;
+    bool     idle_indicator_enabled;
+    char     admin_password[33];
+    bool     auth_enabled;
+    bool     image_display_enabled;
+    bool     image_display_show_overlay;
+    char     goes_region[16];
+    uint16_t goes_update_interval_s;
+    uint8_t  image_display_source;
+    uint8_t  moon_bg_style;
+    float    moon_lat;
+    float    moon_lon;
+    uint8_t  solar_band;
+    bool     image_display_crop;
+    uint8_t  moon_drag_light_mode;
+    uint8_t  moon_flip_u;
+    uint8_t  moon_flip_v;
+    float    moon_roll_offset;
+    float    moon_yaw_offset;
+    float    moon_pitch_offset;
+    uint8_t  moon_north_up;
+    uint8_t  moon_spin_mode;
+    uint8_t  moon_spin_return_s;
+    uint8_t  crash_log_retention_days;
+    uint8_t  auto_rotate_pages_hi;
+    uint8_t  auto_rotate_order_ext;
+    uint8_t  goes_orientation;
+    uint8_t  solar_orientation;
+    uint16_t nav_grace_s;
+    char     custom_image_url[256];
+    uint8_t  custom_orientation;
+    uint16_t custom_update_interval_s;
+} app_config_v45_t;
+
+/* auto_rotate_order2 (uint8[16], align 1) appends directly after the uint16
+ * custom_update_interval_s with no padding, so offsetof == end-of-last-field.
+ * Same technique as the v44 custom_image_url assert: compare against the end
+ * of the last v45 field to catch any field inserted/reordered ahead of the
+ * new block. */
+_Static_assert(offsetof(app_config_t, auto_rotate_order2) ==
+                   offsetof(app_config_v45_t, custom_update_interval_s) +
+                       sizeof(((app_config_v45_t *)0)->custom_update_interval_s),
+               "app_config_v45_t snapshot drifted from app_config_t layout");
 
 // v17 snapshot — AllSky fields without allsky_enabled
 typedef struct {

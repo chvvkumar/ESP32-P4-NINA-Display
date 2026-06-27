@@ -30,6 +30,7 @@ static void set_error_msg(goes_data_t *d, const char *m)
 void goes_data_init(goes_data_t *data)
 {
     memset(data, 0, sizeof(*data));
+    data->src_kind = -1;
     data->mutex = xSemaphoreCreateMutex();
 }
 
@@ -54,6 +55,7 @@ void goes_client_cleanup(goes_data_t *data)
         }
         data->image_w = 0;
         data->image_h = 0;
+        data->src_kind = -1;
         data->connected = false;
         goes_data_unlock(data);
     }
@@ -118,9 +120,13 @@ static const char *SOLAR_LABELS[SOLAR_BAND_COUNT] = {
 const char *solar_band_url(uint8_t idx)   { return idx < SOLAR_BAND_COUNT ? SOLAR_URLS[idx]   : SOLAR_URLS[0]; }
 const char *solar_band_label(uint8_t idx) { return idx < SOLAR_BAND_COUNT ? SOLAR_LABELS[idx] : SOLAR_LABELS[0]; }
 
-/* All solar imagery (SDO/AIA and SOHO) needs a vertical flip to display upright
- * on this panel, same as the GOES path. */
-bool solar_band_vflip(uint8_t idx) { (void)idx; return true; }
+/* Solar source images (SDO/AIA via sdo.gsfc.nasa.gov, SOHO/HMI via
+ * soho.nascom.nasa.gov) are delivered upright (north up, caption at bottom), so
+ * no vertical flip is applied. Any build-environment orientation difference is
+ * corrected by the per-source `solar_orientation` rotation setting, not here.
+ * (A vertical flip is a mirror and would put the caption at the top and mirror
+ * sunspot positions, which no rotation setting can undo.) */
+bool solar_band_vflip(uint8_t idx) { (void)idx; return false; }
 
 /* Per-band center-crop percentage (100 = no crop). AIA (0..9) and SOHO EIT
  * (12..15) have a wide source border, so 88% zooms past the timestamp/label.
@@ -195,10 +201,10 @@ esp_err_t goes_client_poll(const char *region, goes_data_t *data)
      * NESDIS GOES JPEG must be flipped (vflip=true) to display north-up. This matches
      * the Solar path, which also uses vflip=true. Verified on-device: vflip=false
      * renders the image upside-down (issue #166 regression). */
-    return goes_client_poll_url(url, data, true, goes_region_name(region));
+    return goes_client_poll_url(url, data, true, goes_region_name(region), 0 /* GOES */);
 }
 
-esp_err_t goes_client_poll_url(const char *url, goes_data_t *data, bool vflip, const char *label)
+esp_err_t goes_client_poll_url(const char *url, goes_data_t *data, bool vflip, const char *label, int8_t src_kind)
 {
     if (!url || !data) return ESP_ERR_INVALID_ARG;
 
@@ -349,6 +355,7 @@ esp_err_t goes_client_poll_url(const char *url, goes_data_t *data, bool vflip, c
         data->vflip = vflip;
         if (label) { strlcpy(data->label, label, sizeof(data->label)); }
         else       { data->label[0] = '\0'; }
+        data->src_kind = src_kind;
         data->error_msg[0] = '\0';   /* clear: this fetch succeeded */
         data->connected = true;
         data->last_poll_ms = esp_timer_get_time() / 1000;
