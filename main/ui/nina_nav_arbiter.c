@@ -29,6 +29,8 @@ static struct {
     bool     topology_dirty;       /* rebuild requested */
     int      modal_depth;          /* >0 = a modal surface is open */
     bool     slideshow_advance;    /* interval timer fired since last resolve */
+    bool     auto_rotate_was_enabled; /* slideshow enabled at last resolve (edge
+                                       * detect for first-stop image prefetch) */
     bool     idle_claim_active;    /* IDLE was the resolved source last commit */
     int      current_committed;    /* last page the arbiter committed */
     int8_t   pending_img_source;       /* image source the next/desired Image Display
@@ -43,6 +45,7 @@ void nav_arbiter_init(void) {
     s_arb.topology_dirty = false;
     s_arb.modal_depth = 0;
     s_arb.slideshow_advance = false;
+    s_arb.auto_rotate_was_enabled = false;
     s_arb.idle_claim_active = false;
     s_arb.pending_img_source = -1;
     s_arb.current_committed_img_source = -1;
@@ -211,6 +214,22 @@ static int slideshow_build_candidates(int cand_out[ARP_ORDER_CAPACITY],
     return n;
 }
 
+/* Scan the slideshow order for the first image stop; return its image
+ * source (0=GOES,1=Moon,2=Solar,3=Custom) or -1 if the order has none.
+ * Iterates auto_rotate_order2[] with the same bounds/termination convention
+ * as slideshow_build_candidates() (skip 0xFF and out-of-range entries). */
+static int8_t first_image_source_in_order(const app_config_t *c) {
+    for (int i = 0; i < ARP_ORDER_CAPACITY; i++) {
+        uint8_t bit = c->auto_rotate_order2[i];
+        if (bit == 0xFF || bit >= ARP_IDX_MAX) continue;
+        if (bit == ARP_IDX_IMG_GOES || bit == ARP_IDX_IMG_MOON
+            || bit == ARP_IDX_IMG_SOLAR || bit == ARP_IDX_IMG_CUSTOM) {
+            return (int8_t)(bit - ARP_IDX_IMG_GOES);
+        }
+    }
+    return -1;
+}
+
 /** Resolve the slideshow stop that follows `from_page` in the candidate order.
  *  Writes the chosen stop's image source (0-3, or -1) to *img_src_out.
  *  Returns Home Page (with *img_src_out = -1) if no candidate is available.
@@ -245,6 +264,19 @@ static int slideshow_next(void) {
 
 void nav_arbiter_resolve(int64_t now_ms) {
     const app_config_t *c = app_config_get();
+
+    /* Warm the first image stop the moment the slideshow turns on (false->true
+     * edge), before any early return, so the activation edge is never missed and
+     * the enabled-state flag stays in sync even while a modal is open. Firing the
+     * prefetch during a modal is harmless: it only fills the spare buffer. */
+    bool auto_rotate_now = c->auto_rotate_enabled;
+    if (auto_rotate_now && !s_arb.auto_rotate_was_enabled) {
+        int8_t first_src = first_image_source_in_order(c);
+        if (first_src >= 0) {
+            image_source_trigger_prefetch(first_src);
+        }
+    }
+    s_arb.auto_rotate_was_enabled = auto_rotate_now;
 
     /* Rung 0: modal freeze. Closing a modal restamps grace in
      * nav_arbiter_notify_modal_close, so the next resolve holds the page. */
@@ -333,11 +365,14 @@ void nav_arbiter_resolve(int64_t now_ms) {
                      desired, (int)src, (int)s_arb.pending_img_source);
 
             /* Prefetch lookahead (schedule only; fetch/swap is Phase 4). After
-             * committing an image stop during a slideshow, peek the source the
-             * NEXT advance would select WITHOUT mutating arbiter state, and ask
-             * the goes task to warm it. next_src is 0-3 for an image stop, else
-             * -1 (non-image next stop => nothing to prefetch). */
-            if (src == NAV_SRC_SLIDESHOW && desired == PAGE_IDX_IMAGE_DISPLAY) {
+             * EVERY slideshow stop (image or not), peek the source the NEXT
+             * advance would select WITHOUT mutating arbiter state, and ask the
+             * goes task to warm it when the next stop is an image page. This
+             * closes the gap where a non-image stop (e.g. Clock) preceding an
+             * image stop never warmed it. next_src is 0-3 when the next stop is
+             * an image page, else -1 (non-image next stop => nothing to
+             * prefetch). */
+            if (src == NAV_SRC_SLIDESHOW) {
                 int8_t next_src = -1;
                 (void)slideshow_advance_from(s_arb.current_committed, s_arb.current_committed_img_source, &next_src);
                 if (next_src >= 0) {
