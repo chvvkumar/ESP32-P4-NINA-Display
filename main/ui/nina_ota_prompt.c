@@ -504,7 +504,7 @@ void nina_ota_prompt_show_status(const char *title, const char *message) {
     lv_label_set_text(lbl_error, message ? message : "");
 }
 
-void nina_ota_prompt_show_manual_flash(const char *tag) {
+void nina_ota_prompt_show_manual_flash(const char *tag, const char *full_erase_tag) {
     if (!ota_overlay) return;
 
     /* No accept/skip in this mode — only dismissal */
@@ -520,14 +520,30 @@ void nina_ota_prompt_show_manual_flash(const char *tag) {
     lv_obj_add_flag(error_cont, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(manual_cont, LV_OBJ_FLAG_HIDDEN);
 
-    /* Explanation text (no 0x0000 device line) */
-    char body[320];
-    snprintf(body, sizeof(body),
-             "Firmware %s can't be installed over WiFi.\n"
-             "Back up settings first: web UI > Backup > Download Backup.\n"
-             "On a computer, connect by USB and flash nina-display-factory.bin "
-             "with the ESP Web Flasher. Full steps on the GitHub release page.",
-             tag ? tag : "");
+    const char *tag_s = tag ? tag : "";
+
+    /* When the full-erase marker is on an INTERMEDIATE release (different from the
+     * target), name that triggering version. When full_erase_tag is empty (the
+     * history-incomplete fail-safe) or equals the target, the single-version copy
+     * is correct. Buffer sized for the longest (two-tag) variant: ~420 chars + NUL. */
+    char body[512];
+    if (full_erase_tag && full_erase_tag[0] && strcmp(full_erase_tag, tag_s) != 0) {
+        snprintf(body, sizeof(body),
+                 "Firmware %s can't be installed over WiFi.\n"
+                 "Release %s on the way to %s needs a full erase, so the whole "
+                 "update must be flashed by USB.\n"
+                 "Back up settings first: web UI > Backup > Download Backup.\n"
+                 "On a computer, connect by USB and flash nina-display-factory.bin "
+                 "with the ESP Web Flasher. Full steps on the GitHub release page.",
+                 tag_s, full_erase_tag, tag_s);
+    } else {
+        snprintf(body, sizeof(body),
+                 "Firmware %s can't be installed over WiFi.\n"
+                 "Back up settings first: web UI > Backup > Download Backup.\n"
+                 "On a computer, connect by USB and flash nina-display-factory.bin "
+                 "with the ESP Web Flasher. Full steps on the GitHub release page.",
+                 tag_s);
+    }
     lv_label_set_text(lbl_manual_body, body);
 
     /* Show overlay */
