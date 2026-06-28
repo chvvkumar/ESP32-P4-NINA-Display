@@ -22,6 +22,7 @@ typedef enum {
     CTRL_TYPE_ENUM = 1,
     CTRL_TYPE_INT  = 2,
     CTRL_TYPE_PAGE = 3,   /* special non-config item: current page */
+    CTRL_TYPE_PIN  = 4,   /* special non-config bool: navigation pin (arbiter) */
 } ctrl_type_t;
 
 typedef struct control_item control_item_t;

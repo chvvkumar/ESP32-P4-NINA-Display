@@ -18,7 +18,7 @@
 #include "ui/nina_dashboard.h"      /* nina_dashboard_apply_theme, get_active_page */
 #include "ui/nina_dashboard_internal.h" /* PAGE_IDX_IMAGE_DISPLAY */
 #include "ui/nina_image_display.h"  /* image_display_apply_live */
-#include "ui/nina_nav_arbiter.h"    /* nav_arbiter_notify_topology_changed */
+#include "ui/nina_nav_arbiter.h"    /* nav_arbiter_notify_topology_changed, nav_arbiter_is_pinned */
 #include "ui/page_registry.h"       /* page_ref_*, PAGE_REF_* */
 
 /* ===================================================================== */
@@ -63,6 +63,14 @@ static int get_page(const control_item_t *it, const app_config_t *c)
     (void)it;
     (void)c;
     return control_page_current_id();
+}
+
+/* PIN item get — live navigation-pin state (non-config; cfg ignored). */
+static int get_nav_pinned(const control_item_t *it, const app_config_t *c)
+{
+    (void)it;
+    (void)c;
+    return nav_arbiter_is_pinned() ? 1 : 0;
 }
 
 /* ===================================================================== */
@@ -224,6 +232,12 @@ static const control_item_t s_items[] = {
      * (resolves to PAGE_REF_ID_MAX-1). The handler performs set/cycle specially
      * via control_page_set_by_id() / control_page_cycle_next(). */
     { "page",                         CTRL_TYPE_PAGE, 0, -1, 1, NULL, 0, get_page,                         NULL,                             NULL },
+
+    /* ---- Special: navigation pin (NON-CONFIG; arbiter-backed bool) ----
+     * Reported as a bool with On/Off labels. Does not snapshot/save: the handler
+     * special-cases it (like the page item) and drives nav_arbiter_set_pin().
+     * set=NULL, apply=NULL; get returns the live arbiter pin state. */
+    { "nav_pinned",                   CTRL_TYPE_PIN,  0, 1, 1, NULL, 0, get_nav_pinned,                   NULL,                             NULL },
 };
 
 #undef LBL
@@ -287,7 +301,7 @@ const char *control_item_label(const control_item_t *item, int value)
     if (!item) {
         return NULL;
     }
-    if (item->type == CTRL_TYPE_BOOL) {
+    if (item->type == CTRL_TYPE_BOOL || item->type == CTRL_TYPE_PIN) {
         return value ? "On" : "Off";
     }
     if (strcmp(item->name, "theme") == 0) {

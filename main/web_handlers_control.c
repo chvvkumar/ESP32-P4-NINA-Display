@@ -16,10 +16,12 @@
 
 #include "web_server_internal.h"
 #include "control_registry.h"
+#include "ui/nina_nav_arbiter.h"   /* nav_arbiter_set_pin / nav_arbiter_is_pinned */
 #include "cJSON.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"             /* esp_timer_get_time */
 #include <string.h>
 #include <strings.h>   /* strcasecmp */
 #include <stdlib.h>
@@ -67,11 +69,12 @@ static cJSON *control_item_to_json(const control_item_t *it,
     cJSON_AddStringToObject(o, "name", it->name);
 
     const char *type_str = (it->type == CTRL_TYPE_BOOL) ? "bool" :
+                           (it->type == CTRL_TYPE_PIN)  ? "bool" :
                            (it->type == CTRL_TYPE_INT)  ? "int"  :
                            (it->type == CTRL_TYPE_PAGE) ? "enum" : "enum";
     cJSON_AddStringToObject(o, "type", type_str);
 
-    if (it->type == CTRL_TYPE_BOOL) {
+    if (it->type == CTRL_TYPE_BOOL || it->type == CTRL_TYPE_PIN) {
         cJSON_AddBoolToObject(o, "value", v != 0);
     } else {
         cJSON_AddNumberToObject(o, "value", v);
@@ -251,6 +254,12 @@ esp_err_t control_toggle_post_handler(httpd_req_t *req)
     if (!it) {
         return send_400(req, "unknown name");
     }
+    if (it->type == CTRL_TYPE_PIN) {
+        /* Non-config: flip the navigation pin via the arbiter (no snapshot/save). */
+        nav_arbiter_set_pin(!nav_arbiter_is_pinned(), -1, -1,
+                            esp_timer_get_time() / 1000);
+        return send_item(req, it);
+    }
     if (it->type != CTRL_TYPE_BOOL) {
         return send_400(req, "toggle requires a bool item");
     }
@@ -307,7 +316,7 @@ esp_err_t control_set_post_handler(httpd_req_t *req)
     }
 
     int target;
-    if (it->type == CTRL_TYPE_BOOL) {
+    if (it->type == CTRL_TYPE_BOOL || it->type == CTRL_TYPE_PIN) {
         if (strcasecmp(valuebuf, "true") == 0) {
             target = 1;
         } else if (strcasecmp(valuebuf, "false") == 0) {
@@ -317,6 +326,12 @@ esp_err_t control_set_post_handler(httpd_req_t *req)
         }
     } else {
         target = ctrl_parse_int(valuebuf);
+    }
+
+    if (it->type == CTRL_TYPE_PIN) {
+        /* Non-config: drive the navigation pin via the arbiter (no snapshot/save). */
+        nav_arbiter_set_pin(target != 0, -1, -1, esp_timer_get_time() / 1000);
+        return send_item(req, it);
     }
 
     if (it->type == CTRL_TYPE_PAGE) {
@@ -352,6 +367,9 @@ esp_err_t control_adjust_post_handler(httpd_req_t *req)
     }
     if (it->type == CTRL_TYPE_BOOL) {
         return send_400(req, "adjust not supported for bool");
+    }
+    if (it->type == CTRL_TYPE_PIN) {
+        return send_400(req, "adjust not supported for nav_pinned");
     }
 
     int delta = ctrl_parse_int(deltabuf);
