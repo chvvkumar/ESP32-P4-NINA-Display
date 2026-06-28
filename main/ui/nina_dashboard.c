@@ -8,6 +8,7 @@
 
 #include "nina_dashboard.h"
 #include "nina_dashboard_internal.h"
+#include "nina_empty_state.h"
 #include "nina_thumbnail.h"
 #include "nina_graph_overlay.h"
 #include "nina_info_overlay.h"
@@ -707,6 +708,37 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_style_bg_opa(p->stale_overlay, LV_OPA_40, 0);
     lv_obj_add_flag(p->stale_overlay, LV_OBJ_FLAG_HIDDEN);
 
+    /* Disconnected full-screen branded overlay (IDLE-04, Plan 02).
+     * Floats over the bento grid; hidden initially; shown by update_disconnected_state.
+     * Title includes the configured hostname so the user knows which node is offline. */
+    {
+        char host[64] = {0};
+        extract_host_from_url(app_config_get_instance_url(page_index), host, sizeof(host));
+        char offline_title[96];
+        if (host[0]) {
+            snprintf(offline_title, sizeof(offline_title), "%s Offline", host);
+        } else {
+            snprintf(offline_title, sizeof(offline_title), "Node %d Offline", page_index + 1);
+        }
+        p->empty_state_cont = nina_empty_state_create(p->page,
+                                                       ICON_CLOUD_OFF,
+                                                       offline_title,
+                                                       "Verify NINA is running on host",
+                                                       0);
+        if (p->empty_state_cont) {
+            /* Make it a full-coverage floating sibling (mirrors stale_overlay pattern). */
+            lv_obj_add_flag(p->empty_state_cont, LV_OBJ_FLAG_FLOATING);
+            lv_obj_set_size(p->empty_state_cont, LV_PCT(100), LV_PCT(100));
+            lv_obj_set_pos(p->empty_state_cont, 0, 0);
+            /* Opaque black backdrop so the bento grid does not bleed through
+             * (BUG-1 fix: mirrors stale_overlay bg_color/bg_opa pattern). */
+            lv_obj_set_style_bg_color(p->empty_state_cont, lv_color_hex(0x000000), 0);
+            lv_obj_set_style_bg_opa(p->empty_state_cont, LV_OPA_COVER, 0);
+            /* Must not consume bento-grid info-overlay taps on reconnect. */
+            lv_obj_remove_flag(p->empty_state_cont, LV_OBJ_FLAG_CLICKABLE);
+        }
+    }
+
     p->arc_completing = false;
     p->cached_end_epoch = 0;
     p->cached_total = 0;
@@ -765,6 +797,13 @@ static void screen_press_cb(lv_event_t *e) {
 /* Swipe left/right to change pages (cycles through NINA + sysinfo) */
 static void gesture_event_cb(lv_event_t *e) {
     if (total_page_count <= 1) return;
+    /* If the wait/loading overlay is visible, a swipe cancels the load and
+     * returns to the prior page via the arbiter.  Return immediately so the
+     * normal page-swipe computation does not also run. */
+    if (nina_wait_overlay_visible()) {
+        nina_wait_overlay_cancel();
+        return;
+    }
     if (thumbnail_overlay && !lv_obj_has_flag(thumbnail_overlay, LV_OBJ_FLAG_HIDDEN)) return;
     if (nina_graph_visible()) return;
     if (nina_info_overlay_visible()) return;

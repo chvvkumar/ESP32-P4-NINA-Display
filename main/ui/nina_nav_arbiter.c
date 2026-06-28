@@ -14,6 +14,7 @@
 #include "nina_connection.h"
 #include "nina_idle_indicator.h"
 #include "nina_wait_overlay.h"
+#include "goes_client.h"               /* goes_region_name, solar_band_label */
 #include "bsp/esp-bsp.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -443,7 +444,22 @@ void nav_arbiter_resolve(int64_t now_ms) {
              * fetch task can show the overlay on its next cycle. Manual nav only;
              * auto-cycle stays seamless via prefetch. */
             if (desired == PAGE_IDX_IMAGE_DISPLAY && src == NAV_SRC_USER) {
-                nina_wait_overlay_show("Loading image...", NULL);
+                /* Derive a subtitle for all four image sources so the overlay
+                 * always names the source being loaded. */
+                const app_config_t *c = app_config_get();
+                char arb_label[48] = "";
+                int8_t ps = s_arb.pending_img_source;
+                if (ps == 0 && c->goes_region[0]) {
+                    strlcpy(arb_label, goes_region_name(c->goes_region), sizeof(arb_label));
+                } else if (ps == 1) {
+                    strlcpy(arb_label, "Moon", sizeof(arb_label));
+                } else if (ps == 2) {
+                    strlcpy(arb_label, solar_band_label(c->solar_band), sizeof(arb_label));
+                } else if (ps >= 3) {
+                    strlcpy(arb_label, "Custom", sizeof(arb_label));
+                }
+                nina_wait_overlay_set_prior_page(s_arb.current_committed);
+                nina_wait_overlay_show("Loading image...", arb_label[0] ? arb_label : NULL);
                 nina_wait_overlay_set_progress(-1);
             }
             bsp_display_unlock();

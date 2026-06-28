@@ -18,6 +18,7 @@
 #include "nina_nav_arbiter.h"
 #include "app_config.h"
 #include "themes.h"
+#include "nina_empty_state.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -216,10 +217,8 @@ static summary_card_t cards[MAX_NINA_INSTANCES];
 static int card_count = 0;
 static int prev_visible_count = -1;
 
-/* Empty state widgets */
+/* Empty state widget (shared component — Plan 01) */
 static lv_obj_t *empty_cont = NULL;
-static lv_obj_t *empty_msg = NULL;
-static lv_obj_t *empty_sub = NULL;
 
 /* Glass card style — semi-transparent with subtle border */
 static lv_style_t style_glass_card;
@@ -617,34 +616,21 @@ static void create_card(summary_card_t *sc, lv_obj_t *parent, int instance_index
 
 /**
  * @brief Create the empty-state container (shown when no instances connected).
+ *
+ * Uses the shared nina_empty_state component (Plan 01) for a branded,
+ * icon-led presentation (IDLE-02).
  */
 static void create_empty_state(lv_obj_t *parent) {
-    empty_cont = lv_obj_create(parent);
-    lv_obj_remove_style_all(empty_cont);
-    lv_obj_set_size(empty_cont, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_flex_flow(empty_cont, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(empty_cont,
-        LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(empty_cont, 16, 0);
-    lv_obj_clear_flag(empty_cont, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(empty_cont, LV_OBJ_FLAG_HIDDEN);
-
-    empty_msg = lv_label_create(empty_cont);
-    lv_label_set_text(empty_msg, "No Connections");
-    lv_obj_set_style_text_font(empty_msg, &lv_font_montserrat_32, 0);
-    lv_obj_set_style_text_align(empty_msg, LV_TEXT_ALIGN_CENTER, 0);
-
-    empty_sub = lv_label_create(empty_cont);
-    lv_label_set_text(empty_sub, "Waiting for N.I.N.A. instances...");
-    lv_obj_set_style_text_font(empty_sub, &lv_font_montserrat_18, 0);
-    lv_obj_set_style_text_align(empty_sub, LV_TEXT_ALIGN_CENTER, 0);
-
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(empty_msg,
-            lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
-        lv_obj_set_style_text_color(empty_sub,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+    empty_cont = nina_empty_state_create(parent,
+                                         ICON_CLOUD_OFF,
+                                         "No N.I.N.A. Instances Connected",
+                                         "N.I.N.A. may not be running",
+                                         0);
+    if (empty_cont) {
+        /* Take the container out of sum_page's START-aligned flex flow
+         * (which otherwise pins it to the top) and center it on the page. */
+        lv_obj_add_flag(empty_cont, LV_OBJ_FLAG_FLOATING);
+        lv_obj_align(empty_cont, LV_ALIGN_CENTER, 0, 0);
     }
 }
 
@@ -867,17 +853,13 @@ void summary_page_update(const nina_client_t *instances, int count) {
         for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
             lv_obj_add_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
         }
-        if (empty_cont) {
-            lv_obj_clear_flag(empty_cont, LV_OBJ_FLAG_HIDDEN);
-        }
+        nina_empty_state_show(empty_cont);
         prev_visible_count = 0;
         return;
     }
 
     /* Hide empty state, show cards */
-    if (empty_cont) {
-        lv_obj_add_flag(empty_cont, LV_OBJ_FLAG_HIDDEN);
-    }
+    nina_empty_state_hide(empty_cont);
 
     bool layout_changed = (visible != prev_visible_count);
 
@@ -1352,17 +1334,8 @@ void summary_page_apply_theme(void) {
         }
     }
 
-    /* Update empty state theme */
-    if (empty_msg) {
-        lv_obj_set_style_text_color(empty_msg,
-            lv_color_hex(app_config_apply_brightness(
-                current_theme->header_text_color, gb)), 0);
-    }
-    if (empty_sub) {
-        lv_obj_set_style_text_color(empty_sub,
-            lv_color_hex(app_config_apply_brightness(
-                current_theme->label_color, gb)), 0);
-    }
+    /* Update empty state theme via shared component */
+    nina_empty_state_apply_theme(empty_cont, current_theme, gb);
 
     lv_obj_invalidate(sum_page);
 }

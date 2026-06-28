@@ -1527,8 +1527,19 @@ void goes_poll_task(void *arg)
         bool manual_fetch = atomic_exchange(&image_display_manual_fetch, false);
         bool show_wait = false;
         if (image_display_page_active) {
-            const char *band_name = (eff_src == 2)
-                                        ? solar_band_label(cfg->solar_band) : NULL;
+            /* Derive a meaningful subtitle for all four image sources so the
+             * loading overlay always names the source being fetched. */
+            char pending_label[48] = "";
+            if (eff_src == 0 && cfg->goes_region[0]) {
+                strlcpy(pending_label, goes_region_name(cfg->goes_region), sizeof(pending_label));
+            } else if (eff_src == 1) {
+                strlcpy(pending_label, "Moon", sizeof(pending_label));
+            } else if (eff_src == 2) {
+                strlcpy(pending_label, solar_band_label(cfg->solar_band), sizeof(pending_label));
+            } else if (eff_src == 3) {
+                strlcpy(pending_label, "Custom", sizeof(pending_label));
+            }
+            const char *band_name = pending_label[0] ? pending_label : NULL;
             /* Only treat the overlay as shown if the lock was acquired and the
              * show actually ran — otherwise the error-hide below would be a
              * spurious no-op against an overlay that never appeared. */
