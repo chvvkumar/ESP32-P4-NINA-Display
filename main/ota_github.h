@@ -13,6 +13,9 @@ typedef struct {
     char ota_url[2048];        // Pre-signed S3 URL can be ~1KB with auth tokens
     bool is_prerelease;
     bool requires_full_erase;  // Release requires manual USB erase+flash (cannot OTA)
+    char full_erase_tag[32];   // Newest release tag on the install path carrying the full-erase
+                               // marker; empty when no path release is marked, or when the
+                               // fail-safe fired on an unverifiable update history.
 } github_release_info_t;
 
 /**

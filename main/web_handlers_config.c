@@ -163,6 +163,12 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
     cJSON_AddNumberToObject(obj, "moon_lon", (double)cfg->moon_lon);
     cJSON_AddNumberToObject(obj, "solar_band", cfg->solar_band);
     cJSON_AddNumberToObject(obj, "moon_drag_light_mode", cfg->moon_drag_light_mode);
+    cJSON_AddNumberToObject(obj, "goes_vflip", cfg->goes_vflip);
+    cJSON_AddNumberToObject(obj, "goes_hflip", cfg->goes_hflip);
+    cJSON_AddNumberToObject(obj, "solar_vflip", cfg->solar_vflip);
+    cJSON_AddNumberToObject(obj, "solar_hflip", cfg->solar_hflip);
+    cJSON_AddNumberToObject(obj, "custom_vflip", cfg->custom_vflip);
+    cJSON_AddNumberToObject(obj, "custom_hflip", cfg->custom_hflip);
     cJSON_AddNumberToObject(obj, "moon_flip_u", cfg->moon_flip_u);
     cJSON_AddNumberToObject(obj, "moon_flip_v", cfg->moon_flip_v);
     cJSON_AddNumberToObject(obj, "moon_roll_offset", (double)cfg->moon_roll_offset);
@@ -363,6 +369,12 @@ static const backup_field_t s_backup_fields[] = {
     {"moon_lon",                   "Moon Longitude",       "Image Display", false, false},
     {"solar_band",                 "Solar Band",           "Image Display", false, false},
     {"moon_drag_light_mode",       "Moon Drag Lighting",   "Image Display", false, false},
+    {"goes_vflip",                 "GOES Flip Vertical",   "Image Display", false, false},
+    {"goes_hflip",                 "GOES Flip Horizontal", "Image Display", false, false},
+    {"solar_vflip",                "Solar Flip Vertical",  "Image Display", false, false},
+    {"solar_hflip",                "Solar Flip Horizontal","Image Display", false, false},
+    {"custom_vflip",               "Custom Flip Vertical", "Image Display", false, false},
+    {"custom_hflip",               "Custom Flip Horizontal","Image Display", false, false},
     {"moon_flip_u",                "Moon Flip U",          "Image Display", false, false},
     {"moon_flip_v",                "Moon Flip V",          "Image Display", false, false},
     {"moon_roll_offset",           "Moon Roll Offset",     "Image Display", false, false},
@@ -1187,6 +1199,19 @@ static app_config_t *parse_config_from_json(cJSON *root)
 
     JSON_TO_INT(root, "solar_band", cfg->solar_band);
     JSON_TO_INT(root, "moon_drag_light_mode", cfg->moon_drag_light_mode);
+
+    cJSON *jgoesvf = cJSON_GetObjectItem(root, "goes_vflip");
+    if (jgoesvf && cJSON_IsNumber(jgoesvf)) cfg->goes_vflip = (jgoesvf->valueint != 0) ? 1 : 0;
+    cJSON *jgoeshf = cJSON_GetObjectItem(root, "goes_hflip");
+    if (jgoeshf && cJSON_IsNumber(jgoeshf)) cfg->goes_hflip = (jgoeshf->valueint != 0) ? 1 : 0;
+    cJSON *jsolarvf = cJSON_GetObjectItem(root, "solar_vflip");
+    if (jsolarvf && cJSON_IsNumber(jsolarvf)) cfg->solar_vflip = (jsolarvf->valueint != 0) ? 1 : 0;
+    cJSON *jsolarhf = cJSON_GetObjectItem(root, "solar_hflip");
+    if (jsolarhf && cJSON_IsNumber(jsolarhf)) cfg->solar_hflip = (jsolarhf->valueint != 0) ? 1 : 0;
+    cJSON *jcustomvf = cJSON_GetObjectItem(root, "custom_vflip");
+    if (jcustomvf && cJSON_IsNumber(jcustomvf)) cfg->custom_vflip = (jcustomvf->valueint != 0) ? 1 : 0;
+    cJSON *jcustomhf = cJSON_GetObjectItem(root, "custom_hflip");
+    if (jcustomhf && cJSON_IsNumber(jcustomhf)) cfg->custom_hflip = (jcustomhf->valueint != 0) ? 1 : 0;
 
     cJSON *jflipu = cJSON_GetObjectItem(root, "moon_flip_u");
     if (jflipu && cJSON_IsNumber(jflipu)) cfg->moon_flip_u = (jflipu->valueint != 0) ? 1 : 0;

@@ -2303,7 +2303,7 @@ void data_update_task(void *arg) {
                      * blocking warning and wait only for dismissal. */
                     ESP_LOGW(TAG, "Firmware %s requires manual USB erase+flash", rel->tag);
                     if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                        nina_ota_prompt_show_manual_flash(rel->tag);
+                        nina_ota_prompt_show_manual_flash(rel->tag, rel->full_erase_tag);
                         bsp_display_unlock();
                     }
                     while (nina_ota_prompt_visible()) {
@@ -2715,7 +2715,7 @@ main_loop:
                      * blocking warning and wait only for dismissal. */
                     ESP_LOGW(TAG, "Firmware %s requires manual USB erase+flash", rel->tag);
                     if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                        nina_ota_prompt_show_manual_flash(rel->tag);
+                        nina_ota_prompt_show_manual_flash(rel->tag, rel->full_erase_tag);
                         bsp_display_unlock();
                     }
                     while (nina_ota_prompt_visible()) {

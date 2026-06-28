@@ -10,7 +10,7 @@ void nina_ota_prompt_show_progress(void);
 void nina_ota_prompt_set_progress(int percent);
 void nina_ota_prompt_show_error(const char *error_msg);
 void nina_ota_prompt_show_status(const char *title, const char *message);
-void nina_ota_prompt_show_manual_flash(const char *tag);
+void nina_ota_prompt_show_manual_flash(const char *tag, const char *full_erase_tag);
 void nina_ota_prompt_apply_theme(void);
 bool nina_ota_prompt_update_accepted(void);
 bool nina_ota_prompt_skipped(void);
