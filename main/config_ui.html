@@ -1309,6 +1309,16 @@
             </select>
             <div class="field-hint">Rotate the satellite image clockwise.</div>
           </div>
+          <div class="toggle-row" style="margin-top:16px;border-bottom:1px solid rgba(255,255,255,0.06)">
+            <span class="toggle-label">Flip vertical</span>
+            <label class="toggle"><input type="checkbox" id="goesVflip" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Mirrors the satellite image top-to-bottom.</div>
+          <div class="toggle-row">
+            <span class="toggle-label">Flip horizontal</span>
+            <label class="toggle"><input type="checkbox" id="goesHflip" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Mirrors the satellite image left-to-right.</div>
           <div class="field" style="margin-top:16px">
             <button onclick="fetchGoesPreview()" class="btn btn-primary" id="goesPreviewBtn" style="width:100%">Fetch Preview</button>
           </div>
@@ -1441,6 +1451,16 @@
             </select>
             <div class="field-hint">Rotate the solar image clockwise.</div>
           </div>
+          <div class="toggle-row" style="margin-top:16px;border-bottom:1px solid rgba(255,255,255,0.06)">
+            <span class="toggle-label">Flip vertical</span>
+            <label class="toggle"><input type="checkbox" id="solarVflip" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Mirrors the solar image top-to-bottom.</div>
+          <div class="toggle-row">
+            <span class="toggle-label">Flip horizontal</span>
+            <label class="toggle"><input type="checkbox" id="solarHflip" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Mirrors the solar image left-to-right.</div>
           </div>
           <div id="customGroup" style="display:none">
           <div class="field" style="margin-top:16px">
@@ -1458,6 +1478,16 @@
             </select>
             <div class="field-hint">Rotate the custom image clockwise.</div>
           </div>
+          <div class="toggle-row" style="margin-top:16px;border-bottom:1px solid rgba(255,255,255,0.06)">
+            <span class="toggle-label">Flip vertical</span>
+            <label class="toggle"><input type="checkbox" id="customVflip" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Mirrors the custom image top-to-bottom.</div>
+          <div class="toggle-row">
+            <span class="toggle-label">Flip horizontal</span>
+            <label class="toggle"><input type="checkbox" id="customHflip" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Mirrors the custom image left-to-right.</div>
           <div class="field" style="margin-top:16px">
             <label class="field-label">Update Interval</label>
             <select class="input" id="customInterval" onchange="applyImageDisplay();checkDirty()">
@@ -2804,10 +2834,16 @@
                 <tr><td>goes_region</td><td>string</td><td>region code</td><td>GOES region id.</td></tr>
                 <tr><td>goes_update_interval_s</td><td>int</td><td>300 to 7200 (clamped)</td><td>GOES refresh interval in seconds.</td></tr>
                 <tr><td>goes_orientation</td><td>int</td><td>0 to 3</td><td>Rotation quadrant (0/90/180/270 degrees).</td></tr>
+                <tr><td>goes_vflip</td><td>int</td><td>0 or 1</td><td>Flip GOES image vertically (top/bottom).</td></tr>
+                <tr><td>goes_hflip</td><td>int</td><td>0 or 1</td><td>Flip GOES image horizontally (left/right).</td></tr>
                 <tr><td>solar_band</td><td>int</td><td>0 to 17</td><td>Solar / SDO / SOHO band index. An invalid value falls back to 0.</td></tr>
                 <tr><td>solar_orientation</td><td>int</td><td>0 to 3</td><td>Rotation quadrant.</td></tr>
+                <tr><td>solar_vflip</td><td>int</td><td>0 or 1</td><td>Flip solar image vertically (top/bottom).</td></tr>
+                <tr><td>solar_hflip</td><td>int</td><td>0 or 1</td><td>Flip solar image horizontally (left/right).</td></tr>
                 <tr><td>custom_image_url</td><td>string (max 256)</td><td>must start with http:// or https:// (empty string clears it)</td><td>Custom image source URL. Validated server-side.</td></tr>
                 <tr><td>custom_orientation</td><td>int</td><td>0 to 3</td><td>Rotation quadrant.</td></tr>
+                <tr><td>custom_vflip</td><td>int</td><td>0 or 1</td><td>Flip custom image vertically (top/bottom).</td></tr>
+                <tr><td>custom_hflip</td><td>int</td><td>0 or 1</td><td>Flip custom image horizontally (left/right).</td></tr>
                 <tr><td>custom_update_interval_s</td><td>int</td><td>10 to 7200 (clamped)</td><td>Custom image refresh interval in seconds.</td></tr>
                 <tr><td>moon_bg_style</td><td>int</td><td>0 to 3</td><td>Moon page background style. An invalid value falls back to 0.</td></tr>
                 <tr><td>moon_lat</td><td>float</td><td>latitude</td><td>Observer latitude for moon libration.</td></tr>
@@ -3937,12 +3973,18 @@
       if($('customImageUrl')) $('customImageUrl').value=data.custom_image_url||'';
       updateImgCustomPillHint();
       if($('customOrientation')) $('customOrientation').value=String(data.custom_orientation||0);
+      if($('customVflip')) $('customVflip').checked=!!data.custom_vflip;
+      if($('customHflip')) $('customHflip').checked=!!data.custom_hflip;
       if($('customInterval')) $('customInterval').value=String(data.custom_update_interval_s||60);
       if($('moonBg')) $('moonBg').value=String(data.moon_bg_style||0);
       if($('moonDragLight')) $('moonDragLight').value=String(data.moon_drag_light_mode||0);
       if($('solarBand')) $('solarBand').value=String(data.solar_band||0);
       if($('goesOrientation')) $('goesOrientation').value=String(data.goes_orientation||0);
+      if($('goesVflip')) $('goesVflip').checked=!!data.goes_vflip;
+      if($('goesHflip')) $('goesHflip').checked=!!data.goes_hflip;
       if($('solarOrientation')) $('solarOrientation').value=String(data.solar_orientation||0);
+      if($('solarVflip')) $('solarVflip').checked=!!data.solar_vflip;
+      if($('solarHflip')) $('solarHflip').checked=!!data.solar_hflip;
       var mlat=data.moon_lat, mlon=data.moon_lon;
       // Prefill from weather location when moon coords are unset
       if((!mlat && !mlon) && (data.weather_lat || data.weather_lon)){ mlat=data.weather_lat; mlon=data.weather_lon; }
@@ -4445,9 +4487,19 @@
        `data` is a /api/check-update-json response; `tag` is substituted live. */
     function fullEraseCautionHtml(data){
       var tag=escHtml((data&&data.tag)||'');
+      var eraseTag=escHtml((data&&data.full_erase_tag)||'');
       var relUrl=(data&&(data.release_url||data.html_url))||'https://github.com/chvvkumar/ESP32-P4-NINA-Display/releases';
       relUrl=escHtml(relUrl);
-      return 'Firmware <strong>'+tag+'</strong> requires a manual update. It cannot be installed over the air. '+
+      // Name the intermediate release that forces the manual update when it differs
+      // from the target. Empty eraseTag (history-incomplete fail-safe) or eraseTag
+      // equal to the target keeps the existing single-version wording.
+      var lead;
+      if(eraseTag && eraseTag!==tag){
+        lead='Updating to <strong>'+tag+'</strong> requires a manual update, because release <strong>'+eraseTag+'</strong> on the way requires a full erase. It cannot be installed over the air. ';
+      } else {
+        lead='Firmware <strong>'+tag+'</strong> requires a manual update. It cannot be installed over the air. ';
+      }
+      return lead+
         'First back up your settings on the Backup tab (Download Backup). '+
         'Then flash nina-display-factory.bin at address 0x0000 using the '+
         '<a href="https://espressif.github.io/esptool-js/" target="_blank" rel="noopener">ESP Web Flasher</a>. '+
@@ -5240,9 +5292,15 @@
         moon_spin_return_s: parseInt($('moon_spin_return_s').value,10)||3,
         solar_band: parseInt($('solarBand').value,10)||0,
         goes_orientation: parseInt($('goesOrientation').value,10)||0,
+        goes_vflip: $('goesVflip')&&$('goesVflip').checked?1:0,
+        goes_hflip: $('goesHflip')&&$('goesHflip').checked?1:0,
         solar_orientation: parseInt($('solarOrientation').value,10)||0,
+        solar_vflip: $('solarVflip')&&$('solarVflip').checked?1:0,
+        solar_hflip: $('solarHflip')&&$('solarHflip').checked?1:0,
         custom_image_url: $('customImageUrl')?$('customImageUrl').value.trim():'',
         custom_orientation: $('customOrientation')?parseInt($('customOrientation').value,10)||0:0,
+        custom_vflip: $('customVflip')&&$('customVflip').checked?1:0,
+        custom_hflip: $('customHflip')&&$('customHflip').checked?1:0,
         custom_update_interval_s: $('customInterval')?parseInt($('customInterval').value,10)||60:60
       }).then(function(r){
         if(!r.ok){ showToast('Failed to save image settings','error'); return; }

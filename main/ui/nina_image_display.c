@@ -620,6 +620,51 @@ void nina_image_display_update(goes_data_t *data)
     strlcpy(label_copy, data->label, sizeof(label_copy));
     goes_data_unlock(data);
 
+    /* Per-source logical mirror pass. Runs on the upright `copy` (after vflip +
+     * caption mask) and BEFORE the rotation block, so flips compose naturally
+     * with rotation. vflip reverses row order (top<->bottom); hflip reverses the
+     * pixel order within each row (left<->right). Moon (source 1) is excluded —
+     * it has its own moon_flip_u/v handling elsewhere. Dimensions are unchanged. */
+    uint8_t do_vflip = (buf_src == 0)   ? cfg->goes_vflip
+                       : (buf_src == 2) ? cfg->solar_vflip
+                       : (buf_src == 3) ? cfg->custom_vflip
+                                        : 0;
+    uint8_t do_hflip = (buf_src == 0)   ? cfg->goes_hflip
+                       : (buf_src == 2) ? cfg->solar_hflip
+                       : (buf_src == 3) ? cfg->custom_hflip
+                                        : 0;
+    if (do_vflip) {
+        /* Swap row y with row (h-1-y) using one PSRAM temp row of dst_stride. */
+        uint8_t *tmp_row = heap_caps_malloc(dst_stride, MALLOC_CAP_SPIRAM);
+        if (!tmp_row) {
+            ESP_LOGE(TAG, "PSRAM alloc failed for vflip temp row (%u bytes)",
+                     (unsigned)dst_stride);
+            heap_caps_free(copy);
+            /* goes lock already released above; just retire the wait overlay. */
+            nina_wait_overlay_hide();
+            return;
+        }
+        for (uint32_t y = 0; y < h / 2; y++) {
+            uint8_t *row_a = (uint8_t *)copy + (size_t)y * dst_stride;
+            uint8_t *row_b = (uint8_t *)copy + (size_t)(h - 1 - y) * dst_stride;
+            memcpy(tmp_row, row_a, dst_stride);
+            memcpy(row_a, row_b, dst_stride);
+            memcpy(row_b, tmp_row, dst_stride);
+        }
+        heap_caps_free(tmp_row);
+    }
+    if (do_hflip) {
+        /* Reverse the w pixels in each row: swap col x with (w-1-x). */
+        for (uint32_t y = 0; y < h; y++) {
+            uint16_t *row = (uint16_t *)((uint8_t *)copy + (size_t)y * dst_stride);
+            for (uint32_t x = 0; x < (uint32_t)w / 2; x++) {
+                uint16_t t          = row[x];
+                row[x]              = row[w - 1 - x];
+                row[w - 1 - x]      = t;
+            }
+        }
+    }
+
     /* Per-source logical rotation pass. Rotates the decoded RGB565 pixel buffer
      * (NOT via an LVGL transform) so it is independent of display rotation and
      * runs on the upright `copy` produced above (after vflip + caption mask).
