@@ -18,8 +18,11 @@
       --accent-hover: #9dbcff;
       --accent-glow: rgba(var(--accent-rgb), 0.15);
       --text: #e2e8f0;
+      --text-secondary: #b8c2d0;
       --text-muted: #94a3b8;
       --text-hint: #7a8ba4;
+      --accent-strong: #5a86e8;
+      --accent-strong-hover: #4a72d8;
       --danger: #f87171;
       --danger-hover: #ef4444;
       --warning: #fbbf24;
@@ -40,7 +43,7 @@
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: var(--bg);
       background-image:
         radial-gradient(ellipse at 20% 0%, rgba(122, 162, 247, 0.05) 0%, transparent 50%),
@@ -154,14 +157,20 @@
       display: block; font-size: 0.82rem; color: var(--text-muted);
       margin-bottom: 8px; font-weight: 500; letter-spacing: 0.01em;
     }
-    .field-hint { font-size: 0.72rem; color: var(--text-hint); margin-top: 6px; opacity: 0.7; }
+    .field-hint { font-size: 0.72rem; color: var(--text-hint); margin-top: 6px; }
     /* Section help popover (inline expandable, toggled by info icon in card title) */
     .card-title-label { display:inline-flex; align-items:center; min-width:0; }
     .help-btn {
+      position:relative;
       display:inline-flex; align-items:center; justify-content:center;
       width:18px; height:18px; padding:0; margin-left:8px; flex-shrink:0;
       border:none; background:transparent; cursor:pointer; color:var(--text-muted);
       border-radius:50%; vertical-align:middle; transition:color 0.2s ease, background 0.2s ease;
+    }
+    /* Expand the tap target to >=44x44px without enlarging the 18px visible box or shifting inline layout */
+    .help-btn::before {
+      content:""; position:absolute; left:50%; top:50%; transform:translate(-50%, -50%);
+      width:44px; height:44px;
     }
     .help-btn:hover { color:var(--accent); background:var(--accent-glow); }
     .help-btn svg { width:14px; height:14px; display:block; pointer-events:none; }
@@ -1745,7 +1754,7 @@
           <label class="toggle"><input type="checkbox" id="notify_cat_2" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
         </div>
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label">Focuser</span>
+          <span class="toggle-label">Focuser Events</span>
           <label class="toggle"><input type="checkbox" id="notify_cat_3" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
         </div>
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
@@ -1983,9 +1992,11 @@
           <label class="toggle"><input type="checkbox" id="debug_mode"><span class="toggle-track"></span></label>
         </div>
         <div class="field-hint" style="margin-top:4px;margin-bottom:16px">Shows extra performance and diagnostic info.</div>
-        <span class="toggle-label">Enable Demo Mode</span>
-        <label class="toggle"><input type="checkbox" id="demo_mode"><span class="toggle-track"></span></label>
-        <p style="color:#888;font-size:0.85em;margin:2px 0 8px 0;">Generates simulated astrophotography data. Reboot for the change to fully take effect.</p>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Enable Demo Mode</span>
+          <label class="toggle"><input type="checkbox" id="demo_mode"><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint" style="margin-top:4px;margin-bottom:16px">Generates simulated astrophotography data. Reboot for the change to fully take effect.</div>
         <button class="btn btn-outline" id="ssBtn" onclick="takeScreenshot()">Capture Screenshot</button>
         <div id="ssContainer" style="display:none;margin-top:16px">
           <img id="ssImage" style="width:100%;border-radius:var(--radius-sm);border:1px solid var(--border)">
