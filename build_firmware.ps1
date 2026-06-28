@@ -7,6 +7,7 @@
 #   .\build_firmware.ps1 -FullClean   # Clean rebuild
 #   .\build_firmware.ps1 -OTA         # Build + OTA flash to both devices
 #   .\build_firmware.ps1 -OTA -Devices "NinaDash1.lan","NinaDash2.lan"
+#   .\build_firmware.ps1 -Release      # Enforce clean tree + tag matches version.txt, fail otherwise
 
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', 'Password',
     Justification='Dev tool: password sourced from env var or interactive prompt; not persisted.')]
@@ -14,6 +15,7 @@ param(
     [string]$IdfPath = "C:\Espressif\frameworks\esp-idf-v5.5.2",
     [switch]$FullClean,
     [switch]$OTA,
+    [switch]$Release,
     [string[]]$Devices = @("NinaDash2.lan"),
     [string]$Password = $(if ($env:NINADASH_PASSWORD) { $env:NINADASH_PASSWORD } else { "changeme123!" })
 )
@@ -89,6 +91,45 @@ Write-Host "Activating ESP-IDF environment from $IdfPath ..." -ForegroundColor C
 if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
     Write-Error "Failed to activate ESP-IDF environment."
     exit 1
+}
+
+# Version integrity check
+Push-Location $ProjectDir
+try {
+    $gitDescribe = (git describe --tags --always --dirty 2>$null)
+    if ($gitDescribe) { $gitDescribe = $gitDescribe.Trim() } else { $gitDescribe = "" }
+} finally {
+    Pop-Location
+}
+
+$versionTxt = (Get-Content (Join-Path $ProjectDir 'version.txt') -Raw).Trim()
+$isDirty = $gitDescribe -match '-dirty$'
+
+# Parse base version from git describe: strip leading v/V, take substring before first '-'
+$tagBase = $gitDescribe -replace '^[vV]', ''
+$dashIdx = $tagBase.IndexOf('-')
+if ($dashIdx -ge 0) { $tagBase = $tagBase.Substring(0, $dashIdx) }
+
+if ($tagBase -match '^\d+\.\d+\.\d+') {
+    $tagMismatch = ($tagBase -ne $versionTxt)
+} else {
+    # Describe returned a bare commit sha (no usable tag) - treat as mismatch
+    $tagMismatch = $true
+}
+
+Write-Host "Version: version.txt=$versionTxt  git-describe=$gitDescribe" -ForegroundColor Cyan
+
+if ($isDirty -or $tagMismatch) {
+    $reasons = @()
+    if ($isDirty) { $reasons += "dirty tree" }
+    if ($tagMismatch) { $reasons += "git tag base '$tagBase' != version.txt '$versionTxt'" }
+    $msg = "version integrity check failed (" + ($reasons -join "; ") + ")."
+    if ($Release) {
+        Write-Error ("Release build blocked: " + $msg + " Commit/stash changes and create matching tag ``git tag v$versionTxt`` so git describe == v$versionTxt.")
+        exit 1
+    } else {
+        Write-Host ("WARNING: " + $msg) -ForegroundColor Yellow
+    }
 }
 
 # Full clean if requested or if build dir has a Python mismatch

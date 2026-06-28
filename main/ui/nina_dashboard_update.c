@@ -5,6 +5,7 @@
 
 #include "nina_dashboard.h"
 #include "nina_dashboard_internal.h"
+#include "nina_empty_state.h"
 #include "nina_connection.h"
 #include "app_config.h"
 #include "themes.h"
@@ -240,6 +241,30 @@ static void update_disconnected_state(dashboard_page_t *p, int instance_idx, int
     set_label_if_changed(p->lbl_target_time_header, "TIME LIMIT");
     for (int i = 0; i < MAX_POWER_WIDGETS; i++) {
         lv_obj_add_flag(p->box_pwr[i], LV_OBJ_FLAG_HIDDEN);
+    }
+
+    /* IDLE-04: hide the header and arc so only the branded overlay is visible.
+     * IDLE-05: arc hidden via LV_OBJ_FLAG_HIDDEN (not drawn at bg_main). */
+    if (p->header_box) {
+        lv_obj_add_flag(p->header_box, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (p->arc_exposure) {
+        lv_obj_add_flag(p->arc_exposure, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    /* Refresh the offline title to reflect the current configured hostname,
+     * then show the branded empty-state overlay. */
+    if (p->empty_state_cont) {
+        char host[64] = {0};
+        extract_host_from_url(app_config_get_instance_url(instance_idx), host, sizeof(host));
+        char offline_title[96];
+        if (host[0]) {
+            snprintf(offline_title, sizeof(offline_title), "%s Offline", host);
+        } else {
+            snprintf(offline_title, sizeof(offline_title), "Node %d Offline", instance_idx + 1);
+        }
+        nina_empty_state_set_title(p->empty_state_cont, offline_title);
+        nina_empty_state_show(p->empty_state_cont);
     }
 }
 
@@ -779,6 +804,22 @@ void update_nina_dashboard_page(int instance, const nina_client_t *data) {
         update_disconnected_state(p, inst, gb, conn_state);
         update_stale_indicator(p, data);
         return;
+    }
+
+    /* Reconnect restore: on the first CONNECTED poll after a disconnected state,
+     * un-hide the header and arc and dismiss the branded empty-state overlay.
+     * Gated on nina_connected so this only runs once per transition, not every
+     * poll cycle (T-05-05: avoids per-poll LVGL churn). */
+    if (!p->nina_connected) {
+        if (p->header_box) {
+            lv_obj_clear_flag(p->header_box, LV_OBJ_FLAG_HIDDEN);
+        }
+        if (p->arc_exposure) {
+            lv_obj_clear_flag(p->arc_exposure, LV_OBJ_FLAG_HIDDEN);
+        }
+        if (p->empty_state_cont) {
+            nina_empty_state_hide(p->empty_state_cont);
+        }
     }
 
     update_header(p, data);

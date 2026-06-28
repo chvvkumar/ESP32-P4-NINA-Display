@@ -20,6 +20,7 @@
 #include "themes.h"
 #include "app_config.h"
 #include "spotify_auth.h"
+#include "nina_empty_state.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -76,6 +77,9 @@ static lv_obj_t *minimal_progress = NULL;      /* Optional thin progress bar */
 static lv_obj_t *status_panel = NULL;
 static lv_obj_t *status_title = NULL;
 static lv_obj_t *status_subtitle = NULL;
+
+/* Shared empty-state overlay for the nothing-playing idle state (IDLE-03, Plan 01). */
+static lv_obj_t *idle_empty_state = NULL;
 
 static lv_timer_t *idle_timer = NULL;
 static bool is_idle = true;
@@ -171,7 +175,7 @@ static void spotify_status_refresh(void)
         case SPOTIFY_AUTH_AUTHORIZED:
         default:
             if (!has_received_data) {
-                spotify_status_set("Connecting to Spotify\xE2\x80\xA6", "");
+                spotify_status_set("Connecting to Spotify...", "");
                 return;
             }
             /* Authorized and data has arrived (nothing-playing handled by the
@@ -197,7 +201,7 @@ static bool is_version_keyword(const char *start, size_t len)
         "remaster", "remix", "live", "edit", "version", "deluxe", "mix",
         "acoustic", "demo", "mono", "stereo", "anniversary", "bonus",
         "extended", "radio", "single", "original", "alternate", "session",
-        "stripped", "instrumental", "explicit", "clean", "feat", NULL
+        "stripped", "instrumental", "explicit", "clean", "feat", "from", NULL
     };
     /* Build a lowercase copy for case-insensitive search */
     char lower[128];
@@ -403,6 +407,24 @@ lv_obj_t *spotify_page_create(lv_obj_t *parent)
     /* 6. Status panel — text-based setup/connecting indicator, created last so
      * it draws above album art and the dim overlay. Hidden until needed. */
     create_status_panel();
+
+    /* 7. Nothing-playing idle empty-state (IDLE-03).  Created after the status
+     * panel so it layers on top.  Hidden until nina_spotify_set_idle() fires. */
+    idle_empty_state = nina_empty_state_create(spotify_page,
+                                               ICON_MUSIC_OFF,
+                                               "Nothing Playing",
+                                               "Start playback in Spotify",
+                                               0);
+    if (idle_empty_state) {
+        lv_obj_move_foreground(idle_empty_state);
+        lv_obj_add_flag(idle_empty_state, LV_OBJ_FLAG_FLOATING);
+        lv_obj_set_size(idle_empty_state, LV_PCT(100), LV_PCT(100));
+        lv_obj_set_pos(idle_empty_state, 0, 0);
+        /* Opaque black backdrop so the status panel does not bleed through
+         * (BUG-1 fix: mirrors stale_overlay bg_color/bg_opa pattern). */
+        lv_obj_set_style_bg_color(idle_empty_state, lv_color_hex(0x000000), 0);
+        lv_obj_set_style_bg_opa(idle_empty_state, LV_OPA_COVER, 0);
+    }
 
     /* Touch handler on entire page */
     lv_obj_add_event_cb(spotify_page, page_touch_cb, LV_EVENT_CLICKED, NULL);
@@ -825,6 +847,9 @@ void nina_spotify_update(const spotify_playback_t *data)
     has_received_data = true;
     is_playing = data->is_playing;
 
+    /* Real track data has arrived — hide the nothing-playing empty state (IDLE-03). */
+    nina_empty_state_hide(idle_empty_state);
+
     bool minimal = app_config_get()->spotify_minimal_mode;
 
     if (minimal) {
@@ -1049,10 +1074,13 @@ void nina_spotify_set_idle(void)
     lv_obj_add_flag(img_album_art, LV_OBJ_FLAG_HIDDEN);
 
     /* Hide the status panel — we've heard from the API, nothing is playing.
-     * The "Nothing Playing" text (track_info_cont / minimal_info_cont) is shown
-     * by set_idle_state instead. */
+     * The branded empty-state overlay (IDLE-03) now provides the idle message;
+     * the old track_info_cont / minimal_info_cont paths remain as fallback. */
     has_received_data = true;
     spotify_status_hide();
+
+    /* Show the shared empty-state component (Plan 01, IDLE-03). */
+    nina_empty_state_show(idle_empty_state);
 }
 
 /* ── Public API: theme ───────────────────────────────────────────────── */
@@ -1085,6 +1113,12 @@ void spotify_page_apply_theme(void)
     if (status_subtitle) {
         lv_obj_set_style_text_color(status_subtitle,
             lv_color_hex(current_theme->label_color), 0);
+    }
+
+    /* Apply theme to the nothing-playing empty state (IDLE-03). */
+    if (idle_empty_state) {
+        nina_empty_state_apply_theme(idle_empty_state, current_theme,
+                                     app_config_get()->color_brightness);
     }
 
     lv_obj_invalidate(spotify_page);

@@ -65,6 +65,13 @@ void session_destroy(const char *token);
  * out buffer must hold at least 65 bytes (64 hex + NUL). */
 bool session_extract_cookie(httpd_req_t *req, char *out, size_t out_len);
 
+/* ---- Shared login lockout (defined in web_handlers_auth.c) ----
+ * Let alternate auth paths (X-Auth-Password header) share the cookie-login
+ * rate limiter so the header is not an unthrottled brute-force bypass. */
+bool auth_is_locked_out(void);  /* true if inside the lockout window (false when auth disabled) */
+void auth_note_failure(void);   /* record a failed auth; engages lockout at threshold */
+void auth_note_success(void);   /* clear failure counter and any lockout */
+
 /**
  * @brief Guard handler entry with session auth. Returns 401/302 if missing/invalid.
  * Must be the first statement in the handler body.
@@ -105,11 +112,24 @@ esp_err_t spotify_status_get_handler(httpd_req_t *req);
 esp_err_t spotify_control_post_handler(httpd_req_t *req);
 esp_err_t image_display_config_get_handler(httpd_req_t *req);
 esp_err_t image_display_config_post_handler(httpd_req_t *req);
+esp_err_t image_display_refresh_post_handler(httpd_req_t *req);
+esp_err_t pages_get_handler(httpd_req_t *req);
+esp_err_t navigate_post_handler(httpd_req_t *req);
+esp_err_t nav_pin_post_handler(httpd_req_t *req);
+esp_err_t control_list_get_handler(httpd_req_t *req);
+esp_err_t control_get_get_handler(httpd_req_t *req);
+esp_err_t control_toggle_post_handler(httpd_req_t *req);
+esp_err_t control_cycle_post_handler(httpd_req_t *req);
+esp_err_t control_set_post_handler(httpd_req_t *req);
+esp_err_t control_adjust_post_handler(httpd_req_t *req);
 esp_err_t backup_get_handler(httpd_req_t *req);
 esp_err_t restore_post_handler(httpd_req_t *req);
 esp_err_t status_get_handler(httpd_req_t *req);
 esp_err_t nina_status_get_handler(httpd_req_t *req);
 esp_err_t crash_get_handler(httpd_req_t *req);
+esp_err_t weather_get_handler(httpd_req_t *req);
+esp_err_t events_get_handler(httpd_req_t *req);
+esp_err_t events_clear_post_handler(httpd_req_t *req);
 esp_err_t admin_password_post_handler(httpd_req_t *req);
 esp_err_t login_page_get_handler(httpd_req_t *req);
 esp_err_t login_post_handler(httpd_req_t *req);

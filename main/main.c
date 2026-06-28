@@ -571,6 +571,10 @@ void app_main(void)
     // SPIFFS, reads reset reason + RTC panic text, enforces ring + retention).
     crash_log_init();
 
+    /* Create the event-log mutex before any task or HTTP handler can reach it,
+     * so the ring's add/clear/copy paths never race on lazy creation. */
+    nina_event_log_init();
+
     nina_connection_init();
 
     perf_monitor_init(30);

@@ -84,6 +84,54 @@ jobs:
           echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
           echo "branch=$BRANCH" >> $GITHUB_OUTPUT
 
+      - name: Determine tag
+        if: steps.check_skip.outputs.skip != 'true'
+        id: tag
+        run: |
+          BRANCH=${GITHUB_REF_NAME}
+
+          if [ "$BRANCH" = "main" ]; then
+            VERSION=$(cat version.txt | tr -d '[:space:]')
+            TAG="v${VERSION}"
+          else
+            # Make the local tag set authoritative: pull every tag created by
+            # prior release runs (a shallow/persistent runner workspace otherwise
+            # lags the remote, which previously caused the number to collide and
+            # silently clobber an existing pre-release).
+            git fetch --force --tags origin
+
+            # Use latest main release version so pre-releases sort correctly
+            LATEST_MAIN_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | grep -v '-' | head -1)
+            if [ -n "$LATEST_MAIN_TAG" ]; then
+              BASE_VERSION=${LATEST_MAIN_TAG#v}
+            else
+              BASE_VERSION=$(cat version.txt | tr -d '[:space:]')
+            fi
+
+            # Next number = highest existing dev.N + 1 (use the max, not a count,
+            # so gaps from deleted/withdrawn tags never cause a reuse), then skip
+            # any number whose tag already exists as a final race/lag safeguard.
+            PREFIX="v${BASE_VERSION}-${BRANCH}."
+            LAST=$(git tag -l "${PREFIX}*" | sed "s|^${PREFIX}||" | grep -E '^[0-9]+$' | sort -n | tail -1)
+            NEXT=$(( ${LAST:-0} + 1 ))
+            TAG="${PREFIX}${NEXT}"
+            while git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null 2>&1; do
+              NEXT=$(( NEXT + 1 ))
+              TAG="${PREFIX}${NEXT}"
+            done
+          fi
+
+          # Force the build to embed THIS tag (build runs before the tag is
+          # created at release time, so git describe alone would lag by one).
+          echo "BUILD_GIT_TAG_OVERRIDE=$TAG" >> $GITHUB_ENV
+
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          if [ "$BRANCH" = "main" ]; then
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          else
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: Set ESP-IDF paths
         if: steps.check_skip.outputs.skip != 'true'
         run: |
@@ -340,50 +388,6 @@ jobs:
           name: firmware-${{ steps.version.outputs.branch }}-${{ steps.version.outputs.short_sha }}
           path: firmware/
           retention-days: 30
-
-      - name: Determine tag
-        if: steps.check_skip.outputs.skip != 'true'
-        id: tag
-        run: |
-          BRANCH=${GITHUB_REF_NAME}
-
-          if [ "$BRANCH" = "main" ]; then
-            VERSION=$(cat version.txt | tr -d '[:space:]')
-            TAG="v${VERSION}"
-          else
-            # Make the local tag set authoritative: pull every tag created by
-            # prior release runs (a shallow/persistent runner workspace otherwise
-            # lags the remote, which previously caused the number to collide and
-            # silently clobber an existing pre-release).
-            git fetch --force --tags origin
-
-            # Use latest main release version so pre-releases sort correctly
-            LATEST_MAIN_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | grep -v '-' | head -1)
-            if [ -n "$LATEST_MAIN_TAG" ]; then
-              BASE_VERSION=${LATEST_MAIN_TAG#v}
-            else
-              BASE_VERSION=$(cat version.txt | tr -d '[:space:]')
-            fi
-
-            # Next number = highest existing dev.N + 1 (use the max, not a count,
-            # so gaps from deleted/withdrawn tags never cause a reuse), then skip
-            # any number whose tag already exists as a final race/lag safeguard.
-            PREFIX="v${BASE_VERSION}-${BRANCH}."
-            LAST=$(git tag -l "${PREFIX}*" | sed "s|^${PREFIX}||" | grep -E '^[0-9]+$' | sort -n | tail -1)
-            NEXT=$(( ${LAST:-0} + 1 ))
-            TAG="${PREFIX}${NEXT}"
-            while git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null 2>&1; do
-              NEXT=$(( NEXT + 1 ))
-              TAG="${PREFIX}${NEXT}"
-            done
-          fi
-
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          if [ "$BRANCH" = "main" ]; then
-            echo "is_prerelease=false" >> $GITHUB_OUTPUT
-          else
-            echo "is_prerelease=true" >> $GITHUB_OUTPUT
-          fi
 
       - name: Generate changelog
         if: steps.check_skip.outputs.skip != 'true'

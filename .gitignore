@@ -171,3 +171,9 @@ components/tgx/*
 
 # Local serial-console DSI underrun watcher (not part of the build)
 watch_underrun.ps1
+
+# GSD planning artifacts (local only) — created by /gsd-* skills
+.planning/
+skill-observations/
+.gsd/
+gsd-core/

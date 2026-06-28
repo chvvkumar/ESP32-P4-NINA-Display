@@ -14,6 +14,8 @@ typedef struct {
     uint16_t          image_h;
     bool              vflip;        /* true: buffer is vertically flipped (sw JPEG) */
     char              label[48];    /* human-readable name of the source this buffer holds (region/band); rendered verbatim by the page so it can never desync from image_buf */
+    char              error_msg[48]; /* human-readable failure reason shown on-screen when a fetch fails; "" when last fetch succeeded */
+    int8_t            src_kind;      /* source the current image_buf belongs to: 0=GOES 1=Moon 2=Solar 3=Custom, -1=unknown */
     SemaphoreHandle_t mutex;
 } goes_data_t;
 
@@ -21,7 +23,7 @@ void      goes_data_init(goes_data_t *data);
 bool      goes_data_lock(goes_data_t *data, int timeout_ms);
 void      goes_data_unlock(goes_data_t *data);
 esp_err_t goes_client_poll(const char *region, goes_data_t *data);
-esp_err_t goes_client_poll_url(const char *url, goes_data_t *data, bool vflip, const char *label);
+esp_err_t goes_client_poll_url(const char *url, goes_data_t *data, bool vflip, const char *label, int8_t src_kind);
 void      goes_client_cleanup(goes_data_t *data);
 
 /* NESDIS sector code -> human-readable region name. Returns the code itself

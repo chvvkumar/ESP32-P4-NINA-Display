@@ -192,7 +192,7 @@ static void moon_tap_cb(lv_event_t *e)
 {
     (void)e;
     /* Only the Moon source animates; ignore taps on the GOES image. */
-    if (app_config_get()->image_display_source != 1) return;
+    if (image_source_get_effective() != 1) return;
     atomic_store(&moon_anim_request, true);
     if (goes_task_handle) xTaskNotifyGive(goes_task_handle);
 }
@@ -213,7 +213,7 @@ static bool moon_indev_point(lv_point_t *p)
 static void moon_drag_pressed_cb(lv_event_t *e)
 {
     (void)e;
-    if (app_config_get()->image_display_source != 1) return;   /* Moon only */
+    if (image_source_get_effective() != 1) return;   /* Moon only */
     lv_point_t p;
     if (!moon_indev_point(&p)) return;
     moon_drag_begin((float)p.x, (float)p.y);
@@ -226,7 +226,7 @@ static void moon_drag_pressed_cb(lv_event_t *e)
 static void moon_drag_pressing_cb(lv_event_t *e)
 {
     (void)e;
-    if (app_config_get()->image_display_source != 1) return;   /* Moon only */
+    if (image_source_get_effective() != 1) return;   /* Moon only */
     lv_point_t p;
     if (!moon_indev_point(&p)) return;
     moon_drag_move((float)p.x, (float)p.y);
@@ -240,7 +240,7 @@ static void moon_drag_pressing_cb(lv_event_t *e)
 static void moon_drag_released_cb(lv_event_t *e)
 {
     (void)e;
-    if (app_config_get()->image_display_source != 1) return;   /* Moon only */
+    if (image_source_get_effective() != 1) return;   /* Moon only */
     moon_drag_end();
     if (goes_task_handle) xTaskNotifyGive(goes_task_handle);
 }
@@ -461,6 +461,29 @@ void nina_image_display_update(goes_data_t *data)
      * crossfade between two crops of the same frame is pointless. */
     bool forced = force_redraw;
     force_redraw = false;
+
+    /* Custom Image URL (source 3) error overlay. A failed fetch sets
+     * goes_data.error_msg to a reason string and leaves no fresh frame
+     * (last_poll_ms not advanced), so the new-image gate below would return
+     * early and the page would show a blank or stale panel with no explanation.
+     * Read error_msg under the goes lock (like every other goes_data read here),
+     * and when the active source is Custom AND a reason is present, render it as
+     * the caption text and bail. A successful fetch clears error_msg, so the
+     * normal swap path below runs and overwrites the caption — no stale error.
+     * Scoped to source 3, so GOES/Solar/Moon are visually unchanged. */
+    if (image_source_get_effective() == 3 && data->error_msg[0] != '\0') {
+        char err_copy[48];
+        strlcpy(err_copy, data->error_msg, sizeof(err_copy));
+        goes_data_unlock(data);
+        lv_label_set_text(lbl_region, err_copy);
+        lv_label_set_text(lbl_timestamp, "");
+        hide_moon_corner_labels();
+        /* Release any manual-fetch wait overlay so it cannot get stuck on the
+         * error path (mirrors the other early-exit overlay-hide sites). */
+        nina_wait_overlay_hide();
+        return;
+    }
+
     if (!data->image_buf || (!forced && data->last_poll_ms <= displayed_poll_ms)) {
         goes_data_unlock(data);
         return;
@@ -487,11 +510,24 @@ void nina_image_display_update(goes_data_t *data)
     extern uint8_t solar_band_crop_pct(uint8_t idx);
     extern bool    solar_band_text_mask(uint8_t idx, float *x0, float *y0, float *x1, float *y1);
     const app_config_t *cfg = app_config_get();
+    /* Source of the buffer CURRENTLY in goes_data, captured under the goes lock
+     * (alongside sw/sh/label_copy). Every per-source render decision below (crop,
+     * caption mask, orientation, instant-vs-crossfade, labels) keys off THIS tag,
+     * not image_source_get_effective() (intent). The two can disagree during a
+     * prefetch swap or rotation transition; keying off the buffer's own tag is the
+     * only way to guarantee, e.g., a Moon buffer is never center-cropped because a
+     * pending intent says GOES/Solar. Fall back to intent when the tag is unknown
+     * (-1: a buffer written before this field existed, or an edge case). */
+    int8_t buf_src = data->src_kind;
+    if (buf_src < 0) buf_src = image_source_get_effective();
     uint16_t w = sw, h = sh, ox = 0, oy = 0;
-    uint8_t crop_pct = (cfg->image_display_source == 2)
+    uint8_t crop_pct = (buf_src == 2)
                            ? solar_band_crop_pct(cfg->solar_band)
                            : 88;
-    if (cfg->image_display_crop && cfg->image_display_source != 1 && crop_pct < 100) {
+    /* Custom Image URL (source 3) is arbitrary user content: never center-crop
+     * it (treat like Moon source 1 — show the full image, width-fit). */
+    if (cfg->image_display_crop && buf_src != 1 &&
+        buf_src != 3 && crop_pct < 100) {
         w  = (uint16_t)((uint32_t)sw * crop_pct / 100);
         h  = (uint16_t)((uint32_t)sh * crop_pct / 100);
         ox = (uint16_t)((sw - w) / 2);
@@ -527,7 +563,7 @@ void nina_image_display_update(goes_data_t *data)
     int   mx0 = 0, mx1 = 0, my0 = 0, my1 = 0, sample_col = 0;
     /* Gate the caption mask on the same crop/clean toggle as the crop, so turning
      * the toggle off shows the raw frame (incl. burned-in timestamp). */
-    if (cfg->image_display_crop && cfg->image_display_source == 2) {
+    if (cfg->image_display_crop && buf_src == 2) {
         float fx0, fy0, fx1, fy1;
         if (solar_band_text_mask(cfg->solar_band, &fx0, &fy0, &fx1, &fy1)) {
             mask_on = true;
@@ -583,9 +619,10 @@ void nina_image_display_update(goes_data_t *data)
      * runs on the upright `copy` produced above (after vflip + caption mask).
      * orient: 0/1/2/3 = 0/90/180/270 degrees CLOCKWISE. Moon (source 1) never
      * rotates. 90/270 swap width<->height. */
-    uint8_t orient = (cfg->image_display_source == 0)   ? cfg->goes_orientation
-                     : (cfg->image_display_source == 2) ? cfg->solar_orientation
-                                                        : 0;
+    uint8_t orient = (buf_src == 0)   ? cfg->goes_orientation
+                     : (buf_src == 2) ? cfg->solar_orientation
+                     : (buf_src == 3) ? cfg->custom_orientation
+                                      : 0;
     if (orient != 0) {
         uint16_t rw, rh;
         if (orient == 2) {            /* 180deg: same dims */
@@ -676,7 +713,7 @@ void nina_image_display_update(goes_data_t *data)
      * there hit the same midpoint brightness dip, reading as a visible jump as the
      * crisp resting frame faded in. Instant matches every other moon frame swap. */
     bool instant = first_image ||
-                   forced || (app_config_get()->image_display_source == 1);
+                   forced || (buf_src == 1);
     /* poll_ms == displayed_poll_ms on a forced re-crop (same cached frame), so
      * this assignment leaves displayed_poll_ms unchanged and a later real
      * download (higher last_poll_ms) still passes the new-image gate. */
@@ -719,8 +756,8 @@ void nina_image_display_update(goes_data_t *data)
         lv_anim_start(&a_out);
     }
 
-    /* cfg is already fetched above (crop check). */
-    if (cfg->image_display_source == 1) {           /* Moon */
+    /* cfg / buf_src are already fetched above (crop check). */
+    if (buf_src == 1) {                              /* Moon */
         extern void moon_caption(char *name_out, size_t name_sz,
                                  char *pct_out, size_t pct_sz);
         char name[24], pct[16];
@@ -728,7 +765,7 @@ void nina_image_display_update(goes_data_t *data)
         lv_label_set_text(lbl_region, name);
         lv_label_set_text(lbl_timestamp, pct);
         update_moon_corner_labels();
-    } else if (cfg->image_display_source == 2) {     /* Solar (SDO/AIA) */
+    } else if (buf_src == 2) {                       /* Solar (SDO/AIA) */
         lv_label_set_text(lbl_region, label_copy);
         time_t now; struct tm ti; time(&now); localtime_r(&now, &ti);
         char ts[32]; strftime(ts, sizeof(ts), "Updated %H:%M", &ti);
@@ -959,7 +996,7 @@ void nina_image_display_set_overlay_visible(bool visible)
     /* Corner labels follow the overlay visibility, but only ever show for Moon.
      * When making visible, restore them only if we are actually on the Moon source;
      * when hiding, always hide unconditionally. */
-    if (visible && app_config_get()->image_display_source == 1) {
+    if (visible && image_source_get_effective() == 1) {
         update_moon_corner_labels();
     } else {
         hide_moon_corner_labels();

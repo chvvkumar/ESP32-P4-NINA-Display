@@ -120,6 +120,10 @@ typedef struct {
     int32_t anim_rms_ra_x100;
     int32_t anim_rms_dec_x100;
     int32_t anim_hfr_x100;
+
+    // Disconnected full-screen branded overlay (IDLE-04, Plan 02).
+    // Created at page-create time; shown on disconnect, hidden on reconnect.
+    lv_obj_t *empty_state_cont;
 } dashboard_page_t;
 
 /* AllSky page — defined in nina_dashboard.c */

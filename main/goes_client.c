@@ -12,10 +12,25 @@ static const char *TAG = "goes_client";
 #define GOES_JPEG_MAX_SIZE   (1024 * 1024)   /* 1MB: fits SOHO LASCO C3 1024 (~815KB) */
 #define GOES_HTTP_BUF_SIZE   4096
 #define GOES_HTTP_TIMEOUT_MS 30000
+#define GOES_IMG_MAX_DIM     1024            /* reject images wider/taller than this before decode */
+#define GOES_MAX_REDIRECTS   5               /* follow up to this many 30x Location hops */
+
+/* Set a human-readable failure reason under the goes lock and mark disconnected.
+ * Centralizes the lock boilerplate so every failure exit can record a reason. */
+static void set_error_msg(goes_data_t *d, const char *m)
+{
+    if (!d) return;
+    if (goes_data_lock(d, 1000)) {
+        strlcpy(d->error_msg, m ? m : "", sizeof(d->error_msg));
+        d->connected = false;
+        goes_data_unlock(d);
+    }
+}
 
 void goes_data_init(goes_data_t *data)
 {
     memset(data, 0, sizeof(*data));
+    data->src_kind = -1;
     data->mutex = xSemaphoreCreateMutex();
 }
 
@@ -40,6 +55,7 @@ void goes_client_cleanup(goes_data_t *data)
         }
         data->image_w = 0;
         data->image_h = 0;
+        data->src_kind = -1;
         data->connected = false;
         goes_data_unlock(data);
     }
@@ -104,9 +120,13 @@ static const char *SOLAR_LABELS[SOLAR_BAND_COUNT] = {
 const char *solar_band_url(uint8_t idx)   { return idx < SOLAR_BAND_COUNT ? SOLAR_URLS[idx]   : SOLAR_URLS[0]; }
 const char *solar_band_label(uint8_t idx) { return idx < SOLAR_BAND_COUNT ? SOLAR_LABELS[idx] : SOLAR_LABELS[0]; }
 
-/* All solar imagery (SDO/AIA and SOHO) needs a vertical flip to display upright
- * on this panel, same as the GOES path. */
-bool solar_band_vflip(uint8_t idx) { (void)idx; return true; }
+/* Solar source images (SDO/AIA via sdo.gsfc.nasa.gov, SOHO/HMI via
+ * soho.nascom.nasa.gov) are delivered upright (north up, caption at bottom), so
+ * no vertical flip is applied. Any build-environment orientation difference is
+ * corrected by the per-source `solar_orientation` rotation setting, not here.
+ * (A vertical flip is a mirror and would put the caption at the top and mirror
+ * sunspot positions, which no rotation setting can undo.) */
+bool solar_band_vflip(uint8_t idx) { (void)idx; return false; }
 
 /* Per-band center-crop percentage (100 = no crop). AIA (0..9) and SOHO EIT
  * (12..15) have a wide source border, so 88% zooms past the timestamp/label.
@@ -181,10 +201,10 @@ esp_err_t goes_client_poll(const char *region, goes_data_t *data)
      * NESDIS GOES JPEG must be flipped (vflip=true) to display north-up. This matches
      * the Solar path, which also uses vflip=true. Verified on-device: vflip=false
      * renders the image upside-down (issue #166 regression). */
-    return goes_client_poll_url(url, data, true, goes_region_name(region));
+    return goes_client_poll_url(url, data, true, goes_region_name(region), 0 /* GOES */);
 }
 
-esp_err_t goes_client_poll_url(const char *url, goes_data_t *data, bool vflip, const char *label)
+esp_err_t goes_client_poll_url(const char *url, goes_data_t *data, bool vflip, const char *label, int8_t src_kind)
 {
     if (!url || !data) return ESP_ERR_INVALID_ARG;
 
@@ -201,10 +221,7 @@ esp_err_t goes_client_poll_url(const char *url, goes_data_t *data, bool vflip, c
     esp_http_client_handle_t client = esp_http_client_init(&http_cfg);
     if (!client) {
         ESP_LOGE(TAG, "Failed to create HTTP client");
-        if (goes_data_lock(data, 1000)) {
-            data->connected = false;
-            goes_data_unlock(data);
-        }
+        set_error_msg(data, "Fetch failed");
         return ESP_FAIL;
     }
 
@@ -212,23 +229,47 @@ esp_err_t goes_client_poll_url(const char *url, goes_data_t *data, bool vflip, c
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "HTTP open failed: %s", esp_err_to_name(err));
         esp_http_client_cleanup(client);
-        if (goes_data_lock(data, 1000)) {
-            data->connected = false;
-            goes_data_unlock(data);
-        }
+        set_error_msg(data, "Fetch failed");
         return err;
     }
 
     int content_length = esp_http_client_fetch_headers(client);
     int status = esp_http_client_get_status_code(client);
 
+    /* Follow Location redirects manually: the streaming open()/fetch_headers()
+     * path does NOT auto-follow. For each 30x, esp_http_client_set_redirection()
+     * adopts the captured Location URL; we then re-open + re-fetch_headers on the
+     * new URL. Cap the chain to avoid loops. crt_bundle already covers TLS hosts. */
+    int redirects = 0;
+    while ((status == 301 || status == 302 || status == 307 || status == 308) &&
+           redirects < GOES_MAX_REDIRECTS) {
+        ESP_LOGI(TAG, "HTTP %d redirect, following (hop %d)", status, redirects + 1);
+        err = esp_http_client_set_redirection(client);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "set_redirection failed: %s", esp_err_to_name(err));
+            break;
+        }
+        /* Close the prior response's socket before reconnecting to the redirect
+         * target. Without this, the previous connection leaks for the duration of
+         * the chain. cleanup() on the terminal path still closes exactly once. */
+        esp_http_client_close(client);
+        /* Re-issue the request against the new (redirected) URL. */
+        err = esp_http_client_open(client, 0);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "HTTP re-open failed: %s", esp_err_to_name(err));
+            esp_http_client_cleanup(client);
+            set_error_msg(data, "Fetch failed");
+            return err;
+        }
+        content_length = esp_http_client_fetch_headers(client);
+        status = esp_http_client_get_status_code(client);
+        redirects++;
+    }
+
     if (status != 200) {
         ESP_LOGW(TAG, "HTTP status %d", status);
         esp_http_client_cleanup(client);
-        if (goes_data_lock(data, 1000)) {
-            data->connected = false;
-            goes_data_unlock(data);
-        }
+        set_error_msg(data, "Fetch failed");
         return ESP_FAIL;
     }
 
@@ -243,10 +284,7 @@ esp_err_t goes_client_poll_url(const char *url, goes_data_t *data, bool vflip, c
     if (!jpeg_buf) {
         ESP_LOGE(TAG, "PSRAM alloc failed for JPEG (%d bytes)", content_length);
         esp_http_client_cleanup(client);
-        if (goes_data_lock(data, 1000)) {
-            data->connected = false;
-            goes_data_unlock(data);
-        }
+        set_error_msg(data, "Out of memory");
         return ESP_ERR_NO_MEM;
     }
 
@@ -263,11 +301,31 @@ esp_err_t goes_client_poll_url(const char *url, goes_data_t *data, bool vflip, c
     if (total_read < 1000) {
         ESP_LOGW(TAG, "JPEG too small (%d bytes), likely error page", total_read);
         heap_caps_free(jpeg_buf);
-        if (goes_data_lock(data, 1000)) {
-            data->connected = false;
-            goes_data_unlock(data);
-        }
+        set_error_msg(data, "Fetch failed");
         return ESP_FAIL;
+    }
+
+    /* JPEG magic gate: SOI marker is FF D8. Reject non-JPEG payloads (HTML error
+     * pages, PNG, etc.) before handing anything to the decoder. */
+    if (jpeg_buf[0] != 0xFF || jpeg_buf[1] != 0xD8) {
+        ESP_LOGW(TAG, "Not a JPEG (magic %02X %02X)", jpeg_buf[0], jpeg_buf[1]);
+        heap_caps_free(jpeg_buf);
+        set_error_msg(data, "Not a JPEG image");
+        return ESP_FAIL;
+    }
+
+    /* Pre-decode dimension cap: a small JPEG can decode to enormous dimensions,
+     * so probe width/height from the header and reject BEFORE the big decode
+     * allocation to avoid OOM. */
+    uint32_t probe_w = 0, probe_h = 0;
+    if (jpeg_probe_dimensions(jpeg_buf, total_read, &probe_w, &probe_h)) {
+        if (probe_w > GOES_IMG_MAX_DIM || probe_h > GOES_IMG_MAX_DIM) {
+            ESP_LOGW(TAG, "JPEG too large: %lux%lu (max %d)",
+                     (unsigned long)probe_w, (unsigned long)probe_h, GOES_IMG_MAX_DIM);
+            heap_caps_free(jpeg_buf);
+            set_error_msg(data, "Image too large (max 1024px)");
+            return ESP_FAIL;
+        }
     }
 
     ESP_LOGI(TAG, "Downloaded %d bytes JPEG, decoding...", total_read);
@@ -283,10 +341,7 @@ esp_err_t goes_client_poll_url(const char *url, goes_data_t *data, bool vflip, c
     if (!decoded || !rgb565) {
         ESP_LOGE(TAG, "JPEG decode failed");
         if (rgb565) heap_caps_free(rgb565);
-        if (goes_data_lock(data, 1000)) {
-            data->connected = false;
-            goes_data_unlock(data);
-        }
+        set_error_msg(data, "Decode failed");
         return ESP_FAIL;
     }
 
@@ -300,6 +355,8 @@ esp_err_t goes_client_poll_url(const char *url, goes_data_t *data, bool vflip, c
         data->vflip = vflip;
         if (label) { strlcpy(data->label, label, sizeof(data->label)); }
         else       { data->label[0] = '\0'; }
+        data->src_kind = src_kind;
+        data->error_msg[0] = '\0';   /* clear: this fetch succeeded */
         data->connected = true;
         data->last_poll_ms = esp_timer_get_time() / 1000;
         goes_data_unlock(data);

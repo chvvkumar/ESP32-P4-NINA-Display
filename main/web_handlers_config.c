@@ -10,6 +10,7 @@
 #include "ui/nina_dashboard.h"          /* nina_dashboard_get_total_page_count() */
 #include "ui/nina_dashboard_internal.h" /* PAGE_IDX_SUMMARY, SETTINGS_PAGE_IDX, SYSINFO_PAGE_IDX page-index macros */
 #include "ui/nina_nav_arbiter.h"        /* nav_arbiter_submit_user — live Home Page USER claim */
+#include "ui/page_registry.h"           /* page_ref_navigate, PAGE_REF_ID_MAX, PAGE_REF_SETTINGS */
 
 extern const uint8_t config_html_start[] asm("_binary_config_ui_html_start");
 extern const uint8_t config_html_end[]   asm("_binary_config_ui_html_end");
@@ -102,6 +103,18 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
         }
         cJSON_AddItemToObject(obj, "auto_rotate_order", order_arr);
     }
+    {
+        /* New flat slideshow list: 16 ARP_IDX_* slots, 0xFF terminates/skips. */
+        cJSON *order2_arr = cJSON_CreateArray();
+        for (int i = 0; i < ARP_ORDER_CAPACITY; i++) {
+            uint8_t v = cfg->auto_rotate_order2[i];
+            if (v == 0xFF) {
+                continue;   /* unused slot */
+            }
+            cJSON_AddItemToArray(order2_arr, cJSON_CreateNumber(v));
+        }
+        cJSON_AddItemToObject(obj, "auto_rotate_order2", order2_arr);
+    }
     cJSON_AddNumberToObject(obj, "update_rate_s", cfg->update_rate_s);
     cJSON_AddNumberToObject(obj, "graph_update_interval_s", cfg->graph_update_interval_s);
     cJSON_AddNumberToObject(obj, "connection_timeout_s", cfg->connection_timeout_s);
@@ -142,6 +155,9 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
     cJSON_AddStringToObject(obj, "goes_region", cfg->goes_region);
     cJSON_AddNumberToObject(obj, "goes_update_interval_s", cfg->goes_update_interval_s);
     cJSON_AddNumberToObject(obj, "image_display_source", cfg->image_display_source);
+    cJSON_AddStringToObject(obj, "custom_image_url", cfg->custom_image_url);
+    cJSON_AddNumberToObject(obj, "custom_orientation", cfg->custom_orientation);
+    cJSON_AddNumberToObject(obj, "custom_update_interval_s", cfg->custom_update_interval_s);
     cJSON_AddNumberToObject(obj, "moon_bg_style", cfg->moon_bg_style);
     cJSON_AddNumberToObject(obj, "moon_lat", (double)cfg->moon_lat);
     cJSON_AddNumberToObject(obj, "moon_lon", (double)cfg->moon_lon);
@@ -339,6 +355,9 @@ static const backup_field_t s_backup_fields[] = {
     {"goes_region",                "GOES Region",          "Image Display", false, false},
     {"goes_update_interval_s",     "GOES Update Interval", "Image Display", false, false},
     {"image_display_source",       "Image Source",         "Image Display", false, false},
+    {"custom_image_url",           "Custom Image URL",     "Image Display", false, false},
+    {"custom_orientation",         "Custom Orientation",   "Image Display", false, false},
+    {"custom_update_interval_s",   "Custom Update Interval","Image Display", false, false},
     {"moon_bg_style",              "Moon Background Style", "Image Display", false, false},
     {"moon_lat",                   "Moon Latitude",        "Image Display", false, false},
     {"moon_lon",                   "Moon Longitude",       "Image Display", false, false},
@@ -427,6 +446,7 @@ static const restore_strmax_t s_restore_strmax[] = {
     {"allsky_hostname",     128},
     {"allsky_field_config", 1536},
     {"allsky_thresholds",   1024},
+    {"custom_image_url",    256},
     /* goes_region max sourced from the struct field size at runtime below */
     {NULL, 0}
 };
@@ -451,7 +471,9 @@ static const restore_numrange_t s_restore_numrange[] = {
     {"allsky_update_interval_s",1,    300,   false},  /* app_config.c:2548 */
     {"allsky_dew_offset",       -50,  50,    true},   /* app_config.c:2552 */
     {"goes_update_interval_s",  300,  7200,  false},  /* app_config.c:2556 */
-    {"image_display_source",    0,    2,     false},  /* app_config.c:2565 */
+    {"image_display_source",    0,    3,     false},  /* app_config.c:2598 (0=GOES,1=Moon,2=Solar,3=Custom URL) */
+    {"custom_orientation",      0,    3,     false},  /* app_config.c:2590 */
+    {"custom_update_interval_s",10,   7200,  false},  /* app_config.c:2594 */
     {"moon_bg_style",           0,    3,     false},  /* app_config.c:2569 */
     {"solar_band",              0,    17,    false},  /* app_config.c:2573 */
     {"moon_drag_light_mode",    0,    2,     false},  /* app_config.c:2577 */
@@ -826,7 +848,8 @@ static bool validate_config_fields(cJSON *root, httpd_req_t *req)
         !validate_string_len(root, "allsky_hostname", 128) ||
         !validate_string_len(root, "allsky_field_config", 1536) ||
         !validate_string_len(root, "allsky_thresholds", 1024) ||
-        !validate_string_len(root, "goes_region", sizeof(((app_config_t *)0)->goes_region))) {
+        !validate_string_len(root, "goes_region", sizeof(((app_config_t *)0)->goes_region)) ||
+        !validate_string_len(root, "custom_image_url", sizeof(((app_config_t *)0)->custom_image_url))) {
         send_400(req, "String field exceeds maximum length");
         return false;
     }
@@ -919,19 +942,15 @@ static app_config_t *parse_config_from_json(cJSON *root)
     JSON_TO_BOOL(root, "auto_rotate_enabled", cfg->auto_rotate_enabled);
     JSON_TO_BOOL(root, "auto_rotate_skip_disconnected", cfg->auto_rotate_skip_disconnected);
 
-    /* Home Page value space (matches validate_config in app_config.c): -1 (Auto =
-     * Summary) or any navigable page index 0..SYSINFO, excluding the Settings page
-     * (never a valid Home Page). Upper bound = SYSINFO index = SYSINFO_PAGE_IDX(
-     * MAX_NINA_INSTANCES) = 9; Settings index = SETTINGS_PAGE_IDX(MAX_NINA_INSTANCES)
-     * = 8. Out-of-range or the Settings index falls back to -1 (Auto). The reserved-
-     * band macros come from nina_dashboard_internal.h (via nina_dashboard.h). */
+    /* Home Page now stores a page_ref registry id (0..PAGE_REF_ID_MAX-1). The web
+     * UI always sends a concrete id (never -1). Reject out-of-range ids and the
+     * Settings page (never a valid Home Page target) by falling back to 0
+     * (Summary). PAGE_REF_ID_MAX/PAGE_REF_SETTINGS come from ui/page_registry.h. */
     cJSON *apo_item = cJSON_GetObjectItem(root, "active_page_override");
     if (cJSON_IsNumber(apo_item)) {
         int v = apo_item->valueint;
-        if (v < -1 ||
-            v > SYSINFO_PAGE_IDX(MAX_NINA_INSTANCES) ||
-            v == SETTINGS_PAGE_IDX(MAX_NINA_INSTANCES)) {
-            v = -1;   /* Auto/Summary */
+        if (v < 0 || v >= PAGE_REF_ID_MAX || v == PAGE_REF_SETTINGS) {
+            v = 0;   /* Summary */
         }
         cfg->active_page_override = (int8_t)v;
     }
@@ -970,6 +989,27 @@ static app_config_t *parse_config_from_json(cJSON *root)
             cfg->auto_rotate_order[i] = 0xFF;
         }
         if (count < 9) cfg->auto_rotate_order_ext = 0xFF;
+    }
+
+    /* New flat slideshow list: 16 ARP_IDX_* slots. When present it is the
+     * authoritative source for auto_rotate_order2[]; the legacy parse above
+     * still populates the deprecated auto_rotate_order[] harmlessly. */
+    cJSON *order2_arr = cJSON_GetObjectItem(root, "auto_rotate_order2");
+    if (cJSON_IsArray(order2_arr)) {
+        int count2 = cJSON_GetArraySize(order2_arr);
+        if (count2 > ARP_ORDER_CAPACITY) count2 = ARP_ORDER_CAPACITY;
+        for (int i = 0; i < count2; i++) {
+            cJSON *item2 = cJSON_GetArrayItem(order2_arr, i);
+            uint8_t v = 0xFF;
+            if (cJSON_IsNumber(item2) &&
+                item2->valueint >= 0 && item2->valueint < ARP_IDX_MAX) {
+                v = (uint8_t)item2->valueint;
+            }
+            cfg->auto_rotate_order2[i] = v;
+        }
+        for (int i = count2; i < ARP_ORDER_CAPACITY; i++) {
+            cfg->auto_rotate_order2[i] = 0xFF;
+        }
     }
 
     cJSON *ur_item = cJSON_GetObjectItem(root, "update_rate_s");
@@ -1123,6 +1163,21 @@ static app_config_t *parse_config_from_json(cJSON *root)
     }
 
     JSON_TO_INT(root, "image_display_source", cfg->image_display_source);
+
+    JSON_TO_STRING(root, "custom_image_url", cfg->custom_image_url);
+    cJSON *custom_orient = cJSON_GetObjectItem(root, "custom_orientation");
+    if (cJSON_IsNumber(custom_orient)) {
+        int v = custom_orient->valueint;
+        cfg->custom_orientation = (v >= 0 && v <= 3) ? (uint8_t)v : 0;
+    }
+    cJSON *custom_interval = cJSON_GetObjectItem(root, "custom_update_interval_s");
+    if (cJSON_IsNumber(custom_interval)) {
+        int v = custom_interval->valueint;
+        if (v < 10) v = 10;
+        if (v > 7200) v = 7200;
+        cfg->custom_update_interval_s = (uint16_t)v;
+    }
+
     JSON_TO_INT(root, "moon_bg_style",        cfg->moon_bg_style);
 
     cJSON *jmoonlat = cJSON_GetObjectItem(root, "moon_lat");
@@ -1221,12 +1276,13 @@ static app_config_t *parse_config_from_json(cJSON *root)
 
     // Idle override
     JSON_TO_BOOL(root, "idle_page_override_enabled", cfg->idle_page_override_enabled);
-    /* idle_page_override_target: idle_target_t enum, valid range -1 (Summary) .. 7 (NINA3) */
+    /* idle_page_override_target now stores a page_ref registry id
+     * (0..PAGE_REF_ID_MAX-1). Out-of-range falls back to 0 (Summary).
+     * PAGE_REF_ID_MAX comes from ui/page_registry.h. */
     cJSON *ipt_item = cJSON_GetObjectItem(root, "idle_page_override_target");
     if (cJSON_IsNumber(ipt_item)) {
         int v = ipt_item->valueint;
-        if (v < IDLE_TARGET_SUMMARY) v = IDLE_TARGET_SUMMARY;
-        if (v > IDLE_TARGET_NINA3) v = IDLE_TARGET_NINA3;
+        if (v < 0 || v >= PAGE_REF_ID_MAX) v = 0;
         cfg->idle_page_override_target = (int8_t)v;
     }
     JSON_TO_BOOL(root, "idle_indicator_enabled", cfg->idle_indicator_enabled);
@@ -1410,18 +1466,12 @@ esp_err_t config_post_handler(httpd_req_t *req)
     app_config_save(cfg);   /* applies app_config_normalize_nav_exclusivity() internally */
     config_trigger_side_effects(old_cfg, cfg);
 
-    /* Home Page live (Q7): if active_page_override changed, navigate there now via
-     * a USER claim. -1 (Auto) resolves to the Summary page. Skip the Settings page
-     * (never a valid Home Page target). nina_dashboard.h pulls in the page-index
-     * macros transitively via nina_dashboard_internal.h. */
+    /* Home Page live (Q7): if active_page_override changed, navigate there now.
+     * The field is a page_ref registry id; page_ref_navigate() resolves the id,
+     * sets the image-source override for image-source ids (which the old direct
+     * page-index claim did not), and issues the USER-claim navigation. */
     if (cfg->active_page_override != old_cfg->active_page_override) {
-        int hp = cfg->active_page_override;
-        int claim = (hp < 0) ? PAGE_IDX_SUMMARY : hp;   /* -1 (Auto) -> Summary */
-        int total = nina_dashboard_get_total_page_count();
-        if (claim >= 0 && claim < total &&
-            claim != SETTINGS_PAGE_IDX(MAX_NINA_INSTANCES)) {
-            nav_arbiter_submit_user(claim, esp_timer_get_time() / 1000);
-        }
+        page_ref_navigate((page_ref_t)cfg->active_page_override);
     }
 
     free(old_cfg);

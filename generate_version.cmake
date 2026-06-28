@@ -16,14 +16,24 @@ set(GIT_TAG "unknown")
 set(GIT_SHA "unknown")
 set(GIT_BRANCH "unknown")
 
+# CI sets BUILD_GIT_TAG_OVERRIDE to the exact release tag so the embedded
+# version matches the published release, even though the git tag is created
+# after the build and the tree may be dirty. Local/dev builds fall back to
+# git describe.
+if(DEFINED ENV{BUILD_GIT_TAG_OVERRIDE} AND NOT "$ENV{BUILD_GIT_TAG_OVERRIDE}" STREQUAL "")
+    set(GIT_TAG "$ENV{BUILD_GIT_TAG_OVERRIDE}")
+endif()
+
 if(GIT_FOUND)
-    execute_process(
-        COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
-        WORKING_DIRECTORY ${SRC_DIR}
-        OUTPUT_VARIABLE GIT_TAG
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_QUIET
-    )
+    if(GIT_TAG STREQUAL "unknown")
+        execute_process(
+            COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
+            WORKING_DIRECTORY ${SRC_DIR}
+            OUTPUT_VARIABLE GIT_TAG
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+        )
+    endif()
     execute_process(
         COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
         WORKING_DIRECTORY ${SRC_DIR}

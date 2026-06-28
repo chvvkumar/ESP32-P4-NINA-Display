@@ -15,6 +15,7 @@
 #include "nina_settings_tabview.h"
 #include "nina_dashboard.h"
 #include "nina_dashboard_internal.h"
+#include "page_registry.h"
 #include "app_config.h"
 #include "themes.h"
 #include "ui_styles.h"
@@ -63,41 +64,69 @@ static void skip_offline_changed_cb(lv_event_t *e);
 static void page_checkbox_changed_cb(lv_event_t *e);
 static void update_mode_visibility(uint32_t mode);
 
-/* Home-page dropdown <-> absolute page index map.
- * Dropdown rows: 0=Auto, 1=AllSky, 2=Spotify, 3=Clock, 4=Summary,
- *                5=NINA1, 6=NINA2, 7=NINA3, 8=SysInfo.
- * Absolute indices: AllSky=0, Spotify=1, Clock=2, Summary=4,
- *                   NINA i = NINA_PAGE_OFFSET+i, SysInfo=SYSINFO_PAGE_IDX.
- * Auto (row 0) maps to active_page_override = -1. */
-static int home_dd_sel_to_abs(uint32_t sel)
+/* ── Home-page dropdown <-> page_ref registry id map ──
+ *
+ * The Home Page setting persists a page_ref registry id (0..PAGE_REF_ID_MAX-1)
+ * in active_page_override. There is no "Auto" option; the default is Summary
+ * (PAGE_REF_SUMMARY == 0).
+ *
+ * The dropdown lists only TARGETABLE entries whose kind is PAGE or
+ * IMAGE_SOURCE, in registry order. Overlays and Settings are excluded, so a
+ * dropdown option index is NOT equal to the page_ref id. s_home_dd_ids[] is the
+ * parallel mapping: dropdown option index -> page_ref id. s_home_dd_count is
+ * the number of options built. Both are populated by build_home_options(). */
+static page_ref_t s_home_dd_ids[PAGE_REF_ID_MAX];
+static int        s_home_dd_count = 0;
+
+/* True if a registry entry belongs in the Home Page dropdown. */
+static bool home_entry_is_listed(const page_ref_entry_t *e)
 {
-    switch (sel) {
-        case 0: return -1;                          /* Auto */
-        case 1: return PAGE_IDX_ALLSKY;             /* 0 */
-        case 2: return PAGE_IDX_SPOTIFY;            /* 1 */
-        case 3: return PAGE_IDX_CLOCK;             /* 2 */
-        case 4: return PAGE_IDX_SUMMARY;           /* 4 */
-        case 5: return NINA_PAGE_OFFSET + 0;       /* 5 */
-        case 6: return NINA_PAGE_OFFSET + 1;       /* 6 */
-        case 7: return NINA_PAGE_OFFSET + 2;       /* 7 */
-        case 8: return SYSINFO_PAGE_IDX(page_count);
-        default: return -1;
+    if (e == NULL || !e->targetable) return false;
+    return (e->kind == PAGE_REF_KIND_PAGE ||
+            e->kind == PAGE_REF_KIND_IMAGE_SOURCE);
+}
+
+/* Build the dropdown options string (newline-separated labels in registry
+ * order) and the parallel option-index -> id map. */
+static void build_home_options(char *buf, size_t buf_size)
+{
+    buf[0] = '\0';
+    s_home_dd_count = 0;
+
+    int count = page_ref_count();
+    for (int i = 0; i < count; i++) {
+        const page_ref_entry_t *e = page_ref_get(i);
+        if (!home_entry_is_listed(e)) continue;
+        if (s_home_dd_count >= (int)(sizeof(s_home_dd_ids) / sizeof(s_home_dd_ids[0]))) break;
+
+        if (s_home_dd_count > 0) {
+            strncat(buf, "\n", buf_size - strlen(buf) - 1);
+        }
+        strncat(buf, e->label, buf_size - strlen(buf) - 1);
+        s_home_dd_ids[s_home_dd_count] = e->id;
+        s_home_dd_count++;
     }
 }
 
-/* Inverse of home_dd_sel_to_abs: absolute page index -> dropdown row. */
-static uint32_t home_abs_to_dd_sel(int ov)
+/* Dropdown option index -> stored page_ref id. Falls back to Summary. */
+static int home_dd_sel_to_abs(uint32_t sel)
 {
-    if (ov < 0) return 0;                                  /* Auto */
-    if (ov == PAGE_IDX_ALLSKY) return 1;
-    if (ov == PAGE_IDX_SPOTIFY) return 2;
-    if (ov == PAGE_IDX_CLOCK) return 3;
-    if (ov == PAGE_IDX_SUMMARY) return 4;
-    if (ov == NINA_PAGE_OFFSET + 0) return 5;
-    if (ov == NINA_PAGE_OFFSET + 1) return 6;
-    if (ov == NINA_PAGE_OFFSET + 2) return 7;
-    if (ov == SYSINFO_PAGE_IDX(page_count)) return 8;
-    return 4;   /* PAGE_IDX_IMAGE_DISPLAY (3) and any stray value -> Summary */
+    if ((int)sel < s_home_dd_count) {
+        return (int)s_home_dd_ids[sel];
+    }
+    return (int)PAGE_REF_SUMMARY;
+}
+
+/* Stored page_ref id -> dropdown option index. Falls back to the Summary
+ * option (or 0 if Summary is somehow not listed). */
+static uint32_t home_abs_to_dd_sel(int id)
+{
+    int summary_opt = 0;
+    for (int i = 0; i < s_home_dd_count; i++) {
+        if ((int)s_home_dd_ids[i] == id) return (uint32_t)i;
+        if (s_home_dd_ids[i] == PAGE_REF_SUMMARY) summary_opt = i;
+    }
+    return (uint32_t)summary_opt;
 }
 
 /* ── Slideshow order-list helpers (canonical membership) ──
@@ -418,16 +447,13 @@ static void create_page_nav_card(lv_obj_t *parent)
 
         dd_pinned_page = lv_dropdown_create(row);
         lv_obj_set_width(dd_pinned_page, 200);
-        lv_dropdown_set_options(dd_pinned_page,
-                                "Auto\n"
-                                "AllSky\n"
-                                "Spotify\n"
-                                "Clock\n"
-                                "Summary\n"
-                                "NINA 1\n"
-                                "NINA 2\n"
-                                "NINA 3\n"
-                                "SysInfo");
+        {
+            /* Generous buffer: up to PAGE_REF_ID_MAX (24) labels, each well
+             * under 24 chars including the newline separator. */
+            char home_opts[PAGE_REF_ID_MAX * 24];
+            build_home_options(home_opts, sizeof(home_opts));
+            lv_dropdown_set_options(dd_pinned_page, home_opts);
+        }
 
         if (current_theme) {
             int gb = app_config_get()->color_brightness;
@@ -439,7 +465,7 @@ static void create_page_nav_card(lv_obj_t *parent)
             lv_obj_set_style_border_width(dd_pinned_page, 1, 0);
         }
 
-        /* Set initial selection from config (absolute page index -> row). */
+        /* Set initial selection from config (page_ref id -> option index). */
         lv_dropdown_set_selected(dd_pinned_page,
                                  home_abs_to_dd_sel(app_config_get()->active_page_override));
 
@@ -597,15 +623,15 @@ static void create_page_nav_card(lv_obj_t *parent)
     lv_obj_set_style_text_font(ar_hint, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(ar_hint, lv_color_hex(0x888888), 0);
 
-    /* ── Determine initial mode from config ── */
+    /* ── Determine initial mode from config ──
+     * active_page_override always holds a concrete page_ref id now (no -1/Auto),
+     * so a non-cycling config is the Fixed (pinned Home Page) mode. */
     app_config_t *cfg = app_config_get();
     uint32_t initial_mode;
     if (cfg->auto_rotate_enabled) {
         initial_mode = 2;  /* Cycle */
-    } else if (cfg->active_page_override >= 0) {
-        initial_mode = 1;  /* Fixed */
     } else {
-        initial_mode = 0;  /* Manual */
+        initial_mode = 1;  /* Fixed */
     }
     /* Set the correct button as checked (no one_checked, so no auto-check on button 0) */
     lv_buttonmatrix_set_button_ctrl(seg_mode, initial_mode, LV_BUTTONMATRIX_CTRL_CHECKED);
@@ -688,21 +714,31 @@ static void page_mode_changed_cb(lv_event_t *e)
 
     update_mode_visibility(sel);
 
+    /* active_page_override now persists a page_ref registry id (see
+     * page_registry.h); there is no -1/Auto sentinel. The Home Page is always a
+     * concrete page_ref id taken from the Home Page dropdown. */
+    int home_id = (int)PAGE_REF_SUMMARY;
+    if (dd_pinned_page) {
+        uint32_t dd_sel = lv_dropdown_get_selected(dd_pinned_page);
+        home_id = home_dd_sel_to_abs(dd_sel);
+    }
+
     if (sel == 0) {
         /* Manual */
-        cfg->active_page_override = -1;
+        cfg->active_page_override = (int8_t)home_id;
         cfg->auto_rotate_enabled = false;
     } else if (sel == 1) {
         /* Fixed */
         cfg->auto_rotate_enabled = false;
-        /* Set override to the currently selected pinned page (absolute index) */
-        if (dd_pinned_page) {
-            uint32_t dd_sel = lv_dropdown_get_selected(dd_pinned_page);
-            cfg->active_page_override = (int8_t)home_dd_sel_to_abs(dd_sel);
-        }
+        cfg->active_page_override = (int8_t)home_id;
+        /* Live apply: navigate to the chosen Home Page now. page_ref_navigate
+         * resolves the id (setting the image-source override for image-source
+         * ids) and issues a USER-claim navigation. It does not take the LVGL
+         * lock, so it is safe from this event callback. */
+        page_ref_navigate((page_ref_t)home_id);
     } else if (sel == 2) {
         /* Cycle */
-        cfg->active_page_override = -1;
+        cfg->active_page_override = (int8_t)home_id;
         cfg->auto_rotate_enabled = true;
         cfg->idle_page_override_enabled = false;   /* exclusivity: auto-rotate wins */
     }
@@ -718,7 +754,11 @@ static void pinned_page_changed_cb(lv_event_t *e)
 {
     LV_UNUSED(e);
     uint32_t sel = lv_dropdown_get_selected(dd_pinned_page);
-    app_config_get()->active_page_override = (int8_t)home_dd_sel_to_abs(sel);
+    int home_id = home_dd_sel_to_abs(sel);
+    app_config_get()->active_page_override = (int8_t)home_id;
+    /* Live apply: navigate to the newly selected Home Page now. Safe from this
+     * event callback — page_ref_navigate does not take the LVGL lock. */
+    page_ref_navigate((page_ref_t)home_id);
     settings_mark_dirty(false);
 }
 
@@ -853,14 +893,13 @@ void settings_tab_display_refresh(void)
         else                lv_obj_remove_state(sw_demo_mode, LV_STATE_CHECKED);
     }
 
-    /* Page navigation — determine mode */
+    /* Page navigation — determine mode. active_page_override always holds a
+     * concrete page_ref id now (no -1/Auto), so a non-cycling config is Fixed. */
     uint32_t mode;
     if (cfg->auto_rotate_enabled) {
         mode = 2;  /* Cycle */
-    } else if (cfg->active_page_override >= 0) {
-        mode = 1;  /* Fixed */
     } else {
-        mode = 0;  /* Manual */
+        mode = 1;  /* Fixed */
     }
 
     if (seg_mode) {
@@ -873,7 +912,7 @@ void settings_tab_display_refresh(void)
     }
     update_mode_visibility(mode);
 
-    /* Fixed sub-section (absolute page index -> dropdown row) */
+    /* Fixed sub-section (page_ref id -> dropdown option index) */
     if (dd_pinned_page) {
         lv_dropdown_set_selected(dd_pinned_page,
                                  home_abs_to_dd_sel(cfg->active_page_override));

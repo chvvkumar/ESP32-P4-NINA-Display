@@ -132,9 +132,49 @@ bool check_session(httpd_req_t *req) {
     const app_config_t *cfg = app_config_get();
     if (cfg && !cfg->auth_enabled) return true;
 
+    /* Cookie path: a valid session cookie grants access without touching the
+     * lockout (a browser presenting a good cookie is not a brute-force attempt). */
     char tok[SESSION_TOKEN_HEX_LEN + 1];
-    if (!session_extract_cookie(req, tok, sizeof(tok))) return false;
-    return session_valid(tok);
+    if (session_extract_cookie(req, tok, sizeof(tok)) && session_valid(tok)) {
+        return true;
+    }
+
+    /* Header path (stateless clients: automation, macro keypads). Only reached
+     * when there is no valid cookie. Carries the admin password in the
+     * X-Auth-Password header and is fed into the SAME login lockout so it is
+     * not an unthrottled brute-force bypass. */
+    size_t hdr_len = httpd_req_get_hdr_value_len(req, "X-Auth-Password");
+    if (hdr_len == 0) return false;  /* header absent -> no lockout change */
+    /* Cap to admin_password capacity; anything longer cannot match anyway. */
+    if (hdr_len > sizeof(cfg->admin_password) - 1) return false;
+
+    if (auth_is_locked_out()) return false;  /* behave as locked; do not compare */
+
+    char hdr[sizeof(cfg->admin_password)];  /* 32 chars + NUL */
+    if (httpd_req_get_hdr_value_str(req, "X-Auth-Password",
+                                    hdr, sizeof(hdr)) != ESP_OK) {
+        return false;  /* truncation/error -> no lockout change */
+    }
+
+    /* Constant-time compare (same style as login_post_handler): iterate over
+     * max(a,b) with clamped indexing so the loop count does not depend on the
+     * submitted password length, and do not early-return on first mismatch. */
+    size_t a = strlen(hdr);
+    size_t b = strlen(cfg->admin_password);
+    unsigned char diff = (a != b) ? 1 : 0;
+    size_t maxn = (a > b) ? a : b;
+    for (size_t i = 0; i < maxn; i++) {
+        unsigned char ca = (i < a) ? (unsigned char)hdr[i] : 0;
+        unsigned char cb = (i < b) ? (unsigned char)cfg->admin_password[i] : 0;
+        diff |= ca ^ cb;
+    }
+
+    if (diff != 0 || cfg->admin_password[0] == '\0') {
+        auth_note_failure();
+        return false;
+    }
+    auth_note_success();
+    return true;
 }
 
 /**
@@ -196,7 +236,7 @@ void start_web_server(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 16384;
-    config.max_uri_handlers = 56;
+    config.max_uri_handlers = 69;
     config.max_open_sockets = 16;
     config.lru_purge_enable = true;
     config.keep_alive_enable = true;
@@ -251,6 +291,9 @@ void start_web_server(void)
         { "/api/status",                 HTTP_GET,  status_get_handler, NULL },
         { "/api/nina/status",            HTTP_GET,  nina_status_get_handler, NULL },
         { "/api/crash",                  HTTP_GET,  crash_get_handler, NULL },
+        { "/api/weather",                HTTP_GET,  weather_get_handler, NULL },
+        { "/api/events",                 HTTP_GET,  events_get_handler, NULL },
+        { "/api/events/clear",           HTTP_POST, events_clear_post_handler, NULL },
         { "/api/admin-password",         HTTP_POST, admin_password_post_handler, NULL },
         { "/login",                      HTTP_GET,  login_page_get_handler, NULL },
         { "/api/login",                  HTTP_POST, login_post_handler, NULL },
@@ -266,12 +309,23 @@ void start_web_server(void)
         { "/api/coredump",           HTTP_GET,  coredump_get_handler,        NULL },
         { "/api/coredump/info",      HTTP_GET,  coredump_info_get_handler,   NULL },
         { "/api/coredump/clear",     HTTP_POST, coredump_clear_post_handler, NULL },
+        { "/api/pages",              HTTP_GET,  pages_get_handler,     NULL },
+        { "/api/navigate",           HTTP_GET,  navigate_post_handler, NULL },
+        { "/api/navigate",           HTTP_POST, navigate_post_handler, NULL },
+        { "/api/nav/pin",            HTTP_POST, nav_pin_post_handler,  NULL },
+        { "/api/control/list",       HTTP_GET,  control_list_get_handler,    NULL },
+        { "/api/control/get",        HTTP_GET,  control_get_get_handler,     NULL },
+        { "/api/control/toggle",     HTTP_POST, control_toggle_post_handler, NULL },
+        { "/api/control/cycle",      HTTP_POST, control_cycle_post_handler,  NULL },
+        { "/api/control/set",        HTTP_POST, control_set_post_handler,    NULL },
+        { "/api/control/adjust",     HTTP_POST, control_adjust_post_handler, NULL },
+        { "/api/image-display/refresh", HTTP_POST, image_display_refresh_post_handler, NULL },
     };
 
-    /* Keep config.max_uri_handlers (set to 56 above) in sync with the route
+    /* Keep config.max_uri_handlers (set to 69 above) in sync with the route
      * table; a route that overflows it would be silently dropped at
      * registration. Bump both together when adding routes. */
-    _Static_assert(sizeof(routes) / sizeof(routes[0]) <= 56,
+    _Static_assert(sizeof(routes) / sizeof(routes[0]) <= 69,
                    "max_uri_handlers too small for route table");
 
     for (int i = 0; i < (int)(sizeof(routes)/sizeof(routes[0])); i++) {

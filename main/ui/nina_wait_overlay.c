@@ -23,8 +23,10 @@
 
 #include "nina_wait_overlay.h"
 #include "nina_dashboard_internal.h"
+#include "nina_nav_arbiter.h"
 #include "app_config.h"
 #include "display_defs.h"
+#include "esp_timer.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -37,6 +39,20 @@ static lv_obj_t *bar_progress = NULL;
 static lv_obj_t *bar_glow     = NULL;
 
 static bool indeterminate = false;
+
+/* ── Stall-timer state ──────────────────────────────────────────────── */
+
+/* One-shot 15 s watchdog that auto-dismisses the overlay if loading stalls.
+ * Created in nina_wait_overlay_show, deleted in nina_wait_overlay_hide.
+ * Always set to NULL after every lv_timer_delete (double-free guard). */
+static lv_timer_t *s_stall_timer = NULL;
+
+/* The page to return to when the overlay is dismissed by swipe or timeout.
+ * Set via nina_wait_overlay_set_prior_page() before show(). */
+static int s_prior_page = -1;
+
+/* Forward declaration so stall_timer_cb can be defined before show/hide. */
+static void stall_timer_cb(lv_timer_t *timer);
 
 /* ── Helpers ────────────────────────────────────────────────────────── */
 
@@ -100,8 +116,9 @@ void nina_wait_overlay_create(lv_obj_t *parent) {
     lv_obj_set_style_bg_color(wait_overlay, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(wait_overlay, LV_OPA_COVER, 0);
     lv_obj_add_flag(wait_overlay, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(wait_overlay, LV_OBJ_FLAG_CLICKABLE);          /* eat taps   */
-    lv_obj_clear_flag(wait_overlay, LV_OBJ_FLAG_GESTURE_BUBBLE);   /* eat swipes */
+    /* Eat taps but let swipes bubble up to the screen's gesture_event_cb so
+     * a horizontal swipe can cancel the load and return to the prior page. */
+    lv_obj_add_flag(wait_overlay, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_set_flex_flow(wait_overlay, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(wait_overlay, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -167,6 +184,23 @@ void nina_wait_overlay_create(lv_obj_t *parent) {
 
 /* ── Public API ─────────────────────────────────────────────────────── */
 
+/* One-shot stall watchdog callback.  This runs inside the LVGL tick which
+ * already holds the LVGL tick lock — do NOT call bsp_display_lock /
+ * lvgl_port_lock here.  nav_arbiter_submit_user() is lock-safe (atomic
+ * write + task notify) and is the ONLY navigation path used here. */
+static void stall_timer_cb(lv_timer_t *timer) {
+    LV_UNUSED(timer);
+    /* Null the pointer first: the just-fired one-shot is already deleted by
+     * LVGL, and nina_wait_overlay_hide() will guard-check before re-deleting. */
+    s_stall_timer = NULL;
+    int prior = s_prior_page;
+    s_prior_page = -1;
+    nina_wait_overlay_hide();
+    if (prior >= 0) {
+        nav_arbiter_submit_user(prior, esp_timer_get_time() / 1000, -1);
+    }
+}
+
 void nina_wait_overlay_show(const char *title, const char *subtitle) {
     if (!wait_overlay) return;
 
@@ -185,6 +219,15 @@ void nina_wait_overlay_show(const char *title, const char *subtitle) {
 
     /* Default to the indeterminate pulse — the download/decode time is unknown. */
     nina_wait_overlay_set_progress(-1);
+
+    /* Arm the 15-second one-shot stall watchdog.  Delete any previous timer
+     * first so a rapid show->show sequence does not leak a timer handle. */
+    if (s_stall_timer) {
+        lv_timer_delete(s_stall_timer);
+        s_stall_timer = NULL;
+    }
+    s_stall_timer = lv_timer_create(stall_timer_cb, 15000, NULL);
+    lv_timer_set_repeat_count(s_stall_timer, 1);
 }
 
 void nina_wait_overlay_set_progress(int percent) {
@@ -220,12 +263,35 @@ void nina_wait_overlay_set_progress(int percent) {
 void nina_wait_overlay_hide(void) {
     if (!wait_overlay) return;
     stop_pulse();
+    /* Cancel the stall watchdog so a successful load does not trigger a
+     * delayed nav-away.  Guard the delete with a NULL check (the callback
+     * itself already nulled the pointer before calling here). */
+    if (s_stall_timer) {
+        lv_timer_delete(s_stall_timer);
+        s_stall_timer = NULL;
+    }
     lv_obj_add_flag(wait_overlay, LV_OBJ_FLAG_HIDDEN);
 }
 
 bool nina_wait_overlay_visible(void) {
     if (!wait_overlay) return false;
     return !lv_obj_has_flag(wait_overlay, LV_OBJ_FLAG_HIDDEN);
+}
+
+void nina_wait_overlay_set_prior_page(int page) {
+    s_prior_page = page;
+}
+
+void nina_wait_overlay_cancel(void) {
+    /* Hide (also deletes the stall timer) then navigate back to the prior page
+     * via the arbiter.  Caller holds the display lock; nav_arbiter_submit_user
+     * is lock-safe and must not be wrapped in another lock call. */
+    nina_wait_overlay_hide();
+    int prior = s_prior_page;
+    s_prior_page = -1;
+    if (prior >= 0) {
+        nav_arbiter_submit_user(prior, esp_timer_get_time() / 1000, -1);
+    }
 }
 
 void nina_wait_overlay_apply_theme(void) {

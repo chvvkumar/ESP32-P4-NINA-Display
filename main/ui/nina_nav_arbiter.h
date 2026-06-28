@@ -35,8 +35,11 @@ typedef enum {
 void nav_arbiter_init(void);
 
 /** Record a USER navigation claim (absolute page index + now_ms timestamp).
- *  Stamps the grace window. Does NOT itself move the page; resolve() does. */
-void nav_arbiter_submit_user(int abs_page, int64_t now_ms);
+ *  Stamps the grace window and wakes the data task so resolve() runs on the next
+ *  loop iteration. img_src pins the Image Display source (0-3) for an image
+ *  target, or -1 for a non-image target (clears any runtime override). Does NOT
+ *  itself move the page; resolve() does. */
+void nav_arbiter_submit_user(int abs_page, int64_t now_ms, int8_t img_src);
 
 /** Raise the topology-rebuild flag (instance enable/disable, URL, demo, mode
  *  toggles). The next resolve() consumes it and rebuilds affected slots. */
@@ -59,6 +62,21 @@ void nav_arbiter_resolve(int64_t now_ms);
 
 /** True while the IDLE claim is the resolved source (for the idle indicator). */
 bool nav_arbiter_idle_active(void);
+
+/** Set or clear the in-memory navigation pin. While pinned, the arbiter holds
+ *  the USER-selected page and skips slideshow/session/idle/default with no grace
+ *  expiry. RUNTIME ONLY: resets to off on reboot.
+ *  on=true:  pin on. If abs_page >= 0 the pin holds that page (with img_src as
+ *            the Image Display source, 0-3 or -1); otherwise it holds whatever
+ *            page is currently shown.
+ *  on=false: pin off; the current page is restamped into the USER grace window
+ *            so it holds for nav_grace_s before the automatic ladder resumes.
+ *  Either way the data task is woken so resolve() runs promptly. now_ms is the
+ *  caller's monotonic millisecond clock. */
+void nav_arbiter_set_pin(bool on, int abs_page, int8_t img_src, int64_t now_ms);
+
+/** True if the navigation pin is currently engaged. */
+bool nav_arbiter_is_pinned(void);
 
 #ifdef __cplusplus
 }

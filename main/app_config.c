@@ -11,6 +11,7 @@
 #include "esp_heap_caps.h"
 #include "perf_monitor.h"
 #include "themes.h"
+#include "ui/page_registry.h"
 
 static const char *TAG = "app_config";
 static app_config_t s_config;
@@ -691,7 +692,7 @@ static void set_defaults(app_config_t *cfg) {
     }
     cfg->brightness = 50;
     cfg->color_brightness = 100;
-    cfg->active_page_override = -1;
+    cfg->active_page_override = PAGE_REF_SUMMARY;  /* Home Page = Summary (page_ref_t registry id) */
     cfg->auto_rotate_enabled = false;
     cfg->auto_rotate_interval_s = 30;
     cfg->auto_rotate_effect = 0;
@@ -701,6 +702,12 @@ static void set_defaults(app_config_t *cfg) {
     /* Default rotation order: Summary, AllSky, Spotify, Clock, NINA1, NINA2, NINA3, SysInfo */
     for (int i = 0; i < 8; i++) cfg->auto_rotate_order[i] = (uint8_t)i;
     cfg->auto_rotate_order_ext = 8;  // 9th slot = bit index 8 (Image Display)
+    /* Default flat slideshow order (auto_rotate_order2): ARP_IDX_* values 0..7
+     * only. Image Display (ARP_IDX_IMG_GOES, index 8) stays OPT-IN, excluded from
+     * the fresh-install default rotation. memset() above already cleared the
+     * array, so set the explicit defaults and pad the tail (8..15) with 0xFF. */
+    for (int i = 0; i < 8; i++) cfg->auto_rotate_order2[i] = (uint8_t)i;   // 0..7 (Clock is last)
+    for (int i = 8; i < ARP_ORDER_CAPACITY; i++) cfg->auto_rotate_order2[i] = 0xFF;
     cfg->update_rate_s = 5;
     cfg->graph_update_interval_s = 10;
     cfg->connection_timeout_s = 6;
@@ -766,7 +773,7 @@ static void set_defaults(app_config_t *cfg) {
     cfg->weather_units = 0;
     cfg->weather_time_format = 0;
     cfg->idle_page_override_enabled = false;
-    cfg->idle_page_override_target = IDLE_TARGET_SUMMARY;
+    cfg->idle_page_override_target = PAGE_REF_SUMMARY;
     cfg->idle_page_persistent = false;
     cfg->idle_indicator_enabled = true;
     cfg->nav_grace_s = 10;             // manual-nav grace window (10-300s, default 10)
@@ -808,8 +815,83 @@ static void set_defaults(app_config_t *cfg) {
     cfg->goes_orientation = 0;
     cfg->solar_orientation = 0;
 
+    // Custom Image URL source (Image Display source index 3)
+    strcpy(cfg->custom_image_url, "https://picsum.photos/720");
+    cfg->custom_orientation = 0;          // 0=0°,1=90°,2=180°,3=270° clockwise
+    cfg->custom_update_interval_s = 60;   // poll interval (10-7200s)
+
     // Auth is on by default — protects device from open-LAN access
     cfg->auth_enabled = true;
+}
+
+/* Convert the two page-target fields from their pre-v47 encodings
+ * (active_page_override = raw page index, idle_page_override_target =
+ * idle_target_t enum) to page_ref registry ids. Must run on EVERY
+ * migration path from a pre-v47 config, since the dispatcher does not
+ * chain migrations.
+ *
+ * Known limitation: the active_page_override remap below assumes the
+ * v44/v45-era raw-page-index layout. Pre-v43 configs used an older page
+ * layout, so an ancient stored value may not map perfectly here; however
+ * validate_config() (registry-aware, runs after every migration) bounds
+ * any unmappable value to Summary, which is acceptable.
+ *
+ * The from_version parameter is the config version the caller is migrating
+ * FROM. The active_page_override field has existed since v0 and is always
+ * stored as a raw page index, so its remap is unconditional. The
+ * idle_page_override_target field was INTRODUCED at config v29; for sources
+ * older than v29 the field is not present in the old blob and therefore holds
+ * the set_defaults() value (PAGE_REF_SUMMARY = 0), which is already a correct
+ * page_ref id. Remapping that 0 as if it were the old idle_target_t enum would
+ * wrongly turn it into Clock (id 7), so the idle remap is gated on
+ * from_version >= 29. */
+static void normalize_legacy_page_targets(app_config_t *cfg, uint32_t from_version)
+{
+    /* Remap idle_page_override_target: old idle_target_t enum -> page_ref id.
+     * Only applies when migrating from v29 or later, where the field actually
+     * existed in the old blob. For pre-v29 sources the field already holds the
+     * set_defaults() PAGE_REF_SUMMARY value and must be left untouched.
+     * Use an int temporary so the negative-capable int8_t does not sign-extend
+     * unexpectedly inside the switch. */
+    if (from_version >= 29) {
+        int isrc = cfg->image_display_source;
+        if (isrc < 0) isrc = 0;
+        if (isrc > 3) isrc = 3;
+        int old = (int)cfg->idle_page_override_target;
+        switch (old) {
+            case -1: cfg->idle_page_override_target = 0;  break;  /* Summary  */
+            case  0: cfg->idle_page_override_target = 7;  break;  /* Clock    */
+            case  1: cfg->idle_page_override_target = 5;  break;  /* AllSky   */
+            case  2: cfg->idle_page_override_target = 6;  break;  /* Spotify  */
+            case  3: cfg->idle_page_override_target = (int8_t)(8 + isrc); break;  /* Image -> concrete source (8..11) */
+            case  4: cfg->idle_page_override_target = 4;  break;  /* SysInfo  */
+            case  5: cfg->idle_page_override_target = 1;  break;  /* NINA1    */
+            case  6: cfg->idle_page_override_target = 2;  break;  /* NINA2    */
+            case  7: cfg->idle_page_override_target = 3;  break;  /* NINA3    */
+            default: cfg->idle_page_override_target = 0;  break;  /* Summary  */
+        }
+    }
+
+    /* Remap active_page_override: old RAW PAGE INDEX -> page_ref id.
+     * Same int-temporary guard for the int8_t -1 (legacy Auto) case. */
+    int asrc = cfg->image_display_source;
+    if (asrc < 0) asrc = 0;
+    if (asrc > 3) asrc = 3;
+    int old2 = (int)cfg->active_page_override;
+    switch (old2) {
+        case -1: cfg->active_page_override = 0;  break;  /* legacy Auto -> Summary */
+        case  0: cfg->active_page_override = 5;  break;  /* AllSky   */
+        case  1: cfg->active_page_override = 6;  break;  /* Spotify  */
+        case  2: cfg->active_page_override = 7;  break;  /* Clock    */
+        case  3: cfg->active_page_override = (int8_t)(8 + asrc); break;  /* Image -> concrete source (8..11) */
+        case  4: cfg->active_page_override = 0;  break;  /* Summary  */
+        case  5: cfg->active_page_override = 1;  break;  /* NINA1    */
+        case  6: cfg->active_page_override = 2;  break;  /* NINA2    */
+        case  7: cfg->active_page_override = 3;  break;  /* NINA3    */
+        case  8: cfg->active_page_override = 13; break;  /* Settings (home_page resolves to Summary at runtime) */
+        case  9: cfg->active_page_override = 4;  break;  /* SysInfo  */
+        default: cfg->active_page_override = 0;  break;  /* Summary  */
+    }
 }
 
 /**
@@ -841,6 +923,8 @@ static void migrate_from_v0(const app_config_v0_t *old, app_config_t *cfg) {
     cfg->auto_rotate_interval_s = old->auto_rotate_interval_s > 0 ? old->auto_rotate_interval_s : 30;
     cfg->auto_rotate_effect = old->auto_rotate_effect;
     cfg->auto_rotate_skip_disconnected = old->auto_rotate_skip_disconnected;
+
+    normalize_legacy_page_targets(cfg, 0);
 
     ESP_LOGI(TAG, "Migrated config from v0 → v%d (WiFi credentials now managed by ESP-IDF WiFi NVS)",
              APP_CONFIG_VERSION);
@@ -876,6 +960,8 @@ static void migrate_from_v1(const app_config_v1_t *old, app_config_t *cfg) {
     cfg->auto_rotate_skip_disconnected = old->auto_rotate_skip_disconnected;
     /* auto_rotate_pages keeps default 0x0E from set_defaults() */
 
+    normalize_legacy_page_targets(cfg, 1);
+
     ESP_LOGI(TAG, "Migrated config from v1 → v%d", APP_CONFIG_VERSION);
 }
 
@@ -909,6 +995,8 @@ static void migrate_from_v2(const app_config_v2_t *old, app_config_t *cfg) {
     cfg->auto_rotate_skip_disconnected = old->auto_rotate_skip_disconnected;
     cfg->auto_rotate_pages = old->auto_rotate_pages;
     /* update_rate_s keeps default 2 from set_defaults() */
+
+    normalize_legacy_page_targets(cfg, 2);
 
     ESP_LOGI(TAG, "Migrated config from v2 → v%d", APP_CONFIG_VERSION);
 }
@@ -945,6 +1033,8 @@ static void migrate_from_v3(const app_config_v3_t *old, app_config_t *cfg) {
     cfg->update_rate_s = old->update_rate_s;
     /* graph_update_interval_s keeps default 5 from set_defaults() */
 
+    normalize_legacy_page_targets(cfg, 3);
+
     ESP_LOGI(TAG, "Migrated config from v3 → v%d", APP_CONFIG_VERSION);
 }
 
@@ -980,6 +1070,8 @@ static void migrate_from_v4(const app_config_v4_t *old, app_config_t *cfg) {
     cfg->update_rate_s = old->update_rate_s;
     cfg->graph_update_interval_s = old->graph_update_interval_s;
     /* connection_timeout_s keeps default 6 from set_defaults() */
+
+    normalize_legacy_page_targets(cfg, 4);
 
     ESP_LOGI(TAG, "Migrated config from v4 → v%d", APP_CONFIG_VERSION);
 }
@@ -1018,6 +1110,8 @@ static void migrate_from_v5(const app_config_v5_t *old, app_config_t *cfg) {
     cfg->connection_timeout_s = old->connection_timeout_s;
     /* toast_duration_s keeps default 8 from set_defaults() */
 
+    normalize_legacy_page_targets(cfg, 5);
+
     ESP_LOGI(TAG, "Migrated config from v5 → v%d", APP_CONFIG_VERSION);
 }
 
@@ -1055,6 +1149,8 @@ static void migrate_from_v6(const app_config_v6_t *old, app_config_t *cfg) {
     cfg->connection_timeout_s = old->connection_timeout_s;
     cfg->toast_duration_s = old->toast_duration_s;
     /* debug_mode keeps default false from set_defaults() */
+
+    normalize_legacy_page_targets(cfg, 6);
 
     ESP_LOGI(TAG, "Migrated config from v6 → v%d", APP_CONFIG_VERSION);
 }
@@ -1098,6 +1194,8 @@ static void migrate_from_v7(const app_config_v7_t *old, app_config_t *cfg) {
         cfg->instance_enabled[i] = (old->api_url[i][0] != '\0');
     }
 
+    normalize_legacy_page_targets(cfg, 7);
+
     ESP_LOGI(TAG, "Migrated config from v7 → v%d", APP_CONFIG_VERSION);
 }
 
@@ -1137,6 +1235,8 @@ static void migrate_from_v8(const app_config_v8_t *old, app_config_t *cfg) {
     cfg->debug_mode = old->debug_mode;
     memcpy(cfg->instance_enabled, old->instance_enabled, sizeof(cfg->instance_enabled));
     /* screen_sleep: defaults from set_defaults() (disabled, 60s timeout) */
+
+    normalize_legacy_page_targets(cfg, 8);
 
     ESP_LOGI(TAG, "Migrated config from v8 → v%d", APP_CONFIG_VERSION);
 }
@@ -1180,6 +1280,8 @@ static void migrate_from_v9(const app_config_v9_t *old, app_config_t *cfg) {
     cfg->screen_sleep_timeout_s = old->screen_sleep_timeout_s;
     /* alert_flash_enabled: defaults from set_defaults() (enabled) */
 
+    normalize_legacy_page_targets(cfg, 9);
+
     ESP_LOGI(TAG, "Migrated config from v9 → v%d", APP_CONFIG_VERSION);
 }
 
@@ -1222,6 +1324,8 @@ static void migrate_from_v10(const app_config_v10_t *old, app_config_t *cfg) {
     cfg->screen_sleep_timeout_s = old->screen_sleep_timeout_s;
     cfg->alert_flash_enabled = old->alert_flash_enabled;
     /* idle_poll_interval_s, wifi_power_save: defaults from set_defaults() */
+
+    normalize_legacy_page_targets(cfg, 10);
 
     ESP_LOGI(TAG, "Migrated config from v10 → v%d", APP_CONFIG_VERSION);
 }
@@ -1268,6 +1372,8 @@ static void migrate_from_v11(const app_config_v11_t *old, app_config_t *cfg) {
     cfg->wifi_power_save = old->wifi_power_save;
     /* widget_style: defaults from set_defaults() */
 
+    normalize_legacy_page_targets(cfg, 11);
+
     ESP_LOGI(TAG, "Migrated config from v11 → v%d", APP_CONFIG_VERSION);
 }
 
@@ -1313,6 +1419,8 @@ static void migrate_from_v12(const app_config_v12_t *old, app_config_t *cfg) {
     cfg->wifi_power_save = old->wifi_power_save;
     cfg->widget_style = old->widget_style;
     /* auto_update_check, update_channel: defaults from set_defaults() */
+
+    normalize_legacy_page_targets(cfg, 12);
 
     ESP_LOGI(TAG, "Migrated config from v12 → v%d", APP_CONFIG_VERSION);
 }
@@ -1361,6 +1469,8 @@ static void migrate_from_v13(const app_config_v13_t *old, app_config_t *cfg) {
     cfg->auto_update_check = old->auto_update_check;
     cfg->update_channel = old->update_channel;
     /* deep_sleep_enabled, deep_sleep_wake_timer_s, deep_sleep_on_idle: defaults from set_defaults() */
+
+    normalize_legacy_page_targets(cfg, 13);
 
     ESP_LOGI(TAG, "Migrated config from v13 → v%d", APP_CONFIG_VERSION);
 }
@@ -1413,6 +1523,8 @@ static void migrate_from_v14(const app_config_v14_t *old, app_config_t *cfg) {
     cfg->deep_sleep_on_idle = old->deep_sleep_on_idle;
     /* screen_rotation: defaults from set_defaults() */
 
+    normalize_legacy_page_targets(cfg, 14);
+
     ESP_LOGI(TAG, "Migrated config from v14 → v%d", APP_CONFIG_VERSION);
 }
 
@@ -1464,6 +1576,8 @@ static void migrate_from_v15(const app_config_v15_t *old, app_config_t *cfg) {
     cfg->deep_sleep_on_idle = old->deep_sleep_on_idle;
     cfg->screen_rotation = old->screen_rotation;
     /* hostname: defaults from set_defaults() */
+
+    normalize_legacy_page_targets(cfg, 15);
 
     ESP_LOGI(TAG, "Migrated config from v15 → v%d", APP_CONFIG_VERSION);
 }
@@ -1523,6 +1637,8 @@ static void migrate_from_v17(const app_config_v17_t *old, app_config_t *cfg) {
     memcpy(cfg->allsky_thresholds, old->allsky_thresholds, sizeof(cfg->allsky_thresholds));
     cfg->allsky_enabled = false;  /* new in v18 — default off, user must configure fields first */
 
+    normalize_legacy_page_targets(cfg, 17);
+
     ESP_LOGI(TAG, "Migrated config from v17 → v%d", APP_CONFIG_VERSION);
 }
 
@@ -1579,6 +1695,8 @@ static void migrate_from_v18(const app_config_v18_t *old, app_config_t *cfg) {
     memcpy(cfg->allsky_thresholds, old->allsky_thresholds, sizeof(cfg->allsky_thresholds));
     cfg->allsky_enabled = old->allsky_enabled;
     cfg->demo_mode = false;  /* new in v19 — default off */
+
+    normalize_legacy_page_targets(cfg, 18);
 
     ESP_LOGI(TAG, "Migrated config from v18 → v%d", APP_CONFIG_VERSION);
 }
@@ -1639,6 +1757,8 @@ static void migrate_from_v19(const app_config_v19_t *old, app_config_t *cfg) {
     cfg->allsky_enabled = old->allsky_enabled;
     cfg->demo_mode = old->demo_mode;
     /* Spotify fields: new in v20 — defaults already set by set_defaults() */
+
+    normalize_legacy_page_targets(cfg, 19);
 
     ESP_LOGI(TAG, "Migrated config from v19 → v%d", APP_CONFIG_VERSION);
 }
@@ -1706,6 +1826,8 @@ static void migrate_from_v22(const app_config_v22_t *old, app_config_t *cfg) {
     cfg->spotify_minimal_mode = old->spotify_minimal_mode;
     /* spotify_scroll_text: new in v23 — defaults already set by set_defaults() */
 
+    normalize_legacy_page_targets(cfg, 22);
+
     ESP_LOGI(TAG, "Migrated config from v22 → v%d", APP_CONFIG_VERSION);
 }
 
@@ -1769,6 +1891,8 @@ static void migrate_from_v23(const app_config_v23_t *old, app_config_t *cfg) {
 
     /* wifi_networks stays zeroed from set_defaults() */
 
+    normalize_legacy_page_targets(cfg, 23);
+
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v23 to v%d", APP_CONFIG_VERSION);
 }
@@ -1797,6 +1921,8 @@ static void migrate_from_v37(const void *raw, size_t raw_size, app_config_t *cfg
     /* crash_log_retention_days: new in v41 — default already set by set_defaults() */
     cfg->crash_log_retention_days = 30;
 
+    normalize_legacy_page_targets(cfg, 37);
+
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v37 to v%d", APP_CONFIG_VERSION);
 }
@@ -1817,6 +1943,8 @@ static void migrate_from_v38(const void *raw, size_t raw_size, app_config_t *cfg
     /* crash_log_retention_days: new in v41 — default already set by set_defaults() */
     cfg->crash_log_retention_days = 30;
 
+    normalize_legacy_page_targets(cfg, 38);
+
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v38 to v%d", APP_CONFIG_VERSION);
 }
@@ -1834,6 +1962,8 @@ static void migrate_from_v39(const void *raw, size_t raw_size, app_config_t *cfg
     /* crash_log_retention_days: new in v41 — default already set by set_defaults() */
     cfg->crash_log_retention_days = 30;
 
+    normalize_legacy_page_targets(cfg, 39);
+
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v39 to v%d", APP_CONFIG_VERSION);
 }
@@ -1846,6 +1976,8 @@ static void migrate_from_v40(const void *raw, size_t raw_size, app_config_t *cfg
 
     /* crash_log_retention_days: new in v41 — default already set by set_defaults() */
     cfg->crash_log_retention_days = 30;
+
+    normalize_legacy_page_targets(cfg, 40);
 
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v40 to v%d", APP_CONFIG_VERSION);
@@ -1863,6 +1995,8 @@ static void migrate_from_v41(const void *raw, size_t raw_size, app_config_t *cfg
     cfg->auto_rotate_pages_hi = 0;
     cfg->auto_rotate_order_ext = 8;
 
+    normalize_legacy_page_targets(cfg, 41);
+
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v41 to v%d", APP_CONFIG_VERSION);
 }
@@ -1878,6 +2012,8 @@ static void migrate_from_v42(const void *raw, size_t raw_size, app_config_t *cfg
     cfg->goes_orientation = 0;
     cfg->solar_orientation = 0;
 
+    normalize_legacy_page_targets(cfg, 42);
+
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v42 to v%d", APP_CONFIG_VERSION);
 }
@@ -1885,6 +2021,38 @@ static void migrate_from_v42(const void *raw, size_t raw_size, app_config_t *cfg
 /* --- v43 → v44 migration: rename active_page_override semantics to "Home Page";
  *     collapse slideshow mask+order into one ordered list; add nav_grace_s;
  *     drop idle_page_persistent; normalize mode exclusivity. --- */
+/* Build the flat auto_rotate_order2[] list from the legacy 9-slot order
+ * already present in cfg (auto_rotate_order[0..7] + auto_rotate_order_ext).
+ * Bit-indices 0-7 copy through unchanged; the single legacy Image Display
+ * stop (bit-index 8) maps to the per-source ARP_IDX_IMG_* matching
+ * cfg->image_display_source (0->GOES,1->Moon,2->Solar,3->Custom). 0xFF
+ * terminators are skipped; order is preserved; the result is 0xFF-padded. */
+static void build_order2_from_legacy(app_config_t *cfg)
+{
+    for (int i = 0; i < ARP_ORDER_CAPACITY; i++) cfg->auto_rotate_order2[i] = 0xFF;
+
+    int dn = 0;
+    for (int i = 0; i < 9 && dn < ARP_ORDER_CAPACITY; i++) {
+        uint8_t v = (i < 8) ? cfg->auto_rotate_order[i] : cfg->auto_rotate_order_ext;
+        if (v == 0xFF) continue;
+        uint8_t mapped;
+        if (v == 8) {
+            /* Legacy single Image Display stop -> per-source stop. */
+            switch (cfg->image_display_source) {
+                case 1:  mapped = ARP_IDX_IMG_MOON;   break;
+                case 2:  mapped = ARP_IDX_IMG_SOLAR;  break;
+                case 3:  mapped = ARP_IDX_IMG_CUSTOM; break;
+                default: mapped = ARP_IDX_IMG_GOES;   break;
+            }
+        } else if (v <= 7) {
+            mapped = v;   /* indices 0-7 are identical across schemes */
+        } else {
+            continue;     /* skip invalid legacy index (9-254) */
+        }
+        cfg->auto_rotate_order2[dn++] = mapped;
+    }
+}
+
 static void migrate_from_v43(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
@@ -1925,6 +2093,12 @@ static void migrate_from_v43(const void *raw, size_t raw_size, app_config_t *cfg
     for (int i = 0; i < 8; i++) cfg->auto_rotate_order[i] = (i < dn) ? derived[i] : 0xFF;
     cfg->auto_rotate_order_ext = (dn > 8) ? derived[8] : 0xFF;
 
+    /* Translate the derived legacy 9-slot order into the flat auto_rotate_order2[]
+     * list so v43 users keep their saved slideshow order (consistent with
+     * v44/v45). build_order2_from_legacy() splits the single Image Display stop
+     * into the per-source ARP_IDX_IMG_* matching this device's image_display_source. */
+    build_order2_from_legacy(cfg);
+
     /* nav_grace_s default. */
     cfg->nav_grace_s = 10;
 
@@ -1935,6 +2109,8 @@ static void migrate_from_v43(const void *raw, size_t raw_size, app_config_t *cfg
     /* Exclusivity: auto-rotate wins the tie-break. */
     app_config_normalize_nav_exclusivity(cfg);
 
+    normalize_legacy_page_targets(cfg, 43);
+
     cfg->config_version = APP_CONFIG_VERSION;
 
     /* Single migration summary line. */
@@ -1942,6 +2118,72 @@ static void migrate_from_v43(const void *raw, size_t raw_size, app_config_t *cfg
         "Migrated config v43->v44: HomePage=%d, slideshow=[%d slots], "
         "nav_grace_s=%d, dropped idle_page_persistent, dropped rotation bitmask",
         (int)cfg->active_page_override, dn, (int)cfg->nav_grace_s);
+}
+
+/* --- v44 → v46 migration: add Custom Image URL source (Image Display source
+ *     index 3) — custom_image_url, custom_orientation, custom_update_interval_s. --- */
+static void migrate_from_v44(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v44_t) ? raw_size : sizeof(app_config_v44_t);
+    memcpy(cfg, raw, copy);
+
+    /* custom_image_url / custom_orientation / custom_update_interval_s: new in
+     * v45, appended past the v44 snapshot — apply the set_defaults() values. */
+    strlcpy(cfg->custom_image_url, "https://picsum.photos/720", sizeof(cfg->custom_image_url));
+    cfg->custom_orientation = 0;
+    cfg->custom_update_interval_s = 60;
+
+    /* The legacy 9-slot order (auto_rotate_order[0..7] + auto_rotate_order_ext)
+     * lives at this struct offset and was already copied above. Translate it
+     * into the new flat auto_rotate_order2[] list, splitting the single
+     * Image Display stop into the per-source ARP_IDX_IMG_* matching this
+     * device's saved image_display_source. */
+    build_order2_from_legacy(cfg);
+
+    normalize_legacy_page_targets(cfg, 44);
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v44 to v%d", APP_CONFIG_VERSION);
+}
+
+/* --- v45 → v46 migration: append auto_rotate_order2[16] (each image source is
+ *     now its own distinct slideshow stop). The legacy auto_rotate_order[8] +
+ *     auto_rotate_order_ext encoding is preserved for binary stability but no
+ *     longer drives the slideshow. --- */
+static void migrate_from_v45(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v45_t) ? raw_size : sizeof(app_config_v45_t);
+    memcpy(cfg, raw, copy);
+
+    /* Translate the old 9-slot order into the new flat auto_rotate_order2[],
+     * mapping the single old Image Display stop (bit-index 8) to the matching
+     * per-source ARP_IDX_IMG_* based on cfg->image_display_source. */
+    build_order2_from_legacy(cfg);
+
+    normalize_legacy_page_targets(cfg, 45);
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v45 to v%d", APP_CONFIG_VERSION);
+}
+
+/* --- v46 → v47 migration: remap idle_page_override_target (old idle_target_t
+ *     enum, -1..7) and active_page_override (old RAW PAGE INDEX) onto the
+ *     page_ref_t registry ids defined in ui/page_registry.h. The struct layout
+ *     is unchanged; only the stored VALUES of these two int8_t fields move. --- */
+static void migrate_from_v46(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v46_t) ? raw_size : sizeof(app_config_v46_t);
+    memcpy(cfg, raw, copy);
+
+    /* Remap idle_page_override_target + active_page_override from their old
+     * pre-v47 encodings onto page_ref registry ids. */
+    normalize_legacy_page_targets(cfg, 46);
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config v46 -> v%d (page-ref remap)", APP_CONFIG_VERSION);
 }
 
 static void migrate_from_v36(const void *raw, size_t raw_size, app_config_t *cfg)
@@ -1975,6 +2217,8 @@ static void migrate_from_v36(const void *raw, size_t raw_size, app_config_t *cfg
     cfg->moon_spin_mode = 0;
     cfg->moon_spin_return_s = 3;
 
+    normalize_legacy_page_targets(cfg, 36);
+
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v36 to v%d", APP_CONFIG_VERSION);
 }
@@ -1988,6 +2232,8 @@ static void migrate_from_v35(const void *raw, size_t raw_size, app_config_t *cfg
     /* image_display_crop field: new in v36 — defaults already set by set_defaults() */
     cfg->image_display_crop = false;
 
+    normalize_legacy_page_targets(cfg, 35);
+
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v35 to v%d", APP_CONFIG_VERSION);
 }
@@ -2000,6 +2246,8 @@ static void migrate_from_v34(const void *raw, size_t raw_size, app_config_t *cfg
 
     /* Solar band field: new in v35 — defaults already set by set_defaults() */
     cfg->solar_band = 0;
+
+    normalize_legacy_page_targets(cfg, 34);
 
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v34 to v%d", APP_CONFIG_VERSION);
@@ -2017,6 +2265,8 @@ static void migrate_from_v33(const void *raw, size_t raw_size, app_config_t *cfg
     cfg->moon_lat = cfg->weather_lat;   /* prefill from weather */
     cfg->moon_lon = cfg->weather_lon;
 
+    normalize_legacy_page_targets(cfg, 33);
+
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v33 to v%d", APP_CONFIG_VERSION);
 }
@@ -2033,6 +2283,8 @@ static void migrate_from_v32(const void *raw, size_t raw_size, app_config_t *cfg
     if (cfg->idle_page_override_target == 3) {
         cfg->idle_page_override_target = IDLE_TARGET_SYSINFO;  // now 4
     }
+
+    normalize_legacy_page_targets(cfg, 32);
 
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v32 to v%d", APP_CONFIG_VERSION);
@@ -2052,6 +2304,8 @@ static void migrate_from_v31(const void *raw, size_t raw_size, app_config_t *cfg
     if (cfg->idle_page_override_target == 3) {
         cfg->idle_page_override_target = IDLE_TARGET_SYSINFO;  // now 4
     }
+
+    normalize_legacy_page_targets(cfg, 31);
 
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v31 to v%d", APP_CONFIG_VERSION);
@@ -2074,6 +2328,8 @@ static void migrate_from_v30(const void *raw, size_t raw_size, app_config_t *cfg
         cfg->idle_page_override_target = IDLE_TARGET_SYSINFO;  // now 4
     }
 
+    normalize_legacy_page_targets(cfg, 30);
+
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v30 to v%d", APP_CONFIG_VERSION);
 }
@@ -2094,6 +2350,8 @@ static void migrate_from_v29(const void *raw, size_t raw_size, app_config_t *cfg
     if (cfg->idle_page_override_target == 3) {
         cfg->idle_page_override_target = IDLE_TARGET_SYSINFO;  // now 4
     }
+
+    normalize_legacy_page_targets(cfg, 29);
 
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v29 to v%d", APP_CONFIG_VERSION);
@@ -2185,6 +2443,8 @@ static void migrate_from_v28(const void *raw, size_t raw_size, app_config_t *cfg
 
     /* New weather/idle fields stay at defaults from set_defaults() */
 
+    normalize_legacy_page_targets(cfg, 28);
+
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v28 to v%d", APP_CONFIG_VERSION);
 }
@@ -2200,6 +2460,8 @@ static void migrate_from_v27(const void *raw, size_t raw_size, app_config_t *cfg
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         cfg->toast_instance_muted[i] = false;
     }
+    normalize_legacy_page_targets(cfg, 27);
+
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v27 to v%d", APP_CONFIG_VERSION);
 }
@@ -2216,6 +2478,8 @@ static void migrate_from_v26(const void *raw, size_t raw_size, app_config_t *cfg
     size_t copy = raw_size < sizeof(app_config_v32_t) ? raw_size : sizeof(app_config_v32_t);
     memcpy(cfg, raw, copy);
     for (int i = 0; i < 8; i++) cfg->auto_rotate_order[i] = (uint8_t)i;
+    normalize_legacy_page_targets(cfg, 26);
+
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v26 to v%d", APP_CONFIG_VERSION);
 }
@@ -2229,6 +2493,8 @@ static void migrate_from_v25(const void *raw, size_t raw_size, app_config_t *cfg
     size_t copy = raw_size < sizeof(app_config_t) ? raw_size : sizeof(app_config_t);
     memcpy(cfg, raw, copy);
     cfg->spotify_overlay_visible = false;
+    normalize_legacy_page_targets(cfg, 25);
+
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v25 to v%d", APP_CONFIG_VERSION);
 }
@@ -2260,6 +2526,7 @@ static void migrate_from_v24(const void *raw, size_t raw_size, app_config_t *cfg
         case 6: cfg->widget_style = 4; break; /* Chamfered */
         default: cfg->widget_style = 0; break; /* Wireframe/Accent Bar → Default */
     }
+    normalize_legacy_page_targets(cfg, 24);
     ESP_LOGI(TAG, "Migrated config from v24 to v%d", APP_CONFIG_VERSION);
 }
 
@@ -2325,6 +2592,8 @@ static void migrate_from_v21(const app_config_v21_t *old, app_config_t *cfg) {
     cfg->spotify_overlay_timeout_s = old->spotify_overlay_timeout_s;
     /* spotify_minimal_mode: new in v22 — defaults already set by set_defaults() */
     /* spotify_scroll_text: new in v23 — defaults already set by set_defaults() */
+
+    normalize_legacy_page_targets(cfg, 21);
 
     ESP_LOGI(TAG, "Migrated config from v21 → v%d", APP_CONFIG_VERSION);
 }
@@ -2392,6 +2661,8 @@ static void migrate_from_v20(const app_config_v20_t *old, app_config_t *cfg) {
 
     /* spotify_overlay_timeout_s + spotify_minimal_mode: new — defaults set by set_defaults() */
 
+    normalize_legacy_page_targets(cfg, 20);
+
     ESP_LOGI(TAG, "Migrated config from v20 → v%d", APP_CONFIG_VERSION);
 }
 
@@ -2445,6 +2716,8 @@ static void migrate_from_v16(const app_config_v16_t *old, app_config_t *cfg) {
     memcpy(cfg->hostname, old->hostname, sizeof(cfg->hostname));
     /* AllSky fields: defaults from set_defaults() */
 
+    normalize_legacy_page_targets(cfg, 16);
+
     ESP_LOGI(TAG, "Migrated config from v16 → v%d", APP_CONFIG_VERSION);
 }
 
@@ -2485,15 +2758,37 @@ static bool validate_config(app_config_t *cfg) {
         cfg->mqtt_port = 1883;
         fixed = true;
     }
-    /* Home Page value space: -1 (Auto = Summary) or any page index 0..SYSINFO,
-     * excluding Settings (Settings is filtered out by home_page() / the pickers,
-     * not here). The upper bound is the sysinfo index = total navigable pages - 1.
-     * EXTRA_PAGES is not includable in app_config.c; per nina_dashboard_internal.h
-     * MAX_NINA_INSTANCES=3 + EXTRA_PAGES=7, so max_home = 9. */
-    int max_home = (MAX_NINA_INSTANCES + 7) - 1;   /* = SYSINFO index (EXTRA_PAGES=7) */
-    if (cfg->active_page_override < -1 || cfg->active_page_override > max_home) {
-        cfg->active_page_override = -1;
-        fixed = true;
+    /* Home Page stores a page_ref_t registry id (see ui/page_registry.h). Validate
+     * against the registry: an unknown id (including negative int8 values, which
+     * wrap to a high page_ref_t and miss the table) or a non-targetable entry
+     * (Settings=13, overlays 14..23) collapses to Summary. Registry-aware so
+     * appending new targetable pages needs no change here. */
+    if (cfg->active_page_override == 12) {   /* PAGE_REF_IMG_DEFAULT retired as a target -> concrete source */
+        int src = cfg->image_display_source;
+        if (src < 0) src = 0;
+        if (src > 3) src = 3;
+        cfg->active_page_override = (int8_t)(8 + src);
+    }
+    {
+        const page_ref_entry_t *e = page_ref_by_id((page_ref_t)cfg->active_page_override);
+        if (e == NULL || !e->targetable) {
+            cfg->active_page_override = PAGE_REF_SUMMARY;   /* unknown or non-targetable -> Summary */
+            fixed = true;
+        }
+    }
+    /* Idle page target is likewise a page_ref_t id; same registry-aware validation. */
+    if (cfg->idle_page_override_target == 12) {   /* PAGE_REF_IMG_DEFAULT retired as a target -> concrete source */
+        int src = cfg->image_display_source;
+        if (src < 0) src = 0;
+        if (src > 3) src = 3;
+        cfg->idle_page_override_target = (int8_t)(8 + src);
+    }
+    {
+        const page_ref_entry_t *e = page_ref_by_id((page_ref_t)cfg->idle_page_override_target);
+        if (e == NULL || !e->targetable) {
+            cfg->idle_page_override_target = PAGE_REF_SUMMARY;   /* unknown or non-targetable -> Summary */
+            fixed = true;
+        }
     }
     if (cfg->auto_rotate_interval_s == 0 || cfg->auto_rotate_interval_s > 3600) {
         cfg->auto_rotate_interval_s = 30;
@@ -2512,6 +2807,15 @@ static bool validate_config(app_config_t *cfg) {
         for (int i = 0; i < 8; i++) cfg->auto_rotate_order[i] = (uint8_t)i;
         cfg->auto_rotate_order_ext = 8;  // 9th slot = Image Display bit index
         fixed = true;
+    }
+    /* Validate the flat slideshow order: any entry that is not the 0xFF
+     * terminator and out of ARP_IDX_* range is dropped to 0xFF. */
+    for (int i = 0; i < ARP_ORDER_CAPACITY; i++) {
+        if (cfg->auto_rotate_order2[i] != 0xFF &&
+            cfg->auto_rotate_order2[i] >= ARP_IDX_MAX) {
+            cfg->auto_rotate_order2[i] = 0xFF;
+            fixed = true;
+        }
     }
     if (cfg->update_rate_s < 1 || cfg->update_rate_s > 10) {
         cfg->update_rate_s = 2;
@@ -2562,7 +2866,17 @@ static bool validate_config(app_config_t *cfg) {
         strcpy(cfg->goes_region, "umv");
         fixed = true;
     }
-    if (cfg->image_display_source > 2) {
+    /* Custom Image URL source (Image Display source index 3) */
+    cfg->custom_image_url[sizeof(cfg->custom_image_url) - 1] = '\0';
+    if (cfg->custom_orientation > 3) {
+        cfg->custom_orientation = 0;
+        fixed = true;
+    }
+    if (cfg->custom_update_interval_s < 10 || cfg->custom_update_interval_s > 7200) {
+        cfg->custom_update_interval_s = 60;
+        fixed = true;
+    }
+    if (cfg->image_display_source > 3) {   /* 0=GOES, 1=Moon, 2=Solar, 3=Custom URL */
         cfg->image_display_source = 0;
         fixed = true;
     }
@@ -2683,6 +2997,24 @@ void app_config_init(void) {
             nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(handle);
         }
+    } else if (version_check == 46) {
+        /* v46 → v47: remap active_page_override + idle_page_override_target onto page_registry ids */
+        migrate_from_v46(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    } else if (version_check == 45) {
+        /* v45 → v46: added auto_rotate_order2 (each image source is a distinct slideshow stop) */
+        migrate_from_v45(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    } else if (version_check == 44) {
+        /* v44 → v46: added Custom Image URL source, then auto_rotate_order2 */
+        migrate_from_v44(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 43) {
         /* v43 → v44: Home Page rename, single slideshow list, nav_grace_s, drop persistent */
         migrate_from_v43(raw, stored_size, &s_config);
