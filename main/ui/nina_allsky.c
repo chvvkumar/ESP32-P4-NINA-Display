@@ -228,9 +228,7 @@ static inline void set_bar_value_if_changed(lv_obj_t *bar, int *cached, int valu
 }
 
 static inline bool is_red_theme(void) {
-    return current_theme &&
-           (strcmp(current_theme->name, "Red Night") == 0 ||
-            strcmp(current_theme->name, "Night Vision Red") == 0);
+    return theme_is_red_night(current_theme);
 }
 
 static uint32_t parse_hex_color(const char *str, uint32_t fallback) {

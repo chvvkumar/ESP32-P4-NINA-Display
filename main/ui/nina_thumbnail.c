@@ -9,6 +9,8 @@
 #include "nina_thumbnail.h"
 #include "nina_dashboard_internal.h"
 #include "nina_nav_arbiter.h"
+#include "themes.h"
+#include "image_red_remap.h"
 #include "jpeg_utils.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
@@ -51,6 +53,15 @@ static uint32_t fit_scale = 256;
 static uint32_t orig_w = 0;
 static uint32_t orig_h = 0;
 static uint32_t last_click_time = 0;
+
+/* Foreground color for overlay chrome (zoom badge text, back-arrow icon).
+ * Under Red Night use a bright red from the theme; otherwise keep white. */
+static uint32_t thumbnail_chrome_fg_color(void) {
+    if (theme_is_red_night(current_theme)) {
+        return current_theme->text_color;
+    }
+    return 0xFFFFFF;
+}
 
 void nina_thumbnail_init(void) {
     thumbnail_scaled_buf = heap_caps_aligned_calloc(128, 1, SCALED_BUF_MAX_SIZE, MALLOC_CAP_SPIRAM);
@@ -238,7 +249,7 @@ void nina_thumbnail_create(lv_obj_t *parent) {
 
     zoom_badge_lbl = lv_label_create(zoom_badge);
     lv_obj_set_style_text_font(zoom_badge_lbl, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_color(zoom_badge_lbl, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_color(zoom_badge_lbl, lv_color_hex(thumbnail_chrome_fg_color()), 0);
     lv_label_set_text(zoom_badge_lbl, "");
 
     /* --- Back button (floating child of overlay, bottom-right) --- */
@@ -256,7 +267,7 @@ void nina_thumbnail_create(lv_obj_t *parent) {
     btn_back_lbl = lv_label_create(btn_back);
     lv_label_set_text(btn_back_lbl, LV_SYMBOL_LEFT);
     lv_obj_set_style_text_font(btn_back_lbl, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_color(btn_back_lbl, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_color(btn_back_lbl, lv_color_hex(thumbnail_chrome_fg_color()), 0);
     lv_obj_center(btn_back_lbl);
 
     lv_obj_add_event_cb(btn_back, back_btn_cb, LV_EVENT_CLICKED, NULL);
@@ -290,6 +301,11 @@ void nina_dashboard_set_thumbnail(const uint8_t *rgb565_data, uint32_t w, uint32
 
     /* Take ownership of the buffer */
     thumbnail_original_buf = (uint8_t *)rgb565_data;
+
+    /* Under Red Night, remap the camera image to red shades in-place before it
+     * is shown. Self-gates: no-op unless the active theme is Red Night. Done on
+     * the original buffer so PPA-scaled zoom buffers inherit the remap. */
+    image_red_remap_rgb565((uint16_t *)thumbnail_original_buf, (size_t)w * h);
 
     /* Set up LVGL image descriptor with original buffer */
     update_image_descriptor(thumbnail_original_buf, w, h, data_size);
@@ -376,7 +392,7 @@ void nina_thumbnail_apply_theme(void) {
         lv_obj_set_style_bg_color(btn_back, lv_color_hex(current_theme ? current_theme->progress_color : 0x4FC3F7), LV_STATE_PRESSED);
     }
     if (btn_back_lbl) {
-        lv_obj_set_style_text_color(btn_back_lbl, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_text_color(btn_back_lbl, lv_color_hex(thumbnail_chrome_fg_color()), 0);
     }
     if (thumbnail_loading_lbl) {
         lv_obj_set_style_text_color(thumbnail_loading_lbl,
@@ -387,6 +403,6 @@ void nina_thumbnail_apply_theme(void) {
         lv_obj_set_style_bg_opa(zoom_badge, LV_OPA_70, 0);
     }
     if (zoom_badge_lbl) {
-        lv_obj_set_style_text_color(zoom_badge_lbl, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_text_color(zoom_badge_lbl, lv_color_hex(thumbnail_chrome_fg_color()), 0);
     }
 }

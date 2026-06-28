@@ -354,7 +354,9 @@ void populate_filter_data(const filter_detail_data_t *data) {
     lv_label_set_text(lbl_moving_val, data->connected ? "Yes" : "No");
 
     if (current_theme) {
-        uint32_t conn_col = data->connected ? 0x4ade80 : current_theme->label_color;
+        uint32_t conn_col = data->connected
+            ? (theme_is_red_night(current_theme) ? current_theme->progress_color : 0x4ade80)
+            : current_theme->label_color;
         lv_obj_set_style_text_color(lbl_moving_val,
             lv_color_hex(app_config_apply_brightness(conn_col, gb)), 0);
     }

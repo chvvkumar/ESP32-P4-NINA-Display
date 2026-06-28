@@ -83,6 +83,18 @@ static lv_obj_t *forecast_row  = NULL;
 static lv_obj_t *forecast_bars[FORECAST_BARS];
 static lv_obj_t *forecast_lbls[FORECAST_BARS];
 
+/* Dividers — captured so apply_theme can recolor them */
+#define CLK_RULE_COUNT 2
+#define CLK_VDIV_COUNT 3
+static lv_obj_t *rules[CLK_RULE_COUNT];
+static int rule_count = 0;
+static lv_obj_t *vdividers[CLK_VDIV_COUNT];
+static int vdivider_count = 0;
+
+/* Last-known metric flag, so apply_theme can recolor forecast bars
+ * (which depend on temperature) without live weather data on hand. */
+static bool last_is_metric = false;
+
 /* Timer */
 static lv_timer_t *clock_timer = NULL;
 
@@ -126,6 +138,9 @@ static lv_obj_t *make_rule(lv_obj_t *parent) {
     lv_obj_set_style_bg_opa(rule, LV_OPA_COVER, 0);
     lv_obj_remove_flag(rule, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_clear_flag(rule, LV_OBJ_FLAG_CLICKABLE);
+    if (rule_count < CLK_RULE_COUNT) {
+        rules[rule_count++] = rule;
+    }
     return rule;
 }
 
@@ -139,8 +154,19 @@ static float to_fahrenheit(float temp, bool is_metric) {
 
 /**
  * Get bar color based on temperature (compared in Fahrenheit).
+ *
+ * When @p red_night is true, every band maps to a shade of pure red whose
+ * brightness rises with temperature (cold = dark red, hot = bright red).
+ * No green/blue/orange under Red Night. Otherwise the fixed editorial
+ * green/blue/orange/olive palette is returned unchanged.
  */
-static uint32_t bar_color_for_temp(float temp_f) {
+static uint32_t bar_color_for_temp(float temp_f, bool red_night) {
+    if (red_night) {
+        if (temp_f > 75.0f)  return 0xFF0000;  /* hot  — bright red */
+        if (temp_f >= 65.0f) return 0xC00000;  /* warm — medium-bright red */
+        if (temp_f >= 55.0f) return 0x800000;  /* cool — medium-dark red */
+        return 0x500000;                        /* cold — dark red */
+    }
     if (temp_f > 75.0f) return CLK_BAR_HOT;
     if (temp_f >= 65.0f) return CLK_BAR_WARM;
     if (temp_f >= 55.0f) return CLK_BAR_COOL;
@@ -177,6 +203,9 @@ static lv_obj_t *make_vdivider(lv_obj_t *parent) {
     lv_obj_set_style_bg_opa(div, LV_OPA_COVER, 0);
     lv_obj_remove_flag(div, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_clear_flag(div, LV_OBJ_FLAG_CLICKABLE);
+    if (vdivider_count < CLK_VDIV_COUNT) {
+        vdividers[vdivider_count++] = div;
+    }
     return div;
 }
 
@@ -200,6 +229,10 @@ static void clock_timer_cb(lv_timer_t *timer) {
 /* ── Page creation ───────────────────────────────────────────────────── */
 
 lv_obj_t *clock_page_create(lv_obj_t *parent) {
+    /* Reset divider registries so re-creation cannot overflow the arrays */
+    rule_count = 0;
+    vdivider_count = 0;
+
     /* Root — full screen, own background, overrides parent padding */
     clock_root = lv_obj_create(parent);
     lv_obj_set_size(clock_root, SCREEN_SIZE, SCREEN_SIZE);
@@ -359,6 +392,8 @@ void clock_page_update(void) {
     const app_config_t *cfg = app_config_get();
     bool is_24h = (cfg->weather_time_format == 1);
     bool is_metric = (cfg->weather_units == 1);
+    last_is_metric = is_metric;
+    bool red_night = theme_is_red_night(current_theme);
 
     /* ── Time & date ── */
     time_t now = time(NULL);
@@ -491,7 +526,7 @@ void clock_page_update(void) {
         /* Bar color based on temperature in Fahrenheit */
         float temp_f = to_fahrenheit(wd.hourly_temps[i], is_metric);
         lv_obj_set_style_bg_color(forecast_bars[i],
-                                   lv_color_hex(bar_color_for_temp(temp_f)), 0);
+                                   lv_color_hex(bar_color_for_temp(temp_f, red_night)), 0);
 
         /* Hour label */
         uint8_t hr = wd.hourly_hours[i];
@@ -509,10 +544,135 @@ void clock_page_update(void) {
     lv_obj_remove_flag(forecast_row, LV_OBJ_FLAG_HIDDEN);
 }
 
-/* ── Theme (no-op) ───────────────────────────────────────────────────── */
+/* ── Theme ───────────────────────────────────────────────────────────── */
 
+/**
+ * Set a label's text color, guarding against a NULL widget.
+ */
+static void set_label_color(lv_obj_t *lbl, uint32_t color_hex) {
+    if (lbl) {
+        lv_obj_set_style_text_color(lbl, lv_color_hex(color_hex), 0);
+    }
+}
+
+/**
+ * Recolor the whole clock page for the active theme.
+ *
+ * Under Red Night every pixel becomes a red shade or black: background black,
+ * text bright/secondary red, dividers dark red, and forecast bars red shades
+ * scaled by temperature. In every non-red theme the fixed editorial cream/warm
+ * palette is restored byte-for-byte, so those themes look identical to before.
+ */
 void clock_page_apply_theme(void) {
-    /* Editorial colors are fixed — nothing to do. */
+    if (!clock_root) return;
+
+    bool red_night = theme_is_red_night(current_theme);
+
+    /* Resolve the palette: red-night pulls from the active theme, otherwise
+     * the fixed editorial constants are used verbatim. */
+    uint32_t bg, primary, secondary, tertiary, dim, condition, rule, bar_label;
+    if (red_night) {
+        bg        = current_theme->bg_main;        /* black */
+        primary   = current_theme->text_color;     /* bright red */
+        secondary = current_theme->text_color;     /* bright red */
+        tertiary  = current_theme->label_color;    /* dim red */
+        dim       = current_theme->label_color;    /* dim red */
+        condition = current_theme->label_color;    /* dim red */
+        rule      = current_theme->bento_border;   /* dark red */
+        bar_label = current_theme->label_color;    /* dim red */
+    } else {
+        bg        = CLK_BG;
+        primary   = CLK_PRIMARY;
+        secondary = CLK_SECONDARY;
+        tertiary  = CLK_TERTIARY;
+        dim       = CLK_DIM;
+        condition = CLK_CONDITION;
+        rule      = CLK_RULE;
+        bar_label = CLK_BAR_LABEL;
+    }
+
+    /* Background */
+    lv_obj_set_style_bg_color(clock_root, lv_color_hex(bg), 0);
+
+    /* Date stack (tertiary) */
+    set_label_color(lbl_day,  tertiary);
+    set_label_color(lbl_date, tertiary);
+    set_label_color(lbl_year, tertiary);
+
+    /* Weather header */
+    set_label_color(lbl_temp, primary);
+    set_label_color(lbl_deg,  primary);
+    set_label_color(lbl_cond, condition);
+    set_label_color(lbl_hilo, dim);
+
+    /* Time */
+    set_label_color(lbl_time, primary);
+    set_label_color(lbl_ampm, dim);
+
+    /* Stats strip values (secondary). Their labels are children created
+     * inline with CLK_DIM; recolor those too via the stat columns. */
+    set_label_color(lbl_humid_val, secondary);
+    set_label_color(lbl_dew_val,   secondary);
+    set_label_color(lbl_wind_val,  secondary);
+    set_label_color(lbl_uv_val,    secondary);
+
+    /* Stat unit labels: the second child of each value's parent column. */
+    lv_obj_t *val_labels[4] = {
+        lbl_humid_val, lbl_dew_val, lbl_wind_val, lbl_uv_val
+    };
+    for (int i = 0; i < 4; i++) {
+        if (!val_labels[i]) continue;
+        lv_obj_t *col = lv_obj_get_parent(val_labels[i]);
+        if (!col) continue;
+        uint32_t child_cnt = lv_obj_get_child_count(col);
+        for (uint32_t c = 0; c < child_cnt; c++) {
+            lv_obj_t *child = lv_obj_get_child(col, c);
+            if (child && child != val_labels[i]) {
+                set_label_color(child, dim);
+            }
+        }
+    }
+
+    /* Horizontal rules */
+    for (int i = 0; i < rule_count; i++) {
+        if (rules[i]) {
+            lv_obj_set_style_bg_color(rules[i], lv_color_hex(rule), 0);
+        }
+    }
+
+    /* Vertical dividers */
+    for (int i = 0; i < vdivider_count; i++) {
+        if (vdividers[i]) {
+            lv_obj_set_style_bg_color(vdividers[i], lv_color_hex(rule), 0);
+        }
+    }
+
+    /* Forecast labels */
+    for (int i = 0; i < FORECAST_BARS; i++) {
+        set_label_color(forecast_lbls[i], bar_label);
+    }
+
+    /* Forecast bars: recolor from the last-known weather sample so the red
+     * map applies immediately on theme switch. When no weather is present
+     * the bars stay hidden, so the placeholder color is harmless. */
+    weather_data_t wd;
+    weather_client_get_data(&wd);
+    if (wd.valid) {
+        for (int i = 0; i < FORECAST_BARS; i++) {
+            if (!forecast_bars[i]) continue;
+            float temp_f = to_fahrenheit(wd.hourly_temps[i], last_is_metric);
+            lv_obj_set_style_bg_color(forecast_bars[i],
+                lv_color_hex(bar_color_for_temp(temp_f, red_night)), 0);
+        }
+    } else {
+        /* No data: give every bar the neutral cool/cold base for the theme. */
+        uint32_t base = red_night ? 0x500000 : CLK_BAR_COOL;
+        for (int i = 0; i < FORECAST_BARS; i++) {
+            if (forecast_bars[i]) {
+                lv_obj_set_style_bg_color(forecast_bars[i], lv_color_hex(base), 0);
+            }
+        }
+    }
 }
 
 void clock_page_request_update(void) {

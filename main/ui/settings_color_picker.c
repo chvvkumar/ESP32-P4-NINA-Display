@@ -154,9 +154,13 @@ void color_picker_show(uint32_t current_color,
         lv_obj_add_flag(sw, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_clear_flag(sw, LV_OBJ_FLAG_SCROLLABLE);
 
-        /* Current color (position 0) gets a white border */
+        /* Current color (position 0) gets a white border (red under Red Night) */
         if (i == 0) {
-            lv_obj_set_style_border_color(sw, lv_color_hex(0xFFFFFF), 0);
+            if (theme_is_red_night(current_theme)) {
+                lv_obj_set_style_border_color(sw, lv_color_hex(current_theme->text_color), 0);
+            } else {
+                lv_obj_set_style_border_color(sw, lv_color_hex(0xFFFFFF), 0);
+            }
             lv_obj_set_style_border_width(sw, CURRENT_BORDER_WIDTH, 0);
             lv_obj_set_style_border_opa(sw, LV_OPA_COVER, 0);
         }

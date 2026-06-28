@@ -48,6 +48,9 @@ int nina_dashboard_get_active_page(void);
 /** Get the currently active theme. */
 const theme_t *nina_dashboard_get_current_theme(void);
 
+/** Alias for nina_dashboard_get_current_theme(). */
+const theme_t *nina_dashboard_get_theme(void);
+
 /**
  * @brief Apply a specific theme to all dashboard pages
  * @param theme_index Index of the theme to apply
