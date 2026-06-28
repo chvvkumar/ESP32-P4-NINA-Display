@@ -245,11 +245,16 @@ static void create_network_card(lv_obj_t *parent) {
                 lv_obj_set_style_text_opa(label, LV_OPA_30, 0);
             }
 
-            /* Highlight active network with green border */
+            /* Highlight active network with green border (red under Red Night) */
             if (i == active && configured) {
                 lv_obj_set_style_border_width(wifi_net_btns[i], 2, 0);
-                lv_obj_set_style_border_color(wifi_net_btns[i],
-                    lv_palette_main(LV_PALETTE_GREEN), 0);
+                if (theme_is_red_night(current_theme)) {
+                    lv_obj_set_style_border_color(wifi_net_btns[i],
+                        lv_color_hex(current_theme->progress_color), 0);
+                } else {
+                    lv_obj_set_style_border_color(wifi_net_btns[i],
+                        lv_palette_main(LV_PALETTE_GREEN), 0);
+                }
             }
 
             lv_obj_add_event_cb(wifi_net_btns[i], wifi_net_btn_cb,
@@ -891,8 +896,13 @@ void settings_tab_system_refresh(void) {
 
             if (i == active && configured) {
                 lv_obj_set_style_border_width(wifi_net_btns[i], 2, 0);
-                lv_obj_set_style_border_color(wifi_net_btns[i],
-                    lv_palette_main(LV_PALETTE_GREEN), 0);
+                if (theme_is_red_night(current_theme)) {
+                    lv_obj_set_style_border_color(wifi_net_btns[i],
+                        lv_color_hex(current_theme->progress_color), 0);
+                } else {
+                    lv_obj_set_style_border_color(wifi_net_btns[i],
+                        lv_palette_main(LV_PALETTE_GREEN), 0);
+                }
             } else {
                 lv_obj_set_style_border_width(wifi_net_btns[i], 0, 0);
             }

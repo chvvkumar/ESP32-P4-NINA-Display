@@ -14,6 +14,7 @@
 #include "nina_image_display.h"
 #include "nina_wait_overlay.h"
 #include "nina_dashboard_internal.h"
+#include "image_red_remap.h"   /* image_red_remap_rgb565 — self-gates on red-night */
 #include "moon_interaction.h"
 #include "app_config.h"
 #include "display_defs.h"
@@ -248,10 +249,15 @@ static void moon_drag_released_cb(lv_event_t *e)
 /* Apply the "chip" style to a label: small translucent rounded background that
  * keeps text legible when the main overlay bar is nearly transparent.
  * bg_opa=120 (~47%), corner radius=8, horizontal pad=8, vertical pad=3.
- * The label's own bg colour is set to black; text colour is always white so it
- * is never inadvertently overridden by apply_theme() later. */
+ * Non-red themes keep the historic black chip + white text exactly. Under the
+ * Red Night theme (gated by theme_is_red_night) the chip background stays black
+ * and the text becomes the theme's red (text_color) so the page emits only red
+ * shades or black. nina_image_display_apply_theme() re-runs this on theme change. */
 static void apply_chip_style(lv_obj_t *lbl)
 {
+    const theme_t *th = current_theme;
+    bool red = theme_is_red_night(th);
+    lv_color_t txt = red ? lv_color_hex(th->text_color) : lv_color_white();
     lv_obj_set_style_bg_color(lbl,   lv_color_black(), 0);
     lv_obj_set_style_bg_opa(lbl,     120,              0);
     lv_obj_set_style_radius(lbl,     8,                0);
@@ -259,7 +265,7 @@ static void apply_chip_style(lv_obj_t *lbl)
     lv_obj_set_style_pad_right(lbl,  8,                0);
     lv_obj_set_style_pad_top(lbl,    3,                0);
     lv_obj_set_style_pad_bottom(lbl, 3,                0);
-    lv_obj_set_style_text_color(lbl, lv_color_white(), 0);
+    lv_obj_set_style_text_color(lbl, txt, 0);
 }
 
 /* extern declaration for moon_overlay_info — owned by moon_ephemeris.c,
@@ -677,6 +683,12 @@ void nina_image_display_update(goes_data_t *data)
         buf_size = rot_size;
     }
 
+    /* Red Night: recolour the decoded image to red shades (luma->red, in place).
+     * Self-gates inside the helper (no-op for every non-red theme), so call it
+     * unconditionally on the final upright/cropped/rotated `copy` before it is
+     * handed to LVGL. w*h is the committed pixel count. */
+    image_red_remap_rgb565((uint16_t *)copy, (size_t)w * h);
+
     /* Point the BACK slot's descriptor at the new copy. release_dsc() frees the
      * previous buffer unless it was borrowed (moon-drag), and clears that flag —
      * this owned copy is not borrowed. */
@@ -818,6 +830,11 @@ void nina_image_display_show_scaled(const uint16_t *buf, int w, int h)
     }
     memcpy(moon_copy_buf[ci], buf, need);
 
+    /* Red Night: recolour the owned copy to red shades in place (self-gates to a
+     * no-op for non-red themes). A second remap of an already-red moon buffer
+     * leaves red as red, so calling unconditionally here is safe. */
+    image_red_remap_rgb565(moon_copy_buf[ci], (size_t)w * h);
+
     /* Point the BACK slot at the owned copy. release_dsc() frees any prior OWNED
      * buffer; these copy buffers are module-owned and persistent, so we mark the
      * slot "borrowed" (release_dsc then skips the free) and free them ourselves in
@@ -890,6 +907,12 @@ void nina_image_display_show_borrowed(const uint16_t *buf, int w, int h)
     lv_image_dsc_t *back_dsc = front_is_a ? &img_dsc_b : &img_dsc_a;
     release_dsc(back_dsc, back_is_a);          /* free prior OWNED buffer if any */
     size_t need = (size_t)w * h * 2;
+    /* Red Night: recolour the borrowed full-panel buffer in place (self-gates to a
+     * no-op for non-red themes). The moon renderer already remaps this buffer under
+     * red-night, so a second in-place remap leaves red as red — harmless. The buffer
+     * is mutable PSRAM owned by the moon-drag loop; the const here is only on the
+     * incoming pointer type. */
+    image_red_remap_rgb565((uint16_t *)buf, (size_t)w * h);
     back_dsc->data          = (const uint8_t *)buf;
     back_dsc->data_size     = need;
     back_dsc->header.magic  = LV_IMAGE_HEADER_MAGIC;
@@ -1005,9 +1028,15 @@ void nina_image_display_set_overlay_visible(bool visible)
 
 void nina_image_display_apply_theme(void)
 {
-    /* lbl_region text colour is now enforced white by apply_chip_style() so the
-     * phase name remains legible regardless of theme.  The function is kept for
-     * future per-theme customisation of this page and for callers that invoke it
-     * unconditionally. */
-    (void)current_theme;
+    /* Re-apply the chip style to every existing caption/corner label so a theme
+     * switch recolours them live. apply_chip_style() reads current_theme and,
+     * under Red Night, emits red text on a black chip; non-red themes keep the
+     * historic white-on-black look unchanged. Each label is NULL-guarded so this
+     * is safe before create() or after cleanup(). */
+    if (lbl_region)    apply_chip_style(lbl_region);
+    if (lbl_timestamp) apply_chip_style(lbl_timestamp);
+    if (lbl_moon_age)  apply_chip_style(lbl_moon_age);
+    if (lbl_moon_next) apply_chip_style(lbl_moon_next);
+    if (lbl_moon_rise) apply_chip_style(lbl_moon_rise);
+    if (lbl_moon_set)  apply_chip_style(lbl_moon_set);
 }

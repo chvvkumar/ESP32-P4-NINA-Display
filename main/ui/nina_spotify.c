@@ -21,6 +21,7 @@
 #include "app_config.h"
 #include "spotify_auth.h"
 #include "nina_empty_state.h"
+#include "image_red_remap.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -1002,6 +1003,11 @@ void nina_spotify_set_album_art(const uint8_t *rgb565_data, uint32_t w, uint32_t
     art_dsc.data = current_art_buf;
     art_dsc.data_size = data_size;
 
+    /* Red Night: remap album art to red shades in place (self-gates; no-op
+     * in non-red themes, so Spotify branding is untouched otherwise).
+     * w*h is the committed RGB565 pixel count. */
+    image_red_remap_rgb565((uint16_t *)current_art_buf, (size_t)w * h);
+
     lv_image_set_src(img_album_art, &art_dsc);
 
     /* Hide status panel now that we have album art */
@@ -1088,6 +1094,170 @@ void nina_spotify_set_idle(void)
 void spotify_page_apply_theme(void)
 {
     if (!spotify_page || !current_theme) return;
+
+    /* Red Night (star-party) only: recolor the player chrome that is normally
+     * left in Spotify-branded fixed colors (white/gray text, white buttons,
+     * blue progress). Every chrome pixel becomes a red shade or black. All
+     * other themes preserve the branded colors exactly (this branch is skipped).
+     */
+    if (theme_is_red_night(current_theme)) {
+        lv_color_t title_c  = lv_color_hex(current_theme->text_color);   /* bright red */
+        lv_color_t label_c  = lv_color_hex(current_theme->label_color);  /* dim red */
+        lv_color_t track_c  = lv_color_hex(current_theme->bento_border); /* dark red */
+        lv_color_t prog_c   = lv_color_hex(current_theme->progress_color);
+        lv_color_t btn_bg_c = lv_color_hex(current_theme->bento_bg);     /* dark red */
+        lv_color_t icon_c   = lv_color_hex(current_theme->text_color);   /* bright red */
+
+        /* Titles -> bright red */
+        if (lbl_track_title) {
+            lv_obj_set_style_text_color(lbl_track_title, title_c, 0);
+        }
+        if (minimal_track_title) {
+            lv_obj_set_style_text_color(minimal_track_title, title_c, 0);
+        }
+
+        /* Subtitles / artist / album -> dim red */
+        if (lbl_track_subtitle) {
+            lv_obj_set_style_text_color(lbl_track_subtitle, label_c, 0);
+        }
+        if (lbl_artist_name) {
+            lv_obj_set_style_text_color(lbl_artist_name, label_c, 0);
+        }
+        if (lbl_album_name) {
+            lv_obj_set_style_text_color(lbl_album_name, label_c, 0);
+        }
+        if (minimal_track_subtitle) {
+            lv_obj_set_style_text_color(minimal_track_subtitle, label_c, 0);
+        }
+        if (minimal_artist_name) {
+            lv_obj_set_style_text_color(minimal_artist_name, label_c, 0);
+        }
+        if (minimal_album_name) {
+            lv_obj_set_style_text_color(minimal_album_name, label_c, 0);
+        }
+
+        /* Time labels -> dim red */
+        if (lbl_time_elapsed) {
+            lv_obj_set_style_text_color(lbl_time_elapsed, label_c, 0);
+        }
+        if (lbl_time_total) {
+            lv_obj_set_style_text_color(lbl_time_total, label_c, 0);
+        }
+
+        /* Progress bars: track -> dark red, indicator -> theme progress red */
+        if (bar_progress) {
+            lv_obj_set_style_bg_color(bar_progress, track_c, LV_PART_MAIN);
+            lv_obj_set_style_bg_color(bar_progress, prog_c, LV_PART_INDICATOR);
+        }
+        if (minimal_progress) {
+            lv_obj_set_style_bg_color(minimal_progress, track_c, LV_PART_MAIN);
+            lv_obj_set_style_bg_color(minimal_progress, prog_c, LV_PART_INDICATOR);
+        }
+
+        /* Buttons: dark red backgrounds (full opacity), bright red icons */
+        if (btn_prev) {
+            lv_obj_set_style_bg_color(btn_prev, btn_bg_c, 0);
+            lv_obj_set_style_bg_opa(btn_prev, LV_OPA_COVER, 0);
+            lv_obj_t *icon = lv_obj_get_child(btn_prev, 0);
+            if (icon) {
+                lv_obj_set_style_text_color(icon, icon_c, 0);
+            }
+        }
+        if (btn_next) {
+            lv_obj_set_style_bg_color(btn_next, btn_bg_c, 0);
+            lv_obj_set_style_bg_opa(btn_next, LV_OPA_COVER, 0);
+            lv_obj_t *icon = lv_obj_get_child(btn_next, 0);
+            if (icon) {
+                lv_obj_set_style_text_color(icon, icon_c, 0);
+            }
+        }
+        if (btn_play_pause) {
+            lv_obj_set_style_bg_color(btn_play_pause, track_c, 0);
+            lv_obj_t *icon = lv_obj_get_child(btn_play_pause, 0);
+            if (icon) {
+                lv_obj_set_style_text_color(icon, icon_c, 0);
+            }
+        }
+
+        /* Status panel + empty state still use theme colors (handled below). */
+    } else {
+        /* Non-red themes: restore the exact Spotify-branded chrome colors so a
+         * switch away from Red Night reverts cleanly. These mirror the literals
+         * used in create_track_info_container / create_controls /
+         * create_minimal_widgets, keeping non-red themes identical to as-built.
+         */
+        if (lbl_track_title) {
+            lv_obj_set_style_text_color(lbl_track_title, lv_color_white(), 0);
+        }
+        if (minimal_track_title) {
+            lv_obj_set_style_text_color(minimal_track_title, lv_color_white(), 0);
+        }
+        if (lbl_track_subtitle) {
+            lv_obj_set_style_text_color(lbl_track_subtitle,
+                lv_color_make(0xAA, 0xAA, 0xAA), 0);
+        }
+        if (lbl_artist_name) {
+            lv_obj_set_style_text_color(lbl_artist_name,
+                lv_color_make(0xAA, 0xAA, 0xAA), 0);
+        }
+        if (lbl_album_name) {
+            lv_obj_set_style_text_color(lbl_album_name,
+                lv_color_make(0x77, 0x77, 0x77), 0);
+        }
+        if (minimal_track_subtitle) {
+            lv_obj_set_style_text_color(minimal_track_subtitle,
+                lv_color_make(0xAA, 0xAA, 0xAA), 0);
+        }
+        if (minimal_artist_name) {
+            lv_obj_set_style_text_color(minimal_artist_name,
+                lv_color_make(0xD1, 0xD5, 0xDB), 0);
+        }
+        if (minimal_album_name) {
+            lv_obj_set_style_text_color(minimal_album_name,
+                lv_color_make(0x9C, 0xA3, 0xAF), 0);
+        }
+        if (lbl_time_elapsed) {
+            lv_obj_set_style_text_color(lbl_time_elapsed,
+                lv_color_make(0x88, 0x88, 0x88), 0);
+        }
+        if (lbl_time_total) {
+            lv_obj_set_style_text_color(lbl_time_total,
+                lv_color_make(0x88, 0x88, 0x88), 0);
+        }
+        if (bar_progress) {
+            lv_obj_set_style_bg_color(bar_progress,
+                lv_color_make(0x44, 0x44, 0x44), LV_PART_MAIN);
+        }
+        if (minimal_progress) {
+            lv_obj_set_style_bg_color(minimal_progress,
+                lv_color_hex(0x1F2937), LV_PART_MAIN);
+            /* Indicator is set to progress_color by the shared code below,
+             * matching original non-red behavior. */
+        }
+        if (btn_prev) {
+            lv_obj_set_style_bg_color(btn_prev, lv_color_make(0x33, 0x33, 0x33), 0);
+            lv_obj_set_style_bg_opa(btn_prev, LV_OPA_70, 0);
+            lv_obj_t *icon = lv_obj_get_child(btn_prev, 0);
+            if (icon) {
+                lv_obj_set_style_text_color(icon, lv_color_white(), 0);
+            }
+        }
+        if (btn_next) {
+            lv_obj_set_style_bg_color(btn_next, lv_color_make(0x33, 0x33, 0x33), 0);
+            lv_obj_set_style_bg_opa(btn_next, LV_OPA_70, 0);
+            lv_obj_t *icon = lv_obj_get_child(btn_next, 0);
+            if (icon) {
+                lv_obj_set_style_text_color(icon, lv_color_white(), 0);
+            }
+        }
+        if (btn_play_pause) {
+            lv_obj_set_style_bg_color(btn_play_pause, lv_color_white(), 0);
+            lv_obj_t *icon = lv_obj_get_child(btn_play_pause, 0);
+            if (icon) {
+                lv_obj_set_style_text_color(icon, lv_color_black(), 0);
+            }
+        }
+    }
 
     /* The Spotify page uses mostly fixed dark colors (white text on album art),
      * so theme application is minimal. Apply theme accent to progress bar. */

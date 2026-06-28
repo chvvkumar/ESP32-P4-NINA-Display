@@ -78,8 +78,22 @@ static lv_obj_t *ota_bar_glow = NULL;
 #define OTA_ACCENT_DIM   0x005566   /* Dimmed cyan for track */
 #define OTA_GLOW_OPA     LV_OPA_40
 
+/* Active theme accessor (defined in nina_dashboard.c by the dashboard module) */
+const theme_t *nina_dashboard_get_theme(void);
+
 static void ota_show_overlay(const char *message) {
     if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+        /* ── Theme-aware colors: under Red Night use red shades / black only ── */
+        const theme_t *t = nina_dashboard_get_theme();
+        bool red_night = (t && theme_is_red_night(t));
+
+        uint32_t title_color   = red_night ? t->text_color     : 0xFFFFFF;
+        uint32_t accent_color  = red_night ? t->text_color     : OTA_ACCENT;
+        uint32_t glow_color    = red_night ? t->progress_color : OTA_ACCENT;
+        uint32_t hint_color    = red_night ? t->label_color    : 0x555555;
+        uint32_t track_color   = red_night ? t->bento_border   : OTA_ACCENT_DIM;
+        uint32_t grad_color    = red_night ? t->bento_border   : 0x0088FF;
+
         /* ── Fullscreen black overlay ── */
         ota_overlay = lv_obj_create(lv_scr_act());
         lv_obj_remove_style_all(ota_overlay);
@@ -91,7 +105,7 @@ static void ota_show_overlay(const char *message) {
         /* ── Title — upper third ── */
         lv_obj_t *title = lv_label_create(ota_overlay);
         lv_label_set_text(title, message);
-        lv_obj_set_style_text_color(title, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_text_color(title, lv_color_hex(title_color), 0);
         lv_obj_set_style_text_font(title, &lv_font_montserrat_36, 0);
         lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_width(title, LV_PCT(90));
@@ -100,7 +114,7 @@ static void ota_show_overlay(const char *message) {
         /* ── Large percentage — center ── */
         ota_progress_label = lv_label_create(ota_overlay);
         lv_label_set_text(ota_progress_label, "0%");
-        lv_obj_set_style_text_color(ota_progress_label, lv_color_hex(OTA_ACCENT), 0);
+        lv_obj_set_style_text_color(ota_progress_label, lv_color_hex(accent_color), 0);
         lv_obj_set_style_text_font(ota_progress_label, &lv_font_montserrat_48, 0);
         lv_obj_set_style_text_align(ota_progress_label, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_align(ota_progress_label, LV_ALIGN_CENTER, 0, 20);
@@ -108,7 +122,7 @@ static void ota_show_overlay(const char *message) {
         /* ── "Do not power off" hint ── */
         lv_obj_t *hint = lv_label_create(ota_overlay);
         lv_label_set_text(hint, "Do not power off");
-        lv_obj_set_style_text_color(hint, lv_color_hex(0x555555), 0);
+        lv_obj_set_style_text_color(hint, lv_color_hex(hint_color), 0);
         lv_obj_set_style_text_font(hint, &lv_font_montserrat_20, 0);
         lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_align(hint, LV_ALIGN_CENTER, 0, 70);
@@ -124,7 +138,7 @@ static void ota_show_overlay(const char *message) {
         lv_obj_set_style_bg_opa(ota_bar_glow, LV_OPA_TRANSP, LV_PART_MAIN);
         lv_obj_set_style_radius(ota_bar_glow, 12, LV_PART_MAIN);
         /* Indicator: soft glow */
-        lv_obj_set_style_bg_color(ota_bar_glow, lv_color_hex(OTA_ACCENT), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_color(ota_bar_glow, lv_color_hex(glow_color), LV_PART_INDICATOR);
         lv_obj_set_style_bg_opa(ota_bar_glow, OTA_GLOW_OPA, LV_PART_INDICATOR);
         lv_obj_set_style_radius(ota_bar_glow, 12, LV_PART_INDICATOR);
 
@@ -136,13 +150,13 @@ static void ota_show_overlay(const char *message) {
         lv_bar_set_range(ota_bar, 0, 100);
         lv_bar_set_value(ota_bar, 0, LV_ANIM_OFF);
         /* Track: dark rounded pill */
-        lv_obj_set_style_bg_color(ota_bar, lv_color_hex(OTA_ACCENT_DIM), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(ota_bar, lv_color_hex(track_color), LV_PART_MAIN);
         lv_obj_set_style_bg_opa(ota_bar, LV_OPA_30, LV_PART_MAIN);
         lv_obj_set_style_radius(ota_bar, 6, LV_PART_MAIN);
         /* Indicator: bright accent with gradient */
-        lv_obj_set_style_bg_color(ota_bar, lv_color_hex(OTA_ACCENT), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_color(ota_bar, lv_color_hex(accent_color), LV_PART_INDICATOR);
         lv_obj_set_style_bg_opa(ota_bar, LV_OPA_COVER, LV_PART_INDICATOR);
-        lv_obj_set_style_bg_grad_color(ota_bar, lv_color_hex(0x0088FF), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_grad_color(ota_bar, lv_color_hex(grad_color), LV_PART_INDICATOR);
         lv_obj_set_style_bg_grad_dir(ota_bar, LV_GRAD_DIR_HOR, LV_PART_INDICATOR);
         lv_obj_set_style_radius(ota_bar, 6, LV_PART_INDICATOR);
 

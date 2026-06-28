@@ -6,6 +6,7 @@
 #include <math.h>
 #include <string.h>
 #include "stb_image.h"
+#include "image_red_remap.h"
 
 static const char *TAG = "moon_render";
 
@@ -184,6 +185,11 @@ uint16_t *moon_render(int w, int h, const moon_state_t *st, uint8_t bg_style)
             }
         }
     }
+
+    /* Red Night: remap the fully-rendered buffer (moon disc, starfield, halo)
+     * to red shades by luminance. Self-gates; no-op under non-red themes, so
+     * the warm/white moon is preserved exactly outside Red Night. */
+    image_red_remap_rgb565(buf, (size_t)w * h);
 
     if (s_tex_mtx) xSemaphoreGive(s_tex_mtx);
     return buf;

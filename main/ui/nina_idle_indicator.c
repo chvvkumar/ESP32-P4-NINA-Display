@@ -6,6 +6,7 @@
 #include "nina_idle_indicator.h"
 #include "app_config.h"
 #include "display_defs.h"
+#include "nina_dashboard_internal.h"  /* current_theme, themes.h (theme_is_red_night) */
 #include "esp_lvgl_port.h"
 
 #include <string.h>
@@ -60,14 +61,25 @@ static void apply_red(indicator_entry_t *ind)
 
 static void apply_green(indicator_entry_t *ind)
 {
+    /* Under Red Night, the connected/reconnecting pill must use red shades or
+     * black only (no sage green). Dark red bg/border from the bento palette,
+     * dot/border accent from progress (fallback to text) color. */
+    bool red = theme_is_red_night(current_theme);
+    uint32_t bg_col     = red ? current_theme->bento_bg     : GREEN_BG;
+    uint32_t border_col = red ? current_theme->bento_border : GREEN_BORDER;
+    uint32_t dot_col    = red
+        ? (current_theme->progress_color ? current_theme->progress_color
+                                         : current_theme->text_color)
+        : GREEN_DOT;
+
     if (ind->pill) {
-        lv_obj_set_style_bg_color(ind->pill, lv_color_hex(GREEN_BG), 0);
+        lv_obj_set_style_bg_color(ind->pill, lv_color_hex(bg_col), 0);
         lv_obj_set_style_bg_opa(ind->pill, GREEN_BG_OPA, 0);
-        lv_obj_set_style_border_color(ind->pill, lv_color_hex(GREEN_BORDER), 0);
+        lv_obj_set_style_border_color(ind->pill, lv_color_hex(red ? dot_col : border_col), 0);
         lv_obj_set_style_border_opa(ind->pill, GREEN_BORDER_OPA, 0);
     }
-    lv_obj_set_style_bg_color(ind->dot, lv_color_hex(GREEN_DOT), 0);
-    lv_obj_set_style_shadow_color(ind->dot, lv_color_hex(GREEN_DOT), 0);
+    lv_obj_set_style_bg_color(ind->dot, lv_color_hex(dot_col), 0);
+    lv_obj_set_style_shadow_color(ind->dot, lv_color_hex(dot_col), 0);
 }
 
 /* ── Public API ─────────────────────────────────────────────────────── */

@@ -585,7 +585,9 @@ static void create_card(summary_card_t *sc, lv_obj_t *parent, int instance_index
 
         sc->lbl_safety = lv_label_create(safety_block);
         lv_obj_set_style_text_font(sc->lbl_safety, &lv_font_material_safety, 0);
-        lv_obj_set_style_text_color(sc->lbl_safety, lv_color_hex(0x999999), 0);
+        uint32_t safety_unknown_color = theme_is_red_night(current_theme)
+            ? current_theme->label_color : 0x999999;
+        lv_obj_set_style_text_color(sc->lbl_safety, lv_color_hex(safety_unknown_color), 0);
         lv_label_set_text(sc->lbl_safety, ICON_GPP_MAYBE);
         lv_obj_add_flag(sc->lbl_safety, LV_OBJ_FLAG_HIDDEN);
     }
@@ -1272,7 +1274,8 @@ void summary_page_update(const nina_client_t *instances, int count) {
                 }
             } else {
                 set_label_if_changed(sc->lbl_safety, ICON_GPP_MAYBE);
-                set_text_color_cached(sc->lbl_safety, &sc->cached_safety_color, 0x999999);
+                set_text_color_cached(sc->lbl_safety, &sc->cached_safety_color,
+                    theme_is_red_night(current_theme) ? current_theme->label_color : 0x999999);
             }
         }
     }

@@ -261,7 +261,7 @@ static void apply_theme_to_page(dashboard_page_t *p) {
 
     if (p->lbl_instance_name) {
         uint32_t glow_color;
-        if (strcmp(current_theme->name, "Red Night") == 0) {
+        if (theme_is_red_night(current_theme)) {
             glow_color = app_config_apply_brightness(
                 p->nina_connected ? current_theme->text_color : current_theme->label_color, gb);
         } else {
@@ -298,10 +298,17 @@ static void apply_theme_to_page(dashboard_page_t *p) {
         if (p->lbl_pwr_title[i]) lv_obj_set_style_text_color(p->lbl_pwr_title[i], lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
     }
 
+    if (p->empty_state_cont) {
+        nina_empty_state_apply_theme(p->empty_state_cont, current_theme, gb);
+    }
 }
 
 const theme_t *nina_dashboard_get_current_theme(void) {
     return current_theme;
+}
+
+const theme_t *nina_dashboard_get_theme(void) {
+    return nina_dashboard_get_current_theme();
 }
 
 void nina_dashboard_apply_theme(int theme_index) {
@@ -393,7 +400,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     p->lbl_instance_name = lv_label_create(top_row);
     {
         uint32_t glow_color = 0xf87171;
-        if (current_theme && strcmp(current_theme->name, "Red Night") == 0) {
+        if (theme_is_red_night(current_theme)) {
             glow_color = current_theme->label_color;
         }
         lv_obj_set_style_text_color(p->lbl_instance_name, lv_color_hex(glow_color), 0);
@@ -439,7 +446,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_style_text_font(lbl_seq_title, &lv_font_montserrat_14, 0);
 
     p->lbl_seq_container = lv_label_create(seq_left);
-    lv_obj_set_style_text_color(p->lbl_seq_container, lv_color_hex(0x4FC3F7), 0);
+    lv_obj_set_style_text_color(p->lbl_seq_container, lv_color_hex(theme_is_red_night(current_theme) ? current_theme->header_text_color : 0x4FC3F7), 0);
     lv_obj_set_style_text_font(p->lbl_seq_container, &lv_font_montserrat_24, 0);
     lv_label_set_text(p->lbl_seq_container, "----");
 
@@ -447,7 +454,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     extern const lv_font_t lv_font_material_safety;
     p->safety_icon = lv_label_create(box_seq);
     lv_obj_set_style_text_font(p->safety_icon, &lv_font_material_safety, 0);
-    lv_obj_set_style_text_color(p->safety_icon, lv_color_hex(0x999999), 0);
+    lv_obj_set_style_text_color(p->safety_icon, lv_color_hex(theme_is_red_night(current_theme) ? current_theme->label_color : 0x999999), 0);
     lv_label_set_text(p->safety_icon, "");
     lv_obj_clear_flag(p->safety_icon, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(p->safety_icon, LV_OBJ_FLAG_SCROLLABLE);
@@ -689,7 +696,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     /* Stale data indicator — floating label in upper-right corner */
     p->lbl_stale = lv_label_create(p->page);
     lv_obj_add_flag(p->lbl_stale, LV_OBJ_FLAG_FLOATING);
-    lv_obj_set_style_text_color(p->lbl_stale, lv_color_hex(0xfbbf24), 0);  /* amber */
+    lv_obj_set_style_text_color(p->lbl_stale, lv_color_hex(theme_is_red_night(current_theme) ? current_theme->text_color : 0xfbbf24), 0);  /* amber; bright red under Red Night */
     lv_obj_set_style_text_font(p->lbl_stale, &lv_font_montserrat_14, 0);
     lv_obj_set_style_bg_color(p->lbl_stale, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(p->lbl_stale, LV_OPA_70, 0);

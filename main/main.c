@@ -50,6 +50,8 @@
 #include "ui/nina_thumbnail.h"
 #include "ui/nina_setup_screen.h"
 #include "ui/nina_nav_arbiter.h"
+#include "ui/themes.h"
+#include "image_red_remap.h"
 
 /* Embedded splash logo (JPEG, hardware-decoded at boot) */
 extern const uint8_t logo_jpg_start[] asm("_binary_logo_jpg_start");
@@ -718,6 +720,14 @@ void app_main(void)
                     jpeg_del_decoder_engine(decoder);
 
                     if (err == ESP_OK && out_size > 0) {
+                        /* Red Night gate: live theme pointer is not set yet at splash,
+                         * so resolve the SAVED theme directly from config (loaded before
+                         * the display in app_main) and remap the logo to red/black if so. */
+                        const theme_t *saved_theme = themes_get(app_config_get()->theme_index);
+                        if (theme_is_red_night(saved_theme)) {
+                            image_red_remap_rgb565_force((uint16_t *)rgb_buf,
+                                                         (size_t)out_w * (size_t)out_h);
+                        }
                         splash_dsc.header.magic  = LV_IMAGE_HEADER_MAGIC;
                         splash_dsc.header.w      = (int32_t)out_w;
                         splash_dsc.header.h      = (int32_t)out_h;

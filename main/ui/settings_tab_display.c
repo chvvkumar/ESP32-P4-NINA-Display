@@ -621,7 +621,11 @@ static void create_page_nav_card(lv_obj_t *parent)
     lv_obj_t *ar_hint = lv_label_create(cont_cycle);
     lv_label_set_text(ar_hint, "When enabled, overrides \"Switch page when idle\"");
     lv_obj_set_style_text_font(ar_hint, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(ar_hint, lv_color_hex(0x888888), 0);
+    if (theme_is_red_night(current_theme)) {
+        lv_obj_set_style_text_color(ar_hint, lv_color_hex(current_theme->label_color), 0);
+    } else {
+        lv_obj_set_style_text_color(ar_hint, lv_color_hex(0x888888), 0);
+    }
 
     /* ── Determine initial mode from config ──
      * active_page_override always holds a concrete page_ref id now (no -1/Auto),

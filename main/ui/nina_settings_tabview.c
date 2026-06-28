@@ -671,7 +671,11 @@ lv_obj_t *settings_tabview_create(lv_obj_t *parent) {
     lbl_save_btn = lv_label_create(save_bar);
     lv_label_set_text(lbl_save_btn, LV_SYMBOL_SAVE " Save");
     lv_obj_set_style_text_font(lbl_save_btn, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_color(lbl_save_btn, lv_color_white(), 0);
+    if (theme_is_red_night(current_theme)) {
+        lv_obj_set_style_text_color(lbl_save_btn, lv_color_hex(current_theme->text_color), 0);
+    } else {
+        lv_obj_set_style_text_color(lbl_save_btn, lv_color_white(), 0);
+    }
     lv_obj_center(lbl_save_btn);
 
     /* ── Floating back button — bottom-right corner (like graph/sysinfo) ── */

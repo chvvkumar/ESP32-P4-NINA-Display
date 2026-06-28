@@ -808,13 +808,13 @@
 
     /* === WIFI SCAN PANEL === */
     .wifi-scan-panel{border:1px solid rgba(var(--accent-rgb),0.25);border-radius:10px;padding:14px;margin-bottom:18px;background:rgba(var(--accent-rgb),0.04)}
-    .wifi-scan-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;cursor:pointer}
+    .wifi-scan-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:0;cursor:pointer}
     .wifi-scan-title{color:var(--accent);font-weight:600;font-size:0.82rem;display:flex;align-items:center;gap:6px}
     .wifi-scan-title .chevron{transition:transform 0.2s;display:inline-block}
     .wifi-scan-title .chevron.collapsed{transform:rotate(-90deg)}
     .wifi-scan-rescan{color:var(--accent);font-size:0.72rem;cursor:pointer;border:1px solid rgba(var(--accent-rgb),0.35);padding:3px 10px;border-radius:5px;background:rgba(var(--accent-rgb),0.08);transition:background 0.2s}
     .wifi-scan-rescan:hover{background:rgba(var(--accent-rgb),0.15)}
-    .wifi-scan-list{overflow:hidden;transition:max-height 0.3s ease,opacity 0.3s ease;max-height:500px;opacity:1}
+    .wifi-scan-list{overflow:hidden;transition:max-height 0.3s ease,opacity 0.3s ease;max-height:500px;opacity:1;margin-top:10px}
     .wifi-scan-list.collapsed{max-height:0;opacity:0;margin:0}
     .wifi-scan-row{padding:10px 12px;border-radius:8px;background:rgba(255,255,255,0.06);margin-bottom:4px;display:flex;justify-content:space-between;align-items:center;transition:background 0.15s}
     .wifi-scan-row:hover{background:rgba(255,255,255,0.1)}
@@ -884,7 +884,7 @@
   <!-- ======== BOTTOM NAVIGATION (MOBILE) ======== -->
   <nav class="bottom-nav">
     <div class="nav-items" id="bottomTabs">
-      <button class="nav-btn active" data-tab="nodes">
+      <button class="nav-btn" data-tab="nodes">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
         N.I.N.A.
       </button>
@@ -1810,10 +1810,10 @@
         <div class="help-popover"><div class="help-popover-title">Network and time</div><p>The device connects to your WiFi and also broadcasts its own setup WiFi network at the same time. It joins one of the three configured networks to reach your NINA computers; its own setup network uses the device hostname as the network name with password 12345678, so you can reach the settings for first-time setup without a separate screen. The three networks are priority-ordered: Network 1 is tried first, then 2, then 3.</p><p>Hostname is used on your network, as the setup network name, and as the Home Assistant device name. NTP server and timezone set the clock used on the clock page and in timestamps; the timezone list carries the correct local-time and daylight-saving rules.</p><p>Example: hostname ninadash1 produces access point SSID ninadash1 and the device is reachable at ninadash1.lan. Changes here take effect after a reboot.</p></div>
         <div class="wifi-scan-panel" id="wifiScanPanel">
           <div class="wifi-scan-header" onclick="toggleScanPanel()">
-            <span class="wifi-scan-title"><span class="chevron" id="scanChevron">&#x25BC;</span> Available Networks</span>
+            <span class="wifi-scan-title"><span class="chevron collapsed" id="scanChevron">&#x25BC;</span> Available Networks</span>
             <span class="wifi-scan-rescan" id="scanRescanBtn" onclick="event.stopPropagation();scanWifi()">&#x21bb; Rescan</span>
           </div>
-          <div class="wifi-scan-list" id="wifiScanList">
+          <div class="wifi-scan-list collapsed" id="wifiScanList">
             <div class="wifi-scan-status" id="wifiScanStatus">Scanning for networks...</div>
           </div>
         </div>
@@ -3044,6 +3044,21 @@
   </div>
 
   <script>
+    /* Early tab restore: apply the saved tab's active class at parse time so the
+       first paint shows the correct tab (no nodes-first flash). Matches the class
+       names switchTab() toggles ('active' on .tab-panel + [data-tab]). The later
+       switchTab(saved) call is then a visual no-op but still runs per-tab handlers. */
+    (function(){
+      var name='nodes';
+      try{var s=localStorage.getItem('nina_tab');if(s&&document.getElementById('tab-'+s))name=s;}catch(e){}
+      var p=document.getElementById('tab-'+name);
+      if(p)p.classList.add('active');
+      var btns=document.querySelectorAll('[data-tab="'+name+'"]');
+      for(var i=0;i<btns.length;i++)btns[i].classList.add('active');
+    })();
+  </script>
+
+  <script>
     /* ============================================================
        NINA Display — Config UI JavaScript
        Tab IDs: display | nodes | behavior | system
@@ -3059,14 +3074,19 @@
        "no connections" target dropdown are built from this list so their
        values are page-registry numeric ids. */
     var _pageRegistry=[];
+    var _pageRegistryPromise=null;
     function fetchPageRegistry(){
-      return fetch('/api/pages').then(function(r){
+      /* Promise-cached so it can be kicked off at init (in parallel with
+         /api/config) and re-awaited by populateConfig without a second fetch. */
+      if(_pageRegistryPromise) return _pageRegistryPromise;
+      _pageRegistryPromise=fetch('/api/pages').then(function(r){
         return r.ok?r.json():[];
       }).then(function(j){
         _pageRegistry=Array.isArray(j)?j:[];
       }).catch(function(){
         _pageRegistry=[];
       });
+      return _pageRegistryPromise;
     }
     /* Pages the user may target as a Home Page or idle page. */
     function targetablePages(){
@@ -4116,6 +4136,7 @@
     }
 
     function scanWifi(){
+      window._wifiScanned=true;
       var list=$('wifiScanList');
       var status=$('wifiScanStatus');
       list.classList.remove('collapsed');
@@ -4202,11 +4223,16 @@
       var chev=$('scanChevron');
       list.classList.toggle('collapsed');
       chev.classList.toggle('collapsed');
+      /* Scan lazily on the first unfurl of "Available Networks" (the ~4.7s scan
+         is no longer fired on page load). Manual Rescan still works regardless. */
+      if(!list.classList.contains('collapsed') && !window._wifiScanned && typeof scanWifi==='function') scanWifi();
     }
 
     function loadConfig(){
-      fetch('/api/config').then(r=>r.json()).then(populateConfig).catch(e=>console.error('Failed to load config',e));
-      scanWifi();
+      /* Returns the chain so init can defer heavy startup work after populate.
+         scanWifi() is no longer fired here; it runs lazily on first unfurl of the
+         "Available Networks" panel. */
+      return fetch('/api/config').then(r=>r.json()).then(populateConfig).catch(e=>console.error('Failed to load config',e));
     }
 
     /* === Version Load === */
@@ -6009,11 +6035,21 @@
 
     /* === Init === */
     populateTimezones();
-    loadConfig();
-    loadVersion();
-    checkUpdateBadge();
-    refreshNavMetrics();
-    setInterval(refreshNavMetrics, 5000);
+    /* Start /api/pages at t=0 in parallel with /api/config; populateConfig
+       awaits this same cached promise instead of starting it after config. */
+    fetchPageRegistry();
+    /* Defer version load and the 5s status poller until after config is populated,
+       so they don't fire onto the device's few httpd workers mid-load. The GitHub
+       update check (~7s) runs once in the background, lightly delayed, after that
+       work so the badge populates on every tab without opening System. */
+    loadConfig().then(function(){
+      loadVersion();
+      refreshNavMetrics();
+      setInterval(refreshNavMetrics, 5000);
+      setTimeout(function(){
+        if(!window._updateChecked && typeof checkUpdateBadge==='function'){ window._updateChecked=true; checkUpdateBadge(); }
+      }, 1500);
+    });
   </script>
 </body>
 </html>
