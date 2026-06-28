@@ -47,7 +47,13 @@ void image_display_apply_live(const app_config_t *prev, const app_config_t *cur,
         bool crop_changed = cur->image_display_crop != prev->image_display_crop;
         bool orient_changed = (cur->goes_orientation != prev->goes_orientation) ||
                               (cur->solar_orientation != prev->solar_orientation) ||
-                              (cur->custom_orientation != prev->custom_orientation);
+                              (cur->custom_orientation != prev->custom_orientation) ||
+                              (cur->goes_vflip   != prev->goes_vflip) ||
+                              (cur->goes_hflip   != prev->goes_hflip) ||
+                              (cur->solar_vflip  != prev->solar_vflip) ||
+                              (cur->solar_hflip  != prev->solar_hflip) ||
+                              (cur->custom_vflip != prev->custom_vflip) ||
+                              (cur->custom_hflip != prev->custom_hflip);
 
         if (source_band_region_changed) {
             /* Source/band/region needs a genuinely new image: flag the next
@@ -132,9 +138,15 @@ esp_err_t image_display_config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "moon_lon", cfg->moon_lon);
     cJSON_AddNumberToObject(root, "solar_band", cfg->solar_band);
     cJSON_AddNumberToObject(root, "goes_orientation", cfg->goes_orientation);
+    cJSON_AddNumberToObject(root, "goes_vflip", cfg->goes_vflip);
+    cJSON_AddNumberToObject(root, "goes_hflip", cfg->goes_hflip);
     cJSON_AddNumberToObject(root, "solar_orientation", cfg->solar_orientation);
+    cJSON_AddNumberToObject(root, "solar_vflip", cfg->solar_vflip);
+    cJSON_AddNumberToObject(root, "solar_hflip", cfg->solar_hflip);
     cJSON_AddStringToObject(root, "custom_image_url", cfg->custom_image_url);
     cJSON_AddNumberToObject(root, "custom_orientation", cfg->custom_orientation);
+    cJSON_AddNumberToObject(root, "custom_vflip", cfg->custom_vflip);
+    cJSON_AddNumberToObject(root, "custom_hflip", cfg->custom_hflip);
     cJSON_AddNumberToObject(root, "custom_update_interval_s", cfg->custom_update_interval_s);
     cJSON_AddNumberToObject(root, "moon_drag_light_mode", cfg->moon_drag_light_mode);
     cJSON_AddNumberToObject(root, "moon_flip_u", cfg->moon_flip_u);
@@ -240,13 +252,25 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     if (cJSON_IsNumber(sb)) { int v = sb->valueint; cur->solar_band = (v >= 0 && v <= 17) ? (uint8_t)v : 0; }
     cJSON *go = cJSON_GetObjectItem(root, "goes_orientation");
     if (cJSON_IsNumber(go)) { int v = go->valueint; cur->goes_orientation = (v >= 0 && v <= 3) ? (uint8_t)v : 0; }
+    cJSON *gvf = cJSON_GetObjectItem(root, "goes_vflip");
+    if (cJSON_IsNumber(gvf)) { cur->goes_vflip = (gvf->valueint != 0) ? 1 : 0; }
+    cJSON *ghf = cJSON_GetObjectItem(root, "goes_hflip");
+    if (cJSON_IsNumber(ghf)) { cur->goes_hflip = (ghf->valueint != 0) ? 1 : 0; }
     cJSON *so = cJSON_GetObjectItem(root, "solar_orientation");
     if (cJSON_IsNumber(so)) { int v = so->valueint; cur->solar_orientation = (v >= 0 && v <= 3) ? (uint8_t)v : 0; }
+    cJSON *svf = cJSON_GetObjectItem(root, "solar_vflip");
+    if (cJSON_IsNumber(svf)) { cur->solar_vflip = (svf->valueint != 0) ? 1 : 0; }
+    cJSON *shf = cJSON_GetObjectItem(root, "solar_hflip");
+    if (cJSON_IsNumber(shf)) { cur->solar_hflip = (shf->valueint != 0) ? 1 : 0; }
     /* Custom image URL: length + scheme already validated above; copy bounded
      * into the 256-byte field. */
     JSON_TO_STRING(root, "custom_image_url", cur->custom_image_url);
     cJSON *co = cJSON_GetObjectItem(root, "custom_orientation");
     if (cJSON_IsNumber(co)) { int v = co->valueint; cur->custom_orientation = (v >= 0 && v <= 3) ? (uint8_t)v : 0; }
+    cJSON *cvf = cJSON_GetObjectItem(root, "custom_vflip");
+    if (cJSON_IsNumber(cvf)) { cur->custom_vflip = (cvf->valueint != 0) ? 1 : 0; }
+    cJSON *chf = cJSON_GetObjectItem(root, "custom_hflip");
+    if (cJSON_IsNumber(chf)) { cur->custom_hflip = (chf->valueint != 0) ? 1 : 0; }
     cJSON *ci = cJSON_GetObjectItem(root, "custom_update_interval_s");
     if (cJSON_IsNumber(ci)) { int v = ci->valueint; if (v < 10) v = 10; if (v > 7200) v = 7200; cur->custom_update_interval_s = (uint16_t)v; }
     cJSON *dlm = cJSON_GetObjectItem(root, "moon_drag_light_mode");

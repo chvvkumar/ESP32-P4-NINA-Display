@@ -46,7 +46,7 @@ extern "C" {
 #define ARP_ORDER_CAPACITY 16   /* size of auto_rotate_order2[] */
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 47
+#define APP_CONFIG_VERSION 48
 
 #define WIDGET_STYLE_COUNT 13
 
@@ -250,6 +250,16 @@ typedef struct {
     // Replaces the legacy auto_rotate_order[8] + auto_rotate_order_ext encoding;
     // each image source is now its own distinct stop (see ARP_IDX_* above).
     uint8_t  auto_rotate_order2[16];
+
+    // Added after v47 — must stay at end to preserve NVS binary compatibility
+    // Per-source Image Display mirror flips. 0/1 each; 0 = no flip (current
+    // behavior). vflip mirrors top<->bottom, hflip mirrors left<->right.
+    uint8_t  goes_vflip;     // GOES source: mirror top<->bottom (default 0)
+    uint8_t  goes_hflip;     // GOES source: mirror left<->right (default 0)
+    uint8_t  solar_vflip;    // Solar source: mirror top<->bottom (default 0)
+    uint8_t  solar_hflip;    // Solar source: mirror left<->right (default 0)
+    uint8_t  custom_vflip;   // Custom source: mirror top<->bottom (default 0)
+    uint8_t  custom_hflip;   // Custom source: mirror left<->right (default 0)
 } app_config_t;
 
 /* ── Version 43 config struct — used only for NVS migration to v44 ────── */
@@ -703,7 +713,133 @@ typedef struct {
     uint8_t  auto_rotate_order2[16];
 } app_config_v46_t;
 
-_Static_assert(sizeof(app_config_v46_t) == sizeof(app_config_t),
+/* v46_t's assert lives just below the v47_t definition (it compares against
+ * sizeof(app_config_v47_t), which must be a complete type first). */
+
+/* ── Version 47 config struct — used only for NVS migration to v48 ────── */
+/* Byte-identical to app_config_t minus the trailing per-source flip bytes  */
+/* (goes/solar/custom v/hflip). Verbatim copy of the v47 struct body.       */
+typedef struct {
+    uint32_t config_version;
+    char api_url[3][128];
+    char ntp_server[64];
+    char tz_string[64];
+    char filter_colors[3][512];
+    char rms_thresholds[3][256];
+    char hfr_thresholds[3][256];
+    int theme_index;
+    int brightness;
+    int color_brightness;
+    bool mqtt_enabled;
+    char mqtt_broker_url[128];
+    char mqtt_username[64];
+    char mqtt_password[64];
+    char mqtt_topic_prefix[64];
+    uint16_t mqtt_port;
+    int8_t   active_page_override;
+    bool     auto_rotate_enabled;
+    uint16_t auto_rotate_interval_s;
+    uint8_t  auto_rotate_effect;
+    bool     auto_rotate_skip_disconnected;
+    uint8_t  auto_rotate_pages;
+    uint8_t  update_rate_s;
+    uint8_t  graph_update_interval_s;
+    uint8_t  connection_timeout_s;
+    uint8_t  toast_duration_s;
+    bool     debug_mode;
+    bool     instance_enabled[3];
+    bool     screen_sleep_enabled;
+    uint16_t screen_sleep_timeout_s;
+    bool     alert_flash_enabled;
+    uint8_t  idle_poll_interval_s;
+    bool     wifi_power_save;
+    uint8_t  widget_style;
+    uint8_t  auto_update_check;
+    uint8_t  update_channel;
+    bool     deep_sleep_enabled;
+    uint32_t deep_sleep_wake_timer_s;
+    bool     deep_sleep_on_idle;
+    uint8_t  screen_rotation;
+    char     hostname[32];
+    char     allsky_hostname[128];
+    uint16_t allsky_update_interval_s;
+    float    allsky_dew_offset;
+    char     allsky_field_config[1536];
+    char     allsky_thresholds[1024];
+    bool     allsky_enabled;
+    bool     demo_mode;
+    bool     spotify_enabled;
+    char     spotify_client_id[64];
+    uint16_t spotify_poll_interval_ms;
+    bool     spotify_show_progress_bar;
+    uint8_t  spotify_overlay_timeout_s;
+    bool     spotify_minimal_mode;
+    bool     spotify_scroll_text;
+    wifi_network_t wifi_networks[3];
+    bool     spotify_overlay_visible;
+    uint8_t  auto_rotate_order[8];
+    uint8_t  toast_aggregation_window_s;
+    uint32_t toast_notify_mask;
+    bool     toast_instance_muted[3];
+    uint8_t  weather_provider;
+    char     weather_api_key[64];
+    float    weather_lat;
+    float    weather_lon;
+    char     weather_location_name[64];
+    uint16_t weather_poll_interval_s;
+    uint8_t  weather_units;
+    uint8_t  weather_time_format;
+    bool     idle_page_override_enabled;
+    int8_t   idle_page_override_target;
+    bool     idle_page_persistent;
+    bool     idle_indicator_enabled;
+    char     admin_password[33];
+    bool     auth_enabled;
+    bool     image_display_enabled;
+    bool     image_display_show_overlay;
+    char     goes_region[16];
+    uint16_t goes_update_interval_s;
+    uint8_t  image_display_source;
+    uint8_t  moon_bg_style;
+    float    moon_lat;
+    float    moon_lon;
+    uint8_t  solar_band;
+    bool     image_display_crop;
+    uint8_t  moon_drag_light_mode;
+    uint8_t  moon_flip_u;
+    uint8_t  moon_flip_v;
+    float    moon_roll_offset;
+    float    moon_yaw_offset;
+    float    moon_pitch_offset;
+    uint8_t  moon_north_up;
+    uint8_t  moon_spin_mode;
+    uint8_t  moon_spin_return_s;
+    uint8_t  crash_log_retention_days;
+    uint8_t  auto_rotate_pages_hi;
+    uint8_t  auto_rotate_order_ext;
+    uint8_t  goes_orientation;
+    uint8_t  solar_orientation;
+    uint16_t nav_grace_s;
+    char     custom_image_url[256];
+    uint8_t  custom_orientation;
+    uint16_t custom_update_interval_s;
+    uint8_t  auto_rotate_order2[16];
+} app_config_v47_t;
+
+/* The 6 new uint8 flips (align 1) append directly after auto_rotate_order2[16]
+ * (also align 1) with no padding, so offsetof == end-of-last-v47-field. Compare
+ * against the end of auto_rotate_order2 to catch any field inserted/reordered
+ * ahead of the new block without tripping on tail padding. */
+_Static_assert(offsetof(app_config_t, goes_vflip) ==
+                   offsetof(app_config_v47_t, auto_rotate_order2) +
+                       sizeof(((app_config_v47_t *)0)->auto_rotate_order2),
+               "app_config_v47_t snapshot drifted from app_config_t layout");
+
+/* v46_t and v47_t have byte-identical bodies (v48 only appends 6 trailing flip
+ * bytes past the v47 layout), so v46 stays valid by matching v47_t's size
+ * rather than app_config_t's — avoids any tail-padding ambiguity from the
+ * appended uint8 block. */
+_Static_assert(sizeof(app_config_v46_t) == sizeof(app_config_v47_t),
                "app_config_v46_t snapshot drifted from app_config_t layout");
 
 // v17 snapshot — AllSky fields without allsky_enabled

@@ -16,7 +16,12 @@
 
 static const char *TAG = "ota_github";
 
-#define GITHUB_API_URL    "https://api.github.com/repos/chvvkumar/ESP32-P4-NINA-Display/releases?per_page=5"
+/* Releases endpoint, paginated. per_page=10 keeps each page's JSON under the
+ * 128 KB MAX_RESPONSE_SIZE buffer (measured worst case ~93 KB). The full per-page
+ * URL is composed by appending "&page=N" into a stack buffer (see fetch_releases_page). */
+#define GITHUB_API_URL    "https://api.github.com/repos/chvvkumar/ESP32-P4-NINA-Display/releases?per_page=10"
+#define MAX_RELEASE_PAGES 10       /* safety cap: 10 pages x per_page=10 = 100 releases (>2x current 43) */
+#define RELEASE_URL_BUF   256      /* generous bound for GITHUB_API_URL + "&page=NN" */
 #define OTA_BUF_SIZE      4096
 #define MAX_RESPONSE_SIZE (128 * 1024)
 #define OTA_ASSET_NAME    "nina-display-ota.bin"
@@ -191,25 +196,31 @@ static esp_err_t redirect_event_handler(esp_http_client_event_t *evt) {
     return ESP_OK;
 }
 
-/* ── Check GitHub for updates ─────────────────────────────────────── */
+/* ── Fetch one page of the releases list ──────────────────────────── */
 
-bool ota_github_check(bool include_prereleases, const char *current_version, github_release_info_t *out) {
-    if (!current_version || !out) return false;
-
-    ESP_LOGI(TAG, "Checking GitHub for updates (current: %s, channel: %s)",
-             current_version, include_prereleases ? "pre-release" : "stable");
-
+/*
+ * Fetch a single page (?per_page=10&page=N) of the GitHub releases list and
+ * parse it into a cJSON array. Returns the parsed array (caller owns it and must
+ * cJSON_Delete it), or NULL on ANY failure: HTTP error, non-200 status, response
+ * buffer overflow, or JSON parse failure. *overflow_out is set true only when the
+ * 128 KB response buffer overflowed (so the caller can apply the history fail-safe);
+ * it is left untouched on other failures. The helper frees its own response buffer.
+ */
+static cJSON *fetch_releases_page(int page, bool *overflow_out) {
     http_response_t resp = {0};
     resp.buffer_size = MAX_RESPONSE_SIZE;
     resp.buffer = heap_caps_malloc(resp.buffer_size, MALLOC_CAP_SPIRAM);
     if (!resp.buffer) {
-        ESP_LOGE(TAG, "Failed to allocate response buffer");
-        return false;
+        ESP_LOGE(TAG, "Failed to allocate response buffer (page %d)", page);
+        return NULL;
     }
     resp.buffer[0] = '\0';
 
+    char url[RELEASE_URL_BUF];
+    snprintf(url, sizeof(url), "%s&page=%d", GITHUB_API_URL, page);
+
     esp_http_client_config_t config = {
-        .url = GITHUB_API_URL,
+        .url = url,
         .event_handler = http_event_handler,
         .user_data = &resp,
         .timeout_ms = 10000,
@@ -220,9 +231,9 @@ bool ota_github_check(bool include_prereleases, const char *current_version, git
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (!client) {
-        ESP_LOGE(TAG, "Failed to init HTTP client");
+        ESP_LOGE(TAG, "Failed to init HTTP client (page %d)", page);
         free(resp.buffer);
-        return false;
+        return NULL;
     }
 
     esp_http_client_set_header(client, "User-Agent", "ESP32-NINA-Display");
@@ -233,27 +244,44 @@ bool ota_github_check(bool include_prereleases, const char *current_version, git
     esp_http_client_cleanup(client);
 
     if (err != ESP_OK || status != 200) {
-        ESP_LOGW(TAG, "GitHub API request failed (err=%s, status=%d)", esp_err_to_name(err), status);
+        ESP_LOGW(TAG, "GitHub API request failed (page %d, err=%s, status=%d)",
+                 page, esp_err_to_name(err), status);
         free(resp.buffer);
-        return false;
+        return NULL;
     }
 
-    ESP_LOGI(TAG, "GitHub API response: %d bytes", resp.buffer_len);
+    ESP_LOGI(TAG, "GitHub API response (page %d): %d bytes", page, resp.buffer_len);
 
     if (resp.overflow) {
-        ESP_LOGE(TAG, "Response was truncated (buffer %d bytes too small)", resp.buffer_size);
+        ESP_LOGE(TAG, "Response was truncated (page %d, buffer %d bytes too small)",
+                 page, resp.buffer_size);
+        if (overflow_out) {
+            *overflow_out = true;
+        }
         free(resp.buffer);
-        return false;
+        return NULL;
     }
 
-    /* Parse JSON array of releases */
     cJSON *releases = cJSON_Parse(resp.buffer);
     free(resp.buffer);
     if (!releases || !cJSON_IsArray(releases)) {
-        ESP_LOGW(TAG, "Failed to parse GitHub releases JSON");
-        if (releases) cJSON_Delete(releases);
-        return false;
+        ESP_LOGW(TAG, "Failed to parse GitHub releases JSON (page %d)", page);
+        if (releases) {
+            cJSON_Delete(releases);
+        }
+        return NULL;
     }
+
+    return releases;
+}
+
+/* ── Check GitHub for updates ─────────────────────────────────────── */
+
+bool ota_github_check(bool include_prereleases, const char *current_version, github_release_info_t *out) {
+    if (!current_version || !out) return false;
+
+    ESP_LOGI(TAG, "Checking GitHub for updates (current: %s, channel: %s)",
+             current_version, include_prereleases ? "pre-release" : "stable");
 
     /* Detect channel switch: current version type doesn't match target channel.
      * When switching channels (e.g. pre-release → stable), the normal version
@@ -270,74 +298,153 @@ bool ota_github_check(bool include_prereleases, const char *current_version, git
                  include_prereleases ? "pre-release" : "stable");
     }
 
-    bool found = false;
-    int count = cJSON_GetArraySize(releases);
-    for (int i = 0; i < count && !found; i++) {
-        cJSON *release = cJSON_GetArrayItem(releases, i);
-        if (!release) continue;
+    /* ── Paginated path scan (newest-first) ──────────────────────────────
+     * Walk pages 1..MAX_RELEASE_PAGES. The TARGET is the newest in-channel
+     * release newer than installed (first qualifying release, newest-first).
+     * The full-erase marker is OR'd across EVERY in-channel release on the
+     * path (installed < v <= target), so a marker on a skipped intermediate
+     * release suppresses the OTA even when the target itself is unmarked.
+     * full_erase_tag records the FIRST marked release encountered = newest
+     * marked. Scanning stops once a release at-or-below installed is seen
+     * (path fully covered). Fail-safe: if the page cap is hit before reaching
+     * installed, or a fetch errors/overflows mid-path, force manual-flash. */
+    bool found_target = false;          /* an OTA target release has been captured */
+    bool any_marker = false;            /* OR of nina:full_erase=1 across the path */
+    bool reached_installed = false;     /* a fetched in-channel release compared <= installed */
+    bool fail_safe = false;             /* history could not be fully verified */
+    char full_erase_tag_local[32] = {0};/* newest marked tag on the path (written once) */
 
-        /* Skip drafts */
-        cJSON *draft = cJSON_GetObjectItem(release, "draft");
-        if (cJSON_IsTrue(draft)) continue;
+    for (int page = 1; page <= MAX_RELEASE_PAGES && !reached_installed; page++) {
+        bool overflow = false;
+        cJSON *releases = fetch_releases_page(page, &overflow);
+        if (!releases) {
+            /* Page-1 failure with nothing found yet → behave as the old
+             * "request failed → return false" path. A MID-PATH failure (after a
+             * target was captured, before reaching installed) means the history
+             * is unverifiable → fail-safe to manual-flash. */
+            if (found_target) {
+                ESP_LOGW(TAG, "Couldn't verify full update history: page %d fetch %s",
+                         page, overflow ? "overflowed" : "failed");
+                fail_safe = true;
+            } else {
+                ESP_LOGW(TAG, "GitHub release fetch failed on page %d with no target found", page);
+            }
+            break;
+        }
 
-        /* Check pre-release flag — each channel only sees its own releases */
-        cJSON *prerelease = cJSON_GetObjectItem(release, "prerelease");
-        bool is_pre = cJSON_IsTrue(prerelease);
-        if (is_pre && !include_prereleases) continue;   /* stable channel: skip pre-releases */
-        if (!is_pre && include_prereleases) continue;    /* pre-release channel: skip stable */
+        int count = cJSON_GetArraySize(releases);
+        for (int i = 0; i < count && !reached_installed; i++) {
+            cJSON *release = cJSON_GetArrayItem(releases, i);
+            if (!release) continue;
 
-        /* Get tag name */
-        cJSON *tag = cJSON_GetObjectItem(release, "tag_name");
-        if (!cJSON_IsString(tag) || !tag->valuestring) continue;
+            /* Skip drafts */
+            cJSON *draft = cJSON_GetObjectItem(release, "draft");
+            if (cJSON_IsTrue(draft)) continue;
 
-        /* Compare versions — skip check when switching channels so the latest
-         * release from the target channel is always offered. */
-        if (!channel_switch && compare_versions(tag->valuestring, current_version) <= 0) continue;
+            /* Check pre-release flag — each channel only sees its own releases */
+            cJSON *prerelease = cJSON_GetObjectItem(release, "prerelease");
+            bool is_pre = cJSON_IsTrue(prerelease);
+            if (is_pre && !include_prereleases) continue;   /* stable channel: skip pre-releases */
+            if (!is_pre && include_prereleases) continue;    /* pre-release channel: skip stable */
 
-        /* Find OTA asset */
-        cJSON *assets = cJSON_GetObjectItem(release, "assets");
-        if (!cJSON_IsArray(assets)) continue;
+            /* Get tag name */
+            cJSON *tag = cJSON_GetObjectItem(release, "tag_name");
+            if (!cJSON_IsString(tag) || !tag->valuestring) continue;
 
-        const char *ota_url = NULL;
-        int asset_count = cJSON_GetArraySize(assets);
-        for (int j = 0; j < asset_count; j++) {
-            cJSON *asset = cJSON_GetArrayItem(assets, j);
-            cJSON *name = cJSON_GetObjectItem(asset, "name");
-            if (cJSON_IsString(name) && strcmp(name->valuestring, OTA_ASSET_NAME) == 0) {
-                cJSON *url = cJSON_GetObjectItem(asset, "browser_download_url");
-                if (cJSON_IsString(url)) {
-                    ota_url = url->valuestring;
-                }
+            /* Classify by version. When switching channels the version check is
+             * skipped so the latest in-channel release is always the target. */
+            if (!channel_switch && compare_versions(tag->valuestring, current_version) <= 0) {
+                /* At-or-below installed: the path is fully covered. This release is
+                 * NOT on the installed→target path, so its marker is irrelevant. */
+                reached_installed = true;
                 break;
+            }
+
+            /* This is a path release (installed < v, in channel). */
+            cJSON *body = cJSON_GetObjectItem(release, "body");
+            const char *body_str = cJSON_IsString(body) ? body->valuestring : "";
+
+            /* OR the full-erase marker across the path; record the newest marked tag. */
+            if (strstr(body_str, "nina:full_erase=1") != NULL) {
+                any_marker = true;
+                if (full_erase_tag_local[0] == '\0') {
+                    strncpy(full_erase_tag_local, tag->valuestring, sizeof(full_erase_tag_local) - 1);
+                    full_erase_tag_local[sizeof(full_erase_tag_local) - 1] = '\0';
+                }
+            }
+
+            /* Capture the FIRST qualifying release (newest-first) as the OTA target. */
+            if (!found_target) {
+                cJSON *assets = cJSON_GetObjectItem(release, "assets");
+                const char *ota_url = NULL;
+                if (cJSON_IsArray(assets)) {
+                    int asset_count = cJSON_GetArraySize(assets);
+                    for (int j = 0; j < asset_count; j++) {
+                        cJSON *asset = cJSON_GetArrayItem(assets, j);
+                        cJSON *name = cJSON_GetObjectItem(asset, "name");
+                        if (cJSON_IsString(name) && strcmp(name->valuestring, OTA_ASSET_NAME) == 0) {
+                            cJSON *url = cJSON_GetObjectItem(asset, "browser_download_url");
+                            if (cJSON_IsString(url)) {
+                                ota_url = url->valuestring;
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                if (!ota_url) {
+                    /* No OTA asset on the newest release: it cannot be the OTA target,
+                     * but its marker still counts toward the path determination above.
+                     * Keep scanning for an older release that does carry the asset. */
+                    ESP_LOGW(TAG, "Release %s has no %s asset, skipping as target",
+                             tag->valuestring, OTA_ASSET_NAME);
+                } else {
+                    memset(out, 0, sizeof(*out));
+                    strncpy(out->tag, tag->valuestring, sizeof(out->tag) - 1);
+                    out->tag[sizeof(out->tag) - 1] = '\0';
+                    extract_summary(body_str, out->summary, sizeof(out->summary));
+                    strncpy(out->ota_url, ota_url, sizeof(out->ota_url) - 1);
+                    out->ota_url[sizeof(out->ota_url) - 1] = '\0';
+                    out->is_prerelease = is_pre;
+                    found_target = true;
+                    ESP_LOGI(TAG, "Update target: %s (pre-release: %s)", out->tag, is_pre ? "yes" : "no");
+
+                    /* Under channel_switch there is no installed-version boundary to
+                     * reach, so the latest in-channel release is the whole path. */
+                    if (channel_switch) {
+                        reached_installed = true;
+                        break;
+                    }
+                }
             }
         }
 
-        if (!ota_url) {
-            ESP_LOGW(TAG, "Release %s has no %s asset, skipping", tag->valuestring, OTA_ASSET_NAME);
-            continue;
-        }
-
-        /* Extract summary from release body */
-        cJSON *body = cJSON_GetObjectItem(release, "body");
-        const char *body_str = cJSON_IsString(body) ? body->valuestring : "";
-
-        /* Fill output */
-        memset(out, 0, sizeof(*out));
-        strncpy(out->tag, tag->valuestring, sizeof(out->tag) - 1);
-        extract_summary(body_str, out->summary, sizeof(out->summary));
-        strncpy(out->ota_url, ota_url, sizeof(out->ota_url) - 1);
-        out->is_prerelease = is_pre;
-        out->requires_full_erase = (strstr(body_str, "nina:full_erase=1") != NULL);
-
-        ESP_LOGI(TAG, "Update available: %s (pre-release: %s)", out->tag, is_pre ? "yes" : "no");
-        found = true;
+        cJSON_Delete(releases);
     }
 
-    cJSON_Delete(releases);
+    /* Fail-safe (ERASE-05): a target was found but the scan ended without
+     * reaching installed (page cap exhausted) — the history is not fully
+     * verified, so never offer OTA. The mid-path fetch-error case above
+     * already set fail_safe. */
+    if (found_target && !reached_installed && !fail_safe) {
+        ESP_LOGW(TAG, "Couldn't verify full update history: page cap (%d) reached before installed version",
+                 MAX_RELEASE_PAGES);
+        fail_safe = true;
+    }
 
-    if (!found) {
+    if (!found_target) {
         ESP_LOGI(TAG, "No newer release found");
         return false;
+    }
+
+    /* Populate the erase determination on the captured target. */
+    out->requires_full_erase = any_marker || fail_safe;
+    if (fail_safe) {
+        /* History-incomplete variant: empty tag signals "couldn't verify". */
+        out->full_erase_tag[0] = '\0';
+    } else {
+        strncpy(out->full_erase_tag, full_erase_tag_local, sizeof(out->full_erase_tag) - 1);
+        out->full_erase_tag[sizeof(out->full_erase_tag) - 1] = '\0';
     }
 
     /*

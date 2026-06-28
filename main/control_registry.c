@@ -38,6 +38,12 @@ static int get_image_display_source(const control_item_t *it, const app_config_t
 static int get_goes_orientation(const control_item_t *it, const app_config_t *c)           { (void)it; return c->goes_orientation; }
 static int get_solar_orientation(const control_item_t *it, const app_config_t *c)          { (void)it; return c->solar_orientation; }
 static int get_custom_orientation(const control_item_t *it, const app_config_t *c)         { (void)it; return c->custom_orientation; }
+static int get_goes_vflip(const control_item_t *it, const app_config_t *c)                 { (void)it; return c->goes_vflip ? 1 : 0; }
+static int get_goes_hflip(const control_item_t *it, const app_config_t *c)                 { (void)it; return c->goes_hflip ? 1 : 0; }
+static int get_solar_vflip(const control_item_t *it, const app_config_t *c)                { (void)it; return c->solar_vflip ? 1 : 0; }
+static int get_solar_hflip(const control_item_t *it, const app_config_t *c)                { (void)it; return c->solar_hflip ? 1 : 0; }
+static int get_custom_vflip(const control_item_t *it, const app_config_t *c)               { (void)it; return c->custom_vflip ? 1 : 0; }
+static int get_custom_hflip(const control_item_t *it, const app_config_t *c)               { (void)it; return c->custom_hflip ? 1 : 0; }
 static int get_solar_band(const control_item_t *it, const app_config_t *c)                 { (void)it; return c->solar_band; }
 static int get_goes_update_interval_s(const control_item_t *it, const app_config_t *c)     { (void)it; return c->goes_update_interval_s; }
 static int get_custom_update_interval_s(const control_item_t *it, const app_config_t *c)   { (void)it; return c->custom_update_interval_s; }
@@ -90,6 +96,12 @@ static void set_image_display_source(const control_item_t *it, app_config_t *c, 
 static void set_goes_orientation(const control_item_t *it, app_config_t *c, int v)           { (void)it; c->goes_orientation = (uint8_t)v; }
 static void set_solar_orientation(const control_item_t *it, app_config_t *c, int v)          { (void)it; c->solar_orientation = (uint8_t)v; }
 static void set_custom_orientation(const control_item_t *it, app_config_t *c, int v)         { (void)it; c->custom_orientation = (uint8_t)v; }
+static void set_goes_vflip(const control_item_t *it, app_config_t *c, int v)                 { (void)it; c->goes_vflip = (uint8_t)(v != 0); }
+static void set_goes_hflip(const control_item_t *it, app_config_t *c, int v)                 { (void)it; c->goes_hflip = (uint8_t)(v != 0); }
+static void set_solar_vflip(const control_item_t *it, app_config_t *c, int v)                { (void)it; c->solar_vflip = (uint8_t)(v != 0); }
+static void set_solar_hflip(const control_item_t *it, app_config_t *c, int v)                { (void)it; c->solar_hflip = (uint8_t)(v != 0); }
+static void set_custom_vflip(const control_item_t *it, app_config_t *c, int v)               { (void)it; c->custom_vflip = (uint8_t)(v != 0); }
+static void set_custom_hflip(const control_item_t *it, app_config_t *c, int v)               { (void)it; c->custom_hflip = (uint8_t)(v != 0); }
 static void set_solar_band(const control_item_t *it, app_config_t *c, int v)                 { (void)it; c->solar_band = (uint8_t)v; }
 static void set_goes_update_interval_s(const control_item_t *it, app_config_t *c, int v)     { (void)it; c->goes_update_interval_s = (uint16_t)v; }
 static void set_custom_update_interval_s(const control_item_t *it, app_config_t *c, int v)   { (void)it; c->custom_update_interval_s = (uint16_t)v; }
@@ -205,6 +217,12 @@ static const control_item_t s_items[] = {
     { "goes_orientation",           CTRL_TYPE_ENUM, 0, 3, 1, LBL(orient_labels), get_goes_orientation,   set_goes_orientation,   apply_image_display },
     { "solar_orientation",          CTRL_TYPE_ENUM, 0, 3, 1, LBL(orient_labels), get_solar_orientation,  set_solar_orientation,  apply_image_display },
     { "custom_orientation",         CTRL_TYPE_ENUM, 0, 3, 1, LBL(orient_labels), get_custom_orientation, set_custom_orientation, apply_image_display },
+    { "goes_vflip",                 CTRL_TYPE_BOOL, 0, 1, 1, NULL, 0, get_goes_vflip,         set_goes_vflip,         apply_image_display },
+    { "goes_hflip",                 CTRL_TYPE_BOOL, 0, 1, 1, NULL, 0, get_goes_hflip,         set_goes_hflip,         apply_image_display },
+    { "solar_vflip",                CTRL_TYPE_BOOL, 0, 1, 1, NULL, 0, get_solar_vflip,        set_solar_vflip,        apply_image_display },
+    { "solar_hflip",                CTRL_TYPE_BOOL, 0, 1, 1, NULL, 0, get_solar_hflip,        set_solar_hflip,        apply_image_display },
+    { "custom_vflip",               CTRL_TYPE_BOOL, 0, 1, 1, NULL, 0, get_custom_vflip,       set_custom_vflip,       apply_image_display },
+    { "custom_hflip",               CTRL_TYPE_BOOL, 0, 1, 1, NULL, 0, get_custom_hflip,       set_custom_hflip,       apply_image_display },
     /* solar_band: enum with no labels -> control_item_label() returns NULL so the
      * handler formats the numeric band index as the label string. */
     { "solar_band",                 CTRL_TYPE_ENUM, 0, 17, 1, NULL, 0, get_solar_band,             set_solar_band,             apply_image_display },

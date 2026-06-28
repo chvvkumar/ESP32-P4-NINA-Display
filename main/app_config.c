@@ -820,6 +820,14 @@ static void set_defaults(app_config_t *cfg) {
     cfg->custom_orientation = 0;          // 0=0°,1=90°,2=180°,3=270° clockwise
     cfg->custom_update_interval_s = 60;   // poll interval (10-7200s)
 
+    // Per-source Image Display mirror flips (0=no flip = current behavior)
+    cfg->goes_vflip = 0;
+    cfg->goes_hflip = 0;
+    cfg->solar_vflip = 0;
+    cfg->solar_hflip = 0;
+    cfg->custom_vflip = 0;
+    cfg->custom_hflip = 0;
+
     // Auth is on by default — protects device from open-LAN access
     cfg->auth_enabled = true;
 }
@@ -2186,6 +2194,29 @@ static void migrate_from_v46(const void *raw, size_t raw_size, app_config_t *cfg
     ESP_LOGI(TAG, "Migrated config v46 -> v%d (page-ref remap)", APP_CONFIG_VERSION);
 }
 
+/* --- v47 → v48 migration: appends 6 per-source Image Display mirror-flip
+ *     bytes (goes/solar/custom v/hflip). Layout ahead is unchanged; the new
+ *     fields are additive and default 0 (no flip = current behavior). --- */
+static void migrate_from_v47(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v47_t) ? raw_size : sizeof(app_config_v47_t);
+    memcpy(cfg, raw, copy);
+
+    /* The 6 flip fields are appended past the v47 snapshot, so memcpy(copy)
+     * never touches them. set_defaults() already zeroed the whole struct, but
+     * set them explicitly for documentation (0 = no flip = current behavior). */
+    cfg->goes_vflip   = 0;
+    cfg->goes_hflip   = 0;
+    cfg->solar_vflip  = 0;
+    cfg->solar_hflip  = 0;
+    cfg->custom_vflip = 0;
+    cfg->custom_hflip = 0;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v47 to v%d", APP_CONFIG_VERSION);
+}
+
 static void migrate_from_v36(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
@@ -2876,6 +2907,13 @@ static bool validate_config(app_config_t *cfg) {
         cfg->custom_update_interval_s = 60;
         fixed = true;
     }
+    /* Per-source Image Display mirror flips — normalize each to 0/1. */
+    if (cfg->goes_vflip > 1)   { cfg->goes_vflip   = (cfg->goes_vflip   != 0) ? 1 : 0; fixed = true; }
+    if (cfg->goes_hflip > 1)   { cfg->goes_hflip   = (cfg->goes_hflip   != 0) ? 1 : 0; fixed = true; }
+    if (cfg->solar_vflip > 1)  { cfg->solar_vflip  = (cfg->solar_vflip  != 0) ? 1 : 0; fixed = true; }
+    if (cfg->solar_hflip > 1)  { cfg->solar_hflip  = (cfg->solar_hflip  != 0) ? 1 : 0; fixed = true; }
+    if (cfg->custom_vflip > 1) { cfg->custom_vflip = (cfg->custom_vflip != 0) ? 1 : 0; fixed = true; }
+    if (cfg->custom_hflip > 1) { cfg->custom_hflip = (cfg->custom_hflip != 0) ? 1 : 0; fixed = true; }
     if (cfg->image_display_source > 3) {   /* 0=GOES, 1=Moon, 2=Solar, 3=Custom URL */
         cfg->image_display_source = 0;
         fixed = true;
@@ -2997,6 +3035,12 @@ void app_config_init(void) {
             nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(handle);
         }
+    } else if (version_check == 47) {
+        /* v47 → v48: added per-source Image Display mirror flips (goes/solar/custom v/hflip) */
+        migrate_from_v47(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 46) {
         /* v46 → v47: remap active_page_override + idle_page_override_target onto page_registry ids */
         migrate_from_v46(raw, stored_size, &s_config);
