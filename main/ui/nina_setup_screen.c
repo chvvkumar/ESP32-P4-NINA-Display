@@ -1,8 +1,12 @@
 #include "nina_setup_screen.h"
 #include "app_config.h"
+#include "themes.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/portmacro.h"
+
+/* Provided by nina_dashboard.c; returns the active theme or NULL before init. */
+const theme_t *nina_dashboard_get_theme(void);
 
 static const char *TAG = "setup_screen";
 
@@ -23,6 +27,21 @@ void nina_setup_screen_create(lv_obj_t *parent)
 {
     ESP_LOGI(TAG, "Creating setup screen");
 
+    /* Under the Red Night theme, substitute red shades for the hardcoded
+     * white/gray/blue colors so the wizard does not leak bright colors.
+     * When the theme is not yet initialized (NULL) or is not Red Night,
+     * keep the original colors exactly. */
+    const theme_t *t = nina_dashboard_get_theme();
+    bool red = (t && theme_is_red_night(t));
+
+    uint32_t col_title = red ? t->text_color : 0xFFFFFF;
+    uint32_t col_secondary = red ? t->label_color : 0xCCCCCC;
+    uint32_t col_divider = red ? t->bento_border : 0x444444;
+    uint32_t col_waiting = red ? t->label_color : 0x555555;
+    uint32_t col_value = red ? t->text_color : 0x3b82f6;
+    uint32_t col_spin_ind = red ? t->progress_color : 0x3b82f6;
+    uint32_t col_spin_track = red ? t->bento_border : 0x222222;
+
     /* Full-screen background */
     s_setup_cont = lv_obj_create(parent);
     lv_obj_remove_style_all(s_setup_cont);
@@ -42,7 +61,7 @@ void nina_setup_screen_create(lv_obj_t *parent)
     lv_label_set_text(title, "WiFi Setup Required");
     lv_obj_set_width(title, lv_pct(100));
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-    lv_obj_set_style_text_color(title, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_color(title, lv_color_hex(col_title), 0);
     lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
 
     /* Subtitle */
@@ -50,14 +69,14 @@ void nina_setup_screen_create(lv_obj_t *parent)
     lv_label_set_text(subtitle, "Connect to this device's WiFi network\nand open the setup page in your browser.");
     lv_obj_set_width(subtitle, lv_pct(90));
     lv_obj_set_style_text_font(subtitle, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_color(subtitle, lv_color_hex(0xCCCCCC), 0);
+    lv_obj_set_style_text_color(subtitle, lv_color_hex(col_secondary), 0);
     lv_obj_set_style_text_align(subtitle, LV_TEXT_ALIGN_CENTER, 0);
 
     /* First divider */
     lv_obj_t *div1 = lv_obj_create(s_setup_cont);
     lv_obj_remove_style_all(div1);
     lv_obj_set_size(div1, lv_pct(80), 1);
-    lv_obj_set_style_bg_color(div1, lv_color_hex(0x444444), 0);
+    lv_obj_set_style_bg_color(div1, lv_color_hex(col_divider), 0);
     lv_obj_set_style_bg_opa(div1, LV_OPA_60, 0);
 
     /* Info rows */
@@ -78,34 +97,34 @@ void nina_setup_screen_create(lv_obj_t *parent)
         lv_obj_t *lbl = lv_label_create(row);
         lv_label_set_text(lbl, labels[i]);
         lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
-        lv_obj_set_style_text_color(lbl, lv_color_hex(0xCCCCCC), 0);
+        lv_obj_set_style_text_color(lbl, lv_color_hex(col_secondary), 0);
 
         lv_obj_t *val = lv_label_create(row);
         lv_label_set_text(val, values[i]);
         lv_obj_set_style_text_font(val, &lv_font_montserrat_22, 0);
-        lv_obj_set_style_text_color(val, lv_color_hex(0x3b82f6), 0);
+        lv_obj_set_style_text_color(val, lv_color_hex(col_value), 0);
     }
 
     /* Second divider */
     lv_obj_t *div2 = lv_obj_create(s_setup_cont);
     lv_obj_remove_style_all(div2);
     lv_obj_set_size(div2, lv_pct(80), 1);
-    lv_obj_set_style_bg_color(div2, lv_color_hex(0x444444), 0);
+    lv_obj_set_style_bg_color(div2, lv_color_hex(col_divider), 0);
     lv_obj_set_style_bg_opa(div2, LV_OPA_60, 0);
 
     /* Waiting text */
     lv_obj_t *waiting = lv_label_create(s_setup_cont);
     lv_label_set_text(waiting, "Waiting for configuration...");
     lv_obj_set_style_text_font(waiting, &lv_font_montserrat_18, 0);
-    lv_obj_set_style_text_color(waiting, lv_color_hex(0x555555), 0);
+    lv_obj_set_style_text_color(waiting, lv_color_hex(col_waiting), 0);
     lv_obj_set_style_text_align(waiting, LV_TEXT_ALIGN_CENTER, 0);
 
     /* Spinner */
     lv_obj_t *spinner = lv_spinner_create(s_setup_cont);
     lv_obj_set_size(spinner, 40, 40);
     lv_spinner_set_anim_params(spinner, 1000, 270);
-    lv_obj_set_style_arc_color(spinner, lv_color_hex(0x3b82f6), LV_PART_INDICATOR);
-    lv_obj_set_style_arc_color(spinner, lv_color_hex(0x222222), LV_PART_MAIN);
+    lv_obj_set_style_arc_color(spinner, lv_color_hex(col_spin_ind), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(spinner, lv_color_hex(col_spin_track), LV_PART_MAIN);
     lv_obj_set_style_arc_width(spinner, 4, LV_PART_INDICATOR);
     lv_obj_set_style_arc_width(spinner, 4, LV_PART_MAIN);
 

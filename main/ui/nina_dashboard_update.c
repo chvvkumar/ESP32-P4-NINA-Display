@@ -730,7 +730,7 @@ static void update_stale_indicator(dashboard_page_t *p, const nina_client_t *d) 
         /* Stale color: dim for warning, bright for severe */
         uint32_t stale_color;
         if (theme_is_red_night(current_theme)) {
-            stale_color = (stale_ms > STALE_DIM_MS) ? 0xff0000 : 0xcc0000;
+            stale_color = (stale_ms > STALE_DIM_MS) ? 0xff0000 : current_theme->text_color;
         } else {
             stale_color = (stale_ms > STALE_DIM_MS) ? 0xf87171 : 0xfbbf24;
         }
@@ -780,8 +780,10 @@ static void update_safety_icon(dashboard_page_t *p, const nina_client_t *data, i
         }
     } else {
         set_label_if_changed(p->safety_icon, ICON_GPP_MAYBE);
+        uint32_t unknown_color = theme_is_red_night(current_theme)
+            ? current_theme->label_color : 0x999999;
         set_text_color_if_changed(p->safety_icon,
-            lv_color_hex(app_config_apply_brightness(0x999999, gb)), 0);
+            lv_color_hex(app_config_apply_brightness(unknown_color, gb)), 0);
     }
 }
 
