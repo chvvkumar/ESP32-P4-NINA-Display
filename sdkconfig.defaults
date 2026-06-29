@@ -70,7 +70,11 @@ CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
 
 # PPA requires full-screen DPI framebuffers (avoid_tearing mode)
 # Partial buffers (720*50*2=72000) are not cache-line aligned (72000%128!=0)
-CONFIG_BSP_LCD_DPI_BUFFER_NUMS=2
+# 3 framebuffers (not 2): with only 2, avoid-tear tears when a full-screen
+# redraw overruns VSYNC (e.g. software crossfade of a large uncropped custom
+# image). A 3rd buffer holds the last good frame while the next renders, so an
+# overrun can never be scanned out half-drawn. +1.01MB PSRAM, allocated at boot.
+CONFIG_BSP_LCD_DPI_BUFFER_NUMS=3
 CONFIG_BSP_DISPLAY_LVGL_AVOID_TEAR=y
 CONFIG_BSP_DISPLAY_LVGL_FULL_REFRESH=y
 
