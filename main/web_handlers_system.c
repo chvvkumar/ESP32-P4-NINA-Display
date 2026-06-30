@@ -390,7 +390,7 @@ esp_err_t version_get_handler(httpd_req_t *req)
 // Handler for checking GitHub OTA updates (returns JSON result to web UI)
 esp_err_t check_update_json_handler(httpd_req_t *req)
 {
-    bool include_pre = (app_config_get()->update_channel == 1);
+    int update_channel = app_config_get()->update_channel;
     const char *cur_ver = ota_github_get_current_version();
 
     github_release_info_t *rel = heap_caps_calloc(1, sizeof(github_release_info_t), MALLOC_CAP_SPIRAM);
@@ -402,7 +402,7 @@ esp_err_t check_update_json_handler(httpd_req_t *req)
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "current_version", cur_ver);
 
-    if (ota_github_check(include_pre, cur_ver, rel)) {
+    if (ota_github_check(update_channel, cur_ver, rel)) {
         cJSON_AddBoolToObject(root, "update_available", true);
         cJSON_AddStringToObject(root, "tag", rel->tag);
         cJSON_AddStringToObject(root, "summary", rel->summary);
@@ -441,7 +441,7 @@ esp_err_t ota_github_post_handler(httpd_req_t *req)
     body[received] = '\0';
 
     /* Re-check GitHub for the release to get the OTA URL */
-    bool include_pre = (app_config_get()->update_channel == 1);
+    int update_channel = app_config_get()->update_channel;
     const char *cur_ver = ota_github_get_current_version();
 
     github_release_info_t *rel = heap_caps_calloc(1, sizeof(github_release_info_t), MALLOC_CAP_SPIRAM);
@@ -450,7 +450,7 @@ esp_err_t ota_github_post_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    if (!ota_github_check(include_pre, cur_ver, rel)) {
+    if (!ota_github_check(update_channel, cur_ver, rel)) {
         heap_caps_free(rel);
         return send_400(req, "No update available");
     }

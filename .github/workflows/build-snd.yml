@@ -1,0 +1,304 @@
+name: Build Firmware (snd)
+
+on:
+  push:
+    branches: [snd]
+  workflow_dispatch:
+
+env:
+  IDF_VERSION: v5.5.2
+  IDF_TARGET: esp32p4
+  CCACHE_DIR: /opt/actions-runner-esp32/.ccache
+  CCACHE_MAXSIZE: 1G
+  CCACHE_COMPRESSLEVEL: 6
+
+permissions:
+  contents: write
+
+jobs:
+  check-changes:
+    name: Check Changed Paths
+    runs-on: ubuntu-latest
+    outputs:
+      has_code_changes: ${{ steps.filter.outputs.has_code_changes }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if code files changed
+        id: filter
+        run: |
+          # A manual run (workflow_dispatch) always builds; github.event.before is
+          # unset there, so short-circuit before the diff to avoid an empty BASE.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "has_code_changes=true" >> $GITHUB_OUTPUT
+            echo "Manual run requested, build will run"
+            exit 0
+          fi
+          BASE=${{ github.event.before }}
+          HEAD=${{ github.sha }}
+          CODE_CHANGES=$(git diff --name-only "$BASE" "$HEAD" -- \
+            ':!**/*.md' ':!docs/**' ':!images/**' ':!tests/**' ':!LICENSE' ':!.gitignore' ':!.github/workflows/**' \
+            | head -1)
+
+          if [ -n "$CODE_CHANGES" ]; then
+            echo "has_code_changes=true" >> $GITHUB_OUTPUT
+            echo "Code changes detected, build will run"
+          else
+            echo "has_code_changes=false" >> $GITHUB_OUTPUT
+            echo "Only docs/workflow/non-code changes, skipping build"
+          fi
+
+  build:
+    needs: check-changes
+    if: needs.check-changes.outputs.has_code_changes == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: self-hosted
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          clean: false
+
+      - name: Check for skip CI
+        id: check_skip
+        run: |
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          if echo "$COMMIT_MSG" | grep -qi '\[skip ci\]'; then
+            echo "Skipping CI due to [skip ci] in commit message"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Read version
+        if: steps.check_skip.outputs.skip != 'true'
+        id: version
+        run: |
+          VERSION=$(cat version.txt | tr -d '[:space:]')
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          BRANCH=${GITHUB_REF_NAME//\//-}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Determine embedded version override
+        if: steps.check_skip.outputs.skip != 'true'
+        id: tag
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+
+          # Force the build to embed a snd-<sha> tag so the rolling alpha
+          # release's firmware reports a recognizable, commit-pinned version.
+          # generate_version.cmake reads BUILD_GIT_TAG_OVERRIDE.
+          echo "BUILD_GIT_TAG_OVERRIDE=snd-${SHORT_SHA}" >> $GITHUB_ENV
+
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+
+      - name: Set ESP-IDF paths
+        if: steps.check_skip.outputs.skip != 'true'
+        run: |
+          echo "IDF_PATH=$HOME/esp/esp-idf" >> $GITHUB_ENV
+          echo "IDF_TOOLS_PATH=$HOME/esp/tools" >> $GITHUB_ENV
+
+      - name: Ensure ESP-IDF ${{ env.IDF_VERSION }} is installed
+        if: steps.check_skip.outputs.skip != 'true'
+        run: |
+          # Check if ESP-IDF is already installed and at the correct version
+          if [ -f "$IDF_PATH/export.sh" ]; then
+            INSTALLED_VERSION=$(git -C "$IDF_PATH" describe --tags --exact-match 2>/dev/null || echo "")
+            if [ -z "$INSTALLED_VERSION" ] && [ -f "$IDF_PATH/version.txt" ]; then
+              INSTALLED_VERSION="v$(cat "$IDF_PATH/version.txt" | tr -d '[:space:]')"
+            fi
+            echo "ESP-IDF found: ${INSTALLED_VERSION:-unknown}"
+            if [ "$INSTALLED_VERSION" = "$IDF_VERSION" ]; then
+              echo "Correct version already installed. Skipping."
+              exit 0
+            else
+              echo "Version mismatch ($INSTALLED_VERSION != $IDF_VERSION). Reinstalling..."
+              rm -rf "$IDF_PATH"
+              rm -rf "$IDF_TOOLS_PATH"
+            fi
+          fi
+
+          echo "Installing ESP-IDF $IDF_VERSION..."
+
+          echo "::group::Clone ESP-IDF $IDF_VERSION"
+          mkdir -p "$(dirname "$IDF_PATH")" "$(dirname "$IDF_TOOLS_PATH")"
+          git clone --branch "$IDF_VERSION" --depth 1 --recursive \
+            https://github.com/espressif/esp-idf.git "$IDF_PATH"
+          echo "::endgroup::"
+
+          echo "::group::Install ESP-IDF tools for $IDF_TARGET"
+          "$IDF_PATH/install.sh" "$IDF_TARGET"
+          echo "::endgroup::"
+
+          echo "ESP-IDF $IDF_VERSION installation complete."
+
+      - name: Setup ESP-IDF environment
+        if: steps.check_skip.outputs.skip != 'true'
+        run: |
+          . $IDF_PATH/export.sh
+          echo "IDF version: $(idf.py --version)"
+
+      - name: Setup ccache
+        if: steps.check_skip.outputs.skip != 'true'
+        run: |
+          # Install ccache if not present
+          if ! command -v ccache &>/dev/null; then
+            echo "Installing ccache..."
+            sudo apt-get update -qq && sudo apt-get install -y -qq ccache
+          fi
+          echo "ccache version: $(ccache --version | head -1)"
+          ccache --zero-stats
+          ccache --show-config | grep -E "max_size|cache_dir|compression"
+
+      - name: Clean build state (always rebuild config)
+        if: steps.check_skip.outputs.skip != 'true'
+        run: |
+          # Decide whether managed_components also needs purging BEFORE removing
+          # build/, since the comparison hash lives in build/.build_config_hash.
+          NEEDS_DEPS_CLEAN=false
+          if [ -f build/.build_config_hash ]; then
+            OLD_HASH=$(cat build/.build_config_hash)
+            NEW_HASH=$(cat sdkconfig.defaults main/idf_component.yml main/CMakeLists.txt CMakeLists.txt dependencies.lock 2>/dev/null | sha256sum | cut -d' ' -f1)
+            if [ "$OLD_HASH" != "$NEW_HASH" ]; then
+              echo "Build config changed, will also purge managed_components"
+              NEEDS_DEPS_CLEAN=true
+            fi
+          else
+            echo "No previous successful build hash found, will also purge managed_components"
+            NEEDS_DEPS_CLEAN=true
+          fi
+
+          # Always purge build/ and sdkconfig: a stale sdkconfig selects the wrong
+          # display pipeline and a stale build/ keeps a stale build_version.h and
+          # object files. ccache (separate CCACHE_DIR) is untouched, so recompiles
+          # stay fast.
+          rm -rf build sdkconfig
+          echo "Removed build and sdkconfig"
+
+          # Only re-download managed_components when the dependency/config hash
+          # changed: it is pinned by dependencies.lock, and re-fetching from the
+          # component registry every run adds a network failure point.
+          if [ "$NEEDS_DEPS_CLEAN" = "true" ]; then
+            rm -rf managed_components
+            echo "Removed managed_components"
+          else
+            echo "Config unchanged, reusing managed_components"
+          fi
+
+      - name: Build project
+        if: steps.check_skip.outputs.skip != 'true'
+        env:
+          IDF_CCACHE_ENABLE: 1
+        run: |
+          . $IDF_PATH/export.sh
+          idf.py build
+
+      - name: Save build config hash
+        if: steps.check_skip.outputs.skip != 'true'
+        run: |
+          cat sdkconfig.defaults main/idf_component.yml main/CMakeLists.txt CMakeLists.txt dependencies.lock 2>/dev/null | sha256sum | cut -d' ' -f1 > build/.build_config_hash
+
+      - name: Show ccache stats
+        if: steps.check_skip.outputs.skip != 'true'
+        run: |
+          ccache --show-stats
+
+      - name: Generate firmware binaries
+        if: steps.check_skip.outputs.skip != 'true'
+        run: |
+          . $IDF_PATH/export.sh
+          mkdir -p firmware
+
+          # Detect app binary from project_description.json
+          APP_BIN=$(python3 -c "
+          import json
+          with open('build/project_description.json') as f:
+              d = json.load(f)
+          print('build/' + d['app_bin'])
+          ")
+
+          # Merge factory binary (bootloader + partition table + app)
+          python3 -m esptool --chip esp32p4 merge_bin \
+            --flash_mode dio \
+            --flash_size 32MB \
+            --flash_freq 80m \
+            -o firmware/nina-display-factory.bin \
+            0x2000  build/bootloader/bootloader.bin \
+            0x8000  build/partition_table/partition-table.bin \
+            0x20000 "$APP_BIN"
+
+          # Copy app binary as OTA file
+          cp "$APP_BIN" firmware/nina-display-ota.bin
+
+          # Keep bootloader + partition table on disk (build/ tree) for local
+          # inspection only. They are not uploaded as release assets.
+          cp build/bootloader/bootloader.bin firmware/bootloader.bin
+          cp build/partition_table/partition-table.bin firmware/partition-table.bin
+
+          # Copy ELF for crash backtrace decoding
+          APP_ELF=$(python3 -c "
+          import json
+          with open('build/project_description.json') as f:
+              d = json.load(f)
+          print('build/' + d['app_elf'])
+          ")
+          cp "$APP_ELF" firmware/nina-display.elf
+
+          # Report sizes
+          echo "Factory: $(du -h firmware/nina-display-factory.bin | cut -f1)"
+          echo "OTA:     $(du -h firmware/nina-display-ota.bin | cut -f1)"
+
+      - name: Check for network_adapter.bin
+        if: steps.check_skip.outputs.skip != 'true'
+        id: network_adapter
+        run: |
+          if [ -f "network_adapter.bin" ]; then
+            cp network_adapter.bin firmware/
+            echo "included=true" >> $GITHUB_OUTPUT
+          else
+            echo "included=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish rolling alpha pre-release
+        if: steps.check_skip.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="snd-alpha"
+          SHORT_SHA="${{ steps.tag.outputs.short_sha }}"
+
+          # Move the rolling tag to this commit and force-push it.
+          git tag -f "$TAG"
+          git push origin "$TAG" --force
+
+          # Delete the existing rolling pre-release so only ONE remains
+          # (no accumulation across snd pushes).
+          gh release delete "$TAG" --yes 2>/dev/null || true
+
+          # Build the release body. The HTML-comment markers below are parsed
+          # by the device's update checker; the nina:sha marker carries the
+          # full 40-char commit SHA.
+          cat > /tmp/snd-notes.md << EOF
+          Rolling alpha build from the snd branch. This pre-release is overwritten on every push to snd.
+          Commit: ${GITHUB_SHA}
+
+          <!-- nina:channel=alpha -->
+          <!-- nina:sha=${GITHUB_SHA} -->
+          <!-- nina:full_erase=0 -->
+          EOF
+
+          # --target pins the release (and the rolling tag) to the commit
+          # actually built.
+          gh release create "$TAG" \
+            firmware/nina-display-factory.bin \
+            firmware/nina-display-ota.bin \
+            firmware/nina-display.elf \
+            --target "$GITHUB_SHA" \
+            --title "snd-alpha (${SHORT_SHA})" \
+            --notes-file /tmp/snd-notes.md \
+            --prerelease
