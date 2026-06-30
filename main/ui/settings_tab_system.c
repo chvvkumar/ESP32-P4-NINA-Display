@@ -481,7 +481,7 @@ static void create_firmware_card(lv_obj_t *parent) {
         }
 
         dd_update_channel = lv_dropdown_create(row);
-        lv_dropdown_set_options(dd_update_channel, "Stable\nPre-releases");
+        lv_dropdown_set_options(dd_update_channel, "Stable\nPre-releases\nAlpha (snd)");
         lv_obj_set_width(dd_update_channel, 180);
         lv_obj_set_style_text_font(dd_update_channel, &lv_font_montserrat_16, 0);
         if (current_theme) {

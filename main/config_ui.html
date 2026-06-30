@@ -1991,8 +1991,9 @@
           <select class="input" id="update_channel">
             <option value="0">Stable only</option>
             <option value="1">Include pre-releases</option>
+            <option value="2">Alpha (snd)</option>
           </select>
-          <div class="field-hint">Stable only skips pre-release builds; Include pre-releases also offers beta firmware.</div>
+          <div class="field-hint">Stable only skips pre-release builds; Include pre-releases also offers beta firmware. Alpha (snd) installs experimental snd-branch builds; expect frequent changes.</div>
         </div>
         <button class="btn btn-primary" style="margin-top:12px;width:100%" id="checkUpdateBtn" onclick="checkForUpdates()">Check for Updates</button>
         <div id="updateResult" style="display:none;margin-top:12px;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.03)">
@@ -4698,7 +4699,8 @@
             var rel=releases[i];
             if(rel.draft===true) continue;
             var isPre=rel.prerelease===true;
-            if(channel===1){ if(!isPre) continue; }   // pre-release channel: only pre-releases
+            if(channel===2){ if(rel.tag_name!=='snd-alpha') continue; }  // alpha channel: only the snd-alpha rolling release
+            else if(channel===1){ if(!isPre || rel.tag_name==='snd-alpha') continue; }  // pre-release channel: pre-releases except snd-alpha
             else { if(isPre) continue; }              // stable channel: only stable releases
             if(rel.tag_name===_updateInfo.current_version) break;
             if(count>=20) break;

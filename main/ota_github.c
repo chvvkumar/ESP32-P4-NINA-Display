@@ -12,6 +12,7 @@
 #include "freertos/semphr.h"
 #include "cJSON.h"
 #include <string.h>
+#include <strings.h>
 #include <stdlib.h>
 
 static const char *TAG = "ota_github";
@@ -25,6 +26,7 @@ static const char *TAG = "ota_github";
 #define OTA_BUF_SIZE      4096
 #define MAX_RESPONSE_SIZE (128 * 1024)
 #define OTA_ASSET_NAME    "nina-display-ota.bin"
+#define SND_ALPHA_TAG     "snd-alpha"   /* fixed tag of the rolling Alpha (snd) pre-release */
 
 /* ── Semver comparison ──────────────────────────────────────────────── */
 
@@ -72,6 +74,53 @@ static int compare_versions(const char *v1, const char *v2) {
     }
 
     return 0;  /* neither has suffix */
+}
+
+/* ── Alpha (snd) freshness via commit-sha marker ──────────────────── */
+
+/*
+ * The Alpha (snd) release tag is constant ("snd-alpha"), so semver comparison
+ * cannot tell a fresh build from the installed one. Instead the release body
+ * carries a marker: "<!-- nina:sha=<commit sha> -->". This returns true when the
+ * marker sha differs from the running firmware's BUILD_GIT_SHA (update available).
+ *
+ * Comparison is case-insensitive over min(strlen(marker), strlen(BUILD_GIT_SHA))
+ * characters, requiring at least 7 hex chars compared (BUILD_GIT_SHA is the short
+ * sha). A missing or too-short marker is treated as "no update" (fail safe).
+ */
+static bool alpha_marker_indicates_update(const char *body_str) {
+    if (!body_str) return false;
+
+    const char *m = strstr(body_str, "nina:sha=");
+    if (!m) return false;
+    m += strlen("nina:sha=");
+
+    /* Copy the hex sha up to the next whitespace or end-of-marker. */
+    char marker_sha[64] = {0};
+    size_t n = 0;
+    while (m[n] && n < sizeof(marker_sha) - 1) {
+        char c = m[n];
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '-' || c == '>') break;
+        marker_sha[n] = c;
+        n++;
+    }
+    marker_sha[n] = '\0';
+
+    size_t mlen = strlen(marker_sha);
+    size_t blen = strlen(BUILD_GIT_SHA);
+    size_t cmp = (mlen < blen) ? mlen : blen;
+    if (cmp < 7) {
+        ESP_LOGW(TAG, "Alpha sha marker too short (%u chars), not offering update", (unsigned)mlen);
+        return false;   /* fail safe: do not offer */
+    }
+
+    if (strncasecmp(marker_sha, BUILD_GIT_SHA, cmp) == 0) {
+        ESP_LOGI(TAG, "Alpha sha matches running build (%.*s), no update", (int)cmp, BUILD_GIT_SHA);
+        return false;   /* same commit → no update */
+    }
+
+    ESP_LOGI(TAG, "Alpha sha differs (marker=%s build=%s), update available", marker_sha, BUILD_GIT_SHA);
+    return true;
 }
 
 /* ── Strip markdown images ![alt](url) from a string in-place ─────── */
@@ -277,11 +326,94 @@ static cJSON *fetch_releases_page(int page, bool *overflow_out) {
 
 /* ── Check GitHub for updates ─────────────────────────────────────── */
 
-bool ota_github_check(bool include_prereleases, const char *current_version, github_release_info_t *out) {
+/* Resolve the OTA download URL in-place (follows the GitHub 302 redirect to the
+ * S3 asset). Used after a release target has been captured into *out. */
+static void resolve_ota_download_url(github_release_info_t *out);
+
+bool ota_github_check(int channel, const char *current_version, github_release_info_t *out) {
     if (!current_version || !out) return false;
 
+    /* channel: 0 = Stable, 1 = Pre-releases / Beta, 2 = Alpha (snd). */
+    const char *channel_name = (channel == 2) ? "alpha (snd)" :
+                               (channel == 1) ? "pre-release" : "stable";
     ESP_LOGI(TAG, "Checking GitHub for updates (current: %s, channel: %s)",
-             current_version, include_prereleases ? "pre-release" : "stable");
+             current_version, channel_name);
+    bool include_prereleases = (channel == 1);
+
+    /* ── Alpha (snd) channel ──────────────────────────────────────────────
+     * The Alpha release is a single rolling pre-release with the constant tag
+     * SND_ALPHA_TAG. Freshness is determined by the commit-sha marker in the
+     * release body (not semver), and requires_full_erase is always false (the
+     * body marker is nina:full_erase=0). Scan pages for the snd-alpha release,
+     * verify its sha marker against the running build, and offer it if newer. */
+    if (channel == 2) {
+        for (int page = 1; page <= MAX_RELEASE_PAGES; page++) {
+            bool overflow = false;
+            cJSON *releases = fetch_releases_page(page, &overflow);
+            if (!releases) {
+                ESP_LOGW(TAG, "Alpha (snd) fetch %s on page %d",
+                         overflow ? "overflowed" : "failed", page);
+                break;
+            }
+            int count = cJSON_GetArraySize(releases);
+            for (int i = 0; i < count; i++) {
+                cJSON *release = cJSON_GetArrayItem(releases, i);
+                if (!release) continue;
+                cJSON *draft = cJSON_GetObjectItem(release, "draft");
+                if (cJSON_IsTrue(draft)) continue;
+                cJSON *tag = cJSON_GetObjectItem(release, "tag_name");
+                if (!cJSON_IsString(tag) || !tag->valuestring) continue;
+                if (strcmp(tag->valuestring, SND_ALPHA_TAG) != 0) continue;  /* only snd-alpha */
+
+                cJSON *body = cJSON_GetObjectItem(release, "body");
+                const char *body_str = cJSON_IsString(body) ? body->valuestring : "";
+
+                if (!alpha_marker_indicates_update(body_str)) {
+                    cJSON_Delete(releases);
+                    ESP_LOGI(TAG, "Alpha (snd) up to date");
+                    return false;
+                }
+
+                /* Locate the OTA asset on the snd-alpha release. */
+                const char *ota_url = NULL;
+                cJSON *assets = cJSON_GetObjectItem(release, "assets");
+                if (cJSON_IsArray(assets)) {
+                    int asset_count = cJSON_GetArraySize(assets);
+                    for (int j = 0; j < asset_count; j++) {
+                        cJSON *asset = cJSON_GetArrayItem(assets, j);
+                        cJSON *name = cJSON_GetObjectItem(asset, "name");
+                        if (cJSON_IsString(name) && strcmp(name->valuestring, OTA_ASSET_NAME) == 0) {
+                            cJSON *url = cJSON_GetObjectItem(asset, "browser_download_url");
+                            if (cJSON_IsString(url)) ota_url = url->valuestring;
+                            break;
+                        }
+                    }
+                }
+                if (!ota_url) {
+                    ESP_LOGW(TAG, "Alpha (snd) release has no %s asset", OTA_ASSET_NAME);
+                    cJSON_Delete(releases);
+                    return false;
+                }
+
+                memset(out, 0, sizeof(*out));
+                strncpy(out->tag, tag->valuestring, sizeof(out->tag) - 1);
+                out->tag[sizeof(out->tag) - 1] = '\0';
+                extract_summary(body_str, out->summary, sizeof(out->summary));
+                strncpy(out->ota_url, ota_url, sizeof(out->ota_url) - 1);
+                out->ota_url[sizeof(out->ota_url) - 1] = '\0';
+                out->is_prerelease = true;
+                out->requires_full_erase = false;   /* alpha body marker is nina:full_erase=0 */
+                out->full_erase_tag[0] = '\0';
+                cJSON_Delete(releases);
+                ESP_LOGI(TAG, "Alpha (snd) update target: %s", out->tag);
+                resolve_ota_download_url(out);
+                return true;
+            }
+            cJSON_Delete(releases);
+        }
+        ESP_LOGI(TAG, "No Alpha (snd) release found");
+        return false;
+    }
 
     /* Detect channel switch: current version type doesn't match target channel.
      * When switching channels (e.g. pre-release → stable), the normal version
@@ -350,6 +482,10 @@ bool ota_github_check(bool include_prereleases, const char *current_version, git
             /* Get tag name */
             cJSON *tag = cJSON_GetObjectItem(release, "tag_name");
             if (!cJSON_IsString(tag) || !tag->valuestring) continue;
+
+            /* The Alpha (snd) rolling release belongs only to channel 2 (handled
+             * above); never offer it on the Stable or Pre-release/Beta channels. */
+            if (strcmp(tag->valuestring, SND_ALPHA_TAG) == 0) continue;
 
             /* Classify by version. When switching channels the version check is
              * skipped so the latest in-channel release is always the target. */
@@ -447,20 +583,28 @@ bool ota_github_check(bool include_prereleases, const char *current_version, git
         out->full_erase_tag[sizeof(out->full_erase_tag) - 1] = '\0';
     }
 
-    /*
-     * Resolve redirect chain: browser_download_url redirects via 302 from
-     * github.com to objects.githubusercontent.com (S3).  We resolve here
-     * because the OTA download task uses open/read which doesn't follow
-     * redirects.  With auto-redirect disabled, the client won't retain the
-     * Location header internally, so we capture it via an event handler
-     * during HTTP_EVENT_ON_HEADER.  Using GET+perform() with auto-redirect
-     * off — perform() completes at the 302 without chasing the redirect.
-     */
+    resolve_ota_download_url(out);
+    return true;
+}
+
+/* ── Resolve the OTA download URL (follow the GitHub 302 redirect) ─── */
+
+/*
+ * Resolve redirect chain: browser_download_url redirects via 302 from
+ * github.com to objects.githubusercontent.com (S3).  We resolve here
+ * because the OTA download task uses open/read which doesn't follow
+ * redirects.  With auto-redirect disabled, the client won't retain the
+ * Location header internally, so we capture it via an event handler
+ * during HTTP_EVENT_ON_HEADER.  Using GET+perform() with auto-redirect
+ * off — perform() completes at the 302 without chasing the redirect.
+ * On any failure out->ota_url is left at the original (still valid) URL.
+ */
+static void resolve_ota_download_url(github_release_info_t *out) {
     ESP_LOGI(TAG, "Resolving OTA download URL...");
     char *resolved_url = heap_caps_calloc(1, 2048, MALLOC_CAP_SPIRAM);
     if (!resolved_url) {
         ESP_LOGE(TAG, "Failed to allocate resolved_url");
-        return true;  /* URL still valid, just unresolved */
+        return;  /* URL still valid, just unresolved */
     }
     redirect_ctx_t redir_ctx = {
         .url_buf = resolved_url,
@@ -495,7 +639,6 @@ bool ota_github_check(bool include_prereleases, const char *current_version, git
     }
 
     free(resolved_url);
-    return true;
 }
 
 /* ── Download and flash OTA binary ────────────────────────────────── */

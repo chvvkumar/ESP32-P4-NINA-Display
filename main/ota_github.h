@@ -20,12 +20,14 @@ typedef struct {
 
 /**
  * Check GitHub for a newer firmware release.
- * @param include_prereleases If true, also consider pre-release versions
+ * @param channel Update channel: 0 = Stable (released builds), 1 = Pre-releases
+ *                / Beta (excluding the Alpha snd-alpha release), 2 = Alpha (snd)
+ *                (only the rolling snd-alpha pre-release).
  * @param current_version Current firmware version string (e.g., "1.0.12")
  * @param out Filled with release info if update available
  * @return true if a newer release is available, false otherwise
  */
-bool ota_github_check(bool include_prereleases, const char *current_version, github_release_info_t *out);
+bool ota_github_check(int channel, const char *current_version, github_release_info_t *out);
 
 /**
  * Download and flash an OTA binary from a URL.

@@ -2781,6 +2781,11 @@ static bool validate_config(app_config_t *cfg) {
         cfg->brightness = 50;
         fixed = true;
     }
+    /* Update channel: 0=Stable, 1=Pre-releases/Beta, 2=Alpha (snd). */
+    if (cfg->update_channel > 2) {
+        cfg->update_channel = 0;
+        fixed = true;
+    }
     if (cfg->mqtt_topic_prefix[0] == '\0') {
         strcpy(cfg->mqtt_topic_prefix, "ninadisplay");
         fixed = true;
