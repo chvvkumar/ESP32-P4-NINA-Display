@@ -2294,9 +2294,9 @@ void data_update_task(void *arg) {
         ESP_LOGI(TAG, "Checking for firmware updates...");
         github_release_info_t *rel = heap_caps_calloc(1, sizeof(github_release_info_t), MALLOC_CAP_SPIRAM);
         if (rel) {
-            bool include_pre = (app_config_get()->update_channel == 1);
+            int update_channel = app_config_get()->update_channel;
             const char *cur_ver = ota_github_get_current_version();
-            if (ota_github_check(include_pre, cur_ver, rel)) {
+            if (ota_github_check(update_channel, cur_ver, rel)) {
                 ESP_LOGI(TAG, "New firmware available: %s", rel->tag);
                 if (rel->requires_full_erase) {
                     /* This release cannot be installed over WiFi — show a
@@ -2707,9 +2707,9 @@ main_loop:
             ESP_LOGI(TAG, "On-demand firmware update check...");
             github_release_info_t *rel = heap_caps_calloc(1, sizeof(github_release_info_t), MALLOC_CAP_SPIRAM);
             if (rel) {
-                bool include_pre = (app_config_get()->update_channel == 1);
+                int update_channel = app_config_get()->update_channel;
                 const char *cur_ver = ota_github_get_current_version();
-                bool update_found = ota_github_check(include_pre, cur_ver, rel);
+                bool update_found = ota_github_check(update_channel, cur_ver, rel);
                 if (update_found && rel->requires_full_erase) {
                     /* This release cannot be installed over WiFi — show a
                      * blocking warning and wait only for dismissal. */

@@ -185,6 +185,11 @@
     .help-popover p { margin:0 0 8px; color:var(--text-muted); }
     .help-popover p:last-child { margin-bottom:0; }
     .help-popover ul { margin:6px 0 8px; padding-left:18px; color:var(--text-muted); }
+    .help-popover table.help-scenario { width:100%; border-collapse:collapse; margin:8px 0 2px; font-size:0.75rem; }
+    .help-popover table.help-scenario th { text-align:left; color:var(--text-muted); font-weight:600; padding:4px 10px 5px 0; border-bottom:1px solid var(--border); }
+    .help-popover table.help-scenario td { padding:6px 10px 6px 0; color:var(--text-secondary); vertical-align:top; border-bottom:1px solid rgba(255,255,255,0.05); line-height:1.4; }
+    .help-popover table.help-scenario td:last-child { color:var(--accent); }
+    .help-popover table.help-scenario tr:last-child td { border-bottom:none; }
     .help-popover li { margin:0 0 5px; }
     .help-popover li:last-child { margin-bottom:0; }
     .help-popover strong { color:var(--text); font-weight:600; }
@@ -1563,11 +1568,11 @@
 
       <div class="card">
         <div class="card-title"><span class="card-title-label">Page Navigation <span id="pm_summary" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span> <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
-        <div class="help-popover"><div class="help-popover-title">Page Navigation</div><p>The display picks which page to show on its own, based on a few simple rules. You can always swipe or tap to take over for a while; after the stay-on-page time passes, the display goes back to deciding on its own.</p><p>There are two main controls. <strong>Home Page</strong> is where the display settles when nothing else is happening. If you set Home Page to a NINA instance, the display also returns there while that instance is imaging. <strong>Auto Cycle</strong> rotates through the pages you pick. Turning Auto Cycle on replaces the resting-on-Home-Page behavior, so only one of the two is active at a time.</p><p>Examples:</p><ul><li><strong>Home Page set to a NINA instance, Auto Cycle off:</strong> the display rests on that instance and returns to it while it is imaging.</li><li><strong>Auto Cycle on with a few pages selected:</strong> the display rotates through just those pages, one after another.</li><li><strong>You swipe to another page:</strong> it stays on that page for the stay-on-page time, then returns to its automatic choice.</li><li><strong>All NINA instances disconnected, no-connections page turned on:</strong> the display switches to the page you chose for that situation.</li><li><strong>Home Page set to Clock or Summary, nothing imaging:</strong> the display rests on that page.</li></ul></div>
+        <div class="help-popover"><div class="help-popover-title">Page Navigation</div><p>The display chooses a page automatically. Swipe or tap any time to take over; it returns to its automatic choice after the stay-on-page time. This table shows what appears in each situation.</p><table class="help-scenario"><thead><tr><th>In this situation</th><th>You'll see</th></tr></thead><tbody><tr><td>You just swiped or tapped</td><td>That page, held briefly</td></tr><tr><td>Auto Cycle is on</td><td>Pages rotate in turn</td></tr><tr><td>One NINA instance online</td><td>That instance's dashboard</td></tr><tr><td>Several instances online</td><td>Your Home instance if it is one of them, otherwise the Summary page</td></tr><tr><td>All instances offline, "Switch when no connections" on</td><td>Your chosen fallback page</td></tr><tr><td>All instances offline, that option off</td><td>Your Home Page</td></tr><tr><td>Quiet, nothing happening</td><td>Your Home Page</td></tr></tbody></table></div>
 
         <div class="pn-section-label">Home Page</div>
         <div class="pn-pill-grid" id="start-page-pills"></div>
-        <div class="field-hint">The page the display settles on; when set to a NINA instance, the display also returns to that instance during an imaging session.</div>
+        <div class="field-hint">The page the display settles on; when set to a NINA instance, the display also returns to that instance whenever it is online.</div>
 
         <div class="pn-divider"></div>
 
@@ -1986,8 +1991,9 @@
           <select class="input" id="update_channel">
             <option value="0">Stable only</option>
             <option value="1">Include pre-releases</option>
+            <option value="2">Alpha (snd)</option>
           </select>
-          <div class="field-hint">Stable only skips pre-release builds; Include pre-releases also offers beta firmware.</div>
+          <div class="field-hint">Stable only skips pre-release builds; Include pre-releases also offers beta firmware. Alpha (snd) installs experimental snd-branch builds; expect frequent changes.</div>
         </div>
         <button class="btn btn-primary" style="margin-top:12px;width:100%" id="checkUpdateBtn" onclick="checkForUpdates()">Check for Updates</button>
         <div id="updateResult" style="display:none;margin-top:12px;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.03)">
@@ -4693,7 +4699,8 @@
             var rel=releases[i];
             if(rel.draft===true) continue;
             var isPre=rel.prerelease===true;
-            if(channel===1){ if(!isPre) continue; }   // pre-release channel: only pre-releases
+            if(channel===2){ if(rel.tag_name!=='snd-alpha') continue; }  // alpha channel: only the snd-alpha rolling release
+            else if(channel===1){ if(!isPre || rel.tag_name==='snd-alpha') continue; }  // pre-release channel: pre-releases except snd-alpha
             else { if(isPre) continue; }              // stable channel: only stable releases
             if(rel.tag_name===_updateInfo.current_version) break;
             if(count>=20) break;

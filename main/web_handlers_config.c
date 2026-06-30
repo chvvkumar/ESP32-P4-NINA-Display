@@ -1100,7 +1100,8 @@ static app_config_t *parse_config_from_json(cJSON *root)
     cJSON *update_ch = cJSON_GetObjectItem(root, "update_channel");
     if (cJSON_IsNumber(update_ch)) {
         int v = update_ch->valueint;
-        cfg->update_channel = (v == 1) ? 1 : 0;
+        if (v < 0 || v > 2) v = 0;
+        cfg->update_channel = (uint8_t)v;
     }
 
     cJSON *rot_item = cJSON_GetObjectItem(root, "screen_rotation");
