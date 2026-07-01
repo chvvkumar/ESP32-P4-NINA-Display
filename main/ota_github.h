@@ -18,16 +18,26 @@ typedef struct {
                                // fail-safe fired on an unverifiable update history.
 } github_release_info_t;
 
+typedef enum {
+    OTA_CHECK_UP_TO_DATE = 0,   /* definitive: no newer release available */
+    OTA_CHECK_UPDATE_AVAILABLE, /* *out filled with the target release */
+    OTA_CHECK_ERROR,            /* transient: network/rate-limit/unverifiable — retry, NOT up-to-date, NOT manual-flash */
+} ota_check_result_t;
+
 /**
  * Check GitHub for a newer firmware release.
  * @param channel Update channel: 0 = Stable (released builds), 1 = Pre-releases
  *                / Beta (excluding the Alpha snd-alpha release), 2 = Alpha (snd)
  *                (only the rolling snd-alpha pre-release).
  * @param current_version Current firmware version string (e.g., "1.0.12")
- * @param out Filled with release info if update available
- * @return true if a newer release is available, false otherwise
+ * @param out Filled with release info when the result is OTA_CHECK_UPDATE_AVAILABLE
+ * @return OTA_CHECK_UPDATE_AVAILABLE when a newer release is available (*out filled);
+ *         OTA_CHECK_UP_TO_DATE when definitively on the latest release;
+ *         OTA_CHECK_ERROR on a transient failure (network/rate-limit/unverifiable
+ *         history) — the caller should retry and must not treat this as up-to-date
+ *         or as a manual-flash requirement.
  */
-bool ota_github_check(int channel, const char *current_version, github_release_info_t *out);
+ota_check_result_t ota_github_check(int channel, const char *current_version, github_release_info_t *out);
 
 /**
  * Download and flash an OTA binary from a URL.
