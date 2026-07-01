@@ -2,9 +2,10 @@
  * @file settings_tab_display.c
  * @brief Display tab for on-device settings tabview.
  *
- * Contains two cards:
- *   1. Appearance — theme dropdown, widget style dropdown, text brightness slider
- *   2. Page Navigation — segmented control (Manual/Fixed/Cycle) with conditional
+ * Contains three cards:
+ *   1. Appearance — theme dropdown, widget style dropdown, rotation dropdown
+ *   2. Brightness — screen backlight slider, text brightness slider
+ *   3. Page Navigation — segmented control (Manual/Fixed/Cycle) with conditional
  *      sub-sections for Fixed (pinned page) and Cycle (interval, transition,
  *      skip-offline, page checkboxes) modes.
  *
@@ -21,6 +22,7 @@
 #include "ui_styles.h"
 #include "tasks.h"
 #include "lvgl.h"
+#include "bsp/esp-bsp.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -31,9 +33,13 @@ static lv_obj_t *tab_root = NULL;
 /* Appearance */
 static lv_obj_t *dd_theme = NULL;
 static lv_obj_t *dd_widget_style = NULL;
+static lv_obj_t *dd_rotation = NULL;
+
+/* Brightness */
+static lv_obj_t *slider_backlight = NULL;
+static lv_obj_t *lbl_backlight_val = NULL;
 static lv_obj_t *slider_text_bright = NULL;
 static lv_obj_t *lbl_text_bright_val = NULL;
-static lv_obj_t *sw_demo_mode = NULL;
 
 /* Page Navigation */
 static lv_obj_t *seg_mode = NULL;
@@ -50,11 +56,15 @@ static lv_obj_t *cb_pages[6];
 /* ── Segment button map ─────────────────────────────────────────────── */
 static const char *seg_map[] = {"Manual", "Fixed", "Cycle", ""};
 
+/* ── Rotation dropdown options ───────────────────────────────────────── */
+static const char *rotation_opts = "0\xc2\xb0\n90\xc2\xb0\n180\xc2\xb0\n270\xc2\xb0";
+
 /* ── Forward declarations ───────────────────────────────────────────── */
 static void theme_dd_changed_cb(lv_event_t *e);
 static void widget_style_dd_changed_cb(lv_event_t *e);
+static void rotation_changed_cb(lv_event_t *e);
+static void backlight_changed_cb(lv_event_t *e);
 static void text_bright_changed_cb(lv_event_t *e);
-static void demo_mode_changed_cb(lv_event_t *e);
 static void page_mode_changed_cb(lv_event_t *e);
 static void pinned_page_changed_cb(lv_event_t *e);
 static void interval_minus_cb(lv_event_t *e);
@@ -189,7 +199,7 @@ static void ar_order_remove(app_config_t *cfg, uint8_t code)
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
- *  Appearance Card — Theme / Widget Style / Text Brightness
+ *  Appearance Card — Theme / Widget Style / Rotation
  * ═══════════════════════════════════════════════════════════════════════ */
 
 static void build_theme_options(char *buf, size_t buf_size)
@@ -217,7 +227,7 @@ static void create_appearance_card(lv_obj_t *parent)
 
     /* ── Theme row ── */
     {
-        lv_obj_t *row = settings_make_row(card);
+        lv_obj_t *row = settings_make_row_lg(card);
 
         lv_obj_t *lbl = lv_label_create(row);
         lv_label_set_text(lbl, "Theme");
@@ -253,7 +263,7 @@ static void create_appearance_card(lv_obj_t *parent)
 
     /* ── Widget style row ── */
     {
-        lv_obj_t *row = settings_make_row(card);
+        lv_obj_t *row = settings_make_row_lg(card);
 
         lv_obj_t *lbl = lv_label_create(row);
         lv_label_set_text(lbl, "Widget Style");
@@ -287,14 +297,110 @@ static void create_appearance_card(lv_obj_t *parent)
 
     settings_make_divider(card);
 
-    /* ── Text brightness row ── */
+    /* ── Rotation row (moved from Behavior Hardware card) ── */
     {
-        lv_obj_t *row = settings_make_row(card);
+        lv_obj_t *row = settings_make_row_lg(card);
 
         lv_obj_t *lbl = lv_label_create(row);
-        lv_label_set_text(lbl, "Text Brightness");
+        lv_label_set_text(lbl, "Rotation");
         lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
-        lv_obj_set_style_min_width(lbl, 130, 0);
+        if (current_theme) {
+            int gb = app_config_get()->color_brightness;
+            lv_obj_set_style_text_color(lbl,
+                lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+        }
+
+        dd_rotation = lv_dropdown_create(row);
+        lv_dropdown_set_options(dd_rotation, rotation_opts);
+        lv_obj_set_width(dd_rotation, 160);
+        lv_dropdown_set_selected(dd_rotation, app_config_get()->screen_rotation);
+
+        if (current_theme) {
+            int gb = app_config_get()->color_brightness;
+            lv_obj_set_style_bg_color(dd_rotation, lv_color_hex(current_theme->bento_bg), 0);
+            lv_obj_set_style_bg_opa(dd_rotation, LV_OPA_COVER, 0);
+            lv_obj_set_style_text_color(dd_rotation,
+                lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+            lv_obj_set_style_border_color(dd_rotation, lv_color_hex(current_theme->bento_border), 0);
+            lv_obj_set_style_border_width(dd_rotation, 1, 0);
+        }
+
+        lv_obj_add_event_cb(dd_rotation, rotation_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ *  Brightness Card — Screen backlight / Text brightness
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+static void create_brightness_card(lv_obj_t *parent)
+{
+    lv_obj_t *card = settings_make_card(parent, "Brightness");
+
+    /* ── Screen backlight row (moved from Behavior Hardware card) ── */
+    {
+        lv_obj_t *row = settings_make_row_lg(card);
+
+        lv_obj_t *lbl = lv_label_create(row);
+        lv_label_set_text(lbl, "Screen");
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
+        lv_obj_set_style_min_width(lbl, 100, 0);
+        if (current_theme) {
+            int gb = app_config_get()->color_brightness;
+            lv_obj_set_style_text_color(lbl,
+                lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+        }
+
+        /* Slider + value in a sub-container */
+        lv_obj_t *ctrl = lv_obj_create(row);
+        lv_obj_remove_style_all(ctrl);
+        lv_obj_set_flex_grow(ctrl, 1);
+        lv_obj_set_height(ctrl, 50);
+        lv_obj_set_flex_flow(ctrl, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(ctrl, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_column(ctrl, 10, 0);
+
+        slider_backlight = lv_slider_create(ctrl);
+        lv_obj_set_flex_grow(slider_backlight, 1);
+        lv_obj_set_height(slider_backlight, 16);
+        lv_slider_set_range(slider_backlight, 0, 100);
+        lv_slider_set_value(slider_backlight, app_config_get()->brightness, LV_ANIM_OFF);
+        lv_obj_set_style_radius(slider_backlight, 8, 0);
+        lv_obj_set_style_radius(slider_backlight, 8, LV_PART_INDICATOR);
+        lv_obj_set_style_radius(slider_backlight, LV_RADIUS_CIRCLE, LV_PART_KNOB);
+        lv_obj_set_style_pad_all(slider_backlight, 8, LV_PART_KNOB);
+        if (current_theme) {
+            lv_obj_set_style_bg_color(slider_backlight, lv_color_hex(current_theme->bento_border), 0);
+            lv_obj_set_style_bg_opa(slider_backlight, LV_OPA_COVER, 0);
+            lv_obj_set_style_bg_color(slider_backlight, lv_color_hex(current_theme->progress_color), LV_PART_INDICATOR);
+            lv_obj_set_style_bg_opa(slider_backlight, LV_OPA_COVER, LV_PART_INDICATOR);
+            lv_obj_set_style_bg_color(slider_backlight, lv_color_hex(current_theme->progress_color), LV_PART_KNOB);
+            lv_obj_set_style_bg_opa(slider_backlight, LV_OPA_COVER, LV_PART_KNOB);
+        }
+        lv_obj_add_event_cb(slider_backlight, backlight_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+        lbl_backlight_val = lv_label_create(ctrl);
+        lv_obj_set_style_text_font(lbl_backlight_val, &lv_font_montserrat_20, 0);
+        lv_obj_set_style_min_width(lbl_backlight_val, 50, 0);
+        lv_obj_set_style_text_align(lbl_backlight_val, LV_TEXT_ALIGN_RIGHT, 0);
+        if (current_theme) {
+            int gb = app_config_get()->color_brightness;
+            lv_obj_set_style_text_color(lbl_backlight_val,
+                lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+        }
+        lv_label_set_text_fmt(lbl_backlight_val, "%d%%", app_config_get()->brightness);
+    }
+
+    settings_make_divider(card);
+
+    /* ── Text brightness row (moved out of Appearance) ── */
+    {
+        lv_obj_t *row = settings_make_row_lg(card);
+
+        lv_obj_t *lbl = lv_label_create(row);
+        lv_label_set_text(lbl, "Text");
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
+        lv_obj_set_style_min_width(lbl, 100, 0);
         if (current_theme) {
             int gb = app_config_get()->color_brightness;
             lv_obj_set_style_text_color(lbl,
@@ -341,29 +447,13 @@ static void create_appearance_card(lv_obj_t *parent)
         }
         lv_label_set_text_fmt(lbl_text_bright_val, "%d%%", app_config_get()->color_brightness);
     }
-
-    settings_make_divider(card);
-
-    /* ── Demo mode toggle ── */
-    {
-        lv_obj_t *toggle_row = settings_make_toggle_row(card, "Demo Mode", &sw_demo_mode);
-        LV_UNUSED(toggle_row);
-
-        if (app_config_get()->demo_mode) {
-            lv_obj_add_state(sw_demo_mode, LV_STATE_CHECKED);
-        } else {
-            lv_obj_remove_state(sw_demo_mode, LV_STATE_CHECKED);
-        }
-
-        lv_obj_add_event_cb(sw_demo_mode, demo_mode_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
-    }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
  *  Page Navigation Card — Manual / Fixed / Cycle
  * ═══════════════════════════════════════════════════════════════════════ */
 
-static void create_page_nav_card(lv_obj_t *parent)
+static lv_obj_t *create_page_nav_card(lv_obj_t *parent)
 {
     lv_obj_t *card = settings_make_card(parent, "Page Navigation");
 
@@ -591,7 +681,7 @@ static void create_page_nav_card(lv_obj_t *parent)
         for (int i = 0; i < 6; i++) {
             cb_pages[i] = lv_checkbox_create(cb_grid);
             lv_checkbox_set_text(cb_pages[i], page_names[i]);
-            lv_obj_set_style_text_font(cb_pages[i], &lv_font_montserrat_16, 0);
+            lv_obj_set_style_text_font(cb_pages[i], &lv_font_montserrat_18, 0);
             lv_obj_set_style_min_width(cb_pages[i], 130, 0);
 
             if (ar_order_contains(cfg_cb, (uint8_t)i)) {
@@ -640,6 +730,8 @@ static void create_page_nav_card(lv_obj_t *parent)
     /* Set the correct button as checked (no one_checked, so no auto-check on button 0) */
     lv_buttonmatrix_set_button_ctrl(seg_mode, initial_mode, LV_BUTTONMATRIX_CTRL_CHECKED);
     update_mode_visibility(initial_mode);
+
+    return card;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -666,6 +758,25 @@ static void widget_style_dd_changed_cb(lv_event_t *e)
     settings_mark_dirty(false);
 }
 
+static void rotation_changed_cb(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    uint32_t idx = lv_dropdown_get_selected(dd_rotation);
+    app_config_get()->screen_rotation = (uint8_t)idx;
+    lv_display_set_rotation(lv_display_get_default(), idx);
+    settings_mark_dirty(false);
+}
+
+static void backlight_changed_cb(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    int val = lv_slider_get_value(slider_backlight);
+    app_config_get()->brightness = val;
+    bsp_display_brightness_set(val);
+    lv_label_set_text_fmt(lbl_backlight_val, "%d%%", val);
+    settings_mark_dirty(false);
+}
+
 static void text_bright_changed_cb(lv_event_t *e)
 {
     lv_event_code_t code = lv_event_get_code(e);
@@ -682,14 +793,6 @@ static void text_bright_changed_cb(lv_event_t *e)
         nina_dashboard_apply_theme(app_config_get()->theme_index);
         settings_mark_dirty(false);
     }
-}
-
-static void demo_mode_changed_cb(lv_event_t *e)
-{
-    LV_UNUSED(e);
-    if (!sw_demo_mode) return;
-    app_config_get()->demo_mode = lv_obj_has_state(sw_demo_mode, LV_STATE_CHECKED);
-    settings_mark_dirty(true);  /* requires reboot — demo task is spawned at startup */
 }
 
 static void update_mode_visibility(uint32_t mode)
@@ -838,9 +941,11 @@ void settings_tab_display_destroy(void) {
     tab_root = NULL;
     dd_theme = NULL;
     dd_widget_style = NULL;
+    dd_rotation = NULL;
+    slider_backlight = NULL;
+    lbl_backlight_val = NULL;
     slider_text_bright = NULL;
     lbl_text_bright_val = NULL;
-    sw_demo_mode = NULL;
     seg_mode = NULL;
     cont_fixed = NULL;
     dd_pinned_page = NULL;
@@ -864,7 +969,15 @@ void settings_tab_display_create(lv_obj_t *parent)
     lv_obj_set_style_pad_all(parent, 8, 0);
 
     create_appearance_card(parent);
-    create_page_nav_card(parent);
+    create_brightness_card(parent);
+    lv_obj_t *last_card = create_page_nav_card(parent);
+
+    /* Fill the viewport: grow the final card so the empty band below it is
+     * <100px (SETRD-01). The tab page is a COLUMN flex with concrete height,
+     * so growing the last child consumes the remaining vertical space. */
+    if (last_card) {
+        lv_obj_set_flex_grow(last_card, 1);
+    }
 }
 
 void settings_tab_display_refresh(void)
@@ -885,16 +998,22 @@ void settings_tab_display_refresh(void)
         lv_dropdown_set_selected(dd_widget_style, (uint32_t)cfg->widget_style);
     }
 
+    if (dd_rotation) {
+        lv_dropdown_set_selected(dd_rotation, (uint32_t)cfg->screen_rotation);
+    }
+
+    /* Brightness widgets */
+    if (slider_backlight) {
+        lv_slider_set_value(slider_backlight, cfg->brightness, LV_ANIM_OFF);
+    }
+    if (lbl_backlight_val) {
+        lv_label_set_text_fmt(lbl_backlight_val, "%d%%", cfg->brightness);
+    }
     if (slider_text_bright) {
         lv_slider_set_value(slider_text_bright, cfg->color_brightness, LV_ANIM_OFF);
     }
     if (lbl_text_bright_val) {
         lv_label_set_text_fmt(lbl_text_bright_val, "%d%%", cfg->color_brightness);
-    }
-
-    if (sw_demo_mode) {
-        if (cfg->demo_mode) lv_obj_add_state(sw_demo_mode, LV_STATE_CHECKED);
-        else                lv_obj_remove_state(sw_demo_mode, LV_STATE_CHECKED);
     }
 
     /* Page navigation — determine mode. active_page_override always holds a

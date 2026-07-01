@@ -34,12 +34,13 @@
 
 /* ── Layout ──────────────────────────────────────────────────────────── */
 #define ST_ROW_H        50   /* Uniform row height for settings rows */
+#define ST_ROW_H_LG     60   /* Large row height for Display/Nodes rows */
 #define SAVE_BAR_H      48   /* Sticky save bar height */
 #define KB_HEIGHT       280   /* On-screen keyboard height */
 #define TAB_BAR_H        44   /* Tab bar height */
 #define CARD_PAD         12   /* Card internal padding */
 #define CARD_ROW_GAP      8   /* Row gap within cards */
-#define STEPPER_BTN_SZ   46   /* +/- stepper button size */
+#define STEPPER_BTN_SZ   56   /* +/- stepper button size */
 
 /* ── Static State ────────────────────────────────────────────────────── */
 static lv_obj_t *st_root      = NULL;  /* root container */
@@ -227,7 +228,10 @@ void settings_hide_keyboard(void) {
     kb_visible = false;
 
     if (tabview) {
-        lv_obj_set_height(tabview, LV_PCT(100));
+        /* Restore the flex-grow model (not a fixed PCT) so the docked save-bar
+         * reflow is preserved after the keyboard closes. */
+        lv_obj_set_height(tabview, LV_SIZE_CONTENT);
+        lv_obj_set_flex_grow(tabview, 1);
     }
 }
 
@@ -292,6 +296,20 @@ lv_obj_t *settings_make_row(lv_obj_t *parent) {
     lv_obj_remove_style_all(row);
     lv_obj_set_width(row, LV_PCT(100));
     lv_obj_set_height(row, ST_ROW_H);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    return row;
+}
+
+/* Large-row variant (ST_ROW_H_LG=60) for Display/Nodes tabs. Identical flex
+ * flow/align to settings_make_row; kept as a distinct factory so Behavior/System
+ * dense 50px rows are not accidentally enlarged by a shared height param. */
+lv_obj_t *settings_make_row_lg(lv_obj_t *parent) {
+    lv_obj_t *row = lv_obj_create(parent);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_width(row, LV_PCT(100));
+    lv_obj_set_height(row, ST_ROW_H_LG);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -599,8 +617,11 @@ lv_obj_t *settings_tabview_create(lv_obj_t *parent) {
     /* ── Tabview ── */
     tabview = lv_tabview_create(st_root);
     lv_tabview_set_tab_bar_position(tabview, LV_DIR_TOP);
-    lv_tabview_set_tab_bar_size(tabview, TAB_BAR_H);
-    lv_obj_set_size(tabview, LV_PCT(100), LV_PCT(100));
+    lv_tabview_set_tab_bar_size(tabview, 52);
+    /* Height driven by flex grow (not a fixed PCT) so a hidden save bar reflows
+     * and the tabview reclaims the freed dock space. */
+    lv_obj_set_size(tabview, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_grow(tabview, 1);
 
     /* ── Add 4 Tabs ── */
     lv_obj_t *tab_display  = lv_tabview_add_tab(tabview, "Display");
@@ -628,7 +649,7 @@ lv_obj_t *settings_tabview_create(lv_obj_t *parent) {
         lv_obj_set_style_border_width(tab_bar, 0, 0);
         lv_obj_set_style_pad_all(tab_bar, 0, 0);
     }
-    lv_obj_set_style_pad_left(tab_bar, 48, 0);
+    lv_obj_set_style_pad_left(tab_bar, 56, 0);
 
     /* Style tab bar button text */
     if (current_theme) {
@@ -650,12 +671,11 @@ lv_obj_t *settings_tabview_create(lv_obj_t *parent) {
     settings_tab_behavior_create(tab_behavior);
     settings_tab_system_create(tab_system);
 
-    /* ── Save Bar (initially hidden, floating at bottom) ── */
+    /* ── Save Bar (initially hidden; docked column sibling below the tabview) ── */
     save_bar = lv_obj_create(st_root);
     lv_obj_remove_style_all(save_bar);
-    lv_obj_set_size(save_bar, LV_PCT(90), SAVE_BAR_H);
-    lv_obj_add_flag(save_bar, LV_OBJ_FLAG_FLOATING);
-    lv_obj_align(save_bar, LV_ALIGN_BOTTOM_MID, 0, -12);
+    lv_obj_set_size(save_bar, LV_PCT(100), 56);
+    lv_obj_set_flex_grow(save_bar, 0);   /* only the tabview grows; save bar is fixed */
     lv_obj_set_flex_flow(save_bar, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(save_bar, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -678,9 +698,9 @@ lv_obj_t *settings_tabview_create(lv_obj_t *parent) {
     }
     lv_obj_center(lbl_save_btn);
 
-    /* ── Floating back button — bottom-right corner (like graph/sysinfo) ── */
+    /* ── Floating back button — docked over the top tab-bar band, top-left ── */
     lv_obj_t *btn_back = lv_button_create(st_root);
-    lv_obj_set_size(btn_back, 64, 64);
+    lv_obj_set_size(btn_back, 52, 52);
     lv_obj_set_style_radius(btn_back, 14, 0);
     lv_obj_set_style_bg_opa(btn_back, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(btn_back, lv_color_hex(current_theme ? current_theme->bento_border : 0x333333), 0);
@@ -689,7 +709,7 @@ lv_obj_t *settings_tabview_create(lv_obj_t *parent) {
     lv_obj_set_style_shadow_width(btn_back, 0, 0);
     lv_obj_add_flag(btn_back, LV_OBJ_FLAG_FLOATING | LV_OBJ_FLAG_CLICKABLE);
     lv_obj_remove_flag(btn_back, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_align(btn_back, LV_ALIGN_BOTTOM_RIGHT, -10, -10);
+    lv_obj_align(btn_back, LV_ALIGN_TOP_LEFT, 0, 0);
 
     lv_obj_t *lbl_back = lv_label_create(btn_back);
     lv_label_set_text(lbl_back, LV_SYMBOL_LEFT);
