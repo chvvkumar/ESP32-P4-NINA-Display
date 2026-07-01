@@ -42,6 +42,25 @@
 
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: var(--border-em) transparent;
+    }
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--border-em);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(var(--accent-rgb), 0.55);
+    }
+
     body {
       font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: var(--bg);
@@ -2059,17 +2078,17 @@
         </p>
         <div class="field">
           <label for="admin_pw_current">Current password</label>
-          <input type="password" id="admin_pw_current" autocomplete="current-password">
+          <input type="password" class="input" id="admin_pw_current" autocomplete="current-password">
           <div class="field-hint">Enter the password in use now to authorize the change.</div>
         </div>
         <div class="field">
           <label for="admin_pw_new">New password (4-32 chars)</label>
-          <input type="password" id="admin_pw_new" autocomplete="new-password">
+          <input type="password" class="input" id="admin_pw_new" autocomplete="new-password">
           <div class="field-hint">Choose a password 4 to 32 characters long.</div>
         </div>
         <div class="field">
           <label for="admin_pw_confirm">Confirm new password</label>
-          <input type="password" id="admin_pw_confirm" autocomplete="new-password">
+          <input type="password" class="input" id="admin_pw_confirm" autocomplete="new-password">
           <div class="field-hint">Re-enter the new password exactly to confirm.</div>
         </div>
         <button class="btn btn-primary" onclick="changeAdminPassword()">Save Password</button>
