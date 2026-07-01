@@ -330,8 +330,8 @@ static cJSON *fetch_releases_page(int page, bool *overflow_out) {
  * S3 asset). Used after a release target has been captured into *out. */
 static void resolve_ota_download_url(github_release_info_t *out);
 
-bool ota_github_check(int channel, const char *current_version, github_release_info_t *out) {
-    if (!current_version || !out) return false;
+ota_check_result_t ota_github_check(int channel, const char *current_version, github_release_info_t *out) {
+    if (!current_version || !out) return OTA_CHECK_ERROR;
 
     /* channel: 0 = Stable, 1 = Pre-releases / Beta, 2 = Alpha (snd). */
     const char *channel_name = (channel == 2) ? "alpha (snd)" :
@@ -347,12 +347,14 @@ bool ota_github_check(int channel, const char *current_version, github_release_i
      * body marker is nina:full_erase=0). Scan pages for the snd-alpha release,
      * verify its sha marker against the running build, and offer it if newer. */
     if (channel == 2) {
+        bool alpha_fetch_error = false;
         for (int page = 1; page <= MAX_RELEASE_PAGES; page++) {
             bool overflow = false;
             cJSON *releases = fetch_releases_page(page, &overflow);
             if (!releases) {
                 ESP_LOGW(TAG, "Alpha (snd) fetch %s on page %d",
                          overflow ? "overflowed" : "failed", page);
+                alpha_fetch_error = true;
                 break;
             }
             int count = cJSON_GetArraySize(releases);
@@ -371,7 +373,7 @@ bool ota_github_check(int channel, const char *current_version, github_release_i
                 if (!alpha_marker_indicates_update(body_str)) {
                     cJSON_Delete(releases);
                     ESP_LOGI(TAG, "Alpha (snd) up to date");
-                    return false;
+                    return OTA_CHECK_UP_TO_DATE;
                 }
 
                 /* Locate the OTA asset on the snd-alpha release. */
@@ -392,7 +394,7 @@ bool ota_github_check(int channel, const char *current_version, github_release_i
                 if (!ota_url) {
                     ESP_LOGW(TAG, "Alpha (snd) release has no %s asset", OTA_ASSET_NAME);
                     cJSON_Delete(releases);
-                    return false;
+                    return OTA_CHECK_ERROR;
                 }
 
                 memset(out, 0, sizeof(*out));
@@ -407,12 +409,12 @@ bool ota_github_check(int channel, const char *current_version, github_release_i
                 cJSON_Delete(releases);
                 ESP_LOGI(TAG, "Alpha (snd) update target: %s", out->tag);
                 resolve_ota_download_url(out);
-                return true;
+                return OTA_CHECK_UPDATE_AVAILABLE;
             }
             cJSON_Delete(releases);
         }
         ESP_LOGI(TAG, "No Alpha (snd) release found");
-        return false;
+        return alpha_fetch_error ? OTA_CHECK_ERROR : OTA_CHECK_UP_TO_DATE;
     }
 
     /* Detect channel switch: current version type doesn't match target channel.
@@ -444,6 +446,8 @@ bool ota_github_check(int channel, const char *current_version, github_release_i
     bool any_marker = false;            /* OR of nina:full_erase=1 across the path */
     bool reached_installed = false;     /* a fetched in-channel release compared <= installed */
     bool fail_safe = false;             /* history could not be fully verified */
+    bool verify_error = false;          /* transient mid-path fetch failure (retry, not manual-flash) */
+    bool fetch_failed_no_target = false;/* page-1 fetch failed before any target captured */
     char full_erase_tag_local[32] = {0};/* newest marked tag on the path (written once) */
 
     for (int page = 1; page <= MAX_RELEASE_PAGES && !reached_installed; page++) {
@@ -457,14 +461,21 @@ bool ota_github_check(int channel, const char *current_version, github_release_i
             if (found_target) {
                 ESP_LOGW(TAG, "Couldn't verify full update history: page %d fetch %s",
                          page, overflow ? "overflowed" : "failed");
-                fail_safe = true;
+                verify_error = true;
             } else {
                 ESP_LOGW(TAG, "GitHub release fetch failed on page %d with no target found", page);
+                fetch_failed_no_target = true;
             }
             break;
         }
 
         int count = cJSON_GetArraySize(releases);
+        if (count == 0) {
+            /* Empty page: natural end of the releases list, history fully covered. */
+            cJSON_Delete(releases);
+            reached_installed = true;
+            break;
+        }
         for (int i = 0; i < count && !reached_installed; i++) {
             cJSON *release = cJSON_GetArrayItem(releases, i);
             if (!release) continue;
@@ -560,17 +571,23 @@ bool ota_github_check(int channel, const char *current_version, github_release_i
 
     /* Fail-safe (ERASE-05): a target was found but the scan ended without
      * reaching installed (page cap exhausted) — the history is not fully
-     * verified, so never offer OTA. The mid-path fetch-error case above
-     * already set fail_safe. */
-    if (found_target && !reached_installed && !fail_safe) {
+     * verified, so never offer OTA. The mid-path fetch-error case above set
+     * verify_error instead, which short-circuits to OTA_CHECK_ERROR below. */
+    if (found_target && !reached_installed && !fail_safe && !verify_error) {
         ESP_LOGW(TAG, "Couldn't verify full update history: page cap (%d) reached before installed version",
                  MAX_RELEASE_PAGES);
         fail_safe = true;
     }
 
+    /* Transient mid-path fetch failure: history unverifiable, but this is a retry
+     * condition, not a manual-flash requirement. out is caller-owned; leave it. */
+    if (verify_error) {
+        return OTA_CHECK_ERROR;
+    }
+
     if (!found_target) {
         ESP_LOGI(TAG, "No newer release found");
-        return false;
+        return fetch_failed_no_target ? OTA_CHECK_ERROR : OTA_CHECK_UP_TO_DATE;
     }
 
     /* Populate the erase determination on the captured target. */
@@ -584,7 +601,7 @@ bool ota_github_check(int channel, const char *current_version, github_release_i
     }
 
     resolve_ota_download_url(out);
-    return true;
+    return OTA_CHECK_UPDATE_AVAILABLE;
 }
 
 /* ── Resolve the OTA download URL (follow the GitHub 302 redirect) ─── */
