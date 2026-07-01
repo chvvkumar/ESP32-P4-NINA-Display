@@ -4552,6 +4552,7 @@
       fetch('/api/check-update-json').then(function(r){return r.json();}).then(function(data){
         btn.disabled=false; btn.textContent='Check for Updates';
         result.style.display='block';
+        if(data.error){ resultText.innerHTML='⚠️ '+escHtml(data.error); summary.style.display='none'; installBtn.style.display='none'; return; }
         if(data.update_available){
           if(data.requires_full_erase){
             // Manual-update release: block GitHub OTA, show caution copy instead of the install button.
@@ -4654,6 +4655,7 @@
       var pill=$('updatePill');
       if(!pill) return;
       fetch('/api/check-update-json').then(function(r){return r.json();}).then(function(data){
+        if(data&&data.error) return;
         if(data&&data.update_available){
           _updateInfo=data;
           pill.innerHTML=escHtml(data.tag)+' \u2191';

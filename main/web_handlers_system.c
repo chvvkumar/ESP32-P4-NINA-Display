@@ -402,13 +402,17 @@ esp_err_t check_update_json_handler(httpd_req_t *req)
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "current_version", cur_ver);
 
-    if (ota_github_check(update_channel, cur_ver, rel)) {
+    ota_check_result_t chk = ota_github_check(update_channel, cur_ver, rel);
+    if (chk == OTA_CHECK_UPDATE_AVAILABLE) {
         cJSON_AddBoolToObject(root, "update_available", true);
         cJSON_AddStringToObject(root, "tag", rel->tag);
         cJSON_AddStringToObject(root, "summary", rel->summary);
         cJSON_AddBoolToObject(root, "is_prerelease", rel->is_prerelease);
         cJSON_AddBoolToObject(root, "requires_full_erase", rel->requires_full_erase);
         cJSON_AddStringToObject(root, "full_erase_tag", rel->full_erase_tag);
+    } else if (chk == OTA_CHECK_ERROR) {
+        cJSON_AddBoolToObject(root, "update_available", false);
+        cJSON_AddStringToObject(root, "error", "Could not reach GitHub. Try again.");
     } else {
         cJSON_AddBoolToObject(root, "update_available", false);
     }
@@ -450,7 +454,7 @@ esp_err_t ota_github_post_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    if (!ota_github_check(update_channel, cur_ver, rel)) {
+    if (ota_github_check(update_channel, cur_ver, rel) != OTA_CHECK_UPDATE_AVAILABLE) {
         heap_caps_free(rel);
         return send_400(req, "No update available");
     }

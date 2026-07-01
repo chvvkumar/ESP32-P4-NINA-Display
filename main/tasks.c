@@ -2296,7 +2296,8 @@ void data_update_task(void *arg) {
         if (rel) {
             int update_channel = app_config_get()->update_channel;
             const char *cur_ver = ota_github_get_current_version();
-            if (ota_github_check(update_channel, cur_ver, rel)) {
+            ota_check_result_t chk = ota_github_check(update_channel, cur_ver, rel);
+            if (chk == OTA_CHECK_UPDATE_AVAILABLE) {
                 ESP_LOGI(TAG, "New firmware available: %s", rel->tag);
                 if (rel->requires_full_erase) {
                     /* This release cannot be installed over WiFi — show a
@@ -2362,6 +2363,8 @@ void data_update_task(void *arg) {
                         bsp_display_unlock();
                     }
                 }
+            } else if (chk == OTA_CHECK_ERROR) {
+                ESP_LOGW(TAG, "Boot firmware update check failed (network/GitHub); will retry next check");
             } else {
                 ESP_LOGI(TAG, "No firmware update available");
             }
@@ -2709,8 +2712,8 @@ main_loop:
             if (rel) {
                 int update_channel = app_config_get()->update_channel;
                 const char *cur_ver = ota_github_get_current_version();
-                bool update_found = ota_github_check(update_channel, cur_ver, rel);
-                if (update_found && rel->requires_full_erase) {
+                ota_check_result_t chk = ota_github_check(update_channel, cur_ver, rel);
+                if (chk == OTA_CHECK_UPDATE_AVAILABLE && rel->requires_full_erase) {
                     /* This release cannot be installed over WiFi — show a
                      * blocking warning and wait only for dismissal. */
                     ESP_LOGW(TAG, "Firmware %s requires manual USB erase+flash", rel->tag);
@@ -2721,7 +2724,7 @@ main_loop:
                     while (nina_ota_prompt_visible()) {
                         vTaskDelay(pdMS_TO_TICKS(200));
                     }
-                } else if (update_found) {
+                } else if (chk == OTA_CHECK_UPDATE_AVAILABLE) {
                     ESP_LOGI(TAG, "New firmware available: %s", rel->tag);
                     if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                         nina_ota_prompt_show(rel->tag, cur_ver, rel->summary);
@@ -2768,6 +2771,16 @@ main_loop:
                             nina_ota_prompt_hide();
                             bsp_display_unlock();
                         }
+                    }
+                } else if (chk == OTA_CHECK_ERROR) {
+                    ESP_LOGW(TAG, "Firmware update check failed (network/GitHub)");
+                    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                        nina_ota_prompt_show("", cur_ver, NULL);
+                        nina_ota_prompt_show_status("Update check failed", "Update check failed - try again");
+                        bsp_display_unlock();
+                    }
+                    while (nina_ota_prompt_visible()) {
+                        vTaskDelay(pdMS_TO_TICKS(200));
                     }
                 } else {
                     ESP_LOGI(TAG, "No firmware update available");
