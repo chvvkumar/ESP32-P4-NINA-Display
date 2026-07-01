@@ -34,6 +34,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <time.h>
 #include "esp_heap_caps.h"
 #include "cJSON.h"
@@ -52,6 +53,11 @@
 #include "ui/nina_nav_arbiter.h"
 #include "ui/themes.h"
 #include "image_red_remap.h"
+#include "build_version.h"
+
+/* Splash credit fonts (defined in ui/lv_font_overpass_*.c) */
+extern const lv_font_t lv_font_overpass_27;
+extern const lv_font_t lv_font_overpass_16;
 
 /* Embedded splash logo (JPEG, hardware-decoded at boot) */
 extern const uint8_t logo_jpg_start[] asm("_binary_logo_jpg_start");
@@ -776,9 +782,38 @@ void app_main(void)
             lv_obj_set_style_bg_opa(splash_cont, LV_OPA_COVER, 0);
             lv_obj_center(splash_cont);
 
+            /* Vertical flex stack: logo, name, divider, version */
+            lv_obj_set_flex_flow(splash_cont, LV_FLEX_FLOW_COLUMN);
+            lv_obj_set_flex_align(splash_cont, LV_FLEX_ALIGN_CENTER,
+                                  LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+            lv_obj_set_style_pad_row(splash_cont, 14, 0);
+
+            /* Red Night gate: same saved-theme resolve the logo remap uses */
+            const theme_t *splash_theme = themes_get(app_config_get()->theme_index);
+            bool red_night = theme_is_red_night(splash_theme);
+            lv_color_t credit_col  = red_night ? lv_color_hex(0xB81D1D) : lv_color_hex(0xC8C8C8);
+            lv_color_t divider_col = red_night ? lv_color_hex(0x7A1414) : lv_color_hex(0x3C3C3C);
+
             lv_obj_t *img = lv_image_create(splash_cont);
             lv_image_set_src(img, &splash_dsc);
-            lv_obj_center(img);
+
+            lv_obj_t *name_lbl = lv_label_create(splash_cont);
+            lv_label_set_text(name_lbl, "Kumar Challa");
+            lv_obj_set_style_text_font(name_lbl, &lv_font_overpass_27, 0);
+            lv_obj_set_style_text_color(name_lbl, credit_col, 0);
+
+            lv_obj_t *divider = lv_obj_create(splash_cont);
+            lv_obj_remove_style_all(divider);
+            lv_obj_set_size(divider, 180, 2);
+            lv_obj_set_style_bg_color(divider, divider_col, 0);
+            lv_obj_set_style_bg_opa(divider, LV_OPA_COVER, 0);
+
+            char ver_buf[48];
+            snprintf(ver_buf, sizeof(ver_buf), "v%s", BUILD_VERSION);
+            lv_obj_t *ver_lbl = lv_label_create(splash_cont);
+            lv_label_set_text(ver_lbl, ver_buf);
+            lv_obj_set_style_text_font(ver_lbl, &lv_font_overpass_16, 0);
+            lv_obj_set_style_text_color(ver_lbl, credit_col, 0);
 
             /* Delayed fade: hold 3 s, then fade out over 500 ms */
             lv_anim_t a;

@@ -1,14 +1,20 @@
 /**
  * @file settings_tab_nodes.c
- * @brief Nodes & Data tab — instance enable toggles, per-node accordion
- *        sections with hostname, filter colors, and RMS/HFR thresholds.
+ * @brief Nodes & Data tab — instance enable strip + a segmented node picker
+ *        with a single flex-grow detail panel per node (hostname, filter
+ *        colors, and RMS/HFR thresholds).
  *
- * Part of the on-device settings tabview. Each of the 3 NINA instances
- * gets a collapsible accordion with:
- *   - Hostname text input
- *   - Filter color swatches (parsed from JSON config)
- *   - RMS threshold steppers and color swatches
- *   - HFR threshold steppers and color swatches
+ * Part of the on-device settings tabview. Layout is master-detail:
+ *   - Active Instances enable strip (3 toggles)
+ *   - Segmented [Node 1][Node 2][Node 3] picker (buttonmatrix, seg_mode idiom)
+ *   - One detail panel shown at a time (3 pre-built, others hidden):
+ *       - Hostname text input
+ *       - Filter color swatches (parsed from JSON config)
+ *       - RMS threshold steppers and color swatches
+ *       - HFR threshold steppers and color swatches
+ *
+ * Disabled nodes get a locked (dimmed, non-selectable) segment via
+ * LV_BUTTONMATRIX_CTRL_DISABLED; all-disabled shows an empty-state hint.
  */
 
 #include "settings_tab_nodes.h"
@@ -51,10 +57,6 @@
 /* ── Per-node widget/data structure ─────────────────────────────────── */
 typedef struct {
     lv_obj_t *sw_enable;
-    lv_obj_t *accordion_header;
-    lv_obj_t *accordion_body;
-    lv_obj_t *lbl_chevron;
-    lv_obj_t *lbl_header_text;
     lv_obj_t *ta_hostname;
     lv_obj_t *filter_row;
     lv_obj_t *filter_swatches[NODE_MAX_FILTERS];
@@ -87,7 +89,13 @@ typedef struct {
 
 static node_widgets_t nodes[MAX_NINA_INSTANCES];
 static lv_obj_t *tab_root = NULL;
-static int expanded_node = -1;
+
+/* ── Master-detail layout state ─────────────────────────────────────── */
+static lv_obj_t *node_seg = NULL;                          /* segmented picker */
+static const char *node_seg_map[] = {"Node 1", "Node 2", "Node 3", ""};
+static lv_obj_t *node_detail[MAX_NINA_INSTANCES] = {0};    /* 3 pre-built panels */
+static lv_obj_t *empty_hint = NULL;                        /* all-disabled hint */
+static int selected_node = 0;                              /* current selection */
 
 /* ── Forward declarations ───────────────────────────────────────────── */
 static void parse_filter_colors(int idx);
@@ -98,36 +106,10 @@ static void rebuild_rms_json(int node_idx);
 static void rebuild_hfr_json(int node_idx);
 static void create_filter_swatches(int idx);
 static void create_threshold_section(lv_obj_t *parent, int idx, bool is_hfr);
-
-/* ── Accordion toggle ───────────────────────────────────────────────── */
-static void update_chevron(int idx)
-{
-    if (!nodes[idx].lbl_chevron) return;
-    lv_label_set_text(nodes[idx].lbl_chevron,
-                      (expanded_node == idx) ? LV_SYMBOL_DOWN : LV_SYMBOL_RIGHT);
-}
-
-static void accordion_header_cb(lv_event_t *e)
-{
-    int idx = (int)(intptr_t)lv_event_get_user_data(e);
-
-    if (expanded_node == idx) {
-        /* Collapse current */
-        lv_obj_add_flag(nodes[idx].accordion_body, LV_OBJ_FLAG_HIDDEN);
-        expanded_node = -1;
-        update_chevron(idx);
-    } else {
-        /* Collapse previously expanded */
-        if (expanded_node >= 0 && expanded_node < MAX_NINA_INSTANCES) {
-            lv_obj_add_flag(nodes[expanded_node].accordion_body, LV_OBJ_FLAG_HIDDEN);
-            update_chevron(expanded_node);
-        }
-        /* Expand new */
-        lv_obj_clear_flag(nodes[idx].accordion_body, LV_OBJ_FLAG_HIDDEN);
-        expanded_node = idx;
-        update_chevron(idx);
-    }
-}
+static void build_node_detail(lv_obj_t *parent, int idx);
+static void node_seg_changed_cb(lv_event_t *e);
+static void nodes_sync_segments(void);
+static void nodes_apply_enable_change(void);
 
 /* ── Enable toggle callback ─────────────────────────────────────────── */
 static void enable_toggle_cb(lv_event_t *e)
@@ -136,6 +118,8 @@ static void enable_toggle_cb(lv_event_t *e)
     bool on = lv_obj_has_state(nodes[idx].sw_enable, LV_STATE_CHECKED);
     app_config_get()->instance_enabled[idx] = on;
     settings_mark_dirty(false);
+    /* Re-sync segment lock state, selection, and empty-state in one pass. */
+    nodes_apply_enable_change();
 }
 
 /* ── Hostname defocus callback ──────────────────────────────────────── */
@@ -147,13 +131,6 @@ static void hostname_defocus_cb(lv_event_t *e)
     char url[128];
     snprintf(url, sizeof(url), "http://%s/api", text);
     snprintf(app_config_get()->api_url[idx], sizeof(app_config_get()->api_url[0]), "%s", url);
-
-    /* Update accordion header text */
-    if (nodes[idx].lbl_header_text) {
-        char hdr[64];
-        snprintf(hdr, sizeof(hdr), "Node %d  -  %s", idx + 1, text);
-        lv_label_set_text(nodes[idx].lbl_header_text, hdr);
-    }
 
     settings_mark_dirty(false);
     settings_hide_keyboard();
@@ -563,10 +540,10 @@ static void create_filter_swatches(int idx)
                                           filter_swatch_cb, (void *)packed);
         nodes[idx].filter_swatches[f] = sw;
 
-        /* Filter name label below swatch */
+        /* Filter name label below swatch (interactive-swatch label >=18px, SETRD-07) */
         lv_obj_t *lbl = lv_label_create(col);
         lv_label_set_text(lbl, nodes[idx].filter_names[f]);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
         if (current_theme) {
             int gb = app_config_get()->color_brightness;
             lv_obj_set_style_text_color(lbl,
@@ -592,11 +569,11 @@ static void create_threshold_section(lv_obj_t *parent, int idx, bool is_hfr)
     lv_obj_set_style_pad_top(lbl_title, 8, 0);
 
     /* === Good row === */
-    lv_obj_t *row_good = settings_make_row(parent);
+    lv_obj_t *row_good = settings_make_row_lg(parent);
     {
         lv_obj_t *lbl = lv_label_create(row_good);
         lv_label_set_text(lbl, "Good <");
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
         if (current_theme) {
             lv_obj_set_style_text_color(lbl,
                 lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
@@ -635,11 +612,11 @@ static void create_threshold_section(lv_obj_t *parent, int idx, bool is_hfr)
     }
 
     /* === Warn row === */
-    lv_obj_t *row_warn = settings_make_row(parent);
+    lv_obj_t *row_warn = settings_make_row_lg(parent);
     {
         lv_obj_t *lbl = lv_label_create(row_warn);
         lv_label_set_text(lbl, "Warn <");
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
         if (current_theme) {
             lv_obj_set_style_text_color(lbl,
                 lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
@@ -678,14 +655,14 @@ static void create_threshold_section(lv_obj_t *parent, int idx, bool is_hfr)
     }
 
     /* === Bad row (color only, no stepper) === */
-    lv_obj_t *row_bad = settings_make_row(parent);
+    lv_obj_t *row_bad = settings_make_row_lg(parent);
     {
         lv_obj_t *lbl = lv_label_create(row_bad);
         char bad_text[32];
         float warn_val = is_hfr ? nodes[idx].hfr_warn_max : nodes[idx].rms_warn_max;
         snprintf(bad_text, sizeof(bad_text), "Bad >= %.1f", warn_val);
         lv_label_set_text(lbl, bad_text);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
         if (current_theme) {
             lv_obj_set_style_text_color(lbl,
                 lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
@@ -701,8 +678,11 @@ static void create_threshold_section(lv_obj_t *parent, int idx, bool is_hfr)
     }
 }
 
-/* ── Create a single node accordion ─────────────────────────────────── */
-static void create_node_accordion(lv_obj_t *parent, int idx)
+/* ── Build one node detail panel (body content only, no picker header) ──
+ * `parent` is the pre-built detail container (node_detail[idx]); this fills
+ * it with hostname / filters / RMS / HFR. Per-node widget refs (nodes[idx].*)
+ * are populated so settings_tab_nodes_refresh keeps working unchanged. */
+static void build_node_detail(lv_obj_t *parent, int idx)
 {
     app_config_t *cfg = app_config_get();
     int gb = cfg->color_brightness;
@@ -712,76 +692,13 @@ static void create_node_accordion(lv_obj_t *parent, int idx)
     parse_rms_thresholds(idx);
     parse_hfr_thresholds(idx);
 
-    /* Extract hostname from URL for display */
+    /* Extract hostname from URL for the textarea */
     char hostname[64] = "";
     extract_host_from_url(cfg->api_url[idx], hostname, sizeof(hostname));
 
-    /* ── Accordion header (tappable row) ────────────────────────────── */
-    lv_obj_t *hdr = lv_obj_create(parent);
-    lv_obj_remove_style_all(hdr);
-    lv_obj_set_width(hdr, LV_PCT(100));
-    lv_obj_set_height(hdr, 50);
-    lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(hdr, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_left(hdr, 12, 0);
-    lv_obj_set_style_pad_column(hdr, 8, 0);
-    lv_obj_add_flag(hdr, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_clear_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
-
-    /* Themed background for header row */
-    if (current_theme) {
-        lv_obj_set_style_bg_color(hdr, lv_color_hex(current_theme->bento_border), 0);
-        lv_obj_set_style_bg_opa(hdr, LV_OPA_30, 0);
-        lv_obj_set_style_radius(hdr, 12, 0);
-    }
-
-    lv_obj_add_event_cb(hdr, accordion_header_cb, LV_EVENT_CLICKED,
-                         (void *)(intptr_t)idx);
-    nodes[idx].accordion_header = hdr;
-
-    /* Chevron */
-    lv_obj_t *chevron = lv_label_create(hdr);
-    lv_label_set_text(chevron, LV_SYMBOL_RIGHT);
-    lv_obj_set_style_text_font(chevron, &lv_font_montserrat_20, 0);
-    if (current_theme) {
-        lv_obj_set_style_text_color(chevron,
-            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-    }
-    nodes[idx].lbl_chevron = chevron;
-
-    /* Header text */
-    char hdr_text[80];
-    snprintf(hdr_text, sizeof(hdr_text), "Node %d  -  %s", idx + 1,
-             hostname[0] ? hostname : "(not configured)");
-    lv_obj_t *lbl_hdr = lv_label_create(hdr);
-    lv_label_set_text(lbl_hdr, hdr_text);
-    lv_obj_set_style_text_font(lbl_hdr, &lv_font_montserrat_20, 0);
-    lv_label_set_long_mode(lbl_hdr, LV_LABEL_LONG_CLIP);
-    lv_obj_set_flex_grow(lbl_hdr, 1);
-    if (current_theme) {
-        lv_obj_set_style_text_color(lbl_hdr,
-            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-    }
-    nodes[idx].lbl_header_text = lbl_hdr;
-
-    /* ── Accordion body (hidden by default) ─────────────────────────── */
-    lv_obj_t *body = lv_obj_create(parent);
-    lv_obj_remove_style_all(body);
-    lv_obj_set_width(body, LV_PCT(100));
-    lv_obj_set_height(body, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(body, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_left(body, 8, 0);
-    lv_obj_set_style_pad_right(body, 8, 0);
-    lv_obj_set_style_pad_row(body, 6, 0);
-    lv_obj_set_style_pad_top(body, 8, 0);
-    lv_obj_set_style_pad_bottom(body, 12, 0);
-    lv_obj_add_flag(body, LV_OBJ_FLAG_HIDDEN);  /* collapsed by default */
-    nodes[idx].accordion_body = body;
-
     /* ── Hostname input ─────────────────────────────────────────────── */
     lv_obj_t *ta_host = NULL;
-    settings_make_textarea_row(body, "Hostname:port", "e.g. 192.168.1.100:1888",
+    settings_make_textarea_row(parent, "Hostname:port", "e.g. 192.168.1.100:1888",
                                 false, &ta_host);
     if (ta_host) {
         lv_textarea_set_text(ta_host, hostname);
@@ -793,10 +710,10 @@ static void create_node_accordion(lv_obj_t *parent, int idx)
     }
     nodes[idx].ta_hostname = ta_host;
 
-    settings_make_divider(body);
+    settings_make_divider(parent);
 
     /* ── Filter colors section ──────────────────────────────────────── */
-    lv_obj_t *lbl_filt = lv_label_create(body);
+    lv_obj_t *lbl_filt = lv_label_create(parent);
     lv_label_set_text(lbl_filt, "Filter Colors");
     lv_obj_set_style_text_font(lbl_filt, &lv_font_montserrat_20, 0);
     if (current_theme) {
@@ -805,7 +722,7 @@ static void create_node_accordion(lv_obj_t *parent, int idx)
     }
 
     /* Scrollable row for filter swatches */
-    lv_obj_t *filt_row = lv_obj_create(body);
+    lv_obj_t *filt_row = lv_obj_create(parent);
     lv_obj_remove_style_all(filt_row);
     lv_obj_set_width(filt_row, LV_PCT(100));
     lv_obj_set_height(filt_row, SWATCH_SIZE + 24);
@@ -818,15 +735,121 @@ static void create_node_accordion(lv_obj_t *parent, int idx)
 
     create_filter_swatches(idx);
 
-    settings_make_divider(body);
+    settings_make_divider(parent);
 
     /* ── RMS Thresholds ─────────────────────────────────────────────── */
-    create_threshold_section(body, idx, false);
+    create_threshold_section(parent, idx, false);
 
-    settings_make_divider(body);
+    settings_make_divider(parent);
 
     /* ── HFR Thresholds ─────────────────────────────────────────────── */
-    create_threshold_section(body, idx, true);
+    create_threshold_section(parent, idx, true);
+}
+
+/* ── Segment picker: select callback + lock/enable-change passes ─────── */
+
+/* Swap the visible detail panel to `sel` (hide all others). */
+static void node_show_detail(int sel)
+{
+    for (int k = 0; k < MAX_NINA_INSTANCES; k++) {
+        if (!node_detail[k]) continue;
+        if (k == sel) {
+            lv_obj_clear_flag(node_detail[k], LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(node_detail[k], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
+/* Manual single-select on the buttonmatrix (mirrors seg_mode idiom). */
+static void node_seg_select(int sel)
+{
+    if (!node_seg) return;
+    for (int k = 0; k < MAX_NINA_INSTANCES; k++) {
+        lv_buttonmatrix_clear_button_ctrl(node_seg, k, LV_BUTTONMATRIX_CTRL_CHECKED);
+    }
+    if (sel >= 0 && sel < MAX_NINA_INSTANCES) {
+        lv_buttonmatrix_set_button_ctrl(node_seg, sel, LV_BUTTONMATRIX_CTRL_CHECKED);
+    }
+}
+
+static void node_seg_changed_cb(lv_event_t *e)
+{
+    (void)e;
+    if (!node_seg) return;
+    uint32_t sel = lv_buttonmatrix_get_selected_button(node_seg);
+    if (sel == LV_BUTTONMATRIX_BUTTON_NONE) return;
+    if ((int)sel >= MAX_NINA_INSTANCES) return;
+    /* Belt-and-braces: DISABLED segments emit no VALUE_CHANGED, but guard anyway. */
+    if (!app_config_get()->instance_enabled[sel]) return;
+
+    node_seg_select((int)sel);
+    node_show_detail((int)sel);
+    selected_node = (int)sel;
+}
+
+/* Set/clear DISABLED on every segment to match the enable flags. A DISABLED
+ * buttonmatrix button renders dimmed (LV_STATE_DISABLED) and is inert. */
+static void nodes_sync_segments(void)
+{
+    if (!node_seg) return;
+    app_config_t *cfg = app_config_get();
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        if (cfg->instance_enabled[i]) {
+            lv_buttonmatrix_clear_button_ctrl(node_seg, i, LV_BUTTONMATRIX_CTRL_DISABLED);
+        } else {
+            lv_buttonmatrix_set_button_ctrl(node_seg, i, LV_BUTTONMATRIX_CTRL_DISABLED);
+        }
+    }
+}
+
+/* One ordered pass covering every enable-change case (RESEARCH Open Risk #3):
+ *   (a) sync DISABLED flags on all segments
+ *   (b) find first enabled node
+ *   (c) if none: clear all CHECKED, hide all panels, show empty-state hint
+ *   (d) else: hide hint; if selected is now disabled/invalid, move CHECKED
+ *       + visible panel to first enabled; else keep selection but ensure its
+ *       CHECKED flag + panel are set. */
+static void nodes_apply_enable_change(void)
+{
+    if (!node_seg) return;
+    app_config_t *cfg = app_config_get();
+
+    /* (a) */
+    nodes_sync_segments();
+
+    /* (b) */
+    int first = -1;
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        if (cfg->instance_enabled[i]) {
+            first = i;
+            break;
+        }
+    }
+
+    /* (c) all disabled */
+    if (first == -1) {
+        node_seg_select(-1);            /* clear CHECKED on all */
+        node_show_detail(-1);           /* hide every panel */
+        if (empty_hint) {
+            lv_obj_clear_flag(empty_hint, LV_OBJ_FLAG_HIDDEN);
+        }
+        return;
+    }
+
+    /* (d) at least one enabled */
+    if (empty_hint) {
+        lv_obj_add_flag(empty_hint, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    bool sel_ok = (selected_node >= 0 && selected_node < MAX_NINA_INSTANCES &&
+                   cfg->instance_enabled[selected_node]);
+    if (!sel_ok) {
+        /* Move selection to the first enabled node. */
+        selected_node = first;
+    }
+    node_seg_select(selected_node);
+    node_show_detail(selected_node);
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -835,18 +858,23 @@ static void create_node_accordion(lv_obj_t *parent, int idx)
 
 void settings_tab_nodes_destroy(void) {
     tab_root = NULL;
-    expanded_node = -1;
+    node_seg = NULL;
+    empty_hint = NULL;
+    selected_node = 0;
+    memset(node_detail, 0, sizeof(node_detail));
     memset(nodes, 0, sizeof(nodes));
 }
 
 void settings_tab_nodes_create(lv_obj_t *parent)
 {
     tab_root = parent;
-    expanded_node = -1;
+    node_seg = NULL;
+    empty_hint = NULL;
+    selected_node = 0;
+    memset(node_detail, 0, sizeof(node_detail));
     memset(nodes, 0, sizeof(nodes));
 
     app_config_t *cfg = app_config_get();
-    int gb = cfg->color_brightness;
 
     /* Make parent scrollable column */
     lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
@@ -880,23 +908,109 @@ void settings_tab_nodes_create(lv_obj_t *parent)
         nodes[i].sw_enable = sw;
     }
 
-    /* ── Per-node accordion sections ────────────────────────────────── */
+    /* ── Node Configuration card: segmented picker + one detail panel ── */
     lv_obj_t *card_nodes = settings_make_card(parent, "Node Configuration");
+    /* Fill the remaining viewport so the flex_grow=1 detail panel below has a
+     * concrete-height parent to expand into. Without this the card is
+     * LV_SIZE_CONTENT and every detail panel collapses to 0px (RESEARCH Q5). */
+    lv_obj_set_flex_grow(card_nodes, 1);
+    int gb = cfg->color_brightness;
 
-    /* Hint text */
-    lv_obj_t *lbl_hint = lv_label_create(card_nodes);
-    lv_label_set_text(lbl_hint, "Tap a node to expand its settings");
-    lv_obj_set_style_text_font(lbl_hint, &lv_font_montserrat_16, 0);
+    /* Segmented node picker (buttonmatrix, seg_mode idiom copied verbatim).
+     * Manual single-select — do NOT use lv_buttonmatrix_set_one_checked(),
+     * it auto-checks button 0 and the clear loop re-triggers it. */
+    node_seg = lv_buttonmatrix_create(card_nodes);
+    lv_obj_remove_style_all(node_seg);
+    lv_buttonmatrix_set_map(node_seg, node_seg_map);
+    lv_obj_set_width(node_seg, LV_PCT(100));
+    lv_obj_set_height(node_seg, 48);
+
     if (current_theme) {
-        lv_obj_set_style_text_color(lbl_hint,
+        /* Main container (the background strip) */
+        lv_obj_set_style_bg_color(node_seg, lv_color_hex(current_theme->bento_border), 0);
+        lv_obj_set_style_bg_opa(node_seg, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(node_seg, 10, 0);
+        lv_obj_set_style_border_width(node_seg, 0, 0);
+        lv_obj_set_style_outline_width(node_seg, 0, 0);
+        lv_obj_set_style_pad_all(node_seg, 4, 0);
+        lv_obj_set_style_pad_gap(node_seg, 4, 0);
+        lv_obj_set_style_text_font(node_seg, &lv_font_montserrat_20, 0);
+
+        /* Unchecked items — transparent bg, theme text color */
+        lv_obj_set_style_bg_opa(node_seg, LV_OPA_TRANSP, LV_PART_ITEMS);
+        lv_obj_set_style_border_width(node_seg, 0, LV_PART_ITEMS);
+        lv_obj_set_style_shadow_width(node_seg, 0, LV_PART_ITEMS);
+        lv_obj_set_style_outline_width(node_seg, 0, LV_PART_ITEMS);
+        lv_obj_set_style_radius(node_seg, 8, LV_PART_ITEMS);
+        lv_obj_set_style_text_color(node_seg,
+            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), LV_PART_ITEMS);
+        lv_obj_set_style_text_font(node_seg, &lv_font_montserrat_20, LV_PART_ITEMS);
+
+        /* Checked item — progress_color bg, theme-aware text */
+        lv_obj_set_style_bg_color(node_seg, lv_color_hex(current_theme->progress_color),
+                                  LV_PART_ITEMS | LV_STATE_CHECKED);
+        lv_obj_set_style_bg_opa(node_seg, LV_OPA_COVER,
+                                LV_PART_ITEMS | LV_STATE_CHECKED);
+        lv_obj_set_style_text_color(node_seg,
+            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)),
+            LV_PART_ITEMS | LV_STATE_CHECKED);
+        lv_obj_set_style_border_width(node_seg, 0, LV_PART_ITEMS | LV_STATE_CHECKED);
+
+        /* Suppress all other visual states that could show a false highlight */
+        lv_obj_set_style_bg_opa(node_seg, LV_OPA_TRANSP, LV_PART_ITEMS | LV_STATE_FOCUSED);
+        lv_obj_set_style_outline_width(node_seg, 0, LV_PART_ITEMS | LV_STATE_FOCUSED);
+        lv_obj_set_style_border_width(node_seg, 0, LV_PART_ITEMS | LV_STATE_FOCUSED);
+        lv_obj_set_style_bg_opa(node_seg, LV_OPA_TRANSP, LV_PART_ITEMS | LV_STATE_FOCUS_KEY);
+        lv_obj_set_style_outline_width(node_seg, 0, LV_PART_ITEMS | LV_STATE_FOCUS_KEY);
+        lv_obj_set_style_border_width(node_seg, 0, LV_PART_ITEMS | LV_STATE_FOCUS_KEY);
+        lv_obj_set_style_bg_opa(node_seg, LV_OPA_TRANSP, LV_PART_ITEMS | LV_STATE_PRESSED);
+        lv_obj_set_style_outline_width(node_seg, 0, LV_PART_ITEMS | LV_STATE_PRESSED);
+
+        /* Disabled item — dimmed text so a locked (disabled-node) segment is
+         * visibly greyed. remove_style_all cleared the theme's default
+         * disabled opacity, so set it explicitly (SETRD-02 "dimmed"). */
+        lv_obj_set_style_text_opa(node_seg, LV_OPA_40, LV_PART_ITEMS | LV_STATE_DISABLED);
+        lv_obj_set_style_bg_opa(node_seg, LV_OPA_TRANSP, LV_PART_ITEMS | LV_STATE_DISABLED);
+    }
+
+    lv_obj_add_event_cb(node_seg, node_seg_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    /* Empty-state hint (hidden unless zero nodes enabled) */
+    empty_hint = lv_label_create(card_nodes);
+    lv_label_set_text(empty_hint, "No nodes enabled - enable a node above");
+    lv_obj_set_style_text_font(empty_hint, &lv_font_montserrat_18, 0);
+    if (current_theme) {
+        lv_obj_set_style_text_color(empty_hint,
             lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
     }
-    lv_obj_set_style_pad_bottom(lbl_hint, 6, 0);
+    lv_obj_set_style_pad_top(empty_hint, 8, 0);
+    lv_obj_add_flag(empty_hint, LV_OBJ_FLAG_HIDDEN);
 
+    /* Build all three detail panels once; only the selected one is shown.
+     * Each carries flex_grow=1 so the visible panel fills the viewport; a
+     * hidden flex child occupies zero space, so grow on hidden panels is
+     * inert (SETRD-02 single flex-grow detail panel). */
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
-        if (i > 0) settings_make_divider(card_nodes);
-        create_node_accordion(card_nodes, i);
+        lv_obj_t *panel = lv_obj_create(card_nodes);
+        lv_obj_remove_style_all(panel);
+        lv_obj_set_width(panel, LV_PCT(100));
+        lv_obj_set_height(panel, LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(panel, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_flex_grow(panel, 1);
+        lv_obj_set_style_pad_left(panel, 8, 0);
+        lv_obj_set_style_pad_right(panel, 8, 0);
+        lv_obj_set_style_pad_row(panel, 6, 0);
+        lv_obj_set_style_pad_top(panel, 8, 0);
+        lv_obj_set_style_pad_bottom(panel, 12, 0);
+        lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);   /* shown by apply-enable below */
+        node_detail[i] = panel;
+        build_node_detail(panel, i);
     }
+
+    /* Establish initial segment lock state + selection (first enabled node,
+     * or empty state if none) so the tab opens correctly. */
+    nodes_apply_enable_change();
 }
 
 void settings_tab_nodes_refresh(void)
@@ -925,16 +1039,6 @@ void settings_tab_nodes_refresh(void)
             char hostname[64] = "";
             extract_host_from_url(cfg->api_url[i], hostname, sizeof(hostname));
             lv_textarea_set_text(nodes[i].ta_hostname, hostname);
-        }
-
-        /* Update accordion header text */
-        if (nodes[i].lbl_header_text) {
-            char hostname[64] = "";
-            extract_host_from_url(cfg->api_url[i], hostname, sizeof(hostname));
-            char hdr[80];
-            snprintf(hdr, sizeof(hdr), "Node %d  -  %s", i + 1,
-                     hostname[0] ? hostname : "(not configured)");
-            lv_label_set_text(nodes[i].lbl_header_text, hdr);
         }
 
         /* Rebuild filter swatches */
@@ -976,6 +1080,11 @@ void settings_tab_nodes_refresh(void)
         if (nodes[i].swatch_hfr_bad)
             lv_obj_set_style_bg_color(nodes[i].swatch_hfr_bad, lv_color_hex(nodes[i].hfr_bad_color), 0);
     }
+
+    /* Re-sync segment lock state, selection, and empty-state hint so a config
+     * change from elsewhere (e.g. web UI enabling a node) is reflected. */
+    nodes_sync_segments();
+    nodes_apply_enable_change();
 }
 
 void settings_tab_nodes_apply_theme(void)
