@@ -40,7 +40,6 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
 - [Display Interface](#display-interface)
 - [Features](#features)
 - [Web API](#web-api)
-- [Building from Source](#building-from-source)
 
 ---
 
@@ -328,9 +327,3 @@ The `/api/screenshot` endpoint captures a live JPEG of the current display using
 ```bash
 curl -o screenshot.jpg http://<device-ip>/api/screenshot
 ```
-
----
-
-## Building from Source
-
-Most users should flash a [pre-built release](../../releases). To build from source, this is a standard **ESP-IDF 5.5.x** project (`idf.py build` / `idf.py flash`). Architecture, module map, and build details are documented in [CLAUDE.md](CLAUDE.md).
