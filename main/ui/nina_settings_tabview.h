@@ -40,6 +40,7 @@ void settings_hide_keyboard(void);
 /* Shared widget helpers for settings tabs */
 lv_obj_t *settings_make_card(lv_obj_t *parent, const char *title);
 lv_obj_t *settings_make_row(lv_obj_t *parent);
+lv_obj_t *settings_make_row_lg(lv_obj_t *parent);
 lv_obj_t *settings_make_divider(lv_obj_t *parent);
 lv_obj_t *settings_make_stepper(lv_obj_t *parent, lv_obj_t **out_minus,
                                  lv_obj_t **out_label, lv_obj_t **out_plus);

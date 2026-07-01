@@ -22,6 +22,8 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
+#include <math.h>
 
 #include "esp_timer.h"
 
@@ -45,15 +47,18 @@ static inline void set_bar_if_changed(lv_obj_t *bar, int32_t val, lv_anim_enable
     if (lv_bar_get_value(bar) != val) lv_bar_set_value(bar, val, anim);
 }
 
-/* ── Bar animation (matches arc easing on individual pages) ───────── */
-#define BAR_ANIM_NORMAL_MS   400   /* normal progress update */
-#define BAR_ANIM_FILL_MS     300   /* fill-to-100 on new exposure */
+/* ── Bar animation (mirrors the monotonic-timer exposure model of the arc) ─ */
+/* Bar-scaled copies of the arc's exposure-model constants (see
+ * nina_dashboard_internal.h: ARC_RANGE/ARC_TIMER_MS/ARC_TRANSITION_MS/
+ * ARC_GAP_GRACE_S). The bar range is 0-100 instead of 0-3600. */
+#define BAR_RANGE           100
+#define BAR_TIMER_MS        200
+#define BAR_TRANSITION_MS   300
+#define BAR_GAP_GRACE_S     60
 
 static void bar_anim_exec(void *obj, int32_t v) {
     lv_bar_set_value((lv_obj_t *)obj, v, LV_ANIM_OFF);
 }
-
-static void bar_fill_complete_cb(lv_anim_t *a);  /* defined after summary_card_t */
 
 /* Set text color only if cached value differs (avoids LVGL dirty-marking) */
 static inline void set_text_color_cached(lv_obj_t *obj, uint32_t *cached, uint32_t color) {
@@ -180,10 +185,14 @@ typedef struct {
     lv_obj_t *lbl_detail;
     lv_obj_t *lbl_safety;       /* safety monitor icon (floating, bottom-left) */
     int instance_index;         /* which NINA instance this card represents */
-    /* Bar animation state (mirrors arc animation on individual pages) */
-    int prev_bar_progress;      /* previous progress value for new-exposure detection */
-    bool bar_completing;        /* true while fill-to-100 animation is in flight */
-    int pending_bar_progress;   /* progress value to apply after fill completes */
+    /* Bar exposure-model state (mirrors dashboard_page_t's arc fields) */
+    bool bar_completing;        /* true while snap-to-full animation is in flight */
+    int64_t exp_anchor_us;      /* monotonic esp_timer anchor (us); 0 = no active exposure */
+    float   exp_anchor_elapsed; /* elapsed seconds at the anchor moment */
+    bool    cached_is_exposing; /* last-seen is_exposing (edge detection) */
+    float   cached_total;       /* cached exposure_total (seconds) */
+    int64_t cached_end_epoch;   /* cached exposure_end_epoch (Unix seconds) */
+    int64_t gap_start_epoch;    /* inter-exposure gap grace start (Unix seconds) */
     /* Cached style values — only call lv_obj_set_style_* when changed to avoid
      * unnecessary LVGL invalidations that trigger expensive full redraws. */
     uint32_t cached_name_color;
@@ -204,18 +213,96 @@ typedef struct {
     uint32_t cached_safety_color;
 } summary_card_t;
 
-static void bar_fill_complete_cb(lv_anim_t *a) {
-    summary_card_t *sc = (summary_card_t *)a->user_data;
-    if (!sc) return;
-    sc->bar_completing = false;
-    lv_bar_set_value(sc->bar_progress, sc->pending_bar_progress, LV_ANIM_OFF);
-}
-
 /* ── Module state ──────────────────────────────────────────────────── */
 static lv_obj_t *sum_page = NULL;
 static summary_card_t cards[MAX_NINA_INSTANCES];
 static int card_count = 0;
 static int prev_visible_count = -1;
+
+/* ── Bar exposure model (scaled copy of the dashboard arc model) ─────── */
+static void bar_start_exposure_anim(summary_card_t *sc);
+
+/* Clear a card's exposure anchor and reset its progress bar to empty. Mirrors
+ * update_disconnected_state's arc reset (nina_dashboard_update.c): used when a
+ * card is hidden/skipped for unavailability so a stale anchor cannot keep the
+ * interp timer driving a hidden bar. */
+static void bar_reset_exposure_state(summary_card_t *sc) {
+    if (!sc->bar_progress) return;
+    lv_anim_delete(sc->bar_progress, bar_anim_exec);
+    sc->bar_completing     = false;
+    sc->exp_anchor_us      = 0;
+    sc->exp_anchor_elapsed = 0;
+    sc->cached_is_exposing = false;
+    sc->cached_total       = 0;
+    sc->cached_end_epoch   = 0;
+    sc->gap_start_epoch    = 0;
+    set_bar_if_changed(sc->bar_progress, 0, LV_ANIM_OFF);
+    set_label_if_changed(sc->lbl_pct, "");
+}
+
+/* Scaled copy of arc_start_exposure_anim (nina_dashboard_update.c). Drives one
+ * long linear anim toward (BAR_RANGE-1) over the monotonic remaining time so
+ * the finished edge is the only thing that fills to 100. */
+static void bar_start_exposure_anim(summary_card_t *sc) {
+    if (sc->exp_anchor_us == 0 || sc->cached_total <= 0 || !sc->cached_is_exposing) return;
+
+    float since_anchor_s = (float)(esp_timer_get_time() - sc->exp_anchor_us) / 1e6f;
+    float remaining_s = sc->cached_total - (sc->exp_anchor_elapsed + since_anchor_s);
+    if (remaining_s <= 0.1f) return;   /* <=100ms: completion edge will fill it */
+
+    int current = lv_bar_get_value(sc->bar_progress);
+    int remaining_ms = (int)(remaining_s * 1000.0f);
+
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, sc->bar_progress);
+    lv_anim_set_values(&a, current, BAR_RANGE - 1);
+    lv_anim_set_time(&a, remaining_ms);
+    lv_anim_set_exec_cb(&a, bar_anim_exec);
+    lv_anim_set_path_cb(&a, lv_anim_path_linear);
+    lv_anim_start(&a);
+}
+
+/* Scaled copy of arc_interp_timer_cb. Runs continuously (created at page build)
+ * and iterates all cards. Runs inside lv_timer_handler, which holds the display
+ * lock, so no extra locking is required (same as the dashboard arc timer). */
+static void summary_bar_interp_cb(lv_timer_t *timer) {
+    (void)timer;
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        summary_card_t *sc = &cards[i];
+        if (!sc->bar_progress || sc->bar_completing) continue;
+        if (sc->exp_anchor_us == 0 || sc->cached_total <= 0) continue;
+        if (!sc->cached_is_exposing) continue;
+
+        /* Monotonic elapsed: esp_timer never skews or goes backward. */
+        float elapsed = sc->exp_anchor_elapsed +
+                        (float)(esp_timer_get_time() - sc->exp_anchor_us) / 1e6f;
+
+        /* Backward-only wall correction. Difference epoch seconds in int64
+         * first (they exceed float's 24-bit precision), then cast the small
+         * result to float for the P4 single-precision FPU. */
+        int64_t remaining_wall_ms = (sc->cached_end_epoch - (int64_t)time(NULL)) * 1000;
+        float elapsed_wall = sc->cached_total - (float)remaining_wall_ms / 1000.0f;
+
+        if (elapsed_wall < elapsed - 1.0f) {
+            sc->exp_anchor_us = esp_timer_get_time();
+            sc->exp_anchor_elapsed = (elapsed_wall > 0.0f) ? elapsed_wall : 0.0f;
+            bar_start_exposure_anim(sc);
+            continue;
+        }
+
+        /* The long linear anim is the smooth source of truth; only restart it if
+         * none is running and time remains. */
+        lv_anim_t *existing = lv_anim_get(sc->bar_progress, bar_anim_exec);
+        if (!existing && elapsed < sc->cached_total) {
+            bar_start_exposure_anim(sc);
+        }
+
+        /* Refresh the percent label from the live interpolated bar value. */
+        int live_pct = lv_bar_get_value(sc->bar_progress);
+        SET_LABEL_FMT_IF_CHANGED(sc->lbl_pct, 8, "%d%%", live_pct);
+    }
+}
 
 /* Empty state widget (shared component — Plan 01) */
 static lv_obj_t *empty_cont = NULL;
@@ -663,6 +750,11 @@ lv_obj_t *summary_page_create(lv_obj_t *parent) {
         lv_obj_add_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
     }
 
+    /* Single shared interpolation timer driving all cards' progress bars
+     * (mirrors the per-page arc timer in nina_dashboard.c). Runs continuously;
+     * each tick it advances only cards with an active exposure anchor. */
+    lv_timer_create(summary_bar_interp_cb, BAR_TIMER_MS, NULL);
+
     /* Empty state — shown when no instances are connected */
     create_empty_state(sum_page);
 
@@ -687,9 +779,16 @@ void summary_page_rebuild(void) {
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         if (!nina_slot_available[i]) {
             lv_obj_add_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
-            /* Invalidate bar animation state so a re-enabled card starts clean */
-            cards[i].prev_bar_progress = 0;
-            cards[i].bar_completing    = false;
+            /* Drop the exposure anchor so a re-enabled card starts clean and no
+             * stale anchor keeps the interp timer driving a hidden bar. */
+            lv_anim_delete(cards[i].bar_progress, bar_anim_exec);
+            cards[i].bar_completing     = false;
+            cards[i].exp_anchor_us      = 0;
+            cards[i].exp_anchor_elapsed = 0;
+            cards[i].cached_is_exposing = false;
+            cards[i].cached_total       = 0;
+            cards[i].cached_end_epoch   = 0;
+            cards[i].gap_start_epoch    = 0;
         }
     }
 
@@ -940,7 +1039,12 @@ void summary_page_update(const nina_client_t *instances, int count) {
         summary_card_t *sc = &cards[i];
         const nina_client_t *d = &instances[i];
 
-        if (!nina_slot_available[i] || !nina_connection_is_connected(i)) continue;
+        if (!nina_slot_available[i] || !nina_connection_is_connected(i)) {
+            /* Card is hidden this cycle — drop any stale exposure anchor so the
+             * interp timer doesn't keep driving an off-screen bar. */
+            bar_reset_exposure_state(sc);
+            continue;
+        }
 
         /* Instance name — telescope + camera, fallback to profile, then host */
         if (d->telescope_name[0] && d->camera_name[0]) {
@@ -1008,60 +1112,152 @@ void summary_page_update(const nina_client_t *instances, int count) {
             set_text_color_cached(sc->lbl_target, &sc->cached_target_color, tgt_color);
         }
 
-        /* Progress bar + percentage (animated like arc on individual pages) */
-        if (d->exposure_total > 0) {
-            int pct = (int)((d->exposure_current / d->exposure_total) * 100.0f);
-            if (pct < 0) pct = 0;
-            if (pct > 100) pct = 100;
+        /* Progress bar + percentage — monotonic-timer exposure model scaled to
+         * 0-100 (ports update_exposure_arc from nina_dashboard_update.c). Smooth
+         * progress between polls is driven by summary_bar_interp_cb; this block
+         * handles seeding, re-anchoring, the finished edge, and the gap/idle
+         * reset. */
+        {
+            time_t now = time(NULL);
 
-            int current_val = lv_bar_get_value(sc->bar_progress);
-            bool new_exposure = (sc->prev_bar_progress > 70 && pct < 30);
-            sc->prev_bar_progress = pct;
+            /* Detect the is_exposing true->false edge BEFORE updating the cached
+             * flag; NINA drops is_exposing at sub end and the poll usually sees
+             * that before remaining hits zero, so this edge drives the snap. */
+            bool finished_edge = (sc->cached_is_exposing && !d->is_exposing
+                                  && sc->exp_anchor_us != 0);
+            sc->cached_is_exposing = d->is_exposing;
 
-            if (new_exposure && current_val > 0) {
-                /* New exposure started — fill bar to 100 first, then reset */
+            if (finished_edge) {
+                /* Snap the bar to full for a polished completion; the gap logic
+                 * below then holds/fades it before the next sub. */
+                lv_anim_delete(sc->bar_progress, bar_anim_exec);
                 sc->bar_completing = true;
-                sc->pending_bar_progress = pct;
-
-                lv_anim_delete(sc->bar_progress, bar_anim_exec);
+                sc->exp_anchor_us = 0;
+                int cur_fill = lv_bar_get_value(sc->bar_progress);
                 lv_anim_t a;
                 lv_anim_init(&a);
                 lv_anim_set_var(&a, sc->bar_progress);
-                lv_anim_set_values(&a, current_val, 100);
-                lv_anim_set_time(&a, BAR_ANIM_FILL_MS);
-                lv_anim_set_exec_cb(&a, bar_anim_exec);
-                lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
-                a.user_data = sc;
-                lv_anim_set_ready_cb(&a, bar_fill_complete_cb);
-                lv_anim_start(&a);
-            } else if (sc->bar_completing) {
-                /* Still waiting for fill-to-100 to finish */
-                sc->pending_bar_progress = pct;
-                if (pct > 30) {
-                    sc->bar_completing = false;
-                    lv_anim_delete(sc->bar_progress, bar_anim_exec);
-                    lv_bar_set_value(sc->bar_progress, pct, LV_ANIM_OFF);
-                }
-            } else if (pct != current_val) {
-                /* Normal update — ease-out to new value */
-                lv_anim_delete(sc->bar_progress, bar_anim_exec);
-                lv_anim_t a;
-                lv_anim_init(&a);
-                lv_anim_set_var(&a, sc->bar_progress);
-                lv_anim_set_values(&a, current_val, pct);
-                lv_anim_set_time(&a, BAR_ANIM_NORMAL_MS);
+                lv_anim_set_values(&a, cur_fill, BAR_RANGE);
+                lv_anim_set_time(&a, BAR_TRANSITION_MS);
                 lv_anim_set_exec_cb(&a, bar_anim_exec);
                 lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
                 lv_anim_start(&a);
+                SET_LABEL_FMT_IF_CHANGED(sc->lbl_pct, 8, "%d%%", 100);
             }
 
-            SET_LABEL_FMT_IF_CHANGED(sc->lbl_pct, 8, "%d%%", pct);
-        } else {
-            sc->prev_bar_progress = 0;
-            sc->bar_completing = false;
-            lv_anim_delete(sc->bar_progress, bar_anim_exec);
-            set_bar_if_changed(sc->bar_progress, 0, LV_ANIM_OFF);
-            set_label_if_changed(sc->lbl_pct, "");
+            if (d->exposure_total > 0 && d->exposure_end_epoch > 0 && d->is_exposing) {
+                /* Camera is actively exposing. */
+                sc->gap_start_epoch = 0;
+
+                /* Detect new exposure by end_epoch change, or exposing with no
+                 * anchor. Computed against the OLD cached_* values, so this must
+                 * run BEFORE the cache assignments below. */
+                bool new_exposure = (d->exposure_end_epoch != sc->cached_end_epoch
+                                     && d->exposure_end_epoch > (int64_t)now)
+                                    || (sc->exp_anchor_us == 0);
+                bool same_exposure = (sc->exp_anchor_us != 0
+                                      && d->exposure_end_epoch == sc->cached_end_epoch);
+                bool total_changed = (same_exposure && sc->cached_total > 0.0f
+                                      && fabsf(sc->cached_total - d->exposure_total) > 1.0f);
+
+                sc->cached_end_epoch = d->exposure_end_epoch;
+                sc->cached_total = d->exposure_total;
+
+                if (new_exposure) {
+                    /* Anchor the monotonic clock; seed elapsed with a ONE-TIME
+                     * wall estimate (detection can land mid-sub). Difference the
+                     * epochs in int64 first, then cast to float for the P4 FPU. */
+                    int64_t remaining_seed_ms = (d->exposure_end_epoch - (int64_t)now) * 1000;
+                    float seed = d->exposure_total - (float)remaining_seed_ms / 1000.0f;
+                    if (seed < 0.0f) seed = 0.0f;
+                    if (seed > d->exposure_total) seed = d->exposure_total;
+
+                    sc->exp_anchor_us = esp_timer_get_time();
+                    sc->exp_anchor_elapsed = seed;
+                    sc->bar_completing = false;
+
+                    lv_anim_delete(sc->bar_progress, bar_anim_exec);
+                    int seed_val = (int)((seed * (float)BAR_RANGE) / d->exposure_total);
+                    if (seed_val < 0) seed_val = 0;
+                    if (seed_val > BAR_RANGE - 1) seed_val = BAR_RANGE - 1;
+                    lv_bar_set_value(sc->bar_progress, seed_val, LV_ANIM_OFF);
+                    SET_LABEL_FMT_IF_CHANGED(sc->lbl_pct, 8, "%d%%", seed_val);
+
+                    bar_start_exposure_anim(sc);
+                } else if (total_changed) {
+                    /* Same ongoing sub, exposure_total corrected. Re-anchor and
+                     * smoothly animate the one-time correction; do NOT call
+                     * bar_start_exposure_anim (it would delete this correction
+                     * anim). The interp timer restarts the long anim afterward. */
+                    int64_t remaining_seed_ms = (d->exposure_end_epoch - (int64_t)now) * 1000;
+                    float seed = d->exposure_total - (float)remaining_seed_ms / 1000.0f;
+                    if (seed < 0.0f) seed = 0.0f;
+                    if (seed > d->exposure_total) seed = d->exposure_total;
+
+                    sc->exp_anchor_us = esp_timer_get_time();
+                    sc->exp_anchor_elapsed = seed;
+
+                    int target_val = (int)((seed * (float)BAR_RANGE) / d->exposure_total);
+                    if (target_val < 0) target_val = 0;
+                    if (target_val > BAR_RANGE - 1) target_val = BAR_RANGE - 1;
+                    int cur_val = lv_bar_get_value(sc->bar_progress);
+
+                    lv_anim_delete(sc->bar_progress, bar_anim_exec);
+                    lv_anim_t a;
+                    lv_anim_init(&a);
+                    lv_anim_set_var(&a, sc->bar_progress);
+                    lv_anim_set_values(&a, cur_val, target_val);
+                    lv_anim_set_time(&a, BAR_TRANSITION_MS);
+                    lv_anim_set_exec_cb(&a, bar_anim_exec);
+                    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+                    lv_anim_start(&a);
+                }
+                /* Normal progress updates are handled by summary_bar_interp_cb. */
+            } else {
+                /* No active exposure — inter-exposure gap or idle state. */
+                if (sc->cached_end_epoch > 0 && sc->cached_total > 0) {
+                    /* Was recently exposing — hold bar position during the gap. */
+                    bool camera_idle = (strcmp(d->status, "Idle") == 0
+                                     || strcmp(d->status, "NoState") == 0
+                                     || strcmp(d->status, "OFFLINE") == 0);
+
+                    if (sc->gap_start_epoch == 0) {
+                        sc->gap_start_epoch = (int64_t)now;
+                    }
+
+                    int64_t gap_duration = (int64_t)now - sc->gap_start_epoch;
+                    if (camera_idle || gap_duration > BAR_GAP_GRACE_S) {
+                        /* Grace expired — transition to idle. */
+                        sc->cached_end_epoch = 0;
+                        sc->cached_total = 0;
+                        sc->gap_start_epoch = 0;
+                        sc->exp_anchor_us = 0;
+                        sc->exp_anchor_elapsed = 0;
+                        sc->bar_completing = false;
+                        lv_anim_delete(sc->bar_progress, bar_anim_exec);
+
+                        lv_anim_t a;
+                        lv_anim_init(&a);
+                        lv_anim_set_var(&a, sc->bar_progress);
+                        lv_anim_set_values(&a, lv_bar_get_value(sc->bar_progress), 0);
+                        lv_anim_set_time(&a, 500);
+                        lv_anim_set_exec_cb(&a, bar_anim_exec);
+                        lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+                        lv_anim_start(&a);
+
+                        set_label_if_changed(sc->lbl_pct, "");
+                    }
+                    /* else: within grace — hold, do nothing. */
+                } else {
+                    /* Genuinely idle — no recent exposure data. */
+                    sc->gap_start_epoch = 0;
+                    sc->exp_anchor_us = 0;
+                    sc->exp_anchor_elapsed = 0;
+                    lv_anim_delete(sc->bar_progress, bar_anim_exec);
+                    set_bar_if_changed(sc->bar_progress, 0, LV_ANIM_OFF);
+                    set_label_if_changed(sc->lbl_pct, "");
+                }
+            }
         }
 
         /* Progress bar color: filter color or theme progress */

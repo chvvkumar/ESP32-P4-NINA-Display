@@ -10,7 +10,7 @@
 <p align="center">
   <a href="https://github.com/chvvkumar/ESP32-P4-NINA-Display/releases/latest"><img src="https://img.shields.io/github/v/release/chvvkumar/ESP32-P4-NINA-Display?label=version&logo=semver&logoColor=white" alt="Version"></a>
   <a href="https://github.com/espressif/esp-idf/tree/v5.5.2"><img src="https://img.shields.io/badge/ESP--IDF-v5.5.2-blue?logo=espressif" alt="ESP-IDF"></a>
-  <a href="https://lvgl.io/"><img src="https://img.shields.io/badge/LVGL-v9.2.0-red?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTEyIDJDNi40OCAyIDIgNi40OCAyIDEyczQuNDggMTAgMTAgMTAgMTAtNC40OCAxMC0xMFMxNy41MiAyIDEyIDJ6bTAgMThjLTQuNDEgMC04LTMuNTktOC04czMuNTktOCA4LTggOCAzLjU5IDggOC0zLjU5IDgtOCA4eiIvPjwvc3ZnPg==" alt="LVGL"></a>
+  <a href="https://lvgl.io/"><img src="https://img.shields.io/badge/LVGL-v9.5.0-red?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTEyIDJDNi40OCAyIDIgNi40OCAyIDEyczQuNDggMTAgMTAgMTAgMTAtNC40OCAxMC0xMFMxNy41MiAyIDEyIDJ6bTAgMThjLTQuNDEgMC04LTMuNTktOC04czMuNTktOCA4LTggOCAzLjU5IDggOC0zLjU5IDgtOCA4eiIvPjwvc3ZnPg==" alt="LVGL"></a>
 </p>
 
 <p align="center">
@@ -20,7 +20,7 @@
   <img src="https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/chvvkumar/ESP32-P4-NINA-Display/badges/firmware-metrics.json&query=$.ota_size&label=OTA%20Binary&logo=chip&color=green" alt="OTA Size">
 </p>
 
-A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nighttime-imaging.eu/), built for the **Waveshare ESP32-P4-WIFI6-Touch-LCD-4B** (720x720). It polls the [ninaAPI Advanced plugin](https://github.com/christian-photo/ninaAPI) over HTTP and WebSocket to show real-time session data — exposure arcs, guiding RMS, filter status, sequence progress, power draw, and more. Monitor up to three separate N.I.N.A. instances from a single device.
+A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nighttime-imaging.eu/), built for the **Waveshare ESP32-P4-WIFI6-Touch-LCD-4B** (720x720). It polls the [ninaAPI Advanced plugin](https://github.com/christian-photo/ninaAPI) over HTTP and WebSocket to show real-time session data: exposure arcs, guiding RMS, filter status, sequence progress, power draw, and more. Monitor up to three separate N.I.N.A. instances from one device. Beyond NINA it also runs a Spotify Now Playing screen, AllSky environmental panel, clock with weather and 3D moon phase, and GOES/solar imagery.
 
 <p align="center">
   <img src="images/pic1.jpg" alt="Device" width="1200">
@@ -36,14 +36,10 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [First-Time Setup](#first-time-setup)
+- [Security](#security)
 - [Display Interface](#display-interface)
-- [Spotify Integration](#spotify-integration)
-- [Navigation](#navigation)
-- [Multi-Instance Support](#multi-instance-support)
-- [Themes & Filter Colors](#themes--filter-colors)
-- [MQTT / Home Assistant Integration](#mqtt--home-assistant-integration)
+- [Features](#features)
 - [Web API](#web-api)
-- [Building from Source](#building-from-source)
 
 ---
 
@@ -77,7 +73,7 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
     <td align="center"><img src="images/HFR_history.jpg" alt="HFR History Graph" width="480"></td>
   </tr>
   <tr>
-    <td align="center"><img src="images/display_settings.jpg" alt="Display Settings" width="480"></td>
+    <td align="center"><img src="images/display_settings.jpg" alt="On-device Settings" width="480"></td>
     <td align="center"><img src="images/systemstats.jpg" alt="System Stats" width="480"></td>
   </tr>
 </table>
@@ -95,19 +91,19 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
   </tr>
 </table>
 
-### Spotify Slbum Art Display
+### Spotify Album Art Display
 
 <table align="center">
   <tr>
     <td align="center" colspan="2"><img src="images/Spotify_desk.jpg" alt="Spotify on two devices" width="480"></td>
   </tr>
   <tr>
-    <td align="center"><em>With controls</em></td>
-    <td align="center"><em>Controls hidden</em></td>
-  </tr>
-  <tr>
     <td align="center"><img src="images/Spotify_overlay.jpg" alt="Spotify overlay with controls" width="480"></td>
     <td align="center"><img src="images/Spotify_overlay_minimal.jpg" alt="Spotify minimal overlay" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>With controls</em></td>
+    <td align="center"><em>Controls hidden</em></td>
   </tr>
 </table>
 
@@ -118,7 +114,7 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
     <td align="center"><img src="images/clock-face.jpg" alt="Clock Face with Weather" width="480"></td>
   </tr>
   <tr>
-    <td align="center"><em> Clockface with weather data, forecast bars</em></td>
+    <td align="center"><em>Clock face with weather data and forecast bars</em></td>
   </tr>
 </table>
 
@@ -147,17 +143,54 @@ Real-time 3D rendered Moon with accurate phase, libration, and sub-solar lightin
 
 ### Web Configuration UI
 
+Every setting is managed from the on-device web UI, organized into tabs.
+
 <table align="center">
   <tr>
-    <td align="center"><img src="images/main.jpg" alt="Main Settings" width="480"></td>
-    <td align="center"><img src="images/nina.jpg" alt="NINA Settings" width="480"></td>
+    <td align="center"><img src="images/settings_nina.jpg" alt="N.I.N.A. instance settings" width="480"></td>
+    <td align="center"><img src="images/settings_display.jpg" alt="Display and page navigation settings" width="480"></td>
   </tr>
   <tr>
-    <td align="center"><img src="images/network.jpg" alt="Network Settings" width="480"></td>
-    <td align="center"><img src="images/display.jpg" alt="Display Settings" width="480"></td>
+    <td align="center"><em>N.I.N.A. instances (hosts, filter colors, RMS/HFR thresholds)</em></td>
+    <td align="center"><em>Display (theme, home page, auto-cycle, page rotation)</em></td>
   </tr>
   <tr>
-    <td align="center"><img src="images/system.jpg" alt="System Settings" width="480"></td>
+    <td align="center"><img src="images/settings_behavior.jpg" alt="Behavior settings" width="480"></td>
+    <td align="center"><img src="images/settings_system.jpg" alt="System settings" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Behavior (power, polling, notifications)</em></td>
+    <td align="center"><em>System (network, MQTT, firmware, auth)</em></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="images/settings_clock.jpg" alt="Clock and weather settings" width="480"></td>
+    <td align="center"><img src="images/settings_spotify.jpg" alt="Spotify settings" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Clock &amp; Weather (provider, location, units)</em></td>
+    <td align="center"><em>Spotify (client ID, playback options)</em></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="images/settings_allsky.jpg" alt="AllSky settings" width="480"></td>
+    <td align="center"><img src="images/settings_image.jpg" alt="Image display settings" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>AllSky (connection, per-quadrant field mappings)</em></td>
+    <td align="center"><em>Image Display (GOES / Moon / Solar / custom URL)</em></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="images/settings_logs.jpg" alt="Logs tab" width="480"></td>
+    <td align="center"><img src="images/settings_backup.jpg" alt="Backup and restore tab" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Logs (live console output, crash log, download)</em></td>
+    <td align="center"><em>Backup (export / restore configuration)</em></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><img src="images/settings_api.jpg" alt="HTTP API reference tab" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><em>API (in-UI reference for every HTTP endpoint)</em></td>
   </tr>
 </table>
 
@@ -168,103 +201,72 @@ Real-time 3D rendered Moon with accurate phase, libration, and sub-solar lightin
 ### Hardware
 
 - **[Waveshare ESP32-P4-WIFI6-Touch-LCD-4B](https://www.waveshare.com/esp32-p4-wifi6-touch-lcd-4b.htm?sku=31416)** — currently the only tested board. The layout is tuned for its 720x720 display.
+- **[3D Printed Stand](https://www.thingiverse.com/thing:7321463)** (optional) — a printable stand for the display, designed by [@chicago925](https://github.com/chicago925) ([#116](https://github.com/chvvkumar/ESP32-P4-NINA-Display/issues/116)).
 
 ### Software (on the N.I.N.A. PC)
 
 - [N.I.N.A. Nighttime Imaging 'N' Astronomy](https://nighttime-imaging.eu/)
 - [ninaAPI Advanced plugin](https://github.com/christian-photo/ninaAPI) by Christian Palm — install it from N.I.N.A.'s plugin manager, then enable it. Required for operation.
 
-
 <p align="center">
   <img src="images/NINA_Plugin.jpg" alt="NINA Plugin" width="800">
 </p>
-
-
-### Community
-
-- **[3D Printed Stand](https://www.thingiverse.com/thing:7321463)** — a printable stand for the Waveshare display, designed by [@chicago925](https://github.com/chicago925) ([#116](https://github.com/chvvkumar/ESP32-P4-NINA-Display/issues/116)).
 
 ---
 
 ## Installation
 
-### Flashing a pre-built release
+Download the latest factory binary from the [Releases page](../../releases). No build environment is needed: use a Chromium-based browser and the [ESP Web Flasher](https://espressif.github.io/esptool-js/), then flash `nina-display-factory.bin` at address `0x0000`. Each release includes step-by-step flashing instructions.
 
-Download the latest factory binary from the [Releases page](../../releases). Each release includes step-by-step flashing instructions.
+> **Note:** If your board warns about outdated `esp-hosted` co-processor firmware, flash `network_adapter.bin` at address `0x0000` to the ESP32-C6 coprocessor. A pre-built binary is in the [`firmware/`](firmware/) folder.
 
-No build environment needed — just a Chromium-based browser and the [ESP Web Flasher](https://espressif.github.io/esptool-js/). Flash `nina-display-factory.bin` at address `0x0000`.
-
-> **Note:** If your board shows warnings about outdated `esp-hosted` co-processor firmware, flash `network_adapter.bin` at address `0x0000` to the ESP32-C6 coprocessor. A pre-built binary is included in the [`firmware/`](firmware/) folder of this repository.
+After the first flash, further updates can be delivered over the air from GitHub releases (System tab in the web UI).
 
 ---
 
 ## First-Time Setup
 
-On first boot (or whenever WiFi is not connected), the device broadcasts a WiFi access point named **`NINA-DISPLAY`** (password: `12345678`). Connect to it from your phone or laptop, then open `http://192.168.4.1` in a browser.
+On first boot (or whenever WiFi is not connected), the device broadcasts a WiFi access point named **`NINA-DISPLAY`** (password: `12345678`). Connect to it from your phone or laptop and open `http://192.168.4.1`.
 
 Set at minimum:
 
 1. **WiFi credentials** — your observatory/home network where NINA runs.
-2. **NINA host(s)** — the IP or hostname of each NINA PC (e.g. `192.168.1.50`). The device builds the full API URL automatically. You can configure up to three instances.
+2. **NINA host(s)** — the IP or hostname of each NINA PC (e.g. `192.168.1.50`). The device builds the full API URL automatically. Up to three instances.
 
-Save settings. The device reconnects to your network and starts polling immediately.
+Save. The device reconnects to your network and starts polling immediately.
 
-> Once the device connects to your network, the config AP is automatically disabled to reduce radio interference. If the WiFi connection drops, the AP reappears so you can reconfigure.
+> Once connected to your network, the config AP is disabled to reduce radio interference. If the WiFi connection drops, the AP reappears so you can reconfigure.
 
 ---
 
 ## Security
 
-The device web interface uses a session cookie for authentication. Open the web UI and you will be redirected to a login page. Enter the admin password (default: `changeme123!`). There is no username, only a password. Sessions expire after 12 hours.
+The web interface is protected by a session-cookie login (default password: `changeme123!`; there is no username). **Change it on first boot:** web UI, System tab, Admin Password section.
 
-- Default admin password: `changeme123!`
-- Change the password on first boot. Open the web UI, navigate to Settings, select the System tab, and use the Admin Password section. The same section includes a Sign out button.
-- Authentication covers `/` and all configuration, reboot, factory reset, OTA, and secret-returning endpoints.
-- Unauthenticated entry points: `/login`, `/api/login`.
-- Other unauthenticated endpoints: `/favicon.ico`, `/api/version`, `/api/status`, `/api/nina/status`, `/api/check-update-json`, `/api/spotify/callback` (OAuth redirect target), `/api/allsky-proxy`, `/api/screenshot`, `/api/crash`.
-- Unauthenticated HTML requests to protected paths redirect to `/login`. Unauthenticated `/api/*` requests return HTTP 401 with a JSON body, and the UI redirects the browser to `/login`.
-- The admin password is stored in NVS. The transport is HTTP, not HTTPS. Treat the LAN segment as the trust boundary. Session tokens are 256-bit random values held in RAM and cleared on reboot.
-- Secrets (WiFi password, MQTT password, Spotify client ID) are redacted in `GET /api/config` and returned as `********`. The configuration backup endpoint returns real values to authenticated users.
-- The password field accepts 4 to 32 characters. Changing the password requires the current password.
-- Authentication can be disabled. Settings, System tab, Authentication card contains a "Require login to access the web UI" toggle. Default is enabled. When disabled, every endpoint becomes open to any client on the LAN, which includes reboot, factory reset, OTA, and configuration change. Secrets remain redacted in every API response regardless of the toggle state: `GET /api/config` returns `********` for sensitive fields, and `GET /api/config/backup?include_sensitive=1` is downgraded to a redacted backup when authentication is off. Use this only on trusted networks.
+- Authentication is enabled by default and covers all configuration, reboot, factory reset, OTA, and secret-returning endpoints. Sessions expire after 12 hours.
+- Transport is HTTP, not HTTPS. Treat your LAN segment as the trust boundary.
+- Secrets (WiFi/MQTT passwords, Spotify client ID) are redacted as `********` in API responses regardless of the auth setting.
+- Authentication can be disabled (System tab). When off, every endpoint is open to anyone on the LAN, including reboot, factory reset, and OTA. Use only on trusted networks.
 
 ---
 
 ## Display Interface
 
-### Summary Page
+The **Summary page** shows a card for each configured NINA instance: name, active filter, target, progress, RMS, HFR, and time to meridian flip. Tap a card to jump to that instance's full dashboard.
 
-The first page shows glassmorphic cards for all configured NINA instances at a glance. Each card displays the instance name, active filter, target name, progress bar, RMS, HFR, and time to meridian flip. Tap a card to jump to that instance's full dashboard.
+Each **instance page** is a 720x720 bento-box grid: header (target, profile, WiFi, connection dot), sequence, an animated exposure arc colored by the active filter, filter/timing, guiding RMS, image stats (HFR, star count), mount flip time, session time, and power (voltage, current, watts, dew-heater PWM). A pulsing header dot marks an active API request; grey means NINA is unreachable, and the page dims after prolonged stale data.
 
-### Instance Pages
+### Touch interactions
 
-Each NINA instance gets a dedicated 720x720 bento-box grid:
-
-| Section | Data shown |
-|---|---|
-| Header | Target name, profile name, WiFi signal bars, connection status dot |
-| Sequence | Container name, current step |
-| Exposure arc | Animated arc showing exposure progress; color follows the active filter |
-| Filter & timing | Active filter name, elapsed / remaining time, loop count |
-| Guiding | Total RMS, RA RMS, Dec RMS (arcseconds); color shifts at configurable thresholds |
-| Image stats | HFR, star count |
-| Mount | Time to meridian flip |
-| Session | Target time, elapsed imaging time |
-| Power | Input voltage (V), current (A), power (W), PWM percentages for dew heaters |
-
-A pulsing dot in the header indicates an active API request. When solid and colored, you're connected. Grey means NINA isn't reachable. After 30 seconds without data, an amber "Last update" warning appears. After 2 minutes, the page dims to indicate stale data.
-
-#### Touch interactions
-
-Every section on the instance page is tappable:
+Every section on an instance page is tappable:
 
 | Tap area | Opens |
 |---|---|
-| Header | Full-screen JPEG preview of the last captured image (tap anywhere to dismiss) |
+| Header | Full-screen JPEG preview of the last captured image (tap to dismiss) |
 | Sequence box | Sequence detail overlay (container, step, exposure counts) |
 | Exposure arc | Camera & weather overlay (camera name, temperature, dew point, humidity, pressure) |
-| Filter label (arc center) | Filter wheel overlay (current filter, available filters) |
-| RMS box | RMS history graph (up to 500 points, RA/Dec/Total series, threshold lines) |
+| Filter label (arc center) | Filter wheel overlay (current and available filters) |
+| RMS box | RMS history graph (up to 500 points, RA/Dec/Total, threshold lines) |
 | HFR box (short tap) | HFR history graph (up to 500 points, threshold lines) |
 | HFR box (long press) | Autofocus overlay (V-curve, focus position) |
 | Flip time box | Mount overlay (RA/Dec, altitude, azimuth, meridian flip state) |
@@ -272,154 +274,56 @@ Every section on the instance page is tappable:
 | Stars box | Image statistics overlay (star count, HFR, FWHM, eccentricity, SNR) |
 | Power row | Jump back to Summary page |
 
-### Settings Page
+### On-device settings
 
-On-device display settings accessible by swiping past the last instance page:
-
-- **Theme** — cycle through 14 built-in dark themes
-- **Backlight brightness** — slider (0–100%)
-- **Text/color brightness** — slider (0–100%) for dark-site dimming
-- **Update rate** — polling interval (1–10 s)
-- **Graph update interval** — how often graph data is sampled (2–30 s)
-- **Auto-rotate** — toggle, interval, transition effect (instant/fade/slide), skip disconnected
-
-### System Info Page
-
-The last page shows: device IP, hostname, WiFi SSID/RSSI, heap and PSRAM usage, chip info, IDF version, uptime, and task count.
+Swipe to the **Settings** page for on-device configuration in four tabs: Display (theme, brightness), Behavior (auto-rotate, sleep, timeouts), Nodes (NINA hosts), and System. The web UI exposes the full set of options. The **System Info** page reports IP, WiFi, CPU, memory, PSRAM, uptime, and task count.
 
 ---
 
-## Spotify Integration
+## Features
 
-The display doubles as an immersive Spotify Now Playing screen, showing full-screen album art with playback controls.
+### Navigation
 
-### Setup
+Swipe left/right to cycle pages, or press the **BOOT button** (GPIO 35) to advance. **Auto-cycle** rotates through a selectable, reorderable list of pages on a configurable interval with fade, slide, or instant transitions, and can skip disconnected instances. The **Home Page** setting picks the page the display settles on; when it is a NINA instance, the display also returns there whenever that instance is online. Page-indicator dots at the bottom mark the NINA instance pages.
 
-1. Create a free app at [developer.spotify.com](https://developer.spotify.com)
-2. Set the redirect URI in your Spotify app to `http://127.0.0.1:8000/callback`
-3. Copy the **Client ID** from your Spotify app into the web config (Spotify tab)
-4. **Save** the config, then click **Login with Spotify** in the Account section
-5. After approving in Spotify, you'll see a "can't connect" page — copy the full URL from the address bar and paste it into the redirect URL field
+### Multi-Instance Support
 
-### Features
+Add up to three NINA hosts. Only the active (visible) page gets full ~2-second polling; background instances get a slower heartbeat (default 30 s). When the Summary page is active, all instances are polled at full rate.
 
-- **Full-screen album art** — hardware JPEG decoded and scaled to fill the 720x720 display
-- **Playback controls** — play/pause, next, previous via touch buttons
-- **Progress bar** — real-time track progress with elapsed and remaining time
-- **Track info** — scrolling title, artist, and album name
-- **Auto-hide overlay** — controls fade out after a configurable timeout; tap to show, tap again to dismiss
-- **Smart polling** — NINA and AllSky polling automatically suspends while the Spotify page is active, freeing network bandwidth for album art downloads
-- **Token management** — OAuth 2.0 PKCE flow with automatic token refresh
+### Themes & Filter Colors
 
-The Spotify page is included in the page rotation and can be navigated to via swipe or auto-rotate.
+Nine built-in dark themes, selectable in the Display tab; changes apply instantly without a reboot. A color-brightness slider (0-100%) uniformly dims all theme colors for dark-site use. Filter colors are set per-instance as hex values, and new filters reported by NINA are added automatically with a default color. RMS and HFR threshold colors are configurable, so out-of-range values shift green to amber to red.
 
----
+### Spotify
 
-## Navigation
+The display doubles as a full-screen Spotify Now Playing screen with album art, playback controls, progress bar, and scrolling track info. NINA and AllSky polling pause while the Spotify page is active to free bandwidth for album-art downloads.
 
-- **Swipe** left/right to cycle through pages (wraps around)
-- **BOOT button** (GPIO 35) advances to the next page
-- **Auto-rotate** cycles pages on a configurable interval with fade, slide, or instant transitions
-- **Page indicator dots** at the bottom show NINA instance pages
-- **Active page override** in config to boot directly to a specific page
+Setup (Spotify tab in the web UI):
 
-Page order: AllSky (optional) → Summary → NINA instances (1..N) → Spotify (optional) → Settings → System Info.
+1. Create a free app at [developer.spotify.com](https://developer.spotify.com).
+2. Set its redirect URI to `http://127.0.0.1:8000/callback`.
+3. Paste the **Client ID** into the Spotify tab and **Save**.
+4. Click **Login with Spotify** and approve access.
+5. Spotify redirects to a "can't connect" page: copy the full URL from the address bar and paste it into the Redirect URL field.
 
----
+### MQTT / Home Assistant
 
-## Multi-Instance Support
+Point MQTT at your broker to publish the device's own state via Home Assistant auto-discovery: screen brightness and text brightness (dimmable light entities), a reboot button, and an uptime sensor. Home Assistant can then set brightness or reboot the device, for example dimming during a dark-site session. NINA session data is not published over MQTT.
 
-Add a second or third API URL in the config page. Only the **active (visible) page** gets full 2-second polling. Background instances get a 10-second heartbeat. When the summary page is active, all instances receive full polling.
+### AllSky, Weather, and Imagery
 
-Auto-rotate can be configured to skip disconnected instances and to include or exclude specific pages via a bitmask.
-
----
-
-## Themes & Filter Colors
-
-Six built-in dark themes: Bento Default, OLED Black, Red Night, Monochrome, All Black, and Midnight Industrial. Select one from the web config. Theme changes apply instantly without a reboot.
-
-A color brightness slider (0–100%) uniformly adjusts all theme colors for dark-site use.
-
-Filter colors are configured per-instance as hex values. When NINA reports a new filter name, it's automatically added to the config with a default color you can customize. RMS and HFR threshold colors are also configurable — set your acceptable limits, and values outside range shift from green to amber to red.
-
----
-
-## MQTT / Home Assistant Integration
-
-Enable MQTT in the web config and point it at your broker. The device publishes Home Assistant auto-discovery configs for:
-
-- **Screen Brightness** — a dimmable light entity (0–100%) to control the display backlight
-- **Text Brightness** — a dimmable light entity (0–100%) to control theme color intensity
-- **Reboot** — a button entity to restart the device remotely
-
-Enables screen dimming via HA automation during a dark-site session or display integration into observatory control workflows.
+- **AllSky** — a four-quadrant environmental panel (thermal, sky quality, ambient, power) fed from an AllSky API with configurable field mappings and thresholds.
+- **Weather** — OpenWeatherMap, Open-Meteo, or Weather Underground data on the clock page.
+- **Image Display** — full-screen GOES satellite, NASA SDO/SOHO solar imagery, or a custom image URL.
 
 ---
 
 ## Web API
 
-The on-device HTTP server (port 80) exposes endpoints beyond the config UI:
+The device serves an HTTP API on port 80. A full, always-current reference for every endpoint (with copy-paste `curl` examples) lives in the web UI's **API tab**.
 
-| Endpoint | Method | Purpose |
-|---|---|---|
-| `/api/config` | GET/POST | Read or write the full device configuration |
-| `/api/brightness` | POST | Set display brightness (0–100%) live |
-| `/api/color-brightness` | POST | Set color brightness (0–100%) live |
-| `/api/theme` | POST | Switch theme live |
-| `/api/screenshot` | GET | Capture a JPEG screenshot of the current display |
-| `/api/reboot` | POST | Reboot the device |
-| `/api/factory-reset` | POST | Erase config and restore defaults |
-
-### Screenshots
-
-The `/api/screenshot` endpoint captures a live JPEG of the current display using the ESP32-P4's hardware JPEG encoder. Open it in a browser or fetch it with `curl`:
+The `/api/screenshot` endpoint captures a live JPEG of the current display using the ESP32-P4's hardware JPEG encoder:
 
 ```bash
-# Save a screenshot
 curl -o screenshot.jpg http://<device-ip>/api/screenshot
 ```
-
----
-
-## Building from Source
-
-Standard **ESP-IDF** project targeting IDF 5.5.x. Requires the IDF toolchain installed and `IDF_PATH` set.
-
-```bash
-# Activate IDF environment (once per terminal session)
-. $IDF_PATH/export.sh
-
-# Build
-idf.py build
-
-# Flash and open serial monitor
-idf.py flash monitor
-
-# Wipe build directory if you hit stale artifact issues
-idf.py fullclean
-```
-
-Dependencies are managed via **IDF Component Manager** (`idf_component.yml`). Don't edit files under `managed_components/` directly — run `idf.py update-dependencies` to refresh them.
-
-### source files
-
-| File | Purpose |
-|---|---|
-| `main/main.c` | Boot sequence, WiFi init, task spawning |
-| `main/tasks.c` | Polling loop, WebSocket lifecycle, auto-rotate, thumbnail fetch |
-| `main/nina_client.h/.c` | Poll orchestration and tiered request scheduling |
-| `main/nina_api_fetchers.h/.c` | Individual REST endpoint fetchers (camera, guider, mount, etc.) |
-| `main/nina_sequence.h/.c` | Sequence JSON parsing (container, step, exposure counts) |
-| `main/nina_websocket.h/.c` | WebSocket client with concurrent multi-instance connections |
-| `main/app_config.h/.c` | NVS-backed config (WiFi, URLs, themes, thresholds, MQTT) |
-| `main/web_server.h/.c` | On-device HTTP config UI + JSON API |
-| `main/mqtt_ha.h/.c` | MQTT + Home Assistant auto-discovery |
-| `main/jpeg_utils.h/.c` | Hardware JPEG decoding via `esp_driver_jpeg` |
-| `main/ui/nina_dashboard.h/.c` | LVGL page management, swipe gestures, page indicator dots |
-| `main/ui/nina_dashboard_update.c` | Live data widget update logic |
-| `main/ui/nina_summary.h/.c` | Summary page with glassmorphic instance cards |
-| `main/ui/nina_sysinfo.h/.c` | System info page |
-| `main/ui/nina_thumbnail.h/.c` | Full-screen thumbnail overlay |
-| `main/ui/themes.h/.c` | 6 built-in dark themes |
-

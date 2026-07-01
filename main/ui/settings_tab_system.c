@@ -215,7 +215,7 @@ static void create_network_card(lv_obj_t *parent) {
         for (int i = 0; i < 3; i++) {
             wifi_net_btns[i] = lv_button_create(btn_row);
             lv_obj_set_flex_grow(wifi_net_btns[i], 1);
-            lv_obj_set_height(wifi_net_btns[i], 36);
+            lv_obj_set_height(wifi_net_btns[i], 56);
             lv_obj_set_style_radius(wifi_net_btns[i], 8, 0);
             lv_obj_set_style_bg_opa(wifi_net_btns[i], LV_OPA_COVER, 0);
             lv_obj_set_style_bg_color(wifi_net_btns[i], lv_color_hex(btn_bg), 0);
@@ -228,7 +228,7 @@ static void create_network_card(lv_obj_t *parent) {
             bool configured = (ssid[0] != '\0');
 
             lv_obj_t *label = lv_label_create(wifi_net_btns[i]);
-            lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+            lv_obj_set_style_text_font(label, &lv_font_montserrat_18, 0);
             if (configured) {
                 lv_label_set_text(label, ssid);
             } else {
@@ -287,7 +287,7 @@ static void create_network_card(lv_obj_t *parent) {
         dd_timezone = lv_dropdown_create(row);
         lv_dropdown_set_options(dd_timezone, tz_names);
         lv_obj_set_width(dd_timezone, 220);
-        lv_obj_set_style_text_font(dd_timezone, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(dd_timezone, &lv_font_montserrat_18, 0);
         if (current_theme) {
             lv_obj_set_style_bg_color(dd_timezone, lv_color_hex(current_theme->bento_bg), 0);
             lv_obj_set_style_bg_opa(dd_timezone, LV_OPA_COVER, 0);
@@ -483,7 +483,7 @@ static void create_firmware_card(lv_obj_t *parent) {
         dd_update_channel = lv_dropdown_create(row);
         lv_dropdown_set_options(dd_update_channel, "Stable\nPre-releases\nAlpha (snd)");
         lv_obj_set_width(dd_update_channel, 180);
-        lv_obj_set_style_text_font(dd_update_channel, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(dd_update_channel, &lv_font_montserrat_18, 0);
         if (current_theme) {
             lv_obj_set_style_bg_color(dd_update_channel, lv_color_hex(current_theme->bento_bg), 0);
             lv_obj_set_style_bg_opa(dd_update_channel, LV_OPA_COVER, 0);

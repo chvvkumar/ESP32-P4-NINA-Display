@@ -2,11 +2,15 @@
  * @file settings_tab_behavior.c
  * @brief Behavior tab for the settings tabview.
  *
- * Contains four cards:
- *   - Hardware:      screen rotation dropdown, backlight slider
- *   - Power Mgmt:    screen sleep, deep sleep, WiFi power save
+ * Contains these cards:
+ *   - Power Mgmt:    screen sleep, deep sleep, WiFi power save, auto power off
  *   - Polling:       data rate, graph rate, connection timeout, toast duration
- *   - Notifications: border flash alerts
+ *   - Notifications: border flash alerts, per-instance mutes
+ *   - Idle Page:     idle-override target, indicator, stay-on-page grace
+ *
+ * Leaf on/off toggles (WiFi Power Save, Auto Power Off, Border Flash, per-node
+ * mutes) render two-per-row; reveal toggles (Screen Sleep, Deep Sleep) stay
+ * full-width. Screen rotation and backlight now live on the Display tab.
  */
 
 #include "settings_tab_behavior.h"
@@ -18,7 +22,6 @@
 #include "themes.h"
 #include "display_defs.h"
 #include "lvgl.h"
-#include "bsp/esp-bsp.h"
 #include "esp_wifi.h"
 
 #include <stdio.h>
@@ -26,11 +29,6 @@
 
 /* ── Tab root ────────────────────────────────────────────────────────── */
 static lv_obj_t *tab_root = NULL;
-
-/* ── Hardware card ───────────────────────────────────────────────────── */
-static lv_obj_t *dd_rotation       = NULL;
-static lv_obj_t *slider_backlight  = NULL;
-static lv_obj_t *lbl_backlight_val = NULL;
 
 /* ── Power management card ───────────────────────────────────────────── */
 static lv_obj_t *sw_screen_sleep      = NULL;
@@ -67,9 +65,6 @@ static lv_obj_t *lbl_nav_grace           = NULL;
 static page_ref_t idle_target_ids[PAGE_REF_ID_MAX];
 static int        idle_target_count = 0;
 
-/* ── Rotation dropdown options ───────────────────────────────────────── */
-static const char *rotation_opts = "0\xc2\xb0\n90\xc2\xb0\n180\xc2\xb0\n270\xc2\xb0";
-
 /* ════════════════════════════════════════════════════════════════════════
  *  Helper — format sleep timeout with appropriate unit
  * ════════════════════════════════════════════════════════════════════════ */
@@ -83,27 +78,6 @@ static void update_sleep_timeout_label(void) {
         lv_label_set_text_fmt(lbl_sleep_timeout, "%d s",
                               cfg->screen_sleep_timeout_s);
     }
-}
-
-/* ════════════════════════════════════════════════════════════════════════
- *  Hardware Card Callbacks
- * ════════════════════════════════════════════════════════════════════════ */
-
-static void rotation_changed_cb(lv_event_t *e) {
-    LV_UNUSED(e);
-    uint32_t idx = lv_dropdown_get_selected(dd_rotation);
-    app_config_get()->screen_rotation = (uint8_t)idx;
-    lv_display_set_rotation(lv_display_get_default(), idx);
-    settings_mark_dirty(false);
-}
-
-static void backlight_changed_cb(lv_event_t *e) {
-    LV_UNUSED(e);
-    int val = lv_slider_get_value(slider_backlight);
-    app_config_get()->brightness = val;
-    bsp_display_brightness_set(val);
-    lv_label_set_text_fmt(lbl_backlight_val, "%d%%", val);
-    settings_mark_dirty(false);
 }
 
 /* ════════════════════════════════════════════════════════════════════════
@@ -438,14 +412,46 @@ static void make_labeled_stepper(lv_obj_t *card, const char *text,
 }
 
 /* ════════════════════════════════════════════════════════════════════════
+ *  Helper — 2-column leaf-toggle grid
+ *
+ *  Pure on/off leaf toggles are laid two-per-row in a ROW_WRAP grid. Each
+ *  cell is lv_pct(48) — deliberately sub-50% so 48%+48%+gap does not overflow
+ *  the row and wrap the second cell (RESEARCH Open Risk #4). settings_make_
+ *  toggle_row() builds a LV_PCT(100) SPACE_BETWEEN row; setting its width to
+ *  the cell percentage makes it a grid cell directly (no extra container),
+ *  preserving the label-left / switch-right layout inside each cell.
+ * ════════════════════════════════════════════════════════════════════════ */
+
+#define LEAF_CELL_PCT 48   /* sub-50% so two cells + gap fit per row */
+
+/* Create the ROW_WRAP grid container for leaf toggles inside @p card. */
+static lv_obj_t *make_toggle_grid(lv_obj_t *card)
+{
+    lv_obj_t *grid = lv_obj_create(card);
+    lv_obj_remove_style_all(grid);
+    lv_obj_set_width(grid, LV_PCT(100));
+    lv_obj_set_height(grid, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_style_pad_column(grid, 8, 0);
+    lv_obj_set_style_pad_row(grid, 8, 0);
+    lv_obj_clear_flag(grid, LV_OBJ_FLAG_SCROLLABLE);
+    return grid;
+}
+
+/* Add one leaf toggle cell (label + switch) to @p grid, returning the switch
+ * via @p out_sw. The cell width is sub-50% so exactly two fit per row. */
+static void add_toggle_cell(lv_obj_t *grid, const char *text, lv_obj_t **out_sw)
+{
+    lv_obj_t *cell = settings_make_toggle_row(grid, text, out_sw);
+    lv_obj_set_width(cell, LV_PCT(LEAF_CELL_PCT));
+}
+
+/* ════════════════════════════════════════════════════════════════════════
  *  Tab Creation
  * ════════════════════════════════════════════════════════════════════════ */
 
 void settings_tab_behavior_destroy(void) {
     tab_root = NULL;
-    dd_rotation = NULL;
-    slider_backlight = NULL;
-    lbl_backlight_val = NULL;
     sw_screen_sleep = NULL;
     cont_sleep_opts = NULL;
     lbl_sleep_timeout = NULL;
@@ -473,101 +479,11 @@ void settings_tab_behavior_create(lv_obj_t *parent) {
     app_config_t *cfg = app_config_get();
     int gb = cfg->color_brightness;
 
-    /* ── Hardware Card ───────────────────────────────────────────────── */
-    {
-        lv_obj_t *card = settings_make_card(parent, "HARDWARE");
-
-        /* Rotation row */
-        {
-            lv_obj_t *row = settings_make_row(card);
-
-            lv_obj_t *lbl = lv_label_create(row);
-            lv_label_set_text(lbl, "Rotation");
-            lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
-            if (current_theme) {
-                lv_obj_set_style_text_color(lbl,
-                    lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-            }
-
-            dd_rotation = lv_dropdown_create(row);
-            lv_dropdown_set_options(dd_rotation, rotation_opts);
-            lv_obj_set_width(dd_rotation, 160);
-            lv_dropdown_set_selected(dd_rotation, cfg->screen_rotation);
-
-            /* Style the dropdown */
-            if (current_theme) {
-                lv_obj_set_style_bg_color(dd_rotation, lv_color_hex(current_theme->bento_bg), 0);
-                lv_obj_set_style_bg_opa(dd_rotation, LV_OPA_COVER, 0);
-                lv_obj_set_style_text_color(dd_rotation,
-                    lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-                lv_obj_set_style_border_color(dd_rotation, lv_color_hex(current_theme->bento_border), 0);
-                lv_obj_set_style_border_width(dd_rotation, 1, 0);
-            }
-
-            lv_obj_add_event_cb(dd_rotation, rotation_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
-        }
-
-        settings_make_divider(card);
-
-        /* Backlight row */
-        {
-            lv_obj_t *row = settings_make_row(card);
-
-            lv_obj_t *lbl = lv_label_create(row);
-            lv_label_set_text(lbl, "Backlight");
-            lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
-            lv_obj_set_style_min_width(lbl, 100, 0);
-            if (current_theme) {
-                lv_obj_set_style_text_color(lbl,
-                    lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-            }
-
-            /* Slider + value in a sub-container */
-            lv_obj_t *ctrl = lv_obj_create(row);
-            lv_obj_remove_style_all(ctrl);
-            lv_obj_set_flex_grow(ctrl, 1);
-            lv_obj_set_height(ctrl, 50);
-            lv_obj_set_flex_flow(ctrl, LV_FLEX_FLOW_ROW);
-            lv_obj_set_flex_align(ctrl, LV_FLEX_ALIGN_CENTER,
-                                  LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-            lv_obj_set_style_pad_column(ctrl, 10, 0);
-
-            slider_backlight = lv_slider_create(ctrl);
-            lv_obj_set_flex_grow(slider_backlight, 1);
-            lv_obj_set_height(slider_backlight, 16);
-            lv_slider_set_range(slider_backlight, 0, 100);
-            lv_slider_set_value(slider_backlight, cfg->brightness, LV_ANIM_OFF);
-            lv_obj_set_style_radius(slider_backlight, 8, 0);
-            lv_obj_set_style_radius(slider_backlight, 8, LV_PART_INDICATOR);
-            lv_obj_set_style_radius(slider_backlight, LV_RADIUS_CIRCLE, LV_PART_KNOB);
-            lv_obj_set_style_pad_all(slider_backlight, 8, LV_PART_KNOB);
-            if (current_theme) {
-                lv_obj_set_style_bg_color(slider_backlight, lv_color_hex(current_theme->bento_border), 0);
-                lv_obj_set_style_bg_opa(slider_backlight, LV_OPA_COVER, 0);
-                lv_obj_set_style_bg_color(slider_backlight, lv_color_hex(current_theme->progress_color), LV_PART_INDICATOR);
-                lv_obj_set_style_bg_opa(slider_backlight, LV_OPA_COVER, LV_PART_INDICATOR);
-                lv_obj_set_style_bg_color(slider_backlight, lv_color_hex(current_theme->progress_color), LV_PART_KNOB);
-                lv_obj_set_style_bg_opa(slider_backlight, LV_OPA_COVER, LV_PART_KNOB);
-            }
-            lv_obj_add_event_cb(slider_backlight, backlight_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
-
-            lbl_backlight_val = lv_label_create(ctrl);
-            lv_obj_set_style_text_font(lbl_backlight_val, &lv_font_montserrat_20, 0);
-            lv_obj_set_style_min_width(lbl_backlight_val, 50, 0);
-            lv_obj_set_style_text_align(lbl_backlight_val, LV_TEXT_ALIGN_RIGHT, 0);
-            if (current_theme) {
-                lv_obj_set_style_text_color(lbl_backlight_val,
-                    lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-            }
-            lv_label_set_text_fmt(lbl_backlight_val, "%d%%", cfg->brightness);
-        }
-    }
-
     /* ── Power Management Card ───────────────────────────────────────── */
     {
         lv_obj_t *card = settings_make_card(parent, "POWER MANAGEMENT");
 
-        /* Screen sleep toggle */
+        /* Screen sleep toggle — reveal toggle, full-width */
         settings_make_toggle_row(card, "Screen Sleep", &sw_screen_sleep);
         if (cfg->screen_sleep_enabled) {
             lv_obj_add_state(sw_screen_sleep, LV_STATE_CHECKED);
@@ -595,23 +511,15 @@ void settings_tab_behavior_create(lv_obj_t *parent) {
 
         settings_make_divider(card);
 
-        /* WiFi power save toggle */
-        settings_make_toggle_row(card, "WiFi Power Save", &sw_wifi_power_save);
-        if (cfg->wifi_power_save) {
-            lv_obj_add_state(sw_wifi_power_save, LV_STATE_CHECKED);
-        }
-        lv_obj_add_event_cb(sw_wifi_power_save, wifi_power_save_toggle_cb, LV_EVENT_VALUE_CHANGED, NULL);
-
-        settings_make_divider(card);
-
-        /* Deep sleep toggle */
+        /* Deep sleep toggle — reveal toggle, full-width */
         settings_make_toggle_row(card, "Deep Sleep", &sw_deep_sleep);
         if (cfg->deep_sleep_enabled) {
             lv_obj_add_state(sw_deep_sleep, LV_STATE_CHECKED);
         }
         lv_obj_add_event_cb(sw_deep_sleep, deep_sleep_toggle_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
-        /* Collapsible deep sleep options container */
+        /* Collapsible deep sleep options container (wake timer only; Auto Power
+         * Off is a leaf toggle and lives in the 2-column grid below). */
         cont_deep_sleep_opts = lv_obj_create(card);
         lv_obj_remove_style_all(cont_deep_sleep_opts);
         lv_obj_set_width(cont_deep_sleep_opts, LV_PCT(100));
@@ -633,12 +541,26 @@ void settings_tab_behavior_create(lv_obj_t *parent) {
             lv_label_set_text_fmt(lbl_wake_timer, "%lu h", (unsigned long)hours);
         }
 
-        /* Auto power off on idle toggle */
-        settings_make_toggle_row(cont_deep_sleep_opts, "Auto Power Off", &sw_auto_power_off);
-        if (cfg->deep_sleep_on_idle) {
-            lv_obj_add_state(sw_auto_power_off, LV_STATE_CHECKED);
+        settings_make_divider(card);
+
+        /* Leaf toggles two-per-row: WiFi Power Save + Auto Power Off. Auto Power
+         * Off is re-parented out of the deep-sleep reveal container into this
+         * leaf grid per CONTEXT §Behavior (its callback is unchanged). */
+        {
+            lv_obj_t *grid = make_toggle_grid(card);
+
+            add_toggle_cell(grid, "WiFi Power Save", &sw_wifi_power_save);
+            if (cfg->wifi_power_save) {
+                lv_obj_add_state(sw_wifi_power_save, LV_STATE_CHECKED);
+            }
+            lv_obj_add_event_cb(sw_wifi_power_save, wifi_power_save_toggle_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+            add_toggle_cell(grid, "Auto Power Off", &sw_auto_power_off);
+            if (cfg->deep_sleep_on_idle) {
+                lv_obj_add_state(sw_auto_power_off, LV_STATE_CHECKED);
+            }
+            lv_obj_add_event_cb(sw_auto_power_off, auto_power_off_toggle_cb, LV_EVENT_VALUE_CHANGED, NULL);
         }
-        lv_obj_add_event_cb(sw_auto_power_off, auto_power_off_toggle_cb, LV_EVENT_VALUE_CHANGED, NULL);
     }
 
     /* ── Polling Card ────────────────────────────────────────────────── */
@@ -688,7 +610,10 @@ void settings_tab_behavior_create(lv_obj_t *parent) {
     {
         lv_obj_t *card = settings_make_card(parent, "NOTIFICATIONS");
 
-        settings_make_toggle_row(card, "Border Flash", &sw_alert_flash);
+        /* Leaf toggles two-per-row: Border Flash + per-instance mutes. */
+        lv_obj_t *grid = make_toggle_grid(card);
+
+        add_toggle_cell(grid, "Border Flash", &sw_alert_flash);
         if (cfg->alert_flash_enabled) {
             lv_obj_add_state(sw_alert_flash, LV_STATE_CHECKED);
         }
@@ -697,8 +622,6 @@ void settings_tab_behavior_create(lv_obj_t *parent) {
         /* Per-instance mute toggles — only show for enabled instances */
         for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
             if (!cfg->instance_enabled[i]) continue;
-
-            settings_make_divider(card);
 
             /* Try to extract hostname from URL for label */
             char label[48];
@@ -713,7 +636,7 @@ void settings_tab_behavior_create(lv_obj_t *parent) {
                 snprintf(label, sizeof(label), "Instance %d Alerts", i + 1);
             }
 
-            settings_make_toggle_row(card, label, &sw_instance_mute[i]);
+            add_toggle_cell(grid, label, &sw_instance_mute[i]);
             if (!cfg->toast_instance_muted[i]) {
                 lv_obj_add_state(sw_instance_mute[i], LV_STATE_CHECKED);
             }
@@ -820,15 +743,6 @@ void settings_tab_behavior_create(lv_obj_t *parent) {
 void settings_tab_behavior_refresh(void) {
     if (!tab_root) return;
     app_config_t *cfg = app_config_get();
-
-    /* Hardware */
-    if (dd_rotation) {
-        lv_dropdown_set_selected(dd_rotation, cfg->screen_rotation);
-    }
-    if (slider_backlight) {
-        lv_slider_set_value(slider_backlight, cfg->brightness, LV_ANIM_OFF);
-        lv_label_set_text_fmt(lbl_backlight_val, "%d%%", cfg->brightness);
-    }
 
     /* Screen sleep */
     if (sw_screen_sleep) {
