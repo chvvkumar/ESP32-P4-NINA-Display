@@ -934,7 +934,7 @@ static void animate_card_move(summary_card_t *sc, int32_t dy) {
 
 /* ── Data Update ───────────────────────────────────────────────────── */
 
-void summary_page_update(const nina_client_t *instances, int count) {
+void summary_page_update(const nina_client_t *instances, int count, const bool *locked) {
     if (!sum_page) return;
 
     int gb = app_config_get()->color_brightness;
@@ -1043,6 +1043,13 @@ void summary_page_update(const nina_client_t *instances, int count) {
             /* Card is hidden this cycle — drop any stale exposure anchor so the
              * interp timer doesn't keep driving an off-screen bar. */
             bar_reset_exposure_state(sc);
+            continue;
+        }
+
+        /* Trylock failed this cycle — the instance may be mid-commit, so leave
+         * the card's previous data-bearing contents intact rather than reading
+         * torn fields. The card stays visible; it refreshes next cycle. */
+        if (locked && !locked[i]) {
             continue;
         }
 

@@ -20,6 +20,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
@@ -178,7 +179,14 @@ esp_err_t brightness_post_handler(httpd_req_t *req)
         int brightness = val->valueint;
         if (brightness < 0) brightness = 0;
         if (brightness > 100) brightness = 100;
-        app_config_get()->brightness = brightness;
+        /* Live preview: apply to the in-memory config (no NVS write until Save). */
+        app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+        if (cfg) {
+            *cfg = app_config_get_snapshot();
+            cfg->brightness = brightness;
+            app_config_apply(cfg);
+            heap_caps_free(cfg);
+        }
         bsp_display_brightness_set(brightness);
         ESP_LOGI(TAG, "Brightness set to %d%%", brightness);
         mqtt_ha_publish_state();
@@ -221,8 +229,16 @@ esp_err_t color_brightness_post_handler(httpd_req_t *req)
         int cb = val->valueint;
         if (cb < 0) cb = 0;
         if (cb > 100) cb = 100;
-        app_config_t *cfg = app_config_get();
+        /* Live preview: apply to the in-memory config (no NVS write until Save). */
+        app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+        if (!cfg) {
+            cJSON_Delete(root);
+            httpd_resp_send_500(req);
+            return ESP_FAIL;
+        }
+        *cfg = app_config_get_snapshot();
         cfg->color_brightness = cb;
+        app_config_apply(cfg);
 
         // Re-apply theme to update static text brightness
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
@@ -231,6 +247,7 @@ esp_err_t color_brightness_post_handler(httpd_req_t *req)
         } else {
             ESP_LOGW(TAG, "Display lock timeout (color brightness)");
         }
+        heap_caps_free(cfg);
 
         ESP_LOGI(TAG, "Color brightness set to %d%%", cb);
         mqtt_ha_publish_state();
@@ -273,8 +290,17 @@ esp_err_t theme_post_handler(httpd_req_t *req)
         int idx = val->valueint;
         if (idx < 0) idx = 0;
         if (idx >= themes_get_count()) idx = themes_get_count() - 1;
-        app_config_t *cfg = app_config_get();
+        /* Live preview: apply to the in-memory config (no NVS write until Save). */
+        app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+        if (!cfg) {
+            cJSON_Delete(root);
+            httpd_resp_send_500(req);
+            return ESP_FAIL;
+        }
+        *cfg = app_config_get_snapshot();
         cfg->theme_index = idx;
+        app_config_apply(cfg);
+        heap_caps_free(cfg);
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
             nina_dashboard_apply_theme(idx);
             bsp_display_unlock();
@@ -321,14 +347,23 @@ esp_err_t widget_style_post_handler(httpd_req_t *req)
         int idx = val->valueint;
         if (idx < 0) idx = 0;
         if (idx >= WIDGET_STYLE_COUNT) idx = WIDGET_STYLE_COUNT - 1;
-        app_config_t *cfg = app_config_get();
+        /* Live preview: apply to the in-memory config (no NVS write until Save). */
+        app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+        if (!cfg) {
+            cJSON_Delete(root);
+            httpd_resp_send_500(req);
+            return ESP_FAIL;
+        }
+        *cfg = app_config_get_snapshot();
         cfg->widget_style = (uint8_t)idx;
+        app_config_apply(cfg);
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
             nina_dashboard_apply_theme(cfg->theme_index);
             bsp_display_unlock();
         } else {
             ESP_LOGW(TAG, "Display lock timeout (widget style switch)");
         }
+        heap_caps_free(cfg);
         ESP_LOGI(TAG, "Widget style set to %d", idx);
     }
 
@@ -420,8 +455,17 @@ esp_err_t screen_rotation_post_handler(httpd_req_t *req)
         int rot = val->valueint;
         if (rot < 0) rot = 0;
         if (rot > 3) rot = 3;
-        app_config_t *cfg = app_config_get();
+        /* Live preview: apply to the in-memory config (no NVS write until Save). */
+        app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+        if (!cfg) {
+            cJSON_Delete(root);
+            httpd_resp_send_500(req);
+            return ESP_FAIL;
+        }
+        *cfg = app_config_get_snapshot();
         cfg->screen_rotation = (uint8_t)rot;
+        app_config_apply(cfg);
+        heap_caps_free(cfg);
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
             lv_display_set_rotation(lv_display_get_default(), rot);
             bsp_display_unlock();

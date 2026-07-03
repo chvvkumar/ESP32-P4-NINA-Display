@@ -33,6 +33,8 @@ static const char *TAG = "spotify_auth";
 #define TOKEN_RESPONSE_BUF_SIZE 4096    /* 4KB SPIRAM for token responses */
 #define HTTP_TIMEOUT_MS         10000
 #define POST_BODY_BUF_SIZE      2048    /* URL-encoded POST body */
+#define REFRESH_BACKOFF_INITIAL_MS 30000    /* 30s after first transient failure */
+#define REFRESH_BACKOFF_MAX_MS     600000   /* 10min cap */
 
 static SemaphoreHandle_t s_mutex;
 static char *s_access_token = NULL;
@@ -42,8 +44,27 @@ static char *s_refresh_token = NULL;
 static int64_t s_token_expiry_ms;       /* Monotonic ms when access token expires */
 static spotify_auth_state_t s_state = SPOTIFY_AUTH_NONE;
 
+/* A token request must never run under s_mutex (it performs blocking HTTPS).
+ * These guard against duplicate concurrent requests and rate-limit retries
+ * after transient failures. All accessed only while holding s_mutex. */
+static bool s_refresh_in_flight = false;
+static int64_t s_next_refresh_ms = 0;
+static int64_t s_refresh_backoff_ms = REFRESH_BACKOFF_INITIAL_MS;
+
+/* Parsed token-endpoint result. do_token_request fills this without touching
+ * module state, so callers can run it outside s_mutex and commit under it. */
+typedef struct {
+    int     http_status;
+    bool    got_tokens;     /* access_token + expires_in parsed */
+    bool    got_refresh;    /* endpoint returned a rotated refresh token */
+    bool    invalid_grant;  /* definitive rejection — refresh token is dead */
+    int64_t expiry_ms;      /* monotonic ms when access token expires */
+    char    access_token[ACCESS_TOKEN_SIZE];
+    char    refresh_token[REFRESH_TOKEN_SIZE];
+} token_result_t;
+
 /* Forward declarations */
-static esp_err_t do_token_request(const char *body, size_t body_len);
+static esp_err_t do_token_request(const char *body, size_t body_len, token_result_t *res);
 static void save_tokens_to_nvs(void);
 static void load_tokens_from_nvs(void);
 static void clear_tokens_from_nvs(void);
@@ -146,6 +167,7 @@ static void clear_tokens_from_nvs(void) {
  */
 static int url_encode_param(char *buf, int pos, int buf_size,
                             const char *key, const char *value) {
+    if (pos < 0 || buf_size <= 0) return -1;
     /* Simple append — Spotify token endpoint values are safe ASCII
      * (base64url codes, client IDs, redirect URIs with limited charset).
      * No full percent-encoding needed for these specific parameters. */
@@ -165,7 +187,15 @@ static int url_encode_param(char *buf, int pos, int buf_size,
 // Token request — core HTTPS POST to Spotify token endpoint
 // =============================================================================
 
-static esp_err_t do_token_request(const char *body, size_t body_len) {
+static esp_err_t do_token_request(const char *body, size_t body_len, token_result_t *res) {
+    res->http_status = 0;
+    res->got_tokens = false;
+    res->got_refresh = false;
+    res->invalid_grant = false;
+    res->expiry_ms = 0;
+    res->access_token[0] = '\0';
+    res->refresh_token[0] = '\0';
+
     esp_http_client_config_t http_cfg = {
         .url = TOKEN_ENDPOINT,
         .method = HTTP_METHOD_POST,
@@ -198,6 +228,7 @@ static esp_err_t do_token_request(const char *body, size_t body_len) {
 
     int content_length = esp_http_client_fetch_headers(client);
     int status = esp_http_client_get_status_code(client);
+    res->http_status = status;
 
     /* Determine buffer size */
     int buf_size = (content_length > 0 && content_length < TOKEN_RESPONSE_BUF_SIZE)
@@ -223,24 +254,29 @@ static esp_err_t do_token_request(const char *body, size_t body_len) {
 
     esp_http_client_cleanup(client);
 
-    if (status < 200 || status >= 300) {
-        ESP_LOGE(TAG, "Token request failed HTTP %d: %.256s", status, buffer);
-        free(buffer);
-        return ESP_FAIL;
-    }
-
-    if (total_read == 0) {
-        ESP_LOGE(TAG, "Empty token response body");
-        free(buffer);
-        return ESP_FAIL;
-    }
-
-    /* Parse JSON response */
-    cJSON *json = cJSON_Parse(buffer);
+    /* Parse JSON regardless of status so error bodies (e.g. invalid_grant)
+     * can classify the failure as definitive vs transient. */
+    cJSON *json = (total_read > 0) ? cJSON_Parse(buffer) : NULL;
     free(buffer);
 
+    if (status < 200 || status >= 300) {
+        const char *err_str = "unknown";
+        if (json) {
+            cJSON *error = cJSON_GetObjectItem(json, "error");
+            if (cJSON_IsString(error) && error->valuestring) {
+                err_str = error->valuestring;
+                if (strcmp(err_str, "invalid_grant") == 0) {
+                    res->invalid_grant = true;
+                }
+            }
+        }
+        ESP_LOGE(TAG, "Token request failed HTTP %d (error: %s)", status, err_str);
+        if (json) cJSON_Delete(json);
+        return ESP_FAIL;
+    }
+
     if (!json) {
-        ESP_LOGE(TAG, "Failed to parse token response JSON");
+        ESP_LOGE(TAG, "Empty or unparseable token response body");
         return ESP_FAIL;
     }
 
@@ -250,23 +286,20 @@ static esp_err_t do_token_request(const char *body, size_t body_len) {
     cJSON *expires_in = cJSON_GetObjectItem(json, "expires_in");
 
     if (cJSON_IsString(access) && cJSON_IsNumber(expires_in)) {
-        /* Update access token */
-        snprintf(s_access_token, ACCESS_TOKEN_SIZE, "%s", access->valuestring);
+        snprintf(res->access_token, ACCESS_TOKEN_SIZE, "%s", access->valuestring);
 
         /* Compute expiry in monotonic ms */
         int expires_s = expires_in->valueint;
-        s_token_expiry_ms = now_ms() + ((int64_t)expires_s * 1000);
+        res->expiry_ms = now_ms() + ((int64_t)expires_s * 1000);
 
-        /* Refresh token — Spotify may or may not return a new one.
-         * If present, update it; otherwise keep the existing one. */
+        /* Refresh token — Spotify may or may not return a new one. */
         cJSON *refresh = cJSON_GetObjectItem(json, "refresh_token");
         if (cJSON_IsString(refresh) && refresh->valuestring[0] != '\0') {
-            snprintf(s_refresh_token, REFRESH_TOKEN_SIZE, "%s", refresh->valuestring);
+            snprintf(res->refresh_token, REFRESH_TOKEN_SIZE, "%s", refresh->valuestring);
+            res->got_refresh = true;
         }
 
-        s_state = SPOTIFY_AUTH_AUTHORIZED;
-        save_tokens_to_nvs();
-
+        res->got_tokens = true;
         ESP_LOGI(TAG, "Token exchange OK — expires in %d s", expires_s);
         result = ESP_OK;
     } else {
@@ -351,18 +384,50 @@ esp_err_t spotify_auth_exchange_code(const char *code, const char *code_verifier
         return ESP_ERR_NO_MEM;
     }
 
+    /* Reserve the in-flight slot so a concurrent refresh cannot overlap. */
     xSemaphoreTake(s_mutex, portMAX_DELAY);
-    esp_err_t err = do_token_request(body, (size_t)pos);
+    if (s_refresh_in_flight) {
+        xSemaphoreGive(s_mutex);
+        free(body);
+        ESP_LOGW(TAG, "exchange_code: token request already in flight");
+        return ESP_FAIL;
+    }
+    s_refresh_in_flight = true;
     xSemaphoreGive(s_mutex);
 
-    free(body);
-
-    if (err != ESP_OK) {
+    token_result_t *res = heap_caps_malloc(sizeof(token_result_t), MALLOC_CAP_SPIRAM);
+    if (!res) {
         xSemaphoreTake(s_mutex, portMAX_DELAY);
-        s_state = SPOTIFY_AUTH_ERROR;
+        s_refresh_in_flight = false;
         xSemaphoreGive(s_mutex);
+        free(body);
+        return ESP_ERR_NO_MEM;
     }
 
+    esp_err_t err = do_token_request(body, (size_t)pos, res);
+    free(body);
+
+    /* Commit under the lock — do_token_request never touched module state. */
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    s_refresh_in_flight = false;
+    if (err == ESP_OK && res->got_tokens) {
+        snprintf(s_access_token, ACCESS_TOKEN_SIZE, "%s", res->access_token);
+        s_token_expiry_ms = res->expiry_ms;
+        if (res->got_refresh) {
+            snprintf(s_refresh_token, REFRESH_TOKEN_SIZE, "%s", res->refresh_token);
+        }
+        s_state = SPOTIFY_AUTH_AUTHORIZED;
+        save_tokens_to_nvs();
+        s_refresh_backoff_ms = REFRESH_BACKOFF_INITIAL_MS;
+        s_next_refresh_ms = 0;
+        err = ESP_OK;
+    } else {
+        s_state = SPOTIFY_AUTH_ERROR;
+        err = ESP_FAIL;
+    }
+    xSemaphoreGive(s_mutex);
+
+    free(res);
     return err;
 }
 
@@ -387,22 +452,42 @@ esp_err_t spotify_auth_get_access_token(char *buf, size_t buf_size) {
         return ESP_OK;
     }
 
-    /* Need to refresh */
-    ESP_LOGI(TAG, "Access token expired or missing — refreshing");
+    /* Need to refresh. Back off after transient failures so we do not hammer
+     * the token endpoint; the window is cleared on a successful refresh. */
+    if (s_next_refresh_ms != 0 && now_ms() < s_next_refresh_ms) {
+        xSemaphoreGive(s_mutex);
+        return ESP_FAIL;
+    }
+
+    /* Another caller is already refreshing — do not start a duplicate request. */
+    if (s_refresh_in_flight) {
+        xSemaphoreGive(s_mutex);
+        return ESP_FAIL;
+    }
 
     const app_config_t *cfg = app_config_get();
     if (cfg->spotify_client_id[0] == '\0') {
         ESP_LOGE(TAG, "Cannot refresh: no client_id configured");
-        s_state = SPOTIFY_AUTH_ERROR;
         xSemaphoreGive(s_mutex);
         return ESP_FAIL;
     }
+
+    /* Snapshot the inputs into locals so the HTTPS request runs unlocked. */
+    char refresh_local[REFRESH_TOKEN_SIZE];
+    char client_id_local[64];
+    snprintf(refresh_local, sizeof(refresh_local), "%s", s_refresh_token);
+    snprintf(client_id_local, sizeof(client_id_local), "%s", cfg->spotify_client_id);
+    s_refresh_in_flight = true;
+    xSemaphoreGive(s_mutex);
+
+    ESP_LOGI(TAG, "Access token expired or missing — refreshing");
 
     /* Build refresh POST body */
     char *body = heap_caps_malloc(POST_BODY_BUF_SIZE, MALLOC_CAP_SPIRAM);
     if (!body) {
         ESP_LOGE(TAG, "Failed to allocate refresh body buffer");
-        s_state = SPOTIFY_AUTH_ERROR;
+        xSemaphoreTake(s_mutex, portMAX_DELAY);
+        s_refresh_in_flight = false;
         xSemaphoreGive(s_mutex);
         return ESP_ERR_NO_MEM;
     }
@@ -411,31 +496,70 @@ esp_err_t spotify_auth_get_access_token(char *buf, size_t buf_size) {
     pos = url_encode_param(body, pos, POST_BODY_BUF_SIZE,
                            "grant_type", "refresh_token");
     pos = url_encode_param(body, pos, POST_BODY_BUF_SIZE,
-                           "refresh_token", s_refresh_token);
+                           "refresh_token", refresh_local);
     pos = url_encode_param(body, pos, POST_BODY_BUF_SIZE,
-                           "client_id", cfg->spotify_client_id);
+                           "client_id", client_id_local);
 
     if (pos < 0) {
         ESP_LOGE(TAG, "Refresh body overflow");
         free(body);
-        s_state = SPOTIFY_AUTH_ERROR;
+        xSemaphoreTake(s_mutex, portMAX_DELAY);
+        s_refresh_in_flight = false;
         xSemaphoreGive(s_mutex);
         return ESP_FAIL;
     }
 
-    esp_err_t err = do_token_request(body, (size_t)pos);
+    token_result_t *res = heap_caps_malloc(sizeof(token_result_t), MALLOC_CAP_SPIRAM);
+    if (!res) {
+        free(body);
+        xSemaphoreTake(s_mutex, portMAX_DELAY);
+        s_refresh_in_flight = false;
+        xSemaphoreGive(s_mutex);
+        return ESP_ERR_NO_MEM;
+    }
+
+    esp_err_t err = do_token_request(body, (size_t)pos, res);
     free(body);
 
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Token refresh failed");
-        s_state = SPOTIFY_AUTH_ERROR;
+    /* Commit under the lock. */
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    s_refresh_in_flight = false;
+
+    if (err == ESP_OK && res->got_tokens) {
+        snprintf(s_access_token, ACCESS_TOKEN_SIZE, "%s", res->access_token);
+        s_token_expiry_ms = res->expiry_ms;
+        if (res->got_refresh) {
+            snprintf(s_refresh_token, REFRESH_TOKEN_SIZE, "%s", res->refresh_token);
+        }
+        s_state = SPOTIFY_AUTH_AUTHORIZED;
+        save_tokens_to_nvs();
+        s_refresh_backoff_ms = REFRESH_BACKOFF_INITIAL_MS;
+        s_next_refresh_ms = 0;
+        snprintf(buf, buf_size, "%s", s_access_token);
         xSemaphoreGive(s_mutex);
-        return ESP_FAIL;
+        free(res);
+        return ESP_OK;
     }
 
-    snprintf(buf, buf_size, "%s", s_access_token);
+    if (res->invalid_grant) {
+        /* Definitive rejection: the refresh token is dead — force re-auth. */
+        ESP_LOGE(TAG, "Token refresh rejected (invalid_grant) — re-auth required");
+        s_state = SPOTIFY_AUTH_ERROR;
+    } else {
+        /* Transient failure (network/5xx/timeout): stay AUTHORIZED so the next
+         * poll retries after the backoff window, and drop the expired token. */
+        ESP_LOGW(TAG, "Token refresh failed (transient) — will retry after backoff");
+        s_access_token[0] = '\0';
+        s_token_expiry_ms = 0;
+        s_next_refresh_ms = now_ms() + s_refresh_backoff_ms;
+        s_refresh_backoff_ms *= 2;
+        if (s_refresh_backoff_ms > REFRESH_BACKOFF_MAX_MS) {
+            s_refresh_backoff_ms = REFRESH_BACKOFF_MAX_MS;
+        }
+    }
     xSemaphoreGive(s_mutex);
-    return ESP_OK;
+    free(res);
+    return ESP_FAIL;
 }
 
 void spotify_auth_invalidate_token(void) {

@@ -14,6 +14,12 @@ static const char *PHASE_NAMES[8] = {
 
 static double rev(double x){ x = fmod(x, 360.0); return x < 0 ? x + 360.0 : x; }
 
+/* Single-precision degree-argument trig for the moon rise/set sample loop: the
+ * P4 FPU is single precision, so reduce the angle to [0,360) in double then
+ * evaluate the transcendental in float. */
+static inline float sind_f(double deg){ return sinf((float)(rev(deg) * DEG)); }
+static inline float cosd_f(double deg){ return cosf((float)(rev(deg) * DEG)); }
+
 static uint8_t phase_index_from_cycle(double cyc)
 {
     if      (cyc < 0.0335 || cyc >= 0.9665) return 0;
@@ -226,16 +232,16 @@ static void moon_ra_dec_at(time_t utc, double *ra_out, double *dec_out)
 {
     double d = (double)utc / 86400.0 + 2440587.5 - 2451543.5;
 
-    double oblecl = (23.4393 - 3.563e-7 * d) * DEG;
+    double oblecl_deg = 23.4393 - 3.563e-7 * d;   /* obliquity, degrees */
 
     /* Sun mean longitude for GMST0 and perturbation terms. */
     double ws = 282.9404 + 4.70935e-5 * d;
     double es = 0.016709 - 1.151e-9 * d;
     double Ms = rev(356.0470 + 0.9856002585 * d);
-    double Es = Ms + RAD * es * sin(Ms*DEG) * (1 + es*cos(Ms*DEG));
-    double xvs = cos(Es*DEG) - es;
-    double yvs = sqrt(1.0 - es*es) * sin(Es*DEG);
-    double vs  = atan2(yvs, xvs) * RAD;
+    double Es = Ms + RAD * es * sind_f(Ms) * (1.0 + es * cosd_f(Ms));
+    float  xvs = cosd_f(Es) - (float)es;
+    float  yvs = sqrtf((float)(1.0 - es*es)) * sind_f(Es);
+    float  vs  = atan2f(yvs, xvs) * (float)RAD;
     double slon = rev(vs + ws);
     double Ls   = rev(ws + Ms);
 
@@ -246,50 +252,50 @@ static void moon_ra_dec_at(time_t utc, double *ra_out, double *dec_out)
     double am = 60.2666;
     double em = 0.054900;
     double Mm = rev(115.3654 + 13.0649929509 * d);
-    double Em = Mm + RAD * em * sin(Mm*DEG) * (1 + em*cos(Mm*DEG));
-    Em = Em - (Em - RAD*em*sin(Em*DEG) - Mm) / (1 - em*cos(Em*DEG));
-    double xv = am * (cos(Em*DEG) - em);
-    double yv = am * (sqrt(1.0 - em*em) * sin(Em*DEG));
-    double vm = atan2(yv, xv) * RAD;
-    double rm = sqrt(xv*xv + yv*yv);
-    double xh = rm * (cos(Nm*DEG)*cos((vm+wm)*DEG) - sin(Nm*DEG)*sin((vm+wm)*DEG)*cos(im*DEG));
-    double yh = rm * (sin(Nm*DEG)*cos((vm+wm)*DEG) + cos(Nm*DEG)*sin((vm+wm)*DEG)*cos(im*DEG));
-    double zh = rm * (sin((vm+wm)*DEG)*sin(im*DEG));
-    double mlon = atan2(yh, xh) * RAD;
-    double mlat = atan2(zh, sqrt(xh*xh + yh*yh)) * RAD;
+    double Em = Mm + RAD * em * sind_f(Mm) * (1.0 + em * cosd_f(Mm));
+    Em = Em - (Em - RAD * em * sind_f(Em) - Mm) / (1.0 - em * cosd_f(Em));
+    float  xv = (float)am * (cosd_f(Em) - (float)em);
+    float  yv = (float)am * (sqrtf((float)(1.0 - em*em)) * sind_f(Em));
+    float  vm = atan2f(yv, xv) * (float)RAD;
+    float  rm = sqrtf(xv*xv + yv*yv);
+    float  xh = rm * (cosd_f(Nm)*cosd_f(vm+wm) - sind_f(Nm)*sind_f(vm+wm)*cosd_f(im));
+    float  yh = rm * (sind_f(Nm)*cosd_f(vm+wm) + cosd_f(Nm)*sind_f(vm+wm)*cosd_f(im));
+    float  zh = rm * (sind_f(vm+wm)*sind_f(im));
+    float  mlon = atan2f(yh, xh) * (float)RAD;
+    float  mlat = atan2f(zh, sqrtf(xh*xh + yh*yh)) * (float)RAD;
 
     /* Perturbations. */
     double Lm = rev(Nm + wm + Mm);
     double D  = rev(Lm - Ls);
     double F  = rev(Lm - Nm);
-    mlon += -1.274 * sin((Mm - 2*D)*DEG)
-          +  0.658 * sin((2*D)*DEG)
-          -  0.186 * sin(Ms*DEG)
-          -  0.059 * sin((2*Mm - 2*D)*DEG)
-          -  0.057 * sin((Mm - 2*D + Ms)*DEG)
-          +  0.053 * sin((Mm + 2*D)*DEG)
-          +  0.046 * sin((2*D - Ms)*DEG)
-          +  0.041 * sin((Mm - Ms)*DEG)
-          -  0.035 * sin(D*DEG)
-          -  0.031 * sin((Mm + Ms)*DEG)
-          -  0.015 * sin((2*F - 2*D)*DEG)
-          +  0.011 * sin((Mm - 4*D)*DEG);
-    mlat += -0.173 * sin((F - 2*D)*DEG)
-          -  0.055 * sin((Mm - F - 2*D)*DEG)
-          -  0.046 * sin((Mm + F - 2*D)*DEG)
-          +  0.033 * sin((F + 2*D)*DEG)
-          +  0.017 * sin((2*Mm + F)*DEG);
-    mlon = rev(mlon);
+    mlon += -1.274f * sind_f(Mm - 2*D)
+          +  0.658f * sind_f(2*D)
+          -  0.186f * sind_f(Ms)
+          -  0.059f * sind_f(2*Mm - 2*D)
+          -  0.057f * sind_f(Mm - 2*D + Ms)
+          +  0.053f * sind_f(Mm + 2*D)
+          +  0.046f * sind_f(2*D - Ms)
+          +  0.041f * sind_f(Mm - Ms)
+          -  0.035f * sind_f(D)
+          -  0.031f * sind_f(Mm + Ms)
+          -  0.015f * sind_f(2*F - 2*D)
+          +  0.011f * sind_f(Mm - 4*D);
+    mlat += -0.173f * sind_f(F - 2*D)
+          -  0.055f * sind_f(Mm - F - 2*D)
+          -  0.046f * sind_f(Mm + F - 2*D)
+          +  0.033f * sind_f(F + 2*D)
+          +  0.017f * sind_f(2*Mm + F);
+    mlon = (float)rev(mlon);
 
     /* Ecliptic -> equatorial. */
-    double xg = cos(mlon*DEG) * cos(mlat*DEG);
-    double yg = sin(mlon*DEG) * cos(mlat*DEG);
-    double zg = sin(mlat*DEG);
-    double xe  = xg;
-    double ye  = yg*cos(oblecl) - zg*sin(oblecl);
-    double ze  = yg*sin(oblecl) + zg*cos(oblecl);
-    *ra_out  = rev(atan2(ye, xe) * RAD);
-    *dec_out = atan2(ze, sqrt(xe*xe + ye*ye)) * RAD;
+    float xg = cosd_f(mlon) * cosd_f(mlat);
+    float yg = sind_f(mlon) * cosd_f(mlat);
+    float zg = sind_f(mlat);
+    float xe = xg;
+    float ye = yg*cosd_f(oblecl_deg) - zg*sind_f(oblecl_deg);
+    float ze = yg*sind_f(oblecl_deg) + zg*cosd_f(oblecl_deg);
+    *ra_out  = rev(atan2f(ye, xe) * (float)RAD);
+    *dec_out = atan2f(ze, sqrtf(xe*xe + ye*ye)) * (float)RAD;
 
     (void)slon; /* true solar longitude not needed here; suppress unused-variable warning */
 }

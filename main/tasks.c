@@ -49,6 +49,7 @@
 #include "esp_system.h"
 #include <time.h>
 #include <math.h>          /* expf — framerate-independent settle ease */
+#include <stdatomic.h>     /* atomic_exchange — read-and-clear WS event flags */
 #include "perf_monitor.h"
 #include "power_mgmt.h"
 #include "crash_log.h"
@@ -320,7 +321,12 @@ void input_task(void *arg) {
             }
         }
 
-        if (long_pressed && app_config_get()->deep_sleep_enabled) {
+        if (long_pressed && ota_in_progress) {
+            /* An OTA is flashing — deep sleep now would stop WiFi mid-write and
+             * silently discard the update. Skip it and tell the user. */
+            ESP_LOGW(TAG, "Long press ignored — firmware update in progress");
+            nina_toast_show(TOAST_WARNING, "Update in progress");
+        } else if (long_pressed && app_config_get()->deep_sleep_enabled) {
             /* Long press — enter deep sleep */
             ESP_LOGI(TAG, "Long press detected — entering deep sleep");
 
@@ -1830,9 +1836,13 @@ void spotify_poll_task(void *arg)
                                         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                                             nina_spotify_set_album_art(final_buf, final_w, final_h, final_size);
                                             bsp_display_unlock();
+                                            art_ok = true;
+                                            /* Ownership transferred to UI — don't free final_buf */
+                                        } else {
+                                            /* Lock timed out — free the buffer and leave
+                                             * art_ok false so the art is retried next poll. */
+                                            free(final_buf);
                                         }
-                                        art_ok = true;
-                                        /* Ownership transferred to UI — don't free final_buf */
                                     } else {
                                         perf_timer_stop(&g_perf.spotify_art_decode);
                                         ESP_LOGW(TAG, "HW JPEG decode failed, trying SW fallback");
@@ -1881,8 +1891,12 @@ void spotify_poll_task(void *arg)
                                 if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                                     nina_spotify_set_album_art(final_buf, final_w, final_h, final_size);
                                     bsp_display_unlock();
+                                    art_ok = true;
+                                } else {
+                                    /* Lock timed out — free the buffer and leave
+                                     * art_ok false so the art is retried next poll. */
+                                    free(final_buf);
                                 }
-                                art_ok = true;
                             } else {
                                 ESP_LOGW(TAG, "SW JPEG decode also failed for album art");
                             }
@@ -2325,10 +2339,18 @@ void data_update_task(void *arg) {
                     if (nina_ota_prompt_skipped())          { accepted = false; break; }
                     vTaskDelay(pdMS_TO_TICKS(200));
                 }
-                if (accepted) {
-                    /* Accepted — proceed with OTA download */
+                if (accepted && atomic_exchange(&ota_in_progress, true)) {
+                    /* Another OTA is already running — do not start a second
+                     * write stream against the same partition. */
+                    ESP_LOGW(TAG, "OTA already in progress — ignoring boot update request");
+                    nina_toast_show(TOAST_WARNING, "Update already in progress");
+                    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                        nina_ota_prompt_hide();
+                        bsp_display_unlock();
+                    }
+                } else if (accepted) {
+                    /* Accepted — ota_in_progress was set true by the exchange above. */
                     ESP_LOGI(TAG, "User accepted OTA update to %s", rel->tag);
-                    ota_in_progress = true;
                     if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                         nina_ota_prompt_show_progress();
                         bsp_display_unlock();
@@ -2737,9 +2759,18 @@ main_loop:
                         if (nina_ota_prompt_skipped())          { accepted = false; break; }
                         vTaskDelay(pdMS_TO_TICKS(200));
                     }
-                    if (accepted) {
+                    if (accepted && atomic_exchange(&ota_in_progress, true)) {
+                        /* Another OTA is already running — do not start a second
+                         * write stream against the same partition. */
+                        ESP_LOGW(TAG, "OTA already in progress — ignoring update request");
+                        nina_toast_show(TOAST_WARNING, "Update already in progress");
+                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_ota_prompt_hide();
+                            bsp_display_unlock();
+                        }
+                    } else if (accepted) {
+                        /* Accepted — ota_in_progress was set true by the exchange above. */
                         ESP_LOGI(TAG, "User accepted OTA update to %s", rel->tag);
-                        ota_in_progress = true;
                         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                             nina_ota_prompt_show_progress();
                             bsp_display_unlock();
@@ -2812,7 +2843,7 @@ main_loop:
                 for (int j = 0; j < instance_count; j++)
                     locked[j] = nina_client_lock(&instances[j], 15);
                 if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                    summary_page_update(instances, instance_count);
+                    summary_page_update(instances, instance_count, locked);
                     bsp_display_unlock();
                 }
                 for (int j = 0; j < instance_count; j++)
@@ -2919,7 +2950,7 @@ main_loop:
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                 if (g_perf.enabled) perf_timer_record(&g_perf.ui_lock_wait, esp_timer_get_time() - lock_start);
                 perf_timer_start(&g_perf.ui_summary_update);
-                summary_page_update(instances, instance_count);
+                summary_page_update(instances, instance_count, locked);
                 perf_timer_stop(&g_perf.ui_summary_update);
                 bsp_display_unlock();
             }
@@ -3127,8 +3158,7 @@ main_loop:
 
         // ── Event-driven UI refresh: check if any WS event needs immediate UI update ──
         if (active_nina_idx >= 0 && active_page_idx >= 0
-            && instances[active_nina_idx].ui_refresh_needed) {
-            instances[active_nina_idx].ui_refresh_needed = false;
+            && atomic_exchange(&instances[active_nina_idx].ui_refresh_needed, false)) {
             if (nina_client_lock(&instances[active_nina_idx], 15)) {
                 if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                     update_nina_dashboard_page(active_nina_idx, &instances[active_nina_idx]);

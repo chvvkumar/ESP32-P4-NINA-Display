@@ -11,6 +11,7 @@
 #include "ui/nina_dashboard_internal.h" /* PAGE_IDX_SUMMARY, SETTINGS_PAGE_IDX, SYSINFO_PAGE_IDX page-index macros */
 #include "ui/nina_nav_arbiter.h"        /* nav_arbiter_submit_user — live Home Page USER claim */
 #include "ui/page_registry.h"           /* page_ref_navigate, PAGE_REF_ID_MAX, PAGE_REF_SETTINGS */
+#include "ui/themes.h"                  /* themes_get_count() — theme_index clamp */
 
 extern const uint8_t config_html_start[] asm("_binary_config_ui_html_start");
 extern const uint8_t config_html_end[]   asm("_binary_config_ui_html_end");
@@ -899,7 +900,13 @@ static app_config_t *parse_config_from_json(cJSON *root)
     JSON_TO_STRING(root, "url3",           cfg->api_url[2]);
     JSON_TO_STRING(root, "ntp",            cfg->ntp_server);
     JSON_TO_STRING(root, "timezone",       cfg->tz_string);
-    JSON_TO_INT   (root, "theme_index",    cfg->theme_index);
+    cJSON *ti_item = cJSON_GetObjectItem(root, "theme_index");
+    if (cJSON_IsNumber(ti_item)) {
+        int v = ti_item->valueint;
+        if (v < 0) v = 0;
+        if (v >= themes_get_count()) v = themes_get_count() - 1;
+        cfg->theme_index = v;
+    }
     cJSON *ws_item = cJSON_GetObjectItem(root, "widget_style");
     if (cJSON_IsNumber(ws_item)) {
         int v = ws_item->valueint;
@@ -1175,7 +1182,11 @@ static app_config_t *parse_config_from_json(cJSON *root)
         cfg->goes_update_interval_s = (uint16_t)v;
     }
 
-    JSON_TO_INT(root, "image_display_source", cfg->image_display_source);
+    cJSON *jimgsrc = cJSON_GetObjectItem(root, "image_display_source");
+    if (cJSON_IsNumber(jimgsrc)) {
+        int v = jimgsrc->valueint;
+        cfg->image_display_source = (v >= 0 && v <= 3) ? (uint8_t)v : 0;
+    }
 
     JSON_TO_STRING(root, "custom_image_url", cfg->custom_image_url);
     cJSON *custom_orient = cJSON_GetObjectItem(root, "custom_orientation");
@@ -1191,15 +1202,27 @@ static app_config_t *parse_config_from_json(cJSON *root)
         cfg->custom_update_interval_s = (uint16_t)v;
     }
 
-    JSON_TO_INT(root, "moon_bg_style",        cfg->moon_bg_style);
+    cJSON *jmoonbg = cJSON_GetObjectItem(root, "moon_bg_style");
+    if (cJSON_IsNumber(jmoonbg)) {
+        int v = jmoonbg->valueint;
+        cfg->moon_bg_style = (v >= 0 && v <= 3) ? (uint8_t)v : 0;
+    }
 
     cJSON *jmoonlat = cJSON_GetObjectItem(root, "moon_lat");
     if (jmoonlat && cJSON_IsNumber(jmoonlat)) cfg->moon_lat = (float)jmoonlat->valuedouble;
     cJSON *jmoonlon = cJSON_GetObjectItem(root, "moon_lon");
     if (jmoonlon && cJSON_IsNumber(jmoonlon)) cfg->moon_lon = (float)jmoonlon->valuedouble;
 
-    JSON_TO_INT(root, "solar_band", cfg->solar_band);
-    JSON_TO_INT(root, "moon_drag_light_mode", cfg->moon_drag_light_mode);
+    cJSON *jsolarband = cJSON_GetObjectItem(root, "solar_band");
+    if (cJSON_IsNumber(jsolarband)) {
+        int v = jsolarband->valueint;
+        cfg->solar_band = (v >= 0 && v <= 17) ? (uint8_t)v : 0;
+    }
+    cJSON *jmoondrag = cJSON_GetObjectItem(root, "moon_drag_light_mode");
+    if (cJSON_IsNumber(jmoondrag)) {
+        int v = jmoondrag->valueint;
+        cfg->moon_drag_light_mode = (v >= 0 && v <= 2) ? (uint8_t)v : 0;
+    }
 
     cJSON *jgoesvf = cJSON_GetObjectItem(root, "goes_vflip");
     if (jgoesvf && cJSON_IsNumber(jgoesvf)) cfg->goes_vflip = (jgoesvf->valueint != 0) ? 1 : 0;
@@ -1273,7 +1296,11 @@ static app_config_t *parse_config_from_json(cJSON *root)
     JSON_TO_BOOL(root, "toast_instance_muted_3", cfg->toast_instance_muted[2]);
 
     // Weather
-    JSON_TO_INT(root, "weather_provider", cfg->weather_provider);
+    cJSON *jwxprov = cJSON_GetObjectItem(root, "weather_provider");
+    if (cJSON_IsNumber(jwxprov)) {
+        int v = jwxprov->valueint;
+        cfg->weather_provider = (v >= 0 && v <= 2) ? (uint8_t)v : 0;
+    }
     JSON_TO_STRING(root, "weather_api_key", cfg->weather_api_key);
 
     cJSON *jlat = cJSON_GetObjectItem(root, "weather_lat");

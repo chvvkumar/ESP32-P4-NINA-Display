@@ -1905,6 +1905,10 @@ static void migrate_from_v23(const app_config_v23_t *old, app_config_t *cfg) {
     ESP_LOGI(TAG, "Migrated config from v23 to v%d", APP_CONFIG_VERSION);
 }
 
+/* Reconstruct the flat slideshow list from the legacy rotation mask+order for
+ * pre-v43 migrations (defined after build_order2_from_legacy). */
+static void rebuild_slideshow_from_legacy_mask(app_config_t *cfg);
+
 /* --- v37 → v40 migration (added moon orientation tuning, moon_north_up, moon touch-spin) --- */
 static void migrate_from_v37(const void *raw, size_t raw_size, app_config_t *cfg)
 {
@@ -1929,6 +1933,7 @@ static void migrate_from_v37(const void *raw, size_t raw_size, app_config_t *cfg
     /* crash_log_retention_days: new in v41 — default already set by set_defaults() */
     cfg->crash_log_retention_days = 30;
 
+    rebuild_slideshow_from_legacy_mask(cfg);
     normalize_legacy_page_targets(cfg, 37);
 
     cfg->config_version = APP_CONFIG_VERSION;
@@ -1951,6 +1956,7 @@ static void migrate_from_v38(const void *raw, size_t raw_size, app_config_t *cfg
     /* crash_log_retention_days: new in v41 — default already set by set_defaults() */
     cfg->crash_log_retention_days = 30;
 
+    rebuild_slideshow_from_legacy_mask(cfg);
     normalize_legacy_page_targets(cfg, 38);
 
     cfg->config_version = APP_CONFIG_VERSION;
@@ -1970,6 +1976,7 @@ static void migrate_from_v39(const void *raw, size_t raw_size, app_config_t *cfg
     /* crash_log_retention_days: new in v41 — default already set by set_defaults() */
     cfg->crash_log_retention_days = 30;
 
+    rebuild_slideshow_from_legacy_mask(cfg);
     normalize_legacy_page_targets(cfg, 39);
 
     cfg->config_version = APP_CONFIG_VERSION;
@@ -1985,6 +1992,7 @@ static void migrate_from_v40(const void *raw, size_t raw_size, app_config_t *cfg
     /* crash_log_retention_days: new in v41 — default already set by set_defaults() */
     cfg->crash_log_retention_days = 30;
 
+    rebuild_slideshow_from_legacy_mask(cfg);
     normalize_legacy_page_targets(cfg, 40);
 
     cfg->config_version = APP_CONFIG_VERSION;
@@ -2003,6 +2011,7 @@ static void migrate_from_v41(const void *raw, size_t raw_size, app_config_t *cfg
     cfg->auto_rotate_pages_hi = 0;
     cfg->auto_rotate_order_ext = 8;
 
+    rebuild_slideshow_from_legacy_mask(cfg);
     normalize_legacy_page_targets(cfg, 41);
 
     cfg->config_version = APP_CONFIG_VERSION;
@@ -2020,6 +2029,7 @@ static void migrate_from_v42(const void *raw, size_t raw_size, app_config_t *cfg
     cfg->goes_orientation = 0;
     cfg->solar_orientation = 0;
 
+    rebuild_slideshow_from_legacy_mask(cfg);
     normalize_legacy_page_targets(cfg, 42);
 
     cfg->config_version = APP_CONFIG_VERSION;
@@ -2059,6 +2069,37 @@ static void build_order2_from_legacy(app_config_t *cfg)
         }
         cfg->auto_rotate_order2[dn++] = mapped;
     }
+}
+
+/* Pre-v43 migrations otherwise leave auto_rotate_order2[] at its set_defaults()
+ * value, discarding the user's saved slideshow selection. Derive that selection
+ * the same way migrate_from_v43 does: filter the legacy 9-slot order by the
+ * effective rotation mask (auto_rotate_pages | pages_hi<<8 — pages_hi is 0 for
+ * vintages predating it), rewrite the legacy order, then rebuild the flat list
+ * and settle nav-mode exclusivity. Operates on the fields already present in
+ * cfg after the migration's copy/fixups. */
+static void rebuild_slideshow_from_legacy_mask(app_config_t *cfg)
+{
+    uint16_t eff_mask = (uint16_t)cfg->auto_rotate_pages
+                      | ((uint16_t)cfg->auto_rotate_pages_hi << 8);
+    uint8_t derived[9];
+    int dn = 0;
+    for (int i = 0; i < 9; i++) {
+        uint8_t bit = (i < 8) ? cfg->auto_rotate_order[i] : cfg->auto_rotate_order_ext;
+        if (bit == 0xFF) continue;
+        if (bit > 8) continue;
+        if (!(eff_mask & (1u << bit))) continue;
+        /* de-dup */
+        bool seen = false;
+        for (int k = 0; k < dn; k++) if (derived[k] == bit) { seen = true; break; }
+        if (seen) continue;
+        derived[dn++] = bit;
+    }
+    for (int i = 0; i < 8; i++) cfg->auto_rotate_order[i] = (i < dn) ? derived[i] : 0xFF;
+    cfg->auto_rotate_order_ext = (dn > 8) ? derived[8] : 0xFF;
+
+    build_order2_from_legacy(cfg);
+    app_config_normalize_nav_exclusivity(cfg);
 }
 
 static void migrate_from_v43(const void *raw, size_t raw_size, app_config_t *cfg)
@@ -2248,6 +2289,7 @@ static void migrate_from_v36(const void *raw, size_t raw_size, app_config_t *cfg
     cfg->moon_spin_mode = 0;
     cfg->moon_spin_return_s = 3;
 
+    rebuild_slideshow_from_legacy_mask(cfg);
     normalize_legacy_page_targets(cfg, 36);
 
     cfg->config_version = APP_CONFIG_VERSION;
@@ -2263,6 +2305,7 @@ static void migrate_from_v35(const void *raw, size_t raw_size, app_config_t *cfg
     /* image_display_crop field: new in v36 — defaults already set by set_defaults() */
     cfg->image_display_crop = false;
 
+    rebuild_slideshow_from_legacy_mask(cfg);
     normalize_legacy_page_targets(cfg, 35);
 
     cfg->config_version = APP_CONFIG_VERSION;
@@ -2278,6 +2321,7 @@ static void migrate_from_v34(const void *raw, size_t raw_size, app_config_t *cfg
     /* Solar band field: new in v35 — defaults already set by set_defaults() */
     cfg->solar_band = 0;
 
+    rebuild_slideshow_from_legacy_mask(cfg);
     normalize_legacy_page_targets(cfg, 34);
 
     cfg->config_version = APP_CONFIG_VERSION;
@@ -2296,6 +2340,7 @@ static void migrate_from_v33(const void *raw, size_t raw_size, app_config_t *cfg
     cfg->moon_lat = cfg->weather_lat;   /* prefill from weather */
     cfg->moon_lon = cfg->weather_lon;
 
+    rebuild_slideshow_from_legacy_mask(cfg);
     normalize_legacy_page_targets(cfg, 33);
 
     cfg->config_version = APP_CONFIG_VERSION;
@@ -2315,6 +2360,7 @@ static void migrate_from_v32(const void *raw, size_t raw_size, app_config_t *cfg
         cfg->idle_page_override_target = IDLE_TARGET_SYSINFO;  // now 4
     }
 
+    rebuild_slideshow_from_legacy_mask(cfg);
     normalize_legacy_page_targets(cfg, 32);
 
     cfg->config_version = APP_CONFIG_VERSION;
@@ -2336,6 +2382,7 @@ static void migrate_from_v31(const void *raw, size_t raw_size, app_config_t *cfg
         cfg->idle_page_override_target = IDLE_TARGET_SYSINFO;  // now 4
     }
 
+    rebuild_slideshow_from_legacy_mask(cfg);
     normalize_legacy_page_targets(cfg, 31);
 
     cfg->config_version = APP_CONFIG_VERSION;
@@ -2359,6 +2406,7 @@ static void migrate_from_v30(const void *raw, size_t raw_size, app_config_t *cfg
         cfg->idle_page_override_target = IDLE_TARGET_SYSINFO;  // now 4
     }
 
+    rebuild_slideshow_from_legacy_mask(cfg);
     normalize_legacy_page_targets(cfg, 30);
 
     cfg->config_version = APP_CONFIG_VERSION;
@@ -2382,6 +2430,7 @@ static void migrate_from_v29(const void *raw, size_t raw_size, app_config_t *cfg
         cfg->idle_page_override_target = IDLE_TARGET_SYSINFO;  // now 4
     }
 
+    rebuild_slideshow_from_legacy_mask(cfg);
     normalize_legacy_page_targets(cfg, 29);
 
     cfg->config_version = APP_CONFIG_VERSION;
@@ -2474,6 +2523,7 @@ static void migrate_from_v28(const void *raw, size_t raw_size, app_config_t *cfg
 
     /* New weather/idle fields stay at defaults from set_defaults() */
 
+    rebuild_slideshow_from_legacy_mask(cfg);
     normalize_legacy_page_targets(cfg, 28);
 
     cfg->config_version = APP_CONFIG_VERSION;
@@ -2491,6 +2541,7 @@ static void migrate_from_v27(const void *raw, size_t raw_size, app_config_t *cfg
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         cfg->toast_instance_muted[i] = false;
     }
+    rebuild_slideshow_from_legacy_mask(cfg);
     normalize_legacy_page_targets(cfg, 27);
 
     cfg->config_version = APP_CONFIG_VERSION;
@@ -2509,6 +2560,7 @@ static void migrate_from_v26(const void *raw, size_t raw_size, app_config_t *cfg
     size_t copy = raw_size < sizeof(app_config_v32_t) ? raw_size : sizeof(app_config_v32_t);
     memcpy(cfg, raw, copy);
     for (int i = 0; i < 8; i++) cfg->auto_rotate_order[i] = (uint8_t)i;
+    rebuild_slideshow_from_legacy_mask(cfg);
     normalize_legacy_page_targets(cfg, 26);
 
     cfg->config_version = APP_CONFIG_VERSION;
@@ -2758,6 +2810,34 @@ static void migrate_from_v16(const app_config_v16_t *old, app_config_t *cfg) {
  */
 static bool validate_config(app_config_t *cfg) {
     bool fixed = false;
+
+    /* A raw NVS blob (or a truncated/corrupt one) can leave a char-array field
+     * without its terminating NUL; every reader below treats these as C
+     * strings. Force-terminate every char array before any of them is used. */
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        cfg->api_url[i][sizeof(cfg->api_url[i]) - 1] = '\0';
+        cfg->filter_colors[i][sizeof(cfg->filter_colors[i]) - 1] = '\0';
+        cfg->rms_thresholds[i][sizeof(cfg->rms_thresholds[i]) - 1] = '\0';
+        cfg->hfr_thresholds[i][sizeof(cfg->hfr_thresholds[i]) - 1] = '\0';
+        cfg->wifi_networks[i].ssid[sizeof(cfg->wifi_networks[i].ssid) - 1] = '\0';
+        cfg->wifi_networks[i].password[sizeof(cfg->wifi_networks[i].password) - 1] = '\0';
+    }
+    cfg->ntp_server[sizeof(cfg->ntp_server) - 1] = '\0';
+    cfg->tz_string[sizeof(cfg->tz_string) - 1] = '\0';
+    cfg->mqtt_broker_url[sizeof(cfg->mqtt_broker_url) - 1] = '\0';
+    cfg->mqtt_username[sizeof(cfg->mqtt_username) - 1] = '\0';
+    cfg->mqtt_password[sizeof(cfg->mqtt_password) - 1] = '\0';
+    cfg->mqtt_topic_prefix[sizeof(cfg->mqtt_topic_prefix) - 1] = '\0';
+    cfg->hostname[sizeof(cfg->hostname) - 1] = '\0';
+    cfg->allsky_hostname[sizeof(cfg->allsky_hostname) - 1] = '\0';
+    cfg->allsky_field_config[sizeof(cfg->allsky_field_config) - 1] = '\0';
+    cfg->allsky_thresholds[sizeof(cfg->allsky_thresholds) - 1] = '\0';
+    cfg->spotify_client_id[sizeof(cfg->spotify_client_id) - 1] = '\0';
+    cfg->weather_api_key[sizeof(cfg->weather_api_key) - 1] = '\0';
+    cfg->weather_location_name[sizeof(cfg->weather_location_name) - 1] = '\0';
+    cfg->admin_password[sizeof(cfg->admin_password) - 1] = '\0';
+    cfg->goes_region[sizeof(cfg->goes_region) - 1] = '\0';
+    cfg->custom_image_url[sizeof(cfg->custom_image_url) - 1] = '\0';
 
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         if (cfg->rms_thresholds[i][0] == '\0') {
@@ -3388,8 +3468,14 @@ void app_config_init(void) {
 
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
-    } else if (stored_size >= sizeof(app_config_v0_t)) {
-        /* Likely legacy v0 blob — attempt migration */
+    } else if (stored_size >= sizeof(app_config_v0_t) &&
+               !(version_check > APP_CONFIG_VERSION && version_check < 0x1000)) {
+        /* Likely legacy v0 blob — its first bytes are the wifi_ssid text, so
+         * version_check is either 0 (empty SSID) or a large printable-ASCII
+         * value (>= 0x1000). A small integer just above APP_CONFIG_VERSION is a
+         * future/unknown version (e.g. a firmware downgrade), not a v0 blob:
+         * let it fall through to the terminal defaults branch below instead of
+         * mis-migrating it as v0. */
         app_config_v0_t old;
         memcpy(&old, raw, sizeof(app_config_v0_t));
         migrate_from_v0(&old, &s_config);
@@ -3431,6 +3517,7 @@ void app_config_save(const app_config_t *config) {
 
     memcpy(&s_config, config, sizeof(app_config_t));
     s_config.config_version = APP_CONFIG_VERSION;  // Always stamp current version
+    validate_config(&s_config);
 
     app_config_normalize_nav_exclusivity(&s_config);
 
@@ -3467,6 +3554,7 @@ void app_config_apply(const app_config_t *config) {
     invalidate_json_caches();
     memcpy(&s_config, config, sizeof(app_config_t));
     s_config.config_version = APP_CONFIG_VERSION;
+    validate_config(&s_config);
     s_config_dirty = true;
     xSemaphoreGive(s_config_mutex);
 }
@@ -3717,16 +3805,20 @@ static void fill_threshold_config(const char *json, cJSON **cache,
 
 void app_config_get_rms_threshold_config(int instance_index, threshold_config_t *out) {
     if (instance_index < 0 || instance_index >= MAX_NINA_INSTANCES) instance_index = 0;
+    xSemaphoreTake(s_config_mutex, portMAX_DELAY);
     fill_threshold_config(s_config.rms_thresholds[instance_index],
                           &s_rms_thresholds_cache[instance_index],
                           0.5f, 1.0f, out);
+    xSemaphoreGive(s_config_mutex);
 }
 
 void app_config_get_hfr_threshold_config(int instance_index, threshold_config_t *out) {
     if (instance_index < 0 || instance_index >= MAX_NINA_INSTANCES) instance_index = 0;
+    xSemaphoreTake(s_config_mutex, portMAX_DELAY);
     fill_threshold_config(s_config.hfr_thresholds[instance_index],
                           &s_hfr_thresholds_cache[instance_index],
                           2.0f, 3.5f, out);
+    xSemaphoreGive(s_config_mutex);
 }
 
 /**
@@ -3748,9 +3840,23 @@ static bool filter_in_api_list(const char *name, const char *filter_names[], int
  */
 void app_config_sync_filters(const char *filter_names[], int count, int instance_index) {
     if (count <= 0) return;
+    if (instance_index < 0 || instance_index >= MAX_NINA_INSTANCES) instance_index = 0;
+
+    /* Runs on a poll-task stack: snapshot the config into a PSRAM heap copy
+     * (~7.6 KB) rather than mutating live s_config field-by-field. The merge
+     * works against the snapshot; app_config_save() commits it under the mutex
+     * (which also invalidates the JSON caches). */
+    app_config_t *snap = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    if (!snap) {
+        ESP_LOGE(TAG, "Filter sync: failed to allocate config snapshot");
+        return;
+    }
+    xSemaphoreTake(s_config_mutex, portMAX_DELAY);
+    memcpy(snap, &s_config, sizeof(app_config_t));
+    xSemaphoreGive(s_config_mutex);
 
     bool needs_save = false;
-    char *field = get_filter_colors_field(instance_index);
+    char *field = snap->filter_colors[instance_index];
 
     // --- Sync filter_colors for this instance ---
     cJSON *colors = cJSON_Parse(field);
@@ -3793,12 +3899,12 @@ void app_config_sync_filters(const char *filter_names[], int count, int instance
     cJSON_Delete(colors);
 
     if (needs_save) {
-        invalidate_json_caches();
-        app_config_save(&s_config);
+        app_config_save(snap);
         ESP_LOGI(TAG, "Filter config synced with API and saved to NVS");
     } else {
         ESP_LOGI(TAG, "Filter config already in sync with API");
     }
+    free(snap);
 }
 
 int app_config_get_instance_count(void) {

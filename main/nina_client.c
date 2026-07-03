@@ -552,15 +552,17 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
         state->static_fetched = false;
         state->cached_image_count = -1;
         nina_connection_set_static_data_ready(instance, false);
-        data->prev_target_container[0] = '\0';
+        if (nina_client_lock(data, 100)) {
+            data->prev_target_container[0] = '\0';
+            nina_client_unlock(data);
+        }
         state->http_client = (void *)reuse_handle;
         http_poll_ctx_set(NULL);
         return;
     }
 
     // --- Handle PROFILE-CHANGED: invalidate cached static data ---
-    if (data->profile_refresh_needed) {
-        data->profile_refresh_needed = false;
+    if (atomic_exchange(&data->profile_refresh_needed, false)) {
         state->static_fetched = false;
         state->cached_image_count = -1;
         nina_connection_set_static_data_ready(instance, false);
@@ -603,7 +605,7 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
          * real current-sub length (not the stale image-history total) before the
          * UI seeds the exposure arc on first connect. */
         data->sequence_poll_needed = true;
-    } else {
+    } else if (nina_client_lock(data, 100)) {
         snprintf(data->profile_name, sizeof(data->profile_name), "%s", state->cached_profile);
         if (state->cached_telescope[0] != '\0') {
             snprintf(data->telescope_name, sizeof(data->telescope_name), "%s", state->cached_telescope);
@@ -617,6 +619,7 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
             memcpy(state->cached_filters, data->filters, sizeof(state->cached_filters));
             state->cached_filter_count = data->filter_count;
         }
+        nina_client_unlock(data);
     }
 
     if (state->bundle_not_available) {
@@ -681,19 +684,22 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
     }
 
     // --- SEQUENCE: Timer-based + event-driven polling ---
+    bool sequence_event = atomic_exchange(&data->sequence_poll_needed, false);
     bool sequence_due = (now_ms - state->last_sequence_poll_ms >= NINA_POLL_SEQUENCE_MS);
-    if (sequence_due || data->sequence_poll_needed) {
-        if (data->sequence_poll_needed) {
+    if (sequence_due || sequence_event) {
+        if (sequence_event) {
             ESP_LOGD(TAG, "Event-driven sequence poll triggered");
         }
-        data->sequence_poll_needed = false;
         perf_timer_start(&g_perf.poll_sequence);
         fetch_sequence_counts_optional(base_url, data);
         perf_timer_stop(&g_perf.poll_sequence);
         state->last_sequence_poll_ms = now_ms;
     }
 
-    fixup_exposure_timing(data);
+    if (nina_client_lock(data, 100)) {
+        fixup_exposure_timing(data);
+        nina_client_unlock(data);
+    }
 
     // Save persistent HTTP client for next poll cycle
     state->http_client = (void *)reuse_handle;
@@ -727,7 +733,10 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
     int64_t now_ms = esp_timer_get_time() / 1000;
 
     // Mark disconnected before fetch — fetchers set connected=true on success.
-    data->connected = false;
+    if (nina_client_lock(data, 100)) {
+        data->connected = false;
+        nina_client_unlock(data);
+    }
 
     // --- Equipment fetch ---
     // Use the full bundle only on first connect (to seed static data: filters, switch, etc.).
@@ -746,7 +755,10 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
     }
 
     nina_conn_state_t conn_state = nina_connection_report_poll(instance, data->connected);
-    data->connected = (conn_state == NINA_CONN_CONNECTED);
+    if (nina_client_lock(data, 100)) {
+        data->connected = (conn_state == NINA_CONN_CONNECTED);
+        nina_client_unlock(data);
+    }
 
     if (!data->connected) {
         state->static_fetched = false;
@@ -758,8 +770,7 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
     }
 
     // --- Handle PROFILE-CHANGED: invalidate cached static data ---
-    if (data->profile_refresh_needed) {
-        data->profile_refresh_needed = false;
+    if (atomic_exchange(&data->profile_refresh_needed, false)) {
         state->static_fetched = false;
         state->cached_image_count = -1;
         nina_connection_set_static_data_ready(instance, false);
@@ -788,7 +799,7 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
         nina_connection_set_static_data_ready(instance, true);
         state->last_slow_poll_ms = now_ms;
         state->last_sequence_poll_ms = now_ms;
-    } else {
+    } else if (nina_client_lock(data, 100)) {
         snprintf(data->profile_name, sizeof(data->profile_name), "%s", state->cached_profile);
         if (state->cached_telescope[0] != '\0') {
             snprintf(data->telescope_name, sizeof(data->telescope_name), "%s", state->cached_telescope);
@@ -801,6 +812,7 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
             memcpy(state->cached_filters, data->filters, sizeof(state->cached_filters));
             state->cached_filter_count = data->filter_count;
         }
+        nina_client_unlock(data);
     }
 
     // --- SLOW: Focuser + Mount + Switch (every 30s, legacy only — bundle handles these) ---
@@ -870,23 +882,25 @@ bool nina_client_resolve_host(const char *host, char *ip_out, size_t ip_len) {
 
     int64_t now_ms = esp_timer_get_time() / 1000;
 
-    if (s_dns_mutex) xSemaphoreTake(s_dns_mutex, pdMS_TO_TICKS(5000));
-
-    // Check DNS cache for a valid (non-expired) entry
-    for (int i = 0; i < 3; i++) {
-        if (strcmp(s_dns_cache[i].hostname, host) == 0 &&
-            s_dns_cache[i].resolved_ip[0] != '\0') {
-            if (now_ms - s_dns_cache[i].resolve_time_ms < DNS_CACHE_TTL_MS) {
-                snprintf(ip_out, ip_len, "%s", s_dns_cache[i].resolved_ip);
-                ESP_LOGD(TAG, "DNS cache hit for %s -> %s", host, ip_out);
-                if (s_dns_mutex) xSemaphoreGive(s_dns_mutex);
-                return true;
+    // Check DNS cache for a valid (non-expired) entry. On a failed take, skip the
+    // cache entirely and fall through to a fresh lookup — never give a mutex we
+    // do not hold, and never touch the cache unlocked.
+    bool dns_locked = (s_dns_mutex && xSemaphoreTake(s_dns_mutex, pdMS_TO_TICKS(5000)) == pdTRUE);
+    if (dns_locked) {
+        for (int i = 0; i < 3; i++) {
+            if (strcmp(s_dns_cache[i].hostname, host) == 0 &&
+                s_dns_cache[i].resolved_ip[0] != '\0') {
+                if (now_ms - s_dns_cache[i].resolve_time_ms < DNS_CACHE_TTL_MS) {
+                    snprintf(ip_out, ip_len, "%s", s_dns_cache[i].resolved_ip);
+                    ESP_LOGD(TAG, "DNS cache hit for %s -> %s", host, ip_out);
+                    xSemaphoreGive(s_dns_mutex);
+                    return true;
+                }
+                break;  // Found entry but expired — do fresh lookup
             }
-            break;  // Found entry but expired — do fresh lookup
         }
+        xSemaphoreGive(s_dns_mutex);
     }
-
-    if (s_dns_mutex) xSemaphoreGive(s_dns_mutex);
 
     // Cache miss or expired — perform real DNS lookup (outside mutex — can block)
     struct addrinfo hints = {0};
@@ -901,26 +915,29 @@ bool nina_client_resolve_host(const char *host, char *ip_out, size_t ip_len) {
         inet_ntoa_r(addr->sin_addr, ip_str, sizeof(ip_str));
         freeaddrinfo(result);
 
-        if (s_dns_mutex) xSemaphoreTake(s_dns_mutex, pdMS_TO_TICKS(5000));
-
-        // Find existing slot or first empty slot
-        int slot = -1;
-        for (int i = 0; i < 3; i++) {
-            if (strcmp(s_dns_cache[i].hostname, host) == 0 ||
-                s_dns_cache[i].hostname[0] == '\0') {
-                slot = i;
-                break;
+        // The resolved IP is in a local; return it regardless of the cache lock.
+        // Only update the shared cache when the take succeeded.
+        dns_locked = (s_dns_mutex && xSemaphoreTake(s_dns_mutex, pdMS_TO_TICKS(5000)) == pdTRUE);
+        if (dns_locked) {
+            // Find existing slot or first empty slot
+            int slot = -1;
+            for (int i = 0; i < 3; i++) {
+                if (strcmp(s_dns_cache[i].hostname, host) == 0 ||
+                    s_dns_cache[i].hostname[0] == '\0') {
+                    slot = i;
+                    break;
+                }
             }
-        }
-        if (slot < 0) slot = 0;  // Evict first slot if all full
+            if (slot < 0) slot = 0;  // Evict first slot if all full
 
-        snprintf(s_dns_cache[slot].hostname, sizeof(s_dns_cache[slot].hostname), "%s", host);
-        snprintf(s_dns_cache[slot].resolved_ip, sizeof(s_dns_cache[slot].resolved_ip), "%s", ip_str);
-        s_dns_cache[slot].resolve_time_ms = now_ms;
+            snprintf(s_dns_cache[slot].hostname, sizeof(s_dns_cache[slot].hostname), "%s", host);
+            snprintf(s_dns_cache[slot].resolved_ip, sizeof(s_dns_cache[slot].resolved_ip), "%s", ip_str);
+            s_dns_cache[slot].resolve_time_ms = now_ms;
+
+            xSemaphoreGive(s_dns_mutex);
+        }
 
         snprintf(ip_out, ip_len, "%s", ip_str);
-
-        if (s_dns_mutex) xSemaphoreGive(s_dns_mutex);
 
         ESP_LOGD(TAG, "DNS cached %s -> %s", host, ip_str);
         return true;
@@ -928,19 +945,22 @@ bool nina_client_resolve_host(const char *host, char *ip_out, size_t ip_len) {
 
     if (result) freeaddrinfo(result);
 
-    // Lookup failed — try stale cache as fallback
-    if (s_dns_mutex) xSemaphoreTake(s_dns_mutex, pdMS_TO_TICKS(5000));
-    for (int i = 0; i < 3; i++) {
-        if (strcmp(s_dns_cache[i].hostname, host) == 0 &&
-            s_dns_cache[i].resolved_ip[0] != '\0') {
-            snprintf(ip_out, ip_len, "%s", s_dns_cache[i].resolved_ip);
-            ESP_LOGW(TAG, "DNS lookup failed for %s, using stale cache -> %s",
-                     host, ip_out);
-            if (s_dns_mutex) xSemaphoreGive(s_dns_mutex);
-            return true;
+    // Lookup failed — try stale cache as fallback (only if the take succeeds;
+    // a failed take skips the stale-cache path and returns failure).
+    dns_locked = (s_dns_mutex && xSemaphoreTake(s_dns_mutex, pdMS_TO_TICKS(5000)) == pdTRUE);
+    if (dns_locked) {
+        for (int i = 0; i < 3; i++) {
+            if (strcmp(s_dns_cache[i].hostname, host) == 0 &&
+                s_dns_cache[i].resolved_ip[0] != '\0') {
+                snprintf(ip_out, ip_len, "%s", s_dns_cache[i].resolved_ip);
+                ESP_LOGW(TAG, "DNS lookup failed for %s, using stale cache -> %s",
+                         host, ip_out);
+                xSemaphoreGive(s_dns_mutex);
+                return true;
+            }
         }
+        xSemaphoreGive(s_dns_mutex);
     }
-    if (s_dns_mutex) xSemaphoreGive(s_dns_mutex);
 
     ESP_LOGD(TAG, "DNS check failed for %s (err %d), no cache available", host, err);
     return false;

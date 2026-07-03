@@ -93,6 +93,16 @@ esp_err_t spotify_client_fetch_album_art(const char *url, uint8_t **out_buf,
  */
 void spotify_client_destroy_connection(void);
 
+/**
+ * Quiesce the Spotify client for teardown (e.g. before OTA reclaims network
+ * resources). Blocks until any in-flight Spotify HTTP request completes
+ * (bounded wait ~15 s), then destroys the persistent player handle. On return,
+ * no Spotify HTTP request is in flight and the handle is destroyed. Subsequent
+ * requests are rejected until the next successful currently-playing poll
+ * recreates the handle.
+ */
+void spotify_client_prepare_shutdown(void);
+
 #ifdef __cplusplus
 }
 #endif

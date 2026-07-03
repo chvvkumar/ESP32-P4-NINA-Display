@@ -51,6 +51,17 @@ static QueueHandle_t s_cmd_queue = NULL;
 
 static esp_mqtt_client_handle_t s_mqtt_client = NULL;
 static bool s_connected = false;
+
+/* Boot-time brightness restore (one-shot). MQTT brightness commands are
+ * live-only (never saved to NVS), so a reboot reverts to the NVS value until
+ * HA publishes again. The device publishes its screen/text state topics
+ * retained, so the broker already holds the last live brightness. On the
+ * first connect after boot we subscribe to our own state topics, apply the
+ * retained payload through the normal command queue, then unsubscribe. A
+ * non-retained message on a state topic is the echo of our own connect-time
+ * state publish and means the broker had no retained value — stop waiting. */
+static bool s_restore_screen_pending = true;
+static bool s_restore_text_pending = true;
 static char s_device_id[16];  // Last 6 hex chars of MAC
 static uint32_t s_backoff_ms = MQTT_BACKOFF_INITIAL_MS;
 static esp_timer_handle_t s_reconnect_timer = NULL;
@@ -464,6 +475,17 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
         esp_mqtt_client_subscribe(s_mqtt_client, s_topic_text_cmd, 1);
         esp_mqtt_client_subscribe(s_mqtt_client, s_topic_reboot_cmd, 1);
 
+        /* Boot-time restore: subscribe to our own retained state topics BEFORE
+         * the state publish below. TCP ordering guarantees the broker processes
+         * the SUBSCRIBE first, so the retained delivery snapshots the pre-reboot
+         * value even though we immediately publish the NVS state afterwards. */
+        if (s_restore_screen_pending) {
+            esp_mqtt_client_subscribe(s_mqtt_client, s_topic_screen_state, 1);
+        }
+        if (s_restore_text_pending) {
+            esp_mqtt_client_subscribe(s_mqtt_client, s_topic_text_state, 1);
+        }
+
         // Publish current state
         mqtt_ha_publish_state();
         break;
@@ -475,6 +497,37 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
         break;
 
     case MQTT_EVENT_DATA:
+        /* Boot-time restore: our own state topics, subscribed one-shot above.
+         * The state payload {"state":...,"brightness":N} has the same shape as
+         * a command payload, so the command parsers apply directly. Retained
+         * flag REQUIRED here (opposite of the command-topic rule below): the
+         * retained message is the pre-reboot value; a non-retained message is
+         * the echo of our own connect-time publish (no retained value existed).
+         * Either way this topic's restore is finished — unsubscribe. */
+        if (event->topic && event->topic_len > 0) {
+            if (s_restore_screen_pending &&
+                event->topic_len == (int)strlen(s_topic_screen_state) &&
+                strncmp(event->topic, s_topic_screen_state, event->topic_len) == 0) {
+                if (event->retain) {
+                    handle_screen_command(event->data, event->data_len);
+                    ESP_LOGI(TAG, "Screen brightness restored from retained MQTT state");
+                }
+                s_restore_screen_pending = false;
+                esp_mqtt_client_unsubscribe(s_mqtt_client, s_topic_screen_state);
+                break;
+            }
+            if (s_restore_text_pending &&
+                event->topic_len == (int)strlen(s_topic_text_state) &&
+                strncmp(event->topic, s_topic_text_state, event->topic_len) == 0) {
+                if (event->retain) {
+                    handle_text_command(event->data, event->data_len);
+                    ESP_LOGI(TAG, "Text brightness restored from retained MQTT state");
+                }
+                s_restore_text_pending = false;
+                esp_mqtt_client_unsubscribe(s_mqtt_client, s_topic_text_state);
+                break;
+            }
+        }
         /* Ignore retained command messages. The screen/text/reboot topics are
          * Home Assistant command topics (momentary light-set / button-press); a
          * retained payload is a stale command the broker redelivers on every
