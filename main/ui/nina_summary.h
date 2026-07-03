@@ -36,8 +36,12 @@ void summary_page_rebuild(void);
  *
  * @param instances Array of nina_client_t data for all instances
  * @param count Number of instances
+ * @param locked Per-instance trylock results (length >= count); cards whose
+ *        locked[i] is false keep their previous data-bearing contents this
+ *        cycle instead of reading a mid-commit instance. May be NULL to update
+ *        every card unconditionally.
  */
-void summary_page_update(const nina_client_t *instances, int count);
+void summary_page_update(const nina_client_t *instances, int count, const bool *locked);
 
 /**
  * @brief Apply the current theme to the summary page.

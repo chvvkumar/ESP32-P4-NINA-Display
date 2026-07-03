@@ -25,6 +25,7 @@
 #include "freertos/task.h"
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_spiffs.h"
 #include "esp_heap_caps.h"
 #include "esp_attr.h"
@@ -320,12 +321,12 @@ static void append_crash_record(uint32_t reason, const char *panic_text)
 
     time_t now = time(NULL);
     bool synced = (now >= 1577836800);  /* Jan 1 2020 */
-    uint32_t uptime_ms = esp_log_timestamp();  /* ms since boot */
+    uint32_t uptime_s = (uint32_t)(esp_timer_get_time() / 1000000);  /* s since boot, wrap-safe */
 
     power_mgmt_crash_info_t info = power_mgmt_get_crash_info();
 
     cJSON_AddNumberToObject(o, "ts", synced ? (double)now : 0.0);
-    cJSON_AddNumberToObject(o, "uptime_s", (double)(uptime_ms / 1000u));
+    cJSON_AddNumberToObject(o, "uptime_s", (double)uptime_s);
     cJSON_AddNumberToObject(o, "reason", (double)reason);
     cJSON_AddStringToObject(o, "reason_str", power_mgmt_reset_reason_str(reason));
     cJSON_AddNumberToObject(o, "crash_count", (double)info.crash_count);
