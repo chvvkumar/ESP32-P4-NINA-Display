@@ -14,6 +14,8 @@
 #include "esp_websocket_client.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
+#include "freertos/task.h"
 #include "cJSON.h"
 #include <string.h>
 #include <stdarg.h>
@@ -32,6 +34,9 @@ static const char *TAG = "nina_ws";
 #define WS_BACKOFF_INITIAL_MS  5000
 #define WS_BACKOFF_MAX_MS      60000
 
+/* Fragmented-frame reassembly cap. Frames larger than this are dropped. */
+#define WS_REASM_MAX_BYTES     (16 * 1024)
+
 static esp_websocket_client_handle_t ws_clients[MAX_NINA_INSTANCES];
 static nina_client_t *ws_client_data[MAX_NINA_INSTANCES];
 
@@ -39,6 +44,36 @@ static nina_client_t *ws_client_data[MAX_NINA_INSTANCES];
 static _Atomic int ws_backoff_ms[MAX_NINA_INSTANCES];
 static _Atomic int64_t ws_disconnect_time_ms[MAX_NINA_INSTANCES];
 static _Atomic bool ws_needs_reconnect[MAX_NINA_INSTANCES];
+
+/* Per-instance lifecycle mutex — serializes stop/start/reconnect handle
+ * manipulation. Lock order: this mutex OUTER, nina_client_lock INNER.
+ * Lazily created (no init call site available in these files) via an
+ * atomic-elected static-allocation pattern so no heap alloc runs inside a
+ * critical section and exactly one task creates each mutex. */
+static SemaphoreHandle_t ws_life_mutex[MAX_NINA_INSTANCES];
+static StaticSemaphore_t ws_life_mutex_buf[MAX_NINA_INSTANCES];
+static _Atomic int       ws_life_mutex_state[MAX_NINA_INSTANCES]; // 0=uninit,1=creating,2=ready
+
+/* Per-instance fragment reassembly buffer (PSRAM, kept between messages). */
+static char    *ws_reasm_buf[MAX_NINA_INSTANCES];
+static int      ws_reasm_cap[MAX_NINA_INSTANCES];   // allocated capacity
+static int      ws_reasm_len[MAX_NINA_INSTANCES];   // expected total for active message
+static int      ws_reasm_have[MAX_NINA_INSTANCES];  // bytes accumulated
+static int64_t  ws_reasm_warn_ms[MAX_NINA_INSTANCES];
+
+static SemaphoreHandle_t ws_get_life_mutex(int index) {
+    int expected = 0;
+    if (atomic_compare_exchange_strong(&ws_life_mutex_state[index], &expected, 1)) {
+        ws_life_mutex[index] = xSemaphoreCreateMutexStatic(&ws_life_mutex_buf[index]);
+        ws_backoff_ms[index] = WS_BACKOFF_INITIAL_MS;  /* one-time backoff seed */
+        atomic_store(&ws_life_mutex_state[index], 2);
+    } else {
+        while (atomic_load(&ws_life_mutex_state[index]) != 2) {
+            vTaskDelay(1);
+        }
+    }
+    return ws_life_mutex[index];
+}
 
 /* ── Connect aggregation state ──────────────────────────────────────── */
 #define CONNECT_AGG_IDLE_TIMEOUT_MS 60000
@@ -744,13 +779,17 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             nina_client_unlock(data);
         }
         /* Reset equipment mask — new profile may have different equipment */
+        portENTER_CRITICAL(&s_agg_lock);
         s_ever_connected[index] = 0;
+        portEXIT_CRITICAL(&s_agg_lock);
         if (toast_allowed(index, 9))
             ws_toast(index, TOAST_INFO, "Profile changed");
         nina_event_log_add(EVENT_SEV_INFO, index, "Profile changed");
     }
-    // AUTOFOCUS-FAILED: AF did not converge
-    else if (strcmp(evt->valuestring, "AUTOFOCUS-FAILED") == 0) {
+    // AUTOFOCUS-FAILED / ERROR-AF: AF did not converge (v2 emits ERROR-AF;
+    // keep AUTOFOCUS-FAILED for older plugin builds)
+    else if (strcmp(evt->valuestring, "AUTOFOCUS-FAILED") == 0 ||
+             strcmp(evt->valuestring, "ERROR-AF") == 0) {
         if (nina_client_lock(data, 50)) {
             data->autofocus.af_running = false;
             data->ui_refresh_needed = true;
@@ -939,6 +978,83 @@ static void handle_websocket_message(int index, const char *payload, int len) {
 }
 
 /**
+ * @brief Reassemble a possibly-fragmented text frame and dispatch it.
+ *
+ * esp_websocket_client posts payloads larger than buffer_size as multiple
+ * DATA events: the first carries op_code 0x01 with payload_offset 0, and
+ * continuation chunks carry op_code 0x00 with increasing payload_offset;
+ * payload_len is the full message length on every event. Accumulate into a
+ * per-instance PSRAM buffer and dispatch once complete. Runs only in the WS
+ * client task, so buffer state needs no lock; nina_websocket_stop frees the
+ * buffer after the client is destroyed (no concurrent handler).
+ */
+static void ws_handle_data_frame(int index, esp_websocket_event_data_t *d) {
+    int total = d->payload_len;
+    int off   = d->payload_offset;
+    int chunk = d->data_len;
+    if (total <= 0 || chunk < 0) return;
+
+    /* Whole message delivered in one frame — dispatch directly. */
+    if (off == 0 && chunk == total) {
+        handle_websocket_message(index, (const char *)d->data_ptr, total);
+        return;
+    }
+
+    /* Oversize message — discard with a rate-limited warning. */
+    if (total > WS_REASM_MAX_BYTES) {
+        int64_t now = esp_timer_get_time() / 1000;
+        if (now - ws_reasm_warn_ms[index] > 5000) {
+            ESP_LOGW(TAG, "WS[%d]: message %d bytes exceeds %d cap, dropped",
+                     index, total, WS_REASM_MAX_BYTES);
+            ws_reasm_warn_ms[index] = now;
+        }
+        ws_reasm_len[index] = 0;
+        ws_reasm_have[index] = 0;
+        return;
+    }
+
+    /* Start of a new message resets accumulator. */
+    if (off == 0) {
+        ws_reasm_len[index] = total;
+        ws_reasm_have[index] = 0;
+    } else if (off != ws_reasm_have[index] || total != ws_reasm_len[index]) {
+        /* Continuation without a matching active message (e.g. binary
+         * continuation, or a lost start) — drop and wait for a fresh start. */
+        ws_reasm_len[index] = 0;
+        ws_reasm_have[index] = 0;
+        return;
+    }
+
+    if (ws_reasm_cap[index] < total) {
+        char *nb = heap_caps_malloc(total, MALLOC_CAP_SPIRAM);
+        if (!nb) {
+            ESP_LOGW(TAG, "WS[%d]: reassembly alloc failed (%d bytes)", index, total);
+            ws_reasm_len[index] = 0;
+            ws_reasm_have[index] = 0;
+            return;
+        }
+        if (ws_reasm_buf[index]) heap_caps_free(ws_reasm_buf[index]);
+        ws_reasm_buf[index] = nb;
+        ws_reasm_cap[index] = total;
+    }
+
+    if (off + chunk > ws_reasm_cap[index]) {
+        ws_reasm_len[index] = 0;
+        ws_reasm_have[index] = 0;
+        return;
+    }
+
+    memcpy(ws_reasm_buf[index] + off, d->data_ptr, chunk);
+    ws_reasm_have[index] += chunk;
+
+    if (ws_reasm_have[index] >= ws_reasm_len[index]) {
+        handle_websocket_message(index, ws_reasm_buf[index], ws_reasm_len[index]);
+        ws_reasm_len[index] = 0;
+        ws_reasm_have[index] = 0;
+    }
+}
+
+/**
  * @brief WebSocket event handler callback.
  * handler_args carries the instance index as (void *)(intptr_t)index.
  */
@@ -976,8 +1092,10 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base,
         break;
 
     case WEBSOCKET_EVENT_DATA:
-        if (data->op_code == 0x01 && data->data_len > 0) {  // Text frame
-            handle_websocket_message(index, (const char *)data->data_ptr, data->data_len);
+        // Text frame (0x01) and continuation (0x00) — reassemble fragments.
+        // Binary/ping/pong/close opcodes are ignored.
+        if (data->op_code == 0x01 || data->op_code == 0x00) {
+            ws_handle_data_frame(index, data);
         }
         break;
 
@@ -1015,12 +1133,44 @@ static bool build_ws_url(const char *base_url, char *ws_url, size_t ws_url_size)
     return true;
 }
 
-void nina_websocket_start(int index, const char *base_url, nina_client_t *data) {
-    if (index < 0 || index >= MAX_NINA_INSTANCES) return;
+/* Stop/destroy the client. Caller must hold ws_life_mutex[index]. */
+static void ws_stop_locked(int index) {
+    if (ws_clients[index]) {
+        esp_websocket_client_stop(ws_clients[index]);
+        esp_websocket_client_destroy(ws_clients[index]);
+        ws_clients[index] = NULL;
+    }
+    if (ws_client_data[index]) {
+        if (nina_client_lock(ws_client_data[index], 50)) {
+            ws_client_data[index]->websocket_connected = false;
+            nina_connection_report_ws(index, false);
+            nina_client_unlock(ws_client_data[index]);
+        }
+        ws_client_data[index] = NULL;
+    }
 
+    // Stop aggregation timer and reset state
+    if (s_agg_timers[index]) {
+        esp_timer_stop(s_agg_timers[index]);
+    }
+    memset(&s_agg[index], 0, sizeof(connect_agg_state_t));
+
+    /* Free the reassembly buffer — safe now that the client (and its event
+     * handler) is destroyed, so no concurrent writer remains. */
+    if (ws_reasm_buf[index]) {
+        heap_caps_free(ws_reasm_buf[index]);
+        ws_reasm_buf[index] = NULL;
+    }
+    ws_reasm_cap[index] = 0;
+    ws_reasm_len[index] = 0;
+    ws_reasm_have[index] = 0;
+}
+
+/* Init/start the client. Caller must hold ws_life_mutex[index]. */
+static void ws_start_locked(int index, const char *base_url, nina_client_t *data) {
     if (ws_clients[index]) {
         ESP_LOGW(TAG, "WS[%d]: Already running, stopping first", index);
-        nina_websocket_stop(index);
+        ws_stop_locked(index);
     }
 
     char ws_url[192];
@@ -1032,8 +1182,9 @@ void nina_websocket_start(int index, const char *base_url, nina_client_t *data) 
     ESP_LOGI(TAG, "WS[%d]: Connecting to %s", index, ws_url);
 
     ws_client_data[index] = data;
-    ws_backoff_ms[index] = WS_BACKOFF_INITIAL_MS;
     ws_needs_reconnect[index] = false;
+    /* Backoff is reset on WEBSOCKET_EVENT_CONNECTED, not here — resetting on
+     * start would defeat the exponential backoff for offline rigs. */
 
     esp_websocket_client_config_t ws_cfg = {
         .uri = ws_url,
@@ -1067,28 +1218,20 @@ void nina_websocket_start(int index, const char *base_url, nina_client_t *data) 
      * from /equipment/info and persists across WS reconnects. */
 }
 
+void nina_websocket_start(int index, const char *base_url, nina_client_t *data) {
+    if (index < 0 || index >= MAX_NINA_INSTANCES) return;
+    SemaphoreHandle_t m = ws_get_life_mutex(index);
+    xSemaphoreTake(m, portMAX_DELAY);
+    ws_start_locked(index, base_url, data);
+    xSemaphoreGive(m);
+}
+
 void nina_websocket_stop(int index) {
     if (index < 0 || index >= MAX_NINA_INSTANCES) return;
-
-    if (ws_clients[index]) {
-        esp_websocket_client_stop(ws_clients[index]);
-        esp_websocket_client_destroy(ws_clients[index]);
-        ws_clients[index] = NULL;
-    }
-    if (ws_client_data[index]) {
-        if (nina_client_lock(ws_client_data[index], 50)) {
-            ws_client_data[index]->websocket_connected = false;
-            nina_connection_report_ws(index, false);
-            nina_client_unlock(ws_client_data[index]);
-        }
-        ws_client_data[index] = NULL;
-    }
-
-    // Stop aggregation timer and reset state
-    if (s_agg_timers[index]) {
-        esp_timer_stop(s_agg_timers[index]);
-    }
-    memset(&s_agg[index], 0, sizeof(connect_agg_state_t));
+    SemaphoreHandle_t m = ws_get_life_mutex(index);
+    xSemaphoreTake(m, portMAX_DELAY);
+    ws_stop_locked(index);
+    xSemaphoreGive(m);
 }
 
 void nina_websocket_stop_all(void) {
@@ -1111,8 +1254,11 @@ void nina_websocket_check_reconnect(int index, const char *base_url, nina_client
     if (ws_backoff_ms[index] > WS_BACKOFF_MAX_MS)
         ws_backoff_ms[index] = WS_BACKOFF_MAX_MS;
 
-    nina_websocket_stop(index);
-    nina_websocket_start(index, base_url, data);
+    SemaphoreHandle_t m = ws_get_life_mutex(index);
+    xSemaphoreTake(m, portMAX_DELAY);
+    ws_stop_locked(index);
+    ws_start_locked(index, base_url, data);
+    xSemaphoreGive(m);
 }
 
 void nina_websocket_check_deferred_alerts(int index) {
@@ -1131,5 +1277,7 @@ void nina_websocket_update_equipment_mask(int index, uint16_t connected_mask) {
     /* OR — accumulate bits. Equipment that was ever connected keeps its bit
      * even after disconnecting, so deferred disconnect toasts still fire.
      * Reset happens only on profile change or instance stop. */
+    portENTER_CRITICAL(&s_agg_lock);
     s_ever_connected[index] |= connected_mask;
+    portEXIT_CRITICAL(&s_agg_lock);
 }

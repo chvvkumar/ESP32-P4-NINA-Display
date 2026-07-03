@@ -134,6 +134,29 @@ static char *http_get_body(const char *url) {
 
     int content_length = esp_http_client_fetch_headers(client);
     int status = esp_http_client_get_status_code(client);
+
+    /* Follow Location redirects manually: the streaming open()/fetch_headers()
+     * path does NOT auto-follow. Cap the chain to avoid loops. */
+    int redirects = 0;
+    while ((status == 301 || status == 302 || status == 307 || status == 308) &&
+           redirects < 3) {
+        err = esp_http_client_set_redirection(client);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "set_redirection failed: %s", esp_err_to_name(err));
+            break;
+        }
+        esp_http_client_close(client);
+        err = esp_http_client_open(client, 0);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "HTTP re-open failed: %s", esp_err_to_name(err));
+            esp_http_client_cleanup(client);
+            return NULL;
+        }
+        content_length = esp_http_client_fetch_headers(client);
+        status = esp_http_client_get_status_code(client);
+        redirects++;
+    }
+
     if (status < 200 || status >= 300) {
         ESP_LOGW(TAG, "HTTP %d for %s", status, url);
         esp_http_client_cleanup(client);
@@ -181,7 +204,7 @@ static bool fetch_owm(const app_config_t *cfg, weather_data_t *out) {
     /* ── Current weather ── */
     char url[320];
     snprintf(url, sizeof(url),
-             "http://api.openweathermap.org/data/2.5/weather?"
+             "https://api.openweathermap.org/data/2.5/weather?"
              "lat=%.4f&lon=%.4f&appid=%s&units=%s",
              cfg->weather_lat, cfg->weather_lon, cfg->weather_api_key, units);
 
@@ -246,7 +269,7 @@ static bool fetch_owm(const app_config_t *cfg, weather_data_t *out) {
 
     /* ── Forecast (3-hour intervals) ── */
     snprintf(url, sizeof(url),
-             "http://api.openweathermap.org/data/2.5/forecast?"
+             "https://api.openweathermap.org/data/2.5/forecast?"
              "lat=%.4f&lon=%.4f&appid=%s&units=%s&cnt=16",
              cfg->weather_lat, cfg->weather_lon, cfg->weather_api_key, units);
 

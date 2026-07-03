@@ -358,9 +358,17 @@ esp_err_t image_display_refresh_post_handler(httpd_req_t *req)
 {
     REQUIRE_AUTH(req);
 
-    app_config_t cfg = app_config_get_snapshot();
+    /* app_config_t is ~7.6 KB — snapshot into a PSRAM heap copy, not the stack. */
+    app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    if (!cfg) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    *cfg = app_config_get_snapshot();
+    bool image_display_enabled = cfg->image_display_enabled;
+    heap_caps_free(cfg);
 
-    if (cfg.image_display_enabled) {
+    if (image_display_enabled) {
         atomic_store(&image_display_manual_fetch, true);
         goes_ensure_task_running();
         if (goes_task_handle) {

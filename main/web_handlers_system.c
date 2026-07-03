@@ -8,6 +8,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
+#include <stdatomic.h>
 #include "esp_heap_caps.h"
 #include "nina_websocket.h"
 #include "mqtt_ha.h"
@@ -202,8 +203,10 @@ static void ota_stop_network(void) {
     ota_in_progress = true;
     /* Give tasks time to reach their suspend points */
     vTaskDelay(pdMS_TO_TICKS(200));
-    /* Free all TLS sessions to maximize bandwidth and DMA heap for OTA */
-    spotify_client_destroy_connection();
+    /* Free all TLS sessions to maximize bandwidth and DMA heap for OTA.
+     * prepare_shutdown blocks until any in-flight Spotify request completes,
+     * then destroys the handle so the poll task cannot touch a freed client. */
+    spotify_client_prepare_shutdown();
     nina_websocket_stop_all();
     mqtt_ha_stop();
 }
@@ -232,6 +235,14 @@ esp_err_t ota_post_handler(httpd_req_t *req)
 
     if (req->content_len > 16 * 1024 * 1024) {
         return send_400(req, "Firmware too large (max 16 MB)");
+    }
+
+    /* Mutual exclusion: reject a second concurrent OTA without touching network state */
+    if (atomic_exchange(&ota_in_progress, true)) {
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"error\":\"Update already in progress\"}");
+        return ESP_OK;
     }
 
     /* ── Stop all network traffic and show OTA screen ── */
@@ -274,19 +285,29 @@ esp_err_t ota_post_handler(httpd_req_t *req)
     int received_total = 0;
     int last_progress_pct = -1;
     bool failed = false;
+    bool timed_out = false;
+    int timeout_count = 0;
 
     while (remaining > 0) {
         int to_read = remaining < OTA_BUF_SIZE ? remaining : OTA_BUF_SIZE;
         int received = httpd_req_recv(req, buf, to_read);
         if (received <= 0) {
             if (received == HTTPD_SOCK_ERR_TIMEOUT) {
-                /* Retry on timeout */
+                /* Bound consecutive timeouts so a stalled upload cannot loop forever */
+                if (++timeout_count >= 5) {
+                    ESP_LOGE(TAG, "OTA: aborting after %d consecutive recv timeouts at %d/%d bytes",
+                             timeout_count, received_total, total);
+                    failed = true;
+                    timed_out = true;
+                    break;
+                }
                 continue;
             }
             ESP_LOGE(TAG, "OTA: recv error %d at %d/%d bytes", received, received_total, total);
             failed = true;
             break;
         }
+        timeout_count = 0;
 
         err = esp_ota_write(ota_handle, buf, received);
         if (err != ESP_OK) {
@@ -315,8 +336,13 @@ esp_err_t ota_post_handler(httpd_req_t *req)
         esp_ota_abort(ota_handle);
         ota_remove_overlay();
         ota_restore_network();
-        httpd_resp_set_status(req, "500 Internal Server Error");
-        httpd_resp_sendstr(req, "{\"error\":\"OTA receive/write failed\"}");
+        if (timed_out) {
+            httpd_resp_set_status(req, "408 Request Timeout");
+            httpd_resp_sendstr(req, "{\"error\":\"OTA upload timed out\"}");
+        } else {
+            httpd_resp_set_status(req, "500 Internal Server Error");
+            httpd_resp_sendstr(req, "{\"error\":\"OTA receive/write failed\"}");
+        }
         return ESP_FAIL;
     }
 
@@ -390,6 +416,7 @@ esp_err_t version_get_handler(httpd_req_t *req)
 // Handler for checking GitHub OTA updates (returns JSON result to web UI)
 esp_err_t check_update_json_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     int update_channel = app_config_get()->update_channel;
     const char *cur_ver = ota_github_get_current_version();
 
@@ -457,6 +484,15 @@ esp_err_t ota_github_post_handler(httpd_req_t *req)
     if (ota_github_check(update_channel, cur_ver, rel) != OTA_CHECK_UPDATE_AVAILABLE) {
         heap_caps_free(rel);
         return send_400(req, "No update available");
+    }
+
+    /* Mutual exclusion: reject a second concurrent OTA without touching network state */
+    if (atomic_exchange(&ota_in_progress, true)) {
+        heap_caps_free(rel);
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"error\":\"Update already in progress\"}");
+        return ESP_OK;
     }
 
     /* Stop network and show OTA overlay on device */

@@ -2,6 +2,7 @@
 #include "spotify_auth.h"
 #include "spotify_client.h"
 #include "tasks.h"
+#include "esp_heap_caps.h"
 #include <string.h>
 
 /**
@@ -57,38 +58,47 @@ esp_err_t spotify_config_post_handler(httpd_req_t *req)
         return send_400(req, "spotify_client_id too long");
     }
 
-    /* Work on a mutex-protected snapshot copy; never field-write the live config. */
-    app_config_t cfg = app_config_get_snapshot();
+    /* Work on a mutex-protected snapshot copy; never field-write the live config.
+     * app_config_t is ~7.6 KB — snapshot into a PSRAM heap copy, not the stack. */
+    app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    if (!cfg) {
+        cJSON_Delete(root);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    *cfg = app_config_get_snapshot();
 
-    JSON_TO_BOOL(root, "spotify_enabled", cfg.spotify_enabled);
-    JSON_TO_STRING(root, "spotify_client_id", cfg.spotify_client_id);
+    JSON_TO_BOOL(root, "spotify_enabled", cfg->spotify_enabled);
+    JSON_TO_STRING(root, "spotify_client_id", cfg->spotify_client_id);
     cJSON *spi_item = cJSON_GetObjectItem(root, "spotify_poll_interval_ms");
     if (cJSON_IsNumber(spi_item)) {
         int v = spi_item->valueint;
         if (v < 1000) v = 1000;
         if (v > 30000) v = 30000;
-        cfg.spotify_poll_interval_ms = (uint16_t)v;
+        cfg->spotify_poll_interval_ms = (uint16_t)v;
     }
-    JSON_TO_BOOL(root, "spotify_show_progress_bar", cfg.spotify_show_progress_bar);
-    JSON_TO_BOOL(root, "spotify_minimal_mode", cfg.spotify_minimal_mode);
-    JSON_TO_BOOL(root, "spotify_scroll_text", cfg.spotify_scroll_text);
+    JSON_TO_BOOL(root, "spotify_show_progress_bar", cfg->spotify_show_progress_bar);
+    JSON_TO_BOOL(root, "spotify_minimal_mode", cfg->spotify_minimal_mode);
+    JSON_TO_BOOL(root, "spotify_scroll_text", cfg->spotify_scroll_text);
     cJSON *sot_item = cJSON_GetObjectItem(root, "spotify_overlay_timeout_s");
     if (cJSON_IsNumber(sot_item)) {
         int v = sot_item->valueint;
         if (v < 0) v = 0;
         if (v > 255) v = 255;   /* uint8_t; 0 = never hide */
-        cfg.spotify_overlay_timeout_s = (uint8_t)v;
+        cfg->spotify_overlay_timeout_s = (uint8_t)v;
     }
-    JSON_TO_BOOL(root, "spotify_overlay_visible", cfg.spotify_overlay_visible);
+    JSON_TO_BOOL(root, "spotify_overlay_visible", cfg->spotify_overlay_visible);
 
     cJSON_Delete(root);
 
     /* Single atomic memcpy under mutex + NVS persist. */
-    app_config_save(&cfg);
+    app_config_save(cfg);
 
     /* Live apply: the poll task reads the live config (now updated by save) on
      * its next cycle; ensure it is running when the feature is enabled. */
-    if (cfg.spotify_enabled) {
+    bool spotify_enabled = cfg->spotify_enabled;
+    heap_caps_free(cfg);
+    if (spotify_enabled) {
         spotify_ensure_task_running();
     }
 

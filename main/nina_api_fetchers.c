@@ -15,6 +15,20 @@
 
 static const char *TAG = "nina_fetch";
 
+/* Client-mutex write timeout for fetcher commits. The poll task is the primary
+ * writer; the WS handler and UI take the same lock. On timeout we skip the write
+ * for this cycle (data stays one cycle stale) rather than write lock-free. */
+#define FETCH_LOCK_MS 100
+
+/* Commit an offline state (connected=false, status=OFFLINE) under the lock. */
+static void nina_fetch_set_offline(nina_client_t *data) {
+    if (nina_client_lock(data, FETCH_LOCK_MS)) {
+        data->connected = false;
+        strcpy(data->status, "OFFLINE");
+        nina_client_unlock(data);
+    }
+}
+
 /**
  * @brief Fetch camera info - ALWAYS WORKS
  * Provides: IsExposing, ExposureEndTime, Temperature, CoolerPower, CameraState
@@ -26,8 +40,7 @@ void fetch_camera_info_robust(const char *base_url, nina_client_t *data) {
     cJSON *json = http_get_json(url);
     if (!json) {
         // Transport failure / non-2xx / empty body — API unreachable.
-        data->connected = false;
-        strcpy(data->status, "OFFLINE");
+        nina_fetch_set_offline(data);
         return;
     }
 
@@ -35,8 +48,7 @@ void fetch_camera_info_robust(const char *base_url, nina_client_t *data) {
     // not merely a non-NULL body. Recomputed every poll so a stuck `true` can't latch.
     if (!nina_api_envelope_ok(json)) {
         cJSON_Delete(json);
-        data->connected = false;
-        strcpy(data->status, "OFFLINE");
+        nina_fetch_set_offline(data);
         return;
     }
 
@@ -45,11 +57,14 @@ void fetch_camera_info_robust(const char *base_url, nina_client_t *data) {
         // Envelope OK but no Response object — treat as offline this poll
         // (symmetric with fetch_equipment_info_bundled).
         cJSON_Delete(json);
-        data->connected = false;
-        strcpy(data->status, "OFFLINE");
+        nina_fetch_set_offline(data);
         return;
     }
 
+    if (!nina_client_lock(data, FETCH_LOCK_MS)) {
+        cJSON_Delete(json);
+        return;
+    }
     data->connected = true;
     {
         // Camera name
@@ -101,6 +116,7 @@ void fetch_camera_info_robust(const char *base_url, nina_client_t *data) {
         }
         // Do NOT clear exposure_end_epoch when !is_exposing -- UI uses it to detect completion
     }
+    nina_client_unlock(data);
 
     cJSON_Delete(json);
 }
@@ -117,7 +133,7 @@ void fetch_filter_robust_ex(const char *base_url, nina_client_t *data, bool fetc
     if (!json) return;
 
     cJSON *response = cJSON_GetObjectItem(json, "Response");
-    if (response) {
+    if (response && nina_client_lock(data, FETCH_LOCK_MS)) {
         // Get current filter
         cJSON *selectedFilter = cJSON_GetObjectItem(response, "SelectedFilter");
         if (selectedFilter) {
@@ -151,6 +167,7 @@ void fetch_filter_robust_ex(const char *base_url, nina_client_t *data, bool fetc
             }
             ESP_LOGI(TAG, "Found %d available filters", data->filter_count);
         }
+        nina_client_unlock(data);
     }
     cJSON_Delete(json);
 }
@@ -195,7 +212,7 @@ void fetch_image_history_robust(const char *base_url, nina_client_t *data) {
     cJSON *response = cJSON_GetObjectItem(json, "Response");
     if (response && cJSON_IsArray(response) && cJSON_GetArraySize(response) > 0) {
         cJSON *latest = cJSON_GetArrayItem(response, 0);
-        if (latest) {
+        if (latest && nina_client_lock(data, FETCH_LOCK_MS)) {
             // Target name from last saved image (only if non-empty)
             cJSON *target = cJSON_GetObjectItem(latest, "TargetName");
             if (target && target->valuestring && target->valuestring[0] != '\0') {
@@ -240,6 +257,7 @@ void fetch_image_history_robust(const char *base_url, nina_client_t *data) {
             }
 
             ESP_LOGI(TAG, "Image stats: HFR=%.2f, Stars=%d", data->hfr, data->stars);
+            nina_client_unlock(data);
         }
     }
 
@@ -257,7 +275,7 @@ void fetch_profile_robust(const char *base_url, nina_client_t *data) {
     if (!json) return;
 
     cJSON *response = cJSON_GetObjectItem(json, "Response");
-    if (response && cJSON_IsArray(response)) {
+    if (response && cJSON_IsArray(response) && nina_client_lock(data, FETCH_LOCK_MS)) {
         cJSON *item = NULL;
         cJSON_ArrayForEach(item, response) {
             cJSON *isActive = cJSON_GetObjectItem(item, "IsActive");
@@ -270,6 +288,7 @@ void fetch_profile_robust(const char *base_url, nina_client_t *data) {
                 break;
             }
         }
+        nina_client_unlock(data);
     }
     cJSON_Delete(json);
 }
@@ -285,9 +304,16 @@ void fetch_guider_robust(const char *base_url, nina_client_t *data) {
     if (!json) return;
 
     cJSON *response = cJSON_GetObjectItem(json, "Response");
-    if (response) {
+    if (response && nina_client_lock(data, FETCH_LOCK_MS)) {
+        cJSON *connected = cJSON_GetObjectItem(response, "Connected");
         cJSON *rms = cJSON_GetObjectItem(response, "RMSError");
-        if (rms) {
+        // Guider disconnected or no RMS payload: zero the values so the UI does
+        // not render stale guiding numbers for a guider that is no longer guiding.
+        if ((connected && !cJSON_IsTrue(connected)) || !rms) {
+            data->guider.rms_total = 0;
+            data->guider.rms_ra = 0;
+            data->guider.rms_dec = 0;
+        } else {
             // Total RMS
             cJSON *total = cJSON_GetObjectItem(rms, "Total");
             if (total) {
@@ -318,6 +344,7 @@ void fetch_guider_robust(const char *base_url, nina_client_t *data) {
             ESP_LOGI(TAG, "Guiding RMS - Total: %.2f\", RA: %.2f\", DEC: %.2f\"",
                 data->guider.rms_total, data->guider.rms_ra, data->guider.rms_dec);
         }
+        nina_client_unlock(data);
     }
 
     cJSON_Delete(json);
@@ -334,11 +361,12 @@ void fetch_mount_robust(const char *base_url, nina_client_t *data) {
     if (!json) return;
 
     cJSON *response = cJSON_GetObjectItem(json, "Response");
-    if (response) {
+    if (response && nina_client_lock(data, FETCH_LOCK_MS)) {
         cJSON *flip_time = cJSON_GetObjectItem(response, "TimeToMeridianFlipString");
         if (flip_time && flip_time->valuestring) {
             strncpy(data->meridian_flip, flip_time->valuestring, sizeof(data->meridian_flip) - 1);
         }
+        nina_client_unlock(data);
     }
 
     cJSON_Delete(json);
@@ -355,11 +383,12 @@ void fetch_focuser_robust(const char *base_url, nina_client_t *data) {
     if (!json) return;
 
     cJSON *response = cJSON_GetObjectItem(json, "Response");
-    if (response) {
+    if (response && nina_client_lock(data, FETCH_LOCK_MS)) {
         cJSON *position = cJSON_GetObjectItem(response, "Position");
         if (position) {
             data->focuser.position = position->valueint;
         }
+        nina_client_unlock(data);
     }
     cJSON_Delete(json);
 }
@@ -476,8 +505,9 @@ void fetch_switch_info(const char *base_url, nina_client_t *data) {
     if (!json) return;
 
     cJSON *response = cJSON_GetObjectItem(json, "Response");
-    if (response) {
+    if (response && nina_client_lock(data, FETCH_LOCK_MS)) {
         parse_switch_response(response, data);
+        nina_client_unlock(data);
     }
 
     cJSON_Delete(json);
@@ -502,12 +532,13 @@ void fetch_safety_monitor_info(const char *base_url, nina_client_t *data) {
     }
 
     cJSON *connected = cJSON_GetObjectItem(response, "Connected");
-    if (connected && cJSON_IsTrue(connected)) {
+    if (connected && cJSON_IsTrue(connected) && nina_client_lock(data, FETCH_LOCK_MS)) {
         data->safety_connected = true;
         cJSON *is_safe = cJSON_GetObjectItem(response, "IsSafe");
         data->safety_is_safe = is_safe && cJSON_IsTrue(is_safe);
         ESP_LOGI(TAG, "Safety monitor: connected=%d, safe=%d",
                  data->safety_connected, data->safety_is_safe);
+        nina_client_unlock(data);
     }
 
     cJSON_Delete(json);
@@ -530,8 +561,7 @@ int fetch_equipment_info_bundled(const char *base_url, nina_client_t *data, bool
     cJSON *json = http_get_json(url);
     if (!json) {
         // Transport failure / non-2xx / empty body — API unreachable.
-        data->connected = false;
-        strcpy(data->status, "OFFLINE");
+        nina_fetch_set_offline(data);
         return -1;
     }
 
@@ -539,8 +569,7 @@ int fetch_equipment_info_bundled(const char *base_url, nina_client_t *data, bool
     // means the API is up but reported a failure — treat as offline this poll.
     if (!nina_api_envelope_ok(json)) {
         cJSON_Delete(json);
-        data->connected = false;
-        strcpy(data->status, "OFFLINE");
+        nina_fetch_set_offline(data);
         return -1;
     }
 
@@ -548,12 +577,17 @@ int fetch_equipment_info_bundled(const char *base_url, nina_client_t *data, bool
     if (!response) {
         // Envelope OK but no Response object — may be a 404 or unsupported endpoint
         cJSON_Delete(json);
-        data->connected = false;
-        strcpy(data->status, "OFFLINE");
+        nina_fetch_set_offline(data);
         return -2;
     }
 
     // Envelope is OK with a Response object — the API is reachable this poll.
+    // Commit all parsed equipment fields atomically under the client lock. On
+    // timeout, skip the write section but still return success (data one cycle stale).
+    if (!nina_client_lock(data, FETCH_LOCK_MS)) {
+        cJSON_Delete(json);
+        return 0;
+    }
     data->connected = true;
 
     // ── Camera ──
@@ -604,8 +638,15 @@ int fetch_equipment_info_bundled(const char *base_url, nina_client_t *data, bool
     // ── Guider ──
     cJSON *guider = cJSON_GetObjectItem(response, "Guider");
     if (guider) {
+        cJSON *guider_conn = cJSON_GetObjectItem(guider, "Connected");
         cJSON *rms = cJSON_GetObjectItem(guider, "RMSError");
-        if (rms) {
+        // Guider disconnected or no RMS payload: zero the values so the UI does
+        // not render stale guiding numbers for a guider that is no longer guiding.
+        if ((guider_conn && !cJSON_IsTrue(guider_conn)) || !rms) {
+            data->guider.rms_total = 0;
+            data->guider.rms_ra = 0;
+            data->guider.rms_dec = 0;
+        } else {
             cJSON *total = cJSON_GetObjectItem(rms, "Total");
             if (total) {
                 cJSON *arcsec = cJSON_GetObjectItem(total, "Arcseconds");
@@ -692,6 +733,7 @@ int fetch_equipment_info_bundled(const char *base_url, nina_client_t *data, bool
             data->safety_is_safe = is_safe && cJSON_IsTrue(is_safe);
         }
     }
+    nina_client_unlock(data);
 
     /* Build equipment connected bitmask from Connected fields.
      * Bit positions match equipment_type_t in nina_websocket.c:

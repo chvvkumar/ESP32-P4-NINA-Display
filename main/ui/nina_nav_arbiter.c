@@ -24,9 +24,11 @@
 static const char *TAG = "nav_arb";
 
 static struct {
-    int      user_page;            /* last USER claim target, -1 if none */
-    int8_t   user_img_source;      /* image source the USER claim pins (0-3), or -1
-                                    * for a non-image target (clears the override) */
+    _Atomic uint32_t user_claim;   /* USER claim page + image source packed into one
+                                    * atomic word so the pair updates/reads without
+                                    * tearing across cores: (page+1)<<16 | (img_src+1),
+                                    * with -1 sentinels encoded as 0. See
+                                    * pack_claim()/unpack_claim() below. */
     _Atomic int64_t user_stamp_ms; /* when the USER claim was stamped; atomic to
                                     * close the cross-core torn-read window between
                                     * submit_user (LVGL/web task) and resolve
@@ -49,9 +51,19 @@ static struct {
                                     * mirroring user_stamp_ms's cross-core guard. */
 } s_arb;
 
+/* Pack/unpack the USER claim (page index + image source) into one 32-bit word.
+ * Both fields are >= -1, so (field+1) is non-negative and fits a uint16_t. */
+static inline uint32_t pack_claim(int page, int8_t img_src) {
+    return ((uint32_t)(uint16_t)(page + 1) << 16)
+         | (uint32_t)(uint16_t)((int)img_src + 1);
+}
+static inline void unpack_claim(uint32_t v, int *page, int8_t *img_src) {
+    *page    = (int)(uint16_t)(v >> 16) - 1;
+    *img_src = (int8_t)((int)(uint16_t)(v & 0xFFFFu) - 1);
+}
+
 void nav_arbiter_init(void) {
-    s_arb.user_page = -1;
-    s_arb.user_img_source = -1;
+    s_arb.user_claim = pack_claim(-1, -1);
     s_arb.user_stamp_ms = 0;
     s_arb.topology_dirty = false;
     s_arb.modal_depth = 0;
@@ -66,8 +78,7 @@ void nav_arbiter_init(void) {
 }
 
 void nav_arbiter_submit_user(int abs_page, int64_t now_ms, int8_t img_src) {
-    s_arb.user_page = abs_page;
-    s_arb.user_img_source = img_src;
+    s_arb.user_claim = pack_claim(abs_page, img_src);
     s_arb.user_stamp_ms = now_ms;
     /* Wake the data task so the arbiter resolves this claim on the next loop
      * iteration instead of waiting up to a full update_rate_s cycle. Idempotent
@@ -94,7 +105,9 @@ void nav_arbiter_notify_modal_open(void)  { s_arb.modal_depth++; }
 void nav_arbiter_notify_modal_close(int64_t now_ms) {
     if (s_arb.modal_depth > 0) s_arb.modal_depth--;
     s_arb.user_stamp_ms = now_ms;     /* restamp grace on close */
-    if (s_arb.user_page < 0) s_arb.user_page = nina_dashboard_get_active_page();
+    int up; int8_t us;
+    unpack_claim(s_arb.user_claim, &up, &us);
+    if (up < 0) s_arb.user_claim = pack_claim(nina_dashboard_get_active_page(), us);
 }
 
 void nav_arbiter_notify_slideshow_tick(void) { s_arb.slideshow_advance = true; }
@@ -105,11 +118,14 @@ void nav_arbiter_set_pin(bool on, int abs_page, int8_t img_src, int64_t now_ms) 
     if (on) {
         s_arb.pinned = true;
         if (abs_page >= 0) {
-            s_arb.user_page = abs_page;
-            s_arb.user_img_source = img_src;
-        } else if (s_arb.user_page < 0) {
-            s_arb.user_page = s_arb.current_committed;
-            s_arb.user_img_source = s_arb.current_committed_img_source;
+            s_arb.user_claim = pack_claim(abs_page, img_src);
+        } else {
+            int up; int8_t us;
+            unpack_claim(s_arb.user_claim, &up, &us);
+            if (up < 0) {
+                s_arb.user_claim = pack_claim(s_arb.current_committed,
+                                              s_arb.current_committed_img_source);
+            }
         }
     } else {
         s_arb.pinned = false;
@@ -342,7 +358,10 @@ void nav_arbiter_resolve(int64_t now_ms) {
     int desired;
     nav_source_t src;
 
-    bool user_active = (s_arb.user_page >= 0)
+    int user_page; int8_t user_img_source;
+    unpack_claim(s_arb.user_claim, &user_page, &user_img_source);
+
+    bool user_active = (user_page >= 0)
         && ((now_ms - s_arb.user_stamp_ms) < (int64_t)c->nav_grace_s * 1000);
 
     /* Tie-break: auto-rotate wins if both flags are somehow set. */
@@ -358,19 +377,20 @@ void nav_arbiter_resolve(int64_t now_ms) {
          * session, idle, and default are all skipped. Manual navigation while
          * pinned updates s_arb.user_page via nav_arbiter_submit_user(), so the
          * held page follows manual nav and persists until the pin is cleared. */
-        if (s_arb.user_page < 0) {
-            s_arb.user_page = s_arb.current_committed;
-            s_arb.user_img_source = s_arb.current_committed_img_source;
+        if (user_page < 0) {
+            user_page = s_arb.current_committed;
+            user_img_source = s_arb.current_committed_img_source;
+            s_arb.user_claim = pack_claim(user_page, user_img_source);
         }
-        desired = s_arb.user_page;
+        desired = user_page;
         src = NAV_SRC_USER;
-        s_arb.pending_img_source = s_arb.user_img_source;
+        s_arb.pending_img_source = user_img_source;
     } else if (user_active) {
-        desired = s_arb.user_page; src = NAV_SRC_USER;
+        desired = user_page; src = NAV_SRC_USER;
         /* Pin the user's chosen image source (0-3) so the commit block does not
          * clobber the override back to the persisted default. -1 for non-image
          * targets, which correctly clears the override. */
-        s_arb.pending_img_source = s_arb.user_img_source;
+        s_arb.pending_img_source = user_img_source;
     } else if (auto_rotate) {
         if (s_arb.slideshow_advance) {
             s_arb.slideshow_advance = false;
