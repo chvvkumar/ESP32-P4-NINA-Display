@@ -109,6 +109,26 @@
     /* Non-collapsible cards (e.g. Logs): no chevron, no pointer affordance */
     .card.nocollapse > .card-title { cursor: default; }
     .card.nocollapse > .card-title::after { display: none; }
+    /* Layer-2 in-flow card: a subsection nested inside a .card (layer 1).
+       Must be a direct child of .card so the collapse rule hides it. */
+    .subsection {
+      background: var(--elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 14px 16px;
+      margin-top: 14px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+    /* Uniform 14px above every subsection, so cards that mix direct-child
+       controls (a top toggle, an info grid) with subsections space correctly. */
+    .subsection-title {
+      font-size: 0.72rem; font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.06em;
+      margin-bottom: 10px;
+    }
+    /* Danger-zone subsection: neutral surface, danger-tinted border only (no hue theme change) */
+    .subsection.danger-zone { border-color: rgba(248, 113, 113, 0.35); }
     /* Logs tab: break out wider than the 960px content column, and fit the window
        as a flex column so only the viewport scrolls (not the page). */
     #tab-logs .card {
@@ -707,7 +727,8 @@
     .fw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-bottom: 24px; }
     .fw-item {
       background: var(--elevated); padding: 12px 14px;
-      border-radius: 10px; border: 1px solid var(--border);
+      border-radius: var(--radius-sm); border: 1px solid var(--border);
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.05);
       transition: border-color 0.2s;
     }
     .fw-item:hover { border-color: var(--border-em); }
@@ -799,6 +820,8 @@
       #logsView.logs-view { height: 60vh; min-height: 300px; }
       #crashlogView.logs-view { height: auto; max-height: 60vh; }
 
+      /* Subsections: tighter padding on narrow screens */
+      .subsection { padding: 10px 12px; }
       /* Card titles */
       .card-title { font-size: 0.9rem; }
       /* Field labels */
@@ -1002,28 +1025,34 @@
       <div class="card">
         <div class="card-title"><span class="card-title-label">Polling &amp; Connectivity <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
         <div class="help-popover"><div class="help-popover-title">Polling and Connectivity</div><p>Sets how often the device contacts the NINA API and how patient it is before declaring an instance offline. Data update rate is the base polling interval for the active page; faster values refresh the display sooner but generate more API traffic. Graph update rate controls how often the RMS and HFR history graphs add a point.</p><p>Connection timeout is how long a request waits for a response before that instance is marked offline. Idle poll interval is the slower, occasional check used to re-test an offline instance while you are viewing a non-NINA page, which avoids contacting an instance that is not running too often.</p><p>Example: set Data update rate to 2 seconds for a responsive display, raise Connection timeout to 10 seconds on a slow or distant network, and leave Idle poll interval at 30 seconds.</p></div>
-        <div class="row stack-mobile">
-          <div class="field">
-            <label class="field-label">Data update rate (s)</label>
-            <input type="number" class="input" id="update_rate" min="1" max="10" value="2">
-            <div class="field-hint">Base polling interval for the active page, from 1 to 10 seconds; lower is more responsive but adds API traffic.</div>
-          </div>
-          <div class="field">
-            <label class="field-label">Graph update rate (s)</label>
-            <input type="number" class="input" id="graph_interval" min="2" max="30" value="5">
-            <div class="field-hint">How often the RMS and HFR history graphs record a new data point, from 2 to 30 seconds.</div>
+        <div class="subsection">
+          <div class="subsection-title">Update Rates</div>
+          <div class="row stack-mobile">
+            <div class="field">
+              <label class="field-label">Data update rate (s)</label>
+              <input type="number" class="input" id="update_rate" min="1" max="10" value="2">
+              <div class="field-hint">Base polling interval for the active page, from 1 to 10 seconds; lower is more responsive but adds API traffic.</div>
+            </div>
+            <div class="field">
+              <label class="field-label">Graph update rate (s)</label>
+              <input type="number" class="input" id="graph_interval" min="2" max="30" value="5">
+              <div class="field-hint">How often the RMS and HFR history graphs record a new data point, from 2 to 30 seconds.</div>
+            </div>
           </div>
         </div>
-        <div class="row stack-mobile">
-          <div class="field">
-            <label class="field-label">Connection timeout (s)</label>
-            <input type="number" class="input" id="connection_timeout" min="2" max="30" value="6">
-            <div class="field-hint">Seconds without response before a NINA instance is offline</div>
-          </div>
-          <div class="field">
-            <label class="field-label">Idle poll interval (s)</label>
-            <input type="number" class="input" id="idle_poll_interval" min="5" max="120" value="30">
-            <div class="field-hint">How often an offline instance is re-checked while you are on a non-NINA page</div>
+        <div class="subsection">
+          <div class="subsection-title">Connectivity</div>
+          <div class="row stack-mobile">
+            <div class="field">
+              <label class="field-label">Connection timeout (s)</label>
+              <input type="number" class="input" id="connection_timeout" min="2" max="30" value="6">
+              <div class="field-hint">Seconds without response before a NINA instance is offline</div>
+            </div>
+            <div class="field">
+              <label class="field-label">Idle poll interval (s)</label>
+              <input type="number" class="input" id="idle_poll_interval" min="5" max="120" value="30">
+              <div class="field-hint">How often an offline instance is re-checked while you are on a non-NINA page</div>
+            </div>
           </div>
         </div>
       </div>
@@ -1041,11 +1070,16 @@
         </div>
         <div class="field-hint">Turns on the AllSky page and starts reading AllSky data; off hides the page and stops reading.</div>
         <div id="allskyConnectionFields">
-        <div class="field" style="margin-top:16px">
-          <label class="field-label">AllSky Hostname</label>
-          <input type="text" class="input" id="allskyHostname" placeholder="allskypi5.lan:8080">
-          <div class="field-hint">Host:port of the AllSky API (e.g., allskypi5.lan:8080)</div>
+        <div class="subsection">
+          <div class="subsection-title">Server</div>
+          <div class="field">
+            <label class="field-label">AllSky Hostname</label>
+            <input type="text" class="input" id="allskyHostname" placeholder="allskypi5.lan:8080">
+            <div class="field-hint">Host:port of the AllSky API (e.g., allskypi5.lan:8080)</div>
+          </div>
         </div>
+        <div class="subsection">
+          <div class="subsection-title">Reading</div>
         <div class="row stack-mobile">
           <div class="field">
             <label class="field-label">Update Interval</label>
@@ -1068,6 +1102,7 @@
           </div>
         </div>
         </div>
+        </div>
       </div>
 
       <div class="card" id="allskyFieldMappingsCard">
@@ -1075,11 +1110,17 @@
         <div class="help-popover"><div class="help-popover-title">AllSky Field Mappings</div><p>Maps values from the AllSky API JSON to the four display quadrants: Thermal, Sky Quality, Ambient, and Power. Each quadrant has a main value, two sub values, and two status dots, and each is filled by entering the JSON key path for that value.</p><p>Use Fetch JSON from AllSky to load the live response, click a Key Path input to make it active, then click Use on a value to copy its path in. Value fields that show a unit also have color controls that set the gradient range between their low and high bounds.</p><p>Example: map the Thermal main value to data.cpu_temp with a 0 to 80 range so the reading shifts from blue toward red as the camera warms.</p></div>
         <div class="field-hint" style="margin-bottom:16px">Configure which AllSky API JSON values appear in each display quadrant. Click a value's path input, then click "Use" on a value to fill it. Use the color controls to set gradient ranges per field.</div>
 
-        <button onclick="fetchAllSkyJson()" class="btn btn-primary" id="fetchJsonBtn" style="width:100%;margin-bottom:16px">Fetch JSON from AllSky</button>
+        <div class="subsection">
+          <div class="subsection-title">Import from AllSky</div>
+          <button onclick="fetchAllSkyJson()" class="btn btn-primary" id="fetchJsonBtn" style="width:100%;margin-bottom:16px">Fetch JSON from AllSky</button>
 
-        <div id="allskyJsonTree" style="display:none; max-height:300px; overflow-y:auto; margin:0 0 16px; padding:12px; background:rgba(0,0,0,0.25); border-radius:var(--radius-sm); border:1px solid rgba(255,255,255,0.06); font-family:'SF Mono',Monaco,Consolas,monospace; font-size:0.75rem; line-height:1.6;"></div>
+          <div id="allskyJsonTree" style="display:none; max-height:300px; overflow-y:auto; margin:0; padding:12px; background:rgba(0,0,0,0.25); border-radius:var(--radius-sm); border:1px solid rgba(255,255,255,0.06); font-family:'SF Mono',Monaco,Consolas,monospace; font-size:0.75rem; line-height:1.6;"></div>
+        </div>
 
-        <div id="allskyFieldMappings"></div>
+        <div class="subsection">
+          <div class="subsection-title">Quadrant Mappings</div>
+          <div id="allskyFieldMappings"></div>
+        </div>
       </div>
 
     </div>
@@ -1090,6 +1131,8 @@
       <div class="card">
         <div class="card-title"><span class="card-title-label">Weather <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
         <div class="help-popover"><div class="help-popover-title">Weather</div><p>Drives the weather overlay shown on the Clock page. Pick a provider and supply an API key if the provider needs one. Open-Meteo needs no key; OpenWeatherMap and Weather Underground each require a key. The forecast uses the device location set on the System tab.</p><p>The Time Format option switches the clock between 14:30 and 2:30 PM. Temperature Units switches all weather readings between degrees F and degrees C. Update Interval sets how often the device fetches new weather data.</p><p>Example: choose Open-Meteo, set units to degrees C, and the Clock page shows local conditions refreshed on the chosen interval.</p></div>
+        <div class="subsection">
+        <div class="subsection-title">Provider</div>
         <div class="field">
           <label class="field-label">Weather Provider</label>
           <select class="input" id="weather_provider" onchange="toggleWeatherApiKey();checkDirty()">
@@ -1117,6 +1160,9 @@
           <input type="text" class="input" id="weather_station_id" placeholder="e.g. KMOOFAL42">
           <div class="field-hint">Personal Weather Station ID for Weather Underground</div>
         </div>
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">Display Options</div>
         <div class="row stack-mobile">
           <div class="field">
             <label class="field-label">Temperature Units</label>
@@ -1150,6 +1196,7 @@
           <div class="field">
             <div class="field-hint">The clock uses the time zone and NTP server configured on the System tab.</div>
           </div>
+        </div>
         </div>
       </div>
 
@@ -1581,6 +1628,8 @@
       <div class="card">
         <div class="card-title"><span class="card-title-label">Hardware <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
         <div class="help-popover"><div class="help-popover-title">Hardware</div><p>Physical display controls: screen rotation, backlight level, and automatic screen off. All apply live and persist when you save.</p><p>Screen Rotation reorients the entire UI in 90-degree steps for sideways or upside-down mounting. Backlight sets the panel brightness, separate from the Text brightness control above. Turn off screen when idle blanks the backlight after a period with no touch; the firmware keeps running and the next touch wakes the screen.</p><p>Example: if the device is mounted with the USB port facing up, set Screen Rotation to 180 degrees so the dashboard reads right-side up.</p></div>
+        <div class="subsection">
+        <div class="subsection-title">Display</div>
         <div class="row stack-mobile">
           <div class="field">
             <label class="field-label">Screen Rotation</label>
@@ -1601,6 +1650,9 @@
             <div class="field-hint">Panel backlight level, separate from Text brightness above.</div>
           </div>
         </div>
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">Screen Sleep</div>
         <div class="toggle-row">
           <span class="toggle-label">Turn off screen when idle</span>
           <label class="toggle"><input type="checkbox" id="screen_sleep_enabled"><span class="toggle-track"></span></label>
@@ -1615,6 +1667,7 @@
             </div>
           </div>
         </div>
+        </div>
       </div>
     </div>
 
@@ -1625,7 +1678,8 @@
         <div class="card-title"><span class="card-title-label">Page Navigation <span id="pm_summary" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span> <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
         <div class="help-popover"><div class="help-popover-title">Page Navigation</div><p>The display chooses a page automatically. Swipe or tap any time to take over; it returns to its automatic choice after the stay-on-page time. This table shows what appears in each situation.</p><table class="help-scenario"><thead><tr><th>In this situation</th><th>You'll see</th></tr></thead><tbody><tr><td>Always show the Home Page is on</td><td>Your Home Page, always (swipes return after the stay-on-page time)</td></tr><tr><td>You just swiped or tapped</td><td>That page, held briefly</td></tr><tr><td>Auto Cycle is on</td><td>Pages rotate in turn</td></tr><tr><td>One NINA instance online</td><td>That instance's dashboard</td></tr><tr><td>Several instances online</td><td>Your Home instance if it is one of them, otherwise the Summary page</td></tr><tr><td>All instances offline, "Switch when no connections" on</td><td>Your chosen fallback page</td></tr><tr><td>All instances offline, that option off</td><td>Your Home Page</td></tr><tr><td>Quiet, nothing happening</td><td>Your Home Page</td></tr></tbody></table></div>
 
-        <div class="pn-section-label">Home Page</div>
+        <div class="subsection">
+        <div class="subsection-title">Home Page</div>
         <div class="pn-pill-grid" id="start-page-pills"></div>
         <div class="field-hint">The page the display settles on; when set to a NINA instance, the display also returns to that instance whenever it is online.</div>
 
@@ -1636,9 +1690,10 @@
           </div>
           <label class="toggle"><input type="checkbox" id="home_page_lock" onchange="toggleHomeLock();checkDirty()"><span class="toggle-track"></span></label>
         </div>
+        </div>
 
-        <div class="pn-divider"></div>
-
+        <div class="subsection">
+        <div class="subsection-title">Auto Cycle</div>
         <div class="toggle-row">
           <div>
             <span class="toggle-label">Auto Cycle</span>
@@ -1680,15 +1735,19 @@
             <div class="field-hint">Note: Image pages (GOES, Solar, and Custom URL) download a fresh image from their source each time the rotation reaches them, even if their refresh interval has not elapsed yet. Shorter rotation intervals mean more frequent downloads from those image servers.</div>
           </div>
         </div>
+        </div>
 
-        <div class="field" style="margin-top:12px">
+        <div class="subsection">
+        <div class="subsection-title">Manual Navigation</div>
+        <div class="field">
           <label class="field-label">Stay on selected page (seconds)</label>
           <input type="number" class="input" id="nav_grace_s" min="10" max="300" value="10">
           <div class="field-hint" style="margin-top:2px">After you swipe or tap to a page, the display keeps showing it for this long, then returns on its own to the page it would normally show (the connected instance, or your Home page).</div>
         </div>
+        </div>
 
-        <div class="pn-divider"></div>
-
+        <div class="subsection">
+        <div class="subsection-title">When Disconnected</div>
         <div class="toggle-row">
           <div>
             <span class="toggle-label">Switch page when no connections</span>
@@ -1709,11 +1768,14 @@
             <label class="toggle"><input type="checkbox" id="idle_indicator_enabled" onchange="checkDirty()"><span class="toggle-track"></span></label>
           </div>
         </div>
+        </div>
       </div>
 
       <div class="card">
         <div class="card-title"><span class="card-title-label">Notifications <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
         <div class="help-popover"><div class="help-popover-title">Notifications</div><p>Controls on-screen pop-up notifications, the border-flash alerts, and which event categories produce notifications. Notification duration sets how long a normal pop-up stays visible; error and warning pop-ups show for twice that time. Border flash alerts flash the screen edge when an RMS, HFR, or safety threshold is exceeded.</p><p>The aggregation window combines a burst of notifications that arrive close together into one, which reduces clutter during noisy events; set it to 0 to show every notification individually. The Event Categories toggles decide which kinds of events generate notifications at all; turning a category off suppresses its notifications.</p><p>Example: keep Error Events and Safety Events on, turn Focuser and Guider Events off to cut routine chatter, and set the aggregation window to 5 seconds so rapid sequence updates collapse into a single notification.</p></div>
+        <div class="subsection">
+        <div class="subsection-title">Alerts</div>
         <div class="field" style="margin-bottom:16px">
           <label class="field-label">Toast duration (s)</label>
           <input type="number" class="input" id="toast_duration" min="3" max="30" value="8">
@@ -1724,8 +1786,7 @@
           <label class="toggle"><input type="checkbox" id="alert_flash_enabled" checked><span class="toggle-track"></span></label>
         </div>
         <div class="field-hint" style="margin-top:4px">Flash the screen border when RMS, HFR, or safety thresholds are exceeded.</div>
-        <hr class="divider">
-        <div class="field">
+        <div class="field" style="margin-top:16px">
           <label class="field-label">Aggregation Window</label>
           <div class="slider-group">
             <input type="range" class="slider" id="toast_aggregation_window" min="0" max="15" value="5" oninput="updateAggregationLabel(this.value);checkDirty()">
@@ -1733,8 +1794,9 @@
           </div>
           <div class="field-hint">Combine rapid-fire notifications within this window. 0 = Off (show each individually).</div>
         </div>
-        <hr class="divider">
-        <div class="field-label" style="margin-bottom:12px">Event Categories</div>
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">Event Categories</div>
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
           <span class="toggle-label">Error Events</span>
           <label class="toggle"><input type="checkbox" id="notify_cat_8" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
@@ -1783,6 +1845,7 @@
           <span class="toggle-label">Flat Device Events</span>
           <label class="toggle"><input type="checkbox" id="notify_cat_11" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
         </div>
+        </div>
       </div>
     </div>
 
@@ -1824,14 +1887,18 @@
             <div class="wifi-scan-status" id="wifiScanStatus">Scanning for networks...</div>
           </div>
         </div>
+        <div class="subsection">
+        <div class="subsection-title">Device Name</div>
         <div class="field">
           <label class="field-label">Device hostname</label>
           <input type="text" class="input" id="hostname" placeholder="NINA-DISPLAY" maxlength="31" pattern="[A-Za-z0-9\-]+" style="max-width:320px">
           <div class="field-hint">Used on your network, as the setup WiFi network name, and as the Home Assistant device name.</div>
         </div>
-        <hr class="divider">
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">WiFi Networks</div>
         <div class="field">
-          <div class="field-label" style="margin-top:16px;font-weight:600;color:var(--accent)">Network 1 (Primary)</div>
+          <div class="field-label" style="font-weight:600;color:var(--accent)">Network 1 (Primary)</div>
           <label class="field-label">SSID</label>
           <input type="text" class="input" id="ssid1" placeholder="Network name">
           <div class="field-hint">Highest-priority network; the device connects to this one first when it is in range.</div>
@@ -1853,13 +1920,14 @@
           <label class="field-label">Password</label>
           <input type="password" class="input" id="pass3" placeholder="Enter new password to change">
         </div>
-        <hr class="divider">
         <div class="toggle-row">
           <span class="toggle-label">WiFi power save</span>
           <label class="toggle"><input type="checkbox" id="wifi_power_save" checked><span class="toggle-track"></span></label>
         </div>
         <div class="field-hint">Lets the WiFi radio rest between updates to save power. The device stays connected, so there is no reconnect delay.</div>
-        <hr class="divider">
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">Time</div>
         <div class="row stack-mobile">
           <div class="field">
             <label class="field-label">NTP server</label>
@@ -1894,6 +1962,7 @@
             </select>
             <div class="field-hint">Select your region so local time and daylight-saving transitions are applied to displayed times.</div>
           </div>
+        </div>
         </div>
         <div class="field-hint hint-center">Reboot required after changing hostname, WiFi, NTP, or timezone.</div>
       </div>
@@ -1955,7 +2024,9 @@
           <label class="toggle"><input type="checkbox" id="mqtt_enabled"><span class="toggle-track"></span></label>
         </div>
         <div class="field-hint" style="margin-top:4px">Turn on publishing of the device's own state and Home Assistant auto-discovery to the broker.</div>
-        <div class="field" style="margin-top:16px">
+        <div class="subsection">
+        <div class="subsection-title">Broker</div>
+        <div class="field">
           <label class="field-label">Broker host</label>
           <input type="text" class="input" id="mqtt_broker" placeholder="192.168.1.250">
           <div class="field-hint">IP address or hostname of your MQTT broker.</div>
@@ -1972,6 +2043,9 @@
             <div class="field-hint">Added to the front of every topic the device sends; use a unique value per device.</div>
           </div>
         </div>
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">Authentication</div>
         <div class="row stack-mobile">
           <div class="field">
             <label class="field-label">Username</label>
@@ -1983,6 +2057,7 @@
             <input type="password" class="input" id="mqtt_pass" placeholder="Password">
             <div class="field-hint">Leave blank if the broker allows anonymous connections.</div>
           </div>
+        </div>
         </div>
         <div class="field-hint hint-center">Reboot required after changing MQTT settings.</div>
       </div>
@@ -1998,7 +2073,8 @@
           <div class="fw-item"><div class="fw-label">Release</div><div class="fw-value" id="fw_git_tag">--</div></div>
           <div class="fw-item"><div class="fw-label">Commit</div><div class="fw-value" id="fw_git_sha">--</div></div>
         </div>
-        <hr class="divider">
+        <div class="subsection">
+        <div class="subsection-title">Automatic Updates</div>
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
           <span class="toggle-label">Check for updates on boot</span>
           <label class="toggle"><input type="checkbox" id="auto_update_check" checked><span class="toggle-track"></span></label>
@@ -2019,7 +2095,9 @@
           <div id="updateSummary" style="display:none;margin-top:8px;font-size:0.78rem;color:var(--text-muted);max-height:120px;overflow-y:auto;white-space:pre-wrap"></div>
           <button class="btn btn-primary" id="otaGithubBtn" style="display:none;margin-top:12px;width:100%" onclick="startGithubOta()">Install Update</button>
         </div>
-        <hr class="divider">
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">Manual Update</div>
         <div class="ota-bar">
           <label class="ota-label" id="otaFileLabel">
             Choose firmware .bin file
@@ -2032,15 +2110,21 @@
           <div class="progress-bg"><div id="otaProgressFill" class="progress-fill"></div></div>
           <div id="otaStatus" class="progress-status"></div>
         </div>
+        </div>
       </div>
 
       <div class="card">
         <div class="card-title"><span class="card-title-label">Device <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
         <div class="help-popover"><div class="help-popover-title">Device actions and modes</div><p>Reboot restarts the device and applies pending reboot-required settings. Factory Reset erases all saved settings and returns every setting to defaults, including WiFi, so plan to reconnect over the device's own setup WiFi network afterward.</p><p>Debug Mode enables extra performance and diagnostic info; leave it off for normal use. Demo Mode generates simulated session data so the dashboard can be used with no live NINA connection. Reboot the device for the change to fully take effect. Capture Screenshot pulls a JPEG of the current display.</p><p>Example: enable Demo Mode to preview the dashboard layout before any N.I.N.A. instance is online, then disable it to return to live data.</p></div>
+        <div class="subsection danger-zone">
+        <div class="subsection-title">Device Actions</div>
         <div class="row stack-mobile" style="margin-bottom:16px">
           <button class="btn btn-outline" onclick="saveAndReboot()" style="flex:1">Reboot</button>
           <button class="btn btn-danger" onclick="factoryReset()" style="flex:1">Factory Reset</button>
         </div>
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">Modes</div>
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
           <span class="toggle-label">Enable Debug Mode</span>
           <label class="toggle"><input type="checkbox" id="debug_mode"><span class="toggle-track"></span></label>
@@ -2051,6 +2135,7 @@
           <label class="toggle"><input type="checkbox" id="demo_mode"><span class="toggle-track"></span></label>
         </div>
         <div class="field-hint" style="margin-top:4px;margin-bottom:16px">Generates simulated astrophotography data. Reboot for the change to fully take effect.</div>
+        </div>
         <button class="btn btn-outline" id="ssBtn" onclick="takeScreenshot()">Capture Screenshot</button>
         <div id="ssContainer" style="display:none;margin-top:16px">
           <img id="ssImage" style="width:100%;border-radius:var(--radius-sm);border:1px solid var(--border)">
@@ -2060,6 +2145,8 @@
       <div class="card" id="adminPasswordCard">
         <div class="card-title"><span class="card-title-label">Authentication <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
         <div class="help-popover"><div class="help-popover-title">Web UI access control</div><p>Require login asks for a username and password before the web settings will open, and is on by default. When it is off, anyone on the network can reboot, factory-reset, flash, or reconfigure the device; secrets such as passwords, API keys, and tokens stay redacted in API responses either way.</p><p>The admin password defaults to changeme123!. To change it, enter the current password, then the new password twice (4 to 32 characters). Sign out clears your current browser session.</p><p>Example: keep Require login enabled and change the password from the default before exposing the device beyond your local network.</p></div>
+        <div class="subsection">
+        <div class="subsection-title">Access Control</div>
         <div class="toggle-row">
           <span class="toggle-label">Require login to access the web UI</span>
           <label class="toggle"><input type="checkbox" id="auth_enabled"><span class="toggle-track"></span></label>
@@ -2070,8 +2157,9 @@
         </p>
         <button class="btn btn-primary" style="margin-top:12px" onclick="saveAuthEnabled()">Save</button>
         <div id="auth_enabled_status" style="margin-top:10px;font-size:0.9em;"></div>
-        <hr style="border:0;border-top:1px solid var(--border);margin:16px 0">
-        <div style="font-weight:600;color:var(--text);text-transform:uppercase;letter-spacing:0.04em;font-size:0.8rem;margin-bottom:8px">Admin Password</div>
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">Admin Password</div>
         <p style="color:#888;font-size:0.85em;margin:2px 0 12px 0;">
           Default password is <code>changeme123!</code>. Change it now to secure this device's web interface.
         </p>
@@ -2092,7 +2180,7 @@
         </div>
         <button class="btn btn-primary" onclick="changeAdminPassword()">Save Password</button>
         <div id="admin_pw_status" style="margin-top:10px;font-size:0.9em;"></div>
-        <hr style="border:0;border-top:1px solid var(--border);margin:16px 0">
+        </div>
         <button class="btn" id="signOutBtn" onclick="signOut()">Sign out</button>
       </div>
     </div>
@@ -3219,20 +3307,29 @@
           '<div class="card node-config-card" id="node_card_'+i+'" data-node="'+i+'">'+
             '<div class="card-title"><span class="card-title-label">N.I.N.A. '+(i+1)+' <span id="node_card_hostname_'+i+'" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span> <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>'+
             '<div class="help-popover"><div class="help-popover-title">N.I.N.A. Node</div><p>Configures one N.I.N.A. instance: where to reach it, whether its notifications are muted, the color shown per filter, and the color bands applied to guider RMS and HFR values on its dashboard page.</p><p>The hostname is the only required field. The remaining settings change how this instance\'s data is colored and whether it shows pop-up notifications.</p><p>Example: enter the IP of your imaging PC, mute notifications on a secondary instance you are not watching, and set the RMS bands so values under 0.5 show green and values over 1.0 show red.</p></div>'+
+            '<div class="subsection">'+
+            '<div class="subsection-title">Connection</div>'+
             '<div class="field"><label class="field-label">Hostname / IP</label>'+
             '<input type="text" class="input" id="'+urlId+'" placeholder="'+placeholders[i]+'" oninput="updateNodeLabels()">'+
             '<div class="field-hint">Host or IP of the N.I.N.A. computer running the Advanced API plugin; the web page adds port 1888 and the /v2/api/ path before saving (e.g. 192.168.1.100 becomes http://192.168.1.100:1888/v2/api/).</div></div>'+
+            '</div>'+
+            '<div class="subsection">'+
+            '<div class="subsection-title">Notifications</div>'+
             '<div class="toggle-row" style="padding-bottom:0">'+
             '<span class="toggle-label">Mute Notifications</span>'+
             '<label class="toggle"><input type="checkbox" id="toast_instance_muted_'+i+'" onchange="checkDirty()"><span class="toggle-track"></span></label>'+
             '</div>'+
-            '<div class="field-hint" style="border-bottom:1px solid rgba(255,255,255,0.06);padding-bottom:14px;margin-bottom:14px">Suppresses all on-screen pop-up notifications from this instance, including connect and disconnect events.</div>'+
+            '<div class="field-hint">Suppresses all on-screen pop-up notifications from this instance, including connect and disconnect events.</div>'+
+            '</div>'+
+            '<div class="subsection">'+
+            '<div class="subsection-title">Colors &amp; Thresholds</div>'+
             '<div class="field"><label class="field-label">Filter colors</label>'+
             '<div id="filters_'+i+'" class="filter-grid"></div>'+
             '<div class="field-hint">Sets the color used for the exposure arc and labels when each filter is active; detected filters appear after the instance connects.</div></div>'+
             '<div class="row stack-mobile">'+
             mkThresholdSection('rms',i)+
             mkThresholdSection('hfr',i)+
+            '</div>'+
             '</div></div>'
         );
       }
