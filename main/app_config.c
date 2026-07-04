@@ -777,6 +777,7 @@ static void set_defaults(app_config_t *cfg) {
     cfg->idle_page_persistent = false;
     cfg->idle_indicator_enabled = true;
     cfg->nav_grace_s = 10;             // manual-nav grace window (10-300s, default 10)
+    cfg->home_page_lock = false;       // hold the Home Page regardless of connection state
 
     // Admin password default — change via web UI on first boot
     strcpy(cfg->admin_password, "changeme123!");
@@ -2258,6 +2259,24 @@ static void migrate_from_v47(const void *raw, size_t raw_size, app_config_t *cfg
     ESP_LOGI(TAG, "Migrated config from v47 to v%d", APP_CONFIG_VERSION);
 }
 
+/* --- v48 → v49 migration: appends the home_page_lock flag (always show the
+ *     Home Page regardless of connection state). Layout ahead is unchanged;
+ *     the new field is additive and defaults false (current behavior). --- */
+static void migrate_from_v48(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v48_t) ? raw_size : sizeof(app_config_v48_t);
+    memcpy(cfg, raw, copy);
+
+    /* home_page_lock is appended past the v48 snapshot, so memcpy(copy) never
+     * touches it. set_defaults() already cleared it, but set it explicitly for
+     * documentation (false = no lock = current behavior). */
+    cfg->home_page_lock = false;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v48 to v%d", APP_CONFIG_VERSION);
+}
+
 static void migrate_from_v36(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
@@ -3060,6 +3079,8 @@ static bool validate_config(app_config_t *cfg) {
     }
     if (cfg->nav_grace_s < 10)  { cfg->nav_grace_s = 10;  fixed = true; }
     if (cfg->nav_grace_s > 300) { cfg->nav_grace_s = 300; fixed = true; }
+    /* bool loaded from a raw NVS blob may hold any byte value; force canonical 0/1 */
+    cfg->home_page_lock = cfg->home_page_lock ? true : false;
     if (cfg->spotify_poll_interval_ms < 1000 || cfg->spotify_poll_interval_ms > 30000) {
         cfg->spotify_poll_interval_ms = 3000;
         fixed = true;
@@ -3120,6 +3141,12 @@ void app_config_init(void) {
             nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(handle);
         }
+    } else if (version_check == 48) {
+        /* v48 → v49: added home_page_lock (always show the Home Page) */
+        migrate_from_v48(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 47) {
         /* v47 → v48: added per-source Image Display mirror flips (goes/solar/custom v/hflip) */
         migrate_from_v47(raw, stored_size, &s_config);
@@ -3506,6 +3533,12 @@ app_config_t *app_config_get(void) {
 }
 
 void app_config_normalize_nav_exclusivity(app_config_t *cfg) {
+    /* Home-page-lock wins over both automatic modes: it holds the Home Page
+     * unconditionally, so slideshow and idle override are cleared while set. */
+    if (cfg->home_page_lock) {
+        cfg->auto_rotate_enabled = false;
+        cfg->idle_page_override_enabled = false;
+    }
     if (cfg->auto_rotate_enabled && cfg->idle_page_override_enabled) {
         cfg->idle_page_override_enabled = false;
     }

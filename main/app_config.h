@@ -46,7 +46,7 @@ extern "C" {
 #define ARP_ORDER_CAPACITY 16   /* size of auto_rotate_order2[] */
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 48
+#define APP_CONFIG_VERSION 49
 
 #define WIDGET_STYLE_COUNT 13
 
@@ -260,6 +260,9 @@ typedef struct {
     uint8_t  solar_hflip;    // Solar source: mirror left<->right (default 0)
     uint8_t  custom_vflip;   // Custom source: mirror top<->bottom (default 0)
     uint8_t  custom_hflip;   // Custom source: mirror left<->right (default 0)
+
+    // Added after v48 — must stay at end to preserve NVS binary compatibility
+    bool     home_page_lock; /* v49: hold the Home Page regardless of connection state */
 } app_config_t;
 
 /* ── Version 43 config struct — used only for NVS migration to v44 ────── */
@@ -841,6 +844,131 @@ _Static_assert(offsetof(app_config_t, goes_vflip) ==
  * appended uint8 block. */
 _Static_assert(sizeof(app_config_v46_t) == sizeof(app_config_v47_t),
                "app_config_v46_t snapshot drifted from app_config_t layout");
+
+/* ── Version 48 config struct — used only for NVS migration to v49 ────── */
+/* Byte-identical to app_config_t minus the trailing home_page_lock flag.   */
+/* Verbatim copy of the v48 struct body (v47 body + the 6 flip bytes).      */
+typedef struct {
+    uint32_t config_version;
+    char api_url[3][128];
+    char ntp_server[64];
+    char tz_string[64];
+    char filter_colors[3][512];
+    char rms_thresholds[3][256];
+    char hfr_thresholds[3][256];
+    int theme_index;
+    int brightness;
+    int color_brightness;
+    bool mqtt_enabled;
+    char mqtt_broker_url[128];
+    char mqtt_username[64];
+    char mqtt_password[64];
+    char mqtt_topic_prefix[64];
+    uint16_t mqtt_port;
+    int8_t   active_page_override;
+    bool     auto_rotate_enabled;
+    uint16_t auto_rotate_interval_s;
+    uint8_t  auto_rotate_effect;
+    bool     auto_rotate_skip_disconnected;
+    uint8_t  auto_rotate_pages;
+    uint8_t  update_rate_s;
+    uint8_t  graph_update_interval_s;
+    uint8_t  connection_timeout_s;
+    uint8_t  toast_duration_s;
+    bool     debug_mode;
+    bool     instance_enabled[3];
+    bool     screen_sleep_enabled;
+    uint16_t screen_sleep_timeout_s;
+    bool     alert_flash_enabled;
+    uint8_t  idle_poll_interval_s;
+    bool     wifi_power_save;
+    uint8_t  widget_style;
+    uint8_t  auto_update_check;
+    uint8_t  update_channel;
+    bool     deep_sleep_enabled;
+    uint32_t deep_sleep_wake_timer_s;
+    bool     deep_sleep_on_idle;
+    uint8_t  screen_rotation;
+    char     hostname[32];
+    char     allsky_hostname[128];
+    uint16_t allsky_update_interval_s;
+    float    allsky_dew_offset;
+    char     allsky_field_config[1536];
+    char     allsky_thresholds[1024];
+    bool     allsky_enabled;
+    bool     demo_mode;
+    bool     spotify_enabled;
+    char     spotify_client_id[64];
+    uint16_t spotify_poll_interval_ms;
+    bool     spotify_show_progress_bar;
+    uint8_t  spotify_overlay_timeout_s;
+    bool     spotify_minimal_mode;
+    bool     spotify_scroll_text;
+    wifi_network_t wifi_networks[3];
+    bool     spotify_overlay_visible;
+    uint8_t  auto_rotate_order[8];
+    uint8_t  toast_aggregation_window_s;
+    uint32_t toast_notify_mask;
+    bool     toast_instance_muted[3];
+    uint8_t  weather_provider;
+    char     weather_api_key[64];
+    float    weather_lat;
+    float    weather_lon;
+    char     weather_location_name[64];
+    uint16_t weather_poll_interval_s;
+    uint8_t  weather_units;
+    uint8_t  weather_time_format;
+    bool     idle_page_override_enabled;
+    int8_t   idle_page_override_target;
+    bool     idle_page_persistent;
+    bool     idle_indicator_enabled;
+    char     admin_password[33];
+    bool     auth_enabled;
+    bool     image_display_enabled;
+    bool     image_display_show_overlay;
+    char     goes_region[16];
+    uint16_t goes_update_interval_s;
+    uint8_t  image_display_source;
+    uint8_t  moon_bg_style;
+    float    moon_lat;
+    float    moon_lon;
+    uint8_t  solar_band;
+    bool     image_display_crop;
+    uint8_t  moon_drag_light_mode;
+    uint8_t  moon_flip_u;
+    uint8_t  moon_flip_v;
+    float    moon_roll_offset;
+    float    moon_yaw_offset;
+    float    moon_pitch_offset;
+    uint8_t  moon_north_up;
+    uint8_t  moon_spin_mode;
+    uint8_t  moon_spin_return_s;
+    uint8_t  crash_log_retention_days;
+    uint8_t  auto_rotate_pages_hi;
+    uint8_t  auto_rotate_order_ext;
+    uint8_t  goes_orientation;
+    uint8_t  solar_orientation;
+    uint16_t nav_grace_s;
+    char     custom_image_url[256];
+    uint8_t  custom_orientation;
+    uint16_t custom_update_interval_s;
+    uint8_t  auto_rotate_order2[16];
+    uint8_t  goes_vflip;
+    uint8_t  goes_hflip;
+    uint8_t  solar_vflip;
+    uint8_t  solar_hflip;
+    uint8_t  custom_vflip;
+    uint8_t  custom_hflip;
+} app_config_v48_t;
+
+/* home_page_lock (bool, align 1) appends directly after custom_hflip (uint8,
+ * align 1) with no padding, so offsetof == end-of-last-v48-field. Compare
+ * against the end of custom_hflip to catch any field inserted/reordered ahead
+ * of the new flag without tripping on tail padding. */
+_Static_assert(offsetof(app_config_t, home_page_lock) ==
+                   offsetof(app_config_v48_t, custom_hflip) +
+                       sizeof(((app_config_v48_t *)0)->custom_hflip),
+               "app_config_v48_t snapshot drifted from app_config_t layout");
 
 // v17 snapshot — AllSky fields without allsky_enabled
 typedef struct {
@@ -2625,8 +2753,9 @@ void app_config_get_hfr_threshold_config(int instance_index, threshold_config_t 
 void app_config_sync_filters(const char *filter_names[], int count, int instance_index);
 uint32_t app_config_apply_brightness(uint32_t color, int brightness);
 
-/** Enforce nav-mode exclusivity in-place: auto-rotate and idle-override cannot
- *  both be enabled. Auto-rotate wins the tie-break. Idempotent. */
+/** Enforce nav-mode exclusivity in-place: home-page-lock, auto-rotate, and
+ *  idle-override are mutually exclusive. Home-page-lock wins over both; between
+ *  auto-rotate and idle-override, auto-rotate wins the tie-break. Idempotent. */
 void app_config_normalize_nav_exclusivity(app_config_t *cfg);
 
 #ifdef __cplusplus
