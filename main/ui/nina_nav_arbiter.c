@@ -391,6 +391,16 @@ void nav_arbiter_resolve(int64_t now_ms) {
          * clobber the override back to the persisted default. -1 for non-image
          * targets, which correctly clears the override. */
         s_arb.pending_img_source = user_img_source;
+    } else if (c->home_page_lock) {
+        /* HOME LOCK rung: persisted always-show-Home-Page. Outranks slideshow,
+         * session, idle, and default; yields to modal freeze, the runtime pin,
+         * and the USER grace window above. Config normalization already clears
+         * auto_rotate_enabled while the lock is set, so ordering ahead of the
+         * slideshow rung is belt-and-suspenders. */
+        int8_t hs = -1;
+        desired = home_page_with_src(&hs);
+        s_arb.pending_img_source = hs;
+        src = NAV_SRC_DEFAULT;
     } else if (auto_rotate) {
         if (s_arb.slideshow_advance) {
             s_arb.slideshow_advance = false;

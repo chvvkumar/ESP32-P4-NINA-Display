@@ -202,6 +202,9 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
     // Navigation grace window (USER manual-nav hold time, seconds)
     cJSON_AddNumberToObject(obj, "nav_grace_s", cfg->nav_grace_s);
 
+    // Home Page lock (always show the Home Page regardless of connection state)
+    cJSON_AddBoolToObject(obj, "home_page_lock", cfg->home_page_lock);
+
     // Authentication
     cJSON_AddBoolToObject(obj, "auth_enabled", cfg->auth_enabled);
 
@@ -404,6 +407,7 @@ static const backup_field_t s_backup_fields[] = {
     {"idle_page_override_target", "Idle Override Target",   "Behavior", false, false},
     {"idle_indicator_enabled",   "Idle Indicator Enabled", "Behavior", false, false},
     {"nav_grace_s",              "Manual Nav Grace (s)",   "Behavior", false, false},
+    {"home_page_lock",           "Always show Home Page",  "Behavior", false, false},
     {"auth_enabled",             "Authentication Enabled", "System",   false, false},
 
     /* Sensitive */
@@ -1348,6 +1352,10 @@ static app_config_t *parse_config_from_json(cJSON *root)
         if (v > 300) v = 300;
         cfg->nav_grace_s = (uint16_t)v;
     }
+
+    // Home Page lock (always show the Home Page). app_config_save() normalizes
+    // exclusivity: the lock clears auto-rotate and idle override when set.
+    JSON_TO_BOOL(root, "home_page_lock", cfg->home_page_lock);
 
     // Authentication toggle
     JSON_TO_BOOL(root, "auth_enabled", cfg->auth_enabled);

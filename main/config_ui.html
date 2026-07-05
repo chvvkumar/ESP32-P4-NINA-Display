@@ -109,6 +109,26 @@
     /* Non-collapsible cards (e.g. Logs): no chevron, no pointer affordance */
     .card.nocollapse > .card-title { cursor: default; }
     .card.nocollapse > .card-title::after { display: none; }
+    /* Layer-2 in-flow card: a subsection nested inside a .card (layer 1).
+       Must be a direct child of .card so the collapse rule hides it. */
+    .subsection {
+      background: var(--elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 14px 16px;
+      margin-top: 14px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+    /* Uniform 14px above every subsection, so cards that mix direct-child
+       controls (a top toggle, an info grid) with subsections space correctly. */
+    .subsection-title {
+      font-size: 0.72rem; font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.06em;
+      margin-bottom: 10px;
+    }
+    /* Danger-zone subsection: neutral surface, danger-tinted border only (no hue theme change) */
+    .subsection.danger-zone { border-color: rgba(248, 113, 113, 0.35); }
     /* Logs tab: break out wider than the 960px content column, and fit the window
        as a flex column so only the viewport scrolls (not the page). */
     #tab-logs .card {
@@ -707,7 +727,8 @@
     .fw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-bottom: 24px; }
     .fw-item {
       background: var(--elevated); padding: 12px 14px;
-      border-radius: 10px; border: 1px solid var(--border);
+      border-radius: var(--radius-sm); border: 1px solid var(--border);
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.05);
       transition: border-color 0.2s;
     }
     .fw-item:hover { border-color: var(--border-em); }
@@ -799,6 +820,8 @@
       #logsView.logs-view { height: 60vh; min-height: 300px; }
       #crashlogView.logs-view { height: auto; max-height: 60vh; }
 
+      /* Subsections: tighter padding on narrow screens */
+      .subsection { padding: 10px 12px; }
       /* Card titles */
       .card-title { font-size: 0.9rem; }
       /* Field labels */
@@ -998,6 +1021,41 @@
       </div>
 
       <div id="node-cards"></div>
+
+      <div class="card">
+        <div class="card-title"><span class="card-title-label">Polling &amp; Connectivity <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Polling and Connectivity</div><p>Sets how often the device contacts the NINA API and how patient it is before declaring an instance offline. Data update rate is the base polling interval for the active page; faster values refresh the display sooner but generate more API traffic. Graph update rate controls how often the RMS and HFR history graphs add a point.</p><p>Connection timeout is how long a request waits for a response before that instance is marked offline. Idle poll interval is the slower, occasional check used to re-test an offline instance while you are viewing a non-NINA page, which avoids contacting an instance that is not running too often.</p><p>Example: set Data update rate to 2 seconds for a responsive display, raise Connection timeout to 10 seconds on a slow or distant network, and leave Idle poll interval at 30 seconds.</p></div>
+        <div class="subsection">
+          <div class="subsection-title">Update Rates</div>
+          <div class="row stack-mobile">
+            <div class="field">
+              <label class="field-label">Data update rate (s)</label>
+              <input type="number" class="input" id="update_rate" min="1" max="10" value="2">
+              <div class="field-hint">Base polling interval for the active page, from 1 to 10 seconds; lower is more responsive but adds API traffic.</div>
+            </div>
+            <div class="field">
+              <label class="field-label">Graph update rate (s)</label>
+              <input type="number" class="input" id="graph_interval" min="2" max="30" value="5">
+              <div class="field-hint">How often the RMS and HFR history graphs record a new data point, from 2 to 30 seconds.</div>
+            </div>
+          </div>
+        </div>
+        <div class="subsection">
+          <div class="subsection-title">Connectivity</div>
+          <div class="row stack-mobile">
+            <div class="field">
+              <label class="field-label">Connection timeout (s)</label>
+              <input type="number" class="input" id="connection_timeout" min="2" max="30" value="6">
+              <div class="field-hint">Seconds without response before a NINA instance is offline</div>
+            </div>
+            <div class="field">
+              <label class="field-label">Idle poll interval (s)</label>
+              <input type="number" class="input" id="idle_poll_interval" min="5" max="120" value="30">
+              <div class="field-hint">How often an offline instance is re-checked while you are on a non-NINA page</div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- ==================== TAB 5: ALLSKY ==================== -->
@@ -1012,11 +1070,16 @@
         </div>
         <div class="field-hint">Turns on the AllSky page and starts reading AllSky data; off hides the page and stops reading.</div>
         <div id="allskyConnectionFields">
-        <div class="field" style="margin-top:16px">
-          <label class="field-label">AllSky Hostname</label>
-          <input type="text" class="input" id="allskyHostname" placeholder="allskypi5.lan:8080">
-          <div class="field-hint">Host:port of the AllSky API (e.g., allskypi5.lan:8080)</div>
+        <div class="subsection">
+          <div class="subsection-title">Server</div>
+          <div class="field">
+            <label class="field-label">AllSky Hostname</label>
+            <input type="text" class="input" id="allskyHostname" placeholder="allskypi5.lan:8080">
+            <div class="field-hint">Host:port of the AllSky API (e.g., allskypi5.lan:8080)</div>
+          </div>
         </div>
+        <div class="subsection">
+          <div class="subsection-title">Reading</div>
         <div class="row stack-mobile">
           <div class="field">
             <label class="field-label">Update Interval</label>
@@ -1039,6 +1102,7 @@
           </div>
         </div>
         </div>
+        </div>
       </div>
 
       <div class="card" id="allskyFieldMappingsCard">
@@ -1046,11 +1110,17 @@
         <div class="help-popover"><div class="help-popover-title">AllSky Field Mappings</div><p>Maps values from the AllSky API JSON to the four display quadrants: Thermal, Sky Quality, Ambient, and Power. Each quadrant has a main value, two sub values, and two status dots, and each is filled by entering the JSON key path for that value.</p><p>Use Fetch JSON from AllSky to load the live response, click a Key Path input to make it active, then click Use on a value to copy its path in. Value fields that show a unit also have color controls that set the gradient range between their low and high bounds.</p><p>Example: map the Thermal main value to data.cpu_temp with a 0 to 80 range so the reading shifts from blue toward red as the camera warms.</p></div>
         <div class="field-hint" style="margin-bottom:16px">Configure which AllSky API JSON values appear in each display quadrant. Click a value's path input, then click "Use" on a value to fill it. Use the color controls to set gradient ranges per field.</div>
 
-        <button onclick="fetchAllSkyJson()" class="btn btn-primary" id="fetchJsonBtn" style="width:100%;margin-bottom:16px">Fetch JSON from AllSky</button>
+        <div class="subsection">
+          <div class="subsection-title">Import from AllSky</div>
+          <button onclick="fetchAllSkyJson()" class="btn btn-primary" id="fetchJsonBtn" style="width:100%;margin-bottom:16px">Fetch JSON from AllSky</button>
 
-        <div id="allskyJsonTree" style="display:none; max-height:300px; overflow-y:auto; margin:0 0 16px; padding:12px; background:rgba(0,0,0,0.25); border-radius:var(--radius-sm); border:1px solid rgba(255,255,255,0.06); font-family:'SF Mono',Monaco,Consolas,monospace; font-size:0.75rem; line-height:1.6;"></div>
+          <div id="allskyJsonTree" style="display:none; max-height:300px; overflow-y:auto; margin:0; padding:12px; background:rgba(0,0,0,0.25); border-radius:var(--radius-sm); border:1px solid rgba(255,255,255,0.06); font-family:'SF Mono',Monaco,Consolas,monospace; font-size:0.75rem; line-height:1.6;"></div>
+        </div>
 
-        <div id="allskyFieldMappings"></div>
+        <div class="subsection">
+          <div class="subsection-title">Quadrant Mappings</div>
+          <div id="allskyFieldMappings"></div>
+        </div>
       </div>
 
     </div>
@@ -1059,8 +1129,10 @@
     <div id="tab-clock" class="tab-panel">
 
       <div class="card">
-        <div class="card-title"><span class="card-title-label">Clock &amp; Weather <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
-        <div class="help-popover"><div class="help-popover-title">Clock and weather data</div><p>Drives the weather overlay shown on the Clock page and sets the timezone used to format the on-screen clock. Pick a provider, supply credentials if the provider needs them, then set a location either by city lookup or by entering latitude and longitude directly. Open-Meteo needs no API key; OpenWeatherMap and Weather Underground each require a key.</p><p>The timezone controls only how the clock and times are displayed, it does not change the actual moment. Example: selecting America/Denver shows 03:12 UTC as 21:12 the previous evening. The Time Format option switches the same time between 14:30 and 2:30 PM.</p><p>Example: choose Open-Meteo, run Look up for "Denver", accept a result to fill latitude 39.74 and longitude -104.99, set units to degrees C, and the Clock page shows local conditions refreshed on the chosen interval.</p></div>
+        <div class="card-title"><span class="card-title-label">Weather <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Weather</div><p>Drives the weather overlay shown on the Clock page. Pick a provider and supply an API key if the provider needs one. Open-Meteo needs no key; OpenWeatherMap and Weather Underground each require a key. The forecast uses the device location set on the System tab.</p><p>The Time Format option switches the clock between 14:30 and 2:30 PM. Temperature Units switches all weather readings between degrees F and degrees C. Update Interval sets how often the device fetches new weather data.</p><p>Example: choose Open-Meteo, set units to degrees C, and the Clock page shows local conditions refreshed on the chosen interval.</p></div>
+        <div class="subsection">
+        <div class="subsection-title">Provider</div>
         <div class="field">
           <label class="field-label">Weather Provider</label>
           <select class="input" id="weather_provider" onchange="toggleWeatherApiKey();checkDirty()">
@@ -1078,37 +1150,19 @@
             <span id="wunderground_link" style="display:none">Get an API key at <a href="https://www.wunderground.com/member/api-keys" target="_blank" rel="noopener" style="color:#7eb8da">wunderground.com</a></span>
           </div>
         </div>
-        <div class="field" id="weather_city_lookup_field">
-          <label class="field-label">Location</label>
-          <div style="display:flex;gap:10px">
-            <input type="text" class="input" id="weather_location_search" placeholder="Search city name..." style="flex:1">
-            <button class="btn btn-outline" onclick="lookupCity()" type="button">Look up</button>
-          </div>
-          <div id="city_results" style="display:none;margin-top:6px;background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.08);border-radius:10px;max-height:200px;overflow-y:auto"></div>
-          <div class="field-hint">Type a city name and select Look up to auto-fill latitude, longitude, and location name.</div>
-        </div>
         <div class="field" id="weather_location_name_field">
           <label class="field-label">Location Name</label>
           <input type="text" class="input" id="weather_location_name" readonly placeholder="Auto-filled by lookup" style="opacity:0.7">
-          <div class="field-hint">Read-only; set automatically by the city lookup above.</div>
+          <div class="field-hint">Read-only; set automatically by the city lookup on the System tab.</div>
         </div>
         <div class="field" id="weather_station_id_field" style="display:none">
           <label class="field-label">Station ID</label>
           <input type="text" class="input" id="weather_station_id" placeholder="e.g. KMOOFAL42">
           <div class="field-hint">Personal Weather Station ID for Weather Underground</div>
         </div>
-        <div class="row stack-mobile">
-          <div class="field">
-            <label class="field-label">Latitude</label>
-            <input type="number" class="input" id="weather_lat" step="0.0001" placeholder="0.0000">
-            <div class="field-hint">Decimal degrees, positive north (e.g. 39.7392); needed when not using city lookup.</div>
-          </div>
-          <div class="field">
-            <label class="field-label">Longitude</label>
-            <input type="number" class="input" id="weather_lon" step="0.0001" placeholder="0.0000">
-            <div class="field-hint">Decimal degrees, positive east, negative west (e.g. -104.9903).</div>
-          </div>
         </div>
+        <div class="subsection">
+        <div class="subsection-title">Display Options</div>
         <div class="row stack-mobile">
           <div class="field">
             <label class="field-label">Temperature Units</label>
@@ -1140,10 +1194,9 @@
             <div class="field-hint">How often the device fetches new weather data from the provider.</div>
           </div>
           <div class="field">
-            <label class="field-label">Timezone</label>
-            <select class="input" id="tz_string"></select>
-            <div class="field-hint">Display timezone for the clock; underlying time stays UTC, only the shown value changes.</div>
+            <div class="field-hint">The clock uses the time zone and NTP server configured on the System tab.</div>
           </div>
+        </div>
         </div>
       </div>
 
@@ -1153,32 +1206,49 @@
     <div id="tab-spotify" class="tab-panel">
 
       <div class="card">
-        <div class="card-title"><span class="card-title-label">Connection <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
-        <div class="help-popover"><div class="help-popover-title">Spotify connection and player layout</div><p>Enables the Spotify page and controls how the immersive player renders. After creating a Spotify app and pasting the Client ID, complete the one-time login in the Account card below. The numbered Setup Instructions box walks through registering the redirect URI and pasting the callback URL.</p><p>Poll interval sets how often the device queries Spotify for the current track and playback position. Lower values update the progress bar and track changes faster but make more API calls. Example: 3000 ms updates roughly every 3 seconds; 10000 ms reduces traffic at the cost of a laggier progress bar.</p><p>Minimal Mode replaces the full player layout with centered track text, dimming the album art to a background and hiding the transport controls. Show Overlay forces the playback overlay visible, the same as tapping the album art; Overlay Timeout sets how long it stays before auto-hiding, with 0 keeping it on permanently.</p></div>
-        <div style="background:rgba(var(--accent-rgb),0.08);border:1px solid rgba(var(--accent-rgb),0.2);border-radius:10px;padding:14px 16px;margin-bottom:16px;font-size:0.82rem;line-height:1.6;color:#d4d4d8">
-          <strong style="color:rgba(var(--accent-rgb),1)">Setup Instructions</strong>
-          <ol style="margin:8px 0 0;padding-left:20px">
-            <li>Go to <a href="https://developer.spotify.com" target="_blank" rel="noopener" style="color:rgba(var(--accent-rgb),1);text-decoration:underline">developer.spotify.com</a> and create a free app</li>
-            <li>Set the redirect URI in your Spotify app to: <code style="background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.78rem">http://127.0.0.1:8000/callback</code></li>
-            <li>Copy the <strong>Client ID</strong> from your Spotify app and paste it below</li>
-            <li>Click <strong>Save</strong> at the bottom of this page</li>
-            <li>In the <strong>Account</strong> section below, click <strong>Login with Spotify</strong> and approve access in the popup</li>
-            <li>After approving, Spotify redirects to <code style="background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.78rem">http://127.0.0.1:8000/callback?code=...</code> and your browser shows a "can't connect" / "site can't be reached" page. This is expected.</li>
-            <li>Copy the <strong>full URL</strong> from that page's address bar (it must include the <code style="background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.78rem">?code=</code> part)</li>
-            <li>Paste it into the <strong>Redirect URL</strong> field in the Account section and click <strong>Submit</strong></li>
-          </ol>
-        </div>
+        <div class="card-title"><span class="card-title-label">Account Setup <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Account Setup</div><p>Connects the device to your Spotify account so the player page can show what is playing. Create a free app on the Spotify developer site, paste its Client ID here, then log in. The Client ID is saved to the device automatically when you select Login with Spotify, so no separate save is needed.</p><p>After you approve access, the browser lands on a page that cannot load. That is expected: copy the full address from that page, including the ?code= part, and paste it into the Redirect URL field. The device stores the resulting tokens, so login is a one-time step per account. Use Logout to clear the stored tokens.</p></div>
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
           <span class="toggle-label">Enable Spotify</span>
           <label class="toggle"><input type="checkbox" id="spotify_enabled" onchange="updateSpotifyEnabledUI()"><span class="toggle-track"></span></label>
         </div>
         <div class="field-hint">Turns the Spotify page on and starts checking your playback.</div>
         <div id="spotifyConnectionFields">
-          <div class="field" style="margin-top:16px">
+          <div class="field-label" style="margin-top:16px;font-weight:600;color:var(--accent)">Step 1: Create a Spotify app</div>
+          <div class="field-hint">Go to <a href="https://developer.spotify.com" target="_blank" rel="noopener" style="color:rgba(var(--accent-rgb),1);text-decoration:underline">developer.spotify.com</a>, create a free app, and set its Redirect URI to <code style="background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.78rem">http://127.0.0.1:8000/callback</code></div>
+          <div class="field-label" style="margin-top:16px;font-weight:600;color:var(--accent)">Step 2: Enter the Client ID</div>
+          <div class="field">
             <label class="field-label">Client ID</label>
             <input type="text" class="input" id="spotifyClientId" placeholder="e.g. a1b2c3d4e5f6...">
-            <div class="field-hint">From your app at <a href="https://developer.spotify.com" target="_blank" rel="noopener" style="color:var(--text-hint)">developer.spotify.com</a></div>
+            <div class="field-hint">Saved to the device automatically when you select Login with Spotify below. No separate save needed.</div>
           </div>
+          <div id="spotifyAccountCard">
+            <div class="field-label" style="margin-top:16px;font-weight:600;color:var(--accent)">Step 3: Log in</div>
+            <div class="field">
+              <label class="field-label">Status</label>
+              <div id="spotifyStatus" style="font-size:0.875rem;color:var(--text-hint);margin-bottom:12px">Checking...</div>
+            </div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+              <button class="btn btn-primary" id="spotifyLoginBtn" onclick="spotifyLogin()" style="flex:1;min-width:120px">Login with Spotify</button>
+              <button class="btn btn-danger" id="spotifyLogoutBtn" onclick="spotifyLogout()" style="flex:1;min-width:120px;display:none">Logout</button>
+            </div>
+            <div id="spotifyPasteDiv" style="display:none;margin-top:16px">
+              <p style="font-size:0.82rem;color:#a1a1aa;margin:0 0 10px;line-height:1.5">After approving in Spotify, you'll see a "can't connect" page. Copy the <strong>full URL</strong> from the address bar and paste it below:</p>
+              <div class="field" style="margin-bottom:10px">
+                <label class="field-label">Redirect URL</label>
+                <input type="text" class="input" id="spotifyPasteUrl" placeholder="http://127.0.0.1:8000/callback?code=..." style="font-size:0.92rem;min-height:52px;border:1px solid rgba(var(--accent-rgb),0.35);background:rgba(0,0,0,0.45)">
+                <div class="field-hint">Paste the entire callback URL from the address bar; it must contain the ?code= portion.</div>
+              </div>
+              <button class="btn btn-primary" id="spotifySubmitBtn" onclick="spotifySubmitCallback()" style="width:100%">Submit</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" id="spotifyPlayerCard">
+        <div class="card-title"><span class="card-title-label">Player Options <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Player Options</div><p>Controls how the Spotify player page looks and how often it refreshes. Poll Interval sets how often the device checks Spotify for the current track and playback position; lower values track changes faster but make more API calls.</p><p>Minimal Mode shows centered track text with the album art dimmed to a background and the transport controls hidden. Show Overlay keeps the playback overlay visible, the same as tapping the album art; Overlay Timeout sets how long it stays before auto-hiding, with 0 keeping it on permanently.</p></div>
+        <div id="spotifyPlayerOptionsFields">
           <div class="field">
             <label class="field-label">Poll Interval (ms)</label>
             <input type="number" class="input" id="spotifyPollInterval" min="1000" max="30000" step="500" value="3000">
@@ -1209,28 +1279,6 @@
             <input type="number" class="input" id="spotifyOverlayTimeout" min="0" max="60" step="1" value="5">
             <div class="field-hint">Seconds before playback overlay auto-hides (0 = always visible)</div>
           </div>
-        </div>
-      </div>
-
-      <div class="card" id="spotifyAccountCard">
-        <div class="card-title"><span class="card-title-label">Account <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
-        <div class="help-popover"><div class="help-popover-title">Spotify account login</div><p>Completes the OAuth login that authorizes the device to read your playback. Select Login with Spotify, approve access in the popup, then copy the full redirect URL from the resulting "site can't be reached" page and paste it into the Redirect URL field. The device exchanges that code for tokens stored on-device, so this is a one-time step per account.</p><p>Status shows whether the device currently holds valid credentials. Use Logout to clear the stored tokens. Example: after a successful submit, Status changes from "Checking..." to a logged-in state and the Logout button appears.</p></div>
-        <div class="field">
-          <label class="field-label">Status</label>
-          <div id="spotifyStatus" style="font-size:0.875rem;color:var(--text-hint);margin-bottom:12px">Checking...</div>
-        </div>
-        <div style="display:flex;gap:10px;flex-wrap:wrap">
-          <button class="btn btn-primary" id="spotifyLoginBtn" onclick="spotifyLogin()" style="flex:1;min-width:120px">Login with Spotify</button>
-          <button class="btn btn-danger" id="spotifyLogoutBtn" onclick="spotifyLogout()" style="flex:1;min-width:120px;display:none">Logout</button>
-        </div>
-        <div id="spotifyPasteDiv" style="display:none;margin-top:16px">
-          <p style="font-size:0.82rem;color:#a1a1aa;margin:0 0 10px;line-height:1.5">After approving in Spotify, you'll see a "can't connect" page. Copy the <strong>full URL</strong> from the address bar and paste it below:</p>
-          <div class="field" style="margin-bottom:10px">
-            <label class="field-label">Redirect URL</label>
-            <input type="text" class="input" id="spotifyPasteUrl" placeholder="http://127.0.0.1:8000/callback?code=..." style="font-size:0.92rem;min-height:52px;border:1px solid rgba(var(--accent-rgb),0.35);background:rgba(0,0,0,0.45)">
-            <div class="field-hint">Paste the entire callback URL from the address bar; it must contain the ?code= portion.</div>
-          </div>
-          <button class="btn btn-primary" id="spotifySubmitBtn" onclick="spotifySubmitCallback()" style="width:100%">Submit</button>
         </div>
       </div>
 
@@ -1361,15 +1409,7 @@
             </select>
             <div class="field-hint">Sets what renders behind the moon disc (plain black, starfield, soft glow, or both).</div>
           </div>
-          <div class="field">
-            <label class="field-label">Latitude</label>
-            <input class="input" id="moonLat" type="number" step="0.0001" placeholder="e.g. 40.7128" onchange="applyImageDisplay();checkDirty()">
-          </div>
-          <div class="field">
-            <label class="field-label">Longitude</label>
-            <input class="input" id="moonLon" type="number" step="0.0001" placeholder="e.g. -74.0060" onchange="applyImageDisplay();checkDirty()">
-            <div class="field-hint" id="moonLocHint">Set your location for accurate moon orientation. Prefilled from Weather when available.</div>
-          </div>
+          <div class="field-hint" style="margin-top:12px">The moon view uses the device location set on the System tab.</div>
           <div class="field">
             <label class="field-label">Moon drag lighting</label>
             <select class="input" id="moonDragLight" onchange="applyImageDisplay();checkDirty()">
@@ -1381,7 +1421,7 @@
           </div>
           <div class="card">
             <div class="card-title"><span class="card-title-label">Moon Orientation <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
-          <div class="help-popover"><div class="help-popover-title">Moon appearance and orientation</div><p>Corrects how the rendered moon is oriented and how it responds to dragging. Keep Moon upright (north-up) holds the moon's north pole at the top like phone apps and NASA imagery; turning it off tilts the disc to match how the real moon sits in your local sky as it moves. Set the Latitude and Longitude above for an accurate sky-tilt and terminator.</p><p>Flip horizontal (U) and Flip vertical (V) mirror the image for displays or mounts that reverse it. The Roll, Yaw, and Pitch offset sliders nudge the moon from its standard orientation, and Reset orientation returns them to that standard view.</p><p>Free-spin mode changes drag behavior. Off, the disc rubber-bands back to the live sky as soon as you release it. On, the disc holds your spin and eases back after the Return to live view timeout (3 to 60 seconds). Example: enable Free-spin, set the return to 15s, drag to inspect the far limb, and the view holds for 15 seconds before returning to live.</p></div>
+          <div class="help-popover"><div class="help-popover-title">Moon appearance and orientation</div><p>Corrects how the rendered moon is oriented and how it responds to dragging. Keep Moon upright (north-up) holds the moon's north pole at the top like phone apps and NASA imagery; turning it off tilts the disc to match how the real moon sits in your local sky as it moves. The device location set on the System tab is used for an accurate sky-tilt and terminator.</p><p>Flip horizontal (U) and Flip vertical (V) mirror the image for displays or mounts that reverse it. The Roll, Yaw, and Pitch offset sliders nudge the moon from its standard orientation, and Reset orientation returns them to that standard view.</p><p>Free-spin mode changes drag behavior. Off, the disc rubber-bands back to the live sky as soon as you release it. On, the disc holds your spin and eases back after the Return to live view timeout (3 to 60 seconds). Example: enable Free-spin, set the return to 15s, drag to inspect the far limb, and the view holds for 15 seconds before returning to live.</p></div>
           <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
             <span class="toggle-label">Keep Moon upright (north-up)</span>
             <label class="toggle"><input type="checkbox" id="moon_north_up" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
@@ -1540,7 +1580,7 @@
 
       <div class="card">
         <div class="card-title"><span class="card-title-label">Appearance <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
-        <div class="help-popover"><div class="help-popover-title">Appearance</div><p>Controls the look of the dashboard: the color theme, the visual style applied to widget panels, and the brightness of on-screen text. All three apply live as you change them and persist when you save.</p><p>Theme sets the color palette across every page. Widget Style changes only how the dashboard panels are drawn (borders, glass, inset, and similar). Text brightness scales the foreground text color, separate from the backlight on the Behavior tab.</p><p>Example: pick the Red Night theme to preserve dark adaptation at the telescope, then lower Text brightness to 50% if labels are still too bright.</p></div>
+        <div class="help-popover"><div class="help-popover-title">Appearance</div><p>Controls the look of the dashboard: the color theme, the visual style applied to widget panels, and the brightness of on-screen text. All three apply live as you change them and persist when you save.</p><p>Theme sets the color palette across every page. Widget Style changes only how the dashboard panels are drawn (borders, glass, inset, and similar). Text brightness scales the foreground text color, separate from the backlight in the Hardware card below.</p><p>Example: pick the Red Night theme to preserve dark adaptation at the telescope, then lower Text brightness to 50% if labels are still too bright.</p></div>
         <div class="field">
           <label class="field-label">Theme</label>
           <select class="input" id="theme_select" onchange="setTheme(this.value)">
@@ -1581,20 +1621,79 @@
             <input type="range" class="slider" id="color_brightness" min="0" max="100" value="80" oninput="setColorBrightness(this.value)">
             <span class="slider-val" id="color_brightness_val">80%</span>
           </div>
-          <div class="field-hint">Scales on-screen text brightness, independent of the backlight set on the Behavior tab.</div>
+          <div class="field-hint">Scales on-screen text brightness, independent of the screen backlight below.</div>
         </div>
       </div>
 
       <div class="card">
-        <div class="card-title"><span class="card-title-label">Page Navigation <span id="pm_summary" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span> <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
-        <div class="help-popover"><div class="help-popover-title">Page Navigation</div><p>The display chooses a page automatically. Swipe or tap any time to take over; it returns to its automatic choice after the stay-on-page time. This table shows what appears in each situation.</p><table class="help-scenario"><thead><tr><th>In this situation</th><th>You'll see</th></tr></thead><tbody><tr><td>You just swiped or tapped</td><td>That page, held briefly</td></tr><tr><td>Auto Cycle is on</td><td>Pages rotate in turn</td></tr><tr><td>One NINA instance online</td><td>That instance's dashboard</td></tr><tr><td>Several instances online</td><td>Your Home instance if it is one of them, otherwise the Summary page</td></tr><tr><td>All instances offline, "Switch when no connections" on</td><td>Your chosen fallback page</td></tr><tr><td>All instances offline, that option off</td><td>Your Home Page</td></tr><tr><td>Quiet, nothing happening</td><td>Your Home Page</td></tr></tbody></table></div>
+        <div class="card-title"><span class="card-title-label">Hardware <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Hardware</div><p>Physical display controls: screen rotation, backlight level, and automatic screen off. All apply live and persist when you save.</p><p>Screen Rotation reorients the entire UI in 90-degree steps for sideways or upside-down mounting. Backlight sets the panel brightness, separate from the Text brightness control above. Turn off screen when idle blanks the backlight after a period with no touch; the firmware keeps running and the next touch wakes the screen.</p><p>Example: if the device is mounted with the USB port facing up, set Screen Rotation to 180 degrees so the dashboard reads right-side up.</p></div>
+        <div class="subsection">
+        <div class="subsection-title">Display</div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Screen Rotation</label>
+            <select class="input" id="screen_rotation_select" onchange="setScreenRotation(this.value)">
+              <option value="0">0° (Default)</option>
+              <option value="1">90°</option>
+              <option value="2">180°</option>
+              <option value="3">270°</option>
+            </select>
+            <div class="field-hint">Rotates the whole UI in 90-degree steps to match the physical mounting.</div>
+          </div>
+          <div class="field">
+            <label class="field-label">Backlight</label>
+            <div class="slider-group">
+              <input type="range" class="slider" id="brightness" min="0" max="100" value="80" oninput="setBrightness(this.value)">
+              <span class="slider-val" id="brightness_val">80%</span>
+            </div>
+            <div class="field-hint">Panel backlight level, separate from Text brightness above.</div>
+          </div>
+        </div>
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">Screen Sleep</div>
+        <div class="toggle-row">
+          <span class="toggle-label">Turn off screen when idle</span>
+          <label class="toggle"><input type="checkbox" id="screen_sleep_enabled"><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint" style="margin-top:4px">Blanks the backlight after the timeout while the firmware keeps running; touch wakes the screen.</div>
+        <div id="screen_sleep_details" style="margin-top:16px">
+          <div class="row stack-mobile">
+            <div class="field">
+              <label class="field-label">Timeout (seconds)</label>
+              <input type="number" class="input" id="screen_sleep_timeout" min="10" max="3600" value="60">
+              <div class="field-hint">Idle time with no touch before the screen blanks, from 10 to 3600 seconds.</div>
+            </div>
+          </div>
+        </div>
+        </div>
+      </div>
+    </div>
 
-        <div class="pn-section-label">Home Page</div>
+    <!-- ==================== TAB 3: BEHAVIOR & ALERTS ==================== -->
+    <div id="tab-behavior" class="tab-panel">
+
+      <div class="card">
+        <div class="card-title"><span class="card-title-label">Page Navigation <span id="pm_summary" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span> <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Page Navigation</div><p>The display chooses a page automatically. Swipe or tap any time to take over; it returns to its automatic choice after the stay-on-page time. This table shows what appears in each situation.</p><table class="help-scenario"><thead><tr><th>In this situation</th><th>You'll see</th></tr></thead><tbody><tr><td>Always show the Home Page is on</td><td>Your Home Page, always (swipes return after the stay-on-page time)</td></tr><tr><td>You just swiped or tapped</td><td>That page, held briefly</td></tr><tr><td>Auto Cycle is on</td><td>Pages rotate in turn</td></tr><tr><td>One NINA instance online</td><td>That instance's dashboard</td></tr><tr><td>Several instances online</td><td>Your Home instance if it is one of them, otherwise the Summary page</td></tr><tr><td>All instances offline, "Switch when no connections" on</td><td>Your chosen fallback page</td></tr><tr><td>All instances offline, that option off</td><td>Your Home Page</td></tr><tr><td>Quiet, nothing happening</td><td>Your Home Page</td></tr></tbody></table></div>
+
+        <div class="subsection">
+        <div class="subsection-title">Home Page</div>
         <div class="pn-pill-grid" id="start-page-pills"></div>
         <div class="field-hint">The page the display settles on; when set to a NINA instance, the display also returns to that instance whenever it is online.</div>
 
-        <div class="pn-divider"></div>
+        <div class="toggle-row" style="margin-top:12px">
+          <div>
+            <span class="toggle-label">Always show the Home Page</span>
+            <div class="field-hint" style="margin-top:2px">Keeps the display on the Home Page at all times, even while instances are connected. You can still swipe to other pages; the display returns to the Home Page after the stay-on-page time.</div>
+          </div>
+          <label class="toggle"><input type="checkbox" id="home_page_lock" onchange="toggleHomeLock();checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        </div>
 
+        <div class="subsection">
+        <div class="subsection-title">Auto Cycle</div>
         <div class="toggle-row">
           <div>
             <span class="toggle-label">Auto Cycle</span>
@@ -1636,15 +1735,19 @@
             <div class="field-hint">Note: Image pages (GOES, Solar, and Custom URL) download a fresh image from their source each time the rotation reaches them, even if their refresh interval has not elapsed yet. Shorter rotation intervals mean more frequent downloads from those image servers.</div>
           </div>
         </div>
+        </div>
 
-        <div class="field" style="margin-top:12px">
+        <div class="subsection">
+        <div class="subsection-title">Manual Navigation</div>
+        <div class="field">
           <label class="field-label">Stay on selected page (seconds)</label>
           <input type="number" class="input" id="nav_grace_s" min="10" max="300" value="10">
           <div class="field-hint" style="margin-top:2px">After you swipe or tap to a page, the display keeps showing it for this long, then returns on its own to the page it would normally show (the connected instance, or your Home page).</div>
         </div>
+        </div>
 
-        <div class="pn-divider"></div>
-
+        <div class="subsection">
+        <div class="subsection-title">When Disconnected</div>
         <div class="toggle-row">
           <div>
             <span class="toggle-label">Switch page when no connections</span>
@@ -1665,111 +1768,14 @@
             <label class="toggle"><input type="checkbox" id="idle_indicator_enabled" onchange="checkDirty()"><span class="toggle-track"></span></label>
           </div>
         </div>
-      </div>
-    </div>
-
-    <!-- ==================== TAB 3: BEHAVIOR & ALERTS ==================== -->
-    <div id="tab-behavior" class="tab-panel">
-
-      <div class="card">
-        <div class="card-title"><span class="card-title-label">Hardware <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
-        <div class="help-popover"><div class="help-popover-title">Hardware</div><p>Physical display controls: how the image is rotated on the panel and the backlight level. Both apply live and persist when you save.</p><p>Screen Rotation reorients the entire UI in 90-degree steps for sideways or upside-down mounting. Backlight sets the panel brightness, separate from the Text brightness control on the Display tab.</p><p>Example: if the device is mounted with the USB port facing up, set Screen Rotation to 180 degrees so the dashboard reads right-side up.</p></div>
-        <div class="row stack-mobile">
-          <div class="field">
-            <label class="field-label">Screen Rotation</label>
-            <select class="input" id="screen_rotation_select" onchange="setScreenRotation(this.value)">
-              <option value="0">0° (Default)</option>
-              <option value="1">90°</option>
-              <option value="2">180°</option>
-              <option value="3">270°</option>
-            </select>
-            <div class="field-hint">Rotates the whole UI in 90-degree steps to match the physical mounting.</div>
-          </div>
-          <div class="field">
-            <label class="field-label">Backlight</label>
-            <div class="slider-group">
-              <input type="range" class="slider" id="brightness" min="0" max="100" value="80" oninput="setBrightness(this.value)">
-              <span class="slider-val" id="brightness_val">80%</span>
-            </div>
-            <div class="field-hint">Panel backlight level, separate from Text brightness on the Display tab.</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title"><span class="card-title-label">Power Management <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
-        <div class="help-popover"><div class="help-popover-title">Power Management</div><p>Reduces power draw in two ways. Screen-off-when-idle blanks the backlight after a period with no touch, while the firmware keeps running and wakes the screen on the next touch. Deep sleep powers the device down on a long-press of the BOOT button or after extended disconnection, and resumes only on the wake timer or a physical reboot.</p><p>WiFi power save lets the WiFi radio rest between updates; the device stays connected, so there is no reconnect delay. The wake timer sets how many hours pass before the device wakes itself from deep sleep; a value of 0 means it stays asleep until physically rebooted.</p><p>Example: set Turn off screen when idle on with a 120 second timeout for an always-mounted display, and leave deep sleep off so the dashboard stays reachable over the network.</p></div>
-        <div class="toggle-row">
-          <span class="toggle-label">Turn off screen when idle</span>
-          <label class="toggle"><input type="checkbox" id="screen_sleep_enabled"><span class="toggle-track"></span></label>
-        </div>
-        <div class="field-hint" style="margin-top:4px">Blanks the backlight after the timeout while the firmware keeps running; touch wakes the screen.</div>
-        <div id="screen_sleep_details" style="margin-top:16px">
-          <div class="row stack-mobile">
-            <div class="field">
-              <label class="field-label">Timeout (seconds)</label>
-              <input type="number" class="input" id="screen_sleep_timeout" min="10" max="3600" value="60">
-              <div class="field-hint">Idle time with no touch before the screen blanks, from 10 to 3600 seconds.</div>
-            </div>
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-label">WiFi power save</span>
-            <label class="toggle"><input type="checkbox" id="wifi_power_save" checked><span class="toggle-track"></span></label>
-          </div>
-          <div class="field-hint">Lets the WiFi radio rest between updates to save power. The device stays connected, so there is no reconnect delay.</div>
-        </div>
-        <hr class="divider">
-        <div class="toggle-row">
-          <span class="toggle-label">Enable deep sleep (long-press BOOT to power off)</span>
-          <label class="toggle"><input type="checkbox" id="deep_sleep_enabled"><span class="toggle-track"></span></label>
-        </div>
-        <div class="field-hint" style="margin-top:4px">Allows a long-press of the BOOT button to power the device into deep sleep.</div>
-        <div id="deep_sleep_details" style="margin-top:16px">
-          <div class="field">
-            <label class="field-label">Wake timer (hours)</label>
-            <input type="number" class="input" id="deep_sleep_wake_timer" min="0" max="72" step="1" value="0">
-            <div class="field-hint">Hours until auto-wake. 0 = stay asleep forever. Warning: with timer set to 0, the device must be physically rebooted to wake up; there is no manual wake from deep sleep.</div>
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-label">Auto power off when idle</span>
-            <label class="toggle"><input type="checkbox" id="deep_sleep_on_idle"><span class="toggle-track"></span></label>
-          </div>
-          <div class="field-hint">Enter deep sleep after extended disconnection from all NINA instances. The device must be physically rebooted to wake up if the wake timer is set to 0.</div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title"><span class="card-title-label">Polling &amp; Connectivity <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
-        <div class="help-popover"><div class="help-popover-title">Polling and Connectivity</div><p>Sets how often the device contacts the NINA API and how patient it is before declaring an instance offline. Data update rate is the base polling interval for the active page; faster values refresh the display sooner but generate more API traffic. Graph update rate controls how often the RMS and HFR history graphs add a point.</p><p>Connection timeout is how long a request waits for a response before that instance is marked offline. Idle poll interval is the slower, occasional check used to re-test an offline instance while you are viewing a non-NINA page, which avoids contacting an instance that is not running too often.</p><p>Example: set Data update rate to 2 seconds for a responsive display, raise Connection timeout to 10 seconds on a slow or distant network, and leave Idle poll interval at 30 seconds.</p></div>
-        <div class="row stack-mobile">
-          <div class="field">
-            <label class="field-label">Data update rate (s)</label>
-            <input type="number" class="input" id="update_rate" min="1" max="10" value="2">
-            <div class="field-hint">Base polling interval for the active page, from 1 to 10 seconds; lower is more responsive but adds API traffic.</div>
-          </div>
-          <div class="field">
-            <label class="field-label">Graph update rate (s)</label>
-            <input type="number" class="input" id="graph_interval" min="2" max="30" value="5">
-            <div class="field-hint">How often the RMS and HFR history graphs record a new data point, from 2 to 30 seconds.</div>
-          </div>
-        </div>
-        <div class="row stack-mobile">
-          <div class="field">
-            <label class="field-label">Connection timeout (s)</label>
-            <input type="number" class="input" id="connection_timeout" min="2" max="30" value="6">
-            <div class="field-hint">Seconds without response before a NINA instance is offline</div>
-          </div>
-          <div class="field">
-            <label class="field-label">Idle poll interval (s)</label>
-            <input type="number" class="input" id="idle_poll_interval" min="5" max="120" value="30">
-            <div class="field-hint">How often an offline instance is re-checked while you are on a non-NINA page</div>
-          </div>
         </div>
       </div>
 
       <div class="card">
         <div class="card-title"><span class="card-title-label">Notifications <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
         <div class="help-popover"><div class="help-popover-title">Notifications</div><p>Controls on-screen pop-up notifications, the border-flash alerts, and which event categories produce notifications. Notification duration sets how long a normal pop-up stays visible; error and warning pop-ups show for twice that time. Border flash alerts flash the screen edge when an RMS, HFR, or safety threshold is exceeded.</p><p>The aggregation window combines a burst of notifications that arrive close together into one, which reduces clutter during noisy events; set it to 0 to show every notification individually. The Event Categories toggles decide which kinds of events generate notifications at all; turning a category off suppresses its notifications.</p><p>Example: keep Error Events and Safety Events on, turn Focuser and Guider Events off to cut routine chatter, and set the aggregation window to 5 seconds so rapid sequence updates collapse into a single notification.</p></div>
+        <div class="subsection">
+        <div class="subsection-title">Alerts</div>
         <div class="field" style="margin-bottom:16px">
           <label class="field-label">Toast duration (s)</label>
           <input type="number" class="input" id="toast_duration" min="3" max="30" value="8">
@@ -1780,8 +1786,7 @@
           <label class="toggle"><input type="checkbox" id="alert_flash_enabled" checked><span class="toggle-track"></span></label>
         </div>
         <div class="field-hint" style="margin-top:4px">Flash the screen border when RMS, HFR, or safety thresholds are exceeded.</div>
-        <hr class="divider">
-        <div class="field">
+        <div class="field" style="margin-top:16px">
           <label class="field-label">Aggregation Window</label>
           <div class="slider-group">
             <input type="range" class="slider" id="toast_aggregation_window" min="0" max="15" value="5" oninput="updateAggregationLabel(this.value);checkDirty()">
@@ -1789,8 +1794,9 @@
           </div>
           <div class="field-hint">Combine rapid-fire notifications within this window. 0 = Off (show each individually).</div>
         </div>
-        <hr class="divider">
-        <div class="field-label" style="margin-bottom:12px">Event Categories</div>
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">Event Categories</div>
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
           <span class="toggle-label">Error Events</span>
           <label class="toggle"><input type="checkbox" id="notify_cat_8" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
@@ -1839,6 +1845,7 @@
           <span class="toggle-label">Flat Device Events</span>
           <label class="toggle"><input type="checkbox" id="notify_cat_11" checked onchange="checkDirty()"><span class="toggle-track"></span></label>
         </div>
+        </div>
       </div>
     </div>
 
@@ -1880,14 +1887,18 @@
             <div class="wifi-scan-status" id="wifiScanStatus">Scanning for networks...</div>
           </div>
         </div>
+        <div class="subsection">
+        <div class="subsection-title">Device Name</div>
         <div class="field">
           <label class="field-label">Device hostname</label>
           <input type="text" class="input" id="hostname" placeholder="NINA-DISPLAY" maxlength="31" pattern="[A-Za-z0-9\-]+" style="max-width:320px">
           <div class="field-hint">Used on your network, as the setup WiFi network name, and as the Home Assistant device name.</div>
         </div>
-        <hr class="divider">
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">WiFi Networks</div>
         <div class="field">
-          <div class="field-label" style="margin-top:16px;font-weight:600;color:var(--accent)">Network 1 (Primary)</div>
+          <div class="field-label" style="font-weight:600;color:var(--accent)">Network 1 (Primary)</div>
           <label class="field-label">SSID</label>
           <input type="text" class="input" id="ssid1" placeholder="Network name">
           <div class="field-hint">Highest-priority network; the device connects to this one first when it is in range.</div>
@@ -1909,7 +1920,14 @@
           <label class="field-label">Password</label>
           <input type="password" class="input" id="pass3" placeholder="Enter new password to change">
         </div>
-        <hr class="divider">
+        <div class="toggle-row">
+          <span class="toggle-label">WiFi power save</span>
+          <label class="toggle"><input type="checkbox" id="wifi_power_save" checked><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint">Lets the WiFi radio rest between updates to save power. The device stays connected, so there is no reconnect delay.</div>
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">Time</div>
         <div class="row stack-mobile">
           <div class="field">
             <label class="field-label">NTP server</label>
@@ -1945,7 +1963,57 @@
             <div class="field-hint">Select your region so local time and daylight-saving transitions are applied to displayed times.</div>
           </div>
         </div>
+        </div>
         <div class="field-hint hint-center">Reboot required after changing hostname, WiFi, NTP, or timezone.</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="card-title-label">Location <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Location</div><p>Sets the device location used by location-based features: the weather forecast on the clock page and the moon phase view. Type a city name and select Look up to fill the coordinates automatically.</p><p>You can also enter latitude and longitude by hand, for example from a GPS reading or an online map.</p></div>
+        <div class="field-hint" style="margin-bottom:12px">This location is used by the weather forecast on the clock page and by the moon phase view.</div>
+        <div class="field" id="weather_city_lookup_field">
+          <label class="field-label">Location</label>
+          <div style="display:flex;gap:10px">
+            <input type="text" class="input" id="weather_location_search" placeholder="Search city name..." style="flex:1">
+            <button class="btn btn-outline" onclick="lookupCity()" type="button">Look up</button>
+          </div>
+          <div id="city_results" style="display:none;margin-top:6px;background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.08);border-radius:10px;max-height:200px;overflow-y:auto"></div>
+          <div class="field-hint">Type a city name and select Look up to auto-fill latitude, longitude, and location name.</div>
+        </div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Latitude</label>
+            <input type="number" class="input" id="weather_lat" step="0.0001" placeholder="0.0000">
+            <div class="field-hint">Decimal degrees, positive north (e.g. 39.7392); needed when not using city lookup.</div>
+          </div>
+          <div class="field">
+            <label class="field-label">Longitude</label>
+            <input type="number" class="input" id="weather_lon" step="0.0001" placeholder="0.0000">
+            <div class="field-hint">Decimal degrees, positive east, negative west (e.g. -104.9903).</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="card-title-label">Power Management <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Power Management</div><p>Controls deep sleep. Deep sleep powers the device down on a long-press of the BOOT button or, optionally, after extended disconnection from all NINA instances. While asleep the display is off and the device is not reachable over the network.</p><p>The wake timer sets how many hours pass before the device wakes itself from deep sleep. A value of 0 means it stays asleep until physically rebooted.</p><p>Example: leave deep sleep off for an always-mounted display so the dashboard stays reachable over the network at all times.</p></div>
+        <div class="toggle-row">
+          <span class="toggle-label">Enable deep sleep (long-press BOOT to power off)</span>
+          <label class="toggle"><input type="checkbox" id="deep_sleep_enabled"><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint" style="margin-top:4px">Allows a long-press of the BOOT button to power the device into deep sleep.</div>
+        <div id="deep_sleep_details" style="margin-top:16px">
+          <div class="field">
+            <label class="field-label">Wake timer (hours)</label>
+            <input type="number" class="input" id="deep_sleep_wake_timer" min="0" max="72" step="1" value="0">
+            <div class="field-hint">Hours until auto-wake. 0 = stay asleep forever. Warning: with timer set to 0, the device must be physically rebooted to wake up; there is no manual wake from deep sleep.</div>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Auto power off when idle</span>
+            <label class="toggle"><input type="checkbox" id="deep_sleep_on_idle"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Enter deep sleep after extended disconnection from all NINA instances. The device must be physically rebooted to wake up if the wake timer is set to 0.</div>
+        </div>
       </div>
 
       <div class="card">
@@ -1956,7 +2024,9 @@
           <label class="toggle"><input type="checkbox" id="mqtt_enabled"><span class="toggle-track"></span></label>
         </div>
         <div class="field-hint" style="margin-top:4px">Turn on publishing of the device's own state and Home Assistant auto-discovery to the broker.</div>
-        <div class="field" style="margin-top:16px">
+        <div class="subsection">
+        <div class="subsection-title">Broker</div>
+        <div class="field">
           <label class="field-label">Broker host</label>
           <input type="text" class="input" id="mqtt_broker" placeholder="192.168.1.250">
           <div class="field-hint">IP address or hostname of your MQTT broker.</div>
@@ -1973,6 +2043,9 @@
             <div class="field-hint">Added to the front of every topic the device sends; use a unique value per device.</div>
           </div>
         </div>
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">Authentication</div>
         <div class="row stack-mobile">
           <div class="field">
             <label class="field-label">Username</label>
@@ -1984,6 +2057,7 @@
             <input type="password" class="input" id="mqtt_pass" placeholder="Password">
             <div class="field-hint">Leave blank if the broker allows anonymous connections.</div>
           </div>
+        </div>
         </div>
         <div class="field-hint hint-center">Reboot required after changing MQTT settings.</div>
       </div>
@@ -1999,7 +2073,8 @@
           <div class="fw-item"><div class="fw-label">Release</div><div class="fw-value" id="fw_git_tag">--</div></div>
           <div class="fw-item"><div class="fw-label">Commit</div><div class="fw-value" id="fw_git_sha">--</div></div>
         </div>
-        <hr class="divider">
+        <div class="subsection">
+        <div class="subsection-title">Automatic Updates</div>
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
           <span class="toggle-label">Check for updates on boot</span>
           <label class="toggle"><input type="checkbox" id="auto_update_check" checked><span class="toggle-track"></span></label>
@@ -2020,7 +2095,9 @@
           <div id="updateSummary" style="display:none;margin-top:8px;font-size:0.78rem;color:var(--text-muted);max-height:120px;overflow-y:auto;white-space:pre-wrap"></div>
           <button class="btn btn-primary" id="otaGithubBtn" style="display:none;margin-top:12px;width:100%" onclick="startGithubOta()">Install Update</button>
         </div>
-        <hr class="divider">
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">Manual Update</div>
         <div class="ota-bar">
           <label class="ota-label" id="otaFileLabel">
             Choose firmware .bin file
@@ -2033,15 +2110,21 @@
           <div class="progress-bg"><div id="otaProgressFill" class="progress-fill"></div></div>
           <div id="otaStatus" class="progress-status"></div>
         </div>
+        </div>
       </div>
 
       <div class="card">
         <div class="card-title"><span class="card-title-label">Device <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
         <div class="help-popover"><div class="help-popover-title">Device actions and modes</div><p>Reboot restarts the device and applies pending reboot-required settings. Factory Reset erases all saved settings and returns every setting to defaults, including WiFi, so plan to reconnect over the device's own setup WiFi network afterward.</p><p>Debug Mode enables extra performance and diagnostic info; leave it off for normal use. Demo Mode generates simulated session data so the dashboard can be used with no live NINA connection. Reboot the device for the change to fully take effect. Capture Screenshot pulls a JPEG of the current display.</p><p>Example: enable Demo Mode to preview the dashboard layout before any N.I.N.A. instance is online, then disable it to return to live data.</p></div>
+        <div class="subsection danger-zone">
+        <div class="subsection-title">Device Actions</div>
         <div class="row stack-mobile" style="margin-bottom:16px">
           <button class="btn btn-outline" onclick="saveAndReboot()" style="flex:1">Reboot</button>
           <button class="btn btn-danger" onclick="factoryReset()" style="flex:1">Factory Reset</button>
         </div>
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">Modes</div>
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
           <span class="toggle-label">Enable Debug Mode</span>
           <label class="toggle"><input type="checkbox" id="debug_mode"><span class="toggle-track"></span></label>
@@ -2052,6 +2135,7 @@
           <label class="toggle"><input type="checkbox" id="demo_mode"><span class="toggle-track"></span></label>
         </div>
         <div class="field-hint" style="margin-top:4px;margin-bottom:16px">Generates simulated astrophotography data. Reboot for the change to fully take effect.</div>
+        </div>
         <button class="btn btn-outline" id="ssBtn" onclick="takeScreenshot()">Capture Screenshot</button>
         <div id="ssContainer" style="display:none;margin-top:16px">
           <img id="ssImage" style="width:100%;border-radius:var(--radius-sm);border:1px solid var(--border)">
@@ -2061,6 +2145,8 @@
       <div class="card" id="adminPasswordCard">
         <div class="card-title"><span class="card-title-label">Authentication <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
         <div class="help-popover"><div class="help-popover-title">Web UI access control</div><p>Require login asks for a username and password before the web settings will open, and is on by default. When it is off, anyone on the network can reboot, factory-reset, flash, or reconfigure the device; secrets such as passwords, API keys, and tokens stay redacted in API responses either way.</p><p>The admin password defaults to changeme123!. To change it, enter the current password, then the new password twice (4 to 32 characters). Sign out clears your current browser session.</p><p>Example: keep Require login enabled and change the password from the default before exposing the device beyond your local network.</p></div>
+        <div class="subsection">
+        <div class="subsection-title">Access Control</div>
         <div class="toggle-row">
           <span class="toggle-label">Require login to access the web UI</span>
           <label class="toggle"><input type="checkbox" id="auth_enabled"><span class="toggle-track"></span></label>
@@ -2071,8 +2157,9 @@
         </p>
         <button class="btn btn-primary" style="margin-top:12px" onclick="saveAuthEnabled()">Save</button>
         <div id="auth_enabled_status" style="margin-top:10px;font-size:0.9em;"></div>
-        <hr style="border:0;border-top:1px solid var(--border);margin:16px 0">
-        <div style="font-weight:600;color:var(--text);text-transform:uppercase;letter-spacing:0.04em;font-size:0.8rem;margin-bottom:8px">Admin Password</div>
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">Admin Password</div>
         <p style="color:#888;font-size:0.85em;margin:2px 0 12px 0;">
           Default password is <code>changeme123!</code>. Change it now to secure this device's web interface.
         </p>
@@ -2093,7 +2180,7 @@
         </div>
         <button class="btn btn-primary" onclick="changeAdminPassword()">Save Password</button>
         <div id="admin_pw_status" style="margin-top:10px;font-size:0.9em;"></div>
-        <hr style="border:0;border-top:1px solid var(--border);margin:16px 0">
+        </div>
         <button class="btn" id="signOutBtn" onclick="signOut()">Sign out</button>
       </div>
     </div>
@@ -3220,20 +3307,29 @@
           '<div class="card node-config-card" id="node_card_'+i+'" data-node="'+i+'">'+
             '<div class="card-title"><span class="card-title-label">N.I.N.A. '+(i+1)+' <span id="node_card_hostname_'+i+'" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span> <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>'+
             '<div class="help-popover"><div class="help-popover-title">N.I.N.A. Node</div><p>Configures one N.I.N.A. instance: where to reach it, whether its notifications are muted, the color shown per filter, and the color bands applied to guider RMS and HFR values on its dashboard page.</p><p>The hostname is the only required field. The remaining settings change how this instance\'s data is colored and whether it shows pop-up notifications.</p><p>Example: enter the IP of your imaging PC, mute notifications on a secondary instance you are not watching, and set the RMS bands so values under 0.5 show green and values over 1.0 show red.</p></div>'+
+            '<div class="subsection">'+
+            '<div class="subsection-title">Connection</div>'+
             '<div class="field"><label class="field-label">Hostname / IP</label>'+
             '<input type="text" class="input" id="'+urlId+'" placeholder="'+placeholders[i]+'" oninput="updateNodeLabels()">'+
             '<div class="field-hint">Host or IP of the N.I.N.A. computer running the Advanced API plugin; the web page adds port 1888 and the /v2/api/ path before saving (e.g. 192.168.1.100 becomes http://192.168.1.100:1888/v2/api/).</div></div>'+
-            '<div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">'+
+            '</div>'+
+            '<div class="subsection">'+
+            '<div class="subsection-title">Notifications</div>'+
+            '<div class="toggle-row" style="padding-bottom:0">'+
             '<span class="toggle-label">Mute Notifications</span>'+
             '<label class="toggle"><input type="checkbox" id="toast_instance_muted_'+i+'" onchange="checkDirty()"><span class="toggle-track"></span></label>'+
             '</div>'+
             '<div class="field-hint">Suppresses all on-screen pop-up notifications from this instance, including connect and disconnect events.</div>'+
+            '</div>'+
+            '<div class="subsection">'+
+            '<div class="subsection-title">Colors &amp; Thresholds</div>'+
             '<div class="field"><label class="field-label">Filter colors</label>'+
             '<div id="filters_'+i+'" class="filter-grid"></div>'+
             '<div class="field-hint">Sets the color used for the exposure arc and labels when each filter is active; detected filters appear after the instance connects.</div></div>'+
             '<div class="row stack-mobile">'+
             mkThresholdSection('rms',i)+
             mkThresholdSection('hfr',i)+
+            '</div>'+
             '</div></div>'
         );
       }
@@ -3532,8 +3628,21 @@
       if(on && $('idle_page_override_enabled') && $('idle_page_override_enabled').checked){
         $('idle_page_override_enabled').checked=false; toggleIdleOverride();
       }
+      if(on && $('home_page_lock') && $('home_page_lock').checked){
+        $('home_page_lock').checked=false; toggleHomeLock();
+      }
       $('pn_cycle_settings').style.display=on?'flex':'none';
       updatePageNavSummary();
+    }
+
+    function toggleHomeLock(){
+      var on=$('home_page_lock').checked;
+      if(on && $('auto_cycle_toggle') && $('auto_cycle_toggle').checked){
+        $('auto_cycle_toggle').checked=false; toggleAutoCycle();
+      }
+      if(on && $('idle_page_override_enabled') && $('idle_page_override_enabled').checked){
+        $('idle_page_override_enabled').checked=false; toggleIdleOverride();
+      }
     }
 
     function updatePageNavSummary(){
@@ -3760,6 +3869,7 @@
         auto_rotate_skip_disconnected:!!$('auto_rotate_skip').checked,
         auto_rotate_order2:getRotateOrder(),
         nav_grace_s:parseInt($('nav_grace_s').value)||10,
+        home_page_lock:!!$('home_page_lock').checked,
         update_rate_s:parseInt($('update_rate').value)||2,
         graph_update_interval_s:parseInt($('graph_interval').value)||5,
         connection_timeout_s:parseInt($('connection_timeout').value)||6,
@@ -3812,8 +3922,8 @@
         custom_image_url:$('customImageUrl')?$('customImageUrl').value.trim():'',
         custom_orientation:$('customOrientation')?parseInt($('customOrientation').value,10)||0:0,
         custom_update_interval_s:$('customInterval')?parseInt($('customInterval').value,10)||60:60,
-        moon_lat:parseFloat($('moonLat').value)||0,
-        moon_lon:parseFloat($('moonLon').value)||0,
+        moon_lat:parseFloat($('weather_lat').value)||0,
+        moon_lon:parseFloat($('weather_lon').value)||0,
         moon_north_up:$('moon_north_up').checked?1:0,
         moon_flip_u:$('moon_flip_u').checked?1:0,
         moon_flip_v:$('moon_flip_v').checked?1:0,
@@ -3830,7 +3940,6 @@
         weather_poll_interval_s:parseInt($('weather_poll_interval_s').value)||900,
         weather_units:parseInt($('weather_units').value)||0,
         weather_time_format:parseInt($('weather_time_format').value)||0,
-        tz_string:$('tz_string').value,
         idle_page_override_enabled:!!$('idle_page_override_enabled').checked,
         idle_page_override_target:parseInt($('idle_page_override_target').value),
         idle_indicator_enabled:!!$('idle_indicator_enabled').checked,
@@ -4010,11 +4119,6 @@
       if($('solarOrientation')) $('solarOrientation').value=String(data.solar_orientation||0);
       if($('solarVflip')) $('solarVflip').checked=!!data.solar_vflip;
       if($('solarHflip')) $('solarHflip').checked=!!data.solar_hflip;
-      var mlat=data.moon_lat, mlon=data.moon_lon;
-      // Prefill from weather location when moon coords are unset
-      if((!mlat && !mlon) && (data.weather_lat || data.weather_lon)){ mlat=data.weather_lat; mlon=data.weather_lon; }
-      if($('moonLat')) $('moonLat').value=mlat||'';
-      if($('moonLon')) $('moonLon').value=mlon||'';
       if($('moon_north_up')) $('moon_north_up').checked = (data.moon_north_up==null) ? true : !!data.moon_north_up;
       if($('moon_flip_u')) $('moon_flip_u').checked=!!data.moon_flip_u;
       if($('moon_flip_v')) $('moon_flip_v').checked=!!data.moon_flip_v;
@@ -4034,14 +4138,16 @@
       // Clock & Weather fields
       if($('weather_provider')) $('weather_provider').value=data.weather_provider||0;
       if($('weather_api_key')) $('weather_api_key').value=data.weather_api_key||'';
-      if($('weather_lat')) $('weather_lat').value=data.weather_lat||'';
-      if($('weather_lon')) $('weather_lon').value=data.weather_lon||'';
+      var wlat=data.weather_lat, wlon=data.weather_lon;
+      // Fall back to a previously configured moon-only location
+      if((!wlat && !wlon) && (data.moon_lat || data.moon_lon)){ wlat=data.moon_lat; wlon=data.moon_lon; }
+      if($('weather_lat')) $('weather_lat').value=wlat||'';
+      if($('weather_lon')) $('weather_lon').value=wlon||'';
       if($('weather_location_name')) $('weather_location_name').value=data.weather_location_name||'';
       if($('weather_station_id')) $('weather_station_id').value=(data.weather_provider==2)?(data.weather_location_name||''):'';
       if($('weather_poll_interval_s')) $('weather_poll_interval_s').value=data.weather_poll_interval_s||900;
       if($('weather_units')) $('weather_units').value=data.weather_units||0;
       if($('weather_time_format')) $('weather_time_format').value=data.weather_time_format||0;
-      if($('tz_string')) $('tz_string').value=data.tz_string||'';
       toggleWeatherApiKey();
 
       // Idle override fields
@@ -4049,6 +4155,12 @@
       if($('idle_page_override_target')) $('idle_page_override_target').value=data.idle_page_override_target!=null?data.idle_page_override_target:0;
       if($('idle_indicator_enabled')) $('idle_indicator_enabled').checked=data.idle_indicator_enabled!==false;
       toggleIdleOverride();
+
+      // Home Page lock — raw state from data, set after toggleAutoCycle()/
+      // toggleIdleOverride() so the mutual-exclusion handlers cannot clear it
+      // during load. The server normalizes exclusivity, so no handler call is
+      // needed here (the lock has no dependent controls to show/hide).
+      if($('home_page_lock')) $('home_page_lock').checked=!!data.home_page_lock;
 
       // Crash log retention (days; 0 = never). Default 30 when absent.
       if($('crashlog_retention')) $('crashlog_retention').value=(data.crash_log_retention_days!=null?data.crash_log_retention_days:30);
@@ -4078,71 +4190,6 @@
         loadedConfig='';
       }
       checkDirty();
-    }
-
-    /* === Timezone Data === */
-    const TIMEZONES = [
-      {label: "US/Eastern (EST/EDT)", value: "EST5EDT,M3.2.0,M11.1.0"},
-      {label: "US/Central (CST/CDT)", value: "CST6CDT,M3.2.0,M11.1.0"},
-      {label: "US/Mountain (MST/MDT)", value: "MST7MDT,M3.2.0,M11.1.0"},
-      {label: "US/Pacific (PST/PDT)", value: "PST8PDT,M3.2.0,M11.1.0"},
-      {label: "US/Alaska (AKST/AKDT)", value: "AKST9AKDT,M3.2.0,M11.1.0"},
-      {label: "US/Hawaii (HST)", value: "HST10"},
-      {label: "US/Arizona (MST, no DST)", value: "MST7"},
-      {label: "Canada/Atlantic (AST/ADT)", value: "AST4ADT,M3.2.0,M11.1.0"},
-      {label: "Canada/Newfoundland (NST/NDT)", value: "NST3:30NDT,M3.2.0,M11.1.0"},
-      {label: "Mexico/Central (CST/CDT)", value: "CST6CDT,M4.1.0,M10.5.0"},
-      {label: "Brazil/Sao Paulo (BRT)", value: "BRT3"},
-      {label: "Argentina (ART)", value: "ART3"},
-      {label: "Chile/Santiago (CLT/CLST)", value: "CLT4CLST,M10.2.6/24,M3.2.6/24"},
-      {label: "Colombia (COT)", value: "COT5"},
-      {label: "Europe/London (GMT/BST)", value: "GMT0BST,M3.5.0/1,M10.5.0"},
-      {label: "Europe/Paris (CET/CEST)", value: "CET-1CEST,M3.5.0,M10.5.0/3"},
-      {label: "Europe/Berlin (CET/CEST)", value: "CET-1CEST,M3.5.0,M10.5.0/3"},
-      {label: "Europe/Madrid (CET/CEST)", value: "CET-1CEST,M3.5.0,M10.5.0/3"},
-      {label: "Europe/Rome (CET/CEST)", value: "CET-1CEST,M3.5.0,M10.5.0/3"},
-      {label: "Europe/Amsterdam (CET/CEST)", value: "CET-1CEST,M3.5.0,M10.5.0/3"},
-      {label: "Europe/Stockholm (CET/CEST)", value: "CET-1CEST,M3.5.0,M10.5.0/3"},
-      {label: "Europe/Warsaw (CET/CEST)", value: "CET-1CEST,M3.5.0,M10.5.0/3"},
-      {label: "Europe/Athens (EET/EEST)", value: "EET-2EEST,M3.5.0/3,M10.5.0/4"},
-      {label: "Europe/Helsinki (EET/EEST)", value: "EET-2EEST,M3.5.0/3,M10.5.0/4"},
-      {label: "Europe/Bucharest (EET/EEST)", value: "EET-2EEST,M3.5.0/3,M10.5.0/4"},
-      {label: "Europe/Istanbul (TRT)", value: "TRT-3"},
-      {label: "Europe/Moscow (MSK)", value: "MSK-3"},
-      {label: "Asia/Dubai (GST)", value: "GST-4"},
-      {label: "Asia/Kolkata (IST)", value: "IST-5:30"},
-      {label: "Asia/Kathmandu (NPT)", value: "NPT-5:45"},
-      {label: "Asia/Dhaka (BST)", value: "BST-6"},
-      {label: "Asia/Bangkok (ICT)", value: "ICT-7"},
-      {label: "Asia/Ho Chi Minh (ICT)", value: "ICT-7"},
-      {label: "Asia/Shanghai (CST)", value: "CST-8"},
-      {label: "Asia/Hong Kong (HKT)", value: "HKT-8"},
-      {label: "Asia/Singapore (SGT)", value: "SGT-8"},
-      {label: "Asia/Taipei (CST)", value: "CST-8"},
-      {label: "Asia/Tokyo (JST)", value: "JST-9"},
-      {label: "Asia/Seoul (KST)", value: "KST-9"},
-      {label: "Australia/Perth (AWST)", value: "AWST-8"},
-      {label: "Australia/Adelaide (ACST/ACDT)", value: "ACST-9:30ACDT,M10.1.0,M4.1.0/3"},
-      {label: "Australia/Sydney (AEST/AEDT)", value: "AEST-10AEDT,M10.1.0,M4.1.0/3"},
-      {label: "Australia/Brisbane (AEST)", value: "AEST-10"},
-      {label: "Pacific/Auckland (NZST/NZDT)", value: "NZST-12NZDT,M9.5.0,M4.1.0/3"},
-      {label: "Africa/Cairo (EET)", value: "EET-2"},
-      {label: "Africa/Johannesburg (SAST)", value: "SAST-2"},
-      {label: "Africa/Lagos (WAT)", value: "WAT-1"},
-      {label: "Africa/Nairobi (EAT)", value: "EAT-3"},
-      {label: "UTC", value: "UTC0"}
-    ];
-
-    function populateTimezones(){
-      var sel=$('tz_string');
-      if(!sel) return;
-      sel.innerHTML='<option value="">Select timezone...</option>';
-      TIMEZONES.forEach(function(tz){
-        var opt=document.createElement('option');
-        opt.value=tz.value;
-        opt.textContent=tz.label;
-        sel.appendChild(opt);
-      });
     }
 
     /* === City Lookup === */
@@ -4189,7 +4236,6 @@
       $('weather_api_key_field').style.display=isOpenMeteo?'none':'';
       $('owm_link').style.display=(!isOpenMeteo&&!isWU)?'':'none';
       $('wunderground_link').style.display=isWU?'':'none';
-      $('weather_city_lookup_field').style.display=isWU?'none':'';
       $('weather_location_name_field').style.display=isWU?'none':'';
       $('weather_station_id_field').style.display=isWU?'':'none';
       /* Clear provider-specific fields when switching providers */
@@ -4197,8 +4243,6 @@
         $('weather_api_key').value='';
         $('weather_location_name').value='';
         $('weather_station_id').value='';
-        $('weather_lat').value='';
-        $('weather_lon').value='';
         if($('city_results')) $('city_results').style.display='none';
         if($('weather_location_search')) $('weather_location_search').value='';
       }
@@ -4209,6 +4253,9 @@
       var enabled=$('idle_page_override_enabled').checked;
       if(enabled && $('auto_cycle_toggle') && $('auto_cycle_toggle').checked){
         $('auto_cycle_toggle').checked=false; toggleAutoCycle();
+      }
+      if(enabled && $('home_page_lock') && $('home_page_lock').checked){
+        $('home_page_lock').checked=false; toggleHomeLock();
       }
       $('idle_target_field').style.display=enabled?'':'none';
     }
@@ -5050,6 +5097,7 @@
       var d=on?'':'none';
       $('spotifyConnectionFields').style.display=d;
       $('spotifyAccountCard').style.display=on?'block':'none';
+      if($('spotifyPlayerCard')) $('spotifyPlayerCard').style.display=on?'block':'none';
       var arpSpotify=$('arp_spotify');
       if(arpSpotify){
         var row=arpSpotify.parentNode;
@@ -5308,8 +5356,8 @@
         image_display_source: getImageSource(),
         moon_bg_style: parseInt($('moonBg').value,10)||0,
         moon_drag_light_mode: parseInt($('moonDragLight').value,10)||0,
-        moon_lat: parseFloat($('moonLat').value)||0,
-        moon_lon: parseFloat($('moonLon').value)||0,
+        moon_lat: parseFloat($('weather_lat').value)||0,
+        moon_lon: parseFloat($('weather_lon').value)||0,
         moon_north_up: $('moon_north_up').checked?1:0,
         moon_flip_u: $('moon_flip_u').checked?1:0,
         moon_flip_v: $('moon_flip_v').checked?1:0,
@@ -6131,7 +6179,6 @@
     }
 
     /* === Init === */
-    populateTimezones();
     /* Start /api/pages at t=0 in parallel with /api/config; populateConfig
        awaits this same cached promise instead of starting it after config. */
     fetchPageRegistry();
