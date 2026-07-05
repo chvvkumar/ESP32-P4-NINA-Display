@@ -638,6 +638,38 @@ jobs:
           echo "pt_sha=$PT_SHA" >> $GITHUB_OUTPUT
           echo "bl_sha=$BL_SHA" >> $GITHUB_OUTPUT
 
+          # --- Full-erase floor (per-channel carry-forward) --------------------
+          # The floor is the newest release of THIS channel (stable vs
+          # pre-release) that required a full erase. It is carried forward in
+          # every release body so devices can decide erase-vs-OTA from the
+          # newest release alone. PREV_TAG above (git describe) is fine for the
+          # hash chain, but the floor must be read from the previous release of
+          # the SAME channel, so look that up explicitly. Soft-fail throughout:
+          # any lookup problem just means "no prior floor" — never fail the
+          # build over the floor computation.
+          THIS_TAG="${{ steps.tag.outputs.tag }}"
+          IS_PRERELEASE="${{ steps.tag.outputs.is_prerelease }}"
+          NEW_FLOOR=""
+          if [ "$REQUIRED" = "true" ]; then
+            NEW_FLOOR="$THIS_TAG"
+            echo "Full-erase floor: $NEW_FLOOR (new this release)"
+          else
+            # Latest release of the same channel, excluding the rolling
+            # snd-alpha tag and the tag being created by this run.
+            PREV_CHANNEL_TAG=$(gh release list --limit 50 --json tagName,isPrerelease \
+              -q "[.[] | select(.isPrerelease == ${IS_PRERELEASE}) | select(.tagName != \"snd-alpha\") | select(.tagName != \"${THIS_TAG}\")] | .[0].tagName" 2>/dev/null || true)
+            if [ -n "$PREV_CHANNEL_TAG" ] && [ "$PREV_CHANNEL_TAG" != "null" ]; then
+              PREV_CHANNEL_BODY=$(gh release view "$PREV_CHANNEL_TAG" --json body -q .body 2>/dev/null || true)
+              NEW_FLOOR=$(echo "$PREV_CHANNEL_BODY" | grep -oE 'nina:full_erase_floor=[A-Za-z0-9._-]+' | head -1 | sed 's/.*nina:full_erase_floor=//')
+            fi
+            if [ -n "$NEW_FLOOR" ]; then
+              echo "Full-erase floor: $NEW_FLOOR (carried forward from ${PREV_CHANNEL_TAG})"
+            else
+              echo "Full-erase floor: none (no prior floor found; marker omitted)"
+            fi
+          fi
+          echo "erase_floor=$NEW_FLOOR" >> $GITHUB_OUTPUT
+
           if [ "$REQUIRED" = "true" ]; then
             echo "required=true" >> $GITHUB_OUTPUT
             echo "reason<<EOFR" >> $GITHUB_OUTPUT
@@ -661,6 +693,7 @@ jobs:
           ERASE_REASON="${{ steps.erase_check.outputs.reason }}"
           PT_SHA="${{ steps.erase_check.outputs.pt_sha }}"
           BL_SHA="${{ steps.erase_check.outputs.bl_sha }}"
+          ERASE_FLOOR="${{ steps.erase_check.outputs.erase_floor }}"
 
           if [ -n "$PREV_TAG" ]; then
             COMPARE_URL="https://github.com/chvvkumar/ESP32-P4-NINA-Display/compare/${PREV_TAG}...${TAG}"
@@ -669,7 +702,7 @@ jobs:
           fi
 
           AI_AVAILABLE="${{ steps.release_summary.outputs.ai_available }}"
-          export TAG PREV_TAG VERSION BRANCH COMPARE_URL FACTORY_MB OTA_MB AI_AVAILABLE FULL_ERASE ERASE_REASON PT_SHA BL_SHA
+          export TAG PREV_TAG VERSION BRANCH COMPARE_URL FACTORY_MB OTA_MB AI_AVAILABLE FULL_ERASE ERASE_REASON PT_SHA BL_SHA ERASE_FLOOR
           python3 << 'PYEOF'
           import os, json
           tag = os.environ['TAG']
@@ -684,6 +717,7 @@ jobs:
           erase_reason = os.environ.get('ERASE_REASON', '').strip()
           pt_sha = os.environ.get('PT_SHA', '').strip()
           bl_sha = os.environ.get('BL_SHA', '').strip()
+          erase_floor = os.environ.get('ERASE_FLOOR', '').strip()
 
           # Load metrics if available
           try:
@@ -722,6 +756,13 @@ jobs:
               erase_marker,
               pt_marker,
               bl_marker,
+          ]
+          # Per-channel full-erase floor: newest release of this channel that
+          # required a full erase. Omitted entirely when no floor is known so
+          # devices fall back to their legacy release-history walk.
+          if erase_floor:
+              lines.append(f'<!-- nina:full_erase_floor={erase_floor} -->')
+          lines += [
               f'## NINA Display {tag}',
               '',
               f'**Branch:** {branch}',
