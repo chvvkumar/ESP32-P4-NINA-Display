@@ -123,6 +123,45 @@ static bool alpha_marker_indicates_update(const char *body_str) {
     return true;
 }
 
+/* ── Full-erase floor marker (fast-path erase decision) ───────────── */
+
+/*
+ * Parse the "nina:full_erase_floor=<tag>" hidden marker from a release body
+ * (same HTML-comment convention as the alpha "nina:sha" marker above). The tag
+ * is copied up to the next whitespace or the "-->" comment terminator, so
+ * pre-release tags containing '-' (e.g. "v2.0.0-dev.3") survive intact.
+ * Returns true when the marker is present with a non-empty value; no version
+ * validation is done here — the caller decides whether the tag is usable.
+ */
+static bool parse_full_erase_floor(const char *body_str, char *tag_out, size_t tag_out_size) {
+    if (!body_str || !tag_out || tag_out_size == 0) return false;
+    tag_out[0] = '\0';
+
+    const char *m = strstr(body_str, "nina:full_erase_floor=");
+    if (!m) return false;
+    m += strlen("nina:full_erase_floor=");
+
+    size_t n = 0;
+    while (m[n] && n < tag_out_size - 1) {
+        char c = m[n];
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '>') break;
+        if (c == '-' && m[n + 1] == '-' && m[n + 2] == '>') break;
+        tag_out[n] = c;
+        n++;
+    }
+    tag_out[n] = '\0';
+
+    return tag_out[0] != '\0';
+}
+
+/* A floor tag is usable only when it parses as a full major.minor.patch
+ * version (optional 'v' prefix), mirroring compare_versions' parsing. */
+static bool floor_tag_parses_as_version(const char *tag) {
+    if (tag[0] == 'v' || tag[0] == 'V') tag++;
+    int maj = 0, min = 0, pat = 0;
+    return sscanf(tag, "%d.%d.%d", &maj, &min, &pat) == 3;
+}
+
 /* ── Strip markdown images ![alt](url) from a string in-place ─────── */
 
 static void strip_markdown_images(char *text) {
@@ -449,6 +488,9 @@ ota_check_result_t ota_github_check(int channel, const char *current_version, gi
     bool verify_error = false;          /* transient mid-path fetch failure (retry, not manual-flash) */
     bool fetch_failed_no_target = false;/* page-1 fetch failed before any target captured */
     char full_erase_tag_local[32] = {0};/* newest marked tag on the path (written once) */
+    bool floor_decided = false;         /* erase decision made via the target's floor marker */
+    bool floor_requires_erase = false;  /* fast-path result: installed < floor */
+    char floor_tag_local[32] = {0};     /* floor tag parsed from the target release body */
 
     for (int page = 1; page <= MAX_RELEASE_PAGES && !reached_installed; page++) {
         bool overflow = false;
@@ -556,6 +598,31 @@ ota_check_result_t ota_github_check(int channel, const char *current_version, gi
                     found_target = true;
                     ESP_LOGI(TAG, "Update target: %s (pre-release: %s)", out->tag, is_pre ? "yes" : "no");
 
+                    /* Fast path: the target release body may carry a precomputed
+                     * full-erase floor ("nina:full_erase_floor=<tag>"). When present
+                     * and parseable, the erase decision is installed < floor
+                     * (strictly less-than: installed == floor means the device
+                     * already went through that erase) and the history walk is
+                     * skipped entirely. Missing or malformed markers fall back to
+                     * the existing walk unchanged. The floor is also skipped during
+                     * a channel switch because cross-channel version tags are not
+                     * comparable, so the legacy path below decides. */
+                    if (!channel_switch &&
+                        parse_full_erase_floor(body_str, floor_tag_local, sizeof(floor_tag_local)) &&
+                        floor_tag_parses_as_version(floor_tag_local)) {
+                        floor_decided = true;
+                        floor_requires_erase =
+                            (compare_versions(current_version, floor_tag_local) < 0);
+                        ESP_LOGI(TAG, "Erase decision via floor marker: floor=%s installed=%s -> full_erase=%d",
+                                 floor_tag_local, current_version, (int)floor_requires_erase);
+                        reached_installed = true;   /* stop paging; walk not needed */
+                        break;
+                    }
+                    if (!channel_switch) {
+                        ESP_LOGW(TAG, "No usable full-erase floor marker on target %s, using history walk",
+                                 out->tag);
+                    }
+
                     /* Under channel_switch there is no installed-version boundary to
                      * reach, so the latest in-channel release is the whole path. */
                     if (channel_switch) {
@@ -591,13 +658,25 @@ ota_check_result_t ota_github_check(int channel, const char *current_version, gi
     }
 
     /* Populate the erase determination on the captured target. */
-    out->requires_full_erase = any_marker || fail_safe;
-    if (fail_safe) {
-        /* History-incomplete variant: empty tag signals "couldn't verify". */
-        out->full_erase_tag[0] = '\0';
+    if (floor_decided) {
+        /* Fast path: the target's floor marker decided; the OR walk did not run.
+         * The floor tag is only meaningful when an erase is actually required. */
+        out->requires_full_erase = floor_requires_erase;
+        if (floor_requires_erase) {
+            strncpy(out->full_erase_tag, floor_tag_local, sizeof(out->full_erase_tag) - 1);
+            out->full_erase_tag[sizeof(out->full_erase_tag) - 1] = '\0';
+        } else {
+            out->full_erase_tag[0] = '\0';
+        }
     } else {
-        strncpy(out->full_erase_tag, full_erase_tag_local, sizeof(out->full_erase_tag) - 1);
-        out->full_erase_tag[sizeof(out->full_erase_tag) - 1] = '\0';
+        out->requires_full_erase = any_marker || fail_safe;
+        if (fail_safe) {
+            /* History-incomplete variant: empty tag signals "couldn't verify". */
+            out->full_erase_tag[0] = '\0';
+        } else {
+            strncpy(out->full_erase_tag, full_erase_tag_local, sizeof(out->full_erase_tag) - 1);
+            out->full_erase_tag[sizeof(out->full_erase_tag) - 1] = '\0';
+        }
     }
 
     resolve_ota_download_url(out);
