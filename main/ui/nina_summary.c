@@ -193,6 +193,11 @@ typedef struct {
     float   cached_total;       /* cached exposure_total (seconds) */
     int64_t cached_end_epoch;   /* cached exposure_end_epoch (Unix seconds) */
     int64_t gap_start_epoch;    /* inter-exposure gap grace start (Unix seconds) */
+    /* NINA-domain clock pair copied from nina_client_t while the data lock is
+     * held (summary update path); read lock-free by summary_bar_interp_cb.
+     * cached_nina_epoch == 0 -> unknown, fall back to time(NULL). */
+    int64_t cached_nina_epoch;   /* NINA-PC UTC epoch at capture (HTTP Date) */
+    int64_t cached_nina_mono_us; /* esp_timer_get_time() at capture */
     /* Cached style values — only call lv_obj_set_style_* when changed to avoid
      * unnecessary LVGL invalidations that trigger expensive full redraws. */
     uint32_t cached_name_color;
@@ -236,6 +241,8 @@ static void bar_reset_exposure_state(summary_card_t *sc) {
     sc->cached_total       = 0;
     sc->cached_end_epoch   = 0;
     sc->gap_start_epoch    = 0;
+    sc->cached_nina_epoch  = 0;
+    sc->cached_nina_mono_us = 0;
     set_bar_if_changed(sc->bar_progress, 0, LV_ANIM_OFF);
     set_label_if_changed(sc->lbl_pct, "");
 }
@@ -280,8 +287,19 @@ static void summary_bar_interp_cb(lv_timer_t *timer) {
 
         /* Backward-only wall correction. Difference epoch seconds in int64
          * first (they exceed float's 24-bit precision), then cast the small
-         * result to float for the P4 single-precision FPU. */
-        int64_t remaining_wall_ms = (sc->cached_end_epoch - (int64_t)time(NULL)) * 1000;
+         * result to float for the P4 single-precision FPU. "Wall" is the
+         * NINA-PC clock domain (cached_end_epoch is a NINA timestamp): advance
+         * the cached Date-header epoch by monotonic time. This timer runs
+         * WITHOUT the data lock, so it reads the card's cached pair (copied
+         * under the lock in summary_page_update), never the instance struct. */
+        int64_t now_nina;
+        if (sc->cached_nina_epoch != 0) {
+            now_nina = sc->cached_nina_epoch +
+                       (esp_timer_get_time() - sc->cached_nina_mono_us) / 1000000;
+        } else {
+            now_nina = (int64_t)time(NULL);
+        }
+        int64_t remaining_wall_ms = (sc->cached_end_epoch - now_nina) * 1000;
         float elapsed_wall = sc->cached_total - (float)remaining_wall_ms / 1000.0f;
 
         if (elapsed_wall < elapsed - 1.0f) {
@@ -789,6 +807,8 @@ void summary_page_rebuild(void) {
             cards[i].cached_total       = 0;
             cards[i].cached_end_epoch   = 0;
             cards[i].gap_start_epoch    = 0;
+            cards[i].cached_nina_epoch  = 0;
+            cards[i].cached_nina_mono_us = 0;
         }
     }
 
@@ -946,6 +966,11 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
      * from what the cards actually show. */
     int visible = 0;
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        /* cppcheck-suppress arrayIndexThenCheck
+         * nina_slot_available[i]/nina_connection_is_connected(i) are indexed
+         * within the loop's own MAX_NINA_INSTANCES bound; the `i < count`
+         * check is an independent additional condition, not an array-size
+         * guard for these accesses. */
         if (nina_slot_available[i] && i < count && nina_connection_is_connected(i)) visible++;
     }
 
@@ -981,6 +1006,9 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
          * Only available slots (nina_slot_available[i]) can ever be shown;
          * unavailable slots are always kept hidden regardless of connection. */
         for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+            /* cppcheck-suppress arrayIndexThenCheck
+             * See rationale above: i is bounded by MAX_NINA_INSTANCES from
+             * the enclosing loop, independent of the `i < count` check. */
             if (nina_slot_available[i] && i < count && nina_connection_is_connected(i)) {
                 lv_obj_clear_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
                 update_card_layout(&cards[i], visible);
@@ -1024,6 +1052,9 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
         /* No layout change — just ensure correct visibility.
          * Unavailable slots stay hidden regardless of connection state. */
         for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+            /* cppcheck-suppress arrayIndexThenCheck
+             * See rationale above: i is bounded by MAX_NINA_INSTANCES from
+             * the enclosing loop, independent of the `i < count` check. */
             if (nina_slot_available[i] && i < count && nina_connection_is_connected(i)) {
                 lv_obj_clear_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
             } else {
@@ -1125,7 +1156,18 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
          * handles seeding, re-anchoring, the finished edge, and the gap/idle
          * reset. */
         {
-            time_t now = time(NULL);
+            /* NINA-domain "now" for all NINA-timestamp math. locked[i] was
+             * checked above (trylock-and-skip), so the data lock is held for
+             * this card: reading d's clock pair is safe. Copy the pair into
+             * the card cache for the lock-free summary_bar_interp_cb.
+             * Concurrency: the cached pair is serialized by the LVGL display
+             * lock, not the nina_client lock — this writer runs under both
+             * locks, while summary_bar_interp_cb reads it under the LVGL lock
+             * only (esp_lvgl_port task). Keep any future readers inside the
+             * LVGL lock. */
+            int64_t now_nina = nina_client_now_epoch(d);
+            sc->cached_nina_epoch = d->nina_clock_epoch;
+            sc->cached_nina_mono_us = d->nina_clock_mono_us;
 
             /* Detect the is_exposing true->false edge BEFORE updating the cached
              * flag; NINA drops is_exposing at sub end and the poll usually sees
@@ -1160,7 +1202,7 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
                  * anchor. Computed against the OLD cached_* values, so this must
                  * run BEFORE the cache assignments below. */
                 bool new_exposure = (d->exposure_end_epoch != sc->cached_end_epoch
-                                     && d->exposure_end_epoch > (int64_t)now)
+                                     && d->exposure_end_epoch > now_nina)
                                     || (sc->exp_anchor_us == 0);
                 bool same_exposure = (sc->exp_anchor_us != 0
                                       && d->exposure_end_epoch == sc->cached_end_epoch);
@@ -1174,7 +1216,7 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
                     /* Anchor the monotonic clock; seed elapsed with a ONE-TIME
                      * wall estimate (detection can land mid-sub). Difference the
                      * epochs in int64 first, then cast to float for the P4 FPU. */
-                    int64_t remaining_seed_ms = (d->exposure_end_epoch - (int64_t)now) * 1000;
+                    int64_t remaining_seed_ms = (d->exposure_end_epoch - now_nina) * 1000;
                     float seed = d->exposure_total - (float)remaining_seed_ms / 1000.0f;
                     if (seed < 0.0f) seed = 0.0f;
                     if (seed > d->exposure_total) seed = d->exposure_total;
@@ -1196,7 +1238,7 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
                      * smoothly animate the one-time correction; do NOT call
                      * bar_start_exposure_anim (it would delete this correction
                      * anim). The interp timer restarts the long anim afterward. */
-                    int64_t remaining_seed_ms = (d->exposure_end_epoch - (int64_t)now) * 1000;
+                    int64_t remaining_seed_ms = (d->exposure_end_epoch - now_nina) * 1000;
                     float seed = d->exposure_total - (float)remaining_seed_ms / 1000.0f;
                     if (seed < 0.0f) seed = 0.0f;
                     if (seed > d->exposure_total) seed = d->exposure_total;
@@ -1228,11 +1270,14 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
                                      || strcmp(d->status, "NoState") == 0
                                      || strcmp(d->status, "OFFLINE") == 0);
 
+                    /* Gap timing is device-only elapsed time (a duration, not
+                     * a NINA-timestamp comparison) — stays on time(NULL). */
+                    int64_t now_wall = (int64_t)time(NULL);
                     if (sc->gap_start_epoch == 0) {
-                        sc->gap_start_epoch = (int64_t)now;
+                        sc->gap_start_epoch = now_wall;
                     }
 
-                    int64_t gap_duration = (int64_t)now - sc->gap_start_epoch;
+                    int64_t gap_duration = now_wall - sc->gap_start_epoch;
                     if (camera_idle || gap_duration > BAR_GAP_GRACE_S) {
                         /* Grace expired — transition to idle. */
                         sc->cached_end_epoch = 0;
@@ -1241,6 +1286,8 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
                         sc->exp_anchor_us = 0;
                         sc->exp_anchor_elapsed = 0;
                         sc->bar_completing = false;
+                        sc->cached_nina_epoch = 0;
+                        sc->cached_nina_mono_us = 0;
                         lv_anim_delete(sc->bar_progress, bar_anim_exec);
 
                         lv_anim_t a;

@@ -42,6 +42,10 @@ typedef struct {
     int min_seconds;          // Smallest RemainingTime found so far (-1 = none)
     const char *reason;       // Header label for the binding constraint
     int condition_count;      // Total conditions found (including those without time)
+    int64_t now_epoch;        // "Now" in the NINA clock domain (from
+                              // nina_client_now_epoch); ExpectedDateTime is a
+                              // NINA-PC timestamp, so the subtraction must not
+                              // use the device SNTP clock. 0 = unknown.
 } earliest_condition_t;
 
 // Recursively scan all conditions with RemainingTime or ExpectedDateTime in a
@@ -72,9 +76,9 @@ static void find_earliest_condition(cJSON *container, earliest_condition_t *out)
                     time_t expected = parse_iso8601(edt->valuestring);
                     // Ignore sentinel values (year 1 / parse failure)
                     if (expected > 86400) {
-                        time_t now = time(NULL);
-                        if (now > 0 && expected > now) {
-                            secs = (int)(expected - now);
+                        int64_t now_nina = out->now_epoch;
+                        if (now_nina > 0 && (int64_t)expected > now_nina) {
+                            secs = (int)((int64_t)expected - now_nina);
                         }
                     }
                 }
@@ -310,7 +314,13 @@ void fetch_sequence_counts_optional(const char *base_url, nina_client_t *data) {
                 // Find the earliest binding condition (time, horizon, dawn, etc.)
                 data->target_time_remaining[0] = '\0';
                 data->target_time_reason[0] = '\0';
-                earliest_condition_t earliest = { .min_seconds = -1, .reason = "TIME LIMIT", .condition_count = 0 };
+                /* now_epoch: NINA clock domain (falls back to time(NULL) while
+                 * unknown). This runs on the instance's poll task — the same
+                 * task that writes the clock pair in the camera-info fetcher —
+                 * so the unlocked read cannot tear. */
+                earliest_condition_t earliest = { .min_seconds = -1, .reason = "TIME LIMIT",
+                                                  .condition_count = 0,
+                                                  .now_epoch = nina_client_now_epoch(data) };
                 find_earliest_condition(target_container, &earliest);
                 data->target_condition_count = earliest.condition_count;
                 if (earliest.min_seconds >= 0) {

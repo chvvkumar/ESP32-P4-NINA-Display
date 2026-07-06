@@ -471,10 +471,11 @@ void clock_page_update(void) {
 
     /* Condition — uppercase */
     char cond_upper[sizeof(wd.condition)];
-    for (int i = 0; i < (int)sizeof(wd.condition) && wd.condition[i]; i++) {
-        cond_upper[i] = (char)toupper((unsigned char)wd.condition[i]);
-        cond_upper[i + 1] = '\0';
+    int cu_i = 0;
+    for (; cu_i < (int)sizeof(wd.condition) - 1 && wd.condition[cu_i]; cu_i++) {
+        cond_upper[cu_i] = (char)toupper((unsigned char)wd.condition[cu_i]);
     }
+    cond_upper[cu_i] = '\0';
     if (wd.condition[0] == '\0') {
         strcpy(cond_upper, "--");
     }

@@ -2,12 +2,13 @@
  * @file allsky_client.c
  * @brief AllSky API HTTP client — polls /all endpoint and extracts configured field values.
  *
- * Uses esp_http_client in standalone mode (no keep-alive reuse) since AllSky
- * polling runs at low frequency (5-60 s) and only hits a single endpoint.
+ * Uses http_fetch's shared fetcher with a module-static keep-alive slot
+ * (s_conn). AllSky polling is single-owner (only allsky_poll_task ever
+ * calls allsky_client_poll), so the connection slot needs no locking.
  */
 
 #include "allsky_client.h"
-#include "esp_http_client.h"
+#include "http_fetch.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
@@ -26,6 +27,10 @@ static const char *TAG = "allsky_client";
 /* Cached parsed field_config_json — avoids re-parsing on every poll cycle */
 static cJSON *s_cached_field_config = NULL;
 static char  *s_cached_field_config_str = NULL;
+
+/* Persistent keep-alive slot, owned exclusively by allsky_poll_task; lazily
+ * created on first poll. */
+static http_fetch_conn_t *s_conn = NULL;
 
 // =============================================================================
 // Mutex Helpers
@@ -265,90 +270,41 @@ void allsky_client_poll(const char *hostname, const char *field_config_json, all
 
     ESP_LOGD(TAG, "Polling AllSky: %s", url);
 
-    /* Configure HTTP client — standalone mode (no keep-alive reuse) */
-    esp_http_client_config_t http_cfg = {
-        .url = url,
+    /* Lazily create the keep-alive slot on first poll. If allocation fails,
+     * fall through with conn == NULL -- http_fetch falls back to a one-shot
+     * client for this attempt, so a transient PSRAM shortage degrades
+     * gracefully instead of failing the poll outright. */
+    if (!s_conn) {
+        s_conn = http_fetch_conn_create();
+        if (!s_conn) {
+            ESP_LOGW(TAG, "Failed to allocate AllSky keep-alive connection slot");
+        }
+    }
+
+    http_fetch_opts_t opts = {
         .timeout_ms = ALLSKY_HTTP_TIMEOUT_MS,
-        .keep_alive_enable = true,
-        .keep_alive_idle = 15,
-        .keep_alive_interval = 5,
-        .keep_alive_count = 3,
+        .use_tls_bundle = false,
+        .max_redirects = 0,
+        .max_attempts = 1,
+        .max_response_bytes = ALLSKY_RESPONSE_BUF_SIZE,
+        .conn = s_conn,
     };
-    esp_http_client_handle_t client = esp_http_client_init(&http_cfg);
-    if (!client) {
-        ESP_LOGW(TAG, "Failed to init HTTP client for AllSky");
-        if (allsky_data_lock(data, 100)) {
-            data->connected = false;
-            allsky_data_unlock(data);
-        }
-        return;
-    }
 
-    esp_err_t err = esp_http_client_open(client, 0);
+    char *buffer = NULL;
+    size_t total_read = 0;
+    esp_err_t err = http_fetch_text(url, &opts, &buffer, &total_read);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "AllSky HTTP open failed: %s", esp_err_to_name(err));
-        esp_http_client_cleanup(client);
+        ESP_LOGW(TAG, "AllSky HTTP fetch failed for %s: %s", url, esp_err_to_name(err));
         if (allsky_data_lock(data, 100)) {
             data->connected = false;
             allsky_data_unlock(data);
         }
         return;
     }
-
-    int content_length = esp_http_client_fetch_headers(client);
-    if (content_length < 0) {
-        ESP_LOGW(TAG, "AllSky HTTP fetch headers failed");
-        esp_http_client_cleanup(client);
-        if (allsky_data_lock(data, 100)) {
-            data->connected = false;
-            allsky_data_unlock(data);
-        }
-        return;
-    }
-
-    int status = esp_http_client_get_status_code(client);
-    if (status < 200 || status >= 300) {
-        ESP_LOGW(TAG, "AllSky HTTP %d for %s", status, url);
-        esp_http_client_cleanup(client);
-        if (allsky_data_lock(data, 100)) {
-            data->connected = false;
-            allsky_data_unlock(data);
-        }
-        return;
-    }
-
-    /* Determine buffer size: use content_length if available, else fixed max */
-    int buf_size = (content_length > 0) ? (content_length + 1) : ALLSKY_RESPONSE_BUF_SIZE;
-    if (buf_size > ALLSKY_RESPONSE_BUF_SIZE) {
-        buf_size = ALLSKY_RESPONSE_BUF_SIZE;
-    }
-
-    char *buffer = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
-    if (!buffer) {
-        ESP_LOGE(TAG, "Failed to allocate %d bytes for AllSky response", buf_size);
-        esp_http_client_cleanup(client);
-        if (allsky_data_lock(data, 100)) {
-            data->connected = false;
-            allsky_data_unlock(data);
-        }
-        return;
-    }
-
-    /* Read response body */
-    int total_read = 0, read_len;
-    int max_read = buf_size - 1;  /* Leave room for null terminator */
-    while (total_read < max_read) {
-        read_len = esp_http_client_read(client, buffer + total_read, max_read - total_read);
-        if (read_len <= 0) break;
-        total_read += read_len;
-    }
-    buffer[total_read] = '\0';
-
-    esp_http_client_cleanup(client);
 
     if (total_read == 0) {
         ESP_LOGW(TAG, "AllSky: empty response body");
-        free(buffer);
+        heap_caps_free(buffer);
         if (allsky_data_lock(data, 100)) {
             data->connected = false;
             allsky_data_unlock(data);
@@ -358,7 +314,7 @@ void allsky_client_poll(const char *hostname, const char *field_config_json, all
 
     /* Parse JSON response */
     cJSON *json = cJSON_Parse(buffer);
-    free(buffer);
+    heap_caps_free(buffer);
 
     if (!json) {
         ESP_LOGW(TAG, "AllSky: failed to parse JSON response");
@@ -396,7 +352,7 @@ void allsky_client_poll(const char *hostname, const char *field_config_json, all
         memcpy(data->field_values, local_data.field_values, sizeof(data->field_values));
         data->moon_illumination = local_data.moon_illumination;
         allsky_data_unlock(data);
-        ESP_LOGD(TAG, "AllSky poll OK — %d bytes parsed", total_read);
+        ESP_LOGD(TAG, "AllSky poll OK — %u bytes parsed", (unsigned)total_read);
     } else {
         ESP_LOGW(TAG, "AllSky: failed to acquire mutex for data update");
     }

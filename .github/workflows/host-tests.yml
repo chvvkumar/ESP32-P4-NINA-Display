@@ -1,0 +1,93 @@
+name: Host Tests
+
+on:
+  push:
+    branches: [main, dev, snd]
+    paths:
+      - 'main/**'
+      - 'test/**'
+      - '.github/workflows/host-tests.yml'
+  pull_request:
+    paths:
+      - 'main/**'
+      - 'test/**'
+      - '.github/workflows/host-tests.yml'
+
+jobs:
+  host-tests:
+    name: Host Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure host test project
+        run: cmake -S test/host -B build_host
+
+      - name: Build host tests
+        run: cmake --build build_host
+
+      - name: Run host tests
+        run: ctest --test-dir build_host --output-on-failure
+
+  cppcheck:
+    name: Static Analysis (cppcheck)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install cppcheck
+        run: sudo apt-get update && sudo apt-get install -y cppcheck
+
+      - name: Run cppcheck against firmware sources
+        run: |
+          cppcheck \
+            --enable=warning,portability \
+            --error-exitcode=1 \
+            --inline-suppr \
+            --std=c11 \
+            -I main \
+            -I main/ui \
+            --suppress=missingIncludeSystem \
+            --suppress=missingInclude \
+            --suppress=unknownMacro \
+            --suppress=comparePointers \
+            --suppress=internalError:main/stb_image.h \
+            --suppress=zerodivcond:main/stb_image.h \
+            -i main/ui/lv_font_material_safety.c \
+            -i main/ui/lv_font_superscript_24.c \
+            -i main/ui/lv_font_overpass_16.c \
+            -i main/ui/lv_font_overpass_27.c \
+            -i main/ui/lv_font_playfair_228.c \
+            -i main/ui/lv_font_playfair_90.c \
+            -i main/stb_image.c \
+            -i main/stb_image.h \
+            main main/ui
+        # Suppression rationale (kept explicit and narrow; any new finding
+        # outside these exact classes/files still fails the job):
+        #   missingIncludeSystem / missingInclude - firmware headers pull in
+        #     ESP-IDF/FreeRTOS/LVGL headers that don't exist on this runner
+        #     (no IDF toolchain here); these are not real findings.
+        #   unknownMacro - ESP-IDF macros (ESP_LOGx, IRAM_ATTR, etc.) are
+        #     unresolvable without the IDF headers; not a real finding.
+        #   comparePointers - fires on the `xxx_end - xxx_start` idiom used
+        #     by every EMBED_FILES/EMBED_TXTFILES asset (config_ui.html,
+        #     login.html, setup_ui.html, favicon.png, logo.jpg,
+        #     spotify_logo.png, moon_texture.png, moon_equirect.jpg; verified
+        #     across main.c, moon_render.c, moon_sphere.cpp,
+        #     web_handlers_auth.c, web_handlers_config.c) because cppcheck
+        #     treats the two extern linker-symbol arrays as unrelated
+        #     objects. Confirmed false positive for this pattern, not a
+        #     first-party logic bug; suppressed by rule id only after
+        #     manual verification of every occurrence.
+        #   internalError / zerodivcond on main/stb_image.h - the -i excludes
+        #     above only skip stb_image.c/.h as standalone translation units;
+        #     cppcheck still analyzes stb_image.h's body when it is #included
+        #     (with STB_IMAGE_IMPLEMENTATION) by a non-excluded .c file, so
+        #     these need an explicit per-file suppression. stb_image.h is
+        #     vendored third-party code we do not maintain.
+        #   -i (excluded files) - generated LVGL bitmap font sources
+        #     (main/ui/lv_font_*.c) are machine-generated glyph tables, and
+        #     main/stb_image.* is a vendored third-party single-header
+        #     library; neither is firmware logic we maintain.

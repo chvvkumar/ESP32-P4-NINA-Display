@@ -11,23 +11,25 @@
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_http_client.h"
+#include "http_fetch.h"
 #include <time.h>
 
 /* ── Per-task HTTP client context ──
  *
  * Each instance_poll_task registers its context before calling poll functions.
  * http_get_json() looks up the context for the current task to enable
- * keep-alive client reuse.  When no context is registered (e.g., UI
- * coordinator fetching thumbnails/graphs), http_get_json() falls back to
- * standalone mode (no reuse, no keep-alive).
+ * keep-alive client reuse via the shared fetcher (main/http_fetch.h). When no
+ * context is registered (e.g., UI coordinator fetching thumbnails/graphs),
+ * http_get_json() falls back to standalone mode (one-shot, no reuse, no
+ * keep-alive).
  *
  * Implementation uses a small fixed-size registry indexed by instance,
  * avoiding FreeRTOS TLS (whose index 0 is claimed by LWIP/pthread).
  */
 typedef struct {
-    esp_http_client_handle_t *client_handle;  /* Points to local reuse_handle */
-    bool poll_mode;                           /* true = keep-alive + client reuse */
+    http_fetch_conn_t *conn;  /* Persistent keep-alive slot, owned by the caller's
+                               * nina_poll_state_t.http_client. NULL = standalone/
+                               * one-shot mode (no reuse, no keep-alive). */
 } http_poll_ctx_t;
 
 /**
@@ -45,6 +47,12 @@ http_poll_ctx_t *http_poll_ctx_get(void);
 /* HTTP GET and parse JSON response. Caller must cJSON_Delete() the result.
  * Uses per-task poll context for client reuse when available. */
 cJSON *http_get_json(const char *url);
+
+/* Variant of http_get_json() that also captures the response "Date" header
+ * (the NINA PC's own clock) parsed to a UTC epoch. Writes 0 to *date_epoch_out
+ * when the header is missing/unparseable or the fetch fails; date_epoch_out
+ * may be NULL (behaves exactly like http_get_json()). */
+cJSON *http_get_json_dated(const char *url, int64_t *date_epoch_out);
 
 /* Resolve an IPv4 hostname to its dotted-quad string using the app-level
  * DNS cache (60s TTL, stale fallback). On a hit, copies the cached IP into

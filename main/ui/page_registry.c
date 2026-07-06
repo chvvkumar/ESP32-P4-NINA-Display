@@ -177,6 +177,28 @@ bool page_ref_resolve(page_ref_t id, int *page_idx_out, int8_t *img_src_out)
     return true;
 }
 
+/* ── Optional page lifecycle ops (Task 4.7) ──
+ * Parallel array indexed by id, separate from the frozen s_pages[] identity
+ * table above. Zero-initialized (all NULL) until a page module opts in via
+ * page_registry_set_ops(). */
+static const page_ops_t *s_ops[PAGE_REF_ID_MAX];
+
+void page_registry_set_ops(uint8_t page_id, const page_ops_t *ops)
+{
+    if (page_id >= PAGE_REF_ID_MAX) {
+        return;
+    }
+    s_ops[page_id] = ops;
+}
+
+const page_ops_t *page_registry_get_ops(uint8_t page_id)
+{
+    if (page_id >= PAGE_REF_ID_MAX) {
+        return NULL;
+    }
+    return s_ops[page_id];
+}
+
 bool page_ref_navigate(page_ref_t id)
 {
     int page_idx;

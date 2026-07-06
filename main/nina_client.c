@@ -13,6 +13,8 @@
 #include "nina_sequence.h"
 #include "nina_websocket.h"
 #include "nina_connection.h"
+#include "http_fetch.h"
+#include "time_parse.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -80,9 +82,8 @@ http_poll_ctx_t *http_poll_ctx_get(void) {
 
 static SemaphoreHandle_t s_dns_mutex = NULL;
 
-// Retry delays between attempts (ms). Index 0 = delay before 2nd attempt, etc.
-static const int http_retry_delays_ms[] = {500};
-#define HTTP_MAX_ATTEMPTS  2
+#define HTTP_MAX_ATTEMPTS    2      // Total attempts: 1 initial + 1 retry
+#define HTTP_RETRY_DELAY_MS  500    // Flat delay before the retry
 #define HTTP_JSON_MAX_SIZE (1024 * 1024)  // 1 MB cap for JSON API responses
 
 // =============================================================================
@@ -179,12 +180,51 @@ time_t parse_iso8601(const char *str) {
     return 0;
 }
 
-cJSON *http_get_json(const char *url) {
-    /* Read per-task HTTP context from TLS (set by poll tasks).
-     * If no context is set, use standalone mode (no reuse, no keep-alive). */
+/* ── Per-attempt perf instrumentation bridge for http_get_json() ──
+ * http_fetch.c (main/http_fetch.h/.c) is deliberately protocol- and
+ * metrics-agnostic, so it reports diagnostics per attempt via an optional
+ * callback instead of calling into perf_monitor directly. This adapter
+ * reconstructs the exact connect/TTFB/body timing and retry/failure
+ * counters the old hand-rolled loop recorded inline. */
+typedef struct {
+    bool ever_connected;   /* true if ANY attempt's esp_http_client_open() succeeded */
+    bool succeeded_late;   /* true if the attempt that finally produced the result was > 0 */
+} http_get_json_perf_ctx_t;
+
+static void http_get_json_on_attempt(const http_fetch_attempt_info_t *info, void *hook_ctx) {
+    http_get_json_perf_ctx_t *pctx = (http_get_json_perf_ctx_t *)hook_ctx;
+
+    if (info->attempt_index > 0) {
+        perf_counter_increment(&g_perf.http_retry_count);
+    }
+
+    /* http_connect times esp_http_client_open() itself, so it's meaningful
+     * whether or not the open succeeded (matches the original timer, which
+     * wrapped open() unconditionally). http_ttfb (fetch_headers) and
+     * http_body (read loop) are only ever attempted once open succeeded. */
+    perf_timer_record(&g_perf.http_connect, info->connect_us);
+    if (info->ever_connected) {
+        pctx->ever_connected = true;
+        perf_timer_record(&g_perf.http_ttfb, info->headers_us);
+    }
+    if (info->body_us > 0) {
+        perf_timer_record(&g_perf.http_body, info->body_us);
+    }
+
+    if (info->ok && info->attempt_index > 0) {
+        pctx->succeeded_late = true;
+    }
+}
+
+cJSON *http_get_json_dated(const char *url, int64_t *date_epoch_out) {
+    if (date_epoch_out) *date_epoch_out = 0;
+
+    /* Read per-task HTTP context (set by poll tasks) for keep-alive reuse via
+     * the shared fetcher (main/http_fetch.h). If no context is registered,
+     * or its conn slot is unset, http_fetch treats a NULL conn as a one-shot
+     * client (no reuse, no keep-alive) -- same fallback as before. */
     http_poll_ctx_t *tls_ctx = http_poll_ctx_get();
-    bool poll_mode = tls_ctx ? tls_ctx->poll_mode : false;
-    esp_http_client_handle_t *reuse_slot = tls_ctx ? tls_ctx->client_handle : NULL;
+    http_fetch_conn_t *reuse_conn = tls_ctx ? tls_ctx->conn : NULL;
 
     /* ── mDNS-bypass URL rewrite ──
      * NINA hostnames are typically .lan (mDNS), and esp_http_client does a fresh
@@ -234,166 +274,102 @@ cJSON *http_get_json(const char *url) {
 
     perf_timer_start(&g_perf.http_request);
     perf_counter_increment(&g_perf.http_request_count);
-    bool ever_connected = false;
-    for (int attempt = 0; attempt < HTTP_MAX_ATTEMPTS; attempt++) {
-        if (attempt > 0) {
-            perf_counter_increment(&g_perf.http_retry_count);
-            ESP_LOGD(TAG, "HTTP retry %d/%d for %s (delay %d ms)",
-                     attempt + 1, HTTP_MAX_ATTEMPTS, url,
-                     http_retry_delays_ms[attempt - 1]);
-            vTaskDelay(pdMS_TO_TICKS(http_retry_delays_ms[attempt - 1]));
-        }
 
-        esp_http_client_handle_t client;
-        bool reusing = (poll_mode && reuse_slot && *reuse_slot != NULL);
+    /* Optional response-Date capture (NINA-PC clock domain). RFC-1123 dates
+     * are 29 chars ("Mon, 06 Jul 2026 19:06:19 GMT"); 48 leaves headroom. */
+    char date_buf[48];
+    date_buf[0] = '\0';
 
-        if (reusing) {
-            client = *reuse_slot;
-            esp_http_client_set_url(client, req_url);
+    http_get_json_perf_ctx_t pctx = { 0 };
+    http_fetch_opts_t opts = {
+        .timeout_ms = 3000,
+        .max_attempts = HTTP_MAX_ATTEMPTS,
+        .retry_delay_ms = HTTP_RETRY_DELAY_MS,
+        /* +1 for the NUL terminator: http_fetch's cap check rejects when
+         * content_length+1 exceeds it, matching the original's
+         * "content_length > HTTP_JSON_MAX_SIZE" boundary (content_length ==
+         * HTTP_JSON_MAX_SIZE exactly was allowed). */
+        .max_response_bytes = HTTP_JSON_MAX_SIZE + 1,
+        .host_header = host_hdr,
+        .on_attempt = http_get_json_on_attempt,
+        .hook_ctx = &pctx,
+        .conn = reuse_conn,
+        .capture_header = date_epoch_out ? "Date" : NULL,
+        .capture_header_out = date_epoch_out ? date_buf : NULL,
+        .capture_header_out_len = date_epoch_out ? sizeof(date_buf) : 0,
+    };
+
+    char *body = NULL;
+    size_t body_len = 0;
+    esp_err_t err = http_fetch_text(req_url, &opts, &body, &body_len);
+
+    if (err != ESP_OK) {
+        /* Extract host from URL for a clean log message. (http_fetch.c also
+         * logs its own generic failure line under the "http_fetch" tag; this
+         * host-only line is kept for parity with the previous log format.) */
+        const char *host = url;
+        const char *scheme_end = strstr(url, "://");
+        if (scheme_end) host = scheme_end + 3;
+        const char *host_end = strchr(host, ':');
+        if (!host_end) host_end = strchr(host, '/');
+        int host_len = host_end ? (int)(host_end - host) : (int)strlen(host);
+        ESP_LOGW(TAG, "%.*s unreachable", host_len, host);
+
+        if (pctx.ever_connected) {
+            perf_counter_increment(&g_perf.http_failure_count);
         } else {
-            esp_http_client_config_t cfg = {
-                .url = req_url,
-                .timeout_ms = 3000,
-                .keep_alive_enable = poll_mode,
-            };
-            client = esp_http_client_init(&cfg);
-            if (!client) continue;
+            perf_counter_increment(&g_perf.http_unreachable_count);
         }
-
-        /* When the URL carries a numeric IP (mDNS bypass), the Host header must
-         * always carry the original hostname so NINA routes correctly. Re-set it
-         * every request: a reused handle may have served a different host, and
-         * set_url() does not update an explicitly-set Host header. When no rewrite
-         * happened (host_hdr == NULL) leave esp_http_client to derive Host from the
-         * URL as usual. */
-        if (host_hdr) {
-            esp_http_client_set_header(client, "Host", host_hdr);
-        }
-
-        perf_timer_start(&g_perf.http_connect);
-        esp_err_t err = esp_http_client_open(client, 0);
-        perf_timer_stop(&g_perf.http_connect);
-        if (err != ESP_OK) {
-            esp_http_client_cleanup(client);
-            if (reusing && reuse_slot) *reuse_slot = NULL;
-            continue;  // Transport error — retryable
-        }
-        ever_connected = true;
-
-        perf_timer_start(&g_perf.http_ttfb);
-        int content_length = esp_http_client_fetch_headers(client);
-        perf_timer_stop(&g_perf.http_ttfb);
-        if (content_length < 0) {
-            esp_http_client_cleanup(client);
-            if (reusing && reuse_slot) *reuse_slot = NULL;
-            continue;  // Transport error — retryable
-        }
-
-        int status = esp_http_client_get_status_code(client);
-        if (status < 200 || status >= 300) {
-            ESP_LOGW(TAG, "HTTP %d for %s", status, url);
-            if (reusing) {
-                esp_http_client_close(client);
-            } else {
-                esp_http_client_cleanup(client);
-            }
-            if (status >= 500) continue;  // 5xx — retryable
-            perf_timer_stop(&g_perf.http_request);
-            return NULL;  // 4xx — not retryable
-        }
-
-        // Guard against chunked transfer encoding or missing Content-Length.
-        // NINA API always sends Content-Length; if absent, treat as error.
-        if (content_length == 0) {
-            ESP_LOGW(TAG, "No Content-Length for %s (chunked?), skipping", url);
-            if (reusing) {
-                esp_http_client_close(client);
-            } else {
-                esp_http_client_cleanup(client);
-            }
-            perf_timer_stop(&g_perf.http_request);
-            return NULL;
-        }
-
-        if (content_length > HTTP_JSON_MAX_SIZE) {
-            ESP_LOGW(TAG, "JSON response too large (%d bytes, max %d) for %s",
-                     content_length, HTTP_JSON_MAX_SIZE, url);
-            if (reusing) {
-                esp_http_client_close(client);
-            } else {
-                esp_http_client_cleanup(client);
-            }
-            perf_timer_stop(&g_perf.http_request);
-            return NULL;
-        }
-
-        char *buffer = heap_caps_malloc(content_length + 1, MALLOC_CAP_SPIRAM);
-        if (!buffer) {
-            if (reusing) esp_http_client_close(client);
-            else esp_http_client_cleanup(client);
-            perf_timer_stop(&g_perf.http_request);
-            return NULL;  // OOM — not retryable
-        }
-
-        int total_read_len = 0, read_len;
-        perf_timer_start(&g_perf.http_body);
-        while (total_read_len < content_length) {
-            read_len = esp_http_client_read(client, buffer + total_read_len,
-                                            content_length - total_read_len);
-            if (read_len <= 0) break;
-            total_read_len += read_len;
-        }
-        perf_timer_stop(&g_perf.http_body);
-        /* Check for partial read — truncated JSON could parse into
-         * a valid but incomplete tree, causing silent data loss. */
-        if (total_read_len < content_length) {
-            ESP_LOGW(TAG, "Partial HTTP read: %d/%d bytes for %s",
-                     total_read_len, content_length, url);
-            free(buffer);
-            if (poll_mode && reuse_slot) {
-                esp_http_client_close(client);
-                *reuse_slot = client;
-            } else {
-                esp_http_client_cleanup(client);
-            }
-            continue;  /* retry */
-        }
-        buffer[total_read_len] = '\0';
-
-        // Keep connection alive for reuse in poll mode; cleanup otherwise
-        if (poll_mode && reuse_slot) {
-            esp_http_client_close(client);
-            *reuse_slot = client;
-        } else {
-            esp_http_client_cleanup(client);
-        }
-
-        perf_timer_start(&g_perf.json_parse);
-        cJSON *json = cJSON_Parse(buffer);
-        perf_timer_stop(&g_perf.json_parse);
-        perf_counter_increment(&g_perf.json_parse_count);
-        free(buffer);
         perf_timer_stop(&g_perf.http_request);
-        if (attempt > 0) perf_counter_increment(&g_perf.http_attempt0_fail_count);
-        return json;
+        return NULL;  // All attempts exhausted
     }
 
-    /* Extract host from URL for a clean log message */
-    const char *host = url;
-    const char *scheme_end = strstr(url, "://");
-    if (scheme_end) host = scheme_end + 3;
-    const char *host_end = strchr(host, ':');
-    if (!host_end) host_end = strchr(host, '/');
-    int host_len = host_end ? (int)(host_end - host) : (int)strlen(host);
-    ESP_LOGW(TAG, "%.*s unreachable", host_len, host);
-
-    if (ever_connected) {
-        perf_counter_increment(&g_perf.http_failure_count);
-    } else {
-        perf_counter_increment(&g_perf.http_unreachable_count);
+    if (pctx.succeeded_late) {
+        perf_counter_increment(&g_perf.http_attempt0_fail_count);
     }
+
+    /* Parse the captured Date header (empty string when absent). 0 stays in
+     * *date_epoch_out on any parse failure. */
+    if (date_epoch_out && date_buf[0] != '\0') {
+        *date_epoch_out = (int64_t)time_parse_rfc1123(date_buf);
+    }
+
+    /* Guard against chunked transfer encoding or missing Content-Length.
+     * NINA API always sends Content-Length; an empty body is treated as
+     * error, matching the original manual-client behavior. */
+    if (body_len == 0) {
+        ESP_LOGW(TAG, "No Content-Length for %s (chunked?), skipping", url);
+        heap_caps_free(body);
+        perf_timer_stop(&g_perf.http_request);
+        return NULL;
+    }
+
+    perf_timer_start(&g_perf.json_parse);
+    cJSON *json = cJSON_Parse(body);
+    perf_timer_stop(&g_perf.json_parse);
+    perf_counter_increment(&g_perf.json_parse_count);
+    heap_caps_free(body);
     perf_timer_stop(&g_perf.http_request);
-    return NULL;  // All attempts exhausted
+    return json;
+}
+
+/* Thin wrapper — the common no-Date-capture case used by ~17 call sites. */
+cJSON *http_get_json(const char *url) {
+    return http_get_json_dated(url, NULL);
+}
+
+/* Current time in the NINA-PC clock domain. See nina_client.h for the
+ * locking contract: nina_clock_epoch/nina_clock_mono_us are written under
+ * the client mutex (camera-info fetchers only); callers should hold the
+ * mutex or tolerate a rare torn int64 read on RV32 — lock-free UI timers
+ * use a cached pair copied under the lock instead. All math is int64
+ * (P4 FPU is single-precision; no double). */
+int64_t nina_client_now_epoch(const nina_client_t *client) {
+    if (client && client->nina_clock_epoch != 0) {
+        return client->nina_clock_epoch +
+               (esp_timer_get_time() - client->nina_clock_mono_us) / 1000000;
+    }
+    return (int64_t)time(NULL);
 }
 
 /* ── NINA API envelope helpers ──
@@ -488,16 +464,23 @@ void nina_client_get_data(const char *base_url, nina_client_t *data) {
 
 void nina_poll_state_init(nina_poll_state_t *state) {
     if (state->http_client) {
-        esp_http_client_cleanup((esp_http_client_handle_t)state->http_client);
+        http_fetch_conn_destroy((http_fetch_conn_t *)state->http_client);
     }
     memset(state, 0, sizeof(nina_poll_state_t));
     state->cached_image_count = -1;  // Force initial full fetch
 }
 
 void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state_t *state, int instance) {
-    // Set per-task HTTP context for client reuse during this poll cycle
-    esp_http_client_handle_t reuse_handle = (esp_http_client_handle_t)state->http_client;
-    http_poll_ctx_t poll_ctx = { .client_handle = &reuse_handle, .poll_mode = true };
+    // Set per-task HTTP context for client reuse during this poll cycle.
+    // Lazily create the persistent keep-alive slot on first use (mirrors the
+    // previous lazy esp_http_client_handle_t allocation inside http_get_json).
+    // state->http_client holds the http_fetch_conn_t* directly and persists
+    // across calls, so — unlike the old reuse_handle round-trip — there is
+    // nothing to write back at the end of this function.
+    if (!state->http_client) {
+        state->http_client = http_fetch_conn_create();
+    }
+    http_poll_ctx_t poll_ctx = { .conn = (http_fetch_conn_t *)state->http_client };
     http_poll_ctx_set(&poll_ctx);
 
     int64_t now_ms = esp_timer_get_time() / 1000;
@@ -556,7 +539,6 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
             data->prev_target_container[0] = '\0';
             nina_client_unlock(data);
         }
-        state->http_client = (void *)reuse_handle;
         http_poll_ctx_set(NULL);
         return;
     }
@@ -701,8 +683,6 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
         nina_client_unlock(data);
     }
 
-    // Save persistent HTTP client for next poll cycle
-    state->http_client = (void *)reuse_handle;
     http_poll_ctx_set(NULL);
 
     ESP_LOGI(TAG, "=== Poll Summary ===");
@@ -725,9 +705,14 @@ void nina_client_poll_heartbeat(const char *base_url, nina_client_t *data, int i
 }
 
 void nina_client_poll_background(const char *base_url, nina_client_t *data, nina_poll_state_t *state, int instance) {
-    // Set per-task HTTP context for client reuse during this poll cycle
-    esp_http_client_handle_t reuse_handle = (esp_http_client_handle_t)state->http_client;
-    http_poll_ctx_t poll_ctx = { .client_handle = &reuse_handle, .poll_mode = true };
+    // Set per-task HTTP context for client reuse during this poll cycle.
+    // Lazily create the persistent keep-alive slot on first use; state->http_client
+    // holds the http_fetch_conn_t* directly and persists across calls (see
+    // nina_client_poll() above for the full rationale).
+    if (!state->http_client) {
+        state->http_client = http_fetch_conn_create();
+    }
+    http_poll_ctx_t poll_ctx = { .conn = (http_fetch_conn_t *)state->http_client };
     http_poll_ctx_set(&poll_ctx);
 
     int64_t now_ms = esp_timer_get_time() / 1000;
@@ -764,7 +749,6 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
         state->static_fetched = false;
         state->cached_image_count = -1;
         nina_connection_set_static_data_ready(instance, false);
-        state->http_client = (void *)reuse_handle;
         http_poll_ctx_set(NULL);
         return;
     }
@@ -829,8 +813,6 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
         state->last_sequence_poll_ms = now_ms;
     }
 
-    // Save persistent HTTP client for next poll cycle
-    state->http_client = (void *)reuse_handle;
     http_poll_ctx_set(NULL);
 
     ESP_LOGD(TAG, "Background poll: connected=%d, profile=%s, target=%s",

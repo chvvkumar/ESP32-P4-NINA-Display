@@ -1,9 +1,11 @@
 #include "web_server.h"
 #include "web_server_internal.h"
+#include "web_route_auth.h"
 #include <string.h>
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "ui/nina_setup_screen.h" /* is_setup_mode() */
 
 /* ---- Session store ---- */
 #define MAX_SESSIONS 8
@@ -232,6 +234,54 @@ bool validate_url_format(const char *url) {
             strncmp(url, "mqtts://", 8) == 0);
 }
 
+/**
+ * @brief One route table entry: the httpd_uri_t plus its auth classification.
+ *
+ * Aggregate-initializing only the first two/three fields of `uri` and
+ * omitting `.auth` entirely yields ROUTE_AUTH_REQUIRED (enum value 0) --
+ * a new route is secured by default unless explicitly marked otherwise.
+ */
+typedef struct {
+    httpd_uri_t uri;
+    route_auth_class_t auth;
+} route_entry_t;
+
+/**
+ * @brief Single registration-point auth gate. Registered as the handler for
+ * every route; the real handler is reached only after route_auth_allows()
+ * says so. req->user_ctx points at the owning route_entry_t (set at
+ * registration time below), so the classification and real handler are
+ * always looked up together -- no per-handler auth code to forget.
+ */
+static esp_err_t auth_gate_handler(httpd_req_t *req)
+{
+    const route_entry_t *entry = (const route_entry_t *)req->user_ctx;
+    bool setup_mode = is_setup_mode();
+    bool authed = false;
+
+    switch (entry->auth) {
+        case ROUTE_PUBLIC:
+            /* Never touch check_session() here: PUBLIC routes must not be
+             * able to trip the X-Auth-Password lockout counter. */
+            return entry->uri.handler(req);
+        case ROUTE_SETUP_EXEMPT:
+            if (setup_mode) {
+                return entry->uri.handler(req);
+            }
+            authed = check_session(req);
+            break;
+        case ROUTE_AUTH_REQUIRED:
+        default:
+            authed = check_session(req);
+            break;
+    }
+
+    if (!route_auth_allows(entry->auth, setup_mode, authed)) {
+        return send_auth_required(req);
+    }
+    return entry->uri.handler(req);
+}
+
 void start_web_server(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
@@ -252,74 +302,79 @@ void start_web_server(void)
         return;
     }
 
-    static const httpd_uri_t routes[] = {
-        { "/",                     HTTP_GET,  root_get_handler, NULL },
-        { "/favicon.ico",          HTTP_GET,  favicon_get_handler, NULL },
-        { "/api/config",           HTTP_GET,  config_get_handler, NULL },
-        { "/api/config",           HTTP_POST, config_post_handler, NULL },
-        { "/api/brightness",       HTTP_POST, brightness_post_handler, NULL },
-        { "/api/color-brightness", HTTP_POST, color_brightness_post_handler, NULL },
-        { "/api/theme",            HTTP_POST, theme_post_handler, NULL },
-        { "/api/widget-style",     HTTP_POST, widget_style_post_handler, NULL },
-        { "/api/reboot",           HTTP_POST, reboot_post_handler, NULL },
-        { "/api/factory-reset",    HTTP_POST, factory_reset_post_handler, NULL },
-        { "/api/screenshot",       HTTP_GET,  screenshot_get_handler, NULL },
-        { "/api/page",             HTTP_POST, page_post_handler, NULL },
-        { "/api/screen-rotation", HTTP_POST, screen_rotation_post_handler, NULL },
-        { "/api/version",          HTTP_GET,  version_get_handler, NULL },
-        { "/api/ota",              HTTP_POST, ota_post_handler, NULL },
-        { "/api/perf",             HTTP_GET,  perf_get_handler, NULL },
-        { "/api/perf/reset",       HTTP_POST, perf_reset_post_handler, NULL },
-        { "/api/config/apply",     HTTP_POST, config_apply_handler, NULL },
-        { "/api/config/revert",    HTTP_POST, config_revert_handler, NULL },
-        { "/api/check-update",     HTTP_POST, check_update_post_handler, NULL },
-        { "/api/check-update-json", HTTP_GET, check_update_json_handler, NULL },
-        { "/api/ota-github",       HTTP_POST, ota_github_post_handler, NULL },
-        { "/api/allsky-config",    HTTP_GET,  allsky_config_get_handler, NULL },
-        { "/api/allsky-proxy",     HTTP_GET,  allsky_proxy_get_handler, NULL },
-        { "/api/spotify/config",         HTTP_GET,  spotify_config_get_handler, NULL },
-        { "/api/spotify/config",         HTTP_POST, spotify_config_post_handler, NULL },
-        { "/api/spotify/callback",       HTTP_GET,  spotify_callback_get_handler, NULL },
-        { "/api/spotify/token-exchange", HTTP_POST, spotify_token_exchange_post_handler, NULL },
-        { "/api/spotify/logout",         HTTP_POST, spotify_logout_post_handler, NULL },
-        { "/api/spotify/status",         HTTP_GET,  spotify_status_get_handler, NULL },
-        { "/api/spotify/control",        HTTP_POST, spotify_control_post_handler, NULL },
-        { "/api/image-display-config",   HTTP_GET,  image_display_config_get_handler, NULL },
-        { "/api/image-display-config",   HTTP_POST, image_display_config_post_handler, NULL },
-        { "/api/config/backup",          HTTP_GET,  backup_get_handler,   NULL },
-        { "/api/config/restore",         HTTP_POST, restore_post_handler, NULL },
-        { "/api/status",                 HTTP_GET,  status_get_handler, NULL },
-        { "/api/nina/status",            HTTP_GET,  nina_status_get_handler, NULL },
-        { "/api/crash",                  HTTP_GET,  crash_get_handler, NULL },
-        { "/api/weather",                HTTP_GET,  weather_get_handler, NULL },
-        { "/api/events",                 HTTP_GET,  events_get_handler, NULL },
-        { "/api/events/clear",           HTTP_POST, events_clear_post_handler, NULL },
-        { "/api/admin-password",         HTTP_POST, admin_password_post_handler, NULL },
-        { "/login",                      HTTP_GET,  login_page_get_handler, NULL },
-        { "/api/login",                  HTTP_POST, login_post_handler, NULL },
-        { "/api/logout",                 HTTP_POST, logout_post_handler, NULL },
-        { "/api/wifi/scan",              HTTP_GET,  wifi_scan_get_handler, NULL },
-        { "/api/wifi/setup",         HTTP_POST, wifi_setup_post_handler, NULL },
-        { "/api/wifi/status",        HTTP_GET,  wifi_status_get_handler, NULL },
-        { "/api/auth/status",        HTTP_GET,  auth_status_get_handler, NULL },
-        { "/api/logs",               HTTP_GET,  logs_get_handler, NULL },
-        { "/api/logs/clear",         HTTP_POST, logs_clear_post_handler, NULL },
-        { "/api/crashlog",           HTTP_GET,  crashlog_get_handler, NULL },
-        { "/api/crashlog/clear",     HTTP_POST, crashlog_clear_post_handler, NULL },
-        { "/api/coredump",           HTTP_GET,  coredump_get_handler,        NULL },
-        { "/api/coredump/info",      HTTP_GET,  coredump_info_get_handler,   NULL },
-        { "/api/coredump/clear",     HTTP_POST, coredump_clear_post_handler, NULL },
-        { "/api/pages",              HTTP_GET,  pages_get_handler,     NULL },
-        { "/api/navigate",           HTTP_GET,  navigate_post_handler, NULL },
-        { "/api/navigate",           HTTP_POST, navigate_post_handler, NULL },
-        { "/api/nav/pin",            HTTP_POST, nav_pin_post_handler,  NULL },
-        { "/api/control/list",       HTTP_GET,  control_list_get_handler,    NULL },
-        { "/api/control/get",        HTTP_GET,  control_get_get_handler,     NULL },
-        { "/api/control/toggle",     HTTP_POST, control_toggle_post_handler, NULL },
-        { "/api/control/cycle",      HTTP_POST, control_cycle_post_handler,  NULL },
-        { "/api/control/set",        HTTP_POST, control_set_post_handler,    NULL },
-        { "/api/control/adjust",     HTTP_POST, control_adjust_post_handler, NULL },
-        { "/api/image-display/refresh", HTTP_POST, image_display_refresh_post_handler, NULL },
+    /* Auth classification: every entry defaults to ROUTE_AUTH_REQUIRED
+     * (fail-closed) unless explicitly marked ROUTE_PUBLIC or
+     * ROUTE_SETUP_EXEMPT below. See main/web_route_auth.h for the truth
+     * table auth_gate_handler() evaluates via route_auth_allows(). */
+    static const route_entry_t routes[] = {
+        { { "/",                     HTTP_GET,  root_get_handler, NULL }, ROUTE_SETUP_EXEMPT },
+        { { "/ui/fragment",          HTTP_GET,  ui_fragment_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/favicon.ico",          HTTP_GET,  favicon_get_handler, NULL }, ROUTE_PUBLIC },
+        { { "/api/config",           HTTP_GET,  config_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/config",           HTTP_POST, config_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/brightness",       HTTP_POST, brightness_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/color-brightness", HTTP_POST, color_brightness_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/theme",            HTTP_POST, theme_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/widget-style",     HTTP_POST, widget_style_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/reboot",           HTTP_POST, reboot_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/factory-reset",    HTTP_POST, factory_reset_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/screenshot",       HTTP_GET,  screenshot_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/page",             HTTP_POST, page_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/screen-rotation", HTTP_POST, screen_rotation_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/version",          HTTP_GET,  version_get_handler, NULL }, ROUTE_PUBLIC },
+        { { "/api/ota",              HTTP_POST, ota_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/perf",             HTTP_GET,  perf_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/perf/reset",       HTTP_POST, perf_reset_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/config/apply",     HTTP_POST, config_apply_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/config/revert",    HTTP_POST, config_revert_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/check-update",     HTTP_POST, check_update_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/check-update-json", HTTP_GET, check_update_json_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/ota-github",       HTTP_POST, ota_github_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/allsky-config",    HTTP_GET,  allsky_config_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/allsky-proxy",     HTTP_GET,  allsky_proxy_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/spotify/config",         HTTP_GET,  spotify_config_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/spotify/config",         HTTP_POST, spotify_config_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/spotify/callback",       HTTP_GET,  spotify_callback_get_handler, NULL }, ROUTE_PUBLIC },
+        { { "/api/spotify/token-exchange", HTTP_POST, spotify_token_exchange_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/spotify/logout",         HTTP_POST, spotify_logout_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/spotify/status",         HTTP_GET,  spotify_status_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/spotify/control",        HTTP_POST, spotify_control_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/image-display-config",   HTTP_GET,  image_display_config_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/image-display-config",   HTTP_POST, image_display_config_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/config/backup",          HTTP_GET,  backup_get_handler,   NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/config/restore",         HTTP_POST, restore_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/status",                 HTTP_GET,  status_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/nina/status",            HTTP_GET,  nina_status_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/crash",                  HTTP_GET,  crash_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/weather",                HTTP_GET,  weather_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/events",                 HTTP_GET,  events_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/events/clear",           HTTP_POST, events_clear_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/admin-password",         HTTP_POST, admin_password_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/login",                      HTTP_GET,  login_page_get_handler, NULL }, ROUTE_PUBLIC },
+        { { "/api/login",                  HTTP_POST, login_post_handler, NULL }, ROUTE_PUBLIC },
+        { { "/api/logout",                 HTTP_POST, logout_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/wifi/scan",              HTTP_GET,  wifi_scan_get_handler, NULL }, ROUTE_SETUP_EXEMPT },
+        { { "/api/wifi/setup",         HTTP_POST, wifi_setup_post_handler, NULL }, ROUTE_SETUP_EXEMPT },
+        { { "/api/wifi/status",        HTTP_GET,  wifi_status_get_handler, NULL }, ROUTE_SETUP_EXEMPT },
+        { { "/api/auth/status",        HTTP_GET,  auth_status_get_handler, NULL }, ROUTE_PUBLIC },
+        { { "/api/logs",               HTTP_GET,  logs_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/logs/clear",         HTTP_POST, logs_clear_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/crashlog",           HTTP_GET,  crashlog_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/crashlog/clear",     HTTP_POST, crashlog_clear_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/coredump",           HTTP_GET,  coredump_get_handler,        NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/coredump/info",      HTTP_GET,  coredump_info_get_handler,   NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/coredump/clear",     HTTP_POST, coredump_clear_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/pages",              HTTP_GET,  pages_get_handler,     NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/navigate",           HTTP_GET,  navigate_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/navigate",           HTTP_POST, navigate_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/nav/pin",            HTTP_POST, nav_pin_post_handler,  NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/control/list",       HTTP_GET,  control_list_get_handler,    NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/control/get",        HTTP_GET,  control_get_get_handler,     NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/control/toggle",     HTTP_POST, control_toggle_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/control/cycle",      HTTP_POST, control_cycle_post_handler,  NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/control/set",        HTTP_POST, control_set_post_handler,    NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/control/adjust",     HTTP_POST, control_adjust_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/image-display/refresh", HTTP_POST, image_display_refresh_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
     };
 
     /* Keep config.max_uri_handlers (set to 69 above) in sync with the route
@@ -329,7 +384,10 @@ void start_web_server(void)
                    "max_uri_handlers too small for route table");
 
     for (int i = 0; i < (int)(sizeof(routes)/sizeof(routes[0])); i++) {
-        httpd_register_uri_handler(server, &routes[i]);
+        httpd_uri_t gated = routes[i].uri;
+        gated.handler = auth_gate_handler;
+        gated.user_ctx = (void *)&routes[i];
+        httpd_register_uri_handler(server, &gated);
     }
 
     ESP_LOGI(TAG, "Web server started with %d routes",

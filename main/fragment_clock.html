@@ -1,0 +1,73 @@
+
+      <div class="card">
+        <div class="card-title"><span class="card-title-label">Weather <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Weather</div><p>Drives the weather overlay shown on the Clock page. Pick a provider and supply an API key if the provider needs one. Open-Meteo needs no key; OpenWeatherMap and Weather Underground each require a key. The forecast uses the device location set on the System tab.</p><p>The Time Format option switches the clock between 14:30 and 2:30 PM. Temperature Units switches all weather readings between degrees F and degrees C. Update Interval sets how often the device fetches new weather data.</p><p>Example: choose Open-Meteo, set units to degrees C, and the Clock page shows local conditions refreshed on the chosen interval.</p></div>
+        <div class="subsection">
+        <div class="subsection-title">Provider</div>
+        <div class="field">
+          <label class="field-label">Weather Provider</label>
+          <select class="input" id="weather_provider" onchange="toggleWeatherApiKey();checkDirty()">
+            <option value="0">OpenWeatherMap</option>
+            <option value="1">Open-Meteo (no key needed)</option>
+            <option value="2">Weather Underground</option>
+          </select>
+          <div class="field-hint">Open-Meteo works without a key; OpenWeatherMap and Weather Underground require an API key.</div>
+        </div>
+        <div class="field" id="weather_api_key_field">
+          <label class="field-label">API Key</label>
+          <input type="text" class="input" id="weather_api_key" placeholder="Enter API key">
+          <div class="field-hint" id="weather_api_key_hint">
+            <span id="owm_link">Get a free API key at <a href="https://home.openweathermap.org/api_keys" target="_blank" rel="noopener" style="color:#7eb8da">openweathermap.org</a></span>
+            <span id="wunderground_link" style="display:none">Get an API key at <a href="https://www.wunderground.com/member/api-keys" target="_blank" rel="noopener" style="color:#7eb8da">wunderground.com</a></span>
+          </div>
+        </div>
+        <div class="field" id="weather_location_name_field">
+          <label class="field-label">Location Name</label>
+          <input type="text" class="input" id="weather_location_name" readonly placeholder="Auto-filled by lookup" style="opacity:0.7">
+          <div class="field-hint">Read-only; set automatically by the city lookup on the System tab.</div>
+        </div>
+        <div class="field" id="weather_station_id_field" style="display:none">
+          <label class="field-label">Station ID</label>
+          <input type="text" class="input" id="weather_station_id" placeholder="e.g. KMOOFAL42">
+          <div class="field-hint">Personal Weather Station ID for Weather Underground</div>
+        </div>
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">Display Options</div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Temperature Units</label>
+            <select class="input" id="weather_units">
+              <option value="0">&deg;F Imperial</option>
+              <option value="1">&deg;C Metric</option>
+            </select>
+            <div class="field-hint">Switches all weather temperatures between degrees F and degrees C.</div>
+          </div>
+          <div class="field">
+            <label class="field-label">Time Format</label>
+            <select class="input" id="weather_time_format">
+              <option value="0">12-hour (AM/PM)</option>
+              <option value="1">24-hour</option>
+            </select>
+            <div class="field-hint">Switches the clock between 12-hour (2:30 PM) and 24-hour (14:30) display.</div>
+          </div>
+        </div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Update Interval</label>
+            <select class="input" id="weather_poll_interval_s">
+              <option value="900">15 minutes</option>
+              <option value="1200">20 minutes</option>
+              <option value="1800">30 minutes</option>
+              <option value="2700">45 minutes</option>
+              <option value="3600">60 minutes</option>
+            </select>
+            <div class="field-hint">How often the device fetches new weather data from the provider.</div>
+          </div>
+          <div class="field">
+            <div class="field-hint">The clock uses the time zone and NTP server configured on the System tab.</div>
+          </div>
+        </div>
+        </div>
+      </div>
+

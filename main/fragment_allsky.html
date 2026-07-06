@@ -1,0 +1,63 @@
+
+      <div class="card">
+        <div class="card-title"><span class="card-title-label">Connection <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">AllSky Connection</div><p>Points the device at an AllSky camera's API and sets how often it reads data. AllSky updates run on their own schedule, independent of N.I.N.A. polling, so this interval does not affect N.I.N.A. updates.</p><p>The dew-point safety margin controls when the dew reading is colored as safe. The reading is treated as safe while the dew point sits below ambient temperature minus this margin.</p><p>Example: set the hostname to allskypi5.lan:8080, the interval to 5 seconds, and a 5 C margin so dew is flagged unsafe once the dew point rises to within 5 C of ambient.</p></div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Enable AllSky</span>
+          <label class="toggle"><input type="checkbox" id="allsky_enabled" onchange="updateAllSkyEnabledUI()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint">Turns on the AllSky page and starts reading AllSky data; off hides the page and stops reading.</div>
+        <div id="allskyConnectionFields">
+        <div class="subsection">
+          <div class="subsection-title">Server</div>
+          <div class="field">
+            <label class="field-label">AllSky Hostname</label>
+            <input type="text" class="input" id="allskyHostname" placeholder="allskypi5.lan:8080">
+            <div class="field-hint">Host:port of the AllSky API (e.g., allskypi5.lan:8080)</div>
+          </div>
+        </div>
+        <div class="subsection">
+          <div class="subsection-title">Reading</div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Update Interval</label>
+            <select class="input" id="allskyInterval">
+              <option value="1">1 second</option>
+              <option value="2">2 seconds</option>
+              <option value="5" selected>5 seconds</option>
+              <option value="10">10 seconds</option>
+              <option value="30">30 seconds</option>
+              <option value="60">1 minute</option>
+              <option value="120">2 minutes</option>
+              <option value="300">5 minutes</option>
+            </select>
+            <div class="field-hint">How often the device reads the AllSky API; longer intervals reduce load on the AllSky host.</div>
+          </div>
+          <div class="field">
+            <label class="field-label">Dew Point Safety Margin (&deg;C)</label>
+            <input type="number" class="input" id="allskyDewOffset" step="0.5" min="-50" max="50" value="5.0">
+            <div class="field-hint">Dew point colored safe when below ambient &minus; this offset</div>
+          </div>
+        </div>
+        </div>
+        </div>
+      </div>
+
+      <div class="card" id="allskyFieldMappingsCard">
+        <div class="card-title"><span class="card-title-label">Field Mappings <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">AllSky Field Mappings</div><p>Maps values from the AllSky API JSON to the four display quadrants: Thermal, Sky Quality, Ambient, and Power. Each quadrant has a main value, two sub values, and two status dots, and each is filled by entering the JSON key path for that value.</p><p>Use Fetch JSON from AllSky to load the live response, click a Key Path input to make it active, then click Use on a value to copy its path in. Value fields that show a unit also have color controls that set the gradient range between their low and high bounds.</p><p>Example: map the Thermal main value to data.cpu_temp with a 0 to 80 range so the reading shifts from blue toward red as the camera warms.</p></div>
+        <div class="field-hint" style="margin-bottom:16px">Configure which AllSky API JSON values appear in each display quadrant. Click a value's path input, then click "Use" on a value to fill it. Use the color controls to set gradient ranges per field.</div>
+
+        <div class="subsection">
+          <div class="subsection-title">Import from AllSky</div>
+          <button onclick="fetchAllSkyJson()" class="btn btn-primary" id="fetchJsonBtn" style="width:100%;margin-bottom:16px">Fetch JSON from AllSky</button>
+
+          <div id="allskyJsonTree" style="display:none; max-height:300px; overflow-y:auto; margin:0; padding:12px; background:rgba(0,0,0,0.25); border-radius:var(--radius-sm); border:1px solid rgba(255,255,255,0.06); font-family:'SF Mono',Monaco,Consolas,monospace; font-size:0.75rem; line-height:1.6;"></div>
+        </div>
+
+        <div class="subsection">
+          <div class="subsection-title">Quadrant Mappings</div>
+          <div id="allskyFieldMappings"></div>
+        </div>
+      </div>
+

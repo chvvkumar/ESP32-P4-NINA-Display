@@ -9,6 +9,7 @@
 #include "nina_api_fetchers.h"
 #include "nina_client_internal.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "cJSON.h"
 #include <string.h>
 #include <stdio.h>
@@ -37,7 +38,12 @@ void fetch_camera_info_robust(const char *base_url, nina_client_t *data) {
     char url[256];
     snprintf(url, sizeof(url), "%sequipment/camera/info", base_url);
 
-    cJSON *json = http_get_json(url);
+    /* Capture the NINA PC's own clock from the HTTP Date header, and stamp
+     * the device monotonic clock ONCE right after the fetch returns so the
+     * (epoch, mono) pair describes the same instant. */
+    int64_t date_epoch = 0;
+    cJSON *json = http_get_json_dated(url, &date_epoch);
+    int64_t fetch_mono_us = esp_timer_get_time();
     if (!json) {
         // Transport failure / non-2xx / empty body — API unreachable.
         nina_fetch_set_offline(data);
@@ -66,6 +72,10 @@ void fetch_camera_info_robust(const char *base_url, nina_client_t *data) {
         return;
     }
     data->connected = true;
+    if (date_epoch > 0) {
+        data->nina_clock_epoch = date_epoch;
+        data->nina_clock_mono_us = fetch_mono_us;
+    }
     {
         // Camera name
         cJSON *cam_name = cJSON_GetObjectItem(response, "Name");
@@ -100,17 +110,21 @@ void fetch_camera_info_robust(const char *base_url, nina_client_t *data) {
 
         if (data->is_exposing && exp_end && exp_end->valuestring) {
             time_t end_time = parse_iso8601(exp_end->valuestring);
-            time_t now = time(NULL);
+            /* Do the remaining-time math in the NINA clock domain: Date-derived
+             * "now" needs no boot-clock sanity guard; the time(NULL) fallback
+             * keeps the >2020 guard against an unset SNTP clock. */
+            int64_t now_nina = (date_epoch > 0) ? date_epoch : (int64_t)time(NULL);
+            bool now_valid = (date_epoch > 0) || (now_nina > 1577836800);
 
-            if (now > 1577836800 && end_time > 0) {
-                double remaining = difftime(end_time, now);
+            if (now_valid && end_time > 0) {
+                int64_t remaining = (int64_t)end_time - now_nina;
                 if (remaining >= 0 && remaining <= 7200) {
-                    data->exposure_current = -remaining;
+                    data->exposure_current = -(float)remaining;
                     data->exposure_end_epoch = (int64_t)end_time;
-                    if (data->exposure_total == 0 && remaining > 0.5) {
+                    if (data->exposure_total == 0 && remaining > 0) {
                         data->exposure_total = (float)remaining;
                     }
-                    ESP_LOGI(TAG, "Camera exposing: %.1fs remaining", remaining);
+                    ESP_LOGI(TAG, "Camera exposing: %llds remaining", (long long)remaining);
                 }
             }
         }
@@ -558,7 +572,12 @@ int fetch_equipment_info_bundled(const char *base_url, nina_client_t *data, bool
     char url[256];
     snprintf(url, sizeof(url), "%sequipment/info", base_url);
 
-    cJSON *json = http_get_json(url);
+    /* Capture NINA's own clock (HTTP Date header) + a device monotonic stamp
+     * taken ONCE right after the fetch returns (same pattern as
+     * fetch_camera_info_robust). */
+    int64_t date_epoch = 0;
+    cJSON *json = http_get_json_dated(url, &date_epoch);
+    int64_t fetch_mono_us = esp_timer_get_time();
     if (!json) {
         // Transport failure / non-2xx / empty body — API unreachable.
         nina_fetch_set_offline(data);
@@ -589,6 +608,10 @@ int fetch_equipment_info_bundled(const char *base_url, nina_client_t *data, bool
         return 0;
     }
     data->connected = true;
+    if (date_epoch > 0) {
+        data->nina_clock_epoch = date_epoch;
+        data->nina_clock_mono_us = fetch_mono_us;
+    }
 
     // ── Camera ──
     cJSON *camera = cJSON_GetObjectItem(response, "Camera");
@@ -621,13 +644,16 @@ int fetch_equipment_info_bundled(const char *base_url, nina_client_t *data, bool
 
         if (data->is_exposing && exp_end && exp_end->valuestring) {
             time_t end_time = parse_iso8601(exp_end->valuestring);
-            time_t now = time(NULL);
-            if (now > 1577836800 && end_time > 0) {
-                double remaining = difftime(end_time, now);
+            /* NINA-domain "now": Date-derived needs no boot-clock guard; the
+             * time(NULL) fallback keeps the >2020 unset-SNTP guard. */
+            int64_t now_nina = (date_epoch > 0) ? date_epoch : (int64_t)time(NULL);
+            bool now_valid = (date_epoch > 0) || (now_nina > 1577836800);
+            if (now_valid && end_time > 0) {
+                int64_t remaining = (int64_t)end_time - now_nina;
                 if (remaining >= 0 && remaining <= 7200) {
-                    data->exposure_current = -remaining;
+                    data->exposure_current = -(float)remaining;
                     data->exposure_end_epoch = (int64_t)end_time;
-                    if (data->exposure_total == 0 && remaining > 0.5) {
+                    if (data->exposure_total == 0 && remaining > 0) {
                         data->exposure_total = (float)remaining;
                     }
                 }

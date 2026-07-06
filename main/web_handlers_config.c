@@ -11,7 +11,7 @@
 #include "ui/nina_dashboard_internal.h" /* PAGE_IDX_SUMMARY, SETTINGS_PAGE_IDX, SYSINFO_PAGE_IDX page-index macros */
 #include "ui/nina_nav_arbiter.h"        /* nav_arbiter_submit_user — live Home Page USER claim */
 #include "ui/page_registry.h"           /* page_ref_navigate, PAGE_REF_ID_MAX, PAGE_REF_SETTINGS */
-#include "ui/themes.h"                  /* themes_get_count() — theme_index clamp */
+#include "settings_table.h"             /* settings_json_serialize/parse — table-driven config JSON */
 
 extern const uint8_t config_html_start[] asm("_binary_config_ui_html_start");
 extern const uint8_t config_html_end[]   asm("_binary_config_ui_html_end");
@@ -19,6 +19,41 @@ extern const uint8_t setup_html_start[] asm("_binary_setup_ui_html_start");
 extern const uint8_t setup_html_end[]   asm("_binary_setup_ui_html_end");
 extern const uint8_t favicon_png_start[] asm("_binary_favicon_png_start");
 extern const uint8_t favicon_png_end[]   asm("_binary_favicon_png_end");
+
+/* P6b tab fragments -- see s_ui_fragments[] below for the lookup table these feed. */
+extern const uint8_t fragment_logs_html_start[] asm("_binary_fragment_logs_html_start");
+extern const uint8_t fragment_logs_html_end[]   asm("_binary_fragment_logs_html_end");
+extern const uint8_t fragment_backup_html_start[] asm("_binary_fragment_backup_html_start");
+extern const uint8_t fragment_backup_html_end[]   asm("_binary_fragment_backup_html_end");
+extern const uint8_t fragment_api_html_start[] asm("_binary_fragment_api_html_start");
+extern const uint8_t fragment_api_html_end[]   asm("_binary_fragment_api_html_end");
+
+/* P6c tab fragments. image-display's tab name has a hyphen; the embedded
+ * asset filename/symbol use an underscore (fragment_image_display.html),
+ * so the name->symbol mapping only lines up in the s_ui_fragments[] row
+ * below, not by naming convention alone. */
+extern const uint8_t fragment_allsky_html_start[] asm("_binary_fragment_allsky_html_start");
+extern const uint8_t fragment_allsky_html_end[]   asm("_binary_fragment_allsky_html_end");
+extern const uint8_t fragment_clock_html_start[] asm("_binary_fragment_clock_html_start");
+extern const uint8_t fragment_clock_html_end[]   asm("_binary_fragment_clock_html_end");
+extern const uint8_t fragment_spotify_html_start[] asm("_binary_fragment_spotify_html_start");
+extern const uint8_t fragment_spotify_html_end[]   asm("_binary_fragment_spotify_html_end");
+extern const uint8_t fragment_image_display_html_start[] asm("_binary_fragment_image_display_html_start");
+extern const uint8_t fragment_image_display_html_end[]   asm("_binary_fragment_image_display_html_end");
+
+/* P6d tab fragments -- final wave. Extracts the remaining four tabs (nodes,
+ * display, behavior, system), completing the migration: all 11 tabs now ship
+ * as lazily-fetched fragments and config_ui.html holds only the tab shell,
+ * loader machinery, and the shared JS (see config_ui.html's Tab Fragment
+ * Loader section for LAZY_TABS/loadedTabs). */
+extern const uint8_t fragment_nodes_html_start[] asm("_binary_fragment_nodes_html_start");
+extern const uint8_t fragment_nodes_html_end[]   asm("_binary_fragment_nodes_html_end");
+extern const uint8_t fragment_display_html_start[] asm("_binary_fragment_display_html_start");
+extern const uint8_t fragment_display_html_end[]   asm("_binary_fragment_display_html_end");
+extern const uint8_t fragment_behavior_html_start[] asm("_binary_fragment_behavior_html_start");
+extern const uint8_t fragment_behavior_html_end[]   asm("_binary_fragment_behavior_html_end");
+extern const uint8_t fragment_system_html_start[] asm("_binary_fragment_system_html_start");
+extern const uint8_t fragment_system_html_end[]   asm("_binary_fragment_system_html_end");
 
 // Handler for root URL
 esp_err_t root_get_handler(httpd_req_t *req)
@@ -33,6 +68,72 @@ esp_err_t root_get_handler(httpd_req_t *req)
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, (const char *)config_html_start,
                     config_html_end - config_html_start);
+    return ESP_OK;
+}
+
+/**
+ * @brief One row of the tab-fragment lookup table: a `tab` query value maps
+ * to an embedded HTML asset's start/end pointers (same EMBED_TXTFILES
+ * pattern as config_html_start/end above).
+ */
+typedef struct {
+    const char *name;
+    const uint8_t *start;
+    const uint8_t *end;
+} ui_fragment_entry_t;
+
+/*
+ * Fragment table for GET /ui/fragment?tab=<name> -- serves one config_ui.html
+ * tab's markup as a standalone HTML asset, fetched lazily by the browser on
+ * tab activation (see ensureTabLoaded() in config_ui.html). P6a landed only
+ * the loader machinery (table empty, every lookup 404s). P6b extracted logs,
+ * backup, and api. P6c extracted allsky, clock, spotify, and image-display.
+ * P6d (final wave) extracts the remaining four -- nodes, display, behavior,
+ * system -- so every tab now ships as its own fragment_NAME.html and none
+ * remain inline in config_ui.html. The "image-display" row is the one
+ * name/symbol mismatch: the tab name has a hyphen, but embedded-asset
+ * symbols cannot contain one, so the file is fragment_image_display.html
+ * and only this table maps the hyphenated tab name to the underscored
+ * symbol.
+ */
+static const ui_fragment_entry_t s_ui_fragments[] = {
+    { "__none__", NULL, NULL },  /* placeholder so the array type-checks; never matches a real tab name */
+    { "logs",   fragment_logs_html_start,   fragment_logs_html_end },
+    { "backup", fragment_backup_html_start, fragment_backup_html_end },
+    { "api",    fragment_api_html_start,    fragment_api_html_end },
+    { "allsky",        fragment_allsky_html_start,        fragment_allsky_html_end },
+    { "clock",         fragment_clock_html_start,         fragment_clock_html_end },
+    { "spotify",       fragment_spotify_html_start,       fragment_spotify_html_end },
+    { "image-display", fragment_image_display_html_start, fragment_image_display_html_end },
+    { "nodes",         fragment_nodes_html_start,         fragment_nodes_html_end },
+    { "display",       fragment_display_html_start,       fragment_display_html_end },
+    { "behavior",      fragment_behavior_html_start,      fragment_behavior_html_end },
+    { "system",        fragment_system_html_start,        fragment_system_html_end },
+};
+
+// Handler for GET /ui/fragment?tab=<name> -- serves one lazily-loaded config_ui.html tab fragment.
+esp_err_t ui_fragment_get_handler(httpd_req_t *req)
+{
+    REQUIRE_AUTH(req);
+
+    char qbuf[64] = {0};
+    char tab[32] = {0};
+    if (httpd_req_get_url_query_str(req, qbuf, sizeof(qbuf)) == ESP_OK) {
+        httpd_query_key_value(qbuf, "tab", tab, sizeof(tab));
+    }
+
+    for (size_t i = 0; i < sizeof(s_ui_fragments) / sizeof(s_ui_fragments[0]); i++) {
+        if (s_ui_fragments[i].start != NULL && strcmp(s_ui_fragments[i].name, tab) == 0) {
+            httpd_resp_set_type(req, "text/html");
+            httpd_resp_send(req, (const char *)s_ui_fragments[i].start,
+                             s_ui_fragments[i].end - s_ui_fragments[i].start);
+            return ESP_OK;
+        }
+    }
+
+    httpd_resp_set_status(req, "404 Not Found");
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_send(req, "unknown fragment", HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
 
@@ -59,12 +160,20 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
 
     cJSON_AddNumberToObject(obj, "config_version", APP_CONFIG_VERSION);
 
-    cJSON_AddStringToObject(obj, "hostname", cfg->hostname);
+    /* Every "simple" field (plain default + optional range check) is driven
+     * from the single SETTINGS_TABLE X-macro in settings_table.h/.c. This
+     * covers the large majority of scalar fields below; anything NOT covered
+     * (arrays, JSON-blob strings, secrets, cross-field page targets) keeps
+     * its hand-written call below, in original relative order. */
+    settings_json_serialize(cfg, obj);
+    /* idle_page_persistent is a SETTINGS_TABLE row (kept there only for
+     * settings_defaults_apply()/settings_clamp_apply() consistency) but is
+     * retired/unread outside app_config.c migrations; never expose it. */
+    cJSON_DeleteItemFromObject(obj, "idle_page_persistent");
+
     cJSON_AddStringToObject(obj, "url1", cfg->api_url[0]);
     cJSON_AddStringToObject(obj, "url2", cfg->api_url[1]);
     cJSON_AddStringToObject(obj, "url3", cfg->api_url[2]);
-    cJSON_AddStringToObject(obj, "ntp", cfg->ntp_server);
-    cJSON_AddStringToObject(obj, "timezone", cfg->tz_string);
     cJSON_AddStringToObject(obj, "filter_colors_1", cfg->filter_colors[0]);
     cJSON_AddStringToObject(obj, "filter_colors_2", cfg->filter_colors[1]);
     cJSON_AddStringToObject(obj, "filter_colors_3", cfg->filter_colors[2]);
@@ -74,21 +183,8 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
     cJSON_AddStringToObject(obj, "hfr_thresholds_1", cfg->hfr_thresholds[0]);
     cJSON_AddStringToObject(obj, "hfr_thresholds_2", cfg->hfr_thresholds[1]);
     cJSON_AddStringToObject(obj, "hfr_thresholds_3", cfg->hfr_thresholds[2]);
-    cJSON_AddNumberToObject(obj, "theme_index", cfg->theme_index);
-    cJSON_AddNumberToObject(obj, "widget_style", cfg->widget_style);
-    cJSON_AddNumberToObject(obj, "brightness", cfg->brightness);
-    cJSON_AddNumberToObject(obj, "color_brightness", cfg->color_brightness);
-    cJSON_AddBoolToObject(obj, "mqtt_enabled", cfg->mqtt_enabled);
-    cJSON_AddStringToObject(obj, "mqtt_broker_url", cfg->mqtt_broker_url);
-    cJSON_AddNumberToObject(obj, "mqtt_port", cfg->mqtt_port);
-    cJSON_AddStringToObject(obj, "mqtt_username", cfg->mqtt_username);
     cJSON_AddStringToObject(obj, "mqtt_password", cfg->mqtt_password);
-    cJSON_AddStringToObject(obj, "mqtt_topic_prefix", cfg->mqtt_topic_prefix);
     cJSON_AddNumberToObject(obj, "active_page_override", cfg->active_page_override);
-    cJSON_AddBoolToObject(obj, "auto_rotate_enabled", cfg->auto_rotate_enabled);
-    cJSON_AddNumberToObject(obj, "auto_rotate_interval_s", cfg->auto_rotate_interval_s);
-    cJSON_AddNumberToObject(obj, "auto_rotate_effect", cfg->auto_rotate_effect);
-    cJSON_AddBoolToObject(obj, "auto_rotate_skip_disconnected", cfg->auto_rotate_skip_disconnected);
     cJSON_AddNumberToObject(obj, "auto_rotate_pages",
         (int)cfg->auto_rotate_pages | ((int)cfg->auto_rotate_pages_hi << 8));
     {
@@ -118,98 +214,23 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
     }
     cJSON_AddNumberToObject(obj, "update_rate_s", cfg->update_rate_s);
     cJSON_AddNumberToObject(obj, "graph_update_interval_s", cfg->graph_update_interval_s);
-    cJSON_AddNumberToObject(obj, "connection_timeout_s", cfg->connection_timeout_s);
-    cJSON_AddNumberToObject(obj, "toast_duration_s", cfg->toast_duration_s);
-    cJSON_AddBoolToObject(obj, "debug_mode", cfg->debug_mode);
-    cJSON_AddBoolToObject(obj, "demo_mode", cfg->demo_mode);
     cJSON_AddBoolToObject(obj, "instance_enabled_1", cfg->instance_enabled[0]);
     cJSON_AddBoolToObject(obj, "instance_enabled_2", cfg->instance_enabled[1]);
     cJSON_AddBoolToObject(obj, "instance_enabled_3", cfg->instance_enabled[2]);
-    cJSON_AddBoolToObject(obj, "screen_sleep_enabled", cfg->screen_sleep_enabled);
-    cJSON_AddNumberToObject(obj, "screen_sleep_timeout_s", cfg->screen_sleep_timeout_s);
-    cJSON_AddBoolToObject(obj, "alert_flash_enabled", cfg->alert_flash_enabled);
-    cJSON_AddNumberToObject(obj, "idle_poll_interval_s", cfg->idle_poll_interval_s);
-    cJSON_AddBoolToObject(obj, "wifi_power_save", cfg->wifi_power_save);
-    cJSON_AddBoolToObject(obj, "deep_sleep_enabled", cfg->deep_sleep_enabled);
-    cJSON_AddNumberToObject(obj, "deep_sleep_wake_timer_s", cfg->deep_sleep_wake_timer_s);
-    cJSON_AddBoolToObject(obj, "deep_sleep_on_idle", cfg->deep_sleep_on_idle);
-    cJSON_AddBoolToObject(obj, "auto_update_check", cfg->auto_update_check);
-    cJSON_AddNumberToObject(obj, "update_channel", cfg->update_channel);
-    cJSON_AddNumberToObject(obj, "screen_rotation", cfg->screen_rotation);
-    cJSON_AddBoolToObject(obj, "allsky_enabled", cfg->allsky_enabled);
-    cJSON_AddStringToObject(obj, "allsky_hostname", cfg->allsky_hostname);
-    cJSON_AddNumberToObject(obj, "allsky_update_interval_s", cfg->allsky_update_interval_s);
-    cJSON_AddNumberToObject(obj, "allsky_dew_offset", (double)cfg->allsky_dew_offset);
     cJSON_AddStringToObject(obj, "allsky_field_config", cfg->allsky_field_config);
     cJSON_AddStringToObject(obj, "allsky_thresholds", cfg->allsky_thresholds);
-    cJSON_AddBoolToObject(obj, "spotify_enabled", cfg->spotify_enabled);
     cJSON_AddStringToObject(obj, "spotify_client_id", cfg->spotify_client_id);
-    cJSON_AddNumberToObject(obj, "spotify_poll_interval_ms", cfg->spotify_poll_interval_ms);
-    cJSON_AddBoolToObject(obj, "spotify_show_progress_bar", cfg->spotify_show_progress_bar);
-    cJSON_AddBoolToObject(obj, "spotify_minimal_mode", cfg->spotify_minimal_mode);
-    cJSON_AddBoolToObject(obj, "spotify_scroll_text", cfg->spotify_scroll_text);
-    cJSON_AddNumberToObject(obj, "spotify_overlay_timeout_s", cfg->spotify_overlay_timeout_s);
-    cJSON_AddBoolToObject(obj, "spotify_overlay_visible", cfg->spotify_overlay_visible);
-    cJSON_AddBoolToObject(obj, "image_display_enabled", cfg->image_display_enabled);
-    cJSON_AddBoolToObject(obj, "image_display_show_overlay", cfg->image_display_show_overlay);
-    cJSON_AddBoolToObject(obj, "image_display_crop", cfg->image_display_crop);
-    cJSON_AddStringToObject(obj, "goes_region", cfg->goes_region);
-    cJSON_AddNumberToObject(obj, "goes_update_interval_s", cfg->goes_update_interval_s);
-    cJSON_AddNumberToObject(obj, "image_display_source", cfg->image_display_source);
-    cJSON_AddStringToObject(obj, "custom_image_url", cfg->custom_image_url);
-    cJSON_AddNumberToObject(obj, "custom_orientation", cfg->custom_orientation);
-    cJSON_AddNumberToObject(obj, "custom_update_interval_s", cfg->custom_update_interval_s);
-    cJSON_AddNumberToObject(obj, "moon_bg_style", cfg->moon_bg_style);
-    cJSON_AddNumberToObject(obj, "moon_lat", (double)cfg->moon_lat);
-    cJSON_AddNumberToObject(obj, "moon_lon", (double)cfg->moon_lon);
-    cJSON_AddNumberToObject(obj, "solar_band", cfg->solar_band);
     cJSON_AddNumberToObject(obj, "moon_drag_light_mode", cfg->moon_drag_light_mode);
-    cJSON_AddNumberToObject(obj, "goes_vflip", cfg->goes_vflip);
-    cJSON_AddNumberToObject(obj, "goes_hflip", cfg->goes_hflip);
-    cJSON_AddNumberToObject(obj, "solar_vflip", cfg->solar_vflip);
-    cJSON_AddNumberToObject(obj, "solar_hflip", cfg->solar_hflip);
-    cJSON_AddNumberToObject(obj, "custom_vflip", cfg->custom_vflip);
-    cJSON_AddNumberToObject(obj, "custom_hflip", cfg->custom_hflip);
-    cJSON_AddNumberToObject(obj, "moon_flip_u", cfg->moon_flip_u);
-    cJSON_AddNumberToObject(obj, "moon_flip_v", cfg->moon_flip_v);
-    cJSON_AddNumberToObject(obj, "moon_roll_offset", (double)cfg->moon_roll_offset);
-    cJSON_AddNumberToObject(obj, "moon_yaw_offset", (double)cfg->moon_yaw_offset);
-    cJSON_AddNumberToObject(obj, "moon_pitch_offset", (double)cfg->moon_pitch_offset);
-    cJSON_AddNumberToObject(obj, "moon_north_up", cfg->moon_north_up);
-    cJSON_AddNumberToObject(obj, "moon_spin_mode", cfg->moon_spin_mode);
-    cJSON_AddNumberToObject(obj, "moon_spin_return_s", cfg->moon_spin_return_s);
-    cJSON_AddNumberToObject(obj, "toast_aggregation_window_s", cfg->toast_aggregation_window_s);
     cJSON_AddNumberToObject(obj, "toast_notify_mask", cfg->toast_notify_mask);
     cJSON_AddBoolToObject(obj, "toast_instance_muted_1", cfg->toast_instance_muted[0]);
     cJSON_AddBoolToObject(obj, "toast_instance_muted_2", cfg->toast_instance_muted[1]);
     cJSON_AddBoolToObject(obj, "toast_instance_muted_3", cfg->toast_instance_muted[2]);
 
-    // Weather
-    cJSON_AddNumberToObject(obj, "weather_provider", cfg->weather_provider);
-    cJSON_AddStringToObject(obj, "weather_api_key", cfg->weather_api_key);
-    cJSON_AddNumberToObject(obj, "weather_lat", (double)cfg->weather_lat);
-    cJSON_AddNumberToObject(obj, "weather_lon", (double)cfg->weather_lon);
-    cJSON_AddStringToObject(obj, "weather_location_name", cfg->weather_location_name);
-    cJSON_AddNumberToObject(obj, "weather_poll_interval_s", cfg->weather_poll_interval_s);
-    cJSON_AddNumberToObject(obj, "weather_units", cfg->weather_units);
-    cJSON_AddNumberToObject(obj, "weather_time_format", cfg->weather_time_format);
-
-    // Idle override
-    cJSON_AddBoolToObject(obj, "idle_page_override_enabled", cfg->idle_page_override_enabled);
+    // Idle override (target excluded from the table: cross-field page-registry semantics)
     cJSON_AddNumberToObject(obj, "idle_page_override_target", cfg->idle_page_override_target);
-    cJSON_AddBoolToObject(obj, "idle_indicator_enabled", cfg->idle_indicator_enabled);
-
-    // Navigation grace window (USER manual-nav hold time, seconds)
-    cJSON_AddNumberToObject(obj, "nav_grace_s", cfg->nav_grace_s);
 
     // Home Page lock (always show the Home Page regardless of connection state)
     cJSON_AddBoolToObject(obj, "home_page_lock", cfg->home_page_lock);
-
-    // Authentication
-    cJSON_AddBoolToObject(obj, "auth_enabled", cfg->auth_enabled);
-
-    // Crash log
-    cJSON_AddNumberToObject(obj, "crash_log_retention_days", cfg->crash_log_retention_days);
 
     return obj;
 }
@@ -898,26 +919,17 @@ static app_config_t *parse_config_from_json(cJSON *root)
     }
     memcpy(cfg, app_config_get(), sizeof(app_config_t));
 
-    JSON_TO_STRING(root, "hostname",       cfg->hostname);
+    /* Every "simple" field (plain default + optional range check) is driven
+     * from the single SETTINGS_TABLE X-macro in settings_table.h/.c. This
+     * covers the large majority of scalar fields below; anything NOT covered
+     * (arrays, JSON-blob strings, secrets with sentinel handling, cross-field
+     * page targets) keeps its hand-written parse below, in original relative
+     * order. */
+    settings_json_parse(root, cfg);
+
     JSON_TO_STRING(root, "url1",           cfg->api_url[0]);
     JSON_TO_STRING(root, "url2",           cfg->api_url[1]);
     JSON_TO_STRING(root, "url3",           cfg->api_url[2]);
-    JSON_TO_STRING(root, "ntp",            cfg->ntp_server);
-    JSON_TO_STRING(root, "timezone",       cfg->tz_string);
-    cJSON *ti_item = cJSON_GetObjectItem(root, "theme_index");
-    if (cJSON_IsNumber(ti_item)) {
-        int v = ti_item->valueint;
-        if (v < 0) v = 0;
-        if (v >= themes_get_count()) v = themes_get_count() - 1;
-        cfg->theme_index = v;
-    }
-    cJSON *ws_item = cJSON_GetObjectItem(root, "widget_style");
-    if (cJSON_IsNumber(ws_item)) {
-        int v = ws_item->valueint;
-        if (v < 0) v = 0;
-        if (v >= WIDGET_STYLE_COUNT) v = WIDGET_STYLE_COUNT - 1;
-        cfg->widget_style = (uint8_t)v;
-    }
     JSON_TO_STRING(root, "filter_colors_1", cfg->filter_colors[0]);
     JSON_TO_STRING(root, "filter_colors_2", cfg->filter_colors[1]);
     JSON_TO_STRING(root, "filter_colors_3", cfg->filter_colors[2]);
@@ -927,9 +939,6 @@ static app_config_t *parse_config_from_json(cJSON *root)
     JSON_TO_STRING(root, "hfr_thresholds_1", cfg->hfr_thresholds[0]);
     JSON_TO_STRING(root, "hfr_thresholds_2", cfg->hfr_thresholds[1]);
     JSON_TO_STRING(root, "hfr_thresholds_3", cfg->hfr_thresholds[2]);
-    JSON_TO_BOOL  (root, "mqtt_enabled",   cfg->mqtt_enabled);
-    JSON_TO_STRING(root, "mqtt_broker_url", cfg->mqtt_broker_url);
-    JSON_TO_STRING(root, "mqtt_username",  cfg->mqtt_username);
     /* mqtt_password: skip write if value equals "********" sentinel */
     {
         cJSON *_mp = cJSON_GetObjectItem(root, "mqtt_password");
@@ -938,32 +947,6 @@ static app_config_t *parse_config_from_json(cJSON *root)
             cfg->mqtt_password[sizeof(cfg->mqtt_password) - 1] = '\0';
         }
     }
-    JSON_TO_STRING(root, "mqtt_topic_prefix", cfg->mqtt_topic_prefix);
-
-    // Clamped int fields
-    cJSON *brightness = cJSON_GetObjectItem(root, "brightness");
-    if (cJSON_IsNumber(brightness)) {
-        int val = brightness->valueint;
-        if (val < 0) val = 0;
-        if (val > 100) val = 100;
-        cfg->brightness = val;
-    }
-
-    cJSON *color_brightness = cJSON_GetObjectItem(root, "color_brightness");
-    if (cJSON_IsNumber(color_brightness)) {
-        int val = color_brightness->valueint;
-        if (val < 0) val = 0;
-        if (val > 100) val = 100;
-        cfg->color_brightness = val;
-    }
-
-    cJSON *mqtt_port = cJSON_GetObjectItem(root, "mqtt_port");
-    if (cJSON_IsNumber(mqtt_port)) {
-        cfg->mqtt_port = (uint16_t)mqtt_port->valueint;
-    }
-
-    JSON_TO_BOOL(root, "auto_rotate_enabled", cfg->auto_rotate_enabled);
-    JSON_TO_BOOL(root, "auto_rotate_skip_disconnected", cfg->auto_rotate_skip_disconnected);
 
     /* Home Page now stores a page_ref registry id (0..PAGE_REF_ID_MAX-1). The web
      * UI always sends a concrete id (never -1). Reject out-of-range ids and the
@@ -976,22 +959,6 @@ static app_config_t *parse_config_from_json(cJSON *root)
             v = 0;   /* Summary */
         }
         cfg->active_page_override = (int8_t)v;
-    }
-
-    cJSON *ari_item = cJSON_GetObjectItem(root, "auto_rotate_interval_s");
-    if (cJSON_IsNumber(ari_item)) {
-        int v = ari_item->valueint;
-        if (v < 0) v = 0;
-        if (v > 3600) v = 3600;
-        cfg->auto_rotate_interval_s = (uint16_t)v;
-    }
-
-    cJSON *are_item = cJSON_GetObjectItem(root, "auto_rotate_effect");
-    if (cJSON_IsNumber(are_item)) {
-        int v = are_item->valueint;
-        if (v < 0) v = 0;
-        if (v > 3) v = 3;
-        cfg->auto_rotate_effect = (uint8_t)v;
     }
 
     /* The slideshow list is the single ordered auto_rotate_order[] + ext list:
@@ -1051,100 +1018,13 @@ static app_config_t *parse_config_from_json(cJSON *root)
         cfg->graph_update_interval_s = (uint8_t)v;
     }
 
-    cJSON *ct_item = cJSON_GetObjectItem(root, "connection_timeout_s");
-    if (cJSON_IsNumber(ct_item)) {
-        int v = ct_item->valueint;
-        if (v < 2) v = 2;
-        if (v > 30) v = 30;
-        cfg->connection_timeout_s = (uint8_t)v;
-    }
-
-    cJSON *td_item = cJSON_GetObjectItem(root, "toast_duration_s");
-    if (cJSON_IsNumber(td_item)) {
-        int v = td_item->valueint;
-        if (v < 3) v = 3;
-        if (v > 30) v = 30;
-        cfg->toast_duration_s = (uint8_t)v;
-    }
-
-    JSON_TO_BOOL(root, "debug_mode", cfg->debug_mode);
-    JSON_TO_BOOL(root, "demo_mode", cfg->demo_mode);
     JSON_TO_BOOL(root, "instance_enabled_1", cfg->instance_enabled[0]);
     JSON_TO_BOOL(root, "instance_enabled_2", cfg->instance_enabled[1]);
     JSON_TO_BOOL(root, "instance_enabled_3", cfg->instance_enabled[2]);
 
-    JSON_TO_BOOL(root, "screen_sleep_enabled", cfg->screen_sleep_enabled);
-    JSON_TO_BOOL(root, "alert_flash_enabled", cfg->alert_flash_enabled);
-    cJSON *sst_item = cJSON_GetObjectItem(root, "screen_sleep_timeout_s");
-    if (cJSON_IsNumber(sst_item)) {
-        int v = sst_item->valueint;
-        if (v < 10) v = 10;
-        if (v > 3600) v = 3600;
-        cfg->screen_sleep_timeout_s = (uint16_t)v;
-    }
-
-    cJSON *ipi_item = cJSON_GetObjectItem(root, "idle_poll_interval_s");
-    if (cJSON_IsNumber(ipi_item)) {
-        int v = ipi_item->valueint;
-        if (v < 5) v = 5;
-        if (v > 120) v = 120;
-        cfg->idle_poll_interval_s = (uint8_t)v;
-    }
-
-    JSON_TO_BOOL(root, "wifi_power_save", cfg->wifi_power_save);
-
-    JSON_TO_BOOL(root, "deep_sleep_enabled", cfg->deep_sleep_enabled);
-    JSON_TO_BOOL(root, "deep_sleep_on_idle", cfg->deep_sleep_on_idle);
-
-    cJSON *dswt_item = cJSON_GetObjectItem(root, "deep_sleep_wake_timer_s");
-    if (cJSON_IsNumber(dswt_item)) {
-        int v = dswt_item->valueint;
-        if (v < 0) v = 0;
-        if (v > 259200) v = 259200;  // max 72 hours in seconds
-        cfg->deep_sleep_wake_timer_s = (uint32_t)v;
-    }
-
-    cJSON *auto_update = cJSON_GetObjectItem(root, "auto_update_check");
-    if (cJSON_IsBool(auto_update)) {
-        cfg->auto_update_check = cJSON_IsTrue(auto_update) ? 1 : 0;
-    }
-    cJSON *update_ch = cJSON_GetObjectItem(root, "update_channel");
-    if (cJSON_IsNumber(update_ch)) {
-        int v = update_ch->valueint;
-        if (v < 0 || v > 2) v = 0;
-        cfg->update_channel = (uint8_t)v;
-    }
-
-    cJSON *rot_item = cJSON_GetObjectItem(root, "screen_rotation");
-    if (cJSON_IsNumber(rot_item)) {
-        int v = rot_item->valueint;
-        if (v < 0) v = 0;
-        if (v > 3) v = 3;
-        cfg->screen_rotation = (uint8_t)v;
-    }
-
-    JSON_TO_BOOL  (root, "allsky_enabled",      cfg->allsky_enabled);
-    JSON_TO_STRING(root, "allsky_hostname",      cfg->allsky_hostname);
     JSON_TO_STRING(root, "allsky_field_config",  cfg->allsky_field_config);
     JSON_TO_STRING(root, "allsky_thresholds",    cfg->allsky_thresholds);
 
-    cJSON *as_interval = cJSON_GetObjectItem(root, "allsky_update_interval_s");
-    if (cJSON_IsNumber(as_interval)) {
-        int v = as_interval->valueint;
-        if (v < 1) v = 1;
-        if (v > 300) v = 300;
-        cfg->allsky_update_interval_s = (uint16_t)v;
-    }
-
-    cJSON *as_dew = cJSON_GetObjectItem(root, "allsky_dew_offset");
-    if (cJSON_IsNumber(as_dew)) {
-        float v = (float)as_dew->valuedouble;
-        if (v < -50.0f) v = -50.0f;
-        if (v > 50.0f) v = 50.0f;
-        cfg->allsky_dew_offset = v;
-    }
-
-    JSON_TO_BOOL  (root, "spotify_enabled",           cfg->spotify_enabled);
     /* spotify_client_id: skip write if value equals "********" sentinel */
     {
         cJSON *_scid = cJSON_GetObjectItem(root, "spotify_client_id");
@@ -1154,136 +1034,11 @@ static app_config_t *parse_config_from_json(cJSON *root)
         }
     }
     /* admin_password is never accepted via /api/config — use /api/admin-password. */
-    cJSON *spi_item = cJSON_GetObjectItem(root, "spotify_poll_interval_ms");
-    if (cJSON_IsNumber(spi_item)) {
-        int v = spi_item->valueint;
-        if (v < 1000) v = 1000;
-        if (v > 30000) v = 30000;
-        cfg->spotify_poll_interval_ms = (uint16_t)v;
-    }
-    JSON_TO_BOOL  (root, "spotify_show_progress_bar",  cfg->spotify_show_progress_bar);
-    JSON_TO_BOOL  (root, "spotify_minimal_mode",       cfg->spotify_minimal_mode);
-    JSON_TO_BOOL  (root, "spotify_scroll_text",        cfg->spotify_scroll_text);
-    cJSON *sot_item = cJSON_GetObjectItem(root, "spotify_overlay_timeout_s");
-    if (cJSON_IsNumber(sot_item)) {
-        int v = sot_item->valueint;
-        if (v < 0) v = 0;
-        if (v > 255) v = 255;   /* uint8_t; 0 = never hide */
-        cfg->spotify_overlay_timeout_s = (uint8_t)v;
-    }
-    JSON_TO_BOOL  (root, "spotify_overlay_visible",   cfg->spotify_overlay_visible);
 
-    JSON_TO_BOOL  (root, "image_display_enabled",       cfg->image_display_enabled);
-    JSON_TO_BOOL  (root, "image_display_show_overlay",   cfg->image_display_show_overlay);
-    JSON_TO_BOOL  (root, "image_display_crop",           cfg->image_display_crop);
-    JSON_TO_STRING(root, "goes_region",                  cfg->goes_region);
-
-    cJSON *goes_interval = cJSON_GetObjectItem(root, "goes_update_interval_s");
-    if (cJSON_IsNumber(goes_interval)) {
-        int v = goes_interval->valueint;
-        if (v < 300) v = 300;
-        if (v > 7200) v = 7200;
-        cfg->goes_update_interval_s = (uint16_t)v;
-    }
-
-    cJSON *jimgsrc = cJSON_GetObjectItem(root, "image_display_source");
-    if (cJSON_IsNumber(jimgsrc)) {
-        int v = jimgsrc->valueint;
-        cfg->image_display_source = (v >= 0 && v <= 3) ? (uint8_t)v : 0;
-    }
-
-    JSON_TO_STRING(root, "custom_image_url", cfg->custom_image_url);
-    cJSON *custom_orient = cJSON_GetObjectItem(root, "custom_orientation");
-    if (cJSON_IsNumber(custom_orient)) {
-        int v = custom_orient->valueint;
-        cfg->custom_orientation = (v >= 0 && v <= 3) ? (uint8_t)v : 0;
-    }
-    cJSON *custom_interval = cJSON_GetObjectItem(root, "custom_update_interval_s");
-    if (cJSON_IsNumber(custom_interval)) {
-        int v = custom_interval->valueint;
-        if (v < 10) v = 10;
-        if (v > 7200) v = 7200;
-        cfg->custom_update_interval_s = (uint16_t)v;
-    }
-
-    cJSON *jmoonbg = cJSON_GetObjectItem(root, "moon_bg_style");
-    if (cJSON_IsNumber(jmoonbg)) {
-        int v = jmoonbg->valueint;
-        cfg->moon_bg_style = (v >= 0 && v <= 3) ? (uint8_t)v : 0;
-    }
-
-    cJSON *jmoonlat = cJSON_GetObjectItem(root, "moon_lat");
-    if (jmoonlat && cJSON_IsNumber(jmoonlat)) cfg->moon_lat = (float)jmoonlat->valuedouble;
-    cJSON *jmoonlon = cJSON_GetObjectItem(root, "moon_lon");
-    if (jmoonlon && cJSON_IsNumber(jmoonlon)) cfg->moon_lon = (float)jmoonlon->valuedouble;
-
-    cJSON *jsolarband = cJSON_GetObjectItem(root, "solar_band");
-    if (cJSON_IsNumber(jsolarband)) {
-        int v = jsolarband->valueint;
-        cfg->solar_band = (v >= 0 && v <= 17) ? (uint8_t)v : 0;
-    }
     cJSON *jmoondrag = cJSON_GetObjectItem(root, "moon_drag_light_mode");
     if (cJSON_IsNumber(jmoondrag)) {
         int v = jmoondrag->valueint;
         cfg->moon_drag_light_mode = (v >= 0 && v <= 2) ? (uint8_t)v : 0;
-    }
-
-    cJSON *jgoesvf = cJSON_GetObjectItem(root, "goes_vflip");
-    if (jgoesvf && cJSON_IsNumber(jgoesvf)) cfg->goes_vflip = (jgoesvf->valueint != 0) ? 1 : 0;
-    cJSON *jgoeshf = cJSON_GetObjectItem(root, "goes_hflip");
-    if (jgoeshf && cJSON_IsNumber(jgoeshf)) cfg->goes_hflip = (jgoeshf->valueint != 0) ? 1 : 0;
-    cJSON *jsolarvf = cJSON_GetObjectItem(root, "solar_vflip");
-    if (jsolarvf && cJSON_IsNumber(jsolarvf)) cfg->solar_vflip = (jsolarvf->valueint != 0) ? 1 : 0;
-    cJSON *jsolarhf = cJSON_GetObjectItem(root, "solar_hflip");
-    if (jsolarhf && cJSON_IsNumber(jsolarhf)) cfg->solar_hflip = (jsolarhf->valueint != 0) ? 1 : 0;
-    cJSON *jcustomvf = cJSON_GetObjectItem(root, "custom_vflip");
-    if (jcustomvf && cJSON_IsNumber(jcustomvf)) cfg->custom_vflip = (jcustomvf->valueint != 0) ? 1 : 0;
-    cJSON *jcustomhf = cJSON_GetObjectItem(root, "custom_hflip");
-    if (jcustomhf && cJSON_IsNumber(jcustomhf)) cfg->custom_hflip = (jcustomhf->valueint != 0) ? 1 : 0;
-
-    cJSON *jflipu = cJSON_GetObjectItem(root, "moon_flip_u");
-    if (jflipu && cJSON_IsNumber(jflipu)) cfg->moon_flip_u = (jflipu->valueint != 0) ? 1 : 0;
-    cJSON *jflipv = cJSON_GetObjectItem(root, "moon_flip_v");
-    if (jflipv && cJSON_IsNumber(jflipv)) cfg->moon_flip_v = (jflipv->valueint != 0) ? 1 : 0;
-    cJSON *jroll = cJSON_GetObjectItem(root, "moon_roll_offset");
-    if (jroll && cJSON_IsNumber(jroll)) {
-        float v = (float)jroll->valuedouble;
-        if (v < -180.0f) v = -180.0f;
-        if (v > 180.0f) v = 180.0f;
-        cfg->moon_roll_offset = v;
-    }
-    cJSON *jyaw = cJSON_GetObjectItem(root, "moon_yaw_offset");
-    if (jyaw && cJSON_IsNumber(jyaw)) {
-        float v = (float)jyaw->valuedouble;
-        if (v < -180.0f) v = -180.0f;
-        if (v > 180.0f) v = 180.0f;
-        cfg->moon_yaw_offset = v;
-    }
-    cJSON *jpitch = cJSON_GetObjectItem(root, "moon_pitch_offset");
-    if (jpitch && cJSON_IsNumber(jpitch)) {
-        float v = (float)jpitch->valuedouble;
-        if (v < -90.0f) v = -90.0f;
-        if (v > 90.0f) v = 90.0f;
-        cfg->moon_pitch_offset = v;
-    }
-    cJSON *jnorthup = cJSON_GetObjectItem(root, "moon_north_up");
-    if (jnorthup && cJSON_IsNumber(jnorthup)) cfg->moon_north_up = (jnorthup->valueint != 0) ? 1 : 0;
-    cJSON *jspinmode = cJSON_GetObjectItem(root, "moon_spin_mode");
-    if (jspinmode && cJSON_IsNumber(jspinmode)) cfg->moon_spin_mode = (jspinmode->valueint != 0) ? 1 : 0;
-    cJSON *jspinret = cJSON_GetObjectItem(root, "moon_spin_return_s");
-    if (jspinret && cJSON_IsNumber(jspinret)) {
-        int v = jspinret->valueint;
-        if (v < 3) v = 3;
-        if (v > 60) v = 60;
-        cfg->moon_spin_return_s = (uint8_t)v;
-    }
-
-    cJSON *taw_item = cJSON_GetObjectItem(root, "toast_aggregation_window_s");
-    if (cJSON_IsNumber(taw_item)) {
-        int v = taw_item->valueint;
-        if (v < 0) v = 0;
-        if (v > 15) v = 15;
-        cfg->toast_aggregation_window_s = (uint8_t)v;
     }
 
     cJSON *tnm_item = cJSON_GetObjectItem(root, "toast_notify_mask");
@@ -1299,40 +1054,6 @@ static app_config_t *parse_config_from_json(cJSON *root)
     JSON_TO_BOOL(root, "toast_instance_muted_2", cfg->toast_instance_muted[1]);
     JSON_TO_BOOL(root, "toast_instance_muted_3", cfg->toast_instance_muted[2]);
 
-    // Weather
-    cJSON *jwxprov = cJSON_GetObjectItem(root, "weather_provider");
-    if (cJSON_IsNumber(jwxprov)) {
-        int v = jwxprov->valueint;
-        cfg->weather_provider = (v >= 0 && v <= 2) ? (uint8_t)v : 0;
-    }
-    JSON_TO_STRING(root, "weather_api_key", cfg->weather_api_key);
-
-    cJSON *jlat = cJSON_GetObjectItem(root, "weather_lat");
-    if (jlat && cJSON_IsNumber(jlat)) cfg->weather_lat = (float)jlat->valuedouble;
-    cJSON *jlon = cJSON_GetObjectItem(root, "weather_lon");
-    if (jlon && cJSON_IsNumber(jlon)) cfg->weather_lon = (float)jlon->valuedouble;
-
-    JSON_TO_STRING(root, "weather_location_name", cfg->weather_location_name);
-
-    cJSON *wpi_item = cJSON_GetObjectItem(root, "weather_poll_interval_s");
-    if (cJSON_IsNumber(wpi_item)) {
-        int v = wpi_item->valueint;
-        if (v < 900) v = 900;
-        if (v > 3600) v = 3600;
-        cfg->weather_poll_interval_s = (uint16_t)v;
-    }
-
-    cJSON *wu_item = cJSON_GetObjectItem(root, "weather_units");
-    if (cJSON_IsNumber(wu_item)) {
-        cfg->weather_units = (wu_item->valueint != 0) ? 1 : 0;  /* 0=imperial, 1=metric */
-    }
-    cJSON *wtf_item = cJSON_GetObjectItem(root, "weather_time_format");
-    if (cJSON_IsNumber(wtf_item)) {
-        cfg->weather_time_format = (wtf_item->valueint != 0) ? 1 : 0;  /* 0=12h, 1=24h */
-    }
-
-    // Idle override
-    JSON_TO_BOOL(root, "idle_page_override_enabled", cfg->idle_page_override_enabled);
     /* idle_page_override_target now stores a page_ref registry id
      * (0..PAGE_REF_ID_MAX-1). Out-of-range falls back to 0 (Summary).
      * PAGE_REF_ID_MAX comes from ui/page_registry.h. */
@@ -1342,32 +1063,10 @@ static app_config_t *parse_config_from_json(cJSON *root)
         if (v < 0 || v >= PAGE_REF_ID_MAX) v = 0;
         cfg->idle_page_override_target = (int8_t)v;
     }
-    JSON_TO_BOOL(root, "idle_indicator_enabled", cfg->idle_indicator_enabled);
-
-    // Manual navigation grace window (seconds). Clamp 10-300.
-    cJSON *grace = cJSON_GetObjectItem(root, "nav_grace_s");
-    if (cJSON_IsNumber(grace)) {
-        int v = grace->valueint;
-        if (v < 10) v = 10;
-        if (v > 300) v = 300;
-        cfg->nav_grace_s = (uint16_t)v;
-    }
 
     // Home Page lock (always show the Home Page). app_config_save() normalizes
     // exclusivity: the lock clears auto-rotate and idle override when set.
     JSON_TO_BOOL(root, "home_page_lock", cfg->home_page_lock);
-
-    // Authentication toggle
-    JSON_TO_BOOL(root, "auth_enabled", cfg->auth_enabled);
-
-    // Crash log retention (days; 0 = never, clamp to common preset range)
-    cJSON *clr_item = cJSON_GetObjectItem(root, "crash_log_retention_days");
-    if (cJSON_IsNumber(clr_item)) {
-        int v = clr_item->valueint;
-        if (v < 0) v = 0;
-        if (v > 255) v = 255;
-        cfg->crash_log_retention_days = (uint8_t)v;
-    }
 
     return cfg;
 }

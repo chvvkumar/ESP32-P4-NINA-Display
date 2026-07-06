@@ -62,6 +62,15 @@ typedef struct {
     bool is_waiting;              // Sequence is in a wait state (TS-WAITSTART)
     int64_t wait_start_epoch;     // Wait start time (Unix epoch seconds)
 
+    // NINA-PC clock domain anchor. NINA timestamps (ExposureEndTime, sequence
+    // ExpectedDateTime, WaitStartTime) are stamped by the NINA PC's clock,
+    // which can be several seconds skewed from the device's SNTP clock. The
+    // camera-info fetchers capture NINA's own clock from the HTTP Date
+    // response header; all NINA-timestamp math should use this pair (via
+    // nina_client_now_epoch()) instead of time(NULL).
+    int64_t nina_clock_epoch;    /* NINA-domain UTC epoch from HTTP Date header, 0 = unknown */
+    int64_t nina_clock_mono_us;  /* esp_timer_get_time() at capture */
+
     // Image stats
     float hfr;
     int stars;
@@ -151,6 +160,14 @@ void nina_client_init_mutex(nina_client_t *client);
 bool nina_client_lock(nina_client_t *client, uint32_t timeout_ms);
 void nina_client_unlock(nina_client_t *client);
 
+// Current time in the NINA-PC clock domain (Unix epoch seconds).
+// Returns nina_clock_epoch advanced by the device's monotonic esp_timer since
+// capture, or falls back to (int64_t)time(NULL) while the pair is unknown.
+// The pair is written under the client mutex; callers should hold it or
+// tolerate a rare torn read (int64 on RV32) — lock-free UI paths use a cached
+// pair instead (see dashboard_page_t.cached_nina_epoch).
+int64_t nina_client_now_epoch(const nina_client_t *client);
+
 // Polling intervals (ms)
 #define NINA_POLL_SLOW_MS     30000   // Focuser, mount, switch
 #define NINA_POLL_SEQUENCE_MS 15000   // Sequence counts (supplemented by event-driven sequence_poll_needed)
@@ -170,7 +187,9 @@ typedef struct {
     nina_filter_t cached_filters[MAX_FILTERS];
     int cached_filter_count;
 
-    // Persistent HTTP client handle for keep-alive reuse (esp_http_client_handle_t)
+    // Persistent keep-alive slot for the shared HTTP fetcher (http_fetch_conn_t*,
+    // see main/http_fetch.h). Opaque here to avoid a header dependency; owned
+    // and destroyed via nina_poll_state_init()/http_fetch_conn_destroy().
     void *http_client;
 
     // Cached image count for change-detection gating of /image-history.

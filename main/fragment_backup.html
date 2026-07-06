@@ -1,0 +1,66 @@
+      <!-- Export Card -->
+      <div class="card">
+        <div class="card-title"><span class="card-title-label">Export Configuration <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Export configuration</div><p>Downloads the device configuration as a JSON file for backup or for cloning settings to another unit. The header shows the configuration version and running firmware version embedded in the file; the restore screen uses these to flag version mismatches.</p><p>Include sensitive data controls whether secrets are written to the file. With it off, the export omits every secret: the weather API key, MQTT username, password, and broker URL, the Spotify Client ID, the hostname, your saved WiFi passwords, and the admin password. Turn it on only for a private full backup that can restore those values.</p><p>Example: leave Include sensitive data off when sharing a configuration as a template, and turn it on only for a private full backup of one device.</p></div>
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;font-size:0.82rem;color:#a1a1aa">
+          <span>Config version: <strong style="color:#f4f4f5" id="backupCurrentVersion">--</strong></span>
+          <span>&middot;</span>
+          <span>Firmware: <strong style="color:#f4f4f5" id="backupFirmwareVersion">--</strong></span>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <div>
+            <span class="toggle-label">Include sensitive data</span>
+            <div class="field-hint" style="margin-top:2px">Weather and MQTT credentials, Spotify Client ID, hostname, WiFi and admin passwords</div>
+          </div>
+          <label class="toggle"><input type="checkbox" id="backupIncludeSensitive"><span class="toggle-track"></span></label>
+        </div>
+        <button class="btn btn-primary" id="backupDownloadBtn" onclick="downloadBackup()" style="margin-top:16px;width:100%">Download Backup</button>
+      </div>
+
+      <!-- Import Card -->
+      <div class="card">
+        <div class="card-title"><span class="card-title-label">Restore Configuration <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Restore configuration</div><p>Loads a previously exported JSON file and previews the effect before applying it. The metadata header shows the source hostname and MAC, the firmware version the file came from, and the export date. A version warning appears when the backup's configuration version differs from this device.</p><p>The preview lists each setting that would change, plus notices for settings missing from the backup, settings this firmware does not recognize, sensitive values that were excluded from the file, and any validation issues. Nothing is written until you press Restore; Cancel discards the file.</p><p>Example: restoring a file exported without sensitive data leaves the current MQTT password and other secrets in place, shown as excluded in the preview.</p></div>
+        <div class="field">
+          <label class="ota-label" id="restoreFileLabel" style="display:block;text-align:center;cursor:pointer">
+            Choose backup .json file
+            <input type="file" id="restoreFileInput" accept=".json" onchange="restoreFileSelected(this)" style="display:none">
+          </label>
+        </div>
+
+        <!-- Preview Panel (hidden until file selected) -->
+        <div id="restorePreview" style="display:none;margin-top:16px">
+          <!-- Metadata Header -->
+          <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:14px 16px;margin-bottom:12px;font-size:0.82rem;color:#a1a1aa;line-height:1.8">
+            <div>Source: <strong style="color:#f4f4f5" id="restoreHostname">--</strong> (<span id="restoreMac">--</span>)</div>
+            <div>Firmware: <strong style="color:#f4f4f5" id="restoreFirmware">--</strong> &middot; Exported: <span id="restoreDate">--</span></div>
+          </div>
+
+          <!-- Version Warning Banner -->
+          <div id="restoreWarningBanner" style="border-radius:10px;padding:14px 16px;margin-bottom:12px;font-size:0.82rem;line-height:1.6;display:none"></div>
+
+          <!-- Changes Diff -->
+          <div id="restoreChanges" style="margin-bottom:12px"></div>
+
+          <!-- No Changes -->
+          <div id="restoreNoChanges" style="font-size:0.82rem;color:var(--text-hint);margin-bottom:12px"></div>
+
+          <!-- Missing Fields Notice -->
+          <div id="restoreMissing" style="display:none;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.15);border-radius:10px;padding:12px 16px;margin-bottom:12px;font-size:0.8rem;color:#d4d4d8"></div>
+
+          <!-- Unknown Fields Notice -->
+          <div id="restoreUnknown" style="display:none;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.15);border-radius:10px;padding:12px 16px;margin-bottom:12px;font-size:0.8rem;color:#d4d4d8"></div>
+
+          <!-- Sensitive Excluded Notice -->
+          <div id="restoreSensitive" style="display:none;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:12px 16px;margin-bottom:12px;font-size:0.8rem;color:var(--text-hint)"></div>
+
+          <!-- Validation Notes -->
+          <div id="restoreValidation" style="display:none;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.15);border-radius:10px;padding:12px 16px;margin-bottom:12px;font-size:0.8rem;color:#d4d4d8"></div>
+
+          <!-- Action Buttons -->
+          <div style="display:flex;gap:10px;margin-top:16px">
+            <button class="btn btn-outline" onclick="cancelRestore()" style="flex:1">Cancel</button>
+            <button class="btn btn-primary" id="restoreConfirmBtn" onclick="confirmRestore()" style="flex:1">Restore</button>
+          </div>
+        </div>
+      </div>

@@ -1,0 +1,92 @@
+
+      <div class="card">
+        <div class="card-title"><span class="card-title-label">Appearance <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Appearance</div><p>Controls the look of the dashboard: the color theme, the visual style applied to widget panels, and the brightness of on-screen text. All three apply live as you change them and persist when you save.</p><p>Theme sets the color palette across every page. Widget Style changes only how the dashboard panels are drawn (borders, glass, inset, and similar). Text brightness scales the foreground text color, separate from the backlight in the Hardware card below.</p><p>Example: pick the Red Night theme to preserve dark adaptation at the telescope, then lower Text brightness to 50% if labels are still too bright.</p></div>
+        <div class="field">
+          <label class="field-label">Theme</label>
+          <select class="input" id="theme_select" onchange="setTheme(this.value)">
+            <option value="0">Default</option>
+            <option value="1">Red Night</option>
+            <option value="2">Cyber Dusk</option>
+            <option value="3">Stellar Ember</option>
+            <option value="4">Arctic Steel</option>
+            <option value="5">Oxidized Copper</option>
+            <option value="6">Solar Flare</option>
+            <option value="7">Phantom Green</option>
+            <option value="8">Bloodmoon</option>
+          </select>
+          <div class="field-hint">Color palette applied across all pages; changes preview immediately.</div>
+        </div>
+        <div class="field">
+          <label class="field-label">Widget Style</label>
+          <select class="input" id="widget_style_select" onchange="setWidgetStyle(this.value)">
+            <option value="0">Default</option>
+            <option value="1">Subtle Border</option>
+            <option value="2">Soft Inset</option>
+            <option value="3">Frosted Glass</option>
+            <option value="4">Chamfered</option>
+            <option value="5">Double Border</option>
+            <option value="6">Raised Slab</option>
+            <option value="7">Gradient Fade</option>
+            <option value="8">Scanline</option>
+            <option value="9">Pillar</option>
+            <option value="10">Stepped Edge</option>
+            <option value="11">Horizon Line</option>
+            <option value="12">Ember Ring</option>
+          </select>
+          <div class="field-hint">Visual treatment of the dashboard panels only, with no effect on colors or layout.</div>
+        </div>
+        <div class="field">
+          <label class="field-label">Text brightness</label>
+          <div class="slider-group">
+            <input type="range" class="slider" id="color_brightness" min="0" max="100" value="80" oninput="setColorBrightness(this.value)">
+            <span class="slider-val" id="color_brightness_val">80%</span>
+          </div>
+          <div class="field-hint">Scales on-screen text brightness, independent of the screen backlight below.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="card-title-label">Hardware <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Hardware</div><p>Physical display controls: screen rotation, backlight level, and automatic screen off. All apply live and persist when you save.</p><p>Screen Rotation reorients the entire UI in 90-degree steps for sideways or upside-down mounting. Backlight sets the panel brightness, separate from the Text brightness control above. Turn off screen when idle blanks the backlight after a period with no touch; the firmware keeps running and the next touch wakes the screen.</p><p>Example: if the device is mounted with the USB port facing up, set Screen Rotation to 180 degrees so the dashboard reads right-side up.</p></div>
+        <div class="subsection">
+        <div class="subsection-title">Display</div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Screen Rotation</label>
+            <select class="input" id="screen_rotation_select" onchange="setScreenRotation(this.value)">
+              <option value="0">0° (Default)</option>
+              <option value="1">90°</option>
+              <option value="2">180°</option>
+              <option value="3">270°</option>
+            </select>
+            <div class="field-hint">Rotates the whole UI in 90-degree steps to match the physical mounting.</div>
+          </div>
+          <div class="field">
+            <label class="field-label">Backlight</label>
+            <div class="slider-group">
+              <input type="range" class="slider" id="brightness" min="0" max="100" value="80" oninput="setBrightness(this.value)">
+              <span class="slider-val" id="brightness_val">80%</span>
+            </div>
+            <div class="field-hint">Panel backlight level, separate from Text brightness above.</div>
+          </div>
+        </div>
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">Screen Sleep</div>
+        <div class="toggle-row">
+          <span class="toggle-label">Turn off screen when idle</span>
+          <label class="toggle"><input type="checkbox" id="screen_sleep_enabled"><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint" style="margin-top:4px">Blanks the backlight after the timeout while the firmware keeps running; touch wakes the screen.</div>
+        <div id="screen_sleep_details" style="margin-top:16px">
+          <div class="row stack-mobile">
+            <div class="field">
+              <label class="field-label">Timeout (seconds)</label>
+              <input type="number" class="input" id="screen_sleep_timeout" min="10" max="3600" value="60">
+              <div class="field-hint">Idle time with no touch before the screen blanks, from 10 to 3600 seconds.</div>
+            </div>
+          </div>
+        </div>
+        </div>
+      </div>

@@ -179,7 +179,11 @@ esp_err_t login_post_handler(httpd_req_t *req)
     }
     cJSON_Delete(root);
 
-    if (diff != 0 || cfg->admin_password[0] == '\0') {
+    /* When auth is disabled every route is already open, so demanding the
+     * correct password here only breaks clients that unconditionally log in
+     * first (e.g. the OTA deploy script after a password change). Accept any
+     * password and issue a normal session. */
+    if (!auth_off && (diff != 0 || cfg->admin_password[0] == '\0')) {
         /* Failed attempt: bump counter, engage lockout at threshold. */
         auth_note_failure();
         httpd_resp_set_status(req, "401 Unauthorized");
