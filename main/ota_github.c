@@ -1,5 +1,6 @@
 #include "ota_github.h"
 #include "build_version.h"
+#include "http_fetch.h"
 #include "esp_log.h"
 #include "esp_http_client.h"
 #include "esp_ota_ops.h"
@@ -98,6 +99,11 @@ static bool alpha_marker_indicates_update(const char *body_str) {
     /* Copy the hex sha up to the next whitespace or end-of-marker. */
     char marker_sha[64] = {0};
     size_t n = 0;
+    /* cppcheck-suppress arrayIndexThenCheck
+     * m[n] indexes into the null-terminated body_str buffer (via strstr),
+     * not into marker_sha; it is safe to read at any n up to and including
+     * the string's terminating '\0', independent of the marker_sha bound
+     * checked here. */
     while (m[n] && n < sizeof(marker_sha) - 1) {
         char c = m[n];
         if (c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '-' || c == '>') break;
@@ -142,6 +148,11 @@ static bool parse_full_erase_floor(const char *body_str, char *tag_out, size_t t
     m += strlen("nina:full_erase_floor=");
 
     size_t n = 0;
+    /* cppcheck-suppress arrayIndexThenCheck
+     * m[n] indexes into the null-terminated body_str buffer (via strstr),
+     * not into tag_out; it is safe to read at any n up to and including the
+     * string's terminating '\0', independent of the tag_out_size bound
+     * checked here. */
     while (m[n] && n < tag_out_size - 1) {
         char c = m[n];
         if (c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '>') break;
@@ -233,37 +244,6 @@ static void extract_summary(const char *body, char *out, size_t out_size) {
     strip_markdown_images(out);
 }
 
-/* ── HTTP event handler for reading response into buffer ──────────── */
-
-typedef struct {
-    char *buffer;
-    int   buffer_len;
-    int   buffer_size;
-    bool  overflow;
-} http_response_t;
-
-static esp_err_t http_event_handler(esp_http_client_event_t *evt) {
-    http_response_t *resp = (http_response_t *)evt->user_data;
-    if (!resp) return ESP_OK;
-
-    switch (evt->event_id) {
-    case HTTP_EVENT_ON_DATA:
-        if (resp->buffer_len + evt->data_len < resp->buffer_size) {
-            memcpy(resp->buffer + resp->buffer_len, evt->data, evt->data_len);
-            resp->buffer_len += evt->data_len;
-            resp->buffer[resp->buffer_len] = '\0';
-        } else if (!resp->overflow) {
-            resp->overflow = true;
-            ESP_LOGW(TAG, "Response buffer overflow: %d + %d >= %d",
-                     resp->buffer_len, evt->data_len, resp->buffer_size);
-        }
-        break;
-    default:
-        break;
-    }
-    return ESP_OK;
-}
-
 /* ── Redirect resolver — captures Location header from 3xx ────────── */
 
 typedef struct {
@@ -295,63 +275,40 @@ static esp_err_t redirect_event_handler(esp_http_client_event_t *evt) {
  * it is left untouched on other failures. The helper frees its own response buffer.
  */
 static cJSON *fetch_releases_page(int page, bool *overflow_out) {
-    http_response_t resp = {0};
-    resp.buffer_size = MAX_RESPONSE_SIZE;
-    resp.buffer = heap_caps_malloc(resp.buffer_size, MALLOC_CAP_SPIRAM);
-    if (!resp.buffer) {
-        ESP_LOGE(TAG, "Failed to allocate response buffer (page %d)", page);
-        return NULL;
-    }
-    resp.buffer[0] = '\0';
-
     char url[RELEASE_URL_BUF];
     snprintf(url, sizeof(url), "%s&page=%d", GITHUB_API_URL, page);
 
-    esp_http_client_config_t config = {
-        .url = url,
-        .event_handler = http_event_handler,
-        .user_data = &resp,
+    http_fetch_opts_t opts = {
         .timeout_ms = 10000,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .buffer_size = 2048,
-        .buffer_size_tx = 512,
+        .use_tls_bundle = true,
+        .max_redirects = 3,
+        .max_attempts = 1,
+        .max_response_bytes = MAX_RESPONSE_SIZE,
+        .user_agent = "ESP32-NINA-Display",
+        .accept = "application/vnd.github.v3+json",
     };
 
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (!client) {
-        ESP_LOGE(TAG, "Failed to init HTTP client (page %d)", page);
-        free(resp.buffer);
-        return NULL;
-    }
-
-    esp_http_client_set_header(client, "User-Agent", "ESP32-NINA-Display");
-    esp_http_client_set_header(client, "Accept", "application/vnd.github.v3+json");
-
-    esp_err_t err = esp_http_client_perform(client);
-    int status = esp_http_client_get_status_code(client);
-    esp_http_client_cleanup(client);
-
-    if (err != ESP_OK || status != 200) {
-        ESP_LOGW(TAG, "GitHub API request failed (page %d, err=%s, status=%d)",
-                 page, esp_err_to_name(err), status);
-        free(resp.buffer);
-        return NULL;
-    }
-
-    ESP_LOGI(TAG, "GitHub API response (page %d): %d bytes", page, resp.buffer_len);
-
-    if (resp.overflow) {
-        ESP_LOGE(TAG, "Response was truncated (page %d, buffer %d bytes too small)",
-                 page, resp.buffer_size);
-        if (overflow_out) {
-            *overflow_out = true;
+    char *body = NULL;
+    size_t body_len = 0;
+    esp_err_t err = http_fetch_text(url, &opts, &body, &body_len);
+    if (err != ESP_OK) {
+        if (err == ESP_ERR_INVALID_SIZE) {
+            ESP_LOGE(TAG, "Response was truncated (page %d, buffer %d bytes too small)",
+                     page, MAX_RESPONSE_SIZE);
+            if (overflow_out) {
+                *overflow_out = true;
+            }
+        } else {
+            ESP_LOGW(TAG, "GitHub API request failed (page %d, err=%s)",
+                     page, esp_err_to_name(err));
         }
-        free(resp.buffer);
         return NULL;
     }
 
-    cJSON *releases = cJSON_Parse(resp.buffer);
-    free(resp.buffer);
+    ESP_LOGI(TAG, "GitHub API response (page %d): %u bytes", page, (unsigned)body_len);
+
+    cJSON *releases = cJSON_Parse(body);
+    heap_caps_free(body);
     if (!releases || !cJSON_IsArray(releases)) {
         ESP_LOGW(TAG, "Failed to parse GitHub releases JSON (page %d)", page);
         if (releases) {

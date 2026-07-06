@@ -9,6 +9,7 @@
 
 #include "spotify_client.h"
 #include "spotify_auth.h"
+#include "http_fetch.h"
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
 #include "esp_log.h"
@@ -143,7 +144,7 @@ static esp_err_t send_control_request(const char *url, esp_http_client_method_t 
 // Public API — Init
 // =============================================================================
 
-/* Guards s_player_client and s_player_shutdown. Held for the full lifetime of
+/* Guards s_player_conn and s_player_shutdown. Held for the full lifetime of
  * any player/album-art HTTP request so spotify_client_prepare_shutdown can
  * guarantee no request is in flight before it destroys the handle. */
 static SemaphoreHandle_t s_player_mutex;
@@ -162,37 +163,25 @@ void spotify_client_init(void)
 // Public API — Get Currently Playing (persistent keep-alive connection)
 // =============================================================================
 
-/* Persistent HTTP client for the currently-playing endpoint.
- * Reusing the TLS session avoids a 2-5 second handshake on every poll. */
-static esp_http_client_handle_t s_player_client = NULL;
+/* Persistent keep-alive slot for the currently-playing endpoint. http_fetch's
+ * conn owns the underlying esp_http_client handle and its own stale/dead
+ * keep-alive reconnect-once logic (mirrors the hand-rolled retry this used
+ * to do here directly). */
+static http_fetch_conn_t *s_player_conn = NULL;
+
+/* PSRAM buffer for the raw access token passed to http_fetch's bearer_token
+ * option (http_fetch prepends "Bearer " itself, so no prefix room needed
+ * here, unlike s_auth_header_buf above). Lazy-allocated on first use. */
+static char *s_player_token_buf = NULL;
+#define SPOTIFY_TOKEN_BUF_SIZE AUTH_HEADER_BUF_SIZE
 
 /* Caller must hold s_player_mutex. */
-static void player_client_destroy(void)
+static void player_conn_destroy(void)
 {
-    if (s_player_client) {
-        esp_http_client_cleanup(s_player_client);
-        s_player_client = NULL;
+    if (s_player_conn) {
+        http_fetch_conn_destroy(s_player_conn);
+        s_player_conn = NULL;
     }
-}
-
-/* Caller must hold s_player_mutex. */
-static esp_http_client_handle_t player_client_get(void)
-{
-    if (s_player_shutdown) return NULL;
-    if (s_player_client) return s_player_client;
-
-    esp_http_client_config_t http_cfg = {
-        .url = SPOTIFY_API_BASE "/currently-playing",
-        .timeout_ms = SPOTIFY_HTTP_TIMEOUT_MS,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .keep_alive_enable = true,
-    };
-
-    s_player_client = esp_http_client_init(&http_cfg);
-    if (s_player_client) {
-        ESP_LOGI(TAG, "Created persistent HTTP client for currently-playing");
-    }
-    return s_player_client;
 }
 
 esp_err_t spotify_client_get_currently_playing(spotify_playback_t *out)
@@ -210,68 +199,52 @@ esp_err_t spotify_client_get_currently_playing(spotify_playback_t *out)
 
     esp_err_t ret = ESP_FAIL;
 
-    esp_http_client_handle_t client = player_client_get();
-    if (!client) {
-        ESP_LOGE(TAG, "Failed to init HTTP client for currently-playing");
+    if (!s_player_conn) {
+        s_player_conn = http_fetch_conn_create();
+        if (!s_player_conn) {
+            ESP_LOGE(TAG, "Failed to create http_fetch conn for currently-playing");
+            ret = ESP_FAIL;
+            goto unlock;
+        }
+    }
+
+    if (!s_player_token_buf) {
+        s_player_token_buf = heap_caps_malloc(SPOTIFY_TOKEN_BUF_SIZE, MALLOC_CAP_SPIRAM);
+        if (!s_player_token_buf) {
+            ESP_LOGE(TAG, "Failed to allocate token buffer from PSRAM");
+            ret = ESP_FAIL;
+            goto unlock;
+        }
+    }
+    if (spotify_auth_get_access_token(s_player_token_buf, SPOTIFY_TOKEN_BUF_SIZE) != ESP_OK) {
+        ESP_LOGW(TAG, "No valid access token available");
         ret = ESP_FAIL;
         goto unlock;
     }
 
-    if (set_auth_header(client) != ESP_OK) {
-        ret = ESP_FAIL;
-        goto unlock;
-    }
+    int status = 0;
+    char *body = NULL;
+    size_t body_len = 0;
+    http_fetch_opts_t opts = {
+        .use_tls_bundle = true,
+        .timeout_ms = SPOTIFY_HTTP_TIMEOUT_MS,
+        .max_attempts = 1,        /* conn's internal stale-reconnect covers the
+                                    * hand-rolled retry this call used to do */
+        .max_response_bytes = SPOTIFY_RESPONSE_BUF_SIZE,
+        .bearer_token = s_player_token_buf,
+        .conn = s_player_conn,
+        .status_out = &status,
+    };
 
-    esp_err_t err = esp_http_client_open(client, 0);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "HTTP open failed: %s — reconnecting", esp_err_to_name(err));
-        /* Connection stale or dropped — destroy and retry once */
-        player_client_destroy();
-        client = player_client_get();
-        if (!client) { ret = ESP_FAIL; goto unlock; }
-        if (set_auth_header(client) != ESP_OK) { ret = ESP_FAIL; goto unlock; }
-        err = esp_http_client_open(client, 0);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "HTTP open retry failed: %s", esp_err_to_name(err));
-            player_client_destroy();
-            ret = ESP_FAIL;
-            goto unlock;
-        }
-    }
+    esp_err_t err = http_fetch_text(SPOTIFY_API_BASE "/currently-playing", &opts,
+                                     &body, &body_len);
 
-    int content_length = esp_http_client_fetch_headers(client);
-    int status = esp_http_client_get_status_code(client);
-
-    /* Status -1 means the server closed the keep-alive connection silently.
-     * Reconnect and retry once instead of wasting a poll cycle. */
-    if (status == -1) {
-        ESP_LOGW(TAG, "Stale keep-alive connection — reconnecting");
-        player_client_destroy();
-        client = player_client_get();
-        if (!client) { ret = ESP_FAIL; goto unlock; }
-        if (set_auth_header(client) != ESP_OK) { ret = ESP_FAIL; goto unlock; }
-        err = esp_http_client_open(client, 0);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "HTTP open retry failed: %s", esp_err_to_name(err));
-            player_client_destroy();
-            ret = ESP_FAIL;
-            goto unlock;
-        }
-        content_length = esp_http_client_fetch_headers(client);
-        status = esp_http_client_get_status_code(client);
-        if (status == -1) {
-            player_client_destroy();
-            ret = ESP_FAIL;
-            goto unlock;
-        }
-    }
-
-    /* 204 = nothing currently playing — drain and keep connection alive */
+    /* 204 = nothing currently playing. Any 2xx (including 204) is success to
+     * http_fetch, so this arrives as err == ESP_OK with an empty body; keep
+     * the connection alive, same as before. */
     if (status == 204) {
         ESP_LOGD(TAG, "No active playback (204)");
-        /* Drain any residual body to keep the connection clean */
-        char drain[64];
-        while (esp_http_client_read(client, drain, sizeof(drain)) > 0) {}
+        if (body) heap_caps_free(body);
 
         /* Update cached state to reflect nothing playing */
         if (xSemaphoreTake(s_mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
@@ -288,69 +261,37 @@ esp_err_t spotify_client_get_currently_playing(spotify_playback_t *out)
     if (status == 401) {
         ESP_LOGW(TAG, "HTTP 401 from currently-playing — invalidating token");
         spotify_auth_invalidate_token();
-        player_client_destroy();
+        if (body) heap_caps_free(body);
+        player_conn_destroy();
         ret = ESP_FAIL;
         goto unlock;
     }
 
-    if (status != 200) {
-        ESP_LOGW(TAG, "Unexpected HTTP %d from currently-playing", status);
-        player_client_destroy();
+    if (err != ESP_OK || status != 200) {
+        ESP_LOGW(TAG, "currently-playing failed: %s (HTTP %d)",
+                 esp_err_to_name(err), status);
+        if (body) heap_caps_free(body);
+        player_conn_destroy();
         ret = ESP_FAIL;
         goto unlock;
     }
 
-    /* A body larger than the cap cannot be parsed. Destroy the connection so
-     * the next poll starts clean rather than reading a truncated JSON. */
-    if (content_length > 0 && (content_length + 1) > SPOTIFY_RESPONSE_BUF_SIZE) {
-        ESP_LOGW(TAG, "currently-playing response too large: %d bytes", content_length);
-        player_client_destroy();
-        ret = ESP_FAIL;
-        goto unlock;
-    }
-
-    /* Allocate response buffer from SPIRAM */
-    int buf_size = (content_length > 0) ? (content_length + 1) : SPOTIFY_RESPONSE_BUF_SIZE;
-    if (buf_size > SPOTIFY_RESPONSE_BUF_SIZE) {
-        buf_size = SPOTIFY_RESPONSE_BUF_SIZE;
-    }
-
-    char *buffer = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
-    if (!buffer) {
-        ESP_LOGE(TAG, "Failed to allocate %d bytes for response", buf_size);
-        player_client_destroy();
-        ret = ESP_FAIL;
-        goto unlock;
-    }
-
-    /* Read response body */
-    int total_read = 0, read_len;
-    int max_read = buf_size - 1;
-    while (total_read < max_read) {
-        read_len = esp_http_client_read(client, buffer + total_read, max_read - total_read);
-        if (read_len <= 0) break;
-        total_read += read_len;
-    }
-    buffer[total_read] = '\0';
-
-    /* Don't cleanup — keep connection alive for next poll */
-
-    if (total_read == 0) {
+    if (body_len == 0) {
         ESP_LOGW(TAG, "Empty response body from currently-playing");
-        free(buffer);
+        if (body) heap_caps_free(body);
         ret = ESP_FAIL;
         goto unlock;
     }
 
     /* Parse JSON */
-    cJSON *json = cJSON_Parse(buffer);
-    free(buffer);
+    cJSON *json = cJSON_Parse(body);
+    heap_caps_free(body);
 
     if (!json) {
         /* Likely a truncated/partial body on a reused connection — destroy so
          * the next poll starts on a clean connection. */
         ESP_LOGW(TAG, "Failed to parse currently-playing JSON");
-        player_client_destroy();
+        player_conn_destroy();
         ret = ESP_FAIL;
         goto unlock;
     }
@@ -622,10 +563,10 @@ esp_err_t spotify_client_fetch_album_art(const char *url, uint8_t **out_buf,
 void spotify_client_destroy_connection(void)
 {
     if (s_player_mutex && xSemaphoreTake(s_player_mutex, portMAX_DELAY) == pdTRUE) {
-        player_client_destroy();
+        player_conn_destroy();
         xSemaphoreGive(s_player_mutex);
     } else {
-        player_client_destroy();
+        player_conn_destroy();
     }
 }
 
@@ -639,12 +580,12 @@ void spotify_client_prepare_shutdown(void)
      * so 15s is long enough for it to finish. */
     if (xSemaphoreTake(s_player_mutex, pdMS_TO_TICKS(15000)) == pdTRUE) {
         s_player_shutdown = true;
-        player_client_destroy();
+        player_conn_destroy();
         xSemaphoreGive(s_player_mutex);
     } else {
         /* Contract requires the handle destroyed on return; force it. */
         ESP_LOGW(TAG, "prepare_shutdown: mutex wait timed out — forcing teardown");
         s_player_shutdown = true;
-        player_client_destroy();
+        player_conn_destroy();
     }
 }

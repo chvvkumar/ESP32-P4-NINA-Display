@@ -1,5 +1,5 @@
 #include "web_server_internal.h"
-#include "esp_http_client.h"
+#include "http_fetch.h"
 #include "esp_heap_caps.h"
 #include <string.h>
 
@@ -11,6 +11,7 @@
  */
 esp_err_t allsky_config_get_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     app_config_t *cfg = app_config_get();
     cJSON *root = cJSON_CreateObject();
     if (root == NULL) {
@@ -45,6 +46,7 @@ esp_err_t allsky_config_get_handler(httpd_req_t *req)
  */
 esp_err_t allsky_proxy_get_handler(httpd_req_t *req)
 {
+    REQUIRE_AUTH(req);
     /* Snapshot the hostname into a local under the config mutex so the live
      * config is not read field-by-field during the (slow) outbound fetch.
      * app_config_t is ~7.6 KB — too large for the httpd stack, so snapshot into
@@ -70,71 +72,29 @@ esp_err_t allsky_proxy_get_handler(httpd_req_t *req)
     char url[192];
     snprintf(url, sizeof(url), "http://%s/all", allsky_hostname);
 
-    esp_http_client_config_t http_cfg = {
-        .url = url,
-        /* 3s outbound timeout: keep an httpd worker from blocking on a slow or
-         * unreachable AllSky host. */
+    /* One-shot fetch (conn=NULL): this runs on an httpd worker task, not a
+     * persistent poll loop, so there is no task-owned keep-alive slot to
+     * reuse here. 3s timeout keeps the httpd worker from blocking on a slow
+     * or unreachable AllSky host; cap matches the previous fixed buffer. */
+    http_fetch_opts_t opts = {
         .timeout_ms = 3000,
-        .buffer_size = 2048,
+        .max_response_bytes = ALLSKY_PROXY_BUF_SIZE,
     };
-    esp_http_client_handle_t client = esp_http_client_init(&http_cfg);
-    if (!client) {
-        httpd_resp_set_status(req, "502 Bad Gateway");
-        httpd_resp_set_type(req, "application/json");
-        httpd_resp_send(req, "{\"error\":\"Failed to create HTTP client\"}", HTTPD_RESP_USE_STRLEN);
-        return ESP_OK;
-    }
-
-    esp_err_t err = esp_http_client_open(client, 0);
+    char *body = NULL;
+    size_t body_len = 0;
+    esp_err_t err = http_fetch_text(url, &opts, &body, &body_len);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "AllSky proxy: failed to connect to %s", url);
-        esp_http_client_cleanup(client);
+        ESP_LOGW(TAG, "AllSky proxy: fetch failed for %s (%s)", url, esp_err_to_name(err));
         httpd_resp_set_status(req, "502 Bad Gateway");
         httpd_resp_set_type(req, "application/json");
         httpd_resp_send(req, "{\"error\":\"Failed to reach AllSky API\"}", HTTPD_RESP_USE_STRLEN);
         return ESP_OK;
     }
-
-    int content_length = esp_http_client_fetch_headers(client);
-    int status = esp_http_client_get_status_code(client);
-
-    if (status != 200 || content_length <= 0) {
-        ESP_LOGW(TAG, "AllSky proxy: bad response status=%d content_length=%d", status, content_length);
-        esp_http_client_cleanup(client);
-        httpd_resp_set_status(req, "502 Bad Gateway");
-        httpd_resp_set_type(req, "application/json");
-        httpd_resp_send(req, "{\"error\":\"Failed to reach AllSky API\"}", HTTPD_RESP_USE_STRLEN);
-        return ESP_OK;
-    }
-
-    /* Cap to our buffer size */
-    if (content_length > ALLSKY_PROXY_BUF_SIZE - 1) {
-        content_length = ALLSKY_PROXY_BUF_SIZE - 1;
-    }
-
-    char *buffer = heap_caps_malloc(ALLSKY_PROXY_BUF_SIZE, MALLOC_CAP_SPIRAM);
-    if (!buffer) {
-        ESP_LOGE(TAG, "AllSky proxy: PSRAM malloc failed");
-        esp_http_client_cleanup(client);
-        httpd_resp_send_500(req);
-        return ESP_OK;
-    }
-
-    int total_read = 0;
-    while (total_read < content_length) {
-        int read_len = esp_http_client_read(client, buffer + total_read,
-                                            content_length - total_read);
-        if (read_len <= 0) break;
-        total_read += read_len;
-    }
-    buffer[total_read] = '\0';
-
-    esp_http_client_cleanup(client);
 
     /* Forward the AllSky JSON response to the browser */
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, buffer, total_read);
+    httpd_resp_send(req, body, body_len);
 
-    free(buffer);
+    heap_caps_free(body);
     return ESP_OK;
 }

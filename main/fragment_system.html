@@ -1,0 +1,332 @@
+
+      <div class="sys-metrics">
+          <div class="sys-metric m-temp">
+            <div class="sm-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></svg> Temperature</div>
+            <div class="sm-value"><span class="mv" id="mTemp">--</span></div>
+          </div>
+          <div class="sys-metric m-up">
+            <div class="sm-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> Uptime</div>
+            <div class="sm-value"><span class="mv" id="mUptime">--</span></div>
+          </div>
+          <div class="sys-metric m-mem">
+            <div class="sm-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="6" width="16" height="12" rx="2"/><path d="M8 6V4m4 2V4m4 2V4M8 18v2m4-2v2m4-2v2"/></svg> Internal Heap</div>
+            <div class="sm-value"><span class="mv" id="mMem">--</span></div>
+          </div>
+          <div class="sys-metric m-psram">
+            <div class="sm-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/></svg> PSRAM</div>
+            <div class="sm-value"><span class="mv" id="mPsram">--</span></div>
+          </div>
+          <div class="sys-metric m-wifi">
+            <div class="sm-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/></svg> WiFi Signal</div>
+            <div class="sm-value"><span class="bars" id="mWifiBars"></span><span class="mv" id="mWifi">--</span></div>
+          </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="card-title-label">Network <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Network and time</div><p>The device connects to your WiFi and also broadcasts its own setup WiFi network at the same time. It joins one of the three configured networks to reach your NINA computers; its own setup network uses the device hostname as the network name with password 12345678, so you can reach the settings for first-time setup without a separate screen. The three networks are priority-ordered: Network 1 is tried first, then 2, then 3.</p><p>Hostname is used on your network, as the setup network name, and as the Home Assistant device name. NTP server and timezone set the clock used on the clock page and in timestamps; the timezone list carries the correct local-time and daylight-saving rules.</p><p>Example: hostname ninadash1 produces access point SSID ninadash1 and the device is reachable at ninadash1.lan. Changes here take effect after a reboot.</p></div>
+        <div class="wifi-scan-panel" id="wifiScanPanel">
+          <div class="wifi-scan-header" onclick="toggleScanPanel()">
+            <span class="wifi-scan-title"><span class="chevron collapsed" id="scanChevron">&#x25BC;</span> Available Networks</span>
+            <span class="wifi-scan-rescan" id="scanRescanBtn" onclick="event.stopPropagation();scanWifi()">&#x21bb; Rescan</span>
+          </div>
+          <div class="wifi-scan-list collapsed" id="wifiScanList">
+            <div class="wifi-scan-status" id="wifiScanStatus">Scanning for networks...</div>
+          </div>
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">Device Name</div>
+        <div class="field">
+          <label class="field-label">Device hostname</label>
+          <input type="text" class="input" id="hostname" placeholder="NINA-DISPLAY" maxlength="31" pattern="[A-Za-z0-9\-]+" style="max-width:320px">
+          <div class="field-hint">Used on your network, as the setup WiFi network name, and as the Home Assistant device name.</div>
+        </div>
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">WiFi Networks</div>
+        <div class="field">
+          <div class="field-label" style="font-weight:600;color:var(--accent)">Network 1 (Primary)</div>
+          <label class="field-label">SSID</label>
+          <input type="text" class="input" id="ssid1" placeholder="Network name">
+          <div class="field-hint">Highest-priority network; the device connects to this one first when it is in range.</div>
+          <label class="field-label">Password</label>
+          <input type="password" class="input" id="pass1" placeholder="Enter new password to change">
+          <div class="hint">Password is stored in device config and not readable</div>
+
+          <div class="field-label" style="margin-top:16px;font-weight:600;color:var(--accent)">Network 2</div>
+          <label class="field-label">SSID</label>
+          <input type="text" class="input" id="ssid2" placeholder="Network name">
+          <div class="field-hint">Fallback joined only when Network 1 is unavailable.</div>
+          <label class="field-label">Password</label>
+          <input type="password" class="input" id="pass2" placeholder="Enter new password to change">
+
+          <div class="field-label" style="margin-top:16px;font-weight:600;color:var(--accent)">Network 3</div>
+          <label class="field-label">SSID</label>
+          <input type="text" class="input" id="ssid3" placeholder="Network name">
+          <div class="field-hint">Second fallback joined only when Networks 1 and 2 are unavailable.</div>
+          <label class="field-label">Password</label>
+          <input type="password" class="input" id="pass3" placeholder="Enter new password to change">
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">WiFi power save</span>
+          <label class="toggle"><input type="checkbox" id="wifi_power_save" checked><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint">Lets the WiFi radio rest between updates to save power. The device stays connected, so there is no reconnect delay.</div>
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">Time</div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">NTP server</label>
+            <input type="text" class="input" id="ntp" placeholder="pool.ntp.org">
+            <div class="field-hint">Hostname of the time server used to set the clock; pool.ntp.org works for most locations.</div>
+          </div>
+          <div class="field">
+            <label class="field-label">Timezone</label>
+            <select class="input" id="timezone">
+              <option value="">UTC (default)</option>
+              <option value="GMT0">GMT</option>
+              <option value="GMT0BST,M3.5.0/1,M10.5.0">UK (GMT/BST)</option>
+              <option value="CET-1CEST,M3.5.0,M10.5.0/3">Central Europe (CET/CEST)</option>
+              <option value="EET-2EEST,M3.5.0/3,M10.5.0/4">Eastern Europe (EET/EEST)</option>
+              <option value="EST5EDT,M3.2.0,M11.1.0">US Eastern (EST/EDT)</option>
+              <option value="CST6CDT,M3.2.0,M11.1.0">US Central (CST/CDT)</option>
+              <option value="MST7MDT,M3.2.0,M11.1.0">US Mountain (MST/MDT)</option>
+              <option value="MST7">US Arizona (MST, no DST)</option>
+              <option value="PST8PDT,M3.2.0,M11.1.0">US Pacific (PST/PDT)</option>
+              <option value="AKST9AKDT,M3.2.0,M11.1.0">US Alaska (AKST/AKDT)</option>
+              <option value="HST10">US Hawaii (HST, no DST)</option>
+              <option value="AEST-10AEDT,M10.1.0,M4.1.0/3">Australia Eastern (AEST/AEDT)</option>
+              <option value="ACST-9:30ACDT,M10.1.0,M4.1.0/3">Australia Central (ACST/ACDT)</option>
+              <option value="AWST-8">Australia Western (AWST, no DST)</option>
+              <option value="NZST-12NZDT,M9.5.0,M4.1.0/3">New Zealand (NZST/NZDT)</option>
+              <option value="JST-9">Japan (JST)</option>
+              <option value="CST-8">China (CST)</option>
+              <option value="IST-5:30">India (IST)</option>
+              <option value="<-03>3">Argentina (ART)</option>
+              <option value="<-03>3<-02>,M10.3.0/0,M2.3.0/0">Brazil (BRT/BRST)</option>
+              <option value="SAST-2">South Africa (SAST)</option>
+            </select>
+            <div class="field-hint">Select your region so local time and daylight-saving transitions are applied to displayed times.</div>
+          </div>
+        </div>
+        </div>
+        <div class="field-hint hint-center">Reboot required after changing hostname, WiFi, NTP, or timezone.</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="card-title-label">Location <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Location</div><p>Sets the device location used by location-based features: the weather forecast on the clock page and the moon phase view. Type a city name and select Look up to fill the coordinates automatically.</p><p>You can also enter latitude and longitude by hand, for example from a GPS reading or an online map.</p></div>
+        <div class="field-hint" style="margin-bottom:12px">This location is used by the weather forecast on the clock page and by the moon phase view.</div>
+        <div class="field" id="weather_city_lookup_field">
+          <label class="field-label">Location</label>
+          <div style="display:flex;gap:10px">
+            <input type="text" class="input" id="weather_location_search" placeholder="Search city name..." style="flex:1">
+            <button class="btn btn-outline" onclick="lookupCity()" type="button">Look up</button>
+          </div>
+          <div id="city_results" style="display:none;margin-top:6px;background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.08);border-radius:10px;max-height:200px;overflow-y:auto"></div>
+          <div class="field-hint">Type a city name and select Look up to auto-fill latitude, longitude, and location name.</div>
+        </div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Latitude</label>
+            <input type="number" class="input" id="weather_lat" step="0.0001" placeholder="0.0000">
+            <div class="field-hint">Decimal degrees, positive north (e.g. 39.7392); needed when not using city lookup.</div>
+          </div>
+          <div class="field">
+            <label class="field-label">Longitude</label>
+            <input type="number" class="input" id="weather_lon" step="0.0001" placeholder="0.0000">
+            <div class="field-hint">Decimal degrees, positive east, negative west (e.g. -104.9903).</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="card-title-label">Power Management <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Power Management</div><p>Controls deep sleep. Deep sleep powers the device down on a long-press of the BOOT button or, optionally, after extended disconnection from all NINA instances. While asleep the display is off and the device is not reachable over the network.</p><p>The wake timer sets how many hours pass before the device wakes itself from deep sleep. A value of 0 means it stays asleep until physically rebooted.</p><p>Example: leave deep sleep off for an always-mounted display so the dashboard stays reachable over the network at all times.</p></div>
+        <div class="toggle-row">
+          <span class="toggle-label">Enable deep sleep (long-press BOOT to power off)</span>
+          <label class="toggle"><input type="checkbox" id="deep_sleep_enabled"><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint" style="margin-top:4px">Allows a long-press of the BOOT button to power the device into deep sleep.</div>
+        <div id="deep_sleep_details" style="margin-top:16px">
+          <div class="field">
+            <label class="field-label">Wake timer (hours)</label>
+            <input type="number" class="input" id="deep_sleep_wake_timer" min="0" max="72" step="1" value="0">
+            <div class="field-hint">Hours until auto-wake. 0 = stay asleep forever. Warning: with timer set to 0, the device must be physically rebooted to wake up; there is no manual wake from deep sleep.</div>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Auto power off when idle</span>
+            <label class="toggle"><input type="checkbox" id="deep_sleep_on_idle"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Enter deep sleep after extended disconnection from all NINA instances. The device must be physically rebooted to wake up if the wake timer is set to 0.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="card-title-label">MQTT <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">MQTT publishing</div><p>Publishes this device's own state to an MQTT broker and exposes it in Home Assistant. It does not republish N.I.N.A. session data. Auto-discovery config messages are sent so Home Assistant creates the entities automatically, with no manual setup: screen brightness and text brightness (both controllable), a reboot button, and an uptime sensor.</p><p>Broker host and port point at your MQTT server. Topic prefix is added to the front of every topic the device sends, so multiple displays can share one broker without collision. Username and password are sent only if your broker requires authentication; leave them blank for anonymous brokers.</p><p>Example: broker host 192.168.1.250, port 1883, topic prefix ninadisplay publishes under ninadisplay/... and appears in Home Assistant as a device named after the hostname.</p></div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Enable MQTT</span>
+          <label class="toggle"><input type="checkbox" id="mqtt_enabled"><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint" style="margin-top:4px">Turn on publishing of the device's own state and Home Assistant auto-discovery to the broker.</div>
+        <div class="subsection">
+        <div class="subsection-title">Broker</div>
+        <div class="field">
+          <label class="field-label">Broker host</label>
+          <input type="text" class="input" id="mqtt_broker" placeholder="192.168.1.250">
+          <div class="field-hint">IP address or hostname of your MQTT broker.</div>
+        </div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Port</label>
+            <input type="text" class="input" id="mqtt_port" placeholder="1883">
+            <div class="field-hint">Broker TCP port; 1883 for plain MQTT is the common default.</div>
+          </div>
+          <div class="field">
+            <label class="field-label">Topic prefix</label>
+            <input type="text" class="input" id="mqtt_prefix" placeholder="ninadisplay">
+            <div class="field-hint">Added to the front of every topic the device sends; use a unique value per device.</div>
+          </div>
+        </div>
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">Authentication</div>
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Username</label>
+            <input type="text" class="input" id="mqtt_user" placeholder="Username">
+            <div class="field-hint">Leave blank if the broker allows anonymous connections.</div>
+          </div>
+          <div class="field">
+            <label class="field-label">Password</label>
+            <input type="password" class="input" id="mqtt_pass" placeholder="Password">
+            <div class="field-hint">Leave blank if the broker allows anonymous connections.</div>
+          </div>
+        </div>
+        </div>
+        <div class="field-hint hint-center">Reboot required after changing MQTT settings.</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="card-title-label">Firmware <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Firmware and updates</div><p>The info grid is read-only build detail: running version and build date, the ESP-IDF version, and the exact release version. Updates are pulled from GitHub releases; the device keeps the previous firmware so a failed or bad update can roll back automatically.</p><p>Check for updates on boot queries GitHub at startup. Update channel selects which releases qualify: Stable only ignores pre-releases, Include pre-releases also offers beta builds. Check for Updates queries now and, if a newer build exists, shows release notes and an Install button. The file picker below it flashes a local .bin you supply instead of downloading from GitHub.</p><p>Example: set Update channel to Stable only and leave Check for updates on boot enabled to be notified of tagged releases without receiving test builds.</p></div>
+        <div class="fw-grid">
+          <div class="fw-item"><div class="fw-label">Version</div><div class="fw-value" id="fw_version">--</div></div>
+          <div class="fw-item"><div class="fw-label">Built</div><div class="fw-value" id="fw_date">--</div></div>
+          <div class="fw-item"><div class="fw-label">IDF</div><div class="fw-value" id="fw_idf">--</div></div>
+          <div class="fw-item"><div class="fw-label">Partition</div><div class="fw-value" id="fw_partition">--</div></div>
+          <div class="fw-item"><div class="fw-label">Release</div><div class="fw-value" id="fw_git_tag">--</div></div>
+          <div class="fw-item"><div class="fw-label">Commit</div><div class="fw-value" id="fw_git_sha">--</div></div>
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">Automatic Updates</div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Check for updates on boot</span>
+          <label class="toggle"><input type="checkbox" id="auto_update_check" checked><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint" style="margin-top:4px">Automatically check GitHub for new firmware releases when the device boots.</div>
+        <div class="field" style="margin-top:12px">
+          <label class="field-label">Update channel</label>
+          <select class="input" id="update_channel">
+            <option value="0">Stable only</option>
+            <option value="1">Include pre-releases</option>
+            <option value="2">Alpha (snd)</option>
+          </select>
+          <div class="field-hint">Stable only skips pre-release builds; Include pre-releases also offers beta firmware. Alpha (snd) installs experimental snd-branch builds; expect frequent changes.</div>
+        </div>
+        <button class="btn btn-primary" style="margin-top:12px;width:100%" id="checkUpdateBtn" onclick="checkForUpdates()">Check for Updates</button>
+        <div id="updateResult" style="display:none;margin-top:12px;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.03)">
+          <div id="updateResultText" style="font-size:0.85rem;color:var(--text-secondary)"></div>
+          <div id="updateSummary" style="display:none;margin-top:8px;font-size:0.78rem;color:var(--text-muted);max-height:120px;overflow-y:auto;white-space:pre-wrap"></div>
+          <button class="btn btn-primary" id="otaGithubBtn" style="display:none;margin-top:12px;width:100%" onclick="startGithubOta()">Install Update</button>
+        </div>
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">Manual Update</div>
+        <div class="ota-bar">
+          <label class="ota-label" id="otaFileLabel">
+            Choose firmware .bin file
+            <input type="file" id="otaFile" accept=".bin" style="display:none" onchange="otaFileSelected(this)">
+          </label>
+          <button class="btn btn-primary" id="otaBtn" disabled onclick="startOta()">Update</button>
+        </div>
+        <div class="field-hint" style="margin-top:4px">Flash a firmware .bin you provide directly instead of downloading from GitHub.</div>
+        <div id="otaProgress" style="display:none;margin-top:16px">
+          <div class="progress-bg"><div id="otaProgressFill" class="progress-fill"></div></div>
+          <div id="otaStatus" class="progress-status"></div>
+        </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="card-title-label">Device <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Device actions and modes</div><p>Reboot restarts the device and applies pending reboot-required settings. Factory Reset erases all saved settings and returns every setting to defaults, including WiFi, so plan to reconnect over the device's own setup WiFi network afterward.</p><p>Debug Mode enables extra performance and diagnostic info; leave it off for normal use. Demo Mode generates simulated session data so the dashboard can be used with no live NINA connection. Reboot the device for the change to fully take effect. Capture Screenshot pulls a JPEG of the current display.</p><p>Example: enable Demo Mode to preview the dashboard layout before any N.I.N.A. instance is online, then disable it to return to live data.</p></div>
+        <div class="subsection danger-zone">
+        <div class="subsection-title">Device Actions</div>
+        <div class="row stack-mobile" style="margin-bottom:16px">
+          <button class="btn btn-outline" onclick="saveAndReboot()" style="flex:1">Reboot</button>
+          <button class="btn btn-danger" onclick="factoryReset()" style="flex:1">Factory Reset</button>
+        </div>
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">Modes</div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Enable Debug Mode</span>
+          <label class="toggle"><input type="checkbox" id="debug_mode"><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint" style="margin-top:4px;margin-bottom:16px">Shows extra performance and diagnostic info.</div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Enable Demo Mode</span>
+          <label class="toggle"><input type="checkbox" id="demo_mode"><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint" style="margin-top:4px;margin-bottom:16px">Generates simulated astrophotography data. Reboot for the change to fully take effect.</div>
+        </div>
+        <button class="btn btn-outline" id="ssBtn" onclick="takeScreenshot()">Capture Screenshot</button>
+        <div id="ssContainer" style="display:none;margin-top:16px">
+          <img id="ssImage" style="width:100%;border-radius:var(--radius-sm);border:1px solid var(--border)">
+        </div>
+      </div>
+
+      <div class="card" id="adminPasswordCard">
+        <div class="card-title"><span class="card-title-label">Authentication <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Web UI access control</div><p>Require login asks for a username and password before the web settings will open, and is on by default. When it is off, anyone on the network can reboot, factory-reset, flash, or reconfigure the device; secrets such as passwords, API keys, and tokens stay redacted in API responses either way.</p><p>The admin password defaults to changeme123!. To change it, enter the current password, then the new password twice (4 to 32 characters). Sign out clears your current browser session.</p><p>Example: keep Require login enabled and change the password from the default before exposing the device beyond your local network.</p></div>
+        <div class="subsection">
+        <div class="subsection-title">Access Control</div>
+        <div class="toggle-row">
+          <span class="toggle-label">Require login to access the web UI</span>
+          <label class="toggle"><input type="checkbox" id="auth_enabled"><span class="toggle-track"></span></label>
+        </div>
+        <p style="color:#888;font-size:0.85em;margin:8px 0 0 0;">
+          When disabled, anyone on the network can control the device (reboot, factory reset, OTA, config change).
+          Secrets (passwords, API keys, tokens) remain redacted in API responses either way.
+        </p>
+        <button class="btn btn-primary" style="margin-top:12px" onclick="saveAuthEnabled()">Save</button>
+        <div id="auth_enabled_status" style="margin-top:10px;font-size:0.9em;"></div>
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">Admin Password</div>
+        <p style="color:#888;font-size:0.85em;margin:2px 0 12px 0;">
+          Default password is <code>changeme123!</code>. Change it now to secure this device's web interface.
+        </p>
+        <div class="field">
+          <label for="admin_pw_current">Current password</label>
+          <input type="password" class="input" id="admin_pw_current" autocomplete="current-password">
+          <div class="field-hint">Enter the password in use now to authorize the change.</div>
+        </div>
+        <div class="field">
+          <label for="admin_pw_new">New password (4-32 chars)</label>
+          <input type="password" class="input" id="admin_pw_new" autocomplete="new-password">
+          <div class="field-hint">Choose a password 4 to 32 characters long.</div>
+        </div>
+        <div class="field">
+          <label for="admin_pw_confirm">Confirm new password</label>
+          <input type="password" class="input" id="admin_pw_confirm" autocomplete="new-password">
+          <div class="field-hint">Re-enter the new password exactly to confirm.</div>
+        </div>
+        <button class="btn btn-primary" onclick="changeAdminPassword()">Save Password</button>
+        <div id="admin_pw_status" style="margin-top:10px;font-size:0.9em;"></div>
+        </div>
+        <button class="btn" id="signOutBtn" onclick="signOut()">Sign out</button>
+      </div>

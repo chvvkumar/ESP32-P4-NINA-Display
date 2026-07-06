@@ -112,6 +112,12 @@ typedef struct {
     bool     cached_is_exposing;    // Last-known is_exposing state from poll data
     char     prev_filter[32];       // Track previous filter for change detection
 
+    // NINA-domain clock pair copied from nina_client_t in update_exposure_arc
+    // (caller holds the data lock), read lock-free by arc_interp_timer_cb.
+    // cached_nina_epoch == 0 -> unknown, fall back to time(NULL).
+    int64_t  cached_nina_epoch;     // NINA-PC UTC epoch at capture (HTTP Date)
+    int64_t  cached_nina_mono_us;   // esp_timer_get_time() at capture
+
     // Connection state (tracked for theme reapplication)
     bool nina_connected;
 
