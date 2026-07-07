@@ -11,6 +11,7 @@
 #include "nina_graph_internal.h"
 #include "nina_dashboard.h"
 #include "nina_nav_arbiter.h"
+#include "graph_downsample.h"
 #include "esp_timer.h"
 #include <stdio.h>
 #include <string.h>
@@ -31,11 +32,11 @@
 /* -- History point options ----------------------------------------------- */
 const int point_options[] = {25, 50, 100, 200, 400};
 
-/* Max points actually drawn on the chart. The chart is ~720px wide, so more
- * than this yields sub-pixel polyline segments with no visible difference.
- * Decimating the displayed set (storage stays GRAPH_MAX_POINTS) roughly halves
- * the per-point loop and polyline segment count for the heavy locked redraw. */
-#define GRAPH_MAX_DISPLAY_POINTS 360
+/* GRAPH_MAX_DISPLAY_POINTS is defined in graph_downsample.h (chart is ~720px
+ * wide, so more than this yields sub-pixel polyline segments with no visible
+ * difference; decimating the displayed set, storage stays GRAPH_MAX_POINTS,
+ * roughly halves the per-point loop and polyline segment count for the heavy
+ * locked redraw). */
 
 /* -- Y-scale options for RMS (arcseconds x 100) ------------------------- */
 const int rms_scale_values[] = {0, 100, 200, 400, 800, 1600};  /* 0 = auto */
@@ -575,12 +576,9 @@ void nina_graph_set_rms_data(const graph_rms_data_t *data) {
     /* Decimate the displayed set to the chart's pixel width. When the source
      * has more samples than the chart can resolve, subsample with an integer
      * stride so the polyline draws far fewer segments under the display lock. */
-    int disp_count = count;
-    int stride = 1;
-    if (count > GRAPH_MAX_DISPLAY_POINTS) {
-        stride = (count + GRAPH_MAX_DISPLAY_POINTS - 1) / GRAPH_MAX_DISPLAY_POINTS;
-        disp_count = (count + stride - 1) / stride;
-    }
+    graph_downsample_t ds = graph_downsample_compute(count);
+    int disp_count = ds.disp_count;
+    int stride = ds.stride;
 
     /* Configure chart */
     lv_chart_set_point_count(chart, disp_count);
@@ -595,16 +593,7 @@ void nina_graph_set_rms_data(const graph_rms_data_t *data) {
     update_series_colors();
 
     /* Find Y range (auto mode) */
-    float max_val = 0.5f;  /* minimum visible range */
-    for (int i = 0; i < count; i++) {
-        float abs_ra = fabsf(data->ra[i]);
-        float abs_dec = fabsf(data->dec[i]);
-        if (abs_ra > max_val) max_val = abs_ra;
-        if (abs_dec > max_val) max_val = abs_dec;
-    }
-    /* Add 20% headroom and round up */
-    int range = (int)(max_val * 120.0f + 50.0f);  /* x100 then +headroom */
-    if (range < 100) range = 100;
+    int range = graph_rms_y_range(data->ra, data->dec, count);
 
     /* Apply Y scale */
     int scale_val = 0;
@@ -660,12 +649,9 @@ void nina_graph_set_hfr_data(const graph_hfr_data_t *data) {
     if (count > GRAPH_MAX_POINTS) count = GRAPH_MAX_POINTS;
 
     /* Decimate the displayed set to the chart's pixel width (see RMS path). */
-    int disp_count = count;
-    int stride = 1;
-    if (count > GRAPH_MAX_DISPLAY_POINTS) {
-        stride = (count + GRAPH_MAX_DISPLAY_POINTS - 1) / GRAPH_MAX_DISPLAY_POINTS;
-        disp_count = (count + stride - 1) / stride;
-    }
+    graph_downsample_t ds = graph_downsample_compute(count);
+    int disp_count = ds.disp_count;
+    int stride = ds.stride;
 
     /* Configure chart */
     lv_chart_set_point_count(chart, disp_count);
@@ -680,14 +666,8 @@ void nina_graph_set_hfr_data(const graph_hfr_data_t *data) {
     update_series_colors();
 
     /* Find Y range (auto mode) -- HFR is always positive */
-    float max_val = 1.0f;
     float sum = 0;
-    for (int i = 0; i < count; i++) {
-        if (data->hfr[i] > max_val) max_val = data->hfr[i];
-        sum += data->hfr[i];
-    }
-    int range = (int)(max_val * 120.0f + 0.5f);  /* x100 + 20% headroom */
-    if (range < 200) range = 200;
+    int range = graph_hfr_y_range(data->hfr, count, &sum);
 
     /* Apply Y scale */
     int scale_val = 0;

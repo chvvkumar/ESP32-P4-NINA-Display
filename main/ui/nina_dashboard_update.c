@@ -117,8 +117,19 @@ void arc_interp_timer_cb(lv_timer_t *timer) {
      * small result to float for the P4 single-precision FPU. If NINA is
      * genuinely slower than our anchor predicted (paused / dither / meridian
      * flip extended the sub), the wall clock shows less elapsed than us — only
-     * then re-anchor backward. Never pull forward on wall drift. */
-    int64_t remaining_wall_ms = (p->cached_end_epoch - (int64_t)time(NULL)) * 1000;
+     * then re-anchor backward. Never pull forward on wall drift.
+     * "Wall" here is the NINA-PC clock domain (cached_end_epoch is a NINA
+     * timestamp): advance the cached Date-header epoch by monotonic time.
+     * This timer runs WITHOUT the data lock, so it reads the page's cached
+     * pair (copied under the lock in update_exposure_arc), never d directly. */
+    int64_t now_nina;
+    if (p->cached_nina_epoch != 0) {
+        now_nina = p->cached_nina_epoch +
+                   (esp_timer_get_time() - p->cached_nina_mono_us) / 1000000;
+    } else {
+        now_nina = (int64_t)time(NULL);
+    }
+    int64_t remaining_wall_ms = (p->cached_end_epoch - now_nina) * 1000;
     float elapsed_wall = p->cached_total - (float)remaining_wall_ms / 1000.0f;
 
     if (elapsed_wall < elapsed - 1.0f) {
@@ -222,6 +233,8 @@ static void update_disconnected_state(dashboard_page_t *p, int instance_idx, int
     p->cached_end_epoch = 0;
     p->cached_total = 0;
     p->gap_start_epoch = 0;
+    p->cached_nina_epoch = 0;
+    p->cached_nina_mono_us = 0;
     lv_arc_set_value(p->arc_exposure, 0);
     lv_obj_add_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
     lv_anim_delete(p->lbl_rms_value, arcsec_anim_exec);
@@ -335,11 +348,24 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
         p->gap_start_epoch = 0;
         p->exp_anchor_us = 0;
         p->exp_anchor_elapsed = 0;
+        p->cached_nina_epoch = 0;
+        p->cached_nina_mono_us = 0;
         lv_arc_set_value(p->arc_exposure, 0);
         snprintf(p->prev_filter, sizeof(p->prev_filter), "%s", d->current_filter);
     }
 
-    time_t now = time(NULL);
+    /* NINA-domain "now" for all NINA-timestamp math (exposure_end_epoch is a
+     * NINA-PC timestamp). The caller (update_nina_dashboard_page, via
+     * data_update_task) holds the nina_client lock here, so reading d's clock
+     * pair is safe. Copy the pair into the page cache for the lock-free
+     * 200ms arc_interp_timer_cb.
+     * Concurrency: the cached pair is serialized by the LVGL display lock,
+     * not the nina_client lock — this writer runs under both locks, while
+     * arc_interp_timer_cb reads it under the LVGL lock only (esp_lvgl_port
+     * task). Keep any future readers inside the LVGL lock. */
+    int64_t now_nina = nina_client_now_epoch(d);
+    p->cached_nina_epoch = d->nina_clock_epoch;
+    p->cached_nina_mono_us = d->nina_clock_mono_us;
 
     /* Detect the IsExposing true->false edge BEFORE updating cached_is_exposing.
      * NINA flips IsExposing->false at sub end and the poll usually sees that
@@ -383,7 +409,7 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
 
         // Detect new exposure by end_epoch change, or idle->exposing with no anchor
         bool new_exposure = (d->exposure_end_epoch != p->cached_end_epoch
-                             && d->exposure_end_epoch > (int64_t)now)
+                             && d->exposure_end_epoch > now_nina)
                             || (p->exp_anchor_us == 0);
 
         /* Detect a material exposure_total change on the SAME ongoing exposure
@@ -405,7 +431,7 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
              * are (detection can land mid-sub on page switch / first connect).
              * Difference the epochs in int64 first to preserve precision, then
              * cast the small result to float for the P4 single-precision FPU. */
-            int64_t remaining_seed_ms = (d->exposure_end_epoch - (int64_t)now) * 1000;
+            int64_t remaining_seed_ms = (d->exposure_end_epoch - now_nina) * 1000;
             float seed = d->exposure_total - (float)remaining_seed_ms / 1000.0f;
             if (seed < 0.0f) seed = 0.0f;
             if (seed > d->exposure_total) seed = d->exposure_total;
@@ -431,7 +457,7 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
              * image-history length replaced by the real sequence length).
              * Re-anchor against the corrected total and smoothly animate the
              * one-time position correction instead of hard-jumping the arc. */
-            int64_t remaining_seed_ms = (d->exposure_end_epoch - (int64_t)now) * 1000;
+            int64_t remaining_seed_ms = (d->exposure_end_epoch - now_nina) * 1000;
             float seed = d->exposure_total - (float)remaining_seed_ms / 1000.0f;
             if (seed < 0.0f) seed = 0.0f;
             if (seed > d->exposure_total) seed = d->exposure_total;
@@ -495,11 +521,14 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
                              || strcmp(d->status, "NoState") == 0
                              || strcmp(d->status, "OFFLINE") == 0);
 
+            /* Gap timing is device-only elapsed time (a duration, not a
+             * NINA-timestamp comparison) — deliberately stays on time(NULL). */
+            int64_t now_wall = (int64_t)time(NULL);
             if (p->gap_start_epoch == 0) {
-                p->gap_start_epoch = (int64_t)now;
+                p->gap_start_epoch = now_wall;
             }
 
-            int64_t gap_duration = (int64_t)now - p->gap_start_epoch;
+            int64_t gap_duration = now_wall - p->gap_start_epoch;
             if (camera_idle || gap_duration > ARC_GAP_GRACE_S) {
                 // Grace period expired — transition to idle
                 p->cached_end_epoch = 0;
@@ -508,6 +537,8 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
                 p->exp_anchor_us = 0;
                 p->exp_anchor_elapsed = 0;
                 p->arc_completing = false;
+                p->cached_nina_epoch = 0;
+                p->cached_nina_mono_us = 0;
                 set_label_if_changed(p->lbl_exposure_total, "");
                 set_label_if_changed(p->lbl_loop_count, "");
                 set_label_if_changed(p->lbl_exposure_current, "--");

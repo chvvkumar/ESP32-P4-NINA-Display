@@ -17,6 +17,7 @@
 #include "nina_allsky.h"
 #include "nina_spotify.h"
 #include "nina_clock.h"
+#include "page_registry.h"
 #include "nina_image_display.h"
 #include "moon_interaction.h"
 #include "nina_settings_tabview.h"
@@ -49,25 +50,126 @@ int  nina_available_count = 0;
 lv_obj_t *allsky_obj = NULL;
 static lv_obj_t *allsky_page_created = NULL;  /* Always holds the created page object */
 
+/* ── AllSky page registry ops (Task 4.7 wave P7b) ──
+ * get_obj reads allsky_obj (NOT allsky_page_created): allsky_obj is NULL
+ * whenever the page is disabled, so is_available=NULL (derive from
+ * get_obj()!=NULL) reproduces the enabled-AND-created guard used throughout
+ * this file without a separate availability check. The page itself is never
+ * destroyed once created (only hidden/tracked), so destroy stays NULL. */
+static lv_obj_t *allsky_ops_get_obj(void) { return allsky_obj; }
+
+static const page_ops_t s_allsky_page_ops = {
+    .create       = allsky_page_create,
+    .destroy      = NULL,
+    .get_obj      = allsky_ops_get_obj,
+    .show         = NULL,
+    .hide         = NULL,
+    .apply_theme  = allsky_page_apply_theme,
+    .is_available = NULL,
+};
+
 /* Spotify page — always at PAGE_IDX_SPOTIFY (1), excluded from indicators */
 lv_obj_t *spotify_obj = NULL;
 static lv_obj_t *spotify_page_created = NULL;  /* Always holds the created page object */
 
+/* ── Spotify page registry ops (Task 4.7 wave P7b) ──
+ * Same NULL-when-disabled pattern as AllSky above; show/hide route to the
+ * existing idle-timer lifecycle callbacks. */
+static lv_obj_t *spotify_ops_get_obj(void) { return spotify_obj; }
+
+static const page_ops_t s_spotify_page_ops = {
+    .create       = spotify_page_create,
+    .destroy      = NULL,
+    .get_obj      = spotify_ops_get_obj,
+    .show         = nina_spotify_on_show,
+    .hide         = nina_spotify_on_hide,
+    .apply_theme  = spotify_page_apply_theme,
+    .is_available = NULL,
+};
+
 /* Clock page — always at PAGE_IDX_CLOCK (2), always present */
 lv_obj_t *clock_obj = NULL;
+
+/* ── Clock page registry ops (Task 4.7 / retro 4.7, wave P7a proof) ──
+ * Thunks over the existing clock_page_* functions; get_obj reads the
+ * clock_obj global above (clock_obj lives here, not in nina_clock.c). */
+static lv_obj_t *clock_ops_get_obj(void) { return clock_obj; }
+
+static const page_ops_t s_clock_page_ops = {
+    .create       = clock_page_create,
+    .destroy      = NULL,   /* clock page is never destroyed, always present */
+    .get_obj      = clock_ops_get_obj,
+    .show         = clock_page_on_show,
+    .hide         = clock_page_on_hide,
+    .apply_theme  = clock_page_apply_theme,
+    .is_available = NULL,   /* NULL = derive from get_obj() != NULL (always available) */
+};
 
 /* Image Display page — always at PAGE_IDX_IMAGE_DISPLAY (3), excluded from indicators */
 lv_obj_t *image_display_obj = NULL;
 static lv_obj_t *image_display_page_created = NULL;
 
+/* ── Image Display page registry ops (Task 4.7 wave P7b) ──
+ * Registered under PAGE_REF_IMG_DEFAULT: the registry's generic "the Image
+ * Display page itself" id (page_idx = PAGE_IDX_IMAGE_DISPLAY, img_src = -1),
+ * distinct from the per-source ids (PAGE_REF_IMG_GOES/MOON/SOLAR/CUSTOM) that
+ * share the same page_idx. Page lifecycle (create/get_obj/apply_theme) is
+ * per-page, not per-source, so one ops registration covers all sources. */
+static lv_obj_t *image_display_ops_get_obj(void) { return image_display_obj; }
+
+static const page_ops_t s_image_display_page_ops = {
+    .create       = nina_image_display_create,
+    .destroy      = NULL,
+    .get_obj      = image_display_ops_get_obj,
+    .show         = NULL,
+    .hide         = NULL,
+    .apply_theme  = nina_image_display_apply_theme,
+    .is_available = NULL,
+};
+
 /* Summary page — at PAGE_IDX_SUMMARY (4), excluded from indicators */
 static lv_obj_t *summary_obj = NULL;
+
+/* ── Summary page registry ops (Task 4.7 wave P7b) ──
+ * Summary is always present (never disabled/NULL'd), so get_obj simply
+ * returns summary_obj and is_available derives to "always true" once created.
+ * show_page_at() has no summary-specific on-show behavior today beyond
+ * clearing the hidden flag (summary_page_update() runs from data_update_task
+ * on its own poll cadence, not on page-show), so show is left NULL. */
+static lv_obj_t *summary_ops_get_obj(void) { return summary_obj; }
+
+static const page_ops_t s_summary_page_ops = {
+    .create       = summary_page_create,
+    .destroy      = NULL,
+    .get_obj      = summary_ops_get_obj,
+    .show         = NULL,
+    .hide         = NULL,
+    .apply_theme  = summary_page_apply_theme,
+    .is_available = NULL,
+};
 
 /* Settings page — at SETTINGS_PAGE_IDX(page_count), excluded from indicators */
 static lv_obj_t *settings_obj = NULL;
 
 /* System info page — at SYSINFO_PAGE_IDX(page_count), excluded from indicators */
 static lv_obj_t *sysinfo_obj = NULL;
+
+/* ── System info page registry ops (Task 4.7 wave P7b) ──
+ * The pre-ops show_page_at() branch refreshed stats every time the page
+ * became visible (sysinfo_page_refresh()); fold that into the show thunk so
+ * ops-driven show reproduces the exact same on-show behavior. */
+static lv_obj_t *sysinfo_ops_get_obj(void) { return sysinfo_obj; }
+static void sysinfo_ops_show(void) { sysinfo_page_refresh(); }
+
+static const page_ops_t s_sysinfo_page_ops = {
+    .create       = sysinfo_page_create,
+    .destroy      = NULL,
+    .get_obj      = sysinfo_ops_get_obj,
+    .show         = sysinfo_ops_show,
+    .hide         = NULL,
+    .apply_theme  = sysinfo_page_apply_theme,
+    .is_available = NULL,
+};
 int total_page_count = 0;   /* page_count + EXTRA_PAGES (allsky + spotify + clock + summary + settings + sysinfo) */
 
 /* Private state */
@@ -164,23 +266,98 @@ static int abs_page_to_instance(int idx) {
     return inst;
 }
 
+/* Absolute page index -> registry page_ref id, or PAGE_REF_ID_MAX if the page
+ * has not (yet) opted into ops-based dispatch. Only pages registered via
+ * page_registry_set_ops() need an entry here; unmapped indices fall through
+ * to the hardcoded branches below unchanged. */
+static page_ref_t page_idx_to_ref_id(int idx) {
+    if (idx == PAGE_IDX_CLOCK) return PAGE_REF_CLOCK;
+    if (idx == PAGE_IDX_SUMMARY) return PAGE_REF_SUMMARY;
+    if (idx == PAGE_IDX_ALLSKY) return PAGE_REF_ALLSKY;
+    if (idx == PAGE_IDX_SPOTIFY) return PAGE_REF_SPOTIFY;
+    if (idx == PAGE_IDX_IMAGE_DISPLAY) return PAGE_REF_IMG_DEFAULT;
+    if (idx == SYSINFO_PAGE_IDX(page_count)) return PAGE_REF_SYSINFO;
+    return PAGE_REF_ID_MAX;
+}
+
+/* Ops-driven variants of the get_obj/hide/show dispatchers. Returns true if
+ * the page at idx has registered ops and was handled; false to fall back to
+ * the hardcoded branches. */
+static bool ops_get_obj(int idx, lv_obj_t **obj_out) {
+    page_ref_t rid = page_idx_to_ref_id(idx);
+    if (rid >= PAGE_REF_ID_MAX) return false;
+    const page_ops_t *ops = page_registry_get_ops(rid);
+    if (!ops) return false;
+    *obj_out = ops->get_obj();
+    return true;
+}
+
+static bool ops_hide(int idx) {
+    page_ref_t rid = page_idx_to_ref_id(idx);
+    if (rid >= PAGE_REF_ID_MAX) return false;
+    const page_ops_t *ops = page_registry_get_ops(rid);
+    if (!ops) return false;
+    /* Matches the pre-ops branch shape exactly: both the hide flag and the
+     * on-hide callback are gated on the object actually existing. */
+    lv_obj_t *obj = ops->get_obj();
+    if (obj) {
+        lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+        if (ops->hide) ops->hide();
+    }
+    return true;
+}
+
+static bool ops_show(int idx) {
+    page_ref_t rid = page_idx_to_ref_id(idx);
+    if (rid >= PAGE_REF_ID_MAX) return false;
+    const page_ops_t *ops = page_registry_get_ops(rid);
+    if (!ops) return false;
+    /* Matches the pre-ops branch shape exactly: both the clear-hidden flag
+     * and the on-show callback are gated on the object actually existing. */
+    lv_obj_t *obj = ops->get_obj();
+    if (obj) {
+        lv_obj_clear_flag(obj, LV_OBJ_FLAG_HIDDEN);
+        if (ops->show) ops->show();
+    }
+    return true;
+}
+
+/* Ops-driven apply_theme dispatcher helper. Returns true (handled) if @p idx
+ * has registered ops, calling ops->apply_theme() unconditionally — the
+ * per-page apply_theme functions already NULL-guard their own module-level
+ * page pointer internally, so re-theming a currently-disabled/hidden page is
+ * a safe no-op, matching how summary/sysinfo already re-theme unconditionally
+ * today. Returns false (not handled) if @p idx has no registered ops, so the
+ * caller can fall back to its hardcoded branch. */
+static bool ops_apply_theme(int idx) {
+    page_ref_t rid = page_idx_to_ref_id(idx);
+    if (rid >= PAGE_REF_ID_MAX) return false;
+    const page_ops_t *ops = page_registry_get_ops(rid);
+    if (!ops) return false;
+    if (ops->apply_theme) ops->apply_theme();
+    return true;
+}
+
+/* True if the page at @p idx has registered ops AND is currently available
+ * (ops->is_available() if provided, else ops->get_obj() != NULL). False if
+ * @p idx has no registered ops — callers only use this for indices that are
+ * always mapped by page_idx_to_ref_id() once ported. */
+static bool page_ops_is_available(int idx) {
+    page_ref_t rid = page_idx_to_ref_id(idx);
+    if (rid >= PAGE_REF_ID_MAX) return false;
+    const page_ops_t *ops = page_registry_get_ops(rid);
+    if (!ops) return false;
+    if (ops->is_available) return ops->is_available();
+    return ops->get_obj() != NULL;
+}
+
 /* Hide the page object at the given index */
 static void hide_page_at(int idx) {
-    if (idx == PAGE_IDX_ALLSKY && allsky_obj)
-        lv_obj_add_flag(allsky_obj, LV_OBJ_FLAG_HIDDEN);
-    else if (idx == PAGE_IDX_SPOTIFY && spotify_obj) {
-        lv_obj_add_flag(spotify_obj, LV_OBJ_FLAG_HIDDEN);
-        nina_spotify_on_hide();
-    }
-    else if (idx == PAGE_IDX_CLOCK && clock_obj) {
-        lv_obj_add_flag(clock_obj, LV_OBJ_FLAG_HIDDEN);
-        clock_page_on_hide();
-    }
-    else if (idx == PAGE_IDX_IMAGE_DISPLAY && image_display_obj)
-        lv_obj_add_flag(image_display_obj, LV_OBJ_FLAG_HIDDEN);
-    else if (idx == PAGE_IDX_SUMMARY && summary_obj)
-        lv_obj_add_flag(summary_obj, LV_OBJ_FLAG_HIDDEN);
-    else if (abs_page_to_instance(idx) >= 0) {
+    /* Ported pages (AllSky, Spotify, Clock, Image Display, Summary, Sysinfo)
+     * are handled entirely by their registered ops. Only the NINA instance
+     * band and the Settings modal remain as hardcoded fallback branches. */
+    if (ops_hide(idx)) return;
+    if (abs_page_to_instance(idx) >= 0) {
         int inst = abs_page_to_instance(idx);
         if (nina_slot_available[inst] && pages[inst].page)
             lv_obj_add_flag(pages[inst].page, LV_OBJ_FLAG_HIDDEN);
@@ -190,27 +367,14 @@ static void hide_page_at(int idx) {
         settings_obj = NULL;
         /* Settings is a modal surface — unfreeze the arbiter on destroy. */
         nav_arbiter_notify_modal_close(esp_timer_get_time() / 1000);
-    } else if (idx == SYSINFO_PAGE_IDX(page_count) && sysinfo_obj)
-        lv_obj_add_flag(sysinfo_obj, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 /* Show the page object at the given index */
 static void show_page_at(int idx) {
-    if (idx == PAGE_IDX_ALLSKY && allsky_obj)
-        lv_obj_clear_flag(allsky_obj, LV_OBJ_FLAG_HIDDEN);
-    else if (idx == PAGE_IDX_SPOTIFY && spotify_obj) {
-        lv_obj_clear_flag(spotify_obj, LV_OBJ_FLAG_HIDDEN);
-        nina_spotify_on_show();
-    }
-    else if (idx == PAGE_IDX_CLOCK && clock_obj) {
-        lv_obj_clear_flag(clock_obj, LV_OBJ_FLAG_HIDDEN);
-        clock_page_on_show();
-    }
-    else if (idx == PAGE_IDX_IMAGE_DISPLAY && image_display_obj)
-        lv_obj_clear_flag(image_display_obj, LV_OBJ_FLAG_HIDDEN);
-    else if (idx == PAGE_IDX_SUMMARY && summary_obj)
-        lv_obj_clear_flag(summary_obj, LV_OBJ_FLAG_HIDDEN);
-    else if (abs_page_to_instance(idx) >= 0) {
+    /* Ported pages route through ops (see hide_page_at note above). */
+    if (ops_show(idx)) return;
+    if (abs_page_to_instance(idx) >= 0) {
         int inst = abs_page_to_instance(idx);
         if (nina_slot_available[inst] && pages[inst].page)
             lv_obj_clear_flag(pages[inst].page, LV_OBJ_FLAG_HIDDEN);
@@ -225,24 +389,18 @@ static void show_page_at(int idx) {
         lv_obj_clear_flag(settings_obj, LV_OBJ_FLAG_HIDDEN);
         settings_tabview_refresh();
     }
-    else if (idx == SYSINFO_PAGE_IDX(page_count) && sysinfo_obj) {
-        lv_obj_clear_flag(sysinfo_obj, LV_OBJ_FLAG_HIDDEN);
-        sysinfo_page_refresh();
-    }
 }
 
 static lv_obj_t *get_page_obj(int idx) {
-    if (idx == PAGE_IDX_ALLSKY && allsky_obj) return allsky_obj;
-    if (idx == PAGE_IDX_SPOTIFY && spotify_obj) return spotify_obj;
-    if (idx == PAGE_IDX_CLOCK && clock_obj) return clock_obj;
-    if (idx == PAGE_IDX_IMAGE_DISPLAY && image_display_obj) return image_display_obj;
-    if (idx == PAGE_IDX_SUMMARY && summary_obj) return summary_obj;
+    /* Ported pages route through ops (see hide_page_at note above); the ops
+     * get_obj itself returns NULL when an optional page is disabled. */
+    lv_obj_t *ops_obj = NULL;
+    if (ops_get_obj(idx, &ops_obj)) return ops_obj;
     if (abs_page_to_instance(idx) >= 0) {
         int inst = abs_page_to_instance(idx);
         return (nina_slot_available[inst] && pages[inst].page) ? pages[inst].page : NULL;
     }
     if (idx == SETTINGS_PAGE_IDX(page_count) && settings_obj) return settings_obj;
-    if (idx == SYSINFO_PAGE_IDX(page_count) && sysinfo_obj) return sysinfo_obj;
     return NULL;
 }
 
@@ -330,13 +488,18 @@ void nina_dashboard_apply_theme(int theme_index) {
         apply_theme_to_page(&pages[i]);
     }
 
-    if (allsky_obj) allsky_page_apply_theme();
-    if (spotify_obj) spotify_page_apply_theme();
-    clock_page_apply_theme();
-    if (image_display_obj) nina_image_display_apply_theme();
-    summary_page_apply_theme();
+    /* Ported pages re-theme through registry ops. Each page's apply_theme
+     * NULL-guards its own module state internally, so re-theming a currently
+     * disabled optional page (AllSky/Spotify/Image Display) is safe — and
+     * keeps the hidden-but-created page current so a later re-enable shows
+     * the correct theme. Settings stays hand-dispatched (modal, lazy). */
+    ops_apply_theme(PAGE_IDX_ALLSKY);
+    ops_apply_theme(PAGE_IDX_SPOTIFY);
+    ops_apply_theme(PAGE_IDX_CLOCK);
+    ops_apply_theme(PAGE_IDX_IMAGE_DISPLAY);
+    ops_apply_theme(PAGE_IDX_SUMMARY);
     if (settings_obj) settings_tabview_apply_theme();
-    sysinfo_page_apply_theme();
+    ops_apply_theme(SYSINFO_PAGE_IDX(page_count));
     nina_graph_overlay_apply_theme();
     nina_info_overlay_apply_theme();
     nina_thumbnail_apply_theme();
@@ -750,6 +913,8 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     p->cached_end_epoch = 0;
     p->cached_total = 0;
     p->gap_start_epoch = 0;
+    p->cached_nina_epoch = 0;
+    p->cached_nina_mono_us = 0;
 }
 
 /* Page indicator dots at the bottom */
@@ -836,9 +1001,13 @@ static void gesture_event_cb(lv_event_t *e) {
         for (int step = 1; step < total_page_count; step++) {
             int candidate = (active_page + step) % total_page_count;
             if (candidate == SETTINGS_PAGE_IDX(page_count)) continue;
-            if (candidate == PAGE_IDX_ALLSKY && allsky_obj == NULL) continue;
-            if (candidate == PAGE_IDX_SPOTIFY && spotify_obj == NULL) continue;
-            if (candidate == PAGE_IDX_IMAGE_DISPLAY && image_display_obj == NULL) continue;
+            /* Optional pages (AllSky/Spotify/Image Display) are skipped when
+             * unavailable; availability comes from their registered ops
+             * (get_obj() == NULL while disabled). */
+            if ((candidate == PAGE_IDX_ALLSKY ||
+                 candidate == PAGE_IDX_SPOTIFY ||
+                 candidate == PAGE_IDX_IMAGE_DISPLAY) &&
+                !page_ops_is_available(candidate)) continue;
             new_page = candidate;
             break;
         }
@@ -846,9 +1015,10 @@ static void gesture_event_cb(lv_event_t *e) {
         for (int step = 1; step < total_page_count; step++) {
             int candidate = (active_page - step + total_page_count) % total_page_count;
             if (candidate == SETTINGS_PAGE_IDX(page_count)) continue;
-            if (candidate == PAGE_IDX_ALLSKY && allsky_obj == NULL) continue;
-            if (candidate == PAGE_IDX_SPOTIFY && spotify_obj == NULL) continue;
-            if (candidate == PAGE_IDX_IMAGE_DISPLAY && image_display_obj == NULL) continue;
+            if ((candidate == PAGE_IDX_ALLSKY ||
+                 candidate == PAGE_IDX_SPOTIFY ||
+                 candidate == PAGE_IDX_IMAGE_DISPLAY) &&
+                !page_ops_is_available(candidate)) continue;
             new_page = candidate;
             break;
         }
@@ -971,29 +1141,37 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     lv_obj_set_style_pad_all(main_cont, OUTER_PADDING, 0);
 
     /* AllSky page — PAGE_IDX_ALLSKY, always created but hidden initially.
-     * allsky_obj is set to NULL when disabled to remove from navigation. */
-    allsky_page_created = allsky_page_create(main_cont);
+     * allsky_obj is set to NULL when disabled to remove from navigation.
+     * Ops are registered BEFORE create so ops-based dispatch is live for
+     * every subsequent reference to the page (same for all pages below). */
+    page_registry_set_ops(PAGE_REF_ALLSKY, &s_allsky_page_ops);
+    allsky_page_created = s_allsky_page_ops.create(main_cont);
     lv_obj_add_flag(allsky_page_created, LV_OBJ_FLAG_HIDDEN);
     allsky_obj = app_config_get()->allsky_enabled ? allsky_page_created : NULL;
 
     /* Spotify page — PAGE_IDX_SPOTIFY, always created but hidden initially.
      * spotify_obj is set to NULL when disabled to remove from navigation. */
-    spotify_page_created = spotify_page_create(main_cont);
+    page_registry_set_ops(PAGE_REF_SPOTIFY, &s_spotify_page_ops);
+    spotify_page_created = s_spotify_page_ops.create(main_cont);
     lv_obj_add_flag(spotify_page_created, LV_OBJ_FLAG_HIDDEN);
     spotify_obj = app_config_get()->spotify_enabled ? spotify_page_created : NULL;
 
-    /* Clock page — PAGE_IDX_CLOCK, always present, hidden initially */
-    clock_obj = clock_page_create(main_cont);
+    /* Clock page — PAGE_IDX_CLOCK, always present, hidden initially. */
+    page_registry_set_ops(PAGE_REF_CLOCK, &s_clock_page_ops);
+    clock_obj = s_clock_page_ops.create(main_cont);
     lv_obj_add_flag(clock_obj, LV_OBJ_FLAG_HIDDEN);
 
     /* Image Display page — PAGE_IDX_IMAGE_DISPLAY, always created but hidden initially.
-     * image_display_obj is set to NULL when disabled to remove from navigation. */
-    image_display_page_created = nina_image_display_create(main_cont);
+     * image_display_obj is set to NULL when disabled to remove from navigation.
+     * Registered under PAGE_REF_IMG_DEFAULT (the page itself, source-agnostic). */
+    page_registry_set_ops(PAGE_REF_IMG_DEFAULT, &s_image_display_page_ops);
+    image_display_page_created = s_image_display_page_ops.create(main_cont);
     lv_obj_add_flag(image_display_page_created, LV_OBJ_FLAG_HIDDEN);
     image_display_obj = app_config_get()->image_display_enabled ? image_display_page_created : NULL;
 
     /* Summary page — PAGE_IDX_SUMMARY, visible by default */
-    summary_obj = summary_page_create(main_cont);
+    page_registry_set_ops(PAGE_REF_SUMMARY, &s_summary_page_ops);
+    summary_obj = s_summary_page_ops.create(main_cont);
 
     /* NINA instance pages — absolute index NINA_PAGE_OFFSET + i, hidden initially.
      * Slot i maps to instance i (fixed identity). Index positions are reserved,
@@ -1017,7 +1195,8 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     settings_obj = NULL;
 
     /* System info page — always last (SYSINFO_PAGE_IDX), hidden initially */
-    sysinfo_obj = sysinfo_page_create(main_cont);
+    page_registry_set_ops(PAGE_REF_SYSINFO, &s_sysinfo_page_ops);
+    sysinfo_obj = s_sysinfo_page_ops.create(main_cont);
     lv_obj_add_flag(sysinfo_obj, LV_OBJ_FLAG_HIDDEN);
     total_page_count = page_count + EXTRA_PAGES;  /* allsky + spotify + clock + summary + NINA pages + settings + sysinfo */
 
@@ -1107,9 +1286,12 @@ void nina_dashboard_rebuild_slot(int instance) {
 
 void nina_dashboard_show_page(int page_index, int instance_count) {
     if (page_index < 0 || page_index >= total_page_count) return;
-    if (page_index == PAGE_IDX_ALLSKY && allsky_obj == NULL) return;  /* allsky disabled */
-    if (page_index == PAGE_IDX_SPOTIFY && spotify_obj == NULL) return;  /* spotify disabled */
-    if (page_index == PAGE_IDX_IMAGE_DISPLAY && image_display_obj == NULL) return;  /* image display disabled */
+    /* Optional pages: reject navigation to a disabled page (ops availability,
+     * derived from ops get_obj() == NULL while disabled). */
+    if ((page_index == PAGE_IDX_ALLSKY ||
+         page_index == PAGE_IDX_SPOTIFY ||
+         page_index == PAGE_IDX_IMAGE_DISPLAY) &&
+        !page_ops_is_available(page_index)) return;
     if (page_index == active_page) return;
 
     hide_page_at(active_page);
@@ -1318,9 +1500,12 @@ static void slide_new_ready_cb(lv_anim_t *a)
 void nina_dashboard_show_page_animated(int page_index, int instance_count, int effect)
 {
     if (page_index < 0 || page_index >= total_page_count) return;
-    if (page_index == PAGE_IDX_ALLSKY && allsky_obj == NULL) return;  /* allsky disabled */
-    if (page_index == PAGE_IDX_SPOTIFY && spotify_obj == NULL) return;  /* spotify disabled */
-    if (page_index == PAGE_IDX_IMAGE_DISPLAY && image_display_obj == NULL) return;  /* image display disabled */
+    /* Optional pages: reject navigation to a disabled page (ops availability,
+     * same condition as nina_dashboard_show_page above). */
+    if ((page_index == PAGE_IDX_ALLSKY ||
+         page_index == PAGE_IDX_SPOTIFY ||
+         page_index == PAGE_IDX_IMAGE_DISPLAY) &&
+        !page_ops_is_available(page_index)) return;
     if (page_index == active_page) return;
 
     lv_obj_t *old_obj = get_page_obj(active_page);

@@ -1,0 +1,57 @@
+
+      <div class="card" id="instance-overview">
+        <div class="card-title"><span class="card-title-label">Active N.I.N.A. Instances <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Active N.I.N.A. Instances</div><p>Selects which of the three N.I.N.A. instance slots the device polls and shows as pages. A disabled instance is not contacted and its page is skipped, but the slot keeps its fixed position so the other instances do not shift.</p><p>Each enabled instance gets its own dashboard page and a configuration card below. The device updates the page you are viewing in full and checks the other instances less often in the background.</p><p>Example: enable N.I.N.A. 1 and N.I.N.A. 2 for a two-instance setup and leave N.I.N.A. 3 off; only two node cards and two instance pages appear.</p></div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label" id="inst_lbl_0">N.I.N.A. 1</span>
+          <label class="toggle"><input type="checkbox" id="instance_enabled_0" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint">Polls this instance and shows its page; turn off to stop contacting it and hide its page.</div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label" id="inst_lbl_1">N.I.N.A. 2</span>
+          <label class="toggle"><input type="checkbox" id="instance_enabled_1" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint">Polls this instance and shows its page; turn off to stop contacting it and hide its page.</div>
+        <div class="toggle-row">
+          <span class="toggle-label" id="inst_lbl_2">N.I.N.A. 3</span>
+          <label class="toggle"><input type="checkbox" id="instance_enabled_2" onchange="updateInstanceStates();checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint">Polls this instance and shows its page; turn off to stop contacting it and hide its page.</div>
+      </div>
+
+      <div id="node-cards"></div>
+
+      <div class="card">
+        <div class="card-title"><span class="card-title-label">Polling &amp; Connectivity <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Polling and Connectivity</div><p>Sets how often the device contacts the NINA API and how patient it is before declaring an instance offline. Data update rate is the base polling interval for the active page; faster values refresh the display sooner but generate more API traffic. Graph update rate controls how often the RMS and HFR history graphs add a point.</p><p>Connection timeout is how long a request waits for a response before that instance is marked offline. Idle poll interval is the slower, occasional check used to re-test an offline instance while you are viewing a non-NINA page, which avoids contacting an instance that is not running too often.</p><p>Example: set Data update rate to 2 seconds for a responsive display, raise Connection timeout to 10 seconds on a slow or distant network, and leave Idle poll interval at 30 seconds.</p></div>
+        <div class="subsection">
+          <div class="subsection-title">Update Rates</div>
+          <div class="row stack-mobile">
+            <div class="field">
+              <label class="field-label">Data update rate (s)</label>
+              <input type="number" class="input" id="update_rate" min="1" max="10" value="2">
+              <div class="field-hint">Base polling interval for the active page, from 1 to 10 seconds; lower is more responsive but adds API traffic.</div>
+            </div>
+            <div class="field">
+              <label class="field-label">Graph update rate (s)</label>
+              <input type="number" class="input" id="graph_interval" min="2" max="30" value="5">
+              <div class="field-hint">How often the RMS and HFR history graphs record a new data point, from 2 to 30 seconds.</div>
+            </div>
+          </div>
+        </div>
+        <div class="subsection">
+          <div class="subsection-title">Connectivity</div>
+          <div class="row stack-mobile">
+            <div class="field">
+              <label class="field-label">Connection timeout (s)</label>
+              <input type="number" class="input" id="connection_timeout" min="2" max="30" value="6">
+              <div class="field-hint">Seconds without response before a NINA instance is offline</div>
+            </div>
+            <div class="field">
+              <label class="field-label">Idle poll interval (s)</label>
+              <input type="number" class="input" id="idle_poll_interval" min="5" max="120" value="30">
+              <div class="field-hint">How often an offline instance is re-checked while you are on a non-NINA page</div>
+            </div>
+          </div>
+        </div>
+      </div>

@@ -34,6 +34,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include "lvgl.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -129,6 +131,42 @@ bool page_ref_resolve(page_ref_t id, int *page_idx_out, int8_t *img_src_out);
  * Caller must NOT hold the LVGL lock; the arbiter takes it internally.
  */
 bool page_ref_navigate(page_ref_t id);
+
+/**
+ * OPTIONAL page lifecycle ops (Task 4.7 / retro 4.7, wave P7a).
+ *
+ * The identity table above (s_pages) is frozen metadata only — no function
+ * pointers. This ops table is a SEPARATE, opt-in registration: a page module
+ * may register a page_ops_t for its own id so generic dispatch code (see
+ * nina_dashboard.c: hide_page_at/show_page_at/get_page_obj/apply_theme) can
+ * drive it without a hardcoded branch. Pages that do not register ops keep
+ * flowing through the existing hardcoded branches unchanged.
+ *
+ * All ops are called with the LVGL display lock already held by the caller
+ * (dispatchers run under the same lock discipline as the branches they
+ * replace). `create` and `get_obj` are NOT optional for a registered page —
+ * dispatchers assume both are non-NULL if the ops pointer itself is non-NULL.
+ */
+typedef struct {
+    lv_obj_t *(*create)(lv_obj_t *parent);   /* build page, return root obj */
+    void (*destroy)(void);                    /* optional teardown; NULL = never destroyed */
+    lv_obj_t *(*get_obj)(void);               /* current root obj or NULL */
+    void (*show)(void);                       /* on-activate (after unhide); optional */
+    void (*hide)(void);                       /* on-deactivate (before hide); optional */
+    void (*apply_theme)(void);                /* re-theme existing widgets; optional */
+    bool (*is_available)(void);               /* optional; NULL = derive from get_obj()!=NULL */
+} page_ops_t;
+
+/**
+ * Register (or clear, with ops=NULL) the lifecycle ops for @p page_id.
+ * @p ops must have static storage duration (the registry stores the pointer,
+ * not a copy). Not thread-safe; call only from the UI/LVGL-owning task during
+ * page creation, before any dispatcher can reference the id.
+ */
+void page_registry_set_ops(uint8_t page_id, const page_ops_t *ops);
+
+/** Get the registered ops for @p page_id, or NULL if none registered. */
+const page_ops_t *page_registry_get_ops(uint8_t page_id);
 
 #ifdef __cplusplus
 }

@@ -1,4 +1,5 @@
 #include "app_config.h"
+#include "app_config_forward.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "esp_log.h"
@@ -10,6 +11,7 @@
 #include <stdlib.h>
 #include "esp_heap_caps.h"
 #include "perf_monitor.h"
+#include "settings_table.h"
 #include "themes.h"
 #include "ui/page_registry.h"
 
@@ -680,23 +682,16 @@ typedef struct {
 
 static void set_defaults(app_config_t *cfg) {
     memset(cfg, 0, sizeof(app_config_t));
+    settings_defaults_apply(cfg);   /* every "simple" field's default — see settings_table.h */
     cfg->config_version = APP_CONFIG_VERSION;
     strcpy(cfg->api_url[0], "http://astromele1.lan:1888/v2/api/");
     strcpy(cfg->api_url[1], "http://astromele2.lan:1888/v2/api/");
-    strcpy(cfg->ntp_server, "pool.ntp.org");
-    strcpy(cfg->tz_string, "CST6CDT,M3.2.0,M11.1.0");
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         strcpy(cfg->filter_colors[i], "{}");
         strcpy(cfg->rms_thresholds[i], DEFAULT_RMS_THRESHOLDS);
         strcpy(cfg->hfr_thresholds[i], DEFAULT_HFR_THRESHOLDS);
     }
-    cfg->brightness = 50;
-    cfg->color_brightness = 100;
     cfg->active_page_override = PAGE_REF_SUMMARY;  /* Home Page = Summary (page_ref_t registry id) */
-    cfg->auto_rotate_enabled = false;
-    cfg->auto_rotate_interval_s = 30;
-    cfg->auto_rotate_effect = 0;
-    cfg->auto_rotate_skip_disconnected = true;
     cfg->auto_rotate_pages = 0x0E;  // Default: all NINA instances (bits 1-3)
     cfg->auto_rotate_pages_hi = 0;  // bits 8-15 off by default (Image Display opt-in, like AllSky/Spotify/Clock)
     /* Default rotation order: Summary, AllSky, Spotify, Clock, NINA1, NINA2, NINA3, SysInfo */
@@ -708,129 +703,43 @@ static void set_defaults(app_config_t *cfg) {
      * array, so set the explicit defaults and pad the tail (8..15) with 0xFF. */
     for (int i = 0; i < 8; i++) cfg->auto_rotate_order2[i] = (uint8_t)i;   // 0..7 (Clock is last)
     for (int i = 8; i < ARP_ORDER_CAPACITY; i++) cfg->auto_rotate_order2[i] = 0xFF;
+    /* update_rate_s / graph_update_interval_s: NOT table-driven — their
+     * validate_config() out-of-range reset target differs from this default
+     * (5->2 and 10->5 respectively), so one table row can't represent both
+     * constants without lying about one of them. See settings_table.h. */
     cfg->update_rate_s = 5;
     cfg->graph_update_interval_s = 10;
-    cfg->connection_timeout_s = 6;
-    cfg->toast_duration_s = 8;
-    cfg->debug_mode = false;
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         cfg->instance_enabled[i] = true;
     }
-    cfg->screen_sleep_enabled = false;
-    cfg->screen_sleep_timeout_s = 60;
-    cfg->alert_flash_enabled = true;
-    cfg->idle_poll_interval_s = 30;
-    cfg->wifi_power_save = false;  /* mains-powered display: WIFI_PS_NONE cuts DTIM modem-sleep latency */
-    cfg->widget_style = 0;
-    cfg->auto_update_check = 1;
-    cfg->update_channel = 0;
-    cfg->deep_sleep_enabled = false;
-    cfg->deep_sleep_wake_timer_s = 28800;  // 8 hours
-    cfg->deep_sleep_on_idle = false;
-    cfg->screen_rotation = 0;
-    strcpy(cfg->hostname, "NINA-DISPLAY");
-    strcpy(cfg->mqtt_broker_url, "mqtt://192.168.1.250");
-    strcpy(cfg->mqtt_topic_prefix, "ninadisplay");
-    cfg->mqtt_port = 1883;
 
-    // AllSky defaults
-    strcpy(cfg->allsky_hostname, "allskypi5.lan");
-    cfg->allsky_update_interval_s = 5;
-    cfg->allsky_dew_offset = 5.0f;
+    // AllSky defaults (field_config/thresholds are JSON blobs, not table-driven)
     strncpy(cfg->allsky_field_config, DEFAULT_ALLSKY_FIELD_CONFIG, sizeof(cfg->allsky_field_config) - 1);
     cfg->allsky_field_config[sizeof(cfg->allsky_field_config) - 1] = '\0';
     strncpy(cfg->allsky_thresholds, DEFAULT_ALLSKY_THRESHOLDS, sizeof(cfg->allsky_thresholds) - 1);
     cfg->allsky_thresholds[sizeof(cfg->allsky_thresholds) - 1] = '\0';
-    cfg->allsky_enabled = false;
-    cfg->demo_mode = false;
 
-    // Spotify defaults
-    cfg->spotify_enabled = false;
+    // Spotify client ID: secret-like sentinel, not table-driven
     cfg->spotify_client_id[0] = '\0';
-    cfg->spotify_poll_interval_ms = 3000;
-    cfg->spotify_show_progress_bar = true;
-    cfg->spotify_minimal_mode = false;
-    cfg->spotify_overlay_timeout_s = 5;
-    cfg->spotify_scroll_text = true;
-    cfg->spotify_overlay_visible = false;
 
     memset(cfg->wifi_networks, 0, sizeof(cfg->wifi_networks));
 
-    // Toast notification overhaul defaults
-    cfg->toast_aggregation_window_s = 5;
+    // Toast notification overhaul defaults (mask/per-instance mute are not table-driven)
     cfg->toast_notify_mask = 0xFFFFFFFF;  // all categories enabled
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         cfg->toast_instance_muted[i] = false;
     }
 
-    // Weather defaults
-    cfg->weather_provider = 0;
-    memset(cfg->weather_api_key, 0, sizeof(cfg->weather_api_key));
-    cfg->weather_lat = 0.0f;
-    cfg->weather_lon = 0.0f;
-    memset(cfg->weather_location_name, 0, sizeof(cfg->weather_location_name));
-    cfg->weather_poll_interval_s = 900;
-    cfg->weather_units = 0;
-    cfg->weather_time_format = 0;
-    cfg->idle_page_override_enabled = false;
     cfg->idle_page_override_target = PAGE_REF_SUMMARY;
-    cfg->idle_page_persistent = false;
-    cfg->idle_indicator_enabled = true;
-    cfg->nav_grace_s = 10;             // manual-nav grace window (10-300s, default 10)
-    cfg->home_page_lock = false;       // hold the Home Page regardless of connection state
+    cfg->home_page_lock = false;       // hold the Home Page regardless of connection state; explicit bool canonicalization in validate_config(), not table-driven
 
     // Admin password default — change via web UI on first boot
     strcpy(cfg->admin_password, "changeme123!");
 
-    // Image Display defaults
-    cfg->image_display_enabled = false;
-    cfg->image_display_show_overlay = true;
-    strcpy(cfg->goes_region, "umv");
-    cfg->goes_update_interval_s = 600;
-
-    // Moon phase defaults
-    cfg->image_display_source = 0;   // 0=GOES, 1=Moon
-    cfg->moon_bg_style = 0;          // 0=black, 1=stars, 2=glow
-    cfg->moon_lat = 0.0f;            // unset until configured / prefilled from weather
-    cfg->moon_lon = 0.0f;
-    cfg->solar_band = 0;             // SDO/AIA band index 0..9
-    cfg->image_display_crop = false; // crop/zoom image to fill & hide baked-in labels
+    /* moon_drag_light_mode: NOT table-driven — its validate_config()
+     * out-of-range reset target (0) differs from this default (2), so one
+     * table row can't represent both constants. See settings_table.h. */
     cfg->moon_drag_light_mode = 2;   // 0=true phase, 1=explore, 2=locked to surface (default) (moon drag-to-rotate lighting)
-
-    // Moon sphere orientation tuning defaults (tuned baseline from a reference device)
-    cfg->moon_flip_u = 0;            // mirror texture longitude E<->W
-    cfg->moon_flip_v = 0;            // flip texture latitude N<->S
-    cfg->moon_roll_offset = -7.0f;   // degrees, clamp [-180,180]
-    cfg->moon_yaw_offset = 0.0f;     // degrees, clamp [-180,180]
-    cfg->moon_pitch_offset = -5.0f;  // degrees, clamp [-90,90]
-    cfg->moon_north_up = 1;          // 0=true sky tilt, 1=always upright/north-up
-
-    // Moon touch-spin return behavior defaults
-    cfg->moon_spin_mode = 0;         // 0=rubber band snap-back (preserves existing behavior)
-    cfg->moon_spin_return_s = 3;     // free-spin hold before auto-return, clamp [3,60]
-
-    // Crash log defaults
-    cfg->crash_log_retention_days = 30;  // auto-purge crash records older than 30 days (0 = never)
-
-    // Per-source Image Display render rotation (0=0°,1=90°,2=180°,3=270° clockwise)
-    cfg->goes_orientation = 0;
-    cfg->solar_orientation = 0;
-
-    // Custom Image URL source (Image Display source index 3)
-    strcpy(cfg->custom_image_url, "https://picsum.photos/720");
-    cfg->custom_orientation = 0;          // 0=0°,1=90°,2=180°,3=270° clockwise
-    cfg->custom_update_interval_s = 60;   // poll interval (10-7200s)
-
-    // Per-source Image Display mirror flips (0=no flip = current behavior)
-    cfg->goes_vflip = 0;
-    cfg->goes_hflip = 0;
-    cfg->solar_vflip = 0;
-    cfg->solar_hflip = 0;
-    cfg->custom_vflip = 0;
-    cfg->custom_hflip = 0;
-
-    // Auth is on by default — protects device from open-LAN access
-    cfg->auth_enabled = true;
 }
 
 /* Convert the two page-target fields from their pre-v47 encodings
@@ -2868,29 +2777,7 @@ static bool validate_config(app_config_t *cfg) {
             fixed = true;
         }
     }
-    if (cfg->color_brightness < 0 || cfg->color_brightness > 100) {
-        cfg->color_brightness = 100;
-        fixed = true;
-    }
-    if (cfg->theme_index < 0 || cfg->theme_index >= themes_get_count()) {
-        cfg->theme_index = 0;
-        fixed = true;
-    }
-    if (cfg->brightness < 0 || cfg->brightness > 100) {
-        cfg->brightness = 50;
-        fixed = true;
-    }
-    /* Update channel: 0=Stable, 1=Pre-releases/Beta, 2=Alpha (snd). */
-    if (cfg->update_channel > 2) {
-        cfg->update_channel = 0;
-        fixed = true;
-    }
-    if (cfg->mqtt_topic_prefix[0] == '\0') {
-        strcpy(cfg->mqtt_topic_prefix, "ninadisplay");
-        fixed = true;
-    }
-    if (cfg->mqtt_port == 0) {
-        cfg->mqtt_port = 1883;
+    if (settings_clamp_apply(cfg)) {
         fixed = true;
     }
     /* Home Page stores a page_ref_t registry id (see ui/page_registry.h). Validate
@@ -2925,14 +2812,6 @@ static bool validate_config(app_config_t *cfg) {
             fixed = true;
         }
     }
-    if (cfg->auto_rotate_interval_s == 0 || cfg->auto_rotate_interval_s > 3600) {
-        cfg->auto_rotate_interval_s = 30;
-        fixed = true;
-    }
-    if (cfg->auto_rotate_effect > 3) {
-        cfg->auto_rotate_effect = 0;
-        fixed = true;
-    }
     if (cfg->auto_rotate_pages == 0) {
         cfg->auto_rotate_pages = 0x0E;  // Default: all NINA instances
         fixed = true;
@@ -2960,114 +2839,8 @@ static bool validate_config(app_config_t *cfg) {
         cfg->graph_update_interval_s = 5;
         fixed = true;
     }
-    if (cfg->connection_timeout_s < 2 || cfg->connection_timeout_s > 30) {
-        cfg->connection_timeout_s = 6;
-        fixed = true;
-    }
-    if (cfg->toast_duration_s < 3 || cfg->toast_duration_s > 30) {
-        cfg->toast_duration_s = 8;
-        fixed = true;
-    }
-    if (cfg->screen_sleep_timeout_s < 10 || cfg->screen_sleep_timeout_s > 3600) {
-        cfg->screen_sleep_timeout_s = 60;
-        fixed = true;
-    }
-    if (cfg->idle_poll_interval_s < 5 || cfg->idle_poll_interval_s > 120) {
-        cfg->idle_poll_interval_s = 30;
-        fixed = true;
-    }
-    if (cfg->widget_style >= WIDGET_STYLE_COUNT) {
-        cfg->widget_style = 0;
-        fixed = true;
-    }
-    if (cfg->screen_rotation > 3) {
-        cfg->screen_rotation = 0;
-        fixed = true;
-    }
-    if (cfg->allsky_update_interval_s < 1 || cfg->allsky_update_interval_s > 300) {
-        cfg->allsky_update_interval_s = 5;
-        fixed = true;
-    }
-    if (cfg->allsky_dew_offset < -50.0f || cfg->allsky_dew_offset > 50.0f) {
-        cfg->allsky_dew_offset = 5.0f;
-        fixed = true;
-    }
-    if (cfg->goes_update_interval_s < 300 || cfg->goes_update_interval_s > 7200) {
-        cfg->goes_update_interval_s = 600;
-        fixed = true;
-    }
-    cfg->goes_region[sizeof(cfg->goes_region) - 1] = '\0';
-    if (cfg->goes_region[0] == '\0') {
-        strcpy(cfg->goes_region, "umv");
-        fixed = true;
-    }
-    /* Custom Image URL source (Image Display source index 3) */
-    cfg->custom_image_url[sizeof(cfg->custom_image_url) - 1] = '\0';
-    if (cfg->custom_orientation > 3) {
-        cfg->custom_orientation = 0;
-        fixed = true;
-    }
-    if (cfg->custom_update_interval_s < 10 || cfg->custom_update_interval_s > 7200) {
-        cfg->custom_update_interval_s = 60;
-        fixed = true;
-    }
-    /* Per-source Image Display mirror flips — normalize each to 0/1. */
-    if (cfg->goes_vflip > 1)   { cfg->goes_vflip   = (cfg->goes_vflip   != 0) ? 1 : 0; fixed = true; }
-    if (cfg->goes_hflip > 1)   { cfg->goes_hflip   = (cfg->goes_hflip   != 0) ? 1 : 0; fixed = true; }
-    if (cfg->solar_vflip > 1)  { cfg->solar_vflip  = (cfg->solar_vflip  != 0) ? 1 : 0; fixed = true; }
-    if (cfg->solar_hflip > 1)  { cfg->solar_hflip  = (cfg->solar_hflip  != 0) ? 1 : 0; fixed = true; }
-    if (cfg->custom_vflip > 1) { cfg->custom_vflip = (cfg->custom_vflip != 0) ? 1 : 0; fixed = true; }
-    if (cfg->custom_hflip > 1) { cfg->custom_hflip = (cfg->custom_hflip != 0) ? 1 : 0; fixed = true; }
-    if (cfg->image_display_source > 3) {   /* 0=GOES, 1=Moon, 2=Solar, 3=Custom URL */
-        cfg->image_display_source = 0;
-        fixed = true;
-    }
-    if (cfg->moon_bg_style > 3) {
-        cfg->moon_bg_style = 0;
-        fixed = true;
-    }
-    if (cfg->solar_band > 17) {
-        cfg->solar_band = 0;
-        fixed = true;
-    }
     if (cfg->moon_drag_light_mode > 2) {
         cfg->moon_drag_light_mode = 0;
-        fixed = true;
-    }
-    if (cfg->moon_flip_u > 1) {
-        cfg->moon_flip_u = (cfg->moon_flip_u != 0) ? 1 : 0;
-        fixed = true;
-    }
-    if (cfg->moon_flip_v > 1) {
-        cfg->moon_flip_v = (cfg->moon_flip_v != 0) ? 1 : 0;
-        fixed = true;
-    }
-    if (cfg->moon_roll_offset < -180.0f || cfg->moon_roll_offset > 180.0f) {
-        if (cfg->moon_roll_offset < -180.0f) cfg->moon_roll_offset = -180.0f;
-        else cfg->moon_roll_offset = 180.0f;
-        fixed = true;
-    }
-    if (cfg->moon_yaw_offset < -180.0f || cfg->moon_yaw_offset > 180.0f) {
-        if (cfg->moon_yaw_offset < -180.0f) cfg->moon_yaw_offset = -180.0f;
-        else cfg->moon_yaw_offset = 180.0f;
-        fixed = true;
-    }
-    if (cfg->moon_pitch_offset < -90.0f || cfg->moon_pitch_offset > 90.0f) {
-        if (cfg->moon_pitch_offset < -90.0f) cfg->moon_pitch_offset = -90.0f;
-        else cfg->moon_pitch_offset = 90.0f;
-        fixed = true;
-    }
-    if (cfg->moon_spin_mode > 1) {
-        cfg->moon_spin_mode = 1;   /* only reached when value > 1 */
-        fixed = true;
-    }
-    if (cfg->moon_spin_return_s < 3 || cfg->moon_spin_return_s > 60) {
-        if (cfg->moon_spin_return_s < 3) cfg->moon_spin_return_s = 3;
-        else cfg->moon_spin_return_s = 60;
-        fixed = true;
-    }
-    if (cfg->moon_north_up > 1) {
-        cfg->moon_north_up = (cfg->moon_north_up != 0) ? 1 : 0;
         fixed = true;
     }
     if (cfg->allsky_thresholds[0] == '\0' ||
@@ -3077,14 +2850,8 @@ static bool validate_config(app_config_t *cfg) {
         cfg->allsky_thresholds[sizeof(cfg->allsky_thresholds) - 1] = '\0';
         fixed = true;
     }
-    if (cfg->nav_grace_s < 10)  { cfg->nav_grace_s = 10;  fixed = true; }
-    if (cfg->nav_grace_s > 300) { cfg->nav_grace_s = 300; fixed = true; }
     /* bool loaded from a raw NVS blob may hold any byte value; force canonical 0/1 */
     cfg->home_page_lock = cfg->home_page_lock ? true : false;
-    if (cfg->spotify_poll_interval_ms < 1000 || cfg->spotify_poll_interval_ms > 30000) {
-        cfg->spotify_poll_interval_ms = 3000;
-        fixed = true;
-    }
     /* spotify_overlay_timeout_s is uint8_t (0-255); 0 means never hide, all values valid */
 
     return fixed;
@@ -3501,7 +3268,7 @@ void app_config_init(void) {
          * version_check is either 0 (empty SSID) or a large printable-ASCII
          * value (>= 0x1000). A small integer just above APP_CONFIG_VERSION is a
          * future/unknown version (e.g. a firmware downgrade), not a v0 blob:
-         * let it fall through to the terminal defaults branch below instead of
+         * let it fall through to the forward-tolerant branch below instead of
          * mis-migrating it as v0. */
         app_config_v0_t old;
         memcpy(&old, raw, sizeof(app_config_v0_t));
@@ -3510,6 +3277,26 @@ void app_config_init(void) {
 
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
+    } else if (config_accept_forward(version_check, stored_size, APP_CONFIG_VERSION, sizeof(app_config_t))) {
+        /* Forward-tolerant load — firmware downgrade case. The stored blob was
+         * written by a NEWER firmware (version_check > APP_CONFIG_VERSION).
+         * Because app_config_t fields are strictly append-only, this
+         * firmware's entire struct layout is a known prefix of that blob, so
+         * read it directly rather than falling through to the terminal
+         * "unknown blob" branch, which would wipe the whole fleet's settings
+         * back to factory defaults on every downgrade.
+         *
+         * Deliberately do NOT nvs_set_blob() here: writing back would
+         * truncate the newer blob to this firmware's smaller struct size,
+         * discarding the fields added after APP_CONFIG_VERSION. Leaving NVS
+         * untouched means a subsequent re-upgrade finds the original newer
+         * blob still intact and loads it with no data loss. */
+        ESP_LOGW(TAG, "Config blob v%u is newer than firmware v%u; loading known prefix "
+                      "(fields added after v%u unavailable until re-upgrade)",
+                 (unsigned)version_check, (unsigned)APP_CONFIG_VERSION, (unsigned)APP_CONFIG_VERSION);
+        memcpy(&s_config, raw, sizeof(app_config_t));
+        s_config.config_version = APP_CONFIG_VERSION;
+        validate_config(&s_config);
     } else {
         ESP_LOGW(TAG, "Unknown config blob (size=%d, ver=0x%08x), using defaults",
                  (int)stored_size, (unsigned)version_check);

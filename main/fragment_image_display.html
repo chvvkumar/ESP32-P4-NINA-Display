@@ -1,0 +1,287 @@
+
+      <div class="card">
+        <div class="card-title"><span class="card-title-label">GOES Satellite Imagery <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Full-screen image page</div><p>Renders one full-screen image source on its own page: a GOES-19 GEOCOLOR satellite sector, a 3D-rendered moon phase, or SDO/SOHO solar imagery. Pick the source with the Source selector; the fields below change to match the chosen source. Show Overlay applies to all sources; the update interval applies to GOES and Solar (the moon is drawn on the device and has no fetch interval).</p><p>Fill (crop borders) zooms the disc to fill the 720x720 panel and cuts off the timestamp and label baked into the source image border. It applies to GOES and Solar; the Moon has no border text and is not cropped. Example: with Fill off, a GOES sector shows letterboxed with its caption; with Fill on, the disc fills the screen and the caption is hidden.</p><p>In some firmware versions the image may appear rotated, which is why each source has its own rotation control. If the satellite, moon, or sun appears upside down or sideways, set the matching rotation to correct it.</p></div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Enable Image Display</span>
+          <label class="toggle"><input type="checkbox" id="image_display_enabled" onchange="updateImageDisplayEnabledUI();applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint">Adds the full-screen image page and starts fetching the selected source.</div>
+        <div id="imageDisplayFields">
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Source</label>
+            <div class="pn-pill-grid">
+              <label class="pn-pill rotate-pill">
+                <input type="radio" name="imageSourceSel" id="imageSource0" value="0" onchange="updateImageSourceUI();applyImageDisplay();checkDirty()">
+                <span class="pn-pill-visual">GOES Satellite</span>
+              </label>
+              <label class="pn-pill rotate-pill">
+                <input type="radio" name="imageSourceSel" id="imageSource1" value="1" onchange="updateImageSourceUI();applyImageDisplay();checkDirty()">
+                <span class="pn-pill-visual">Moon Phase</span>
+              </label>
+              <label class="pn-pill rotate-pill">
+                <input type="radio" name="imageSourceSel" id="imageSource2" value="2" onchange="updateImageSourceUI();applyImageDisplay();checkDirty()">
+                <span class="pn-pill-visual">Solar (SDO)</span>
+              </label>
+              <label class="pn-pill rotate-pill">
+                <input type="radio" name="imageSourceSel" id="imageSource3" value="3" onchange="updateImageSourceUI();applyImageDisplay();checkDirty()">
+                <span class="pn-pill-visual">Custom URL</span>
+              </label>
+            </div>
+            <div class="field-hint">Chooses GOES satellite, Moon phase, Solar, or a custom image URL; the options below switch to match.</div>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Show Overlay</span>
+            <label class="toggle"><input type="checkbox" id="image_display_show_overlay" onchange="applyImageDisplay();checkDirty()" checked><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Region/phase name and update time overlay on the display</div>
+          <div id="discOptions">
+          <div class="toggle-row">
+            <span class="toggle-label">Fill (crop borders)</span>
+            <label class="toggle"><input type="checkbox" id="image_display_crop" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Zoom the disc to fill the screen and hide the image's timestamp/label.</div>
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Update Interval</label>
+            <select class="input" id="goesInterval" onchange="applyImageDisplay();checkDirty()">
+              <option value="300">5 minutes</option>
+              <option value="600" selected>10 minutes</option>
+              <option value="900">15 minutes</option>
+              <option value="1800">30 minutes</option>
+              <option value="3600">1 hour</option>
+              <option value="7200">2 hours</option>
+            </select>
+            <div class="field-hint">How often the image refreshes.</div>
+          </div>
+          </div>
+          <div id="goesGroup">
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Region</label>
+            <select class="input" id="goesRegion" onchange="applyImageDisplay();checkDirty()">
+              <option value="umv">Upper Mississippi Valley</option>
+              <option value="cgl">Great Lakes</option>
+              <option value="ne">Northeast</option>
+              <option value="se">Southeast</option>
+              <option value="smv">Southern Mississippi Valley</option>
+              <option value="sp">Southern Plains</option>
+              <option value="nr">Northern Rockies</option>
+              <option value="sr">Southern Rockies</option>
+              <option value="pnw">Pacific Northwest</option>
+              <option value="psw">Pacific Southwest</option>
+              <option value="eus">U.S. Atlantic Coast</option>
+              <option value="pr">Puerto Rico</option>
+              <option value="mex">Mexico</option>
+              <option value="cam">Central America</option>
+              <option value="car">Caribbean</option>
+              <option value="ga">Gulf of America</option>
+              <option value="can">Canada</option>
+              <option value="na">Northern Atlantic</option>
+              <option value="taw">Tropical Atlantic</option>
+              <option value="eep">Eastern Pacific</option>
+              <option value="nsa">South America (North)</option>
+              <option value="ssa">South America (South)</option>
+            </select>
+            <div class="field-hint">GOES-19 GEOCOLOR sector for satellite imagery</div>
+          </div>
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">GOES Rotation</label>
+            <select class="input" id="goesOrientation" onchange="applyImageDisplay();checkDirty()">
+              <option value="0">0&deg;</option>
+              <option value="1">90&deg;</option>
+              <option value="2">180&deg;</option>
+              <option value="3">270&deg;</option>
+            </select>
+            <div class="field-hint">Rotate the satellite image clockwise.</div>
+          </div>
+          <div class="toggle-row" style="margin-top:16px;border-bottom:1px solid rgba(255,255,255,0.06)">
+            <span class="toggle-label">Flip vertical</span>
+            <label class="toggle"><input type="checkbox" id="goesVflip" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Mirrors the satellite image top-to-bottom.</div>
+          <div class="toggle-row">
+            <span class="toggle-label">Flip horizontal</span>
+            <label class="toggle"><input type="checkbox" id="goesHflip" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Mirrors the satellite image left-to-right.</div>
+          <div class="field" style="margin-top:16px">
+            <button onclick="fetchGoesPreview()" class="btn btn-primary" id="goesPreviewBtn" style="width:100%">Fetch Preview</button>
+          </div>
+          <div id="goesPreviewContainer" style="display:none;margin-top:12px;text-align:center">
+            <img id="goesPreviewImg" style="max-width:100%;border-radius:10px;border:1px solid rgba(255,255,255,0.1)" />
+          </div>
+          </div>
+          <div id="moonGroup" style="display:none">
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Background</label>
+            <select class="input" id="moonBg" onchange="applyImageDisplay();checkDirty()">
+              <option value="0">Plain black</option>
+              <option value="1">Starfield</option>
+              <option value="2">Soft glow</option>
+              <option value="3">Starfield + Glow</option>
+            </select>
+            <div class="field-hint">Sets what renders behind the moon disc (plain black, starfield, soft glow, or both).</div>
+          </div>
+          <div class="field-hint" style="margin-top:12px">The moon view uses the device location set on the System tab.</div>
+          <div class="field">
+            <label class="field-label">Moon drag lighting</label>
+            <select class="input" id="moonDragLight" onchange="applyImageDisplay();checkDirty()">
+              <option value="0">True phase</option>
+              <option value="1">Explore (full-lit)</option>
+              <option value="2">Locked to surface</option>
+            </select>
+            <div class="field-hint">How the Moon is lit while you drag to rotate it. True phase keeps the real terminator; Explore lights the whole surface.</div>
+          </div>
+          <div class="card">
+            <div class="card-title"><span class="card-title-label">Moon Orientation <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+          <div class="help-popover"><div class="help-popover-title">Moon appearance and orientation</div><p>Corrects how the rendered moon is oriented and how it responds to dragging. Keep Moon upright (north-up) holds the moon's north pole at the top like phone apps and NASA imagery; turning it off tilts the disc to match how the real moon sits in your local sky as it moves. The device location set on the System tab is used for an accurate sky-tilt and terminator.</p><p>Flip horizontal (U) and Flip vertical (V) mirror the image for displays or mounts that reverse it. The Roll, Yaw, and Pitch offset sliders nudge the moon from its standard orientation, and Reset orientation returns them to that standard view.</p><p>Free-spin mode changes drag behavior. Off, the disc rubber-bands back to the live sky as soon as you release it. On, the disc holds your spin and eases back after the Return to live view timeout (3 to 60 seconds). Example: enable Free-spin, set the return to 15s, drag to inspect the far limb, and the view holds for 15 seconds before returning to live.</p></div>
+          <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+            <span class="toggle-label">Keep Moon upright (north-up)</span>
+            <label class="toggle"><input type="checkbox" id="moon_north_up" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint" style="margin-bottom:12px">On: Moon's north pole stays up like apps/NASA. Off: tilts to match the real sky as the Moon moves.</div>
+          <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+            <span class="toggle-label">Flip horizontal (U)</span>
+            <label class="toggle"><input type="checkbox" id="moon_flip_u" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Mirrors the moon left-to-right for reversed displays or mounts.</div>
+          <div class="toggle-row">
+            <span class="toggle-label">Flip vertical (V)</span>
+            <label class="toggle"><input type="checkbox" id="moon_flip_v" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Mirrors the moon top-to-bottom.</div>
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Roll offset</label>
+            <div class="slider-group">
+              <input type="range" class="slider" id="moon_roll_offset" min="-180" max="180" step="1" value="0" oninput="updateMoonOrientReadout('moon_roll');applyImageDisplay();checkDirty()">
+              <span class="slider-val" id="moon_roll_val">0&deg;</span>
+            </div>
+            <div class="field-hint">Rotates the moon in the screen plane, -180 to 180 degrees from default.</div>
+          </div>
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Yaw offset</label>
+            <div class="slider-group">
+              <input type="range" class="slider" id="moon_yaw_offset" min="-180" max="180" step="1" value="0" oninput="updateMoonOrientReadout('moon_yaw');applyImageDisplay();checkDirty()">
+              <span class="slider-val" id="moon_yaw_val">0&deg;</span>
+            </div>
+            <div class="field-hint">Turns the moon left/right about its vertical axis, -180 to 180 degrees from default.</div>
+          </div>
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Pitch offset</label>
+            <div class="slider-group">
+              <input type="range" class="slider" id="moon_pitch_offset" min="-90" max="90" step="1" value="0" oninput="updateMoonOrientReadout('moon_pitch');applyImageDisplay();checkDirty()">
+              <span class="slider-val" id="moon_pitch_val">0&deg;</span>
+            </div>
+            <div class="field-hint">Tilts the moon up or down, from -90 to 90 degrees relative to its standard orientation.</div>
+          </div>
+          <hr class="divider">
+          <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+            <span class="toggle-label">Free-spin mode</span>
+            <label class="toggle"><input type="checkbox" id="moon_spin_mode" onchange="updateMoonSpinUI();applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint" style="margin-bottom:12px">Off: dragged disc snaps back to the live sky immediately (rubber band). On: the disc holds your spin, then eases back after the timeout below.</div>
+          <div class="field" style="margin-top:16px" id="moonSpinReturnField">
+            <label class="field-label">Return to live view after</label>
+            <div class="slider-group">
+              <input type="range" class="slider" id="moon_spin_return_s" min="3" max="60" step="1" value="3" oninput="updateMoonOrientReadout('moon_spin_return');applyImageDisplay();checkDirty()">
+              <span class="slider-val" id="moon_spin_return_val">3s</span>
+            </div>
+            <div class="field-hint">Only applies in free-spin mode.</div>
+          </div>
+          <div class="field" style="margin-top:16px">
+            <button onclick="resetMoonOrientation()" class="btn" id="moonOrientResetBtn" style="width:100%">Reset orientation</button>
+          </div>
+          </div>
+          </div>
+          <div id="solarGroup" style="display:none">
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Band</label>
+            <select class="input" id="solarBand" onchange="applyImageDisplay();checkDirty()">
+              <option value="0">AIA 94 (Fe XVIII)</option>
+              <option value="1">AIA 131 (Fe XX)</option>
+              <option value="2">AIA 171 (Fe IX/X)</option>
+              <option value="3">AIA 193 (Fe XII)</option>
+              <option value="4">AIA 211 (Fe XIV)</option>
+              <option value="5">AIA 304 (He II)</option>
+              <option value="6">AIA 335 (Fe XVI)</option>
+              <option value="7">AIA 1600 (C IV+cont)</option>
+              <option value="8">AIA 1700 (continuum)</option>
+              <option value="9">AIA 4500 (continuum)</option>
+              <option value="10">LASCO C2 (coronagraph)</option>
+              <option value="11">LASCO C3 (coronagraph)</option>
+              <option value="12">SOHO EIT 171</option>
+              <option value="13">SOHO EIT 195</option>
+              <option value="14">SOHO EIT 284</option>
+              <option value="15">SOHO EIT 304</option>
+              <option value="16">SDO/HMI Continuum</option>
+              <option value="17">SDO/HMI Magnetogram</option>
+            </select>
+            <div class="field-hint">NASA SDO/AIA and SOHO realtime (LASCO, EIT, HMI)</div>
+          </div>
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Solar Rotation</label>
+            <select class="input" id="solarOrientation" onchange="applyImageDisplay();checkDirty()">
+              <option value="0">0&deg;</option>
+              <option value="1">90&deg;</option>
+              <option value="2">180&deg;</option>
+              <option value="3">270&deg;</option>
+            </select>
+            <div class="field-hint">Rotate the solar image clockwise.</div>
+          </div>
+          <div class="toggle-row" style="margin-top:16px;border-bottom:1px solid rgba(255,255,255,0.06)">
+            <span class="toggle-label">Flip vertical</span>
+            <label class="toggle"><input type="checkbox" id="solarVflip" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Mirrors the solar image top-to-bottom.</div>
+          <div class="toggle-row">
+            <span class="toggle-label">Flip horizontal</span>
+            <label class="toggle"><input type="checkbox" id="solarHflip" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Mirrors the solar image left-to-right.</div>
+          </div>
+          <div id="customGroup" style="display:none">
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Image URL</label>
+            <input class="input" id="customImageUrl" type="url" placeholder="https://picsum.photos/720" onchange="applyImageDisplay();updateImgCustomPillHint();checkDirty()">
+            <div class="field-hint">JPEG only. Max 1024x1024 pixels, max 1 MB. PNG and WebP are not supported.</div>
+          </div>
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Custom Rotation</label>
+            <select class="input" id="customOrientation" onchange="applyImageDisplay();checkDirty()">
+              <option value="0">0&deg;</option>
+              <option value="1">90&deg;</option>
+              <option value="2">180&deg;</option>
+              <option value="3">270&deg;</option>
+            </select>
+            <div class="field-hint">Rotate the custom image clockwise.</div>
+          </div>
+          <div class="toggle-row" style="margin-top:16px;border-bottom:1px solid rgba(255,255,255,0.06)">
+            <span class="toggle-label">Flip vertical</span>
+            <label class="toggle"><input type="checkbox" id="customVflip" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Mirrors the custom image top-to-bottom.</div>
+          <div class="toggle-row">
+            <span class="toggle-label">Flip horizontal</span>
+            <label class="toggle"><input type="checkbox" id="customHflip" onchange="applyImageDisplay();checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Mirrors the custom image left-to-right.</div>
+          <div class="field" style="margin-top:16px">
+            <label class="field-label">Update Interval</label>
+            <select class="input" id="customInterval" onchange="applyImageDisplay();checkDirty()">
+              <option value="10">10 seconds</option>
+              <option value="30">30 seconds</option>
+              <option value="60" selected>1 minute</option>
+              <option value="300">5 minutes</option>
+              <option value="600">10 minutes</option>
+              <option value="1800">30 minutes</option>
+              <option value="3600">1 hour</option>
+              <option value="7200">2 hours</option>
+            </select>
+            <div class="field-hint">How often the custom image refreshes.</div>
+          </div>
+          <div class="field" style="margin-top:16px">
+            <button onclick="fetchCustomPreview()" class="btn btn-primary" id="customPreviewBtn" style="width:100%">Refresh on Device</button>
+          </div>
+          </div>
+        </div>
+      </div>
+

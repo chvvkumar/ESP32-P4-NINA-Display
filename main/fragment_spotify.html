@@ -1,0 +1,78 @@
+
+      <div class="card">
+        <div class="card-title"><span class="card-title-label">Account Setup <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Account Setup</div><p>Connects the device to your Spotify account so the player page can show what is playing. Create a free app on the Spotify developer site, paste its Client ID here, then log in. The Client ID is saved to the device automatically when you select Login with Spotify, so no separate save is needed.</p><p>After you approve access, the browser lands on a page that cannot load. That is expected: copy the full address from that page, including the ?code= part, and paste it into the Redirect URL field. The device stores the resulting tokens, so login is a one-time step per account. Use Logout to clear the stored tokens.</p></div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Enable Spotify</span>
+          <label class="toggle"><input type="checkbox" id="spotify_enabled" onchange="updateSpotifyEnabledUI()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint">Turns the Spotify page on and starts checking your playback.</div>
+        <div id="spotifyConnectionFields">
+          <div class="field-label" style="margin-top:16px;font-weight:600;color:var(--accent)">Step 1: Create a Spotify app</div>
+          <div class="field-hint">Go to <a href="https://developer.spotify.com" target="_blank" rel="noopener" style="color:rgba(var(--accent-rgb),1);text-decoration:underline">developer.spotify.com</a>, create a free app, and set its Redirect URI to <code style="background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;font-size:0.78rem">http://127.0.0.1:8000/callback</code></div>
+          <div class="field-label" style="margin-top:16px;font-weight:600;color:var(--accent)">Step 2: Enter the Client ID</div>
+          <div class="field">
+            <label class="field-label">Client ID</label>
+            <input type="text" class="input" id="spotifyClientId" placeholder="e.g. a1b2c3d4e5f6...">
+            <div class="field-hint">Saved to the device automatically when you select Login with Spotify below. No separate save needed.</div>
+          </div>
+          <div id="spotifyAccountCard">
+            <div class="field-label" style="margin-top:16px;font-weight:600;color:var(--accent)">Step 3: Log in</div>
+            <div class="field">
+              <label class="field-label">Status</label>
+              <div id="spotifyStatus" style="font-size:0.875rem;color:var(--text-hint);margin-bottom:12px">Checking...</div>
+            </div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+              <button class="btn btn-primary" id="spotifyLoginBtn" onclick="spotifyLogin()" style="flex:1;min-width:120px">Login with Spotify</button>
+              <button class="btn btn-danger" id="spotifyLogoutBtn" onclick="spotifyLogout()" style="flex:1;min-width:120px;display:none">Logout</button>
+            </div>
+            <div id="spotifyPasteDiv" style="display:none;margin-top:16px">
+              <p style="font-size:0.82rem;color:#a1a1aa;margin:0 0 10px;line-height:1.5">After approving in Spotify, you'll see a "can't connect" page. Copy the <strong>full URL</strong> from the address bar and paste it below:</p>
+              <div class="field" style="margin-bottom:10px">
+                <label class="field-label">Redirect URL</label>
+                <input type="text" class="input" id="spotifyPasteUrl" placeholder="http://127.0.0.1:8000/callback?code=..." style="font-size:0.92rem;min-height:52px;border:1px solid rgba(var(--accent-rgb),0.35);background:rgba(0,0,0,0.45)">
+                <div class="field-hint">Paste the entire callback URL from the address bar; it must contain the ?code= portion.</div>
+              </div>
+              <button class="btn btn-primary" id="spotifySubmitBtn" onclick="spotifySubmitCallback()" style="width:100%">Submit</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" id="spotifyPlayerCard">
+        <div class="card-title"><span class="card-title-label">Player Options <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Player Options</div><p>Controls how the Spotify player page looks and how often it refreshes. Poll Interval sets how often the device checks Spotify for the current track and playback position; lower values track changes faster but make more API calls.</p><p>Minimal Mode shows centered track text with the album art dimmed to a background and the transport controls hidden. Show Overlay keeps the playback overlay visible, the same as tapping the album art; Overlay Timeout sets how long it stays before auto-hiding, with 0 keeping it on permanently.</p></div>
+        <div id="spotifyPlayerOptionsFields">
+          <div class="field">
+            <label class="field-label">Poll Interval (ms)</label>
+            <input type="number" class="input" id="spotifyPollInterval" min="1000" max="30000" step="500" value="3000">
+            <div class="field-hint">How often to check playback state (1000 &ndash; 30000 ms)</div>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Minimal Mode</span>
+            <label class="toggle"><input type="checkbox" id="spotify_minimal_mode"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Shows centered track text, with the album art dimmed to a background and the transport controls hidden.</div>
+          <div class="toggle-row">
+            <span class="toggle-label">Show Overlay</span>
+            <label class="toggle"><input type="checkbox" id="spotify_overlay_visible"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Force the minimal overlay visible (same as tapping album art)</div>
+          <div class="toggle-row">
+            <span class="toggle-label">Scroll Long Text</span>
+            <label class="toggle"><input type="checkbox" id="spotify_scroll_text" checked><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">When off, long text wraps to multiple lines</div>
+          <div class="toggle-row">
+            <span class="toggle-label">Show Progress Bar</span>
+            <label class="toggle"><input type="checkbox" id="spotify_show_progress_bar" checked><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Shows the track elapsed and remaining progress bar on the player.</div>
+          <div class="field">
+            <label class="field-label">Overlay Timeout (s)</label>
+            <input type="number" class="input" id="spotifyOverlayTimeout" min="0" max="60" step="1" value="5">
+            <div class="field-hint">Seconds before playback overlay auto-hides (0 = always visible)</div>
+          </div>
+        </div>
+      </div>
+

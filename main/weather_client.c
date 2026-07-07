@@ -10,10 +10,10 @@
 #include "weather_client.h"
 #include "app_config.h"
 #include "tasks.h"
+#include "poll_task.h"
 
 #include "ui/nina_clock.h"
-#include "esp_http_client.h"
-#include "esp_crt_bundle.h"
+#include "http_fetch.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
@@ -106,92 +106,42 @@ static void str_to_upper(char *s) {
 }
 
 // =============================================================================
-// HTTP fetch helper — returns PSRAM-allocated buffer, caller must free()
+// HTTP fetch helper — returns PSRAM-allocated buffer, caller must
+// heap_caps_free()
 // =============================================================================
 
 /**
  * Perform an HTTP GET and return the response body as a null-terminated
  * PSRAM-allocated string.  Returns NULL on any error.
+ *
+ * Thin wrapper over the shared http_fetch_text() (main/http_fetch.h/.c):
+ * TLS cert-bundle validation on, redirects followed up to 3 hops, single
+ * attempt (this poller's own retry interval is the retry mechanism), same
+ * response-size cap as before. All transport/status/size error logging
+ * happens inside http_fetch_text() itself.
  */
 static char *http_get_body(const char *url) {
-    esp_http_client_config_t cfg = {
-        .url               = url,
-        .timeout_ms        = WEATHER_HTTP_TIMEOUT_MS,
-        .crt_bundle_attach = esp_crt_bundle_attach,
+    http_fetch_opts_t opts = {
+        .timeout_ms         = WEATHER_HTTP_TIMEOUT_MS,
+        .use_tls_bundle     = true,
+        .max_redirects      = 3,
+        .max_attempts       = 1,
+        .max_response_bytes = WEATHER_RESPONSE_BUF_SIZE,
     };
-    esp_http_client_handle_t client = esp_http_client_init(&cfg);
-    if (!client) {
-        ESP_LOGW(TAG, "Failed to init HTTP client");
+
+    char *body = NULL;
+    size_t len = 0;
+    if (http_fetch_text(url, &opts, &body, &len) != ESP_OK) {
         return NULL;
     }
 
-    esp_err_t err = esp_http_client_open(client, 0);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "HTTP open failed: %s", esp_err_to_name(err));
-        esp_http_client_cleanup(client);
-        return NULL;
-    }
-
-    int content_length = esp_http_client_fetch_headers(client);
-    int status = esp_http_client_get_status_code(client);
-
-    /* Follow Location redirects manually: the streaming open()/fetch_headers()
-     * path does NOT auto-follow. Cap the chain to avoid loops. */
-    int redirects = 0;
-    while ((status == 301 || status == 302 || status == 307 || status == 308) &&
-           redirects < 3) {
-        err = esp_http_client_set_redirection(client);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "set_redirection failed: %s", esp_err_to_name(err));
-            break;
-        }
-        esp_http_client_close(client);
-        err = esp_http_client_open(client, 0);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "HTTP re-open failed: %s", esp_err_to_name(err));
-            esp_http_client_cleanup(client);
-            return NULL;
-        }
-        content_length = esp_http_client_fetch_headers(client);
-        status = esp_http_client_get_status_code(client);
-        redirects++;
-    }
-
-    if (status < 200 || status >= 300) {
-        ESP_LOGW(TAG, "HTTP %d for %s", status, url);
-        esp_http_client_cleanup(client);
-        return NULL;
-    }
-
-    int buf_size = (content_length > 0 && content_length < WEATHER_RESPONSE_BUF_SIZE)
-                       ? (content_length + 1)
-                       : WEATHER_RESPONSE_BUF_SIZE;
-
-    char *buffer = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
-    if (!buffer) {
-        ESP_LOGE(TAG, "Failed to allocate %d bytes", buf_size);
-        esp_http_client_cleanup(client);
-        return NULL;
-    }
-
-    int total = 0;
-    int max_read = buf_size - 1;
-    while (total < max_read) {
-        int n = esp_http_client_read(client, buffer + total, max_read - total);
-        if (n <= 0) break;
-        total += n;
-    }
-    buffer[total] = '\0';
-
-    esp_http_client_cleanup(client);
-
-    if (total == 0) {
+    if (len == 0) {
         ESP_LOGW(TAG, "Empty response body");
-        free(buffer);
+        heap_caps_free(body);
         return NULL;
     }
 
-    return buffer;
+    return body;
 }
 
 // =============================================================================
@@ -212,7 +162,7 @@ static bool fetch_owm(const app_config_t *cfg, weather_data_t *out) {
     if (!body) return false;
 
     cJSON *json = cJSON_Parse(body);
-    free(body);
+    heap_caps_free(body);
     if (!json) {
         ESP_LOGW(TAG, "OWM current: JSON parse failed");
         return false;
@@ -280,7 +230,7 @@ static bool fetch_owm(const app_config_t *cfg, weather_data_t *out) {
     }
 
     json = cJSON_Parse(body);
-    free(body);
+    heap_caps_free(body);
     if (!json) return true;
 
     cJSON *list = cJSON_GetObjectItem(json, "list");
@@ -360,7 +310,7 @@ static bool fetch_open_meteo(const app_config_t *cfg, weather_data_t *out) {
     if (!body) return false;
 
     cJSON *json = cJSON_Parse(body);
-    free(body);
+    heap_caps_free(body);
     if (!json) {
         ESP_LOGW(TAG, "Open-Meteo: JSON parse failed");
         return false;
@@ -510,7 +460,7 @@ static bool fetch_wunderground(const app_config_t *cfg, weather_data_t *out) {
     if (!body) return false;
 
     cJSON *json = cJSON_Parse(body);
-    free(body);
+    heap_caps_free(body);
     if (!json) {
         ESP_LOGW(TAG, "WU current: JSON parse failed");
         return false;
@@ -575,7 +525,7 @@ static bool fetch_wunderground(const app_config_t *cfg, weather_data_t *out) {
     body = http_get_body(url);
     if (body) {
         json = cJSON_Parse(body);
-        free(body);
+        heap_caps_free(body);
         if (json) {
             cJSON *temps = cJSON_GetObjectItem(json, "temperature");
             if (temps && cJSON_IsArray(temps)) {
@@ -620,7 +570,7 @@ static bool fetch_wunderground(const app_config_t *cfg, weather_data_t *out) {
         body = http_get_body(url);
         if (body) {
             json = cJSON_Parse(body);
-            free(body);
+            heap_caps_free(body);
             if (json) {
                 cJSON *hourly = cJSON_GetObjectItem(json, "hourly");
                 if (hourly) {
@@ -699,76 +649,96 @@ static bool fetch_wunderground(const app_config_t *cfg, weather_data_t *out) {
 // Poll task
 // =============================================================================
 
+/* Poll interval (seconds) from the cfg snapshot taken during the most recent
+ * successful poll_once() -- stashed here so weather_interval_ms() (called by
+ * poll_loop_run right after a successful poll_once()) can clamp it without
+ * re-snapshotting the config. Only read/written from the weather poll task. */
+static uint32_t s_last_poll_interval_s;
+
+static bool weather_poll_once(void *arg) {
+    (void)arg;
+
+    app_config_t cfg_snap = app_config_get_snapshot();
+
+    /* Skip if no location configured */
+    bool has_location = (cfg_snap.weather_location_name[0] != '\0');
+    /* OWM and WU need an API key */
+    bool needs_key = (cfg_snap.weather_provider == 0 || cfg_snap.weather_provider == 2);
+    bool has_key   = (cfg_snap.weather_api_key[0] != '\0');
+
+    if (!has_location || (needs_key && !has_key)) {
+        ESP_LOGD(TAG, "Weather not configured (provider=%d), sleeping 60s",
+                 cfg_snap.weather_provider);
+        return false; /* backoff is fixed at WEATHER_RETRY_INTERVAL_S -- same as fetch failure */
+    }
+
+    /* Fetch from selected provider */
+    weather_data_t local;
+    memset(&local, 0, sizeof(local));
+    local.uv_index = -1.0f;
+
+    bool ok = false;
+    switch (cfg_snap.weather_provider) {
+        case 0:  ok = fetch_owm(&cfg_snap, &local);          break;
+        case 1:  ok = fetch_open_meteo(&cfg_snap, &local);   break;
+        case 2:  ok = fetch_wunderground(&cfg_snap, &local);  break;
+        default:
+            ESP_LOGW(TAG, "Unknown weather provider: %d", cfg_snap.weather_provider);
+            break;
+    }
+
+    if (!ok) {
+        ESP_LOGW(TAG, "Weather fetch failed, retrying in %ds", WEATHER_RETRY_INTERVAL_S);
+        return false;
+    }
+
+    local.valid = true;
+    local.last_update_ts = (int64_t)time(NULL);
+
+    if (xSemaphoreTake(s_mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
+        memcpy(&s_data, &local, sizeof(weather_data_t));
+        xSemaphoreGive(s_mutex);
+    }
+    ESP_LOGI(TAG, "Weather updated: %.1f%s, %s",
+             local.temp_current,
+             (cfg_snap.weather_units == 0) ? "F" : "C",
+             local.condition);
+
+    /* Trigger immediate clock UI refresh */
+    clock_page_request_update();
+
+    s_last_poll_interval_s = cfg_snap.weather_poll_interval_s;
+    return true;
+}
+
+static uint32_t weather_interval_ms(void *arg) {
+    (void)arg;
+
+    /* Normal poll interval, clamped 15 min - 1 hour */
+    uint32_t interval_ms = s_last_poll_interval_s * 1000;
+    if (interval_ms < 900000)   interval_ms = 900000;   /* min 15 min */
+    if (interval_ms > 3600000)  interval_ms = 3600000;  /* max 1 hour */
+    return interval_ms;
+}
+
 static void weather_poll_task(void *arg) {
     (void)arg;
 
-    /* Wait for WiFi connection */
-    xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT,
-                        pdFALSE, pdFALSE, portMAX_DELAY);
-    ESP_LOGI(TAG, "WiFi connected, starting weather polling");
+    poll_loop_spec_t spec = {
+        .name = "weather",
+        .wifi_group = s_wifi_event_group,
+        .wifi_bits = WIFI_CONNECTED_BIT,
+        .page_active = &clock_page_active,
+        .poll_once = weather_poll_once,
+        .interval_ms = weather_interval_ms,
+        /* Both the "not configured" and "fetch failed" paths retry at a flat
+         * WEATHER_RETRY_INTERVAL_S: initial == max means poll_backoff_next()
+         * always returns WEATHER_RETRY_INTERVAL_S * 1000, never doubling. */
+        .backoff_initial_ms = WEATHER_RETRY_INTERVAL_S * 1000,
+        .backoff_max_ms = WEATHER_RETRY_INTERVAL_S * 1000,
+    };
 
-    while (1) {
-        /* Suspend during OTA updates or when Clock page is not visible */
-        while (ota_in_progress || !clock_page_active) {
-            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
-        }
-
-        app_config_t cfg_snap = app_config_get_snapshot();
-
-        /* Skip if no location configured */
-        bool has_location = (cfg_snap.weather_location_name[0] != '\0');
-        /* OWM and WU need an API key */
-        bool needs_key = (cfg_snap.weather_provider == 0 || cfg_snap.weather_provider == 2);
-        bool has_key   = (cfg_snap.weather_api_key[0] != '\0');
-
-        if (!has_location || (needs_key && !has_key)) {
-            ESP_LOGD(TAG, "Weather not configured (provider=%d), sleeping 60s",
-                     cfg_snap.weather_provider);
-            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(WEATHER_RETRY_INTERVAL_S * 1000));
-            continue;
-        }
-
-        /* Fetch from selected provider */
-        weather_data_t local;
-        memset(&local, 0, sizeof(local));
-        local.uv_index = -1.0f;
-
-        bool ok = false;
-        switch (cfg_snap.weather_provider) {
-            case 0:  ok = fetch_owm(&cfg_snap, &local);          break;
-            case 1:  ok = fetch_open_meteo(&cfg_snap, &local);   break;
-            case 2:  ok = fetch_wunderground(&cfg_snap, &local);  break;
-            default:
-                ESP_LOGW(TAG, "Unknown weather provider: %d", cfg_snap.weather_provider);
-                break;
-        }
-
-        if (ok) {
-            local.valid = true;
-            local.last_update_ts = (int64_t)time(NULL);
-
-            if (xSemaphoreTake(s_mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
-                memcpy(&s_data, &local, sizeof(weather_data_t));
-                xSemaphoreGive(s_mutex);
-            }
-            ESP_LOGI(TAG, "Weather updated: %.1f%s, %s",
-                     local.temp_current,
-                     (cfg_snap.weather_units == 0) ? "F" : "C",
-                     local.condition);
-
-            /* Trigger immediate clock UI refresh */
-            clock_page_request_update();
-
-            /* Normal poll interval */
-            uint32_t interval_ms = (uint32_t)cfg_snap.weather_poll_interval_s * 1000;
-            if (interval_ms < 900000)   interval_ms = 900000;   /* min 15 min */
-            if (interval_ms > 3600000)  interval_ms = 3600000;  /* max 1 hour */
-            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(interval_ms));
-        } else {
-            ESP_LOGW(TAG, "Weather fetch failed, retrying in %ds", WEATHER_RETRY_INTERVAL_S);
-            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(WEATHER_RETRY_INTERVAL_S * 1000));
-        }
-    }
+    poll_loop_run(&spec, NULL);
 }
 
 void weather_client_start(void) {

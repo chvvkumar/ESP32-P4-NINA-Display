@@ -58,6 +58,7 @@
 #include "driver/jpeg_decode.h"
 #include "freertos/queue.h"
 #include "ui/nina_thumbnail.h"
+#include "poll_task.h"
 
 static const char *TAG = "tasks";
 
@@ -564,32 +565,47 @@ static void ota_progress_cb(int percent) {
 // AllSky Poll Task — independent poller pinned to Core 0
 // =============================================================================
 
+static bool allsky_poll_once(void *arg) {
+    (void)arg;
+
+    /* Read fields directly from config pointer — avoids copying the full
+     * ~6.7 KB app_config_t onto this task's small stack. */
+    const app_config_t *cfg = app_config_get();
+
+    /* Only poll when hostname is configured */
+    if (cfg->allsky_hostname[0] != '\0') {
+        allsky_client_poll(cfg->allsky_hostname, cfg->allsky_field_config, &allsky_data);
+    }
+    return true; /* no failure signal — matches original unconditional-retry-at-interval behavior */
+}
+
+static uint32_t allsky_interval_ms(void *arg) {
+    (void)arg;
+
+    const app_config_t *cfg = app_config_get();
+
+    /* Sleep for the configured interval (clamped 1-300s at config-validate time; floor here too) */
+    uint32_t interval_ms = (uint32_t)cfg->allsky_update_interval_s * 1000;
+    if (interval_ms < 1000) interval_ms = 1000;
+    return interval_ms;
+}
+
 void allsky_poll_task(void *arg) {
+    (void)arg;
     ESP_LOGI(TAG, "AllSky poll task started");
 
-    // Wait for WiFi before attempting any HTTP requests
-    xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
+    poll_loop_spec_t spec = {
+        .name = "allsky",
+        .wifi_group = s_wifi_event_group,
+        .wifi_bits = WIFI_CONNECTED_BIT,
+        .page_active = &allsky_page_active,
+        .poll_once = allsky_poll_once,
+        .interval_ms = allsky_interval_ms,
+        .backoff_initial_ms = 0,
+        .backoff_max_ms = 0,
+    };
 
-    while (1) {
-        /* Suspend during OTA or when AllSky page is not visible */
-        while (ota_in_progress || !allsky_page_active) {
-            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
-        }
-
-        /* Read fields directly from config pointer — avoids copying the full
-         * ~6.7 KB app_config_t onto this task's small stack. */
-        const app_config_t *cfg = app_config_get();
-
-        /* Only poll when hostname is configured */
-        if (cfg->allsky_hostname[0] != '\0') {
-            allsky_client_poll(cfg->allsky_hostname, cfg->allsky_field_config, &allsky_data);
-        }
-
-        /* Sleep for the configured interval (clamped 1-300s) */
-        uint32_t interval_ms = (uint32_t)cfg->allsky_update_interval_s * 1000;
-        if (interval_ms < 1000) interval_ms = 1000;
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(interval_ms));
-    }
+    poll_loop_run(&spec, NULL);
 }
 
 // =============================================================================
