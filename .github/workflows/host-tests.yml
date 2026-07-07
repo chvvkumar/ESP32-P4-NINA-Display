@@ -2,7 +2,7 @@ name: Host Tests
 
 on:
   push:
-    branches: [main, dev, snd]
+    branches: [snd]
     paths:
       - 'main/**'
       - 'test/**'
