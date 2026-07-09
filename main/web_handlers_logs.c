@@ -4,6 +4,8 @@
  *
  * GET  /api/logs            -> streams the captured log oldest->newest as a
  *                              text/plain attachment, chunked from PSRAM.
+ *                              Optional ?tail=N serves only the last N bytes
+ *                              (clamped to 1 KB .. full buffer size).
  * POST /api/logs/clear      -> empties the capture buffer, returns {"ok":true}.
  * GET  /api/crashlog        -> streams the persistent crash-history JSONL file
  *                              (text/plain attachment; the UI also fetches it
@@ -23,16 +25,45 @@
 #include "esp_heap_caps.h"
 #include "esp_core_dump.h"
 #include "esp_partition.h"
+#include <stdlib.h>
 #include <string.h>
 
 /* PSRAM-backed chunk size for streaming the download. Keeps the send path off
  * the tight internal heap. */
 #define LOG_CHUNK_SIZE 4096
 
+/* Bounds for the optional ?tail=N byte count on GET /api/logs. */
+#define LOG_TAIL_MIN 1024
+#define LOG_TAIL_MAX LOG_CAPTURE_SIZE
+
 // Handler for downloading the captured log buffer
 esp_err_t logs_get_handler(httpd_req_t *req)
 {
     REQUIRE_AUTH(req);
+
+    /* Optional ?tail=N: serve only the last N bytes of the captured log so
+     * the web UI's Logs tab can poll a small window instead of pulling the
+     * full 512 KB ring on every open (which starves other httpd requests).
+     * No param, a malformed value, or N >= captured size keeps the existing
+     * full-buffer behavior. */
+    size_t tail_bytes = 0;
+    char qbuf[64];
+    if (httpd_req_get_url_query_str(req, qbuf, sizeof(qbuf)) == ESP_OK) {
+        char val[16] = {0};
+        if (httpd_query_key_value(qbuf, "tail", val, sizeof(val)) == ESP_OK &&
+            val[0] != '\0') {
+            long n = strtol(val, NULL, 10);
+            if (n > 0) {
+                if (n < LOG_TAIL_MIN) {
+                    n = LOG_TAIL_MIN;
+                }
+                if (n > (long)LOG_TAIL_MAX) {
+                    n = (long)LOG_TAIL_MAX;
+                }
+                tail_bytes = (size_t)n;
+            }
+        }
+    }
 
     /* Build the download filename from the configured hostname. */
     const char *hostname = app_config_get()->hostname;
@@ -52,10 +83,30 @@ esp_err_t logs_get_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
+    /* When tailing, start the stream at (captured size - N). The size is
+     * sampled once; lines that arrive mid-download simply extend what later
+     * reads return, same as the full download. */
+    size_t offset = 0;
+    if (tail_bytes > 0) {
+        size_t total = log_capture_size();
+        if (tail_bytes < total) {
+            offset = total - tail_bytes;
+            /* Advance past the first (likely partial) line so the tail starts
+             * on a clean line boundary. Cheap single-chunk scan; if no newline
+             * is found in the first chunk, just start mid-line. */
+            size_t got = log_capture_read(offset, chunk, LOG_CHUNK_SIZE);
+            if (got > 0) {
+                const char *nl = memchr(chunk, '\n', got);
+                if (nl != NULL) {
+                    offset += (size_t)(nl - chunk) + 1;
+                }
+            }
+        }
+    }
+
     /* Stream oldest->newest. Each read locks the ring only for its own copy,
      * so logging is never blocked across the whole HTTP send. New lines that
      * arrive mid-download simply extend what later reads return. */
-    size_t offset = 0;
     for (;;) {
         size_t got = log_capture_read(offset, chunk, LOG_CHUNK_SIZE);
         if (got == 0) {
