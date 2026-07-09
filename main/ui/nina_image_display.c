@@ -40,8 +40,7 @@ static const char *TAG = "image_display";
  * LV_FONT_MONTSERRAT_* Kconfig toggles.  All overlay labels (bottom phase /
  * timestamp and the four moon-corner info labels) use overpass_27 for
  * readability at desk distance.  At this size the longest strings reach past
- * the inscribed moon disc; each label's translucent chip background keeps the
- * text legible where it overlaps the moon. */
+ * the inscribed moon disc and render directly over it (no chip background). */
 extern const lv_font_t lv_font_overpass_27;
 
 static lv_obj_t *page_container;
@@ -246,21 +245,18 @@ static void moon_drag_released_cb(lv_event_t *e)
     if (goes_task_handle) xTaskNotifyGive(goes_task_handle);
 }
 
-/* Apply the "chip" style to a label: small translucent rounded background that
- * keeps text legible when the main overlay bar is nearly transparent.
- * bg_opa=120 (~47%), corner radius=8, horizontal pad=8, vertical pad=3.
- * Non-red themes keep the historic black chip + white text exactly. Under the
- * Red Night theme (gated by theme_is_red_night) the chip background stays black
- * and the text becomes the theme's red (text_color) so the page emits only red
- * shades or black. nina_image_display_apply_theme() re-runs this on theme change. */
+/* Apply the "chip" style to a label: transparent background (no chip) with the
+ * historic padding so label geometry/stacking math is unchanged.
+ * Non-red themes use white text. Under the Red Night theme (gated by
+ * theme_is_red_night) the text becomes the theme's red (text_color) so the page
+ * emits only red shades or black. nina_image_display_apply_theme() re-runs this
+ * on theme change. */
 static void apply_chip_style(lv_obj_t *lbl)
 {
     const theme_t *th = current_theme;
     bool red = theme_is_red_night(th);
     lv_color_t txt = red ? lv_color_hex(th->text_color) : lv_color_white();
-    lv_obj_set_style_bg_color(lbl,   lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(lbl,     120,              0);
-    lv_obj_set_style_radius(lbl,     8,                0);
+    lv_obj_set_style_bg_opa(lbl,     LV_OPA_TRANSP,    0);
     lv_obj_set_style_pad_left(lbl,   8,                0);
     lv_obj_set_style_pad_right(lbl,  8,                0);
     lv_obj_set_style_pad_top(lbl,    3,                0);
@@ -391,9 +387,9 @@ lv_obj_t *nina_image_display_create(lv_obj_t *parent)
     lv_obj_remove_style_all(overlay_bar);
     lv_obj_set_size(overlay_bar, SCREEN_SIZE, 68);
     lv_obj_align(overlay_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
-    /* No bar background: each bottom label carries its own translucent chip
-     * (apply_chip_style), so overlay_bar is just an invisible positioning
-     * container for lbl_region / lbl_timestamp. */
+    /* No bar background: labels render text directly (apply_chip_style), so
+     * overlay_bar is just an invisible positioning container for
+     * lbl_region / lbl_timestamp. */
     lv_obj_set_style_bg_opa(overlay_bar, LV_OPA_TRANSP, 0);
     /* No edge padding — the bottom labels sit flush in the screen corners so they
      * stay clear of the inscribed moon disc. */
@@ -404,7 +400,7 @@ lv_obj_t *nina_image_display_create(lv_obj_t *parent)
     lbl_region = lv_label_create(overlay_bar);
     lv_obj_set_style_text_font(lbl_region, &lv_font_overpass_27, 0);
     lv_obj_align(lbl_region, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-    apply_chip_style(lbl_region);   /* white text + translucent chip bg */
+    apply_chip_style(lbl_region);   /* white text, transparent bg */
     lv_label_set_text(lbl_region, "");
 
     lbl_timestamp = lv_label_create(overlay_bar);
@@ -426,8 +422,8 @@ lv_obj_t *nina_image_display_create(lv_obj_t *parent)
     lbl_moon_next = lv_label_create(page_container);
     lv_obj_set_style_text_font(lbl_moon_next, &lv_font_overpass_27, 0);
     apply_chip_style(lbl_moon_next);
-    /* Stack flush below lbl_moon_age. At 27px the chip is line_height(39)+pad(6) =
-     * 45px tall, so the second row sits at y = 45 (chips touch, no gap). */
+    /* Stack flush below lbl_moon_age. At 27px each label is line_height(39)+pad(6)
+     * = 45px tall, so the second row sits at y = 45 (rows touch, no gap). */
     lv_obj_align(lbl_moon_next, LV_ALIGN_TOP_LEFT, 0, 45);
     lv_label_set_text(lbl_moon_next, "");
     lv_obj_add_flag(lbl_moon_next, LV_OBJ_FLAG_HIDDEN);
@@ -1073,11 +1069,10 @@ void nina_image_display_set_overlay_visible(bool visible)
 
 void nina_image_display_apply_theme(void)
 {
-    /* Re-apply the chip style to every existing caption/corner label so a theme
+    /* Re-apply the label style to every existing caption/corner label so a theme
      * switch recolours them live. apply_chip_style() reads current_theme and,
-     * under Red Night, emits red text on a black chip; non-red themes keep the
-     * historic white-on-black look unchanged. Each label is NULL-guarded so this
-     * is safe before create() or after cleanup(). */
+     * under Red Night, emits red text; non-red themes use white text. Each label
+     * is NULL-guarded so this is safe before create() or after cleanup(). */
     if (lbl_region)    apply_chip_style(lbl_region);
     if (lbl_timestamp) apply_chip_style(lbl_timestamp);
     if (lbl_moon_age)  apply_chip_style(lbl_moon_age);
