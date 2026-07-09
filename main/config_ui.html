@@ -429,6 +429,8 @@
 
     .tab-panel { display: none; animation: fadeIn 0.3s ease; }
     .tab-panel.active { display: block; }
+    /* Inline placeholder shown inside a panel while its fragment downloads. */
+    .tab-loading { text-align: center; padding: 56px 0; color: var(--text-muted); font-size: 0.85rem; }
     @keyframes fadeIn {
       from { opacity: 0; transform: translateY(8px); }
       to { opacity: 1; transform: translateY(0); }
@@ -1434,11 +1436,12 @@
        main/fragment_NAME.html (embedded, served by GET /ui/fragment?tab=NAME)
        and loadedTabs starts empty: every tab, including the default ('nodes',
        or whichever was restored from localStorage), is fetched lazily on
-       first activation. switchTab() already awaits ensureTabLoaded() before
-       marking a panel active (see below), so the initial switchTab() call at
-       boot -- which shows whichever tab was last active -- transparently
-       fetches that tab's fragment first; no separate boot-time special case
-       is needed for the default tab. */
+       first activation. switchTab() (see below) activates the panel
+       immediately with an inline loading placeholder, then awaits
+       ensureTabLoaded() before running the tab's populate/activation hooks,
+       so the initial switchTab() call at boot -- which shows whichever tab
+       was last active -- transparently fetches that tab's fragment first; no
+       separate boot-time special case is needed for the default tab. */
     const TAB_ORDER=['nodes','allsky','clock','spotify','image-display','display','behavior','system','logs','backup','api'];
     const LAZY_TABS=new Set(TAB_ORDER);
     const loadedTabs=new Set(TAB_ORDER.filter(n=>!LAZY_TABS.has(n)));
@@ -1465,16 +1468,44 @@
       }catch(e){
         console.error('Failed to load tab fragment: '+name,e);
       }
+      _queuedTabs.delete(name);
     }
 
     /* Await before showing/using a tab. Chains onto _fragInFlight so a rapid
        double-tap (or programmatic switchTab calls) can never issue two
        fragment fetches concurrently -- the socket budget only tolerates one
        polite serial GET at a time (see CLAUDE.md connection ceiling). */
+    /* Names already sitting in the chain (queued or in flight). Prevents a
+       click on a tab the idle prefetch just enqueued (or a rapid double-tap)
+       from chaining a duplicate fetch of the same fragment; cleared by
+       loadTabFragment() when the attempt finishes so a failed load can be
+       retried by the next click. */
+    const _queuedTabs=new Set();
     function ensureTabLoaded(name){
-      if(loadedTabs.has(name)) return _fragInFlight;
+      if(loadedTabs.has(name)||_queuedTabs.has(name)) return _fragInFlight;
+      _queuedTabs.add(name);
       _fragInFlight=_fragInFlight.then(()=>loadTabFragment(name));
       return _fragInFlight;
+    }
+
+    /* === Idle Tab Prefetch ===
+       After the boot tab has settled, trickle-fetch the remaining fragments
+       one at a time through the same ensureTabLoaded() chain (never in
+       parallel; the serialization comment above still holds). Only ever one
+       prefetch is enqueued at a time, so a user click on an unloaded tab
+       waits behind at most one in-flight fragment. Fragments only -- no API
+       data is prefetched. _prefetchIdx advances past failures so a bad
+       fragment cannot retry-loop. */
+    let _prefetchIdx=0;
+    function prefetchNextTab(){
+      while(_prefetchIdx<TAB_ORDER.length && loadedTabs.has(TAB_ORDER[_prefetchIdx])) _prefetchIdx++;
+      if(_prefetchIdx>=TAB_ORDER.length) return;
+      var name=TAB_ORDER[_prefetchIdx++];
+      ensureTabLoaded(name).then(function(){ setTimeout(prefetchNextTab,300); });
+    }
+    function startTabPrefetch(){
+      if(typeof requestIdleCallback==='function') requestIdleCallback(prefetchNextTab,{timeout:2000});
+      else setTimeout(prefetchNextTab,2000);
     }
 
     /* === Config Fetch Cache ===
@@ -1499,16 +1530,63 @@
     }
     function invalidateConfigCache(){ _cfgCache=null; }
 
-    /* === Tab Navigation === */
+    /* === Short-TTL Status/Version Memo ===
+       Mirrors _cfgCache for the two small read-only GETs that several tabs
+       share (/api/version, /api/status), so e.g. opening Logs then Backup a
+       moment apart reuses one response instead of hitting the device twice.
+       TTL is 4s -- deliberately under the 5s nav-metrics poll interval so
+       every poll tick still fetches fresh data (a TTL equal to the interval
+       would make alternate ticks hit the cache and halve the poll rate).
+       Errors are never cached; concurrent callers share one in-flight fetch. */
+    const _memoTTL=4000;
+    var _memoCache={};
+    var _memoInFlight={};
+    function fetchJsonMemo(url){
+      var hit=_memoCache[url];
+      if(hit && (Date.now()-hit.t)<_memoTTL) return Promise.resolve(hit.data);
+      if(_memoInFlight[url]) return _memoInFlight[url];
+      _memoInFlight[url]=fetch(url).then(function(r){
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        return r.json();
+      }).then(function(data){
+        _memoCache[url]={t:Date.now(),data:data};
+        delete _memoInFlight[url];
+        return data;
+      }).catch(function(e){
+        delete _memoInFlight[url];
+        throw e;
+      });
+      return _memoInFlight[url];
+    }
+
+    /* === Tab Navigation ===
+       Active classes swap immediately on click so the nav never feels dead
+       while a fragment downloads (first visit used to block 200ms-1s with no
+       feedback); an unloaded panel shows an inline placeholder until its
+       fragment arrives. _currentTab tracks the most recent request: if the
+       user clicks elsewhere before a slow fragment resolves, the late
+       fragment still lands in its own (now background) panel via
+       loadTabFragment(), but the per-tab activation side effects below only
+       run for the tab that is still current. */
+    let _currentTab=null;
     async function switchTab(name){
-      await ensureTabLoaded(name);
+      _currentTab=name;
       $$('.tab-panel').forEach(p=>p.classList.remove('active'));
       $$('.tab-btn, .nav-btn').forEach(b=>b.classList.remove('active'));
       var panel=$('tab-'+name);
-      if(panel) panel.classList.add('active');
+      if(panel){
+        panel.classList.add('active');
+        /* Placeholder only when the fragment is genuinely absent; if a load
+           is already queued it will overwrite this on arrival. */
+        if(!loadedTabs.has(name)) panel.innerHTML='<div class="tab-loading">Loading…</div>';
+      }
       $$('[data-tab="'+name+'"]').forEach(b=>b.classList.add('active'));
       setAccent(name);
       try{localStorage.setItem('nina_tab',name);}catch(e){}
+      await ensureTabLoaded(name);
+      /* User moved on while this fragment loaded: skip activation hooks; the
+         current tab's own switchTab() call owns them now. */
+      if(_currentTab!==name) return;
       if(name==='logs'){
         /* Re-enter the currently selected source; refreshes it and (for device)
            resumes auto-refresh. Falls back to direct calls if not yet defined. */
@@ -2292,7 +2370,7 @@
     function populateTab_backup(data){
       if ($('backupCurrentVersion')) $('backupCurrentVersion').textContent = 'v' + (data.config_version || '?');
       if ($('backupFirmwareVersion')) {
-        fetch('/api/version').then(function(r){return r.json()}).then(function(v){
+        fetchJsonMemo('/api/version').then(function(v){
           $('backupFirmwareVersion').textContent = v.git_tag || '--';
         }).catch(function(){});
       }
@@ -2524,7 +2602,7 @@
          the user has necessarily opened System). Every write is guarded;
          populateTab_system() calls this again once the fragment is present
          so the grid still ends up populated. */
-      fetch('/api/version').then(r=>r.json()).then(data=>{
+      fetchJsonMemo('/api/version').then(data=>{
         if($('fw_version')) $('fw_version').textContent=data.version||'--';
         if($('fw_date')) $('fw_date').textContent=(data.date||'--')+' '+(data.time||'');
         if($('fw_idf')) $('fw_idf').textContent=data.idf||'--';
@@ -2822,7 +2900,7 @@
       return '<1m';
     }
     function refreshNavMetrics(){
-      fetch('/api/status').then(function(r){return r.json();}).then(function(d){
+      fetchJsonMemo('/api/status').then(function(d){
         if(!d) return;
         // Temperature (1 decimal, null -> --)
         var t=$('mTemp');
@@ -3844,9 +3922,12 @@
       return !!(p && p.classList.contains('active'));
     }
 
+    /* Bytes of log tail shown in the viewer; Download still serves the full log. */
+    var LOGS_TAIL_BYTES=32768;
+
     /* Hint text per source (no em dashes in user-facing strings). */
     var LOG_HINTS={
-      device:'Console output captured since boot (kept in memory; oldest lines drop off as new ones arrive).',
+      device:'Console output captured since boot (kept in memory; oldest lines drop off as new ones arrive). The viewer shows the most recent output; use Download for the full log.',
       crash:'Saved crash history (survives reboot). Records unexpected restarts and crashes, with details when available. Newest 20 records kept.'
     };
 
@@ -3904,7 +3985,10 @@
       if(btn) btn.disabled=true;
       /* Was the view scrolled to (near) the bottom before we replaced content? */
       var nearBottom = (view.scrollHeight - view.scrollTop - view.clientHeight) < 40;
-      fetch('/api/logs')
+      /* Viewer shows only the newest slice of the buffer; pulling the whole
+         512 KB capture every refresh starved the device's web server. The
+         Download link (see setLogSource) still fetches the full log. */
+      fetch('/api/logs?tail='+LOGS_TAIL_BYTES)
         .then(function(r){
           if(!r.ok) throw new Error('HTTP '+r.status);
           return r.text();
@@ -4410,6 +4494,10 @@
       setTimeout(function(){
         if(!window._updateChecked && typeof checkUpdateBadge==='function'){ window._updateChecked=true; checkUpdateBadge(); }
       }, 1500);
+      /* Quietly fetch the remaining tab fragments one at a time so later tab
+         clicks open instantly. Waits for browser idle time (2s fallback);
+         chains through the same one-at-a-time fragment queue as user clicks. */
+      setTimeout(startTabPrefetch, 2000);
     });
   </script>
 </body>
