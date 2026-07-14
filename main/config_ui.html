@@ -196,7 +196,7 @@
       display: block; font-size: 0.82rem; color: var(--text-muted);
       margin-bottom: 8px; font-weight: 500; letter-spacing: 0.01em;
     }
-    .field-hint { font-size: 0.72rem; color: var(--text-hint); margin-top: 6px; }
+    .field-hint { font-size: 0.82rem; color: var(--text-hint); margin-top: 6px; line-height: 1.5; }
     /* Section help popover (inline expandable, toggled by info icon in card title) */
     .card-title-label { display:inline-flex; align-items:center; min-width:0; }
     .help-btn {
@@ -324,7 +324,7 @@
       backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
       border-bottom: 1px solid rgba(255, 255, 255, 0.06);
       display: flex; align-items: center; justify-content: space-between;
-      padding: 0 24px; height: 60px;
+      padding: 8px 24px; min-height: 60px;
     }
     .top-nav .brand {
       font-size: 0.95rem; font-weight: 700; letter-spacing: -0.02em;
@@ -333,10 +333,37 @@
     .top-nav .brand .logo {
       width: 36px; height: 36px;
     }
-    .top-nav .tabs {
-      display: flex; gap: 4px; background: rgba(255, 255, 255, 0.04);
-      padding: 4px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.04);
+    /* Grouped dropdowns: three trigger pills on one row, each opening a menu */
+    .top-nav .nav-tabs-wrap {
+      display: flex; align-items: center; gap: 6px;
     }
+    .top-nav .nav-group { position: relative; }
+    .top-nav .group-btn {
+      background: none; border: 1px solid rgba(255, 255, 255, 0.06); color: var(--text-hint);
+      cursor: pointer; padding: 7px 16px; border-radius: 8px; font-size: 0.8rem;
+      font-weight: 600; letter-spacing: 0.01em; transition: all 0.25s ease;
+      white-space: nowrap; font-family: inherit;
+    }
+    .top-nav .group-btn::after {
+      content: '\25BE'; margin-left: 6px; font-size: 0.7em; opacity: 0.7;
+    }
+    .top-nav .group-btn:hover { color: #f4f4f5; background: rgba(255, 255, 255, 0.04); }
+    .top-nav .group-btn.active {
+      color: #f4f4f5; background: rgba(var(--accent-rgb), 0.12);
+      border-color: rgba(var(--accent-rgb), 0.3);
+      box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.08);
+    }
+    /* Menu: floats under its trigger, hidden until the group is .open */
+    .top-nav .group-menu {
+      display: none; position: absolute; top: calc(100% + 6px); left: 0;
+      flex-direction: column; gap: 2px; min-width: 160px; z-index: 200;
+      background: rgba(18, 18, 20, 0.98); border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px; padding: 6px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+      backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    }
+    .top-nav .nav-group.open .group-menu { display: flex; }
+    .top-nav .group-menu .tab-btn { text-align: left; width: 100%; }
     .top-nav .tab-btn {
       background: none; border: none; color: var(--text-hint); cursor: pointer;
       padding: 8px 18px; border-radius: 8px; font-size: 0.8rem; font-weight: 500;
@@ -806,7 +833,7 @@
 
     /* === RESPONSIVE === */
     @media (max-width: 768px) {
-      .top-nav .tabs, .top-nav .nav-right { display: none; }
+      .top-nav .nav-tabs-wrap, .top-nav .nav-right { display: none; }
       .bottom-nav { display: block; }
       .content { padding: 16px 16px calc(var(--bottom-nav-height) + var(--save-bar-height) + env(safe-area-inset-bottom, 0px) + 16px); }
       .save-bar { bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom, 0px)); }
@@ -917,20 +944,35 @@
   <!-- ======== TOP NAVIGATION ======== -->
   <nav class="top-nav">
     <div class="brand"><img class="logo" src="/favicon.ico" alt=""> <span id="brandName">NINA Display</span></div>
-    <div class="tabs" id="topTabs">
-      <button class="tab-btn" data-tab="nodes">N.I.N.A.</button>
-      <button class="tab-btn" data-tab="allsky">AllSky</button>
-      <button class="tab-btn" data-tab="json">JSON</button>
-      <button class="tab-btn" data-tab="ha">Home Assistant</button>
-      <button class="tab-btn" data-tab="clock">Clock</button>
-      <button class="tab-btn" data-tab="spotify">Spotify</button>
-      <button class="tab-btn" data-tab="image-display">Image Display</button>
-      <button class="tab-btn" data-tab="display">Display</button>
-      <button class="tab-btn" data-tab="behavior">Behavior</button>
-      <button class="tab-btn" data-tab="system">System</button>
-      <button class="tab-btn" data-tab="logs">Logs</button>
-      <button class="tab-btn" data-tab="backup">Backup</button>
-      <button class="tab-btn" data-tab="api">API</button>
+    <div class="nav-tabs-wrap">
+      <div class="nav-group" data-group="pages">
+        <button class="group-btn" data-group="pages">Pages</button>
+        <div class="group-menu">
+          <button class="tab-btn" data-tab="nodes" data-group="pages">N.I.N.A.</button>
+          <button class="tab-btn" data-tab="allsky" data-group="pages">AllSky</button>
+          <button class="tab-btn" data-tab="json" data-group="pages">JSON</button>
+          <button class="tab-btn" data-tab="ha" data-group="pages">Home Assistant</button>
+          <button class="tab-btn" data-tab="clock" data-group="pages">Clock</button>
+          <button class="tab-btn" data-tab="spotify" data-group="pages">Spotify</button>
+          <button class="tab-btn" data-tab="image-display" data-group="pages">Image Display</button>
+        </div>
+      </div>
+      <div class="nav-group" data-group="device">
+        <button class="group-btn" data-group="device">Device</button>
+        <div class="group-menu">
+          <button class="tab-btn" data-tab="display" data-group="device">Display</button>
+          <button class="tab-btn" data-tab="behavior" data-group="device">Behavior</button>
+          <button class="tab-btn" data-tab="system" data-group="device">System</button>
+        </div>
+      </div>
+      <div class="nav-group" data-group="tools">
+        <button class="group-btn" data-group="tools">Tools</button>
+        <div class="group-menu">
+          <button class="tab-btn" data-tab="logs" data-group="tools">Logs</button>
+          <button class="tab-btn" data-tab="backup" data-group="tools">Backup</button>
+          <button class="tab-btn" data-tab="api" data-group="tools">API</button>
+        </div>
+      </div>
     </div>
     <div class="nav-right">
       <button class="update-pill" id="updatePill" style="display:none" title="Update available - click to install"></button>
@@ -1588,6 +1630,14 @@
        fragment still lands in its own (now background) panel via
        loadTabFragment(), but the per-tab activation side effects below only
        run for the tab that is still current. */
+    /* Grouped dropdowns: map each tab to its owning group so the trigger pill
+       can highlight when one of its tabs is active. */
+    const TAB_GROUP = { nodes:'pages', allsky:'pages', json:'pages', ha:'pages', clock:'pages', spotify:'pages', 'image-display':'pages', display:'device', behavior:'device', system:'device', logs:'tools', backup:'tools', api:'tools' };
+    function highlightGroup(name){
+      $$('.group-btn').forEach(b=>b.classList.toggle('active', b.dataset.group===TAB_GROUP[name]));
+    }
+    function closeGroups(){ $$('.nav-group.open').forEach(g=>g.classList.remove('open')); }
+
     let _currentTab=null;
     async function switchTab(name){
       _currentTab=name;
@@ -1602,6 +1652,8 @@
       }
       $$('[data-tab="'+name+'"]').forEach(b=>b.classList.add('active'));
       setAccent(name);
+      // Highlight the owning group pill for this tab (covers restore, deep clicks)
+      highlightGroup(name);
       try{localStorage.setItem('nina_tab',name);}catch(e){}
       await ensureTabLoaded(name);
       /* User moved on while this fragment loaded: skip activation hooks; the
@@ -1624,6 +1676,17 @@
     $$('.tab-btn, .nav-btn').forEach(btn=>{
       btn.addEventListener('click',()=>switchTab(btn.dataset.tab));
     });
+    // Group trigger toggles its dropdown (closing any other open one); does NOT navigate.
+    $$('.group-btn').forEach(b=>b.addEventListener('click',e=>{
+      e.stopPropagation();
+      var g=b.closest('.nav-group'), wasOpen=g.classList.contains('open');
+      closeGroups();
+      if(!wasOpen) g.classList.add('open');
+    }));
+    // Picking a menu tab closes the dropdown (navigation runs via the .tab-btn binding above).
+    $$('.group-menu .tab-btn').forEach(b=>b.addEventListener('click',closeGroups));
+    // Outside click closes any open dropdown.
+    document.addEventListener('click',e=>{ if(!e.target.closest('.nav-group')) closeGroups(); });
 
     try{
       var saved=localStorage.getItem('nina_tab');
