@@ -21,6 +21,14 @@ static SemaphoreHandle_t s_config_mutex;
 static bool s_config_dirty = false;
 static const char *NVS_NAMESPACE = "app_conf";
 
+/* ── Tiles-config caches (v52 config split) ──
+ * json_tiles_config / ha_tiles_config were removed from app_config_t and moved
+ * to dedicated NVS string keys, each mirrored in a fixed 6144-byte PSRAM buffer
+ * allocated once and NEVER freed/realloc'd (see accessor contract in the .h). */
+#define TILES_CACHE_BYTES 6144
+static char *s_json_tiles_cache = NULL;   /* PSRAM, allocated once, never freed */
+static char *s_ha_tiles_cache   = NULL;   /* PSRAM, allocated once, never freed */
+
 // ── Cached parsed JSON trees for hot-path lookups ──
 // Invalidated on config save. NULL = needs re-parse on next access.
 static cJSON *s_filter_colors_cache[MAX_NINA_INSTANCES] = {NULL};
@@ -46,6 +54,85 @@ static void invalidate_json_caches(void) {
             s_hfr_thresholds_cache[i] = NULL;
         }
     }
+}
+
+/* Allocate the two tiles caches once. Alloc-guarded so a factory-reset re-init
+ * (which calls app_config_init again) neither leaks nor double-allocs — the
+ * buffers persist across the erase; only their contents reset to "". */
+static void tiles_caches_alloc(void) {
+    if (!s_json_tiles_cache) {
+        s_json_tiles_cache = heap_caps_malloc(TILES_CACHE_BYTES, MALLOC_CAP_SPIRAM);
+    }
+    if (!s_ha_tiles_cache) {
+        s_ha_tiles_cache = heap_caps_malloc(TILES_CACHE_BYTES, MALLOC_CAP_SPIRAM);
+    }
+    if (s_json_tiles_cache) {
+        s_json_tiles_cache[0] = '\0';
+    }
+    if (s_ha_tiles_cache) {
+        s_ha_tiles_cache[0] = '\0';
+    }
+    /* On alloc failure the pointer stays NULL; getters return "". */
+}
+
+/* Load one NVS string key into its fixed cache buffer; missing key -> "".
+ * Handle must be open. Buffer is always NUL-terminated on return. */
+static void tiles_cache_load_key(nvs_handle_t h, const char *key, char *cache) {
+    if (!cache) {
+        return;
+    }
+    size_t len = TILES_CACHE_BYTES;
+    esp_err_t e = nvs_get_str(h, key, cache, &len);
+    if (e != ESP_OK) {
+        cache[0] = '\0';
+    }
+    cache[TILES_CACHE_BYTES - 1] = '\0';   /* defensive */
+}
+
+const char *app_config_get_json_tiles(void) {
+    return s_json_tiles_cache ? s_json_tiles_cache : "";
+}
+
+const char *app_config_get_ha_tiles(void) {
+    return s_ha_tiles_cache ? s_ha_tiles_cache : "";
+}
+
+/* Shared setter: validate length, update cache + NVS key under the config mutex.
+ * Read is lock-free by contract; the write is serialized against app_config_save
+ * (same mutex) so shared state is never torn between a save and a tiles-set. */
+static esp_err_t tiles_set(const char *key, char **cache, const char *s) {
+    if (!s) {
+        s = "";
+    }
+    xSemaphoreTake(s_config_mutex, portMAX_DELAY);
+    if (!*cache) {   /* first-ever set before init alloc, or a prior OOM */
+        *cache = heap_caps_malloc(TILES_CACHE_BYTES, MALLOC_CAP_SPIRAM);
+        if (!*cache) {
+            xSemaphoreGive(s_config_mutex);
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    strlcpy(*cache, s, TILES_CACHE_BYTES);   /* clamps to 6143 + NUL, always terminated */
+
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (err == ESP_OK) {
+        err = nvs_set_str(h, key, *cache);
+        if (err == ESP_OK) {
+            nvs_commit(h);
+        }
+        nvs_close(h);
+    }
+    xSemaphoreGive(s_config_mutex);
+    return err;   /* cache updated regardless; a failed NVS write is logged by caller */
+}
+
+esp_err_t app_config_set_json_tiles(const char *s) {
+    return tiles_set("json_tiles", &s_json_tiles_cache, s);
+}
+
+esp_err_t app_config_set_ha_tiles(const char *s) {
+    return tiles_set("ha_tiles", &s_ha_tiles_cache, s);
 }
 
 // Default RMS thresholds: good <= 0.5", ok <= 1.0", bad > 1.0" - DIMMED for Night Vision
@@ -718,6 +805,18 @@ static void set_defaults(app_config_t *cfg) {
     cfg->allsky_field_config[sizeof(cfg->allsky_field_config) - 1] = '\0';
     strncpy(cfg->allsky_thresholds, DEFAULT_ALLSKY_THRESHOLDS, sizeof(cfg->allsky_thresholds) - 1);
     cfg->allsky_thresholds[sizeof(cfg->allsky_thresholds) - 1] = '\0';
+
+    // JSON Display defaults (tiles now live in NVS key "json_tiles", see accessors)
+    cfg->json_enabled = false;
+    cfg->json_url[0] = '\0';
+    cfg->json_auth_header[0] = '\0';
+    cfg->json_update_interval_s = 30;
+
+    // Home Assistant defaults (tiles now live in NVS key "ha_tiles", see accessors)
+    cfg->ha_enabled = false;
+    cfg->ha_base_url[0] = '\0';
+    cfg->ha_token[0] = '\0';
+    cfg->ha_update_interval_s = 30;
 
     // Spotify client ID: secret-like sentinel, not table-driven
     cfg->spotify_client_id[0] = '\0';
@@ -2186,6 +2285,97 @@ static void migrate_from_v48(const void *raw, size_t raw_size, app_config_t *cfg
     ESP_LOGI(TAG, "Migrated config from v48 to v%d", APP_CONFIG_VERSION);
 }
 
+/* --- v49 → v50 migration: appends the JSON Display fields. Layout ahead is
+ *     unchanged; the new fields are additive and default to disabled. --- */
+static void migrate_from_v49(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v49_t) ? raw_size : sizeof(app_config_v49_t);
+    memcpy(cfg, raw, copy);
+
+    /* JSON scalar fields are appended past the v49 snapshot, so memcpy(copy)
+     * never touches them. set_defaults() already applied them (json_enabled=false,
+     * url/auth empty, interval=30); set them explicitly for documentation. The
+     * tiles blob no longer lives in the struct — its cache is "" (v49 had none). */
+    cfg->json_enabled = false;
+    cfg->json_url[0] = '\0';
+    cfg->json_auth_header[0] = '\0';
+    cfg->json_update_interval_s = 30;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v49 to v%d", APP_CONFIG_VERSION);
+}
+
+/* --- v50 → v52 migration. v50 predates HA and has json_tiles_config as its
+ *     LAST field. The v52 struct removed json_tiles_config mid-struct, so a
+ *     blind memcpy of the v50 blob would overflow the smaller dest and land the
+ *     6144-byte json blob on top of the HA scalars. Copy the shared prefix only,
+ *     then lift json_tiles_config out to the "json_tiles" NVS key/cache. --- */
+static void migrate_from_v50(const void *raw, size_t raw_size,
+                             app_config_t *cfg, nvs_handle_t handle)
+{
+    const app_config_v50_t *old = (const app_config_v50_t *)raw;
+    set_defaults(cfg);   /* also sets ha_* defaults (disabled/empty/30) */
+
+    /* Copy shared prefix [config_version .. json_update_interval_s]. */
+    memcpy(cfg, raw, offsetof(app_config_t, ha_enabled));
+    /* HA scalars keep their set_defaults() values (v50 had no HA). */
+
+    /* json tiles -> cache + key; ha tiles -> "" (none in v50). */
+    if (s_json_tiles_cache) {
+        memcpy(s_json_tiles_cache, old->json_tiles_config, TILES_CACHE_BYTES);
+        s_json_tiles_cache[TILES_CACHE_BYTES - 1] = '\0';
+        nvs_set_str(handle, "json_tiles", s_json_tiles_cache);
+    }
+    if (s_ha_tiles_cache) {
+        s_ha_tiles_cache[0] = '\0';
+        nvs_set_str(handle, "ha_tiles", "");
+    }
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v50 to v%d", APP_CONFIG_VERSION);
+    (void)raw_size;
+}
+
+/* --- v51 → v52 migration: split the two inline 6144-byte tiles blobs out to
+ *     the "json_tiles"/"ha_tiles" NVS keys. json_tiles_config sat mid-struct
+ *     (ahead of the HA scalars), so a blind memcpy would misplace the HA
+ *     scalars and overflow the smaller dest. Copy the shared prefix verbatim,
+ *     copy the HA scalars by name (their offsets shifted), lift both tiles. --- */
+static void migrate_from_v51(const void *raw, size_t raw_size,
+                             app_config_t *cfg, nvs_handle_t handle)
+{
+    const app_config_v51_t *old = (const app_config_v51_t *)raw;
+    set_defaults(cfg);
+
+    /* Shared prefix [config_version .. json_update_interval_s] is byte-identical
+     * to the old blob (asserted in the header). Copy it verbatim. */
+    memcpy(cfg, raw, offsetof(app_config_t, ha_enabled));
+
+    /* HA scalars: copy by name (their offsets differ between old blob and new
+     * struct because json_tiles_config was removed ahead of them). */
+    cfg->ha_enabled = old->ha_enabled;
+    memcpy(cfg->ha_base_url, old->ha_base_url, sizeof(cfg->ha_base_url));
+    memcpy(cfg->ha_token, old->ha_token, sizeof(cfg->ha_token));
+    cfg->ha_update_interval_s = old->ha_update_interval_s;
+
+    /* Tiles -> caches + NVS keys. Force-terminate (raw blob may lack a NUL). */
+    if (s_json_tiles_cache) {
+        memcpy(s_json_tiles_cache, old->json_tiles_config, TILES_CACHE_BYTES);
+        s_json_tiles_cache[TILES_CACHE_BYTES - 1] = '\0';
+        nvs_set_str(handle, "json_tiles", s_json_tiles_cache);
+    }
+    if (s_ha_tiles_cache) {
+        memcpy(s_ha_tiles_cache, old->ha_tiles_config, TILES_CACHE_BYTES);
+        s_ha_tiles_cache[TILES_CACHE_BYTES - 1] = '\0';
+        nvs_set_str(handle, "ha_tiles", s_ha_tiles_cache);
+    }
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v51 to v%d", APP_CONFIG_VERSION);
+    (void)raw_size;
+}
+
 static void migrate_from_v36(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
@@ -2766,6 +2956,12 @@ static bool validate_config(app_config_t *cfg) {
     cfg->admin_password[sizeof(cfg->admin_password) - 1] = '\0';
     cfg->goes_region[sizeof(cfg->goes_region) - 1] = '\0';
     cfg->custom_image_url[sizeof(cfg->custom_image_url) - 1] = '\0';
+    cfg->json_url[sizeof(cfg->json_url) - 1] = '\0';
+    cfg->json_auth_header[sizeof(cfg->json_auth_header) - 1] = '\0';
+    /* json/ha tiles no longer live in the struct — NUL-termination is handled by
+     * the tiles cache setter (strlcpy) and loader (tiles_cache_load_key). */
+    cfg->ha_base_url[sizeof(cfg->ha_base_url) - 1] = '\0';
+    cfg->ha_token[sizeof(cfg->ha_token) - 1] = '\0';
 
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         if (cfg->rms_thresholds[i][0] == '\0') {
@@ -2854,11 +3050,32 @@ static bool validate_config(app_config_t *cfg) {
     cfg->home_page_lock = cfg->home_page_lock ? true : false;
     /* spotify_overlay_timeout_s is uint8_t (0-255); 0 means never hide, all values valid */
 
+    /* JSON Display: clamp poll interval; canonicalize bool. (Char arrays already
+     * NUL-terminated above; tiles config lives in NVS key "json_tiles".) */
+    if (cfg->json_update_interval_s < 5 || cfg->json_update_interval_s > 300) {
+        cfg->json_update_interval_s = 30;
+        fixed = true;
+    }
+    cfg->json_enabled = cfg->json_enabled ? true : false;
+
+    /* Home Assistant: clamp poll interval; canonicalize bool. (Char arrays
+     * already NUL-terminated above; tiles config lives in NVS key "ha_tiles".) */
+    if (cfg->ha_update_interval_s < 5 || cfg->ha_update_interval_s > 300) {
+        cfg->ha_update_interval_s = 30;
+        fixed = true;
+    }
+    cfg->ha_enabled = cfg->ha_enabled ? true : false;
+
     return fixed;
 }
 
 void app_config_init(void) {
     s_config_mutex = xSemaphoreCreateMutex();
+    /* Allocate the tiles caches early so getters are safe ("") on every
+     * early-return path below (NVS-open fail, fresh install). Alloc-guarded, so
+     * a factory-reset re-init reuses the existing buffers without leaking. */
+    tiles_caches_alloc();
+    bool tiles_loaded = false;   /* migrations that source inline tiles set this true */
     nvs_handle_t handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
     if (err != ESP_OK) {
@@ -2908,6 +3125,32 @@ void app_config_init(void) {
             nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
             nvs_commit(handle);
         }
+        /* tiles_loaded stays false -> tail loads "json_tiles"/"ha_tiles" keys */
+    } else if (version_check == 51 && stored_size == sizeof(app_config_v51_t)) {
+        /* v51 → v52: split the two inline tiles blobs out to NVS keys. Guard on
+         * exact v51 size so a truncated blob falls through to forward/unknown
+         * rather than reading the old HA and tiles fields past the buffer. */
+        migrate_from_v51(raw, stored_size, &s_config, handle);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+        tiles_loaded = true;
+    } else if (version_check == 50 && stored_size == sizeof(app_config_v50_t)) {
+        /* v50 → v52: split json tiles out to its NVS key; HA fields defaulted.
+         * Guard on exact v50 size (parity with the v51 branch) so a truncated
+         * blob does not read old->json_tiles_config past the raw buffer; it
+         * falls through to the forward/unknown-version path instead. */
+        migrate_from_v50(raw, stored_size, &s_config, handle);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+        tiles_loaded = true;
+    } else if (version_check == 49) {
+        /* v49 → v50: added JSON Display fields */
+        migrate_from_v49(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 48) {
         /* v48 → v49: added home_page_lock (always show the Home Page) */
         migrate_from_v48(raw, stored_size, &s_config);
@@ -3060,204 +3303,158 @@ void app_config_init(void) {
         nvs_commit(handle);
     } else if (version_check == 23 && stored_size >= sizeof(app_config_v23_t)) {
         /* Version 23 blob — migrate to v24 */
-        app_config_v23_t old;
-        memcpy(&old, raw, sizeof(app_config_v23_t));
-        migrate_from_v23(&old, &s_config);
+        migrate_from_v23((const app_config_v23_t *)raw, &s_config);
         validate_config(&s_config);
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
     } else if (version_check == 22 && stored_size >= sizeof(app_config_v22_t)) {
         /* Version 22 blob — migrate to v23 */
-        app_config_v22_t old;
-        memcpy(&old, raw, sizeof(app_config_v22_t));
-        migrate_from_v22(&old, &s_config);
+        migrate_from_v22((const app_config_v22_t *)raw, &s_config);
         validate_config(&s_config);
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
     } else if (version_check == 21 && stored_size >= sizeof(app_config_v21_t)) {
         /* Version 21 blob — migrate to v23 */
-        app_config_v21_t old;
-        memcpy(&old, raw, sizeof(app_config_v21_t));
-        migrate_from_v21(&old, &s_config);
+        migrate_from_v21((const app_config_v21_t *)raw, &s_config);
         validate_config(&s_config);
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
     } else if (version_check == 20 && stored_size >= sizeof(app_config_v20_t)) {
         /* Version 20 blob — migrate to v23 */
-        app_config_v20_t old;
-        memcpy(&old, raw, sizeof(app_config_v20_t));
-        migrate_from_v20(&old, &s_config);
+        migrate_from_v20((const app_config_v20_t *)raw, &s_config);
         validate_config(&s_config);
 
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
     } else if (version_check == 19 && stored_size >= sizeof(app_config_v19_t)) {
         /* Version 19 blob — migrate to v21 */
-        app_config_v19_t old;
-        memcpy(&old, raw, sizeof(app_config_v19_t));
-        migrate_from_v19(&old, &s_config);
+        migrate_from_v19((const app_config_v19_t *)raw, &s_config);
         validate_config(&s_config);
 
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
     } else if (version_check == 18 && stored_size >= sizeof(app_config_v18_t)) {
         /* Version 18 blob — migrate to v20 */
-        app_config_v18_t old;
-        memcpy(&old, raw, sizeof(app_config_v18_t));
-        migrate_from_v18(&old, &s_config);
+        migrate_from_v18((const app_config_v18_t *)raw, &s_config);
         validate_config(&s_config);
 
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
     } else if (version_check == 17 && stored_size >= sizeof(app_config_v17_t)) {
         /* Version 17 blob — migrate to v20 */
-        app_config_v17_t old;
-        memcpy(&old, raw, sizeof(app_config_v17_t));
-        migrate_from_v17(&old, &s_config);
+        migrate_from_v17((const app_config_v17_t *)raw, &s_config);
         validate_config(&s_config);
 
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
     } else if (version_check == 16 && stored_size >= sizeof(app_config_v16_t)) {
         /* Version 16 blob — migrate to v17 */
-        app_config_v16_t old;
-        memcpy(&old, raw, sizeof(app_config_v16_t));
-        migrate_from_v16(&old, &s_config);
+        migrate_from_v16((const app_config_v16_t *)raw, &s_config);
         validate_config(&s_config);
 
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
     } else if (version_check == 15 && stored_size >= sizeof(app_config_v15_t)) {
         /* Version 15 blob — migrate to v17 */
-        app_config_v15_t old;
-        memcpy(&old, raw, sizeof(app_config_v15_t));
-        migrate_from_v15(&old, &s_config);
+        migrate_from_v15((const app_config_v15_t *)raw, &s_config);
         validate_config(&s_config);
 
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
     } else if (version_check == 14 && stored_size >= sizeof(app_config_v14_t)) {
         /* Version 14 blob — migrate to v16 */
-        app_config_v14_t old;
-        memcpy(&old, raw, sizeof(app_config_v14_t));
-        migrate_from_v14(&old, &s_config);
+        migrate_from_v14((const app_config_v14_t *)raw, &s_config);
         validate_config(&s_config);
 
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
     } else if (version_check == 13 && stored_size >= sizeof(app_config_v13_t)) {
         /* Version 13 blob — migrate to v15 */
-        app_config_v13_t old;
-        memcpy(&old, raw, sizeof(app_config_v13_t));
-        migrate_from_v13(&old, &s_config);
+        migrate_from_v13((const app_config_v13_t *)raw, &s_config);
         validate_config(&s_config);
 
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
     } else if (version_check == 12 && stored_size >= sizeof(app_config_v12_t)) {
         /* Version 12 blob — migrate to v14 */
-        app_config_v12_t old;
-        memcpy(&old, raw, sizeof(app_config_v12_t));
-        migrate_from_v12(&old, &s_config);
+        migrate_from_v12((const app_config_v12_t *)raw, &s_config);
         validate_config(&s_config);
 
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
     } else if (version_check == 11 && stored_size >= sizeof(app_config_v11_t)) {
         /* Version 11 blob — migrate to v12 */
-        app_config_v11_t old;
-        memcpy(&old, raw, sizeof(app_config_v11_t));
-        migrate_from_v11(&old, &s_config);
+        migrate_from_v11((const app_config_v11_t *)raw, &s_config);
         validate_config(&s_config);
 
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
     } else if (version_check == 10 && stored_size >= sizeof(app_config_v10_t)) {
         /* Version 10 blob — migrate to v11 */
-        app_config_v10_t old;
-        memcpy(&old, raw, sizeof(app_config_v10_t));
-        migrate_from_v10(&old, &s_config);
+        migrate_from_v10((const app_config_v10_t *)raw, &s_config);
         validate_config(&s_config);
 
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
     } else if (version_check == 9 && stored_size >= sizeof(app_config_v9_t)) {
         /* Version 9 blob — migrate to v10 */
-        app_config_v9_t old;
-        memcpy(&old, raw, sizeof(app_config_v9_t));
-        migrate_from_v9(&old, &s_config);
+        migrate_from_v9((const app_config_v9_t *)raw, &s_config);
         validate_config(&s_config);
 
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
     } else if (version_check == 8 && stored_size >= sizeof(app_config_v8_t)) {
         /* Version 8 blob — migrate to v9 */
-        app_config_v8_t old;
-        memcpy(&old, raw, sizeof(app_config_v8_t));
-        migrate_from_v8(&old, &s_config);
+        migrate_from_v8((const app_config_v8_t *)raw, &s_config);
         validate_config(&s_config);
 
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
     } else if (version_check == 7 && stored_size >= sizeof(app_config_v7_t)) {
         /* Version 7 blob — migrate to v8 */
-        app_config_v7_t old;
-        memcpy(&old, raw, sizeof(app_config_v7_t));
-        migrate_from_v7(&old, &s_config);
+        migrate_from_v7((const app_config_v7_t *)raw, &s_config);
         validate_config(&s_config);
 
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
     } else if (version_check == 6 && stored_size >= sizeof(app_config_v6_t)) {
         /* Version 6 blob — migrate to v7 */
-        app_config_v6_t old;
-        memcpy(&old, raw, sizeof(app_config_v6_t));
-        migrate_from_v6(&old, &s_config);
+        migrate_from_v6((const app_config_v6_t *)raw, &s_config);
         validate_config(&s_config);
 
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
     } else if (version_check == 5 && stored_size >= sizeof(app_config_v5_t)) {
         /* Version 5 blob — migrate to v6 */
-        app_config_v5_t old;
-        memcpy(&old, raw, sizeof(app_config_v5_t));
-        migrate_from_v5(&old, &s_config);
+        migrate_from_v5((const app_config_v5_t *)raw, &s_config);
         validate_config(&s_config);
 
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
     } else if (version_check == 4 && stored_size >= sizeof(app_config_v4_t)) {
         /* Version 4 blob — migrate to v5 */
-        app_config_v4_t old;
-        memcpy(&old, raw, sizeof(app_config_v4_t));
-        migrate_from_v4(&old, &s_config);
+        migrate_from_v4((const app_config_v4_t *)raw, &s_config);
         validate_config(&s_config);
 
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
     } else if (version_check == 3 && stored_size >= sizeof(app_config_v3_t)) {
         /* Version 3 blob — migrate to v4 */
-        app_config_v3_t old;
-        memcpy(&old, raw, sizeof(app_config_v3_t));
-        migrate_from_v3(&old, &s_config);
+        migrate_from_v3((const app_config_v3_t *)raw, &s_config);
         validate_config(&s_config);
 
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
     } else if (version_check == 2 && stored_size >= sizeof(app_config_v2_t)) {
         /* Version 2 blob — migrate to v3 */
-        app_config_v2_t old;
-        memcpy(&old, raw, sizeof(app_config_v2_t));
-        migrate_from_v2(&old, &s_config);
+        migrate_from_v2((const app_config_v2_t *)raw, &s_config);
         validate_config(&s_config);
 
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
     } else if (version_check == 1 && stored_size >= sizeof(app_config_v1_t)) {
         /* Version 1 blob — migrate to v2 */
-        app_config_v1_t old;
-        memcpy(&old, raw, sizeof(app_config_v1_t));
-        migrate_from_v1(&old, &s_config);
+        migrate_from_v1((const app_config_v1_t *)raw, &s_config);
         validate_config(&s_config);
 
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
@@ -3270,9 +3467,7 @@ void app_config_init(void) {
          * future/unknown version (e.g. a firmware downgrade), not a v0 blob:
          * let it fall through to the forward-tolerant branch below instead of
          * mis-migrating it as v0. */
-        app_config_v0_t old;
-        memcpy(&old, raw, sizeof(app_config_v0_t));
-        migrate_from_v0(&old, &s_config);
+        migrate_from_v0((const app_config_v0_t *)raw, &s_config);
         validate_config(&s_config);
 
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
@@ -3303,6 +3498,14 @@ void app_config_init(void) {
         set_defaults(&s_config);
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
+    }
+
+    /* Load the tiles caches from their NVS keys unless a migration branch above
+     * already populated them (v50/v51). Missing keys -> "" (fresh device, or a
+     * device from v49-and-earlier that never had tiles). */
+    if (!tiles_loaded) {
+        tiles_cache_load_key(handle, "json_tiles", s_json_tiles_cache);
+        tiles_cache_load_key(handle, "ha_tiles",   s_ha_tiles_cache);
     }
 
     free(raw);
@@ -3362,11 +3565,13 @@ void app_config_save(const app_config_t *config) {
     xSemaphoreGive(s_config_mutex);
 }
 
-app_config_t app_config_get_snapshot(void) {
+void app_config_get_snapshot_into(app_config_t *dst) {
+    if (dst == NULL) {
+        return;
+    }
     xSemaphoreTake(s_config_mutex, portMAX_DELAY);
-    app_config_t copy = s_config;
+    memcpy(dst, &s_config, sizeof(*dst));
     xSemaphoreGive(s_config_mutex);
-    return copy;
 }
 
 void app_config_apply(const app_config_t *config) {
@@ -3408,6 +3613,17 @@ esp_err_t app_config_revert(void) {
     invalidate_json_caches();
     memcpy(&s_config, tmp, sizeof(app_config_t));
     s_config_dirty = false;
+    /* Reload tiles caches from NVS (revert to last-persisted tiles). The tiles
+     * setter writes the NVS key immediately on POST, so the keys hold the
+     * last-saved values; reload so cache == NVS after a revert. */
+    {
+        nvs_handle_t h;
+        if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) == ESP_OK) {
+            tiles_cache_load_key(h, "json_tiles", s_json_tiles_cache);
+            tiles_cache_load_key(h, "ha_tiles",   s_ha_tiles_cache);
+            nvs_close(h);
+        }
+    }
     xSemaphoreGive(s_config_mutex);
     free(tmp);
 
@@ -3423,7 +3639,10 @@ void app_config_factory_reset(void) {
     invalidate_json_caches();
     ESP_LOGW(TAG, "Performing factory reset - erasing NVS partition");
 
-    // Erase the entire NVS partition
+    /* Erase the entire NVS partition. This also removes the tiles keys
+     * "json_tiles"/"ha_tiles" along with "config"; the app_config_init() below
+     * re-runs tiles_caches_alloc() (alloc-guarded: reuses buffers, resets to "")
+     * and finds no keys, so both caches come up empty. */
     esp_err_t err = nvs_flash_erase();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to erase NVS: %s", esp_err_to_name(err));

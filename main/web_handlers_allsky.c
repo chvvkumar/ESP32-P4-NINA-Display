@@ -56,7 +56,7 @@ esp_err_t allsky_proxy_get_handler(httpd_req_t *req)
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
-    *cfg = app_config_get_snapshot();
+    app_config_get_snapshot_into(cfg);
     char allsky_hostname[sizeof(cfg->allsky_hostname)];
     strlcpy(allsky_hostname, cfg->allsky_hostname, sizeof(allsky_hostname));
     heap_caps_free(cfg);

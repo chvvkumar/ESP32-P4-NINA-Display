@@ -46,7 +46,14 @@ extern "C" {
 #define ARP_ORDER_CAPACITY 16   /* size of auto_rotate_order2[] */
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 49
+#define APP_CONFIG_VERSION 52
+
+/* Tiles-config blobs no longer live inside app_config_t (v52 split them out to
+ * dedicated NVS string keys "json_tiles"/"ha_tiles"). These bound the value
+ * length; the web length-guards use them since they can no longer sizeof() a
+ * removed struct field. Value length includes the terminating NUL. */
+#define JSON_TILES_CONFIG_MAX 6144   /* max bytes (incl NUL) for the "json_tiles" NVS value */
+#define HA_TILES_CONFIG_MAX   6144   /* max bytes (incl NUL) for the "ha_tiles"  NVS value */
 
 #define WIDGET_STYLE_COUNT 13
 
@@ -263,6 +270,24 @@ typedef struct {
 
     // Added after v48 — must stay at end to preserve NVS binary compatibility
     bool     home_page_lock; /* v49: hold the Home Page regardless of connection state */
+
+    // Added after v49 — must stay at end to preserve NVS binary compatibility
+    // JSON Display page
+    bool     json_enabled;             // enable JSON Display page + poll task (default false)
+    char     json_url[256];            // JSON source URL (http/https)
+    char     json_auth_header[256];    // optional "Name: value" header ("" = none)
+    uint16_t json_update_interval_s;   // poll interval 5-300s (default 30)
+    /* json_tiles_config REMOVED in v52 — now NVS key "json_tiles"
+     * (see app_config_get_json_tiles / app_config_set_json_tiles). */
+
+    // Added after v50 — must stay at end to preserve NVS binary compatibility
+    // Home Assistant page
+    bool     ha_enabled;               // enable HA page + poll task (default false)
+    char     ha_base_url[256];         // scheme+host+port, no path (http/https)
+    char     ha_token[256];            // RAW long-lived token (device wraps as Bearer)
+    uint16_t ha_update_interval_s;     // poll interval 5-300s (default 30)
+    /* ha_tiles_config REMOVED in v52 — now NVS key "ha_tiles"
+     * (see app_config_get_ha_tiles / app_config_set_ha_tiles). */
 } app_config_t;
 
 /* ── Version 43 config struct — used only for NVS migration to v44 ────── */
@@ -969,6 +994,400 @@ _Static_assert(offsetof(app_config_t, home_page_lock) ==
                    offsetof(app_config_v48_t, custom_hflip) +
                        sizeof(((app_config_v48_t *)0)->custom_hflip),
                "app_config_v48_t snapshot drifted from app_config_t layout");
+
+/* ── Version 49 config struct — used only for NVS migration to v50 ────── */
+/* Byte-identical to app_config_t minus the trailing JSON Display fields.   */
+/* Verbatim copy of the v48 struct body PLUS the trailing home_page_lock.   */
+typedef struct {
+    uint32_t config_version;
+    char api_url[3][128];
+    char ntp_server[64];
+    char tz_string[64];
+    char filter_colors[3][512];
+    char rms_thresholds[3][256];
+    char hfr_thresholds[3][256];
+    int theme_index;
+    int brightness;
+    int color_brightness;
+    bool mqtt_enabled;
+    char mqtt_broker_url[128];
+    char mqtt_username[64];
+    char mqtt_password[64];
+    char mqtt_topic_prefix[64];
+    uint16_t mqtt_port;
+    int8_t   active_page_override;
+    bool     auto_rotate_enabled;
+    uint16_t auto_rotate_interval_s;
+    uint8_t  auto_rotate_effect;
+    bool     auto_rotate_skip_disconnected;
+    uint8_t  auto_rotate_pages;
+    uint8_t  update_rate_s;
+    uint8_t  graph_update_interval_s;
+    uint8_t  connection_timeout_s;
+    uint8_t  toast_duration_s;
+    bool     debug_mode;
+    bool     instance_enabled[3];
+    bool     screen_sleep_enabled;
+    uint16_t screen_sleep_timeout_s;
+    bool     alert_flash_enabled;
+    uint8_t  idle_poll_interval_s;
+    bool     wifi_power_save;
+    uint8_t  widget_style;
+    uint8_t  auto_update_check;
+    uint8_t  update_channel;
+    bool     deep_sleep_enabled;
+    uint32_t deep_sleep_wake_timer_s;
+    bool     deep_sleep_on_idle;
+    uint8_t  screen_rotation;
+    char     hostname[32];
+    char     allsky_hostname[128];
+    uint16_t allsky_update_interval_s;
+    float    allsky_dew_offset;
+    char     allsky_field_config[1536];
+    char     allsky_thresholds[1024];
+    bool     allsky_enabled;
+    bool     demo_mode;
+    bool     spotify_enabled;
+    char     spotify_client_id[64];
+    uint16_t spotify_poll_interval_ms;
+    bool     spotify_show_progress_bar;
+    uint8_t  spotify_overlay_timeout_s;
+    bool     spotify_minimal_mode;
+    bool     spotify_scroll_text;
+    wifi_network_t wifi_networks[3];
+    bool     spotify_overlay_visible;
+    uint8_t  auto_rotate_order[8];
+    uint8_t  toast_aggregation_window_s;
+    uint32_t toast_notify_mask;
+    bool     toast_instance_muted[3];
+    uint8_t  weather_provider;
+    char     weather_api_key[64];
+    float    weather_lat;
+    float    weather_lon;
+    char     weather_location_name[64];
+    uint16_t weather_poll_interval_s;
+    uint8_t  weather_units;
+    uint8_t  weather_time_format;
+    bool     idle_page_override_enabled;
+    int8_t   idle_page_override_target;
+    bool     idle_page_persistent;
+    bool     idle_indicator_enabled;
+    char     admin_password[33];
+    bool     auth_enabled;
+    bool     image_display_enabled;
+    bool     image_display_show_overlay;
+    char     goes_region[16];
+    uint16_t goes_update_interval_s;
+    uint8_t  image_display_source;
+    uint8_t  moon_bg_style;
+    float    moon_lat;
+    float    moon_lon;
+    uint8_t  solar_band;
+    bool     image_display_crop;
+    uint8_t  moon_drag_light_mode;
+    uint8_t  moon_flip_u;
+    uint8_t  moon_flip_v;
+    float    moon_roll_offset;
+    float    moon_yaw_offset;
+    float    moon_pitch_offset;
+    uint8_t  moon_north_up;
+    uint8_t  moon_spin_mode;
+    uint8_t  moon_spin_return_s;
+    uint8_t  crash_log_retention_days;
+    uint8_t  auto_rotate_pages_hi;
+    uint8_t  auto_rotate_order_ext;
+    uint8_t  goes_orientation;
+    uint8_t  solar_orientation;
+    uint16_t nav_grace_s;
+    char     custom_image_url[256];
+    uint8_t  custom_orientation;
+    uint16_t custom_update_interval_s;
+    uint8_t  auto_rotate_order2[16];
+    uint8_t  goes_vflip;
+    uint8_t  goes_hflip;
+    uint8_t  solar_vflip;
+    uint8_t  solar_hflip;
+    uint8_t  custom_vflip;
+    uint8_t  custom_hflip;
+    bool     home_page_lock;
+} app_config_v49_t;
+
+/* json_enabled (bool, align 1) appends directly after home_page_lock (bool,
+ * align 1) with no padding; compare against end of home_page_lock. */
+_Static_assert(offsetof(app_config_t, json_enabled) ==
+                   offsetof(app_config_v49_t, home_page_lock) +
+                       sizeof(((app_config_v49_t *)0)->home_page_lock),
+               "app_config_v49_t snapshot drifted from app_config_t layout");
+
+/* ── Version 50 config struct — used only for NVS migration to v51 ────── */
+/* Byte-identical to app_config_t minus the trailing Home Assistant fields. */
+/* Verbatim copy of the v49 struct body PLUS the trailing JSON Display     */
+/* fields (json_enabled/json_url/json_auth_header/json_update_interval_s/   */
+/* json_tiles_config).                                                      */
+typedef struct {
+    uint32_t config_version;
+    char api_url[3][128];
+    char ntp_server[64];
+    char tz_string[64];
+    char filter_colors[3][512];
+    char rms_thresholds[3][256];
+    char hfr_thresholds[3][256];
+    int theme_index;
+    int brightness;
+    int color_brightness;
+    bool mqtt_enabled;
+    char mqtt_broker_url[128];
+    char mqtt_username[64];
+    char mqtt_password[64];
+    char mqtt_topic_prefix[64];
+    uint16_t mqtt_port;
+    int8_t   active_page_override;
+    bool     auto_rotate_enabled;
+    uint16_t auto_rotate_interval_s;
+    uint8_t  auto_rotate_effect;
+    bool     auto_rotate_skip_disconnected;
+    uint8_t  auto_rotate_pages;
+    uint8_t  update_rate_s;
+    uint8_t  graph_update_interval_s;
+    uint8_t  connection_timeout_s;
+    uint8_t  toast_duration_s;
+    bool     debug_mode;
+    bool     instance_enabled[3];
+    bool     screen_sleep_enabled;
+    uint16_t screen_sleep_timeout_s;
+    bool     alert_flash_enabled;
+    uint8_t  idle_poll_interval_s;
+    bool     wifi_power_save;
+    uint8_t  widget_style;
+    uint8_t  auto_update_check;
+    uint8_t  update_channel;
+    bool     deep_sleep_enabled;
+    uint32_t deep_sleep_wake_timer_s;
+    bool     deep_sleep_on_idle;
+    uint8_t  screen_rotation;
+    char     hostname[32];
+    char     allsky_hostname[128];
+    uint16_t allsky_update_interval_s;
+    float    allsky_dew_offset;
+    char     allsky_field_config[1536];
+    char     allsky_thresholds[1024];
+    bool     allsky_enabled;
+    bool     demo_mode;
+    bool     spotify_enabled;
+    char     spotify_client_id[64];
+    uint16_t spotify_poll_interval_ms;
+    bool     spotify_show_progress_bar;
+    uint8_t  spotify_overlay_timeout_s;
+    bool     spotify_minimal_mode;
+    bool     spotify_scroll_text;
+    wifi_network_t wifi_networks[3];
+    bool     spotify_overlay_visible;
+    uint8_t  auto_rotate_order[8];
+    uint8_t  toast_aggregation_window_s;
+    uint32_t toast_notify_mask;
+    bool     toast_instance_muted[3];
+    uint8_t  weather_provider;
+    char     weather_api_key[64];
+    float    weather_lat;
+    float    weather_lon;
+    char     weather_location_name[64];
+    uint16_t weather_poll_interval_s;
+    uint8_t  weather_units;
+    uint8_t  weather_time_format;
+    bool     idle_page_override_enabled;
+    int8_t   idle_page_override_target;
+    bool     idle_page_persistent;
+    bool     idle_indicator_enabled;
+    char     admin_password[33];
+    bool     auth_enabled;
+    bool     image_display_enabled;
+    bool     image_display_show_overlay;
+    char     goes_region[16];
+    uint16_t goes_update_interval_s;
+    uint8_t  image_display_source;
+    uint8_t  moon_bg_style;
+    float    moon_lat;
+    float    moon_lon;
+    uint8_t  solar_band;
+    bool     image_display_crop;
+    uint8_t  moon_drag_light_mode;
+    uint8_t  moon_flip_u;
+    uint8_t  moon_flip_v;
+    float    moon_roll_offset;
+    float    moon_yaw_offset;
+    float    moon_pitch_offset;
+    uint8_t  moon_north_up;
+    uint8_t  moon_spin_mode;
+    uint8_t  moon_spin_return_s;
+    uint8_t  crash_log_retention_days;
+    uint8_t  auto_rotate_pages_hi;
+    uint8_t  auto_rotate_order_ext;
+    uint8_t  goes_orientation;
+    uint8_t  solar_orientation;
+    uint16_t nav_grace_s;
+    char     custom_image_url[256];
+    uint8_t  custom_orientation;
+    uint16_t custom_update_interval_s;
+    uint8_t  auto_rotate_order2[16];
+    uint8_t  goes_vflip;
+    uint8_t  goes_hflip;
+    uint8_t  solar_vflip;
+    uint8_t  solar_hflip;
+    uint8_t  custom_vflip;
+    uint8_t  custom_hflip;
+    bool     home_page_lock;
+    bool     json_enabled;
+    char     json_url[256];
+    char     json_auth_header[256];
+    uint16_t json_update_interval_s;
+    char     json_tiles_config[6144];
+} app_config_v50_t;
+
+/* v52 split json_tiles_config out of app_config_t. The v50 blob still carries
+ * it inline (as its last field), immediately after json_update_interval_s. The
+ * shared prefix [config_version .. json_update_interval_s] is byte-identical
+ * between the old v50 blob and the new v52 struct; migrate_from_v50 copies that
+ * prefix, so the new struct's ha_enabled (first field past the prefix) must land
+ * exactly where the v50 blob's json_tiles_config began. */
+_Static_assert(offsetof(app_config_t, ha_enabled) ==
+                   offsetof(app_config_v50_t, json_tiles_config),
+               "v50 prefix drifted: config split boundary moved");
+
+/* ── Version 51 config struct — used only for NVS migration to v52 ────── */
+/* Verbatim copy of the OLD (pre-split) v51 app_config_t body, with BOTH 6144   */
+/* tiles blobs still inline. Used by migrate_from_v51 to lift the inline tiles  */
+/* out to the "json_tiles"/"ha_tiles" NVS keys. */
+typedef struct {
+    uint32_t config_version;
+    char api_url[3][128];
+    char ntp_server[64];
+    char tz_string[64];
+    char filter_colors[3][512];
+    char rms_thresholds[3][256];
+    char hfr_thresholds[3][256];
+    int theme_index;
+    int brightness;
+    int color_brightness;
+    bool mqtt_enabled;
+    char mqtt_broker_url[128];
+    char mqtt_username[64];
+    char mqtt_password[64];
+    char mqtt_topic_prefix[64];
+    uint16_t mqtt_port;
+    int8_t   active_page_override;
+    bool     auto_rotate_enabled;
+    uint16_t auto_rotate_interval_s;
+    uint8_t  auto_rotate_effect;
+    bool     auto_rotate_skip_disconnected;
+    uint8_t  auto_rotate_pages;
+    uint8_t  update_rate_s;
+    uint8_t  graph_update_interval_s;
+    uint8_t  connection_timeout_s;
+    uint8_t  toast_duration_s;
+    bool     debug_mode;
+    bool     instance_enabled[3];
+    bool     screen_sleep_enabled;
+    uint16_t screen_sleep_timeout_s;
+    bool     alert_flash_enabled;
+    uint8_t  idle_poll_interval_s;
+    bool     wifi_power_save;
+    uint8_t  widget_style;
+    uint8_t  auto_update_check;
+    uint8_t  update_channel;
+    bool     deep_sleep_enabled;
+    uint32_t deep_sleep_wake_timer_s;
+    bool     deep_sleep_on_idle;
+    uint8_t  screen_rotation;
+    char     hostname[32];
+    char     allsky_hostname[128];
+    uint16_t allsky_update_interval_s;
+    float    allsky_dew_offset;
+    char     allsky_field_config[1536];
+    char     allsky_thresholds[1024];
+    bool     allsky_enabled;
+    bool     demo_mode;
+    bool     spotify_enabled;
+    char     spotify_client_id[64];
+    uint16_t spotify_poll_interval_ms;
+    bool     spotify_show_progress_bar;
+    uint8_t  spotify_overlay_timeout_s;
+    bool     spotify_minimal_mode;
+    bool     spotify_scroll_text;
+    wifi_network_t wifi_networks[3];
+    bool     spotify_overlay_visible;
+    uint8_t  auto_rotate_order[8];
+    uint8_t  toast_aggregation_window_s;
+    uint32_t toast_notify_mask;
+    bool     toast_instance_muted[3];
+    uint8_t  weather_provider;
+    char     weather_api_key[64];
+    float    weather_lat;
+    float    weather_lon;
+    char     weather_location_name[64];
+    uint16_t weather_poll_interval_s;
+    uint8_t  weather_units;
+    uint8_t  weather_time_format;
+    bool     idle_page_override_enabled;
+    int8_t   idle_page_override_target;
+    bool     idle_page_persistent;
+    bool     idle_indicator_enabled;
+    char     admin_password[33];
+    bool     auth_enabled;
+    bool     image_display_enabled;
+    bool     image_display_show_overlay;
+    char     goes_region[16];
+    uint16_t goes_update_interval_s;
+    uint8_t  image_display_source;
+    uint8_t  moon_bg_style;
+    float    moon_lat;
+    float    moon_lon;
+    uint8_t  solar_band;
+    bool     image_display_crop;
+    uint8_t  moon_drag_light_mode;
+    uint8_t  moon_flip_u;
+    uint8_t  moon_flip_v;
+    float    moon_roll_offset;
+    float    moon_yaw_offset;
+    float    moon_pitch_offset;
+    uint8_t  moon_north_up;
+    uint8_t  moon_spin_mode;
+    uint8_t  moon_spin_return_s;
+    uint8_t  crash_log_retention_days;
+    uint8_t  auto_rotate_pages_hi;
+    uint8_t  auto_rotate_order_ext;
+    uint8_t  goes_orientation;
+    uint8_t  solar_orientation;
+    uint16_t nav_grace_s;
+    char     custom_image_url[256];
+    uint8_t  custom_orientation;
+    uint16_t custom_update_interval_s;
+    uint8_t  auto_rotate_order2[16];
+    uint8_t  goes_vflip;
+    uint8_t  goes_hflip;
+    uint8_t  solar_vflip;
+    uint8_t  solar_hflip;
+    uint8_t  custom_vflip;
+    uint8_t  custom_hflip;
+    bool     home_page_lock;
+    bool     json_enabled;
+    char     json_url[256];
+    char     json_auth_header[256];
+    uint16_t json_update_interval_s;
+    char     json_tiles_config[6144];   /* KEPT here — this is the OLD layout */
+    bool     ha_enabled;
+    char     ha_base_url[256];
+    char     ha_token[256];
+    uint16_t ha_update_interval_s;
+    char     ha_tiles_config[6144];     /* KEPT here — this is the OLD layout */
+} app_config_v51_t;
+
+/* The migration memcpy's the shared prefix [0 .. json_update_interval_s]. That
+ * prefix is byte-identical between the old v51 blob and the new v52 struct, so
+ * assert the boundary: the new struct's ha_enabled sits exactly where the old
+ * blob's json_tiles_config began. Catches any accidental prefix reorder. */
+_Static_assert(offsetof(app_config_t, ha_enabled) ==
+                   offsetof(app_config_v51_t, json_tiles_config),
+               "v51 prefix drifted: config split boundary moved");
 
 // v17 snapshot — AllSky fields without allsky_enabled
 typedef struct {
@@ -2725,7 +3144,10 @@ typedef struct {
 
 void app_config_init(void);
 app_config_t *app_config_get(void);
-app_config_t app_config_get_snapshot(void);
+/* Copy the live config into a caller-provided buffer under the config mutex.
+ * app_config_t is ~20 KB — NEVER return/copy it by value onto a task stack
+ * (overflows small poll/UI task stacks). Snapshot into a PSRAM heap buffer. */
+void app_config_get_snapshot_into(app_config_t *dst);
 void app_config_save(const app_config_t *config);
 void app_config_apply(const app_config_t *config);   // in-memory only, no NVS
 esp_err_t app_config_revert(void);                    // reload NVS into memory
@@ -2733,6 +3155,25 @@ bool app_config_is_dirty(void);                       // true if apply called wi
 int app_config_get_instance_count(void);
 const char *app_config_get_instance_url(int index);
 void app_config_factory_reset(void);
+
+/* Tiles-config accessors. The value lives in a dedicated NVS key ("json_tiles"
+ * / "ha_tiles"), mirrored in a process-lifetime PSRAM cache buffer.
+ *
+ * Getter: returns a stable, always-NUL-terminated const pointer ("" when unset).
+ *   The buffer is allocated once at init and NEVER freed or reallocated, so the
+ *   pointer is valid for the life of the process. A concurrent setter overwrites
+ *   the buffer IN PLACE under the config mutex; a lock-free reader may therefore
+ *   observe a torn string (same benign risk class as reading cfg->json_tiles_config
+ *   pre-split while app_config_save() memcpy'd s_config). Callers use the pointer
+ *   transiently (json_client_poll/ha_client_poll copy the content). Do NOT free.
+ * Setter: validates length (clamps to MAX-1), writes the NVS key + commits, and
+ *   updates the cache under the config mutex. Returns ESP_OK, or ESP_ERR_NO_MEM if
+ *   the cache could not be allocated (NVS/struct blob remain uncorrupted). */
+const char *app_config_get_json_tiles(void);
+const char *app_config_get_ha_tiles(void);
+esp_err_t   app_config_set_json_tiles(const char *s);
+esp_err_t   app_config_set_ha_tiles(const char *s);
+
 bool app_config_is_instance_enabled(int index);
 int app_config_get_enabled_instance_count(void);
 uint32_t app_config_get_filter_color(const char *filter_name, int instance_index);

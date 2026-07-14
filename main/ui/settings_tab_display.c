@@ -18,6 +18,7 @@
 #include "nina_dashboard_internal.h"
 #include "page_registry.h"
 #include "app_config.h"
+#include "esp_heap_caps.h"
 #include "themes.h"
 #include "ui_styles.h"
 #include "tasks.h"
@@ -924,11 +925,16 @@ static void page_checkbox_changed_cb(lv_event_t *e)
     if (checked) ar_order_add(cfg, (uint8_t)bit);
     else         ar_order_remove(cfg, (uint8_t)bit);
 
-    /* Persist the canonical list to NVS (snapshot pattern). */
-    app_config_t snap = app_config_get_snapshot();
-    memcpy(snap.auto_rotate_order, cfg->auto_rotate_order, sizeof(snap.auto_rotate_order));
-    snap.auto_rotate_order_ext = cfg->auto_rotate_order_ext;
-    app_config_save(&snap);
+    /* Persist the canonical list to NVS (snapshot pattern). app_config_t is
+     * ~20 KB; snapshot into a PSRAM heap buffer, never onto this stack. */
+    app_config_t *snap = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    if (snap != NULL) {
+        app_config_get_snapshot_into(snap);
+        memcpy(snap->auto_rotate_order, cfg->auto_rotate_order, sizeof(snap->auto_rotate_order));
+        snap->auto_rotate_order_ext = cfg->auto_rotate_order_ext;
+        app_config_save(snap);
+        heap_caps_free(snap);
+    }
 
     settings_mark_dirty(false);
 }

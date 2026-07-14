@@ -920,6 +920,8 @@
     <div class="tabs" id="topTabs">
       <button class="tab-btn" data-tab="nodes">N.I.N.A.</button>
       <button class="tab-btn" data-tab="allsky">AllSky</button>
+      <button class="tab-btn" data-tab="json">JSON</button>
+      <button class="tab-btn" data-tab="ha">Home Assistant</button>
       <button class="tab-btn" data-tab="clock">Clock</button>
       <button class="tab-btn" data-tab="spotify">Spotify</button>
       <button class="tab-btn" data-tab="image-display">Image Display</button>
@@ -949,6 +951,14 @@
       <button class="nav-btn" data-tab="allsky">
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41m11.32-11.32l1.41-1.41"/></svg>
         AllSky
+      </button>
+      <button class="nav-btn" data-tab="json">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1"/><path d="M16 3h1a2 2 0 0 1 2 2v5a2 2 0 0 0 2 2 2 2 0 0 0-2 2v5a2 2 0 0 1-2 2h-1"/></svg>
+        JSON
+      </button>
+      <button class="nav-btn" data-tab="ha">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l9-9 9 9"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg>
+        Home
       </button>
       <button class="nav-btn" data-tab="clock">
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -1008,6 +1018,14 @@
     <!-- Markup extracted to main/fragment_allsky.html (P6c); lazily fetched by
          ensureTabLoaded() via GET /ui/fragment?tab=allsky and injected here. -->
     <div id="tab-allsky" class="tab-panel"></div>
+
+    <!-- Markup extracted to main/fragment_json.html; lazily fetched by
+         ensureTabLoaded() via GET /ui/fragment?tab=json and injected here. -->
+    <div id="tab-json" class="tab-panel"></div>
+
+    <!-- Markup extracted to main/fragment_ha.html; lazily fetched by
+         ensureTabLoaded() via GET /ui/fragment?tab=ha and injected here. -->
+    <div id="tab-ha" class="tab-panel"></div>
 
     <!-- ==================== TAB 6: CLOCK & WEATHER ==================== -->
     <!-- Markup extracted to main/fragment_clock.html (P6c); lazily fetched by
@@ -1413,6 +1431,8 @@
       system:  {color:'#7aa2f7', rgb:'122, 162, 247'},
       logs:    {color:'#7aa2f7', rgb:'122, 162, 247'},
       allsky:  {color:'#7aa2f7', rgb:'122, 162, 247'},
+      json:    {color:'#7aa2f7', rgb:'122, 162, 247'},
+      ha:      {color:'#7aa2f7', rgb:'122, 162, 247'},
       clock:   {color:'#7aa2f7', rgb:'122, 162, 247'},
       spotify: {color:'#7aa2f7', rgb:'122, 162, 247'},
       backup:  {color:'#7aa2f7', rgb:'122, 162, 247'},
@@ -1442,7 +1462,7 @@
        so the initial switchTab() call at boot -- which shows whichever tab
        was last active -- transparently fetches that tab's fragment first; no
        separate boot-time special case is needed for the default tab. */
-    const TAB_ORDER=['nodes','allsky','clock','spotify','image-display','display','behavior','system','logs','backup','api'];
+    const TAB_ORDER=['nodes','allsky','json','ha','clock','spotify','image-display','display','behavior','system','logs','backup','api'];
     const LAZY_TABS=new Set(TAB_ORDER);
     const loadedTabs=new Set(TAB_ORDER.filter(n=>!LAZY_TABS.has(n)));
 
@@ -2071,6 +2091,8 @@
     const COLLECT_TAB_FNS={
       nodes: collectTab_nodes,
       allsky: collectTab_allsky,
+      json: collectTab_json,
+      ha: collectTab_ha,
       clock: collectTab_clock,
       spotify: collectTab_spotify,
       'image-display': collectTab_image_display,
@@ -2383,6 +2405,8 @@
     const POPULATE_TAB_FNS={
       nodes: populateTab_nodes,
       allsky: populateTab_allsky,
+      json: populateTab_json,
+      ha: populateTab_ha,
       clock: populateTab_clock,
       spotify: populateTab_spotify,
       'image-display': populateTab_image_display,
@@ -3793,6 +3817,466 @@
       return d.innerHTML;
     }
 
+    /* ============================================================
+       JSON Display tab — settings builder
+       Ported from main/fragment_json.html's mockup (row-based tile builder).
+       Markup lives in fragment_json.html; this is the behavior. Uses its own
+       endpoints (/api/json-config GET/POST, /api/json-proxy GET) so the tiles
+       blob stays off the main /api/config payload. collectTab_json is a no-op
+       so the main Save never touches JSON; the JSON tab has its own Save.
+       ============================================================ */
+
+    /* threshold color defaults taken from the on-device Default theme */
+    const JD_C_NORMAL="#a3a3a3", JD_C_WARN="#d97706", JD_C_CRIT="#be123c", JD_C_OK="#059669";
+    const JD_MAX_ROWS=6, JD_MAX_PER_ROW=4, JD_MAX_TILES=15;
+
+    let jdRows=[];          /* [[tile,...],...] builder state */
+    let jdSample=null;      /* last fetched JSON response (for live preview) */
+    let jdUid=1;
+    const jdNextId=()=>jdUid++;
+    /* collapse state keyed by row-array identity — survives re-renders */
+    const jdCollapsedRows=new WeakSet();
+
+    function jdNumberTile(path,label,unit,dec,low,high,cLow,cNorm,cHigh){
+      return {id:jdNextId(),path:path,label:label,type:"number",unit:unit,decimals:dec,low:low,high:high,cLow:cLow,cNorm:cNorm,cHigh:cHigh};
+    }
+    function jdTextTile(path,label,maps){ return {id:jdNextId(),path:path,label:label,type:"text",maps:maps||[]}; }
+    function jdBoolTile(path,label,tText,fText,tColor,fColor){
+      return {id:jdNextId(),path:path,label:label,type:"bool",tText:tText,fText:fText,tColor:tColor,fColor:fColor};
+    }
+
+    function jdTileCount(){ return jdRows.reduce((n,r)=>n+r.length,0); }
+    function jdNum(v){ var n=parseFloat(v); return isFinite(n)?n:0; }
+    function jdClampInt(v,lo,hi){ v=parseInt(v,10); if(!isFinite(v)) v=lo; return Math.max(lo,Math.min(hi,v)); }
+    function jdTitleCase(s){ return String(s).replace(/_/g," ").replace(/\b\w/g,c=>c.toUpperCase()); }
+
+    /* Tokenize a path: dot keys, [N] index, [field=value] match selector.
+       Match values may contain dots (field is up to first '=', value is rest). */
+    function jdTokenizePath(path){
+      const tokens=[]; let i=0;
+      while(i<path.length){
+        const ch=path[i];
+        if(ch==="."){ i++; continue; }
+        if(ch==="["){
+          const end=path.indexOf("]",i);
+          if(end===-1) break;
+          const inner=path.slice(i+1,end);
+          const eq=inner.indexOf("=");
+          if(eq!==-1){ tokens.push({kind:"match",field:inner.slice(0,eq),value:inner.slice(eq+1)}); }
+          else { tokens.push({kind:"index",value:inner}); }
+          i=end+1;
+        } else {
+          let j=i;
+          while(j<path.length && path[j]!=="." && path[j]!=="[") j++;
+          tokens.push({kind:"key",value:path.slice(i,j)});
+          i=j;
+        }
+      }
+      return tokens;
+    }
+    function jdEvalPath(obj,path){
+      if(!path) return undefined;
+      let cur=obj;
+      for(const t of jdTokenizePath(path)){
+        if(cur==null) return undefined;
+        if(t.kind==="match"){
+          if(!Array.isArray(cur)) return undefined;
+          cur=cur.find(el=>el && String(el[t.field])===t.value);
+        } else { cur=cur[t.value]; }
+      }
+      return cur;
+    }
+    /* group.outside_temp -> "Outside Temp" (drop a dotted prefix, title-case) */
+    function jdEntityLabel(entityId){
+      const s=String(entityId);
+      const local=s.includes(".")?s.slice(s.indexOf(".")+1):s;
+      return jdTitleCase(local);
+    }
+    function jdLastSeg(path){
+      if(!path) return path;
+      const tokens=jdTokenizePath(path);
+      for(let i=tokens.length-1;i>=0;i--){
+        if(tokens[i].kind==="match" && tokens[i].field==="entity_id") return jdEntityLabel(tokens[i].value);
+      }
+      for(let i=tokens.length-1;i>=0;i--){ if(tokens[i].kind==="key") return tokens[i].value; }
+      return path;
+    }
+    function jdTruthy(v){
+      if(typeof v==="boolean") return v;
+      if(typeof v==="number") return v!==0;
+      if(typeof v==="string") return !["false","0","no","off","unsafe","closed",""].includes(v.trim().toLowerCase());
+      return !!v;
+    }
+
+    /* ---- live preview rendering ---- */
+    function jdComputeTile(t){
+      const raw=jdEvalPath(jdSample,t.path);
+      const out={label:t.label||jdLastSeg(t.path),value:"--",unit:"",color:JD_C_NORMAL,banner:false};
+      if(t.type==="number"){
+        out.unit=t.unit||"";
+        const n=typeof raw==="number"?raw:parseFloat(raw);
+        if(isFinite(n)){
+          out.value=n.toFixed(jdClampInt(t.decimals,0,4));
+          if(n<jdNum(t.low)) out.color=t.cLow;
+          else if(n>jdNum(t.high)) out.color=t.cHigh;
+          else out.color=t.cNorm;
+        }
+      } else if(t.type==="text"){
+        if(raw!=null){
+          out.value=String(raw);
+          const hit=(t.maps||[]).find(m=>m.val && m.val.toLowerCase()===String(raw).toLowerCase());
+          out.color=hit?hit.color:JD_C_NORMAL;
+        }
+      } else if(t.type==="bool"){
+        out.banner=true;
+        if(raw!==undefined){
+          const on=jdTruthy(raw);
+          out.value=on?(t.tText||"TRUE"):(t.fText||"FALSE");
+          out.color=on?t.tColor:t.fColor;
+        }
+      }
+      return out;
+    }
+    function jdRenderDevice(){
+      const host=$('jd_devPage'); if(!host) return;
+      host.innerHTML="";
+      jdRows.forEach(row=>{
+        const r=document.createElement("div"); r.className="dev-row";
+        row.forEach(t=>{
+          const c=jdComputeTile(t);
+          const tile=document.createElement("div"); tile.className="dev-tile"+(c.banner?" banner":"");
+          const lbl=document.createElement("div"); lbl.className="t-label"; lbl.textContent=c.label;
+          const val=document.createElement("div"); val.className="t-value"; val.textContent=c.value;
+          val.style.color=c.value==="--"?"var(--jd-text)":c.color;
+          tile.appendChild(lbl); tile.appendChild(val);
+          if(c.unit && c.value!=="--"){ const u=document.createElement("div"); u.className="t-unit"; u.textContent=c.unit; tile.appendChild(u); }
+          r.appendChild(tile);
+        });
+        host.appendChild(r);
+      });
+      var empty=$('jd_devEmpty'); if(empty) empty.style.display=jdTileCount()===0?"flex":"none";
+    }
+    function jdOnSourceChange(){ jdRenderDevice(); }
+
+    /* ---- builder rendering ---- */
+    function jdRenderBuilder(){
+      const host=$('jd_rowsHost'); if(!host) return;
+      host.innerHTML="";
+      const total=jdTileCount();
+      jdRows.forEach((row,ri)=>{
+        const collapsed=jdCollapsedRows.has(row);
+        const rEl=document.createElement("div"); rEl.className="rb-row"+(collapsed?" collapsed":"");
+        const head=document.createElement("div");
+        head.className="rb-row-head"; head.setAttribute("role","button"); head.setAttribute("tabindex","0");
+        head.setAttribute("aria-expanded",collapsed?"false":"true");
+        head.innerHTML=
+          '<span class="rb-caret" aria-hidden="true">'+(collapsed?"▸":"▾")+'</span>'+
+          '<span class="rb-name">Row '+(ri+1)+'</span>'+
+          '<span class="rb-fill">'+row.length+' / '+JD_MAX_PER_ROW+' tiles</span>';
+        const toggle=()=>{ if(collapsed) jdCollapsedRows.delete(row); else jdCollapsedRows.add(row); jdRenderBuilder(); };
+        head.onclick=(e)=>{ if(!e.target.closest("button")) toggle(); };
+        head.onkeydown=(e)=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); toggle(); } };
+        const del=document.createElement("button");
+        del.className="btn btn-danger sm"; del.textContent="Remove Row";
+        del.onclick=(e)=>{ e.stopPropagation(); jdRows.splice(ri,1); jdSyncAll(); };
+        head.appendChild(del);
+        rEl.appendChild(head);
+        if(!collapsed){
+          const tilesEl=document.createElement("div"); tilesEl.className="rb-tiles";
+          row.forEach((t,ti)=>tilesEl.appendChild(jdTileEditor(t,ri,ti)));
+          rEl.appendChild(tilesEl);
+          const addTile=document.createElement("button");
+          addTile.className="btn btn-outline sm"; addTile.style.marginTop="10px"; addTile.textContent="+ Add Tile";
+          const canAdd=row.length<JD_MAX_PER_ROW && total<JD_MAX_TILES;
+          addTile.disabled=!canAdd;
+          addTile.onclick=()=>{ row.push(jdNumberTile("","New Tile","",1,0,100,JD_C_NORMAL,JD_C_NORMAL,JD_C_WARN)); jdSyncAll(); };
+          rEl.appendChild(addTile);
+        }
+        host.appendChild(rEl);
+      });
+      var addRowBtn=$('jd_addRowBtn'); if(addRowBtn) addRowBtn.disabled=jdRows.length>=JD_MAX_ROWS || total>=JD_MAX_TILES;
+      var cnt=$('jd_tileCount');
+      if(cnt){ cnt.textContent=total+' / '+JD_MAX_TILES+' tiles'; cnt.classList.toggle("full",total>=JD_MAX_TILES); }
+    }
+
+    function jdTileEditor(t,ri,ti){
+      const el=document.createElement("div"); el.className="rb-tile";
+      const head=document.createElement("div"); head.className="rb-tile-head";
+      head.innerHTML='<span class="idx">'+(ti+1)+'</span><span class="path-preview">'+escHtml(t.path||"<no key>")+'</span>';
+      const x=document.createElement("button");
+      x.className="x"; x.setAttribute("aria-label","Remove tile"); x.innerHTML="&times;";
+      x.onclick=()=>{ jdRows[ri].splice(ti,1); jdSyncAll(); };
+      head.appendChild(x); el.appendChild(head);
+
+      el.appendChild(jdLabeledInput("Key path","mono sm",t.path,"items[0].value",v=>{
+        t.path=v; head.querySelector(".path-preview").textContent=v||"<no key>"; jdRenderDevice();
+      }));
+      el.appendChild(jdLabeledInput("Label","sm",t.label,jdLastSeg(t.path)||"Label",v=>{ t.label=v; jdRenderDevice(); }));
+
+      const typeWrap=document.createElement("div");
+      typeWrap.innerHTML='<div class="mini-label">Type</div>';
+      const sel=document.createElement("select"); sel.className="input sm";
+      [["number","Number"],["text","Text"],["bool","Boolean"]].forEach(([v,lbl])=>{
+        const o=document.createElement("option"); o.value=v; o.textContent=lbl; if(t.type===v) o.selected=true; sel.appendChild(o);
+      });
+      sel.onchange=()=>{ jdConvertType(t,sel.value); jdSyncAll(); };
+      typeWrap.appendChild(sel); el.appendChild(typeWrap);
+
+      const tf=document.createElement("div"); tf.className="type-fields";
+      if(t.type==="number") tf.appendChild(jdNumberFields(t));
+      else if(t.type==="text") tf.appendChild(jdTextFields(t));
+      else tf.appendChild(jdBoolFields(t));
+      el.appendChild(tf);
+      return el;
+    }
+
+    function jdConvertType(t,type){
+      if(t.type===type) return;
+      t.type=type;
+      if(type==="number"){
+        t.unit=t.unit||""; t.decimals=(t.decimals!=null)?t.decimals:1;
+        t.low=(t.low!=null)?t.low:0; t.high=(t.high!=null)?t.high:100;
+        t.cLow=t.cLow||JD_C_NORMAL; t.cNorm=t.cNorm||JD_C_NORMAL; t.cHigh=t.cHigh||JD_C_WARN;
+      } else if(type==="text"){ t.maps=t.maps||[]; }
+      else { t.tText=t.tText||"TRUE"; t.fText=t.fText||"FALSE"; t.tColor=t.tColor||JD_C_OK; t.fColor=t.fColor||JD_C_CRIT; }
+    }
+
+    function jdLabeledInput(label,cls,value,ph,onInput){
+      const w=document.createElement("div"); w.style.marginBottom="8px";
+      const l=document.createElement("div"); l.className="mini-label"; l.textContent=label;
+      const i=document.createElement("input"); i.className="input "+cls; i.value=value||""; i.placeholder=ph||"";
+      i.oninput=()=>onInput(i.value);
+      w.appendChild(l); w.appendChild(i); return w;
+    }
+    function jdMiniField(label,inputEl){
+      const w=document.createElement("div"); w.style.flex="1 1 100px";
+      const l=document.createElement("div"); l.className="mini-label"; l.textContent=label;
+      w.appendChild(l); w.appendChild(inputEl); return w;
+    }
+    function jdInp(value,ph,onInput,cls){
+      const i=document.createElement("input"); i.className="input "+(cls||"sm");
+      i.value=(value!=null)?value:""; i.placeholder=ph||""; i.oninput=()=>onInput(i.value); return i;
+    }
+    function jdNumInp(value,min,max,step,onInput){
+      const i=document.createElement("input"); i.type="number"; i.className="input sm"; i.value=(value!=null)?value:"";
+      if(min!==undefined) i.min=min; if(max!==undefined) i.max=max; if(step!==undefined) i.step=step;
+      i.oninput=()=>onInput(i.value===""?0:parseFloat(i.value)); return i;
+    }
+    function jdSwatch(label,color,onInput){
+      const r=document.createElement("div"); r.className="swatch-row";
+      const c=document.createElement("input"); c.type="color"; c.className="swatch"; c.value=color||JD_C_NORMAL;
+      c.setAttribute("aria-label",label); c.oninput=()=>onInput(c.value);
+      const l=document.createElement("span"); l.className="lab"; l.textContent=label;
+      r.appendChild(c); r.appendChild(l); return r;
+    }
+
+    function jdNumberFields(t){
+      const w=document.createElement("div");
+      const row=document.createElement("div"); row.className="row2";
+      row.appendChild(jdMiniField("Unit",jdInp(t.unit,"unit",v=>{ t.unit=v; jdRenderDevice(); },"sm")));
+      row.appendChild(jdMiniField("Decimals",jdNumInp(t.decimals,0,4,1,v=>{ t.decimals=v; jdRenderDevice(); })));
+      w.appendChild(row);
+      const row2=document.createElement("div"); row2.className="row2"; row2.style.marginTop="8px";
+      row2.appendChild(jdMiniField("Threshold Low",jdNumInp(t.low,-1e6,1e6,"any",v=>{ t.low=v; jdRenderDevice(); })));
+      row2.appendChild(jdMiniField("Threshold High",jdNumInp(t.high,-1e6,1e6,"any",v=>{ t.high=v; jdRenderDevice(); })));
+      w.appendChild(row2);
+      const sw=document.createElement("div"); sw.style.marginTop="10px";
+      sw.innerHTML='<div class="mini-label">Colors by threshold</div>';
+      sw.appendChild(jdSwatch("Below low",t.cLow,v=>{ t.cLow=v; jdRenderDevice(); }));
+      sw.appendChild(jdSwatch("In range",t.cNorm,v=>{ t.cNorm=v; jdRenderDevice(); }));
+      sw.appendChild(jdSwatch("Above high",t.cHigh,v=>{ t.cHigh=v; jdRenderDevice(); }));
+      w.appendChild(sw); return w;
+    }
+    function jdTextFields(t){
+      const w=document.createElement("div");
+      w.innerHTML='<div class="mini-label">Value → color (up to 4)</div>';
+      const listHost=document.createElement("div"); w.appendChild(listHost);
+      function drawMaps(){
+        listHost.innerHTML="";
+        (t.maps||[]).forEach((m,i)=>{
+          const r=document.createElement("div"); r.className="map-row";
+          const val=document.createElement("input"); val.className="input sm"; val.value=m.val||""; val.placeholder="Value";
+          val.oninput=()=>{ m.val=val.value; jdRenderDevice(); };
+          const right=document.createElement("div"); right.style.display="flex"; right.style.gap="6px"; right.style.alignItems="center";
+          const c=document.createElement("input"); c.type="color"; c.className="swatch"; c.value=m.color||JD_C_NORMAL;
+          c.oninput=()=>{ m.color=c.value; jdRenderDevice(); };
+          const x=document.createElement("button"); x.className="btn btn-danger sm"; x.textContent="✕";
+          x.style.minHeight="30px"; x.style.padding="0 10px";
+          x.onclick=()=>{ t.maps.splice(i,1); drawMaps(); jdRenderDevice(); };
+          right.appendChild(c); right.appendChild(x);
+          r.appendChild(val); r.appendChild(right); listHost.appendChild(r);
+        });
+        addBtn.disabled=(t.maps||[]).length>=4;
+      }
+      const addBtn=document.createElement("button");
+      addBtn.className="btn btn-outline sm"; addBtn.textContent="+ Add mapping"; addBtn.style.marginTop="4px";
+      addBtn.onclick=()=>{ (t.maps=t.maps||[]).push({val:"",color:JD_C_WARN}); drawMaps(); };
+      w.appendChild(addBtn); drawMaps(); return w;
+    }
+    function jdBoolFields(t){
+      const w=document.createElement("div");
+      const row=document.createElement("div"); row.className="row2";
+      row.appendChild(jdMiniField("True text",jdInp(t.tText,"ON",v=>{ t.tText=v; jdRenderDevice(); },"sm")));
+      row.appendChild(jdMiniField("False text",jdInp(t.fText,"OFF",v=>{ t.fText=v; jdRenderDevice(); },"sm")));
+      w.appendChild(row);
+      const sw=document.createElement("div"); sw.style.marginTop="10px";
+      sw.appendChild(jdSwatch("True color",t.tColor,v=>{ t.tColor=v; jdRenderDevice(); }));
+      sw.appendChild(jdSwatch("False color",t.fColor,v=>{ t.fColor=v; jdRenderDevice(); }));
+      w.appendChild(sw); return w;
+    }
+
+    /* ---- fetch live JSON (through the device proxy) ---- */
+    function jdFetchJson(){
+      const btn=$('jd_fetchBtn'); const tree=$('jd_tree');
+      if(!btn||!tree) return;
+      btn.textContent="Fetching..."; btn.disabled=true;
+      /* Send the live (possibly unsaved) URL + auth header so Fetch works
+       * before Save. Sent as request headers, not query params, so the token
+       * never lands in a request-URI log. Device falls back to saved config. */
+      var jdHdrs={};
+      var jdUrlEl=$('jd_url'); if(jdUrlEl && jdUrlEl.value.trim()) jdHdrs['X-JSON-URL']=jdUrlEl.value.trim();
+      var jdAuthEl=$('jd_auth'); if(jdAuthEl && jdAuthEl.value.trim()) jdHdrs['X-JSON-AUTH']=jdAuthEl.value.trim();
+      fetch('/api/json-proxy',{headers:jdHdrs})
+        .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+        .then(data=>{
+          jdSample=data;
+          tree.classList.remove("hidden"); tree.innerHTML="";
+          jdBuildTree(data,"",tree,0);
+          jdRenderDevice();
+          btn.textContent="Refresh JSON";
+        })
+        .catch(e=>{ showToast('Fetch failed: '+e.message,'error'); btn.textContent="Fetch JSON"; })
+        .finally(()=>{ btn.disabled=false; });
+    }
+    function jdBuildTree(obj,prefix,host,depth){
+      if(obj==null||typeof obj!=="object") return;
+      const isArr=Array.isArray(obj);
+      Object.keys(obj).forEach(k=>{
+        const val=obj[k];
+        let seg,keyLabel;
+        if(isArr){
+          if(val && typeof val==="object" && val.entity_id!=null){ seg="[entity_id="+val.entity_id+"]"; keyLabel=String(val.entity_id); }
+          else { seg="["+k+"]"; keyLabel="["+k+"]"; }
+        } else { seg=k; keyLabel=k; }
+        const path=isArr?prefix+seg:(prefix?prefix+"."+k:k);
+        const line=document.createElement("div"); line.className="jt-line"; line.style.paddingLeft=(depth*14)+"px";
+        if(val!==null && typeof val==="object"){
+          line.innerHTML='<span class="jt-key">'+escHtml(keyLabel)+'</span><span class="jt-punct">: '+(Array.isArray(val)?"[ &hellip; ]":"{ &hellip; }")+'</span>';
+          host.appendChild(line); jdBuildTree(val,path,host,depth+1);
+        } else {
+          const leaf=document.createElement("span"); leaf.className="jt-leaf"; leaf.tabIndex=0; leaf.setAttribute("role","button");
+          leaf.title='Add "'+path+'" as a tile';
+          const vclass=typeof val==="number"?"jt-val-num":typeof val==="boolean"?"jt-val-bool":"jt-val-str";
+          const vtext=typeof val==="string"?'"'+val+'"':String(val);
+          leaf.innerHTML='<span class="jt-key">'+escHtml(keyLabel)+'</span><span class="jt-punct">:</span> <span class="'+vclass+'">'+escHtml(vtext)+'</span><span class="jt-add">+ add tile</span>';
+          const add=()=>jdAddTileFromPath(path,val);
+          leaf.onclick=add;
+          leaf.onkeydown=(e)=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); add(); } };
+          line.appendChild(leaf); host.appendChild(line);
+        }
+      });
+    }
+    function jdAddTileFromPath(path,rawVal){
+      if(jdTileCount()>=JD_MAX_TILES){ jdFlashCount(); return; }
+      let target=null;
+      for(let i=jdRows.length-1;i>=0;i--){ if(jdRows[i].length<JD_MAX_PER_ROW){ target=jdRows[i]; break; } }
+      if(!target){ if(jdRows.length>=JD_MAX_ROWS) return; target=[]; jdRows.push(target); }
+      const label=jdLastSeg(path);
+      const tokens=jdTokenizePath(path);
+      const isStateLeaf=tokens.length && tokens[tokens.length-1].kind==="key" && tokens[tokens.length-1].value==="state";
+      const entTok=tokens.find(t=>t.kind==="match" && t.field==="entity_id");
+      const isBinary=entTok && String(entTok.value).startsWith("binary_sensor.");
+      const numericStr=typeof rawVal==="string" && isFinite(parseFloat(rawVal)) && rawVal.trim()!=="";
+      let tile;
+      if(typeof rawVal==="boolean" || (isBinary && isStateLeaf)) tile=jdBoolTile(path,label,"YES","NO",JD_C_OK,JD_C_CRIT);
+      else if(typeof rawVal==="number" || numericStr) tile=jdNumberTile(path,label,"",1,0,100,JD_C_NORMAL,JD_C_NORMAL,JD_C_WARN);
+      else tile=jdTextTile(path,label,[]);
+      target.push(tile); jdSyncAll();
+    }
+    function jdFlashCount(){
+      const c=$('jd_tileCount'); if(!c) return;
+      c.style.transition="none"; c.style.color="var(--danger)";
+      setTimeout(()=>{ c.style.transition=""; c.style.color=""; },400);
+    }
+
+    function jdAddRow(){
+      if(jdRows.length>=JD_MAX_ROWS || jdTileCount()>=JD_MAX_TILES) return;
+      jdRows.push([ jdNumberTile("","New Tile","",1,0,100,JD_C_NORMAL,JD_C_NORMAL,JD_C_WARN) ]);
+      jdSyncAll();
+    }
+    function jdSyncAll(){ jdRenderBuilder(); jdRenderDevice(); }
+
+    /* ---- serialize / parse tiles_config ---- */
+    function jdSerializeTiles(){
+      const rows=jdRows.map(row=>row.map(t=>{
+        if(t.type==="number"){
+          return {path:t.path||"",label:t.label||"",type:"number",unit:t.unit||"",
+            decimals:jdClampInt(t.decimals,0,4),low:jdNum(t.low),high:jdNum(t.high),
+            cLow:t.cLow||JD_C_NORMAL,cNorm:t.cNorm||JD_C_NORMAL,cHigh:t.cHigh||JD_C_WARN};
+        } else if(t.type==="text"){
+          return {path:t.path||"",label:t.label||"",type:"text",
+            maps:(t.maps||[]).slice(0,4).map(m=>({val:m.val||"",color:m.color||JD_C_NORMAL}))};
+        }
+        return {path:t.path||"",label:t.label||"",type:"bool",
+          tText:t.tText||"TRUE",fText:t.fText||"FALSE",tColor:t.tColor||JD_C_OK,fColor:t.fColor||JD_C_CRIT};
+      }));
+      return JSON.stringify({rows:rows});
+    }
+    function jdParseTiles(str){
+      jdRows=[];
+      let cfg=null;
+      try{ cfg=JSON.parse(str||"{}"); }catch(e){ cfg=null; }
+      const rows=(cfg && Array.isArray(cfg.rows))?cfg.rows:[];
+      rows.slice(0,JD_MAX_ROWS).forEach(row=>{
+        if(!Array.isArray(row)) return;
+        const outRow=[];
+        row.slice(0,JD_MAX_PER_ROW).forEach(t=>{
+          if(!t||typeof t!=="object") return;
+          if(t.type==="text") outRow.push(jdTextTile(t.path||"",t.label||"",(t.maps||[]).slice(0,4).map(m=>({val:m.val||"",color:m.color||JD_C_NORMAL}))));
+          else if(t.type==="bool") outRow.push(jdBoolTile(t.path||"",t.label||"",t.tText||"TRUE",t.fText||"FALSE",t.tColor||JD_C_OK,t.fColor||JD_C_CRIT));
+          else outRow.push(jdNumberTile(t.path||"",t.label||"",t.unit||"",jdClampInt(t.decimals,0,4),jdNum(t.low),jdNum(t.high),t.cLow||JD_C_NORMAL,t.cNorm||JD_C_NORMAL,t.cHigh||JD_C_WARN));
+        });
+        jdRows.push(outRow);
+      });
+    }
+
+    /* ---- tab collect/populate/save ---- */
+    /* collectTab_json is intentionally a no-op: JSON Display uses its own
+       /api/json-config endpoint, so the main /api/config Save never carries the
+       ~6 KB tiles blob. The JSON tab has its own "Save JSON Display" button. */
+    function collectTab_json(data){ /* no-op by design */ }
+
+    function populateTab_json(data){
+      /* Ignore the main-config blob; load JSON Display from its own endpoint. */
+      if(!$('jd_rowsHost')) return;  /* fragment not injected yet */
+      fetch('/api/json-config').then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+        .then(d=>{
+          if($('jd_enabled')) $('jd_enabled').checked=!!d.json_enabled;
+          if($('jd_url')) $('jd_url').value=d.json_url||"";
+          if($('jd_auth')) $('jd_auth').value=d.json_auth_header||"";
+          if($('jd_interval')) $('jd_interval').value=String(d.json_update_interval_s||30);
+          jdParseTiles(d.json_tiles_config||"");
+          jdSyncAll();
+        })
+        .catch(e=>{ console.error('Load JSON Display config failed',e); jdParseTiles(""); jdSyncAll(); });
+    }
+
+    function jdSaveConfig(){
+      const btn=$('jd_saveBtn'); if(!btn) return;
+      const body={
+        json_enabled: $('jd_enabled')?!!$('jd_enabled').checked:false,
+        json_url: $('jd_url')?$('jd_url').value.trim():"",
+        json_auth_header: $('jd_auth')?$('jd_auth').value.trim():"",
+        json_update_interval_s: $('jd_interval')?parseInt($('jd_interval').value,10)||30:30,
+        json_tiles_config: jdSerializeTiles()
+      };
+      btn.disabled=true; btn.textContent="Saving...";
+      postJson('/api/json-config',body).then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
+        .then(()=>{ showToast('JSON Display saved','success'); })
+        .catch(e=>{ showToast('Save failed: '+e.message,'error'); })
+        .finally(()=>{ btn.disabled=false; btn.textContent="Save JSON Display"; });
+    }
+
     function selectJsonKey(path){
       if(activeFieldInput){
         activeFieldInput.value=path;
@@ -3805,6 +4289,507 @@
       } else {
         showToast('Click a key path input field first, then click Use on a JSON value','info');
       }
+    }
+
+    /* ============================================================
+       Home Assistant tab — settings builder
+       Ported from main/ha_page_mockup.html (per-entity tile builder).
+       Markup lives in fragment_ha.html; this is the behavior. Uses its own
+       endpoints (/api/ha-config GET/POST, /api/ha-probe GET) so the tiles
+       blob stays off the main /api/config payload. collectTab_ha is a no-op
+       so the main Save never touches HA; the HA tab has its own Save.
+       Each tile names one entity + attribute; Probe fetches the live entity
+       (GET /api/states/<entity_id> via the device proxy) to build the
+       attribute dropdown and auto-derive label / unit / type.
+       ============================================================ */
+
+    /* threshold color defaults taken from the on-device Default theme */
+    const HA_C_NORMAL="#a3a3a3", HA_C_WARN="#d97706", HA_C_CRIT="#be123c", HA_C_OK="#059669";
+    const HA_MAX_ROWS=6, HA_MAX_PER_ROW=4, HA_MAX_TILES=15;
+    const HA_BOOLISH=new Set(["on","off","open","closed","home","not_home","true","false"]);
+
+    let haRows=[];             /* [[tile,...],...] builder state */
+    let haEntities={};         /* entity_id -> last probed {state,attributes} */
+    let haUid=1;
+    const haNextId=()=>haUid++;
+    /* collapse state keyed by row-array identity — survives re-renders */
+    const haCollapsedRows=new WeakSet();
+
+    function haBaseTile(entity_id,attr,label){
+      return {id:haNextId(),entity_id:entity_id,attr:attr||"state",label:label,probed:false,error:false};
+    }
+    function haNumberTile(entity_id,attr,label,unit,dec,low,high,cLow,cNorm,cHigh){
+      return Object.assign(haBaseTile(entity_id,attr,label),
+        {type:"number",unit:unit,decimals:dec,low:low,high:high,cLow:cLow,cNorm:cNorm,cHigh:cHigh});
+    }
+    function haTextTile(entity_id,attr,label,maps){ return Object.assign(haBaseTile(entity_id,attr,label),{type:"text",maps:maps||[]}); }
+    function haBoolTile(entity_id,attr,label,tText,fText,tColor,fColor){
+      return Object.assign(haBaseTile(entity_id,attr,label),{type:"bool",tText:tText,fText:fText,tColor:tColor,fColor:fColor});
+    }
+
+    function haTileCount(){ return haRows.reduce((n,r)=>n+r.length,0); }
+    function haNum(v){ var n=parseFloat(v); return isFinite(n)?n:0; }
+    function haClampInt(v,lo,hi){ v=parseInt(v,10); if(!isFinite(v)) v=lo; return Math.max(lo,Math.min(hi,v)); }
+    function haTitleCase(s){ return String(s).replace(/[_.]/g," ").replace(/\b\w/g,c=>c.toUpperCase()); }
+    /* sensor.outside_temp -> "Outside Temp" (drop the domain prefix) */
+    function haEntityLocalTitle(entityId){
+      const s=String(entityId);
+      const local=s.includes(".")?s.slice(s.indexOf(".")+1):s;
+      return haTitleCase(local);
+    }
+    function haGetEntity(id){ return haEntities[id]||null; }
+    function haIsUnavailable(v){
+      return typeof v==="string" && (v.toLowerCase()==="unavailable"||v.toLowerCase()==="unknown");
+    }
+    function haRawValue(t){
+      const ent=haGetEntity(t.entity_id);
+      if(!ent) return {notfound:true};
+      if(t.attr==="state") return {value:ent.state};
+      return {value:ent.attributes?ent.attributes[t.attr]:undefined};
+    }
+    function haTruthy(v){
+      if(typeof v==="boolean") return v;
+      if(typeof v==="number") return v!==0;
+      if(typeof v==="string") return !["false","0","no","off","closed","not_home",""].includes(v.trim().toLowerCase());
+      return !!v;
+    }
+    function haDeriveType(v){
+      if(typeof v==="boolean") return "bool";
+      if(typeof v==="string" && HA_BOOLISH.has(v.trim().toLowerCase())) return "bool";
+      if(typeof v==="number") return "number";
+      if(typeof v==="string" && v.trim()!=="" && isFinite(parseFloat(v)) && !haIsUnavailable(v)) return "number";
+      return "text";
+    }
+    /* auto-derived label / unit / type for the tile's entity + attr */
+    function haDeriveDefaults(t){
+      const ent=haGetEntity(t.entity_id);
+      if(!ent) return;
+      const attrs=ent.attributes||{};
+      if(t.attr==="state") t.label=attrs.friendly_name||haEntityLocalTitle(t.entity_id);
+      else t.label=haTitleCase(t.attr);
+      if(t.attr==="state") t.unit=attrs.unit_of_measurement||"";
+      else t.unit=attrs[t.attr+"_unit"]||"";
+      const raw=t.attr==="state"?ent.state:attrs[t.attr];
+      haConvertType(t,haDeriveType(raw));
+    }
+
+    /* ---- live preview rendering ---- */
+    function haComputeTile(t){
+      const out={label:t.label||haEntityLocalTitle(t.entity_id),value:"--",unit:"",color:HA_C_NORMAL,banner:false};
+      if(t.type==="bool") out.banner=true;
+      const r=haRawValue(t);
+      const raw=r.value;
+      if(r.notfound || raw===undefined || raw===null || haIsUnavailable(raw)) return out;
+      if(t.type==="number"){
+        out.unit=t.unit||"";
+        const n=typeof raw==="number"?raw:parseFloat(raw);
+        if(isFinite(n)){
+          out.value=n.toFixed(haClampInt(t.decimals,0,4));
+          if(n<haNum(t.low)) out.color=t.cLow;
+          else if(n>haNum(t.high)) out.color=t.cHigh;
+          else out.color=t.cNorm;
+        }
+      } else if(t.type==="text"){
+        out.value=String(raw);
+        const hit=(t.maps||[]).find(m=>m.val && m.val.toLowerCase()===String(raw).toLowerCase());
+        out.color=hit?hit.color:HA_C_NORMAL;
+      } else if(t.type==="bool"){
+        const on=haTruthy(raw);
+        out.value=on?(t.tText||"TRUE"):(t.fText||"FALSE");
+        out.color=on?t.tColor:t.fColor;
+      }
+      return out;
+    }
+    function haRenderDevice(){
+      const host=$('ha_devPage'); if(!host) return;
+      host.innerHTML="";
+      haRows.forEach(row=>{
+        const r=document.createElement("div"); r.className="dev-row";
+        row.forEach(t=>{
+          const c=haComputeTile(t);
+          const tile=document.createElement("div"); tile.className="dev-tile"+(c.banner?" banner":"");
+          const lbl=document.createElement("div"); lbl.className="t-label"; lbl.textContent=c.label;
+          const val=document.createElement("div"); val.className="t-value"; val.textContent=c.value;
+          val.style.color=c.value==="--"?"var(--ha-text)":c.color;
+          tile.appendChild(lbl); tile.appendChild(val);
+          if(c.unit && c.value!=="--"){ const u=document.createElement("div"); u.className="t-unit"; u.textContent=c.unit; tile.appendChild(u); }
+          r.appendChild(tile);
+        });
+        host.appendChild(r);
+      });
+      var empty=$('ha_devEmpty'); if(empty) empty.style.display=haTileCount()===0?"flex":"none";
+    }
+    function haOnSourceChange(){ haRenderDevice(); }
+
+    /* ---- builder rendering ---- */
+    function haRenderBuilder(){
+      const host=$('ha_rowsHost'); if(!host) return;
+      host.innerHTML="";
+      const total=haTileCount();
+      haRows.forEach((row,ri)=>{
+        const collapsed=haCollapsedRows.has(row);
+        const rEl=document.createElement("div"); rEl.className="rb-row"+(collapsed?" collapsed":"");
+        const head=document.createElement("div");
+        head.className="rb-row-head"; head.setAttribute("role","button"); head.setAttribute("tabindex","0");
+        head.setAttribute("aria-expanded",collapsed?"false":"true");
+        head.innerHTML=
+          '<span class="rb-caret" aria-hidden="true">'+(collapsed?"▸":"▾")+'</span>'+
+          '<span class="rb-name">Row '+(ri+1)+'</span>'+
+          '<span class="rb-fill">'+row.length+' / '+HA_MAX_PER_ROW+' tiles</span>';
+        const toggle=()=>{ if(collapsed) haCollapsedRows.delete(row); else haCollapsedRows.add(row); haRenderBuilder(); };
+        head.onclick=(e)=>{ if(!e.target.closest("button")) toggle(); };
+        head.onkeydown=(e)=>{ if(e.target.closest("button")) return; if(e.key==="Enter"||e.key===" "){ e.preventDefault(); toggle(); } };
+        const upBtn=document.createElement("button");
+        upBtn.className="rb-move"; upBtn.setAttribute("aria-label","Move row "+(ri+1)+" up");
+        upBtn.innerHTML="&#9650;"; upBtn.disabled=ri===0;
+        upBtn.onclick=(e)=>{ e.stopPropagation(); haMoveRow(ri,-1); };
+        const dnBtn=document.createElement("button");
+        dnBtn.className="rb-move"; dnBtn.setAttribute("aria-label","Move row "+(ri+1)+" down");
+        dnBtn.innerHTML="&#9660;"; dnBtn.disabled=ri===haRows.length-1;
+        dnBtn.onclick=(e)=>{ e.stopPropagation(); haMoveRow(ri,1); };
+        head.appendChild(upBtn); head.appendChild(dnBtn);
+        const del=document.createElement("button");
+        del.className="btn btn-danger sm"; del.textContent="Remove Row";
+        del.onclick=(e)=>{ e.stopPropagation(); haRows.splice(ri,1); haSyncAll(); };
+        head.appendChild(del);
+        rEl.appendChild(head);
+        if(!collapsed){
+          const tilesEl=document.createElement("div"); tilesEl.className="rb-tiles";
+          row.forEach((t,ti)=>tilesEl.appendChild(haTileEditor(t,ri,ti)));
+          rEl.appendChild(tilesEl);
+          const addTile=document.createElement("button");
+          addTile.className="btn btn-outline sm"; addTile.style.marginTop="10px"; addTile.textContent="+ Add Tile";
+          const canAdd=row.length<HA_MAX_PER_ROW && total<HA_MAX_TILES;
+          addTile.disabled=!canAdd;
+          addTile.onclick=()=>{ const t=haNumberTile("","state","New Tile","",1,0,100,HA_C_NORMAL,HA_C_NORMAL,HA_C_WARN); row.push(t); haSyncAll(); };
+          rEl.appendChild(addTile);
+        }
+        host.appendChild(rEl);
+      });
+      var addRowBtn=$('ha_addRowBtn'); if(addRowBtn) addRowBtn.disabled=haRows.length>=HA_MAX_ROWS || total>=HA_MAX_TILES;
+      var cnt=$('ha_tileCount');
+      if(cnt){ cnt.textContent=total+' / '+HA_MAX_TILES+' tiles'; cnt.classList.toggle("full",total>=HA_MAX_TILES); }
+    }
+
+    function haTileEditor(t,ri,ti){
+      const el=document.createElement("div"); el.className="rb-tile";
+      const head=document.createElement("div"); head.className="rb-tile-head";
+      head.innerHTML='<span class="idx">'+(ti+1)+'</span><span class="path-preview">'+
+        escHtml(t.entity_id?(t.entity_id+" · "+t.attr):"<no entity>")+'</span>';
+      const lBtn=document.createElement("button");
+      lBtn.className="rb-move tile"; lBtn.setAttribute("aria-label","Move tile "+(ti+1)+" left");
+      lBtn.innerHTML="&#9664;"; lBtn.disabled=ti===0;
+      lBtn.onclick=()=>haMoveTile(ri,ti,-1);
+      const rBtn=document.createElement("button");
+      rBtn.className="rb-move tile"; rBtn.setAttribute("aria-label","Move tile "+(ti+1)+" right");
+      rBtn.innerHTML="&#9654;"; rBtn.disabled=ti===haRows[ri].length-1;
+      rBtn.onclick=()=>haMoveTile(ri,ti,1);
+      const x=document.createElement("button");
+      x.className="x"; x.setAttribute("aria-label","Remove tile"); x.innerHTML="&times;";
+      x.onclick=()=>{ haRows[ri].splice(ti,1); haSyncAll(); };
+      head.appendChild(lBtn); head.appendChild(rBtn); head.appendChild(x); el.appendChild(head);
+
+      /* ---- entity_id + Probe ---- */
+      const eWrap=document.createElement("div"); eWrap.style.marginBottom="8px";
+      eWrap.innerHTML='<div class="mini-label">Entity ID</div>';
+      const pr=document.createElement("div"); pr.className="probe-row";
+      const eIn=document.createElement("input");
+      eIn.className="input mono sm"; eIn.value=t.entity_id||""; eIn.placeholder="sensor.outside_temp";
+      eIn.oninput=()=>{ t.entity_id=eIn.value.trim(); head.querySelector(".path-preview").textContent=t.entity_id?(t.entity_id+" · "+t.attr):"<no entity>"; };
+      const probeBtn=document.createElement("button");
+      probeBtn.className="btn btn-primary sm"; probeBtn.textContent="Probe";
+      probeBtn.onclick=()=>haProbeTile(t,probeBtn);
+      pr.appendChild(eIn); pr.appendChild(probeBtn);
+      eWrap.appendChild(pr);
+
+      const status=document.createElement("div"); status.className="probe-status";
+      const ent=haGetEntity(t.entity_id);
+      if(t.error){
+        status.classList.add("err");
+        status.innerHTML="&#9888; entity not found — check the ID and that it exists in Home Assistant.";
+      } else if(t.probed && ent){
+        const fn=ent.attributes && ent.attributes.friendly_name;
+        const nAttr=ent.attributes?Object.keys(ent.attributes).length:0;
+        status.classList.add("ok");
+        status.innerHTML="&#10003; "+(fn?escHtml(fn):"(no friendly_name)")+' <span class="dom">· '+(nAttr+1)+' fields available</span>';
+      }
+      eWrap.appendChild(status); el.appendChild(eWrap);
+
+      /* fresh, never-probed tile with no cached entity: stop at entity + Probe */
+      if(!t.probed && !ent) return el;
+
+      /* ---- attribute dropdown (only when we have cached entity data) ---- */
+      if(ent){
+        const aWrap=document.createElement("div"); aWrap.style.marginBottom="8px";
+        aWrap.innerHTML='<div class="mini-label">Show</div>';
+        const aSel=document.createElement("select"); aSel.className="input sm";
+        const keys=["state"].concat(ent.attributes?Object.keys(ent.attributes):[]);
+        keys.forEach(k=>{
+          const o=document.createElement("option"); o.value=k;
+          o.textContent=k==="state"?"state (main value)":k;
+          if(t.attr===k) o.selected=true; aSel.appendChild(o);
+        });
+        aSel.onchange=()=>{ t.attr=aSel.value; haDeriveDefaults(t); haSyncAll(); };
+        aWrap.appendChild(aSel); el.appendChild(aWrap);
+      }
+
+      /* label */
+      el.appendChild(haLabeledInput("Label","sm",t.label,haEntityLocalTitle(t.entity_id)||"Label",v=>{ t.label=v; haRenderDevice(); }));
+
+      /* type */
+      const typeWrap=document.createElement("div");
+      typeWrap.innerHTML='<div class="mini-label">Type</div>';
+      const sel=document.createElement("select"); sel.className="input sm";
+      [["number","Number"],["text","Text"],["bool","Boolean"]].forEach(([v,lbl])=>{
+        const o=document.createElement("option"); o.value=v; o.textContent=lbl; if(t.type===v) o.selected=true; sel.appendChild(o);
+      });
+      sel.onchange=()=>{ haConvertType(t,sel.value); haSyncAll(); };
+      typeWrap.appendChild(sel); el.appendChild(typeWrap);
+
+      const tf=document.createElement("div"); tf.className="type-fields";
+      if(t.type==="number") tf.appendChild(haNumberFields(t));
+      else if(t.type==="text") tf.appendChild(haTextFields(t));
+      else tf.appendChild(haBoolFields(t));
+      el.appendChild(tf);
+      return el;
+    }
+
+    function haConvertType(t,type){
+      if(t.type===type) return;
+      t.type=type;
+      if(type==="number"){
+        t.unit=t.unit||""; t.decimals=(t.decimals!=null)?t.decimals:1;
+        t.low=(t.low!=null)?t.low:0; t.high=(t.high!=null)?t.high:100;
+        t.cLow=t.cLow||HA_C_NORMAL; t.cNorm=t.cNorm||HA_C_NORMAL; t.cHigh=t.cHigh||HA_C_WARN;
+      } else if(type==="text"){ t.maps=t.maps||[]; }
+      else { t.tText=t.tText||"ON"; t.fText=t.fText||"OFF"; t.tColor=t.tColor||HA_C_OK; t.fColor=t.fColor||HA_C_CRIT; }
+    }
+
+    function haLabeledInput(label,cls,value,ph,onInput){
+      const w=document.createElement("div"); w.style.marginBottom="8px";
+      const l=document.createElement("div"); l.className="mini-label"; l.textContent=label;
+      const i=document.createElement("input"); i.className="input "+cls; i.value=value||""; i.placeholder=ph||"";
+      i.oninput=()=>onInput(i.value);
+      w.appendChild(l); w.appendChild(i); return w;
+    }
+    function haMiniField(label,inputEl){
+      const w=document.createElement("div"); w.style.flex="1 1 100px";
+      const l=document.createElement("div"); l.className="mini-label"; l.textContent=label;
+      w.appendChild(l); w.appendChild(inputEl); return w;
+    }
+    function haInp(value,ph,onInput,cls){
+      const i=document.createElement("input"); i.className="input "+(cls||"sm");
+      i.value=(value!=null)?value:""; i.placeholder=ph||""; i.oninput=()=>onInput(i.value); return i;
+    }
+    function haNumInp(value,min,max,step,onInput){
+      const i=document.createElement("input"); i.type="number"; i.className="input sm"; i.value=(value!=null)?value:"";
+      if(min!==undefined) i.min=min; if(max!==undefined) i.max=max; if(step!==undefined) i.step=step;
+      i.oninput=()=>onInput(i.value===""?0:parseFloat(i.value)); return i;
+    }
+    function haSwatch(label,color,onInput){
+      const r=document.createElement("div"); r.className="swatch-row";
+      const c=document.createElement("input"); c.type="color"; c.className="swatch"; c.value=color||HA_C_NORMAL;
+      c.setAttribute("aria-label",label); c.oninput=()=>onInput(c.value);
+      const l=document.createElement("span"); l.className="lab"; l.textContent=label;
+      r.appendChild(c); r.appendChild(l); return r;
+    }
+
+    function haNumberFields(t){
+      const w=document.createElement("div");
+      const row=document.createElement("div"); row.className="row2";
+      row.appendChild(haMiniField("Unit",haInp(t.unit,"unit",v=>{ t.unit=v; haRenderDevice(); },"sm")));
+      row.appendChild(haMiniField("Decimals",haNumInp(t.decimals,0,4,1,v=>{ t.decimals=v; haRenderDevice(); })));
+      w.appendChild(row);
+      const row2=document.createElement("div"); row2.className="row2"; row2.style.marginTop="8px";
+      row2.appendChild(haMiniField("Threshold Low",haNumInp(t.low,-1e6,1e6,"any",v=>{ t.low=v; haRenderDevice(); })));
+      row2.appendChild(haMiniField("Threshold High",haNumInp(t.high,-1e6,1e6,"any",v=>{ t.high=v; haRenderDevice(); })));
+      w.appendChild(row2);
+      const sw=document.createElement("div"); sw.style.marginTop="10px";
+      sw.innerHTML='<div class="mini-label">Colors by threshold</div>';
+      sw.appendChild(haSwatch("Below low",t.cLow,v=>{ t.cLow=v; haRenderDevice(); }));
+      sw.appendChild(haSwatch("In range",t.cNorm,v=>{ t.cNorm=v; haRenderDevice(); }));
+      sw.appendChild(haSwatch("Above high",t.cHigh,v=>{ t.cHigh=v; haRenderDevice(); }));
+      w.appendChild(sw); return w;
+    }
+    function haTextFields(t){
+      const w=document.createElement("div");
+      w.innerHTML='<div class="mini-label">Value → color (up to 4)</div>';
+      const listHost=document.createElement("div"); w.appendChild(listHost);
+      function drawMaps(){
+        listHost.innerHTML="";
+        (t.maps||[]).forEach((m,i)=>{
+          const r=document.createElement("div"); r.className="map-row";
+          const val=document.createElement("input"); val.className="input sm"; val.value=m.val||""; val.placeholder="Value";
+          val.oninput=()=>{ m.val=val.value; haRenderDevice(); };
+          const right=document.createElement("div"); right.style.display="flex"; right.style.gap="6px"; right.style.alignItems="center";
+          const c=document.createElement("input"); c.type="color"; c.className="swatch"; c.value=m.color||HA_C_NORMAL;
+          c.oninput=()=>{ m.color=c.value; haRenderDevice(); };
+          const x=document.createElement("button"); x.className="btn btn-danger sm"; x.textContent="✕";
+          x.style.minHeight="30px"; x.style.padding="0 10px";
+          x.onclick=()=>{ t.maps.splice(i,1); drawMaps(); haRenderDevice(); };
+          right.appendChild(c); right.appendChild(x);
+          r.appendChild(val); r.appendChild(right); listHost.appendChild(r);
+        });
+        addBtn.disabled=(t.maps||[]).length>=4;
+      }
+      const addBtn=document.createElement("button");
+      addBtn.className="btn btn-outline sm"; addBtn.textContent="+ Add mapping"; addBtn.style.marginTop="4px";
+      addBtn.onclick=()=>{ (t.maps=t.maps||[]).push({val:"",color:HA_C_WARN}); drawMaps(); };
+      w.appendChild(addBtn); drawMaps(); return w;
+    }
+    function haBoolFields(t){
+      const w=document.createElement("div");
+      const row=document.createElement("div"); row.className="row2";
+      row.appendChild(haMiniField("True text",haInp(t.tText,"ON",v=>{ t.tText=v; haRenderDevice(); },"sm")));
+      row.appendChild(haMiniField("False text",haInp(t.fText,"OFF",v=>{ t.fText=v; haRenderDevice(); },"sm")));
+      w.appendChild(row);
+      const sw=document.createElement("div"); sw.style.marginTop="10px";
+      sw.appendChild(haSwatch("True color",t.tColor,v=>{ t.tColor=v; haRenderDevice(); }));
+      sw.appendChild(haSwatch("False color",t.fColor,v=>{ t.fColor=v; haRenderDevice(); }));
+      w.appendChild(sw);
+      const note=document.createElement("div"); note.className="field-hint"; note.style.marginTop="8px";
+      note.textContent="on / off, open / closed, home / not_home, and true / false all map to True / False. An unavailable state renders as --.";
+      w.appendChild(note); return w;
+    }
+
+    /* ---- probe one entity through the device (GET /api/ha-probe?entity=) ---- */
+    function haProbeTile(t,btn){
+      if(!t.entity_id){ showToast('Enter an entity ID first','info'); return; }
+      /* Send the live (possibly unsaved) base URL + token so Probe works before
+       * Save. Sent as request headers, not query params, so the token never
+       * lands in a request-URI log. Device falls back to saved config. */
+      var haHdrs={};
+      var baseEl=$('ha_base'); if(baseEl && baseEl.value.trim()) haHdrs['X-HA-BASE']=baseEl.value.trim();
+      var tokEl=$('ha_token'); if(tokEl && tokEl.value.trim()) haHdrs['X-HA-TOKEN']=tokEl.value.trim();
+      if(btn){ btn.disabled=true; btn.textContent="..."; }
+      fetch('/api/ha-probe?entity='+encodeURIComponent(t.entity_id),{headers:haHdrs})
+        .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+        .then(ent=>{
+          haEntities[t.entity_id]={state:ent.state,attributes:ent.attributes||{}};
+          t.error=false; t.probed=true; t.attr="state";
+          haDeriveDefaults(t);
+          haSyncAll();
+        })
+        .catch(e=>{ t.probed=true; t.error=true; haRenderBuilder(); showToast('Probe failed: '+e.message,'error'); })
+        .finally(()=>{ if(btn){ btn.disabled=false; btn.textContent="Probe"; } });
+    }
+
+    function haAddRow(){
+      if(haRows.length>=HA_MAX_ROWS || haTileCount()>=HA_MAX_TILES) return;
+      haRows.push([ haNumberTile("","state","New Tile","",1,0,100,HA_C_NORMAL,HA_C_NORMAL,HA_C_WARN) ]);
+      haSyncAll();
+    }
+    /* reorder a whole row up (-1) / down (+1); collapse state travels with the
+       row because haCollapsedRows keys on the row-array identity, not index. */
+    function haMoveRow(ri,dir){
+      const ni=ri+dir;
+      if(ni<0||ni>=haRows.length) return;
+      const tmp=haRows[ri]; haRows[ri]=haRows[ni]; haRows[ni]=tmp;
+      haSyncAll();
+    }
+    /* reorder a tile within its row left (-1) / right (+1). */
+    function haMoveTile(ri,ti,dir){
+      const row=haRows[ri]; if(!row) return;
+      const ni=ti+dir;
+      if(ni<0||ni>=row.length) return;
+      const tmp=row[ti]; row[ti]=row[ni]; row[ni]=tmp;
+      haSyncAll();
+    }
+    function haSyncAll(){ haRenderBuilder(); haRenderDevice(); }
+
+    /* ---- serialize / parse ha_tiles_config ---- */
+    function haSerializeTiles(){
+      const rows=haRows.map(row=>row.map(t=>{
+        const base={entity_id:t.entity_id||"",attr:t.attr||"state",label:t.label||""};
+        if(t.type==="number"){
+          return Object.assign(base,{type:"number",unit:t.unit||"",
+            decimals:haClampInt(t.decimals,0,4),low:haNum(t.low),high:haNum(t.high),
+            cLow:t.cLow||HA_C_NORMAL,cNorm:t.cNorm||HA_C_NORMAL,cHigh:t.cHigh||HA_C_WARN});
+        } else if(t.type==="text"){
+          return Object.assign(base,{type:"text",
+            maps:(t.maps||[]).slice(0,4).map(m=>({val:m.val||"",color:m.color||HA_C_NORMAL}))});
+        }
+        return Object.assign(base,{type:"bool",
+          tText:t.tText||"ON",fText:t.fText||"OFF",tColor:t.tColor||HA_C_OK,fColor:t.fColor||HA_C_CRIT});
+      }));
+      return JSON.stringify({rows:rows});
+    }
+    function haParseTiles(str){
+      haRows=[];
+      let cfg=null;
+      try{ cfg=JSON.parse(str||"{}"); }catch(e){ cfg=null; }
+      const rows=(cfg && Array.isArray(cfg.rows))?cfg.rows:[];
+      rows.slice(0,HA_MAX_ROWS).forEach(row=>{
+        if(!Array.isArray(row)) return;
+        const outRow=[];
+        row.slice(0,HA_MAX_PER_ROW).forEach(t=>{
+          if(!t||typeof t!=="object") return;
+          let tile;
+          if(t.type==="text") tile=haTextTile(t.entity_id||"",t.attr||"state",t.label||"",(t.maps||[]).slice(0,4).map(m=>({val:m.val||"",color:m.color||HA_C_NORMAL})));
+          else if(t.type==="bool") tile=haBoolTile(t.entity_id||"",t.attr||"state",t.label||"",t.tText||"ON",t.fText||"OFF",t.tColor||HA_C_OK,t.fColor||HA_C_CRIT);
+          else tile=haNumberTile(t.entity_id||"",t.attr||"state",t.label||"",t.unit||"",haClampInt(t.decimals,0,4),haNum(t.low),haNum(t.high),t.cLow||HA_C_NORMAL,t.cNorm||HA_C_NORMAL,t.cHigh||HA_C_WARN);
+          /* a saved tile is treated as probed so its full editor shows; the
+             attribute dropdown reappears only after a fresh Probe. */
+          tile.probed=true;
+          outRow.push(tile);
+        });
+        haRows.push(outRow);
+      });
+    }
+
+    /* ---- tab collect/populate/save ---- */
+    /* collectTab_ha is intentionally a no-op: Home Assistant uses its own
+       /api/ha-config endpoint, so the main /api/config Save never carries the
+       ~6 KB tiles blob. The HA tab has its own "Save Home Assistant" button. */
+    function collectTab_ha(data){ /* no-op by design */ }
+
+    function populateTab_ha(data){
+      /* Ignore the main-config blob; load Home Assistant from its own endpoint. */
+      if(!$('ha_rowsHost')) return;  /* fragment not injected yet */
+      haEntities={};
+      fetch('/api/ha-config').then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+        .then(d=>{
+          if($('ha_enabled')) $('ha_enabled').checked=!!d.ha_enabled;
+          if($('ha_base')) $('ha_base').value=d.ha_base_url||"";
+          if($('ha_token')) $('ha_token').value=d.ha_token||"";
+          if($('ha_interval')) $('ha_interval').value=String(d.ha_update_interval_s||30);
+          haParseTiles(d.ha_tiles_config||"");
+          haSyncAll();
+        })
+        .catch(e=>{ console.error('Load Home Assistant config failed',e); haParseTiles(""); haSyncAll(); });
+    }
+
+    /* Build the /api/ha-config payload from the current form + builder state.
+       Includes ha_enabled so both explicit Save and the live enable-toggle
+       persist the page on/off state to NVS. */
+    function haBuildConfigBody(){
+      return {
+        ha_enabled: $('ha_enabled')?!!$('ha_enabled').checked:false,
+        ha_base_url: $('ha_base')?$('ha_base').value.trim():"",
+        ha_token: $('ha_token')?$('ha_token').value.trim():"",
+        ha_update_interval_s: $('ha_interval')?parseInt($('ha_interval').value,10)||30:30,
+        ha_tiles_config: haSerializeTiles()
+      };
+    }
+
+    function haSaveConfig(){
+      const btn=$('ha_saveBtn'); if(!btn) return;
+      btn.disabled=true; btn.textContent="Saving...";
+      postJson('/api/ha-config',haBuildConfigBody()).then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
+        .then(()=>{ showToast('Home Assistant saved','success'); })
+        .catch(e=>{ showToast('Save failed: '+e.message,'error'); })
+        .finally(()=>{ btn.disabled=false; btn.textContent="Save Home Assistant"; });
+    }
+
+    /* Enable-toggle live-apply: the POST handler applies ha_enabled immediately
+       (shows/hides the page, starts/stops polling) and persists to NVS, so the
+       toggle takes effect without waiting for an explicit Save. */
+    function haOnEnabledToggle(){
+      haRenderDevice();
+      const on=$('ha_enabled')?!!$('ha_enabled').checked:false;
+      postJson('/api/ha-config',haBuildConfigBody()).then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
+        .then(()=>{ showToast(on?'Home Assistant page enabled':'Home Assistant page disabled','success'); })
+        .catch(e=>{ showToast('Apply failed: '+e.message,'error'); });
     }
 
     /* === Collapsible Cards === */

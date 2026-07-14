@@ -73,9 +73,11 @@ typedef uint8_t page_ref_t;
 #define PAGE_REF_OVL_INFO_SESSION   ((page_ref_t)21)
 #define PAGE_REF_OVL_THUMBNAIL      ((page_ref_t)22)
 #define PAGE_REF_OVL_EVENTLOG       ((page_ref_t)23)
+#define PAGE_REF_JSON               ((page_ref_t)24)
+#define PAGE_REF_HA                 ((page_ref_t)25)
 
 /** Exclusive upper bound on assigned ids. */
-#define PAGE_REF_ID_MAX ((page_ref_t)24)
+#define PAGE_REF_ID_MAX ((page_ref_t)26)
 
 /** What kind of UI surface a page_ref names. */
 typedef enum {

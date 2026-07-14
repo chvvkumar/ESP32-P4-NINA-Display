@@ -15,6 +15,8 @@
 #include "nina_sysinfo.h"
 #include "nina_summary.h"
 #include "nina_allsky.h"
+#include "nina_json.h"
+#include "nina_ha.h"
 #include "nina_spotify.h"
 #include "nina_clock.h"
 #include "page_registry.h"
@@ -65,6 +67,40 @@ static const page_ops_t s_allsky_page_ops = {
     .show         = NULL,
     .hide         = NULL,
     .apply_theme  = allsky_page_apply_theme,
+    .is_available = NULL,
+};
+
+/* JSON Display page — always at PAGE_IDX_JSON (4), excluded from indicators.
+ * json_obj is NULL when disabled (same NULL-when-disabled pattern as AllSky). */
+static lv_obj_t *json_obj = NULL;
+static lv_obj_t *json_page_created = NULL;  /* Always holds the created page object */
+
+static lv_obj_t *json_ops_get_obj(void) { return json_obj; }
+
+static const page_ops_t s_json_page_ops = {
+    .create       = json_page_create,
+    .destroy      = NULL,
+    .get_obj      = json_ops_get_obj,
+    .show         = NULL,
+    .hide         = NULL,
+    .apply_theme  = json_page_apply_theme,
+    .is_available = NULL,
+};
+
+/* Home Assistant page — always at PAGE_IDX_HA (5), excluded from indicators.
+ * ha_obj is NULL when disabled (same NULL-when-disabled pattern as JSON). */
+static lv_obj_t *ha_obj = NULL;
+static lv_obj_t *ha_page_created = NULL;  /* Always holds the created page object */
+
+static lv_obj_t *ha_ops_get_obj(void) { return ha_obj; }
+
+static const page_ops_t s_ha_page_ops = {
+    .create       = ha_page_create,
+    .destroy      = NULL,
+    .get_obj      = ha_ops_get_obj,
+    .show         = NULL,
+    .hide         = NULL,
+    .apply_theme  = ha_page_apply_theme,
     .is_available = NULL,
 };
 
@@ -127,7 +163,7 @@ static const page_ops_t s_image_display_page_ops = {
     .is_available = NULL,
 };
 
-/* Summary page — at PAGE_IDX_SUMMARY (4), excluded from indicators */
+/* Summary page — at PAGE_IDX_SUMMARY (5), excluded from indicators */
 static lv_obj_t *summary_obj = NULL;
 
 /* ── Summary page registry ops (Task 4.7 wave P7b) ──
@@ -170,7 +206,7 @@ static const page_ops_t s_sysinfo_page_ops = {
     .apply_theme  = sysinfo_page_apply_theme,
     .is_available = NULL,
 };
-int total_page_count = 0;   /* page_count + EXTRA_PAGES (allsky + spotify + clock + summary + settings + sysinfo) */
+int total_page_count = 0;   /* page_count + EXTRA_PAGES (allsky + spotify + clock + image_display + json + summary + settings + sysinfo) */
 
 /* Private state */
 static lv_obj_t *scr_dashboard = NULL;
@@ -251,7 +287,9 @@ lv_obj_t *create_value_label(lv_obj_t *parent) {
  *   PAGE_IDX_SPOTIFY       (1)                  = Spotify page
  *   PAGE_IDX_CLOCK         (2)                  = Clock page (always present)
  *   PAGE_IDX_IMAGE_DISPLAY (3)                  = Image Display page
- *   PAGE_IDX_SUMMARY       (4)                  = summary page
+ *   PAGE_IDX_JSON          (4)                  = JSON Display page
+ *   PAGE_IDX_HA            (5)                  = Home Assistant page
+ *   PAGE_IDX_SUMMARY       (6)                  = summary page
  *   NINA_PAGE_OFFSET .. NINA_PAGE_OFFSET+pc-1   = NINA instance pages  (pages[idx - NINA_PAGE_OFFSET])
  *   SETTINGS_PAGE_IDX(pc)                       = settings page
  *   SYSINFO_PAGE_IDX(pc)                        = sysinfo page
@@ -275,6 +313,8 @@ static page_ref_t page_idx_to_ref_id(int idx) {
     if (idx == PAGE_IDX_SUMMARY) return PAGE_REF_SUMMARY;
     if (idx == PAGE_IDX_ALLSKY) return PAGE_REF_ALLSKY;
     if (idx == PAGE_IDX_SPOTIFY) return PAGE_REF_SPOTIFY;
+    if (idx == PAGE_IDX_JSON) return PAGE_REF_JSON;
+    if (idx == PAGE_IDX_HA) return PAGE_REF_HA;
     if (idx == PAGE_IDX_IMAGE_DISPLAY) return PAGE_REF_IMG_DEFAULT;
     if (idx == SYSINFO_PAGE_IDX(page_count)) return PAGE_REF_SYSINFO;
     return PAGE_REF_ID_MAX;
@@ -494,6 +534,8 @@ void nina_dashboard_apply_theme(int theme_index) {
      * keeps the hidden-but-created page current so a later re-enable shows
      * the correct theme. Settings stays hand-dispatched (modal, lazy). */
     ops_apply_theme(PAGE_IDX_ALLSKY);
+    ops_apply_theme(PAGE_IDX_JSON);
+    ops_apply_theme(PAGE_IDX_HA);
     ops_apply_theme(PAGE_IDX_SPOTIFY);
     ops_apply_theme(PAGE_IDX_CLOCK);
     ops_apply_theme(PAGE_IDX_IMAGE_DISPLAY);
@@ -1149,6 +1191,20 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     lv_obj_add_flag(allsky_page_created, LV_OBJ_FLAG_HIDDEN);
     allsky_obj = app_config_get()->allsky_enabled ? allsky_page_created : NULL;
 
+    /* JSON Display page — PAGE_IDX_JSON, always created but hidden initially.
+     * json_obj is set to NULL when disabled to remove from navigation. */
+    page_registry_set_ops(PAGE_REF_JSON, &s_json_page_ops);
+    json_page_created = s_json_page_ops.create(main_cont);
+    lv_obj_add_flag(json_page_created, LV_OBJ_FLAG_HIDDEN);
+    json_obj = app_config_get()->json_enabled ? json_page_created : NULL;
+
+    /* Home Assistant page — PAGE_IDX_HA, always created but hidden initially.
+     * ha_obj is set to NULL when disabled to remove from navigation. */
+    page_registry_set_ops(PAGE_REF_HA, &s_ha_page_ops);
+    ha_page_created = s_ha_page_ops.create(main_cont);
+    lv_obj_add_flag(ha_page_created, LV_OBJ_FLAG_HIDDEN);
+    ha_obj = app_config_get()->ha_enabled ? ha_page_created : NULL;
+
     /* Spotify page — PAGE_IDX_SPOTIFY, always created but hidden initially.
      * spotify_obj is set to NULL when disabled to remove from navigation. */
     page_registry_set_ops(PAGE_REF_SPOTIFY, &s_spotify_page_ops);
@@ -1198,7 +1254,7 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     page_registry_set_ops(PAGE_REF_SYSINFO, &s_sysinfo_page_ops);
     sysinfo_obj = s_sysinfo_page_ops.create(main_cont);
     lv_obj_add_flag(sysinfo_obj, LV_OBJ_FLAG_HIDDEN);
-    total_page_count = page_count + EXTRA_PAGES;  /* allsky + spotify + clock + summary + NINA pages + settings + sysinfo */
+    total_page_count = page_count + EXTRA_PAGES;  /* allsky + spotify + clock + image_display + json + summary + NINA pages + settings + sysinfo */
 
     /* Page indicator dots — one dot per available NINA slot (not allsky, spotify, summary, settings, or sysinfo) */
     create_page_indicator(scr_dashboard, nina_available_count);
@@ -1325,6 +1381,44 @@ void nina_dashboard_set_allsky_enabled(bool enabled) {
             lv_obj_add_flag(allsky_page_created, LV_OBJ_FLAG_HIDDEN);
         }
         allsky_obj = NULL;
+    }
+}
+
+bool nina_dashboard_is_json_page(void) {
+    return json_obj != NULL && active_page == PAGE_IDX_JSON;
+}
+
+void nina_dashboard_set_json_enabled(bool enabled) {
+    if (enabled) {
+        json_obj = json_page_created;
+    } else {
+        /* If currently viewing the JSON page, switch to summary first */
+        if (active_page == PAGE_IDX_JSON && json_obj != NULL) {
+            nina_dashboard_show_page(PAGE_IDX_SUMMARY, total_page_count);
+        }
+        if (json_page_created) {
+            lv_obj_add_flag(json_page_created, LV_OBJ_FLAG_HIDDEN);
+        }
+        json_obj = NULL;
+    }
+}
+
+bool nina_dashboard_is_ha_page(void) {
+    return ha_obj != NULL && active_page == PAGE_IDX_HA;
+}
+
+void nina_dashboard_set_ha_enabled(bool enabled) {
+    if (enabled) {
+        ha_obj = ha_page_created;
+    } else {
+        /* If currently viewing the HA page, switch to summary first */
+        if (active_page == PAGE_IDX_HA && ha_obj != NULL) {
+            nina_dashboard_show_page(PAGE_IDX_SUMMARY, total_page_count);
+        }
+        if (ha_page_created) {
+            lv_obj_add_flag(ha_page_created, LV_OBJ_FLAG_HIDDEN);
+        }
+        ha_obj = NULL;
     }
 }
 

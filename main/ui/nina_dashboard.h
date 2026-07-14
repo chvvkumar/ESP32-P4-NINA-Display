@@ -122,6 +122,32 @@ bool nina_dashboard_is_image_display_page(void);
 void nina_dashboard_set_image_display_enabled(bool enabled);
 
 /**
+ * @brief Check if the active page is the JSON Display page
+ * @return true if the JSON Display page is currently shown
+ */
+bool nina_dashboard_is_json_page(void);
+
+/**
+ * @brief Enable or disable the JSON Display page at runtime.
+ * When disabled, switches away if currently viewing and removes from navigation.
+ * Must be called with LVGL display lock held.
+ */
+void nina_dashboard_set_json_enabled(bool enabled);
+
+/**
+ * @brief Check if the active page is the Home Assistant page
+ * @return true if the Home Assistant page is currently shown
+ */
+bool nina_dashboard_is_ha_page(void);
+
+/**
+ * @brief Enable or disable the Home Assistant page at runtime.
+ * When disabled, switches away if currently viewing and removes from navigation.
+ * Must be called with LVGL display lock held.
+ */
+void nina_dashboard_set_ha_enabled(bool enabled);
+
+/**
  * @brief Check if the active page is the clock page
  * @return true if the clock page is currently shown
  */

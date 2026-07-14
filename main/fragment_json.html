@@ -1,0 +1,230 @@
+<!-- JSON Display settings fragment. Markup only: the builder JS lives in
+     config_ui.html (populateTab_json / collectTab_json / renderJsonBuilder and
+     helpers). Injected into #tab-json via GET /ui/fragment?tab=json. Scoped
+     styles under #jd-root so builder-only classes never leak to other tabs. -->
+<div id="jd-root">
+  <style>
+    /* on-device Default-theme colors used by the live preview */
+    #jd-root { --jd-bg:#050505; --jd-bento:#0a0a0a; --jd-border:#222; --jd-label:#6b7280; --jd-text:#a3a3a3; }
+
+    #jd-root .jd-count {
+      margin-left:auto; font-size:0.68rem; letter-spacing:0.02em; color:var(--text-muted);
+      text-transform:none; font-weight:600; background:rgba(255,255,255,0.05);
+      border:1px solid var(--border, rgba(255,255,255,0.12)); padding:3px 10px; border-radius:999px;
+    }
+    #jd-root .jd-count.full { color:var(--warning,#fbbf24); border-color:rgba(251,191,36,0.4); }
+
+    #jd-root .input.mono { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:0.78rem; }
+    #jd-root .input.sm { min-height:38px; padding:8px 11px; font-size:0.8rem; }
+    #jd-root .btn.sm { min-height:34px; padding:6px 12px; font-size:0.76rem; }
+    #jd-root .btn.full { width:100%; }
+    #jd-root .row2 { display:flex; gap:12px; flex-wrap:wrap; }
+    #jd-root .row2 > div { flex:1 1 120px; }
+
+    /* JSON tree */
+    #jd-root .json-tree {
+      margin-top:12px; padding:12px; max-height:260px; overflow:auto;
+      background:rgba(0,0,0,0.28); border:1px solid rgba(255,255,255,0.06); border-radius:var(--radius-sm,10px);
+      font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:0.76rem; line-height:1.7;
+    }
+    #jd-root .json-tree.hidden { display:none; }
+    #jd-root .jt-line { white-space:nowrap; }
+    #jd-root .jt-key { color:var(--accent,#7aa2f7); }
+    #jd-root .jt-punct { color:var(--text-hint,#7a8ba4); }
+    #jd-root .jt-val-num { color:#7fd88f; }
+    #jd-root .jt-val-str { color:#e0b877; }
+    #jd-root .jt-val-bool { color:#c792ea; }
+    #jd-root .jt-leaf {
+      display:inline-flex; align-items:center; gap:6px; cursor:pointer; border-radius:6px;
+      padding:0 4px; margin:0 -4px; border:1px solid transparent;
+    }
+    #jd-root .jt-leaf:hover, #jd-root .jt-leaf:focus-visible {
+      background:rgba(122,162,247,0.12); border-color:rgba(122,162,247,0.3); outline:none;
+    }
+    #jd-root .jt-add { font-size:0.62rem; color:var(--accent,#7aa2f7); opacity:0; transition:opacity 0.15s; }
+    #jd-root .jt-leaf:hover .jt-add, #jd-root .jt-leaf:focus-visible .jt-add { opacity:1; }
+
+    /* row builder */
+    #jd-root .rb-row {
+      border:1px solid var(--border,rgba(255,255,255,0.12)); border-radius:var(--radius-sm,10px);
+      background:rgba(255,255,255,0.02); padding:12px; margin-bottom:12px;
+    }
+    #jd-root .rb-row-head {
+      display:flex; align-items:center; gap:10px; margin-bottom:10px; cursor:pointer;
+      border-radius:8px; padding:4px; margin:-4px -4px 6px; user-select:none;
+    }
+    #jd-root .rb-row-head:hover { background:rgba(255,255,255,0.03); }
+    #jd-root .rb-row-head:focus-visible { outline:none; box-shadow:0 0 0 2px rgba(122,162,247,0.4); }
+    #jd-root .rb-row.collapsed .rb-row-head { margin-bottom:-4px; }
+    #jd-root .rb-caret { font-size:0.7rem; color:var(--text-muted,#94a3b8); width:12px; flex-shrink:0; }
+    #jd-root .rb-name { font-size:0.72rem; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:var(--text-muted,#94a3b8); }
+    #jd-root .rb-fill { margin-left:auto; font-size:0.68rem; color:var(--text-hint,#7a8ba4); }
+    #jd-root .rb-tiles { display:grid; gap:10px; }
+    #jd-root .rb-tile {
+      border:1px solid var(--border,rgba(255,255,255,0.12)); border-radius:var(--radius-sm,10px);
+      background:var(--elevated,rgba(48,54,72,0.96)); padding:12px;
+    }
+    #jd-root .rb-tile-head { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+    #jd-root .rb-tile-head .idx {
+      width:20px; height:20px; border-radius:6px; flex-shrink:0; background:rgba(122,162,247,0.16);
+      color:var(--accent,#7aa2f7); font-size:0.66rem; font-weight:700; display:grid; place-items:center;
+    }
+    #jd-root .rb-tile-head .path-preview {
+      font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:0.7rem;
+      color:var(--text-hint,#7a8ba4); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    }
+    #jd-root .rb-tile-head .x {
+      margin-left:auto; background:none; border:none; color:var(--text-hint,#7a8ba4); cursor:pointer;
+      font-size:1.1rem; line-height:1; padding:2px 6px; border-radius:6px;
+    }
+    #jd-root .rb-tile-head .x:hover { color:var(--danger,#f87171); background:rgba(239,68,68,0.08); }
+    #jd-root .mini-label { font-size:0.66rem; color:var(--text-hint,#7a8ba4); margin:0 0 4px; text-transform:uppercase; letter-spacing:0.04em; }
+    #jd-root .type-fields { margin-top:10px; padding-top:10px; border-top:1px dashed var(--border,rgba(255,255,255,0.12)); }
+
+    #jd-root .swatch-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+    #jd-root .swatch {
+      -webkit-appearance:none; appearance:none; width:34px; height:30px; padding:0;
+      border:1px solid var(--border,rgba(255,255,255,0.12)); border-radius:8px; background:none; cursor:pointer; flex-shrink:0;
+    }
+    #jd-root .swatch::-webkit-color-swatch-wrapper { padding:3px; }
+    #jd-root .swatch::-webkit-color-swatch { border:none; border-radius:5px; }
+    #jd-root .swatch-row .lab { font-size:0.74rem; color:var(--text-secondary,#b8c2d0); flex:1; }
+    #jd-root .map-row { display:grid; grid-template-columns:1fr auto; gap:8px; margin-bottom:8px; align-items:center; }
+
+    /* legend */
+    #jd-root .legend { font-size:0.74rem; color:var(--text-secondary,#b8c2d0); line-height:1.7; }
+    #jd-root .legend code {
+      font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; color:#f4f4f5;
+      background:rgba(0,0,0,0.4); border:1px solid var(--border,rgba(255,255,255,0.12));
+      padding:1px 7px; border-radius:6px; font-size:0.72rem; margin-right:8px;
+    }
+    #jd-root .legend .l-item { display:flex; gap:4px; padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05); }
+    #jd-root .legend .l-item:last-child { border-bottom:none; }
+    #jd-root .legend .l-desc { color:var(--text-muted,#94a3b8); }
+
+    /* live preview: square 720x720 canvas scaled to fit */
+    #jd-root .jd-device {
+      position:relative; width:100%; max-width:720px; margin:0 auto; aspect-ratio:1/1;
+      container-type:size; background:var(--jd-bg); border-radius:12px; overflow:hidden;
+      display:flex; flex-direction:column; padding:2.2cqmin; gap:1.6cqmin; border:1px solid var(--jd-border);
+    }
+    #jd-root .jd-dev-page { flex:1 1 auto; display:flex; flex-direction:column; gap:1.6cqmin; min-height:0; }
+    #jd-root .dev-row { flex:1 1 0; display:flex; gap:1.6cqmin; min-height:0; }
+    #jd-root .dev-tile {
+      flex:1 1 0; min-width:0; background:var(--jd-bento); border:1px solid var(--jd-border);
+      border-radius:3.3cqmin; padding:2.2cqmin; display:flex; flex-direction:column;
+      align-items:center; justify-content:center; gap:0.8cqmin; text-align:center; overflow:hidden;
+    }
+    #jd-root .dev-tile .t-label {
+      font-size:2.6cqmin; font-weight:600; letter-spacing:0.14em; text-transform:uppercase;
+      color:var(--jd-label); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%;
+    }
+    #jd-root .dev-tile .t-value {
+      font-size:7.4cqmin; font-weight:700; line-height:1.02; color:var(--jd-text);
+      font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%;
+    }
+    #jd-root .dev-tile.banner .t-value { font-size:9cqmin; }
+    #jd-root .dev-tile .t-unit { font-size:3cqmin; color:var(--jd-label); font-weight:500; margin-top:-0.2cqmin; }
+    #jd-root .jd-device-empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+      color:var(--jd-label); font-size:3.4cqmin; text-align:center; padding:8cqmin; }
+
+    /* two-column layout: settings LEFT, live preview RIGHT (sticky) */
+    #jd-root .jd-layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:20px; }
+    /* Break out of the .content 960px cap so the two equal columns match the
+       centered top-nav tab bar (~1200px), not the full viewport. Capped +
+       viewport-centered via margin (not transform) so the sticky preview keeps
+       working. Only above the single-column stack breakpoint. */
+    @media (min-width:901px){
+      #jd-root .jd-layout {
+        width:min(calc(100vw - 48px), 1200px); max-width:none;
+        margin-left:calc(50% - min(50vw - 24px, 600px));
+      }
+    }
+    #jd-root .jd-col-settings { min-width:0; }
+    #jd-root .jd-col-settings > .card:last-child { margin-bottom:0; }
+    #jd-root .jd-col-preview { min-width:0; }
+    #jd-root .jd-sticky { position:sticky; top:76px; }
+    #jd-root .jd-sticky > .card { margin-bottom:0; }
+    @media (max-width:900px){
+      #jd-root .jd-layout { grid-template-columns:1fr; }
+      #jd-root .jd-sticky { position:static; top:auto; }
+    }
+  </style>
+
+  <div class="jd-layout">
+  <div class="jd-col-settings">
+  <!-- SOURCE -->
+  <div class="card">
+    <div class="card-title"><span class="card-title-label">Source</span></div>
+    <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+      <span class="toggle-label">Enable JSON Display</span>
+      <label class="toggle"><input type="checkbox" id="jd_enabled" onchange="jdOnSourceChange()"><span class="toggle-track"></span></label>
+    </div>
+    <div class="field-hint">Turns on the page and starts reading the source. Off hides the page and stops requests.</div>
+
+    <div class="subsection">
+      <div class="field">
+        <label class="field-label" for="jd_url">JSON URL</label>
+        <input class="input mono" id="jd_url" maxlength="255" placeholder="http://192.168.1.50:8080/api/status" oninput="jdOnSourceChange()">
+        <div class="field-hint">Full address of a JSON endpoint (HTTP or HTTPS, up to 255 characters). Point at a <strong>single, curated endpoint</strong> that returns just the values you need, not a large collection. A response with thousands of items (over 1&nbsp;MB) is too large to poll on the device.</div>
+      </div>
+      <div class="field">
+        <label class="field-label" for="jd_auth">Auth Header <span style="color:var(--text-hint);font-weight:400">(optional)</span></label>
+        <input class="input mono" id="jd_auth" maxlength="255" placeholder="X-API-Key: &lt;key&gt;">
+        <div class="field-hint">One header sent with each request, written as <code>Name: value</code> (for example <code>Authorization: Bearer &lt;token&gt;</code> or <code>X-API-Key: &lt;key&gt;</code>). Tile key paths read nested values with dot and <code>[index]</code> notation; a <code>[field=value]</code> selector matches an array element by one of its fields. Leave blank for none.</div>
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label class="field-label" for="jd_interval">Poll Interval</label>
+          <select class="input" id="jd_interval">
+            <option value="5">5 seconds</option>
+            <option value="10">10 seconds</option>
+            <option value="30" selected>30 seconds</option>
+            <option value="60">1 minute</option>
+            <option value="120">2 minutes</option>
+            <option value="300">5 minutes</option>
+          </select>
+          <div class="field-hint">How often the device re-reads the source (5 to 300 seconds).</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="subsection">
+      <div class="subsection-title">Import keys from a live response</div>
+      <button type="button" class="btn btn-primary full" id="jd_fetchBtn" onclick="jdFetchJson()">Fetch JSON</button>
+      <div class="field-hint" style="margin-top:8px">Reads the current response and lists every value. Click a value to add it as a tile.</div>
+      <div class="json-tree hidden" id="jd_tree" aria-label="Sample JSON response"></div>
+    </div>
+  </div>
+
+  <!-- LAYOUT BUILDER -->
+  <div class="card nocollapse">
+    <div class="card-title"><span class="card-title-label">Layout</span><span class="jd-count" id="jd_tileCount">0 / 15 tiles</span></div>
+    <div class="field-hint" style="margin-bottom:14px">Build the page as rows of tiles. Up to <strong>6 rows</strong>, <strong>4 tiles</strong> per row, <strong>15 tiles</strong> total.</div>
+    <div id="jd_rowsHost"></div>
+    <button type="button" class="btn btn-outline full" id="jd_addRowBtn" onclick="jdAddRow()" style="margin-top:4px">+ Add Row</button>
+  </div>
+
+  <!-- SAVE -->
+  <div class="card nocollapse">
+    <div class="field-hint" style="margin-bottom:12px">Saving persists these settings to the device and applies them immediately.</div>
+    <button type="button" class="btn btn-primary full" id="jd_saveBtn" onclick="jdSaveConfig()">Save JSON Display</button>
+  </div>
+
+  </div><!-- /.jd-col-settings -->
+
+  <div class="jd-col-preview">
+    <div class="jd-sticky">
+      <!-- PREVIEW -->
+      <div class="card">
+        <div class="card-title"><span class="card-title-label">Preview</span></div>
+        <div class="field-hint" style="margin-bottom:12px">720x720 layout. Each row splits the height evenly; tiles in a row grow to fill the width. Values recolor by threshold, value map, or true/false state. Fetch JSON to preview with live values.</div>
+        <div class="jd-device">
+          <div class="jd-dev-page" id="jd_devPage"></div>
+          <div class="jd-device-empty" id="jd_devEmpty" style="display:none">No tiles yet</div>
+        </div>
+      </div>
+    </div>
+  </div><!-- /.jd-col-preview -->
+  </div><!-- /.jd-layout -->
+</div>

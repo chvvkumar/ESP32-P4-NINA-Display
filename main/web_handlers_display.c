@@ -182,7 +182,7 @@ esp_err_t brightness_post_handler(httpd_req_t *req)
         /* Live preview: apply to the in-memory config (no NVS write until Save). */
         app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
         if (cfg) {
-            *cfg = app_config_get_snapshot();
+            app_config_get_snapshot_into(cfg);
             cfg->brightness = brightness;
             app_config_apply(cfg);
             heap_caps_free(cfg);
@@ -236,7 +236,7 @@ esp_err_t color_brightness_post_handler(httpd_req_t *req)
             httpd_resp_send_500(req);
             return ESP_FAIL;
         }
-        *cfg = app_config_get_snapshot();
+        app_config_get_snapshot_into(cfg);
         cfg->color_brightness = cb;
         app_config_apply(cfg);
 
@@ -297,7 +297,7 @@ esp_err_t theme_post_handler(httpd_req_t *req)
             httpd_resp_send_500(req);
             return ESP_FAIL;
         }
-        *cfg = app_config_get_snapshot();
+        app_config_get_snapshot_into(cfg);
         cfg->theme_index = idx;
         app_config_apply(cfg);
         heap_caps_free(cfg);
@@ -354,7 +354,7 @@ esp_err_t widget_style_post_handler(httpd_req_t *req)
             httpd_resp_send_500(req);
             return ESP_FAIL;
         }
-        *cfg = app_config_get_snapshot();
+        app_config_get_snapshot_into(cfg);
         cfg->widget_style = (uint8_t)idx;
         app_config_apply(cfg);
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
@@ -462,7 +462,7 @@ esp_err_t screen_rotation_post_handler(httpd_req_t *req)
             httpd_resp_send_500(req);
             return ESP_FAIL;
         }
-        *cfg = app_config_get_snapshot();
+        app_config_get_snapshot_into(cfg);
         cfg->screen_rotation = (uint8_t)rot;
         app_config_apply(cfg);
         heap_caps_free(cfg);

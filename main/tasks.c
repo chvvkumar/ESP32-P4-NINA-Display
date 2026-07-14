@@ -10,6 +10,8 @@
 #include "nina_websocket.h"
 #include "nina_connection.h"
 #include "allsky_client.h"
+#include "json_client.h"
+#include "ha_client.h"
 #include "goes_client.h"
 #include "moon_render.h"
 #include "moon_sphere.h"   /* tgx sphere renderer for the Moon page */
@@ -25,6 +27,8 @@
 #include "ui/nina_summary.h"
 #include "ui/nina_sysinfo.h"
 #include "ui/nina_allsky.h"
+#include "ui/nina_json.h"
+#include "ui/nina_ha.h"
 #include "ui/nina_spotify.h"
 #include "ui/nina_graph_overlay.h"
 #include "ui/nina_info_overlay.h"
@@ -161,12 +165,22 @@ static instance_poll_ctx_t poll_contexts[MAX_NINA_INSTANCES];
 TaskHandle_t spotify_task_handle = NULL;
 _Atomic bool spotify_page_active = false;
 _Atomic bool allsky_page_active  = false;
+_Atomic bool json_page_active    = false;
+_Atomic bool ha_page_active      = false;
 _Atomic bool clock_page_active   = false;
 _Atomic bool nina_pages_active   = false;
 
 /* AllSky polling state */
 static allsky_data_t allsky_data;
 static TaskHandle_t allsky_task_handle = NULL;
+
+/* JSON Display polling state */
+static json_data_t json_data;
+static TaskHandle_t json_task_handle = NULL;
+
+/* Home Assistant polling state */
+static ha_data_t ha_data;
+static TaskHandle_t ha_task_handle = NULL;
 
 /* GOES / Image Display polling state.
  * Non-static: tasks.h externs these and web handlers use goes_task_handle /
@@ -369,6 +383,10 @@ void input_task(void *arg) {
                     && !app_config_get()->allsky_enabled) continue;
                 if (candidate == PAGE_IDX_SPOTIFY && !nina_dashboard_is_spotify_page()
                     && !app_config_get()->spotify_enabled) continue;
+                if (candidate == PAGE_IDX_JSON && !nina_dashboard_is_json_page()
+                    && !app_config_get()->json_enabled) continue;
+                if (candidate == PAGE_IDX_HA && !nina_dashboard_is_ha_page()
+                    && !app_config_get()->ha_enabled) continue;
                 if (candidate == PAGE_IDX_IMAGE_DISPLAY && !nina_dashboard_is_image_display_page()
                     && !app_config_get()->image_display_enabled) continue;
                 new_page = candidate;
@@ -606,6 +624,166 @@ void allsky_poll_task(void *arg) {
     };
 
     poll_loop_run(&spec, NULL);
+}
+
+// =============================================================================
+// JSON Display Poll Task — independent poller pinned to Core 0
+// =============================================================================
+
+static bool json_poll_once(void *arg) {
+    (void)arg;
+
+    /* Read fields directly from config pointer — avoids copying the full
+     * ~7.6 KB app_config_t onto this task's small stack. */
+    const app_config_t *cfg = app_config_get();
+
+    /* Only poll when a URL is configured. */
+    if (cfg->json_url[0] != '\0') {
+        json_client_poll(cfg->json_url, cfg->json_auth_header,
+                         app_config_get_json_tiles(), &json_data);
+    }
+    return true; /* no failure signal — retry at interval, matches allsky */
+}
+
+static uint32_t json_interval_ms(void *arg) {
+    (void)arg;
+
+    const app_config_t *cfg = app_config_get();
+
+    /* Configured interval (clamped 5-300s at config-validate time; floor here). */
+    uint32_t interval_ms = (uint32_t)cfg->json_update_interval_s * 1000;
+    if (interval_ms < 5000) interval_ms = 5000;
+    return interval_ms;
+}
+
+void json_poll_task(void *arg) {
+    (void)arg;
+    ESP_LOGI(TAG, "JSON Display poll task started");
+
+    poll_loop_spec_t spec = {
+        .name = "json",
+        .wifi_group = s_wifi_event_group,
+        .wifi_bits = WIFI_CONNECTED_BIT,
+        .page_active = &json_page_active,
+        .poll_once = json_poll_once,
+        .interval_ms = json_interval_ms,
+        .backoff_initial_ms = 0,
+        .backoff_max_ms = 0,
+    };
+
+    poll_loop_run(&spec, NULL);
+}
+
+void json_ensure_task_running(void)
+{
+    /* Only spawn when the page is enabled; a runtime enable via the web UI must
+     * start polling without a reboot (mirrors goes_ensure_task_running). */
+    if (!app_config_get()->json_enabled) return;
+
+    /* Guard check-and-assign against a double-spawn race: this may be called
+     * concurrently from the boot task and an httpd task (runtime enable). */
+    static portMUX_TYPE json_spawn_mux = portMUX_INITIALIZER_UNLOCKED;
+    portENTER_CRITICAL(&json_spawn_mux);
+    bool already = (json_task_handle != NULL);
+    portEXIT_CRITICAL(&json_spawn_mux);
+    if (already) return;
+
+    /* PSRAM stack 10240 words, pinned to Core 0, priority 3 — mirrors the boot
+     * spawn in data_update_task exactly. 10240 (not 6144) gives TLS headroom:
+     * an https JSON source runs an mbedTLS handshake on this task's stack. */
+    StackType_t  *stack = heap_caps_malloc(10240 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+    StaticTask_t *tcb   = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (stack && tcb) {
+        portENTER_CRITICAL(&json_spawn_mux);
+        json_task_handle = xTaskCreateStaticPinnedToCore(
+            json_poll_task, "json", 10240, NULL, 3, stack, tcb, 0);
+        portEXIT_CRITICAL(&json_spawn_mux);
+        ESP_LOGI(TAG, "JSON Display poll task spawned");
+    } else {
+        ESP_LOGE(TAG, "Failed to allocate JSON Display poll task stack");
+        if (stack) heap_caps_free(stack);
+        if (tcb) heap_caps_free(tcb);
+    }
+}
+
+// =============================================================================
+// Home Assistant Poll Task — independent poller pinned to Core 0
+// =============================================================================
+
+static bool ha_poll_once(void *arg) {
+    (void)arg;
+
+    /* Read fields directly from config pointer — avoids copying the full
+     * ~7.6 KB app_config_t onto this task's small stack. */
+    const app_config_t *cfg = app_config_get();
+
+    /* Only poll when a base URL is configured. */
+    if (cfg->ha_base_url[0] != '\0') {
+        ha_client_poll(cfg->ha_base_url, cfg->ha_token,
+                       app_config_get_ha_tiles(), &ha_data);
+    }
+    return true; /* no failure signal — retry at interval, matches json */
+}
+
+static uint32_t ha_interval_ms(void *arg) {
+    (void)arg;
+
+    const app_config_t *cfg = app_config_get();
+
+    /* Configured interval (clamped 5-300s at config-validate time; floor here). */
+    uint32_t interval_ms = (uint32_t)cfg->ha_update_interval_s * 1000;
+    if (interval_ms < 5000) interval_ms = 5000;
+    return interval_ms;
+}
+
+void ha_poll_task(void *arg) {
+    (void)arg;
+    ESP_LOGI(TAG, "Home Assistant poll task started");
+
+    poll_loop_spec_t spec = {
+        .name = "ha",
+        .wifi_group = s_wifi_event_group,
+        .wifi_bits = WIFI_CONNECTED_BIT,
+        .page_active = &ha_page_active,
+        .poll_once = ha_poll_once,
+        .interval_ms = ha_interval_ms,
+        .backoff_initial_ms = 0,
+        .backoff_max_ms = 0,
+    };
+
+    poll_loop_run(&spec, NULL);
+}
+
+void ha_ensure_task_running(void)
+{
+    /* Only spawn when the page is enabled; a runtime enable via the web UI must
+     * start polling without a reboot (mirrors json_ensure_task_running). */
+    if (!app_config_get()->ha_enabled) return;
+
+    /* Guard check-and-assign against a double-spawn race: this may be called
+     * concurrently from the boot task and an httpd task (runtime enable). */
+    static portMUX_TYPE ha_spawn_mux = portMUX_INITIALIZER_UNLOCKED;
+    portENTER_CRITICAL(&ha_spawn_mux);
+    bool already = (ha_task_handle != NULL);
+    portEXIT_CRITICAL(&ha_spawn_mux);
+    if (already) return;
+
+    /* PSRAM stack 10240 words, pinned to Core 0, priority 3 — mirrors the boot
+     * spawn in data_update_task exactly. 10240 (not 6144) gives TLS headroom:
+     * an https HA base runs an mbedTLS handshake on this task's stack. */
+    StackType_t  *stack = heap_caps_malloc(10240 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+    StaticTask_t *tcb   = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (stack && tcb) {
+        portENTER_CRITICAL(&ha_spawn_mux);
+        ha_task_handle = xTaskCreateStaticPinnedToCore(
+            ha_poll_task, "ha", 10240, NULL, 3, stack, tcb, 0);
+        portEXIT_CRITICAL(&ha_spawn_mux);
+        ESP_LOGI(TAG, "Home Assistant poll task spawned");
+    } else {
+        ESP_LOGE(TAG, "Failed to allocate Home Assistant poll task stack");
+        if (stack) heap_caps_free(stack);
+        if (tcb) heap_caps_free(tcb);
+    }
 }
 
 // =============================================================================
@@ -2452,6 +2630,44 @@ boot_update_check_done:
         }
     }
 
+    /* JSON Display poll task (pinned to Core 0, networking).
+     * json_data_init runs UNCONDITIONALLY so the mutex exists before any later
+     * web-handler-triggered enable + page entry; the task itself is spawned only
+     * when the page is enabled. */
+    json_client_init(&json_data);
+    if (app_config_get()->json_enabled) {
+        StackType_t *js_stack = heap_caps_malloc(10240 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+        StaticTask_t *js_tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (js_stack && js_tcb) {
+            json_task_handle = xTaskCreateStaticPinnedToCore(
+                json_poll_task, "json", 10240, NULL, 3, js_stack, js_tcb, 0);
+            ESP_LOGI(TAG, "JSON Display poll task spawned");
+        } else {
+            ESP_LOGE(TAG, "Failed to allocate JSON Display poll task stack");
+            if (js_stack) heap_caps_free(js_stack);
+            if (js_tcb) heap_caps_free(js_tcb);
+        }
+    }
+
+    /* Home Assistant poll task (pinned to Core 0, networking).
+     * ha_client_init runs UNCONDITIONALLY so the mutex exists before any later
+     * web-handler-triggered enable + page entry; the task itself is spawned only
+     * when the page is enabled. */
+    ha_client_init(&ha_data);
+    if (app_config_get()->ha_enabled) {
+        StackType_t *ha_stack = heap_caps_malloc(10240 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+        StaticTask_t *ha_tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (ha_stack && ha_tcb) {
+            ha_task_handle = xTaskCreateStaticPinnedToCore(
+                ha_poll_task, "ha", 10240, NULL, 3, ha_stack, ha_tcb, 0);
+            ESP_LOGI(TAG, "Home Assistant poll task spawned");
+        } else {
+            ESP_LOGE(TAG, "Failed to allocate Home Assistant poll task stack");
+            if (ha_stack) heap_caps_free(ha_stack);
+            if (ha_tcb) heap_caps_free(ha_tcb);
+        }
+    }
+
     /* GOES / Image Display poll task.
      * goes_data_init must run UNCONDITIONALLY so the mutex exists before any
      * later web-handler-triggered enable + page entry. */
@@ -2590,6 +2806,8 @@ main_loop:
 
         int current_active = nina_dashboard_get_active_page();  // Snapshot to avoid races
         bool on_allsky = nina_dashboard_is_allsky_page();
+        bool on_json = nina_dashboard_is_json_page();
+        bool on_ha = nina_dashboard_is_ha_page();
         bool on_sysinfo = nina_dashboard_is_sysinfo_page();
         bool on_settings = nina_dashboard_is_settings_page();
         bool on_summary = nina_dashboard_is_summary_page();
@@ -2602,13 +2820,15 @@ main_loop:
          *   PAGE_IDX_SPOTIFY       (1)                  = Spotify page
          *   PAGE_IDX_CLOCK         (2)                  = Clock page (always present)
          *   PAGE_IDX_IMAGE_DISPLAY (3)                  = Image Display page
-         *   PAGE_IDX_SUMMARY       (4)                  = summary page
+         *   PAGE_IDX_JSON          (4)                  = JSON Display page
+         *   PAGE_IDX_HA            (5)                  = Home Assistant page
+         *   PAGE_IDX_SUMMARY       (6)                  = summary page
          *   NINA_PAGE_OFFSET .. NINA_PAGE_OFFSET+pc-1   = NINA instance pages
          *   SETTINGS_PAGE_IDX(pc)                       = settings page
          *   SYSINFO_PAGE_IDX(pc)                        = sysinfo page
          *
          * active_nina_idx: the actual instance index (0..MAX_NINA_INSTANCES-1)
-         *   for the active page, or -1 if on allsky/spotify/clock/summary/settings/sysinfo.
+         *   for the active page, or -1 if on allsky/json/ha/spotify/clock/summary/settings/sysinfo.
          */
         bool on_spotify = nina_dashboard_is_spotify_page();
         int active_nina_idx = -1;   /* Actual instance index (for data access) */
@@ -2668,6 +2888,22 @@ main_loop:
             }
             prev_on_allsky = on_allsky;
             allsky_page_active = on_allsky;
+
+            /* JSON Display flag — wake task immediately on page entry */
+            static bool prev_on_json = false;
+            if (on_json && !prev_on_json && json_task_handle) {
+                xTaskNotifyGive(json_task_handle);
+            }
+            prev_on_json = on_json;
+            json_page_active = on_json;
+
+            /* Home Assistant flag — wake task immediately on page entry */
+            static bool prev_on_ha = false;
+            if (on_ha && !prev_on_ha && ha_task_handle) {
+                xTaskNotifyGive(ha_task_handle);
+            }
+            prev_on_ha = on_ha;
+            ha_page_active = on_ha;
 
             static bool prev_on_clock = false;
             if (on_clock && !prev_on_clock) {
@@ -2876,6 +3112,28 @@ main_loop:
                     allsky_data_unlock(&allsky_data);
                 }
             }
+
+            /* Immediate JSON Display render with cached data */
+            if (on_json) {
+                if (json_client_lock(&json_data, 15)) {
+                    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                        json_page_update(&json_data);
+                        bsp_display_unlock();
+                    }
+                    json_client_unlock(&json_data);
+                }
+            }
+
+            /* Immediate Home Assistant render with cached data */
+            if (on_ha) {
+                if (ha_client_lock(&ha_data, 15)) {
+                    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                        ha_page_update(&ha_data);
+                        bsp_display_unlock();
+                    }
+                    ha_client_unlock(&ha_data);
+                }
+            }
         }
 
         int64_t now_ms = esp_timer_get_time() / 1000;
@@ -2946,6 +3204,28 @@ main_loop:
                     bsp_display_unlock();
                 }
                 allsky_data_unlock(&allsky_data);
+            }
+        } else if (on_json) {
+            /* JSON Display page — trylock-and-skip the json data (like AllSky),
+             * then a single LVGL lock. Skipping a cycle rather than blocking the
+             * UI preserves the lock-ordering discipline. */
+            if (json_client_lock(&json_data, 15)) {
+                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                    json_page_update(&json_data);
+                    bsp_display_unlock();
+                }
+                json_client_unlock(&json_data);
+            }
+        } else if (on_ha) {
+            /* Home Assistant page — trylock-and-skip the ha data (like JSON),
+             * then a single LVGL lock. Skipping a cycle rather than blocking the
+             * UI preserves the lock-ordering discipline. */
+            if (ha_client_lock(&ha_data, 15)) {
+                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                    ha_page_update(&ha_data);
+                    bsp_display_unlock();
+                }
+                ha_client_unlock(&ha_data);
             }
         } else if (on_image_display) {
             /* Image Display page — repaint when a new GOES image has arrived.

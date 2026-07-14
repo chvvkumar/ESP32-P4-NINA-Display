@@ -285,8 +285,17 @@ static esp_err_t auth_gate_handler(httpd_req_t *req)
 void start_web_server(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.stack_size = 16384;
-    config.max_uri_handlers = 69;
+    /* 40 KB: the httpd worker runs one-shot outbound fetches INLINE on this
+     * task's stack (json-proxy, ha-probe → ha_client_fetch_entity, allsky
+     * proxy). The httpd baseline alone is ~15 KB here; a plain-HTTP HA probe
+     * fetch pushed the total to ~24.5 KB and overran 24576 (coredump: httpd
+     * worker crashed at the URL snprintf in fetch_entity_core, ~1 KB free,
+     * stack full of the 0xa5 fill pattern). An https source adds a TLS
+     * handshake on top. 40 KB covers an inline fetch (HTTP or TLS) with margin.
+     * The proper long-term fix is to offload these outbound fetches off the
+     * httpd worker onto a dedicated task; until then this stack must stay large. */
+    config.stack_size = 40960;
+    config.max_uri_handlers = 76;
     config.max_open_sockets = 16;
     config.lru_purge_enable = true;
     config.keep_alive_enable = true;
@@ -332,6 +341,12 @@ void start_web_server(void)
         { { "/api/ota-github",       HTTP_POST, ota_github_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/allsky-config",    HTTP_GET,  allsky_config_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/allsky-proxy",     HTTP_GET,  allsky_proxy_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/json-config",      HTTP_GET,  json_config_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/json-config",      HTTP_POST, json_config_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/json-proxy",       HTTP_GET,  json_proxy_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/ha-config",        HTTP_GET,  ha_config_get_handler,  NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/ha-config",        HTTP_POST, ha_config_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/ha-probe",         HTTP_GET,  ha_probe_get_handler,   NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/spotify/config",         HTTP_GET,  spotify_config_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/spotify/config",         HTTP_POST, spotify_config_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/spotify/callback",       HTTP_GET,  spotify_callback_get_handler, NULL }, ROUTE_PUBLIC },
@@ -377,10 +392,10 @@ void start_web_server(void)
         { { "/api/image-display/refresh", HTTP_POST, image_display_refresh_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
     };
 
-    /* Keep config.max_uri_handlers (set to 69 above) in sync with the route
+    /* Keep config.max_uri_handlers (set to 76 above) in sync with the route
      * table; a route that overflows it would be silently dropped at
      * registration. Bump both together when adding routes. */
-    _Static_assert(sizeof(routes) / sizeof(routes[0]) <= 69,
+    _Static_assert(sizeof(routes) / sizeof(routes[0]) <= 76,
                    "max_uri_handlers too small for route table");
 
     for (int i = 0; i < (int)(sizeof(routes)/sizeof(routes[0])); i++) {

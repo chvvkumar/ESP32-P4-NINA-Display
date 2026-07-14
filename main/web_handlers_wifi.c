@@ -195,7 +195,7 @@ esp_err_t wifi_setup_post_handler(httpd_req_t *req)
         httpd_resp_send_500(req);
         return ESP_OK;
     }
-    *cfg = app_config_get_snapshot();
+    app_config_get_snapshot_into(cfg);
     strlcpy(cfg->wifi_networks[0].ssid, ssid_item->valuestring,
             sizeof(cfg->wifi_networks[0].ssid));
     if (cJSON_IsString(pass_item)) {
