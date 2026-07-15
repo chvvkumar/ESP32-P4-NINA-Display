@@ -132,16 +132,32 @@ static esp_err_t send_item_json(httpd_req_t *req, cJSON *o)
 /* Send one item using a fresh snapshot and its live getter value. */
 static esp_err_t send_item(httpd_req_t *req, const control_item_t *it)
 {
-    app_config_t cfg = app_config_get_snapshot();
-    return send_item_json(req, control_item_to_json(it, &cfg, NULL));
+    /* app_config_t is ~20 KB; snapshot into PSRAM, never onto the httpd stack. */
+    app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    if (!cfg) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    app_config_get_snapshot_into(cfg);
+    esp_err_t r = send_item_json(req, control_item_to_json(it, cfg, NULL));
+    heap_caps_free(cfg);
+    return r;
 }
 
 /* Send one item reporting an explicit @p value (used by page set/cycle to report
  * the target id, which the arbiter has not necessarily committed yet). */
 static esp_err_t send_item_value(httpd_req_t *req, const control_item_t *it, int value)
 {
-    app_config_t cfg = app_config_get_snapshot();
-    return send_item_json(req, control_item_to_json(it, &cfg, &value));
+    /* app_config_t is ~20 KB; snapshot into PSRAM, never onto the httpd stack. */
+    app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    if (!cfg) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    app_config_get_snapshot_into(cfg);
+    esp_err_t r = send_item_json(req, control_item_to_json(it, cfg, &value));
+    heap_caps_free(cfg);
+    return r;
 }
 
 /* Commit a new value for a config item: clamp, snapshot, modify, save, apply. */
@@ -154,10 +170,9 @@ static void ctrl_commit_value(const control_item_t *it, int newval)
     if (newval > emax) {
         newval = emax;
     }
-    /* app_config_t is ~7.5 KB. Holding TWO copies on the HTTP task stack
-     * overflows it (panic/reboot), so allocate both in PSRAM. The by-value
-     * snapshot return uses an sret hidden pointer and writes straight into the
-     * dereferenced destination, so no large stack temporary is created. */
+    /* app_config_t is ~20 KB. Holding TWO copies on the HTTP task stack
+     * overflows it (panic/reboot), so allocate both in PSRAM. Snapshot via the
+     * out-param variant so no large stack return-temporary is materialized. */
     app_config_t *prev = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
     app_config_t *cur  = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
     if (!prev || !cur) {
@@ -166,7 +181,7 @@ static void ctrl_commit_value(const control_item_t *it, int newval)
         ESP_LOGE(TAG, "ctrl_commit_value: PSRAM alloc failed");
         return;
     }
-    *prev = app_config_get_snapshot();
+    app_config_get_snapshot_into(prev);
     *cur  = *prev;
     it->set(it, cur, newval);
     app_config_save(cur);
@@ -180,8 +195,16 @@ static void ctrl_commit_value(const control_item_t *it, int newval)
 /* Read an item's current value from a fresh snapshot. */
 static int ctrl_current_value(const control_item_t *it)
 {
-    app_config_t cfg = app_config_get_snapshot();
-    return it->get(it, &cfg);
+    /* app_config_t is ~20 KB; snapshot into PSRAM, never onto the httpd stack. */
+    app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    if (!cfg) {
+        ESP_LOGE(TAG, "ctrl_current_value: PSRAM alloc failed");
+        return it->vmin;
+    }
+    app_config_get_snapshot_into(cfg);
+    int v = it->get(it, cfg);
+    heap_caps_free(cfg);
+    return v;
 }
 
 /* ===================================================================== */
@@ -199,19 +222,28 @@ esp_err_t control_list_get_handler(httpd_req_t *req)
     }
 
     /* Single snapshot for the whole list: every item reflects one consistent
-     * config view (no per-item re-snapshot that could mix mid-write states). */
-    app_config_t cfg = app_config_get_snapshot();
+     * config view (no per-item re-snapshot that could mix mid-write states).
+     * app_config_t is ~20 KB; snapshot into PSRAM, never onto the httpd stack. */
+    app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    if (!cfg) {
+        cJSON_Delete(arr);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    app_config_get_snapshot_into(cfg);
 
     for (int i = 0; i < control_registry_count(); i++) {
         const control_item_t *it = control_registry_get(i);
         if (!it) {
             continue;
         }
-        cJSON *o = control_item_to_json(it, &cfg, NULL);
+        cJSON *o = control_item_to_json(it, cfg, NULL);
         if (o) {
             cJSON_AddItemToArray(arr, o);
         }
     }
+
+    heap_caps_free(cfg);
 
     char *out = cJSON_PrintUnformatted(arr);
     if (!out) {

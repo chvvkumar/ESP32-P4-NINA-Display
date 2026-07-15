@@ -658,17 +658,25 @@ static uint32_t s_last_poll_interval_s;
 static bool weather_poll_once(void *arg) {
     (void)arg;
 
-    app_config_t cfg_snap = app_config_get_snapshot();
+    /* app_config_t is ~20 KB; never place it on this task's stack. Snapshot
+     * into a PSRAM heap buffer and free on every return path. */
+    app_config_t *cfg_snap = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    if (cfg_snap == NULL) {
+        ESP_LOGE(TAG, "Weather poll: config snapshot alloc failed");
+        return false;
+    }
+    app_config_get_snapshot_into(cfg_snap);
 
     /* Skip if no location configured */
-    bool has_location = (cfg_snap.weather_location_name[0] != '\0');
+    bool has_location = (cfg_snap->weather_location_name[0] != '\0');
     /* OWM and WU need an API key */
-    bool needs_key = (cfg_snap.weather_provider == 0 || cfg_snap.weather_provider == 2);
-    bool has_key   = (cfg_snap.weather_api_key[0] != '\0');
+    bool needs_key = (cfg_snap->weather_provider == 0 || cfg_snap->weather_provider == 2);
+    bool has_key   = (cfg_snap->weather_api_key[0] != '\0');
 
     if (!has_location || (needs_key && !has_key)) {
         ESP_LOGD(TAG, "Weather not configured (provider=%d), sleeping 60s",
-                 cfg_snap.weather_provider);
+                 cfg_snap->weather_provider);
+        heap_caps_free(cfg_snap);
         return false; /* backoff is fixed at WEATHER_RETRY_INTERVAL_S -- same as fetch failure */
     }
 
@@ -678,17 +686,18 @@ static bool weather_poll_once(void *arg) {
     local.uv_index = -1.0f;
 
     bool ok = false;
-    switch (cfg_snap.weather_provider) {
-        case 0:  ok = fetch_owm(&cfg_snap, &local);          break;
-        case 1:  ok = fetch_open_meteo(&cfg_snap, &local);   break;
-        case 2:  ok = fetch_wunderground(&cfg_snap, &local);  break;
+    switch (cfg_snap->weather_provider) {
+        case 0:  ok = fetch_owm(cfg_snap, &local);          break;
+        case 1:  ok = fetch_open_meteo(cfg_snap, &local);   break;
+        case 2:  ok = fetch_wunderground(cfg_snap, &local);  break;
         default:
-            ESP_LOGW(TAG, "Unknown weather provider: %d", cfg_snap.weather_provider);
+            ESP_LOGW(TAG, "Unknown weather provider: %d", cfg_snap->weather_provider);
             break;
     }
 
     if (!ok) {
         ESP_LOGW(TAG, "Weather fetch failed, retrying in %ds", WEATHER_RETRY_INTERVAL_S);
+        heap_caps_free(cfg_snap);
         return false;
     }
 
@@ -701,13 +710,14 @@ static bool weather_poll_once(void *arg) {
     }
     ESP_LOGI(TAG, "Weather updated: %.1f%s, %s",
              local.temp_current,
-             (cfg_snap.weather_units == 0) ? "F" : "C",
+             (cfg_snap->weather_units == 0) ? "F" : "C",
              local.condition);
 
     /* Trigger immediate clock UI refresh */
     clock_page_request_update();
 
-    s_last_poll_interval_s = cfg_snap.weather_poll_interval_s;
+    s_last_poll_interval_s = cfg_snap->weather_poll_interval_s;
+    heap_caps_free(cfg_snap);
     return true;
 }
 

@@ -1,0 +1,228 @@
+<!-- Home Assistant settings fragment. Markup only: the builder JS lives in
+     config_ui.html (populateTab_ha / collectTab_ha / haRenderBuilder and
+     helpers). Injected into #tab-ha via GET /ui/fragment?tab=ha. Scoped styles
+     under #ha-root so builder-only classes never leak to other tabs. Each tile
+     names one entity + attribute; the per-tile Entity-ID + Probe + attribute
+     dropdown are built in JS. -->
+<div id="ha-root">
+  <style>
+    /* on-device Default-theme colors used by the live preview */
+    #ha-root { --ha-bg:#050505; --ha-bento:#0a0a0a; --ha-border:#222; --ha-label:#6b7280; --ha-text:#a3a3a3; }
+
+    #ha-root .ha-count {
+      margin-left:auto; font-size:0.68rem; letter-spacing:0.02em; color:var(--text-muted);
+      text-transform:none; font-weight:600; background:rgba(255,255,255,0.05);
+      border:1px solid var(--border, rgba(255,255,255,0.12)); padding:3px 10px; border-radius:999px;
+    }
+    #ha-root .ha-count.full { color:var(--warning,#fbbf24); border-color:rgba(251,191,36,0.4); }
+
+    #ha-root .input.mono { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:0.78rem; }
+    #ha-root .input.sm { min-height:38px; padding:8px 11px; font-size:0.8rem; }
+    #ha-root .btn.sm { min-height:34px; padding:6px 12px; font-size:0.76rem; }
+    #ha-root .btn.full { width:100%; }
+    #ha-root .row2 { display:flex; gap:12px; flex-wrap:wrap; }
+    #ha-root .row2 > div { flex:1 1 120px; }
+
+    /* row builder */
+    #ha-root .rb-row {
+      border:1px solid var(--border,rgba(255,255,255,0.12)); border-radius:var(--radius-sm,10px);
+      background:rgba(255,255,255,0.02); padding:12px; margin-bottom:12px;
+    }
+    #ha-root .rb-row-head {
+      display:flex; align-items:center; gap:10px; margin-bottom:10px; cursor:pointer;
+      border-radius:8px; padding:4px; margin:-4px -4px 6px; user-select:none;
+    }
+    #ha-root .rb-row-head:hover { background:rgba(255,255,255,0.03); }
+    #ha-root .rb-row-head:focus-visible { outline:none; box-shadow:0 0 0 2px rgba(122,162,247,0.4); }
+    #ha-root .rb-row.collapsed .rb-row-head { margin-bottom:-4px; }
+    #ha-root .rb-caret { font-size:0.7rem; color:var(--text-muted,#94a3b8); width:12px; flex-shrink:0; }
+    #ha-root .rb-name { font-size:0.72rem; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:var(--text-muted,#94a3b8); }
+    #ha-root .rb-fill { margin-left:auto; font-size:0.68rem; color:var(--text-hint,#7a8ba4); }
+    #ha-root .rb-tiles { display:grid; gap:10px; }
+    #ha-root .rb-tile {
+      border:1px solid var(--border,rgba(255,255,255,0.12)); border-radius:var(--radius-sm,10px);
+      background:var(--elevated,rgba(48,54,72,0.96)); padding:12px;
+    }
+    #ha-root .rb-tile-head { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+    #ha-root .rb-tile-head .idx {
+      width:20px; height:20px; border-radius:6px; flex-shrink:0; background:rgba(122,162,247,0.16);
+      color:var(--accent,#7aa2f7); font-size:0.66rem; font-weight:700; display:grid; place-items:center;
+    }
+    #ha-root .rb-tile-head .path-preview {
+      font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:0.7rem;
+      color:var(--text-hint,#7a8ba4); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    }
+    #ha-root .rb-tile-head .x {
+      margin-left:auto; background:none; border:none; color:var(--text-hint,#7a8ba4); cursor:pointer;
+      font-size:1.1rem; line-height:1; padding:2px 6px; border-radius:6px;
+    }
+    #ha-root .rb-tile-head .x:hover { color:var(--danger,#f87171); background:rgba(239,68,68,0.08); }
+    #ha-root .mini-label { font-size:0.66rem; color:var(--text-hint,#7a8ba4); margin:0 0 4px; text-transform:uppercase; letter-spacing:0.04em; }
+    #ha-root .type-fields { margin-top:10px; padding-top:10px; border-top:1px dashed var(--border,rgba(255,255,255,0.12)); }
+
+    /* probe row (entity_id + Probe button) */
+    #ha-root .probe-row { display:flex; gap:8px; align-items:stretch; }
+    #ha-root .probe-row .input { flex:1 1 auto; }
+    #ha-root .probe-row .btn { flex:0 0 auto; }
+    #ha-root .probe-status { font-size:0.7rem; margin-top:6px; line-height:1.4; }
+    #ha-root .probe-status.ok { color:var(--success,#4ade80); }
+    #ha-root .probe-status.err { color:var(--danger,#f87171); }
+    #ha-root .probe-status .dom { color:var(--text-hint,#7a8ba4); }
+
+    #ha-root .swatch-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+    #ha-root .swatch {
+      -webkit-appearance:none; appearance:none; width:34px; height:30px; padding:0;
+      border:1px solid var(--border,rgba(255,255,255,0.12)); border-radius:8px; background:none; cursor:pointer; flex-shrink:0;
+    }
+    #ha-root .swatch::-webkit-color-swatch-wrapper { padding:3px; }
+    #ha-root .swatch::-webkit-color-swatch { border:none; border-radius:5px; }
+    #ha-root .swatch-row .lab { font-size:0.74rem; color:var(--text-secondary,#b8c2d0); flex:1; }
+    #ha-root .map-row { display:grid; grid-template-columns:1fr auto; gap:8px; margin-bottom:8px; align-items:center; }
+
+    /* legend */
+    #ha-root .legend { font-size:0.74rem; color:var(--text-secondary,#b8c2d0); line-height:1.7; }
+    #ha-root .legend code {
+      font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; color:#f4f4f5;
+      background:rgba(0,0,0,0.4); border:1px solid var(--border,rgba(255,255,255,0.12));
+      padding:1px 7px; border-radius:6px; font-size:0.72rem; margin-right:8px;
+    }
+    #ha-root .legend .l-item { display:flex; gap:4px; padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05); }
+    #ha-root .legend .l-item:last-child { border-bottom:none; }
+    #ha-root .legend .l-desc { color:var(--text-muted,#94a3b8); }
+
+    /* live preview: square 720x720 canvas scaled to fit */
+    #ha-root .ha-device {
+      position:relative; width:100%; max-width:720px; margin:0 auto; aspect-ratio:1/1;
+      container-type:size; background:var(--ha-bg); border-radius:12px; overflow:hidden;
+      display:flex; flex-direction:column; padding:2.2cqmin; gap:1.6cqmin; border:1px solid var(--ha-border);
+    }
+    #ha-root .ha-dev-page { flex:1 1 auto; display:flex; flex-direction:column; gap:1.6cqmin; min-height:0; }
+    #ha-root .dev-row { flex:1 1 0; display:flex; gap:1.6cqmin; min-height:0; }
+    #ha-root .dev-tile {
+      flex:1 1 0; min-width:0; background:var(--ha-bento); border:1px solid var(--ha-border);
+      border-radius:3.3cqmin; padding:2.2cqmin; display:flex; flex-direction:column;
+      align-items:center; justify-content:center; gap:0.8cqmin; text-align:center; overflow:hidden;
+    }
+    #ha-root .dev-tile .t-label {
+      font-size:2.6cqmin; font-weight:600; letter-spacing:0.14em; text-transform:uppercase;
+      color:var(--ha-label); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%;
+    }
+    #ha-root .dev-tile .t-value {
+      font-size:7.4cqmin; font-weight:700; line-height:1.02; color:var(--ha-text);
+      font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%;
+    }
+    #ha-root .dev-tile.banner .t-value { font-size:9cqmin; }
+    #ha-root .dev-tile .t-unit { font-size:3cqmin; color:var(--ha-label); font-weight:500; margin-top:-0.2cqmin; }
+    #ha-root .ha-device-empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+      color:var(--ha-label); font-size:3.4cqmin; text-align:center; padding:8cqmin; }
+
+    /* reorder buttons (rows: ▲▼ in the row header; tiles: ◀▶ in the tile header) */
+    #ha-root .rb-move {
+      background:rgba(255,255,255,0.04); border:1px solid var(--border,rgba(255,255,255,0.12));
+      color:var(--text-secondary,#b8c2d0); cursor:pointer; border-radius:6px; padding:0;
+      width:26px; height:26px; font-size:0.6rem; line-height:1; flex-shrink:0;
+      display:inline-grid; place-items:center;
+    }
+    #ha-root .rb-move:hover:not(:disabled) { background:rgba(122,162,247,0.16); color:var(--accent,#7aa2f7); border-color:rgba(122,162,247,0.35); }
+    #ha-root .rb-move:focus-visible { outline:none; box-shadow:0 0 0 2px rgba(122,162,247,0.5); }
+    #ha-root .rb-move:disabled { opacity:0.3; cursor:default; }
+    /* keep the tile move group + close button clustered on the right */
+    #ha-root .rb-tile-head .rb-move.tile:first-of-type { margin-left:auto; }
+    #ha-root .rb-tile-head .x { margin-left:6px; }
+
+    /* two-column layout: settings LEFT, live preview RIGHT (sticky) */
+    /* align-items defaults to stretch so the preview column grows to the full
+       row height; that gives the sticky preview room to travel while the
+       (usually taller) settings column scrolls. */
+    #ha-root .ha-layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:20px; }
+    /* Break out of the .content 960px cap so the two equal columns match the
+       centered top-nav tab bar (~1200px), not the full viewport. Capped +
+       viewport-centered via margin (not transform) so the sticky preview keeps
+       working. Only above the single-column stack breakpoint. */
+    @media (min-width:901px){
+      #ha-root .ha-layout {
+        width:min(calc(100vw - 48px), 1200px); max-width:none;
+        margin-left:calc(50% - min(50vw - 24px, 600px));
+      }
+    }
+    #ha-root .ha-col-settings { min-width:0; }
+    #ha-root .ha-col-settings > .card:last-child { margin-bottom:0; }
+    #ha-root .ha-col-preview { min-width:0; }
+    #ha-root .ha-sticky { position:sticky; top:76px; }
+    #ha-root .ha-sticky > .card { margin-bottom:0; }
+    @media (max-width:900px){
+      #ha-root .ha-layout { grid-template-columns:1fr; }
+      #ha-root .ha-sticky { position:static; top:auto; }
+    }
+  </style>
+
+  <div class="ha-layout">
+  <div class="ha-col-settings">
+  <!-- CONNECTION -->
+  <div class="card">
+    <div class="card-title"><span class="card-title-label">Home Assistant connection</span></div>
+    <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+      <span class="toggle-label">Enable Home Assistant page</span>
+      <label class="toggle"><input type="checkbox" id="ha_enabled" onchange="haOnEnabledToggle()"><span class="toggle-track"></span></label>
+    </div>
+    <div class="field-hint">Turns on the page and starts reading your entities. Off hides the page and stops requests. Applies immediately.</div>
+
+    <div class="subsection">
+      <div class="field">
+        <label class="field-label" for="ha_base">Base URL</label>
+        <input class="input mono" id="ha_base" maxlength="255" placeholder="http://homeassistant.local:8123" oninput="haOnSourceChange()">
+        <div class="field-hint">Scheme, host, and port only, no path (HTTP or HTTPS). The device appends <code>/api/states/&lt;entity_id&gt;</code> for each tile.</div>
+      </div>
+      <div class="field">
+        <label class="field-label" for="ha_token">Long-Lived Access Token</label>
+        <input class="input mono" id="ha_token" maxlength="255" type="password" placeholder="paste token only" oninput="haOnSourceChange()">
+        <div class="field-hint">Paste the raw token from your Home Assistant profile. Do not include <code>Authorization:</code> or <code>Bearer</code>: the device wraps it for you.</div>
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label class="field-label" for="ha_interval">Poll Interval</label>
+          <select class="input" id="ha_interval">
+            <option value="5">5 seconds</option>
+            <option value="10">10 seconds</option>
+            <option value="30" selected>30 seconds</option>
+            <option value="60">1 minute</option>
+            <option value="120">2 minutes</option>
+            <option value="300">5 minutes</option>
+          </select>
+          <div class="field-hint">How often each entity is re-fetched (5 to 300 seconds).</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LAYOUT BUILDER -->
+  <div class="card nocollapse">
+    <div class="card-title"><span class="card-title-label">Layout</span><span class="ha-count" id="ha_tileCount">0 / 15 tiles</span></div>
+    <div class="field-hint" style="margin-bottom:14px">Build the page as rows of tiles. Each tile shows one entity attribute. Up to <strong>6 rows</strong>, <strong>4 tiles</strong> per row, <strong>15 tiles</strong> total. Use the row <strong>&#9650;/&#9660;</strong> and tile <strong>&#9664;/&#9654;</strong> buttons to reorder.</div>
+    <div id="ha_rowsHost"></div>
+    <button type="button" class="btn btn-outline full" id="ha_addRowBtn" onclick="haAddRow()" style="margin-top:4px">+ Add Row</button>
+  </div>
+
+  <!-- SAVE -->
+  <div class="card nocollapse">
+    <div class="field-hint" style="margin-bottom:12px">Saving persists these settings to the device and applies them immediately.</div>
+    <button type="button" class="btn btn-primary full" id="ha_saveBtn" onclick="haSaveConfig()">Save Home Assistant</button>
+  </div>
+
+  </div><!-- /.ha-col-settings -->
+
+  <div class="ha-col-preview">
+    <div class="ha-sticky">
+      <!-- PREVIEW -->
+      <div class="card">
+        <div class="card-title"><span class="card-title-label">Preview</span></div>
+        <div class="field-hint" style="margin-bottom:12px">720x720 layout. Each row splits the height evenly; tiles in a row grow to fill the width. Values recolor by threshold, value map, or true/false state. Probe an entity to preview with live values.</div>
+        <div class="ha-device">
+          <div class="ha-dev-page" id="ha_devPage"></div>
+          <div class="ha-device-empty" id="ha_devEmpty" style="display:none">No tiles yet</div>
+        </div>
+      </div>
+    </div>
+  </div><!-- /.ha-col-preview -->
+  </div><!-- /.ha-layout -->
+</div>

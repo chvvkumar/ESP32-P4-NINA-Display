@@ -61,10 +61,24 @@ void instance_poll_task(void *arg);
 /** FreeRTOS task: AllSky API poller — polls at allsky_update_interval_s rate. */
 void allsky_poll_task(void *arg);
 
+/** FreeRTOS task: JSON Display API poller — polls at json_update_interval_s rate. */
+void json_poll_task(void *arg);
+
+/** Create the JSON Display poll task if it isn't already running. Safe to call multiple times. */
+void json_ensure_task_running(void);
+
+/** FreeRTOS task: Home Assistant API poller — polls at ha_update_interval_s rate. */
+void ha_poll_task(void *arg);
+
+/** Create the Home Assistant poll task if it isn't already running. Safe to call multiple times. */
+void ha_ensure_task_running(void);
+
 /** Feature poll task handles and page-active flags — defined in tasks.c. */
 extern TaskHandle_t spotify_task_handle;
 extern _Atomic bool spotify_page_active;
 extern _Atomic bool allsky_page_active;
+extern _Atomic bool json_page_active;
+extern _Atomic bool ha_page_active;
 extern _Atomic bool clock_page_active;
 extern _Atomic bool nina_pages_active;
 

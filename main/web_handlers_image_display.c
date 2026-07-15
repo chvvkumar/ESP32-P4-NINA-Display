@@ -224,7 +224,7 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
-    *cur = app_config_get_snapshot();
+    app_config_get_snapshot_into(cur);
     *prev = *cur;
 
     JSON_TO_BOOL(root, "image_display_enabled", cur->image_display_enabled);
@@ -364,7 +364,7 @@ esp_err_t image_display_refresh_post_handler(httpd_req_t *req)
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
-    *cfg = app_config_get_snapshot();
+    app_config_get_snapshot_into(cfg);
     bool image_display_enabled = cfg->image_display_enabled;
     heap_caps_free(cfg);
 
