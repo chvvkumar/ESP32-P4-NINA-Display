@@ -5,10 +5,10 @@ idf_component_register(
     SRCS main.c tasks.c axi_qos.c power_mgmt.c jpeg_utils.c stb_image.c image_red_remap.c perf_monitor.c ota_github.c
          http_fetch.c poll_task.c time_parse.c
          nina_connection.c nina_client.c nina_api_fetchers.c nina_sequence.c nina_websocket.c
-         allsky_client.c goes_client.c weather_client.c moon_ephemeris.c moon_render.c moon_sphere.cpp moon_interaction.c spotify_auth.c spotify_client.c demo_data.c
-         app_config.c settings_table.c control_registry.c web_server.c web_route_auth.c web_handlers_config.c web_handlers_display.c web_handlers_system.c web_handlers_allsky.c web_handlers_spotify.c web_handlers_image_display.c web_handlers_pages.c web_handlers_control.c web_handlers_auth.c web_handlers_wifi.c web_handlers_logs.c log_capture.c crash_log.c mqtt_ha.c
-         ui/page_registry.c ui/nina_dashboard.c ui/nina_dashboard_update.c ui/nina_nav_arbiter.c ui/nina_thumbnail.c ui/nina_graph_overlay.c ui/graph_downsample.c ui/nina_graph_controls.c ui/nina_sysinfo.c ui/nina_summary.c ui/nina_allsky.c ui/nina_image_display.c ui/nina_clock.c ui/nina_spotify.c ui/nina_settings_tabview.c ui/settings_tab_display.c ui/settings_tab_nodes.c ui/settings_tab_behavior.c ui/settings_tab_system.c ui/settings_color_picker.c ui/themes.c ui/ui_styles.c
-         ui/nina_toast.c ui/nina_event_log.c ui/nina_alerts.c ui/nina_safety.c ui/nina_session_stats.c ui/lv_font_material_safety.c ui/lv_font_material_icons_idle.c ui/lv_font_warning_128.c ui/lv_font_superscript_24.c ui/lv_font_playfair_228.c ui/lv_font_playfair_90.c ui/lv_font_overpass_27.c ui/lv_font_overpass_16.c
+         allsky_client.c json_client.c ha_client.c goes_client.c weather_client.c moon_ephemeris.c moon_render.c moon_sphere.cpp moon_interaction.c spotify_auth.c spotify_client.c demo_data.c
+         app_config.c settings_table.c control_registry.c web_server.c web_route_auth.c web_handlers_config.c web_handlers_display.c web_handlers_system.c web_handlers_allsky.c web_handlers_json.c web_handlers_ha.c web_handlers_spotify.c web_handlers_image_display.c web_handlers_pages.c web_handlers_control.c web_handlers_auth.c web_handlers_wifi.c web_handlers_logs.c log_capture.c crash_log.c mqtt_ha.c
+         ui/page_registry.c ui/nina_dashboard.c ui/nina_dashboard_update.c ui/nina_nav_arbiter.c ui/nina_thumbnail.c ui/nina_graph_overlay.c ui/graph_downsample.c ui/nina_graph_controls.c ui/nina_sysinfo.c ui/nina_summary.c ui/nina_allsky.c ui/nina_tile_grid.c ui/nina_json.c ui/nina_ha.c ui/nina_image_display.c ui/nina_clock.c ui/nina_spotify.c ui/nina_settings_tabview.c ui/settings_tab_display.c ui/settings_tab_nodes.c ui/settings_tab_behavior.c ui/settings_tab_system.c ui/settings_color_picker.c ui/themes.c ui/ui_styles.c
+         ui/nina_toast.c ui/nina_event_log.c ui/nina_alerts.c ui/nina_safety.c ui/nina_session_stats.c ui/lv_font_material_safety.c ui/lv_font_material_icons_idle.c ui/lv_font_warning_128.c ui/lv_font_superscript_24.c ui/lv_font_playfair_228.c ui/lv_font_playfair_90.c ui/lv_font_overpass_27.c ui/lv_font_overpass_16.c ui/lv_font_montserrat_64.c
          ui/nina_setup_screen.c ui/nina_idle_indicator.c
          ui/nina_info_overlay.c ui/nina_info_camera.c ui/nina_info_mount.c
          ui/nina_info_imagestats.c ui/nina_info_sequence.c ui/nina_info_filter.c ui/nina_info_autofocus.c ui/nina_info_session_stats.c
@@ -17,7 +17,7 @@ idf_component_register(
          ui/nina_empty_state.c
          ${LV_DEMOS_SOURCES}
     INCLUDE_DIRS . ui ${LV_DEMO_DIR}
-    EMBED_TXTFILES config_ui.html login.html setup_ui.html fragment_logs.html fragment_backup.html fragment_api.html fragment_allsky.html fragment_clock.html fragment_spotify.html fragment_image_display.html fragment_nodes.html fragment_display.html fragment_behavior.html fragment_system.html
+    EMBED_TXTFILES config_ui.html login.html setup_ui.html fragment_logs.html fragment_backup.html fragment_api.html fragment_allsky.html fragment_json.html fragment_ha.html fragment_clock.html fragment_spotify.html fragment_image_display.html fragment_nodes.html fragment_display.html fragment_behavior.html fragment_system.html
     EMBED_FILES favicon.png logo.jpg spotify_logo.png moon_texture.png moon_equirect.jpg)
 
 idf_component_get_property(LVGL_LIB lvgl__lvgl COMPONENT_LIB)

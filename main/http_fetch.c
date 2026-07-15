@@ -106,6 +106,27 @@ static void apply_headers(esp_http_client_handle_t client, const http_fetch_opts
             esp_http_client_set_header(client, "Authorization", hdr);
         }
     }
+    if (opts->extra_header && opts->extra_header[0] != '\0') {
+        /* Split a raw "Name: value" line at the FIRST ':' and apply it as one
+         * request header, so a non-Bearer auth header (e.g. "X-API-Key: abc")
+         * is forwarded verbatim. The name is copied out to NUL-terminate it;
+         * leading spaces in the value are trimmed. Header line capped at 256. */
+        const char *line = opts->extra_header;
+        const char *colon = strchr(line, ':');
+        if (colon && colon != line) {
+            size_t name_len = (size_t)(colon - line);
+            char name[256];
+            if (name_len < sizeof(name)) {
+                memcpy(name, line, name_len);
+                name[name_len] = '\0';
+                const char *value = colon + 1;
+                while (*value == ' ') {
+                    value++;
+                }
+                esp_http_client_set_header(client, name, value);
+            }
+        }
+    }
     if (opts->user_agent) {
         esp_http_client_set_header(client, "User-Agent", opts->user_agent);
     }

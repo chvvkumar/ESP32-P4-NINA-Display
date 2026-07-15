@@ -62,6 +62,10 @@ typedef struct {
     int retry_delay_ms;         /**< flat delay between attempts; 0 -> 500 */
     size_t max_response_bytes;  /**< 0 -> 65536; hard cap, includes the NUL terminator */
     const char *bearer_token;   /**< optional: adds "Authorization: Bearer <token>" */
+    const char *extra_header;   /**< optional: raw "Name: value" line, split at the
+                                  * first ':' and applied as one request header. Lets
+                                  * a caller forward an arbitrary auth header (e.g.
+                                  * "X-API-Key: abc") that is not Bearer-shaped. */
     const char *user_agent;     /**< optional: adds a "User-Agent" header */
     const char *accept;         /**< optional: adds an "Accept" header */
     const char *host_header;    /**< optional: explicit "Host" header, re-applied on every

@@ -34,6 +34,10 @@ extern const uint8_t fragment_api_html_end[]   asm("_binary_fragment_api_html_en
  * below, not by naming convention alone. */
 extern const uint8_t fragment_allsky_html_start[] asm("_binary_fragment_allsky_html_start");
 extern const uint8_t fragment_allsky_html_end[]   asm("_binary_fragment_allsky_html_end");
+extern const uint8_t fragment_json_html_start[] asm("_binary_fragment_json_html_start");
+extern const uint8_t fragment_json_html_end[]   asm("_binary_fragment_json_html_end");
+extern const uint8_t fragment_ha_html_start[] asm("_binary_fragment_ha_html_start");
+extern const uint8_t fragment_ha_html_end[]   asm("_binary_fragment_ha_html_end");
 extern const uint8_t fragment_clock_html_start[] asm("_binary_fragment_clock_html_start");
 extern const uint8_t fragment_clock_html_end[]   asm("_binary_fragment_clock_html_end");
 extern const uint8_t fragment_spotify_html_start[] asm("_binary_fragment_spotify_html_start");
@@ -102,6 +106,8 @@ static const ui_fragment_entry_t s_ui_fragments[] = {
     { "backup", fragment_backup_html_start, fragment_backup_html_end },
     { "api",    fragment_api_html_start,    fragment_api_html_end },
     { "allsky",        fragment_allsky_html_start,        fragment_allsky_html_end },
+    { "json",          fragment_json_html_start,          fragment_json_html_end },
+    { "ha",            fragment_ha_html_start,            fragment_ha_html_end },
     { "clock",         fragment_clock_html_start,         fragment_clock_html_end },
     { "spotify",       fragment_spotify_html_start,       fragment_spotify_html_end },
     { "image-display", fragment_image_display_html_start, fragment_image_display_html_end },

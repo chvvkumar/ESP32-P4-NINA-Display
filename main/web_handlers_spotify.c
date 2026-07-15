@@ -66,7 +66,7 @@ esp_err_t spotify_config_post_handler(httpd_req_t *req)
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
-    *cfg = app_config_get_snapshot();
+    app_config_get_snapshot_into(cfg);
 
     JSON_TO_BOOL(root, "spotify_enabled", cfg->spotify_enabled);
     JSON_TO_STRING(root, "spotify_client_id", cfg->spotify_client_id);
