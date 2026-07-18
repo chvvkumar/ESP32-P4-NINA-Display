@@ -202,6 +202,11 @@ Every setting is managed from the on-device web UI, organized into tabs.
 
 - **[Waveshare ESP32-P4-WIFI6-Touch-LCD-4B](https://www.waveshare.com/esp32-p4-wifi6-touch-lcd-4b.htm?sku=31416)** — currently the only tested board. The layout is tuned for its 720x720 display.
 - **[3D Printed Stand](https://www.thingiverse.com/thing:7321463)** (optional) — a printable stand for the display, designed by [@chicago925](https://github.com/chicago925) ([#116](https://github.com/chvvkumar/ESP32-P4-NINA-Display/issues/116)).
+- **[3D Printed Mount](https://www.printables.com/model/1784141-waveshare-esp32-p4-wifi6-touch-lcd-4b-mount)** (optional) — a printable desk mount for the display, designed by the project author.
+
+<p align="center">
+  <img src="images/3d_printed_stand.jpg" alt="3D printed mount for the Waveshare ESP32-P4-WIFI6-Touch-LCD-4B" width="600">
+</p>
 
 ### Software (on the N.I.N.A. PC)
 
