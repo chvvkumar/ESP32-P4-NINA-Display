@@ -14,7 +14,8 @@
  * ---------------------------------
  * The numeric ids 0..PAGE_REF_ID_MAX-1 are FROZEN forever. Several config
  * fields persist these ids verbatim in NVS:
- *   - auto_rotate_order2[]      (slideshow stop list; ids 0..11 = ARP_IDX_*)
+ *   - auto_rotate_order2[]      (slideshow stop list; ids 0..11 = ARP_IDX_*,
+ *                                plus PAGE_REF_JSON/PAGE_REF_HA as appended stops)
  *   - idle_page_override_target (idle page id)
  *   - active_page_override      (Home Page id)
  * Renumbering or reordering an existing id would silently re-point a user's
