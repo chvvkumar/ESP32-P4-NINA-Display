@@ -462,6 +462,10 @@
       from { opacity: 0; transform: translateY(8px); }
       to { opacity: 1; transform: translateY(0); }
     }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
 
     /* === COMPONENTS === */
     .input {
@@ -1179,13 +1183,35 @@
          /api/config) and re-awaited by populateConfig without a second fetch. */
       if(_pageRegistryPromise) return _pageRegistryPromise;
       _pageRegistryPromise=fetch('/api/pages').then(function(r){
-        return r.ok?r.json():[];
+        return r.ok?r.json():Promise.reject(new Error('HTTP '+r.status));
       }).then(function(j){
         _pageRegistry=Array.isArray(j)?j:[];
+        /* A freshly booted device can answer before the registry is
+           serviceable -- treat empty as transient so the next call refetches
+           instead of caching an empty list for the page's lifetime. */
+        if(!_pageRegistry.length) _pageRegistryPromise=null;
       }).catch(function(){
         _pageRegistry=[];
+        _pageRegistryPromise=null;
       });
       return _pageRegistryPromise;
+    }
+    /* Fresh-boot race: /api/pages can fail or come back empty while the
+       device is still starting. Retry a few times in the background and
+       rebuild the registry-driven controls (with their saved values) once
+       the registry lands. */
+    function retryPageRegistry(attempts){
+      if(attempts<=0) return;
+      setTimeout(function(){
+        fetchPageRegistry().then(function(){
+          if(!_pageRegistry.length){ retryPageRegistry(attempts-1); return; }
+          if(_cfgCache && loadedTabs.has('behavior') && POPULATE_TAB_FNS.behavior){
+            POPULATE_TAB_FNS.behavior(_cfgCache);
+          } else {
+            populatePageControls();
+          }
+        });
+      },2000);
     }
     /* Pages the user may target as a Home Page or idle page. */
     function targetablePages(){
@@ -1242,9 +1268,11 @@
        from populateTab_nodes(), which runs only after the fragment's markup
        is present. Clears the container first so repeat calls (every config
        reload, or a second lazy-populate race) rebuild cleanly instead of
-       appending duplicate cards -- the node cards use only inline on*=
-       handlers, never addEventListener, so a full rebuild carries no
-       duplicate-listener risk. */
+       appending duplicate cards -- the node cards' own controls use only
+       inline on*= handlers; collapse listeners are re-attached via
+       initCollapsibleCards() after each rebuild, and the old elements (with
+       their listeners) are discarded by the innerHTML clear, so a full
+       rebuild carries no duplicate-listener risk. */
     function buildNodeCards(){
       const container=$('node-cards');
       if(!container) return;
@@ -1253,7 +1281,7 @@
       for(let i=0;i<3;i++){
         const urlId='url'+(i+1);
         container.insertAdjacentHTML('beforeend',
-          '<div class="card node-config-card" id="node_card_'+i+'" data-node="'+i+'">'+
+          '<div class="card node-config-card" id="node_card_'+i+'" data-node="'+i+'" data-collapse-key="node_'+i+'">'+
             '<div class="card-title"><span class="card-title-label">N.I.N.A. '+(i+1)+' <span id="node_card_hostname_'+i+'" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:0.7rem"></span> <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>'+
             '<div class="help-popover"><div class="help-popover-title">N.I.N.A. Node</div><p>Configures one N.I.N.A. instance: where to reach it, whether its notifications are muted, the color shown per filter, and the color bands applied to guider RMS and HFR values on its dashboard page.</p><p>The hostname is the only required field. The remaining settings change how this instance\'s data is colored and whether it shows pop-up notifications.</p><p>Example: enter the IP of your imaging PC, mute notifications on a secondary instance you are not watching, and set the RMS bands so values under 0.5 show green and values over 1.0 show red.</p></div>'+
             '<div class="subsection">'+
@@ -1312,6 +1340,11 @@
             '<input type="color" class="thresh-dot" id="'+pfx+'_bad_color_'+n+'" value="#ef4444">'+
           '</div></div>';
       }
+      /* These cards are injected after loadTabFragment()'s
+         initCollapsibleCards(panel) pass, so wire collapse listeners here.
+         Rebuilds clear the container first, replacing the elements wholesale,
+         so re-running this carries no duplicate-listener risk. */
+      if(typeof initCollapsibleCards==='function') initCollapsibleCards(container);
     }
 
     /* === Rotation Page Pill Generation ===
@@ -1330,21 +1363,27 @@
       if(!c) return;
       var alreadyWired=c.dataset.wired==='1';
       c.innerHTML='';
+      /* [id, label, stop value]. Stop values are frozen page_ref ids: 0..11
+         anchored block, plus appended JSON (24) and Home Assistant (25) —
+         keep in sync with ARP_IDX_* in app_config.h. */
       var items=[
-        ['arp_summary','Summary'],
-        ['arp_nina1','NINA 1'],
-        ['arp_nina2','NINA 2'],
-        ['arp_nina3','NINA 3'],
-        ['arp_sysinfo','System Info'],
-        ['arp_allsky','AllSky'],
-        ['arp_spotify','Spotify'],
-        ['arp_clock','Clock'],
-        ['arp_img_goes','Img: GOES'],
-        ['arp_img_moon','Img: Moon'],
-        ['arp_img_solar','Img: Solar'],
-        ['arp_img_custom','Img: Custom']
+        ['arp_summary','Summary',0],
+        ['arp_nina1','NINA 1',1],
+        ['arp_nina2','NINA 2',2],
+        ['arp_nina3','NINA 3',3],
+        ['arp_sysinfo','System Info',4],
+        ['arp_allsky','AllSky',5],
+        ['arp_spotify','Spotify',6],
+        ['arp_clock','Clock',7],
+        ['arp_json','JSON Display',24],
+        ['arp_ha','Home Assistant',25],
+        ['arp_img_goes','Img: GOES',8],
+        ['arp_img_moon','Img: Moon',9],
+        ['arp_img_solar','Img: Solar',10],
+        ['arp_img_custom','Img: Custom',11]
       ];
-      items.forEach(function(it,idx){
+      items.forEach(function(it){
+        var idx=it[2];
         c.insertAdjacentHTML('beforeend',
           '<label class="pn-pill rotate-pill" draggable="true" data-arp-idx="'+idx+'">'+
             '<span class="pn-pill-grip">\u2022\u2022\u2022</span>'+
@@ -1526,9 +1565,22 @@
            re-scanning the whole document here would re-attach a second click
            listener to every already-loaded tab's cards. */
         if(typeof initCollapsibleCards==='function') initCollapsibleCards(panel);
-        if(_cfgCache && POPULATE_TAB_FNS[name]) POPULATE_TAB_FNS[name](_cfgCache);
+        if(_cfgCache && POPULATE_TAB_FNS[name]){
+          try{ POPULATE_TAB_FNS[name](_cfgCache); }
+          catch(e){
+            console.error('populateTab_'+name+' failed',e);
+            _populateFailed=true;
+            cfgOverlay('error');
+          }
+        }
       }catch(e){
         console.error('Failed to load tab fragment: '+name,e);
+        /* Leave the tab out of loadedTabs so the next attempt refetches; give
+           the user an explicit retry instead of a stuck "Loading..." panel. */
+        if(panel && !loadedTabs.has(name)){
+          panel.innerHTML='<div class="tab-loading" style="cursor:pointer" '+
+            'onclick="switchTab(\''+name+'\')">Couldn\'t load this tab &mdash; tap to retry</div>';
+        }
       }
       _queuedTabs.delete(name);
     }
@@ -1577,11 +1629,13 @@
        their own. Invalidated by any successful write to /api/config. */
     let _cfgCache=null;
     let _cfgFetchPromise=null;
+    var _cfgStale=false;
     function fetchConfig(force){
-      if(!force && _cfgCache) return Promise.resolve(_cfgCache);
+      if(!force && _cfgCache && !_cfgStale) return Promise.resolve(_cfgCache);
       if(_cfgFetchPromise) return _cfgFetchPromise;
       _cfgFetchPromise=fetch('/api/config').then(r=>r.json()).then(function(data){
         _cfgCache=data;
+        _cfgStale=false;
         _cfgFetchPromise=null;
         return data;
       }).catch(function(e){
@@ -1590,7 +1644,12 @@
       });
       return _cfgFetchPromise;
     }
-    function invalidateConfigCache(){ _cfgCache=null; }
+    /* Invalidation marks the cache stale rather than nulling it: a non-null
+       _cfgCache is what configLoadedGuard()/liveApply()/checkDirty() use as
+       proof the page was populated from real device state, and tabs opened
+       after a save still populate from the (slightly stale) copy instead of
+       showing empty fields. The next fetchConfig() refetches. */
+    function invalidateConfigCache(){ _cfgStale=true; }
 
     /* === Short-TTL Status/Version Memo ===
        Mirrors _cfgCache for the two small read-only GETs that several tabs
@@ -1671,6 +1730,11 @@
       // status widgets populate instantly instead of waiting for the next poll.
       if(name==='system' && typeof refreshNavMetrics==='function') refreshNavMetrics();
       if(name==='api' && typeof apiInjectHost==='function') apiInjectHost();
+      /* Home Page pills / idle dropdown are registry-driven; if the boot-time
+         /api/pages fetch lost the race, try again whenever Behavior opens. */
+      if(name==='behavior' && !_pageRegistry.length){
+        fetchPageRegistry().then(function(){ if(_pageRegistry.length) populatePageControls(); });
+      }
     }
 
     $$('.tab-btn, .nav-btn').forEach(btn=>{
@@ -1915,7 +1979,7 @@
 
     /* === Rotation slideshow list === */
     /* Single ordered slideshow list: membership == order.
-       data-arp-idx equals the page/image-source rotation index (0..11).
+       data-arp-idx equals the slideshow stop id (0..11, 24=JSON, 25=HA).
        Saved array holds the indices of CHECKED pills in on-screen order,
        padded to 16 slots with 0xFF (255 = unused). */
     function getRotateOrder(){
@@ -1935,8 +1999,10 @@
       var pills=Array.from(container.querySelectorAll('.pn-pill[data-arp-idx]'));
       var pillMap={};
       pills.forEach(function(p){ pillMap[p.getAttribute('data-arp-idx')]=p; });
-      /* Members (in order) = valid indices 0..11 that are not the 0xFF/255 sentinel. */
-      var members=orderArr.map(function(v){return parseInt(v);}).filter(function(v){return !isNaN(v)&&v>=0&&v!==255&&v<12/* keep in sync with ARP_IDX_MAX in app_config.h */;});
+      /* Members (in order) = valid stop ids (0..11, 24=JSON, 25=HA) that are
+         not the 0xFF/255 sentinel. Keep in sync with ARP_STOP_IS_VALID in
+         app_config.h. */
+      var members=orderArr.map(function(v){return parseInt(v);}).filter(function(v){return !isNaN(v)&&(v>=0&&v<12||v===24||v===25);});
       /* Reorder members to the front in saved order, set their checkbox on. */
       members.forEach(function(idx){
         var p=pillMap[idx];
@@ -2491,14 +2557,22 @@
          the registry-driven controls already exist. */
       await fetchPageRegistry();
       populatePageControls();
+      if(!_pageRegistry.length) retryPageRegistry(10);
 
       var hn=data.hostname||'NINA Display';
       $('brandName').textContent=hn;
       document.title=hn;
 
       TAB_ORDER.forEach(function(name){
-        if(loadedTabs.has(name)) POPULATE_TAB_FNS[name](data);
+        if(!loadedTabs.has(name)) return;
+        try{ POPULATE_TAB_FNS[name](data); }
+        catch(e){
+          console.error('populateTab_'+name+' failed',e);
+          _populateFailed=true;
+        }
       });
+      if(_populateFailed){ cfgOverlay('error'); }
+      else cfgOverlay('hide');
 
       loadedConfig=JSON.stringify(getConfigData());
       _populating=false;
@@ -2677,8 +2751,58 @@
          scanWifi() is no longer fired here; it runs lazily on first unfurl of the
          "Available Networks" panel. Forces a fresh GET (bypassing _cfgCache) since
          this is the authoritative load path -- initial page load and post-revert
-         reload both need the server's current state, not a stale cached copy. */
-      return fetchConfig(true).then(populateConfig).catch(e=>console.error('Failed to load config',e));
+         reload both need the server's current state, not a stale cached copy.
+         On failure (freshly booted device can drop the first request) keep
+         retrying: until a config load succeeds every save path is blocked (see
+         configLoadedGuard), so the page must not sit un-populated forever. */
+      return fetchConfig(true).then(populateConfig).catch(function(e){
+        console.error('Failed to load config',e);
+        if(!window._cfgLoadToastShown){
+          window._cfgLoadToastShown=true;
+          showToast('Could not load settings from device -- retrying...','error');
+        }
+        cfgOverlay('retry');
+        setTimeout(loadConfig,3000);
+      });
+    }
+    /* Central guard for every path that POSTs the full config payload. A null
+       _cfgCache means getConfigData() would seed from {} and collect empty DOM
+       fields from loaded fragments -- saving that wipes device settings
+       (WiFi, hostname, MQTT). Fail closed. */
+    function configLoadedGuard(){
+      if(_cfgCache && !_populateFailed) return true;
+      if(_populateFailed) showToast('Some settings failed to load - refresh the page before saving','error');
+      else showToast('Settings not loaded from device yet -- still retrying, please wait','error');
+      return false;
+    }
+
+    /* === Settings-load overlay ===
+       Covers the UI from page open until the config has loaded AND every
+       loaded tab populated without throwing. Three states: 'loading' (spinner),
+       'retry' (first fetch failed, loadConfig is retrying), 'error' (a tab's
+       populate threw -- fields on screen may be blank/stale; only a page
+       refresh recovers). While visible, saving is already blocked by
+       configLoadedGuard()/_populateFailed. */
+    var _populateFailed=false;
+    function cfgOverlay(state){
+      var el=document.getElementById('cfg-load-overlay');
+      if(!el){
+        el=document.createElement('div');
+        el.id='cfg-load-overlay';
+        el.style.cssText='position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(10,12,16,0.88);backdrop-filter:blur(3px);color:#dfe5ee;font-size:1rem;text-align:center;padding:24px';
+        el.innerHTML='<div class="spinner" id="cfg-load-spin" style="width:34px;height:34px;border:3px solid rgba(255,255,255,0.2);border-top-color:#7ab7ff;border-radius:50%;animation:spin 0.9s linear infinite"></div>'+
+          '<div id="cfg-load-msg"></div>'+
+          '<button type="button" class="btn" id="cfg-load-refresh" style="display:none" onclick="location.reload()">Refresh Page</button>';
+        document.body.appendChild(el);
+      }
+      var msg=document.getElementById('cfg-load-msg');
+      var spin=document.getElementById('cfg-load-spin');
+      var btn=document.getElementById('cfg-load-refresh');
+      if(state==='hide'){ el.style.display='none'; return; }
+      el.style.display='flex';
+      if(state==='loading'){ msg.textContent='Loading settings from device...'; spin.style.display=''; btn.style.display='none'; }
+      else if(state==='retry'){ msg.textContent='Device not answering yet - retrying...'; spin.style.display=''; btn.style.display='none'; }
+      else if(state==='error'){ msg.textContent='Some settings failed to load. Refresh the page before making changes.'; spin.style.display='none'; btn.style.display=''; }
     }
 
     /* === Version Load === */
@@ -2738,6 +2862,7 @@
 
     /* === Save / Discard / Reboot / Reset === */
     function save(){
+      if(!configLoadedGuard()) return;
       var btn=$('saveBtn');
       btn.disabled=true; btn.textContent='Saving...';
       postJson('/api/config',getConfigData()).then(r=>{
@@ -2765,6 +2890,7 @@
     }
 
     function saveAndReboot(){
+      if(!configLoadedGuard()) return;
       if(!confirm('Apply changes and reboot now?')) return;
       postJson('/api/config',getConfigData()).then(r=>{
         if(!r.ok) throw new Error('Save failed');
@@ -3253,6 +3379,7 @@
     /* === Dirty State Detection === */
     function checkDirty(){
       if(_populating) return;
+      if(!_cfgCache||_populateFailed) return;  /* nothing loaded to compare against */
       var dirty=JSON.stringify(getConfigData())!==loadedConfig;
       $('saveBar').classList.toggle('visible',dirty);
     }
@@ -3263,6 +3390,7 @@
       if(_populating) return;
       clearTimeout(_applyTimer);
       _applyTimer=setTimeout(()=>{
+        if(!_cfgCache||_populateFailed) return;  /* never live-apply from an un-loaded page (see configLoadedGuard) */
         var data=getConfigData();
         if(data.wifi_networks){
           data.wifi_networks.forEach(function(n){delete n.pass;});
@@ -4859,6 +4987,9 @@
     function getCardKey(card){
       var title=card.querySelector('.card-title');
       if(!title) return null;
+      /* Node cards embed the live hostname in their title text, which would
+         make a text-derived key drift; they carry an explicit stable key. */
+      if(card.dataset&&card.dataset.collapseKey) return 'nina_collapse_'+card.dataset.collapseKey;
       var tab=card.closest('.tab-panel');
       var tabId=tab?tab.id:'unknown';
       var text=title.textContent.trim().replace(/\s+/g,'_').substring(0,40);
@@ -5535,6 +5666,7 @@
        so they don't fire onto the device's few httpd workers mid-load. The GitHub
        update check (~7s) runs once in the background, lightly delayed, after that
        work so the badge populates on every tab without opening System. */
+    cfgOverlay('loading');
     loadConfig().then(function(){
       loadVersion();
       refreshNavMetrics();

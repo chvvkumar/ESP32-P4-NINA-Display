@@ -3019,10 +3019,10 @@ static bool validate_config(app_config_t *cfg) {
         fixed = true;
     }
     /* Validate the flat slideshow order: any entry that is not the 0xFF
-     * terminator and out of ARP_IDX_* range is dropped to 0xFF. */
+     * terminator and not a valid stop id is dropped to 0xFF. */
     for (int i = 0; i < ARP_ORDER_CAPACITY; i++) {
         if (cfg->auto_rotate_order2[i] != 0xFF &&
-            cfg->auto_rotate_order2[i] >= ARP_IDX_MAX) {
+            !ARP_STOP_IS_VALID(cfg->auto_rotate_order2[i])) {
             cfg->auto_rotate_order2[i] = 0xFF;
             fixed = true;
         }
