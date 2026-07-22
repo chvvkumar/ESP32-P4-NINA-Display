@@ -259,13 +259,14 @@ static int slideshow_build_candidates(int cand_out[ARP_ORDER_CAPACITY],
     int n = 0;
     for (int i = 0; i < ARP_ORDER_CAPACITY; i++) {
         uint8_t bit = c->auto_rotate_order2[i];
-        if (bit == 0xFF || bit >= ARP_IDX_MAX) continue;
+        if (bit == 0xFF || !ARP_STOP_IS_VALID(bit)) continue;
         int p = -1;
         int8_t img_src = -1;
-        /* page_ref ids 0..11 are identical to ARP_IDX_* and to the slideshow
-         * stop encoding. page_ref_resolve() folds in the same availability +
-         * enable checks the old inline switch did (slot/allsky/spotify/custom),
-         * returning false when the stop is unavailable. */
+        /* Slideshow stop values ARE page_ref ids (0..11 anchored, plus the
+         * appended JSON/HA ids). page_ref_resolve() folds in the same
+         * availability + enable checks the old inline switch did
+         * (slot/allsky/spotify/custom/json/ha), returning false when the
+         * stop is unavailable. */
         if (!page_ref_resolve((page_ref_t)bit, &p, &img_src)) continue;
         int inst = p - NINA_PAGE_OFFSET;
         if (inst >= 0 && inst < MAX_NINA_INSTANCES
@@ -285,7 +286,7 @@ static int slideshow_build_candidates(int cand_out[ARP_ORDER_CAPACITY],
 static int8_t first_image_source_in_order(const app_config_t *c) {
     for (int i = 0; i < ARP_ORDER_CAPACITY; i++) {
         uint8_t bit = c->auto_rotate_order2[i];
-        if (bit == 0xFF || bit >= ARP_IDX_MAX) continue;
+        if (bit == 0xFF || !ARP_STOP_IS_VALID(bit)) continue;
         if (bit == ARP_IDX_IMG_GOES || bit == ARP_IDX_IMG_MOON
             || bit == ARP_IDX_IMG_SOLAR || bit == ARP_IDX_IMG_CUSTOM) {
             return (int8_t)(bit - ARP_IDX_IMG_GOES);

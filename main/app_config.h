@@ -29,6 +29,15 @@ extern "C" {
  *   9  ARP_IDX_IMG_MOON   -> PAGE_IDX_IMAGE_DISPLAY (3), image source 1
  *  10  ARP_IDX_IMG_SOLAR  -> PAGE_IDX_IMAGE_DISPLAY (3), image source 2
  *  11  ARP_IDX_IMG_CUSTOM -> PAGE_IDX_IMAGE_DISPLAY (3), image source 3
+ *
+ * Stop values are page_ref_t ids (ids 0..11 are frozen identical to the
+ * ARP_IDX_* constants above). Pages added to the registry after the 0..11
+ * anchored block keep their frozen registry id as their slideshow stop value,
+ * so the range is no longer contiguous: ids 12..23 name non-slideshow entries
+ * (image-default sentinel, Settings, overlays) and are NOT valid stops.
+ *  24  ARP_IDX_JSON       -> PAGE_IDX_JSON (4)  (== PAGE_REF_JSON)
+ *  25  ARP_IDX_HA         -> PAGE_IDX_HA (5)    (== PAGE_REF_HA)
+ * Use ARP_STOP_IS_VALID() for validation, never `< ARP_IDX_MAX` alone.
  */
 #define ARP_IDX_SUMMARY     0
 #define ARP_IDX_NINA1       1
@@ -42,7 +51,11 @@ extern "C" {
 #define ARP_IDX_IMG_MOON    9
 #define ARP_IDX_IMG_SOLAR  10
 #define ARP_IDX_IMG_CUSTOM 11
-#define ARP_IDX_MAX        12   /* exclusive validation bound */
+#define ARP_IDX_MAX        12   /* exclusive bound of the contiguous 0..11 block only */
+#define ARP_IDX_JSON       24   /* == PAGE_REF_JSON (frozen registry id) */
+#define ARP_IDX_HA         25   /* == PAGE_REF_HA (frozen registry id) */
+/* True if @p b names a valid slideshow stop. */
+#define ARP_STOP_IS_VALID(b) ((b) < ARP_IDX_MAX || (b) == ARP_IDX_JSON || (b) == ARP_IDX_HA)
 #define ARP_ORDER_CAPACITY 16   /* size of auto_rotate_order2[] */
 
 // Current config struct version — bump on every layout change.

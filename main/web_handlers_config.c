@@ -998,7 +998,7 @@ static app_config_t *parse_config_from_json(cJSON *root)
             cJSON *item2 = cJSON_GetArrayItem(order2_arr, i);
             uint8_t v = 0xFF;
             if (cJSON_IsNumber(item2) &&
-                item2->valueint >= 0 && item2->valueint < ARP_IDX_MAX) {
+                item2->valueint >= 0 && ARP_STOP_IS_VALID(item2->valueint)) {
                 v = (uint8_t)item2->valueint;
             }
             cfg->auto_rotate_order2[i] = v;

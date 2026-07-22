@@ -1363,21 +1363,27 @@
       if(!c) return;
       var alreadyWired=c.dataset.wired==='1';
       c.innerHTML='';
+      /* [id, label, stop value]. Stop values are frozen page_ref ids: 0..11
+         anchored block, plus appended JSON (24) and Home Assistant (25) —
+         keep in sync with ARP_IDX_* in app_config.h. */
       var items=[
-        ['arp_summary','Summary'],
-        ['arp_nina1','NINA 1'],
-        ['arp_nina2','NINA 2'],
-        ['arp_nina3','NINA 3'],
-        ['arp_sysinfo','System Info'],
-        ['arp_allsky','AllSky'],
-        ['arp_spotify','Spotify'],
-        ['arp_clock','Clock'],
-        ['arp_img_goes','Img: GOES'],
-        ['arp_img_moon','Img: Moon'],
-        ['arp_img_solar','Img: Solar'],
-        ['arp_img_custom','Img: Custom']
+        ['arp_summary','Summary',0],
+        ['arp_nina1','NINA 1',1],
+        ['arp_nina2','NINA 2',2],
+        ['arp_nina3','NINA 3',3],
+        ['arp_sysinfo','System Info',4],
+        ['arp_allsky','AllSky',5],
+        ['arp_spotify','Spotify',6],
+        ['arp_clock','Clock',7],
+        ['arp_json','JSON Display',24],
+        ['arp_ha','Home Assistant',25],
+        ['arp_img_goes','Img: GOES',8],
+        ['arp_img_moon','Img: Moon',9],
+        ['arp_img_solar','Img: Solar',10],
+        ['arp_img_custom','Img: Custom',11]
       ];
-      items.forEach(function(it,idx){
+      items.forEach(function(it){
+        var idx=it[2];
         c.insertAdjacentHTML('beforeend',
           '<label class="pn-pill rotate-pill" draggable="true" data-arp-idx="'+idx+'">'+
             '<span class="pn-pill-grip">\u2022\u2022\u2022</span>'+
@@ -1973,7 +1979,7 @@
 
     /* === Rotation slideshow list === */
     /* Single ordered slideshow list: membership == order.
-       data-arp-idx equals the page/image-source rotation index (0..11).
+       data-arp-idx equals the slideshow stop id (0..11, 24=JSON, 25=HA).
        Saved array holds the indices of CHECKED pills in on-screen order,
        padded to 16 slots with 0xFF (255 = unused). */
     function getRotateOrder(){
@@ -1993,8 +1999,10 @@
       var pills=Array.from(container.querySelectorAll('.pn-pill[data-arp-idx]'));
       var pillMap={};
       pills.forEach(function(p){ pillMap[p.getAttribute('data-arp-idx')]=p; });
-      /* Members (in order) = valid indices 0..11 that are not the 0xFF/255 sentinel. */
-      var members=orderArr.map(function(v){return parseInt(v);}).filter(function(v){return !isNaN(v)&&v>=0&&v!==255&&v<12/* keep in sync with ARP_IDX_MAX in app_config.h */;});
+      /* Members (in order) = valid stop ids (0..11, 24=JSON, 25=HA) that are
+         not the 0xFF/255 sentinel. Keep in sync with ARP_STOP_IS_VALID in
+         app_config.h. */
+      var members=orderArr.map(function(v){return parseInt(v);}).filter(function(v){return !isNaN(v)&&(v>=0&&v<12||v===24||v===25);});
       /* Reorder members to the front in saved order, set their checkbox on. */
       members.forEach(function(idx){
         var p=pillMap[idx];
