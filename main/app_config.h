@@ -126,7 +126,7 @@ typedef struct {
     uint16_t screen_sleep_timeout_s;   // Seconds with 0 connections before screen off (default 60)
     bool     alert_flash_enabled;     // Enable border flash alerts for RMS/HFR/safety events (default true)
     uint8_t  idle_poll_interval_s;   // Heartbeat poll interval while screen sleeping (5-120, default 30)
-    bool     wifi_power_save;        // Enable WiFi modem sleep for power savings (default true)
+    bool     wifi_power_save;        // Enable WiFi modem sleep for power savings (default false)
     uint8_t  widget_style;           // Widget panel style index (0-12, default 0)
     uint8_t  auto_update_check;     // 0=disabled, 1=enabled (check GitHub for firmware updates on boot)
     uint8_t  update_channel;        // 0=stable releases only, 1=include pre-releases
