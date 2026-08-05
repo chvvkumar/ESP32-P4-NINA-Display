@@ -50,6 +50,7 @@
 #include "ui/nina_settings_tabview.h"
 #include "ui/nina_thumbnail.h"
 #include "ui/nina_setup_screen.h"
+#include "ui/nina_setup_hint.h"
 #include "ui/nina_nav_arbiter.h"
 #include "ui/themes.h"
 #include "image_red_remap.h"
@@ -404,6 +405,13 @@ static void event_handler(void *arg, esp_event_base_t event_base,
             }
             weather_client_start();
         }
+
+        /* First-boot hint: show the web-config address on screen while the
+         * device still looks factory-fresh. Covers both paths — the setup-mode
+         * transition just above and a normal boot — and refreshes the address
+         * (instead of rebuilding) if it is already on screen. Takes the display
+         * lock itself, so it must not be called with the lock held. */
+        nina_setup_hint_show_if_needed();
 
         /* Apply timezone before SNTP so localtime_r works as soon as time is set */
         const char *tz = app_config_get()->tz_string;
@@ -852,6 +860,11 @@ void app_main(void)
         /* Fresh first resolution — let the arbiter pick the page from current
          * state instead of force-navigating on boot. */
         nav_arbiter_resolve(esp_timer_get_time() / 1000);
+
+        /* WiFi comes up before the display, so the got-IP handler may have run
+         * while there was no screen to draw on. Re-check now that the dashboard
+         * exists; a no-op unless the device is factory-fresh and has an IP. */
+        nina_setup_hint_show_if_needed();
 
         nina_client_init();  // DNS cache mutex — must be called before poll tasks spawn
         nina_client_init_image_buffers();  // Pre-allocate PSRAM image fetch buffer

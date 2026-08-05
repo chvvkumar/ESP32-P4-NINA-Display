@@ -7,6 +7,7 @@
 #include "esp_mac.h"
 #include "esp_timer.h"
 #include "ui/nina_setup_screen.h"
+#include "ui/nina_setup_hint.h"         /* nina_setup_hint_destroy — retire hint on first save */
 #include "ui/nina_dashboard.h"          /* nina_dashboard_get_total_page_count() */
 #include "ui/nina_dashboard_internal.h" /* PAGE_IDX_SUMMARY, SETTINGS_PAGE_IDX, SYSINFO_PAGE_IDX page-index macros */
 #include "ui/nina_nav_arbiter.h"        /* nav_arbiter_submit_user — live Home Page USER claim */
@@ -1219,6 +1220,13 @@ esp_err_t config_post_handler(httpd_req_t *req)
         }
     }
 
+    /* Explicit false is a deliberate API/test request to re-arm the hint (the web UI never sends this key); absent key or true keeps the retire-on-first-save behavior. */
+    cJSON *sh_item = cJSON_GetObjectItem(root, "setup_hint_dismissed");
+    bool setup_hint_explicit_clear = cJSON_IsBool(sh_item) && !cJSON_IsTrue(sh_item);
+    if (setup_hint_explicit_clear) {
+        cfg->setup_hint_dismissed = false;
+    }
+
     cJSON_Delete(root);
 
     app_config_t *old_cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
@@ -1229,8 +1237,22 @@ esp_err_t config_post_handler(httpd_req_t *req)
         return ESP_OK;
     }
     memcpy(old_cfg, app_config_get(), sizeof(app_config_t));
+
+    /* A settings save proves the user found the web config UI, which is the
+     * only thing the first-boot hint overlay exists to teach. Retire it here so
+     * it persists inside this same NVS write (no second save). */
+    bool retire_setup_hint = !cfg->setup_hint_dismissed && !setup_hint_explicit_clear;
+    if (retire_setup_hint) {
+        cfg->setup_hint_dismissed = true;
+    }
+
     app_config_save(cfg);   /* applies app_config_normalize_nav_exclusivity() internally */
     config_trigger_side_effects(old_cfg, cfg);
+
+    if (retire_setup_hint) {
+        nina_setup_hint_destroy();   /* no-op when the overlay is not showing */
+        ESP_LOGI(TAG, "Setup hint retired by web config save");
+    }
 
     /* Home Page live (Q7): if active_page_override changed, navigate there now.
      * The field is a page_ref registry id; page_ref_navigate() resolves the id,
