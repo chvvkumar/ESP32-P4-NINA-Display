@@ -54,3 +54,51 @@ target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=panic_print_char")
 # Build-time generated version header (git tag, sha, branch)
 target_include_directories(${COMPONENT_LIB} PRIVATE ${CMAKE_BINARY_DIR}/generated)
 add_dependencies(${COMPONENT_LIB} generate_build_version)
+
+# Build-time gzip of the embedded web UI. Every asset listed here is embedded
+# twice: the plain copy via EMBED_TXTFILES above (symbols unchanged) and a .gz
+# copy generated below. send_embedded_asset() in web_handlers_config.c picks
+# between them per request from Accept-Encoding.
+# Keep this list in sync with the HTML entries in EMBED_TXTFILES.
+# login.html / setup_ui.html are deliberately excluded: both are served on
+# paths that must work before any UI state exists, and neither is large enough
+# to pay for the extra flash.
+set(WEB_GZ_ASSETS
+    config_ui.html
+    fragment_logs.html fragment_backup.html fragment_api.html
+    fragment_allsky.html fragment_json.html fragment_ha.html
+    fragment_clock.html fragment_spotify.html fragment_image_display.html
+    fragment_nodes.html fragment_display.html fragment_behavior.html
+    fragment_system.html)
+
+idf_build_get_property(python PYTHON)
+idf_build_get_property(project_dir PROJECT_DIR)
+set(web_gz_dir ${CMAKE_BINARY_DIR}/generated/gz)
+set(web_gz_files "")
+foreach(asset IN LISTS WEB_GZ_ASSETS)
+    # Plain DEPENDS on the .html, not MAIN_DEPENDENCY: EMBED_TXTFILES already
+    # claims each .html as the MAIN_DEPENDENCY of its own embed rule, and a
+    # source file may only be the main dependency of one custom command.
+    add_custom_command(
+        OUTPUT ${web_gz_dir}/${asset}.gz
+        COMMAND ${python} ${project_dir}/tools/gzip_asset.py
+                ${CMAKE_CURRENT_SOURCE_DIR}/${asset}
+                ${web_gz_dir}/${asset}.gz
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${asset}
+                ${project_dir}/tools/gzip_asset.py
+        COMMENT "Gzipping ${asset}"
+        VERBATIM)
+    list(APPEND web_gz_files ${web_gz_dir}/${asset}.gz)
+endforeach()
+
+add_custom_target(generate_web_gz DEPENDS ${web_gz_files})
+add_dependencies(${COMPONENT_LIB} generate_web_gz)
+
+# target_add_binary_data takes each .gz as the MAIN_DEPENDENCY of its .S
+# generation, so editing an .html regenerates the .gz and then the .S. It is
+# deliberately NOT given DEPENDS generate_web_gz: a target-level dependency
+# there would make the (slow) hex conversion of config_ui.html.gz re-run on
+# every build, since generate_web_gz is always considered out of date.
+foreach(asset IN LISTS WEB_GZ_ASSETS)
+    target_add_binary_data(${COMPONENT_LIB} "${web_gz_dir}/${asset}.gz" BINARY)
+endforeach()
