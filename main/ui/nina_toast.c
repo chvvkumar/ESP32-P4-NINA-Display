@@ -30,6 +30,10 @@ static const char *TAG = "toast";
 #define TOAST_POOL_SIZE     4
 #define BACKLOG_SIZE        16
 
+/* Bounds for an explicit per-toast lifetime override (nina_toast_show_timed) */
+#define TOAST_OVERRIDE_MIN_MS   1000
+#define TOAST_OVERRIDE_MAX_MS   120000
+
 /* Toast bar dimensions */
 #define TOAST_RADIUS        18
 #define TOAST_MARGIN_X      12
@@ -134,6 +138,7 @@ typedef struct {
 typedef struct {
     toast_severity_t sev;
     char             message[128];
+    uint32_t         lifetime_ms;   /* Explicit override, 0 = config default */
     bool             valid;
 } pending_toast_t;
 
@@ -141,6 +146,7 @@ typedef struct {
 typedef struct {
     toast_severity_t sev;
     char             message[128];
+    uint32_t         lifetime_ms;   /* Explicit override, 0 = config default */
 } backlog_entry_t;
 
 /* ── Module state ───────────────────────────────────────────────────── */
@@ -193,6 +199,16 @@ static int lifetime_for_severity(toast_severity_t sev) {
     return (sev == TOAST_ERROR || sev == TOAST_WARNING) ? (base * 2) : base;
 }
 
+/** Resolve the lifetime a slot should use: an explicit override (clamped to
+ *  TOAST_OVERRIDE_MIN_MS..TOAST_OVERRIDE_MAX_MS), or 0 for the severity
+ *  default derived from config. Single clamp point for every code path. */
+static int resolve_lifetime_ms(toast_severity_t sev, uint32_t override_ms) {
+    if (override_ms == 0) return lifetime_for_severity(sev);
+    if (override_ms < TOAST_OVERRIDE_MIN_MS) return TOAST_OVERRIDE_MIN_MS;
+    if (override_ms > TOAST_OVERRIDE_MAX_MS) return TOAST_OVERRIDE_MAX_MS;
+    return (int)override_ms;
+}
+
 /* ── Animation callbacks ───────────────────────────────────────────── */
 static void anim_opa_cb(void *obj, int32_t v) {
     lv_obj_set_style_opa((lv_obj_t *)obj, (lv_opa_t)v, 0);
@@ -210,7 +226,7 @@ static void exit_anim_done_cb(lv_anim_t *a) {
 }
 
 /* ── Backlog ring buffer operations (LVGL context only) ─────────────── */
-static void backlog_push(toast_severity_t sev, const char *msg) {
+static void backlog_push(toast_severity_t sev, const char *msg, uint32_t lifetime_ms) {
     if (s_bl_count >= BACKLOG_SIZE) {
         /* Overflow: drop oldest entry */
         ESP_LOGW(TAG, "Backlog overflow, dropping oldest: %s", s_backlog[s_bl_head].message);
@@ -220,15 +236,17 @@ static void backlog_push(toast_severity_t sev, const char *msg) {
     s_backlog[s_bl_tail].sev = sev;
     strncpy(s_backlog[s_bl_tail].message, msg, sizeof(s_backlog[s_bl_tail].message) - 1);
     s_backlog[s_bl_tail].message[sizeof(s_backlog[s_bl_tail].message) - 1] = '\0';
+    s_backlog[s_bl_tail].lifetime_ms = lifetime_ms;
     s_bl_tail = (s_bl_tail + 1) % BACKLOG_SIZE;
     s_bl_count++;
 }
 
-static bool backlog_pop(toast_severity_t *sev, char *msg, size_t msg_sz) {
+static bool backlog_pop(toast_severity_t *sev, char *msg, size_t msg_sz, uint32_t *lifetime_ms) {
     if (s_bl_count <= 0) return false;
     *sev = s_backlog[s_bl_head].sev;
     strncpy(msg, s_backlog[s_bl_head].message, msg_sz - 1);
     msg[msg_sz - 1] = '\0';
+    *lifetime_ms = s_backlog[s_bl_head].lifetime_ms;
     s_bl_head = (s_bl_head + 1) % BACKLOG_SIZE;
     s_bl_count--;
     return true;
@@ -346,7 +364,9 @@ static void update_label(toast_state_t *ts) {
 }
 
 /* ── Show a toast in a specific pool slot (LVGL context) ────────────── */
-static void show_in_slot(int idx, toast_severity_t sev, const char *msg, int visual_pos) {
+/* lifetime_ms: explicit override in ms, or 0 for the severity default. */
+static void show_in_slot(int idx, toast_severity_t sev, const char *msg, int visual_pos,
+                         uint32_t lifetime_ms) {
     toast_state_t *ts = &s_pool[idx];
 
     /* Cancel any running animations on this bar */
@@ -358,7 +378,7 @@ static void show_in_slot(int idx, toast_severity_t sev, const char *msg, int vis
     strncpy(ts->message, msg, sizeof(ts->message) - 1);
     ts->message[sizeof(ts->message) - 1] = '\0';
     ts->shown_ms = now_ms();
-    ts->lifetime_ms = lifetime_for_severity(sev);
+    ts->lifetime_ms = resolve_lifetime_ms(sev, lifetime_ms);
     ts->dedup_count = 1;
     ts->active = true;
 
@@ -479,11 +499,12 @@ static void compact_and_promote(void) {
     while (n < TOAST_POOL_SIZE && s_bl_count > 0) {
         toast_severity_t sev;
         char msg[128];
-        if (!backlog_pop(&sev, msg, sizeof(msg))) break;
+        uint32_t lifetime_ms = 0;
+        if (!backlog_pop(&sev, msg, sizeof(msg), &lifetime_ms)) break;
         /* Find a free pool slot */
         for (int i = 0; i < TOAST_POOL_SIZE; i++) {
             if (!s_pool[i].active) {
-                show_in_slot(i, sev, msg, n); /* n = next visual position (top) */
+                show_in_slot(i, sev, msg, n, lifetime_ms); /* n = next visual position (top) */
                 n++;
                 break;
             }
@@ -507,7 +528,9 @@ static void toast_click_cb(lv_event_t *e) {
 }
 
 /* ── Dedup: check all active pool slots for matching message+severity ── */
-static bool try_dedup(toast_severity_t sev, const char *msg) {
+/* On a match the newest request's lifetime wins, so a timed toast that
+ * collapses onto an identical visible one re-arms with its own duration. */
+static bool try_dedup(toast_severity_t sev, const char *msg, uint32_t lifetime_ms) {
     for (int i = 0; i < TOAST_POOL_SIZE; i++) {
         toast_state_t *ts = &s_pool[i];
         if (!ts->active) continue;
@@ -516,7 +539,7 @@ static bool try_dedup(toast_severity_t sev, const char *msg) {
             /* Bump count and reset timer */
             ts->dedup_count++;
             ts->shown_ms = now_ms();
-            ts->lifetime_ms = lifetime_for_severity(sev);
+            ts->lifetime_ms = resolve_lifetime_ms(sev, lifetime_ms);
             update_label(ts);
             /* Update countdown */
             char countdown_buf[16];
@@ -530,21 +553,22 @@ static bool try_dedup(toast_severity_t sev, const char *msg) {
 }
 
 /* ── Add a toast to pool or backlog (LVGL context) ──────────────────── */
-static void add_toast(toast_severity_t sev, const char *msg) {
+static void add_toast(toast_severity_t sev, const char *msg, uint32_t lifetime_ms) {
     /* Try dedup first */
-    if (try_dedup(sev, msg)) return;
+    if (try_dedup(sev, msg, lifetime_ms)) return;
 
     /* Find an inactive pool slot */
     int n_active = active_count();
     for (int i = 0; i < TOAST_POOL_SIZE; i++) {
         if (!s_pool[i].active) {
-            show_in_slot(i, sev, msg, n_active); /* Visual pos = current active count (top) */
+            /* Visual pos = current active count (top) */
+            show_in_slot(i, sev, msg, n_active, lifetime_ms);
             return;
         }
     }
 
-    /* All pool slots full — add to backlog */
-    backlog_push(sev, msg);
+    /* All pool slots full — add to backlog (override travels with the entry) */
+    backlog_push(sev, msg, lifetime_ms);
     ESP_LOGD(TAG, "Toast queued to backlog (%d items): %s", s_bl_count, msg);
 }
 
@@ -567,7 +591,7 @@ static void tick_cb(lv_timer_t *timer) {
 
     /* 2. Process pending toasts → add to pool or backlog */
     for (int i = 0; i < pending_count; i++) {
-        add_toast(local[i].sev, local[i].message);
+        add_toast(local[i].sev, local[i].message, local[i].lifetime_ms);
     }
 
     /* 3. Check lifetimes, expire any that exceeded their lifetime */
@@ -697,7 +721,9 @@ void nina_toast_init(lv_obj_t *screen) {
     ESP_LOGI(TAG, "Toast system initialized (pool=%d, backlog=%d)", TOAST_POOL_SIZE, BACKLOG_SIZE);
 }
 
-void nina_toast_show(toast_severity_t sev, const char *msg) {
+/** Shared enqueue path for every public show_* entry point.  Thread-safe.
+ *  lifetime_ms: explicit override in ms, or 0 for the severity default. */
+static void toast_enqueue(toast_severity_t sev, const char *msg, uint32_t lifetime_ms) {
     if (!msg || !s_pool[0].bar) return;
 
     /* Write to pending queue under spinlock — zero LVGL calls */
@@ -721,8 +747,13 @@ void nina_toast_show(toast_severity_t sev, const char *msg) {
     s_pending[slot].sev = sev;
     strncpy(s_pending[slot].message, msg, sizeof(s_pending[slot].message) - 1);
     s_pending[slot].message[sizeof(s_pending[slot].message) - 1] = '\0';
+    s_pending[slot].lifetime_ms = lifetime_ms;
     s_pending[slot].valid = true;
     portEXIT_CRITICAL(&s_pending_lock);
+}
+
+void nina_toast_show(toast_severity_t sev, const char *msg) {
+    toast_enqueue(sev, msg, 0);
 }
 
 void nina_toast_show_fmt(toast_severity_t sev, const char *fmt, ...) {
@@ -732,6 +763,16 @@ void nina_toast_show_fmt(toast_severity_t sev, const char *fmt, ...) {
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
     nina_toast_show(sev, buf);
+}
+
+void nina_toast_show_timed(toast_severity_t sev, uint32_t duration_ms, const char *fmt, ...) {
+    char buf[128];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    /* duration_ms is clamped at resolve time (resolve_lifetime_ms); 0 = default */
+    toast_enqueue(sev, buf, duration_ms);
 }
 
 void nina_toast_dismiss_all(void) {

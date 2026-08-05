@@ -3167,6 +3167,10 @@ esp_err_t app_config_revert(void);                    // reload NVS into memory
 bool app_config_is_dirty(void);                       // true if apply called without save
 int app_config_get_instance_count(void);
 const char *app_config_get_instance_url(int index);
+/* Extract the display hostname from an instance's configured URL.
+ * "http://astromele2.lan:1888/v2/api/" -> "astromele2.lan". Writes "" when the
+ * index is out of range or the URL is unset. Always NUL-terminates. */
+void app_config_get_instance_host(int index, char *out, size_t out_size);
 void app_config_factory_reset(void);
 
 /* Tiles-config accessors. The value lives in a dedicated NVS key ("json_tiles"

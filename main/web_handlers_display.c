@@ -53,7 +53,8 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
         bool url_changed = (strcmp(new_cfg->api_url[i], old_cfg->api_url[i]) != 0);
         if (enable_changed || url_changed) {
             if (!new_cfg->instance_enabled[i]) {
-                nina_connection_report_poll(i, false);
+                /* User turned it off — offline now, no timeout window. */
+                nina_connection_force_disconnect(i);
             }
             if (poll_task_handles[i]) {
                 xTaskNotifyGive(poll_task_handles[i]);

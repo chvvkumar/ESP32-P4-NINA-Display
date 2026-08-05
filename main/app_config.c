@@ -3959,6 +3959,25 @@ const char *app_config_get_instance_url(int index) {
     return s_config.api_url[index];
 }
 
+void app_config_get_instance_host(int index, char *out, size_t out_size) {
+    if (!out || out_size == 0) return;
+    out[0] = '\0';
+    const char *url = app_config_get_instance_url(index);
+    if (!url || url[0] == '\0') return;
+
+    /* Skip the scheme ("http://" / "https://") when present. */
+    const char *host = strstr(url, "://");
+    host = host ? host + 3 : url;
+
+    /* Copy up to the port separator, the path separator, or the end. */
+    size_t i = 0;
+    while (host[i] && host[i] != ':' && host[i] != '/' && i < out_size - 1) {
+        out[i] = host[i];
+        i++;
+    }
+    out[i] = '\0';
+}
+
 bool app_config_is_instance_enabled(int index) {
     if (index < 0 || index >= MAX_NINA_INSTANCES) return false;
     return s_config.instance_enabled[index];

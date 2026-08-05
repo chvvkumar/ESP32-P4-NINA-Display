@@ -5,7 +5,8 @@
  * @brief Internal shared utilities for nina_client modules.
  *
  * Not part of the public API — only included by nina_client.c,
- * nina_api_fetchers.c, nina_sequence.c, and nina_websocket.c.
+ * nina_api_fetchers.c, nina_sequence.c, nina_websocket.c, and net_diag.c
+ * (the last for nina_client_resolve_host() only).
  */
 
 #include "cJSON.h"
