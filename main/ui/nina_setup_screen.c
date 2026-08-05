@@ -49,7 +49,7 @@ void nina_setup_screen_create(lv_obj_t *parent)
     lv_obj_set_style_bg_color(s_setup_cont, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(s_setup_cont, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(s_setup_cont, 40, 0);
-    lv_obj_set_style_pad_top(s_setup_cont, 100, 0);
+    lv_obj_set_style_pad_top(s_setup_cont, 72, 0);
     lv_obj_set_style_pad_row(s_setup_cont, 12, 0);
     lv_obj_set_flex_flow(s_setup_cont, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(s_setup_cont, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -60,7 +60,7 @@ void nina_setup_screen_create(lv_obj_t *parent)
     lv_obj_t *title = lv_label_create(s_setup_cont);
     lv_label_set_text(title, "WiFi Setup Required");
     lv_obj_set_width(title, lv_pct(100));
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_36, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(col_title), 0);
     lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
 
@@ -68,7 +68,7 @@ void nina_setup_screen_create(lv_obj_t *parent)
     lv_obj_t *subtitle = lv_label_create(s_setup_cont);
     lv_label_set_text(subtitle, "Connect to this device's WiFi network\nand open the setup page in your browser.");
     lv_obj_set_width(subtitle, lv_pct(90));
-    lv_obj_set_style_text_font(subtitle, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(subtitle, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(subtitle, lv_color_hex(col_secondary), 0);
     lv_obj_set_style_text_align(subtitle, LV_TEXT_ALIGN_CENTER, 0);
 
@@ -96,12 +96,12 @@ void nina_setup_screen_create(lv_obj_t *parent)
 
         lv_obj_t *lbl = lv_label_create(row);
         lv_label_set_text(lbl, labels[i]);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_22, 0);
         lv_obj_set_style_text_color(lbl, lv_color_hex(col_secondary), 0);
 
         lv_obj_t *val = lv_label_create(row);
         lv_label_set_text(val, values[i]);
-        lv_obj_set_style_text_font(val, &lv_font_montserrat_22, 0);
+        lv_obj_set_style_text_font(val, &lv_font_montserrat_32, 0);
         lv_obj_set_style_text_color(val, lv_color_hex(col_value), 0);
     }
 
@@ -115,13 +115,13 @@ void nina_setup_screen_create(lv_obj_t *parent)
     /* Waiting text */
     lv_obj_t *waiting = lv_label_create(s_setup_cont);
     lv_label_set_text(waiting, "Waiting for configuration...");
-    lv_obj_set_style_text_font(waiting, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(waiting, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(waiting, lv_color_hex(col_waiting), 0);
     lv_obj_set_style_text_align(waiting, LV_TEXT_ALIGN_CENTER, 0);
 
     /* Spinner */
     lv_obj_t *spinner = lv_spinner_create(s_setup_cont);
-    lv_obj_set_size(spinner, 40, 40);
+    lv_obj_set_size(spinner, 56, 56);
     lv_spinner_set_anim_params(spinner, 1000, 270);
     lv_obj_set_style_arc_color(spinner, lv_color_hex(col_spin_ind), LV_PART_INDICATOR);
     lv_obj_set_style_arc_color(spinner, lv_color_hex(col_spin_track), LV_PART_MAIN);

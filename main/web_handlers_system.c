@@ -7,6 +7,8 @@
 #include "perf_monitor.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
+#include "freertos/idf_additions.h"
 #include <string.h>
 #include <stdatomic.h>
 #include "esp_heap_caps.h"
@@ -413,39 +415,117 @@ esp_err_t version_get_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-// Handler for checking GitHub OTA updates (returns JSON result to web UI)
-esp_err_t check_update_json_handler(httpd_req_t *req)
+/* ── Asynchronous GitHub update check ─────────────────────────────────
+ * ota_github_check() is a ~7 s HTTPS round trip to api.github.com. The
+ * esp_http_server dispatches every handler from one task, so running the
+ * check inline stalls all other web requests behind it. Instead the handler
+ * serves a cached answer when one is fresh, otherwise it wakes a persistent
+ * worker task and tells the client to poll.
+ *
+ * The worker is created once, on first demand, and then parks forever on a
+ * task notification. It is deliberately *not* a one-shot task: a task with a
+ * heap-caps stack that deletes itself hands its own stack to the idle task's
+ * cleanup path, which aborts if it cannot complete, so the self-delete form is
+ * discouraged. Parking one 12 KB PSRAM stack costs nothing scarce.
+ *
+ * A successful answer is reused for an hour. A failed one is reused for only
+ * a minute, so a transient network error does not pin the UI to an error for
+ * the rest of the hour. `?refresh=1` bypasses the cache entirely (used by the
+ * manual "Check for Updates" button) and drops the stored answer, so pollers
+ * that follow a forced check see "checking" rather than the result it replaces.
+ */
+#define UPD_CACHE_TTL_OK_US    (3600LL * 1000000LL)
+#define UPD_CACHE_TTL_FAIL_US  (60LL * 1000000LL)
+#define UPD_WORKER_STACK       12288
+
+static SemaphoreHandle_t s_upd_mutex = NULL;      /* guards the cache fields below */
+static github_release_info_t *s_upd_rel = NULL;   /* PSRAM; last release info */
+static ota_check_result_t s_upd_result = OTA_CHECK_ERROR;
+static int64_t s_upd_stamp_us = 0;                /* esp_timer_get_time() at completion */
+static bool s_upd_have_result = false;
+
+/* Worker handle and request state. Everything below is guarded by
+ * s_upd_mutex, including the handle itself: the worker is created lazily and
+ * exactly once, by whichever request first needs it. */
+static TaskHandle_t s_upd_task = NULL;
+static bool s_upd_checking = false;   /* a cycle is running (state CHECKING) */
+static int s_upd_req_channel = 0;
+static char s_upd_req_version[48];
+
+/* Persistent worker: parks on a notification, runs one check per wake,
+ * publishes the result into the cache, then parks again. Never exits. */
+static void update_check_worker(void *arg)
 {
-    REQUIRE_AUTH(req);
-    int update_channel = app_config_get()->update_channel;
-    const char *cur_ver = ota_github_get_current_version();
+    (void)arg;
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
-    github_release_info_t *rel = heap_caps_calloc(1, sizeof(github_release_info_t), MALLOC_CAP_SPIRAM);
-    if (!rel) {
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
+        /* Copy the request parameters out; the HTTPS call below must not read
+         * fields a concurrent handler may be rewriting. */
+        int channel = 0;
+        char version[sizeof(s_upd_req_version)];
+        version[0] = '\0';
+        if (xSemaphoreTake(s_upd_mutex, portMAX_DELAY) == pdTRUE) {
+            channel = s_upd_req_channel;
+            memcpy(version, s_upd_req_version, sizeof(version));
+            version[sizeof(version) - 1] = '\0';
+            xSemaphoreGive(s_upd_mutex);
+        }
+
+        ota_check_result_t chk = OTA_CHECK_ERROR;
+        github_release_info_t *scratch =
+            heap_caps_calloc(1, sizeof(github_release_info_t), MALLOC_CAP_SPIRAM);
+        if (scratch) {
+            chk = ota_github_check(channel, version, scratch);
+        } else {
+            ESP_LOGE(TAG, "Update check: no PSRAM for release info");
+        }
+
+        /* Publish under the mutex. The long HTTPS call above ran outside it, so
+         * a concurrent reader never waits on the network.
+         *
+         * This is the single exit of a cycle, and portMAX_DELAY cannot time
+         * out, so every path above -- including the allocation failure --
+         * lands here and leaves a terminal state (DONE or FAILED, never
+         * CHECKING). The flag cannot stick. */
+        xSemaphoreTake(s_upd_mutex, portMAX_DELAY);
+        if (scratch && s_upd_rel) {
+            memcpy(s_upd_rel, scratch, sizeof(*s_upd_rel));
+        }
+        s_upd_result = chk;
+        s_upd_stamp_us = esp_timer_get_time();
+        s_upd_have_result = true;
+        s_upd_checking = false;
+        xSemaphoreGive(s_upd_mutex);
+
+        if (scratch) {
+            heap_caps_free(scratch);
+        }
+        ESP_LOGI(TAG, "Async update check finished (result=%d)", (int)chk);
     }
+}
 
-    cJSON *root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root, "current_version", cur_ver);
-
-    ota_check_result_t chk = ota_github_check(update_channel, cur_ver, rel);
-    if (chk == OTA_CHECK_UPDATE_AVAILABLE) {
+/* Serialise the cached result into `root`. Caller must hold s_upd_mutex. */
+static void upd_cache_to_json(cJSON *root)
+{
+    if (s_upd_result == OTA_CHECK_UPDATE_AVAILABLE && s_upd_rel) {
         cJSON_AddBoolToObject(root, "update_available", true);
-        cJSON_AddStringToObject(root, "tag", rel->tag);
-        cJSON_AddStringToObject(root, "summary", rel->summary);
-        cJSON_AddBoolToObject(root, "is_prerelease", rel->is_prerelease);
-        cJSON_AddBoolToObject(root, "requires_full_erase", rel->requires_full_erase);
-        cJSON_AddStringToObject(root, "full_erase_tag", rel->full_erase_tag);
-    } else if (chk == OTA_CHECK_ERROR) {
+        cJSON_AddStringToObject(root, "tag", s_upd_rel->tag);
+        cJSON_AddStringToObject(root, "summary", s_upd_rel->summary);
+        cJSON_AddBoolToObject(root, "is_prerelease", s_upd_rel->is_prerelease);
+        cJSON_AddBoolToObject(root, "requires_full_erase", s_upd_rel->requires_full_erase);
+        cJSON_AddStringToObject(root, "full_erase_tag", s_upd_rel->full_erase_tag);
+    } else if (s_upd_result == OTA_CHECK_ERROR) {
         cJSON_AddBoolToObject(root, "update_available", false);
         cJSON_AddStringToObject(root, "error", "Could not reach GitHub. Try again.");
     } else {
         cJSON_AddBoolToObject(root, "update_available", false);
     }
+}
 
-    heap_caps_free(rel);
-
+/* Send `root` as an application/json response and delete it. */
+static esp_err_t upd_send_json(httpd_req_t *req, cJSON *root)
+{
     const char *json_str = cJSON_PrintUnformatted(root);
     if (!json_str) {
         cJSON_Delete(root);
@@ -457,6 +537,114 @@ esp_err_t check_update_json_handler(httpd_req_t *req)
     free((void *)json_str);
     cJSON_Delete(root);
     return ESP_OK;
+}
+
+// Handler for checking GitHub OTA updates (returns JSON result to web UI)
+esp_err_t check_update_json_handler(httpd_req_t *req)
+{
+    REQUIRE_AUTH(req);
+
+    /* Every handler runs on the single esp_http_server task, so this lazy init
+     * cannot race with itself. */
+    if (!s_upd_mutex) {
+        s_upd_mutex = xSemaphoreCreateMutex();
+        if (!s_upd_mutex) {
+            httpd_resp_send_500(req);
+            return ESP_FAIL;
+        }
+    }
+    if (!s_upd_rel) {
+        s_upd_rel = heap_caps_calloc(1, sizeof(github_release_info_t), MALLOC_CAP_SPIRAM);
+        if (!s_upd_rel) {
+            httpd_resp_send_500(req);
+            return ESP_FAIL;
+        }
+    }
+
+    /* ?refresh=1 forces a new check instead of serving the cached answer. */
+    bool force = false;
+    {
+        char query[48];
+        char val[8];
+        if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+            httpd_query_key_value(query, "refresh", val, sizeof(val)) == ESP_OK) {
+            force = (val[0] == '1');
+        }
+    }
+
+    const char *cur_ver = ota_github_get_current_version();
+    /* Read the config before taking s_upd_mutex, so the two locks never nest. */
+    int channel = app_config_get()->update_channel;
+
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    cJSON_AddStringToObject(root, "current_version", cur_ver);
+
+    if (xSemaphoreTake(s_upd_mutex, portMAX_DELAY) != pdTRUE) {
+        cJSON_Delete(root);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    /* ── Fresh cached answer: reply immediately ── */
+    int64_t ttl = (s_upd_result == OTA_CHECK_ERROR) ? UPD_CACHE_TTL_FAIL_US
+                                                    : UPD_CACHE_TTL_OK_US;
+    if (s_upd_have_result && !force &&
+        (esp_timer_get_time() - s_upd_stamp_us) < ttl) {
+        cJSON_AddBoolToObject(root, "cached", true);
+        upd_cache_to_json(root);
+        xSemaphoreGive(s_upd_mutex);
+        return upd_send_json(req, root);
+    }
+
+    /* ── A check is needed. Bring the worker up on first demand only. ── */
+    if (!s_upd_task) {
+        /* PSRAM stack, Core 0 with the other network tasks, below httpd. */
+        if (xTaskCreatePinnedToCoreWithCaps(update_check_worker, "upd_chk",
+                                            UPD_WORKER_STACK, NULL, 4, &s_upd_task,
+                                            0, MALLOC_CAP_SPIRAM) != pdPASS) {
+            /* Leave the state untouched so a later request retries the
+             * creation. Never fall back to running the check inline: that puts
+             * mbedTLS on the httpd worker stack and overflows it. */
+            s_upd_task = NULL;
+            ESP_LOGE(TAG, "Failed to start update check worker");
+            if (s_upd_have_result) {
+                cJSON_AddBoolToObject(root, "cached", true);
+                upd_cache_to_json(root);
+            } else {
+                cJSON_AddBoolToObject(root, "update_available", false);
+                cJSON_AddStringToObject(root, "error",
+                                        "Could not start update check. Try again.");
+            }
+            xSemaphoreGive(s_upd_mutex);
+            return upd_send_json(req, root);
+        }
+    }
+
+    /* Only the request that moves the state to CHECKING notifies the worker.
+     * ulTaskNotifyTake(pdTRUE, ...) clears the count when the cycle starts, so
+     * a notify sent mid-cycle would be latched and drive a redundant second
+     * HTTPS round trip. Requests arriving while CHECKING simply coalesce onto
+     * the running cycle and poll for its result. */
+    if (!s_upd_checking) {
+        s_upd_req_channel = channel;
+        strncpy(s_upd_req_version, cur_ver, sizeof(s_upd_req_version) - 1);
+        s_upd_req_version[sizeof(s_upd_req_version) - 1] = '\0';
+        /* Drop the previous answer. Without this a forced check keeps serving
+         * the result it was asked to replace: the client's follow-up polls do
+         * not carry ?refresh=1, so they would read the still-fresh cache and
+         * report the stale answer before the new one lands. */
+        s_upd_have_result = false;
+        s_upd_checking = true;
+        xTaskNotifyGive(s_upd_task);
+    }
+
+    cJSON_AddStringToObject(root, "status", "checking");
+    xSemaphoreGive(s_upd_mutex);
+    return upd_send_json(req, root);
 }
 
 // Handler for GitHub OTA download (triggered from web UI)

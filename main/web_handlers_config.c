@@ -4,9 +4,11 @@
 #include <time.h>
 #include "esp_heap_caps.h"
 #include "build_version.h"
+#include "esp_app_desc.h" /* esp_app_get_elf_sha256 — per-image ETag source */
 #include "esp_mac.h"
 #include "esp_timer.h"
 #include "ui/nina_setup_screen.h"
+#include "ui/nina_setup_hint.h"         /* nina_setup_hint_destroy — retire hint on first save */
 #include "ui/nina_dashboard.h"          /* nina_dashboard_get_total_page_count() */
 #include "ui/nina_dashboard_internal.h" /* PAGE_IDX_SUMMARY, SETTINGS_PAGE_IDX, SYSINFO_PAGE_IDX page-index macros */
 #include "ui/nina_nav_arbiter.h"        /* nav_arbiter_submit_user — live Home Page USER claim */
@@ -59,6 +61,114 @@ extern const uint8_t fragment_behavior_html_end[]   asm("_binary_fragment_behavi
 extern const uint8_t fragment_system_html_start[] asm("_binary_fragment_system_html_start");
 extern const uint8_t fragment_system_html_end[]   asm("_binary_fragment_system_html_end");
 
+/* Build-time gzip copies of the shell and every fragment (see WEB_GZ_ASSETS in
+ * main/CMakeLists.txt). Symbol names follow the embed convention: the .gz file
+ * basename with every non-identifier character mapped to '_'. */
+extern const uint8_t config_html_gz_start[] asm("_binary_config_ui_html_gz_start");
+extern const uint8_t config_html_gz_end[]   asm("_binary_config_ui_html_gz_end");
+extern const uint8_t fragment_logs_html_gz_start[] asm("_binary_fragment_logs_html_gz_start");
+extern const uint8_t fragment_logs_html_gz_end[]   asm("_binary_fragment_logs_html_gz_end");
+extern const uint8_t fragment_backup_html_gz_start[] asm("_binary_fragment_backup_html_gz_start");
+extern const uint8_t fragment_backup_html_gz_end[]   asm("_binary_fragment_backup_html_gz_end");
+extern const uint8_t fragment_api_html_gz_start[] asm("_binary_fragment_api_html_gz_start");
+extern const uint8_t fragment_api_html_gz_end[]   asm("_binary_fragment_api_html_gz_end");
+extern const uint8_t fragment_allsky_html_gz_start[] asm("_binary_fragment_allsky_html_gz_start");
+extern const uint8_t fragment_allsky_html_gz_end[]   asm("_binary_fragment_allsky_html_gz_end");
+extern const uint8_t fragment_json_html_gz_start[] asm("_binary_fragment_json_html_gz_start");
+extern const uint8_t fragment_json_html_gz_end[]   asm("_binary_fragment_json_html_gz_end");
+extern const uint8_t fragment_ha_html_gz_start[] asm("_binary_fragment_ha_html_gz_start");
+extern const uint8_t fragment_ha_html_gz_end[]   asm("_binary_fragment_ha_html_gz_end");
+extern const uint8_t fragment_clock_html_gz_start[] asm("_binary_fragment_clock_html_gz_start");
+extern const uint8_t fragment_clock_html_gz_end[]   asm("_binary_fragment_clock_html_gz_end");
+extern const uint8_t fragment_spotify_html_gz_start[] asm("_binary_fragment_spotify_html_gz_start");
+extern const uint8_t fragment_spotify_html_gz_end[]   asm("_binary_fragment_spotify_html_gz_end");
+extern const uint8_t fragment_image_display_html_gz_start[] asm("_binary_fragment_image_display_html_gz_start");
+extern const uint8_t fragment_image_display_html_gz_end[]   asm("_binary_fragment_image_display_html_gz_end");
+extern const uint8_t fragment_nodes_html_gz_start[] asm("_binary_fragment_nodes_html_gz_start");
+extern const uint8_t fragment_nodes_html_gz_end[]   asm("_binary_fragment_nodes_html_gz_end");
+extern const uint8_t fragment_display_html_gz_start[] asm("_binary_fragment_display_html_gz_start");
+extern const uint8_t fragment_display_html_gz_end[]   asm("_binary_fragment_display_html_gz_end");
+extern const uint8_t fragment_behavior_html_gz_start[] asm("_binary_fragment_behavior_html_gz_start");
+extern const uint8_t fragment_behavior_html_gz_end[]   asm("_binary_fragment_behavior_html_gz_end");
+extern const uint8_t fragment_system_html_gz_start[] asm("_binary_fragment_system_html_gz_start");
+extern const uint8_t fragment_system_html_gz_end[]   asm("_binary_fragment_system_html_gz_end");
+
+/* Every embedded asset changes exactly when the firmware image does, so one
+ * ETag covers the shell and all fragments.
+ *
+ * The tag is derived from the running app's ELF SHA-256, not from
+ * BUILD_GIT_SHA: the maintainer's normal workflow rebuilds and reflashes from
+ * a dirty working tree, where the git SHA is unchanged across builds. That
+ * made a modified UI serve a 304 and leave the browser on the stale shell.
+ * The ELF hash changes with the image itself, so a reflash always invalidates.
+ *
+ * Built once on first use into a static buffer. esp_http_server dispatches
+ * handlers from a single task, so the lazy init cannot race; the buffer is
+ * static because httpd_resp_set_hdr() stores the pointer rather than copying,
+ * so the value has to outlive the response.
+ */
+static const char *asset_etag(void)
+{
+    static char s_etag[24]; /* '"' + up to 16 hex chars + '"' + NUL */
+
+    if (s_etag[0] == '\0') {
+        /* esp_app_get_elf_sha256() writes a null-terminated hex string
+         * truncated to the buffer size, and returns the bytes written. */
+        char sha[17] = {0};
+        esp_app_get_elf_sha256(sha, sizeof(sha));
+        snprintf(s_etag, sizeof(s_etag), "\"%s\"", sha);
+    }
+    return s_etag;
+}
+
+/*
+ * Serve one embedded UI asset with revalidation and optional gzip.
+ *
+ * Cache-Control is "no-cache" (revalidate every time, never serve stale UI
+ * after an OTA) paired with an ETag, so the steady-state cost of a page load
+ * is a 304 with an empty body instead of a fresh transfer.
+ *
+ * gz_start/gz_end may be NULL to force the plain copy.
+ */
+static esp_err_t send_embedded_asset(httpd_req_t *req,
+                                     const uint8_t *plain_start, const uint8_t *plain_end,
+                                     const uint8_t *gz_start, const uint8_t *gz_end,
+                                     const char *content_type)
+{
+    const char *etag = asset_etag();
+
+    httpd_resp_set_type(req, content_type);
+    httpd_resp_set_hdr(req, "ETag", etag);
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
+    httpd_resp_set_hdr(req, "Vary", "Accept-Encoding");
+
+    /* If-None-Match may carry a list and/or a W/ weak prefix; substring match
+     * on the quoted tag accepts both without parsing the list. */
+    char inm[80];
+    esp_err_t inm_err = httpd_req_get_hdr_value_str(req, "If-None-Match", inm, sizeof(inm));
+    if ((inm_err == ESP_OK || inm_err == ESP_ERR_HTTPD_RESULT_TRUNC) &&
+        strstr(inm, etag) != NULL) {
+        httpd_resp_set_status(req, "304 Not Modified");
+        return httpd_resp_send(req, NULL, 0);
+    }
+
+    if (gz_start != NULL && gz_end > gz_start) {
+        /* On ESP_ERR_HTTPD_RESULT_TRUNC the buffer still holds a
+         * null-terminated prefix (strlcpy), so searching it is safe. Clients
+         * that bury "gzip" past 96 chars simply get the plain copy. */
+        char accept_enc[96];
+        esp_err_t enc_err = httpd_req_get_hdr_value_str(req, "Accept-Encoding",
+                                                        accept_enc, sizeof(accept_enc));
+        if ((enc_err == ESP_OK || enc_err == ESP_ERR_HTTPD_RESULT_TRUNC) &&
+            strstr(accept_enc, "gzip") != NULL) {
+            httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+            return httpd_resp_send(req, (const char *)gz_start, gz_end - gz_start);
+        }
+    }
+
+    return httpd_resp_send(req, (const char *)plain_start, plain_end - plain_start);
+}
+
 // Handler for root URL
 esp_err_t root_get_handler(httpd_req_t *req)
 {
@@ -69,10 +179,9 @@ esp_err_t root_get_handler(httpd_req_t *req)
         return ESP_OK;
     }
     REQUIRE_AUTH(req);
-    httpd_resp_set_type(req, "text/html");
-    httpd_resp_send(req, (const char *)config_html_start,
-                    config_html_end - config_html_start);
-    return ESP_OK;
+    return send_embedded_asset(req, config_html_start, config_html_end,
+                               config_html_gz_start, config_html_gz_end,
+                               "text/html");
 }
 
 /**
@@ -84,6 +193,8 @@ typedef struct {
     const char *name;
     const uint8_t *start;
     const uint8_t *end;
+    const uint8_t *gz_start;
+    const uint8_t *gz_end;
 } ui_fragment_entry_t;
 
 /*
@@ -101,20 +212,33 @@ typedef struct {
  * symbol.
  */
 static const ui_fragment_entry_t s_ui_fragments[] = {
-    { "__none__", NULL, NULL },  /* placeholder so the array type-checks; never matches a real tab name */
-    { "logs",   fragment_logs_html_start,   fragment_logs_html_end },
-    { "backup", fragment_backup_html_start, fragment_backup_html_end },
-    { "api",    fragment_api_html_start,    fragment_api_html_end },
-    { "allsky",        fragment_allsky_html_start,        fragment_allsky_html_end },
-    { "json",          fragment_json_html_start,          fragment_json_html_end },
-    { "ha",            fragment_ha_html_start,            fragment_ha_html_end },
-    { "clock",         fragment_clock_html_start,         fragment_clock_html_end },
-    { "spotify",       fragment_spotify_html_start,       fragment_spotify_html_end },
-    { "image-display", fragment_image_display_html_start, fragment_image_display_html_end },
-    { "nodes",         fragment_nodes_html_start,         fragment_nodes_html_end },
-    { "display",       fragment_display_html_start,       fragment_display_html_end },
-    { "behavior",      fragment_behavior_html_start,      fragment_behavior_html_end },
-    { "system",        fragment_system_html_start,        fragment_system_html_end },
+    { "__none__", NULL, NULL, NULL, NULL },  /* placeholder so the array type-checks; never matches a real tab name */
+    { "logs",   fragment_logs_html_start,   fragment_logs_html_end,
+                fragment_logs_html_gz_start,   fragment_logs_html_gz_end },
+    { "backup", fragment_backup_html_start, fragment_backup_html_end,
+                fragment_backup_html_gz_start, fragment_backup_html_gz_end },
+    { "api",    fragment_api_html_start,    fragment_api_html_end,
+                fragment_api_html_gz_start,    fragment_api_html_gz_end },
+    { "allsky",        fragment_allsky_html_start,        fragment_allsky_html_end,
+                       fragment_allsky_html_gz_start,        fragment_allsky_html_gz_end },
+    { "json",          fragment_json_html_start,          fragment_json_html_end,
+                       fragment_json_html_gz_start,          fragment_json_html_gz_end },
+    { "ha",            fragment_ha_html_start,            fragment_ha_html_end,
+                       fragment_ha_html_gz_start,            fragment_ha_html_gz_end },
+    { "clock",         fragment_clock_html_start,         fragment_clock_html_end,
+                       fragment_clock_html_gz_start,         fragment_clock_html_gz_end },
+    { "spotify",       fragment_spotify_html_start,       fragment_spotify_html_end,
+                       fragment_spotify_html_gz_start,       fragment_spotify_html_gz_end },
+    { "image-display", fragment_image_display_html_start, fragment_image_display_html_end,
+                       fragment_image_display_html_gz_start, fragment_image_display_html_gz_end },
+    { "nodes",         fragment_nodes_html_start,         fragment_nodes_html_end,
+                       fragment_nodes_html_gz_start,         fragment_nodes_html_gz_end },
+    { "display",       fragment_display_html_start,       fragment_display_html_end,
+                       fragment_display_html_gz_start,       fragment_display_html_gz_end },
+    { "behavior",      fragment_behavior_html_start,      fragment_behavior_html_end,
+                       fragment_behavior_html_gz_start,      fragment_behavior_html_gz_end },
+    { "system",        fragment_system_html_start,        fragment_system_html_end,
+                       fragment_system_html_gz_start,        fragment_system_html_gz_end },
 };
 
 // Handler for GET /ui/fragment?tab=<name> -- serves one lazily-loaded config_ui.html tab fragment.
@@ -130,10 +254,10 @@ esp_err_t ui_fragment_get_handler(httpd_req_t *req)
 
     for (size_t i = 0; i < sizeof(s_ui_fragments) / sizeof(s_ui_fragments[0]); i++) {
         if (s_ui_fragments[i].start != NULL && strcmp(s_ui_fragments[i].name, tab) == 0) {
-            httpd_resp_set_type(req, "text/html");
-            httpd_resp_send(req, (const char *)s_ui_fragments[i].start,
-                             s_ui_fragments[i].end - s_ui_fragments[i].start);
-            return ESP_OK;
+            return send_embedded_asset(req,
+                                       s_ui_fragments[i].start, s_ui_fragments[i].end,
+                                       s_ui_fragments[i].gz_start, s_ui_fragments[i].gz_end,
+                                       "text/html");
         }
     }
 
@@ -1219,6 +1343,13 @@ esp_err_t config_post_handler(httpd_req_t *req)
         }
     }
 
+    /* Explicit false is a deliberate API/test request to re-arm the hint (the web UI never sends this key); absent key or true keeps the retire-on-first-save behavior. */
+    cJSON *sh_item = cJSON_GetObjectItem(root, "setup_hint_dismissed");
+    bool setup_hint_explicit_clear = cJSON_IsBool(sh_item) && !cJSON_IsTrue(sh_item);
+    if (setup_hint_explicit_clear) {
+        cfg->setup_hint_dismissed = false;
+    }
+
     cJSON_Delete(root);
 
     app_config_t *old_cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
@@ -1229,8 +1360,22 @@ esp_err_t config_post_handler(httpd_req_t *req)
         return ESP_OK;
     }
     memcpy(old_cfg, app_config_get(), sizeof(app_config_t));
+
+    /* A settings save proves the user found the web config UI, which is the
+     * only thing the first-boot hint overlay exists to teach. Retire it here so
+     * it persists inside this same NVS write (no second save). */
+    bool retire_setup_hint = !cfg->setup_hint_dismissed && !setup_hint_explicit_clear;
+    if (retire_setup_hint) {
+        cfg->setup_hint_dismissed = true;
+    }
+
     app_config_save(cfg);   /* applies app_config_normalize_nav_exclusivity() internally */
     config_trigger_side_effects(old_cfg, cfg);
+
+    if (retire_setup_hint) {
+        nina_setup_hint_destroy();   /* no-op when the overlay is not showing */
+        ESP_LOGI(TAG, "Setup hint retired by web config save");
+    }
 
     /* Home Page live (Q7): if active_page_override changed, navigate there now.
      * The field is a page_ref registry id; page_ref_navigate() resolves the id,

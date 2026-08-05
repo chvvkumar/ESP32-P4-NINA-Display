@@ -4,10 +4,10 @@
  * @file nina_toast.h
  * @brief Transient stacking toast notifications (thread-safe).
  *
- * nina_toast_show() / nina_toast_show_fmt() are safe to call from ANY
- * FreeRTOS task (WebSocket handler, data task, etc.).  They buffer the
- * request in a spinlock-protected pending queue; an LVGL timer drains
- * the queue and creates the pill widgets in the LVGL context.
+ * nina_toast_show() / nina_toast_show_fmt() / nina_toast_show_timed() are
+ * safe to call from ANY FreeRTOS task (WebSocket handler, data task, etc.).
+ * They buffer the request in a spinlock-protected pending queue; an LVGL
+ * timer drains the queue and creates the pill widgets in the LVGL context.
  */
 
 #ifdef __cplusplus
@@ -15,6 +15,7 @@ extern "C" {
 #endif
 
 #include "lvgl.h"
+#include <stdint.h>
 
 typedef enum {
     TOAST_INFO,
@@ -31,6 +32,19 @@ void nina_toast_show(toast_severity_t sev, const char *msg);
 
 /** Printf-style wrapper around nina_toast_show().  Thread-safe. */
 void nina_toast_show_fmt(toast_severity_t sev, const char *fmt, ...);
+
+/**
+ * Printf-style toast with an explicit on-screen lifetime.  Thread-safe.
+ *
+ * @param duration_ms  Lifetime override in ms, clamped to 1000..120000.
+ *                     Pass 0 to use the configured default (toast_duration_s,
+ *                     doubled for WARNING/ERROR) exactly like nina_toast_show().
+ *
+ * The per-toast countdown label ticks down the overridden lifetime.  If the
+ * toast is deduplicated against an identical visible one, the newest request's
+ * duration wins.
+ */
+void nina_toast_show_timed(toast_severity_t sev, uint32_t duration_ms, const char *fmt, ...);
 
 /** Dismiss all visible toasts (LVGL context only). */
 void nina_toast_dismiss_all(void);
