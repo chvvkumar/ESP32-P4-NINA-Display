@@ -275,7 +275,7 @@
 
         <div class="api-ep">
           <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/check-update-json</span><span class="api-badge auth">Auth</span></div>
-          <p class="api-purpose">Read the result of the last update check.</p>
+          <p class="api-purpose">Read the result of the last update check. Returns the cached result (up to an hour old), or <code>{"status":"checking"}</code> while a check runs in the background &mdash; poll every few seconds until a result appears. Add <code>?refresh=1</code> to force a new check.</p>
           <div class="api-snip-label">Request</div>
           <div class="api-snip" data-curl="curl -b cookies.txt http://HOST/api/check-update-json">
             <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
