@@ -3,12 +3,15 @@
  * @brief Centralized NINA instance connection state manager.
  *
  * Owns the authoritative connection state for all NINA instances.
- * Uses a time-based timeout (configurable via web UI) to determine when
- * an instance is considered offline, preventing single-failure disconnects.
+ * Uses a time-based timeout (configurable via web UI) scaled by
+ * NINA_CONN_GRACE_MULT to determine when an instance is considered offline,
+ * preventing single-failure disconnects.
  */
 
 #include "nina_connection.h"
 #include "app_config.h"
+#include "net_diag.h"
+#include "ui/nina_toast.h"
 #include "esp_timer.h"
 #include "esp_log.h"
 #include <string.h>
@@ -25,6 +28,20 @@ static int64_t now_ms(void) {
 
 static bool valid_index(int i) {
     return i >= 0 && i < MAX_NINA_INSTANCES;
+}
+
+/* Outage toasts use the same gate as the WebSocket connect toasts in
+ * nina_websocket.c: notify-mask bit 0 plus the per-instance mute switch. */
+static bool outage_toasts_enabled(int instance) {
+    const app_config_t *cfg = app_config_get();
+    return (cfg->toast_notify_mask & (1 << 0)) && !cfg->toast_instance_muted[instance];
+}
+
+/* Display name for an instance ("astromele2.lan"), with a generic fallback so
+ * a blank/unparseable URL never produces an empty toast. */
+static const char *instance_host(int instance, char *buf, size_t buf_size) {
+    app_config_get_instance_host(instance, buf, buf_size);
+    return buf[0] ? buf : "NINA host";
 }
 
 /* ── Lifecycle ─────────────────────────────────────────────────────── */
@@ -56,6 +73,11 @@ nina_conn_state_t nina_connection_report_poll(int instance, bool success) {
     int64_t ts = now_ms();
     nina_conn_state_t prev = c->state;
 
+    /* Outage-notification bookkeeping for this call (see the block below). */
+    bool    episode_start = false;   /* first failed poll of a new outage */
+    bool    recovered     = false;   /* success while an outage warning is live */
+    int64_t remaining_ms  = 0;       /* grace left when the outage started */
+
     if (success) {
         c->consecutive_successes++;
         c->consecutive_failures = 0;
@@ -71,7 +93,12 @@ nina_conn_state_t nina_connection_report_poll(int instance, bool success) {
             c->state = NINA_CONN_CONNECTED;
             break;
         case NINA_CONN_CONNECTED:
-            /* Stay connected */
+            /* Stay connected — the instance answered before the grace window
+             * ran out, so retract the warning we showed when it went quiet. */
+            if (c->outage_warned) {
+                recovered = true;
+                c->outage_warned = false;
+            }
             break;
         }
     } else {
@@ -85,12 +112,20 @@ nina_conn_state_t nina_connection_report_poll(int instance, bool success) {
             c->state = NINA_CONN_DISCONNECTED;
             break;
         case NINA_CONN_CONNECTED: {
-            /* Time-based timeout: only transition to DISCONNECTED if the
-             * configured timeout has elapsed since the last successful poll. */
+            /* Time-based timeout with patience: only transition to
+             * DISCONNECTED once GRACE_MULT x the configured timeout has
+             * elapsed since the last successful poll. One hung HTTP connect
+             * (~9.5 s) plus the poll interval must not take a rig offline. */
             int64_t timeout_ms = (int64_t)app_config_get()->connection_timeout_s * 1000;
-            if (c->last_connected_ms > 0 && (ts - c->last_connected_ms) >= timeout_ms) {
+            int64_t grace_ms = timeout_ms * NINA_CONN_GRACE_MULT;
+            int64_t quiet_ms = (c->last_connected_ms > 0) ? (ts - c->last_connected_ms) : 0;
+            if (c->last_connected_ms > 0 && quiet_ms >= grace_ms) {
                 c->state = NINA_CONN_DISCONNECTED;
                 c->static_data_ready = false;
+            } else if (c->consecutive_failures == 1) {
+                /* First miss of this outage: warn the user with a countdown. */
+                episode_start = true;
+                remaining_ms = grace_ms - quiet_ms;
             }
             break;
         }
@@ -98,6 +133,47 @@ nina_conn_state_t nina_connection_report_poll(int instance, bool success) {
             /* Stay disconnected, reset static data on each failure */
             c->static_data_ready = false;
             break;
+        }
+    }
+
+    /* Outage notifications. The warning countdown, its retraction, and the
+     * final "offline" toast all fire from here so every navigation-visible
+     * connection change has exactly one user-facing message. */
+    bool demoted = (prev == NINA_CONN_CONNECTED && c->state == NINA_CONN_DISCONNECTED);
+    if (episode_start || recovered || demoted) {
+        char host_buf[48];
+        const char *host = instance_host(instance, host_buf, sizeof(host_buf));
+        bool toasts_on = outage_toasts_enabled(instance);
+
+        if (episode_start) {
+            /* Only worth a countdown if the user can read it before it expires. */
+            if (toasts_on && remaining_ms > 3000) {
+                nina_toast_show_timed(TOAST_WARNING, (uint32_t)remaining_ms,
+                                      "[%d] %s not responding - offline in %ds",
+                                      instance + 1, host, (int)(remaining_ms / 1000));
+                c->outage_warned = true;
+            }
+            /* Triage the local network once per outage. Blocking (~3.0 s worst
+             * case) and internally rate-limited; accepted here so the log line
+             * lands at the moment the outage started. */
+            net_diag_log_outage(host);
+        }
+        if (recovered && toasts_on) {
+            nina_toast_show_timed(TOAST_SUCCESS, 0, "[%d] %s reconnected",
+                                  instance + 1, host);
+        }
+        if (demoted) {
+            if (toasts_on) {
+                nina_toast_show_timed(TOAST_WARNING, 0, "[%d] %s offline",
+                                      instance + 1, host);
+            }
+            c->outage_warned = false;
+            /* Also triage here, not only on episode_start: when the poll tier is
+             * slower than the grace window (idle tier, 30 s) the very first miss
+             * demotes outright and would otherwise leave no diagnostic line.
+             * net_diag's own 10 s guard suppresses the duplicate in the common
+             * case where the episode already logged one. */
+            net_diag_log_outage(host);
         }
     }
 
@@ -113,6 +189,23 @@ nina_conn_state_t nina_connection_report_poll(int instance, bool success) {
     }
 
     return c->state;
+}
+
+void nina_connection_force_disconnect(int instance) {
+    if (!valid_index(instance)) return;
+    nina_conn_info_t *c = &s_instances[instance];
+    /* Idempotent: the disabled-instance sweep calls this every cycle, so do
+     * nothing (and log nothing) unless this is an actual transition. */
+    if (c->state == NINA_CONN_DISCONNECTED) {
+        return;
+    }
+    c->state = NINA_CONN_DISCONNECTED;
+    c->static_data_ready = false;
+    c->consecutive_failures = 0;
+    c->consecutive_successes = 0;
+    c->outage_warned = false;
+    c->last_state_change_ms = now_ms();
+    ESP_LOGI(TAG, "Instance %d: forced offline (disabled)", instance);
 }
 
 void nina_connection_report_ws(int instance, bool connected) {

@@ -2376,6 +2376,27 @@ static void migrate_from_v51(const void *raw, size_t raw_size,
     (void)raw_size;
 }
 
+/* --- v52 → v53 migration: appends the setup_hint_dismissed flag (user pressed
+ *     "Don't show again" on the first-boot setup-hint overlay). Layout ahead is
+ *     unchanged; the new field is additive and defaults false (hint shown).
+ *     The tiles blobs already live in their own NVS keys in v52, so this
+ *     migration leaves them alone (the caller's tiles_loaded stays false and
+ *     the tail loads "json_tiles"/"ha_tiles" as usual). --- */
+static void migrate_from_v52(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v52_t) ? raw_size : sizeof(app_config_v52_t);
+    memcpy(cfg, raw, copy);
+
+    /* setup_hint_dismissed is appended past the v52 snapshot, so memcpy(copy)
+     * never touches it. set_defaults() already cleared it, but set it explicitly
+     * for documentation (false = hint still eligible to show). */
+    cfg->setup_hint_dismissed = false;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v52 to v%d", APP_CONFIG_VERSION);
+}
+
 static void migrate_from_v36(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
@@ -3126,6 +3147,14 @@ void app_config_init(void) {
             nvs_commit(handle);
         }
         /* tiles_loaded stays false -> tail loads "json_tiles"/"ha_tiles" keys */
+    } else if (version_check == 52) {
+        /* v52 → v53: added setup_hint_dismissed (first-boot setup hint "Don't
+         * show again"). tiles_loaded stays false: a v52 device already keeps its
+         * tiles in the "json_tiles"/"ha_tiles" NVS keys, so the tail loads them. */
+        migrate_from_v52(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 51 && stored_size == sizeof(app_config_v51_t)) {
         /* v51 → v52: split the two inline tiles blobs out to NVS keys. Guard on
          * exact v51 size so a truncated blob falls through to forward/unknown
@@ -3957,6 +3986,25 @@ int app_config_get_instance_count(void) {
 const char *app_config_get_instance_url(int index) {
     if (index < 0 || index >= MAX_NINA_INSTANCES) return "";
     return s_config.api_url[index];
+}
+
+void app_config_get_instance_host(int index, char *out, size_t out_size) {
+    if (!out || out_size == 0) return;
+    out[0] = '\0';
+    const char *url = app_config_get_instance_url(index);
+    if (!url || url[0] == '\0') return;
+
+    /* Skip the scheme ("http://" / "https://") when present. */
+    const char *host = strstr(url, "://");
+    host = host ? host + 3 : url;
+
+    /* Copy up to the port separator, the path separator, or the end. */
+    size_t i = 0;
+    while (host[i] && host[i] != ':' && host[i] != '/' && i < out_size - 1) {
+        out[i] = host[i];
+        i++;
+    }
+    out[i] = '\0';
 }
 
 bool app_config_is_instance_enabled(int index) {

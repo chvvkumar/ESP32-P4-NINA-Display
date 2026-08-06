@@ -163,7 +163,9 @@
     /* -- Custom Image URL source -- */ \
     STR       (custom_image_url,             "custom_image_url",             "https://picsum.photos/720") \
     INT_RESET (custom_orientation,           "custom_orientation",           0,     0,     3) \
-    INT_RESET (custom_update_interval_s,     "custom_update_interval_s",     60,    10,    7200)
+    INT_RESET (custom_update_interval_s,     "custom_update_interval_s",     60,    10,    7200) \
+    /* -- First-boot setup hint -- */ \
+    BOOL      (setup_hint_dismissed,         "setup_hint_dismissed",         false)
 
 /* Apply every row's default value to *cfg. Called from set_defaults()
  * immediately after the memset(). Does not touch excluded/complex fields

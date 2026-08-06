@@ -458,7 +458,8 @@ void instance_poll_task(void *arg) {
                 ESP_LOGI(TAG, "Poll[%d]: instance disabled, resources released", idx + 1);
             }
             ctx->client->connected = false;
-            nina_connection_report_poll(idx, false);
+            /* Explicit shutdown, not a poll failure — skip the patience window. */
+            nina_connection_force_disconnect(idx);
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5000));
             continue;
         }

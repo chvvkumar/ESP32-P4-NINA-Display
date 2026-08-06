@@ -16,7 +16,7 @@
 #include "nina_dashboard.h"
 #include "nina_dashboard_internal.h"   /* PAGE_IDX_SUMMARY, SETTINGS_PAGE_IDX, MAX_NINA_INSTANCES */
 #include "nina_nav_arbiter.h"          /* topology notify + Home Page USER claim */
-#include "nina_connection.h"           /* nina_connection_report_poll */
+#include "nina_connection.h"           /* nina_connection_force_disconnect */
 #include "tasks.h"                     /* poll_task_handles */
 #include "bsp/esp-bsp.h"               /* bsp_display_lock/unlock */
 #include "app_config.h"
@@ -103,7 +103,8 @@ static void apply_nav_side_effects(const app_config_t *old_cfg, const app_config
         bool url_changed = (strcmp(new_cfg->api_url[i], old_cfg->api_url[i]) != 0);
         if (enable_changed || url_changed) {
             if (!new_cfg->instance_enabled[i]) {
-                nina_connection_report_poll(i, false);
+                /* User turned it off — offline now, no timeout window. */
+                nina_connection_force_disconnect(i);
             }
             if (poll_task_handles[i]) {
                 xTaskNotifyGive(poll_task_handles[i]);

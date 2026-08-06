@@ -108,26 +108,11 @@ static uint16_t            s_ever_connected[MAX_NINA_INSTANCES];
  * @brief Extract hostname from a NINA instance config URL.
  *
  * Given "http://astromele2.lan:1888/v2/api/" returns "astromele2.lan".
- * Result is written to @p out (max @p out_size bytes).
+ * Thin wrapper over the shared extractor in app_config.c (also used by
+ * nina_connection.c for its outage toasts).
  */
 static void get_instance_hostname(int index, char *out, size_t out_size) {
-    if (out_size == 0) return;
-    out[0] = '\0';
-    if (index < 0 || index >= MAX_NINA_INSTANCES) return;
-    const char *url = app_config_get_instance_url(index);
-    if (!url || url[0] == '\0') return;
-
-    /* Skip scheme (http:// or https://) */
-    const char *host = strstr(url, "://");
-    host = host ? host + 3 : url;
-
-    /* Copy until ':' or '/' or end */
-    size_t i = 0;
-    while (host[i] && host[i] != ':' && host[i] != '/' && i < out_size - 1) {
-        out[i] = host[i];
-        i++;
-    }
-    out[i] = '\0';
+    app_config_get_instance_host(index, out, out_size);
 }
 
 /** Show a toast prefixed with the NINA instance hostname. Thread-safe. */
