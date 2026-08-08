@@ -833,6 +833,8 @@
       transform: translateX(120%); transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), visibility 0s linear 0.35s;
     }
     .toast.show { visibility: visible; pointer-events: auto; transform: translateX(0); transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), visibility 0s linear 0s; }
+    .restore-cb { width: 15px; height: 15px; margin: 0; flex-shrink: 0; cursor: pointer; accent-color: var(--accent); }
+
     /* Severity reads from the icon only; the box itself stays plain. */
     .toast-icon { display: inline-flex; flex-shrink: 0; color: var(--text-muted); }
     .toast-icon svg { width: 18px; height: 18px; display: block; }
@@ -4591,6 +4593,10 @@
     var _backupData = null;  /* holds parsed backup JSON for confirm step */
     var _restoreFromDevice = false;  /* preview source was another device, not a file */
     var _pullSensitiveRefused = false;  /* asked the source for secrets, it sent none */
+    var _restoreRows = [];        /* every selectable row in the preview */
+    var _restoreSkip = {};        /* field keys the user unchecked */
+    var _restoreCats = [];        /* {cat, rows, parentCb} for in-place updates */
+    var _restoreBlocked = false;  /* preview reported errors that block restoring */
 
     function downloadBackup() {
       var btn = $('backupDownloadBtn');
@@ -4659,7 +4665,13 @@
           return r.json();
         })
         .then(function(preview) { renderRestorePreview(preview); })
-        .catch(function(e) { showToast('Preview failed: ' + e.message, 'error'); });
+        .catch(function(e) {
+          showToast('Preview failed: ' + e.message, 'error');
+          /* Never leave an earlier preview on screen paired with this backup:
+             the panel would show A's rows and selection while _backupData held
+             B, and Restore would post B stripped by A's choices. */
+          cancelRestore();
+        });
     }
 
     /* Copy the configuration from another display on the network. The device
@@ -4733,6 +4745,9 @@
     function renderRestorePreview(p) {
       if (p.error) {
         showToast(p.error, 'error');
+        /* same reasoning as the fetch failure path: drop the stale panel and
+           its selection rather than pairing them with a new backup */
+        cancelRestore();
         return;
       }
 
@@ -4768,42 +4783,27 @@
         banner.style.color = color.text;
         banner.style.display = 'block';
         banner.innerHTML = '<div style="margin-bottom:4px"><strong>Version: v' + p.backup_version + ' &rarr; v' + p.current_version + '</strong></div>' +
-          p.warnings.map(function(w) { return '<div>' + w + '</div>'; }).join('');
+          p.warnings.map(function(w) { return '<div>' + escHtml(w) + '</div>'; }).join('');
       } else {
         banner.style.display = 'none';
       }
 
-      /* Changes diff grouped by category */
-      var changesDiv = $('restoreChanges');
-      changesDiv.innerHTML = '';
-      if (p.changes && p.total_changes > 0) {
-        var cats = Object.keys(p.changes);
-        cats.forEach(function(cat) {
-          var items = p.changes[cat];
-          if (!items || !items.length) return;
-          var section = document.createElement('div');
-          section.style.cssText = 'background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:14px 16px;margin-bottom:8px';
-          var header = '<div style="font-size:0.85rem;font-weight:600;color:#f4f4f5;margin-bottom:8px;cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display===\'none\'?\'block\':\'none\'">' +
-            cat + ' <span style="color:#71717a;font-weight:400">(' + items.length + ' change' + (items.length > 1 ? 's' : '') + ')</span></div>';
-          var body = '<div>';
-          items.forEach(function(ch) {
-            var row = '<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:0.8rem;border-bottom:1px solid rgba(255,255,255,0.04)">' +
-              '<span style="color:#a1a1aa">' + ch.label + '</span>';
-            if (isSecretField(ch)) {
-              row += '<span style="color:var(--accent)">will be replaced (hidden)</span>';
-            } else if (isBlobChange(ch)) {
-              row += '<span style="color:var(--accent)">will be replaced</span>';
-            } else {
-              row += '<span><span style="color:#71717a;text-decoration:line-through">' + formatDiffValue(ch.from) + '</span>' +
-                ' &rarr; <span style="color:var(--accent)">' + formatDiffValue(ch.to) + '</span></span>';
-            }
-            body += row + '</div>';
+      /* Changes diff: flattened into one selectable row list, then grouped for
+         display. Every preview starts with everything selected, which is the
+         behavior this screen has always had. */
+      _restoreRows = [];
+      if (p.changes) {
+        Object.keys(p.changes).forEach(function(cat) {
+          (p.changes[cat] || []).forEach(function(ch) {
+            if (!ch || !ch.field) return;
+            _restoreRows.push({field: ch.field, label: ch.label || ch.field, category: cat, change: ch});
           });
-          body += '</div>';
-          section.innerHTML = header + body;
-          changesDiv.appendChild(section);
         });
       }
+      hiddenRestoreRows().forEach(function(r) { _restoreRows.push(r); });
+      _restoreSkip = {};
+      _restoreBlocked = !!p.restore_blocked;
+      renderRestoreChanges();
 
       /* No changes categories */
       var noChanges = $('restoreNoChanges');
@@ -4873,20 +4873,202 @@
           html += '<strong style="color:#f59e0b">Adjusted values:</strong><br>' +
             warns.map(escHtml).join('<br>');
         }
+        /* sits directly above the disabled Restore button */
+        if (p.restore_blocked) {
+          html += '<br><br>Leaving items out does not get around these problems. They have to be fixed before any of this backup can be restored.';
+        }
         valDiv.innerHTML = html;
       } else {
         valDiv.style.display = 'none';
       }
 
-      /* Update confirm button — block restore when there are hard errors */
-      var rcBtn = $('restoreConfirmBtn');
-      if (p.restore_blocked) {
-        rcBtn.disabled = true;
-        rcBtn.textContent = 'Resolve errors to restore';
-      } else {
-        rcBtn.disabled = false;
-        rcBtn.textContent = 'Restore (' + p.total_changes + ' change' + (p.total_changes !== 1 ? 's' : '') + ')';
+      /* Confirm button state is owned by updateRestoreButton (it also has to
+         follow the selection), called at the end of renderRestoreChanges. */
+      updateRestoreButton();
+    }
+
+    /* ---- selective restore ---- */
+
+    /* wifi_networks and admin_password are applied by a restore but never come
+       back as diff rows, so without these they would ride along invisibly with
+       no way to leave them out. The current values are masked or absent, so the
+       key being present in the backup is the only signal available. */
+    function hiddenRestoreRows() {
+      var b = _backupData || {};
+      var sections = [b.config, b.sensitive];
+      function present(key) {
+        return sections.some(function(s) { return s && s[key] !== undefined; });
       }
+      var out = [];
+      if (present('wifi_networks')) out.push({field: 'wifi_networks', label: 'WiFi networks', category: 'Credentials & Network', note: 'will be replaced'});
+      if (present('admin_password')) out.push({field: 'admin_password', label: 'Admin password', category: 'Credentials & Network', note: 'will be changed'});
+      return out;
+    }
+
+    function restoreSelectedCount() {
+      var n = 0;
+      _restoreRows.forEach(function(r) { if (!_restoreSkip[r.field]) n++; });
+      return n;
+    }
+
+    function updateRestoreButton() {
+      var btn = $('restoreConfirmBtn');
+      if (!btn) return;
+      if (_restoreBlocked) {
+        btn.disabled = true;
+        btn.textContent = 'Resolve errors to restore';
+        return;
+      }
+      var n = restoreSelectedCount();
+      btn.disabled = (n === 0);
+      btn.textContent = 'Restore (' + n + ' change' + (n !== 1 ? 's' : '') + ')';
+    }
+
+    function restoreValueHtml(ch) {
+      if (isSecretField(ch)) return '<span style="color:var(--accent)">will be replaced (hidden)</span>';
+      if (isBlobChange(ch)) return '<span style="color:var(--accent)">will be replaced</span>';
+      /* values come from a backup file, so they are escaped before display */
+      return '<span style="color:#71717a;text-decoration:line-through">' + escHtml(formatDiffValue(ch.from)) + '</span>' +
+             ' &rarr; <span style="color:var(--accent)">' + escHtml(formatDiffValue(ch.to)) + '</span>';
+    }
+
+    /* Selection changes update the existing nodes in place. Re-rendering the
+       list would re-expand collapsed categories and take focus off the checkbox
+       the user just clicked. */
+    function syncRestoreSelection() {
+      _restoreCats.forEach(function(c) {
+        var on = c.rows.filter(function(r) { return !_restoreSkip[r.field]; }).length;
+        c.parentCb.checked = (on > 0);
+        c.parentCb.indeterminate = (on > 0 && on < c.rows.length);
+      });
+      updateRestoreButton();
+    }
+
+    function restoreRowEl(r) {
+      var row = document.createElement('label');
+      row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:4px 0;font-size:0.8rem;border-bottom:1px solid rgba(255,255,255,0.04);cursor:pointer';
+      var cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.className = 'restore-cb';
+      cb.checked = !_restoreSkip[r.field];
+      r._cb = cb;
+      cb.onchange = function() {
+        if (cb.checked) delete _restoreSkip[r.field]; else _restoreSkip[r.field] = true;
+        syncRestoreSelection();
+      };
+      var name = document.createElement('span');
+      name.style.cssText = 'color:#a1a1aa;flex:1'; name.textContent = r.label;
+      var val = document.createElement('span');
+      if (r.note) { val.style.color = 'var(--accent)'; val.textContent = r.note; }
+      else { val.innerHTML = restoreValueHtml(r.change); }
+      row.appendChild(cb); row.appendChild(name); row.appendChild(val);
+      return row;
+    }
+
+    function restoreCatEl(cat, rows) {
+      var section = document.createElement('div');
+      section.style.cssText = 'background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:14px 16px;margin-bottom:8px';
+      var header = document.createElement('div');
+      header.style.cssText = 'display:flex;align-items:center;gap:10px;font-size:0.85rem;font-weight:600;color:#f4f4f5;margin-bottom:8px;cursor:pointer';
+      var parent = document.createElement('input');
+      parent.type = 'checkbox'; parent.className = 'restore-cb';
+      var on = rows.filter(function(r) { return !_restoreSkip[r.field]; }).length;
+      parent.checked = (on > 0);
+      parent.indeterminate = (on > 0 && on < rows.length);
+      parent.setAttribute('aria-label', 'Apply every change under ' + cat);
+      /* the header still collapses its body on click, so the checkbox has to
+         keep that click to itself */
+      parent.onclick = function(e) { e.stopPropagation(); };
+      parent.onchange = function() {
+        /* Decided from the selection as it was before the click, so a partly
+           selected category fills up rather than emptying: partial -> all,
+           all -> none, none -> all. */
+        var on = rows.filter(function(r) { return !_restoreSkip[r.field]; }).length;
+        var selectAll = (on < rows.length);
+        rows.forEach(function(r) {
+          if (selectAll) delete _restoreSkip[r.field]; else _restoreSkip[r.field] = true;
+          if (r._cb) r._cb.checked = selectAll;
+        });
+        syncRestoreSelection();
+      };
+      var name = document.createElement('span'); name.textContent = cat;
+      var count = document.createElement('span');
+      count.style.cssText = 'color:#71717a;font-weight:400';
+      count.textContent = '(' + rows.length + ' change' + (rows.length > 1 ? 's' : '') + ')';
+      header.appendChild(parent); header.appendChild(name); header.appendChild(count);
+      var body = document.createElement('div');
+      rows.forEach(function(r) { body.appendChild(restoreRowEl(r)); });
+      header.onclick = function(e) {
+        if (e.target === parent) return;
+        body.style.display = (body.style.display === 'none') ? 'block' : 'none';
+      };
+      section.appendChild(header); section.appendChild(body);
+      _restoreCats.push({cat: cat, rows: rows, parentCb: parent});
+      return section;
+    }
+
+    function setAllRestoreRows(on) {
+      _restoreSkip = {};
+      _restoreRows.forEach(function(r) {
+        if (!on) _restoreSkip[r.field] = true;
+        if (r._cb) r._cb.checked = on;
+      });
+      syncRestoreSelection();
+    }
+
+    function restoreSelectLink(text, onClick) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.style.cssText = 'background:none;border:none;padding:0;color:var(--accent);cursor:pointer;font-size:0.78rem';
+      b.textContent = text;
+      b.onclick = onClick;
+      return b;
+    }
+
+    function renderRestoreChanges() {
+      var host = $('restoreChanges');
+      if (!host) return;
+      host.innerHTML = '';
+      _restoreCats = [];
+      if (!_restoreRows.length) { updateRestoreButton(); return; }
+
+      var bar = document.createElement('div');
+      bar.style.cssText = 'display:flex;gap:14px;align-items:center;margin-bottom:8px;font-size:0.78rem';
+      var lbl = document.createElement('span');
+      lbl.style.color = 'var(--text-hint)';
+      lbl.textContent = 'Choose what to restore:';
+      bar.appendChild(lbl);
+      bar.appendChild(restoreSelectLink('Select all', function() { setAllRestoreRows(true); }));
+      bar.appendChild(restoreSelectLink('Select none', function() { setAllRestoreRows(false); }));
+      host.appendChild(bar);
+
+      /* group by category, keeping the order the categories first appeared in */
+      var order = [], byCat = {};
+      _restoreRows.forEach(function(r) {
+        if (!byCat[r.category]) { byCat[r.category] = []; order.push(r.category); }
+        byCat[r.category].push(r);
+      });
+      order.forEach(function(cat) { host.appendChild(restoreCatEl(cat, byCat[cat])); });
+      updateRestoreButton();
+    }
+
+    /* Build the object actually sent: unchecked keys are removed, and a key the
+       device never receives is left exactly as it is. _backupData itself is not
+       touched, so the selection can be changed and restored again. */
+    var RESTORE_COMPANION_KEYS = {
+      /* the backup mirrors network 0's password here for older firmware, so
+         dropping only wifi_networks would still overwrite it */
+      wifi_networks: ['wifi_password']
+    };
+    function restorePayload() {
+      var copy = JSON.parse(JSON.stringify(_backupData));
+      Object.keys(_restoreSkip).forEach(function(field) {
+        var keys = [field].concat(RESTORE_COMPANION_KEYS[field] || []);
+        keys.forEach(function(k) {
+          if (copy.config) delete copy.config[k];
+          if (copy.sensitive) delete copy.sensitive[k];
+        });
+      });
+      return copy;
     }
 
     /* The device already summarises its large fields (the tile layouts arrive as
@@ -4927,6 +5109,10 @@
       _backupData = null;
       _restoreFromDevice = false;
       _pullSensitiveRefused = false;
+      _restoreRows = [];
+      _restoreSkip = {};
+      _restoreCats = [];
+      _restoreBlocked = false;
     }
 
     function confirmRestore() {
@@ -4935,7 +5121,7 @@
       if (btn.disabled) return;  /* blocked by validation errors */
       btn.disabled = true; btn.textContent = 'Restoring...';
 
-      postJson('/api/config/restore', {backup: _backupData, confirm: true})
+      postJson('/api/config/restore', {backup: restorePayload(), confirm: true})
         .then(function(r) {
           if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Restore failed'); });
           return r.json();
