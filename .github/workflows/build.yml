@@ -62,6 +62,15 @@ jobs:
           fetch-depth: 0
           clean: false
 
+      # clean:false preserves untracked caches (managed_components), but git
+      # checkout does not restore a tracked file that was deleted in the
+      # persistent workspace when its index entry matches the target ref --
+      # a missing dependencies.lock then triggers a lockless dependency solve
+      # that can pull incompatible component versions. Restore all tracked
+      # files explicitly; untracked caches are untouched.
+      - name: Restore tracked files
+        run: git checkout --force HEAD -- .
+
       - name: Check for skip CI
         id: check_skip
         run: |
