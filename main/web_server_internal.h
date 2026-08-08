@@ -13,9 +13,16 @@
 /* Logging tag -- shared across all handler files */
 static const char *TAG __attribute__((unused)) = "web_server";
 
-/* Maximum accepted POST payload size for config endpoints */
+/* Maximum accepted POST payload size for config endpoints. Buffers are
+ * PSRAM-backed (see receive_json_body), so these are generous by design.
+ *
+ * RESTORE was 16384 until the backup gained the two tiles blobs. A restore body
+ * wraps a whole backup file: the pre-tiles config section is ~8 KB, and each
+ * tiles blob is up to 6144 bytes whose embedded quotes roughly double under JSON
+ * escaping. 49152 covers the worst case with headroom; a body at or above the
+ * cap is rejected with "Payload too large" rather than silently truncated. */
 #define CONFIG_MAX_PAYLOAD 8192
-#define CONFIG_MAX_RESTORE_PAYLOAD 16384
+#define CONFIG_MAX_RESTORE_PAYLOAD 49152
 
 /* ---- JSON extraction macros ---- */
 #define JSON_TO_STRING(root, key, dest) do { \
@@ -110,6 +117,17 @@ esp_err_t json_proxy_get_handler(httpd_req_t *req);
 esp_err_t ha_config_get_handler(httpd_req_t *req);
 esp_err_t ha_config_post_handler(httpd_req_t *req);
 esp_err_t ha_probe_get_handler(httpd_req_t *req);
+esp_err_t ha_test_get_handler(httpd_req_t *req);
+esp_err_t config_pull_post_handler(httpd_req_t *req);
+
+/* ---- Page live-apply spines (defined alongside their page-config handlers) ----
+ * Apply the CURRENT live config to the JSON Display / Home Assistant page: drop
+ * the client's parsed-tiles cache, rebuild the page widget tree, show/hide the
+ * page per @p enabled, re-resolve navigation, and ensure the poll task runs.
+ * Persistence is the caller's job -- these only read app_config_get() and the
+ * tiles getters. Used by the page-config POST handlers and by config restore. */
+void json_page_apply_live(bool enabled);
+void ha_page_apply_live(bool enabled);
 esp_err_t spotify_config_get_handler(httpd_req_t *req);
 esp_err_t spotify_config_post_handler(httpd_req_t *req);
 esp_err_t spotify_callback_get_handler(httpd_req_t *req);

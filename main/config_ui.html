@@ -2243,9 +2243,38 @@
        fragments, but these two stay here: COLLECT_TAB_FNS is built at script
        parse time, and both are no-ops anyway. Each tab uses its own endpoint
        (/api/json-config, /api/ha-config), so the main /api/config Save never
-       carries their ~6 KB tiles blobs; each tab has its own Save button. */
+       carries their ~6 KB tiles blobs; savePageFragments() below posts them
+       separately instead. */
     function collectTab_json(data){ /* no-op by design */ }
     function collectTab_ha(data){ /* no-op by design */ }
+
+    /* Those two tabs apply their edits as an unsaved preview while you work;
+       Save is what stores them. Each fragment publishes a hook that returns a
+       promise to store its whole page config, or null when the tab was never
+       opened or nothing changed. A rejection here fails the Save so the error
+       is surfaced rather than silently dropped. */
+    function savePageFragments(){
+      var jobs=[];
+      [window.jdCollectAndSave,window.haCollectAndSave].forEach(function(hook){
+        if(typeof hook!=='function') return;
+        var p=hook();
+        if(p) jobs.push(p);
+      });
+      return Promise.all(jobs);
+    }
+
+    /* Discard counterpart: /api/config/revert restores the config blob but not
+       the JSON/HA tile caches, so a page previewing unsaved tiles would keep
+       showing them. Each fragment puts its own last-stored config back. */
+    function revertPageFragments(){
+      var jobs=[];
+      [window.jdRevertPreview,window.haRevertPreview].forEach(function(hook){
+        if(typeof hook!=='function') return;
+        var p=hook(false);
+        if(p) jobs.push(p);
+      });
+      return Promise.all(jobs);
+    }
 
     const COLLECT_TAB_FNS={
       nodes: collectTab_nodes,
@@ -2904,7 +2933,7 @@
       postJson('/api/config',getConfigData()).then(r=>{
         if(!r.ok) throw new Error('Save failed');
         return r.text();
-      }).then(()=>{
+      }).then(()=>savePageFragments()).then(()=>{
         invalidateConfigCache();
         showToast('Settings saved','success');
         loadedConfig=JSON.stringify(getConfigData());
@@ -2919,6 +2948,8 @@
     function reloadConfig(){
       fetch('/api/config/revert',{method:'POST'}).then(r=>{
         if(!r.ok) throw new Error('Revert failed');
+        return revertPageFragments();
+      }).then(()=>{
         invalidateConfigCache();
         loadConfig();
         $('saveBar').classList.remove('visible');
@@ -2930,6 +2961,8 @@
       if(!confirm('Apply changes and reboot now?')) return;
       postJson('/api/config',getConfigData()).then(r=>{
         if(!r.ok) throw new Error('Save failed');
+        return savePageFragments();
+      }).then(()=>{
         invalidateConfigCache();
         return fetch('/api/reboot',{method:'POST'});
       }).then(()=>{
@@ -4521,6 +4554,7 @@
     /* ---- Backup & Restore ---- */
 
     var _backupData = null;  /* holds parsed backup JSON for confirm step */
+    var _restoreFromDevice = false;  /* preview source was another device, not a file */
 
     function downloadBackup() {
       var btn = $('backupDownloadBtn');
@@ -4564,22 +4598,96 @@
 
       var reader = new FileReader();
       reader.onload = function(e) {
+        var obj;
         try {
-          _backupData = JSON.parse(e.target.result);
+          obj = JSON.parse(e.target.result);
         } catch (err) {
           showToast('Invalid JSON file', 'error');
           return;
         }
-        /* Send preview request */
-        postJson('/api/config/restore', {backup: _backupData, confirm: false})
-          .then(function(r) {
-            if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Preview failed'); });
-            return r.json();
-          })
-          .then(function(preview) { renderRestorePreview(preview); })
-          .catch(function(e) { showToast('Preview failed: ' + e.message, 'error'); });
+        startRestorePreview(obj, false);
       };
       reader.readAsText(input.files[0]);
+    }
+
+    /* Single entry point for the restore preview: a chosen file and a backup
+       pulled from another device both land here, so the preview, the notices,
+       and the Restore/Cancel buttons behave identically for both. */
+    function startRestorePreview(obj, fromDevice) {
+      _backupData = obj;
+      _restoreFromDevice = !!fromDevice;
+      return postJson('/api/config/restore', {backup: _backupData, confirm: false})
+        .then(function(r) {
+          if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Preview failed'); });
+          return r.json();
+        })
+        .then(function(preview) { renderRestorePreview(preview); })
+        .catch(function(e) { showToast('Preview failed: ' + e.message, 'error'); });
+    }
+
+    /* Copy the configuration from another display on the network. The device
+       proxies the request (it holds the network path and the credentials); the
+       reply is that device's backup JSON verbatim. */
+    function pullFromDevice() {
+      var btn = $('pullFetchBtn');
+      if (!btn) return;
+      var hostEl = $('pullHost');
+      var host = hostEl ? hostEl.value.trim() : '';
+      /* The device supplies the scheme itself and rejects a host carrying one,
+         a path, or credentials, so a pasted URL is reduced to the bare host
+         here rather than bounced back as an error. */
+      host = host.replace(/^[a-z]+:\/\//i, '').replace(/[/?#].*$/, '');
+      /* show the cleaned value rather than sending something the field does not
+         match; a password pasted with a trailing newline is rejected by the
+         device's header guard, so it is trimmed here too */
+      if (hostEl && hostEl.value !== host) hostEl.value = host;
+      if (!host) { showToast('Enter the address of the display to copy from', 'error'); if (hostEl) hostEl.focus(); return; }
+      var pwEl = $('pullPassword');
+      if (pwEl && pwEl.value !== pwEl.value.trim()) pwEl.value = pwEl.value.trim();
+      var body = {
+        host: host,
+        password: pwEl ? pwEl.value : '',
+        sensitive: $('pullSensitive') ? !!$('pullSensitive').checked : true
+      };
+      /* our own device failing to answer is a different problem from the other
+         device failing, so it gets its own message */
+      var PANEL = ' panel';
+      btn.disabled = true; btn.textContent = 'Fetching...';
+      postJson('/api/config/pull', body)
+        .then(function(r) {
+          return r.json().then(function(d) { return {ok: r.ok, d: d}; },
+                               function() { throw new Error(PANEL); });
+        }, function() { throw new Error(PANEL); })
+        .then(function(res) {
+          var d = res.d;
+          if (!d || typeof d !== 'object') throw new Error(PANEL);
+          if (d.error) {
+            if (d.error === 'unreachable')  throw new Error('Cannot reach that device - check the hostname');
+            if (d.error === 'auth')         throw new Error('That device rejected the password');
+            if (d.error === 'bad_response') throw new Error('That device answered but did not return a valid backup');
+            if (d.error === 'bad_host')     throw new Error('That address cannot be used - enter just the device name, like ninadash1.lan');
+            throw new Error('That device could not be copied from');
+          }
+          if (!res.ok) throw new Error('That device could not be copied from');
+          /* Keep-local rule: never carry a hostname across, or two displays end
+             up answering to the same name. meta.hostname stays, it is only the
+             "Source:" label in the preview. */
+          if (d.config)    delete d.config.hostname;
+          if (d.sensitive) delete d.sensitive.hostname;
+          delete d.hostname;
+          return startRestorePreview(d, true);
+        })
+        .catch(function(e) {
+          showToast(e.message === PANEL
+            ? 'This display did not respond - your session may have expired, sign in again'
+            : e.message, 'error');
+        })
+        .finally(function() {
+          btn.disabled = false; btn.textContent = 'Fetch from device';
+          /* held for exactly one transfer, whether it succeeded, failed, or the
+             preview it opened is never acted on */
+          if (pwEl) pwEl.value = '';
+        });
     }
 
     function renderRestorePreview(p) {
@@ -4595,6 +4703,10 @@
       $('restoreMac').textContent = p.backup_mac || '--';
       $('restoreFirmware').textContent = p.backup_firmware || '--';
       $('restoreDate').textContent = p.export_date || '--';
+
+      /* Device-pull notice */
+      var pullNotice = $('restorePullNotice');
+      if (pullNotice) pullNotice.style.display = _restoreFromDevice ? 'block' : 'none';
 
       /* Version warning banner */
       var banner = $('restoreWarningBanner');
@@ -4628,12 +4740,17 @@
             cat + ' <span style="color:#71717a;font-weight:400">(' + items.length + ' change' + (items.length > 1 ? 's' : '') + ')</span></div>';
           var body = '<div>';
           items.forEach(function(ch) {
-            var fromStr = formatDiffValue(ch.from);
-            var toStr = formatDiffValue(ch.to);
-            body += '<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:0.8rem;border-bottom:1px solid rgba(255,255,255,0.04)">' +
-              '<span style="color:#a1a1aa">' + ch.label + '</span>' +
-              '<span><span style="color:#71717a;text-decoration:line-through">' + fromStr + '</span> &rarr; <span style="color:var(--accent)">' + toStr + '</span></span>' +
-              '</div>';
+            var row = '<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:0.8rem;border-bottom:1px solid rgba(255,255,255,0.04)">' +
+              '<span style="color:#a1a1aa">' + ch.label + '</span>';
+            if (isSecretField(ch)) {
+              row += '<span style="color:var(--accent)">will be replaced (hidden)</span>';
+            } else if (isBlobChange(ch)) {
+              row += '<span style="color:var(--accent)">will be replaced</span>';
+            } else {
+              row += '<span><span style="color:#71717a;text-decoration:line-through">' + formatDiffValue(ch.from) + '</span>' +
+                ' &rarr; <span style="color:var(--accent)">' + formatDiffValue(ch.to) + '</span></span>';
+            }
+            body += row + '</div>';
           });
           body += '</div>';
           section.innerHTML = header + body;
@@ -4720,6 +4837,20 @@
       }
     }
 
+    /* The device already summarises its large fields (the tile layouts arrive as
+       "Current (812 chars)" -> "Modified (1043 chars)"), so this is only a
+       backstop for any value that still turns up too long to read as a diff. */
+    function isBlobChange(ch) {
+      return (typeof ch.from === 'string' && ch.from.length > 200) ||
+             (typeof ch.to === 'string' && ch.to.length > 200);
+    }
+    /* Credentials travel in a backup made with sensitive data included. Their
+       values are worth nothing to the reader and should not sit in the page for
+       a screen-share, so only the fact that they change is shown. */
+    function isSecretField(ch) {
+      return /password|token|api_key|auth_header|client_id/i.test(String(ch.field || ''));
+    }
+
     function formatDiffValue(val) {
       if (val === null || val === undefined) return '(empty)';
       if (typeof val === 'boolean') return val ? 'On' : 'Off';
@@ -4736,7 +4867,13 @@
       $('restoreFileLabel').appendChild(input);
       var rcBtn = $('restoreConfirmBtn');
       if (rcBtn) { rcBtn.disabled = false; rcBtn.textContent = 'Restore'; }
+      /* the other device's password is only ever held for one transfer */
+      var pw = $('pullPassword');
+      if (pw) pw.value = '';
+      var pullNotice = $('restorePullNotice');
+      if (pullNotice) pullNotice.style.display = 'none';
       _backupData = null;
+      _restoreFromDevice = false;
     }
 
     function confirmRestore() {

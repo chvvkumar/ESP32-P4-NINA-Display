@@ -3310,7 +3310,13 @@ app_config_t *app_config_get(void);
  * (overflows small poll/UI task stacks). Snapshot into a PSRAM heap buffer. */
 void app_config_get_snapshot_into(app_config_t *dst);
 void app_config_save(const app_config_t *config);
-void app_config_apply(const app_config_t *config);   // in-memory only, no NVS
+void app_config_apply(const app_config_t *config);   // in-memory only, no NVS; marks dirty
+/* Same as app_config_apply(), but leaves the unsaved-changes flag exactly as it
+ * found it (neither set nor cleared). For the "preview":true path of the
+ * page-config POST handlers: a preview is a live look at candidate values, not a
+ * pending edit, so it must not raise the web UI's "unsaved changes" bar -- nor
+ * clear it if a real live-apply already raised it. */
+void app_config_apply_preview(const app_config_t *config);
 esp_err_t app_config_revert(void);                    // reload NVS into memory
 bool app_config_is_dirty(void);                       // true if apply called without save
 int app_config_get_instance_count(void);
@@ -3338,6 +3344,16 @@ const char *app_config_get_json_tiles(void);
 const char *app_config_get_ha_tiles(void);
 esp_err_t   app_config_set_json_tiles(const char *s);
 esp_err_t   app_config_set_ha_tiles(const char *s);
+
+/* Preview (RAM-only) variants: identical to the setters above but SKIP the NVS
+ * write, so the live page picks up the new tiles while the saved value is left
+ * untouched. Same relationship as app_config_apply() vs app_config_save() for
+ * the struct blob. Used by the "preview":true path of POST /api/json-config and
+ * POST /api/ha-config. The change is device-wide and is NOT auto-reverted: a
+ * later non-preview POST, or a preview POST carrying the saved values, restores
+ * the cache; otherwise it reverts on the next reboot (NVS is authoritative). */
+esp_err_t   app_config_set_json_tiles_ram(const char *s);
+esp_err_t   app_config_set_ha_tiles_ram(const char *s);
 
 bool app_config_is_instance_enabled(int index);
 int app_config_get_enabled_instance_count(void);

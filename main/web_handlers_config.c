@@ -1,6 +1,8 @@
 #include "web_server_internal.h"
 #include "mqtt_ha.h"
+#include "http_fetch.h"                 /* http_fetch_text — /api/config/pull proxy */
 #include <string.h>
+#include <strings.h>                    /* strncasecmp */
 #include <time.h>
 #include "esp_heap_caps.h"
 #include "build_version.h"
@@ -425,12 +427,24 @@ esp_err_t config_get_handler(httpd_req_t *req)
 
 /* ---- Backup/Restore Field Registry ---- */
 
+/* is_sensitive and mask_preview are related but NOT the same question:
+ *   is_sensitive  -- "may this leave the device in a redacted export?"
+ *                    Drives the config/sensitive split and the "********"
+ *                    leave-alone sentinel on the write path.
+ *   mask_preview  -- "is the value itself a credential?" Drives whether a
+ *                    restore-preview diff row shows the value or a placeholder.
+ * hostname is the case that separates them: sensitive enough to withhold from a
+ * redacted export, but its real from/to must be visible in the preview -- it is
+ * the one change that renames the device mid-session, and masking it would hide
+ * exactly the diff a user needs to see. mask_preview implies is_sensitive; the
+ * reverse does not hold. */
 typedef struct {
     const char *json_key;      /* JSON key as used in GET /api/config */
     const char *label;         /* Human-readable label for diff display */
     const char *category;      /* Tab/group name for diff grouping */
     bool        is_sensitive;  /* true = only exported in "sensitive" section */
     bool        is_large;      /* true = truncate value in diff display */
+    bool        mask_preview;  /* true = never put the value in a preview diff */
 } backup_field_t;
 
 static const backup_field_t s_backup_fields[] = {
@@ -478,6 +492,28 @@ static const backup_field_t s_backup_fields[] = {
     {"hfr_thresholds_1",   "HFR Thresholds 1",    "Nodes & Data", false, true},
     {"hfr_thresholds_2",   "HFR Thresholds 2",    "Nodes & Data", false, true},
     {"hfr_thresholds_3",   "HFR Thresholds 3",    "Nodes & Data", false, true},
+    /* JSON Display + Home Assistant pages. None of these reach the backup by
+     * default: the tile layouts live in dedicated NVS keys (v52 moved them out
+     * of app_config_t to keep ~6 KB each off the main /api/config payload), and
+     * the eight scalars are not SETTINGS_TABLE rows, so serialize_config_to_json()
+     * emits none of them. backup_get_handler and the restore preview inject all
+     * ten into their local JSON explicitly; the confirm path applies the scalars
+     * onto new_cfg and the layouts through app_config_set_*_tiles(). Registered
+     * here so the diff, category grouping, is_large truncation, sensitive split,
+     * and unknown-field detection treat them like any other field.
+     *
+     * Sensitivity: the two credential-bearing headers are sensitive; a tile
+     * layout, a URL, an interval, and an enable flag are not. */
+    {"json_enabled",           "JSON Display Page",        "Nodes & Data", false, false},
+    {"json_url",               "JSON Source URL",          "Nodes & Data", false, false},
+    {"json_auth_header",       "JSON Auth Header",         "Nodes & Data", true,  false, true},
+    {"json_update_interval_s", "JSON Poll Interval",       "Nodes & Data", false, false},
+    {"json_tiles_config",      "JSON Display Tiles",       "Nodes & Data", false, true},
+    {"ha_enabled",             "Home Assistant Page",      "Nodes & Data", false, false},
+    {"ha_base_url",            "Home Assistant URL",       "Nodes & Data", false, false},
+    {"ha_token",               "Home Assistant Token",     "Nodes & Data", true,  false, true},
+    {"ha_update_interval_s",   "Home Assistant Interval",  "Nodes & Data", false, false},
+    {"ha_tiles_config",        "Home Assistant Tiles",     "Nodes & Data", false, true},
 
     /* System */
     {"ntp",                  "NTP Server",          "System", false, false},
@@ -561,15 +597,20 @@ static const backup_field_t s_backup_fields[] = {
     {"home_page_lock",           "Always show Home Page",  "Behavior", false, false},
     {"auth_enabled",             "Authentication Enabled", "System",   false, false},
 
-    /* Sensitive */
-    {"weather_api_key",    "Weather API Key",    "Weather", true, false},
-    {"mqtt_username",      "MQTT Username",      "MQTT",    true, false},
-    {"mqtt_password",      "MQTT Password",      "MQTT",    true, false},
-    {"mqtt_broker_url",    "MQTT Broker URL",    "MQTT",    true, false},
-    {"spotify_client_id",  "Spotify Client ID",  "Spotify", true, false},
-    {"hostname",           "Hostname",           "System",  true, false},
+    /* Sensitive. mask_preview (6th column) is set on everything whose VALUE is a
+     * credential -- including mqtt_broker_url, which may embed user:pass@host.
+     * hostname is deliberately left unmasked: still withheld from a redacted
+     * export, but its real from/to shows in the preview, because a hostname
+     * change renames the device mid-session and is the diff a user most needs
+     * to see. */
+    {"weather_api_key",    "Weather API Key",    "Weather", true, false, true},
+    {"mqtt_username",      "MQTT Username",      "MQTT",    true, false, true},
+    {"mqtt_password",      "MQTT Password",      "MQTT",    true, false, true},
+    {"mqtt_broker_url",    "MQTT Broker URL",    "MQTT",    true, false, true},
+    {"spotify_client_id",  "Spotify Client ID",  "Spotify", true, false, true},
+    {"hostname",           "Hostname",           "System",  true, false, false},
 
-    {NULL, NULL, NULL, false, false}  /* sentinel */
+    {NULL, NULL, NULL, false, false, false}  /* sentinel */
 };
 
 /* Returns true if two cJSON values are equal */
@@ -615,9 +656,31 @@ static const restore_strmax_t s_restore_strmax[] = {
     {"allsky_field_config", 1536},
     {"allsky_thresholds",   1024},
     {"custom_image_url",    256},
+    {"json_tiles_config",   JSON_TILES_CONFIG_MAX},
+    {"ha_tiles_config",     HA_TILES_CONFIG_MAX},
+    {"json_url",            256},
+    {"json_auth_header",    256},
+    {"ha_base_url",         256},
+    {"ha_token",            256},
     /* goes_region max sourced from the struct field size at runtime below */
     {NULL, 0}
 };
+
+/* Fields whose value must satisfy validate_url_format() (empty allowed = "not
+ * configured"). ONE list drives both the restore-preview check
+ * (check_restore_field step 4) and the write-path check (validate_config_fields),
+ * so a field can never preview clean and then 400 on confirm. Adding a URL field
+ * means adding one row here, not editing two strcmp chains. */
+static const char *const s_url_fields[] = {
+    "url1", "url2", "url3", "mqtt_broker_url", "json_url", "ha_base_url", NULL
+};
+
+static bool is_url_field(const char *json_key) {
+    for (const char *const *k = s_url_fields; *k; k++) {
+        if (strcmp(*k, json_key) == 0) return true;
+    }
+    return false;
+}
 
 /* Numeric fields with a confirmable [min,max] clamp. Ranges sourced directly
  * from app_config.c validate_config() (line refs in comments). is_float marks
@@ -637,6 +700,8 @@ static const restore_numrange_t s_restore_numrange[] = {
     {"idle_poll_interval_s",    5,    120,   false},  /* app_config.c:2536 */
     {"screen_rotation",         0,    3,     false},  /* app_config.c:2544 */
     {"allsky_update_interval_s",1,    300,   false},  /* app_config.c:2548 */
+    {"json_update_interval_s",  5,    300,   false},  /* app_config.c validate_config (out of range -> 30) */
+    {"ha_update_interval_s",    5,    300,   false},  /* app_config.c validate_config (out of range -> 30) */
     {"allsky_dew_offset",       -50,  50,    true},   /* app_config.c:2552 */
     {"goes_update_interval_s",  300,  7200,  false},  /* app_config.c:2556 */
     {"image_display_source",    0,    3,     false},  /* app_config.c:2598 (0=GOES,1=Moon,2=Solar,3=Custom URL) */
@@ -727,12 +792,10 @@ static void check_restore_field(const backup_field_t *f,
         }
     }
 
-    /* 4. Invalid URL -> ERROR */
+    /* 4. Invalid URL -> ERROR. Same s_url_fields list validate_config_fields
+     *    enforces on confirm, so preview and confirm cannot disagree. */
     if (cJSON_IsString(backup_value) && backup_value->valuestring[0] != '\0') {
-        if ((strcmp(f->json_key, "url1") == 0 ||
-             strcmp(f->json_key, "url2") == 0 ||
-             strcmp(f->json_key, "url3") == 0 ||
-             strcmp(f->json_key, "mqtt_broker_url") == 0) &&
+        if (is_url_field(f->json_key) &&
             !validate_url_format(backup_value->valuestring)) {
             snprintf(msg, sizeof(msg), "%s: is not a valid URL.", f->label);
             add_validation_note(notes, blocked, "error", msg);
@@ -781,6 +844,17 @@ static void check_restore_field(const backup_field_t *f,
                 "use only letters, numbers, and hyphens.");
         }
     }
+}
+
+/* Display stand-in for a secret in a preview diff row. Reveals only whether a
+ * value is present, never the value itself. "********" is the same sentinel the
+ * restore confirm path already treats as "leave the live credential alone", so
+ * a preview row that is echoed back verbatim is inert. */
+static const char *sensitive_placeholder(const cJSON *v)
+{
+    if (v == NULL || cJSON_IsNull(v)) return "(not set)";
+    if (cJSON_IsString(v) && v->valuestring[0] == '\0') return "(not set)";
+    return "********";
 }
 
 /*
@@ -927,8 +1001,23 @@ static cJSON *build_restore_preview(const cJSON *backup_root, const cJSON *curre
         cJSON_AddStringToObject(change, "field", f->json_key);
         cJSON_AddStringToObject(change, "label", f->label);
 
-        /* Add from/to values — truncate large strings */
-        if (f->is_large && cJSON_IsString(backup_value)) {
+        /* Add from/to values.
+         *
+         * A credential never goes on the wire, not even in a preview the browser
+         * only renders masked: the row's existence already says "this changes",
+         * and the placeholders say whether a value is being set or cleared. This
+         * is the single choke point every diff row passes through, so a secret
+         * added later is protected by setting mask_preview in the registry -- not
+         * by remembering to mask at a call site. The other preview arrays carry key
+         * names only (missing_fields, unknown_fields, sensitive_excluded) and the
+         * validation notes are built from f->label, so this is the only path that
+         * ever had a value to leak.
+         *
+         * Large JSON-blob fields are summarized by length rather than inlined. */
+        if (f->mask_preview) {
+            cJSON_AddStringToObject(change, "from", sensitive_placeholder(current_value));
+            cJSON_AddStringToObject(change, "to",   sensitive_placeholder(backup_value));
+        } else if (f->is_large && cJSON_IsString(backup_value)) {
             char trunc[80];
             snprintf(trunc, sizeof(trunc), "Modified (%d chars)", (int)strlen(backup_value->valuestring));
             cJSON_AddStringToObject(change, "to", trunc);
@@ -1017,29 +1106,66 @@ static bool validate_config_fields(cJSON *root, httpd_req_t *req)
         !validate_string_len(root, "allsky_field_config", 1536) ||
         !validate_string_len(root, "allsky_thresholds", 1024) ||
         !validate_string_len(root, "goes_region", sizeof(((app_config_t *)0)->goes_region)) ||
-        !validate_string_len(root, "custom_image_url", sizeof(((app_config_t *)0)->custom_image_url))) {
+        !validate_string_len(root, "custom_image_url", sizeof(((app_config_t *)0)->custom_image_url)) ||
+        /* JSON Display / Home Assistant page fields (restore path only; absent
+         * from the config POST body, which routes them through their own
+         * endpoints). Bounds mirror json_config_post_handler /
+         * ha_config_post_handler exactly. */
+        !validate_string_len(root, "json_url", sizeof(((app_config_t *)0)->json_url)) ||
+        !validate_string_len(root, "json_auth_header", sizeof(((app_config_t *)0)->json_auth_header)) ||
+        !validate_string_len(root, "json_tiles_config", JSON_TILES_CONFIG_MAX) ||
+        !validate_string_len(root, "ha_base_url", sizeof(((app_config_t *)0)->ha_base_url)) ||
+        !validate_string_len(root, "ha_token", sizeof(((app_config_t *)0)->ha_token)) ||
+        !validate_string_len(root, "ha_tiles_config", HA_TILES_CONFIG_MAX)) {
         send_400(req, "String field exceeds maximum length");
         return false;
     }
 
-    cJSON *url_items[] = {
-        cJSON_GetObjectItem(root, "url1"),
-        cJSON_GetObjectItem(root, "url2"),
-        cJSON_GetObjectItem(root, "url3"),
-        cJSON_GetObjectItem(root, "mqtt_broker_url"),
-    };
-    for (int i = 0; i < 4; i++) {
-        if (cJSON_IsString(url_items[i]) && !validate_url_format(url_items[i]->valuestring)) {
-            send_400(req, "Invalid URL format");
+    /* Driven by s_url_fields, the same list check_restore_field step 4 uses for
+     * the preview, so a malformed URL is reported at preview time instead of
+     * surfacing here as a field-less 400 on confirm. validate_url_format() lets
+     * an empty string through, so clearing any of these still works. */
+    for (const char *const *k = s_url_fields; *k; k++) {
+        cJSON *u = cJSON_GetObjectItem(root, *k);
+        if (cJSON_IsString(u) && !validate_url_format(u->valuestring)) {
+            char msg[80];
+            snprintf(msg, sizeof(msg), "Invalid URL format in '%s'", *k);
+            send_400(req, msg);
             return false;
         }
     }
     return true;
 }
 
+/* Delete every sensitive key whose incoming value is the redaction sentinel.
+ *
+ * GET /api/config and the restore preview both hand out "********" in place of a
+ * real secret, so a round-tripped payload carries the sentinel rather than the
+ * value. Because parse_config_from_json() starts from a copy of the live config
+ * and every field parse is key-present-gated, deleting the key IS "preserve the
+ * existing value" -- one registry-driven pass replaces a per-secret `if (strcmp
+ * != "********")` arm, and covers a hand-edited backup with literal asterisks in
+ * a field nobody remembered to guard.
+ *
+ * Driven by is_sensitive (all 8), not mask_preview (7): hostname shows its real
+ * value in a preview but must still honour the sentinel on the write path. */
+static void strip_masked_secrets(cJSON *root)
+{
+    for (const backup_field_t *f = s_backup_fields; f->json_key; f++) {
+        if (!f->is_sensitive) continue;
+        cJSON *v = cJSON_GetObjectItem(root, f->json_key);
+        if (cJSON_IsString(v) && strcmp(v->valuestring, "********") == 0) {
+            cJSON_DeleteItemFromObject(root, f->json_key);
+        }
+    }
+}
+
 // Parse JSON into a new app_config_t (heap-allocated).
 // Starts from a copy of the current config so missing fields are preserved.
 // Returns NULL on allocation failure.
+// NOTE: mutates `root` -- strip_masked_secrets() removes redacted secrets so
+// they cannot be written. Callers delete `root` shortly after, and the restore
+// path relies on the same removal.
 static app_config_t *parse_config_from_json(cJSON *root)
 {
     app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
@@ -1048,6 +1174,8 @@ static app_config_t *parse_config_from_json(cJSON *root)
         return NULL;
     }
     memcpy(cfg, app_config_get(), sizeof(app_config_t));
+
+    strip_masked_secrets(root);
 
     /* Every "simple" field (plain default + optional range check) is driven
      * from the single SETTINGS_TABLE X-macro in settings_table.h/.c. This
@@ -1069,14 +1197,9 @@ static app_config_t *parse_config_from_json(cJSON *root)
     JSON_TO_STRING(root, "hfr_thresholds_1", cfg->hfr_thresholds[0]);
     JSON_TO_STRING(root, "hfr_thresholds_2", cfg->hfr_thresholds[1]);
     JSON_TO_STRING(root, "hfr_thresholds_3", cfg->hfr_thresholds[2]);
-    /* mqtt_password: skip write if value equals "********" sentinel */
-    {
-        cJSON *_mp = cJSON_GetObjectItem(root, "mqtt_password");
-        if (cJSON_IsString(_mp) && strcmp(_mp->valuestring, "********") != 0) {
-            strncpy(cfg->mqtt_password, _mp->valuestring, sizeof(cfg->mqtt_password) - 1);
-            cfg->mqtt_password[sizeof(cfg->mqtt_password) - 1] = '\0';
-        }
-    }
+    /* mqtt_password: a sentinel value was already removed by
+     * strip_masked_secrets(), so key-present means "a real new value". */
+    JSON_TO_STRING(root, "mqtt_password", cfg->mqtt_password);
 
     /* Home Page now stores a page_ref registry id (0..PAGE_REF_ID_MAX-1). The web
      * UI always sends a concrete id (never -1). Reject out-of-range ids and the
@@ -1155,14 +1278,8 @@ static app_config_t *parse_config_from_json(cJSON *root)
     JSON_TO_STRING(root, "allsky_field_config",  cfg->allsky_field_config);
     JSON_TO_STRING(root, "allsky_thresholds",    cfg->allsky_thresholds);
 
-    /* spotify_client_id: skip write if value equals "********" sentinel */
-    {
-        cJSON *_scid = cJSON_GetObjectItem(root, "spotify_client_id");
-        if (cJSON_IsString(_scid) && strcmp(_scid->valuestring, "********") != 0) {
-            strncpy(cfg->spotify_client_id, _scid->valuestring, sizeof(cfg->spotify_client_id) - 1);
-            cfg->spotify_client_id[sizeof(cfg->spotify_client_id) - 1] = '\0';
-        }
-    }
+    /* spotify_client_id: sentinel already removed by strip_masked_secrets(). */
+    JSON_TO_STRING(root, "spotify_client_id", cfg->spotify_client_id);
     /* admin_password is never accepted via /api/config — use /api/admin-password. */
 
     cJSON *jmoondrag = cJSON_GetObjectItem(root, "moon_drag_light_mode");
@@ -1223,6 +1340,7 @@ cJSON *receive_json_body(httpd_req_t *req, int max_size)
     while (received < remaining) {
         int ret = httpd_req_recv(req, buf + received, remaining - received);
         if (ret <= 0) {
+            memset(buf, 0, (size_t)received);   /* see scrub note below */
             free(buf);
             if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
                 ESP_LOGW(TAG, "Config handler: recv timeout (got %d/%d bytes)", received, remaining);
@@ -1237,6 +1355,12 @@ cJSON *receive_json_body(httpd_req_t *req, int max_size)
     buf[received] = '\0';
 
     cJSON *root = cJSON_Parse(buf);
+    /* Scrub before releasing: config POST bodies routinely carry the admin
+     * password, WiFi passphrases, an HA token, or a source device's password
+     * (/api/config/pull). free() does not clear, and this PSRAM block is handed
+     * straight to the next allocation, so a later handler could read a stale
+     * secret out of its own fresh buffer. One memset here covers every caller. */
+    memset(buf, 0, (size_t)received);
     free(buf);
     if (!root) {
         send_400(req, "Invalid JSON");
@@ -1527,6 +1651,25 @@ esp_err_t backup_get_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
+    /* The JSON Display / Home Assistant page config never reaches this object on
+     * its own: the tile layouts live in their own NVS keys (and must stay off
+     * this payload -- it also backs GET /api/config, deliberately slimmed by
+     * moving those ~6 KB blobs out), and the eight scalars are not SETTINGS_TABLE
+     * rows. Inject all ten here so the s_backup_fields split below routes them
+     * for us -- json_auth_header and ha_token into sensitive_section, the rest
+     * into config_section. Everything except those two carries no credential, so
+     * it is exported regardless of include_sensitive. */
+    cJSON_AddBoolToObject(full_config,   "json_enabled",           cfg->json_enabled);
+    cJSON_AddStringToObject(full_config, "json_url",               cfg->json_url);
+    cJSON_AddStringToObject(full_config, "json_auth_header",       cfg->json_auth_header);
+    cJSON_AddNumberToObject(full_config, "json_update_interval_s", cfg->json_update_interval_s);
+    cJSON_AddStringToObject(full_config, "json_tiles_config",      app_config_get_json_tiles());
+    cJSON_AddBoolToObject(full_config,   "ha_enabled",             cfg->ha_enabled);
+    cJSON_AddStringToObject(full_config, "ha_base_url",            cfg->ha_base_url);
+    cJSON_AddStringToObject(full_config, "ha_token",               cfg->ha_token);
+    cJSON_AddNumberToObject(full_config, "ha_update_interval_s",   cfg->ha_update_interval_s);
+    cJSON_AddStringToObject(full_config, "ha_tiles_config",        app_config_get_ha_tiles());
+
     /* Split into config and sensitive sections */
     cJSON *config_section = cJSON_CreateObject();
     cJSON *sensitive_section = include_sensitive ? cJSON_CreateObject() : NULL;
@@ -1651,6 +1794,22 @@ esp_err_t restore_post_handler(httpd_req_t *req)
             cJSON_Delete(root);
             httpd_resp_send_500(req);
             return ESP_OK;
+        }
+        /* Mirror the injection in backup_get_handler so the JSON Display / HA
+         * fields have a current value to diff against; without it every restore
+         * would report all ten as changing from (empty). */
+        {
+            const app_config_t *live = app_config_get();
+            cJSON_AddBoolToObject(current_json,   "json_enabled",           live->json_enabled);
+            cJSON_AddStringToObject(current_json, "json_url",               live->json_url);
+            cJSON_AddStringToObject(current_json, "json_auth_header",       live->json_auth_header);
+            cJSON_AddNumberToObject(current_json, "json_update_interval_s", live->json_update_interval_s);
+            cJSON_AddStringToObject(current_json, "json_tiles_config",      app_config_get_json_tiles());
+            cJSON_AddBoolToObject(current_json,   "ha_enabled",             live->ha_enabled);
+            cJSON_AddStringToObject(current_json, "ha_base_url",            live->ha_base_url);
+            cJSON_AddStringToObject(current_json, "ha_token",               live->ha_token);
+            cJSON_AddNumberToObject(current_json, "ha_update_interval_s",   live->ha_update_interval_s);
+            cJSON_AddStringToObject(current_json, "ha_tiles_config",        app_config_get_ha_tiles());
         }
 
         cJSON *preview = build_restore_preview(backup, current_json);
@@ -1780,6 +1939,83 @@ esp_err_t restore_post_handler(httpd_req_t *req)
             }
         }
 
+        /* JSON Display + Home Assistant page config. parse_config_from_json()
+         * carries none of it: the eight scalars are not SETTINGS_TABLE rows, and
+         * the tile layouts are not even in app_config_t. Apply the scalars onto
+         * new_cfg (picked up by the app_config_save() below, whose
+         * validate_config() clamps both intervals to 5..300 and NUL-terminates
+         * the char arrays), and persist the layouts through their own setters,
+         * which clamp to MAX-1 and refresh the getter cache.
+         *
+         * An absent key leaves the current value untouched, so a backup taken
+         * before these fields existed neither blanks a URL nor drops a token.
+         * strip_masked_secrets() (run inside parse_config_from_json above) has
+         * already deleted any "********" value, so a redacted backup cannot
+         * overwrite a live credential with literal asterisks.
+         *
+         * Change detection compares against the LIVE config, which is still
+         * pre-restore at this point; the tiles comparison must happen BEFORE the
+         * setter overwrites the cache. Each page's live-apply spine runs once,
+         * after the save, only if something on that page actually moved. */
+        bool json_page_changed = false;
+        bool ha_page_changed = false;
+        {
+            const app_config_t *live = app_config_get();
+
+            cJSON *it = cJSON_GetObjectItem(merged, "json_enabled");
+            if (cJSON_IsBool(it)) new_cfg->json_enabled = cJSON_IsTrue(it);
+            it = cJSON_GetObjectItem(merged, "json_url");
+            if (cJSON_IsString(it)) strlcpy(new_cfg->json_url, it->valuestring, sizeof(new_cfg->json_url));
+            it = cJSON_GetObjectItem(merged, "json_auth_header");
+            /* A "********" value was already deleted by strip_masked_secrets()
+             * inside parse_config_from_json above, so key-present means a real
+             * new credential; a redacted backup simply leaves the live one. */
+            if (cJSON_IsString(it)) {
+                strlcpy(new_cfg->json_auth_header, it->valuestring, sizeof(new_cfg->json_auth_header));
+            }
+            it = cJSON_GetObjectItem(merged, "json_update_interval_s");
+            if (cJSON_IsNumber(it)) new_cfg->json_update_interval_s = (uint16_t)it->valueint;
+
+            it = cJSON_GetObjectItem(merged, "ha_enabled");
+            if (cJSON_IsBool(it)) new_cfg->ha_enabled = cJSON_IsTrue(it);
+            it = cJSON_GetObjectItem(merged, "ha_base_url");
+            if (cJSON_IsString(it)) strlcpy(new_cfg->ha_base_url, it->valuestring, sizeof(new_cfg->ha_base_url));
+            it = cJSON_GetObjectItem(merged, "ha_token");
+            if (cJSON_IsString(it)) {   /* sentinel already stripped -- see above */
+                strlcpy(new_cfg->ha_token, it->valuestring, sizeof(new_cfg->ha_token));
+            }
+            it = cJSON_GetObjectItem(merged, "ha_update_interval_s");
+            if (cJSON_IsNumber(it)) new_cfg->ha_update_interval_s = (uint16_t)it->valueint;
+
+            json_page_changed =
+                (new_cfg->json_enabled != live->json_enabled) ||
+                (new_cfg->json_update_interval_s != live->json_update_interval_s) ||
+                (strcmp(new_cfg->json_url, live->json_url) != 0) ||
+                (strcmp(new_cfg->json_auth_header, live->json_auth_header) != 0);
+            ha_page_changed =
+                (new_cfg->ha_enabled != live->ha_enabled) ||
+                (new_cfg->ha_update_interval_s != live->ha_update_interval_s) ||
+                (strcmp(new_cfg->ha_base_url, live->ha_base_url) != 0) ||
+                (strcmp(new_cfg->ha_token, live->ha_token) != 0);
+
+            cJSON *jt = cJSON_GetObjectItem(merged, "json_tiles_config");
+            if (cJSON_IsString(jt) && jt->valuestring) {
+                if (strcmp(jt->valuestring, app_config_get_json_tiles()) != 0) {
+                    json_page_changed = true;
+                }
+                esp_err_t te = app_config_set_json_tiles(jt->valuestring);
+                if (te != ESP_OK) ESP_LOGW(TAG, "restore: json tiles persist failed: %s", esp_err_to_name(te));
+            }
+            cJSON *ht = cJSON_GetObjectItem(merged, "ha_tiles_config");
+            if (cJSON_IsString(ht) && ht->valuestring) {
+                if (strcmp(ht->valuestring, app_config_get_ha_tiles()) != 0) {
+                    ha_page_changed = true;
+                }
+                esp_err_t te = app_config_set_ha_tiles(ht->valuestring);
+                if (te != ESP_OK) ESP_LOGW(TAG, "restore: ha tiles persist failed: %s", esp_err_to_name(te));
+            }
+        }
+
         cJSON_Delete(merged);
         cJSON_Delete(root);
 
@@ -1797,6 +2033,19 @@ esp_err_t restore_post_handler(httpd_req_t *req)
         free(old_cfg);
         free(new_cfg);
 
+        /* Bring each tile page up to the restored config: rebuild the widget
+         * tree, show/hide per the restored enable flag, re-resolve navigation,
+         * and start the poll task if the restore just enabled the page. Run only
+         * for a page whose scalars or layout actually moved -- a rebuild is not
+         * free, and most restores touch neither. Read the enable flag back from
+         * the saved config so it reflects validate_config()'s canonicalization. */
+        if (json_page_changed) {
+            json_page_apply_live(app_config_get()->json_enabled);
+        }
+        if (ha_page_changed) {
+            ha_page_apply_live(app_config_get()->ha_enabled);
+        }
+
         /* Send success response with change count */
         cJSON *resp = cJSON_CreateObject();
         cJSON_AddStringToObject(resp, "status", "applied");
@@ -1811,4 +2060,172 @@ esp_err_t restore_post_handler(httpd_req_t *req)
         free((void *)resp_str);
         return ESP_OK;
     }
+}
+
+/* ---- Device-to-device config clone (POST /api/config/pull) ---- */
+
+/* Upstream backup cap. A backup with both tiles blobs runs ~30 KB; 64 KB leaves
+ * room for growth while bounding what one httpd worker will buffer in PSRAM. */
+#define PULL_MAX_RESPONSE  65536
+/* The source device may be on a slow power-save link (20-50 KB/s measured), so
+ * allow a generous window for a ~30 KB body before giving up. */
+#define PULL_TIMEOUT_MS    15000
+
+/* Send {"error":"<code>"} (plus "status" when @p status is non-zero) as a 200.
+ * The verdict lives in the body so the browser gets one uniform shape to switch
+ * on; transport-vs-upstream detail never leaks into the HTTP status of OUR
+ * response. Returns ESP_OK so handlers can `return pull_send_error(...)`. */
+static esp_err_t pull_send_error(httpd_req_t *req, const char *code, int status)
+{
+    char body[96];
+    if (status != 0) {
+        snprintf(body, sizeof(body), "{\"error\":\"%s\",\"status\":%d}", code, status);
+    } else {
+        snprintf(body, sizeof(body), "{\"error\":\"%s\"}", code);
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, body, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+/**
+ * @brief POST /api/config/pull  -- fetch another device's backup through this
+ *        device and forward it, so one panel can be cloned from another.
+ *
+ * Body: {"host":"<hostname or ip[:port]>","password":"<source admin password>",
+ *        "sensitive":true|false}
+ *
+ * The device performs GET http://<host>/api/config/backup?include_sensitive=<0|1>
+ * with an X-Auth-Password header (check_session() on the source accepts that
+ * header as an alternative to a session cookie, and feeds it through the same
+ * login lockout). Doing the fetch here rather than in the browser avoids a CORS
+ * problem and means the source password never has to survive a cross-origin
+ * request; it is used once, never logged, and never echoed.
+ *
+ * On success the upstream body is forwarded VERBATIM (it is already exactly the
+ * backup JSON that POST /api/config/restore consumes). Failures come back as a
+ * 200 carrying {"error":...} -- see pull_send_error.
+ */
+esp_err_t config_pull_post_handler(httpd_req_t *req)
+{
+    REQUIRE_AUTH(req);
+    cJSON *root = receive_json_body(req, CONFIG_MAX_PAYLOAD);
+    if (!root) return ESP_OK;  /* error already sent */
+
+    cJSON *host_item = cJSON_GetObjectItem(root, "host");
+    cJSON *pw_item   = cJSON_GetObjectItem(root, "password");
+    bool include_sensitive = cJSON_IsTrue(cJSON_GetObjectItem(root, "sensitive"));
+
+    if (!cJSON_IsString(host_item) || host_item->valuestring[0] == '\0') {
+        cJSON_Delete(root);
+        return send_400(req, "Missing 'host'");
+    }
+
+    /* Host hygiene. Only a bare host[:port] is accepted; the scheme is supplied
+     * by us, so a caller cannot redirect the fetch elsewhere by smuggling one
+     * in. A single leading "http://" is tolerated (users paste URLs) and
+     * stripped BEFORE the checks, so "https://x" and "host/path" both fail the
+     * '/' test, and "user@host" fails the '@' test. Whitespace and control
+     * characters are rejected outright -- they cannot appear in a hostname and
+     * could otherwise split the request line. */
+    char host[128];
+    {
+        const char *h = host_item->valuestring;
+        if (strncasecmp(h, "http://", 7) == 0) h += 7;
+        if (h[0] == '\0' || strlen(h) >= sizeof(host)) {
+            cJSON_Delete(root);
+            return pull_send_error(req, "bad_host", 0);
+        }
+        for (const char *p = h; *p; p++) {
+            unsigned char c = (unsigned char)*p;
+            if (c == '/' || c == '@' || c == '?' || c == '#' || c == '\\' ||
+                c <= ' ' || c == 0x7f) {
+                cJSON_Delete(root);
+                return pull_send_error(req, "bad_host", 0);
+            }
+        }
+        strlcpy(host, h, sizeof(host));
+    }
+
+    /* Password: optional (the source may have auth disabled). Capped at the
+     * admin_password capacity -- check_session() rejects anything longer, so a
+     * longer value could never authenticate anyway. */
+    char auth_hdr[64];
+    auth_hdr[0] = '\0';
+    if (cJSON_IsString(pw_item) && pw_item->valuestring[0] != '\0') {
+        if (strlen(pw_item->valuestring) >= sizeof(((app_config_t *)0)->admin_password)) {
+            cJSON_Delete(root);
+            return pull_send_error(req, "auth", 0);
+        }
+        /* auth_hdr[64] covers "X-Auth-Password: " (17) + password (<=32). */
+        snprintf(auth_hdr, sizeof(auth_hdr), "X-Auth-Password: %s", pw_item->valuestring);
+    }
+
+    /* Wipe the password out of the cJSON string before freeing it, so the only
+     * remaining copy is auth_hdr (a local, zeroed right after the fetch). cJSON
+     * frees without clearing, and the PSRAM it releases is reused by the next
+     * allocation -- receive_json_body() scrubs the raw request buffer for the
+     * same reason. */
+    if (cJSON_IsString(pw_item) && pw_item->valuestring) {
+        memset(pw_item->valuestring, 0, strlen(pw_item->valuestring));
+    }
+    cJSON_Delete(root);   /* password is now only in auth_hdr, a local */
+
+    /* url[192] covers "http://" + host[<=127] + the fixed query string (45). */
+    char url[192];
+    snprintf(url, sizeof(url), "http://%s/api/config/backup?include_sensitive=%d",
+             host, include_sensitive ? 1 : 0);
+
+    int status = 0;
+    http_fetch_opts_t opts = {
+        .timeout_ms         = PULL_TIMEOUT_MS,
+        .max_redirects      = 0,   /* a peer device never redirects; refuse to chase one */
+        .max_attempts       = 1,
+        .max_response_bytes = PULL_MAX_RESPONSE,
+        .extra_header       = (auth_hdr[0] != '\0') ? auth_hdr : NULL,
+        .status_out         = &status,
+    };
+
+    char *body = NULL;
+    size_t body_len = 0;
+    esp_err_t err = http_fetch_text(url, &opts, &body, &body_len);
+
+    /* Scrub the password from the stack copy as soon as the fetch is done. */
+    memset(auth_hdr, 0, sizeof(auth_hdr));
+
+    if (err != ESP_OK) {
+        /* status 0 == no HTTP response at all (DNS/connect/timeout). Never log
+         * the password or the header; host and status are safe. */
+        ESP_LOGW(TAG, "config pull: %s failed (status=%d, %s)",
+                 host, status, esp_err_to_name(err));
+        if (status == 0) {
+            return pull_send_error(req, "unreachable", 0);
+        }
+        if (status == 401 || status == 403) {
+            return pull_send_error(req, "auth", status);
+        }
+        return pull_send_error(req, "bad_response", status);
+    }
+
+    /* A 200 is not proof we reached a NINA display: a captive portal or a login
+     * page also answers 200. Require the body to parse and to carry the "meta"
+     * object every backup has, so the browser is never handed something the
+     * restore endpoint will reject. Parse-and-discard: the raw text is what gets
+     * forwarded, since it is already the exact restore input. */
+    cJSON *probe = cJSON_Parse(body);
+    bool looks_like_backup = (probe != NULL && cJSON_IsObject(cJSON_GetObjectItem(probe, "meta")));
+    if (probe) cJSON_Delete(probe);
+    if (!looks_like_backup) {
+        ESP_LOGW(TAG, "config pull: %s returned a non-backup body", host);
+        heap_caps_free(body);
+        return pull_send_error(req, "bad_response", status);
+    }
+
+    ESP_LOGI(TAG, "config pull: %s ok (%u bytes, secrets=%d)",
+             host, (unsigned)body_len, include_sensitive ? 1 : 0);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, body, body_len);
+    heap_caps_free(body);
+    return ESP_OK;
 }

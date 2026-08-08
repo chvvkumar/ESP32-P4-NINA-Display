@@ -54,10 +54,18 @@
       display:flex; align-items:center; gap:10px; margin-bottom:10px; cursor:pointer;
       border-radius:8px; padding:4px; margin:-4px -4px 6px; user-select:none;
     }
-    #jd-root .rb-row-head:hover { background:rgba(255,255,255,0.03); }
-    #jd-root .rb-row-head:focus-visible { outline:none; box-shadow:0 0 0 2px rgba(122,162,247,0.4); }
-    #jd-root .rb-row.collapsed .rb-row-head { margin-bottom:-4px; }
-    #jd-root .rb-caret { font-size:0.7rem; color:var(--text-muted,#94a3b8); width:12px; flex-shrink:0; }
+    #jd-root .rb-row-head:hover, #jd-root .rb-tile-head:hover { background:rgba(255,255,255,0.03); }
+    #jd-root .rb-row-head:focus-visible, #jd-root .rb-tile-head:focus-visible { outline:none; box-shadow:0 0 0 2px rgba(122,162,247,0.4); }
+    #jd-root .rb-row:not([open]) .rb-row-head { margin-bottom:-4px; }
+    /* collapsible sections use native details/summary; the marker is drawn by
+       ::before because a flex summary drops the built-in one */
+    #jd-root summary { cursor:pointer; list-style:none; }
+    #jd-root summary::-webkit-details-marker { display:none; }
+    #jd-root summary::before {
+      content:"\25B8"; display:inline-block; width:12px; flex-shrink:0;
+      font-size:0.7rem; color:var(--text-muted,#94a3b8);
+    }
+    #jd-root details[open] > summary::before { content:"\25BE"; }
     #jd-root .rb-name { font-size:0.72rem; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:var(--text-muted,#94a3b8); }
     #jd-root .rb-fill { margin-left:auto; font-size:0.68rem; color:var(--text-hint,#7a8ba4); }
     #jd-root .rb-tiles { display:grid; gap:10px; }
@@ -65,7 +73,7 @@
       border:1px solid var(--border,rgba(255,255,255,0.12)); border-radius:var(--radius-sm,10px);
       background:var(--elevated,rgba(48,54,72,0.96)); padding:12px;
     }
-    #jd-root .rb-tile-head { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+    #jd-root .rb-tile-head { display:flex; align-items:center; gap:8px; margin-bottom:10px; border-radius:8px; padding:2px 4px; margin-left:-4px; margin-right:-4px; }
     #jd-root .rb-tile-head .idx {
       width:20px; height:20px; border-radius:6px; flex-shrink:0; background:rgba(122,162,247,0.16);
       color:var(--accent,#7aa2f7); font-size:0.66rem; font-weight:700; display:grid; place-items:center;
@@ -90,6 +98,27 @@
     #jd-root .swatch::-webkit-color-swatch-wrapper { padding:3px; }
     #jd-root .swatch::-webkit-color-swatch { border:none; border-radius:5px; }
     #jd-root .swatch-row .lab { font-size:0.74rem; color:var(--text-secondary,#b8c2d0); flex:1; }
+    /* compact color chips: one horizontal strip per tile, wraps when narrow */
+    #jd-root .swatch-strip { display:flex; flex-wrap:wrap; gap:8px; }
+    #jd-root .swatch-row.chip {
+      flex:1 1 150px; margin-bottom:0; gap:6px; padding:4px 7px;
+      border:1px solid var(--border,rgba(255,255,255,0.12)); border-radius:8px; background:rgba(255,255,255,0.02);
+    }
+    #jd-root .chip .swatch { width:26px; height:24px; }
+    #jd-root .chip .lab { font-size:0.68rem; }
+    #jd-root .sw-def {
+      font-size:0.58rem; letter-spacing:0.05em; text-transform:uppercase; color:var(--text-hint,#7a8ba4);
+      border:1px solid var(--border,rgba(255,255,255,0.12)); border-radius:999px; padding:1px 7px; flex-shrink:0;
+    }
+    #jd-root .sw-reset {
+      background:none; border:none; color:var(--text-hint,#7a8ba4); cursor:pointer;
+      font-size:1rem; line-height:1; padding:1px 6px; border-radius:6px; flex-shrink:0;
+    }
+    #jd-root .sw-reset:hover { color:var(--danger,#f87171); background:rgba(239,68,68,0.08); }
+    #jd-root .jd-defaults {
+      border:1px solid var(--border,rgba(255,255,255,0.12)); border-radius:var(--radius-sm,10px);
+      background:rgba(255,255,255,0.02); padding:12px; margin-bottom:12px;
+    }
     #jd-root .map-row { display:grid; grid-template-columns:1fr auto; gap:8px; margin-bottom:8px; align-items:center; }
 
     /* legend */
@@ -159,25 +188,25 @@
     <div class="card-title"><span class="card-title-label">Source</span></div>
     <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
       <span class="toggle-label">Enable JSON Display</span>
-      <label class="toggle"><input type="checkbox" id="jd_enabled" onchange="jdOnSourceChange()"><span class="toggle-track"></span></label>
+      <label class="toggle"><input type="checkbox" id="jd_enabled" onchange="jdOnEnabledToggle()"><span class="toggle-track"></span></label>
     </div>
     <div class="field-hint">Turns on the page and starts reading the source. Off hides the page and stops requests.</div>
 
     <div class="subsection">
       <div class="field">
         <label class="field-label" for="jd_url">JSON URL</label>
-        <input class="input mono" id="jd_url" maxlength="255" placeholder="http://192.168.1.50:8080/api/status" oninput="jdOnSourceChange()">
+        <input class="input mono" id="jd_url" maxlength="255" placeholder="http://192.168.1.50:8080/api/status" oninput="jdOnSourceEdit()" onchange="jdOnSourceCommit()">
         <div class="field-hint">Full address of a JSON endpoint (HTTP or HTTPS, up to 255 characters). Point at a <strong>single, curated endpoint</strong> that returns just the values you need, not a large collection. A response with thousands of items (over 1&nbsp;MB) is too large to poll on the device.</div>
       </div>
       <div class="field">
         <label class="field-label" for="jd_auth">Auth Header <span style="color:var(--text-hint);font-weight:400">(optional)</span></label>
-        <input class="input mono" id="jd_auth" maxlength="255" placeholder="X-API-Key: &lt;key&gt;">
+        <input class="input mono" id="jd_auth" maxlength="255" placeholder="X-API-Key: &lt;key&gt;" oninput="jdOnSourceEdit()" onchange="jdOnSourceCommit()">
         <div class="field-hint">One header sent with each request, written as <code>Name: value</code> (for example <code>Authorization: Bearer &lt;token&gt;</code> or <code>X-API-Key: &lt;key&gt;</code>). Tile key paths read nested values with dot and <code>[index]</code> notation; a <code>[field=value]</code> selector matches an array element by one of its fields. Leave blank for none.</div>
       </div>
       <div class="row2">
         <div class="field">
           <label class="field-label" for="jd_interval">Poll Interval</label>
-          <select class="input" id="jd_interval">
+          <select class="input" id="jd_interval" onchange="jdOnSourceChange()">
             <option value="5">5 seconds</option>
             <option value="10">10 seconds</option>
             <option value="30" selected>30 seconds</option>
@@ -202,14 +231,19 @@
   <div class="card nocollapse">
     <div class="card-title"><span class="card-title-label">Layout</span><span class="jd-count" id="jd_tileCount">0 / 15 tiles</span></div>
     <div class="field-hint" style="margin-bottom:14px">Build the page as rows of tiles. Up to <strong>6 rows</strong>, <strong>4 tiles</strong> per row, <strong>15 tiles</strong> total.</div>
+    <details class="jd-defaults" open>
+      <summary class="mini-label">Default colors</summary>
+      <div class="field-hint" style="margin:8px 0 10px">Used by every tile that has no color of its own.</div>
+      <div id="jd_defHost"></div>
+    </details>
     <div id="jd_rowsHost"></div>
     <button type="button" class="btn btn-outline full" id="jd_addRowBtn" onclick="jdAddRow()" style="margin-top:4px">+ Add Row</button>
   </div>
 
-  <!-- SAVE -->
+  <!-- PREVIEW -->
   <div class="card nocollapse">
-    <div class="field-hint" style="margin-bottom:12px">Saving persists these settings to the device and applies them immediately.</div>
-    <button type="button" class="btn btn-primary full" id="jd_saveBtn" onclick="jdSaveConfig()">Save JSON Display</button>
+    <div class="field-hint" style="margin-bottom:12px">Shows this layout on the device straight away so you can check it. Nothing is stored until you press Save at the bottom of the page.</div>
+    <button type="button" class="btn btn-primary full" id="jd_previewBtn" onclick="jdPreviewLayout()">Preview Layout on Device</button>
   </div>
 
   </div><!-- /.jd-col-settings -->
@@ -259,21 +293,33 @@
     /* threshold color defaults taken from the on-device Default theme */
     const JD_C_NORMAL="#a3a3a3", JD_C_WARN="#d97706", JD_C_CRIT="#be123c", JD_C_OK="#059669";
     const JD_MAX_ROWS=6, JD_MAX_PER_ROW=4, JD_MAX_TILES=15;
+    /* stock fallback per color slot, and the slot labels shown in the UI */
+    const JD_STOCK={cLow:JD_C_NORMAL,cNorm:JD_C_NORMAL,cHigh:JD_C_WARN,tColor:JD_C_OK,fColor:JD_C_CRIT};
+    const JD_DEF_KEYS=[["cLow","Below low"],["cNorm","In range"],["cHigh","Above high"],["tColor","True"],["fColor","False"]];
 
     let jdRows=[];          /* [[tile,...],...] builder state */
+    let jdDefaults={};      /* page-level color defaults; missing key -> JD_STOCK */
+    let jdHealLegacy=false; /* loaded config predates "defaults": strip baked colors */
     let jdSample=null;      /* last fetched JSON response (for live preview) */
     let jdUid=1;
     const jdNextId=()=>jdUid++;
-    /* collapse state keyed by row-array identity — survives re-renders */
+    /* collapse state keyed by row-array / tile identity — survives the rebuilds
+       the builder does on every edit, and is never saved to config */
     const jdCollapsedRows=new WeakSet();
+    const jdCollapsedTiles=new WeakSet();
 
-    function jdNumberTile(path,label,unit,dec,low,high,cLow,cNorm,cHigh){
-      return {id:jdNextId(),path:path,label:label,type:"number",unit:unit,decimals:dec,low:low,high:high,cLow:cLow,cNorm:cNorm,cHigh:cHigh};
+    /* Tiles carry a color key only as an override; absent means "inherit". */
+    function jdNumberTile(path,label,unit,dec,low,high){
+      return {id:jdNextId(),path:path,label:label,type:"number",unit:unit,decimals:dec,low:low,high:high};
     }
     function jdTextTile(path,label,maps){ return {id:jdNextId(),path:path,label:label,type:"text",maps:maps||[]}; }
-    function jdBoolTile(path,label,tText,fText,tColor,fColor){
-      return {id:jdNextId(),path:path,label:label,type:"bool",tText:tText,fText:fText,tColor:tColor,fColor:fColor};
+    function jdBoolTile(path,label,tText,fText){
+      return {id:jdNextId(),path:path,label:label,type:"bool",tText:tText,fText:fText};
     }
+    function jdDefColor(key){ return jdDefaults[key]||JD_STOCK[key]; }
+    /* effective color: tile override -> page default -> stock constant */
+    function jdColorOf(t,key){ return t[key]||jdDefColor(key); }
+    function jdClearColors(t){ JD_DEF_KEYS.forEach(([k])=>{ delete t[k]; }); }
 
     function jdTileCount(){ return jdRows.reduce((n,r)=>n+r.length,0); }
     function jdNum(v){ var n=parseFloat(v); return isFinite(n)?n:0; }
@@ -347,9 +393,9 @@
         const n=typeof raw==="number"?raw:parseFloat(raw);
         if(isFinite(n)){
           out.value=n.toFixed(jdClampInt(t.decimals,0,4));
-          if(n<jdNum(t.low)) out.color=t.cLow;
-          else if(n>jdNum(t.high)) out.color=t.cHigh;
-          else out.color=t.cNorm;
+          if(n<jdNum(t.low)) out.color=jdColorOf(t,"cLow");
+          else if(n>jdNum(t.high)) out.color=jdColorOf(t,"cHigh");
+          else out.color=jdColorOf(t,"cNorm");
         }
       } else if(t.type==="text"){
         if(raw!=null){
@@ -362,7 +408,7 @@
         if(raw!==undefined){
           const on=jdTruthy(raw);
           out.value=on?(t.tText||"TRUE"):(t.fText||"FALSE");
-          out.color=on?t.tColor:t.fColor;
+          out.color=jdColorOf(t,on?"tColor":"fColor");
         }
       }
       return out;
@@ -386,42 +432,79 @@
       });
       var empty=$('jd_devEmpty'); if(empty) empty.style.display=jdTileCount()===0?"flex":"none";
     }
-    function jdOnSourceChange(){ jdRenderDevice(); }
+    /* Typing only repaints the local preview. The device is not told about a
+       half-typed URL or key: text fields commit on change (blur / Enter), the
+       interval select stays on the debounce, and the enable toggle applies at
+       once. */
+    function jdOnSourceEdit(){ jdRenderDevice(); }
+    /* A key pasted with a trailing newline is rejected by the device's header
+       guard and would only show up as a failed fetch later, so the field is
+       cleaned on commit: what you see is what gets sent. */
+    function jdTrimField(id){ const e=$(id); if(e && e.value!==e.value.trim()) e.value=e.value.trim(); }
+    function jdOnSourceCommit(){
+      jdTrimField('jd_url'); jdTrimField('jd_auth');
+      jdRenderDevice(); if(jdLoaded) jdPreviewNow(null);
+    }
+    function jdOnSourceChange(){ jdRenderDevice(); jdSchedulePreview(); }
+    /* Enable toggle: show or hide the page on the device right away as a
+       preview; the page-wide Save is what stores it. */
+    function jdOnEnabledToggle(){
+      const on=$('jd_enabled')?!!$('jd_enabled').checked:false;
+      jdRenderDevice();
+      jdPreviewNow(on?'JSON Display page shown - not saved yet':'JSON Display page hidden - not saved yet');
+    }
 
     /* ---- builder rendering ---- */
+    /* Page-level default colors. While dragging (oninput) only the preview is
+       redrawn so the open color picker survives; on commit (onchange) the tile
+       list is rebuilt so inheriting swatches show the new color. */
+    function jdRenderDefaults(){
+      const host=$('jd_defHost'); if(!host) return;
+      host.innerHTML="";
+      const strip=document.createElement("div"); strip.className="swatch-strip";
+      JD_DEF_KEYS.forEach(([k,lbl])=>{
+        /* no DEFAULT badge here: these are the defaults */
+        const r=jdSwatch(lbl,jdDefColor(k),v=>{ jdDefaults[k]=v; jdRenderDevice(); });
+        r.className="swatch-row chip";
+        r.firstChild.onchange=()=>jdRenderBuilder();
+        strip.appendChild(r);
+      });
+      host.appendChild(strip);
+      const b=document.createElement("button");
+      b.className="btn btn-outline sm"; b.style.marginTop="10px"; b.textContent="Apply defaults to all tiles";
+      b.onclick=()=>{
+        if(!confirm("Clear the individual colors on every tile so they all follow the defaults?")) return;
+        jdRows.forEach(row=>row.forEach(jdClearColors)); jdSyncAll();
+      };
+      host.appendChild(b);
+    }
+
     function jdRenderBuilder(){
       const host=$('jd_rowsHost'); if(!host) return;
       host.innerHTML="";
       const total=jdTileCount();
       jdRows.forEach((row,ri)=>{
-        const collapsed=jdCollapsedRows.has(row);
-        const rEl=document.createElement("div"); rEl.className="rb-row"+(collapsed?" collapsed":"");
-        const head=document.createElement("div");
-        head.className="rb-row-head"; head.setAttribute("role","button"); head.setAttribute("tabindex","0");
-        head.setAttribute("aria-expanded",collapsed?"false":"true");
+        const rEl=document.createElement("details"); rEl.className="rb-row";
+        rEl.open=!jdCollapsedRows.has(row);
+        rEl.ontoggle=()=>{ if(rEl.open) jdCollapsedRows.delete(row); else jdCollapsedRows.add(row); };
+        const head=document.createElement("summary"); head.className="rb-row-head";
         head.innerHTML=
-          '<span class="rb-caret" aria-hidden="true">'+(collapsed?"▸":"▾")+'</span>'+
           '<span class="rb-name">Row '+(ri+1)+'</span>'+
           '<span class="rb-fill">'+row.length+' / '+JD_MAX_PER_ROW+' tiles</span>';
-        const toggle=()=>{ if(collapsed) jdCollapsedRows.delete(row); else jdCollapsedRows.add(row); jdRenderBuilder(); };
-        head.onclick=(e)=>{ if(!e.target.closest("button")) toggle(); };
-        head.onkeydown=(e)=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); toggle(); } };
         const del=document.createElement("button");
         del.className="btn btn-danger sm"; del.textContent="Remove Row";
         del.onclick=(e)=>{ e.stopPropagation(); jdRows.splice(ri,1); jdSyncAll(); };
         head.appendChild(del);
         rEl.appendChild(head);
-        if(!collapsed){
-          const tilesEl=document.createElement("div"); tilesEl.className="rb-tiles";
-          row.forEach((t,ti)=>tilesEl.appendChild(jdTileEditor(t,ri,ti)));
-          rEl.appendChild(tilesEl);
-          const addTile=document.createElement("button");
-          addTile.className="btn btn-outline sm"; addTile.style.marginTop="10px"; addTile.textContent="+ Add Tile";
-          const canAdd=row.length<JD_MAX_PER_ROW && total<JD_MAX_TILES;
-          addTile.disabled=!canAdd;
-          addTile.onclick=()=>{ row.push(jdNumberTile("","New Tile","",1,0,100,JD_C_NORMAL,JD_C_NORMAL,JD_C_WARN)); jdSyncAll(); };
-          rEl.appendChild(addTile);
-        }
+        const tilesEl=document.createElement("div"); tilesEl.className="rb-tiles";
+        row.forEach((t,ti)=>tilesEl.appendChild(jdTileEditor(t,ri,ti)));
+        rEl.appendChild(tilesEl);
+        const addTile=document.createElement("button");
+        addTile.className="btn btn-outline sm"; addTile.style.marginTop="10px"; addTile.textContent="+ Add Tile";
+        const canAdd=row.length<JD_MAX_PER_ROW && total<JD_MAX_TILES;
+        addTile.disabled=!canAdd;
+        addTile.onclick=()=>{ row.push(jdNumberTile("","New Tile","",1,0,100)); jdSyncAll(); };
+        rEl.appendChild(addTile);
         host.appendChild(rEl);
       });
       var addRowBtn=$('jd_addRowBtn'); if(addRowBtn) addRowBtn.disabled=jdRows.length>=JD_MAX_ROWS || total>=JD_MAX_TILES;
@@ -429,28 +512,38 @@
       if(cnt){ cnt.textContent=total+' / '+JD_MAX_TILES+' tiles'; cnt.classList.toggle("full",total>=JD_MAX_TILES); }
     }
 
+    /* summary text: the label, but an unset key path always stays visible so a
+       collapsed fresh tile still shows it has no source */
+    function jdTileTitle(t){
+      if(t.path) return t.label||t.path;
+      return t.label?(t.label+" <no key path>"):"<no key path>";
+    }
+
     function jdTileEditor(t,ri,ti){
-      const el=document.createElement("div"); el.className="rb-tile";
-      const head=document.createElement("div"); head.className="rb-tile-head";
-      head.innerHTML='<span class="idx">'+(ti+1)+'</span><span class="path-preview">'+escHtml(t.path||"<no key>")+'</span>';
+      const el=document.createElement("details"); el.className="rb-tile";
+      el.open=!jdCollapsedTiles.has(t);
+      el.ontoggle=()=>{ if(el.open) jdCollapsedTiles.delete(t); else jdCollapsedTiles.add(t); };
+      const head=document.createElement("summary"); head.className="rb-tile-head";
+      head.innerHTML='<span class="idx">'+(ti+1)+'</span><span class="path-preview">'+escHtml(jdTileTitle(t))+'</span>';
+      const setTitle=()=>{ head.querySelector(".path-preview").textContent=jdTileTitle(t); };
       const x=document.createElement("button");
       x.className="x"; x.setAttribute("aria-label","Remove tile"); x.innerHTML="&times;";
-      x.onclick=()=>{ jdRows[ri].splice(ti,1); jdSyncAll(); };
+      x.onclick=(e)=>{ e.stopPropagation(); jdRows[ri].splice(ti,1); jdSyncAll(); };
       head.appendChild(x); el.appendChild(head);
 
-      el.appendChild(jdLabeledInput("Key path","mono sm",t.path,"items[0].value",v=>{
-        t.path=v; head.querySelector(".path-preview").textContent=v||"<no key>"; jdRenderDevice();
-      }));
-      el.appendChild(jdLabeledInput("Label","sm",t.label,jdLastSeg(t.path)||"Label",v=>{ t.label=v; jdRenderDevice(); }));
-
-      const typeWrap=document.createElement("div");
-      typeWrap.innerHTML='<div class="mini-label">Type</div>';
+      /* identity fields sit above the dashed rule; .row2 wraps when narrow */
+      const idRow=document.createElement("div"); idRow.className="row2";
+      const pathF=jdMiniField("Key path",jdInp(t.path,"items[0].value",v=>{ t.path=v; setTitle(); jdRenderDevice(); },"mono sm"));
+      pathF.style.flex="1.5 1 180px";
+      idRow.appendChild(pathF);
+      idRow.appendChild(jdMiniField("Label",jdInp(t.label,jdLastSeg(t.path)||"Label",v=>{ t.label=v; setTitle(); jdRenderDevice(); },"sm")));
       const sel=document.createElement("select"); sel.className="input sm";
       [["number","Number"],["text","Text"],["bool","Boolean"]].forEach(([v,lbl])=>{
         const o=document.createElement("option"); o.value=v; o.textContent=lbl; if(t.type===v) o.selected=true; sel.appendChild(o);
       });
       sel.onchange=()=>{ jdConvertType(t,sel.value); jdSyncAll(); };
-      typeWrap.appendChild(sel); el.appendChild(typeWrap);
+      idRow.appendChild(jdMiniField("Type",sel));
+      el.appendChild(idRow);
 
       const tf=document.createElement("div"); tf.className="type-fields";
       if(t.type==="number") tf.appendChild(jdNumberFields(t));
@@ -466,18 +559,10 @@
       if(type==="number"){
         t.unit=t.unit||""; t.decimals=(t.decimals!=null)?t.decimals:1;
         t.low=(t.low!=null)?t.low:0; t.high=(t.high!=null)?t.high:100;
-        t.cLow=t.cLow||JD_C_NORMAL; t.cNorm=t.cNorm||JD_C_NORMAL; t.cHigh=t.cHigh||JD_C_WARN;
       } else if(type==="text"){ t.maps=t.maps||[]; }
-      else { t.tText=t.tText||"TRUE"; t.fText=t.fText||"FALSE"; t.tColor=t.tColor||JD_C_OK; t.fColor=t.fColor||JD_C_CRIT; }
+      else { t.tText=t.tText||"TRUE"; t.fText=t.fText||"FALSE"; }
     }
 
-    function jdLabeledInput(label,cls,value,ph,onInput){
-      const w=document.createElement("div"); w.style.marginBottom="8px";
-      const l=document.createElement("div"); l.className="mini-label"; l.textContent=label;
-      const i=document.createElement("input"); i.className="input "+cls; i.value=value||""; i.placeholder=ph||"";
-      i.oninput=()=>onInput(i.value);
-      w.appendChild(l); w.appendChild(i); return w;
-    }
     function jdMiniField(label,inputEl){
       const w=document.createElement("div"); w.style.flex="1 1 100px";
       const l=document.createElement("div"); l.className="mini-label"; l.textContent=label;
@@ -495,9 +580,28 @@
     function jdSwatch(label,color,onInput){
       const r=document.createElement("div"); r.className="swatch-row";
       const c=document.createElement("input"); c.type="color"; c.className="swatch"; c.value=color||JD_C_NORMAL;
-      c.setAttribute("aria-label",label); c.oninput=()=>onInput(c.value);
+      c.setAttribute("aria-label",label); if(onInput) c.oninput=()=>onInput(c.value);
       const l=document.createElement("span"); l.className="lab"; l.textContent=label;
       r.appendChild(c); r.appendChild(l); return r;
+    }
+    /* Tile swatch: shows the effective color, badged "default" while the tile
+       inherits. Picking a color sets the override, the x clears it back to
+       inherit -- both update in place so the color picker stays open. */
+    function jdTileSwatch(label,t,key){
+      const r=jdSwatch(label,jdColorOf(t,key),null);
+      r.className="swatch-row chip";
+      const c=r.firstChild;
+      const badge=document.createElement("span"); badge.className="sw-def"; badge.textContent="default";
+      const x=document.createElement("button"); x.className="sw-reset";
+      x.setAttribute("aria-label","Use the default "+label+" color"); x.innerHTML="&times;";
+      function sync(){
+        c.value=jdColorOf(t,key);
+        badge.style.display=t[key]?"none":"";
+        x.style.display=t[key]?"":"none";
+      }
+      c.oninput=()=>{ t[key]=c.value; sync(); jdRenderDevice(); };
+      x.onclick=()=>{ delete t[key]; sync(); jdRenderDevice(); };
+      r.appendChild(badge); r.appendChild(x); sync(); return r;
     }
 
     function jdNumberFields(t){
@@ -512,14 +616,16 @@
       w.appendChild(row2);
       const sw=document.createElement("div"); sw.style.marginTop="10px";
       sw.innerHTML='<div class="mini-label">Colors by threshold</div>';
-      sw.appendChild(jdSwatch("Below low",t.cLow,v=>{ t.cLow=v; jdRenderDevice(); }));
-      sw.appendChild(jdSwatch("In range",t.cNorm,v=>{ t.cNorm=v; jdRenderDevice(); }));
-      sw.appendChild(jdSwatch("Above high",t.cHigh,v=>{ t.cHigh=v; jdRenderDevice(); }));
+      const strip=document.createElement("div"); strip.className="swatch-strip";
+      strip.appendChild(jdTileSwatch("Below low",t,"cLow"));
+      strip.appendChild(jdTileSwatch("In range",t,"cNorm"));
+      strip.appendChild(jdTileSwatch("Above high",t,"cHigh"));
+      sw.appendChild(strip);
       w.appendChild(sw); return w;
     }
     function jdTextFields(t){
       const w=document.createElement("div");
-      w.innerHTML='<div class="mini-label">Value → color (up to 4)</div>';
+      w.insertAdjacentHTML("beforeend",'<div class="mini-label">Value &rarr; color (up to 4)</div>');
       const listHost=document.createElement("div"); w.appendChild(listHost);
       function drawMaps(){
         listHost.innerHTML="";
@@ -549,9 +655,9 @@
       row.appendChild(jdMiniField("True text",jdInp(t.tText,"ON",v=>{ t.tText=v; jdRenderDevice(); },"sm")));
       row.appendChild(jdMiniField("False text",jdInp(t.fText,"OFF",v=>{ t.fText=v; jdRenderDevice(); },"sm")));
       w.appendChild(row);
-      const sw=document.createElement("div"); sw.style.marginTop="10px";
-      sw.appendChild(jdSwatch("True color",t.tColor,v=>{ t.tColor=v; jdRenderDevice(); }));
-      sw.appendChild(jdSwatch("False color",t.fColor,v=>{ t.fColor=v; jdRenderDevice(); }));
+      const sw=document.createElement("div"); sw.className="swatch-strip"; sw.style.marginTop="10px";
+      sw.appendChild(jdTileSwatch("True color",t,"tColor"));
+      sw.appendChild(jdTileSwatch("False color",t,"fColor"));
       w.appendChild(sw); return w;
     }
 
@@ -618,8 +724,8 @@
       const isBinary=entTok && String(entTok.value).startsWith("binary_sensor.");
       const numericStr=typeof rawVal==="string" && isFinite(parseFloat(rawVal)) && rawVal.trim()!=="";
       let tile;
-      if(typeof rawVal==="boolean" || (isBinary && isStateLeaf)) tile=jdBoolTile(path,label,"YES","NO",JD_C_OK,JD_C_CRIT);
-      else if(typeof rawVal==="number" || numericStr) tile=jdNumberTile(path,label,"",1,0,100,JD_C_NORMAL,JD_C_NORMAL,JD_C_WARN);
+      if(typeof rawVal==="boolean" || (isBinary && isStateLeaf)) tile=jdBoolTile(path,label,"YES","NO");
+      else if(typeof rawVal==="number" || numericStr) tile=jdNumberTile(path,label,"",1,0,100);
       else tile=jdTextTile(path,label,[]);
       target.push(tile); jdSyncAll();
     }
@@ -631,31 +737,52 @@
 
     function jdAddRow(){
       if(jdRows.length>=JD_MAX_ROWS || jdTileCount()>=JD_MAX_TILES) return;
-      jdRows.push([ jdNumberTile("","New Tile","",1,0,100,JD_C_NORMAL,JD_C_NORMAL,JD_C_WARN) ]);
+      jdRows.push([ jdNumberTile("","New Tile","",1,0,100) ]);
       jdSyncAll();
     }
-    function jdSyncAll(){ jdRenderBuilder(); jdRenderDevice(); }
+    function jdSyncAll(){ jdRenderDefaults(); jdRenderBuilder(); jdRenderDevice(); }
 
     /* ---- serialize / parse tiles_config ---- */
+    /* only real overrides are written; an absent key means "inherit" */
+    function jdPutColors(o,t,keys){ keys.forEach(k=>{ if(t[k]) o[k]=t[k]; }); return o; }
+    /* Adopt saved per-tile colors as overrides. In a legacy config (no top-level
+       "defaults") a value that merely repeats the stock constant was baked in by
+       an older build, never chosen, so it is dropped back to inherit. Once the
+       config carries "defaults" every stored color is a deliberate override and
+       is kept verbatim -- including one set back to a stock color on purpose. */
+    function jdAdoptColors(t,src,keys){
+      keys.forEach(k=>{
+        const v=src[k];
+        if(typeof v!=="string" || !v) return;
+        if(jdHealLegacy && v.toLowerCase()===JD_STOCK[k].toLowerCase()) return;
+        t[k]=v;
+      });
+      return t;
+    }
     function jdSerializeTiles(){
+      const defaults={};
+      JD_DEF_KEYS.forEach(([k])=>{ defaults[k]=jdDefColor(k); });
       const rows=jdRows.map(row=>row.map(t=>{
         if(t.type==="number"){
-          return {path:t.path||"",label:t.label||"",type:"number",unit:t.unit||"",
-            decimals:jdClampInt(t.decimals,0,4),low:jdNum(t.low),high:jdNum(t.high),
-            cLow:t.cLow||JD_C_NORMAL,cNorm:t.cNorm||JD_C_NORMAL,cHigh:t.cHigh||JD_C_WARN};
+          return jdPutColors({path:t.path||"",label:t.label||"",type:"number",unit:t.unit||"",
+            decimals:jdClampInt(t.decimals,0,4),low:jdNum(t.low),high:jdNum(t.high)},t,["cLow","cNorm","cHigh"]);
         } else if(t.type==="text"){
           return {path:t.path||"",label:t.label||"",type:"text",
             maps:(t.maps||[]).slice(0,4).map(m=>({val:m.val||"",color:m.color||JD_C_NORMAL}))};
         }
-        return {path:t.path||"",label:t.label||"",type:"bool",
-          tText:t.tText||"TRUE",fText:t.fText||"FALSE",tColor:t.tColor||JD_C_OK,fColor:t.fColor||JD_C_CRIT};
+        return jdPutColors({path:t.path||"",label:t.label||"",type:"bool",
+          tText:t.tText||"TRUE",fText:t.fText||"FALSE"},t,["tColor","fColor"]);
       }));
-      return JSON.stringify({rows:rows});
+      return JSON.stringify({defaults:defaults,rows:rows});
     }
     function jdParseTiles(str){
-      jdRows=[];
+      jdRows=[]; jdDefaults={};
       let cfg=null;
       try{ cfg=JSON.parse(str||"{}"); }catch(e){ cfg=null; }
+      const hasDefs=!!(cfg && cfg.defaults && typeof cfg.defaults==="object");
+      jdHealLegacy=!hasDefs;
+      const defs=hasDefs?cfg.defaults:{};
+      JD_DEF_KEYS.forEach(([k])=>{ if(typeof defs[k]==="string" && defs[k]) jdDefaults[k]=defs[k]; });
       const rows=(cfg && Array.isArray(cfg.rows))?cfg.rows:[];
       rows.slice(0,JD_MAX_ROWS).forEach(row=>{
         if(!Array.isArray(row)) return;
@@ -663,14 +790,94 @@
         row.slice(0,JD_MAX_PER_ROW).forEach(t=>{
           if(!t||typeof t!=="object") return;
           if(t.type==="text") outRow.push(jdTextTile(t.path||"",t.label||"",(t.maps||[]).slice(0,4).map(m=>({val:m.val||"",color:m.color||JD_C_NORMAL}))));
-          else if(t.type==="bool") outRow.push(jdBoolTile(t.path||"",t.label||"",t.tText||"TRUE",t.fText||"FALSE",t.tColor||JD_C_OK,t.fColor||JD_C_CRIT));
-          else outRow.push(jdNumberTile(t.path||"",t.label||"",t.unit||"",jdClampInt(t.decimals,0,4),jdNum(t.low),jdNum(t.high),t.cLow||JD_C_NORMAL,t.cNorm||JD_C_NORMAL,t.cHigh||JD_C_WARN));
+          else if(t.type==="bool") outRow.push(jdAdoptColors(jdBoolTile(t.path||"",t.label||"",t.tText||"TRUE",t.fText||"FALSE"),t,["tColor","fColor"]));
+          else outRow.push(jdAdoptColors(jdNumberTile(t.path||"",t.label||"",t.unit||"",jdClampInt(t.decimals,0,4),jdNum(t.low),jdNum(t.high)),t,["cLow","cNorm","cHigh"]));
         });
         jdRows.push(outRow);
       });
     }
 
-    /* ---- tab populate / save ---- */
+    /* ---- tab populate / preview / save ----
+       Two ways this page reaches the device:
+         preview:true  -> apply now, store nothing (this tab's own button, the
+                          enable toggle, and the debounced source-field apply)
+         no flag       -> apply and store (the page-wide Save, through the
+                          window.jdCollectAndSave hook below)
+       Dirtiness is derived by comparing the current payload against the one
+       last loaded or stored, so no edit path has to remember to flag it. */
+    let jdLoaded=false;     /* populate has run at least once */
+    let jdStored="";        /* pristine payload: as last loaded / stored */
+    let jdPreviewSent=false;/* device is showing something that is not stored */
+    let jdPrevTimer=null;
+
+    function jdPayload(preview){
+      const body={
+        json_enabled: $('jd_enabled')?!!$('jd_enabled').checked:false,
+        json_url: $('jd_url')?$('jd_url').value.trim():"",
+        json_auth_header: $('jd_auth')?$('jd_auth').value.trim():"",
+        json_update_interval_s: $('jd_interval')?parseInt($('jd_interval').value,10)||30:30,
+        json_tiles_config: jdSerializeTiles()
+      };
+      if(preview) body.preview=true;
+      return body;
+    }
+    /* An immediate preview supersedes any pending debounced one. previewSent is
+       only set once the device has actually accepted the preview, so a failed
+       POST does not arm the unload restore. */
+    function jdPreviewNow(okMsg){
+      clearTimeout(jdPrevTimer); jdPrevTimer=null;
+      return postJson('/api/json-config',jdPayload(true))
+        .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
+        .then(()=>{ jdPreviewSent=true; if(okMsg) showToast(okMsg,'success'); })
+        .catch(e=>{ showToast('Preview failed: '+e.message,'error'); });
+    }
+    /* A preview lives in the device's RAM until something replaces it: there is
+       no timeout, and the main Discard does not restore tiles. So if the user
+       walks away from unsaved previews, push the pristine config back as one
+       more preview. On unload that has to be sendBeacon (a normal fetch is
+       killed with the page); the Blob type keeps the JSON content-type. */
+    function jdRevertPreview(unloading){
+      /* kill a pending debounce first: a timer armed by the keystroke that has
+         not fired yet would otherwise outlive the discard */
+      clearTimeout(jdPrevTimer); jdPrevTimer=null;
+      if(!jdPreviewSent || !jdStored) return null;
+      jdPreviewSent=false;
+      const body=JSON.parse(jdStored); body.preview=true;
+      const json=JSON.stringify(body);
+      if(unloading){
+        if(navigator.sendBeacon) navigator.sendBeacon('/api/json-config',new Blob([json],{type:'application/json'}));
+        return null;
+      }
+      return postJson('/api/json-config',body).catch(()=>{});
+    }
+    window.addEventListener('beforeunload',()=>{ jdRevertPreview(true); });
+    function jdSchedulePreview(){
+      if(!jdLoaded) return;
+      clearTimeout(jdPrevTimer);
+      jdPrevTimer=setTimeout(()=>{ jdPreviewNow(null); },600);
+    }
+    function jdPreviewLayout(){
+      const btn=$('jd_previewBtn'); if(!btn) return;
+      btn.disabled=true; btn.textContent="Sending...";
+      jdPreviewNow('Preview sent to the device - not saved yet')
+        .finally(()=>{ btn.disabled=false; btn.textContent="Preview Layout on Device"; });
+    }
+    /* Page-wide Save hook: a promise that stores this page's whole config
+       (source fields + tiles + default colors), or null when the tab was never
+       opened or nothing changed since it was loaded. */
+    function jdCollectAndSave(){
+      /* drop any pending debounced preview: firing it after this save would
+         re-apply unsaved values and race the page-wide config POST */
+      clearTimeout(jdPrevTimer); jdPrevTimer=null;
+      if(!jdLoaded || !$('jd_rowsHost')) return null;
+      const body=jdPayload(false);
+      const json=JSON.stringify(body);
+      if(json===jdStored) return null;
+      return postJson('/api/json-config',body).then(r=>{
+        if(!r.ok) throw new Error('JSON Display: HTTP '+r.status);
+        jdStored=json; jdPreviewSent=false;
+      });
+    }
 
     function populateTab_json(data){
       /* Ignore the main-config blob; load JSON Display from its own endpoint. */
@@ -683,32 +890,22 @@
           if($('jd_interval')) $('jd_interval').value=String(d.json_update_interval_s||30);
           jdParseTiles(d.json_tiles_config||"");
           jdSyncAll();
+          jdLoaded=true; jdStored=JSON.stringify(jdPayload(false));
         })
         .catch(e=>{ console.error('Load JSON Display config failed',e); jdParseTiles(""); jdSyncAll(); });
-    }
-
-    function jdSaveConfig(){
-      const btn=$('jd_saveBtn'); if(!btn) return;
-      const body={
-        json_enabled: $('jd_enabled')?!!$('jd_enabled').checked:false,
-        json_url: $('jd_url')?$('jd_url').value.trim():"",
-        json_auth_header: $('jd_auth')?$('jd_auth').value.trim():"",
-        json_update_interval_s: $('jd_interval')?parseInt($('jd_interval').value,10)||30:30,
-        json_tiles_config: jdSerializeTiles()
-      };
-      btn.disabled=true; btn.textContent="Saving...";
-      postJson('/api/json-config',body).then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
-        .then(()=>{ showToast('JSON Display saved','success'); })
-        .catch(e=>{ showToast('Save failed: '+e.message,'error'); })
-        .finally(()=>{ btn.disabled=false; btn.textContent="Save JSON Display"; });
     }
 
   /* Published for the shell (POPULATE_TAB_FNS looks populateTab_json up on
      window at call time) and for the inline handlers in the markup above. */
   window.populateTab_json=populateTab_json;
   window.jdOnSourceChange=jdOnSourceChange;
+  window.jdOnSourceEdit=jdOnSourceEdit;
+  window.jdOnSourceCommit=jdOnSourceCommit;
+  window.jdOnEnabledToggle=jdOnEnabledToggle;
   window.jdFetchJson=jdFetchJson;
   window.jdAddRow=jdAddRow;
-  window.jdSaveConfig=jdSaveConfig;
+  window.jdPreviewLayout=jdPreviewLayout;
+  window.jdCollectAndSave=jdCollectAndSave;
+  window.jdRevertPreview=jdRevertPreview;
 })();
 </script>

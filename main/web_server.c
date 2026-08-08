@@ -295,7 +295,7 @@ void start_web_server(void)
      * The proper long-term fix is to offload these outbound fetches off the
      * httpd worker onto a dedicated task; until then this stack must stay large. */
     config.stack_size = 40960;
-    config.max_uri_handlers = 76;
+    config.max_uri_handlers = 80;
     config.max_open_sockets = 16;
     config.lru_purge_enable = true;
     config.keep_alive_enable = true;
@@ -336,6 +336,7 @@ void start_web_server(void)
         { { "/api/perf/reset",       HTTP_POST, perf_reset_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/config/apply",     HTTP_POST, config_apply_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/config/revert",    HTTP_POST, config_revert_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/config/pull",      HTTP_POST, config_pull_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/check-update",     HTTP_POST, check_update_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/check-update-json", HTTP_GET, check_update_json_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/ota-github",       HTTP_POST, ota_github_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
@@ -347,6 +348,7 @@ void start_web_server(void)
         { { "/api/ha-config",        HTTP_GET,  ha_config_get_handler,  NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/ha-config",        HTTP_POST, ha_config_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/ha-probe",         HTTP_GET,  ha_probe_get_handler,   NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/ha-test",          HTTP_GET,  ha_test_get_handler,    NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/spotify/config",         HTTP_GET,  spotify_config_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/spotify/config",         HTTP_POST, spotify_config_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/spotify/callback",       HTTP_GET,  spotify_callback_get_handler, NULL }, ROUTE_PUBLIC },
@@ -392,10 +394,12 @@ void start_web_server(void)
         { { "/api/image-display/refresh", HTTP_POST, image_display_refresh_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
     };
 
-    /* Keep config.max_uri_handlers (set to 76 above) in sync with the route
+    /* Keep config.max_uri_handlers (set to 80 above) in sync with the route
      * table; a route that overflows it would be silently dropped at
-     * registration. Bump both together when adding routes. */
-    _Static_assert(sizeof(routes) / sizeof(routes[0]) <= 76,
+     * registration. Bump both together when adding routes. Raised 76 -> 80 when
+     * /api/ha-test and /api/config/pull filled the last two slots; the extra
+     * headroom is a few pointers per slot in the httpd handler array. */
+    _Static_assert(sizeof(routes) / sizeof(routes[0]) <= 80,
                    "max_uri_handlers too small for route table");
 
     for (int i = 0; i < (int)(sizeof(routes)/sizeof(routes[0])); i++) {

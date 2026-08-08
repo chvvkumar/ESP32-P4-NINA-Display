@@ -65,3 +65,16 @@ void ha_client_invalidate_config_cache(void);
  */
 cJSON *ha_client_fetch_entity(const char *base_url, const char *token,
                               const char *entity_id);
+
+/**
+ * Credentials check -- used by the /api/ha-test handler (one-shot, safe from the
+ * httpd worker task). Fetches GET {base_url}/api/config with Bearer auth.
+ *
+ * Returns the upstream HTTP status code, or 0 when no response ever arrived
+ * (DNS/connect/timeout) -- ha_client_fetch_entity collapses all of those into
+ * NULL, which is why this variant exists. On HTTP 200 with a parseable body,
+ * *out_json receives the parsed JSON (caller must cJSON_Delete); in every other
+ * case *out_json is set to NULL. @p out_json may be NULL (body discarded).
+ */
+int ha_client_fetch_config(const char *base_url, const char *token,
+                           cJSON **out_json);

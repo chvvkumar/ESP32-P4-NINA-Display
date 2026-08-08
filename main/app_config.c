@@ -99,7 +99,10 @@ const char *app_config_get_ha_tiles(void) {
 
 /* Shared setter: validate length, update cache + NVS key under the config mutex.
  * Read is lock-free by contract; the write is serialized against app_config_save
- * (same mutex) so shared state is never torn between a save and a tiles-set. */
+ * (same mutex) so shared state is never torn between a save and a tiles-set.
+ * A NULL @p key updates the in-RAM cache ONLY (no NVS write) -- the preview path
+ * of the page-config POST handlers, mirroring app_config_apply() vs
+ * app_config_save() for the struct blob. */
 static esp_err_t tiles_set(const char *key, char **cache, const char *s) {
     if (!s) {
         s = "";
@@ -114,14 +117,17 @@ static esp_err_t tiles_set(const char *key, char **cache, const char *s) {
     }
     strlcpy(*cache, s, TILES_CACHE_BYTES);   /* clamps to 6143 + NUL, always terminated */
 
-    nvs_handle_t h;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
-    if (err == ESP_OK) {
-        err = nvs_set_str(h, key, *cache);
+    esp_err_t err = ESP_OK;
+    if (key != NULL) {
+        nvs_handle_t h;
+        err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
         if (err == ESP_OK) {
-            nvs_commit(h);
+            err = nvs_set_str(h, key, *cache);
+            if (err == ESP_OK) {
+                nvs_commit(h);
+            }
+            nvs_close(h);
         }
-        nvs_close(h);
     }
     xSemaphoreGive(s_config_mutex);
     return err;   /* cache updated regardless; a failed NVS write is logged by caller */
@@ -133,6 +139,14 @@ esp_err_t app_config_set_json_tiles(const char *s) {
 
 esp_err_t app_config_set_ha_tiles(const char *s) {
     return tiles_set("ha_tiles", &s_ha_tiles_cache, s);
+}
+
+esp_err_t app_config_set_json_tiles_ram(const char *s) {
+    return tiles_set(NULL, &s_json_tiles_cache, s);
+}
+
+esp_err_t app_config_set_ha_tiles_ram(const char *s) {
+    return tiles_set(NULL, &s_ha_tiles_cache, s);
 }
 
 // Default RMS thresholds: good <= 0.5", ok <= 1.0", bad > 1.0" - DIMMED for Night Vision
@@ -3603,14 +3617,28 @@ void app_config_get_snapshot_into(app_config_t *dst) {
     xSemaphoreGive(s_config_mutex);
 }
 
-void app_config_apply(const app_config_t *config) {
+/* Shared body of app_config_apply / app_config_apply_preview. @p mark_dirty
+ * false leaves s_config_dirty exactly as found -- neither set nor cleared -- so a
+ * preview never fabricates an "unsaved changes" state, and never hides a real one
+ * raised by an earlier live-apply. */
+static void apply_config_locked(const app_config_t *config, bool mark_dirty) {
     xSemaphoreTake(s_config_mutex, portMAX_DELAY);
     invalidate_json_caches();
     memcpy(&s_config, config, sizeof(app_config_t));
     s_config.config_version = APP_CONFIG_VERSION;
     validate_config(&s_config);
-    s_config_dirty = true;
+    if (mark_dirty) {
+        s_config_dirty = true;
+    }
     xSemaphoreGive(s_config_mutex);
+}
+
+void app_config_apply(const app_config_t *config) {
+    apply_config_locked(config, true);
+}
+
+void app_config_apply_preview(const app_config_t *config) {
+    apply_config_locked(config, false);
 }
 
 esp_err_t app_config_revert(void) {
