@@ -4171,6 +4171,19 @@
       });
     }
 
+    /* Open the card holding the restore preview and bring it into view. Uses the
+       same 'collapsed' class and persistence as a manual card click, so the card
+       stays open the way the user would expect afterwards. */
+    function revealRestoreCard(){
+      var panel = $('restorePreview');
+      var card = panel ? panel.closest('.card') : null;
+      if (card && card.classList.contains('collapsed')) {
+        card.classList.remove('collapsed');
+        saveCollapseState();
+      }
+      if (panel && panel.scrollIntoView) panel.scrollIntoView({behavior: 'smooth', block: 'start'});
+    }
+
     function saveCollapseState(){
       var state={};
       document.querySelectorAll('.card').forEach(function(card){
@@ -4555,6 +4568,7 @@
 
     var _backupData = null;  /* holds parsed backup JSON for confirm step */
     var _restoreFromDevice = false;  /* preview source was another device, not a file */
+    var _pullSensitiveRefused = false;  /* asked the source for secrets, it sent none */
 
     function downloadBackup() {
       var btn = $('backupDownloadBtn');
@@ -4616,6 +4630,7 @@
     function startRestorePreview(obj, fromDevice) {
       _backupData = obj;
       _restoreFromDevice = !!fromDevice;
+      if (!fromDevice) _pullSensitiveRefused = false;
       return postJson('/api/config/restore', {backup: _backupData, confirm: false})
         .then(function(r) {
           if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Preview failed'); });
@@ -4675,6 +4690,9 @@
           if (d.config)    delete d.config.hostname;
           if (d.sensitive) delete d.sensitive.hostname;
           delete d.hostname;
+          /* A source with its own password protection off strips secrets by
+             design, so a "sensitive" request can come back without them. */
+          _pullSensitiveRefused = !!body.sensitive && !d.sensitive;
           return startRestorePreview(d, true);
         })
         .catch(function(e) {
@@ -4707,6 +4725,13 @@
       /* Device-pull notice */
       var pullNotice = $('restorePullNotice');
       if (pullNotice) pullNotice.style.display = _restoreFromDevice ? 'block' : 'none';
+
+      /* The preview lives inside the Restore card, which starts collapsed. A
+         pull is triggered from a different card, so without this the preview
+         populates out of sight and the button looks dead. The file path needs
+         no equivalent: its input is inside this card, so it can only be reached
+         while the card is already open. */
+      if (_restoreFromDevice) revealRestoreCard();
 
       /* Version warning banner */
       var banner = $('restoreWarningBanner');
@@ -4791,7 +4816,12 @@
       if (!p.sensitive_included && p.sensitive_excluded && p.sensitive_excluded.length > 0) {
         sensDiv.style.display = 'block';
         sensDiv.innerHTML = '<strong>Sensitive fields not in backup:</strong> ' +
-          p.sensitive_excluded.join(', ') + '<br>These will remain unchanged.';
+          p.sensitive_excluded.join(', ') + '<br>These will remain unchanged.' +
+          /* asked for secrets but the source sent none: it refuses to share them
+             while its own password protection is off */
+          (_pullSensitiveRefused
+            ? '<br><br>The other display has password protection turned off, so it did not share its saved passwords and keys. Turn on its admin password if you want those copied too.'
+            : '');
       } else {
         sensDiv.style.display = 'none';
       }
@@ -4874,6 +4904,7 @@
       if (pullNotice) pullNotice.style.display = 'none';
       _backupData = null;
       _restoreFromDevice = false;
+      _pullSensitiveRefused = false;
     }
 
     function confirmRestore() {
