@@ -7,6 +7,7 @@
 #include "esp_netif.h"
 #include "esp_system.h"
 #include "esp_app_desc.h"
+#include "esp_heap_caps.h"   /* PSRAM snapshot for the config apply below */
 #include "esp_timer.h"
 #include "cJSON.h"
 #include "bsp/esp-bsp.h"
@@ -28,8 +29,10 @@ static const char *TAG = "mqtt_ha";
  * mutate live config, or write NVS (all of which can block and stall the MQTT
  * keepalive). The callback only PARSES a command and enqueues the requested
  * change here. mqtt_ha_process_pending(), called from the UI-context
- * data_update_task each cycle, applies the change under the display lock and
- * persists config via the snapshot+save pattern. */
+ * data_update_task each cycle, applies the change under the display lock.
+ * Both brightness commands are deliberately LIVE-ONLY: they go through a PSRAM
+ * config snapshot + app_config_apply_external() (RAM, no NVS, no unsaved-changes
+ * flag), never app_config_save() and never a field-write on the live s_config. */
 typedef enum {
     MQTT_CMD_SCREEN_BRIGHTNESS,  /* value = 0..100 backlight brightness */
     MQTT_CMD_TEXT_BRIGHTNESS,    /* value = 0..100 color (text) brightness */
@@ -386,26 +389,44 @@ void mqtt_ha_process_pending(void)
             break;
         }
         case MQTT_CMD_TEXT_BRIGHTNESS: {
-            /* LIVE-ONLY: never persist. The rendered theme reads color_brightness
-             * from the live app_config (apply_theme_to_page() in nina_dashboard.c),
-             * so the live effect requires the in-memory value to be visible to the
-             * theme code. Replicate the web UI live-preview (color_brightness_post_handler
-             * in web_handlers_display.c): write the single scalar field on the live
-             * config, then re-apply the theme — but skip app_config_save(). A single
-             * aligned int store is the same mechanism the UI uses; no torn-write race. */
-            app_config_t *cfg = app_config_get();
+            /* LIVE-ONLY: never persist. NVS writes run with the CPU cache
+             * disabled, which can starve the esp-hosted SDIO transport, and an HA
+             * automation can publish these very frequently.
+             *
+             * The rendered theme reads color_brightness from the LIVE app_config
+             * (apply_theme_to_page() in nina_dashboard.c), so the in-memory value
+             * must be updated for the change to show. Snapshot + apply, never a
+             * field-write on the live s_config: app_config_apply_external() is
+             * exactly this case -- RAM-only like app_config_apply(), but it leaves
+             * the "unsaved changes" flag alone, because a change commanded over
+             * MQTT is not a pending web edit the user could Save.
+             *
+             * We run on data_update_task (see mqtt_ha.h), not the MQTT event task,
+             * so blocking is fine -- but app_config_t is several KB, so the copy
+             * goes in PSRAM and never on the task stack (same reasoning as
+             * app_config_sync_filters()). */
             int newv = cmd.value;
-            if (newv < 0) {  /* "ON" with no value */
-                newv = (cfg->color_brightness == 0) ? 100 : cfg->color_brightness;
+            app_config_t *snap = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+            if (!snap) {
+                ESP_LOGE(TAG, "Text brightness: config snapshot alloc failed");
+                break;   /* nothing applied; leave state untouched */
             }
-            cfg->color_brightness = newv;  /* live scalar write, NOT saved */
+            app_config_get_snapshot_into(snap);
+            if (newv < 0) {  /* "ON" with no value */
+                newv = (snap->color_brightness == 0) ? 100 : snap->color_brightness;
+            }
+            snap->color_brightness = newv;
+            app_config_apply_external(snap);   /* live only: no NVS, no dirty flag */
+
             /* Re-apply theme so the new color brightness takes effect live. */
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                nina_dashboard_apply_theme(cfg->theme_index);
+                nina_dashboard_apply_theme(snap->theme_index);
                 bsp_display_unlock();
             } else {
                 ESP_LOGW(TAG, "Display lock timeout (MQTT theme apply)");
             }
+            heap_caps_free(snap);
+
             ESP_LOGI(TAG, "Text brightness set to %d%% via MQTT (live, not saved)", newv);
             brightness_applied = true;
             break;

@@ -64,6 +64,13 @@ cJSON *receive_json_body(httpd_req_t *req, int max_size);
 bool check_session(httpd_req_t *req);
 esp_err_t send_auth_required(httpd_req_t *req);
 
+/* True when the request carries a valid browser SESSION COOKIE (config UI), as
+ * opposed to a stateless X-Auth-Password client (HA automation, macro keypad).
+ * Cosmetic use only -- decides whether a live-apply raises the "unsaved changes"
+ * bar. Never a security decision; REQUIRE_AUTH has already run. Returns true
+ * when auth is disabled (the two are indistinguishable then). */
+bool request_is_web_ui(httpd_req_t *req);
+
 /* Session API used by login/logout handlers */
 const char *session_create(void);
 bool session_valid(const char *token);

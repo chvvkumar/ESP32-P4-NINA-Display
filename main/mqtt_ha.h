@@ -34,8 +34,9 @@ bool mqtt_ha_is_connected(void);
  *
  * Must be called from a UI-context task that may take the display lock
  * (e.g. data_update_task). The MQTT event callback only parses and enqueues;
- * the actual apply and config persist happen here so the esp-mqtt event loop
- * is never blocked. Safe to call when MQTT is disabled (no-op).
+ * the actual apply happens here so the esp-mqtt event loop is never blocked.
+ * Brightness commands apply live only -- nothing is written to NVS. Safe to
+ * call when MQTT is disabled (no-op).
  */
 void mqtt_ha_process_pending(void);
 

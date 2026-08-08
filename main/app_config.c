@@ -3641,6 +3641,12 @@ void app_config_apply_preview(const app_config_t *config) {
     apply_config_locked(config, false);
 }
 
+void app_config_apply_external(const app_config_t *config) {
+    /* Same mechanism as app_config_apply_preview(); separate name only so the
+     * externally-commanded call sites do not have to claim to be "previewing". */
+    apply_config_locked(config, false);
+}
+
 esp_err_t app_config_revert(void) {
     nvs_handle_t handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle);

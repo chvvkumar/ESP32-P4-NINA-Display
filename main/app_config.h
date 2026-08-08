@@ -3317,6 +3317,13 @@ void app_config_apply(const app_config_t *config);   // in-memory only, no NVS; 
  * pending edit, so it must not raise the web UI's "unsaved changes" bar -- nor
  * clear it if a real live-apply already raised it. */
 void app_config_apply_preview(const app_config_t *config);
+/* Same mechanism as app_config_apply_preview(), different name for a different
+ * caller: a config change COMMANDED FROM OUTSIDE (an HA automation, a macro
+ * keypad, any stateless API client) is not an unsaved web edit, so it must not
+ * raise the web UI's "unsaved changes" bar. The user never opened an editor;
+ * there is nothing for them to Save, and a bar they cannot explain is worse than
+ * no bar. Persistence semantics are identical to app_config_apply(): RAM only. */
+void app_config_apply_external(const app_config_t *config);
 esp_err_t app_config_revert(void);                    // reload NVS into memory
 bool app_config_is_dirty(void);                       // true if apply called without save
 int app_config_get_instance_count(void);

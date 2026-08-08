@@ -180,6 +180,36 @@ bool check_session(httpd_req_t *req) {
 }
 
 /**
+ * @brief True when this request plausibly came from the config UI in a browser,
+ *        rather than from a stateless API client (HA automation, macro keypad,
+ *        curl).
+ *
+ * Discriminator: the session cookie. It already exists and is already the thing
+ * that separates the two client classes -- a browser logs in once and carries
+ * the cookie; a stateless client has no session and authenticates per request
+ * with X-Auth-Password (see check_session). No new header or flag is introduced
+ * for this; if the cookie stops being the browser's credential, this stops being
+ * correct, and that is the right coupling.
+ *
+ * Used only to decide whether a live-apply counts as an unsaved WEB EDIT (raises
+ * the config UI's "unsaved changes" bar) or as an externally commanded change
+ * (must not). It is deliberately NOT a security decision -- REQUIRE_AUTH has
+ * already run by the time any handler asks -- so a wrong answer costs a
+ * cosmetic bar, never access.
+ *
+ * When auth is disabled there is no cookie and no header to tell the two apart,
+ * so this returns true: that preserves today's behavior exactly for the UI, and
+ * an open device is not the configuration this distinction was built for.
+ */
+bool request_is_web_ui(httpd_req_t *req) {
+    const app_config_t *cfg = app_config_get();
+    if (cfg && !cfg->auth_enabled) return true;   /* indistinguishable; keep old behavior */
+
+    char tok[SESSION_TOKEN_HEX_LEN + 1];
+    return session_extract_cookie(req, tok, sizeof(tok)) && session_valid(tok);
+}
+
+/**
  * @brief Send an auth-required response.
  *
  * For browser page requests (URI does not start with /api/), issue a 302 redirect
