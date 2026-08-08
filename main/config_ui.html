@@ -828,12 +828,16 @@
       border: 1px solid var(--border);
       padding: 14px 22px; border-radius: 16px; font-size: 0.85rem;
       box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+      display: flex; align-items: center; gap: 10px; max-width: min(420px, calc(100vw - 48px));
       visibility: hidden; pointer-events: none;
       transform: translateX(120%); transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), visibility 0s linear 0.35s;
     }
     .toast.show { visibility: visible; pointer-events: auto; transform: translateX(0); transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), visibility 0s linear 0s; }
-    .toast.success { border-left: 3px solid #10b981; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(16, 185, 129, 0.08); }
-    .toast.error { border-left: 3px solid #ef4444; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(239, 68, 68, 0.08); }
+    /* Severity reads from the icon only; the box itself stays plain. */
+    .toast-icon { display: inline-flex; flex-shrink: 0; color: var(--text-muted); }
+    .toast-icon svg { width: 18px; height: 18px; display: block; }
+    .toast.success .toast-icon { color: #10b981; }
+    .toast.error .toast-icon { color: #ef4444; }
 
     /* === RESPONSIVE === */
     @media (max-width: 768px) {
@@ -2824,7 +2828,7 @@
         console.error('Failed to load config',e);
         if(!window._cfgLoadToastShown){
           window._cfgLoadToastShown=true;
-          showToast('Could not load settings from device -- retrying...','error');
+          showToast('Could not load settings from device. Retrying.','error');
         }
         cfgOverlay('retry');
         setTimeout(loadConfig,3000);
@@ -2837,7 +2841,7 @@
     function configLoadedGuard(){
       if(_cfgCache && !_populateFailed) return true;
       if(_populateFailed) showToast('Some settings failed to load - refresh the page before saving','error');
-      else showToast('Settings not loaded from device yet -- still retrying, please wait','error');
+      else showToast('Settings not loaded from device yet. Still retrying, please wait.','error');
       return false;
     }
 
@@ -2917,10 +2921,19 @@
     }
 
     /* === Toast === */
+    /* Severity is carried by a small inline SVG (check / cross / dot) rather
+       than a colored edge on the box. */
+    var TOAST_ICONS={
+      success:'<svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.8 7.8a1 1 0 01-1.4 0L3.3 10.3a1 1 0 111.4-1.4l3.5 3.5 7.1-7.1a1 1 0 011.4 0z" clip-rule="evenodd"/></svg>',
+      error:'<svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.3 5.3a1 1 0 011.4 0L10 8.6l3.3-3.3a1 1 0 111.4 1.4L11.4 10l3.3 3.3a1 1 0 01-1.4 1.4L10 11.4l-3.3 3.3a1 1 0 01-1.4-1.4L8.6 10 5.3 6.7a1 1 0 010-1.4z" clip-rule="evenodd"/></svg>',
+      info:'<svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M10 2.5a7.5 7.5 0 100 15 7.5 7.5 0 000-15zM9 9a1 1 0 012 0v5a1 1 0 01-2 0V9zm1-3.6a1.1 1.1 0 110 2.2 1.1 1.1 0 010-2.2z" clip-rule="evenodd"/></svg>'
+    };
     function showToast(msg,type){
       var t=$('toast');
-      t.textContent=msg;
       t.className='toast '+(type||'')+' show';
+      /* icon is trusted markup, the message never is: it is set as text */
+      t.innerHTML='<span class="toast-icon">'+(TOAST_ICONS[type]||TOAST_ICONS.info)+'</span><span class="toast-msg"></span>';
+      t.querySelector('.toast-msg').textContent=msg;
       clearTimeout(t._timer);
       t._timer=setTimeout(()=>{t.classList.remove('show');},3000);
     }
@@ -3498,8 +3511,17 @@
       },400);
     }
 
-    document.querySelector('.content').addEventListener('input',()=>{checkDirty();liveApply();});
-    document.querySelector('.content').addEventListener('change',()=>{checkDirty();liveApply();});
+    /* Some controls are action parameters, not device settings: a transfer
+       hostname, a password used once, an export toggle. They are not part of
+       getConfigData(), so touching them must neither raise the save bar nor
+       fire a live apply. Marked by a data-no-dirty container so every control
+       inside one is excluded, including any added later. */
+    function isNonSettingTarget(e){
+      var t=e && e.target;
+      return !!(t && t.closest && t.closest('[data-no-dirty]'));
+    }
+    document.querySelector('.content').addEventListener('input',(e)=>{if(isNonSettingTarget(e))return;checkDirty();liveApply();});
+    document.querySelector('.content').addEventListener('change',(e)=>{if(isNonSettingTarget(e))return;checkDirty();liveApply();});
 
     /* === Spotify Configuration === */
 
@@ -3586,7 +3608,7 @@
         var error=u.searchParams.get('error');
         if(error){showToast('Spotify login denied: '+error,'error');return;}
         var savedState=sessionStorage.getItem('spotify_auth_state');
-        if(cbState!==savedState){showToast('Auth state mismatch — please retry login','error');return;}
+        if(cbState!==savedState){showToast('Auth state mismatch. Please retry login.','error');return;}
         if(!code){showToast('No auth code found in URL','error');return;}
         var cv=sessionStorage.getItem('spotify_code_verifier');
         var ru=sessionStorage.getItem('spotify_redirect_uri');
@@ -3613,7 +3635,7 @@
         sessionStorage.removeItem('spotify_code_verifier');
         sessionStorage.removeItem('spotify_auth_state');
         sessionStorage.removeItem('spotify_redirect_uri');
-      }catch(e){showToast('Invalid URL — paste the full address bar URL','error');}
+      }catch(e){showToast('Invalid URL. Paste the full address bar URL.','error');}
     }
 
     function spotifyLogout(){
