@@ -39,6 +39,12 @@
  *     instance demotes immediately on that miss. */
 #define NINA_CONN_GRACE_MULT 3
 
+/* Minimum consecutive failed polls required before a CONNECTED instance is
+ * demoted.  Checked in addition to the elapsed grace window above, so a poll
+ * tier slower than that window (idle tier, 20-120 s) cannot take a healthy
+ * instance offline on a single missed poll. */
+#define NINA_CONN_MIN_FAILURES 3
+
 /* ── Connection state machine ──────────────────────────────────────── */
 
 typedef enum {

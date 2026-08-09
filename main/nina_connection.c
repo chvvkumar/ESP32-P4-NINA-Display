@@ -112,14 +112,17 @@ nina_conn_state_t nina_connection_report_poll(int instance, bool success) {
             c->state = NINA_CONN_DISCONNECTED;
             break;
         case NINA_CONN_CONNECTED: {
-            /* Time-based timeout with patience: only transition to
-             * DISCONNECTED once GRACE_MULT x the configured timeout has
-             * elapsed since the last successful poll. One hung HTTP connect
-             * (~9.5 s) plus the poll interval must not take a rig offline. */
+            /* Demote only when both patience conditions hold: GRACE_MULT x the
+             * configured timeout has elapsed since the last successful poll AND
+             * at least NINA_CONN_MIN_FAILURES consecutive polls have failed.
+             * The elapsed window keeps one hung HTTP connect (~9.5 s) from
+             * taking a rig offline; the failure count keeps a poll tier slower
+             * than that window (idle tier) from demoting on a single miss. */
             int64_t timeout_ms = (int64_t)app_config_get()->connection_timeout_s * 1000;
             int64_t grace_ms = timeout_ms * NINA_CONN_GRACE_MULT;
             int64_t quiet_ms = (c->last_connected_ms > 0) ? (ts - c->last_connected_ms) : 0;
-            if (c->last_connected_ms > 0 && quiet_ms >= grace_ms) {
+            if (c->last_connected_ms > 0 && quiet_ms >= grace_ms &&
+                c->consecutive_failures >= NINA_CONN_MIN_FAILURES) {
                 c->state = NINA_CONN_DISCONNECTED;
                 c->static_data_ready = false;
             } else if (c->consecutive_failures == 1) {
@@ -168,11 +171,11 @@ nina_conn_state_t nina_connection_report_poll(int instance, bool success) {
                                       instance + 1, host);
             }
             c->outage_warned = false;
-            /* Also triage here, not only on episode_start: when the poll tier is
-             * slower than the grace window (idle tier, 30 s) the very first miss
-             * demotes outright and would otherwise leave no diagnostic line.
-             * net_diag's own 10 s guard suppresses the duplicate in the common
-             * case where the episode already logged one. */
+            /* Also triage here, not only on episode_start: that fires on the
+             * first failure, while demotion can now land several failures (and
+             * minutes) later, so the log line at the moment the rig actually
+             * goes offline is the useful one. net_diag's own 10 s guard
+             * suppresses the duplicate when the episode already logged one. */
             net_diag_log_outage(host);
         }
     }
