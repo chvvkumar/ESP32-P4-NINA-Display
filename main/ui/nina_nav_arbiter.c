@@ -484,8 +484,17 @@ void nav_arbiter_resolve(int64_t now_ms) {
      * Mark the page committed ONLY on a successful lock+switch; a lock timeout
      * leaves current_committed unchanged so the next resolve retries (otherwise
      * desired==current_committed would suppress the retry forever). */
+    /* Compare against the LIVE override, not the arbiter's cached copy: the
+     * override is a shared atomic that other writers touch (page_ref_navigate(),
+     * a swipe onto the image page) and that the commit below applies BEFORE
+     * taking the display lock — so a lock timeout applies the source while the
+     * page switch is abandoned. Gating on the cached copy made the arbiter
+     * believe the right source was already applied and it never healed the
+     * drift (Home Page = Moon, panel stuck on the persisted default source).
+     * Raw override, not the effective source: pending -1 ("no override, use the
+     * persisted default") must not read as a change every cycle. */
     bool img_src_changed = (desired == PAGE_IDX_IMAGE_DISPLAY)
-        && (s_arb.pending_img_source != s_arb.current_committed_img_source);
+        && (s_arb.pending_img_source != image_source_get_override());
 
     if (desired != s_arb.current_committed || img_src_changed) {
         int effect = (src == NAV_SRC_SLIDESHOW) ? c->auto_rotate_effect : 0;
@@ -493,6 +502,12 @@ void nav_arbiter_resolve(int64_t now_ms) {
          * the Image Display page fetches/renders the right source. pending is -1
          * for non-image stops, which clears the override (persisted default). */
         image_source_set_override(s_arb.pending_img_source);
+        /* Track the source with the write, not with the page switch below: the
+         * write already happened, so recording it only on lock success would
+         * leave the cache disagreeing with the live override (the drift this
+         * block used to gate on). current_committed still moves only on a
+         * successful switch, so a lock timeout still retries the page. */
+        s_arb.current_committed_img_source = s_arb.pending_img_source;
         if (desired == PAGE_IDX_IMAGE_DISPLAY && goes_task_handle) {
             xTaskNotifyGive(goes_task_handle);   /* wake fetch for new source */
         }
@@ -529,7 +544,6 @@ void nav_arbiter_resolve(int64_t now_ms) {
             }
             bsp_display_unlock();
             s_arb.current_committed = desired;
-            s_arb.current_committed_img_source = s_arb.pending_img_source;
             ESP_LOGI(TAG, "commit page=%d src=%d img_src=%d",
                      desired, (int)src, (int)s_arb.pending_img_source);
 

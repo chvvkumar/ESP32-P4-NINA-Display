@@ -226,6 +226,11 @@ void image_source_set_override(int8_t src)
     atomic_store(&s_image_source_override, src);
 }
 
+int8_t image_source_get_override(void)
+{
+    return atomic_load(&s_image_source_override);
+}
+
 int8_t image_source_get_effective(void)
 {
     int8_t ov = atomic_load(&s_image_source_override);

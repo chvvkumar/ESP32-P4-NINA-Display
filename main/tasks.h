@@ -97,6 +97,13 @@ void image_source_set_override(int8_t src);
  *  config value (app_config_get()->image_display_source). */
 int8_t image_source_get_effective(void);
 
+/** Raw runtime override as last written (-1 = cleared / use persisted default).
+ *  Unlike image_source_get_effective(), this does NOT fold in the persisted
+ *  config value, so a caller can tell "no override" apart from "override happens
+ *  to equal the default". The navigation arbiter compares its desired source
+ *  against this live value to detect (and heal) drift caused by another writer. */
+int8_t image_source_get_override(void);
+
 /** Request a background prefetch of image source @p src (Phase 4 consumes it).
  *  Stores the requested source and wakes goes_poll_task. */
 void image_source_trigger_prefetch(int8_t src);
