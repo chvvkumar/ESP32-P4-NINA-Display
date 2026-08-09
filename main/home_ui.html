@@ -13,23 +13,24 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
 .ic{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;width:16px;height:16px;flex-shrink:0}
 .ic3{stroke-width:3}
 /* top nav */
-.top-nav{position:sticky;top:0;z-index:100;background:rgba(10,10,11,.97);border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 16px;padding:10px 24px;min-height:60px}
-.brand{display:flex;align-items:center;gap:12px;min-width:0}
-.brand-logo{width:36px;height:36px;border-radius:10px;flex-shrink:0;background:linear-gradient(135deg,rgba(var(--a),.28),rgba(var(--a),.08));border:1px solid rgba(var(--a),.35);display:flex;align-items:center;justify-content:center;color:var(--accent)}
-.brand-logo .ic{width:20px;height:20px}
+.top-nav{position:sticky;top:0;z-index:100;background:rgba(10,10,11,.7);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 16px;padding:8px 24px;min-height:60px}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.brand .logo{width:36px;height:36px;flex-shrink:0}
 .brand-name{font-size:.95rem;font-weight:700;letter-spacing:-.02em;color:#f4f4f5}
 .brand-meta{font-size:.7rem;color:var(--hint);font-variant-numeric:tabular-nums;white-space:nowrap;min-height:1em}
 .nav-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .nav-group{display:inline-flex;align-items:center;gap:10px;font-size:.75rem;color:var(--muted);padding:6px 12px;border:1px solid rgba(255,255,255,.06);border-radius:10px;background:rgba(255,255,255,.02);white-space:nowrap;font-variant-numeric:tabular-nums}
 .nav-group .fw-ver{color:#f4f4f5;font-weight:600;min-width:5ch;text-align:center}
-.update-badge{color:var(--accent);font-size:.64rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border:1px solid rgba(var(--a),.4);border-radius:8px;background:rgba(var(--a),.1);text-decoration:none;transition:border-color .2s}
+.update-badge{color:var(--accent);font-size:.64rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border:1px solid rgba(var(--a),.4);border-radius:10px;background:rgba(var(--a),.1);text-decoration:none;transition:border-color .2s}
 .update-badge:hover{border-color:rgba(var(--a),.7)}
 .update-badge.hide{display:none}
+.github-link{color:var(--hint);text-decoration:none;font-size:.75rem;display:flex;align-items:center;gap:6px;padding:7px 12px;border:1px solid rgba(255,255,255,.06);border-radius:10px;transition:all .2s ease;background:rgba(255,255,255,.02);white-space:nowrap}
+.github-link:hover{color:#f4f4f5;border-color:rgba(var(--a),.3);background:rgba(255,255,255,.04)}
 .btn{border:none;border-radius:10px;padding:9px 18px;font-weight:600;cursor:pointer;font-size:.82rem;transition:transform .2s;display:inline-flex;align-items:center;justify-content:center;gap:8px;font-family:inherit;text-decoration:none}
 .btn-primary{background:linear-gradient(135deg,var(--accent),rgba(var(--a),.8));color:#0a0a0b;box-shadow:0 4px 16px rgba(var(--a),.2)}
 .btn-primary:hover{transform:translateY(-1px)}
 .btn .ic{width:15px;height:15px}
-.btn:focus-visible,.deck-chip:focus-visible,.rig-row:focus-visible,.int-chip:focus-visible,.update-badge:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn:focus-visible,.deck-chip:focus-visible,.rig-row:focus-visible,.int-chip:focus-visible,.update-badge:focus-visible,.github-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .content{max-width:1180px;margin:0 auto;padding:24px 24px 60px}
 .card{background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:var(--radius);padding:24px 28px;margin-bottom:20px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
 .card-title{font-size:.7rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.08em;margin-bottom:18px;opacity:.9;display:flex;align-items:center;justify-content:space-between;gap:12px}
@@ -215,7 +216,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
 
 <nav class="top-nav">
  <div class="brand">
-  <div class="brand-logo"><svg class="ic"><use href="#i-star"/></svg></div>
+  <img class="logo" src="/favicon.ico" alt="">
   <div>
    <div class="brand-name" id="brandName">NINA Display</div>
    <div class="brand-meta" id="brandIp"></div>
@@ -226,6 +227,10 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
    <span class="fw-ver" id="fwVer">--</span>
    <a class="update-badge hide" id="updateBadge" href="/config#system">Update available</a>
   </span>
+  <a class="github-link" href="https://github.com/chvvkumar/ESP32-P4-NINA-Display" target="_blank" rel="noopener">
+   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+   GitHub
+  </a>
   <a class="btn btn-primary" href="/config"><svg class="ic"><use href="#i-gear"/></svg>Settings</a>
  </div>
 </nav>
