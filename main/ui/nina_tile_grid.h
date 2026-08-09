@@ -17,12 +17,16 @@
  * / ha_client) fills a values[]/resolved[] array in ROW-MAJOR flatten order that
  * matches the SAME tiles-config; this module renders it.
  *
- * Tiles-config JSON schema (shared): { "rows": [ [ tile, ... ], ... ] } where
- * each tile carries the DISPLAY keys this module reads:
+ * Tiles-config JSON schema (shared): { "defaults": {...}, "rows": [ [ tile, ...
+ * ], ... ] } where each tile carries the DISPLAY keys this module reads:
  *   label, type ("number"|"text"|"bool"),
  *   number: unit, decimals(0-4), low, high, cLow, cNorm, cHigh
  *   text:   maps: [ {val,color}, ... ]  (<=4)
  *   bool:   tText, fText, tColor, fColor
+ * The optional top-level "defaults" object { cLow, cNorm, cHigh, tColor, fColor
+ * } (all "#RRGGBB", all optional) supplies page-level fallbacks: a tile's own
+ * key wins, then the page default, then the stock constant. Text-tile "maps"
+ * colors are not covered by defaults.
  * Any source field ("path" for JSON, "entity_id"/"attr" for HA) is IGNORED here
  * and parsed only by the page's client.
  *

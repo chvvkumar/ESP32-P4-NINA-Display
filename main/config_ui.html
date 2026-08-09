@@ -437,14 +437,14 @@
       -ms-overflow-style: none; scrollbar-width: none;
     }
     .bottom-nav .nav-items::-webkit-scrollbar { display: none; }
-    .bottom-nav .nav-btn {
+    .bottom-nav .nav-btn, .bottom-nav .nav-home {
       background: none; border: none; color: var(--text-hint); cursor: pointer;
       display: flex; flex-direction: column; align-items: center; gap: 3px;
       padding: 8px 12px; border-radius: 10px; font-size: 0.78rem;
       font-weight: 500; transition: all 0.25s ease; position: relative; font-family: inherit;
-      flex-shrink: 0;
+      flex-shrink: 0; text-decoration: none;
     }
-    .bottom-nav .nav-btn svg { width: 22px; height: 22px; }
+    .bottom-nav .nav-btn svg, .bottom-nav .nav-home svg { width: 22px; height: 22px; }
     .bottom-nav .nav-btn.active { color: var(--accent); }
     .bottom-nav .nav-btn.active::after {
       content: ''; position: absolute; bottom: 2px; left: 50%;
@@ -828,12 +828,18 @@
       border: 1px solid var(--border);
       padding: 14px 22px; border-radius: 16px; font-size: 0.85rem;
       box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+      display: flex; align-items: center; gap: 10px; max-width: min(420px, calc(100vw - 48px));
       visibility: hidden; pointer-events: none;
       transform: translateX(120%); transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), visibility 0s linear 0.35s;
     }
     .toast.show { visibility: visible; pointer-events: auto; transform: translateX(0); transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), visibility 0s linear 0s; }
-    .toast.success { border-left: 3px solid #10b981; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(16, 185, 129, 0.08); }
-    .toast.error { border-left: 3px solid #ef4444; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(239, 68, 68, 0.08); }
+    .restore-cb { width: 15px; height: 15px; margin: 0; flex-shrink: 0; cursor: pointer; accent-color: var(--accent); }
+
+    /* Severity reads from the icon only; the box itself stays plain. */
+    .toast-icon { display: inline-flex; flex-shrink: 0; color: var(--text-muted); }
+    .toast-icon svg { width: 18px; height: 18px; display: block; }
+    .toast.success .toast-icon { color: #10b981; }
+    .toast.error .toast-icon { color: #ef4444; }
 
     /* === RESPONSIVE === */
     @media (max-width: 768px) {
@@ -949,6 +955,10 @@
   <nav class="top-nav">
     <div class="brand"><img class="logo" src="/favicon.ico" alt=""> <span id="brandName">NINA Display</span></div>
     <div class="nav-tabs-wrap">
+      <a class="github-link" href="/">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l9-9 9 9"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg>
+        Home
+      </a>
       <div class="nav-group" data-group="pages">
         <button class="group-btn" data-group="pages">Pages</button>
         <div class="group-menu">
@@ -990,6 +1000,10 @@
   <!-- ======== BOTTOM NAVIGATION (MOBILE) ======== -->
   <nav class="bottom-nav">
     <div class="nav-items" id="bottomTabs">
+      <a class="nav-home" href="/">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l9-9 9 9"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg>
+        Home
+      </a>
       <button class="nav-btn" data-tab="nodes">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
         N.I.N.A.
@@ -1004,7 +1018,7 @@
       </button>
       <button class="nav-btn" data-tab="ha">
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l9-9 9 9"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg>
-        Home
+        Home Asst
       </button>
       <button class="nav-btn" data-tab="clock">
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -1775,10 +1789,16 @@
     document.addEventListener('click',e=>{ if(!e.target.closest('.nav-group')) closeGroups(); });
 
     try{
+      var hashTab=location.hash.replace('#','');
       var saved=localStorage.getItem('nina_tab');
-      if(saved&&$('tab-'+saved)) switchTab(saved);
+      if(hashTab&&$('tab-'+hashTab)) switchTab(hashTab);
+      else if(saved&&$('tab-'+saved)) switchTab(saved);
       else switchTab('nodes');
     }catch(e){ switchTab('nodes'); }
+    window.addEventListener('hashchange',()=>{
+      var t=location.hash.replace('#','');
+      if(t&&$('tab-'+t)) switchTab(t);
+    });
 
     /* === Live API Controls === */
     function setTheme(v){postJson('/api/theme',{theme_index:parseInt(v)})}
@@ -2243,9 +2263,38 @@
        fragments, but these two stay here: COLLECT_TAB_FNS is built at script
        parse time, and both are no-ops anyway. Each tab uses its own endpoint
        (/api/json-config, /api/ha-config), so the main /api/config Save never
-       carries their ~6 KB tiles blobs; each tab has its own Save button. */
+       carries their ~6 KB tiles blobs; savePageFragments() below posts them
+       separately instead. */
     function collectTab_json(data){ /* no-op by design */ }
     function collectTab_ha(data){ /* no-op by design */ }
+
+    /* Those two tabs apply their edits as an unsaved preview while you work;
+       Save is what stores them. Each fragment publishes a hook that returns a
+       promise to store its whole page config, or null when the tab was never
+       opened or nothing changed. A rejection here fails the Save so the error
+       is surfaced rather than silently dropped. */
+    function savePageFragments(){
+      var jobs=[];
+      [window.jdCollectAndSave,window.haCollectAndSave].forEach(function(hook){
+        if(typeof hook!=='function') return;
+        var p=hook();
+        if(p) jobs.push(p);
+      });
+      return Promise.all(jobs);
+    }
+
+    /* Discard counterpart: /api/config/revert restores the config blob but not
+       the JSON/HA tile caches, so a page previewing unsaved tiles would keep
+       showing them. Each fragment puts its own last-stored config back. */
+    function revertPageFragments(){
+      var jobs=[];
+      [window.jdRevertPreview,window.haRevertPreview].forEach(function(hook){
+        if(typeof hook!=='function') return;
+        var p=hook(false);
+        if(p) jobs.push(p);
+      });
+      return Promise.all(jobs);
+    }
 
     const COLLECT_TAB_FNS={
       nodes: collectTab_nodes,
@@ -2795,7 +2844,7 @@
         console.error('Failed to load config',e);
         if(!window._cfgLoadToastShown){
           window._cfgLoadToastShown=true;
-          showToast('Could not load settings from device -- retrying...','error');
+          showToast('Could not load settings from device. Retrying.','error');
         }
         cfgOverlay('retry');
         setTimeout(loadConfig,3000);
@@ -2808,7 +2857,7 @@
     function configLoadedGuard(){
       if(_cfgCache && !_populateFailed) return true;
       if(_populateFailed) showToast('Some settings failed to load - refresh the page before saving','error');
-      else showToast('Settings not loaded from device yet -- still retrying, please wait','error');
+      else showToast('Settings not loaded from device yet. Still retrying, please wait.','error');
       return false;
     }
 
@@ -2888,10 +2937,19 @@
     }
 
     /* === Toast === */
+    /* Severity is carried by a small inline SVG (check / cross / dot) rather
+       than a colored edge on the box. */
+    var TOAST_ICONS={
+      success:'<svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.8 7.8a1 1 0 01-1.4 0L3.3 10.3a1 1 0 111.4-1.4l3.5 3.5 7.1-7.1a1 1 0 011.4 0z" clip-rule="evenodd"/></svg>',
+      error:'<svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.3 5.3a1 1 0 011.4 0L10 8.6l3.3-3.3a1 1 0 111.4 1.4L11.4 10l3.3 3.3a1 1 0 01-1.4 1.4L10 11.4l-3.3 3.3a1 1 0 01-1.4-1.4L8.6 10 5.3 6.7a1 1 0 010-1.4z" clip-rule="evenodd"/></svg>',
+      info:'<svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M10 2.5a7.5 7.5 0 100 15 7.5 7.5 0 000-15zM9 9a1 1 0 012 0v5a1 1 0 01-2 0V9zm1-3.6a1.1 1.1 0 110 2.2 1.1 1.1 0 010-2.2z" clip-rule="evenodd"/></svg>'
+    };
     function showToast(msg,type){
       var t=$('toast');
-      t.textContent=msg;
       t.className='toast '+(type||'')+' show';
+      /* icon is trusted markup, the message never is: it is set as text */
+      t.innerHTML='<span class="toast-icon">'+(TOAST_ICONS[type]||TOAST_ICONS.info)+'</span><span class="toast-msg"></span>';
+      t.querySelector('.toast-msg').textContent=msg;
       clearTimeout(t._timer);
       t._timer=setTimeout(()=>{t.classList.remove('show');},3000);
     }
@@ -2904,7 +2962,7 @@
       postJson('/api/config',getConfigData()).then(r=>{
         if(!r.ok) throw new Error('Save failed');
         return r.text();
-      }).then(()=>{
+      }).then(()=>savePageFragments()).then(()=>{
         invalidateConfigCache();
         showToast('Settings saved','success');
         loadedConfig=JSON.stringify(getConfigData());
@@ -2919,6 +2977,8 @@
     function reloadConfig(){
       fetch('/api/config/revert',{method:'POST'}).then(r=>{
         if(!r.ok) throw new Error('Revert failed');
+        return revertPageFragments();
+      }).then(()=>{
         invalidateConfigCache();
         loadConfig();
         $('saveBar').classList.remove('visible');
@@ -2930,6 +2990,8 @@
       if(!confirm('Apply changes and reboot now?')) return;
       postJson('/api/config',getConfigData()).then(r=>{
         if(!r.ok) throw new Error('Save failed');
+        return savePageFragments();
+      }).then(()=>{
         invalidateConfigCache();
         return fetch('/api/reboot',{method:'POST'});
       }).then(()=>{
@@ -3465,8 +3527,17 @@
       },400);
     }
 
-    document.querySelector('.content').addEventListener('input',()=>{checkDirty();liveApply();});
-    document.querySelector('.content').addEventListener('change',()=>{checkDirty();liveApply();});
+    /* Some controls are action parameters, not device settings: a transfer
+       hostname, a password used once, an export toggle. They are not part of
+       getConfigData(), so touching them must neither raise the save bar nor
+       fire a live apply. Marked by a data-no-dirty container so every control
+       inside one is excluded, including any added later. */
+    function isNonSettingTarget(e){
+      var t=e && e.target;
+      return !!(t && t.closest && t.closest('[data-no-dirty]'));
+    }
+    document.querySelector('.content').addEventListener('input',(e)=>{if(isNonSettingTarget(e))return;checkDirty();liveApply();});
+    document.querySelector('.content').addEventListener('change',(e)=>{if(isNonSettingTarget(e))return;checkDirty();liveApply();});
 
     /* === Spotify Configuration === */
 
@@ -3553,7 +3624,7 @@
         var error=u.searchParams.get('error');
         if(error){showToast('Spotify login denied: '+error,'error');return;}
         var savedState=sessionStorage.getItem('spotify_auth_state');
-        if(cbState!==savedState){showToast('Auth state mismatch — please retry login','error');return;}
+        if(cbState!==savedState){showToast('Auth state mismatch. Please retry login.','error');return;}
         if(!code){showToast('No auth code found in URL','error');return;}
         var cv=sessionStorage.getItem('spotify_code_verifier');
         var ru=sessionStorage.getItem('spotify_redirect_uri');
@@ -3580,7 +3651,7 @@
         sessionStorage.removeItem('spotify_code_verifier');
         sessionStorage.removeItem('spotify_auth_state');
         sessionStorage.removeItem('spotify_redirect_uri');
-      }catch(e){showToast('Invalid URL — paste the full address bar URL','error');}
+      }catch(e){showToast('Invalid URL. Paste the full address bar URL.','error');}
     }
 
     function spotifyLogout(){
@@ -4138,6 +4209,19 @@
       });
     }
 
+    /* Open the card holding the restore preview and bring it into view. Uses the
+       same 'collapsed' class and persistence as a manual card click, so the card
+       stays open the way the user would expect afterwards. */
+    function revealRestoreCard(){
+      var panel = $('restorePreview');
+      var card = panel ? panel.closest('.card') : null;
+      if (card && card.classList.contains('collapsed')) {
+        card.classList.remove('collapsed');
+        saveCollapseState();
+      }
+      if (panel && panel.scrollIntoView) panel.scrollIntoView({behavior: 'smooth', block: 'start'});
+    }
+
     function saveCollapseState(){
       var state={};
       document.querySelectorAll('.card').forEach(function(card){
@@ -4521,6 +4605,12 @@
     /* ---- Backup & Restore ---- */
 
     var _backupData = null;  /* holds parsed backup JSON for confirm step */
+    var _restoreFromDevice = false;  /* preview source was another device, not a file */
+    var _pullSensitiveRefused = false;  /* asked the source for secrets, it sent none */
+    var _restoreRows = [];        /* every selectable row in the preview */
+    var _restoreSkip = {};        /* field keys the user unchecked */
+    var _restoreCats = [];        /* {cat, rows, parentCb} for in-place updates */
+    var _restoreBlocked = false;  /* preview reported errors that block restoring */
 
     function downloadBackup() {
       var btn = $('backupDownloadBtn');
@@ -4564,27 +4654,114 @@
 
       var reader = new FileReader();
       reader.onload = function(e) {
+        var obj;
         try {
-          _backupData = JSON.parse(e.target.result);
+          obj = JSON.parse(e.target.result);
         } catch (err) {
           showToast('Invalid JSON file', 'error');
           return;
         }
-        /* Send preview request */
-        postJson('/api/config/restore', {backup: _backupData, confirm: false})
-          .then(function(r) {
-            if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Preview failed'); });
-            return r.json();
-          })
-          .then(function(preview) { renderRestorePreview(preview); })
-          .catch(function(e) { showToast('Preview failed: ' + e.message, 'error'); });
+        startRestorePreview(obj, false);
       };
       reader.readAsText(input.files[0]);
+    }
+
+    /* Single entry point for the restore preview: a chosen file and a backup
+       pulled from another device both land here, so the preview, the notices,
+       and the Restore/Cancel buttons behave identically for both. */
+    function startRestorePreview(obj, fromDevice) {
+      _backupData = obj;
+      _restoreFromDevice = !!fromDevice;
+      if (!fromDevice) _pullSensitiveRefused = false;
+      return postJson('/api/config/restore', {backup: _backupData, confirm: false})
+        .then(function(r) {
+          if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Preview failed'); });
+          return r.json();
+        })
+        .then(function(preview) { renderRestorePreview(preview); })
+        .catch(function(e) {
+          showToast('Preview failed: ' + e.message, 'error');
+          /* Never leave an earlier preview on screen paired with this backup:
+             the panel would show A's rows and selection while _backupData held
+             B, and Restore would post B stripped by A's choices. */
+          cancelRestore();
+        });
+    }
+
+    /* Copy the configuration from another display on the network. The device
+       proxies the request (it holds the network path and the credentials); the
+       reply is that device's backup JSON verbatim. */
+    function pullFromDevice() {
+      var btn = $('pullFetchBtn');
+      if (!btn) return;
+      var hostEl = $('pullHost');
+      var host = hostEl ? hostEl.value.trim() : '';
+      /* The device supplies the scheme itself and rejects a host carrying one,
+         a path, or credentials, so a pasted URL is reduced to the bare host
+         here rather than bounced back as an error. */
+      host = host.replace(/^[a-z]+:\/\//i, '').replace(/[/?#].*$/, '');
+      /* show the cleaned value rather than sending something the field does not
+         match; a password pasted with a trailing newline is rejected by the
+         device's header guard, so it is trimmed here too */
+      if (hostEl && hostEl.value !== host) hostEl.value = host;
+      if (!host) { showToast('Enter the address of the display to copy from', 'error'); if (hostEl) hostEl.focus(); return; }
+      var pwEl = $('pullPassword');
+      if (pwEl && pwEl.value !== pwEl.value.trim()) pwEl.value = pwEl.value.trim();
+      var body = {
+        host: host,
+        password: pwEl ? pwEl.value : '',
+        sensitive: $('pullSensitive') ? !!$('pullSensitive').checked : true
+      };
+      /* our own device failing to answer is a different problem from the other
+         device failing, so it gets its own message */
+      var PANEL = ' panel';
+      btn.disabled = true; btn.textContent = 'Fetching...';
+      postJson('/api/config/pull', body)
+        .then(function(r) {
+          return r.json().then(function(d) { return {ok: r.ok, d: d}; },
+                               function() { throw new Error(PANEL); });
+        }, function() { throw new Error(PANEL); })
+        .then(function(res) {
+          var d = res.d;
+          if (!d || typeof d !== 'object') throw new Error(PANEL);
+          if (d.error) {
+            if (d.error === 'unreachable')  throw new Error('Cannot reach that device - check the hostname');
+            if (d.error === 'auth')         throw new Error('That device rejected the password');
+            if (d.error === 'bad_response') throw new Error('That device answered but did not return a valid backup');
+            if (d.error === 'bad_host')     throw new Error('That address cannot be used - enter just the device name, like ninadash1.lan');
+            throw new Error('That device could not be copied from');
+          }
+          if (!res.ok) throw new Error('That device could not be copied from');
+          /* Keep-local rule: never carry a hostname across, or two displays end
+             up answering to the same name. meta.hostname stays, it is only the
+             "Source:" label in the preview. */
+          if (d.config)    delete d.config.hostname;
+          if (d.sensitive) delete d.sensitive.hostname;
+          delete d.hostname;
+          /* A source with its own password protection off strips secrets by
+             design, so a "sensitive" request can come back without them. */
+          _pullSensitiveRefused = !!body.sensitive && !d.sensitive;
+          return startRestorePreview(d, true);
+        })
+        .catch(function(e) {
+          showToast(e.message === PANEL
+            ? 'This display did not respond - your session may have expired, sign in again'
+            : e.message, 'error');
+        })
+        .finally(function() {
+          btn.disabled = false; btn.textContent = 'Fetch from device';
+          /* held for exactly one transfer, whether it succeeded, failed, or the
+             preview it opened is never acted on */
+          if (pwEl) pwEl.value = '';
+        });
     }
 
     function renderRestorePreview(p) {
       if (p.error) {
         showToast(p.error, 'error');
+        /* same reasoning as the fetch failure path: drop the stale panel and
+           its selection rather than pairing them with a new backup */
+        cancelRestore();
         return;
       }
 
@@ -4595,6 +4772,17 @@
       $('restoreMac').textContent = p.backup_mac || '--';
       $('restoreFirmware').textContent = p.backup_firmware || '--';
       $('restoreDate').textContent = p.export_date || '--';
+
+      /* Device-pull notice */
+      var pullNotice = $('restorePullNotice');
+      if (pullNotice) pullNotice.style.display = _restoreFromDevice ? 'block' : 'none';
+
+      /* The preview lives inside the Restore card, which starts collapsed. A
+         pull is triggered from a different card, so without this the preview
+         populates out of sight and the button looks dead. The file path needs
+         no equivalent: its input is inside this card, so it can only be reached
+         while the card is already open. */
+      if (_restoreFromDevice) revealRestoreCard();
 
       /* Version warning banner */
       var banner = $('restoreWarningBanner');
@@ -4609,37 +4797,27 @@
         banner.style.color = color.text;
         banner.style.display = 'block';
         banner.innerHTML = '<div style="margin-bottom:4px"><strong>Version: v' + p.backup_version + ' &rarr; v' + p.current_version + '</strong></div>' +
-          p.warnings.map(function(w) { return '<div>' + w + '</div>'; }).join('');
+          p.warnings.map(function(w) { return '<div>' + escHtml(w) + '</div>'; }).join('');
       } else {
         banner.style.display = 'none';
       }
 
-      /* Changes diff grouped by category */
-      var changesDiv = $('restoreChanges');
-      changesDiv.innerHTML = '';
-      if (p.changes && p.total_changes > 0) {
-        var cats = Object.keys(p.changes);
-        cats.forEach(function(cat) {
-          var items = p.changes[cat];
-          if (!items || !items.length) return;
-          var section = document.createElement('div');
-          section.style.cssText = 'background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:14px 16px;margin-bottom:8px';
-          var header = '<div style="font-size:0.85rem;font-weight:600;color:#f4f4f5;margin-bottom:8px;cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display===\'none\'?\'block\':\'none\'">' +
-            cat + ' <span style="color:#71717a;font-weight:400">(' + items.length + ' change' + (items.length > 1 ? 's' : '') + ')</span></div>';
-          var body = '<div>';
-          items.forEach(function(ch) {
-            var fromStr = formatDiffValue(ch.from);
-            var toStr = formatDiffValue(ch.to);
-            body += '<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:0.8rem;border-bottom:1px solid rgba(255,255,255,0.04)">' +
-              '<span style="color:#a1a1aa">' + ch.label + '</span>' +
-              '<span><span style="color:#71717a;text-decoration:line-through">' + fromStr + '</span> &rarr; <span style="color:var(--accent)">' + toStr + '</span></span>' +
-              '</div>';
+      /* Changes diff: flattened into one selectable row list, then grouped for
+         display. Every preview starts with everything selected, which is the
+         behavior this screen has always had. */
+      _restoreRows = [];
+      if (p.changes) {
+        Object.keys(p.changes).forEach(function(cat) {
+          (p.changes[cat] || []).forEach(function(ch) {
+            if (!ch || !ch.field) return;
+            _restoreRows.push({field: ch.field, label: ch.label || ch.field, category: cat, change: ch});
           });
-          body += '</div>';
-          section.innerHTML = header + body;
-          changesDiv.appendChild(section);
         });
       }
+      hiddenRestoreRows().forEach(function(r) { _restoreRows.push(r); });
+      _restoreSkip = {};
+      _restoreBlocked = !!p.restore_blocked;
+      renderRestoreChanges();
 
       /* No changes categories */
       var noChanges = $('restoreNoChanges');
@@ -4674,7 +4852,12 @@
       if (!p.sensitive_included && p.sensitive_excluded && p.sensitive_excluded.length > 0) {
         sensDiv.style.display = 'block';
         sensDiv.innerHTML = '<strong>Sensitive fields not in backup:</strong> ' +
-          p.sensitive_excluded.join(', ') + '<br>These will remain unchanged.';
+          p.sensitive_excluded.join(', ') + '<br>These will remain unchanged.' +
+          /* asked for secrets but the source sent none: it refuses to share them
+             while its own password protection is off */
+          (_pullSensitiveRefused
+            ? '<br><br>The other display has password protection turned off, so it did not share its saved passwords and keys. Turn on its admin password if you want those copied too.'
+            : '');
       } else {
         sensDiv.style.display = 'none';
       }
@@ -4704,20 +4887,216 @@
           html += '<strong style="color:#f59e0b">Adjusted values:</strong><br>' +
             warns.map(escHtml).join('<br>');
         }
+        /* sits directly above the disabled Restore button */
+        if (p.restore_blocked) {
+          html += '<br><br>Leaving items out does not get around these problems. They have to be fixed before any of this backup can be restored.';
+        }
         valDiv.innerHTML = html;
       } else {
         valDiv.style.display = 'none';
       }
 
-      /* Update confirm button — block restore when there are hard errors */
-      var rcBtn = $('restoreConfirmBtn');
-      if (p.restore_blocked) {
-        rcBtn.disabled = true;
-        rcBtn.textContent = 'Resolve errors to restore';
-      } else {
-        rcBtn.disabled = false;
-        rcBtn.textContent = 'Restore (' + p.total_changes + ' change' + (p.total_changes !== 1 ? 's' : '') + ')';
+      /* Confirm button state is owned by updateRestoreButton (it also has to
+         follow the selection), called at the end of renderRestoreChanges. */
+      updateRestoreButton();
+    }
+
+    /* ---- selective restore ---- */
+
+    /* wifi_networks and admin_password are applied by a restore but never come
+       back as diff rows, so without these they would ride along invisibly with
+       no way to leave them out. The current values are masked or absent, so the
+       key being present in the backup is the only signal available. */
+    function hiddenRestoreRows() {
+      var b = _backupData || {};
+      var sections = [b.config, b.sensitive];
+      function present(key) {
+        return sections.some(function(s) { return s && s[key] !== undefined; });
       }
+      var out = [];
+      if (present('wifi_networks')) out.push({field: 'wifi_networks', label: 'WiFi networks', category: 'Credentials & Network', note: 'will be replaced'});
+      if (present('admin_password')) out.push({field: 'admin_password', label: 'Admin password', category: 'Credentials & Network', note: 'will be changed'});
+      return out;
+    }
+
+    function restoreSelectedCount() {
+      var n = 0;
+      _restoreRows.forEach(function(r) { if (!_restoreSkip[r.field]) n++; });
+      return n;
+    }
+
+    function updateRestoreButton() {
+      var btn = $('restoreConfirmBtn');
+      if (!btn) return;
+      if (_restoreBlocked) {
+        btn.disabled = true;
+        btn.textContent = 'Resolve errors to restore';
+        return;
+      }
+      var n = restoreSelectedCount();
+      btn.disabled = (n === 0);
+      btn.textContent = 'Restore (' + n + ' change' + (n !== 1 ? 's' : '') + ')';
+    }
+
+    function restoreValueHtml(ch) {
+      if (isSecretField(ch)) return '<span style="color:var(--accent)">will be replaced (hidden)</span>';
+      if (isBlobChange(ch)) return '<span style="color:var(--accent)">will be replaced</span>';
+      /* values come from a backup file, so they are escaped before display */
+      return '<span style="color:#71717a;text-decoration:line-through">' + escHtml(formatDiffValue(ch.from)) + '</span>' +
+             ' &rarr; <span style="color:var(--accent)">' + escHtml(formatDiffValue(ch.to)) + '</span>';
+    }
+
+    /* Selection changes update the existing nodes in place. Re-rendering the
+       list would re-expand collapsed categories and take focus off the checkbox
+       the user just clicked. */
+    function syncRestoreSelection() {
+      _restoreCats.forEach(function(c) {
+        var on = c.rows.filter(function(r) { return !_restoreSkip[r.field]; }).length;
+        c.parentCb.checked = (on > 0);
+        c.parentCb.indeterminate = (on > 0 && on < c.rows.length);
+      });
+      updateRestoreButton();
+    }
+
+    function restoreRowEl(r) {
+      var row = document.createElement('label');
+      row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:4px 0;font-size:0.8rem;border-bottom:1px solid rgba(255,255,255,0.04);cursor:pointer';
+      var cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.className = 'restore-cb';
+      cb.checked = !_restoreSkip[r.field];
+      r._cb = cb;
+      cb.onchange = function() {
+        if (cb.checked) delete _restoreSkip[r.field]; else _restoreSkip[r.field] = true;
+        syncRestoreSelection();
+      };
+      var name = document.createElement('span');
+      name.style.cssText = 'color:#a1a1aa;flex:1'; name.textContent = r.label;
+      var val = document.createElement('span');
+      if (r.note) { val.style.color = 'var(--accent)'; val.textContent = r.note; }
+      else { val.innerHTML = restoreValueHtml(r.change); }
+      row.appendChild(cb); row.appendChild(name); row.appendChild(val);
+      return row;
+    }
+
+    function restoreCatEl(cat, rows) {
+      var section = document.createElement('div');
+      section.style.cssText = 'background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:14px 16px;margin-bottom:8px';
+      var header = document.createElement('div');
+      header.style.cssText = 'display:flex;align-items:center;gap:10px;font-size:0.85rem;font-weight:600;color:#f4f4f5;margin-bottom:8px;cursor:pointer';
+      var parent = document.createElement('input');
+      parent.type = 'checkbox'; parent.className = 'restore-cb';
+      var on = rows.filter(function(r) { return !_restoreSkip[r.field]; }).length;
+      parent.checked = (on > 0);
+      parent.indeterminate = (on > 0 && on < rows.length);
+      parent.setAttribute('aria-label', 'Apply every change under ' + cat);
+      /* the header still collapses its body on click, so the checkbox has to
+         keep that click to itself */
+      parent.onclick = function(e) { e.stopPropagation(); };
+      parent.onchange = function() {
+        /* Decided from the selection as it was before the click, so a partly
+           selected category fills up rather than emptying: partial -> all,
+           all -> none, none -> all. */
+        var on = rows.filter(function(r) { return !_restoreSkip[r.field]; }).length;
+        var selectAll = (on < rows.length);
+        rows.forEach(function(r) {
+          if (selectAll) delete _restoreSkip[r.field]; else _restoreSkip[r.field] = true;
+          if (r._cb) r._cb.checked = selectAll;
+        });
+        syncRestoreSelection();
+      };
+      var name = document.createElement('span'); name.textContent = cat;
+      var count = document.createElement('span');
+      count.style.cssText = 'color:#71717a;font-weight:400';
+      count.textContent = '(' + rows.length + ' change' + (rows.length > 1 ? 's' : '') + ')';
+      header.appendChild(parent); header.appendChild(name); header.appendChild(count);
+      var body = document.createElement('div');
+      rows.forEach(function(r) { body.appendChild(restoreRowEl(r)); });
+      header.onclick = function(e) {
+        if (e.target === parent) return;
+        body.style.display = (body.style.display === 'none') ? 'block' : 'none';
+      };
+      section.appendChild(header); section.appendChild(body);
+      _restoreCats.push({cat: cat, rows: rows, parentCb: parent});
+      return section;
+    }
+
+    function setAllRestoreRows(on) {
+      _restoreSkip = {};
+      _restoreRows.forEach(function(r) {
+        if (!on) _restoreSkip[r.field] = true;
+        if (r._cb) r._cb.checked = on;
+      });
+      syncRestoreSelection();
+    }
+
+    function restoreSelectLink(text, onClick) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.style.cssText = 'background:none;border:none;padding:0;color:var(--accent);cursor:pointer;font-size:0.78rem';
+      b.textContent = text;
+      b.onclick = onClick;
+      return b;
+    }
+
+    function renderRestoreChanges() {
+      var host = $('restoreChanges');
+      if (!host) return;
+      host.innerHTML = '';
+      _restoreCats = [];
+      if (!_restoreRows.length) { updateRestoreButton(); return; }
+
+      var bar = document.createElement('div');
+      bar.style.cssText = 'display:flex;gap:14px;align-items:center;margin-bottom:8px;font-size:0.78rem';
+      var lbl = document.createElement('span');
+      lbl.style.color = 'var(--text-hint)';
+      lbl.textContent = 'Choose what to restore:';
+      bar.appendChild(lbl);
+      bar.appendChild(restoreSelectLink('Select all', function() { setAllRestoreRows(true); }));
+      bar.appendChild(restoreSelectLink('Select none', function() { setAllRestoreRows(false); }));
+      host.appendChild(bar);
+
+      /* group by category, keeping the order the categories first appeared in */
+      var order = [], byCat = {};
+      _restoreRows.forEach(function(r) {
+        if (!byCat[r.category]) { byCat[r.category] = []; order.push(r.category); }
+        byCat[r.category].push(r);
+      });
+      order.forEach(function(cat) { host.appendChild(restoreCatEl(cat, byCat[cat])); });
+      updateRestoreButton();
+    }
+
+    /* Build the object actually sent: unchecked keys are removed, and a key the
+       device never receives is left exactly as it is. _backupData itself is not
+       touched, so the selection can be changed and restored again. */
+    var RESTORE_COMPANION_KEYS = {
+      /* the backup mirrors network 0's password here for older firmware, so
+         dropping only wifi_networks would still overwrite it */
+      wifi_networks: ['wifi_password']
+    };
+    function restorePayload() {
+      var copy = JSON.parse(JSON.stringify(_backupData));
+      Object.keys(_restoreSkip).forEach(function(field) {
+        var keys = [field].concat(RESTORE_COMPANION_KEYS[field] || []);
+        keys.forEach(function(k) {
+          if (copy.config) delete copy.config[k];
+          if (copy.sensitive) delete copy.sensitive[k];
+        });
+      });
+      return copy;
+    }
+
+    /* The device already summarises its large fields (the tile layouts arrive as
+       "Current (812 chars)" -> "Modified (1043 chars)"), so this is only a
+       backstop for any value that still turns up too long to read as a diff. */
+    function isBlobChange(ch) {
+      return (typeof ch.from === 'string' && ch.from.length > 200) ||
+             (typeof ch.to === 'string' && ch.to.length > 200);
+    }
+    /* Credentials travel in a backup made with sensitive data included. Their
+       values are worth nothing to the reader and should not sit in the page for
+       a screen-share, so only the fact that they change is shown. */
+    function isSecretField(ch) {
+      return /password|token|api_key|auth_header|client_id/i.test(String(ch.field || ''));
     }
 
     function formatDiffValue(val) {
@@ -4736,7 +5115,18 @@
       $('restoreFileLabel').appendChild(input);
       var rcBtn = $('restoreConfirmBtn');
       if (rcBtn) { rcBtn.disabled = false; rcBtn.textContent = 'Restore'; }
+      /* the other device's password is only ever held for one transfer */
+      var pw = $('pullPassword');
+      if (pw) pw.value = '';
+      var pullNotice = $('restorePullNotice');
+      if (pullNotice) pullNotice.style.display = 'none';
       _backupData = null;
+      _restoreFromDevice = false;
+      _pullSensitiveRefused = false;
+      _restoreRows = [];
+      _restoreSkip = {};
+      _restoreCats = [];
+      _restoreBlocked = false;
     }
 
     function confirmRestore() {
@@ -4745,7 +5135,7 @@
       if (btn.disabled) return;  /* blocked by validation errors */
       btn.disabled = true; btn.textContent = 'Restoring...';
 
-      postJson('/api/config/restore', {backup: _backupData, confirm: true})
+      postJson('/api/config/restore', {backup: restorePayload(), confirm: true})
         .then(function(r) {
           if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Restore failed'); });
           return r.json();

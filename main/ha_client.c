@@ -61,6 +61,9 @@ static http_fetch_conn_t *s_conn = NULL;
 static bool   cjson_scalar_str(const cJSON *node, char *buf, size_t len);
 static void   invalidate_tiles_config(void);
 static int    get_tiles_config(const char *tiles_config_json);
+static cJSON *fetch_path_core(const char *base_url, const char *token,
+                              const char *path, http_fetch_conn_t *conn,
+                              int *status_out);
 static cJSON *fetch_entity_core(const char *base_url, const char *token,
                                 const char *entity_id, http_fetch_conn_t *conn);
 static bool   resolve_tile_value(cJSON *entity, const char *attr,
@@ -277,18 +280,28 @@ static bool resolve_tile_value(cJSON *entity, const char *attr,
 // =============================================================================
 
 /**
- * Fetch GET {base_url}/api/states/{entity_id} with Bearer auth. @p conn may be a
- * keep-alive slot (poll task) or NULL for a one-shot client (probe handler).
- * Returns the parsed entity JSON (caller cJSON_Delete) or NULL on failure.
+ * Fetch GET {base_url}/{path} with Bearer auth. @p path is a root-relative path
+ * WITHOUT a leading slash ("api/states/<id>", "api/config"). @p conn may be a
+ * keep-alive slot (poll task) or NULL for a one-shot client (httpd handlers).
+ * Returns the parsed JSON (caller cJSON_Delete) or NULL on failure.
+ *
+ * @p status_out (optional) is pre-set to 0 and receives the upstream HTTP status
+ * whenever headers were reached, so a caller can tell a transport failure (0)
+ * from an auth rejection (401/403) from a 200 whose body would not parse. NULL
+ * disables status reporting.
  */
-static cJSON *fetch_entity_core(const char *base_url, const char *token,
-                                const char *entity_id, http_fetch_conn_t *conn) {
-    if (!base_url || base_url[0] == '\0' || !entity_id || entity_id[0] == '\0') {
+static cJSON *fetch_path_core(const char *base_url, const char *token,
+                              const char *path, http_fetch_conn_t *conn,
+                              int *status_out) {
+    if (status_out) {
+        *status_out = 0;
+    }
+    if (!base_url || base_url[0] == '\0' || !path || path[0] == '\0') {
         return NULL;
     }
 
-    /* Strip any trailing slash(es) from base so "{base}/api/states/{id}" never
-     * produces a double slash. base_url is <=255 chars. */
+    /* Strip any trailing slash(es) from base so "{base}/{path}" never produces a
+     * double slash. base_url is <=255 chars. */
     char base[256];
     size_t blen = strlen(base_url);
     if (blen >= sizeof(base)) {
@@ -300,11 +313,11 @@ static cJSON *fetch_entity_core(const char *base_url, const char *token,
         base[--blen] = '\0';
     }
 
-    /* url[512] covers base[256] + "/api/states/" + entity_id (<=127). */
+    /* url[512] covers base[<=255] + '/' + path[<=191]. */
     char url[512];
-    int un = snprintf(url, sizeof(url), "%s/api/states/%s", base, entity_id);
+    int un = snprintf(url, sizeof(url), "%s/%s", base, path);
     if (un <= 0 || un >= (int)sizeof(url)) {
-        ESP_LOGW(TAG, "HA URL truncated for entity %s", entity_id);
+        ESP_LOGW(TAG, "HA URL truncated for path %s", path);
         return NULL;
     }
 
@@ -329,17 +342,18 @@ static cJSON *fetch_entity_core(const char *base_url, const char *token,
         .max_response_bytes = HA_RESPONSE_BUF_SIZE,
         .extra_header = (auth[0] != '\0') ? auth : NULL,
         .conn = conn,
+        .status_out = status_out,
     };
 
     char *buffer = NULL;
     size_t total_read = 0;
     esp_err_t err = http_fetch_text(url, &opts, &buffer, &total_read);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "HA fetch failed for %s: %s", entity_id, esp_err_to_name(err));
+        ESP_LOGW(TAG, "HA fetch failed for %s: %s", path, esp_err_to_name(err));
         return NULL;
     }
     if (total_read == 0) {
-        ESP_LOGW(TAG, "HA: empty response for %s", entity_id);
+        ESP_LOGW(TAG, "HA: empty response for %s", path);
         heap_caps_free(buffer);
         return NULL;
     }
@@ -347,16 +361,52 @@ static cJSON *fetch_entity_core(const char *base_url, const char *token,
     cJSON *json = cJSON_Parse(buffer);
     heap_caps_free(buffer);
     if (!json) {
-        ESP_LOGW(TAG, "HA: failed to parse response for %s", entity_id);
+        ESP_LOGW(TAG, "HA: failed to parse response for %s", path);
         return NULL;
     }
     return json;
+}
+
+/** Build "api/states/<entity_id>" and fetch it. Status is not reported. */
+static cJSON *fetch_entity_core(const char *base_url, const char *token,
+                                const char *entity_id, http_fetch_conn_t *conn) {
+    if (!entity_id || entity_id[0] == '\0') {
+        return NULL;
+    }
+    /* path[192] covers "api/states/" (11) + the longest entity id the probe
+     * handler accepts (159) + NUL. */
+    char path[192];
+    int pn = snprintf(path, sizeof(path), "api/states/%s", entity_id);
+    if (pn <= 0 || pn >= (int)sizeof(path)) {
+        ESP_LOGW(TAG, "HA entity path truncated: %s", entity_id);
+        return NULL;
+    }
+    return fetch_path_core(base_url, token, path, conn, NULL);
 }
 
 cJSON *ha_client_fetch_entity(const char *base_url, const char *token,
                               const char *entity_id) {
     /* One-shot (conn=NULL): safe to call from the httpd worker task. */
     return fetch_entity_core(base_url, token, entity_id, NULL);
+}
+
+int ha_client_fetch_config(const char *base_url, const char *token,
+                           cJSON **out_json) {
+    if (out_json) {
+        *out_json = NULL;
+    }
+    /* One-shot (conn=NULL): safe from the httpd worker task, and never disturbs
+     * the poll task's keep-alive slot. */
+    int status = 0;
+    cJSON *json = fetch_path_core(base_url, token, "api/config", NULL, &status);
+    if (json) {
+        if (out_json) {
+            *out_json = json;
+        } else {
+            cJSON_Delete(json);
+        }
+    }
+    return status;
 }
 
 // =============================================================================

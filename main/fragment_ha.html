@@ -33,10 +33,18 @@
       display:flex; align-items:center; gap:10px; margin-bottom:10px; cursor:pointer;
       border-radius:8px; padding:4px; margin:-4px -4px 6px; user-select:none;
     }
-    #ha-root .rb-row-head:hover { background:rgba(255,255,255,0.03); }
-    #ha-root .rb-row-head:focus-visible { outline:none; box-shadow:0 0 0 2px rgba(122,162,247,0.4); }
-    #ha-root .rb-row.collapsed .rb-row-head { margin-bottom:-4px; }
-    #ha-root .rb-caret { font-size:0.7rem; color:var(--text-muted,#94a3b8); width:12px; flex-shrink:0; }
+    #ha-root .rb-row-head:hover, #ha-root .rb-tile-head:hover { background:rgba(255,255,255,0.03); }
+    #ha-root .rb-row-head:focus-visible, #ha-root .rb-tile-head:focus-visible { outline:none; box-shadow:0 0 0 2px rgba(122,162,247,0.4); }
+    #ha-root .rb-row:not([open]) .rb-row-head { margin-bottom:-4px; }
+    /* collapsible sections use native details/summary; the marker is drawn by
+       ::before because a flex summary drops the built-in one */
+    #ha-root summary { cursor:pointer; list-style:none; }
+    #ha-root summary::-webkit-details-marker { display:none; }
+    #ha-root summary::before {
+      content:"\25B8"; display:inline-block; width:12px; flex-shrink:0;
+      font-size:0.7rem; color:var(--text-muted,#94a3b8);
+    }
+    #ha-root details[open] > summary::before { content:"\25BE"; }
     #ha-root .rb-name { font-size:0.72rem; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:var(--text-muted,#94a3b8); }
     #ha-root .rb-fill { margin-left:auto; font-size:0.68rem; color:var(--text-hint,#7a8ba4); }
     #ha-root .rb-tiles { display:grid; gap:10px; }
@@ -44,7 +52,7 @@
       border:1px solid var(--border,rgba(255,255,255,0.12)); border-radius:var(--radius-sm,10px);
       background:var(--elevated,rgba(48,54,72,0.96)); padding:12px;
     }
-    #ha-root .rb-tile-head { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+    #ha-root .rb-tile-head { display:flex; align-items:center; gap:8px; margin-bottom:10px; border-radius:8px; padding:2px 4px; margin-left:-4px; margin-right:-4px; }
     #ha-root .rb-tile-head .idx {
       width:20px; height:20px; border-radius:6px; flex-shrink:0; background:rgba(122,162,247,0.16);
       color:var(--accent,#7aa2f7); font-size:0.66rem; font-weight:700; display:grid; place-items:center;
@@ -78,6 +86,27 @@
     #ha-root .swatch::-webkit-color-swatch-wrapper { padding:3px; }
     #ha-root .swatch::-webkit-color-swatch { border:none; border-radius:5px; }
     #ha-root .swatch-row .lab { font-size:0.74rem; color:var(--text-secondary,#b8c2d0); flex:1; }
+    /* compact color chips: one horizontal strip per tile, wraps when narrow */
+    #ha-root .swatch-strip { display:flex; flex-wrap:wrap; gap:8px; }
+    #ha-root .swatch-row.chip {
+      flex:1 1 150px; margin-bottom:0; gap:6px; padding:4px 7px;
+      border:1px solid var(--border,rgba(255,255,255,0.12)); border-radius:8px; background:rgba(255,255,255,0.02);
+    }
+    #ha-root .chip .swatch { width:26px; height:24px; }
+    #ha-root .chip .lab { font-size:0.68rem; }
+    #ha-root .sw-def {
+      font-size:0.58rem; letter-spacing:0.05em; text-transform:uppercase; color:var(--text-hint,#7a8ba4);
+      border:1px solid var(--border,rgba(255,255,255,0.12)); border-radius:999px; padding:1px 7px; flex-shrink:0;
+    }
+    #ha-root .sw-reset {
+      background:none; border:none; color:var(--text-hint,#7a8ba4); cursor:pointer;
+      font-size:1rem; line-height:1; padding:1px 6px; border-radius:6px; flex-shrink:0;
+    }
+    #ha-root .sw-reset:hover { color:var(--danger,#f87171); background:rgba(239,68,68,0.08); }
+    #ha-root .ha-defaults {
+      border:1px solid var(--border,rgba(255,255,255,0.12)); border-radius:var(--radius-sm,10px);
+      background:rgba(255,255,255,0.02); padding:12px; margin-bottom:12px;
+    }
     #ha-root .map-row { display:grid; grid-template-columns:1fr auto; gap:8px; margin-bottom:8px; align-items:center; }
 
     /* legend */
@@ -171,18 +200,18 @@
     <div class="subsection">
       <div class="field">
         <label class="field-label" for="ha_base">Base URL</label>
-        <input class="input mono" id="ha_base" maxlength="255" placeholder="http://homeassistant.local:8123" oninput="haOnSourceChange()">
+        <input class="input mono" id="ha_base" maxlength="255" placeholder="http://homeassistant.local:8123" oninput="haOnSourceEdit()" onchange="haOnSourceCommit()">
         <div class="field-hint">Scheme, host, and port only, no path (HTTP or HTTPS). The device appends <code>/api/states/&lt;entity_id&gt;</code> for each tile.</div>
       </div>
       <div class="field">
         <label class="field-label" for="ha_token">Long-Lived Access Token</label>
-        <input class="input mono" id="ha_token" maxlength="255" type="password" placeholder="paste token only" oninput="haOnSourceChange()">
+        <input class="input mono" id="ha_token" maxlength="255" type="password" placeholder="paste token only" oninput="haOnSourceEdit()" onchange="haOnSourceCommit()">
         <div class="field-hint">Paste the raw token from your Home Assistant profile. Do not include <code>Authorization:</code> or <code>Bearer</code>: the device wraps it for you.</div>
       </div>
       <div class="row2">
         <div class="field">
           <label class="field-label" for="ha_interval">Poll Interval</label>
-          <select class="input" id="ha_interval">
+          <select class="input" id="ha_interval" onchange="haOnSourceChange()">
             <option value="5">5 seconds</option>
             <option value="10">10 seconds</option>
             <option value="30" selected>30 seconds</option>
@@ -193,6 +222,9 @@
           <div class="field-hint">How often each entity is re-fetched (5 to 300 seconds).</div>
         </div>
       </div>
+      <button type="button" class="btn btn-outline full" id="ha_testBtn" onclick="haTestConnection()">Test Connection</button>
+      <div class="probe-status" id="ha_testStatus"></div>
+      <div class="field-hint" style="margin-top:6px">Checks the address and token above without saving them.</div>
     </div>
   </div>
 
@@ -200,14 +232,19 @@
   <div class="card nocollapse">
     <div class="card-title"><span class="card-title-label">Layout</span><span class="ha-count" id="ha_tileCount">0 / 15 tiles</span></div>
     <div class="field-hint" style="margin-bottom:14px">Build the page as rows of tiles. Each tile shows one entity attribute. Up to <strong>6 rows</strong>, <strong>4 tiles</strong> per row, <strong>15 tiles</strong> total. Use the row <strong>&#9650;/&#9660;</strong> and tile <strong>&#9664;/&#9654;</strong> buttons to reorder.</div>
+    <details class="ha-defaults" open>
+      <summary class="mini-label">Default colors</summary>
+      <div class="field-hint" style="margin:8px 0 10px">Used by every tile that has no color of its own.</div>
+      <div id="ha_defHost"></div>
+    </details>
     <div id="ha_rowsHost"></div>
     <button type="button" class="btn btn-outline full" id="ha_addRowBtn" onclick="haAddRow()" style="margin-top:4px">+ Add Row</button>
   </div>
 
-  <!-- SAVE -->
+  <!-- PREVIEW -->
   <div class="card nocollapse">
-    <div class="field-hint" style="margin-bottom:12px">Saving persists these settings to the device and applies them immediately.</div>
-    <button type="button" class="btn btn-primary full" id="ha_saveBtn" onclick="haSaveConfig()">Save Home Assistant</button>
+    <div class="field-hint" style="margin-bottom:12px">Shows this layout on the device straight away so you can check it. Nothing is stored until you press Save at the bottom of the page.</div>
+    <button type="button" class="btn btn-primary full" id="ha_previewBtn" onclick="haPreviewLayout()">Preview Layout on Device</button>
   </div>
 
   </div><!-- /.ha-col-settings -->
@@ -261,25 +298,37 @@
     const HA_C_NORMAL="#a3a3a3", HA_C_WARN="#d97706", HA_C_CRIT="#be123c", HA_C_OK="#059669";
     const HA_MAX_ROWS=6, HA_MAX_PER_ROW=4, HA_MAX_TILES=15;
     const HA_BOOLISH=new Set(["on","off","open","closed","home","not_home","true","false"]);
+    /* stock fallback per color slot, and the slot labels shown in the UI */
+    const HA_STOCK={cLow:HA_C_NORMAL,cNorm:HA_C_NORMAL,cHigh:HA_C_WARN,tColor:HA_C_OK,fColor:HA_C_CRIT};
+    const HA_DEF_KEYS=[["cLow","Below low"],["cNorm","In range"],["cHigh","Above high"],["tColor","True"],["fColor","False"]];
 
     let haRows=[];             /* [[tile,...],...] builder state */
+    let haDefaults={};         /* page-level color defaults; missing key -> HA_STOCK */
+    let haHealLegacy=false;    /* loaded config predates "defaults": strip baked colors */
     let haEntities={};         /* entity_id -> last probed {state,attributes} */
     let haUid=1;
     const haNextId=()=>haUid++;
-    /* collapse state keyed by row-array identity — survives re-renders */
+    /* collapse state keyed by row-array / tile identity — survives the rebuilds
+       the builder does on every edit, and is never saved to config */
     const haCollapsedRows=new WeakSet();
+    const haCollapsedTiles=new WeakSet();
 
     function haBaseTile(entity_id,attr,label){
       return {id:haNextId(),entity_id:entity_id,attr:attr||"state",label:label,probed:false,error:false};
     }
-    function haNumberTile(entity_id,attr,label,unit,dec,low,high,cLow,cNorm,cHigh){
+    /* Tiles carry a color key only as an override; absent means "inherit". */
+    function haNumberTile(entity_id,attr,label,unit,dec,low,high){
       return Object.assign(haBaseTile(entity_id,attr,label),
-        {type:"number",unit:unit,decimals:dec,low:low,high:high,cLow:cLow,cNorm:cNorm,cHigh:cHigh});
+        {type:"number",unit:unit,decimals:dec,low:low,high:high});
     }
     function haTextTile(entity_id,attr,label,maps){ return Object.assign(haBaseTile(entity_id,attr,label),{type:"text",maps:maps||[]}); }
-    function haBoolTile(entity_id,attr,label,tText,fText,tColor,fColor){
-      return Object.assign(haBaseTile(entity_id,attr,label),{type:"bool",tText:tText,fText:fText,tColor:tColor,fColor:fColor});
+    function haBoolTile(entity_id,attr,label,tText,fText){
+      return Object.assign(haBaseTile(entity_id,attr,label),{type:"bool",tText:tText,fText:fText});
     }
+    function haDefColor(key){ return haDefaults[key]||HA_STOCK[key]; }
+    /* effective color: tile override -> page default -> stock constant */
+    function haColorOf(t,key){ return t[key]||haDefColor(key); }
+    function haClearColors(t){ HA_DEF_KEYS.forEach(([k])=>{ delete t[k]; }); }
 
     function haTileCount(){ return haRows.reduce((n,r)=>n+r.length,0); }
     function haNum(v){ var n=parseFloat(v); return isFinite(n)?n:0; }
@@ -339,9 +388,9 @@
         const n=typeof raw==="number"?raw:parseFloat(raw);
         if(isFinite(n)){
           out.value=n.toFixed(haClampInt(t.decimals,0,4));
-          if(n<haNum(t.low)) out.color=t.cLow;
-          else if(n>haNum(t.high)) out.color=t.cHigh;
-          else out.color=t.cNorm;
+          if(n<haNum(t.low)) out.color=haColorOf(t,"cLow");
+          else if(n>haNum(t.high)) out.color=haColorOf(t,"cHigh");
+          else out.color=haColorOf(t,"cNorm");
         }
       } else if(t.type==="text"){
         out.value=String(raw);
@@ -350,7 +399,7 @@
       } else if(t.type==="bool"){
         const on=haTruthy(raw);
         out.value=on?(t.tText||"TRUE"):(t.fText||"FALSE");
-        out.color=on?t.tColor:t.fColor;
+        out.color=haColorOf(t,on?"tColor":"fColor");
       }
       return out;
     }
@@ -373,26 +422,61 @@
       });
       var empty=$('ha_devEmpty'); if(empty) empty.style.display=haTileCount()===0?"flex":"none";
     }
-    function haOnSourceChange(){ haRenderDevice(); }
+    /* Typing only repaints the local preview and drops a stale test result. The
+       device is never handed a half-typed address or token: those fields commit
+       on change (blur / Enter), the interval select stays on the debounce, and
+       the enable toggle applies at once. */
+    function haOnSourceEdit(){
+      haRenderDevice();
+      const st=$('ha_testStatus'); if(st){ st.textContent=""; st.className="probe-status"; }
+    }
+    /* A token pasted with a trailing newline is rejected by the device's header
+       guard and would only show up as an auth failure at poll time, so the
+       field is cleaned on commit: what you see is what gets sent. */
+    function haTrimField(id){ const e=$(id); if(e && e.value!==e.value.trim()) e.value=e.value.trim(); }
+    function haOnSourceCommit(){
+      haTrimField('ha_base'); haTrimField('ha_token');
+      haOnSourceEdit(); if(haLoaded) haPreviewNow(null);
+    }
+    function haOnSourceChange(){ haOnSourceEdit(); haSchedulePreview(); }
 
     /* ---- builder rendering ---- */
+    /* Page-level default colors. While dragging (oninput) only the preview is
+       redrawn so the open color picker survives; on commit (onchange) the tile
+       list is rebuilt so inheriting swatches show the new color. */
+    function haRenderDefaults(){
+      const host=$('ha_defHost'); if(!host) return;
+      host.innerHTML="";
+      const strip=document.createElement("div"); strip.className="swatch-strip";
+      HA_DEF_KEYS.forEach(([k,lbl])=>{
+        /* no DEFAULT badge here: these are the defaults */
+        const r=haSwatch(lbl,haDefColor(k),v=>{ haDefaults[k]=v; haRenderDevice(); });
+        r.className="swatch-row chip";
+        r.firstChild.onchange=()=>haRenderBuilder();
+        strip.appendChild(r);
+      });
+      host.appendChild(strip);
+      const b=document.createElement("button");
+      b.className="btn btn-outline sm"; b.style.marginTop="10px"; b.textContent="Apply defaults to all tiles";
+      b.onclick=()=>{
+        if(!confirm("Clear the individual colors on every tile so they all follow the defaults?")) return;
+        haRows.forEach(row=>row.forEach(haClearColors)); haSyncAll();
+      };
+      host.appendChild(b);
+    }
+
     function haRenderBuilder(){
       const host=$('ha_rowsHost'); if(!host) return;
       host.innerHTML="";
       const total=haTileCount();
       haRows.forEach((row,ri)=>{
-        const collapsed=haCollapsedRows.has(row);
-        const rEl=document.createElement("div"); rEl.className="rb-row"+(collapsed?" collapsed":"");
-        const head=document.createElement("div");
-        head.className="rb-row-head"; head.setAttribute("role","button"); head.setAttribute("tabindex","0");
-        head.setAttribute("aria-expanded",collapsed?"false":"true");
+        const rEl=document.createElement("details"); rEl.className="rb-row";
+        rEl.open=!haCollapsedRows.has(row);
+        rEl.ontoggle=()=>{ if(rEl.open) haCollapsedRows.delete(row); else haCollapsedRows.add(row); };
+        const head=document.createElement("summary"); head.className="rb-row-head";
         head.innerHTML=
-          '<span class="rb-caret" aria-hidden="true">'+(collapsed?"▸":"▾")+'</span>'+
           '<span class="rb-name">Row '+(ri+1)+'</span>'+
           '<span class="rb-fill">'+row.length+' / '+HA_MAX_PER_ROW+' tiles</span>';
-        const toggle=()=>{ if(collapsed) haCollapsedRows.delete(row); else haCollapsedRows.add(row); haRenderBuilder(); };
-        head.onclick=(e)=>{ if(!e.target.closest("button")) toggle(); };
-        head.onkeydown=(e)=>{ if(e.target.closest("button")) return; if(e.key==="Enter"||e.key===" "){ e.preventDefault(); toggle(); } };
         const upBtn=document.createElement("button");
         upBtn.className="rb-move"; upBtn.setAttribute("aria-label","Move row "+(ri+1)+" up");
         upBtn.innerHTML="&#9650;"; upBtn.disabled=ri===0;
@@ -407,17 +491,15 @@
         del.onclick=(e)=>{ e.stopPropagation(); haRows.splice(ri,1); haSyncAll(); };
         head.appendChild(del);
         rEl.appendChild(head);
-        if(!collapsed){
-          const tilesEl=document.createElement("div"); tilesEl.className="rb-tiles";
-          row.forEach((t,ti)=>tilesEl.appendChild(haTileEditor(t,ri,ti)));
-          rEl.appendChild(tilesEl);
-          const addTile=document.createElement("button");
-          addTile.className="btn btn-outline sm"; addTile.style.marginTop="10px"; addTile.textContent="+ Add Tile";
-          const canAdd=row.length<HA_MAX_PER_ROW && total<HA_MAX_TILES;
-          addTile.disabled=!canAdd;
-          addTile.onclick=()=>{ const t=haNumberTile("","state","New Tile","",1,0,100,HA_C_NORMAL,HA_C_NORMAL,HA_C_WARN); row.push(t); haSyncAll(); };
-          rEl.appendChild(addTile);
-        }
+        const tilesEl=document.createElement("div"); tilesEl.className="rb-tiles";
+        row.forEach((t,ti)=>tilesEl.appendChild(haTileEditor(t,ri,ti)));
+        rEl.appendChild(tilesEl);
+        const addTile=document.createElement("button");
+        addTile.className="btn btn-outline sm"; addTile.style.marginTop="10px"; addTile.textContent="+ Add Tile";
+        const canAdd=row.length<HA_MAX_PER_ROW && total<HA_MAX_TILES;
+        addTile.disabled=!canAdd;
+        addTile.onclick=()=>{ const t=haNumberTile("","state","New Tile","",1,0,100); row.push(t); haSyncAll(); };
+        rEl.appendChild(addTile);
         host.appendChild(rEl);
       });
       var addRowBtn=$('ha_addRowBtn'); if(addRowBtn) addRowBtn.disabled=haRows.length>=HA_MAX_ROWS || total>=HA_MAX_TILES;
@@ -425,36 +507,48 @@
       if(cnt){ cnt.textContent=total+' / '+HA_MAX_TILES+' tiles'; cnt.classList.toggle("full",total>=HA_MAX_TILES); }
     }
 
+    /* summary text: the label, else the source entity plus the attribute when it
+       is not the main state, so two tiles on one entity stay distinguishable; an
+       unset entity always stays visible on a collapsed fresh tile */
+    function haTileTitle(t){
+      if(!t.entity_id) return t.label?(t.label+" <no entity>"):"<no entity>";
+      if(t.label) return t.label;
+      return t.entity_id+((t.attr && t.attr!=="state")?(" - "+t.attr):"");
+    }
+
     function haTileEditor(t,ri,ti){
-      const el=document.createElement("div"); el.className="rb-tile";
-      const head=document.createElement("div"); head.className="rb-tile-head";
-      head.innerHTML='<span class="idx">'+(ti+1)+'</span><span class="path-preview">'+
-        escHtml(t.entity_id?(t.entity_id+" · "+t.attr):"<no entity>")+'</span>';
+      const el=document.createElement("details"); el.className="rb-tile";
+      el.open=!haCollapsedTiles.has(t);
+      el.ontoggle=()=>{ if(el.open) haCollapsedTiles.delete(t); else haCollapsedTiles.add(t); };
+      const head=document.createElement("summary"); head.className="rb-tile-head";
+      head.innerHTML='<span class="idx">'+(ti+1)+'</span><span class="path-preview">'+escHtml(haTileTitle(t))+'</span>';
+      const setTitle=()=>{ head.querySelector(".path-preview").textContent=haTileTitle(t); };
       const lBtn=document.createElement("button");
       lBtn.className="rb-move tile"; lBtn.setAttribute("aria-label","Move tile "+(ti+1)+" left");
       lBtn.innerHTML="&#9664;"; lBtn.disabled=ti===0;
-      lBtn.onclick=()=>haMoveTile(ri,ti,-1);
+      lBtn.onclick=(e)=>{ e.stopPropagation(); haMoveTile(ri,ti,-1); };
       const rBtn=document.createElement("button");
       rBtn.className="rb-move tile"; rBtn.setAttribute("aria-label","Move tile "+(ti+1)+" right");
       rBtn.innerHTML="&#9654;"; rBtn.disabled=ti===haRows[ri].length-1;
-      rBtn.onclick=()=>haMoveTile(ri,ti,1);
+      rBtn.onclick=(e)=>{ e.stopPropagation(); haMoveTile(ri,ti,1); };
       const x=document.createElement("button");
       x.className="x"; x.setAttribute("aria-label","Remove tile"); x.innerHTML="&times;";
-      x.onclick=()=>{ haRows[ri].splice(ti,1); haSyncAll(); };
+      x.onclick=(e)=>{ e.stopPropagation(); haRows[ri].splice(ti,1); haSyncAll(); };
       head.appendChild(lBtn); head.appendChild(rBtn); head.appendChild(x); el.appendChild(head);
 
-      /* ---- entity_id + Probe ---- */
-      const eWrap=document.createElement("div"); eWrap.style.marginBottom="8px";
-      eWrap.innerHTML='<div class="mini-label">Entity ID</div>';
+      /* ---- entity_id + Probe, sharing a row with the attribute picker ----
+         .row2 wraps to one column when the card is narrow */
+      const idRow=document.createElement("div"); idRow.className="row2";
       const pr=document.createElement("div"); pr.className="probe-row";
       const eIn=document.createElement("input");
       eIn.className="input mono sm"; eIn.value=t.entity_id||""; eIn.placeholder="sensor.outside_temp";
-      eIn.oninput=()=>{ t.entity_id=eIn.value.trim(); head.querySelector(".path-preview").textContent=t.entity_id?(t.entity_id+" · "+t.attr):"<no entity>"; };
+      eIn.oninput=()=>{ t.entity_id=eIn.value.trim(); setTitle(); };
       const probeBtn=document.createElement("button");
       probeBtn.className="btn btn-primary sm"; probeBtn.textContent="Probe";
       probeBtn.onclick=()=>haProbeTile(t,probeBtn);
       pr.appendChild(eIn); pr.appendChild(probeBtn);
-      eWrap.appendChild(pr);
+      const eF=haMiniField("Entity ID",pr); eF.style.flex="1.5 1 200px";
+      idRow.appendChild(eF);
 
       const status=document.createElement("div"); status.className="probe-status";
       const ent=haGetEntity(t.entity_id);
@@ -467,15 +561,8 @@
         status.classList.add("ok");
         status.innerHTML="&#10003; "+(fn?escHtml(fn):"(no friendly_name)")+' <span class="dom">· '+(nAttr+1)+' fields available</span>';
       }
-      eWrap.appendChild(status); el.appendChild(eWrap);
-
-      /* fresh, never-probed tile with no cached entity: stop at entity + Probe */
-      if(!t.probed && !ent) return el;
-
       /* ---- attribute dropdown (only when we have cached entity data) ---- */
       if(ent){
-        const aWrap=document.createElement("div"); aWrap.style.marginBottom="8px";
-        aWrap.innerHTML='<div class="mini-label">Show</div>';
         const aSel=document.createElement("select"); aSel.className="input sm";
         const keys=["state"].concat(ent.attributes?Object.keys(ent.attributes):[]);
         keys.forEach(k=>{
@@ -484,21 +571,23 @@
           if(t.attr===k) o.selected=true; aSel.appendChild(o);
         });
         aSel.onchange=()=>{ t.attr=aSel.value; haDeriveDefaults(t); haSyncAll(); };
-        aWrap.appendChild(aSel); el.appendChild(aWrap);
+        idRow.appendChild(haMiniField("Show",aSel));
       }
+      el.appendChild(idRow); el.appendChild(status);
 
-      /* label */
-      el.appendChild(haLabeledInput("Label","sm",t.label,haEntityLocalTitle(t.entity_id)||"Label",v=>{ t.label=v; haRenderDevice(); }));
+      /* fresh, never-probed tile with no cached entity: stop at entity + Probe */
+      if(!t.probed && !ent) return el;
 
-      /* type */
-      const typeWrap=document.createElement("div");
-      typeWrap.innerHTML='<div class="mini-label">Type</div>';
+      /* ---- label + type share one row ---- */
+      const metaRow=document.createElement("div"); metaRow.className="row2"; metaRow.style.marginTop="8px";
+      metaRow.appendChild(haMiniField("Label",haInp(t.label,haEntityLocalTitle(t.entity_id)||"Label",v=>{ t.label=v; setTitle(); haRenderDevice(); },"sm")));
       const sel=document.createElement("select"); sel.className="input sm";
       [["number","Number"],["text","Text"],["bool","Boolean"]].forEach(([v,lbl])=>{
         const o=document.createElement("option"); o.value=v; o.textContent=lbl; if(t.type===v) o.selected=true; sel.appendChild(o);
       });
       sel.onchange=()=>{ haConvertType(t,sel.value); haSyncAll(); };
-      typeWrap.appendChild(sel); el.appendChild(typeWrap);
+      metaRow.appendChild(haMiniField("Type",sel));
+      el.appendChild(metaRow);
 
       const tf=document.createElement("div"); tf.className="type-fields";
       if(t.type==="number") tf.appendChild(haNumberFields(t));
@@ -514,18 +603,10 @@
       if(type==="number"){
         t.unit=t.unit||""; t.decimals=(t.decimals!=null)?t.decimals:1;
         t.low=(t.low!=null)?t.low:0; t.high=(t.high!=null)?t.high:100;
-        t.cLow=t.cLow||HA_C_NORMAL; t.cNorm=t.cNorm||HA_C_NORMAL; t.cHigh=t.cHigh||HA_C_WARN;
       } else if(type==="text"){ t.maps=t.maps||[]; }
-      else { t.tText=t.tText||"ON"; t.fText=t.fText||"OFF"; t.tColor=t.tColor||HA_C_OK; t.fColor=t.fColor||HA_C_CRIT; }
+      else { t.tText=t.tText||"ON"; t.fText=t.fText||"OFF"; }
     }
 
-    function haLabeledInput(label,cls,value,ph,onInput){
-      const w=document.createElement("div"); w.style.marginBottom="8px";
-      const l=document.createElement("div"); l.className="mini-label"; l.textContent=label;
-      const i=document.createElement("input"); i.className="input "+cls; i.value=value||""; i.placeholder=ph||"";
-      i.oninput=()=>onInput(i.value);
-      w.appendChild(l); w.appendChild(i); return w;
-    }
     function haMiniField(label,inputEl){
       const w=document.createElement("div"); w.style.flex="1 1 100px";
       const l=document.createElement("div"); l.className="mini-label"; l.textContent=label;
@@ -543,9 +624,28 @@
     function haSwatch(label,color,onInput){
       const r=document.createElement("div"); r.className="swatch-row";
       const c=document.createElement("input"); c.type="color"; c.className="swatch"; c.value=color||HA_C_NORMAL;
-      c.setAttribute("aria-label",label); c.oninput=()=>onInput(c.value);
+      c.setAttribute("aria-label",label); if(onInput) c.oninput=()=>onInput(c.value);
       const l=document.createElement("span"); l.className="lab"; l.textContent=label;
       r.appendChild(c); r.appendChild(l); return r;
+    }
+    /* Tile swatch: shows the effective color, badged "default" while the tile
+       inherits. Picking a color sets the override, the x clears it back to
+       inherit -- both update in place so the color picker stays open. */
+    function haTileSwatch(label,t,key){
+      const r=haSwatch(label,haColorOf(t,key),null);
+      r.className="swatch-row chip";
+      const c=r.firstChild;
+      const badge=document.createElement("span"); badge.className="sw-def"; badge.textContent="default";
+      const x=document.createElement("button"); x.className="sw-reset";
+      x.setAttribute("aria-label","Use the default "+label+" color"); x.innerHTML="&times;";
+      function sync(){
+        c.value=haColorOf(t,key);
+        badge.style.display=t[key]?"none":"";
+        x.style.display=t[key]?"":"none";
+      }
+      c.oninput=()=>{ t[key]=c.value; sync(); haRenderDevice(); };
+      x.onclick=()=>{ delete t[key]; sync(); haRenderDevice(); };
+      r.appendChild(badge); r.appendChild(x); sync(); return r;
     }
 
     function haNumberFields(t){
@@ -560,9 +660,11 @@
       w.appendChild(row2);
       const sw=document.createElement("div"); sw.style.marginTop="10px";
       sw.innerHTML='<div class="mini-label">Colors by threshold</div>';
-      sw.appendChild(haSwatch("Below low",t.cLow,v=>{ t.cLow=v; haRenderDevice(); }));
-      sw.appendChild(haSwatch("In range",t.cNorm,v=>{ t.cNorm=v; haRenderDevice(); }));
-      sw.appendChild(haSwatch("Above high",t.cHigh,v=>{ t.cHigh=v; haRenderDevice(); }));
+      const strip=document.createElement("div"); strip.className="swatch-strip";
+      strip.appendChild(haTileSwatch("Below low",t,"cLow"));
+      strip.appendChild(haTileSwatch("In range",t,"cNorm"));
+      strip.appendChild(haTileSwatch("Above high",t,"cHigh"));
+      sw.appendChild(strip);
       w.appendChild(sw); return w;
     }
     function haTextFields(t){
@@ -597,9 +699,9 @@
       row.appendChild(haMiniField("True text",haInp(t.tText,"ON",v=>{ t.tText=v; haRenderDevice(); },"sm")));
       row.appendChild(haMiniField("False text",haInp(t.fText,"OFF",v=>{ t.fText=v; haRenderDevice(); },"sm")));
       w.appendChild(row);
-      const sw=document.createElement("div"); sw.style.marginTop="10px";
-      sw.appendChild(haSwatch("True color",t.tColor,v=>{ t.tColor=v; haRenderDevice(); }));
-      sw.appendChild(haSwatch("False color",t.fColor,v=>{ t.fColor=v; haRenderDevice(); }));
+      const sw=document.createElement("div"); sw.className="swatch-strip"; sw.style.marginTop="10px";
+      sw.appendChild(haTileSwatch("True color",t,"tColor"));
+      sw.appendChild(haTileSwatch("False color",t,"fColor"));
       w.appendChild(sw);
       const note=document.createElement("div"); note.className="field-hint"; note.style.marginTop="8px";
       note.textContent="on / off, open / closed, home / not_home, and true / false all map to True / False. An unavailable state renders as --.";
@@ -630,7 +732,7 @@
 
     function haAddRow(){
       if(haRows.length>=HA_MAX_ROWS || haTileCount()>=HA_MAX_TILES) return;
-      haRows.push([ haNumberTile("","state","New Tile","",1,0,100,HA_C_NORMAL,HA_C_NORMAL,HA_C_WARN) ]);
+      haRows.push([ haNumberTile("","state","New Tile","",1,0,100) ]);
       haSyncAll();
     }
     /* reorder a whole row up (-1) / down (+1); collapse state travels with the
@@ -649,29 +751,50 @@
       const tmp=row[ti]; row[ti]=row[ni]; row[ni]=tmp;
       haSyncAll();
     }
-    function haSyncAll(){ haRenderBuilder(); haRenderDevice(); }
+    function haSyncAll(){ haRenderDefaults(); haRenderBuilder(); haRenderDevice(); }
 
     /* ---- serialize / parse ha_tiles_config ---- */
+    /* only real overrides are written; an absent key means "inherit" */
+    function haPutColors(o,t,keys){ keys.forEach(k=>{ if(t[k]) o[k]=t[k]; }); return o; }
+    /* Adopt saved per-tile colors as overrides. In a legacy config (no top-level
+       "defaults") a value that merely repeats the stock constant was baked in by
+       an older build, never chosen, so it is dropped back to inherit. Once the
+       config carries "defaults" every stored color is a deliberate override and
+       is kept verbatim -- including one set back to a stock color on purpose. */
+    function haAdoptColors(t,src,keys){
+      keys.forEach(k=>{
+        const v=src[k];
+        if(typeof v!=="string" || !v) return;
+        if(haHealLegacy && v.toLowerCase()===HA_STOCK[k].toLowerCase()) return;
+        t[k]=v;
+      });
+      return t;
+    }
     function haSerializeTiles(){
+      const defaults={};
+      HA_DEF_KEYS.forEach(([k])=>{ defaults[k]=haDefColor(k); });
       const rows=haRows.map(row=>row.map(t=>{
         const base={entity_id:t.entity_id||"",attr:t.attr||"state",label:t.label||""};
         if(t.type==="number"){
-          return Object.assign(base,{type:"number",unit:t.unit||"",
-            decimals:haClampInt(t.decimals,0,4),low:haNum(t.low),high:haNum(t.high),
-            cLow:t.cLow||HA_C_NORMAL,cNorm:t.cNorm||HA_C_NORMAL,cHigh:t.cHigh||HA_C_WARN});
+          return haPutColors(Object.assign(base,{type:"number",unit:t.unit||"",
+            decimals:haClampInt(t.decimals,0,4),low:haNum(t.low),high:haNum(t.high)}),t,["cLow","cNorm","cHigh"]);
         } else if(t.type==="text"){
           return Object.assign(base,{type:"text",
             maps:(t.maps||[]).slice(0,4).map(m=>({val:m.val||"",color:m.color||HA_C_NORMAL}))});
         }
-        return Object.assign(base,{type:"bool",
-          tText:t.tText||"ON",fText:t.fText||"OFF",tColor:t.tColor||HA_C_OK,fColor:t.fColor||HA_C_CRIT});
+        return haPutColors(Object.assign(base,{type:"bool",
+          tText:t.tText||"ON",fText:t.fText||"OFF"}),t,["tColor","fColor"]);
       }));
-      return JSON.stringify({rows:rows});
+      return JSON.stringify({defaults:defaults,rows:rows});
     }
     function haParseTiles(str){
-      haRows=[];
+      haRows=[]; haDefaults={};
       let cfg=null;
       try{ cfg=JSON.parse(str||"{}"); }catch(e){ cfg=null; }
+      const hasDefs=!!(cfg && cfg.defaults && typeof cfg.defaults==="object");
+      haHealLegacy=!hasDefs;
+      const defs=hasDefs?cfg.defaults:{};
+      HA_DEF_KEYS.forEach(([k])=>{ if(typeof defs[k]==="string" && defs[k]) haDefaults[k]=defs[k]; });
       const rows=(cfg && Array.isArray(cfg.rows))?cfg.rows:[];
       rows.slice(0,HA_MAX_ROWS).forEach(row=>{
         if(!Array.isArray(row)) return;
@@ -680,8 +803,8 @@
           if(!t||typeof t!=="object") return;
           let tile;
           if(t.type==="text") tile=haTextTile(t.entity_id||"",t.attr||"state",t.label||"",(t.maps||[]).slice(0,4).map(m=>({val:m.val||"",color:m.color||HA_C_NORMAL})));
-          else if(t.type==="bool") tile=haBoolTile(t.entity_id||"",t.attr||"state",t.label||"",t.tText||"ON",t.fText||"OFF",t.tColor||HA_C_OK,t.fColor||HA_C_CRIT);
-          else tile=haNumberTile(t.entity_id||"",t.attr||"state",t.label||"",t.unit||"",haClampInt(t.decimals,0,4),haNum(t.low),haNum(t.high),t.cLow||HA_C_NORMAL,t.cNorm||HA_C_NORMAL,t.cHigh||HA_C_WARN);
+          else if(t.type==="bool") tile=haAdoptColors(haBoolTile(t.entity_id||"",t.attr||"state",t.label||"",t.tText||"ON",t.fText||"OFF"),t,["tColor","fColor"]);
+          else tile=haAdoptColors(haNumberTile(t.entity_id||"",t.attr||"state",t.label||"",t.unit||"",haClampInt(t.decimals,0,4),haNum(t.low),haNum(t.high)),t,["cLow","cNorm","cHigh"]);
           /* a saved tile is treated as probed so its full editor shows; the
              attribute dropdown reappears only after a fresh Probe. */
           tile.probed=true;
@@ -691,7 +814,18 @@
       });
     }
 
-    /* ---- tab populate / save ---- */
+    /* ---- tab populate / preview / save ----
+       Two ways this page reaches the device:
+         preview:true  -> apply now, store nothing (this tab's own button, the
+                          enable toggle, and the debounced connection-field apply)
+         no flag       -> apply and store (the page-wide Save, through the
+                          window.haCollectAndSave hook below)
+       Dirtiness is derived by comparing the current payload against the one
+       last loaded or stored, so no edit path has to remember to flag it. */
+    let haLoaded=false;     /* populate has run at least once */
+    let haStored="";        /* pristine payload: as last loaded / stored */
+    let haPreviewSent=false;/* device is showing something that is not stored */
+    let haPrevTimer=null;
 
     function populateTab_ha(data){
       /* Ignore the main-config blob; load Home Assistant from its own endpoint. */
@@ -705,49 +839,145 @@
           if($('ha_interval')) $('ha_interval').value=String(d.ha_update_interval_s||30);
           haParseTiles(d.ha_tiles_config||"");
           haSyncAll();
+          haLoaded=true; haStored=JSON.stringify(haPayload(false));
         })
         .catch(e=>{ console.error('Load Home Assistant config failed',e); haParseTiles(""); haSyncAll(); });
     }
 
-    /* Build the /api/ha-config payload from the current form + builder state.
-       Includes ha_enabled so both explicit Save and the live enable-toggle
-       persist the page on/off state to NVS. */
-    function haBuildConfigBody(){
-      return {
+    /* Build the /api/ha-config payload from the current form + builder state. */
+    function haPayload(preview){
+      const body={
         ha_enabled: $('ha_enabled')?!!$('ha_enabled').checked:false,
         ha_base_url: $('ha_base')?$('ha_base').value.trim():"",
         ha_token: $('ha_token')?$('ha_token').value.trim():"",
         ha_update_interval_s: $('ha_interval')?parseInt($('ha_interval').value,10)||30:30,
         ha_tiles_config: haSerializeTiles()
       };
+      if(preview) body.preview=true;
+      return body;
+    }
+    /* An immediate preview supersedes any pending debounced one. previewSent is
+       only set once the device has actually accepted the preview, so a failed
+       POST does not arm the unload restore. */
+    function haPreviewNow(okMsg){
+      clearTimeout(haPrevTimer); haPrevTimer=null;
+      return postJson('/api/ha-config',haPayload(true))
+        .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
+        .then(()=>{ haPreviewSent=true; if(okMsg) showToast(okMsg,'success'); })
+        .catch(e=>{ showToast('Preview failed: '+e.message,'error'); });
+    }
+    /* A preview lives in the device's RAM until something replaces it: there is
+       no timeout, and the main Discard does not restore tiles. So if the user
+       walks away from unsaved previews, push the pristine config back as one
+       more preview. On unload that has to be sendBeacon (a normal fetch is
+       killed with the page); the Blob type keeps the JSON content-type. */
+    function haRevertPreview(unloading){
+      /* kill a pending debounce first: a timer armed by the keystroke that has
+         not fired yet would otherwise outlive the discard */
+      clearTimeout(haPrevTimer); haPrevTimer=null;
+      if(!haPreviewSent || !haStored) return null;
+      haPreviewSent=false;
+      const body=JSON.parse(haStored); body.preview=true;
+      const json=JSON.stringify(body);
+      if(unloading){
+        if(navigator.sendBeacon) navigator.sendBeacon('/api/ha-config',new Blob([json],{type:'application/json'}));
+        return null;
+      }
+      return postJson('/api/ha-config',body).catch(()=>{});
+    }
+    window.addEventListener('beforeunload',()=>{ haRevertPreview(true); });
+    function haSchedulePreview(){
+      if(!haLoaded) return;
+      clearTimeout(haPrevTimer);
+      haPrevTimer=setTimeout(()=>{ haPreviewNow(null); },600);
+    }
+    function haPreviewLayout(){
+      const btn=$('ha_previewBtn'); if(!btn) return;
+      btn.disabled=true; btn.textContent="Sending...";
+      haPreviewNow('Preview sent to the device - not saved yet')
+        .finally(()=>{ btn.disabled=false; btn.textContent="Preview Layout on Device"; });
+    }
+    /* Page-wide Save hook: a promise that stores this page's whole config
+       (connection fields + tiles + default colors), or null when the tab was
+       never opened or nothing changed since it was loaded. */
+    function haCollectAndSave(){
+      /* drop any pending debounced preview: firing it after this save would
+         re-apply unsaved values and race the page-wide config POST */
+      clearTimeout(haPrevTimer); haPrevTimer=null;
+      if(!haLoaded || !$('ha_rowsHost')) return null;
+      const body=haPayload(false);
+      const json=JSON.stringify(body);
+      if(json===haStored) return null;
+      return postJson('/api/ha-config',body).then(r=>{
+        if(!r.ok) throw new Error('Home Assistant: HTTP '+r.status);
+        haStored=json; haPreviewSent=false;
+      });
     }
 
-    function haSaveConfig(){
-      const btn=$('ha_saveBtn'); if(!btn) return;
-      btn.disabled=true; btn.textContent="Saving...";
-      postJson('/api/ha-config',haBuildConfigBody()).then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
-        .then(()=>{ showToast('Home Assistant saved','success'); })
-        .catch(e=>{ showToast('Save failed: '+e.message,'error'); })
-        .finally(()=>{ btn.disabled=false; btn.textContent="Save Home Assistant"; });
-    }
-
-    /* Enable-toggle live-apply: the POST handler applies ha_enabled immediately
-       (shows/hides the page, starts/stops polling) and persists to NVS, so the
-       toggle takes effect without waiting for an explicit Save. */
+    /* Enable-toggle: shows or hides the page on the device right away as a
+       preview; the page-wide Save is what stores it. */
     function haOnEnabledToggle(){
-      haRenderDevice();
       const on=$('ha_enabled')?!!$('ha_enabled').checked:false;
-      postJson('/api/ha-config',haBuildConfigBody()).then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
-        .then(()=>{ showToast(on?'Home Assistant page enabled':'Home Assistant page disabled','success'); })
-        .catch(e=>{ showToast('Apply failed: '+e.message,'error'); });
+      haRenderDevice();
+      haPreviewNow(on?'Home Assistant page shown - not saved yet':'Home Assistant page hidden - not saved yet');
+    }
+
+    /* ---- test the connection without saving it (GET /api/ha-test) ---- */
+    function haTestConnection(){
+      const btn=$('ha_testBtn'), out=$('ha_testStatus');
+      if(!btn||!out) return;
+      /* Send the live (possibly unsaved) base URL + token as headers, same as
+       * Probe, so the token never lands in a request-URI log. */
+      var haHdrs={};
+      var baseEl=$('ha_base'); if(baseEl && baseEl.value.trim()) haHdrs['X-HA-BASE']=baseEl.value.trim();
+      var tokEl=$('ha_token'); if(tokEl && tokEl.value.trim()) haHdrs['X-HA-TOKEN']=tokEl.value.trim();
+      btn.disabled=true; btn.textContent="Testing...";
+      out.className="probe-status"; out.textContent="Testing...";
+      /* The verdict rides in the body, so the body is read whatever the HTTP
+         status is: an "error" key means the request could not even be made
+         (no address configured), not a verdict about the server. */
+      /* A missing verdict body means this display did not answer (or answered
+         with the login page) -- that says nothing about the Home Assistant
+         address, so it gets its own message. */
+      const panelFailed=()=>{
+        out.className="probe-status err";
+        out.textContent="Could not run the test - this display did not answer. Sign in again, then retry.";
+      };
+      fetch('/api/ha-test',{headers:haHdrs})
+        .then(r=>r.json().catch(()=>null))
+        .then(d=>{
+          if(!d || (!d.stage && !d.error)){ panelFailed(); return; }
+          out.classList.add(d.ok?"ok":"err");
+          if(d.error){
+            out.textContent="Enter the Home Assistant address above first";
+          } else if(d.stage==="ok"){
+            out.textContent="Connected - "+(d.location_name||"Home Assistant")+" (HA "+(d.version||"?")+")";
+          } else if(d.stage==="auth"){
+            out.textContent="Auth rejected - check the token";
+          } else if(d.stage==="not_ha"){
+            /* status 200 = reachable but the wrong kind of server; any other
+               status = reachable but nothing useful at that address */
+            out.textContent="Server responded but does not look like Home Assistant"+
+              ((d.status && d.status!==200)?(" (responded with "+d.status+")"):"");
+          } else {
+            out.textContent="Cannot reach server - check the URL";
+          }
+        })
+        .catch(e=>{ panelFailed(); })
+        .finally(()=>{ btn.disabled=false; btn.textContent="Test Connection"; });
     }
 
   /* Published for the shell (POPULATE_TAB_FNS looks populateTab_ha up on
      window at call time) and for the inline handlers in the markup above. */
   window.populateTab_ha=populateTab_ha;
   window.haOnSourceChange=haOnSourceChange;
+  window.haOnSourceEdit=haOnSourceEdit;
+  window.haOnSourceCommit=haOnSourceCommit;
   window.haOnEnabledToggle=haOnEnabledToggle;
   window.haAddRow=haAddRow;
-  window.haSaveConfig=haSaveConfig;
+  window.haPreviewLayout=haPreviewLayout;
+  window.haTestConnection=haTestConnection;
+  window.haCollectAndSave=haCollectAndSave;
+  window.haRevertPreview=haRevertPreview;
 })();
 </script>

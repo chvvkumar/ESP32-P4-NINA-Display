@@ -6,6 +6,7 @@
  * REQUIRE_AUTH() first-line (defense-in-depth):
  *   GET  /api/json-config  -- return the 5 JSON Display config fields
  *   POST /api/json-config  -- validate, snapshot+save, invalidate cache, live-apply
+ *                             ("preview":true applies live WITHOUT persisting)
  *   GET  /api/json-proxy   -- one-shot fetch of the configured URL (with auth
  *                             header), forward the raw JSON body to the browser
  *
@@ -38,6 +39,45 @@
  * truncated; the config UI then reports a parse failure rather than the device
  * buffering megabytes on an httpd worker. */
 #define JSON_PROXY_BUF_SIZE      262144
+
+/**
+ * @brief Apply the current JSON Display config to the live UI, without touching
+ *        persistence.
+ *
+ * Shared spine for every path that changes JSON Display config: the POST handler
+ * (save and preview) and the backup restore path. Reads the values it applies
+ * from the live config (app_config_get / app_config_get_json_tiles), so the
+ * caller must have already committed them there via app_config_save(),
+ * app_config_apply_preview(), or app_config_set_json_tiles[_ram]().
+ *
+ * Steps, in order: drop the client's parsed-tiles cache so the next poll re-reads
+ * the config; rebuild the page widget tree to the new rows/tiles; show/hide the
+ * page per @p enabled; re-resolve navigation (the page just appeared/disappeared
+ * from the arbiter ladder); start the poll task if the page is enabled.
+ *
+ * The refresh + enable calls touch LVGL and do NOT self-lock, so they run under
+ * the display lock (matches allsky_page_refresh_config usage). A lock timeout is
+ * not fatal -- the next poll picks the config up.
+ */
+void json_page_apply_live(bool enabled)
+{
+    json_client_invalidate_config_cache();
+    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+        json_page_refresh_config();
+        nina_dashboard_set_json_enabled(enabled);
+        bsp_display_unlock();
+    } else {
+        ESP_LOGW(TAG, "JSON config: display lock timeout; page refresh deferred to next poll");
+    }
+
+    nav_arbiter_notify_topology_changed();
+
+    /* A runtime enable must start the poll task without a reboot; idempotent
+     * (no-op when disabled or already running). */
+    if (enabled) {
+        json_ensure_task_running();
+    }
+}
 
 /**
  * @brief GET /api/json-config  -- return the JSON Display config fields.
@@ -83,6 +123,17 @@ esp_err_t json_config_get_handler(httpd_req_t *req)
  * then live-apply (invalidate the client's parsed-tiles cache + rebuild the
  * page widget tree + show/hide the page). app_config_t is ~7.6 KB, so the copy
  * lives in PSRAM -- never on the httpd stack (two copies overflow it -> panic).
+ *
+ * Preview: a body carrying "preview":true runs the identical validation and
+ * live-apply path but swaps both persist calls for their RAM-only twins --
+ * app_config_apply_preview() instead of app_config_save(),
+ * app_config_set_json_tiles_ram() instead of app_config_set_json_tiles(). Nothing
+ * reaches NVS, so the panel shows the candidate config while the saved one is
+ * untouched. The live-apply helpers read app_config_get() /
+ * app_config_get_json_tiles(), which is exactly what those two RAM-only writes
+ * update, so preview needs no separate apply path. Neither RAM-only write
+ * touches the unsaved-changes flag, so a preview never raises the web UI's
+ * "unsaved changes" bar.
  */
 esp_err_t json_config_post_handler(httpd_req_t *req)
 {
@@ -111,6 +162,9 @@ esp_err_t json_config_post_handler(httpd_req_t *req)
         }
     }
 
+    /* Preview: apply live, persist nothing. Absent/false => save as before. */
+    bool preview = cJSON_IsTrue(cJSON_GetObjectItem(root, "preview"));
+
     app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
     if (!cfg) {
         cJSON_Delete(root);
@@ -131,45 +185,31 @@ esp_err_t json_config_post_handler(httpd_req_t *req)
      * the live-apply refresh below reads the new value. */
     cJSON *tiles_item = cJSON_GetObjectItem(root, "json_tiles_config");
     if (cJSON_IsString(tiles_item) && tiles_item->valuestring) {
-        esp_err_t te = app_config_set_json_tiles(tiles_item->valuestring);
-        if (te != ESP_OK) ESP_LOGW(TAG, "json tiles persist failed: %s", esp_err_to_name(te));
+        esp_err_t te = preview ? app_config_set_json_tiles_ram(tiles_item->valuestring)
+                               : app_config_set_json_tiles(tiles_item->valuestring);
+        if (te != ESP_OK) ESP_LOGW(TAG, "json tiles apply failed: %s", esp_err_to_name(te));
     }
 
     cJSON_Delete(root);
 
-    /* Single atomic memcpy under the config mutex + NVS persist. validate_config
-     * (inside save) clamps json_update_interval_s to 5..300 and NUL-terminates
-     * the char arrays. */
-    app_config_save(cfg);
-
-    /* Live apply. The parsed-tiles cache in json_client must be dropped so the
-     * next poll re-reads the new config; the page widget tree is rebuilt to the
-     * new rows/tiles; and the page is shown/hidden per json_enabled. The refresh
-     * + enable calls touch LVGL, so they run under the display lock (they do NOT
-     * self-lock -- matches allsky_page_refresh_config usage). */
-    json_client_invalidate_config_cache();
-    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-        json_page_refresh_config();
-        nina_dashboard_set_json_enabled(cfg->json_enabled);
-        bsp_display_unlock();
+    /* Single atomic memcpy under the config mutex, + NVS persist unless preview.
+     * validate_config (inside both save and apply) clamps json_update_interval_s
+     * to 5..300 and NUL-terminates the char arrays. The _preview variant also
+     * leaves the unsaved-changes flag untouched. */
+    if (preview) {
+        app_config_apply_preview(cfg);
     } else {
-        ESP_LOGW(TAG, "JSON config: display lock timeout; page refresh deferred to next poll");
+        app_config_save(cfg);
     }
 
-    /* Re-resolve navigation so the arbiter immediately re-evaluates the JSON
-     * page's availability (it just appeared/disappeared from the ladder). */
-    nav_arbiter_notify_topology_changed();
-
-    /* A runtime enable must start the poll task without a reboot; idempotent
-     * (no-op when disabled or already running). */
-    if (cfg->json_enabled) {
-        json_ensure_task_running();
-    }
+    /* Live apply (cache drop + widget rebuild + show/hide + nav + task). */
+    json_page_apply_live(cfg->json_enabled);
 
     heap_caps_free(cfg);
 
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send(req, preview ? "{\"success\":true,\"preview\":true}"
+                                 : "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
 

@@ -88,13 +88,52 @@ static esp_http_client_handle_t make_client(const char *url,
     return esp_http_client_init(&cfg);
 }
 
+/** True if @p s contains no CR or LF. NUL cannot appear inside a C string, so
+ * CR/LF are the only characters that can terminate a header line early. */
+static bool header_token_is_clean(const char *s) {
+    for (const char *p = s; *p; p++) {
+        if (*p == '\r' || *p == '\n') return false;
+    }
+    return true;
+}
+
+/**
+ * Set one request header, refusing anything that could inject additional
+ * headers or split the request.
+ *
+ * Every header this module emits routes through here, which matters because the
+ * values are caller-supplied secrets that ultimately come from a user-editable
+ * field: the /api/config/pull password, ha_token, json_auth_header, a Spotify
+ * bearer. A CR or LF inside any of them would end the header line early and let
+ * the remainder be read as further headers (or as a body). Reject the whole
+ * header rather than strip the offending bytes -- a credential containing a
+ * newline is malformed input, not something to silently repair, and stripping
+ * would send a subtly wrong secret instead of failing visibly.
+ *
+ * The value is NEVER logged; it is the secret. The name is logged only once it
+ * is known clean, so a crafted name cannot forge log lines either.
+ */
+static void set_header_checked(esp_http_client_handle_t client,
+                               const char *name, const char *value) {
+    if (!name || !value) return;
+    if (!header_token_is_clean(name)) {
+        ESP_LOGW(TAG, "Dropping request header: name contains CR/LF");
+        return;
+    }
+    if (!header_token_is_clean(value)) {
+        ESP_LOGW(TAG, "Dropping request header '%s': value contains CR/LF", name);
+        return;
+    }
+    esp_http_client_set_header(client, name, value);
+}
+
 /** Apply the optional headers from @p opts to @p client. */
 static void apply_headers(esp_http_client_handle_t client, const http_fetch_opts_t *opts) {
     if (opts->host_header) {
         /* Re-assert on every call: a reused keep-alive handle may have served
          * a different Host on a prior request, and esp_http_client_set_url()
          * does not update an already-set Host header. */
-        esp_http_client_set_header(client, "Host", opts->host_header);
+        set_header_checked(client, "Host", opts->host_header);
     }
     if (opts->bearer_token) {
         /* 1200 bytes: real-world bearer tokens (e.g. Spotify OAuth access
@@ -103,7 +142,7 @@ static void apply_headers(esp_http_client_handle_t client, const http_fetch_opts
         char hdr[1200];
         int n = snprintf(hdr, sizeof(hdr), "Bearer %s", opts->bearer_token);
         if (n > 0 && n < (int)sizeof(hdr)) {
-            esp_http_client_set_header(client, "Authorization", hdr);
+            set_header_checked(client, "Authorization", hdr);
         }
     }
     if (opts->extra_header && opts->extra_header[0] != '\0') {
@@ -123,15 +162,15 @@ static void apply_headers(esp_http_client_handle_t client, const http_fetch_opts
                 while (*value == ' ') {
                     value++;
                 }
-                esp_http_client_set_header(client, name, value);
+                set_header_checked(client, name, value);
             }
         }
     }
     if (opts->user_agent) {
-        esp_http_client_set_header(client, "User-Agent", opts->user_agent);
+        set_header_checked(client, "User-Agent", opts->user_agent);
     }
     if (opts->accept) {
-        esp_http_client_set_header(client, "Accept", opts->accept);
+        set_header_checked(client, "Accept", opts->accept);
     }
 }
 

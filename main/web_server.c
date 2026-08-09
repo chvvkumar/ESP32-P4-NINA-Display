@@ -180,6 +180,36 @@ bool check_session(httpd_req_t *req) {
 }
 
 /**
+ * @brief True when this request plausibly came from the config UI in a browser,
+ *        rather than from a stateless API client (HA automation, macro keypad,
+ *        curl).
+ *
+ * Discriminator: the session cookie. It already exists and is already the thing
+ * that separates the two client classes -- a browser logs in once and carries
+ * the cookie; a stateless client has no session and authenticates per request
+ * with X-Auth-Password (see check_session). No new header or flag is introduced
+ * for this; if the cookie stops being the browser's credential, this stops being
+ * correct, and that is the right coupling.
+ *
+ * Used only to decide whether a live-apply counts as an unsaved WEB EDIT (raises
+ * the config UI's "unsaved changes" bar) or as an externally commanded change
+ * (must not). It is deliberately NOT a security decision -- REQUIRE_AUTH has
+ * already run by the time any handler asks -- so a wrong answer costs a
+ * cosmetic bar, never access.
+ *
+ * When auth is disabled there is no cookie and no header to tell the two apart,
+ * so this returns true: that preserves today's behavior exactly for the UI, and
+ * an open device is not the configuration this distinction was built for.
+ */
+bool request_is_web_ui(httpd_req_t *req) {
+    const app_config_t *cfg = app_config_get();
+    if (cfg && !cfg->auth_enabled) return true;   /* indistinguishable; keep old behavior */
+
+    char tok[SESSION_TOKEN_HEX_LEN + 1];
+    return session_extract_cookie(req, tok, sizeof(tok)) && session_valid(tok);
+}
+
+/**
  * @brief Send an auth-required response.
  *
  * For browser page requests (URI does not start with /api/), issue a 302 redirect
@@ -295,7 +325,7 @@ void start_web_server(void)
      * The proper long-term fix is to offload these outbound fetches off the
      * httpd worker onto a dedicated task; until then this stack must stay large. */
     config.stack_size = 40960;
-    config.max_uri_handlers = 76;
+    config.max_uri_handlers = 84;
     config.max_open_sockets = 16;
     config.lru_purge_enable = true;
     config.keep_alive_enable = true;
@@ -316,7 +346,8 @@ void start_web_server(void)
      * ROUTE_SETUP_EXEMPT below. See main/web_route_auth.h for the truth
      * table auth_gate_handler() evaluates via route_auth_allows(). */
     static const route_entry_t routes[] = {
-        { { "/",                     HTTP_GET,  root_get_handler, NULL }, ROUTE_SETUP_EXEMPT },
+        { { "/",                     HTTP_GET,  home_get_handler, NULL }, ROUTE_SETUP_EXEMPT },
+        { { "/config",               HTTP_GET,  root_get_handler, NULL }, ROUTE_SETUP_EXEMPT },
         { { "/ui/fragment",          HTTP_GET,  ui_fragment_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/favicon.ico",          HTTP_GET,  favicon_get_handler, NULL }, ROUTE_PUBLIC },
         { { "/api/config",           HTTP_GET,  config_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
@@ -336,6 +367,7 @@ void start_web_server(void)
         { { "/api/perf/reset",       HTTP_POST, perf_reset_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/config/apply",     HTTP_POST, config_apply_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/config/revert",    HTTP_POST, config_revert_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/config/pull",      HTTP_POST, config_pull_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/check-update",     HTTP_POST, check_update_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/check-update-json", HTTP_GET, check_update_json_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/ota-github",       HTTP_POST, ota_github_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
@@ -347,6 +379,7 @@ void start_web_server(void)
         { { "/api/ha-config",        HTTP_GET,  ha_config_get_handler,  NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/ha-config",        HTTP_POST, ha_config_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/ha-probe",         HTTP_GET,  ha_probe_get_handler,   NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/ha-test",          HTTP_GET,  ha_test_get_handler,    NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/spotify/config",         HTTP_GET,  spotify_config_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/spotify/config",         HTTP_POST, spotify_config_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/spotify/callback",       HTTP_GET,  spotify_callback_get_handler, NULL }, ROUTE_PUBLIC },
@@ -392,10 +425,12 @@ void start_web_server(void)
         { { "/api/image-display/refresh", HTTP_POST, image_display_refresh_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
     };
 
-    /* Keep config.max_uri_handlers (set to 76 above) in sync with the route
+    /* Keep config.max_uri_handlers (set to 84 above) in sync with the route
      * table; a route that overflows it would be silently dropped at
-     * registration. Bump both together when adding routes. */
-    _Static_assert(sizeof(routes) / sizeof(routes[0]) <= 76,
+     * registration. Bump both together when adding routes. Raised 80 -> 84 when
+     * the Home page took "/" and the config UI moved to /config (77 routes);
+     * the extra headroom is a few pointers per slot in the httpd handler array. */
+    _Static_assert(sizeof(routes) / sizeof(routes[0]) <= 84,
                    "max_uri_handlers too small for route table");
 
     for (int i = 0; i < (int)(sizeof(routes)/sizeof(routes[0])); i++) {
