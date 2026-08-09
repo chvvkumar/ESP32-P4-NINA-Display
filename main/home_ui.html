@@ -640,16 +640,14 @@ var WHY_LABEL = {
 var WHY = {
  menu:      function ()  { return ', so the screen stays where it is.'; },
  override:  function (n) { return ': ' + n + ' shows for a short while, then normal rules take over.'; },
- lock:      function ()  { return ', so the panel stays on ' + pageLabel(state.homeSlug) + '.'; },
+ lock:      function (n) { return ', so the panel stays on ' + n + '.'; },
  slideshow: function (n) { return ': ' + n + ' is taking its turn.'; },
  session:   function ()  {
   if (state.sessionCount > 1) return ', so the panel shows the summary of every computer.';
   return ': ' + (state.sessionRig || 'a NINA computer') + ' is connected, so the panel follows it.';
  },
- idle:      function ()  {
-  return ', so the panel shows ' + pageLabel(state.idleSlug || state.currentSlug) + '.';
- },
- home:      function ()  { return ', so the panel shows your home page, ' + pageLabel(state.homeSlug) + '.'; }
+ idle:      function (n) { return ', so the panel shows ' + n + '.'; },
+ home:      function (n) { return ', so the panel shows ' + n + '.'; }
 };
 
 /* ---- per-tick countdown: two targeted writes, no layout reads ---- */
