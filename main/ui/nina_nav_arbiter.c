@@ -17,6 +17,7 @@
 #include "goes_client.h"               /* goes_region_name, solar_band_label */
 #include "bsp/esp-bsp.h"
 #include "esp_log.h"
+#include "esp_timer.h"   /* nav_arbiter_get_web_status: grace-remaining clock */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "tasks.h"   /* image_source_* override API + goes_task_handle */
@@ -49,6 +50,10 @@ static struct {
                                     * Atomic: written by the web/LVGL task
                                     * (set_pin), read by the data task (resolve),
                                     * mirroring user_stamp_ms's cross-core guard. */
+    _Atomic uint8_t last_level;    /* nav_source_t rung that won the last resolve
+                                    * (NAV_SRC_HOLD while modal-frozen). Written
+                                    * by resolve() (data task), read by
+                                    * nav_arbiter_get_web_status() (httpd task). */
 } s_arb;
 
 /* Pack/unpack the USER claim (page index + image source) into one 32-bit word.
@@ -73,6 +78,7 @@ void nav_arbiter_init(void) {
     s_arb.pending_img_source = -1;
     s_arb.current_committed_img_source = -1;
     s_arb.pinned = false;
+    s_arb.last_level = (uint8_t)NAV_SRC_DEFAULT;
     s_arb.current_committed = nina_dashboard_get_active_page();
     ESP_LOGI(TAG, "nav arbiter init (committed page=%d)", s_arb.current_committed);
 }
@@ -141,6 +147,27 @@ void nav_arbiter_set_pin(bool on, int abs_page, int8_t img_src, int64_t now_ms) 
 }
 
 bool nav_arbiter_is_pinned(void) { return s_arb.pinned; }
+
+void nav_arbiter_get_web_status(nav_arbiter_web_status_t *out)
+{
+    if (!out) return;
+    out->level = (nav_source_t)s_arb.last_level;
+    out->grace_remaining_s = 0;
+    /* Grace remaining: recomputed here from the atomic claim fields rather than
+     * stored at resolve time, so pollers see it count down between resolves.
+     * The pin holds without expiry, so it reports 0. */
+    int user_page;
+    int8_t user_src;
+    unpack_claim(s_arb.user_claim, &user_page, &user_src);
+    if (user_page >= 0 && !s_arb.pinned) {
+        int64_t now_ms = esp_timer_get_time() / 1000;
+        int64_t left_ms = (int64_t)app_config_get()->nav_grace_s * 1000
+                        - (now_ms - s_arb.user_stamp_ms);
+        if (left_ms > 0) {
+            out->grace_remaining_s = (int)((left_ms + 999) / 1000);
+        }
+    }
+}
 
 /* ── Ladder helpers (Task 3.2) ──
  *
@@ -345,7 +372,10 @@ void nav_arbiter_resolve(int64_t now_ms) {
 
     /* Rung 0: modal freeze. Closing a modal restamps grace in
      * nav_arbiter_notify_modal_close, so the next resolve holds the page. */
-    if (s_arb.modal_depth > 0) return;
+    if (s_arb.modal_depth > 0) {
+        s_arb.last_level = (uint8_t)NAV_SRC_HOLD;
+        return;
+    }
 
     /* Topology rebuild consumed before resolution. */
     if (s_arb.topology_dirty) {
@@ -438,6 +468,10 @@ void nav_arbiter_resolve(int64_t now_ms) {
         desired = home_page_with_src(&hs);
         s_arb.pending_img_source = hs;
     }
+
+    /* Publish the winning rung for the web API (level state, read atomically
+     * by nav_arbiter_get_web_status from the httpd task). */
+    s_arb.last_level = (uint8_t)src;
 
     /* Idle indicator coupling. */
     bool now_idle = (src == NAV_SRC_IDLE);

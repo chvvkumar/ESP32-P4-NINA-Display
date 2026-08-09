@@ -325,7 +325,7 @@ void start_web_server(void)
      * The proper long-term fix is to offload these outbound fetches off the
      * httpd worker onto a dedicated task; until then this stack must stay large. */
     config.stack_size = 40960;
-    config.max_uri_handlers = 80;
+    config.max_uri_handlers = 84;
     config.max_open_sockets = 16;
     config.lru_purge_enable = true;
     config.keep_alive_enable = true;
@@ -346,7 +346,8 @@ void start_web_server(void)
      * ROUTE_SETUP_EXEMPT below. See main/web_route_auth.h for the truth
      * table auth_gate_handler() evaluates via route_auth_allows(). */
     static const route_entry_t routes[] = {
-        { { "/",                     HTTP_GET,  root_get_handler, NULL }, ROUTE_SETUP_EXEMPT },
+        { { "/",                     HTTP_GET,  home_get_handler, NULL }, ROUTE_SETUP_EXEMPT },
+        { { "/config",               HTTP_GET,  root_get_handler, NULL }, ROUTE_SETUP_EXEMPT },
         { { "/ui/fragment",          HTTP_GET,  ui_fragment_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/favicon.ico",          HTTP_GET,  favicon_get_handler, NULL }, ROUTE_PUBLIC },
         { { "/api/config",           HTTP_GET,  config_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
@@ -424,12 +425,12 @@ void start_web_server(void)
         { { "/api/image-display/refresh", HTTP_POST, image_display_refresh_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
     };
 
-    /* Keep config.max_uri_handlers (set to 80 above) in sync with the route
+    /* Keep config.max_uri_handlers (set to 84 above) in sync with the route
      * table; a route that overflows it would be silently dropped at
-     * registration. Bump both together when adding routes. Raised 76 -> 80 when
-     * /api/ha-test and /api/config/pull filled the last two slots; the extra
-     * headroom is a few pointers per slot in the httpd handler array. */
-    _Static_assert(sizeof(routes) / sizeof(routes[0]) <= 80,
+     * registration. Bump both together when adding routes. Raised 80 -> 84 when
+     * the Home page took "/" and the config UI moved to /config (77 routes);
+     * the extra headroom is a few pointers per slot in the httpd handler array. */
+    _Static_assert(sizeof(routes) / sizeof(routes[0]) <= 84,
                    "max_uri_handlers too small for route table");
 
     for (int i = 0; i < (int)(sizeof(routes)/sizeof(routes[0])); i++) {

@@ -19,6 +19,8 @@
 
 extern const uint8_t config_html_start[] asm("_binary_config_ui_html_start");
 extern const uint8_t config_html_end[]   asm("_binary_config_ui_html_end");
+extern const uint8_t home_html_start[] asm("_binary_home_ui_html_start");
+extern const uint8_t home_html_end[]   asm("_binary_home_ui_html_end");
 extern const uint8_t setup_html_start[] asm("_binary_setup_ui_html_start");
 extern const uint8_t setup_html_end[]   asm("_binary_setup_ui_html_end");
 extern const uint8_t favicon_png_start[] asm("_binary_favicon_png_start");
@@ -171,7 +173,7 @@ static esp_err_t send_embedded_asset(httpd_req_t *req,
     return httpd_resp_send(req, (const char *)plain_start, plain_end - plain_start);
 }
 
-// Handler for root URL
+// Handler for the config UI (served at /config; "/" is the Home page below)
 esp_err_t root_get_handler(httpd_req_t *req)
 {
     if (is_setup_mode()) {
@@ -184,6 +186,22 @@ esp_err_t root_get_handler(httpd_req_t *req)
     return send_embedded_asset(req, config_html_start, config_html_end,
                                config_html_gz_start, config_html_gz_end,
                                "text/html");
+}
+
+// Handler for the Home page at "/". Mirrors root_get_handler's flow exactly:
+// the first-run setup screen wins while no WiFi is configured, and
+// unauthenticated browsers are redirected into the login flow.
+esp_err_t home_get_handler(httpd_req_t *req)
+{
+    if (is_setup_mode()) {
+        httpd_resp_set_type(req, "text/html");
+        httpd_resp_send(req, (const char *)setup_html_start,
+                        setup_html_end - setup_html_start);
+        return ESP_OK;
+    }
+    REQUIRE_AUTH(req);
+    return send_embedded_asset(req, home_html_start, home_html_end,
+                               NULL, NULL, "text/html");
 }
 
 /**

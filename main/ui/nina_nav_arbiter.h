@@ -78,6 +78,19 @@ void nav_arbiter_set_pin(bool on, int abs_page, int8_t img_src, int64_t now_ms);
 /** True if the navigation pin is currently engaged. */
 bool nav_arbiter_is_pinned(void);
 
+/** Snapshot of the arbiter's last resolve outcome, for the web API. */
+typedef struct {
+    nav_source_t level;             /* winning rung at the last resolve
+                                     * (NAV_SRC_HOLD while a modal is open) */
+    int          grace_remaining_s; /* seconds left in the USER grace window,
+                                     * 0 when no grace claim is active (the
+                                     * runtime pin has no expiry and reports 0) */
+} nav_arbiter_web_status_t;
+
+/** Fill @p out with the last resolve outcome. Safe to call from any task
+ *  (httpd included): reads only the arbiter's atomic fields. */
+void nav_arbiter_get_web_status(nav_arbiter_web_status_t *out);
+
 #ifdef __cplusplus
 }
 #endif
