@@ -29,6 +29,7 @@ typedef enum {
     NAV_SRC_IDLE,       /* idle-override active, all rigs confirmed down */
     NAV_SRC_DEFAULT,    /* Home Page fallback */
     NAV_SRC_HOLD,       /* modal open: no change */
+    NAV_SRC_HOME_LOCK,  /* home_page_lock rung won (appended v49+; keep last) */
 } nav_source_t;
 
 /** One-time init. Call from app_main after the dashboard is created. */

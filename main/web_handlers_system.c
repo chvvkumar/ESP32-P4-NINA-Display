@@ -753,6 +753,7 @@ static const char *nav_level_str(nav_source_t src)
 {
     switch (src) {
         case NAV_SRC_HOLD:      return "menu";
+        case NAV_SRC_HOME_LOCK: return "lock";
         case NAV_SRC_USER:      return "override";
         case NAV_SRC_SLIDESHOW: return "slideshow";
         case NAV_SRC_SESSION:   return "session";
@@ -846,6 +847,7 @@ esp_err_t status_get_handler(httpd_req_t *req)
         cJSON_AddStringToObject(nav_obj, "level", nav_level_str(nav.level));
         cJSON_AddNumberToObject(nav_obj, "override_remaining_s", nav.grace_remaining_s);
         cJSON_AddNumberToObject(nav_obj, "grace_s", cfg->nav_grace_s);
+        cJSON_AddBoolToObject(nav_obj, "home_page_lock", cfg->home_page_lock);
         cJSON_AddNumberToObject(nav_obj, "current_page", nina_dashboard_get_active_page());
         cJSON_AddStringToObject(nav_obj, "current_page_slug",
                                 page_id_slug_or_summary(control_page_current_id()));

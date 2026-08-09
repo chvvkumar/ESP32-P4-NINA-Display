@@ -431,7 +431,7 @@ void nav_arbiter_resolve(int64_t now_ms) {
         int8_t hs = -1;
         desired = home_page_with_src(&hs);
         s_arb.pending_img_source = hs;
-        src = NAV_SRC_DEFAULT;
+        src = NAV_SRC_HOME_LOCK;
     } else if (auto_rotate) {
         if (s_arb.slideshow_advance) {
             s_arb.slideshow_advance = false;

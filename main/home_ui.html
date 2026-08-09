@@ -59,31 +59,47 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
 .main-grid>.card,.side-col>.card{margin-bottom:0}
 .side-col{display:flex;flex-direction:column;gap:20px}
 .side-col>.card:last-child{flex:1}
-/* ladder hero */
+/* decision-flow hero */
 .hero-card{padding:24px 28px 28px;display:flex;flex-direction:column}
 .mode-chip{font-size:.7rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-2);background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:8px;padding:3px 10px;white-space:nowrap;min-width:118px;text-align:center}
 .hero-body{flex:1;position:relative;display:grid;grid-template-columns:minmax(0,1fr) 190px;gap:44px}
-.ladder{display:flex;flex-direction:column;justify-content:space-between;position:relative}
-.ladder::before{content:'';position:absolute;left:17px;top:20px;bottom:20px;width:2px;background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.1) 50%,rgba(255,255,255,.04));border-radius:1px}
-.rung{position:relative;display:flex;align-items:flex-start;gap:14px;padding:12px 14px 12px 0;border-radius:12px;border:1px solid transparent}
-.rung+.rung{margin-top:4px}
-.rung-num{width:36px;height:36px;border-radius:50%;flex-shrink:0;align-self:center;display:flex;align-items:center;justify-content:center;line-height:1;padding:0;font-size:.75rem;font-weight:700;font-variant-numeric:tabular-nums;background:var(--input-bg);border:1px solid var(--border);color:var(--hint);position:relative;z-index:1}
-.rung-main{min-width:0;flex:1;padding-top:2px}
-.rung-name{font-size:.88rem;font-weight:600;color:var(--text-2)}
-.rung-desc{font-size:.75rem;color:var(--hint);line-height:1.45;margin-top:2px}
-.rung-state{flex-shrink:0;align-self:center;font-size:.64rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:3px 9px;border-radius:8px;white-space:nowrap;min-width:84px;text-align:center;color:var(--hint);background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07)}
-.rung.inactive .rung-name{color:var(--muted)}
-.rung.dimmed{opacity:.6}
-.rung.active{background:rgba(var(--a),.09);border-color:rgba(var(--a),.4)}
-.rung.active .rung-num{background:var(--accent);color:#0a0a0b;border-color:var(--accent)}
-.rung.active .rung-name{color:#f4f4f5}
-.rung.active .rung-desc{color:var(--text-2)}
-.rung.active .rung-state{color:#0a0a0b;background:var(--accent);border-color:var(--accent)}
-.rung.active::after{content:'';position:absolute;right:-9px;top:50%;transform:translateY(-50%);width:0;height:0;border-top:7px solid transparent;border-bottom:7px solid transparent;border-left:9px solid rgba(var(--a),.9)}
-/* override countdown row: height always reserved so rungs below never shift */
-.rung-extra{margin-top:8px}
+/* flow grid: col 1 = questions, col 2 = yes connector, col 3 = yes outcomes.
+   Each step emits a question row, then a NO-connector row; auto-placement keeps them paired. */
+.flow{position:relative;display:grid;grid-template-columns:minmax(0,1.12fr) 44px minmax(0,1fr);align-content:start}
+.fstep{display:contents}
+.fq{grid-column:1;align-self:center;background:var(--input-bg);border:1px solid var(--border);border-radius:12px;padding:11px 14px;font-size:.8rem;font-weight:600;line-height:1.35;color:var(--muted);transition:border-color .3s,background-color .3s,color .3s,opacity .3s}
+.fyes{grid-column:2;align-self:center;position:relative;height:2px;background:rgba(255,255,255,.1);transition:background-color .3s,opacity .3s}
+.fyes::before{content:'yes';position:absolute;top:-15px;left:50%;transform:translateX(-50%);font-size:.56rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--hint)}
+.fyes::after{content:'';position:absolute;right:-1px;top:50%;transform:translateY(-50%);width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-left:6px solid rgba(255,255,255,.18)}
+.fout{grid-column:3;align-self:center;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:10px 12px;font-size:.74rem;font-weight:600;line-height:1.35;color:var(--muted);transition:border-color .3s,background-color .3s,color .3s,opacity .3s,box-shadow .3s}
+.fno{grid-column:1;justify-self:center;position:relative;width:2px;height:36px;background:rgba(255,255,255,.1);transition:opacity .3s}
+.fno::before{content:'no';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:.56rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--hint);background:var(--glass-bg);padding:1px 6px;border-radius:6px}
+.fno::after{content:'';position:absolute;bottom:-1px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:6px solid rgba(255,255,255,.18)}
+.fterm{grid-column:1;display:flex;align-items:center;gap:10px;background:rgba(255,255,255,.02);border:1px dashed rgba(255,255,255,.16);border-radius:12px;padding:11px 14px;font-size:.78rem;font-weight:600;color:var(--muted);transition:border-color .3s,background-color .3s,color .3s,opacity .3s,box-shadow .3s}
+.fterm .ic{opacity:.7}
+/* answered steps above the winner: lit question, lit NO path, dim yes branch */
+.fstep.past .fq{color:#f4f4f5;border-color:rgba(var(--a),.3);background:rgba(var(--a),.05)}
+.fstep.past .fno{background:linear-gradient(180deg,rgba(var(--a),.8),rgba(var(--a),.45))}
+.fstep.past .fno::before{color:var(--accent)}
+.fstep.past .fno::after{border-top-color:rgba(var(--a),.7)}
+.fstep.past .fyes,.fstep.past .fout{opacity:.42}
+/* the winning step: question answered yes, outcome takes the screen */
+.fstep.active .fq{color:#f4f4f5;border-color:rgba(var(--a),.5);background:rgba(var(--a),.09)}
+.fstep.active .fyes{background:rgba(var(--a),.85)}
+.fstep.active .fyes::before{color:var(--accent)}
+.fstep.active .fyes::after{border-left-color:rgba(var(--a),.9)}
+.fstep.active .fout{color:#f4f4f5;border-color:rgba(var(--a),.55);background:rgba(var(--a),.13);box-shadow:0 0 20px rgba(var(--a),.22)}
+.fstep.active .fno{opacity:.35}
+.fstep.active .fterm{border-style:solid;border-color:rgba(var(--a),.55);background:rgba(var(--a),.12);color:#f4f4f5;box-shadow:0 0 20px rgba(var(--a),.22)}
+.fstep.active .fterm .ic{opacity:1;color:var(--accent)}
+/* steps the decision never reached */
+.fstep.future .fq,.fstep.future .fyes,.fstep.future .fout,.fstep.future .fno,.fstep.future .fterm{opacity:.38}
+/* step whose feature is turned off in Settings: dimmed like future, never lit as "answered no" */
+.fstep.off .fq,.fstep.off .fyes,.fstep.off .fout,.fstep.off .fno{opacity:.38}
+/* extras inside outcome nodes: countdown space is always reserved (no layout shift) */
+.fextra{margin-top:8px}
 #overrideExtra{visibility:hidden}
-.rung.active #overrideExtra.has-content{visibility:visible}
+#overrideExtra.has-content{visibility:visible}
 #slideshowExtra{display:none}
 #slideshowExtra.has-content{display:block}
 .countdown-wrap{display:flex;align-items:center;gap:10px}
@@ -95,8 +111,9 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
 .rot-arrow{width:10px;height:10px;color:var(--hint)}
 .rot-step{font-size:.7rem;font-weight:600;color:var(--muted);padding:3px 10px;border-radius:8px;background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.08)}
 .rot-step.now{color:var(--accent);background:rgba(var(--a),.13);border-color:rgba(var(--a),.45)}
-/* connector from active row to panel preview */
+/* connector from winning node to panel preview, with arrowhead */
 .connector{position:absolute;top:0;left:0;height:2px;background:linear-gradient(90deg,rgba(var(--a),.9),rgba(var(--a),.35));border-radius:1px;z-index:0;transition:transform .3s;pointer-events:none}
+.connector::after{content:'';position:absolute;right:0;top:50%;transform:translateY(-50%);width:0;height:0;border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:8px solid rgba(var(--a),.8)}
 /* panel preview */
 .panel-col{display:flex;flex-direction:column;align-items:center;gap:12px;align-self:start;position:relative;z-index:1;transition:transform .3s}
 .panel-label{font-size:.64rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--hint)}
@@ -166,7 +183,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
 .deck-hint{font-size:.75rem;color:var(--hint);margin-top:12px;line-height:1.5}
 /* responsive */
 @media (max-width:900px){.main-grid{grid-template-columns:1fr}.content{padding:16px 16px 48px}.card{padding:20px}}
-@media (max-width:640px){.hero-body{grid-template-columns:1fr;gap:20px}.connector{display:none}.rung.active::after{display:none}.panel-col{align-self:stretch}.rung-desc{font-size:.7rem}.brand-meta{display:none}}
+@media (max-width:640px){.hero-body{grid-template-columns:1fr;gap:20px}.connector{display:none}.panel-col{align-self:stretch}.flow{grid-template-columns:minmax(0,1fr) 36px minmax(0,1fr)}.fq{font-size:.74rem;padding:10px 12px}.fout{font-size:.68rem;padding:9px 10px}.fterm{font-size:.72rem}.brand-meta{display:none}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -257,63 +274,58 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
    <div class="hero-body" id="heroBody">
     <div class="connector" id="connector"></div>
 
-    <div class="ladder" id="ladder">
-     <div class="rung inactive" data-level="menu">
-      <div class="rung-num">1</div>
-      <div class="rung-main">
-       <div class="rung-name">Menu open</div>
-       <div class="rung-desc">A settings or detail screen is open on the panel. The page holds until it closes.</div>
-      </div>
-      <span class="rung-state" id="menuState">Waiting</span>
+    <div class="flow" id="flow">
+     <div class="fstep future" data-level="menu">
+      <div class="fq">Is a menu open on the panel?</div>
+      <div class="fyes"></div>
+      <div class="fout" id="outMenu">The screen stays where it is</div>
+      <div class="fno"></div>
      </div>
-     <div class="rung inactive" data-level="override">
-      <div class="rung-num">2</div>
-      <div class="rung-main">
-       <div class="rung-name">Manual override</div>
-       <div class="rung-desc" id="overrideDesc">After you swipe, tap, or pick a page here, it stays on screen for 10 seconds.</div>
-       <div class="rung-extra" id="overrideExtra">
+     <div class="fstep future" data-level="override">
+      <div class="fq">Did you just pick a page?</div>
+      <div class="fyes"></div>
+      <div class="fout" id="outOverride">
+       <div>Your page shows for a while</div>
+       <div class="fextra" id="overrideExtra">
         <div class="countdown-wrap">
          <div class="countdown-bar"><div class="countdown-fill" id="countdownFill"></div></div>
          <span class="countdown-num" id="countdownNum">10s</span>
         </div>
        </div>
       </div>
-      <span class="rung-state" id="overrideState">Waiting</span>
+      <div class="fno"></div>
      </div>
-     <div class="rung inactive" data-level="slideshow">
-      <div class="rung-num">3</div>
-      <div class="rung-main">
-       <div class="rung-name">Slideshow</div>
-       <div class="rung-desc" id="slideshowDesc">Auto-rotate is off. Turn it on below to cycle through selected pages.</div>
-       <div class="rung-extra" id="slideshowExtra">
+     <div class="fstep future" data-level="lock">
+      <div class="fq">Is 'Always show the Home Page' on?</div>
+      <div class="fyes"></div>
+      <div class="fout" id="outLock">Show your home page</div>
+      <div class="fno"></div>
+     </div>
+     <div class="fstep future" data-level="slideshow">
+      <div class="fq">Is the slideshow on?</div>
+      <div class="fyes"></div>
+      <div class="fout" id="outSlideshow">
+       <div>Pages take turns</div>
+       <div class="fextra" id="slideshowExtra">
         <div class="rotation-order" id="rotationOrder"></div>
        </div>
       </div>
-      <span class="rung-state" id="slideshowState">Off</span>
+      <div class="fno"></div>
      </div>
-     <div class="rung inactive" data-level="session">
-      <div class="rung-num">4</div>
-      <div class="rung-main">
-       <div class="rung-name">Session</div>
-       <div class="rung-desc" id="sessionDesc">When a NINA computer is connected, the panel follows its page.</div>
-      </div>
-      <span class="rung-state" id="sessionState">Waiting</span>
+     <div class="fstep future" data-level="session">
+      <div class="fq">Is a telescope busy imaging?</div>
+      <div class="fyes"></div>
+      <div class="fout" id="outSession">Show that telescope's page</div>
+      <div class="fno"></div>
      </div>
-     <div class="rung inactive" data-level="idle">
-      <div class="rung-num">5</div>
-      <div class="rung-main">
-       <div class="rung-name">Idle page</div>
-       <div class="rung-desc" id="idleDesc">When every NINA computer is offline, show your chosen idle page instead.</div>
-      </div>
-      <span class="rung-state" id="idleState">Waiting</span>
+     <div class="fstep future" data-level="idle">
+      <div class="fq">Are all your telescope computers offline?</div>
+      <div class="fyes"></div>
+      <div class="fout" id="outIdle">Show your idle page</div>
+      <div class="fno"></div>
      </div>
-     <div class="rung inactive" data-level="home">
-      <div class="rung-num">6</div>
-      <div class="rung-main">
-       <div class="rung-name" id="homeRungName">Home page: Summary</div>
-       <div class="rung-desc">If nothing above applies, the panel falls back to your home page.</div>
-      </div>
-      <span class="rung-state" id="homeState">Fallback</span>
+     <div class="fstep future" data-level="home">
+      <div class="fterm" id="outHome"><svg class="ic"><use href="#i-grid"/></svg><span id="homeTermText">Show your home page (Summary)</span></div>
      </div>
     </div>
 
@@ -360,7 +372,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
    <div class="card">
     <div class="card-title"><span>Panel Pages</span></div>
     <div class="deck" id="deck"></div>
-    <div class="deck-hint" id="deckHint">Tap a page to send the panel there. It holds for 10 seconds, then normal rules take over again.</div>
+    <div class="deck-hint" id="deckHint">Tap a page to send the panel there. It holds for a short while, then normal rules take over again.</div>
    </div>
   </div>
  </div>
@@ -398,19 +410,23 @@ var state = {
 var pagesBySlug = {};
 
 /* ---- DOM refs ---- */
-var rungs = {};
-document.querySelectorAll('.rung').forEach(function (el) { rungs[el.dataset.level] = el; });
-var heroBody = $('heroBody'), ladderEl = $('ladder'), connector = $('connector');
+/* flow steps: top-down question order; the resolved level wins its row */
+var ORDER = ['menu', 'override', 'lock', 'slideshow', 'session', 'idle', 'home'];
+var steps = {};
+document.querySelectorAll('.fstep').forEach(function (el) { steps[el.dataset.level] = el; });
+var outcomes = {
+ menu: $('outMenu'), override: $('outOverride'), lock: $('outLock'), slideshow: $('outSlideshow'),
+ session: $('outSession'), idle: $('outIdle'), home: $('outHome')
+};
+var activeTarget = null;
+var heroBody = $('heroBody'), flowEl = $('flow'), connector = $('connector');
 var panelCol = $('panelCol'), panelFrame = $('panelFrame'), panelUse = $('panelUse');
 var panelPageName = $('panelPageName'), panelPageSub = $('panelPageSub'), panelDots = $('panelDots');
 var whyLevel = $('whyLevel'), whyRest = $('whyRest');
 var deck = $('deck'), modeChip = $('modeChip'), toggleHint = $('toggleHint');
 var rotationOrder = $('rotationOrder'), countdownFill = $('countdownFill'), countdownNum = $('countdownNum');
-var overrideState = $('overrideState'), overrideExtra = $('overrideExtra'), overrideDesc = $('overrideDesc');
-var slideshowState = $('slideshowState'), slideshowDesc = $('slideshowDesc'), slideshowExtra = $('slideshowExtra');
-var sessionState = $('sessionState'), sessionDesc = $('sessionDesc');
-var menuState = $('menuState'), idleState = $('idleState'), idleDesc = $('idleDesc');
-var homeRungName = $('homeRungName'), homeState = $('homeState');
+var overrideExtra = $('overrideExtra'), slideshowExtra = $('slideshowExtra');
+var outIdle = outcomes.idle, outLock = outcomes.lock, homeTermText = $('homeTermText');
 var autoRotateToggle = $('autoRotateToggle'), connPill = $('connPill'), deckHint = $('deckHint');
 var rigList = $('rigList'), rigEmpty = $('rigEmpty');
 var metricUptime = $('metricUptime'), metricTemp = $('metricTemp'), tempSub = $('tempSub');
@@ -611,18 +627,24 @@ function renderRigs(instances, uptimeMs) {
 }
 
 /* ---- panel-why copy per level (end-user language) ---- */
-var WHY_LABEL = { menu: 'Menu open', override: 'Manual override', slideshow: 'Slideshow',
-                  session: 'Session', idle: 'Idle page', home: 'Home page' };
+var WHY_LABEL = {
+ menu: 'A menu is open', override: 'You chose this page',
+ lock: "'Always show the Home Page' is on", slideshow: 'The slideshow is on',
+ session: 'A telescope is imaging', idle: 'All your telescope computers are offline', home: 'Nothing else applies'
+};
 var WHY = {
- menu:      function ()  { return ' decides: a menu is open on the panel.'; },
- override:  function (n) { return ' decides: you picked ' + n + '. Normal rules resume shortly.'; },
- slideshow: function (n) { return ' decides: auto-rotate is showing ' + n + '.'; },
+ menu:      function ()  { return ', so the screen stays where it is.'; },
+ override:  function (n) { return ': ' + n + ' shows for a short while, then normal rules take over.'; },
+ lock:      function ()  { return ', so the panel stays on ' + pageLabel(state.homeSlug) + '.'; },
+ slideshow: function (n) { return ': ' + n + ' is taking its turn.'; },
  session:   function ()  {
-  if (state.sessionCount > 1) return ' decides: several computers are connected.';
-  return ' decides: ' + (state.sessionRig || 'a NINA computer') + ' is connected.';
+  if (state.sessionCount > 1) return ', so the panel shows the summary of every computer.';
+  return ': ' + (state.sessionRig || 'a NINA computer') + ' is connected, so the panel follows it.';
  },
- idle:      function ()  { return ' decides: every NINA computer is offline.'; },
- home:      function ()  { return ' decides: nothing else applies, so the panel shows your home page.'; }
+ idle:      function ()  {
+  return ', so the panel shows ' + pageLabel(state.idleSlug || state.currentSlug) + '.';
+ },
+ home:      function ()  { return ', so the panel shows your home page, ' + pageLabel(state.homeSlug) + '.'; }
 };
 
 /* ---- per-tick countdown: two targeted writes, no layout reads ---- */
@@ -634,57 +656,41 @@ function tickCountdown() {
 /* ---- full render: idempotent, textContent/class writes only ---- */
 var lastLevel = '';
 function render() {
- var lvl = rungs[state.level] ? state.level : 'home';
+ var lvl = steps[state.level] ? state.level : 'home';
  var slug = state.currentSlug;
 
- Object.keys(rungs).forEach(function (l) {
-  var el = rungs[l];
-  el.classList.remove('active', 'inactive', 'dimmed');
-  el.classList.add(l === lvl ? 'active' : 'inactive');
+ /* light the taken path: questions above the winner answered "no",
+    the winner answered "yes", everything below unreached */
+ var ai = ORDER.indexOf(lvl);
+ ORDER.forEach(function (l, i) {
+  var el = steps[l];
+  el.classList.remove('past', 'active', 'future', 'off');
+  /* idle step turned off in Settings: dim it instead of "answered no" */
+  if (l === 'idle' && !state.idleEnabled && i !== ai) el.classList.add('off');
+  else el.classList.add(i < ai ? 'past' : i === ai ? 'active' : 'future');
  });
- if (state.autoRotate) {
-  rungs.session.classList.add('dimmed');
-  rungs.idle.classList.add('dimmed');
-  rungs.home.classList.add('dimmed');
- } else {
-  rungs.slideshow.classList.add('dimmed');
- }
- rungs[lvl].classList.remove('dimmed');
+ activeTarget = outcomes[lvl];
 
- menuState.textContent = lvl === 'menu' ? 'Active' : 'Waiting';
-
- /* fixed-width state labels: the countdown number never rides in the pill */
- overrideState.textContent = lvl === 'override' ? 'Active' : 'Waiting';
+ /* countdown row: space is always reserved inside the outcome node (no layout shift) */
  overrideExtra.classList.toggle('has-content', lvl === 'override');
- overrideDesc.textContent = 'After you swipe, tap, or pick a page here, it stays on screen for ' +
-  state.graceS + ' seconds.';
  if (lvl === 'override') tickCountdown();
 
- slideshowState.textContent = state.autoRotate ? (lvl === 'slideshow' ? 'Active' : 'Paused') : 'Off';
- slideshowDesc.textContent = state.autoRotate
-  ? 'Auto-rotate cycles through your selected pages.'
-  : 'Auto-rotate is off. Turn it on below to cycle through selected pages.';
  slideshowExtra.classList.toggle('has-content', state.autoRotate && state.rotation.length > 0);
  renderRotation();
 
- sessionState.textContent = lvl === 'session' ? 'Active' : (state.autoRotate ? 'Bypassed' : 'Waiting');
- if (state.sessionCount > 1) {
-  sessionDesc.textContent = 'Several computers are connected, so the panel shows the summary.';
- } else if (state.sessionRig) {
-  sessionDesc.textContent = state.sessionRig + ' is connected, so the panel follows its page.';
- } else {
-  sessionDesc.textContent = 'When a NINA computer is connected, the panel follows its page.';
- }
+ outIdle.textContent = !state.idleEnabled
+  ? "Off. Turn on 'Switch page when no connections' in Settings to use this."
+  : state.idleSlug
+   ? 'Show your idle page (' + pageLabel(state.idleSlug) + ')'
+   : 'Show your idle page';
 
- idleState.textContent = !state.idleEnabled ? 'Off' : (lvl === 'idle' ? 'Active' : 'Waiting');
- idleDesc.textContent = state.idleEnabled && state.idleSlug
-  ? 'When every NINA computer is offline, show ' + pageLabel(state.idleSlug) + ' instead.'
-  : 'When every NINA computer is offline, show your chosen idle page instead.';
-
- homeRungName.textContent = 'Home page: ' + pageLabel(state.homeSlug);
- homeState.textContent = lvl === 'home' ? 'Active' : 'Fallback';
+ outLock.textContent = 'Show your home page (' + pageLabel(state.homeSlug) + ')';
+ homeTermText.textContent = 'Show your home page (' + pageLabel(state.homeSlug) + ')';
 
  modeChip.textContent = state.mode === 'slideshow' ? 'Slideshow mode' : 'Pinned mode';
+ modeChip.title = state.mode === 'slideshow'
+  ? 'Auto-rotate is on. The panel takes turns showing your selected pages. Turn it off below to pin the panel to one page.'
+  : 'Auto-rotate is off. The panel stays on the page chosen by the rules below, such as following an imaging telescope. Turn on Auto-rotate below to cycle pages instead.';
  toggleHint.textContent = state.autoRotate
   ? 'On. The panel cycles through the slideshow pages.'
   : 'Off. The panel stays pinned to the active session.';
@@ -713,33 +719,34 @@ function render() {
  * Runs only on level change, resize, breakpoint change, or font load; never per tick. */
 var mq640 = window.matchMedia('(max-width: 640px)');
 function layout() {
- var active = ladderEl.querySelector('.rung.active');
+ var active = activeTarget;
  if (!active || mq640.matches) {
   connector.style.display = 'none';
   panelCol.style.transform = '';
   return;
  }
- var rungCenter = ladderEl.offsetTop + active.offsetTop + active.offsetHeight / 2;
- var rungRight = ladderEl.offsetLeft + active.offsetLeft + active.offsetWidth;
+ var nodeCenter = flowEl.offsetTop + active.offsetTop + active.offsetHeight / 2;
+ var nodeRight = flowEl.offsetLeft + active.offsetLeft + active.offsetWidth;
+ /* slide the preview column so the frame centers on the winning node (clamped inside the hero) */
  var frameCenter = panelCol.offsetTop + panelFrame.offsetTop + panelFrame.offsetHeight / 2;
- var delta = rungCenter - frameCenter;
+ var delta = nodeCenter - frameCenter;
  var maxDown = heroBody.clientHeight - (panelCol.offsetTop + panelCol.offsetHeight);
  var maxUp = -panelCol.offsetTop;
  if (delta > maxDown) delta = maxDown;
  if (delta < maxUp) delta = maxUp;
  panelCol.style.transform = 'translateY(' + delta + 'px)';
- var width = panelCol.offsetLeft + panelFrame.offsetLeft - rungRight;
+ var width = panelCol.offsetLeft + panelFrame.offsetLeft - nodeRight;
  if (width < 8) { connector.style.display = 'none'; return; }
  connector.style.display = 'block';
- connector.style.left = rungRight + 'px';
+ connector.style.left = nodeRight + 'px';
  connector.style.width = width + 'px';
- connector.style.transform = 'translateY(' + (rungCenter - 1) + 'px)';
+ connector.style.transform = 'translateY(' + (nodeCenter - 1) + 'px)';
 }
 mq640.addEventListener('change', layout);
 if (window.ResizeObserver) {
  var ro = new ResizeObserver(layout);
  ro.observe(heroBody);
- ro.observe(ladderEl);
+ ro.observe(flowEl);
 } else {
  var rafPending = false;
  window.addEventListener('resize', function () {
@@ -817,7 +824,7 @@ function applyStatus(st, ns) {
   intChips[k].classList.toggle('off', !ints[k]);
  });
 
- /* NINA instances: session rung copy, tile subtitles, connection rows */
+ /* NINA instances: session why-line copy, tile subtitles, connection rows */
  var instances = (ns && ns.instances) || [];
  var connected = [];
  instances.forEach(function (inst) {
@@ -903,6 +910,7 @@ setInterval(function () {
 
 /* ---- init: sequential loads to be kind to the single-worker httpd ---- */
 $('brandName').textContent = location.hostname || 'NINA Display';
+if (location.hostname) document.title = location.hostname.split('.')[0];
 getJSON('/api/version').then(function (v) {
  $('fwVer').textContent = v.git_tag || v.version || '--';
 }).catch(function () {}).then(function () {
