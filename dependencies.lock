@@ -54,7 +54,7 @@ dependencies:
       type: service
     version: 1.2.1
   espressif/esp_lcd_touch_gt911:
-    component_hash: 6029febef66eefd0910d527d7f30292779ccbf22a8dedd2bd69466acf0068a7b
+    component_hash: 07f678e4202d79bbad917805dcec4134ff08344177720f32ec4898267ad9e394
     dependencies:
     - name: espressif/esp_lcd_touch
       registry_url: https://components.espressif.com
@@ -66,7 +66,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.2.0~2
+    version: 1.2.0~3
   espressif/esp_lvgl_port:
     component_hash: fb6c1fdfe70d4ca39a035d63ca394a35f17ec84ce16ff98ecb13a54155d75da4
     dependencies:
@@ -122,19 +122,19 @@ dependencies:
       type: service
     version: 0.16.3
   espressif/wifi_remote_over_eppp:
-    component_hash: 06d8bc15348bbd21f1390daace36ed5adcf6026c93c5b69decc55fa04df2711a
+    component_hash: 1fd6968af20f0b19e421f6b519b0a8caf81d689afc3783b564c28559e45f66ef
     dependencies:
-    - name: idf
-      require: private
-      version: '>=5.3'
     - name: espressif/eppp_link
       registry_url: https://components.espressif.com
       require: private
       version: '>=0.1'
+    - name: idf
+      require: private
+      version: '>=5.3'
     source:
       registry_url: https://components.espressif.com
       type: service
-    version: 0.3.2
+    version: 0.3.3
   idf:
     source:
       type: idf
@@ -169,7 +169,7 @@ dependencies:
     - esp32p4
     version: 1.0.1
   waveshare/esp_lcd_st7703:
-    component_hash: 0ee99c4d38d5742f554fa10f0cc17a74529d623fb0ebdb0e9bfac1703f1d4442
+    component_hash: d82de85750df3c6c9bfae4c49fdf8cc443e2387cb19507081968f71c11976378
     dependencies:
     - name: espressif/cmake_utilities
       registry_url: https://components.espressif.com
@@ -183,7 +183,7 @@ dependencies:
       type: service
     targets:
     - esp32p4
-    version: 1.0.5
+    version: 2.0.0
 direct_dependencies:
 - espressif/esp_codec_dev
 - espressif/esp_hosted
@@ -195,6 +195,6 @@ direct_dependencies:
 - lvgl/lvgl
 - waveshare/esp32_p4_wifi6_touch_lcd_4b
 - waveshare/esp_lcd_st7703
-manifest_hash: 553b726d4b934eca3f1e80e40c5f9ff2caa96358302536ab0d7110079803539c
+manifest_hash: 25ddac7cd13120345c4f8a4b745711175bcedc11bea34c23e21d31d3bcbfb0ef
 target: esp32p4
 version: 2.0.0
