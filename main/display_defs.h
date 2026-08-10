@@ -14,3 +14,17 @@
 
 /** Display resolution (720x720 square panel) */
 #define SCREEN_SIZE 720
+
+/**
+ * @brief Set the screen rotation (0-3 = 0/90/180/270 degrees).
+ *
+ * The single entry point for changing rotation. As well as calling
+ * lv_display_set_rotation() it re-binds LVGL's draw buffers for the PPA
+ * hardware-rotation layout, so setting the rotation any other way leaves the
+ * buffers bound for the wrong mode. Safe to call repeatedly and in either
+ * direction (0 <-> non-0).
+ *
+ * @note The caller must already hold the display lock. Never call this from an
+ *       ISR or from the display flush callback.
+ */
+void display_rotation_apply(int rot);

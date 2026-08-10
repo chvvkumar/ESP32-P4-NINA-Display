@@ -14,8 +14,8 @@
             <button class="btn btn-outline" id="logsClearBtn" onclick="logsClearActive()">Clear</button>
           </div>
           <div class="logs-toolbar-slot">
-            <!-- Device source controls -->
-            <div id="logsDeviceCtl" style="display:flex;flex-wrap:wrap;align-items:center;gap:14px">
+            <!-- Device source controls: action parameters, not device settings — excluded from dirty/liveApply (see isNonSettingTarget) -->
+            <div id="logsDeviceCtl" data-no-dirty style="display:flex;flex-wrap:wrap;align-items:center;gap:14px">
               <div class="toggle-row" style="margin:0;border:0;padding:0">
                 <span class="toggle-label">Auto-refresh</span>
                 <label class="toggle"><input type="checkbox" id="logsAutoRefresh"><span class="toggle-track"></span></label>

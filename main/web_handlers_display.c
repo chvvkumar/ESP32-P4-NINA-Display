@@ -40,7 +40,7 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
     }
     if (new_cfg->screen_rotation != old_cfg->screen_rotation) {
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-            lv_display_set_rotation(lv_display_get_default(), new_cfg->screen_rotation);
+            display_rotation_apply(new_cfg->screen_rotation);
             bsp_display_unlock();
         }
     }
@@ -493,7 +493,7 @@ esp_err_t screen_rotation_post_handler(httpd_req_t *req)
         apply_display_change(req, cfg);
         heap_caps_free(cfg);
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-            lv_display_set_rotation(lv_display_get_default(), rot);
+            display_rotation_apply(rot);
             bsp_display_unlock();
         } else {
             ESP_LOGW(TAG, "Display lock timeout (screen rotation)");

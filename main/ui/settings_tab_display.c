@@ -18,6 +18,7 @@
 #include "nina_dashboard_internal.h"
 #include "page_registry.h"
 #include "app_config.h"
+#include "display_defs.h"           /* display_rotation_apply() */
 #include "esp_heap_caps.h"
 #include "themes.h"
 #include "ui_styles.h"
@@ -764,7 +765,8 @@ static void rotation_changed_cb(lv_event_t *e)
     LV_UNUSED(e);
     uint32_t idx = lv_dropdown_get_selected(dd_rotation);
     app_config_get()->screen_rotation = (uint8_t)idx;
-    lv_display_set_rotation(lv_display_get_default(), idx);
+    /* Already on the LVGL port task with the display lock held — do not re-take. */
+    display_rotation_apply((int)idx);
     settings_mark_dirty(false);
 }
 

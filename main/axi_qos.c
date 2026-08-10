@@ -16,6 +16,7 @@ static const char *TAG = "axi_qos";
 #define AXI_QOS_PRIO_MAX   0xF  /* top read priority for the DSI scanout DMA */
 #define AXI_QOS_PRIO_LOW   1    /* de-prioritized Cache/CPU reads             */
 #define AXI_QOS_PRIO_WRITE 0    /* keep writes low; the fix is read-side only */
+#define AXI_QOS_PRIO_DMA2D 4    /* PPA/DMA2D: above Cache/CPU(1), below DSI   */
 
 void board_boost_dsi_axi_qos(void)
 {
@@ -31,11 +32,19 @@ void board_boost_dsi_axi_qos(void)
     axi_icm_ll_set_cache_qos_arbiter_prio(AXI_QOS_PRIO_WRITE, AXI_QOS_PRIO_LOW);
     axi_icm_ll_set_cpu_qos_arbiter_prio(AXI_QOS_PRIO_WRITE, AXI_QOS_PRIO_LOW);
 
+    /* PPA (screen rotation, JPEG scaling) runs through the DMA2D master, whose
+     * arqos/awqos default to 0 — i.e. below the Cache/CPU floor set above. Raise
+     * both directions (PPA reads the source frame and writes the destination
+     * frame, both in PSRAM) so hardware rotation is not starved, but keep it
+     * well under the DSI scanout so the panel still wins the arbiter.
+     * Signature: (write_prio, read_prio). */
+    axi_icm_ll_set_dma2d_qos_arbiter_prio(AXI_QOS_PRIO_DMA2D, AXI_QOS_PRIO_DMA2D);
+
     /* Follow-up lever if priority alone is insufficient: the burstiness and
      * peak/transaction-rate regulators (axi_icm_ll_set_qos_burstiness,
      * axi_icm_ll_set_qos_peak_transaction_rate) can throttle the Cache/CPU
      * masters harder. Intentionally not touched here. */
 
-    ESP_LOGI(TAG, "AXI ICM QoS boosted: DW-GDMA(DSI) read prio=%d, Cache/CPU read prio=%d (blue-flash/PSRAM-starvation fix)",
-             AXI_QOS_PRIO_MAX, AXI_QOS_PRIO_LOW);
+    ESP_LOGI(TAG, "AXI ICM QoS boosted: DW-GDMA(DSI) read prio=%d, Cache/CPU read prio=%d, DMA2D(PPA) prio=%d (blue-flash/PSRAM-starvation fix)",
+             AXI_QOS_PRIO_MAX, AXI_QOS_PRIO_LOW, AXI_QOS_PRIO_DMA2D);
 }
