@@ -501,6 +501,14 @@ void nav_arbiter_resolve(int64_t now_ms) {
         /* Apply the runtime image-source override BEFORE switching the page so
          * the Image Display page fetches/renders the right source. pending is -1
          * for non-image stops, which clears the override (persisted default). */
+        /* Capture the effective source BEFORE the override write so the fetch
+         * wake below can be gated on a REAL source change. Healing a cleared
+         * override back to a value that resolves to the same effective source
+         * (e.g. override -1 -> 0 while the persisted default is already 0) must
+         * not re-download the image: an ungated notify here self-sustains a
+         * refetch/crossfade loop (commit -> notify -> fetch -> resolve -> commit)
+         * that fades the image page every few seconds. */
+        int8_t eff_before = image_source_get_effective();
         image_source_set_override(s_arb.pending_img_source);
         /* Track the source with the write, not with the page switch below: the
          * write already happened, so recording it only on lock success would
@@ -508,7 +516,9 @@ void nav_arbiter_resolve(int64_t now_ms) {
          * block used to gate on). current_committed still moves only on a
          * successful switch, so a lock timeout still retries the page. */
         s_arb.current_committed_img_source = s_arb.pending_img_source;
-        if (desired == PAGE_IDX_IMAGE_DISPLAY && goes_task_handle) {
+        if (desired == PAGE_IDX_IMAGE_DISPLAY && goes_task_handle &&
+            (s_arb.current_committed != PAGE_IDX_IMAGE_DISPLAY ||
+             image_source_get_effective() != eff_before)) {
             xTaskNotifyGive(goes_task_handle);   /* wake fetch for new source */
         }
         /* Manual navigation to the image page (USER claim) shows the loading
