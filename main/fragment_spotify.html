@@ -26,7 +26,8 @@
               <button class="btn btn-primary" id="spotifyLoginBtn" onclick="spotifyLogin()" style="flex:1;min-width:120px">Login with Spotify</button>
               <button class="btn btn-danger" id="spotifyLogoutBtn" onclick="spotifyLogout()" style="flex:1;min-width:120px;display:none">Logout</button>
             </div>
-            <div id="spotifyPasteDiv" style="display:none;margin-top:16px">
+            <!-- action parameters, not device settings — excluded from dirty/liveApply (see isNonSettingTarget) -->
+            <div id="spotifyPasteDiv" data-no-dirty style="display:none;margin-top:16px">
               <p style="font-size:0.82rem;color:#a1a1aa;margin:0 0 10px;line-height:1.5">After approving in Spotify, you'll see a "can't connect" page. Copy the <strong>full URL</strong> from the address bar and paste it below:</p>
               <div class="field" style="margin-bottom:10px">
                 <label class="field-label">Redirect URL</label>

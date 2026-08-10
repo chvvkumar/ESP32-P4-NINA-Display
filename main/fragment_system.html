@@ -118,7 +118,8 @@
         <div class="card-title"><span class="card-title-label">Location <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
         <div class="help-popover"><div class="help-popover-title">Location</div><p>Sets the device location used by location-based features: the weather forecast on the clock page and the moon phase view. Type a city name and select Look up to fill the coordinates automatically.</p><p>You can also enter latitude and longitude by hand, for example from a GPS reading or an online map.</p></div>
         <div class="field-hint" style="margin-bottom:12px">This location is used by the weather forecast on the clock page and by the moon phase view.</div>
-        <div class="field" id="weather_city_lookup_field">
+        <!-- action parameters, not device settings — excluded from dirty/liveApply (see isNonSettingTarget) -->
+        <div class="field" id="weather_city_lookup_field" data-no-dirty>
           <label class="field-label">Location</label>
           <div style="display:flex;gap:10px">
             <input type="text" class="input" id="weather_location_search" placeholder="Search city name..." style="flex:1">
@@ -243,7 +244,8 @@
           <button class="btn btn-primary" id="otaGithubBtn" style="display:none;margin-top:12px;width:100%" onclick="startGithubOta()">Install Update</button>
         </div>
         </div>
-        <div class="subsection">
+        <!-- action parameters, not device settings — excluded from dirty/liveApply (see isNonSettingTarget) -->
+        <div class="subsection" data-no-dirty>
         <div class="subsection-title">Manual Update</div>
         <div class="ota-bar">
           <label class="ota-label" id="otaFileLabel">
@@ -292,7 +294,11 @@
       <div class="card" id="adminPasswordCard">
         <div class="card-title"><span class="card-title-label">Authentication <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
         <div class="help-popover"><div class="help-popover-title">Web UI access control</div><p>Require login asks for a username and password before the web settings will open, and is on by default. When it is off, anyone on the network can reboot, factory-reset, flash, or reconfigure the device; secrets such as passwords, API keys, and tokens stay redacted in API responses either way.</p><p>The admin password defaults to changeme123!. To change it, enter the current password, then the new password twice (4 to 32 characters). Sign out clears your current browser session.</p><p>Example: keep Require login enabled and change the password from the default before exposing the device beyond your local network.</p></div>
-        <div class="subsection">
+        <!-- data-no-dirty: auth_enabled persists through its own Save button
+             (saveAuthEnabled -> partial POST), not getConfigData(). Without this,
+             toggling fires the delegated liveApply, which re-posts the STALE
+             cached auth_enabled from _cfgCache and reverts the setting. -->
+        <div class="subsection" data-no-dirty>
         <div class="subsection-title">Access Control</div>
         <div class="toggle-row">
           <span class="toggle-label">Require login to access the web UI</span>
@@ -305,7 +311,8 @@
         <button class="btn btn-primary" style="margin-top:12px" onclick="saveAuthEnabled()">Save</button>
         <div id="auth_enabled_status" style="margin-top:10px;font-size:0.9em;"></div>
         </div>
-        <div class="subsection">
+        <!-- action parameters, not device settings — excluded from dirty/liveApply (see isNonSettingTarget) -->
+        <div class="subsection" data-no-dirty>
         <div class="subsection-title">Admin Password</div>
         <p style="color:#888;font-size:0.85em;margin:2px 0 12px 0;">
           Default password is <code>changeme123!</code>. Change it now to secure this device's web interface.

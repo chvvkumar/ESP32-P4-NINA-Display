@@ -2158,7 +2158,13 @@
       data.moon_drag_light_mode=parseInt($('moonDragLight').value,10)||0;
       data.solar_band=parseInt($('solarBand').value,10)||0;
       data.goes_orientation=parseInt($('goesOrientation').value,10)||0;
+      data.goes_vflip=$('goesVflip')&&$('goesVflip').checked?1:0;
+      data.goes_hflip=$('goesHflip')&&$('goesHflip').checked?1:0;
       data.solar_orientation=parseInt($('solarOrientation').value,10)||0;
+      data.solar_vflip=$('solarVflip')&&$('solarVflip').checked?1:0;
+      data.solar_hflip=$('solarHflip')&&$('solarHflip').checked?1:0;
+      data.custom_vflip=$('customVflip')&&$('customVflip').checked?1:0;
+      data.custom_hflip=$('customHflip')&&$('customHflip').checked?1:0;
       data.custom_image_url=$('customImageUrl')?$('customImageUrl').value.trim():'';
       data.custom_orientation=$('customOrientation')?parseInt($('customOrientation').value,10)||0:0;
       data.custom_update_interval_s=$('customInterval')?parseInt($('customInterval').value,10)||60:60;
@@ -2318,6 +2324,24 @@
         if(loadedTabs.has(name)) COLLECT_TAB_FNS[name](data);
       });
       return data;
+    }
+
+    /* === Config Diff ===
+       Send only changed keys to the device. getConfigData() seeds from a
+       cached server snapshot (_cfgCache), so re-posting the whole object
+       would revert any setting changed outside this page (Control API,
+       MQTT, another browser tab, per-feature endpoints) back to the stale
+       cached value. Keys absent from the POST keep their current value on
+       the device, so untouched settings can never be clobbered. */
+    function configDiff(data){
+      var base=null;
+      try{ if(loadedConfig) base=JSON.parse(loadedConfig); }catch(e){}
+      if(!base) return data;  /* no baseline yet: fall back to full payload */
+      var out={};
+      Object.keys(data).forEach(function(k){
+        if(!(k in base)||JSON.stringify(data[k])!==JSON.stringify(base[k])) out[k]=data[k];
+      });
+      return out;
     }
 
     /* === Config Load === */
@@ -2959,7 +2983,10 @@
       if(!configLoadedGuard()) return;
       var btn=$('saveBtn');
       btn.disabled=true; btn.textContent='Saving...';
-      postJson('/api/config',getConfigData()).then(r=>{
+      /* Diff only: a typed WiFi password changes wifi_networks vs the
+         baseline (whose pass fields populate empty), so it rides along
+         naturally; unchanged keys stay out and cannot clobber the device. */
+      postJson('/api/config',configDiff(getConfigData())).then(r=>{
         if(!r.ok) throw new Error('Save failed');
         return r.text();
       }).then(()=>savePageFragments()).then(()=>{
@@ -2988,7 +3015,7 @@
     function saveAndReboot(){
       if(!configLoadedGuard()) return;
       if(!confirm('Apply changes and reboot now?')) return;
-      postJson('/api/config',getConfigData()).then(r=>{
+      postJson('/api/config',configDiff(getConfigData())).then(r=>{
         if(!r.ok) throw new Error('Save failed');
         return savePageFragments();
       }).then(()=>{
@@ -3020,6 +3047,19 @@
       }).then(function(r){
         if(!r.ok) throw new Error('HTTP '+r.status);
         invalidateConfigCache();
+        /* auth_enabled is in no collectTab_* (it saves through this partial POST),
+           so getConfigData() passes it through from _cfgCache. Patch the cached
+           value AND the loadedConfig dirty-compare snapshot in place, or the next
+           liveApply/Save would re-post the stale value and silently revert this
+           change (same stale-cache clobber class as the image flip toggles). */
+        if(_cfgCache) _cfgCache.auth_enabled = want;
+        if(loadedConfig){
+          try{
+            var lc=JSON.parse(loadedConfig);
+            lc.auth_enabled=want;
+            loadedConfig=JSON.stringify(lc);
+          }catch(e){}
+        }
         if(status){
           status.textContent = want ? 'Authentication enabled.' : 'Authentication disabled.';
           status.style.color = '#6c6';
@@ -3506,7 +3546,7 @@
     function checkDirty(){
       if(_populating) return;
       if(!_cfgCache||_populateFailed) return;  /* nothing loaded to compare against */
-      var dirty=JSON.stringify(getConfigData())!==loadedConfig;
+      var dirty=Object.keys(configDiff(getConfigData())).length>0;
       $('saveBar').classList.toggle('visible',dirty);
     }
 
@@ -3523,7 +3563,9 @@
         }
         delete data.ssid;
         delete data.pass;
-        postJson('/api/config/apply',data).catch(e=>console.error('Live apply failed:',e));
+        var diff=configDiff(data);
+        if(!Object.keys(diff).length) return;  /* nothing changed: skip the POST */
+        postJson('/api/config/apply',diff).catch(e=>console.error('Live apply failed:',e));
       },400);
     }
 
