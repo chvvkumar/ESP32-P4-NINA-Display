@@ -11,7 +11,7 @@
 #include "bsp/esp-bsp.h"            /* bsp_display_brightness_set, bsp_display_lock/unlock */
 #include "bsp/display.h"
 #include "display_defs.h"           /* LVGL_LOCK_TIMEOUT_MS */
-#include "lvgl.h"                   /* lv_display_set_rotation, lv_display_get_default */
+#include "lvgl.h"
 #include "mqtt_ha.h"               /* mqtt_ha_publish_state */
 #include "tasks.h"                  /* image_source_get_effective */
 #include "ui/themes.h"              /* themes_get_count, themes_get */
@@ -165,7 +165,7 @@ static void apply_screen_rotation(const app_config_t *prev, const app_config_t *
 {
     (void)prev;
     if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-        lv_display_set_rotation(lv_display_get_default(), cur->screen_rotation);
+        display_rotation_apply(cur->screen_rotation);
         bsp_display_unlock();
     }
 }
