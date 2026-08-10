@@ -24,6 +24,9 @@
 #include "esp_timer.h"
 #include "nina_connection.h"
 #include "ui/nina_dashboard.h"
+#include "ui/nina_nav_arbiter.h"
+#include "ui/page_registry.h"
+#include "control_registry.h"   /* control_page_current_id — image-source-aware page id */
 #include "power_mgmt.h"
 #include "esp_wifi.h"
 #include "driver/temperature_sensor.h"
@@ -745,6 +748,37 @@ esp_err_t perf_reset_post_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* Map a nav_source_t rung to the web contract's "level" string. */
+static const char *nav_level_str(nav_source_t src)
+{
+    switch (src) {
+        case NAV_SRC_HOLD:      return "menu";
+        case NAV_SRC_HOME_LOCK: return "lock";
+        case NAV_SRC_USER:      return "override";
+        case NAV_SRC_SLIDESHOW: return "slideshow";
+        case NAV_SRC_SESSION:   return "session";
+        case NAV_SRC_IDLE:      return "idle";
+        case NAV_SRC_BOOT:      /* fallthrough */
+        case NAV_SRC_DEFAULT:
+        default:                return "home";
+    }
+}
+
+/* Slug for a page_ref id. Unknown/legacy ids (including the -1 Home Page
+ * sentinel) fall back to Summary's slug, matching the arbiter's home_page()
+ * Summary fallback. */
+static const char *page_id_slug_or_summary(int id)
+{
+    const page_ref_entry_t *e = NULL;
+    if (id >= 0 && id < (int)PAGE_REF_ID_MAX) {
+        e = page_ref_by_id((page_ref_t)id);
+    }
+    if (!e || !e->slug) {
+        e = page_ref_by_id(PAGE_REF_SUMMARY);
+    }
+    return (e && e->slug) ? e->slug : "summary";
+}
+
 // Handler for lightweight device status (test automation)
 esp_err_t status_get_handler(httpd_req_t *req)
 {
@@ -800,6 +834,70 @@ esp_err_t status_get_handler(httpd_req_t *req)
         cJSON_AddNullToObject(root, "wifi_rssi");
         cJSON_AddStringToObject(root, "wifi_ssid", "");
     }
+
+    // ── Navigation state (Home web page) ──
+    const app_config_t *cfg = app_config_get();
+    nav_arbiter_web_status_t nav;
+    nav_arbiter_get_web_status(&nav);
+
+    cJSON *nav_obj = cJSON_AddObjectToObject(root, "nav");
+    if (nav_obj) {
+        cJSON_AddStringToObject(nav_obj, "mode",
+                                cfg->auto_rotate_enabled ? "slideshow" : "pinned");
+        cJSON_AddStringToObject(nav_obj, "level", nav_level_str(nav.level));
+        cJSON_AddNumberToObject(nav_obj, "override_remaining_s", nav.grace_remaining_s);
+        cJSON_AddNumberToObject(nav_obj, "grace_s", cfg->nav_grace_s);
+        cJSON_AddBoolToObject(nav_obj, "home_page_lock", cfg->home_page_lock);
+        cJSON_AddNumberToObject(nav_obj, "current_page", nina_dashboard_get_active_page());
+        cJSON_AddStringToObject(nav_obj, "current_page_slug",
+                                page_id_slug_or_summary(control_page_current_id()));
+        cJSON_AddStringToObject(nav_obj, "home_page_slug",
+                                page_id_slug_or_summary(cfg->active_page_override));
+        cJSON_AddBoolToObject(nav_obj, "idle_enabled", cfg->idle_page_override_enabled);
+        cJSON_AddStringToObject(nav_obj, "idle_page_slug",
+                                cfg->idle_page_override_enabled
+                                    ? page_id_slug_or_summary(cfg->idle_page_override_target)
+                                    : "");
+        cJSON_AddBoolToObject(nav_obj, "auto_rotate", cfg->auto_rotate_enabled);
+        // Slideshow stop values ARE page_ref ids; skip empty/invalid entries
+        // the same way slideshow_build_candidates() does.
+        cJSON *rot = cJSON_AddArrayToObject(nav_obj, "rotation");
+        if (rot) {
+            for (int i = 0; i < ARP_ORDER_CAPACITY; i++) {
+                uint8_t bit = cfg->auto_rotate_order2[i];
+                if (bit == 0xFF || !ARP_STOP_IS_VALID(bit)) continue;
+                const page_ref_entry_t *e = page_ref_by_id((page_ref_t)bit);
+                if (e && e->slug) {
+                    cJSON_AddItemToArray(rot, cJSON_CreateString(e->slug));
+                }
+            }
+        }
+    }
+
+    // ── Integration availability (Home web page badges) ──
+    cJSON *integ = cJSON_AddObjectToObject(root, "integrations");
+    if (integ) {
+        // Live broker connection state (false when MQTT is disabled).
+        cJSON_AddBoolToObject(integ, "mqtt", mqtt_ha_is_connected());
+        cJSON_AddBoolToObject(integ, "allsky", cfg->allsky_enabled);
+        // Weather has no enable flag; "configured" mirrors the poll task's own
+        // gate (location set, plus an API key for the providers that need one).
+        bool weather_needs_key = (cfg->weather_provider == 0 || cfg->weather_provider == 2);
+        bool weather_configured = (cfg->weather_location_name[0] != '\0')
+                               && (!weather_needs_key || cfg->weather_api_key[0] != '\0');
+        cJSON_AddBoolToObject(integ, "weather", weather_configured);
+        cJSON_AddBoolToObject(integ, "spotify", cfg->spotify_enabled);
+    }
+
+    // ── Cached update-check answer only; NEVER a network call here. The cache
+    // is filled by the async worker above (check_update_json_handler); when no
+    // check has run yet this reports false. ──
+    bool upd_avail = false;
+    if (s_upd_mutex && xSemaphoreTake(s_upd_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        upd_avail = s_upd_have_result && (s_upd_result == OTA_CHECK_UPDATE_AVAILABLE);
+        xSemaphoreGive(s_upd_mutex);
+    }
+    cJSON_AddBoolToObject(root, "update_available", upd_avail);
 
     const char *json_str = cJSON_PrintUnformatted(root);
     if (!json_str) {

@@ -40,7 +40,7 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
     }
     if (new_cfg->screen_rotation != old_cfg->screen_rotation) {
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-            lv_display_set_rotation(lv_display_get_default(), new_cfg->screen_rotation);
+            display_rotation_apply(new_cfg->screen_rotation);
             bsp_display_unlock();
         }
     }
@@ -148,6 +148,31 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
     }
 }
 
+/**
+ * Commit a live display tweak to the in-memory config, RAM-only either way.
+ *
+ * These five endpoints (/api/brightness, /api/color-brightness, /api/theme,
+ * /api/widget-style, /api/screen-rotation) serve two very different callers: the
+ * config UI's sliders, where the change IS a pending unsaved edit and the
+ * "unsaved changes" bar is honest -- and HA automations or macro keypads driving
+ * the same routes with X-Auth-Password, where the user never opened an editor
+ * and a bar they cannot explain is a bug. A day/night theme automation firing a
+ * few minutes after boot left dash2 permanently flagged dirty with nothing
+ * actually unsaved.
+ *
+ * Split on the session cookie (see request_is_web_ui) -- an existing signal, not
+ * a new one. Persistence is unchanged and identical on both paths: neither
+ * writes NVS. Only the flag differs.
+ */
+static void apply_display_change(httpd_req_t *req, const app_config_t *cfg)
+{
+    if (request_is_web_ui(req)) {
+        app_config_apply(cfg);        /* pending web edit -> bar is correct */
+    } else {
+        app_config_apply_external(cfg);   /* commanded from outside -> no bar */
+    }
+}
+
 // Handler for live brightness adjustment (no reboot needed)
 esp_err_t brightness_post_handler(httpd_req_t *req)
 {
@@ -185,7 +210,7 @@ esp_err_t brightness_post_handler(httpd_req_t *req)
         if (cfg) {
             app_config_get_snapshot_into(cfg);
             cfg->brightness = brightness;
-            app_config_apply(cfg);
+            apply_display_change(req, cfg);
             heap_caps_free(cfg);
         }
         bsp_display_brightness_set(brightness);
@@ -239,7 +264,7 @@ esp_err_t color_brightness_post_handler(httpd_req_t *req)
         }
         app_config_get_snapshot_into(cfg);
         cfg->color_brightness = cb;
-        app_config_apply(cfg);
+        apply_display_change(req, cfg);
 
         // Re-apply theme to update static text brightness
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
@@ -300,7 +325,7 @@ esp_err_t theme_post_handler(httpd_req_t *req)
         }
         app_config_get_snapshot_into(cfg);
         cfg->theme_index = idx;
-        app_config_apply(cfg);
+        apply_display_change(req, cfg);
         heap_caps_free(cfg);
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
             nina_dashboard_apply_theme(idx);
@@ -357,7 +382,7 @@ esp_err_t widget_style_post_handler(httpd_req_t *req)
         }
         app_config_get_snapshot_into(cfg);
         cfg->widget_style = (uint8_t)idx;
-        app_config_apply(cfg);
+        apply_display_change(req, cfg);
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
             nina_dashboard_apply_theme(cfg->theme_index);
             bsp_display_unlock();
@@ -465,10 +490,10 @@ esp_err_t screen_rotation_post_handler(httpd_req_t *req)
         }
         app_config_get_snapshot_into(cfg);
         cfg->screen_rotation = (uint8_t)rot;
-        app_config_apply(cfg);
+        apply_display_change(req, cfg);
         heap_caps_free(cfg);
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-            lv_display_set_rotation(lv_display_get_default(), rot);
+            display_rotation_apply(rot);
             bsp_display_unlock();
         } else {
             ESP_LOGW(TAG, "Display lock timeout (screen rotation)");

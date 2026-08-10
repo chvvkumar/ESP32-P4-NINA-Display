@@ -63,7 +63,7 @@ typedef struct {
     tile_grid_type_t type;
     char     label[32];
     /* number */
-    char     unit[12];
+    char     unit[16];   /* UTF-8; fits "mag/arcsec²" (13 B incl NUL) */
     int      decimals;
     float    low;
     float    high;
@@ -79,6 +79,17 @@ typedef struct {
     uint32_t t_color;
     uint32_t f_color;
 } tile_grid_tile_cfg_t;
+
+/* Page-level color defaults (optional top-level "defaults" object). Each member
+ * is already resolved against its stock constant, so a tile whose own key is
+ * absent falls back here and a page without "defaults" falls back to stock. */
+typedef struct {
+    uint32_t c_low;
+    uint32_t c_norm;
+    uint32_t c_high;
+    uint32_t t_color;
+    uint32_t f_color;
+} tile_grid_defaults_t;
 
 /* ── Per-tile widget storage ──────────────────────────────────────────── */
 
@@ -133,7 +144,8 @@ static inline void set_font_if_changed(lv_obj_t *obj, const lv_font_t **cached,
 static const lv_font_t *unit_font_for_value_size(int value_size);
 static void fit_tile_fonts(tile_grid_w_t *tw, const tile_grid_tile_cfg_t *tc,
                            const char *value_str, const char *unit_str);
-static void parse_one_tile(const cJSON *t, tile_grid_tile_cfg_t *tc);
+static void parse_one_tile(const cJSON *t, const tile_grid_defaults_t *d,
+                           tile_grid_tile_cfg_t *tc);
 static void parse_tiles_config(nina_tile_grid_t *g, const char *tiles_config_json);
 static void build_tile(tile_grid_w_t *tw, lv_obj_t *parent,
                        const tile_grid_tile_cfg_t *tc, int rows, int gb);
@@ -275,15 +287,39 @@ static inline void set_font_if_changed(lv_obj_t *obj, const lv_font_t **cached,
     }
 }
 
-/* Scale the unit proportionally to the chosen value font (simple switch). */
+/* ── Superscript font fallback (same pattern as nina_allsky.c) ─────────── */
+
+extern const lv_font_t lv_font_superscript_24;
+
+/* Mutable copies of the built-in montserrat unit fonts with the superscript
+ * font attached as fallback, so units like "mag/arcsec²" render instead of
+ * tofu. The built-ins live in const flash (DROM) on ESP32-P4 so their fallback
+ * pointer cannot be patched in-place. */
+static lv_font_t unit_font_16_super;
+static lv_font_t unit_font_22_super;
+static lv_font_t unit_font_28_super;
+static bool      unit_fonts_super_init = false;
+
+/* Scale the unit proportionally to the chosen value font (simple switch).
+ * Lazily builds the fallback copies on first use; every caller runs under the
+ * display lock held by this module's caller, so a plain flag is sufficient. */
 static const lv_font_t *unit_font_for_value_size(int value_size) {
+    if (!unit_fonts_super_init) {
+        memcpy(&unit_font_16_super, &lv_font_montserrat_16, sizeof(lv_font_t));
+        memcpy(&unit_font_22_super, &lv_font_montserrat_22, sizeof(lv_font_t));
+        memcpy(&unit_font_28_super, &lv_font_montserrat_28, sizeof(lv_font_t));
+        unit_font_16_super.fallback = &lv_font_superscript_24;
+        unit_font_22_super.fallback = &lv_font_superscript_24;
+        unit_font_28_super.fallback = &lv_font_superscript_24;
+        unit_fonts_super_init = true;
+    }
     if (value_size >= 64) {
-        return &lv_font_montserrat_28;
+        return &unit_font_28_super;
     }
     if (value_size >= 48) {
-        return &lv_font_montserrat_22;
+        return &unit_font_22_super;
     }
-    return &lv_font_montserrat_16;
+    return &unit_font_16_super;
 }
 
 /* Measure width of a string in a given font (letter_space matches the label
@@ -314,7 +350,7 @@ static void fit_tile_fonts(tile_grid_w_t *tw, const tile_grid_tile_cfg_t *tc,
         set_font_if_changed(tw->lbl_label, &tw->cached_label_font,
                             label_font_for_rows(tw->rows));
         set_font_if_changed(tw->lbl_unit, &tw->cached_unit_font,
-                            &lv_font_montserrat_16);
+                            unit_font_for_value_size(0));
         tw->cached_fit_str[0] = '\0';
         return;
     }
@@ -384,19 +420,21 @@ static void fit_tile_fonts(tile_grid_w_t *tw, const tile_grid_tile_cfg_t *tc,
 
 /* ── Config parsing (tiles_config → tile_cfg[] + row structure) ────────── */
 
-static void parse_one_tile(const cJSON *t, tile_grid_tile_cfg_t *tc) {
+static void parse_one_tile(const cJSON *t, const tile_grid_defaults_t *d,
+                           tile_grid_tile_cfg_t *tc) {
     memset(tc, 0, sizeof(*tc));
 
-    /* Defaults (mockup convertType). */
+    /* Defaults (mockup convertType); colors come from the page defaults, which
+     * already collapse to the stock constants when the page declares none. */
     tc->type     = TG_NUMBER;
     tc->decimals = 1;
     tc->low      = 0.0f;
     tc->high     = 100.0f;
-    tc->c_low    = C_NORMAL;
-    tc->c_norm   = C_NORMAL;
-    tc->c_high   = C_WARN;
-    tc->t_color  = C_OK;
-    tc->f_color  = C_CRIT;
+    tc->c_low    = d->c_low;
+    tc->c_norm   = d->c_norm;
+    tc->c_high   = d->c_high;
+    tc->t_color  = d->t_color;
+    tc->f_color  = d->f_color;
 
     const char *label = obj_str(t, "label");
     if (label) {
@@ -440,9 +478,9 @@ static void parse_one_tile(const cJSON *t, tile_grid_tile_cfg_t *tc) {
         if (cJSON_IsNumber(j_high)) {
             tc->high = (float)j_high->valuedouble;
         }
-        tc->c_low  = parse_hex_color(obj_str(t, "cLow"),  C_NORMAL);
-        tc->c_norm = parse_hex_color(obj_str(t, "cNorm"), C_NORMAL);
-        tc->c_high = parse_hex_color(obj_str(t, "cHigh"), C_WARN);
+        tc->c_low  = parse_hex_color(obj_str(t, "cLow"),  d->c_low);
+        tc->c_norm = parse_hex_color(obj_str(t, "cNorm"), d->c_norm);
+        tc->c_high = parse_hex_color(obj_str(t, "cHigh"), d->c_high);
     } else if (tc->type == TG_TEXT) {
         cJSON *maps = cJSON_GetObjectItem(t, "maps");
         int mc = 0;
@@ -467,8 +505,8 @@ static void parse_one_tile(const cJSON *t, tile_grid_tile_cfg_t *tc) {
         const char *ft = obj_str(t, "fText");
         snprintf(tc->t_text, sizeof(tc->t_text), "%s", tt ? tt : "TRUE");
         snprintf(tc->f_text, sizeof(tc->f_text), "%s", ft ? ft : "FALSE");
-        tc->t_color = parse_hex_color(obj_str(t, "tColor"), C_OK);
-        tc->f_color = parse_hex_color(obj_str(t, "fColor"), C_CRIT);
+        tc->t_color = parse_hex_color(obj_str(t, "tColor"), d->t_color);
+        tc->f_color = parse_hex_color(obj_str(t, "fColor"), d->f_color);
     }
 }
 
@@ -494,6 +532,22 @@ static void parse_tiles_config(nina_tile_grid_t *g, const char *tiles_config_jso
         return;
     }
 
+    /* Optional top-level "defaults": page-level fallbacks for the threshold and
+     * boolean colors. Missing object or missing key collapses to the stock
+     * constant, so every tile still resolves the same way as before. Text-tile
+     * "maps" colors are deliberately not covered. */
+    cJSON *defs = cJSON_GetObjectItem(root, "defaults");
+    if (!cJSON_IsObject(defs)) {
+        defs = NULL;
+    }
+    tile_grid_defaults_t d = {
+        .c_low   = parse_hex_color(defs ? obj_str(defs, "cLow")   : NULL, C_NORMAL),
+        .c_norm  = parse_hex_color(defs ? obj_str(defs, "cNorm")  : NULL, C_NORMAL),
+        .c_high  = parse_hex_color(defs ? obj_str(defs, "cHigh")  : NULL, C_WARN),
+        .t_color = parse_hex_color(defs ? obj_str(defs, "tColor") : NULL, C_OK),
+        .f_color = parse_hex_color(defs ? obj_str(defs, "fColor") : NULL, C_CRIT),
+    };
+
     int ri = 0;
     cJSON *row;
     cJSON_ArrayForEach(row, rows) {
@@ -512,7 +566,7 @@ static void parse_tiles_config(nina_tile_grid_t *g, const char *tiles_config_jso
             if (!cJSON_IsObject(tile)) {
                 continue;
             }
-            parse_one_tile(tile, &g->tile_cfg[g->tile_count]);
+            parse_one_tile(tile, &d, &g->tile_cfg[g->tile_count]);
             g->tile_count++;
             in_row++;
         }
@@ -571,8 +625,8 @@ static void build_tile(tile_grid_w_t *tw, lv_obj_t *parent,
 
     /* Unit (empty for text/bool tiles). */
     tw->lbl_unit = lv_label_create(tw->tile);
-    lv_obj_set_style_text_font(tw->lbl_unit, &lv_font_montserrat_16, 0);
-    tw->cached_unit_font = &lv_font_montserrat_16;
+    lv_obj_set_style_text_font(tw->lbl_unit, unit_font_for_value_size(0), 0);
+    tw->cached_unit_font = unit_font_for_value_size(0);
     lv_obj_set_style_text_align(tw->lbl_unit, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_width(tw->lbl_unit, LV_PCT(100));
     lv_label_set_long_mode(tw->lbl_unit, LV_LABEL_LONG_DOT);

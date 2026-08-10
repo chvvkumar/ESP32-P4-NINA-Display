@@ -197,12 +197,23 @@ static goes_data_t goes_prefetch_data;
  * -1 = no override (use the persisted cfg->image_display_source);
  * 0-3 = the slideshow-selected source (GOES/Moon/Solar/Custom).
  * Written by the navigation arbiter (another task), read by goes_poll_task and
- * the Image Display UI — int8 atomics are lock-free, so a plain load/store is
+ * the Image Display UI — word atomics are lock-free, so a plain load/store is
  * the correct cross-task pattern. */
-static _Atomic int8_t s_image_source_override = -1;
+/* These three are logically int8 (-1..3) but MUST be word-sized: the
+ * esp-14.2.0 RISC-V toolchain lowers byte-wide atomic RMWs to an lr.w/sc.w
+ * loop on the containing 32-bit word and ORs in the SIGN-EXTENDED value
+ * without masking it to 8 bits, so storing -1 into a byte atomic also sets
+ * every higher-addressed byte of that word to 0xFF. Packed as int8_t these
+ * three shared one word (plus perf_monitor's s_cpu_first_sample), and every
+ * goes_poll_task iteration's -1 exchanges silently wiped
+ * s_image_source_override back to -1 — the arbiter then re-healed it each
+ * cycle, self-sustaining a refetch/crossfade loop on the Image Display page.
+ * int32_t gives each its own naturally aligned word and compiles to a plain
+ * word AMO. Do not narrow these back. */
+static _Atomic int32_t s_image_source_override = -1;
 /* Source the background prefetch should load (set by image_source_trigger_prefetch,
  * consumed in Phase 4). -1 = nothing pending. */
-static _Atomic int8_t s_prefetch_source = -1;
+static _Atomic int32_t s_prefetch_source = -1;
 /* Phase 4 prefetch hand-off. s_prefetch_ready is set by the prefetch PRODUCER in
  * goes_poll_task once a NEXT-source frame has been fetched/rendered into
  * goes_prefetch_data, and cleared by the SWAP CONSUMER at the top of the loop the
@@ -212,8 +223,8 @@ static _Atomic int8_t s_prefetch_source = -1;
  * and skip a redundant foreground fetch this iteration. Both are written ONLY by
  * goes_poll_task (single writer); the atomics make the producer-then-consumer
  * publish/consume safe within that one task across loop iterations. */
-static _Atomic bool   s_prefetch_ready = false;
-static _Atomic int8_t s_prefetch_ready_src = -1;
+static _Atomic bool    s_prefetch_ready = false;
+static _Atomic int32_t s_prefetch_ready_src = -1;  /* int32: see block comment above s_image_source_override */
 
 static demo_task_params_t demo_params;
 
@@ -223,21 +234,26 @@ static demo_task_params_t demo_params;
  * above so rotation never touches NVS. */
 void image_source_set_override(int8_t src)
 {
-    atomic_store(&s_image_source_override, src);
+    atomic_store(&s_image_source_override, (int32_t)src);
+}
+
+int8_t image_source_get_override(void)
+{
+    return (int8_t)atomic_load(&s_image_source_override);
 }
 
 int8_t image_source_get_effective(void)
 {
-    int8_t ov = atomic_load(&s_image_source_override);
+    int32_t ov = atomic_load(&s_image_source_override);
     if (ov >= 0) {
-        return ov;
+        return (int8_t)ov;
     }
     return (int8_t)app_config_get()->image_display_source;
 }
 
 void image_source_trigger_prefetch(int8_t src)
 {
-    atomic_store(&s_prefetch_source, src);
+    atomic_store(&s_prefetch_source, (int32_t)src);
     if (goes_task_handle) {
         xTaskNotifyGive(goes_task_handle);
     }
@@ -1045,7 +1061,7 @@ void moon_overlay_info(char *age,  size_t age_sz,
  * requests land without an intervening swap. */
 static void image_prefetch_run(const app_config_t *cfg)
 {
-    int8_t pf = atomic_exchange(&s_prefetch_source, -1);
+    int8_t pf = (int8_t)atomic_exchange(&s_prefetch_source, -1);
     if (pf < 0) return;
 
     /* A prior prefetch frame that was never swapped in would leak when the new
@@ -1110,7 +1126,7 @@ static void image_prefetch_run(const app_config_t *cfg)
     }
 
     if (err == ESP_OK) {
-        atomic_store(&s_prefetch_ready_src, pf);
+        atomic_store(&s_prefetch_ready_src, (int32_t)pf);
         atomic_store(&s_prefetch_ready, true);
     }
 }
@@ -1165,7 +1181,7 @@ void goes_poll_task(void *arg)
         bool swap_satisfies_eff = false;
         {
             bool ready = atomic_exchange(&s_prefetch_ready, false);
-            int8_t swapped_src = atomic_exchange(&s_prefetch_ready_src, -1);
+            int8_t swapped_src = (int8_t)atomic_exchange(&s_prefetch_ready_src, -1);
             if (ready && goes_prefetch_data.image_buf) {
                 bool moved = false;
                 if (goes_data_lock(&goes_data, 1000)) {
@@ -1218,7 +1234,7 @@ void goes_poll_task(void *arg)
                  * of orphaning the buffer for the rest of the session (a leak if
                  * rotation later stops and no further prefetch ever runs). */
                 if (!moved) {
-                    atomic_store(&s_prefetch_ready_src, swapped_src);
+                    atomic_store(&s_prefetch_ready_src, (int32_t)swapped_src);
                     atomic_store(&s_prefetch_ready, true);
                 }
             }

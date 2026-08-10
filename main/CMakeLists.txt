@@ -17,7 +17,7 @@ idf_component_register(
          ui/nina_empty_state.c
          ${LV_DEMOS_SOURCES}
     INCLUDE_DIRS . ui ${LV_DEMO_DIR}
-    EMBED_TXTFILES config_ui.html login.html setup_ui.html fragment_logs.html fragment_backup.html fragment_api.html fragment_allsky.html fragment_json.html fragment_ha.html fragment_clock.html fragment_spotify.html fragment_image_display.html fragment_nodes.html fragment_display.html fragment_behavior.html fragment_system.html
+    EMBED_TXTFILES config_ui.html home_ui.html login.html setup_ui.html fragment_logs.html fragment_backup.html fragment_api.html fragment_allsky.html fragment_json.html fragment_ha.html fragment_clock.html fragment_spotify.html fragment_image_display.html fragment_nodes.html fragment_display.html fragment_behavior.html fragment_system.html
     EMBED_FILES favicon.png logo.jpg spotify_logo.png moon_texture.png moon_equirect.jpg)
 
 idf_component_get_property(LVGL_LIB lvgl__lvgl COMPONENT_LIB)

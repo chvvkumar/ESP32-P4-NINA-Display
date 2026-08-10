@@ -3,6 +3,10 @@ dependencies:
   espressif/esp_hosted: ">=2.12.3,<2.12.4"
   espressif/esp_wifi_remote: "~0.16.3"
   espressif/esp_websocket_client: "~1.6.1"
+  # Explicit pin: 2.9.0 uses on_frame_buf_complete (IDF 6.x API) and breaks
+  # IDF 5.5.2 builds. Guards against a lockless solve picking it via the
+  # BSP's transitive ^2 requirement.
+  espressif/esp_lvgl_port: "~2.8.0"
   lvgl/lvgl:
     version: "~9.5.0"
     public: true

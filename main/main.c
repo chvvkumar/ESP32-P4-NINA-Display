@@ -29,8 +29,10 @@
 #include "esp_ota_ops.h"
 #include "ota_github.h"
 #include "driver/jpeg_decode.h"
+#include "driver/ppa.h"
+#include "esp_lcd_mipi_dsi.h"   /* esp_lcd_dpi_panel_get_frame_buffer() */
 #include "display/lv_display_private.h"
-#include "draw/sw/lv_draw_sw_utils.h"
+#include "display_defs.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -64,23 +66,44 @@ extern const lv_font_t lv_font_overpass_16;
 extern const uint8_t logo_jpg_start[] asm("_binary_logo_jpg_start");
 extern const uint8_t logo_jpg_end[]   asm("_binary_logo_jpg_end");
 
+static const char *TAG = "main";
+
 /*
- * ── SW rotation for DPI avoid-tearing mode ─────────────────────────
+ * ── PPA hardware rotation for DPI avoid-tearing mode ───────────────
  *
- * The BSP disables sw_rotate when avoid_tearing is enabled because its
- * flush callback only has a single rotation buffer — the DPI controller
- * reads it while the next frame is being written, causing tearing.
+ * The BSP disables sw_rotate when avoid_tearing is enabled, which also
+ * disables the port's own rotation path.  We intercept the flush callback
+ * instead and rotate with the PPA SRM engine.
  *
- * Fix: intercept the flush callback, rotate the full frame in-place
- * (DPI buf → temp PSRAM buf → back to DPI buf), then let the BSP
- * flush handle the normal DPI buffer swap.  The DPI controller only
- * ever sees its own registered framebuffers — no flicker.
+ * The DPI panel is created with three framebuffers but esp_lvgl_port only
+ * ever claims two, so fb2 is allocated, cache-aligned and otherwise unused.
+ * We use it as LVGL's render target while rotated:
+ *
+ *   rot 0        LVGL renders into fb0/fb1 (double buffered) → straight to
+ *                the BSP flush.  Bit-identical to stock; zero PPA traffic.
+ *   rot 90/180/270
+ *                LVGL renders into fb2 (single buffered), PPA rotates
+ *                fb2 → fb0/fb1 alternating, and the PPA destination is what
+ *                gets handed to the BSP flush.
+ *
+ * Alternating the destination reproduces the ping-pong cadence the port
+ * already runs, so the buffer being scanned out is never the buffer PPA is
+ * writing.  Handing a registered DPI framebuffer to the panel also keeps the
+ * driver on its zero-copy path (no DMA2D frame copy).
  */
-static lv_color_t *rot_buf;              /* temp rotation buffer (PSRAM)    */
 static lv_display_flush_cb_t orig_flush; /* saved BSP flush callback        */
+static ppa_client_handle_t   s_ppa_rot;  /* dedicated SRM client, flush path */
+static void                 *s_fb[3];    /* the three DPI framebuffers      */
+/* Invariant: s_rot_dst is always the fb the DPI is NOT currently scanning.
+ * Owned by the flush path, which maintains it in both branches. Starts at 1
+ * because the DPI driver's initial cur_fb_index is 0. */
+static uint8_t               s_rot_dst = 1;
+
+/* 720*720*2 = 1,036,800 — a whole number of 128-byte cache lines. */
+#define ROT_FB_BYTES (BSP_LCD_H_RES * BSP_LCD_V_RES * 2)
 
 /* Mirror of the BSP's private lvgl_port_display_ctx_t — only the fields we
- * need for rotation.  Must match esp_lvgl_port v2.7.2 layout.
+ * need for rotation.  Must match esp_lvgl_port 2.8.0 layout.
  * NOTE: BSP uses CONFIG_LVGL_PORT_ENABLE_PPA (not CONFIG_LV_USE_PPA) to
  * conditionally include ppa_handle. Using the wrong guard shifts the flags
  * field by 4 bytes, causing silent memory corruption. */
@@ -105,30 +128,100 @@ typedef struct {
     } flags;
 } disp_ctx_compat_t;
 
+/* LVGL rotation enum → PPA SRM angle.  Both are counter-clockwise, so this is
+ * a straight 1:1 map.  If the panel comes up rotated the wrong way, swap
+ * entries 1 and 3 — that is the whole fix. */
+static const ppa_srm_rotation_angle_t s_rot_map[4] = {
+    PPA_SRM_ROTATION_ANGLE_0,   PPA_SRM_ROTATION_ANGLE_90,
+    PPA_SRM_ROTATION_ANGLE_180, PPA_SRM_ROTATION_ANGLE_270,
+};
+
 static void rotated_flush_cb(lv_display_t *drv, const lv_area_t *area,
                               uint8_t *color_map)
 {
     int rot = lv_display_get_rotation(drv);
-    if (rot == LV_DISPLAY_ROTATION_0 || !rot_buf) {
+    if (rot == LV_DISPLAY_ROTATION_0 || !s_ppa_rot) {
+        /* Keep the invariant true while unrotated too: color_map is about to
+         * become the scanned-out fb, so the next PPA destination is the other
+         * one.  This is what makes the first flush after a switch into a
+         * rotated mode safe.  Left alone if color_map is neither (PPA init
+         * failed, so s_fb[] may be unset). */
+        if ((void *)color_map == s_fb[0]) {
+            s_rot_dst = 1;
+        } else if ((void *)color_map == s_fb[1]) {
+            s_rot_dst = 0;
+        }
         orig_flush(drv, area, color_map);
         return;
     }
 
-    /* Rotate entire frame: DPI buffer → temp → back to DPI buffer.
-     * The DPI controller is reading the OTHER framebuffer right now,
-     * so overwriting this one is safe (no tearing). */
-    lv_color_format_t cf = lv_display_get_color_format(drv);
-    uint32_t stride = lv_draw_buf_width_to_stride(BSP_LCD_H_RES, cf);
+    /* color_map is fb2 (bound by display_rotation_apply); rotate it into
+     * whichever of fb0/fb1 was not committed last flush.  The PPA driver does
+     * its own cache maintenance on both windows, so no msync here. */
+    uint8_t dst = s_rot_dst;
+    ppa_srm_oper_config_t srm = {
+        .in  = { .buffer = color_map,
+                 .pic_w = BSP_LCD_H_RES, .pic_h = BSP_LCD_V_RES,
+                 .block_w = BSP_LCD_H_RES, .block_h = BSP_LCD_V_RES,
+                 .srm_cm = PPA_SRM_COLOR_MODE_RGB565 },
+        .out = { .buffer = s_fb[dst], .buffer_size = ROT_FB_BYTES,
+                 .pic_w = BSP_LCD_H_RES, .pic_h = BSP_LCD_V_RES,
+                 .srm_cm = PPA_SRM_COLOR_MODE_RGB565 },
+        .rotation_angle = s_rot_map[rot & 3],
+        .scale_x = 1.0f, .scale_y = 1.0f,
+        .mode = PPA_TRANS_MODE_BLOCKING,
+    };
 
-    lv_draw_sw_rotate(color_map, (uint8_t *)rot_buf,
-                      BSP_LCD_H_RES, BSP_LCD_V_RES,
-                      stride, stride, rot, cf);
-    memcpy(color_map, rot_buf, stride * BSP_LCD_V_RES);
+    if (ppa_do_scale_rotate_mirror(s_ppa_rot, &srm) != ESP_OK) {
+        /* Re-present the last good rotated frame rather than pushing an
+         * unrotated one.  Rate-limited: this runs on the flush path, so a
+         * persistent failure must not flood the log ring or stall the UI. */
+        static int64_t last_warn_us;
+        int64_t now_us = esp_timer_get_time();
+        if (last_warn_us == 0 || now_us - last_warn_us > 5000000) {
+            last_warn_us = now_us;
+            ESP_LOGW(TAG, "PPA rotate failed, re-presenting previous frame");
+        }
+        orig_flush(drv, area, (uint8_t *)s_fb[dst ^ 1]);
+        return;
+    }
+    s_rot_dst = dst ^ 1;
 
     /* BSP flush handles draw_bitmap + semaphore.  It checks
-     * sw_rotate && current_rotation > 0, but draw_buffs[2] == NULL
-     * so BSP skips its own rotation → straight to DPI buffer swap. */
-    orig_flush(drv, area, color_map);
+     * sw_rotate && current_rotation > 0, but draw_buffs[2] == NULL under
+     * avoid-tearing so it skips its own rotation → straight to the DPI buffer
+     * swap, zero-copy because s_fb[dst] is a registered framebuffer. */
+    orig_flush(drv, area, (uint8_t *)s_fb[dst]);
+}
+
+/* Set the screen rotation and re-bind LVGL's draw buffers to match.
+ * Declared in display_defs.h; the caller must already hold the display lock.
+ * Safe to call repeatedly and in either direction (0 <-> non-0). */
+void display_rotation_apply(int rot)
+{
+    lv_display_t *disp = lv_display_get_default();
+    if (!disp) return;
+    if (rot < 0 || rot > 3) rot = 0;
+
+    lv_display_set_rotation(disp, (lv_display_rotation_t)rot);
+
+    /* PPA/framebuffer init failed: leave LVGL on whatever the BSP bound and
+     * let the flush callback short-circuit to the stock path. */
+    if (!s_ppa_rot || !s_fb[2]) return;
+
+    /* rot 0: fb0/fb1 double buffered, the stock layout.  rot != 0: fb2 single
+     * buffered, which the flush path rotates into fb0/fb1.  s_rot_dst is
+     * deliberately not reset here — the flush path keeps it pointing at the fb
+     * the DPI is not scanning, including while unrotated.
+     * lv_display_set_buffers() resumes rendering into its buf_1 argument, so
+     * the upright arm starts on s_fb[s_rot_dst] to avoid drawing over the fb
+     * being scanned out.  fb0 and fb1 are otherwise interchangeable as LVGL's
+     * pair, so which one leads does not matter beyond that. */
+    bool upright = (rot == LV_DISPLAY_ROTATION_0);
+    lv_display_set_buffers(disp, upright ? s_fb[s_rot_dst] : s_fb[2],
+                           upright ? s_fb[s_rot_dst ^ 1] : NULL,
+                           ROT_FB_BYTES, LV_DISPLAY_RENDER_MODE_FULL);
+    lv_obj_invalidate(lv_screen_active());
 }
 
 static void *cjson_psram_malloc(size_t sz) { return heap_caps_malloc(sz, MALLOC_CAP_SPIRAM); }
@@ -150,8 +243,6 @@ static void splash_fade_done(lv_anim_t *a)
         splash_dsc.data = NULL;
     }
 }
-
-static const char *TAG = "main";
 
 /* Shared globals — used by event_handler() and tasks.c */
 EventGroupHandle_t s_wifi_event_group;
@@ -662,37 +753,47 @@ void app_main(void)
      * panel + its DW-GDMA channel exist. */
     board_boost_dsi_axi_qos();
 
-    /* ── SW rotation setup ──
-     * Allocate one temp PSRAM buffer for in-place rotation.  The flush
-     * callback rotates DPI buf → temp → back to DPI buf, then lets the
-     * BSP handle the normal DPI buffer swap. */
+    /* ── PPA hardware rotation setup ──
+     * Grab all three DPI framebuffers and a dedicated SRM client.  A dedicated
+     * client (not the shared one in jpeg_utils.c) is required: that one has
+     * max_pending_trans_num = 1 and is driven from Core 0, so a decode
+     * overlapping a flush would fail the transaction. */
     {
         lv_display_t *disp = lv_display_get_default();
         if (disp) {
-            const size_t fb_size = BSP_LCD_H_RES * BSP_LCD_V_RES * sizeof(lv_color_t);
-            rot_buf = heap_caps_malloc(fb_size, MALLOC_CAP_SPIRAM);
-            if (!rot_buf) {
-                ESP_LOGW(TAG, "No PSRAM for rotation buffer, SW rotation disabled");
+            disp_ctx_compat_t *ctx =
+                (disp_ctx_compat_t *)lv_display_get_driver_data(disp);
+            esp_lcd_panel_handle_t panel =
+                ctx ? (esp_lcd_panel_handle_t)ctx->panel_handle : NULL;
+
+            bool ppa_ok = false;
+            if (panel && esp_lcd_dpi_panel_get_frame_buffer(
+                             panel, 3, &s_fb[0], &s_fb[1], &s_fb[2]) == ESP_OK) {
+                ppa_client_config_t pcfg = {
+                    .oper_type = PPA_OPERATION_SRM,
+                    .max_pending_trans_num = 1,
+                };
+                ppa_ok = (ppa_register_client(&pcfg, &s_ppa_rot) == ESP_OK);
+            }
+
+            if (ppa_ok) {
+                ESP_LOGI(TAG, "Screen rotation: PPA hardware");
             } else {
-                /* Enable sw_rotate in BSP context so LVGL handles coordinate
-                 * transforms and the BSP rotation-update returns early. */
-                disp_ctx_compat_t *ctx =
-                    (disp_ctx_compat_t *)lv_display_get_driver_data(disp);
-                if (ctx) ctx->flags.sw_rotate = 1;
-
-                orig_flush = disp->flush_cb;
-                lv_display_set_flush_cb(disp, rotated_flush_cb);
-                ESP_LOGI(TAG, "SW rotation ready (%.0f KB PSRAM)",
-                         fb_size / 1024.0);
+                ESP_LOGW(TAG, "Screen rotation disabled (PPA init failed)");
             }
 
-            /* Apply saved screen rotation */
-            uint8_t rot = app_config_get()->screen_rotation;
-            if (rot > 0 && rot <= 3) {
-                lvgl_port_lock(0);
-                lv_display_set_rotation(disp, rot);
-                lvgl_port_unlock();
-            }
+            /* Swap the flush callback and apply the saved rotation under the
+             * port lock — the LVGL task is already running and could otherwise
+             * be mid-flush.  The apply is unconditional: even at rot 0 it is
+             * what binds LVGL to fb0/fb1 for the PPA layout. */
+            lvgl_port_lock(0);
+            /* Enable sw_rotate in BSP context so LVGL handles coordinate
+             * transforms and the BSP rotation-update returns early. */
+            if (ctx) ctx->flags.sw_rotate = 1;
+            orig_flush = disp->flush_cb;
+            lv_display_set_flush_cb(disp, rotated_flush_cb);
+            display_rotation_apply(app_config_get()->screen_rotation);
+            lvgl_port_unlock();
         }
     }
 

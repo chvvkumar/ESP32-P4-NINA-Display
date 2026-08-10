@@ -17,6 +17,7 @@
 #include "goes_client.h"               /* goes_region_name, solar_band_label */
 #include "bsp/esp-bsp.h"
 #include "esp_log.h"
+#include "esp_timer.h"   /* nav_arbiter_get_web_status: grace-remaining clock */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "tasks.h"   /* image_source_* override API + goes_task_handle */
@@ -49,6 +50,10 @@ static struct {
                                     * Atomic: written by the web/LVGL task
                                     * (set_pin), read by the data task (resolve),
                                     * mirroring user_stamp_ms's cross-core guard. */
+    _Atomic uint8_t last_level;    /* nav_source_t rung that won the last resolve
+                                    * (NAV_SRC_HOLD while modal-frozen). Written
+                                    * by resolve() (data task), read by
+                                    * nav_arbiter_get_web_status() (httpd task). */
 } s_arb;
 
 /* Pack/unpack the USER claim (page index + image source) into one 32-bit word.
@@ -73,6 +78,7 @@ void nav_arbiter_init(void) {
     s_arb.pending_img_source = -1;
     s_arb.current_committed_img_source = -1;
     s_arb.pinned = false;
+    s_arb.last_level = (uint8_t)NAV_SRC_DEFAULT;
     s_arb.current_committed = nina_dashboard_get_active_page();
     ESP_LOGI(TAG, "nav arbiter init (committed page=%d)", s_arb.current_committed);
 }
@@ -141,6 +147,27 @@ void nav_arbiter_set_pin(bool on, int abs_page, int8_t img_src, int64_t now_ms) 
 }
 
 bool nav_arbiter_is_pinned(void) { return s_arb.pinned; }
+
+void nav_arbiter_get_web_status(nav_arbiter_web_status_t *out)
+{
+    if (!out) return;
+    out->level = (nav_source_t)s_arb.last_level;
+    out->grace_remaining_s = 0;
+    /* Grace remaining: recomputed here from the atomic claim fields rather than
+     * stored at resolve time, so pollers see it count down between resolves.
+     * The pin holds without expiry, so it reports 0. */
+    int user_page;
+    int8_t user_src;
+    unpack_claim(s_arb.user_claim, &user_page, &user_src);
+    if (user_page >= 0 && !s_arb.pinned) {
+        int64_t now_ms = esp_timer_get_time() / 1000;
+        int64_t left_ms = (int64_t)app_config_get()->nav_grace_s * 1000
+                        - (now_ms - s_arb.user_stamp_ms);
+        if (left_ms > 0) {
+            out->grace_remaining_s = (int)((left_ms + 999) / 1000);
+        }
+    }
+}
 
 /* ── Ladder helpers (Task 3.2) ──
  *
@@ -345,7 +372,10 @@ void nav_arbiter_resolve(int64_t now_ms) {
 
     /* Rung 0: modal freeze. Closing a modal restamps grace in
      * nav_arbiter_notify_modal_close, so the next resolve holds the page. */
-    if (s_arb.modal_depth > 0) return;
+    if (s_arb.modal_depth > 0) {
+        s_arb.last_level = (uint8_t)NAV_SRC_HOLD;
+        return;
+    }
 
     /* Topology rebuild consumed before resolution. */
     if (s_arb.topology_dirty) {
@@ -401,7 +431,7 @@ void nav_arbiter_resolve(int64_t now_ms) {
         int8_t hs = -1;
         desired = home_page_with_src(&hs);
         s_arb.pending_img_source = hs;
-        src = NAV_SRC_DEFAULT;
+        src = NAV_SRC_HOME_LOCK;
     } else if (auto_rotate) {
         if (s_arb.slideshow_advance) {
             s_arb.slideshow_advance = false;
@@ -439,6 +469,10 @@ void nav_arbiter_resolve(int64_t now_ms) {
         s_arb.pending_img_source = hs;
     }
 
+    /* Publish the winning rung for the web API (level state, read atomically
+     * by nav_arbiter_get_web_status from the httpd task). */
+    s_arb.last_level = (uint8_t)src;
+
     /* Idle indicator coupling. */
     bool now_idle = (src == NAV_SRC_IDLE);
     if (now_idle != s_arb.idle_claim_active) {
@@ -450,16 +484,41 @@ void nav_arbiter_resolve(int64_t now_ms) {
      * Mark the page committed ONLY on a successful lock+switch; a lock timeout
      * leaves current_committed unchanged so the next resolve retries (otherwise
      * desired==current_committed would suppress the retry forever). */
+    /* Compare against the LIVE override, not the arbiter's cached copy: the
+     * override is a shared atomic that other writers touch (page_ref_navigate(),
+     * a swipe onto the image page) and that the commit below applies BEFORE
+     * taking the display lock — so a lock timeout applies the source while the
+     * page switch is abandoned. Gating on the cached copy made the arbiter
+     * believe the right source was already applied and it never healed the
+     * drift (Home Page = Moon, panel stuck on the persisted default source).
+     * Raw override, not the effective source: pending -1 ("no override, use the
+     * persisted default") must not read as a change every cycle. */
     bool img_src_changed = (desired == PAGE_IDX_IMAGE_DISPLAY)
-        && (s_arb.pending_img_source != s_arb.current_committed_img_source);
+        && (s_arb.pending_img_source != image_source_get_override());
 
     if (desired != s_arb.current_committed || img_src_changed) {
         int effect = (src == NAV_SRC_SLIDESHOW) ? c->auto_rotate_effect : 0;
         /* Apply the runtime image-source override BEFORE switching the page so
          * the Image Display page fetches/renders the right source. pending is -1
          * for non-image stops, which clears the override (persisted default). */
+        /* Capture the effective source BEFORE the override write so the fetch
+         * wake below can be gated on a REAL source change. Healing a cleared
+         * override back to a value that resolves to the same effective source
+         * (e.g. override -1 -> 0 while the persisted default is already 0) must
+         * not re-download the image: an ungated notify here self-sustains a
+         * refetch/crossfade loop (commit -> notify -> fetch -> resolve -> commit)
+         * that fades the image page every few seconds. */
+        int8_t eff_before = image_source_get_effective();
         image_source_set_override(s_arb.pending_img_source);
-        if (desired == PAGE_IDX_IMAGE_DISPLAY && goes_task_handle) {
+        /* Track the source with the write, not with the page switch below: the
+         * write already happened, so recording it only on lock success would
+         * leave the cache disagreeing with the live override (the drift this
+         * block used to gate on). current_committed still moves only on a
+         * successful switch, so a lock timeout still retries the page. */
+        s_arb.current_committed_img_source = s_arb.pending_img_source;
+        if (desired == PAGE_IDX_IMAGE_DISPLAY && goes_task_handle &&
+            (s_arb.current_committed != PAGE_IDX_IMAGE_DISPLAY ||
+             image_source_get_effective() != eff_before)) {
             xTaskNotifyGive(goes_task_handle);   /* wake fetch for new source */
         }
         /* Manual navigation to the image page (USER claim) shows the loading
@@ -495,7 +554,6 @@ void nav_arbiter_resolve(int64_t now_ms) {
             }
             bsp_display_unlock();
             s_arb.current_committed = desired;
-            s_arb.current_committed_img_source = s_arb.pending_img_source;
             ESP_LOGI(TAG, "commit page=%d src=%d img_src=%d",
                      desired, (int)src, (int)s_arb.pending_img_source);
 

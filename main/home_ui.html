@@ -1,0 +1,931 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NinaDash Home</title>
+<link rel="icon" type="image/png" href="/favicon.ico">
+<style>
+:root{--bg:#080a10;--border:rgba(255,255,255,.12);--accent:#7aa2f7;--a:122,162,247;--text:#e2e8f0;--text-2:#b8c2d0;--muted:#94a3b8;--hint:#7a8ba4;--danger:#f87171;--warning:#fbbf24;--success:#4ade80;--radius:16px;--radius-sm:10px;--glass-bg:#1e2330;--glass-border:rgba(255,255,255,.14);--elevated:rgba(48,54,72,.96);--input-bg:rgba(12,14,20,.92)}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);background-image:radial-gradient(ellipse at 20% 0%,rgba(122,162,247,.05) 0%,transparent 50%),radial-gradient(ellipse at 80% 100%,rgba(124,141,240,.04) 0%,transparent 50%),linear-gradient(135deg,#0a0c14 0%,#0f1320 100%);color:var(--text);line-height:1.5;overflow-x:hidden;min-height:100dvh}
+/* shared icon rules: one place for stroke attrs (SVG sprite) */
+.ic{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;width:16px;height:16px;flex-shrink:0}
+.ic3{stroke-width:3}
+/* top nav */
+.top-nav{position:sticky;top:0;z-index:100;background:rgba(10,10,11,.7);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 16px;padding:8px 24px;min-height:60px}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.brand .logo{width:36px;height:36px;flex-shrink:0}
+.brand-name{font-size:.95rem;font-weight:700;letter-spacing:-.02em;color:#f4f4f5}
+.brand-meta{font-size:.7rem;color:var(--hint);font-variant-numeric:tabular-nums;white-space:nowrap;min-height:1em}
+.nav-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.nav-group{display:inline-flex;align-items:center;gap:10px;font-size:.75rem;color:var(--muted);padding:6px 12px;border:1px solid rgba(255,255,255,.06);border-radius:10px;background:rgba(255,255,255,.02);white-space:nowrap;font-variant-numeric:tabular-nums}
+.nav-group .fw-ver{color:#f4f4f5;font-weight:600;min-width:5ch;text-align:center}
+.update-badge{color:var(--accent);font-size:.64rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border:1px solid rgba(var(--a),.4);border-radius:10px;background:rgba(var(--a),.1);text-decoration:none;transition:border-color .2s}
+.update-badge:hover{border-color:rgba(var(--a),.7)}
+.update-badge.hide{display:none}
+.github-link{color:var(--hint);text-decoration:none;font-size:.75rem;display:flex;align-items:center;gap:6px;padding:7px 12px;border:1px solid rgba(255,255,255,.06);border-radius:10px;transition:all .2s ease;background:rgba(255,255,255,.02);white-space:nowrap}
+.github-link:hover{color:#f4f4f5;border-color:rgba(var(--a),.3);background:rgba(255,255,255,.04)}
+.btn{border:none;border-radius:10px;padding:9px 18px;font-weight:600;cursor:pointer;font-size:.82rem;transition:transform .2s;display:inline-flex;align-items:center;justify-content:center;gap:8px;font-family:inherit;text-decoration:none}
+.btn-primary{background:linear-gradient(135deg,var(--accent),rgba(var(--a),.8));color:#0a0a0b;box-shadow:0 4px 16px rgba(var(--a),.2)}
+.btn-primary:hover{transform:translateY(-1px)}
+.btn .ic{width:15px;height:15px}
+.btn:focus-visible,.deck-chip:focus-visible,.rig-row:focus-visible,.int-chip:focus-visible,.update-badge:focus-visible,.github-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.content{max-width:1180px;margin:0 auto;padding:24px 24px 60px}
+.card{background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:var(--radius);padding:24px 28px;margin-bottom:20px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+.card-title{font-size:.7rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.08em;margin-bottom:18px;opacity:.9;display:flex;align-items:center;justify-content:space-between;gap:12px}
+/* connection-lost pill: position fixed, so showing it never shifts layout */
+.conn-pill{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:200;font-size:.75rem;font-weight:600;color:var(--warning);background:rgba(20,22,30,.96);border:1px solid rgba(251,191,36,.35);border-radius:10px;padding:7px 14px;opacity:0;pointer-events:none;transition:opacity .3s;white-space:nowrap}
+.conn-pill.show{opacity:1}
+/* metrics row */
+.sys-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:20px}
+.sys-metric{background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:10px}
+.sm-label{display:flex;align-items:center;gap:8px;color:var(--hint);font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+.sm-label .ic{width:15px;height:15px;opacity:.7}
+.sm-value{color:#f4f4f5;font-size:1.35rem;font-weight:700;line-height:1;font-variant-numeric:tabular-nums;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.sm-sub{font-size:.7rem;color:var(--hint);font-weight:500;min-height:1em}
+.sm-bar{background:rgba(255,255,255,.06);border-radius:4px;height:6px;overflow:hidden}
+.sm-bar-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,var(--accent),rgba(var(--a),.7));transition:width .5s}
+.sm-bar-fill.warn{background:linear-gradient(90deg,var(--warning),rgba(251,191,36,.7))}
+.bars{display:inline-flex;align-items:flex-end;gap:3px;height:22px}
+.bars span{width:5px;border-radius:1px;background:rgba(255,255,255,.12)}
+.bars span.on{background:var(--success)}
+/* reserved widths so live values never shift layout */
+#metricUptime{min-width:14ch}
+#metricTemp{min-width:6ch}
+#metricRssi{min-width:3ch;text-align:right}
+#memFree,#psFree{min-width:4ch;text-align:right}
+/* main grid: side column stretches so both columns bottom-align */
+.main-grid{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:20px}
+.main-grid>.card,.side-col>.card{margin-bottom:0}
+.side-col{display:flex;flex-direction:column;gap:20px}
+.side-col>.card:last-child{flex:1}
+/* decision-flow hero */
+.hero-card{padding:24px 28px 28px;display:flex;flex-direction:column}
+.mode-chip{font-size:.7rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-2);background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:8px;padding:3px 10px;white-space:nowrap;min-width:118px;text-align:center}
+.hero-body{flex:1;position:relative;display:grid;grid-template-columns:minmax(0,1fr) 190px;gap:44px}
+/* flow grid: col 1 = questions, col 2 = yes connector, col 3 = yes outcomes.
+   Each step emits a question row, then a NO-connector row; auto-placement keeps them paired. */
+.flow{position:relative;display:grid;grid-template-columns:minmax(0,1.12fr) 44px minmax(0,1fr);align-content:start}
+.fstep{display:contents}
+.fq{grid-column:1;align-self:center;background:var(--input-bg);border:1px solid var(--border);border-radius:12px;padding:11px 14px;font-size:.8rem;font-weight:600;line-height:1.35;color:var(--muted);transition:border-color .3s,background-color .3s,color .3s,opacity .3s}
+.fyes{grid-column:2;align-self:center;position:relative;height:2px;background:rgba(255,255,255,.1);transition:background-color .3s,opacity .3s}
+.fyes::before{content:'yes';position:absolute;top:-15px;left:50%;transform:translateX(-50%);font-size:.56rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--hint)}
+.fyes::after{content:'';position:absolute;right:-1px;top:50%;transform:translateY(-50%);width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-left:6px solid rgba(255,255,255,.18)}
+.fout{grid-column:3;align-self:center;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:10px 12px;font-size:.74rem;font-weight:600;line-height:1.35;color:var(--muted);transition:border-color .3s,background-color .3s,color .3s,opacity .3s,box-shadow .3s}
+.fno{grid-column:1;justify-self:center;position:relative;width:2px;height:36px;background:rgba(255,255,255,.1);transition:opacity .3s}
+.fno::before{content:'no';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:.56rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--hint);background:var(--glass-bg);padding:1px 6px;border-radius:6px}
+.fno::after{content:'';position:absolute;bottom:-1px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:6px solid rgba(255,255,255,.18)}
+.fterm{grid-column:1;display:flex;align-items:center;gap:10px;background:rgba(255,255,255,.02);border:1px dashed rgba(255,255,255,.16);border-radius:12px;padding:11px 14px;font-size:.78rem;font-weight:600;color:var(--muted);transition:border-color .3s,background-color .3s,color .3s,opacity .3s,box-shadow .3s}
+.fterm .ic{opacity:.7}
+/* answered steps above the winner: lit question, lit NO path, dim yes branch */
+.fstep.past .fq{color:#f4f4f5;border-color:rgba(var(--a),.3);background:rgba(var(--a),.05)}
+.fstep.past .fno{background:linear-gradient(180deg,rgba(var(--a),.8),rgba(var(--a),.45))}
+.fstep.past .fno::before{color:var(--accent)}
+.fstep.past .fno::after{border-top-color:rgba(var(--a),.7)}
+.fstep.past .fyes,.fstep.past .fout{opacity:.42}
+/* the winning step: question answered yes, outcome takes the screen */
+.fstep.active .fq{color:#f4f4f5;border-color:rgba(var(--a),.5);background:rgba(var(--a),.09)}
+.fstep.active .fyes{background:rgba(var(--a),.85)}
+.fstep.active .fyes::before{color:var(--accent)}
+.fstep.active .fyes::after{border-left-color:rgba(var(--a),.9)}
+.fstep.active .fout{color:#f4f4f5;border-color:rgba(var(--a),.55);background:rgba(var(--a),.13);box-shadow:0 0 20px rgba(var(--a),.22)}
+.fstep.active .fno{opacity:.35}
+.fstep.active .fterm{border-style:solid;border-color:rgba(var(--a),.55);background:rgba(var(--a),.12);color:#f4f4f5;box-shadow:0 0 20px rgba(var(--a),.22)}
+.fstep.active .fterm .ic{opacity:1;color:var(--accent)}
+/* steps the decision never reached */
+.fstep.future .fq,.fstep.future .fyes,.fstep.future .fout,.fstep.future .fno,.fstep.future .fterm{opacity:.38}
+/* step whose feature is turned off in Settings: dimmed like future, never lit as "answered no" */
+.fstep.off .fq,.fstep.off .fyes,.fstep.off .fout,.fstep.off .fno{opacity:.38}
+/* extras inside outcome nodes: countdown space is always reserved (no layout shift) */
+.fextra{margin-top:8px}
+#overrideExtra{visibility:hidden}
+#overrideExtra.has-content{visibility:visible}
+#slideshowExtra{display:none}
+#slideshowExtra.has-content{display:block}
+.countdown-wrap{display:flex;align-items:center;gap:10px}
+.countdown-bar{flex:1;height:5px;background:rgba(255,255,255,.08);border-radius:3px;overflow:hidden}
+.countdown-fill{height:100%;width:100%;background:var(--accent);border-radius:3px;transform-origin:left;transition:transform 1s linear}
+.countdown-num{font-size:.75rem;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums;min-width:4ch;text-align:right}
+.rotation-order{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center}
+.rot-pair{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.rot-arrow{width:10px;height:10px;color:var(--hint)}
+.rot-step{font-size:.7rem;font-weight:600;color:var(--muted);padding:3px 10px;border-radius:8px;background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.08)}
+.rot-step.now{color:var(--accent);background:rgba(var(--a),.13);border-color:rgba(var(--a),.45)}
+/* connector from winning node to panel preview, with arrowhead */
+.connector{position:absolute;top:0;left:0;height:2px;background:linear-gradient(90deg,rgba(var(--a),.9),rgba(var(--a),.35));border-radius:1px;z-index:0;transition:transform .3s;pointer-events:none}
+.connector::after{content:'';position:absolute;right:0;top:50%;transform:translateY(-50%);width:0;height:0;border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:8px solid rgba(var(--a),.8)}
+/* panel preview */
+.panel-col{display:flex;flex-direction:column;align-items:center;gap:12px;align-self:start;position:relative;z-index:1;transition:transform .3s}
+.panel-label{font-size:.64rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--hint)}
+.panel-frame{width:172px;height:172px;border-radius:26px;background:#05070c;border:3px solid rgba(255,255,255,.14);box-shadow:0 8px 30px rgba(0,0,0,.7);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:16px;text-align:center;position:relative;overflow:hidden}
+.panel-frame::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 30% 20%,rgba(var(--a),.12),transparent 60%)}
+.panel-icon{color:var(--accent);position:relative}
+.panel-icon .ic{width:34px;height:34px}
+.panel-page-name,.panel-page-sub{position:relative;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.panel-page-name{font-size:.82rem;font-weight:700;color:#f4f4f5;line-height:1.3}
+.panel-page-sub{font-size:.7rem;color:var(--hint);min-height:1em}
+.panel-dots{display:flex;gap:5px;position:relative;margin-top:4px;min-height:5px}
+.panel-dots span{width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.18)}
+.panel-dots span.on{background:var(--accent)}
+.panel-why{font-size:.7rem;color:var(--muted);text-align:center;line-height:1.45;max-width:190px;min-height:3em}
+.panel-why strong{color:var(--accent);font-weight:600}
+/* auto-rotate toggle row (whole row is the label = big hit area) */
+.toggle-row{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:18px;padding:12px 14px;cursor:pointer;background:var(--elevated);border:1px solid var(--border);border-radius:var(--radius-sm)}
+.toggle-label{display:block;font-size:.82rem;color:var(--text-2)}
+.toggle-hint{display:block;font-size:.7rem;color:var(--hint);margin-top:1px}
+.toggle{position:relative;display:inline-block;width:48px;height:26px;flex-shrink:0}
+.toggle input{opacity:0;width:0;height:0;position:absolute}
+.toggle-track{position:absolute;inset:0;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.06);border-radius:26px;transition:background-color .3s,border-color .3s}
+.toggle-track::before{content:'';position:absolute;height:20px;width:20px;left:3px;bottom:2px;background:#71717a;border-radius:50%;transition:transform .3s cubic-bezier(.4,0,.2,1),background-color .3s}
+.toggle input:checked+.toggle-track{background:rgba(var(--a),.3);border-color:rgba(var(--a),.4)}
+.toggle input:checked+.toggle-track::before{transform:translateX(20px);background:var(--accent)}
+.toggle input:focus-visible+.toggle-track{outline:2px solid var(--accent);outline-offset:2px}
+/* rig rows */
+.rig-row{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:var(--radius-sm);background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06);text-decoration:none;color:inherit;transition:border-color .2s}
+.rig-row:hover{border-color:rgba(255,255,255,.18)}
+.rig-row+.rig-row{margin-top:10px}
+.rig-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;background:rgba(255,255,255,.18)}
+.rig-dot.ok{background:var(--success)}
+.rig-dot.bad{background:var(--danger)}
+.rig-dot.mid{background:var(--warning);animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.rig-main{min-width:0;flex:1}
+.rig-name{font-size:.82rem;font-weight:600;color:#f4f4f5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rig-sub{font-size:.7rem;color:var(--hint);display:flex;align-items:center;gap:6px;min-height:1.1em}
+.rig-sub .ic{width:11px;height:11px;color:var(--success)}
+.status-pill{flex-shrink:0;font-size:.64rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:3px 9px;border-radius:8px;white-space:nowrap;min-width:104px;text-align:center}
+.status-pill.ok{background:rgba(74,222,128,.12);color:var(--success);border:1px solid rgba(74,222,128,.28)}
+.status-pill.bad{background:rgba(248,113,113,.1);color:var(--danger);border:1px solid rgba(248,113,113,.26)}
+.status-pill.mid{background:rgba(251,191,36,.12);color:var(--warning);border:1px solid rgba(251,191,36,.28)}
+/* reserved 3ch keeps the pill width constant across all ellipsis frames */
+.status-pill .ell{display:inline-block;width:3ch;text-align:left}
+.status-pill.mid .ell::after{content:'';animation:ell 1.5s steps(4) infinite}
+@keyframes ell{0%{content:''}25%{content:'.'}50%{content:'..'}75%{content:'...'}}
+.rig-empty{font-size:.75rem;color:var(--hint)}
+/* integrations */
+.integrations{display:flex;flex-wrap:wrap;gap:8px}
+.int-chip{display:inline-flex;align-items:center;gap:8px;font-size:.75rem;font-weight:600;color:var(--text-2);padding:7px 13px;border-radius:10px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.07);text-decoration:none;transition:border-color .2s}
+.int-chip:hover{border-color:rgba(255,255,255,.18)}
+.int-chip .ic{width:14px;height:14px;opacity:.75}
+.int-chip .int-dot{width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,.18)}
+.int-chip.on .int-dot{background:var(--success)}
+.int-chip.off{color:var(--muted)}
+/* page deck: uniform tile grid */
+.deck{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;min-height:76px}
+.deck-chip{display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:4px;min-height:76px;padding:10px 8px;border-radius:var(--radius-sm);text-align:center;border:1px solid rgba(255,255,255,.08);background:rgba(0,0,0,.3);color:var(--muted);cursor:pointer;user-select:none;font-family:inherit;transition:border-color .2s,color .2s}
+.deck-chip .ic{width:18px;height:18px}
+.deck-chip .pt-name{font-size:.76rem;font-weight:600;line-height:1.2}
+.deck-chip .pt-sub{font-size:.62rem;color:var(--hint);min-height:1em}
+.deck-chip:hover:not(.disabled){border-color:rgba(255,255,255,.18);color:var(--text-2)}
+.deck-chip.current{background:rgba(var(--a),.13);border-color:rgba(var(--a),.45)}
+.deck-chip.current .pt-name{color:var(--accent)}
+.deck-chip.disabled{opacity:.35;cursor:default}
+.deck-hint{font-size:.75rem;color:var(--hint);margin-top:12px;line-height:1.5}
+/* responsive */
+@media (max-width:900px){.main-grid{grid-template-columns:1fr}.content{padding:16px 16px 48px}.card{padding:20px}}
+@media (max-width:640px){.hero-body{grid-template-columns:1fr;gap:20px}.connector{display:none}.panel-col{align-self:stretch}.flow{grid-template-columns:minmax(0,1fr) 36px minmax(0,1fr)}.fq{font-size:.74rem;padding:10px 12px}.fout{font-size:.68rem;padding:9px 10px}.fterm{font-size:.72rem}.brand-meta{display:none}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<!-- SVG sprite: single copy of every icon path -->
+<svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
+<defs>
+<symbol id="i-star" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></symbol>
+<symbol id="i-gear" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></symbol>
+<symbol id="i-chip" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></symbol>
+<symbol id="i-bars" viewBox="0 0 24 24"><path d="M6 19v-3M10 19v-6M14 19v-9M18 19V5"/></symbol>
+<symbol id="i-therm" viewBox="0 0 24 24"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></symbol>
+<symbol id="i-wifi" viewBox="0 0 24 24"><path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></symbol>
+<symbol id="i-signal" viewBox="0 0 24 24"><path d="M4 11a9 9 0 0 1 9 9M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></symbol>
+<symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></symbol>
+<symbol id="i-cloud" viewBox="0 0 24 24"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9z"/></symbol>
+<symbol id="i-spotify" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8 14.5c2.5-1 5.5-1 8 .5M7.5 11c3-1.2 6.5-1.2 9.5.5M7 7.8c3.5-1.4 7.5-1.4 11 .5"/></symbol>
+<symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+<symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></symbol>
+<symbol id="i-code" viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></symbol>
+<symbol id="i-home" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></symbol>
+<symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><polyline points="9 6 15 12 9 18"/></symbol>
+</defs>
+</svg>
+
+<nav class="top-nav">
+ <div class="brand">
+  <img class="logo" src="/favicon.ico" alt="">
+  <div>
+   <div class="brand-name" id="brandName">NINA Display</div>
+   <div class="brand-meta" id="brandIp"></div>
+  </div>
+ </div>
+ <div class="nav-right">
+  <span class="nav-group">
+   <span class="fw-ver" id="fwVer">--</span>
+   <a class="update-badge hide" id="updateBadge" href="/config#system">Update available</a>
+  </span>
+  <a class="github-link" href="https://github.com/chvvkumar/ESP32-P4-NINA-Display" target="_blank" rel="noopener">
+   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+   GitHub
+  </a>
+  <a class="btn btn-primary" href="/config"><svg class="ic"><use href="#i-gear"/></svg>Settings</a>
+ </div>
+</nav>
+
+<div class="content">
+ <div class="sys-metrics">
+  <div class="sys-metric">
+   <div class="sm-label"><svg class="ic"><use href="#i-clock"/></svg>Uptime</div>
+   <div class="sm-value" id="metricUptime">--</div>
+   <div class="sm-sub">Since last restart</div>
+  </div>
+  <div class="sys-metric">
+   <div class="sm-label"><svg class="ic"><use href="#i-chip"/></svg>Memory</div>
+   <div class="sm-value"><span id="memFree">--</span><span class="sm-sub">free of <span id="memTotal">--</span></span></div>
+   <div class="sm-bar"><div class="sm-bar-fill" id="memBar" style="width:0%"></div></div>
+   <div class="sm-sub" id="memPct"></div>
+  </div>
+  <div class="sys-metric">
+   <div class="sm-label"><svg class="ic"><use href="#i-bars"/></svg>PSRAM</div>
+   <div class="sm-value"><span id="psFree">--</span><span class="sm-sub">free of <span id="psTotal">--</span></span></div>
+   <div class="sm-bar"><div class="sm-bar-fill" id="psBar" style="width:0%"></div></div>
+   <div class="sm-sub" id="psPct"></div>
+  </div>
+  <div class="sys-metric">
+   <div class="sm-label"><svg class="ic"><use href="#i-therm"/></svg>SoC Temp</div>
+   <div class="sm-value" id="metricTemp">--</div>
+   <div class="sm-sub" id="tempSub"></div>
+  </div>
+  <div class="sys-metric">
+   <div class="sm-label"><svg class="ic"><use href="#i-wifi"/></svg>WiFi</div>
+   <div class="sm-value">
+    <span id="metricRssi">--</span><span class="sm-sub">dBm</span>
+    <span class="bars" id="rssiBars"><span style="height:8px"></span><span style="height:13px"></span><span style="height:18px"></span><span style="height:22px"></span></span>
+   </div>
+   <div class="sm-sub" id="wifiSsid"></div>
+  </div>
+ </div>
+
+ <div class="main-grid">
+  <div class="card hero-card">
+   <div class="card-title">
+    <span>Why the panel shows this page</span>
+    <span class="mode-chip" id="modeChip">Pinned mode</span>
+   </div>
+
+   <div class="hero-body" id="heroBody">
+    <div class="connector" id="connector"></div>
+
+    <div class="flow" id="flow">
+     <div class="fstep future" data-level="menu">
+      <div class="fq">Is a menu open on the panel?</div>
+      <div class="fyes"></div>
+      <div class="fout" id="outMenu">The screen stays where it is</div>
+      <div class="fno"></div>
+     </div>
+     <div class="fstep future" data-level="override">
+      <div class="fq">Did you just pick a page?</div>
+      <div class="fyes"></div>
+      <div class="fout" id="outOverride">
+       <div>Your page shows for a while</div>
+       <div class="fextra" id="overrideExtra">
+        <div class="countdown-wrap">
+         <div class="countdown-bar"><div class="countdown-fill" id="countdownFill"></div></div>
+         <span class="countdown-num" id="countdownNum">10s</span>
+        </div>
+       </div>
+      </div>
+      <div class="fno"></div>
+     </div>
+     <div class="fstep future" data-level="lock">
+      <div class="fq">Is 'Always show the Home Page' on?</div>
+      <div class="fyes"></div>
+      <div class="fout" id="outLock">Show your home page</div>
+      <div class="fno"></div>
+     </div>
+     <div class="fstep future" data-level="slideshow">
+      <div class="fq">Is the slideshow on?</div>
+      <div class="fyes"></div>
+      <div class="fout" id="outSlideshow">
+       <div>Pages take turns</div>
+       <div class="fextra" id="slideshowExtra">
+        <div class="rotation-order" id="rotationOrder"></div>
+       </div>
+      </div>
+      <div class="fno"></div>
+     </div>
+     <div class="fstep future" data-level="session">
+      <div class="fq">Is a telescope busy imaging?</div>
+      <div class="fyes"></div>
+      <div class="fout" id="outSession">Show that telescope's page</div>
+      <div class="fno"></div>
+     </div>
+     <div class="fstep future" data-level="idle">
+      <div class="fq">Are all your telescope computers offline?</div>
+      <div class="fyes"></div>
+      <div class="fout" id="outIdle">Show your idle page</div>
+      <div class="fno"></div>
+     </div>
+     <div class="fstep future" data-level="home">
+      <div class="fterm" id="outHome"><svg class="ic"><use href="#i-grid"/></svg><span id="homeTermText">Show your home page (Summary)</span></div>
+     </div>
+    </div>
+
+    <div class="panel-col" id="panelCol">
+     <div class="panel-label">Panel is showing</div>
+     <div class="panel-frame" id="panelFrame">
+      <div class="panel-icon"><svg class="ic"><use id="panelUse" href="#i-grid"/></svg></div>
+      <div class="panel-page-name" id="panelPageName">Summary</div>
+      <div class="panel-page-sub" id="panelPageSub"></div>
+      <div class="panel-dots" id="panelDots"></div>
+     </div>
+     <div class="panel-why"><strong id="whyLevel">Home page</strong><span id="whyRest"> decides what the panel shows.</span></div>
+    </div>
+   </div>
+
+   <label class="toggle-row">
+    <span>
+     <span class="toggle-label">Auto-rotate</span>
+     <span class="toggle-hint" id="toggleHint">Off. The panel stays pinned to the active session.</span>
+    </span>
+    <span class="toggle">
+     <input type="checkbox" id="autoRotateToggle" aria-label="Auto-rotate">
+     <span class="toggle-track"></span>
+    </span>
+   </label>
+  </div>
+
+  <div class="side-col">
+   <div class="card">
+    <div class="card-title"><span>NINA Connections</span></div>
+    <div id="rigList"><div class="rig-empty" id="rigEmpty">Waiting for device data.</div></div>
+   </div>
+
+   <div class="card">
+    <div class="card-title"><span>Integrations</span></div>
+    <div class="integrations">
+     <a class="int-chip off" id="intMqtt" href="/config#system"><svg class="ic"><use href="#i-signal"/></svg>MQTT <span class="int-dot"></span></a>
+     <a class="int-chip off" id="intAllsky" href="/config#allsky"><svg class="ic"><use href="#i-sun"/></svg>AllSky <span class="int-dot"></span></a>
+     <a class="int-chip off" id="intWeather" href="/config#clock"><svg class="ic"><use href="#i-cloud"/></svg>Weather <span class="int-dot"></span></a>
+     <a class="int-chip off" id="intSpotify" href="/config#spotify"><svg class="ic"><use href="#i-spotify"/></svg>Spotify <span class="int-dot"></span></a>
+    </div>
+   </div>
+
+   <div class="card">
+    <div class="card-title"><span>Panel Pages</span></div>
+    <div class="deck" id="deck"></div>
+    <div class="deck-hint" id="deckHint">Tap a page to send the panel there. It holds for a short while, then normal rules take over again.</div>
+   </div>
+  </div>
+ </div>
+</div>
+
+<div class="conn-pill" id="connPill">Device unreachable, retrying</div>
+
+<script>
+'use strict';
+
+var $ = function (id) { return document.getElementById(id); };
+
+/* ---- slug -> icon / subtitle mapping (presentation only; data comes from the API) ---- */
+var ICONS = { summary: 'i-grid', sysinfo: 'i-chip', allsky: 'i-sun', spotify: 'i-music',
+              clock: 'i-clock', json: 'i-code', ha: 'i-home' };
+var SUBS  = { summary: 'All computers', sysinfo: 'Device status', allsky: 'Sky conditions',
+              spotify: 'Music player', clock: 'Time and weather', json: 'Custom tiles',
+              ha: 'Entity tiles', 'image.goes': 'Satellite view', 'image.moon': 'Moon phase',
+              'image.solar': 'Solar view', 'image.custom': 'Your image' };
+function iconFor(slug) {
+ if (slug.indexOf('nina.') === 0) return 'i-star';
+ if (slug.indexOf('image') === 0) return 'i-image';
+ return ICONS[slug] || 'i-grid';
+}
+
+/* ---- state (filled from the device APIs) ---- */
+var state = {
+ level: 'home', mode: 'pinned', autoRotate: false,
+ currentSlug: 'summary', homeSlug: 'summary',
+ idleEnabled: false, idleSlug: '',
+ graceS: 10, rotation: [], overrideRemaining: 0,
+ sessionRig: '', sessionCount: 0,
+ ninaSubs: {}
+};
+var pagesBySlug = {};
+
+/* ---- DOM refs ---- */
+/* flow steps: top-down question order; the resolved level wins its row */
+var ORDER = ['menu', 'override', 'lock', 'slideshow', 'session', 'idle', 'home'];
+var steps = {};
+document.querySelectorAll('.fstep').forEach(function (el) { steps[el.dataset.level] = el; });
+var outcomes = {
+ menu: $('outMenu'), override: $('outOverride'), lock: $('outLock'), slideshow: $('outSlideshow'),
+ session: $('outSession'), idle: $('outIdle'), home: $('outHome')
+};
+var activeTarget = null;
+var heroBody = $('heroBody'), flowEl = $('flow'), connector = $('connector');
+var panelCol = $('panelCol'), panelFrame = $('panelFrame'), panelUse = $('panelUse');
+var panelPageName = $('panelPageName'), panelPageSub = $('panelPageSub'), panelDots = $('panelDots');
+var whyLevel = $('whyLevel'), whyRest = $('whyRest');
+var deck = $('deck'), modeChip = $('modeChip'), toggleHint = $('toggleHint');
+var rotationOrder = $('rotationOrder'), countdownFill = $('countdownFill'), countdownNum = $('countdownNum');
+var overrideExtra = $('overrideExtra'), slideshowExtra = $('slideshowExtra');
+var outIdle = outcomes.idle, outLock = outcomes.lock, homeTermText = $('homeTermText');
+var autoRotateToggle = $('autoRotateToggle'), connPill = $('connPill'), deckHint = $('deckHint');
+var rigList = $('rigList'), rigEmpty = $('rigEmpty');
+var metricUptime = $('metricUptime'), metricTemp = $('metricTemp'), tempSub = $('tempSub');
+var metricRssi = $('metricRssi'), wifiSsid = $('wifiSsid');
+var rssiBars = Array.prototype.slice.call($('rssiBars').children);
+var memFree = $('memFree'), memTotal = $('memTotal'), memBar = $('memBar'), memPct = $('memPct');
+var psFree = $('psFree'), psTotal = $('psTotal'), psBar = $('psBar'), psPct = $('psPct');
+var intChips = { mqtt: $('intMqtt'), allsky: $('intAllsky'), weather: $('intWeather'), spotify: $('intSpotify') };
+
+var SVG_NS = 'http://www.w3.org/2000/svg';
+function makeIcon(symbolId, cls) {
+ var svg = document.createElementNS(SVG_NS, 'svg');
+ svg.setAttribute('class', cls || 'ic');
+ var use = document.createElementNS(SVG_NS, 'use');
+ use.setAttribute('href', '#' + symbolId);
+ svg.appendChild(use);
+ return svg;
+}
+
+function getJSON(url, opts) {
+ return fetch(url, opts).then(function (r) {
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+ });
+}
+
+function hostOf(url) {
+ if (!url) return '';
+ return url.replace(/^https?:\/\//, '').split(/[:/]/)[0];
+}
+
+function pageLabel(slug) {
+ var p = pagesBySlug[slug];
+ return p ? p.label : (slug || 'page');
+}
+function pageSub(slug) {
+ if (state.ninaSubs[slug]) return state.ninaSubs[slug];
+ return SUBS[slug] || '';
+}
+
+function p2(n) { return (n < 10 ? '0' : '') + n; }
+/* zero-padded h/m/s: string length is constant, so tabular digits never shift layout */
+function fmtUptime(t) {
+ return Math.floor(t / 86400) + 'd ' + p2(Math.floor(t % 86400 / 3600)) + 'h ' +
+  p2(Math.floor(t % 3600 / 60)) + 'm ' + p2(t % 60) + 's';
+}
+function fmtK(b) { return Math.round(b / 1024) + 'K'; }
+function fmtM(b) { return (b / 1048576).toFixed(1) + 'M'; }
+function fmtAgo(ms) {
+ var m = Math.floor(ms / 60000);
+ if (m < 1) return 'moments ago';
+ var h = Math.floor(m / 60), d = Math.floor(h / 24);
+ if (d > 0) return d + 'd ' + (h % 24) + 'h ago';
+ if (h > 0) return h + 'h ' + (m % 60) + 'm ago';
+ return m + 'm ago';
+}
+
+/* ---- page deck: built once from /api/pages ---- */
+var deckChips = {};
+function buildDeck(pages) {
+ pages.forEach(function (p) { pagesBySlug[p.slug] = p; });
+ pages.filter(function (p) {
+  return p.targetable && (p.kind === 'page' || p.kind === 'image_source');
+ }).forEach(function (p) {
+  var b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'deck-chip' + (p.available ? '' : ' disabled');
+  b.dataset.page = p.slug;
+  b.appendChild(makeIcon(iconFor(p.slug), 'ic'));
+  var nm = document.createElement('span');
+  nm.className = 'pt-name';
+  nm.textContent = p.label;
+  b.appendChild(nm);
+  var sub = document.createElement('span');
+  sub.className = 'pt-sub';
+  sub.textContent = pageSub(p.slug);
+  b.appendChild(sub);
+  if (p.available) {
+   b.addEventListener('click', function () { gotoPage(p.slug); });
+  } else {
+   b.disabled = true;
+   b.title = 'Enable in Settings';
+  }
+  deck.appendChild(b);
+  deckChips[p.slug] = { btn: b, sub: sub };
+ });
+ /* panel dots: one per available NINA page */
+ pages.filter(function (p) { return p.slug.indexOf('nina.') === 0 && p.available; })
+  .forEach(function (p) {
+   var s = document.createElement('span');
+   s.dataset.p = p.slug;
+   panelDots.appendChild(s);
+  });
+}
+
+/* ---- rotation order list: rebuilt only when the slug list changes ---- */
+var lastRot = null, rotSteps = [];
+function renderRotation() {
+ var key = state.rotation.join(',');
+ if (key !== lastRot) {
+  lastRot = key;
+  rotationOrder.textContent = '';
+  rotSteps = [];
+  state.rotation.forEach(function (slug, i) {
+   var pair = document.createElement('span');
+   pair.className = 'rot-pair';
+   if (i > 0) pair.appendChild(makeIcon('i-chev', 'ic rot-arrow'));
+   var s = document.createElement('span');
+   s.className = 'rot-step';
+   s.dataset.rot = slug;
+   s.textContent = pageLabel(slug);
+   pair.appendChild(s);
+   rotationOrder.appendChild(pair);
+   rotSteps.push(s);
+  });
+ }
+ rotSteps.forEach(function (s) {
+  s.classList.toggle('now', state.autoRotate && s.dataset.rot === state.currentSlug);
+ });
+}
+
+/* ---- NINA connection rows: rebuilt only on topology change ---- */
+var rigRefs = [], lastRigSig = null;
+function renderRigs(instances, uptimeMs) {
+ var list = instances.filter(function (i) { return i.enabled; });
+ rigEmpty.style.display = list.length ? 'none' : '';
+ if (!list.length) { rigEmpty.textContent = 'No NINA computers enabled.'; }
+ var sig = list.map(function (i) { return i.index + ':' + hostOf(i.url); }).join('|');
+ if (sig !== lastRigSig) {
+  lastRigSig = sig;
+  rigRefs.forEach(function (r) { r.row.remove(); });
+  rigRefs = [];
+  list.forEach(function (inst) {
+   var row = document.createElement('a');
+   row.className = 'rig-row';
+   row.href = '/config#nodes';
+   var dot = document.createElement('span');
+   dot.className = 'rig-dot';
+   row.appendChild(dot);
+   var main = document.createElement('div');
+   main.className = 'rig-main';
+   var name = document.createElement('div');
+   name.className = 'rig-name';
+   name.textContent = hostOf(inst.url) || ('NINA ' + (inst.index + 1));
+   main.appendChild(name);
+   var sub = document.createElement('div');
+   sub.className = 'rig-sub';
+   var subIcon = makeIcon('i-check', 'ic ic3');
+   subIcon.style.display = 'none';
+   sub.appendChild(subIcon);
+   var subText = document.createElement('span');
+   sub.appendChild(subText);
+   main.appendChild(sub);
+   row.appendChild(main);
+   var pill = document.createElement('span');
+   pill.className = 'status-pill';
+   row.appendChild(pill);
+   rigList.appendChild(row);
+   rigRefs.push({ row: row, dot: dot, subIcon: subIcon, subText: subText, pill: pill, lastState: '' });
+  });
+ }
+ list.forEach(function (inst, n) {
+  var r = rigRefs[n];
+  if (!r) return;
+  var st = inst.connection_state;
+  if (st === 'unknown') st = 'connecting';
+  if (st !== r.lastState) {
+   r.lastState = st;
+   if (st === 'connected') {
+    r.dot.className = 'rig-dot ok';
+    r.pill.className = 'status-pill ok';
+    r.pill.textContent = 'Connected';
+   } else if (st === 'connecting') {
+    r.dot.className = 'rig-dot mid';
+    r.pill.className = 'status-pill mid';
+    r.pill.textContent = 'Connecting';
+    var ell = document.createElement('span');
+    ell.className = 'ell';
+    r.pill.appendChild(ell);
+   } else {
+    r.dot.className = 'rig-dot bad';
+    r.pill.className = 'status-pill bad';
+    r.pill.textContent = 'Disconnected';
+   }
+  }
+  var subMsg = '', showIcon = false;
+  if (st === 'connected') {
+   if (inst.websocket_connected) { subMsg = 'Live updates active'; showIcon = true; }
+   else subMsg = 'Polling for updates';
+  } else if (st === 'connecting') {
+   subMsg = 'Checking now';
+  } else if (inst.last_successful_poll_ms > 0 && uptimeMs > inst.last_successful_poll_ms) {
+   subMsg = 'Last seen ' + fmtAgo(uptimeMs - inst.last_successful_poll_ms);
+  }
+  r.subIcon.style.display = showIcon ? '' : 'none';
+  r.subText.textContent = subMsg;
+ });
+}
+
+/* ---- panel-why copy per level (end-user language) ---- */
+var WHY_LABEL = {
+ menu: 'A menu is open', override: 'You chose this page',
+ lock: "'Always show the Home Page' is on", slideshow: 'The slideshow is on',
+ session: 'A telescope is imaging', idle: 'All your telescope computers are offline', home: 'Nothing else applies'
+};
+var WHY = {
+ menu:      function ()  { return ', so the screen stays where it is.'; },
+ override:  function (n) { return ': ' + n + ' shows for a short while, then normal rules take over.'; },
+ lock:      function (n) { return ', so the panel stays on ' + n + '.'; },
+ slideshow: function (n) { return ': ' + n + ' is taking its turn.'; },
+ session:   function ()  {
+  if (state.sessionCount > 1) return ', so the panel shows the summary of every computer.';
+  return ': ' + (state.sessionRig || 'a NINA computer') + ' is connected, so the panel follows it.';
+ },
+ idle:      function (n) { return ', so the panel shows ' + n + '.'; },
+ home:      function (n) { return ', so the panel shows ' + n + '.'; }
+};
+
+/* ---- per-tick countdown: two targeted writes, no layout reads ---- */
+function tickCountdown() {
+ countdownNum.textContent = state.overrideRemaining + 's';
+ countdownFill.style.transform = 'scaleX(' + (state.graceS ? state.overrideRemaining / state.graceS : 0) + ')';
+}
+
+/* ---- full render: idempotent, textContent/class writes only ---- */
+var lastLevel = '';
+function render() {
+ var lvl = steps[state.level] ? state.level : 'home';
+ var slug = state.currentSlug;
+
+ /* light the taken path: questions above the winner answered "no",
+    the winner answered "yes", everything below unreached */
+ var ai = ORDER.indexOf(lvl);
+ ORDER.forEach(function (l, i) {
+  var el = steps[l];
+  el.classList.remove('past', 'active', 'future', 'off');
+  /* idle step turned off in Settings: dim it instead of "answered no" */
+  if (l === 'idle' && !state.idleEnabled && i !== ai) el.classList.add('off');
+  else el.classList.add(i < ai ? 'past' : i === ai ? 'active' : 'future');
+ });
+ activeTarget = outcomes[lvl];
+
+ /* countdown row: space is always reserved inside the outcome node (no layout shift) */
+ overrideExtra.classList.toggle('has-content', lvl === 'override');
+ if (lvl === 'override') tickCountdown();
+
+ slideshowExtra.classList.toggle('has-content', state.autoRotate && state.rotation.length > 0);
+ renderRotation();
+
+ outIdle.textContent = !state.idleEnabled
+  ? "Off. Turn on 'Switch page when no connections' in Settings to use this."
+  : state.idleSlug
+   ? 'Show your idle page (' + pageLabel(state.idleSlug) + ')'
+   : 'Show your idle page';
+
+ outLock.textContent = 'Show your home page (' + pageLabel(state.homeSlug) + ')';
+ homeTermText.textContent = 'Show your home page (' + pageLabel(state.homeSlug) + ')';
+
+ modeChip.textContent = state.mode === 'slideshow' ? 'Slideshow mode' : 'Pinned mode';
+ modeChip.title = state.mode === 'slideshow'
+  ? 'Auto-rotate is on. The panel takes turns showing your selected pages. Turn it off below to pin the panel to one page.'
+  : 'Auto-rotate is off. The panel stays on the page chosen by the rules below, such as following an imaging telescope. Turn on Auto-rotate below to cycle pages instead.';
+ toggleHint.textContent = state.autoRotate
+  ? 'On. The panel cycles through the slideshow pages.'
+  : 'Off. The panel stays pinned to the active session.';
+ if (autoRotateToggle.checked !== state.autoRotate) autoRotateToggle.checked = state.autoRotate;
+
+ deckHint.textContent = 'Tap a page to send the panel there. It holds for ' + state.graceS +
+  ' seconds, then normal rules take over again.';
+
+ /* panel preview: swap sprite reference + text on stable nodes (no innerHTML) */
+ panelUse.setAttribute('href', '#' + iconFor(slug));
+ panelPageName.textContent = pageLabel(slug);
+ panelPageSub.textContent = pageSub(slug);
+ whyLevel.textContent = WHY_LABEL[lvl];
+ whyRest.textContent = WHY[lvl](pageLabel(slug));
+ Array.prototype.forEach.call(panelDots.children, function (s) {
+  s.classList.toggle('on', s.dataset.p === slug);
+ });
+ Object.keys(deckChips).forEach(function (k) {
+  deckChips[k].btn.classList.toggle('current', k === slug);
+ });
+
+ if (lvl !== lastLevel) { lastLevel = lvl; layout(); }
+}
+
+/* ---- connector + preview alignment ----
+ * Runs only on level change, resize, breakpoint change, or font load; never per tick. */
+var mq640 = window.matchMedia('(max-width: 640px)');
+function layout() {
+ var active = activeTarget;
+ if (!active || mq640.matches) {
+  connector.style.display = 'none';
+  panelCol.style.transform = '';
+  return;
+ }
+ var nodeCenter = flowEl.offsetTop + active.offsetTop + active.offsetHeight / 2;
+ var nodeRight = flowEl.offsetLeft + active.offsetLeft + active.offsetWidth;
+ /* slide the preview column so the frame centers on the winning node (clamped inside the hero) */
+ var frameCenter = panelCol.offsetTop + panelFrame.offsetTop + panelFrame.offsetHeight / 2;
+ var delta = nodeCenter - frameCenter;
+ var maxDown = heroBody.clientHeight - (panelCol.offsetTop + panelCol.offsetHeight);
+ var maxUp = -panelCol.offsetTop;
+ if (delta > maxDown) delta = maxDown;
+ if (delta < maxUp) delta = maxUp;
+ panelCol.style.transform = 'translateY(' + delta + 'px)';
+ var width = panelCol.offsetLeft + panelFrame.offsetLeft - nodeRight;
+ if (width < 8) { connector.style.display = 'none'; return; }
+ connector.style.display = 'block';
+ connector.style.left = nodeRight + 'px';
+ connector.style.width = width + 'px';
+ connector.style.transform = 'translateY(' + (nodeCenter - 1) + 'px)';
+}
+mq640.addEventListener('change', layout);
+if (window.ResizeObserver) {
+ var ro = new ResizeObserver(layout);
+ ro.observe(heroBody);
+ ro.observe(flowEl);
+} else {
+ var rafPending = false;
+ window.addEventListener('resize', function () {
+  if (rafPending) return;
+  rafPending = true;
+  requestAnimationFrame(function () { rafPending = false; layout(); });
+ });
+}
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(layout);
+
+/* ---- metrics ---- */
+var uptimeBase = null, uptimeT0 = 0;
+function updUptime() {
+ if (uptimeBase === null) return;
+ metricUptime.textContent = fmtUptime(Math.floor((uptimeBase + (Date.now() - uptimeT0)) / 1000));
+}
+
+function applyStatus(st, ns) {
+ var nav = st.nav || {};
+ state.autoRotate = !!nav.auto_rotate;
+ state.mode = nav.mode || (state.autoRotate ? 'slideshow' : 'pinned');
+ state.level = nav.level || 'home';
+ state.currentSlug = nav.current_page_slug || state.currentSlug;
+ state.homeSlug = nav.home_page_slug || 'summary';
+ state.idleEnabled = !!nav.idle_enabled;
+ state.idleSlug = nav.idle_page_slug || '';
+ state.graceS = nav.grace_s > 0 ? nav.grace_s : 10;
+ state.rotation = nav.rotation || [];
+ state.overrideRemaining = state.level === 'override'
+  ? (nav.override_remaining_s != null ? nav.override_remaining_s : state.graceS) : 0;
+
+ uptimeBase = st.uptime_ms || 0;
+ uptimeT0 = Date.now();
+ updUptime();
+
+ if (st.heap_total > 0) {
+  memFree.textContent = fmtK(st.heap_internal_free);
+  memTotal.textContent = fmtK(st.heap_total);
+  var mu = Math.round((1 - st.heap_internal_free / st.heap_total) * 100);
+  memBar.style.width = mu + '%';
+  memBar.classList.toggle('warn', mu > 80);
+  memPct.textContent = mu + '% used';
+ }
+ if (st.psram_total > 0) {
+  psFree.textContent = fmtM(st.psram_free);
+  psTotal.textContent = fmtM(st.psram_total);
+  var pu = Math.round((1 - st.psram_free / st.psram_total) * 100);
+  psBar.style.width = pu + '%';
+  psBar.classList.toggle('warn', pu > 80);
+  psPct.textContent = pu + '% used';
+ }
+ if (st.temperature_c != null) {
+  metricTemp.textContent = st.temperature_c.toFixed(1) + '°C';
+  tempSub.textContent = st.temperature_c > 75 ? 'Running hot' : 'Normal range';
+ } else {
+  metricTemp.textContent = '--';
+  tempSub.textContent = 'Not available';
+ }
+ if (st.wifi_rssi != null) {
+  metricRssi.textContent = st.wifi_rssi;
+  var lit = st.wifi_rssi >= -55 ? 4 : st.wifi_rssi >= -65 ? 3 : st.wifi_rssi >= -75 ? 2 : st.wifi_rssi >= -85 ? 1 : 0;
+  rssiBars.forEach(function (b, i) { b.classList.toggle('on', i < lit); });
+  wifiSsid.textContent = st.wifi_ssid || '';
+ } else {
+  metricRssi.textContent = '--';
+  rssiBars.forEach(function (b) { b.classList.remove('on'); });
+  wifiSsid.textContent = 'Offline';
+ }
+
+ $('updateBadge').classList.toggle('hide', !st.update_available);
+
+ var ints = st.integrations || {};
+ Object.keys(intChips).forEach(function (k) {
+  intChips[k].classList.toggle('on', !!ints[k]);
+  intChips[k].classList.toggle('off', !ints[k]);
+ });
+
+ /* NINA instances: session why-line copy, tile subtitles, connection rows */
+ var instances = (ns && ns.instances) || [];
+ var connected = [];
+ instances.forEach(function (inst) {
+  if (!inst.enabled) return;
+  var slug = 'nina.' + (inst.index + 1);
+  var host = hostOf(inst.url);
+  state.ninaSubs[slug] = host;
+  if (deckChips[slug]) deckChips[slug].sub.textContent = host;
+  if (inst.connection_state === 'connected') connected.push(host);
+ });
+ state.sessionRig = connected[0] || '';
+ state.sessionCount = connected.length;
+ renderRigs(instances, st.uptime_ms || 0);
+
+ render();
+}
+
+/* ---- poll loop: sequential fetches, 5s cadence, 15s backoff after 3 failures ---- */
+var pollTimer = null, failCount = 0;
+function schedule() {
+ pollTimer = setTimeout(poll, failCount >= 3 ? 15000 : 5000);
+}
+function poll() {
+ pollTimer = null;
+ if (document.hidden) return; /* visibilitychange resumes */
+ getJSON('/api/status').then(function (st) {
+  return getJSON('/api/nina/status').then(function (ns) {
+   applyStatus(st, ns);
+   failCount = 0;
+  });
+ }).catch(function () {
+  failCount++;
+ }).then(function () {
+  connPill.classList.toggle('show', failCount > 0);
+  schedule();
+ });
+}
+document.addEventListener('visibilitychange', function () {
+ if (document.hidden) {
+  if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+ } else if (!pollTimer) {
+  poll();
+ }
+});
+
+/* ---- interactions ---- */
+function gotoPage(slug) {
+ /* optimistic local override; the next poll resyncs with the device */
+ state.level = 'override';
+ state.currentSlug = slug;
+ state.overrideRemaining = state.graceS;
+ render();
+ fetch('/api/navigate?ref=' + encodeURIComponent(slug), { method: 'POST' }).catch(function () {});
+}
+
+autoRotateToggle.addEventListener('change', function (e) {
+ var want = e.target.checked;
+ state.autoRotate = want;
+ state.mode = want ? 'slideshow' : 'pinned';
+ render();
+ fetch('/api/control/toggle?name=auto_rotate_enabled', { method: 'POST' })
+  .then(function (r) {
+   if (!r.ok) throw new Error('HTTP ' + r.status);
+   if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+   poll();
+  })
+  .catch(function () {
+   state.autoRotate = !want;
+   state.mode = state.autoRotate ? 'slideshow' : 'pinned';
+   render();
+  });
+});
+
+/* ---- 1s ticker: uptime + local override countdown only ---- */
+setInterval(function () {
+ if (document.hidden) return;
+ updUptime();
+ if (state.level === 'override' && state.overrideRemaining > 0) {
+  state.overrideRemaining--;
+  tickCountdown();
+ }
+}, 1000);
+
+/* ---- init: sequential loads to be kind to the single-worker httpd ---- */
+$('brandName').textContent = location.hostname || 'NINA Display';
+if (location.hostname) document.title = location.hostname.split('.')[0];
+getJSON('/api/version').then(function (v) {
+ $('fwVer').textContent = v.git_tag || v.version || '--';
+}).catch(function () {}).then(function () {
+ return getJSON('/api/wifi/status').then(function (w) {
+  $('brandIp').textContent = w.ip || '';
+ }).catch(function () {});
+}).then(function () {
+ return getJSON('/api/pages').then(buildDeck).catch(function () {});
+}).then(function () {
+ render();
+ poll();
+});
+</script>
+</body>
+</html>
