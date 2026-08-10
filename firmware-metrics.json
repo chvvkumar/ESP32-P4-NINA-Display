@@ -1,13 +1,13 @@
 {
   "flash_size": "32MB",
   "psram": "32MB @ 200MHz",
-  "factory_size": "4.14 MB",
-  "ota_size": "4.02 MB",
+  "factory_size": "4.26 MB",
+  "ota_size": "4.14 MB",
   "dram_used": "N/A",
   "iram_used": "N/A",
   "esp_idf": "v5.5.2",
   "target": "esp32p4",
-  "build_date": "2026-08-06",
+  "build_date": "2026-08-10",
   "branch": "main",
-  "commit": "e03a82e"
+  "commit": "9c43b5f"
 }
