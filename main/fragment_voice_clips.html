@@ -11,7 +11,7 @@
         <div class="field-hint" style="margin:0 0 10px">Upload any common audio format (mp3, m4a, wav, ogg); your browser converts it to the required 16 kHz mono PCM before uploading. Files ending in .pcm are sent as-is. Clips are limited to 10 seconds each; Boot Jingle may be up to 15 seconds.</div>
 
         <input type="file" id="vcFile" accept="audio/*,.pcm" style="display:none">
-        <div id="vcRows"></div>
+        <div id="vcRows" class="vc-grid"></div>
 
         <div style="margin-top:20px">
           <button type="button" class="btn btn-outline" onclick="vcResetAll()">Reset All Clips to Defaults</button>
@@ -98,24 +98,28 @@
   function vcBuildRows(){
     var c=document.getElementById('vcRows');
     if(!c) return;
-    var html='';
+    /* One grid for every group so the columns align across the whole table
+       (mirrors the Event Categories table on the Behavior tab). Group titles
+       span the full row; the header row appears once at the top. */
+    var html='<div class="vc-head"></div><div class="vc-head">Status</div><div class="vc-head">Upload</div><div class="vc-head">Reset</div><div class="vc-head">Preview</div>';
     var lastG=-1;
     CLIPS.forEach(function(cl){
       var n=cl[0];
       if(cl[2]!==lastG){
         lastG=cl[2];
-        html+='<div class="subsection-title" style="margin-top:16px">'+GROUPS[lastG]+'</div>';
+        html+='<div class="subsection-title vc-group">'+GROUPS[lastG]+'</div>';
       }
-      html+='<div class="vc-row" style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,0.05)">'+
-        '<div style="flex:1;min-width:0">'+
+      html+=
+        '<div class="vc-cell vc-name">'+
           '<div style="font-size:0.82rem">'+vcLabel(n)+'</div>'+
           '<div class="field-hint" style="margin:0">&ldquo;'+cl[1]+'&rdquo;</div>'+
         '</div>'+
-        '<span id="vcb_'+n+'" style="font-size:0.62rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;padding:2px 8px;border-radius:8px;border:1px solid var(--border);color:var(--text-muted);white-space:nowrap">Default</span>'+
-        '<button type="button" class="vp-btn" title="Play on the device" aria-label="Play on the device" onclick="vcPlay(\''+n+'\')">&#9654;</button>'+
-        '<button type="button" class="btn btn-outline" style="padding:5px 12px;font-size:0.72rem" onclick="vcPick(\''+n+'\')">Upload</button>'+
-        '<button type="button" class="btn btn-outline" id="vcr_'+n+'" style="padding:5px 12px;font-size:0.72rem;display:none" onclick="vcReset(\''+n+'\')">Reset</button>'+
-      '</div>';
+        '<div class="vc-cell"><span id="vcb_'+n+'" style="font-size:0.62rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;padding:2px 8px;border-radius:8px;border:1px solid var(--border);color:var(--text-muted);white-space:nowrap;min-width:104px;text-align:center">Default</span></div>'+
+        '<div class="vc-cell"><button type="button" class="btn btn-outline" style="padding:5px 12px;font-size:0.72rem" onclick="vcPick(\''+n+'\')">Upload</button></div>'+
+        /* Reset stays in the layout via visibility (not display) so the column
+           width and row height never shift between default and custom rows. */
+        '<div class="vc-cell"><button type="button" class="btn btn-outline" id="vcr_'+n+'" style="padding:5px 12px;font-size:0.72rem;visibility:hidden" onclick="vcReset(\''+n+'\')">Reset</button></div>'+
+        '<div class="vc-cell"><button type="button" class="vp-btn" title="Play on the device" aria-label="Play on the device" onclick="vcPlay(\''+n+'\')">&#9654;</button></div>';
     });
     c.innerHTML=html;
     var f=document.getElementById('vcFile');
@@ -149,9 +153,13 @@
           s.textContent=d.formatting
             ?'Storage is being prepared (first-time format). Uploads and playback are unavailable until this finishes; check back in a minute.'
             :'Storage is not ready yet. Uploads and playback are unavailable.';
+          s.style.color='#eab308';   /* prominent: matches the warn threshold yellow */
+          s.style.fontWeight='600';
         } else {
           s.textContent='Storage: '+fmtMB(d.spiffs_used||0)+' used of '+fmtMB(d.spiffs_total||0)+
             ' · Custom clips: '+fmtKB(d.custom_bytes||0)+' of '+fmtMB(d.budget||4194304)+' budget';
+          s.style.color='';
+          s.style.fontWeight='';
         }
       }
       (d.clips||[]).forEach(function(cl){
@@ -168,7 +176,7 @@
             b.style.borderColor='';
           }
         }
-        if(rst) rst.style.display=cl.custom?'':'none';
+        if(rst) rst.style.visibility=cl.custom?'visible':'hidden';
       });
     }).catch(function(){
       var s=document.getElementById('vcStatus');
