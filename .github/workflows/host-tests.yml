@@ -43,6 +43,7 @@ jobs:
       - name: Run cppcheck against firmware sources
         run: |
           cppcheck \
+            -j "$(nproc)" \
             --enable=warning,portability \
             --error-exitcode=1 \
             --inline-suppr \
