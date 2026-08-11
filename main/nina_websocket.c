@@ -694,10 +694,10 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             if (toast_allowed(index, 7))
                 ws_toast(index, TOAST_ERROR, "UNSAFE");
             nina_event_log_add(EVENT_SEV_ERROR, index, "Observatory UNSAFE!");
-            if (app_config_get()->alert_flash_enabled) {
-                nina_alert_trigger(ALERT_SAFETY, index, 0);
-            }
         }
+        /* Both edges into the breach engine: unsafe enters, safe re-arms so the
+         * next unsafe transition speaks again.  Flash/voice gates live inside. */
+        nina_alert_eval_safety(index, safe);
         /* Safety state update (no display lock needed — state tracking only) */
         nina_safety_update(true, safe);
         ESP_LOGI(TAG, "WS[%d]: Safety changed: %s", index, safe ? "SAFE" : "UNSAFE");

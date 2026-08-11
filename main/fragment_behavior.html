@@ -111,6 +111,35 @@
           <label class="toggle"><input type="checkbox" id="alert_flash_enabled" checked><span class="toggle-track"></span></label>
         </div>
         <div class="field-hint" style="margin-top:4px">Flash the screen border when RMS, HFR, or safety thresholds are exceeded.</div>
+        <div class="toggle-row" style="margin-top:16px">
+          <span class="toggle-label">Voice alerts</span>
+          <label class="toggle"><input type="checkbox" id="alert_voice_enabled"><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint" style="margin-top:4px">Speak a warning through the onboard speaker when a threshold is exceeded. Independent of border flash.</div>
+        <div class="field" style="margin-top:16px">
+          <label class="field-label">Voice volume</label>
+          <div class="slider-group">
+            <input type="range" class="slider" id="alert_voice_volume" min="0" max="100" value="70" oninput="$('alert_voice_volume_val').textContent=this.value+'%'">
+            <span class="slider-val" id="alert_voice_volume_val">70%</span>
+          </div>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Speak guiding RMS alerts</span>
+          <label class="toggle"><input type="checkbox" id="alert_voice_type_0" checked><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Speak HFR alerts</span>
+          <label class="toggle"><input type="checkbox" id="alert_voice_type_1" checked><span class="toggle-track"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">Speak safety alerts</span>
+          <label class="toggle"><input type="checkbox" id="alert_voice_type_2" checked><span class="toggle-track"></span></label>
+        </div>
+        <div class="field" style="margin-top:16px">
+          <label class="field-label">Repeat interval (min)</label>
+          <input type="number" class="input" id="alert_voice_repeat_min" min="0" max="60" value="5">
+          <div class="field-hint">Re-announce this often while the threshold is still exceeded. 0 = announce once only.</div>
+        </div>
         <div class="field" style="margin-top:16px">
           <label class="field-label">Aggregation Window</label>
           <div class="slider-group">

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Audio Test</title>
+<style>
+  :root { color-scheme: dark light; }
+  body { margin: 0; padding: 1.25rem; font: 15px/1.4 system-ui, sans-serif;
+         background: #14161a; color: #e6e6e6; }
+  h1 { font-size: 1.2rem; margin: 0 0 .25rem; }
+  p.sub { margin: 0 0 1.5rem; color: #9aa0a6; font-size: .85rem; }
+  h2 { font-size: .95rem; margin: 1.75rem 0 .6rem; color: #9aa0a6;
+       text-transform: uppercase; letter-spacing: .05em; }
+  .grid { display: grid; gap: .5rem;
+          grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr)); }
+  button, select, input { font: inherit; border-radius: 6px;
+          border: 1px solid #3a3f47; background: #22262c; color: inherit;
+          padding: .5rem .7rem; }
+  button { cursor: pointer; }
+  button:hover { background: #2d323a; }
+  button:active { background: #3a4049; }
+  form { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+  input[type=number] { width: 6rem; }
+  #out { margin-top: 1.5rem; padding: .6rem .8rem; border-radius: 6px;
+         background: #1b1e23; border: 1px solid #3a3f47; font-family: ui-monospace,
+         monospace; font-size: .85rem; white-space: pre-wrap; color: #9aa0a6; }
+  #out.ok { color: #7ddc8f; } #out.err { color: #ff8b8b; }
+</style>
+</head>
+<body>
+<h1>Audio Test</h1>
+<p class="sub">Speaker and voice-alert test surface. Plays through the onboard
+speaker regardless of the alert_voice_enabled setting.</p>
+
+<h2>Clips</h2>
+<div class="grid" id="clips"></div>
+
+<h2>Sentence</h2>
+<form id="say">
+  <select id="type">
+    <option value="rms">Guiding RMS</option>
+    <option value="hfr">HFR</option>
+    <option value="safety">Unsafe conditions</option>
+  </select>
+  <select id="instance">
+    <option value="1">Instance 1</option>
+    <option value="2">Instance 2</option>
+    <option value="3">Instance 3</option>
+  </select>
+  <input type="number" id="value" step="0.1" min="0" value="1.5">
+  <button type="submit">Speak</button>
+</form>
+
+<div id="out">ready</div>
+
+<script>
+const CLIPS = ['chime','warning','instance_1','instance_2','instance_3',
+  'rms','hfr','above_limit','unsafe','point',
+  'digit_0','digit_1','digit_2','digit_3','digit_4',
+  'digit_5','digit_6','digit_7','digit_8','digit_9'];
+
+const out = document.getElementById('out');
+function show(text, ok) {
+  out.textContent = text;
+  out.className = ok ? 'ok' : 'err';
+}
+
+async function post(url, label) {
+  try {
+    const r = await fetch(url, { method: 'POST' });
+    const body = await r.json();
+    show(label + ' -> ' + r.status + ' ' + JSON.stringify(body), r.ok && body.ok);
+  } catch (e) {
+    show(label + ' -> ' + e, false);
+  }
+}
+
+const grid = document.getElementById('clips');
+for (const name of CLIPS) {
+  const b = document.createElement('button');
+  b.textContent = name;
+  b.onclick = () => post('/api/test/clip?name=' + encodeURIComponent(name), name);
+  grid.appendChild(b);
+}
+
+document.getElementById('say').onsubmit = (e) => {
+  e.preventDefault();
+  const type = document.getElementById('type').value;
+  const inst = document.getElementById('instance').value;
+  const val  = document.getElementById('value').value || '0';
+  const url = '/api/test/alert?type=' + type + '&instance=' + inst + '&value=' + val;
+  post(url, type + ' i' + inst);
+};
+</script>
+</body>
+</html>

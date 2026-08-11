@@ -2411,6 +2411,31 @@ static void migrate_from_v52(const void *raw, size_t raw_size, app_config_t *cfg
     ESP_LOGI(TAG, "Migrated config from v52 to v%d", APP_CONFIG_VERSION);
 }
 
+/* --- v53 → v54 migration: appends the four spoken-voice-alert settings
+ *     (alert_voice_enabled/_volume/_types/_repeat_min). Layout ahead is
+ *     unchanged; the new fields are additive and default to "voice off, but
+ *     preconfigured" so an upgrading device stays silent until the user opts
+ *     in. Tiles blobs already live in their own NVS keys, so this migration
+ *     leaves them alone (the caller's tiles_loaded stays false and the tail
+ *     loads "json_tiles"/"ha_tiles" as usual). --- */
+static void migrate_from_v53(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v53_t) ? raw_size : sizeof(app_config_v53_t);
+    memcpy(cfg, raw, copy);
+
+    /* The alert_voice_* block is appended past the v53 snapshot, so
+     * memcpy(copy) never touches it. set_defaults() already assigned the
+     * SETTINGS_TABLE defaults, but set them explicitly for documentation. */
+    cfg->alert_voice_enabled    = 0;
+    cfg->alert_voice_volume     = 70;
+    cfg->alert_voice_types      = ALERT_VOICE_TYPE_ALL;
+    cfg->alert_voice_repeat_min = 5;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v53 to v%d", APP_CONFIG_VERSION);
+}
+
 static void migrate_from_v36(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
@@ -3161,6 +3186,14 @@ void app_config_init(void) {
             nvs_commit(handle);
         }
         /* tiles_loaded stays false -> tail loads "json_tiles"/"ha_tiles" keys */
+    } else if (version_check == 53) {
+        /* v53 → v54: added the spoken voice-alert settings (alert_voice_*).
+         * tiles_loaded stays false: a v53 device already keeps its tiles in the
+         * "json_tiles"/"ha_tiles" NVS keys, so the tail loads them. */
+        migrate_from_v53(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 52) {
         /* v52 → v53: added setup_hint_dismissed (first-boot setup hint "Don't
          * show again"). tiles_loaded stays false: a v52 device already keeps its
