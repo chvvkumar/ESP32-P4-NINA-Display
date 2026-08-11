@@ -99,7 +99,7 @@
       <div class="card">
         <div class="card-title"><span class="card-title-label">Notifications <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
         <div class="help-popover"><div class="help-popover-title">Notifications</div><p>Controls on-screen pop-up notifications, the border-flash alerts, and which event categories produce notifications. Notification duration sets how long a normal pop-up stays visible; error and warning pop-ups show for twice that time. Border flash alerts flash the screen edge when an RMS, HFR, or safety threshold is exceeded.</p><p>The aggregation window combines a burst of notifications that arrive close together into one, which reduces clutter during noisy events; set it to 0 to show every notification individually. The Event Categories toggles decide which kinds of events generate notifications at all; turning a category off suppresses its notifications.</p><p>Example: keep Error Events and Safety Events on, turn Focuser and Guider Events off to cut routine chatter, and set the aggregation window to 5 seconds so rapid sequence updates collapse into a single notification.</p></div>
-        <div class="subcard">
+        <div class="subsection">
         <div class="subsection-title">Display Alerts</div>
         <div class="field" style="margin-bottom:16px">
           <label class="field-label">Toast duration (s)</label>
@@ -120,7 +120,7 @@
           <div class="field-hint">Combine rapid-fire notifications within this window. 0 = Off (show each individually).</div>
         </div>
         </div>
-        <div class="subcard">
+        <div class="subsection">
         <div class="subsection-title">Voice Alerts</div>
         <div class="toggle-row">
           <span class="toggle-label">Voice alerts</span>
