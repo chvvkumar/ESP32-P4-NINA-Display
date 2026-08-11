@@ -179,4 +179,7 @@ esp_err_t crashlog_clear_post_handler(httpd_req_t *req);
 esp_err_t coredump_info_get_handler(httpd_req_t *req);
 esp_err_t coredump_get_handler(httpd_req_t *req);
 esp_err_t coredump_clear_post_handler(httpd_req_t *req);
+esp_err_t voice_clips_get_handler(httpd_req_t *req);
+esp_err_t voice_clip_post_handler(httpd_req_t *req);
+esp_err_t voice_clip_reset_post_handler(httpd_req_t *req);
 void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t *new_cfg);

@@ -194,11 +194,8 @@ static void agg_timer_cb(void *arg) {
         if ((cfg->toast_notify_mask & (1 << 0)) && !cfg->toast_instance_muted[index]) {
             nina_toast_show(TOAST_SUCCESS, buf);
         }
-        /* Voice has its own mask/gates; the 30 s cooldown collapses the burst
-         * to one spoken "<equipment> connected" per instance. */
-        for (int i = 0; i < EQ_COUNT; i++) {
-            if (connect_final & (1 << i)) audio_alert_speak_event(0, index, i);
-        }
+        /* Voice has its own mask/gates; one grouped sentence for the burst. */
+        audio_alert_speak_equipment_group(0, index, connect_final);
     }
 
     /* Show deferred disconnects — only for equipment we've seen connect before.
@@ -223,10 +220,10 @@ static void agg_timer_cb(void *arg) {
             if ((cfg->toast_notify_mask & (1 << 1)) && !cfg->toast_instance_muted[index]) {
                 ws_toast_fmt(index, sev, "%s disconnected", equipment_names[i]);
             }
-            audio_alert_speak_event(1, index, i);
             nina_event_log_add_fmt(sev == TOAST_ERROR ? EVENT_SEV_ERROR : EVENT_SEV_WARNING,
                                    index, "%s disconnected", equipment_names[i]);
         }
+        audio_alert_speak_equipment_group(1, index, disc_final);
     }
 }
 

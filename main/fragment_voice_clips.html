@@ -1,0 +1,288 @@
+
+      <!-- Voice Clips tab: action-only tab (uploads apply immediately). The
+           whole card is data-no-dirty so nothing here raises the save bar or
+           fires a live apply -- this tab does not participate in the config
+           Save/Discard cycle at all. -->
+      <div class="card nocollapse" data-no-dirty>
+        <div class="card-title"><span class="card-title-label">Voice Clips <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Voice clips</div><p>The device speaks alerts by playing short sound clips back to back. Every clip ships with a built-in default voice; here you can replace any of them with your own recording and hear the result on the device speaker.</p><p>Upload replaces a clip, the play button speaks the currently active version on the device, and Reset returns a clip to its built-in default. Changes take effect immediately; there is nothing to save.</p><p>Example: record your own "Warning" in your voice, upload it, then press play to hear it from the panel.</p></div>
+
+        <div class="field-hint" id="vcStatus" style="margin:0 0 6px">Loading storage info&hellip;</div>
+        <div class="field-hint" style="margin:0 0 10px">Upload any common audio format (mp3, m4a, wav, ogg); your browser converts it to the required 16 kHz mono PCM before uploading. Files ending in .pcm are sent as-is. Clips are limited to 10 seconds each; Boot Jingle may be up to 15 seconds.</div>
+
+        <input type="file" id="vcFile" accept="audio/*,.pcm" style="display:none">
+        <div id="vcRows"></div>
+
+        <div style="margin-top:20px">
+          <button type="button" class="btn btn-outline" onclick="vcResetAll()">Reset All Clips to Defaults</button>
+        </div>
+      </div>
+
+<script>
+/* Runs synchronously when the shell injects this fragment (see
+   activateFragmentScripts in config_ui.html). Guarded so a retried fragment
+   load re-executes as a no-op; the re-injected DOM is rebuilt by
+   vcBuildRows(), which the shell calls after every injection and which
+   vcRefresh() also ensures before fetching state. No network I/O happens at
+   script-run time (fragments may be idle-prefetched; API data must not be). */
+(function(){
+  if(window.__vcTabJs) return;
+  window.__vcTabJs=true;
+
+  var GROUPS=['Sounds','Identity','Sentence parts','Numbers','Equipment','Events'];
+  /* [name, default spoken text, group index] -- names must match the
+     firmware's clip table exactly (see /api/voice-clips). */
+  var CLIPS=[
+    ['chime','(attention chime)',0],
+    ['boot_jingle','(startup jingle)',0],
+    ['instance_1','NINA one',1],
+    ['instance_2','NINA two',1],
+    ['instance_3','NINA three',1],
+    ['warning','Warning',2],
+    ['point','point',2],
+    ['and','and',2],
+    ['rms','R M S error',2],
+    ['hfr','H F R',2],
+    ['above_limit','above limit',2],
+    ['rms_above','R M S is above set threshold',2],
+    ['hfr_above','HFR is above set threshold',2],
+    ['unsafe','Unsafe conditions',2],
+    ['connected','connected',2],
+    ['disconnected','disconnected',2],
+    ['digit_0','zero',3],
+    ['digit_1','one',3],
+    ['digit_2','two',3],
+    ['digit_3','three',3],
+    ['digit_4','four',3],
+    ['digit_5','five',3],
+    ['digit_6','six',3],
+    ['digit_7','seven',3],
+    ['digit_8','eight',3],
+    ['digit_9','nine',3],
+    ['camera','Camera',4],
+    ['mount','Mount',4],
+    ['guider','Guider',4],
+    ['focuser','Focuser',4],
+    ['filterwheel','Filter wheel',4],
+    ['rotator','Rotator',4],
+    ['safety','Safety monitor',4],
+    ['dome','Dome',4],
+    ['flat','Flat panel',4],
+    ['switch','Switch',4],
+    ['weather','Weather station',4],
+    ['sequence_event','Sequence event',5],
+    ['focuser_event','Focuser event',5],
+    ['mount_event','Mount event',5],
+    ['meridian_flip','Meridian flip complete',5],
+    ['guider_event','Guider event',5],
+    ['safety_event','Safety event',5],
+    ['error_event','Error reported',5],
+    ['profile_changed','Profile changed',5],
+    ['dome_event','Dome event',5],
+    ['flat_event','Flat panel event',5]
+  ];
+
+  function vcLabel(n){
+    return n.split('_').map(function(w){
+      if(w==='rms') return 'RMS';
+      if(w==='hfr') return 'HFR';
+      return w.charAt(0).toUpperCase()+w.slice(1);
+    }).join(' ');
+  }
+  /* Caps mirror the firmware: 10 s of 16 kHz s16 mono = 320000 bytes;
+     boot_jingle alone gets 15 s = 480000. */
+  function vcCap(n){ return n==='boot_jingle'?480000:320000; }
+  function fmtKB(b){ return Math.round(b/1024)+' KB'; }
+  function fmtMB(b){ return (b/1048576).toFixed(1)+' MB'; }
+
+  function vcBuildRows(){
+    var c=document.getElementById('vcRows');
+    if(!c) return;
+    var html='';
+    var lastG=-1;
+    CLIPS.forEach(function(cl){
+      var n=cl[0];
+      if(cl[2]!==lastG){
+        lastG=cl[2];
+        html+='<div class="subsection-title" style="margin-top:16px">'+GROUPS[lastG]+'</div>';
+      }
+      html+='<div class="vc-row" style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,0.05)">'+
+        '<div style="flex:1;min-width:0">'+
+          '<div style="font-size:0.82rem">'+vcLabel(n)+'</div>'+
+          '<div class="field-hint" style="margin:0">&ldquo;'+cl[1]+'&rdquo;</div>'+
+        '</div>'+
+        '<span id="vcb_'+n+'" style="font-size:0.62rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;padding:2px 8px;border-radius:8px;border:1px solid var(--border);color:var(--text-muted);white-space:nowrap">Default</span>'+
+        '<button type="button" class="vp-btn" title="Play on the device" aria-label="Play on the device" onclick="vcPlay(\''+n+'\')">&#9654;</button>'+
+        '<button type="button" class="btn btn-outline" style="padding:5px 12px;font-size:0.72rem" onclick="vcPick(\''+n+'\')">Upload</button>'+
+        '<button type="button" class="btn btn-outline" id="vcr_'+n+'" style="padding:5px 12px;font-size:0.72rem;display:none" onclick="vcReset(\''+n+'\')">Reset</button>'+
+      '</div>';
+    });
+    c.innerHTML=html;
+    var f=document.getElementById('vcFile');
+    if(f && !f.dataset.wired){
+      f.dataset.wired='1';
+      f.addEventListener('change',function(){
+        var file=f.files && f.files[0];
+        f.value='';
+        if(file && _pending) vcUpload(_pending,file);
+      });
+    }
+  }
+
+  var _pending=null;
+  function vcPick(name){
+    _pending=name;
+    var f=document.getElementById('vcFile');
+    if(f) f.click();
+  }
+
+  function vcRefresh(){
+    var c=document.getElementById('vcRows');
+    if(c && !c.children.length) vcBuildRows();
+    fetch('/api/voice-clips').then(function(r){
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      return r.json();
+    }).then(function(d){
+      var s=document.getElementById('vcStatus');
+      if(s){
+        if(!d.ready){
+          s.textContent=d.formatting
+            ?'Storage is being prepared (first-time format). Uploads and playback are unavailable until this finishes; check back in a minute.'
+            :'Storage is not ready yet. Uploads and playback are unavailable.';
+        } else {
+          s.textContent='Storage: '+fmtMB(d.spiffs_used||0)+' used of '+fmtMB(d.spiffs_total||0)+
+            ' · Custom clips: '+fmtKB(d.custom_bytes||0)+' of '+fmtMB(d.budget||4194304)+' budget';
+        }
+      }
+      (d.clips||[]).forEach(function(cl){
+        var b=document.getElementById('vcb_'+cl.name);
+        var rst=document.getElementById('vcr_'+cl.name);
+        if(b){
+          if(cl.custom){
+            b.textContent='Custom · '+fmtKB(cl.size||0);
+            b.style.color='var(--accent)';
+            b.style.borderColor='var(--accent)';
+          } else {
+            b.textContent='Default';
+            b.style.color='';
+            b.style.borderColor='';
+          }
+        }
+        if(rst) rst.style.display=cl.custom?'':'none';
+      });
+    }).catch(function(){
+      var s=document.getElementById('vcStatus');
+      if(s) s.textContent='Could not load clip status.';
+    });
+  }
+
+  /* Decode any browser-supported audio, resample to 16 kHz mono via
+     OfflineAudioContext, convert Float32 to s16le (Int16Array is
+     little-endian on every shipping JS platform). Rejects with a clear
+     message when the result would exceed the clip's byte cap. */
+  function pcmFromAudio(file,cap){
+    var AC=window.AudioContext||window.webkitAudioContext;
+    var ac=new AC();
+    return file.arrayBuffer().then(function(buf){
+      return ac.decodeAudioData(buf);
+    }).then(function(decoded){
+      ac.close();
+      var len=Math.ceil(decoded.duration*16000);
+      if(len===0){
+        throw new Error('Audio file is empty');
+      }
+      if(len*2>cap){
+        throw new Error('Audio is '+decoded.duration.toFixed(1)+' s; the limit for this clip is '+(cap/32000)+' seconds');
+      }
+      var oc=new OfflineAudioContext(1,len,16000);
+      var src=oc.createBufferSource();
+      src.buffer=decoded;
+      src.connect(oc.destination);
+      src.start();
+      return oc.startRendering();
+    }).then(function(rendered){
+      var f32=rendered.getChannelData(0);
+      var s16=new Int16Array(f32.length);
+      for(var i=0;i<f32.length;i++){
+        var v=Math.max(-1,Math.min(1,f32[i]));
+        s16[i]=v<0?v*0x8000:v*0x7FFF;
+      }
+      return s16.buffer;
+    }).catch(function(e){
+      try{ ac.close(); }catch(_){ }
+      throw e;
+    });
+  }
+
+  function vcUpload(name,file){
+    var p;
+    var cap=vcCap(name);
+    if(/\.pcm$/i.test(file.name)){
+      if(file.size===0){
+        showToast('Audio file is empty','error');
+        return;
+      }
+      if(file.size%2!==0){
+        showToast('PCM file length must be even (16-bit samples)','error');
+        return;
+      }
+      if(file.size>cap){
+        showToast('File is too large: the limit for this clip is '+(cap/32000)+' seconds ('+cap+' bytes of 16 kHz mono PCM)','error');
+        return;
+      }
+      p=file.arrayBuffer();
+    }else{
+      p=pcmFromAudio(file,cap);
+    }
+    p.then(function(buf){
+      return fetch('/api/voice-clip?name='+encodeURIComponent(name),{
+        method:'POST',
+        headers:{'Content-Type':'application/octet-stream'},
+        body:buf
+      });
+    }).then(function(r){
+      if(r.ok){
+        showToast('Clip uploaded','success');
+        vcRefresh();
+        return;
+      }
+      return r.json().catch(function(){return {};}).then(function(e){
+        if(r.status===503) showToast('Storage is still being prepared; try again in a minute','error');
+        else showToast(e.error||('Upload failed (HTTP '+r.status+')'),'error');
+      });
+    }).catch(function(e){
+      showToast(e && e.message?e.message:'Could not read this audio file','error');
+    });
+  }
+
+  function vcPlay(name){
+    fetch('/api/voice-preview?kind=clip&name='+encodeURIComponent(name),{method:'POST'})
+      .then(function(r){
+        if(!r.ok) showToast(r.status===503?'Storage is still being prepared; try again in a minute':'Voice preview failed','error');
+      })
+      .catch(function(){ showToast('Voice preview failed','error'); });
+  }
+
+  function vcReset(name){
+    fetch('/api/voice-clip/reset?name='+encodeURIComponent(name),{method:'POST'}).then(function(r){
+      if(r.ok){ showToast('Clip reset to default','success'); vcRefresh(); }
+      else showToast('Reset failed','error');
+    }).catch(function(){ showToast('Reset failed','error'); });
+  }
+
+  function vcResetAll(){
+    if(!confirm('Reset all voice clips to the built-in defaults? All custom uploads will be deleted.')) return;
+    fetch('/api/voice-clip/reset?all=1',{method:'POST'}).then(function(r){
+      if(r.ok){ showToast('All clips reset to defaults','success'); vcRefresh(); }
+      else showToast('Reset failed','error');
+    }).catch(function(){ showToast('Reset failed','error'); });
+  }
+
+  window.vcBuildRows=vcBuildRows;
+  window.vcRefresh=vcRefresh;
+  window.vcPick=vcPick;
+  window.vcPlay=vcPlay;
+  window.vcReset=vcReset;
+  window.vcResetAll=vcResetAll;
+})();
+</script>

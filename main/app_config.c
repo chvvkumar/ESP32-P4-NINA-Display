@@ -13,6 +13,7 @@
 #include "perf_monitor.h"
 #include "settings_table.h"
 #include "themes.h"
+#include "voice_store.h"
 #include "ui/page_registry.h"
 
 static const char *TAG = "app_config";
@@ -2477,6 +2478,41 @@ static void migrate_from_v55(const void *raw, size_t raw_size, app_config_t *cfg
     ESP_LOGI(TAG, "Migrated config from v55 to v%d", APP_CONFIG_VERSION);
 }
 
+/* --- v56 → v57 migration: appends alert_voice_brief (brief spoken breach
+ *     alerts without the measured value). Additive; an upgrading device
+ *     keeps today's detailed announcements. --- */
+static void migrate_from_v56(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v56_t) ? raw_size : sizeof(app_config_v56_t);
+    memcpy(cfg, raw, copy);
+
+    /* Appended past the v56 snapshot, so memcpy(copy) never touches it; the
+     * copy may still have landed inside dest padding, so re-assign. */
+    cfg->alert_voice_brief = 0;  // detailed announcements by default
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v56 to v%d", APP_CONFIG_VERSION);
+}
+
+/* --- v57 → v58 migration: appends alert_voice_conn and alert_voice_disc
+ *     (spoken NINA link connect/disconnect announcements). Additive; an
+ *     upgrading device announces disconnects but stays quiet on connects. --- */
+static void migrate_from_v57(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v57_t) ? raw_size : sizeof(app_config_v57_t);
+    memcpy(cfg, raw, copy);
+
+    /* Appended past the v57 snapshot, so memcpy(copy) never touches them; the
+     * copy may still have landed inside dest padding, so re-assign. */
+    cfg->alert_voice_conn = 0;  // connect announcements default off
+    cfg->alert_voice_disc = 1;  // disconnect announcements default on
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v57 to v%d", APP_CONFIG_VERSION);
+}
+
 static void migrate_from_v36(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
@@ -3232,6 +3268,23 @@ void app_config_init(void) {
             nvs_commit(handle);
         }
         /* tiles_loaded stays false -> tail loads "json_tiles"/"ha_tiles" keys */
+    } else if (version_check == 57) {
+        /* v57 → v58: added alert_voice_conn/alert_voice_disc (spoken NINA link
+         * connect/disconnect announcements). tiles_loaded stays false: a v57
+         * device already keeps its tiles in the "json_tiles"/"ha_tiles" NVS
+         * keys, so the tail loads them. */
+        migrate_from_v57(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    } else if (version_check == 56) {
+        /* v56 → v57: added alert_voice_brief (brief spoken breach alerts).
+         * tiles_loaded stays false: a v56 device already keeps its tiles in the
+         * "json_tiles"/"ha_tiles" NVS keys, so the tail loads them. */
+        migrate_from_v56(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 55) {
         /* v55 → v56: added voice_notify_mask (per-category voice alert mask)
          * and boot_jingle_enabled (startup jingle toggle).
@@ -3797,6 +3850,11 @@ bool app_config_is_dirty(void) {
 void app_config_factory_reset(void) {
     invalidate_json_caches();
     ESP_LOGW(TAG, "Performing factory reset - erasing NVS partition");
+
+    /* Remove custom voice clips from SPIFFS.  If the store is not mounted
+     * yet (possibly still in its ~70 s first format), voice_store_wipe()
+     * defers the wipe to the mount task instead of blocking here. */
+    voice_store_wipe();
 
     /* Erase the entire NVS partition. This also removes the tiles keys
      * "json_tiles"/"ha_tiles" along with "config"; the app_config_init() below

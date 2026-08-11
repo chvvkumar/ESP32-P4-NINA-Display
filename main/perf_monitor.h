@@ -192,6 +192,12 @@ void perf_monitor_capture_memory(void);
 // Capture CPU utilization snapshot. Call at report interval from data task.
 void perf_monitor_capture_cpu(void);
 
+// Ungated per-core CPU load getter (works with debug_mode / g_perf.enabled
+// off). Maintains its own idle-task runtime deltas; returns 0s until a second
+// sample at least 200 ms after the first exists. Any output pointer may be
+// NULL. Not thread-safe: intended for the single httpd worker (/api/status).
+void perf_monitor_get_core_loads(float *core0, float *core1, float *total);
+
 // Record WiFi signal metrics from an already-fetched ap_info.
 void perf_monitor_record_wifi(const wifi_ap_record_t *ap_info);
 

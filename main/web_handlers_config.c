@@ -65,6 +65,11 @@ extern const uint8_t fragment_behavior_html_end[]   asm("_binary_fragment_behavi
 extern const uint8_t fragment_system_html_start[] asm("_binary_fragment_system_html_start");
 extern const uint8_t fragment_system_html_end[]   asm("_binary_fragment_system_html_end");
 
+/* Voice Clips tab (custom clip overrides). Like image-display, the tab name is
+ * hyphenated ("voice-clips") while the asset symbol uses underscores. */
+extern const uint8_t fragment_voice_clips_html_start[] asm("_binary_fragment_voice_clips_html_start");
+extern const uint8_t fragment_voice_clips_html_end[]   asm("_binary_fragment_voice_clips_html_end");
+
 /* Build-time gzip copies of the shell and every fragment (see WEB_GZ_ASSETS in
  * main/CMakeLists.txt). Symbol names follow the embed convention: the .gz file
  * basename with every non-identifier character mapped to '_'. */
@@ -94,6 +99,8 @@ extern const uint8_t fragment_display_html_gz_start[] asm("_binary_fragment_disp
 extern const uint8_t fragment_display_html_gz_end[]   asm("_binary_fragment_display_html_gz_end");
 extern const uint8_t fragment_behavior_html_gz_start[] asm("_binary_fragment_behavior_html_gz_start");
 extern const uint8_t fragment_behavior_html_gz_end[]   asm("_binary_fragment_behavior_html_gz_end");
+extern const uint8_t fragment_voice_clips_html_gz_start[] asm("_binary_fragment_voice_clips_html_gz_start");
+extern const uint8_t fragment_voice_clips_html_gz_end[]   asm("_binary_fragment_voice_clips_html_gz_end");
 extern const uint8_t fragment_system_html_gz_start[] asm("_binary_fragment_system_html_gz_start");
 extern const uint8_t fragment_system_html_gz_end[]   asm("_binary_fragment_system_html_gz_end");
 
@@ -259,6 +266,8 @@ static const ui_fragment_entry_t s_ui_fragments[] = {
                        fragment_behavior_html_gz_start,      fragment_behavior_html_gz_end },
     { "system",        fragment_system_html_start,        fragment_system_html_end,
                        fragment_system_html_gz_start,        fragment_system_html_gz_end },
+    { "voice-clips",   fragment_voice_clips_html_start,   fragment_voice_clips_html_end,
+                       fragment_voice_clips_html_gz_start,   fragment_voice_clips_html_gz_end },
 };
 
 // Handler for GET /ui/fragment?tab=<name> -- serves one lazily-loaded config_ui.html tab fragment.
@@ -494,6 +503,9 @@ static const backup_field_t s_backup_fields[] = {
     {"alert_voice_volume",          "Voice Alert Volume",       "Behavior", false, false},
     {"alert_voice_types",           "Voice Alert Types",        "Behavior", false, false},
     {"alert_voice_repeat_min",      "Voice Alert Repeat",       "Behavior", false, false},
+    {"alert_voice_brief",           "Brief Voice Alerts",       "Behavior", false, false},
+    {"alert_voice_conn",            "Announce NINA Connect",    "Behavior", false, false},
+    {"alert_voice_disc",            "Announce NINA Disconnect", "Behavior", false, false},
     {"toast_aggregation_window_s",  "Toast Aggregation Window","Behavior", false, false},
     {"toast_notify_mask",           "Notification Categories", "Behavior", false, false},
     {"voice_notify_mask",           "Voice Alert Categories",  "Behavior", false, false},
