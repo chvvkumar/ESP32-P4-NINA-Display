@@ -973,6 +973,9 @@ void app_main(void)
         /* Voice alerts — spawns the playback task. Deliberately outside the
          * display lock above (codec init + task create, no LVGL work). */
         audio_alert_init();
+        /* Startup jingle — plays only when enabled; the queue drain naturally
+         * delays it until the codec opens. */
+        audio_alert_play_boot_jingle();
 
         nina_client_init();  // DNS cache mutex — must be called before poll tasks spawn
         nina_client_init_image_buffers();  // Pre-allocate PSRAM image fetch buffer

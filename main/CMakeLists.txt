@@ -35,7 +35,18 @@ idf_component_register(
                 audio_clips/digit_0.pcm audio_clips/digit_1.pcm audio_clips/digit_2.pcm
                 audio_clips/digit_3.pcm audio_clips/digit_4.pcm audio_clips/digit_5.pcm
                 audio_clips/digit_6.pcm audio_clips/digit_7.pcm audio_clips/digit_8.pcm
-                audio_clips/digit_9.pcm)
+                audio_clips/digit_9.pcm
+                audio_clips/connected.pcm audio_clips/disconnected.pcm
+                audio_clips/camera.pcm audio_clips/mount.pcm audio_clips/guider.pcm
+                audio_clips/focuser.pcm audio_clips/filterwheel.pcm audio_clips/rotator.pcm
+                audio_clips/safety.pcm audio_clips/dome.pcm audio_clips/flat.pcm
+                audio_clips/switch.pcm audio_clips/weather.pcm
+                audio_clips/sequence_event.pcm audio_clips/focuser_event.pcm
+                audio_clips/mount_event.pcm audio_clips/meridian_flip.pcm
+                audio_clips/guider_event.pcm audio_clips/safety_event.pcm
+                audio_clips/error_event.pcm audio_clips/profile_changed.pcm
+                audio_clips/dome_event.pcm audio_clips/flat_event.pcm
+                audio_clips/boot_jingle.pcm)
 
 idf_component_get_property(LVGL_LIB lvgl__lvgl COMPONENT_LIB)
 target_compile_options(

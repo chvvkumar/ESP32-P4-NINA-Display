@@ -7,8 +7,10 @@ renders land. Output format matches what audio_alert.c opens the codec with:
 16 kHz, 16-bit signed little-endian, mono, headerless raw PCM.
 
 Run from anywhere: python tools/gen_placeholder_clips.py
-Overwrites existing .pcm files. Replace individual files with real renders in
-the same format; no code or CMake change is needed.
+Skips any .pcm that already exists (real renders must never be clobbered by
+beeps; this has happened once). Pass --force to overwrite existing files.
+Replace individual files with real renders in the same format; no code or
+CMake change is needed.
 """
 
 import math
@@ -40,6 +42,28 @@ for _d in range(10):
     _count = 1 + _d // 5
     CLIPS["digit_%d" % _d] = (400 + 60 * _d, _count, 160 if _count == 1 else 150, 40)
 
+# Event-announcement clips (audio_alert_speak_event). Equipment names match
+# equipment_names[] in nina_websocket.c, snake_cased: one long pulse, pitch
+# identifies the device. Category event clips: two pulses, pitch identifies
+# the category. connected/disconnected: high vs low double-beep.
+_EQUIPMENT = ["camera", "mount", "guider", "focuser", "filterwheel", "rotator",
+              "safety", "dome", "flat", "switch", "weather"]
+for _i, _name in enumerate(_EQUIPMENT):
+    CLIPS[_name] = (480 + 45 * _i, 1, 180, 0)
+
+_EVENTS = ["sequence_event", "focuser_event", "mount_event", "meridian_flip",
+           "guider_event", "safety_event", "error_event", "profile_changed",
+           "dome_event", "flat_event"]
+for _i, _name in enumerate(_EVENTS):
+    CLIPS[_name] = (450 + 55 * _i, 2, 110, 40)
+
+CLIPS["connected"]    = (1180, 2, 90, 30)
+CLIPS["disconnected"] = (340,  2, 90, 30)
+
+# Real renders that live in main/audio_clips/ and must NEVER be overwritten by
+# placeholders (boot_jingle.pcm is a real 5 s render, not a beep pattern).
+REAL_RENDERS = {"boot_jingle"}
+
 
 def pulse(freq_hz, ms):
     """One sine burst with linear fade in/out, as a list of float samples."""
@@ -69,14 +93,24 @@ def main():
     out_dir = os.path.normpath(out_dir)
     os.makedirs(out_dir, exist_ok=True)
 
+    force = "--force" in sys.argv
+    written = skipped = 0
     for name, params in sorted(CLIPS.items()):
+        if name in REAL_RENDERS:
+            continue
+        path = os.path.join(out_dir, name + ".pcm")
+        if os.path.exists(path) and not force:
+            skipped += 1
+            continue
         data = render(*params)
-        with open(os.path.join(out_dir, name + ".pcm"), "wb") as f:
+        with open(path, "wb") as f:
             f.write(data)
+        written += 1
         print("%-14s %6d bytes  %4d ms" %
               (name + ".pcm", len(data), len(data) * 1000 // (2 * SAMPLE_RATE)))
 
-    print("%d clips written to %s" % (len(CLIPS), out_dir))
+    print("%d written, %d skipped (existing; --force overwrites) in %s" %
+          (written, skipped, out_dir))
     return 0
 
 
@@ -88,7 +122,7 @@ def _self_check():
         ms = len(data) * 1000 // (2 * SAMPLE_RATE)
         assert len(data) and len(data) % 2 == 0, name
         assert 150 <= ms <= 400, "%s is %d ms" % (name, ms)
-    assert len(CLIPS) == 20, len(CLIPS)
+    assert len(CLIPS) == 43, len(CLIPS)
     print("self-check OK")
 
 

@@ -19,6 +19,7 @@
 #include "bsp/esp-bsp.h"        /* bsp_audio_codec_speaker_init */
 #include "esp_codec_dev.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -44,7 +45,14 @@ static const char *TAG = "audio_alert";
     X(instance_1) X(instance_2) X(instance_3)                   \
     X(rms) X(hfr) X(above_limit) X(unsafe) X(point)             \
     X(digit_0) X(digit_1) X(digit_2) X(digit_3) X(digit_4)      \
-    X(digit_5) X(digit_6) X(digit_7) X(digit_8) X(digit_9)
+    X(digit_5) X(digit_6) X(digit_7) X(digit_8) X(digit_9)      \
+    X(connected) X(disconnected)                                \
+    X(camera) X(mount) X(guider) X(focuser) X(filterwheel)      \
+    X(rotator) X(safety) X(dome) X(flat) X(switch) X(weather)   \
+    X(sequence_event) X(focuser_event) X(mount_event)           \
+    X(meridian_flip) X(guider_event) X(safety_event)            \
+    X(error_event) X(profile_changed) X(dome_event) X(flat_event)  \
+    X(boot_jingle)
 
 #define CLIP_EXTERN(name)                               \
     extern const uint8_t _binary_##name##_pcm_start[];  \
@@ -128,6 +136,54 @@ static bool build_sentence(sentence_t *s, alert_type_t type, int instance_idx,
     default:
         return false;   /* unknown type: nothing sensible to say */
     }
+}
+
+/* Equipment clip per equipment index.  Order MUST match equipment_type_t in
+ * nina_websocket.c (EQ_CAMERA .. EQ_WEATHER). */
+static const clip_id_t s_equipment_clip[] = {
+    CLIP_ID_camera, CLIP_ID_mount, CLIP_ID_guider, CLIP_ID_focuser,
+    CLIP_ID_filterwheel, CLIP_ID_rotator, CLIP_ID_safety, CLIP_ID_dome,
+    CLIP_ID_flat, CLIP_ID_switch, CLIP_ID_weather,
+};
+
+/* Event clip per category, index = category_bit - 2 (categories 2..11). */
+static const clip_id_t s_category_clip[] = {
+    CLIP_ID_sequence_event, CLIP_ID_focuser_event, CLIP_ID_mount_event,
+    CLIP_ID_meridian_flip, CLIP_ID_guider_event, CLIP_ID_safety_event,
+    CLIP_ID_error_event, CLIP_ID_profile_changed, CLIP_ID_dome_event,
+    CLIP_ID_flat_event,
+};
+
+/* Assemble an event announcement (shared by the live and the preview entry
+ * points): chime + warning (bad-news categories only) + instance + either
+ * "<equipment> connected/disconnected" (categories 0/1; bare
+ * connected/disconnected when no equipment is given) or the category's event
+ * clip (categories 2..11). */
+static bool build_event_sentence(sentence_t *s, int category_bit,
+                                 int instance_idx, int equipment_idx) {
+    if (category_bit < 0 || category_bit > 11) return false;
+    if (instance_idx < 0 || instance_idx > 2) return false;
+
+    memset(s, 0, sizeof(*s));
+    push_clip(s, CLIP_ID_chime);
+    /* Warning tone only for the bad-news categories: equipment disconnects,
+     * meridian flip, safety and error. */
+    if (category_bit == 1 || category_bit == 5 ||
+        category_bit == 7 || category_bit == 8) {
+        push_clip(s, CLIP_ID_warning);
+    }
+    push_clip(s, CLIP_ID_instance_1 + instance_idx);
+
+    if (category_bit <= 1) {
+        if (equipment_idx >= 0 &&
+            equipment_idx < (int)(sizeof(s_equipment_clip) / sizeof(s_equipment_clip[0]))) {
+            push_clip(s, s_equipment_clip[equipment_idx]);
+        }
+        push_clip(s, (category_bit == 0) ? CLIP_ID_connected : CLIP_ID_disconnected);
+    } else {
+        push_clip(s, s_category_clip[category_bit - 2]);
+    }
+    return true;
 }
 
 /* Post an assembled sentence.  Never blocks. */
@@ -240,10 +296,60 @@ void audio_alert_init(void) {
 
 void audio_alert_speak(alert_type_t type, int instance_idx, float value) {
     if (!s_queue) return;
-    if (!app_config_get()->alert_voice_enabled) return;
+    app_config_t *cfg = app_config_get();
+    if (!cfg->alert_voice_enabled) return;
+    /* Per-instance mute — live path only; the test endpoints bypass it so the
+     * speaker stays testable while an instance is muted. */
+    if (instance_idx >= 0 && instance_idx < 3 && cfg->alert_voice_muted[instance_idx]) return;
 
     sentence_t s;
     if (build_sentence(&s, type, instance_idx, value)) enqueue(&s);
+}
+
+void audio_alert_speak_event(int category_bit, int instance_idx, int equipment_idx) {
+    if (!s_queue) return;
+    if (category_bit < 0 || category_bit > 11) return;
+    if (instance_idx < 0 || instance_idx > 2) return;
+
+    app_config_t *cfg = app_config_get();
+    if (!cfg->alert_voice_enabled) return;
+    if (cfg->alert_voice_muted[instance_idx]) return;
+    if (!(cfg->voice_notify_mask & (1u << category_bit))) return;
+
+    /* Per-(category,instance) 30 s cooldown.  Deliberately unlocked: callers
+     * run on several tasks (WS handlers, esp_timer), but a raced read/write
+     * here only risks one duplicate or one suppressed announcement, which is
+     * acceptable for a rate limiter. */
+    static int64_t s_last_event_ms[12][3];
+    int64_t now = esp_timer_get_time() / 1000;
+    int64_t last = s_last_event_ms[category_bit][instance_idx];
+    if (last != 0 && now - last < 30000) return;
+    s_last_event_ms[category_bit][instance_idx] = now;
+
+    sentence_t s;
+    if (build_event_sentence(&s, category_bit, instance_idx, equipment_idx)) enqueue(&s);
+}
+
+void audio_alert_play_boot_jingle(void) {
+    if (!s_queue) return;
+    if (!app_config_get()->boot_jingle_enabled) return;
+
+    sentence_t s = { .clip = { (uint8_t)CLIP_ID_boot_jingle }, .count = 1 };
+    enqueue(&s);
+}
+
+void audio_alert_preview_jingle(void) {
+    if (!s_queue) return;
+
+    sentence_t s = { .clip = { (uint8_t)CLIP_ID_boot_jingle }, .count = 1 };
+    enqueue(&s);
+}
+
+void audio_alert_preview_event(int category_bit, int instance_idx, int equipment_idx) {
+    if (!s_queue) return;
+
+    sentence_t s;
+    if (build_event_sentence(&s, category_bit, instance_idx, equipment_idx)) enqueue(&s);
 }
 
 void audio_alert_test_speak(alert_type_t type, int instance_idx, float value) {

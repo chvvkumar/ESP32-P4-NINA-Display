@@ -28,6 +28,7 @@
 #include "ui/nina_alerts.h"
 #include "ui/nina_safety.h"
 #include "ui/nina_session_stats.h"
+#include "audio_alert.h"
 
 static const char *TAG = "nina_ws";
 
@@ -193,6 +194,11 @@ static void agg_timer_cb(void *arg) {
         if ((cfg->toast_notify_mask & (1 << 0)) && !cfg->toast_instance_muted[index]) {
             nina_toast_show(TOAST_SUCCESS, buf);
         }
+        /* Voice has its own mask/gates; the 30 s cooldown collapses the burst
+         * to one spoken "<equipment> connected" per instance. */
+        for (int i = 0; i < EQ_COUNT; i++) {
+            if (connect_final & (1 << i)) audio_alert_speak_event(0, index, i);
+        }
     }
 
     /* Show deferred disconnects — only for equipment we've seen connect before.
@@ -217,6 +223,7 @@ static void agg_timer_cb(void *arg) {
             if ((cfg->toast_notify_mask & (1 << 1)) && !cfg->toast_instance_muted[index]) {
                 ws_toast_fmt(index, sev, "%s disconnected", equipment_names[i]);
             }
+            audio_alert_speak_event(1, index, i);
             nina_event_log_add_fmt(sev == TOAST_ERROR ? EVENT_SEV_ERROR : EVENT_SEV_WARNING,
                                    index, "%s disconnected", equipment_names[i]);
         }
@@ -233,6 +240,7 @@ static void record_connect_event(int index, equipment_type_t eq) {
         if ((cfg->toast_notify_mask & (1 << 0)) && !cfg->toast_instance_muted[index]) {
             ws_toast(index, TOAST_SUCCESS, equipment_names[eq]);
         }
+        audio_alert_speak_event(0, index, (int)eq);
         nina_event_log_add_fmt(EVENT_SEV_INFO, index, "%s connected", equipment_names[eq]);
         return;
     }
@@ -346,6 +354,7 @@ static void record_disconnect_event(int index, equipment_type_t eq) {
     if ((cfg->toast_notify_mask & (1 << 1)) && !cfg->toast_instance_muted[index]) {
         ws_toast_fmt(index, sev, "%s disconnected", equipment_names[eq]);
     }
+    audio_alert_speak_event(1, index, (int)eq);
     nina_event_log_add_fmt(sev == TOAST_ERROR ? EVENT_SEV_ERROR : EVENT_SEV_WARNING,
                            index, "%s disconnected", equipment_names[eq]);
 }
@@ -543,6 +552,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         }
         if (toast_allowed(index, 2))
             ws_toast(index, TOAST_SUCCESS, "Sequence completed");
+        audio_alert_speak_event(2, index, -1);
         nina_event_log_add(EVENT_SEV_SUCCESS, index, "Sequence completed");
         ESP_LOGI(TAG, "WS[%d]: Sequence finished", index);
     }
@@ -557,6 +567,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         }
         if (toast_allowed(index, 2))
             ws_toast(index, TOAST_INFO, "Sequence started");
+        audio_alert_speak_event(2, index, -1);
         nina_event_log_add(EVENT_SEV_INFO, index, "Sequence started");
         nina_session_stats_reset(index);
         ESP_LOGI(TAG, "WS[%d]: Sequence starting", index);
@@ -632,6 +643,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         }
         if (toast_allowed(index, 3))
             ws_toast(index, TOAST_SUCCESS, "Autofocus complete");
+        audio_alert_speak_event(3, index, -1);
         nina_event_log_add_fmt(EVENT_SEV_SUCCESS, index,
             "Autofocus complete: pos %d, HFR %.2f",
             best_pos, best_hfr);
@@ -695,6 +707,8 @@ static void handle_websocket_message(int index, const char *payload, int len) {
                 ws_toast(index, TOAST_ERROR, "UNSAFE");
             nina_event_log_add(EVENT_SEV_ERROR, index, "Observatory UNSAFE!");
         }
+        /* No audio_alert_speak_event(7, ...) here: the breach engine below
+         * already speaks "unsafe conditions"; a category-7 call would double up. */
         /* Both edges into the breach engine: unsafe enters, safe re-arms so the
          * next unsafe transition speaks again.  Flash/voice gates live inside. */
         nina_alert_eval_safety(index, safe);
@@ -715,6 +729,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         }
         if (toast_allowed(index, 2))
             ws_toast(index, TOAST_INFO, "Waiting for next target");
+        audio_alert_speak_event(2, index, -1);
         nina_event_log_add(EVENT_SEV_INFO, index, "Waiting for next target");
         ESP_LOGI(TAG, "WS[%d]: Waiting for next target", index);
     }
@@ -736,6 +751,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         }
         if (toast_allowed(index, 5))
             ws_toast(index, TOAST_INFO, "Meridian flip completed");
+        audio_alert_speak_event(5, index, -1);
         nina_event_log_add(EVENT_SEV_INFO, index, "Meridian flip completed");
         ESP_LOGI(TAG, "WS[%d]: Meridian flip completed", index);
     }
@@ -751,6 +767,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         }
         if (toast_allowed(index, 6))
             ws_toast(index, TOAST_WARNING, "Guider stopped");
+        audio_alert_speak_event(6, index, -1);
         nina_event_log_add(EVENT_SEV_WARNING, index, "Guider stopped");
         ESP_LOGI(TAG, "WS[%d]: Guider stopped", index);
     }
@@ -769,6 +786,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         portEXIT_CRITICAL(&s_agg_lock);
         if (toast_allowed(index, 9))
             ws_toast(index, TOAST_INFO, "Profile changed");
+        audio_alert_speak_event(9, index, -1);
         nina_event_log_add(EVENT_SEV_INFO, index, "Profile changed");
     }
     // AUTOFOCUS-FAILED / ERROR-AF: AF did not converge (v2 emits ERROR-AF;
@@ -782,6 +800,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         }
         if (toast_allowed(index, 3) || toast_allowed(index, 8))
             ws_toast(index, TOAST_ERROR, "Autofocus failed");
+        audio_alert_speak_event(8, index, -1);   /* failure -> Error category */
         nina_event_log_add(EVENT_SEV_ERROR, index, "Autofocus failed");
         ESP_LOGW(TAG, "WS[%d]: Autofocus failed", index);
     }
@@ -799,12 +818,14 @@ static void handle_websocket_message(int index, const char *payload, int len) {
     else if (strcmp(evt->valuestring, "MOUNT-SLEWING") == 0) {
         if (toast_allowed(index, 4))
             ws_toast(index, TOAST_INFO, "Mount slewing to target");
+        audio_alert_speak_event(4, index, -1);
         ESP_LOGI(TAG, "WS[%d]: Mount slewing", index);
     }
     // MOUNT-PARKED: Mount parked
     else if (strcmp(evt->valuestring, "MOUNT-PARKED") == 0) {
         if (toast_allowed(index, 4))
             ws_toast(index, TOAST_INFO, "Mount parked");
+        audio_alert_speak_event(4, index, -1);
         nina_event_log_add(EVENT_SEV_INFO, index, "Mount parked");
         ESP_LOGI(TAG, "WS[%d]: Mount parked", index);
     }
@@ -812,18 +833,21 @@ static void handle_websocket_message(int index, const char *payload, int len) {
     else if (strcmp(evt->valuestring, "MOUNT-HOMED") == 0) {
         if (toast_allowed(index, 4))
             ws_toast(index, TOAST_INFO, "Mount homed");
+        audio_alert_speak_event(4, index, -1);
         ESP_LOGI(TAG, "WS[%d]: Mount homed", index);
     }
     // MOUNT-TRACKING-ON: Tracking started
     else if (strcmp(evt->valuestring, "MOUNT-TRACKING-ON") == 0) {
         if (toast_allowed(index, 4))
             ws_toast(index, TOAST_SUCCESS, "Tracking started");
+        audio_alert_speak_event(4, index, -1);
         ESP_LOGI(TAG, "WS[%d]: Tracking started", index);
     }
     // MOUNT-TRACKING-OFF: Tracking stopped
     else if (strcmp(evt->valuestring, "MOUNT-TRACKING-OFF") == 0) {
         if (toast_allowed(index, 4))
             ws_toast(index, TOAST_WARNING, "Tracking stopped");
+        audio_alert_speak_event(4, index, -1);
         nina_event_log_add(EVENT_SEV_WARNING, index, "Tracking stopped");
         ESP_LOGW(TAG, "WS[%d]: Tracking stopped", index);
     }
@@ -831,6 +855,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
     else if (strncmp(evt->valuestring, "ERROR", 5) == 0) {
         if (toast_allowed(index, 8))
             ws_toast_fmt(index, TOAST_ERROR, "Error: %s", evt->valuestring);
+        audio_alert_speak_event(8, index, -1);
         nina_event_log_add_fmt(EVENT_SEV_ERROR, index, "Error: %s", evt->valuestring);
         ESP_LOGE(TAG, "WS[%d]: Error event: %s", index, evt->valuestring);
     }
@@ -850,6 +875,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
     else if (strcmp(evt->valuestring, "MOUNT-UNPARKED") == 0) {
         if (toast_allowed(index, 4))
             ws_toast(index, TOAST_INFO, "Mount unparked");
+        audio_alert_speak_event(4, index, -1);
         nina_event_log_add(EVENT_SEV_INFO, index, "Mount unparked");
     }
     else if (strcmp(evt->valuestring, "FOCUSER-CONNECTED") == 0) {
@@ -885,11 +911,13 @@ static void handle_websocket_message(int index, const char *payload, int len) {
     else if (strcmp(evt->valuestring, "DOME-SHUTTER-OPENED") == 0) {
         if (toast_allowed(index, 10))
             ws_toast(index, TOAST_INFO, "Dome shutter opened");
+        audio_alert_speak_event(10, index, -1);
         nina_event_log_add(EVENT_SEV_INFO, index, "Dome shutter opened");
     }
     else if (strcmp(evt->valuestring, "DOME-SHUTTER-CLOSED") == 0) {
         if (toast_allowed(index, 10))
             ws_toast(index, TOAST_INFO, "Dome shutter closed");
+        audio_alert_speak_event(10, index, -1);
         nina_event_log_add(EVENT_SEV_INFO, index, "Dome shutter closed");
     }
     else if (strcmp(evt->valuestring, "FLAT-CONNECTED") == 0) {
@@ -901,16 +929,19 @@ static void handle_websocket_message(int index, const char *payload, int len) {
     else if (strcmp(evt->valuestring, "FLAT-LIGHT-TOGGLED") == 0) {
         if (toast_allowed(index, 11))
             ws_toast(index, TOAST_INFO, "Flat light toggled");
+        audio_alert_speak_event(11, index, -1);
         nina_event_log_add(EVENT_SEV_INFO, index, "Flat light toggled");
     }
     else if (strcmp(evt->valuestring, "FLAT-COVER-OPENED") == 0) {
         if (toast_allowed(index, 11))
             ws_toast(index, TOAST_INFO, "Flat cover opened");
+        audio_alert_speak_event(11, index, -1);
         nina_event_log_add(EVENT_SEV_INFO, index, "Flat cover opened");
     }
     else if (strcmp(evt->valuestring, "FLAT-COVER-CLOSED") == 0) {
         if (toast_allowed(index, 11))
             ws_toast(index, TOAST_INFO, "Flat cover closed");
+        audio_alert_speak_event(11, index, -1);
         nina_event_log_add(EVENT_SEV_INFO, index, "Flat cover closed");
     }
     else if (strcmp(evt->valuestring, "SWITCH-CONNECTED") == 0) {
@@ -928,6 +959,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
     else if (strcmp(evt->valuestring, "CAMERA-DOWNLOAD-TIMEOUT") == 0) {
         if (toast_allowed(index, 1) || toast_allowed(index, 8))
             ws_toast(index, TOAST_ERROR, "Camera download timeout");
+        audio_alert_speak_event(8, index, -1);   /* timeout -> Error category */
         nina_event_log_add(EVENT_SEV_ERROR, index, "Camera download timeout");
     }
     else if (strcmp(evt->valuestring, "SEQUENCE-ENTITY-FAILED") == 0) {
@@ -941,6 +973,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         }
         if (toast_allowed(index, 2) || toast_allowed(index, 8))
             ws_toast(index, TOAST_ERROR, msg);
+        audio_alert_speak_event(8, index, -1);   /* failure -> Error category */
         nina_event_log_add_fmt(EVENT_SEV_ERROR, index, "Entity failed: %s", msg);
     }
     else {

@@ -423,6 +423,7 @@ void start_web_server(void)
         { { "/api/control/set",        HTTP_POST, control_set_post_handler,    NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/control/adjust",     HTTP_POST, control_adjust_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/image-display/refresh", HTTP_POST, image_display_refresh_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/voice-preview",      HTTP_POST, voice_preview_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
     };
 
     /* Keep config.max_uri_handlers (set to 84 above) in sync with the route

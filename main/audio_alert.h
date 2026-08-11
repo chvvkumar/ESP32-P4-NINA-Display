@@ -31,6 +31,39 @@ void audio_alert_init(void);
  */
 void audio_alert_speak(alert_type_t type, int instance_idx, float value);
 
+/* ── Event announcements (nina_websocket.c) ─────────────────────────────────
+ * category_bit uses the toast_notify_mask bit layout: 0 Equipment Connects,
+ * 1 Equipment Disconnects, 2 Sequence, 3 Focuser, 4 Mount, 5 Meridian Flip,
+ * 6 Guider, 7 Safety, 8 Error, 9 Profile, 10 Dome, 11 Flat Device.
+ * equipment_idx is an equipment_type_t value (nina_websocket.c) and is only
+ * meaningful for categories 0/1; pass -1 otherwise. */
+
+/**
+ * Queue a spoken event announcement (live path).  Thread-safe; gated on
+ * alert_voice_enabled, alert_voice_muted[instance], the voice_notify_mask
+ * category bit, and a per-(category,instance) 30 s cooldown.
+ */
+void audio_alert_speak_event(int category_bit, int instance_idx, int equipment_idx);
+
+/**
+ * Speak the same event sentence bypassing every gate except queue existence
+ * (web preview endpoint; mirrors audio_alert_test_speak).
+ */
+void audio_alert_preview_event(int category_bit, int instance_idx, int equipment_idx);
+
+/**
+ * Queue the startup jingle (call once from app_main after audio_alert_init).
+ * Gated on boot_jingle_enabled; the queue drain naturally delays playback
+ * until the codec opens.  Thread-safe, never blocks.
+ */
+void audio_alert_play_boot_jingle(void);
+
+/**
+ * Queue the startup jingle bypassing the enable gate (web preview endpoint;
+ * mirrors audio_alert_preview_event).
+ */
+void audio_alert_preview_jingle(void);
+
 /* ── Test hooks (web_test_audio.c) ──────────────────────────────────────────
  * Both bypass the alert_voice_enabled gate so the speaker can be exercised
  * while voice alerts are switched off.  alert_voice_volume still applies. */
