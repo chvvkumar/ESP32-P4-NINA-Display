@@ -33,7 +33,8 @@ CLIPS = {
     "rms":         (520,  2, 120, 40),
     "hfr":         (620,  2, 120, 40),
     "above_limit": (880,  3, 100, 30),
-    "above_threshold": (980, 2, 130, 40),
+    "rms_above":   (980, 2, 130, 40),
+    "hfr_above":   (1020, 2, 130, 40),
     "unsafe":      (330,  4, 70,  30),
     "point":       (1500, 1, 150, 0),
 }
@@ -124,7 +125,7 @@ def _self_check():
         ms = len(data) * 1000 // (2 * SAMPLE_RATE)
         assert len(data) and len(data) % 2 == 0, name
         assert 150 <= ms <= 400, "%s is %d ms" % (name, ms)
-    assert len(CLIPS) == 45, len(CLIPS)
+    assert len(CLIPS) == 46, len(CLIPS)
     print("self-check OK")
 
 

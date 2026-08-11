@@ -54,7 +54,7 @@ static const char *TAG = "audio_alert";
     X(sequence_event) X(focuser_event) X(mount_event)           \
     X(meridian_flip) X(guider_event) X(safety_event)            \
     X(error_event) X(profile_changed) X(dome_event) X(flat_event)  \
-    X(boot_jingle) X(above_threshold) X(and)
+    X(boot_jingle) X(rms_above) X(hfr_above) X(and)
 
 #define CLIP_EXTERN(name)                               \
     extern const uint8_t _binary_##name##_pcm_start[];  \
@@ -133,10 +133,13 @@ static bool build_sentence(sentence_t *s, alert_type_t type, int instance_idx,
     switch (type) {
     case ALERT_RMS:
     case ALERT_HFR:
-        push_clip(s, (type == ALERT_RMS) ? CLIP_ID_rms : CLIP_ID_hfr);
         if (brief) {
-            push_clip(s, CLIP_ID_above_threshold);
+            /* Single fused clip ("HFR is above set threshold."): metric and
+             * predicate rendered as one utterance so no clip-gap pause splits
+             * the phrase. */
+            push_clip(s, (type == ALERT_RMS) ? CLIP_ID_rms_above : CLIP_ID_hfr_above);
         } else {
+            push_clip(s, (type == ALERT_RMS) ? CLIP_ID_rms : CLIP_ID_hfr);
             push_value(s, value);
             push_clip(s, CLIP_ID_above_limit);
         }

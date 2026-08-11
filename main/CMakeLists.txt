@@ -31,7 +31,7 @@ idf_component_register(
                 audio_clips/chime.pcm audio_clips/warning.pcm
                 audio_clips/instance_1.pcm audio_clips/instance_2.pcm audio_clips/instance_3.pcm
                 audio_clips/rms.pcm audio_clips/hfr.pcm
-                audio_clips/above_limit.pcm audio_clips/above_threshold.pcm
+                audio_clips/above_limit.pcm audio_clips/rms_above.pcm audio_clips/hfr_above.pcm
                 audio_clips/unsafe.pcm audio_clips/point.pcm
                 audio_clips/digit_0.pcm audio_clips/digit_1.pcm audio_clips/digit_2.pcm
                 audio_clips/digit_3.pcm audio_clips/digit_4.pcm audio_clips/digit_5.pcm
