@@ -13,6 +13,7 @@
 #include "perf_monitor.h"
 #include "settings_table.h"
 #include "themes.h"
+#include "voice_store.h"
 #include "ui/page_registry.h"
 
 static const char *TAG = "app_config";
@@ -3849,6 +3850,11 @@ bool app_config_is_dirty(void) {
 void app_config_factory_reset(void) {
     invalidate_json_caches();
     ESP_LOGW(TAG, "Performing factory reset - erasing NVS partition");
+
+    /* Remove custom voice clips from SPIFFS.  If the store is not mounted
+     * yet (possibly still in its ~70 s first format), voice_store_wipe()
+     * defers the wipe to the mount task instead of blocking here. */
+    voice_store_wipe();
 
     /* Erase the entire NVS partition. This also removes the tiles keys
      * "json_tiles"/"ha_tiles" along with "config"; the app_config_init() below

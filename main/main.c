@@ -19,6 +19,7 @@
 #include "ui/nina_event_log.h"
 #include "ui/nina_alerts.h"
 #include "audio_alert.h"
+#include "voice_store.h"
 #include "ui/nina_safety.h"
 #include "ui/nina_session_stats.h"
 #include "app_config.h"
@@ -973,6 +974,10 @@ void app_main(void)
         /* Voice alerts — spawns the playback task. Deliberately outside the
          * display lock above (codec init + task create, no LVGL work). */
         audio_alert_init();
+        /* Custom voice-clip overrides — background task mounts the "storage"
+         * SPIFFS partition at /spiffs_store (first-ever mount formats it,
+         * ~70 s) and hot-applies saved clips.  Never blocks boot. */
+        voice_store_init();
         /* Startup jingle — plays only when enabled; the queue drain naturally
          * delays it until the codec opens. */
         audio_alert_play_boot_jingle();

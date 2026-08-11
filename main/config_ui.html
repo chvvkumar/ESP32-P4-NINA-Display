@@ -1004,6 +1004,7 @@
         <div class="group-menu">
           <button class="tab-btn" data-tab="display" data-group="device">Display</button>
           <button class="tab-btn" data-tab="behavior" data-group="device">Behavior</button>
+          <button class="tab-btn" data-tab="voice-clips" data-group="device">Voice Clips</button>
           <button class="tab-btn" data-tab="system" data-group="device">System</button>
         </div>
       </div>
@@ -1067,6 +1068,10 @@
       <button class="nav-btn" data-tab="behavior">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
         Behavior
+      </button>
+      <button class="nav-btn" data-tab="voice-clips">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+        Voice
       </button>
       <button class="nav-btn" data-tab="system">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
@@ -1142,6 +1147,14 @@
     <!-- Markup extracted to main/fragment_behavior.html (P6d); lazily fetched by
          ensureTabLoaded() via GET /ui/fragment?tab=behavior and injected here. -->
     <div id="tab-behavior" class="tab-panel"></div>
+
+    <!-- ==================== TAB: VOICE CLIPS ==================== -->
+    <!-- Markup extracted to main/fragment_voice_clips.html; lazily fetched by
+         ensureTabLoaded() via GET /ui/fragment?tab=voice-clips and injected
+         here. Filename uses underscores (tab name has a hyphen) -- see
+         s_ui_fragments[] in web_handlers_config.c for the name->symbol
+         mapping. Action-only tab: no config fields, no Save participation. -->
+    <div id="tab-voice-clips" class="tab-panel"></div>
 
     <!-- ==================== TAB 4: SYSTEM ==================== -->
     <!-- Markup extracted to main/fragment_system.html (P6d); lazily fetched by
@@ -1590,7 +1603,7 @@
        so the initial switchTab() call at boot -- which shows whichever tab
        was last active -- transparently fetches that tab's fragment first; no
        separate boot-time special case is needed for the default tab. */
-    const TAB_ORDER=['nodes','allsky','json','ha','clock','spotify','image-display','display','behavior','system','logs','backup','api'];
+    const TAB_ORDER=['nodes','allsky','json','ha','clock','spotify','image-display','display','behavior','voice-clips','system','logs','backup','api'];
     const LAZY_TABS=new Set(TAB_ORDER);
     const loadedTabs=new Set(TAB_ORDER.filter(n=>!LAZY_TABS.has(n)));
 
@@ -1760,7 +1773,7 @@
        run for the tab that is still current. */
     /* Grouped dropdowns: map each tab to its owning group so the trigger pill
        can highlight when one of its tabs is active. */
-    const TAB_GROUP = { nodes:'pages', allsky:'pages', json:'pages', ha:'pages', clock:'pages', spotify:'pages', 'image-display':'pages', display:'device', behavior:'device', system:'device', logs:'tools', backup:'tools', api:'tools' };
+    const TAB_GROUP = { nodes:'pages', allsky:'pages', json:'pages', ha:'pages', clock:'pages', spotify:'pages', 'image-display':'pages', display:'device', behavior:'device', 'voice-clips':'device', system:'device', logs:'tools', backup:'tools', api:'tools' };
     function highlightGroup(name){
       $$('.group-btn').forEach(b=>b.classList.toggle('active', b.dataset.group===TAB_GROUP[name]));
     }
@@ -1799,6 +1812,8 @@
       // status widgets populate instantly instead of waiting for the next poll.
       if(name==='system' && typeof refreshNavMetrics==='function') refreshNavMetrics();
       if(name==='api' && typeof apiInjectHost==='function') apiInjectHost();
+      // Voice Clips: refresh storage state + Default/Custom badges on every visit.
+      if(name==='voice-clips' && typeof window.vcRefresh==='function') window.vcRefresh();
       /* Home Page pills / idle dropdown are registry-driven; if the boot-time
          /api/pages fetch lost the race, try again whenever Behavior opens. */
       if(name==='behavior' && !_pageRegistry.length){
@@ -2321,6 +2336,10 @@
     function collectTab_json(data){ /* no-op by design */ }
     function collectTab_ha(data){ /* no-op by design */ }
 
+    /* Voice Clips is an action-only tab: uploads/resets apply immediately via
+       their own endpoints and never ride the config Save cycle. */
+    function collectTab_voice_clips(data){ /* no-op by design */ }
+
     /* Those two tabs apply their edits as an unsaved preview while you work;
        Save is what stores them. Each fragment publishes a hook that returns a
        promise to store its whole page config, or null when the tab was never
@@ -2359,6 +2378,7 @@
       'image-display': collectTab_image_display,
       display: collectTab_display,
       behavior: collectTab_behavior,
+      'voice-clips': collectTab_voice_clips,
       system: collectTab_system,
       logs: collectTab_logs,
       backup: collectTab_backup,
@@ -2713,6 +2733,13 @@
       'image-display': populateTab_image_display,
       display: populateTab_display,
       behavior: populateTab_behavior,
+      /* Voice Clips has no config fields; its "populate" just (re)builds the
+         static clip rows after each fragment injection. The builder lives in
+         the fragment's own inline script (like json/ha), so look it up on
+         window at call time. No network I/O here -- fragments may be
+         idle-prefetched, and the clip-state fetch runs only on activation
+         (see switchTab's voice-clips hook). */
+      'voice-clips': function(){ if(window.vcBuildRows) window.vcBuildRows(); },
       system: populateTab_system,
       logs: populateTab_logs,
       backup: populateTab_backup,

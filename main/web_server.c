@@ -325,7 +325,7 @@ void start_web_server(void)
      * The proper long-term fix is to offload these outbound fetches off the
      * httpd worker onto a dedicated task; until then this stack must stay large. */
     config.stack_size = 40960;
-    config.max_uri_handlers = 84;
+    config.max_uri_handlers = 96;
     config.max_open_sockets = 16;
     config.lru_purge_enable = true;
     config.keep_alive_enable = true;
@@ -424,14 +424,17 @@ void start_web_server(void)
         { { "/api/control/adjust",     HTTP_POST, control_adjust_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/image-display/refresh", HTTP_POST, image_display_refresh_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/voice-preview",      HTTP_POST, voice_preview_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/voice-clips",        HTTP_GET,  voice_clips_get_handler,      NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/voice-clip",         HTTP_POST, voice_clip_post_handler,      NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/voice-clip/reset",   HTTP_POST, voice_clip_reset_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
     };
 
-    /* Keep config.max_uri_handlers (set to 84 above) in sync with the route
+    /* Keep config.max_uri_handlers (set to 96 above) in sync with the route
      * table; a route that overflows it would be silently dropped at
-     * registration. Bump both together when adding routes. Raised 80 -> 84 when
-     * the Home page took "/" and the config UI moved to /config (77 routes);
-     * the extra headroom is a few pointers per slot in the httpd handler array. */
-    _Static_assert(sizeof(routes) / sizeof(routes[0]) <= 84,
+     * registration. Bump both together when adding routes. Raised 84 -> 96 when
+     * the voice clip endpoints landed (81 routes); the extra headroom is a few
+     * pointers per slot in the httpd handler array. */
+    _Static_assert(sizeof(routes) / sizeof(routes[0]) <= 96,
                    "max_uri_handlers too small for route table");
 
     for (int i = 0; i < (int)(sizeof(routes)/sizeof(routes[0])); i++) {

@@ -310,6 +310,12 @@ Two alert sources feed the voice system:
 
 Controls in the Behavior tab: master enable, volume, alert-type selection, brief mode, repeat interval, and per-category toggles with preview buttons that play each announcement on the device. Each NINA node card has a voice mute for that instance. A separate Startup Sound toggle plays a short jingle when the display finishes booting. Voice alerts are disabled by default.
 
+### Custom Voice Clips
+
+Replace any of the 47 built-in clips from the **Voice Clips** tab in the web UI (Device menu, after Behavior): the chime, the startup jingle, the "NINA one/two/three" identity clips, sentence fragments, digits, equipment names, and event phrases. Upload mp3, m4a, wav, or ogg files and the browser converts them to the required 16 kHz, 16-bit, mono PCM before upload; .pcm files upload unchanged. Clips are stored on the device's SPIFFS storage partition, survive firmware updates, and apply immediately. Each row has a play button that plays the active clip on the device speaker, and a reset control that restores the built-in recording. **Reset All** and a factory reset both remove every custom clip. Record a rig name over the "NINA one" identity clip to tell side-by-side devices apart by ear. The first boot after updating to this firmware prepares the storage partition in the background for about a minute; uploads are rejected with a message until preparation finishes.
+
+Limits: 10 seconds per clip, 15 seconds for the startup jingle, 4 MB total for all custom clips.
+
 ### Spotify
 
 The display doubles as a full-screen Spotify Now Playing screen with album art, playback controls, progress bar, and scrolling track info. NINA and AllSky polling pause while the Spotify page is active to free bandwidth for album-art downloads.

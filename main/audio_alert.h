@@ -17,6 +17,7 @@ extern "C" {
 
 #include "nina_alerts.h"   /* alert_type_t */
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /** Create the sentence queue and playback task.  Call once at startup. */
@@ -90,6 +91,24 @@ void audio_alert_play_boot_jingle(void);
  * mirrors audio_alert_preview_event).
  */
 void audio_alert_preview_jingle(void);
+
+/* ── Clip overrides (voice_store.c) ─────────────────────────────────────────
+ * Custom PCM loaded from SPIFFS replaces the embedded clip at playback time. */
+
+/** Number of embedded clips (CLIP_COUNT). */
+int audio_alert_clip_count(void);
+
+/** CLIP_LIST name for index idx ("chime", "digit_7", ...), NULL out of range. */
+const char *audio_alert_clip_name(int idx);
+
+/**
+ * Install (non-NULL pcm) or clear (NULL pcm) a playback override for clip idx.
+ * pcm must be a heap_caps_malloc'd buffer whose ownership transfers here; the
+ * previous override buffer (if any) is retired via a free-queue drained by the
+ * playback task between sentences, never freed inline.  Callers must be
+ * serialized (voice_store holds its mutex around every call).
+ */
+void audio_alert_set_override(int idx, const uint8_t *pcm, size_t len);
 
 /* ── Test hooks (web_test_audio.c) ──────────────────────────────────────────
  * Both bypass the alert_voice_enabled gate so the speaker can be exercised

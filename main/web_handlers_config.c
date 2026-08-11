@@ -65,6 +65,11 @@ extern const uint8_t fragment_behavior_html_end[]   asm("_binary_fragment_behavi
 extern const uint8_t fragment_system_html_start[] asm("_binary_fragment_system_html_start");
 extern const uint8_t fragment_system_html_end[]   asm("_binary_fragment_system_html_end");
 
+/* Voice Clips tab (custom clip overrides). Like image-display, the tab name is
+ * hyphenated ("voice-clips") while the asset symbol uses underscores. */
+extern const uint8_t fragment_voice_clips_html_start[] asm("_binary_fragment_voice_clips_html_start");
+extern const uint8_t fragment_voice_clips_html_end[]   asm("_binary_fragment_voice_clips_html_end");
+
 /* Build-time gzip copies of the shell and every fragment (see WEB_GZ_ASSETS in
  * main/CMakeLists.txt). Symbol names follow the embed convention: the .gz file
  * basename with every non-identifier character mapped to '_'. */
@@ -94,6 +99,8 @@ extern const uint8_t fragment_display_html_gz_start[] asm("_binary_fragment_disp
 extern const uint8_t fragment_display_html_gz_end[]   asm("_binary_fragment_display_html_gz_end");
 extern const uint8_t fragment_behavior_html_gz_start[] asm("_binary_fragment_behavior_html_gz_start");
 extern const uint8_t fragment_behavior_html_gz_end[]   asm("_binary_fragment_behavior_html_gz_end");
+extern const uint8_t fragment_voice_clips_html_gz_start[] asm("_binary_fragment_voice_clips_html_gz_start");
+extern const uint8_t fragment_voice_clips_html_gz_end[]   asm("_binary_fragment_voice_clips_html_gz_end");
 extern const uint8_t fragment_system_html_gz_start[] asm("_binary_fragment_system_html_gz_start");
 extern const uint8_t fragment_system_html_gz_end[]   asm("_binary_fragment_system_html_gz_end");
 
@@ -259,6 +266,8 @@ static const ui_fragment_entry_t s_ui_fragments[] = {
                        fragment_behavior_html_gz_start,      fragment_behavior_html_gz_end },
     { "system",        fragment_system_html_start,        fragment_system_html_end,
                        fragment_system_html_gz_start,        fragment_system_html_gz_end },
+    { "voice-clips",   fragment_voice_clips_html_start,   fragment_voice_clips_html_end,
+                       fragment_voice_clips_html_gz_start,   fragment_voice_clips_html_gz_end },
 };
 
 // Handler for GET /ui/fragment?tab=<name> -- serves one lazily-loaded config_ui.html tab fragment.

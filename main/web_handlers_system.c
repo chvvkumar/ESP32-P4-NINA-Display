@@ -32,6 +32,7 @@
 #include "driver/temperature_sensor.h"
 #include "weather_client.h"
 #include "ui/nina_event_log.h"
+#include "voice_store.h"
 
 // Handler for reboot
 esp_err_t reboot_post_handler(httpd_req_t *req)
@@ -898,6 +899,24 @@ esp_err_t status_get_handler(httpd_req_t *req)
         xSemaphoreGive(s_upd_mutex);
     }
     cJSON_AddBoolToObject(root, "update_available", upd_avail);
+
+    // ── CPU load (ungated getter; works with debug_mode off) ──
+    float cpu0 = 0.0f, cpu1 = 0.0f, cpu_total = 0.0f;
+    perf_monitor_get_core_loads(&cpu0, &cpu1, &cpu_total);
+    cJSON_AddNumberToObject(root, "cpu_load", cpu_total);
+    cJSON_AddNumberToObject(root, "cpu0", cpu0);
+    cJSON_AddNumberToObject(root, "cpu1", cpu1);
+
+    // ── Voice clip storage (SPIFFS). Fields are always present; all zeros
+    // with "ready":false semantics while the store is unavailable/formatting. ──
+    size_t vs_used = 0, vs_total = 0, vs_custom = 0;
+    if (voice_store_ready()) {
+        voice_store_stats(&vs_used, &vs_total, &vs_custom);
+    }
+    cJSON_AddNumberToObject(root, "spiffs_used", (double)vs_used);
+    cJSON_AddNumberToObject(root, "spiffs_total", (double)vs_total);
+    cJSON_AddNumberToObject(root, "voice_custom_bytes", (double)vs_custom);
+    cJSON_AddNumberToObject(root, "voice_custom_budget", (double)VOICE_STORE_BUDGET);
 
     const char *json_str = cJSON_PrintUnformatted(root);
     if (!json_str) {

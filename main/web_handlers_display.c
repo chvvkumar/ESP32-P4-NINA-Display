@@ -642,6 +642,7 @@ esp_err_t screenshot_get_handler(httpd_req_t *req)
  *   kind=breach&type=rms|hfr|safety&instance=1..3[&value=F]
  *   kind=conn&state=connected|disconnected&instance=1..3   (NINA link edge)
  *   kind=jingle                       (startup jingle, no other params)
+ *   kind=clip&name=X                  (single clip by filename stem, e.g. "chime")
  * Uses the preview/test entry points, which bypass the enable/mute/mask gates
  * so the web UI can audition sentences while voice alerts are switched off. */
 esp_err_t voice_preview_post_handler(httpd_req_t *req)
@@ -655,6 +656,19 @@ esp_err_t voice_preview_post_handler(httpd_req_t *req)
     }
     if (strcmp(kind, "jingle") == 0) {   /* no instance/category params */
         audio_alert_preview_jingle();
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"ok\":true}");
+        return ESP_OK;
+    }
+    if (strcmp(kind, "clip") == 0) {     /* single clip, no instance param */
+        char name[32] = {0};
+        if (httpd_query_key_value(q, "name", name, sizeof(name)) != ESP_OK ||
+            name[0] == '\0') {
+            return send_400(req, "missing name");
+        }
+        if (!audio_alert_test_clip(name)) {
+            return send_400(req, "unknown clip");
+        }
         httpd_resp_set_type(req, "application/json");
         httpd_resp_sendstr(req, "{\"ok\":true}");
         return ESP_OK;
