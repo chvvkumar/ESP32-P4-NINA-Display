@@ -222,6 +222,25 @@
       transition:color 0.2s ease, border-color 0.2s ease;
     }
     .vp-btn:hover { color:var(--accent); border-color:var(--accent); }
+    /* Event Categories table (Behavior tab): name | pop-up | voice | preview */
+    .evcat-grid {
+      display:grid; grid-template-columns:1fr auto auto auto;
+      column-gap:18px; align-items:center;
+    }
+    .evcat-head {
+      font-size:0.62rem; color:var(--text-muted); text-transform:uppercase;
+      letter-spacing:0.04em; padding-bottom:8px; justify-self:center;
+    }
+    .evcat-head:first-child { justify-self:start; }
+    .evcat-name {
+      padding:10px 0; border-bottom:1px solid rgba(255,255,255,0.06);
+      font-size:0.85rem;
+    }
+    .evcat-cell {
+      padding:10px 0; border-bottom:1px solid rgba(255,255,255,0.06);
+      justify-self:center; display:flex; align-items:center;
+    }
+    .evcat-name.evcat-last, .evcat-cell.evcat-last { border-bottom:none; }
     .help-popover {
       display:none; margin:-10px 0 22px; padding:14px 16px;
       background:var(--input-bg); border:1px solid var(--border);
@@ -2548,7 +2567,7 @@
       $('alert_flash_enabled').checked=data.alert_flash_enabled!==false;
       $('alert_voice_enabled').checked=!!data.alert_voice_enabled;
       $('boot_jingle_enabled').checked=!!data.boot_jingle_enabled;
-      var vVol=data.alert_voice_volume!=null?data.alert_voice_volume:70;
+      var vVol=data.alert_voice_volume!=null?data.alert_voice_volume:90;
       $('alert_voice_volume').value=vVol;
       $('alert_voice_volume_val').textContent=vVol+'%';
       var vMask=data.alert_voice_types!=null?data.alert_voice_types:7;
