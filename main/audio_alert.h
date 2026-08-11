@@ -17,6 +17,7 @@ extern "C" {
 
 #include "nina_alerts.h"   /* alert_type_t */
 #include <stdbool.h>
+#include <stdint.h>
 
 /** Create the sentence queue and playback task.  Call once at startup. */
 void audio_alert_init(void);
@@ -46,10 +47,36 @@ void audio_alert_speak(alert_type_t type, int instance_idx, float value);
 void audio_alert_speak_event(int category_bit, int instance_idx, int equipment_idx);
 
 /**
+ * Queue one grouped equipment announcement for an aggregated burst
+ * (live path).  category_bit must be 0 (connects) or 1 (disconnects);
+ * eq_mask holds one bit per equipment_type_t value.  Speaks
+ * "instance N <eq>, <eq> and <eq> connected/disconnected"; a single set bit
+ * degenerates to the audio_alert_speak_event sentence.  Same gates and the
+ * same per-(category,instance) 30 s cooldown as audio_alert_speak_event.
+ */
+void audio_alert_speak_equipment_group(int category_bit, int instance_idx,
+                                       uint16_t eq_mask);
+
+/**
  * Speak the same event sentence bypassing every gate except queue existence
  * (web preview endpoint; mirrors audio_alert_test_speak).
  */
 void audio_alert_preview_event(int category_bit, int instance_idx, int equipment_idx);
+
+/* ── NINA link announcements (nina_connection.c) ──────────────────────────── */
+
+/**
+ * Queue a spoken NINA link connect/disconnect announcement (live path).
+ * Thread-safe; gated on alert_voice_enabled, alert_voice_muted[instance] and
+ * the alert_voice_conn / alert_voice_disc toggle for the given edge.
+ */
+void audio_alert_speak_conn(int instance_idx, bool connected);
+
+/**
+ * Speak the same link sentence bypassing every gate except queue existence
+ * (web preview endpoint; mirrors audio_alert_preview_event).
+ */
+void audio_alert_preview_conn(int instance_idx, bool connected);
 
 /**
  * Queue the startup jingle (call once from app_main after audio_alert_init).

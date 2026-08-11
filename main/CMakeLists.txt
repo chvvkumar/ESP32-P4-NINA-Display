@@ -31,12 +31,13 @@ idf_component_register(
                 audio_clips/chime.pcm audio_clips/warning.pcm
                 audio_clips/instance_1.pcm audio_clips/instance_2.pcm audio_clips/instance_3.pcm
                 audio_clips/rms.pcm audio_clips/hfr.pcm
-                audio_clips/above_limit.pcm audio_clips/unsafe.pcm audio_clips/point.pcm
+                audio_clips/above_limit.pcm audio_clips/above_threshold.pcm
+                audio_clips/unsafe.pcm audio_clips/point.pcm
                 audio_clips/digit_0.pcm audio_clips/digit_1.pcm audio_clips/digit_2.pcm
                 audio_clips/digit_3.pcm audio_clips/digit_4.pcm audio_clips/digit_5.pcm
                 audio_clips/digit_6.pcm audio_clips/digit_7.pcm audio_clips/digit_8.pcm
                 audio_clips/digit_9.pcm
-                audio_clips/connected.pcm audio_clips/disconnected.pcm
+                audio_clips/connected.pcm audio_clips/disconnected.pcm audio_clips/and.pcm
                 audio_clips/camera.pcm audio_clips/mount.pcm audio_clips/guider.pcm
                 audio_clips/focuser.pcm audio_clips/filterwheel.pcm audio_clips/rotator.pcm
                 audio_clips/safety.pcm audio_clips/dome.pcm audio_clips/flat.pcm

@@ -10,6 +10,7 @@
 
 #include "nina_connection.h"
 #include "app_config.h"
+#include "audio_alert.h"
 #include "net_diag.h"
 #include "ui/nina_toast.h"
 #include "esp_timer.h"
@@ -189,6 +190,18 @@ nina_conn_state_t nina_connection_report_poll(int instance, bool success) {
                  prev == NINA_CONN_CONNECTED ? "CONNECTED" : "DISCONNECTED",
                  c->state == NINA_CONN_CONNECTED ? "CONNECTED" : "DISCONNECTED",
                  c->consecutive_failures, c->consecutive_successes);
+
+        /* Spoken link announcements: any transition INTO CONNECTED speaks
+         * "connected"; a transition INTO DISCONNECTED speaks "disconnected"
+         * only when the prior state was CONNECTED, so a rig that is off at
+         * boot (UNKNOWN/CONNECTING fail-fast) stays silent.  Safe here: this
+         * module holds no lock or critical section, the state store above is
+         * done, and audio_alert_speak_conn only enqueues (never blocks). */
+        if (c->state == NINA_CONN_CONNECTED) {
+            audio_alert_speak_conn(instance, true);
+        } else if (c->state == NINA_CONN_DISCONNECTED && prev == NINA_CONN_CONNECTED) {
+            audio_alert_speak_conn(instance, false);
+        }
     }
 
     return c->state;
@@ -202,6 +215,7 @@ void nina_connection_force_disconnect(int instance) {
     if (c->state == NINA_CONN_DISCONNECTED) {
         return;
     }
+    bool was_connected = (c->state == NINA_CONN_CONNECTED);
     c->state = NINA_CONN_DISCONNECTED;
     c->static_data_ready = false;
     c->consecutive_failures = 0;
@@ -209,6 +223,13 @@ void nina_connection_force_disconnect(int instance) {
     c->outage_warned = false;
     c->last_state_change_ms = now_ms();
     ESP_LOGI(TAG, "Instance %d: forced offline (disabled)", instance);
+    /* Announce only a CONNECTED -> DISCONNECTED edge: disabling an instance
+     * that was UNKNOWN/CONNECTING (already offline in practice) stays silent.
+     * The early return above keeps the every-cycle disabled sweep from
+     * re-announcing.  No lock held; enqueue-only call. */
+    if (was_connected) {
+        audio_alert_speak_conn(instance, false);
+    }
 }
 
 void nina_connection_report_ws(int instance, bool connected) {

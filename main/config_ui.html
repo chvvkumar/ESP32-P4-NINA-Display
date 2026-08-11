@@ -129,6 +129,15 @@
     }
     /* Danger-zone subsection: neutral surface, danger-tinted border only (no hue theme change) */
     .subsection.danger-zone { border-color: rgba(248, 113, 113, 0.35); }
+    /* Layer-2 paired subcards (Behavior tab alerts): a surface slightly lighter
+       than the card so sibling groups read as separate nested cards. */
+    .subcard {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 14px 16px;
+      margin-top: 14px;
+    }
     /* Logs tab: break out wider than the 960px content column, and fit the window
        as a flex column so only the viewport scrolls (not the page). */
     #tab-logs .card {
@@ -2241,6 +2250,9 @@
       data.alert_voice_volume=parseInt($('alert_voice_volume').value)||0;
       data.alert_voice_types=(function(){var m=0;for(var b=0;b<3;b++){if($('alert_voice_type_'+b).checked) m|=(1<<b);}return m;})();
       data.alert_voice_repeat_min=parseInt($('alert_voice_repeat_min').value)||0;
+      data.alert_voice_brief=$('alert_voice_brief').checked?1:0;
+      data.alert_voice_conn=$('alert_voice_conn').checked?1:0;
+      data.alert_voice_disc=$('alert_voice_disc').checked?1:0;
       data.boot_jingle_enabled=$('boot_jingle_enabled').checked?1:0;
       data.toast_aggregation_window_s=parseInt($('toast_aggregation_window').value)||0;
       data.toast_notify_mask=(function(){var m=0;for(var i=0;i<12;i++){if($('notify_cat_'+i).checked) m|=(1<<i);}return m>>>0;})();
@@ -2573,6 +2585,9 @@
       var vMask=data.alert_voice_types!=null?data.alert_voice_types:7;
       for(var vb=0;vb<3;vb++){$('alert_voice_type_'+vb).checked=!!(vMask&(1<<vb));}
       $('alert_voice_repeat_min').value=data.alert_voice_repeat_min!=null?data.alert_voice_repeat_min:5;
+      $('alert_voice_brief').checked=!!data.alert_voice_brief;
+      $('alert_voice_conn').checked=!!data.alert_voice_conn;
+      $('alert_voice_disc').checked=data.alert_voice_disc!=null?!!data.alert_voice_disc:true;
       var aggWin=data.toast_aggregation_window_s!=null?data.toast_aggregation_window_s:5;
       $('toast_aggregation_window').value=aggWin;
       updateAggregationLabel(aggWin);
@@ -3050,6 +3065,11 @@
     }
     function previewVoiceJingle(){
       fetch('/api/voice-preview?kind=jingle',{method:'POST'})
+        .then(function(r){if(!r.ok) showToast('Voice preview failed','error');})
+        .catch(function(){showToast('Voice preview failed','error');});
+    }
+    function previewVoiceConn(state){
+      fetch('/api/voice-preview?kind=conn&state='+state+'&instance=1',{method:'POST'})
         .then(function(r){if(!r.ok) showToast('Voice preview failed','error');})
         .catch(function(){showToast('Voice preview failed','error');});
     }

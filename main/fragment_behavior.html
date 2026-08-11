@@ -99,8 +99,8 @@
       <div class="card">
         <div class="card-title"><span class="card-title-label">Notifications <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
         <div class="help-popover"><div class="help-popover-title">Notifications</div><p>Controls on-screen pop-up notifications, the border-flash alerts, and which event categories produce notifications. Notification duration sets how long a normal pop-up stays visible; error and warning pop-ups show for twice that time. Border flash alerts flash the screen edge when an RMS, HFR, or safety threshold is exceeded.</p><p>The aggregation window combines a burst of notifications that arrive close together into one, which reduces clutter during noisy events; set it to 0 to show every notification individually. The Event Categories toggles decide which kinds of events generate notifications at all; turning a category off suppresses its notifications.</p><p>Example: keep Error Events and Safety Events on, turn Focuser and Guider Events off to cut routine chatter, and set the aggregation window to 5 seconds so rapid sequence updates collapse into a single notification.</p></div>
-        <div class="subsection">
-        <div class="subsection-title">Alerts</div>
+        <div class="subcard">
+        <div class="subsection-title">Display Alerts</div>
         <div class="field" style="margin-bottom:16px">
           <label class="field-label">Toast duration (s)</label>
           <input type="number" class="input" id="toast_duration" min="3" max="30" value="8">
@@ -111,16 +111,22 @@
           <label class="toggle"><input type="checkbox" id="alert_flash_enabled" checked><span class="toggle-track"></span></label>
         </div>
         <div class="field-hint" style="margin-top:4px">Flash the screen border when RMS, HFR, or safety thresholds are exceeded.</div>
-        <div class="toggle-row" style="margin-top:16px">
+        <div class="field" style="margin-top:16px">
+          <label class="field-label">Aggregation Window</label>
+          <div class="slider-group">
+            <input type="range" class="slider" id="toast_aggregation_window" min="0" max="15" value="5" oninput="updateAggregationLabel(this.value);checkDirty()">
+            <span class="slider-val" id="toast_aggregation_val">5s</span>
+          </div>
+          <div class="field-hint">Combine rapid-fire notifications within this window. 0 = Off (show each individually).</div>
+        </div>
+        </div>
+        <div class="subcard">
+        <div class="subsection-title">Voice Alerts</div>
+        <div class="toggle-row">
           <span class="toggle-label">Voice alerts</span>
           <label class="toggle"><input type="checkbox" id="alert_voice_enabled"><span class="toggle-track"></span></label>
         </div>
         <div class="field-hint" style="margin-top:4px">Speak a warning through the onboard speaker when a threshold is exceeded. Independent of border flash.</div>
-        <div class="toggle-row" style="margin-top:16px">
-          <span class="toggle-label">Startup Sound</span>
-          <div style="display:flex;align-items:center;gap:12px;flex-shrink:0"><label class="toggle"><input type="checkbox" id="boot_jingle_enabled" checked onchange="checkDirty()"><span class="toggle-track"></span></label><button type="button" class="vp-btn" title="Hear a preview" aria-label="Hear a preview" onclick="previewVoiceJingle()">&#9654;</button></div>
-        </div>
-        <div class="field-hint" style="margin-top:4px">Plays a short jingle through the speaker when the display finishes starting up.</div>
         <div class="field" style="margin-top:16px">
           <label class="field-label">Voice volume</label>
           <div class="slider-group">
@@ -140,19 +146,31 @@
           <span class="toggle-label">Speak safety alerts</span>
           <div style="display:flex;align-items:center;gap:12px;flex-shrink:0"><label class="toggle"><input type="checkbox" id="alert_voice_type_2" checked><span class="toggle-track"></span></label><button type="button" class="vp-btn" title="Hear a preview" aria-label="Hear a preview" onclick="previewVoiceBreach('safety')">&#9654;</button></div>
         </div>
+        <div class="toggle-row" style="margin-top:16px">
+          <span class="toggle-label">Brief Announcements</span>
+          <label class="toggle"><input type="checkbox" id="alert_voice_brief" onchange="checkDirty()"><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint" style="margin-top:4px">Shorter spoken alerts: "NINA one, H F R, is above set threshold" instead of the full announcement with the measured value.</div>
         <div class="field" style="margin-top:16px">
           <label class="field-label">Repeat interval (min)</label>
           <input type="number" class="input" id="alert_voice_repeat_min" min="0" max="60" value="5">
           <div class="field-hint">Re-announce this often while the threshold is still exceeded. 0 = announce once only.</div>
         </div>
-        <div class="field" style="margin-top:16px">
-          <label class="field-label">Aggregation Window</label>
-          <div class="slider-group">
-            <input type="range" class="slider" id="toast_aggregation_window" min="0" max="15" value="5" oninput="updateAggregationLabel(this.value);checkDirty()">
-            <span class="slider-val" id="toast_aggregation_val">5s</span>
-          </div>
-          <div class="field-hint">Combine rapid-fire notifications within this window. 0 = Off (show each individually).</div>
+        <div class="toggle-row" style="margin-top:16px">
+          <span class="toggle-label">Announce NINA Connect</span>
+          <div style="display:flex;align-items:center;gap:12px;flex-shrink:0"><label class="toggle"><input type="checkbox" id="alert_voice_conn" onchange="checkDirty()"><span class="toggle-track"></span></label><button type="button" class="vp-btn" title="Hear a preview" aria-label="Hear a preview" onclick="previewVoiceConn('connected')">&#9654;</button></div>
         </div>
+        <div class="field-hint" style="margin-top:4px">Speaks "NINA one connected" when a NINA computer comes online.</div>
+        <div class="toggle-row" style="margin-top:16px">
+          <span class="toggle-label">Announce NINA Disconnect</span>
+          <div style="display:flex;align-items:center;gap:12px;flex-shrink:0"><label class="toggle"><input type="checkbox" id="alert_voice_disc" checked onchange="checkDirty()"><span class="toggle-track"></span></label><button type="button" class="vp-btn" title="Hear a preview" aria-label="Hear a preview" onclick="previewVoiceConn('disconnected')">&#9654;</button></div>
+        </div>
+        <div class="field-hint" style="margin-top:4px">Speaks "NINA one disconnected" when a connected NINA computer goes offline.</div>
+        <div class="toggle-row" style="margin-top:16px">
+          <span class="toggle-label">Startup Sound</span>
+          <div style="display:flex;align-items:center;gap:12px;flex-shrink:0"><label class="toggle"><input type="checkbox" id="boot_jingle_enabled" checked onchange="checkDirty()"><span class="toggle-track"></span></label><button type="button" class="vp-btn" title="Hear a preview" aria-label="Hear a preview" onclick="previewVoiceJingle()">&#9654;</button></div>
+        </div>
+        <div class="field-hint" style="margin-top:4px">Plays a short jingle through the speaker when the display finishes starting up.</div>
         </div>
         <div class="subsection">
         <div class="subsection-title">Event Categories</div>

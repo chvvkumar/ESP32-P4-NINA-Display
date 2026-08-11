@@ -299,6 +299,17 @@ Add up to three NINA hosts. Only the active (visible) page gets full ~2-second p
 
 Nine built-in dark themes, selectable in the Display tab; changes apply instantly without a reboot. A color-brightness slider (0-100%) uniformly dims all theme colors for dark-site use. Filter colors are set per-instance as hex values, and new filters reported by NINA are added automatically with a default color. RMS and HFR threshold colors are configurable, so out-of-range values shift green to amber to red.
 
+### Voice Alerts
+
+The firmware speaks alerts through the onboard speaker. Announcements are assembled from pre-rendered voice clips, so no network or cloud service is involved at playback time.
+
+Two alert sources feed the voice system:
+
+- **Threshold breaches**: guiding RMS, HFR, and the ASCOM safety monitor, evaluated per instance. A breach is announced once on entry, for example "Warning, NINA one, HFR, two point five, above limit". A Brief Announcements option shortens this to "NINA one, HFR, is above set threshold". Re-announcement while the value stays out of range is controlled by a configurable repeat interval, and the alert re-arms once the value recovers below 95% of the threshold.
+- **Session events**: each of the twelve event categories (equipment connects and disconnects, sequence, focuser, mount, meridian flip, guider, safety, error, profile, dome, flat device) has an independent voice toggle next to its pop-up toggle. Equipment events name the device, for example "NINA two, Camera, disconnected". A 30-second per-category cooldown suppresses bursts. Disconnects, meridian flip, safety, and error are enabled by default; the remaining categories are opt-in.
+
+Controls in the Behavior tab: master enable, volume, alert-type selection, brief mode, repeat interval, and per-category toggles with preview buttons that play each announcement on the device. Each NINA node card has a voice mute for that instance. A separate Startup Sound toggle plays a short jingle when the display finishes booting. Voice alerts are disabled by default.
+
 ### Spotify
 
 The display doubles as a full-screen Spotify Now Playing screen with album art, playback controls, progress bar, and scrolling track info. NINA and AllSky polling pause while the Spotify page is active to free bandwidth for album-art downloads.
