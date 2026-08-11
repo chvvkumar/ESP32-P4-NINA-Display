@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Configure host test project
         run: cmake -S test/host -B build_host
@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install cppcheck
         run: sudo apt-get update && sudo apt-get install -y cppcheck
@@ -43,6 +43,7 @@ jobs:
       - name: Run cppcheck against firmware sources
         run: |
           cppcheck \
+            -j "$(nproc)" \
             --enable=warning,portability \
             --error-exitcode=1 \
             --inline-suppr \

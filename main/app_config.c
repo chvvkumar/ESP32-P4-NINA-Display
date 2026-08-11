@@ -2431,7 +2431,7 @@ static void migrate_from_v53(const void *raw, size_t raw_size, app_config_t *cfg
      * memcpy(copy) never touches it. set_defaults() already assigned the
      * SETTINGS_TABLE defaults, but set them explicitly for documentation. */
     cfg->alert_voice_enabled    = 0;
-    cfg->alert_voice_volume     = 70;
+    cfg->alert_voice_volume     = 90;
     cfg->alert_voice_types      = ALERT_VOICE_TYPE_ALL;
     cfg->alert_voice_repeat_min = 5;
 
