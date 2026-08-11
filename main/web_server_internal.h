@@ -106,6 +106,7 @@ esp_err_t widget_style_post_handler(httpd_req_t *req);
 esp_err_t page_post_handler(httpd_req_t *req);
 esp_err_t screen_rotation_post_handler(httpd_req_t *req);
 esp_err_t screenshot_get_handler(httpd_req_t *req);
+esp_err_t voice_preview_post_handler(httpd_req_t *req);
 esp_err_t reboot_post_handler(httpd_req_t *req);
 esp_err_t factory_reset_post_handler(httpd_req_t *req);
 esp_err_t ota_post_handler(httpd_req_t *req);

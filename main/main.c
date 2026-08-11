@@ -18,12 +18,14 @@
 #include "ui/nina_toast.h"
 #include "ui/nina_event_log.h"
 #include "ui/nina_alerts.h"
+#include "audio_alert.h"
 #include "ui/nina_safety.h"
 #include "ui/nina_session_stats.h"
 #include "app_config.h"
 #include "axi_qos.h"
 #include "log_capture.h"
 #include "web_server.h"
+#include "web_test_audio.h"
 #include "mqtt_ha.h"
 #include "tasks.h"
 #include "esp_ota_ops.h"
@@ -722,6 +724,7 @@ void app_main(void)
     power_mgmt_init();
 
     start_web_server();
+    web_test_audio_init();   /* standalone speaker test surface on port 8080 */
 
     /* Pre-allocate JPEG encoder DMA channel before display init claims DMA resources */
     screenshot_encoder_init();
@@ -966,6 +969,13 @@ void app_main(void)
          * while there was no screen to draw on. Re-check now that the dashboard
          * exists; a no-op unless the device is factory-fresh and has an IP. */
         nina_setup_hint_show_if_needed();
+
+        /* Voice alerts — spawns the playback task. Deliberately outside the
+         * display lock above (codec init + task create, no LVGL work). */
+        audio_alert_init();
+        /* Startup jingle — plays only when enabled; the queue drain naturally
+         * delays it until the codec opens. */
+        audio_alert_play_boot_jingle();
 
         nina_client_init();  // DNS cache mutex — must be called before poll tasks spawn
         nina_client_init_image_buffers();  // Pre-allocate PSRAM image fetch buffer

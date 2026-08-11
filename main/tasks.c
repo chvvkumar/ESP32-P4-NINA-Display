@@ -3510,25 +3510,25 @@ main_loop:
 
             if (safety_conn) {
                 nina_safety_update(true, safety_safe);
+                /* Also feed the breach engine here, not just on the WebSocket
+                 * SAFETY-CHANGED edge: a sustained unsafe state has no further
+                 * events, and the periodic re-announce needs a periodic sample.
+                 * Idempotent -- repeat samples of the same state do nothing. */
+                nina_alert_eval_safety(i, safety_safe);
             }
 
-            if (app_config_get()->alert_flash_enabled) {
-                if (rms_total > 0.0f) {
-                    threshold_config_t rms_cfg;
-                    app_config_get_rms_threshold_config(i, &rms_cfg);
-                    if (rms_cfg.ok_max > 0.0f && rms_total > rms_cfg.ok_max) {
-                        nina_alert_trigger(ALERT_RMS, i, rms_total);
-                    }
-                }
+            /* Alert eval runs unconditionally: nina_alert_eval() owns the breach
+             * edge, the hysteresis recovery and the voice re-announce timer, and
+             * applies the alert_flash_enabled / alert_voice_enabled gates itself.
+             * Gating here instead would leave breach state stale whenever a
+             * setting is toggled mid-session. */
+            threshold_config_t rms_cfg;
+            app_config_get_rms_threshold_config(i, &rms_cfg);
+            nina_alert_eval(ALERT_RMS, i, rms_total, rms_cfg.ok_max);
 
-                if (hfr > 0.0f) {
-                    threshold_config_t hfr_cfg;
-                    app_config_get_hfr_threshold_config(i, &hfr_cfg);
-                    if (hfr_cfg.ok_max > 0.0f && hfr > hfr_cfg.ok_max) {
-                        nina_alert_trigger(ALERT_HFR, i, hfr);
-                    }
-                }
-            }
+            threshold_config_t hfr_cfg;
+            app_config_get_hfr_threshold_config(i, &hfr_cfg);
+            nina_alert_eval(ALERT_HFR, i, hfr, hfr_cfg.ok_max);
         }
 
         /* ── Navigation arbiter: resolve the page-commit ladder once per cycle ──
