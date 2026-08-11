@@ -241,22 +241,25 @@
       justify-self:center; display:flex; align-items:center;
     }
     .evcat-name.evcat-last, .evcat-cell.evcat-last { border-bottom:none; }
-    /* Voice Clips table: name | status | upload | reset | preview */
+    /* Voice Clips tables: name | status | upload | reset | preview. One grid
+       per raised subsection; the non-name columns are fixed widths so the
+       tables align ACROSS sections (auto would size each section alone). */
     .vc-grid {
-      display:grid; grid-template-columns:1fr auto auto auto auto;
-      column-gap:18px; align-items:center;
+      display:grid; grid-template-columns:1fr 128px 84px 72px 44px;
+      column-gap:14px; align-items:center;
     }
     .vc-head {
       font-size:0.62rem; color:var(--text-muted); text-transform:uppercase;
       letter-spacing:0.04em; padding-bottom:8px; justify-self:center;
     }
     .vc-head:first-child { justify-self:start; }
-    .vc-group { grid-column:1 / -1; margin-top:16px; }
     .vc-cell {
       padding:7px 0; border-bottom:1px solid rgba(255,255,255,0.05);
       justify-self:center; display:flex; align-items:center;
     }
     .vc-cell.vc-name { justify-self:stretch; display:block; min-width:0; }
+    /* Last row of each section grid: no divider above the card edge */
+    .vc-grid .vc-cell:nth-last-child(-n+5) { border-bottom:none; }
     .help-popover {
       display:none; margin:-10px 0 22px; padding:14px 16px;
       background:var(--input-bg); border:1px solid var(--border);

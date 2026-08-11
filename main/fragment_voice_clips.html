@@ -11,7 +11,7 @@
         <div class="field-hint" style="margin:0 0 10px">Upload any common audio format (mp3, m4a, wav, ogg); your browser converts it to the required 16 kHz mono PCM before uploading. Files ending in .pcm are sent as-is. Clips are limited to 10 seconds each; Boot Jingle may be up to 15 seconds.</div>
 
         <input type="file" id="vcFile" accept="audio/*,.pcm" style="display:none">
-        <div id="vcRows" class="vc-grid"></div>
+        <div id="vcRows"></div>
 
         <div style="margin-top:20px">
           <button type="button" class="btn btn-outline" onclick="vcResetAll()">Reset All Clips to Defaults</button>
@@ -98,16 +98,21 @@
   function vcBuildRows(){
     var c=document.getElementById('vcRows');
     if(!c) return;
-    /* One grid for every group so the columns align across the whole table
-       (mirrors the Event Categories table on the Behavior tab). Group titles
-       span the full row; the header row appears once at the top. */
-    var html='<div class="vc-head"></div><div class="vc-head">Status</div><div class="vc-head">Upload</div><div class="vc-head">Reset</div><div class="vc-head">Preview</div>';
+    /* One raised .subsection per group (matching the other config pages),
+       each holding its own grid. Column widths are FIXED in .vc-grid so the
+       tables align across sections; the header row appears only in the first
+       section. */
+    var html='';
     var lastG=-1;
     CLIPS.forEach(function(cl){
       var n=cl[0];
       if(cl[2]!==lastG){
+        if(lastG!==-1) html+='</div></div>';   /* close previous grid + subsection */
         lastG=cl[2];
-        html+='<div class="subsection-title vc-group">'+GROUPS[lastG]+'</div>';
+        html+='<div class="subsection"><div class="subsection-title">'+GROUPS[lastG]+'</div><div class="vc-grid">';
+        if(lastG===0){
+          html+='<div class="vc-head"></div><div class="vc-head">Status</div><div class="vc-head">Upload</div><div class="vc-head">Reset</div><div class="vc-head">Preview</div>';
+        }
       }
       html+=
         '<div class="vc-cell vc-name">'+
@@ -121,6 +126,7 @@
         '<div class="vc-cell"><button type="button" class="btn btn-outline" id="vcr_'+n+'" style="padding:5px 12px;font-size:0.72rem;visibility:hidden" onclick="vcReset(\''+n+'\')">Reset</button></div>'+
         '<div class="vc-cell"><button type="button" class="vp-btn" title="Play on the device" aria-label="Play on the device" onclick="vcPlay(\''+n+'\')">&#9654;</button></div>';
     });
+    if(lastG!==-1) html+='</div></div>';
     c.innerHTML=html;
     var f=document.getElementById('vcFile');
     if(f && !f.dataset.wired){
