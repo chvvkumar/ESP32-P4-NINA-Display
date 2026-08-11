@@ -372,9 +372,13 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
     cJSON_AddStringToObject(obj, "spotify_client_id", cfg->spotify_client_id);
     cJSON_AddNumberToObject(obj, "moon_drag_light_mode", cfg->moon_drag_light_mode);
     cJSON_AddNumberToObject(obj, "toast_notify_mask", cfg->toast_notify_mask);
+    cJSON_AddNumberToObject(obj, "voice_notify_mask", cfg->voice_notify_mask);
     cJSON_AddBoolToObject(obj, "toast_instance_muted_1", cfg->toast_instance_muted[0]);
     cJSON_AddBoolToObject(obj, "toast_instance_muted_2", cfg->toast_instance_muted[1]);
     cJSON_AddBoolToObject(obj, "toast_instance_muted_3", cfg->toast_instance_muted[2]);
+    cJSON_AddBoolToObject(obj, "alert_voice_muted_1", cfg->alert_voice_muted[0]);
+    cJSON_AddBoolToObject(obj, "alert_voice_muted_2", cfg->alert_voice_muted[1]);
+    cJSON_AddBoolToObject(obj, "alert_voice_muted_3", cfg->alert_voice_muted[2]);
 
     // Idle override (target excluded from the table: cross-field page-registry semantics)
     cJSON_AddNumberToObject(obj, "idle_page_override_target", cfg->idle_page_override_target);
@@ -486,8 +490,14 @@ static const backup_field_t s_backup_fields[] = {
     {"graph_update_interval_s",     "Graph Update Interval",    "Behavior", false, false},
     {"active_page_override",        "Home Page",                "Behavior", false, false},
     {"alert_flash_enabled",         "Alert Flash",              "Behavior", false, false},
+    {"alert_voice_enabled",         "Voice Alerts",             "Behavior", false, false},
+    {"alert_voice_volume",          "Voice Alert Volume",       "Behavior", false, false},
+    {"alert_voice_types",           "Voice Alert Types",        "Behavior", false, false},
+    {"alert_voice_repeat_min",      "Voice Alert Repeat",       "Behavior", false, false},
     {"toast_aggregation_window_s",  "Toast Aggregation Window","Behavior", false, false},
     {"toast_notify_mask",           "Notification Categories", "Behavior", false, false},
+    {"voice_notify_mask",           "Voice Alert Categories",  "Behavior", false, false},
+    {"boot_jingle_enabled",         "Startup Sound",           "Behavior", false, false},
     {"screen_sleep_enabled",        "Screen Sleep",             "Behavior", false, false},
     {"screen_sleep_timeout_s",      "Screen Sleep Timeout",     "Behavior", false, false},
 
@@ -501,6 +511,9 @@ static const backup_field_t s_backup_fields[] = {
     {"toast_instance_muted_1",      "Instance 1 Muted",       "Nodes & Data", false, false},
     {"toast_instance_muted_2",      "Instance 2 Muted",       "Nodes & Data", false, false},
     {"toast_instance_muted_3",      "Instance 3 Muted",       "Nodes & Data", false, false},
+    {"alert_voice_muted_1",         "Instance 1 Voice Muted", "Nodes & Data", false, false},
+    {"alert_voice_muted_2",         "Instance 2 Voice Muted", "Nodes & Data", false, false},
+    {"alert_voice_muted_3",         "Instance 3 Voice Muted", "Nodes & Data", false, false},
     {"filter_colors_1",    "Filter Colors 1",     "Nodes & Data", false, true},
     {"filter_colors_2",    "Filter Colors 2",     "Nodes & Data", false, true},
     {"filter_colors_3",    "Filter Colors 3",     "Nodes & Data", false, true},
@@ -1315,9 +1328,20 @@ static app_config_t *parse_config_from_json(cJSON *root)
         cfg->toast_notify_mask = (uint32_t)d & 0xFFFFFu;
     }
 
+    cJSON *vnm_item = cJSON_GetObjectItem(root, "voice_notify_mask");
+    if (cJSON_IsNumber(vnm_item)) {
+        /* Bound to defined notification-category bits (highest used bit = 11). */
+        double d = vnm_item->valuedouble;
+        if (d < 0) d = 0;
+        cfg->voice_notify_mask = (uint32_t)d & 0xFFFu;
+    }
+
     JSON_TO_BOOL(root, "toast_instance_muted_1", cfg->toast_instance_muted[0]);
     JSON_TO_BOOL(root, "toast_instance_muted_2", cfg->toast_instance_muted[1]);
     JSON_TO_BOOL(root, "toast_instance_muted_3", cfg->toast_instance_muted[2]);
+    JSON_TO_BOOL(root, "alert_voice_muted_1", cfg->alert_voice_muted[0]);
+    JSON_TO_BOOL(root, "alert_voice_muted_2", cfg->alert_voice_muted[1]);
+    JSON_TO_BOOL(root, "alert_voice_muted_3", cfg->alert_voice_muted[2]);
 
     /* idle_page_override_target now stores a page_ref registry id
      * (0..PAGE_REF_ID_MAX-1). Out-of-range falls back to 0 (Summary).

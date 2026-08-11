@@ -839,8 +839,11 @@ static void set_defaults(app_config_t *cfg) {
 
     // Toast notification overhaul defaults (mask/per-instance mute are not table-driven)
     cfg->toast_notify_mask = 0xFFFFFFFF;  // all categories enabled
+    // Voice alert categories: disconnects, meridian flip, safety, error (v56, not table-driven)
+    cfg->voice_notify_mask = 0x1A2;
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         cfg->toast_instance_muted[i] = false;
+        cfg->alert_voice_muted[i] = false;  // per-instance voice mute (v55, not table-driven)
     }
 
     cfg->idle_page_override_target = PAGE_REF_SUMMARY;
@@ -2411,6 +2414,69 @@ static void migrate_from_v52(const void *raw, size_t raw_size, app_config_t *cfg
     ESP_LOGI(TAG, "Migrated config from v52 to v%d", APP_CONFIG_VERSION);
 }
 
+/* --- v53 → v54 migration: appends the four spoken-voice-alert settings
+ *     (alert_voice_enabled/_volume/_types/_repeat_min). Layout ahead is
+ *     unchanged; the new fields are additive and default to "voice off, but
+ *     preconfigured" so an upgrading device stays silent until the user opts
+ *     in. Tiles blobs already live in their own NVS keys, so this migration
+ *     leaves them alone (the caller's tiles_loaded stays false and the tail
+ *     loads "json_tiles"/"ha_tiles" as usual). --- */
+static void migrate_from_v53(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v53_t) ? raw_size : sizeof(app_config_v53_t);
+    memcpy(cfg, raw, copy);
+
+    /* The alert_voice_* block is appended past the v53 snapshot, so
+     * memcpy(copy) never touches it. set_defaults() already assigned the
+     * SETTINGS_TABLE defaults, but set them explicitly for documentation. */
+    cfg->alert_voice_enabled    = 0;
+    cfg->alert_voice_volume     = 90;
+    cfg->alert_voice_types      = ALERT_VOICE_TYPE_ALL;
+    cfg->alert_voice_repeat_min = 5;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v53 to v%d", APP_CONFIG_VERSION);
+}
+
+/* --- v54 → v55 migration: appends alert_voice_muted[3] (per-instance voice
+ *     mute, parallels toast_instance_muted). Additive; an upgrading device
+ *     keeps voice enabled everywhere it already was. --- */
+static void migrate_from_v54(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v54_t) ? raw_size : sizeof(app_config_v54_t);
+    memcpy(cfg, raw, copy);
+
+    /* Appended past the v54 snapshot, so memcpy(copy) never touches it; the
+     * copy may still have landed inside dest tail padding, so re-assign. */
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        cfg->alert_voice_muted[i] = false;
+    }
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v54 to v%d", APP_CONFIG_VERSION);
+}
+
+/* --- v55 → v56 migration: appends voice_notify_mask (per-category voice
+ *     alert mask, same bits as toast_notify_mask) and boot_jingle_enabled
+ *     (startup jingle toggle). Additive; an upgrading device gets the
+ *     default-on categories and the jingle enabled. --- */
+static void migrate_from_v55(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v55_t) ? raw_size : sizeof(app_config_v55_t);
+    memcpy(cfg, raw, copy);
+
+    /* Appended past the v55 snapshot, so memcpy(copy) never touches it; the
+     * copy may still have landed inside dest padding, so re-assign. */
+    cfg->voice_notify_mask = 0x1A2;  // disconnects+meridian+safety+error
+    cfg->boot_jingle_enabled = 1;    // startup jingle default on
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v55 to v%d", APP_CONFIG_VERSION);
+}
+
 static void migrate_from_v36(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
@@ -3070,6 +3136,11 @@ static bool validate_config(app_config_t *cfg) {
         cfg->graph_update_interval_s = 5;
         fixed = true;
     }
+    /* Voice alert mask: only 12 notification categories are defined. */
+    if (cfg->voice_notify_mask & ~0xFFFu) {
+        cfg->voice_notify_mask &= 0xFFFu;
+        fixed = true;
+    }
     if (cfg->moon_drag_light_mode > 2) {
         cfg->moon_drag_light_mode = 0;
         fixed = true;
@@ -3161,6 +3232,31 @@ void app_config_init(void) {
             nvs_commit(handle);
         }
         /* tiles_loaded stays false -> tail loads "json_tiles"/"ha_tiles" keys */
+    } else if (version_check == 55) {
+        /* v55 → v56: added voice_notify_mask (per-category voice alert mask)
+         * and boot_jingle_enabled (startup jingle toggle).
+         * tiles_loaded stays false: a v55 device already keeps its tiles in the
+         * "json_tiles"/"ha_tiles" NVS keys, so the tail loads them. */
+        migrate_from_v55(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    } else if (version_check == 54) {
+        /* v54 → v55: added alert_voice_muted[3] (per-instance voice mute).
+         * tiles_loaded stays false: a v54 device already keeps its tiles in the
+         * "json_tiles"/"ha_tiles" NVS keys, so the tail loads them. */
+        migrate_from_v54(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    } else if (version_check == 53) {
+        /* v53 → v54: added the spoken voice-alert settings (alert_voice_*).
+         * tiles_loaded stays false: a v53 device already keeps its tiles in the
+         * "json_tiles"/"ha_tiles" NVS keys, so the tail loads them. */
+        migrate_from_v53(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 52) {
         /* v52 → v53: added setup_hint_dismissed (first-boot setup hint "Don't
          * show again"). tiles_loaded stays false: a v52 device already keeps its

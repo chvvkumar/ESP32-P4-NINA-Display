@@ -213,6 +213,34 @@
     }
     .help-btn:hover { color:var(--accent); background:var(--accent-glow); }
     .help-btn svg { width:14px; height:14px; display:block; pointer-events:none; }
+    /* Compact play button for voice previews (Behavior tab) */
+    .vp-btn {
+      display:inline-flex; align-items:center; justify-content:center;
+      width:26px; height:26px; padding:0; flex-shrink:0;
+      border:1px solid var(--border); background:var(--input-bg); color:var(--text-muted);
+      border-radius:50%; cursor:pointer; font-size:0.55rem; line-height:1;
+      transition:color 0.2s ease, border-color 0.2s ease;
+    }
+    .vp-btn:hover { color:var(--accent); border-color:var(--accent); }
+    /* Event Categories table (Behavior tab): name | pop-up | voice | preview */
+    .evcat-grid {
+      display:grid; grid-template-columns:1fr auto auto auto;
+      column-gap:18px; align-items:center;
+    }
+    .evcat-head {
+      font-size:0.62rem; color:var(--text-muted); text-transform:uppercase;
+      letter-spacing:0.04em; padding-bottom:8px; justify-self:center;
+    }
+    .evcat-head:first-child { justify-self:start; }
+    .evcat-name {
+      padding:10px 0; border-bottom:1px solid rgba(255,255,255,0.06);
+      font-size:0.85rem;
+    }
+    .evcat-cell {
+      padding:10px 0; border-bottom:1px solid rgba(255,255,255,0.06);
+      justify-self:center; display:flex; align-items:center;
+    }
+    .evcat-name.evcat-last, .evcat-cell.evcat-last { border-bottom:none; }
     .help-popover {
       display:none; margin:-10px 0 22px; padding:14px 16px;
       background:var(--input-bg); border:1px solid var(--border);
@@ -1311,6 +1339,11 @@
             '<label class="toggle"><input type="checkbox" id="toast_instance_muted_'+i+'" onchange="checkDirty()"><span class="toggle-track"></span></label>'+
             '</div>'+
             '<div class="field-hint">Suppresses all on-screen pop-up notifications from this instance, including connect and disconnect events.</div>'+
+            '<div class="toggle-row" style="padding-bottom:0">'+
+            '<span class="toggle-label">Mute Voice Alerts</span>'+
+            '<label class="toggle"><input type="checkbox" id="alert_voice_muted_'+i+'" onchange="checkDirty()"><span class="toggle-track"></span></label>'+
+            '</div>'+
+            '<div class="field-hint">Stops spoken voice alerts from this instance. Voice alerts must also be enabled on the Behavior tab to be heard at all.</div>'+
             '</div>'+
             '<div class="subsection">'+
             '<div class="subsection-title">Colors &amp; Thresholds</div>'+
@@ -2116,6 +2149,9 @@
       data.toast_instance_muted_1=!!$('toast_instance_muted_0').checked;
       data.toast_instance_muted_2=!!$('toast_instance_muted_1').checked;
       data.toast_instance_muted_3=!!$('toast_instance_muted_2').checked;
+      data.alert_voice_muted_1=!!$('alert_voice_muted_0').checked;
+      data.alert_voice_muted_2=!!$('alert_voice_muted_1').checked;
+      data.alert_voice_muted_3=!!$('alert_voice_muted_2').checked;
     }
 
     function collectTab_allsky(data){
@@ -2199,8 +2235,16 @@
       data.home_page_lock=!!$('home_page_lock').checked;
       data.toast_duration_s=parseInt($('toast_duration').value)||8;
       data.alert_flash_enabled=!!$('alert_flash_enabled').checked;
+      /* alert_voice_* are numeric SETTINGS_TABLE rows (uint8), so send numbers —
+         the device's PARSE_INT ignores a JSON bool. */
+      data.alert_voice_enabled=$('alert_voice_enabled').checked?1:0;
+      data.alert_voice_volume=parseInt($('alert_voice_volume').value)||0;
+      data.alert_voice_types=(function(){var m=0;for(var b=0;b<3;b++){if($('alert_voice_type_'+b).checked) m|=(1<<b);}return m;})();
+      data.alert_voice_repeat_min=parseInt($('alert_voice_repeat_min').value)||0;
+      data.boot_jingle_enabled=$('boot_jingle_enabled').checked?1:0;
       data.toast_aggregation_window_s=parseInt($('toast_aggregation_window').value)||0;
       data.toast_notify_mask=(function(){var m=0;for(var i=0;i<12;i++){if($('notify_cat_'+i).checked) m|=(1<<i);}return m>>>0;})();
+      data.voice_notify_mask=(function(){var m=0;for(var i=0;i<12;i++){if($('voice_cat_'+i).checked) m|=(1<<i);}return m>>>0;})();
       data.idle_page_override_enabled=!!$('idle_page_override_enabled').checked;
       data.idle_page_override_target=parseInt($('idle_page_override_target').value);
       data.idle_indicator_enabled=!!$('idle_indicator_enabled').checked;
@@ -2383,6 +2427,9 @@
       $('toast_instance_muted_0').checked=!!data.toast_instance_muted_1;
       $('toast_instance_muted_1').checked=!!data.toast_instance_muted_2;
       $('toast_instance_muted_2').checked=!!data.toast_instance_muted_3;
+      $('alert_voice_muted_0').checked=!!data.alert_voice_muted_1;
+      $('alert_voice_muted_1').checked=!!data.alert_voice_muted_2;
+      $('alert_voice_muted_2').checked=!!data.alert_voice_muted_3;
 
       for(var i=0;i<3;i++){
         var key='filter_colors_'+(i+1);
@@ -2518,11 +2565,21 @@
       populatePageControls();
       $('toast_duration').value=data.toast_duration_s||8;
       $('alert_flash_enabled').checked=data.alert_flash_enabled!==false;
+      $('alert_voice_enabled').checked=!!data.alert_voice_enabled;
+      $('boot_jingle_enabled').checked=!!data.boot_jingle_enabled;
+      var vVol=data.alert_voice_volume!=null?data.alert_voice_volume:90;
+      $('alert_voice_volume').value=vVol;
+      $('alert_voice_volume_val').textContent=vVol+'%';
+      var vMask=data.alert_voice_types!=null?data.alert_voice_types:7;
+      for(var vb=0;vb<3;vb++){$('alert_voice_type_'+vb).checked=!!(vMask&(1<<vb));}
+      $('alert_voice_repeat_min').value=data.alert_voice_repeat_min!=null?data.alert_voice_repeat_min:5;
       var aggWin=data.toast_aggregation_window_s!=null?data.toast_aggregation_window_s:5;
       $('toast_aggregation_window').value=aggWin;
       updateAggregationLabel(aggWin);
       var mask=data.toast_notify_mask!=null?data.toast_notify_mask:0xFFFFFFFF;
       for(var i=0;i<12;i++){$('notify_cat_'+i).checked=!!(mask&(1<<i));}
+      var vcMask=data.voice_notify_mask!=null?data.voice_notify_mask:0x1A2;
+      for(var vc=0;vc<12;vc++){$('voice_cat_'+vc).checked=!!(vcMask&(1<<vc));}
 
       $('auto_cycle_toggle').checked=!!data.auto_rotate_enabled;
       toggleAutoCycle();
@@ -2976,6 +3033,25 @@
       t.querySelector('.toast-msg').textContent=msg;
       clearTimeout(t._timer);
       t._timer=setTimeout(()=>{t.classList.remove('show');},3000);
+    }
+
+    /* === Voice previews (Behavior tab play buttons) ===
+       Fire-and-forget: the device speaks the sample; nothing to render here.
+       Same-origin fetch carries the session cookie like every other POST. */
+    function previewVoiceCat(bit){
+      fetch('/api/voice-preview?kind=event&category='+bit+'&instance=1',{method:'POST'})
+        .then(function(r){if(!r.ok) showToast('Voice preview failed','error');})
+        .catch(function(){showToast('Voice preview failed','error');});
+    }
+    function previewVoiceBreach(t){
+      fetch('/api/voice-preview?kind=breach&type='+t+'&instance=1&value=2.5',{method:'POST'})
+        .then(function(r){if(!r.ok) showToast('Voice preview failed','error');})
+        .catch(function(){showToast('Voice preview failed','error');});
+    }
+    function previewVoiceJingle(){
+      fetch('/api/voice-preview?kind=jingle',{method:'POST'})
+        .then(function(r){if(!r.ok) showToast('Voice preview failed','error');})
+        .catch(function(){showToast('Voice preview failed','error');});
     }
 
     /* === Save / Discard / Reboot / Reset === */

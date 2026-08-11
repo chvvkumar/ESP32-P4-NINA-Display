@@ -1,4 +1,5 @@
 #include "web_server_internal.h"
+#include "audio_alert.h"
 #include "nina_allsky.h"
 #include "nina_connection.h"
 #include "tasks.h"
@@ -633,5 +634,74 @@ esp_err_t screenshot_get_handler(httpd_req_t *req)
 
     free(enc_out);
     ESP_LOGI(TAG, "Screenshot sent successfully");
+    return ESP_OK;
+}
+
+/* POST /api/voice-preview — speak a sample voice alert through the speaker.
+ *   kind=event&category=0..11&instance=1..3[&equipment=0..N]
+ *   kind=breach&type=rms|hfr|safety&instance=1..3[&value=F]
+ *   kind=jingle                       (startup jingle, no other params)
+ * Uses the preview/test entry points, which bypass the enable/mute/mask gates
+ * so the web UI can audition sentences while voice alerts are switched off. */
+esp_err_t voice_preview_post_handler(httpd_req_t *req)
+{
+    REQUIRE_AUTH(req);
+
+    char q[128] = {0}, kind[12] = {0}, buf[16] = {0};
+    if (httpd_req_get_url_query_str(req, q, sizeof(q)) != ESP_OK ||
+        httpd_query_key_value(q, "kind", kind, sizeof(kind)) != ESP_OK) {
+        return send_400(req, "missing kind");
+    }
+    if (strcmp(kind, "jingle") == 0) {   /* no instance/category params */
+        audio_alert_preview_jingle();
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"ok\":true}");
+        return ESP_OK;
+    }
+    if (httpd_query_key_value(q, "instance", buf, sizeof(buf)) != ESP_OK) {
+        return send_400(req, "missing instance");
+    }
+    int instance = atoi(buf);
+    if (instance < 1 || instance > 3) {
+        return send_400(req, "instance must be 1-3");
+    }
+
+    if (strcmp(kind, "event") == 0) {
+        if (httpd_query_key_value(q, "category", buf, sizeof(buf)) != ESP_OK) {
+            return send_400(req, "missing category");
+        }
+        int category = atoi(buf);
+        if (category < 0 || category > 11) {
+            return send_400(req, "category must be 0-11");
+        }
+        int equipment = -1;
+        if (httpd_query_key_value(q, "equipment", buf, sizeof(buf)) == ESP_OK) {
+            equipment = atoi(buf);
+        }
+        audio_alert_preview_event(category, instance - 1, equipment);
+    } else if (strcmp(kind, "breach") == 0) {
+        char tbuf[12] = {0};
+        if (httpd_query_key_value(q, "type", tbuf, sizeof(tbuf)) != ESP_OK) {
+            return send_400(req, "missing type");
+        }
+        alert_type_t type;
+        if      (strcmp(tbuf, "rms") == 0)    type = ALERT_RMS;
+        else if (strcmp(tbuf, "hfr") == 0)    type = ALERT_HFR;
+        else if (strcmp(tbuf, "safety") == 0) type = ALERT_SAFETY;
+        else return send_400(req, "bad type");
+
+        float value = 0.0f;
+        if (httpd_query_key_value(q, "value", buf, sizeof(buf)) == ESP_OK) {
+            char *end = NULL;
+            value = strtof(buf, &end);
+            if (end == buf) return send_400(req, "bad value");
+        }
+        audio_alert_test_speak(type, instance - 1, value);
+    } else {
+        return send_400(req, "bad kind");
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"ok\":true}");
     return ESP_OK;
 }
