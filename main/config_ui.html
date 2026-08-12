@@ -35,8 +35,7 @@
       --elevated: rgba(48, 54, 72, 0.96);
       --border-em: rgba(255, 255, 255, 0.20);
       --input-bg: rgba(12, 14, 20, 0.92);
-      --nav-height: 60px;
-      --bottom-nav-height: 68px;
+      --nav-height: 100px; /* two-tier bar: 60px sections row + 40px tabs row */
       --save-bar-height: 64px;
     }
 
@@ -134,7 +133,7 @@
     #tab-logs .card {
       width: min(1180px, 94vw); margin-left: 50%; transform: translateX(-50%);
       display: flex; flex-direction: column; box-sizing: border-box;
-      max-height: calc(100vh - 208px);
+      max-height: calc(100vh - var(--nav-height) - 148px);
     }
     .logs-layout { display: flex; gap: 18px; align-items: stretch; }
     .logs-controls { flex: 0 0 220px; display: flex; flex-direction: column; gap: 12px; }
@@ -364,65 +363,64 @@
     .api-table td:nth-child(2), .api-table td:nth-child(3) { white-space: nowrap; color: var(--text-muted); }
     .api-table tr:last-child td { border-bottom: none; }
 
-    /* === NAVIGATION === */
+    /* === NAVIGATION (two-tier: sections row + tabs row) === */
     .top-nav {
       position: sticky; top: 0; z-index: 100;
       background: rgba(10, 10, 11, 0.7);
       backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
       border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 8px 24px; min-height: 60px;
+    }
+    .top-nav .nav-row1 {
+      display: flex; align-items: center; height: 60px; padding: 0 24px;
     }
     .top-nav .brand {
       font-size: 0.95rem; font-weight: 700; letter-spacing: -0.02em;
-      display: flex; align-items: center; gap: 10px; flex: 1 1 0;
+      display: flex; align-items: center; gap: 10px; margin-right: 20px;
+      white-space: nowrap;
     }
     .top-nav .brand .logo {
       width: 36px; height: 36px;
     }
-    /* Grouped dropdowns: three trigger pills on one row, each opening a menu */
-    .top-nav .nav-tabs-wrap {
-      display: flex; align-items: center; gap: 6px;
+    /* Section buttons: Home is a real link to /; the rest switch row 2 */
+    .top-nav .nav-sections { display: flex; align-self: stretch; }
+    .top-nav .nav-section {
+      position: relative; display: flex; align-items: center; padding: 0 14px;
+      background: none; border: none; color: var(--text-hint); cursor: pointer;
+      font-size: 0.8rem; font-weight: 600; letter-spacing: 0.01em;
+      font-family: inherit; text-decoration: none; white-space: nowrap;
+      transition: color 0.2s ease;
     }
-    .top-nav .nav-group { position: relative; }
-    .top-nav .group-btn {
-      background: none; border: 1px solid rgba(255, 255, 255, 0.06); color: var(--text-hint);
-      cursor: pointer; padding: 7px 16px; border-radius: 8px; font-size: 0.8rem;
-      font-weight: 600; letter-spacing: 0.01em; transition: all 0.25s ease;
-      white-space: nowrap; font-family: inherit;
+    .top-nav .nav-section:hover { color: #f4f4f5; }
+    .top-nav .nav-section.active { color: #f4f4f5; }
+    .top-nav .nav-section.active::after {
+      content: ''; position: absolute; left: 14px; right: 14px; bottom: -1px;
+      height: 2px; border-radius: 2px 2px 0 0; background: var(--accent);
+      box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.4);
     }
-    .top-nav .group-btn::after {
-      content: '\25BE'; margin-left: 6px; font-size: 0.7em; opacity: 0.7;
+    /* Tabs row: shows only the selected section's tab group */
+    .top-nav .nav-row2 {
+      display: flex; align-items: center; height: 40px; padding: 0 18px;
+      border-top: 1px solid rgba(255, 255, 255, 0.045);
+      background: rgba(255, 255, 255, 0.015);
     }
-    .top-nav .group-btn:hover { color: #f4f4f5; background: rgba(255, 255, 255, 0.04); }
-    .top-nav .group-btn.active {
-      color: #f4f4f5; background: rgba(var(--accent-rgb), 0.12);
-      border-color: rgba(var(--accent-rgb), 0.3);
-      box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.08);
-    }
-    /* Menu: floats under its trigger, hidden until the group is .open */
-    .top-nav .group-menu {
-      display: none; position: absolute; top: calc(100% + 6px); left: 0;
-      flex-direction: column; gap: 2px; min-width: 160px; z-index: 200;
-      background: rgba(18, 18, 20, 0.98); border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 12px; padding: 6px;
-      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
-      backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-    }
-    .top-nav .nav-group.open .group-menu { display: flex; }
-    .top-nav .group-menu .tab-btn { text-align: left; width: 100%; }
+    .top-nav .tab-group { display: none; gap: 2px; }
+    .top-nav .tab-group.active { display: flex; }
+    .top-nav .nav-row2 .tab-group.active { margin-left: var(--r2i, 0px); }
     .top-nav .tab-btn {
       background: none; border: none; color: var(--text-hint); cursor: pointer;
-      padding: 8px 18px; border-radius: 8px; font-size: 0.8rem; font-weight: 500;
+      padding: 5px 12px; border-radius: 8px; font-size: 0.8rem; font-weight: 500;
       transition: all 0.25s ease; white-space: nowrap; position: relative; font-family: inherit;
     }
     .top-nav .tab-btn:hover { color: #f4f4f5; background: rgba(255, 255, 255, 0.04); }
     .top-nav .tab-btn.active {
       color: #f4f4f5; background: rgba(var(--accent-rgb), 0.12);
-      box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.08);
+      box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.3);
+    }
+    .top-nav .nav-section:focus-visible, .top-nav .tab-btn:focus-visible {
+      outline: 2px solid var(--accent); outline-offset: -2px;
     }
     .top-nav .nav-right {
-      display: flex; align-items: center; gap: 10px; flex: 1 1 0; justify-content: flex-end;
+      display: flex; align-items: center; gap: 10px; margin-left: auto;
     }
     .top-nav .github-link {
       color: var(--text-hint); text-decoration: none; font-size: 0.75rem;
@@ -469,37 +467,6 @@
     }
     .sys-metric .bars { display: inline-flex; align-items: flex-end; gap: 3px; height: 22px; }
     .sys-metric .bars span { width: 5px; border-radius: 1px; }
-
-    .bottom-nav {
-      display: none; position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
-      background: rgba(20, 20, 24, 0.85);
-      backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-      border-top: 1px solid rgba(255, 255, 255, 0.06);
-      height: auto; min-height: 68px; padding: 0 8px;
-      padding-bottom: env(safe-area-inset-bottom, 0px);
-    }
-    .bottom-nav .nav-items {
-      display: flex; height: 100%; align-items: center; justify-content: flex-start; gap: 2px;
-      overflow-x: auto; -webkit-overflow-scrolling: touch; padding: 0 4px;
-      -ms-overflow-style: none; scrollbar-width: none;
-    }
-    .bottom-nav .nav-items::-webkit-scrollbar { display: none; }
-    .bottom-nav .nav-btn, .bottom-nav .nav-home {
-      background: none; border: none; color: var(--text-hint); cursor: pointer;
-      display: flex; flex-direction: column; align-items: center; gap: 3px;
-      padding: 8px 12px; border-radius: 10px; font-size: 0.78rem;
-      font-weight: 500; transition: all 0.25s ease; position: relative; font-family: inherit;
-      flex-shrink: 0; text-decoration: none;
-    }
-    .bottom-nav .nav-btn svg, .bottom-nav .nav-home svg { width: 22px; height: 22px; }
-    .bottom-nav .nav-btn.active { color: var(--accent); }
-    .bottom-nav .nav-btn.active::after {
-      content: ''; position: absolute; bottom: 2px; left: 50%;
-      transform: translateX(-50%); width: 20px; height: 3px; border-radius: 2px;
-      background: var(--accent);
-      box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.4);
-      transition: background 0.4s ease, box-shadow 0.4s ease;
-    }
 
     .tab-panel { display: none; animation: fadeIn 0.3s ease; }
     .tab-panel.active { display: block; }
@@ -869,7 +836,7 @@
     .save-bar.visible { transform: translateY(0); }
     .save-bar .changes-hint { font-size: 0.8rem; color: var(--accent); margin-right: auto; opacity: 0.8; }
     .toast {
-      position: fixed; top: 76px; right: 24px; z-index: 200;
+      position: fixed; top: calc(var(--nav-height) + 16px); right: 24px; z-index: 200;
       background: var(--elevated);
       backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
       border: 1px solid var(--border);
@@ -890,11 +857,31 @@
 
     /* === RESPONSIVE === */
     @media (max-width: 768px) {
-      .top-nav .nav-tabs-wrap, .top-nav .nav-right { display: none; }
-      .bottom-nav { display: block; }
-      .content { padding: 16px 16px calc(var(--bottom-nav-height) + var(--save-bar-height) + env(safe-area-inset-bottom, 0px) + 16px); }
-      .save-bar { bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom, 0px)); }
-      .toast { top: auto; bottom: calc(var(--bottom-nav-height) + var(--save-bar-height) + env(safe-area-inset-bottom, 0px) + 16px); right: 16px; }
+      /* Sections wrap onto their own row as a 4-part segmented control;
+         row 2 becomes a horizontally scrollable pill row (hidden scrollbar).
+         Same DOM as desktop. */
+      .top-nav .nav-row1 { flex-wrap: wrap; height: auto; padding: 8px 14px 10px; row-gap: 10px; }
+      .top-nav .brand { margin-right: 0; }
+      .top-nav .brand .logo { width: 30px; height: 30px; }
+      .top-nav .nav-sections {
+        order: 3; flex-basis: 100%; align-self: auto;
+        display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px;
+        padding: 3px; border-radius: 9px; background: rgba(255, 255, 255, 0.045);
+      }
+      .top-nav .nav-section { justify-content: center; height: 30px; padding: 0; border-radius: 6px; font-size: 0.75rem; }
+      .top-nav .nav-section.active { background: rgba(255, 255, 255, 0.09); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35); }
+      .top-nav .nav-section.active::after { display: none; }
+      .top-nav .nav-row2 {
+        height: auto; padding: 0 14px 10px; border-top: none; background: none;
+        overflow-x: auto; -webkit-overflow-scrolling: touch;
+        -ms-overflow-style: none; scrollbar-width: none;
+      }
+      .top-nav .nav-row2::-webkit-scrollbar { display: none; }
+      .top-nav .nav-row2 .tab-group.active { margin-left: 0; }
+      .top-nav .tab-btn { padding: 6px 12px; background: rgba(255, 255, 255, 0.04); flex-shrink: 0; }
+      .content { padding: 16px 16px calc(var(--save-bar-height) + env(safe-area-inset-bottom, 0px) + 24px); }
+      .save-bar { padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); height: auto; min-height: 64px; }
+      .toast { top: auto; bottom: calc(var(--save-bar-height) + env(safe-area-inset-bottom, 0px) + 16px); right: 16px; }
       .row.stack-mobile { flex-direction: column; }
 
       /* Logs: stack controls above the viewer on narrow screens, drop the breakout.
@@ -998,123 +985,45 @@
     </div>
   </div>
 
-  <!-- ======== TOP NAVIGATION ======== -->
+  <!-- ======== TOP NAVIGATION (two-tier) ======== -->
   <nav class="top-nav">
-    <div class="brand"><img class="logo" src="/favicon.ico" alt=""> <span id="brandName">NINA Display</span></div>
-    <div class="nav-tabs-wrap">
-      <a class="github-link" href="/">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l9-9 9 9"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg>
-        Home
-      </a>
-      <div class="nav-group" data-group="pages">
-        <button class="group-btn" data-group="pages">Pages</button>
-        <div class="group-menu">
-          <button class="tab-btn" data-tab="nodes" data-group="pages">N.I.N.A.</button>
-          <button class="tab-btn" data-tab="allsky" data-group="pages">AllSky</button>
-          <button class="tab-btn" data-tab="json" data-group="pages">JSON</button>
-          <button class="tab-btn" data-tab="ha" data-group="pages">Home Assistant</button>
-          <button class="tab-btn" data-tab="clock" data-group="pages">Clock</button>
-          <button class="tab-btn" data-tab="spotify" data-group="pages">Spotify</button>
-          <button class="tab-btn" data-tab="image-display" data-group="pages">Image Display</button>
-        </div>
+    <div class="nav-row1">
+      <div class="brand"><img class="logo" src="/favicon.ico" alt=""> <span id="brandName">NINA Display</span></div>
+      <div class="nav-sections">
+        <a class="nav-section" href="/">Home</a>
+        <button type="button" class="nav-section" data-section="pages">Pages</button>
+        <button type="button" class="nav-section" data-section="device">Device</button>
+        <button type="button" class="nav-section" data-section="tools">Tools</button>
       </div>
-      <div class="nav-group" data-group="device">
-        <button class="group-btn" data-group="device">Device</button>
-        <div class="group-menu">
-          <button class="tab-btn" data-tab="display" data-group="device">Display</button>
-          <button class="tab-btn" data-tab="behavior" data-group="device">Behavior</button>
-          <button class="tab-btn" data-tab="voice-clips" data-group="device">Voice Clips</button>
-          <button class="tab-btn" data-tab="system" data-group="device">System</button>
-        </div>
-      </div>
-      <div class="nav-group" data-group="tools">
-        <button class="group-btn" data-group="tools">Tools</button>
-        <div class="group-menu">
-          <button class="tab-btn" data-tab="logs" data-group="tools">Logs</button>
-          <button class="tab-btn" data-tab="backup" data-group="tools">Backup</button>
-          <button class="tab-btn" data-tab="api" data-group="tools">API</button>
-        </div>
+      <div class="nav-right">
+        <button class="update-pill" id="updatePill" style="display:none" title="Update available - click to install"></button>
+        <a class="github-link" href="https://github.com/chvvkumar/ESP32-P4-NINA-Display" target="_blank" rel="noopener">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          GitHub
+        </a>
       </div>
     </div>
-    <div class="nav-right">
-      <button class="update-pill" id="updatePill" style="display:none" title="Update available - click to install"></button>
-      <a class="github-link" href="https://github.com/chvvkumar/ESP32-P4-NINA-Display" target="_blank" rel="noopener">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-        GitHub
-      </a>
-    </div>
-  </nav>
-
-  <!-- ======== BOTTOM NAVIGATION (MOBILE) ======== -->
-  <nav class="bottom-nav">
-    <div class="nav-items" id="bottomTabs">
-      <a class="nav-home" href="/">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l9-9 9 9"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg>
-        Home
-      </a>
-      <button class="nav-btn" data-tab="nodes">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-        N.I.N.A.
-      </button>
-      <button class="nav-btn" data-tab="allsky">
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41m11.32-11.32l1.41-1.41"/></svg>
-        AllSky
-      </button>
-      <button class="nav-btn" data-tab="json">
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1"/><path d="M16 3h1a2 2 0 0 1 2 2v5a2 2 0 0 0 2 2 2 2 0 0 0-2 2v5a2 2 0 0 1-2 2h-1"/></svg>
-        JSON
-      </button>
-      <button class="nav-btn" data-tab="ha">
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l9-9 9 9"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg>
-        Home Asst
-      </button>
-      <button class="nav-btn" data-tab="clock">
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-        Clock
-      </button>
-      <button class="nav-btn" data-tab="spotify">
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>
-        Spotify
-      </button>
-      <button class="nav-btn" data-tab="image-display">
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-        Image
-      </button>
-      <button class="nav-btn" data-tab="display">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-        Display
-      </button>
-      <button class="nav-btn" data-tab="behavior">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-        Behavior
-      </button>
-      <button class="nav-btn" data-tab="voice-clips">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
-        Voice
-      </button>
-      <button class="nav-btn" data-tab="system">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
-        System
-      </button>
-      <button class="nav-btn" data-tab="logs">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><line x1="8" y1="9" x2="10" y2="9"/></svg>
-        Logs
-      </button>
-      <button class="nav-btn" data-tab="backup">
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-          <polyline points="7 10 12 15 17 10"/>
-          <line x1="12" y1="15" x2="12" y2="3"/>
-        </svg>
-        Backup
-      </button>
-      <button class="nav-btn" data-tab="api">
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="16 18 22 12 16 6"/>
-          <polyline points="8 6 2 12 8 18"/>
-        </svg>
-        API
-      </button>
+    <div class="nav-row2">
+      <div class="tab-group" data-section="pages">
+        <button class="tab-btn" data-tab="nodes">N.I.N.A.</button>
+        <button class="tab-btn" data-tab="allsky">AllSky</button>
+        <button class="tab-btn" data-tab="json">JSON</button>
+        <button class="tab-btn" data-tab="ha">Home Assistant</button>
+        <button class="tab-btn" data-tab="clock">Clock</button>
+        <button class="tab-btn" data-tab="spotify">Spotify</button>
+        <button class="tab-btn" data-tab="image-display">Image Display</button>
+      </div>
+      <div class="tab-group" data-section="device">
+        <button class="tab-btn" data-tab="display">Display</button>
+        <button class="tab-btn" data-tab="behavior">Behavior</button>
+        <button class="tab-btn" data-tab="voice-clips">Voice Clips</button>
+        <button class="tab-btn" data-tab="system">System</button>
+      </div>
+      <div class="tab-group" data-section="tools">
+        <button class="tab-btn" data-tab="logs">Logs</button>
+        <button class="tab-btn" data-tab="backup">Backup</button>
+        <button class="tab-btn" data-tab="api">API</button>
+      </div>
     </div>
   </nav>
 
@@ -1223,7 +1132,8 @@
   <script>
     /* Early tab restore: apply the saved tab's active class at parse time so the
        first paint shows the correct tab (no nodes-first flash). Matches the class
-       names switchTab() toggles ('active' on .tab-panel + [data-tab]). The later
+       names switchTab() toggles ('active' on .tab-panel + [data-tab], plus the
+       tab's .tab-group and section button in the two-tier bar). The later
        switchTab(saved) call is then a visual no-op but still runs per-tab handlers. */
     (function(){
       var name='nodes';
@@ -1232,6 +1142,13 @@
       if(p)p.classList.add('active');
       var btns=document.querySelectorAll('[data-tab="'+name+'"]');
       for(var i=0;i<btns.length;i++)btns[i].classList.add('active');
+      var tg=document.querySelector('.tab-group [data-tab="'+name+'"]');
+      var grp=tg&&tg.closest('.tab-group');
+      if(grp){
+        grp.classList.add('active');
+        var sb=document.querySelector('.nav-section[data-section="'+grp.dataset.section+'"]');
+        if(sb)sb.classList.add('active');
+      }
     })();
   </script>
 
@@ -1790,19 +1707,38 @@
        fragment still lands in its own (now background) panel via
        loadTabFragment(), but the per-tab activation side effects below only
        run for the tab that is still current. */
-    /* Grouped dropdowns: map each tab to its owning group so the trigger pill
-       can highlight when one of its tabs is active. */
+    /* Two-tier bar: map each tab to its owning section so the section button
+       highlights and row 2 shows the matching tab group. _lastUsedTab remembers
+       the tab last visited in each section (in-memory) so a section click lands
+       on a sensible default; switchTab() keeps it seeded as tabs activate. */
     const TAB_GROUP = { nodes:'pages', allsky:'pages', json:'pages', ha:'pages', clock:'pages', spotify:'pages', 'image-display':'pages', display:'device', behavior:'device', 'voice-clips':'device', system:'device', logs:'tools', backup:'tools', api:'tools' };
+    var _lastUsedTab={};
     function highlightGroup(name){
-      $$('.group-btn').forEach(b=>b.classList.toggle('active', b.dataset.group===TAB_GROUP[name]));
+      var sec=TAB_GROUP[name];
+      $$('.nav-section[data-section]').forEach(b=>b.classList.toggle('active', b.dataset.section===sec));
+      $$('.tab-group').forEach(g=>g.classList.toggle('active', g.dataset.section===sec));
+      if(sec) _lastUsedTab[sec]=name;
+      alignRow2();
     }
-    function closeGroups(){ $$('.nav-group.open').forEach(g=>g.classList.remove('open')); }
+
+    function alignRow2(){
+      var grp=document.querySelector('.nav-row2 .tab-group.active');
+      if(!grp) return;
+      var nav=document.querySelector('.top-nav');
+      var row2=document.querySelector('.nav-row2');
+      var btn=document.querySelector('.nav-section[data-section="'+grp.dataset.section+'"]');
+      if(!nav||!row2||!btn) return;
+      var indent=btn.getBoundingClientRect().left-row2.getBoundingClientRect().left-parseFloat(getComputedStyle(row2).paddingLeft);
+      nav.style.setProperty('--r2i', Math.max(0,indent)+'px');
+    }
+    window.addEventListener('resize', alignRow2);
+    window.addEventListener('load', alignRow2);
 
     let _currentTab=null;
     async function switchTab(name){
       _currentTab=name;
       $$('.tab-panel').forEach(p=>p.classList.remove('active'));
-      $$('.tab-btn, .nav-btn').forEach(b=>b.classList.remove('active'));
+      $$('.tab-btn').forEach(b=>b.classList.remove('active'));
       var panel=$('tab-'+name);
       if(panel){
         panel.classList.add('active');
@@ -1812,7 +1748,7 @@
       }
       $$('[data-tab="'+name+'"]').forEach(b=>b.classList.add('active'));
       setAccent(name);
-      // Highlight the owning group pill for this tab (covers restore, deep clicks)
+      // Activate the owning section + tab group (covers restore, deep links)
       highlightGroup(name);
       try{localStorage.setItem('nina_tab',name);}catch(e){}
       await ensureTabLoaded(name);
@@ -1840,20 +1776,19 @@
       }
     }
 
-    $$('.tab-btn, .nav-btn').forEach(btn=>{
+    $$('.tab-btn').forEach(btn=>{
       btn.addEventListener('click',()=>switchTab(btn.dataset.tab));
     });
-    // Group trigger toggles its dropdown (closing any other open one); does NOT navigate.
-    $$('.group-btn').forEach(b=>b.addEventListener('click',e=>{
-      e.stopPropagation();
-      var g=b.closest('.nav-group'), wasOpen=g.classList.contains('open');
-      closeGroups();
-      if(!wasOpen) g.classList.add('open');
+    // Section click lands on that section's last-used tab (first tab on cold start).
+    $$('.nav-section[data-section]').forEach(b=>b.addEventListener('click',()=>{
+      var sec=b.dataset.section;
+      var g=document.querySelector('.tab-group[data-section="'+sec+'"]');
+      if(!g) return;
+      var t=_lastUsedTab[sec];
+      var btn=t&&g.querySelector('[data-tab="'+t+'"]');
+      if(!btn) btn=g.querySelector('.tab-btn');
+      if(btn) switchTab(btn.dataset.tab);
     }));
-    // Picking a menu tab closes the dropdown (navigation runs via the .tab-btn binding above).
-    $$('.group-menu .tab-btn').forEach(b=>b.addEventListener('click',closeGroups));
-    // Outside click closes any open dropdown.
-    document.addEventListener('click',e=>{ if(!e.target.closest('.nav-group')) closeGroups(); });
 
     try{
       var hashTab=location.hash.replace('#','');
@@ -4889,7 +4824,7 @@
       };
       /* our own device failing to answer is a different problem from the other
          device failing, so it gets its own message */
-      var PANEL = ' panel';
+      var PANEL = '\u0000panel';
       btn.disabled = true; btn.textContent = 'Fetching...';
       postJson('/api/config/pull', body)
         .then(function(r) {
