@@ -653,9 +653,10 @@ jobs:
           # every release body so devices can decide erase-vs-OTA from the
           # newest release alone. PREV_TAG above (git describe) is fine for the
           # hash chain, but the floor must be read from the previous release of
-          # the SAME channel, so look that up explicitly. Soft-fail throughout:
-          # any lookup problem just means "no prior floor" — never fail the
-          # build over the floor computation.
+          # the SAME channel, so look that up explicitly. The carry-forward
+          # lookups soft-fail (a miss just falls through to the recompute), but
+          # the cross-channel recompute below is fatal on failure: emitting a
+          # floor derived from a failed lookup would ship a permissive v0.0.0.
           THIS_TAG="${{ steps.tag.outputs.tag }}"
           IS_PRERELEASE="${{ steps.tag.outputs.is_prerelease }}"
           NEW_FLOOR=""
@@ -674,7 +675,35 @@ jobs:
             if [ -n "$NEW_FLOOR" ]; then
               echo "Full-erase floor: $NEW_FLOOR (carried forward from ${PREV_CHANNEL_TAG})"
             else
-              echo "Full-erase floor: none (no prior floor found; marker omitted)"
+              # Carry-forward chain broken (prior release deleted by the keep-2
+              # cleanup, or predates the marker). Recompute from ground truth:
+              # newest release of ANY channel whose body says full_erase=1.
+              # Cross-channel is required, not optional: versions are one
+              # monotone line, and dev history is routinely deleted, so a
+              # per-channel scan would miss a stable full-erase boundary and
+              # offer plain OTA across it. --paginate covers >30 releases;
+              # drafts and the rolling snd-alpha tag are excluded.
+              # A failed lookup must NOT read as "nothing is marked": the
+              # resulting v0.0.0 floor is the device's fast path and disables
+              # the erase check entirely, offering plain OTA across a
+              # partition-table boundary. Capture gh's own exit status (this
+              # run: block is bash -e without pipefail, so piping into head
+              # would always report success) and fail the build instead.
+              RECOMP_OUT=$(mktemp)
+              if ! gh api --paginate 'repos/{owner}/{repo}/releases?per_page=100' \
+                -q '.[] | select(.draft | not) | select(.tag_name != "snd-alpha") | select(.body != null) | select(.body | contains("nina:full_erase=1")) | .tag_name' > "$RECOMP_OUT"; then
+                rm -f "$RECOMP_OUT"
+                echo "::error::Full-erase floor recompute failed: could not list releases. Refusing to publish a floor derived from a failed lookup."
+                exit 1
+              fi
+              NEW_FLOOR=$(head -1 "$RECOMP_OUT")
+              rm -f "$RECOMP_OUT"
+              if [ -n "$NEW_FLOOR" ]; then
+                echo "Full-erase floor: $NEW_FLOOR (recomputed across channels)"
+              else
+                NEW_FLOOR="v0.0.0"
+                echo "Full-erase floor: v0.0.0 (scan succeeded, nothing marked full_erase=1 anywhere)"
+              fi
             fi
           fi
           echo "erase_floor=$NEW_FLOOR" >> $GITHUB_OUTPUT
@@ -713,7 +742,7 @@ jobs:
           AI_AVAILABLE="${{ steps.release_summary.outputs.ai_available }}"
           export TAG PREV_TAG VERSION BRANCH COMPARE_URL FACTORY_MB OTA_MB AI_AVAILABLE FULL_ERASE ERASE_REASON PT_SHA BL_SHA ERASE_FLOOR
           python3 << 'PYEOF'
-          import os, json
+          import os, json, sys
           tag = os.environ['TAG']
           prev_tag = os.environ.get('PREV_TAG', '')
           version = os.environ['VERSION']
@@ -726,7 +755,14 @@ jobs:
           erase_reason = os.environ.get('ERASE_REASON', '').strip()
           pt_sha = os.environ.get('PT_SHA', '').strip()
           bl_sha = os.environ.get('BL_SHA', '').strip()
+          # The erase-check step is the only legitimate source of v0.0.0 (a
+          # successful scan that found nothing marked). Defaulting here would
+          # invent a permissive floor from a step that produced no output at
+          # all, which disables the device-side erase check.
           erase_floor = os.environ.get('ERASE_FLOOR', '').strip()
+          if not erase_floor:
+              print('::error::ERASE_FLOOR is empty: the erase-check step produced no floor. Refusing to invent v0.0.0.')
+              sys.exit(1)
 
           # Load metrics if available
           try:
@@ -766,11 +802,10 @@ jobs:
               pt_marker,
               bl_marker,
           ]
-          # Per-channel full-erase floor: newest release of this channel that
-          # required a full erase. Omitted entirely when no floor is known so
-          # devices fall back to their legacy release-history walk.
-          if erase_floor:
-              lines.append(f'<!-- nina:full_erase_floor={erase_floor} -->')
+          # Full-erase floor: newest release that required a full erase.
+          # Always emitted so the marker can never be lost from the chain; a
+          # v0.0.0 floor means "no erase boundary known" and is always safe.
+          lines.append(f'<!-- nina:full_erase_floor={erase_floor} -->')
           lines += [
               f'## NINA Display {tag}',
               '',
@@ -868,9 +903,12 @@ jobs:
           CURRENT_TAG="${{ steps.tag.outputs.tag }}"
           echo "Cleaning up old pre-releases (keeping latest 2)..."
 
-          # List all pre-releases sorted newest first, skip the 2 most recent, delete the rest
+          # List all pre-releases sorted newest first, skip the 2 most recent, delete the rest.
+          # snd-alpha is excluded from the window entirely: it is a rolling tag
+          # owned by build-snd.yml, so it must never be counted toward the keep
+          # count nor deleted (two dev builds would otherwise kill the Alpha channel).
           gh release list --limit 50 --json tagName,isPrerelease \
-            -q '[.[] | select(.isPrerelease)] | .[2:] | .[].tagName' | \
+            -q '[.[] | select(.isPrerelease and (.tagName != "snd-alpha"))] | .[2:] | .[].tagName' | \
           while read -r old_tag; do
             echo "Deleting old pre-release: $old_tag"
             gh release delete "$old_tag" --yes --cleanup-tag 2>/dev/null || true
