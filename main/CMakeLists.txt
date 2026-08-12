@@ -6,7 +6,7 @@ idf_component_register(
          http_fetch.c poll_task.c time_parse.c
          nina_connection.c nina_client.c nina_api_fetchers.c nina_sequence.c nina_websocket.c
          net_diag.c allsky_client.c json_client.c ha_client.c goes_client.c weather_client.c moon_ephemeris.c moon_render.c moon_sphere.cpp moon_interaction.c spotify_auth.c spotify_client.c demo_data.c
-         audio_alert.c web_test_audio.c
+         audio_alert.c web_test_audio.c voice_store.c web_handlers_voice.c
          app_config.c settings_table.c control_registry.c web_server.c web_route_auth.c web_handlers_config.c web_handlers_display.c web_handlers_system.c web_handlers_allsky.c web_handlers_json.c web_handlers_ha.c web_handlers_spotify.c web_handlers_image_display.c web_handlers_pages.c web_handlers_control.c web_handlers_auth.c web_handlers_wifi.c web_handlers_logs.c log_capture.c crash_log.c mqtt_ha.c
          ui/page_registry.c ui/nina_dashboard.c ui/nina_dashboard_update.c ui/nina_nav_arbiter.c ui/nina_thumbnail.c ui/nina_graph_overlay.c ui/graph_downsample.c ui/nina_graph_controls.c ui/nina_sysinfo.c ui/nina_summary.c ui/nina_allsky.c ui/nina_tile_grid.c ui/nina_json.c ui/nina_ha.c ui/nina_image_display.c ui/nina_clock.c ui/nina_spotify.c ui/nina_settings_tabview.c ui/settings_tab_display.c ui/settings_tab_nodes.c ui/settings_tab_behavior.c ui/settings_tab_system.c ui/settings_color_picker.c ui/themes.c ui/ui_styles.c
          ui/nina_toast.c ui/nina_event_log.c ui/nina_alerts.c ui/nina_safety.c ui/nina_session_stats.c ui/lv_font_material_safety.c ui/lv_font_material_icons_idle.c ui/lv_font_warning_128.c ui/lv_font_superscript_24.c ui/lv_font_playfair_228.c ui/lv_font_playfair_90.c ui/lv_font_overpass_27.c ui/lv_font_overpass_16.c ui/lv_font_montserrat_64.c
@@ -18,7 +18,7 @@ idf_component_register(
          ui/nina_empty_state.c
          ${LV_DEMOS_SOURCES}
     INCLUDE_DIRS . ui ${LV_DEMO_DIR}
-    EMBED_TXTFILES config_ui.html home_ui.html login.html setup_ui.html fragment_logs.html fragment_backup.html fragment_api.html fragment_allsky.html fragment_json.html fragment_ha.html fragment_clock.html fragment_spotify.html fragment_image_display.html fragment_nodes.html fragment_display.html fragment_behavior.html fragment_system.html
+    EMBED_TXTFILES config_ui.html home_ui.html login.html setup_ui.html fragment_logs.html fragment_backup.html fragment_api.html fragment_allsky.html fragment_json.html fragment_ha.html fragment_clock.html fragment_spotify.html fragment_image_display.html fragment_nodes.html fragment_display.html fragment_behavior.html fragment_system.html fragment_voice_clips.html
                    # Standalone audio test page (web_test_audio.c, port 8080).
                    # Deliberately NOT in WEB_GZ_ASSETS: one small page served by
                    # a second httpd instance that has no gzip negotiation.
@@ -31,12 +31,13 @@ idf_component_register(
                 audio_clips/chime.pcm audio_clips/warning.pcm
                 audio_clips/instance_1.pcm audio_clips/instance_2.pcm audio_clips/instance_3.pcm
                 audio_clips/rms.pcm audio_clips/hfr.pcm
-                audio_clips/above_limit.pcm audio_clips/unsafe.pcm audio_clips/point.pcm
+                audio_clips/above_limit.pcm audio_clips/rms_above.pcm audio_clips/hfr_above.pcm
+                audio_clips/unsafe.pcm audio_clips/point.pcm
                 audio_clips/digit_0.pcm audio_clips/digit_1.pcm audio_clips/digit_2.pcm
                 audio_clips/digit_3.pcm audio_clips/digit_4.pcm audio_clips/digit_5.pcm
                 audio_clips/digit_6.pcm audio_clips/digit_7.pcm audio_clips/digit_8.pcm
                 audio_clips/digit_9.pcm
-                audio_clips/connected.pcm audio_clips/disconnected.pcm
+                audio_clips/connected.pcm audio_clips/disconnected.pcm audio_clips/and.pcm
                 audio_clips/camera.pcm audio_clips/mount.pcm audio_clips/guider.pcm
                 audio_clips/focuser.pcm audio_clips/filterwheel.pcm audio_clips/rotator.pcm
                 audio_clips/safety.pcm audio_clips/dome.pcm audio_clips/flat.pcm
@@ -97,7 +98,7 @@ set(WEB_GZ_ASSETS
     fragment_allsky.html fragment_json.html fragment_ha.html
     fragment_clock.html fragment_spotify.html fragment_image_display.html
     fragment_nodes.html fragment_display.html fragment_behavior.html
-    fragment_system.html)
+    fragment_system.html fragment_voice_clips.html)
 
 idf_build_get_property(python PYTHON)
 idf_build_get_property(project_dir PROJECT_DIR)

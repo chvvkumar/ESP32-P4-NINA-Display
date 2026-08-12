@@ -388,6 +388,69 @@ void perf_monitor_capture_cpu(void)
     s_prev_task_count = (uint8_t)filled;
 }
 
+void perf_monitor_get_core_loads(float *core0, float *core1, float *total)
+{
+    // Ungated (/api/status must report CPU load with debug_mode off), so it
+    // keeps its own idle-runtime deltas instead of reading g_perf.cpu.
+    // ulTotalRunTime is wall-clock (esp_timer based), so per-core load is
+    // 100 - idle%. Called only from the single httpd worker task, so the
+    // static previous-sample state needs no lock.
+    static uint32_t s_prev_idle_rt[2];
+    static uint32_t s_prev_total_rt;
+    static float    s_load[2];
+    static bool     s_have_prev = false;
+
+    // Static rather than on the httpd worker stack (single-caller assumption
+    // above makes this safe, same as the other statics here).
+    static TaskStatus_t tasks[CPU_MAX_TRACKED_TASKS];
+    UBaseType_t count = uxTaskGetNumberOfTasks();
+    if (count > CPU_MAX_TRACKED_TASKS) count = CPU_MAX_TRACKED_TASKS;
+
+    uint32_t total_rt = 0;
+    UBaseType_t filled = uxTaskGetSystemState(tasks, count, &total_rt);
+    if (filled == 0) {
+        // uxTaskGetSystemState returns 0 when the live task count exceeds the
+        // array passed in; loads would silently read 0% forever.
+        static bool s_warned = false;
+        if (!s_warned) {
+            s_warned = true;
+            ESP_LOGW(TAG, "uxTaskGetSystemState returned 0: task count %u exceeds CPU_MAX_TRACKED_TASKS (%d); CPU load unavailable",
+                     (unsigned)uxTaskGetNumberOfTasks(), CPU_MAX_TRACKED_TASKS);
+        }
+    }
+
+    uint32_t idle_rt[2] = {0, 0};
+    for (UBaseType_t i = 0; i < filled; i++) {
+        if (strncmp(tasks[i].pcTaskName, "IDLE", 4) == 0) {
+            char c = tasks[i].pcTaskName[4];
+            if (c == '0' || c == '1') idle_rt[c - '0'] = tasks[i].ulRunTimeCounter;
+        }
+    }
+
+    uint32_t total_delta = total_rt - s_prev_total_rt;
+    // Recompute only when at least 200 ms of runtime elapsed since the last
+    // sample; shorter deltas (rapid polling) reuse the cached loads.
+    if (filled > 0 && s_have_prev && total_delta > 200000) {
+        for (int c = 0; c < 2; c++) {
+            float pct = 100.0f -
+                (float)(idle_rt[c] - s_prev_idle_rt[c]) / (float)total_delta * 100.0f;
+            if (pct < 0.0f) pct = 0.0f;
+            if (pct > 100.0f) pct = 100.0f;
+            s_load[c] = pct;
+        }
+    }
+    if (filled > 0 && (!s_have_prev || total_delta > 200000)) {
+        s_prev_idle_rt[0] = idle_rt[0];
+        s_prev_idle_rt[1] = idle_rt[1];
+        s_prev_total_rt   = total_rt;
+        s_have_prev = true;
+    }
+
+    if (core0) *core0 = s_load[0];
+    if (core1) *core1 = s_load[1];
+    if (total) *total = (s_load[0] + s_load[1]) / 2.0f;
+}
+
 // ── Low-DMA-heap watchdog ───────────────────────────────────────────
 //
 // Catches transient exhaustion of the DMA-capable internal heap (the pool

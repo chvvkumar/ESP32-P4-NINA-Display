@@ -18,17 +18,21 @@
 #include "app_config.h"
 #include "bsp/esp-bsp.h"        /* bsp_audio_codec_speaker_init */
 #include "esp_codec_dev.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include <stdatomic.h>
 #include <string.h>
 
 static const char *TAG = "audio_alert";
 
 #define CLIP_SAMPLE_RATE    16000
-#define SENTENCE_MAX_CLIPS  12      /* chime+warning+instance+metric+"999.9"+limit = 9 */
+#define SENTENCE_MAX_CLIPS  16      /* worst case: disconnect group =
+                                     * chime+warning+instance+10 equipment
+                                     * +"and"+last equipment+disconnected = 16 */
 #define SENTENCE_QUEUE_LEN  8   /* match the 8-deep flash queue in nina_alerts.c */
 #define PCM_CHUNK_BYTES     2048
 #define DRAIN_WAIT_MS       400     /* keep the PA up this long between sentences */
@@ -52,7 +56,7 @@ static const char *TAG = "audio_alert";
     X(sequence_event) X(focuser_event) X(mount_event)           \
     X(meridian_flip) X(guider_event) X(safety_event)            \
     X(error_event) X(profile_changed) X(dome_event) X(flat_event)  \
-    X(boot_jingle)
+    X(boot_jingle) X(rms_above) X(hfr_above) X(and)
 
 #define CLIP_EXTERN(name)                               \
     extern const uint8_t _binary_##name##_pcm_start[];  \
@@ -84,11 +88,34 @@ typedef struct {
 } sentence_t;
 
 static QueueHandle_t          s_queue = NULL;
+static QueueHandle_t          s_free_q = NULL;  /* retired override buffers, freed
+                                                 * by the playback task between
+                                                 * sentences (never mid-clip) */
 static esp_codec_dev_handle_t s_codec = NULL;   /* task-owned, lazily created */
 static bool                   s_codec_dead = false;   /* init failed once: never retry
                                                        * (BSP leaves dangling I2S handles
                                                        * that assert on a second attempt) */
 static uint8_t                s_pcm_buf[PCM_CHUNK_BYTES];
+
+/* ── Clip overrides (voice_store.c) ─────────────────────────────────────────
+ * Per-clip custom PCM in PSRAM that replaces the embedded clip at playback.
+ * Lock-free single-writer publication via C11 atomics: the P4 is dual-core
+ * RVWMO, so plain/volatile stores may reorder between cores and an explicit
+ * acquire/release pairing is required.  Writer ordering
+ * (audio_alert_set_override, serialized by voice_store's mutex):
+ *   apply: store len (relaxed) first, then buf with release — the release
+ *          store publishes len, so a reader whose acquire load sees the new
+ *          buf also sees its len;
+ *   clear: store buf NULL (relaxed) first, then len 0 (relaxed) — a reader
+ *          that sees a non-NULL buf never pairs it with a cleared len.
+ * The reader (play_clip, playback task only) loads buf with acquire, then
+ * len relaxed. */
+typedef struct {
+    _Atomic(const uint8_t *) buf;
+    _Atomic size_t           len;
+} clip_override_t;
+
+static clip_override_t s_override[CLIP_COUNT];
 
 /* ── Sentence assembly ──────────────────────────────────────────────────── */
 static void push_clip(sentence_t *s, clip_id_t id) {
@@ -111,24 +138,36 @@ static void push_value(sentence_t *s, float value) {
     push_clip(s, CLIP_ID_digit_0 + tenths % 10);
 }
 
-/* Assemble the announcement.  Shared by the live and the test entry points --
- * the only difference between them is the alert_voice_enabled gate.
+/* Assemble the announcement.  Shared by the live, test-page and preview entry
+ * points -- the only difference between them is the alert_voice_enabled gate --
+ * so the alert_voice_brief mode applies to all of them automatically.
+ * Brief mode drops the warning clip and, for RMS/HFR, replaces the spoken
+ * value + "above limit" with a single "is above set threshold" clip.
  * Returns false for arguments that have nothing sensible to say. */
 static bool build_sentence(sentence_t *s, alert_type_t type, int instance_idx,
                            float value) {
     if (instance_idx < 0 || instance_idx > 2) return false;
 
+    bool brief = app_config_get()->alert_voice_brief != 0;
+
     memset(s, 0, sizeof(*s));
     push_clip(s, CLIP_ID_chime);
-    push_clip(s, CLIP_ID_warning);
+    if (!brief) push_clip(s, CLIP_ID_warning);
     push_clip(s, CLIP_ID_instance_1 + instance_idx);
 
     switch (type) {
     case ALERT_RMS:
     case ALERT_HFR:
-        push_clip(s, (type == ALERT_RMS) ? CLIP_ID_rms : CLIP_ID_hfr);
-        push_value(s, value);
-        push_clip(s, CLIP_ID_above_limit);
+        if (brief) {
+            /* Single fused clip ("HFR is above set threshold."): metric and
+             * predicate rendered as one utterance so no clip-gap pause splits
+             * the phrase. */
+            push_clip(s, (type == ALERT_RMS) ? CLIP_ID_rms_above : CLIP_ID_hfr_above);
+        } else {
+            push_clip(s, (type == ALERT_RMS) ? CLIP_ID_rms : CLIP_ID_hfr);
+            push_value(s, value);
+            push_clip(s, CLIP_ID_above_limit);
+        }
         return true;
     case ALERT_SAFETY:
         push_clip(s, CLIP_ID_unsafe);
@@ -186,6 +225,67 @@ static bool build_event_sentence(sentence_t *s, int category_bit,
     return true;
 }
 
+/* Assemble a grouped equipment announcement: chime + warning (disconnects
+ * only, matching build_event_sentence) + instance + each equipment clip for
+ * the set bits of eq_mask ascending, with "and" before the last one when two
+ * or more are set + connected/disconnected.  A single set bit degenerates to
+ * exactly the single-device sentence build_event_sentence produces. */
+static bool build_group_sentence(sentence_t *s, int category_bit,
+                                 int instance_idx, uint16_t eq_mask) {
+    const int n_eq = (int)(sizeof(s_equipment_clip) / sizeof(s_equipment_clip[0]));
+    if (category_bit < 0 || category_bit > 1) return false;
+    if (instance_idx < 0 || instance_idx > 2) return false;
+    eq_mask &= (uint16_t)((1u << n_eq) - 1u);
+    if (!eq_mask) return false;
+
+    memset(s, 0, sizeof(*s));
+    push_clip(s, CLIP_ID_chime);
+    if (category_bit == 1) push_clip(s, CLIP_ID_warning);
+    push_clip(s, CLIP_ID_instance_1 + instance_idx);
+
+    int total = 0;
+    for (int i = 0; i < n_eq; i++) {
+        if (eq_mask & (1u << i)) total++;
+    }
+    int emitted = 0;
+    for (int i = 0; i < n_eq; i++) {
+        if (!(eq_mask & (1u << i))) continue;
+        if (total >= 2 && emitted == total - 1) push_clip(s, CLIP_ID_and);
+        push_clip(s, s_equipment_clip[i]);
+        emitted++;
+    }
+    push_clip(s, (category_bit == 0) ? CLIP_ID_connected : CLIP_ID_disconnected);
+    return true;
+}
+
+/* Assemble a NINA link announcement (shared by the live and the preview entry
+ * points): chime + instance + connected/disconnected.  No warning clip on
+ * either edge (user decision). */
+static bool build_conn_sentence(sentence_t *s, int instance_idx, bool connected) {
+    if (instance_idx < 0 || instance_idx > 2) return false;
+
+    memset(s, 0, sizeof(*s));
+    push_clip(s, CLIP_ID_chime);
+    push_clip(s, CLIP_ID_instance_1 + instance_idx);
+    push_clip(s, connected ? CLIP_ID_connected : CLIP_ID_disconnected);
+    return true;
+}
+
+/* Per-(category,instance) 30 s cooldown, shared by the single-event and the
+ * grouped equipment paths so they pace each other.  Deliberately unlocked:
+ * callers run on several tasks (WS handlers, esp_timer), but a raced
+ * read/write here only risks one duplicate or one suppressed announcement,
+ * which is acceptable for a rate limiter. */
+static int64_t s_last_event_ms[12][3];
+
+static bool event_cooldown_pass(int category_bit, int instance_idx) {
+    int64_t now = esp_timer_get_time() / 1000;
+    int64_t last = s_last_event_ms[category_bit][instance_idx];
+    if (last != 0 && now - last < 30000) return false;
+    s_last_event_ms[category_bit][instance_idx] = now;
+    return true;
+}
+
 /* Post an assembled sentence.  Never blocks. */
 static void enqueue(const sentence_t *s) {
     if (xQueueSend(s_queue, s, 0) != pdTRUE) {
@@ -226,9 +326,16 @@ static bool codec_open(void) {
 }
 
 static void play_clip(clip_id_t id) {
-    const clip_t *c = &s_clips[id];
-    const uint8_t *p = c->start;
-    size_t remain = (size_t)(c->end - c->start);
+    /* Acquire-load buf before len (see the ordering comment at clip_override_t). */
+    const uint8_t *p = atomic_load_explicit(&s_override[id].buf, memory_order_acquire);
+    size_t remain;
+    if (p) {
+        remain = atomic_load_explicit(&s_override[id].len, memory_order_relaxed);
+    } else {
+        const clip_t *c = &s_clips[id];
+        p = c->start;
+        remain = (size_t)(c->end - c->start);
+    }
 
     while (remain) {
         size_t n = (remain < sizeof(s_pcm_buf)) ? remain : sizeof(s_pcm_buf);
@@ -251,12 +358,22 @@ static void play_clip(clip_id_t id) {
  * xTaskCreate) -- the I2S/I2C codec path is not safe to run off a cached PSRAM
  * stack.  Do NOT switch this to a static PSRAM stack.
  */
+/* Free retired override buffers.  Runs only on the playback task, between
+ * sentences, so no clip can be mid-playback from a buffer being freed. */
+static void drain_free_queue(void) {
+    void *old;
+    while (s_free_q && xQueueReceive(s_free_q, &old, 0) == pdTRUE) {
+        heap_caps_free(old);
+    }
+}
+
 static void audio_alert_task(void *arg) {
     (void)arg;
     sentence_t s;
 
     for (;;) {
         if (xQueueReceive(s_queue, &s, portMAX_DELAY) != pdTRUE) continue;
+        drain_free_queue();
 
         if (!codec_open()) {
             xQueueReset(s_queue);   /* speaker is unusable; don't pile up */
@@ -270,6 +387,7 @@ static void audio_alert_task(void *arg) {
         } while (xQueueReceive(s_queue, &s, pdMS_TO_TICKS(DRAIN_WAIT_MS)) == pdTRUE);
 
         esp_codec_dev_close(s_codec);   /* PA standby: no idle hiss */
+        drain_free_queue();
     }
 }
 
@@ -284,14 +402,64 @@ void audio_alert_init(void) {
         return;
     }
 
+    /* One retire slot per clip: enough for a replace-all while idle. */
+    s_free_q = xQueueCreate(CLIP_COUNT, sizeof(void *));
+    if (!s_free_q) {
+        /* Playback still works, but replaced override buffers will be leaked
+         * (set_override must never free inline while the task is live). */
+        ESP_LOGE(TAG, "Free-queue alloc failed; replaced clip buffers will leak");
+    }
+
     if (xTaskCreate(audio_alert_task, "audio_alert", 4096, NULL, 3, NULL) != pdPASS) {
         ESP_LOGE(TAG, "Task create failed");
         vQueueDelete(s_queue);
         s_queue = NULL;
+        if (s_free_q) {
+            vQueueDelete(s_free_q);
+            s_free_q = NULL;
+        }
         return;
     }
 
     ESP_LOGI(TAG, "Audio alerts initialized");
+}
+
+int audio_alert_clip_count(void) {
+    return CLIP_COUNT;
+}
+
+const char *audio_alert_clip_name(int idx) {
+    return (idx >= 0 && idx < CLIP_COUNT) ? s_clip_names[idx] : NULL;
+}
+
+void audio_alert_set_override(int idx, const uint8_t *pcm, size_t len) {
+    if (idx < 0 || idx >= CLIP_COUNT) return;
+
+    /* Writer is serialized (voice_store mutex), so a relaxed load is fine. */
+    const uint8_t *old = atomic_load_explicit(&s_override[idx].buf, memory_order_relaxed);
+    if (pcm) {
+        /* Apply: len (relaxed) before buf (release) — see clip_override_t. */
+        atomic_store_explicit(&s_override[idx].len, len, memory_order_relaxed);
+        atomic_store_explicit(&s_override[idx].buf, pcm, memory_order_release);
+    } else {
+        /* Clear: buf (NULL) before len. */
+        atomic_store_explicit(&s_override[idx].buf, NULL, memory_order_relaxed);
+        atomic_store_explicit(&s_override[idx].len, 0, memory_order_relaxed);
+    }
+
+    if (!old) return;
+    if (!s_queue) {
+        /* No playback task exists (s_queue is only non-NULL once the task is
+         * running), so nothing can be mid-playback: freeing inline is safe. */
+        heap_caps_free((void *)old);
+        return;
+    }
+    if (!s_free_q || xQueueSend(s_free_q, &old, 0) != pdTRUE) {
+        /* Retire queue missing (alloc failed at init) or full (many
+         * replacements with no playback in between).  Leaking beats freeing a
+         * buffer the playback task might still be streaming. */
+        ESP_LOGW(TAG, "Override retire unavailable; leaking old clip buffer");
+    }
 }
 
 void audio_alert_speak(alert_type_t type, int instance_idx, float value) {
@@ -315,19 +483,47 @@ void audio_alert_speak_event(int category_bit, int instance_idx, int equipment_i
     if (!cfg->alert_voice_enabled) return;
     if (cfg->alert_voice_muted[instance_idx]) return;
     if (!(cfg->voice_notify_mask & (1u << category_bit))) return;
-
-    /* Per-(category,instance) 30 s cooldown.  Deliberately unlocked: callers
-     * run on several tasks (WS handlers, esp_timer), but a raced read/write
-     * here only risks one duplicate or one suppressed announcement, which is
-     * acceptable for a rate limiter. */
-    static int64_t s_last_event_ms[12][3];
-    int64_t now = esp_timer_get_time() / 1000;
-    int64_t last = s_last_event_ms[category_bit][instance_idx];
-    if (last != 0 && now - last < 30000) return;
-    s_last_event_ms[category_bit][instance_idx] = now;
+    if (!event_cooldown_pass(category_bit, instance_idx)) return;
 
     sentence_t s;
     if (build_event_sentence(&s, category_bit, instance_idx, equipment_idx)) enqueue(&s);
+}
+
+void audio_alert_speak_equipment_group(int category_bit, int instance_idx,
+                                       uint16_t eq_mask) {
+    if (!s_queue) return;
+    if (category_bit < 0 || category_bit > 1) return;
+    if (instance_idx < 0 || instance_idx > 2) return;
+    if (!eq_mask) return;
+
+    app_config_t *cfg = app_config_get();
+    if (!cfg->alert_voice_enabled) return;
+    if (cfg->alert_voice_muted[instance_idx]) return;
+    if (!(cfg->voice_notify_mask & (1u << category_bit))) return;
+    if (!event_cooldown_pass(category_bit, instance_idx)) return;
+
+    sentence_t s;
+    if (build_group_sentence(&s, category_bit, instance_idx, eq_mask)) enqueue(&s);
+}
+
+void audio_alert_speak_conn(int instance_idx, bool connected) {
+    if (!s_queue) return;
+    if (instance_idx < 0 || instance_idx > 2) return;
+
+    app_config_t *cfg = app_config_get();
+    if (!cfg->alert_voice_enabled) return;
+    if (cfg->alert_voice_muted[instance_idx]) return;
+    if (!(connected ? cfg->alert_voice_conn : cfg->alert_voice_disc)) return;
+
+    sentence_t s;
+    if (build_conn_sentence(&s, instance_idx, connected)) enqueue(&s);
+}
+
+void audio_alert_preview_conn(int instance_idx, bool connected) {
+    if (!s_queue) return;
+
+    sentence_t s;
+    if (build_conn_sentence(&s, instance_idx, connected)) enqueue(&s);
 }
 
 void audio_alert_play_boot_jingle(void) {

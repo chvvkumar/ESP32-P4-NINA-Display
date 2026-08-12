@@ -640,7 +640,9 @@ esp_err_t screenshot_get_handler(httpd_req_t *req)
 /* POST /api/voice-preview — speak a sample voice alert through the speaker.
  *   kind=event&category=0..11&instance=1..3[&equipment=0..N]
  *   kind=breach&type=rms|hfr|safety&instance=1..3[&value=F]
+ *   kind=conn&state=connected|disconnected&instance=1..3   (NINA link edge)
  *   kind=jingle                       (startup jingle, no other params)
+ *   kind=clip&name=X                  (single clip by filename stem, e.g. "chime")
  * Uses the preview/test entry points, which bypass the enable/mute/mask gates
  * so the web UI can audition sentences while voice alerts are switched off. */
 esp_err_t voice_preview_post_handler(httpd_req_t *req)
@@ -654,6 +656,19 @@ esp_err_t voice_preview_post_handler(httpd_req_t *req)
     }
     if (strcmp(kind, "jingle") == 0) {   /* no instance/category params */
         audio_alert_preview_jingle();
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"ok\":true}");
+        return ESP_OK;
+    }
+    if (strcmp(kind, "clip") == 0) {     /* single clip, no instance param */
+        char name[32] = {0};
+        if (httpd_query_key_value(q, "name", name, sizeof(name)) != ESP_OK ||
+            name[0] == '\0') {
+            return send_400(req, "missing name");
+        }
+        if (!audio_alert_test_clip(name)) {
+            return send_400(req, "unknown clip");
+        }
         httpd_resp_set_type(req, "application/json");
         httpd_resp_sendstr(req, "{\"ok\":true}");
         return ESP_OK;
@@ -697,6 +712,17 @@ esp_err_t voice_preview_post_handler(httpd_req_t *req)
             if (end == buf) return send_400(req, "bad value");
         }
         audio_alert_test_speak(type, instance - 1, value);
+    } else if (strcmp(kind, "conn") == 0) {
+        char sbuf[16] = {0};
+        if (httpd_query_key_value(q, "state", sbuf, sizeof(sbuf)) != ESP_OK) {
+            return send_400(req, "missing state");
+        }
+        bool connected;
+        if      (strcmp(sbuf, "connected") == 0)    connected = true;
+        else if (strcmp(sbuf, "disconnected") == 0) connected = false;
+        else return send_400(req, "bad state");
+
+        audio_alert_preview_conn(instance - 1, connected);
     } else {
         return send_400(req, "bad kind");
     }
