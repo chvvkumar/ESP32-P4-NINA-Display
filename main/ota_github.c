@@ -12,9 +12,11 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "cJSON.h"
+#include "esp_timer.h"
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 
 static const char *TAG = "ota_github";
 
@@ -28,6 +30,111 @@ static const char *TAG = "ota_github";
 #define MAX_RESPONSE_SIZE (128 * 1024)
 #define OTA_ASSET_NAME    "nina-display-ota.bin"
 #define SND_ALPHA_TAG     "snd-alpha"   /* fixed tag of the rolling Alpha (snd) pre-release */
+
+/* ── Boot-time rollback confirm guard ───────────────────────────────── */
+/* With CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE the first boot of a fresh OTA
+ * image runs in ESP_OTA_IMG_PENDING_VERIFY. While pending, esp_ota_begin
+ * refuses every further OTA with ESP_ERR_OTA_ROLLBACK_INVALID_STATE, and any
+ * reset makes the bootloader roll the image back. The guard confirms the
+ * image once boot is demonstrably healthy (display + network milestones), or
+ * after an uptime fallback so a device that never gets network (AP-only setup
+ * mode, WiFi outage) still confirms eventually. A crash before the confirm
+ * still triggers the bootloader rollback safety net. */
+
+#define OTA_CONFIRM_FALLBACK_S  300   /* mark valid after 5 min uptime regardless */
+#define OTA_CONFIRM_POLL_MS     5000
+
+static _Atomic bool s_image_was_pending = false;  /* pending-verify at boot */
+static _Atomic bool s_image_confirmed  = false;   /* running image known VALID */
+static _Atomic bool s_display_ready    = false;
+static _Atomic bool s_network_ready    = false;
+
+/* Marks the running image valid, logging (never ignoring) the result.
+ * Writes otadata (flash op): caller must run on an internal-RAM stack. */
+static esp_err_t ota_confirm_image_valid(const char *reason) {
+    if (atomic_load(&s_image_confirmed)) {
+        return ESP_OK;
+    }
+    esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+    if (err == ESP_OK) {
+        atomic_store(&s_image_confirmed, true);
+        ESP_LOGI(TAG, "OTA image confirmed valid (%s) — rollback cancelled", reason);
+    } else {
+        ESP_LOGE(TAG, "esp_ota_mark_app_valid_cancel_rollback failed (%s): %s",
+                 reason, esp_err_to_name(err));
+    }
+    return err;
+}
+
+static void ota_confirm_task(void *arg) {
+    (void)arg;
+    const int64_t deadline_us = esp_timer_get_time()
+                              + (int64_t)OTA_CONFIRM_FALLBACK_S * 1000000;
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(OTA_CONFIRM_POLL_MS));
+        if (atomic_load(&s_image_confirmed)) {
+            break;  /* confirmed elsewhere (e.g. OTA request pre-flight) */
+        }
+        bool healthy = atomic_load(&s_display_ready) && atomic_load(&s_network_ready);
+        if (!healthy && esp_timer_get_time() < deadline_us) {
+            continue;
+        }
+        if (ota_confirm_image_valid(healthy ? "boot healthy" : "uptime fallback") == ESP_OK) {
+            break;
+        }
+        /* Mark-valid failed: keep retrying so no path leaves the image
+         * pending forever (a pending image blocks all OTAs and rolls back
+         * on the next reset). */
+    }
+    vTaskDelete(NULL);
+}
+
+void ota_github_boot_guard_init(void) {
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    esp_ota_img_states_t st;
+    bool pending = (esp_ota_get_state_partition(running, &st) == ESP_OK &&
+                    st == ESP_OTA_IMG_PENDING_VERIFY);
+    atomic_store(&s_image_was_pending, pending);
+    atomic_store(&s_image_confirmed, !pending);
+    if (!pending) {
+        return;  /* normal boot — nothing to confirm */
+    }
+
+    ESP_LOGI(TAG, "First boot of new OTA image (pending verify) — confirm gated on "
+                  "display+network, fallback %d s", OTA_CONFIRM_FALLBACK_S);
+    /* Internal-RAM stack required: the confirm path writes otadata (flash op
+     * with cache disabled), so the stack must not live in PSRAM. */
+    if (xTaskCreatePinnedToCore(ota_confirm_task, "ota_confirm", 4096, NULL, 3,
+                                NULL, tskNO_AFFINITY) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create ota_confirm task — confirming inline");
+        ota_confirm_image_valid("task create failed");
+    }
+}
+
+bool ota_github_image_was_pending(void) {
+    return atomic_load(&s_image_was_pending);
+}
+
+void ota_github_note_display_ready(void) {
+    atomic_store(&s_display_ready, true);
+}
+
+void ota_github_note_network_ready(void) {
+    atomic_store(&s_network_ready, true);
+}
+
+esp_err_t ota_github_ensure_can_update(void) {
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    esp_ota_img_states_t st;
+    if (esp_ota_get_state_partition(running, &st) != ESP_OK ||
+        st != ESP_OTA_IMG_PENDING_VERIFY) {
+        return ESP_OK;  /* not pending — nothing blocks an update */
+    }
+    /* Still pending: the device is up and serving this request, so the image
+     * evidently works. Confirm it now instead of refusing the update — a
+     * reboot in this state would roll the image back. */
+    return ota_confirm_image_valid("update requested");
+}
 
 /* ── Semver comparison ──────────────────────────────────────────────── */
 
@@ -762,8 +869,19 @@ static void ota_download_task(void *arg) {
     }
     ESP_LOGI(TAG, "Writing to partition '%s' at offset 0x%lx", part->label, part->address);
 
+    /* Pre-flight: a running image still pending verification makes
+     * esp_ota_begin refuse with ESP_ERR_OTA_ROLLBACK_INVALID_STATE.
+     * Confirm it here (this task runs on an internal-RAM stack). */
+    esp_err_t err = ota_github_ensure_can_update();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "OTA blocked: running image pending verify, confirm failed: %s",
+                 esp_err_to_name(err));
+        ctx->result = ESP_ERR_OTA_ROLLBACK_INVALID_STATE;
+        goto done;
+    }
+
     esp_ota_handle_t ota_handle = 0;
-    esp_err_t err = esp_ota_begin(part, OTA_WITH_SEQUENTIAL_WRITES, &ota_handle);
+    err = esp_ota_begin(part, OTA_WITH_SEQUENTIAL_WRITES, &ota_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_begin failed: %s", esp_err_to_name(err));
         ctx->result = err;

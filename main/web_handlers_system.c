@@ -266,13 +266,33 @@ esp_err_t ota_post_handler(httpd_req_t *req)
     ESP_LOGI(TAG, "OTA: writing to partition '%s' at offset 0x%lx",
              update_partition->label, update_partition->address);
 
+    /* Pre-flight: on the first boot after an OTA the running image may still
+     * be pending verification, which makes esp_ota_begin refuse with
+     * ESP_ERR_OTA_ROLLBACK_INVALID_STATE (HTTP 500 with no body, previously).
+     * The device is demonstrably up — it is serving this request — so confirm
+     * the image now; if that fails, say so instead of a bare 500. Runs on the
+     * httpd worker (internal-RAM stack), as the flash write requires. */
+    esp_err_t err = ota_github_ensure_can_update();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "OTA refused: running image pending verify, confirm failed: %s",
+                 esp_err_to_name(err));
+        ota_remove_overlay();
+        ota_restore_network();
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"error\":\"Current firmware is awaiting boot verification and could not be confirmed. Reboot the device, then retry the update.\"}");
+        return ESP_FAIL;
+    }
+
     esp_ota_handle_t ota_handle = 0;
-    esp_err_t err = esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &ota_handle);
+    err = esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &ota_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_begin failed: %s", esp_err_to_name(err));
         ota_remove_overlay();
         ota_restore_network();
-        httpd_resp_send_500(req);
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"error\":\"esp_ota_begin failed\"}");
         return ESP_FAIL;
     }
 
@@ -733,6 +753,18 @@ esp_err_t ota_github_post_handler(httpd_req_t *req)
     if (rel->requires_full_erase) {
         heap_caps_free(rel);
         return send_400(req, "This update requires a manual USB flash. See the release notes.");
+    }
+
+    /* Pre-flight: confirm a still-pending running image before promising an
+     * install — while pending, esp_ota_begin refuses every OTA. Doing it here
+     * surfaces a clear error; after this point the "started" response is
+     * already committed and a download failure can only be logged. */
+    if (ota_github_ensure_can_update() != ESP_OK) {
+        heap_caps_free(rel);
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"error\":\"Current firmware is awaiting boot verification and could not be confirmed. Reboot the device, then retry the update.\"}");
+        return ESP_OK;
     }
 
     /* Mutual exclusion: reject a second concurrent OTA without touching network state */

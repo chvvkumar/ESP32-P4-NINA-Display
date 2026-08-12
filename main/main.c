@@ -447,6 +447,7 @@ static void event_handler(void *arg, esp_event_base_t event_base,
         ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
         wifi_attempt_count = 0;
         networks_tried = 0;
+        ota_github_note_network_ready();  /* boot-health milestone for the rollback confirm guard */
 
         /* Show green toast with connected network name and refresh settings UI */
         {
@@ -724,6 +725,12 @@ void app_main(void)
     // Enable Dynamic Frequency Scaling — CPU scales 360 MHz (active) to 40 MHz (idle)
     power_mgmt_init();
 
+    /* Arm the rollback confirm guard before the web server can serve OTA
+     * requests: captures whether this is the first boot of a fresh OTA image
+     * and, if so, spawns the task that marks it valid once boot is healthy
+     * (display + network) or after an uptime fallback. */
+    ota_github_boot_guard_init();
+
     start_web_server();
     web_test_audio_init();   /* standalone speaker test surface on port 8080 */
 
@@ -750,6 +757,7 @@ void app_main(void)
     bsp_display_start_with_config(&cfg);
     bsp_display_backlight_on();
     bsp_display_brightness_set(app_config_get()->brightness);
+    ota_github_note_display_ready();  /* boot-health milestone for the rollback confirm guard */
 
     /* Raise DW-GDMA (DSI scanout) PSRAM read priority above Cache/CPU so the
      * MIPI-DSI framebuffer fetch is not starved by LVGL/PPA traffic. Fixes the
@@ -1028,18 +1036,13 @@ void app_main(void)
         weather_client_start();
     } /* end if (!setup_mode) */
 
-    /* Mark this firmware as valid so the bootloader won't roll back.
-     * This must come after successful init — if we crash before here,
-     * the bootloader will revert to the previous OTA partition. */
-    /* Determine whether this is the first boot of a freshly-OTA'd image.
-     * Only then is a pending OTA version promoted to the confirmed installed
-     * version; a rollback/normal boot discards the stale pending stamp. */
-    const esp_partition_t *running = esp_ota_get_running_partition();
-    esp_ota_img_states_t ota_state;
-    bool first_boot_new_image =
-        (esp_ota_get_state_partition(running, &ota_state) == ESP_OK &&
-         ota_state == ESP_OTA_IMG_PENDING_VERIFY);
-    ota_github_reconcile_version(first_boot_new_image);
-
-    esp_ota_mark_app_valid_cancel_rollback();
+    /* Marking the firmware valid (cancelling bootloader rollback) is owned by
+     * the confirm guard armed early in app_main (ota_github_boot_guard_init):
+     * it fires once display and network are up, or after an uptime fallback,
+     * and checks + retries the mark-valid result instead of ignoring it.
+     * Use the pending-verify state captured at guard init — the guard may
+     * already have confirmed the image (state VALID) by the time we get here.
+     * Only a first boot of a freshly-OTA'd image promotes the pending OTA
+     * version to installed; a rollback/normal boot discards the stale stamp. */
+    ota_github_reconcile_version(ota_github_image_was_pending());
 }
