@@ -272,12 +272,14 @@ static esp_err_t redirect_event_handler(esp_http_client_event_t *evt) {
  * cJSON_Delete it), or NULL on ANY failure: HTTP error, non-200 status, response
  * buffer overflow, or JSON parse failure. *overflow_out is set true only when the
  * 128 KB response buffer overflowed (so the caller can apply the history fail-safe);
- * it is left untouched on other failures. The helper frees its own response buffer.
+ * *rate_limited_out is set true only when GitHub answered 403/429 (quota exhausted);
+ * both are left untouched on other failures. The helper frees its own response buffer.
  */
-static cJSON *fetch_releases_page(int page, bool *overflow_out) {
+static cJSON *fetch_releases_page(int page, bool *overflow_out, bool *rate_limited_out) {
     char url[RELEASE_URL_BUF];
     snprintf(url, sizeof(url), "%s&page=%d", GITHUB_API_URL, page);
 
+    int status = 0;   /* 0 = no response reached (transport failure) */
     http_fetch_opts_t opts = {
         .timeout_ms = 10000,
         .use_tls_bundle = true,
@@ -286,13 +288,21 @@ static cJSON *fetch_releases_page(int page, bool *overflow_out) {
         .max_response_bytes = MAX_RESPONSE_SIZE,
         .user_agent = "ESP32-NINA-Display",
         .accept = "application/vnd.github.v3+json",
+        .status_out = &status,
     };
 
     char *body = NULL;
     size_t body_len = 0;
     esp_err_t err = http_fetch_text(url, &opts, &body, &body_len);
     if (err != ESP_OK) {
-        if (err == ESP_ERR_INVALID_SIZE) {
+        if (status == 403 || status == 429) {
+            /* Unauthenticated GitHub API quota (60/h/IP) exhausted; the caller
+             * backs off for an hour instead of re-hammering in a minute. */
+            ESP_LOGW(TAG, "GitHub API rate limit hit (page %d, status %d)", page, status);
+            if (rate_limited_out) {
+                *rate_limited_out = true;
+            }
+        } else if (err == ESP_ERR_INVALID_SIZE) {
             ESP_LOGE(TAG, "Response was truncated (page %d, buffer %d bytes too small)",
                      page, MAX_RESPONSE_SIZE);
             if (overflow_out) {
@@ -335,6 +345,7 @@ ota_check_result_t ota_github_check(int channel, const char *current_version, gi
     ESP_LOGI(TAG, "Checking GitHub for updates (current: %s, channel: %s)",
              current_version, channel_name);
     bool include_prereleases = (channel == 1);
+    bool rate_limited = false;   /* any page fetch was rejected with 403/429 */
 
     /* ── Alpha (snd) channel ──────────────────────────────────────────────
      * The Alpha release is a single rolling pre-release with the constant tag
@@ -346,7 +357,7 @@ ota_check_result_t ota_github_check(int channel, const char *current_version, gi
         bool alpha_fetch_error = false;
         for (int page = 1; page <= MAX_RELEASE_PAGES; page++) {
             bool overflow = false;
-            cJSON *releases = fetch_releases_page(page, &overflow);
+            cJSON *releases = fetch_releases_page(page, &overflow, &rate_limited);
             if (!releases) {
                 ESP_LOGW(TAG, "Alpha (snd) fetch %s on page %d",
                          overflow ? "overflowed" : "failed", page);
@@ -390,7 +401,7 @@ ota_check_result_t ota_github_check(int channel, const char *current_version, gi
                 if (!ota_url) {
                     ESP_LOGW(TAG, "Alpha (snd) release has no %s asset", OTA_ASSET_NAME);
                     cJSON_Delete(releases);
-                    return OTA_CHECK_ERROR;
+                    return OTA_CHECK_ERROR;   /* not a quota problem: the page arrived */
                 }
 
                 memset(out, 0, sizeof(*out));
@@ -410,6 +421,7 @@ ota_check_result_t ota_github_check(int channel, const char *current_version, gi
             cJSON_Delete(releases);
         }
         ESP_LOGI(TAG, "No Alpha (snd) release found");
+        if (rate_limited) return OTA_CHECK_RATE_LIMITED;
         return alpha_fetch_error ? OTA_CHECK_ERROR : OTA_CHECK_UP_TO_DATE;
     }
 
@@ -451,7 +463,7 @@ ota_check_result_t ota_github_check(int channel, const char *current_version, gi
 
     for (int page = 1; page <= MAX_RELEASE_PAGES && !reached_installed; page++) {
         bool overflow = false;
-        cJSON *releases = fetch_releases_page(page, &overflow);
+        cJSON *releases = fetch_releases_page(page, &overflow, &rate_limited);
         if (!releases) {
             /* Page-1 failure with nothing found yet → behave as the old
              * "request failed → return false" path. A MID-PATH failure (after a
@@ -483,19 +495,39 @@ ota_check_result_t ota_github_check(int channel, const char *current_version, gi
             cJSON *draft = cJSON_GetObjectItem(release, "draft");
             if (cJSON_IsTrue(draft)) continue;
 
-            /* Check pre-release flag — each channel only sees its own releases */
-            cJSON *prerelease = cJSON_GetObjectItem(release, "prerelease");
-            bool is_pre = cJSON_IsTrue(prerelease);
-            if (is_pre && !include_prereleases) continue;   /* stable channel: skip pre-releases */
-            if (!is_pre && include_prereleases) continue;    /* pre-release channel: skip stable */
-
             /* Get tag name */
             cJSON *tag = cJSON_GetObjectItem(release, "tag_name");
             if (!cJSON_IsString(tag) || !tag->valuestring) continue;
 
             /* The Alpha (snd) rolling release belongs only to channel 2 (handled
-             * above); never offer it on the Stable or Pre-release/Beta channels. */
+             * above); never offer it on the Stable or Pre-release/Beta channels.
+             * This skip MUST stay ahead of every compare below: "snd-alpha"
+             * sscanf-parses as 0.0.0 and would otherwise terminate the walk on
+             * page 1. */
             if (strcmp(tag->valuestring, SND_ALPHA_TAG) == 0) continue;
+
+            /* Check pre-release flag — each channel only sees its own releases */
+            cJSON *prerelease = cJSON_GetObjectItem(release, "prerelease");
+            bool is_pre = cJSON_IsTrue(prerelease);
+            if ((is_pre && !include_prereleases) || (!is_pre && include_prereleases)) {
+                /* Out of channel: never a target, never a marker contributor — but
+                 * it may still TERMINATE the walk. Versions across channels are one
+                 * monotone line here, so an out-of-channel release at-or-below
+                 * installed proves the path is covered. Without this the dev channel
+                 * cannot terminate at all once its own historical releases have been
+                 * deleted, and every check walks to the page cap. Only a tag that
+                 * parses as a full version may terminate: any non-semver tag
+                 * sscanf-parses as 0.0.0 and would falsely terminate on page 1. */
+                if (!channel_switch &&
+                    floor_tag_parses_as_version(tag->valuestring) &&
+                    compare_versions(tag->valuestring, current_version) <= 0) {
+                    ESP_LOGI(TAG, "Walk terminated by out-of-channel release %s (<= installed %s)",
+                             tag->valuestring, current_version);
+                    reached_installed = true;
+                    break;
+                }
+                continue;
+            }
 
             /* Classify by version. When switching channels the version check is
              * skipped so the latest in-channel release is always the target. */
@@ -606,12 +638,15 @@ ota_check_result_t ota_github_check(int channel, const char *current_version, gi
     /* Transient mid-path fetch failure: history unverifiable, but this is a retry
      * condition, not a manual-flash requirement. out is caller-owned; leave it. */
     if (verify_error) {
-        return OTA_CHECK_ERROR;
+        return rate_limited ? OTA_CHECK_RATE_LIMITED : OTA_CHECK_ERROR;
     }
 
     if (!found_target) {
         ESP_LOGI(TAG, "No newer release found");
-        return fetch_failed_no_target ? OTA_CHECK_ERROR : OTA_CHECK_UP_TO_DATE;
+        if (fetch_failed_no_target) {
+            return rate_limited ? OTA_CHECK_RATE_LIMITED : OTA_CHECK_ERROR;
+        }
+        return OTA_CHECK_UP_TO_DATE;
     }
 
     /* Populate the erase determination on the captured target. */

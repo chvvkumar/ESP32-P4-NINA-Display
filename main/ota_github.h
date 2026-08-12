@@ -21,7 +21,8 @@ typedef struct {
 typedef enum {
     OTA_CHECK_UP_TO_DATE = 0,   /* definitive: no newer release available */
     OTA_CHECK_UPDATE_AVAILABLE, /* *out filled with the target release */
-    OTA_CHECK_ERROR,            /* transient: network/rate-limit/unverifiable — retry, NOT up-to-date, NOT manual-flash */
+    OTA_CHECK_ERROR,            /* transient: network/unverifiable — retry, NOT up-to-date, NOT manual-flash */
+    OTA_CHECK_RATE_LIMITED,     /* GitHub answered 403/429: quota exhausted, back off ~1 h */
 } ota_check_result_t;
 
 /**
@@ -33,9 +34,12 @@ typedef enum {
  * @param out Filled with release info when the result is OTA_CHECK_UPDATE_AVAILABLE
  * @return OTA_CHECK_UPDATE_AVAILABLE when a newer release is available (*out filled);
  *         OTA_CHECK_UP_TO_DATE when definitively on the latest release;
- *         OTA_CHECK_ERROR on a transient failure (network/rate-limit/unverifiable
+ *         OTA_CHECK_ERROR on a transient failure (network/unverifiable
  *         history) — the caller should retry and must not treat this as up-to-date
- *         or as a manual-flash requirement.
+ *         or as a manual-flash requirement;
+ *         OTA_CHECK_RATE_LIMITED when GitHub rejected a page fetch with 403/429 —
+ *         same "not up-to-date, not manual-flash" contract as ERROR, but the caller
+ *         must back off for roughly an hour instead of retrying in a minute.
  */
 ota_check_result_t ota_github_check(int channel, const char *current_version, github_release_info_t *out);
 
