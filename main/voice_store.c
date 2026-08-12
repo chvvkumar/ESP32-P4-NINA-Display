@@ -1,16 +1,19 @@
 /**
  * @file voice_store.c
- * @brief Custom voice-clip overrides persisted on the "storage" SPIFFS
+ * @brief Custom voice-clip overrides persisted on the "storage" littlefs
  *        partition (see voice_store.h).
  *
  * Mount point is /spiffs_store: crash_log.c already owns /spiffs for its own
  * small "crashlog" partition, so this module uses a distinct base path.
+ * (The paths keep their historical "spiffs" names; the filesystem is littlefs.)
  *
- * The very first mount of the (never-before-formatted) 15.9 MB partition
- * formats it, which takes ~70 s.  That work runs on a dedicated background
- * task so boot is never blocked.  The task's stack MUST stay in internal RAM
- * (plain xTaskCreate): SPIFFS format erases flash with the CPU cache
- * disabled, and a PSRAM stack would fault when touched during those windows.
+ * An unformatted partition (or a SPIFFS leftover from older firmware) fails
+ * the mount and is auto-formatted.  littlefs formats lazily — it writes the
+ * superblocks and erases blocks on first use — so the old ~70 s SPIFFS
+ * first-boot format ordeal is gone.  The mount still runs on a dedicated
+ * background task so boot is never blocked.  The task's stack MUST stay in
+ * internal RAM (plain xTaskCreate): flash erase/write windows run with the
+ * CPU cache disabled, and a PSRAM stack would fault when touched during them.
  */
 
 #include "voice_store.h"
@@ -22,7 +25,7 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
-#include "esp_spiffs.h"
+#include "esp_littlefs.h"
 
 #include <dirent.h>
 #include <stdio.h>
@@ -42,6 +45,19 @@ static const char *TAG = "voice_store";
 
 static SemaphoreHandle_t s_mutex = NULL;   /* guards scan vs save vs stats */
 static volatile bool     s_ready = false;
+
+/* Cached filesystem stats.  esp_littlefs_info() traverses the filesystem
+ * (flash reads with the CPU cache disabled → potential one-frame display
+ * freeze), so it must never run on an HTTP request path — littlefs is much
+ * faster than SPIFFS here, but the freeze-avoidance rationale stands.
+ * The background scan computes them once; save/reset keep them current
+ * incrementally.  s_used_cache drifts by filesystem metadata overhead between
+ * boots, which is acceptable for a UI statistic.  Guarded by s_mutex. */
+#define VOICE_MAX_CLIPS 64   /* > CLIP_COUNT (~47); runtime-guarded below */
+static size_t s_used_cache = 0;
+static size_t s_total_cache = 0;
+static size_t s_custom_cache = 0;
+static size_t s_clip_size[VOICE_MAX_CLIPS];   /* 0 = built-in (no custom file) */
 static volatile bool     s_formatting = false;
 static volatile bool     s_wipe_pending = false;   /* factory reset requested
                                                     * before the store mounted;
@@ -64,30 +80,23 @@ static void clip_path(char *out, size_t out_size, const char *name, const char *
     /* Both %-expansions are precision-bounded so 20 + 40 + 12 + NUL always
      * fits VOICE_PATH_MAX under -Werror=format-truncation.
      *
-     * SPIFFS object names (the path minus the mount point) are capped at
-     * CONFIG_SPIFFS_OBJ_NAME_LEN = 32 bytes including the NUL.  The tmp
-     * suffix is ".t" (not ".tmp"/".pcm.tmp") to stay under that ceiling:
-     * current worst case is "/voice/profile_changed.pcm" = 26 chars + NUL. */
+     * littlefs file names are capped at CONFIG_LITTLEFS_OBJ_NAME_LEN
+     * (default 64) bytes.  The tmp suffix stays ".t" (not ".tmp"/".pcm.tmp")
+     * from the SPIFFS 32-byte era — no reason to rename existing files:
+     * current worst case is "profile_changed.pcm" = 19 chars + NUL. */
     snprintf(out, out_size, VOICE_STORE_DIR "/" CLIP_NAME_FMT "%.12s", name, suffix);
 }
 
-/* Summed size of every voice/<clip>.pcm.  Call with s_mutex held. */
-static size_t custom_bytes_locked(void) {
-    size_t sum = 0;
-    DIR *d = opendir(VOICE_STORE_DIR);
-    if (!d) return 0;
-
-    struct dirent *e;
-    while ((e = readdir(d)) != NULL) {
-        const char *dot = strrchr(e->d_name, '.');
-        if (!dot || strcmp(dot, ".pcm") != 0) continue;
-        char path[VOICE_PATH_MAX];
-        snprintf(path, sizeof(path), VOICE_STORE_DIR "/" CLIP_NAME_FMT, e->d_name);
-        struct stat st;
-        if (stat(path, &st) == 0) sum += (size_t)st.st_size;
-    }
-    closedir(d);
-    return sum;
+/* Record clip idx's file now being new_size bytes and adjust the cached
+ * totals by the difference.  Call with s_mutex held. */
+static void cache_set_clip_size(int idx, size_t new_size) {
+    if (idx < 0 || idx >= VOICE_MAX_CLIPS) return;
+    size_t old = s_clip_size[idx];
+    s_clip_size[idx] = new_size;
+    s_custom_cache = (s_custom_cache >= old) ? s_custom_cache - old + new_size
+                                             : new_size;
+    s_used_cache = (s_used_cache >= old) ? s_used_cache - old + new_size
+                                         : new_size;
 }
 
 /* Load voice/<name>.pcm into PSRAM and hand it to audio_alert.  Ownership of
@@ -129,13 +138,15 @@ static bool load_and_apply(const char *name, int idx) {
 static void voice_store_task(void *arg) {
     (void)arg;
 
-    esp_vfs_spiffs_conf_t conf = {
+    esp_vfs_littlefs_conf_t conf = {
         .base_path              = VOICE_STORE_MOUNT,
         .partition_label        = VOICE_STORE_PARTITION,
-        .max_files              = 4,
-        .format_if_mount_failed = true,   /* first-ever mount formats: ~70 s */
+        /* First-ever mount (or a SPIFFS leftover) formats.  littlefs formats
+         * lazily — superblocks only, blocks erased on first use — so this is
+         * quick, not the old ~70 s SPIFFS ordeal. */
+        .format_if_mount_failed = true,
     };
-    esp_err_t err = esp_vfs_spiffs_register(&conf);
+    esp_err_t err = esp_vfs_littlefs_register(&conf);
     s_formatting = false;
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Mount failed: %s — custom clips disabled this boot",
@@ -144,8 +155,8 @@ static void voice_store_task(void *arg) {
         return;
     }
 
-    /* SPIFFS has a flat namespace: '/' in filenames just works and mkdir is
-     * unsupported.  Attempt it anyway for VFS layers that care; ignore result. */
+    /* littlefs has real directories: create voice/ if absent (EEXIST is fine,
+     * so the result is ignored). */
     mkdir(VOICE_STORE_DIR, 0777);
 
     xSemaphoreTake(s_mutex, portMAX_DELAY);
@@ -155,14 +166,20 @@ static void voice_store_task(void *arg) {
         struct dirent *e;
         while ((e = readdir(d)) != NULL) {
             const char *dot = strrchr(e->d_name, '.');
+            char path[VOICE_PATH_MAX];
+            snprintf(path, sizeof(path), VOICE_STORE_DIR "/" CLIP_NAME_FMT, e->d_name);
             if (dot && strcmp(dot, ".t") == 0) {
                 /* Stale temp from an interrupted save: discard. */
-                char path[VOICE_PATH_MAX];
-                snprintf(path, sizeof(path), VOICE_STORE_DIR "/" CLIP_NAME_FMT, e->d_name);
                 remove(path);
                 continue;
             }
             if (!dot || strcmp(dot, ".pcm") != 0) continue;
+
+            /* Account every .pcm (orphans included, matching the old
+             * whole-dir walk) toward the cached custom total. */
+            struct stat st;
+            size_t fsz = (stat(path, &st) == 0) ? (size_t)st.st_size : 0;
+            s_custom_cache += fsz;
 
             char stem[48];
             size_t stem_len = (size_t)(dot - e->d_name);
@@ -172,10 +189,14 @@ static void voice_store_task(void *arg) {
 
             int idx = clip_index(stem);
             if (idx < 0) continue;
+            if (idx < VOICE_MAX_CLIPS) s_clip_size[idx] = fsz;
             if (load_and_apply(stem, idx)) applied++;
         }
         closedir(d);
     }
+    /* One-time full-partition walk; every later stats request serves this
+     * cached figure instead. */
+    esp_littlefs_info(VOICE_STORE_PARTITION, &s_total_cache, &s_used_cache);
     s_ready = true;
     xSemaphoreGive(s_mutex);
 
@@ -187,8 +208,10 @@ static void voice_store_task(void *arg) {
         voice_store_reset_all();
     }
 
-    size_t used = 0, total = 0;
-    esp_spiffs_info(VOICE_STORE_PARTITION, &total, &used);
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    size_t used = s_used_cache;
+    size_t total = s_total_cache;
+    xSemaphoreGive(s_mutex);
     ESP_LOGI(TAG, "Ready: %d custom clip(s) applied, %u/%u bytes used",
              applied, (unsigned)used, (unsigned)total);
     vTaskDelete(NULL);
@@ -224,9 +247,12 @@ bool voice_store_formatting(void) {
 void voice_store_stats(size_t *used_bytes, size_t *total_bytes, size_t *custom_bytes) {
     size_t used = 0, total = 0, custom = 0;
     if (s_ready) {
-        esp_spiffs_info(VOICE_STORE_PARTITION, &total, &used);
+        /* Cached figures only: never walk the filesystem on an HTTP request
+         * path (a long flash op freezes the display for a frame). */
         xSemaphoreTake(s_mutex, portMAX_DELAY);
-        custom = custom_bytes_locked();
+        used = s_used_cache;
+        total = s_total_cache;
+        custom = s_custom_cache;
         xSemaphoreGive(s_mutex);
     }
     if (used_bytes)   *used_bytes = used;
@@ -249,19 +275,17 @@ int voice_store_save(const char *clip_name, const uint8_t *data, size_t len) {
     clip_path(tmp, sizeof(tmp), clip_name, ".t");
 
     /* Phase 1 (mutex, brief): budget headroom after replacing this clip's
-     * existing file. */
-    struct stat st;
+     * existing file, from the cache — no filesystem access. */
     xSemaphoreTake(s_mutex, portMAX_DELAY);
-    size_t existing = 0;
-    if (stat(path, &st) == 0) existing = (size_t)st.st_size;
-    size_t custom = custom_bytes_locked();
+    size_t existing = (idx < VOICE_MAX_CLIPS) ? s_clip_size[idx] : 0;
+    size_t custom = s_custom_cache;
     xSemaphoreGive(s_mutex);
     if (custom - existing + len > VOICE_STORE_BUDGET) {
         return VOICE_STORE_ERR_OVER_BUDGET;
     }
 
-    /* Phase 2 (NO mutex): the tmp write can take seconds on SPIFFS under GC
-     * (up to 480 KB); holding s_mutex here would stall stats/scan callers.
+    /* Phase 2 (NO mutex): the tmp write (up to 480 KB) is still seconds of
+     * flash I/O; holding s_mutex here would stall stats/scan callers.
      * httpd is single-task, so no concurrent save can race for the same tmp.
      * Write-then-rename so an interrupted save never corrupts the live file. */
     FILE *f = fopen(tmp, "wb");
@@ -278,20 +302,22 @@ int voice_store_save(const char *clip_name, const uint8_t *data, size_t len) {
     /* Phase 3 (mutex): re-check the budget — state may have changed while the
      * mutex was released — then commit, hot-apply and account. */
     xSemaphoreTake(s_mutex, portMAX_DELAY);
-    existing = 0;
-    if (stat(path, &st) == 0) existing = (size_t)st.st_size;
-    custom = custom_bytes_locked();
+    existing = (idx < VOICE_MAX_CLIPS) ? s_clip_size[idx] : 0;
+    custom = s_custom_cache;
     if (custom - existing + len > VOICE_STORE_BUDGET) {
         remove(tmp);
         xSemaphoreGive(s_mutex);
         return VOICE_STORE_ERR_OVER_BUDGET;
     }
-    remove(path);   /* SPIFFS rename does not overwrite an existing target */
+    /* littlefs rename atomically replaces an existing target (unlike SPIFFS),
+     * so no pre-remove: the live clip survives a power cut mid-commit, and on
+     * rename failure the old file — and its cache accounting — stay intact. */
     if (rename(tmp, path) != 0) {
         remove(tmp);
         xSemaphoreGive(s_mutex);
         return VOICE_STORE_ERR_IO;
     }
+    cache_set_clip_size(idx, len);
 
     /* Hot-apply from the caller's data (no need to re-read the file). */
     uint8_t *buf = heap_caps_malloc(len, MALLOC_CAP_SPIRAM);
@@ -316,6 +342,7 @@ int voice_store_reset(const char *clip_name) {
 
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     remove(path);   /* missing file is fine: clearing a default clip is a no-op */
+    cache_set_clip_size(idx, 0);
     audio_alert_set_override(idx, NULL, 0);
     xSemaphoreGive(s_mutex);
     return VOICE_STORE_OK;
@@ -332,6 +359,7 @@ int voice_store_reset_all(void) {
         char path[VOICE_PATH_MAX];
         clip_path(path, sizeof(path), name, ".pcm");
         remove(path);
+        cache_set_clip_size(i, 0);
         audio_alert_set_override(i, NULL, 0);
     }
     xSemaphoreGive(s_mutex);
@@ -341,23 +369,23 @@ int voice_store_reset_all(void) {
 bool voice_store_is_custom(const char *clip_name, size_t *size_out) {
     if (size_out) *size_out = 0;
     if (!s_ready) return false;
-    if (clip_index(clip_name) < 0) return false;
+    int idx = clip_index(clip_name);
+    if (idx < 0 || idx >= VOICE_MAX_CLIPS) return false;
 
-    char path[VOICE_PATH_MAX];
-    clip_path(path, sizeof(path), clip_name, ".pcm");
-
-    struct stat st;
-    bool exists = (stat(path, &st) == 0 && st.st_size > 0);
-    if (exists && size_out) *size_out = (size_t)st.st_size;
-    return exists;
+    /* Cached presence: no per-clip stat() on the request path. */
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    size_t sz = s_clip_size[idx];
+    xSemaphoreGive(s_mutex);
+    if (size_out) *size_out = sz;
+    return sz > 0;
 }
 
 void voice_store_wipe(void) {
     if (!s_ready) {
-        /* Store not mounted yet (factory reset during the ~70 s first
-         * format): defer; the mount task performs the wipe right after its
-         * scan completes, so an early factory reset cannot leave custom
-         * clips behind. */
+        /* Store not mounted yet (factory reset while the background mount
+         * task is still running): defer; the mount task performs the wipe
+         * right after its scan completes, so an early factory reset cannot
+         * leave custom clips behind. */
         s_wipe_pending = true;
         return;
     }

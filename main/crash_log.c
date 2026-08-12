@@ -26,7 +26,7 @@
 
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "esp_spiffs.h"
+#include "esp_littlefs.h"
 #include "esp_heap_caps.h"
 #include "esp_attr.h"
 #include "esp_core_dump.h"
@@ -126,7 +126,7 @@ static void panic_text_clear(void)
     s_panic_rtc.head  = 0;
 }
 
-/* ── SPIFFS mount ─────────────────────────────────────────────────────────── */
+/* ── littlefs mount ───────────────────────────────────────────────────────── */
 
 static bool s_mounted = false;
 
@@ -136,21 +136,21 @@ static bool ensure_mounted(void)
         return true;
     }
 
-    /* The "crashlog" partition (128KB) ships unformatted; format on first mount.
-     * It is small, so the format completes quickly. */
-    esp_vfs_spiffs_conf_t conf = {
+    /* The "crashlog" partition (128KB) ships unformatted (or holds a SPIFFS
+     * image from older firmware); either fails the mount and is auto-formatted.
+     * littlefs formats lazily (superblocks only), so this completes quickly. */
+    esp_vfs_littlefs_conf_t conf = {
         .base_path              = CRASH_LOG_MOUNT_POINT,
         .partition_label        = "crashlog",
-        .max_files              = 4,
         .format_if_mount_failed = true,
     };
 
-    esp_err_t err = esp_vfs_spiffs_register(&conf);
+    esp_err_t err = esp_vfs_littlefs_register(&conf);
     if (err == ESP_OK) {
         s_mounted = true;
         size_t total = 0, used = 0;
-        if (esp_spiffs_info("crashlog", &total, &used) == ESP_OK) {
-            ESP_LOGI(TAG, "SPIFFS mounted: %u/%u bytes used", (unsigned)used, (unsigned)total);
+        if (esp_littlefs_info("crashlog", &total, &used) == ESP_OK) {
+            ESP_LOGI(TAG, "littlefs mounted: %u/%u bytes used", (unsigned)used, (unsigned)total);
         }
         return true;
     }
@@ -161,7 +161,7 @@ static bool ensure_mounted(void)
         return true;
     }
 
-    ESP_LOGE(TAG, "SPIFFS mount failed: %s — crash logging disabled this boot",
+    ESP_LOGE(TAG, "littlefs mount failed: %s — crash logging disabled this boot",
              esp_err_to_name(err));
     return false;
 }
@@ -367,19 +367,20 @@ static void append_crash_record(uint32_t reason, const char *panic_text)
 
 /* State captured by crash_log_init() and consumed by the deferred worker. The
  * RTC panic text must be extracted and the ring cleared synchronously in
- * crash_log_init() (RTC reads are instant); SPIFFS work is deferred. */
+ * crash_log_init() (RTC reads are instant); filesystem work is deferred. */
 static bool      s_crash_pending = false;     /* a crash record is waiting to be written */
 static uint32_t  s_pending_reason = 0;
 static char     *s_pending_panic = NULL;      /* PSRAM buffer, owned by the worker */
 
 /**
- * One-shot background worker: performs the (potentially ~70s on first boot)
- * SPIFFS mount/format off the boot critical path, then writes any pending crash
+ * One-shot background worker: performs the littlefs mount/format off the boot
+ * critical path (littlefs formats lazily, so even a first-boot format is
+ * quick — the old ~70 s SPIFFS ordeal is gone), then writes any pending crash
  * record and runs the retention purge. Self-deletes when done.
  *
- * Its stack MUST live in internal RAM. SPIFFS format issues many flash
- * erase/write operations that execute with the CPU data cache disabled; a stack
- * in (cached) PSRAM would fault when touched during those operations. Plain
+ * Its stack MUST live in internal RAM. Format/write issues flash erase/write
+ * operations that execute with the CPU data cache disabled; a stack in
+ * (cached) PSRAM would fault when touched during those operations. Plain
  * xTaskCreate() allocates the stack in internal RAM — do NOT switch this to a
  * PSRAM/static-PSRAM stack or xTaskCreateWithCaps(MALLOC_CAP_SPIRAM).
  */
@@ -419,8 +420,8 @@ static void crash_log_deferred_worker(void *arg)
 void crash_log_init(void)
 {
     /* Read the reset reason and capture panic text from the RTC ring NOW — these
-     * are instant reads. The SPIFFS mount/format (which can take ~70s on first
-     * boot) is deferred to a background task so it never blocks app_main(). */
+     * are instant reads. The littlefs mount/format is deferred to a background
+     * task so it never blocks app_main(). */
     uint32_t reason = power_mgmt_get_last_reset_reason();
     s_pending_reason = reason;
 
@@ -439,7 +440,7 @@ void crash_log_init(void)
      * now: any text we cared about is already copied into s_pending_panic. */
     panic_text_clear();
 
-    /* Defer SPIFFS mount/format + record write to a background task. Internal-RAM
+    /* Defer littlefs mount/format + record write to a background task. Internal-RAM
      * stack is mandatory (see crash_log_deferred_worker). Low priority on Core 0
      * keeps it out of the way of UI/network bring-up. */
     xTaskCreatePinnedToCore(crash_log_deferred_worker, "crash_log_def",

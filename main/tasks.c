@@ -2596,6 +2596,8 @@ void data_update_task(void *arg) {
                         bsp_display_unlock();
                     }
                 }
+            } else if (chk == OTA_CHECK_RATE_LIMITED) {
+                ESP_LOGW(TAG, "Boot firmware update check hit the GitHub rate limit; will retry later");
             } else if (chk == OTA_CHECK_ERROR) {
                 ESP_LOGW(TAG, "Boot firmware update check failed (network/GitHub); will retry next check");
             } else {
@@ -3072,11 +3074,16 @@ main_loop:
                             bsp_display_unlock();
                         }
                     }
-                } else if (chk == OTA_CHECK_ERROR) {
-                    ESP_LOGW(TAG, "Firmware update check failed (network/GitHub)");
+                } else if (chk == OTA_CHECK_ERROR || chk == OTA_CHECK_RATE_LIMITED) {
+                    bool limited = (chk == OTA_CHECK_RATE_LIMITED);
+                    ESP_LOGW(TAG, "Firmware update check %s",
+                             limited ? "hit the GitHub rate limit" : "failed (network/GitHub)");
                     if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                         nina_ota_prompt_show("", cur_ver, NULL);
-                        nina_ota_prompt_show_status("Update check failed", "Update check failed - try again");
+                        nina_ota_prompt_show_status(
+                            limited ? "Update limit reached" : "Update check failed",
+                            limited ? "GitHub update limit reached. Try again in about an hour."
+                                    : "Update check failed - try again");
                         bsp_display_unlock();
                     }
                     while (nina_ota_prompt_visible()) {
