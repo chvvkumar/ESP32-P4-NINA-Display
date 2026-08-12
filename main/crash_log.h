@@ -31,7 +31,7 @@
 extern "C" {
 #endif
 
-/* SPIFFS mount point and crash-history file path. */
+/* littlefs mount point (historical "/spiffs" name) and crash-history file path. */
 #define CRASH_LOG_MOUNT_POINT "/spiffs"
 #define CRASH_LOG_FILE_PATH   CRASH_LOG_MOUNT_POINT "/crashlog.jsonl"
 
@@ -39,12 +39,12 @@ extern "C" {
 #define CRASH_LOG_MAX_ENTRIES 20
 
 /**
- * Mount SPIFFS, record a crash entry if this boot followed an abnormal reset,
+ * Mount littlefs, record a crash entry if this boot followed an abnormal reset,
  * enforce the ring + retention, then clear the RTC panic buffer.
  *
  * Call once from app_main() after app_config_init() and after
  * power_mgmt_check_crash(). Reads crash_log_retention_days from app_config.
- * Safe to call even if SPIFFS mount fails — the feature degrades to a no-op and
+ * Safe to call even if the mount fails — the feature degrades to a no-op and
  * logs a warning rather than aborting boot.
  */
 void crash_log_init(void);
@@ -53,7 +53,7 @@ void crash_log_init(void);
  * Open the crash-history file for reading.
  *
  * @return FILE* positioned at the start of /spiffs/crashlog.jsonl, or NULL if the
- *         file does not exist (no crashes yet) or SPIFFS is unmounted. The caller
+ *         file does not exist (no crashes yet) or the fs is unmounted. The caller
  *         owns the handle and must fclose() it.
  */
 FILE *crash_log_open_read(void);
