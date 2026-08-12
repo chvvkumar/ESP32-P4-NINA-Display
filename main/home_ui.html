@@ -51,7 +51,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
 .bars span{width:5px;border-radius:1px;background:rgba(255,255,255,.12)}
 .bars span.on{background:var(--success)}
 /* reserved widths so live values never shift layout */
-#metricUptime{min-width:14ch}
+#metricUptime{min-width:8ch}
 #metricTemp{min-width:6ch}
 #metricRssi{min-width:3ch;text-align:right}
 #memFree,#psFree{min-width:4ch;text-align:right}
@@ -239,9 +239,9 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
 <div class="content">
  <div class="sys-metrics">
   <div class="sys-metric">
-   <div class="sm-label"><svg class="ic"><use href="#i-clock"/></svg>Uptime</div>
+   <div class="sm-label"><svg class="ic"><use href="#i-clock"/></svg>Uptime &middot; CPU</div>
    <div class="sm-value" id="metricUptime">--</div>
-   <div class="sm-sub">Since last restart</div>
+   <div class="sm-sub" id="cpuSub">Since last restart</div>
   </div>
   <div class="sys-metric">
    <div class="sm-label"><svg class="ic"><use href="#i-chip"/></svg>Memory</div>
@@ -268,13 +268,8 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
    </div>
    <div class="sm-sub" id="wifiSsid"></div>
   </div>
-  <!-- CPU + Storage tiles: fields are new /api/status keys; older firmware
-       omits them, so both tiles start hidden and only show when present. -->
-  <div class="sys-metric" id="cpuTile" style="display:none">
-   <div class="sm-label"><svg class="ic"><use href="#i-chip"/></svg>CPU</div>
-   <div class="sm-value" id="cpuLoad">--</div>
-   <div class="sm-sub" id="cpuCores"></div>
-  </div>
+  <!-- Storage tile: spiffs_* are new /api/status keys; older firmware omits
+       them, so the tile starts hidden and only shows when present. -->
   <div class="sys-metric" id="sfTile" style="display:none">
    <div class="sm-label"><svg class="ic"><use href="#i-db"/></svg>Storage</div>
    <div class="sm-value"><span id="sfUsed">--</span><span class="sm-sub">of <span id="sfTotal">--</span></span></div>
@@ -453,7 +448,7 @@ var metricRssi = $('metricRssi'), wifiSsid = $('wifiSsid');
 var rssiBars = Array.prototype.slice.call($('rssiBars').children);
 var memFree = $('memFree'), memTotal = $('memTotal'), memBar = $('memBar'), memPct = $('memPct');
 var psFree = $('psFree'), psTotal = $('psTotal'), psBar = $('psBar'), psPct = $('psPct');
-var cpuTile = $('cpuTile'), cpuLoad = $('cpuLoad'), cpuCores = $('cpuCores');
+var cpuSub = $('cpuSub');
 var sfTile = $('sfTile'), sfUsed = $('sfUsed'), sfTotal = $('sfTotal'), sfBar = $('sfBar'), sfVoice = $('sfVoice');
 var intChips = { mqtt: $('intMqtt'), allsky: $('intAllsky'), weather: $('intWeather'), spotify: $('intSpotify') };
 
@@ -488,11 +483,14 @@ function pageSub(slug) {
  return SUBS[slug] || '';
 }
 
-function p2(n) { return (n < 10 ? '0' : '') + n; }
-/* zero-padded h/m/s: string length is constant, so tabular digits never shift layout */
+/* compact uptime: the two largest units that matter, no leading zero units */
 function fmtUptime(t) {
- return Math.floor(t / 86400) + 'd ' + p2(Math.floor(t % 86400 / 3600)) + 'h ' +
-  p2(Math.floor(t % 3600 / 60)) + 'm ' + p2(t % 60) + 's';
+ var d = Math.floor(t / 86400), h = Math.floor(t % 86400 / 3600);
+ var m = Math.floor(t % 3600 / 60), s = t % 60;
+ if (d > 0) return d + 'd ' + h + 'h';
+ if (h > 0) return h + 'h ' + m + 'm';
+ if (m > 0) return m + 'm ' + s + 's';
+ return s + 's';
 }
 function fmtK(b) { return Math.round(b / 1024) + 'K'; }
 function fmtM(b) { return (b / 1048576).toFixed(1) + 'M'; }
@@ -835,14 +833,14 @@ function applyStatus(st, ns) {
   wifiSsid.textContent = 'Offline';
  }
 
- /* CPU + Storage: fields absent on older firmware -> keep the tiles hidden */
+ /* CPU + Storage: fields absent on older firmware -> CPU line falls back to the
+    plain uptime caption, Storage tile stays hidden */
  if (st.cpu_load != null) {
-  cpuTile.style.display = '';
-  cpuLoad.textContent = Math.round(st.cpu_load) + '%';
-  cpuCores.textContent = (st.cpu0 != null && st.cpu1 != null)
-   ? 'C0 ' + Math.round(st.cpu0) + '% · C1 ' + Math.round(st.cpu1) + '%' : '';
+  cpuSub.textContent = 'CPU ' + Math.round(st.cpu_load) + '%' +
+   ((st.cpu0 != null && st.cpu1 != null)
+    ? ' · C0 ' + Math.round(st.cpu0) + '% · C1 ' + Math.round(st.cpu1) + '%' : '');
  } else {
-  cpuTile.style.display = 'none';
+  cpuSub.textContent = 'Since last restart';
  }
  if (st.spiffs_total != null && st.spiffs_total > 0) {
   sfTile.style.display = '';
