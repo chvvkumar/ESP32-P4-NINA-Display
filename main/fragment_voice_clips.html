@@ -1,8 +1,11 @@
 
-      <!-- Voice Clips tab: action-only tab (uploads apply immediately). The
-           whole card is data-no-dirty so nothing here raises the save bar or
-           fires a live apply -- this tab does not participate in the config
-           Save/Discard cycle at all. -->
+      <!-- Voice Clips tab: action-only tab (uploads and previews apply
+           immediately). EVERY card here is data-no-dirty so nothing raises the
+           save bar or fires a live apply -- this tab does not participate in
+           the config Save/Discard cycle at all. The top card is nocollapse
+           (status must always be visible); the Sentences card and the six clip
+           group cards use the shell's collapsible-card machinery and default to
+           collapsed. -->
       <div class="card nocollapse" data-no-dirty>
         <div class="card-title"><span class="card-title-label">Voice Clips <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
         <div class="help-popover"><div class="help-popover-title">Voice clips</div><p>The device speaks alerts by playing short sound clips back to back. Every clip ships with a built-in default voice; here you can replace any of them with your own recording and hear the result on the device speaker.</p><p>Upload replaces a clip, the play button speaks the currently active version on the device, and Reset returns a clip to its built-in default. Changes take effect immediately; there is nothing to save.</p><p>Example: record your own "Warning" in your voice, upload it, then press play to hear it from the panel.</p></div>
@@ -11,12 +14,44 @@
         <div class="field-hint" style="margin:0 0 10px">Upload any common audio format (mp3, m4a, wav, ogg); your browser converts it to the required 16 kHz mono PCM before uploading. Files ending in .pcm are sent as-is. Clips are limited to 10 seconds each; Boot Jingle may be up to 15 seconds.</div>
 
         <input type="file" id="vcFile" accept="audio/*,.pcm" style="display:none">
-        <div id="vcRows"></div>
 
-        <div style="margin-top:20px">
+        <div>
           <button type="button" class="btn btn-outline" onclick="vcResetAll()">Reset All Clips to Defaults</button>
         </div>
       </div>
+
+      <!-- Sentence preview: the full announcements the device speaks, built out
+           of the clips below. Rows are rendered by vsBuild()/vsRender() so the
+           shown wording follows the shared controls. -->
+      <div class="card" data-no-dirty>
+        <div class="card-title"><span class="card-title-label">Sentences <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Sentences</div><p>Whole announcements, not single clips: each row shows the words the device says and plays them on the speaker. Use the controls to choose which instance, which device and which value the sample uses.</p><p>The wording shown is the full version. If "Short spoken alerts" is on in Behavior &amp; Alerts, the device shortens the RMS and HFR announcements when it speaks them for real.</p></div>
+
+        <div class="row stack-mobile">
+          <div class="field">
+            <label class="field-label">Instance</label>
+            <select class="input" id="vsInst">
+              <option value="1">NINA 1</option>
+              <option value="2">NINA 2</option>
+              <option value="3">NINA 3</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field-label">Device</label>
+            <select class="input" id="vsEquip"></select>
+          </div>
+          <div class="field">
+            <label class="field-label">Value</label>
+            <input type="number" class="input" id="vsValue" step="0.1" min="0" max="99.9" value="2.5">
+            <div class="field-hint">Used by the RMS and HFR rows only.</div>
+          </div>
+        </div>
+
+        <div id="vsRows"></div>
+      </div>
+
+      <!-- One collapsible card per clip group, built by vcBuildRows(). -->
+      <div id="vcRows"></div>
 
 <script>
 /* Runs synchronously when the shell injects this fragment (see
@@ -95,24 +130,45 @@
   function fmtKB(b){ return Math.round(b/1024)+' KB'; }
   function fmtMB(b){ return (b/1048576).toFixed(1)+' MB'; }
 
+  /* Spoken text of every clip in a group, in clip-table order. The sentence
+     preview derives its wording from these instead of a second copy, so the
+     two can never drift: group 1 = instance clips (index = instance-1),
+     group 3 = digits 0-9, group 4 = equipment (index = equipment_type_t),
+     group 5 = event categories (index = category_bit - 2). */
+  function vcTexts(g){
+    return CLIPS.filter(function(c){ return c[2]===g; }).map(function(c){ return c[1]; });
+  }
+  function vcText(name){
+    for(var i=0;i<CLIPS.length;i++) if(CLIPS[i][0]===name) return CLIPS[i][1];
+    return name;
+  }
+
   function vcBuildRows(){
     var c=document.getElementById('vcRows');
     if(!c) return;
-    /* One raised .subsection per group (matching the other config pages),
-       each holding its own grid. Column widths are FIXED in .vc-grid so the
-       tables align across sections; the header row appears only in the first
-       section. */
+    /* Rows are derived purely from the static CLIPS table, so a rebuild can
+       only ever reproduce the same markup -- while destroying the per-clip
+       Custom/Default badges and Reset visibility that vcRefresh() painted from
+       /api/voice-clips. Callers that fire outside a fragment injection
+       (populateConfig's tab loop on Discard / backup restore) must therefore be
+       no-ops; a re-injected fragment brings a fresh empty container, so the
+       real build still runs. */
+    if(c.children.length) return;
+    /* One collapsible .card per group, each holding its own grid. Column
+       widths are FIXED in .vc-grid so the tables still align across cards;
+       the header row is repeated per card because each card collapses on its
+       own and a header left behind in the first one would be hidden. */
     var html='';
     var lastG=-1;
     CLIPS.forEach(function(cl){
       var n=cl[0];
       if(cl[2]!==lastG){
-        if(lastG!==-1) html+='</div></div>';   /* close previous grid + subsection */
+        if(lastG!==-1) html+='</div></div>';   /* close previous grid + card */
         lastG=cl[2];
-        html+='<div class="subsection"><div class="subsection-title">'+GROUPS[lastG]+'</div><div class="vc-grid">';
-        if(lastG===0){
-          html+='<div class="vc-head"></div><div class="vc-head">Status</div><div class="vc-head">Upload</div><div class="vc-head">Reset</div><div class="vc-head">Preview</div>';
-        }
+        html+='<div class="card" data-no-dirty><div class="card-title">'+
+              '<span class="card-title-label">'+GROUPS[lastG]+'</span></div>'+
+              '<div class="vc-grid">'+
+              '<div class="vc-head"></div><div class="vc-head">Status</div><div class="vc-head">Upload</div><div class="vc-head">Reset</div><div class="vc-head">Preview</div>';
       }
       html+=
         '<div class="vc-cell vc-name">'+
@@ -128,6 +184,10 @@
     });
     if(lastG!==-1) html+='</div></div>';
     c.innerHTML=html;
+    /* These cards are created after loadTabFragment()'s
+       initCollapsibleCards(panel) pass, so wire them here; the nodes for a
+       rebuild are always fresh, so this cannot double-attach a listener. */
+    if(typeof initCollapsibleCards==='function') initCollapsibleCards(c);
     var f=document.getElementById('vcFile');
     if(f && !f.dataset.wired){
       f.dataset.wired='1';
@@ -137,6 +197,158 @@
         if(file && _pending) vcUpload(_pending,file);
       });
     }
+    vsBuild();
+  }
+
+  /* ── Sentence preview ──────────────────────────────────────────────────────
+     Rows mirror build_sentence / build_event_sentence / build_conn_sentence in
+     main/audio_alert.c. Keep the composition below in step with those:
+       - every sentence starts with the chime clip;
+       - the warning clip is added for all three breaches and for event
+         categories 1 (equipment disconnect), 5 (meridian flip), 7 (safety) and
+         8 (error) -- never for link connect/disconnect;
+       - RMS/HFR speak the value digit by digit (see vsValueWords).
+     The text always shows the full wording; alert_voice_brief shortens what the
+     device actually says for RMS/HFR (user decision: not mirrored here). */
+  var SENT=[
+    {sec:'Breaches',  label:'RMS breach',            kind:'breach', type:'rms'},
+    {sec:'Breaches',  label:'HFR breach',            kind:'breach', type:'hfr'},
+    {sec:'Breaches',  label:'Safety breach',         kind:'breach', type:'safety'},
+    {sec:'Equipment', label:'Equipment connected',   kind:'event',  cat:0},
+    {sec:'Equipment', label:'Equipment disconnected',kind:'event',  cat:1},
+    {sec:'Events',    label:'Sequence event',        kind:'event',  cat:2},
+    {sec:'Events',    label:'Focuser event',         kind:'event',  cat:3},
+    {sec:'Events',    label:'Mount event',           kind:'event',  cat:4},
+    {sec:'Events',    label:'Meridian flip',         kind:'event',  cat:5},
+    {sec:'Events',    label:'Guider event',          kind:'event',  cat:6},
+    {sec:'Events',    label:'Safety event',          kind:'event',  cat:7},
+    {sec:'Events',    label:'Error reported',        kind:'event',  cat:8},
+    {sec:'Events',    label:'Profile changed',       kind:'event',  cat:9},
+    {sec:'Events',    label:'Dome event',            kind:'event',  cat:10},
+    {sec:'Events',    label:'Flat panel event',      kind:'event',  cat:11},
+    {sec:'NINA Link', label:'Link connected',        kind:'conn',   state:'connected'},
+    {sec:'NINA Link', label:'Link disconnected',     kind:'conn',   state:'disconnected'}
+  ];
+
+  function vsInst(){
+    var e=document.getElementById('vsInst');
+    var v=e?parseInt(e.value,10):1;
+    return (v>=1&&v<=3)?v:1;
+  }
+  function vsEquip(){
+    var e=document.getElementById('vsEquip');
+    var v=e?parseInt(e.value,10):0;
+    return (v>=0&&v<=10)?v:0;
+  }
+  function vsValue(){
+    var e=document.getElementById('vsValue');
+    var v=e?parseFloat(e.value):NaN;
+    if(isNaN(v)) v=2.5;
+    return Math.min(99.9,Math.max(0,v));
+  }
+
+  /* Mirrors push_value(): round to tenths, then one clip per digit with
+     "point" before the tenth. 2.5 -> "two point five". */
+  function vsValueWords(v){
+    var dig=vcTexts(3);
+    var tenths=v>0?Math.floor(v*10+0.5):0;
+    if(tenths>9999) tenths=9999;
+    var whole=Math.floor(tenths/10);
+    var w=[];
+    if(whole>=100) w.push(dig[Math.floor(whole/100)%10]);
+    if(whole>=10)  w.push(dig[Math.floor(whole/10)%10]);
+    w.push(dig[whole%10]);
+    w.push(vcText('point'));
+    w.push(dig[tenths%10]);
+    return w.join(' ');
+  }
+
+  function vsSentence(r){
+    var p=[];
+    var warn=(r.kind==='breach')||
+             (r.kind==='event'&&(r.cat===1||r.cat===5||r.cat===7||r.cat===8));
+    if(warn) p.push(vcText('warning')+'.');
+    p.push(vcTexts(1)[vsInst()-1]);
+    if(r.kind==='breach'){
+      if(r.type==='safety') p.push(vcText('unsafe'));
+      else{
+        p.push(vcText(r.type));
+        p.push(vsValueWords(vsValue()));
+        p.push(vcText('above_limit'));
+      }
+    }else if(r.kind==='event'){
+      if(r.cat<=1){
+        p.push(vcTexts(4)[vsEquip()]);
+        p.push(vcText(r.cat===0?'connected':'disconnected'));
+      }else{
+        p.push(vcTexts(5)[r.cat-2]);
+      }
+    }else{
+      p.push(vcText(r.state));
+    }
+    return '(chime) '+p.join(' ');
+  }
+
+  /* Query string is capped at 128 bytes server-side (voice_preview_post_handler);
+     these stay well under it. */
+  function vsUrl(r){
+    var base='/api/voice-preview?kind='+r.kind+'&instance='+vsInst();
+    if(r.kind==='breach') return base+'&type='+r.type+'&value='+vsValue();
+    if(r.kind==='conn')   return base+'&state='+r.state;
+    return base+'&category='+r.cat+(r.cat<=1?'&equipment='+vsEquip():'');
+  }
+
+  function vsPlay(i){
+    var r=SENT[i];
+    if(!r) return;
+    fetch(vsUrl(r),{method:'POST'})
+      .then(function(res){ if(!res.ok) showToast('Voice preview failed','error'); })
+      .catch(function(){ showToast('Voice preview failed','error'); });
+  }
+
+  function vsRender(){
+    SENT.forEach(function(r,i){
+      var el=document.getElementById('vs_'+i);
+      if(el) el.textContent='“'+vsSentence(r)+'”';
+    });
+  }
+
+  function vsBuild(){
+    var c=document.getElementById('vsRows');
+    if(!c) return;
+    var eq=document.getElementById('vsEquip');
+    if(eq && !eq.options.length){
+      eq.innerHTML=vcTexts(4).map(function(t,i){
+        return '<option value="'+i+'">'+t+'</option>';
+      }).join('');
+    }
+    var html='';
+    var lastSec='';
+    SENT.forEach(function(r,i){
+      if(r.sec!==lastSec){
+        if(lastSec) html+='</div>';
+        lastSec=r.sec;
+        html+='<div class="subsection"><div class="subsection-title">'+r.sec+'</div>';
+      }
+      html+='<div style="display:flex;align-items:center;gap:14px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,0.05)">'+
+              '<div style="flex:1;min-width:0">'+
+                '<div style="font-size:0.82rem">'+r.label+'</div>'+
+                '<div class="field-hint" id="vs_'+i+'" style="margin:0"></div>'+
+              '</div>'+
+              '<button type="button" class="vp-btn" title="Play on the device" aria-label="Play on the device" onclick="vsPlay('+i+')">&#9654;</button>'+
+            '</div>';
+    });
+    if(lastSec) html+='</div>';
+    c.innerHTML=html;
+    ['vsInst','vsEquip','vsValue'].forEach(function(id){
+      var e=document.getElementById(id);
+      if(e && !e.dataset.wired){
+        e.dataset.wired='1';
+        e.addEventListener('change',vsRender);
+        e.addEventListener('input',vsRender);
+      }
+    });
+    vsRender();
   }
 
   var _pending=null;
@@ -298,5 +510,6 @@
   window.vcPlay=vcPlay;
   window.vcReset=vcReset;
   window.vcResetAll=vcResetAll;
+  window.vsPlay=vsPlay;
 })();
 </script>
