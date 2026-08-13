@@ -904,9 +904,10 @@ function applyStatus(st, ns) {
  /* CPU + Storage: fields absent on older firmware -> CPU line falls back to the
     plain uptime caption, Storage tile stays hidden */
  if (st.cpu_load != null) {
-  cpuSub.textContent = 'CPU ' + Math.round(st.cpu_load) + '%' +
+  /* numeric values only (Math.round) -> safe for innerHTML */
+  cpuSub.innerHTML = 'CPU overall ' + Math.round(st.cpu_load) + '%' +
    ((st.cpu0 != null && st.cpu1 != null)
-    ? ' · C0 ' + Math.round(st.cpu0) + '% · C1 ' + Math.round(st.cpu1) + '%' : '');
+    ? '<br>Core 0 ' + Math.round(st.cpu0) + '%<br>Core 1 ' + Math.round(st.cpu1) + '%' : '');
  } else {
   cpuSub.textContent = 'Since last restart';
  }
