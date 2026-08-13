@@ -18,9 +18,6 @@ void settings_tabview_refresh(void);
 /** Re-apply current theme colors to all settings widgets. */
 void settings_tabview_apply_theme(void);
 
-/** @return true if the on-screen keyboard is currently visible. */
-bool settings_tabview_keyboard_active(void);
-
 /**
  * @brief Get or create the shared keyboard overlay for text input.
  * Tabs call this to get the keyboard reference.

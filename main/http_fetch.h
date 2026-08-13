@@ -10,10 +10,14 @@
  * and a PSRAM-backed response buffer, with optional persistent keep-alive
  * reuse across calls from the same task.
  *
- * NOT for: image streaming (GOES tiles, Spotify album art -- those decode
- * progressively into caller-managed buffers) or OTA binary download (goes
- * through esp_https_ota / ota_github.c's own 4KB chunked writer). Those
- * stay on their own hand-rolled paths.
+ * Binary bodies (GOES/solar tiles, NINA thumbnails, Spotify album art) go
+ * through http_fetch_binary() at the bottom of this header, which shares the
+ * same open/redirect/read shell but hands back a raw byte buffer instead of a
+ * NUL-terminated string.
+ *
+ * NOT for: OTA binary download (goes through esp_https_ota / ota_github.c's
+ * own 4KB chunked writer straight into the flash partition -- it never holds
+ * the image in RAM, so it stays on its own path).
  *
  * v3 seam note: NINA-specific URL building (/v2/api/ vs /v3/api/ path
  * prefixes), the response-envelope unwrap ({"Response":...,"Success":bool}),
@@ -33,6 +37,8 @@
 #include <stdint.h>
 #include "esp_err.h"
 #include "cJSON.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 /** Opaque persistent keep-alive slot; one per task that wants reuse. */
 typedef struct http_fetch_conn http_fetch_conn_t;
@@ -113,12 +119,73 @@ typedef struct {
 esp_err_t http_fetch_text(const char *url, const http_fetch_opts_t *opts,
                            char **out_body, size_t *out_len);
 
+/* ------------------------------------------------------------------------
+ * Binary streaming fetch (images)
+ * ---------------------------------------------------------------------- */
+
+/** What to do when the server's Content-Length exceeds opts->max_size.
+ *
+ * There is deliberately no "honour it anyway" policy: that lets one response
+ * header dictate the allocation size, which is the whole reason max_size
+ * exists. Pick CLAMP only where a truncated body is still useful. */
+typedef enum {
+    HTTP_BIN_OVERSIZE_CLAMP = 0, /**< read at most max_size bytes (GOES/solar tiles) */
+    HTTP_BIN_OVERSIZE_REJECT,    /**< fail before allocating (Spotify album art,
+                                   *  NINA thumbnail) */
+} http_fetch_oversize_t;
+
 /**
- * Convenience wrapper: http_fetch_text() + cJSON_Parse(). Returns NULL on
- * any failure (transport, HTTP status, or JSON parse). Caller must
- * cJSON_Delete() the result.
+ * Options for http_fetch_binary(). Zero-initialise and set what you need;
+ * max_size is the only required field.
  */
-cJSON *http_fetch_json(const char *url, const http_fetch_opts_t *opts);
+typedef struct {
+    int timeout_ms;            /**< 0 -> 8000 */
+    bool use_tls_bundle;       /**< true -> esp_crt_bundle_attach (HTTPS) */
+    int max_redirects;         /**< 0 = don't follow 30x */
+    int rx_buffer_size;        /**< esp_http_client rx buffer; 0 -> IDF default */
+    int tx_buffer_size;        /**< esp_http_client tx buffer; 0 -> IDF default */
+    size_t max_size;           /**< REQUIRED hard cap; see http_fetch_oversize_t */
+    size_t unknown_len_size;   /**< initial buffer when no Content-Length; 0 -> max_size */
+    size_t grow_step;          /**< realloc increment when the buffer fills; 0 = never grow */
+    http_fetch_oversize_t oversize;
+    bool shrink_to_fit;        /**< realloc down to the byte count actually read */
+    bool probe_overflow;       /**< with no Content-Length and the buffer exactly full,
+                                 *  read one more byte: if data remains the source
+                                 *  exceeded max_size -- fail rather than return a
+                                 *  silently truncated image */
+    bool require_full_length;  /**< fail when a non-chunked response delivered fewer
+                                 *  bytes than its Content-Length */
+    uint8_t *prealloc;         /**< optional scratch buffer used INSTEAD of a malloc
+                                 *  when the response fits, to avoid PSRAM churn.
+                                 *  Requires prealloc_lock. Never grown; the result is
+                                 *  copied out to a right-sized PSRAM allocation and
+                                 *  the lock is released before returning, so the
+                                 *  caller's ownership rules are the same either way. */
+    size_t prealloc_size;
+    SemaphoreHandle_t prealloc_lock;  /**< guards @ref prealloc; required to use it */
+    int prealloc_lock_wait_ms;        /**< take() timeout; on timeout the fetch falls
+                                        *  back to a plain PSRAM allocation */
+    const char *label;         /**< short subject for log lines ("Album art"); NULL -> "HTTP" */
+} http_fetch_binary_opts_t;
+
+/**
+ * Stream a binary HTTP GET body (JPEG/PNG/...) into a PSRAM buffer.
+ *
+ * Covers the shell that every image fetch on this device needs: client setup,
+ * open + fetch_headers, the manual redirect chain (esp_http_client's streaming
+ * path does NOT auto-follow; each hop closes the previous socket before
+ * re-opening, which matters against this board's ~9 concurrent connection
+ * ceiling), status check, sizing against a cap, the read loop, and cleanup.
+ * Payload validation (JPEG magic, dimensions, decode) stays with the caller.
+ *
+ * On ESP_OK, *out_buf is a PSRAM buffer the caller frees with heap_caps_free()
+ * and *out_len is its length. On failure both are left NULL/0 and nothing is
+ * leaked. Returns the esp_http_client error for a transport failure,
+ * ESP_ERR_NO_MEM for an allocation failure, ESP_FAIL otherwise (bad status,
+ * empty/short body, over cap).
+ */
+esp_err_t http_fetch_binary(const char *url, const http_fetch_binary_opts_t *opts,
+                             uint8_t **out_buf, size_t *out_len);
 
 /**
  * Create a persistent keep-alive slot for the calling task's poll loop.

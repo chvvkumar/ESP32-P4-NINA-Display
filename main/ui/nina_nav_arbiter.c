@@ -118,8 +118,6 @@ void nav_arbiter_notify_modal_close(int64_t now_ms) {
 
 void nav_arbiter_notify_slideshow_tick(void) { s_arb.slideshow_advance = true; }
 
-bool nav_arbiter_idle_active(void) { return s_arb.idle_claim_active; }
-
 void nav_arbiter_set_pin(bool on, int abs_page, int8_t img_src, int64_t now_ms) {
     if (on) {
         s_arb.pinned = true;

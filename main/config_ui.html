@@ -135,9 +135,6 @@
       display: flex; flex-direction: column; box-sizing: border-box;
       max-height: calc(100vh - var(--nav-height) - 148px);
     }
-    .logs-layout { display: flex; gap: 18px; align-items: stretch; }
-    .logs-controls { flex: 0 0 220px; display: flex; flex-direction: column; gap: 12px; }
-    .logs-controls .btn { width: 100%; }
     /* Logs card: horizontal toolbar layout */
     .logs-toolbar {
       display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
@@ -752,10 +749,6 @@
       from { opacity: 0; transform: translateY(-8px); }
       to { opacity: 1; transform: translateY(0); }
     }
-    .pn-divider {
-      height: 1px; margin: 22px 0;
-      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.06) 20%, rgba(255,255,255,0.06) 80%, transparent);
-    }
     .pn-sub-divider { height: 1px; background: rgba(255,255,255,0.04); margin: 4px 0; }
 
     /* Drag-to-reorder */
@@ -811,8 +804,6 @@
     /* === UTILITIES === */
     .row { display: flex; gap: 14px; align-items: flex-start; }
     .row > * { flex: 1; }
-    .flex-wrap-gap { display: flex; flex-wrap: wrap; gap: 12px; }
-    .flex-col-gap { display: flex; flex-direction: column; gap: 12px; }
     .color-swatch {
       width: 46px; height: 40px; padding: 0; border: 1px solid rgba(255, 255, 255, 0.1);
       background: none; border-radius: 10px; cursor: pointer;
@@ -890,8 +881,6 @@
       /* Logs: stack controls above the viewer on narrow screens, drop the breakout.
          Page scroll is acceptable on mobile, so the card is a plain block here. */
       #tab-logs .card { width: auto; margin-left: 0; transform: none; max-height: none; display: block; }
-      .logs-layout { flex-direction: column; }
-      .logs-controls { flex: 0 0 auto; }
       .logs-toolbar-slot { margin-left: 0; }
       #logsView.logs-view { height: 60vh; min-height: 300px; }
       #crashlogView.logs-view { height: auto; max-height: 60vh; }
@@ -1828,8 +1817,6 @@
       _colorTimer=setTimeout(()=>postJson('/api/color-brightness',{color_brightness:parseInt(v)}),150);
     }
 
-    function setPage(v){postJson('/api/page',{page:parseInt(v)})}
-
     /* === Page Navigation (Start Page + Auto Cycle) === */
     function buildStartPagePills(){
       var c=$('start-page-pills');
@@ -2572,7 +2559,6 @@
       $('auto_rotate_skip').checked=!!data.auto_rotate_skip_disconnected;
       if($('nav_grace_s')) $('nav_grace_s').value=(data.nav_grace_s||10);
       if(data.auto_rotate_order2) setRotateOrder(data.auto_rotate_order2);
-      else if(data.auto_rotate_order) setRotateOrder(data.auto_rotate_order);
 
       if($('idle_page_override_enabled')) $('idle_page_override_enabled').checked=!!data.idle_page_override_enabled;
       if($('idle_page_override_target')) $('idle_page_override_target').value=data.idle_page_override_target!=null?data.idle_page_override_target:0;
@@ -4250,10 +4236,12 @@
       return html;
     }
 
+    /* Single HTML escaper for the whole shell (fragments call it too).
+       Escapes quotes as well as &<> so it is safe in attribute context. */
     function escHtml(s){
-      var d=document.createElement('div');
-      d.textContent=s;
-      return d.innerHTML;
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+                      .replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+                      .replace(/'/g,'&#39;');
     }
 
     /* Fills the AllSky field-mapping input the user last focused with a path
@@ -4983,10 +4971,6 @@
         var n = notes[i];
         if (n && n.severity === 'error') errs.push(n.message);
         else if (n) warns.push(n.message);
-      }
-      function escHtml(s) {
-        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
-                        .replace(/>/g, '&gt;');
       }
       if (errs.length > 0 || warns.length > 0) {
         valDiv.style.display = 'block';

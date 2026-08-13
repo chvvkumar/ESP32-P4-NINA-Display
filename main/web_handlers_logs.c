@@ -221,17 +221,7 @@ esp_err_t coredump_info_get_handler(httpd_req_t *req)
     cJSON_AddStringToObject(root, "git_sha", BUILD_GIT_SHA);
     cJSON_AddStringToObject(root, "version", BUILD_VERSION);
 
-    const char *json_str = cJSON_PrintUnformatted(root);
-    if (!json_str) {
-        cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
-    free((void *)json_str);
-    cJSON_Delete(root);
-    return ESP_OK;
+    return send_json_response(req, root);
 }
 
 // Handler for downloading the raw core dump ELF from the coredump partition

@@ -316,8 +316,8 @@ typedef struct {
     // Added after v53 — must stay at end to preserve NVS binary compatibility
     // Spoken voice alerts over the onboard speaker. Gated independently of
     // alert_flash_enabled: either, both, or neither may be enabled.
-    uint8_t  alert_voice_enabled;      // master enable, 0 = off / 1 = on (default 0)
-    uint8_t  alert_voice_volume;       // speaker volume 0-100 (default 70)
+    uint8_t  alert_voice_enabled;      // master enable, 0 = off / 1 = on (default 1)
+    uint8_t  alert_voice_volume;       // speaker volume 0-100 (default 90)
     uint8_t  alert_voice_types;        // ALERT_VOICE_TYPE_* bitmask (default 7 = all three)
     uint8_t  alert_voice_repeat_min;   // re-announce period in minutes while still
                                        // breached, 0 = announce once only (default 5)
@@ -329,8 +329,7 @@ typedef struct {
 
     // Added after v55 — must stay at end to preserve NVS binary compatibility
     uint32_t voice_notify_mask;        // per-category voice alert mask, same bits as
-                                       // toast_notify_mask (default 0x1A2 =
-                                       // disconnects+meridian+safety+error)
+                                       // toast_notify_mask (default 0xFFF = all)
     uint8_t  boot_jingle_enabled;      // play the startup jingle once at boot,
                                        // 0 = off / 1 = on (default 1)
 
@@ -340,7 +339,7 @@ typedef struct {
 
     // Added after v57 — must stay at end to preserve NVS binary compatibility
     uint8_t  alert_voice_conn;         // announce NINA link connect, 0 = off / 1 = on
-                                       // (default 0)
+                                       // (default 1)
     uint8_t  alert_voice_disc;         // announce NINA link disconnect, 0 = off / 1 = on
                                        // (default 1)
 } app_config_t;
@@ -4093,6 +4092,14 @@ app_config_t *app_config_get(void);
  * (overflows small poll/UI task stacks). Snapshot into a PSRAM heap buffer. */
 void app_config_get_snapshot_into(app_config_t *dst);
 void app_config_save(const app_config_t *config);
+/* Same commit semantics as app_config_save(), but the ~350 ms NVS write is
+ * debounced: the values go live in RAM immediately and the flash write happens
+ * ~2 s after the LAST call, so a burst (an HA slider drag, a held keypad key)
+ * costs one write instead of one per step. Safe from any task. A reboot via
+ * esp_restart() flushes a pending write first (shutdown handler). */
+void app_config_save_deferred(const app_config_t *config);
+/* Write a pending deferred save to NVS now (no-op if nothing is pending). */
+void app_config_flush_deferred(void);
 void app_config_apply(const app_config_t *config);   // in-memory only, no NVS; marks dirty
 /* Same as app_config_apply(), but leaves the unsaved-changes flag exactly as it
  * found it (neither set nor cleared). For the "preview":true path of the

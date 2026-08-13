@@ -6,7 +6,6 @@
  * as a child of each page's exposure box.  This module only tracks state.
  *
  * nina_safety_update() can be called from any task (state is atomic).
- * nina_safety_is_safe() and nina_safety_is_connected() are lock-free reads.
  */
 
 #include "nina_safety.h"
@@ -35,12 +34,4 @@ void nina_safety_update(bool connected, bool is_safe) {
 
 void nina_safety_apply_theme(void) {
     /* Visual dot is managed by dashboard — no-op */
-}
-
-bool nina_safety_is_safe(void) {
-    return s_safe;
-}
-
-bool nina_safety_is_connected(void) {
-    return s_connected;
 }

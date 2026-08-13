@@ -35,6 +35,18 @@ extern _Atomic bool moon_anim_request;
 
 static const char *TAG = "image_display";
 
+/* Set a label only when the text actually changed. lv_label_set_text() always
+ * reallocates + invalidates, so the unconditional form dirtied six labels on
+ * every moon drag frame even though the strings change at most once a minute.
+ * File-local copy of the same helper in nina_dashboard_update.c / nina_summary.c
+ * (both static there). */
+static inline void set_label_if_changed(lv_obj_t *label, const char *text)
+{
+    if (!label) return;
+    const char *cur = lv_label_get_text(label);
+    if (!cur || strcmp(cur, text) != 0) lv_label_set_text(label, text);
+}
+
 /* Overlay label font — unconditionally compiled into the firmware
  * (see main/CMakeLists.txt), so it avoids any dependency on the
  * LV_FONT_MONTSERRAT_* Kconfig toggles.  All overlay labels (bottom phase /
@@ -292,10 +304,10 @@ static void update_moon_corner_labels(void)
     char age[20], next[20], rise[20], set[20];
     moon_overlay_info(age, sizeof(age), next, sizeof(next),
                       rise, sizeof(rise), set, sizeof(set));
-    lv_label_set_text(lbl_moon_age,  age);
-    lv_label_set_text(lbl_moon_next, next);
-    lv_label_set_text(lbl_moon_rise, rise);
-    lv_label_set_text(lbl_moon_set,  set);
+    set_label_if_changed(lbl_moon_age,  age);
+    set_label_if_changed(lbl_moon_next, next);
+    set_label_if_changed(lbl_moon_rise, rise);
+    set_label_if_changed(lbl_moon_set,  set);
     lv_obj_clear_flag(lbl_moon_age,  LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(lbl_moon_next, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(lbl_moon_rise, LV_OBJ_FLAG_HIDDEN);
@@ -872,8 +884,11 @@ void nina_image_display_show_scaled(const uint16_t *buf, int w, int h)
     memcpy(moon_copy_buf[ci], buf, need);
 
     /* Red Night: recolour the owned copy to red shades in place (self-gates to a
-     * no-op for non-red themes). A second remap of an already-red moon buffer
-     * leaves red as red, so calling unconditionally here is safe. */
+     * no-op for non-red themes). The remap is NOT idempotent — a second pass takes
+     * the luma of (R,0,0) and darkens the image ~0.30x — so callers must hand this
+     * function a NOT-yet-remapped source. The drag path (which remaps its 240x240
+     * source before the PPA upscale) routes its red-night PPA-failure fallback
+     * around this function for exactly that reason. */
     image_red_remap_rgb565(moon_copy_buf[ci], (size_t)w * h);
 
     /* Point the BACK slot at the owned copy. release_dsc() frees any prior OWNED
@@ -920,8 +935,8 @@ void nina_image_display_show_scaled(const uint16_t *buf, int w, int h)
                              char *pct_out, size_t pct_sz);
     char name[24], pct[16];
     moon_caption(name, sizeof(name), pct, sizeof(pct));
-    lv_label_set_text(lbl_region, name);
-    lv_label_set_text(lbl_timestamp, pct);
+    set_label_if_changed(lbl_region, name);
+    set_label_if_changed(lbl_timestamp, pct);
     update_moon_corner_labels();
 
     nina_wait_overlay_hide();
@@ -948,12 +963,11 @@ void nina_image_display_show_borrowed(const uint16_t *buf, int w, int h)
     lv_image_dsc_t *back_dsc = front_is_a ? &img_dsc_b : &img_dsc_a;
     release_dsc(back_dsc, back_is_a);          /* free prior OWNED buffer if any */
     size_t need = (size_t)w * h * 2;
-    /* Red Night: recolour the borrowed full-panel buffer in place (self-gates to a
-     * no-op for non-red themes). The moon renderer already remaps this buffer under
-     * red-night, so a second in-place remap leaves red as red — harmless. The buffer
-     * is mutable PSRAM owned by the moon-drag loop; the const here is only on the
-     * incoming pointer type. */
-    image_red_remap_rgb565((uint16_t *)buf, (size_t)w * h);
+    /* NO red-night remap here. The drag path remaps the small (240x240) render
+     * source before the PPA upscale, which is ~9x cheaper than remapping the
+     * 720x720 result on every frame. The remap is NOT idempotent (a second pass
+     * takes the luma of (R,0,0) and darkens the image ~0.30x), so remapping the
+     * already-remapped buffer here would visibly dim the disc. */
     back_dsc->data          = (const uint8_t *)buf;
     back_dsc->data_size     = need;
     back_dsc->header.magic  = LV_IMAGE_HEADER_MAGIC;
@@ -991,8 +1005,8 @@ void nina_image_display_show_borrowed(const uint16_t *buf, int w, int h)
                              char *pct_out, size_t pct_sz);
     char name[24], pct[16];
     moon_caption(name, sizeof(name), pct, sizeof(pct));
-    lv_label_set_text(lbl_region, name);
-    lv_label_set_text(lbl_timestamp, pct);
+    set_label_if_changed(lbl_region, name);
+    set_label_if_changed(lbl_timestamp, pct);
     update_moon_corner_labels();
 
     nina_wait_overlay_hide();

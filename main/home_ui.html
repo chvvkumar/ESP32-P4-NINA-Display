@@ -173,7 +173,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
 @keyframes ell{0%{content:''}25%{content:'.'}50%{content:'..'}75%{content:'...'}}
 .rig-empty{font-size:.75rem;color:var(--hint)}
 /* integrations */
-.integrations{display:flex;flex-wrap:wrap;gap:8px}
+.integrations{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .int-chip{display:inline-flex;align-items:center;gap:8px;font-size:.75rem;font-weight:600;color:var(--text-2);padding:7px 13px;border-radius:10px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.07);text-decoration:none;transition:border-color .2s}
 .int-chip:hover{border-color:rgba(255,255,255,.18)}
 .int-chip .ic{width:14px;height:14px;opacity:.75}
@@ -904,9 +904,10 @@ function applyStatus(st, ns) {
  /* CPU + Storage: fields absent on older firmware -> CPU line falls back to the
     plain uptime caption, Storage tile stays hidden */
  if (st.cpu_load != null) {
-  cpuSub.textContent = 'CPU ' + Math.round(st.cpu_load) + '%' +
+  /* numeric values only (Math.round) -> safe for innerHTML */
+  cpuSub.innerHTML = 'CPU overall ' + Math.round(st.cpu_load) + '%' +
    ((st.cpu0 != null && st.cpu1 != null)
-    ? ' · C0 ' + Math.round(st.cpu0) + '% · C1 ' + Math.round(st.cpu1) + '%' : '');
+    ? '<br>Core 0 ' + Math.round(st.cpu0) + '%<br>Core 1 ' + Math.round(st.cpu1) + '%' : '');
  } else {
   cpuSub.textContent = 'Since last restart';
  }

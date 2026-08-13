@@ -420,44 +420,6 @@ static void fixup_exposure_timing(nina_client_t *data) {
 // Public API
 // =============================================================================
 
-void nina_client_get_data(const char *base_url, nina_client_t *data) {
-    // Initialize
-    memset(data, 0, sizeof(nina_client_t));
-    data->connected = false;
-    strcpy(data->target_name, "No Target");
-    strcpy(data->status, "IDLE");
-    strcpy(data->meridian_flip, "--");
-    strcpy(data->profile_name, "NINA");
-    strcpy(data->current_filter, "--");
-    strcpy(data->time_remaining, "--");
-    data->target_time_remaining[0] = '\0';
-    data->target_time_reason[0] = '\0';
-    data->filter_count = 0;
-
-    ESP_LOGI(TAG, "=== Fetching NINA data (robust method) ===");
-
-    fetch_camera_info_robust(base_url, data);
-
-    if (data->connected) {
-        fetch_filter_robust_ex(base_url, data, true);
-        fetch_image_history_robust(base_url, data);
-        fetch_profile_robust(base_url, data);
-        fetch_guider_robust(base_url, data);
-        fetch_mount_robust(base_url, data);
-        fetch_focuser_robust(base_url, data);
-        fetch_sequence_counts_optional(base_url, data);
-
-        fixup_exposure_timing(data);
-    }
-
-    ESP_LOGI(TAG, "=== Data Summary ===");
-    ESP_LOGI(TAG, "Connected: %d, Profile: %s", data->connected, data->profile_name);
-    ESP_LOGI(TAG, "Target: %s, Filter: %s", data->target_name, data->current_filter);
-    ESP_LOGI(TAG, "Exposure: %.1fs (%.1f/%.1f)", data->exposure_total, data->exposure_current, data->exposure_total);
-    ESP_LOGI(TAG, "Camera: %.1fC (%.0f%% power)", data->camera.temp, data->camera.cooler_power);
-    ESP_LOGI(TAG, "Guiding: %.2f\", HFR: %.2f, Stars: %d", data->guider.rms_total, data->hfr, data->stars);
-}
-
 // =============================================================================
 // Tiered Polling API
 // =============================================================================
@@ -596,11 +558,11 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
             // Legacy: restore cached filters
             memcpy(data->filters, state->cached_filters, sizeof(data->filters));
             data->filter_count = state->cached_filter_count;
-        } else {
-            // Bundled: filters come fresh every cycle, update cache
-            memcpy(state->cached_filters, data->filters, sizeof(state->cached_filters));
-            state->cached_filter_count = data->filter_count;
         }
+        /* Bundled: no cache write here. The bundle only parses the filter list
+         * when include_static is set (first connect), and the list can only
+         * change on a profile change — which clears static_fetched and re-seeds
+         * the cache above. Copying it back every cycle was pure work. */
         nina_client_unlock(data);
     }
 
@@ -612,13 +574,19 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
 
         if (!data->websocket_connected) {
             /* Image count gate: only fetch full image-history if the count changed.
-             * Saves ~95% of fetches during long exposures (30-600s between changes). */
-            int img_count = fetch_image_count(base_url);
-            if (img_count >= 0 && img_count != state->cached_image_count) {
-                state->cached_image_count = img_count;
-                perf_timer_start(&g_perf.poll_image_history);
-                fetch_image_history_robust(base_url, data);
-                perf_timer_stop(&g_perf.poll_image_history);
+             * Saves ~95% of fetches during long exposures (30-600s between changes).
+             * The count probe itself runs on its own timer, not every fast cycle —
+             * a down WebSocket usually means a stressed link, and probing at
+             * update_rate_s doubled the request rate at exactly the wrong moment. */
+            if (now_ms - state->last_image_count_ms >= NINA_POLL_IMAGE_COUNT_MS) {
+                state->last_image_count_ms = now_ms;
+                int img_count = fetch_image_count(base_url);
+                if (img_count >= 0 && img_count != state->cached_image_count) {
+                    state->cached_image_count = img_count;
+                    perf_timer_start(&g_perf.poll_image_history);
+                    fetch_image_history_robust(base_url, data);
+                    perf_timer_stop(&g_perf.poll_image_history);
+                }
             }
             if (data->telescope_name[0] != '\0') {
                 snprintf(state->cached_telescope, sizeof(state->cached_telescope), "%s", data->telescope_name);
@@ -649,9 +617,12 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
         }
     } else {
         // --- BUNDLED: Only image history needs separate fetch (not in bundle) ---
-        if (!data->websocket_connected) {
+        if (!data->websocket_connected &&
+            now_ms - state->last_image_count_ms >= NINA_POLL_IMAGE_COUNT_MS) {
             /* Image count gate: lightweight count check (~50 bytes) before
-             * full image-history fetch (~400-800 bytes). */
+             * full image-history fetch (~400-800 bytes). Probed on its own timer
+             * so the WS-down fallback does not double the fast-cycle request rate. */
+            state->last_image_count_ms = now_ms;
             int img_count = fetch_image_count(base_url);
             if (img_count >= 0 && img_count != state->cached_image_count) {
                 state->cached_image_count = img_count;
@@ -791,11 +762,10 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
         if (state->bundle_not_available) {
             memcpy(data->filters, state->cached_filters, sizeof(data->filters));
             data->filter_count = state->cached_filter_count;
-        } else {
-            // Bundled: filters come fresh, update cache
-            memcpy(state->cached_filters, data->filters, sizeof(state->cached_filters));
-            state->cached_filter_count = data->filter_count;
         }
+        /* Bundled: cache seeded on connect / profile refresh above; the
+         * background tier fetches camera-only heartbeats and never refreshes
+         * the filter list, so re-copying it every cycle was a no-op. */
         nina_client_unlock(data);
     }
 
@@ -827,12 +797,19 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
 #include <sys/socket.h>
 #include <arpa/inet.h>
 
-#define DNS_CACHE_TTL_MS 60000  // 60-second TTL
+#define DNS_CACHE_TTL_MS 60000  // 60-second TTL for a successful lookup
+#define DNS_NEG_TTL_MS   10000  // 10-second TTL for a failed lookup
 
 typedef struct {
     char hostname[128];
     char resolved_ip[46];  // INET6_ADDRSTRLEN
     int64_t resolve_time_ms;
+    /* Time of the last failed lookup for this host (0 = none). A powered-off
+     * .lan rig is the normal daytime state here, and without this every poll
+     * wake burned a fresh getaddrinfo + resolver timeout against the ~9-socket
+     * ceiling. Within the negative TTL we reproduce what the failure path would
+     * have returned — stale IP if we ever resolved this host, else failure. */
+    int64_t fail_time_ms;
 } dns_cache_entry_t;
 
 static dns_cache_entry_t s_dns_cache[3];  // One per instance (MAX_NINA_INSTANCES)
@@ -870,16 +847,27 @@ bool nina_client_resolve_host(const char *host, char *ip_out, size_t ip_len) {
     bool dns_locked = (s_dns_mutex && xSemaphoreTake(s_dns_mutex, pdMS_TO_TICKS(5000)) == pdTRUE);
     if (dns_locked) {
         for (int i = 0; i < 3; i++) {
-            if (strcmp(s_dns_cache[i].hostname, host) == 0 &&
-                s_dns_cache[i].resolved_ip[0] != '\0') {
-                if (now_ms - s_dns_cache[i].resolve_time_ms < DNS_CACHE_TTL_MS) {
-                    snprintf(ip_out, ip_len, "%s", s_dns_cache[i].resolved_ip);
-                    ESP_LOGD(TAG, "DNS cache hit for %s -> %s", host, ip_out);
-                    xSemaphoreGive(s_dns_mutex);
-                    return true;
-                }
-                break;  // Found entry but expired — do fresh lookup
+            if (strcmp(s_dns_cache[i].hostname, host) != 0) continue;
+
+            bool have_ip = (s_dns_cache[i].resolved_ip[0] != '\0');
+            if (have_ip && now_ms - s_dns_cache[i].resolve_time_ms < DNS_CACHE_TTL_MS) {
+                snprintf(ip_out, ip_len, "%s", s_dns_cache[i].resolved_ip);
+                ESP_LOGD(TAG, "DNS cache hit for %s -> %s", host, ip_out);
+                xSemaphoreGive(s_dns_mutex);
+                return true;
             }
+            // Negative cache: recent failure — skip getaddrinfo and return what
+            // the failure path would have (stale success if any, else failure).
+            if (s_dns_cache[i].fail_time_ms != 0 &&
+                now_ms - s_dns_cache[i].fail_time_ms < DNS_NEG_TTL_MS) {
+                if (have_ip) {
+                    snprintf(ip_out, ip_len, "%s", s_dns_cache[i].resolved_ip);
+                }
+                ESP_LOGD(TAG, "DNS negative-cache hit for %s (stale ip=%d)", host, (int)have_ip);
+                xSemaphoreGive(s_dns_mutex);
+                return have_ip;
+            }
+            break;  // Found entry but expired — do fresh lookup
         }
         xSemaphoreGive(s_dns_mutex);
     }
@@ -915,6 +903,7 @@ bool nina_client_resolve_host(const char *host, char *ip_out, size_t ip_len) {
             snprintf(s_dns_cache[slot].hostname, sizeof(s_dns_cache[slot].hostname), "%s", host);
             snprintf(s_dns_cache[slot].resolved_ip, sizeof(s_dns_cache[slot].resolved_ip), "%s", ip_str);
             s_dns_cache[slot].resolve_time_ms = now_ms;
+            s_dns_cache[slot].fail_time_ms = 0;  // Host is back — drop the negative mark
 
             xSemaphoreGive(s_dns_mutex);
         }
@@ -931,10 +920,19 @@ bool nina_client_resolve_host(const char *host, char *ip_out, size_t ip_len) {
     // a failed take skips the stale-cache path and returns failure).
     dns_locked = (s_dns_mutex && xSemaphoreTake(s_dns_mutex, pdMS_TO_TICKS(5000)) == pdTRUE);
     if (dns_locked) {
+        // Mark the failure so the next DNS_NEG_TTL_MS worth of checks skip
+        // getaddrinfo entirely. Reuse this host's slot, else claim an empty one;
+        // never evict a live entry just to record a miss.
+        int slot = -1;
         for (int i = 0; i < 3; i++) {
-            if (strcmp(s_dns_cache[i].hostname, host) == 0 &&
-                s_dns_cache[i].resolved_ip[0] != '\0') {
-                snprintf(ip_out, ip_len, "%s", s_dns_cache[i].resolved_ip);
+            if (strcmp(s_dns_cache[i].hostname, host) == 0) { slot = i; break; }
+            if (slot < 0 && s_dns_cache[i].hostname[0] == '\0') slot = i;
+        }
+        if (slot >= 0) {
+            snprintf(s_dns_cache[slot].hostname, sizeof(s_dns_cache[slot].hostname), "%s", host);
+            s_dns_cache[slot].fail_time_ms = now_ms;
+            if (s_dns_cache[slot].resolved_ip[0] != '\0') {
+                snprintf(ip_out, ip_len, "%s", s_dns_cache[slot].resolved_ip);
                 ESP_LOGW(TAG, "DNS lookup failed for %s, using stale cache -> %s",
                          host, ip_out);
                 xSemaphoreGive(s_dns_mutex);
@@ -972,6 +970,7 @@ bool nina_client_dns_check(const char *base_url) {
 }
 
 #define MAX_IMAGE_SIZE (4 * 1024 * 1024)  // 4 MB cap for image downloads
+#define IMAGE_MAX_REDIRECTS 3             // Cap on manual Location-following hops
 
 /* Pre-allocated PSRAM buffer for image fetching — avoids repeated malloc/free
  * that fragments PSRAM during long soak sessions.  Only one thumbnail fetch
@@ -980,15 +979,47 @@ bool nina_client_dns_check(const char *base_url) {
 
 static uint8_t *s_image_fetch_buf = NULL;
 static SemaphoreHandle_t s_image_mutex = NULL;
+static portMUX_TYPE s_image_buf_mux = portMUX_INITIALIZER_UNLOCKED;
 
-void nina_client_init_image_buffers(void) {
-    s_image_fetch_buf = heap_caps_malloc(IMAGE_FETCH_BUF_SIZE, MALLOC_CAP_SPIRAM);
-    s_image_mutex = xSemaphoreCreateMutex();
-    if (!s_image_fetch_buf || !s_image_mutex) {
-        ESP_LOGE(TAG, "Failed to pre-allocate image fetch buffer");
-    } else {
-        ESP_LOGI(TAG, "Image fetch buffer pre-allocated: %dKB", IMAGE_FETCH_BUF_SIZE / 1024);
+/* Allocated on the first thumbnail fetch, never freed: a device whose user
+ * never taps a thumbnail should not pay 1 MB of PSRAM for the scratch buffer,
+ * and freeing it between taps would re-introduce exactly the fragmentation the
+ * pre-allocation exists to avoid.  Degrades cleanly: on failure both pointers
+ * stay NULL and http_fetch_binary falls back to its dynamic buffer, so the
+ * fetch still works and a later tap retries the allocation. */
+static void nina_client_ensure_image_buffer(void) {
+    static bool warned = false;
+    if (s_image_fetch_buf && s_image_mutex) return;
+
+    uint8_t *buf = heap_caps_malloc(IMAGE_FETCH_BUF_SIZE, MALLOC_CAP_SPIRAM);
+    SemaphoreHandle_t mtx = buf ? xSemaphoreCreateMutex() : NULL;
+    if (!buf || !mtx) {
+        if (buf) heap_caps_free(buf);
+        if (!warned) {
+            warned = true;
+            ESP_LOGW(TAG, "Image fetch buffer unavailable (%dKB) - using dynamic allocation",
+                     IMAGE_FETCH_BUF_SIZE / 1024);
+        }
+        return;
     }
+
+    /* Publish both pointers together; a concurrent first fetch that loses the
+     * race frees its own copy rather than leaking it. */
+    bool won;
+    portENTER_CRITICAL(&s_image_buf_mux);
+    won = (s_image_fetch_buf == NULL);
+    if (won) {
+        s_image_fetch_buf = buf;
+        s_image_mutex = mtx;
+    }
+    portEXIT_CRITICAL(&s_image_buf_mux);
+
+    if (!won) {
+        heap_caps_free(buf);
+        vSemaphoreDelete(mtx);
+        return;
+    }
+    ESP_LOGI(TAG, "Image fetch buffer allocated on first use: %dKB", IMAGE_FETCH_BUF_SIZE / 1024);
 }
 
 uint8_t *nina_client_fetch_prepared_image(const char *base_url, int width, int height, int quality, size_t *out_size) {
@@ -999,123 +1030,41 @@ uint8_t *nina_client_fetch_prepared_image(const char *base_url, int width, int h
 
     ESP_LOGI(TAG, "Fetching prepared image: %s", url);
 
-    esp_http_client_config_t config = {
-        .url = url,
+    nina_client_ensure_image_buffer();
+
+    /* Shared binary fetch shell: the 1 MB pre-allocated PSRAM buffer is used
+     * (under s_image_mutex) whenever the body fits, and its contents are copied
+     * out to a right-sized allocation before the lock is released; otherwise a
+     * plain PSRAM buffer grows in 256 KB steps up to MAX_IMAGE_SIZE.
+     *
+     * OVERSIZE_REJECT: a declared Content-Length above the 4 MB cap is refused
+     * before anything is allocated. A prepared thumbnail that large is invalid
+     * by construction (we asked for a resized, quality-capped JPEG), so the
+     * header is either broken or hostile; honouring it would let one response
+     * dictate a multi-megabyte PSRAM allocation, and a body clamped to the cap
+     * would be a truncated JPEG that cannot decode anyway. */
+    const http_fetch_binary_opts_t bopts = {
         .timeout_ms = 15000,
+        .max_redirects = IMAGE_MAX_REDIRECTS,
+        .max_size = MAX_IMAGE_SIZE,
+        .unknown_len_size = 256 * 1024,
+        .grow_step = 256 * 1024,
+        .oversize = HTTP_BIN_OVERSIZE_REJECT,
+        .require_full_length = true,
+        .prealloc = s_image_fetch_buf,
+        .prealloc_size = IMAGE_FETCH_BUF_SIZE,
+        .prealloc_lock = s_image_mutex,
+        .prealloc_lock_wait_ms = 100,
+        .label = "Image",
     };
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (!client) return NULL;
 
-    esp_err_t err = esp_http_client_open(client, 0);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to open HTTP connection for image");
-        esp_http_client_cleanup(client);
-        return NULL;
-    }
-
-    int content_length = esp_http_client_fetch_headers(client);
-    int status = esp_http_client_get_status_code(client);
-    if (status != 200) {
-        ESP_LOGE(TAG, "Image request failed with HTTP %d", status);
-        esp_http_client_cleanup(client);
-        return NULL;
-    }
-
-    bool chunked = esp_http_client_is_chunked_response(client);
-    ESP_LOGI(TAG, "Image response: content_length=%d, chunked=%d", content_length, chunked);
-
-    // Use pre-allocated buffer when available to avoid PSRAM fragmentation
-    bool using_static = false;
     uint8_t *buffer = NULL;
-    int buf_size = 0;
-
-    if (s_image_fetch_buf && s_image_mutex &&
-        xSemaphoreTake(s_image_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        int needed = (content_length > 0) ? content_length : (256 * 1024);
-        if (needed <= IMAGE_FETCH_BUF_SIZE) {
-            buffer = s_image_fetch_buf;
-            buf_size = IMAGE_FETCH_BUF_SIZE;
-            using_static = true;
-        } else {
-            xSemaphoreGive(s_image_mutex);
-        }
-    }
-
-    if (!buffer) {
-        // Fallback to dynamic allocation
-        buf_size = (content_length > 0) ? content_length : (256 * 1024);
-        buffer = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
-        if (!buffer) {
-            ESP_LOGE(TAG, "Failed to allocate %d bytes for image", buf_size);
-            esp_http_client_cleanup(client);
-            return NULL;
-        }
-    }
-
-    int total_read = 0, read_len;
-    while (1) {
-        int to_read = buf_size - total_read;
-        if (to_read <= 0) {
-            if (using_static) {
-                // Static buffer full — can't grow it, abort
-                ESP_LOGW(TAG, "Image exceeds pre-allocated buffer (%d bytes)", buf_size);
-                xSemaphoreGive(s_image_mutex);
-                esp_http_client_cleanup(client);
-                return NULL;
-            }
-            int new_size = buf_size + (256 * 1024);
-            if (new_size > MAX_IMAGE_SIZE) {
-                ESP_LOGW(TAG, "Image exceeds %d byte cap, aborting fetch", MAX_IMAGE_SIZE);
-                free(buffer);
-                esp_http_client_cleanup(client);
-                return NULL;
-            }
-            uint8_t *new_buf = heap_caps_realloc(buffer, new_size, MALLOC_CAP_SPIRAM);
-            if (!new_buf) {
-                ESP_LOGE(TAG, "Failed to grow image buffer to %d", new_size);
-                free(buffer);
-                esp_http_client_cleanup(client);
-                return NULL;
-            }
-            buffer = new_buf;
-            buf_size = new_size;
-            to_read = buf_size - total_read;
-        }
-        read_len = esp_http_client_read(client, (char *)buffer + total_read, to_read);
-        if (read_len <= 0) break;
-        total_read += read_len;
-    }
-
-    esp_http_client_cleanup(client);
-
-    if (total_read == 0) {
-        ESP_LOGE(TAG, "No image data received");
-        if (!using_static) free(buffer);
-        else xSemaphoreGive(s_image_mutex);
+    size_t total_read = 0;
+    if (http_fetch_binary(url, &bopts, &buffer, &total_read) != ESP_OK) {
         return NULL;
     }
 
-    if (!chunked && total_read < content_length) {
-        ESP_LOGE(TAG, "Incomplete image read: %d/%d", total_read, content_length);
-        if (!using_static) free(buffer);
-        else xSemaphoreGive(s_image_mutex);
-        return NULL;
-    }
-
-    // If using static buffer, copy to a right-sized allocation for the caller
-    uint8_t *result = buffer;
-    if (using_static) {
-        result = heap_caps_malloc(total_read, MALLOC_CAP_SPIRAM);
-        if (!result) {
-            ESP_LOGE(TAG, "Failed to allocate %d bytes for image result", total_read);
-            xSemaphoreGive(s_image_mutex);
-            return NULL;
-        }
-        memcpy(result, s_image_fetch_buf, total_read);
-        xSemaphoreGive(s_image_mutex);
-    }
-
-    *out_size = (size_t)total_read;
-    ESP_LOGI(TAG, "Image fetched: %d bytes", total_read);
-    return result;
+    *out_size = total_read;
+    ESP_LOGI(TAG, "Image fetched: %u bytes", (unsigned)total_read);
+    return buffer;
 }

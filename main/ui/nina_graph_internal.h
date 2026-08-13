@@ -12,7 +12,6 @@
 #include "nina_dashboard_internal.h"
 
 /* Layout constants */
-#define GR_HEADER_H     64
 #define GR_CONTROLS_H   108
 #define GR_PAD          12
 #define GR_CHART_PAD    8

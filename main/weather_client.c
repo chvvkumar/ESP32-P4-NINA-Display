@@ -14,6 +14,7 @@
 
 #include "ui/nina_clock.h"
 #include "http_fetch.h"
+#include "json_get.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
@@ -105,6 +106,17 @@ static void str_to_upper(char *s) {
     for (; *s; s++) *s = toupper((unsigned char)*s);
 }
 
+/* A cJSON array is a linked list, so cJSON_GetArrayItem() re-walks from the
+ * head on every call — an indexed loop over one is O(n^2). Seek once to the
+ * start index, then advance with ->next inside the loop. Returns NULL when the
+ * array is shorter than n, matching cJSON_GetArrayItem()'s out-of-range
+ * behaviour. */
+static cJSON *array_seek(const cJSON *arr, int n) {
+    cJSON *it = arr ? arr->child : NULL;
+    while (it && n-- > 0) it = it->next;
+    return it;
+}
+
 // =============================================================================
 // HTTP fetch helper — returns PSRAM-allocated buffer, caller must
 // heap_caps_free()
@@ -178,23 +190,18 @@ static bool fetch_owm(const app_config_t *cfg, weather_data_t *out) {
         return false;
     }
 
-    cJSON *temp_item = cJSON_GetObjectItem(main_obj, "temp");
-    cJSON *temp_max  = cJSON_GetObjectItem(main_obj, "temp_max");
-    cJSON *temp_min  = cJSON_GetObjectItem(main_obj, "temp_min");
-    cJSON *hum_item  = cJSON_GetObjectItem(main_obj, "humidity");
-
-    out->temp_current = temp_item  ? (float)temp_item->valuedouble  : 0.0f;
-    out->temp_high    = temp_max   ? (float)temp_max->valuedouble   : out->temp_current;
-    out->temp_low     = temp_min   ? (float)temp_min->valuedouble   : out->temp_current;
-    out->humidity     = hum_item   ? (float)hum_item->valuedouble   : 0.0f;
+    /* temp_current first: it is the fallback for the high/low pair. */
+    out->temp_current = json_num_or(main_obj, "temp", 0.0f);
+    out->temp_high    = json_num_or(main_obj, "temp_max", out->temp_current);
+    out->temp_low     = json_num_or(main_obj, "temp_min", out->temp_current);
+    out->humidity     = json_num_or(main_obj, "humidity", 0.0f);
 
     /* Dew point approximation */
     out->dew_point = out->temp_current - ((100.0f - out->humidity) / 5.0f);
 
     if (wind_obj) {
-        cJSON *ws = cJSON_GetObjectItem(wind_obj, "speed");
         cJSON *wd = cJSON_GetObjectItem(wind_obj, "deg");
-        out->wind_speed = ws ? (float)ws->valuedouble : 0.0f;
+        out->wind_speed = json_num_or(wind_obj, "speed", 0.0f);
         if (wd) {
             deg_to_compass((float)wd->valuedouble, out->wind_dir, sizeof(out->wind_dir));
         } else {
@@ -247,14 +254,13 @@ static bool fetch_owm(const app_config_t *cfg, weather_data_t *out) {
         out->hourly_hours[0] = (uint8_t)tm_now.tm_hour;
 
         /* Slots 1..9: 3-hour forecast entries */
-        for (int i = 0; i < count; i++) {
-            cJSON *entry = cJSON_GetArrayItem(list, i);
-            cJSON *dt    = cJSON_GetObjectItem(entry, "dt");
-            cJSON *m     = cJSON_GetObjectItem(entry, "main");
-            cJSON *t     = m ? cJSON_GetObjectItem(m, "temp") : NULL;
-            if (t) {
-                out->hourly_temps[i + 1] = (float)t->valuedouble;
-            }
+        int i = -1;
+        cJSON *entry = NULL;
+        cJSON_ArrayForEach(entry, list) {
+            if (++i >= count) break;
+            cJSON *dt = cJSON_GetObjectItem(entry, "dt");
+            JSON_GET_FLOAT(cJSON_GetObjectItem(entry, "main"), "temp",
+                           out->hourly_temps[i + 1]);
             if (dt) {
                 time_t ts = (time_t)dt->valuedouble;
                 struct tm tm_info;
@@ -324,17 +330,13 @@ static bool fetch_open_meteo(const app_config_t *cfg, weather_data_t *out) {
         return false;
     }
 
-    cJSON *ct  = cJSON_GetObjectItem(current, "temperature_2m");
-    cJSON *ch  = cJSON_GetObjectItem(current, "relative_humidity_2m");
     cJSON *cwc = cJSON_GetObjectItem(current, "weather_code");
-    cJSON *cws = cJSON_GetObjectItem(current, "wind_speed_10m");
     cJSON *cwd = cJSON_GetObjectItem(current, "wind_direction_10m");
-    cJSON *cdp = cJSON_GetObjectItem(current, "dew_point_2m");
 
-    out->temp_current = ct  ? (float)ct->valuedouble  : 0.0f;
-    out->humidity     = ch  ? (float)ch->valuedouble  : 0.0f;
-    out->wind_speed   = cws ? (float)cws->valuedouble : 0.0f;
-    out->dew_point    = cdp ? (float)cdp->valuedouble : 0.0f;
+    out->temp_current = json_num_or(current, "temperature_2m", 0.0f);
+    out->humidity     = json_num_or(current, "relative_humidity_2m", 0.0f);
+    out->wind_speed   = json_num_or(current, "wind_speed_10m", 0.0f);
+    out->dew_point    = json_num_or(current, "dew_point_2m", 0.0f);
 
     if (cwd) {
         deg_to_compass((float)cwd->valuedouble, out->wind_dir, sizeof(out->wind_dir));
@@ -364,40 +366,46 @@ static bool fetch_open_meteo(const app_config_t *cfg, weather_data_t *out) {
         /* Find the index of the current hour in the hourly array.
          * Open-Meteo returns ISO-8601 strings like "2026-03-22T14:00" */
         int start_idx = -1;
-        for (int i = 0; i < h_count; i++) {
-            cJSON *t_item = cJSON_GetArrayItem(h_time, i);
-            if (!t_item || !cJSON_IsString(t_item)) continue;
+        int idx = 0;
+        cJSON *t_item = NULL;
+        cJSON_ArrayForEach(t_item, h_time) {
             /* Parse hour from "YYYY-MM-DDTHH:MM" */
-            const char *ts = t_item->valuestring;
-            int len = strlen(ts);
-            if (len < 13) continue;
-            /* Extract hour: position 11-12 */
-            int h = (ts[11] - '0') * 10 + (ts[12] - '0');
-            /* Extract day to match: position 8-9 */
-            int d = (ts[8] - '0') * 10 + (ts[9] - '0');
-            if (d == tm_now.tm_mday && h == cur_hour) {
-                start_idx = i;
-                break;
+            if (cJSON_IsString(t_item) && strlen(t_item->valuestring) >= 13) {
+                const char *ts = t_item->valuestring;
+                /* Extract hour: position 11-12 */
+                int h = (ts[11] - '0') * 10 + (ts[12] - '0');
+                /* Extract day to match: position 8-9 */
+                int d = (ts[8] - '0') * 10 + (ts[9] - '0');
+                if (d == tm_now.tm_mday && h == cur_hour) {
+                    start_idx = idx;
+                    break;
+                }
             }
+            idx++;
         }
 
         /* Fill next 10 hourly slots */
         if (start_idx >= 0 && h_temp) {
+            cJSON *tv = array_seek(h_temp, start_idx);
+            cJSON *ti = array_seek(h_time, start_idx);
             for (int i = 0; i < 10 && (start_idx + i) < h_count; i++) {
-                cJSON *tv = cJSON_GetArrayItem(h_temp, start_idx + i);
-                if (tv) out->hourly_temps[i] = (float)tv->valuedouble;
-
-                cJSON *ti = cJSON_GetArrayItem(h_time, start_idx + i);
-                if (ti && cJSON_IsString(ti) && strlen(ti->valuestring) >= 13) {
-                    out->hourly_hours[i] = (uint8_t)((ti->valuestring[11] - '0') * 10
-                                                      + (ti->valuestring[12] - '0'));
+                if (tv) {
+                    out->hourly_temps[i] = (float)tv->valuedouble;
+                    tv = tv->next;
+                }
+                if (ti) {
+                    if (cJSON_IsString(ti) && strlen(ti->valuestring) >= 13) {
+                        out->hourly_hours[i] = (uint8_t)((ti->valuestring[11] - '0') * 10
+                                                          + (ti->valuestring[12] - '0'));
+                    }
+                    ti = ti->next;
                 }
             }
         }
 
         /* UV index: take max from first UV entry at current hour */
         if (h_uv && start_idx >= 0) {
-            cJSON *uv_item = cJSON_GetArrayItem(h_uv, start_idx);
+            cJSON *uv_item = array_seek(h_uv, start_idx);
             out->uv_index = uv_item ? (float)uv_item->valuedouble : -1.0f;
         }
 
@@ -406,27 +414,34 @@ static bool fetch_open_meteo(const app_config_t *cfg, weather_data_t *out) {
             float hi = -1000.0f, lo = 1000.0f;
             /* Find first index for today */
             int day_start = -1;
-            for (int i = 0; i < h_count; i++) {
-                cJSON *t_item = cJSON_GetArrayItem(h_time, i);
-                if (!t_item || !cJSON_IsString(t_item) || strlen(t_item->valuestring) < 10) continue;
-                int d = (t_item->valuestring[8] - '0') * 10 + (t_item->valuestring[9] - '0');
-                if (d == tm_now.tm_mday) {
-                    day_start = i;
-                    break;
+            int d_idx = 0;
+            cJSON *d_item = NULL;
+            cJSON_ArrayForEach(d_item, h_time) {
+                if (cJSON_IsString(d_item) && strlen(d_item->valuestring) >= 10) {
+                    int d = (d_item->valuestring[8] - '0') * 10 + (d_item->valuestring[9] - '0');
+                    if (d == tm_now.tm_mday) {
+                        day_start = d_idx;
+                        break;
+                    }
                 }
+                d_idx++;
             }
             if (day_start >= 0) {
+                cJSON *ht = array_seek(h_time, day_start);
+                cJSON *tv = array_seek(h_temp, day_start);
                 for (int i = day_start; i < h_count && i < day_start + 24; i++) {
-                    cJSON *t_item = cJSON_GetArrayItem(h_time, i);
-                    if (t_item && cJSON_IsString(t_item) && strlen(t_item->valuestring) >= 10) {
-                        int d = (t_item->valuestring[8] - '0') * 10 + (t_item->valuestring[9] - '0');
-                        if (d != tm_now.tm_mday) break;
+                    if (ht) {
+                        if (cJSON_IsString(ht) && strlen(ht->valuestring) >= 10) {
+                            int d = (ht->valuestring[8] - '0') * 10 + (ht->valuestring[9] - '0');
+                            if (d != tm_now.tm_mday) break;
+                        }
+                        ht = ht->next;
                     }
-                    cJSON *tv = cJSON_GetArrayItem(h_temp, i);
                     if (tv) {
                         float v = (float)tv->valuedouble;
                         if (v > hi) hi = v;
                         if (v < lo) lo = v;
+                        tv = tv->next;
                     }
                 }
                 out->temp_high = (hi > -999.0f) ? hi : out->temp_current;
@@ -479,17 +494,12 @@ static bool fetch_wunderground(const app_config_t *cfg, weather_data_t *out) {
     const char *units_key = (cfg->weather_units == 0) ? "imperial" : "metric";
     cJSON *u = cJSON_GetObjectItem(obs0, units_key);
     if (u) {
-        cJSON *t  = cJSON_GetObjectItem(u, "temp");
-        cJSON *dp = cJSON_GetObjectItem(u, "dewpt");
-        cJSON *ws = cJSON_GetObjectItem(u, "windSpeed");
-
-        out->temp_current = t  ? (float)t->valuedouble  : 0.0f;
-        out->dew_point    = dp ? (float)dp->valuedouble  : 0.0f;
-        out->wind_speed   = ws ? (float)ws->valuedouble  : 0.0f;
+        out->temp_current = json_num_or(u, "temp", 0.0f);
+        out->dew_point    = json_num_or(u, "dewpt", 0.0f);
+        out->wind_speed   = json_num_or(u, "windSpeed", 0.0f);
     }
 
-    cJSON *hum = cJSON_GetObjectItem(obs0, "humidity");
-    out->humidity = hum ? (float)hum->valuedouble : 0.0f;
+    out->humidity = json_num_or(obs0, "humidity", 0.0f);
 
     cJSON *winddir = cJSON_GetObjectItem(obs0, "winddir");
     if (winddir) {
@@ -500,8 +510,7 @@ static bool fetch_wunderground(const app_config_t *cfg, weather_data_t *out) {
     out->condition[0] = '\0';
 
     /* UV is at the top level of the PWS observation */
-    cJSON *uv = cJSON_GetObjectItem(obs0, "uv");
-    out->uv_index = (uv && cJSON_IsNumber(uv)) ? (float)uv->valuedouble : -1.0f;
+    out->uv_index = json_num_or(obs0, "uv", -1.0f);
 
     /* High/low not in PWS current — set defaults, updated by forecast below */
     out->temp_high = out->temp_current;
@@ -537,10 +546,12 @@ static bool fetch_wunderground(const app_config_t *cfg, weather_data_t *out) {
                 struct tm tm_now;
                 localtime_r(&now, &tm_now);
 
-                for (int i = 0; i < count; i++) {
-                    cJSON *tv = cJSON_GetArrayItem(temps, i);
-                    if (tv) out->hourly_temps[i] = (float)tv->valuedouble;
-                    out->hourly_hours[i] = (uint8_t)((tm_now.tm_hour + i) % 24);
+                int slot = -1;
+                cJSON *tv = NULL;
+                cJSON_ArrayForEach(tv, temps) {
+                    if (++slot >= count) break;
+                    out->hourly_temps[slot] = (float)tv->valuedouble;
+                    out->hourly_hours[slot] = (uint8_t)((tm_now.tm_hour + slot) % 24);
                 }
 
                 /* Update high/low from forecast */
@@ -586,30 +597,36 @@ static bool fetch_wunderground(const app_config_t *cfg, weather_data_t *out) {
                     localtime_r(&now, &tm_now);
 
                     int start_idx = -1;
-                    for (int i = 0; i < h_count; i++) {
-                        cJSON *t_item = cJSON_GetArrayItem(h_time, i);
-                        if (!t_item || !cJSON_IsString(t_item)) continue;
-                        const char *ts = t_item->valuestring;
-                        int len = strlen(ts);
-                        if (len < 13) continue;
-                        int h = (ts[11] - '0') * 10 + (ts[12] - '0');
-                        int d = (ts[8] - '0') * 10 + (ts[9] - '0');
-                        if (d == tm_now.tm_mday && h == tm_now.tm_hour) {
-                            start_idx = i;
-                            break;
+                    int idx = 0;
+                    cJSON *t_item = NULL;
+                    cJSON_ArrayForEach(t_item, h_time) {
+                        if (cJSON_IsString(t_item) && strlen(t_item->valuestring) >= 13) {
+                            const char *ts = t_item->valuestring;
+                            int h = (ts[11] - '0') * 10 + (ts[12] - '0');
+                            int d = (ts[8] - '0') * 10 + (ts[9] - '0');
+                            if (d == tm_now.tm_mday && h == tm_now.tm_hour) {
+                                start_idx = idx;
+                                break;
+                            }
                         }
+                        idx++;
                     }
 
                     if (start_idx >= 0 && h_temp) {
+                        cJSON *tv = array_seek(h_temp, start_idx);
+                        cJSON *ti = array_seek(h_time, start_idx);
                         for (int i = 0; i < 10 && (start_idx + i) < h_count; i++) {
-                            cJSON *tv = cJSON_GetArrayItem(h_temp, start_idx + i);
-                            if (tv) out->hourly_temps[i] = (float)tv->valuedouble;
-
-                            cJSON *ti = cJSON_GetArrayItem(h_time, start_idx + i);
-                            if (ti && cJSON_IsString(ti) && strlen(ti->valuestring) >= 13) {
-                                out->hourly_hours[i] = (uint8_t)(
-                                    (ti->valuestring[11] - '0') * 10 +
-                                    (ti->valuestring[12] - '0'));
+                            if (tv) {
+                                out->hourly_temps[i] = (float)tv->valuedouble;
+                                tv = tv->next;
+                            }
+                            if (ti) {
+                                if (cJSON_IsString(ti) && strlen(ti->valuestring) >= 13) {
+                                    out->hourly_hours[i] = (uint8_t)(
+                                        (ti->valuestring[11] - '0') * 10 +
+                                        (ti->valuestring[12] - '0'));
+                                }
+                                ti = ti->next;
                             }
                         }
                         got_forecast = true;
@@ -617,7 +634,7 @@ static bool fetch_wunderground(const app_config_t *cfg, weather_data_t *out) {
 
                     /* UV index from Open-Meteo */
                     if (h_uv && start_idx >= 0) {
-                        cJSON *uv_item = cJSON_GetArrayItem(h_uv, start_idx);
+                        cJSON *uv_item = array_seek(h_uv, start_idx);
                         if (uv_item) out->uv_index = (float)uv_item->valuedouble;
                     }
                 }

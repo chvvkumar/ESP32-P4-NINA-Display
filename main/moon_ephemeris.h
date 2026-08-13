@@ -32,11 +32,6 @@ typedef struct {
  * north-up convention orientation is returned (have_location=false). */
 void moon_compute(time_t utc, double lat, double lon, moon_state_t *out);
 
-/* Build a moon_state_t from a synodic cycle fraction (0=new, 0.5=full) and a
- * supplied orientation, without any ephemeris computation. Used for animating
- * through the moon cycle. */
-void moon_state_from_cycle(double cycle, float orient_rad, moon_state_t *out);
-
 /* Compute the current/next moon up-period relative to `now`.
  * lat/lon are observer coordinates in decimal degrees.
  * If lat==0.0 && lon==0.0 (location unset) both events are marked invalid.

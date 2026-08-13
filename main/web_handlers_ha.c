@@ -99,18 +99,7 @@ esp_err_t ha_config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "ha_update_interval_s",  cfg->ha_update_interval_s);
     cJSON_AddStringToObject(root, "ha_tiles_config",       app_config_get_ha_tiles());
 
-    const char *json_str = cJSON_PrintUnformatted(root);
-    if (json_str == NULL) {
-        cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
-
-    free((void *)json_str);
-    cJSON_Delete(root);
-    return ESP_OK;
+    return send_json_response(req, root);
 }
 
 /**
@@ -165,13 +154,11 @@ esp_err_t ha_config_post_handler(httpd_req_t *req)
     /* Preview: apply live, persist nothing. Absent/false => save as before. */
     bool preview = cJSON_IsTrue(cJSON_GetObjectItem(root, "preview"));
 
-    app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    app_config_t *cfg = config_snapshot_for_request(req);
     if (!cfg) {
         cJSON_Delete(root);
-        httpd_resp_send_500(req);
         return ESP_FAIL;
     }
-    app_config_get_snapshot_into(cfg);
 
     JSON_TO_BOOL(root,   "ha_enabled",           cfg->ha_enabled);
     JSON_TO_STRING(root, "ha_base_url",          cfg->ha_base_url);
@@ -225,17 +212,16 @@ esp_err_t ha_config_post_handler(httpd_req_t *req)
  *
  * @p base must be HA_BASE_BUF bytes, @p token HA_TOKEN_BUF bytes; both are always
  * NUL-terminated on a true return. Returns false only when the PSRAM config copy
- * could not be allocated (caller sends 500). The config copy is heap-allocated in
- * PSRAM and freed before returning -- app_config_t is ~7.6 KB and must never sit
- * on the httpd stack.
+ * could not be allocated, in which case the 500 has ALREADY been sent and the
+ * caller just returns ESP_FAIL. The config copy is freed before returning --
+ * app_config_t is ~8.6 KB and must never sit on the httpd stack.
  */
 static bool ha_resolve_credentials(httpd_req_t *req, char *base, char *token)
 {
-    app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    app_config_t *cfg = config_snapshot_for_request(req);
     if (!cfg) {
         return false;
     }
-    app_config_get_snapshot_into(cfg);
     strlcpy(base, cfg->ha_base_url, HA_BASE_BUF);
     strlcpy(token, cfg->ha_token, HA_TOKEN_BUF);
     heap_caps_free(cfg);
@@ -274,8 +260,7 @@ esp_err_t ha_probe_get_handler(httpd_req_t *req)
     char base[HA_BASE_BUF];
     char token[HA_TOKEN_BUF];
     if (!ha_resolve_credentials(req, base, token)) {
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
+        return ESP_FAIL;   /* 500 already sent */
     }
 
     /* Read the ?entity=<entity_id> query parameter. */
@@ -306,18 +291,7 @@ esp_err_t ha_probe_get_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
-    const char *body = cJSON_PrintUnformatted(ent);
-    if (body == NULL) {
-        cJSON_Delete(ent);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, body, HTTPD_RESP_USE_STRLEN);
-
-    free((void *)body);
-    cJSON_Delete(ent);
-    return ESP_OK;
+    return send_json_response(req, ent);
 }
 
 /**
@@ -344,8 +318,7 @@ esp_err_t ha_test_get_handler(httpd_req_t *req)
     char base[HA_BASE_BUF];
     char token[HA_TOKEN_BUF];
     if (!ha_resolve_credentials(req, base, token)) {
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
+        return ESP_FAIL;   /* 500 already sent */
     }
     if (base[0] == '\0') {
         httpd_resp_set_status(req, "400 Bad Request");
@@ -402,16 +375,5 @@ esp_err_t ha_test_get_handler(httpd_req_t *req)
         cJSON_Delete(upstream);
     }
 
-    const char *out = cJSON_PrintUnformatted(root);
-    if (out == NULL) {
-        cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, out, HTTPD_RESP_USE_STRLEN);
-
-    free((void *)out);
-    cJSON_Delete(root);
-    return ESP_OK;
+    return send_json_response(req, root);
 }

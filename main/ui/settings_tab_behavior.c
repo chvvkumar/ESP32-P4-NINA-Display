@@ -152,14 +152,22 @@ static void deep_sleep_toggle_cb(lv_event_t *e) {
     settings_mark_dirty(false);
 }
 
+/* The wake timer is stored in seconds but only ever presented and stepped in
+ * whole hours, so the seconds->hours divide and the label text live in one
+ * place. Self-guards on the label so the load path can call it unconditionally. */
+static void wake_timer_label_refresh(const app_config_t *cfg) {
+    if (!lbl_wake_timer) return;
+    lv_label_set_text_fmt(lbl_wake_timer, "%lu h",
+                          (unsigned long)(cfg->deep_sleep_wake_timer_s / 3600));
+}
+
 static void wake_timer_minus_cb(lv_event_t *e) {
     LV_UNUSED(e);
     app_config_t *cfg = app_config_get();
     uint32_t hours = cfg->deep_sleep_wake_timer_s / 3600;
     if (hours > 0) {
-        hours--;
-        cfg->deep_sleep_wake_timer_s = hours * 3600;
-        lv_label_set_text_fmt(lbl_wake_timer, "%lu h", (unsigned long)hours);
+        cfg->deep_sleep_wake_timer_s = (hours - 1) * 3600;
+        wake_timer_label_refresh(cfg);
         settings_mark_dirty(false);
     }
 }
@@ -169,9 +177,8 @@ static void wake_timer_plus_cb(lv_event_t *e) {
     app_config_t *cfg = app_config_get();
     uint32_t hours = cfg->deep_sleep_wake_timer_s / 3600;
     if (hours < 72) {
-        hours++;
-        cfg->deep_sleep_wake_timer_s = hours * 3600;
-        lv_label_set_text_fmt(lbl_wake_timer, "%lu h", (unsigned long)hours);
+        cfg->deep_sleep_wake_timer_s = (hours + 1) * 3600;
+        wake_timer_label_refresh(cfg);
         settings_mark_dirty(false);
     }
 }
@@ -393,14 +400,7 @@ static void make_labeled_stepper(lv_obj_t *card, const char *text,
 {
     lv_obj_t *row = settings_make_row(card);
 
-    int gb = app_config_get()->color_brightness;
-    lv_obj_t *lbl = lv_label_create(row);
-    lv_label_set_text(lbl, text);
-    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
-    if (current_theme) {
-        lv_obj_set_style_text_color(lbl,
-            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-    }
+    lv_obj_t *lbl = ui_label(row, text, &lv_font_montserrat_20, UI_THEME_COLOR(text_color));
 
     lv_obj_t *btn_m = NULL, *lbl_val = NULL, *btn_p = NULL;
     settings_make_stepper(row, &btn_m, &lbl_val, &btn_p);
@@ -533,13 +533,10 @@ void settings_tab_behavior_create(lv_obj_t *parent) {
         }
 
         /* Wake timer stepper (hours) */
-        {
-            uint32_t hours = cfg->deep_sleep_wake_timer_s / 3600;
-            make_labeled_stepper(cont_deep_sleep_opts, "Wake Timer",
-                                 wake_timer_minus_cb, wake_timer_plus_cb,
-                                 &lbl_wake_timer);
-            lv_label_set_text_fmt(lbl_wake_timer, "%lu h", (unsigned long)hours);
-        }
+        make_labeled_stepper(cont_deep_sleep_opts, "Wake Timer",
+                             wake_timer_minus_cb, wake_timer_plus_cb,
+                             &lbl_wake_timer);
+        wake_timer_label_refresh(cfg);
 
         settings_make_divider(card);
 
@@ -668,13 +665,7 @@ void settings_tab_behavior_create(lv_obj_t *parent) {
         {
             lv_obj_t *row = settings_make_row(idle_target_container);
 
-            lv_obj_t *target_lbl = lv_label_create(row);
-            lv_label_set_text(target_lbl, "Target page");
-            lv_obj_set_style_text_font(target_lbl, &lv_font_montserrat_20, 0);
-            if (current_theme) {
-                lv_obj_set_style_text_color(target_lbl,
-                    lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-            }
+            lv_obj_t *target_lbl = ui_label(row, "Target page", &lv_font_montserrat_20, UI_THEME_COLOR(text_color));
 
             dd_idle_target = lv_dropdown_create(row);
             lv_obj_set_width(dd_idle_target, 200);
@@ -779,10 +770,7 @@ void settings_tab_behavior_refresh(void) {
             lv_obj_add_flag(cont_deep_sleep_opts, LV_OBJ_FLAG_HIDDEN);
         }
     }
-    if (lbl_wake_timer) {
-        uint32_t hours = cfg->deep_sleep_wake_timer_s / 3600;
-        lv_label_set_text_fmt(lbl_wake_timer, "%lu h", (unsigned long)hours);
-    }
+    wake_timer_label_refresh(cfg);
     if (sw_auto_power_off) {
         if (cfg->deep_sleep_on_idle)
             lv_obj_add_state(sw_auto_power_off, LV_STATE_CHECKED);

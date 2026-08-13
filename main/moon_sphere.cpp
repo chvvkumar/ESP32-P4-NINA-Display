@@ -32,8 +32,8 @@
 
 #include <tgx.h>
 
-/* Project's existing stb_image (implementation lives in main/stb_image.c, already
- * compiled as C and linked because moon_render.c uses it). Include the header
+/* Project's existing stb_image (implementation lives in main/stb_image.c and is
+ * compiled as C). Include the header
  * with C linkage so this C++ TU does not name-mangle stbi_load_from_memory /
  * stbi_image_free. Do NOT define STB_IMAGE_IMPLEMENTATION here. */
 extern "C" {
@@ -92,7 +92,7 @@ static const char *TAG = "moon_sphere";
 #endif
 
 /* RGB565 packer with clamping, named pack565() so it does not collide with the
- * tgx::RGB565 type. Mirrors moon_render.c's rgb565() bit layout. Used only to
+ * tgx::RGB565 type. Used only to
  * draw the starfield + glow background directly into the color buffer. */
 static inline uint16_t pack565(int r, int g, int b)
 {
@@ -105,7 +105,7 @@ static inline uint16_t pack565(int r, int g, int b)
     return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
 }
 
-/* 4x4 ordered-dither (Bayer) matrix, ported from moon_render.c, used to fill
+/* 4x4 ordered-dither (Bayer) matrix, used to fill
  * RGB565 truncation slack in the warm glow halo so it does not band. */
 static const uint8_t s_bayer4[4][4] = {
     { 0,  8,  2, 10},
@@ -366,11 +366,37 @@ extern "C" bool moon_sphere_init(void)
     return s_inited;
 }
 
+/* Release the decoded lunar texture (1024x512 RGB565 = 1,048,576 B PSRAM) when
+ * the Image Display page is left. Held under the same mutex as init so a render
+ * in flight on the other core cannot be looking at s_tex_buf while it is freed.
+ * The state is reset to "never inited", so the next moon_sphere_init() (lazy,
+ * from moon_sphere_render*) re-decodes cleanly, including the current flips.
+ * Safe to call when nothing was ever allocated. */
+extern "C" void moon_sphere_deinit(void)
+{
+    if (s_init_mtx) xSemaphoreTake(s_init_mtx, portMAX_DELAY);
+
+    if (s_tex_buf) {
+        heap_caps_free(s_tex_buf);
+        s_tex_buf = nullptr;
+    }
+    s_tex_w = 0;
+    s_tex_h = 0;
+    s_tex.setInvalid();          /* drop the dangling wrapper */
+    s_inited = false;
+    s_applied_flip_u = -1;       /* -1 = no texture decoded yet */
+    s_applied_flip_v = -1;
+
+    if (s_init_mtx) xSemaphoreGive(s_init_mtx);
+}
+
 /* Apply a live flip-config change to the EXISTING decoded texture buffer in
  * place, with no JPEG re-decode. A flip is a row/column mirror, which is its own
- * inverse, so toggling an axis = mirroring that axis once. This avoids the large
- * (~1.5MB) PSRAM decode spike that init_real_texture() incurs; that spike landed
- * mid-render (on top of the live 720x720 color+z scratch) and could fail with
+ * inverse, so toggling an axis = mirroring that axis once. This avoids the PSRAM
+ * decode spike that init_real_texture() incurs: for the 1024x512 asset that is
+ * 1,572,864 B of stb RGB888 coexisting with the 1,048,576 B RGB565 texture, so
+ * ~2.6MB peak. That spike lands mid-render (on top of the live 720x720 color+z
+ * scratch, ~2MB more) and could fail with
  * outofmem under concurrent load (e.g. an OTA check), falling back to the ugly
  * placeholder. Guarded by the init mutex. No-op when the flip state already
  * matches (the common steady-state path, zero cost). */
@@ -462,7 +488,7 @@ static uint16_t *moon_sphere_render_core(int w, int h, const moon_state_t *st,
      *   bit 0 (bg_style 1 or 3): deterministic starfield
      *   bit 1 (bg_style 2 or 3): soft warm glow halo just outside the disc
      *   bg_style 0: plain black
-     * Ported from moon_render.c's flat-path background. Single precision. */
+     * Single precision. */
     Image<RGB565> im(color_buf, w, h, w);
 
     /* 1. Black base. */
@@ -749,8 +775,8 @@ extern "C" uint16_t *moon_sphere_render_ex(int w, int h, const moon_state_t *st,
 {
     if (w <= 0 || h <= 0 || st == nullptr) return nullptr;
 
-    /* Lazy init of the texture, mirroring how moon_render_init() is invoked
-     * inline before first use in the flat path. */
+    /* Lazy init of the texture: decoded on first use, released by
+     * moon_sphere_deinit() when the page is left. */
     if (!moon_sphere_init()) return nullptr;
 
     const size_t npix      = (size_t)w * (size_t)h;

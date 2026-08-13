@@ -1,4 +1,5 @@
 #include "power_mgmt.h"
+#include "app_config.h"
 
 #include "esp_log.h"
 #include "esp_pm.h"
@@ -47,6 +48,11 @@ void power_mgmt_enter_deep_sleep(uint32_t wake_timer_s)
     } else {
         ESP_LOGI(TAG, "Entering deep sleep with NO timer wakeup");
     }
+
+    /* Commit any debounced config write. esp_deep_sleep_start() does NOT run
+     * the registered shutdown handlers (only esp_restart() does), so without
+     * this an in-flight app_config_save_deferred() is lost on wake. */
+    app_config_flush_deferred();
 
     /* Cleanly shut down WiFi before sleeping */
     esp_wifi_stop();

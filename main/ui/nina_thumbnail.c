@@ -63,13 +63,24 @@ static uint32_t thumbnail_chrome_fg_color(void) {
     return 0xFFFFFF;
 }
 
-void nina_thumbnail_init(void) {
+/* Allocated the first time a thumbnail actually needs scaling, never freed: a
+ * device whose user never taps a thumbnail should not pay 4 MB of PSRAM for
+ * the zoom scratch buffer, and freeing it between taps would just churn PSRAM.
+ * No extra guard needed -- the only caller is apply_zoom(), reached solely from
+ * nina_dashboard_set_thumbnail() and LVGL event callbacks, all of which run
+ * under the LVGL display lock.  On failure apply_zoom() falls through to its
+ * existing dynamic-allocation path and a later zoom retries the allocation. */
+static void thumbnail_ensure_scaled_buf(void) {
+    static bool warned = false;
+    if (thumbnail_scaled_buf) return;
+
     thumbnail_scaled_buf = heap_caps_aligned_calloc(128, 1, SCALED_BUF_MAX_SIZE, MALLOC_CAP_SPIRAM);
     if (thumbnail_scaled_buf) {
         thumbnail_scaled_buf_size = SCALED_BUF_MAX_SIZE;
-        ESP_LOGI(TAG, "Thumbnail scaled buffer pre-allocated: %dKB", SCALED_BUF_MAX_SIZE / 1024);
-    } else {
-        ESP_LOGE(TAG, "Failed to pre-allocate thumbnail scaled buffer (%d bytes)", SCALED_BUF_MAX_SIZE);
+        ESP_LOGI(TAG, "Thumbnail scaled buffer allocated on first use: %dKB", SCALED_BUF_MAX_SIZE / 1024);
+    } else if (!warned) {
+        warned = true;
+        ESP_LOGW(TAG, "Failed to allocate thumbnail scaled buffer (%d bytes)", SCALED_BUF_MAX_SIZE);
     }
 }
 
@@ -113,6 +124,7 @@ static void apply_zoom(void) {
         /* PPA pre-scale to target dimensions for smooth panning */
         size_t ppa_size = 0;
         uint8_t *scaled = NULL;
+        thumbnail_ensure_scaled_buf();
         if (thumbnail_scaled_buf && thumbnail_scaled_buf_size > 0) {
             /* Use pre-allocated buffer */
             scaled = ppa_scale_rgb565_into(thumbnail_original_buf,
