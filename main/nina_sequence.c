@@ -8,6 +8,7 @@
 
 #include "nina_sequence.h"
 #include "nina_client_internal.h"
+#include "json_get.h"
 #include "esp_log.h"
 #include "cJSON.h"
 #include <string.h>
@@ -347,20 +348,9 @@ void fetch_sequence_counts_optional(const char *base_url, nina_client_t *data) {
                 cJSON *running_exp = find_running_smart_exposure(target_container);
 
                 if (running_exp) {
-                    cJSON *completed = cJSON_GetObjectItem(running_exp, "CompletedIterations");
-                    if (completed && cJSON_IsNumber(completed)) {
-                        data->exposure_count = completed->valueint;
-                    }
-
-                    cJSON *iterations = cJSON_GetObjectItem(running_exp, "Iterations");
-                    if (iterations && cJSON_IsNumber(iterations)) {
-                        data->exposure_iterations = iterations->valueint;
-                    }
-
-                    cJSON *exp_count = cJSON_GetObjectItem(running_exp, "ExposureCount");
-                    if (exp_count && cJSON_IsNumber(exp_count)) {
-                        data->exposure_total_count = exp_count->valueint;
-                    }
+                    JSON_GET_INT(running_exp, "CompletedIterations", data->exposure_count);
+                    JSON_GET_INT(running_exp, "Iterations", data->exposure_iterations);
+                    JSON_GET_INT(running_exp, "ExposureCount", data->exposure_total_count);
 
                     cJSON *exp_time = cJSON_GetObjectItem(running_exp, "ExposureTime");
                     if (exp_time && cJSON_IsNumber(exp_time)) {

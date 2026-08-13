@@ -171,12 +171,17 @@ int64_t nina_client_now_epoch(const nina_client_t *client);
 // Polling intervals (ms)
 #define NINA_POLL_SLOW_MS     30000   // Focuser, mount, switch
 #define NINA_POLL_SEQUENCE_MS 15000   // Sequence counts (supplemented by event-driven sequence_poll_needed)
+// Image-count change probe (WebSocket-down fallback only). Exposures are
+// 30-600 s apart, so probing on every fast cycle just doubled the request rate
+// exactly when the link was already degraded enough to drop the WebSocket.
+#define NINA_POLL_IMAGE_COUNT_MS 8000
 
 // Polling state - tracks timers and cached static data between polls
 typedef struct {
     // Timestamps (ms from esp_timer_get_time)
     int64_t last_slow_poll_ms;
     int64_t last_sequence_poll_ms;
+    int64_t last_image_count_ms;   // Last /image-history count probe (WS-down path)
 
     // Static data fetched once
     bool static_fetched;
@@ -215,20 +220,13 @@ void nina_client_poll_heartbeat(const char *base_url, nina_client_t *data, int i
 // Skips fast-changing data: guider RMS, HFR/stars, current filter position.
 void nina_client_poll_background(const char *base_url, nina_client_t *data, nina_poll_state_t *state, int instance);
 
-// Legacy API - fetches all data every call (kept for compatibility)
-void nina_client_get_data(const char *base_url, nina_client_t *data);
-
 // DNS pre-check: resolve hostname from a NINA base URL.
 // Returns true if hostname resolves (or is an IP address), false on DNS failure.
 // Use before polling to avoid expensive HTTP client setup for unreachable hosts.
 bool nina_client_dns_check(const char *base_url);
 
-// Pre-allocate persistent PSRAM buffer for image fetching.
-// Call once from app_main() before any image fetch.  Avoids PSRAM
-// fragmentation from repeated malloc/free during long sessions.
-void nina_client_init_image_buffers(void);
-
 // Fetch prepared image as JPEG from NINA API
+// The persistent PSRAM scratch buffer is allocated inside on first call.
 // Returns heap-allocated JPEG bytes (caller must free), or NULL on error
 // Uses: GET /prepared-image?resize=true&size=WxH&quality=Q&autoPrepare=true
 uint8_t *nina_client_fetch_prepared_image(const char *base_url, int width, int height, int quality, size_t *out_size);

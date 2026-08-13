@@ -4092,6 +4092,14 @@ app_config_t *app_config_get(void);
  * (overflows small poll/UI task stacks). Snapshot into a PSRAM heap buffer. */
 void app_config_get_snapshot_into(app_config_t *dst);
 void app_config_save(const app_config_t *config);
+/* Same commit semantics as app_config_save(), but the ~350 ms NVS write is
+ * debounced: the values go live in RAM immediately and the flash write happens
+ * ~2 s after the LAST call, so a burst (an HA slider drag, a held keypad key)
+ * costs one write instead of one per step. Safe from any task. A reboot via
+ * esp_restart() flushes a pending write first (shutdown handler). */
+void app_config_save_deferred(const app_config_t *config);
+/* Write a pending deferred save to NVS now (no-op if nothing is pending). */
+void app_config_flush_deferred(void);
 void app_config_apply(const app_config_t *config);   // in-memory only, no NVS; marks dirty
 /* Same as app_config_apply(), but leaves the unsaved-changes flag exactly as it
  * found it (neither set nor cleared). For the "preview":true path of the

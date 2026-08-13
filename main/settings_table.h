@@ -124,7 +124,6 @@
     INT       (weather_time_format,          "weather_time_format",          0,     0,     1) \
     /* -- Idle page override (target excluded — cross-field page-registry semantics) -- */ \
     BOOL      (idle_page_override_enabled,   "idle_page_override_enabled",   false) \
-    BOOL      (idle_page_persistent,         "idle_page_persistent",         false) /* retired/unread; not currently serialized */ \
     BOOL      (idle_indicator_enabled,       "idle_indicator_enabled",       true) \
     /* -- Auth (admin_password excluded — secret) -- */ \
     BOOL      (auth_enabled,                 "auth_enabled",                 true) \
@@ -192,7 +191,7 @@ bool settings_clamp_apply(app_config_t *cfg);
 /* Serialize every row's current value into `root` under its json_key, one
  * cJSON_Add*ToObject call per row (bool->AddBool, string kinds->AddString,
  * everything else->AddNumber). Does not touch excluded/complex fields
- * (arrays, JSON blobs, secrets, cross-field page targets, idle_page_persistent) —
+ * (arrays, JSON blobs, secrets, cross-field page targets) —
  * callers that need those keep their existing hand-written cJSON_Add*
  * calls in web_handlers_config.c. */
 void settings_json_serialize(const app_config_t *cfg, cJSON *root);

@@ -103,7 +103,8 @@ bool nina_dashboard_is_spotify_page(void);
 
 /**
  * @brief Enable or disable the Spotify page at runtime.
- * When disabled, switches away if currently viewing and removes from navigation.
+ * Creates the page on first enable; when disabled, switches away if currently
+ * viewing and removes from navigation.
  * Must be called with LVGL display lock held.
  */
 void nina_dashboard_set_spotify_enabled(bool enabled);

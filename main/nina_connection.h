@@ -112,12 +112,6 @@ bool nina_connection_is_connected(int instance);
 /** Returns true if the WebSocket for this instance is connected. */
 bool nina_connection_is_ws_connected(int instance);
 
-/** Returns true if static data has been fetched at least once. */
-bool nina_connection_has_static_data(int instance);
-
-/** Timestamp (ms) of last successful REST poll, or 0 if never connected. */
-int64_t nina_connection_last_seen_ms(int instance);
-
 /** Get read-only pointer to the full connection info struct. */
 const nina_conn_info_t *nina_connection_get_info(int instance);
 

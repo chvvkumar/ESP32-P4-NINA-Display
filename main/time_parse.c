@@ -9,6 +9,7 @@
 
 #include <ctype.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 /*
@@ -147,4 +148,42 @@ time_t time_parse_rfc1123(const char *s) {
     tm.tm_min = min;
     tm.tm_sec = sec;
     return my_timegm(&tm);
+}
+
+void fmt_duration(char *buf, size_t sz, int32_t seconds, fmt_duration_style_t style) {
+    if (!buf || sz == 0) return;
+    if (seconds < 0) seconds = 0;
+
+    /* All fields as plain int: every component fits, and the format strings
+     * below stay %d rather than PRId32 (this module is also host-compiled). */
+    int days  = (int)(seconds / 86400);
+    int hours = (int)(seconds / 3600);          /* total hours, may exceed 24 */
+    int hod   = hours % 24;                     /* hour-of-day, for UPTIME    */
+    int mins  = (int)((seconds % 3600) / 60);
+    int secs  = (int)(seconds % 60);
+
+    switch (style) {
+    case FMT_DUR_HM_COMPACT:
+        if (hours > 0) snprintf(buf, sz, "%dh %02dm", hours, mins);
+        else           snprintf(buf, sz, "%dm", mins);
+        break;
+    case FMT_DUR_HM_CLOCK:
+        snprintf(buf, sz, "%d:%02d", hours, mins);
+        break;
+    case FMT_DUR_HMS_CLOCK:
+        snprintf(buf, sz, "%d:%02d:%02d", hours, mins, secs);
+        break;
+    case FMT_DUR_TIERED:
+        if (hours > 0)     snprintf(buf, sz, "%dh %dm", hours, mins);
+        else if (mins > 0) snprintf(buf, sz, "%dm %ds", mins, secs);
+        else               snprintf(buf, sz, "%ds", secs);
+        break;
+    case FMT_DUR_UPTIME:
+        if (days > 0) snprintf(buf, sz, "%dd %02d:%02d:%02d", days, hod, mins, secs);
+        else          snprintf(buf, sz, "%02d:%02d:%02d", hours, mins, secs);
+        break;
+    default:
+        buf[0] = '\0';
+        break;
+    }
 }

@@ -54,11 +54,6 @@ void spotify_auth_logout(void);
  */
 void spotify_auth_invalidate_token(void);
 
-/**
- * Check if tokens are stored (may still be expired/invalid).
- */
-bool spotify_auth_has_tokens(void);
-
 #ifdef __cplusplus
 }
 #endif

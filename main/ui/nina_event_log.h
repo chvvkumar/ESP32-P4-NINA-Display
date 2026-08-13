@@ -2,12 +2,11 @@
 
 /**
  * @file nina_event_log.h
- * @brief Persistent event history ring buffer with scrollable overlay UI.
+ * @brief Persistent event history ring buffer.
  *
- * nina_event_log_add() / nina_event_log_add_fmt() are safe to call from
- * ANY FreeRTOS task -- they write to a spinlock-protected ring buffer
- * with zero LVGL calls.  The overlay UI functions must only be called
- * from the LVGL context (with the display lock held).
+ * All functions here are safe to call from ANY FreeRTOS task -- they
+ * touch a mutex-protected ring buffer with zero LVGL calls.  Readers
+ * (copy_entries/clear) back the /api/events endpoint.
  */
 
 #ifdef __cplusplus
@@ -55,18 +54,6 @@ int nina_event_log_copy_entries(nina_event_log_entry_t *out, int max_out);
 
 /** Clear all entries from the log.  Thread-safe: callable from any task. */
 void nina_event_log_clear(void);
-
-/** Create the overlay UI (call once from LVGL context at startup). */
-void nina_event_log_overlay_create(lv_obj_t *screen);
-
-/** Populate rows from ring buffer and show the overlay (LVGL context). */
-void nina_event_log_show(void);
-
-/** Hide the overlay and remove rows (LVGL context). */
-void nina_event_log_hide(void);
-
-/** Re-theme the overlay (LVGL context). */
-void nina_event_log_apply_theme(void);
 
 #ifdef __cplusplus
 }

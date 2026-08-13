@@ -14,6 +14,7 @@
 #include "themes.h"
 #include "display_defs.h"
 #include "app_config.h"
+#include "esp_attr.h"     /* EXT_RAM_BSS_ATTR */
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -159,7 +160,9 @@ static pending_toast_t  s_pending[PENDING_QUEUE_SIZE];
 static portMUX_TYPE     s_pending_lock = portMUX_INITIALIZER_UNLOCKED;
 
 /* Backlog FIFO ring buffer (LVGL context only, no lock needed) */
-static backlog_entry_t  s_backlog[BACKLOG_SIZE];
+/* LVGL-context only (no spinlock, no ISR) => safe in PSRAM .ext_ram.bss.
+ * s_pending above stays internal: it is written under a portMUX spinlock. */
+static EXT_RAM_BSS_ATTR backlog_entry_t s_backlog[BACKLOG_SIZE];
 static int              s_bl_head  = 0;  /* Next read position */
 static int              s_bl_tail  = 0;  /* Next write position */
 static int              s_bl_count = 0;
@@ -773,16 +776,6 @@ void nina_toast_show_timed(toast_severity_t sev, uint32_t duration_ms, const cha
     va_end(ap);
     /* duration_ms is clamped at resolve time (resolve_lifetime_ms); 0 = default */
     toast_enqueue(sev, buf, duration_ms);
-}
-
-void nina_toast_dismiss_all(void) {
-    for (int i = 0; i < TOAST_POOL_SIZE; i++) {
-        dismiss_slot(i);
-    }
-    /* Clear backlog too */
-    s_bl_head = 0;
-    s_bl_tail = 0;
-    s_bl_count = 0;
 }
 
 void nina_toast_apply_theme(void) {

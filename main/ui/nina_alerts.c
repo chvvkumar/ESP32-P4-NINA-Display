@@ -296,11 +296,6 @@ void nina_alert_eval_safety(int instance, bool is_safe) {
     alert_eval_edge(ALERT_SAFETY, instance, 0.0f, is_safe ? 0 : 1, false);
 }
 
-void nina_alert_flash(void) {
-    /* Direct flash — only call from LVGL context */
-    do_flash();
-}
-
 void nina_alerts_apply_theme(void) {
     /* Flash colors are set dynamically per step — no persistent state to restyle */
 }

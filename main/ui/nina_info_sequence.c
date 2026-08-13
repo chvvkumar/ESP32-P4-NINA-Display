@@ -43,62 +43,8 @@ static lv_obj_t *lbl_no_data = NULL;
 /* Content container */
 static lv_obj_t *content_root = NULL;
 
-/* ── Local helpers ─────────────────────────────────────────────────── */
-
-static lv_obj_t *make_info_card(lv_obj_t *parent) {
-    lv_obj_t *card = lv_obj_create(parent);
-    lv_obj_remove_style_all(card);
-    lv_obj_add_style(card, &style_bento_box, 0);
-    lv_obj_set_width(card, LV_PCT(100));
-    lv_obj_set_height(card, LV_SIZE_CONTENT);
-    lv_obj_set_style_pad_all(card, 12, 0);
-    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_row(card, 8, 0);
-    lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
-    return card;
-}
-
-static void make_info_section(lv_obj_t *parent, const char *title) {
-    lv_obj_t *lbl = lv_label_create(parent);
-    lv_label_set_text(lbl, title);
-    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_letter_space(lbl, 2, 0);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(lbl,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
-}
-
-static lv_obj_t *make_info_kv(lv_obj_t *parent, const char *key) {
-    lv_obj_t *row = lv_obj_create(parent);
-    lv_obj_remove_style_all(row);
-    lv_obj_set_width(row, LV_PCT(100));
-    lv_obj_set_height(row, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-
-    lv_obj_t *lbl_key = lv_label_create(row);
-    lv_label_set_text(lbl_key, key);
-    lv_obj_set_style_text_font(lbl_key, &lv_font_montserrat_18, 0);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(lbl_key,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
-
-    lv_obj_t *lbl_val = lv_label_create(row);
-    lv_label_set_text(lbl_val, "--");
-    lv_obj_set_style_text_font(lbl_val, &lv_font_montserrat_18, 0);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(lbl_val,
-            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-    }
-
-    return lbl_val;
-}
+/* Card/section/kv factories are shared: ui_card/ui_section_label/ui_kv (ui_helpers.h).
+ * This page uses card pad 12 / row gap 8 and key+value font 18. */
 
 /* ── Build ─────────────────────────────────────────────────────────── */
 
@@ -116,7 +62,7 @@ void build_sequence_content(lv_obj_t *content) {
 
     /* ── Target + Time remaining card ── */
     {
-        lv_obj_t *card = make_info_card(content);
+        lv_obj_t *card = ui_card(content, 12, 8);
 
         lv_obj_t *target_row = lv_obj_create(card);
         lv_obj_remove_style_all(target_row);
@@ -132,9 +78,7 @@ void build_sequence_content(lv_obj_t *content) {
         lv_obj_set_style_text_font(lbl_target_name, &lv_font_montserrat_28, 0);
         lv_label_set_long_mode(lbl_target_name, LV_LABEL_LONG_DOT);
         lv_obj_set_flex_grow(lbl_target_name, 1);
-        if (current_theme)
-            lv_obj_set_style_text_color(lbl_target_name,
-                lv_color_hex(app_config_apply_brightness(current_theme->target_name_color, gb)), 0);
+        ui_set_theme_text_color(lbl_target_name, UI_THEME_COLOR(target_name_color));
 
         /* Time remaining block */
         lv_obj_t *time_block = lv_obj_create(target_row);
@@ -148,22 +92,15 @@ void build_sequence_content(lv_obj_t *content) {
         lv_label_set_text(lbl_rem_hdr, "REMAINING");
         lv_obj_set_style_text_font(lbl_rem_hdr, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_letter_space(lbl_rem_hdr, 1, 0);
-        if (current_theme)
-            lv_obj_set_style_text_color(lbl_rem_hdr,
-                lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+        ui_set_theme_text_color(lbl_rem_hdr, UI_THEME_COLOR(label_color));
 
-        lbl_time_remaining = lv_label_create(time_block);
-        lv_label_set_text(lbl_time_remaining, "--:--:--");
-        lv_obj_set_style_text_font(lbl_time_remaining, &lv_font_montserrat_24, 0);
-        if (current_theme)
-            lv_obj_set_style_text_color(lbl_time_remaining,
-                lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+        lbl_time_remaining = ui_label(time_block, "--:--:--", &lv_font_montserrat_24, UI_THEME_COLOR(text_color));
     }
 
     /* ── Current Step card ── */
     {
-        lv_obj_t *card = make_info_card(content);
-        make_info_section(card, "CURRENT STEP");
+        lv_obj_t *card = ui_card(content, 12, 8);
+        ui_section_label(card, "CURRENT STEP");
 
         /* Step info row: two columns side by side */
         lv_obj_t *step_row = lv_obj_create(card);
@@ -182,8 +119,8 @@ void build_sequence_content(lv_obj_t *content) {
         lv_obj_set_flex_flow(left, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_style_pad_row(left, 4, 0);
 
-        lbl_container_val = make_info_kv(left, "Container");
-        lbl_step_val      = make_info_kv(left, "Step");
+        lbl_container_val = ui_kv(left, "Container", &lv_font_montserrat_18, &lv_font_montserrat_18);
+        lbl_step_val      = ui_kv(left, "Step", &lv_font_montserrat_18, &lv_font_montserrat_18);
 
         /* Right: Filter + Exposure */
         lv_obj_t *right = lv_obj_create(step_row);
@@ -193,17 +130,15 @@ void build_sequence_content(lv_obj_t *content) {
         lv_obj_set_flex_flow(right, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_style_pad_row(right, 4, 0);
 
-        lbl_filter_val   = make_info_kv(right, "Filter");
-        lbl_exp_time_val = make_info_kv(right, "Exposure");
+        lbl_filter_val   = ui_kv(right, "Filter", &lv_font_montserrat_18, &lv_font_montserrat_18);
+        lbl_exp_time_val = ui_kv(right, "Exposure", &lv_font_montserrat_18, &lv_font_montserrat_18);
 
         /* Progress row */
         lbl_current_progress = lv_label_create(card);
         lv_label_set_text(lbl_current_progress, "-- / --");
         lv_obj_set_style_text_font(lbl_current_progress, &lv_font_montserrat_22, 0);
         lv_obj_set_style_pad_top(lbl_current_progress, 6, 0);
-        if (current_theme)
-            lv_obj_set_style_text_color(lbl_current_progress,
-                lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+        ui_set_theme_text_color(lbl_current_progress, UI_THEME_COLOR(text_color));
 
         /* Progress bar */
         bar_current = lv_bar_create(card);
@@ -225,10 +160,10 @@ void build_sequence_content(lv_obj_t *content) {
 
     /* ── Filter Breakdown card ── */
     {
-        lv_obj_t *card = make_info_card(content);
+        lv_obj_t *card = ui_card(content, 12, 8);
         lv_obj_set_flex_grow(card, 1);
         lv_obj_set_style_pad_all(card, 10, 0);
-        make_info_section(card, "FILTER BREAKDOWN");
+        ui_section_label(card, "FILTER BREAKDOWN");
 
         for (int i = 0; i < MAX_SEQ_FILTERS; i++) {
             lv_obj_t *row = lv_obj_create(card);
@@ -248,9 +183,7 @@ void build_sequence_content(lv_obj_t *content) {
             lv_obj_set_style_text_font(name, &lv_font_montserrat_18, 0);
             lv_obj_set_width(name, 54);
             lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_RIGHT, 0);
-            if (current_theme)
-                lv_obj_set_style_text_color(name,
-                    lv_color_hex(app_config_apply_brightness(current_theme->filter_text_color, gb)), 0);
+            ui_set_theme_text_color(name, UI_THEME_COLOR(filter_text_color));
             lbl_filter_names[i] = name;
 
             /* Progress bar (flexible) */
@@ -276,9 +209,7 @@ void build_sequence_content(lv_obj_t *content) {
             lv_label_set_text(count, "");
             lv_obj_set_style_text_font(count, &lv_font_montserrat_16, 0);
             lv_obj_set_width(count, 64);
-            if (current_theme)
-                lv_obj_set_style_text_color(count,
-                    lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+            ui_set_theme_text_color(count, UI_THEME_COLOR(text_color));
             lbl_filter_counts[i] = count;
         }
     }
@@ -300,16 +231,9 @@ void build_sequence_content(lv_obj_t *content) {
         lv_label_set_text(lbl_total_hdr, "TOTAL EXPOSURES");
         lv_obj_set_style_text_font(lbl_total_hdr, &lv_font_montserrat_16, 0);
         lv_obj_set_style_text_letter_space(lbl_total_hdr, 2, 0);
-        if (current_theme)
-            lv_obj_set_style_text_color(lbl_total_hdr,
-                lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+        ui_set_theme_text_color(lbl_total_hdr, UI_THEME_COLOR(label_color));
 
-        lbl_totals = lv_label_create(totals_row);
-        lv_label_set_text(lbl_totals, "-- / --");
-        lv_obj_set_style_text_font(lbl_totals, &lv_font_montserrat_24, 0);
-        if (current_theme)
-            lv_obj_set_style_text_color(lbl_totals,
-                lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+        lbl_totals = ui_label(totals_row, "-- / --", &lv_font_montserrat_24, UI_THEME_COLOR(text_color));
     }
 
     /* ── No-data message ── */
@@ -318,9 +242,7 @@ void build_sequence_content(lv_obj_t *content) {
     lv_obj_set_style_text_font(lbl_no_data, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_align(lbl_no_data, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_align(lbl_no_data, LV_ALIGN_CENTER);
-    if (current_theme)
-        lv_obj_set_style_text_color(lbl_no_data,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+    ui_set_theme_text_color(lbl_no_data, UI_THEME_COLOR(label_color));
     lv_obj_add_flag(lbl_no_data, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -360,9 +282,7 @@ void populate_sequence_data(const sequence_detail_data_t *data) {
     /* Target name */
     lv_label_set_text(lbl_target_name,
         data->target_name[0] ? data->target_name : "--");
-    if (current_theme)
-        lv_obj_set_style_text_color(lbl_target_name,
-            lv_color_hex(app_config_apply_brightness(current_theme->target_name_color, gb)), 0);
+    ui_set_theme_text_color(lbl_target_name, UI_THEME_COLOR(target_name_color));
 
     /* Time remaining */
     lv_label_set_text(lbl_time_remaining,

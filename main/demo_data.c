@@ -8,6 +8,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "time_parse.h"
 #include <string.h>
 #include <math.h>
 #include <time.h>
@@ -360,33 +361,24 @@ void demo_data_task(void *param)
                 if (st->flip_countdown_s <= 0) {
                     st->flip_countdown_s = prof->flip_reset_s;
                 }
-                int h = st->flip_countdown_s / 3600;
-                int m = (st->flip_countdown_s % 3600) / 60;
-                snprintf(d->meridian_flip, sizeof(d->meridian_flip),
-                         "%d:%02d", h, m);
+                fmt_duration(d->meridian_flip, sizeof(d->meridian_flip),
+                             st->flip_countdown_s, FMT_DUR_HM_CLOCK);
             } else {
                 strncpy(d->meridian_flip, "--:--", sizeof(d->meridian_flip) - 1);
             }
 
             /* ── Target conditions ───────────────────────────────── */
             {
-                int tt = target_time_s;
-                int th = tt / 3600;
-                int tm = (tt % 3600) / 60;
-                snprintf(d->target_time_remaining, sizeof(d->target_time_remaining),
-                         "%d:%02d", th, tm);
+                fmt_duration(d->target_time_remaining, sizeof(d->target_time_remaining),
+                             target_time_s, FMT_DUR_HM_CLOCK);
                 strncpy(d->target_time_reason, "SETS IN", sizeof(d->target_time_reason) - 1);
                 d->target_condition_count = 2;
             }
 
             /* ── Sequence time remaining ─────────────────────────── */
             {
-                int rem = compute_remaining_s(prof, st);
-                int rh = rem / 3600;
-                int rm = (rem % 3600) / 60;
-                int rs = rem % 60;
-                snprintf(d->time_remaining, sizeof(d->time_remaining),
-                         "%d:%02d:%02d", rh, rm, rs);
+                fmt_duration(d->time_remaining, sizeof(d->time_remaining),
+                             compute_remaining_s(prof, st), FMT_DUR_HMS_CLOCK);
             }
 
             /* ── Power box ───────────────────────────────────────── */

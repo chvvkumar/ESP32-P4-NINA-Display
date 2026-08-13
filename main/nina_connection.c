@@ -261,16 +261,6 @@ bool nina_connection_is_ws_connected(int instance) {
     return s_instances[instance].ws_connected;
 }
 
-bool nina_connection_has_static_data(int instance) {
-    if (!valid_index(instance)) return false;
-    return s_instances[instance].static_data_ready;
-}
-
-int64_t nina_connection_last_seen_ms(int instance) {
-    if (!valid_index(instance)) return 0;
-    return s_instances[instance].last_connected_ms;
-}
-
 const nina_conn_info_t *nina_connection_get_info(int instance) {
     if (!valid_index(instance)) return NULL;
     return &s_instances[instance];

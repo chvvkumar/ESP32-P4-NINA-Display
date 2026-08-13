@@ -39,62 +39,8 @@ static lv_obj_t *lbl_no_data = NULL;
 /* Content container */
 static lv_obj_t *content_root = NULL;
 
-/* ── Local helpers ─────────────────────────────────────────────────── */
-
-static lv_obj_t *make_info_card(lv_obj_t *parent) {
-    lv_obj_t *card = lv_obj_create(parent);
-    lv_obj_remove_style_all(card);
-    lv_obj_add_style(card, &style_bento_box, 0);
-    lv_obj_set_width(card, LV_PCT(100));
-    lv_obj_set_height(card, LV_SIZE_CONTENT);
-    lv_obj_set_style_pad_all(card, 12, 0);
-    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_row(card, 8, 0);
-    lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
-    return card;
-}
-
-static void make_info_section(lv_obj_t *parent, const char *title) {
-    lv_obj_t *lbl = lv_label_create(parent);
-    lv_label_set_text(lbl, title);
-    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_letter_space(lbl, 2, 0);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(lbl,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
-}
-
-static lv_obj_t *make_info_kv(lv_obj_t *parent, const char *key) {
-    lv_obj_t *row = lv_obj_create(parent);
-    lv_obj_remove_style_all(row);
-    lv_obj_set_width(row, LV_PCT(100));
-    lv_obj_set_height(row, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-
-    lv_obj_t *lbl_key = lv_label_create(row);
-    lv_label_set_text(lbl_key, key);
-    lv_obj_set_style_text_font(lbl_key, &lv_font_montserrat_18, 0);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(lbl_key,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
-
-    lv_obj_t *lbl_val = lv_label_create(row);
-    lv_label_set_text(lbl_val, "--");
-    lv_obj_set_style_text_font(lbl_val, &lv_font_montserrat_18, 0);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(lbl_val,
-            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-    }
-
-    return lbl_val;
-}
+/* Card/section/kv factories are shared: ui_card/ui_section_label/ui_kv (ui_helpers.h).
+ * This page uses card pad 12 / row gap 8 and key+value font 18. */
 
 /* ── Build ─────────────────────────────────────────────────────────── */
 
@@ -109,14 +55,12 @@ void build_filter_content(lv_obj_t *content) {
     lv_obj_set_flex_align(content, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_remove_flag(content, LV_OBJ_FLAG_SCROLLABLE);
 
-    int gb = current_theme ? app_config_get()->color_brightness : 100;
-
     /* ── Current Filter hero card ── */
     {
-        lv_obj_t *card = make_info_card(content);
+        lv_obj_t *card = ui_card(content, 12, 8);
         lv_obj_set_width(card, LV_PCT(100));
         lv_obj_set_style_pad_all(card, 16, 0);
-        make_info_section(card, "CURRENT FILTER");
+        ui_section_label(card, "CURRENT FILTER");
 
         lv_obj_t *current_row = lv_obj_create(card);
         lv_obj_remove_style_all(current_row);
@@ -132,34 +76,22 @@ void build_filter_content(lv_obj_t *content) {
         lv_obj_t *lbl_arrow = lv_label_create(current_row);
         lv_label_set_text(lbl_arrow, LV_SYMBOL_RIGHT LV_SYMBOL_RIGHT);
         lv_obj_set_style_text_font(lbl_arrow, &lv_font_montserrat_22, 0);
-        if (current_theme)
-            lv_obj_set_style_text_color(lbl_arrow,
-                lv_color_hex(app_config_apply_brightness(current_theme->progress_color, gb)), 0);
+        ui_set_theme_text_color(lbl_arrow, UI_THEME_COLOR(progress_color));
 
         /* Current filter name (hero size) */
-        lbl_current_filter = lv_label_create(current_row);
-        lv_label_set_text(lbl_current_filter, "--");
-        lv_obj_set_style_text_font(lbl_current_filter, &lv_font_montserrat_32, 0);
-        if (current_theme)
-            lv_obj_set_style_text_color(lbl_current_filter,
-                lv_color_hex(app_config_apply_brightness(current_theme->filter_text_color, gb)), 0);
+        lbl_current_filter = ui_label(current_row, "--", &lv_font_montserrat_32, UI_THEME_COLOR(filter_text_color));
 
         /* Position label */
-        lbl_position = lv_label_create(current_row);
-        lv_label_set_text(lbl_position, "");
-        lv_obj_set_style_text_font(lbl_position, &lv_font_montserrat_20, 0);
-        if (current_theme)
-            lv_obj_set_style_text_color(lbl_position,
-                lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+        lbl_position = ui_label(current_row, "", &lv_font_montserrat_20, UI_THEME_COLOR(label_color));
     }
 
     /* ── Filter list card ── */
     {
-        lv_obj_t *card = make_info_card(content);
+        lv_obj_t *card = ui_card(content, 12, 8);
         lv_obj_set_width(card, LV_PCT(100));
         lv_obj_set_flex_grow(card, 1);
         lv_obj_set_style_pad_all(card, 12, 0);
-        make_info_section(card, "AVAILABLE FILTERS");
+        ui_section_label(card, "AVAILABLE FILTERS");
 
         for (int i = 0; i < MAX_FILTER_SLOTS; i++) {
             lv_obj_t *slot = lv_obj_create(card);
@@ -182,9 +114,7 @@ void build_filter_content(lv_obj_t *content) {
             lv_label_set_text(num, "");
             lv_obj_set_style_text_font(num, &lv_font_montserrat_18, 0);
             lv_obj_set_width(num, 30);
-            if (current_theme)
-                lv_obj_set_style_text_color(num,
-                    lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+            ui_set_theme_text_color(num, UI_THEME_COLOR(label_color));
             lbl_slot_nums[i] = num;
 
             /* Filter name */
@@ -192,18 +122,11 @@ void build_filter_content(lv_obj_t *content) {
             lv_label_set_text(name, "");
             lv_obj_set_style_text_font(name, &lv_font_montserrat_22, 0);
             lv_obj_set_flex_grow(name, 1);
-            if (current_theme)
-                lv_obj_set_style_text_color(name,
-                    lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+            ui_set_theme_text_color(name, UI_THEME_COLOR(label_color));
             lbl_slot_names[i] = name;
 
             /* Active marker (check icon) */
-            lv_obj_t *marker = lv_label_create(slot);
-            lv_label_set_text(marker, LV_SYMBOL_OK);
-            lv_obj_set_style_text_font(marker, &lv_font_montserrat_16, 0);
-            if (current_theme)
-                lv_obj_set_style_text_color(marker,
-                    lv_color_hex(app_config_apply_brightness(current_theme->progress_color, gb)), 0);
+            lv_obj_t *marker = ui_label(slot, LV_SYMBOL_OK, &lv_font_montserrat_16, UI_THEME_COLOR(progress_color));
             lv_obj_add_flag(marker, LV_OBJ_FLAG_HIDDEN);
             lbl_active_markers[i] = marker;
         }
@@ -211,10 +134,10 @@ void build_filter_content(lv_obj_t *content) {
 
     /* ── Status card ── */
     {
-        lv_obj_t *card = make_info_card(content);
+        lv_obj_t *card = ui_card(content, 12, 8);
         lv_obj_set_width(card, LV_PCT(100));
         lv_obj_set_style_pad_all(card, 10, 0);
-        make_info_section(card, "STATUS");
+        ui_section_label(card, "STATUS");
 
         lv_obj_t *status_row = lv_obj_create(card);
         lv_obj_remove_style_all(status_row);
@@ -230,7 +153,7 @@ void build_filter_content(lv_obj_t *content) {
         lv_obj_set_flex_grow(left, 1);
         lv_obj_set_height(left, LV_SIZE_CONTENT);
         lv_obj_set_flex_flow(left, LV_FLEX_FLOW_COLUMN);
-        lbl_device_val = make_info_kv(left, "Device");
+        lbl_device_val = ui_kv(left, "Device", &lv_font_montserrat_18, &lv_font_montserrat_18);
 
         /* Right: Moving */
         lv_obj_t *right_col = lv_obj_create(status_row);
@@ -238,7 +161,7 @@ void build_filter_content(lv_obj_t *content) {
         lv_obj_set_flex_grow(right_col, 1);
         lv_obj_set_height(right_col, LV_SIZE_CONTENT);
         lv_obj_set_flex_flow(right_col, LV_FLEX_FLOW_COLUMN);
-        lbl_moving_val = make_info_kv(right_col, "Connected");
+        lbl_moving_val = ui_kv(right_col, "Connected", &lv_font_montserrat_18, &lv_font_montserrat_18);
     }
 
     /* ── No-data message ── */
@@ -247,9 +170,7 @@ void build_filter_content(lv_obj_t *content) {
     lv_obj_set_style_text_font(lbl_no_data, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_align(lbl_no_data, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_align(lbl_no_data, LV_ALIGN_CENTER);
-    if (current_theme)
-        lv_obj_set_style_text_color(lbl_no_data,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+    ui_set_theme_text_color(lbl_no_data, UI_THEME_COLOR(label_color));
     lv_obj_add_flag(lbl_no_data, LV_OBJ_FLAG_HIDDEN);
 }
 

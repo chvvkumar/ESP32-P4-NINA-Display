@@ -10,6 +10,7 @@
 
 #include "nina_websocket.h"
 #include "nina_client_internal.h"
+#include "json_get.h"
 #include "app_config.h"
 #include "esp_websocket_client.h"
 #include "esp_log.h"
@@ -400,14 +401,9 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             const char *new_target = NULL;
             const char *new_telescope = NULL;
 
-            cJSON *hfr = cJSON_GetObjectItem(stats, "HFR");
-            if (hfr) new_hfr = (float)hfr->valuedouble;
-
-            cJSON *stars = cJSON_GetObjectItem(stats, "Stars");
-            if (stars) new_stars = stars->valueint;
-
-            cJSON *exp = cJSON_GetObjectItem(stats, "ExposureTime");
-            if (exp) new_exp_total = (float)exp->valuedouble;
+            JSON_GET_FLOAT(stats, "HFR", new_hfr);
+            JSON_GET_INT(stats, "Stars", new_stars);
+            JSON_GET_FLOAT(stats, "ExposureTime", new_exp_total);
 
             cJSON *target = cJSON_GetObjectItem(stats, "TargetName");
             if (target && target->valuestring && target->valuestring[0] != '\0')
@@ -424,54 +420,24 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             img_stats.stars = new_stars;
             img_stats.exposure_time = new_exp_total;
 
-            cJSON *hfr_stdev = cJSON_GetObjectItem(stats, "HFRStDev");
-            if (hfr_stdev) img_stats.hfr_stdev = (float)hfr_stdev->valuedouble;
+            JSON_GET_FLOAT(stats, "HFRStDev", img_stats.hfr_stdev);
+            JSON_GET_FLOAT(stats, "Mean", img_stats.mean);
+            JSON_GET_FLOAT(stats, "Median", img_stats.median);
+            JSON_GET_FLOAT(stats, "StDev", img_stats.stdev);
+            JSON_GET_INT(stats, "Min", img_stats.min_val);
+            JSON_GET_INT(stats, "Max", img_stats.max_val);
+            JSON_GET_INT(stats, "Gain", img_stats.gain);
+            JSON_GET_INT(stats, "Offset", img_stats.offset);
+            JSON_GET_FLOAT(stats, "Temperature", img_stats.temperature);
+            JSON_GET_STR(stats, "Filter", img_stats.filter);
+            JSON_GET_STR(stats, "CameraName", img_stats.camera_name);
+            JSON_GET_INT(stats, "FocalLength", img_stats.focal_length);
+            JSON_GET_STR(stats, "Date", img_stats.date);
+            JSON_GET_STR(stats, "Filename", img_stats.filename);
 
-            cJSON *mean = cJSON_GetObjectItem(stats, "Mean");
-            if (mean) img_stats.mean = (float)mean->valuedouble;
-
-            cJSON *median = cJSON_GetObjectItem(stats, "Median");
-            if (median) img_stats.median = (float)median->valuedouble;
-
-            cJSON *stdev = cJSON_GetObjectItem(stats, "StDev");
-            if (stdev) img_stats.stdev = (float)stdev->valuedouble;
-
-            cJSON *min_val = cJSON_GetObjectItem(stats, "Min");
-            if (min_val) img_stats.min_val = min_val->valueint;
-
-            cJSON *max_val = cJSON_GetObjectItem(stats, "Max");
-            if (max_val) img_stats.max_val = max_val->valueint;
-
-            cJSON *gain = cJSON_GetObjectItem(stats, "Gain");
-            if (gain) img_stats.gain = gain->valueint;
-
-            cJSON *offset = cJSON_GetObjectItem(stats, "Offset");
-            if (offset) img_stats.offset = offset->valueint;
-
-            cJSON *temperature = cJSON_GetObjectItem(stats, "Temperature");
-            if (temperature) img_stats.temperature = (float)temperature->valuedouble;
-
-            cJSON *filter = cJSON_GetObjectItem(stats, "Filter");
-            if (filter && filter->valuestring)
-                strncpy(img_stats.filter, filter->valuestring, sizeof(img_stats.filter) - 1);
-
-            cJSON *camera_name = cJSON_GetObjectItem(stats, "CameraName");
-            if (camera_name && camera_name->valuestring)
-                strncpy(img_stats.camera_name, camera_name->valuestring, sizeof(img_stats.camera_name) - 1);
-
+            /* new_telescope is a borrowed pointer resolved above, not a lookup */
             if (new_telescope)
                 strncpy(img_stats.telescope_name, new_telescope, sizeof(img_stats.telescope_name) - 1);
-
-            cJSON *focal_length = cJSON_GetObjectItem(stats, "FocalLength");
-            if (focal_length) img_stats.focal_length = focal_length->valueint;
-
-            cJSON *date = cJSON_GetObjectItem(stats, "Date");
-            if (date && date->valuestring)
-                strncpy(img_stats.date, date->valuestring, sizeof(img_stats.date) - 1);
-
-            cJSON *filename = cJSON_GetObjectItem(stats, "Filename");
-            if (filename && filename->valuestring)
-                strncpy(img_stats.filename, filename->valuestring, sizeof(img_stats.filename) - 1);
 
             // Snapshots for post-unlock logging (avoid racing reads of data->)
             int log_exposure_count = 0;

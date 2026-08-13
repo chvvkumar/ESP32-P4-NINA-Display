@@ -100,18 +100,7 @@ esp_err_t json_config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "json_update_interval_s", cfg->json_update_interval_s);
     cJSON_AddStringToObject(root, "json_tiles_config",      app_config_get_json_tiles());
 
-    const char *json_str = cJSON_PrintUnformatted(root);
-    if (json_str == NULL) {
-        cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
-
-    free((void *)json_str);
-    cJSON_Delete(root);
-    return ESP_OK;
+    return send_json_response(req, root);
 }
 
 /**
@@ -165,13 +154,11 @@ esp_err_t json_config_post_handler(httpd_req_t *req)
     /* Preview: apply live, persist nothing. Absent/false => save as before. */
     bool preview = cJSON_IsTrue(cJSON_GetObjectItem(root, "preview"));
 
-    app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    app_config_t *cfg = config_snapshot_for_request(req);
     if (!cfg) {
         cJSON_Delete(root);
-        httpd_resp_send_500(req);
         return ESP_FAIL;
     }
-    app_config_get_snapshot_into(cfg);
 
     JSON_TO_BOOL(root,   "json_enabled",           cfg->json_enabled);
     JSON_TO_STRING(root, "json_url",               cfg->json_url);
@@ -230,12 +217,10 @@ esp_err_t json_proxy_get_handler(httpd_req_t *req)
 {
     REQUIRE_AUTH(req);
 
-    app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    app_config_t *cfg = config_snapshot_for_request(req);
     if (!cfg) {
-        httpd_resp_send_500(req);
         return ESP_FAIL;
     }
-    app_config_get_snapshot_into(cfg);
     char url[sizeof(cfg->json_url)];
     char auth_header[sizeof(cfg->json_auth_header)];
     strlcpy(url, cfg->json_url, sizeof(url));

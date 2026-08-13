@@ -24,12 +24,6 @@ void nina_safety_update(bool connected, bool is_safe);
 /** Re-theme (no-op, visual dot managed by dashboard). */
 void nina_safety_apply_theme(void);
 
-/** Returns cached safe state.  Safe from any task. */
-bool nina_safety_is_safe(void);
-
-/** Returns true if safety monitor is connected.  Safe from any task. */
-bool nina_safety_is_connected(void);
-
 #ifdef __cplusplus
 }
 #endif

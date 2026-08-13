@@ -31,6 +31,9 @@ static const char *TAG = "spotify_client";
 /* Response buffer cap for album art JPEG downloads */
 #define SPOTIFY_ART_MAX_SIZE        (512 * 1024)   /* 512 KB max */
 
+/* Cap on manual Location-following hops for album art (streaming path) */
+#define SPOTIFY_ART_MAX_REDIRECTS   3
+
 /* HTTP timeout for Spotify API requests */
 #define SPOTIFY_HTTP_TIMEOUT_MS     10000
 
@@ -444,116 +447,34 @@ esp_err_t spotify_client_fetch_album_art(const char *url, uint8_t **out_buf,
         return ESP_FAIL;
     }
 
-    esp_err_t ret = ESP_FAIL;
-
-    esp_http_client_config_t http_cfg = {
-        .url = url,
+    /* Shared binary fetch shell (client setup, manual redirect chain — Spotify's
+     * CDN art URLs do 30x — sizing, read loop). REJECT: an art image over the
+     * cap is refused rather than truncated. probe_overflow keeps INTEG-7: with
+     * no Content-Length the buffer is sized to the cap, so an exactly-full
+     * buffer is checked for a further byte and rejected rather than handed to
+     * the decoder as a partial JPEG. shrink_to_fit returns the over-allocated
+     * no-Content-Length buffer at its real size. */
+    const http_fetch_binary_opts_t bopts = {
         .timeout_ms = SPOTIFY_HTTP_TIMEOUT_MS,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .keep_alive_enable = false,
+        .use_tls_bundle = true,
+        .max_redirects = SPOTIFY_ART_MAX_REDIRECTS,
+        .max_size = SPOTIFY_ART_MAX_SIZE,
+        .oversize = HTTP_BIN_OVERSIZE_REJECT,
+        .shrink_to_fit = true,
+        .probe_overflow = true,
+        .label = "Album art",
     };
 
-    esp_http_client_handle_t client = esp_http_client_init(&http_cfg);
-    if (!client) {
-        ESP_LOGE(TAG, "Failed to init HTTP client for album art");
-        xSemaphoreGive(s_player_mutex);
-        return ESP_FAIL;
-    }
+    esp_err_t err = http_fetch_binary(url, &bopts, out_buf, out_size);
 
-    esp_err_t err = esp_http_client_open(client, 0);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "HTTP open failed for album art: %s", esp_err_to_name(err));
-        esp_http_client_cleanup(client);
-        xSemaphoreGive(s_player_mutex);
-        return ESP_FAIL;
-    }
-
-    int content_length = esp_http_client_fetch_headers(client);
-    int status = esp_http_client_get_status_code(client);
-
-    if (status != 200) {
-        ESP_LOGW(TAG, "Album art HTTP %d for %s", status, url);
-        esp_http_client_cleanup(client);
-        xSemaphoreGive(s_player_mutex);
-        return ESP_FAIL;
-    }
-
-    /* Determine buffer size */
-    size_t buf_size;
-    if (content_length > 0) {
-        if ((size_t)content_length > SPOTIFY_ART_MAX_SIZE) {
-            ESP_LOGW(TAG, "Album art too large: %d bytes", content_length);
-            esp_http_client_cleanup(client);
-            xSemaphoreGive(s_player_mutex);
-            return ESP_FAIL;
-        }
-        buf_size = (size_t)content_length;
-    } else {
-        /* No content-length header — use max and reallocate later */
-        buf_size = SPOTIFY_ART_MAX_SIZE;
-    }
-
-    uint8_t *buffer = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
-    if (!buffer) {
-        ESP_LOGE(TAG, "Failed to allocate %zu bytes for album art", buf_size);
-        esp_http_client_cleanup(client);
-        xSemaphoreGive(s_player_mutex);
-        return ESP_FAIL;
-    }
-
-    /* Stream response into buffer */
-    bool had_content_length = (content_length > 0);
-    size_t total_read = 0;
-    int read_len;
-    while (total_read < buf_size) {
-        read_len = esp_http_client_read(client, (char *)buffer + total_read,
-                                         buf_size - total_read);
-        if (read_len <= 0) break;
-        total_read += read_len;
-    }
-
-    /* INTEG-7: With no Content-Length the buffer is sized to the cap. If it
-     * filled exactly, the image may be larger than the cap and silently
-     * truncated. Probe one more byte: if more data is available the source
-     * exceeded SPOTIFY_ART_MAX_SIZE — reject rather than decode a partial JPEG. */
-    if (!had_content_length && total_read == buf_size) {
-        char probe;
-        int extra = esp_http_client_read(client, &probe, 1);
-        if (extra > 0) {
-            ESP_LOGW(TAG, "Album art exceeds %d byte cap (no content-length) — rejecting",
-                     (int)SPOTIFY_ART_MAX_SIZE);
-            esp_http_client_cleanup(client);
-            free(buffer);
-            xSemaphoreGive(s_player_mutex);
-            return ESP_FAIL;
-        }
-    }
-
-    esp_http_client_cleanup(client);
-
-    if (total_read == 0) {
-        ESP_LOGW(TAG, "Empty album art response");
-        free(buffer);
-        xSemaphoreGive(s_player_mutex);
-        return ESP_FAIL;
-    }
-
-    /* If we over-allocated (no content-length), shrink to actual size */
-    if (total_read < buf_size) {
-        uint8_t *shrunk = heap_caps_realloc(buffer, total_read, MALLOC_CAP_SPIRAM);
-        if (shrunk) {
-            buffer = shrunk;
-        }
-        /* If realloc fails, keep the original oversized buffer — still valid */
-    }
-
-    *out_buf = buffer;
-    *out_size = total_read;
-    ret = ESP_OK;
-
-    ESP_LOGD(TAG, "Album art fetched: %zu bytes from %s", total_read, url);
+    /* The player mutex is held across the whole request so prepare_shutdown()
+     * waits for it, exactly as before. */
     xSemaphoreGive(s_player_mutex);
-    return ret;
+
+    if (err != ESP_OK) return ESP_FAIL;
+
+    ESP_LOGD(TAG, "Album art fetched: %zu bytes from %s", *out_size, url);
+    return ESP_OK;
 }
 
 // =============================================================================

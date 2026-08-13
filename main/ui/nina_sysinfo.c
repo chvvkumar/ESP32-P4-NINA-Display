@@ -22,13 +22,11 @@
 #include <stdio.h>
 #include <string.h>
 #include "perf_monitor.h"
+#include "time_parse.h"
 #include "nina_idle_indicator.h"
 
 /* ── Layout ──────────────────────────────────────────────────────────── */
-#define SI_PAD       16
 #define SI_GAP       10
-#define SI_RADIUS    24
-#define SI_ICON_SIZE 48
 
 /* ── Widgets ─────────────────────────────────────────────────────────── */
 static lv_obj_t *si_page        = NULL;
@@ -97,59 +95,8 @@ static uint32_t bar_level_color(int pct, int low_thresh, int high_thresh) {
 
 /* ── Helpers ─────────────────────────────────────────────────────────── */
 
-static lv_obj_t *make_card(lv_obj_t *parent) {
-    lv_obj_t *card = lv_obj_create(parent);
-    lv_obj_remove_style_all(card);
-    lv_obj_add_style(card, &style_bento_box, 0);
-    lv_obj_set_width(card, LV_PCT(100));
-    lv_obj_set_height(card, LV_SIZE_CONTENT);
-    lv_obj_set_style_pad_all(card, 12, 0);
-    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_row(card, 4, 0);
-    return card;
-}
-
-static lv_obj_t *make_section_title(lv_obj_t *parent, const char *text) {
-    lv_obj_t *lbl = lv_label_create(parent);
-    lv_label_set_text(lbl, text);
-    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_letter_space(lbl, 2, 0);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(lbl, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
-    return lbl;
-}
-
-/* Row: "LABEL  value" in a single line */
-static lv_obj_t *make_kv_row(lv_obj_t *parent, const char *key, lv_obj_t **out_val) {
-    lv_obj_t *row = lv_obj_create(parent);
-    lv_obj_remove_style_all(row);
-    lv_obj_set_width(row, LV_PCT(100));
-    lv_obj_set_height(row, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-
-    lv_obj_t *lbl_key = lv_label_create(row);
-    lv_label_set_text(lbl_key, key);
-    lv_obj_set_style_text_font(lbl_key, &lv_font_montserrat_18, 0);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(lbl_key, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
-
-    lv_obj_t *lbl_val = lv_label_create(row);
-    lv_label_set_text(lbl_val, "--");
-    lv_obj_set_style_text_font(lbl_val, &lv_font_montserrat_20, 0);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(lbl_val, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-    }
-
-    *out_val = lbl_val;
-    return row;
-}
+/* Card/section/kv factories are shared: ui_card/ui_section_label/ui_kv (ui_helpers.h).
+ * This page uses card pad 12 / row gap 4, key font 18, value font 20. */
 
 static lv_obj_t *make_bar(lv_obj_t *parent) {
     lv_obj_t *bar = lv_bar_create(parent);
@@ -209,13 +156,7 @@ lv_obj_t *sysinfo_page_create(lv_obj_t *parent) {
     lv_obj_set_flex_align(hdr_left, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(hdr_left, 12, 0);
 
-    lbl_title = lv_label_create(hdr_left);
-    lv_label_set_text(lbl_title, "System");
-    lv_obj_set_style_text_font(lbl_title, &lv_font_montserrat_28, 0);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(lbl_title, lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
-    }
+    lbl_title = ui_label(hdr_left, "System", &lv_font_montserrat_28, UI_THEME_COLOR(header_text_color));
 
     /* ── Two-column layout for cards ── */
     lv_obj_t *cols = lv_obj_create(si_page);
@@ -244,70 +185,70 @@ lv_obj_t *sysinfo_page_create(lv_obj_t *parent) {
 
     /* ── Network Card (left) ── */
     {
-        lv_obj_t *card = make_card(col_left);
-        make_section_title(card, "NETWORK");
-        make_kv_row(card, "Hostname", &lbl_hostname_val);
-        make_kv_row(card, "STA IP", &lbl_sta_ip_val);
-        make_kv_row(card, "AP IP", &lbl_ap_ip_val);
-        make_kv_row(card, "MAC", &lbl_mac_val);
+        lv_obj_t *card = ui_card(col_left, 12, 4);
+        ui_section_label(card, "NETWORK");
+        lbl_hostname_val = ui_kv(card, "Hostname", &lv_font_montserrat_18, &lv_font_montserrat_20);
+        lbl_sta_ip_val = ui_kv(card, "STA IP", &lv_font_montserrat_18, &lv_font_montserrat_20);
+        lbl_ap_ip_val = ui_kv(card, "AP IP", &lv_font_montserrat_18, &lv_font_montserrat_20);
+        lbl_mac_val = ui_kv(card, "MAC", &lv_font_montserrat_18, &lv_font_montserrat_20);
     }
 
     /* ── WiFi Card (left) ── */
     {
-        lv_obj_t *card = make_card(col_left);
-        make_section_title(card, "WIFI");
-        make_kv_row(card, "SSID", &lbl_ssid_val);
-        make_kv_row(card, "RSSI", &lbl_rssi_val);
-        make_kv_row(card, "Channel", &lbl_channel_val);
+        lv_obj_t *card = ui_card(col_left, 12, 4);
+        ui_section_label(card, "WIFI");
+        lbl_ssid_val = ui_kv(card, "SSID", &lv_font_montserrat_18, &lv_font_montserrat_20);
+        lbl_rssi_val = ui_kv(card, "RSSI", &lv_font_montserrat_18, &lv_font_montserrat_20);
+        lbl_channel_val = ui_kv(card, "Channel", &lv_font_montserrat_18, &lv_font_montserrat_20);
         bar_wifi = make_bar(card);
     }
 
     /* ── Memory Card (right) ── */
     {
-        lv_obj_t *card = make_card(col_right);
-        make_section_title(card, "MEMORY");
-        make_kv_row(card, "Heap", &lbl_heap_val);
+        lv_obj_t *card = ui_card(col_right, 12, 4);
+        ui_section_label(card, "MEMORY");
+        lbl_heap_val = ui_kv(card, "Heap", &lv_font_montserrat_18, &lv_font_montserrat_20);
         bar_heap = make_bar(card);
-        make_kv_row(card, "PSRAM", &lbl_psram_val);
+        lbl_psram_val = ui_kv(card, "PSRAM", &lv_font_montserrat_18, &lv_font_montserrat_20);
         bar_psram = make_bar(card);
     }
 
     /* ── CPU Card (right, visible when debug mode enabled) ── */
     {
-        cpu_card = make_card(col_right);
-        make_section_title(cpu_card, "CPU");
-        make_kv_row(cpu_card, "Core 0", &lbl_core0_val);
+        cpu_card = ui_card(col_right, 12, 4);
+        ui_section_label(cpu_card, "CPU");
+        lbl_core0_val = ui_kv(cpu_card, "Core 0", &lv_font_montserrat_18, &lv_font_montserrat_20);
         bar_core0 = make_bar(cpu_card);
-        make_kv_row(cpu_card, "Core 1", &lbl_core1_val);
+        lbl_core1_val = ui_kv(cpu_card, "Core 1", &lv_font_montserrat_18, &lv_font_montserrat_20);
         bar_core1 = make_bar(cpu_card);
-        make_kv_row(cpu_card, "Total", &lbl_cputotal_val);
+        lbl_cputotal_val = ui_kv(cpu_card, "Total", &lv_font_montserrat_18, &lv_font_montserrat_20);
         bar_cputotal = make_bar(cpu_card);
-        make_kv_row(cpu_card, "Headroom", &lbl_headroom_val);
-        make_kv_row(cpu_card, "Render", &lbl_lvgl_fps_val);
-        make_kv_row(cpu_card, "Top Task", &lbl_top_task_val);
+        lbl_headroom_val = ui_kv(cpu_card, "Headroom", &lv_font_montserrat_18, &lv_font_montserrat_20);
+        lbl_lvgl_fps_val = ui_kv(cpu_card, "Render", &lv_font_montserrat_18, &lv_font_montserrat_20);
+        lbl_top_task_val = ui_kv(cpu_card, "Top Task", &lv_font_montserrat_18, &lv_font_montserrat_20);
         if (!g_perf.enabled) lv_obj_add_flag(cpu_card, LV_OBJ_FLAG_HIDDEN);
     }
 
     /* ── System Card (right) ── */
     {
-        lv_obj_t *card = make_card(col_right);
-        make_section_title(card, "SYSTEM");
-        make_kv_row(card, "Chip", &lbl_chip_val);
-        make_kv_row(card, "IDF", &lbl_idf_val);
-        make_kv_row(card, "Uptime", &lbl_uptime_val);
-        make_kv_row(card, "Tasks", &lbl_tasks_val);
+        lv_obj_t *card = ui_card(col_right, 12, 4);
+        ui_section_label(card, "SYSTEM");
+        lbl_chip_val = ui_kv(card, "Chip", &lv_font_montserrat_18, &lv_font_montserrat_20);
+        lbl_idf_val = ui_kv(card, "IDF", &lv_font_montserrat_18, &lv_font_montserrat_20);
+        lbl_uptime_val = ui_kv(card, "Uptime", &lv_font_montserrat_18, &lv_font_montserrat_20);
+        lbl_tasks_val = ui_kv(card, "Tasks", &lv_font_montserrat_18, &lv_font_montserrat_20);
     }
 
     /* ── Performance Card (left, visible when debug mode enabled) ── */
     {
-        perf_card = make_card(col_left);
-        make_section_title(perf_card, "PERFORMANCE");
-        make_kv_row(perf_card, "Poll Cycle", &lbl_poll_cycle_val);
-        make_kv_row(perf_card, "HTTP Reqs", &lbl_http_reqs_val);
-        make_kv_row(perf_card, "WS Events", &lbl_ws_events_val);
-        make_kv_row(perf_card, "JSON Parses", &lbl_json_parses_val);
-        make_kv_row(perf_card, "Lock Wait", &lbl_lock_wait_val);
-        make_kv_row(perf_card, "Stack HWM", &lbl_stack_hwm_val);
+        perf_card = ui_card(col_left, 12, 4);
+        ui_section_label(perf_card, "PERFORMANCE");
+        lbl_poll_cycle_val = ui_kv(perf_card, "Poll Cycle", &lv_font_montserrat_18, &lv_font_montserrat_20);
+        lbl_http_reqs_val = ui_kv(perf_card, "HTTP Reqs", &lv_font_montserrat_18, &lv_font_montserrat_20);
+        lbl_ws_events_val = ui_kv(perf_card, "WS Events", &lv_font_montserrat_18, &lv_font_montserrat_20);
+        lbl_json_parses_val = ui_kv(perf_card, "JSON Parses", &lv_font_montserrat_18, &lv_font_montserrat_20);
+        lbl_lock_wait_val = ui_kv(perf_card, "Lock Wait", &lv_font_montserrat_18, &lv_font_montserrat_20);
+        lbl_stack_hwm_val = ui_kv(perf_card, "Stack HWM", &lv_font_montserrat_18, &lv_font_montserrat_20);
         if (!g_perf.enabled) lv_obj_add_flag(perf_card, LV_OBJ_FLAG_HIDDEN);
     }
 
@@ -323,13 +264,7 @@ lv_obj_t *sysinfo_page_create(lv_obj_t *parent) {
     lv_obj_add_flag(btn_gear, LV_OBJ_FLAG_FLOATING | LV_OBJ_FLAG_CLICKABLE);
     lv_obj_remove_flag(btn_gear, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_align(btn_gear, LV_ALIGN_BOTTOM_RIGHT, -10, -10);
-    lv_obj_t *gear_icon = lv_label_create(btn_gear);
-    lv_label_set_text(gear_icon, LV_SYMBOL_SETTINGS);
-    lv_obj_set_style_text_font(gear_icon, &lv_font_montserrat_48, 0);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(gear_icon, lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
-    }
+    lv_obj_t *gear_icon = ui_label(btn_gear, LV_SYMBOL_SETTINGS, &lv_font_montserrat_48, UI_THEME_COLOR(header_text_color));
     lv_obj_center(gear_icon);
     lv_obj_add_event_cb(btn_gear, gear_btn_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_set_ext_click_area(btn_gear, 10);
@@ -465,14 +400,7 @@ void sysinfo_page_refresh(void) {
 
         /* Uptime */
         int64_t us = esp_timer_get_time();
-        int secs = (int)(us / 1000000);
-        int days = secs / 86400; secs %= 86400;
-        int hrs  = secs / 3600;  secs %= 3600;
-        int mins = secs / 60;    secs %= 60;
-        if (days > 0)
-            snprintf(buf, sizeof(buf), "%dd %02d:%02d:%02d", days, hrs, mins, secs);
-        else
-            snprintf(buf, sizeof(buf), "%02d:%02d:%02d", hrs, mins, secs);
+        fmt_duration(buf, sizeof(buf), (int32_t)(us / 1000000), FMT_DUR_UPTIME);
         lv_label_set_text(lbl_uptime_val, buf);
 
         snprintf(buf, sizeof(buf), "%u", (unsigned)uxTaskGetNumberOfTasks());

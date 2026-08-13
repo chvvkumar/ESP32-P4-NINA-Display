@@ -77,8 +77,6 @@ void color_picker_show(uint32_t current_color,
     cp_callback = cb;
     cp_user_data = user_data;
 
-    int gb = app_config_get()->color_brightness;
-
     /* ── Full-screen overlay ─────────────────────────────────────────── */
     cp_overlay = lv_obj_create(lv_layer_top());
     lv_obj_remove_style_all(cp_overlay);
@@ -119,13 +117,7 @@ void color_picker_show(uint32_t current_color,
     lv_obj_set_style_pad_row(cp_card, 12, 0);
 
     /* ── Title ───────────────────────────────────────────────────────── */
-    cp_title = lv_label_create(cp_card);
-    lv_label_set_text(cp_title, "Select Color");
-    lv_obj_set_style_text_font(cp_title, &lv_font_montserrat_22, 0);
-    if (current_theme) {
-        lv_obj_set_style_text_color(cp_title,
-            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-    }
+    cp_title = ui_label(cp_card, "Select Color", &lv_font_montserrat_22, UI_THEME_COLOR(text_color));
 
     /* ── Grid container (flex row with wrap) ─────────────────────────── */
     lv_obj_t *grid = lv_obj_create(cp_card);
@@ -172,13 +164,7 @@ void color_picker_show(uint32_t current_color,
     }
 
     /* ── Hint label ──────────────────────────────────────────────────── */
-    cp_hint = lv_label_create(cp_card);
-    lv_label_set_text(cp_hint, "Tap a color to select");
-    lv_obj_set_style_text_font(cp_hint, &lv_font_montserrat_16, 0);
-    if (current_theme) {
-        lv_obj_set_style_text_color(cp_hint,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
+    cp_hint = ui_label(cp_card, "Tap a color to select", &lv_font_montserrat_16, UI_THEME_COLOR(label_color));
 }
 
 void color_picker_hide(void)

@@ -2,6 +2,11 @@
 #include "spotify_auth.h"
 #include "spotify_client.h"
 #include "tasks.h"
+#include "ui/nina_dashboard.h"    /* nina_dashboard_set_spotify_enabled */
+#include "ui/nina_nav_arbiter.h"  /* nav_arbiter_notify_topology_changed */
+#include "display_defs.h"         /* LVGL_LOCK_TIMEOUT_MS */
+#include "bsp/esp-bsp.h"
+#include "bsp/display.h"          /* bsp_display_lock / bsp_display_unlock */
 #include "esp_heap_caps.h"
 #include <string.h>
 
@@ -27,18 +32,7 @@ esp_err_t spotify_config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "spotify_overlay_timeout_s", cfg->spotify_overlay_timeout_s);
     cJSON_AddBoolToObject(root, "spotify_overlay_visible", cfg->spotify_overlay_visible);
 
-    const char *json_str = cJSON_PrintUnformatted(root);
-    if (json_str == NULL) {
-        cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
-
-    free((void *)json_str);
-    cJSON_Delete(root);
-    return ESP_OK;
+    return send_json_response(req, root);
 }
 
 /**
@@ -58,15 +52,12 @@ esp_err_t spotify_config_post_handler(httpd_req_t *req)
         return send_400(req, "spotify_client_id too long");
     }
 
-    /* Work on a mutex-protected snapshot copy; never field-write the live config.
-     * app_config_t is ~7.6 KB — snapshot into a PSRAM heap copy, not the stack. */
-    app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    /* Work on a mutex-protected snapshot copy; never field-write the live config. */
+    app_config_t *cfg = config_snapshot_for_request(req);
     if (!cfg) {
         cJSON_Delete(root);
-        httpd_resp_send_500(req);
         return ESP_FAIL;
     }
-    app_config_get_snapshot_into(cfg);
 
     JSON_TO_BOOL(root, "spotify_enabled", cfg->spotify_enabled);
     JSON_TO_STRING(root, "spotify_client_id", cfg->spotify_client_id);
@@ -98,6 +89,17 @@ esp_err_t spotify_config_post_handler(httpd_req_t *req)
      * its next cycle; ensure it is running when the feature is enabled. */
     bool spotify_enabled = cfg->spotify_enabled;
     heap_caps_free(cfg);
+
+    /* The Spotify page is created lazily on first enable (and dropped from
+     * navigation on disable), so a runtime toggle must reach the dashboard —
+     * otherwise the page only appears after a reboot. LVGL work, so it runs
+     * under the display lock; a timeout is not fatal, the next toggle retries. */
+    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+        nina_dashboard_set_spotify_enabled(spotify_enabled);
+        bsp_display_unlock();
+    }
+    nav_arbiter_notify_topology_changed();
+
     if (spotify_enabled) {
         spotify_ensure_task_running();
     }
@@ -235,18 +237,7 @@ esp_err_t spotify_status_get_handler(httpd_req_t *req)
     cJSON_AddStringToObject(root, "track", pb.track_title);
     cJSON_AddStringToObject(root, "artist", pb.artist_name);
 
-    const char *json_str = cJSON_PrintUnformatted(root);
-    if (json_str == NULL) {
-        cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
-
-    free((void *)json_str);
-    cJSON_Delete(root);
-    return ESP_OK;
+    return send_json_response(req, root);
 }
 
 /**

@@ -6,6 +6,8 @@
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
+#include "esp_system.h"   /* esp_register_shutdown_handler */
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
@@ -21,6 +23,21 @@ static app_config_t s_config;
 static SemaphoreHandle_t s_config_mutex;
 static bool s_config_dirty = false;
 static const char *NVS_NAMESPACE = "app_conf";
+
+/* ── Debounced NVS save ──
+ * The NVS blob write costs ~350 ms (8.6 KB spans ~2 of 16 pages, so nearly every
+ * save compacts). A stream of small sets -- an HA slider drag over the control
+ * API, a macro keypad held down -- must not pay that per step.
+ * app_config_save_deferred() commits to RAM immediately and coalesces the flash
+ * write behind a restartable window, so a whole drag costs one write.
+ *
+ * The write runs on a dedicated task, never in a timer callback: 350 ms of
+ * blocking in the shared esp_timer task would stall every other timer. The
+ * notify-with-timeout in deferred_save_task() IS the restartable one-shot. */
+#define CONFIG_DEFERRED_SAVE_MS 2000
+static TaskHandle_t s_deferred_task = NULL;
+static bool s_deferred_pending = false;   /* guarded by s_config_mutex */
+static void deferred_save_task(void *arg);
 
 /* ── Tiles-config caches (v52 config split) ──
  * json_tiles_config / ha_tiles_config were removed from app_config_t and moved
@@ -794,11 +811,15 @@ static void set_defaults(app_config_t *cfg) {
         strcpy(cfg->hfr_thresholds[i], DEFAULT_HFR_THRESHOLDS);
     }
     cfg->active_page_override = PAGE_REF_SUMMARY;  /* Home Page = Summary (page_ref_t registry id) */
-    cfg->auto_rotate_pages = 0x0E;  // Default: all NINA instances (bits 1-3)
-    cfg->auto_rotate_pages_hi = 0;  // bits 8-15 off by default (Image Display opt-in, like AllSky/Spotify/Clock)
-    /* Default rotation order: Summary, AllSky, Spotify, Clock, NINA1, NINA2, NINA3, SysInfo */
-    for (int i = 0; i < 8; i++) cfg->auto_rotate_order[i] = (uint8_t)i;
-    cfg->auto_rotate_order_ext = 8;  // 9th slot = bit index 8 (Image Display)
+    /* Retired legacy rotation fields (auto_rotate_pages/_hi, auto_rotate_order[])
+     * are left at their memset(0) value: nothing outside the migration chain
+     * reads them, and every migration that does read them takes the values from
+     * the stored blob. The one exception is auto_rotate_order_ext, appended in
+     * v42: for a pre-v42 blob it lies past the copied region, so migrations
+     * v37..v41 consume this seeded value. 8 == the legacy Image Display stop,
+     * which the pages_hi==0 mask filter then drops — keeping the seed keeps
+     * those migration paths byte-identical to prior firmware. */
+    cfg->auto_rotate_order_ext = 8;
     /* Default flat slideshow order (auto_rotate_order2): ARP_IDX_* values 0..7
      * only. Image Display (ARP_IDX_IMG_GOES, index 8) stays OPT-IN, excluded from
      * the fresh-install default rotation. memset() above already cleared the
@@ -3145,16 +3166,10 @@ static bool validate_config(app_config_t *cfg) {
             fixed = true;
         }
     }
-    if (cfg->auto_rotate_pages == 0) {
-        cfg->auto_rotate_pages = 0x0E;  // Default: all NINA instances
-        fixed = true;
-    }
-    /* Validate rotation order — reset to default if first entry is 0xFF (uninitialised) */
-    if (cfg->auto_rotate_order[0] == 0xFF) {
-        for (int i = 0; i < 8; i++) cfg->auto_rotate_order[i] = (uint8_t)i;
-        cfg->auto_rotate_order_ext = 8;  // 9th slot = Image Display bit index
-        fixed = true;
-    }
+    /* auto_rotate_pages/_hi and auto_rotate_order[]/_ext are retired: read only
+     * by the migration chain, which sources them from the stored blob. No
+     * repair here — validate_config runs after migration, so a repair could
+     * only corrupt what a migration already consumed. */
     /* Validate the flat slideshow order: any entry that is not the 0xFF
      * terminator and not a valid stop id is dropped to 0xFF. */
     for (int i = 0; i < ARP_ORDER_CAPACITY; i++) {
@@ -3217,6 +3232,23 @@ void app_config_init(void) {
      * early-return path below (NVS-open fail, fresh install). Alloc-guarded, so
      * a factory-reset re-init reuses the existing buffers without leaking. */
     tiles_caches_alloc();
+    /* Deferred-save worker + reboot flush. Started before every early return
+     * below so the debounce path is available regardless of NVS state, and
+     * guarded so a factory-reset re-init does not spawn a second worker.
+     * Internal-RAM stack on purpose: this task writes flash. */
+    if (!s_deferred_task) {
+        if (xTaskCreate(deferred_save_task, "cfgsave", 3072, NULL, 3, &s_deferred_task) != pdPASS) {
+            s_deferred_task = NULL;   /* falls back to synchronous saves */
+            ESP_LOGE(TAG, "Deferred-save task create failed; saves stay synchronous");
+        }
+        /* esp_restart() runs shutdown handlers, so no reboot path (web reboot,
+         * OTA) can drop a pending window. Deep sleep does not run them, but it
+         * is never triggered by a config write. */
+        esp_err_t sh_err = esp_register_shutdown_handler(app_config_flush_deferred);
+        if (sh_err != ESP_OK) {
+            ESP_LOGW(TAG, "Shutdown flush handler not registered: %s", esp_err_to_name(sh_err));
+        }
+    }
     bool tiles_loaded = false;   /* migrations that source inline tiles set this true */
     nvs_handle_t handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
@@ -3726,8 +3758,8 @@ void app_config_normalize_nav_exclusivity(app_config_t *cfg) {
     }
 }
 
-void app_config_save(const app_config_t *config) {
-    xSemaphoreTake(s_config_mutex, portMAX_DELAY);
+/* Commit @p config into the live in-memory config. Caller holds s_config_mutex. */
+static void commit_config_locked(const app_config_t *config) {
     invalidate_json_caches();
 
     memcpy(&s_config, config, sizeof(app_config_t));
@@ -3735,12 +3767,14 @@ void app_config_save(const app_config_t *config) {
     validate_config(&s_config);
 
     app_config_normalize_nav_exclusivity(&s_config);
+}
 
+/* Write the live in-memory config to NVS (~350 ms). Caller holds s_config_mutex. */
+static void persist_config_locked(void) {
     nvs_handle_t my_handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &my_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Error opening NVS handle for saving: %s", esp_err_to_name(err));
-        xSemaphoreGive(s_config_mutex);
         return;
     }
 
@@ -3753,8 +3787,49 @@ void app_config_save(const app_config_t *config) {
         s_config_dirty = false;
     }
     nvs_close(my_handle);
+}
 
+void app_config_save(const app_config_t *config) {
+    xSemaphoreTake(s_config_mutex, portMAX_DELAY);
+    commit_config_locked(config);
+    persist_config_locked();
     xSemaphoreGive(s_config_mutex);
+}
+
+void app_config_flush_deferred(void) {
+    xSemaphoreTake(s_config_mutex, portMAX_DELAY);
+    if (s_deferred_pending) {
+        s_deferred_pending = false;
+        persist_config_locked();
+    }
+    xSemaphoreGive(s_config_mutex);
+}
+
+void app_config_save_deferred(const app_config_t *config) {
+    if (!s_deferred_task) {
+        /* No worker task (creation failed): behave exactly like app_config_save(). */
+        app_config_save(config);
+        return;
+    }
+    xSemaphoreTake(s_config_mutex, portMAX_DELAY);
+    commit_config_locked(config);
+    s_deferred_pending = true;
+    xSemaphoreGive(s_config_mutex);
+    xTaskNotifyGive(s_deferred_task);
+}
+
+/* Owns the flash write for app_config_save_deferred(). The inner
+ * notify-with-timeout is the debounce: every further change restarts the window,
+ * so a burst of sets collapses into one NVS write. */
+static void deferred_save_task(void *arg) {
+    (void)arg;
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        while (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(CONFIG_DEFERRED_SAVE_MS)) > 0) {
+            /* another change landed inside the window -- keep waiting */
+        }
+        app_config_flush_deferred();
+    }
 }
 
 void app_config_get_snapshot_into(app_config_t *dst) {

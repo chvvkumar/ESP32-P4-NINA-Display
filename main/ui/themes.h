@@ -41,13 +41,6 @@ int themes_get_count(void);
  */
 const theme_t* themes_get(int index);
 
-/**
- * @brief Get the index of a theme by name
- * @param name Name of the theme
- * @return Index of the theme, or 0 if not found
- */
-int themes_get_index_by_name(const char *name);
-
 #ifdef __cplusplus
 }
 #endif

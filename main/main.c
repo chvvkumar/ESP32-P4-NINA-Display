@@ -481,15 +481,13 @@ static void event_handler(void *arg, esp_event_base_t event_base,
                 lv_obj_t *scr = lv_scr_act();
                 create_nina_dashboard(scr, instance_count);
                 nina_toast_init(scr);
-                nina_event_log_overlay_create(scr);
                 nina_alerts_init(scr);
                 nina_safety_create(scr);
                 bsp_display_unlock();
             }
             nina_dashboard_set_page_change_cb(on_page_changed);
             nina_client_init();
-            nina_client_init_image_buffers();
-            nina_thumbnail_init();
+            /* Image fetch + thumbnail zoom buffers are allocated on first use. */
             /* spotify_auth_init() already ran before dashboard creation above. */
             spotify_client_init();
 
@@ -950,7 +948,6 @@ void app_main(void)
 
         /* Initialize notification overlays (must be after dashboard so they float on top) */
         nina_toast_init(scr);
-        nina_event_log_overlay_create(scr);
         nina_alerts_init(scr);
         nina_safety_create(scr);
 
@@ -991,8 +988,8 @@ void app_main(void)
         audio_alert_play_boot_jingle();
 
         nina_client_init();  // DNS cache mutex — must be called before poll tasks spawn
-        nina_client_init_image_buffers();  // Pre-allocate PSRAM image fetch buffer
-        nina_thumbnail_init();  // Pre-allocate PSRAM zoom buffer
+        /* The 1 MB image fetch buffer and 4 MB thumbnail zoom buffer are
+         * allocated on first thumbnail use, not at boot. */
 
         /* Spotify init — always called so web handlers (config, login) work even when disabled.
          * spotify_auth_init() already ran before dashboard creation above. */

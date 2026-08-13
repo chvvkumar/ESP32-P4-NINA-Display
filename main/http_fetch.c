@@ -30,6 +30,7 @@ struct http_fetch_conn {
  * and would otherwise leave a stale value from an intermediate response.
  */
 static void capture_reset(const http_fetch_opts_t *opts) {
+    if (!opts) return;   /* binary path has no header capture */
     if (opts->capture_header_out && opts->capture_header_out_len > 0) {
         opts->capture_header_out[0] = '\0';
     }
@@ -180,6 +181,10 @@ static void apply_headers(esp_http_client_handle_t client, const http_fetch_opts
  * On success fills *status_out / *content_length_out and returns ESP_OK.
  * On transport failure returns the esp_http_client error.
  *
+ * @param opts          text-fetch options, used ONLY for response-header
+ *                       capture; NULL from the binary path, which captures
+ *                       nothing.
+ * @param what          subject for the per-hop log line (URL, or a short label).
  * @param opened_out    set true as soon as the FIRST esp_http_client_open()
  *                       call (before any redirect hop) succeeds, regardless
  *                       of what happens afterward -- mirrors the "ever
@@ -192,6 +197,7 @@ static void apply_headers(esp_http_client_handle_t client, const http_fetch_opts
  */
 static esp_err_t open_and_follow_redirects(esp_http_client_handle_t client,
                                             const http_fetch_opts_t *opts,
+                                            int max_redirects, const char *what,
                                             int *status_out, int *content_length_out,
                                             bool *opened_out, int64_t *connect_us_out,
                                             int64_t *headers_us_out) {
@@ -208,7 +214,9 @@ static esp_err_t open_and_follow_redirects(esp_http_client_handle_t client,
     int status = esp_http_client_get_status_code(client);
 
     int redirects = 0;
-    while (http_status_is_redirect(status) && redirects < opts->max_redirects) {
+    while (http_status_is_redirect(status) && redirects < max_redirects) {
+        ESP_LOGI(TAG, "HTTP %d redirect, following (hop %d): %s",
+                 status, redirects + 1, what);
         err = esp_http_client_set_redirection(client);
         if (err != ESP_OK) break; /* no Location header or similar -- stop following */
 
@@ -272,7 +280,8 @@ static esp_err_t attempt_once(const char *url, const http_fetch_opts_t *opts,
 
     int status = 0;
     int content_length = 0;
-    esp_err_t err = open_and_follow_redirects(client, opts, &status, &content_length,
+    esp_err_t err = open_and_follow_redirects(client, opts, opts->max_redirects, url,
+                                               &status, &content_length,
                                                &info->ever_connected, &info->connect_us,
                                                &info->headers_us);
 
@@ -288,7 +297,8 @@ static esp_err_t attempt_once(const char *url, const http_fetch_opts_t *opts,
         if (!client) return ESP_ERR_NO_MEM;
         apply_headers(client, opts);
         esp_http_client_set_user_data(client, (void *)opts);
-        err = open_and_follow_redirects(client, opts, &status, &content_length,
+        err = open_and_follow_redirects(client, opts, opts->max_redirects, url,
+                                         &status, &content_length,
                                          &info->ever_connected, &info->connect_us,
                                          &info->headers_us);
     }
@@ -412,19 +422,182 @@ esp_err_t http_fetch_text(const char *url, const http_fetch_opts_t *opts_in,
     return last_err;
 }
 
-cJSON *http_fetch_json(const char *url, const http_fetch_opts_t *opts) {
-    char *body = NULL;
-    size_t len = 0;
-    if (http_fetch_text(url, opts, &body, &len) != ESP_OK) {
-        return NULL;
+esp_err_t http_fetch_binary(const char *url, const http_fetch_binary_opts_t *opts_in,
+                             uint8_t **out_buf, size_t *out_len) {
+    if (!url || !opts_in || !out_buf || !out_len) return ESP_ERR_INVALID_ARG;
+    if (opts_in->max_size == 0) return ESP_ERR_INVALID_ARG;
+
+    http_fetch_binary_opts_t o = *opts_in;
+    if (o.timeout_ms <= 0) o.timeout_ms = 8000;
+    if (o.unknown_len_size == 0) o.unknown_len_size = o.max_size;
+    const char *what = o.label ? o.label : "HTTP";
+
+    *out_buf = NULL;
+    *out_len = 0;
+
+    esp_http_client_config_t cfg = {
+        .url = url,
+        .timeout_ms = o.timeout_ms,
+        .buffer_size = o.rx_buffer_size,      /* 0 -> esp_http_client default */
+        .buffer_size_tx = o.tx_buffer_size,   /* 0 -> esp_http_client default */
+        .keep_alive_enable = false,
+        .crt_bundle_attach = o.use_tls_bundle ? esp_crt_bundle_attach : NULL,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    if (!client) {
+        ESP_LOGE(TAG, "%s: failed to create HTTP client", what);
+        return ESP_FAIL;
     }
 
-    cJSON *json = cJSON_Parse(body);
-    heap_caps_free(body);
-    if (!json) {
-        ESP_LOGW(TAG, "JSON parse failed for %s", url);
+    int status = 0;
+    int content_length = 0;
+    esp_err_t err = open_and_follow_redirects(client, NULL, o.max_redirects, what,
+                                               &status, &content_length,
+                                               NULL, NULL, NULL);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "%s: HTTP open failed: %s", what, esp_err_to_name(err));
+        esp_http_client_cleanup(client);
+        return err;
     }
-    return json;
+    if (status != 200) {
+        ESP_LOGW(TAG, "%s: HTTP status %d", what, status);
+        esp_http_client_cleanup(client);
+        return ESP_FAIL;
+    }
+
+    bool chunked = esp_http_client_is_chunked_response(client);
+    ESP_LOGI(TAG, "%s: content_length=%d, chunked=%d", what, content_length, (int)chunked);
+
+    /* Size the buffer. A Content-Length above max_size never sizes the
+     * allocation: either we take the first max_size bytes (CLAMP) or we refuse
+     * the response outright, so a bad or hostile header cannot pick our
+     * allocation size for us. */
+    size_t needed;
+    if (content_length > 0) {
+        if ((size_t)content_length > o.max_size) {
+            if (o.oversize == HTTP_BIN_OVERSIZE_CLAMP) {
+                content_length = (int)o.max_size;
+            } else {
+                ESP_LOGW(TAG, "%s too large: %d bytes (cap %u)",
+                         what, content_length, (unsigned)o.max_size);
+                esp_http_client_cleanup(client);
+                return ESP_FAIL;
+            }
+        }
+        needed = (size_t)content_length;
+    } else {
+        needed = o.unknown_len_size;
+    }
+
+    /* Prefer the caller's scratch buffer when the body fits: avoids the
+     * malloc/free churn that fragments PSRAM over a long soak. Requires the
+     * lock -- an unguarded shared buffer would race between fetches. */
+    uint8_t *buf = NULL;
+    size_t bufsize = 0;
+    bool prealloc_used = false;
+    if (o.prealloc && o.prealloc_lock && needed <= o.prealloc_size &&
+        xSemaphoreTake(o.prealloc_lock, pdMS_TO_TICKS(o.prealloc_lock_wait_ms)) == pdTRUE) {
+        buf = o.prealloc;
+        bufsize = o.prealloc_size;
+        prealloc_used = true;
+    }
+    if (!buf) {
+        bufsize = needed;
+        buf = heap_caps_malloc(bufsize, MALLOC_CAP_SPIRAM);
+        if (!buf) {
+            ESP_LOGE(TAG, "%s: PSRAM alloc failed (%u bytes)", what, (unsigned)bufsize);
+            esp_http_client_cleanup(client);
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
+    size_t total = 0;
+    esp_err_t rerr = ESP_OK;
+    while (1) {
+        if (total >= bufsize) {
+            if (o.grow_step == 0) break;   /* fixed-size buffer: full is done */
+            if (prealloc_used) {
+                ESP_LOGW(TAG, "%s exceeds pre-allocated buffer (%u bytes)",
+                         what, (unsigned)bufsize);
+                rerr = ESP_FAIL;
+                break;
+            }
+            size_t grown = bufsize + o.grow_step;
+            if (grown > o.max_size) {
+                ESP_LOGW(TAG, "%s exceeds %u byte cap, aborting fetch",
+                         what, (unsigned)o.max_size);
+                rerr = ESP_FAIL;
+                break;
+            }
+            uint8_t *nb = heap_caps_realloc(buf, grown, MALLOC_CAP_SPIRAM);
+            if (!nb) {
+                ESP_LOGE(TAG, "%s: failed to grow buffer to %u", what, (unsigned)grown);
+                rerr = ESP_ERR_NO_MEM;
+                break;
+            }
+            buf = nb;
+            bufsize = grown;
+        }
+        int n = esp_http_client_read(client, (char *)buf + total, (int)(bufsize - total));
+        if (n <= 0) break;
+        total += (size_t)n;
+    }
+
+    if (rerr == ESP_OK && o.probe_overflow && content_length <= 0 && total == bufsize) {
+        /* Sized to the cap with no Content-Length: a buffer that filled exactly
+         * may be a truncated image. If one more byte is available the source
+         * was over cap -- reject rather than hand a partial JPEG to a decoder. */
+        char probe;
+        if (esp_http_client_read(client, &probe, 1) > 0) {
+            ESP_LOGW(TAG, "%s exceeds %u byte cap (no content-length) -- rejecting",
+                     what, (unsigned)o.max_size);
+            rerr = ESP_FAIL;
+        }
+    }
+
+    esp_http_client_cleanup(client);
+
+    if (rerr == ESP_OK && total == 0) {
+        ESP_LOGW(TAG, "%s: empty response", what);
+        rerr = ESP_FAIL;
+    }
+    if (rerr == ESP_OK && o.require_full_length && !chunked &&
+        content_length > 0 && total < (size_t)content_length) {
+        ESP_LOGE(TAG, "%s: incomplete read: %u/%d", what, (unsigned)total, content_length);
+        rerr = ESP_FAIL;
+    }
+
+    if (rerr != ESP_OK) {
+        if (prealloc_used) {
+            xSemaphoreGive(o.prealloc_lock);
+        } else {
+            heap_caps_free(buf);
+        }
+        return rerr;
+    }
+
+    if (prealloc_used) {
+        /* Copy out to a right-sized allocation so the scratch buffer (and its
+         * lock) are released before returning: the caller owns plain PSRAM
+         * either way and never sees the lock. */
+        uint8_t *result = heap_caps_malloc(total, MALLOC_CAP_SPIRAM);
+        if (!result) {
+            ESP_LOGE(TAG, "%s: failed to allocate %u bytes for result",
+                     what, (unsigned)total);
+            xSemaphoreGive(o.prealloc_lock);
+            return ESP_ERR_NO_MEM;
+        }
+        memcpy(result, buf, total);
+        xSemaphoreGive(o.prealloc_lock);
+        buf = result;
+    } else if (o.shrink_to_fit && total < bufsize) {
+        uint8_t *shrunk = heap_caps_realloc(buf, total, MALLOC_CAP_SPIRAM);
+        if (shrunk) buf = shrunk;   /* on failure keep the oversized buffer -- still valid */
+    }
+
+    *out_buf = buf;
+    *out_len = total;
+    return ESP_OK;
 }
 
 http_fetch_conn_t *http_fetch_conn_create(void) {

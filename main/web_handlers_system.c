@@ -426,17 +426,7 @@ esp_err_t version_get_handler(httpd_req_t *req)
     cJSON_AddStringToObject(root, "git_sha", BUILD_GIT_SHA);
     cJSON_AddStringToObject(root, "git_branch", BUILD_GIT_BRANCH);
 
-    const char *json_str = cJSON_PrintUnformatted(root);
-    if (!json_str) {
-        cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
-    free((void *)json_str);
-    cJSON_Delete(root);
-    return ESP_OK;
+    return send_json_response(req, root);
 }
 
 /* ── Asynchronous GitHub update check ─────────────────────────────────
@@ -558,22 +548,6 @@ static void upd_cache_to_json(cJSON *root)
     }
 }
 
-/* Send `root` as an application/json response and delete it. */
-static esp_err_t upd_send_json(httpd_req_t *req, cJSON *root)
-{
-    const char *json_str = cJSON_PrintUnformatted(root);
-    if (!json_str) {
-        cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
-    free((void *)json_str);
-    cJSON_Delete(root);
-    return ESP_OK;
-}
-
 // Handler for checking GitHub OTA updates (returns JSON result to web UI)
 esp_err_t check_update_json_handler(httpd_req_t *req)
 {
@@ -636,7 +610,7 @@ esp_err_t check_update_json_handler(httpd_req_t *req)
         cJSON_AddBoolToObject(root, "cached", true);
         upd_cache_to_json(root);
         xSemaphoreGive(s_upd_mutex);
-        return upd_send_json(req, root);
+        return send_json_response(req, root);
     }
 
     /* ── A check is needed. Bring the worker up on first demand only. ── */
@@ -659,7 +633,7 @@ esp_err_t check_update_json_handler(httpd_req_t *req)
                                         "Could not start update check. Try again.");
             }
             xSemaphoreGive(s_upd_mutex);
-            return upd_send_json(req, root);
+            return send_json_response(req, root);
         }
     }
 
@@ -683,7 +657,7 @@ esp_err_t check_update_json_handler(httpd_req_t *req)
 
     cJSON_AddStringToObject(root, "status", "checking");
     xSemaphoreGive(s_upd_mutex);
-    return upd_send_json(req, root);
+    return send_json_response(req, root);
 }
 
 // Handler for GitHub OTA download (triggered from web UI)
@@ -1007,17 +981,7 @@ esp_err_t status_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "voice_custom_bytes", (double)vs_custom);
     cJSON_AddNumberToObject(root, "voice_custom_budget", (double)VOICE_STORE_BUDGET);
 
-    const char *json_str = cJSON_PrintUnformatted(root);
-    if (!json_str) {
-        cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
-    free((void *)json_str);
-    cJSON_Delete(root);
-    return ESP_OK;
+    return send_json_response(req, root);
 }
 
 // Handler for per-instance NINA connection health (test automation)
@@ -1059,17 +1023,7 @@ esp_err_t nina_status_get_handler(httpd_req_t *req)
         cJSON_AddItemToArray(arr, inst);
     }
 
-    const char *json_str = cJSON_PrintUnformatted(root);
-    if (!json_str) {
-        cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
-    free((void *)json_str);
-    cJSON_Delete(root);
-    return ESP_OK;
+    return send_json_response(req, root);
 }
 
 // Helper: map esp_reset_reason_t to human-readable string
@@ -1111,17 +1065,7 @@ esp_err_t crash_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "uptime_s",
                             (double)esp_timer_get_time() / 1000000.0);
 
-    const char *json_str = cJSON_PrintUnformatted(root);
-    if (!json_str) {
-        cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
-    free((void *)json_str);
-    cJSON_Delete(root);
-    return ESP_OK;
+    return send_json_response(req, root);
 }
 
 // Handler for changing the admin password. Requires the current password.
@@ -1187,14 +1131,13 @@ esp_err_t admin_password_post_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
-    /* Apply + persist */
-    app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    /* Apply + persist. Snapshot under the config mutex rather than memcpy'ing
+     * the live pointer, so a concurrent save cannot be copied half-written. */
+    app_config_t *cfg = config_snapshot_for_request(req);
     if (!cfg) {
         cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_OK;
+        return ESP_OK;   /* 500 already sent */
     }
-    memcpy(cfg, live, sizeof(app_config_t));
     memset(cfg->admin_password, 0, sizeof(cfg->admin_password));
     strncpy(cfg->admin_password, new_pw, sizeof(cfg->admin_password) - 1);
 
@@ -1257,17 +1200,7 @@ esp_err_t weather_get_handler(httpd_req_t *req)
         }
     }
 
-    const char *json_str = cJSON_PrintUnformatted(root);
-    if (!json_str) {
-        cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
-    free((void *)json_str);
-    cJSON_Delete(root);
-    return ESP_OK;
+    return send_json_response(req, root);
 }
 
 // Handler for the on-device UI event log ring (public, no auth)
@@ -1315,17 +1248,7 @@ esp_err_t events_get_handler(httpd_req_t *req)
 
     heap_caps_free(snap);
 
-    const char *json_str = cJSON_PrintUnformatted(root);
-    if (!json_str) {
-        cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
-    free((void *)json_str);
-    cJSON_Delete(root);
-    return ESP_OK;
+    return send_json_response(req, root);
 }
 
 // Handler for clearing the on-device UI event log (auth required)

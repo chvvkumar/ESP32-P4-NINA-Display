@@ -47,15 +47,8 @@ static lv_obj_t *coord_divider   = NULL;
 /* ── Status pill helper ──────────────────────────────────────────── */
 
 static lv_obj_t *make_status_pill(lv_obj_t *parent, const char *text, lv_obj_t **out_lbl) {
-    int gb = app_config_get()->color_brightness;
 
-    lv_obj_t *lbl = lv_label_create(parent);
-    lv_label_set_text(lbl, text);
-    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
-    if (current_theme) {
-        lv_obj_set_style_text_color(lbl,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
+    lv_obj_t *lbl = ui_label(parent, text, &lv_font_montserrat_16, UI_THEME_COLOR(label_color));
     *out_lbl = lbl;
     return lbl;
 }
@@ -71,18 +64,16 @@ void build_mount_content(lv_obj_t *content) {
     lbl_parked = lbl_home = lbl_slewing = lbl_mount_name = NULL;
     coord_divider = NULL;
 
-    int gb = app_config_get()->color_brightness;
-
     /* Content uses column flow */
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(content, 10, 0);
 
     /* ── Hero: Coordinates card (full width) ── */
     {
-        lv_obj_t *card = make_info_card(content);
+        lv_obj_t *card = ui_card(content, INFO_CARD_PAD, INFO_CARD_ROW_GAP);
         lv_obj_set_width(card, LV_PCT(100));
         lv_obj_set_style_pad_all(card, 16, 0);
-        make_info_section(card, "COORDINATES");
+        ui_section_label(card, "COORDINATES");
 
         lv_obj_t *coord_row = lv_obj_create(card);
         lv_obj_remove_style_all(coord_row);
@@ -104,18 +95,9 @@ void build_mount_content(lv_obj_t *content) {
         lv_label_set_text(ra_lbl, "RA");
         lv_obj_set_style_text_font(ra_lbl, &lv_font_montserrat_16, 0);
         lv_obj_set_style_text_letter_space(ra_lbl, 2, 0);
-        if (current_theme) {
-            lv_obj_set_style_text_color(ra_lbl,
-                lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-        }
+        ui_set_theme_text_color(ra_lbl, UI_THEME_COLOR(label_color));
 
-        lbl_ra_value = lv_label_create(ra_block);
-        lv_label_set_text(lbl_ra_value, "--");
-        lv_obj_set_style_text_font(lbl_ra_value, &lv_font_montserrat_36, 0);
-        if (current_theme) {
-            lv_obj_set_style_text_color(lbl_ra_value,
-                lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-        }
+        lbl_ra_value = ui_label(ra_block, "--", &lv_font_montserrat_36, UI_THEME_COLOR(text_color));
 
         /* Vertical divider */
         coord_divider = lv_obj_create(coord_row);
@@ -139,18 +121,9 @@ void build_mount_content(lv_obj_t *content) {
         lv_label_set_text(dec_lbl, "DEC");
         lv_obj_set_style_text_font(dec_lbl, &lv_font_montserrat_16, 0);
         lv_obj_set_style_text_letter_space(dec_lbl, 2, 0);
-        if (current_theme) {
-            lv_obj_set_style_text_color(dec_lbl,
-                lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-        }
+        ui_set_theme_text_color(dec_lbl, UI_THEME_COLOR(label_color));
 
-        lbl_dec_value = lv_label_create(dec_block);
-        lv_label_set_text(lbl_dec_value, "--");
-        lv_obj_set_style_text_font(lbl_dec_value, &lv_font_montserrat_36, 0);
-        if (current_theme) {
-            lv_obj_set_style_text_color(lbl_dec_value,
-                lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-        }
+        lbl_dec_value = ui_label(dec_block, "--", &lv_font_montserrat_36, UI_THEME_COLOR(text_color));
     }
 
     /* ── Two-column row ── */
@@ -182,41 +155,41 @@ void build_mount_content(lv_obj_t *content) {
 
     /* ── POSITION card (left) ── */
     {
-        lv_obj_t *card = make_info_card(col_left);
+        lv_obj_t *card = ui_card(col_left, INFO_CARD_PAD, INFO_CARD_ROW_GAP);
         lv_obj_set_flex_grow(card, 1);
-        make_info_section(card, "POSITION");
-        make_info_kv(card, "Altitude",  &lbl_altitude);
-        make_info_kv(card, "Azimuth",   &lbl_azimuth);
-        make_info_kv(card, "Pier Side", &lbl_pier_side);
-        make_info_kv(card, "Alignment", &lbl_alignment);
+        ui_section_label(card, "POSITION");
+        lbl_altitude = ui_kv(card, "Altitude", &lv_font_montserrat_20, &lv_font_montserrat_22);
+        lbl_azimuth = ui_kv(card, "Azimuth", &lv_font_montserrat_20, &lv_font_montserrat_22);
+        lbl_pier_side = ui_kv(card, "Pier Side", &lv_font_montserrat_20, &lv_font_montserrat_22);
+        lbl_alignment = ui_kv(card, "Alignment", &lv_font_montserrat_20, &lv_font_montserrat_22);
     }
 
     /* ── MERIDIAN card (left) ── */
     {
-        lv_obj_t *card = make_info_card(col_left);
+        lv_obj_t *card = ui_card(col_left, INFO_CARD_PAD, INFO_CARD_ROW_GAP);
         lv_obj_set_flex_grow(card, 1);
-        make_info_section(card, "MERIDIAN");
-        make_info_kv_wide(card, "Flip In", &lbl_flip_time);
+        ui_section_label(card, "MERIDIAN");
+        lbl_flip_time = ui_kv(card, "Flip In", &lv_font_montserrat_20, &lv_font_montserrat_28);
     }
 
     /* ── TRACKING card (right) ── */
     {
-        lv_obj_t *card = make_info_card(col_right);
+        lv_obj_t *card = ui_card(col_right, INFO_CARD_PAD, INFO_CARD_ROW_GAP);
         lv_obj_set_flex_grow(card, 1);
-        make_info_section(card, "TRACKING");
-        make_info_kv(card, "Mode",       &lbl_track_mode);
-        make_info_kv(card, "Enabled",    &lbl_track_enabled);
-        make_info_kv(card, "Sidereal T", &lbl_sidereal);
+        ui_section_label(card, "TRACKING");
+        lbl_track_mode = ui_kv(card, "Mode", &lv_font_montserrat_20, &lv_font_montserrat_22);
+        lbl_track_enabled = ui_kv(card, "Enabled", &lv_font_montserrat_20, &lv_font_montserrat_22);
+        lbl_sidereal = ui_kv(card, "Sidereal T", &lv_font_montserrat_20, &lv_font_montserrat_22);
     }
 
     /* ── SITE card (right) ── */
     {
-        lv_obj_t *card = make_info_card(col_right);
+        lv_obj_t *card = ui_card(col_right, INFO_CARD_PAD, INFO_CARD_ROW_GAP);
         lv_obj_set_flex_grow(card, 1);
-        make_info_section(card, "SITE");
-        make_info_kv(card, "Latitude",  &lbl_latitude);
-        make_info_kv(card, "Longitude", &lbl_longitude);
-        make_info_kv(card, "Elevation", &lbl_elevation);
+        ui_section_label(card, "SITE");
+        lbl_latitude = ui_kv(card, "Latitude", &lv_font_montserrat_20, &lv_font_montserrat_22);
+        lbl_longitude = ui_kv(card, "Longitude", &lv_font_montserrat_20, &lv_font_montserrat_22);
+        lbl_elevation = ui_kv(card, "Elevation", &lv_font_montserrat_20, &lv_font_montserrat_22);
     }
 
     /* ── Status row (full width, compact pills) ── */

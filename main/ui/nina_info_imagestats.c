@@ -46,62 +46,8 @@ static lv_obj_t *lbl_no_data = NULL;
 /* Content container (to hide/show children) */
 static lv_obj_t *content_root = NULL;
 
-/* ── Local helpers ─────────────────────────────────────────────────── */
-
-static lv_obj_t *make_info_card(lv_obj_t *parent) {
-    lv_obj_t *card = lv_obj_create(parent);
-    lv_obj_remove_style_all(card);
-    lv_obj_add_style(card, &style_bento_box, 0);
-    lv_obj_set_width(card, LV_PCT(100));
-    lv_obj_set_height(card, LV_SIZE_CONTENT);
-    lv_obj_set_style_pad_all(card, 14, 0);
-    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_row(card, 8, 0);
-    lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
-    return card;
-}
-
-static void make_info_section(lv_obj_t *parent, const char *title) {
-    lv_obj_t *lbl = lv_label_create(parent);
-    lv_label_set_text(lbl, title);
-    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_letter_space(lbl, 2, 0);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(lbl,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
-}
-
-static lv_obj_t *make_info_kv(lv_obj_t *parent, const char *key) {
-    lv_obj_t *row = lv_obj_create(parent);
-    lv_obj_remove_style_all(row);
-    lv_obj_set_width(row, LV_PCT(100));
-    lv_obj_set_height(row, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-
-    lv_obj_t *lbl_key = lv_label_create(row);
-    lv_label_set_text(lbl_key, key);
-    lv_obj_set_style_text_font(lbl_key, &lv_font_montserrat_20, 0);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(lbl_key,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
-
-    lv_obj_t *lbl_val = lv_label_create(row);
-    lv_label_set_text(lbl_val, "--");
-    lv_obj_set_style_text_font(lbl_val, &lv_font_montserrat_22, 0);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(lbl_val,
-            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-    }
-
-    return lbl_val;
-}
+/* Card/section/kv factories are shared: ui_card/ui_section_label/ui_kv (ui_helpers.h).
+ * This page uses card pad 14 / row gap 8, key font 20, value font 22. */
 
 /* ── Build ─────────────────────────────────────────────────────────── */
 
@@ -115,13 +61,11 @@ void build_imagestats_content(lv_obj_t *content) {
     lv_obj_set_style_pad_row(content, 10, 0);
     lv_obj_remove_flag(content, LV_OBJ_FLAG_SCROLLABLE);
 
-    int gb = current_theme ? app_config_get()->color_brightness : 100;
-
     /* ── Hero: Stars + HFR + HFR SD ── */
     {
-        lv_obj_t *card = make_info_card(content);
+        lv_obj_t *card = ui_card(content, 14, 8);
         lv_obj_set_width(card, LV_PCT(100));
-        make_info_section(card, "LAST IMAGE");
+        ui_section_label(card, "LAST IMAGE");
 
         lv_obj_t *hero_row = lv_obj_create(card);
         lv_obj_remove_style_all(hero_row);
@@ -144,16 +88,9 @@ void build_imagestats_content(lv_obj_t *content) {
             lv_label_set_text(lbl, "STARS");
             lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
             lv_obj_set_style_text_letter_space(lbl, 2, 0);
-            if (current_theme)
-                lv_obj_set_style_text_color(lbl,
-                    lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+            ui_set_theme_text_color(lbl, UI_THEME_COLOR(label_color));
 
-            lbl_stars_val = lv_label_create(block);
-            lv_label_set_text(lbl_stars_val, "--");
-            lv_obj_set_style_text_font(lbl_stars_val, &lv_font_montserrat_36, 0);
-            if (current_theme)
-                lv_obj_set_style_text_color(lbl_stars_val,
-                    lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+            lbl_stars_val = ui_label(block, "--", &lv_font_montserrat_36, UI_THEME_COLOR(text_color));
         }
 
         /* Divider 1 */
@@ -180,16 +117,9 @@ void build_imagestats_content(lv_obj_t *content) {
             lv_label_set_text(lbl, "HFR");
             lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
             lv_obj_set_style_text_letter_space(lbl, 2, 0);
-            if (current_theme)
-                lv_obj_set_style_text_color(lbl,
-                    lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+            ui_set_theme_text_color(lbl, UI_THEME_COLOR(label_color));
 
-            lbl_hfr_val = lv_label_create(block);
-            lv_label_set_text(lbl_hfr_val, "--");
-            lv_obj_set_style_text_font(lbl_hfr_val, &lv_font_montserrat_36, 0);
-            if (current_theme)
-                lv_obj_set_style_text_color(lbl_hfr_val,
-                    lv_color_hex(app_config_apply_brightness(current_theme->hfr_color, gb)), 0);
+            lbl_hfr_val = ui_label(block, "--", &lv_font_montserrat_36, UI_THEME_COLOR(hfr_color));
         }
 
         /* Divider 2 */
@@ -216,16 +146,9 @@ void build_imagestats_content(lv_obj_t *content) {
             lv_label_set_text(lbl, "HFR SD");
             lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
             lv_obj_set_style_text_letter_space(lbl, 2, 0);
-            if (current_theme)
-                lv_obj_set_style_text_color(lbl,
-                    lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+            ui_set_theme_text_color(lbl, UI_THEME_COLOR(label_color));
 
-            lbl_hfr_sd_val = lv_label_create(block);
-            lv_label_set_text(lbl_hfr_sd_val, "--");
-            lv_obj_set_style_text_font(lbl_hfr_sd_val, &lv_font_montserrat_28, 0);
-            if (current_theme)
-                lv_obj_set_style_text_color(lbl_hfr_sd_val,
-                    lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+            lbl_hfr_sd_val = ui_label(block, "--", &lv_font_montserrat_28, UI_THEME_COLOR(text_color));
         }
     }
 
@@ -249,14 +172,14 @@ void build_imagestats_content(lv_obj_t *content) {
         lv_obj_remove_flag(col_left, LV_OBJ_FLAG_SCROLLABLE);
 
         {
-            lv_obj_t *card = make_info_card(col_left);
+            lv_obj_t *card = ui_card(col_left, 14, 8);
             lv_obj_set_flex_grow(card, 1);
-            make_info_section(card, "PIXEL STATISTICS");
-            lbl_mean_val   = make_info_kv(card, "Mean");
-            lbl_median_val = make_info_kv(card, "Median");
-            lbl_stdev_val  = make_info_kv(card, "StdDev");
-            lbl_min_val    = make_info_kv(card, "Min");
-            lbl_max_val    = make_info_kv(card, "Max");
+            ui_section_label(card, "PIXEL STATISTICS");
+            lbl_mean_val   = ui_kv(card, "Mean", &lv_font_montserrat_20, &lv_font_montserrat_22);
+            lbl_median_val = ui_kv(card, "Median", &lv_font_montserrat_20, &lv_font_montserrat_22);
+            lbl_stdev_val  = ui_kv(card, "StdDev", &lv_font_montserrat_20, &lv_font_montserrat_22);
+            lbl_min_val    = ui_kv(card, "Min", &lv_font_montserrat_20, &lv_font_montserrat_22);
+            lbl_max_val    = ui_kv(card, "Max", &lv_font_montserrat_20, &lv_font_montserrat_22);
         }
 
         /* Right column: Capture Settings */
@@ -269,34 +192,34 @@ void build_imagestats_content(lv_obj_t *content) {
         lv_obj_remove_flag(col_right, LV_OBJ_FLAG_SCROLLABLE);
 
         {
-            lv_obj_t *card = make_info_card(col_right);
+            lv_obj_t *card = ui_card(col_right, 14, 8);
             lv_obj_set_flex_grow(card, 1);
-            make_info_section(card, "CAPTURE");
-            lbl_exposure_val = make_info_kv(card, "Exposure");
-            lbl_filter_val   = make_info_kv(card, "Filter");
-            lbl_gain_val     = make_info_kv(card, "Gain");
-            lbl_offset_val   = make_info_kv(card, "Offset");
-            lbl_temp_val     = make_info_kv(card, "Temp");
+            ui_section_label(card, "CAPTURE");
+            lbl_exposure_val = ui_kv(card, "Exposure", &lv_font_montserrat_20, &lv_font_montserrat_22);
+            lbl_filter_val   = ui_kv(card, "Filter", &lv_font_montserrat_20, &lv_font_montserrat_22);
+            lbl_gain_val     = ui_kv(card, "Gain", &lv_font_montserrat_20, &lv_font_montserrat_22);
+            lbl_offset_val   = ui_kv(card, "Offset", &lv_font_montserrat_20, &lv_font_montserrat_22);
+            lbl_temp_val     = ui_kv(card, "Temp", &lv_font_montserrat_20, &lv_font_montserrat_22);
         }
     }
 
     /* ── Equipment row (full width) ── */
     {
-        lv_obj_t *card = make_info_card(content);
+        lv_obj_t *card = ui_card(content, 14, 8);
         lv_obj_set_width(card, LV_PCT(100));
         lv_obj_set_style_pad_right(card, 92, 0);
-        make_info_section(card, "EQUIPMENT");
-        lbl_camera_val    = make_info_kv(card, "Camera");
+        ui_section_label(card, "EQUIPMENT");
+        lbl_camera_val    = ui_kv(card, "Camera", &lv_font_montserrat_20, &lv_font_montserrat_22);
         lv_label_set_long_mode(lbl_camera_val, LV_LABEL_LONG_DOT);
         lv_obj_set_width(lbl_camera_val, LV_PCT(55));
         lv_obj_set_style_text_align(lbl_camera_val, LV_TEXT_ALIGN_RIGHT, 0);
 
-        lbl_telescope_val = make_info_kv(card, "Telescope");
+        lbl_telescope_val = ui_kv(card, "Telescope", &lv_font_montserrat_20, &lv_font_montserrat_22);
         lv_label_set_long_mode(lbl_telescope_val, LV_LABEL_LONG_DOT);
         lv_obj_set_width(lbl_telescope_val, LV_PCT(55));
         lv_obj_set_style_text_align(lbl_telescope_val, LV_TEXT_ALIGN_RIGHT, 0);
 
-        lbl_focal_len_val = make_info_kv(card, "Focal Len");
+        lbl_focal_len_val = ui_kv(card, "Focal Len", &lv_font_montserrat_20, &lv_font_montserrat_22);
     }
 
     /* ── No-data message (hidden by default) ── */
@@ -305,9 +228,7 @@ void build_imagestats_content(lv_obj_t *content) {
     lv_obj_set_style_text_font(lbl_no_data, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_align(lbl_no_data, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_align(lbl_no_data, LV_ALIGN_CENTER);
-    if (current_theme)
-        lv_obj_set_style_text_color(lbl_no_data,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+    ui_set_theme_text_color(lbl_no_data, UI_THEME_COLOR(label_color));
     lv_obj_add_flag(lbl_no_data, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -353,9 +274,7 @@ void populate_imagestats_data(const imagestats_detail_data_t *data) {
 
     snprintf(buf, sizeof(buf), "%.2f", data->hfr);
     lv_label_set_text(lbl_hfr_val, buf);
-    if (current_theme)
-        lv_obj_set_style_text_color(lbl_hfr_val,
-            lv_color_hex(app_config_apply_brightness(current_theme->hfr_color, gb)), 0);
+    ui_set_theme_text_color(lbl_hfr_val, UI_THEME_COLOR(hfr_color));
 
     snprintf(buf, sizeof(buf), "%.2f", data->hfr_stdev);
     lv_label_set_text(lbl_hfr_sd_val, buf);
@@ -397,7 +316,7 @@ void populate_imagestats_data(const imagestats_detail_data_t *data) {
     snprintf(buf, sizeof(buf), "%d", data->offset);
     lv_label_set_text(lbl_offset_val, buf);
 
-    snprintf(buf, sizeof(buf), "%.1fC", data->temperature);
+    snprintf(buf, sizeof(buf), "%.1f C", data->temperature);
     lv_label_set_text(lbl_temp_val, buf);
 
     /* Equipment */

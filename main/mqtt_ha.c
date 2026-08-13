@@ -10,6 +10,7 @@
 #include "esp_heap_caps.h"   /* PSRAM snapshot for the config apply below */
 #include "esp_timer.h"
 #include "cJSON.h"
+#include "poll_backoff.h"    /* shared exponential-backoff step */
 #include "bsp/esp-bsp.h"
 #include "bsp/display.h"
 #include "tasks.h"
@@ -47,10 +48,13 @@ typedef struct {
 #define MQTT_CMD_QUEUE_LEN 8
 static QueueHandle_t s_cmd_queue = NULL;
 
-// Exponential backoff for MQTT reconnection
+/* Exponential backoff for MQTT reconnection. The doubling step itself is the
+ * shared poll_backoff_next() (poll_backoff.h) — pure and host-tested — so the
+ * only policy left here is the initial delay, the ceiling, and when to reset.
+ * s_backoff_ms holds the delay for the NEXT attempt, so it starts at INITIAL
+ * rather than at the "no failure yet" zero poll_task.c uses. */
 #define MQTT_BACKOFF_INITIAL_MS  5000   // 5 seconds
 #define MQTT_BACKOFF_MAX_MS      60000  // 60 seconds
-#define MQTT_BACKOFF_MULTIPLIER  2
 
 static esp_mqtt_client_handle_t s_mqtt_client = NULL;
 static bool s_connected = false;
@@ -144,6 +148,27 @@ static cJSON *create_device_object(void)
     return dev;
 }
 
+/**
+ * @brief Serialize @p obj, publish it, and free everything.
+ *
+ * Consumes @p obj unconditionally (including when printing fails), so callers
+ * never own it past the call. Every JSON topic this module publishes — the four
+ * discovery configs and the two state topics — is retained at QoS 1, so those
+ * flags are fixed here rather than passed in.
+ */
+static void mqtt_publish_json(const char *topic, cJSON *obj)
+{
+    if (!obj) return;
+    char *payload = cJSON_PrintUnformatted(obj);
+    if (payload) {
+        esp_mqtt_client_publish(s_mqtt_client, topic, payload, 0, 1, 1);
+        free(payload);
+    } else {
+        ESP_LOGW(TAG, "MQTT publish to %s dropped: JSON print failed", topic);
+    }
+    cJSON_Delete(obj);
+}
+
 static void publish_discovery(void)
 {
     if (!s_mqtt_client || !s_connected) return;
@@ -168,13 +193,7 @@ static void publish_discovery(void)
     cJSON_AddNumberToObject(screen, "brightness_scale", 100);
     cJSON_AddStringToObject(screen, "icon", "mdi:brightness-6");
     cJSON_AddItemToObject(screen, "device", create_device_object());
-
-    char *payload = cJSON_PrintUnformatted(screen);
-    if (payload) {
-        esp_mqtt_client_publish(s_mqtt_client, disc_topic, payload, 0, 1, 1);
-        free(payload);
-    }
-    cJSON_Delete(screen);
+    mqtt_publish_json(disc_topic, screen);
 
     // --- Text Brightness Light ---
     snprintf(disc_topic, sizeof(disc_topic), "homeassistant/light/%s_text/config", prefix);
@@ -192,13 +211,7 @@ static void publish_discovery(void)
     cJSON_AddNumberToObject(text, "brightness_scale", 100);
     cJSON_AddStringToObject(text, "icon", "mdi:format-color-text");
     cJSON_AddItemToObject(text, "device", create_device_object());
-
-    payload = cJSON_PrintUnformatted(text);
-    if (payload) {
-        esp_mqtt_client_publish(s_mqtt_client, disc_topic, payload, 0, 1, 1);
-        free(payload);
-    }
-    cJSON_Delete(text);
+    mqtt_publish_json(disc_topic, text);
 
     // --- Reboot Button ---
     snprintf(disc_topic, sizeof(disc_topic), "homeassistant/button/%s_reboot/config", prefix);
@@ -214,13 +227,7 @@ static void publish_discovery(void)
     cJSON_AddStringToObject(reboot, "icon", "mdi:restart");
     cJSON_AddStringToObject(reboot, "device_class", "restart");
     cJSON_AddItemToObject(reboot, "device", create_device_object());
-
-    payload = cJSON_PrintUnformatted(reboot);
-    if (payload) {
-        esp_mqtt_client_publish(s_mqtt_client, disc_topic, payload, 0, 1, 1);
-        free(payload);
-    }
-    cJSON_Delete(reboot);
+    mqtt_publish_json(disc_topic, reboot);
 
     // --- Uptime Diagnostic Sensor ---
     snprintf(disc_topic, sizeof(disc_topic), "homeassistant/sensor/%s_uptime/config", prefix);
@@ -237,13 +244,7 @@ static void publish_discovery(void)
     cJSON_AddStringToObject(uptime, "icon", "mdi:timer-outline");
     cJSON_AddStringToObject(uptime, "entity_category", "diagnostic");
     cJSON_AddItemToObject(uptime, "device", create_device_object());
-
-    payload = cJSON_PrintUnformatted(uptime);
-    if (payload) {
-        esp_mqtt_client_publish(s_mqtt_client, disc_topic, payload, 0, 1, 1);
-        free(payload);
-    }
-    cJSON_Delete(uptime);
+    mqtt_publish_json(disc_topic, uptime);
 
     ESP_LOGI(TAG, "HA discovery configs published");
 }
@@ -258,12 +259,7 @@ void mqtt_ha_publish_state(void)
     cJSON *screen_state = cJSON_CreateObject();
     cJSON_AddStringToObject(screen_state, "state", cfg->brightness > 0 ? "ON" : "OFF");
     cJSON_AddNumberToObject(screen_state, "brightness", cfg->brightness);
-    char *payload = cJSON_PrintUnformatted(screen_state);
-    if (payload) {
-        esp_mqtt_client_publish(s_mqtt_client, s_topic_screen_state, payload, 0, 1, 1);
-        free(payload);
-    }
-    cJSON_Delete(screen_state);
+    mqtt_publish_json(s_topic_screen_state, screen_state);
 
     // Uptime (seconds since boot)
     int64_t uptime_us = esp_timer_get_time();
@@ -275,12 +271,7 @@ void mqtt_ha_publish_state(void)
     cJSON *text_state = cJSON_CreateObject();
     cJSON_AddStringToObject(text_state, "state", cfg->color_brightness > 0 ? "ON" : "OFF");
     cJSON_AddNumberToObject(text_state, "brightness", cfg->color_brightness);
-    payload = cJSON_PrintUnformatted(text_state);
-    if (payload) {
-        esp_mqtt_client_publish(s_mqtt_client, s_topic_text_state, payload, 0, 1, 1);
-        free(payload);
-    }
-    cJSON_Delete(text_state);
+    mqtt_publish_json(s_topic_text_state, text_state);
 }
 
 /* Non-blocking enqueue from the MQTT event task. Drops the command if the
@@ -468,10 +459,8 @@ static void schedule_reconnect(void)
     esp_timer_start_once(s_reconnect_timer, (uint64_t)s_backoff_ms * 1000);
 
     // Increase backoff for next attempt, capped at max
-    s_backoff_ms = s_backoff_ms * MQTT_BACKOFF_MULTIPLIER;
-    if (s_backoff_ms > MQTT_BACKOFF_MAX_MS) {
-        s_backoff_ms = MQTT_BACKOFF_MAX_MS;
-    }
+    s_backoff_ms = poll_backoff_next(s_backoff_ms, MQTT_BACKOFF_INITIAL_MS,
+                                     MQTT_BACKOFF_MAX_MS);
 }
 
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base,

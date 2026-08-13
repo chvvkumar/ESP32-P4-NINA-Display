@@ -46,9 +46,6 @@ void nina_toast_show_fmt(toast_severity_t sev, const char *fmt, ...);
  */
 void nina_toast_show_timed(toast_severity_t sev, uint32_t duration_ms, const char *fmt, ...);
 
-/** Dismiss all visible toasts (LVGL context only). */
-void nina_toast_dismiss_all(void);
-
 /** Re-apply current theme colors to visible toasts (LVGL context only). */
 void nina_toast_apply_theme(void);
 

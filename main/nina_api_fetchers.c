@@ -8,6 +8,7 @@
 
 #include "nina_api_fetchers.h"
 #include "nina_client_internal.h"
+#include "json_get.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "cJSON.h"
@@ -77,24 +78,10 @@ void fetch_camera_info_robust(const char *base_url, nina_client_t *data) {
         data->nina_clock_mono_us = fetch_mono_us;
     }
     {
-        // Camera name
-        cJSON *cam_name = cJSON_GetObjectItem(response, "Name");
-        if (cam_name && cam_name->valuestring && cam_name->valuestring[0] != '\0')
-            strncpy(data->camera_name, cam_name->valuestring, sizeof(data->camera_name) - 1);
-
-        // Camera state
-        cJSON *state = cJSON_GetObjectItem(response, "CameraState");
-        if (state && state->valuestring) {
-            strncpy(data->status, state->valuestring, sizeof(data->status) - 1);
-        }
-
-        // Temperature
-        cJSON *temp = cJSON_GetObjectItem(response, "Temperature");
-        if (temp) data->camera.temp = (float)temp->valuedouble;
-
-        // Cooler power
-        cJSON *cooler = cJSON_GetObjectItem(response, "CoolerPower");
-        if (cooler) data->camera.cooler_power = (float)cooler->valuedouble;
+        JSON_GET_STR_NONEMPTY(response, "Name", data->camera_name);
+        JSON_GET_STR(response, "CameraState", data->status);
+        JSON_GET_FLOAT(response, "Temperature", data->camera.temp);
+        JSON_GET_FLOAT(response, "CoolerPower", data->camera.cooler_power);
 
         // Exposure time (total length per frame)
         cJSON *exp_time = cJSON_GetObjectItem(response, "ExposureTime");
@@ -257,13 +244,8 @@ void fetch_image_history_robust(const char *base_url, nina_client_t *data) {
                 }
             }
 
-            // HFR
-            cJSON *hfr = cJSON_GetObjectItem(latest, "HFR");
-            if (hfr) data->hfr = (float)hfr->valuedouble;
-
-            // Stars
-            cJSON *stars = cJSON_GetObjectItem(latest, "Stars");
-            if (stars) data->stars = stars->valueint;
+            JSON_GET_FLOAT(latest, "HFR", data->hfr);
+            JSON_GET_INT(latest, "Stars", data->stars);
 
             // Detect new image (HFR or stars changed)
             if (data->hfr != prev_hfr || data->stars != prev_stars) {
@@ -328,32 +310,11 @@ void fetch_guider_robust(const char *base_url, nina_client_t *data) {
             data->guider.rms_ra = 0;
             data->guider.rms_dec = 0;
         } else {
-            // Total RMS
-            cJSON *total = cJSON_GetObjectItem(rms, "Total");
-            if (total) {
-                cJSON *arcsec = cJSON_GetObjectItem(total, "Arcseconds");
-                if (arcsec) {
-                    data->guider.rms_total = (float)arcsec->valuedouble;
-                }
-            }
-
-            // RA RMS
-            cJSON *ra = cJSON_GetObjectItem(rms, "RA");
-            if (ra) {
-                cJSON *arcsec = cJSON_GetObjectItem(ra, "Arcseconds");
-                if (arcsec) {
-                    data->guider.rms_ra = (float)arcsec->valuedouble;
-                }
-            }
-
-            // DEC RMS
-            cJSON *dec = cJSON_GetObjectItem(rms, "Dec");
-            if (dec) {
-                cJSON *arcsec = cJSON_GetObjectItem(dec, "Arcseconds");
-                if (arcsec) {
-                    data->guider.rms_dec = (float)arcsec->valuedouble;
-                }
-            }
+            /* Each axis under RMSError is {"Arcseconds": n}; the inner lookup is
+             * NULL-safe, so a missing axis leaves the previous value in place. */
+            JSON_GET_FLOAT(cJSON_GetObjectItem(rms, "Total"), "Arcseconds", data->guider.rms_total);
+            JSON_GET_FLOAT(cJSON_GetObjectItem(rms, "RA"),    "Arcseconds", data->guider.rms_ra);
+            JSON_GET_FLOAT(cJSON_GetObjectItem(rms, "Dec"),   "Arcseconds", data->guider.rms_dec);
 
             ESP_LOGI(TAG, "Guiding RMS - Total: %.2f\", RA: %.2f\", DEC: %.2f\"",
                 data->guider.rms_total, data->guider.rms_ra, data->guider.rms_dec);
@@ -376,10 +337,7 @@ void fetch_mount_robust(const char *base_url, nina_client_t *data) {
 
     cJSON *response = cJSON_GetObjectItem(json, "Response");
     if (response && nina_client_lock(data, FETCH_LOCK_MS)) {
-        cJSON *flip_time = cJSON_GetObjectItem(response, "TimeToMeridianFlipString");
-        if (flip_time && flip_time->valuestring) {
-            strncpy(data->meridian_flip, flip_time->valuestring, sizeof(data->meridian_flip) - 1);
-        }
+        JSON_GET_STR(response, "TimeToMeridianFlipString", data->meridian_flip);
         nina_client_unlock(data);
     }
 
@@ -398,10 +356,7 @@ void fetch_focuser_robust(const char *base_url, nina_client_t *data) {
 
     cJSON *response = cJSON_GetObjectItem(json, "Response");
     if (response && nina_client_lock(data, FETCH_LOCK_MS)) {
-        cJSON *position = cJSON_GetObjectItem(response, "Position");
-        if (position) {
-            data->focuser.position = position->valueint;
-        }
+        JSON_GET_INT(response, "Position", data->focuser.position);
         nina_client_unlock(data);
     }
     cJSON_Delete(json);
@@ -616,19 +571,10 @@ int fetch_equipment_info_bundled(const char *base_url, nina_client_t *data, bool
     // ── Camera ──
     cJSON *camera = cJSON_GetObjectItem(response, "Camera");
     if (camera) {
-        cJSON *cam_name = cJSON_GetObjectItem(camera, "Name");
-        if (cam_name && cam_name->valuestring && cam_name->valuestring[0] != '\0')
-            strncpy(data->camera_name, cam_name->valuestring, sizeof(data->camera_name) - 1);
-
-        cJSON *state = cJSON_GetObjectItem(camera, "CameraState");
-        if (state && state->valuestring)
-            strncpy(data->status, state->valuestring, sizeof(data->status) - 1);
-
-        cJSON *temp = cJSON_GetObjectItem(camera, "Temperature");
-        if (temp) data->camera.temp = (float)temp->valuedouble;
-
-        cJSON *cooler = cJSON_GetObjectItem(camera, "CoolerPower");
-        if (cooler) data->camera.cooler_power = (float)cooler->valuedouble;
+        JSON_GET_STR_NONEMPTY(camera, "Name", data->camera_name);
+        JSON_GET_STR(camera, "CameraState", data->status);
+        JSON_GET_FLOAT(camera, "Temperature", data->camera.temp);
+        JSON_GET_FLOAT(camera, "CoolerPower", data->camera.cooler_power);
 
         // Exposure time (total length per frame)
         cJSON *exp_time_cam = cJSON_GetObjectItem(camera, "ExposureTime");
@@ -673,21 +619,9 @@ int fetch_equipment_info_bundled(const char *base_url, nina_client_t *data, bool
             data->guider.rms_ra = 0;
             data->guider.rms_dec = 0;
         } else {
-            cJSON *total = cJSON_GetObjectItem(rms, "Total");
-            if (total) {
-                cJSON *arcsec = cJSON_GetObjectItem(total, "Arcseconds");
-                if (arcsec) data->guider.rms_total = (float)arcsec->valuedouble;
-            }
-            cJSON *ra = cJSON_GetObjectItem(rms, "RA");
-            if (ra) {
-                cJSON *arcsec = cJSON_GetObjectItem(ra, "Arcseconds");
-                if (arcsec) data->guider.rms_ra = (float)arcsec->valuedouble;
-            }
-            cJSON *dec = cJSON_GetObjectItem(rms, "Dec");
-            if (dec) {
-                cJSON *arcsec = cJSON_GetObjectItem(dec, "Arcseconds");
-                if (arcsec) data->guider.rms_dec = (float)arcsec->valuedouble;
-            }
+            JSON_GET_FLOAT(cJSON_GetObjectItem(rms, "Total"), "Arcseconds", data->guider.rms_total);
+            JSON_GET_FLOAT(cJSON_GetObjectItem(rms, "RA"),    "Arcseconds", data->guider.rms_ra);
+            JSON_GET_FLOAT(cJSON_GetObjectItem(rms, "Dec"),   "Arcseconds", data->guider.rms_dec);
             ESP_LOGI(TAG, "Guiding RMS - Total: %.2f\", RA: %.2f\", DEC: %.2f\"",
                 data->guider.rms_total, data->guider.rms_ra, data->guider.rms_dec);
         }
@@ -696,13 +630,7 @@ int fetch_equipment_info_bundled(const char *base_url, nina_client_t *data, bool
     // ── Filter Wheel ──
     cJSON *fw = cJSON_GetObjectItem(response, "FilterWheel");
     if (fw) {
-        cJSON *sel = cJSON_GetObjectItem(fw, "SelectedFilter");
-        if (sel) {
-            cJSON *name = cJSON_GetObjectItem(sel, "Name");
-            if (name && name->valuestring) {
-                strncpy(data->current_filter, name->valuestring, sizeof(data->current_filter) - 1);
-            }
-        }
+        JSON_GET_STR(cJSON_GetObjectItem(fw, "SelectedFilter"), "Name", data->current_filter);
 
         if (fetch_filter_list) {
             cJSON *avail = cJSON_GetObjectItem(fw, "AvailableFilters");
@@ -729,19 +657,11 @@ int fetch_equipment_info_bundled(const char *base_url, nina_client_t *data, bool
     }
 
     // ── Focuser ──
-    cJSON *focuser = cJSON_GetObjectItem(response, "Focuser");
-    if (focuser) {
-        cJSON *pos = cJSON_GetObjectItem(focuser, "Position");
-        if (pos) data->focuser.position = pos->valueint;
-    }
+    JSON_GET_INT(cJSON_GetObjectItem(response, "Focuser"), "Position", data->focuser.position);
 
     // ── Mount ──
-    cJSON *mount = cJSON_GetObjectItem(response, "Mount");
-    if (mount) {
-        cJSON *flip = cJSON_GetObjectItem(mount, "TimeToMeridianFlipString");
-        if (flip && flip->valuestring)
-            strncpy(data->meridian_flip, flip->valuestring, sizeof(data->meridian_flip) - 1);
-    }
+    JSON_GET_STR(cJSON_GetObjectItem(response, "Mount"), "TimeToMeridianFlipString",
+                 data->meridian_flip);
 
     // ── Switch ──
     cJSON *sw = cJSON_GetObjectItem(response, "Switch");
@@ -810,78 +730,33 @@ void fetch_camera_details(const char *base_url, camera_detail_data_t *out) {
     cJSON *response = cJSON_GetObjectItem(json, "Response");
     if (!response) { cJSON_Delete(json); return; }
 
-    // Name
-    cJSON *name = cJSON_GetObjectItem(response, "Name");
-    if (name && name->valuestring)
-        strncpy(out->name, name->valuestring, sizeof(out->name) - 1);
+    JSON_GET_STR(response, "Name", out->name);
 
-    // Sensor dimensions
-    cJSON *xsize = cJSON_GetObjectItem(response, "XSize");
-    if (xsize) out->x_size = xsize->valueint;
-    cJSON *ysize = cJSON_GetObjectItem(response, "YSize");
-    if (ysize) out->y_size = ysize->valueint;
+    // Sensor
+    JSON_GET_INT(response, "XSize", out->x_size);
+    JSON_GET_INT(response, "YSize", out->y_size);
+    JSON_GET_FLOAT(response, "PixelSize", out->pixel_size);
+    JSON_GET_INT(response, "BitDepth", out->bit_depth);
+    JSON_GET_STR(response, "SensorType", out->sensor_type);
 
-    // Pixel size
-    cJSON *pixel = cJSON_GetObjectItem(response, "PixelSize");
-    if (pixel) out->pixel_size = (float)pixel->valuedouble;
+    // Cooling
+    JSON_GET_FLOAT(response, "Temperature", out->temperature);
+    JSON_GET_FLOAT(response, "TemperatureSetPoint", out->target_temp);
+    JSON_GET_FLOAT(response, "CoolerPower", out->cooler_power);
+    JSON_GET_BOOL(response, "CoolerOn", out->cooler_on);
+    JSON_GET_BOOL(response, "AtTargetTemp", out->at_target);
+    JSON_GET_BOOL(response, "DewHeaterOn", out->dew_heater_on);
 
-    // Bit depth
-    cJSON *bits = cJSON_GetObjectItem(response, "BitDepth");
-    if (bits) out->bit_depth = bits->valueint;
+    JSON_GET_STR(response, "CameraState", out->camera_state);
+    JSON_GET_FLOAT(response, "LastDownloadTime", out->last_download_time);
 
-    // Sensor type
-    cJSON *sensor = cJSON_GetObjectItem(response, "SensorType");
-    if (sensor && sensor->valuestring)
-        strncpy(out->sensor_type, sensor->valuestring, sizeof(out->sensor_type) - 1);
-
-    // Temperature
-    cJSON *temp = cJSON_GetObjectItem(response, "Temperature");
-    if (temp) out->temperature = (float)temp->valuedouble;
-
-    // Target temperature (from CoolingTargetTemp or TemperatureSetPoint)
-    cJSON *target_temp = cJSON_GetObjectItem(response, "TemperatureSetPoint");
-    if (target_temp) out->target_temp = (float)target_temp->valuedouble;
-
-    // Cooler power
-    cJSON *cooler_pwr = cJSON_GetObjectItem(response, "CoolerPower");
-    if (cooler_pwr) out->cooler_power = (float)cooler_pwr->valuedouble;
-
-    // Cooler on
-    cJSON *cooler_on = cJSON_GetObjectItem(response, "CoolerOn");
-    if (cooler_on) out->cooler_on = cJSON_IsTrue(cooler_on);
-
-    // At target temp
-    cJSON *at_target = cJSON_GetObjectItem(response, "AtTargetTemp");
-    if (at_target) out->at_target = cJSON_IsTrue(at_target);
-
-    // Dew heater
-    cJSON *dew = cJSON_GetObjectItem(response, "DewHeaterOn");
-    if (dew) out->dew_heater_on = cJSON_IsTrue(dew);
-
-    // Camera state
-    cJSON *state = cJSON_GetObjectItem(response, "CameraState");
-    if (state && state->valuestring)
-        strncpy(out->camera_state, state->valuestring, sizeof(out->camera_state) - 1);
-
-    // Last download time
-    cJSON *download = cJSON_GetObjectItem(response, "LastDownloadTime");
-    if (download) out->last_download_time = (float)download->valuedouble;
-
-    // Gain
-    cJSON *gain = cJSON_GetObjectItem(response, "Gain");
-    if (gain) out->gain = gain->valueint;
-    cJSON *gain_min = cJSON_GetObjectItem(response, "GainMin");
-    if (gain_min) out->gain_min = gain_min->valueint;
-    cJSON *gain_max = cJSON_GetObjectItem(response, "GainMax");
-    if (gain_max) out->gain_max = gain_max->valueint;
-
-    // Offset
-    cJSON *offset = cJSON_GetObjectItem(response, "Offset");
-    if (offset) out->offset = offset->valueint;
-    cJSON *offset_min = cJSON_GetObjectItem(response, "OffsetMin");
-    if (offset_min) out->offset_min = offset_min->valueint;
-    cJSON *offset_max = cJSON_GetObjectItem(response, "OffsetMax");
-    if (offset_max) out->offset_max = offset_max->valueint;
+    // Gain / offset
+    JSON_GET_INT(response, "Gain", out->gain);
+    JSON_GET_INT(response, "GainMin", out->gain_min);
+    JSON_GET_INT(response, "GainMax", out->gain_max);
+    JSON_GET_INT(response, "Offset", out->offset);
+    JSON_GET_INT(response, "OffsetMin", out->offset_min);
+    JSON_GET_INT(response, "OffsetMax", out->offset_max);
 
     // Readout mode — index maps to name from ReadoutModes array
     cJSON *readout_idx = cJSON_GetObjectItem(response, "ReadoutMode");
@@ -896,19 +771,10 @@ void fetch_camera_details(const char *base_url, camera_detail_data_t *out) {
         snprintf(out->readout_mode, sizeof(out->readout_mode), "Mode %d", readout_idx->valueint);
     }
 
-    // USB limit
-    cJSON *usb = cJSON_GetObjectItem(response, "USBLimit");
-    if (usb) out->usb_limit = usb->valueint;
-
-    // Battery
-    cJSON *battery = cJSON_GetObjectItem(response, "Battery");
-    if (battery) out->battery = battery->valueint;
-
-    // Binning
-    cJSON *binx = cJSON_GetObjectItem(response, "BinX");
-    if (binx) out->bin_x = binx->valueint;
-    cJSON *biny = cJSON_GetObjectItem(response, "BinY");
-    if (biny) out->bin_y = biny->valueint;
+    JSON_GET_INT(response, "USBLimit", out->usb_limit);
+    JSON_GET_INT(response, "Battery", out->battery);
+    JSON_GET_INT(response, "BinX", out->bin_x);
+    JSON_GET_INT(response, "BinY", out->bin_y);
 
     ESP_LOGI(TAG, "Camera details: %s %dx%d %.2fum %dbit",
              out->name, out->x_size, out->y_size, out->pixel_size, out->bit_depth);
@@ -941,26 +807,13 @@ void fetch_weather_details(const char *base_url, camera_detail_data_t *out) {
 
     out->weather_connected = true;
 
-    cJSON *temp = cJSON_GetObjectItem(response, "Temperature");
-    if (temp) out->weather_temp = (float)temp->valuedouble;
-
-    cJSON *dew = cJSON_GetObjectItem(response, "DewPoint");
-    if (dew) out->dew_point = (float)dew->valuedouble;
-
-    cJSON *humidity = cJSON_GetObjectItem(response, "Humidity");
-    if (humidity) out->humidity = (float)humidity->valuedouble;
-
-    cJSON *pressure = cJSON_GetObjectItem(response, "Pressure");
-    if (pressure) out->pressure = (float)pressure->valuedouble;
-
-    cJSON *wind = cJSON_GetObjectItem(response, "WindSpeed");
-    if (wind) out->wind_speed = (float)wind->valuedouble;
-
-    cJSON *wind_dir = cJSON_GetObjectItem(response, "WindDirection");
-    if (wind_dir) out->wind_direction = wind_dir->valueint;
-
-    cJSON *cloud = cJSON_GetObjectItem(response, "CloudCover");
-    if (cloud) out->cloud_cover = cloud->valueint;
+    JSON_GET_FLOAT(response, "Temperature", out->weather_temp);
+    JSON_GET_FLOAT(response, "DewPoint", out->dew_point);
+    JSON_GET_FLOAT(response, "Humidity", out->humidity);
+    JSON_GET_FLOAT(response, "Pressure", out->pressure);
+    JSON_GET_FLOAT(response, "WindSpeed", out->wind_speed);
+    JSON_GET_INT(response, "WindDirection", out->wind_direction);
+    JSON_GET_INT(response, "CloudCover", out->cloud_cover);
 
     cJSON *sqm = cJSON_GetObjectItem(response, "SkyQuality");
     if (sqm) {
@@ -990,88 +843,35 @@ void fetch_mount_details(const char *base_url, mount_detail_data_t *out) {
     cJSON *response = cJSON_GetObjectItem(json, "Response");
     if (!response) { cJSON_Delete(json); return; }
 
-    // Connected
-    cJSON *conn = cJSON_GetObjectItem(response, "Connected");
-    if (conn) out->connected = cJSON_IsTrue(conn);
+    JSON_GET_BOOL(response, "Connected", out->connected);
+    JSON_GET_STR(response, "Name", out->name);
 
-    // Name
-    cJSON *name = cJSON_GetObjectItem(response, "Name");
-    if (name && name->valuestring)
-        strncpy(out->name, name->valuestring, sizeof(out->name) - 1);
-
-    // Coordinates
+    // Coordinates (sub-object; lookup is NULL-safe when absent)
     cJSON *coords = cJSON_GetObjectItem(response, "Coordinates");
-    if (coords) {
-        cJSON *ra_str = cJSON_GetObjectItem(coords, "RAString");
-        if (ra_str && ra_str->valuestring)
-            strncpy(out->ra_string, ra_str->valuestring, sizeof(out->ra_string) - 1);
+    JSON_GET_STR(coords, "RAString", out->ra_string);
+    JSON_GET_STR(coords, "DecString", out->dec_string);
+    JSON_GET_FLOAT(coords, "RADegrees", out->ra_degrees);
+    JSON_GET_FLOAT(coords, "Dec", out->dec_degrees);
 
-        cJSON *dec_str = cJSON_GetObjectItem(coords, "DecString");
-        if (dec_str && dec_str->valuestring)
-            strncpy(out->dec_string, dec_str->valuestring, sizeof(out->dec_string) - 1);
+    // Pointing
+    JSON_GET_FLOAT(response, "Altitude", out->altitude);
+    JSON_GET_FLOAT(response, "Azimuth", out->azimuth);
+    JSON_GET_STR(response, "SideOfPier", out->pier_side);
+    JSON_GET_STR(response, "AlignmentMode", out->alignment_mode);
+    JSON_GET_STR(response, "TrackingMode", out->tracking_mode);
+    JSON_GET_BOOL(response, "TrackingEnabled", out->tracking_enabled);
+    JSON_GET_STR(response, "SiderealTimeString", out->sidereal_time);
+    JSON_GET_STR(response, "TimeToMeridianFlipString", out->flip_time);
 
-        cJSON *ra_deg = cJSON_GetObjectItem(coords, "RADegrees");
-        if (ra_deg) out->ra_degrees = (float)ra_deg->valuedouble;
-
-        cJSON *dec_deg = cJSON_GetObjectItem(coords, "Dec");
-        if (dec_deg) out->dec_degrees = (float)dec_deg->valuedouble;
-    }
-
-    // Altitude / Azimuth
-    cJSON *alt = cJSON_GetObjectItem(response, "Altitude");
-    if (alt) out->altitude = (float)alt->valuedouble;
-
-    cJSON *az = cJSON_GetObjectItem(response, "Azimuth");
-    if (az) out->azimuth = (float)az->valuedouble;
-
-    // Side of pier
-    cJSON *pier = cJSON_GetObjectItem(response, "SideOfPier");
-    if (pier && pier->valuestring)
-        strncpy(out->pier_side, pier->valuestring, sizeof(out->pier_side) - 1);
-
-    // Alignment mode
-    cJSON *alignment = cJSON_GetObjectItem(response, "AlignmentMode");
-    if (alignment && alignment->valuestring)
-        strncpy(out->alignment_mode, alignment->valuestring, sizeof(out->alignment_mode) - 1);
-
-    // Tracking mode
-    cJSON *track_mode = cJSON_GetObjectItem(response, "TrackingMode");
-    if (track_mode && track_mode->valuestring)
-        strncpy(out->tracking_mode, track_mode->valuestring, sizeof(out->tracking_mode) - 1);
-
-    // Tracking enabled
-    cJSON *tracking = cJSON_GetObjectItem(response, "TrackingEnabled");
-    if (tracking) out->tracking_enabled = cJSON_IsTrue(tracking);
-
-    // Sidereal time
-    cJSON *sidereal = cJSON_GetObjectItem(response, "SiderealTimeString");
-    if (sidereal && sidereal->valuestring)
-        strncpy(out->sidereal_time, sidereal->valuestring, sizeof(out->sidereal_time) - 1);
-
-    // Meridian flip time
-    cJSON *flip = cJSON_GetObjectItem(response, "TimeToMeridianFlipString");
-    if (flip && flip->valuestring)
-        strncpy(out->flip_time, flip->valuestring, sizeof(out->flip_time) - 1);
-
-    // Site coordinates
-    cJSON *lat = cJSON_GetObjectItem(response, "SiteLatitude");
-    if (lat) out->latitude = (float)lat->valuedouble;
-
-    cJSON *lon = cJSON_GetObjectItem(response, "SiteLongitude");
-    if (lon) out->longitude = (float)lon->valuedouble;
-
-    cJSON *elev = cJSON_GetObjectItem(response, "SiteElevation");
-    if (elev) out->elevation = (float)elev->valuedouble;
+    // Site
+    JSON_GET_FLOAT(response, "SiteLatitude", out->latitude);
+    JSON_GET_FLOAT(response, "SiteLongitude", out->longitude);
+    JSON_GET_FLOAT(response, "SiteElevation", out->elevation);
 
     // Status booleans
-    cJSON *at_park = cJSON_GetObjectItem(response, "AtPark");
-    if (at_park) out->at_park = cJSON_IsTrue(at_park);
-
-    cJSON *at_home = cJSON_GetObjectItem(response, "AtHome");
-    if (at_home) out->at_home = cJSON_IsTrue(at_home);
-
-    cJSON *slewing = cJSON_GetObjectItem(response, "Slewing");
-    if (slewing) out->slewing = cJSON_IsTrue(slewing);
+    JSON_GET_BOOL(response, "AtPark", out->at_park);
+    JSON_GET_BOOL(response, "AtHome", out->at_home);
+    JSON_GET_BOOL(response, "Slewing", out->slewing);
 
     ESP_LOGI(TAG, "Mount details: %s RA=%s DEC=%s Alt=%.1f Az=%.1f",
              out->name, out->ra_string, out->dec_string, out->altitude, out->azimuth);
@@ -1148,9 +948,8 @@ void fetch_sequence_details(const char *base_url, sequence_detail_data_t *out) {
     out->has_data = true;
 
     // Target name (strip _Container suffix)
-    cJSON *target_name = cJSON_GetObjectItem(active_target, "Name");
-    if (target_name && target_name->valuestring) {
-        strncpy(out->target_name, target_name->valuestring, sizeof(out->target_name) - 1);
+    JSON_GET_STR(active_target, "Name", out->target_name);
+    {
         char *suffix = strstr(out->target_name, "_Container");
         if (suffix) *suffix = '\0';
     }
@@ -1179,12 +978,9 @@ void fetch_sequence_details(const char *base_url, sequence_detail_data_t *out) {
         if (!active_child) active_child = last_finished_child;
 
         if (active_child) {
-            cJSON *child_name = cJSON_GetObjectItem(active_child, "Name");
-            if (child_name && child_name->valuestring) {
-                strncpy(out->container_name, child_name->valuestring, sizeof(out->container_name) - 1);
-                char *suffix = strstr(out->container_name, "_Container");
-                if (suffix) *suffix = '\0';
-            }
+            JSON_GET_STR(active_child, "Name", out->container_name);
+            char *suffix = strstr(out->container_name, "_Container");
+            if (suffix) *suffix = '\0';
         }
     }
 
@@ -1216,10 +1012,8 @@ void fetch_sequence_details(const char *base_url, sequence_detail_data_t *out) {
             if (child_name && child_name->valuestring &&
                 strcmp(child_name->valuestring, "Smart Exposure") == 0) {
                 // This is a Smart Exposure node — extract filter and counts
-                cJSON *completed = cJSON_GetObjectItem(child, "CompletedIterations");
-                cJSON *iterations = cJSON_GetObjectItem(child, "Iterations");
-                int comp = completed ? completed->valueint : 0;
-                int total = iterations ? iterations->valueint : 0;
+                int comp = json_int_or(child, "CompletedIterations", 0);
+                int total = json_int_or(child, "Iterations", 0);
 
                 // Look for filter name in the parent or sibling context
                 // Smart Exposure items typically sit inside a container with filter in its name,
@@ -1289,24 +1083,14 @@ void fetch_sequence_details(const char *base_url, sequence_detail_data_t *out) {
 
     // Fill current step info from the running Smart Exposure
     if (running_smart_exp) {
-        cJSON *completed = cJSON_GetObjectItem(running_smart_exp, "CompletedIterations");
-        cJSON *iterations = cJSON_GetObjectItem(running_smart_exp, "Iterations");
-        cJSON *exp_time = cJSON_GetObjectItem(running_smart_exp, "ExposureTime");
-        cJSON *filter_prop = cJSON_GetObjectItem(running_smart_exp, "Filter");
-
-        out->current_completed = completed ? completed->valueint : 0;
-        out->current_total = iterations ? iterations->valueint : 0;
-        out->current_exposure_time = exp_time ? (float)exp_time->valuedouble : 0;
-        if (filter_prop && filter_prop->valuestring) {
-            strncpy(out->current_filter, filter_prop->valuestring, sizeof(out->current_filter) - 1);
-        }
+        out->current_completed     = json_int_or(running_smart_exp, "CompletedIterations", 0);
+        out->current_total         = json_int_or(running_smart_exp, "Iterations", 0);
+        out->current_exposure_time = json_num_or(running_smart_exp, "ExposureTime", 0);
+        JSON_GET_STR(running_smart_exp, "Filter", out->current_filter);
 
         strncpy(out->step_name, "Smart Exposure", sizeof(out->step_name) - 1);
     } else if (running_step) {
-        cJSON *step_name = cJSON_GetObjectItem(running_step, "Name");
-        if (step_name && step_name->valuestring) {
-            strncpy(out->step_name, step_name->valuestring, sizeof(out->step_name) - 1);
-        }
+        JSON_GET_STR(running_step, "Name", out->step_name);
     }
 
     // Time remaining — look for OverallRemainingTime or similar at sequence level
@@ -1352,27 +1136,17 @@ void fetch_guider_graph(const char *base_url, graph_rms_data_t *out, int max_poi
     cJSON *response = cJSON_GetObjectItem(json, "Response");
     if (!response) { cJSON_Delete(json); return; }
 
-    /* Parse RMS summary */
+    /* Parse RMS summary (sub-object; lookup is NULL-safe when absent) */
     cJSON *rms = cJSON_GetObjectItem(response, "RMS");
-    if (rms) {
-        cJSON *ra = cJSON_GetObjectItem(rms, "RA");
-        cJSON *dec = cJSON_GetObjectItem(rms, "Dec");
-        cJSON *total = cJSON_GetObjectItem(rms, "Total");
-        cJSON *peak_ra = cJSON_GetObjectItem(rms, "PeakRA");
-        cJSON *peak_dec = cJSON_GetObjectItem(rms, "PeakDec");
-        cJSON *pscale = cJSON_GetObjectItem(rms, "Scale");
+    JSON_GET_FLOAT(rms, "RA", out->rms_ra);
+    JSON_GET_FLOAT(rms, "Dec", out->rms_dec);
+    JSON_GET_FLOAT(rms, "Total", out->rms_total);
+    JSON_GET_FLOAT(rms, "PeakRA", out->peak_ra);
+    JSON_GET_FLOAT(rms, "PeakDec", out->peak_dec);
+    JSON_GET_FLOAT(rms, "Scale", out->pixel_scale);
 
-        if (ra) out->rms_ra = (float)ra->valuedouble;
-        if (dec) out->rms_dec = (float)dec->valuedouble;
-        if (total) out->rms_total = (float)total->valuedouble;
-        if (peak_ra) out->peak_ra = (float)peak_ra->valuedouble;
-        if (peak_dec) out->peak_dec = (float)peak_dec->valuedouble;
-        if (pscale) out->pixel_scale = (float)pscale->valuedouble;
-    }
-
-    /* Parse pixel scale from response level */
-    cJSON *ps = cJSON_GetObjectItem(response, "PixelScale");
-    if (ps) out->pixel_scale = (float)ps->valuedouble;
+    /* Parse pixel scale from response level (overrides RMS.Scale) */
+    JSON_GET_FLOAT(response, "PixelScale", out->pixel_scale);
 
     /* Parse guide steps array */
     cJSON *steps = cJSON_GetObjectItem(response, "GuideSteps");
@@ -1381,18 +1155,19 @@ void fetch_guider_graph(const char *base_url, graph_rms_data_t *out, int max_poi
         /* Take last max_points steps (most recent) */
         int start = 0;
         if (total_steps > max_points) start = total_steps - max_points;
-        if (max_points > GRAPH_MAX_POINTS) max_points = GRAPH_MAX_POINTS;
 
+        /* Single forward pass: cJSON arrays are linked lists, so indexed
+         * access re-walks the list per element (O(n^2) over thousands of
+         * guide steps). Order is unchanged: array order, oldest-first. */
         int idx = 0;
-        for (int i = start; i < total_steps && idx < GRAPH_MAX_POINTS; i++) {
-            cJSON *step = cJSON_GetArrayItem(steps, i);
-            if (!step) continue;
+        int i = 0;
+        cJSON *step = NULL;
+        cJSON_ArrayForEach(step, steps) {
+            if (i++ < start) continue;
+            if (idx >= GRAPH_MAX_POINTS) break;
 
-            cJSON *ra_raw = cJSON_GetObjectItem(step, "RADistanceRaw");
-            cJSON *dec_raw = cJSON_GetObjectItem(step, "DECDistanceRaw");
-
-            out->ra[idx] = ra_raw ? (float)ra_raw->valuedouble : 0;
-            out->dec[idx] = dec_raw ? (float)dec_raw->valuedouble : 0;
+            out->ra[idx]  = json_num_or(step, "RADistanceRaw", 0);
+            out->dec[idx] = json_num_or(step, "DECDistanceRaw", 0);
             /* Total computed from RA and DEC */
             out->total[idx] = sqrtf(out->ra[idx] * out->ra[idx] +
                                     out->dec[idx] * out->dec[idx]);
@@ -1425,26 +1200,26 @@ void fetch_hfr_history(const char *base_url, graph_hfr_data_t *out, int max_poin
     int total_images = cJSON_GetArraySize(response);
     if (total_images <= 0) { cJSON_Delete(json); return; }
 
-    /* The API returns images newest-first; we want oldest-first for the chart.
-     * Take last max_points images and reverse into the output array. */
+    /* The API returns images OLDEST-first, which is also what the chart wants,
+     * so emit in array order. Keep the last max_points images (most recent).
+     * Single forward pass: cJSON arrays are linked lists, so indexed access
+     * re-walks the list per element (O(n^2); ?all=true grows all session). */
+    if (max_points > GRAPH_MAX_POINTS) max_points = GRAPH_MAX_POINTS;
     int start = 0;
     if (total_images > max_points) start = total_images - max_points;
-    if (max_points > GRAPH_MAX_POINTS) max_points = GRAPH_MAX_POINTS;
 
-    /* First pass: collect from start..end into temp positions */
     int count = 0;
-    for (int i = total_images - 1; i >= start && count < GRAPH_MAX_POINTS; i--) {
-        cJSON *item = cJSON_GetArrayItem(response, i);
-        if (!item) continue;
+    int i = 0;
+    cJSON *item = NULL;
+    cJSON_ArrayForEach(item, response) {
+        if (i++ < start) continue;
+        if (count >= GRAPH_MAX_POINTS) break;
 
-        cJSON *hfr = cJSON_GetObjectItem(item, "HFR");
-        cJSON *stars = cJSON_GetObjectItem(item, "Stars");
-
-        float hfr_val = hfr ? (float)hfr->valuedouble : 0;
+        float hfr_val = json_num_or(item, "HFR", 0);
         if (hfr_val <= 0) continue;  /* Skip images with no HFR data */
 
         out->hfr[count] = hfr_val;
-        out->stars[count] = stars ? stars->valueint : 0;
+        out->stars[count] = json_int_or(item, "Stars", 0);
         count++;
     }
     out->count = count;

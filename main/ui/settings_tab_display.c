@@ -143,60 +143,48 @@ static uint32_t home_abs_to_dd_sel(int id)
 
 /* ── Slideshow order-list helpers (canonical membership) ──
  *
- * The nav arbiter slideshow reads ONLY auto_rotate_order[0..7] +
- * auto_rotate_order_ext (9 slots). Each slot holds a "bit code" page id:
- *   0=Summary, 1=NINA1, 2=NINA2, 3=NINA3, 4=SysInfo,
- *   5=AllSky, 6=Spotify, 7=Clock, 8=ImageDisplay; 0xFF = empty.
- * The on-device checkbox table exposes only codes 0..5 (page_names below);
- * codes 6/7/8 are preserved across edits since this UI cannot express them. */
+ * The nav arbiter slideshow reads ONLY auto_rotate_order2[0..15]
+ * (nina_nav_arbiter.c: slideshow_build_candidates). Each used slot holds a
+ * page_ref id (== ARP_IDX_*): 0=Summary, 1..3=NINA1..3, 4=SysInfo, 5=AllSky,
+ * 6=Spotify, 7=Clock, 8..11=Image sources, 24=JSON, 25=HA; 0xFF = empty.
+ * The on-device checkbox table exposes only ids 0..5 (page_names below);
+ * every other id is preserved across edits since this UI cannot express it. */
 
-#define AR_ORDER_SLOTS  9   /* 8 in auto_rotate_order[] + 1 ext */
-
-/* Read slot i (0..8) of the canonical order list from cfg. */
-static uint8_t ar_order_get(const app_config_t *cfg, int i)
-{
-    return (i < 8) ? cfg->auto_rotate_order[i] : cfg->auto_rotate_order_ext;
-}
-
-/* Write slot i (0..8) of the canonical order list in cfg. */
-static void ar_order_set(app_config_t *cfg, int i, uint8_t v)
-{
-    if (i < 8) cfg->auto_rotate_order[i] = v;
-    else       cfg->auto_rotate_order_ext = v;
-}
-
-/* True if bit-code page is present anywhere in the order list. */
+/* True if the page id is present anywhere in the order list. */
 static bool ar_order_contains(const app_config_t *cfg, uint8_t code)
 {
-    for (int i = 0; i < AR_ORDER_SLOTS; i++) {
-        if (ar_order_get(cfg, i) == code) return true;
+    for (int i = 0; i < ARP_ORDER_CAPACITY; i++) {
+        if (cfg->auto_rotate_order2[i] == code) return true;
     }
     return false;
 }
 
-/* Add a bit-code page to the order list (append into first empty slot),
+/* Add a page id to the order list (append into first empty slot),
  * preserving existing order. No-op if already present or list is full. */
 static void ar_order_add(app_config_t *cfg, uint8_t code)
 {
     if (ar_order_contains(cfg, code)) return;
-    for (int i = 0; i < AR_ORDER_SLOTS; i++) {
-        if (ar_order_get(cfg, i) == 0xFF) { ar_order_set(cfg, i, code); return; }
+    for (int i = 0; i < ARP_ORDER_CAPACITY; i++) {
+        if (cfg->auto_rotate_order2[i] == 0xFF) {
+            cfg->auto_rotate_order2[i] = code;
+            return;
+        }
     }
 }
 
-/* Remove a bit-code page from the order list and compact remaining entries
+/* Remove a page id from the order list and compact remaining entries
  * forward so order is preserved and trailing slots become 0xFF. */
 static void ar_order_remove(app_config_t *cfg, uint8_t code)
 {
-    uint8_t kept[AR_ORDER_SLOTS];
+    uint8_t kept[ARP_ORDER_CAPACITY];
     int n = 0;
-    for (int i = 0; i < AR_ORDER_SLOTS; i++) {
-        uint8_t v = ar_order_get(cfg, i);
+    for (int i = 0; i < ARP_ORDER_CAPACITY; i++) {
+        uint8_t v = cfg->auto_rotate_order2[i];
         if (v == 0xFF || v == code) continue;
         kept[n++] = v;
     }
-    for (int i = 0; i < AR_ORDER_SLOTS; i++) {
-        ar_order_set(cfg, i, (i < n) ? kept[i] : 0xFF);
+    for (int i = 0; i < ARP_ORDER_CAPACITY; i++) {
+        cfg->auto_rotate_order2[i] = (i < n) ? kept[i] : 0xFF;
     }
 }
 
@@ -231,14 +219,7 @@ static void create_appearance_card(lv_obj_t *parent)
     {
         lv_obj_t *row = settings_make_row_lg(card);
 
-        lv_obj_t *lbl = lv_label_create(row);
-        lv_label_set_text(lbl, "Theme");
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
-        if (current_theme) {
-            int gb = app_config_get()->color_brightness;
-            lv_obj_set_style_text_color(lbl,
-                lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-        }
+        lv_obj_t *lbl = ui_label(row, "Theme", &lv_font_montserrat_20, UI_THEME_COLOR(text_color));
 
         dd_theme = lv_dropdown_create(row);
         lv_obj_set_width(dd_theme, 220);
@@ -267,14 +248,7 @@ static void create_appearance_card(lv_obj_t *parent)
     {
         lv_obj_t *row = settings_make_row_lg(card);
 
-        lv_obj_t *lbl = lv_label_create(row);
-        lv_label_set_text(lbl, "Widget Style");
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
-        if (current_theme) {
-            int gb = app_config_get()->color_brightness;
-            lv_obj_set_style_text_color(lbl,
-                lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-        }
+        lv_obj_t *lbl = ui_label(row, "Widget Style", &lv_font_montserrat_20, UI_THEME_COLOR(text_color));
 
         dd_widget_style = lv_dropdown_create(row);
         lv_obj_set_width(dd_widget_style, 220);
@@ -303,14 +277,7 @@ static void create_appearance_card(lv_obj_t *parent)
     {
         lv_obj_t *row = settings_make_row_lg(card);
 
-        lv_obj_t *lbl = lv_label_create(row);
-        lv_label_set_text(lbl, "Rotation");
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
-        if (current_theme) {
-            int gb = app_config_get()->color_brightness;
-            lv_obj_set_style_text_color(lbl,
-                lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-        }
+        lv_obj_t *lbl = ui_label(row, "Rotation", &lv_font_montserrat_20, UI_THEME_COLOR(text_color));
 
         dd_rotation = lv_dropdown_create(row);
         lv_dropdown_set_options(dd_rotation, rotation_opts);
@@ -347,11 +314,7 @@ static void create_brightness_card(lv_obj_t *parent)
         lv_label_set_text(lbl, "Screen");
         lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
         lv_obj_set_style_min_width(lbl, 100, 0);
-        if (current_theme) {
-            int gb = app_config_get()->color_brightness;
-            lv_obj_set_style_text_color(lbl,
-                lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-        }
+        ui_set_theme_text_color(lbl, UI_THEME_COLOR(text_color));
 
         /* Slider + value in a sub-container */
         lv_obj_t *ctrl = lv_obj_create(row);
@@ -385,11 +348,7 @@ static void create_brightness_card(lv_obj_t *parent)
         lv_obj_set_style_text_font(lbl_backlight_val, &lv_font_montserrat_20, 0);
         lv_obj_set_style_min_width(lbl_backlight_val, 50, 0);
         lv_obj_set_style_text_align(lbl_backlight_val, LV_TEXT_ALIGN_RIGHT, 0);
-        if (current_theme) {
-            int gb = app_config_get()->color_brightness;
-            lv_obj_set_style_text_color(lbl_backlight_val,
-                lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-        }
+        ui_set_theme_text_color(lbl_backlight_val, UI_THEME_COLOR(text_color));
         lv_label_set_text_fmt(lbl_backlight_val, "%d%%", app_config_get()->brightness);
     }
 
@@ -403,11 +362,7 @@ static void create_brightness_card(lv_obj_t *parent)
         lv_label_set_text(lbl, "Text");
         lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
         lv_obj_set_style_min_width(lbl, 100, 0);
-        if (current_theme) {
-            int gb = app_config_get()->color_brightness;
-            lv_obj_set_style_text_color(lbl,
-                lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-        }
+        ui_set_theme_text_color(lbl, UI_THEME_COLOR(text_color));
 
         /* Slider + value in a sub-container */
         lv_obj_t *ctrl = lv_obj_create(row);
@@ -442,11 +397,7 @@ static void create_brightness_card(lv_obj_t *parent)
         lv_obj_set_style_text_font(lbl_text_bright_val, &lv_font_montserrat_20, 0);
         lv_obj_set_style_min_width(lbl_text_bright_val, 50, 0);
         lv_obj_set_style_text_align(lbl_text_bright_val, LV_TEXT_ALIGN_RIGHT, 0);
-        if (current_theme) {
-            int gb = app_config_get()->color_brightness;
-            lv_obj_set_style_text_color(lbl_text_bright_val,
-                lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-        }
+        ui_set_theme_text_color(lbl_text_bright_val, UI_THEME_COLOR(text_color));
         lv_label_set_text_fmt(lbl_text_bright_val, "%d%%", app_config_get()->color_brightness);
     }
 }
@@ -528,14 +479,7 @@ static lv_obj_t *create_page_nav_card(lv_obj_t *parent)
     {
         lv_obj_t *row = settings_make_row(cont_fixed);
 
-        lv_obj_t *lbl = lv_label_create(row);
-        lv_label_set_text(lbl, "Home Page");
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
-        if (current_theme) {
-            int gb = app_config_get()->color_brightness;
-            lv_obj_set_style_text_color(lbl,
-                lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-        }
+        lv_obj_t *lbl = ui_label(row, "Home Page", &lv_font_montserrat_20, UI_THEME_COLOR(text_color));
 
         dd_pinned_page = lv_dropdown_create(row);
         lv_obj_set_width(dd_pinned_page, 200);
@@ -578,14 +522,7 @@ static lv_obj_t *create_page_nav_card(lv_obj_t *parent)
     {
         lv_obj_t *row = settings_make_row(cont_cycle);
 
-        lv_obj_t *lbl = lv_label_create(row);
-        lv_label_set_text(lbl, "Interval");
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
-        if (current_theme) {
-            int gb = app_config_get()->color_brightness;
-            lv_obj_set_style_text_color(lbl,
-                lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-        }
+        lv_obj_t *lbl = ui_label(row, "Interval", &lv_font_montserrat_20, UI_THEME_COLOR(text_color));
 
         lv_obj_t *stepper = settings_make_stepper(row, &btn_interval_minus,
                                                    &lbl_interval_val, &btn_interval_plus);
@@ -602,14 +539,7 @@ static lv_obj_t *create_page_nav_card(lv_obj_t *parent)
     {
         lv_obj_t *row = settings_make_row(cont_cycle);
 
-        lv_obj_t *lbl = lv_label_create(row);
-        lv_label_set_text(lbl, "Transition");
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
-        if (current_theme) {
-            int gb = app_config_get()->color_brightness;
-            lv_obj_set_style_text_color(lbl,
-                lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-        }
+        lv_obj_t *lbl = ui_label(row, "Transition", &lv_font_montserrat_20, UI_THEME_COLOR(text_color));
 
         dd_transition = lv_dropdown_create(row);
         lv_obj_set_width(dd_transition, 200);
@@ -657,13 +587,9 @@ static lv_obj_t *create_page_nav_card(lv_obj_t *parent)
         lv_label_set_text(lbl_section, "Pages in Rotation");
         lv_obj_set_style_text_font(lbl_section, &lv_font_montserrat_20, 0);
         lv_obj_set_style_pad_top(lbl_section, 4, 0);
-        if (current_theme) {
-            int gb = app_config_get()->color_brightness;
-            lv_obj_set_style_text_color(lbl_section,
-                lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-        }
+        ui_set_theme_text_color(lbl_section, UI_THEME_COLOR(text_color));
 
-        /* Checkbox index i maps directly to canonical order-list bit code i:
+        /* Checkbox index i maps directly to slideshow stop id i (page_ref id):
          * 0=Summary, 1=NINA1, 2=NINA2, 3=NINA3, 4=SysInfo, 5=AllSky. */
         static const char *page_names[] = {
             "Summary", "NINA 1", "NINA 2", "NINA 3", "SysInfo", "AllSky"
@@ -921,8 +847,8 @@ static void page_checkbox_changed_cb(lv_event_t *e)
     /* Mutate the live config so the nav arbiter slideshow sees the new
      * membership immediately, preserving existing order. Checked pages are
      * appended; unchecked pages are removed and the list is compacted.
-     * Codes 6/7/8 (Spotify/Clock/ImageDisplay) are not in this checkbox set
-     * and are preserved untouched. */
+     * Ids 6..11/24/25 (Spotify/Clock/Image sources/JSON/HA) are not in this
+     * checkbox set and are preserved untouched. */
     app_config_t *cfg = app_config_get();
     if (checked) ar_order_add(cfg, (uint8_t)bit);
     else         ar_order_remove(cfg, (uint8_t)bit);
@@ -932,8 +858,8 @@ static void page_checkbox_changed_cb(lv_event_t *e)
     app_config_t *snap = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
     if (snap != NULL) {
         app_config_get_snapshot_into(snap);
-        memcpy(snap->auto_rotate_order, cfg->auto_rotate_order, sizeof(snap->auto_rotate_order));
-        snap->auto_rotate_order_ext = cfg->auto_rotate_order_ext;
+        memcpy(snap->auto_rotate_order2, cfg->auto_rotate_order2,
+               sizeof(snap->auto_rotate_order2));
         app_config_save(snap);
         heap_caps_free(snap);
     }
@@ -1064,8 +990,8 @@ void settings_tab_display_refresh(void)
         }
     }
 
-    /* Page checkboxes — membership read from canonical order list.
-     * Checkbox index i maps directly to order-list bit code i. */
+    /* Page checkboxes — membership read from auto_rotate_order2[].
+     * Checkbox index i maps directly to slideshow stop id i. */
     for (int i = 0; i < 6; i++) {
         if (cb_pages[i]) {
             if (ar_order_contains(cfg, (uint8_t)i)) {

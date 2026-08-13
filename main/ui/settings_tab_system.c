@@ -133,25 +133,15 @@ static void extract_mqtt_host(const char *url, char *out, size_t out_size) {
 static lv_obj_t *make_info_row(lv_obj_t *parent, const char *title,
                                 const char *value, lv_obj_t **out_val_lbl)
 {
-    int gb = app_config_get()->color_brightness;
 
     lv_obj_t *row = settings_make_row(parent);
 
-    lv_obj_t *lbl_title = lv_label_create(row);
-    lv_label_set_text(lbl_title, title);
-    lv_obj_set_style_text_font(lbl_title, &lv_font_montserrat_20, 0);
-    if (current_theme) {
-        lv_obj_set_style_text_color(lbl_title,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
+    lv_obj_t *lbl_title = ui_label(row, title, &lv_font_montserrat_20, UI_THEME_COLOR(label_color));
 
     lv_obj_t *lbl_val = lv_label_create(row);
     lv_label_set_text(lbl_val, value ? value : "--");
     lv_obj_set_style_text_font(lbl_val, &lv_font_montserrat_20, 0);
-    if (current_theme) {
-        lv_obj_set_style_text_color(lbl_val,
-            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-    }
+    ui_set_theme_text_color(lbl_val, UI_THEME_COLOR(text_color));
 
     if (out_val_lbl) *out_val_lbl = lbl_val;
     return row;
@@ -161,7 +151,6 @@ static lv_obj_t *make_info_row(lv_obj_t *parent, const char *title,
 static lv_obj_t *make_outlined_button(lv_obj_t *parent, const char *text,
                                        lv_obj_t **out_lbl)
 {
-    int gb = app_config_get()->color_brightness;
 
     lv_obj_t *btn = lv_button_create(parent);
     lv_obj_set_width(btn, LV_PCT(100));
@@ -176,13 +165,7 @@ static lv_obj_t *make_outlined_button(lv_obj_t *parent, const char *text,
         lv_obj_set_style_bg_opa(btn, LV_OPA_40, LV_STATE_PRESSED);
     }
 
-    lv_obj_t *lbl = lv_label_create(btn);
-    lv_label_set_text(lbl, text);
-    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
-    if (current_theme) {
-        lv_obj_set_style_text_color(lbl,
-            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-    }
+    lv_obj_t *lbl = ui_label(btn, text, &lv_font_montserrat_20, UI_THEME_COLOR(text_color));
     lv_obj_center(lbl);
 
     if (out_lbl) *out_lbl = lbl;
@@ -276,13 +259,7 @@ static void create_network_card(lv_obj_t *parent) {
     {
         lv_obj_t *row = settings_make_row(card);
 
-        lv_obj_t *lbl = lv_label_create(row);
-        lv_label_set_text(lbl, "Timezone");
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
-        if (current_theme) {
-            lv_obj_set_style_text_color(lbl,
-                lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-        }
+        lv_obj_t *lbl = ui_label(row, "Timezone", &lv_font_montserrat_20, UI_THEME_COLOR(text_color));
 
         dd_timezone = lv_dropdown_create(row);
         lv_dropdown_set_options(dd_timezone, tz_names);
@@ -305,13 +282,7 @@ static void create_network_card(lv_obj_t *parent) {
     settings_make_divider(card);
 
     /* Hint label */
-    lv_obj_t *hint = lv_label_create(card);
-    lv_label_set_text(hint, "Configure networks via Web UI");
-    lv_obj_set_style_text_font(hint, &lv_font_montserrat_16, 0);
-    if (current_theme) {
-        lv_obj_set_style_text_color(hint,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
+    lv_obj_t *hint = ui_label(card, "Configure networks via Web UI", &lv_font_montserrat_16, UI_THEME_COLOR(label_color));
 }
 
 /* ════════════════════════════════════════════════════════════════════════
@@ -319,7 +290,6 @@ static void create_network_card(lv_obj_t *parent) {
  * ════════════════════════════════════════════════════════════════════════ */
 
 static void create_mqtt_card(lv_obj_t *parent) {
-    int gb = app_config_get()->color_brightness;
     app_config_t *cfg = app_config_get();
     lv_obj_t *card = settings_make_card(parent, "MQTT");
 
@@ -360,13 +330,7 @@ static void create_mqtt_card(lv_obj_t *parent) {
     {
         lv_obj_t *row = settings_make_row(cont_mqtt_fields);
 
-        lv_obj_t *lbl = lv_label_create(row);
-        lv_label_set_text(lbl, "Port");
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
-        if (current_theme) {
-            lv_obj_set_style_text_color(lbl,
-                lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-        }
+        lv_obj_t *lbl = ui_label(row, "Port", &lv_font_montserrat_20, UI_THEME_COLOR(text_color));
 
         lv_obj_t *btn_minus, *btn_plus;
         settings_make_stepper(row, &btn_minus, &lbl_mqtt_port, &btn_plus);
@@ -411,13 +375,7 @@ static void create_mqtt_card(lv_obj_t *parent) {
     settings_make_divider(card);
 
     /* Hint */
-    lv_obj_t *hint = lv_label_create(card);
-    lv_label_set_text(hint, "Reboot required after MQTT changes");
-    lv_obj_set_style_text_font(hint, &lv_font_montserrat_16, 0);
-    if (current_theme) {
-        lv_obj_set_style_text_color(hint,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
+    lv_obj_t *hint = ui_label(card, "Reboot required after MQTT changes", &lv_font_montserrat_16, UI_THEME_COLOR(label_color));
 }
 
 /* ════════════════════════════════════════════════════════════════════════
@@ -472,13 +430,7 @@ static void create_firmware_card(lv_obj_t *parent) {
     {
         lv_obj_t *row = settings_make_row(card);
 
-        lv_obj_t *lbl = lv_label_create(row);
-        lv_label_set_text(lbl, "Channel");
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
-        if (current_theme) {
-            lv_obj_set_style_text_color(lbl,
-                lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-        }
+        lv_obj_t *lbl = ui_label(row, "Channel", &lv_font_montserrat_20, UI_THEME_COLOR(text_color));
 
         dd_update_channel = lv_dropdown_create(row);
         lv_dropdown_set_options(dd_update_channel, "Stable\nPre-releases\nAlpha (snd)");
@@ -516,10 +468,7 @@ static void create_firmware_card(lv_obj_t *parent) {
     lbl_check_update = lv_label_create(btn_check_update);
     lv_label_set_text(lbl_check_update, LV_SYMBOL_REFRESH "  Check for Updates");
     lv_obj_set_style_text_font(lbl_check_update, &lv_font_montserrat_20, 0);
-    if (current_theme) {
-        lv_obj_set_style_text_color(lbl_check_update,
-            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-    }
+    ui_set_theme_text_color(lbl_check_update, UI_THEME_COLOR(text_color));
     lv_obj_center(lbl_check_update);
 
     lv_obj_add_event_cb(btn_check_update, check_update_btn_cb, LV_EVENT_CLICKED, NULL);

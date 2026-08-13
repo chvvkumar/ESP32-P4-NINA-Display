@@ -1,7 +1,6 @@
 #include "goes_client.h"
 #include "jpeg_utils.h"
-#include "esp_http_client.h"
-#include "esp_crt_bundle.h"
+#include "http_fetch.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
@@ -210,93 +209,29 @@ esp_err_t goes_client_poll_url(const char *url, goes_data_t *data, bool vflip, c
 
     ESP_LOGI(TAG, "Fetching %s", url);
 
-    esp_http_client_config_t http_cfg = {
-        .url = url,
+    /* Shared binary fetch shell (client setup, manual redirect chain, sizing,
+     * read loop). CLAMP: an oversized Content-Length is truncated to the cap
+     * rather than rejected, so a too-large tile still gets the JPEG checks
+     * below rather than failing outright. */
+    const http_fetch_binary_opts_t bopts = {
         .timeout_ms = GOES_HTTP_TIMEOUT_MS,
-        .buffer_size = GOES_HTTP_BUF_SIZE,
-        .buffer_size_tx = 1024,
-        .crt_bundle_attach = esp_crt_bundle_attach,
+        .use_tls_bundle = true,
+        .max_redirects = GOES_MAX_REDIRECTS,
+        .rx_buffer_size = GOES_HTTP_BUF_SIZE,
+        .tx_buffer_size = 1024,
+        .max_size = GOES_JPEG_MAX_SIZE,
+        .oversize = HTTP_BIN_OVERSIZE_CLAMP,
+        .label = "GOES image",
     };
 
-    esp_http_client_handle_t client = esp_http_client_init(&http_cfg);
-    if (!client) {
-        ESP_LOGE(TAG, "Failed to create HTTP client");
-        set_error_msg(data, "Fetch failed");
-        return ESP_FAIL;
-    }
-
-    esp_err_t err = esp_http_client_open(client, 0);
+    uint8_t *jpeg_buf = NULL;
+    size_t jpeg_len = 0;
+    esp_err_t err = http_fetch_binary(url, &bopts, &jpeg_buf, &jpeg_len);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "HTTP open failed: %s", esp_err_to_name(err));
-        esp_http_client_cleanup(client);
-        set_error_msg(data, "Fetch failed");
+        set_error_msg(data, err == ESP_ERR_NO_MEM ? "Out of memory" : "Fetch failed");
         return err;
     }
-
-    int content_length = esp_http_client_fetch_headers(client);
-    int status = esp_http_client_get_status_code(client);
-
-    /* Follow Location redirects manually: the streaming open()/fetch_headers()
-     * path does NOT auto-follow. For each 30x, esp_http_client_set_redirection()
-     * adopts the captured Location URL; we then re-open + re-fetch_headers on the
-     * new URL. Cap the chain to avoid loops. crt_bundle already covers TLS hosts. */
-    int redirects = 0;
-    while ((status == 301 || status == 302 || status == 307 || status == 308) &&
-           redirects < GOES_MAX_REDIRECTS) {
-        ESP_LOGI(TAG, "HTTP %d redirect, following (hop %d)", status, redirects + 1);
-        err = esp_http_client_set_redirection(client);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "set_redirection failed: %s", esp_err_to_name(err));
-            break;
-        }
-        /* Close the prior response's socket before reconnecting to the redirect
-         * target. Without this, the previous connection leaks for the duration of
-         * the chain. cleanup() on the terminal path still closes exactly once. */
-        esp_http_client_close(client);
-        /* Re-issue the request against the new (redirected) URL. */
-        err = esp_http_client_open(client, 0);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "HTTP re-open failed: %s", esp_err_to_name(err));
-            esp_http_client_cleanup(client);
-            set_error_msg(data, "Fetch failed");
-            return err;
-        }
-        content_length = esp_http_client_fetch_headers(client);
-        status = esp_http_client_get_status_code(client);
-        redirects++;
-    }
-
-    if (status != 200) {
-        ESP_LOGW(TAG, "HTTP status %d", status);
-        esp_http_client_cleanup(client);
-        set_error_msg(data, "Fetch failed");
-        return ESP_FAIL;
-    }
-
-    if (content_length <= 0) {
-        content_length = GOES_JPEG_MAX_SIZE;
-    }
-    if (content_length > GOES_JPEG_MAX_SIZE) {
-        content_length = GOES_JPEG_MAX_SIZE;
-    }
-
-    uint8_t *jpeg_buf = heap_caps_malloc(content_length, MALLOC_CAP_SPIRAM);
-    if (!jpeg_buf) {
-        ESP_LOGE(TAG, "PSRAM alloc failed for JPEG (%d bytes)", content_length);
-        esp_http_client_cleanup(client);
-        set_error_msg(data, "Out of memory");
-        return ESP_ERR_NO_MEM;
-    }
-
-    int total_read = 0;
-    while (total_read < content_length) {
-        int read_len = esp_http_client_read(client, (char *)(jpeg_buf + total_read),
-                                            content_length - total_read);
-        if (read_len <= 0) break;
-        total_read += read_len;
-    }
-
-    esp_http_client_cleanup(client);
+    int total_read = (int)jpeg_len;
 
     if (total_read < 1000) {
         ESP_LOGW(TAG, "JPEG too small (%d bytes), likely error page", total_read);

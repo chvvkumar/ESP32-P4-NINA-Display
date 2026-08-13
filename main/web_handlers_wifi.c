@@ -68,17 +68,8 @@ esp_err_t wifi_scan_get_handler(httpd_req_t *req)
         cJSON *root = cJSON_CreateObject();
         cJSON_AddStringToObject(root, "error", "WiFi scan failed");
         cJSON_AddNumberToObject(root, "code", err);
-        char *json = cJSON_PrintUnformatted(root);
-        if (!json) {
-            cJSON_Delete(root);
-            return httpd_resp_send_500(req);
-        }
-        httpd_resp_set_type(req, "application/json");
         httpd_resp_set_status(req, "500 Internal Server Error");
-        httpd_resp_sendstr(req, json);
-        free(json);
-        cJSON_Delete(root);
-        return ESP_OK;
+        return send_json_response(req, root);
     }
 
     uint16_t ap_count = 0;
@@ -93,17 +84,8 @@ esp_err_t wifi_scan_get_handler(httpd_req_t *req)
         cJSON *root = cJSON_CreateObject();
         cJSON_AddStringToObject(root, "error", "Out of memory for scan results");
         cJSON_AddNumberToObject(root, "code", ESP_ERR_NO_MEM);
-        char *json = cJSON_PrintUnformatted(root);
-        if (!json) {
-            cJSON_Delete(root);
-            return httpd_resp_send_500(req);
-        }
-        httpd_resp_set_type(req, "application/json");
         httpd_resp_set_status(req, "500 Internal Server Error");
-        httpd_resp_sendstr(req, json);
-        free(json);
-        cJSON_Delete(root);
-        return ESP_OK;
+        return send_json_response(req, root);
     }
 
     esp_wifi_scan_get_ap_records(&ap_count, ap_records);
@@ -151,19 +133,8 @@ esp_err_t wifi_scan_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "count", result_count);
     cJSON_AddNumberToObject(root, "incompatible_count", incompatible_count);
 
-    char *json = cJSON_PrintUnformatted(root);
-    if (!json) {
-        cJSON_Delete(root);
-        heap_caps_free(ap_records);
-        return httpd_resp_send_500(req);
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, json);
-
-    free(json);
-    cJSON_Delete(root);
     heap_caps_free(ap_records);
-    return ESP_OK;
+    return send_json_response(req, root);
 }
 
 esp_err_t wifi_setup_post_handler(httpd_req_t *req)
@@ -187,15 +158,12 @@ esp_err_t wifi_setup_post_handler(httpd_req_t *req)
         return send_400(req, "SSID is required");
     }
 
-    /* Work on a mutex-protected snapshot copy; never field-write the live config.
-     * Heap-allocated in PSRAM (app_config_t is ~7.6 KB — too large for the httpd stack). */
-    app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    /* Work on a mutex-protected snapshot copy; never field-write the live config. */
+    app_config_t *cfg = config_snapshot_for_request(req);
     if (!cfg) {
         cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_OK;
+        return ESP_OK;   /* 500 already sent; keep the connection open */
     }
-    app_config_get_snapshot_into(cfg);
     strlcpy(cfg->wifi_networks[0].ssid, ssid_item->valuestring,
             sizeof(cfg->wifi_networks[0].ssid));
     if (cJSON_IsString(pass_item)) {
@@ -246,14 +214,5 @@ esp_err_t wifi_status_get_handler(httpd_req_t *req)
     cJSON_AddStringToObject(root, "ssid", ssid_str);
     cJSON_AddStringToObject(root, "ip", ip_str);
 
-    char *json = cJSON_PrintUnformatted(root);
-    if (!json) {
-        cJSON_Delete(root);
-        return httpd_resp_send_500(req);
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, json);
-    free(json);
-    cJSON_Delete(root);
-    return ESP_OK;
+    return send_json_response(req, root);
 }

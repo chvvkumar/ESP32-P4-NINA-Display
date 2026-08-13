@@ -61,9 +61,6 @@ void nav_arbiter_notify_slideshow_tick(void);
  *  around the commit. now_ms is the caller's monotonic millisecond clock. */
 void nav_arbiter_resolve(int64_t now_ms);
 
-/** True while the IDLE claim is the resolved source (for the idle indicator). */
-bool nav_arbiter_idle_active(void);
-
 /** Set or clear the in-memory navigation pin. While pinned, the arbiter holds
  *  the USER-selected page and skips slideshow/session/idle/default with no grace
  *  expiry. RUNTIME ONLY: resets to off on reboot.

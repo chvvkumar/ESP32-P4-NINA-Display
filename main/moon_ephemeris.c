@@ -202,29 +202,6 @@ void moon_compute(time_t utc, double lat, double lon, moon_state_t *out)
     out->roll = (float)(Pang - q);
 }
 
-void moon_state_from_cycle(double cycle, float orient_rad, moon_state_t *out)
-{
-    cycle = fmod(cycle, 1.0);
-    if (cycle < 0.0) cycle += 1.0;
-    double k = (1.0 - cos(2.0 * M_PI * cycle)) / 2.0;
-    if (k < 0.0) k = 0.0;
-    if (k > 1.0) k = 1.0;
-    out->illum         = (float)k;
-    out->waxing        = (cycle < 0.5);
-    out->cycle         = (float)cycle;
-    uint8_t pi         = phase_index_from_cycle(cycle);
-    out->phase_index   = pi;
-    out->phase_name    = PHASE_NAMES[pi];
-    out->orient_rad    = orient_rad;
-    out->lib_lon       = 0.0f;
-    out->lib_lat       = 0.0f;
-    out->sun_lon       = 0.0f;
-    out->sun_lat       = 0.0f;
-    out->roll          = orient_rad;
-    out->axis_P        = 0.0f;
-    out->have_location = true;
-}
-
 /* Internal: compute geocentric RA (degrees, 0..360) and Dec (degrees) for a
  * given UTC time_t.  Mirrors the moon block from moon_compute() without the
  * orientation / libration work so it can be called cheaply in a sample loop. */
