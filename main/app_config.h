@@ -316,8 +316,8 @@ typedef struct {
     // Added after v53 — must stay at end to preserve NVS binary compatibility
     // Spoken voice alerts over the onboard speaker. Gated independently of
     // alert_flash_enabled: either, both, or neither may be enabled.
-    uint8_t  alert_voice_enabled;      // master enable, 0 = off / 1 = on (default 0)
-    uint8_t  alert_voice_volume;       // speaker volume 0-100 (default 70)
+    uint8_t  alert_voice_enabled;      // master enable, 0 = off / 1 = on (default 1)
+    uint8_t  alert_voice_volume;       // speaker volume 0-100 (default 90)
     uint8_t  alert_voice_types;        // ALERT_VOICE_TYPE_* bitmask (default 7 = all three)
     uint8_t  alert_voice_repeat_min;   // re-announce period in minutes while still
                                        // breached, 0 = announce once only (default 5)
@@ -329,8 +329,7 @@ typedef struct {
 
     // Added after v55 — must stay at end to preserve NVS binary compatibility
     uint32_t voice_notify_mask;        // per-category voice alert mask, same bits as
-                                       // toast_notify_mask (default 0x1A2 =
-                                       // disconnects+meridian+safety+error)
+                                       // toast_notify_mask (default 0xFFF = all)
     uint8_t  boot_jingle_enabled;      // play the startup jingle once at boot,
                                        // 0 = off / 1 = on (default 1)
 
@@ -340,7 +339,7 @@ typedef struct {
 
     // Added after v57 — must stay at end to preserve NVS binary compatibility
     uint8_t  alert_voice_conn;         // announce NINA link connect, 0 = off / 1 = on
-                                       // (default 0)
+                                       // (default 1)
     uint8_t  alert_voice_disc;         // announce NINA link disconnect, 0 = off / 1 = on
                                        // (default 1)
 } app_config_t;

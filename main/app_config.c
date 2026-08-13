@@ -840,8 +840,8 @@ static void set_defaults(app_config_t *cfg) {
 
     // Toast notification overhaul defaults (mask/per-instance mute are not table-driven)
     cfg->toast_notify_mask = 0xFFFFFFFF;  // all categories enabled
-    // Voice alert categories: disconnects, meridian flip, safety, error (v56, not table-driven)
-    cfg->voice_notify_mask = 0x1A2;
+    // Voice alert categories: all 12 (v56, not table-driven)
+    cfg->voice_notify_mask = 0xFFF;
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         cfg->toast_instance_muted[i] = false;
         cfg->alert_voice_muted[i] = false;  // per-instance voice mute (v55, not table-driven)
