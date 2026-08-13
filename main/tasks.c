@@ -935,10 +935,27 @@ static uint16_t *s_drag_zbuf   = NULL;
 static uint16_t *s_ppa_out[2]  = { NULL, NULL };   /* 720x720 PPA-output ping-pong */
 static int       s_ppa_ping    = 0;                /* index PPA writes next (flips each frame) */
 
-/* Free the moon-drag scratch and PPA output buffers and NULL them. Called on
- * Image Display page leave. Safe to call when the buffers were never allocated
- * (NULL frees are no-ops). The page's own software-scale copy buffers are freed
- * separately in nina_image_display_cleanup(). */
+/* MOON BUFFER LIFETIME CONTRACT (fixes a confirmed use-after-free crash).
+ * The moon texture (moon_sphere.cpp s_tex_buf, ~1MB) and the drag scratch above
+ * are READ/WRITTEN by renders that run ONLY on goes_poll_task, and a single
+ * 720px render blocks ~300ms. data_update_task (Core 1) detects the page leave,
+ * so it must NOT free them itself: while a slideshow rotation fires the leave,
+ * goes_poll_task can be mid-drawSphere sampling s_tex_buf, and freeing it under
+ * the renderer panics inside tgx texture sampling. moon_sphere's init mutex does
+ * NOT cover this — the render path never holds it across the render, and it
+ * cannot cover the drag scratch at all.
+ * So the free is OWNERSHIP-TRANSFERRED, not locked: data_update_task only sets
+ * this request flag (AFTER nina_image_display_cleanup() has dropped the LVGL
+ * descriptor that borrows s_ppa_out), and goes_poll_task performs the actual
+ * free at its parked point, where no render can be in flight. One task renders,
+ * the same task frees; no cross-task lock, no contention, no blocked UI. */
+static _Atomic bool s_moon_release_req = false;
+
+/* Free the moon-drag scratch and PPA output buffers and NULL them. Called ONLY
+ * from goes_poll_task (see the ownership contract above). Safe to call when the
+ * buffers were never allocated (NULL frees are no-ops). The page's own
+ * software-scale copy buffers are freed separately in
+ * nina_image_display_cleanup(). */
 static void moon_drag_buffers_free(void)
 {
     if (s_drag_color) { heap_caps_free(s_drag_color); s_drag_color = NULL; }
@@ -1125,9 +1142,18 @@ void moon_overlay_info(char *age,  size_t age_sz,
  * Consume any pending prefetch request (s_prefetch_source, set by the arbiter via
  * image_source_trigger_prefetch) and build that source's frame INTO
  * goes_prefetch_data — never goes_data — so a later rotation to it can swap in a
- * ready buffer with no network round-trip. Runs at the END of each goes_poll_task
- * foreground iteration (both the moon path and the network path call it), so it
- * only ever executes in the single goes_poll_task context that owns both structs.
+ * ready buffer with no network round-trip.
+ *
+ * TWO call sites, BOTH inside goes_poll_task, so this only ever executes in the
+ * single context that owns both structs (and, for the Moon source, the only
+ * context allowed to touch the tgx texture):
+ *   1. the parked loop — serves requests scheduled from a NON-image slideshow
+ *      stop, which is when this task is suspended and used to drop them;
+ *   2. the top of the active loop body, ahead of the foreground fetch, so the
+ *      deadline-bound prefetch is never serialized behind a refresh.
+ * A missed request is not a cosmetic loss: with auto-rotate on, the loading
+ * overlay is deliberately suppressed, so an image stop that arrives without a
+ * warm frame shows a BLACK page for the whole fetch.
  *
  * On success it sets s_prefetch_ready + s_prefetch_ready_src so the swap consumer
  * at the top of the loop can install the buffer and decide whether it satisfies the
@@ -1219,8 +1245,43 @@ void goes_poll_task(void *arg)
     ESP_LOGI(TAG, "GOES poll task started");
 
     while (1) {
-        /* Suspend during OTA or when the Image Display page is not visible */
+        /* Set while parked below, so the code after the park loop can tell a
+         * page (re)entry from an ordinary refresh tick and re-show the retained
+         * frame. */
+        bool re_entered = false;
+
+        /* Suspend during OTA or when the Image Display page is not visible.
+         * This is also the ONLY safe point to release the moon texture + drag
+         * scratch: reaching here proves no render is in flight on this task (the
+         * renders all run below, in this same loop body). data_update_task hands
+         * the request over via s_moon_release_req rather than freeing them
+         * itself — see the ownership contract at moon_drag_buffers_free(). */
         while (ota_in_progress || !image_display_page_active) {
+            re_entered = true;
+            if (atomic_exchange(&s_moon_release_req, false)) {
+                moon_sphere_deinit();       /* ~1MB cached lunar texture */
+                moon_drag_buffers_free();   /* drag color/z + PPA ping-pong */
+                /* Reset drag orientation so a visit that ended mid-settle does not
+                 * carry a stale s_cur_* into the next visit (which would snap the
+                 * disc home on the first frame). */
+                moon_drag_reset();
+                ESP_LOGI(TAG, "Left Image Display: freed moon texture + drag buffers");
+            }
+            /* Serve the slideshow prefetch WHILE PARKED. The arbiter schedules the
+             * next stop's image source at every slideshow commit, including from a
+             * NON-image stop (Clock/JSON/Summary) — at which point this task is
+             * parked here. The producer used to live only after this loop, so those
+             * requests were never served and the image page arrived cold: with
+             * auto-rotate on the loading overlay is deliberately suppressed, so cold
+             * == black screen for the whole fetch. Running it here gives a full stop
+             * of lead time and makes the swap consumer below find a ready frame.
+             * Same task owns goes_prefetch_data, so the single-writer invariant and
+             * the moon-render ownership contract above are unchanged; it runs AFTER
+             * the release above so a free is never deferred behind a fetch. Skipped
+             * during OTA — that must not contend for PSRAM or the network. */
+            if (!ota_in_progress) {
+                image_prefetch_run(app_config_get());
+            }
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
         }
 
@@ -1232,6 +1293,34 @@ void goes_poll_task(void *arg)
          * else the persisted default. Read ONCE so a mid-iteration arbiter change
          * cannot make the fetch dispatch and the interval/label logic disagree. */
         int8_t eff_src = image_source_get_effective();
+
+        /* ── Retained-frame re-show on page (re)entry ───────────────────────────
+         * goes_data keeps its last decoded frame across page leave (nothing frees
+         * it there any more), but nina_image_display_cleanup() dropped the page's
+         * own LVGL copy, so the panel is blank until something is pushed. Push the
+         * retained frame here — before any fetch — so a slideshow stop never shows
+         * black while a slow/failing download runs. displayed_poll_ms was reset to
+         * 0 by cleanup(), so the new-image gate passes; force_redraw is belt-and-
+         * braces against a same-millisecond stamp.
+         *
+         * Gated on src_kind == eff_src: the buffer's own tag, never intent (a
+         * retained GOES frame must never be shown for a Solar stop). On a mismatch
+         * nothing is shown, has_image() stays false, and the overlay block below
+         * puts "Loading image..." up instead of leaving a black panel. */
+        if (re_entered) {
+            bool kept = false;
+            if (goes_data_lock(&goes_data, 200)) {
+                kept = (goes_data.image_buf != NULL && goes_data.src_kind == eff_src);
+                goes_data_unlock(&goes_data);
+            }
+            if (kept && image_display_page_active) {
+                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                    nina_image_display_force_redraw();
+                    nina_image_display_update(&goes_data);
+                    bsp_display_unlock();
+                }
+            }
+        }
 
         /* A manual navigation/config change requests a fresh foreground fetch +
          * loading animation. Peek the flag here WITHOUT consuming it (the single
@@ -1322,6 +1411,24 @@ void goes_poll_task(void *arg)
                 }
             }
         }
+
+        /* ── Prefetch PRODUCER, run BEFORE the foreground fetch ─────────────────
+         * Deadline ordering, not convenience. The prefetch is the only work here
+         * with a hard deadline (the next slideshow rotation, as little as 10s);
+         * the foreground fetch below is a periodic refresh of a frame that is
+         * already on screen. Running the producer at the END of the loop body (as
+         * it used to) serialized it behind a full HTTP fetch + JPEG decode, so the
+         * next stop's frame regularly missed the rotation and that page arrived
+         * cold — black, because auto-rotate suppresses the loading overlay.
+         *
+         * It also matters on the rotation AWAY from the image page:
+         * image_display_page_active is updated by data_update_task one cycle after
+         * the arbiter commits, so the commit that schedules the next image stop
+         * still finds this task unparked. It wakes here and, with the override
+         * already cleared to -1, would otherwise burn seconds fetching the
+         * PERSISTED default source for a page we just left before ever reaching
+         * the producer. No-op when nothing is pending. */
+        image_prefetch_run(cfg);
 
         /* A pending manual fetch always forces a fresh foreground fetch this
          * iteration, even when the swap installed the right source: the manual
@@ -1820,9 +1927,9 @@ void goes_poll_task(void *arg)
                     }
                 }
             }
-            /* Prefetch the NEXT slideshow image source (if the arbiter scheduled
-             * one) before sleeping, so a rotation to it swaps in instantly. */
-            image_prefetch_run(cfg);
+            /* The NEXT slideshow image source was already prefetched near the top
+             * of this iteration (see the deadline-ordering note there), so nothing
+             * to do before sleeping. */
             /* Recompute ~every 60s once time is valid so orientation tracks the
              * sky; poll every ~3s while waiting for the clock to sync. */
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(time_valid ? 60000 : 3000));
@@ -1863,9 +1970,16 @@ void goes_poll_task(void *arg)
              * spurious no-op against an overlay that never appeared. */
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                 /* manual_fetch (config change OR manual nav) always animates. The
-                 * bare cold-image trigger is suppressed while auto-cycle is ON so a
-                 * slideshow prefetch miss stays seamless (no overlay flash). */
-                if (manual_fetch || (!nina_image_display_has_image() && !cfg->auto_rotate_enabled)) {
+                 * cold-image trigger fires whenever nothing is on screen for this
+                 * source — INCLUDING during auto-cycle. It used to be suppressed
+                 * there to keep a prefetch miss seamless, but with goes_data now
+                 * retaining its last frame across page leave, "no image" means
+                 * genuinely nothing to show, and suppressing the overlay left a
+                 * black panel as the steady state whenever the source was
+                 * unreachable. A retained frame keeps has_image() true, so the
+                 * seamless case is still seamless and a failing fetch never flashes
+                 * an overlay over a good frame. */
+                if (manual_fetch || !nina_image_display_has_image()) {
                     nina_wait_overlay_show("Loading image...", band_name);
                     nina_wait_overlay_set_progress(-1);   /* indeterminate */
                     show_wait = true;
@@ -1917,10 +2031,8 @@ void goes_poll_task(void *arg)
             nina_toast_show(TOAST_WARNING, "Failed to load image");
         }
 
-        /* Prefetch the NEXT slideshow image source (if the arbiter scheduled one)
-         * after the foreground fetch and before sleeping, so a rotation to it swaps
-         * in instantly. No-op when nothing is pending. */
-        image_prefetch_run(cfg);
+        /* The NEXT slideshow image source was already prefetched near the top of
+         * this iteration (see the deadline-ordering note there). */
 
         /* Sleep for the configured interval. The satellite sources (GOES/Solar)
          * clamp to 5min-2h to respect the image cadence; the custom source uses
@@ -2954,7 +3066,9 @@ main_loop:
             prev_on_clock = on_clock;
             clock_page_active = on_clock;
 
-            /* Image Display lifecycle — wake on entry, free buffers on leave */
+            /* Image Display lifecycle — wake on entry, free the page's own LVGL
+             * buffers on leave (the decoded frame in goes_data is retained; see
+             * the note below). */
             static bool prev_on_image_display = false;
             if (on_image_display && !prev_on_image_display && goes_task_handle) {
                 xTaskNotifyGive(goes_task_handle);
@@ -2968,18 +3082,28 @@ main_loop:
                     nina_wait_overlay_hide();
                     bsp_display_unlock();
                 }
-                goes_client_cleanup(&goes_data);
-                moon_sphere_deinit();   /* release the cached moon texture (tgx renderer) */
-                /* Free the moon drag-to-rotate render scratch (color/z). The page's
-                 * own software-scale copy buffers are freed inside
-                 * nina_image_display_cleanup() above, so each side frees only what it
-                 * owns — no leak, no double-free. */
-                moon_drag_buffers_free();
-                /* Reset drag orientation so a visit that ended mid-settle does not
-                 * carry a stale s_cur_* into the next visit (which would snap the
-                 * disc home on the first frame). */
-                moon_drag_reset();
-                ESP_LOGI(TAG, "Left Image Display: freed buffers");
+                /* goes_data.image_buf is deliberately NOT freed here. Freeing the
+                 * last decoded frame on every page leave meant every slideshow
+                 * re-entry started from nothing, so a slow or failing source (e.g.
+                 * an SDO TLS handshake that outruns the fetch timeout) showed a
+                 * black panel for the whole stop. Keeping it costs ~1-2MB of PSRAM
+                 * for one frame and lets the re-entry path in goes_poll_task put
+                 * the last good frame back instantly. It is replaced in place by
+                 * the next successful fetch/prefetch swap, and released when the
+                 * Image Display feature is disabled (image_display_apply_live).
+                 * Moon texture + drag scratch are NOT freed here either.
+                 * Synchronization
+                 * contract: they are written by renders that run only on
+                 * goes_poll_task (a 720px render blocks ~300ms and cannot be
+                 * interrupted), so freeing them from this task raced the renderer
+                 * and crashed inside tgx texture sampling. We only request the
+                 * release; goes_poll_task frees them at its parked point. The
+                 * request is issued AFTER nina_image_display_cleanup() above, so
+                 * the LVGL descriptor borrowing s_ppa_out is already dropped by the
+                 * time the owner task can free it. */
+                atomic_store(&s_moon_release_req, true);
+                if (goes_task_handle) xTaskNotifyGive(goes_task_handle);
+                ESP_LOGI(TAG, "Left Image Display: freed page buffers (frame retained)");
             }
             prev_on_image_display = on_image_display;
         }
