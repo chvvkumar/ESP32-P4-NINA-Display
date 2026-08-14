@@ -87,6 +87,7 @@
     BOOL      (screen_sleep_enabled,         "screen_sleep_enabled",         false) \
     BOOL      (alert_flash_enabled,          "alert_flash_enabled",          true) \
     BOOL      (wifi_power_save,              "wifi_power_save",              false) \
+    INT_RESET (wifi_max_tx_dbm,              "wifi_max_tx_dbm",              0,     0,     20)    /* 0 = no cap (radio default); the only other legal values are 8/11/14/17/20. RESET, not clamp: an out-of-range byte (e.g. a stale 255) must fail toward connectivity (0 = uncapped), never toward a silent 20 dBm cap the user never chose. This row bounds the range only; the exact whitelist is enforced at the BOTTOM of validate_config() in app_config.c, which runs after settings_clamp_apply() and resets an in-range off-list survivor (e.g. 13) to 0. Strictest check last — the two compose, they do not fight */ \
     BOOL      (auto_update_check,            "auto_update_check",            1) \
     INT_RESET (update_channel,               "update_channel",               0,     0,     2) \
     /* -- Deep sleep -- */ \

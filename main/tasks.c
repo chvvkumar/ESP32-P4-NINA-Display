@@ -63,6 +63,7 @@
 #include "freertos/queue.h"
 #include "ui/nina_thumbnail.h"
 #include "poll_task.h"
+#include "wifi_manager.h"   /* wifi_apply_tx_power — re-applied on screen-sleep wake */
 
 static const char *TAG = "tasks";
 
@@ -3704,6 +3705,7 @@ main_loop:
                 if (screen_asleep && screen_touch_wake) {
                     /* Restore WiFi power save mode */
                     esp_wifi_set_ps(sl_cfg->wifi_power_save ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE);
+                    wifi_apply_tx_power(sl_cfg->wifi_max_tx_dbm);
                     /* Resume LVGL processing */
                     lvgl_port_lock(0);
                     lvgl_port_resume();
@@ -3777,6 +3779,7 @@ main_loop:
                 if (should_wake) {
                     /* Restore WiFi power save mode */
                     esp_wifi_set_ps(sl_cfg->wifi_power_save ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE);
+                    wifi_apply_tx_power(sl_cfg->wifi_max_tx_dbm);
                     /* Resume LVGL processing */
                     lvgl_port_lock(0);
                     lvgl_port_resume();
@@ -3857,6 +3860,7 @@ main_loop:
                 /* Feature disabled while asleep — wake up */
                 /* Restore WiFi power save mode */
                 esp_wifi_set_ps(sl_cfg->wifi_power_save ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE);
+                wifi_apply_tx_power(sl_cfg->wifi_max_tx_dbm);
                 /* Resume LVGL processing */
                 lvgl_port_lock(0);
                 lvgl_port_resume();

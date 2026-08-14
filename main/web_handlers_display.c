@@ -15,6 +15,7 @@
 #include "lvgl.h"
 #include "driver/jpeg_encode.h"
 #include "mqtt_ha.h"
+#include "wifi_manager.h"
 #include "weather_client.h"
 #include "ui/nina_clock.h"
 #include "ui/nina_idle_indicator.h"
@@ -38,6 +39,19 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
             nina_dashboard_apply_theme(new_cfg->theme_index);
             bsp_display_unlock();
         }
+    }
+    /* WiFi transmit power. Applied here rather than in the POST handler so all
+     * three config write paths get it: /api/config (Save), /api/config/apply
+     * (live preview, RAM only), and /api/config/revert (Discard, which calls
+     * this with the NVS values as new_cfg). Revert genuinely puts the radio
+     * back where it was, including all the way back to the chip default when
+     * the saved value is 0 — wifi_apply_tx_power() restores the power it
+     * probed at boot rather than treating 0 as "leave the cap in place". An
+     * unsaved change therefore lasts only until Discard or the next reboot,
+     * which is the lockout escape hatch the web UI's warning tells the user
+     * about. */
+    if (new_cfg->wifi_max_tx_dbm != old_cfg->wifi_max_tx_dbm) {
+        wifi_apply_tx_power(new_cfg->wifi_max_tx_dbm);
     }
     if (new_cfg->screen_rotation != old_cfg->screen_rotation) {
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {

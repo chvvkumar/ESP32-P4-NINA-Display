@@ -2226,6 +2226,7 @@
       data.debug_mode=!!$('debug_mode').checked;
       data.demo_mode=!!$('demo_mode').checked;
       data.wifi_power_save=!!$('wifi_power_save').checked;
+      data.wifi_max_tx_dbm=parseInt($('wifi_max_tx_dbm').value)||0;
       data.deep_sleep_enabled=!!$('deep_sleep_enabled').checked;
       data.deep_sleep_wake_timer_s=(parseInt($('deep_sleep_wake_timer').value)||0)*3600;
       data.deep_sleep_on_idle=!!$('deep_sleep_on_idle').checked;
@@ -2608,6 +2609,12 @@
       $('debug_mode').checked=!!data.debug_mode;
       $('demo_mode').checked=!!data.demo_mode;
       $('wifi_power_save').checked=data.wifi_power_save!==false;
+      /* _prev is the value txPowerChanged() restores when the user declines the
+         lockout warning; seed it here so a decline before any accepted change
+         still has somewhere to go back to. */
+      var txSel=$('wifi_max_tx_dbm');
+      txSel.value=data.wifi_max_tx_dbm||0;
+      txSel._prev=txSel.value;
       $('deep_sleep_enabled').checked=!!data.deep_sleep_enabled;
       $('deep_sleep_wake_timer').value=Math.round((data.deep_sleep_wake_timer_s||0)/3600);
       $('deep_sleep_on_idle').checked=!!data.deep_sleep_on_idle;
@@ -3597,6 +3604,36 @@
         showToast('Screenshot failed','error');
         btn.textContent='Capture Screenshot'; btn.disabled=false;
       });
+    }
+
+    /* === WiFi Transmit Power === */
+    /* Every other setting can be undone from this page. This one can lock you
+       out of it: too low a value for the distance to the router and the device
+       drops off the network mid-request. Confirm before the change reaches the
+       radio, and put the recovery step in the prompt.
+
+       A <select> fires 'input' first, so the delegated listener on .content
+       has ALREADY scheduled liveApply()'s 400 ms debounce timer before this
+       runs -- the inline onchange is not ahead of it. The decline path works
+       for a different reason: confirm() blocks the single JS thread, so that
+       timer cannot fire while the dialog is up; _prev is restored before it
+       ever gets a chance. Then the delegated 'change' listener bubbles,
+       re-enters liveApply(), and clearTimeout()s the pending timer in favour
+       of a fresh one that reads the restored value -- which diffs clean, so
+       nothing is posted, and its checkDirty() retracts the save bar the
+       'input' pass had raised. */
+    function txPowerChanged(sel){
+      if(sel.value!=='0' && !confirm(
+        'Lower the WiFi transmit power to '+sel.value+' dBm?\n\n'+
+        'This applies right away. If the device is far from your router it may '+
+        'drop off the network and this page will stop responding.\n\n'+
+        'To recover, power-cycle the device: the change is not saved yet, so it '+
+        'is discarded on restart. Only press Save once you have confirmed this '+
+        'page still works.\n\nContinue?')){
+        sel.value=sel._prev;
+        return;
+      }
+      sel._prev=sel.value;
     }
 
     /* === Dirty State Detection === */

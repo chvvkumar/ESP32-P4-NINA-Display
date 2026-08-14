@@ -542,6 +542,7 @@ static const backup_field_t s_backup_fields[] = {
     {"deep_sleep_wake_timer_s","Deep Sleep Timer",   "System", false, false},
     {"deep_sleep_on_idle",   "Sleep on Idle",        "System", false, false},
     {"wifi_power_save",      "WiFi Power Save",      "System", false, false},
+    {"wifi_max_tx_dbm",      "WiFi Transmit Power",  "System", false, false},
     {"crash_log_retention_days","Crash Log Retention","System", false, false},
 
     /* AllSky */
