@@ -47,11 +47,22 @@ static void build_header(lv_obj_t *page, octoprint_widgets_t *w)
     lv_obj_set_height(spacer, 1);
     lv_obj_set_flex_grow(spacer, 1);
 
-    /* Fault slot: permanent geometry, muted "No faults" at rest, recoloured in
-     * place by the update path when a fault appears. */
-    w->lbl_error = octo_w_label(hdr, "No faults", &lv_font_montserrat_12,
-                                &octo_style_label);
-    lv_obj_set_style_margin_right(w->lbl_error, 6, 0);
+    /* Fault slot: the shared strip, stripped back to bare type because this
+     * header carries no plate. It is born empty and hidden; text, colour and
+     * visibility all come from the update path. */
+    octo_w_status_strip(hdr, w);
+    if (w->error_strip) {
+        lv_obj_set_style_bg_opa(w->error_strip, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(w->error_strip, 0, 0);
+        lv_obj_set_style_radius(w->error_strip, 0, 0);
+        lv_obj_set_style_pad_hor(w->error_strip, 0, 0);
+        lv_obj_set_style_pad_ver(w->error_strip, 0, 0);
+        lv_obj_set_style_margin_right(w->error_strip, 6, 0);
+    }
+    /* No dot: the state line stays the strip's one accent element. */
+    if (w->error_dot) {
+        lv_obj_add_flag(w->error_dot, LV_OBJ_FLAG_HIDDEN);
+    }
 
     octo_w_state_line(hdr, w);
 }

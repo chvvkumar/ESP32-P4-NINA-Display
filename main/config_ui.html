@@ -2528,10 +2528,11 @@
       if($('octoUrl')) $('octoUrl').value=data.octoprint_url||'';
       if($('octoApiKey')) $('octoApiKey').value=data.octoprint_api_key||'';
       if($('octoInterval')) $('octoInterval').value=data.octoprint_update_interval_s||5;
-      /* Layout 1 (the retired "Instrument dial") is still legal in stored config
-         but has no option here; it resolves to Bento on the device, so show that
-         rather than leaving the select blank. */
-      if($('octoLayout')){var ol=parseInt(data.octoprint_layout,10)||0;$('octoLayout').value=String(ol===1?0:ol);}
+      /* Layouts 1, 3 and 4 (the retired "Instrument dial", "Large numerals" and
+         "Layer timeline") are still legal in stored config but have no option
+         here; they resolve to Bento on the device, so show that rather than
+         leaving the select blank. */
+      if($('octoLayout')){var ol=parseInt(data.octoprint_layout,10)||0;if(ol!==0&&ol!==2)ol=0;$('octoLayout').value=String(ol);}
       if($('octoImageSource')) $('octoImageSource').value=String(data.octoprint_image_source||0);
       if($('octoSnapshotUrl')) $('octoSnapshotUrl').value=data.octoprint_snapshot_url||'';
     }

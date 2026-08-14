@@ -82,6 +82,7 @@ class MockState:
         self.manual = False
         self.down_until = 0.0
         self.t0 = time.time()
+        self.layer_total = LAYER_TOTAL
         self.pending = {}          # app_token -> {app, user, decision, created}
         # Manual overrides, seeded from the timeline the moment manual engages.
         self.m = {"progress": 0.0, "layer": 1,
@@ -120,9 +121,12 @@ class MockState:
                           nozzle_target=tt, bed_actual=ba, bed_target=bt)
             self.manual = True
 
-    @staticmethod
-    def layer_of(pct):
-        return max(1, min(LAYER_TOTAL, int(round(pct / 100.0 * LAYER_TOTAL)) or 1))
+    def layer_of(self, pct):
+        n = self.layer_total
+        return max(1, min(n, int(round(pct / 100.0 * n)) or 1))
+
+    def pct_of_layer(self):
+        return max(0.0, min(100.0, 100.0 * self.m["layer"] / self.layer_total))
 
     def snapshot(self):
         """Everything the endpoints need, derived consistently from one sample."""
@@ -246,7 +250,7 @@ def dlp_payload(st, s):
                    "total": "-", "totalFormatted": "-"},
         "layer": {"averageLayerDuration": "-", "averageLayerDurationInSeconds": "-",
                   "current": str(s["layer"]), "lastLayerDuration": "0h:02m:49s",
-                  "lastLayerDurationInSeconds": 169, "total": str(LAYER_TOTAL)},
+                  "lastLayerDurationInSeconds": 169, "total": str(st.layer_total)},
         "print": {"changeFilamentCount": 0, "changeFilamentTimeLeft": "-",
                   "changeFilamentTimeLeftInSeconds": 0,
                   "estimatedChangedFilamentTime": "-",
@@ -495,7 +499,7 @@ class Handler(BaseHTTPRequestHandler):
                     "scenario": st.scenario, "dlp_enabled": st.dlp_enabled,
                     "manual": st.manual, "duration_s": st.duration,
                     "phase": s["phase"], "progress": round(s["pct"], 2),
-                    "layer": s["layer"], "layer_total": LAYER_TOTAL,
+                    "layer": s["layer"], "layer_total": st.layer_total,
                     "print_time_s": s["print_time"], "print_time_left_s": s["left"],
                     "nozzle_actual": s["tool_actual"], "nozzle_target": s["tool_target"],
                     "bed_actual": s["bed_actual"], "bed_target": s["bed_target"],
@@ -528,9 +532,11 @@ class Handler(BaseHTTPRequestHandler):
                     # Restart the cycle at the progress the sliders were left on.
                     st.t0 = time.time() - HEATUP_S - st.duration * st.m["progress"] / 100.0
                     return self.send_json({"ok": True, "manual": False})
-                fields = {"progress": (0.0, 100.0), "layer": (0, LAYER_TOTAL),
+                fields = {"progress": (0.0, 100.0),
                           "nozzle_actual": (0.0, 300.0), "nozzle_target": (0.0, 300.0),
                           "bed_actual": (0.0, 120.0), "bed_target": (0.0, 120.0)}
+                # Layer entry. "layer" is the old name for "current_layer".
+                layer_keys = ("total_layers", "current_layer", "layer")
                 touched = False
                 for k, (lo, hi) in fields.items():
                     if k not in body:
@@ -540,17 +546,35 @@ class Handler(BaseHTTPRequestHandler):
                     except (TypeError, ValueError):
                         return self.send_json({"error": "%s must be a number" % k}, 400)
                     st.enter_manual()
-                    st.m[k] = int(max(lo, min(hi, v))) if k == "layer" \
-                        else max(lo, min(hi, v))
+                    st.m[k] = max(lo, min(hi, v))
+                    touched = True
+                # Total first, so current clamps against the new total.
+                for k in layer_keys:
+                    if k not in body:
+                        continue
+                    try:
+                        v = float(body[k])
+                    except (TypeError, ValueError):
+                        return self.send_json({"error": "%s must be a number" % k}, 400)
+                    st.enter_manual()
+                    if k == "total_layers":
+                        st.layer_total = int(max(1, min(10000, v)))
+                        st.m["layer"] = min(st.m["layer"], st.layer_total)
+                    else:
+                        st.m["layer"] = int(max(0, min(st.layer_total, v)))
                     touched = True
                 if not touched:
                     return self.send_json(
                         {"error": "no known field set",
-                         "valid": sorted(fields) + ["resume"]}, 400)
-                # Progress drives the layer unless the layer was set in the same call.
-                if "progress" in body and "layer" not in body:
+                         "valid": sorted(fields) + sorted(layer_keys) + ["resume"]}, 400)
+                # Last writer wins: layers set the percent, otherwise percent sets the layer.
+                if any(k in body for k in layer_keys):
+                    st.m["progress"] = st.pct_of_layer()
+                elif "progress" in body:
                     st.m["layer"] = st.layer_of(st.m["progress"])
-                return self.send_json({"ok": True, "manual": True, "values": dict(st.m)})
+                return self.send_json({"ok": True, "manual": True,
+                                       "layer_total": st.layer_total,
+                                       "values": dict(st.m)})
 
         self.send_json({"error": "Not found"}, 404)
 
@@ -661,6 +685,16 @@ def self_test():
     check(json.loads(body)["progress"]["completion"] == 55.0,
           "manual progress 55 should show completion 55, got %r"
           % json.loads(body)["progress"]["completion"])
+
+    post("/mock/set", {"total_layers": 200, "current_layer": 50})
+    st, body = get("/api/job", {"X-Api-Key": key})
+    check(json.loads(body)["progress"]["completion"] == 25.0,
+          "layer 50 of 200 should show completion 25.0, got %r"
+          % json.loads(body)["progress"]["completion"])
+    st, body = get("/plugin/DisplayLayerProgress/values", {"X-Api-Key": key})
+    lay = json.loads(body)["layer"]
+    check(lay["current"] == "50" and lay["total"] == "200",
+          "DLP should report layer 50/200 as strings, got %r" % lay)
 
     st, body = post("/plugin/appkeys/request", {"app": "NINA Display (test)"})
     check(st == 201, "appkeys request should be 201, got %d" % st)

@@ -922,6 +922,17 @@ void octoprint_ensure_task_running(void)
                       octoprint_poll_task, "octoprint", 12288, NULL, 3, 0);
 }
 
+/* Cuts the wait for a config change that only the poller can act on (image
+ * source, snapshot URL) from up to one poll interval to ~0. Same shape as the
+ * page-activation wake below and image_source_trigger_prefetch's goes wake:
+ * poll_loop_run sleeps in ulTaskNotifyTake, so this returns it immediately and
+ * the next poll re-reads config. Harmless when the page is inactive -- the
+ * gate loop consumes the notify and tasks.c re-wakes on activation. */
+void octoprint_wake_now(void)
+{
+    if (octoprint_task_handle) xTaskNotifyGive(octoprint_task_handle);
+}
+
 // =============================================================================
 // GOES Image Display Poll Task — independent poller pinned to Core 0
 // =============================================================================
@@ -2825,13 +2836,13 @@ void data_update_task(void *arg) {
                     esp_err_t ota_err = ota_github_download(rel->ota_url, ota_progress_cb);
                     if (ota_err == ESP_OK) {
                         ota_github_save_pending_version(rel->tag);
-                        ESP_LOGI(TAG, "OTA download success, rebooting...");
+                        ESP_LOGI(TAG, "OTA download success");
                         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                             nina_ota_prompt_set_progress(100);
                             bsp_display_unlock();
                         }
                         vTaskDelay(pdMS_TO_TICKS(1000));
-                        esp_restart();
+                        app_reboot("boot OTA complete");
                     } else {
                         ESP_LOGE(TAG, "OTA download failed: %s", esp_err_to_name(ota_err));
                         ota_in_progress = false;
@@ -3298,13 +3309,13 @@ main_loop:
                         esp_err_t ota_err = ota_github_download(rel->ota_url, ota_progress_cb);
                         if (ota_err == ESP_OK) {
                             ota_github_save_pending_version(rel->tag);
-                            ESP_LOGI(TAG, "OTA download success, rebooting...");
+                            ESP_LOGI(TAG, "OTA download success");
                             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                                 nina_ota_prompt_set_progress(100);
                                 bsp_display_unlock();
                             }
                             vTaskDelay(pdMS_TO_TICKS(1000));
-                            esp_restart();
+                            app_reboot("on-demand OTA complete");
                         } else {
                             ESP_LOGE(TAG, "OTA download failed: %s", esp_err_to_name(ota_err));
                             ota_in_progress = false;

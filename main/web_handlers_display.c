@@ -127,11 +127,20 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
             topology_changed = true;  /* optional page appeared/disappeared */
         }
     }
-    /* OctoPrint page enable / layout change. The URL, API key, image source and
-     * poll interval need no live action — octoprint_poll_task re-reads config
-     * every cycle, so the next poll picks them up. Only the enable toggle (page
-     * create/destroy) and the layout selection (widget tree rebuild) have to be
-     * applied here. */
+    /* Image source / snapshot URL: the poll task re-reads config every cycle,
+     * but "every cycle" is up to octoprint_update_interval_s away (300 s at the
+     * top of the range), so the switch would sit there invisible. Wake it and it
+     * drops the held frame and fetches the new source in that one pass. The URL,
+     * API key and interval keep the lazy path — they need no visible-now edit. */
+    if (new_cfg->octoprint_enabled &&
+        (new_cfg->octoprint_image_source != old_cfg->octoprint_image_source ||
+         strcmp(new_cfg->octoprint_snapshot_url, old_cfg->octoprint_snapshot_url) != 0)) {
+        octoprint_wake_now();
+    }
+    /* OctoPrint page enable / layout change. The URL, API key and poll interval
+     * need no live action — octoprint_poll_task re-reads config every cycle, so
+     * the next poll picks them up. Only the enable toggle (page create/destroy)
+     * and the layout selection (widget tree rebuild) have to be applied here. */
     if (new_cfg->octoprint_enabled != old_cfg->octoprint_enabled ||
         new_cfg->octoprint_layout != old_cfg->octoprint_layout) {
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {

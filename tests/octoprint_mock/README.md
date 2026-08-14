@@ -113,14 +113,15 @@ latch: the client stops asking until the next reconnect.
 
 ## Setting values by script
 
-`POST /mock/set` takes any of `progress` (0 to 100), `layer` (0 to 86), `nozzle_actual`,
-`nozzle_target` (0 to 300), `bed_actual`, `bed_target` (0 to 120). Any of them switches the mock into
-manual mode. Out of range values are clamped. Setting `progress` without `layer` derives the layer
-from the progress.
+`POST /mock/set` takes any of `progress` (0 to 100), `total_layers` (1 to 10000), `current_layer`
+(0 to total, `layer` is an alias), `nozzle_actual`, `nozzle_target` (0 to 300), `bed_actual`,
+`bed_target` (0 to 120). Any of them switches the mock into manual mode. Out of range values are
+clamped. Setting `progress` without a layer derives the layer from the progress; setting
+`current_layer` or `total_layers` derives the percent from current/total. Last writer wins.
 
 ```
 curl -X POST -d "{\"progress\": 55}"                    http://localhost:5001/mock/set
-curl -X POST -d "{\"progress\": 99.5, \"layer\": 85}"   http://localhost:5001/mock/set
+curl -X POST -d "{\"total_layers\": 200, \"current_layer\": 50}" http://localhost:5001/mock/set
 curl -X POST -d "{\"nozzle_actual\": 215, \"nozzle_target\": 250}" http://localhost:5001/mock/set
 curl -X POST -d "{\"bed_actual\": 60, \"bed_target\": 85}" http://localhost:5001/mock/set
 curl -X POST -d "{\"resume\": true}"                    http://localhost:5001/mock/set

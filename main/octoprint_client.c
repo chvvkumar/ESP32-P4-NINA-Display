@@ -709,11 +709,15 @@ void octoprint_client_poll(const char *base_url, const char *api_key,
     const int8_t want_src = (int8_t)((image_source == 1) ? 1 : 0);
 
     if (atomic_load(&s_page_active)) {
-        /* Source switched while the page stayed open. If the new source has
-         * nothing to show this cycle (preview selected with no job file loaded),
-         * the held frame must go: otherwise the old webcam still sits on screen
-         * under a "THUMBNAIL" tag. */
-        drop_img = (s_image_src >= 0 && s_image_src != want_src);
+        /* Source switched while the page stayed open. The whole switch happens
+         * in THIS pass: the held frame is dropped and the newly selected source
+         * is fetched, decoded and published below, so the change costs one poll,
+         * not one to drop plus another to fetch. If the new source has nothing
+         * to show this cycle (preview selected with no job file loaded), the
+         * drop still stands: otherwise the old webcam frame would sit on screen
+         * as if it were the preview. */
+        const bool src_switched = (s_image_src >= 0 && s_image_src != want_src);
+        drop_img = src_switched;
 
         if (image_source == 1) {
             /* Webcam: refetch every cycle -- it is a live view. */
@@ -721,8 +725,10 @@ void octoprint_client_poll(const char *base_url, const char *api_key,
                 new_img = NULL;
             }
         } else if (file_path[0] != '\0') {
-            /* A different file resets the give-up counter below. */
-            if (strcmp(s_thumb_fail_key, file_path) != 0) {
+            /* A different file -- or the user re-selecting this source -- resets
+             * the give-up counter: an explicit switch must retry even when this
+             * file's thumbnail already failed OCTO_THUMB_MAX_FAILS times. */
+            if (src_switched || strcmp(s_thumb_fail_key, file_path) != 0) {
                 snprintf(s_thumb_fail_key, sizeof(s_thumb_fail_key), "%s", file_path);
                 s_thumb_fails = 0;
             }

@@ -6,6 +6,17 @@
 #include <stdbool.h>
 
 /**
+ * Restart the device, logging why first.
+ *
+ * The ONLY sanctioned way to reboot: every esp_restart() call site in the
+ * firmware goes through here so a reset always leaves a "Restarting: <reason>"
+ * line in the serial log and the PSRAM log ring. Does not return.
+ *
+ * @param reason short caller identity, e.g. "web /api/reboot from 192.168.1.5"
+ */
+void app_reboot(const char *reason);
+
+/**
  * Initialize power management — enables Dynamic Frequency Scaling.
  * Must be called after app_config_init() and before task creation.
  * Requires CONFIG_PM_ENABLE=y in sdkconfig.

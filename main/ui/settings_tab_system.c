@@ -21,6 +21,7 @@
 #include "esp_system.h"
 #include "esp_idf_version.h"
 #include "esp_ota_ops.h"
+#include "power_mgmt.h"        /* app_reboot — single logged restart path */
 
 #include <stdio.h>
 #include <string.h>
@@ -742,7 +743,7 @@ static void demo_mode_cb(lv_event_t *e) {
 static void confirm_reboot_cb(lv_event_t *e) {
     lv_obj_t *mbox = lv_event_get_user_data(e);
     lv_msgbox_close(mbox);
-    esp_restart();
+    app_reboot("settings reboot (touch)");
 }
 
 static void reboot_btn_cb(lv_event_t *e) {
@@ -760,7 +761,7 @@ static void confirm_factory_reset_cb(lv_event_t *e) {
     lv_obj_t *mbox = lv_event_get_user_data(e);
     lv_msgbox_close(mbox);
     app_config_factory_reset();
-    esp_restart();
+    app_reboot("settings factory reset (touch)");
 }
 
 static void factory_reset_btn_cb(lv_event_t *e) {

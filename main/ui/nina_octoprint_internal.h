@@ -4,14 +4,14 @@
  * @file nina_octoprint_internal.h
  * @brief Layout seam for the OctoPrint page — shared widget library + ops table.
  *
- * FOUR user-selectable layouts (app_config_t::octoprint_layout) share ONE widget
+ * TWO user-selectable layouts (app_config_t::octoprint_layout) share ONE widget
  * library. A layout ARRANGES widgets; it never owns data logic, polling, or the
  * update path. The contract is deliberately one-way:
  *
  *   nina_octoprint.c  owns: create/destroy/update/theme, the client snapshot,
  *                           the image handoff, the empty state, the ops table.
- *   octoprint_layout_*.c own: geometry only (four files; the ops table has a
- *                           fifth, retired slot aliased to Bento). Each
+ *   octoprint_layout_*.c own: geometry only (two files; the ops table has three
+ *                           further retired slots aliased to Bento). Each
  *                           build() fills in whichever
  *                           handles of octoprint_widgets_t it actually creates
  *                           and leaves the rest NULL. The update path null-checks
@@ -35,9 +35,6 @@
  * these already exist in the project — no new font faces were added for this
  * page. */
 LV_FONT_DECLARE(lv_font_montserrat_64);
-
-/** Segment count of the layer progress strip (mockup v1 uses 12). */
-#define OCTO_LAYER_SEGS   12
 
 /** Card corner radius shared by every layout (mockup: 24 px bento). */
 #define OCTO_CARD_RADIUS  24
@@ -65,19 +62,17 @@ extern lv_style_t octo_style_accent;  /* accent text: progress_color            
  *
  *  BAR_GRADIENT  name + "214.9 / 215 °C" on one line, heat-gradient bar
  *                stacked below it with a bright tick at the target.
- *  TEXT_ONLY     the same value line, no bar. (Large-numerals layout.)
  *  TILE          compact caption over "214.9/215 C" for a dock metrics tile.
  */
 typedef enum {
     OCTO_TEMP_BAR_GRADIENT = 0,
-    OCTO_TEMP_TEXT_ONLY,
     OCTO_TEMP_TILE,
 } octo_temp_variant_t;
 
 /**
  * One tool's temperature readout. Built by octo_w_temp(), driven by the single
  * update path in nina_octoprint.c. Handles a variant does not build stay NULL
- * and the update path skips them, so all three share one code path.
+ * and the update path skips them, so both share one code path.
  */
 typedef struct {
     lv_obj_t           *root;      /* element container                        */
@@ -105,7 +100,6 @@ typedef struct {
     lv_obj_t *layer_cell;       /* hidden wholesale when !dlp_available     */
     lv_obj_t *lbl_layer_cur;    /* "52"                                     */
     lv_obj_t *lbl_layer_total;  /* "/ 84"                                   */
-    lv_obj_t *layer_segs[OCTO_LAYER_SEGS];
 
     /* temperatures ----------------------------------------------------- */
     octo_temp_el_t nozzle;
@@ -123,9 +117,9 @@ typedef struct {
     lv_obj_t *conn_chip;        /* link-down indicator; hidden when healthy  */
     lv_obj_t *conn_dot;
     lv_obj_t *lbl_conn;         /* "PRINTER OFFLINE"/error; hidden when OK   */
-    lv_obj_t *error_strip;      /* fault chip/strip; muted when no fault    */
+    lv_obj_t *error_strip;      /* fault chip/strip; hidden when no fault   */
     lv_obj_t *error_dot;
-    lv_obj_t *lbl_error;        /* fault text, or "No faults"               */
+    lv_obj_t *lbl_error;        /* fault text; hidden when no fault         */
 
     /* image ------------------------------------------------------------ */
     lv_obj_t *img_hero;         /* lv_image bound to the UI-owned RGB565 copy */
@@ -150,15 +144,14 @@ typedef struct {
 
 /* Indexed by app_config_t::octoprint_layout, 0..OCTO_LAYOUT_COUNT-1.
  *
- * Slot 1 (the retired "Instrument dial") is a reserved alias of the Bento
- * layout: the value is still legal in NVS and still passes validate_config, it
- * simply resolves to Bento. The web UI no longer offers it. Do not renumber the
- * remaining slots -- stored configs name them by index. */
+ * Slots 1 ("Instrument dial"), 3 ("Large numerals") and 4 ("Layer timeline")
+ * are retired and reserved aliases of the Bento layout: those values are still
+ * legal in NVS and still pass validate_config, they simply resolve to Bento.
+ * The web UI no longer offers them. Do not renumber the remaining slots --
+ * stored configs name them by index. */
 #define OCTO_LAYOUT_COUNT 5
 extern const octoprint_layout_ops_t octoprint_layout_bento;
 extern const octoprint_layout_ops_t octoprint_layout_glass;
-extern const octoprint_layout_ops_t octoprint_layout_typo;
-extern const octoprint_layout_ops_t octoprint_layout_timeline;
 
 /* ── Shared widget factories (implemented in nina_octoprint.c) ─────────
  * These are the whole widget library. Layouts compose them; nothing else.
@@ -231,7 +224,12 @@ lv_obj_t *octo_w_image_hero(lv_obj_t *parent, octoprint_widgets_t *w);
 lv_obj_t *octo_w_chip(lv_obj_t *parent, const char *text,
                       lv_obj_t **out_dot, lv_obj_t **out_label);
 
-/** Fault strip: a chip that reads "No faults" until the update path fills it. */
+/**
+ * Fault strip: an empty chip, created HIDDEN. The update path shows it (with
+ * text and alert colour) only while there is a fault or the printer is offline,
+ * and hides it again otherwise. Layouts lay it out as usual and must not set its
+ * visibility or a resting placeholder text.
+ */
 lv_obj_t *octo_w_status_strip(lv_obj_t *parent, octoprint_widgets_t *w);
 
 /** Connection indicator chip. Sets w->conn_chip / conn_dot / lbl_conn. */

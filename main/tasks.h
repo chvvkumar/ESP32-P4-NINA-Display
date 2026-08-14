@@ -96,6 +96,11 @@ void octoprint_poll_task(void *arg);
 /** Create the OctoPrint poll task if it isn't already running. Safe to call multiple times. */
 void octoprint_ensure_task_running(void);
 
+/** Wake octoprint_poll_task so it re-reads config and polls now instead of at
+ *  the end of its interval. Called from the config side-effects choke point
+ *  when a field only the poller acts on changes. No-op if the task isn't up. */
+void octoprint_wake_now(void);
+
 /** Feature poll task handles and page-active flags — defined in tasks.c. */
 extern TaskHandle_t spotify_task_handle;
 extern _Atomic bool spotify_page_active;

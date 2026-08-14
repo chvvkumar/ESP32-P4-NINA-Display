@@ -11,6 +11,7 @@
 #include "esp_timer.h"
 #include "cJSON.h"
 #include "poll_backoff.h"    /* shared exponential-backoff step */
+#include "power_mgmt.h"      /* app_reboot — single logged restart path */
 #include "bsp/esp-bsp.h"
 #include "bsp/display.h"
 #include "tasks.h"
@@ -435,8 +436,7 @@ void mqtt_ha_process_pending(void)
     }
 
     if (reboot_requested) {
-        ESP_LOGW(TAG, "Rebooting now (MQTT request)");
-        esp_restart();
+        app_reboot("MQTT reboot command");
     }
 }
 

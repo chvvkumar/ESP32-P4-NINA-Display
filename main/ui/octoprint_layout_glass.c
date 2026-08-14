@@ -18,9 +18,9 @@
  * (CONFIG_LV_GRADIENT_MAX_STOPS=2).
  *
  * Structure (720 x 720 full-bleed page, absolute placement, LV_LAYOUT_NONE):
- *   0     image ground   full-bleed hero + flat dim + top/bottom scrims
- *   0     top bar    52  identity + connection left, dot + state right, no rule
- *   58    error slot 28  left-anchored, fades right ("No faults" at rest)
+ *   0     image ground   full-bleed hero + flat dim + flat metrics strip
+ *   0     top bar    52  identity + connection left, dot + state right, no fill
+ *   58    error slot 28  left-anchored, fades right (hidden unless faulted)
  *   b-103 percent        right-justified, fades left
  *   b-116 layer          left-anchored, fades right
  *   b-87  track      8   single progress bar, no markers
@@ -40,11 +40,11 @@
 
 #define GL_TOPBAR_H     52
 #define GL_ERR_Y        58
-#define GL_ERR_W       320
+#define GL_ERR_W       240
 #define GL_ERR_H        28
-#define GL_PCT_W       400
+#define GL_PCT_W       280
 #define GL_PCT_Y      (-103)
-#define GL_LAYER_W     300
+#define GL_LAYER_W     220
 #define GL_LAYER_Y    (-116)
 #define GL_TRACK_Y     (-87)
 #define GL_TRACK_H       8
@@ -61,9 +61,10 @@
 #define GL_PANE_PAD     36
 
 /* Directional fill: opaque-ish at the anchored edge, transparent past the text.
- * Stops are 0..255 across the object width; 204 = 80 %, matching the mockup. */
+ * Stops are 0..255 across the object width; 230 = 90 %, so the ramp ends just
+ * past the widest reading each pane can hold rather than a screen-width later. */
 #define GL_PANE_OPA    LV_OPA_60
-#define GL_FADE_STOP   204
+#define GL_FADE_STOP   230
 
 /* ── Primitives ───────────────────────────────────────────────────────── */
 
@@ -107,24 +108,19 @@ static lv_obj_t *fade_pane(lv_obj_t *parent, bool fade_right)
 }
 
 /**
- * Vertical darkening scrim in the page ground colour. @p top_opa / @p bot_opa
- * are the two gradient stop opacities, so a scrim can fade in either direction
- * (LVGL carries per-stop opacity in bg_main_opa / bg_grad_opa).
+ * FLAT darkening scrim in the page ground colour at a single opacity. No
+ * gradient: a tall two-stop vertical ramp quantises in RGB565 into visible
+ * horizontal steps across the image, so every full-width dim here is flat.
  */
-static lv_obj_t *glass_scrim(lv_obj_t *parent, lv_opa_t top_opa, lv_opa_t bot_opa)
+static lv_obj_t *flat_scrim(lv_obj_t *parent, lv_opa_t opa)
 {
     lv_obj_t *s = lv_obj_create(parent);
     lv_obj_remove_style_all(s);
     lv_obj_remove_flag(s, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_remove_flag(s, LV_OBJ_FLAG_CLICKABLE);
 
-    uint32_t ground = octo_color(OCTO_COL_BG);
-    lv_obj_set_style_bg_opa(s, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(s, lv_color_hex(ground), 0);
-    lv_obj_set_style_bg_grad_color(s, lv_color_hex(ground), 0);
-    lv_obj_set_style_bg_grad_dir(s, LV_GRAD_DIR_VER, 0);
-    lv_obj_set_style_bg_main_opa(s, top_opa, 0);
-    lv_obj_set_style_bg_grad_opa(s, bot_opa, 0);
+    lv_obj_set_style_bg_opa(s, opa, 0);
+    lv_obj_set_style_bg_color(s, lv_color_hex(octo_color(OCTO_COL_BG)), 0);
     return s;
 }
 
@@ -151,20 +147,15 @@ static void build_ground(lv_obj_t *page, octoprint_widgets_t *w)
         lv_obj_align(w->img_placeholder, LV_ALIGN_CENTER, 0, -40);
     }
 
-    /* The mockup's radial vignette needs complex gradients, which this build
-     * does not draw; a flat dim plus the two linear scrims is the stand-in. The
-     * scrims are what keep the top bar and the metrics row legible over a bright
-     * frame now that neither has a fill of its own. */
-    lv_obj_t *dim = glass_scrim(page, LV_OPA_20, LV_OPA_20);
+    /* One flat page-wide dim, and one short flat strip behind the metrics row.
+     * No top scrim at all: the top bar sits directly on the image and stays
+     * legible on its own weight and colour. */
+    lv_obj_t *dim = flat_scrim(page, LV_OPA_20);
     lv_obj_set_size(dim, LV_PCT(100), LV_PCT(100));
     lv_obj_set_pos(dim, 0, 0);
 
-    lv_obj_t *top = glass_scrim(page, LV_OPA_80, LV_OPA_TRANSP);
-    lv_obj_set_size(top, LV_PCT(100), 150);
-    lv_obj_set_pos(top, 0, 0);
-
-    lv_obj_t *bottom = glass_scrim(page, LV_OPA_TRANSP, LV_OPA_90);
-    lv_obj_set_size(bottom, LV_PCT(100), 330);
+    lv_obj_t *bottom = flat_scrim(page, LV_OPA_70);
+    lv_obj_set_size(bottom, LV_PCT(100), GL_METRIC_H);
     lv_obj_align(bottom, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 }
 
@@ -172,8 +163,8 @@ static void build_ground(lv_obj_t *page, octoprint_widgets_t *w)
 
 static void build_topbar(lv_obj_t *page, octoprint_widgets_t *w)
 {
-    /* Flush to the top edge, borderless and unfilled — the top scrim is the
-     * only thing separating it from the image. */
+    /* Flush to the top edge, borderless and unfilled — no band of any kind: the
+     * text sits directly over the image. */
     lv_obj_t *bar = octo_w_row(page, true, 12);
     lv_obj_set_size(bar, LV_PCT(100), GL_TOPBAR_H);
     lv_obj_set_pos(bar, 0, 0);
@@ -218,9 +209,9 @@ static void build_topbar(lv_obj_t *page, octoprint_widgets_t *w)
 
 static void build_error_slot(lv_obj_t *page, octoprint_widgets_t *w)
 {
-    /* The chip itself becomes the fading pane: one object, no wrapper, and the
-     * resting "No faults" state occupies its designed place so a fault never
-     * reflows anything. */
+    /* The chip itself becomes the fading pane: one object, no wrapper. The strip
+     * starts hidden and the update path shows it on a fault; placement here is
+     * absolute, so nothing reflows either way. */
     octo_w_status_strip(page, w);
     if (!w->error_strip) {
         return;
@@ -300,9 +291,7 @@ static void build_layer(lv_obj_t *page, octoprint_widgets_t *w)
     /* The left-anchored readout lives inside layer_cell, so the update path
      * hides the whole layer story in one go when DisplayLayerProgress is not
      * installed. The cell itself is an invisible full-page absolute frame; only
-     * its child pane paints. w->layer_segs stays NULL: the 12-segment sub-bar
-     * that used to sit under the track read as a second progress bar, and the
-     * update path null-checks every handle. */
+     * its child pane paints. */
     w->layer_cell = octo_w_row(page, false, 0);
     lv_obj_set_layout(w->layer_cell, LV_LAYOUT_NONE);
     lv_obj_set_size(w->layer_cell, LV_PCT(100), LV_PCT(100));

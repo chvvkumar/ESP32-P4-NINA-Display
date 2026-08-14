@@ -26,6 +26,7 @@
 #include "esp_attr.h"                  /* EXT_RAM_BSS_ATTR */
 #include "esp_system.h"
 #include "esp_timer.h"                 /* esp_timer_get_time — USER claim stamp */
+#include "power_mgmt.h"                /* app_reboot — single logged restart path */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"             /* xTaskNotifyGive */
 #include "lvgl.h"
@@ -83,7 +84,7 @@ static void save_feedback_timer_cb(lv_timer_t *timer) {
     save_feedback_timer = NULL;
 
     if (needs_reboot) {
-        esp_restart();
+        app_reboot("settings save+reboot (touch)");
         return;  /* unreachable */
     }
 

@@ -12,6 +12,9 @@
   .row { display: grid; grid-template-columns: 9em 1fr 5em; gap: .6em;
          align-items: center; margin: .5em 0; }
   input[type=range] { width: 100%; }
+  input[type=number] { font: inherit; width: 8em; padding: .25em .4em;
+                       background: #1a1e24; color: #e6e8eb;
+                       border: 1px solid #39404a; border-radius: 4px; }
   .val { text-align: right; font-variant-numeric: tabular-nums; color: #7fd3ff; }
   button { font: inherit; padding: .45em 1em; margin: 0 .4em .4em 0; cursor: pointer;
            background: #232830; color: #e6e8eb; border: 1px solid #39404a;
@@ -27,16 +30,19 @@
 </style>
 
 <h1>Mock OctoPrint control</h1>
-<p>Sliders switch the mock to manual mode and hold the values. Dependent values
-(print time, time left, ETA, M73, file position) follow the progress slider.</p>
+<p>Sliders and layer boxes switch the mock to manual mode and hold the values.
+Dependent values (print time, time left, ETA, M73, file position) follow the
+progress percent. Typing a layer sets the percent from current divided by total;
+moving the progress slider sets the current layer from the percent.</p>
 
 <h2>Print state</h2>
 <div class="row"><label for="progress">Progress %</label>
   <input type="range" id="progress" min="0" max="100" step="0.5" value="0">
   <span class="val" id="progress_v">0</span></div>
-<div class="row"><label for="layer">Layer</label>
-  <input type="range" id="layer" min="0" max="86" step="1" value="1">
-  <span class="val" id="layer_v">1</span></div>
+<div class="row"><label for="total_layers">Total layers</label>
+  <input type="number" id="total_layers" min="1" max="10000" step="1" value="86"></div>
+<div class="row"><label for="current_layer">Current layer</label>
+  <input type="number" id="current_layer" min="0" max="86" step="1" value="1"></div>
 <div class="row"><label for="nozzle_actual">Nozzle actual</label>
   <input type="range" id="nozzle_actual" min="0" max="300" step="0.5" value="24">
   <span class="val" id="nozzle_actual_v">24</span></div>
@@ -63,8 +69,9 @@
    <code>POST /mock/dlp</code>, <code>GET /mock/status</code>. See README.md.</p>
 
 <script>
-const SLIDERS = ["progress", "layer", "nozzle_actual", "nozzle_target",
+const SLIDERS = ["progress", "nozzle_actual", "nozzle_target",
                  "bed_actual", "bed_target"];
+const NUMBERS = ["total_layers", "current_layer"];
 const SCENARIOS = ["printing", "operational", "paused", "error",
                    "printer_closed", "octoprint_down_60s"];
 let dragging = null;
@@ -95,12 +102,28 @@ SLIDERS.forEach(id => {
   el.addEventListener("change", () => setTimeout(() => dragging = null, 400));
 });
 
+// Number boxes commit on Enter or blur, so a half-typed value never posts.
+NUMBERS.forEach(id => {
+  const el = document.getElementById(id);
+  el.addEventListener("change", () => {
+    const v = parseInt(el.value, 10);
+    if (isNaN(v)) return;
+    const body = {}; body[id] = v;
+    post("/mock/set", body).then(refresh);
+  });
+});
+
 document.getElementById("resume").onclick =
   () => post("/mock/set", {resume: true}).then(refresh);
 document.getElementById("dlp_on").onclick =
   () => post("/mock/dlp", {enabled: true}).then(refresh);
 document.getElementById("dlp_off").onclick =
   () => post("/mock/dlp", {enabled: false}).then(refresh);
+
+function putNum(id, v) {
+  const el = document.getElementById(id);
+  if (document.activeElement !== el) el.value = v;
+}
 
 function put(id, v) {
   if (dragging === id) return;
@@ -112,12 +135,13 @@ function put(id, v) {
 function refresh() {
   fetch("/mock/status").then(r => r.json()).then(s => {
     put("progress", s.progress);
-    put("layer", s.layer);
+    putNum("total_layers", s.layer_total);
+    putNum("current_layer", s.layer);
     put("nozzle_actual", s.nozzle_actual);
     put("nozzle_target", s.nozzle_target);
     put("bed_actual", s.bed_actual);
     put("bed_target", s.bed_target);
-    document.getElementById("layer").max = s.layer_total;
+    document.getElementById("current_layer").max = s.layer_total;
     const box = document.getElementById("status");
     box.className = s.manual ? "manual" : "auto";
     box.innerHTML =

@@ -4,7 +4,7 @@
  *
  * This file owns EVERYTHING that is not geometry: the shared styles, the widget
  * factories, the layout dispatch table, the update path, the image handoff, the
- * empty state and the theme application. The four octoprint_layout_*.c files
+ * empty state and the theme application. The two octoprint_layout_*.c files
  * only arrange widgets (see nina_octoprint_internal.h for the seam contract).
  *
  * Locking: the caller holds octoprint_data_t::mutex AND the LVGL display lock
@@ -15,8 +15,11 @@
  * Image lifetime: octoprint_client frees the retired frame shortly after it
  * releases the mutex, so binding an lv_image straight at data->image_buf would
  * leave the LVGL flush task rendering from a freed pointer between two updates.
- * We therefore memcpy the frame into a UI-owned PSRAM buffer while the lock is
- * held and bind that. The copy happens only when new_image is set, not per poll.
+ * We therefore take a UI-owned PSRAM copy while the lock is held and bind that.
+ * The copy is produced by the bilinear scaler at the hero's exact pixel box, so the
+ * descriptor binds 1:1 and LVGL never runs its software transform (which is what
+ * put the horizontal seams on the hero). It is re-made only when the frame or
+ * the box changes, not per poll.
  */
 
 #include "nina_octoprint.h"
@@ -24,9 +27,11 @@
 #include "nina_empty_state.h"
 #include "app_config.h"
 #include "display_defs.h"
+#include "jpeg_utils.h"
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -55,13 +60,14 @@ static lv_obj_t *s_backdrop  = NULL;  /* full-cover host for the empty state */
 static lv_obj_t *s_empty     = NULL;
 static octoprint_widgets_t s_w;
 
-/* UI-owned copy of the decoded frame (see file header). */
+/* UI-owned, bilinear-scaled copy of the decoded frame (see file header).
+ * s_img_copy is a 128-byte-aligned PSRAM buffer; s_fit_w/h are the pixel
+ * dimensions currently held in it. */
 static uint8_t       *s_img_copy    = NULL;
-static uint32_t       s_img_copy_px = 0;
+static size_t         s_img_copy_sz = 0;
+static uint16_t       s_fit_w       = 0;
+static uint16_t       s_fit_h       = 0;
 static lv_image_dsc_t s_img_dsc;
-
-/* Cheap invalidation guards — avoid restyling unchanged widgets every poll. */
-static int s_segs_on_cached = -1;
 
 /* ── Small helpers ────────────────────────────────────────────────────── */
 
@@ -135,7 +141,9 @@ static void free_img_copy(void)
     }
     heap_caps_free(s_img_copy);
     s_img_copy    = NULL;
-    s_img_copy_px = 0;
+    s_img_copy_sz = 0;
+    s_fit_w       = 0;
+    s_fit_h       = 0;
     memset(&s_img_dsc, 0, sizeof(s_img_dsc));
 }
 
@@ -261,7 +269,7 @@ lv_obj_t *octo_w_temp(lv_obj_t *parent, const char *name,
     out->variant = variant;
     out->hot     = hot;
 
-    /* TILE stacks caption over value; the other two put them on one line. */
+    /* TILE stacks caption over value; BAR_GRADIENT puts them on one line. */
     bool stacked = (variant == OCTO_TEMP_TILE);
 
     lv_obj_t *root = octo_w_row(parent, false, stacked ? 2 : 6);
@@ -288,10 +296,6 @@ lv_obj_t *octo_w_temp(lv_obj_t *parent, const char *name,
                                   &octo_style_label);
     out->lbl_value = octo_w_label(line, "--", &lv_font_montserrat_22,
                                   &octo_style_value);
-
-    if (variant == OCTO_TEMP_TEXT_ONLY) {
-        return root;
-    }
 
     /* Heat bar, stacked under the value line. */
     out->bar = lv_bar_create(root);
@@ -327,7 +331,12 @@ lv_obj_t *octo_w_image_hero(lv_obj_t *parent, octoprint_widgets_t *w)
 
     w->img_hero = lv_image_create(host);
     lv_obj_set_size(w->img_hero, LV_PCT(100), LV_PCT(100));
-    lv_image_set_inner_align(w->img_hero, LV_IMAGE_ALIGN_CONTAIN);
+    /* CENTER, not CONTAIN: image_update() hardware-scales the frame to this
+     * widget's exact box before binding, so the aspect fit is already done and
+     * any LVGL zoom here would only re-introduce the software transform (and its
+     * horizontal seams). The bound frame is never larger than the box, so CENTER
+     * never crops. */
+    lv_image_set_inner_align(w->img_hero, LV_IMAGE_ALIGN_CENTER);
     lv_obj_center(w->img_hero);
     lv_obj_add_flag(w->img_hero, LV_OBJ_FLAG_HIDDEN);
 
@@ -375,7 +384,12 @@ lv_obj_t *octo_w_chip(lv_obj_t *parent, const char *text,
 
 lv_obj_t *octo_w_status_strip(lv_obj_t *parent, octoprint_widgets_t *w)
 {
-    w->error_strip = octo_w_chip(parent, "No faults", &w->error_dot, &w->lbl_error);
+    /* Born empty and hidden. A healthy printer has nothing to report, so the
+     * strip earns its space only when the update path has a fault or an offline
+     * printer to show. Layouts still lay it out normally -- they need no changes
+     * for this; visibility is driven solely from octoprint_page_update(). */
+    w->error_strip = octo_w_chip(parent, "", &w->error_dot, &w->lbl_error);
+    lv_obj_add_flag(w->error_strip, LV_OBJ_FLAG_HIDDEN);
     return w->error_strip;
 }
 
@@ -469,14 +483,15 @@ static const octoprint_layout_ops_t *const s_layouts[OCTO_LAYOUT_COUNT] = {
                                 * it and it resolves to Bento. Reserved, so the
                                 * later slots never renumber. */
     &octoprint_layout_glass,
-    &octoprint_layout_typo,
-    &octoprint_layout_timeline,
+    &octoprint_layout_bento,   /* retired alias: slot 3 was "Large numerals".
+                                * Renders Bento; slot reserved, NVS value legal. */
+    &octoprint_layout_bento,   /* retired alias: slot 4 was "Layer timeline".
+                                * Renders Bento; slot reserved, NVS value legal. */
 };
 
 static void build_content(void)
 {
     memset(&s_w, 0, sizeof(s_w));
-    s_segs_on_cached = -1;
 
     uint8_t idx = app_config_get()->octoprint_layout;
     if (idx >= OCTO_LAYOUT_COUNT) {
@@ -629,6 +644,59 @@ static void temp_update(octo_temp_el_t *t, float actual, float target)
     }
 }
 
+/**
+ * Aspect-fit @p src_w x @p src_h into the hero's laid-out pixel box.
+ *
+ * The box differs per layout (glass runs the hero full-page at 720, bento ~338)
+ * and is not known at build time, so it is read
+ * from the widget itself. Returns false while the box is still unlaid (the first
+ * update can land before the layout pass); the caller then keeps what is on
+ * screen and retries on the next poll.
+ */
+static bool hero_fit_size(uint16_t src_w, uint16_t src_h,
+                          uint16_t *out_w, uint16_t *out_h)
+{
+    lv_obj_update_layout(s_w.img_hero);
+    int32_t bw = lv_obj_get_content_width(s_w.img_hero);
+    int32_t bh = lv_obj_get_content_height(s_w.img_hero);
+    if (bw < 8 || bh < 8 || src_w == 0 || src_h == 0) {
+        return false;
+    }
+    if (bw > SCREEN_SIZE) {
+        bw = SCREEN_SIZE;
+    }
+    if (bh > SCREEN_SIZE) {
+        bh = SCREEN_SIZE;
+    }
+
+    /* Width-limited when the source is relatively wider than the box. */
+    int32_t w, h;
+    if ((int32_t)src_w * bh >= (int32_t)src_h * bw) {
+        w = bw;
+        h = ((int32_t)src_h * bw + src_w / 2) / src_w;
+    } else {
+        h = bh;
+        w = ((int32_t)src_w * bh + src_h / 2) / src_h;
+    }
+    /* Clamp both ways: never past the box (CENTER would clip), never degenerate
+     * (PPA needs a non-empty block). */
+    if (w > bw) {
+        w = bw;
+    }
+    if (h > bh) {
+        h = bh;
+    }
+    if (w < 2) {
+        w = 2;
+    }
+    if (h < 2) {
+        h = 2;
+    }
+    *out_w = (uint16_t)w;
+    *out_h = (uint16_t)h;
+    return true;
+}
+
 static void image_update(const octoprint_data_t *data)
 {
     if (!s_w.img_hero) {
@@ -644,37 +712,72 @@ static void image_update(const octoprint_data_t *data)
         return;
     }
 
-    if (data->new_image || !s_img_copy) {
-        uint32_t px = (uint32_t)data->image_w * (uint32_t)data->image_h;
-        if (px != s_img_copy_px) {
+    uint16_t fit_w = 0, fit_h = 0;
+    if (!hero_fit_size(data->image_w, data->image_h, &fit_w, &fit_h)) {
+        return;   /* hero not laid out yet -- leave the screen as it is */
+    }
+
+    /* Re-scale on a new frame, on the first bind, and whenever the hero box
+     * moved (layout switch, screen rotation): a copy is valid for exactly one
+     * target size. */
+    if (data->new_image || !s_img_copy || fit_w != s_fit_w || fit_h != s_fit_h) {
+        /* 128-byte-aligned address AND size: no longer required now the scale
+         * is software, but kept -- it is one call and it keeps the buffer on
+         * L2 cache lines. */
+        size_t need = ((size_t)fit_w * (size_t)fit_h * 2u + 127u) & ~(size_t)127u;
+        if (need != s_img_copy_sz) {
             lv_image_set_src(s_w.img_hero, NULL);
             heap_caps_free(s_img_copy);
-            s_img_copy    = heap_caps_malloc(px * 2, MALLOC_CAP_SPIRAM);
-            s_img_copy_px = s_img_copy ? px : 0;
+            s_img_copy    = heap_caps_aligned_calloc(128, 1, need, MALLOC_CAP_SPIRAM);
+            s_img_copy_sz = s_img_copy ? need : 0;
+            s_fit_w       = 0;
+            s_fit_h       = 0;
         }
+
         if (s_img_copy) {
-            /* Straight top-down copy: this path needs NO orientation fix.
-             * stb (jpeg_utils.c) emits row 0 = top, and binding that buffer to
-             * an lv_image_dsc_t renders upright -- nina_image_display.c proves
-             * it, since its Solar/Moon/Custom sources pass vflip=false and come
-             * out the right way up through the identical decode -> RGB565 ->
-             * bind path. The "net vertical flip" note in goes_client.c is stale:
-             * vflip there is a per-SOURCE content correction (NESDIS), which is
-             * why solar_band_vflip() had to be changed to return false. A
-             * bottom-up row copy here is therefore a mirror, not a correction.
-             * A camera mounting flip belongs in OctoPrint's webcam settings. */
-            memcpy(s_img_copy, data->image_buf, px * 2);
+            /* Bilinear resample, once, into the hero's exact box, so the
+             * descriptor binds 1:1 and LVGL never runs its software transform
+             * per draw-unit band (which is what showed as repeating horizontal
+             * seams -- PPA only accelerates 1.0x, so a zoomed lv_image is always
+             * the software path).
+             *
+             * Software, not ppa_scale_rgb565_into(): on device the SRM path both
+             * mirrors the frame vertically and resamples by pixel drop/duplicate,
+             * which banded the hero worse than LVGL's own zoom. The GOES/moon
+             * callers are calibrated around that behaviour, so it is left alone.
+             *
+             * Row order: jpeg_sw_decode_rgb565 converts stb output TOP-DOWN
+             * (jpeg_utils.c row loop, verified by reading it AND by the
+             * asymmetric test pattern on-device), so a straight copy renders
+             * upright. NO row reversal belongs on this path. The two past
+             * "mirrored with a straight copy" sightings were builds using the
+             * PPA SRM scale path, which genuinely flips its output; the one
+             * "upright with a reversal" sighting was a stale binary. Before
+             * changing orientation handling in ANY direction, re-run the mock
+             * test-pattern + /api/screenshot procedure on a fullclean build
+             * (see tests/octoprint_mock, fixture .orig backups). */
+            int64_t t0 = esp_timer_get_time();
+            sw_scale_rgb565_bilinear((const uint16_t *)data->image_buf,
+                                     (int)data->image_w, (int)data->image_h,
+                                     (uint16_t *)s_img_copy, (int)fit_w, (int)fit_h);
+            ESP_LOGD(TAG, "hero scale %ux%u -> %ux%u in %lld us",
+                     (unsigned)data->image_w, (unsigned)data->image_h,
+                     (unsigned)fit_w, (unsigned)fit_h,
+                     esp_timer_get_time() - t0);
+
+            s_fit_w                 = fit_w;
+            s_fit_h                 = fit_h;
             s_img_dsc.data          = s_img_copy;
-            s_img_dsc.data_size     = px * 2;
+            s_img_dsc.data_size     = (uint32_t)fit_w * (uint32_t)fit_h * 2u;
             s_img_dsc.header.magic  = LV_IMAGE_HEADER_MAGIC;
             s_img_dsc.header.cf     = LV_COLOR_FORMAT_RGB565;
-            s_img_dsc.header.w      = data->image_w;
-            s_img_dsc.header.h      = data->image_h;
-            s_img_dsc.header.stride = (uint32_t)data->image_w * 2;
+            s_img_dsc.header.w      = fit_w;
+            s_img_dsc.header.h      = fit_h;
+            s_img_dsc.header.stride = (uint32_t)fit_w * 2u;
             lv_image_set_src(s_w.img_hero, &s_img_dsc);
         } else {
-            ESP_LOGW(TAG, "PSRAM alloc failed for %ux%u frame",
-                     (unsigned)data->image_w, (unsigned)data->image_h);
+            ESP_LOGW(TAG, "PSRAM alloc failed for %ux%u hero frame",
+                     (unsigned)fit_w, (unsigned)fit_h);
         }
         /* The client sets new_image on swap and documents that the UI clears it
          * under the lock once the src is re-bound (octoprint_client.h). The
@@ -780,26 +883,6 @@ void octoprint_page_update(const octoprint_data_t *data)
             snprintf(buf, sizeof(buf), "/ --");
         }
         set_txt(s_w.lbl_layer_total, buf);
-
-        int on = 0;
-        if (data->layer_total > 0 && data->layer_current >= 0) {
-            on = (int)(((float)data->layer_current * OCTO_LAYER_SEGS)
-                       / (float)data->layer_total + 0.5f);
-            if (on > OCTO_LAYER_SEGS) {
-                on = OCTO_LAYER_SEGS;
-            }
-        }
-        if (on != s_segs_on_cached) {
-            uint32_t on_c  = col_accent();
-            uint32_t off_c = col_border();
-            for (int i = 0; i < OCTO_LAYER_SEGS; i++) {
-                if (s_w.layer_segs[i]) {
-                    lv_obj_set_style_bg_color(s_w.layer_segs[i],
-                                              lv_color_hex(i < on ? on_c : off_c), 0);
-                }
-            }
-            s_segs_on_cached = on;
-        }
     }
 
     /* -- temperatures ----------------------------------------------------- */
@@ -845,26 +928,32 @@ void octoprint_page_update(const octoprint_data_t *data)
     set_hidden(s_w.conn_chip, !conn_show);
     set_hidden(s_w.lbl_conn, !conn_show);
 
-    /* Fault strip: real error wins, then a closed serial connection (OctoPrint
-     * is up but the printer is off), else a muted "no faults" resting state. */
+    /* Fault strip: shown only when it has something to say. Real error text wins,
+     * then a closed serial connection (OctoPrint is up but the printer is off).
+     * With no fault the strip is hidden outright -- a permanent "No faults" line
+     * is noise on every layout. */
     bool fault = (data->error_text[0] != '\0') || data->error || closed;
-    if (data->error_text[0] != '\0') {
-        set_txt(s_w.lbl_error, data->error_text);
-    } else if (closed) {
-        set_txt(s_w.lbl_error, "Printer disconnected");
-    } else if (data->error) {
-        set_txt(s_w.lbl_error, "Printer error");
-    } else {
-        set_txt(s_w.lbl_error, "No faults");
+    if (fault) {
+        if (data->error_text[0] != '\0') {
+            set_txt(s_w.lbl_error, data->error_text);
+        } else if (closed) {
+            set_txt(s_w.lbl_error, "PRINTER OFFLINE");
+        } else {
+            set_txt(s_w.lbl_error, "Printer error");
+        }
+        if (s_w.lbl_error) {
+            lv_obj_set_style_text_color(s_w.lbl_error, lv_color_hex(col_alert()), 0);
+        }
+        if (s_w.error_dot) {
+            lv_obj_set_style_bg_color(s_w.error_dot, lv_color_hex(col_alert()), 0);
+        }
     }
-    if (s_w.lbl_error) {
-        lv_obj_set_style_text_color(s_w.lbl_error,
-                                    lv_color_hex(fault ? col_alert() : col_label()), 0);
-    }
-    if (s_w.error_dot) {
-        lv_obj_set_style_bg_color(s_w.error_dot,
-                                  lv_color_hex(fault ? col_alert() : col_label()), 0);
-    }
+    /* The label is hidden as well as the strip: a layout may place a bare fault
+     * label with no chip around it, leaving error_strip NULL. The dot's own
+     * visibility is left alone -- it lives inside the strip, and a layout that
+     * hides it deliberately must stay hidden. */
+    set_hidden(s_w.error_strip, !fault);
+    set_hidden(s_w.lbl_error, !fault);
 
     /* -- image ------------------------------------------------------------- */
     image_update(data);
@@ -924,9 +1013,6 @@ static void apply_styles(void)
      * and it clobbered layouts that restyle the chip themselves (the Immersive
      * image layout turns the fault chip into a gradient fade pane in the page
      * ground colour, which a bg_color rewrite half-undid). */
-
-    /* Segment strip is repainted on the next update; drop the cache. */
-    s_segs_on_cached = -1;
 }
 
 /* ── Refresh (layout / theme change) ──────────────────────────────────── */
