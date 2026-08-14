@@ -1,0 +1,33 @@
+{
+  "currentFilename": "creative-pebble-v2-15degree-tilt-stand_0.4n_0.2mm_PETG_MINIIS_1h28m.gcode",
+  "fanSpeed": "30%",
+  "feedrate": "6632.618",
+  "feedrateG0": "-",
+  "feedrateG1": "6632.618",
+  "height": {
+    "current": "1.00",
+    "currentFormatted": "1.0",
+    "total": "-",
+    "totalFormatted": "-"
+  },
+  "layer": {
+    "averageLayerDuration": "-",
+    "averageLayerDurationInSeconds": "-",
+    "current": "4",
+    "lastLayerDuration": "0h:02m:49s",
+    "lastLayerDurationInSeconds": 169,
+    "total": "86"
+  },
+  "print": {
+    "changeFilamentCount": 0,
+    "changeFilamentTimeLeft": "-",
+    "changeFilamentTimeLeftInSeconds": 0,
+    "estimatedChangedFilamentTime": "-",
+    "estimatedEndTime": "10:25",
+    "m73progress": "12",
+    "printerState": "printing",
+    "progress": "19",
+    "timeLeft": "1h16m",
+    "timeLeftInSeconds": 4560
+  }
+}

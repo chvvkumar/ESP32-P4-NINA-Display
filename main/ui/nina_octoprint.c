@@ -4,7 +4,7 @@
  *
  * This file owns EVERYTHING that is not geometry: the shared styles, the widget
  * factories, the layout dispatch table, the update path, the image handoff, the
- * empty state and the theme application. The five octoprint_layout_*.c files
+ * empty state and the theme application. The four octoprint_layout_*.c files
  * only arrange widgets (see nina_octoprint_internal.h for the seam contract).
  *
  * Locking: the caller holds octoprint_data_t::mutex AND the LVGL display lock
@@ -31,6 +31,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 
 static const char *TAG = "octo_ui";
 
@@ -98,19 +99,6 @@ uint32_t octo_color(octo_color_id_t id)
         case OCTO_COL_ALERT:  return col_alert();
         default:              return col_text();
     }
-}
-
-void octo_w_header_wash(lv_obj_t *card)
-{
-    if (!card || !current_theme) {
-        return;
-    }
-    lv_obj_set_style_bg_grad_dir(card, LV_GRAD_DIR_HOR, 0);
-    lv_obj_set_style_bg_color(
-        card, lv_color_hex(tcol(current_theme->header_grad_color, 0x172554)), 0);
-    lv_obj_set_style_bg_grad_color(card, lv_color_hex(col_cardbg()), 0);
-    lv_obj_set_style_bg_main_stop(card, 0, 0);
-    lv_obj_set_style_bg_grad_stop(card, 150, 0);
 }
 
 static void set_txt(lv_obj_t *obj, const char *text)
@@ -244,52 +232,79 @@ lv_obj_t *octo_w_caption(lv_obj_t *parent, const char *text)
     return octo_w_label(parent, text, &lv_font_montserrat_14, &octo_style_label);
 }
 
-/* -- temperature fill-to-target ---------------------------------------- */
+/* -- temperature element ------------------------------------------------ */
 
-lv_obj_t *octo_w_temp(lv_obj_t *parent, const char *name, bool vertical,
-                      bool hot, octo_temp_el_t *out)
+/**
+ * Paint the heat gradient on a bar indicator: cool accent at the cold baseline
+ * running to alert-red (hot end) or amber (bed) at the top of the scale.
+ *
+ * ponytail: two stops, because CONFIG_LV_GRADIENT_MAX_STOPS is 2 in this build.
+ * The mockup's blue-cyan-amber-red ramp needs 3+ stops; raise that Kconfig and
+ * swap in an lv_grad_dsc_t here if the intermediate hues are ever worth it.
+ */
+static void temp_bar_gradient(lv_obj_t *bar, bool hot)
+{
+    lv_obj_set_style_bg_color(bar, lv_color_hex(col_accent()), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_grad_color(bar, lv_color_hex(hot ? col_alert() : col_hot()),
+                                   LV_PART_INDICATOR);
+    lv_obj_set_style_bg_grad_dir(bar, LV_GRAD_DIR_HOR, LV_PART_INDICATOR);
+}
+
+lv_obj_t *octo_w_temp(lv_obj_t *parent, const char *name,
+                      octo_temp_variant_t variant, bool hot,
+                      octo_temp_el_t *out)
 {
     if (!out) {
         return NULL;
     }
     memset(out, 0, sizeof(*out));
-    out->vertical = vertical;
-    out->hot      = hot;
+    out->variant = variant;
+    out->hot     = hot;
 
-    lv_obj_t *root = octo_w_row(parent, !vertical, 14);
-    lv_obj_set_flex_align(root,
-                          vertical ? LV_FLEX_ALIGN_END : LV_FLEX_ALIGN_START,
-                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    /* TILE stacks caption over value; the other two put them on one line. */
+    bool stacked = (variant == OCTO_TEMP_TILE);
+
+    lv_obj_t *root = octo_w_row(parent, false, stacked ? 2 : 6);
+    lv_obj_set_flex_align(root, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_START);
     out->root = root;
 
-    out->lbl_name = octo_w_label(root, name, &lv_font_montserrat_12, &octo_style_label);
-    if (!vertical) {
-        lv_obj_set_width(out->lbl_name, 62);
+    if (stacked) {
+        out->lbl_name  = octo_w_caption(root, name);
+        out->lbl_value = octo_w_label(root, "--", &lv_font_montserrat_20,
+                                      &octo_style_value);
+        return root;
     }
 
-    out->lbl_value = octo_w_label(root, "--", &lv_font_montserrat_22, &octo_style_value);
-    if (!vertical) {
-        lv_obj_set_width(out->lbl_value, 138);
+    /* Value line: name left, reading right. Sized for the worst case
+     * ("250.3 / 250 °C") so a high-temp filament cannot reflow the row. */
+    lv_obj_t *line = octo_w_row(root, true, 12);
+    lv_obj_set_width(line, LV_PCT(100));
+    lv_obj_set_height(line, LV_SIZE_CONTENT);
+    lv_obj_set_flex_align(line, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_END,
+                          LV_FLEX_ALIGN_END);
+
+    out->lbl_name  = octo_w_label(line, name, &lv_font_montserrat_14,
+                                  &octo_style_label);
+    out->lbl_value = octo_w_label(line, "--", &lv_font_montserrat_22,
+                                  &octo_style_value);
+
+    if (variant == OCTO_TEMP_TEXT_ONLY) {
+        return root;
     }
 
+    /* Heat bar, stacked under the value line. */
     out->bar = lv_bar_create(root);
     lv_bar_set_range(out->bar, 0, 1000);
     lv_bar_set_value(out->bar, 0, LV_ANIM_OFF);
-    lv_obj_set_style_radius(out->bar, 8, 0);
-    lv_obj_set_style_radius(out->bar, 8, LV_PART_INDICATOR);
+    lv_obj_set_width(out->bar, LV_PCT(100));
+    lv_obj_set_height(out->bar, 10);
+    lv_obj_set_style_radius(out->bar, 5, 0);
+    lv_obj_set_style_radius(out->bar, 5, LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(out->bar, lv_color_hex(col_bg()), 0);
     lv_obj_set_style_border_color(out->bar, lv_color_hex(col_border()), 0);
     lv_obj_set_style_border_width(out->bar, 1, 0);
-    lv_obj_set_style_bg_color(out->bar,
-                              lv_color_hex(hot ? col_hot() : col_accent()),
-                              LV_PART_INDICATOR);
-    if (vertical) {
-        lv_obj_set_size(out->bar, 16, LV_PCT(100));
-        lv_obj_set_flex_grow(out->bar, 1);
-    } else {
-        lv_obj_set_height(out->bar, 16);
-        lv_obj_set_flex_grow(out->bar, 1);
-    }
+    temp_bar_gradient(out->bar, hot);
 
     /* Target tick: a thin bright line positioned in percent of the bar, so it
      * lands correctly before the first layout pass. */
@@ -299,18 +314,8 @@ lv_obj_t *octo_w_temp(lv_obj_t *parent, const char *name, bool vertical,
     lv_obj_remove_flag(out->tick, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_opa(out->tick, LV_OPA_70, 0);
     lv_obj_set_style_bg_color(out->tick, lv_color_hex(col_text()), 0);
-    if (vertical) {
-        lv_obj_set_size(out->tick, LV_PCT(100), 2);
-    } else {
-        lv_obj_set_size(out->tick, 2, LV_PCT(100));
-    }
+    lv_obj_set_size(out->tick, 2, LV_PCT(100));
     lv_obj_add_flag(out->tick, LV_OBJ_FLAG_HIDDEN);
-
-    out->lbl_scale = octo_w_label(root, "--", &lv_font_montserrat_12, &octo_style_label);
-    if (!vertical) {
-        lv_obj_set_width(out->lbl_scale, 40);
-        lv_obj_set_style_text_align(out->lbl_scale, LV_TEXT_ALIGN_RIGHT, 0);
-    }
     return root;
 }
 
@@ -329,9 +334,6 @@ lv_obj_t *octo_w_image_hero(lv_obj_t *parent, octoprint_widgets_t *w)
     w->img_placeholder = octo_w_label(host, "NO IMAGE",
                                       &lv_font_montserrat_16, &octo_style_label);
     lv_obj_center(w->img_placeholder);
-
-    w->lbl_img_tag = octo_w_caption(host, "");
-    lv_obj_align(w->lbl_img_tag, LV_ALIGN_TOP_LEFT, 18, 14);
     return host;
 }
 
@@ -418,7 +420,7 @@ lv_obj_t *octo_w_progress_bar(lv_obj_t *parent, octoprint_widgets_t *w)
 }
 
 lv_obj_t *octo_w_progress_arc(lv_obj_t *parent, int size, int arc_width,
-                              bool is_m73, octoprint_widgets_t *w)
+                              octoprint_widgets_t *w)
 {
     lv_obj_t *arc = lv_arc_create(parent);
     lv_obj_set_size(arc, size, size);
@@ -432,12 +434,8 @@ lv_obj_t *octo_w_progress_arc(lv_obj_t *parent, int size, int arc_width,
     lv_obj_set_style_arc_width(arc, arc_width, LV_PART_INDICATOR);
     lv_obj_set_style_arc_color(arc, lv_color_hex(col_border()), LV_PART_MAIN);
     lv_obj_set_style_arc_color(arc, lv_color_hex(col_accent()), LV_PART_INDICATOR);
-    lv_obj_set_style_arc_opa(arc, is_m73 ? LV_OPA_60 : LV_OPA_COVER, LV_PART_INDICATOR);
-    if (is_m73) {
-        w->arc_m73 = arc;
-    } else {
-        w->arc_completion = arc;
-    }
+    lv_obj_set_style_arc_opa(arc, LV_OPA_COVER, LV_PART_INDICATOR);
+    w->arc_completion = arc;
     return arc;
 }
 
@@ -461,20 +459,15 @@ lv_obj_t *octo_w_state_line(lv_obj_t *parent, octoprint_widgets_t *w)
     return line;
 }
 
-lv_obj_t *octo_w_file_label(lv_obj_t *parent, octoprint_widgets_t *w)
-{
-    w->lbl_file = octo_w_label(parent, "--", &lv_font_overpass_16, &octo_style_label);
-    lv_label_set_long_mode(w->lbl_file, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(w->lbl_file, LV_PCT(100));
-    lv_obj_set_style_text_letter_space(w->lbl_file, 0, 0);
-    return w->lbl_file;
-}
-
 /* ── Layout dispatch ──────────────────────────────────────────────────── */
 
 static const octoprint_layout_ops_t *const s_layouts[OCTO_LAYOUT_COUNT] = {
     &octoprint_layout_bento,
-    &octoprint_layout_instrument,
+    &octoprint_layout_bento,   /* retired alias: slot 1 was "Instrument dial".
+                                * The value stays legal in NVS and in
+                                * validate_config; the web UI no longer offers
+                                * it and it resolves to Bento. Reserved, so the
+                                * later slots never renumber. */
     &octoprint_layout_glass,
     &octoprint_layout_typo,
     &octoprint_layout_timeline,
@@ -485,14 +478,24 @@ static void build_content(void)
     memset(&s_w, 0, sizeof(s_w));
     s_segs_on_cached = -1;
 
-    s_content = octo_w_row(s_root, false, OCTO_GAP);
-    lv_obj_set_size(s_content, LV_PCT(100), LV_PCT(100));
-
     uint8_t idx = app_config_get()->octoprint_layout;
     if (idx >= OCTO_LAYOUT_COUNT) {
         idx = 0;
     }
     const octoprint_layout_ops_t *ops = s_layouts[idx];
+
+    /* Canvas first: a full-bleed layout gets the whole screen, shifted up and
+     * left to negate main_cont's OUTER_PADDING (the same negation the image,
+     * clock and Spotify pages use). Set on every build, so switching layouts at
+     * runtime restores the inset one as well. */
+    int size = ops->full_bleed ? SCREEN_SIZE : OCTO_W;
+    int off  = ops->full_bleed ? -OCTO_PAD : 0;
+    lv_obj_set_size(s_root, size, size);
+    lv_obj_set_pos(s_root, off, off);
+
+    s_content = octo_w_row(s_root, false, OCTO_GAP);
+    lv_obj_set_size(s_content, LV_PCT(100), LV_PCT(100));
+
     ESP_LOGI(TAG, "Building OctoPrint page, layout %u (%s)",
              (unsigned)idx, ops->name ? ops->name : "?");
     ops->build(s_content, &s_w);
@@ -534,7 +537,9 @@ lv_obj_t *octoprint_page_create(lv_obj_t *parent)
 
     s_root = lv_obj_create(parent);
     lv_obj_remove_style_all(s_root);
-    lv_obj_set_size(s_root, OCTO_W, OCTO_W);
+    /* Size and position are set by build_content(): they depend on whether the
+     * selected layout is full-bleed, and they must be re-applied on every
+     * rebuild, not just here. */
     lv_obj_remove_flag(s_root, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_opa(s_root, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(s_root, lv_color_hex(col_bg()), 0);
@@ -573,6 +578,10 @@ static void temp_update(octo_temp_el_t *t, float actual, float target)
     bool has_t = !isnan(target) && target > 0.0f;
     if (!has_a) {
         snprintf(buf, sizeof(buf), "--");
+    } else if (has_t && t->variant == OCTO_TEMP_TILE) {
+        /* The dock tile is narrow, so it drops the spaces: "214.9/215 °C". */
+        snprintf(buf, sizeof(buf), "%.1f/%.0f \xC2\xB0" "C",
+                 (double)actual, (double)target);
     } else if (has_t) {
         snprintf(buf, sizeof(buf), "%.1f / %.0f \xC2\xB0" "C",
                  (double)actual, (double)target);
@@ -580,6 +589,10 @@ static void temp_update(octo_temp_el_t *t, float actual, float target)
         snprintf(buf, sizeof(buf), "%.1f \xC2\xB0" "C", (double)actual);
     }
     set_txt(t->lbl_value, buf);
+
+    if (!t->bar) {
+        return;   /* TEXT_ONLY / TILE: the value line is the whole element */
+    }
 
     /* Scale runs from a cold 25 C baseline to the target plus 10 % headroom, so
      * an overshoot is visible past the tick. With the heater off there is no
@@ -597,9 +610,7 @@ static void temp_update(octo_temp_el_t *t, float actual, float target)
         }
         val = (int)(f * 1000.0f);
     }
-    if (t->bar) {
-        lv_bar_set_value(t->bar, val, LV_ANIM_OFF);
-    }
+    lv_bar_set_value(t->bar, val, LV_ANIM_OFF);
 
     if (t->tick) {
         if (has_t && span > 1.0f) {
@@ -610,24 +621,11 @@ static void temp_update(octo_temp_el_t *t, float actual, float target)
             if (pct > 99) {
                 pct = 99;
             }
-            if (t->vertical) {
-                lv_obj_set_y(t->tick, LV_PCT(100 - pct));
-            } else {
-                lv_obj_set_x(t->tick, LV_PCT(pct));
-            }
+            lv_obj_set_x(t->tick, LV_PCT(pct));
             lv_obj_remove_flag(t->tick, LV_OBJ_FLAG_HIDDEN);
         } else {
             lv_obj_add_flag(t->tick, LV_OBJ_FLAG_HIDDEN);
         }
-    }
-
-    if (t->lbl_scale) {
-        if (has_t) {
-            snprintf(buf, sizeof(buf), "%.0f\xC2\xB0", (double)target);
-        } else {
-            snprintf(buf, sizeof(buf), "--");
-        }
-        set_txt(t->lbl_scale, buf);
     }
 }
 
@@ -636,9 +634,6 @@ static void image_update(const octoprint_data_t *data)
     if (!s_w.img_hero) {
         return;
     }
-
-    const app_config_t *cfg = app_config_get();
-    set_txt(s_w.lbl_img_tag, (cfg->octoprint_image_source == 1) ? "WEBCAM" : "THUMBNAIL");
 
     if (!data->image_buf || data->image_w == 0 || data->image_h == 0) {
         /* Client dropped the frame (page left, source switched, or nothing
@@ -658,6 +653,16 @@ static void image_update(const octoprint_data_t *data)
             s_img_copy_px = s_img_copy ? px : 0;
         }
         if (s_img_copy) {
+            /* Straight top-down copy: this path needs NO orientation fix.
+             * stb (jpeg_utils.c) emits row 0 = top, and binding that buffer to
+             * an lv_image_dsc_t renders upright -- nina_image_display.c proves
+             * it, since its Solar/Moon/Custom sources pass vflip=false and come
+             * out the right way up through the identical decode -> RGB565 ->
+             * bind path. The "net vertical flip" note in goes_client.c is stale:
+             * vflip there is a per-SOURCE content correction (NESDIS), which is
+             * why solar_band_vflip() had to be changed to return false. A
+             * bottom-up row copy here is therefore a mirror, not a correction.
+             * A camera mounting flip belongs in OctoPrint's webcam settings. */
             memcpy(s_img_copy, data->image_buf, px * 2);
             s_img_dsc.data          = s_img_copy;
             s_img_dsc.data_size     = px * 2;
@@ -759,18 +764,6 @@ void octoprint_page_update(const octoprint_data_t *data)
         lv_bar_set_value(s_w.bar_progress, arc_val, LV_ANIM_OFF);
     }
 
-    /* -- M73 ------------------------------------------------------------- */
-    bool m73_ok = data->dlp_available && data->m73_progress >= 0;
-    set_hidden(s_w.m73_row, !m73_ok);
-    set_hidden(s_w.arc_m73, !m73_ok);
-    if (m73_ok) {
-        snprintf(buf, sizeof(buf), "M73 %d%%", data->m73_progress);
-        set_txt(s_w.lbl_m73, buf);
-        if (s_w.arc_m73) {
-            lv_arc_set_value(s_w.arc_m73, data->m73_progress * 10);
-        }
-    }
-
     /* -- layer (DisplayLayerProgress) ------------------------------------ */
     set_hidden(s_w.layer_cell, !data->dlp_available);
     if (data->dlp_available) {
@@ -823,28 +816,34 @@ void octoprint_page_update(const octoprint_data_t *data)
     set_hidden(s_w.finish_cell, !data->dlp_available);
     if (data->dlp_available) {
         set_txt(s_w.lbl_finish, data->eta[0] ? data->eta : "--");
-        if (s_w.lbl_finish_sub) {
-            char dur[32];
-            fmt_duration(data->print_time_left_s, dur, sizeof(dur));
-            snprintf(buf, sizeof(buf), "%s remaining", dur);
-            set_txt(s_w.lbl_finish_sub, buf);
-        }
     }
 
     /* -- identity / state -------------------------------------------------- */
-    set_txt(s_w.lbl_file, data->file_name[0] ? data->file_name : "--");
     set_txt(s_w.lbl_state, state_text(data));
 
-    bool closed = (strcmp(data->conn_state, "Closed") == 0);
+    bool closed = (strcasecmp(data->conn_state, "Closed") == 0);
     if (s_w.state_dot) {
         uint32_t c = data->error ? col_alert() : (data->printing ? col_accent() : col_label());
         lv_obj_set_style_bg_color(s_w.state_dot, lv_color_hex(c), 0);
     }
-    set_txt(s_w.lbl_conn, data->conn_state[0] ? data->conn_state : "--");
-    if (s_w.conn_dot) {
-        lv_obj_set_style_bg_color(s_w.conn_dot,
-                                  lv_color_hex(closed ? col_label() : col_accent()), 0);
+
+    /* /api/connection mirrors the printer state ("Printing"/"Operational") while
+     * things are healthy, which just duplicates the job-state chip. Surface the
+     * connection element only when it says something the state chip cannot: the
+     * link to the printer is down. Unknown/empty state stays hidden. */
+    bool conn_error = (strncasecmp(data->conn_state, "Error", 5) == 0);
+    bool conn_show  = closed || conn_error;
+    if (conn_show) {
+        set_txt(s_w.lbl_conn, conn_error ? data->conn_state : "PRINTER OFFLINE");
+        if (s_w.lbl_conn) {
+            lv_obj_set_style_text_color(s_w.lbl_conn, lv_color_hex(col_alert()), 0);
+        }
+        if (s_w.conn_dot) {
+            lv_obj_set_style_bg_color(s_w.conn_dot, lv_color_hex(col_alert()), 0);
+        }
     }
+    set_hidden(s_w.conn_chip, !conn_show);
+    set_hidden(s_w.lbl_conn, !conn_show);
 
     /* Fault strip: real error wins, then a closed serial connection (OctoPrint
      * is up but the printer is off), else a muted "no faults" resting state. */
@@ -893,12 +892,11 @@ static void apply_styles(void)
     nina_empty_state_apply_theme(s_empty, current_theme, cfg_brightness());
 
     /* Widgets whose colours are not carried by a shared style. */
-    lv_obj_t *arcs[2] = { s_w.arc_completion, s_w.arc_m73 };
-    for (int i = 0; i < 2; i++) {
-        if (arcs[i]) {
-            lv_obj_set_style_arc_color(arcs[i], lv_color_hex(col_border()), LV_PART_MAIN);
-            lv_obj_set_style_arc_color(arcs[i], lv_color_hex(col_accent()), LV_PART_INDICATOR);
-        }
+    if (s_w.arc_completion) {
+        lv_obj_set_style_arc_color(s_w.arc_completion, lv_color_hex(col_border()),
+                                   LV_PART_MAIN);
+        lv_obj_set_style_arc_color(s_w.arc_completion, lv_color_hex(col_accent()),
+                                   LV_PART_INDICATOR);
     }
     if (s_w.bar_progress) {
         lv_obj_set_style_bg_color(s_w.bar_progress, lv_color_hex(col_bg()), 0);
@@ -913,22 +911,19 @@ static void apply_styles(void)
         if (t->bar) {
             lv_obj_set_style_bg_color(t->bar, lv_color_hex(col_bg()), 0);
             lv_obj_set_style_border_color(t->bar, lv_color_hex(col_border()), 0);
-            lv_obj_set_style_bg_color(t->bar,
-                                      lv_color_hex(t->hot ? col_hot() : col_accent()),
-                                      LV_PART_INDICATOR);
+            temp_bar_gradient(t->bar, t->hot);
         }
         if (t->tick) {
             lv_obj_set_style_bg_color(t->tick, lv_color_hex(col_text()), 0);
         }
     }
 
-    lv_obj_t *chips[2] = { s_w.conn_chip, s_w.error_strip };
-    for (int i = 0; i < 2; i++) {
-        if (chips[i]) {
-            lv_obj_set_style_bg_color(chips[i], lv_color_hex(col_cardbg()), 0);
-            lv_obj_set_style_border_color(chips[i], lv_color_hex(col_border()), 0);
-        }
-    }
+    /* conn_chip / error_strip are deliberately NOT restyled here. octo_w_chip()
+     * already paints cardbg + border at build time, and this function only ever
+     * runs immediately after build_content(), so the rewrite was redundant --
+     * and it clobbered layouts that restyle the chip themselves (the Immersive
+     * image layout turns the fault chip into a gradient fade pane in the page
+     * ground colour, which a bg_color rewrite half-undid). */
 
     /* Segment strip is repainted on the next update; drop the cache. */
     s_segs_on_cached = -1;

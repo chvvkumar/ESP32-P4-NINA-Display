@@ -1,0 +1,31 @@
+{
+  "current": {
+    "baudrate": 115200,
+    "port": "/dev/ttyACM0",
+    "printerProfile": "prusa_mini",
+    "state": "Printing"
+  },
+  "options": {
+    "baudratePreference": 115200,
+    "baudrates": [
+      250000,
+      230400,
+      115200,
+      57600,
+      38400,
+      19200,
+      9600
+    ],
+    "portPreference": null,
+    "ports": [
+      "/dev/ttyACM0"
+    ],
+    "printerProfilePreference": "prusa_mini",
+    "printerProfiles": [
+      {
+        "id": "prusa_mini",
+        "name": "Prusa Mini+"
+      }
+    ]
+  }
+}

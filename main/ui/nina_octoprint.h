@@ -18,7 +18,7 @@
  * @brief Build the OctoPrint page (full-screen, no header band).
  *
  * Renders in the layout selected by app_config_t::octoprint_layout
- * (0=bento 1=instrument 2=glass 3=typographic 4=timeline).
+ * (0=bento 1=retired (renders Bento; reserved) 2=glass 3=typographic 4=timeline).
  *
  * @param parent Parent LVGL container (main_cont)
  * @return The page root object (caller hides it initially). Mirrors json_page_create.

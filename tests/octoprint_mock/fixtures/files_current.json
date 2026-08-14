@@ -1,0 +1,28 @@
+{
+  "DisplayLayerProgress": {
+    "totalLayerCountWithoutOffset": "86"
+  },
+  "dashboard": {
+    "filament_change_array": "[]",
+    "layer_move_array": "[4, 1094, 2903, 2983, 2630, 1851, 1361, 1367, 1365, 1343, 1348, 1349, 1426, 1497, 1477, 1660, 1761, 1765, 1761, 1530, 1559, 1519, 1491, 1427, 1403, 1439, 1313, 1272, 1252, 1261, 1261, 1197, 1257, 1191, 1071, 1111, 1119, 1063, 1049, 1102, 1043, 1007, 1071, 977, 977, 961, 943, 991, 987, 914, 1001, 852, 872, 897, 860, 795, 1023, 904, 884, 803, 783, 785, 779, 665, 645, 667, 627, 653, 623, 564, 566, 558, 575, 546, 542, 501, 470, 432, 514, 455, 457, 187, 156, 122, 71, 41, 31]"
+  },
+  "date": 1786715506,
+  "display": "creative-pebble-v2-15degree-tilt-stand_0.4n_0.2mm_PETG_MINIIS_1h28m.gcode",
+  "hash": "6e1ba520c2cf68268a7190841f04b8679892ccce",
+  "name": "creative-pebble-v2-15degree-tilt-stand_0.4n_0.2mm_PETG_MINIIS_1h28m.gcode",
+  "origin": "local",
+  "path": "creative-pebble-v2-15degree-tilt-stand_0.4n_0.2mm_PETG_MINIIS_1h28m.gcode",
+  "refs": {
+    "download": "http://octopi.lan/downloads/files/local/creative-pebble-v2-15degree-tilt-stand_0.4n_0.2mm_PETG_MINIIS_1h28m.gcode",
+    "resource": "http://octopi.lan/api/files/local/creative-pebble-v2-15degree-tilt-stand_0.4n_0.2mm_PETG_MINIIS_1h28m.gcode"
+  },
+  "size": 2650998,
+  "thumbnail": "plugin/prusaslicerthumbnails/thumbnail/creative-pebble-v2-15degree-tilt-stand_0.4n_0.2mm_PETG_MINIIS_1h28m.png?20260814085142",
+  "thumbnail_src": "prusaslicerthumbnails",
+  "type": "machinecode",
+  "typePath": [
+    "machinecode",
+    "gcode"
+  ],
+  "user": "_api"
+}

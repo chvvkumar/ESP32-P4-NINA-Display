@@ -359,8 +359,8 @@ typedef struct {
     char     octoprint_api_key[64];    // OctoPrint application/API key (secret)
     uint16_t octoprint_update_interval_s; // poll interval 2-300s (default 5)
     uint8_t  octoprint_image_source;   // 0 = G-code preview, 1 = webcam snapshot (default 0)
-    uint8_t  octoprint_layout;         // 0=bento 1=instrument 2=glass 3=typographic
-                                       // 4=timeline (default 0)
+    uint8_t  octoprint_layout;         // 0=bento 1=retired (renders Bento; reserved)
+                                       // 2=glass 3=typographic 4=timeline (default 0)
     char     octoprint_snapshot_url[128]; // explicit webcam snapshot URL; "" = derive
                                           // from octoprint_url (default "")
 } app_config_t;

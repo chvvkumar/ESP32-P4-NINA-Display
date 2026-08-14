@@ -2528,7 +2528,10 @@
       if($('octoUrl')) $('octoUrl').value=data.octoprint_url||'';
       if($('octoApiKey')) $('octoApiKey').value=data.octoprint_api_key||'';
       if($('octoInterval')) $('octoInterval').value=data.octoprint_update_interval_s||5;
-      if($('octoLayout')) $('octoLayout').value=String(data.octoprint_layout||0);
+      /* Layout 1 (the retired "Instrument dial") is still legal in stored config
+         but has no option here; it resolves to Bento on the device, so show that
+         rather than leaving the select blank. */
+      if($('octoLayout')){var ol=parseInt(data.octoprint_layout,10)||0;$('octoLayout').value=String(ol===1?0:ol);}
       if($('octoImageSource')) $('octoImageSource').value=String(data.octoprint_image_source||0);
       if($('octoSnapshotUrl')) $('octoSnapshotUrl').value=data.octoprint_snapshot_url||'';
     }

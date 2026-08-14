@@ -1,0 +1,142 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mock OctoPrint control</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font: 15px/1.45 system-ui, sans-serif; background: #14171c; color: #e6e8eb;
+         max-width: 46em; margin: 2em auto; padding: 0 1em; }
+  h1 { font-size: 1.3em; margin: 0 0 .2em; }
+  h2 { font-size: .95em; text-transform: uppercase; letter-spacing: .08em;
+       color: #8b949e; margin: 1.8em 0 .6em; }
+  .row { display: grid; grid-template-columns: 9em 1fr 5em; gap: .6em;
+         align-items: center; margin: .5em 0; }
+  input[type=range] { width: 100%; }
+  .val { text-align: right; font-variant-numeric: tabular-nums; color: #7fd3ff; }
+  button { font: inherit; padding: .45em 1em; margin: 0 .4em .4em 0; cursor: pointer;
+           background: #232830; color: #e6e8eb; border: 1px solid #39404a;
+           border-radius: 5px; }
+  button:hover { background: #2d333d; }
+  button.on { background: #1f6feb; border-color: #1f6feb; }
+  #status { background: #1a1e24; border: 1px solid #2b313a; border-radius: 6px;
+            padding: .8em 1em; font-variant-numeric: tabular-nums; }
+  #mode { font-weight: 600; }
+  .manual #mode { color: #f0b849; }
+  .auto #mode { color: #56d364; }
+  code { background: #1a1e24; padding: .1em .35em; border-radius: 3px; }
+</style>
+
+<h1>Mock OctoPrint control</h1>
+<p>Sliders switch the mock to manual mode and hold the values. Dependent values
+(print time, time left, ETA, M73, file position) follow the progress slider.</p>
+
+<h2>Print state</h2>
+<div class="row"><label for="progress">Progress %</label>
+  <input type="range" id="progress" min="0" max="100" step="0.5" value="0">
+  <span class="val" id="progress_v">0</span></div>
+<div class="row"><label for="layer">Layer</label>
+  <input type="range" id="layer" min="0" max="86" step="1" value="1">
+  <span class="val" id="layer_v">1</span></div>
+<div class="row"><label for="nozzle_actual">Nozzle actual</label>
+  <input type="range" id="nozzle_actual" min="0" max="300" step="0.5" value="24">
+  <span class="val" id="nozzle_actual_v">24</span></div>
+<div class="row"><label for="nozzle_target">Nozzle target</label>
+  <input type="range" id="nozzle_target" min="0" max="300" step="1" value="250">
+  <span class="val" id="nozzle_target_v">250</span></div>
+<div class="row"><label for="bed_actual">Bed actual</label>
+  <input type="range" id="bed_actual" min="0" max="120" step="0.5" value="23">
+  <span class="val" id="bed_actual_v">23</span></div>
+<div class="row"><label for="bed_target">Bed target</label>
+  <input type="range" id="bed_target" min="0" max="120" step="1" value="85">
+  <span class="val" id="bed_target_v">85</span></div>
+<p><button id="resume">Resume timeline</button></p>
+
+<h2>Scenario</h2>
+<p id="scenarios"></p>
+
+<h2>DisplayLayerProgress plugin</h2>
+<p><button id="dlp_on">Enabled</button><button id="dlp_off">Disabled (404)</button></p>
+
+<h2>Status</h2>
+<div id="status" class="auto">loading</div>
+<p>Scriptable through <code>POST /mock/set</code>, <code>POST /mock/scenario</code>,
+   <code>POST /mock/dlp</code>, <code>GET /mock/status</code>. See README.md.</p>
+
+<script>
+const SLIDERS = ["progress", "layer", "nozzle_actual", "nozzle_target",
+                 "bed_actual", "bed_target"];
+const SCENARIOS = ["printing", "operational", "paused", "error",
+                   "printer_closed", "octoprint_down_60s"];
+let dragging = null;
+
+function post(path, body) {
+  return fetch(path, {method: "POST", headers: {"Content-Type": "application/json"},
+                      body: JSON.stringify(body)}).then(r => r.json());
+}
+
+SCENARIOS.forEach(name => {
+  const b = document.createElement("button");
+  b.textContent = name.replace(/_/g, " ");
+  b.dataset.scenario = name;
+  b.onclick = () => post("/mock/scenario", {scenario: name}).then(refresh);
+  document.getElementById("scenarios").appendChild(b);
+});
+
+SLIDERS.forEach(id => {
+  const el = document.getElementById(id);
+  el.addEventListener("pointerdown", () => dragging = id);
+  el.addEventListener("pointerup", () => setTimeout(() => dragging = null, 400));
+  el.addEventListener("input", () => {
+    dragging = id;
+    document.getElementById(id + "_v").textContent = el.value;
+    const body = {}; body[id] = parseFloat(el.value);
+    post("/mock/set", body);
+  });
+  el.addEventListener("change", () => setTimeout(() => dragging = null, 400));
+});
+
+document.getElementById("resume").onclick =
+  () => post("/mock/set", {resume: true}).then(refresh);
+document.getElementById("dlp_on").onclick =
+  () => post("/mock/dlp", {enabled: true}).then(refresh);
+document.getElementById("dlp_off").onclick =
+  () => post("/mock/dlp", {enabled: false}).then(refresh);
+
+function put(id, v) {
+  if (dragging === id) return;
+  document.getElementById(id).value = v;
+  document.getElementById(id + "_v").textContent =
+    (Math.round(v * 10) / 10).toString();
+}
+
+function refresh() {
+  fetch("/mock/status").then(r => r.json()).then(s => {
+    put("progress", s.progress);
+    put("layer", s.layer);
+    put("nozzle_actual", s.nozzle_actual);
+    put("nozzle_target", s.nozzle_target);
+    put("bed_actual", s.bed_actual);
+    put("bed_target", s.bed_target);
+    document.getElementById("layer").max = s.layer_total;
+    const box = document.getElementById("status");
+    box.className = s.manual ? "manual" : "auto";
+    box.innerHTML =
+      "<span id=mode>" + (s.manual ? "MANUAL (timeline paused)" : "TIMELINE") +
+      "</span> &nbsp; phase " + s.phase + " &nbsp; scenario " + s.scenario +
+      "<br>progress " + s.progress + "% &nbsp; layer " + s.layer + "/" + s.layer_total +
+      " &nbsp; printTime " + s.print_time_s + "s &nbsp; left " + s.print_time_left_s + "s" +
+      "<br>DLP " + (s.dlp_enabled ? "enabled" : "disabled (404)") +
+      (s.down_for_s ? " &nbsp; SERVER DOWN for " + s.down_for_s + "s" : "") +
+      "<br>keys: " + s.api_keys.join(", ");
+    document.querySelectorAll("[data-scenario]").forEach(b =>
+      b.classList.toggle("on", b.dataset.scenario === s.scenario));
+    document.getElementById("dlp_on").classList.toggle("on", s.dlp_enabled);
+    document.getElementById("dlp_off").classList.toggle("on", !s.dlp_enabled);
+  }).catch(() => {
+    document.getElementById("status").textContent = "mock unreachable";
+  });
+}
+
+refresh();
+setInterval(refresh, 1000);
+</script>

@@ -57,7 +57,11 @@ CONFIG_LV_TXT_BREAK_CHARS=" ,.;:-_"
 CONFIG_LV_USE_IMGFONT=y
 # Disable LVGL examples (696 files, ~42KB overflow)
 # CONFIG_LV_BUILD_EXAMPLES is not set
-CONFIG_LV_USE_PPA=y
+# LVGL PPA fill draw unit OFF: it drops (not falls back) fills whose
+# clip_corner sub-layers are not 128B-size-aligned and double-msyncs the
+# whole framebuffer per fill. Only rect-fill accel is lost (LV_USE_PPA_IMG
+# was already off); direct PPA rotation/JPEG scaling are unaffected.
+CONFIG_LV_USE_PPA=n
 CONFIG_LV_DRAW_BUF_STRIDE_ALIGN=1
 CONFIG_LV_DRAW_BUF_ALIGN=128
 
@@ -74,10 +78,10 @@ CONFIG_LV_FONT_MONTSERRAT_48=y
 
 CONFIG_LV_USE_SNAPSHOT=y
 
-# lv_scale: the OctoPrint instrument layout builds its dial tick belt from it.
-# Pinned rather than left on the upstream Kconfig default, which a component
-# update is free to flip.
-CONFIG_LV_USE_SCALE=y
+# lv_scale: no caller left after the OctoPrint instrument layout was retired.
+# LVGL's own Kconfig defaults this to y, so it has to be pinned OFF explicitly --
+# deleting the line would leave lv_scale in the image.
+CONFIG_LV_USE_SCALE=n
 
 CONFIG_PM_ENABLE=y
 CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
@@ -107,6 +111,10 @@ CONFIG_LWIP_MAX_SOCKETS=24
 # Faster TCP socket recycling — reduces TIME_WAIT from 2min to 20s
 CONFIG_LWIP_TCP_MSL=10000
 CONFIG_LWIP_TCP_FIN_WAIT_TIMEOUT=10000
+
+# Web server sets SO_LINGER on session close for fast socket reclaim
+# (web_server.c enable_so_linger); without this lwip returns ENOPROTOOPT
+CONFIG_LWIP_SO_LINGER=y
 
 # Disable LVGL demo modules — saves ~100-200KB flash, never used in production
 CONFIG_LV_USE_DEMO_WIDGETS=n
