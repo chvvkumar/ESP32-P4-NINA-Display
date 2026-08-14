@@ -36,6 +36,14 @@ void image_display_apply_live(const app_config_t *prev, const app_config_t *cur,
         bsp_display_unlock();
     }
 
+    /* Feature turned off: this is the release point for the retained decoded
+     * frame. goes_data keeps its last frame across page leave so a slideshow
+     * re-entry is never black (see the note in tasks.c's page-leave block), so
+     * disabling the page is the only place that ~1-2MB of PSRAM comes back. */
+    if (!cur->image_display_enabled && prev->image_display_enabled) {
+        goes_client_cleanup(&goes_data);
+    }
+
     if (cur->image_display_enabled) {
         bool source_band_region_changed =
             cur->image_display_source != prev->image_display_source ||

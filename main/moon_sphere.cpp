@@ -367,8 +367,16 @@ extern "C" bool moon_sphere_init(void)
 }
 
 /* Release the decoded lunar texture (1024x512 RGB565 = 1,048,576 B PSRAM) when
- * the Image Display page is left. Held under the same mutex as init so a render
- * in flight on the other core cannot be looking at s_tex_buf while it is freed.
+ * the Image Display page is left.
+ *
+ * CALLER CONTRACT: must be called from the SAME task that runs the renders, and
+ * only when no render is in flight. The init mutex taken below does NOT make
+ * this safe against a concurrent render: the render path deliberately does not
+ * hold that mutex across drawSphere (a 720px render blocks ~300ms), so it is
+ * still sampling s_tex_buf the whole time. Calling this from another task while
+ * a render runs panics inside tgx texture sampling (confirmed crash). In this
+ * firmware the sole renderer is goes_poll_task, and it frees at its parked point
+ * on request from data_update_task — see the ownership contract in tasks.c.
  * The state is reset to "never inited", so the next moon_sphere_init() (lazy,
  * from moon_sphere_render*) re-decodes cleanly, including the current flips.
  * Safe to call when nothing was ever allocated. */

@@ -2534,6 +2534,22 @@ static void migrate_from_v57(const void *raw, size_t raw_size, app_config_t *cfg
     ESP_LOGI(TAG, "Migrated config from v57 to v%d", APP_CONFIG_VERSION);
 }
 
+/* --- v58 → v59 migration: appends wifi_max_tx_dbm (WiFi TX power cap).
+ *     Additive; an upgrading device keeps the uncapped chip default. --- */
+static void migrate_from_v58(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v58_t) ? raw_size : sizeof(app_config_v58_t);
+    memcpy(cfg, raw, copy);
+
+    /* Appended past the v58 snapshot, so memcpy(copy) never touches it; the
+     * copy may still have landed inside dest padding, so re-assign. */
+    cfg->wifi_max_tx_dbm = 0;  // no TX power cap by default
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v58 to v%d", APP_CONFIG_VERSION);
+}
+
 static void migrate_from_v36(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
@@ -3223,6 +3239,21 @@ static bool validate_config(app_config_t *cfg) {
     }
     cfg->ha_enabled = cfg->ha_enabled ? true : false;
 
+    /* WiFi TX power cap: whitelist, not a range — only the discrete dBm steps
+     * the UI offers are meaningful, and 0 means "no cap". Anything else (a
+     * stale blob byte, or a value that slipped past the settings-table range
+     * check) resets to 0 so a bad value fails toward connectivity rather than
+     * toward a silently throttled radio. Must stay AFTER settings_clamp_apply()
+     * above, whose two-sided 0..20 range would otherwise let e.g. 13 survive. */
+    switch (cfg->wifi_max_tx_dbm) {
+        case 0: case 8: case 11: case 14: case 17: case 20:
+            break;
+        default:
+            cfg->wifi_max_tx_dbm = 0;
+            fixed = true;
+            break;
+    }
+
     return fixed;
 }
 
@@ -3300,6 +3331,14 @@ void app_config_init(void) {
             nvs_commit(handle);
         }
         /* tiles_loaded stays false -> tail loads "json_tiles"/"ha_tiles" keys */
+    } else if (version_check == 58) {
+        /* v58 → v59: added wifi_max_tx_dbm (WiFi TX power cap). tiles_loaded
+         * stays false: a v58 device already keeps its tiles in the
+         * "json_tiles"/"ha_tiles" NVS keys, so the tail loads them. */
+        migrate_from_v58(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 57) {
         /* v57 → v58: added alert_voice_conn/alert_voice_disc (spoken NINA link
          * connect/disconnect announcements). tiles_loaded stays false: a v57

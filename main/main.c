@@ -324,6 +324,57 @@ int wifi_get_current_network_index(void)
     return current_network_index;
 }
 
+void wifi_apply_tx_power(uint8_t dbm)
+{
+    /* Same whitelist validate_config() enforces, repeated here because this is
+     * the choke point every path reaches: boot, /api/config (Save),
+     * /api/config/apply (live preview, never validated), /api/config/revert,
+     * and the screen-sleep wake re-apply. An off-list value means "no cap"
+     * rather than an arbitrary number written to the radio. */
+    switch (dbm) {
+        case 0: case 8: case 11: case 14: case 17: case 20:
+            break;
+        default:
+            ESP_LOGW(TAG, "WiFi TX power %u dBm is not a legal step, treating as uncapped",
+                     (unsigned)dbm);
+            dbm = 0;
+            break;
+    }
+
+    /* There is no "remove the cap" API — uncapping means writing the chip's
+     * own default back. Capture it on the very first call, which is the one in
+     * wifi_init() right after esp_wifi_start(), i.e. before any cap exists.
+     * 0 means the probe failed (never a real max-TX value), in which case
+     * "no cap" degrades to a no-op instead of writing a bogus power. */
+    static bool s_default_probed = false;
+    static int8_t s_default_qdbm = 0;
+    if (!s_default_probed) {
+        s_default_probed = true;
+        int8_t probed = 0;
+        if (esp_wifi_get_max_tx_power(&probed) == ESP_OK && probed > 0) {
+            s_default_qdbm = probed;
+            ESP_LOGI(TAG, "WiFi TX power chip default is %d dBm", probed / 4);
+        } else {
+            ESP_LOGW(TAG, "WiFi TX power chip default unreadable; uncapping will be a no-op");
+        }
+    }
+
+    /* esp_wifi_set_max_tx_power() takes quarter-dBm units. Goes over the
+     * esp_wifi_remote RPC to the C6, same as every other esp_wifi_* call here. */
+    int8_t target = (dbm == 0) ? s_default_qdbm : (int8_t)(dbm * 4);
+    if (target == 0) {
+        return;   /* uncap requested, nothing captured to restore */
+    }
+    esp_err_t err = esp_wifi_set_max_tx_power(target);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "WiFi TX power set to %d dBm failed: %s", target / 4, esp_err_to_name(err));
+    } else if (dbm == 0) {
+        ESP_LOGI(TAG, "WiFi TX power restored to chip default (%d dBm)", target / 4);
+    } else {
+        ESP_LOGI(TAG, "WiFi TX power capped at %u dBm", (unsigned)dbm);
+    }
+}
+
 static void wifi_reconnect_cb(void *arg)
 {
     if (manual_switch_pending) {
@@ -533,6 +584,10 @@ static void event_handler(void *arg, esp_event_base_t event_base,
             esp_wifi_set_ps(WIFI_PS_NONE);
         }
 
+        /* Apply the TX power cap (0 = uncapped). Must run after the link is up,
+         * since esp_wifi_set_max_tx_power() only takes effect once WiFi started. */
+        wifi_apply_tx_power(app_config_get()->wifi_max_tx_dbm);
+
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
 }
@@ -623,6 +678,10 @@ static void wifi_init(void)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP,  &wifi_config_ap));
     ESP_ERROR_CHECK(esp_wifi_start());
+
+    /* Cap TX power as soon as WiFi is started so AP-only sessions are capped
+     * too; the STA got-IP path re-applies it after the link comes up. */
+    wifi_apply_tx_power(app_config_get()->wifi_max_tx_dbm);
 
     ESP_LOGI(TAG, "wifi_init finished.");
 }

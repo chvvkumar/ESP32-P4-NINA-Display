@@ -8,7 +8,9 @@ extern "C" {
 /* Decode/prepare the texture into PSRAM once. Returns false on failure. */
 bool moon_sphere_init(void);
 /* Free the decoded PSRAM texture (~1 MB) and reset init state; the next render
- * re-decodes lazily. Call on Image Display page leave. Safe if never inited. */
+ * re-decodes lazily. Call on Image Display page leave. Safe if never inited.
+ * NOT safe against a concurrent render: call it only from the task that runs the
+ * moon renders (goes_poll_task here), with no render in flight. */
 void moon_sphere_deinit(void);
 /* Render a textured, sub-solar-lit sphere for `st` into a freshly malloc'd
  * RGB565 PSRAM buffer of size w*h*2 (caller frees). Returns NULL on failure. */
