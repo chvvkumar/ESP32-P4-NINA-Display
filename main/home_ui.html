@@ -12,25 +12,34 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
 /* shared icon rules: one place for stroke attrs (SVG sprite) */
 .ic{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;width:16px;height:16px;flex-shrink:0}
 .ic3{stroke-width:3}
-/* top nav */
-.top-nav{position:sticky;top:0;z-index:100;background:rgba(10,10,11,.7);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 16px;padding:8px 24px;min-height:60px}
+/* top nav: two-tier bar (sections row + tabs row) */
+.top-nav{position:sticky;top:0;z-index:100;background:rgba(10,10,11,.7);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-bottom:1px solid rgba(255,255,255,.06)}
+.nav-row1{display:flex;align-items:center;gap:16px;height:60px;padding:0 24px}
 .brand{display:flex;align-items:center;gap:10px;min-width:0}
 .brand .logo{width:36px;height:36px;flex-shrink:0}
 .brand-name{font-size:.95rem;font-weight:700;letter-spacing:-.02em;color:#f4f4f5}
 .brand-meta{font-size:.7rem;color:var(--hint);font-variant-numeric:tabular-nums;white-space:nowrap;min-height:1em}
-.nav-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-.nav-group{display:inline-flex;align-items:center;gap:10px;font-size:.75rem;color:var(--muted);padding:6px 12px;border:1px solid rgba(255,255,255,.06);border-radius:10px;background:rgba(255,255,255,.02);white-space:nowrap;font-variant-numeric:tabular-nums}
-.nav-group .fw-ver{color:#f4f4f5;font-weight:600;min-width:5ch;text-align:center}
+.nav-sections{display:flex;align-self:stretch}
+.nav-section{position:relative;display:flex;align-items:center;padding:0 14px;background:none;border:none;color:var(--hint);cursor:pointer;font-size:.8rem;font-weight:600;font-family:inherit;text-decoration:none;white-space:nowrap;transition:color .2s}
+.nav-section:hover,.nav-section.active{color:#f4f4f5}
+.nav-section.active::after{content:'';position:absolute;left:14px;right:14px;bottom:-1px;height:2px;border-radius:2px 2px 0 0;background:var(--accent);box-shadow:0 0 8px rgba(var(--a),.4)}
+.nav-row2{position:absolute;left:0;right:0;top:100%;display:flex;align-items:center;height:40px;padding:0 18px;border-top:1px solid rgba(255,255,255,.045);border-bottom:1px solid rgba(255,255,255,.1);background:linear-gradient(rgba(var(--a),.04),rgba(var(--a),.04)),#141a2a;box-shadow:0 12px 28px rgba(0,0,0,.45)}
+.nav-row2:not(:has(.tab-group.active)){display:none}
+.tab-group{display:none;gap:2px}
+.tab-group.active{display:flex}
+.nav-row2 .tab-group.active{margin-left:var(--r2i,0px)}
+.nav-tab{color:var(--hint);text-decoration:none;white-space:nowrap;padding:5px 12px;border-radius:8px;font-size:.8rem;font-weight:500;transition:color .2s,background-color .2s}
+.nav-tab:hover{color:#f4f4f5;background:rgba(255,255,255,.05)}
+.nav-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-left:auto}
+.fw-pill{display:inline-flex;align-items:center;gap:10px;font-size:.75rem;color:var(--muted);padding:6px 12px;border:1px solid rgba(255,255,255,.06);border-radius:10px;background:rgba(255,255,255,.02);white-space:nowrap;font-variant-numeric:tabular-nums}
+.fw-pill .fw-ver{color:#f4f4f5;font-weight:600;min-width:5ch;text-align:center}
 .update-badge{color:var(--accent);font-size:.64rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border:1px solid rgba(var(--a),.4);border-radius:10px;background:rgba(var(--a),.1);text-decoration:none;transition:border-color .2s}
 .update-badge:hover{border-color:rgba(var(--a),.7)}
 .update-badge.hide{display:none}
 .github-link{color:var(--hint);text-decoration:none;font-size:.75rem;display:flex;align-items:center;gap:6px;padding:7px 12px;border:1px solid rgba(255,255,255,.06);border-radius:10px;transition:all .2s ease;background:rgba(255,255,255,.02);white-space:nowrap}
 .github-link:hover{color:#f4f4f5;border-color:rgba(var(--a),.3);background:rgba(255,255,255,.04)}
-.btn{border:none;border-radius:10px;padding:9px 18px;font-weight:600;cursor:pointer;font-size:.82rem;transition:transform .2s;display:inline-flex;align-items:center;justify-content:center;gap:8px;font-family:inherit;text-decoration:none}
-.btn-primary{background:linear-gradient(135deg,var(--accent),rgba(var(--a),.8));color:#0a0a0b;box-shadow:0 4px 16px rgba(var(--a),.2)}
-.btn-primary:hover{transform:translateY(-1px)}
-.btn .ic{width:15px;height:15px}
-.btn:focus-visible,.deck-chip:focus-visible,.rig-row:focus-visible,.int-chip:focus-visible,.update-badge:focus-visible,.github-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.deck-chip:focus-visible,.rig-row:focus-visible,.int-chip:focus-visible,.update-badge:focus-visible,.github-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.nav-section:focus-visible,.nav-tab:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .content{max-width:1180px;margin:0 auto;padding:24px 24px 60px}
 .card{background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:var(--radius);padding:24px 28px;margin-bottom:20px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
 .card-title{font-size:.7rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.08em;margin-bottom:18px;opacity:.9;display:flex;align-items:center;justify-content:space-between;gap:12px}
@@ -51,7 +60,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
 .bars span{width:5px;border-radius:1px;background:rgba(255,255,255,.12)}
 .bars span.on{background:var(--success)}
 /* reserved widths so live values never shift layout */
-#metricUptime{min-width:14ch}
+#metricUptime{min-width:8ch}
 #metricTemp{min-width:6ch}
 #metricRssi{min-width:3ch;text-align:right}
 #memFree,#psFree{min-width:4ch;text-align:right}
@@ -164,7 +173,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
 @keyframes ell{0%{content:''}25%{content:'.'}50%{content:'..'}75%{content:'...'}}
 .rig-empty{font-size:.75rem;color:var(--hint)}
 /* integrations */
-.integrations{display:flex;flex-wrap:wrap;gap:8px}
+.integrations{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .int-chip{display:inline-flex;align-items:center;gap:8px;font-size:.75rem;font-weight:600;color:var(--text-2);padding:7px 13px;border-radius:10px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.07);text-decoration:none;transition:border-color .2s}
 .int-chip:hover{border-color:rgba(255,255,255,.18)}
 .int-chip .ic{width:14px;height:14px;opacity:.75}
@@ -184,6 +193,8 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
 .deck-hint{font-size:.75rem;color:var(--hint);margin-top:12px;line-height:1.5}
 /* responsive */
 @media (max-width:900px){.main-grid{grid-template-columns:1fr}.content{padding:16px 16px 48px}.card{padding:20px}}
+/* nav: sections become a 4-part segmented control on their own row; tabs row scrolls (hidden scrollbar) */
+@media (max-width:768px){.nav-row1{flex-wrap:wrap;height:auto;padding:8px 14px 10px;row-gap:10px}.brand .logo{width:30px;height:30px}.nav-sections{order:3;flex-basis:100%;align-self:auto;display:grid;grid-template-columns:repeat(4,1fr);gap:2px;padding:3px;border-radius:9px;background:rgba(255,255,255,.045)}.nav-section{justify-content:center;height:30px;padding:0;border-radius:6px;font-size:.75rem}.nav-section.active{background:rgba(255,255,255,.09);box-shadow:0 1px 3px rgba(0,0,0,.35)}.nav-section.active::after{display:none}.nav-row2{height:auto;padding:0 14px 10px;border-top:none;background:none;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}.nav-row2::-webkit-scrollbar{display:none}.nav-tab{padding:6px 12px;background:rgba(255,255,255,.04);flex-shrink:0}.nav-row2 .tab-group.active{margin-left:0}}
 @media (max-width:640px){.hero-body{grid-template-columns:1fr;gap:20px}.connector{display:none}.panel-col{align-self:stretch}.flow{grid-template-columns:minmax(0,1fr) 36px minmax(0,1fr)}.fq{font-size:.74rem;padding:10px 12px}.fout{font-size:.68rem;padding:9px 10px}.fterm{font-size:.72rem}.brand-meta{display:none}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 </style>
@@ -194,7 +205,6 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
 <svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
 <defs>
 <symbol id="i-star" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></symbol>
-<symbol id="i-gear" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></symbol>
 <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></symbol>
 <symbol id="i-chip" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></symbol>
 <symbol id="i-bars" viewBox="0 0 24 24"><path d="M6 19v-3M10 19v-6M14 19v-9M18 19V5"/></symbol>
@@ -216,32 +226,61 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
 </svg>
 
 <nav class="top-nav">
- <div class="brand">
-  <img class="logo" src="/favicon.ico" alt="">
-  <div>
-   <div class="brand-name" id="brandName">NINA Display</div>
-   <div class="brand-meta" id="brandIp"></div>
+ <div class="nav-row1">
+  <div class="brand">
+   <img class="logo" src="/favicon.ico" alt="">
+   <div>
+    <div class="brand-name" id="brandName">NINA Display</div>
+    <div class="brand-meta" id="brandIp"></div>
+   </div>
+  </div>
+  <div class="nav-sections">
+   <a class="nav-section active" href="/">Home</a>
+   <button type="button" class="nav-section" data-section="pages">Pages</button>
+   <button type="button" class="nav-section" data-section="device">Device</button>
+   <button type="button" class="nav-section" data-section="tools">Tools</button>
+  </div>
+  <div class="nav-right">
+   <span class="fw-pill">
+    <span class="fw-ver" id="fwVer">--</span>
+    <a class="update-badge hide" id="updateBadge" href="/config#system">Update available</a>
+   </span>
+   <a class="github-link" href="https://github.com/chvvkumar/ESP32-P4-NINA-Display" target="_blank" rel="noopener">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+    GitHub
+   </a>
   </div>
  </div>
- <div class="nav-right">
-  <span class="nav-group">
-   <span class="fw-ver" id="fwVer">--</span>
-   <a class="update-badge hide" id="updateBadge" href="/config#system">Update available</a>
-  </span>
-  <a class="github-link" href="https://github.com/chvvkumar/ESP32-P4-NINA-Display" target="_blank" rel="noopener">
-   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-   GitHub
-  </a>
-  <a class="btn btn-primary" href="/config"><svg class="ic"><use href="#i-gear"/></svg>Settings</a>
+ <div class="nav-row2">
+  <div class="tab-group" data-section="pages">
+   <a class="nav-tab" href="/config#nodes">N.I.N.A.</a>
+   <a class="nav-tab" href="/config#allsky">AllSky</a>
+   <a class="nav-tab" href="/config#json">JSON</a>
+   <a class="nav-tab" href="/config#ha">Home Assistant</a>
+   <a class="nav-tab" href="/config#clock">Clock</a>
+   <a class="nav-tab" href="/config#spotify">Spotify</a>
+   <a class="nav-tab" href="/config#image-display">Image Display</a>
+  </div>
+  <div class="tab-group" data-section="device">
+   <a class="nav-tab" href="/config#display">Display</a>
+   <a class="nav-tab" href="/config#behavior">Behavior</a>
+   <a class="nav-tab" href="/config#voice-clips">Voice Clips</a>
+   <a class="nav-tab" href="/config#system">System</a>
+  </div>
+  <div class="tab-group" data-section="tools">
+   <a class="nav-tab" href="/config#logs">Logs</a>
+   <a class="nav-tab" href="/config#backup">Backup</a>
+   <a class="nav-tab" href="/config#api">API</a>
+  </div>
  </div>
 </nav>
 
 <div class="content">
  <div class="sys-metrics">
   <div class="sys-metric">
-   <div class="sm-label"><svg class="ic"><use href="#i-clock"/></svg>Uptime</div>
+   <div class="sm-label"><svg class="ic"><use href="#i-clock"/></svg>Uptime &middot; CPU</div>
    <div class="sm-value" id="metricUptime">--</div>
-   <div class="sm-sub">Since last restart</div>
+   <div class="sm-sub" id="cpuSub">Since last restart</div>
   </div>
   <div class="sys-metric">
    <div class="sm-label"><svg class="ic"><use href="#i-chip"/></svg>Memory</div>
@@ -268,13 +307,8 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
    </div>
    <div class="sm-sub" id="wifiSsid"></div>
   </div>
-  <!-- CPU + Storage tiles: fields are new /api/status keys; older firmware
-       omits them, so both tiles start hidden and only show when present. -->
-  <div class="sys-metric" id="cpuTile" style="display:none">
-   <div class="sm-label"><svg class="ic"><use href="#i-chip"/></svg>CPU</div>
-   <div class="sm-value" id="cpuLoad">--</div>
-   <div class="sm-sub" id="cpuCores"></div>
-  </div>
+  <!-- Storage tile: spiffs_* are new /api/status keys; older firmware omits
+       them, so the tile starts hidden and only shows when present. -->
   <div class="sys-metric" id="sfTile" style="display:none">
    <div class="sm-label"><svg class="ic"><use href="#i-db"/></svg>Storage</div>
    <div class="sm-value"><span id="sfUsed">--</span><span class="sm-sub">of <span id="sfTotal">--</span></span></div>
@@ -404,6 +438,35 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
 
 var $ = function (id) { return document.getElementById(id); };
 
+/* ---- top nav: section buttons switch the visible tab group locally;
+   Home is a real link, tabs are plain /config#slug links ---- */
+(function () {
+ function alignRow2() {
+  var grp = document.querySelector('.nav-row2 .tab-group.active');
+  if (!grp) return;
+  var nav = document.querySelector('.top-nav');
+  var row2 = document.querySelector('.nav-row2');
+  var sec = document.querySelector('.nav-section[data-section="' + grp.dataset.section + '"]');
+  if (!nav || !row2 || !sec) return;
+  var indent = sec.getBoundingClientRect().left - row2.getBoundingClientRect().left - parseFloat(getComputedStyle(row2).paddingLeft);
+  nav.style.setProperty('--r2i', Math.max(0, indent) + 'px');
+ }
+ document.querySelectorAll('.nav-section[data-section]').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+   var open = !btn.classList.contains('active');
+   document.querySelectorAll('.nav-section').forEach(function (b) {
+    b.classList.toggle('active', open ? b === btn : !b.dataset.section);
+   });
+   document.querySelectorAll('.tab-group').forEach(function (g) {
+    g.classList.toggle('active', open && g.dataset.section === btn.dataset.section);
+   });
+   alignRow2();
+  });
+ });
+ window.addEventListener('resize', alignRow2);
+ window.addEventListener('load', alignRow2);
+})();
+
 /* ---- slug -> icon / subtitle mapping (presentation only; data comes from the API) ---- */
 var ICONS = { summary: 'i-grid', sysinfo: 'i-chip', allsky: 'i-sun', spotify: 'i-music',
               clock: 'i-clock', json: 'i-code', ha: 'i-home' };
@@ -453,7 +516,7 @@ var metricRssi = $('metricRssi'), wifiSsid = $('wifiSsid');
 var rssiBars = Array.prototype.slice.call($('rssiBars').children);
 var memFree = $('memFree'), memTotal = $('memTotal'), memBar = $('memBar'), memPct = $('memPct');
 var psFree = $('psFree'), psTotal = $('psTotal'), psBar = $('psBar'), psPct = $('psPct');
-var cpuTile = $('cpuTile'), cpuLoad = $('cpuLoad'), cpuCores = $('cpuCores');
+var cpuSub = $('cpuSub');
 var sfTile = $('sfTile'), sfUsed = $('sfUsed'), sfTotal = $('sfTotal'), sfBar = $('sfBar'), sfVoice = $('sfVoice');
 var intChips = { mqtt: $('intMqtt'), allsky: $('intAllsky'), weather: $('intWeather'), spotify: $('intSpotify') };
 
@@ -488,11 +551,14 @@ function pageSub(slug) {
  return SUBS[slug] || '';
 }
 
-function p2(n) { return (n < 10 ? '0' : '') + n; }
-/* zero-padded h/m/s: string length is constant, so tabular digits never shift layout */
+/* compact uptime: the two largest units that matter, no leading zero units */
 function fmtUptime(t) {
- return Math.floor(t / 86400) + 'd ' + p2(Math.floor(t % 86400 / 3600)) + 'h ' +
-  p2(Math.floor(t % 3600 / 60)) + 'm ' + p2(t % 60) + 's';
+ var d = Math.floor(t / 86400), h = Math.floor(t % 86400 / 3600);
+ var m = Math.floor(t % 3600 / 60), s = t % 60;
+ if (d > 0) return d + 'd ' + h + 'h';
+ if (h > 0) return h + 'h ' + m + 'm';
+ if (m > 0) return m + 'm ' + s + 's';
+ return s + 's';
 }
 function fmtK(b) { return Math.round(b / 1024) + 'K'; }
 function fmtM(b) { return (b / 1048576).toFixed(1) + 'M'; }
@@ -835,14 +901,15 @@ function applyStatus(st, ns) {
   wifiSsid.textContent = 'Offline';
  }
 
- /* CPU + Storage: fields absent on older firmware -> keep the tiles hidden */
+ /* CPU + Storage: fields absent on older firmware -> CPU line falls back to the
+    plain uptime caption, Storage tile stays hidden */
  if (st.cpu_load != null) {
-  cpuTile.style.display = '';
-  cpuLoad.textContent = Math.round(st.cpu_load) + '%';
-  cpuCores.textContent = (st.cpu0 != null && st.cpu1 != null)
-   ? 'C0 ' + Math.round(st.cpu0) + '% · C1 ' + Math.round(st.cpu1) + '%' : '';
+  /* numeric values only (Math.round) -> safe for innerHTML */
+  cpuSub.innerHTML = 'CPU overall ' + Math.round(st.cpu_load) + '%' +
+   ((st.cpu0 != null && st.cpu1 != null)
+    ? '<br>Core 0 ' + Math.round(st.cpu0) + '%<br>Core 1 ' + Math.round(st.cpu1) + '%' : '');
  } else {
-  cpuTile.style.display = 'none';
+  cpuSub.textContent = 'Since last restart';
  }
  if (st.spiffs_total != null && st.spiffs_total > 0) {
   sfTile.style.display = '';

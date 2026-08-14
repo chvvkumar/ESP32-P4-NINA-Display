@@ -144,7 +144,7 @@
 
       <div class="card">
         <div class="card-title"><span class="card-title-label">Power Management <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
-        <div class="help-popover"><div class="help-popover-title">Power Management</div><p>Controls deep sleep. Deep sleep powers the device down on a long-press of the BOOT button or, optionally, after extended disconnection from all NINA instances. While asleep the display is off and the device is not reachable over the network.</p><p>The wake timer sets how many hours pass before the device wakes itself from deep sleep. A value of 0 means it stays asleep until physically rebooted.</p><p>Example: leave deep sleep off for an always-mounted display so the dashboard stays reachable over the network at all times.</p></div>
+        <div class="help-popover"><div class="help-popover-title">Power Management</div><p>Controls deep sleep. Deep sleep powers the device down on a long-press of the BOOT button or, optionally, after extended disconnection from all NINA instances. While asleep the display is off and the device is not reachable over the network.</p><p>The wake timer sets how many hours pass before the device wakes itself from deep sleep. A value of 0 means it stays asleep until physically rebooted.</p><p>WiFi transmit power sets how strongly the device transmits. Maximum is the normal setting. Lowering it reduces WiFi range slightly but can fix brief teal or green screen flashes on some boards, caused by power supply noise during WiFi transmit bursts. The new value takes effect the moment you pick it, so you can judge the result before you save. If a lower setting makes the device unreachable, power-cycle it and the unsaved change is discarded.</p><p>Example: leave deep sleep off for an always-mounted display so the dashboard stays reachable over the network at all times.</p></div>
         <div class="toggle-row">
           <span class="toggle-label">Enable deep sleep (long-press BOOT to power off)</span>
           <label class="toggle"><input type="checkbox" id="deep_sleep_enabled"><span class="toggle-track"></span></label>
@@ -161,6 +161,22 @@
             <label class="toggle"><input type="checkbox" id="deep_sleep_on_idle"><span class="toggle-track"></span></label>
           </div>
           <div class="field-hint">Enter deep sleep after extended disconnection from all NINA instances. The device must be physically rebooted to wake up if the wake timer is set to 0.</div>
+        </div>
+        <div class="subsection">
+        <div class="subsection-title">WiFi Transmit Power</div>
+        <div class="field">
+          <label class="field-label">WiFi transmit power</label>
+          <select class="input" id="wifi_max_tx_dbm" onchange="txPowerChanged(this)">
+            <option value="0">Maximum</option>
+            <option value="20">20 dBm</option>
+            <option value="17">17 dBm</option>
+            <option value="14">14 dBm</option>
+            <option value="11">11 dBm</option>
+            <option value="8">8 dBm</option>
+          </select>
+          <div class="field-hint">Lowering transmit power reduces WiFi range slightly but can fix brief teal or green screen flashes on some boards, caused by power supply noise during WiFi transmit bursts. The new value takes effect as soon as you pick it, so you can check the display and this page before saving.</div>
+          <div class="field-hint">Warning: a value too low for the distance to your router can make the device unreachable and leave this page unresponsive. Power-cycle the device to discard an unsaved change, and only press Save once you have confirmed the page still works.</div>
+        </div>
         </div>
       </div>
 

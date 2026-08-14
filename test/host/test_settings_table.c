@@ -379,6 +379,43 @@ int main(void)
         CHECK(cfg.mqtt_enabled == false, "mqtt_enabled: wrong-type value ignored");
     }
 
+    /* ── 8. wifi_max_tx_dbm: INT_RESET row over a discrete-step field ──
+     * Section 2's generated sweep already proves "21 -> def", but this field
+     * is the one where clamp-vs-reset is a behavioral difference worth
+     * pinning by name: a garbage byte must land on 0 (uncapped) and never on
+     * the nearest bound (20 dBm — a silent throttle the user never chose).
+     * Note 13 is in-range and therefore SURVIVES this layer: it is the
+     * whitelist at the bottom of validate_config() in app_config.c that
+     * resets it to 0, and app_config.c is not linked into this harness (it
+     * needs NVS), so 13 is asserted here only as "untouched by the table". */
+    printf("8. wifi_max_tx_dbm: legal steps survive, garbage resets to 0\n");
+    {
+        static const int legal[] = { 0, 8, 20 };
+        for (size_t i = 0; i < sizeof(legal) / sizeof(legal[0]); i++) {
+            app_config_t cfg;
+            memset(&cfg, 0, sizeof(cfg));
+            settings_defaults_apply(&cfg);
+            cfg.wifi_max_tx_dbm = (uint8_t)legal[i];
+            settings_clamp_apply(&cfg);
+            CHECK(cfg.wifi_max_tx_dbm == legal[i],
+                  "wifi_max_tx_dbm: %d survives the clamp pass", legal[i]);
+        }
+    }
+    {
+        app_config_t cfg;
+        memset(&cfg, 0, sizeof(cfg));
+        settings_defaults_apply(&cfg);
+
+        cfg.wifi_max_tx_dbm = 255;
+        settings_clamp_apply(&cfg);
+        CHECK(cfg.wifi_max_tx_dbm == 0, "wifi_max_tx_dbm: 255 resets to 0 (uncapped), not to 20");
+
+        cfg.wifi_max_tx_dbm = 13;
+        settings_clamp_apply(&cfg);
+        CHECK(cfg.wifi_max_tx_dbm == 13,
+              "wifi_max_tx_dbm: in-range 13 survives the table (validate_config's whitelist kills it)");
+    }
+
     printf("\n%s: %d failure(s)\n", fails == 0 ? "PASS" : "FAIL", fails);
     return fails == 0 ? 0 : 1;
 }

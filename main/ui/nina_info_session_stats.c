@@ -14,6 +14,7 @@
 #include "app_config.h"
 #include "ui_helpers.h"
 #include "ui_styles.h"
+#include "time_parse.h"
 #include "lvgl.h"
 #include "esp_timer.h"
 #include <stdio.h>
@@ -49,60 +50,8 @@ static lv_obj_t *content_root = NULL;
 
 /* ── Local helpers ─────────────────────────────────────────────────── */
 
-static lv_obj_t *make_card(lv_obj_t *parent) {
-    lv_obj_t *card = lv_obj_create(parent);
-    lv_obj_remove_style_all(card);
-    lv_obj_add_style(card, &style_bento_box, 0);
-    lv_obj_set_width(card, LV_PCT(100));
-    lv_obj_set_height(card, LV_SIZE_CONTENT);
-    lv_obj_set_style_pad_all(card, 14, 0);
-    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_row(card, 8, 0);
-    lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
-    return card;
-}
-
-static void make_section(lv_obj_t *parent, const char *title) {
-    lv_obj_t *lbl = lv_label_create(parent);
-    lv_label_set_text(lbl, title);
-    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_letter_space(lbl, 2, 0);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(lbl,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
-}
-
-static lv_obj_t *make_kv(lv_obj_t *parent, const char *key) {
-    lv_obj_t *row = lv_obj_create(parent);
-    lv_obj_remove_style_all(row);
-    lv_obj_set_width(row, LV_PCT(100));
-    lv_obj_set_height(row, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-
-    lv_obj_t *lbl_key = lv_label_create(row);
-    lv_label_set_text(lbl_key, key);
-    lv_obj_set_style_text_font(lbl_key, &lv_font_montserrat_20, 0);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(lbl_key,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
-
-    lv_obj_t *lbl_val = lv_label_create(row);
-    lv_label_set_text(lbl_val, "--");
-    lv_obj_set_style_text_font(lbl_val, &lv_font_montserrat_22, 0);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(lbl_val,
-            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-    }
-
-    return lbl_val;
-}
+/* Card/section/kv factories are shared: ui_card/ui_section_label/ui_kv (ui_helpers.h).
+ * This page uses card pad 14 / row gap 8, key font 20, value font 22. */
 
 static lv_obj_t *make_hero_block(lv_obj_t *parent, const char *title,
                                   const lv_font_t *val_font, uint32_t color) {
@@ -119,9 +68,7 @@ static lv_obj_t *make_hero_block(lv_obj_t *parent, const char *title,
     lv_label_set_text(lbl, title);
     lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_letter_space(lbl, 2, 0);
-    if (current_theme)
-        lv_obj_set_style_text_color(lbl,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+    ui_set_theme_text_color(lbl, UI_THEME_COLOR(label_color));
 
     lv_obj_t *val = lv_label_create(block);
     lv_label_set_text(val, "--");
@@ -143,16 +90,10 @@ static lv_obj_t *make_divider(lv_obj_t *parent) {
     return div;
 }
 
-/* Format seconds as "Xh Ym" or "Ym Zs" */
-static void fmt_duration(char *buf, size_t sz, float seconds) {
-    int total = (int)seconds;
-    if (total >= 3600) {
-        snprintf(buf, sz, "%dh %dm", total / 3600, (total % 3600) / 60);
-    } else if (total >= 60) {
-        snprintf(buf, sz, "%dm %ds", total / 60, total % 60);
-    } else {
-        snprintf(buf, sz, "%ds", total);
-    }
+/* Both durations here arrive as float seconds (session accumulators); the
+ * shared formatter takes whole seconds, so truncate at the boundary. */
+static void fmt_duration_f(char *buf, size_t sz, float seconds) {
+    fmt_duration(buf, sz, (int32_t)seconds, FMT_DUR_TIERED);
 }
 
 /* ── Build ─────────────────────────────────────────────────────────── */
@@ -167,14 +108,13 @@ void build_session_stats_content(lv_obj_t *content) {
     lv_obj_set_style_pad_row(content, 10, 0);
     lv_obj_remove_flag(content, LV_OBJ_FLAG_SCROLLABLE);
 
-    int gb = current_theme ? app_config_get()->color_brightness : 100;
     uint32_t text_color = current_theme ? current_theme->text_color : 0xFFFFFF;
     uint32_t progress_color = current_theme ? current_theme->progress_color : 0x4FC3F7;
 
     /* ── Hero: Exposures | Integration | Efficiency ── */
     {
-        lv_obj_t *card = make_card(content);
-        make_section(card, "SESSION TOTALS");
+        lv_obj_t *card = ui_card(content, 14, 8);
+        ui_section_label(card, "SESSION TOTALS");
 
         lv_obj_t *hero_row = lv_obj_create(card);
         lv_obj_remove_style_all(hero_row);
@@ -214,17 +154,15 @@ void build_session_stats_content(lv_obj_t *content) {
         lv_obj_remove_flag(col_left, LV_OBJ_FLAG_SCROLLABLE);
 
         {
-            lv_obj_t *card = make_card(col_left);
+            lv_obj_t *card = ui_card(col_left, 14, 8);
             lv_obj_set_flex_grow(card, 1);
-            make_section(card, "GUIDING (RMS)");
-            lbl_rms_avg_val = make_kv(card, "Average");
-            lbl_rms_min_val = make_kv(card, "Best");
-            lbl_rms_max_val = make_kv(card, "Worst");
+            ui_section_label(card, "GUIDING (RMS)");
+            lbl_rms_avg_val = ui_kv(card, "Average", &lv_font_montserrat_20, &lv_font_montserrat_22);
+            lbl_rms_min_val = ui_kv(card, "Best", &lv_font_montserrat_20, &lv_font_montserrat_22);
+            lbl_rms_max_val = ui_kv(card, "Worst", &lv_font_montserrat_20, &lv_font_montserrat_22);
 
             /* Color the average value with RMS color */
-            if (current_theme)
-                lv_obj_set_style_text_color(lbl_rms_avg_val,
-                    lv_color_hex(app_config_apply_brightness(current_theme->rms_color, gb)), 0);
+            ui_set_theme_text_color(lbl_rms_avg_val, UI_THEME_COLOR(rms_color));
         }
 
         /* Right: HFR */
@@ -237,27 +175,25 @@ void build_session_stats_content(lv_obj_t *content) {
         lv_obj_remove_flag(col_right, LV_OBJ_FLAG_SCROLLABLE);
 
         {
-            lv_obj_t *card = make_card(col_right);
+            lv_obj_t *card = ui_card(col_right, 14, 8);
             lv_obj_set_flex_grow(card, 1);
-            make_section(card, "FOCUS (HFR)");
-            lbl_hfr_avg_val = make_kv(card, "Average");
-            lbl_hfr_min_val = make_kv(card, "Best");
-            lbl_hfr_max_val = make_kv(card, "Worst");
+            ui_section_label(card, "FOCUS (HFR)");
+            lbl_hfr_avg_val = ui_kv(card, "Average", &lv_font_montserrat_20, &lv_font_montserrat_22);
+            lbl_hfr_min_val = ui_kv(card, "Best", &lv_font_montserrat_20, &lv_font_montserrat_22);
+            lbl_hfr_max_val = ui_kv(card, "Worst", &lv_font_montserrat_20, &lv_font_montserrat_22);
 
             /* Color the average value with HFR color */
-            if (current_theme)
-                lv_obj_set_style_text_color(lbl_hfr_avg_val,
-                    lv_color_hex(app_config_apply_brightness(current_theme->hfr_color, gb)), 0);
+            ui_set_theme_text_color(lbl_hfr_avg_val, UI_THEME_COLOR(hfr_color));
         }
     }
 
     /* ── Session info row ── */
     {
-        lv_obj_t *card = make_card(content);
+        lv_obj_t *card = ui_card(content, 14, 8);
         lv_obj_set_style_pad_right(card, INFO_BACK_BTN_ZONE, 0);
-        make_section(card, "SESSION");
-        lbl_duration_val   = make_kv(card, "Duration");
-        lbl_datapoints_val = make_kv(card, "Data Points");
+        ui_section_label(card, "SESSION");
+        lbl_duration_val   = ui_kv(card, "Duration", &lv_font_montserrat_20, &lv_font_montserrat_22);
+        lbl_datapoints_val = ui_kv(card, "Data Points", &lv_font_montserrat_20, &lv_font_montserrat_22);
     }
 
     /* ── No-data label ── */
@@ -266,9 +202,7 @@ void build_session_stats_content(lv_obj_t *content) {
     lv_obj_set_style_text_font(lbl_no_data, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_align(lbl_no_data, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_align(lbl_no_data, LV_ALIGN_CENTER);
-    if (current_theme)
-        lv_obj_set_style_text_color(lbl_no_data,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+    ui_set_theme_text_color(lbl_no_data, UI_THEME_COLOR(label_color));
     lv_obj_add_flag(lbl_no_data, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -318,7 +252,7 @@ void populate_session_stats_data(int instance) {
     lv_label_set_text(lbl_exposures_val, buf);
 
     /* Hero: integration time */
-    fmt_duration(buf, sizeof(buf), st->total_exposure_time_s);
+    fmt_duration_f(buf, sizeof(buf), st->total_exposure_time_s);
     lv_label_set_text(lbl_integration_val, buf);
 
     /* Hero: efficiency = integration / session_elapsed */
@@ -371,7 +305,7 @@ void populate_session_stats_data(int instance) {
     if (st->session_start_ms > 0) {
         int64_t now_ms = esp_timer_get_time() / 1000;
         float elapsed_s = (float)(now_ms - st->session_start_ms) / 1000.0f;
-        fmt_duration(buf, sizeof(buf), elapsed_s);
+        fmt_duration_f(buf, sizeof(buf), elapsed_s);
     } else {
         snprintf(buf, sizeof(buf), "--");
     }

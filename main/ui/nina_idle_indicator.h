@@ -40,12 +40,6 @@ void nina_idle_indicator_set_active(bool idle_active);
  */
 void nina_idle_indicator_reset(void);
 
-/**
- * Briefly flash green before idle override restores previous page.
- * Called from tasks.c (non-UI thread — acquires LVGL lock internally).
- */
-void nina_idle_indicator_set_reconnecting(void);
-
 #ifdef __cplusplus
 }
 #endif

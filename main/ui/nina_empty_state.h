@@ -32,7 +32,6 @@
  * ──────────────────────────────────────────────────────────────────── */
 #define ICON_CLOUD_OFF  "\xee\x8b\x81"   /* U+E2C1 cloud_off  */
 #define ICON_MUSIC_OFF  "\xee\x91\x80"   /* U+E440 music_off  */
-#define ICON_IMAGE      "\xee\x89\x91"   /* U+E251 image      */
 
 /**
  * @brief Create an empty-state widget as a child of @p parent.

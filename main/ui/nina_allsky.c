@@ -422,22 +422,11 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
     lv_label_set_text(qd->lbl_title, quad_titles[quad_index]);
     lv_obj_set_style_text_font(qd->lbl_title, &lv_font_montserrat_22, 0);
     lv_obj_set_style_text_letter_space(qd->lbl_title, 2, 0);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(qd->lbl_title,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
+    ui_set_theme_text_color(qd->lbl_title, UI_THEME_COLOR(label_color));
 
     /* Fan indicator symbol — top-right of THERMAL quadrant */
     if (quad_index == 0) {
-        qd->dot1 = lv_label_create(title_row);
-        lv_label_set_text(qd->dot1, LV_SYMBOL_REFRESH);
-        lv_obj_set_style_text_font(qd->dot1, &lv_font_montserrat_22, 0);
-        if (current_theme) {
-            int gb = app_config_get()->color_brightness;
-            lv_obj_set_style_text_color(qd->dot1,
-                lv_color_hex(app_config_apply_brightness(current_theme->bento_border, gb)), 0);
-        }
+        qd->dot1 = ui_label(title_row, LV_SYMBOL_REFRESH, &lv_font_montserrat_22, UI_THEME_COLOR(bento_border));
     }
 
     /* Moon phase canvas — floating overlay on SQM quadrant (top-right) */
@@ -462,26 +451,12 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
 
     /* GPS indicator symbol — top-right of POWER quadrant */
     if (quad_index == 3) {
-        qd->dot1 = lv_label_create(title_row);
-        lv_label_set_text(qd->dot1, LV_SYMBOL_GPS);
-        lv_obj_set_style_text_font(qd->dot1, &lv_font_montserrat_22, 0);
-        if (current_theme) {
-            int gb = app_config_get()->color_brightness;
-            lv_obj_set_style_text_color(qd->dot1,
-                lv_color_hex(app_config_apply_brightness(current_theme->bento_border, gb)), 0);
-        }
+        qd->dot1 = ui_label(title_row, LV_SYMBOL_GPS, &lv_font_montserrat_22, UI_THEME_COLOR(bento_border));
     }
 
     /* Heater indicator symbol — top-right of AMBIENT quadrant */
     if (quad_index == 2) {
-        qd->dot2 = lv_label_create(title_row);
-        lv_label_set_text(qd->dot2, LV_SYMBOL_CHARGE);
-        lv_obj_set_style_text_font(qd->dot2, &lv_font_montserrat_22, 0);
-        if (current_theme) {
-            int gb = app_config_get()->color_brightness;
-            lv_obj_set_style_text_color(qd->dot2,
-                lv_color_hex(app_config_apply_brightness(current_theme->bento_border, gb)), 0);
-        }
+        qd->dot2 = ui_label(title_row, LV_SYMBOL_CHARGE, &lv_font_montserrat_22, UI_THEME_COLOR(bento_border));
     }
 
     /* 2. Main value (48px font — no transform_scale to avoid expensive software rendering) */
@@ -490,11 +465,7 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
     lv_obj_set_style_text_align(qd->lbl_main_value, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_width(qd->lbl_main_value, LV_PCT(100));
     lv_label_set_text(qd->lbl_main_value, "--");
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(qd->lbl_main_value,
-            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-    }
+    ui_set_theme_text_color(qd->lbl_main_value, UI_THEME_COLOR(text_color));
 
     /* 3. Unit label (uses mutable font copy with superscript fallback) */
     qd->lbl_unit = lv_label_create(qd->box);
@@ -502,11 +473,7 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
     lv_obj_set_style_text_align(qd->lbl_unit, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_width(qd->lbl_unit, LV_PCT(100));
     lv_label_set_text(qd->lbl_unit, qcfg[quad_index].unit);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(qd->lbl_unit,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
+    ui_set_theme_text_color(qd->lbl_unit, UI_THEME_COLOR(label_color));
 
     /* 4. Threshold bar */
     qd->bar = lv_bar_create(qd->box);
@@ -539,20 +506,12 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
     lv_obj_set_style_text_font(qd->lbl_sub1,
         (quad_index == 1) ? &lv_font_montserrat_22 : &lv_font_montserrat_28, 0);
     lv_label_set_text(qd->lbl_sub1, "--");
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(qd->lbl_sub1,
-            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-    }
+    ui_set_theme_text_color(qd->lbl_sub1, UI_THEME_COLOR(text_color));
 
     qd->lbl_sub2 = lv_label_create(sub_row);
     lv_obj_set_style_text_font(qd->lbl_sub2, &lv_font_montserrat_28, 0);
     lv_label_set_text(qd->lbl_sub2, "--");
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(qd->lbl_sub2,
-            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-    }
+    ui_set_theme_text_color(qd->lbl_sub2, UI_THEME_COLOR(text_color));
 
 }
 

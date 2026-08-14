@@ -23,6 +23,7 @@
 #include "themes.h"
 #include "ui_styles.h"
 #include "display_defs.h"
+#include "esp_attr.h"                  /* EXT_RAM_BSS_ATTR */
 #include "esp_system.h"
 #include "esp_timer.h"                 /* esp_timer_get_time — USER claim stamp */
 #include "freertos/FreeRTOS.h"
@@ -35,9 +36,7 @@
 /* ── Layout ──────────────────────────────────────────────────────────── */
 #define ST_ROW_H        50   /* Uniform row height for settings rows */
 #define ST_ROW_H_LG     60   /* Large row height for Display/Nodes rows */
-#define SAVE_BAR_H      48   /* Sticky save bar height */
 #define KB_HEIGHT       280   /* On-screen keyboard height */
-#define TAB_BAR_H        44   /* Tab bar height */
 #define CARD_PAD         12   /* Card internal padding */
 #define CARD_ROW_GAP      8   /* Row gap within cards */
 #define STEPPER_BTN_SZ   56   /* +/- stepper button size */
@@ -51,7 +50,10 @@ static lv_obj_t *lbl_save_btn = NULL;
 static bool      kb_visible   = false;
 static bool      needs_reboot = false;
 static bool      dirty        = false;
-static app_config_t config_snapshot;
+/* 8.6 KB edit baseline, written only while the Settings page is open (LVGL
+ * task context). Kept as a static in PSRAM .ext_ram.bss rather than a heap
+ * alloc so the open/close paths stay unchanged. */
+static EXT_RAM_BSS_ATTR app_config_t config_snapshot;
 
 static lv_timer_t *save_feedback_timer = NULL;
 
@@ -236,10 +238,6 @@ void settings_hide_keyboard(void) {
     }
 }
 
-bool settings_tabview_keyboard_active(void) {
-    return kb_visible;
-}
-
 /* ════════════════════════════════════════════════════════════════════════
  *  Dirty State / Save Bar
  * ════════════════════════════════════════════════════════════════════════ */
@@ -275,16 +273,12 @@ lv_obj_t *settings_make_card(lv_obj_t *parent, const char *title) {
     lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER);
 
     if (title) {
-        int gb = app_config_get()->color_brightness;
         lv_obj_t *lbl = lv_label_create(card);
         lv_label_set_text(lbl, title);
         lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
         lv_obj_set_style_text_letter_space(lbl, 1, 0);
         /* Uppercase via manual copy — LVGL 9 doesn't have auto-uppercase */
-        if (current_theme) {
-            lv_obj_set_style_text_color(lbl,
-                lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-        }
+        ui_set_theme_text_color(lbl, UI_THEME_COLOR(label_color));
     }
 
     ui_styles_set_widget_draw_cbs(card);
@@ -333,7 +327,6 @@ lv_obj_t *settings_make_divider(lv_obj_t *parent) {
 lv_obj_t *settings_make_stepper(lv_obj_t *parent, lv_obj_t **out_minus,
                                  lv_obj_t **out_label, lv_obj_t **out_plus)
 {
-    int gb = app_config_get()->color_brightness;
 
     lv_obj_t *row = lv_obj_create(parent);
     lv_obj_remove_style_all(row);
@@ -354,13 +347,7 @@ lv_obj_t *settings_make_stepper(lv_obj_t *parent, lv_obj_t **out_minus,
     lv_obj_set_style_border_width(btn_minus, 0, 0);
     lv_obj_set_style_shadow_width(btn_minus, 0, 0);
 
-    lv_obj_t *lbl_m = lv_label_create(btn_minus);
-    lv_label_set_text(lbl_m, LV_SYMBOL_MINUS);
-    lv_obj_set_style_text_font(lbl_m, &lv_font_montserrat_22, 0);
-    if (current_theme) {
-        lv_obj_set_style_text_color(lbl_m,
-            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-    }
+    lv_obj_t *lbl_m = ui_label(btn_minus, LV_SYMBOL_MINUS, &lv_font_montserrat_22, UI_THEME_COLOR(text_color));
     lv_obj_center(lbl_m);
 
     /* Value label */
@@ -369,10 +356,7 @@ lv_obj_t *settings_make_stepper(lv_obj_t *parent, lv_obj_t **out_minus,
     lv_obj_set_style_text_font(lbl_val, &lv_font_montserrat_22, 0);
     lv_obj_set_style_min_width(lbl_val, 50, 0);
     lv_obj_set_style_text_align(lbl_val, LV_TEXT_ALIGN_CENTER, 0);
-    if (current_theme) {
-        lv_obj_set_style_text_color(lbl_val,
-            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-    }
+    ui_set_theme_text_color(lbl_val, UI_THEME_COLOR(text_color));
 
     /* [+] button */
     lv_obj_t *btn_plus = lv_button_create(row);
@@ -386,13 +370,7 @@ lv_obj_t *settings_make_stepper(lv_obj_t *parent, lv_obj_t **out_minus,
     lv_obj_set_style_border_width(btn_plus, 0, 0);
     lv_obj_set_style_shadow_width(btn_plus, 0, 0);
 
-    lv_obj_t *lbl_p = lv_label_create(btn_plus);
-    lv_label_set_text(lbl_p, LV_SYMBOL_PLUS);
-    lv_obj_set_style_text_font(lbl_p, &lv_font_montserrat_22, 0);
-    if (current_theme) {
-        lv_obj_set_style_text_color(lbl_p,
-            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-    }
+    lv_obj_t *lbl_p = ui_label(btn_plus, LV_SYMBOL_PLUS, &lv_font_montserrat_22, UI_THEME_COLOR(text_color));
     lv_obj_center(lbl_p);
 
     /* Output pointers */
@@ -406,7 +384,6 @@ lv_obj_t *settings_make_stepper(lv_obj_t *parent, lv_obj_t **out_minus,
 lv_obj_t *settings_make_toggle_row(lv_obj_t *parent, const char *text,
                                     lv_obj_t **out_sw)
 {
-    int gb = app_config_get()->color_brightness;
 
     lv_obj_t *row = lv_obj_create(parent);
     lv_obj_remove_style_all(row);
@@ -416,13 +393,7 @@ lv_obj_t *settings_make_toggle_row(lv_obj_t *parent, const char *text,
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    lv_obj_t *lbl = lv_label_create(row);
-    lv_label_set_text(lbl, text);
-    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
-    if (current_theme) {
-        lv_obj_set_style_text_color(lbl,
-            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-    }
+    lv_obj_t *lbl = ui_label(row, text, &lv_font_montserrat_20, UI_THEME_COLOR(text_color));
 
     lv_obj_t *sw = lv_switch_create(row);
     lv_obj_set_size(sw, 58, 32);
@@ -453,13 +424,7 @@ lv_obj_t *settings_make_textarea_row(lv_obj_t *parent, const char *label_text,
     lv_obj_set_style_pad_row(cont, 4, 0);
 
     /* Label */
-    lv_obj_t *lbl = lv_label_create(cont);
-    lv_label_set_text(lbl, label_text);
-    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
-    if (current_theme) {
-        lv_obj_set_style_text_color(lbl,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
+    lv_obj_t *lbl = ui_label(cont, label_text, &lv_font_montserrat_16, UI_THEME_COLOR(label_color));
 
     /* Textarea */
     lv_obj_t *ta = lv_textarea_create(cont);
@@ -712,13 +677,7 @@ lv_obj_t *settings_tabview_create(lv_obj_t *parent) {
     lv_obj_remove_flag(btn_back, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_align(btn_back, LV_ALIGN_TOP_LEFT, 0, 0);
 
-    lv_obj_t *lbl_back = lv_label_create(btn_back);
-    lv_label_set_text(lbl_back, LV_SYMBOL_LEFT);
-    lv_obj_set_style_text_font(lbl_back, &lv_font_montserrat_28, 0);
-    if (current_theme) {
-        lv_obj_set_style_text_color(lbl_back,
-            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-    }
+    lv_obj_t *lbl_back = ui_label(btn_back, LV_SYMBOL_LEFT, &lv_font_montserrat_28, UI_THEME_COLOR(text_color));
     lv_obj_center(lbl_back);
 
     lv_obj_add_event_cb(btn_back, back_btn_cb, LV_EVENT_CLICKED, NULL);

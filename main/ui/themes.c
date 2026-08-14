@@ -150,12 +150,3 @@ const theme_t* themes_get(int index) {
     }
     return &themes[index];
 }
-
-int themes_get_index_by_name(const char *name) {
-    for (int i = 0; i < themes_get_count(); i++) {
-        if (strcmp(themes[i].name, name) == 0) {
-            return i;
-        }
-    }
-    return 0;
-}

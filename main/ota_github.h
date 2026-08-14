@@ -21,7 +21,8 @@ typedef struct {
 typedef enum {
     OTA_CHECK_UP_TO_DATE = 0,   /* definitive: no newer release available */
     OTA_CHECK_UPDATE_AVAILABLE, /* *out filled with the target release */
-    OTA_CHECK_ERROR,            /* transient: network/rate-limit/unverifiable — retry, NOT up-to-date, NOT manual-flash */
+    OTA_CHECK_ERROR,            /* transient: network/unverifiable — retry, NOT up-to-date, NOT manual-flash */
+    OTA_CHECK_RATE_LIMITED,     /* GitHub answered 403/429: quota exhausted, back off ~1 h */
 } ota_check_result_t;
 
 /**
@@ -33,9 +34,12 @@ typedef enum {
  * @param out Filled with release info when the result is OTA_CHECK_UPDATE_AVAILABLE
  * @return OTA_CHECK_UPDATE_AVAILABLE when a newer release is available (*out filled);
  *         OTA_CHECK_UP_TO_DATE when definitively on the latest release;
- *         OTA_CHECK_ERROR on a transient failure (network/rate-limit/unverifiable
+ *         OTA_CHECK_ERROR on a transient failure (network/unverifiable
  *         history) — the caller should retry and must not treat this as up-to-date
- *         or as a manual-flash requirement.
+ *         or as a manual-flash requirement;
+ *         OTA_CHECK_RATE_LIMITED when GitHub rejected a page fetch with 403/429 —
+ *         same "not up-to-date, not manual-flash" contract as ERROR, but the caller
+ *         must back off for roughly an hour instead of retrying in a minute.
  */
 ota_check_result_t ota_github_check(int channel, const char *current_version, github_release_info_t *out);
 
@@ -47,6 +51,44 @@ ota_check_result_t ota_github_check(int channel, const char *current_version, gi
  * @return ESP_OK on success, error code on failure
  */
 esp_err_t ota_github_download(const char *url, void (*progress_cb)(int percent));
+
+/**
+ * Arm the boot-time rollback confirm guard. Call once, early in app_main
+ * (after NVS init, before the web server starts serving OTA requests).
+ * Captures whether the running image is on its first boot after an OTA
+ * (ESP_OTA_IMG_PENDING_VERIFY) and, if so, spawns a small internal-stack task
+ * that marks the image valid once boot is confirmed healthy (display and
+ * network milestones reported) or, as a fail-safe, after an uptime fallback,
+ * so no path leaves the image pending forever. The return value of the
+ * mark-valid call is checked and retried on failure. A normal boot spawns
+ * nothing.
+ */
+void ota_github_boot_guard_init(void);
+
+/**
+ * True if the running image was in ESP_OTA_IMG_PENDING_VERIFY at
+ * ota_github_boot_guard_init() time (first boot of a freshly OTA'd image).
+ * Use this instead of re-reading the partition state later in boot: the guard
+ * may already have confirmed the image by then.
+ */
+bool ota_github_image_was_pending(void);
+
+/** Boot-health milestone: display initialized. Idempotent, ISR-unsafe. */
+void ota_github_note_display_ready(void);
+
+/** Boot-health milestone: station network up (got IP). Idempotent. */
+void ota_github_note_network_ready(void);
+
+/**
+ * Ensure the running image does not block an OTA (esp_ota_begin refuses with
+ * ESP_ERR_OTA_ROLLBACK_INVALID_STATE while it is pending verification).
+ * If the image is still pending, confirm it now: the device is demonstrably
+ * up if it can service an update request. Returns ESP_OK when an update can
+ * proceed, else the mark-valid error. Performs a flash write on the pending
+ * path: callers must run on an internal-RAM stack (httpd workers and the
+ * ota_dl task qualify; PSRAM-stack tasks must not call this).
+ */
+esp_err_t ota_github_ensure_can_update(void);
 
 /**
  * Record the release tag an OTA update intends to install (pending state).

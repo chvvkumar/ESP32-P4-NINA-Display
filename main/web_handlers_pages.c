@@ -54,19 +54,7 @@ esp_err_t pages_get_handler(httpd_req_t *req)
         cJSON_AddItemToArray(arr, o);
     }
 
-    char *out = cJSON_PrintUnformatted(arr);
-    if (!out) {
-        cJSON_Delete(arr);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, out);
-
-    cJSON_free(out);
-    cJSON_Delete(arr);
-    return ESP_OK;
+    return send_json_response(req, arr);
 }
 
 /* GET|POST /api/navigate?ref=<slug>  or  ?id=<page_ref id>

@@ -7,6 +7,7 @@
 
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "cJSON.h"
 #include "app_config.h"
 
@@ -59,6 +60,82 @@ bool validate_url_format(const char *url);
  * On success returns a cJSON root the caller must cJSON_Delete().
  * Defined in web_handlers_config.c. */
 cJSON *receive_json_body(httpd_req_t *req, int max_size);
+
+/* Receive and parse a SMALL JSON request body into a caller-supplied buffer
+ * (typically 64-256 bytes on the handler stack). Companion to the PSRAM-backed
+ * receive_json_body() above, for the single-scalar control endpoints.
+ *
+ * Rejects a body that does not fit (content_len >= buf_size) with 500 rather
+ * than truncating; 408 on recv timeout; 500 on parse failure. On any failure
+ * the HTTP response has already been sent and NULL is returned. On success
+ * returns a root the caller must cJSON_Delete().
+ *
+ * The >= guard is what keeps the buf[ret] NUL write in bounds -- do not relax
+ * it to >. Single-recv by design: these bodies are one TCP segment. */
+static inline cJSON *receive_small_json_body(httpd_req_t *req, char *buf, size_t buf_size)
+{
+    int remaining = req->content_len;
+    if (remaining < 0 || (size_t)remaining >= buf_size) {
+        httpd_resp_send_500(req);
+        return NULL;
+    }
+    int ret = httpd_req_recv(req, buf, remaining);
+    if (ret <= 0) {
+        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+            httpd_resp_send_408(req);
+        }
+        return NULL;   /* socket-level failure: nothing sensible to send */
+    }
+    buf[ret] = '\0';
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) {
+        httpd_resp_send_500(req);
+    }
+    return root;
+}
+
+/* Serialize @p root, send it as application/json, then free the printed string
+ * and delete @p root.
+ *
+ * CONSUMES @p root on EVERY path including failure -- callers must not delete
+ * it afterwards and must not touch it after the call. A NULL @p root (failed
+ * cJSON_Create*) and a print failure both mean out of memory, so both send 500;
+ * do not "succeed" with a literal body in that case, the client would cache a
+ * lie. */
+static inline esp_err_t send_json_response(httpd_req_t *req, cJSON *root)
+{
+    if (!root) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    char *out = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!out) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t err = httpd_resp_sendstr(req, out);
+    cJSON_free(out);
+    return err;
+}
+
+/* Allocate a PSRAM app_config_t and fill it with the current config snapshot.
+ * app_config_t is ~8.6 KB: never stack-allocate one in an httpd handler, and
+ * never hold two live at once unless the handler genuinely diffs old vs new.
+ * On allocation failure a 500 is sent and NULL is returned -- never carry on
+ * without the snapshot, or device state and config diverge silently.
+ * Caller frees with heap_caps_free(). */
+static inline app_config_t *config_snapshot_for_request(httpd_req_t *req)
+{
+    app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    if (!cfg) {
+        httpd_resp_send_500(req);
+        return NULL;
+    }
+    app_config_get_snapshot_into(cfg);
+    return cfg;
+}
 
 /* ---- Session cookie auth (defined in web_server.c) ---- */
 bool check_session(httpd_req_t *req);

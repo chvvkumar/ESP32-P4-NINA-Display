@@ -6,7 +6,6 @@
 #include "nina_idle_indicator.h"
 #include "app_config.h"
 #include "display_defs.h"
-#include "nina_dashboard_internal.h"  /* current_theme, themes.h (theme_is_red_night) */
 #include "esp_lvgl_port.h"
 
 #include <string.h>
@@ -29,13 +28,6 @@
 #define RED_BORDER_OPA  178             /* 70% */
 #define RED_DOT         0x8B4513        /* muted brick red */
 
-/* Reconnecting — muted sage green */
-#define GREEN_BG        0x1a2e1a
-#define GREEN_BG_OPA    128             /* 50% */
-#define GREEN_BORDER    0x6B8E6B
-#define GREEN_BORDER_OPA 178            /* 70% */
-#define GREEN_DOT       0x6B8E6B        /* sage green */
-
 /* ── Per-indicator state ────────────────────────────────────────────── */
 typedef struct {
     lv_obj_t *pill;     /* NULL for clock (bare dot mode) */
@@ -57,29 +49,6 @@ static void apply_red(indicator_entry_t *ind)
     }
     lv_obj_set_style_bg_color(ind->dot, lv_color_hex(RED_DOT), 0);
     lv_obj_set_style_shadow_color(ind->dot, lv_color_hex(RED_DOT), 0);
-}
-
-static void apply_green(indicator_entry_t *ind)
-{
-    /* Under Red Night, the connected/reconnecting pill must use red shades or
-     * black only (no sage green). Dark red bg/border from the bento palette,
-     * dot/border accent from progress (fallback to text) color. */
-    bool red = theme_is_red_night(current_theme);
-    uint32_t bg_col     = red ? current_theme->bento_bg     : GREEN_BG;
-    uint32_t border_col = red ? current_theme->bento_border : GREEN_BORDER;
-    uint32_t dot_col    = red
-        ? (current_theme->progress_color ? current_theme->progress_color
-                                         : current_theme->text_color)
-        : GREEN_DOT;
-
-    if (ind->pill) {
-        lv_obj_set_style_bg_color(ind->pill, lv_color_hex(bg_col), 0);
-        lv_obj_set_style_bg_opa(ind->pill, GREEN_BG_OPA, 0);
-        lv_obj_set_style_border_color(ind->pill, lv_color_hex(red ? dot_col : border_col), 0);
-        lv_obj_set_style_border_opa(ind->pill, GREEN_BORDER_OPA, 0);
-    }
-    lv_obj_set_style_bg_color(ind->dot, lv_color_hex(dot_col), 0);
-    lv_obj_set_style_shadow_color(ind->dot, lv_color_hex(dot_col), 0);
 }
 
 /* ── Public API ─────────────────────────────────────────────────────── */
@@ -167,22 +136,6 @@ void nina_idle_indicator_set_active(bool idle_active)
                 lv_obj_clear_flag(root, LV_OBJ_FLAG_HIDDEN);
             } else {
                 lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
-            }
-        }
-        lvgl_port_unlock();
-    }
-}
-
-void nina_idle_indicator_set_reconnecting(void)
-{
-    if (lvgl_port_lock(LVGL_LOCK_TIMEOUT_MS)) {
-        for (int i = 0; i < s_count; i++) {
-            indicator_entry_t *ind = &s_indicators[i];
-            lv_obj_t *root = root_obj(ind);
-            if (!root) continue;
-
-            if (!lv_obj_has_flag(root, LV_OBJ_FLAG_HIDDEN)) {
-                apply_green(ind);
             }
         }
         lvgl_port_unlock();

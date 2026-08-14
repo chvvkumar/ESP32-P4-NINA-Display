@@ -19,6 +19,7 @@
 #include "app_config.h"
 #include "themes.h"
 #include "nina_empty_state.h"
+#include "time_parse.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -92,7 +93,6 @@ static inline void set_bg_opa_cached(lv_obj_t *obj, lv_opa_t *cached, lv_opa_t o
 /* ── Layout Constants ──────────────────────────────────────────────── */
 #define CARD_RADIUS      20
 #define CARD_GAP         16
-#define STAT_COLS         3
 
 /* ── 3-tier font/layout presets ───────────────────────────────────── */
 typedef struct {
@@ -270,9 +270,13 @@ static void bar_start_exposure_anim(summary_card_t *sc) {
     lv_anim_start(&a);
 }
 
-/* Scaled copy of arc_interp_timer_cb. Runs continuously (created at page build)
- * and iterates all cards. Runs inside lv_timer_handler, which holds the display
- * lock, so no extra locking is required (same as the dashboard arc timer). */
+/* Shared 200 ms interpolation timer; paused while the summary page is hidden
+ * (see summary_page_on_show/_on_hide). */
+static lv_timer_t *s_bar_timer = NULL;
+
+/* Scaled copy of arc_interp_timer_cb. Iterates all cards. Runs inside
+ * lv_timer_handler, which holds the display lock, so no extra locking is
+ * required (same as the dashboard arc timer). */
 static void summary_bar_interp_cb(lv_timer_t *timer) {
     (void)timer;
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
@@ -461,11 +465,7 @@ static void create_stat_block(lv_obj_t *parent,
     lv_label_set_text(lbl, label_text);
     lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_letter_space(lbl, 1, 0);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(lbl,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
+    ui_set_theme_text_color(lbl, UI_THEME_COLOR(label_color));
 
     /* Value (large) */
     lv_obj_t *val = lv_label_create(block);
@@ -607,11 +607,7 @@ static void create_card(summary_card_t *sc, lv_obj_t *parent, int instance_index
     lv_label_set_text(sc->lbl_seq_title, "SEQUENCE");
     lv_obj_set_style_text_font(sc->lbl_seq_title, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_letter_space(sc->lbl_seq_title, 1, 0);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(sc->lbl_seq_title,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
+    ui_set_theme_text_color(sc->lbl_seq_title, UI_THEME_COLOR(label_color));
 
     sc->lbl_seq_name = lv_label_create(seq_left);
     lv_obj_set_style_text_font(sc->lbl_seq_name, &lv_font_montserrat_18, 0);
@@ -632,11 +628,7 @@ static void create_card(summary_card_t *sc, lv_obj_t *parent, int instance_index
     lv_obj_set_style_text_font(sc->lbl_exp_title, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_letter_space(sc->lbl_exp_title, 1, 0);
     lv_obj_set_style_text_align(sc->lbl_exp_title, LV_TEXT_ALIGN_CENTER, 0);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(sc->lbl_exp_title,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
+    ui_set_theme_text_color(sc->lbl_exp_title, UI_THEME_COLOR(label_color));
 
     sc->lbl_exp_val = lv_label_create(seq_center);
     lv_obj_set_style_text_font(sc->lbl_exp_val, &lv_font_montserrat_18, 0);
@@ -658,11 +650,7 @@ static void create_card(summary_card_t *sc, lv_obj_t *parent, int instance_index
     lv_obj_set_style_text_font(sc->lbl_step_title, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_letter_space(sc->lbl_step_title, 1, 0);
     lv_obj_set_style_text_align(sc->lbl_step_title, LV_TEXT_ALIGN_RIGHT, 0);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(sc->lbl_step_title,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
+    ui_set_theme_text_color(sc->lbl_step_title, UI_THEME_COLOR(label_color));
 
     sc->lbl_seq_step = lv_label_create(seq_right);
     lv_obj_set_style_text_font(sc->lbl_seq_step, &lv_font_montserrat_18, 0);
@@ -713,11 +701,7 @@ static void create_card(summary_card_t *sc, lv_obj_t *parent, int instance_index
     lv_obj_set_style_text_font(sc->lbl_detail, &lv_font_montserrat_18, 0);
     lv_obj_set_style_text_align(sc->lbl_detail, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(sc->lbl_detail, "");
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(sc->lbl_detail,
-            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-    }
+    ui_set_theme_text_color(sc->lbl_detail, UI_THEME_COLOR(text_color));
 
 }
 
@@ -769,9 +753,12 @@ lv_obj_t *summary_page_create(lv_obj_t *parent) {
     }
 
     /* Single shared interpolation timer driving all cards' progress bars
-     * (mirrors the per-page arc timer in nina_dashboard.c). Runs continuously;
-     * each tick it advances only cards with an active exposure anchor. */
-    lv_timer_create(summary_bar_interp_cb, BAR_TIMER_MS, NULL);
+     * (mirrors the per-page arc timer in nina_dashboard.c). Paused whenever the
+     * summary is not the visible page (summary_page_on_show/_on_hide) so the
+     * 5 Hz label/anim churn stops off-screen; each running tick advances only
+     * cards with an active exposure anchor. Created running: the page object is
+     * visible from creation until the first navigation away. */
+    s_bar_timer = lv_timer_create(summary_bar_interp_cb, BAR_TIMER_MS, NULL);
 
     /* Empty state — shown when no instances are connected */
     create_empty_state(sum_page);
@@ -779,6 +766,22 @@ lv_obj_t *summary_page_create(lv_obj_t *parent) {
     prev_visible_count = -1;
 
     return sum_page;
+}
+
+/* ── Page visibility hooks (registered as summary page ops) ──────────
+ * Same pattern as clock_page_on_hide/_on_show: the interpolation timer only
+ * runs while the page is on screen. On show it fires immediately so a bar that
+ * advanced during an exposure while hidden snaps to the right position instead
+ * of waiting up to 200 ms. */
+void summary_page_on_hide(void) {
+    if (s_bar_timer) lv_timer_pause(s_bar_timer);
+}
+
+void summary_page_on_show(void) {
+    if (s_bar_timer) {
+        lv_timer_resume(s_bar_timer);
+        lv_timer_ready(s_bar_timer);
+    }
 }
 
 /**
@@ -1355,15 +1358,10 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
             /* Completed filter exposures + integration time */
             if (d->exposure_total_count > 0) {
                 int total_secs = (int)(d->exposure_total_count * d->exposure_total);
-                int h = total_secs / 3600;
-                int m = (total_secs % 3600) / 60;
-                if (h > 0) {
-                    SET_LABEL_FMT_IF_CHANGED(sc->lbl_exp_val, 32, "%d / %dh %02dm",
-                        d->exposure_total_count, h, m);
-                } else {
-                    SET_LABEL_FMT_IF_CHANGED(sc->lbl_exp_val, 32, "%d / %dm",
-                        d->exposure_total_count, m);
-                }
+                char dur[16];
+                fmt_duration(dur, sizeof(dur), total_secs, FMT_DUR_HM_COMPACT);
+                SET_LABEL_FMT_IF_CHANGED(sc->lbl_exp_val, 32, "%d / %s",
+                    d->exposure_total_count, dur);
             } else if (d->exposure_iterations > 0) {
                 SET_LABEL_FMT_IF_CHANGED(sc->lbl_exp_val, 32, "%d / %d",
                     d->exposure_count, d->exposure_iterations);
@@ -1466,15 +1464,10 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
             }
             if (d->exposure_total_count > 0 && len > 0) {
                 int tsecs = (int)(d->exposure_total_count * d->exposure_total);
-                int th = tsecs / 3600;
-                int tm = (tsecs % 3600) / 60;
-                if (th > 0) {
-                    len += snprintf(detail + len, sizeof(detail) - len,
-                        "  |  %d / %dh %02dm", d->exposure_total_count, th, tm);
-                } else {
-                    len += snprintf(detail + len, sizeof(detail) - len,
-                        "  |  %d / %dm", d->exposure_total_count, tm);
-                }
+                char tdur[16];
+                fmt_duration(tdur, sizeof(tdur), tsecs, FMT_DUR_HM_COMPACT);
+                len += snprintf(detail + len, sizeof(detail) - len,
+                    "  |  %d / %s", d->exposure_total_count, tdur);
             } else if (d->exposure_iterations > 0 && len > 0) {
                 len += snprintf(detail + len, sizeof(detail) - len,
                     "  |  %d / %d exp",

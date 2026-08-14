@@ -586,12 +586,3 @@ void spotify_auth_logout(void) {
 
     ESP_LOGI(TAG, "Logged out — all tokens cleared");
 }
-
-bool spotify_auth_has_tokens(void) {
-    if (!s_mutex) return false;
-    bool has;
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    has = (s_refresh_token[0] != '\0');
-    xSemaphoreGive(s_mutex);
-    return has;
-}

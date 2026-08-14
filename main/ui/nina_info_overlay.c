@@ -41,73 +41,6 @@ uint32_t info_get_text_color(int gb) {
     return app_config_apply_brightness(0xffffff, gb);
 }
 
-/* ── Widget factories ────────────────────────────────────────────── */
-
-lv_obj_t *make_info_card(lv_obj_t *parent) {
-    lv_obj_t *card = lv_obj_create(parent);
-    lv_obj_remove_style_all(card);
-    lv_obj_add_style(card, &style_bento_box, 0);
-    lv_obj_set_width(card, LV_PCT(100));
-    lv_obj_set_height(card, LV_SIZE_CONTENT);
-    lv_obj_set_style_pad_all(card, INFO_CARD_PAD, 0);
-    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_row(card, INFO_CARD_ROW_GAP, 0);
-    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
-    return card;
-}
-
-lv_obj_t *make_info_section(lv_obj_t *parent, const char *title) {
-    lv_obj_t *lbl = lv_label_create(parent);
-    lv_label_set_text(lbl, title);
-    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_letter_space(lbl, 2, 0);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(lbl,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
-    return lbl;
-}
-
-lv_obj_t *make_info_kv(lv_obj_t *parent, const char *key, lv_obj_t **out_val) {
-    lv_obj_t *row = lv_obj_create(parent);
-    lv_obj_remove_style_all(row);
-    lv_obj_set_width(row, LV_PCT(100));
-    lv_obj_set_height(row, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-
-    lv_obj_t *lbl_key = lv_label_create(row);
-    lv_label_set_text(lbl_key, key);
-    lv_obj_set_style_text_font(lbl_key, &lv_font_montserrat_20, 0);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(lbl_key,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
-
-    lv_obj_t *lbl_val = lv_label_create(row);
-    lv_label_set_text(lbl_val, "--");
-    lv_obj_set_style_text_font(lbl_val, &lv_font_montserrat_22, 0);
-    if (current_theme) {
-        int gb = app_config_get()->color_brightness;
-        lv_obj_set_style_text_color(lbl_val,
-            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-    }
-
-    *out_val = lbl_val;
-    return row;
-}
-
-lv_obj_t *make_info_kv_wide(lv_obj_t *parent, const char *key, lv_obj_t **out_val) {
-    lv_obj_t *row = make_info_kv(parent, key, out_val);
-    /* Override value font to 28 for emphasis */
-    lv_obj_set_style_text_font(*out_val, &lv_font_montserrat_28, 0);
-    return row;
-}
-
 /* ── Back button callback ────────────────────────────────────────── */
 
 static void info_back_btn_cb(lv_event_t *e) {
@@ -166,18 +99,12 @@ void nina_info_overlay_create(lv_obj_t *parent) {
 
     info_lbl_title = lv_label_create(info_title_bar);
     lv_obj_set_style_text_font(info_lbl_title, &lv_font_montserrat_28, 0);
-    if (current_theme) {
-        lv_obj_set_style_text_color(info_lbl_title,
-            lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
-    }
+    ui_set_theme_text_color(info_lbl_title, UI_THEME_COLOR(header_text_color));
     lv_label_set_text(info_lbl_title, "INFO");
 
     info_lbl_instance = lv_label_create(info_title_bar);
     lv_obj_set_style_text_font(info_lbl_instance, &lv_font_montserrat_18, 0);
-    if (current_theme) {
-        lv_obj_set_style_text_color(info_lbl_instance,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
+    ui_set_theme_text_color(info_lbl_instance, UI_THEME_COLOR(label_color));
     lv_label_set_text(info_lbl_instance, "");
 
     /* ── Content area ── */
@@ -334,10 +261,6 @@ void nina_info_overlay_clear_request(void) {
 
 info_overlay_type_t nina_info_overlay_get_type(void) {
     return info_current_type;
-}
-
-int nina_info_overlay_get_return_page(void) {
-    return info_return_page;
 }
 
 /* ── Data population dispatch ────────────────────────────────────── */

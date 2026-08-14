@@ -38,9 +38,6 @@ void nina_info_overlay_clear_request(void);
 /** Get the currently requested overlay type. */
 info_overlay_type_t nina_info_overlay_get_type(void);
 
-/** Get the return page index (the page that opened the overlay). */
-int nina_info_overlay_get_return_page(void);
-
 /** Data population — call under display lock. */
 void nina_info_overlay_set_camera_data(const camera_detail_data_t *data);
 void nina_info_overlay_set_mount_data(const mount_detail_data_t *data);

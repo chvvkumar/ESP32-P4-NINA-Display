@@ -8,10 +8,12 @@
  *   - Layer A (reset reason): on every boot crash_log_init() inspects the latched
  *     reset reason (via power_mgmt). Abnormal resets (panic, watchdog, brownout)
  *     are recorded. This works for every crash type including power loss.
- *   - Layer B (panic text): __wrap_panic_print_char() mirrors the serial panic
- *     output into a bounded RTC_NOINIT ring that survives the panic-triggered
- *     reboot. crash_log_init() attaches that text to the Layer-A record when the
- *     ring magic is valid (panic/abort only).
+ *   - Layer B (panic text): crash_log_init() reads the core dump's panic-detail
+ *     note back via esp_core_dump_get_panic_reason() and attaches it to the
+ *     Layer-A record. Present for abort()/assert failures (the abort detail
+ *     string) and task-watchdog panics (the triggered-task list); generic faults
+ *     carry no detail note, so their record has an empty "panic" field and the
+ *     full ELF core dump at GET /api/coredump is the diagnostic path.
  *
  * Records are appended one JSON object per line to /spiffs/crashlog.jsonl. The
  * file is capped to the newest CRASH_LOG_MAX_ENTRIES lines and purged of entries
@@ -31,7 +33,7 @@
 extern "C" {
 #endif
 
-/* SPIFFS mount point and crash-history file path. */
+/* littlefs mount point (historical "/spiffs" name) and crash-history file path. */
 #define CRASH_LOG_MOUNT_POINT "/spiffs"
 #define CRASH_LOG_FILE_PATH   CRASH_LOG_MOUNT_POINT "/crashlog.jsonl"
 
@@ -39,12 +41,12 @@ extern "C" {
 #define CRASH_LOG_MAX_ENTRIES 20
 
 /**
- * Mount SPIFFS, record a crash entry if this boot followed an abnormal reset,
+ * Mount littlefs, record a crash entry if this boot followed an abnormal reset,
  * enforce the ring + retention, then clear the RTC panic buffer.
  *
  * Call once from app_main() after app_config_init() and after
  * power_mgmt_check_crash(). Reads crash_log_retention_days from app_config.
- * Safe to call even if SPIFFS mount fails — the feature degrades to a no-op and
+ * Safe to call even if the mount fails — the feature degrades to a no-op and
  * logs a warning rather than aborting boot.
  */
 void crash_log_init(void);
@@ -53,15 +55,10 @@ void crash_log_init(void);
  * Open the crash-history file for reading.
  *
  * @return FILE* positioned at the start of /spiffs/crashlog.jsonl, or NULL if the
- *         file does not exist (no crashes yet) or SPIFFS is unmounted. The caller
+ *         file does not exist (no crashes yet) or the fs is unmounted. The caller
  *         owns the handle and must fclose() it.
  */
 FILE *crash_log_open_read(void);
-
-/**
- * @return true if a crash-history file currently exists (one or more records).
- */
-bool crash_log_exists(void);
 
 /**
  * Delete the crash-history file. Idempotent — returns ESP_OK whether or not the

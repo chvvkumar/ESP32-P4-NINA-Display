@@ -19,7 +19,6 @@ typedef struct {
 // Start/stop a named timer. Returns elapsed microseconds.
 void     perf_timer_start(perf_timer_t *t);
 int64_t  perf_timer_stop(perf_timer_t *t);
-void     perf_timer_reset(perf_timer_t *t);
 
 // ── CPU Utilization ────────────────────────────────────────────────
 

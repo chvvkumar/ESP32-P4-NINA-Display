@@ -513,14 +513,7 @@ static void create_filter_swatches(int idx)
 
     if (nodes[idx].filter_count == 0) {
         /* Show placeholder label */
-        lv_obj_t *lbl = lv_label_create(nodes[idx].filter_row);
-        lv_label_set_text(lbl, "No filters configured");
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
-        if (current_theme) {
-            int gb = app_config_get()->color_brightness;
-            lv_obj_set_style_text_color(lbl,
-                lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-        }
+        lv_obj_t *lbl = ui_label(nodes[idx].filter_row, "No filters configured", &lv_font_montserrat_16, UI_THEME_COLOR(label_color));
         return;
     }
 
@@ -541,43 +534,23 @@ static void create_filter_swatches(int idx)
         nodes[idx].filter_swatches[f] = sw;
 
         /* Filter name label below swatch (interactive-swatch label >=18px, SETRD-07) */
-        lv_obj_t *lbl = lv_label_create(col);
-        lv_label_set_text(lbl, nodes[idx].filter_names[f]);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
-        if (current_theme) {
-            int gb = app_config_get()->color_brightness;
-            lv_obj_set_style_text_color(lbl,
-                lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-        }
+        lv_obj_t *lbl = ui_label(col, nodes[idx].filter_names[f], &lv_font_montserrat_18, UI_THEME_COLOR(label_color));
     }
 }
 
 /* ── Threshold section builder ──────────────────────────────────────── */
 static void create_threshold_section(lv_obj_t *parent, int idx, bool is_hfr)
 {
-    int gb = app_config_get()->color_brightness;
     const char *title = is_hfr ? "HFR Thresholds" : "RMS Thresholds";
 
     /* Section title */
-    lv_obj_t *lbl_title = lv_label_create(parent);
-    lv_label_set_text(lbl_title, title);
-    lv_obj_set_style_text_font(lbl_title, &lv_font_montserrat_20, 0);
-    if (current_theme) {
-        lv_obj_set_style_text_color(lbl_title,
-            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-    }
+    lv_obj_t *lbl_title = ui_label(parent, title, &lv_font_montserrat_20, UI_THEME_COLOR(text_color));
     lv_obj_set_style_pad_top(lbl_title, 8, 0);
 
     /* === Good row === */
     lv_obj_t *row_good = settings_make_row_lg(parent);
     {
-        lv_obj_t *lbl = lv_label_create(row_good);
-        lv_label_set_text(lbl, "Good <");
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
-        if (current_theme) {
-            lv_obj_set_style_text_color(lbl,
-                lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-        }
+        lv_obj_t *lbl = ui_label(row_good, "Good <", &lv_font_montserrat_18, UI_THEME_COLOR(label_color));
 
         /* Stepper */
         lv_obj_t *btn_minus, *lbl_val, *btn_plus;
@@ -614,13 +587,7 @@ static void create_threshold_section(lv_obj_t *parent, int idx, bool is_hfr)
     /* === Warn row === */
     lv_obj_t *row_warn = settings_make_row_lg(parent);
     {
-        lv_obj_t *lbl = lv_label_create(row_warn);
-        lv_label_set_text(lbl, "Warn <");
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
-        if (current_theme) {
-            lv_obj_set_style_text_color(lbl,
-                lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-        }
+        lv_obj_t *lbl = ui_label(row_warn, "Warn <", &lv_font_montserrat_18, UI_THEME_COLOR(label_color));
 
         /* Stepper */
         lv_obj_t *btn_minus, *lbl_val, *btn_plus;
@@ -663,10 +630,7 @@ static void create_threshold_section(lv_obj_t *parent, int idx, bool is_hfr)
         snprintf(bad_text, sizeof(bad_text), "Bad >= %.1f", warn_val);
         lv_label_set_text(lbl, bad_text);
         lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
-        if (current_theme) {
-            lv_obj_set_style_text_color(lbl,
-                lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-        }
+        ui_set_theme_text_color(lbl, UI_THEME_COLOR(label_color));
 
         /* Color swatch */
         uint32_t c = is_hfr ? nodes[idx].hfr_bad_color : nodes[idx].rms_bad_color;
@@ -685,7 +649,6 @@ static void create_threshold_section(lv_obj_t *parent, int idx, bool is_hfr)
 static void build_node_detail(lv_obj_t *parent, int idx)
 {
     app_config_t *cfg = app_config_get();
-    int gb = cfg->color_brightness;
 
     /* Parse stored JSON into working data */
     parse_filter_colors(idx);
@@ -713,13 +676,7 @@ static void build_node_detail(lv_obj_t *parent, int idx)
     settings_make_divider(parent);
 
     /* ── Filter colors section ──────────────────────────────────────── */
-    lv_obj_t *lbl_filt = lv_label_create(parent);
-    lv_label_set_text(lbl_filt, "Filter Colors");
-    lv_obj_set_style_text_font(lbl_filt, &lv_font_montserrat_20, 0);
-    if (current_theme) {
-        lv_obj_set_style_text_color(lbl_filt,
-            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-    }
+    lv_obj_t *lbl_filt = ui_label(parent, "Filter Colors", &lv_font_montserrat_20, UI_THEME_COLOR(text_color));
 
     /* Scrollable row for filter swatches */
     lv_obj_t *filt_row = lv_obj_create(parent);
@@ -976,13 +933,7 @@ void settings_tab_nodes_create(lv_obj_t *parent)
     lv_obj_add_event_cb(node_seg, node_seg_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
     /* Empty-state hint (hidden unless zero nodes enabled) */
-    empty_hint = lv_label_create(card_nodes);
-    lv_label_set_text(empty_hint, "No nodes enabled - enable a node above");
-    lv_obj_set_style_text_font(empty_hint, &lv_font_montserrat_18, 0);
-    if (current_theme) {
-        lv_obj_set_style_text_color(empty_hint,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
+    empty_hint = ui_label(card_nodes, "No nodes enabled - enable a node above", &lv_font_montserrat_18, UI_THEME_COLOR(label_color));
     lv_obj_set_style_pad_top(empty_hint, 8, 0);
     lv_obj_add_flag(empty_hint, LV_OBJ_FLAG_HIDDEN);
 

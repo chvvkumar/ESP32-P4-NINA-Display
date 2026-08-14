@@ -75,9 +75,9 @@ jobs:
         #   comparePointers - fires on the `xxx_end - xxx_start` idiom used
         #     by every EMBED_FILES/EMBED_TXTFILES asset (config_ui.html,
         #     login.html, setup_ui.html, favicon.png, logo.jpg,
-        #     spotify_logo.png, moon_texture.png, moon_equirect.jpg; verified
-        #     across main.c, moon_render.c, moon_sphere.cpp,
-        #     web_handlers_auth.c, web_handlers_config.c) because cppcheck
+        #     moon_equirect.jpg, audio_clips/*.pcm; verified across main.c,
+        #     moon_sphere.cpp, audio_alert.c, web_handlers_auth.c,
+        #     web_handlers_config.c) because cppcheck
         #     treats the two extern linker-symbol arrays as unrelated
         #     objects. Confirmed false positive for this pattern, not a
         #     first-party logic bug; suppressed by rule id only after

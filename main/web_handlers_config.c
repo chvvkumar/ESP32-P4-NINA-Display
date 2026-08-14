@@ -75,6 +75,8 @@ extern const uint8_t fragment_voice_clips_html_end[]   asm("_binary_fragment_voi
  * basename with every non-identifier character mapped to '_'. */
 extern const uint8_t config_html_gz_start[] asm("_binary_config_ui_html_gz_start");
 extern const uint8_t config_html_gz_end[]   asm("_binary_config_ui_html_gz_end");
+extern const uint8_t home_html_gz_start[] asm("_binary_home_ui_html_gz_start");
+extern const uint8_t home_html_gz_end[]   asm("_binary_home_ui_html_gz_end");
 extern const uint8_t fragment_logs_html_gz_start[] asm("_binary_fragment_logs_html_gz_start");
 extern const uint8_t fragment_logs_html_gz_end[]   asm("_binary_fragment_logs_html_gz_end");
 extern const uint8_t fragment_backup_html_gz_start[] asm("_binary_fragment_backup_html_gz_start");
@@ -208,7 +210,7 @@ esp_err_t home_get_handler(httpd_req_t *req)
     }
     REQUIRE_AUTH(req);
     return send_embedded_asset(req, home_html_start, home_html_end,
-                               NULL, NULL, "text/html");
+                               home_html_gz_start, home_html_gz_end, "text/html");
 }
 
 /**
@@ -325,10 +327,6 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
      * (arrays, JSON-blob strings, secrets, cross-field page targets) keeps
      * its hand-written call below, in original relative order. */
     settings_json_serialize(cfg, obj);
-    /* idle_page_persistent is a SETTINGS_TABLE row (kept there only for
-     * settings_defaults_apply()/settings_clamp_apply() consistency) but is
-     * retired/unread outside app_config.c migrations; never expose it. */
-    cJSON_DeleteItemFromObject(obj, "idle_page_persistent");
 
     cJSON_AddStringToObject(obj, "url1", cfg->api_url[0]);
     cJSON_AddStringToObject(obj, "url2", cfg->api_url[1]);
@@ -344,21 +342,8 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
     cJSON_AddStringToObject(obj, "hfr_thresholds_3", cfg->hfr_thresholds[2]);
     cJSON_AddStringToObject(obj, "mqtt_password", cfg->mqtt_password);
     cJSON_AddNumberToObject(obj, "active_page_override", cfg->active_page_override);
-    cJSON_AddNumberToObject(obj, "auto_rotate_pages",
-        (int)cfg->auto_rotate_pages | ((int)cfg->auto_rotate_pages_hi << 8));
-    {
-        cJSON *order_arr = cJSON_CreateArray();
-        /* 9 rotation-order slots: the 8-element array plus auto_rotate_order_ext. */
-        for (int i = 0; i < 9; i++) {
-            uint8_t v = (i < 8) ? cfg->auto_rotate_order[i] : cfg->auto_rotate_order_ext;
-            if (v == 0xFF) {
-                if (i < 8) break;   /* terminator in the main array */
-                else continue;      /* ext slot unused */
-            }
-            cJSON_AddItemToArray(order_arr, cJSON_CreateNumber(v));
-        }
-        cJSON_AddItemToObject(obj, "auto_rotate_order", order_arr);
-    }
+    /* Retired: auto_rotate_pages/_hi and auto_rotate_order[] are migration-only
+     * fields now; auto_rotate_order2 below is the sole slideshow list. */
     {
         /* New flat slideshow list: 16 ARP_IDX_* slots, 0xFF terminates/skips. */
         cJSON *order2_arr = cJSON_CreateArray();
@@ -442,18 +427,7 @@ esp_err_t config_get_handler(httpd_req_t *req)
 
     cJSON_AddBoolToObject(root, "_dirty", app_config_is_dirty());
 
-    const char *json_str = cJSON_PrintUnformatted(root);
-    if (json_str == NULL) {
-        cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
-
-    free((void*)json_str);
-    cJSON_Delete(root);
-    return ESP_OK;
+    return send_json_response(req, root);
 }
 
 /* ---- Backup/Restore Field Registry ---- */
@@ -491,7 +465,6 @@ static const backup_field_t s_backup_fields[] = {
     {"auto_rotate_interval_s",      "Rotate Interval",          "Behavior", false, false},
     {"auto_rotate_effect",          "Rotate Effect",            "Behavior", false, false},
     {"auto_rotate_skip_disconnected","Skip Disconnected",       "Behavior", false, false},
-    {"auto_rotate_pages",           "Rotate Pages Mask (legacy)","Behavior", false, false},
     {"update_rate_s",               "Update Rate",              "Behavior", false, false},
     {"idle_poll_interval_s",        "Idle Poll Interval",       "Behavior", false, false},
     {"connection_timeout_s",        "Connection Timeout",       "Behavior", false, false},
@@ -569,6 +542,7 @@ static const backup_field_t s_backup_fields[] = {
     {"deep_sleep_wake_timer_s","Deep Sleep Timer",   "System", false, false},
     {"deep_sleep_on_idle",   "Sleep on Idle",        "System", false, false},
     {"wifi_power_save",      "WiFi Power Save",      "System", false, false},
+    {"wifi_max_tx_dbm",      "WiFi Transmit Power",  "System", false, false},
     {"crash_log_retention_days","Crash Log Retention","System", false, false},
 
     /* AllSky */
@@ -1257,29 +1231,10 @@ static app_config_t *parse_config_from_json(cJSON *root)
         cfg->active_page_override = (int8_t)v;
     }
 
-    /* The slideshow list is the single ordered auto_rotate_order[] + ext list:
-     * membership equals order. The legacy auto_rotate_pages/_hi bitmask is no
-     * longer authoritative and is not parsed here (Task 5.2). */
-    cJSON *order_arr = cJSON_GetObjectItem(root, "auto_rotate_order");
-    if (cJSON_IsArray(order_arr)) {
-        int count = cJSON_GetArraySize(order_arr);
-        if (count > 9) count = 9;   /* 9 rotation-order slots (8 array + ext) */
-        for (int i = 0; i < count; i++) {
-            cJSON *item = cJSON_GetArrayItem(order_arr, i);
-            if (cJSON_IsNumber(item) && item->valueint >= 0 && item->valueint <= 8) {
-                if (i < 8) cfg->auto_rotate_order[i] = (uint8_t)item->valueint;
-                else       cfg->auto_rotate_order_ext = (uint8_t)item->valueint;
-            }
-        }
-        for (int i = count; i < 8; i++) {
-            cfg->auto_rotate_order[i] = 0xFF;
-        }
-        if (count < 9) cfg->auto_rotate_order_ext = 0xFF;
-    }
-
-    /* New flat slideshow list: 16 ARP_IDX_* slots. When present it is the
-     * authoritative source for auto_rotate_order2[]; the legacy parse above
-     * still populates the deprecated auto_rotate_order[] harmlessly. */
+    /* The flat slideshow list is the single ordered auto_rotate_order2[] list:
+     * membership equals order. The legacy auto_rotate_pages/_hi bitmask and
+     * auto_rotate_order[]/_ext list are retired (migration-only) and are not
+     * accepted here. */
     cJSON *order2_arr = cJSON_GetObjectItem(root, "auto_rotate_order2");
     if (cJSON_IsArray(order2_arr)) {
         int count2 = cJSON_GetArraySize(order2_arr);
@@ -1530,14 +1485,12 @@ esp_err_t config_post_handler(httpd_req_t *req)
 
     cJSON_Delete(root);
 
-    app_config_t *old_cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    app_config_t *old_cfg = config_snapshot_for_request(req);
     if (!old_cfg) {
-        ESP_LOGE(TAG, "config_post: malloc failed for old_cfg");
+        ESP_LOGE(TAG, "config_post: PSRAM alloc failed for old_cfg");
         free(cfg);
-        httpd_resp_send_500(req);
-        return ESP_OK;
+        return ESP_OK;   /* 500 already sent */
     }
-    memcpy(old_cfg, app_config_get(), sizeof(app_config_t));
 
     /* A settings save proves the user found the web config UI, which is the
      * only thing the first-boot hint overlay exists to teach. Retire it here so
@@ -1590,14 +1543,12 @@ esp_err_t config_apply_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
-    app_config_t *old_cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    app_config_t *old_cfg = config_snapshot_for_request(req);
     if (!old_cfg) {
-        ESP_LOGE(TAG, "config_apply: malloc failed for old_cfg");
+        ESP_LOGE(TAG, "config_apply: PSRAM alloc failed for old_cfg");
         free(cfg);
-        httpd_resp_send_500(req);
-        return ESP_OK;
+        return ESP_OK;   /* 500 already sent */
     }
-    memcpy(old_cfg, app_config_get(), sizeof(app_config_t));
     app_config_apply(cfg);
     config_trigger_side_effects(old_cfg, cfg);
     free(old_cfg);
@@ -1611,13 +1562,11 @@ esp_err_t config_apply_handler(httpd_req_t *req)
 esp_err_t config_revert_handler(httpd_req_t *req)
 {
     REQUIRE_AUTH(req);
-    app_config_t *old_cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    app_config_t *old_cfg = config_snapshot_for_request(req);
     if (!old_cfg) {
-        ESP_LOGE(TAG, "config_revert: malloc failed for old_cfg");
-        httpd_resp_send_500(req);
-        return ESP_OK;
+        ESP_LOGE(TAG, "config_revert: PSRAM alloc failed for old_cfg");
+        return ESP_OK;   /* 500 already sent */
     }
-    memcpy(old_cfg, app_config_get(), sizeof(app_config_t));
 
     esp_err_t err = app_config_revert();
     if (err != ESP_OK) {
@@ -1875,14 +1824,7 @@ esp_err_t restore_post_handler(httpd_req_t *req)
             return ESP_OK;
         }
 
-        const char *json_str = cJSON_PrintUnformatted(preview);
-        cJSON_Delete(preview);
-        if (!json_str) { httpd_resp_send_500(req); return ESP_OK; }
-
-        httpd_resp_set_type(req, "application/json");
-        httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
-        free((void *)json_str);
-        return ESP_OK;
+        return send_json_response(req, preview);
 
     } else {
         /* ---- Confirm mode: apply the backup ---- */
@@ -2074,13 +2016,11 @@ esp_err_t restore_post_handler(httpd_req_t *req)
         cJSON_Delete(root);
 
         /* Save to NVS and trigger side effects */
-        app_config_t *old_cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+        app_config_t *old_cfg = config_snapshot_for_request(req);
         if (!old_cfg) {
             free(new_cfg);
-            httpd_resp_send_500(req);
-            return ESP_OK;
+            return ESP_OK;   /* 500 already sent */
         }
-        memcpy(old_cfg, app_config_get(), sizeof(app_config_t));
 
         app_config_save(new_cfg);
         config_trigger_side_effects(old_cfg, new_cfg);
@@ -2107,12 +2047,7 @@ esp_err_t restore_post_handler(httpd_req_t *req)
          * preview and confirm. The UI should not assert on matching counts. */
         cJSON_AddNumberToObject(resp, "total_changes", 0);
         cJSON_AddItemToObject(resp, "validation_notes", cJSON_CreateArray());
-        const char *resp_str = cJSON_PrintUnformatted(resp);
-        cJSON_Delete(resp);
-        httpd_resp_set_type(req, "application/json");
-        httpd_resp_send(req, resp_str ? resp_str : "{\"status\":\"applied\"}", HTTPD_RESP_USE_STRLEN);
-        free((void *)resp_str);
-        return ESP_OK;
+        return send_json_response(req, resp);
     }
 }
 

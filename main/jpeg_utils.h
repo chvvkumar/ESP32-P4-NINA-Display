@@ -5,13 +5,6 @@
 #include <stddef.h>
 
 /**
- * @brief Fetch a prepared JPEG image from NINA, hardware-decode it, and display it as a thumbnail.
- * @param base_url NINA API base URL for the instance
- * @return true if image was successfully fetched, decoded, and handed to the dashboard
- */
-bool fetch_and_show_thumbnail(const char *base_url);
-
-/**
  * @brief Software JPEG decode fallback (stb_image).
  * Handles CMYK, progressive, and other JPEGs that the HW decoder rejects.
  * Output is RGB565 in PSRAM.  Caller takes ownership (free with free()).

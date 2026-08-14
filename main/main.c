@@ -324,6 +324,57 @@ int wifi_get_current_network_index(void)
     return current_network_index;
 }
 
+void wifi_apply_tx_power(uint8_t dbm)
+{
+    /* Same whitelist validate_config() enforces, repeated here because this is
+     * the choke point every path reaches: boot, /api/config (Save),
+     * /api/config/apply (live preview, never validated), /api/config/revert,
+     * and the screen-sleep wake re-apply. An off-list value means "no cap"
+     * rather than an arbitrary number written to the radio. */
+    switch (dbm) {
+        case 0: case 8: case 11: case 14: case 17: case 20:
+            break;
+        default:
+            ESP_LOGW(TAG, "WiFi TX power %u dBm is not a legal step, treating as uncapped",
+                     (unsigned)dbm);
+            dbm = 0;
+            break;
+    }
+
+    /* There is no "remove the cap" API — uncapping means writing the chip's
+     * own default back. Capture it on the very first call, which is the one in
+     * wifi_init() right after esp_wifi_start(), i.e. before any cap exists.
+     * 0 means the probe failed (never a real max-TX value), in which case
+     * "no cap" degrades to a no-op instead of writing a bogus power. */
+    static bool s_default_probed = false;
+    static int8_t s_default_qdbm = 0;
+    if (!s_default_probed) {
+        s_default_probed = true;
+        int8_t probed = 0;
+        if (esp_wifi_get_max_tx_power(&probed) == ESP_OK && probed > 0) {
+            s_default_qdbm = probed;
+            ESP_LOGI(TAG, "WiFi TX power chip default is %d dBm", probed / 4);
+        } else {
+            ESP_LOGW(TAG, "WiFi TX power chip default unreadable; uncapping will be a no-op");
+        }
+    }
+
+    /* esp_wifi_set_max_tx_power() takes quarter-dBm units. Goes over the
+     * esp_wifi_remote RPC to the C6, same as every other esp_wifi_* call here. */
+    int8_t target = (dbm == 0) ? s_default_qdbm : (int8_t)(dbm * 4);
+    if (target == 0) {
+        return;   /* uncap requested, nothing captured to restore */
+    }
+    esp_err_t err = esp_wifi_set_max_tx_power(target);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "WiFi TX power set to %d dBm failed: %s", target / 4, esp_err_to_name(err));
+    } else if (dbm == 0) {
+        ESP_LOGI(TAG, "WiFi TX power restored to chip default (%d dBm)", target / 4);
+    } else {
+        ESP_LOGI(TAG, "WiFi TX power capped at %u dBm", (unsigned)dbm);
+    }
+}
+
 static void wifi_reconnect_cb(void *arg)
 {
     if (manual_switch_pending) {
@@ -447,6 +498,7 @@ static void event_handler(void *arg, esp_event_base_t event_base,
         ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
         wifi_attempt_count = 0;
         networks_tried = 0;
+        ota_github_note_network_ready();  /* boot-health milestone for the rollback confirm guard */
 
         /* Show green toast with connected network name and refresh settings UI */
         {
@@ -480,15 +532,13 @@ static void event_handler(void *arg, esp_event_base_t event_base,
                 lv_obj_t *scr = lv_scr_act();
                 create_nina_dashboard(scr, instance_count);
                 nina_toast_init(scr);
-                nina_event_log_overlay_create(scr);
                 nina_alerts_init(scr);
                 nina_safety_create(scr);
                 bsp_display_unlock();
             }
             nina_dashboard_set_page_change_cb(on_page_changed);
             nina_client_init();
-            nina_client_init_image_buffers();
-            nina_thumbnail_init();
+            /* Image fetch + thumbnail zoom buffers are allocated on first use. */
             /* spotify_auth_init() already ran before dashboard creation above. */
             spotify_client_init();
 
@@ -533,6 +583,10 @@ static void event_handler(void *arg, esp_event_base_t event_base,
         } else {
             esp_wifi_set_ps(WIFI_PS_NONE);
         }
+
+        /* Apply the TX power cap (0 = uncapped). Must run after the link is up,
+         * since esp_wifi_set_max_tx_power() only takes effect once WiFi started. */
+        wifi_apply_tx_power(app_config_get()->wifi_max_tx_dbm);
 
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
@@ -624,6 +678,10 @@ static void wifi_init(void)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP,  &wifi_config_ap));
     ESP_ERROR_CHECK(esp_wifi_start());
+
+    /* Cap TX power as soon as WiFi is started so AP-only sessions are capped
+     * too; the STA got-IP path re-applies it after the link comes up. */
+    wifi_apply_tx_power(app_config_get()->wifi_max_tx_dbm);
 
     ESP_LOGI(TAG, "wifi_init finished.");
 }
@@ -724,6 +782,12 @@ void app_main(void)
     // Enable Dynamic Frequency Scaling — CPU scales 360 MHz (active) to 40 MHz (idle)
     power_mgmt_init();
 
+    /* Arm the rollback confirm guard before the web server can serve OTA
+     * requests: captures whether this is the first boot of a fresh OTA image
+     * and, if so, spawns the task that marks it valid once boot is healthy
+     * (display + network) or after an uptime fallback. */
+    ota_github_boot_guard_init();
+
     start_web_server();
     web_test_audio_init();   /* standalone speaker test surface on port 8080 */
 
@@ -750,6 +814,7 @@ void app_main(void)
     bsp_display_start_with_config(&cfg);
     bsp_display_backlight_on();
     bsp_display_brightness_set(app_config_get()->brightness);
+    ota_github_note_display_ready();  /* boot-health milestone for the rollback confirm guard */
 
     /* Raise DW-GDMA (DSI scanout) PSRAM read priority above Cache/CPU so the
      * MIPI-DSI framebuffer fetch is not starved by LVGL/PPA traffic. Fixes the
@@ -942,7 +1007,6 @@ void app_main(void)
 
         /* Initialize notification overlays (must be after dashboard so they float on top) */
         nina_toast_init(scr);
-        nina_event_log_overlay_create(scr);
         nina_alerts_init(scr);
         nina_safety_create(scr);
 
@@ -983,8 +1047,8 @@ void app_main(void)
         audio_alert_play_boot_jingle();
 
         nina_client_init();  // DNS cache mutex — must be called before poll tasks spawn
-        nina_client_init_image_buffers();  // Pre-allocate PSRAM image fetch buffer
-        nina_thumbnail_init();  // Pre-allocate PSRAM zoom buffer
+        /* The 1 MB image fetch buffer and 4 MB thumbnail zoom buffer are
+         * allocated on first thumbnail use, not at boot. */
 
         /* Spotify init — always called so web handlers (config, login) work even when disabled.
          * spotify_auth_init() already ran before dashboard creation above. */
@@ -1028,18 +1092,13 @@ void app_main(void)
         weather_client_start();
     } /* end if (!setup_mode) */
 
-    /* Mark this firmware as valid so the bootloader won't roll back.
-     * This must come after successful init — if we crash before here,
-     * the bootloader will revert to the previous OTA partition. */
-    /* Determine whether this is the first boot of a freshly-OTA'd image.
-     * Only then is a pending OTA version promoted to the confirmed installed
-     * version; a rollback/normal boot discards the stale pending stamp. */
-    const esp_partition_t *running = esp_ota_get_running_partition();
-    esp_ota_img_states_t ota_state;
-    bool first_boot_new_image =
-        (esp_ota_get_state_partition(running, &ota_state) == ESP_OK &&
-         ota_state == ESP_OTA_IMG_PENDING_VERIFY);
-    ota_github_reconcile_version(first_boot_new_image);
-
-    esp_ota_mark_app_valid_cancel_rollback();
+    /* Marking the firmware valid (cancelling bootloader rollback) is owned by
+     * the confirm guard armed early in app_main (ota_github_boot_guard_init):
+     * it fires once display and network are up, or after an uptime fallback,
+     * and checks + retries the mark-valid result instead of ignoring it.
+     * Use the pending-verify state captured at guard init — the guard may
+     * already have confirmed the image (state VALID) by the time we get here.
+     * Only a first boot of a freshly-OTA'd image promotes the pending OTA
+     * version to installed; a rollback/normal boot discards the stale stamp. */
+    ota_github_reconcile_version(ota_github_image_was_pending());
 }

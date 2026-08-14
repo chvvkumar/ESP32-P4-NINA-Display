@@ -1294,13 +1294,6 @@ void spotify_page_apply_theme(void)
     lv_obj_invalidate(spotify_page);
 }
 
-/* ── Public API: overlay visibility ──────────────────────────────────── */
-
-bool nina_spotify_is_overlay_visible(void)
-{
-    return !is_idle;
-}
-
 /* ── Public API: show / hide lifecycle ───────────────────────────────── */
 
 void nina_spotify_on_show(void)

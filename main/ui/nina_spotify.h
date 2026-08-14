@@ -50,11 +50,6 @@ void nina_spotify_set_idle(void);
 void spotify_page_apply_theme(void);
 
 /**
- * Check if the controls overlay is currently visible (not idle).
- */
-bool nina_spotify_is_overlay_visible(void);
-
-/**
  * Notify Spotify page that it became the active page (start idle timer).
  */
 void nina_spotify_on_show(void);

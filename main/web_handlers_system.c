@@ -266,13 +266,33 @@ esp_err_t ota_post_handler(httpd_req_t *req)
     ESP_LOGI(TAG, "OTA: writing to partition '%s' at offset 0x%lx",
              update_partition->label, update_partition->address);
 
+    /* Pre-flight: on the first boot after an OTA the running image may still
+     * be pending verification, which makes esp_ota_begin refuse with
+     * ESP_ERR_OTA_ROLLBACK_INVALID_STATE (HTTP 500 with no body, previously).
+     * The device is demonstrably up — it is serving this request — so confirm
+     * the image now; if that fails, say so instead of a bare 500. Runs on the
+     * httpd worker (internal-RAM stack), as the flash write requires. */
+    esp_err_t err = ota_github_ensure_can_update();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "OTA refused: running image pending verify, confirm failed: %s",
+                 esp_err_to_name(err));
+        ota_remove_overlay();
+        ota_restore_network();
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"error\":\"Current firmware is awaiting boot verification and could not be confirmed. Reboot the device, then retry the update.\"}");
+        return ESP_FAIL;
+    }
+
     esp_ota_handle_t ota_handle = 0;
-    esp_err_t err = esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &ota_handle);
+    err = esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &ota_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_begin failed: %s", esp_err_to_name(err));
         ota_remove_overlay();
         ota_restore_network();
-        httpd_resp_send_500(req);
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"error\":\"esp_ota_begin failed\"}");
         return ESP_FAIL;
     }
 
@@ -406,17 +426,7 @@ esp_err_t version_get_handler(httpd_req_t *req)
     cJSON_AddStringToObject(root, "git_sha", BUILD_GIT_SHA);
     cJSON_AddStringToObject(root, "git_branch", BUILD_GIT_BRANCH);
 
-    const char *json_str = cJSON_PrintUnformatted(root);
-    if (!json_str) {
-        cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
-    free((void *)json_str);
-    cJSON_Delete(root);
-    return ESP_OK;
+    return send_json_response(req, root);
 }
 
 /* ── Asynchronous GitHub update check ─────────────────────────────────
@@ -440,6 +450,13 @@ esp_err_t version_get_handler(httpd_req_t *req)
  */
 #define UPD_CACHE_TTL_OK_US    (3600LL * 1000000LL)
 #define UPD_CACHE_TTL_FAIL_US  (60LL * 1000000LL)
+/* A rate-limited answer is held for the full quota window: the home page triggers
+ * a check on every load, so the 60 s fail TTL would keep the outage alive. */
+#define UPD_CACHE_TTL_RATELIMIT_US (3600LL * 1000000LL)
+/* An install may reuse the cached target only this soon after the check that
+ * produced it: ota_url is a pre-signed asset URL with a short lifetime, so an
+ * older entry would download a 403 instead of the image. */
+#define UPD_INSTALL_REUSE_US   (300LL * 1000000LL)
 #define UPD_WORKER_STACK       12288
 
 static SemaphoreHandle_t s_upd_mutex = NULL;      /* guards the cache fields below */
@@ -519,28 +536,16 @@ static void upd_cache_to_json(cJSON *root)
         cJSON_AddBoolToObject(root, "is_prerelease", s_upd_rel->is_prerelease);
         cJSON_AddBoolToObject(root, "requires_full_erase", s_upd_rel->requires_full_erase);
         cJSON_AddStringToObject(root, "full_erase_tag", s_upd_rel->full_erase_tag);
+    } else if (s_upd_result == OTA_CHECK_RATE_LIMITED) {
+        cJSON_AddBoolToObject(root, "update_available", false);
+        cJSON_AddStringToObject(root, "error",
+                                "GitHub update limit reached. Try again in about an hour.");
     } else if (s_upd_result == OTA_CHECK_ERROR) {
         cJSON_AddBoolToObject(root, "update_available", false);
         cJSON_AddStringToObject(root, "error", "Could not reach GitHub. Try again.");
     } else {
         cJSON_AddBoolToObject(root, "update_available", false);
     }
-}
-
-/* Send `root` as an application/json response and delete it. */
-static esp_err_t upd_send_json(httpd_req_t *req, cJSON *root)
-{
-    const char *json_str = cJSON_PrintUnformatted(root);
-    if (!json_str) {
-        cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
-    free((void *)json_str);
-    cJSON_Delete(root);
-    return ESP_OK;
 }
 
 // Handler for checking GitHub OTA updates (returns JSON result to web UI)
@@ -594,14 +599,18 @@ esp_err_t check_update_json_handler(httpd_req_t *req)
     }
 
     /* ── Fresh cached answer: reply immediately ── */
-    int64_t ttl = (s_upd_result == OTA_CHECK_ERROR) ? UPD_CACHE_TTL_FAIL_US
-                                                    : UPD_CACHE_TTL_OK_US;
+    int64_t ttl = UPD_CACHE_TTL_OK_US;
+    if (s_upd_result == OTA_CHECK_ERROR) {
+        ttl = UPD_CACHE_TTL_FAIL_US;
+    } else if (s_upd_result == OTA_CHECK_RATE_LIMITED) {
+        ttl = UPD_CACHE_TTL_RATELIMIT_US;
+    }
     if (s_upd_have_result && !force &&
         (esp_timer_get_time() - s_upd_stamp_us) < ttl) {
         cJSON_AddBoolToObject(root, "cached", true);
         upd_cache_to_json(root);
         xSemaphoreGive(s_upd_mutex);
-        return upd_send_json(req, root);
+        return send_json_response(req, root);
     }
 
     /* ── A check is needed. Bring the worker up on first demand only. ── */
@@ -624,7 +633,7 @@ esp_err_t check_update_json_handler(httpd_req_t *req)
                                         "Could not start update check. Try again.");
             }
             xSemaphoreGive(s_upd_mutex);
-            return upd_send_json(req, root);
+            return send_json_response(req, root);
         }
     }
 
@@ -648,7 +657,7 @@ esp_err_t check_update_json_handler(httpd_req_t *req)
 
     cJSON_AddStringToObject(root, "status", "checking");
     xSemaphoreGive(s_upd_mutex);
-    return upd_send_json(req, root);
+    return send_json_response(req, root);
 }
 
 // Handler for GitHub OTA download (triggered from web UI)
@@ -663,7 +672,21 @@ esp_err_t ota_github_post_handler(httpd_req_t *req)
     }
     body[received] = '\0';
 
-    /* Re-check GitHub for the release to get the OTA URL */
+    /* Optional {"tag":"..."} pins the install to a specific release; the web UI
+     * sends an empty object and takes whatever the last check offered. */
+    char want_tag[32];
+    want_tag[0] = '\0';
+    cJSON *req_json = cJSON_Parse(body);
+    if (req_json) {
+        cJSON *tag_item = cJSON_GetObjectItem(req_json, "tag");
+        if (cJSON_IsString(tag_item) && tag_item->valuestring) {
+            strncpy(want_tag, tag_item->valuestring, sizeof(want_tag) - 1);
+            want_tag[sizeof(want_tag) - 1] = '\0';
+        }
+        cJSON_Delete(req_json);
+    }
+
+    /* Read the config before taking s_upd_mutex, so the two locks never nest. */
     int update_channel = app_config_get()->update_channel;
     const char *cur_ver = ota_github_get_current_version();
 
@@ -673,9 +696,49 @@ esp_err_t ota_github_post_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    if (ota_github_check(update_channel, cur_ver, rel) != OTA_CHECK_UPDATE_AVAILABLE) {
+    /* Reuse the async worker's target when it is the one the UI just offered,
+     * instead of re-walking the releases list inline on the httpd task. Bounded
+     * by UPD_INSTALL_REUSE_US because the cached ota_url is pre-signed. The
+     * channel must match too: the user can switch channels between the check
+     * and the install, and the cached target belongs to the old channel. */
+    bool from_cache = false;
+    if (s_upd_mutex && s_upd_rel &&
+        xSemaphoreTake(s_upd_mutex, portMAX_DELAY) == pdTRUE) {
+        if (s_upd_have_result && s_upd_result == OTA_CHECK_UPDATE_AVAILABLE &&
+            s_upd_req_channel == update_channel &&
+            (esp_timer_get_time() - s_upd_stamp_us) < UPD_INSTALL_REUSE_US &&
+            (want_tag[0] == '\0' || strcmp(want_tag, s_upd_rel->tag) == 0)) {
+            memcpy(rel, s_upd_rel, sizeof(*rel));
+            from_cache = true;
+        }
+        xSemaphoreGive(s_upd_mutex);
+    }
+
+    if (from_cache) {
+        ESP_LOGI(TAG, "GitHub OTA install using cached check result (%s)", rel->tag);
+    } else if (ota_github_check(update_channel, cur_ver, rel) != OTA_CHECK_UPDATE_AVAILABLE) {
         heap_caps_free(rel);
         return send_400(req, "No update available");
+    }
+
+    /* Releases that changed the partition table or bootloader cannot be flashed
+     * over the air. The web UI hides the button, but this endpoint is also used
+     * directly by automation, so gate here for both the cached and fresh paths. */
+    if (rel->requires_full_erase) {
+        heap_caps_free(rel);
+        return send_400(req, "This update requires a manual USB flash. See the release notes.");
+    }
+
+    /* Pre-flight: confirm a still-pending running image before promising an
+     * install — while pending, esp_ota_begin refuses every OTA. Doing it here
+     * surfaces a clear error; after this point the "started" response is
+     * already committed and a download failure can only be logged. */
+    if (ota_github_ensure_can_update() != ESP_OK) {
+        heap_caps_free(rel);
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"error\":\"Current firmware is awaiting boot verification and could not be confirmed. Reboot the device, then retry the update.\"}");
+        return ESP_OK;
     }
 
     /* Mutual exclusion: reject a second concurrent OTA without touching network state */
@@ -918,17 +981,7 @@ esp_err_t status_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "voice_custom_bytes", (double)vs_custom);
     cJSON_AddNumberToObject(root, "voice_custom_budget", (double)VOICE_STORE_BUDGET);
 
-    const char *json_str = cJSON_PrintUnformatted(root);
-    if (!json_str) {
-        cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
-    free((void *)json_str);
-    cJSON_Delete(root);
-    return ESP_OK;
+    return send_json_response(req, root);
 }
 
 // Handler for per-instance NINA connection health (test automation)
@@ -970,17 +1023,7 @@ esp_err_t nina_status_get_handler(httpd_req_t *req)
         cJSON_AddItemToArray(arr, inst);
     }
 
-    const char *json_str = cJSON_PrintUnformatted(root);
-    if (!json_str) {
-        cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
-    free((void *)json_str);
-    cJSON_Delete(root);
-    return ESP_OK;
+    return send_json_response(req, root);
 }
 
 // Helper: map esp_reset_reason_t to human-readable string
@@ -1022,17 +1065,7 @@ esp_err_t crash_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "uptime_s",
                             (double)esp_timer_get_time() / 1000000.0);
 
-    const char *json_str = cJSON_PrintUnformatted(root);
-    if (!json_str) {
-        cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
-    free((void *)json_str);
-    cJSON_Delete(root);
-    return ESP_OK;
+    return send_json_response(req, root);
 }
 
 // Handler for changing the admin password. Requires the current password.
@@ -1098,14 +1131,13 @@ esp_err_t admin_password_post_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
-    /* Apply + persist */
-    app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    /* Apply + persist. Snapshot under the config mutex rather than memcpy'ing
+     * the live pointer, so a concurrent save cannot be copied half-written. */
+    app_config_t *cfg = config_snapshot_for_request(req);
     if (!cfg) {
         cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_OK;
+        return ESP_OK;   /* 500 already sent */
     }
-    memcpy(cfg, live, sizeof(app_config_t));
     memset(cfg->admin_password, 0, sizeof(cfg->admin_password));
     strncpy(cfg->admin_password, new_pw, sizeof(cfg->admin_password) - 1);
 
@@ -1168,17 +1200,7 @@ esp_err_t weather_get_handler(httpd_req_t *req)
         }
     }
 
-    const char *json_str = cJSON_PrintUnformatted(root);
-    if (!json_str) {
-        cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
-    free((void *)json_str);
-    cJSON_Delete(root);
-    return ESP_OK;
+    return send_json_response(req, root);
 }
 
 // Handler for the on-device UI event log ring (public, no auth)
@@ -1226,17 +1248,7 @@ esp_err_t events_get_handler(httpd_req_t *req)
 
     heap_caps_free(snap);
 
-    const char *json_str = cJSON_PrintUnformatted(root);
-    if (!json_str) {
-        cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
-    free((void *)json_str);
-    cJSON_Delete(root);
-    return ESP_OK;
+    return send_json_response(req, root);
 }
 
 // Handler for clearing the on-device UI event log (auth required)

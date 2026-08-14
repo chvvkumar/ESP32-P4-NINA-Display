@@ -15,6 +15,7 @@
 #include "lvgl.h"
 #include "driver/jpeg_encode.h"
 #include "mqtt_ha.h"
+#include "wifi_manager.h"
 #include "weather_client.h"
 #include "ui/nina_clock.h"
 #include "ui/nina_idle_indicator.h"
@@ -38,6 +39,19 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
             nina_dashboard_apply_theme(new_cfg->theme_index);
             bsp_display_unlock();
         }
+    }
+    /* WiFi transmit power. Applied here rather than in the POST handler so all
+     * three config write paths get it: /api/config (Save), /api/config/apply
+     * (live preview, RAM only), and /api/config/revert (Discard, which calls
+     * this with the NVS values as new_cfg). Revert genuinely puts the radio
+     * back where it was, including all the way back to the chip default when
+     * the saved value is 0 — wifi_apply_tx_power() restores the power it
+     * probed at boot rather than treating 0 as "leave the cap in place". An
+     * unsaved change therefore lasts only until Discard or the next reboot,
+     * which is the lockout escape hatch the web UI's warning tells the user
+     * about. */
+    if (new_cfg->wifi_max_tx_dbm != old_cfg->wifi_max_tx_dbm) {
+        wifi_apply_tx_power(new_cfg->wifi_max_tx_dbm);
     }
     if (new_cfg->screen_rotation != old_cfg->screen_rotation) {
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
@@ -72,6 +86,19 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
      * the connection picture, so force a topology re-resolve on the next tick. */
     if (new_cfg->demo_mode != old_cfg->demo_mode) {
         topology_changed = true;
+    }
+    /* Spotify enable change — the page is created lazily on first enable, so a
+     * toggle from the main config save must reach the dashboard here or the
+     * page only appears after a reboot. */
+    if (new_cfg->spotify_enabled != old_cfg->spotify_enabled) {
+        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+            nina_dashboard_set_spotify_enabled(new_cfg->spotify_enabled);
+            bsp_display_unlock();
+        }
+        if (new_cfg->spotify_enabled) {
+            spotify_ensure_task_running();
+        }
+        topology_changed = true;  /* optional page appeared/disappeared */
     }
     /* Spotify layout mode change — refresh overlay if visible */
     if (new_cfg->spotify_minimal_mode != old_cfg->spotify_minimal_mode ||
@@ -174,256 +201,165 @@ static void apply_display_change(httpd_req_t *req, const app_config_t *cfg)
     }
 }
 
+/* ---- Live display tweak spine ------------------------------------------
+ * /api/brightness, /api/color-brightness, /api/theme, /api/widget-style and
+ * /api/screen-rotation were five copies of one 45-line handler: recv a
+ * single-key body, clamp the int, snapshot config into PSRAM, write one field,
+ * apply RAM-only, poke the hardware, answer "OK". Only the key, the range and
+ * the two per-setting steps below differ.
+ *
+ * set()   writes the field into the snapshot (called before apply).
+ * after() drives the hardware and logs, with the snapshot still live (some
+ *         settings need cfg->theme_index, which set() does not change). */
+typedef void (*disp_set_fn)(app_config_t *cfg, int v);
+typedef void (*disp_after_fn)(const app_config_t *cfg, int v);
+
+static esp_err_t live_display_int_post(httpd_req_t *req, const char *key,
+                                       int lo, int hi,
+                                       disp_set_fn set, disp_after_fn after)
+{
+    char buf[128];
+    cJSON *root = receive_small_json_body(req, buf, sizeof(buf));
+    if (!root) {
+        return ESP_FAIL;   /* response already sent */
+    }
+
+    /* A missing or non-numeric key is not an error: the endpoint has always
+     * answered "OK" and changed nothing. */
+    cJSON *val = cJSON_GetObjectItem(root, key);
+    if (cJSON_IsNumber(val)) {
+        int v = val->valueint;
+        if (v < lo) v = lo;
+        if (v > hi) v = hi;
+        /* Live preview: apply to the in-memory config (no NVS write until Save). */
+        app_config_t *cfg = config_snapshot_for_request(req);
+        if (!cfg) {
+            /* Apply nothing: driving the hardware without the matching config
+             * update leaves device state and config silently diverged. */
+            cJSON_Delete(root);
+            return ESP_FAIL;
+        }
+        set(cfg, v);
+        apply_display_change(req, cfg);
+        after(cfg, v);
+        heap_caps_free(cfg);
+    }
+
+    cJSON_Delete(root);
+    httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
 // Handler for live brightness adjustment (no reboot needed)
+static void disp_set_brightness(app_config_t *cfg, int v) { cfg->brightness = v; }
+static void disp_after_brightness(const app_config_t *cfg, int v)
+{
+    (void)cfg;
+    bsp_display_brightness_set(v);
+    ESP_LOGI(TAG, "Brightness set to %d%%", v);
+    mqtt_ha_publish_state();
+}
+
 esp_err_t brightness_post_handler(httpd_req_t *req)
 {
     REQUIRE_AUTH(req);
-    char buf[128];
-    int ret, remaining = req->content_len;
-
-    if (remaining >= (int)sizeof(buf)) {
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-
-    ret = httpd_req_recv(req, buf, remaining);
-    if (ret <= 0) {
-        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
-            httpd_resp_send_408(req);
-        }
-        return ESP_FAIL;
-    }
-    buf[ret] = '\0';
-
-    cJSON *root = cJSON_Parse(buf);
-    if (!root) {
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-
-    cJSON *val = cJSON_GetObjectItem(root, "brightness");
-    if (cJSON_IsNumber(val)) {
-        int brightness = val->valueint;
-        if (brightness < 0) brightness = 0;
-        if (brightness > 100) brightness = 100;
-        /* Live preview: apply to the in-memory config (no NVS write until Save). */
-        app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
-        if (cfg) {
-            app_config_get_snapshot_into(cfg);
-            cfg->brightness = brightness;
-            apply_display_change(req, cfg);
-            heap_caps_free(cfg);
-        }
-        bsp_display_brightness_set(brightness);
-        ESP_LOGI(TAG, "Brightness set to %d%%", brightness);
-        mqtt_ha_publish_state();
-    }
-
-    cJSON_Delete(root);
-    httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
-    return ESP_OK;
+    return live_display_int_post(req, "brightness", 0, 100,
+                                 disp_set_brightness, disp_after_brightness);
 }
 
 // Handler for live color brightness adjustment (no reboot needed)
+static void disp_set_color_brightness(app_config_t *cfg, int v) { cfg->color_brightness = v; }
+static void disp_after_color_brightness(const app_config_t *cfg, int v)
+{
+    // Re-apply theme to update static text brightness
+    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+        nina_dashboard_apply_theme(cfg->theme_index);
+        bsp_display_unlock();
+    } else {
+        ESP_LOGW(TAG, "Display lock timeout (color brightness)");
+    }
+    ESP_LOGI(TAG, "Color brightness set to %d%%", v);
+    mqtt_ha_publish_state();
+}
+
 esp_err_t color_brightness_post_handler(httpd_req_t *req)
 {
     REQUIRE_AUTH(req);
-    char buf[128];
-    int ret, remaining = req->content_len;
-
-    if (remaining >= (int)sizeof(buf)) {
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-
-    ret = httpd_req_recv(req, buf, remaining);
-    if (ret <= 0) {
-        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
-            httpd_resp_send_408(req);
-        }
-        return ESP_FAIL;
-    }
-    buf[ret] = '\0';
-
-    cJSON *root = cJSON_Parse(buf);
-    if (!root) {
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-
-    cJSON *val = cJSON_GetObjectItem(root, "color_brightness");
-    if (cJSON_IsNumber(val)) {
-        int cb = val->valueint;
-        if (cb < 0) cb = 0;
-        if (cb > 100) cb = 100;
-        /* Live preview: apply to the in-memory config (no NVS write until Save). */
-        app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
-        if (!cfg) {
-            cJSON_Delete(root);
-            httpd_resp_send_500(req);
-            return ESP_FAIL;
-        }
-        app_config_get_snapshot_into(cfg);
-        cfg->color_brightness = cb;
-        apply_display_change(req, cfg);
-
-        // Re-apply theme to update static text brightness
-        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-            nina_dashboard_apply_theme(cfg->theme_index);
-            bsp_display_unlock();
-        } else {
-            ESP_LOGW(TAG, "Display lock timeout (color brightness)");
-        }
-        heap_caps_free(cfg);
-
-        ESP_LOGI(TAG, "Color brightness set to %d%%", cb);
-        mqtt_ha_publish_state();
-    }
-
-    cJSON_Delete(root);
-    httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
-    return ESP_OK;
+    return live_display_int_post(req, "color_brightness", 0, 100,
+                                 disp_set_color_brightness, disp_after_color_brightness);
 }
 
 // Handler for live theme switching (no reboot needed)
+static void disp_set_theme(app_config_t *cfg, int v) { cfg->theme_index = v; }
+static void disp_after_theme(const app_config_t *cfg, int v)
+{
+    (void)cfg;
+    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+        nina_dashboard_apply_theme(v);
+        bsp_display_unlock();
+    } else {
+        ESP_LOGW(TAG, "Display lock timeout (theme switch)");
+    }
+    ESP_LOGI(TAG, "Theme set to %d", v);
+}
+
 esp_err_t theme_post_handler(httpd_req_t *req)
 {
     REQUIRE_AUTH(req);
-    char buf[128];
-    int ret, remaining = req->content_len;
-
-    if (remaining >= (int)sizeof(buf)) {
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-
-    ret = httpd_req_recv(req, buf, remaining);
-    if (ret <= 0) {
-        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
-            httpd_resp_send_408(req);
-        }
-        return ESP_FAIL;
-    }
-    buf[ret] = '\0';
-
-    cJSON *root = cJSON_Parse(buf);
-    if (!root) {
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-
-    cJSON *val = cJSON_GetObjectItem(root, "theme_index");
-    if (cJSON_IsNumber(val)) {
-        int idx = val->valueint;
-        if (idx < 0) idx = 0;
-        if (idx >= themes_get_count()) idx = themes_get_count() - 1;
-        /* Live preview: apply to the in-memory config (no NVS write until Save). */
-        app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
-        if (!cfg) {
-            cJSON_Delete(root);
-            httpd_resp_send_500(req);
-            return ESP_FAIL;
-        }
-        app_config_get_snapshot_into(cfg);
-        cfg->theme_index = idx;
-        apply_display_change(req, cfg);
-        heap_caps_free(cfg);
-        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-            nina_dashboard_apply_theme(idx);
-            bsp_display_unlock();
-        } else {
-            ESP_LOGW(TAG, "Display lock timeout (theme switch)");
-        }
-        ESP_LOGI(TAG, "Theme set to %d", idx);
-    }
-
-    cJSON_Delete(root);
-    httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
-    return ESP_OK;
+    return live_display_int_post(req, "theme_index", 0, themes_get_count() - 1,
+                                 disp_set_theme, disp_after_theme);
 }
 
 // Handler for live widget style switching (no reboot needed)
+static void disp_set_widget_style(app_config_t *cfg, int v) { cfg->widget_style = (uint8_t)v; }
+static void disp_after_widget_style(const app_config_t *cfg, int v)
+{
+    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+        nina_dashboard_apply_theme(cfg->theme_index);
+        bsp_display_unlock();
+    } else {
+        ESP_LOGW(TAG, "Display lock timeout (widget style switch)");
+    }
+    ESP_LOGI(TAG, "Widget style set to %d", v);
+}
+
 esp_err_t widget_style_post_handler(httpd_req_t *req)
 {
     REQUIRE_AUTH(req);
-    char buf[128];
-    int ret, remaining = req->content_len;
-
-    if (remaining >= (int)sizeof(buf)) {
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-
-    ret = httpd_req_recv(req, buf, remaining);
-    if (ret <= 0) {
-        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
-            httpd_resp_send_408(req);
-        }
-        return ESP_FAIL;
-    }
-    buf[ret] = '\0';
-
-    cJSON *root = cJSON_Parse(buf);
-    if (!root) {
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-
-    cJSON *val = cJSON_GetObjectItem(root, "widget_style");
-    if (cJSON_IsNumber(val)) {
-        int idx = val->valueint;
-        if (idx < 0) idx = 0;
-        if (idx >= WIDGET_STYLE_COUNT) idx = WIDGET_STYLE_COUNT - 1;
-        /* Live preview: apply to the in-memory config (no NVS write until Save). */
-        app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
-        if (!cfg) {
-            cJSON_Delete(root);
-            httpd_resp_send_500(req);
-            return ESP_FAIL;
-        }
-        app_config_get_snapshot_into(cfg);
-        cfg->widget_style = (uint8_t)idx;
-        apply_display_change(req, cfg);
-        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-            nina_dashboard_apply_theme(cfg->theme_index);
-            bsp_display_unlock();
-        } else {
-            ESP_LOGW(TAG, "Display lock timeout (widget style switch)");
-        }
-        heap_caps_free(cfg);
-        ESP_LOGI(TAG, "Widget style set to %d", idx);
-    }
-
-    cJSON_Delete(root);
-    httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
-    return ESP_OK;
+    return live_display_int_post(req, "widget_style", 0, WIDGET_STYLE_COUNT - 1,
+                                 disp_set_widget_style, disp_after_widget_style);
 }
 
-// Handler for live page switching (saves override and switches immediately)
+// Handler for live screen rotation adjustment (no reboot needed)
+static void disp_set_screen_rotation(app_config_t *cfg, int v) { cfg->screen_rotation = (uint8_t)v; }
+static void disp_after_screen_rotation(const app_config_t *cfg, int v)
+{
+    (void)cfg;
+    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+        display_rotation_apply(v);
+        bsp_display_unlock();
+    } else {
+        ESP_LOGW(TAG, "Display lock timeout (screen rotation)");
+    }
+    ESP_LOGI(TAG, "Screen rotation set to %d", v);
+}
+
+esp_err_t screen_rotation_post_handler(httpd_req_t *req)
+{
+    REQUIRE_AUTH(req);
+    return live_display_int_post(req, "screen_rotation", 0, 3,
+                                 disp_set_screen_rotation, disp_after_screen_rotation);
+}
+
+/* Handler for live page switching. Off the spine above: it touches no config
+ * field, it issues a navigation claim. */
 esp_err_t page_post_handler(httpd_req_t *req)
 {
     REQUIRE_AUTH(req);
     char buf[64];
-    int ret, remaining = req->content_len;
-
-    if (remaining >= (int)sizeof(buf)) {
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-
-    ret = httpd_req_recv(req, buf, remaining);
-    if (ret <= 0) {
-        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
-            httpd_resp_send_408(req);
-        }
-        return ESP_FAIL;
-    }
-    buf[ret] = '\0';
-
-    cJSON *root = cJSON_Parse(buf);
+    cJSON *root = receive_small_json_body(req, buf, sizeof(buf));
     if (!root) {
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
+        return ESP_FAIL;   /* response already sent */
     }
 
     /* Task 4.1: /api/page is the pure immediate-navigation USER path; it no
@@ -443,63 +379,6 @@ esp_err_t page_post_handler(httpd_req_t *req)
             }
             ESP_LOGI(TAG, "Page switched to %d via web (USER claim)", page);
         }
-    }
-
-    cJSON_Delete(root);
-    httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
-    return ESP_OK;
-}
-
-// Handler for live screen rotation adjustment (no reboot needed)
-esp_err_t screen_rotation_post_handler(httpd_req_t *req)
-{
-    REQUIRE_AUTH(req);
-    char buf[64];
-    int ret, remaining = req->content_len;
-
-    if (remaining >= (int)sizeof(buf)) {
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-
-    ret = httpd_req_recv(req, buf, remaining);
-    if (ret <= 0) {
-        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
-            httpd_resp_send_408(req);
-        }
-        return ESP_FAIL;
-    }
-    buf[ret] = '\0';
-
-    cJSON *root = cJSON_Parse(buf);
-    if (!root) {
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-
-    cJSON *val = cJSON_GetObjectItem(root, "screen_rotation");
-    if (cJSON_IsNumber(val)) {
-        int rot = val->valueint;
-        if (rot < 0) rot = 0;
-        if (rot > 3) rot = 3;
-        /* Live preview: apply to the in-memory config (no NVS write until Save). */
-        app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
-        if (!cfg) {
-            cJSON_Delete(root);
-            httpd_resp_send_500(req);
-            return ESP_FAIL;
-        }
-        app_config_get_snapshot_into(cfg);
-        cfg->screen_rotation = (uint8_t)rot;
-        apply_display_change(req, cfg);
-        heap_caps_free(cfg);
-        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-            display_rotation_apply(rot);
-            bsp_display_unlock();
-        } else {
-            ESP_LOGW(TAG, "Display lock timeout (screen rotation)");
-        }
-        ESP_LOGI(TAG, "Screen rotation set to %d", rot);
     }
 
     cJSON_Delete(root);

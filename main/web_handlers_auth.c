@@ -87,17 +87,7 @@ esp_err_t auth_status_get_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
     cJSON_AddBoolToObject(root, "default_password", is_default);
-    char *json = cJSON_PrintUnformatted(root);
-    if (!json) {
-        cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, json);
-    free(json);
-    cJSON_Delete(root);
-    return ESP_OK;
+    return send_json_response(req, root);
 }
 
 /* POST /api/login — verify password, issue session cookie. Unauthenticated. */

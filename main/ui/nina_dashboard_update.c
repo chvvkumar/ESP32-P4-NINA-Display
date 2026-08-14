@@ -9,6 +9,7 @@
 #include "nina_connection.h"
 #include "app_config.h"
 #include "themes.h"
+#include "time_parse.h"
 #include "esp_timer.h"
 #include <stdio.h>
 #include <string.h>
@@ -50,50 +51,89 @@ static inline void set_shadow_color_if_changed(lv_obj_t *obj, lv_color_t color, 
         lv_obj_set_style_shadow_color(obj, color, sel);
 }
 
-/* Pick the largest font that fits the label's parent width */
-static void auto_fit_value_font(lv_obj_t *label) {
-    static const lv_font_t *fonts[] = {
-        &lv_font_montserrat_48, &lv_font_montserrat_36,
-        &lv_font_montserrat_32, &lv_font_montserrat_28,
-    };
+/* ── Font-ladder fit, with a per-label memo ────────────────────────────
+ * The ladder costs up to 7 lv_text_get_size() glyph walks, and it used to run
+ * on every poll cycle even though its inputs (label text, parent content
+ * width, letter spacing) change rarely. Memoise the pick per label object.
+ * Only two labels per NINA page use this, so 8 slots never evict in practice
+ * (linear scan, slot 0 as the fallback victim).
+ * ponytail: the memo keys on the first 63 chars of the text; two names that
+ * differ only past char 63 share a pick, which is the smallest font either
+ * way. The chosen font is re-applied on a hit, so a recycled label pointer
+ * (page rebuild) can never keep a stale font. */
+#define FIT_CACHE_SLOTS 8
+
+typedef struct {
+    const lv_obj_t  *label;
+    const lv_font_t *pick;
+    int32_t          avail;
+    int32_t          letter_space;
+    char             text[64];
+} fit_cache_t;
+
+static fit_cache_t s_fit_cache[FIT_CACHE_SLOTS];
+
+static fit_cache_t *fit_cache_slot(const lv_obj_t *label) {
+    fit_cache_t *empty = NULL;
+    for (int i = 0; i < FIT_CACHE_SLOTS; i++) {
+        if (s_fit_cache[i].label == label) return &s_fit_cache[i];
+        if (!s_fit_cache[i].label && !empty) empty = &s_fit_cache[i];
+    }
+    return empty ? empty : &s_fit_cache[0];
+}
+
+static void auto_fit_font(lv_obj_t *label, const lv_font_t *const *fonts, int nfonts) {
     const char *text = lv_label_get_text(label);
     int32_t letter_space = lv_obj_get_style_text_letter_space(label, 0);
     int32_t avail = lv_obj_get_content_width(lv_obj_get_parent(label));
-    const lv_font_t *pick = fonts[sizeof(fonts) / sizeof(fonts[0]) - 1];
-    for (int i = 0; i < (int)(sizeof(fonts) / sizeof(fonts[0])); i++) {
-        lv_point_t size;
-        lv_text_get_size(&size, text, fonts[i], letter_space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-        if (size.x <= avail) {
-            pick = fonts[i];
-            break;
+
+    fit_cache_t *slot = fit_cache_slot(label);
+    const lv_font_t *pick;
+
+    if (slot->label == label && slot->pick &&
+        slot->avail == avail && slot->letter_space == letter_space &&
+        strncmp(slot->text, text, sizeof(slot->text) - 1) == 0) {
+        pick = slot->pick;
+    } else {
+        pick = fonts[nfonts - 1];
+        for (int i = 0; i < nfonts; i++) {
+            lv_point_t size;
+            lv_text_get_size(&size, text, fonts[i], letter_space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+            if (size.x <= avail) {
+                pick = fonts[i];
+                break;
+            }
         }
+        slot->label        = label;
+        slot->pick         = pick;
+        slot->avail        = avail;
+        slot->letter_space = letter_space;
+        strncpy(slot->text, text, sizeof(slot->text) - 1);
+        slot->text[sizeof(slot->text) - 1] = '\0';
     }
+
     if (lv_obj_get_style_text_font(label, 0) != pick)
         lv_obj_set_style_text_font(label, pick, 0);
 }
 
+/* Pick the largest font that fits the label's parent width */
+static void auto_fit_value_font(lv_obj_t *label) {
+    static const lv_font_t *const fonts[] = {
+        &lv_font_montserrat_48, &lv_font_montserrat_36,
+        &lv_font_montserrat_32, &lv_font_montserrat_28,
+    };
+    auto_fit_font(label, fonts, (int)(sizeof(fonts) / sizeof(fonts[0])));
+}
+
 /* Pick the largest font that fits the label's parent width (wider ladder for target names) */
 static void auto_fit_target_name_font(lv_obj_t *label) {
-    static const lv_font_t *fonts[] = {
+    static const lv_font_t *const fonts[] = {
         &lv_font_montserrat_48, &lv_font_montserrat_36,
         &lv_font_montserrat_32, &lv_font_montserrat_28,
         &lv_font_montserrat_24, &lv_font_montserrat_20,
         &lv_font_montserrat_16,
     };
-    const char *text = lv_label_get_text(label);
-    int32_t letter_space = lv_obj_get_style_text_letter_space(label, 0);
-    int32_t avail = lv_obj_get_content_width(lv_obj_get_parent(label));
-    const lv_font_t *pick = fonts[sizeof(fonts) / sizeof(fonts[0]) - 1];
-    for (int i = 0; i < (int)(sizeof(fonts) / sizeof(fonts[0])); i++) {
-        lv_point_t size;
-        lv_text_get_size(&size, text, fonts[i], letter_space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-        if (size.x <= avail) {
-            pick = fonts[i];
-            break;
-        }
-    }
-    if (lv_obj_get_style_text_font(label, 0) != pick)
-        lv_obj_set_style_text_font(label, pick, 0);
+    auto_fit_font(label, fonts, (int)(sizeof(fonts) / sizeof(fonts[0])));
 }
 
 static void arc_start_exposure_anim(dashboard_page_t *p);
@@ -197,12 +237,55 @@ static void animate_value(lv_obj_t *label, int32_t from, int32_t to,
 
 /* ---- Sub-functions for update_nina_dashboard_page() ---- */
 
+/* Edge gate for update_disconnected_state(). Its whole body (2 URL parses, 3
+ * snprintf, ~14 label writes, font fitting) used to re-run on every poll while
+ * an instance was disconnected, though everything it writes is a pure function
+ * of these inputs. The reconnect side was already gated this way (see the
+ * !p->nina_connected block in update_nina_dashboard_page); this is the matching
+ * disconnect-side gate. Invalidated on the CONNECTED path so the next
+ * disconnect always repaints, and keyed on theme/brightness so a theme change
+ * while offline still restyles. */
+typedef struct {
+    bool              valid;
+    nina_conn_state_t state;
+    bool              enabled;
+    int               gb;
+    const theme_t    *theme;
+    char              url[128];
+} disc_gate_t;
+
+static disc_gate_t s_disc_gate[MAX_NINA_INSTANCES];
+
+/* Drop a slot's gate so its next poll repaints from scratch. Called by
+ * nina_dashboard_rebuild_slot() after (re)creating a slot's widgets: the fresh
+ * widgets carry creation defaults, not the offline layout. */
+void nina_dashboard_invalidate_disconnect_gate(int instance) {
+    if (instance < 0 || instance >= MAX_NINA_INSTANCES) return;
+    s_disc_gate[instance].valid = false;
+}
+
 static void update_disconnected_state(dashboard_page_t *p, int instance_idx, int gb, nina_conn_state_t conn_state) {
     const char *url = app_config_get_instance_url(instance_idx);
+    bool enabled = app_config_is_instance_enabled(instance_idx);
+
+    disc_gate_t *g = &s_disc_gate[instance_idx];
+    if (g->valid && g->state == conn_state && g->enabled == enabled &&
+        g->gb == gb && g->theme == current_theme &&
+        strncmp(g->url, url, sizeof(g->url) - 1) == 0) {
+        return;   /* nothing this body depends on has changed */
+    }
+    g->valid   = true;
+    g->state   = conn_state;
+    g->enabled = enabled;
+    g->gb      = gb;
+    g->theme   = current_theme;
+    strncpy(g->url, url, sizeof(g->url) - 1);
+    g->url[sizeof(g->url) - 1] = '\0';
+
     char host[64] = {0};
     extract_host_from_url(url, host, sizeof(host));
     const char *state_text;
-    if (!app_config_is_instance_enabled(instance_idx)) {
+    if (!enabled) {
         state_text = "Disabled";
     } else if (conn_state == NINA_CONN_UNKNOWN || conn_state == NINA_CONN_CONNECTING) {
         state_text = "Connecting...";
@@ -498,15 +581,10 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
 
         if (d->exposure_total_count > 0) {
             int total_secs = (int)(d->exposure_total_count * d->exposure_total);
-            int h = total_secs / 3600;
-            int m = (total_secs % 3600) / 60;
-            if (h > 0) {
-                SET_LABEL_FMT_IF_CHANGED(p->lbl_filter_done_value, 32, "%d / %dh %02dm",
-                    d->exposure_total_count, h, m);
-            } else {
-                SET_LABEL_FMT_IF_CHANGED(p->lbl_filter_done_value, 32, "%d / %dm",
-                    d->exposure_total_count, m);
-            }
+            char dur[16];
+            fmt_duration(dur, sizeof(dur), total_secs, FMT_DUR_HM_COMPACT);
+            SET_LABEL_FMT_IF_CHANGED(p->lbl_filter_done_value, 32, "%d / %s",
+                d->exposure_total_count, dur);
             set_text_color_if_changed(p->lbl_filter_done_value, lv_color_hex(filter_color), 0);
             lv_obj_clear_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
         } else {
@@ -838,6 +916,10 @@ void update_nina_dashboard_page(int instance, const nina_client_t *data) {
         update_stale_indicator(p, data);
         return;
     }
+
+    /* Connected: drop the disconnect-side edge gate so the next disconnect
+     * repaints the offline layout the reconnect block below is about to undo. */
+    s_disc_gate[inst].valid = false;
 
     /* Reconnect restore: on the first CONNECTED poll after a disconnected state,
      * un-hide the header and arc and dismiss the branded empty-state overlay.

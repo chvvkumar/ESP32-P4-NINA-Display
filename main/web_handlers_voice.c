@@ -117,16 +117,7 @@ esp_err_t voice_clips_get_handler(httpd_req_t *req)
         cJSON_AddItemToArray(clips, c);
     }
 
-    const char *json_str = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!json_str) {
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
-    free((void *)json_str);
-    return ESP_OK;
+    return send_json_response(req, root);
 }
 
 // Handler accepting a raw PCM upload that replaces the named clip

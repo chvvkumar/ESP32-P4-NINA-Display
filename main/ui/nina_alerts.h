@@ -57,9 +57,6 @@ void nina_alert_eval(alert_type_t type, int instance, float value, float thresho
  */
 void nina_alert_eval_safety(int instance, bool is_safe);
 
-/** Fire the flash animation immediately (LVGL context only, internal use). */
-void nina_alert_flash(void);
-
 /** Re-theme (no-op -- colors are computed at trigger time). */
 void nina_alerts_apply_theme(void);
 

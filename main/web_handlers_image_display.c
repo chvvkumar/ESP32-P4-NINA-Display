@@ -36,6 +36,14 @@ void image_display_apply_live(const app_config_t *prev, const app_config_t *cur,
         bsp_display_unlock();
     }
 
+    /* Feature turned off: this is the release point for the retained decoded
+     * frame. goes_data keeps its last frame across page leave so a slideshow
+     * re-entry is never black (see the note in tasks.c's page-leave block), so
+     * disabling the page is the only place that ~1-2MB of PSRAM comes back. */
+    if (!cur->image_display_enabled && prev->image_display_enabled) {
+        goes_client_cleanup(&goes_data);
+    }
+
     if (cur->image_display_enabled) {
         bool source_band_region_changed =
             cur->image_display_source != prev->image_display_source ||
@@ -78,7 +86,8 @@ void image_display_apply_live(const app_config_t *prev, const app_config_t *cur,
                     cur->moon_spin_return_s != prev->moon_spin_return_s)) {
             /* Moon background style changed only (source unchanged, so the
              * source_band_region_changed branch above did not fire): wake the
-             * image-display task so its Moon branch re-renders moon_render() with
+             * image-display task so its Moon branch re-renders via
+             * moon_sphere_render*() with
              * the new cfg->moon_bg_style and commits it via goes_set_image() /
              * nina_image_display_update(). The Moon branch (image_display_source
              * == 1 in goes_poll_task) is purely local — it renders, commits, and
@@ -158,18 +167,7 @@ esp_err_t image_display_config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "moon_spin_mode", cfg->moon_spin_mode);
     cJSON_AddNumberToObject(root, "moon_spin_return_s", cfg->moon_spin_return_s);
 
-    const char *json_str = cJSON_PrintUnformatted(root);
-    if (json_str == NULL) {
-        cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
-
-    free((void *)json_str);
-    cJSON_Delete(root);
-    return ESP_OK;
+    return send_json_response(req, root);
 }
 
 /**
@@ -322,25 +320,16 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     }
 
     cJSON *resp = cJSON_CreateObject();
-    if (resp == NULL) {
-        httpd_resp_set_type(req, "application/json");
-        httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
-        return ESP_OK;
+    if (resp != NULL) {
+        cJSON_AddBoolToObject(resp, "success", true);
+        if (err_copy[0] != '\0') {
+            cJSON_AddStringToObject(resp, "error_msg", err_copy);
+        }
     }
-    cJSON_AddBoolToObject(resp, "success", true);
-    if (err_copy[0] != '\0') {
-        cJSON_AddStringToObject(resp, "error_msg", err_copy);
-    }
-    const char *resp_str = cJSON_PrintUnformatted(resp);
-    httpd_resp_set_type(req, "application/json");
-    if (resp_str != NULL) {
-        httpd_resp_send(req, resp_str, HTTPD_RESP_USE_STRLEN);
-        free((void *)resp_str);
-    } else {
-        httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
-    }
-    cJSON_Delete(resp);
-    return ESP_OK;
+    /* A NULL object or a failed print both mean out of memory -> 500. The old
+     * fallback here answered a literal {"success":true}, which told the UI the
+     * save succeeded and hid the very error_msg this response exists to carry. */
+    return send_json_response(req, resp);
 }
 
 /**
@@ -358,13 +347,10 @@ esp_err_t image_display_refresh_post_handler(httpd_req_t *req)
 {
     REQUIRE_AUTH(req);
 
-    /* app_config_t is ~7.6 KB — snapshot into a PSRAM heap copy, not the stack. */
-    app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    app_config_t *cfg = config_snapshot_for_request(req);
     if (!cfg) {
-        httpd_resp_send_500(req);
         return ESP_FAIL;
     }
-    app_config_get_snapshot_into(cfg);
     bool image_display_enabled = cfg->image_display_enabled;
     heap_caps_free(cfg);
 
@@ -386,23 +372,14 @@ esp_err_t image_display_refresh_post_handler(httpd_req_t *req)
     }
 
     cJSON *resp = cJSON_CreateObject();
-    if (resp == NULL) {
-        httpd_resp_set_type(req, "application/json");
-        httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
-        return ESP_OK;
+    if (resp != NULL) {
+        cJSON_AddBoolToObject(resp, "success", true);
+        if (err_copy[0] != '\0') {
+            cJSON_AddStringToObject(resp, "error_msg", err_copy);
+        }
     }
-    cJSON_AddBoolToObject(resp, "success", true);
-    if (err_copy[0] != '\0') {
-        cJSON_AddStringToObject(resp, "error_msg", err_copy);
-    }
-    const char *resp_str = cJSON_PrintUnformatted(resp);
-    httpd_resp_set_type(req, "application/json");
-    if (resp_str != NULL) {
-        httpd_resp_send(req, resp_str, HTTPD_RESP_USE_STRLEN);
-        free((void *)resp_str);
-    } else {
-        httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
-    }
-    cJSON_Delete(resp);
-    return ESP_OK;
+    /* A NULL object or a failed print both mean out of memory -> 500. The old
+     * fallback here answered a literal {"success":true}, which told the UI the
+     * save succeeded and hid the very error_msg this response exists to carry. */
+    return send_json_response(req, resp);
 }

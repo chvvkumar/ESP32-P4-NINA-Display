@@ -87,6 +87,7 @@
     BOOL      (screen_sleep_enabled,         "screen_sleep_enabled",         false) \
     BOOL      (alert_flash_enabled,          "alert_flash_enabled",          true) \
     BOOL      (wifi_power_save,              "wifi_power_save",              false) \
+    INT_RESET (wifi_max_tx_dbm,              "wifi_max_tx_dbm",              0,     0,     20)    /* 0 = no cap (radio default); the only other legal values are 8/11/14/17/20. RESET, not clamp: an out-of-range byte (e.g. a stale 255) must fail toward connectivity (0 = uncapped), never toward a silent 20 dBm cap the user never chose. This row bounds the range only; the exact whitelist is enforced at the BOTTOM of validate_config() in app_config.c, which runs after settings_clamp_apply() and resets an in-range off-list survivor (e.g. 13) to 0. Strictest check last — the two compose, they do not fight */ \
     BOOL      (auto_update_check,            "auto_update_check",            1) \
     INT_RESET (update_channel,               "update_channel",               0,     0,     2) \
     /* -- Deep sleep -- */ \
@@ -124,7 +125,6 @@
     INT       (weather_time_format,          "weather_time_format",          0,     0,     1) \
     /* -- Idle page override (target excluded — cross-field page-registry semantics) -- */ \
     BOOL      (idle_page_override_enabled,   "idle_page_override_enabled",   false) \
-    BOOL      (idle_page_persistent,         "idle_page_persistent",         false) /* retired/unread; not currently serialized */ \
     BOOL      (idle_indicator_enabled,       "idle_indicator_enabled",       true) \
     /* -- Auth (admin_password excluded — secret) -- */ \
     BOOL      (auth_enabled,                 "auth_enabled",                 true) \
@@ -167,12 +167,12 @@
     /* -- First-boot setup hint -- */ \
     BOOL      (setup_hint_dismissed,         "setup_hint_dismissed",         false) \
     /* -- Spoken voice alerts (v54) -- */ \
-    INT       (alert_voice_enabled,          "alert_voice_enabled",          0,     0,     1)     /* no prior clamp; whole 0/1 domain, matches the goes_vflip-style uint8 flags above */ \
+    INT       (alert_voice_enabled,          "alert_voice_enabled",          1,     0,     1)     /* default on; no prior clamp; whole 0/1 domain, matches the goes_vflip-style uint8 flags above */ \
     INT       (alert_voice_volume,           "alert_voice_volume",           90,    0,     100) \
     INT       (alert_voice_types,            "alert_voice_types",            ALERT_VOICE_TYPE_ALL, 0, ALERT_VOICE_TYPE_ALL) /* bitmask 1=RMS 2=HFR 4=SAFETY; two-sided clamp is exact here because every value 0..7 is a legal mask */ \
     INT       (alert_voice_repeat_min,       "alert_voice_repeat_min",       5,     0,     60)    /* 0 = announce once only */ \
     INT       (alert_voice_brief,            "alert_voice_brief",            0,     0,     1)     /* v57: 0 = detailed breach sentence with value, 1 = brief */ \
-    INT       (alert_voice_conn,             "alert_voice_conn",             0,     0,     1)     /* v58: announce NINA link connect (default off) */ \
+    INT       (alert_voice_conn,             "alert_voice_conn",             1,     0,     1)     /* v58: announce NINA link connect (default on) */ \
     INT       (alert_voice_disc,             "alert_voice_disc",             1,     0,     1)     /* v58: announce NINA link disconnect (default on) */ \
     /* -- Startup jingle (v56) -- */ \
     INT       (boot_jingle_enabled,          "boot_jingle_enabled",          1,     0,     1)     /* play the boot jingle once at startup; default on */
@@ -192,7 +192,7 @@ bool settings_clamp_apply(app_config_t *cfg);
 /* Serialize every row's current value into `root` under its json_key, one
  * cJSON_Add*ToObject call per row (bool->AddBool, string kinds->AddString,
  * everything else->AddNumber). Does not touch excluded/complex fields
- * (arrays, JSON blobs, secrets, cross-field page targets, idle_page_persistent) —
+ * (arrays, JSON blobs, secrets, cross-field page targets) —
  * callers that need those keep their existing hand-written cJSON_Add*
  * calls in web_handlers_config.c. */
 void settings_json_serialize(const app_config_t *cfg, cJSON *root);

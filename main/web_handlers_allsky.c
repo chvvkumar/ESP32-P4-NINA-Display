@@ -26,18 +26,7 @@ esp_err_t allsky_config_get_handler(httpd_req_t *req)
     cJSON_AddStringToObject(root, "thresholds",       cfg->allsky_thresholds);
     cJSON_AddBoolToObject(root, "allsky_enabled",    cfg->allsky_enabled);
 
-    const char *json_str = cJSON_PrintUnformatted(root);
-    if (json_str == NULL) {
-        cJSON_Delete(root);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
-
-    free((void *)json_str);
-    cJSON_Delete(root);
-    return ESP_OK;
+    return send_json_response(req, root);
 }
 
 /**
@@ -51,12 +40,10 @@ esp_err_t allsky_proxy_get_handler(httpd_req_t *req)
      * config is not read field-by-field during the (slow) outbound fetch.
      * app_config_t is ~7.6 KB — too large for the httpd stack, so snapshot into
      * a PSRAM heap copy, extract the hostname, and free before the fetch. */
-    app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    app_config_t *cfg = config_snapshot_for_request(req);
     if (!cfg) {
-        httpd_resp_send_500(req);
         return ESP_FAIL;
     }
-    app_config_get_snapshot_into(cfg);
     char allsky_hostname[sizeof(cfg->allsky_hostname)];
     strlcpy(allsky_hostname, cfg->allsky_hostname, sizeof(allsky_hostname));
     heap_caps_free(cfg);

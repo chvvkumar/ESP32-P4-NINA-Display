@@ -2,6 +2,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include "esp_attr.h"      // EXT_RAM_BSS_ATTR
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
@@ -12,8 +13,11 @@
 
 static const char *TAG = "perf";
 
-// Global singleton
-perf_state_t g_perf;
+// Global singleton. ~3 KB of counters/timers touched only from task context
+// (nina_client, tasks, app_config, main) -- never from the failed-alloc hook or
+// any other ISR path -- so it lives in PSRAM .ext_ram.bss. That section is
+// zeroed in cpu_start() before app_main, so the zero-init contract holds.
+EXT_RAM_BSS_ATTR perf_state_t g_perf;
 
 // ── Failed-allocation catcher ───────────────────────────────────────
 //
@@ -61,7 +65,8 @@ typedef struct {
     int64_t             start_us;
 } start_time_entry_t;
 
-static start_time_entry_t s_start_times[START_TIME_SLOTS];
+// Task-context only (written by perf_timer_start/stop). PSRAM-resident.
+static EXT_RAM_BSS_ATTR start_time_entry_t s_start_times[START_TIME_SLOTS];
 
 static uint32_t ptr_hash(const perf_timer_t *p)
 {
@@ -128,12 +133,6 @@ int64_t perf_timer_stop(perf_timer_t *t)
         t->max_us = elapsed;
     }
     return elapsed;
-}
-
-void perf_timer_reset(perf_timer_t *t)
-{
-    if (!g_perf.enabled) return;
-    memset(t, 0, sizeof(*t));
 }
 
 void perf_timer_record(perf_timer_t *t, int64_t duration_us)

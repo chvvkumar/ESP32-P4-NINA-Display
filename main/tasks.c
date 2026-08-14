@@ -13,10 +13,10 @@
 #include "json_client.h"
 #include "ha_client.h"
 #include "goes_client.h"
-#include "moon_render.h"
 #include "moon_sphere.h"   /* tgx sphere renderer for the Moon page */
 #include "moon_interaction.h"  /* drag-to-rotate touch state */
 #include "moon_ephemeris.h"
+#include "image_red_remap.h"   /* red-night remap applied to the moon drag source */
 #include <math.h>           /* acos() for seamless anim start cycle */
 #include "spotify_auth.h"
 #include "spotify_client.h"
@@ -63,6 +63,7 @@
 #include "freertos/queue.h"
 #include "ui/nina_thumbnail.h"
 #include "poll_task.h"
+#include "wifi_manager.h"   /* wifi_apply_tx_power — re-applied on screen-sleep wake */
 
 static const char *TAG = "tasks";
 
@@ -73,13 +74,100 @@ static QueueHandle_t s_fetch_result_queue = NULL;  /* fetch_result_t */
 #define FETCH_RESULT_QUEUE_LEN 4
 
 #define BOOT_BUTTON_GPIO    GPIO_NUM_35
-#define DEBOUNCE_MS         200
 #define HEARTBEAT_INTERVAL_MS 10000
 /* Graph refresh interval read from config at runtime (graph_update_interval_s) */
 
 /* Signals the data task that a page switch occurred */
 _Atomic bool page_changed = false;
 _Atomic bool ota_in_progress = false;
+
+/* ── PSRAM static task spawn ─────────────────────────────────────────────────
+ * Every background task in this file has the same spawn shape: PSRAM stack +
+ * internal-RAM TCB + xTaskCreateStaticPinnedToCore, freeing both on a partial
+ * allocation failure. Internal heap is the scarce resource (SDIO WiFi RX DMA
+ * competes for it), so the stack must come from SPIRAM; the TCB must not,
+ * FreeRTOS touches it from contexts where PSRAM access is not guaranteed.
+ *
+ * @p depth is passed to FreeRTOS unchanged AND sizes the buffer as
+ * depth * sizeof(StackType_t), which is exactly right and not a 4x waste:
+ * ESP-IDF's RISC-V port defines portSTACK_TYPE as uint8_t
+ * (components/freertos/FreeRTOS-Kernel/portable/riscv/include/freertos/portmacro.h:99),
+ * so StackType_t is one byte and the FreeRTOS "stack depth" argument is in
+ * BYTES here, not words as in vanilla FreeRTOS. The kernel sizes the same way
+ * (FreeRTOS-Kernel/tasks.c:1044, ulStackDepth * sizeof(StackType_t)), so the
+ * buffer and the task's usable stack are identical. Do NOT divide the
+ * allocation by sizeof(StackType_t) "to save PSRAM" — that would hand every
+ * task a stack a quarter of the declared size and let it run off the end.
+ *
+ * Returns the new handle, or NULL if allocation failed (nothing was spawned).
+ */
+static TaskHandle_t psram_task_spawn(TaskFunction_t fn, const char *name,
+                                     uint32_t depth, void *arg,
+                                     UBaseType_t prio, BaseType_t core)
+{
+    StackType_t  *stack = heap_caps_malloc(depth * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+    StaticTask_t *tcb   = heap_caps_calloc(1, sizeof(StaticTask_t),
+                                           MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!stack || !tcb) {
+        ESP_LOGE(TAG, "Failed to allocate PSRAM stack for task '%s'", name);
+        if (stack) heap_caps_free(stack);
+        if (tcb) heap_caps_free(tcb);
+        return NULL;
+    }
+    TaskHandle_t h = xTaskCreateStaticPinnedToCore(fn, name, depth, arg, prio,
+                                                   stack, tcb, core);
+    ESP_LOGI(TAG, "Task '%s' spawned on core %d", name, (int)core);
+    return h;
+}
+
+/* Spawn @p fn once and publish its handle into *@p handle.
+ *
+ * @p mux guards the check-and-publish against a concurrent caller: these are
+ * reachable both from the boot task and from an httpd worker on a runtime
+ * enable. The task-create itself cannot run inside the critical section (it
+ * allocates and takes kernel locks), so the check and the publish are two
+ * separate critical sections — the same narrow check-then-act window the
+ * hand-written guards had. Closing it fully needs an in-progress sentinel;
+ * not done here because it would change behaviour, not just shape.
+ *
+ * Returns the running handle (existing or new), or NULL only when allocation
+ * failed and nothing is running.
+ */
+static TaskHandle_t psram_task_ensure(TaskHandle_t *handle, portMUX_TYPE *mux,
+                                      TaskFunction_t fn, const char *name,
+                                      uint32_t depth, void *arg,
+                                      UBaseType_t prio, BaseType_t core)
+{
+    portENTER_CRITICAL(mux);
+    TaskHandle_t existing = *handle;
+    portEXIT_CRITICAL(mux);
+    if (existing) return existing;
+
+    TaskHandle_t h = psram_task_spawn(fn, name, depth, arg, prio, core);
+    if (h) {
+        portENTER_CRITICAL(mux);
+        *handle = h;
+        portEXIT_CRITICAL(mux);
+    }
+    return h;
+}
+
+/* ── Shared poll-interval getter ─────────────────────────────────────────────
+ * The allsky/json/ha spine specs all wanted the same thing: a live config
+ * field in seconds, scaled to ms and floored. The pointer is into the static
+ * s_config, so it stays valid for the life of the task and the read is live.
+ * Passed as the poll_loop_run() arg; the poll_once callbacks ignore it. */
+typedef struct {
+    const uint16_t *seconds;  /**< Live config field, e.g. &cfg->json_update_interval_s. */
+    uint32_t floor_ms;        /**< Lower bound applied after scaling. */
+} poll_interval_src_t;
+
+static uint32_t config_interval_ms(void *arg)
+{
+    const poll_interval_src_t *src = (const poll_interval_src_t *)arg;
+    uint32_t ms = (uint32_t)*src->seconds * 1000;
+    return (ms < src->floor_ms) ? src->floor_ms : ms;
+}
 
 /**
  * Strip JPEG COM (0xFFFE) markers in-place.
@@ -483,16 +571,31 @@ void instance_poll_task(void *arg) {
         // Check deferred camera-disconnect alerts
         nina_websocket_check_deferred_alerts(idx);
 
-        // DNS pre-check
-        if (!nina_client_dns_check(url)) {
+        int64_t now_ms = esp_timer_get_time() / 1000;
+
+        /* Is a request actually due this wake? Mirrors the tier branch below.
+         * The heartbeat-gated tiers wake far more often than they poll, and a
+         * powered-off host would otherwise re-resolve DNS on every wake. */
+        bool poll_due;
+        if (screen_asleep) {
+            poll_due = true;
+        } else if (!nina_pages_active) {
+            poll_due = (now_ms - ctx->last_heartbeat_ms >=
+                        (int64_t)app_config_get()->idle_poll_interval_s * 1000);
+        } else if (ctx->is_active) {
+            poll_due = true;
+        } else {
+            poll_due = (now_ms - ctx->last_heartbeat_ms >= HEARTBEAT_INTERVAL_MS);
+        }
+
+        // DNS pre-check — only ahead of a request we are about to issue
+        if (poll_due && !nina_client_dns_check(url)) {
             ctx->client->connected = false;
             nina_connection_report_poll(idx, false);
             ESP_LOGD(TAG, "Poll[%d]: DNS failed, skipping", idx + 1);
             vTaskDelay(pdMS_TO_TICKS(5000));
             continue;
         }
-
-        int64_t now_ms = esp_timer_get_time() / 1000;
 
         // Poll based on active/background/idle mode
         if (screen_asleep) {
@@ -614,20 +717,17 @@ static bool allsky_poll_once(void *arg) {
     return true; /* no failure signal — matches original unconditional-retry-at-interval behavior */
 }
 
-static uint32_t allsky_interval_ms(void *arg) {
-    (void)arg;
-
-    const app_config_t *cfg = app_config_get();
-
-    /* Sleep for the configured interval (clamped 1-300s at config-validate time; floor here too) */
-    uint32_t interval_ms = (uint32_t)cfg->allsky_update_interval_s * 1000;
-    if (interval_ms < 1000) interval_ms = 1000;
-    return interval_ms;
-}
-
 void allsky_poll_task(void *arg) {
     (void)arg;
     ESP_LOGI(TAG, "AllSky poll task started");
+
+    /* Interval clamped 1-300s at config-validate time; floored here too.
+     * Lives on this task's stack, which never unwinds (poll_loop_run does not
+     * return), so the pointer handed to the spine stays valid. */
+    poll_interval_src_t interval = {
+        .seconds  = &app_config_get()->allsky_update_interval_s,
+        .floor_ms = 1000,
+    };
 
     poll_loop_spec_t spec = {
         .name = "allsky",
@@ -635,12 +735,12 @@ void allsky_poll_task(void *arg) {
         .wifi_bits = WIFI_CONNECTED_BIT,
         .page_active = &allsky_page_active,
         .poll_once = allsky_poll_once,
-        .interval_ms = allsky_interval_ms,
+        .interval_ms = config_interval_ms,
         .backoff_initial_ms = 0,
         .backoff_max_ms = 0,
     };
 
-    poll_loop_run(&spec, NULL);
+    poll_loop_run(&spec, &interval);
 }
 
 // =============================================================================
@@ -662,20 +762,15 @@ static bool json_poll_once(void *arg) {
     return true; /* no failure signal — retry at interval, matches allsky */
 }
 
-static uint32_t json_interval_ms(void *arg) {
-    (void)arg;
-
-    const app_config_t *cfg = app_config_get();
-
-    /* Configured interval (clamped 5-300s at config-validate time; floor here). */
-    uint32_t interval_ms = (uint32_t)cfg->json_update_interval_s * 1000;
-    if (interval_ms < 5000) interval_ms = 5000;
-    return interval_ms;
-}
-
 void json_poll_task(void *arg) {
     (void)arg;
     ESP_LOGI(TAG, "JSON Display poll task started");
+
+    /* Interval clamped 5-300s at config-validate time; floored here too. */
+    poll_interval_src_t interval = {
+        .seconds  = &app_config_get()->json_update_interval_s,
+        .floor_ms = 5000,
+    };
 
     poll_loop_spec_t spec = {
         .name = "json",
@@ -683,44 +778,25 @@ void json_poll_task(void *arg) {
         .wifi_bits = WIFI_CONNECTED_BIT,
         .page_active = &json_page_active,
         .poll_once = json_poll_once,
-        .interval_ms = json_interval_ms,
+        .interval_ms = config_interval_ms,
         .backoff_initial_ms = 0,
         .backoff_max_ms = 0,
     };
 
-    poll_loop_run(&spec, NULL);
+    poll_loop_run(&spec, &interval);
 }
 
+/* Sole spawn path for json_poll_task — called both at boot and on a runtime
+ * enable from the web UI, so the page starts polling without a reboot.
+ * 10240 words (not 6144) gives TLS headroom: an https JSON source runs an
+ * mbedTLS handshake on this task's stack. */
 void json_ensure_task_running(void)
 {
-    /* Only spawn when the page is enabled; a runtime enable via the web UI must
-     * start polling without a reboot (mirrors goes_ensure_task_running). */
     if (!app_config_get()->json_enabled) return;
 
-    /* Guard check-and-assign against a double-spawn race: this may be called
-     * concurrently from the boot task and an httpd task (runtime enable). */
     static portMUX_TYPE json_spawn_mux = portMUX_INITIALIZER_UNLOCKED;
-    portENTER_CRITICAL(&json_spawn_mux);
-    bool already = (json_task_handle != NULL);
-    portEXIT_CRITICAL(&json_spawn_mux);
-    if (already) return;
-
-    /* PSRAM stack 10240 words, pinned to Core 0, priority 3 — mirrors the boot
-     * spawn in data_update_task exactly. 10240 (not 6144) gives TLS headroom:
-     * an https JSON source runs an mbedTLS handshake on this task's stack. */
-    StackType_t  *stack = heap_caps_malloc(10240 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
-    StaticTask_t *tcb   = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    if (stack && tcb) {
-        portENTER_CRITICAL(&json_spawn_mux);
-        json_task_handle = xTaskCreateStaticPinnedToCore(
-            json_poll_task, "json", 10240, NULL, 3, stack, tcb, 0);
-        portEXIT_CRITICAL(&json_spawn_mux);
-        ESP_LOGI(TAG, "JSON Display poll task spawned");
-    } else {
-        ESP_LOGE(TAG, "Failed to allocate JSON Display poll task stack");
-        if (stack) heap_caps_free(stack);
-        if (tcb) heap_caps_free(tcb);
-    }
+    psram_task_ensure(&json_task_handle, &json_spawn_mux,
+                      json_poll_task, "json", 10240, NULL, 3, 0);
 }
 
 // =============================================================================
@@ -742,20 +818,15 @@ static bool ha_poll_once(void *arg) {
     return true; /* no failure signal — retry at interval, matches json */
 }
 
-static uint32_t ha_interval_ms(void *arg) {
-    (void)arg;
-
-    const app_config_t *cfg = app_config_get();
-
-    /* Configured interval (clamped 5-300s at config-validate time; floor here). */
-    uint32_t interval_ms = (uint32_t)cfg->ha_update_interval_s * 1000;
-    if (interval_ms < 5000) interval_ms = 5000;
-    return interval_ms;
-}
-
 void ha_poll_task(void *arg) {
     (void)arg;
     ESP_LOGI(TAG, "Home Assistant poll task started");
+
+    /* Interval clamped 5-300s at config-validate time; floored here too. */
+    poll_interval_src_t interval = {
+        .seconds  = &app_config_get()->ha_update_interval_s,
+        .floor_ms = 5000,
+    };
 
     poll_loop_spec_t spec = {
         .name = "ha",
@@ -763,44 +834,24 @@ void ha_poll_task(void *arg) {
         .wifi_bits = WIFI_CONNECTED_BIT,
         .page_active = &ha_page_active,
         .poll_once = ha_poll_once,
-        .interval_ms = ha_interval_ms,
+        .interval_ms = config_interval_ms,
         .backoff_initial_ms = 0,
         .backoff_max_ms = 0,
     };
 
-    poll_loop_run(&spec, NULL);
+    poll_loop_run(&spec, &interval);
 }
 
+/* Sole spawn path for ha_poll_task — boot and runtime enable both land here.
+ * 10240 words (not 6144) gives TLS headroom: an https HA base runs an mbedTLS
+ * handshake on this task's stack. */
 void ha_ensure_task_running(void)
 {
-    /* Only spawn when the page is enabled; a runtime enable via the web UI must
-     * start polling without a reboot (mirrors json_ensure_task_running). */
     if (!app_config_get()->ha_enabled) return;
 
-    /* Guard check-and-assign against a double-spawn race: this may be called
-     * concurrently from the boot task and an httpd task (runtime enable). */
     static portMUX_TYPE ha_spawn_mux = portMUX_INITIALIZER_UNLOCKED;
-    portENTER_CRITICAL(&ha_spawn_mux);
-    bool already = (ha_task_handle != NULL);
-    portEXIT_CRITICAL(&ha_spawn_mux);
-    if (already) return;
-
-    /* PSRAM stack 10240 words, pinned to Core 0, priority 3 — mirrors the boot
-     * spawn in data_update_task exactly. 10240 (not 6144) gives TLS headroom:
-     * an https HA base runs an mbedTLS handshake on this task's stack. */
-    StackType_t  *stack = heap_caps_malloc(10240 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
-    StaticTask_t *tcb   = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    if (stack && tcb) {
-        portENTER_CRITICAL(&ha_spawn_mux);
-        ha_task_handle = xTaskCreateStaticPinnedToCore(
-            ha_poll_task, "ha", 10240, NULL, 3, stack, tcb, 0);
-        portEXIT_CRITICAL(&ha_spawn_mux);
-        ESP_LOGI(TAG, "Home Assistant poll task spawned");
-    } else {
-        ESP_LOGE(TAG, "Failed to allocate Home Assistant poll task stack");
-        if (stack) heap_caps_free(stack);
-        if (tcb) heap_caps_free(tcb);
-    }
+    psram_task_ensure(&ha_task_handle, &ha_spawn_mux,
+                      ha_poll_task, "ha", 10240, NULL, 3, 0);
 }
 
 // =============================================================================
@@ -885,10 +936,27 @@ static uint16_t *s_drag_zbuf   = NULL;
 static uint16_t *s_ppa_out[2]  = { NULL, NULL };   /* 720x720 PPA-output ping-pong */
 static int       s_ppa_ping    = 0;                /* index PPA writes next (flips each frame) */
 
-/* Free the moon-drag scratch and PPA output buffers and NULL them. Called on
- * Image Display page leave. Safe to call when the buffers were never allocated
- * (NULL frees are no-ops). The page's own software-scale copy buffers are freed
- * separately in nina_image_display_cleanup(). */
+/* MOON BUFFER LIFETIME CONTRACT (fixes a confirmed use-after-free crash).
+ * The moon texture (moon_sphere.cpp s_tex_buf, ~1MB) and the drag scratch above
+ * are READ/WRITTEN by renders that run ONLY on goes_poll_task, and a single
+ * 720px render blocks ~300ms. data_update_task (Core 1) detects the page leave,
+ * so it must NOT free them itself: while a slideshow rotation fires the leave,
+ * goes_poll_task can be mid-drawSphere sampling s_tex_buf, and freeing it under
+ * the renderer panics inside tgx texture sampling. moon_sphere's init mutex does
+ * NOT cover this — the render path never holds it across the render, and it
+ * cannot cover the drag scratch at all.
+ * So the free is OWNERSHIP-TRANSFERRED, not locked: data_update_task only sets
+ * this request flag (AFTER nina_image_display_cleanup() has dropped the LVGL
+ * descriptor that borrows s_ppa_out), and goes_poll_task performs the actual
+ * free at its parked point, where no render can be in flight. One task renders,
+ * the same task frees; no cross-task lock, no contention, no blocked UI. */
+static _Atomic bool s_moon_release_req = false;
+
+/* Free the moon-drag scratch and PPA output buffers and NULL them. Called ONLY
+ * from goes_poll_task (see the ownership contract above). Safe to call when the
+ * buffers were never allocated (NULL frees are no-ops). The page's own
+ * software-scale copy buffers are freed separately in
+ * nina_image_display_cleanup(). */
 static void moon_drag_buffers_free(void)
 {
     if (s_drag_color) { heap_caps_free(s_drag_color); s_drag_color = NULL; }
@@ -908,7 +976,11 @@ void moon_caption(char *name_out, size_t name_sz, char *pct_out, size_t pct_sz)
 }
 
 /* Cached rise/set results — recomputed at most once per 30 s or on location
- * change.  Avoids running the 457-sample scan on every drag frame. */
+ * change. moon_rise_set() is a 457-sample double-precision scan (~22k soft-float
+ * fmod on this FPU), so it runs ONLY on goes_poll_task (Core 0, no display lock);
+ * moon_overlay_info() on the UI path (Core 1, display lock held) reads the cache.
+ * The spinlock keeps the six fields a consistent set across the two cores. */
+static portMUX_TYPE s_rs_mux = portMUX_INITIALIZER_UNLOCKED;
 static time_t s_rs_calc_at  = 0;
 static time_t s_rs_rise     = 0;
 static time_t s_rs_set      = 0;
@@ -916,6 +988,38 @@ static bool   s_rs_rise_v   = false;
 static bool   s_rs_set_v    = false;
 static double s_rs_lat      = 1e9;
 static double s_rs_lon      = 1e9;
+
+/* Refresh the rise/set cache when stale (>= 30 s) or the location changed.
+ * Call from goes_poll_task only — never with the display lock held. */
+static void moon_rise_set_refresh(void)
+{
+    const app_config_t *cfg = app_config_get();
+    double lat = cfg->moon_lat, lon = cfg->moon_lon;
+    if (lat == 0.0 && lon == 0.0) { lat = cfg->weather_lat; lon = cfg->weather_lon; }
+
+    time_t now;
+    time(&now);
+
+    portENTER_CRITICAL(&s_rs_mux);
+    bool stale = (s_rs_calc_at == 0 || (now - s_rs_calc_at) >= 30 ||
+                  lat != s_rs_lat || lon != s_rs_lon);
+    portEXIT_CRITICAL(&s_rs_mux);
+    if (!stale) return;
+
+    time_t rise_t = 0, set_t = 0;
+    bool   rise_v = false, set_v = false;
+    moon_rise_set(now, lat, lon, &rise_t, &rise_v, &set_t, &set_v);
+
+    portENTER_CRITICAL(&s_rs_mux);
+    s_rs_rise    = rise_t;
+    s_rs_rise_v  = rise_v;
+    s_rs_set     = set_t;
+    s_rs_set_v   = set_v;
+    s_rs_lat     = lat;
+    s_rs_lon     = lon;
+    s_rs_calc_at = now;
+    portEXIT_CRITICAL(&s_rs_mux);
+}
 
 /* Return the signed difference in LOCAL calendar days between evt and now.
  * Normalises both instants to local noon before subtracting so DST transitions
@@ -982,8 +1086,9 @@ static void fmt_moon_event(char *out, size_t sz, const char *label,
  *         12h e.g. "Rise 2:34am" otherwise).  A day-offset suffix " +N" / " -N"
  *         is appended when the event falls on a different local calendar day.
  *   set:  same format as rise.
- * Reads cached s_moon_state (lock-free, single writer) for age/next; calls
- * moon_rise_set() at most once per 30 s (throttled) for the rise/set times. */
+ * Reads cached s_moon_state (lock-free, single writer) for age/next; the rise/set
+ * times come from the cache filled by moon_rise_set_refresh() on the poll task —
+ * this function never runs the ephemeris scan, it is called under the display lock. */
 void moon_overlay_info(char *age,  size_t age_sz,
                        char *next, size_t next_sz,
                        char *rise, size_t rise_sz,
@@ -1015,36 +1120,41 @@ void moon_overlay_info(char *age,  size_t age_sz,
             snprintf(next, next_sz, "New in %.0fd", days_to_new);
     }
 
-    /* --- Rise / Set (throttled) --- */
+    /* --- Rise / Set (cache read only; the scan runs on the poll task) --- */
     const app_config_t *cfg = app_config_get();
-    double lat = cfg->moon_lat, lon = cfg->moon_lon;
-    if (lat == 0.0 && lon == 0.0) { lat = cfg->weather_lat; lon = cfg->weather_lon; }
 
     time_t now;
     time(&now);
 
-    /* Recompute only when the cache is stale (>= 30 s old) or location changed. */
-    if (s_rs_calc_at == 0 || (now - s_rs_calc_at) >= 30 ||
-        lat != s_rs_lat  || lon != s_rs_lon) {
-        moon_rise_set(now, lat, lon, &s_rs_rise, &s_rs_rise_v, &s_rs_set, &s_rs_set_v);
-        s_rs_calc_at = now;
-        s_rs_lat     = lat;
-        s_rs_lon     = lon;
-    }
+    portENTER_CRITICAL(&s_rs_mux);
+    time_t rise_t = s_rs_rise, set_t = s_rs_set;
+    bool   rise_v = s_rs_rise_v, set_v = s_rs_set_v;
+    portEXIT_CRITICAL(&s_rs_mux);
 
     bool use_24h = (cfg->weather_time_format == 1);
 
-    fmt_moon_event(rise, rise_sz, "Rise", s_rs_rise, s_rs_rise_v, now, use_24h);
-    fmt_moon_event(set,  set_sz,  "Set",  s_rs_set,  s_rs_set_v,  now, use_24h);
+    /* The day-offset suffix is derived from `now` on every call, so a cache up to
+     * ~60 s old still renders the correct "+1"/"-1" across a local day rollover. */
+    fmt_moon_event(rise, rise_sz, "Rise", rise_t, rise_v, now, use_24h);
+    fmt_moon_event(set,  set_sz,  "Set",  set_t,  set_v,  now, use_24h);
 }
 
 /* ── Prefetch PRODUCER (Phase 4) ────────────────────────────────────────────
  * Consume any pending prefetch request (s_prefetch_source, set by the arbiter via
  * image_source_trigger_prefetch) and build that source's frame INTO
  * goes_prefetch_data — never goes_data — so a later rotation to it can swap in a
- * ready buffer with no network round-trip. Runs at the END of each goes_poll_task
- * foreground iteration (both the moon path and the network path call it), so it
- * only ever executes in the single goes_poll_task context that owns both structs.
+ * ready buffer with no network round-trip.
+ *
+ * TWO call sites, BOTH inside goes_poll_task, so this only ever executes in the
+ * single context that owns both structs (and, for the Moon source, the only
+ * context allowed to touch the tgx texture):
+ *   1. the parked loop — serves requests scheduled from a NON-image slideshow
+ *      stop, which is when this task is suspended and used to drop them;
+ *   2. the top of the active loop body, ahead of the foreground fetch, so the
+ *      deadline-bound prefetch is never serialized behind a refresh.
+ * A missed request is not a cosmetic loss: with auto-rotate on, the loading
+ * overlay is deliberately suppressed, so an image stop that arrives without a
+ * warm frame shows a BLACK page for the whole fetch.
  *
  * On success it sets s_prefetch_ready + s_prefetch_ready_src so the swap consumer
  * at the top of the loop can install the buffer and decide whether it satisfies the
@@ -1136,8 +1246,43 @@ void goes_poll_task(void *arg)
     ESP_LOGI(TAG, "GOES poll task started");
 
     while (1) {
-        /* Suspend during OTA or when the Image Display page is not visible */
+        /* Set while parked below, so the code after the park loop can tell a
+         * page (re)entry from an ordinary refresh tick and re-show the retained
+         * frame. */
+        bool re_entered = false;
+
+        /* Suspend during OTA or when the Image Display page is not visible.
+         * This is also the ONLY safe point to release the moon texture + drag
+         * scratch: reaching here proves no render is in flight on this task (the
+         * renders all run below, in this same loop body). data_update_task hands
+         * the request over via s_moon_release_req rather than freeing them
+         * itself — see the ownership contract at moon_drag_buffers_free(). */
         while (ota_in_progress || !image_display_page_active) {
+            re_entered = true;
+            if (atomic_exchange(&s_moon_release_req, false)) {
+                moon_sphere_deinit();       /* ~1MB cached lunar texture */
+                moon_drag_buffers_free();   /* drag color/z + PPA ping-pong */
+                /* Reset drag orientation so a visit that ended mid-settle does not
+                 * carry a stale s_cur_* into the next visit (which would snap the
+                 * disc home on the first frame). */
+                moon_drag_reset();
+                ESP_LOGI(TAG, "Left Image Display: freed moon texture + drag buffers");
+            }
+            /* Serve the slideshow prefetch WHILE PARKED. The arbiter schedules the
+             * next stop's image source at every slideshow commit, including from a
+             * NON-image stop (Clock/JSON/Summary) — at which point this task is
+             * parked here. The producer used to live only after this loop, so those
+             * requests were never served and the image page arrived cold: with
+             * auto-rotate on the loading overlay is deliberately suppressed, so cold
+             * == black screen for the whole fetch. Running it here gives a full stop
+             * of lead time and makes the swap consumer below find a ready frame.
+             * Same task owns goes_prefetch_data, so the single-writer invariant and
+             * the moon-render ownership contract above are unchanged; it runs AFTER
+             * the release above so a free is never deferred behind a fetch. Skipped
+             * during OTA — that must not contend for PSRAM or the network. */
+            if (!ota_in_progress) {
+                image_prefetch_run(app_config_get());
+            }
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
         }
 
@@ -1149,6 +1294,34 @@ void goes_poll_task(void *arg)
          * else the persisted default. Read ONCE so a mid-iteration arbiter change
          * cannot make the fetch dispatch and the interval/label logic disagree. */
         int8_t eff_src = image_source_get_effective();
+
+        /* ── Retained-frame re-show on page (re)entry ───────────────────────────
+         * goes_data keeps its last decoded frame across page leave (nothing frees
+         * it there any more), but nina_image_display_cleanup() dropped the page's
+         * own LVGL copy, so the panel is blank until something is pushed. Push the
+         * retained frame here — before any fetch — so a slideshow stop never shows
+         * black while a slow/failing download runs. displayed_poll_ms was reset to
+         * 0 by cleanup(), so the new-image gate passes; force_redraw is belt-and-
+         * braces against a same-millisecond stamp.
+         *
+         * Gated on src_kind == eff_src: the buffer's own tag, never intent (a
+         * retained GOES frame must never be shown for a Solar stop). On a mismatch
+         * nothing is shown, has_image() stays false, and the overlay block below
+         * puts "Loading image..." up instead of leaving a black panel. */
+        if (re_entered) {
+            bool kept = false;
+            if (goes_data_lock(&goes_data, 200)) {
+                kept = (goes_data.image_buf != NULL && goes_data.src_kind == eff_src);
+                goes_data_unlock(&goes_data);
+            }
+            if (kept && image_display_page_active) {
+                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                    nina_image_display_force_redraw();
+                    nina_image_display_update(&goes_data);
+                    bsp_display_unlock();
+                }
+            }
+        }
 
         /* A manual navigation/config change requests a fresh foreground fetch +
          * loading animation. Peek the flag here WITHOUT consuming it (the single
@@ -1240,6 +1413,24 @@ void goes_poll_task(void *arg)
             }
         }
 
+        /* ── Prefetch PRODUCER, run BEFORE the foreground fetch ─────────────────
+         * Deadline ordering, not convenience. The prefetch is the only work here
+         * with a hard deadline (the next slideshow rotation, as little as 10s);
+         * the foreground fetch below is a periodic refresh of a frame that is
+         * already on screen. Running the producer at the END of the loop body (as
+         * it used to) serialized it behind a full HTTP fetch + JPEG decode, so the
+         * next stop's frame regularly missed the rotation and that page arrived
+         * cold — black, because auto-rotate suppresses the loading overlay.
+         *
+         * It also matters on the rotation AWAY from the image page:
+         * image_display_page_active is updated by data_update_task one cycle after
+         * the arbiter commits, so the commit that schedules the next image stop
+         * still finds this task unparked. It wakes here and, with the override
+         * already cleared to -1, would otherwise burn seconds fetching the
+         * PERSISTED default source for a page we just left before ever reaching
+         * the producer. No-op when nothing is pending. */
+        image_prefetch_run(cfg);
+
         /* A pending manual fetch always forces a fresh foreground fetch this
          * iteration, even when the swap installed the right source: the manual
          * path must download a new frame and show the loading animation. The swap
@@ -1295,6 +1486,9 @@ void goes_poll_task(void *arg)
                 if (lat == 0.0 && lon == 0.0) { lat = cfg->weather_lat; lon = cfg->weather_lon; }
                 moon_state_t live;
                 moon_compute(now, lat, lon, &live);
+                /* Keep the overlay's rise/set cache warm here — Core 0, no display
+                 * lock held. moon_overlay_info() must never run this scan itself. */
+                moon_rise_set_refresh();
 
                 /* Interactive drag-to-rotate: while a finger is down OR the disc is
                  * still easing back to the live sky orientation after release, render
@@ -1468,6 +1662,17 @@ void goes_poll_task(void *arg)
                             MOON_DRAG_SECTORS, MOON_DRAG_STACKS, cfg->moon_bg_style,
                             yaw, pitch, light, s_drag_color, s_drag_zbuf);
                         if (fimg) {
+                            /* Red Night: recolour the 240px SOURCE, not the 720 PPA
+                             * output. The remap is per-pixel and the upscale linear, so
+                             * they commute — same result for 1/9th the pixels (57,600 vs
+                             * 518,400) every drag frame. The scratch is fully re-rendered
+                             * each frame, so this never compounds. */
+                            bool red = image_red_remap_active();
+                            if (red) {
+                                image_red_remap_rgb565_force(
+                                    fimg, (size_t)MOON_DRAG_SZ_TOUCH * MOON_DRAG_SZ_TOUCH);
+                            }
+
                             /* PPA hardware-upscale 240->720 (exact 3.0x) into the
                              * ping-pong output buffer NOT currently on screen. No
                              * memset (every output pixel is written) and the blocking
@@ -1493,8 +1698,12 @@ void goes_poll_task(void *arg)
                                 shown = true;
                             }
                             /* PPA failed: fall through to the software-scale fallback
-                             * below using the SAME already-rendered 240px scratch. */
-                            if (!shown && bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                             * below using the SAME already-rendered 240px scratch.
+                             * Skipped under red night — the scratch is already remapped
+                             * and show_scaled() remaps its own copy again, which would
+                             * double-darken it; leaving `shown` false hands the frame to
+                             * the fresh-render fallback below, which remaps exactly once. */
+                            if (!shown && !red && bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                                 nina_image_display_show_scaled(fimg, MOON_DRAG_SZ_TOUCH, MOON_DRAG_SZ_TOUCH);
                                 bsp_display_unlock();
                                 shown = true;
@@ -1719,9 +1928,9 @@ void goes_poll_task(void *arg)
                     }
                 }
             }
-            /* Prefetch the NEXT slideshow image source (if the arbiter scheduled
-             * one) before sleeping, so a rotation to it swaps in instantly. */
-            image_prefetch_run(cfg);
+            /* The NEXT slideshow image source was already prefetched near the top
+             * of this iteration (see the deadline-ordering note there), so nothing
+             * to do before sleeping. */
             /* Recompute ~every 60s once time is valid so orientation tracks the
              * sky; poll every ~3s while waiting for the clock to sync. */
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(time_valid ? 60000 : 3000));
@@ -1762,9 +1971,16 @@ void goes_poll_task(void *arg)
              * spurious no-op against an overlay that never appeared. */
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                 /* manual_fetch (config change OR manual nav) always animates. The
-                 * bare cold-image trigger is suppressed while auto-cycle is ON so a
-                 * slideshow prefetch miss stays seamless (no overlay flash). */
-                if (manual_fetch || (!nina_image_display_has_image() && !cfg->auto_rotate_enabled)) {
+                 * cold-image trigger fires whenever nothing is on screen for this
+                 * source — INCLUDING during auto-cycle. It used to be suppressed
+                 * there to keep a prefetch miss seamless, but with goes_data now
+                 * retaining its last frame across page leave, "no image" means
+                 * genuinely nothing to show, and suppressing the overlay left a
+                 * black panel as the steady state whenever the source was
+                 * unreachable. A retained frame keeps has_image() true, so the
+                 * seamless case is still seamless and a failing fetch never flashes
+                 * an overlay over a good frame. */
+                if (manual_fetch || !nina_image_display_has_image()) {
                     nina_wait_overlay_show("Loading image...", band_name);
                     nina_wait_overlay_set_progress(-1);   /* indeterminate */
                     show_wait = true;
@@ -1816,10 +2032,8 @@ void goes_poll_task(void *arg)
             nina_toast_show(TOAST_WARNING, "Failed to load image");
         }
 
-        /* Prefetch the NEXT slideshow image source (if the arbiter scheduled one)
-         * after the foreground fetch and before sleeping, so a rotation to it swaps
-         * in instantly. No-op when nothing is pending. */
-        image_prefetch_run(cfg);
+        /* The NEXT slideshow image source was already prefetched near the top of
+         * this iteration (see the deadline-ordering note there). */
 
         /* Sleep for the configured interval. The satellite sources (GOES/Solar)
          * clamp to 5min-2h to respect the image cadence; the custom source uses
@@ -1842,31 +2056,13 @@ void goes_poll_task(void *arg)
 // GOES task lifecycle
 // =============================================================================
 
+/* 12288 words: TLS handshake + software JPEG decode headroom (matches/exceeds
+ * the spotify TLS task). */
 void goes_ensure_task_running(void)
 {
-    /* Guard check-and-assign against a double-spawn race: this may be called
-     * concurrently from the boot task and an httpd task (runtime enable). */
     static portMUX_TYPE goes_spawn_mux = portMUX_INITIALIZER_UNLOCKED;
-    portENTER_CRITICAL(&goes_spawn_mux);
-    bool already = (goes_task_handle != NULL);
-    portEXIT_CRITICAL(&goes_spawn_mux);
-    if (already) return;
-
-    /* 12288 words: TLS handshake + software JPEG decode headroom (matches/
-     * exceeds the spotify TLS task). */
-    StackType_t  *stack = heap_caps_malloc(12288 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
-    StaticTask_t *tcb   = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    if (stack && tcb) {
-        portENTER_CRITICAL(&goes_spawn_mux);
-        goes_task_handle = xTaskCreateStaticPinnedToCore(
-            goes_poll_task, "goes", 12288, NULL, 3, stack, tcb, 0);
-        portEXIT_CRITICAL(&goes_spawn_mux);
-        ESP_LOGI(TAG, "GOES poll task spawned");
-    } else {
-        ESP_LOGE(TAG, "Failed to allocate GOES poll task stack");
-        if (stack) heap_caps_free(stack);
-        if (tcb) heap_caps_free(tcb);
-    }
+    psram_task_ensure(&goes_task_handle, &goes_spawn_mux,
+                      goes_poll_task, "goes", 12288, NULL, 3, 0);
 }
 
 // =============================================================================
@@ -2168,21 +2364,23 @@ void spotify_poll_task(void *arg)
 
 void spotify_ensure_task_running(void)
 {
-    if (spotify_task_handle != NULL) return;
-
-    StackType_t  *sp_stack = heap_caps_malloc(10240 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
-    StaticTask_t *sp_tcb   = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    if (sp_stack && sp_tcb) {
-        spotify_task_handle = xTaskCreateStaticPinnedToCore(
-            spotify_poll_task, "spotify_poll", 10240, NULL, 4,
-            sp_stack, sp_tcb, 0);
-    } else {
-        ESP_LOGE(TAG, "Failed to alloc spotify_poll stack from PSRAM, falling back");
-        if (sp_stack) heap_caps_free(sp_stack);
-        if (sp_tcb) heap_caps_free(sp_tcb);
-        xTaskCreatePinnedToCore(spotify_poll_task, "spotify_poll", 10240, NULL, 4,
-                                &spotify_task_handle, 0);
+    static portMUX_TYPE spotify_spawn_mux = portMUX_INITIALIZER_UNLOCKED;
+    if (psram_task_ensure(&spotify_task_handle, &spotify_spawn_mux,
+                          spotify_poll_task, "spotify_poll", 10240, NULL, 4, 0)) {
+        return;
     }
+
+    /* PSRAM exhausted: fall back to an internal-heap task rather than leaving
+     * the page dead. Unique to Spotify — the other pollers simply stay
+     * unspawned. Dynamic create allocates internally, so it must not run inside
+     * the critical section; publish the handle under the mux once it returns. */
+    ESP_LOGE(TAG, "Failed to alloc spotify_poll stack from PSRAM, falling back");
+    TaskHandle_t dyn = NULL;
+    xTaskCreatePinnedToCore(spotify_poll_task, "spotify_poll", 10240, NULL, 4,
+                            &dyn, 0);
+    portENTER_CRITICAL(&spotify_spawn_mux);
+    spotify_task_handle = dyn;
+    portEXIT_CRITICAL(&spotify_spawn_mux);
     ESP_LOGI(TAG, "Spotify poll task created dynamically");
 }
 
@@ -2478,17 +2676,7 @@ void data_update_task(void *arg) {
         demo_params.instance_count = instance_count;
 
         /* Spawn demo data generator on Core 0 */
-        StackType_t *demo_stack = heap_caps_malloc(6144 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
-        StaticTask_t *demo_tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        if (demo_stack && demo_tcb) {
-            xTaskCreateStaticPinnedToCore(demo_data_task, "demo", 6144,
-                                          &demo_params, 4, demo_stack, demo_tcb, 0);
-            ESP_LOGI(TAG, "Demo data task spawned");
-        } else {
-            ESP_LOGE(TAG, "Failed to allocate demo task stack");
-            if (demo_stack) heap_caps_free(demo_stack);
-            if (demo_tcb) heap_caps_free(demo_tcb);
-        }
+        psram_task_spawn(demo_data_task, "demo", 6144, &demo_params, 4, 0);
 
         goto main_loop;
     }
@@ -2596,6 +2784,8 @@ void data_update_task(void *arg) {
                         bsp_display_unlock();
                     }
                 }
+            } else if (chk == OTA_CHECK_RATE_LIMITED) {
+                ESP_LOGW(TAG, "Boot firmware update check hit the GitHub rate limit; will retry later");
             } else if (chk == OTA_CHECK_ERROR) {
                 ESP_LOGW(TAG, "Boot firmware update check failed (network/GitHub); will retry next check");
             } else {
@@ -2616,74 +2806,32 @@ boot_update_check_done:
     for (int i = 0; i < instance_count; i++) {
         char name[16];
         snprintf(name, sizeof(name), "poll_%d", i);
-        /* Use xTaskCreateStaticPinnedToCore with PSRAM-allocated stack to save internal heap.
-         * Pin poll tasks to Core 0 (networking), leaving Core 1 for UI/LVGL. */
-        StackType_t *stack = heap_caps_malloc(8192 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
-        StaticTask_t *tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        if (stack && tcb) {
-            poll_contexts[i].task_handle = xTaskCreateStaticPinnedToCore(
-                instance_poll_task, name, 8192, &poll_contexts[i], 4, stack, tcb, 0);
-            poll_task_handles[i] = poll_contexts[i].task_handle;
-        } else {
-            ESP_LOGE(TAG, "Failed to allocate poll task %d stack from PSRAM", i);
-            if (stack) heap_caps_free(stack);
-            if (tcb) heap_caps_free(tcb);
-        }
+        /* Pin poll tasks to Core 0 (networking), leaving Core 1 for UI/LVGL. */
+        poll_contexts[i].task_handle = psram_task_spawn(
+            instance_poll_task, name, 8192, &poll_contexts[i], 4, 0);
+        poll_task_handles[i] = poll_contexts[i].task_handle;
     }
 
     /* Spawn AllSky poll task (pinned to Core 0, networking) */
     allsky_data_init(&allsky_data);
     if (app_config_get()->allsky_enabled) {
-        StackType_t *as_stack = heap_caps_malloc(6144 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
-        StaticTask_t *as_tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        if (as_stack && as_tcb) {
-            allsky_task_handle = xTaskCreateStaticPinnedToCore(
-                allsky_poll_task, "allsky", 6144, NULL, 3, as_stack, as_tcb, 0);
-            ESP_LOGI(TAG, "AllSky poll task spawned");
-        } else {
-            ESP_LOGE(TAG, "Failed to allocate AllSky poll task stack");
-            if (as_stack) heap_caps_free(as_stack);
-            if (as_tcb) heap_caps_free(as_tcb);
-        }
+        allsky_task_handle = psram_task_spawn(allsky_poll_task, "allsky", 6144, NULL, 3, 0);
     }
 
     /* JSON Display poll task (pinned to Core 0, networking).
      * json_data_init runs UNCONDITIONALLY so the mutex exists before any later
-     * web-handler-triggered enable + page entry; the task itself is spawned only
-     * when the page is enabled. */
+     * web-handler-triggered enable + page entry; json_ensure_task_running()
+     * spawns the task itself only when the page is enabled — same call the web
+     * handler makes on a runtime enable. */
     json_client_init(&json_data);
-    if (app_config_get()->json_enabled) {
-        StackType_t *js_stack = heap_caps_malloc(10240 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
-        StaticTask_t *js_tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        if (js_stack && js_tcb) {
-            json_task_handle = xTaskCreateStaticPinnedToCore(
-                json_poll_task, "json", 10240, NULL, 3, js_stack, js_tcb, 0);
-            ESP_LOGI(TAG, "JSON Display poll task spawned");
-        } else {
-            ESP_LOGE(TAG, "Failed to allocate JSON Display poll task stack");
-            if (js_stack) heap_caps_free(js_stack);
-            if (js_tcb) heap_caps_free(js_tcb);
-        }
-    }
+    json_ensure_task_running();
 
     /* Home Assistant poll task (pinned to Core 0, networking).
      * ha_client_init runs UNCONDITIONALLY so the mutex exists before any later
-     * web-handler-triggered enable + page entry; the task itself is spawned only
-     * when the page is enabled. */
+     * web-handler-triggered enable + page entry; the enable check lives inside
+     * ha_ensure_task_running(). */
     ha_client_init(&ha_data);
-    if (app_config_get()->ha_enabled) {
-        StackType_t *ha_stack = heap_caps_malloc(10240 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
-        StaticTask_t *ha_tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        if (ha_stack && ha_tcb) {
-            ha_task_handle = xTaskCreateStaticPinnedToCore(
-                ha_poll_task, "ha", 10240, NULL, 3, ha_stack, ha_tcb, 0);
-            ESP_LOGI(TAG, "Home Assistant poll task spawned");
-        } else {
-            ESP_LOGE(TAG, "Failed to allocate Home Assistant poll task stack");
-            if (ha_stack) heap_caps_free(ha_stack);
-            if (ha_tcb) heap_caps_free(ha_tcb);
-        }
-    }
+    ha_ensure_task_running();
 
     /* GOES / Image Display poll task.
      * goes_data_init must run UNCONDITIONALLY so the mutex exists before any
@@ -2696,17 +2844,7 @@ boot_update_check_done:
 
     /* Spawn async fetch worker (pinned to Core 0, networking) */
     if (s_fetch_queue && s_fetch_result_queue) {
-        StackType_t *fw_stack = heap_caps_malloc(8192 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
-        StaticTask_t *fw_tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        if (fw_stack && fw_tcb) {
-            xTaskCreateStaticPinnedToCore(
-                fetch_worker_task, "fetch_wk", 8192, NULL, 4, fw_stack, fw_tcb, 0);
-            ESP_LOGI(TAG, "Fetch worker task spawned on Core 0");
-        } else {
-            ESP_LOGE(TAG, "Failed to allocate fetch worker stack");
-            if (fw_stack) heap_caps_free(fw_stack);
-            if (fw_tcb) heap_caps_free(fw_tcb);
-        }
+        psram_task_spawn(fetch_worker_task, "fetch_wk", 8192, NULL, 4, 0);
     }
 
 main_loop:
@@ -2929,7 +3067,9 @@ main_loop:
             prev_on_clock = on_clock;
             clock_page_active = on_clock;
 
-            /* Image Display lifecycle — wake on entry, free buffers on leave */
+            /* Image Display lifecycle — wake on entry, free the page's own LVGL
+             * buffers on leave (the decoded frame in goes_data is retained; see
+             * the note below). */
             static bool prev_on_image_display = false;
             if (on_image_display && !prev_on_image_display && goes_task_handle) {
                 xTaskNotifyGive(goes_task_handle);
@@ -2943,18 +3083,28 @@ main_loop:
                     nina_wait_overlay_hide();
                     bsp_display_unlock();
                 }
-                goes_client_cleanup(&goes_data);
-                moon_render_deinit();   /* release the cached moon texture */
-                /* Free the moon drag-to-rotate render scratch (color/z). The page's
-                 * own software-scale copy buffers are freed inside
-                 * nina_image_display_cleanup() above, so each side frees only what it
-                 * owns — no leak, no double-free. */
-                moon_drag_buffers_free();
-                /* Reset drag orientation so a visit that ended mid-settle does not
-                 * carry a stale s_cur_* into the next visit (which would snap the
-                 * disc home on the first frame). */
-                moon_drag_reset();
-                ESP_LOGI(TAG, "Left Image Display: freed buffers");
+                /* goes_data.image_buf is deliberately NOT freed here. Freeing the
+                 * last decoded frame on every page leave meant every slideshow
+                 * re-entry started from nothing, so a slow or failing source (e.g.
+                 * an SDO TLS handshake that outruns the fetch timeout) showed a
+                 * black panel for the whole stop. Keeping it costs ~1-2MB of PSRAM
+                 * for one frame and lets the re-entry path in goes_poll_task put
+                 * the last good frame back instantly. It is replaced in place by
+                 * the next successful fetch/prefetch swap, and released when the
+                 * Image Display feature is disabled (image_display_apply_live).
+                 * Moon texture + drag scratch are NOT freed here either.
+                 * Synchronization
+                 * contract: they are written by renders that run only on
+                 * goes_poll_task (a 720px render blocks ~300ms and cannot be
+                 * interrupted), so freeing them from this task raced the renderer
+                 * and crashed inside tgx texture sampling. We only request the
+                 * release; goes_poll_task frees them at its parked point. The
+                 * request is issued AFTER nina_image_display_cleanup() above, so
+                 * the LVGL descriptor borrowing s_ppa_out is already dropped by the
+                 * time the owner task can free it. */
+                atomic_store(&s_moon_release_req, true);
+                if (goes_task_handle) xTaskNotifyGive(goes_task_handle);
+                ESP_LOGI(TAG, "Left Image Display: freed page buffers (frame retained)");
             }
             prev_on_image_display = on_image_display;
         }
@@ -3072,11 +3222,16 @@ main_loop:
                             bsp_display_unlock();
                         }
                     }
-                } else if (chk == OTA_CHECK_ERROR) {
-                    ESP_LOGW(TAG, "Firmware update check failed (network/GitHub)");
+                } else if (chk == OTA_CHECK_ERROR || chk == OTA_CHECK_RATE_LIMITED) {
+                    bool limited = (chk == OTA_CHECK_RATE_LIMITED);
+                    ESP_LOGW(TAG, "Firmware update check %s",
+                             limited ? "hit the GitHub rate limit" : "failed (network/GitHub)");
                     if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                         nina_ota_prompt_show("", cur_ver, NULL);
-                        nina_ota_prompt_show_status("Update check failed", "Update check failed - try again");
+                        nina_ota_prompt_show_status(
+                            limited ? "Update limit reached" : "Update check failed",
+                            limited ? "GitHub update limit reached. Try again in about an hour."
+                                    : "Update check failed - try again");
                         bsp_display_unlock();
                     }
                     while (nina_ota_prompt_visible()) {
@@ -3534,10 +3689,11 @@ main_loop:
         /* ── Navigation arbiter: resolve the page-commit ladder once per cycle ──
          * Runs AFTER per-page UI updates and the slideshow-tick feeder, OUTSIDE
          * any LVGL lock (the arbiter takes the lock itself around the commit).
-         * This is the single owner of the navigation decision; it also drives the
-         * idle indicator via nav_arbiter_idle_active() inside its commit. A user
-         * wake (xTaskNotifyGive from on_page_changed) produces a resolve within
-         * one cycle. */
+         * This is the single owner of the navigation decision. It also owns the
+         * idle indicator: when the resolved level enters or leaves NAV_SRC_IDLE
+         * it calls nina_idle_indicator_set_active() itself (nina_nav_arbiter.c),
+         * so nothing here touches that overlay. A user wake (xTaskNotifyGive
+         * from on_page_changed) produces a resolve within one cycle. */
         nav_arbiter_resolve(esp_timer_get_time() / 1000);
 
         /* ── Screen sleep: turn off backlight when idle ── */
@@ -3549,6 +3705,7 @@ main_loop:
                 if (screen_asleep && screen_touch_wake) {
                     /* Restore WiFi power save mode */
                     esp_wifi_set_ps(sl_cfg->wifi_power_save ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE);
+                    wifi_apply_tx_power(sl_cfg->wifi_max_tx_dbm);
                     /* Resume LVGL processing */
                     lvgl_port_lock(0);
                     lvgl_port_resume();
@@ -3622,6 +3779,7 @@ main_loop:
                 if (should_wake) {
                     /* Restore WiFi power save mode */
                     esp_wifi_set_ps(sl_cfg->wifi_power_save ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE);
+                    wifi_apply_tx_power(sl_cfg->wifi_max_tx_dbm);
                     /* Resume LVGL processing */
                     lvgl_port_lock(0);
                     lvgl_port_resume();
@@ -3702,6 +3860,7 @@ main_loop:
                 /* Feature disabled while asleep — wake up */
                 /* Restore WiFi power save mode */
                 esp_wifi_set_ps(sl_cfg->wifi_power_save ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE);
+                wifi_apply_tx_power(sl_cfg->wifi_max_tx_dbm);
                 /* Resume LVGL processing */
                 lvgl_port_lock(0);
                 lvgl_port_resume();

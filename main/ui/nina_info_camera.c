@@ -50,7 +50,6 @@ static lv_obj_t *lbl_w_sqm        = NULL;
 
 static lv_obj_t *make_weather_block(lv_obj_t *parent, const char *title,
                                      lv_obj_t **out_val) {
-    int gb = app_config_get()->color_brightness;
 
     lv_obj_t *block = lv_obj_create(parent);
     lv_obj_remove_style_all(block);
@@ -64,18 +63,9 @@ static lv_obj_t *make_weather_block(lv_obj_t *parent, const char *title,
     lv_label_set_text(lbl_title, title);
     lv_obj_set_style_text_font(lbl_title, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_letter_space(lbl_title, 1, 0);
-    if (current_theme) {
-        lv_obj_set_style_text_color(lbl_title,
-            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
-    }
+    ui_set_theme_text_color(lbl_title, UI_THEME_COLOR(label_color));
 
-    lv_obj_t *lbl_val = lv_label_create(block);
-    lv_label_set_text(lbl_val, "--");
-    lv_obj_set_style_text_font(lbl_val, &lv_font_montserrat_20, 0);
-    if (current_theme) {
-        lv_obj_set_style_text_color(lbl_val,
-            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
-    }
+    lv_obj_t *lbl_val = ui_label(block, "--", &lv_font_montserrat_20, UI_THEME_COLOR(text_color));
 
     *out_val = lbl_val;
     return block;
@@ -125,57 +115,57 @@ void build_camera_content(lv_obj_t *content) {
 
     /* ── SENSOR card (left) ── */
     {
-        lv_obj_t *card = make_info_card(col_left);
+        lv_obj_t *card = ui_card(col_left, INFO_CARD_PAD, INFO_CARD_ROW_GAP);
         lv_obj_set_flex_grow(card, 1);
-        make_info_section(card, "SENSOR");
-        make_info_kv(card, "Name",       &lbl_sensor_name);
+        ui_section_label(card, "SENSOR");
+        lbl_sensor_name = ui_kv(card, "Name", &lv_font_montserrat_20, &lv_font_montserrat_22);
         lv_label_set_long_mode(lbl_sensor_name, LV_LABEL_LONG_DOT);
         lv_obj_set_width(lbl_sensor_name, 140);
-        make_info_kv(card, "Resolution", &lbl_resolution);
-        make_info_kv(card, "Pixel Size", &lbl_pixel_size);
-        make_info_kv(card, "Bit Depth",  &lbl_bit_depth);
-        make_info_kv(card, "Sensor",     &lbl_sensor_type);
+        lbl_resolution = ui_kv(card, "Resolution", &lv_font_montserrat_20, &lv_font_montserrat_22);
+        lbl_pixel_size = ui_kv(card, "Pixel Size", &lv_font_montserrat_20, &lv_font_montserrat_22);
+        lbl_bit_depth = ui_kv(card, "Bit Depth", &lv_font_montserrat_20, &lv_font_montserrat_22);
+        lbl_sensor_type = ui_kv(card, "Sensor", &lv_font_montserrat_20, &lv_font_montserrat_22);
     }
 
     /* ── EXPOSURE card (left) ── */
     {
-        lv_obj_t *card = make_info_card(col_left);
+        lv_obj_t *card = ui_card(col_left, INFO_CARD_PAD, INFO_CARD_ROW_GAP);
         lv_obj_set_flex_grow(card, 1);
-        make_info_section(card, "EXPOSURE");
-        make_info_kv(card, "State",    &lbl_cam_state);
-        make_info_kv(card, "Download", &lbl_download);
-        make_info_kv(card, "Binning",  &lbl_binning);
+        ui_section_label(card, "EXPOSURE");
+        lbl_cam_state = ui_kv(card, "State", &lv_font_montserrat_20, &lv_font_montserrat_22);
+        lbl_download = ui_kv(card, "Download", &lv_font_montserrat_20, &lv_font_montserrat_22);
+        lbl_binning = ui_kv(card, "Binning", &lv_font_montserrat_20, &lv_font_montserrat_22);
     }
 
     /* ── COOLING card (right) ── */
     {
-        lv_obj_t *card = make_info_card(col_right);
+        lv_obj_t *card = ui_card(col_right, INFO_CARD_PAD, INFO_CARD_ROW_GAP);
         lv_obj_set_flex_grow(card, 1);
-        make_info_section(card, "COOLING");
-        make_info_kv(card, "Temp",       &lbl_temp);
-        make_info_kv(card, "Target",     &lbl_target_temp);
-        make_info_kv(card, "Cooler",     &lbl_cooler);
-        make_info_kv(card, "At Target",  &lbl_at_target);
-        make_info_kv(card, "Dew Heater", &lbl_dew_heater);
+        ui_section_label(card, "COOLING");
+        lbl_temp = ui_kv(card, "Temp", &lv_font_montserrat_20, &lv_font_montserrat_22);
+        lbl_target_temp = ui_kv(card, "Target", &lv_font_montserrat_20, &lv_font_montserrat_22);
+        lbl_cooler = ui_kv(card, "Cooler", &lv_font_montserrat_20, &lv_font_montserrat_22);
+        lbl_at_target = ui_kv(card, "At Target", &lv_font_montserrat_20, &lv_font_montserrat_22);
+        lbl_dew_heater = ui_kv(card, "Dew Heater", &lv_font_montserrat_20, &lv_font_montserrat_22);
     }
 
     /* ── SETTINGS card (right) ── */
     {
-        lv_obj_t *card = make_info_card(col_right);
+        lv_obj_t *card = ui_card(col_right, INFO_CARD_PAD, INFO_CARD_ROW_GAP);
         lv_obj_set_flex_grow(card, 1);
-        make_info_section(card, "SETTINGS");
-        make_info_kv(card, "Gain",      &lbl_gain);
-        make_info_kv(card, "Offset",    &lbl_offset);
-        make_info_kv(card, "Readout",   &lbl_readout);
-        make_info_kv(card, "USB Limit", &lbl_usb_limit);
+        ui_section_label(card, "SETTINGS");
+        lbl_gain = ui_kv(card, "Gain", &lv_font_montserrat_20, &lv_font_montserrat_22);
+        lbl_offset = ui_kv(card, "Offset", &lv_font_montserrat_20, &lv_font_montserrat_22);
+        lbl_readout = ui_kv(card, "Readout", &lv_font_montserrat_20, &lv_font_montserrat_22);
+        lbl_usb_limit = ui_kv(card, "USB Limit", &lv_font_montserrat_20, &lv_font_montserrat_22);
     }
 
     /* ── WEATHER card (full width, hidden by default) ── */
     {
-        card_weather_obj = make_info_card(content);
+        card_weather_obj = ui_card(content, INFO_CARD_PAD, INFO_CARD_ROW_GAP);
         lv_obj_set_width(card_weather_obj, LV_PCT(100));
         lv_obj_add_flag(card_weather_obj, LV_OBJ_FLAG_HIDDEN);
-        make_info_section(card_weather_obj, "WEATHER");
+        ui_section_label(card_weather_obj, "WEATHER");
 
         /* Row 1: TEMP, HUMIDITY, DEW PT */
         lv_obj_t *w_row1 = lv_obj_create(card_weather_obj);
@@ -307,7 +297,7 @@ void populate_camera_data(const camera_detail_data_t *data) {
         lv_obj_clear_flag(card_weather_obj, LV_OBJ_FLAG_HIDDEN);
 
         if (lbl_w_temp) {
-            snprintf(buf, sizeof(buf), "%.1fC", (double)data->weather_temp);
+            snprintf(buf, sizeof(buf), "%.1f C", (double)data->weather_temp);
             lv_label_set_text(lbl_w_temp, buf);
         }
         if (lbl_w_humidity) {
@@ -315,7 +305,7 @@ void populate_camera_data(const camera_detail_data_t *data) {
             lv_label_set_text(lbl_w_humidity, buf);
         }
         if (lbl_w_dewpt) {
-            snprintf(buf, sizeof(buf), "%.1fC", (double)data->dew_point);
+            snprintf(buf, sizeof(buf), "%.1f C", (double)data->dew_point);
             lv_label_set_text(lbl_w_dewpt, buf);
         }
         if (lbl_w_wind) {

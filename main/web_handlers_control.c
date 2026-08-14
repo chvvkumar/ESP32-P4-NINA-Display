@@ -108,38 +108,14 @@ static bool ctrl_get_query_str(httpd_req_t *req, const char *key, char *out, siz
     return out[0] != '\0';
 }
 
-/* Send a pre-built item object as the JSON response (takes ownership: deletes
- * @p o before returning). */
-static esp_err_t send_item_json(httpd_req_t *req, cJSON *o)
-{
-    if (!o) {
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    char *out = cJSON_PrintUnformatted(o);
-    if (!out) {
-        cJSON_Delete(o);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, out);
-    cJSON_free(out);
-    cJSON_Delete(o);
-    return ESP_OK;
-}
-
 /* Send one item using a fresh snapshot and its live getter value. */
 static esp_err_t send_item(httpd_req_t *req, const control_item_t *it)
 {
-    /* app_config_t is ~20 KB; snapshot into PSRAM, never onto the httpd stack. */
-    app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    app_config_t *cfg = config_snapshot_for_request(req);
     if (!cfg) {
-        httpd_resp_send_500(req);
         return ESP_FAIL;
     }
-    app_config_get_snapshot_into(cfg);
-    esp_err_t r = send_item_json(req, control_item_to_json(it, cfg, NULL));
+    esp_err_t r = send_json_response(req, control_item_to_json(it, cfg, NULL));
     heap_caps_free(cfg);
     return r;
 }
@@ -148,19 +124,21 @@ static esp_err_t send_item(httpd_req_t *req, const control_item_t *it)
  * the target id, which the arbiter has not necessarily committed yet). */
 static esp_err_t send_item_value(httpd_req_t *req, const control_item_t *it, int value)
 {
-    /* app_config_t is ~20 KB; snapshot into PSRAM, never onto the httpd stack. */
-    app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    app_config_t *cfg = config_snapshot_for_request(req);
     if (!cfg) {
-        httpd_resp_send_500(req);
         return ESP_FAIL;
     }
-    app_config_get_snapshot_into(cfg);
-    esp_err_t r = send_item_json(req, control_item_to_json(it, cfg, &value));
+    esp_err_t r = send_json_response(req, control_item_to_json(it, cfg, &value));
     heap_caps_free(cfg);
     return r;
 }
 
-/* Commit a new value for a config item: clamp, snapshot, modify, save, apply. */
+/* Commit a new value for a config item: clamp, snapshot, modify, save, apply.
+ *
+ * The save is deferred (~2 s debounce): every verb below routes through here,
+ * including sliders driven from Home Assistant, and a drag would otherwise pay a
+ * ~350 ms NVS write per step. The new value is live in RAM before this returns,
+ * so the response and any following get read it back immediately. */
 static void ctrl_commit_value(const control_item_t *it, int newval)
 {
     int emax = control_item_effective_max(it);
@@ -184,7 +162,7 @@ static void ctrl_commit_value(const control_item_t *it, int newval)
     app_config_get_snapshot_into(prev);
     *cur  = *prev;
     it->set(it, cur, newval);
-    app_config_save(cur);
+    app_config_save_deferred(cur);
     if (it->apply) {
         it->apply(prev, cur);
     }
@@ -222,15 +200,12 @@ esp_err_t control_list_get_handler(httpd_req_t *req)
     }
 
     /* Single snapshot for the whole list: every item reflects one consistent
-     * config view (no per-item re-snapshot that could mix mid-write states).
-     * app_config_t is ~20 KB; snapshot into PSRAM, never onto the httpd stack. */
-    app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+     * config view (no per-item re-snapshot that could mix mid-write states). */
+    app_config_t *cfg = config_snapshot_for_request(req);
     if (!cfg) {
         cJSON_Delete(arr);
-        httpd_resp_send_500(req);
         return ESP_FAIL;
     }
-    app_config_get_snapshot_into(cfg);
 
     for (int i = 0; i < control_registry_count(); i++) {
         const control_item_t *it = control_registry_get(i);
@@ -245,18 +220,7 @@ esp_err_t control_list_get_handler(httpd_req_t *req)
 
     heap_caps_free(cfg);
 
-    char *out = cJSON_PrintUnformatted(arr);
-    if (!out) {
-        cJSON_Delete(arr);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, out);
-    cJSON_free(out);
-    cJSON_Delete(arr);
-    return ESP_OK;
+    return send_json_response(req, arr);
 }
 
 esp_err_t control_get_get_handler(httpd_req_t *req)
