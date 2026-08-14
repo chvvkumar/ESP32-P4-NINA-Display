@@ -2550,6 +2550,25 @@ static void migrate_from_v58(const void *raw, size_t raw_size, app_config_t *cfg
     ESP_LOGI(TAG, "Migrated config from v58 to v%d", APP_CONFIG_VERSION);
 }
 
+/* --- v59 → v60 migration: appends the OctoPrint 3D-printer page block.
+ *     Additive; an upgrading device keeps the page disabled and unconfigured. --- */
+static void migrate_from_v59(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v59_t) ? raw_size : sizeof(app_config_v59_t);
+    memcpy(cfg, raw, copy);
+
+    /* Every OctoPrint field is a SETTINGS_TABLE row, so set_defaults() above
+     * already applied all seven. Only the two that sit closest to the end of the
+     * v59 snapshot can be clobbered by the memcpy landing in the destination's
+     * trailing padding, so only those two are re-asserted here. */
+    cfg->octoprint_enabled = 0;
+    cfg->octoprint_url[0] = '\0';
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v59 to v%d", APP_CONFIG_VERSION);
+}
+
 static void migrate_from_v36(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
@@ -3331,6 +3350,14 @@ void app_config_init(void) {
             nvs_commit(handle);
         }
         /* tiles_loaded stays false -> tail loads "json_tiles"/"ha_tiles" keys */
+    } else if (version_check == 59) {
+        /* v59 → v60: added the OctoPrint 3D-printer page block. tiles_loaded
+         * stays false: a v59 device already keeps its tiles in the
+         * "json_tiles"/"ha_tiles" NVS keys, so the tail loads them. */
+        migrate_from_v59(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 58) {
         /* v58 → v59: added wifi_max_tx_dbm (WiFi TX power cap). tiles_loaded
          * stays false: a v58 device already keeps its tiles in the

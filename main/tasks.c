@@ -12,6 +12,7 @@
 #include "allsky_client.h"
 #include "json_client.h"
 #include "ha_client.h"
+#include "octoprint_client.h"
 #include "goes_client.h"
 #include "moon_sphere.h"   /* tgx sphere renderer for the Moon page */
 #include "moon_interaction.h"  /* drag-to-rotate touch state */
@@ -29,6 +30,7 @@
 #include "ui/nina_allsky.h"
 #include "ui/nina_json.h"
 #include "ui/nina_ha.h"
+#include "ui/nina_octoprint.h"
 #include "ui/nina_spotify.h"
 #include "ui/nina_graph_overlay.h"
 #include "ui/nina_info_overlay.h"
@@ -101,9 +103,9 @@ _Atomic bool ota_in_progress = false;
  *
  * Returns the new handle, or NULL if allocation failed (nothing was spawned).
  */
-static TaskHandle_t psram_task_spawn(TaskFunction_t fn, const char *name,
-                                     uint32_t depth, void *arg,
-                                     UBaseType_t prio, BaseType_t core)
+TaskHandle_t psram_task_spawn(TaskFunction_t fn, const char *name,
+                              uint32_t depth, void *arg,
+                              UBaseType_t prio, BaseType_t core)
 {
     StackType_t  *stack = heap_caps_malloc(depth * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
     StaticTask_t *tcb   = heap_caps_calloc(1, sizeof(StaticTask_t),
@@ -255,6 +257,7 @@ _Atomic bool spotify_page_active = false;
 _Atomic bool allsky_page_active  = false;
 _Atomic bool json_page_active    = false;
 _Atomic bool ha_page_active      = false;
+_Atomic bool octoprint_page_active = false;
 _Atomic bool clock_page_active   = false;
 _Atomic bool nina_pages_active   = false;
 
@@ -269,6 +272,12 @@ static TaskHandle_t json_task_handle = NULL;
 /* Home Assistant polling state */
 static ha_data_t ha_data;
 static TaskHandle_t ha_task_handle = NULL;
+
+/* OctoPrint (3D Printer page) polling state. octoprint_data is non-static and
+ * externed in tasks.h so the page renderer can read it under its own mutex,
+ * matching goes_data. */
+octoprint_data_t octoprint_data;
+static TaskHandle_t octoprint_task_handle = NULL;
 
 /* GOES / Image Display polling state.
  * Non-static: tasks.h externs these and web handlers use goes_task_handle /
@@ -491,6 +500,8 @@ void input_task(void *arg) {
                     && !app_config_get()->json_enabled) continue;
                 if (candidate == PAGE_IDX_HA && !nina_dashboard_is_ha_page()
                     && !app_config_get()->ha_enabled) continue;
+                if (candidate == PAGE_IDX_OCTOPRINT && !nina_dashboard_is_octoprint_page()
+                    && !app_config_get()->octoprint_enabled) continue;
                 if (candidate == PAGE_IDX_IMAGE_DISPLAY && !nina_dashboard_is_image_display_page()
                     && !app_config_get()->image_display_enabled) continue;
                 new_page = candidate;
@@ -852,6 +863,63 @@ void ha_ensure_task_running(void)
     static portMUX_TYPE ha_spawn_mux = portMUX_INITIALIZER_UNLOCKED;
     psram_task_ensure(&ha_task_handle, &ha_spawn_mux,
                       ha_poll_task, "ha", 10240, NULL, 3, 0);
+}
+
+// =============================================================================
+// OctoPrint Poll Task — independent poller pinned to Core 0
+// =============================================================================
+
+static bool octoprint_poll_once(void *arg) {
+    (void)arg;
+
+    /* Read fields directly from the config pointer — avoids copying the full
+     * app_config_t onto this task's small stack. */
+    const app_config_t *cfg = app_config_get();
+
+    /* Only poll when a base URL is configured. */
+    if (cfg->octoprint_url[0] != '\0') {
+        octoprint_client_poll(cfg->octoprint_url, cfg->octoprint_api_key,
+                              cfg->octoprint_image_source,
+                              cfg->octoprint_snapshot_url, &octoprint_data);
+    }
+    return true; /* no failure signal — retry at interval, matches json/ha */
+}
+
+void octoprint_poll_task(void *arg) {
+    (void)arg;
+    ESP_LOGI(TAG, "OctoPrint poll task started");
+
+    /* Interval clamped 2-300s at config-validate time; floored here too. */
+    poll_interval_src_t interval = {
+        .seconds  = &app_config_get()->octoprint_update_interval_s,
+        .floor_ms = 2000,
+    };
+
+    poll_loop_spec_t spec = {
+        .name = "octoprint",
+        .wifi_group = s_wifi_event_group,
+        .wifi_bits = WIFI_CONNECTED_BIT,
+        .page_active = &octoprint_page_active,
+        .poll_once = octoprint_poll_once,
+        .interval_ms = config_interval_ms,
+        .backoff_initial_ms = 0,
+        .backoff_max_ms = 0,
+    };
+
+    poll_loop_run(&spec, &interval);
+}
+
+/* Sole spawn path for octoprint_poll_task — boot and runtime enable both land
+ * here. 12288 bytes (vs json/ha's 10240): an https OctoPrint host runs an
+ * mbedTLS handshake on this task's stack, and the image path nests URL/path
+ * buffers plus an stb_image decode on top of it. */
+void octoprint_ensure_task_running(void)
+{
+    if (!app_config_get()->octoprint_enabled) return;
+
+    static portMUX_TYPE octoprint_spawn_mux = portMUX_INITIALIZER_UNLOCKED;
+    psram_task_ensure(&octoprint_task_handle, &octoprint_spawn_mux,
+                      octoprint_poll_task, "octoprint", 12288, NULL, 3, 0);
 }
 
 // =============================================================================
@@ -2833,6 +2901,13 @@ boot_update_check_done:
     ha_client_init(&ha_data);
     ha_ensure_task_running();
 
+    /* OctoPrint poll task (pinned to Core 0, networking).
+     * octoprint_client_init runs UNCONDITIONALLY so the mutex exists before any
+     * later web-handler-triggered enable + page entry; the enable check lives
+     * inside octoprint_ensure_task_running(). */
+    octoprint_client_init(&octoprint_data);
+    octoprint_ensure_task_running();
+
     /* GOES / Image Display poll task.
      * goes_data_init must run UNCONDITIONALLY so the mutex exists before any
      * later web-handler-triggered enable + page entry. */
@@ -2963,6 +3038,7 @@ main_loop:
         bool on_allsky = nina_dashboard_is_allsky_page();
         bool on_json = nina_dashboard_is_json_page();
         bool on_ha = nina_dashboard_is_ha_page();
+        bool on_octoprint = nina_dashboard_is_octoprint_page();
         bool on_sysinfo = nina_dashboard_is_sysinfo_page();
         bool on_settings = nina_dashboard_is_settings_page();
         bool on_summary = nina_dashboard_is_summary_page();
@@ -2977,13 +3053,14 @@ main_loop:
          *   PAGE_IDX_IMAGE_DISPLAY (3)                  = Image Display page
          *   PAGE_IDX_JSON          (4)                  = JSON Display page
          *   PAGE_IDX_HA            (5)                  = Home Assistant page
-         *   PAGE_IDX_SUMMARY       (6)                  = summary page
+         *   PAGE_IDX_OCTOPRINT     (6)                  = OctoPrint 3D Printer page
+         *   PAGE_IDX_SUMMARY       (7)                  = summary page
          *   NINA_PAGE_OFFSET .. NINA_PAGE_OFFSET+pc-1   = NINA instance pages
          *   SETTINGS_PAGE_IDX(pc)                       = settings page
          *   SYSINFO_PAGE_IDX(pc)                        = sysinfo page
          *
          * active_nina_idx: the actual instance index (0..MAX_NINA_INSTANCES-1)
-         *   for the active page, or -1 if on allsky/json/ha/spotify/clock/summary/settings/sysinfo.
+         *   for the active page, or -1 if on allsky/json/ha/octoprint/spotify/clock/summary/settings/sysinfo.
          */
         bool on_spotify = nina_dashboard_is_spotify_page();
         int active_nina_idx = -1;   /* Actual instance index (for data access) */
@@ -3059,6 +3136,30 @@ main_loop:
             }
             prev_on_ha = on_ha;
             ha_page_active = on_ha;
+
+            /* OctoPrint flag — wake on entry; on leave, gate the poll task
+             * BEFORE releasing the decoded image. A poll already past its
+             * page-active check still publishes, so this is not a lifetime
+             * guarantee (the client frees its buffer under its own mutex); it
+             * only keeps the common case from re-decoding a frame we are about
+             * to drop. Two buffers are held: the client's, released by
+             * set_page_active(false), and the page's own copy. */
+            static bool prev_on_octoprint = false;
+            if (on_octoprint && !prev_on_octoprint && octoprint_task_handle) {
+                xTaskNotifyGive(octoprint_task_handle);
+            }
+            octoprint_page_active = on_octoprint;
+            if (on_octoprint != prev_on_octoprint) {
+                octoprint_client_set_page_active(on_octoprint, &octoprint_data);
+                if (!on_octoprint) {
+                    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                        octoprint_page_free_image();
+                        bsp_display_unlock();
+                    }
+                    ESP_LOGI(TAG, "Left OctoPrint page: freed image buffers");
+                }
+            }
+            prev_on_octoprint = on_octoprint;
 
             static bool prev_on_clock = false;
             if (on_clock && !prev_on_clock) {
@@ -3306,6 +3407,17 @@ main_loop:
                     ha_client_unlock(&ha_data);
                 }
             }
+
+            /* Immediate OctoPrint render with cached data */
+            if (on_octoprint) {
+                if (octoprint_client_lock(&octoprint_data, 15)) {
+                    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                        octoprint_page_update(&octoprint_data);
+                        bsp_display_unlock();
+                    }
+                    octoprint_client_unlock(&octoprint_data);
+                }
+            }
         }
 
         int64_t now_ms = esp_timer_get_time() / 1000;
@@ -3398,6 +3510,17 @@ main_loop:
                     bsp_display_unlock();
                 }
                 ha_client_unlock(&ha_data);
+            }
+        } else if (on_octoprint) {
+            /* OctoPrint page — trylock-and-skip the octoprint data (like JSON),
+             * then a single LVGL lock. Skipping a cycle rather than blocking the
+             * UI preserves the lock-ordering discipline. */
+            if (octoprint_client_lock(&octoprint_data, 15)) {
+                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                    octoprint_page_update(&octoprint_data);
+                    bsp_display_unlock();
+                }
+                octoprint_client_unlock(&octoprint_data);
             }
         } else if (on_image_display) {
             /* Image Display page — repaint when a new GOES image has arrived.

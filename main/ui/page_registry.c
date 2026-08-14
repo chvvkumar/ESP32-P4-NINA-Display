@@ -67,6 +67,7 @@ static const page_ref_entry_t s_pages[] = {
     /* id 23 */ { PAGE_REF_OVL_EVENTLOG,     "overlay.eventlog",       "Event Log",        PAGE_REF_KIND_OVERLAY,      PAGE_REF_SUMMARY,      false, "System",  -1,                                     -1 },
     /* id 24 */ { PAGE_REF_JSON,             "json",                   "JSON Display",     PAGE_REF_KIND_PAGE,         PAGE_REF_JSON,         true,  "Ambient", PAGE_IDX_JSON,                          -1 },
     /* id 25 */ { PAGE_REF_HA,               "ha",                     "Home Assistant",   PAGE_REF_KIND_PAGE,         PAGE_REF_HA,           true,  "Ambient", PAGE_IDX_HA,                            -1 },
+    /* id 26 */ { PAGE_REF_OCTOPRINT,        "octoprint",              "3D Printer",       PAGE_REF_KIND_PAGE,         PAGE_REF_OCTOPRINT,    true,  "Ambient", PAGE_IDX_OCTOPRINT,                     -1 },
 };
 
 int page_ref_count(void)
@@ -124,6 +125,7 @@ bool page_ref_is_available(page_ref_t id)
         case PAGE_REF_SPOTIFY: avail = c->spotify_enabled; break;
         case PAGE_REF_JSON: avail = c->json_enabled; break;
         case PAGE_REF_HA: avail = c->ha_enabled; break;
+        case PAGE_REF_OCTOPRINT: avail = (c->octoprint_enabled != 0); break;
         case PAGE_REF_IMG_GOES:
         case PAGE_REF_IMG_MOON:
         case PAGE_REF_IMG_SOLAR:

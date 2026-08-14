@@ -175,7 +175,15 @@
     INT       (alert_voice_conn,             "alert_voice_conn",             1,     0,     1)     /* v58: announce NINA link connect (default on) */ \
     INT       (alert_voice_disc,             "alert_voice_disc",             1,     0,     1)     /* v58: announce NINA link disconnect (default on) */ \
     /* -- Startup jingle (v56) -- */ \
-    INT       (boot_jingle_enabled,          "boot_jingle_enabled",          1,     0,     1)     /* play the boot jingle once at startup; default on */
+    INT       (boot_jingle_enabled,          "boot_jingle_enabled",          1,     0,     1)     /* play the boot jingle once at startup; default on */ \
+    /* -- OctoPrint 3D Printer page (v60) -- */ \
+    INT       (octoprint_enabled,            "octoprint_enabled",            0,     0,     1)     /* uint8 flag, not bool — matches the goes_vflip/alert_voice_conn style above; whole 0/1 domain is legal so the two-sided clamp is exact */ \
+    STR       (octoprint_url,                "octoprint_url",                "")               /* base URL, scheme+host+port; also listed in s_url_fields (web_handlers_config.c) so restore preview and write path both run validate_url_format() */ \
+    STR       (octoprint_api_key,            "octoprint_api_key",            "")               /* SECRET: marked is_sensitive+mask_preview in s_backup_fields, so strip_masked_secrets() preserves it on a sentinel POST and config_get_handler redacts it on GET */ \
+    INT       (octoprint_update_interval_s,  "octoprint_update_interval_s",  5,     2,     300)   /* true clamp: a too-fast or too-slow value is meaningful at the nearest bound, unlike the RESET fields below */ \
+    INT_RESET (octoprint_image_source,       "octoprint_image_source",       0,     0,     1)     /* 0 = G-code preview, 1 = webcam snapshot. RESET, not clamp: an unknown source must fall back to the always-available preview, never to whichever source happens to sit at the far bound */ \
+    INT_RESET (octoprint_layout,             "octoprint_layout",             0,     0,     4)     /* 0=bento 1=instrument 2=glass 3=typographic 4=timeline. RESET, not clamp: layouts are unordered names, so a stale/unknown index means "no opinion" -> bento, not "the highest layout" */ \
+    STR       (octoprint_snapshot_url,       "octoprint_snapshot_url",       "")               /* "" = derive the snapshot URL from octoprint_url (the normal state). A non-empty override is fetched verbatim, so it must be a full URL: listed in s_url_fields (web_handlers_config.c) like octoprint_url, and validate_url_format() still lets the empty string through */
 
 /* Apply every row's default value to *cfg. Called from set_defaults()
  * immediately after the memset(). Does not touch excluded/complex fields

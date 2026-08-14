@@ -128,8 +128,23 @@ static void set_header_checked(esp_http_client_handle_t client,
     esp_http_client_set_header(client, name, value);
 }
 
-/** Apply the optional headers from @p opts to @p client. */
+/** Apply the optional headers (and request method) from @p opts to @p client. */
 static void apply_headers(esp_http_client_handle_t client, const http_fetch_opts_t *opts) {
+    /* The method is not a header, but this is the right place for it: every
+     * caller of apply_headers() is a point where a FRESH or a REUSED keep-alive
+     * handle needs re-arming for this request, and a reused handle would
+     * otherwise carry the previous request's method. Setting it explicitly in
+     * both directions keeps a POST from leaking onto the next GET. */
+    esp_http_client_set_method(client, opts->post_body ? HTTP_METHOD_POST : HTTP_METHOD_GET);
+    if (opts->post_body) {
+        set_header_checked(client, "Content-Type",
+                           opts->content_type ? opts->content_type : "application/json");
+    } else {
+        /* Same reason as the method above, and the header list is NOT re-armed
+         * on its own: drop a Content-Type left behind by a previous POST on this
+         * keep-alive handle so it cannot ride along on this GET. */
+        esp_http_client_delete_header(client, "Content-Type");
+    }
     if (opts->host_header) {
         /* Re-assert on every call: a reused keep-alive handle may have served
          * a different Host on a prior request, and esp_http_client_set_url()
@@ -176,6 +191,38 @@ static void apply_headers(esp_http_client_handle_t client, const http_fetch_opts
 }
 
 /**
+ * Open @p client and, for a POST, write the whole request body.
+ *
+ * esp_http_client_open() needs the body length up front (it emits the
+ * Content-Length header from it), so the open and the single write belong
+ * together -- and both have to repeat on every redirect hop, because each hop
+ * re-opens the socket. @p opts is NULL on the binary path, which never posts,
+ * so that reduces to the original open(client, 0).
+ *
+ * @p opened_out (optional) latches true the moment the socket is up, BEFORE the
+ * body write: a server that accepted the connection and then dropped it mid-body
+ * is reachable, and callers use this latch to tell "unreachable host" apart from
+ * "reachable host, failed request".
+ */
+static esp_err_t open_write_body(esp_http_client_handle_t client,
+                                  const http_fetch_opts_t *opts,
+                                  bool *opened_out) {
+    size_t blen = (opts && opts->post_body) ? strlen(opts->post_body) : 0;
+    esp_err_t err = esp_http_client_open(client, (int)blen);
+    if (err != ESP_OK) return err;
+    if (opened_out) *opened_out = true;
+    if (blen == 0) return ESP_OK;
+
+    int written = esp_http_client_write(client, opts->post_body, (int)blen);
+    if (written < 0 || (size_t)written != blen) {
+        ESP_LOGW(TAG, "POST body write failed (%d of %u bytes)",
+                 written, (unsigned)blen);
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+/**
  * Open @p client, fetch headers, and follow any redirect chain (streaming
  * open()/read() does not auto-follow -- must be done manually per hop).
  * On success fills *status_out / *content_length_out and returns ESP_OK.
@@ -203,18 +250,24 @@ static esp_err_t open_and_follow_redirects(esp_http_client_handle_t client,
                                             int64_t *headers_us_out) {
     capture_reset(opts);
     int64_t t0 = esp_timer_get_time();
-    esp_err_t err = esp_http_client_open(client, 0);
+    esp_err_t err = open_write_body(client, opts, opened_out);
     if (connect_us_out) *connect_us_out += esp_timer_get_time() - t0;
     if (err != ESP_OK) return err;
-    if (opened_out) *opened_out = true;
 
     int64_t t1 = esp_timer_get_time();
     int content_length = esp_http_client_fetch_headers(client);
     if (headers_us_out) *headers_us_out += esp_timer_get_time() - t1;
     int status = esp_http_client_get_status_code(client);
 
+    /* A POST is never replayed at a new location. Replaying the body would be
+     * wrong for 303 (which mandates a bodyless GET) and for 301/302 (which every
+     * client turns into a GET in practice), and silently downgrading the caller's
+     * POST to a GET would send a different request than the one asked for. The
+     * 3xx is handed back through status_out for the caller to deal with. */
+    const bool has_body = (opts && opts->post_body);
+
     int redirects = 0;
-    while (http_status_is_redirect(status) && redirects < max_redirects) {
+    while (http_status_is_redirect(status) && redirects < max_redirects && !has_body) {
         ESP_LOGI(TAG, "HTTP %d redirect, following (hop %d): %s",
                  status, redirects + 1, what);
         err = esp_http_client_set_redirection(client);
@@ -223,7 +276,7 @@ static esp_err_t open_and_follow_redirects(esp_http_client_handle_t client,
         esp_http_client_close(client);
         capture_reset(opts); /* only the final hop's header value may survive */
         t0 = esp_timer_get_time();
-        err = esp_http_client_open(client, 0);
+        err = open_write_body(client, opts, opened_out);
         if (connect_us_out) *connect_us_out += esp_timer_get_time() - t0;
         if (err != ESP_OK) return err;
 
@@ -447,6 +500,14 @@ esp_err_t http_fetch_binary(const char *url, const http_fetch_binary_opts_t *opt
     if (!client) {
         ESP_LOGE(TAG, "%s: failed to create HTTP client", what);
         return ESP_FAIL;
+    }
+
+    /* Reuse the text path's header applier so the CR/LF injection check and the
+     * "Name: value" split behave identically for binary fetches. Only
+     * extra_header is meaningful here; every other field stays NULL. */
+    if (o.extra_header && o.extra_header[0] != '\0') {
+        http_fetch_opts_t hopts = { .extra_header = o.extra_header };
+        apply_headers(client, &hopts);
     }
 
     int status = 0;

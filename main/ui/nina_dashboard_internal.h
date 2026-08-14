@@ -23,21 +23,28 @@
  *   PAGE_IDX_IMAGE_DISPLAY  (3)  = Image Display page
  *   PAGE_IDX_JSON           (4)  = JSON Display page
  *   PAGE_IDX_HA             (5)  = Home Assistant page
- *   PAGE_IDX_SUMMARY        (6)  = Summary page
- *   NINA_PAGE_OFFSET        (7)  .. NINA_PAGE_OFFSET + page_count - 1 = NINA instance pages
+ *   PAGE_IDX_OCTOPRINT      (6)  = OctoPrint 3D Printer page
+ *   PAGE_IDX_SUMMARY        (7)  = Summary page
+ *   NINA_PAGE_OFFSET        (8)  .. NINA_PAGE_OFFSET + page_count - 1 = NINA instance pages
  *   page_count + NINA_PAGE_OFFSET     = settings page
  *   page_count + NINA_PAGE_OFFSET + 1 = sysinfo page
  *   total_page_count = page_count + EXTRA_PAGES
+ *
+ * These are INTERNAL absolute indices and may shift when an optional page is
+ * inserted; nothing persists them. The stable external identity is the
+ * page_ref_t id / slug in page_registry.h, which is what NVS and the web API
+ * exchange. Every consumer must use the macros below, never a literal.
  */
 #define PAGE_IDX_ALLSKY          0
 #define PAGE_IDX_SPOTIFY         1
 #define PAGE_IDX_CLOCK           2
 #define PAGE_IDX_IMAGE_DISPLAY   3
 #define PAGE_IDX_JSON            4
-#define PAGE_IDX_HA              5   /* NEW: Home Assistant page */
-#define PAGE_IDX_SUMMARY         6   /* was 5 */
-#define NINA_PAGE_OFFSET         7   /* was 6 — first NINA page index */
-#define EXTRA_PAGES              9   /* allsky+spotify+clock+image+json+ha+summary+settings+sysinfo */
+#define PAGE_IDX_HA              5
+#define PAGE_IDX_OCTOPRINT       6   /* NEW: OctoPrint 3D Printer page */
+#define PAGE_IDX_SUMMARY         7   /* was 6 */
+#define NINA_PAGE_OFFSET         8   /* was 7 — first NINA page index */
+#define EXTRA_PAGES              10  /* allsky+spotify+clock+image+json+ha+octoprint+summary+settings+sysinfo */
 
 /* Derived page index helpers (use these instead of hardcoded arithmetic) */
 #define SETTINGS_PAGE_IDX(pc)  ((pc) + NINA_PAGE_OFFSET)

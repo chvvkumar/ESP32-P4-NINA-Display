@@ -74,6 +74,11 @@ CONFIG_LV_FONT_MONTSERRAT_48=y
 
 CONFIG_LV_USE_SNAPSHOT=y
 
+# lv_scale: the OctoPrint instrument layout builds its dial tick belt from it.
+# Pinned rather than left on the upstream Kconfig default, which a component
+# update is free to flip.
+CONFIG_LV_USE_SCALE=y
+
 CONFIG_PM_ENABLE=y
 CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
 

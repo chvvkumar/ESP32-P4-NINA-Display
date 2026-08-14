@@ -10,6 +10,7 @@
 #include "ui/nina_dashboard_internal.h"
 #include "ui/nina_nav_arbiter.h"
 #include "ui/nina_image_display.h"
+#include "ui/nina_octoprint.h"
 #include "ui/nina_spotify.h"
 #include "ui/themes.h"
 #include "lvgl.h"
@@ -123,6 +124,29 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
             bsp_display_unlock();
         }
         if (new_cfg->allsky_enabled != old_cfg->allsky_enabled) {
+            topology_changed = true;  /* optional page appeared/disappeared */
+        }
+    }
+    /* OctoPrint page enable / layout change. The URL, API key, image source and
+     * poll interval need no live action — octoprint_poll_task re-reads config
+     * every cycle, so the next poll picks them up. Only the enable toggle (page
+     * create/destroy) and the layout selection (widget tree rebuild) have to be
+     * applied here. */
+    if (new_cfg->octoprint_enabled != old_cfg->octoprint_enabled ||
+        new_cfg->octoprint_layout != old_cfg->octoprint_layout) {
+        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+            /* Only the layout selection needs the widget-tree rebuild; showing
+             * or hiding the page is set_octoprint_enabled's job. */
+            if (new_cfg->octoprint_layout != old_cfg->octoprint_layout) {
+                octoprint_page_refresh_config();
+            }
+            nina_dashboard_set_octoprint_enabled(new_cfg->octoprint_enabled);
+            bsp_display_unlock();
+        }
+        if (new_cfg->octoprint_enabled) {
+            octoprint_ensure_task_running();
+        }
+        if (new_cfg->octoprint_enabled != old_cfg->octoprint_enabled) {
             topology_changed = true;  /* optional page appeared/disappeared */
         }
     }

@@ -50,6 +50,8 @@ extern const uint8_t fragment_spotify_html_start[] asm("_binary_fragment_spotify
 extern const uint8_t fragment_spotify_html_end[]   asm("_binary_fragment_spotify_html_end");
 extern const uint8_t fragment_image_display_html_start[] asm("_binary_fragment_image_display_html_start");
 extern const uint8_t fragment_image_display_html_end[]   asm("_binary_fragment_image_display_html_end");
+extern const uint8_t fragment_octoprint_html_start[] asm("_binary_fragment_octoprint_html_start");
+extern const uint8_t fragment_octoprint_html_end[]   asm("_binary_fragment_octoprint_html_end");
 
 /* P6d tab fragments -- final wave. Extracts the remaining four tabs (nodes,
  * display, behavior, system), completing the migration: all 11 tabs now ship
@@ -95,6 +97,8 @@ extern const uint8_t fragment_spotify_html_gz_start[] asm("_binary_fragment_spot
 extern const uint8_t fragment_spotify_html_gz_end[]   asm("_binary_fragment_spotify_html_gz_end");
 extern const uint8_t fragment_image_display_html_gz_start[] asm("_binary_fragment_image_display_html_gz_start");
 extern const uint8_t fragment_image_display_html_gz_end[]   asm("_binary_fragment_image_display_html_gz_end");
+extern const uint8_t fragment_octoprint_html_gz_start[] asm("_binary_fragment_octoprint_html_gz_start");
+extern const uint8_t fragment_octoprint_html_gz_end[]   asm("_binary_fragment_octoprint_html_gz_end");
 extern const uint8_t fragment_nodes_html_gz_start[] asm("_binary_fragment_nodes_html_gz_start");
 extern const uint8_t fragment_nodes_html_gz_end[]   asm("_binary_fragment_nodes_html_gz_end");
 extern const uint8_t fragment_display_html_gz_start[] asm("_binary_fragment_display_html_gz_start");
@@ -260,6 +264,8 @@ static const ui_fragment_entry_t s_ui_fragments[] = {
                        fragment_spotify_html_gz_start,       fragment_spotify_html_gz_end },
     { "image-display", fragment_image_display_html_start, fragment_image_display_html_end,
                        fragment_image_display_html_gz_start, fragment_image_display_html_gz_end },
+    { "octoprint",     fragment_octoprint_html_start,     fragment_octoprint_html_end,
+                       fragment_octoprint_html_gz_start,     fragment_octoprint_html_gz_end },
     { "nodes",         fragment_nodes_html_start,         fragment_nodes_html_end,
                        fragment_nodes_html_gz_start,         fragment_nodes_html_gz_end },
     { "display",       fragment_display_html_start,       fragment_display_html_end,
@@ -404,6 +410,12 @@ esp_err_t config_get_handler(httpd_req_t *req)
     } while (0)
     REDACT_STRING_FIELD(mqtt_password);
     REDACT_STRING_FIELD(spotify_client_id);
+    /* octoprint_api_key reaches this object via settings_json_serialize() (it is
+     * a SETTINGS_TABLE row, unlike ha_token which is never serialized here), so
+     * it MUST be redacted explicitly or GET /api/config hands out the key. The
+     * write direction needs no arm: it is is_sensitive in s_backup_fields, so
+     * strip_masked_secrets() drops the sentinel and preserves the stored key. */
+    REDACT_STRING_FIELD(octoprint_api_key);
     #undef REDACT_STRING_FIELD
     /* admin_password is never serialized by serialize_config_to_json() at all. */
 
@@ -530,6 +542,19 @@ static const backup_field_t s_backup_fields[] = {
     {"ha_token",               "Home Assistant Token",     "Nodes & Data", true,  false, true},
     {"ha_update_interval_s",   "Home Assistant Interval",  "Nodes & Data", false, false},
     {"ha_tiles_config",        "Home Assistant Tiles",     "Nodes & Data", false, true},
+
+    /* OctoPrint 3D Printer page. Unlike the JSON/HA scalars above, all seven of
+     * these ARE SETTINGS_TABLE rows, so serialize_config_to_json() emits them and
+     * parse_config_from_json() reads them with no hand-written arm. Registered
+     * here for the diff, category grouping, sensitive split, and unknown-field
+     * detection — and, for the API key, to drive strip_masked_secrets(). */
+    {"octoprint_enabled",           "3D Printer Page",        "OctoPrint", false, false},
+    {"octoprint_url",               "OctoPrint URL",          "OctoPrint", false, false},
+    {"octoprint_api_key",           "OctoPrint API Key",      "OctoPrint", true,  false, true},
+    {"octoprint_update_interval_s", "OctoPrint Poll Interval","OctoPrint", false, false},
+    {"octoprint_image_source",      "OctoPrint Image Source", "OctoPrint", false, false},
+    {"octoprint_layout",            "OctoPrint Layout",       "OctoPrint", false, false},
+    {"octoprint_snapshot_url",      "OctoPrint Snapshot URL", "OctoPrint", false, false},
 
     /* System */
     {"ntp",                  "NTP Server",          "System", false, false},
@@ -679,6 +704,9 @@ static const restore_strmax_t s_restore_strmax[] = {
     {"json_auth_header",    256},
     {"ha_base_url",         256},
     {"ha_token",            256},
+    {"octoprint_url",           128},
+    {"octoprint_api_key",       64},
+    {"octoprint_snapshot_url",  128},
     /* goes_region max sourced from the struct field size at runtime below */
     {NULL, 0}
 };
@@ -689,7 +717,8 @@ static const restore_strmax_t s_restore_strmax[] = {
  * so a field can never preview clean and then 400 on confirm. Adding a URL field
  * means adding one row here, not editing two strcmp chains. */
 static const char *const s_url_fields[] = {
-    "url1", "url2", "url3", "mqtt_broker_url", "json_url", "ha_base_url", NULL
+    "url1", "url2", "url3", "mqtt_broker_url", "json_url", "ha_base_url",
+    "octoprint_url", "octoprint_snapshot_url", NULL
 };
 
 static bool is_url_field(const char *json_key) {
@@ -719,6 +748,9 @@ static const restore_numrange_t s_restore_numrange[] = {
     {"allsky_update_interval_s",1,    300,   false},  /* app_config.c:2548 */
     {"json_update_interval_s",  5,    300,   false},  /* app_config.c validate_config (out of range -> 30) */
     {"ha_update_interval_s",    5,    300,   false},  /* app_config.c validate_config (out of range -> 30) */
+    {"octoprint_update_interval_s", 2, 300,  false},  /* settings_table.h INT row (clamped to bound) */
+    {"octoprint_image_source",  0,    1,     false},  /* settings_table.h INT_RESET row (out of range -> 0) */
+    {"octoprint_layout",        0,    4,     false},  /* settings_table.h INT_RESET row (out of range -> 0) */
     {"allsky_dew_offset",       -50,  50,    true},   /* app_config.c:2552 */
     {"goes_update_interval_s",  300,  7200,  false},  /* app_config.c:2556 */
     {"image_display_source",    0,    3,     false},  /* app_config.c:2598 (0=GOES,1=Moon,2=Solar,3=Custom URL) */
@@ -967,9 +999,9 @@ static cJSON *build_restore_preview(const cJSON *backup_root, const cJSON *curre
     bool restore_blocked = false;
 
     /* Track which categories have changes */
-    const char *categories[] = {"Display", "Behavior", "Nodes & Data", "System", "AllSky", "Spotify", "MQTT"};
-    int cat_counts[7] = {0};
-    int num_categories = 7;
+    const char *categories[] = {"Display", "Behavior", "Nodes & Data", "System", "AllSky", "Spotify", "MQTT", "OctoPrint"};
+    int cat_counts[8] = {0};
+    int num_categories = 8;
 
     for (const backup_field_t *f = s_backup_fields; f->json_key; f++) {
         /* Determine which backup section this field comes from */
@@ -1133,7 +1165,13 @@ static bool validate_config_fields(cJSON *root, httpd_req_t *req)
         !validate_string_len(root, "json_tiles_config", JSON_TILES_CONFIG_MAX) ||
         !validate_string_len(root, "ha_base_url", sizeof(((app_config_t *)0)->ha_base_url)) ||
         !validate_string_len(root, "ha_token", sizeof(((app_config_t *)0)->ha_token)) ||
-        !validate_string_len(root, "ha_tiles_config", HA_TILES_CONFIG_MAX)) {
+        !validate_string_len(root, "ha_tiles_config", HA_TILES_CONFIG_MAX) ||
+        /* OctoPrint page fields. Unlike the JSON/HA block above these DO arrive
+         * in the main config POST body (they are SETTINGS_TABLE rows), so this
+         * length gate runs on the normal save path as well as on restore. */
+        !validate_string_len(root, "octoprint_url", sizeof(((app_config_t *)0)->octoprint_url)) ||
+        !validate_string_len(root, "octoprint_api_key", sizeof(((app_config_t *)0)->octoprint_api_key)) ||
+        !validate_string_len(root, "octoprint_snapshot_url", sizeof(((app_config_t *)0)->octoprint_snapshot_url))) {
         send_400(req, "String field exceeds maximum length");
         return false;
     }
