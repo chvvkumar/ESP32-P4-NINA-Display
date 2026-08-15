@@ -1010,6 +1010,11 @@ _Atomic bool image_display_manual_fetch = false;
 #define MOON_DRAG_SETTLE_MS 450          /* target duration of the release ease-back */
 #define MOON_DRAG_FRAME_US  22000        /* target frame period (cap; render usually dominates) */
 #define MOON_DRAG_REST_GRACE_MS 250      /* idle hold after settle before committing the crisp resting render; a new touch within this window re-enters the drag instead (avoids the eager reset / blocking-render stall on rapid re-swipe) */
+#define MOON_LIGHT_FADE_MS  300          /* explore lighting crossfade: 0->1 on touch-down, 1->0 once the disc is home */
+/* Explore lighting mix (0 = true phase, 1 = fully lit) carried across drag
+ * frames, outer-loop iterations and free-spin holds so the fade never restarts
+ * mid-interaction. Written only by goes_poll_task; reset on page leave. */
+static float     s_moon_light_mix = 0.0f;
 static uint16_t *s_drag_color  = NULL;
 static uint16_t *s_drag_zbuf   = NULL;
 static uint16_t *s_ppa_out[2]  = { NULL, NULL };   /* 720x720 PPA-output ping-pong */
@@ -1345,6 +1350,7 @@ void goes_poll_task(void *arg)
                  * carry a stale s_cur_* into the next visit (which would snap the
                  * disc home on the first frame). */
                 moon_drag_reset();
+                s_moon_light_mix = 0.0f;    /* next visit starts from true phase, no stale fade */
                 ESP_LOGI(TAG, "Left Image Display: freed moon texture + drag buffers");
             }
             /* Serve the slideshow prefetch WHILE PARKED. The arbiter schedules the
@@ -1589,11 +1595,12 @@ void goes_poll_task(void *arg)
                  *      output buffer, then show_borrowed it at scale 1.0 (no copy),
                  *      taking the display lock only around the LVGL swap.
                  * The render + PPA run OUTSIDE the display lock so the UI task is
-                 * blocked for the minimum time. To dissolve the lighting/phase pop on
-                 * release, SETTLE frames render in TRUE_PHASE lighting (the resting
-                 * mode) so as the orientation eases home they converge on the resting
-                 * appearance; the final crisp native-720 frame is then crossfaded in
-                 * (set below). If PPA or the buffers are unavailable, the loop falls
+                 * blocked for the minimum time. Every drag frame (active, hold, and
+                 * settle) uses the configured drag lighting mode; EXPLORE is
+                 * crossfaded in over MOON_LIGHT_FADE_MS on touch-down and back out
+                 * once the disc is home (see step 2 below), so the final crisp
+                 * native-720 resting frame (true phase) matches the last drag frame.
+                 * If PPA or the buffers are unavailable, the loop falls
                  * back to a software-scaled render so it degrades instead of crashing. */
                 /* Whether the drag loop body actually ran. Sampling moon_drag_settled()
                  * up front is unreliable: a press+release can complete before this task
@@ -1669,10 +1676,17 @@ void goes_poll_task(void *arg)
                  * re-touch's first settle frame gets a true dt. */
                 int64_t prev_frame_us = esp_timer_get_time();
                 freespin_hold = false;   /* re-evaluated for this outer iteration */
-                while (!moon_drag_settled()) {
+                /* Loop while the disc is away from home OR the explore lighting is
+                 * still fading out: once the disc is home, EXPLORE mode keeps
+                 * rendering a few frames at yaw=pitch=0 with the mix easing to 0 so
+                 * the lit->true-phase handoff is a crossfade, not a switch. The
+                 * resting render below is then identical to the last frame. */
+                while (!moon_drag_settled() || s_moon_light_mix > 0.0f) {
                     if (!image_display_page_active || eff_src != 1) break;
                     ran_drag = true;   /* a drag frame is about to be shown */
                     int64_t frame_t0 = esp_timer_get_time();
+                    float dt_ms = (float)(frame_t0 - prev_frame_us) / 1000.0f;
+                    prev_frame_us = frame_t0;
 
                     /* 1. Ease current orientation toward the finger target. While the
                      * finger is down, use the responsive per-frame alpha. After release
@@ -1687,15 +1701,35 @@ void goes_poll_task(void *arg)
                     } else {
                         /* tau so ~95% of the distance is covered in SETTLE_MS:
                          * alpha = 1 - exp(-dt/tau), tau = SETTLE_MS/3. */
-                        float dt_ms = (float)(frame_t0 - prev_frame_us) / 1000.0f;
                         float tau   = (float)MOON_DRAG_SETTLE_MS / 3.0f;
                         alpha = 1.0f - expf(-dt_ms / tau);
                         if (alpha < 0.02f) alpha = 0.02f;   /* never fully stall */
                         if (alpha > 1.0f)  alpha = 1.0f;
                     }
-                    prev_frame_us = frame_t0;
                     moon_drag_advance(alpha);
                     float yaw, pitch; moon_drag_get(&yaw, &pitch);
+
+                    /* 2. Lighting for this frame. The configured drag mode applies to
+                     * EVERY frame of the interaction (finger down, follow-through, hold,
+                     * ease home). EXPLORE is not switched on/off but CROSSFADED: the
+                     * mix ramps 0->1 over MOON_LIGHT_FADE_MS on touch-down, holds at 1
+                     * while the disc is away from home (so it stays fully lit through
+                     * release, hold and the return), and ramps back to 0 once the disc
+                     * is home, dissolving the terminator back in before the resting
+                     * commit. TRUE_PHASE and SURFACE_LOCKED render their own mode with
+                     * mix 0 (SURFACE_LOCKED's sun = R_drag*R_sky*sun_body equals true
+                     * phase at yaw=pitch=0, so it converges with no pop). The render
+                     * SIZE is the single touch size (240) for the whole interaction —
+                     * active and settle — because 240->720 is an exact 3.0x PPA ratio. */
+                    moon_light_mode_t cfg_light = (moon_light_mode_t)cfg->moon_drag_light_mode;
+                    bool  explore  = (cfg_light == MOON_LIGHT_EXPLORE);
+                    bool  want_lit = explore && !moon_drag_settled();
+                    float mix_step = dt_ms / (float)MOON_LIGHT_FADE_MS;
+                    s_moon_light_mix += want_lit ? mix_step : -mix_step;
+                    if (s_moon_light_mix < 0.0f) s_moon_light_mix = 0.0f;
+                    if (s_moon_light_mix > 1.0f) s_moon_light_mix = 1.0f;
+                    /* Base mode for the mixed render: EXPLORE fades over TRUE_PHASE. */
+                    moon_light_mode_t light = explore ? MOON_LIGHT_TRUE_PHASE : cfg_light;
 
                     /* Free-spin hold: after a rotate-release in free-spin mode the
                      * disc holds its spun orientation, so moon_drag_settled() never
@@ -1704,33 +1738,15 @@ void goes_poll_task(void *arg)
                      * actually converged onto the spun TARGET (moon_drag_advance, run
                      * above each frame, is still easing it there) before breaking;
                      * otherwise we would lock in a half-eased orientation as the crisp
-                     * held frame and the disc would visibly snap after lift. Once
+                     * held frame and the disc would visibly snap after lift. In EXPLORE
+                     * also wait for the lighting fade-in to finish, since the crisp held
+                     * frame is rendered at full explore (mix 1) and must not pop. Once
                      * converged, break to the hold-wait below (which sleeps instead of
                      * re-rendering). */
-                    if (!active && moon_drag_freespin_converged()) {
+                    if (!active && moon_drag_freespin_converged() &&
+                        (!explore || s_moon_light_mix >= 1.0f)) {
                         freespin_hold = true;
                         break;
-                    }
-
-                    /* 2. Lighting for this frame. Active frames use the explore/config
-                     * lighting for free exploration. On settle, true-phase/explore force
-                     * TRUE_PHASE so the terminator shadow dissolves back in as the disc
-                     * returns home (matching the resting render). SURFACE_LOCKED keeps its
-                     * mode through the ease-back: its sun = R_drag(yaw,pitch)*R_sky*sun_body,
-                     * which at yaw=pitch=0 equals true-phase exactly, so the terminator
-                     * stays pinned to the surface and converges with no pop (forcing
-                     * TRUE_PHASE here would flash full-bright/dark on the first large-yaw
-                     * settle frame). The render SIZE is the single touch size (240) for the
-                     * whole interaction — active and settle — because 240->720 is an exact
-                     * 3.0x PPA ratio. */
-                    moon_light_mode_t cfg_light = (moon_light_mode_t)cfg->moon_drag_light_mode;
-                    moon_light_mode_t light;
-                    if (active) {
-                        light = cfg_light;                 /* finger down: use configured mode */
-                    } else if (cfg_light == MOON_LIGHT_SURFACE_LOCKED) {
-                        light = MOON_LIGHT_SURFACE_LOCKED; /* settle: keep terminator pinned; converges to true phase at yaw=pitch=0 */
-                    } else {
-                        light = MOON_LIGHT_TRUE_PHASE;     /* settle for true-phase/explore: dissolve terminator back in */
                     }
 
                     bool shown = false;
@@ -1739,7 +1755,7 @@ void goes_poll_task(void *arg)
                         uint16_t *fimg = moon_sphere_render_into(
                             MOON_DRAG_SZ_TOUCH, MOON_DRAG_SZ_TOUCH, &live,
                             MOON_DRAG_SECTORS, MOON_DRAG_STACKS, cfg->moon_bg_style,
-                            yaw, pitch, light, s_drag_color, s_drag_zbuf);
+                            yaw, pitch, light, s_moon_light_mix, s_drag_color, s_drag_zbuf);
                         if (fimg) {
                             /* Red Night: recolour the 240px SOURCE, not the 720 PPA
                              * output. The remap is per-pixel and the upscale linear, so
@@ -1797,10 +1813,12 @@ void goes_poll_task(void *arg)
                          * exceptional fallback does ~2 allocs/frame (the fresh
                          * moon_sphere_render_ex color/z here, plus update()'s owned-copy
                          * alloc); the "zero per-frame heap alloc" guarantee applies only
-                         * to the PPA path, not this degraded fallback. */
+                         * to the PPA path, not this degraded fallback. render_ex has no
+                         * mix input, so this path renders the configured mode directly
+                         * (lighting switches instead of crossfading; acceptable here). */
                         uint16_t *fimg = moon_sphere_render_ex(MOON_DRAG_SZ_TOUCH, MOON_DRAG_SZ_TOUCH, &live,
                                                                MOON_DRAG_SECTORS, MOON_DRAG_STACKS,
-                                                               cfg->moon_bg_style, yaw, pitch, light);
+                                                               cfg->moon_bg_style, yaw, pitch, cfg_light);
                         if (fimg) {
                             if (goes_data_lock(&goes_data, 1000)) {
                                 if (goes_data.image_buf) heap_caps_free(goes_data.image_buf);
@@ -1917,8 +1935,8 @@ void goes_poll_task(void *arg)
                 break;                     /* genuine rest: commit the resting frame */
                 } /* end outer for(;;) */
 
-                /* Drag settled: the last 240px settle frame (TRUE_PHASE, PPA-upscaled)
-                 * is still on screen. The full-res resting render below commits an
+                /* Drag settled: the last 240px settle frame (home orientation, explore
+                 * mix faded to 0 = true phase, PPA-upscaled) is still on screen. The full-res resting render below commits an
                  * OWNED native-720 frame and crossfades it in over that settle frame
                  * for a smooth sharpen-up. The render scratch / PPA buffers are freed
                  * on page leave, not here, so the next drag reuses them. */

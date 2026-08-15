@@ -33,11 +33,14 @@ uint16_t *moon_sphere_render_ex(int w, int h, const moon_state_t *st,
 /* Same as moon_sphere_render_ex() but renders into CALLER-PROVIDED color + z
  * buffers (no per-frame heap alloc/free). Both must be w*h uint16 and 128-byte
  * aligned (PPA / cache line). Returns color_buf on success or NULL on bad args.
- * Used by the drag-to-rotate loop with persistent scratch buffers. */
+ * Used by the drag-to-rotate loop with persistent scratch buffers.
+ * explore_mix (0..1) crossfades the lighting of TRUE_PHASE / SURFACE_LOCKED
+ * toward the fully-lit explore look (0 = the mode's own lighting, 1 = explore);
+ * ignored for MOON_LIGHT_EXPLORE, which is always mix 1. */
 uint16_t *moon_sphere_render_into(int w, int h, const moon_state_t *st,
                                   int nb_sectors, int nb_stacks, uint8_t bg_style,
                                   float yaw_deg, float pitch_deg,
-                                  moon_light_mode_t light_mode,
+                                  moon_light_mode_t light_mode, float explore_mix,
                                   uint16_t *color_buf, uint16_t *zbuf);
 #ifdef __cplusplus
 }
