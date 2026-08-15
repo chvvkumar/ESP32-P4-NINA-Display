@@ -473,12 +473,15 @@ void ha_client_poll(const char *base_url, const char *token,
         count = JSON_MAX_TILES;
     }
     if (count <= 0) {
-        /* No tiles configured -- nothing to fetch. Publish connected=true so the
-         * page adapter's overlay ordering (base -> !connected -> tile_count==0)
-         * surfaces "No Tiles Configured" rather than "Cannot Reach". Mirrors
-         * json_client leaving connected=true on a successful fetch of 0 tiles. */
+        /* No tiles configured -- nothing to fetch, and nothing to reach. The
+         * page must resolve OK and show "No Tiles Configured" rather than sit
+         * on "Connecting to Home Assistant..." forever, so publish a clean
+         * healthy state (ever_ok=true, fail_count=0). Mirrors json_client
+         * leaving connected=true on a successful fetch of 0 tiles. */
         if (ha_client_lock(data, 100)) {
             data->connected = true;
+            data->ever_ok = true;
+            data->fail_count = 0;
             data->tile_count = 0;
             data->last_poll_ms = esp_timer_get_time() / 1000;
             ha_client_unlock(data);
@@ -584,13 +587,23 @@ void ha_client_poll(const char *base_url, const char *token,
         }
     }
 
-    /* Publish under the mutex. connected = at least one entity fetched OK. */
+    /* Publish under the mutex. connected = at least one entity fetched OK.
+     * A wholly failed poll resolves every tile to "--", so publishing it would
+     * blank the page; keep the last good values/tile_count instead and let the
+     * page render them dimmed (PAGE_CONN_STALE) until fail_count reaches the
+     * DOWN threshold. */
     if (ha_client_lock(data, 200)) {
         data->connected = (fetched_ok > 0);
         data->last_poll_ms = esp_timer_get_time() / 1000;
-        data->tile_count = local.tile_count;
-        memcpy(data->values, local.values, sizeof(data->values));
-        memcpy(data->resolved, local.resolved, sizeof(data->resolved));
+        if (fetched_ok > 0) {
+            data->ever_ok = true;
+            data->fail_count = 0;
+            data->tile_count = local.tile_count;
+            memcpy(data->values, local.values, sizeof(data->values));
+            memcpy(data->resolved, local.resolved, sizeof(data->resolved));
+        } else if (data->fail_count < UINT16_MAX) {
+            data->fail_count++;
+        }
         ha_client_unlock(data);
         ESP_LOGD(TAG, "HA poll: %d tiles, %d/%d entities OK",
                  count, fetched_ok, unique_count);

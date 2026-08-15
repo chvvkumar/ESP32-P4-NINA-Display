@@ -135,6 +135,18 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
     if (new_cfg->octoprint_enabled &&
         (new_cfg->octoprint_image_source != old_cfg->octoprint_image_source ||
          strcmp(new_cfg->octoprint_snapshot_url, old_cfg->octoprint_snapshot_url) != 0)) {
+        /* A source SWITCH also has to clear what is on screen right now: the
+         * held frame is the other source's picture, and the wake below still
+         * needs a fetch and a decode (1-3 s) before the new one lands. Without
+         * this the toggle looks dead for those seconds and then jumps. A
+         * snapshot-URL edit alone keeps the frame -- same source, new address. */
+        if (new_cfg->octoprint_image_source != old_cfg->octoprint_image_source) {
+            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                octoprint_page_image_source_changed();
+                bsp_display_unlock();
+            }
+            octoprint_client_note_image_source_switch(&octoprint_data);
+        }
         octoprint_wake_now();
     }
     /* OctoPrint page enable / layout change. The URL, API key and poll interval

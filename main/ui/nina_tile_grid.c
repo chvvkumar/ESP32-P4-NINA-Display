@@ -40,6 +40,9 @@ static const char *TAG = "tile_grid";
 LV_FONT_DECLARE(lv_font_montserrat_64);
 
 /* ── Layout caps (match the mockup / tiles_config schema) ─────────────── */
+/* Tile-area opacity while the shown values are no longer fresh. */
+#define STALE_OPA               LV_OPA_60
+
 #define TILE_GRID_MAX_ROWS      6
 #define TILE_GRID_MAX_PER_ROW   4
 
@@ -119,6 +122,8 @@ struct nina_tile_grid {
     lv_obj_t *root;          /* page root */
     lv_obj_t *rows_host;     /* flex-column holding the row containers */
     lv_obj_t *empty_overlay; /* full-coverage empty/error overlay */
+    lv_obj_t *stale_lbl;     /* lazily created "Reconnecting..." cue */
+    bool      stale;         /* tiles dimmed, stale cue visible */
 
     tile_grid_tile_cfg_t tile_cfg[JSON_MAX_TILES];
     tile_grid_w_t        tile_w[JSON_MAX_TILES];
@@ -834,6 +839,48 @@ void nina_tile_grid_hide_overlay(nina_tile_grid_t *g) {
     }
 }
 
+void nina_tile_grid_set_busy(nina_tile_grid_t *g, bool busy) {
+    if (g && g->empty_overlay) {
+        nina_empty_state_set_busy(g->empty_overlay, busy);   /* idempotent */
+    }
+}
+
+void nina_tile_grid_set_stale(nina_tile_grid_t *g, bool stale) {
+    if (!g || !g->root || g->stale == stale) {
+        return;
+    }
+    g->stale = stale;
+
+    if (g->rows_host) {
+        lv_obj_set_style_opa(g->rows_host, stale ? STALE_OPA : LV_OPA_COVER, 0);
+    }
+
+    if (stale && !g->stale_lbl) {
+        g->stale_lbl = lv_label_create(g->root);
+        lv_label_set_text(g->stale_lbl, "Reconnecting...");
+        lv_obj_set_style_text_font(g->stale_lbl, &lv_font_montserrat_16, 0);
+        lv_obj_add_flag(g->stale_lbl, LV_OBJ_FLAG_FLOATING);
+        lv_obj_align(g->stale_lbl, LV_ALIGN_BOTTOM_MID, 0, 0);
+        if (current_theme) {
+            int gb = app_config_get()->color_brightness;
+            lv_obj_set_style_text_color(g->stale_lbl,
+                                        lv_color_hex(theme_label_color(gb)), 0);
+        }
+        /* Keep the full-coverage overlay above the cue. */
+        if (g->empty_overlay) {
+            lv_obj_move_foreground(g->empty_overlay);
+        }
+    }
+
+    if (g->stale_lbl) {
+        if (stale) {
+            lv_obj_remove_flag(g->stale_lbl, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(g->stale_lbl, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
 void nina_tile_grid_apply_theme(nina_tile_grid_t *g) {
     if (!g || !g->root || !current_theme) {
         return;
@@ -858,6 +905,10 @@ void nina_tile_grid_apply_theme(nina_tile_grid_t *g) {
     if (g->empty_overlay) {
         nina_empty_state_apply_theme(g->empty_overlay, current_theme, gb);
     }
+    if (g->stale_lbl) {
+        lv_obj_set_style_text_color(g->stale_lbl,
+                                    lv_color_hex(theme_label_color(gb)), 0);
+    }
 
     lv_obj_invalidate(g->root);
 }
@@ -879,7 +930,15 @@ void nina_tile_grid_refresh_config(nina_tile_grid_t *g, const char *tiles_config
 
     build_rows(g);
 
-    /* Keep the overlay above the freshly rebuilt rows. */
+    /* The rebuilt rows_host is fresh: re-apply the stale dim if still set. */
+    if (g->stale && g->rows_host) {
+        lv_obj_set_style_opa(g->rows_host, STALE_OPA, 0);
+    }
+
+    /* Keep the overlay and the stale cue above the freshly rebuilt rows. */
+    if (g->stale_lbl) {
+        lv_obj_move_foreground(g->stale_lbl);
+    }
     if (g->empty_overlay) {
         lv_obj_move_foreground(g->empty_overlay);
     }

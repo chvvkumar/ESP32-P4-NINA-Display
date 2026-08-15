@@ -56,6 +56,19 @@
 #define OCTO_ETA_LEN     16   /* DisplayLayerProgress print.estimatedEndTime    */
 
 /**
+ * Why the image slot looks the way it does. Lets the page tell "not fetched
+ * yet" apart from "webcam is down" and from "this file simply has no
+ * thumbnail", instead of rendering one undifferentiated "NO IMAGE".
+ */
+typedef enum {
+    OCTO_IMG_PENDING = 0,      /* fetch not attempted yet since page entry / source switch */
+    OCTO_IMG_OK,               /* a frame for the selected source is published (or a held "last print" thumbnail) */
+    OCTO_IMG_WEBCAM_FAILED,    /* snapshot fetch/decode failed this pass       */
+    OCTO_IMG_NO_THUMBNAIL,     /* file has no thumbnail and nothing is held    */
+    OCTO_IMG_NO_JOB,           /* preview selected, no job file, nothing held  */
+} octoprint_image_status_t;
+
+/**
  * Live printer state. Every field is written by octoprint_client_poll() under
  * @ref mutex; readers must hold the lock via octoprint_client_lock().
  *
@@ -66,7 +79,12 @@
 typedef struct {
     /* -- connectivity ---------------------------------------------------- */
     bool    connected;          /* last /api/job fetch+parse succeeded         */
-    bool    data_valid;         /* at least one successful poll since boot     */
+    bool    data_valid;         /* at least one successful poll since boot;    */
+                                /* never cleared once set -- a failed poll     */
+                                /* leaves the last good values published       */
+    uint16_t fail_count;        /* consecutive failed /api/job polls (saturates */
+                                /* at 0xFFFF); 0 after any success. Lets the   */
+                                /* page dim one hiccup instead of shouting     */
 
     /* -- state ------------------------------------------------------------ */
     char    job_state[OCTO_STATE_LEN];      /* /api/job "state"               */
@@ -107,6 +125,20 @@ typedef struct {
                                 /* -- and ONLY then, so a failed alloc/bind    */
                                 /* leaves it set and the UI retries next cycle */
 
+    uint8_t  image_status;      /* octoprint_image_status_t; why image_buf is  */
+                                /* what it is. Carried unchanged by a poll     */
+                                /* pass that ran with the page inactive        */
+
+    int8_t   image_src;         /* which source PRODUCED the published frame:  */
+                                /* -1 none, 0 gcode preview, 1 webcam. The     */
+                                /* renderer must read the label off the FRAME, */
+                                /* never off live config: during a source      */
+                                /* toggle the two disagree for a poll or two   */
+                                /* and an old-source frame would be drawn --   */
+                                /* and freed -- as if it were the new source.  */
+                                /* Stays valid after the UI consumes a webcam  */
+                                /* original (buf NULLed, image_src still 1)    */
+
     SemaphoreHandle_t mutex;
 } octoprint_data_t;
 
@@ -130,15 +162,30 @@ void octoprint_client_unlock(octoprint_data_t *data);
  * @param snapshot_url  octoprint_snapshot_url; "" derives
  *                      "<base>/webcam/?action=snapshot".
  *
- * On a /api/job transport or parse failure sets data->connected=false and
- * leaves the previously published values in place (mirrors json_client).
+ * On a /api/job transport or parse failure sets data->connected=false, bumps
+ * data->fail_count, and leaves every other published value (including
+ * data_valid and image_status) in place (mirrors json_client).
  */
 void octoprint_client_poll(const char *base_url, const char *api_key,
                            uint8_t image_source, const char *snapshot_url,
                            octoprint_data_t *data);
 
 /**
- * Gate the image pipeline on page visibility. Passing false frees the decoded
+ * Retire the published frame and mark the slot "fetching": image_buf freed and
+ * NULLed, image_src = -1, image_status = OCTO_IMG_PENDING. Call right before
+ * octoprint_wake_now() when the image source changes.
+ *
+ * Dropping the buffer is the point, not just the status: the held frame belongs
+ * to the source being switched away from, and leaving it published lets the
+ * next page pass re-stage it under the NEW source's label. The call also bumps
+ * an internal generation counter, so a poll pass that is already in flight (it
+ * fetched under the OLD source) publishes a drop instead of its result.
+ */
+void octoprint_client_note_image_source_switch(octoprint_data_t *data);
+
+/**
+ * Gate the image pipeline on page visibility. Passing true resets image_status
+ * to OCTO_IMG_PENDING; passing false frees the decoded
  * buffer immediately (under the mutex) and drops the "which file is cached"
  * memory, so re-entering the page re-fetches. The poll loop itself is gated by
  * the octoprint_page_active flag in tasks.c, matching json/ha.

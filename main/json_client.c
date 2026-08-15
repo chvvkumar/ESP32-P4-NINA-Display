@@ -71,6 +71,7 @@ static bool  cjson_scalar_str(const cJSON *node, char *buf, size_t len);
 static cJSON *json_eval_path(cJSON *root, const char *path);
 static void  invalidate_tiles_config(void);
 static int   get_tiles_config(const char *tiles_config_json);
+static void  mark_poll_failed(json_data_t *data);
 
 // =============================================================================
 // Mutex Helpers (mirror allsky_data_init/lock/unlock)
@@ -82,6 +83,8 @@ void json_client_init(json_data_t *data) {
     }
     memset(data, 0, sizeof(json_data_t));
     data->connected = false;
+    data->ever_ok = false;
+    data->fail_count = 0;
     data->tile_count = 0;
     data->last_poll_ms = 0;
     data->mutex = xSemaphoreCreateMutex();
@@ -117,6 +120,22 @@ void json_client_set_page_active(bool active) {
         conn_teardown_if_page_left();
         xSemaphoreGive(s_conn_mux);
     }
+}
+
+/**
+ * Record one failed poll: connected=false plus a saturating fail_count bump.
+ * Deliberately leaves values[]/resolved[]/tile_count untouched so a short
+ * outage renders the last good readings dimmed instead of blanking the page.
+ */
+static void mark_poll_failed(json_data_t *data) {
+    if (!json_client_lock(data, 100)) {
+        return;
+    }
+    data->connected = false;
+    if (data->fail_count < UINT16_MAX) {
+        data->fail_count++;
+    }
+    json_client_unlock(data);
 }
 
 bool json_client_lock(json_data_t *data, int timeout_ms) {
@@ -423,20 +442,14 @@ void json_client_poll(const char *url, const char *auth_header,
 
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "JSON HTTP fetch failed for %s: %s", url, esp_err_to_name(err));
-        if (json_client_lock(data, 100)) {
-            data->connected = false;
-            json_client_unlock(data);
-        }
+        mark_poll_failed(data);
         return;
     }
 
     if (total_read == 0) {
         ESP_LOGW(TAG, "JSON: empty response body");
         heap_caps_free(buffer);
-        if (json_client_lock(data, 100)) {
-            data->connected = false;
-            json_client_unlock(data);
-        }
+        mark_poll_failed(data);
         return;
     }
 
@@ -445,10 +458,7 @@ void json_client_poll(const char *url, const char *auth_header,
 
     if (!json) {
         ESP_LOGW(TAG, "JSON: failed to parse response");
-        if (json_client_lock(data, 100)) {
-            data->connected = false;
-            json_client_unlock(data);
-        }
+        mark_poll_failed(data);
         return;
     }
 
@@ -482,6 +492,8 @@ void json_client_poll(const char *url, const char *auth_header,
     /* Publish under the mutex. */
     if (json_client_lock(data, 200)) {
         data->connected = true;
+        data->ever_ok = true;
+        data->fail_count = 0;
         data->last_poll_ms = esp_timer_get_time() / 1000;
         data->tile_count = local.tile_count;
         memcpy(data->values, local.values, sizeof(data->values));

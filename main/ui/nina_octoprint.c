@@ -35,6 +35,7 @@
 #include "nina_empty_state.h"
 #include "app_config.h"
 #include "display_defs.h"
+#include "page_conn.h"
 #include "jpeg_utils.h"
 #include "bsp/esp-bsp.h"   /* bsp_display_lock / bsp_display_unlock */
 
@@ -68,6 +69,12 @@ static lv_obj_t *s_content   = NULL;  /* deleted + rebuilt by refresh_config */
 static lv_obj_t *s_backdrop  = NULL;  /* full-cover host for the empty state */
 static lv_obj_t *s_empty     = NULL;
 static octoprint_widgets_t s_w;
+
+/* Current opacity of s_content. Dimmed while the source is STALE (last values
+ * kept on screen), full while it is OK. Tracked so the update path only
+ * restyles on a transition -- a per-cycle lv_obj_set_style_opa() would
+ * invalidate the whole 720x720 frame under FULL_REFRESH. */
+static lv_opa_t s_content_opa = LV_OPA_COVER;
 
 /* UI-owned, bilinear-scaled copy of the decoded frame (see file header).
  * s_img_copy is a 128-byte-aligned PSRAM buffer; s_fit_w/h are the pixel
@@ -154,6 +161,35 @@ static void set_hidden(lv_obj_t *obj, bool hidden)
     } else {
         lv_obj_remove_flag(obj, LV_OBJ_FLAG_HIDDEN);
     }
+}
+
+static void set_content_opa(lv_opa_t opa)
+{
+    if (!s_content || s_content_opa == opa) {
+        return;
+    }
+    s_content_opa = opa;
+    lv_obj_set_style_opa(s_content, opa, 0);
+}
+
+/**
+ * What the image slot says while it holds no frame. One line per reason the
+ * client could not give us a picture, so the user is told which of the four it
+ * is instead of a bare "NO IMAGE". PENDING (and OK, whose placeholder is
+ * hidden anyway) reads as "loading", worded for the source that is actually
+ * being fetched.
+ */
+static const char *placeholder_text(uint8_t status)
+{
+    switch (status) {
+        case OCTO_IMG_WEBCAM_FAILED: return "Webcam unavailable";
+        case OCTO_IMG_NO_THUMBNAIL:  return "No preview for this file";
+        case OCTO_IMG_NO_JOB:        return "No job loaded";
+        default:                     break;
+    }
+    return (app_config_get()->octoprint_image_source == 1)
+           ? "Loading webcam..."
+           : "Loading G-code preview...";
 }
 
 /**
@@ -377,7 +413,9 @@ lv_obj_t *octo_w_image_hero(lv_obj_t *parent, octoprint_widgets_t *w)
     lv_obj_center(w->img_hero);
     lv_obj_add_flag(w->img_hero, LV_OBJ_FLAG_HIDDEN);
 
-    w->img_placeholder = octo_w_label(host, "NO IMAGE",
+    /* Born reading "Loading ...": a freshly built page has never had a frame,
+     * and the poller is on its way with one. "NO IMAGE" read as a verdict. */
+    w->img_placeholder = octo_w_label(host, placeholder_text(OCTO_IMG_PENDING),
                                       &lv_font_montserrat_16, &octo_style_label);
     lv_obj_center(w->img_placeholder);
     return host;
@@ -551,6 +589,7 @@ static void build_content(void)
 
     s_content = octo_w_row(s_root, false, OCTO_GAP);
     lv_obj_set_size(s_content, LV_PCT(100), LV_PCT(100));
+    s_content_opa = LV_OPA_COVER;   /* a fresh tree carries no dim from a stale pass */
 
     ESP_LOGI(TAG, "Building OctoPrint page, layout %u (%s)",
              (unsigned)idx, ops->name ? ops->name : "?");
@@ -784,9 +823,23 @@ static void stage_image(octoprint_data_t *data, octo_staged_t *st)
     if (!data->image_buf || data->image_w == 0 || data->image_h == 0) {
         return;
     }
-    if (!data->data_valid || !data->connected) {
+    if (data->image_src < 0) {
+        /* A frame with no source label is a frame we cannot honestly draw:
+         * staging it would have to guess the label from live config, which is
+         * exactly what mislabels an old frame during a source toggle. */
+        return;
+    }
+    if (data->image_src != ((app_config_get()->octoprint_image_source == 1) ? 1 : 0)) {
+        /* A frame labelled for the other source is never drawn, even if a poll
+         * pass outran the switch. */
+        return;
+    }
+    page_conn_t conn = page_conn_eval(data->data_valid, data->connected,
+                                      (int)data->fail_count);
+    if (conn != PAGE_CONN_OK && conn != PAGE_CONN_STALE) {
         /* The page is showing the empty overlay and the commit pass will not
-         * run, so a scale now would be redone every cycle until reconnect. */
+         * run, so a scale now would be redone every cycle until reconnect.
+         * STALE still renders (dimmed last values), so it still stages. */
         return;
     }
     if (!data->new_image && !s_need_rescale) {
@@ -821,7 +874,11 @@ static void stage_image(octoprint_data_t *data, octo_staged_t *st)
     st->buf = buf;
     st->w   = fit_w;
     st->h   = fit_h;
-    st->src = (int8_t)((app_config_get()->octoprint_image_source == 1) ? 1 : 0);
+    /* The label comes off the FRAME, never off live config: during a source
+     * toggle config already says "webcam" while this buffer is still the
+     * G-code preview, and tagging it 1 would both draw it as the webcam and
+     * free the client's retained original as if it were one. */
+    st->src = data->image_src;
 
     /* The webcam refetches every poll, so the client's retained full-res
      * original (~600 KB PSRAM at 640x480) is pure double-buffering once it has
@@ -857,12 +914,25 @@ static void image_update(octoprint_data_t *data, octo_staged_t *st,
         /* NULL client buffer and nothing staged. Either the client dropped the
          * frame (page left, source switched, nothing decoded yet) -- clear --
          * or stage_image() consumed a webcam original on an earlier pass and
-         * the copy on screen is still the selected source -- keep it. */
+         * the copy on screen is still the selected source -- keep it.
+         * PENDING breaks the tie the other way: the source was just switched or
+         * the page just came back, so whatever is on screen is the wrong
+         * picture and must give way to the loading text.
+         *
+         * Deliberately NOT gated on image_status == OCTO_IMG_OK: a failed
+         * webcam refresh keeps the last good frame on screen (a live view
+         * hiccup, not an empty slot -- user ruling 2026-08-15). Only PENDING
+         * drops it, and PENDING is what a source switch stamps. Config is read
+         * here only because there is no frame left to read a label off -- the
+         * client consumed the original -- and the PENDING check is what makes
+         * that safe across a toggle. */
         if (s_img_copy && s_copy_src == 1 &&
-            app_config_get()->octoprint_image_source == 1) {
+            app_config_get()->octoprint_image_source == 1 &&
+            data->image_status != OCTO_IMG_PENDING) {
             return;
         }
         free_img_copy();
+        set_txt(s_w.img_placeholder, placeholder_text(data->image_status));
         set_hidden(s_w.img_hero, true);
         set_hidden(s_w.img_placeholder, false);
         return;
@@ -926,6 +996,9 @@ static void image_update(octoprint_data_t *data, octo_staged_t *st,
     }
 
     bool have = (s_img_copy != NULL);
+    if (!have) {
+        set_txt(s_w.img_placeholder, placeholder_text(data->image_status));
+    }
     set_hidden(s_w.img_hero, !have);
     set_hidden(s_w.img_placeholder, have);
 }
@@ -937,7 +1010,26 @@ void octoprint_page_free_image(void)
     }
     free_img_copy();
     /* The hero has nothing to show now; leave the page in its placeholder state
-     * so a re-entry before the first poll does not flash an empty image slot. */
+     * so a re-entry before the first poll does not flash an empty image slot.
+     * The text is the loading line, not a verdict: the client re-arms PENDING on
+     * activation and a frame is on its way, so a re-entry must not read as
+     * "there is no image" for the second or two before it lands. */
+    set_txt(s_w.img_placeholder, placeholder_text(OCTO_IMG_PENDING));
+    set_hidden(s_w.img_hero, true);
+    set_hidden(s_w.img_placeholder, false);
+}
+
+void octoprint_page_image_source_changed(void)
+{
+    if (!s_root) {
+        return;
+    }
+    /* The held frame belongs to the source the user just switched away from, so
+     * it is wrong the instant the toggle moves. Drop it here rather than
+     * waiting for the poller: the fetch+decode of the new source takes 1-3 s,
+     * and leaving the old picture up for that long reads as a dead control. */
+    free_img_copy();
+    set_txt(s_w.img_placeholder, placeholder_text(OCTO_IMG_PENDING));
     set_hidden(s_w.img_hero, true);
     set_hidden(s_w.img_placeholder, false);
 }
@@ -975,13 +1067,31 @@ static void page_update_locked(octoprint_data_t *data, octo_staged_t *st,
      * read the configured URL and the client's connectivity flags. */
     if (cfg->octoprint_url[0] == '\0') {
         empty_show("OctoPrint Not Configured");
+        nina_empty_state_set_busy(s_empty, false);
         return;
     }
-    if (!data->data_valid || !data->connected) {
+
+    /* One poll failing is not an outage. The four-state evaluator separates
+     * "nothing yet" (busy overlay) from "gave up" (fault overlay) from "had
+     * data, currently missing polls" -- which keeps the last readings on screen,
+     * dimmed, instead of blanking every card behind a full-page overlay. */
+    page_conn_t conn = page_conn_eval(data->data_valid, data->connected,
+                                      (int)data->fail_count);
+    if (conn == PAGE_CONN_CONNECTING) {
+        empty_show("Connecting to OctoPrint...");
+        nina_empty_state_set_busy(s_empty, true);
+        return;
+    }
+    if (conn == PAGE_CONN_DOWN) {
         empty_show("Cannot Reach OctoPrint");
+        nina_empty_state_set_busy(s_empty, false);
         return;
     }
     empty_hide();
+    nina_empty_state_set_busy(s_empty, false);
+
+    bool stale = (conn == PAGE_CONN_STALE);
+    set_content_opa(stale ? LV_OPA_60 : LV_OPA_COVER);
 
     char buf[48];
 
@@ -1051,10 +1161,16 @@ static void page_update_locked(octoprint_data_t *data, octo_staged_t *st,
     /* /api/connection mirrors the printer state ("Printing"/"Operational") while
      * things are healthy, which just duplicates the job-state chip. Surface the
      * connection element only when it says something the state chip cannot: the
-     * link to the printer is down. Unknown/empty state stays hidden. */
+     * link to the printer is down. Unknown/empty state stays hidden.
+     *
+     * A stale source borrows the same element for its own cue: the values on
+     * screen are the last known good ones and the poller is retrying, which is
+     * exactly what this chip exists to say. It outranks the printer-link texts
+     * because we cannot trust a link state read from a poll that failed. */
     bool conn_error = (strncasecmp(data->conn_state, "Error", 5) == 0);
-    bool conn_show  = closed || conn_error;
-    const char *conn_text = conn_error ? data->conn_state : "PRINTER OFFLINE";
+    bool conn_show  = stale || closed || conn_error;
+    const char *conn_text = stale ? "RECONNECTING"
+                                  : (conn_error ? data->conn_state : "PRINTER OFFLINE");
     if (conn_show) {
         set_txt(s_w.lbl_conn, conn_text);
         if (s_w.lbl_conn) {

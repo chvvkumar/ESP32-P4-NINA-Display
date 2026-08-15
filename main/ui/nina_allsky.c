@@ -8,6 +8,8 @@
 
 #include "nina_allsky.h"
 #include "nina_dashboard_internal.h"
+#include "nina_empty_state.h"
+#include "page_conn.h"
 #include "app_config.h"
 #include "themes.h"
 #include "ui_styles.h"
@@ -49,6 +51,19 @@ typedef struct {
 
 static lv_obj_t *allsky_page = NULL;
 static allsky_quadrant_t quads[4]; /* 0=thermal, 1=sqm, 2=ambient, 3=power */
+
+/* ── Connection-state surfaces ───────────────────────────────────────────
+ * s_backdrop is the opaque full-coverage panel the empty state needs (the
+ * empty state itself renders transparent -- see nina_empty_state.h).
+ * s_reconnect_lbl is the small STALE cue at the bottom of the page.
+ * s_state_key caches the last applied state so the opacity/label restyle
+ * runs on transitions only, not on every poll cycle. It folds the
+ * "configured" flag in because both unconfigured and unreachable map to
+ * PAGE_CONN_DOWN but carry different titles. -1 = nothing applied yet. */
+static lv_obj_t *s_backdrop      = NULL;
+static lv_obj_t *s_empty         = NULL;
+static lv_obj_t *s_reconnect_lbl = NULL;
+static int       s_state_key     = -1;
 
 /* ── Per-quadrant config parsed from JSON ────────────────────────────── */
 
@@ -515,6 +530,42 @@ static void create_quadrant(allsky_quadrant_t *qd, lv_obj_t *parent,
 
 }
 
+/* ── Connection-state surfaces ───────────────────────────────────────── */
+
+/* All three helpers run with the display lock held by the caller. */
+
+static void overlay_show(const char *title, bool busy) {
+    if (!s_backdrop || !s_empty) return;
+    nina_empty_state_set_title(s_empty, title);
+    lv_obj_remove_flag(s_backdrop, LV_OBJ_FLAG_HIDDEN);
+    nina_empty_state_show(s_empty);
+    nina_empty_state_set_busy(s_empty, busy);
+}
+
+static void overlay_hide(void) {
+    if (!s_backdrop) return;
+    nina_empty_state_set_busy(s_empty, false);
+    nina_empty_state_hide(s_empty);
+    lv_obj_add_flag(s_backdrop, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void reconnect_label_show(bool show) {
+    if (!s_reconnect_lbl) return;
+    if (show) {
+        lv_obj_remove_flag(s_reconnect_lbl, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(s_reconnect_lbl, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void quads_set_opa(lv_opa_t opa) {
+    for (int q = 0; q < 4; q++) {
+        if (quads[q].box) {
+            lv_obj_set_style_opa(quads[q].box, opa, 0);
+        }
+    }
+}
+
 /* ── Page creation ───────────────────────────────────────────────────── */
 
 lv_obj_t *allsky_page_create(lv_obj_t *parent) {
@@ -566,6 +617,36 @@ lv_obj_t *allsky_page_create(lv_obj_t *parent) {
     create_quadrant(&quads[2], bot_row, 2); /* ambient */
     create_quadrant(&quads[3], bot_row, 3); /* power */
 
+    /* STALE cue — floating so it stays out of the column flex flow. */
+    s_reconnect_lbl = ui_label(allsky_page, "Reconnecting...",
+                               &lv_font_montserrat_16,
+                               UI_THEME_COLOR(label_color));
+    lv_obj_add_flag(s_reconnect_lbl, LV_OBJ_FLAG_FLOATING);
+    lv_obj_align(s_reconnect_lbl, LV_ALIGN_BOTTOM_MID, 0, -2);
+    lv_obj_add_flag(s_reconnect_lbl, LV_OBJ_FLAG_HIDDEN);
+
+    /* Full-coverage empty state: nina_empty_state renders transparent at 80 %
+     * inline width, so a full-coverage consumer supplies its own opaque
+     * backdrop (usage contract in nina_empty_state.h). FLOATING keeps it out
+     * of the column flex flow so it can cover the whole page. */
+    s_backdrop = lv_obj_create(allsky_page);
+    lv_obj_remove_style_all(s_backdrop);
+    lv_obj_add_flag(s_backdrop, LV_OBJ_FLAG_FLOATING);
+    lv_obj_remove_flag(s_backdrop, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(s_backdrop, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_opa(s_backdrop, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(s_backdrop,
+        lv_color_hex(current_theme ? current_theme->bg_main : 0x050505), 0);
+    lv_obj_add_flag(s_backdrop, LV_OBJ_FLAG_HIDDEN);
+
+    s_empty = nina_empty_state_create(s_backdrop, ICON_CLOUD_OFF,
+                                      "Connecting to AllSky...",
+                                      "Check the AllSky settings.", 0);
+    s_state_key = -1;
+
+    /* Created last so it stays the topmost child: the idle indicator must
+     * remain visible over the backdrop. Nothing calls move_foreground on the
+     * backdrop, so this ordering holds for the life of the page. */
     nina_idle_indicator_create(allsky_page, LV_ALIGN_TOP_MID, true);
 
     return allsky_page;
@@ -595,14 +676,57 @@ static void format_sub_value(char *buf, size_t buf_size,
 void allsky_page_update(const allsky_data_t *data) {
     if (!allsky_page || !data) return;
 
-    int gb = app_config_get()->color_brightness;
-    float dew_offset = app_config_get()->allsky_dew_offset;
+    const app_config_t *cfg = app_config_get();
+    int gb = cfg->color_brightness;
+    float dew_offset = cfg->allsky_dew_offset;
+
+    /* With no hostname the poll task never runs, so ever_ok/fail_count stay at
+     * their initial values and would read as "connecting" forever. Call that
+     * case out instead. */
+    bool configured = (cfg->allsky_hostname[0] != '\0');
+    page_conn_t st = configured
+        ? page_conn_eval(data->ever_ok, data->connected, (int)data->fail_count)
+        : PAGE_CONN_DOWN;
+
+    /* Restyle on transitions only — opacity and label churn every poll cycle
+     * would force needless LVGL invalidations. */
+    int state_key = (int)st | (configured ? 0 : 0x100);
+    if (state_key != s_state_key) {
+        s_state_key = state_key;
+        switch (st) {
+        case PAGE_CONN_CONNECTING:
+            overlay_show("Connecting to AllSky...", true);
+            reconnect_label_show(false);
+            quads_set_opa(LV_OPA_COVER);
+            break;
+        case PAGE_CONN_DOWN:
+            overlay_show(configured ? "Cannot Reach AllSky"
+                                    : "AllSky Not Configured", false);
+            reconnect_label_show(false);
+            quads_set_opa(LV_OPA_COVER);
+            break;
+        case PAGE_CONN_STALE:
+            overlay_hide();
+            reconnect_label_show(true);
+            quads_set_opa(LV_OPA_60);
+            break;
+        case PAGE_CONN_OK:
+        default:
+            overlay_hide();
+            reconnect_label_show(false);
+            quads_set_opa(LV_OPA_COVER);
+            break;
+        }
+    }
+
+    /* Nothing has ever arrived — the overlay is the whole page. */
+    if (st == PAGE_CONN_CONNECTING) return;
 
     for (int q = 0; q < 4; q++) {
         allsky_quadrant_t *qd = &quads[q];
 
-        if (!data->connected) {
-            /* Disconnected: clear all values */
+        if (st == PAGE_CONN_DOWN) {
+            /* Given up on the last reading: clear all values */
             set_text_if_changed(qd->lbl_main_value, "--");
             set_text_if_changed(qd->lbl_sub1, "--");
             set_text_if_changed(qd->lbl_sub2, "--");
@@ -828,6 +952,20 @@ void allsky_page_apply_theme(void) {
                 lv_color_hex(app_config_apply_brightness(current_theme->bento_border, gb)), 0);
         }
     }
+
+    /* Connection-state surfaces */
+    if (s_backdrop) {
+        lv_obj_set_style_bg_color(s_backdrop,
+            lv_color_hex(current_theme->bg_main), 0);
+    }
+    nina_empty_state_apply_theme(s_empty, current_theme, gb);
+    if (s_reconnect_lbl) {
+        lv_obj_set_style_text_color(s_reconnect_lbl,
+            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+    }
+    /* Force the next update to re-apply the state styling (quadrant opacity in
+     * particular) rather than assume the cached key still describes the tree. */
+    s_state_key = -1;
 
     lv_obj_invalidate(allsky_page);
 }

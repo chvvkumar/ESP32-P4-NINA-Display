@@ -34,11 +34,16 @@
 #define ALLSKY_F_SQM_DOT1      14
 
 typedef struct {
-    bool connected;
+    bool connected;            // result of the most recent poll
     char field_values[ALLSKY_MAX_FIELDS][32];
     float moon_illumination;   // AS_MOON_ILLUMINATION (0-100), always fetched directly; <0 = unavailable
     int64_t last_poll_ms;
     SemaphoreHandle_t mutex;
+    /* Connection-quality inputs for page_conn_eval() (see page_conn.h). A failed
+     * poll leaves field_values untouched so the page can keep showing the last
+     * good reading while it is only STALE. */
+    bool     ever_ok;          // latched true on the first successful poll
+    uint16_t fail_count;       // consecutive failed polls; 0 on success, saturates
 } allsky_data_t;
 
 /** Initialise allsky_data_t (creates mutex). Call once before any polling. */

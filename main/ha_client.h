@@ -31,8 +31,17 @@ typedef struct {
     bool    resolved[JSON_MAX_TILES];
     int     tile_count;
     int64_t last_poll_ms;
+    bool     ever_ok;      /* latched true on the first successful poll; never cleared */
+    uint16_t fail_count;   /* consecutive failed polls, 0 on success, saturates at UINT16_MAX */
     SemaphoreHandle_t mutex;
 } ha_data_t;
+
+/*
+ * connected/ever_ok/fail_count feed page_conn_eval() (main/page_conn.h) so the
+ * page can tell "never polled yet" (CONNECTING) from "was up, missed a poll"
+ * (STALE) from "gone" (DOWN). A failed poll leaves values[]/resolved[]/
+ * tile_count at their last good contents so STALE can keep showing them dimmed.
+ */
 
 /** Init ha_data_t (creates mutex). Call once before polling. Mirrors json_client_init. */
 void ha_client_init(ha_data_t *data);
@@ -48,7 +57,10 @@ void ha_client_unlock(ha_data_t *data);
  *  - base_url: scheme+host+port (no path); appends "/api/states/<entity_id>".
  *  - token: RAW long-lived token; wrapped as Authorization: Bearer.
  *  - tiles_config_json: ha_tiles_config (rows/tiles; each tile has entity_id+attr).
- * On any transport/parse failure of ALL entities, sets data->connected=false.
+ * On any transport/parse failure of ALL entities, sets data->connected=false and
+ * bumps data->fail_count, leaving the last good values in place. A poll that
+ * fetches at least one entity sets connected=true, latches ever_ok and clears
+ * fail_count.
  */
 void ha_client_poll(const char *base_url, const char *token,
                     const char *tiles_config_json, ha_data_t *data);

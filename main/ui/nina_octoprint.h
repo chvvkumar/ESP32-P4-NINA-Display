@@ -55,6 +55,18 @@ void octoprint_page_update(octoprint_data_t *data);
 void octoprint_page_free_image(void);
 
 /**
+ * @brief React immediately to an image-source toggle (G-code preview <-> webcam).
+ *
+ * Drops the held frame and puts the image slot back to "Loading ..." worded for
+ * the NEW source, so the control responds at once instead of holding the old
+ * picture for the 1-3 s the fetch and decode of the new one takes. Call from
+ * the config side-effect path with the DISPLAY LOCK HELD, then tell the client
+ * (octoprint_client_note_image_source_switch) and wake the poller. No-op until
+ * the page has been created.
+ */
+void octoprint_page_image_source_changed(void);
+
+/**
  * @brief Re-apply the current theme to the page.
  *
  * Rebuilds the widget tree in place: every layout resolves its decoration

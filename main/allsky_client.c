@@ -309,6 +309,22 @@ static void extract_fields(cJSON *api_data, const char *field_config_json, allsk
 // Public API — Poll AllSky endpoint
 // =============================================================================
 
+/**
+ * Record a failed poll: clear `connected` and bump the consecutive-failure
+ * counter (saturating). field_values are deliberately left alone -- the page
+ * keeps showing the last good reading while the state is only STALE.
+ */
+static void mark_poll_failed(allsky_data_t *data) {
+    if (!allsky_data_lock(data, 100)) {
+        return;
+    }
+    data->connected = false;
+    if (data->fail_count < UINT16_MAX) {
+        data->fail_count++;
+    }
+    allsky_data_unlock(data);
+}
+
 void allsky_client_poll(const char *hostname, const char *field_config_json, allsky_data_t *data) {
     if (!hostname || hostname[0] == '\0' || !data) {
         return;
@@ -359,20 +375,14 @@ void allsky_client_poll(const char *hostname, const char *field_config_json, all
 
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "AllSky HTTP fetch failed for %s: %s", url, esp_err_to_name(err));
-        if (allsky_data_lock(data, 100)) {
-            data->connected = false;
-            allsky_data_unlock(data);
-        }
+        mark_poll_failed(data);
         return;
     }
 
     if (total_read == 0) {
         ESP_LOGW(TAG, "AllSky: empty response body");
         heap_caps_free(buffer);
-        if (allsky_data_lock(data, 100)) {
-            data->connected = false;
-            allsky_data_unlock(data);
-        }
+        mark_poll_failed(data);
         return;
     }
 
@@ -382,10 +392,7 @@ void allsky_client_poll(const char *hostname, const char *field_config_json, all
 
     if (!json) {
         ESP_LOGW(TAG, "AllSky: failed to parse JSON response");
-        if (allsky_data_lock(data, 100)) {
-            data->connected = false;
-            allsky_data_unlock(data);
-        }
+        mark_poll_failed(data);
         return;
     }
 
@@ -412,6 +419,8 @@ void allsky_client_poll(const char *hostname, const char *field_config_json, all
     /* Update shared data under mutex */
     if (allsky_data_lock(data, 200)) {
         data->connected = true;
+        data->ever_ok = true;
+        data->fail_count = 0;
         data->last_poll_ms = esp_timer_get_time() / 1000;
         memcpy(data->field_values, local_data.field_values, sizeof(data->field_values));
         data->moon_illumination = local_data.moon_illumination;
