@@ -10,6 +10,11 @@
  * and a PSRAM-backed response buffer, with optional persistent keep-alive
  * reuse across calls from the same task.
  *
+ * A caller that sets http_fetch_opts_t.post_body gets the identical shell as a
+ * POST carrying a small body (OctoPrint's appkeys authorization request). It is
+ * deliberately minimal: one write, no streaming, no multipart. Everything else
+ * -- retry, redirects, status_out, header capture -- behaves the same.
+ *
  * Binary bodies (GOES/solar tiles, NINA thumbnails, Spotify album art) go
  * through http_fetch_binary() at the bottom of this header, which shares the
  * same open/redirect/read shell but hands back a raw byte buffer instead of a
@@ -71,7 +76,29 @@ typedef struct {
     const char *extra_header;   /**< optional: raw "Name: value" line, split at the
                                   * first ':' and applied as one request header. Lets
                                   * a caller forward an arbitrary auth header (e.g.
-                                  * "X-API-Key: abc") that is not Bearer-shaped. */
+                                  * "X-API-Key: abc") that is not Bearer-shaped.
+                                  * Keep-alive safe: a reused conn handle remembers
+                                  * which extra header the previous request set and
+                                  * deletes it before this request's headers are
+                                  * applied, so omitting extra_header on a later call
+                                  * cannot leak the earlier credential to a new host. */
+    const char *post_body;      /**< optional: NULL = GET (every existing caller).
+                                  * Non-NULL switches the request to POST and sends
+                                  * this NUL-terminated string as the whole body.
+                                  * Small bodies only -- it is written in one
+                                  * esp_http_client_write() after open(), with no
+                                  * chunking, so keep it to a few hundred bytes.
+                                  * Redirects are NOT followed for a POST whatever
+                                  * max_redirects says: the 3xx comes back through
+                                  * status_out instead, since replaying the body at
+                                  * the new location is wrong for 301/302/303 and
+                                  * quietly downgrading to a GET would send a
+                                  * different request than the caller asked for.
+                                  * Everything else (status_out, capture_header,
+                                  * retry, timeouts) behaves the same as for a GET. */
+    const char *content_type;   /**< optional: Content-Type for @ref post_body;
+                                  * NULL -> "application/json". Ignored without a
+                                  * post_body. */
     const char *user_agent;     /**< optional: adds a "User-Agent" header */
     const char *accept;         /**< optional: adds an "Accept" header */
     const char *host_header;    /**< optional: explicit "Host" header, re-applied on every
@@ -84,7 +111,16 @@ typedef struct {
     void (*on_attempt)(const http_fetch_attempt_info_t *info, void *hook_ctx);
                                  /**< optional: NULL disables. See http_fetch_attempt_info_t. */
     void *hook_ctx;              /**< passed through unchanged to on_attempt */
-    http_fetch_conn_t *conn;    /**< optional: NULL = one-shot client (no reuse) */
+    http_fetch_conn_t *conn;    /**< optional: NULL = one-shot client (no reuse).
+                                  * A fetch whose response body was fully drained
+                                  * parks the connection OPEN, so the next fetch on
+                                  * this slot skips TCP+TLS setup entirely; any exit
+                                  * that may leave body bytes unread (non-2xx, cap
+                                  * truncation, partial read) closes first and reuses
+                                  * only the handle allocation. A parked socket the
+                                  * server silently dropped in the meantime is
+                                  * detected on the next request and reconnected
+                                  * once automatically. */
     int *status_out;            /**< optional: written with the FINAL attempt's HTTP
                                   * status code whenever a status was received --
                                   * including non-2xx failure returns (e.g. 204, 401,
@@ -165,6 +201,30 @@ typedef struct {
     SemaphoreHandle_t prealloc_lock;  /**< guards @ref prealloc; required to use it */
     int prealloc_lock_wait_ms;        /**< take() timeout; on timeout the fetch falls
                                         *  back to a plain PSRAM allocation */
+    const char *extra_header;  /**< optional: raw "Name: value" line, split at the first
+                                 *  ':' and applied as one request header -- same
+                                 *  semantics as http_fetch_opts_t.extra_header. Needed
+                                 *  by image sources behind an API-key header (OctoPrint
+                                 *  gcode thumbnails). NULL = no extra header. */
+    http_fetch_conn_t *conn;   /**< optional: NULL = one-shot client (no reuse). Same
+                                 *  semantics as http_fetch_opts_t.conn, including
+                                 *  drained-open parking: a fully read body leaves the
+                                 *  connection OPEN for the next fetch (no TCP+TLS
+                                 *  redo), anything else closes before parking. One
+                                 *  slot per task, never shared across tasks. Do NOT
+                                 *  share one slot between the text and binary
+                                 *  fetchers -- the handles are configured differently
+                                 *  (event handler, rx/tx buffer sizes are fixed at
+                                 *  handle creation). A reused handle drops the
+                                 *  previous request's extra_header automatically (see
+                                 *  the text path's extra_header doc), so alternating
+                                 *  between an API-keyed host and a keyless
+                                 *  third-party host on one slot cannot leak the key.
+                                 *  NOTE: a drained-parked slot HOLDS AN OPEN SOCKET;
+                                 *  a caller whose polling stops (page-gated loops)
+                                 *  must destroy its slot at that seam or the socket
+                                 *  sits against the ~9-connection ceiling until the
+                                 *  server times it out. */
     const char *label;         /**< short subject for log lines ("Album art"); NULL -> "HTTP" */
 } http_fetch_binary_opts_t;
 

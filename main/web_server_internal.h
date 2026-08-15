@@ -204,6 +204,8 @@ esp_err_t ha_config_get_handler(httpd_req_t *req);
 esp_err_t ha_config_post_handler(httpd_req_t *req);
 esp_err_t ha_probe_get_handler(httpd_req_t *req);
 esp_err_t ha_test_get_handler(httpd_req_t *req);
+esp_err_t octoprint_appkey_request_post_handler(httpd_req_t *req);
+esp_err_t octoprint_appkey_status_get_handler(httpd_req_t *req);
 esp_err_t config_pull_post_handler(httpd_req_t *req);
 
 /* ---- Page live-apply spines (defined alongside their page-config handlers) ----

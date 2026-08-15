@@ -1,0 +1,46 @@
+{
+  "/api/job": {
+    "status": 200,
+    "http_version": "HTTP/1.1",
+    "content-type": "application/json",
+    "content-length": "712",
+    "cache-control": "max-age=0",
+    "x-clacks-overhead": "GNU Terry Pratchett",
+    "server-timing": "app;dur=14",
+    "x-robots-tag": "noindex, nofollow, noimageindex",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "sameorigin",
+    "notes": "No Server header. No CORS header. x-clacks-overhead is an OctoPrint easter egg present on all Flask-served routes. vary: Cookie appears on 403 and on /plugin/appkeys/probe but not on this authenticated 200."
+  },
+  "/webcam/?action=snapshot": {
+    "status": 200,
+    "http_version": "HTTP/1.0",
+    "access-control-allow-origin": "*",
+    "server": "MJPG-Streamer/0.2",
+    "cache-control": "no-store, no-cache, must-revalidate, pre-check=0, post-check=0, max-age=0",
+    "pragma": "no-cache",
+    "expires": "Mon, 3 Jan 2000 12:34:56 GMT",
+    "content-type": "image/jpeg",
+    "x-timestamp": "3160362.322144",
+    "notes": "Served by mjpg-streamer, not by OctoPrint. HTTP/1.0, no content-length (connection-close framing), no auth required. x-timestamp is a float uptime-style capture timestamp. Backdated expires header defeats caching."
+  },
+  "/plugin/prusaslicerthumbnails/thumbnail/<name>.png?<cachebust>": {
+    "status": 200,
+    "http_version": "HTTP/1.1",
+    "content-type": "image/png",
+    "content-length": "27098",
+    "accept-ranges": "bytes",
+    "etag": "\"1786715502\"",
+    "last-modified": "Fri, 14 Aug 2026 13:51:42 GMT",
+    "x-original-content-length": "27098",
+    "notes": "Static file route. etag is the file mtime as a bare integer in quotes. Requires X-Api-Key. The query string on the thumbnail URL is a cache-buster, not a parameter."
+  },
+  "/plugin/appkeys/probe": {
+    "status": 204,
+    "http_version": "HTTP/1.1",
+    "content-type": "text/plain",
+    "content-length": "0",
+    "vary": "Cookie",
+    "notes": "204 with an explicit content-type: text/plain and content-length: 0."
+  }
+}

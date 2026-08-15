@@ -15,7 +15,8 @@
  * The numeric ids 0..PAGE_REF_ID_MAX-1 are FROZEN forever. Several config
  * fields persist these ids verbatim in NVS:
  *   - auto_rotate_order2[]      (slideshow stop list; ids 0..11 = ARP_IDX_*,
- *                                plus PAGE_REF_JSON/PAGE_REF_HA as appended stops)
+ *                                plus PAGE_REF_JSON/PAGE_REF_HA/PAGE_REF_OCTOPRINT
+ *                                as appended stops)
  *   - idle_page_override_target (idle page id)
  *   - active_page_override      (Home Page id)
  * Renumbering or reordering an existing id would silently re-point a user's
@@ -76,9 +77,10 @@ typedef uint8_t page_ref_t;
 #define PAGE_REF_OVL_EVENTLOG       ((page_ref_t)23)
 #define PAGE_REF_JSON               ((page_ref_t)24)
 #define PAGE_REF_HA                 ((page_ref_t)25)
+#define PAGE_REF_OCTOPRINT          ((page_ref_t)26)
 
 /** Exclusive upper bound on assigned ids. */
-#define PAGE_REF_ID_MAX ((page_ref_t)26)
+#define PAGE_REF_ID_MAX ((page_ref_t)27)
 
 /** What kind of UI surface a page_ref names. */
 typedef enum {

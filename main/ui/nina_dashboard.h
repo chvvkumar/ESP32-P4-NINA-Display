@@ -149,6 +149,19 @@ bool nina_dashboard_is_ha_page(void);
 void nina_dashboard_set_ha_enabled(bool enabled);
 
 /**
+ * @brief Check if the active page is the OctoPrint 3D Printer page
+ * @return true if the OctoPrint page is currently shown
+ */
+bool nina_dashboard_is_octoprint_page(void);
+
+/**
+ * @brief Enable or disable the OctoPrint page at runtime.
+ * When disabled, switches away if currently viewing and removes from navigation.
+ * Must be called with LVGL display lock held.
+ */
+void nina_dashboard_set_octoprint_enabled(bool enabled);
+
+/**
  * @brief Check if the active page is the clock page
  * @return true if the clock page is currently shown
  */

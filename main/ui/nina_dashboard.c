@@ -17,6 +17,7 @@
 #include "nina_allsky.h"
 #include "nina_json.h"
 #include "nina_ha.h"
+#include "nina_octoprint.h"
 #include "nina_spotify.h"
 #include "nina_clock.h"
 #include "page_registry.h"
@@ -104,6 +105,24 @@ static const page_ops_t s_ha_page_ops = {
     .is_available = NULL,
 };
 
+/* OctoPrint 3D Printer page — always at PAGE_IDX_OCTOPRINT (6), excluded from
+ * indicators. octoprint_obj is NULL when disabled (same NULL-when-disabled
+ * pattern as JSON). */
+static lv_obj_t *octoprint_obj = NULL;
+static lv_obj_t *octoprint_page_created = NULL;  /* NULL until the feature is first enabled */
+
+static lv_obj_t *octoprint_ops_get_obj(void) { return octoprint_obj; }
+
+static const page_ops_t s_octoprint_page_ops = {
+    .create       = octoprint_page_create,
+    .destroy      = NULL,
+    .get_obj      = octoprint_ops_get_obj,
+    .show         = NULL,
+    .hide         = NULL,
+    .apply_theme  = octoprint_page_apply_theme,
+    .is_available = NULL,
+};
+
 /* Spotify page — always at PAGE_IDX_SPOTIFY (1), excluded from indicators */
 lv_obj_t *spotify_obj = NULL;
 static lv_obj_t *spotify_page_created = NULL;  /* NULL until the feature is first enabled */
@@ -163,7 +182,7 @@ static const page_ops_t s_image_display_page_ops = {
     .is_available = NULL,
 };
 
-/* Summary page — at PAGE_IDX_SUMMARY (5), excluded from indicators */
+/* Summary page — at PAGE_IDX_SUMMARY (7), excluded from indicators */
 static lv_obj_t *summary_obj = NULL;
 
 /* ── Summary page registry ops (Task 4.7 wave P7b) ──
@@ -210,7 +229,7 @@ static const page_ops_t s_sysinfo_page_ops = {
     .apply_theme  = sysinfo_page_apply_theme,
     .is_available = NULL,
 };
-int total_page_count = 0;   /* page_count + EXTRA_PAGES (allsky + spotify + clock + image_display + json + summary + settings + sysinfo) */
+int total_page_count = 0;   /* page_count + EXTRA_PAGES (allsky + spotify + clock + image_display + json + ha + octoprint + summary + settings + sysinfo) */
 
 /* Private state */
 static lv_obj_t *scr_dashboard = NULL;
@@ -298,7 +317,8 @@ lv_obj_t *create_value_label(lv_obj_t *parent) {
  *   PAGE_IDX_IMAGE_DISPLAY (3)                  = Image Display page
  *   PAGE_IDX_JSON          (4)                  = JSON Display page
  *   PAGE_IDX_HA            (5)                  = Home Assistant page
- *   PAGE_IDX_SUMMARY       (6)                  = summary page
+ *   PAGE_IDX_OCTOPRINT     (6)                  = OctoPrint 3D Printer page
+ *   PAGE_IDX_SUMMARY       (7)                  = summary page
  *   NINA_PAGE_OFFSET .. NINA_PAGE_OFFSET+pc-1   = NINA instance pages  (pages[idx - NINA_PAGE_OFFSET])
  *   SETTINGS_PAGE_IDX(pc)                       = settings page
  *   SYSINFO_PAGE_IDX(pc)                        = sysinfo page
@@ -324,6 +344,7 @@ static page_ref_t page_idx_to_ref_id(int idx) {
     if (idx == PAGE_IDX_SPOTIFY) return PAGE_REF_SPOTIFY;
     if (idx == PAGE_IDX_JSON) return PAGE_REF_JSON;
     if (idx == PAGE_IDX_HA) return PAGE_REF_HA;
+    if (idx == PAGE_IDX_OCTOPRINT) return PAGE_REF_OCTOPRINT;
     if (idx == PAGE_IDX_IMAGE_DISPLAY) return PAGE_REF_IMG_DEFAULT;
     if (idx == SYSINFO_PAGE_IDX(page_count)) return PAGE_REF_SYSINFO;
     return PAGE_REF_ID_MAX;
@@ -553,6 +574,7 @@ void nina_dashboard_apply_theme(int theme_index) {
     ops_apply_theme(PAGE_IDX_ALLSKY);
     ops_apply_theme(PAGE_IDX_JSON);
     ops_apply_theme(PAGE_IDX_HA);
+    ops_apply_theme(PAGE_IDX_OCTOPRINT);
     ops_apply_theme(PAGE_IDX_SPOTIFY);
     ops_apply_theme(PAGE_IDX_CLOCK);
     ops_apply_theme(PAGE_IDX_IMAGE_DISPLAY);
@@ -1060,7 +1082,7 @@ static void gesture_event_cb(lv_event_t *e) {
             int candidate = (active_page + step) % total_page_count;
             if (candidate == SETTINGS_PAGE_IDX(page_count)) continue;
             /* Skip any page with no backing object: a disabled optional feature
-             * page (AllSky/Spotify/Image Display/JSON/HA) or an unavailable
+             * page (AllSky/Spotify/Image Display/JSON/HA/OctoPrint) or an unavailable
              * NINA slot. Index positions stay reserved either way. */
             if (!page_is_navigable(candidate)) continue;
             new_page = candidate;
@@ -1162,7 +1184,7 @@ static bool slot_is_available_cfg(int instance) {
 }
 
 /* ── Lazy optional-page lifecycle ──
- * The five optional feature pages (AllSky, Spotify, Image Display, JSON, HA)
+ * The optional feature pages (AllSky, Spotify, Image Display, JSON, HA, OctoPrint)
  * are created on FIRST ENABLE, not at boot: a feature that is off costs no
  * PSRAM and no boot latency. Index positions stay reserved either way — the
  * nav pointer is NULL while the feature is off, and every consumer already
@@ -1226,6 +1248,8 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     json_obj = NULL;
     ha_page_created = NULL;
     ha_obj = NULL;
+    octoprint_page_created = NULL;
+    octoprint_obj = NULL;
     spotify_page_created = NULL;
     spotify_obj = NULL;
     image_display_page_created = NULL;
@@ -1271,6 +1295,11 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     page_registry_set_ops(PAGE_REF_HA, &s_ha_page_ops);
     optional_page_set_enabled(&s_ha_page_ops, &ha_page_created,
                               &ha_obj, PAGE_IDX_HA, cfg->ha_enabled);
+
+    /* OctoPrint 3D Printer page — PAGE_IDX_OCTOPRINT */
+    page_registry_set_ops(PAGE_REF_OCTOPRINT, &s_octoprint_page_ops);
+    optional_page_set_enabled(&s_octoprint_page_ops, &octoprint_page_created,
+                              &octoprint_obj, PAGE_IDX_OCTOPRINT, cfg->octoprint_enabled);
 
     /* Spotify page — PAGE_IDX_SPOTIFY */
     page_registry_set_ops(PAGE_REF_SPOTIFY, &s_spotify_page_ops);
@@ -1320,7 +1349,7 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     page_registry_set_ops(PAGE_REF_SYSINFO, &s_sysinfo_page_ops);
     sysinfo_obj = s_sysinfo_page_ops.create(main_cont);
     lv_obj_add_flag(sysinfo_obj, LV_OBJ_FLAG_HIDDEN);
-    total_page_count = page_count + EXTRA_PAGES;  /* allsky + spotify + clock + image_display + json + summary + NINA pages + settings + sysinfo */
+    total_page_count = page_count + EXTRA_PAGES;  /* allsky + spotify + clock + image_display + json + ha + octoprint + summary + NINA pages + settings + sysinfo */
 
     /* Page indicator dots — one dot per available NINA slot (not allsky, spotify, summary, settings, or sysinfo) */
     create_page_indicator(scr_dashboard, nina_available_count);
@@ -1458,6 +1487,15 @@ bool nina_dashboard_is_ha_page(void) {
 void nina_dashboard_set_ha_enabled(bool enabled) {
     optional_page_set_enabled(&s_ha_page_ops, &ha_page_created,
                               &ha_obj, PAGE_IDX_HA, enabled);
+}
+
+bool nina_dashboard_is_octoprint_page(void) {
+    return octoprint_obj != NULL && active_page == PAGE_IDX_OCTOPRINT;
+}
+
+void nina_dashboard_set_octoprint_enabled(bool enabled) {
+    optional_page_set_enabled(&s_octoprint_page_ops, &octoprint_page_created,
+                              &octoprint_obj, PAGE_IDX_OCTOPRINT, enabled);
 }
 
 bool nina_dashboard_is_spotify_page(void) {

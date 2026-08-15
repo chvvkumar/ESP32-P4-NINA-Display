@@ -57,6 +57,16 @@ void ha_client_poll(const char *base_url, const char *token,
 void ha_client_invalidate_config_cache(void);
 
 /**
+ * Page-active gate for keep-alive teardown. Call on every HA page enter/leave
+ * transition (tasks.c, mirrors octoprint_client_set_page_active). On leave,
+ * destroys the keep-alive conn slot -- a drained-parked slot holds an OPEN
+ * socket, and the page-gated poll loop stops running, so the slot would
+ * otherwise hold a dead socket against the ~9-connection ceiling indefinitely.
+ * Safe against a poll in flight (internal mutex + zero-wait try-take).
+ */
+void ha_client_set_page_active(bool active);
+
+/**
  * Single-entity live fetch -- used by the /api/ha-probe handler (one-shot, safe
  * from the httpd worker task). Fetches GET {base_url}/api/states/{entity_id} with
  * Bearer auth; returns the parsed entity JSON (caller must cJSON_Delete) or NULL

@@ -1004,6 +1004,7 @@
         <button class="tab-btn" data-tab="clock">Clock</button>
         <button class="tab-btn" data-tab="spotify">Spotify</button>
         <button class="tab-btn" data-tab="image-display">Image Display</button>
+        <button class="tab-btn" data-tab="octoprint">3D Printer</button>
       </div>
       <div class="tab-group" data-section="device">
         <button class="tab-btn" data-tab="display">Display</button>
@@ -1057,6 +1058,11 @@
          hyphen) -- see s_ui_fragments[] in web_handlers_config.c for the
          name->symbol mapping. -->
     <div id="tab-image-display" class="tab-panel"></div>
+
+    <!-- ==================== TAB: 3D PRINTER (OCTOPRINT) ==================== -->
+    <!-- Markup extracted to main/fragment_octoprint.html; lazily fetched by
+         ensureTabLoaded() via GET /ui/fragment?tab=octoprint and injected here. -->
+    <div id="tab-octoprint" class="tab-panel"></div>
 
     <!-- ==================== TAB 1: DISPLAY ==================== -->
     <!-- Markup extracted to main/fragment_display.html (P6d); lazily fetched by
@@ -1531,7 +1537,7 @@
        so the initial switchTab() call at boot -- which shows whichever tab
        was last active -- transparently fetches that tab's fragment first; no
        separate boot-time special case is needed for the default tab. */
-    const TAB_ORDER=['nodes','allsky','json','ha','clock','spotify','image-display','display','behavior','voice-clips','system','logs','backup','api'];
+    const TAB_ORDER=['nodes','allsky','json','ha','clock','spotify','image-display','octoprint','display','behavior','voice-clips','system','logs','backup','api'];
     const LAZY_TABS=new Set(TAB_ORDER);
     const loadedTabs=new Set(TAB_ORDER.filter(n=>!LAZY_TABS.has(n)));
 
@@ -1703,7 +1709,7 @@
        highlights and row 2 shows the matching tab group. _lastUsedTab remembers
        the tab last visited in each section (in-memory) so a section click lands
        on a sensible default; switchTab() keeps it seeded as tabs activate. */
-    const TAB_GROUP = { nodes:'pages', allsky:'pages', json:'pages', ha:'pages', clock:'pages', spotify:'pages', 'image-display':'pages', display:'device', behavior:'device', 'voice-clips':'device', system:'device', logs:'tools', backup:'tools', api:'tools' };
+    const TAB_GROUP = { nodes:'pages', allsky:'pages', json:'pages', ha:'pages', clock:'pages', spotify:'pages', 'image-display':'pages', octoprint:'pages', display:'device', behavior:'device', 'voice-clips':'device', system:'device', logs:'tools', backup:'tools', api:'tools' };
     var _lastUsedTab={};
     function highlightGroup(name){
       var sec=TAB_GROUP[name];
@@ -2173,6 +2179,22 @@
       data.moon_spin_return_s=parseInt($('moon_spin_return_s').value,10)||3;
     }
 
+    function collectTab_octoprint(data){
+      /* octoprint_enabled is a numeric SETTINGS_TABLE row (uint8), so send a
+         number -- the device's PARSE_INT ignores a JSON bool. */
+      data.octoprint_enabled=$('octoprint_enabled').checked?1:0;
+      data.octoprint_url=$('octoUrl').value.trim();
+      /* The device redacts a stored key to "********" on GET. Posting that
+         value straight back is how you keep the existing key: the device
+         strips the sentinel and preserves what it has. Clearing the field
+         posts "" and really does clear the key. */
+      data.octoprint_api_key=$('octoApiKey').value.trim();
+      data.octoprint_update_interval_s=parseInt($('octoInterval').value,10)||5;
+      data.octoprint_layout=parseInt($('octoLayout').value,10)||0;
+      data.octoprint_image_source=parseInt($('octoImageSource').value,10)||0;
+      data.octoprint_snapshot_url=$('octoSnapshotUrl').value.trim();
+    }
+
     function collectTab_display(data){
       data.theme_index=parseInt($('theme_select').value);
       data.widget_style=parseInt($('widget_style_select').value);
@@ -2321,6 +2343,7 @@
       clock: collectTab_clock,
       spotify: collectTab_spotify,
       'image-display': collectTab_image_display,
+      octoprint: collectTab_octoprint,
       display: collectTab_display,
       behavior: collectTab_behavior,
       'voice-clips': collectTab_voice_clips,
@@ -2498,6 +2521,20 @@
       updateMoonSpinUI();
       updateImageDisplayEnabledUI();
       updateImageSourceUI();
+    }
+
+    function populateTab_octoprint(data){
+      if($('octoprint_enabled')) $('octoprint_enabled').checked=!!data.octoprint_enabled;
+      if($('octoUrl')) $('octoUrl').value=data.octoprint_url||'';
+      if($('octoApiKey')) $('octoApiKey').value=data.octoprint_api_key||'';
+      if($('octoInterval')) $('octoInterval').value=data.octoprint_update_interval_s||5;
+      /* Layouts 1, 3 and 4 (the retired "Instrument dial", "Large numerals" and
+         "Layer timeline") are still legal in stored config but have no option
+         here; they resolve to Bento on the device, so show that rather than
+         leaving the select blank. */
+      if($('octoLayout')){var ol=parseInt(data.octoprint_layout,10)||0;if(ol!==0&&ol!==2)ol=0;$('octoLayout').value=String(ol);}
+      if($('octoImageSource')) $('octoImageSource').value=String(data.octoprint_image_source||0);
+      if($('octoSnapshotUrl')) $('octoSnapshotUrl').value=data.octoprint_snapshot_url||'';
     }
 
     function populateTab_display(data){
@@ -2681,6 +2718,7 @@
       clock: populateTab_clock,
       spotify: populateTab_spotify,
       'image-display': populateTab_image_display,
+      octoprint: populateTab_octoprint,
       display: populateTab_display,
       behavior: populateTab_behavior,
       /* Voice Clips has no config fields; its "populate" just (re)builds the

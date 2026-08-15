@@ -6,6 +6,7 @@
 #include "nina_client.h"
 #include "app_config.h"
 #include "goes_client.h"
+#include "octoprint_client.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdatomic.h>
@@ -58,6 +59,22 @@ void input_task(void *arg);
 /** FreeRTOS task: per-instance NINA data poller (one per configured instance). */
 void instance_poll_task(void *arg);
 
+/**
+ * Spawn a task whose STACK lives in PSRAM (the TCB stays in internal RAM, as
+ * FreeRTOS requires). The shared spawn path for every long-lived poll task here;
+ * exported so on-demand workers outside tasks.c (octoprint_appkeys) use the same
+ * allocation shape instead of hand-rolling xTaskCreateStaticPinnedToCore.
+ *
+ * @p depth is in BYTES on this port -- see the note at the definition.
+ * Neither the stack nor the TCB is ever freed, so the task must NOT delete
+ * itself: park it on a notification and reuse it.
+ *
+ * Returns the new handle, or NULL if allocation failed (nothing was spawned).
+ */
+TaskHandle_t psram_task_spawn(TaskFunction_t fn, const char *name,
+                              uint32_t depth, void *arg,
+                              UBaseType_t prio, BaseType_t core);
+
 /** FreeRTOS task: AllSky API poller — polls at allsky_update_interval_s rate. */
 void allsky_poll_task(void *arg);
 
@@ -73,12 +90,28 @@ void ha_poll_task(void *arg);
 /** Create the Home Assistant poll task if it isn't already running. Safe to call multiple times. */
 void ha_ensure_task_running(void);
 
+/** FreeRTOS task: OctoPrint API poller — polls at octoprint_update_interval_s rate. */
+void octoprint_poll_task(void *arg);
+
+/** Create the OctoPrint poll task if it isn't already running. Safe to call multiple times. */
+void octoprint_ensure_task_running(void);
+
+/** Wake octoprint_poll_task so it re-reads config and polls now instead of at
+ *  the end of its interval. Called from the config side-effects choke point
+ *  when a field only the poller acts on changes. No-op if the task isn't up. */
+void octoprint_wake_now(void);
+
 /** Feature poll task handles and page-active flags — defined in tasks.c. */
 extern TaskHandle_t spotify_task_handle;
 extern _Atomic bool spotify_page_active;
 extern _Atomic bool allsky_page_active;
 extern _Atomic bool json_page_active;
 extern _Atomic bool ha_page_active;
+extern _Atomic bool octoprint_page_active;
+
+/** Shared OctoPrint printer state — read by the 3D Printer page under its own
+ *  mutex (octoprint_client_lock), written by octoprint_poll_task. */
+extern octoprint_data_t octoprint_data;
 extern _Atomic bool clock_page_active;
 extern _Atomic bool nina_pages_active;
 
