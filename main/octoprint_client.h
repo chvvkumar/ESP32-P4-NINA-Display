@@ -28,13 +28,21 @@
  * Image pipeline runs only while the page is active (see
  * octoprint_client_set_page_active) and decodes into an RGB565 PSRAM buffer:
  *   source 0 : gcode preview thumbnail (PNG) -- re-fetched only when the
- *              printing file changes
- *   source 1 : webcam snapshot (JPEG) -- re-fetched every poll cycle
+ *              printing file changes. The decoded frame is RETAINED here so a
+ *              layout change can re-fit it without a refetch.
+ *   source 1 : webcam snapshot (JPEG) -- re-fetched every poll cycle. The UI
+ *              (nina_octoprint.c stage_image) CONSUMES the frame under the
+ *              mutex once it has scaled it: it frees image_buf and NULLs the
+ *              field, since retaining a full-res original that is refetched
+ *              next cycle anyway would be pure double-buffering (~600 KB).
  * The buffer is swapped under the mutex and the previous one freed only after
  * unlocking, so a UI reader holding the lock can never observe a freed buffer.
  *
  * Single-owner: only octoprint_poll_task calls octoprint_client_poll(), so the
- * keep-alive slot and the module-static tier/cache state need no locking.
+ * module-static tier/cache state needs no locking. The keep-alive conn slots
+ * are the exception: they hold open sockets while parked, so page leave must
+ * be able to destroy them from the UI coordinator task; a small mutex in the
+ * .c serialises that against a poll in flight.
  */
 
 #include <stdbool.h>
@@ -45,7 +53,6 @@
 #define OCTO_STATE_LEN   32   /* "Printing", "Operational", "Offline", ...      */
 #define OCTO_CONN_LEN    32   /* /api/connection current.state                  */
 #define OCTO_ERROR_LEN   64   /* printer state.error text                       */
-#define OCTO_FILE_LEN    96   /* job.file.display, truncated                    */
 #define OCTO_ETA_LEN     16   /* DisplayLayerProgress print.estimatedEndTime    */
 
 /**
@@ -60,7 +67,6 @@ typedef struct {
     /* -- connectivity ---------------------------------------------------- */
     bool    connected;          /* last /api/job fetch+parse succeeded         */
     bool    data_valid;         /* at least one successful poll since boot     */
-    int64_t last_success_ms;    /* esp_timer ms of the last successful poll    */
 
     /* -- state ------------------------------------------------------------ */
     char    job_state[OCTO_STATE_LEN];      /* /api/job "state"               */
@@ -75,10 +81,8 @@ typedef struct {
 
     /* -- job progress ------------------------------------------------------ */
     float   completion;         /* percent 0..100; -1 unknown                  */
-    int     m73_progress;       /* firmware M73 percent; -1 absent             */
     int     print_time_s;       /* elapsed seconds; -1 unknown                 */
     int     print_time_left_s;  /* remaining seconds; -1 unknown               */
-    char    file_name[OCTO_FILE_LEN];       /* job.file.display (or .name)    */
 
     /* -- temperatures (NAN = unknown / printer not operational) ------------ */
     float   nozzle_actual;
@@ -93,11 +97,15 @@ typedef struct {
     char    eta[OCTO_ETA_LEN];  /* e.g. "20:46"; "" unknown                    */
 
     /* -- decoded image (RGB565, PSRAM, owned by this module) --------------- */
-    uint8_t *image_buf;         /* NULL when no image is held                  */
+    uint8_t *image_buf;         /* NULL when no image is held. For the webcam  */
+                                /* source the UI frees+NULLs it under the lock */
+                                /* after scaling (see file header)             */
     uint16_t image_w;
     uint16_t image_h;
     bool     new_image;         /* set true on buffer swap; the UI clears it   */
                                 /* under the lock once it has re-bound the src */
+                                /* -- and ONLY then, so a failed alloc/bind    */
+                                /* leaves it set and the UI retries next cycle */
 
     SemaphoreHandle_t mutex;
 } octoprint_data_t;

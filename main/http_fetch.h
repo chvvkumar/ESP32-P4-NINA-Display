@@ -76,7 +76,12 @@ typedef struct {
     const char *extra_header;   /**< optional: raw "Name: value" line, split at the
                                   * first ':' and applied as one request header. Lets
                                   * a caller forward an arbitrary auth header (e.g.
-                                  * "X-API-Key: abc") that is not Bearer-shaped. */
+                                  * "X-API-Key: abc") that is not Bearer-shaped.
+                                  * Keep-alive safe: a reused conn handle remembers
+                                  * which extra header the previous request set and
+                                  * deletes it before this request's headers are
+                                  * applied, so omitting extra_header on a later call
+                                  * cannot leak the earlier credential to a new host. */
     const char *post_body;      /**< optional: NULL = GET (every existing caller).
                                   * Non-NULL switches the request to POST and sends
                                   * this NUL-terminated string as the whole body.
@@ -106,7 +111,16 @@ typedef struct {
     void (*on_attempt)(const http_fetch_attempt_info_t *info, void *hook_ctx);
                                  /**< optional: NULL disables. See http_fetch_attempt_info_t. */
     void *hook_ctx;              /**< passed through unchanged to on_attempt */
-    http_fetch_conn_t *conn;    /**< optional: NULL = one-shot client (no reuse) */
+    http_fetch_conn_t *conn;    /**< optional: NULL = one-shot client (no reuse).
+                                  * A fetch whose response body was fully drained
+                                  * parks the connection OPEN, so the next fetch on
+                                  * this slot skips TCP+TLS setup entirely; any exit
+                                  * that may leave body bytes unread (non-2xx, cap
+                                  * truncation, partial read) closes first and reuses
+                                  * only the handle allocation. A parked socket the
+                                  * server silently dropped in the meantime is
+                                  * detected on the next request and reconnected
+                                  * once automatically. */
     int *status_out;            /**< optional: written with the FINAL attempt's HTTP
                                   * status code whenever a status was received --
                                   * including non-2xx failure returns (e.g. 204, 401,
@@ -192,6 +206,25 @@ typedef struct {
                                  *  semantics as http_fetch_opts_t.extra_header. Needed
                                  *  by image sources behind an API-key header (OctoPrint
                                  *  gcode thumbnails). NULL = no extra header. */
+    http_fetch_conn_t *conn;   /**< optional: NULL = one-shot client (no reuse). Same
+                                 *  semantics as http_fetch_opts_t.conn, including
+                                 *  drained-open parking: a fully read body leaves the
+                                 *  connection OPEN for the next fetch (no TCP+TLS
+                                 *  redo), anything else closes before parking. One
+                                 *  slot per task, never shared across tasks. Do NOT
+                                 *  share one slot between the text and binary
+                                 *  fetchers -- the handles are configured differently
+                                 *  (event handler, rx/tx buffer sizes are fixed at
+                                 *  handle creation). A reused handle drops the
+                                 *  previous request's extra_header automatically (see
+                                 *  the text path's extra_header doc), so alternating
+                                 *  between an API-keyed host and a keyless
+                                 *  third-party host on one slot cannot leak the key.
+                                 *  NOTE: a drained-parked slot HOLDS AN OPEN SOCKET;
+                                 *  a caller whose polling stops (page-gated loops)
+                                 *  must destroy its slot at that seam or the socket
+                                 *  sits against the ~9-connection ceiling until the
+                                 *  server times it out. */
     const char *label;         /**< short subject for log lines ("Album art"); NULL -> "HTTP" */
 } http_fetch_binary_opts_t;
 

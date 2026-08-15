@@ -62,3 +62,13 @@ void allsky_client_poll(const char *hostname, const char *field_config_json, all
 
 /** Invalidate the cached parsed field config. Call when config changes. */
 void allsky_invalidate_field_config_cache(void);
+
+/**
+ * Page-active gate for keep-alive teardown. Call on every AllSky page
+ * enter/leave transition (tasks.c, mirrors octoprint_client_set_page_active).
+ * On leave, destroys the keep-alive conn slot -- a drained-parked slot holds an
+ * OPEN socket, and the page-gated poll loop stops running, so the slot would
+ * otherwise hold a dead socket against the ~9-connection ceiling indefinitely.
+ * Safe against a poll in flight (internal mutex + zero-wait try-take).
+ */
+void allsky_client_set_page_active(bool active);

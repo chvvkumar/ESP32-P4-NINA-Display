@@ -3124,29 +3124,43 @@ main_loop:
             prev_on_spotify = on_spotify;
             spotify_page_active = on_spotify;
 
-            /* AllSky and Clock flags — wake tasks immediately on page entry */
+            /* AllSky and Clock flags — wake tasks immediately on page entry.
+             * On leave, tell the client so it can destroy its keep-alive conn
+             * slot (gate flag first, so the poll task stops before teardown —
+             * same ordering as OctoPrint below). */
             static bool prev_on_allsky = false;
             if (on_allsky && !prev_on_allsky && allsky_task_handle) {
                 xTaskNotifyGive(allsky_task_handle);
             }
-            prev_on_allsky = on_allsky;
             allsky_page_active = on_allsky;
+            if (on_allsky != prev_on_allsky) {
+                allsky_client_set_page_active(on_allsky);
+            }
+            prev_on_allsky = on_allsky;
 
-            /* JSON Display flag — wake task immediately on page entry */
+            /* JSON Display flag — wake task immediately on page entry; conn
+             * teardown on leave, as above */
             static bool prev_on_json = false;
             if (on_json && !prev_on_json && json_task_handle) {
                 xTaskNotifyGive(json_task_handle);
             }
-            prev_on_json = on_json;
             json_page_active = on_json;
+            if (on_json != prev_on_json) {
+                json_client_set_page_active(on_json);
+            }
+            prev_on_json = on_json;
 
-            /* Home Assistant flag — wake task immediately on page entry */
+            /* Home Assistant flag — wake task immediately on page entry; conn
+             * teardown on leave, as above */
             static bool prev_on_ha = false;
             if (on_ha && !prev_on_ha && ha_task_handle) {
                 xTaskNotifyGive(ha_task_handle);
             }
-            prev_on_ha = on_ha;
             ha_page_active = on_ha;
+            if (on_ha != prev_on_ha) {
+                ha_client_set_page_active(on_ha);
+            }
+            prev_on_ha = on_ha;
 
             /* OctoPrint flag — wake on entry; on leave, gate the poll task
              * BEFORE releasing the decoded image. A poll already past its
@@ -3419,13 +3433,13 @@ main_loop:
                 }
             }
 
-            /* Immediate OctoPrint render with cached data */
+            /* Immediate OctoPrint render with cached data.
+             * octoprint_page_update takes the display lock itself (client lock
+             * outside, display lock inside) so the image rescale runs outside
+             * the display lock. */
             if (on_octoprint) {
                 if (octoprint_client_lock(&octoprint_data, 15)) {
-                    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                        octoprint_page_update(&octoprint_data);
-                        bsp_display_unlock();
-                    }
+                    octoprint_page_update(&octoprint_data);
                     octoprint_client_unlock(&octoprint_data);
                 }
             }
@@ -3523,14 +3537,13 @@ main_loop:
                 ha_client_unlock(&ha_data);
             }
         } else if (on_octoprint) {
-            /* OctoPrint page — trylock-and-skip the octoprint data (like JSON),
-             * then a single LVGL lock. Skipping a cycle rather than blocking the
-             * UI preserves the lock-ordering discipline. */
+            /* OctoPrint page — trylock-and-skip the octoprint data (like JSON).
+             * The display lock is taken INSIDE octoprint_page_update (client
+             * lock outside, display lock inside), so the bilinear image rescale
+             * runs before it and never stalls the flush task. Skipping a cycle
+             * rather than blocking the UI preserves lock-ordering discipline. */
             if (octoprint_client_lock(&octoprint_data, 15)) {
-                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                    octoprint_page_update(&octoprint_data);
-                    bsp_display_unlock();
-                }
+                octoprint_page_update(&octoprint_data);
                 octoprint_client_unlock(&octoprint_data);
             }
         } else if (on_image_display) {

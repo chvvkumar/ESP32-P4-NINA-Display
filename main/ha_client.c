@@ -3,9 +3,12 @@
  * @brief Home Assistant client for the HA page.
  *
  * Uses http_fetch's shared fetcher. Within ha_client_poll a module-static
- * keep-alive slot (s_conn) is reused across the sequential per-entity fetches;
- * polling is single-owner (only ha_poll_task ever calls ha_client_poll), so the
- * slot needs no locking. The PUBLIC ha_client_fetch_entity() is a one-shot fetch
+ * keep-alive slot (s_conn) is reused across the sequential per-entity fetches.
+ * Only ha_poll_task ever calls ha_client_poll, but the slot is also DESTROYED
+ * from data_update_task when the page is left (a drained-parked slot holds an
+ * OPEN socket, and the page-gated poll loop stops running), so conn use is
+ * guarded by s_conn_mux -- mirrors octoprint_client.
+ * The PUBLIC ha_client_fetch_entity() is a one-shot fetch
  * (conn=NULL) so the /api/ha-probe handler can call it safely from the httpd
  * worker task without touching the poll task's keep-alive slot.
  *
@@ -25,6 +28,7 @@
 #include <string.h>
 #include <strings.h>   /* strncasecmp / strcasecmp */
 #include <stdlib.h>
+#include <stdatomic.h>
 
 static const char *TAG = "ha_client";
 
@@ -53,11 +57,24 @@ static const char *s_tile_entities[JSON_MAX_TILES];
 static const char *s_tile_attrs[JSON_MAX_TILES];
 static int         s_tile_count = 0;
 
-/* Persistent keep-alive slot, owned exclusively by ha_poll_task; lazily created
- * on first poll. */
+/* Persistent keep-alive slot; lazily created on first poll, destroyed when the
+ * HA page is left (see conn_teardown_if_page_left) so the parked OPEN socket
+ * does not sit against the ~9-connection ceiling while the page is hidden. */
 static http_fetch_conn_t *s_conn = NULL;
 
+/* Serialises conn-slot destruction against a poll in flight (mirrors
+ * octoprint_client). ha_poll_task holds this around the per-entity fetch loop;
+ * ha_client_set_page_active() (data_update_task) try-takes it with zero wait
+ * to destroy the slot when the page is left while the poll task is asleep --
+ * the page-gated loop never runs again, so nobody else would close the socket.
+ * Created in ha_client_init(). */
+static SemaphoreHandle_t s_conn_mux = NULL;
+
+/* Page gate for the teardown; written by data_update_task, read here. */
+static _Atomic bool s_page_active = false;
+
 /* Forward declarations (prototype-before-use under -Werror). */
+static void   conn_teardown_if_page_left(void);
 static bool   cjson_scalar_str(const cJSON *node, char *buf, size_t len);
 static void   invalidate_tiles_config(void);
 static int    get_tiles_config(const char *tiles_config_json);
@@ -82,6 +99,38 @@ void ha_client_init(ha_data_t *data) {
     data->tile_count = 0;
     data->last_poll_ms = 0;
     data->mutex = xSemaphoreCreateMutex();
+    s_conn_mux = xSemaphoreCreateMutex();
+}
+
+/**
+ * Destroy the keep-alive slot once the page has been left. Caller MUST hold
+ * s_conn_mux. Two callers cover the two leave windows: the poll's post-fetch
+ * check (page left mid-poll) and set_page_active(false) via try-take (poll
+ * task asleep, will not run again). No-op while the page is active.
+ */
+static void conn_teardown_if_page_left(void) {
+    if (atomic_load(&s_page_active)) {
+        return;
+    }
+    if (s_conn) {
+        http_fetch_conn_destroy(s_conn);
+        s_conn = NULL;
+    }
+}
+
+void ha_client_set_page_active(bool active) {
+    atomic_store(&s_page_active, active);
+    if (active) {
+        return;
+    }
+    /* Zero-wait try-take: if a poll is mid-fetch it owns the slot, and its
+     * post-fetch teardown (which re-reads the flag cleared above) destroys it
+     * instead. Never destroy without this mutex -- a fetch may be mid-flight
+     * on the handle. */
+    if (s_conn_mux && xSemaphoreTake(s_conn_mux, 0) == pdTRUE) {
+        conn_teardown_if_page_left();
+        xSemaphoreGive(s_conn_mux);
+    }
 }
 
 bool ha_client_lock(ha_data_t *data, int timeout_ms) {
@@ -437,6 +486,12 @@ void ha_client_poll(const char *base_url, const char *token,
         return;
     }
 
+    /* The conn slot is owned for the whole fetch loop: set_page_active()
+     * try-takes this mutex to destroy it, and must never win mid-fetch. */
+    if (s_conn_mux) {
+        xSemaphoreTake(s_conn_mux, portMAX_DELAY);
+    }
+
     /* Lazily create the keep-alive slot on first poll. On failure, fall through
      * with s_conn == NULL -- http_fetch uses a one-shot client per fetch. */
     if (!s_conn) {
@@ -485,6 +540,13 @@ void ha_client_poll(const char *base_url, const char *token,
             fetched_ok++;
         }
         unique_count++;
+    }
+
+    /* Conn use ends here. If the page was left mid-poll (set_page_active's
+     * try-take lost to us), destroy the parked slot on the way out. */
+    conn_teardown_if_page_left();
+    if (s_conn_mux) {
+        xSemaphoreGive(s_conn_mux);
     }
 
     /* Resolve every tile from the de-duped parsed entities into local scratch. */

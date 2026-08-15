@@ -1,7 +1,7 @@
 
       <div class="card">
         <div class="card-title"><span class="card-title-label">OctoPrint <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
-        <div class="help-popover"><div class="help-popover-title">3D Printer page</div><p>Adds a page that shows what your 3D printer is doing: the job name, how far along it is, time remaining, and the hotend and bed temperatures. The data comes from OctoPrint, so the device needs the address of your OctoPrint server and an API key from it.</p><p>Create the key in OctoPrint under Settings, Application Keys, or use the global API key under Settings, API. Paste it into the API Key field below.</p><p>Page Layout changes how the printer page looks on the device. The Image setting picks what is shown alongside the numbers: the model preview embedded in the sliced file, or a live picture from the printer camera.</p></div>
+        <div class="help-popover"><div class="help-popover-title">3D Printer page</div><p>Adds a page that shows what your 3D printer is doing: print progress, time remaining, hotend and bed temperatures, and layer info. The data comes from OctoPrint, so the device needs the address of your OctoPrint server and an API key from it.</p><p>Create the key in OctoPrint under Settings, Application Keys, or use the global API key under Settings, API. Paste it into the API Key field below.</p><p>Page Layout changes how the printer page looks on the device. The Image setting picks what is shown alongside the numbers: the model preview embedded in the sliced file, or a live picture from the printer camera.</p></div>
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
           <span class="toggle-label">Enable 3D Printer page</span>
           <!-- No inline handler: the delegated input/change listener on .content
@@ -10,9 +10,10 @@
           <label class="toggle"><input type="checkbox" id="octoprint_enabled"><span class="toggle-track"></span></label>
         </div>
         <div class="field-hint">Adds the printer page and starts reading from OctoPrint. Off hides the page and stops the requests.</div>
+      </div>
 
-        <div class="subsection">
-        <div class="subsection-title">Connection</div>
+      <div class="card collapsed">
+        <div class="card-title"><span class="card-title-label">Connection</span></div>
         <div class="field">
           <label class="field-label" for="octoUrl">OctoPrint Address</label>
           <input type="text" class="input" id="octoUrl" maxlength="127" placeholder="http://octopi.lan">
@@ -39,10 +40,10 @@
           <input type="number" class="input" id="octoInterval" min="2" max="300" step="1" placeholder="5">
           <div class="field-hint">How often the device asks OctoPrint for new job and temperature values, in seconds (2 to 300).</div>
         </div>
-        </div>
+      </div>
 
-        <div class="subsection">
-        <div class="subsection-title">Appearance</div>
+      <div class="card">
+        <div class="card-title"><span class="card-title-label">Appearance</span></div>
         <div class="field">
           <label class="field-label" for="octoLayout">Page Layout</label>
           <select class="input" id="octoLayout">
@@ -63,7 +64,6 @@
           <label class="field-label" for="octoSnapshotUrl">Camera Snapshot Address <span style="color:var(--text-hint);font-weight:400">(optional)</span></label>
           <input type="text" class="input" id="octoSnapshotUrl" maxlength="127" placeholder="http://octopi.lan/webcam/?action=snapshot">
           <div class="field-hint">Leave blank to use the standard OctoPrint webcam address. Fill this in only if your camera is somewhere else, and enter the full address starting with http:// or https://.</div>
-        </div>
         </div>
       </div>
 

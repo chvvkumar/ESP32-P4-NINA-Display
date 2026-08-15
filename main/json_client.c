@@ -3,8 +3,10 @@
  * @brief Generic JSON HTTP client for the JSON Display page.
  *
  * Uses http_fetch's shared fetcher with a module-static keep-alive slot
- * (s_conn). JSON polling is single-owner (only json_poll_task ever calls
- * json_client_poll), so the connection slot needs no locking.
+ * (s_conn). Only json_poll_task ever calls json_client_poll, but the slot is
+ * also DESTROYED from data_update_task when the page is left (a drained-parked
+ * slot holds an OPEN socket, and the page-gated poll loop stops running), so
+ * conn use is guarded by s_conn_mux -- mirrors octoprint_client.
  *
  * Resolver: C port of the JSON Display mockup tokenizePath()/evalPath().
  * Config cache: mirrors allsky_client.c get_field_config() (parse-once,
@@ -21,6 +23,7 @@
 #include <string.h>
 #include <strings.h>   /* strncasecmp */
 #include <stdlib.h>
+#include <stdatomic.h>
 
 static const char *TAG = "json_client";
 
@@ -46,11 +49,24 @@ static char  *s_cached_tiles_str = NULL;
 static const char *s_tile_paths[JSON_MAX_TILES];
 static int         s_tile_path_count = 0;
 
-/* Persistent keep-alive slot, owned exclusively by json_poll_task; lazily
- * created on first poll. */
+/* Persistent keep-alive slot; lazily created on first poll, destroyed when the
+ * JSON page is left (see conn_teardown_if_page_left) so the parked OPEN socket
+ * does not sit against the ~9-connection ceiling while the page is hidden. */
 static http_fetch_conn_t *s_conn = NULL;
 
+/* Serialises conn-slot destruction against a poll in flight (mirrors
+ * octoprint_client). json_poll_task holds this around the fetch;
+ * json_client_set_page_active() (data_update_task) try-takes it with zero wait
+ * to destroy the slot when the page is left while the poll task is asleep --
+ * the page-gated loop never runs again, so nobody else would close the socket.
+ * Created in json_client_init(). */
+static SemaphoreHandle_t s_conn_mux = NULL;
+
+/* Page gate for the teardown; written by data_update_task, read here. */
+static _Atomic bool s_page_active = false;
+
 /* Forward declarations (prototype-before-use under -Werror). */
+static void  conn_teardown_if_page_left(void);
 static bool  cjson_scalar_str(const cJSON *node, char *buf, size_t len);
 static cJSON *json_eval_path(cJSON *root, const char *path);
 static void  invalidate_tiles_config(void);
@@ -69,6 +85,38 @@ void json_client_init(json_data_t *data) {
     data->tile_count = 0;
     data->last_poll_ms = 0;
     data->mutex = xSemaphoreCreateMutex();
+    s_conn_mux = xSemaphoreCreateMutex();
+}
+
+/**
+ * Destroy the keep-alive slot once the page has been left. Caller MUST hold
+ * s_conn_mux. Two callers cover the two leave windows: the poll's post-fetch
+ * check (page left mid-poll) and set_page_active(false) via try-take (poll
+ * task asleep, will not run again). No-op while the page is active.
+ */
+static void conn_teardown_if_page_left(void) {
+    if (atomic_load(&s_page_active)) {
+        return;
+    }
+    if (s_conn) {
+        http_fetch_conn_destroy(s_conn);
+        s_conn = NULL;
+    }
+}
+
+void json_client_set_page_active(bool active) {
+    atomic_store(&s_page_active, active);
+    if (active) {
+        return;
+    }
+    /* Zero-wait try-take: if a poll is mid-fetch it owns the slot, and its
+     * post-fetch teardown (which re-reads the flag cleared above) destroys it
+     * instead. Never destroy without this mutex -- a fetch may be mid-flight
+     * on the handle. */
+    if (s_conn_mux && xSemaphoreTake(s_conn_mux, 0) == pdTRUE) {
+        conn_teardown_if_page_left();
+        xSemaphoreGive(s_conn_mux);
+    }
 }
 
 bool json_client_lock(json_data_t *data, int timeout_ms) {
@@ -330,6 +378,13 @@ void json_client_poll(const char *url, const char *auth_header,
 
     ESP_LOGD(TAG, "Polling JSON source: %s", url);
 
+    /* The conn slot is owned for the fetch: set_page_active() try-takes this
+     * mutex to destroy it, and must never win mid-fetch. Uncontended in the
+     * common case; the other side holds it only for a microsecond destroy. */
+    if (s_conn_mux) {
+        xSemaphoreTake(s_conn_mux, portMAX_DELAY);
+    }
+
     /* Lazily create the keep-alive slot on first poll. If allocation fails,
      * fall through with conn == NULL -- http_fetch falls back to a one-shot
      * client for this attempt. */
@@ -358,6 +413,14 @@ void json_client_poll(const char *url, const char *auth_header,
     char *buffer = NULL;
     size_t total_read = 0;
     esp_err_t err = http_fetch_text(url, &opts, &buffer, &total_read);
+
+    /* Conn use ends here. If the page was left mid-poll (set_page_active's
+     * try-take lost to us), destroy the parked slot on the way out. */
+    conn_teardown_if_page_left();
+    if (s_conn_mux) {
+        xSemaphoreGive(s_conn_mux);
+    }
+
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "JSON HTTP fetch failed for %s: %s", url, esp_err_to_name(err));
         if (json_client_lock(data, 100)) {

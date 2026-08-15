@@ -49,7 +49,6 @@ LV_FONT_DECLARE(lv_font_montserrat_64);
  * bake in at build time (gradients, reticles) are covered as well, because
  * octoprint_page_apply_theme() rebuilds the content tree.
  * ──────────────────────────────────────────────────────────────────── */
-extern lv_style_t octo_style_card;    /* bento box: bento_bg, bento_border, r24 */
 extern lv_style_t octo_style_label;   /* micro uppercase caption: label_color   */
 extern lv_style_t octo_style_value;   /* value text: text_color                 */
 extern lv_style_t octo_style_accent;  /* accent text: progress_color            */
@@ -190,7 +189,8 @@ lv_obj_t *octo_w_label(lv_obj_t *parent, const char *text,
 lv_obj_t *octo_w_caption(lv_obj_t *parent, const char *text);
 
 /**
- * Temperature element, in one of the three presentations of octo_temp_variant_t.
+ * Temperature element, in one of the two presentations of octo_temp_variant_t
+ * (BAR_GRADIENT or TILE).
  *
  * Only BAR_GRADIENT builds (and therefore drives) a fill. Its colours are THEME
  * TOKENS, not literals: the gradient runs OCTO_COL_ACCENT -> OCTO_COL_ALERT for
@@ -216,13 +216,6 @@ lv_obj_t *octo_w_temp(lv_obj_t *parent, const char *name,
  * Sets w->img_hero and w->img_placeholder.
  */
 lv_obj_t *octo_w_image_hero(lv_obj_t *parent, octoprint_widgets_t *w);
-
-/**
- * Dot + text chip. Used for the connection indicator and the fault strip; the
- * geometry is identical so nothing reflows when a fault appears.
- */
-lv_obj_t *octo_w_chip(lv_obj_t *parent, const char *text,
-                      lv_obj_t **out_dot, lv_obj_t **out_label);
 
 /**
  * Fault strip: an empty chip, created HIDDEN. The update path shows it (with

@@ -70,6 +70,16 @@ void json_client_poll(const char *url, const char *auth_header,
 void json_client_invalidate_config_cache(void);
 
 /**
+ * Page-active gate for keep-alive teardown. Call on every JSON page
+ * enter/leave transition (tasks.c, mirrors octoprint_client_set_page_active).
+ * On leave, destroys the keep-alive conn slot -- a drained-parked slot holds an
+ * OPEN socket, and the page-gated poll loop stops running, so the slot would
+ * otherwise hold a dead socket against the ~9-connection ceiling indefinitely.
+ * Safe against a poll in flight (internal mutex + zero-wait try-take).
+ */
+void json_client_set_page_active(bool active);
+
+/**
  * Resolve a single path against a parsed cJSON root and write the raw scalar
  * string into @p out (NUL-terminated, truncated to @p out_len). Supports the
  * .key / [N] / [field=value] token grammar described above.

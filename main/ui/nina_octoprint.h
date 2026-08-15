@@ -6,9 +6,10 @@
  *
  * Mirrors the JSON Display / AllSky page contract: the page is created once
  * (hidden), fed by the shared octoprint_data_t (populated by octoprint_poll_task
- * via octoprint_client_poll), and re-themed / rebuilt on config change. All
- * functions run with the LVGL display lock held by the CALLER (matches
- * nina_json.c / nina_allsky.c); this module never takes the display lock itself.
+ * via octoprint_client_poll), and re-themed / rebuilt on config change. Every
+ * function runs with the LVGL display lock held by the CALLER, with ONE
+ * exception: octoprint_page_update() takes the display lock itself (see its
+ * doc) so the bilinear image resample can run outside it.
  */
 
 #include "lvgl.h"
@@ -32,9 +33,16 @@ lv_obj_t *octoprint_page_create(lv_obj_t *parent);
  * (G-code preview or webcam snapshot per app_config_t::octoprint_image_source).
  * Missing / unresolved values render "--" in the theme text color.
  *
- * Caller holds data->mutex AND the display lock. Mirrors json_page_update.
+ * Locking: caller holds data->mutex ONLY -- unlike the other page updates,
+ * this function takes the display lock itself (client lock outside, display
+ * lock inside), so the heavy bilinear image scale runs before it is acquired.
+ * Do NOT call with the display lock already held.
+ *
+ * Mutates @p data under the caller's lock: clears new_image once the scaled
+ * frame is bound, and for the webcam source consumes (frees and NULLs)
+ * image_buf after scaling -- see octoprint_client.h.
  */
-void octoprint_page_update(const octoprint_data_t *data);
+void octoprint_page_update(octoprint_data_t *data);
 
 /**
  * @brief Release the page's copy of the decoded frame (up to 2 MB of PSRAM).
@@ -62,6 +70,3 @@ void octoprint_page_apply_theme(void);
  * POST handler, under the display lock). Mirrors json_page_refresh_config.
  */
 void octoprint_page_refresh_config(void);
-
-/** Current page root object, or NULL if the page is not built. */
-lv_obj_t *octoprint_page_get_obj(void);

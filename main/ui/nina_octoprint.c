@@ -7,19 +7,27 @@
  * empty state and the theme application. The two octoprint_layout_*.c files
  * only arrange widgets (see nina_octoprint_internal.h for the seam contract).
  *
- * Locking: the caller holds octoprint_data_t::mutex AND the LVGL display lock
- * for the whole of octoprint_page_update() — the same contract nina_json.c has
- * with json_page_update() (see tasks.c: client lock OUTSIDE, display lock
- * INSIDE). This module never takes either lock itself.
+ * Locking: the caller of octoprint_page_update() holds octoprint_data_t::mutex
+ * ONLY; this module takes the LVGL display lock itself, inside that (lock
+ * order: client lock OUTSIDE, display lock INSIDE, never reversed). The split
+ * exists so the bilinear resample (~300-500k px per webcam frame) runs under
+ * the client lock alone and never stalls the flush task. Every other entry
+ * point (create / refresh / theme / free_image) still runs with the display
+ * lock held by the CALLER, unchanged.
  *
  * Image lifetime: octoprint_client frees the retired frame shortly after it
  * releases the mutex, so binding an lv_image straight at data->image_buf would
  * leave the LVGL flush task rendering from a freed pointer between two updates.
- * We therefore take a UI-owned PSRAM copy while the lock is held and bind that.
- * The copy is produced by the bilinear scaler at the hero's exact pixel box, so the
- * descriptor binds 1:1 and LVGL never runs its software transform (which is what
- * put the horizontal seams on the hero). It is re-made only when the frame or
- * the box changes, not per poll.
+ * We therefore stage a UI-owned PSRAM copy under the client lock (stage_image),
+ * then commit it — descriptor rewrite + lv_image_set_src rebind + pointer swap,
+ * the cheap part — under the display lock, and free the retired copy after
+ * unlocking. The copy is produced by the bilinear scaler at the hero's exact
+ * pixel box, so the descriptor binds 1:1 and LVGL never runs its software
+ * transform (which is what put the horizontal seams on the hero). It is re-made
+ * only when the frame or the box changes, not per update. The target box is the
+ * one cached by the previous commit pass (reading LVGL layout needs the display
+ * lock); a first frame or a moved box costs one skipped update cycle, not a
+ * scale under the display lock.
  */
 
 #include "nina_octoprint.h"
@@ -28,6 +36,7 @@
 #include "app_config.h"
 #include "display_defs.h"
 #include "jpeg_utils.h"
+#include "bsp/esp-bsp.h"   /* bsp_display_lock / bsp_display_unlock */
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -46,7 +55,7 @@ static const char *TAG = "octo_ui";
 
 /* ── Shared styles ────────────────────────────────────────────────────── */
 
-lv_style_t octo_style_card;
+static lv_style_t octo_style_card;   /* file-local: layouts get cards via octo_w_card() */
 lv_style_t octo_style_label;
 lv_style_t octo_style_value;
 lv_style_t octo_style_accent;
@@ -62,12 +71,25 @@ static octoprint_widgets_t s_w;
 
 /* UI-owned, bilinear-scaled copy of the decoded frame (see file header).
  * s_img_copy is a 128-byte-aligned PSRAM buffer; s_fit_w/h are the pixel
- * dimensions currently held in it. */
-static uint8_t       *s_img_copy    = NULL;
-static size_t         s_img_copy_sz = 0;
-static uint16_t       s_fit_w       = 0;
-static uint16_t       s_fit_h       = 0;
+ * dimensions currently held in it. All four are display-lock domain. */
+static uint8_t       *s_img_copy = NULL;
+static uint16_t       s_fit_w    = 0;
+static uint16_t       s_fit_h    = 0;
 static lv_image_dsc_t s_img_dsc;
+
+/* Which octoprint_image_source produced s_img_copy (-1 = none). Display-lock
+ * domain. Needed because stage_image() consumes (frees) the client's webcam
+ * original after scaling, so a NULL data->image_buf is ambiguous: "frame
+ * dropped" vs "frame already shown". */
+static int8_t s_copy_src = -1;
+
+/* Hero content box cached by the last commit pass, and the rescale request
+ * flag. Written under the display lock; stage_image() reads them WITHOUT it
+ * (deliberate, benign race: a stale box stages a wrong-sized copy that the
+ * commit pass detects and re-flags, costing one extra update cycle). */
+static uint16_t s_box_w        = 0;
+static uint16_t s_box_h        = 0;
+static bool     s_need_rescale = true;
 
 /* ── Small helpers ────────────────────────────────────────────────────── */
 
@@ -109,9 +131,17 @@ uint32_t octo_color(octo_color_id_t id)
 
 static void set_txt(lv_obj_t *obj, const char *text)
 {
-    if (obj && text) {
-        lv_label_set_text(obj, text);
+    if (!obj || !text) {
+        return;
     }
+    /* Dirty guard (precedent: nina_empty_state.c): with FULL_REFRESH every
+     * label invalidation repaints the whole 720x720 frame, so skip the set
+     * when the text is unchanged. */
+    const char *cur = lv_label_get_text(obj);
+    if (cur && strcmp(cur, text) == 0) {
+        return;
+    }
+    lv_label_set_text(obj, text);
 }
 
 static void set_hidden(lv_obj_t *obj, bool hidden)
@@ -140,11 +170,17 @@ static void free_img_copy(void)
         lv_image_set_src(s_w.img_hero, NULL);
     }
     heap_caps_free(s_img_copy);
-    s_img_copy    = NULL;
-    s_img_copy_sz = 0;
-    s_fit_w       = 0;
-    s_fit_h       = 0;
+    s_img_copy = NULL;
+    s_fit_w    = 0;
+    s_fit_h    = 0;
+    s_copy_src = -1;
     memset(&s_img_dsc, 0, sizeof(s_img_dsc));
+    /* The cached box may belong to a tree this call is tearing down
+     * (rebuild_in_place), so invalidate it; the next commit pass re-measures.
+     * Costs one update cycle of staging latency after a page re-entry. */
+    s_box_w        = 0;
+    s_box_h        = 0;
+    s_need_rescale = true;
 }
 
 /** "2h 08m" / "48m 12s" / "--" for a duration in seconds (-1 = unknown). */
@@ -331,11 +367,12 @@ lv_obj_t *octo_w_image_hero(lv_obj_t *parent, octoprint_widgets_t *w)
 
     w->img_hero = lv_image_create(host);
     lv_obj_set_size(w->img_hero, LV_PCT(100), LV_PCT(100));
-    /* CENTER, not CONTAIN: image_update() hardware-scales the frame to this
+    /* CENTER, not CONTAIN: stage_image() bilinear-scales the frame to this
      * widget's exact box before binding, so the aspect fit is already done and
      * any LVGL zoom here would only re-introduce the software transform (and its
-     * horizontal seams). The bound frame is never larger than the box, so CENTER
-     * never crops. */
+     * horizontal seams). The bound frame is never larger than the box (except
+     * transiently for one cycle after the box shrinks), so CENTER never
+     * stretches and at worst briefly crops. */
     lv_image_set_inner_align(w->img_hero, LV_IMAGE_ALIGN_CENTER);
     lv_obj_center(w->img_hero);
     lv_obj_add_flag(w->img_hero, LV_OBJ_FLAG_HIDDEN);
@@ -348,8 +385,12 @@ lv_obj_t *octo_w_image_hero(lv_obj_t *parent, octoprint_widgets_t *w)
 
 /* -- chips / strips ----------------------------------------------------- */
 
-lv_obj_t *octo_w_chip(lv_obj_t *parent, const char *text,
-                      lv_obj_t **out_dot, lv_obj_t **out_label)
+/**
+ * Dot + text chip (file-local). Used for the connection indicator and the fault
+ * strip; the geometry is identical so nothing reflows when a fault appears.
+ */
+static lv_obj_t *octo_w_chip(lv_obj_t *parent, const char *text,
+                             lv_obj_t **out_dot, lv_obj_t **out_label)
 {
     lv_obj_t *chip = octo_w_row(parent, true, 6);
     lv_obj_set_size(chip, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
@@ -606,7 +647,7 @@ static void temp_update(octo_temp_el_t *t, float actual, float target)
     set_txt(t->lbl_value, buf);
 
     if (!t->bar) {
-        return;   /* TEXT_ONLY / TILE: the value line is the whole element */
+        return;   /* TILE: the value line is the whole element */
     }
 
     /* Scale runs from a cold 25 C baseline to the target plus 10 % headroom, so
@@ -645,20 +686,17 @@ static void temp_update(octo_temp_el_t *t, float actual, float target)
 }
 
 /**
- * Aspect-fit @p src_w x @p src_h into the hero's laid-out pixel box.
+ * Aspect-fit @p src_w x @p src_h into a @p bw x @p bh box. Pure arithmetic, no
+ * LVGL reads, so it is callable with or without the display lock. Returns
+ * false for a degenerate box (< 8 px: unlaid) or source.
  *
- * The box differs per layout (glass runs the hero full-page at 720, bento ~338)
- * and is not known at build time, so it is read
- * from the widget itself. Returns false while the box is still unlaid (the first
- * update can land before the layout pass); the caller then keeps what is on
- * screen and retries on the next poll.
+ * Idempotent: fitting an already-fitted size into the same box returns it
+ * unchanged. The commit pass relies on that to detect a moved box without
+ * knowing the source dimensions.
  */
-static bool hero_fit_size(uint16_t src_w, uint16_t src_h,
-                          uint16_t *out_w, uint16_t *out_h)
+static bool fit_into_box(uint16_t src_w, uint16_t src_h, int32_t bw, int32_t bh,
+                         uint16_t *out_w, uint16_t *out_h)
 {
-    lv_obj_update_layout(s_w.img_hero);
-    int32_t bw = lv_obj_get_content_width(s_w.img_hero);
-    int32_t bh = lv_obj_get_content_height(s_w.img_hero);
     if (bw < 8 || bh < 8 || src_w == 0 || src_h == 0) {
         return false;
     }
@@ -678,8 +716,7 @@ static bool hero_fit_size(uint16_t src_w, uint16_t src_h,
         h = bh;
         w = ((int32_t)src_w * bh + src_h / 2) / src_h;
     }
-    /* Clamp both ways: never past the box (CENTER would clip), never degenerate
-     * (PPA needs a non-empty block). */
+    /* Clamp both ways: never past the box (CENTER would clip), never degenerate. */
     if (w > bw) {
         w = bw;
     }
@@ -697,92 +734,195 @@ static bool hero_fit_size(uint16_t src_w, uint16_t src_h,
     return true;
 }
 
-static void image_update(const octoprint_data_t *data)
+/**
+ * Frame staged by stage_image() under the client lock, committed (or
+ * discarded) by image_update() under the display lock. A local of
+ * octoprint_page_update(); never outlives one call.
+ */
+typedef struct {
+    uint8_t *buf;       /* 128-aligned PSRAM RGB565, w*h; NULL = nothing staged */
+    uint16_t w, h;
+    int8_t   src;       /* octoprint_image_source that produced it */
+    bool     consumed;  /* set on commit: the caller must not free buf */
+} octo_staged_t;
+
+/**
+ * Phase A of the image path: produce the bilinear-scaled copy WITHOUT the
+ * display lock, so the resample never stalls the flush task. Runs under the
+ * client lock only. The target size comes from the hero box cached by the
+ * previous commit pass; image_update() verifies that box under the display
+ * lock and re-flags a rescale if it moved. A first frame (box not yet cached)
+ * stages nothing and is scaled on the NEXT update cycle -- deliberately the
+ * "skip a frame" option, chosen over a one-off scale under the display lock
+ * because it keeps a single code path (~2 s of placeholder at worst).
+ *
+ * Bilinear resample, once, into the hero's exact box, so the descriptor binds
+ * 1:1 and LVGL never runs its software transform per draw-unit band (which is
+ * what showed as repeating horizontal seams -- PPA only accelerates 1.0x, so a
+ * zoomed lv_image is always the software path).
+ *
+ * Software, not ppa_scale_rgb565_into(): on device the SRM path both mirrors
+ * the frame vertically and resamples by pixel drop/duplicate, which banded the
+ * hero worse than LVGL's own zoom. The GOES/moon callers are calibrated around
+ * that behaviour, so it is left alone.
+ *
+ * Row order: jpeg_sw_decode_rgb565 converts stb output TOP-DOWN (jpeg_utils.c
+ * row loop, verified by reading it AND by the asymmetric test pattern
+ * on-device), so a straight copy renders upright. NO row reversal belongs on
+ * this path. The two past "mirrored with a straight copy" sightings were
+ * builds using the PPA SRM scale path, which genuinely flips its output; the
+ * one "upright with a reversal" sighting was a stale binary. Before changing
+ * orientation handling in ANY direction, re-run the mock test-pattern +
+ * /api/screenshot procedure on a fullclean build (see tests/octoprint_mock,
+ * fixture .orig backups).
+ */
+static void stage_image(octoprint_data_t *data, octo_staged_t *st)
+{
+    memset(st, 0, sizeof(*st));
+    st->src = -1;
+
+    if (!data->image_buf || data->image_w == 0 || data->image_h == 0) {
+        return;
+    }
+    if (!data->data_valid || !data->connected) {
+        /* The page is showing the empty overlay and the commit pass will not
+         * run, so a scale now would be redone every cycle until reconnect. */
+        return;
+    }
+    if (!data->new_image && !s_need_rescale) {
+        return;   /* current copy still matches this frame and box */
+    }
+
+    uint16_t fit_w = 0, fit_h = 0;
+    if (!fit_into_box(data->image_w, data->image_h,
+                      (int32_t)s_box_w, (int32_t)s_box_h, &fit_w, &fit_h)) {
+        return;   /* hero box not cached yet -- scale on the next cycle */
+    }
+
+    /* 128-byte-aligned address AND size: not required by the software scale,
+     * but it is one call and it keeps the buffer on L2 cache lines. */
+    size_t need = ((size_t)fit_w * (size_t)fit_h * 2u + 127u) & ~(size_t)127u;
+    uint8_t *buf = heap_caps_aligned_calloc(128, 1, need, MALLOC_CAP_SPIRAM);
+    if (!buf) {
+        ESP_LOGW(TAG, "PSRAM alloc failed for %ux%u hero frame",
+                 (unsigned)fit_w, (unsigned)fit_h);
+        return;   /* new_image stays set, so the next cycle retries */
+    }
+
+    int64_t t0 = esp_timer_get_time();
+    sw_scale_rgb565_bilinear((const uint16_t *)data->image_buf,
+                             (int)data->image_w, (int)data->image_h,
+                             (uint16_t *)buf, (int)fit_w, (int)fit_h);
+    ESP_LOGD(TAG, "hero scale %ux%u -> %ux%u in %lld us",
+             (unsigned)data->image_w, (unsigned)data->image_h,
+             (unsigned)fit_w, (unsigned)fit_h,
+             esp_timer_get_time() - t0);
+
+    st->buf = buf;
+    st->w   = fit_w;
+    st->h   = fit_h;
+    st->src = (int8_t)((app_config_get()->octoprint_image_source == 1) ? 1 : 0);
+
+    /* The webcam refetches every poll, so the client's retained full-res
+     * original (~600 KB PSRAM at 640x480) is pure double-buffering once it has
+     * been scaled: take ownership and free it here, under the client lock (no
+     * other reader can hold it). The thumbnail original stays with the client
+     * on purpose -- it is what a layout change re-fits from without a refetch.
+     * If the commit is then skipped (display-lock timeout, moved box), the
+     * webcam frame is simply lost; the next poll fetches a fresh one. */
+    if (st->src == 1) {
+        heap_caps_free(data->image_buf);
+        data->image_buf = NULL;
+        data->image_w   = 0;
+        data->image_h   = 0;
+    }
+}
+
+/**
+ * Phase B of the image path: commit (or discard) the staged frame and refresh
+ * the box cache. Runs under BOTH locks. The retired copy is handed back via
+ * @p out_retired and freed by octoprint_page_update() after the display lock
+ * is released.
+ */
+static void image_update(octoprint_data_t *data, octo_staged_t *st,
+                         uint8_t **out_retired)
 {
     if (!s_w.img_hero) {
         return;
     }
 
-    if (!data->image_buf || data->image_w == 0 || data->image_h == 0) {
-        /* Client dropped the frame (page left, source switched, or nothing
-         * decoded yet). */
+    bool have_client = data->image_buf && data->image_w != 0 && data->image_h != 0;
+
+    if (!have_client && !st->buf) {
+        /* NULL client buffer and nothing staged. Either the client dropped the
+         * frame (page left, source switched, nothing decoded yet) -- clear --
+         * or stage_image() consumed a webcam original on an earlier pass and
+         * the copy on screen is still the selected source -- keep it. */
+        if (s_img_copy && s_copy_src == 1 &&
+            app_config_get()->octoprint_image_source == 1) {
+            return;
+        }
         free_img_copy();
         set_hidden(s_w.img_hero, true);
         set_hidden(s_w.img_placeholder, false);
         return;
     }
 
-    uint16_t fit_w = 0, fit_h = 0;
-    if (!hero_fit_size(data->image_w, data->image_h, &fit_w, &fit_h)) {
-        return;   /* hero not laid out yet -- leave the screen as it is */
+    /* Refresh the box cache for the next stage pass (reads LVGL layout, hence
+     * display-lock only). */
+    lv_obj_update_layout(s_w.img_hero);
+    int32_t bw = lv_obj_get_content_width(s_w.img_hero);
+    int32_t bh = lv_obj_get_content_height(s_w.img_hero);
+    bool box_known = (bw >= 8 && bh >= 8);
+    if (box_known) {
+        s_box_w = (uint16_t)((bw > SCREEN_SIZE) ? SCREEN_SIZE : bw);
+        s_box_h = (uint16_t)((bh > SCREEN_SIZE) ? SCREEN_SIZE : bh);
     }
 
-    /* Re-scale on a new frame, on the first bind, and whenever the hero box
-     * moved (layout switch, screen rotation): a copy is valid for exactly one
-     * target size. */
-    if (data->new_image || !s_img_copy || fit_w != s_fit_w || fit_h != s_fit_h) {
-        /* 128-byte-aligned address AND size: no longer required now the scale
-         * is software, but kept -- it is one call and it keeps the buffer on
-         * L2 cache lines. */
-        size_t need = ((size_t)fit_w * (size_t)fit_h * 2u + 127u) & ~(size_t)127u;
-        if (need != s_img_copy_sz) {
-            lv_image_set_src(s_w.img_hero, NULL);
-            heap_caps_free(s_img_copy);
-            s_img_copy    = heap_caps_aligned_calloc(128, 1, need, MALLOC_CAP_SPIRAM);
-            s_img_copy_sz = s_img_copy ? need : 0;
-            s_fit_w       = 0;
-            s_fit_h       = 0;
-        }
+    if (st->buf && box_known) {
+        /* Commit: unbind, swap the pointer, rebind. Cheap -- the scale already
+         * happened. The retired buffer is freed after unlock by the caller. */
+        lv_image_set_src(s_w.img_hero, NULL);
+        *out_retired = s_img_copy;
+        s_img_copy   = st->buf;
+        st->consumed = true;
+        s_fit_w      = st->w;
+        s_fit_h      = st->h;
+        s_copy_src   = st->src;
 
-        if (s_img_copy) {
-            /* Bilinear resample, once, into the hero's exact box, so the
-             * descriptor binds 1:1 and LVGL never runs its software transform
-             * per draw-unit band (which is what showed as repeating horizontal
-             * seams -- PPA only accelerates 1.0x, so a zoomed lv_image is always
-             * the software path).
-             *
-             * Software, not ppa_scale_rgb565_into(): on device the SRM path both
-             * mirrors the frame vertically and resamples by pixel drop/duplicate,
-             * which banded the hero worse than LVGL's own zoom. The GOES/moon
-             * callers are calibrated around that behaviour, so it is left alone.
-             *
-             * Row order: jpeg_sw_decode_rgb565 converts stb output TOP-DOWN
-             * (jpeg_utils.c row loop, verified by reading it AND by the
-             * asymmetric test pattern on-device), so a straight copy renders
-             * upright. NO row reversal belongs on this path. The two past
-             * "mirrored with a straight copy" sightings were builds using the
-             * PPA SRM scale path, which genuinely flips its output; the one
-             * "upright with a reversal" sighting was a stale binary. Before
-             * changing orientation handling in ANY direction, re-run the mock
-             * test-pattern + /api/screenshot procedure on a fullclean build
-             * (see tests/octoprint_mock, fixture .orig backups). */
-            int64_t t0 = esp_timer_get_time();
-            sw_scale_rgb565_bilinear((const uint16_t *)data->image_buf,
-                                     (int)data->image_w, (int)data->image_h,
-                                     (uint16_t *)s_img_copy, (int)fit_w, (int)fit_h);
-            ESP_LOGD(TAG, "hero scale %ux%u -> %ux%u in %lld us",
-                     (unsigned)data->image_w, (unsigned)data->image_h,
-                     (unsigned)fit_w, (unsigned)fit_h,
-                     esp_timer_get_time() - t0);
+        s_img_dsc.data          = s_img_copy;
+        s_img_dsc.data_size     = (uint32_t)st->w * (uint32_t)st->h * 2u;
+        s_img_dsc.header.magic  = LV_IMAGE_HEADER_MAGIC;
+        s_img_dsc.header.cf     = LV_COLOR_FORMAT_RGB565;
+        s_img_dsc.header.w      = st->w;
+        s_img_dsc.header.h      = st->h;
+        s_img_dsc.header.stride = (uint32_t)st->w * 2u;
+        lv_image_set_src(s_w.img_hero, &s_img_dsc);
 
-            s_fit_w                 = fit_w;
-            s_fit_h                 = fit_h;
-            s_img_dsc.data          = s_img_copy;
-            s_img_dsc.data_size     = (uint32_t)fit_w * (uint32_t)fit_h * 2u;
-            s_img_dsc.header.magic  = LV_IMAGE_HEADER_MAGIC;
-            s_img_dsc.header.cf     = LV_COLOR_FORMAT_RGB565;
-            s_img_dsc.header.w      = fit_w;
-            s_img_dsc.header.h      = fit_h;
-            s_img_dsc.header.stride = (uint32_t)fit_w * 2u;
-            lv_image_set_src(s_w.img_hero, &s_img_dsc);
-        } else {
-            ESP_LOGW(TAG, "PSRAM alloc failed for %ux%u hero frame",
-                     (unsigned)fit_w, (unsigned)fit_h);
+        /* Contract (octoprint_client.h): the UI clears new_image under the
+         * client lock once the src is re-bound -- and ONLY then, so a failed
+         * stage or commit keeps the flag set and retries. */
+        data->new_image = false;
+
+        /* Verify the box the stage pass targeted is still this box: a fit is
+         * idempotent, so a changed result means the box moved in between.
+         * Commit anyway (a slightly off-size frame beats a lost one; CENTER
+         * shows it un-stretched) and rescale on the next cycle. */
+        uint16_t vw = 0, vh = 0;
+        s_need_rescale = !(fit_into_box(st->w, st->h, bw, bh, &vw, &vh) &&
+                           vw == st->w && vh == st->h);
+    } else if (st->buf) {
+        /* Box unlaid: discard (the caller frees) and rescale next cycle. */
+        s_need_rescale = true;
+    } else if (have_client && s_img_copy && box_known) {
+        /* Nothing staged this pass; check the on-screen copy against the box
+         * so a layout move re-fits the retained thumbnail. new_image alone
+         * already re-triggers the stage pass, no flag needed for it. */
+        uint16_t vw = 0, vh = 0;
+        if (!(fit_into_box(s_fit_w, s_fit_h, bw, bh, &vw, &vh) &&
+              vw == s_fit_w && vh == s_fit_h)) {
+            s_need_rescale = true;
         }
-        /* The client sets new_image on swap and documents that the UI clears it
-         * under the lock once the src is re-bound (octoprint_client.h). The
-         * caller holds that lock for us; const is cast away for this one flag. */
-        ((octoprint_data_t *)data)->new_image = false;
     }
 
     bool have = (s_img_copy != NULL);
@@ -825,12 +965,10 @@ static const char *state_text(const octoprint_data_t *data)
 
 /* ── Page update ──────────────────────────────────────────────────────── */
 
-void octoprint_page_update(const octoprint_data_t *data)
+/** Widget refresh. Runs under BOTH locks (client outside, display inside). */
+static void page_update_locked(octoprint_data_t *data, octo_staged_t *st,
+                               uint8_t **out_retired)
 {
-    if (!s_root || !data) {
-        return;
-    }
-
     const app_config_t *cfg = app_config_get();
 
     /* Overlay states, mirroring json_page_update: page-specific because they
@@ -916,8 +1054,9 @@ void octoprint_page_update(const octoprint_data_t *data)
      * link to the printer is down. Unknown/empty state stays hidden. */
     bool conn_error = (strncasecmp(data->conn_state, "Error", 5) == 0);
     bool conn_show  = closed || conn_error;
+    const char *conn_text = conn_error ? data->conn_state : "PRINTER OFFLINE";
     if (conn_show) {
-        set_txt(s_w.lbl_conn, conn_error ? data->conn_state : "PRINTER OFFLINE");
+        set_txt(s_w.lbl_conn, conn_text);
         if (s_w.lbl_conn) {
             lv_obj_set_style_text_color(s_w.lbl_conn, lv_color_hex(col_alert()), 0);
         }
@@ -934,13 +1073,25 @@ void octoprint_page_update(const octoprint_data_t *data)
      * is noise on every layout. */
     bool fault = (data->error_text[0] != '\0') || data->error || closed;
     if (fault) {
+        const char *fault_text;
         if (data->error_text[0] != '\0') {
-            set_txt(s_w.lbl_error, data->error_text);
+            fault_text = data->error_text;
         } else if (closed) {
-            set_txt(s_w.lbl_error, "PRINTER OFFLINE");
+            fault_text = "PRINTER OFFLINE";
         } else {
-            set_txt(s_w.lbl_error, "Printer error");
+            fault_text = "Printer error";
         }
+        /* The strip would only repeat the visible connection element (Bento
+         * places both in one header row), so suppress it when the texts match.
+         * When they differ -- a real error alongside a conn line -- both show,
+         * exactly as before. */
+        if (conn_show && strcmp(fault_text, conn_text) == 0) {
+            fault = false;
+        } else {
+            set_txt(s_w.lbl_error, fault_text);
+        }
+    }
+    if (fault) {
         if (s_w.lbl_error) {
             lv_obj_set_style_text_color(s_w.lbl_error, lv_color_hex(col_alert()), 0);
         }
@@ -956,7 +1107,37 @@ void octoprint_page_update(const octoprint_data_t *data)
     set_hidden(s_w.lbl_error, !fault);
 
     /* -- image ------------------------------------------------------------- */
-    image_update(data);
+    image_update(data, st, out_retired);
+}
+
+void octoprint_page_update(octoprint_data_t *data)
+{
+    if (!s_root || !data) {
+        return;
+    }
+
+    /* Phase A -- the caller holds the client lock, NOT the display lock: the
+     * bilinear resample runs here so it cannot stall the flush task. */
+    octo_staged_t staged;
+    stage_image(data, &staged);
+
+    /* Phase B -- display lock taken here, inside the client lock (lock order:
+     * client OUTSIDE, display INSIDE; never reverse). Only cheap widget and
+     * descriptor work happens under it. */
+    uint8_t *retired = NULL;
+    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+        page_update_locked(data, &staged, &retired);
+        bsp_display_unlock();
+    }
+
+    /* Free only after the display lock is released (established pattern), so
+     * the flush task can never be rendering from either buffer. */
+    if (retired) {
+        heap_caps_free(retired);
+    }
+    if (staged.buf && !staged.consumed) {
+        heap_caps_free(staged.buf);
+    }
 }
 
 /* ── Theme ────────────────────────────────────────────────────────────── */
@@ -1060,9 +1241,4 @@ void octoprint_page_apply_theme(void)
         return;
     }
     rebuild_in_place();
-}
-
-lv_obj_t *octoprint_page_get_obj(void)
-{
-    return s_root;
 }

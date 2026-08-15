@@ -51,6 +51,12 @@ static bool s_busy;
  * worker task, so it needs no lock of its own. */
 static TaskHandle_t s_task;
 
+/* Keep-alive slot for the flow's requests -- above all the 1 Hz decision poll,
+ * which would otherwise open a fresh connection every second for up to five
+ * minutes. Touched only by appkeys_task (the sole caller of appkey_http),
+ * while s_busy is held: created lazily, destroyed when the flow ends. */
+static http_fetch_conn_t *s_conn;
+
 static void set_state(octoprint_appkey_state_t state, const char *detail)
 {
     portENTER_CRITICAL(&s_mux);
@@ -120,6 +126,9 @@ static int appkey_http(const char *url, bool tls, const char *post_body,
     int status = 0;
     char *body = NULL;
     size_t len = 0;
+    if (s_conn == NULL) {
+        s_conn = http_fetch_conn_create();   /* NULL is fine: one-shot per request */
+    }
     http_fetch_opts_t opts = {
         .timeout_ms = APPKEY_HTTP_TIMEOUT_MS,
         .use_tls_bundle = tls,
@@ -132,6 +141,7 @@ static int appkey_http(const char *url, bool tls, const char *post_body,
         .max_response_bytes = 1024,
         .accept = "application/json",
         .post_body = post_body,
+        .conn = s_conn,
         .status_out = &status,
     };
     /* http_fetch_text leaves *out_body untouched on failure, so body must stay
@@ -363,6 +373,12 @@ static void appkeys_task(void *arg)
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         appkeys_flow();
+        /* Flow over (whatever the terminal state): release the keep-alive slot
+         * before clearing s_busy, so the next flow cannot race it. */
+        if (s_conn) {
+            http_fetch_conn_destroy(s_conn);
+            s_conn = NULL;
+        }
         portENTER_CRITICAL(&s_mux);
         s_busy = false;
         portEXIT_CRITICAL(&s_mux);

@@ -10,8 +10,11 @@
  * goes_client.c uses to hand a frame to the Image Display page.
  *
  * Single-owner: only octoprint_poll_task calls octoprint_client_poll(), so the
- * statics below (keep-alive slot, slow-tier timestamp, DLP latch, cached image
- * key) need no locking. Only the published octoprint_data_t is mutex-guarded.
+ * tier/cache statics below (slow-tier timestamp, DLP latch, cached image key)
+ * need no locking. The two exceptions: the published octoprint_data_t (its own
+ * mutex) and the keep-alive conn slots, whose destruction is serialised by
+ * s_conn_mux because page leave can require the UI coordinator task to destroy
+ * them while the poll task sleeps (drained-parked slots hold open sockets).
  */
 
 #include "octoprint_client.h"
@@ -37,9 +40,25 @@ static const char *TAG = "octoprint";
 #define OCTO_MAX_BASE_LEN      128            /* octoprint_url[128]            */
 #define OCTO_MAX_GCODE_PATH    128            /* longest job path we will encode */
 
-/* Persistent keep-alive slot, owned exclusively by octoprint_poll_task; lazily
- * created on the first poll. */
+/* Persistent keep-alive slot for the JSON fetches; lazily created on the
+ * first poll. A drained-parked slot holds an OPEN socket, and the whole poll
+ * loop is page-gated, so both slots are destroyed once the page is left (see
+ * conn_teardown_if_page_left) instead of living forever. */
 static http_fetch_conn_t *s_conn = NULL;
+
+/* Separate keep-alive slot for the binary image fetches. Not shared with
+ * s_conn: the snapshot may live on a third-party host, and text/binary slots
+ * must not be mixed (see http_fetch_binary_opts_t.conn). Created lazily on the
+ * first image fetch, destroyed with s_conn on page leave. */
+static http_fetch_conn_t *s_img_conn = NULL;
+
+/* Serialises conn-slot destruction against a poll in flight. The poll task
+ * holds this for the whole poll body; set_page_active() (UI coordinator task)
+ * try-takes it with zero wait to destroy the slots when the page is left while
+ * the poll task is asleep -- the only window the poll task's own exit teardown
+ * cannot cover, because the page-gated loop never runs again. Created in
+ * octoprint_client_init(). */
+static SemaphoreHandle_t s_conn_mux = NULL;
 
 /* Image pipeline gate. Set from the UI/coordinator task, read here -- atomic
  * because it crosses cores, same as the page-active flags in tasks.c. */
@@ -93,6 +112,7 @@ static bool   fetch_thumbnail(const char *base, const char *hdr,
 static bool   fetch_snapshot(const char *base, const char *hdr,
                              const char *snapshot_url,
                              uint8_t **out_rgb, uint16_t *out_w, uint16_t *out_h);
+static void   conn_teardown_if_page_left(void);
 
 // =============================================================================
 // Mutex helpers (mirror json_client_init/lock/unlock)
@@ -106,7 +126,6 @@ static bool   fetch_snapshot(const char *base, const char *hdr,
 static void reset_defaults(octoprint_data_t *data) {
     memset(data, 0, sizeof(octoprint_data_t));
     data->completion        = -1.0f;
-    data->m73_progress      = -1;
     data->print_time_s      = -1;
     data->print_time_left_s = -1;
     data->layer_current     = -1;
@@ -123,6 +142,7 @@ void octoprint_client_init(octoprint_data_t *data) {
     }
     reset_defaults(data);
     data->mutex = xSemaphoreCreateMutex();
+    s_conn_mux  = xSemaphoreCreateMutex();
 }
 
 bool octoprint_client_lock(octoprint_data_t *data, int timeout_ms) {
@@ -163,6 +183,19 @@ void octoprint_client_set_page_active(bool active, octoprint_data_t *data) {
     s_image_src    = -1;
     s_thumb_fail_key[0] = '\0';
     s_thumb_fails       = 0;
+
+    /* Destroy the keep-alive slots so a drained-parked OPEN socket (or its
+     * CLOSE_WAIT remnant after the server times it out) does not sit against
+     * the ~9-connection ceiling for as long as the page stays hidden -- the
+     * page-gated poll loop stops running, so nobody else would close it.
+     * Zero-wait try-take: if a poll is in flight it owns the slots, and its
+     * exit teardown (which re-reads the flag cleared above) destroys them
+     * instead. Never destroy without this mutex -- a fetch may be mid-flight
+     * on the handle. */
+    if (s_conn_mux && xSemaphoreTake(s_conn_mux, 0) == pdTRUE) {
+        conn_teardown_if_page_left();
+        xSemaphoreGive(s_conn_mux);
+    }
 }
 
 // =============================================================================
@@ -339,6 +372,13 @@ static cJSON *fetch_json(const char *base, const char *hdr, const char *path,
 /** Stream an image body into a PSRAM buffer. Caller heap_caps_free()s it. */
 static bool fetch_image_bytes(const char *url, const char *hdr,
                               uint8_t **out_buf, size_t *out_len) {
+    if (!s_img_conn) {
+        s_img_conn = http_fetch_conn_create();   /* NULL is fine: one-shot client */
+    }
+    /* hdr may be NULL here (third-party snapshot host, see fetch_snapshot's
+     * authority check): the reused handle's previous X-Api-Key is scrubbed by
+     * http_fetch before the request goes out, so sharing one slot across the
+     * thumbnail and snapshot fetches cannot leak the key. */
     http_fetch_binary_opts_t opts = {
         .timeout_ms = OCTO_HTTP_TIMEOUT_MS,
         .use_tls_bundle = (strncasecmp(url, "https", 5) == 0),
@@ -348,6 +388,7 @@ static bool fetch_image_bytes(const char *url, const char *hdr,
         .shrink_to_fit = true,
         .probe_overflow = true,
         .extra_header = (hdr && hdr[0] != '\0') ? hdr : NULL,
+        .conn = s_img_conn,
         .label = "OctoPrint image",
     };
     return http_fetch_binary(url, &opts, out_buf, out_len) == ESP_OK;
@@ -527,6 +568,29 @@ static bool fetch_snapshot(const char *base, const char *hdr,
     return ok;
 }
 
+/**
+ * Destroy both keep-alive slots once the page has been left. A drained-parked
+ * slot holds an OPEN socket, and the page-gated poll loop stops running when
+ * the page is hidden, so the slots must not outlive it. Caller MUST hold
+ * s_conn_mux. Two callers cover the two leave windows: every poll exit path
+ * (a poll in flight when the page deactivates cleans up on its way out) and
+ * set_page_active(false) via try-take (the poll task was asleep and will not
+ * run again). No-op while the page is active.
+ */
+static void conn_teardown_if_page_left(void) {
+    if (atomic_load(&s_page_active)) {
+        return;
+    }
+    if (s_img_conn) {
+        http_fetch_conn_destroy(s_img_conn);
+        s_img_conn = NULL;
+    }
+    if (s_conn) {
+        http_fetch_conn_destroy(s_conn);
+        s_conn = NULL;
+    }
+}
+
 // =============================================================================
 // Public API -- one poll cycle
 // =============================================================================
@@ -554,6 +618,13 @@ void octoprint_client_poll(const char *base_url, const char *api_key,
         }
     }
 
+    /* The conn slots are owned for the whole poll: set_page_active() try-takes
+     * this mutex to destroy them, and must never win mid-fetch. Uncontended in
+     * the common case; the UI holds it only for a microsecond destroy. */
+    if (s_conn_mux) {
+        xSemaphoreTake(s_conn_mux, portMAX_DELAY);
+    }
+
     /* Lazily create the keep-alive slot. On failure fall through with NULL --
      * http_fetch then uses a one-shot client per request. */
     if (!s_conn) {
@@ -579,6 +650,10 @@ void octoprint_client_poll(const char *base_url, const char *api_key,
             data->connected = false;
             octoprint_client_unlock(data);
         }
+        conn_teardown_if_page_left();
+        if (s_conn_mux) {
+            xSemaphoreGive(s_conn_mux);
+        }
         return;
     }
 
@@ -586,11 +661,6 @@ void octoprint_client_poll(const char *base_url, const char *api_key,
 
     const cJSON *job_obj = cJSON_GetObjectItem(job, "job");
     const cJSON *file    = cJSON_GetObjectItem(job_obj, "file");
-
-    /* Prefer the human-readable display name; fall back to the raw name. */
-    const cJSON *disp = cJSON_GetObjectItem(file, "display");
-    node_str(cJSON_IsString(disp) ? disp : cJSON_GetObjectItem(file, "name"),
-             local.file_name, sizeof(local.file_name));
 
     /* The metadata request needs the storage-relative path and its origin. */
     char file_path[OCTO_MAX_GCODE_PATH + 1];
@@ -613,9 +683,8 @@ void octoprint_client_poll(const char *base_url, const char *api_key,
     local.print_time_left_s = node_int(cJSON_GetObjectItem(prog, "printTimeLeft"), -1);
     cJSON_Delete(job);
 
-    local.connected       = true;
-    local.data_valid      = true;
-    local.last_success_ms = esp_timer_get_time() / 1000;
+    local.connected  = true;
+    local.data_valid = true;
 
     /* First cycle of a fresh connection: re-arm the plugin probe. */
     if (!s_was_connected) {
@@ -684,13 +753,6 @@ void octoprint_client_poll(const char *base_url, const char *api_key,
             const cJSON *print = cJSON_GetObjectItem(dlp, "print");
             node_str(cJSON_GetObjectItem(print, "estimatedEndTime"),
                      local.eta, sizeof(local.eta));
-            /* The plugin has shipped the M73 percentage both as a flat
-             * "m73progress" and nested under "m73"; accept either. */
-            const cJSON *m73 = cJSON_GetObjectItem(print, "m73progress");
-            if (!m73) {
-                m73 = cJSON_GetObjectItem(cJSON_GetObjectItem(print, "m73"), "progress");
-            }
-            local.m73_progress = node_int(m73, -1);
             cJSON_Delete(dlp);
         } else if (status == 404) {
             ESP_LOGI(TAG, "DisplayLayerProgress not installed; skipping until reconnect");
@@ -715,7 +777,8 @@ void octoprint_client_poll(const char *base_url, const char *api_key,
          * not one to drop plus another to fetch. If the new source has nothing
          * to show this cycle (preview selected with no job file loaded), the
          * drop still stands: otherwise the old webcam frame would sit on screen
-         * as if it were the preview. */
+         * as if it were the preview. The drop applies ONLY on a switch -- see
+         * the empty-path note below the chain. */
         const bool src_switched = (s_image_src >= 0 && s_image_src != want_src);
         drop_img = src_switched;
 
@@ -750,6 +813,10 @@ void octoprint_client_poll(const char *base_url, const char *api_key,
                 }
             }
         }
+        /* else (preview selected, file_path empty -- no job loaded): the held
+         * frame, the previous job's thumbnail, stays published on purpose as a
+         * "last print" view (user ruling 2026-08-14). Not a stale-frame bug;
+         * do not re-flag. */
     }
 
     // ---- Publish -------------------------------------------------------------
@@ -758,7 +825,9 @@ void octoprint_client_poll(const char *base_url, const char *api_key,
     if (octoprint_client_lock(data, 200)) {
         /* Carry the image ownership across the wholesale copy: the new buffer
          * (retiring the old one), nothing at all (source switch), or the
-         * existing one untouched. */
+         * existing one untouched. The carried buffer may legitimately be NULL
+         * for the webcam source: the UI consumes (frees+NULLs) the original
+         * under the lock once it has scaled it (see octoprint_client.h). */
         local.mutex = data->mutex;
         if (new_img) {
             retired         = data->image_buf;
@@ -802,6 +871,11 @@ void octoprint_client_poll(const char *base_url, const char *api_key,
     /* Freed only after the lock is released, so no reader can hold it. */
     if (retired) {
         heap_caps_free(retired);
+    }
+
+    conn_teardown_if_page_left();
+    if (s_conn_mux) {
+        xSemaphoreGive(s_conn_mux);
     }
 
     ESP_LOGD(TAG, "poll OK state=%s completion=%.1f layer=%d/%d dlp=%d",
