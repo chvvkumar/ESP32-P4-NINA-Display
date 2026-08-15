@@ -559,10 +559,12 @@ void nina_image_display_update(goes_data_t *data)
         nina_wait_overlay_hide();
         return;
     }
-    /* Copy the (optionally cropped) source row-by-row. The software JPEG decoder
-     * path sets vflip=true (its buffer is top<->bottom relative to the hardware
-     * decode path); reverse the source row index in that case so the logical
-     * buffer is upright. ox/oy apply the center-crop. */
+    /* Copy the (optionally cropped) source row-by-row. All current fetch paths
+     * set vflip=false: decode is top-down end to end (the historical "SW decode
+     * is flipped" belief was stb's flip-on-load flag reading uninitialized TLS
+     * garbage; see STBI_NO_THREAD_LOCALS in stb_image.c). The vflip mechanism is
+     * kept for any future source that genuinely delivers bottom-up buffers.
+     * ox/oy apply the center-crop. */
     size_t src_stride = (size_t)sw * 2;
     size_t dst_stride = (size_t)w * 2;
 

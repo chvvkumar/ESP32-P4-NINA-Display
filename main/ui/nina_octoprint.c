@@ -766,14 +766,14 @@ typedef struct {
  * hero worse than LVGL's own zoom. The GOES/moon callers are calibrated around
  * that behaviour, so it is left alone.
  *
- * Row order: jpeg_sw_decode_rgb565 converts stb output TOP-DOWN (jpeg_utils.c
- * row loop, verified by reading it AND by the asymmetric test pattern
- * on-device), so a straight copy renders upright. NO row reversal belongs on
- * this path. The two past "mirrored with a straight copy" sightings were
- * builds using the PPA SRM scale path, which genuinely flips its output; the
- * one "upright with a reversal" sighting was a stale binary. Before changing
- * orientation handling in ANY direction, re-run the mock test-pattern +
- * /api/screenshot procedure on a fullclean build (see tests/octoprint_mock,
+ * Row order: jpeg_sw_decode_rgb565 converts stb output TOP-DOWN, so a straight
+ * copy renders upright. NO row reversal belongs on this path. Every past
+ * "mirrored with a straight copy" sighting was stb's flip-on-load flag reading
+ * uninitialized TLS garbage on this task (proven on-device 2026-08-14; see
+ * STBI_NO_THREAD_LOCALS in stb_image.c), which vertically mirrored decodes per
+ * task, per build. With that fixed, decode polarity is deterministic. Before
+ * changing orientation handling in ANY direction, re-run the mock test-pattern
+ * + /api/screenshot procedure on a fullclean build (see tests/octoprint_mock,
  * fixture .orig backups).
  */
 static void stage_image(octoprint_data_t *data, octo_staged_t *st)

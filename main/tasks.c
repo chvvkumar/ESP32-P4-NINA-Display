@@ -1300,7 +1300,7 @@ static void image_prefetch_run(const app_config_t *cfg)
         }
     } else if (pf == 3) {                                       /* Custom image URL */
         if (cfg->custom_image_url[0] != '\0') {
-            err = goes_client_poll_url(cfg->custom_image_url, &goes_prefetch_data, true, "Custom", 3 /* Custom */);
+            err = goes_client_poll_url(cfg->custom_image_url, &goes_prefetch_data, false, "Custom", 3 /* Custom */);
         }
     } else if (pf == 2) {                                       /* Solar (SDO/AIA) */
         const char *url = solar_band_url(cfg->solar_band);
@@ -2079,13 +2079,15 @@ void goes_poll_task(void *arg)
                 }
                 fetch_err = ESP_ERR_INVALID_ARG;
             } else {
-                /* Custom uses the same software JPEG decode path as GOES/Solar,
-                 * which needs a vertical flip to display upright. */
-                fetch_err = goes_client_poll_url(cfg->custom_image_url, &goes_data, true, "Custom", 3 /* Custom */);
+                /* Custom uses the same software JPEG decode path as GOES/Solar.
+                 * Decode is top-down (see STBI_NO_THREAD_LOCALS in stb_image.c),
+                 * so no flip; the per-source custom_vflip/hflip toggles cover
+                 * genuinely inverted source material. */
+                fetch_err = goes_client_poll_url(cfg->custom_image_url, &goes_data, false, "Custom", 3 /* Custom */);
             }
         } else if (eff_src == 2) {                                  /* Solar (SDO/AIA) */
             const char *url = solar_band_url(cfg->solar_band);
-            /* All solar bands need a vertical flip to display upright (see solar_band_vflip). */
+            /* Solar bands are delivered upright; solar_band_vflip() returns false. */
             if (url && url[0]) {
                 fetch_err = goes_client_poll_url(url, &goes_data, solar_band_vflip(cfg->solar_band), solar_band_label(cfg->solar_band), 2 /* Solar */);
             } else {

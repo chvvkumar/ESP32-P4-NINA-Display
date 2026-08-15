@@ -121,10 +121,9 @@ const char *solar_band_label(uint8_t idx) { return idx < SOLAR_BAND_COUNT ? SOLA
 
 /* Solar source images (SDO/AIA via sdo.gsfc.nasa.gov, SOHO/HMI via
  * soho.nascom.nasa.gov) are delivered upright (north up, caption at bottom), so
- * no vertical flip is applied. Any build-environment orientation difference is
- * corrected by the per-source `solar_orientation` rotation setting, not here.
- * (A vertical flip is a mirror and would put the caption at the top and mirror
- * sunspot positions, which no rotation setting can undo.) */
+ * no vertical flip is applied. (Historical "build-environment orientation
+ * differences" were stb's flip-on-load flag reading uninitialized TLS garbage;
+ * see STBI_NO_THREAD_LOCALS in stb_image.c, fixed 2026-08-14.) */
 bool solar_band_vflip(uint8_t idx) { (void)idx; return false; }
 
 /* Per-band center-crop percentage (100 = no crop). AIA (0..9) and SOHO EIT
@@ -196,11 +195,13 @@ esp_err_t goes_client_poll(const char *region, goes_data_t *data)
              "https://cdn.star.nesdis.noaa.gov/GOES19/ABI/SECTOR/%s/GEOCOLOR/%s.jpg",
              region, size);
 
-    /* The decode+render pipeline on this panel applies a net vertical flip, so the
-     * NESDIS GOES JPEG must be flipped (vflip=true) to display north-up. This matches
-     * the Solar path, which also uses vflip=true. Verified on-device: vflip=false
-     * renders the image upside-down (issue #166 regression). */
-    return goes_client_poll_url(url, data, true, goes_region_name(region), 0 /* GOES */);
+    /* The decode pipeline is top-down: stb_image emits top-down rows and every
+     * copy in the render path preserves row order, so NESDIS GOES JPEGs (already
+     * north-up) need no flip. The historical vflip=true here was compensating
+     * stb's flip-on-load flag reading uninitialized TLS garbage on the fetch
+     * task (see STBI_NO_THREAD_LOCALS in stb_image.c, fixed 2026-08-14); with
+     * that fixed, vflip=true would mirror the image. */
+    return goes_client_poll_url(url, data, false, goes_region_name(region), 0 /* GOES */);
 }
 
 esp_err_t goes_client_poll_url(const char *url, goes_data_t *data, bool vflip, const char *label, int8_t src_kind)
