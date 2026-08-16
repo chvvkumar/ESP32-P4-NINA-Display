@@ -2236,7 +2236,7 @@
          strips the sentinel and preserves what it has. Clearing the field
          posts "" and really does clear the key. */
       data.octoprint_api_key=$('octoApiKey').value.trim();
-      data.octoprint_update_interval_s=parseInt($('octoInterval').value,10)||5;
+      data.octoprint_update_interval_s=parseInt($('octoInterval').value,10)||10;
       data.octoprint_layout=parseInt($('octoLayout').value,10)||0;
       data.octoprint_image_source=parseInt($('octoImageSource').value,10)||0;
       data.octoprint_snapshot_url=$('octoSnapshotUrl').value.trim();
@@ -2638,7 +2638,7 @@
       if($('octoprint_enabled')) $('octoprint_enabled').checked=!!data.octoprint_enabled;
       if($('octoUrl')) $('octoUrl').value=data.octoprint_url||'';
       if($('octoApiKey')) $('octoApiKey').value=data.octoprint_api_key||'';
-      if($('octoInterval')) $('octoInterval').value=data.octoprint_update_interval_s||5;
+      if($('octoInterval')) $('octoInterval').value=data.octoprint_update_interval_s||10;
       /* Layouts 1, 3 and 4 (the retired "Instrument dial", "Large numerals" and
          "Layer timeline") are still legal in stored config but have no option
          here; they resolve to Grid on the device, so show that rather than
