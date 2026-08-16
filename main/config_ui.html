@@ -1402,8 +1402,8 @@
       var alreadyWired=c.dataset.wired==='1';
       c.innerHTML='';
       /* [id, label, stop value]. Stop values are frozen page_ref ids: 0..11
-         anchored block, plus appended JSON (24) and Home Assistant (25) —
-         keep in sync with ARP_IDX_* in app_config.h. */
+         anchored block, plus appended JSON (24), Home Assistant (25) and
+         OctoPrint (26) — keep in sync with ARP_IDX_* in app_config.h. */
       var items=[
         ['arp_summary','Summary',0],
         ['arp_nina1','NINA 1',1],
@@ -1415,6 +1415,7 @@
         ['arp_clock','Clock',7],
         ['arp_json','JSON Display',24],
         ['arp_ha','Home Assistant',25],
+        ['arp_octoprint','3D Printer',26],
         ['arp_img_goes','Img: GOES',8],
         ['arp_img_moon','Img: Moon',9],
         ['arp_img_solar','Img: Solar',10],
@@ -2079,7 +2080,8 @@
 
     /* === Rotation slideshow list === */
     /* Single ordered slideshow list: membership == order.
-       data-arp-idx equals the slideshow stop id (0..11, 24=JSON, 25=HA).
+       data-arp-idx equals the slideshow stop id (0..11, 24=JSON, 25=HA,
+       26=OctoPrint).
        Saved array holds the indices of CHECKED pills in on-screen order,
        padded to 16 slots with 0xFF (255 = unused). */
     function getRotateOrder(){

@@ -21,6 +21,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "tasks.h"   /* data_task_handle */
+#include <stdatomic.h>
 
 static const char *TAG = "nav_arb";
 
@@ -47,6 +48,11 @@ static struct {
                                     * (NAV_SRC_HOLD while modal-frozen). Written
                                     * by resolve() (data task), read by
                                     * nav_arbiter_get_web_status() (httpd task). */
+    _Atomic bool content_ready_armed; /* set on commit, consumed by the first
+                                       * notify_content_ready for that page:
+                                       * one dwell restart per visit */
+    _Atomic bool dwell_restart;    /* restart requested; drained by tasks.c via
+                                    * nav_arbiter_take_dwell_restart */
 } s_arb;
 
 void nav_arbiter_init(void) {
@@ -59,6 +65,8 @@ void nav_arbiter_init(void) {
     s_arb.idle_claim_active = false;
     s_arb.pinned = false;
     s_arb.last_level = (uint8_t)NAV_SRC_DEFAULT;
+    s_arb.content_ready_armed = false;
+    s_arb.dwell_restart = false;
     s_arb.current_committed = nina_dashboard_get_active_page();
     ESP_LOGI(TAG, "nav arbiter init (committed page=%d)", s_arb.current_committed);
 }
@@ -84,6 +92,23 @@ void nav_arbiter_notify_modal_close(int64_t now_ms) {
 }
 
 void nav_arbiter_notify_slideshow_tick(void) { s_arb.slideshow_advance = true; }
+
+void nav_arbiter_notify_content_ready(int page_idx) {
+    if (page_idx != s_arb.current_committed) return;
+    if (!atomic_exchange(&s_arb.content_ready_armed, false)) return;
+    atomic_store(&s_arb.dwell_restart, true);
+    /* Restamp grace only while a USER window is still running for this page;
+     * restamping an expired window would re-pin the page. */
+    int64_t now_ms = esp_timer_get_time() / 1000;
+    if (s_arb.user_page == page_idx
+        && (now_ms - s_arb.user_stamp_ms) < (int64_t)app_config_get()->nav_grace_s * 1000) {
+        s_arb.user_stamp_ms = now_ms;
+    }
+}
+
+bool nav_arbiter_take_dwell_restart(void) {
+    return atomic_exchange(&s_arb.dwell_restart, false);
+}
 
 void nav_arbiter_set_pin(bool on, int abs_page, int64_t now_ms) {
     if (on) {
@@ -384,8 +409,18 @@ void nav_arbiter_resolve(int64_t now_ms) {
                     nina_wait_overlay_set_progress(-1);
                 }
             }
+            /* Arm one content-ready dwell restart for this visit. An image page
+             * that already shows a frame on arrival (retained/warm) is fully
+             * loaded now, so disarm: no restart wanted. has_image is read here
+             * while the display lock is still held (module convention). */
+            bool loaded_on_arrival = false;
+            if (PAGE_IDX_IS_IMAGE(desired)) {
+                image_page_t *ip = image_page_by_page_idx(desired);
+                loaded_on_arrival = ip && image_page_has_image(ip);
+            }
             bsp_display_unlock();
             s_arb.current_committed = desired;
+            atomic_store(&s_arb.content_ready_armed, !loaded_on_arrival);
             ESP_LOGI(TAG, "commit page=%d src=%d", desired, (int)src);
         }
     }

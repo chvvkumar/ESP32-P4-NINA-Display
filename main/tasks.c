@@ -2128,16 +2128,20 @@ main_loop:
 
         /* Slideshow-interval edge feeder. The navigation arbiter owns the actual
          * page advance; tasks.c only fires the tick when the configured interval
-         * elapses. resolve() (called once near the end of this cycle) consumes it. */
+         * elapses. resolve() (called once near the end of this cycle) consumes it.
+         * A content-ready dwell restart (picture finished loading) resets the
+         * interval so the loaded page gets its full dwell. */
         {
             app_config_t *r_cfg = app_config_get();
             if (r_cfg->auto_rotate_enabled && r_cfg->auto_rotate_interval_s > 0) {
+                if (nav_arbiter_take_dwell_restart()) last_rotate_ms = now_ms;
                 if (last_rotate_ms == 0) last_rotate_ms = now_ms;
                 if (now_ms - last_rotate_ms >= (int64_t)r_cfg->auto_rotate_interval_s * 1000) {
                     nav_arbiter_notify_slideshow_tick();
                     last_rotate_ms = now_ms;
                 }
             } else {
+                (void)nav_arbiter_take_dwell_restart();   /* drain: never leak a stale flag */
                 last_rotate_ms = 0;
             }
         }
@@ -2201,7 +2205,11 @@ main_loop:
              * rather than blocking the UI preserves lock-ordering discipline. */
             if (octoprint_client_lock(&octoprint_data, 15)) {
                 octoprint_page_update(&octoprint_data);
+                /* Any terminal image verdict (OK / no job / no thumbnail /
+                 * webcam failed) means the page has resolved what it shows. */
+                bool octo_loaded = (octoprint_data.image_status != OCTO_IMG_PENDING);
                 octoprint_client_unlock(&octoprint_data);
+                if (octo_loaded) nav_arbiter_notify_content_ready(PAGE_IDX_OCTOPRINT);
             }
         } else if (on_image) {
             /* Image page — repaint if the poller committed a newer frame (the

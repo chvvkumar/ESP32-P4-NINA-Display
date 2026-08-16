@@ -54,6 +54,16 @@ void nav_arbiter_notify_modal_close(int64_t now_ms);
 /** Advance the slideshow index on the interval timer (records an edge). */
 void nav_arbiter_notify_slideshow_tick(void);
 
+/* A page's content finished loading (image frame committed / first image
+ * pass landed). If page_idx is the page currently shown and no content-ready
+ * has been counted since it was shown, restart its dwell: request a
+ * slideshow-interval restart (consumed by tasks.c) and, if a USER grace window
+ * is currently running for that page, restamp it. At most once per page visit,
+ * so periodic refreshes cannot hold a page forever. Any task; no locks. */
+void nav_arbiter_notify_content_ready(int page_idx);
+/* tasks.c: returns true once per requested restart; caller resets last_rotate_ms. */
+bool nav_arbiter_take_dwell_restart(void);
+
 /** Re-resolve the ladder once and commit if the desired page differs from the
  *  current page. Called once per data_update_task cycle and on user/event wake.
  *  Must be called WITHOUT the LVGL lock held; the arbiter takes it internally
