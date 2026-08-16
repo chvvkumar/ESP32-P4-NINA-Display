@@ -367,27 +367,6 @@ lv_obj_t *octo_w_caption(lv_obj_t *parent, const char *text)
     return octo_w_label(parent, text, &lv_font_montserrat_14, &octo_style_label);
 }
 
-void octo_label_shadow(lv_obj_t *lbl)
-{
-    if (!lbl) {
-        return;
-    }
-    /* Radius 0 = hard offset copy, no blur (the blur task is skipped outright
-     * at lv_draw_blur() when the radius is 0). Setting the same values twice is
-     * a no-op, which is what makes this idempotent. */
-    lv_obj_set_style_drop_shadow_color(lbl, lv_color_black(), 0);
-    lv_obj_set_style_drop_shadow_opa(lbl, OCTO_SHADOW_OPA, 0);
-    lv_obj_set_style_drop_shadow_radius(lbl, 0, 0);
-    lv_obj_set_style_drop_shadow_offset_x(lbl, OCTO_SHADOW_DX, 0);
-    lv_obj_set_style_drop_shadow_offset_y(lbl, OCTO_SHADOW_DY, 0);
-    /* Make room for the offset copy inside the label's OWN coords. A
-     * LV_LABEL_LONG_CLIP label clips its draw to the text area, and a tight
-     * SIZE_CONTENT parent clips its children to bare coords, so without this
-     * padding the shadow is trimmed off the right and bottom edges. */
-    lv_obj_set_style_pad_right(lbl, OCTO_SHADOW_DX, 0);
-    lv_obj_set_style_pad_bottom(lbl, OCTO_SHADOW_DY, 0);
-}
-
 int32_t octo_text_width(const lv_font_t *font, const char *sample)
 {
     lv_point_t sz = { 0, 0 };
