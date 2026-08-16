@@ -284,8 +284,8 @@
         <div class="subsection danger-zone">
         <div class="subsection-title">Device Actions</div>
         <div class="row stack-mobile" style="margin-bottom:16px">
-          <button class="btn btn-outline" onclick="saveAndReboot()" style="flex:1">Reboot</button>
-          <button class="btn btn-danger" onclick="factoryReset()" style="flex:1">Factory Reset</button>
+          <button class="btn btn-outline" onclick="saveAndReboot(this)" style="flex:1">Reboot</button>
+          <button class="btn btn-danger" onclick="factoryReset(this)" style="flex:1">Factory Reset</button>
         </div>
         </div>
         <div class="subsection">
@@ -324,7 +324,7 @@
           When disabled, anyone on the network can control the device (reboot, factory reset, OTA, config change).
           Secrets (passwords, API keys, tokens) remain redacted in API responses either way.
         </p>
-        <button class="btn btn-primary" style="margin-top:12px" onclick="saveAuthEnabled()">Save</button>
+        <button class="btn btn-primary" style="margin-top:12px" onclick="saveAuthEnabled(this)">Save</button>
         <div id="auth_enabled_status" style="margin-top:10px;font-size:0.9em;"></div>
         </div>
         <!-- action parameters, not device settings — excluded from dirty/liveApply (see isNonSettingTarget) -->
