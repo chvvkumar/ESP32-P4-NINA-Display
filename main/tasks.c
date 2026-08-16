@@ -28,6 +28,7 @@
 #include "ui/nina_spotify.h"
 #include "ui/nina_graph_overlay.h"
 #include "ui/nina_info_overlay.h"
+#include "ui/nina_net_debug.h"
 #include "ui/nina_safety.h"
 #include "ui/nina_alerts.h"
 #include "ui/nina_session_stats.h"
@@ -58,6 +59,7 @@
 #include "freertos/queue.h"
 #include "ui/nina_thumbnail.h"
 #include "poll_task.h"
+#include "net_trace.h"
 #include "wifi_manager.h"   /* wifi_apply_tx_power — re-applied on screen-sleep wake */
 
 static const char *TAG = "tasks";
@@ -386,7 +388,8 @@ void input_task(void *arg) {
              * the page underneath it. */
             if (nina_dashboard_thumbnail_visible()
                 || nina_graph_visible()
-                || nina_info_overlay_visible()) {
+                || nina_info_overlay_visible()
+                || nina_net_debug_visible()) {
                 continue;
             }
             int total = nina_dashboard_get_total_page_count();
@@ -508,6 +511,7 @@ void instance_poll_task(void *arg) {
             ctx->client->connected = false;
             nina_connection_report_poll(idx, false);
             ESP_LOGD(TAG, "Poll[%d]: DNS failed, skipping", idx + 1);
+            ctx->last_heartbeat_ms = now_ms;  // offline host: retry at the tier interval, not every 5 s
             vTaskDelay(pdMS_TO_TICKS(5000));
             continue;
         }
@@ -595,6 +599,7 @@ void instance_poll_task(void *arg) {
             cycle_ms = HEARTBEAT_INTERVAL_MS;
         }
         // Use task notification to allow early wake (page change, WS event)
+        net_sched_note(pcTaskGetName(NULL), (uint32_t)(esp_timer_get_time() / 1000) + cycle_ms);
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(cycle_ms));
     }
 
@@ -1126,6 +1131,7 @@ void spotify_poll_task(void *arg)
             interval = backoff;
         }
         perf_timer_stop(&g_perf.spotify_poll_cycle);
+        net_sched_note(pcTaskGetName(NULL), (uint32_t)(esp_timer_get_time() / 1000) + interval);
         vTaskDelay(pdMS_TO_TICKS(interval));
     }
 }
@@ -1898,6 +1904,7 @@ main_loop:
             bool current_debug = app_config_get()->debug_mode;
             if (first_check || current_debug != last_debug_mode) {
                 perf_monitor_set_enabled(current_debug);
+                net_trace_set_verbose(current_debug);
                 /* Suppress verbose per-poll INFO logs when not debugging */
                 esp_log_level_t lvl = current_debug ? ESP_LOG_INFO : ESP_LOG_WARN;
                 esp_log_level_set("nina_client", lvl);
@@ -2121,16 +2128,20 @@ main_loop:
 
         /* Slideshow-interval edge feeder. The navigation arbiter owns the actual
          * page advance; tasks.c only fires the tick when the configured interval
-         * elapses. resolve() (called once near the end of this cycle) consumes it. */
+         * elapses. resolve() (called once near the end of this cycle) consumes it.
+         * A content-ready dwell restart (picture finished loading) resets the
+         * interval so the loaded page gets its full dwell. */
         {
             app_config_t *r_cfg = app_config_get();
             if (r_cfg->auto_rotate_enabled && r_cfg->auto_rotate_interval_s > 0) {
+                if (nav_arbiter_take_dwell_restart()) last_rotate_ms = now_ms;
                 if (last_rotate_ms == 0) last_rotate_ms = now_ms;
                 if (now_ms - last_rotate_ms >= (int64_t)r_cfg->auto_rotate_interval_s * 1000) {
                     nav_arbiter_notify_slideshow_tick();
                     last_rotate_ms = now_ms;
                 }
             } else {
+                (void)nav_arbiter_take_dwell_restart();   /* drain: never leak a stale flag */
                 last_rotate_ms = 0;
             }
         }
@@ -2194,7 +2205,11 @@ main_loop:
              * rather than blocking the UI preserves lock-ordering discipline. */
             if (octoprint_client_lock(&octoprint_data, 15)) {
                 octoprint_page_update(&octoprint_data);
+                /* Any terminal image verdict (OK / no job / no thumbnail /
+                 * webcam failed) means the page has resolved what it shows. */
+                bool octo_loaded = (octoprint_data.image_status != OCTO_IMG_PENDING);
                 octoprint_client_unlock(&octoprint_data);
+                if (octo_loaded) nav_arbiter_notify_content_ready(PAGE_IDX_OCTOPRINT);
             }
         } else if (on_image) {
             /* Image page — repaint if the poller committed a newer frame (the
@@ -2728,6 +2743,7 @@ main_loop:
                 cycle_ms = (uint32_t)app_config_get()->update_rate_s * 1000;
                 if (cycle_ms < 1000) cycle_ms = 1000;
             }
+            net_sched_note(pcTaskGetName(NULL), (uint32_t)(esp_timer_get_time() / 1000) + cycle_ms);
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(cycle_ms));
         }
     }

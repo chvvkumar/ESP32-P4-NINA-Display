@@ -27,6 +27,10 @@ CONFIG_ESP_HOSTED_DFLT_TASK_FROM_SPIRAM=y
 # during a corrupted regen), which bricks WiFi at boot (esp_wifi_init abort).
 CONFIG_ESP_HOSTED_CP_TARGET_ESP32C6=y
 CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE=y
+# Transport packet counters for the net_trace WiFi TX attribution overlay (main/net_trace.c).
+# The 300 s interval only throttles esp_hosted's own periodic stats log line.
+CONFIG_ESP_HOSTED_PKT_STATS=y
+CONFIG_ESP_HOSTED_PKT_STATS_INTERVAL_SEC=300
 CONFIG_CACHE_L2_CACHE_256KB=y
 CONFIG_CACHE_L2_CACHE_LINE_128B=y
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=10240
@@ -115,6 +119,9 @@ CONFIG_LWIP_TCP_FIN_WAIT_TIMEOUT=10000
 # Web server sets SO_LINGER on session close for fast socket reclaim
 # (web_server.c enable_so_linger); without this lwip returns ENOPROTOOPT
 CONFIG_LWIP_SO_LINGER=y
+
+# lwIP per-protocol xmit/recv counters; net_trace names unattributed TX by protocol
+CONFIG_LWIP_STATS=y
 
 # Disable LVGL demo modules — saves ~100-200KB flash, never used in production
 CONFIG_LV_USE_DEMO_WIDGETS=n

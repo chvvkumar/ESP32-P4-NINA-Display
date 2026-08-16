@@ -12,6 +12,7 @@
 #include "nina_thumbnail.h"
 #include "nina_graph_overlay.h"
 #include "nina_info_overlay.h"
+#include "nina_net_debug.h"
 #include "nina_sysinfo.h"
 #include "nina_summary.h"
 #include "nina_allsky.h"
@@ -605,6 +606,7 @@ void nina_dashboard_apply_theme(int theme_index) {
     ops_apply_theme(SYSINFO_PAGE_IDX(page_count));
     nina_graph_overlay_apply_theme();
     nina_info_overlay_apply_theme();
+    nina_net_debug_apply_theme();
     nina_thumbnail_apply_theme();
     nina_toast_apply_theme();
     nina_alerts_apply_theme();

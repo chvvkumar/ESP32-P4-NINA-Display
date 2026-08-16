@@ -1,7 +1,10 @@
 #include "web_server.h"
 #include "web_server_internal.h"
 #include "web_route_auth.h"
+#include "net_trace.h"
 #include <string.h>
+#include <stdio.h>
+#include "lwip/sockets.h"
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -276,6 +279,15 @@ typedef struct {
     route_auth_class_t auth;
 } route_entry_t;
 
+/* Runs the real handler, then re-notes so the response-body TX tail lands
+ * inside the 500 ms net_trace attribution window. */
+static esp_err_t run_handler_noted(const route_entry_t *entry, httpd_req_t *req)
+{
+    esp_err_t r = entry->uri.handler(req);
+    net_ev_note("httpd");
+    return r;
+}
+
 /**
  * @brief Single registration-point auth gate. Registered as the handler for
  * every route; the real handler is reached only after route_auth_allows()
@@ -285,6 +297,20 @@ typedef struct {
  */
 static esp_err_t auth_gate_handler(httpd_req_t *req)
 {
+    int fd = httpd_req_to_sockfd(req);
+    struct sockaddr_storage sa;
+    socklen_t sl = sizeof(sa);
+    char ip[INET6_ADDRSTRLEN] = "?";
+    if (fd >= 0 && getpeername(fd, (struct sockaddr *)&sa, &sl) == 0) {
+        if (sa.ss_family == AF_INET) {
+            inet_ntop(AF_INET, &((struct sockaddr_in *)&sa)->sin_addr, ip, sizeof(ip));
+        } else if (sa.ss_family == AF_INET6) {
+            inet_ntop(AF_INET6, &((struct sockaddr_in6 *)&sa)->sin6_addr, ip, sizeof(ip));
+        }
+    }
+    char detail[160];
+    snprintf(detail, sizeof(detail), "%.100s %s", req->uri, ip);
+    net_ev_note_detail("httpd", detail);
     const route_entry_t *entry = (const route_entry_t *)req->user_ctx;
     bool setup_mode = is_setup_mode();
     bool authed = false;
@@ -293,10 +319,10 @@ static esp_err_t auth_gate_handler(httpd_req_t *req)
         case ROUTE_PUBLIC:
             /* Never touch check_session() here: PUBLIC routes must not be
              * able to trip the X-Auth-Password lockout counter. */
-            return entry->uri.handler(req);
+            return run_handler_noted(entry, req);
         case ROUTE_SETUP_EXEMPT:
             if (setup_mode) {
-                return entry->uri.handler(req);
+                return run_handler_noted(entry, req);
             }
             authed = check_session(req);
             break;
@@ -309,7 +335,7 @@ static esp_err_t auth_gate_handler(httpd_req_t *req)
     if (!route_auth_allows(entry->auth, setup_mode, authed)) {
         return send_auth_required(req);
     }
-    return entry->uri.handler(req);
+    return run_handler_noted(entry, req);
 }
 
 void start_web_server(void)

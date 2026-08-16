@@ -44,6 +44,7 @@
 #include "esp_heap_caps.h"
 #include "cJSON.h"
 #include "perf_monitor.h"
+#include "net_trace.h"
 #include "nina_connection.h"
 #include "power_mgmt.h"
 #include "crash_log.h"
@@ -753,6 +754,8 @@ void app_main(void)
     nina_connection_init();
 
     perf_monitor_init(30);
+    net_trace_init();
+    net_trace_set_verbose(app_config_get()->debug_mode);  /* per-event log lines whenever debug is on */
     perf_monitor_set_enabled(app_config_get()->debug_mode);
     // Deterministic OOM catcher: fires on EVERY failed heap allocation,
     // including the sub-second transient SDIO RX DMA-SRAM exhaustion that the

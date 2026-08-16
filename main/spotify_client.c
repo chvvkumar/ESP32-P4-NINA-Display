@@ -22,6 +22,8 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include "freertos/task.h"
+#include "net_trace.h"
 
 static const char *TAG = "spotify_client";
 
@@ -119,6 +121,7 @@ static esp_err_t send_control_request(const char *url, esp_http_client_method_t 
     /* Set content length to 0 — empty body */
     esp_http_client_set_header(client, "Content-Length", "0");
 
+    net_ev_note(pcTaskGetName(NULL));
     esp_err_t err = esp_http_client_perform(client);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "HTTP request failed for %s: %s", url, esp_err_to_name(err));

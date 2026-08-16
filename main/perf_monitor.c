@@ -10,6 +10,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "cJSON.h"
+#include "net_trace.h"
 
 static const char *TAG = "perf";
 
@@ -902,6 +903,35 @@ char *perf_monitor_report_json(void)
     cJSON_AddItemToObject(network, "http_attempt0_fail_count", counter_to_json(&g_perf.http_attempt0_fail_count));
     cJSON_AddItemToObject(network, "ws_event_count",     counter_to_json(&g_perf.ws_event_count));
     cJSON_AddItemToObject(root, "network", network);
+
+    // Transport TX attribution (net_trace)
+    cJSON *net = cJSON_CreateObject();
+    {
+        uint32_t ntx = 0, nrx = 0, ndrop = 0, nfc = 0;
+        net_trace_totals(&ntx, &nrx, &ndrop, &nfc);
+        cJSON_AddBoolToObject(net, "available", net_trace_available());
+        cJSON_AddNumberToObject(net, "tx_pkts", ntx);
+        cJSON_AddNumberToObject(net, "rx_pkts", nrx);
+        cJSON_AddNumberToObject(net, "tx_drop", ndrop);
+        cJSON_AddNumberToObject(net, "flowctrl_on", nfc);
+        cJSON *srcs = cJSON_CreateObject();
+        for (size_t i = 0; i < net_trace_src_n(); i++) {
+            cJSON_AddNumberToObject(srcs, net_trace_src_name((uint8_t)i), net_trace_src_count((uint8_t)i));
+        }
+        cJSON_AddItemToObject(net, "sources", srcs);
+        net_sched_t sched[NET_TRACE_MAX_SCHED];
+        size_t nsched = net_sched_list(sched, NET_TRACE_MAX_SCHED);
+        cJSON *sarr = cJSON_CreateArray();
+        for (size_t i = 0; i < nsched; i++) {
+            cJSON *s = cJSON_CreateObject();
+            cJSON_AddStringToObject(s, "name", sched[i].name);
+            cJSON_AddNumberToObject(s, "period_ms", sched[i].period_ms);
+            cJSON_AddNumberToObject(s, "count", sched[i].count);
+            cJSON_AddItemToArray(sarr, s);
+        }
+        cJSON_AddItemToObject(net, "sched", sarr);
+    }
+    cJSON_AddItemToObject(root, "net", net);
 
     // JSON parsing
     cJSON *json_parsing = cJSON_CreateObject();

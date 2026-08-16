@@ -623,6 +623,36 @@
       padding: 14px 20px; border-top: 1px solid var(--border);
     }
 
+    /* === CONFIRM POPOVER (askConfirm) === */
+    .cfm-catch { position: fixed; inset: 0; z-index: 1300; }
+    .cfm {
+      position: fixed; z-index: 1301; width: min(300px, 88vw);
+      background: var(--elevated); border: 1px solid var(--border-em);
+      border-radius: 12px; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+      padding: 12px 14px;
+    }
+    .cfm[data-tone="caution"] { --cfm-tone: var(--warning); }
+    .cfm[data-tone="danger"] { --cfm-tone: var(--danger); }
+    .cfm[data-tone="caution"], .cfm[data-tone="danger"] { border-top: 3px solid var(--cfm-tone); }
+    .cfm::after {
+      content: ''; position: absolute; width: 12px; height: 12px;
+      left: var(--cfm-caret, 50%); margin-left: -6px; transform: rotate(45deg);
+      background: var(--elevated); border: 1px solid var(--border-em);
+    }
+    .cfm.above::after { bottom: -7px; border-top: none; border-left: none; }
+    .cfm.below::after {
+      top: -8px; border-bottom: none; border-right: none;
+      background: var(--cfm-tone, var(--elevated)); border-color: var(--cfm-tone, var(--border-em));
+    }
+    .cfm-title { font-weight: 600; font-size: 0.95rem; margin-bottom: 6px; }
+    .cfm-body { font-size: 0.88rem; color: var(--text-secondary); line-height: 1.45; }
+    .cfm-fine { font-size: 0.8rem; color: var(--text-hint); margin-top: 6px; line-height: 1.4; }
+    .cfm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+    .cfm-actions .btn { padding: 7px 12px; font-size: 0.85rem; min-height: 0; }
+    .cfm-ok { position: relative; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+    .cfm-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--danger-hover); opacity: 0.45; }
+    .cfm-lbl { position: relative; }
+
     /* === FILTER GRID === */
     .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: 10px; }
     .filter-chip {
@@ -1112,7 +1142,7 @@
   <!-- ======== SAVE BAR & TOAST ======== -->
   <div class="save-bar" id="saveBar">
     <span class="changes-hint">Unsaved changes</span>
-    <button class="btn btn-outline" onclick="reloadConfig()">Discard</button>
+    <button class="btn btn-outline" onclick="reloadConfig(this)">Discard</button>
     <button class="btn btn-primary" id="saveBtn" onclick="save()">Save</button>
   </div>
   <div class="toast" id="toast"></div>
@@ -1372,8 +1402,8 @@
       var alreadyWired=c.dataset.wired==='1';
       c.innerHTML='';
       /* [id, label, stop value]. Stop values are frozen page_ref ids: 0..11
-         anchored block, plus appended JSON (24) and Home Assistant (25) —
-         keep in sync with ARP_IDX_* in app_config.h. */
+         anchored block, plus appended JSON (24), Home Assistant (25) and
+         OctoPrint (26) — keep in sync with ARP_IDX_* in app_config.h. */
       var items=[
         ['arp_summary','Summary',0],
         ['arp_nina1','NINA 1',1],
@@ -1385,6 +1415,7 @@
         ['arp_clock','Clock',7],
         ['arp_json','JSON Display',24],
         ['arp_ha','Home Assistant',25],
+        ['arp_octoprint','3D Printer',26],
         ['arp_img_goes','Img: GOES',8],
         ['arp_img_moon','Img: Moon',9],
         ['arp_img_solar','Img: Solar',10],
@@ -2049,7 +2080,8 @@
 
     /* === Rotation slideshow list === */
     /* Single ordered slideshow list: membership == order.
-       data-arp-idx equals the slideshow stop id (0..11, 24=JSON, 25=HA).
+       data-arp-idx equals the slideshow stop id (0..11, 24=JSON, 25=HA,
+       26=OctoPrint).
        Saved array holds the indices of CHECKED pills in on-screen order,
        padded to 16 slots with 0xFF (255 = unused). */
     function getRotateOrder(){
@@ -3237,10 +3269,96 @@
       });
     }
 
-    function reloadConfig(){
+    /* === Confirm popover: replaces window.confirm() ===
+       askConfirm(anchorEl, {title, body, fine, ok, tone, hold}) -> Promise<boolean>.
+       Anchored above the trigger (flips below when cramped), one at a time,
+       click-away / Esc cancel, hold:true needs the OK button held ~1.2 s. */
+    var _cfm=null;
+    function askConfirm(anchor,o){
+      if(_cfm) _cfm.done(false);
+      if(!anchor){
+        try{ var ev=window.event, t=ev&&(ev.currentTarget||ev.target); anchor=t&&t.closest?(t.closest('button,select,input,label')||t):null; }catch(e){ anchor=null; }
+      }
+      if(anchor&&!(anchor instanceof Element)) anchor=null;
+      var catcher=document.createElement('div'); catcher.className='cfm-catch';
+      var pop=document.createElement('div'); pop.className='cfm';
+      pop.setAttribute('role','dialog'); pop.setAttribute('aria-modal','true');
+      pop.dataset.tone=o.tone||'neutral';
+      pop.innerHTML='<div class="cfm-title">'+escHtml(o.title||'')+'</div>'+
+        (o.body?'<div class="cfm-body">'+escHtml(o.body)+'</div>':'')+
+        (o.fine?'<div class="cfm-fine">'+escHtml(o.fine)+'</div>':'')+
+        '<div class="cfm-actions"><button type="button" class="btn btn-outline cfm-cancel">Cancel</button>'+
+        '<button type="button" class="btn '+(o.tone==='danger'?'btn-danger':'btn-primary')+' cfm-ok">'+
+        '<span class="cfm-fill"></span><span class="cfm-lbl">'+escHtml(o.ok||'OK')+'</span></button></div>';
+      document.body.appendChild(catcher); document.body.appendChild(pop);
+      var okBtn=pop.querySelector('.cfm-ok'), cancelBtn=pop.querySelector('.cfm-cancel');
+      var resolve, p=new Promise(function(r){ resolve=r; });
+      function place(){
+        var w=pop.offsetWidth, h=pop.offsetHeight, vw=window.innerWidth, vh=window.innerHeight, x, y;
+        if(anchor&&anchor.isConnected){
+          var r=anchor.getBoundingClientRect(), cx=r.left+r.width/2;
+          var above=(r.top-h-12>=8)||(r.bottom+h+12>vh);
+          y=above?r.top-h-12:r.bottom+12;
+          x=Math.max(8,Math.min(cx-w/2,vw-w-8));
+          pop.className='cfm '+(above?'above':'below');
+          pop.style.setProperty('--cfm-caret',Math.max(14,Math.min(cx-x,w-14))+'px');
+        }else{
+          x=(vw-w)/2; y=(vh-h)/2; pop.className='cfm';
+        }
+        pop.style.left=x+'px'; pop.style.top=Math.max(8,y)+'px';
+      }
+      function done(v){
+        if(_cfm!==me) return;
+        _cfm=null;
+        window.removeEventListener('scroll',place,true); window.removeEventListener('resize',place);
+        document.removeEventListener('keydown',onKey,true);
+        catcher.remove(); pop.remove();
+        try{ if(anchor&&anchor.focus) anchor.focus({preventScroll:true}); }catch(e){}
+        resolve(v);
+      }
+      function onKey(e){
+        if(e.key==='Escape'){ e.preventDefault(); e.stopPropagation(); done(false); }
+        else if(e.key==='Tab'){ e.preventDefault(); (document.activeElement===okBtn?cancelBtn:okBtn).focus(); }
+      }
+      var me={done:done}; _cfm=me;
+      catcher.addEventListener('click',function(){ done(false); });
+      cancelBtn.addEventListener('click',function(){ done(false); });
+      if(o.hold){
+        var HOLD=1200, fill=okBtn.querySelector('.cfm-fill'), timer=null;
+        var reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        var start=function(e){
+          if(timer) return;
+          if(e.pointerId!==undefined&&okBtn.setPointerCapture){ try{ okBtn.setPointerCapture(e.pointerId); }catch(x){} }
+          if(!reduce){ fill.style.transition='width '+HOLD+'ms linear'; fill.style.width='100%'; }
+          timer=setTimeout(function(){ fill.style.transition='none'; fill.style.width='100%'; done(true); },HOLD);
+        };
+        var stop=function(){
+          if(!timer) return;
+          clearTimeout(timer); timer=null;
+          fill.style.transition='none'; fill.style.width='0';
+        };
+        okBtn.addEventListener('pointerdown',function(e){ e.preventDefault(); start(e); });
+        ['pointerup','pointerleave','pointercancel'].forEach(function(t){ okBtn.addEventListener(t,stop); });
+        okBtn.addEventListener('keydown',function(e){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); if(!e.repeat) start(e); } });
+        okBtn.addEventListener('keyup',function(e){ if(e.key==='Enter'||e.key===' ') stop(); });
+        okBtn.addEventListener('click',function(e){ e.preventDefault(); });
+        okBtn.addEventListener('contextmenu',function(e){ e.preventDefault(); });
+      }else{
+        okBtn.addEventListener('click',function(){ done(true); });
+      }
+      document.addEventListener('keydown',onKey,true);
+      window.addEventListener('scroll',place,true); window.addEventListener('resize',place);
+      place();
+      cancelBtn.focus({preventScroll:true});
+      return p;
+    }
+
+    async function reloadConfig(el){
       /* Revert is device-wide: it drops every live-applied unsaved change,
          including previews another browser tab is still working on. */
-      if(!confirm('Discard live changes? This reverts unsaved changes made from any browser tab on this device.')) return;
+      if(!await askConfirm(el,{title:'Discard unsaved changes?',
+        body:'Settings changed in this or any other browser tab go back to what is saved on the device.',
+        ok:'Discard',tone:'danger'})) return;
       fetch('/api/config/revert',{method:'POST'}).then(r=>{
         if(!r.ok) throw new Error('Revert failed');
         return revertPageFragments();
@@ -3252,9 +3370,11 @@
       }).catch(e=>showToast('Discard failed: '+e.message,'error'));
     }
 
-    function saveAndReboot(){
+    async function saveAndReboot(el){
       if(!configLoadedGuard()) return;
-      if(!confirm('Apply changes and reboot now?')) return;
+      if(!await askConfirm(el,{title:'Apply changes and reboot?',
+        body:'The display restarts and is offline for about 20 seconds.',
+        ok:'Reboot',tone:'caution'})) return;
       postJson('/api/config',touchedPayload(getConfigData())).then(r=>{
         if(!r.ok) throw new Error('Save failed');
         return savePageFragments();
@@ -3269,14 +3389,16 @@
       });
     }
 
-    function saveAuthEnabled(){
+    async function saveAuthEnabled(el){
       var cb=$('auth_enabled');
       var status=$('auth_enabled_status');
       if(!cb) return;
       if(status){ status.textContent=''; status.style.color=''; }
       var want = !!cb.checked;
       if(!want){
-        if(!confirm('Disable authentication?\n\nAnyone on your network will be able to reboot, reconfigure, and update this device. Secrets will remain redacted.\n\nContinue?')){
+        if(!await askConfirm(el,{title:'Turn off web login?',
+          body:'Anyone on your network can reboot, reconfigure and update this display. Saved passwords and API keys become readable.',
+          ok:'Turn off login',tone:'danger'})){
           cb.checked = true;
           return;
         }
@@ -3336,9 +3458,10 @@
       };
     })();
 
-    function factoryReset(){
-      if(!confirm('Wipe all settings?')) return;
-      if(!confirm('Confirm Reset?')) return;
+    async function factoryReset(el){
+      if(!await askConfirm(el,{title:'Wipe all settings?',
+        body:'WiFi, telescope links, layouts and passwords are erased. The display restarts in setup mode.',
+        fine:'Hold the button until it fills.',ok:'Hold to wipe',tone:'danger',hold:true})) return;
       fetch('/api/factory-reset',{method:'POST'}).then(()=>{
         showToast('Factory reset. Rebooting...','success');
       }).catch(e=>{
@@ -3471,6 +3594,7 @@
               summary.style.display='block';
               summary.textContent=data.summary;
             }
+            installBtn._tag=data.tag;
             installBtn.style.display='block';
           }
         } else {
@@ -3677,9 +3801,12 @@
       $('changelogBackdrop').style.display='none';
     }
 
-    function installFromModal(){
-      if(!confirm('Install the update? The device will reboot after flashing.')) return;
+    async function installFromModal(){
       var btn=$('changelogInstall');
+      var ver=_updateInfo&&_updateInfo.tag;
+      if(!await askConfirm(btn,{title:ver?'Install version '+ver+'?':'Install this update?',
+        body:'The display reboots after flashing and is offline for about a minute.',
+        ok:'Install and reboot',tone:'caution'})) return;
       var label=btn.textContent;
       btn.disabled=true; btn.textContent='Installing\u2026';
       fetch('/api/ota-github',{method:'POST',body:'{}'}).then(function(r){return r.json();}).then(function(data){
@@ -3705,9 +3832,12 @@
       if(ebc) ebc.addEventListener('click',function(){ var b=$('fullEraseBanner'); if(b) b.style.display='none'; });
     })();
 
-    function startGithubOta(){
+    async function startGithubOta(){
       var btn=$('otaGithubBtn');
-      if(!confirm('Install the update? The device will reboot after flashing.')) return;
+      var ver=btn._tag||(_updateInfo&&_updateInfo.tag);
+      if(!await askConfirm(btn,{title:ver?'Install version '+ver+'?':'Install this update?',
+        body:'The display reboots after flashing and is offline for about a minute.',
+        ok:'Install and reboot',tone:'caution'})) return;
       btn.disabled=true; btn.textContent='Installing...';
       fetch('/api/ota-github',{method:'POST',body:'{}'}).then(function(r){return r.json();}).then(function(data){
         if(data.started){
@@ -3720,10 +3850,12 @@
       });
     }
 
-    function startOta(){
+    async function startOta(){
       var fileInput=$('otaFile');
       if(!fileInput.files.length) return;
-      if(!confirm('Flash new firmware? The device will reboot after update.')) return;
+      if(!await askConfirm($('otaBtn'),{title:'Flash this file?',
+        body:'The display reboots after flashing and is offline for about a minute.',
+        ok:'Flash and reboot',tone:'caution'})) return;
       var file=fileInput.files[0];
       var progressDiv=$('otaProgress');
       var fill=$('otaProgressFill');
@@ -3789,28 +3921,26 @@
        drops off the network mid-request. Confirm before the change reaches the
        radio, and put the recovery step in the prompt.
 
-       A <select> fires 'input' first, so the delegated listener on .content
-       has ALREADY scheduled liveApply()'s 400 ms debounce timer before this
-       runs -- the inline onchange is not ahead of it. The decline path works
-       for a different reason: confirm() blocks the single JS thread, so that
-       timer cannot fire while the dialog is up; _prev is restored before it
-       ever gets a chance. Then the delegated 'change' listener bubbles,
-       re-enters liveApply(), and clearTimeout()s the pending timer in favour
-       of a fresh one that reads the restored value -- which diffs clean, so
-       nothing is posted, and its checkDirty() retracts the save bar the
-       'input' pass had raised. */
-    function txPowerChanged(sel){
-      if(sel.value!=='0' && !confirm(
-        'Lower the WiFi transmit power to '+sel.value+' dBm?\n\n'+
-        'This applies right away. If the device is far from your router it may '+
-        'drop off the network and this page will stop responding.\n\n'+
-        'To recover, power-cycle the device: the change is not saved yet, so it '+
-        'is discarded on restart. Only press Save once you have confirmed this '+
-        'page still works.\n\nContinue?')){
-        sel.value=sel._prev;
-        return;
-      }
-      sel._prev=sel.value;
+       The <select>'s 'input' event has ALREADY armed liveApply()'s 400 ms
+       debounce (and marked the key touched) before this onchange runs, and
+       the popover does not block the JS thread, so that timer WILL fire while
+       the question is open. So: put the old value back synchronously, and drop
+       the touched mark on the next tick (after the delegated 'change' listener
+       has re-marked it), so the pending liveApply reads a clean diff and posts
+       nothing while checkDirty() retracts the save bar. Only after the user
+       confirms is the new value set and the same mark/dirty/apply path run. */
+    async function txPowerChanged(sel){
+      var want=sel.value;
+      if(want==='0'){ sel._prev=want; return; }
+      sel.value=sel._prev;
+      setTimeout(function(){ _touched.delete(sel.id); checkDirty(); },0);
+      var ok=await askConfirm(sel,{title:'Lower transmit power to '+want+' dBm?',
+        body:'Applies right away. If the display is far from your router this page may stop responding.',
+        fine:'Not saved yet: a power cycle restores the old value. Press Save only once this page still loads.',
+        ok:'Apply now',tone:'caution'});
+      if(!ok) return;
+      sel.value=want; sel._prev=want;
+      _touched.add(sel.id); checkDirty(); liveApply();
     }
 
     /* === Dirty State Detection === */
@@ -4735,9 +4865,10 @@
       else { syncLogsAutoRefresh(); }
     });
 
-    function clearLogs(){
-      if(!confirm('Clear the captured device logs? This cannot be undone.')) return;
+    async function clearLogs(){
       var btn=$('logsClearBtn');
+      if(!await askConfirm(btn,{title:'Clear device logs?',
+        body:'The log buffer on the display is emptied.',ok:'Clear logs',tone:'danger'})) return;
       btn.disabled=true; var prev=btn.textContent; btn.textContent='Clearing...';
       fetch('/api/logs/clear',{method:'POST'})
         .then(function(r){
@@ -4854,9 +4985,10 @@
         .finally(function(){ if(btn) btn.disabled=false; });
     }
 
-    function clearCrashlog(){
-      if(!confirm('Clear the crash history? This cannot be undone.')) return;
+    async function clearCrashlog(){
       var btn=$('logsClearBtn');
+      if(!await askConfirm(btn,{title:'Clear crash history?',
+        body:'Past reboot reasons are deleted.',ok:'Clear',tone:'danger'})) return;
       btn.disabled=true; var prev=btn.textContent; btn.textContent='Clearing...';
       fetch('/api/crashlog/clear',{method:'POST'})
         .then(function(r){
@@ -4892,9 +5024,10 @@
         .catch(function(){ card.style.display='none'; });
     }
 
-    function clearCoredump(){
-      if(!confirm('Clear the saved crash dump? This cannot be undone.')) return;
+    async function clearCoredump(){
       var btn=$('coredumpClearBtn');
+      if(!await askConfirm(btn,{title:'Delete saved crash dump?',
+        body:'The stored crash dump is deleted from flash.',ok:'Delete',tone:'danger'})) return;
       btn.disabled=true; var prev=btn.textContent; btn.textContent='Clearing...';
       fetch('/api/coredump/clear',{method:'POST'})
         .then(function(r){
