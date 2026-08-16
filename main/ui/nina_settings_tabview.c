@@ -14,8 +14,9 @@
 #include "settings_tab_system.h"
 #include "settings_color_picker.h"
 #include "nina_dashboard.h"
-#include "nina_dashboard_internal.h"   /* PAGE_IDX_SUMMARY, SETTINGS_PAGE_IDX, MAX_NINA_INSTANCES */
+#include "nina_dashboard_internal.h"   /* SYSINFO_PAGE_IDX, page_count, MAX_NINA_INSTANCES */
 #include "nina_nav_arbiter.h"          /* topology notify + Home Page USER claim */
+#include "page_registry.h"             /* page_ref_resolve - Home Page id -> index */
 #include "nina_connection.h"           /* nina_connection_force_disconnect */
 #include "tasks.h"                     /* poll_task_handles */
 #include "bsp/esp-bsp.h"               /* bsp_display_lock/unlock */
@@ -124,14 +125,12 @@ static void apply_nav_side_effects(const app_config_t *old_cfg, const app_config
     }
 
     /* Home Page (active_page_override) change — navigate there now via a USER
-     * claim. -1 (Auto) resolves to the Summary page; skip the Settings page. */
+     * claim. The field is a page_ref id (registry), NOT a page index: resolve it
+     * (availability + Settings excluded by the registry) before claiming. */
     if (new_cfg->active_page_override != old_cfg->active_page_override) {
-        int hp = new_cfg->active_page_override;
-        int claim = (hp < 0) ? PAGE_IDX_SUMMARY : hp;   /* -1 (Auto) -> Summary */
-        int total = nina_dashboard_get_total_page_count();
-        if (claim >= 0 && claim < total &&
-            claim != SETTINGS_PAGE_IDX(page_count)) {
-            nav_arbiter_submit_user(claim, esp_timer_get_time() / 1000, -1);
+        int idx = -1;
+        if (page_ref_resolve((page_ref_t)new_cfg->active_page_override, &idx)) {
+            nav_arbiter_submit_user(idx, esp_timer_get_time() / 1000);
         }
     }
 }

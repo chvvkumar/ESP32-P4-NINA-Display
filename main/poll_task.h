@@ -40,6 +40,13 @@ typedef struct {
 
     uint32_t backoff_initial_ms; /**< 0 = no failure backoff (retry at interval_ms()). */
     uint32_t backoff_max_ms;     /**< Ceiling the doubling saturates at; 0 = unbounded. */
+
+    /** Optional. Called once, on the poll task, each time the loop goes from
+     *  running to gated-off (OTA in progress or page_active false). Nothing
+     *  from poll_once() is in flight when it runs, so it is the safe point to
+     *  release resources that only the poll task may touch (the Moon page
+     *  uses it to drop the tgx texture and drag scratch). NULL = none. */
+    void (*on_park)(void *arg);
 } poll_loop_spec_t;
 
 /**

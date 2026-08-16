@@ -1,6 +1,6 @@
 /**
  * @file octoprint_layout_bento.c
- * @brief OctoPrint layout 0 — "Bento dashboard" (reference layout, mockup v1 rev 2).
+ * @brief OctoPrint layout 0 — "Grid dashboard" (reference layout, mockup v1 rev 2).
  *
  * Geometry only. Every widget comes from the shared library in
  * nina_octoprint_internal.h and every colour comes from octo_color(), so all
@@ -238,6 +238,6 @@ static void bento_build(lv_obj_t *page, octoprint_widgets_t *w)
 }
 
 const octoprint_layout_ops_t octoprint_layout_bento = {
-    .name  = "Bento",
+    .name  = "Grid",
     .build = bento_build,
 };

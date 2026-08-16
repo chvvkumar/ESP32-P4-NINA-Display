@@ -1,130 +1,14 @@
 #include "web_server_internal.h"
-#include "nina_image_display.h"
-#include "ui/nina_dashboard.h"
-#include "tasks.h"
-#include "bsp/esp-bsp.h"
-#include "bsp/display.h"
-#include "display_defs.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+#include "ui/nina_image_page.h"
+#include "ui/nina_dashboard.h"            /* nina_dashboard_get_active_page */
+#include "ui/nina_dashboard_internal.h"   /* PAGE_IDX_IS_IMAGE */
+#include "ui/nina_nav_arbiter.h"          /* nav_arbiter_notify_topology_changed */
 #include "esp_heap_caps.h"
 #include <string.h>
 
 /**
- * @brief Apply Image Display config changes live (preview), comparing prev to cur.
- *
- * Extracted from image_display_config_post_handler so other code paths (e.g. the
- * control registry) can apply image-display changes identically. The branching
- * and side-effects mirror the original handler exactly:
- *   - enable/overlay state pushed to the dashboard under the display lock;
- *   - source/band/region (or custom-URL while Custom is active, or force_fetch on
- *     Custom) -> manual-fetch flag + wake goes_poll_task (re-download + overlay);
- *   - Moon-only change -> wake goes_poll_task (local re-render, no overlay);
- *   - crop/orientation only -> local re-render under the display lock.
- *
- * @param prev        Full config snapshot taken BEFORE the field writes.
- * @param cur         Saved config snapshot (post-write).
- * @param force_fetch Force a re-fetch for the Custom source even if no field changed.
- */
-void image_display_apply_live(const app_config_t *prev, const app_config_t *cur, bool force_fetch)
-{
-    /* Live apply (preview): push display/task state immediately from the saved
-     * snapshot so changes take effect without waiting for a reload. */
-    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-        nina_dashboard_set_image_display_enabled(cur->image_display_enabled);
-        nina_image_display_set_overlay_visible(cur->image_display_show_overlay);
-        bsp_display_unlock();
-    }
-
-    /* Feature turned off: this is the release point for the retained decoded
-     * frame. goes_data keeps its last frame across page leave so a slideshow
-     * re-entry is never black (see the note in tasks.c's page-leave block), so
-     * disabling the page is the only place that ~1-2MB of PSRAM comes back. */
-    if (!cur->image_display_enabled && prev->image_display_enabled) {
-        goes_client_cleanup(&goes_data);
-    }
-
-    if (cur->image_display_enabled) {
-        bool source_band_region_changed =
-            cur->image_display_source != prev->image_display_source ||
-            cur->solar_band != prev->solar_band ||
-            strcmp(cur->goes_region, prev->goes_region) != 0 ||
-            (cur->image_display_source == 3 &&
-             strcmp(cur->custom_image_url, prev->custom_image_url) != 0) ||
-            (force_fetch && cur->image_display_source == 3);
-        bool crop_changed = cur->image_display_crop != prev->image_display_crop;
-        bool orient_changed = (cur->goes_orientation != prev->goes_orientation) ||
-                              (cur->solar_orientation != prev->solar_orientation) ||
-                              (cur->custom_orientation != prev->custom_orientation) ||
-                              (cur->goes_vflip   != prev->goes_vflip) ||
-                              (cur->goes_hflip   != prev->goes_hflip) ||
-                              (cur->solar_vflip  != prev->solar_vflip) ||
-                              (cur->solar_hflip  != prev->solar_hflip) ||
-                              (cur->custom_vflip != prev->custom_vflip) ||
-                              (cur->custom_hflip != prev->custom_hflip);
-
-        if (source_band_region_changed) {
-            /* Source/band/region needs a genuinely new image: flag the next
-             * fetch as manual so goes_poll_task shows the wait overlay during
-             * the re-download/decode, then wake the task. If crop also changed,
-             * the re-download path re-applies the new crop, so no separate local
-             * re-render is needed. */
-            atomic_store(&image_display_manual_fetch, true);
-            goes_ensure_task_running();
-            if (goes_task_handle) {
-                xTaskNotifyGive(goes_task_handle);
-            }
-        } else if (cur->image_display_source == 1 &&
-                   (cur->moon_bg_style != prev->moon_bg_style ||
-                    cur->moon_flip_u != prev->moon_flip_u ||
-                    cur->moon_flip_v != prev->moon_flip_v ||
-                    cur->moon_roll_offset != prev->moon_roll_offset ||
-                    cur->moon_yaw_offset != prev->moon_yaw_offset ||
-                    cur->moon_pitch_offset != prev->moon_pitch_offset ||
-                    cur->moon_north_up != prev->moon_north_up ||
-                    cur->moon_spin_mode != prev->moon_spin_mode ||
-                    cur->moon_spin_return_s != prev->moon_spin_return_s)) {
-            /* Moon background style changed only (source unchanged, so the
-             * source_band_region_changed branch above did not fire): wake the
-             * image-display task so its Moon branch re-renders via
-             * moon_sphere_render*() with
-             * the new cfg->moon_bg_style and commits it via goes_set_image() /
-             * nina_image_display_update(). The Moon branch (image_display_source
-             * == 1 in goes_poll_task) is purely local — it renders, commits, and
-             * `continue`s before ever reaching the manual-fetch / wait-overlay
-             * block, so it never shows the "Loading image..." overlay and never
-             * consumes image_display_manual_fetch. A bare task notify is therefore
-             * sufficient: do NOT set image_display_manual_fetch here, since the
-             * Moon branch would not clear it and it could leak a spurious overlay
-             * onto a later GOES/Solar fetch. A background-only change leaves moon
-             * illumination/orientation unchanged, so moon_anim_request stays clear
-             * and only a single still re-render occurs. This branch is mutually
-             * exclusive with the source-change branch above (that one runs only
-             * when source/band/region changed), so the task is woken at most once
-             * per request. */
-            goes_ensure_task_running();
-            if (goes_task_handle) {
-                xTaskNotifyGive(goes_task_handle);
-            }
-        } else if (crop_changed || orient_changed) {
-            /* Crop/full toggle or orientation change only: re-render the
-             * already-decoded frame locally
-             * instead of re-downloading. nina_image_display_update() locks
-             * goes_data internally but REQUIRES the display lock held by the
-             * caller (see tasks.c), so wrap both calls in bsp_display_lock. The
-             * force-redraw gate is a safe no-op if no image is cached or the page
-             * is not on the image path. */
-            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                nina_image_display_force_redraw();
-                nina_image_display_update(&goes_data);
-                bsp_display_unlock();
-            }
-        }
-    }
-}
-
-/**
- * @brief GET /api/image-display-config -- return Image Display config fields.
+ * @brief GET /api/image-display-config -- return the config fields of all four
+ *        image pages (GOES, Moon, Solar, Custom URL).
  */
 esp_err_t image_display_config_get_handler(httpd_req_t *req)
 {
@@ -136,12 +20,22 @@ esp_err_t image_display_config_get_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    cJSON_AddBoolToObject(root, "image_display_enabled", cfg->image_display_enabled);
-    cJSON_AddBoolToObject(root, "image_display_show_overlay", cfg->image_display_show_overlay);
-    cJSON_AddBoolToObject(root, "image_display_crop", cfg->image_display_crop);
+    cJSON_AddBoolToObject(root, "goes_enabled",         cfg->goes_enabled);
+    cJSON_AddBoolToObject(root, "moon_enabled",         cfg->moon_enabled);
+    cJSON_AddBoolToObject(root, "solar_enabled",        cfg->solar_enabled);
+    cJSON_AddBoolToObject(root, "custom_enabled",       cfg->custom_enabled);
+    cJSON_AddBoolToObject(root, "goes_show_overlay",    cfg->goes_show_overlay);
+    cJSON_AddBoolToObject(root, "moon_show_overlay",    cfg->moon_show_overlay);
+    cJSON_AddBoolToObject(root, "solar_show_overlay",   cfg->solar_show_overlay);
+    cJSON_AddBoolToObject(root, "custom_show_overlay",  cfg->custom_show_overlay);
+    cJSON_AddBoolToObject(root, "goes_crop",            cfg->goes_crop);
+    cJSON_AddBoolToObject(root, "solar_crop",           cfg->solar_crop);
+    cJSON_AddBoolToObject(root, "custom_crop",          cfg->custom_crop);
+    cJSON_AddNumberToObject(root, "solar_update_interval_s", cfg->solar_update_interval_s);
+    cJSON_AddNumberToObject(root, "moon_update_interval_s",  cfg->moon_update_interval_s);
+
     cJSON_AddStringToObject(root, "goes_region", cfg->goes_region);
     cJSON_AddNumberToObject(root, "goes_update_interval_s", cfg->goes_update_interval_s);
-    cJSON_AddNumberToObject(root, "image_display_source", cfg->image_display_source);
     cJSON_AddNumberToObject(root, "moon_bg_style", cfg->moon_bg_style);
     cJSON_AddNumberToObject(root, "moon_lat", cfg->moon_lat);
     cJSON_AddNumberToObject(root, "moon_lon", cfg->moon_lon);
@@ -171,7 +65,13 @@ esp_err_t image_display_config_get_handler(httpd_req_t *req)
 }
 
 /**
- * @brief POST /api/image-display-config -- update Image Display config fields and save to NVS.
+ * @brief POST /api/image-display-config -- update image page config fields.
+ *        Any subset of the keys may be posted; each is applied only when
+ *        present. Optional "preview" (true) applies live WITHOUT persisting;
+ *        without it the values are saved to NVS as before. Optional "source"
+ *        (0..3) selects which page's last fetch error to echo back; optional
+ *        "force_fetch" re-downloads Custom even when nothing changed (it drives
+ *        the live-apply step only, so it works in preview mode too).
  */
 esp_err_t image_display_config_post_handler(httpd_req_t *req)
 {
@@ -205,15 +105,12 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
 
     /* Work on a mutex-protected snapshot copy; never field-write the live config.
      *
-     * app_config_t is ~7.5 KB. Two copies (cfg + prev) on the HTTP task stack
-     * overflow it (panic/reboot), so both live in PSRAM. The by-value snapshot
-     * return uses an sret hidden pointer and writes straight into the
-     * dereferenced destination, so no large stack temporary is created. */
+     * app_config_t is ~8.6 KB. Two copies (cur + prev) on the HTTP task stack
+     * overflow it (panic/reboot), so both live in PSRAM. */
     app_config_t *cur  = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
-    /* Capture the full pre-write snapshot so image_display_apply_live() can tell,
-     * after saving, whether the change needs a new image (source/band/region ->
-     * re-download + wait overlay), a Moon-only re-render, or only a crop/orient
-     * toggle (-> local re-render of the cached frame, no download). */
+    /* Capture the full pre-write snapshot so the live-apply step below can
+     * tell, after saving, whether a page needs a new image (re-download + wait
+     * overlay), a local re-render, or nothing at all. */
     app_config_t *prev = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
     if (!cur || !prev) {
         heap_caps_free(cur);
@@ -225,9 +122,38 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     app_config_get_snapshot_into(cur);
     *prev = *cur;
 
-    JSON_TO_BOOL(root, "image_display_enabled", cur->image_display_enabled);
-    JSON_TO_BOOL(root, "image_display_show_overlay", cur->image_display_show_overlay);
-    JSON_TO_BOOL(root, "image_display_crop", cur->image_display_crop);
+    JSON_TO_BOOL(root, "goes_enabled",        cur->goes_enabled);
+    JSON_TO_BOOL(root, "moon_enabled",        cur->moon_enabled);
+    JSON_TO_BOOL(root, "solar_enabled",       cur->solar_enabled);
+    JSON_TO_BOOL(root, "custom_enabled",      cur->custom_enabled);
+    JSON_TO_BOOL(root, "goes_show_overlay",   cur->goes_show_overlay);
+    JSON_TO_BOOL(root, "moon_show_overlay",   cur->moon_show_overlay);
+    JSON_TO_BOOL(root, "solar_show_overlay",  cur->solar_show_overlay);
+    JSON_TO_BOOL(root, "custom_show_overlay", cur->custom_show_overlay);
+    JSON_TO_BOOL(root, "goes_crop",           cur->goes_crop);
+    JSON_TO_BOOL(root, "solar_crop",          cur->solar_crop);
+    JSON_TO_BOOL(root, "custom_crop",         cur->custom_crop);
+    cJSON *sinterval = cJSON_GetObjectItem(root, "solar_update_interval_s");
+    if (cJSON_IsNumber(sinterval)) {
+        int v = sinterval->valueint;
+        if (v < 300) v = 300;
+        if (v > 7200) v = 7200;
+        cur->solar_update_interval_s = (uint16_t)v;
+    }
+    cJSON *minterval = cJSON_GetObjectItem(root, "moon_update_interval_s");
+    if (cJSON_IsNumber(minterval)) {
+        int v = minterval->valueint;
+        if (v < 10) v = 10;
+        if (v > 3600) v = 3600;
+        cur->moon_update_interval_s = (uint16_t)v;
+    }
+    /* Which page's last fetch error to echo back (each web tab posts its own). */
+    int echo_src = -1;
+    cJSON *src_item = cJSON_GetObjectItem(root, "source");
+    if (cJSON_IsNumber(src_item) && src_item->valueint >= 0 && src_item->valueint < IMG_SRC_COUNT) {
+        echo_src = src_item->valueint;
+    }
+
     JSON_TO_STRING(root, "goes_region", cur->goes_region);
 
     cJSON *interval = cJSON_GetObjectItem(root, "goes_update_interval_s");
@@ -238,8 +164,6 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
         cur->goes_update_interval_s = (uint16_t)v;
     }
 
-    cJSON *src = cJSON_GetObjectItem(root, "image_display_source");
-    if (cJSON_IsNumber(src)) { int v = src->valueint; cur->image_display_source = (v >= 0 && v <= 3) ? (uint8_t)v : 0; }
     cJSON *bg = cJSON_GetObjectItem(root, "moon_bg_style");
     if (cJSON_IsNumber(bg)) { int v = bg->valueint; cur->moon_bg_style = (v >= 0 && v <= 3) ? (uint8_t)v : 0; }
     cJSON *mlat = cJSON_GetObjectItem(root, "moon_lat");
@@ -296,27 +220,47 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     cJSON *ff = cJSON_GetObjectItem(root, "force_fetch");
     if (cJSON_IsBool(ff)) { force_fetch = cJSON_IsTrue(ff); }
 
+    /* Preview: apply live, persist nothing (mirrors json_config_post_handler).
+     * The web UI's image tabs always post preview:true -- persisting here wrote
+     * the whole config snapshot to NVS, so one image toggle also committed every
+     * other tab's unsaved live-applied preview. Those keys are SETTINGS_TABLE
+     * rows, so the main /api/config Save persists them instead. Absent/false =>
+     * save as before (kept for the Control API and any non-UI client). */
+    bool preview = cJSON_IsTrue(cJSON_GetObjectItem(root, "preview"));
+
     cJSON_Delete(root);
 
-    /* Single atomic memcpy under mutex + NVS persist. */
-    app_config_save(cur);
+    /* Single atomic memcpy under mutex, + NVS persist unless preview. */
+    if (preview) {
+        app_config_apply_preview(cur);
+    } else {
+        app_config_save(cur);
+    }
 
-    /* Live apply (preview): push display/task state immediately from the saved
-     * snapshot so changes take effect without waiting for a reload. Shared with
-     * any other code path (e.g. the control registry) that mutates image-display
-     * config, so the apply logic lives in one place. */
-    image_display_apply_live(prev, cur, force_fetch);
+    /* Live apply (preview): create/destroy pages, wake pollers and re-render
+     * from the saved snapshot so changes take effect without waiting for a
+     * reload. Shared with config_trigger_side_effects and the control registry,
+     * so the apply logic lives in one place (nina_image_page.c). */
+    image_page_config_apply_live(prev, cur, force_fetch);
+
+    /* An optional page appeared/disappeared: same signal config_trigger_side_effects
+     * raises for the other optional pages, so the arbiter re-resolves. */
+    if (cur->goes_enabled   != prev->goes_enabled   ||
+        cur->moon_enabled   != prev->moon_enabled   ||
+        cur->solar_enabled  != prev->solar_enabled  ||
+        cur->custom_enabled != prev->custom_enabled) {
+        nav_arbiter_notify_topology_changed();
+    }
 
     heap_caps_free(prev);
     heap_caps_free(cur);
 
-    /* Surface the last-known fetch failure reason (if any) so the web UI can
-     * toast it. error_msg reflects the most recent completed fetch; a refetch
-     * triggered above runs asynchronously on the poll task. */
-    char err_copy[sizeof(((goes_data_t *)0)->error_msg)] = {0};
-    if (goes_data_lock(&goes_data, 200)) {
-        strlcpy(err_copy, goes_data.error_msg, sizeof(err_copy));
-        goes_data_unlock(&goes_data);
+    /* Surface the last-known fetch failure reason of the posting tab's page (if
+     * any) so the web UI can toast it. error_msg reflects the most recent
+     * completed fetch; a refetch triggered above runs asynchronously. */
+    char err_copy[sizeof(((image_frame_t *)0)->error_msg)] = {0};
+    if (echo_src >= 0) {
+        image_page_get_error(image_page_get((image_src_t)echo_src), err_copy, sizeof(err_copy));
     }
 
     cJSON *resp = cJSON_CreateObject();
@@ -326,50 +270,50 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
             cJSON_AddStringToObject(resp, "error_msg", err_copy);
         }
     }
-    /* A NULL object or a failed print both mean out of memory -> 500. The old
-     * fallback here answered a literal {"success":true}, which told the UI the
-     * save succeeded and hid the very error_msg this response exists to carry. */
+    /* A NULL object or a failed print both mean out of memory -> 500. */
     return send_json_response(req, resp);
 }
 
 /**
- * @brief POST /api/image-display/refresh -- force an immediate re-fetch of the
- *        currently configured image source (GOES/Moon/Solar/Custom), regardless
- *        of which source is active and without changing any config.
- *
- * Unlike the config POST handler's force_fetch (which only re-fetches the Custom
- * source), this flags the next fetch as manual so goes_poll_task shows the wait
- * overlay during the re-download/decode, then wakes the task for any source. The
- * Moon source's local re-render path also responds to the task notify. No-op when
- * the Image Display page is disabled.
+ * @brief POST /api/image-display/refresh [{"source":0..3}] -- force an immediate
+ *        re-fetch (or Moon re-render) of ONE image page with the loading overlay,
+ *        without changing any config. With no body or no "source" the currently
+ *        visible image page is refreshed (no-op success if none is on screen).
+ *        No-op when the chosen page is disabled.
  */
 esp_err_t image_display_refresh_post_handler(httpd_req_t *req)
 {
     REQUIRE_AUTH(req);
 
-    app_config_t *cfg = config_snapshot_for_request(req);
-    if (!cfg) {
-        return ESP_FAIL;
-    }
-    bool image_display_enabled = cfg->image_display_enabled;
-    heap_caps_free(cfg);
-
-    if (image_display_enabled) {
-        atomic_store(&image_display_manual_fetch, true);
-        goes_ensure_task_running();
-        if (goes_task_handle) {
-            xTaskNotifyGive(goes_task_handle);
+    int src = -1;
+    if (req->content_len > 0) {
+        cJSON *root = receive_json_body(req, 256);
+        if (root == NULL) {
+            return ESP_OK;   /* malformed body: error response already sent */
         }
+        cJSON *src_item = cJSON_GetObjectItem(root, "source");
+        if (cJSON_IsNumber(src_item)) {
+            src = src_item->valueint;
+            if (src < 0 || src >= IMG_SRC_COUNT) {
+                cJSON_Delete(root);
+                return send_400(req, "source must be 0 (GOES), 1 (Moon), 2 (Solar) or 3 (Custom)");
+            }
+        }
+        cJSON_Delete(root);
     }
 
-    /* Surface the last-known fetch failure reason (if any) so the web UI can
-     * toast it, mirroring the config POST handler. error_msg reflects the most
-     * recent completed fetch; the refetch triggered above runs asynchronously. */
-    char err_copy[sizeof(((goes_data_t *)0)->error_msg)] = {0};
-    if (goes_data_lock(&goes_data, 200)) {
-        strlcpy(err_copy, goes_data.error_msg, sizeof(err_copy));
-        goes_data_unlock(&goes_data);
+    image_page_t *p = NULL;
+    if (src >= 0) {
+        p = image_page_get((image_src_t)src);
+    } else {
+        int cur = nina_dashboard_get_active_page();
+        if (PAGE_IDX_IS_IMAGE(cur)) p = image_page_by_page_idx(cur);
     }
+    char err_copy[sizeof(((image_frame_t *)0)->error_msg)] = {0};
+    if (p && image_page_config_enabled(app_config_get(), p->src)) {
+        image_page_request_manual_fetch(p);
+    }
+    if (p) image_page_get_error(p, err_copy, sizeof(err_copy));
 
     cJSON *resp = cJSON_CreateObject();
     if (resp != NULL) {
@@ -378,8 +322,5 @@ esp_err_t image_display_refresh_post_handler(httpd_req_t *req)
             cJSON_AddStringToObject(resp, "error_msg", err_copy);
         }
     }
-    /* A NULL object or a failed print both mean out of memory -> 500. The old
-     * fallback here answered a literal {"success":true}, which told the UI the
-     * save succeeded and hid the very error_msg this response exists to carry. */
     return send_json_response(req, resp);
 }

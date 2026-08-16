@@ -19,7 +19,8 @@
  * @brief Build the OctoPrint page (full-screen, no header band).
  *
  * Renders in the layout selected by app_config_t::octoprint_layout
- * (0=bento 2=glass; 1, 3 and 4 are retired, render Bento and stay reserved).
+ * (0=bento, 2=glass, 5=overlay, 6=letterbox; 1, 3 and 4 are retired, render
+ * Bento and stay reserved).
  *
  * @param parent Parent LVGL container (main_cont)
  * @return The page root object (caller hides it initially). Mirrors json_page_create.
@@ -74,6 +75,21 @@ void octoprint_page_image_source_changed(void);
  * palette. No-op until the page has been created. Mirrors json_page_apply_theme.
  */
 void octoprint_page_apply_theme(void);
+
+/**
+ * @brief Show or hide the readings drawn over the picture.
+ *
+ * Sets the runtime readings state and applies it to the live tree. Only the
+ * layouts that build a readings layer (octo_w_overlay_layer) are affected; on
+ * Grid this is a no-op. The page also toggles this itself on a tap, which is
+ * screen-only and not persisted -- a config save calls this and re-asserts the
+ * stored value.
+ *
+ * Locking: takes the DISPLAY LOCK ITSELF. The caller must NOT hold it (unlike
+ * every other entry point here except octoprint_page_update). Safe before the
+ * page is created: the state is remembered and applied at build.
+ */
+void octoprint_page_set_overlay_visible(bool visible);
 
 /**
  * @brief Re-read the OctoPrint config and rebuild the widget tree.

@@ -145,11 +145,11 @@ void moon_drag_end(void)
 void moon_drag_reset(void)
 {
     portENTER_CRITICAL(&s_lock);
-    /* Hard reset of all drag state. Called on Image Display page leave so a visit
-     * that ends mid-settle (the render loop breaks on !image_display_page_active
-     * with a non-zero eased orientation) does not leave s_cur_* stale: otherwise
-     * the next visit sees moon_drag_settled() false and snaps the disc from the
-     * stale orientation to home on the first frame. */
+    /* Hard reset of all drag state. Called on Moon page leave. A visit that ends
+     * mid-settle (the render loop breaks when image_page_t.active clears, while
+     * the eased orientation is still non-zero) would otherwise leave s_cur_*
+     * stale, so the next visit sees moon_drag_settled() false and snaps the disc
+     * from the stale orientation to home on the first frame. */
     s_active       = false;
     s_was_rotate   = false;
     s_cur_yaw      = 0.0f;

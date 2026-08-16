@@ -1,0 +1,109 @@
+
+        <div class="card">
+          <div class="card-title"><span class="card-title-label">Moon <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+          <div class="help-popover"><div class="help-popover-title">Moon page</div><p>Adds a full-screen page with a 3D-rendered moon showing the current phase, drawn on the device from your location (System tab) and the current time; nothing is downloaded. Tap the moon to animate it, drag to rotate it.</p><p>Refresh Interval sets how often the view is redrawn to follow the sky. Background, lighting and the Moon Orientation card control how the disc looks and how it responds to dragging.</p></div>
+          <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+            <span class="toggle-label">Enable Moon page</span>
+            <label class="toggle"><input type="checkbox" id="moon_enabled" onchange="updateImagePageEnabledUI('image-moon');applyImagePage('image-moon');checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Adds the Moon page. The moon is drawn on the device; nothing is downloaded.</div>
+          <div id="moonFields">
+            <div class="toggle-row" style="margin-top:16px">
+              <span class="toggle-label">Show Overlay</span>
+              <label class="toggle"><input type="checkbox" id="moon_show_overlay" onchange="applyImagePage('image-moon');checkDirty()" checked><span class="toggle-track"></span></label>
+            </div>
+            <div class="field-hint">Phase name, illumination and rise/set times overlay on the display</div>
+            <div class="field" style="margin-top:16px">
+              <label class="field-label">Refresh Interval</label>
+              <select class="input" id="moonInterval" onchange="applyImagePage('image-moon');checkDirty()">
+                <option value="10">10 seconds</option>
+                <option value="30">30 seconds</option>
+                <option value="60" selected>1 minute</option>
+                <option value="300">5 minutes</option>
+                <option value="900">15 minutes</option>
+                <option value="3600">1 hour</option>
+              </select>
+              <div class="field-hint">How often the moon view is redrawn to track the sky.</div>
+            </div>
+            <div class="field" style="margin-top:16px">
+              <label class="field-label">Background</label>
+              <select class="input" id="moonBg" onchange="applyImagePage('image-moon');checkDirty()">
+                <option value="0">Plain black</option>
+                <option value="1">Starfield</option>
+                <option value="2">Soft glow</option>
+                <option value="3">Starfield + Glow</option>
+              </select>
+              <div class="field-hint">Sets what renders behind the moon disc (plain black, starfield, soft glow, or both).</div>
+            </div>
+            <div class="field-hint" style="margin-top:12px">The moon view uses the device location set on the System tab.</div>
+            <div class="field">
+              <label class="field-label">Moon drag lighting</label>
+              <select class="input" id="moonDragLight" onchange="applyImagePage('image-moon');checkDirty()">
+                <option value="0">True phase</option>
+                <option value="1">Explore (full-lit)</option>
+                <option value="2">Locked to surface</option>
+              </select>
+              <div class="field-hint">How the Moon is lit while you drag to rotate it. True phase keeps the real terminator; Explore lights the whole surface.</div>
+            </div>
+            <div class="card">
+              <div class="card-title"><span class="card-title-label">Moon Orientation <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+              <div class="help-popover"><div class="help-popover-title">Moon appearance and orientation</div><p>Corrects how the rendered moon is oriented and how it responds to dragging. Keep Moon upright (north-up) holds the moon's north pole at the top like phone apps and NASA imagery; turning it off tilts the disc to match how the real moon sits in your local sky as it moves. The device location set on the System tab is used for an accurate sky-tilt and terminator.</p><p>Flip horizontal (U) and Flip vertical (V) mirror the image for displays or mounts that reverse it. The Roll, Yaw, and Pitch offset sliders nudge the moon from its standard orientation, and Reset orientation returns them to that standard view.</p><p>Free-spin mode changes drag behavior. Off, the disc rubber-bands back to the live sky as soon as you release it. On, the disc holds your spin and eases back after the Return to live view timeout (3 to 60 seconds). Example: enable Free-spin, set the return to 15s, drag to inspect the far limb, and the view holds for 15 seconds before returning to live.</p></div>
+              <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+                <span class="toggle-label">Keep Moon upright (north-up)</span>
+                <label class="toggle"><input type="checkbox" id="moon_north_up" onchange="applyImagePage('image-moon');checkDirty()"><span class="toggle-track"></span></label>
+              </div>
+              <div class="field-hint" style="margin-bottom:12px">On: Moon's north pole stays up like apps/NASA. Off: tilts to match the real sky as the Moon moves.</div>
+              <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+                <span class="toggle-label">Flip horizontal (U)</span>
+                <label class="toggle"><input type="checkbox" id="moon_flip_u" onchange="applyImagePage('image-moon');checkDirty()"><span class="toggle-track"></span></label>
+              </div>
+              <div class="field-hint">Mirrors the moon left-to-right for reversed displays or mounts.</div>
+              <div class="toggle-row">
+                <span class="toggle-label">Flip vertical (V)</span>
+                <label class="toggle"><input type="checkbox" id="moon_flip_v" onchange="applyImagePage('image-moon');checkDirty()"><span class="toggle-track"></span></label>
+              </div>
+              <div class="field-hint">Mirrors the moon top-to-bottom.</div>
+              <div class="field" style="margin-top:16px">
+                <label class="field-label">Roll offset</label>
+                <div class="slider-group">
+                  <input type="range" class="slider" id="moon_roll_offset" min="-180" max="180" step="1" value="0" oninput="updateMoonOrientReadout('moon_roll');applyImagePage('image-moon');checkDirty()">
+                  <span class="slider-val" id="moon_roll_val">0&deg;</span>
+                </div>
+                <div class="field-hint">Rotates the moon in the screen plane, -180 to 180 degrees from default.</div>
+              </div>
+              <div class="field" style="margin-top:16px">
+                <label class="field-label">Yaw offset</label>
+                <div class="slider-group">
+                  <input type="range" class="slider" id="moon_yaw_offset" min="-180" max="180" step="1" value="0" oninput="updateMoonOrientReadout('moon_yaw');applyImagePage('image-moon');checkDirty()">
+                  <span class="slider-val" id="moon_yaw_val">0&deg;</span>
+                </div>
+                <div class="field-hint">Turns the moon left/right about its vertical axis, -180 to 180 degrees from default.</div>
+              </div>
+              <div class="field" style="margin-top:16px">
+                <label class="field-label">Pitch offset</label>
+                <div class="slider-group">
+                  <input type="range" class="slider" id="moon_pitch_offset" min="-90" max="90" step="1" value="0" oninput="updateMoonOrientReadout('moon_pitch');applyImagePage('image-moon');checkDirty()">
+                  <span class="slider-val" id="moon_pitch_val">0&deg;</span>
+                </div>
+                <div class="field-hint">Tilts the moon up or down, from -90 to 90 degrees relative to its standard orientation.</div>
+              </div>
+              <hr class="divider">
+              <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+                <span class="toggle-label">Free-spin mode</span>
+                <label class="toggle"><input type="checkbox" id="moon_spin_mode" onchange="updateMoonSpinUI();applyImagePage('image-moon');checkDirty()"><span class="toggle-track"></span></label>
+              </div>
+              <div class="field-hint" style="margin-bottom:12px">Off: dragged disc snaps back to the live sky immediately (rubber band). On: the disc holds your spin, then eases back after the timeout below.</div>
+              <div class="field" style="margin-top:16px" id="moonSpinReturnField">
+                <label class="field-label">Return to live view after</label>
+                <div class="slider-group">
+                  <input type="range" class="slider" id="moon_spin_return_s" min="3" max="60" step="1" value="3" oninput="updateMoonOrientReadout('moon_spin_return');applyImagePage('image-moon');checkDirty()">
+                  <span class="slider-val" id="moon_spin_return_val">3s</span>
+                </div>
+                <div class="field-hint">Only applies in free-spin mode.</div>
+              </div>
+              <div class="field" style="margin-top:16px">
+                <button onclick="resetMoonOrientation()" class="btn" id="moonOrientResetBtn" style="width:100%">Reset orientation</button>
+              </div>
+            </div>
+          </div>
+        </div>

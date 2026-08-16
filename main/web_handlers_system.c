@@ -26,7 +26,7 @@
 #include "ui/nina_dashboard.h"
 #include "ui/nina_nav_arbiter.h"
 #include "ui/page_registry.h"
-#include "control_registry.h"   /* control_page_current_id — image-source-aware page id */
+#include "control_registry.h"   /* control_page_current_id — page id */
 #include "power_mgmt.h"
 #include "lwip/sockets.h"       /* getpeername — client IP in the reboot reason */
 #include "lwip/inet.h"

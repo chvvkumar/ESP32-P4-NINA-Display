@@ -9,7 +9,7 @@
 #include "ui/nina_dashboard.h"
 #include "ui/nina_dashboard_internal.h"
 #include "ui/nina_nav_arbiter.h"
-#include "ui/nina_image_display.h"
+#include "ui/nina_image_page.h"
 #include "ui/nina_octoprint.h"
 #include "ui/nina_spotify.h"
 #include "ui/themes.h"
@@ -171,22 +171,22 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
             topology_changed = true;  /* optional page appeared/disappeared */
         }
     }
-    /* Image Display (GOES) enable/overlay/region/interval change */
-    if (new_cfg->image_display_enabled != old_cfg->image_display_enabled ||
-        new_cfg->image_display_show_overlay != old_cfg->image_display_show_overlay ||
-        strcmp(new_cfg->goes_region, old_cfg->goes_region) != 0 ||
-        new_cfg->goes_update_interval_s != old_cfg->goes_update_interval_s) {
-        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-            nina_dashboard_set_image_display_enabled(new_cfg->image_display_enabled);
-            nina_image_display_set_overlay_visible(new_cfg->image_display_show_overlay);
-            bsp_display_unlock();
-        }
-        if (new_cfg->image_display_enabled) {
-            goes_ensure_task_running();
-        }
-        if (new_cfg->image_display_enabled != old_cfg->image_display_enabled) {
-            topology_changed = true;  /* optional page appeared/disappeared */
-        }
+    /* Readings-over-picture default. octoprint_page_set_overlay_visible() takes
+     * the LVGL lock itself, so it is called OUTSIDE bsp_display_lock() -- and
+     * outside the block above for the same reason. Only the change case needs
+     * the call: a layout rebuild starts the new widget tree from the config
+     * value anyway. Bento (Grid) has no overlay layer and ignores it. */
+    if (new_cfg->octoprint_overlay_visible != old_cfg->octoprint_overlay_visible) {
+        octoprint_page_set_overlay_visible(new_cfg->octoprint_overlay_visible);
+    }
+    /* Image pages (GOES/Moon/Solar/Custom): one live-apply for all four; an
+     * enable toggle is a topology change (an optional page appeared/disappeared). */
+    image_page_config_apply_live(old_cfg, new_cfg, false);
+    if (new_cfg->goes_enabled != old_cfg->goes_enabled ||
+        new_cfg->moon_enabled != old_cfg->moon_enabled ||
+        new_cfg->solar_enabled != old_cfg->solar_enabled ||
+        new_cfg->custom_enabled != old_cfg->custom_enabled) {
+        topology_changed = true;
     }
     /* Weather config change — invalidate stale data and force refresh */
     if (new_cfg->weather_provider != old_cfg->weather_provider ||
@@ -417,7 +417,7 @@ esp_err_t page_post_handler(httpd_req_t *req)
         int total = nina_dashboard_get_total_page_count();
         if (page < 0) page = PAGE_IDX_SUMMARY;          /* -1 (Auto) -> Summary USER claim */
         if (page >= 0 && page < total) {
-            nav_arbiter_submit_user(page, esp_timer_get_time() / 1000, -1);
+            nav_arbiter_submit_user(page, esp_timer_get_time() / 1000);
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                 nina_dashboard_show_page_animated(page, 0, 0);
                 bsp_display_unlock();

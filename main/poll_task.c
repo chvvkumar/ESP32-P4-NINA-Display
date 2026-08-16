@@ -26,11 +26,19 @@ void poll_loop_run(const poll_loop_spec_t *spec, void *arg) {
 
     uint32_t backoff_ms = 0; /* 0 = not currently backing off */
 
+    bool parked = true;    /* start "parked": on_park fires only on running->parked
+                            * transitions, not on a task that starts gated off */
+
     while (1) {
         /* Suspend during OTA updates or while gated inactive (page not visible). */
         while (ota_in_progress || (spec->page_active && !*spec->page_active)) {
+            if (!parked) {
+                parked = true;
+                if (spec->on_park) spec->on_park(arg);
+            }
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
         }
+        parked = false;
 
         bool ok = spec->poll_once(arg);
 

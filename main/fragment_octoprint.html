@@ -1,7 +1,7 @@
 
       <div class="card">
         <div class="card-title"><span class="card-title-label">OctoPrint <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
-        <div class="help-popover"><div class="help-popover-title">3D Printer page</div><p>Adds a page that shows what your 3D printer is doing: print progress, time remaining, hotend and bed temperatures, and layer info. The data comes from OctoPrint, so the device needs the address of your OctoPrint server and an API key from it.</p><p>Create the key in OctoPrint under Settings, Application Keys, or use the global API key under Settings, API. Paste it into the API Key field below.</p><p>Page Layout changes how the printer page looks on the device. The Image setting picks what is shown alongside the numbers: the model preview embedded in the sliced file, or a live picture from the printer camera.</p></div>
+        <div class="help-popover"><div class="help-popover-title">3D Printer page</div><p>Adds a page that shows what your 3D printer is doing: print progress, time remaining, hotend and bed temperatures, and layer info. The data comes from OctoPrint, so the device needs the address of your OctoPrint server and an API key from it.</p><p>Enter the address, then press Authenticate: OctoPrint opens in a new tab and asks you to allow this display. The key is stored here as soon as you approve. If that does not work for your OctoPrint, create a key yourself under Settings, Application Keys, and paste it into the manual field below.</p><p>Page Layout changes how the printer page looks on the device. The Image setting picks what is shown alongside the numbers: the model preview embedded in the sliced file, or a live picture from the printer camera.</p></div>
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
           <span class="toggle-label">Enable 3D Printer page</span>
           <!-- No inline handler: the delegated input/change listener on .content
@@ -19,22 +19,23 @@
           <input type="text" class="input" id="octoUrl" maxlength="127" placeholder="http://octopi.lan">
           <div class="field-hint">Address of your OctoPrint server, the same one you open in a browser. Include http:// or https:// and a port number if you use one.</div>
         </div>
-        <div class="field">
-          <label class="field-label" for="octoApiKey">API Key</label>
+        <!-- Action controls, not settings: data-no-dirty keeps anything in here
+             from raising the save bar or firing a live apply. -->
+        <div class="field" data-no-dirty>
+          <button type="button" class="btn btn-outline full" id="octoKeyBtn" onclick="octoRequestKey()">Authenticate</button>
+          <div class="field-hint" id="octoKeyStatus" style="margin-top:8px"></div>
+          <div class="field-hint">Opens OctoPrint in a new tab. Sign in if asked and press Allow. The key is stored on this display as soon as you approve; the address above is saved when you press Authenticate.</div>
+        </div>
+        <details class="field">
+          <summary class="field-hint" style="cursor:pointer;margin-top:0">Enter an API key manually instead</summary>
+          <label class="field-label" for="octoApiKey" style="margin-top:8px">API Key</label>
           <!-- A saved key comes back from the device as a row of asterisks, never
                the real value. Selecting the field on focus means the first
                keystroke replaces those asterisks instead of appending to them,
                which would otherwise be stored as the key. -->
           <input type="password" class="input" id="octoApiKey" maxlength="63" placeholder="paste key only" autocomplete="off" onfocus="this.select()">
-          <div class="field-hint">Create one in OctoPrint under Settings, Application Keys. Without it OctoPrint refuses the requests and the page stays empty. A key you have already saved is not shown again: leave the field untouched to keep it, or type a new key to replace it.</div>
-        </div>
-        <!-- Action controls, not settings: data-no-dirty keeps anything in here
-             from raising the save bar or firing a live apply. -->
-        <div class="field" data-no-dirty>
-          <button type="button" class="btn btn-outline full" id="octoKeyBtn" onclick="octoRequestKey()">Get a key from OctoPrint</button>
-          <div class="field-hint" id="octoKeyStatus" style="margin-top:8px"></div>
-          <div class="field-hint">Asks OctoPrint to issue a key for this display, so you do not have to create and copy one yourself. Fill in the OctoPrint Address above and press Save first, then approve the request when OctoPrint asks. The key is saved for you as soon as you approve.</div>
-        </div>
+          <div class="field-hint">Create one in OctoPrint under Settings, Application Keys, and paste it here. Leave the field untouched to keep a saved key.</div>
+        </details>
         <div class="field">
           <label class="field-label" for="octoInterval">Update Interval</label>
           <input type="number" class="input" id="octoInterval" min="2" max="300" step="1" placeholder="5">
@@ -47,10 +48,21 @@
         <div class="field">
           <label class="field-label" for="octoLayout">Page Layout</label>
           <select class="input" id="octoLayout">
-            <option value="0">Bento grid</option>
+            <option value="0">Grid</option>
             <option value="2">Immersive image</option>
+            <option value="5">Floating overlay</option>
+            <option value="6">Letterbox</option>
           </select>
-          <div class="field-hint">Changes the look of the printer page on the device. Bento grid arranges the numbers in cards; Immersive image fills the screen with the picture and lays the readings over it. The same values are shown either way.</div>
+          <div class="field-hint">Changes the look of the printer page on the device. Grid arranges the numbers in cards. Immersive image fills the screen with the picture and lays the readings over it. Floating overlay fills the screen with the picture and floats the readings directly on it, with no panels. Letterbox shows the picture between a solid top bar and a solid bottom bar, with no text over the picture. The same values are shown either way.</div>
+        </div>
+        <div class="field">
+          <div class="toggle-row">
+            <span class="toggle-label">Show readings over picture</span>
+            <!-- No inline handler: the delegated input/change listener on .content
+                 runs checkDirty() + the debounced live apply for this control. -->
+            <label class="toggle"><input type="checkbox" id="octoOverlayVisible" checked><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Off hides the status, temperatures and progress readings so only the picture shows. Tapping the printer page on the device shows or hides them temporarily; this setting is what it returns to. Not used by the Grid layout.</div>
         </div>
         <div class="field">
           <label class="field-label" for="octoImageSource">Image</label>
@@ -77,7 +89,8 @@
    execution a no-op if the fragment is refetched after a failed load.
 
    Depends on the shell for: $, showToast, checkDirty, and the two dirty-compare
-   baselines (_cfgCache, loadedConfig). */
+   baselines (_cfgCache, loadedConfig). The shell's populateTab_octoprint fills
+   octoApiKey with the redacted sentinel when a key is saved. */
 (function(){
   if(window.__octoTabJs) return;
   window.__octoTabJs=true;
@@ -88,6 +101,11 @@
   var OCTO_GIVE_UP_MS=5.5*60*1000;
 
   var octoTimer=null, octoDeadline=0, octoDialogOpened=false;
+  /* The tab opened by the Authenticate click. Held only until it has been
+     navigated once (to the approval page, or to OctoPrint itself on an older
+     server that reports no approval page); after that it is dropped and never
+     touched again. Null when the popup was blocked. */
+  var octoWin=null, octoTypedUrl='';
 
   function octoStatus(text,color){
     var el=$('octoKeyStatus');
@@ -96,9 +114,23 @@
     el.style.color=color||'';
   }
 
-  /* Offer the approval page as a link as well as opening it: a window.open()
-     from a poll callback is not a user gesture, so a popup blocker can stop it
-     with no error. */
+  /* Idle-time status line: reflects whether the device has a key. A saved key
+     is populated as the redacted sentinel, so any non-empty value counts. Only
+     runs while no flow is being watched so it never overwrites a live message.
+     There is no populate hook the fragment can see, so a light interval covers
+     a populate that lands after the fragment (deep-link boot on a slow link). */
+  function octoRefreshKeyStatus(){
+    if(octoTimer) return;
+    var f=$('octoApiKey');
+    if(!f) return;
+    var t=f.value?'Key saved':'No key yet';
+    var el=$('octoKeyStatus');
+    if(el && el.textContent!==t && (el.textContent==='' || el.textContent==='Key saved' || el.textContent==='No key yet')) octoStatus(t);
+  }
+
+  /* Offer the approval page as a link too: covers the blocked-popup case, and
+     the case where the tab was already sent to OctoPrint before the approval
+     page address arrived. */
   function octoShowDialogLink(url){
     var el=$('octoKeyStatus');
     if(!el) return;
@@ -110,10 +142,24 @@
     el.appendChild(a);
   }
 
+  /* Navigate the tab exactly once, then let go of it. */
+  function octoNavigate(url){
+    if(!octoWin || !url) return;
+    var w=octoWin; octoWin=null;
+    try{ w.opener=null; w.location=url; }catch(e){}
+  }
+
+  /* Close the tab only if it has not been navigated yet (still our blank page). */
+  function octoCloseWin(){
+    if(!octoWin) return;
+    try{ octoWin.close(); }catch(e){}
+    octoWin=null;
+  }
+
   function octoOpenDialog(url){
     if(!url || octoDialogOpened) return;
     octoDialogOpened=true;
-    try{ window.open(url,'_blank','noopener'); }catch(e){}
+    octoNavigate(url);
     octoShowDialogLink(url);
   }
 
@@ -121,7 +167,7 @@
     var b=$('octoKeyBtn');
     if(!b) return;
     b.disabled=!!on;
-    b.textContent=on?'Waiting for approval...':'Get a key from OctoPrint';
+    b.textContent=on?'Waiting for approval...':'Authenticate';
   }
 
   function octoStop(){
@@ -129,32 +175,37 @@
     octoBusy(false);
   }
 
-  /* The device has already stored the key, so the field must show the same
-     redacted sentinel a reload would show -- WITHOUT the page thinking the user
-     edited it. That means moving both dirty-compare baselines along with the
-     field: loadedConfig is what configDiff() compares against, and _cfgCache is
-     what getConfigData() seeds from and what a later re-populate would restore.
-     Patch either one alone and the next Save or live apply would post a stale
-     value straight back over the key we just received. */
-  function octoAdoptSavedKey(){
-    var f=$('octoApiKey');
-    if(f) f.value='********';
+  /* The device has already stored a value, so the page must treat it as the
+     loaded baseline -- WITHOUT thinking the user edited it. That means moving
+     both dirty-compare baselines: loadedConfig is what configDiff() compares
+     against, and _cfgCache is what getConfigData() seeds from and what a later
+     re-populate would restore. Patch either one alone and the next Save or live
+     apply would post a stale value straight back over what the device holds. */
+  function octoAdoptSaved(name,val){
     try{
-      if(typeof _cfgCache!=='undefined' && _cfgCache) _cfgCache.octoprint_api_key='********';
+      if(typeof _cfgCache!=='undefined' && _cfgCache) _cfgCache[name]=val;
       if(typeof loadedConfig!=='undefined' && loadedConfig){
         var lc=JSON.parse(loadedConfig);
-        lc.octoprint_api_key='********';
+        lc[name]=val;
         loadedConfig=JSON.stringify(lc);
       }
     }catch(e){}
     if(typeof checkDirty==='function') checkDirty();
   }
 
-  var OCTO_FALLBACK=' You can still create a key in OctoPrint under Settings, Application Keys and paste it into the field above.';
+  /* The field must show the same redacted sentinel a reload would show. */
+  function octoAdoptSavedKey(){
+    var f=$('octoApiKey');
+    if(f) f.value='********';
+    octoAdoptSaved('octoprint_api_key','********');
+  }
+
+  var OCTO_FALLBACK=' You can still create a key in OctoPrint and paste it under "Enter an API key manually instead" below.';
 
   /* Returns true once the flow has finished, one way or another. */
   function octoHandle(d){
     if(!d || !d.status){
+      octoCloseWin();
       octoStatus('This display did not answer. Sign in again, then retry.','#f87171');
       return true;
     }
@@ -165,27 +216,38 @@
         octoStatus('Contacting OctoPrint...');
         return false;
       case 'waiting':
-        if(!octoDialogOpened) octoStatus('Waiting for you to approve the request in OctoPrint.');
+        if(!octoDialogOpened){
+          /* Older OctoPrint reports no approval page: send the tab to OctoPrint
+             itself so the user can find the request there. */
+          octoNavigate(octoTypedUrl);
+          octoStatus('Waiting for you to approve the request in OctoPrint.');
+        }
         return false;
       case 'granted':
+        octoCloseWin();
         octoAdoptSavedKey();
-        octoStatus('Access granted. The key is saved, nothing else to do here.','#4ade80');
+        octoStatus('Key saved','#4ade80');
         if(typeof showToast==='function') showToast('OctoPrint key saved','success');
         return true;
       case 'denied':
+        octoCloseWin();
         octoStatus((d.detail||'The request was declined or expired in OctoPrint.')+OCTO_FALLBACK,'#f87171');
         return true;
       case 'unsupported':
+        octoCloseWin();
         octoStatus((d.detail||'This OctoPrint cannot hand out keys this way.')+OCTO_FALLBACK,'#f87171');
         return true;
       case 'timeout':
+        octoCloseWin();
         octoStatus('Nobody approved the request in time.'+OCTO_FALLBACK,'#f87171');
         return true;
       case 'error':
+        octoCloseWin();
         octoStatus((d.detail||'Something went wrong.')+OCTO_FALLBACK,'#f87171');
         return true;
       default:
         /* 'idle' (the display restarted mid-flow) and anything unrecognised. */
+        octoCloseWin();
         octoStatus('The request ended unexpectedly. Try again.'+OCTO_FALLBACK,'#f87171');
         return true;
     }
@@ -194,6 +256,7 @@
   function octoPoll(){
     octoTimer=null;
     if(Date.now()>octoDeadline){
+      octoCloseWin();
       octoStatus('Gave up waiting for a decision.'+OCTO_FALLBACK,'#f87171');
       octoStop();
       return;
@@ -220,42 +283,69 @@
       return;
     }
     octoDialogOpened=false;
+    octoTypedUrl=typed;
     octoDeadline=Date.now()+OCTO_GIVE_UP_MS;
-    /* Disable the button before the address check below, not after: that check
-       is asynchronous, and a second click during it would start a second flow. */
+
+    /* Open the tab NOW, inside the click, while it still counts as a user
+       gesture; a window.open() from a fetch callback is what popup blockers
+       stop. It is parked on a blank page and sent to OctoPrint once the device
+       reports where to go. */
+    octoWin=null;
+    try{ octoWin=window.open('about:blank','_blank'); }catch(e){}
+    if(octoWin){
+      try{
+        octoWin.document.write('<title>OctoPrint</title><p style="font-family:sans-serif;padding:24px">Contacting OctoPrint...</p>');
+        octoWin.document.close();
+      }catch(e){}
+    }
+
+    /* Disable the button before the request goes out: a second click during
+       the round trip would start a second flow. */
     octoBusy(true);
     octoStatus('Contacting OctoPrint...');
 
-    /* The device asks the address it has SAVED, not the one on screen. Without
-       this check, editing the address and requesting a key without saving would
-       quietly ask the previous server and store a key for the wrong printer.
-       It has to compare against a FRESH read: a Save only marks the shell's
-       cached config stale, so comparing against the cached copy would refuse
-       every request made after a save until the page was reloaded. fetchConfig()
-       returns the cached copy while it is still good and re-reads the device
-       once it is stale, which is exactly what is wanted here. Any failure to
-       read skips the check rather than blocking the request. */
-    var checked=(typeof fetchConfig==='function')?fetchConfig():Promise.resolve(null);
-    checked.catch(function(){ return null; }).then(function(cfg){
-      if(cfg && (cfg.octoprint_url||'')!==typed){
-        octoStatus('Press Save first, then request the key. The address on screen has not been saved yet.','#f87171');
-        octoStop();
-        return;
-      }
-      fetch('/api/octoprint/appkey-request',{method:'POST'})
-        .then(function(r){ return r.json().catch(function(){ return null; }); })
-        .then(function(d){
+    /* The device saves the address it is given here and asks that server, so
+       the address on screen never has to be saved first. */
+    fetch('/api/octoprint/appkey-request',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({url:typed})
+      })
+      .then(function(r){
+        return r.json().catch(function(){ return null; }).then(function(d){
+          /* 400 (bad address) and 413 answer {"error":...} with no flow state;
+             a 409 (flow already running) carries the live state and falls
+             through to octoHandle like any other reply. */
+          if(!r.ok && !(d&&d.status)){
+            octoCloseWin();
+            octoStatus((d&&(d.error||d.detail||d.message))||'Check the OctoPrint address.','#f87171');
+            octoStop();
+            return;
+          }
+          /* The device stored the address; move the baselines so the save bar
+             does not go dirty over a value that is already saved. Only on a
+             success status: a 409 (flow already running) or 500 did not save. */
+          if(r.ok) octoAdoptSaved('octoprint_url',typed);
           if(octoHandle(d)){ octoStop(); return; }
           octoTimer=setTimeout(octoPoll,OCTO_POLL_MS);
-        })
-        .catch(function(){
-          octoStatus('Could not reach this display. Sign in again, then retry.','#f87171');
-          octoStop();
         });
-    });
+      })
+      .catch(function(){
+        octoCloseWin();
+        octoStatus('Could not reach this display. Sign in again, then retry.','#f87171');
+        octoStop();
+      });
   }
 
   /* Published for the inline onclick in the markup above. */
   window.octoRequestKey=octoRequestKey;
+
+  /* Idle status line: right after the shell's populate (which runs in the same
+     task as this script), then as any later populate lands, and whenever the
+     user edits the field. */
+  setTimeout(octoRefreshKeyStatus,0);
+  setInterval(octoRefreshKeyStatus,1000);
+  var kf=$('octoApiKey');
+  if(kf) kf.addEventListener('input',octoRefreshKeyStatus);
 })();
 </script>

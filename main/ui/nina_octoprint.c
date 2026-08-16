@@ -4,7 +4,7 @@
  *
  * This file owns EVERYTHING that is not geometry: the shared styles, the widget
  * factories, the layout dispatch table, the update path, the image handoff, the
- * empty state and the theme application. The two octoprint_layout_*.c files
+ * empty state and the theme application. The four octoprint_layout_*.c files
  * only arrange widgets (see nina_octoprint_internal.h for the seam contract).
  *
  * Locking: the caller of octoprint_page_update() holds octoprint_data_t::mutex
@@ -22,8 +22,10 @@
  * then commit it — descriptor rewrite + lv_image_set_src rebind + pointer swap,
  * the cheap part — under the display lock, and free the retired copy after
  * unlocking. The copy is produced by the bilinear scaler at the hero's exact
- * pixel box, so the descriptor binds 1:1 and LVGL never runs its software
- * transform (which is what put the horizontal seams on the hero). It is re-made
+ * pixel box -- fitted inside it, or sized to cover it when the layout sets
+ * octoprint_layout_ops_t::image_cover -- so the descriptor binds 1:1 and LVGL
+ * never runs its software transform (which is what put the horizontal seams on
+ * the hero); a cover-sized copy is cropped by the hero's own clip. It is re-made
  * only when the frame or the box changes, not per update. The target box is the
  * one cached by the previous commit pass (reading LVGL layout needs the display
  * lock); a first frame or a moved box costs one skipped update cycle, not a
@@ -62,6 +64,13 @@ lv_style_t octo_style_value;
 lv_style_t octo_style_accent;
 static bool s_styles_ready = false;
 
+/* Readings-over-picture visibility. RUNTIME state, deliberately not config: a
+ * tap on the page flips it for this session only, while a config save calls
+ * octoprint_page_set_overlay_visible() and re-asserts the stored value. Seeded
+ * from app_config at page create; a rebuild (theme or layout change) keeps
+ * whatever the user last tapped. */
+static bool s_readings_shown = true;
+
 /* ── Page state ───────────────────────────────────────────────────────── */
 
 static lv_obj_t *s_root      = NULL;  /* survives refresh_config */
@@ -97,6 +106,18 @@ static int8_t s_copy_src = -1;
 static uint16_t s_box_w        = 0;
 static uint16_t s_box_h        = 0;
 static bool     s_need_rescale = true;
+
+/* Scaling mode of the active layout (octoprint_layout_ops_t::image_cover):
+ * true = scale to COVER the hero box and let the host crop the excess, false =
+ * aspect-FIT. Written by build_content() ONLY -- it is a property of the
+ * layout, not of the frame, so free_img_copy() must not touch it (that call
+ * also happens on page-leave, where the layout is unchanged). Every path that
+ * can change the layout (create, refresh_config, apply_theme) goes through
+ * build_content() after a free_img_copy(), so the mode and the held copy are
+ * always re-derived together. Read by stage_image() without the display lock,
+ * same benign race as s_box_w/h: one wrong-mode copy that the commit pass
+ * detects and re-flags. */
+static bool s_img_cover = false;
 
 /* ── Small helpers ────────────────────────────────────────────────────── */
 
@@ -293,6 +314,40 @@ lv_obj_t *octo_w_row(lv_obj_t *parent, bool horizontal, int gap)
     return row;
 }
 
+/** Push s_readings_shown onto the live layer. No-op for a layout without one. */
+static void apply_readings_visibility(void)
+{
+    if (!s_w.overlay_layer) {
+        return;
+    }
+    if (s_readings_shown) {
+        lv_obj_remove_flag(s_w.overlay_layer, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(s_w.overlay_layer, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+lv_obj_t *octo_w_overlay_layer(lv_obj_t *page, octoprint_widgets_t *w)
+{
+    lv_obj_t *layer = lv_obj_create(page);
+    lv_obj_remove_style_all(layer);
+    /* FLOATING: the layout root is a flex column, and the layer must sit on top
+     * of it at (0,0) rather than take a slot in the flow (same trick as the
+     * empty-state backdrop). */
+    lv_obj_add_flag(layer, LV_OBJ_FLAG_FLOATING);
+    lv_obj_remove_flag(layer, LV_OBJ_FLAG_SCROLLABLE);
+    /* NOT clickable, so a tap over the readings hit-tests through to the page
+     * root that owns the toggle handler. GESTURE_BUBBLE stays at its default so
+     * page swipes still reach the dashboard. */
+    lv_obj_remove_flag(layer, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_layout(layer, LV_LAYOUT_NONE);
+    lv_obj_set_size(layer, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_pos(layer, 0, 0);
+
+    w->overlay_layer = layer;
+    return layer;
+}
+
 lv_obj_t *octo_w_label(lv_obj_t *parent, const char *text,
                        const lv_font_t *font, lv_style_t *style)
 {
@@ -310,6 +365,37 @@ lv_obj_t *octo_w_label(lv_obj_t *parent, const char *text,
 lv_obj_t *octo_w_caption(lv_obj_t *parent, const char *text)
 {
     return octo_w_label(parent, text, &lv_font_montserrat_14, &octo_style_label);
+}
+
+void octo_label_shadow(lv_obj_t *lbl)
+{
+    if (!lbl) {
+        return;
+    }
+    /* Radius 0 = hard offset copy, no blur (the blur task is skipped outright
+     * at lv_draw_blur() when the radius is 0). Setting the same values twice is
+     * a no-op, which is what makes this idempotent. */
+    lv_obj_set_style_drop_shadow_color(lbl, lv_color_black(), 0);
+    lv_obj_set_style_drop_shadow_opa(lbl, OCTO_SHADOW_OPA, 0);
+    lv_obj_set_style_drop_shadow_radius(lbl, 0, 0);
+    lv_obj_set_style_drop_shadow_offset_x(lbl, OCTO_SHADOW_DX, 0);
+    lv_obj_set_style_drop_shadow_offset_y(lbl, OCTO_SHADOW_DY, 0);
+    /* Make room for the offset copy inside the label's OWN coords. A
+     * LV_LABEL_LONG_CLIP label clips its draw to the text area, and a tight
+     * SIZE_CONTENT parent clips its children to bare coords, so without this
+     * padding the shadow is trimmed off the right and bottom edges. */
+    lv_obj_set_style_pad_right(lbl, OCTO_SHADOW_DX, 0);
+    lv_obj_set_style_pad_bottom(lbl, OCTO_SHADOW_DY, 0);
+}
+
+int32_t octo_text_width(const lv_font_t *font, const char *sample)
+{
+    lv_point_t sz = { 0, 0 };
+    if (!font || !sample) {
+        return 0;
+    }
+    lv_text_get_size(&sz, sample, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    return sz.x;
 }
 
 /* -- temperature element ------------------------------------------------ */
@@ -341,13 +427,24 @@ lv_obj_t *octo_w_temp(lv_obj_t *parent, const char *name,
     out->variant = variant;
     out->hot     = hot;
 
-    /* TILE stacks caption over value; BAR_GRADIENT puts them on one line. */
-    bool stacked = (variant == OCTO_TEMP_TILE);
+    /* TILE and COMPACT stack caption over value; BAR_GRADIENT puts them on one
+     * line. COMPACT differs from TILE only in the value font and format (the
+     * current reading alone, coloured by heat stage in the update path). */
+    bool stacked = (variant == OCTO_TEMP_TILE || variant == OCTO_TEMP_COMPACT);
 
     lv_obj_t *root = octo_w_row(parent, false, stacked ? 2 : 6);
     lv_obj_set_flex_align(root, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_START);
     out->root = root;
+
+    if (variant == OCTO_TEMP_COMPACT) {
+        lv_obj_set_size(root, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        out->lbl_name  = octo_w_label(root, name, &lv_font_montserrat_14,
+                                      &octo_style_label);
+        out->lbl_value = octo_w_label(root, "--", &lv_font_montserrat_bold_22,
+                                      &octo_style_value);
+        return root;
+    }
 
     if (stacked) {
         out->lbl_name  = octo_w_caption(root, name);
@@ -406,9 +503,14 @@ lv_obj_t *octo_w_image_hero(lv_obj_t *parent, octoprint_widgets_t *w)
     /* CENTER, not CONTAIN: stage_image() bilinear-scales the frame to this
      * widget's exact box before binding, so the aspect fit is already done and
      * any LVGL zoom here would only re-introduce the software transform (and its
-     * horizontal seams). The bound frame is never larger than the box (except
-     * transiently for one cycle after the box shrinks), so CENTER never
-     * stretches and at worst briefly crops. */
+     * horizontal seams). A FIT layout binds a frame no larger than the box
+     * (except transiently for one cycle after the box shrinks); a COVER layout
+     * (octoprint_layout_ops_t::image_cover) deliberately binds a LARGER one and
+     * relies on CENTER to show its middle. Either way the scale stays
+     * LV_SCALE_NONE and the overhang is clipped to the widget's own coords
+     * before the draw (lv_refr.c lv_obj_redraw(), which truncates the layer clip
+     * to obj->coords + ext_draw_size, and ext_draw_size is 0 without a
+     * transform), so nothing bleeds outside the hero. */
     lv_image_set_inner_align(w->img_hero, LV_IMAGE_ALIGN_CENTER);
     lv_obj_center(w->img_hero);
     lv_obj_add_flag(w->img_hero, LV_OBJ_FLAG_HIDDEN);
@@ -498,6 +600,7 @@ lv_obj_t *octo_w_time_tile(lv_obj_t *parent, const char *caption,
 lv_obj_t *octo_w_progress_bar(lv_obj_t *parent, octoprint_widgets_t *w)
 {
     lv_obj_t *bar = lv_bar_create(parent);
+    lv_obj_remove_flag(bar, LV_OBJ_FLAG_CLICKABLE);   /* let taps on the track reach the page root (readings toggle) */
     lv_bar_set_range(bar, 0, 1000);
     lv_bar_set_value(bar, 0, LV_ANIM_OFF);
     lv_obj_set_height(bar, 14);
@@ -559,13 +662,15 @@ static const octoprint_layout_ops_t *const s_layouts[OCTO_LAYOUT_COUNT] = {
     &octoprint_layout_bento,   /* retired alias: slot 1 was "Instrument dial".
                                 * The value stays legal in NVS and in
                                 * validate_config; the web UI no longer offers
-                                * it and it resolves to Bento. Reserved, so the
+                                * it and it resolves to Grid. Reserved, so the
                                 * later slots never renumber. */
     &octoprint_layout_glass,
     &octoprint_layout_bento,   /* retired alias: slot 3 was "Large numerals".
-                                * Renders Bento; slot reserved, NVS value legal. */
+                                * Renders Grid; slot reserved, NVS value legal. */
     &octoprint_layout_bento,   /* retired alias: slot 4 was "Layer timeline".
-                                * Renders Bento; slot reserved, NVS value legal. */
+                                * Renders Grid; slot reserved, NVS value legal. */
+    &octoprint_layout_overlay,   /* slot 5: "Floating overlay" */
+    &octoprint_layout_letterbox, /* slot 6: "Letterbox"        */
 };
 
 static void build_content(void)
@@ -582,6 +687,11 @@ static void build_content(void)
      * left to negate main_cont's OUTER_PADDING (the same negation the image,
      * clock and Spotify pages use). Set on every build, so switching layouts at
      * runtime restores the inset one as well. */
+    /* Scaling mode for the image path. Set on every build, so switching layouts
+     * at runtime re-stages with the other mode (rebuild_in_place() drops the
+     * held copy and re-flags a rescale just before this runs). */
+    s_img_cover = ops->image_cover;
+
     int size = ops->full_bleed ? SCREEN_SIZE : OCTO_W;
     int off  = ops->full_bleed ? -OCTO_PAD : 0;
     lv_obj_set_size(s_root, size, size);
@@ -594,6 +704,10 @@ static void build_content(void)
     ESP_LOGI(TAG, "Building OctoPrint page, layout %u (%s)",
              (unsigned)idx, ops->name ? ops->name : "?");
     ops->build(s_content, &s_w);
+
+    /* The fresh tree carries no visibility state; re-assert the runtime one, so
+     * a theme or layout change does not undo a tap toggle. */
+    apply_readings_visibility();
 }
 
 /* ── Empty state ──────────────────────────────────────────────────────── */
@@ -620,9 +734,51 @@ static void empty_hide(void)
 
 /* ── Page create ──────────────────────────────────────────────────────── */
 
+/**
+ * Tap anywhere on the page toggles the readings layer. No-op on a layout that
+ * built no layer (Grid).
+ *
+ * LVGL still emits LV_EVENT_CLICKED on release after a swipe (indev_proc_release
+ * suppresses it only when a SCROLL claimed the press, and this page is not
+ * scrollable), so the gesture direction latched by indev_gesture() -- it is
+ * cleared on the NEXT press, not on release -- is what tells a page swipe from a
+ * tap. Without this guard every page swipe would also toggle the readings.
+ */
+static void page_tap_cb(lv_event_t *e)
+{
+    (void)e;
+    if (!s_w.overlay_layer) {
+        return;
+    }
+    lv_indev_t *indev = lv_indev_active();
+    if (indev && lv_indev_get_gesture_dir(indev) != LV_DIR_NONE) {
+        return;   /* that was a page swipe, not a tap */
+    }
+    s_readings_shown = !s_readings_shown;
+    apply_readings_visibility();
+}
+
+void octoprint_page_set_overlay_visible(bool visible)
+{
+    /* Takes the display lock itself: called from the config side-effect path,
+     * which does not hold it. Remembered even before the page exists -- the
+     * next build_content() applies it. */
+    s_readings_shown = visible;
+    if (!s_root) {
+        return;
+    }
+    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+        apply_readings_visibility();
+        bsp_display_unlock();
+    }
+}
+
 lv_obj_t *octoprint_page_create(lv_obj_t *parent)
 {
     styles_update();
+    /* Seed the runtime readings state from config; taps flip it afterwards
+     * without persisting. */
+    s_readings_shown = app_config_get()->octoprint_overlay_visible;
     /* A rebuild from scratch must not inherit the previous tree's frame copy:
      * s_img_copy != NULL with new_image false would leave image_update() showing
      * a hero it never re-bound. The widget table is cleared first because its
@@ -638,6 +794,11 @@ lv_obj_t *octoprint_page_create(lv_obj_t *parent)
     lv_obj_remove_flag(s_root, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_opa(s_root, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(s_root, lv_color_hex(col_bg()), 0);
+    /* Readings toggle. Registered on the ROOT (clickable by default) and not on
+     * the layer: the layer and every library-built container are non-clickable,
+     * so taps over them hit-test straight through to here. Registered once --
+     * the root survives rebuild_in_place(). */
+    lv_obj_add_event_cb(s_root, page_tap_cb, LV_EVENT_CLICKED, NULL);
 
     build_content();
 
@@ -662,6 +823,24 @@ lv_obj_t *octoprint_page_create(lv_obj_t *parent)
 
 /* ── Update helpers ───────────────────────────────────────────────────── */
 
+/**
+ * Heating stage derived from one tool's actual/target pair. Single precision
+ * only (the P4 FPU has no double unit). @p has_t is false when the heater is
+ * off; an overshoot above a live target still reads as HOLDING.
+ */
+static octo_heat_stage_t octo_heat_stage(float actual, float target,
+                                         bool has_a, bool has_t)
+{
+    if (!has_a) {
+        return OCTO_HEAT_IDLE;
+    }
+    if (has_t) {
+        return (actual < target - OCTO_TEMP_HOLD_BAND_C) ? OCTO_HEAT_HEATING
+                                                         : OCTO_HEAT_HOLDING;
+    }
+    return (actual > OCTO_TEMP_COLD_LINE_C) ? OCTO_HEAT_COOLING : OCTO_HEAT_IDLE;
+}
+
 static void temp_update(octo_temp_el_t *t, float actual, float target)
 {
     if (!t || !t->root) {
@@ -671,6 +850,38 @@ static void temp_update(octo_temp_el_t *t, float actual, float target)
     char buf[48];
     bool has_a = !isnan(actual);
     bool has_t = !isnan(target) && target > 0.0f;
+    if (t->variant == OCTO_TEMP_COMPACT) {
+        /* Current reading alone: "23.8°" — no target, no unit letter. */
+        if (has_a) {
+            snprintf(buf, sizeof(buf), "%.1f\xC2\xB0", (double)actual);
+        } else {
+            snprintf(buf, sizeof(buf), "--");
+        }
+        set_txt(t->lbl_value, buf);
+
+        /* Heat stage recolours the value with a LOCAL style, which outranks the
+         * shared octo_style_value it also carries. */
+        uint32_t col;
+        switch (octo_heat_stage(actual, target, has_a, has_t)) {
+        case OCTO_HEAT_HEATING:
+            col = octo_color(t->hot ? OCTO_COL_ALERT : OCTO_COL_HOT);
+            break;
+        case OCTO_HEAT_HOLDING:
+            col = octo_color(OCTO_COL_TEXT);
+            break;
+        case OCTO_HEAT_COOLING:
+            col = octo_color(OCTO_COL_ACCENT);
+            break;
+        case OCTO_HEAT_IDLE:
+        default:
+            col = octo_color(OCTO_COL_LABEL);
+            break;
+        }
+        if (t->lbl_value) {
+            lv_obj_set_style_text_color(t->lbl_value, lv_color_hex(col), 0);
+        }
+        return;   /* no bar, no tick */
+    }
     if (!has_a) {
         snprintf(buf, sizeof(buf), "--");
     } else if (has_t && t->variant == OCTO_TEMP_TILE) {
@@ -725,16 +936,27 @@ static void temp_update(octo_temp_el_t *t, float actual, float target)
 }
 
 /**
- * Aspect-fit @p src_w x @p src_h into a @p bw x @p bh box. Pure arithmetic, no
- * LVGL reads, so it is callable with or without the display lock. Returns
+ * Scale @p src_w x @p src_h to the @p bw x @p bh box, keeping the aspect: FIT
+ * (whole frame inside the box, bands) when @p cover is false, COVER (box filled
+ * in both axes, excess cropped by the host) when it is true. Pure arithmetic,
+ * no LVGL reads, so it is callable with or without the display lock. Returns
  * false for a degenerate box (< 8 px: unlaid) or source.
  *
- * Idempotent: fitting an already-fitted size into the same box returns it
- * unchanged. The commit pass relies on that to detect a moved box without
- * knowing the source dimensions.
+ * Idempotent in BOTH modes: re-running it on its own output for the same box
+ * returns that output unchanged. The commit pass relies on that to detect a
+ * moved box without knowing the source dimensions. It holds because the
+ * limiting axis is assigned the box edge exactly rather than computed, so the
+ * second pass scales by exactly 1.
+ *
+ * COVER guard: a very lopsided source (a tall thumbnail) would cover a 720
+ * square with an enormous copy, so anything past 2 * SCREEN_SIZE on either axis
+ * falls back to FIT for that frame. The decision depends only on the aspect and
+ * the box, never on the size, so the fallback is idempotent too: re-running
+ * COVER on a fitted copy of the same aspect trips the same guard and returns
+ * the fit size unchanged.
  */
 static bool fit_into_box(uint16_t src_w, uint16_t src_h, int32_t bw, int32_t bh,
-                         uint16_t *out_w, uint16_t *out_h)
+                         bool cover, uint16_t *out_w, uint16_t *out_h)
 {
     if (bw < 8 || bh < 8 || src_w == 0 || src_h == 0) {
         return false;
@@ -744,6 +966,37 @@ static bool fit_into_box(uint16_t src_w, uint16_t src_h, int32_t bw, int32_t bh,
     }
     if (bh > SCREEN_SIZE) {
         bh = SCREEN_SIZE;
+    }
+
+    if (cover) {
+        /* Scale by max(bw/src_w, bh/src_h): the axis that needs the LARGER
+         * factor lands exactly on the box edge, the other overhangs. */
+        int32_t cw, ch;
+        if ((int32_t)bw * (int32_t)src_h >= (int32_t)bh * (int32_t)src_w) {
+            cw = bw;
+            ch = ((int32_t)src_h * bw + src_w / 2) / src_w;
+            if (ch < bh) {
+                ch = bh;   /* rounding must never leave a gap */
+            }
+        } else {
+            ch = bh;
+            cw = ((int32_t)src_w * bh + src_h / 2) / src_h;
+            if (cw < bw) {
+                cw = bw;
+            }
+        }
+        if (cw <= 2 * SCREEN_SIZE && ch <= 2 * SCREEN_SIZE) {
+            *out_w = (uint16_t)cw;
+            *out_h = (uint16_t)ch;
+            return true;
+        }
+        static bool cover_clamped = false;
+        if (!cover_clamped) {
+            cover_clamped = true;
+            ESP_LOGW(TAG, "hero cover %ux%u -> %dx%d too large, using fit",
+                     (unsigned)src_w, (unsigned)src_h, (int)cw, (int)ch);
+        }
+        /* fall through to FIT */
     }
 
     /* Width-limited when the source is relatively wider than the box. */
@@ -848,12 +1101,17 @@ static void stage_image(octoprint_data_t *data, octo_staged_t *st)
 
     uint16_t fit_w = 0, fit_h = 0;
     if (!fit_into_box(data->image_w, data->image_h,
-                      (int32_t)s_box_w, (int32_t)s_box_h, &fit_w, &fit_h)) {
+                      (int32_t)s_box_w, (int32_t)s_box_h, s_img_cover,
+                      &fit_w, &fit_h)) {
         return;   /* hero box not cached yet -- scale on the next cycle */
     }
 
     /* 128-byte-aligned address AND size: not required by the software scale,
-     * but it is one call and it keeps the buffer on L2 cache lines. */
+     * but it is one call and it keeps the buffer on L2 cache lines.
+     * A COVER layout pays for the cropped-off margin: a 4:3 webcam covering the
+     * 720 square is 960x720x2 = 1.38 MB against 720x540x2 = 1.04 MB fitted,
+     * about 0.35 MB more PSRAM per staged copy (twice that for the one cycle
+     * where the retired copy is still held). */
     size_t need = ((size_t)fit_w * (size_t)fit_h * 2u + 127u) & ~(size_t)127u;
     uint8_t *buf = heap_caps_aligned_calloc(128, 1, need, MALLOC_CAP_SPIRAM);
     if (!buf) {
@@ -979,7 +1237,8 @@ static void image_update(octoprint_data_t *data, octo_staged_t *st,
          * Commit anyway (a slightly off-size frame beats a lost one; CENTER
          * shows it un-stretched) and rescale on the next cycle. */
         uint16_t vw = 0, vh = 0;
-        s_need_rescale = !(fit_into_box(st->w, st->h, bw, bh, &vw, &vh) &&
+        s_need_rescale = !(fit_into_box(st->w, st->h, bw, bh, s_img_cover,
+                                        &vw, &vh) &&
                            vw == st->w && vh == st->h);
     } else if (st->buf) {
         /* Box unlaid: discard (the caller frees) and rescale next cycle. */
@@ -989,7 +1248,7 @@ static void image_update(octoprint_data_t *data, octo_staged_t *st,
          * so a layout move re-fits the retained thumbnail. new_image alone
          * already re-triggers the stage pass, no flag needed for it. */
         uint16_t vw = 0, vh = 0;
-        if (!(fit_into_box(s_fit_w, s_fit_h, bw, bh, &vw, &vh) &&
+        if (!(fit_into_box(s_fit_w, s_fit_h, bw, bh, s_img_cover, &vw, &vh) &&
               vw == s_fit_w && vh == s_fit_h)) {
             s_need_rescale = true;
         }
@@ -1285,8 +1544,12 @@ static void apply_styles(void)
                                    LV_PART_INDICATOR);
     }
     if (s_w.bar_progress) {
-        lv_obj_set_style_bg_color(s_w.bar_progress, lv_color_hex(col_bg()), 0);
-        lv_obj_set_style_border_color(s_w.bar_progress, lv_color_hex(col_border()), 0);
+        /* Only the accent indicator. The MAIN track is painted by
+         * octo_w_progress_bar() at build time and this function only ever runs
+         * immediately after build_content(), so rewriting it here is redundant
+         * -- and it clobbers layouts that restyle the track themselves (the
+         * overlay and letterbox layouts hold it down to OCTO_COL_TEXT at
+         * LV_OPA_20). Same reasoning as the conn_chip / error_strip note below. */
         lv_obj_set_style_bg_color(s_w.bar_progress, lv_color_hex(col_accent()),
                                   LV_PART_INDICATOR);
     }

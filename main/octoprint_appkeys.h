@@ -59,12 +59,20 @@ typedef enum {
  * so the caller (an httpd handler) never blocks on the network. Poll
  * octoprint_appkeys_snapshot() for progress.
  *
+ * @param url  OctoPrint base address ("http://host[:port]") to use for this
+ *             flow. NULL or "" means the saved octoprint_url. A non-empty value
+ *             that differs from the saved one is persisted to config before the
+ *             flow starts (the worker reads the address from config), so the
+ *             user does not have to press Save first. Must already be validated
+ *             by the caller (length < sizeof octoprint_url, http/https scheme).
+ *
  * @return ESP_OK on start (including the "address not configured" case, which
  *         is reported through the ERROR state so the UI shows one message
  *         style); ESP_ERR_INVALID_STATE when a flow is already running;
- *         ESP_ERR_NO_MEM when the worker task could not be created.
+ *         ESP_ERR_NO_MEM when the worker task or the config snapshot could not
+ *         be allocated.
  */
-esp_err_t octoprint_appkeys_start(void);
+esp_err_t octoprint_appkeys_start(const char *url);
 
 /**
  * Read the current state. Any out-param may be NULL.

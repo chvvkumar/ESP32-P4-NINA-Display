@@ -2569,6 +2569,72 @@ static void migrate_from_v59(const void *raw, size_t raw_size, app_config_t *cfg
     ESP_LOGI(TAG, "Migrated config from v59 to v%d", APP_CONFIG_VERSION);
 }
 
+/* v61 image-pages split. Derive the per-page fields from the RETIRED global
+ * image_display_* fields. Idempotent (reads only retired fields, which nothing
+ * writes any more), so it is safe to run once per pre-v61 blob regardless of
+ * how old that blob was: the dispatcher below is NON-chaining (a v45 blob goes
+ * straight to v61 through migrate_from_v45, never through migrate_from_v60),
+ * so this runs from the dispatcher TAIL for every version_check < 61 rather
+ * than being pasted into sixty legacy migrations. Blobs older than v33 have
+ * no image fields; set_defaults() left them false, so the derivation yields
+ * "all four pages off", which is what those devices had. */
+void image_pages_derive_from_legacy(app_config_t *cfg)
+{
+    cfg->goes_enabled   = cfg->image_display_enabled;
+    cfg->moon_enabled   = cfg->image_display_enabled;
+    cfg->solar_enabled  = cfg->image_display_enabled;
+    cfg->custom_enabled = cfg->image_display_enabled;   /* availability still needs custom_image_url */
+    cfg->solar_update_interval_s = cfg->goes_update_interval_s;
+    cfg->moon_update_interval_s  = 60;                  /* the former hardcoded cadence */
+    cfg->goes_crop   = cfg->image_display_crop;
+    cfg->solar_crop  = cfg->image_display_crop;
+    cfg->custom_crop = false;   /* Custom is never cropped today (nina_image_display.c:541-549);
+                                 * a migration must not change what the panel shows */
+    cfg->goes_show_overlay   = cfg->image_display_show_overlay;
+    cfg->moon_show_overlay   = cfg->image_display_show_overlay;
+    cfg->solar_show_overlay  = cfg->image_display_show_overlay;
+    cfg->custom_show_overlay = cfg->image_display_show_overlay;
+}
+
+/* --- v60 -> v61 migration: appends the per-page image fields (image pages
+ *     split). All thirteen values are written by image_pages_derive_from_legacy(),
+ *     which the dispatcher tail runs for every pre-v61 blob (single writer), so
+ *     this migration is only the memcpy + version stamp. --- */
+static void migrate_from_v60(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v60_t) ? raw_size : sizeof(app_config_v60_t);
+    /* The v60 snapshot's trailing padding can overlap the first v61 fields; the
+     * dispatcher-tail image_pages_derive_from_legacy() runs after this and is
+     * the single writer of all thirteen v61 fields, so no re-assert here. */
+    memcpy(cfg, raw, copy);
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v60 to v%d", APP_CONFIG_VERSION);
+}
+
+/* --- v61 -> v62 migration: appends octoprint_overlay_visible (OctoPrint page
+ *     "show readings over picture" default). Additive; an upgrading device
+ *     keeps the readings visible, which is what it had before the toggle
+ *     existed. --- */
+static void migrate_from_v61(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v61_t) ? raw_size : sizeof(app_config_v61_t);
+    memcpy(cfg, raw, copy);
+
+    /* octoprint_overlay_visible is a SETTINGS_TABLE row, so set_defaults()
+     * above already applied it — and every OTHER (non-chaining) migration path
+     * gets it from set_defaults() too, with no per-migration assignment. Only
+     * here can the memcpy reach it: the v61 snapshot ends one byte before the
+     * new field, and its trailing padding lands on top. Re-assert it. */
+    cfg->octoprint_overlay_visible = true;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v61 to v%d", APP_CONFIG_VERSION);
+}
+
+
 static void migrate_from_v36(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
@@ -3350,6 +3416,24 @@ void app_config_init(void) {
             nvs_commit(handle);
         }
         /* tiles_loaded stays false -> tail loads "json_tiles"/"ha_tiles" keys */
+    } else if (version_check == 61) {
+        /* v61 -> v62: added octoprint_overlay_visible. tiles_loaded stays
+         * false: a v61 device already keeps its tiles in the
+         * "json_tiles"/"ha_tiles" NVS keys, so the tail loads them. */
+        migrate_from_v61(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    } else if (version_check == 60) {
+        /* v60 -> v61: image pages split (per-page enable/overlay/crop/interval).
+         * tiles_loaded stays false: a v60 device already keeps its tiles in
+         * the "json_tiles"/"ha_tiles" NVS keys, so the tail loads them.
+         * Deliberately NO nvs_set_blob/nvs_commit here: the v61 fields are not
+         * derived until the dispatcher tail. Committing the v61-stamped blob
+         * first would, on power loss in between, leave a v61 blob that never
+         * gets derived. The tail writes and commits for every pre-v61 blob. */
+        migrate_from_v60(raw, stored_size, &s_config);
+        validate_config(&s_config);
     } else if (version_check == 59) {
         /* v59 → v60: added the OctoPrint 3D-printer page block. tiles_loaded
          * stays false: a v59 device already keeps its tiles in the
@@ -3786,6 +3870,24 @@ void app_config_init(void) {
         ESP_LOGW(TAG, "Unknown config blob (size=%d, ver=0x%08x), using defaults",
                  (int)stored_size, (unsigned)version_check);
         set_defaults(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    }
+
+    /* v61 image-pages split derivation for EVERY pre-v61 blob (see
+     * image_pages_derive_from_legacy). Runs after whichever legacy branch
+     * above rebuilt s_config, so the retired globals hold the stored values.
+     * The forward-tolerant (version_check > APP_CONFIG_VERSION) and current
+     * branches are excluded by the comparison. The write-back is a second
+     * nvs_set_blob for these blobs on this one boot; that is acceptable (one
+     * ~350 ms save at migration time).
+     * The bound is the LITERAL 61, not APP_CONFIG_VERSION: a v61 blob already
+     * holds real per-page image settings, and re-deriving them from the
+     * retired image_display_* globals would silently overwrite the user's
+     * choices. Every version bump past 62 must leave this literal alone. */
+    if (version_check < 61) {
+        image_pages_derive_from_legacy(&s_config);
+        validate_config(&s_config);
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
     }

@@ -34,9 +34,10 @@ extern const uint8_t fragment_backup_html_end[]   asm("_binary_fragment_backup_h
 extern const uint8_t fragment_api_html_start[] asm("_binary_fragment_api_html_start");
 extern const uint8_t fragment_api_html_end[]   asm("_binary_fragment_api_html_end");
 
-/* P6c tab fragments. image-display's tab name has a hyphen; the embedded
- * asset filename/symbol use an underscore (fragment_image_display.html),
- * so the name->symbol mapping only lines up in the s_ui_fragments[] row
+/* P6c tab fragments. The four image tabs (image-goes, image-moon,
+ * image-solar, image-custom) have hyphenated tab names; the embedded asset
+ * filenames/symbols use underscores (fragment_image_goes.html and so on),
+ * so the name->symbol mapping only lines up in the s_ui_fragments[] rows
  * below, not by naming convention alone. */
 extern const uint8_t fragment_allsky_html_start[] asm("_binary_fragment_allsky_html_start");
 extern const uint8_t fragment_allsky_html_end[]   asm("_binary_fragment_allsky_html_end");
@@ -48,8 +49,14 @@ extern const uint8_t fragment_clock_html_start[] asm("_binary_fragment_clock_htm
 extern const uint8_t fragment_clock_html_end[]   asm("_binary_fragment_clock_html_end");
 extern const uint8_t fragment_spotify_html_start[] asm("_binary_fragment_spotify_html_start");
 extern const uint8_t fragment_spotify_html_end[]   asm("_binary_fragment_spotify_html_end");
-extern const uint8_t fragment_image_display_html_start[] asm("_binary_fragment_image_display_html_start");
-extern const uint8_t fragment_image_display_html_end[]   asm("_binary_fragment_image_display_html_end");
+extern const uint8_t fragment_image_goes_html_start[]   asm("_binary_fragment_image_goes_html_start");
+extern const uint8_t fragment_image_goes_html_end[]     asm("_binary_fragment_image_goes_html_end");
+extern const uint8_t fragment_image_moon_html_start[]   asm("_binary_fragment_image_moon_html_start");
+extern const uint8_t fragment_image_moon_html_end[]     asm("_binary_fragment_image_moon_html_end");
+extern const uint8_t fragment_image_solar_html_start[]  asm("_binary_fragment_image_solar_html_start");
+extern const uint8_t fragment_image_solar_html_end[]    asm("_binary_fragment_image_solar_html_end");
+extern const uint8_t fragment_image_custom_html_start[] asm("_binary_fragment_image_custom_html_start");
+extern const uint8_t fragment_image_custom_html_end[]   asm("_binary_fragment_image_custom_html_end");
 extern const uint8_t fragment_octoprint_html_start[] asm("_binary_fragment_octoprint_html_start");
 extern const uint8_t fragment_octoprint_html_end[]   asm("_binary_fragment_octoprint_html_end");
 
@@ -67,7 +74,7 @@ extern const uint8_t fragment_behavior_html_end[]   asm("_binary_fragment_behavi
 extern const uint8_t fragment_system_html_start[] asm("_binary_fragment_system_html_start");
 extern const uint8_t fragment_system_html_end[]   asm("_binary_fragment_system_html_end");
 
-/* Voice Clips tab (custom clip overrides). Like image-display, the tab name is
+/* Voice Clips tab (custom clip overrides). Like the image tabs, the tab name is
  * hyphenated ("voice-clips") while the asset symbol uses underscores. */
 extern const uint8_t fragment_voice_clips_html_start[] asm("_binary_fragment_voice_clips_html_start");
 extern const uint8_t fragment_voice_clips_html_end[]   asm("_binary_fragment_voice_clips_html_end");
@@ -95,8 +102,14 @@ extern const uint8_t fragment_clock_html_gz_start[] asm("_binary_fragment_clock_
 extern const uint8_t fragment_clock_html_gz_end[]   asm("_binary_fragment_clock_html_gz_end");
 extern const uint8_t fragment_spotify_html_gz_start[] asm("_binary_fragment_spotify_html_gz_start");
 extern const uint8_t fragment_spotify_html_gz_end[]   asm("_binary_fragment_spotify_html_gz_end");
-extern const uint8_t fragment_image_display_html_gz_start[] asm("_binary_fragment_image_display_html_gz_start");
-extern const uint8_t fragment_image_display_html_gz_end[]   asm("_binary_fragment_image_display_html_gz_end");
+extern const uint8_t fragment_image_goes_html_gz_start[]   asm("_binary_fragment_image_goes_html_gz_start");
+extern const uint8_t fragment_image_goes_html_gz_end[]     asm("_binary_fragment_image_goes_html_gz_end");
+extern const uint8_t fragment_image_moon_html_gz_start[]   asm("_binary_fragment_image_moon_html_gz_start");
+extern const uint8_t fragment_image_moon_html_gz_end[]     asm("_binary_fragment_image_moon_html_gz_end");
+extern const uint8_t fragment_image_solar_html_gz_start[]  asm("_binary_fragment_image_solar_html_gz_start");
+extern const uint8_t fragment_image_solar_html_gz_end[]    asm("_binary_fragment_image_solar_html_gz_end");
+extern const uint8_t fragment_image_custom_html_gz_start[] asm("_binary_fragment_image_custom_html_gz_start");
+extern const uint8_t fragment_image_custom_html_gz_end[]   asm("_binary_fragment_image_custom_html_gz_end");
 extern const uint8_t fragment_octoprint_html_gz_start[] asm("_binary_fragment_octoprint_html_gz_start");
 extern const uint8_t fragment_octoprint_html_gz_end[]   asm("_binary_fragment_octoprint_html_gz_end");
 extern const uint8_t fragment_nodes_html_gz_start[] asm("_binary_fragment_nodes_html_gz_start");
@@ -235,14 +248,14 @@ typedef struct {
  * tab's markup as a standalone HTML asset, fetched lazily by the browser on
  * tab activation (see ensureTabLoaded() in config_ui.html). P6a landed only
  * the loader machinery (table empty, every lookup 404s). P6b extracted logs,
- * backup, and api. P6c extracted allsky, clock, spotify, and image-display.
+ * backup, and api. P6c extracted allsky, clock, spotify, and the image tabs.
  * P6d (final wave) extracts the remaining four -- nodes, display, behavior,
  * system -- so every tab now ships as its own fragment_NAME.html and none
- * remain inline in config_ui.html. The "image-display" row is the one
- * name/symbol mismatch: the tab name has a hyphen, but embedded-asset
- * symbols cannot contain one, so the file is fragment_image_display.html
- * and only this table maps the hyphenated tab name to the underscored
- * symbol.
+ * remain inline in config_ui.html. The four image rows are the
+ * name/symbol mismatch: the tab names have a hyphen, but embedded-asset
+ * symbols cannot contain one, so the files are fragment_image_goes.html
+ * and siblings, and only this table maps the hyphenated tab names to the
+ * underscored symbols.
  */
 static const ui_fragment_entry_t s_ui_fragments[] = {
     { "__none__", NULL, NULL, NULL, NULL },  /* placeholder so the array type-checks; never matches a real tab name */
@@ -262,8 +275,14 @@ static const ui_fragment_entry_t s_ui_fragments[] = {
                        fragment_clock_html_gz_start,         fragment_clock_html_gz_end },
     { "spotify",       fragment_spotify_html_start,       fragment_spotify_html_end,
                        fragment_spotify_html_gz_start,       fragment_spotify_html_gz_end },
-    { "image-display", fragment_image_display_html_start, fragment_image_display_html_end,
-                       fragment_image_display_html_gz_start, fragment_image_display_html_gz_end },
+    { "image-goes",    fragment_image_goes_html_start,    fragment_image_goes_html_end,
+                       fragment_image_goes_html_gz_start,    fragment_image_goes_html_gz_end },
+    { "image-moon",    fragment_image_moon_html_start,    fragment_image_moon_html_end,
+                       fragment_image_moon_html_gz_start,    fragment_image_moon_html_gz_end },
+    { "image-solar",   fragment_image_solar_html_start,   fragment_image_solar_html_end,
+                       fragment_image_solar_html_gz_start,   fragment_image_solar_html_gz_end },
+    { "image-custom",  fragment_image_custom_html_start,  fragment_image_custom_html_end,
+                       fragment_image_custom_html_gz_start,  fragment_image_custom_html_gz_end },
     { "octoprint",     fragment_octoprint_html_start,     fragment_octoprint_html_end,
                        fragment_octoprint_html_gz_start,     fragment_octoprint_html_gz_end },
     { "nodes",         fragment_nodes_html_start,         fragment_nodes_html_end,
@@ -543,9 +562,9 @@ static const backup_field_t s_backup_fields[] = {
     {"ha_update_interval_s",   "Home Assistant Interval",  "Nodes & Data", false, false},
     {"ha_tiles_config",        "Home Assistant Tiles",     "Nodes & Data", false, true},
 
-    /* OctoPrint 3D Printer page. Unlike the JSON/HA scalars above, all seven of
-     * these ARE SETTINGS_TABLE rows, so serialize_config_to_json() emits them and
-     * parse_config_from_json() reads them with no hand-written arm. Registered
+    /* OctoPrint 3D Printer page. Unlike the JSON/HA scalars above, all eight
+     * of these ARE SETTINGS_TABLE rows, so serialize_config_to_json() emits them
+     * and parse_config_from_json() reads them with no hand-written arm. Registered
      * here for the diff, category grouping, sensitive split, and unknown-field
      * detection — and, for the API key, to drive strip_masked_secrets(). */
     {"octoprint_enabled",           "3D Printer Page",        "OctoPrint", false, false},
@@ -555,6 +574,7 @@ static const backup_field_t s_backup_fields[] = {
     {"octoprint_image_source",      "OctoPrint Image Source", "OctoPrint", false, false},
     {"octoprint_layout",            "OctoPrint Layout",       "OctoPrint", false, false},
     {"octoprint_snapshot_url",      "OctoPrint Snapshot URL", "OctoPrint", false, false},
+    {"octoprint_overlay_visible",   "Show readings over picture", "OctoPrint", false, false},
 
     /* System */
     {"ntp",                  "NTP Server",          "System", false, false},
@@ -588,12 +608,22 @@ static const backup_field_t s_backup_fields[] = {
     {"spotify_overlay_visible",   "Show Overlay",         "Spotify", false, false},
 
     /* Image Display */
-    {"image_display_enabled",      "Image Display Enabled","Image Display", false, false},
-    {"image_display_show_overlay", "Show Overlay",         "Image Display", false, false},
-    {"image_display_crop",         "Image Crop/Fill",      "Image Display", false, false},
+    /* Image pages (v61 split): one enable/overlay/crop/interval per page */
+    {"goes_enabled",               "GOES Page Enabled",    "Image Display", false, false},
+    {"goes_show_overlay",          "GOES Show Overlay",    "Image Display", false, false},
+    {"goes_crop",                  "GOES Crop/Fill",       "Image Display", false, false},
+    {"moon_enabled",               "Moon Page Enabled",    "Image Display", false, false},
+    {"moon_show_overlay",          "Moon Show Overlay",    "Image Display", false, false},
+    {"moon_update_interval_s",     "Moon Update Interval", "Image Display", false, false},
+    {"solar_enabled",              "Solar Page Enabled",   "Image Display", false, false},
+    {"solar_show_overlay",         "Solar Show Overlay",   "Image Display", false, false},
+    {"solar_crop",                 "Solar Crop/Fill",      "Image Display", false, false},
+    {"solar_update_interval_s",    "Solar Update Interval","Image Display", false, false},
+    {"custom_enabled",             "Custom Page Enabled",  "Image Display", false, false},
+    {"custom_show_overlay",        "Custom Show Overlay",  "Image Display", false, false},
+    {"custom_crop",                "Custom Crop/Fill",     "Image Display", false, false},
     {"goes_region",                "GOES Region",          "Image Display", false, false},
     {"goes_update_interval_s",     "GOES Update Interval", "Image Display", false, false},
-    {"image_display_source",       "Image Source",         "Image Display", false, false},
     {"custom_image_url",           "Custom Image URL",     "Image Display", false, false},
     {"custom_orientation",         "Custom Orientation",   "Image Display", false, false},
     {"custom_update_interval_s",   "Custom Update Interval","Image Display", false, false},
@@ -750,10 +780,11 @@ static const restore_numrange_t s_restore_numrange[] = {
     {"ha_update_interval_s",    5,    300,   false},  /* app_config.c validate_config (out of range -> 30) */
     {"octoprint_update_interval_s", 2, 300,  false},  /* settings_table.h INT row (clamped to bound) */
     {"octoprint_image_source",  0,    1,     false},  /* settings_table.h INT_RESET row (out of range -> 0) */
-    {"octoprint_layout",        0,    4,     false},  /* settings_table.h INT_RESET row (out of range -> 0) */
+    {"octoprint_layout",        0,    6,     false},  /* settings_table.h INT_RESET row (out of range -> 0) */
     {"allsky_dew_offset",       -50,  50,    true},   /* app_config.c:2552 */
     {"goes_update_interval_s",  300,  7200,  false},  /* app_config.c:2556 */
-    {"image_display_source",    0,    3,     false},  /* app_config.c:2598 (0=GOES,1=Moon,2=Solar,3=Custom URL) */
+    {"solar_update_interval_s", 300,  7200,  false},  /* settings_table.h INT_RESET row (out of range -> 600) */
+    {"moon_update_interval_s",  10,   3600,  false},  /* settings_table.h INT_RESET row (out of range -> 60) */
     {"custom_orientation",      0,    3,     false},  /* app_config.c:2590 */
     {"custom_update_interval_s",10,   7200,  false},  /* app_config.c:2594 */
     {"moon_bg_style",           0,    3,     false},  /* app_config.c:2569 */
@@ -1914,6 +1945,14 @@ esp_err_t restore_post_handler(httpd_req_t *req)
             cJSON_Delete(root);
             httpd_resp_send_500(req);
             return ESP_OK;
+        }
+
+        /* Pre-v61 backup: only the retired image_display_* keys are present.
+         * Derive the thirteen per-page image fields from them so the restored
+         * device keeps its image pages (same derivation the NVS loader runs). */
+        if (!cJSON_HasObjectItem(merged, "goes_enabled") &&
+            cJSON_HasObjectItem(merged, "image_display_enabled")) {
+            image_pages_derive_from_legacy(new_cfg);
         }
 
         /* parse_config_from_json() does not handle admin_password or the

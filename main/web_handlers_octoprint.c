@@ -6,7 +6,12 @@
  * REQUIRE_AUTH() first-line (defense-in-depth):
  *   POST /api/octoprint/appkey-request  -- start a flow, answer with the state
  *                                          it started in (never blocks on the
- *                                          network; the worker does that)
+ *                                          network; the worker does that).
+ *                                          Optional JSON body {"url": "..."}
+ *                                          supplies the OctoPrint address to
+ *                                          use (and persists it) so the user
+ *                                          need not press Save first; empty
+ *                                          body = the saved address.
  *   GET  /api/octoprint/appkey-status   -- poll the flow's state
  *
  * The rest of the OctoPrint page's settings ride on the main /api/config
@@ -20,6 +25,12 @@
 
 #include "web_server_internal.h"
 #include "octoprint_appkeys.h"
+
+#include <ctype.h>
+#include <string.h>
+
+/* Largest accepted request body: a 127-char URL plus JSON wrapping. */
+#define APPKEY_REQUEST_BODY_MAX 512
 
 /**
  * Build the response body shared by both routes: the state name plus the two
@@ -53,12 +64,69 @@ static esp_err_t send_appkey_state(httpd_req_t *req)
  *
  * A second request while one is running answers 409 with the live state rather
  * than starting a competing flow.
+ *
+ * Body: optional JSON {"url": "http://host[:port]"}. A present, non-empty url
+ * (whitespace-trimmed) must be shorter than the octoprint_url field and carry
+ * an http:// or https:// scheme, else 400 and no flow is started. Absent, empty,
+ * or no body at all means "use the saved address". Bodies over
+ * APPKEY_REQUEST_BODY_MAX answer 413.
  */
 esp_err_t octoprint_appkey_request_post_handler(httpd_req_t *req)
 {
     REQUIRE_AUTH(req);
 
-    esp_err_t err = octoprint_appkeys_start();
+    char body[APPKEY_REQUEST_BODY_MAX];
+    char url_buf[sizeof(((app_config_t *)0)->octoprint_url)];
+    const char *url = NULL;   /* NULL = saved address */
+
+    int total = req->content_len;
+    if (total < 0 || total >= (int)sizeof(body)) {
+        httpd_resp_set_status(req, "413 Payload Too Large");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, "{\"error\":\"Request body is too large.\"}");
+    }
+    if (total > 0) {
+        int got = 0;
+        while (got < total) {
+            int ret = httpd_req_recv(req, body + got, total - got);
+            if (ret <= 0) {
+                if (ret == HTTPD_SOCK_ERR_TIMEOUT) httpd_resp_send_408(req);
+                return ESP_FAIL;
+            }
+            got += ret;
+        }
+        body[got] = '\0';
+
+        cJSON *root = cJSON_Parse(body);
+        if (root == NULL) {
+            return send_400(req, "Request body is not valid JSON.");
+        }
+        cJSON *item = cJSON_GetObjectItem(root, "url");
+        if (cJSON_IsString(item)) {
+            /* Trim: a pasted address commonly carries a stray space or newline. */
+            const char *s = item->valuestring;
+            while (*s && isspace((unsigned char)*s)) s++;
+            size_t n = strlen(s);
+            while (n > 0 && isspace((unsigned char)s[n - 1])) n--;
+            if (n >= sizeof(url_buf)) {
+                cJSON_Delete(root);
+                return send_400(req, "The OctoPrint address is too long.");
+            }
+            memcpy(url_buf, s, n);
+            url_buf[n] = '\0';
+            /* validate_url_format() also admits mqtt://; the flow speaks HTTP. */
+            if (n > 0 && (!validate_url_format(url_buf) ||
+                          (strncmp(url_buf, "http://", 7) != 0 &&
+                           strncmp(url_buf, "https://", 8) != 0))) {
+                cJSON_Delete(root);
+                return send_400(req, "The OctoPrint address must start with http:// or https://.");
+            }
+            if (n > 0) url = url_buf;
+        }
+        cJSON_Delete(root);
+    }
+
+    esp_err_t err = octoprint_appkeys_start(url);
     if (err == ESP_ERR_INVALID_STATE) {
         httpd_resp_set_status(req, "409 Conflict");
     } else if (err != ESP_OK) {
