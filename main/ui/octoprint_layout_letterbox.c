@@ -14,11 +14,29 @@
  * a tall G-code preview is shown whole with side bars rather than trimmed.
  *
  * Structure (720 x 720 full-bleed page, absolute placement, LV_LAYOUT_NONE):
- *     0   top band     72  STATUS | TIME ELAPSED  ......  NOZZLE  BED
+ *     0   top band     72  STATUS | TIME ELAPSED | LAYER  ....  NOZZLE  BED
  *    78   error strip  28  absolute, hidden unless faulted (overlaps the image)
  *   112   conn chip    28  absolute, hidden while the link is healthy
  *    72   image       538  letterboxed hero, radius 0, border 0
- *   610   bottom band 110  61.8 % Layer 86 / 86 .... FINISHING AT / track
+ *   610   bottom band 110  61.8 %  ....  ETA 15:56 (content width)  / track
+ *
+ * Top band horizontal budget (worst-case samples, kerning ignored, so a few px
+ * conservative), content box 720 - 2 x 16 pad = 688:
+ *   left   173 status ("OPERATIONAL" bold_22 + 2)
+ *          + 33 (16 margin + 1 rule + 16 margin) + 117 elapsed ("TIME ELAPSED"
+ *          m14 + 12) + 33 + 134 layer ("9999" 56 + 6 gap + "/ 9999" 70 + 2) = 490
+ *   right  68 NOZZLE + 24 gap + 73 BED = 165
+ *   490 + 165 = 655 <= 688, 33 px to spare. The LAYER cell carries its own
+ *   leading rule, so hiding it (no DisplayLayerProgress) takes the rule too.
+ *
+ * Bottom band horizontal budget, content box 720 - 2 x 24 pad - 2 border = 670:
+ *   left   153 pct ("100.0" bold_56 + 2) + 4 + 27 "%" = 184
+ *   right  35 "ETA" (m16 + letter space) + 10 + time, CONTENT-DRIVEN: the time
+ *          label is its natural width and the cell packs from the row's right
+ *          edge, so "ETA" rides 10 px off the first digit whether the time
+ *          reads "10:27" (~160 px, cell ~205) or the worst-case 12-hour
+ *          "12:56 PM" (~250 px, cell 295)
+ *   184 + 295 = 479 <= 670 at worst.
  *
  * Each band is built TWICE (see band()): a bare filled rectangle parented to the
  * page, and a transparent twin of identical size, position and padding parented
@@ -32,12 +50,12 @@
  * Type scale (both bands, ~1.25x the first cut; band heights are UNCHANGED and
  * the extra height is taken out of the padding — see LB_TOP_PAD_VER and
  * LB_BOT_PAD_TOP for the two budgets):
- *   captions STATUS / TIME ELAPSED / NOZZLE / BED   montserrat_14, letter-space 1
- *   "FINISHING AT"                                  montserrat_16, letter-space 1
+ *   captions STATUS / TIME ELAPSED / LAYER / NOZZLE / BED  montserrat_14, l-s 1
+ *   "ETA"                                           montserrat_16, letter-space 1
  *   state "Operational", temps "23.8°"              bold_22
- *   elapsed "01:35:00", "Layer 86 / 86"             montserrat_22
- *   percent "61.8"                                  bold_56
- *   "%" and finish "15:56"                          bold_28
+ *   elapsed "01:35:00", layer "86 / 86"             montserrat_22
+ *   percent "61.8" and finish "15:56"               bold_56
+ *   "%"                                             bold_28
  *
  * The two bands are painted in OCTO_COL_CARDBG, not OCTO_COL_BG: the card fill
  * is the theme's "lifted" ground and it separates the bands from the picture
@@ -74,6 +92,7 @@
  * tallest cell in it is caption + 2 gap + value:
  *   state    16 (montserrat_14) + 2 + 23 (bold_22)       = 41
  *   elapsed  16 (montserrat_14) + 2 + 24 (montserrat_22) = 42
+ *   layer    16 (montserrat_14) + 2 + 24 (montserrat_22) = 42
  *   temps    16 (montserrat_14) + 2 + 23 (bold_22)       = 41
  * 12 + 42 + 12 = 66 <= 70, so the nominal 12 px padding survives the 1.25x
  * scale with 4 px to spare. */
@@ -88,9 +107,9 @@
  *   1 border + 12 pad_top + 83 content + 13 pad_bottom + 1 border = 110
  * and the content box carries exactly
  *   59 row (lv_font_montserrat_bold_56 line_height) + 8 gap + 16 track = 83.
- * The row's height is the tallest child, which is the percentage itself: the
- * finish cell measures 18 + 2 + 28 = 48, the layer cell 24 + 7 lift = 31 and
- * the "%" 28 + 6 lift = 34, all under 59. That leaves ZERO slack, so a taller
+ * The row's height is the tallest child: the percentage and the finish time
+ * are both bold_56 (59), the "ETA" caption 18 + 8 lift = 26 and the "%"
+ * 28 + 6 lift = 34, all under 59. That leaves ZERO slack, so a taller
  * face cannot be dropped in here without taking it back out of LB_BOT_PAD_TOP
  * (floor 8) or LB_BOT_GAP (floor 6). The track's bottom edge sits 14 px clear
  * of the panel edge. */
@@ -103,16 +122,16 @@
 #define LB_DIV_H        40
 #define LB_DIV_MARGIN   16      /* each side */
 #define LB_TEMP_GAP     24
-#define LB_LAYER_MARGIN 16
+#define LB_ETA_GAP      10      /* between "ETA" and the 56 px time */
 
-/* Baseline lift for the small type beside the 56 px percentage. The row packs on
- * its bottom EDGE, but the eye wants a shared BASELINE, so each small label is
+/* Baseline lift for the small type beside a 56 px face. The row packs on its
+ * bottom EDGE, but the eye wants a shared BASELINE, so each small label is
  * raised by the difference in font base_line (descender depth), read off the
  * generated font tables:
  *   bold_56 base_line 11, bold_28 base_line 5       -> 11 - 5 = 6  (the "%")
- *   bold_56 base_line 11, montserrat_22 base_line 4 -> 11 - 4 = 7  (the layers) */
+ *   bold_56 base_line 11, montserrat_16 base_line 3 -> 11 - 3 = 8  ("ETA") */
 #define LB_LIFT_UNIT     6
-#define LB_LIFT_LAYER    7
+#define LB_LIFT_ETA      8
 
 /* Absolute slots for the two hidden-until-needed chips, stacked under the top
  * band. Fixed heights so the second slot's y is arithmetic, not layout. */
@@ -126,9 +145,7 @@
 #define LB_S_ELAPSED    "00:00:00"
 #define LB_S_TEMP       "999.9\xC2\xB0"
 #define LB_S_PCT        "100.0"
-#define LB_S_LAYER_CUR  "9999"
 #define LB_S_LAYER_TOT  "/ 9999"
-#define LB_S_FINISH     "12:56 PM"
 
 /* ── Small shapers ────────────────────────────────────────────────────── */
 
@@ -153,8 +170,7 @@ static void fix_width(lv_obj_t *lbl, const char *sample, lv_text_align_t align)
  * Caption at the sandwich type scale: uppercase, letter-space 1, justified to
  * its own half of the screen. octo_w_caption() is montserrat_14, which is what
  * the top-band captions want, so the font is re-set anyway rather than assumed;
- * the bottom one is stepped UP to 16 (the mockup sets "FINISHING AT" one notch
- * larger than the rest).
+ * the bottom one ("ETA") is stepped UP to 16.
  */
 static lv_obj_t *caption(lv_obj_t *parent, const char *text,
                          const lv_font_t *font, lv_text_align_t align)
@@ -260,6 +276,21 @@ static void build_image(lv_obj_t *page, octoprint_widgets_t *w)
 
 /* ── Top band ─────────────────────────────────────────────────────────── */
 
+/** Vertical hairline in OCTO_COL_BORDER with LB_DIV_MARGIN either side. */
+static lv_obj_t *hairline(lv_obj_t *parent)
+{
+    lv_obj_t *rule = lv_obj_create(parent);
+    lv_obj_remove_style_all(rule);
+    lv_obj_remove_flag(rule, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(rule, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(rule, LB_DIV_W, LB_DIV_H);
+    lv_obj_set_style_bg_opa(rule, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(rule, lv_color_hex(octo_color(OCTO_COL_BORDER)), 0);
+    lv_obj_set_style_margin_left(rule, LB_DIV_MARGIN, 0);
+    lv_obj_set_style_margin_right(rule, LB_DIV_MARGIN, 0);
+    return rule;
+}
+
 static void build_state_cell(lv_obj_t *parent, octoprint_widgets_t *w)
 {
     lv_obj_t *cell = octo_w_row(parent, false, 2);
@@ -306,6 +337,38 @@ static void build_elapsed_cell(lv_obj_t *parent, octoprint_widgets_t *w)
     fix_width(w->lbl_elapsed, LB_S_ELAPSED, LV_TEXT_ALIGN_LEFT);
 }
 
+static void build_layer_cell(lv_obj_t *parent, octoprint_widgets_t *w)
+{
+    /* LAYER tile, dressed exactly like TIME ELAPSED. The cell is a ROW holding
+     * its own leading hairline plus the caption/value column, so the update
+     * path's single HIDDEN flag (no DisplayLayerProgress) removes the rule
+     * along with the numbers and the left group closes up cleanly. */
+    w->layer_cell = octo_w_row(parent, true, 0);
+    lv_obj_set_size(w->layer_cell, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_align(w->layer_cell, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    hairline(w->layer_cell);
+
+    lv_obj_t *cell = octo_w_row(w->layer_cell, false, 2);
+    lv_obj_set_size(cell, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_START);
+    caption(cell, "LAYER", &lv_font_montserrat_14, LV_TEXT_ALIGN_LEFT);
+
+    /* The two live numbers the update path writes as "245" and "/ 267". The
+     * current layer keeps its natural width: the caption above is
+     * left-justified, so the digits start under its first letter and any slack
+     * falls at the cell's right end, where nothing lives (this is the last cell
+     * of the left group, so a digit-count change moves no neighbour). */
+    lv_obj_t *nums = octo_w_row(cell, true, 6);
+    lv_obj_set_size(nums, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    w->lbl_layer_cur = octo_w_label(nums, "--", &lv_font_montserrat_22,
+                                    &octo_style_value);
+    w->lbl_layer_total = octo_w_label(nums, "/ --", &lv_font_montserrat_22,
+                                      &octo_style_value);
+    fix_width(w->lbl_layer_total, LB_S_LAYER_TOT, LV_TEXT_ALIGN_LEFT);
+}
+
 static void build_top_band(lv_obj_t *layer, octoprint_widgets_t *w)
 {
     /* The transparent content twin; the painted rectangle is on the page. */
@@ -315,25 +378,17 @@ static void build_top_band(lv_obj_t *layer, octoprint_widgets_t *w)
     lv_obj_set_flex_align(bar, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER);
 
-    /* Left half: state and elapsed, both left-justified, split by a hairline. */
+    /* Left half: state, elapsed and layer, all left-justified, split by
+     * hairlines. */
     lv_obj_t *left = octo_w_row(bar, true, 0);
     lv_obj_set_size(left, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_flex_align(left, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER);
 
     build_state_cell(left, w);
-
-    lv_obj_t *rule = lv_obj_create(left);
-    lv_obj_remove_style_all(rule);
-    lv_obj_remove_flag(rule, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_remove_flag(rule, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_size(rule, LB_DIV_W, LB_DIV_H);
-    lv_obj_set_style_bg_opa(rule, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(rule, lv_color_hex(octo_color(OCTO_COL_BORDER)), 0);
-    lv_obj_set_style_margin_left(rule, LB_DIV_MARGIN, 0);
-    lv_obj_set_style_margin_right(rule, LB_DIV_MARGIN, 0);
-
+    hairline(left);
     build_elapsed_cell(left, w);
+    build_layer_cell(left, w);
 
     /* Right half: both temperatures, right-justified. */
     lv_obj_t *right = octo_w_row(bar, true, LB_TEMP_GAP);
@@ -381,48 +436,28 @@ static void build_fault_slots(lv_obj_t *layer, octoprint_widgets_t *w)
 
 /* ── Bottom band ──────────────────────────────────────────────────────── */
 
-static void build_layer_cell(lv_obj_t *parent, octoprint_widgets_t *w)
-{
-    /* One row, hidden wholesale by the update path when DisplayLayerProgress is
-     * not installed — the percentage beside it stands on its own. */
-    w->layer_cell = octo_w_row(parent, true, 6);
-    lv_obj_set_size(w->layer_cell, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_style_margin_left(w->layer_cell, LB_LAYER_MARGIN, 0);
-    /* Lifted onto the 56 px digits' baseline rather than the row's bottom edge. */
-    lv_obj_set_style_margin_bottom(w->layer_cell, LB_LIFT_LAYER, 0);
-    lv_obj_set_flex_align(w->layer_cell, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END,
-                          LV_FLEX_ALIGN_END);
-
-    octo_w_label(w->layer_cell, "Layer", &lv_font_montserrat_22, &octo_style_label);
-
-    /* Both numbers are frozen at four digits. The current layer is RIGHT
-     * aligned in its box so the pair stays glued together ("86 / 86") and the
-     * slack from a two-digit print lands after the word, not between the
-     * numbers. */
-    w->lbl_layer_cur = octo_w_label(w->layer_cell, "--", &lv_font_montserrat_22,
-                                    &octo_style_label);
-    fix_width(w->lbl_layer_cur, LB_S_LAYER_CUR, LV_TEXT_ALIGN_RIGHT);
-
-    w->lbl_layer_total = octo_w_label(w->layer_cell, "/ --",
-                                      &lv_font_montserrat_22, &octo_style_label);
-    fix_width(w->lbl_layer_total, LB_S_LAYER_TOT, LV_TEXT_ALIGN_LEFT);
-}
-
 static void build_finish_cell(lv_obj_t *parent, octoprint_widgets_t *w)
 {
     /* DisplayLayerProgress-sourced, so the caption and the value hide together.
-     * Right-justified: it is the right-hand end of the bottom row. */
-    w->finish_cell = octo_w_row(parent, false, 2);
+     * "ETA" sits to the LEFT of the time on its baseline, exactly as the "%"
+     * sits beside the percentage, and the time wears the percentage's own 56 px
+     * face at its NATURAL width, not a worst-case box. The cell is the
+     * right-hand end of the row and packs from its own right edge, so a change
+     * of digits grows the cell leftward and "ETA" stays welded LB_ETA_GAP px off
+     * the first digit. */
+    w->finish_cell = octo_w_row(parent, true, LB_ETA_GAP);
     lv_obj_set_size(w->finish_cell, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_flex_align(w->finish_cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_END,
+    lv_obj_set_flex_align(w->finish_cell, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END,
                           LV_FLEX_ALIGN_END);
 
-    caption(w->finish_cell, "FINISHING AT", &lv_font_montserrat_16,
-            LV_TEXT_ALIGN_RIGHT);
+    lv_obj_t *cap = caption(w->finish_cell, "ETA", &lv_font_montserrat_16,
+                            LV_TEXT_ALIGN_RIGHT);
+    lv_obj_set_style_margin_bottom(cap, LB_LIFT_ETA, 0);
 
     w->lbl_finish = octo_w_label(w->finish_cell, "--",
-                                 &lv_font_montserrat_bold_28, &octo_style_accent);
-    fix_width(w->lbl_finish, LB_S_FINISH, LV_TEXT_ALIGN_RIGHT);
+                                 &lv_font_montserrat_bold_56, &octo_style_accent);
+    lv_obj_set_style_text_letter_space(w->lbl_finish, 0, 0);
+    lv_obj_set_width(w->lbl_finish, LV_SIZE_CONTENT);
 }
 
 static void build_bottom_band(lv_obj_t *layer, octoprint_widgets_t *w)
@@ -467,7 +502,6 @@ static void build_bottom_band(lv_obj_t *layer, octoprint_widgets_t *w)
      * than below it (the two faces have different descenders). */
     lv_obj_set_style_margin_bottom(w->lbl_pct_unit, LB_LIFT_UNIT, 0);
 
-    build_layer_cell(left, w);
     build_finish_cell(row, w);
 
     /* Track: the band's full content width (720 - 2 x 24 pad - 2 x 1 border =

@@ -30,8 +30,8 @@
  *   0     flat dim + flat bottom strip (b-94..b-0), on the layer
  *   0     top bar    52  connection left, dot + state right, no fill
  *   58    error slot 28  left-anchored, fades right (hidden unless faulted)
- *   b-94  percent        right-justified, unfilled, caption over value
- *   b-94  layer          left-anchored, unfilled, caption over value
+ *   b-94  percent        left-anchored, unfilled, caption over value
+ *   b-94  layer          right-justified, unfilled, caption over value
  *   b-78  track      8   single progress bar, 8 px clear above and below
  *   b-0   metrics    70  five equal cells, flush to the bottom edge, no rule
  *
@@ -250,23 +250,23 @@ static void build_error_slot(lv_obj_t *page, octoprint_widgets_t *w)
 
 static void build_percent(lv_obj_t *page, octoprint_widgets_t *w)
 {
-    /* Right-justified, unfilled: caption above value, floating on the image.
-     * The layer pane takes the left side; the two never overlap and the percent
+    /* Left-anchored, unfilled: caption above value, floating on the image.
+     * The layer pane takes the right side; the two never overlap and the percent
      * geometry stands alone when DisplayLayerProgress is absent. */
     lv_obj_t *pane = octo_w_row(page, false, 0);
     lv_obj_set_size(pane, GL_PCT_W, LV_SIZE_CONTENT);
-    lv_obj_align(pane, LV_ALIGN_BOTTOM_RIGHT, 0, GL_PCT_Y);
-    lv_obj_set_style_pad_right(pane, GL_PANE_PAD, 0);
-    lv_obj_set_flex_align(pane, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END,
-                          LV_FLEX_ALIGN_END);
+    lv_obj_align(pane, LV_ALIGN_BOTTOM_LEFT, 0, GL_PCT_Y);
+    lv_obj_set_style_pad_left(pane, GL_PANE_PAD, 0);
+    lv_obj_set_flex_align(pane, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_START);
 
     w->lbl_pct_sub = octo_w_caption(pane, "COMPLETE");
     lv_obj_set_width(w->lbl_pct_sub, LV_PCT(100));
-    lv_obj_set_style_text_align(w->lbl_pct_sub, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_align(w->lbl_pct_sub, LV_TEXT_ALIGN_LEFT, 0);
 
     lv_obj_t *row = octo_w_row(pane, true, 4);
     lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END,
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END,
                           LV_FLEX_ALIGN_END);
 
     /* The mockup sets the percentage in Playfair; that face carries only digits
@@ -306,7 +306,7 @@ static void build_track(lv_obj_t *page, octoprint_widgets_t *w)
 
 static void build_layer(lv_obj_t *page, octoprint_widgets_t *w)
 {
-    /* The left-anchored readout lives inside layer_cell, so the update path
+    /* The right-justified readout lives inside layer_cell, so the update path
      * hides the whole layer story in one go when DisplayLayerProgress is not
      * installed. The cell itself is an invisible full-page absolute frame; only
      * its child pane paints. */
@@ -318,18 +318,18 @@ static void build_layer(lv_obj_t *page, octoprint_widgets_t *w)
     /* Unfilled: caption above value, floating on the image. */
     lv_obj_t *pane = octo_w_row(w->layer_cell, false, 0);
     lv_obj_set_size(pane, GL_LAYER_W, LV_SIZE_CONTENT);
-    lv_obj_align(pane, LV_ALIGN_BOTTOM_LEFT, 0, GL_LAYER_Y);
-    lv_obj_set_style_pad_left(pane, GL_PANE_PAD, 0);
-    lv_obj_set_flex_align(pane, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
-                          LV_FLEX_ALIGN_START);
+    lv_obj_align(pane, LV_ALIGN_BOTTOM_RIGHT, 0, GL_LAYER_Y);
+    lv_obj_set_style_pad_right(pane, GL_PANE_PAD, 0);
+    lv_obj_set_flex_align(pane, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END,
+                          LV_FLEX_ALIGN_END);
 
     lv_obj_t *cap = octo_w_caption(pane, "LAYER");
     lv_obj_set_width(cap, LV_PCT(100));
-    lv_obj_set_style_text_align(cap, LV_TEXT_ALIGN_LEFT, 0);
+    lv_obj_set_style_text_align(cap, LV_TEXT_ALIGN_RIGHT, 0);
 
     lv_obj_t *nums = octo_w_row(pane, true, 6);
     lv_obj_set_size(nums, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_flex_align(nums, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END,
+    lv_obj_set_flex_align(nums, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END,
                           LV_FLEX_ALIGN_END);
     w->lbl_layer_cur = octo_w_label(nums, "--", &lv_font_montserrat_36,
                                     &octo_style_value);

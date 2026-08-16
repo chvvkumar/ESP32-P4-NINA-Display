@@ -28,6 +28,7 @@
 #include "ui/nina_spotify.h"
 #include "ui/nina_graph_overlay.h"
 #include "ui/nina_info_overlay.h"
+#include "ui/nina_net_debug.h"
 #include "ui/nina_safety.h"
 #include "ui/nina_alerts.h"
 #include "ui/nina_session_stats.h"
@@ -58,6 +59,7 @@
 #include "freertos/queue.h"
 #include "ui/nina_thumbnail.h"
 #include "poll_task.h"
+#include "net_trace.h"
 #include "wifi_manager.h"   /* wifi_apply_tx_power — re-applied on screen-sleep wake */
 
 static const char *TAG = "tasks";
@@ -386,7 +388,8 @@ void input_task(void *arg) {
              * the page underneath it. */
             if (nina_dashboard_thumbnail_visible()
                 || nina_graph_visible()
-                || nina_info_overlay_visible()) {
+                || nina_info_overlay_visible()
+                || nina_net_debug_visible()) {
                 continue;
             }
             int total = nina_dashboard_get_total_page_count();
@@ -508,6 +511,7 @@ void instance_poll_task(void *arg) {
             ctx->client->connected = false;
             nina_connection_report_poll(idx, false);
             ESP_LOGD(TAG, "Poll[%d]: DNS failed, skipping", idx + 1);
+            ctx->last_heartbeat_ms = now_ms;  // offline host: retry at the tier interval, not every 5 s
             vTaskDelay(pdMS_TO_TICKS(5000));
             continue;
         }
@@ -595,6 +599,7 @@ void instance_poll_task(void *arg) {
             cycle_ms = HEARTBEAT_INTERVAL_MS;
         }
         // Use task notification to allow early wake (page change, WS event)
+        net_sched_note(pcTaskGetName(NULL), (uint32_t)(esp_timer_get_time() / 1000) + cycle_ms);
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(cycle_ms));
     }
 
@@ -1126,6 +1131,7 @@ void spotify_poll_task(void *arg)
             interval = backoff;
         }
         perf_timer_stop(&g_perf.spotify_poll_cycle);
+        net_sched_note(pcTaskGetName(NULL), (uint32_t)(esp_timer_get_time() / 1000) + interval);
         vTaskDelay(pdMS_TO_TICKS(interval));
     }
 }
@@ -1898,6 +1904,7 @@ main_loop:
             bool current_debug = app_config_get()->debug_mode;
             if (first_check || current_debug != last_debug_mode) {
                 perf_monitor_set_enabled(current_debug);
+                net_trace_set_verbose(current_debug);
                 /* Suppress verbose per-poll INFO logs when not debugging */
                 esp_log_level_t lvl = current_debug ? ESP_LOG_INFO : ESP_LOG_WARN;
                 esp_log_level_set("nina_client", lvl);
@@ -2728,6 +2735,7 @@ main_loop:
                 cycle_ms = (uint32_t)app_config_get()->update_rate_s * 1000;
                 if (cycle_ms < 1000) cycle_ms = 1000;
             }
+            net_sched_note(pcTaskGetName(NULL), (uint32_t)(esp_timer_get_time() / 1000) + cycle_ms);
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(cycle_ms));
         }
     }

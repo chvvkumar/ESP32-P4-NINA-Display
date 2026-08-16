@@ -796,9 +796,10 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
 #include <netdb.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include "net_trace.h"
 
 #define DNS_CACHE_TTL_MS 60000  // 60-second TTL for a successful lookup
-#define DNS_NEG_TTL_MS   10000  // 10-second TTL for a failed lookup
+#define DNS_NEG_TTL_MS   30000  // 30-second TTL for a failed lookup (offline rig re-resolve cadence)
 
 typedef struct {
     char hostname[128];
@@ -876,6 +877,7 @@ bool nina_client_resolve_host(const char *host, char *ip_out, size_t ip_len) {
     struct addrinfo hints = {0};
     hints.ai_family = AF_INET;
     struct addrinfo *result = NULL;
+    net_ev_note_detail(pcTaskGetName(NULL), host);  /* DNS lookup = UDP TX */
     int err = getaddrinfo(host, NULL, &hints, &result);
 
     if (err == 0 && result) {

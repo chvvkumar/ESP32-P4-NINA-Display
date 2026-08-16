@@ -10,6 +10,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "esp_timer.h"
+#include "net_trace.h"
 
 static const char *TAG = "poll_task";
 
@@ -28,6 +30,7 @@ void poll_loop_run(const poll_loop_spec_t *spec, void *arg) {
 
     bool parked = true;    /* start "parked": on_park fires only on running->parked
                             * transitions, not on a task that starts gated off */
+    bool sched_parked = false;   /* net_sched "parked" note issued for this park */
 
     while (1) {
         /* Suspend during OTA updates or while gated inactive (page not visible). */
@@ -36,9 +39,14 @@ void poll_loop_run(const poll_loop_spec_t *spec, void *arg) {
                 parked = true;
                 if (spec->on_park) spec->on_park(arg);
             }
+            if (!sched_parked) {
+                sched_parked = true;
+                net_sched_note(pcTaskGetName(NULL), 0);   /* 0 = parked sentinel */
+            }
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
         }
         parked = false;
+        sched_parked = false;
 
         bool ok = spec->poll_once(arg);
 
@@ -57,6 +65,7 @@ void poll_loop_run(const poll_loop_spec_t *spec, void *arg) {
 
         /* A pending task notify (e.g. WebSocket wake, config change) wakes
          * this early instead of sleeping the full interval. */
+        net_sched_note(pcTaskGetName(NULL), (uint32_t)(esp_timer_get_time() / 1000) + wait_ms);
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(wait_ms));
     }
 }

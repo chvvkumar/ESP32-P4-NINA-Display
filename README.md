@@ -144,10 +144,10 @@ Real-time 3D rendered Moon with accurate phase, libration, and sub-solar lightin
 ### OctoPrint 3D Printer Page
 
 <p align="center">
-  <img src="images/octoprint_hero.jpg" alt="Three displays side by side, the right one showing a live print on the OctoPrint page" width="720">
+  <img src="images/octoprint_hero.jpg" alt="OctoPrint page showing a live print" width="720">
 </p>
 
-Live print status from an OctoPrint host. Four layouts share the same readings and the same picture pipeline; pick one per device. The picture is either the G-code preview embedded by the slicer or a snapshot from the printer camera.
+Shows the current print from an OctoPrint server: progress, layer, time elapsed, estimated finish, and nozzle and bed temperatures. Choose one of four layouts. The picture is either the thumbnail your slicer embeds in the G-code file or a snapshot from the printer camera. The display only reads from OctoPrint; it never sends commands to the printer.
 
 <table align="center">
   <tr>
@@ -193,7 +193,11 @@ Nozzle and bed readings change colour with what the heater is doing: warming up,
 
 ### Web Configuration UI
 
-Every setting is managed from the on-device web UI, organized into tabs.
+<p align="center">
+  <img src="images/web_home.jpg" alt="Web UI home page: device health tiles, the reason the panel is showing its current page, N.I.N.A. connections, integrations, and a page picker" width="720">
+</p>
+
+The home page shows device health at a glance, explains why the panel is on its current page, lists N.I.N.A. connections and integrations, and lets you send the panel to any page with one tap. Every setting is managed from the same web UI, organized into tabs.
 
 <table align="center">
   <tr>
