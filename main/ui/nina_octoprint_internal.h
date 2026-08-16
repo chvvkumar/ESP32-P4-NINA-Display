@@ -245,37 +245,6 @@ lv_obj_t *octo_w_label(lv_obj_t *parent, const char *text,
 /** Uppercase micro caption ("PROGRESS", "LAYER"): font 14, letter-space 2. */
 lv_obj_t *octo_w_caption(lv_obj_t *parent, const char *text);
 
-/* Drop-shadow geometry for labels drawn straight over a picture. */
-#define OCTO_SHADOW_DX   2
-#define OCTO_SHADOW_DY   2
-#define OCTO_SHADOW_OPA  LV_OPA_70
-
-/**
- * Give @p lbl a dark drop shadow so it reads on any picture: the label's own
- * text is drawn once more, offset OCTO_SHADOW_DX/DY, in black at
- * OCTO_SHADOW_OPA, just before the label paints itself. No copy of the text is
- * kept, so the update path needs no change; works for any long mode.
- * Idempotent per label.
- *
- * This is LVGL 9.5's native per-object drop shadow (LV_STYLE_DROP_SHADOW_*),
- * with blur radius 0 for a hard offset copy: lv_draw_label() renders the very
- * same dsc into an A8 sub-layer and composites it recoloured black under the
- * real text (managed_components/lvgl__lvgl/src/draw/lv_draw_label.c:115). Text
- * colour, font, alignment and LONG_MODE_DOTS truncation therefore all track
- * automatically -- including recolouring done by the update path, because the
- * shadow is a mask of whatever the label draws at that moment.
- *
- * CLIPPING. The extra draw area does NOT save the shadow here, so the helper
- * pads the label's right and bottom by OCTO_SHADOW_DX/DY instead: a
- * LV_LABEL_LONG_CLIP label clips its own draw to the text coords
- * (lvgl/src/widgets/label/lv_label.c), and a tight SIZE_CONTENT parent clips
- * its children to bare coords, both ahead of any extra-draw allowance. The
- * padding puts the offset copy inside the label's own box. A label pinned to a
- * FIXED width must therefore add OCTO_SHADOW_DX to that width, or the padding
- * comes out of the text instead.
- */
-void octo_label_shadow(lv_obj_t *lbl);
-
 /** Pixel width of @p sample in @p font (letter_space 0). For fixed-width labels
  * that must not jiggle. */
 int32_t octo_text_width(const lv_font_t *font, const char *sample);

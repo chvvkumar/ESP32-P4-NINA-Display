@@ -18,11 +18,11 @@
  * top corners and one full-width group runs along the bottom, carrying the
  * completion story and ending in an edge-to-edge progress track.
  *
- * LEGIBILITY. The tint alone is not a guarantee over a blown-out frame, so
- * every text label ALSO keeps octo_label_shadow(): a dark drop shadow redrawn
- * under the glyphs. The error strip and the connection chip keep their own
- * darker scrim on top of that, because they carry warning text that must never
- * be a judgement call.
+ * LEGIBILITY. The translucent tinted panels are what carry the text: every
+ * reading sits on one, so the type always has its own ground rather than the
+ * bare picture. The error strip and the connection chip keep their own darker
+ * scrim on top of that, because they carry warning text that must never be a
+ * judgement call.
  *
  * READINGS TOGGLE. Everything except the image ground is parented to
  * w->overlay_layer (octo_w_overlay_layer()), a full-page transparent
@@ -114,11 +114,10 @@ static void tint_panel(lv_obj_t *panel, int32_t radius)
 }
 
 /**
- * Pin @p lbl to the pixel width of @p sample in @p font, clip anything longer,
- * and give it the drop shadow every label on this layout needs. Letter spacing
- * is zeroed first: octo_text_width() measures the bare glyph run while the
- * shared label style adds 2 px per character, which would otherwise push a
- * full-width reading past the measured box.
+ * Pin @p lbl to the pixel width of @p sample in @p font and clip anything
+ * longer. Letter spacing is zeroed first: octo_text_width() measures the bare
+ * glyph run while the shared label style adds 2 px per character, which would
+ * otherwise push a full-width reading past the measured box.
  */
 static void fixed_label(lv_obj_t *lbl, const lv_font_t *font,
                         const char *sample, lv_text_align_t align)
@@ -128,13 +127,9 @@ static void fixed_label(lv_obj_t *lbl, const lv_font_t *font,
     }
     lv_obj_set_style_text_font(lbl, font, 0);
     lv_obj_set_style_text_letter_space(lbl, 0, 0);
-    /* + OCTO_SHADOW_DX: octo_label_shadow() pads the right edge by that much
-     * to keep the shadow unclipped, and that padding would otherwise be taken
-     * out of the measured text width. */
-    lv_obj_set_width(lbl, octo_text_width(font, sample) + 2 + OCTO_SHADOW_DX);
+    lv_obj_set_width(lbl, octo_text_width(font, sample) + 2);
     lv_label_set_long_mode(lbl, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_align(lbl, align, 0);
-    octo_label_shadow(lbl);
 }
 
 /**
@@ -142,16 +137,15 @@ static void fixed_label(lv_obj_t *lbl, const lv_font_t *font,
  * the wider of the two, so their right edges land on the same pixel whichever
  * is longer. The caption measurement is topped up because octo_text_width()
  * measures at letter_space 0 while these captions are tracked out by 1 px per
- * character. OCTO_SHADOW_DX is added for the same reason as in fixed_label():
- * both members of the pair carry a shadow whose padding must not eat text, and
- * adding it to the SHARED width keeps their right edges on one pixel.
+ * character. The 2 px slack is added to the SHARED width, so both members keep
+ * their right edges on one pixel.
  */
 static int32_t pair_width(const lv_font_t *cap_font, const char *cap_text,
                           const lv_font_t *val_font, const char *val_sample)
 {
     int32_t cap_w = octo_text_width(cap_font, cap_text) + 8;
     int32_t val_w = octo_text_width(val_font, val_sample);
-    return ((cap_w > val_w) ? cap_w : val_w) + 2 + OCTO_SHADOW_DX;
+    return ((cap_w > val_w) ? cap_w : val_w) + 2;
 }
 
 /**
@@ -173,7 +167,6 @@ static lv_obj_t *caption(lv_obj_t *parent, const char *text,
         lv_label_set_long_mode(cap, LV_LABEL_LONG_CLIP);
         lv_obj_set_style_text_align(cap, LV_TEXT_ALIGN_RIGHT, 0);
     }
-    octo_label_shadow(cap);
     return cap;
 }
 
@@ -202,8 +195,6 @@ static void build_ground(lv_obj_t *page, octoprint_widgets_t *w)
         lv_image_set_inner_align(w->img_hero, LV_IMAGE_ALIGN_CENTER);
     }
     if (w->img_placeholder) {
-        /* No shadow here: this one sits on the placeholder's own dark ground,
-         * which is the only part of the page that still has one. */
         lv_obj_set_style_text_font(w->img_placeholder, &lv_font_montserrat_20, 0);
         lv_obj_set_style_text_letter_space(w->img_placeholder, 3, 0);
         lv_obj_center(w->img_placeholder);
@@ -215,8 +206,7 @@ static void build_ground(lv_obj_t *page, octoprint_widgets_t *w)
 static void build_top_left(lv_obj_t *parent, octoprint_widgets_t *w)
 {
     /* Tinted container welded flush into the corner, sized tight to its content;
-     * the tint plus the shadow on each label is what separates the type from the
-     * picture behind it. */
+     * the tint is what separates the type from the picture behind it. */
     lv_obj_t *p = octo_w_row(parent, true, 0);
     lv_obj_set_size(p, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_align(p, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -295,7 +285,6 @@ static void temp_cell(lv_obj_t *parent, const char *name, bool hot,
     lv_obj_set_width(t->lbl_name, width);
     lv_label_set_long_mode(t->lbl_name, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_align(t->lbl_name, LV_TEXT_ALIGN_RIGHT, 0);
-    octo_label_shadow(t->lbl_name);
 }
 
 static void build_top_right(lv_obj_t *parent, octoprint_widgets_t *w)
@@ -388,7 +377,6 @@ static void build_bottom(lv_obj_t *parent, octoprint_widgets_t *w)
 
     w->lbl_pct_unit = octo_w_label(left, "%", &lv_font_montserrat_bold_28,
                                    &octo_style_accent);
-    octo_label_shadow(w->lbl_pct_unit);
     /* The unit rides the digits' baseline, not the row's bottom edge. */
     lv_obj_set_style_margin_bottom(w->lbl_pct_unit, OV_LIFT_UNIT, 0);
 
@@ -403,9 +391,8 @@ static void build_bottom(lv_obj_t *parent, octoprint_widgets_t *w)
 
     /* Static word, then the two live numbers the update path writes as "86" and
      * "/ 86" — together they read "Layer 86 / 86". */
-    lv_obj_t *layer_word = octo_w_label(w->layer_cell, "Layer",
-                                        &lv_font_montserrat_22, &octo_style_label);
-    octo_label_shadow(layer_word);
+    octo_w_label(w->layer_cell, "Layer", &lv_font_montserrat_22,
+                 &octo_style_label);
     w->lbl_layer_cur = octo_w_label(w->layer_cell, "--", &lv_font_montserrat_22,
                                     &octo_style_label);
     /* RIGHT for the same reason as the percentage: the current layer hugs the

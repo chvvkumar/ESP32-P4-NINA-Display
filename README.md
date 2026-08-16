@@ -141,6 +141,56 @@ Real-time 3D rendered Moon with accurate phase, libration, and sub-solar lightin
   </tr>
 </table>
 
+### OctoPrint 3D Printer Page
+
+<p align="center">
+  <img src="images/octoprint_hero.jpg" alt="Three displays side by side, the right one showing a live print on the OctoPrint page" width="720">
+</p>
+
+Live print status from an OctoPrint host. Four layouts share the same readings and the same picture pipeline; pick one per device. The picture is either the G-code preview embedded by the slicer or a snapshot from the printer camera.
+
+<table align="center">
+  <tr>
+    <td align="center"><img src="images/octoprint_grid_preview.jpg" alt="Grid layout, G-code preview" width="480"></td>
+    <td align="center"><img src="images/octoprint_immersive_preview.jpg" alt="Immersive image layout, G-code preview" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Grid</em></td>
+    <td align="center"><em>Immersive image</em></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="images/octoprint_overlay_preview.jpg" alt="Floating overlay layout, G-code preview" width="480"></td>
+    <td align="center"><img src="images/octoprint_letterbox_preview.jpg" alt="Letterbox layout, G-code preview" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Floating overlay</em></td>
+    <td align="center"><em>Letterbox</em></td>
+  </tr>
+</table>
+
+The same four layouts showing the printer camera instead of the slicer preview:
+
+<table align="center">
+  <tr>
+    <td align="center"><img src="images/octoprint_grid_webcam.jpg" alt="Grid layout, camera snapshot" width="480"></td>
+    <td align="center"><img src="images/octoprint_immersive_webcam.jpg" alt="Immersive image layout, camera snapshot" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Grid</em></td>
+    <td align="center"><em>Immersive image</em></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="images/octoprint_overlay_webcam.jpg" alt="Floating overlay layout, camera snapshot" width="480"></td>
+    <td align="center"><img src="images/octoprint_letterbox_webcam.jpg" alt="Letterbox layout, camera snapshot" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Floating overlay</em></td>
+    <td align="center"><em>Letterbox</em></td>
+  </tr>
+</table>
+
+Nozzle and bed readings change colour with what the heater is doing: warming up, holding at target, cooling down, or off. Tapping the page hides the readings so only the picture shows; the Grid layout is unaffected.
+
 ### Web Configuration UI
 
 Every setting is managed from the on-device web UI, organized into tabs.
