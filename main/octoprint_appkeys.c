@@ -80,6 +80,13 @@ static void set_dialog(const char *url)
     portEXIT_CRITICAL(&s_mux);
 }
 
+static void clear_busy(void)
+{
+    portENTER_CRITICAL(&s_mux);
+    s_busy = false;
+    portEXIT_CRITICAL(&s_mux);
+}
+
 const char *octoprint_appkeys_state_name(octoprint_appkey_state_t state)
 {
     switch (state) {
@@ -335,7 +342,7 @@ static void appkeys_flow(void)
         base[--len] = '\0';
     }
     if (len == 0) {
-        set_state(OCTO_APPKEY_ERROR, "Save the OctoPrint address first.");
+        set_state(OCTO_APPKEY_ERROR, "Enter the OctoPrint address first.");
         return;
     }
     const bool tls = (strncmp(base, "https://", 8) == 0);
@@ -379,13 +386,34 @@ static void appkeys_task(void *arg)
             http_fetch_conn_destroy(s_conn);
             s_conn = NULL;
         }
-        portENTER_CRITICAL(&s_mux);
-        s_busy = false;
-        portEXIT_CRITICAL(&s_mux);
+        clear_busy();
     }
 }
 
-esp_err_t octoprint_appkeys_start(void)
+/**
+ * Persist @p url as octoprint_url when it differs from the saved value. Same
+ * snapshot pattern as save_api_key(). Skips the ~350 ms NVS write when equal.
+ * Returns false only on allocation failure.
+ */
+static bool save_url_if_changed(const char *url)
+{
+    if (strcmp(app_config_get()->octoprint_url, url) == 0) {
+        return true;
+    }
+    app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    if (!cfg) {
+        ESP_LOGE(TAG, "PSRAM alloc failed for config snapshot");
+        return false;
+    }
+    app_config_get_snapshot_into(cfg);
+    strlcpy(cfg->octoprint_url, url, sizeof(cfg->octoprint_url));
+    app_config_save(cfg);
+    heap_caps_free(cfg);
+    ESP_LOGI(TAG, "OctoPrint address updated from the access request");
+    return true;
+}
+
+esp_err_t octoprint_appkeys_start(const char *url)
 {
     /* One flow at a time: a second request while one is live would leave two
      * pollers racing to write the same config field. */
@@ -399,11 +427,18 @@ esp_err_t octoprint_appkeys_start(void)
 
     set_dialog(NULL);
 
+    /* The worker reads the address from config, so a caller-supplied one must
+     * be on disk before the worker is woken. Done under s_busy so a concurrent
+     * start cannot interleave its own save with this one. */
+    if (url && url[0] != '\0' && !save_url_if_changed(url)) {
+        set_state(OCTO_APPKEY_ERROR, "The device is out of memory. Try again.");
+        clear_busy();
+        return ESP_ERR_NO_MEM;
+    }
+
     if (app_config_get()->octoprint_url[0] == '\0') {
-        set_state(OCTO_APPKEY_ERROR, "Save the OctoPrint address first.");
-        portENTER_CRITICAL(&s_mux);
-        s_busy = false;
-        portEXIT_CRITICAL(&s_mux);
+        set_state(OCTO_APPKEY_ERROR, "Enter the OctoPrint address first.");
+        clear_busy();
         return ESP_OK;
     }
 
@@ -415,9 +450,7 @@ esp_err_t octoprint_appkeys_start(void)
         s_task = psram_task_spawn(appkeys_task, "octo_akey", 10240, NULL, 3, 0);
         if (s_task == NULL) {
             set_state(OCTO_APPKEY_ERROR, "The device is out of memory. Try again.");
-            portENTER_CRITICAL(&s_mux);
-            s_busy = false;
-            portEXIT_CRITICAL(&s_mux);
+            clear_busy();
             return ESP_ERR_NO_MEM;
         }
     }

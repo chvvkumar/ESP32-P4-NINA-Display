@@ -252,7 +252,7 @@ esp_err_t control_toggle_post_handler(httpd_req_t *req)
     }
     if (it->type == CTRL_TYPE_PIN) {
         /* Non-config: flip the navigation pin via the arbiter (no snapshot/save). */
-        nav_arbiter_set_pin(!nav_arbiter_is_pinned(), -1, -1,
+        nav_arbiter_set_pin(!nav_arbiter_is_pinned(), -1,
                             esp_timer_get_time() / 1000);
         return send_item(req, it);
     }
@@ -326,7 +326,7 @@ esp_err_t control_set_post_handler(httpd_req_t *req)
 
     if (it->type == CTRL_TYPE_PIN) {
         /* Non-config: drive the navigation pin via the arbiter (no snapshot/save). */
-        nav_arbiter_set_pin(target != 0, -1, -1, esp_timer_get_time() / 1000);
+        nav_arbiter_set_pin(target != 0, -1, esp_timer_get_time() / 1000);
         return send_item(req, it);
     }
 

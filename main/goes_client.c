@@ -14,52 +14,6 @@ static const char *TAG = "goes_client";
 #define GOES_IMG_MAX_DIM     1024            /* reject images wider/taller than this before decode */
 #define GOES_MAX_REDIRECTS   5               /* follow up to this many 30x Location hops */
 
-/* Set a human-readable failure reason under the goes lock and mark disconnected.
- * Centralizes the lock boilerplate so every failure exit can record a reason. */
-static void set_error_msg(goes_data_t *d, const char *m)
-{
-    if (!d) return;
-    if (goes_data_lock(d, 1000)) {
-        strlcpy(d->error_msg, m ? m : "", sizeof(d->error_msg));
-        d->connected = false;
-        goes_data_unlock(d);
-    }
-}
-
-void goes_data_init(goes_data_t *data)
-{
-    memset(data, 0, sizeof(*data));
-    data->src_kind = -1;
-    data->mutex = xSemaphoreCreateMutex();
-}
-
-bool goes_data_lock(goes_data_t *data, int timeout_ms)
-{
-    if (!data || !data->mutex) return false;
-    return xSemaphoreTake(data->mutex, pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
-}
-
-void goes_data_unlock(goes_data_t *data)
-{
-    if (data && data->mutex) xSemaphoreGive(data->mutex);
-}
-
-void goes_client_cleanup(goes_data_t *data)
-{
-    if (!data) return;
-    if (goes_data_lock(data, 1000)) {
-        if (data->image_buf) {
-            heap_caps_free(data->image_buf);
-            data->image_buf = NULL;
-        }
-        data->image_w = 0;
-        data->image_h = 0;
-        data->src_kind = -1;
-        data->connected = false;
-        goes_data_unlock(data);
-    }
-}
-
 /* NESDIS sectors publish different size ladders. Return the GEOCOLOR image
  * size string (WxH, no extension) the device should fetch for a given sector.
  * Square regional sectors use 600x600 or 500x500; wide oceanic/continental
@@ -185,28 +139,12 @@ const char *goes_region_name(const char *code)
     return code;
 }
 
-esp_err_t goes_client_poll(const char *region, goes_data_t *data)
+/* Shared fetch + JPEG-magic + dimension probe + software decode. Writes the
+ * decoded frame into *out (top-down rows; see STBI_NO_THREAD_LOCALS in
+ * stb_image.c for why no flip is applied anywhere any more). */
+static esp_err_t fetch_jpeg_into(const char *url, const char *label, image_frame_t *out)
 {
-    if (!region || !data) return ESP_ERR_INVALID_ARG;
-
-    const char *size = goes_region_size(region);
-    char url[192];
-    snprintf(url, sizeof(url),
-             "https://cdn.star.nesdis.noaa.gov/GOES19/ABI/SECTOR/%s/GEOCOLOR/%s.jpg",
-             region, size);
-
-    /* The decode pipeline is top-down: stb_image emits top-down rows and every
-     * copy in the render path preserves row order, so NESDIS GOES JPEGs (already
-     * north-up) need no flip. The historical vflip=true here was compensating
-     * stb's flip-on-load flag reading uninitialized TLS garbage on the fetch
-     * task (see STBI_NO_THREAD_LOCALS in stb_image.c, fixed 2026-08-14); with
-     * that fixed, vflip=true would mirror the image. */
-    return goes_client_poll_url(url, data, false, goes_region_name(region), 0 /* GOES */);
-}
-
-esp_err_t goes_client_poll_url(const char *url, goes_data_t *data, bool vflip, const char *label, int8_t src_kind)
-{
-    if (!url || !data) return ESP_ERR_INVALID_ARG;
+    if (!url || !out) return ESP_ERR_INVALID_ARG;
 
     ESP_LOGI(TAG, "Fetching %s", url);
 
@@ -229,7 +167,7 @@ esp_err_t goes_client_poll_url(const char *url, goes_data_t *data, bool vflip, c
     size_t jpeg_len = 0;
     esp_err_t err = http_fetch_binary(url, &bopts, &jpeg_buf, &jpeg_len);
     if (err != ESP_OK) {
-        set_error_msg(data, err == ESP_ERR_NO_MEM ? "Out of memory" : "Fetch failed");
+        strlcpy(out->error_msg, err == ESP_ERR_NO_MEM ? "Out of memory" : "Fetch failed", sizeof(out->error_msg));
         return err;
     }
     int total_read = (int)jpeg_len;
@@ -237,7 +175,7 @@ esp_err_t goes_client_poll_url(const char *url, goes_data_t *data, bool vflip, c
     if (total_read < 1000) {
         ESP_LOGW(TAG, "JPEG too small (%d bytes), likely error page", total_read);
         heap_caps_free(jpeg_buf);
-        set_error_msg(data, "Fetch failed");
+        strlcpy(out->error_msg, "Fetch failed", sizeof(out->error_msg));
         return ESP_FAIL;
     }
 
@@ -246,7 +184,7 @@ esp_err_t goes_client_poll_url(const char *url, goes_data_t *data, bool vflip, c
     if (jpeg_buf[0] != 0xFF || jpeg_buf[1] != 0xD8) {
         ESP_LOGW(TAG, "Not a JPEG (magic %02X %02X)", jpeg_buf[0], jpeg_buf[1]);
         heap_caps_free(jpeg_buf);
-        set_error_msg(data, "Not a JPEG image");
+        strlcpy(out->error_msg, "Not a JPEG image", sizeof(out->error_msg));
         return ESP_FAIL;
     }
 
@@ -259,7 +197,7 @@ esp_err_t goes_client_poll_url(const char *url, goes_data_t *data, bool vflip, c
             ESP_LOGW(TAG, "JPEG too large: %lux%lu (max %d)",
                      (unsigned long)probe_w, (unsigned long)probe_h, GOES_IMG_MAX_DIM);
             heap_caps_free(jpeg_buf);
-            set_error_msg(data, "Image too large (max 1024px)");
+            strlcpy(out->error_msg, "Image too large (max 1024px)", sizeof(out->error_msg));
             return ESP_FAIL;
         }
     }
@@ -269,38 +207,44 @@ esp_err_t goes_client_poll_url(const char *url, goes_data_t *data, bool vflip, c
     uint8_t *rgb565 = NULL;
     uint32_t out_w = 0, out_h = 0;
     size_t out_size = 0;
-
-    bool decoded = jpeg_sw_decode_rgb565(jpeg_buf, total_read,
-                                          &rgb565, &out_w, &out_h, &out_size);
+    bool decoded = jpeg_sw_decode_rgb565(jpeg_buf, total_read, &rgb565, &out_w, &out_h, &out_size);
     heap_caps_free(jpeg_buf);
-
     if (!decoded || !rgb565) {
         ESP_LOGE(TAG, "JPEG decode failed");
         if (rgb565) heap_caps_free(rgb565);
-        set_error_msg(data, "Decode failed");
+        strlcpy(out->error_msg, "Decode failed", sizeof(out->error_msg));
         return ESP_FAIL;
     }
-
     ESP_LOGI(TAG, "Decoded %lux%lu (%u bytes)", out_w, out_h, (unsigned)out_size);
 
-    if (goes_data_lock(data, 2000)) {
-        uint8_t *old = data->image_buf;
-        data->image_buf = rgb565;
-        data->image_w = (uint16_t)out_w;
-        data->image_h = (uint16_t)out_h;
-        data->vflip = vflip;
-        if (label) { strlcpy(data->label, label, sizeof(data->label)); }
-        else       { data->label[0] = '\0'; }
-        data->src_kind = src_kind;
-        data->error_msg[0] = '\0';   /* clear: this fetch succeeded */
-        data->connected = true;
-        data->last_poll_ms = esp_timer_get_time() / 1000;
-        goes_data_unlock(data);
-        if (old) heap_caps_free(old);
-    } else {
-        heap_caps_free(rgb565);
-        return ESP_ERR_TIMEOUT;
-    }
-
+    out->buf = rgb565;
+    out->w = (uint16_t)out_w;
+    out->h = (uint16_t)out_h;
+    strlcpy(out->label, label ? label : "", sizeof(out->label));
+    out->error_msg[0] = '\0';
+    out->stamp_ms = esp_timer_get_time() / 1000;
     return ESP_OK;
+}
+
+esp_err_t image_fetch_goes(const char *region, image_frame_t *out)
+{
+    if (!region || !region[0] || !out) return ESP_ERR_INVALID_ARG;
+    const char *size = goes_region_size(region);
+    char url[192];
+    snprintf(url, sizeof(url),
+             "https://cdn.star.nesdis.noaa.gov/GOES19/ABI/SECTOR/%s/GEOCOLOR/%s.jpg",
+             region, size);
+    return fetch_jpeg_into(url, goes_region_name(region), out);
+}
+
+esp_err_t image_fetch_solar(uint8_t band, image_frame_t *out)
+{
+    if (!out) return ESP_ERR_INVALID_ARG;
+    return fetch_jpeg_into(solar_band_url(band), solar_band_label(band), out);
+}
+
+esp_err_t image_fetch_custom(const char *url, image_frame_t *out)
+{
+    if (!url || !url[0] || !out) return ESP_ERR_INVALID_ARG;
+    return fetch_jpeg_into(url, "Custom", out);
 }

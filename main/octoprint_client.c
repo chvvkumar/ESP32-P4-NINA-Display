@@ -82,6 +82,12 @@ static bool s_was_connected = false;
 static char  s_image_key[OCTO_MAX_GCODE_PATH + 1] = "";
 static int8_t s_image_src = -1;
 
+/* Bumped by every octoprint_client_note_image_source_switch(). A poll pass
+ * snapshots it before its first fetch and re-reads it at publish time: a
+ * difference means the source changed while the pass was in flight, so what it
+ * fetched belongs to the old source and must be dropped, not published. */
+static _Atomic uint32_t s_src_gen = 0;
+
 /* Consecutive thumbnail failures for s_thumb_fail_key. s_image_key is stamped
  * only on a published success, so without this a file whose thumbnail is
  * genuinely missing would re-fetch metadata every cycle. The counter resets when
@@ -134,6 +140,7 @@ static void reset_defaults(octoprint_data_t *data) {
     data->nozzle_target     = NAN;
     data->bed_actual        = NAN;
     data->bed_target        = NAN;
+    data->image_src         = -1;   /* 0 is a real source, so -1 is "none" */
 }
 
 void octoprint_client_init(octoprint_data_t *data) {
@@ -158,9 +165,43 @@ void octoprint_client_unlock(octoprint_data_t *data) {
     }
 }
 
+void octoprint_client_note_image_source_switch(octoprint_data_t *data) {
+    /* Bump first and unconditionally: this is what a poll pass already in
+     * flight checks, and it is the half that must not be lost if the lock
+     * below times out. */
+    atomic_fetch_add(&s_src_gen, 1);
+    if (!data) {
+        return;
+    }
+
+    /* Same swap-under-lock/free-after-unlock discipline as set_page_active:
+     * a reader holding the lock must never see a pointer we already freed. */
+    uint8_t *old = NULL;
+    if (octoprint_client_lock(data, 200)) {
+        old = data->image_buf;
+        data->image_buf    = NULL;
+        data->image_w      = 0;
+        data->image_h      = 0;
+        data->new_image    = false;
+        data->image_status = OCTO_IMG_PENDING;
+        data->image_src    = -1;
+        octoprint_client_unlock(data);
+    } else {
+        /* The generation bump above still forces the in-flight pass to publish
+         * a drop, so the stale frame cannot survive as the new source. */
+        ESP_LOGW(TAG, "Source switch could not take the lock; drop deferred to the poll pass");
+    }
+    if (old) {
+        heap_caps_free(old);
+    }
+}
+
 void octoprint_client_set_page_active(bool active, octoprint_data_t *data) {
     atomic_store(&s_page_active, active);
     if (active) {
+        /* Entering the page: nothing has been fetched for this visit yet, so
+         * the slot is PENDING until the first pass writes a verdict. */
+        octoprint_client_note_image_source_switch(data);
         return;
     }
 
@@ -638,6 +679,11 @@ void octoprint_client_poll(const char *base_url, const char *api_key,
     octoprint_data_t local;
     reset_defaults(&local);   /* mutex stays NULL -- scratch is never locked */
 
+    /* Everything this pass fetches is fetched under the source selected NOW.
+     * Snapshot the generation before the first request so the publish block can
+     * tell whether the user moved the toggle underneath us. */
+    const uint32_t gen0 = atomic_load(&s_src_gen);
+
     // ---- Tier 1: /api/job (also the connectivity probe) --------------------
     int status = 0;
     cJSON *job = fetch_json(base, hdr, "api/job", &status);
@@ -648,6 +694,12 @@ void octoprint_client_poll(const char *base_url, const char *api_key,
         s_conn_state[0] = '\0';
         if (octoprint_client_lock(data, 100)) {
             data->connected = false;
+            /* Everything else (data_valid, the last good values, image_status)
+             * stays as published: the page dims stale data instead of blanking
+             * it, and fail_count tells it how stale "stale" is. */
+            if (data->fail_count < 0xFFFF) {
+                data->fail_count++;
+            }
             octoprint_client_unlock(data);
         }
         conn_teardown_if_page_left();
@@ -685,6 +737,7 @@ void octoprint_client_poll(const char *base_url, const char *api_key,
 
     local.connected  = true;
     local.data_valid = true;
+    local.fail_count = 0;
 
     /* First cycle of a fresh connection: re-arm the plugin probe. */
     if (!s_was_connected) {
@@ -769,8 +822,11 @@ void octoprint_client_poll(const char *base_url, const char *api_key,
     bool drop_img  = false;   /* publish NULL: the held frame is from the old source */
     bool thumb_new = false;   /* the fetch that produced new_img was a thumbnail */
     const int8_t want_src = (int8_t)((image_source == 1) ? 1 : 0);
+    /* Read once: the publish block below must use the same answer this pass
+     * fetched (or did not fetch) under. */
+    const bool page_active = atomic_load(&s_page_active);
 
-    if (atomic_load(&s_page_active)) {
+    if (page_active) {
         /* Source switched while the page stayed open. The whole switch happens
          * in THIS pass: the held frame is dropped and the newly selected source
          * is fetched, decoded and published below, so the change costs one poll,
@@ -820,6 +876,16 @@ void octoprint_client_poll(const char *base_url, const char *api_key,
     }
 
     // ---- Publish -------------------------------------------------------------
+    /* The toggle moved after gen0 was taken, so whatever this pass fetched is
+     * the OLD source's picture. Retire it here -- it is pass-local, nobody else
+     * can be holding it -- and force the drop below. */
+    const bool src_stale = (atomic_load(&s_src_gen) != gen0);
+    if (src_stale && new_img) {
+        heap_caps_free(new_img);
+        new_img   = NULL;
+        thumb_new = false;
+    }
+
     uint8_t *retired = NULL;
     bool published = false;
     if (octoprint_client_lock(data, 200)) {
@@ -829,21 +895,55 @@ void octoprint_client_poll(const char *base_url, const char *api_key,
          * for the webcam source: the UI consumes (frees+NULLs) the original
          * under the lock once it has scaled it (see octoprint_client.h). */
         local.mutex = data->mutex;
-        if (new_img) {
-            retired         = data->image_buf;
+        if (src_stale || new_img || drop_img) {
+            /* local came from reset_defaults(), so its image fields are already
+             * NULL/0/-1 -- publishing them as-is IS the drop. */
+            retired = data->image_buf;
+        }
+        if (src_stale) {
+            /* Forced drop: nothing this pass produced may be published, and the
+             * held frame is the old source's. Image fields stay at their
+             * reset_defaults() values. */
+        } else if (new_img) {
             local.image_buf = new_img;
             local.image_w   = new_w;
             local.image_h   = new_h;
             local.new_image = true;
-        } else if (drop_img) {
-            /* local came from reset_defaults(), so its image fields are already
-             * NULL/0 -- publishing it as-is IS the drop. */
-            retired = data->image_buf;
-        } else {
+            local.image_src = want_src;
+        } else if (!drop_img) {
             local.image_buf = data->image_buf;
             local.image_w   = data->image_w;
             local.image_h   = data->image_h;
             local.new_image = data->new_image;
+            local.image_src = data->image_src;   /* the frame's own label */
+        }
+
+        /* Why the slot looks the way it does. A pass that ran with the page
+         * inactive fetched nothing, so it carries the previous verdict --
+         * local came from reset_defaults() and would otherwise reset it to
+         * PENDING. Webcam has no "held" case for a fresh fetch: the UI frees
+         * the original after scaling, so a NULL image_buf there is normal. */
+        if (src_stale) {
+            /* Back to "loading" until the next pass lands the new source. */
+            local.image_status = OCTO_IMG_PENDING;
+        } else if (page_active) {
+            if (want_src == 1) {
+                /* A failed refresh that still publishes a carried webcam frame
+                 * is not a visible failure -- the status must describe what is
+                 * actually drawn, and the live view keeps its last good frame
+                 * through a hiccup. */
+                local.image_status = (new_img ||
+                                      (local.image_buf && local.image_src == 1))
+                                     ? OCTO_IMG_OK : OCTO_IMG_WEBCAM_FAILED;
+            } else if (local.image_buf) {
+                local.image_status = OCTO_IMG_OK;   /* fetched now, or held */
+            } else {
+                local.image_status = (file_path[0] == '\0') ? OCTO_IMG_NO_JOB
+                                                            : OCTO_IMG_NO_THUMBNAIL;
+            }
+        } else {
+            local.image_status = data->image_status;
+            /* image_src rides along with the carried buffer above. */
         }
         memcpy(data, &local, sizeof(*data));
         octoprint_client_unlock(data);
@@ -856,7 +956,10 @@ void octoprint_client_poll(const char *base_url, const char *api_key,
     /* The held-image bookkeeping only advances once the frame is actually on the
      * published struct. Stamping it earlier would latch "no image" for the rest
      * of the print when a fetch or the publish itself failed. */
-    if (published) {
+    /* A forced drop advances nothing: s_image_src still names the source the
+     * held bookkeeping was built for, so the next pass sees a switch, drops
+     * again if needed and refetches. */
+    if (published && !src_stale) {
         if (new_img) {
             s_image_src = want_src;
             if (thumb_new) {

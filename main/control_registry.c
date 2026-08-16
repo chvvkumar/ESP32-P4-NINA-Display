@@ -13,11 +13,9 @@
 #include "display_defs.h"           /* LVGL_LOCK_TIMEOUT_MS */
 #include "lvgl.h"
 #include "mqtt_ha.h"               /* mqtt_ha_publish_state */
-#include "tasks.h"                  /* image_source_get_effective */
 #include "ui/themes.h"              /* themes_get_count, themes_get */
 #include "ui/nina_dashboard.h"      /* nina_dashboard_apply_theme, get_active_page */
-#include "ui/nina_dashboard_internal.h" /* PAGE_IDX_IMAGE_DISPLAY */
-#include "ui/nina_image_display.h"  /* image_display_apply_live */
+#include "ui/nina_image_page.h"     /* image_page_config_apply_live */
 #include "ui/nina_nav_arbiter.h"    /* nav_arbiter_notify_topology_changed, nav_arbiter_is_pinned */
 #include "ui/page_registry.h"       /* page_ref_*, PAGE_REF_* */
 
@@ -31,10 +29,23 @@ static int get_theme(const control_item_t *it, const app_config_t *c)           
 static int get_widget_style(const control_item_t *it, const app_config_t *c)          { (void)it; return c->widget_style; }
 static int get_screen_rotation(const control_item_t *it, const app_config_t *c)       { (void)it; return c->screen_rotation; }
 
-static int get_image_display_enabled(const control_item_t *it, const app_config_t *c)      { (void)it; return c->image_display_enabled ? 1 : 0; }
-static int get_image_display_show_overlay(const control_item_t *it, const app_config_t *c) { (void)it; return c->image_display_show_overlay ? 1 : 0; }
-static int get_image_display_crop(const control_item_t *it, const app_config_t *c)         { (void)it; return c->image_display_crop ? 1 : 0; }
-static int get_image_display_source(const control_item_t *it, const app_config_t *c)       { (void)it; return c->image_display_source; }
+/* Per-page image bools (v61 split): getter + setter pairs generated together. */
+#define IMG_BOOL_ACCESSORS(field) \
+    static int  get_##field(const control_item_t *it, const app_config_t *c) { (void)it; return c->field ? 1 : 0; } \
+    static void set_##field(const control_item_t *it, app_config_t *c, int v)  { (void)it; c->field = (v != 0); }
+IMG_BOOL_ACCESSORS(goes_enabled)
+IMG_BOOL_ACCESSORS(moon_enabled)
+IMG_BOOL_ACCESSORS(solar_enabled)
+IMG_BOOL_ACCESSORS(custom_enabled)
+IMG_BOOL_ACCESSORS(goes_show_overlay)
+IMG_BOOL_ACCESSORS(moon_show_overlay)
+IMG_BOOL_ACCESSORS(solar_show_overlay)
+IMG_BOOL_ACCESSORS(custom_show_overlay)
+IMG_BOOL_ACCESSORS(goes_crop)
+IMG_BOOL_ACCESSORS(solar_crop)
+IMG_BOOL_ACCESSORS(custom_crop)
+#undef IMG_BOOL_ACCESSORS
+
 static int get_goes_orientation(const control_item_t *it, const app_config_t *c)           { (void)it; return c->goes_orientation; }
 static int get_solar_orientation(const control_item_t *it, const app_config_t *c)          { (void)it; return c->solar_orientation; }
 static int get_custom_orientation(const control_item_t *it, const app_config_t *c)         { (void)it; return c->custom_orientation; }
@@ -89,10 +100,6 @@ static void set_theme(const control_item_t *it, app_config_t *c, int v)         
 static void set_widget_style(const control_item_t *it, app_config_t *c, int v)          { (void)it; c->widget_style = (uint8_t)v; }
 static void set_screen_rotation(const control_item_t *it, app_config_t *c, int v)       { (void)it; c->screen_rotation = (uint8_t)v; }
 
-static void set_image_display_enabled(const control_item_t *it, app_config_t *c, int v)      { (void)it; c->image_display_enabled = (v != 0); }
-static void set_image_display_show_overlay(const control_item_t *it, app_config_t *c, int v) { (void)it; c->image_display_show_overlay = (v != 0); }
-static void set_image_display_crop(const control_item_t *it, app_config_t *c, int v)         { (void)it; c->image_display_crop = (v != 0); }
-static void set_image_display_source(const control_item_t *it, app_config_t *c, int v)       { (void)it; c->image_display_source = (uint8_t)v; }
 static void set_goes_orientation(const control_item_t *it, app_config_t *c, int v)           { (void)it; c->goes_orientation = (uint8_t)v; }
 static void set_solar_orientation(const control_item_t *it, app_config_t *c, int v)          { (void)it; c->solar_orientation = (uint8_t)v; }
 static void set_custom_orientation(const control_item_t *it, app_config_t *c, int v)         { (void)it; c->custom_orientation = (uint8_t)v; }
@@ -172,7 +179,7 @@ static void apply_screen_rotation(const app_config_t *prev, const app_config_t *
 
 static void apply_image_display(const app_config_t *prev, const app_config_t *cur)
 {
-    image_display_apply_live(prev, cur, false);
+    image_page_config_apply_live(prev, cur, false);
 }
 
 static void apply_auto_rotate_enabled(const app_config_t *prev, const app_config_t *cur)
@@ -190,7 +197,6 @@ static void apply_auto_rotate_enabled(const app_config_t *prev, const app_config
 
 static const char *const rot_labels[]    = { "0deg", "90deg", "180deg", "270deg" };
 static const char *const orient_labels[] = { "0deg", "90deg", "180deg", "270deg" };
-static const char *const source_labels[] = { "GOES", "Moon", "Solar", "Custom" };
 static const char *const effect_labels[] = { "Instant", "Fade", "Slide Left", "Slide Right" };
 
 /* ===================================================================== */
@@ -209,11 +215,18 @@ static const control_item_t s_items[] = {
     { "widget_style",     CTRL_TYPE_ENUM, 0,  -1, 1, NULL, 0, get_widget_style,     set_widget_style,     apply_widget_style },
     { "screen_rotation",  CTRL_TYPE_ENUM, 0,   3, 1, LBL(rot_labels), get_screen_rotation, set_screen_rotation, apply_screen_rotation },
 
-    /* ---- Image display (all apply_image_display) ---- */
-    { "image_display_enabled",      CTRL_TYPE_BOOL, 0, 1, 1, NULL, 0, get_image_display_enabled,      set_image_display_enabled,      apply_image_display },
-    { "image_display_show_overlay", CTRL_TYPE_BOOL, 0, 1, 1, NULL, 0, get_image_display_show_overlay, set_image_display_show_overlay, apply_image_display },
-    { "image_display_crop",         CTRL_TYPE_BOOL, 0, 1, 1, NULL, 0, get_image_display_crop,         set_image_display_crop,         apply_image_display },
-    { "image_display_source",       CTRL_TYPE_ENUM, 0, 3, 1, LBL(source_labels), get_image_display_source, set_image_display_source, apply_image_display },
+    /* ---- Image pages (all apply_image_display) ---- */
+    { "goes_enabled",        CTRL_TYPE_BOOL, 0, 1, 1, NULL, 0, get_goes_enabled,        set_goes_enabled,        apply_image_display },
+    { "moon_enabled",        CTRL_TYPE_BOOL, 0, 1, 1, NULL, 0, get_moon_enabled,        set_moon_enabled,        apply_image_display },
+    { "solar_enabled",       CTRL_TYPE_BOOL, 0, 1, 1, NULL, 0, get_solar_enabled,       set_solar_enabled,       apply_image_display },
+    { "custom_enabled",      CTRL_TYPE_BOOL, 0, 1, 1, NULL, 0, get_custom_enabled,      set_custom_enabled,      apply_image_display },
+    { "goes_show_overlay",   CTRL_TYPE_BOOL, 0, 1, 1, NULL, 0, get_goes_show_overlay,   set_goes_show_overlay,   apply_image_display },
+    { "moon_show_overlay",   CTRL_TYPE_BOOL, 0, 1, 1, NULL, 0, get_moon_show_overlay,   set_moon_show_overlay,   apply_image_display },
+    { "solar_show_overlay",  CTRL_TYPE_BOOL, 0, 1, 1, NULL, 0, get_solar_show_overlay,  set_solar_show_overlay,  apply_image_display },
+    { "custom_show_overlay", CTRL_TYPE_BOOL, 0, 1, 1, NULL, 0, get_custom_show_overlay, set_custom_show_overlay, apply_image_display },
+    { "goes_crop",           CTRL_TYPE_BOOL, 0, 1, 1, NULL, 0, get_goes_crop,           set_goes_crop,           apply_image_display },
+    { "solar_crop",          CTRL_TYPE_BOOL, 0, 1, 1, NULL, 0, get_solar_crop,          set_solar_crop,          apply_image_display },
+    { "custom_crop",         CTRL_TYPE_BOOL, 0, 1, 1, NULL, 0, get_custom_crop,         set_custom_crop,         apply_image_display },
     { "goes_orientation",           CTRL_TYPE_ENUM, 0, 3, 1, LBL(orient_labels), get_goes_orientation,   set_goes_orientation,   apply_image_display },
     { "solar_orientation",          CTRL_TYPE_ENUM, 0, 3, 1, LBL(orient_labels), get_solar_orientation,  set_solar_orientation,  apply_image_display },
     { "custom_orientation",         CTRL_TYPE_ENUM, 0, 3, 1, LBL(orient_labels), get_custom_orientation, set_custom_orientation, apply_image_display },
@@ -348,29 +361,6 @@ static int control_current_page_id(void)
 {
     int cur_idx = nina_dashboard_get_active_page();
 
-    /* For the Image Display page multiple ids share one absolute page index;
-     * disambiguate by the effective image source. */
-    if (cur_idx == PAGE_IDX_IMAGE_DISPLAY) {
-        int eff = (int)image_source_get_effective();  /* 0..3 */
-        const page_ref_entry_t *fallback = NULL;
-        for (int i = 0; i < page_ref_count(); i++) {
-            const page_ref_entry_t *e = page_ref_get(i);
-            if (!e || e->page_idx != cur_idx) {
-                continue;
-            }
-            if (e->img_src == eff) {
-                return (int)e->id;
-            }
-            if (!fallback && e->targetable) {
-                fallback = e;
-            }
-        }
-        if (fallback) {
-            return (int)fallback->id;
-        }
-        return (int)PAGE_REF_SUMMARY;
-    }
-
     for (int i = 0; i < page_ref_count(); i++) {
         const page_ref_entry_t *e = page_ref_get(i);
         if (e && e->page_idx == cur_idx && e->targetable) {
@@ -400,15 +390,13 @@ int control_page_cycle_next(void)
 
     /* Advance from the last issued target (anchor), not the laggy live page.
      * Reconcile to live only when the user has clearly moved elsewhere by
-     * other means to a real, targetable, non-image page (image 'live' is
-     * ambiguous under source override/nav lag, so keep the anchor there). */
+     * other means to a real, targetable page. */
     int base = live;
     if (s_page_cycle_anchor >= 0 &&
         page_ref_by_id((page_ref_t)s_page_cycle_anchor) != NULL) {
         base = s_page_cycle_anchor;
         const page_ref_entry_t *le = page_ref_by_id((page_ref_t)live);
-        if (live != s_page_cycle_anchor && le && le->targetable &&
-            le->kind != PAGE_REF_KIND_IMAGE_SOURCE) {
+        if (live != s_page_cycle_anchor && le && le->targetable) {
             base = live;
         }
     }

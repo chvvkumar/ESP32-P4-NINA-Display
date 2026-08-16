@@ -582,14 +582,14 @@
 
         <div class="api-ep">
           <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/image-display-config</span><span class="api-badge auth">Auth</span></div>
-          <p class="api-purpose">Read the Image Display settings. Returns the full current value of every persisted parameter listed in the POST table below (force_fetch is not part of the output).</p>
+          <p class="api-purpose">Read the settings for the four image pages (GOES, Moon, Solar, Custom URL). Returns the full current value of every persisted parameter listed in the POST table below (force_fetch is not part of the output).</p>
           <div class="api-snip-label">Request</div>
           <div class="api-snip" data-curl="curl -b cookies.txt http://HOST/api/image-display-config">
             <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
             <pre>curl -b cookies.txt http://<span class="api-host">HOST</span>/api/image-display-config</pre>
           </div>
           <div class="api-snip-label">Response</div>
-          <div class="api-snip"><pre>{"image_display_enabled":true,"image_display_show_overlay":true,"image_display_crop":false,"goes_region":"FD","goes_update_interval_s":600,"image_display_source":0,"moon_bg_style":0,"moon_lat":30,"moon_lon":-97,"solar_band":0,"goes_orientation":0,"solar_orientation":0,"custom_image_url":"","custom_orientation":0,"custom_update_interval_s":600,"moon_drag_light_mode":0,"moon_flip_u":0,"moon_flip_v":0,"moon_roll_offset":0,"moon_yaw_offset":0,"moon_pitch_offset":0,"moon_north_up":0,"moon_spin_mode":0,"moon_spin_return_s":10}</pre></div>
+          <div class="api-snip"><pre>{"goes_enabled":true,"goes_show_overlay":true,"goes_crop":false,"goes_region":"FD","goes_update_interval_s":600,"moon_enabled":true,"moon_show_overlay":true,"moon_update_interval_s":60,"solar_enabled":false,"solar_show_overlay":true,"solar_crop":false,"solar_update_interval_s":600,"custom_enabled":false,"custom_show_overlay":true,"custom_crop":false,"moon_bg_style":0,"moon_lat":30,"moon_lon":-97,"solar_band":0,"goes_orientation":0,"solar_orientation":0,"custom_image_url":"","custom_orientation":0,"custom_update_interval_s":600,"moon_drag_light_mode":0,"moon_flip_u":0,"moon_flip_v":0,"moon_roll_offset":0,"moon_yaw_offset":0,"moon_pitch_offset":0,"moon_north_up":0,"moon_spin_mode":0,"moon_spin_return_s":10}</pre></div>
         </div>
 
         <div class="api-ep">
@@ -598,11 +598,12 @@
           <div class="api-note">
             <strong>Partial merge.</strong> The handler loads the current full configuration, overwrites only the keys present in the request body, then saves. POST a single key to change one setting; any key you omit keeps its current value.
           </div>
-          <div class="api-snip-label">Request (single key)</div>
-          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/image-display-config -d '{&quot;image_display_source&quot;:1}'">
+          <div class="api-snip-label">Request (single page)</div>
+          <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/image-display-config -d '{&quot;source&quot;:2,&quot;solar_band&quot;:5}'">
             <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
-            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/image-display-config -d '{"image_display_source":1}'</pre>
+            <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/image-display-config -d '{"source":2,"solar_band":5}'</pre>
           </div>
+          <p class="api-purpose">Send any subset of keys; <code>source</code> (0=GOES, 1=Moon, 2=Solar, 3=Custom) selects which page's last fetch error is echoed in the response.</p>
           <div class="api-snip-label">Request (force a refresh)</div>
           <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/image-display-config -d '{&quot;force_fetch&quot;:true}'">
             <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
@@ -613,10 +614,20 @@
             <table class="api-table">
               <thead><tr><th>Param</th><th>Type</th><th>Range / Values</th><th>Notes</th></tr></thead>
               <tbody>
-                <tr><td>image_display_enabled</td><td>bool</td><td>true / false</td><td>Master enable for the Image Display page.</td></tr>
-                <tr><td>image_display_show_overlay</td><td>bool</td><td>true / false</td><td>Show the info overlay.</td></tr>
-                <tr><td>image_display_crop</td><td>bool</td><td>true / false</td><td>Crop vs full-frame. Toggling re-renders the cached frame locally (no re-download).</td></tr>
-                <tr><td>image_display_source</td><td>int</td><td>0=GOES, 1=Moon, 2=Solar, 3=Custom</td><td>Active image source. An invalid value falls back to 0.</td></tr>
+                <tr><td>goes_enabled</td><td>bool</td><td>true / false</td><td>Enable that image page.</td></tr>
+                <tr><td>moon_enabled</td><td>bool</td><td>true / false</td><td>Enable that image page.</td></tr>
+                <tr><td>solar_enabled</td><td>bool</td><td>true / false</td><td>Enable that image page.</td></tr>
+                <tr><td>custom_enabled</td><td>bool</td><td>true / false</td><td>Enable that image page. The Custom URL page also needs custom_image_url set.</td></tr>
+                <tr><td>goes_show_overlay</td><td>bool</td><td>true / false</td><td>Show the info overlay on the GOES page.</td></tr>
+                <tr><td>moon_show_overlay</td><td>bool</td><td>true / false</td><td>Show the info overlay on the Moon page.</td></tr>
+                <tr><td>solar_show_overlay</td><td>bool</td><td>true / false</td><td>Show the info overlay on the Solar page.</td></tr>
+                <tr><td>custom_show_overlay</td><td>bool</td><td>true / false</td><td>Show the info overlay on the Custom URL page.</td></tr>
+                <tr><td>goes_crop</td><td>bool</td><td>true / false</td><td>Crop vs full-frame; re-renders the cached frame locally (no re-download).</td></tr>
+                <tr><td>solar_crop</td><td>bool</td><td>true / false</td><td>Crop vs full-frame; re-renders the cached frame locally (no re-download).</td></tr>
+                <tr><td>custom_crop</td><td>bool</td><td>true / false</td><td>Crop vs full-frame; re-renders the cached frame locally (no re-download).</td></tr>
+                <tr><td>solar_update_interval_s</td><td>int</td><td>300 to 7200 (clamped)</td><td>Solar refresh interval in seconds.</td></tr>
+                <tr><td>moon_update_interval_s</td><td>int</td><td>10 to 3600 (clamped)</td><td>Moon re-render interval in seconds.</td></tr>
+                <tr><td>source</td><td>int</td><td>0=GOES, 1=Moon, 2=Solar, 3=Custom</td><td>Action only, not persisted. Selects which page's last fetch error is echoed in the response. The same key is accepted by <code>POST /api/image-display/refresh</code> as <code>{"source":n}</code>.</td></tr>
                 <tr><td>goes_region</td><td>string</td><td>region code</td><td>GOES region id.</td></tr>
                 <tr><td>goes_update_interval_s</td><td>int</td><td>300 to 7200 (clamped)</td><td>GOES refresh interval in seconds.</td></tr>
                 <tr><td>goes_orientation</td><td>int</td><td>0 to 3</td><td>Rotation quadrant (0/90/180/270 degrees).</td></tr>
@@ -643,12 +654,12 @@
                 <tr><td>moon_north_up</td><td>int</td><td>0 or 1</td><td>Force north-up.</td></tr>
                 <tr><td>moon_spin_mode</td><td>int</td><td>0 or 1</td><td>Enable spin interaction.</td></tr>
                 <tr><td>moon_spin_return_s</td><td>int</td><td>3 to 60 (clamped)</td><td>Seconds before spin returns to rest.</td></tr>
-                <tr><td>force_fetch</td><td>bool</td><td>true / false</td><td>Action only, not persisted. Forces an immediate re-fetch (used by the Preview / Refresh button). Forces a download only for the Custom source; for GOES and Solar a fetch happens automatically when source, band, or region changed.</td></tr>
+                <tr><td>force_fetch</td><td>bool</td><td>true / false</td><td>Action only, not persisted. Forces an immediate re-fetch (used by the Preview / Refresh button). Forces a download only for the Custom URL page; for GOES and Solar a fetch happens automatically when the band or region changed.</td></tr>
               </tbody>
             </table>
           </div>
           <div class="api-note">
-            Changing source, band, or region triggers a re-download with a loading overlay. Crop-only or orientation-only changes re-render the cached frame locally without downloading.
+            Changing the band or region triggers a re-download with a loading overlay. Crop-only or orientation-only changes re-render the cached frame locally without downloading.
           </div>
           <div class="api-snip-label">Response</div>
           <div class="api-snip"><pre>{"success":true}</pre></div>
@@ -742,36 +753,36 @@
           <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/control/get?name=&lt;name&gt;</span><span class="api-badge auth">Auth</span></div>
           <p class="api-purpose">Read one item by name.</p>
           <div class="api-snip-label">Request</div>
-          <div class="api-snip" data-curl="curl -H 'X-Auth-Password: YOUR_PASSWORD' 'http://HOST/api/control/get?name=image_display_source'">
+          <div class="api-snip" data-curl="curl -H 'X-Auth-Password: YOUR_PASSWORD' 'http://HOST/api/control/get?name=goes_enabled'">
             <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
-            <pre>curl -H 'X-Auth-Password: YOUR_PASSWORD' 'http://<span class="api-host">HOST</span>/api/control/get?name=image_display_source'</pre>
+            <pre>curl -H 'X-Auth-Password: YOUR_PASSWORD' 'http://<span class="api-host">HOST</span>/api/control/get?name=goes_enabled'</pre>
           </div>
           <div class="api-snip-label">Response</div>
-          <div class="api-snip"><pre>{"name":"image_display_source","type":"enum","value":1,"label":"Moon","min":0,"max":3,"step":1}</pre></div>
+          <div class="api-snip"><pre>{"name":"goes_enabled","type":"bool","value":1,"label":"On","min":0,"max":1,"step":1}</pre></div>
         </div>
 
         <div class="api-ep">
           <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/control/toggle?name=&lt;name&gt;</span><span class="api-badge auth">Auth</span></div>
           <p class="api-purpose">Flip a bool item. Returns HTTP 400 for non-bool items.</p>
           <div class="api-snip-label">Request</div>
-          <div class="api-snip" data-curl="curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST 'http://HOST/api/control/toggle?name=image_display_crop'">
+          <div class="api-snip" data-curl="curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST 'http://HOST/api/control/toggle?name=solar_crop'">
             <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
-            <pre>curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST 'http://<span class="api-host">HOST</span>/api/control/toggle?name=image_display_crop'</pre>
+            <pre>curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST 'http://<span class="api-host">HOST</span>/api/control/toggle?name=solar_crop'</pre>
           </div>
           <div class="api-snip-label">Response</div>
-          <div class="api-snip"><pre>{"name":"image_display_crop","type":"bool","value":false,"label":"Off","min":0,"max":1,"step":1}</pre></div>
+          <div class="api-snip"><pre>{"name":"solar_crop","type":"bool","value":false,"label":"Off","min":0,"max":1,"step":1}</pre></div>
         </div>
 
         <div class="api-ep">
           <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/control/cycle?name=&lt;name&gt;</span><span class="api-badge auth">Auth</span></div>
           <p class="api-purpose">Advance an enum or int item by its step. Wraps from max back to min.</p>
           <div class="api-snip-label">Request</div>
-          <div class="api-snip" data-curl="curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST 'http://HOST/api/control/cycle?name=image_display_source'">
+          <div class="api-snip" data-curl="curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST 'http://HOST/api/control/cycle?name=goes_orientation'">
             <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
-            <pre>curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST 'http://<span class="api-host">HOST</span>/api/control/cycle?name=image_display_source'</pre>
+            <pre>curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST 'http://<span class="api-host">HOST</span>/api/control/cycle?name=goes_orientation'</pre>
           </div>
           <div class="api-snip-label">Response</div>
-          <div class="api-snip"><pre>{"name":"image_display_source","type":"enum","value":2,"label":"Solar","min":0,"max":3,"step":1}</pre></div>
+          <div class="api-snip"><pre>{"name":"goes_orientation","type":"enum","value":1,"label":"90deg","min":0,"max":3,"step":1}</pre></div>
         </div>
 
         <div class="api-ep">
@@ -800,11 +811,16 @@
 
         <div class="api-ep">
           <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/image-display/refresh</span><span class="api-badge auth">Auth</span></div>
-          <p class="api-purpose">Force an immediate re-fetch of the current image source. This works for all sources, unlike the force_fetch flag on /api/image-display-config which forces a download only for the Custom source.</p>
-          <div class="api-snip-label">Request</div>
+          <p class="api-purpose">Force an immediate re-fetch of one image page with the loading overlay. With no body it refreshes the image page currently on screen; pass {"source":0..3} (0=GOES, 1=Moon, 2=Solar, 3=Custom) to refresh a specific page. This works for all four pages, unlike the force_fetch flag on /api/image-display-config which forces a download only for the Custom URL page.</p>
+          <div class="api-snip-label">Request (page on screen)</div>
           <div class="api-snip" data-curl="curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST http://HOST/api/image-display/refresh">
             <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
             <pre>curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST http://<span class="api-host">HOST</span>/api/image-display/refresh</pre>
+          </div>
+          <div class="api-snip-label">Request (specific page)</div>
+          <div class="api-snip" data-curl="curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST http://HOST/api/image-display/refresh -d '{&quot;source&quot;:2}'">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST http://<span class="api-host">HOST</span>/api/image-display/refresh -d '{"source":2}'</pre>
           </div>
           <div class="api-snip-label">Response</div>
           <div class="api-snip"><pre>{"success":true}</pre></div>
@@ -841,11 +857,11 @@
           <strong>Behavior notes.</strong> cycle wraps from max to min; set and adjust clamp to the range; toggle works on bool items only. The special item name <code>page</code> controls the current page and is the one item that navigates rather than saving config: cycle moves to the next available page, and set selects a page by id. Item names match the config field names used elsewhere in this documentation.
         </div>
 
-        <div class="api-snip-label">Worked example: cycle the image source and read the label</div>
-        <div class="api-snip" data-curl="curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST http://HOST/api/control/cycle?name=image_display_source">
+        <div class="api-snip-label">Worked example: toggle the GOES page and read the label</div>
+        <div class="api-snip" data-curl="curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST http://HOST/api/control/toggle?name=goes_enabled">
           <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
-          <pre>curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST http://<span class="api-host">HOST</span>/api/control/cycle?name=image_display_source</pre>
+          <pre>curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST http://<span class="api-host">HOST</span>/api/control/toggle?name=goes_enabled</pre>
         </div>
-        <p class="api-purpose">Each call advances the source and returns the new item object. The response <code>label</code> (for example "Solar") can be shown on a key face so the keypad always reflects the current state.</p>
+        <p class="api-purpose">Each call turns the GOES page on or off and returns the new item object. The response <code>label</code> ("On" or "Off") can be shown on a key face so the keypad always reflects the current state.</p>
       </div>
 

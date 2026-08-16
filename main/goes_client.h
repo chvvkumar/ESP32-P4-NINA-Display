@@ -6,25 +6,23 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* One decoded RGB565 frame. Produced by image_fetch_*() into a caller-supplied,
+ * zeroed struct; the caller (an image_page_t, see ui/nina_image_page.h) owns
+ * buf and guards the struct with its own mutex. No shared state lives here. */
 typedef struct {
-    bool              connected;
-    int64_t           last_poll_ms;
-    uint8_t          *image_buf;
-    uint16_t          image_w;
-    uint16_t          image_h;
-    bool              vflip;        /* true: buffer is vertically flipped (sw JPEG) */
-    char              label[48];    /* human-readable name of the source this buffer holds (region/band); rendered verbatim by the page so it can never desync from image_buf */
-    char              error_msg[48]; /* human-readable failure reason shown on-screen when a fetch fails; "" when last fetch succeeded */
-    int8_t            src_kind;      /* source the current image_buf belongs to: 0=GOES 1=Moon 2=Solar 3=Custom, -1=unknown */
-    SemaphoreHandle_t mutex;
-} goes_data_t;
+    uint8_t  *buf;            /* RGB565 rows top-down, PSRAM, w*h*2 bytes; NULL = no frame */
+    uint16_t  w, h;
+    char      label[48];      /* caption text for this frame (region / band / "Custom"); "" for Moon */
+    char      error_msg[48];  /* failure reason ("" on success) */
+    int64_t   stamp_ms;       /* esp_timer ms when buf was produced; 0 = never */
+} image_frame_t;
 
-void      goes_data_init(goes_data_t *data);
-bool      goes_data_lock(goes_data_t *data, int timeout_ms);
-void      goes_data_unlock(goes_data_t *data);
-esp_err_t goes_client_poll(const char *region, goes_data_t *data);
-esp_err_t goes_client_poll_url(const char *url, goes_data_t *data, bool vflip, const char *label, int8_t src_kind);
-void      goes_client_cleanup(goes_data_t *data);
+/* Fetch + decode one JPEG into *out (out must be zeroed by the caller). On
+ * ESP_OK out->buf is a fresh PSRAM allocation the caller owns; on failure
+ * out->buf stays NULL and out->error_msg names the reason. */
+esp_err_t image_fetch_goes(const char *region, image_frame_t *out);
+esp_err_t image_fetch_solar(uint8_t band, image_frame_t *out);
+esp_err_t image_fetch_custom(const char *url, image_frame_t *out);
 
 /* NESDIS sector code -> human-readable region name. Returns the code itself
  * when no match is found. Single source of truth for region labels. */

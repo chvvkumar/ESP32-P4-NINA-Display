@@ -375,8 +375,8 @@ extern "C" bool moon_sphere_init(void)
  * hold that mutex across drawSphere (a 720px render blocks ~300ms), so it is
  * still sampling s_tex_buf the whole time. Calling this from another task while
  * a render runs panics inside tgx texture sampling (confirmed crash). In this
- * firmware the sole renderer is goes_poll_task, and it frees at its parked point
- * on request from data_update_task — see the ownership contract in tasks.c.
+ * firmware the sole renderer is the Moon page poller (image_page_poll.c), and
+ * it frees at its own parked point — see the ownership contract there.
  * The state is reset to "never inited", so the next moon_sphere_init() (lazy,
  * from moon_sphere_render*) re-decodes cleanly, including the current flips.
  * Safe to call when nothing was ever allocated. */

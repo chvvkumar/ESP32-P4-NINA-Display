@@ -17,27 +17,27 @@ extern "C" {
  * Each value names a distinct slideshow stop. Indices 0-7 match the legacy
  * auto_rotate bitmask bit positions exactly; indices 8-11 split the former
  * single "Image Display" stop (old bit-index 8) into one stop per image source.
- *   0  ARP_IDX_SUMMARY    -> PAGE_IDX_SUMMARY (4)
- *   1  ARP_IDX_NINA1      -> NINA_PAGE_OFFSET+0 (5)
- *   2  ARP_IDX_NINA2      -> NINA_PAGE_OFFSET+1 (6)
- *   3  ARP_IDX_NINA3      -> NINA_PAGE_OFFSET+2 (7)
+ *   0  ARP_IDX_SUMMARY    -> PAGE_IDX_SUMMARY (10)
+ *   1  ARP_IDX_NINA1      -> NINA_PAGE_OFFSET+0 (11)
+ *   2  ARP_IDX_NINA2      -> NINA_PAGE_OFFSET+1 (12)
+ *   3  ARP_IDX_NINA3      -> NINA_PAGE_OFFSET+2 (13)
  *   4  ARP_IDX_SYSINFO    -> SYSINFO_PAGE_IDX
  *   5  ARP_IDX_ALLSKY     -> PAGE_IDX_ALLSKY (0)
  *   6  ARP_IDX_SPOTIFY    -> PAGE_IDX_SPOTIFY (1)
  *   7  ARP_IDX_CLOCK      -> PAGE_IDX_CLOCK (2)
- *   8  ARP_IDX_IMG_GOES   -> PAGE_IDX_IMAGE_DISPLAY (3), image source 0
- *   9  ARP_IDX_IMG_MOON   -> PAGE_IDX_IMAGE_DISPLAY (3), image source 1
- *  10  ARP_IDX_IMG_SOLAR  -> PAGE_IDX_IMAGE_DISPLAY (3), image source 2
- *  11  ARP_IDX_IMG_CUSTOM -> PAGE_IDX_IMAGE_DISPLAY (3), image source 3
+ *   8  ARP_IDX_IMG_GOES   -> PAGE_IDX_IMG_GOES (3)
+ *   9  ARP_IDX_IMG_MOON   -> PAGE_IDX_IMG_MOON (4)
+ *  10  ARP_IDX_IMG_SOLAR  -> PAGE_IDX_IMG_SOLAR (5)
+ *  11  ARP_IDX_IMG_CUSTOM -> PAGE_IDX_IMG_CUSTOM (6)
  *
  * Stop values are page_ref_t ids (ids 0..11 are frozen identical to the
  * ARP_IDX_* constants above). Pages added to the registry after the 0..11
  * anchored block keep their frozen registry id as their slideshow stop value,
  * so the range is no longer contiguous: ids 12..23 name non-slideshow entries
  * (image-default sentinel, Settings, overlays) and are NOT valid stops.
- *  24  ARP_IDX_JSON       -> PAGE_IDX_JSON (4)  (== PAGE_REF_JSON)
- *  25  ARP_IDX_HA         -> PAGE_IDX_HA (5)    (== PAGE_REF_HA)
- *  26  ARP_IDX_OCTOPRINT  -> PAGE_IDX_OCTOPRINT (6) (== PAGE_REF_OCTOPRINT)
+ *  24  ARP_IDX_JSON       -> PAGE_IDX_JSON (7)  (== PAGE_REF_JSON)
+ *  25  ARP_IDX_HA         -> PAGE_IDX_HA (8)    (== PAGE_REF_HA)
+ *  26  ARP_IDX_OCTOPRINT  -> PAGE_IDX_OCTOPRINT (9) (== PAGE_REF_OCTOPRINT)
  * Use ARP_STOP_IS_VALID() for validation, never `< ARP_IDX_MAX` alone.
  */
 #define ARP_IDX_SUMMARY     0
@@ -62,7 +62,7 @@ extern "C" {
 #define ARP_ORDER_CAPACITY 16   /* size of auto_rotate_order2[] */
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 60
+#define APP_CONFIG_VERSION 62
 
 /* Tiles-config blobs no longer live inside app_config_t (v52 split them out to
  * dedicated NVS string keys "json_tiles"/"ha_tiles"). These bound the value
@@ -206,14 +206,17 @@ typedef struct {
     bool     auth_enabled;              // When false, all endpoints are open; secrets still redacted (default true)
 
     // Added after v32 — must stay at end to preserve NVS binary compatibility
-    // Image Display page
-    bool     image_display_enabled;          // Enable Image Display page + poll task (default false)
-    bool     image_display_show_overlay;     // Show region/timestamp overlay bar (default true)
+    // Image Display page. image_display_enabled / image_display_show_overlay are
+    // RETIRED in v61 (image pages split): kept for binary layout, no longer read
+    // by the firmware; the per-page goes_/moon_/solar_/custom_ fields appended
+    // after v60 replace them.
+    bool     image_display_enabled;          // RETIRED v61 (reserved)
+    bool     image_display_show_overlay;     // RETIRED v61 (reserved)
     char     goes_region[16];                // NESDIS sector code, e.g. "umv" (default "umv")
-    uint16_t goes_update_interval_s;         // Poll interval in seconds, 300-7200 (default 600)
+    uint16_t goes_update_interval_s;         // GOES poll interval in seconds, 300-7200 (default 600)
 
     // Added after v33 — must stay at end to preserve NVS binary compatibility
-    uint8_t  image_display_source;   // 0=GOES (default), 1=Moon
+    uint8_t  image_display_source;   // RETIRED v61 (reserved): read only by legacy migrations
     uint8_t  moon_bg_style;          // 0=black, 1=stars, 2=glow, 3=stars+glow
     float    moon_lat;               // observer latitude (deg), 0=unset
     float    moon_lon;               // observer longitude (deg), 0=unset
@@ -222,7 +225,7 @@ typedef struct {
     uint8_t  solar_band;             // SDO/AIA band index 0..9 (default 0)
 
     // Added after v35 — must stay at end to preserve NVS binary compatibility
-    bool     image_display_crop;     // crop/zoom image to fill & hide baked-in labels (default false)
+    bool     image_display_crop;     // RETIRED v61 (reserved); per-page goes_crop/solar_crop/custom_crop replace it
 
     // Added after v36 — must stay at end to preserve NVS binary compatibility
     uint8_t  moon_drag_light_mode;   // 0=true phase, 1=explore, 2=locked to surface (moon drag-to-rotate lighting)
@@ -359,10 +362,38 @@ typedef struct {
     char     octoprint_api_key[64];    // OctoPrint application/API key (secret)
     uint16_t octoprint_update_interval_s; // poll interval 2-300s (default 5)
     uint8_t  octoprint_image_source;   // 0 = G-code preview, 1 = webcam snapshot (default 0)
-    uint8_t  octoprint_layout;         // 0=bento 2=glass (default 0); 1, 3 and 4
-                                       // are retired, render Bento, stay reserved
+    uint8_t  octoprint_layout;         // 0=bento 2=glass 5=overlay 6=letterbox
+                                       // (default 0); 1, 3 and 4 are retired,
+                                       // render Bento, stay reserved
     char     octoprint_snapshot_url[128]; // explicit webcam snapshot URL; "" = derive
                                           // from octoprint_url (default "")
+
+    // Added after v60 — must stay at end to preserve NVS binary compatibility
+    // Image pages split (v61): one enable / overlay / crop / interval per page.
+    // Field order is FROZEN; append only.
+    bool     goes_enabled;             // GOES Satellite page (default false; migrated = image_display_enabled)
+    bool     moon_enabled;             // Moon page (default false; migrated = image_display_enabled)
+    bool     solar_enabled;            // Solar page (default false; migrated = image_display_enabled)
+    bool     custom_enabled;           // Custom URL page (default false; migrated = image_display_enabled);
+                                       // availability additionally needs custom_image_url non-empty
+    uint16_t solar_update_interval_s;  // Solar poll interval 300-7200 s (default 600; migrated = goes_update_interval_s)
+    uint16_t moon_update_interval_s;   // Moon re-render cadence 10-3600 s (default 60)
+    bool     goes_crop;                // fill/crop borders (default false; migrated = image_display_crop)
+    bool     solar_crop;               // (default false; migrated = image_display_crop)
+    bool     custom_crop;              // (default false; migrated = false: Custom is never cropped today)
+    bool     goes_show_overlay;        // caption overlay (default true; migrated = image_display_show_overlay)
+    bool     moon_show_overlay;        // (default true; migrated = image_display_show_overlay)
+    bool     solar_show_overlay;       // (default true; migrated = image_display_show_overlay)
+    bool     custom_show_overlay;      // (default true; migrated = image_display_show_overlay)
+
+    // Added after v61 — must stay at end to preserve NVS binary compatibility
+    bool     octoprint_overlay_visible; // OctoPrint page: show the readings laid
+                                        // over the picture (default true). This is
+                                        // the saved default the page starts from;
+                                        // a tap on the page toggles it for the
+                                        // screen only and is never persisted.
+                                        // Ignored by the Grid (bento) layout,
+                                        // which has no overlay layer.
 } app_config_t;
 
 /* ── Version 43 config struct — used only for NVS migration to v44 ────── */
@@ -2662,6 +2693,334 @@ _Static_assert(offsetof(app_config_t, octoprint_enabled) ==
 _Static_assert(sizeof(app_config_v59_t) <= sizeof(app_config_t),
                "v59 snapshot must not exceed the current config struct");
 
+/* ── Version 60 config struct — used only for NVS migration to v61 ────── */
+/* Byte-identical to app_config_t minus the trailing image-pages block v61  */
+/* appended. Same layout as the v59 snapshot plus the seven OctoPrint       */
+/* fields v60 appended.                                                     */
+typedef struct {
+    uint32_t config_version;
+    char api_url[3][128];
+    char ntp_server[64];
+    char tz_string[64];
+    char filter_colors[3][512];
+    char rms_thresholds[3][256];
+    char hfr_thresholds[3][256];
+    int theme_index;
+    int brightness;
+    int color_brightness;
+    bool mqtt_enabled;
+    char mqtt_broker_url[128];
+    char mqtt_username[64];
+    char mqtt_password[64];
+    char mqtt_topic_prefix[64];
+    uint16_t mqtt_port;
+    int8_t   active_page_override;
+    bool     auto_rotate_enabled;
+    uint16_t auto_rotate_interval_s;
+    uint8_t  auto_rotate_effect;
+    bool     auto_rotate_skip_disconnected;
+    uint8_t  auto_rotate_pages;
+    uint8_t  update_rate_s;
+    uint8_t  graph_update_interval_s;
+    uint8_t  connection_timeout_s;
+    uint8_t  toast_duration_s;
+    bool     debug_mode;
+    bool     instance_enabled[3];
+    bool     screen_sleep_enabled;
+    uint16_t screen_sleep_timeout_s;
+    bool     alert_flash_enabled;
+    uint8_t  idle_poll_interval_s;
+    bool     wifi_power_save;
+    uint8_t  widget_style;
+    uint8_t  auto_update_check;
+    uint8_t  update_channel;
+    bool     deep_sleep_enabled;
+    uint32_t deep_sleep_wake_timer_s;
+    bool     deep_sleep_on_idle;
+    uint8_t  screen_rotation;
+    char     hostname[32];
+    char     allsky_hostname[128];
+    uint16_t allsky_update_interval_s;
+    float    allsky_dew_offset;
+    char     allsky_field_config[1536];
+    char     allsky_thresholds[1024];
+    bool     allsky_enabled;
+    bool     demo_mode;
+    bool     spotify_enabled;
+    char     spotify_client_id[64];
+    uint16_t spotify_poll_interval_ms;
+    bool     spotify_show_progress_bar;
+    uint8_t  spotify_overlay_timeout_s;
+    bool     spotify_minimal_mode;
+    bool     spotify_scroll_text;
+    wifi_network_t wifi_networks[3];
+    bool     spotify_overlay_visible;
+    uint8_t  auto_rotate_order[8];
+    uint8_t  toast_aggregation_window_s;
+    uint32_t toast_notify_mask;
+    bool     toast_instance_muted[3];
+    uint8_t  weather_provider;
+    char     weather_api_key[64];
+    float    weather_lat;
+    float    weather_lon;
+    char     weather_location_name[64];
+    uint16_t weather_poll_interval_s;
+    uint8_t  weather_units;
+    uint8_t  weather_time_format;
+    bool     idle_page_override_enabled;
+    int8_t   idle_page_override_target;
+    bool     idle_page_persistent;
+    bool     idle_indicator_enabled;
+    char     admin_password[33];
+    bool     auth_enabled;
+    bool     image_display_enabled;
+    bool     image_display_show_overlay;
+    char     goes_region[16];
+    uint16_t goes_update_interval_s;
+    uint8_t  image_display_source;
+    uint8_t  moon_bg_style;
+    float    moon_lat;
+    float    moon_lon;
+    uint8_t  solar_band;
+    bool     image_display_crop;
+    uint8_t  moon_drag_light_mode;
+    uint8_t  moon_flip_u;
+    uint8_t  moon_flip_v;
+    float    moon_roll_offset;
+    float    moon_yaw_offset;
+    float    moon_pitch_offset;
+    uint8_t  moon_north_up;
+    uint8_t  moon_spin_mode;
+    uint8_t  moon_spin_return_s;
+    uint8_t  crash_log_retention_days;
+    uint8_t  auto_rotate_pages_hi;
+    uint8_t  auto_rotate_order_ext;
+    uint8_t  goes_orientation;
+    uint8_t  solar_orientation;
+    uint16_t nav_grace_s;
+    char     custom_image_url[256];
+    uint8_t  custom_orientation;
+    uint16_t custom_update_interval_s;
+    uint8_t  auto_rotate_order2[16];
+    uint8_t  goes_vflip;
+    uint8_t  goes_hflip;
+    uint8_t  solar_vflip;
+    uint8_t  solar_hflip;
+    uint8_t  custom_vflip;
+    uint8_t  custom_hflip;
+    bool     home_page_lock;
+    bool     json_enabled;
+    char     json_url[256];
+    char     json_auth_header[256];
+    uint16_t json_update_interval_s;
+    bool     ha_enabled;
+    char     ha_base_url[256];
+    char     ha_token[256];
+    uint16_t ha_update_interval_s;
+    bool     setup_hint_dismissed;
+    uint8_t  alert_voice_enabled;
+    uint8_t  alert_voice_volume;
+    uint8_t  alert_voice_types;
+    uint8_t  alert_voice_repeat_min;
+    bool     alert_voice_muted[3];
+    uint32_t voice_notify_mask;
+    uint8_t  boot_jingle_enabled;
+    uint8_t  alert_voice_brief;
+    uint8_t  alert_voice_conn;
+    uint8_t  alert_voice_disc;
+    uint8_t  wifi_max_tx_dbm;
+    uint8_t  octoprint_enabled;
+    char     octoprint_url[128];
+    char     octoprint_api_key[64];
+    uint16_t octoprint_update_interval_s;
+    uint8_t  octoprint_image_source;
+    uint8_t  octoprint_layout;
+    char     octoprint_snapshot_url[128];
+} app_config_v60_t;
+
+/* goes_enabled (bool, align 1) appends directly after octoprint_snapshot_url
+ * (char[], align 1), so no alignment padding can sit between them. */
+_Static_assert(offsetof(app_config_t, goes_enabled) ==
+                   offsetof(app_config_v60_t, octoprint_snapshot_url) +
+                       sizeof(((app_config_v60_t *)0)->octoprint_snapshot_url),
+               "app_config_v60_t snapshot drifted from app_config_t layout");
+
+/* migrate_from_v60 memcpy's sizeof(app_config_v60_t) bytes into app_config_t;
+ * it must never exceed the destination. */
+_Static_assert(sizeof(app_config_v60_t) <= sizeof(app_config_t),
+               "v60 snapshot must not exceed the current config struct");
+
+/* ── Version 61 config struct — used only for NVS migration to v62 ────── */
+/* Byte-identical to app_config_t minus the trailing octoprint_overlay_visible */
+/* field v62 appended. Same layout as the v60 snapshot plus the thirteen      */
+/* image-page fields v61 appended.                                           */
+typedef struct {
+    uint32_t config_version;
+    char api_url[3][128];
+    char ntp_server[64];
+    char tz_string[64];
+    char filter_colors[3][512];
+    char rms_thresholds[3][256];
+    char hfr_thresholds[3][256];
+    int theme_index;
+    int brightness;
+    int color_brightness;
+    bool mqtt_enabled;
+    char mqtt_broker_url[128];
+    char mqtt_username[64];
+    char mqtt_password[64];
+    char mqtt_topic_prefix[64];
+    uint16_t mqtt_port;
+    int8_t   active_page_override;
+    bool     auto_rotate_enabled;
+    uint16_t auto_rotate_interval_s;
+    uint8_t  auto_rotate_effect;
+    bool     auto_rotate_skip_disconnected;
+    uint8_t  auto_rotate_pages;
+    uint8_t  update_rate_s;
+    uint8_t  graph_update_interval_s;
+    uint8_t  connection_timeout_s;
+    uint8_t  toast_duration_s;
+    bool     debug_mode;
+    bool     instance_enabled[3];
+    bool     screen_sleep_enabled;
+    uint16_t screen_sleep_timeout_s;
+    bool     alert_flash_enabled;
+    uint8_t  idle_poll_interval_s;
+    bool     wifi_power_save;
+    uint8_t  widget_style;
+    uint8_t  auto_update_check;
+    uint8_t  update_channel;
+    bool     deep_sleep_enabled;
+    uint32_t deep_sleep_wake_timer_s;
+    bool     deep_sleep_on_idle;
+    uint8_t  screen_rotation;
+    char     hostname[32];
+    char     allsky_hostname[128];
+    uint16_t allsky_update_interval_s;
+    float    allsky_dew_offset;
+    char     allsky_field_config[1536];
+    char     allsky_thresholds[1024];
+    bool     allsky_enabled;
+    bool     demo_mode;
+    bool     spotify_enabled;
+    char     spotify_client_id[64];
+    uint16_t spotify_poll_interval_ms;
+    bool     spotify_show_progress_bar;
+    uint8_t  spotify_overlay_timeout_s;
+    bool     spotify_minimal_mode;
+    bool     spotify_scroll_text;
+    wifi_network_t wifi_networks[3];
+    bool     spotify_overlay_visible;
+    uint8_t  auto_rotate_order[8];
+    uint8_t  toast_aggregation_window_s;
+    uint32_t toast_notify_mask;
+    bool     toast_instance_muted[3];
+    uint8_t  weather_provider;
+    char     weather_api_key[64];
+    float    weather_lat;
+    float    weather_lon;
+    char     weather_location_name[64];
+    uint16_t weather_poll_interval_s;
+    uint8_t  weather_units;
+    uint8_t  weather_time_format;
+    bool     idle_page_override_enabled;
+    int8_t   idle_page_override_target;
+    bool     idle_page_persistent;
+    bool     idle_indicator_enabled;
+    char     admin_password[33];
+    bool     auth_enabled;
+    bool     image_display_enabled;
+    bool     image_display_show_overlay;
+    char     goes_region[16];
+    uint16_t goes_update_interval_s;
+    uint8_t  image_display_source;
+    uint8_t  moon_bg_style;
+    float    moon_lat;
+    float    moon_lon;
+    uint8_t  solar_band;
+    bool     image_display_crop;
+    uint8_t  moon_drag_light_mode;
+    uint8_t  moon_flip_u;
+    uint8_t  moon_flip_v;
+    float    moon_roll_offset;
+    float    moon_yaw_offset;
+    float    moon_pitch_offset;
+    uint8_t  moon_north_up;
+    uint8_t  moon_spin_mode;
+    uint8_t  moon_spin_return_s;
+    uint8_t  crash_log_retention_days;
+    uint8_t  auto_rotate_pages_hi;
+    uint8_t  auto_rotate_order_ext;
+    uint8_t  goes_orientation;
+    uint8_t  solar_orientation;
+    uint16_t nav_grace_s;
+    char     custom_image_url[256];
+    uint8_t  custom_orientation;
+    uint16_t custom_update_interval_s;
+    uint8_t  auto_rotate_order2[16];
+    uint8_t  goes_vflip;
+    uint8_t  goes_hflip;
+    uint8_t  solar_vflip;
+    uint8_t  solar_hflip;
+    uint8_t  custom_vflip;
+    uint8_t  custom_hflip;
+    bool     home_page_lock;
+    bool     json_enabled;
+    char     json_url[256];
+    char     json_auth_header[256];
+    uint16_t json_update_interval_s;
+    bool     ha_enabled;
+    char     ha_base_url[256];
+    char     ha_token[256];
+    uint16_t ha_update_interval_s;
+    bool     setup_hint_dismissed;
+    uint8_t  alert_voice_enabled;
+    uint8_t  alert_voice_volume;
+    uint8_t  alert_voice_types;
+    uint8_t  alert_voice_repeat_min;
+    bool     alert_voice_muted[3];
+    uint32_t voice_notify_mask;
+    uint8_t  boot_jingle_enabled;
+    uint8_t  alert_voice_brief;
+    uint8_t  alert_voice_conn;
+    uint8_t  alert_voice_disc;
+    uint8_t  wifi_max_tx_dbm;
+    uint8_t  octoprint_enabled;
+    char     octoprint_url[128];
+    char     octoprint_api_key[64];
+    uint16_t octoprint_update_interval_s;
+    uint8_t  octoprint_image_source;
+    uint8_t  octoprint_layout;
+    char     octoprint_snapshot_url[128];
+    bool     goes_enabled;
+    bool     moon_enabled;
+    bool     solar_enabled;
+    bool     custom_enabled;
+    uint16_t solar_update_interval_s;
+    uint16_t moon_update_interval_s;
+    bool     goes_crop;
+    bool     solar_crop;
+    bool     custom_crop;
+    bool     goes_show_overlay;
+    bool     moon_show_overlay;
+    bool     solar_show_overlay;
+    bool     custom_show_overlay;
+} app_config_v61_t;
+
+/* octoprint_overlay_visible (bool, align 1) appends directly after
+ * custom_show_overlay (bool, align 1), so no alignment padding can sit
+ * between them. */
+_Static_assert(offsetof(app_config_t, octoprint_overlay_visible) ==
+                   offsetof(app_config_v61_t, custom_show_overlay) +
+                       sizeof(((app_config_v61_t *)0)->custom_show_overlay),
+               "app_config_v61_t snapshot drifted from app_config_t layout");
+
+/* migrate_from_v61 memcpy's sizeof(app_config_v61_t) bytes into app_config_t;
+ * it must never exceed the destination. */
+_Static_assert(sizeof(app_config_v61_t) <= sizeof(app_config_t),
+               "v61 snapshot must not exceed the current config struct");
+
 // v17 snapshot — AllSky fields without allsky_enabled
 typedef struct {
     uint32_t config_version;
@@ -4506,6 +4865,13 @@ uint32_t app_config_apply_brightness(uint32_t color, int brightness);
  *  idle-override are mutually exclusive. Home-page-lock wins over both; between
  *  auto-rotate and idle-override, auto-rotate wins the tie-break. Idempotent. */
 void app_config_normalize_nav_exclusivity(app_config_t *cfg);
+
+/* v61 image-pages split: derive the thirteen per-page image fields from the
+ * retired global image_display_* fields (goes/moon/solar/custom_enabled from
+ * image_display_enabled, solar interval from goes interval, crops/overlays
+ * per page; custom_crop = false). Idempotent. Used by the NVS load path for
+ * every pre-v61 blob and by the backup-restore path for pre-v61 backups. */
+void image_pages_derive_from_legacy(app_config_t *cfg);
 
 #ifdef __cplusplus
 }

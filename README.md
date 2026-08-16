@@ -176,7 +176,7 @@ Every setting is managed from the on-device web UI, organized into tabs.
   </tr>
   <tr>
     <td align="center"><em>AllSky (connection, per-quadrant field mappings)</em></td>
-    <td align="center"><em>Image Display (GOES / Moon / Solar / custom URL)</em></td>
+    <td align="center"><em>Image pages (GOES / Moon / Solar / custom URL)</em></td>
   </tr>
   <tr>
     <td align="center"><img src="images/settings_logs.jpg" alt="Logs tab" width="480"></td>
@@ -336,7 +336,7 @@ Point MQTT at your broker to publish the device's own state via Home Assistant a
 
 - **AllSky** — a four-quadrant environmental panel (thermal, sky quality, ambient, power) fed from an AllSky API with configurable field mappings and thresholds.
 - **Weather** — OpenWeatherMap, Open-Meteo, or Weather Underground data on the clock page.
-- **Image Display** — full-screen GOES satellite, NASA SDO/SOHO solar imagery, or a custom image URL.
+- **Image pages** — four full-screen pages: GOES satellite, Moon (rendered on-device), NASA SDO/SOHO solar imagery, and a custom image URL. Each has its own enable, refresh interval, and overlay/crop settings.
 
 ---
 

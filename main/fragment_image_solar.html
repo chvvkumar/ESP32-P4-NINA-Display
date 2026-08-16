@@ -1,0 +1,78 @@
+
+        <div class="card">
+          <div class="card-title"><span class="card-title-label">Solar <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+          <div class="help-popover"><div class="help-popover-title">Solar page</div><p>Adds a full-screen page showing the latest NASA SDO/AIA or SOHO solar image for one band. Pick the band; the picture refreshes at the update interval you choose.</p><p>Fill (crop borders) zooms the solar disc to fill the 720x720 panel and hides the timestamp and label baked into the image border. Rotation and the two flips correct a picture that appears sideways or mirrored on your panel.</p></div>
+          <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+            <span class="toggle-label">Enable Solar page</span>
+            <label class="toggle"><input type="checkbox" id="solar_enabled" onchange="updateImagePageEnabledUI('image-solar');applyImagePage('image-solar');checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Adds the Solar page and starts fetching the selected NASA SDO/SOHO band.</div>
+          <div id="solarFields">
+            <div class="toggle-row" style="margin-top:16px">
+              <span class="toggle-label">Show Overlay</span>
+              <label class="toggle"><input type="checkbox" id="solar_show_overlay" onchange="applyImagePage('image-solar');checkDirty()" checked><span class="toggle-track"></span></label>
+            </div>
+            <div class="field-hint">Band name and update time overlay on the display</div>
+            <div class="toggle-row">
+              <span class="toggle-label">Fill (crop borders)</span>
+              <label class="toggle"><input type="checkbox" id="solar_crop" onchange="applyImagePage('image-solar');checkDirty()"><span class="toggle-track"></span></label>
+            </div>
+            <div class="field-hint">Zoom the solar disc to fill the screen and hide the image's timestamp/label.</div>
+            <div class="field" style="margin-top:16px">
+              <label class="field-label">Update Interval</label>
+              <select class="input" id="solarInterval" onchange="applyImagePage('image-solar');checkDirty()">
+                <option value="300">5 minutes</option>
+                <option value="600" selected>10 minutes</option>
+                <option value="900">15 minutes</option>
+                <option value="1800">30 minutes</option>
+                <option value="3600">1 hour</option>
+                <option value="7200">2 hours</option>
+              </select>
+              <div class="field-hint">How often the solar image refreshes.</div>
+            </div>
+            <div class="field" style="margin-top:16px">
+              <label class="field-label">Band</label>
+              <select class="input" id="solarBand" onchange="applyImagePage('image-solar');checkDirty()">
+                <option value="0">AIA 94 (Fe XVIII)</option>
+                <option value="1">AIA 131 (Fe XX)</option>
+                <option value="2">AIA 171 (Fe IX/X)</option>
+                <option value="3">AIA 193 (Fe XII)</option>
+                <option value="4">AIA 211 (Fe XIV)</option>
+                <option value="5">AIA 304 (He II)</option>
+                <option value="6">AIA 335 (Fe XVI)</option>
+                <option value="7">AIA 1600 (C IV+cont)</option>
+                <option value="8">AIA 1700 (continuum)</option>
+                <option value="9">AIA 4500 (continuum)</option>
+                <option value="10">LASCO C2 (coronagraph)</option>
+                <option value="11">LASCO C3 (coronagraph)</option>
+                <option value="12">SOHO EIT 171</option>
+                <option value="13">SOHO EIT 195</option>
+                <option value="14">SOHO EIT 284</option>
+                <option value="15">SOHO EIT 304</option>
+                <option value="16">SDO/HMI Continuum</option>
+                <option value="17">SDO/HMI Magnetogram</option>
+              </select>
+              <div class="field-hint">NASA SDO/AIA and SOHO realtime (LASCO, EIT, HMI)</div>
+            </div>
+            <div class="field" style="margin-top:16px">
+              <label class="field-label">Rotation</label>
+              <select class="input" id="solarOrientation" onchange="applyImagePage('image-solar');checkDirty()">
+                <option value="0">0&deg;</option>
+                <option value="1">90&deg;</option>
+                <option value="2">180&deg;</option>
+                <option value="3">270&deg;</option>
+              </select>
+              <div class="field-hint">Rotate the solar image clockwise.</div>
+            </div>
+            <div class="toggle-row" style="margin-top:16px;border-bottom:1px solid rgba(255,255,255,0.06)">
+              <span class="toggle-label">Flip vertical</span>
+              <label class="toggle"><input type="checkbox" id="solarVflip" onchange="applyImagePage('image-solar');checkDirty()"><span class="toggle-track"></span></label>
+            </div>
+            <div class="field-hint">Mirrors the solar image top-to-bottom.</div>
+            <div class="toggle-row">
+              <span class="toggle-label">Flip horizontal</span>
+              <label class="toggle"><input type="checkbox" id="solarHflip" onchange="applyImagePage('image-solar');checkDirty()"><span class="toggle-track"></span></label>
+            </div>
+            <div class="field-hint">Mirrors the solar image left-to-right.</div>
+          </div>
+        </div>

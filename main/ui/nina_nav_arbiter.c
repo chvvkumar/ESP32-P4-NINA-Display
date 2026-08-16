@@ -14,22 +14,19 @@
 #include "nina_connection.h"
 #include "nina_idle_indicator.h"
 #include "nina_wait_overlay.h"
-#include "goes_client.h"               /* goes_region_name, solar_band_label */
+#include "nina_image_page.h"   /* image_page_prefetch / has_image / label */
 #include "bsp/esp-bsp.h"
 #include "esp_log.h"
 #include "esp_timer.h"   /* nav_arbiter_get_web_status: grace-remaining clock */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "tasks.h"   /* image_source_* override API + goes_task_handle */
+#include "tasks.h"   /* data_task_handle */
 
 static const char *TAG = "nav_arb";
 
 static struct {
-    _Atomic uint32_t user_claim;   /* USER claim page + image source packed into one
-                                    * atomic word so the pair updates/reads without
-                                    * tearing across cores: (page+1)<<16 | (img_src+1),
-                                    * with -1 sentinels encoded as 0. See
-                                    * pack_claim()/unpack_claim() below. */
+    _Atomic int32_t user_page;     /* USER claim page (-1 = none); atomic for the
+                                    * cross-core submit/resolve pair */
     _Atomic int64_t user_stamp_ms; /* when the USER claim was stamped; atomic to
                                     * close the cross-core torn-read window between
                                     * submit_user (LVGL/web task) and resolve
@@ -41,10 +38,6 @@ static struct {
                                        * detect for first-stop image prefetch) */
     bool     idle_claim_active;    /* IDLE was the resolved source last commit */
     int      current_committed;    /* last page the arbiter committed */
-    int8_t   pending_img_source;       /* image source the next/desired Image Display
-                                        * stop wants (0-3), or -1 if not an image stop */
-    int8_t   current_committed_img_source; /* image source last committed to the
-                                        * Image Display page, or -1 */
     _Atomic bool pinned;           /* in-memory navigation pin: hold the USER page,
                                     * skip the automatic ladder; resets on reboot.
                                     * Atomic: written by the web/LVGL task
@@ -56,51 +49,27 @@ static struct {
                                     * nav_arbiter_get_web_status() (httpd task). */
 } s_arb;
 
-/* Pack/unpack the USER claim (page index + image source) into one 32-bit word.
- * Both fields are >= -1, so (field+1) is non-negative and fits a uint16_t. */
-static inline uint32_t pack_claim(int page, int8_t img_src) {
-    return ((uint32_t)(uint16_t)(page + 1) << 16)
-         | (uint32_t)(uint16_t)((int)img_src + 1);
-}
-static inline void unpack_claim(uint32_t v, int *page, int8_t *img_src) {
-    *page    = (int)(uint16_t)(v >> 16) - 1;
-    *img_src = (int8_t)((int)(uint16_t)(v & 0xFFFFu) - 1);
-}
-
 void nav_arbiter_init(void) {
-    s_arb.user_claim = pack_claim(-1, -1);
+    s_arb.user_page = -1;
     s_arb.user_stamp_ms = 0;
     s_arb.topology_dirty = false;
     s_arb.modal_depth = 0;
     s_arb.slideshow_advance = false;
     s_arb.auto_rotate_was_enabled = false;
     s_arb.idle_claim_active = false;
-    s_arb.pending_img_source = -1;
-    s_arb.current_committed_img_source = -1;
     s_arb.pinned = false;
     s_arb.last_level = (uint8_t)NAV_SRC_DEFAULT;
     s_arb.current_committed = nina_dashboard_get_active_page();
     ESP_LOGI(TAG, "nav arbiter init (committed page=%d)", s_arb.current_committed);
 }
 
-void nav_arbiter_submit_user(int abs_page, int64_t now_ms, int8_t img_src) {
-    s_arb.user_claim = pack_claim(abs_page, img_src);
+void nav_arbiter_submit_user(int abs_page, int64_t now_ms) {
+    s_arb.user_page = abs_page;
     s_arb.user_stamp_ms = now_ms;
     /* Wake the data task so the arbiter resolves this claim on the next loop
-     * iteration instead of waiting up to a full update_rate_s cycle. Idempotent
-     * and harmless: swipe/BOOT already moved the LVGL page directly. */
+     * iteration instead of waiting up to a full update_rate_s cycle. */
     if (data_task_handle) {
         xTaskNotifyGive(data_task_handle);
-    }
-    /* Manual navigation to the Image Display page with no pinned source (img_src
-     * == -1) shows the persisted default, not whatever the slideshow last set.
-     * Clear the runtime override and forget the last committed slideshow source
-     * so the commit block treats this as an image-source change and re-applies
-     * the default. When img_src pins a concrete source (0-3), the USER rung
-     * carries it through pending_img_source, so do not clear here. */
-    if (abs_page == PAGE_IDX_IMAGE_DISPLAY && img_src < 0) {
-        image_source_set_override(-1);
-        s_arb.current_committed_img_source = -1;
     }
 }
 
@@ -111,25 +80,18 @@ void nav_arbiter_notify_modal_open(void)  { s_arb.modal_depth++; }
 void nav_arbiter_notify_modal_close(int64_t now_ms) {
     if (s_arb.modal_depth > 0) s_arb.modal_depth--;
     s_arb.user_stamp_ms = now_ms;     /* restamp grace on close */
-    int up; int8_t us;
-    unpack_claim(s_arb.user_claim, &up, &us);
-    if (up < 0) s_arb.user_claim = pack_claim(nina_dashboard_get_active_page(), us);
+    if (s_arb.user_page < 0) s_arb.user_page = nina_dashboard_get_active_page();
 }
 
 void nav_arbiter_notify_slideshow_tick(void) { s_arb.slideshow_advance = true; }
 
-void nav_arbiter_set_pin(bool on, int abs_page, int8_t img_src, int64_t now_ms) {
+void nav_arbiter_set_pin(bool on, int abs_page, int64_t now_ms) {
     if (on) {
         s_arb.pinned = true;
         if (abs_page >= 0) {
-            s_arb.user_claim = pack_claim(abs_page, img_src);
-        } else {
-            int up; int8_t us;
-            unpack_claim(s_arb.user_claim, &up, &us);
-            if (up < 0) {
-                s_arb.user_claim = pack_claim(s_arb.current_committed,
-                                              s_arb.current_committed_img_source);
-            }
+            s_arb.user_page = abs_page;
+        } else if (s_arb.user_page < 0) {
+            s_arb.user_page = s_arb.current_committed;
         }
     } else {
         s_arb.pinned = false;
@@ -154,9 +116,7 @@ void nav_arbiter_get_web_status(nav_arbiter_web_status_t *out)
     /* Grace remaining: recomputed here from the atomic claim fields rather than
      * stored at resolve time, so pollers see it count down between resolves.
      * The pin holds without expiry, so it reports 0. */
-    int user_page;
-    int8_t user_src;
-    unpack_claim(s_arb.user_claim, &user_page, &user_src);
+    int user_page = s_arb.user_page;
     if (user_page >= 0 && !s_arb.pinned) {
         int64_t now_ms = esp_timer_get_time() / 1000;
         int64_t left_ms = (int64_t)app_config_get()->nav_grace_s * 1000
@@ -174,33 +134,15 @@ void nav_arbiter_get_web_status(nav_arbiter_web_status_t *out)
  * takes the lock only around the committed page transition.
  */
 
-/** Home Page (with image source): resolve the configured active_page_override
- *  (a page_ref id) to an absolute page index plus its image source (0-3, or -1).
- *  Never Settings, never out of range, never unavailable: any of those fall back
- *  to Summary with *img_src_out = -1. page_ref_resolve() folds in the
- *  availability/enable checks, so an unresolvable id maps to Summary too. */
-static int home_page_with_src(int8_t *img_src_out) {
+/** Home Page: the configured active_page_override (a page_ref id) resolved to
+ *  an absolute page index. Never Settings, never out of range, never
+ *  unavailable: any of those fall back to Summary. */
+static int home_page(void) {
     page_ref_t id = (page_ref_t)app_config_get()->active_page_override;
     int idx = -1;
-    int8_t src = -1;
-    if (!page_ref_resolve(id, &idx, &src)) {
-        *img_src_out = -1;
-        return PAGE_IDX_SUMMARY;
-    }
-    if (idx == SETTINGS_PAGE_IDX(page_count)) {
-        *img_src_out = -1;
-        return PAGE_IDX_SUMMARY;
-    }
-    *img_src_out = src;
+    if (!page_ref_resolve(id, &idx)) return PAGE_IDX_SUMMARY;
+    if (idx == SETTINGS_PAGE_IDX(page_count)) return PAGE_IDX_SUMMARY;
     return idx;
-}
-
-/** Home Page: the configured active_page_override, validated. Never Settings,
- *  never out of range, never unavailable. Unresolvable maps to Summary. Thin
- *  wrapper over home_page_with_src() that discards the image source. */
-static int home_page(void) {
-    int8_t src = -1;
-    return home_page_with_src(&src);
 }
 
 /** SESSION target: pinned rig online -> that rig; else lone online rig -> it;
@@ -255,116 +197,74 @@ static bool idle_condition(void) {
 }
 
 /** Resolve the configured idle target (idle_page_override_target, a page_ref id)
- *  to an absolute page index plus its image source (0-3, or -1). Falls back to
- *  Summary with *img_src_out = -1 when the id is unknown or its page is
- *  unavailable: page_ref_resolve() enforces availability and returns false in
- *  that case, preserving the old idle-target Summary fallback. */
-static int idle_target_resolve(int8_t *img_src_out) {
+ *  to an absolute page index. Falls back to Summary when the id is unknown or
+ *  its page is unavailable: page_ref_resolve() enforces availability and returns
+ *  false in that case, preserving the old idle-target Summary fallback. */
+static int idle_target_resolve(void) {
     page_ref_t id = (page_ref_t)app_config_get()->idle_page_override_target;
     int idx = -1;
-    int8_t src = -1;
-    if (!page_ref_resolve(id, &idx, &src)) {
-        *img_src_out = -1;
-        return PAGE_IDX_SUMMARY;
-    }
-    *img_src_out = src;
+    if (!page_ref_resolve(id, &idx)) return PAGE_IDX_SUMMARY;
     return idx;
 }
 
-/** Build the ordered slideshow candidate list from auto_rotate_order2[0..15].
- *  Each entry is an ARP_IDX_* bit index mapped to an absolute page; unavailable
- *  pages and (when configured) disconnected NINA pages are skipped. For each
- *  surviving candidate the per-stop image source (0-3 for the four Image Display
- *  sources, else -1) is recorded in src_out[] in lockstep with cand_out[].
- *  Returns the candidate count. Pure: reads config + connection/availability
- *  level state only, writes no arbiter state. */
-static int slideshow_build_candidates(int cand_out[ARP_ORDER_CAPACITY],
-                                      int8_t src_out[ARP_ORDER_CAPACITY]) {
+/** Ordered slideshow candidate list from auto_rotate_order2[0..15]: each stop
+ *  id resolved to an absolute page; unavailable pages and (when configured)
+ *  disconnected NINA pages are skipped. Pure. */
+static int slideshow_build_candidates(int cand_out[ARP_ORDER_CAPACITY]) {
     const app_config_t *c = app_config_get();
     int n = 0;
     for (int i = 0; i < ARP_ORDER_CAPACITY; i++) {
         uint8_t bit = c->auto_rotate_order2[i];
         if (bit == 0xFF || !ARP_STOP_IS_VALID(bit)) continue;
         int p = -1;
-        int8_t img_src = -1;
-        /* Slideshow stop values ARE page_ref ids (0..11 anchored, plus the
-         * appended JSON/HA ids). page_ref_resolve() folds in the same
-         * availability + enable checks the old inline switch did
-         * (slot/allsky/spotify/custom/json/ha), returning false when the
-         * stop is unavailable. */
-        if (!page_ref_resolve((page_ref_t)bit, &p, &img_src)) continue;
+        if (!page_ref_resolve((page_ref_t)bit, &p)) continue;
         int inst = p - NINA_PAGE_OFFSET;
         if (inst >= 0 && inst < MAX_NINA_INSTANCES
             && c->auto_rotate_skip_disconnected
             && !nina_connection_is_connected(inst)) continue;
-        src_out[n] = img_src;
-        cand_out[n] = p;
-        n++;
+        cand_out[n++] = p;
     }
     return n;
 }
 
-/* Scan the slideshow order for the first image stop; return its image
- * source (0=GOES,1=Moon,2=Solar,3=Custom) or -1 if the order has none.
- * Iterates auto_rotate_order2[] with the same bounds/termination convention
- * as slideshow_build_candidates() (skip 0xFF and out-of-range entries). */
-static int8_t first_image_source_in_order(const app_config_t *c) {
-    for (int i = 0; i < ARP_ORDER_CAPACITY; i++) {
-        uint8_t bit = c->auto_rotate_order2[i];
-        if (bit == 0xFF || !ARP_STOP_IS_VALID(bit)) continue;
-        if (bit == ARP_IDX_IMG_GOES || bit == ARP_IDX_IMG_MOON
-            || bit == ARP_IDX_IMG_SOLAR || bit == ARP_IDX_IMG_CUSTOM) {
-            return (int8_t)(bit - ARP_IDX_IMG_GOES);
-        }
+/** First AVAILABLE image stop in the slideshow order (absolute page index), or
+ *  -1 if the order has none. Used to warm its poller when the slideshow starts. */
+static int first_image_stop_in_order(void) {
+    int cand[ARP_ORDER_CAPACITY];
+    int n = slideshow_build_candidates(cand);
+    for (int i = 0; i < n; i++) {
+        if (PAGE_IDX_IS_IMAGE(cand[i])) return cand[i];
     }
     return -1;
 }
 
-/** Resolve the slideshow stop that follows `from_page` in the candidate order.
- *  Writes the chosen stop's image source (0-3, or -1) to *img_src_out.
- *  Returns Home Page (with *img_src_out = -1) if no candidate is available.
- *  Pure: does not mutate arbiter state, so it serves both the real advance and
- *  the prefetch lookahead peek. */
-static int slideshow_advance_from(int from_page, int8_t from_img_src, int8_t *img_src_out) {
+/** The stop that follows @p from_page in the candidate order (Home Page if
+ *  none available). Pure, so it serves both the real advance and the lookahead. */
+static int slideshow_advance_from(int from_page) {
     int cand[ARP_ORDER_CAPACITY];
-    int8_t src[ARP_ORDER_CAPACITY];
-    int n = slideshow_build_candidates(cand, src);
-    if (n == 0) {
-        *img_src_out = -1;
-        return home_page();
-    }
+    int n = slideshow_build_candidates(cand);
+    if (n == 0) return home_page();
     int cur = -1;
     for (int i = 0; i < n; i++) {
-        if (cand[i] == from_page && src[i] == from_img_src) { cur = i; break; }
+        if (cand[i] == from_page) { cur = i; break; }
     }
-    int next = (cur + 1) % n;
-    *img_src_out = src[next];
-    return cand[next];
+    return cand[(cur + 1) % n];
 }
 
-/** Slideshow advance from the current committed position. Records the chosen
- *  stop's image source in s_arb.pending_img_source. Returns Home Page if no
- *  page is available. */
 static int slideshow_next(void) {
-    int8_t img_src = -1;
-    int p = slideshow_advance_from(s_arb.current_committed, s_arb.current_committed_img_source, &img_src);
-    s_arb.pending_img_source = img_src;
-    return p;
+    return slideshow_advance_from(s_arb.current_committed);
 }
 
 void nav_arbiter_resolve(int64_t now_ms) {
     const app_config_t *c = app_config_get();
 
-    /* Warm the first image stop the moment the slideshow turns on (false->true
-     * edge), before any early return, so the activation edge is never missed and
-     * the enabled-state flag stays in sync even while a modal is open. Firing the
-     * prefetch during a modal is harmless: it only fills the spare buffer. */
+    /* Slideshow on/off edge: warm the first image stop's poller the moment the
+     * slideshow turns on (so the first image stop is never cold), and release
+     * any warm frame when it turns off. Runs before the modal early-return so
+     * the edge is never missed. Warming touches no LVGL. */
     bool auto_rotate_now = c->auto_rotate_enabled;
-    if (auto_rotate_now && !s_arb.auto_rotate_was_enabled) {
-        int8_t first_src = first_image_source_in_order(c);
-        if (first_src >= 0) {
-            image_source_trigger_prefetch(first_src);
-        }
+    if (auto_rotate_now != s_arb.auto_rotate_was_enabled) {
+        image_page_prefetch(auto_rotate_now ? first_image_stop_in_order() : -1);
     }
     s_arb.auto_rotate_was_enabled = auto_rotate_now;
 
@@ -387,19 +287,12 @@ void nav_arbiter_resolve(int64_t now_ms) {
     int desired;
     nav_source_t src;
 
-    int user_page; int8_t user_img_source;
-    unpack_claim(s_arb.user_claim, &user_page, &user_img_source);
-
+    int user_page = s_arb.user_page;
     bool user_active = (user_page >= 0)
         && ((now_ms - s_arb.user_stamp_ms) < (int64_t)c->nav_grace_s * 1000);
 
     /* Tie-break: auto-rotate wins if both flags are somehow set. */
     bool auto_rotate = c->auto_rotate_enabled;
-
-    /* Default: no slideshow image source for this resolve. Only slideshow_next()
-     * sets a concrete 0-3 source; every other rung leaves the override cleared so
-     * a non-slideshow arrival at the image page shows the persisted default. */
-    s_arb.pending_img_source = -1;
 
     if (s_arb.pinned) {
         /* PIN rung: hold the USER selection with no grace expiry; slideshow,
@@ -408,27 +301,18 @@ void nav_arbiter_resolve(int64_t now_ms) {
          * held page follows manual nav and persists until the pin is cleared. */
         if (user_page < 0) {
             user_page = s_arb.current_committed;
-            user_img_source = s_arb.current_committed_img_source;
-            s_arb.user_claim = pack_claim(user_page, user_img_source);
+            s_arb.user_page = user_page;
         }
         desired = user_page;
         src = NAV_SRC_USER;
-        s_arb.pending_img_source = user_img_source;
     } else if (user_active) {
-        desired = user_page; src = NAV_SRC_USER;
-        /* Pin the user's chosen image source (0-3) so the commit block does not
-         * clobber the override back to the persisted default. -1 for non-image
-         * targets, which correctly clears the override. */
-        s_arb.pending_img_source = user_img_source;
+        desired = user_page;
+        src = NAV_SRC_USER;
     } else if (c->home_page_lock) {
         /* HOME LOCK rung: persisted always-show-Home-Page. Outranks slideshow,
          * session, idle, and default; yields to modal freeze, the runtime pin,
-         * and the USER grace window above. Config normalization already clears
-         * auto_rotate_enabled while the lock is set, so ordering ahead of the
-         * slideshow rung is belt-and-suspenders. */
-        int8_t hs = -1;
-        desired = home_page_with_src(&hs);
-        s_arb.pending_img_source = hs;
+         * and the USER grace window above. */
+        desired = home_page();
         src = NAV_SRC_HOME_LOCK;
     } else if (auto_rotate) {
         if (s_arb.slideshow_advance) {
@@ -436,35 +320,26 @@ void nav_arbiter_resolve(int64_t now_ms) {
             desired = slideshow_next();
         } else {
             desired = s_arb.current_committed;   /* hold between intervals */
-            /* Hold the committed source too, so img_src_changed stays false and
-             * we do not spuriously re-commit / clear the override mid-dwell. */
-            s_arb.pending_img_source = s_arb.current_committed_img_source;
         }
         src = NAV_SRC_SLIDESHOW;
     } else {
         int st = session_target();
-        if (st >= 0) { desired = st; src = NAV_SRC_SESSION; }
-        else if (idle_condition()) {
-            int8_t is = -1;
-            desired = idle_target_resolve(&is);
-            s_arb.pending_img_source = is;   /* idle target image source pins it */
+        if (st >= 0) {
+            desired = st;
+            src = NAV_SRC_SESSION;
+        } else if (idle_condition()) {
+            desired = idle_target_resolve();
             src = NAV_SRC_IDLE;
         } else {
-            int8_t hs = -1;
-            desired = home_page_with_src(&hs);
-            s_arb.pending_img_source = hs;    /* home target image source pins it */
+            desired = home_page();
             src = NAV_SRC_DEFAULT;
         }
     }
 
-    /* Validate vs Page Model: available and not Settings, else Home Page. Recompute
-     * the pending image source from Home too, so a re-home does not leave a stale
-     * non-(-1) source from the rung that was just rejected. */
+    /* Validate vs Page Model: available and not Settings, else Home Page. */
     if (desired == SETTINGS_PAGE_IDX(page_count)
         || !nina_dashboard_page_is_available(desired)) {
-        int8_t hs = -1;
-        desired = home_page_with_src(&hs);
-        s_arb.pending_img_source = hs;
+        desired = home_page();
     }
 
     /* Publish the winning rung for the web API (level state, read atomically
@@ -479,97 +354,39 @@ void nav_arbiter_resolve(int64_t now_ms) {
     }
 
     /* Commit only on change. Single path: animated switch always fires the cb.
-     * Mark the page committed ONLY on a successful lock+switch; a lock timeout
-     * leaves current_committed unchanged so the next resolve retries (otherwise
-     * desired==current_committed would suppress the retry forever). */
-    /* Compare against the LIVE override, not the arbiter's cached copy: the
-     * override is a shared atomic that other writers touch (page_ref_navigate(),
-     * a swipe onto the image page) and that the commit below applies BEFORE
-     * taking the display lock — so a lock timeout applies the source while the
-     * page switch is abandoned. Gating on the cached copy made the arbiter
-     * believe the right source was already applied and it never healed the
-     * drift (Home Page = Moon, panel stuck on the persisted default source).
-     * Raw override, not the effective source: pending -1 ("no override, use the
-     * persisted default") must not read as a change every cycle. */
-    bool img_src_changed = (desired == PAGE_IDX_IMAGE_DISPLAY)
-        && (s_arb.pending_img_source != image_source_get_override());
-
-    if (desired != s_arb.current_committed || img_src_changed) {
+     * current_committed moves ONLY on a successful lock+switch; a lock timeout
+     * leaves it unchanged so the next resolve retries. */
+    if (desired != s_arb.current_committed) {
         int effect = (src == NAV_SRC_SLIDESHOW) ? c->auto_rotate_effect : 0;
-        /* Apply the runtime image-source override BEFORE switching the page so
-         * the Image Display page fetches/renders the right source. pending is -1
-         * for non-image stops, which clears the override (persisted default). */
-        /* Capture the effective source BEFORE the override write so the fetch
-         * wake below can be gated on a REAL source change. Healing a cleared
-         * override back to a value that resolves to the same effective source
-         * (e.g. override -1 -> 0 while the persisted default is already 0) must
-         * not re-download the image: an ungated notify here self-sustains a
-         * refetch/crossfade loop (commit -> notify -> fetch -> resolve -> commit)
-         * that fades the image page every few seconds. */
-        int8_t eff_before = image_source_get_effective();
-        image_source_set_override(s_arb.pending_img_source);
-        /* Track the source with the write, not with the page switch below: the
-         * write already happened, so recording it only on lock success would
-         * leave the cache disagreeing with the live override (the drift this
-         * block used to gate on). current_committed still moves only on a
-         * successful switch, so a lock timeout still retries the page. */
-        s_arb.current_committed_img_source = s_arb.pending_img_source;
-        if (desired == PAGE_IDX_IMAGE_DISPLAY && goes_task_handle &&
-            (s_arb.current_committed != PAGE_IDX_IMAGE_DISPLAY ||
-             image_source_get_effective() != eff_before)) {
-            xTaskNotifyGive(goes_task_handle);   /* wake fetch for new source */
-        }
-        /* Manual navigation to the image page (USER claim) shows the loading
-         * animation and forces a fresh foreground fetch (bypassing any warm
-         * prefetch buffer). Auto-cycle/session/idle/default arrivals stay seamless:
-         * they rely on the prefetch swap and never animate. */
-        if (desired == PAGE_IDX_IMAGE_DISPLAY && src == NAV_SRC_USER) {
-            image_display_request_manual_fetch();
+        /* Slideshow lookahead BEFORE the page switch: warm the NEXT stop's poller
+         * now (touches no LVGL, so it is safe outside the lock), skipping the
+         * degenerate single-stop case (next == desired) so the visible page is
+         * never marked warm and left pinned. A non-image next stop un-warms
+         * whatever was warm; retained frames stay resident under the cap. */
+        if (src == NAV_SRC_SLIDESHOW) {
+            int next = slideshow_advance_from(desired);
+            if (next != desired) image_page_prefetch(PAGE_IDX_IS_IMAGE(next) ? next : -1);
         }
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
             nina_dashboard_show_page_animated(desired, 0, effect);
-            /* Cover any stale previous image the instant the page appears, before the
-             * fetch task can show the overlay on its next cycle. Manual nav only;
-             * auto-cycle stays seamless via prefetch. */
-            if (desired == PAGE_IDX_IMAGE_DISPLAY && src == NAV_SRC_USER) {
-                /* Derive a subtitle for all four image sources so the overlay
-                 * always names the source being loaded. */
-                const app_config_t *c = app_config_get();
-                char arb_label[48] = "";
-                int8_t ps = s_arb.pending_img_source;
-                if (ps == 0 && c->goes_region[0]) {
-                    strlcpy(arb_label, goes_region_name(c->goes_region), sizeof(arb_label));
-                } else if (ps == 1) {
-                    strlcpy(arb_label, "Moon", sizeof(arb_label));
-                } else if (ps == 2) {
-                    strlcpy(arb_label, solar_band_label(c->solar_band), sizeof(arb_label));
-                } else if (ps >= 3) {
-                    strlcpy(arb_label, "Custom", sizeof(arb_label));
+            /* Manual navigation onto an image page that has nothing to show yet
+             * (not warm): put the loading overlay up now, before the poller's
+             * first pass, so the user never sees a black panel. A warm page shows
+             * its frame instantly and needs no overlay; auto-cycle arrivals rely
+             * on the warm path and never animate. */
+            if (PAGE_IDX_IS_IMAGE(desired) && src == NAV_SRC_USER) {
+                image_page_t *ip = image_page_by_page_idx(desired);
+                if (ip && !image_page_has_image(ip)) {
+                    char lbl[48];
+                    image_page_label(ip, lbl, sizeof(lbl));
+                    nina_wait_overlay_set_prior_page(s_arb.current_committed);
+                    nina_wait_overlay_show("Loading image...", lbl[0] ? lbl : NULL);
+                    nina_wait_overlay_set_progress(-1);
                 }
-                nina_wait_overlay_set_prior_page(s_arb.current_committed);
-                nina_wait_overlay_show("Loading image...", arb_label[0] ? arb_label : NULL);
-                nina_wait_overlay_set_progress(-1);
             }
             bsp_display_unlock();
             s_arb.current_committed = desired;
-            ESP_LOGI(TAG, "commit page=%d src=%d img_src=%d",
-                     desired, (int)src, (int)s_arb.pending_img_source);
-
-            /* Prefetch lookahead (schedule only; fetch/swap is Phase 4). After
-             * EVERY slideshow stop (image or not), peek the source the NEXT
-             * advance would select WITHOUT mutating arbiter state, and ask the
-             * goes task to warm it when the next stop is an image page. This
-             * closes the gap where a non-image stop (e.g. Clock) preceding an
-             * image stop never warmed it. next_src is 0-3 when the next stop is
-             * an image page, else -1 (non-image next stop => nothing to
-             * prefetch). */
-            if (src == NAV_SRC_SLIDESHOW) {
-                int8_t next_src = -1;
-                (void)slideshow_advance_from(s_arb.current_committed, s_arb.current_committed_img_source, &next_src);
-                if (next_src >= 0) {
-                    image_source_trigger_prefetch(next_src);
-                }
-            }
+            ESP_LOGI(TAG, "commit page=%d src=%d", desired, (int)src);
         }
     }
 }

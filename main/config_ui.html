@@ -1003,7 +1003,10 @@
         <button class="tab-btn" data-tab="ha">Home Assistant</button>
         <button class="tab-btn" data-tab="clock">Clock</button>
         <button class="tab-btn" data-tab="spotify">Spotify</button>
-        <button class="tab-btn" data-tab="image-display">Image Display</button>
+        <button class="tab-btn" data-tab="image-goes">GOES</button>
+        <button class="tab-btn" data-tab="image-moon">Moon</button>
+        <button class="tab-btn" data-tab="image-solar">Solar</button>
+        <button class="tab-btn" data-tab="image-custom">Custom URL</button>
         <button class="tab-btn" data-tab="octoprint">3D Printer</button>
       </div>
       <div class="tab-group" data-section="device">
@@ -1051,13 +1054,15 @@
          ensureTabLoaded() via GET /ui/fragment?tab=spotify and injected here. -->
     <div id="tab-spotify" class="tab-panel"></div>
 
-    <!-- ==================== TAB: IMAGE DISPLAY ==================== -->
-    <!-- Markup extracted to main/fragment_image_display.html (P6c); lazily
-         fetched by ensureTabLoaded() via GET /ui/fragment?tab=image-display
-         and injected here. Filename uses an underscore (tab name has a
-         hyphen) -- see s_ui_fragments[] in web_handlers_config.c for the
-         name->symbol mapping. -->
-    <div id="tab-image-display" class="tab-panel"></div>
+    <!-- ==================== TABS: IMAGE PAGES (GOES / MOON / SOLAR / CUSTOM) ==================== -->
+    <!-- Markup lives in main/fragment_image_{goes,moon,solar,custom}.html; lazily
+         fetched by ensureTabLoaded() via GET /ui/fragment?tab=image-goes etc.
+         Tab names use a hyphen, asset symbols an underscore -- see
+         s_ui_fragments[] in web_handlers_config.c. -->
+    <div id="tab-image-goes" class="tab-panel"></div>
+    <div id="tab-image-moon" class="tab-panel"></div>
+    <div id="tab-image-solar" class="tab-panel"></div>
+    <div id="tab-image-custom" class="tab-panel"></div>
 
     <!-- ==================== TAB: 3D PRINTER (OCTOPRINT) ==================== -->
     <!-- Markup extracted to main/fragment_octoprint.html; lazily fetched by
@@ -1195,7 +1200,16 @@
         fetchPageRegistry().then(function(){
           if(!_pageRegistry.length){ retryPageRegistry(attempts-1); return; }
           if(_cfgCache && loadedTabs.has('behavior') && POPULATE_TAB_FNS.behavior){
-            POPULATE_TAB_FNS.behavior(_cfgCache);
+            /* populateTab_behavior is async: adopt only once it has settled, or
+               the baseline captures the pre-await defaults. Not adopted when it
+               rejects. The pills only exist now, so the baseline's
+               active_page_override and auto_rotate_order2 were collected from an
+               empty registry and must be re-taken here. */
+            return Promise.resolve(POPULATE_TAB_FNS.behavior(_cfgCache)).then(function(){
+              baselineAdoptTab('behavior');
+            },function(e){
+              console.error('populateTab_behavior failed',e);
+            });
           } else {
             populatePageControls();
           }
@@ -1525,8 +1539,8 @@
        Canonical tab list, in the same order the panels appear in the DOM.
        P6a landed the loader machinery with every tab still pre-populated in
        loadedTabs (no-op ensureTabLoaded() for all names). P6b extracted logs,
-       backup, and api. P6c extracted allsky, clock, spotify, and
-       image-display. P6d (final wave) extracts the remaining four -- nodes,
+       backup, and api. P6c extracted allsky, clock, spotify, and the image
+       pages. P6d (final wave) extracts the remaining four -- nodes,
        display, behavior, system -- so every tab now ships as
        main/fragment_NAME.html (embedded, served by GET /ui/fragment?tab=NAME)
        and loadedTabs starts empty: every tab, including the default ('nodes',
@@ -1537,7 +1551,7 @@
        so the initial switchTab() call at boot -- which shows whichever tab
        was last active -- transparently fetches that tab's fragment first; no
        separate boot-time special case is needed for the default tab. */
-    const TAB_ORDER=['nodes','allsky','json','ha','clock','spotify','image-display','octoprint','display','behavior','voice-clips','system','logs','backup','api'];
+    const TAB_ORDER=['nodes','allsky','json','ha','clock','spotify','image-goes','image-moon','image-solar','image-custom','octoprint','display','behavior','voice-clips','system','logs','backup','api'];
     const LAZY_TABS=new Set(TAB_ORDER);
     const loadedTabs=new Set(TAB_ORDER.filter(n=>!LAZY_TABS.has(n)));
 
@@ -1582,7 +1596,21 @@
            listener to every already-loaded tab's cards. */
         if(typeof initCollapsibleCards==='function') initCollapsibleCards(panel);
         if(_cfgCache && POPULATE_TAB_FNS[name]){
-          try{ POPULATE_TAB_FNS[name](_cfgCache); }
+          try{
+            /* AWAIT: populateTab_behavior is async (it awaits the page registry
+               before setting any value), so calling it and adopting on the next
+               line would snapshot the fragment's raw HTML defaults -- zeroed
+               masks, active_page_override -1, an all-0xFF auto_rotate_order2 --
+               as this tab's baseline, i.e. exactly the permanent stale diff this
+               work exists to remove. await also covers the sync populators
+               (await on a non-promise is a no-op) and routes an async rejection
+               into the same catch as a sync throw. */
+            await POPULATE_TAB_FNS[name](_cfgCache);
+            /* Populated after the baseline was taken: adopt this tab's values so
+               its untouched keys never ride a Save (see baselineAdoptTab). Skipped
+               on failure -- a half-populated tab's DOM is not a baseline. */
+            baselineAdoptTab(name);
+          }
           catch(e){
             console.error('populateTab_'+name+' failed',e);
             _populateFailed=true;
@@ -1709,7 +1737,7 @@
        highlights and row 2 shows the matching tab group. _lastUsedTab remembers
        the tab last visited in each section (in-memory) so a section click lands
        on a sensible default; switchTab() keeps it seeded as tabs activate. */
-    const TAB_GROUP = { nodes:'pages', allsky:'pages', json:'pages', ha:'pages', clock:'pages', spotify:'pages', 'image-display':'pages', octoprint:'pages', display:'device', behavior:'device', 'voice-clips':'device', system:'device', logs:'tools', backup:'tools', api:'tools' };
+    const TAB_GROUP = { nodes:'pages', allsky:'pages', json:'pages', ha:'pages', clock:'pages', spotify:'pages', 'image-goes':'pages', 'image-moon':'pages', 'image-solar':'pages', 'image-custom':'pages', octoprint:'pages', display:'device', behavior:'device', 'voice-clips':'device', system:'device', logs:'tools', backup:'tools', api:'tools' };
     var _lastUsedTab={};
     function highlightGroup(name){
       var sec=TAB_GROUP[name];
@@ -1835,8 +1863,10 @@
       var pages=targetablePagesOrdered();
       pages.forEach(function(p){
         var cls='pn-pill start-pill'+(p.available?'':' pn-pill-unavailable');
+        /* Radios have no id; data-cfg-key tells markTouched which config key
+           this group feeds (see collectTab_behavior's active_page_override). */
         c.insertAdjacentHTML('beforeend',
-          '<label class="'+cls+'">'+
+          '<label class="'+cls+'" data-cfg-key="active_page_override">'+
             '<input type="radio" name="start_page" value="'+p.id+'" onchange="onStartPageChange();checkDirty()">'+
             '<span class="pn-pill-visual">'+p.label+'</span>'+
             '<span class="pin-badge">&#9733;</span>'+
@@ -2039,10 +2069,10 @@
       var pills=Array.from(container.querySelectorAll('.pn-pill[data-arp-idx]'));
       var pillMap={};
       pills.forEach(function(p){ pillMap[p.getAttribute('data-arp-idx')]=p; });
-      /* Members (in order) = valid stop ids (0..11, 24=JSON, 25=HA) that are
-         not the 0xFF/255 sentinel. Keep in sync with ARP_STOP_IS_VALID in
-         app_config.h. */
-      var members=orderArr.map(function(v){return parseInt(v);}).filter(function(v){return !isNaN(v)&&(v>=0&&v<12||v===24||v===25);});
+      /* Members (in order) = valid stop ids (0..11, 24=JSON, 25=HA,
+         26=OctoPrint) that are not the 0xFF/255 sentinel. Keep in sync with
+         ARP_STOP_IS_VALID in app_config.h. */
+      var members=orderArr.map(function(v){return parseInt(v);}).filter(function(v){return !isNaN(v)&&(v>=0&&v<12||v===24||v===25||v===26);});
       /* Reorder members to the front in saved order, set their checkbox on. */
       members.forEach(function(idx){
         var p=pillMap[idx];
@@ -2148,27 +2178,24 @@
       data.spotify_overlay_timeout_s=parseInt($('spotifyOverlayTimeout').value)||0;
     }
 
-    function collectTab_image_display(data){
-      data.image_display_enabled=!!$('image_display_enabled').checked;
-      data.image_display_show_overlay=!!$('image_display_show_overlay').checked;
-      data.image_display_crop=!!$('image_display_crop').checked;
+    function collectTab_image_goes(data){
+      data.goes_enabled=!!$('goes_enabled').checked;
+      data.goes_show_overlay=!!$('goes_show_overlay').checked;
+      data.goes_crop=!!$('goes_crop').checked;
+      data.goes_update_interval_s=parseInt($('goesInterval').value,10)||600;
       data.goes_region=$('goesRegion').value;
-      data.goes_update_interval_s=parseInt($('goesInterval').value)||600;
-      data.image_display_source=getImageSource();
+      data.goes_orientation=parseInt($('goesOrientation').value,10)||0;
+      data.goes_vflip=$('goesVflip').checked?1:0;
+      data.goes_hflip=$('goesHflip').checked?1:0;
+    }
+    function collectTab_image_moon(data){
+      data.moon_enabled=!!$('moon_enabled').checked;
+      data.moon_show_overlay=!!$('moon_show_overlay').checked;
+      data.moon_update_interval_s=parseInt($('moonInterval').value,10)||60;
       data.moon_bg_style=parseInt($('moonBg').value,10)||0;
       data.moon_drag_light_mode=parseInt($('moonDragLight').value,10)||0;
-      data.solar_band=parseInt($('solarBand').value,10)||0;
-      data.goes_orientation=parseInt($('goesOrientation').value,10)||0;
-      data.goes_vflip=$('goesVflip')&&$('goesVflip').checked?1:0;
-      data.goes_hflip=$('goesHflip')&&$('goesHflip').checked?1:0;
-      data.solar_orientation=parseInt($('solarOrientation').value,10)||0;
-      data.solar_vflip=$('solarVflip')&&$('solarVflip').checked?1:0;
-      data.solar_hflip=$('solarHflip')&&$('solarHflip').checked?1:0;
-      data.custom_vflip=$('customVflip')&&$('customVflip').checked?1:0;
-      data.custom_hflip=$('customHflip')&&$('customHflip').checked?1:0;
-      data.custom_image_url=$('customImageUrl')?$('customImageUrl').value.trim():'';
-      data.custom_orientation=$('customOrientation')?parseInt($('customOrientation').value,10)||0:0;
-      data.custom_update_interval_s=$('customInterval')?parseInt($('customInterval').value,10)||60:60;
+      data.moon_lat=currentMoonLat();
+      data.moon_lon=currentMoonLon();
       data.moon_north_up=$('moon_north_up').checked?1:0;
       data.moon_flip_u=$('moon_flip_u').checked?1:0;
       data.moon_flip_v=$('moon_flip_v').checked?1:0;
@@ -2177,6 +2204,26 @@
       data.moon_pitch_offset=parseFloat($('moon_pitch_offset').value)||0;
       data.moon_spin_mode=$('moon_spin_mode').checked?1:0;
       data.moon_spin_return_s=parseInt($('moon_spin_return_s').value,10)||3;
+    }
+    function collectTab_image_solar(data){
+      data.solar_enabled=!!$('solar_enabled').checked;
+      data.solar_show_overlay=!!$('solar_show_overlay').checked;
+      data.solar_crop=!!$('solar_crop').checked;
+      data.solar_update_interval_s=parseInt($('solarInterval').value,10)||600;
+      data.solar_band=parseInt($('solarBand').value,10)||0;
+      data.solar_orientation=parseInt($('solarOrientation').value,10)||0;
+      data.solar_vflip=$('solarVflip').checked?1:0;
+      data.solar_hflip=$('solarHflip').checked?1:0;
+    }
+    function collectTab_image_custom(data){
+      data.custom_enabled=!!$('custom_enabled').checked;
+      data.custom_show_overlay=!!$('custom_show_overlay').checked;
+      data.custom_crop=!!$('custom_crop').checked;
+      data.custom_image_url=$('customImageUrl').value.trim();
+      data.custom_orientation=parseInt($('customOrientation').value,10)||0;
+      data.custom_vflip=$('customVflip').checked?1:0;
+      data.custom_hflip=$('customHflip').checked?1:0;
+      data.custom_update_interval_s=parseInt($('customInterval').value,10)||60;
     }
 
     function collectTab_octoprint(data){
@@ -2193,6 +2240,8 @@
       data.octoprint_layout=parseInt($('octoLayout').value,10)||0;
       data.octoprint_image_source=parseInt($('octoImageSource').value,10)||0;
       data.octoprint_snapshot_url=$('octoSnapshotUrl').value.trim();
+      /* Real bool SETTINGS_TABLE row (unlike octoprint_enabled's uint8), so send a JSON boolean. */
+      data.octoprint_overlay_visible=!!$('octoOverlayVisible').checked;
     }
 
     function collectTab_display(data){
@@ -2342,7 +2391,10 @@
       ha: collectTab_ha,
       clock: collectTab_clock,
       spotify: collectTab_spotify,
-      'image-display': collectTab_image_display,
+      'image-goes': collectTab_image_goes,
+      'image-moon': collectTab_image_moon,
+      'image-solar': collectTab_image_solar,
+      'image-custom': collectTab_image_custom,
       octoprint: collectTab_octoprint,
       display: collectTab_display,
       behavior: collectTab_behavior,
@@ -2361,27 +2413,73 @@
       return data;
     }
 
-    /* === Config Diff ===
-       Send only changed keys to the device. getConfigData() seeds from a
-       cached server snapshot (_cfgCache), so re-posting the whole object
-       would revert any setting changed outside this page (Control API,
-       MQTT, another browser tab, per-feature endpoints) back to the stale
-       cached value. Keys absent from the POST keep their current value on
-       the device, so untouched settings can never be clobbered. */
-    function configDiff(data){
+    /* === Touched-Keys Payload ===
+       Post ONLY the keys this browser tab's user actually edited. getConfigData()
+       seeds from a cached server snapshot (_cfgCache) that goes stale the moment
+       anything else writes the config -- the Control API, MQTT, another browser
+       tab, a per-feature endpoint. Posting the whole object (or anything derived
+       from the stale cache) snaps those values back; a second tab live-applying
+       a Home Page change used to be undone by the first tab's next keystroke.
+       Keys absent from the POST keep their current device value, so untouched
+       settings can never be clobbered.
+
+       Two sources, unioned:
+         - value diff against `loadedConfig`, the baseline snapshot taken right
+           after populate and refreshed on every successful Save/Discard;
+         - `_touched`, ids the user physically interacted with (most controls
+           have id == config key), so a value the user deliberately set BACK to
+           the baseline still goes out even though it diffs clean.
+       `_touched` entries that are not real config keys (control ids like
+       'theme_select', action fields) are filtered by the `k in data` test --
+       `data` only ever holds real config keys.
+
+       There is no whole-form fallback: with no baseline we post only the
+       explicitly touched keys. */
+    const _touched=new Set();
+    function touchedPayload(data){
       var base=null;
       try{ if(loadedConfig) base=JSON.parse(loadedConfig); }catch(e){}
-      if(!base) return data;  /* no baseline yet: fall back to full payload */
       var out={};
-      Object.keys(data).forEach(function(k){
-        if(!(k in base)||JSON.stringify(data[k])!==JSON.stringify(base[k])) out[k]=data[k];
-      });
+      if(base){
+        Object.keys(data).forEach(function(k){
+          if(!(k in base)||JSON.stringify(data[k])!==JSON.stringify(base[k])) out[k]=data[k];
+        });
+      }
+      _touched.forEach(function(k){ if(k in data) out[k]=data[k]; });
       return out;
     }
 
     /* === Config Load === */
     let loadedConfig='';
     let _populating=false;
+    /* Last _dirty flag reported by /api/config: the device is holding a
+       live-applied but unsaved change (possibly made from another browser tab).
+       Keeps the Save bar up even when this tab has touched nothing.
+       /api/status carries no dirty flag, so this refreshes on populate only. */
+    var _deviceDirty=false;
+
+    /* Fold ONE tab's freshly populated values into the baseline.
+       The baseline is snapshotted once, in populateConfig(), and only runs the
+       collectors of tabs already loaded at that instant (the boot tab). Every
+       lazily-loaded/prefetched fragment populates later, and any key whose
+       collector output does not round-trip _cfgCache byte-identically would then
+       diff 'changed' forever and ride every Save from every tab -- e.g.
+       collectTab_system emits wifi_networks [{ssid}] while GET /api/config emits
+       [{ssid,password:'********'}], which the device reads as an SSID change and
+       answers by erasing the stored password. A tab that has only just populated
+       has not been touched by the user, so its collected values are unedited by
+       definition and belong in the baseline.
+       Merge only this tab's keys: re-snapshotting the whole form here would adopt
+       (and thereby discard) edits pending in other tabs. */
+    function baselineAdoptTab(name){
+      if(!loadedConfig||!COLLECT_TAB_FNS[name]) return;
+      try{
+        var base=JSON.parse(loadedConfig), tab={};
+        COLLECT_TAB_FNS[name](tab);
+        Object.keys(tab).forEach(function(k){ base[k]=tab[k]; });
+        loadedConfig=JSON.stringify(base);
+      }catch(e){ console.error('baselineAdoptTab('+name+') failed',e); }
+    }
 
     /* === Per-Tab Config Populators ===
        Mirror image of the collectors above: one populate function per tab,
@@ -2480,33 +2578,24 @@
       updateSpotifyEnabledUI();
     }
 
-    function populateTab_image_display(data){
-      if($('image_display_enabled')) $('image_display_enabled').checked=!!data.image_display_enabled;
-      if($('image_display_show_overlay')) $('image_display_show_overlay').checked=data.image_display_show_overlay!=null?!!data.image_display_show_overlay:true;
-      if($('image_display_crop')) $('image_display_crop').checked=!!data.image_display_crop;
-      if($('goesRegion')) $('goesRegion').value=data.goes_region||'umv';
+    function populateTab_image_goes(data){
+      if($('goes_enabled')) $('goes_enabled').checked=!!data.goes_enabled;
+      if($('goes_show_overlay')) $('goes_show_overlay').checked=data.goes_show_overlay!=null?!!data.goes_show_overlay:true;
+      if($('goes_crop')) $('goes_crop').checked=!!data.goes_crop;
       if($('goesInterval')) $('goesInterval').value=data.goes_update_interval_s||600;
-      var imgSrc=parseInt(data.image_display_source||0,10)||0;
-      if($('imageSource0')) $('imageSource0').checked=(imgSrc===0);
-      if($('imageSource1')) $('imageSource1').checked=(imgSrc===1);
-      if($('imageSource2')) $('imageSource2').checked=(imgSrc===2);
-      if($('imageSource3')) $('imageSource3').checked=(imgSrc===3);
-      if($('customImageUrl')) $('customImageUrl').value=data.custom_image_url||'';
-      updateImgCustomPillHint();
-      if($('customOrientation')) $('customOrientation').value=String(data.custom_orientation||0);
-      if($('customVflip')) $('customVflip').checked=!!data.custom_vflip;
-      if($('customHflip')) $('customHflip').checked=!!data.custom_hflip;
-      if($('customInterval')) $('customInterval').value=String(data.custom_update_interval_s||60);
-      if($('moonBg')) $('moonBg').value=String(data.moon_bg_style||0);
-      if($('moonDragLight')) $('moonDragLight').value=String(data.moon_drag_light_mode||0);
-      if($('solarBand')) $('solarBand').value=String(data.solar_band||0);
+      if($('goesRegion')) $('goesRegion').value=data.goes_region||'umv';
       if($('goesOrientation')) $('goesOrientation').value=String(data.goes_orientation||0);
       if($('goesVflip')) $('goesVflip').checked=!!data.goes_vflip;
       if($('goesHflip')) $('goesHflip').checked=!!data.goes_hflip;
-      if($('solarOrientation')) $('solarOrientation').value=String(data.solar_orientation||0);
-      if($('solarVflip')) $('solarVflip').checked=!!data.solar_vflip;
-      if($('solarHflip')) $('solarHflip').checked=!!data.solar_hflip;
-      if($('moon_north_up')) $('moon_north_up').checked = (data.moon_north_up==null) ? true : !!data.moon_north_up;
+      updateImagePageEnabledUI('image-goes');
+    }
+    function populateTab_image_moon(data){
+      if($('moon_enabled')) $('moon_enabled').checked=!!data.moon_enabled;
+      if($('moon_show_overlay')) $('moon_show_overlay').checked=data.moon_show_overlay!=null?!!data.moon_show_overlay:true;
+      if($('moonInterval')) $('moonInterval').value=String(data.moon_update_interval_s||60);
+      if($('moonBg')) $('moonBg').value=String(data.moon_bg_style||0);
+      if($('moonDragLight')) $('moonDragLight').value=String(data.moon_drag_light_mode||0);
+      if($('moon_north_up')) $('moon_north_up').checked=(data.moon_north_up==null)?true:!!data.moon_north_up;
       if($('moon_flip_u')) $('moon_flip_u').checked=!!data.moon_flip_u;
       if($('moon_flip_v')) $('moon_flip_v').checked=!!data.moon_flip_v;
       if($('moon_roll_offset')) $('moon_roll_offset').value=data.moon_roll_offset!=null?data.moon_roll_offset:0;
@@ -2519,8 +2608,30 @@
       updateMoonOrientReadout('moon_pitch');
       updateMoonOrientReadout('moon_spin_return');
       updateMoonSpinUI();
-      updateImageDisplayEnabledUI();
-      updateImageSourceUI();
+      updateImagePageEnabledUI('image-moon');
+    }
+    function populateTab_image_solar(data){
+      if($('solar_enabled')) $('solar_enabled').checked=!!data.solar_enabled;
+      if($('solar_show_overlay')) $('solar_show_overlay').checked=data.solar_show_overlay!=null?!!data.solar_show_overlay:true;
+      if($('solar_crop')) $('solar_crop').checked=!!data.solar_crop;
+      if($('solarInterval')) $('solarInterval').value=data.solar_update_interval_s||600;
+      if($('solarBand')) $('solarBand').value=String(data.solar_band||0);
+      if($('solarOrientation')) $('solarOrientation').value=String(data.solar_orientation||0);
+      if($('solarVflip')) $('solarVflip').checked=!!data.solar_vflip;
+      if($('solarHflip')) $('solarHflip').checked=!!data.solar_hflip;
+      updateImagePageEnabledUI('image-solar');
+    }
+    function populateTab_image_custom(data){
+      if($('custom_enabled')) $('custom_enabled').checked=!!data.custom_enabled;
+      if($('custom_show_overlay')) $('custom_show_overlay').checked=data.custom_show_overlay!=null?!!data.custom_show_overlay:true;
+      if($('custom_crop')) $('custom_crop').checked=!!data.custom_crop;
+      if($('customImageUrl')) $('customImageUrl').value=data.custom_image_url||'';
+      updateImgCustomPillHint();
+      if($('customOrientation')) $('customOrientation').value=String(data.custom_orientation||0);
+      if($('customVflip')) $('customVflip').checked=!!data.custom_vflip;
+      if($('customHflip')) $('customHflip').checked=!!data.custom_hflip;
+      if($('customInterval')) $('customInterval').value=String(data.custom_update_interval_s||60);
+      updateImagePageEnabledUI('image-custom');
     }
 
     function populateTab_octoprint(data){
@@ -2530,11 +2641,13 @@
       if($('octoInterval')) $('octoInterval').value=data.octoprint_update_interval_s||5;
       /* Layouts 1, 3 and 4 (the retired "Instrument dial", "Large numerals" and
          "Layer timeline") are still legal in stored config but have no option
-         here; they resolve to Bento on the device, so show that rather than
-         leaving the select blank. */
-      if($('octoLayout')){var ol=parseInt(data.octoprint_layout,10)||0;if(ol!==0&&ol!==2)ol=0;$('octoLayout').value=String(ol);}
+         here; they resolve to Grid on the device, so show that rather than
+         leaving the select blank. Live layouts: 0 Grid, 2 Immersive
+         image, 5 Floating overlay, 6 Letterbox. */
+      if($('octoLayout')){var ol=parseInt(data.octoprint_layout,10)||0;if(ol!==0&&ol!==2&&ol!==5&&ol!==6)ol=0;$('octoLayout').value=String(ol);}
       if($('octoImageSource')) $('octoImageSource').value=String(data.octoprint_image_source||0);
       if($('octoSnapshotUrl')) $('octoSnapshotUrl').value=data.octoprint_snapshot_url||'';
+      if($('octoOverlayVisible')) $('octoOverlayVisible').checked=data.octoprint_overlay_visible!=null?!!data.octoprint_overlay_visible:true;
     }
 
     function populateTab_display(data){
@@ -2717,7 +2830,10 @@
       ha: function(d){ if(window.populateTab_ha) window.populateTab_ha(d); },
       clock: populateTab_clock,
       spotify: populateTab_spotify,
-      'image-display': populateTab_image_display,
+      'image-goes': populateTab_image_goes,
+      'image-moon': populateTab_image_moon,
+      'image-solar': populateTab_image_solar,
+      'image-custom': populateTab_image_custom,
       octoprint: populateTab_octoprint,
       display: populateTab_display,
       behavior: populateTab_behavior,
@@ -2750,22 +2866,36 @@
       $('brandName').textContent=hn;
       document.title=hn;
 
+      /* Same async trap as loadTabFragment: populateTab_behavior returns a
+         promise and only sets its values after awaiting the page registry, so
+         snapshotting the baseline right after this loop would capture the
+         fragment's raw HTML defaults. Collect what each populator returns and
+         let them all settle first. Each is given its own .catch (mirroring the
+         per-tab try/catch that already handles a sync throw), so one failing tab
+         records _populateFailed without aborting the others. */
+      var pending=[];
       TAB_ORDER.forEach(function(name){
         if(!loadedTabs.has(name)) return;
-        try{ POPULATE_TAB_FNS[name](data); }
+        try{ pending.push(Promise.resolve(POPULATE_TAB_FNS[name](data)).catch(function(e){
+          console.error('populateTab_'+name+' failed',e);
+          _populateFailed=true;
+        })); }
         catch(e){
           console.error('populateTab_'+name+' failed',e);
           _populateFailed=true;
         }
       });
+      await Promise.all(pending);
       if(_populateFailed){ cfgOverlay('error'); }
       else cfgOverlay('hide');
 
       loadedConfig=JSON.stringify(getConfigData());
       _populating=false;
-      if(data._dirty){
-        loadedConfig='';
-      }
+      /* The device holding an unsaved live-applied change raises the Save bar
+         (see checkDirty) but must NOT widen the POST body: dropping the
+         baseline here used to make the next keystroke post the whole stale
+         form, clobbering whatever another tab had just applied. */
+      _deviceDirty=!!data._dirty;
       checkDirty();
     }
 
@@ -3085,17 +3215,21 @@
       if(!configLoadedGuard()) return;
       var btn=$('saveBtn');
       btn.disabled=true; btn.textContent='Saving...';
-      /* Diff only: a typed WiFi password changes wifi_networks vs the
+      /* Touched keys only: a typed WiFi password changes wifi_networks vs the
          baseline (whose pass fields populate empty), so it rides along
-         naturally; unchanged keys stay out and cannot clobber the device. */
-      postJson('/api/config',configDiff(getConfigData())).then(r=>{
+         naturally; untouched keys stay out and cannot clobber the device. */
+      postJson('/api/config',touchedPayload(getConfigData())).then(r=>{
         if(!r.ok) throw new Error('Save failed');
         return r.text();
       }).then(()=>savePageFragments()).then(()=>{
+        _touched.clear();
         invalidateConfigCache();
         showToast('Settings saved','success');
-        loadedConfig=JSON.stringify(getConfigData());
         $('saveBar').classList.remove('visible');
+        /* Re-read from the device rather than re-snapshotting the local form:
+           the save may have merged with changes made elsewhere, and _cfgCache
+           plus the baseline must both come back fresh. */
+        loadConfig();
       }).catch(e=>{
         showToast('Save failed: '+e.message,'error');
       }).finally(()=>{
@@ -3104,10 +3238,14 @@
     }
 
     function reloadConfig(){
+      /* Revert is device-wide: it drops every live-applied unsaved change,
+         including previews another browser tab is still working on. */
+      if(!confirm('Discard live changes? This reverts unsaved changes made from any browser tab on this device.')) return;
       fetch('/api/config/revert',{method:'POST'}).then(r=>{
         if(!r.ok) throw new Error('Revert failed');
         return revertPageFragments();
       }).then(()=>{
+        _touched.clear();
         invalidateConfigCache();
         loadConfig();
         $('saveBar').classList.remove('visible');
@@ -3117,10 +3255,11 @@
     function saveAndReboot(){
       if(!configLoadedGuard()) return;
       if(!confirm('Apply changes and reboot now?')) return;
-      postJson('/api/config',configDiff(getConfigData())).then(r=>{
+      postJson('/api/config',touchedPayload(getConfigData())).then(r=>{
         if(!r.ok) throw new Error('Save failed');
         return savePageFragments();
       }).then(()=>{
+        _touched.clear();
         invalidateConfigCache();
         return fetch('/api/reboot',{method:'POST'});
       }).then(()=>{
@@ -3678,7 +3817,7 @@
     function checkDirty(){
       if(_populating) return;
       if(!_cfgCache||_populateFailed) return;  /* nothing loaded to compare against */
-      var dirty=Object.keys(configDiff(getConfigData())).length>0;
+      var dirty=_deviceDirty||Object.keys(touchedPayload(getConfigData())).length>0;
       $('saveBar').classList.toggle('visible',dirty);
     }
 
@@ -3695,9 +3834,9 @@
         }
         delete data.ssid;
         delete data.pass;
-        var diff=configDiff(data);
-        if(!Object.keys(diff).length) return;  /* nothing changed: skip the POST */
-        postJson('/api/config/apply',diff).catch(e=>console.error('Live apply failed:',e));
+        var body=touchedPayload(data);
+        if(!Object.keys(body).length) return;  /* nothing touched: skip the POST */
+        postJson('/api/config/apply',body).catch(e=>console.error('Live apply failed:',e));
       },400);
     }
 
@@ -3710,8 +3849,22 @@
       var t=e && e.target;
       return !!(t && t.closest && t.closest('[data-no-dirty]'));
     }
-    document.querySelector('.content').addEventListener('input',(e)=>{if(isNonSettingTarget(e))return;checkDirty();liveApply();});
-    document.querySelector('.content').addEventListener('change',(e)=>{if(isNonSettingTarget(e))return;checkDirty();liveApply();});
+    /* Record what the user physically edited so touchedPayload() can send it
+       even when it diffs clean against the (possibly stale) baseline. Most
+       controls carry id == config key; a container may declare the key(s) its
+       controls feed with data-cfg-key="key1 key2" when they do not. Ids that
+       are not config keys are dropped by touchedPayload's `k in data` test. */
+    function markTouched(e){
+      var t=e&&e.target;
+      if(!t) return;
+      if(t.id) _touched.add(t.id);
+      var c=t.closest&&t.closest('[data-cfg-key]');
+      if(c){
+        c.getAttribute('data-cfg-key').split(/\s+/).forEach(function(k){ if(k) _touched.add(k); });
+      }
+    }
+    document.querySelector('.content').addEventListener('input',(e)=>{if(isNonSettingTarget(e))return;markTouched(e);checkDirty();liveApply();});
+    document.querySelector('.content').addEventListener('change',(e)=>{if(isNonSettingTarget(e))return;markTouched(e);checkDirty();liveApply();});
 
     /* === Spotify Configuration === */
 
@@ -4100,33 +4253,26 @@
       return config;
     }
 
-    function updateImageDisplayEnabledUI(){
-      var on=$('image_display_enabled').checked;
-      $('imageDisplayFields').style.display=on?'':'none';
+    /* name -> {enable checkbox id, fields wrapper id, device source index} */
+    const IMAGE_TABS={
+      'image-goes':   {en:'goes_enabled',   fields:'goesFields',   src:0},
+      'image-moon':   {en:'moon_enabled',   fields:'moonFields',   src:1},
+      'image-solar':  {en:'solar_enabled',  fields:'solarFields',  src:2},
+      'image-custom': {en:'custom_enabled', fields:'customFields', src:3}
+    };
+
+    function updateImagePageEnabledUI(name){
+      var t=IMAGE_TABS[name]; if(!t||!$(t.en)) return;
+      var on=$(t.en).checked;
+      if($(t.fields)) $(t.fields).style.display=on?'':'none';
       updatePageSelectOptions();
-    }
-
-    function getImageSource(){
-      var sel=document.querySelector('input[name="imageSourceSel"]:checked');
-      return sel?parseInt(sel.value,10):0;
-    }
-
-    function updateImageSourceUI(){
-      var s=getImageSource();
-      // The shared disc options (GOES/Solar update interval + crop) do not apply
-      // to Moon (rendered locally) or Custom (its own interval, no crop).
-      if($('discOptions')) $('discOptions').style.display=(s===1||s===3)?'none':'';
-      if($('goesGroup'))  $('goesGroup').style.display =(s===0)?'':'none';
-      if($('moonGroup'))  $('moonGroup').style.display =(s===1)?'':'none';
-      if($('solarGroup')) $('solarGroup').style.display=(s===2)?'':'none';
-      if($('customGroup')) $('customGroup').style.display=(s===3)?'':'none';
     }
 
     /* weather_lat/weather_lon are System-tab fields (Location card) reused as
        the moon widget's coordinates -- see the matching note in
-       collectTab_system/populateTab_system. Both Image Display and System
-       are lazily-loaded fragments (P6c, P6d), and applyImageDisplay() is
-       called from Image-Display-tab-only buttons (resetMoonOrientation,
+       collectTab_system/populateTab_system. Both the image tabs and System
+       are lazily-loaded fragments (P6c, P6d), and applyImagePage() is
+       called from image-tab-only buttons (resetMoonOrientation,
        fetchCustomPreview), so System may never have been opened this
        session. Fall back to the cached server config (whichever of
        weather_lat/lon or the older moon_lat/lon key is present) instead of
@@ -4149,40 +4295,24 @@
       return 0;
     }
 
-    function applyImageDisplay(force){
-      return postJson('/api/image-display-config', {
-        force_fetch: !!force,
-        image_display_enabled: !!$('image_display_enabled').checked,
-        image_display_show_overlay: !!$('image_display_show_overlay').checked,
-        image_display_crop: !!$('image_display_crop').checked,
-        goes_region: $('goesRegion').value,
-        goes_update_interval_s: parseInt($('goesInterval').value,10)||600,
-        image_display_source: getImageSource(),
-        moon_bg_style: parseInt($('moonBg').value,10)||0,
-        moon_drag_light_mode: parseInt($('moonDragLight').value,10)||0,
-        moon_lat: currentMoonLat(),
-        moon_lon: currentMoonLon(),
-        moon_north_up: $('moon_north_up').checked?1:0,
-        moon_flip_u: $('moon_flip_u').checked?1:0,
-        moon_flip_v: $('moon_flip_v').checked?1:0,
-        moon_roll_offset: parseFloat($('moon_roll_offset').value)||0,
-        moon_yaw_offset: parseFloat($('moon_yaw_offset').value)||0,
-        moon_pitch_offset: parseFloat($('moon_pitch_offset').value)||0,
-        moon_spin_mode: $('moon_spin_mode').checked?1:0,
-        moon_spin_return_s: parseInt($('moon_spin_return_s').value,10)||3,
-        solar_band: parseInt($('solarBand').value,10)||0,
-        goes_orientation: parseInt($('goesOrientation').value,10)||0,
-        goes_vflip: $('goesVflip')&&$('goesVflip').checked?1:0,
-        goes_hflip: $('goesHflip')&&$('goesHflip').checked?1:0,
-        solar_orientation: parseInt($('solarOrientation').value,10)||0,
-        solar_vflip: $('solarVflip')&&$('solarVflip').checked?1:0,
-        solar_hflip: $('solarHflip')&&$('solarHflip').checked?1:0,
-        custom_image_url: $('customImageUrl')?$('customImageUrl').value.trim():'',
-        custom_orientation: $('customOrientation')?parseInt($('customOrientation').value,10)||0:0,
-        custom_vflip: $('customVflip')&&$('customVflip').checked?1:0,
-        custom_hflip: $('customHflip')&&$('customHflip').checked?1:0,
-        custom_update_interval_s: $('customInterval')?parseInt($('customInterval').value,10)||60:60
-      }).then(function(r){
+    /* Live-apply ONE image tab: POST exactly the keys that tab's collector
+       produces (partial-key contract of /api/image-display-config) plus
+       `source` so the device echoes that page's last fetch error. `extra`
+       merges additional keys (force_fetch for the Custom refresh button).
+
+       Always preview:true -- the device applies the keys live but persists
+       nothing. Saving here used to write the WHOLE config snapshot to NVS,
+       so one image toggle silently persisted every other tab's unsaved live
+       preview. These keys ride the normal Save now (they are SETTINGS_TABLE
+       rows, so touchedPayload carries them to /api/config). force_fetch is
+       independent of persistence: it only triggers the download, so the
+       "Refresh on Device" button still refreshes. */
+    function applyImagePage(name, extra){
+      var t=IMAGE_TABS[name]; if(!t) return Promise.resolve();
+      var body={source:t.src,preview:true};
+      COLLECT_TAB_FNS[name](body);
+      if(extra) Object.assign(body, extra);
+      return postJson('/api/image-display-config', body).then(function(r){
         if(!r.ok){ showToast('Failed to save image settings','error'); return; }
         return r.json().then(function(d){
           if(d&&d.error_msg) showToast(d.error_msg,'error');
@@ -4209,8 +4339,6 @@
     }
 
     function resetMoonOrientation(){
-      if($('goesOrientation')) $('goesOrientation').value='0';
-      if($('solarOrientation')) $('solarOrientation').value='0';
       if($('moon_flip_u')) $('moon_flip_u').checked=false;
       if($('moon_flip_v')) $('moon_flip_v').checked=false;
       if($('moon_roll_offset')) $('moon_roll_offset').value=0;
@@ -4219,7 +4347,7 @@
       updateMoonOrientReadout('moon_roll');
       updateMoonOrientReadout('moon_yaw');
       updateMoonOrientReadout('moon_pitch');
-      applyImageDisplay();checkDirty();
+      applyImagePage('image-moon');checkDirty();
     }
 
     function fetchGoesPreview(){
@@ -4256,7 +4384,7 @@
       btn.disabled=true; btn.textContent='Refreshing...';
       // Push to the device and FORCE an immediate re-fetch so the screen
       // refreshes now, even if the URL is unchanged since the last POST.
-      applyImageDisplay(true).then(function(){
+      applyImagePage('image-custom', {force_fetch:true}).then(function(){
         btn.disabled=false; btn.textContent='Refresh on Device';
       }).catch(function(){
         btn.disabled=false; btn.textContent='Refresh on Device';

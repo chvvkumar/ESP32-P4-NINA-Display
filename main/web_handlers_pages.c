@@ -165,9 +165,9 @@ esp_err_t nav_pin_post_handler(httpd_req_t *req)
                 return send_400(req, "page not available");
             }
         }
-        nav_arbiter_set_pin(true, -1, -1, now_ms);
+        nav_arbiter_set_pin(true, -1, now_ms);
     } else {
-        nav_arbiter_set_pin(false, -1, -1, now_ms);
+        nav_arbiter_set_pin(false, -1, now_ms);
     }
 
     char resp[24];

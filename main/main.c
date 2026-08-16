@@ -57,6 +57,7 @@
 #include "ui/nina_setup_screen.h"
 #include "ui/nina_setup_hint.h"
 #include "ui/nina_nav_arbiter.h"
+#include "ui/nina_image_page.h"
 #include "ui/themes.h"
 #include "image_red_remap.h"
 #include "build_version.h"
@@ -726,6 +727,12 @@ void app_main(void)
     log_capture_init();
 
     app_config_init();
+
+    /* Image pages: instance identities + mutexes must exist before the web
+     * server (httpd workers reach image_page_get()) and before
+     * create_nina_dashboard() (which builds the four pages through the registry
+     * ops). Pollers are spawned later by data_update_task (image_page_init(true)). */
+    image_page_init(false);
 
     // Check if we woke from deep sleep (logs cause, clears intended flag).
     // The wake cause no longer drives navigation — the arbiter resolves the

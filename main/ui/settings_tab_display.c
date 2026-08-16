@@ -768,9 +768,9 @@ static void page_mode_changed_cb(lv_event_t *e)
         cfg->auto_rotate_enabled = false;
         cfg->active_page_override = (int8_t)home_id;
         /* Live apply: navigate to the chosen Home Page now. page_ref_navigate
-         * resolves the id (setting the image-source override for image-source
-         * ids) and issues a USER-claim navigation. It does not take the LVGL
-         * lock, so it is safe from this event callback. */
+         * resolves the id (navigating to the image page for image ids) and
+         * issues a USER-claim navigation. It does not take the LVGL lock, so it
+         * is safe from this event callback. */
         page_ref_navigate((page_ref_t)home_id);
     } else if (sel == 2) {
         /* Cycle */

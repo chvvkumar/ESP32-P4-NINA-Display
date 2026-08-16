@@ -78,3 +78,14 @@ void nina_tile_grid_apply_theme(nina_tile_grid_t *g);
 /** Show/hide the full-coverage empty/error overlay (idempotent; no-op on NULL). */
 void nina_tile_grid_show_overlay(nina_tile_grid_t *g, const char *title);
 void nina_tile_grid_hide_overlay(nina_tile_grid_t *g);
+
+/** Pulse the overlay icon while waiting for a first response (idempotent). */
+void nina_tile_grid_set_busy(nina_tile_grid_t *g, bool busy);
+
+/**
+ * Mark the displayed values as no longer fresh: dims the tile area to ~60%
+ * opacity and shows a small "Reconnecting..." label at the bottom of the page.
+ * Clearing it restores full opacity and hides the label. Idempotent; no-op on
+ * NULL.
+ */
+void nina_tile_grid_set_stale(nina_tile_grid_t *g, bool stale);

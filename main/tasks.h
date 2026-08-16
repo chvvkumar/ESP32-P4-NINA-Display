@@ -5,7 +5,6 @@
 #include "freertos/event_groups.h"
 #include "nina_client.h"
 #include "app_config.h"
-#include "goes_client.h"
 #include "octoprint_client.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -75,6 +74,13 @@ TaskHandle_t psram_task_spawn(TaskFunction_t fn, const char *name,
                               uint32_t depth, void *arg,
                               UBaseType_t prio, BaseType_t core);
 
+/** Spawn @p fn once and publish its handle into *@p handle (mux-guarded
+ *  check-then-publish). Returns the running handle or NULL on alloc failure. */
+TaskHandle_t psram_task_ensure(TaskHandle_t *handle, portMUX_TYPE *mux,
+                               TaskFunction_t fn, const char *name,
+                               uint32_t depth, void *arg,
+                               UBaseType_t prio, BaseType_t core);
+
 /** FreeRTOS task: AllSky API poller — polls at allsky_update_interval_s rate. */
 void allsky_poll_task(void *arg);
 
@@ -115,48 +121,6 @@ extern octoprint_data_t octoprint_data;
 extern _Atomic bool clock_page_active;
 extern _Atomic bool nina_pages_active;
 
-/** GOES / Image Display poll task handle, page-active flag, and shared data. */
-extern TaskHandle_t goes_task_handle;
-extern _Atomic bool image_display_page_active;
-extern goes_data_t goes_data;
-
-/** Runtime image-source override (RAM only — never persisted).
- *  The slideshow/arbiter sets this so the Image Display page can rotate through
- *  GOES/Moon/Solar/Custom without writing the persisted image_display_source.
- *  src -1 clears the override (revert to the configured default). */
-void image_source_set_override(int8_t src);
-
-/** Effective image source: the override if set (>=0), otherwise the persisted
- *  config value (app_config_get()->image_display_source). */
-int8_t image_source_get_effective(void);
-
-/** Raw runtime override as last written (-1 = cleared / use persisted default).
- *  Unlike image_source_get_effective(), this does NOT fold in the persisted
- *  config value, so a caller can tell "no override" apart from "override happens
- *  to equal the default". The navigation arbiter compares its desired source
- *  against this live value to detect (and heal) drift caused by another writer. */
-int8_t image_source_get_override(void);
-
-/** Request a background prefetch of image source @p src (Phase 4 consumes it).
- *  Stores the requested source and wakes goes_poll_task. */
-void image_source_trigger_prefetch(int8_t src);
-
-/** Force the Image Display page to show the loading animation and fetch a fresh
- *  image on the next poll cycle. Used for manual navigation to the page so a
- *  warm prefetch buffer does not suppress the fetch/overlay. Sets
- *  image_display_manual_fetch and wakes goes_poll_task. */
-void image_display_request_manual_fetch(void);
-
-/** Set by the moon-page tap handler to request a one-shot cycle+spin animation.
- *  Consumed (cleared) once by goes_poll_task via atomic_exchange. */
-extern _Atomic bool moon_anim_request;
-
-/** Set by the Image Display config POST handler when the user changes the
- *  source/band, so goes_poll_task can show the wait overlay only for a
- *  user-initiated fetch (not routine periodic polling or page-entry refresh).
- *  Consumed (cleared) once by goes_poll_task via atomic_exchange. */
-extern _Atomic bool image_display_manual_fetch;
-
 /** Weather poll task — spawned by weather_client_start() when location is configured. */
 /* (Task handle is internal to weather_client.c; no extern needed here.) */
 
@@ -165,12 +129,6 @@ void spotify_poll_task(void *arg);
 
 /** Create the Spotify poll task if it isn't already running. Safe to call multiple times. */
 void spotify_ensure_task_running(void);
-
-/** FreeRTOS task: GOES Image Display poller — fetches satellite imagery at goes_update_interval_s rate. */
-void goes_poll_task(void *arg);
-
-/** Create the GOES poll task if it isn't already running. Safe to call multiple times. */
-void goes_ensure_task_running(void);
 
 /** FreeRTOS task: UI coordinator — reads cached data, updates LVGL, handles auto-rotate. */
 void data_update_task(void *arg);

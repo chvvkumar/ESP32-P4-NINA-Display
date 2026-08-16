@@ -110,17 +110,12 @@ bool nina_dashboard_is_spotify_page(void);
 void nina_dashboard_set_spotify_enabled(bool enabled);
 
 /**
- * @brief Check if the active page is the Image Display page
- * @return true if the Image Display page is currently shown
+ * @brief Enable/disable one image page (src = image_src_t: 0 GOES, 1 Moon,
+ *        2 Solar, 3 Custom). Creates the page on first enable, hides it and
+ *        moves to Summary if it was being viewed on disable. Caller holds the
+ *        display lock.
  */
-bool nina_dashboard_is_image_display_page(void);
-
-/**
- * @brief Enable or disable the Image Display page at runtime.
- * When disabled, switches away if currently viewing and removes from navigation.
- * Must be called with LVGL display lock held.
- */
-void nina_dashboard_set_image_display_enabled(bool enabled);
+void nina_dashboard_set_image_page_enabled(int src, bool enabled);
 
 /**
  * @brief Check if the active page is the JSON Display page

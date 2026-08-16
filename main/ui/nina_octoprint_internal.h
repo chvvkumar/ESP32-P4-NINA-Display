@@ -4,14 +4,15 @@
  * @file nina_octoprint_internal.h
  * @brief Layout seam for the OctoPrint page — shared widget library + ops table.
  *
- * TWO user-selectable layouts (app_config_t::octoprint_layout) share ONE widget
- * library. A layout ARRANGES widgets; it never owns data logic, polling, or the
- * update path. The contract is deliberately one-way:
+ * FOUR user-selectable layouts (app_config_t::octoprint_layout) share ONE widget
+ * library: bento, glass, overlay and letterbox. A layout ARRANGES widgets; it
+ * never owns data logic, polling, or the update path. The contract is
+ * deliberately one-way:
  *
  *   nina_octoprint.c  owns: create/destroy/update/theme, the client snapshot,
  *                           the image handoff, the empty state, the ops table.
- *   octoprint_layout_*.c own: geometry only (two files; the ops table has three
- *                           further retired slots aliased to Bento). Each
+ *   octoprint_layout_*.c own: geometry only (four files; the ops table has
+ *                           three further retired slots aliased to Bento). Each
  *                           build() fills in whichever
  *                           handles of octoprint_widgets_t it actually creates
  *                           and leaves the rest NULL. The update path null-checks
@@ -31,16 +32,42 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Fonts available to layouts beyond the ones lvgl.h already declares. All of
- * these already exist in the project — no new font faces were added for this
- * page. */
+/* Fonts available to layouts beyond the ones lvgl.h already declares. The bold
+ * faces are generated for this page (ASCII plus the degree sign); the rest
+ * already existed in the project. */
 LV_FONT_DECLARE(lv_font_montserrat_64);
+LV_FONT_DECLARE(lv_font_montserrat_bold_22);
+LV_FONT_DECLARE(lv_font_montserrat_bold_28);
+LV_FONT_DECLARE(lv_font_montserrat_bold_56);
 
 /** Card corner radius shared by every layout (mockup: 24 px bento). */
 #define OCTO_CARD_RADIUS  24
 
 /** Cold baseline of the fill-to-target temperature bars, in degrees C. */
 #define OCTO_TEMP_COLD_C  25.0f
+
+/** Half-width of the "at temperature" band around the target, in degrees C. */
+#define OCTO_TEMP_HOLD_BAND_C  3.0f
+
+/** With the heater off, above this reading the tool is still cooling down. */
+#define OCTO_TEMP_COLD_LINE_C  40.0f
+
+/**
+ * Derived heating stage of one tool, from its actual/target pair alone (there
+ * is no such field in the OctoPrint payload). Drives the OCTO_TEMP_COMPACT
+ * value colour; the other variants ignore it.
+ *
+ *  IDLE     heater off, at or below OCTO_TEMP_COLD_LINE_C.
+ *  HEATING  target set and the reading is more than OCTO_TEMP_HOLD_BAND_C below it.
+ *  HOLDING  target set and the reading is within the band, or above the target.
+ *  COOLING  heater off but the reading is still above OCTO_TEMP_COLD_LINE_C.
+ */
+typedef enum {
+    OCTO_HEAT_IDLE = 0,
+    OCTO_HEAT_HEATING,
+    OCTO_HEAT_HOLDING,
+    OCTO_HEAT_COOLING,
+} octo_heat_stage_t;
 
 /* ── Shared styles ─────────────────────────────────────────────────────
  * Re-resolved in one place on a theme change and pushed to every widget with
@@ -62,10 +89,19 @@ extern lv_style_t octo_style_accent;  /* accent text: progress_color            
  *  BAR_GRADIENT  name + "214.9 / 215 °C" on one line, heat-gradient bar
  *                stacked below it with a bright tick at the target.
  *  TILE          compact caption over "214.9/215 C" for a dock metrics tile.
+ *  COMPACT       caption ("NOZZLE"/"BED", octo_w_caption style, montserrat_14)
+ *                stacked over the CURRENT reading only ("23.8°" — no target,
+ *                no "C"), value in lv_font_montserrat_bold_22 carrying
+ *                octo_style_value. No bar, no tick. The root is a plain column
+ *                sized LV_SIZE_CONTENT both ways, so the layout places it
+ *                wherever it likes. The update path overrides the value
+ *                colour per octo_heat_stage_t with a LOCAL style, which beats
+ *                the shared one.
  */
 typedef enum {
     OCTO_TEMP_BAR_GRADIENT = 0,
     OCTO_TEMP_TILE,
+    OCTO_TEMP_COMPACT,
 } octo_temp_variant_t;
 
 /**
@@ -123,6 +159,16 @@ typedef struct {
     /* image ------------------------------------------------------------ */
     lv_obj_t *img_hero;         /* lv_image bound to the UI-owned RGB565 copy */
     lv_obj_t *img_placeholder;  /* shown while no frame is held             */
+
+    /* readings toggle -------------------------------------------------- */
+    /**
+     * Full-page transparent container holding everything a layout draws OVER or
+     * beside the picture (text, panels, bars, error strip, conn chip). Hidden /
+     * shown as one object by the readings toggle. Layouts that want the toggle
+     * build it via octo_w_overlay_layer() and parent their widgets to it; Grid
+     * leaves it NULL = no toggle.
+     */
+    lv_obj_t *overlay_layer;
 } octoprint_widgets_t;
 
 /* ── Layout ops ───────────────────────────────────────────────────────── */
@@ -137,6 +183,12 @@ typedef struct {
      * that leaves it false is unaffected.
      */
     bool full_bleed;
+    /**
+     * true = the staged frame is scaled once to COVER the hero box (aspect
+     * kept, excess cropped by the host); false = aspect-FIT (whole frame
+     * visible, bands). Only edge-to-edge picture layouts set it.
+     */
+    bool image_cover;
     /** Build the layout under @p page. @p w is pre-zeroed; fill what you draw. */
     void (*build)(lv_obj_t *page, octoprint_widgets_t *w);
 } octoprint_layout_ops_t;
@@ -144,13 +196,18 @@ typedef struct {
 /* Indexed by app_config_t::octoprint_layout, 0..OCTO_LAYOUT_COUNT-1.
  *
  * Slots 1 ("Instrument dial"), 3 ("Large numerals") and 4 ("Layer timeline")
- * are retired and reserved aliases of the Bento layout: those values are still
- * legal in NVS and still pass validate_config, they simply resolve to Bento.
+ * are retired and reserved aliases of the Grid layout: those values are still
+ * legal in NVS and still pass validate_config, they simply resolve to Grid.
  * The web UI no longer offers them. Do not renumber the remaining slots --
- * stored configs name them by index. */
-#define OCTO_LAYOUT_COUNT 5
+ * stored configs name them by index.
+ *
+ * Live slots: 0 Grid, 2 Glass ("Immersive image"), 5 "Floating overlay",
+ * 6 "Letterbox". */
+#define OCTO_LAYOUT_COUNT 7
 extern const octoprint_layout_ops_t octoprint_layout_bento;
 extern const octoprint_layout_ops_t octoprint_layout_glass;
+extern const octoprint_layout_ops_t octoprint_layout_overlay;
+extern const octoprint_layout_ops_t octoprint_layout_letterbox;
 
 /* ── Shared widget factories (implemented in nina_octoprint.c) ─────────
  * These are the whole widget library. Layouts compose them; nothing else.
@@ -188,9 +245,44 @@ lv_obj_t *octo_w_label(lv_obj_t *parent, const char *text,
 /** Uppercase micro caption ("PROGRESS", "LAYER"): font 14, letter-space 2. */
 lv_obj_t *octo_w_caption(lv_obj_t *parent, const char *text);
 
+/* Drop-shadow geometry for labels drawn straight over a picture. */
+#define OCTO_SHADOW_DX   2
+#define OCTO_SHADOW_DY   2
+#define OCTO_SHADOW_OPA  LV_OPA_70
+
 /**
- * Temperature element, in one of the two presentations of octo_temp_variant_t
- * (BAR_GRADIENT or TILE).
+ * Give @p lbl a dark drop shadow so it reads on any picture: the label's own
+ * text is drawn once more, offset OCTO_SHADOW_DX/DY, in black at
+ * OCTO_SHADOW_OPA, just before the label paints itself. No copy of the text is
+ * kept, so the update path needs no change; works for any long mode.
+ * Idempotent per label.
+ *
+ * This is LVGL 9.5's native per-object drop shadow (LV_STYLE_DROP_SHADOW_*),
+ * with blur radius 0 for a hard offset copy: lv_draw_label() renders the very
+ * same dsc into an A8 sub-layer and composites it recoloured black under the
+ * real text (managed_components/lvgl__lvgl/src/draw/lv_draw_label.c:115). Text
+ * colour, font, alignment and LONG_MODE_DOTS truncation therefore all track
+ * automatically -- including recolouring done by the update path, because the
+ * shadow is a mask of whatever the label draws at that moment.
+ *
+ * CLIPPING. The extra draw area does NOT save the shadow here, so the helper
+ * pads the label's right and bottom by OCTO_SHADOW_DX/DY instead: a
+ * LV_LABEL_LONG_CLIP label clips its own draw to the text coords
+ * (lvgl/src/widgets/label/lv_label.c), and a tight SIZE_CONTENT parent clips
+ * its children to bare coords, both ahead of any extra-draw allowance. The
+ * padding puts the offset copy inside the label's own box. A label pinned to a
+ * FIXED width must therefore add OCTO_SHADOW_DX to that width, or the padding
+ * comes out of the text instead.
+ */
+void octo_label_shadow(lv_obj_t *lbl);
+
+/** Pixel width of @p sample in @p font (letter_space 0). For fixed-width labels
+ * that must not jiggle. */
+int32_t octo_text_width(const lv_font_t *font, const char *sample);
+
+/**
+ * Temperature element, in one of the presentations of octo_temp_variant_t
+ * (BAR_GRADIENT, TILE or COMPACT).
  *
  * Only BAR_GRADIENT builds (and therefore drives) a fill. Its colours are THEME
  * TOKENS, not literals: the gradient runs OCTO_COL_ACCENT -> OCTO_COL_ALERT for
@@ -216,6 +308,31 @@ lv_obj_t *octo_w_temp(lv_obj_t *parent, const char *name,
  * Sets w->img_hero and w->img_placeholder.
  */
 lv_obj_t *octo_w_image_hero(lv_obj_t *parent, octoprint_widgets_t *w);
+
+/**
+ * Readings layer: a full-page, fully transparent, FLOATING, LV_LAYOUT_NONE
+ * container at (0,0) sized 100%x100% of @p page. Parent to it everything the
+ * layout draws over or beside the picture; leave the image hero host parented
+ * to @p page so it stays visible when the readings are hidden. Sets
+ * w->overlay_layer; the spine applies the current readings visibility right
+ * after build() returns, so a layout never has to.
+ *
+ * A layout that does not call this leaves w->overlay_layer NULL, and the page
+ * tap toggle is then a no-op (Grid).
+ *
+ * TAP PASS-THROUGH. The layer itself is NOT clickable, so a tap over it hit-
+ * tests through to the page root, which owns the toggle handler. The library
+ * factories (octo_w_card, octo_w_row) already drop LV_OBJ_FLAG_CLICKABLE, so
+ * anything built from them passes taps through as well. A layout that creates a
+ * container with a raw lv_obj_create() MUST remove LV_OBJ_FLAG_CLICKABLE from
+ * it (lv_obj is clickable by default; lv_label and lv_image are not), or taps
+ * landing on that container will not reach the page and will not toggle.
+ * LV_OBJ_FLAG_GESTURE_BUBBLE is left at its default so page swipes still reach
+ * the dashboard.
+ *
+ * @return The layer (already added to @p page).
+ */
+lv_obj_t *octo_w_overlay_layer(lv_obj_t *page, octoprint_widgets_t *w);
 
 /**
  * Fault strip: an empty chip, created HIDDEN. The update path shows it (with
