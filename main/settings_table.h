@@ -175,7 +175,30 @@
     INT       (alert_voice_conn,             "alert_voice_conn",             1,     0,     1)     /* v58: announce NINA link connect (default on) */ \
     INT       (alert_voice_disc,             "alert_voice_disc",             1,     0,     1)     /* v58: announce NINA link disconnect (default on) */ \
     /* -- Startup jingle (v56) -- */ \
-    INT       (boot_jingle_enabled,          "boot_jingle_enabled",          1,     0,     1)     /* play the boot jingle once at startup; default on */
+    INT       (boot_jingle_enabled,          "boot_jingle_enabled",          1,     0,     1)     /* play the boot jingle once at startup; default on */ \
+    /* -- OctoPrint 3D Printer page (v60) -- */ \
+    INT       (octoprint_enabled,            "octoprint_enabled",            0,     0,     1)     /* uint8 flag, not bool — matches the goes_vflip/alert_voice_conn style above; whole 0/1 domain is legal so the two-sided clamp is exact */ \
+    STR       (octoprint_url,                "octoprint_url",                "")               /* base URL, scheme+host+port; also listed in s_url_fields (web_handlers_config.c) so restore preview and write path both run validate_url_format() */ \
+    STR       (octoprint_api_key,            "octoprint_api_key",            "")               /* SECRET: marked is_sensitive+mask_preview in s_backup_fields, so strip_masked_secrets() preserves it on a sentinel POST and config_get_handler redacts it on GET */ \
+    INT       (octoprint_update_interval_s,  "octoprint_update_interval_s",  5,     2,     300)   /* true clamp: a too-fast or too-slow value is meaningful at the nearest bound, unlike the RESET fields below */ \
+    INT_RESET (octoprint_image_source,       "octoprint_image_source",       0,     0,     1)     /* 0 = G-code preview, 1 = webcam snapshot. RESET, not clamp: an unknown source must fall back to the always-available preview, never to whichever source happens to sit at the far bound */ \
+    INT_RESET (octoprint_layout,             "octoprint_layout",             0,     0,     6)     /* 0=bento 2=glass 5=overlay 6=letterbox; 1, 3 and 4 are retired, render Bento and stay reserved (legal in NVS). RESET, not clamp: layouts are unordered names, so a stale/unknown index means "no opinion" -> bento, not "the highest layout" */ \
+    STR       (octoprint_snapshot_url,       "octoprint_snapshot_url",       "")               /* "" = derive the snapshot URL from octoprint_url (the normal state). A non-empty override is fetched verbatim, so it must be a full URL: listed in s_url_fields (web_handlers_config.c) like octoprint_url, and validate_url_format() still lets the empty string through */ \
+    BOOL      (octoprint_overlay_visible,    "octoprint_overlay_visible",    true)  /* saved default for "show the readings over the picture"; a tap on the device toggles it for the screen only and never reaches NVS. Bento (Grid) has no overlay layer and ignores it */ \
+    /* v61 image pages split: one enable / overlay / crop / interval per page. */ \
+    BOOL      (goes_enabled,                 "goes_enabled",                 false) \
+    BOOL      (moon_enabled,                 "moon_enabled",                 false) \
+    BOOL      (solar_enabled,                "solar_enabled",                false) \
+    BOOL      (custom_enabled,               "custom_enabled",               false) \
+    INT       (solar_update_interval_s,      "solar_update_interval_s",      600,   300,   7200)  /* true clamp, same as the image POST handler's clamp-to-bound (both write paths agree) */ \
+    INT       (moon_update_interval_s,       "moon_update_interval_s",       60,    10,    3600)  /* moon re-render cadence; the hardcoded 60 s becomes the default; true clamp */ \
+    BOOL      (goes_crop,                    "goes_crop",                    false) \
+    BOOL      (solar_crop,                   "solar_crop",                   false) \
+    BOOL      (custom_crop,                  "custom_crop",                  false) \
+    BOOL      (goes_show_overlay,            "goes_show_overlay",            true) \
+    BOOL      (moon_show_overlay,            "moon_show_overlay",            true) \
+    BOOL      (solar_show_overlay,           "solar_show_overlay",           true) \
+    BOOL      (custom_show_overlay,          "custom_show_overlay",          true)
 
 /* Apply every row's default value to *cfg. Called from set_defaults()
  * immediately after the memset(). Does not touch excluded/complex fields

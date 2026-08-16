@@ -9,7 +9,8 @@
 #include "ui/nina_dashboard.h"
 #include "ui/nina_dashboard_internal.h"
 #include "ui/nina_nav_arbiter.h"
-#include "ui/nina_image_display.h"
+#include "ui/nina_image_page.h"
+#include "ui/nina_octoprint.h"
 #include "ui/nina_spotify.h"
 #include "ui/themes.h"
 #include "lvgl.h"
@@ -126,22 +127,66 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
             topology_changed = true;  /* optional page appeared/disappeared */
         }
     }
-    /* Image Display (GOES) enable/overlay/region/interval change */
-    if (new_cfg->image_display_enabled != old_cfg->image_display_enabled ||
-        new_cfg->image_display_show_overlay != old_cfg->image_display_show_overlay ||
-        strcmp(new_cfg->goes_region, old_cfg->goes_region) != 0 ||
-        new_cfg->goes_update_interval_s != old_cfg->goes_update_interval_s) {
+    /* Image source / snapshot URL: the poll task re-reads config every cycle,
+     * but "every cycle" is up to octoprint_update_interval_s away (300 s at the
+     * top of the range), so the switch would sit there invisible. Wake it and it
+     * drops the held frame and fetches the new source in that one pass. The URL,
+     * API key and interval keep the lazy path — they need no visible-now edit. */
+    if (new_cfg->octoprint_enabled &&
+        (new_cfg->octoprint_image_source != old_cfg->octoprint_image_source ||
+         strcmp(new_cfg->octoprint_snapshot_url, old_cfg->octoprint_snapshot_url) != 0)) {
+        /* A source SWITCH also has to clear what is on screen right now: the
+         * held frame is the other source's picture, and the wake below still
+         * needs a fetch and a decode (1-3 s) before the new one lands. Without
+         * this the toggle looks dead for those seconds and then jumps. A
+         * snapshot-URL edit alone keeps the frame -- same source, new address. */
+        if (new_cfg->octoprint_image_source != old_cfg->octoprint_image_source) {
+            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                octoprint_page_image_source_changed();
+                bsp_display_unlock();
+            }
+            octoprint_client_note_image_source_switch(&octoprint_data);
+        }
+        octoprint_wake_now();
+    }
+    /* OctoPrint page enable / layout change. The URL, API key and poll interval
+     * need no live action — octoprint_poll_task re-reads config every cycle, so
+     * the next poll picks them up. Only the enable toggle (page create/destroy)
+     * and the layout selection (widget tree rebuild) have to be applied here. */
+    if (new_cfg->octoprint_enabled != old_cfg->octoprint_enabled ||
+        new_cfg->octoprint_layout != old_cfg->octoprint_layout) {
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-            nina_dashboard_set_image_display_enabled(new_cfg->image_display_enabled);
-            nina_image_display_set_overlay_visible(new_cfg->image_display_show_overlay);
+            /* Only the layout selection needs the widget-tree rebuild; showing
+             * or hiding the page is set_octoprint_enabled's job. */
+            if (new_cfg->octoprint_layout != old_cfg->octoprint_layout) {
+                octoprint_page_refresh_config();
+            }
+            nina_dashboard_set_octoprint_enabled(new_cfg->octoprint_enabled);
             bsp_display_unlock();
         }
-        if (new_cfg->image_display_enabled) {
-            goes_ensure_task_running();
+        if (new_cfg->octoprint_enabled) {
+            octoprint_ensure_task_running();
         }
-        if (new_cfg->image_display_enabled != old_cfg->image_display_enabled) {
+        if (new_cfg->octoprint_enabled != old_cfg->octoprint_enabled) {
             topology_changed = true;  /* optional page appeared/disappeared */
         }
+    }
+    /* Readings-over-picture default. octoprint_page_set_overlay_visible() takes
+     * the LVGL lock itself, so it is called OUTSIDE bsp_display_lock() -- and
+     * outside the block above for the same reason. Only the change case needs
+     * the call: a layout rebuild starts the new widget tree from the config
+     * value anyway. Bento (Grid) has no overlay layer and ignores it. */
+    if (new_cfg->octoprint_overlay_visible != old_cfg->octoprint_overlay_visible) {
+        octoprint_page_set_overlay_visible(new_cfg->octoprint_overlay_visible);
+    }
+    /* Image pages (GOES/Moon/Solar/Custom): one live-apply for all four; an
+     * enable toggle is a topology change (an optional page appeared/disappeared). */
+    image_page_config_apply_live(old_cfg, new_cfg, false);
+    if (new_cfg->goes_enabled != old_cfg->goes_enabled ||
+        new_cfg->moon_enabled != old_cfg->moon_enabled ||
+        new_cfg->solar_enabled != old_cfg->solar_enabled ||
+        new_cfg->custom_enabled != old_cfg->custom_enabled) {
+        topology_changed = true;
     }
     /* Weather config change — invalidate stale data and force refresh */
     if (new_cfg->weather_provider != old_cfg->weather_provider ||
@@ -372,7 +417,7 @@ esp_err_t page_post_handler(httpd_req_t *req)
         int total = nina_dashboard_get_total_page_count();
         if (page < 0) page = PAGE_IDX_SUMMARY;          /* -1 (Auto) -> Summary USER claim */
         if (page >= 0 && page < total) {
-            nav_arbiter_submit_user(page, esp_timer_get_time() / 1000, -1);
+            nav_arbiter_submit_user(page, esp_timer_get_time() / 1000);
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                 nina_dashboard_show_page_animated(page, 0, 0);
                 bsp_display_unlock();

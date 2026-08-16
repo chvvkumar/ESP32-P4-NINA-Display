@@ -3,8 +3,10 @@
  * @brief AllSky API HTTP client — polls /all endpoint and extracts configured field values.
  *
  * Uses http_fetch's shared fetcher with a module-static keep-alive slot
- * (s_conn). AllSky polling is single-owner (only allsky_poll_task ever
- * calls allsky_client_poll), so the connection slot needs no locking.
+ * (s_conn). Only allsky_poll_task ever calls allsky_client_poll, but the slot
+ * is also DESTROYED from data_update_task when the page is left (a
+ * drained-parked slot holds an OPEN socket, and the page-gated poll loop stops
+ * running), so conn use is guarded by s_conn_mux -- mirrors octoprint_client.
  */
 
 #include "allsky_client.h"
@@ -15,6 +17,7 @@
 #include "cJSON.h"
 #include <string.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 
 static const char *TAG = "allsky_client";
 
@@ -28,9 +31,24 @@ static const char *TAG = "allsky_client";
 static cJSON *s_cached_field_config = NULL;
 static char  *s_cached_field_config_str = NULL;
 
-/* Persistent keep-alive slot, owned exclusively by allsky_poll_task; lazily
- * created on first poll. */
+/* Persistent keep-alive slot; lazily created on first poll, destroyed when the
+ * AllSky page is left (see conn_teardown_if_page_left) so the parked OPEN
+ * socket does not sit against the ~9-connection ceiling while hidden. */
 static http_fetch_conn_t *s_conn = NULL;
+
+/* Serialises conn-slot destruction against a poll in flight (mirrors
+ * octoprint_client). allsky_poll_task holds this around the fetch;
+ * allsky_client_set_page_active() (data_update_task) try-takes it with zero
+ * wait to destroy the slot when the page is left while the poll task is asleep
+ * -- the page-gated loop never runs again, so nobody else would close the
+ * socket. Created in allsky_data_init(). */
+static SemaphoreHandle_t s_conn_mux = NULL;
+
+/* Page gate for the teardown; written by data_update_task, read here. */
+static _Atomic bool s_page_active = false;
+
+/* Forward declaration (prototype-before-use under -Werror). */
+static void conn_teardown_if_page_left(void);
 
 // =============================================================================
 // Mutex Helpers
@@ -42,6 +60,38 @@ void allsky_data_init(allsky_data_t *data) {
     data->moon_illumination = -1.0f;
     data->last_poll_ms = 0;
     data->mutex = xSemaphoreCreateMutex();
+    s_conn_mux = xSemaphoreCreateMutex();
+}
+
+/**
+ * Destroy the keep-alive slot once the page has been left. Caller MUST hold
+ * s_conn_mux. Two callers cover the two leave windows: the poll's post-fetch
+ * check (page left mid-poll) and set_page_active(false) via try-take (poll
+ * task asleep, will not run again). No-op while the page is active.
+ */
+static void conn_teardown_if_page_left(void) {
+    if (atomic_load(&s_page_active)) {
+        return;
+    }
+    if (s_conn) {
+        http_fetch_conn_destroy(s_conn);
+        s_conn = NULL;
+    }
+}
+
+void allsky_client_set_page_active(bool active) {
+    atomic_store(&s_page_active, active);
+    if (active) {
+        return;
+    }
+    /* Zero-wait try-take: if a poll is mid-fetch it owns the slot, and its
+     * post-fetch teardown (which re-reads the flag cleared above) destroys it
+     * instead. Never destroy without this mutex -- a fetch may be mid-flight
+     * on the handle. */
+    if (s_conn_mux && xSemaphoreTake(s_conn_mux, 0) == pdTRUE) {
+        conn_teardown_if_page_left();
+        xSemaphoreGive(s_conn_mux);
+    }
 }
 
 bool allsky_data_lock(allsky_data_t *data, int timeout_ms) {
@@ -259,6 +309,22 @@ static void extract_fields(cJSON *api_data, const char *field_config_json, allsk
 // Public API — Poll AllSky endpoint
 // =============================================================================
 
+/**
+ * Record a failed poll: clear `connected` and bump the consecutive-failure
+ * counter (saturating). field_values are deliberately left alone -- the page
+ * keeps showing the last good reading while the state is only STALE.
+ */
+static void mark_poll_failed(allsky_data_t *data) {
+    if (!allsky_data_lock(data, 100)) {
+        return;
+    }
+    data->connected = false;
+    if (data->fail_count < UINT16_MAX) {
+        data->fail_count++;
+    }
+    allsky_data_unlock(data);
+}
+
 void allsky_client_poll(const char *hostname, const char *field_config_json, allsky_data_t *data) {
     if (!hostname || hostname[0] == '\0' || !data) {
         return;
@@ -269,6 +335,12 @@ void allsky_client_poll(const char *hostname, const char *field_config_json, all
     snprintf(url, sizeof(url), "http://%s/all", hostname);
 
     ESP_LOGD(TAG, "Polling AllSky: %s", url);
+
+    /* The conn slot is owned for the fetch: set_page_active() try-takes this
+     * mutex to destroy it, and must never win mid-fetch. */
+    if (s_conn_mux) {
+        xSemaphoreTake(s_conn_mux, portMAX_DELAY);
+    }
 
     /* Lazily create the keep-alive slot on first poll. If allocation fails,
      * fall through with conn == NULL -- http_fetch falls back to a one-shot
@@ -293,22 +365,24 @@ void allsky_client_poll(const char *hostname, const char *field_config_json, all
     char *buffer = NULL;
     size_t total_read = 0;
     esp_err_t err = http_fetch_text(url, &opts, &buffer, &total_read);
+
+    /* Conn use ends here. If the page was left mid-poll (set_page_active's
+     * try-take lost to us), destroy the parked slot on the way out. */
+    conn_teardown_if_page_left();
+    if (s_conn_mux) {
+        xSemaphoreGive(s_conn_mux);
+    }
+
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "AllSky HTTP fetch failed for %s: %s", url, esp_err_to_name(err));
-        if (allsky_data_lock(data, 100)) {
-            data->connected = false;
-            allsky_data_unlock(data);
-        }
+        mark_poll_failed(data);
         return;
     }
 
     if (total_read == 0) {
         ESP_LOGW(TAG, "AllSky: empty response body");
         heap_caps_free(buffer);
-        if (allsky_data_lock(data, 100)) {
-            data->connected = false;
-            allsky_data_unlock(data);
-        }
+        mark_poll_failed(data);
         return;
     }
 
@@ -318,10 +392,7 @@ void allsky_client_poll(const char *hostname, const char *field_config_json, all
 
     if (!json) {
         ESP_LOGW(TAG, "AllSky: failed to parse JSON response");
-        if (allsky_data_lock(data, 100)) {
-            data->connected = false;
-            allsky_data_unlock(data);
-        }
+        mark_poll_failed(data);
         return;
     }
 
@@ -348,6 +419,8 @@ void allsky_client_poll(const char *hostname, const char *field_config_json, all
     /* Update shared data under mutex */
     if (allsky_data_lock(data, 200)) {
         data->connected = true;
+        data->ever_ok = true;
+        data->fail_count = 0;
         data->last_poll_ms = esp_timer_get_time() / 1000;
         memcpy(data->field_values, local_data.field_values, sizeof(data->field_values));
         data->moon_illumination = local_data.moon_illumination;

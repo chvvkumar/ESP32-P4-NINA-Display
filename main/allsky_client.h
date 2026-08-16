@@ -34,11 +34,16 @@
 #define ALLSKY_F_SQM_DOT1      14
 
 typedef struct {
-    bool connected;
+    bool connected;            // result of the most recent poll
     char field_values[ALLSKY_MAX_FIELDS][32];
     float moon_illumination;   // AS_MOON_ILLUMINATION (0-100), always fetched directly; <0 = unavailable
     int64_t last_poll_ms;
     SemaphoreHandle_t mutex;
+    /* Connection-quality inputs for page_conn_eval() (see page_conn.h). A failed
+     * poll leaves field_values untouched so the page can keep showing the last
+     * good reading while it is only STALE. */
+    bool     ever_ok;          // latched true on the first successful poll
+    uint16_t fail_count;       // consecutive failed polls; 0 on success, saturates
 } allsky_data_t;
 
 /** Initialise allsky_data_t (creates mutex). Call once before any polling. */
@@ -62,3 +67,13 @@ void allsky_client_poll(const char *hostname, const char *field_config_json, all
 
 /** Invalidate the cached parsed field config. Call when config changes. */
 void allsky_invalidate_field_config_cache(void);
+
+/**
+ * Page-active gate for keep-alive teardown. Call on every AllSky page
+ * enter/leave transition (tasks.c, mirrors octoprint_client_set_page_active).
+ * On leave, destroys the keep-alive conn slot -- a drained-parked slot holds an
+ * OPEN socket, and the page-gated poll loop stops running, so the slot would
+ * otherwise hold a dead socket against the ~9-connection ceiling indefinitely.
+ * Safe against a poll in flight (internal mutex + zero-wait try-take).
+ */
+void allsky_client_set_page_active(bool active);

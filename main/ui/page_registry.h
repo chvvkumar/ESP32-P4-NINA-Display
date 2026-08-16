@@ -7,15 +7,16 @@
  * Each navigable page, image source, and detail overlay is assigned a stable
  * numeric id (page_ref_t) and a stable string slug. The registry maps these
  * external identities onto the runtime absolute page index (the value the
- * Navigation Arbiter commits) and, for the Image Display page, the image
- * source index (0=GOES, 1=Moon, 2=Solar, 3=Custom, -1 = use configured default).
+ * Navigation Arbiter commits). The four image sources are four distinct pages
+ * (PAGE_IDX_IMG_*), so the index alone identifies the source.
  *
  * APPEND-ONLY / FROZEN-IDS CONTRACT
  * ---------------------------------
  * The numeric ids 0..PAGE_REF_ID_MAX-1 are FROZEN forever. Several config
  * fields persist these ids verbatim in NVS:
  *   - auto_rotate_order2[]      (slideshow stop list; ids 0..11 = ARP_IDX_*,
- *                                plus PAGE_REF_JSON/PAGE_REF_HA as appended stops)
+ *                                plus PAGE_REF_JSON/PAGE_REF_HA/PAGE_REF_OCTOPRINT
+ *                                as appended stops)
  *   - idle_page_override_target (idle page id)
  *   - active_page_override      (Home Page id)
  * Renumbering or reordering an existing id would silently re-point a user's
@@ -62,7 +63,11 @@ typedef uint8_t page_ref_t;
 #define PAGE_REF_IMG_CUSTOM     ((page_ref_t)11)
 
 /* ── Appended ids (FROZEN forever) ── */
-#define PAGE_REF_IMG_DEFAULT        ((page_ref_t)12)
+/* id 12 was PAGE_REF_IMG_DEFAULT ("image.default", the generic Image Display
+ * page). RETIRED in the v61 image-pages split: the four image sources are
+ * first-class pages (ids 8..11) and there is no source-agnostic page any
+ * more. The id is RESERVED and must never be reused (persisted blobs may
+ * still carry it; validate_config maps 12 to a concrete source). */
 #define PAGE_REF_SETTINGS           ((page_ref_t)13)
 #define PAGE_REF_OVL_GRAPH          ((page_ref_t)14)
 #define PAGE_REF_OVL_INFO_CAMERA    ((page_ref_t)15)
@@ -76,21 +81,22 @@ typedef uint8_t page_ref_t;
 #define PAGE_REF_OVL_EVENTLOG       ((page_ref_t)23)
 #define PAGE_REF_JSON               ((page_ref_t)24)
 #define PAGE_REF_HA                 ((page_ref_t)25)
+#define PAGE_REF_OCTOPRINT          ((page_ref_t)26)
 
 /** Exclusive upper bound on assigned ids. */
-#define PAGE_REF_ID_MAX ((page_ref_t)26)
+#define PAGE_REF_ID_MAX ((page_ref_t)27)
 
 /** What kind of UI surface a page_ref names. */
 typedef enum {
     PAGE_REF_KIND_PAGE         = 0,  /* a navigable top-level page                */
-    PAGE_REF_KIND_IMAGE_SOURCE = 1,  /* the Image Display page with a given source */
+    PAGE_REF_KIND_IMAGE_SOURCE = 1,  /* one of the four full-screen image pages (GOES/Moon/Solar/Custom) */
     PAGE_REF_KIND_OVERLAY      = 2,  /* a modal overlay (not directly navigable)   */
 } page_ref_kind_t;
 
 /**
- * One registry entry. Static metadata only; page_idx/img_src below are the
- * values page_ref_resolve() returns at runtime (the table stores the static
- * mapping, resolution folds in availability).
+ * One registry entry. Static metadata only; page_idx below is the value
+ * page_ref_resolve() returns at runtime (the table stores the static mapping,
+ * resolution folds in availability).
  */
 typedef struct {
     page_ref_t       id;          /* stable numeric id (FROZEN)                    */
@@ -101,7 +107,6 @@ typedef struct {
     bool             targetable;  /* true if a nav target (false for overlays/settings) */
     const char      *category;    /* grouping label for UI lists                  */
     int              page_idx;    /* absolute page index, or -1 (overlays)        */
-    int8_t           img_src;     /* image source 0-3, or -1 (non image-source)   */
 } page_ref_entry_t;
 
 /** Number of entries in the registry table. */
@@ -120,17 +125,14 @@ const page_ref_entry_t *page_ref_by_slug(const char *slug);
 bool page_ref_is_available(page_ref_t id);
 
 /**
- * Resolve @p id to its runtime absolute page index and image source.
- * Returns false if the id is unknown, unavailable, or not navigable (overlays).
- * @p page_idx_out and @p img_src_out may be NULL.
+ * Resolve @p id to its runtime absolute page index. Returns false if the id is
+ * unknown, unavailable, or not navigable (overlays). @p page_idx_out may be NULL.
  */
-bool page_ref_resolve(page_ref_t id, int *page_idx_out, int8_t *img_src_out);
+bool page_ref_resolve(page_ref_t id, int *page_idx_out);
 
 /**
- * Navigate to the page named by @p id: resolve, set the image-source override
- * if needed, then issue a USER-claim navigation. Returns false if the id is
- * not targetable or not available.
- *
+ * Navigate to the page named by @p id: resolve, then issue a USER-claim
+ * navigation. Returns false if the id is not targetable or not available.
  * Caller must NOT hold the LVGL lock; the arbiter takes it internally.
  */
 bool page_ref_navigate(page_ref_t id);

@@ -26,8 +26,10 @@
 #include "ui/nina_dashboard.h"
 #include "ui/nina_nav_arbiter.h"
 #include "ui/page_registry.h"
-#include "control_registry.h"   /* control_page_current_id — image-source-aware page id */
+#include "control_registry.h"   /* control_page_current_id — page id */
 #include "power_mgmt.h"
+#include "lwip/sockets.h"       /* getpeername — client IP in the reboot reason */
+#include "lwip/inet.h"
 #include "esp_wifi.h"
 #include "driver/temperature_sensor.h"
 #include "weather_client.h"
@@ -39,9 +41,23 @@ esp_err_t reboot_post_handler(httpd_req_t *req)
 {
     REQUIRE_AUTH(req);
     httpd_resp_send(req, "Rebooting...", HTTPD_RESP_USE_STRLEN);
+
+    /* Name the client in the log: an unexplained reset should point at whoever
+     * asked for it, not just at the endpoint. */
+    char reason[80];
+    char ip[INET6_ADDRSTRLEN] = "";
+    struct sockaddr_in6 peer;
+    socklen_t peer_len = sizeof(peer);
+    if (getpeername(httpd_req_to_sockfd(req), (struct sockaddr *)&peer, &peer_len) == 0 &&
+        inet_ntop(AF_INET6, &peer.sin6_addr, ip, sizeof(ip)) != NULL) {
+        snprintf(reason, sizeof(reason), "web /api/reboot from %s", ip);
+    } else {
+        snprintf(reason, sizeof(reason), "web /api/reboot");
+    }
+
     // Delay slightly to let the response go out
     vTaskDelay(pdMS_TO_TICKS(100));
-    esp_restart();
+    app_reboot(reason);
     return ESP_OK;
 }
 
@@ -69,7 +85,7 @@ esp_err_t factory_reset_post_handler(httpd_req_t *req)
 
     // Reboot the device
     vTaskDelay(pdMS_TO_TICKS(500));
-    esp_restart();
+    app_reboot("web factory reset");
     return ESP_OK;
 }
 
@@ -395,13 +411,13 @@ esp_err_t ota_post_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    ESP_LOGI(TAG, "OTA update successful (%d bytes), rebooting...", received_total);
+    ESP_LOGI(TAG, "OTA update successful (%d bytes)", received_total);
     ota_update_progress(100);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"success\":true}");
 
     vTaskDelay(pdMS_TO_TICKS(500));
-    esp_restart();
+    app_reboot("web OTA upload complete");
     return ESP_OK;
 }
 
@@ -762,11 +778,11 @@ esp_err_t ota_github_post_handler(httpd_req_t *req)
     esp_err_t err = ota_github_download(rel->ota_url, ota_update_progress);
     if (err == ESP_OK) {
         ota_github_save_pending_version(rel->tag);
-        ESP_LOGI(TAG, "GitHub OTA success (%s), rebooting...", rel->tag);
+        ESP_LOGI(TAG, "GitHub OTA success (%s)", rel->tag);
         ota_update_progress(100);
         heap_caps_free(rel);
         vTaskDelay(pdMS_TO_TICKS(1000));
-        esp_restart();
+        app_reboot("web GitHub OTA complete");
     } else {
         ESP_LOGE(TAG, "GitHub OTA failed: %s", esp_err_to_name(err));
         ota_remove_overlay();

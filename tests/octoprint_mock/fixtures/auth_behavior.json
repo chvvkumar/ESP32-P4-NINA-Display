@@ -1,0 +1,32 @@
+{
+  "endpoint_tested": "GET /api/job",
+  "no_key": {
+    "status": 403,
+    "content-type": "application/json",
+    "content-length": 140,
+    "body": {
+      "error": "You don't have the permission to access the requested resource. It is either read-protected or not readable by the server."
+    }
+  },
+  "wrong_key": {
+    "status": 403,
+    "content-type": "application/json",
+    "content-length": 140,
+    "body": {
+      "error": "You don't have the permission to access the requested resource. It is either read-protected or not readable by the server."
+    },
+    "wrong_key_used": "WRONGKEY123"
+  },
+  "valid_key": {
+    "status": 200,
+    "content-type": "application/json"
+  },
+  "notes": [
+    "Missing key and invalid key are indistinguishable: identical 403 status, identical body, identical content-length.",
+    "No WWW-Authenticate header is sent, so this is a 403 and not a 401.",
+    "403 responses carry 'vary: Cookie' (session auth is an alternative credential path).",
+    "The error body is a single-key JSON object with key 'error'.",
+    "Header name is X-Api-Key, case-insensitive per HTTP.",
+    "The unauthenticated endpoints observed are /webcam/?action=snapshot and /plugin/appkeys/probe."
+  ]
+}

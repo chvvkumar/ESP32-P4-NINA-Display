@@ -16,19 +16,24 @@
  *                    solar download/decode time is not known in advance.
  *
  * Threading: every function here runs under the display lock held by the
- * CALLER (dashboard init, theme apply, goes_poll_task with an explicit
+ * CALLER (dashboard init, theme apply, an image page poller with an explicit
  * bsp_display_lock, or data_update_task). Do NOT take the display lock here —
  * matches the nina_ota_prompt convention.
  */
 
 #include "nina_wait_overlay.h"
 #include "nina_dashboard_internal.h"
+#include "nina_dashboard.h"
 #include "nina_nav_arbiter.h"
+#include "page_registry.h"
 #include "app_config.h"
 #include "display_defs.h"
+#include "esp_log.h"
 #include "esp_timer.h"
 #include <string.h>
 #include <stdio.h>
+
+static const char *TAG = "wait_overlay";
 
 /* ── Widget pointers ────────────────────────────────────────────────── */
 static lv_obj_t *wait_overlay = NULL;
@@ -196,9 +201,23 @@ static void stall_timer_cb(lv_timer_t *timer) {
     int prior = s_prior_page;
     s_prior_page = -1;
     nina_wait_overlay_hide();
-    if (prior >= 0) {
-        nav_arbiter_submit_user(prior, esp_timer_get_time() / 1000, -1);
+    if (prior < 0) {
+        return;
     }
+    /* Home Page lock on and the page we are loading IS the Home Page: the lock
+     * puts us straight back within one arbiter cycle, so the return claim only
+     * produces a visible flip to the previous page. Stay put.
+     * All three reads below are lock-free (config pointer, pure table lookup,
+     * plain int read), as required inside the LVGL tick. */
+    const app_config_t *cfg = app_config_get();
+    int home_idx = -1;
+    if (cfg->home_page_lock &&
+        page_ref_resolve((page_ref_t)cfg->active_page_override, &home_idx) &&
+        nina_dashboard_get_active_page() == home_idx) {
+        ESP_LOGI(TAG, "stall watchdog: staying on locked Home page");
+        return;
+    }
+    nav_arbiter_submit_user(prior, esp_timer_get_time() / 1000);
 }
 
 void nina_wait_overlay_show(const char *title, const char *subtitle) {
@@ -290,7 +309,7 @@ void nina_wait_overlay_cancel(void) {
     int prior = s_prior_page;
     s_prior_page = -1;
     if (prior >= 0) {
-        nav_arbiter_submit_user(prior, esp_timer_get_time() / 1000, -1);
+        nav_arbiter_submit_user(prior, esp_timer_get_time() / 1000);
     }
 }
 

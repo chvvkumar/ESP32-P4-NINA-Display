@@ -1,0 +1,88 @@
+
+        <div class="card">
+          <div class="card-title"><span class="card-title-label">GOES Satellite <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+          <div class="help-popover"><div class="help-popover-title">GOES satellite page</div><p>Adds a full-screen page showing the latest GOES-19 GEOCOLOR image for one sector. Pick the sector under Region; the picture refreshes at the update interval you choose.</p><p>Fill (crop borders) zooms the disc to fill the 720x720 panel and hides the timestamp and label baked into the image border. Rotation and the two flips correct a picture that appears sideways or mirrored on your panel.</p></div>
+          <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+            <span class="toggle-label">Enable GOES page</span>
+            <label class="toggle"><input type="checkbox" id="goes_enabled" onchange="updateImagePageEnabledUI('image-goes');applyImagePage('image-goes');checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Adds the GOES satellite page and starts fetching the selected sector.</div>
+          <div id="goesFields">
+            <div class="toggle-row" style="margin-top:16px">
+              <span class="toggle-label">Show Overlay</span>
+              <label class="toggle"><input type="checkbox" id="goes_show_overlay" onchange="applyImagePage('image-goes');checkDirty()" checked><span class="toggle-track"></span></label>
+            </div>
+            <div class="field-hint">Region name and update time overlay on the display</div>
+            <div class="toggle-row">
+              <span class="toggle-label">Fill (crop borders)</span>
+              <label class="toggle"><input type="checkbox" id="goes_crop" onchange="applyImagePage('image-goes');checkDirty()"><span class="toggle-track"></span></label>
+            </div>
+            <div class="field-hint">Zoom the disc to fill the screen and hide the image's timestamp/label.</div>
+            <div class="field" style="margin-top:16px">
+              <label class="field-label">Update Interval</label>
+              <select class="input" id="goesInterval" onchange="applyImagePage('image-goes');checkDirty()">
+                <option value="300">5 minutes</option>
+                <option value="600" selected>10 minutes</option>
+                <option value="900">15 minutes</option>
+                <option value="1800">30 minutes</option>
+                <option value="3600">1 hour</option>
+                <option value="7200">2 hours</option>
+              </select>
+              <div class="field-hint">How often the satellite image refreshes.</div>
+            </div>
+            <div class="field" style="margin-top:16px">
+              <label class="field-label">Region</label>
+              <select class="input" id="goesRegion" onchange="applyImagePage('image-goes');checkDirty()">
+                <option value="umv">Upper Mississippi Valley</option>
+                <option value="cgl">Great Lakes</option>
+                <option value="ne">Northeast</option>
+                <option value="se">Southeast</option>
+                <option value="smv">Southern Mississippi Valley</option>
+                <option value="sp">Southern Plains</option>
+                <option value="nr">Northern Rockies</option>
+                <option value="sr">Southern Rockies</option>
+                <option value="pnw">Pacific Northwest</option>
+                <option value="psw">Pacific Southwest</option>
+                <option value="eus">U.S. Atlantic Coast</option>
+                <option value="pr">Puerto Rico</option>
+                <option value="mex">Mexico</option>
+                <option value="cam">Central America</option>
+                <option value="car">Caribbean</option>
+                <option value="ga">Gulf of America</option>
+                <option value="can">Canada</option>
+                <option value="na">Northern Atlantic</option>
+                <option value="taw">Tropical Atlantic</option>
+                <option value="eep">Eastern Pacific</option>
+                <option value="nsa">South America (North)</option>
+                <option value="ssa">South America (South)</option>
+              </select>
+              <div class="field-hint">GOES-19 GEOCOLOR sector for satellite imagery</div>
+            </div>
+            <div class="field" style="margin-top:16px">
+              <label class="field-label">Rotation</label>
+              <select class="input" id="goesOrientation" onchange="applyImagePage('image-goes');checkDirty()">
+                <option value="0">0&deg;</option>
+                <option value="1">90&deg;</option>
+                <option value="2">180&deg;</option>
+                <option value="3">270&deg;</option>
+              </select>
+              <div class="field-hint">Rotate the satellite image clockwise.</div>
+            </div>
+            <div class="toggle-row" style="margin-top:16px;border-bottom:1px solid rgba(255,255,255,0.06)">
+              <span class="toggle-label">Flip vertical</span>
+              <label class="toggle"><input type="checkbox" id="goesVflip" onchange="applyImagePage('image-goes');checkDirty()"><span class="toggle-track"></span></label>
+            </div>
+            <div class="field-hint">Mirrors the satellite image top-to-bottom.</div>
+            <div class="toggle-row">
+              <span class="toggle-label">Flip horizontal</span>
+              <label class="toggle"><input type="checkbox" id="goesHflip" onchange="applyImagePage('image-goes');checkDirty()"><span class="toggle-track"></span></label>
+            </div>
+            <div class="field-hint">Mirrors the satellite image left-to-right.</div>
+            <div class="field" style="margin-top:16px">
+              <button onclick="fetchGoesPreview()" class="btn btn-primary" id="goesPreviewBtn" style="width:100%">Fetch Preview</button>
+            </div>
+            <div id="goesPreviewContainer" style="display:none;margin-top:12px;text-align:center">
+              <img id="goesPreviewImg" style="max-width:100%;border-radius:10px;border:1px solid rgba(255,255,255,0.1)" />
+            </div>
+          </div>
+        </div>

@@ -107,6 +107,27 @@ void nina_empty_state_apply_theme(lv_obj_t *cont,
                                   int color_brightness);
 
 /**
+ * @brief Turn the "working on it" pulse on the icon on or off.
+ *
+ * While busy is true the icon pulses between 40% and full opacity on a
+ * ~1.2 s infinite animation.  When busy is false the animation stops and
+ * the icon returns to full opacity.  Busy also hides the remedy subtitle
+ * (it describes a failure, not a wait); clearing busy shows it again.  No-op
+ * on the remedy when the container was created without one.  Idempotent:
+ * calling it repeatedly with the same value does not restart the pulse or
+ * re-touch the labels (safe to call every poll cycle).  The pulse only runs
+ * while the container is visible; hide() stops it and show() re-arms it when
+ * busy is still set.
+ *
+ * Caller holds the display lock.  No-op when cont is NULL or the container
+ * was created without an icon.
+ *
+ * @param cont  Container returned by nina_empty_state_create.
+ * @param busy  true to pulse, false to stop.
+ */
+void nina_empty_state_set_busy(lv_obj_t *cont, bool busy);
+
+/**
  * @brief Update the title label text without recreating the widget.
  *
  * Used by the disconnected-NINA consumer to refresh the hostname after

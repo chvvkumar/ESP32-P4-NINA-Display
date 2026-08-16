@@ -1,0 +1,25 @@
+{
+  "job": {
+    "averagePrintTime": null,
+    "estimatedPrintTime": null,
+    "filament": null,
+    "file": {
+      "date": 1786715501,
+      "display": "creative-pebble-v2-15degree-tilt-stand_0.4n_0.2mm_PETG_MINIIS_1h28m.gcode",
+      "name": "creative-pebble-v2-15degree-tilt-stand_0.4n_0.2mm_PETG_MINIIS_1h28m.gcode",
+      "origin": "local",
+      "path": "creative-pebble-v2-15degree-tilt-stand_0.4n_0.2mm_PETG_MINIIS_1h28m.gcode",
+      "size": 2647867
+    },
+    "lastPrintTime": null,
+    "user": "_api"
+  },
+  "progress": {
+    "completion": 11.077746729726229,
+    "filepos": 293324,
+    "printTime": 1047,
+    "printTimeLeft": 4560,
+    "printTimeLeftOrigin": "estimate"
+  },
+  "state": "Printing"
+}

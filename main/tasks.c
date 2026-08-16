@@ -12,12 +12,7 @@
 #include "allsky_client.h"
 #include "json_client.h"
 #include "ha_client.h"
-#include "goes_client.h"
-#include "moon_sphere.h"   /* tgx sphere renderer for the Moon page */
-#include "moon_interaction.h"  /* drag-to-rotate touch state */
-#include "moon_ephemeris.h"
-#include "image_red_remap.h"   /* red-night remap applied to the moon drag source */
-#include <math.h>           /* acos() for seamless anim start cycle */
+#include "octoprint_client.h"
 #include "spotify_auth.h"
 #include "spotify_client.h"
 #include "app_config.h"
@@ -29,6 +24,7 @@
 #include "ui/nina_allsky.h"
 #include "ui/nina_json.h"
 #include "ui/nina_ha.h"
+#include "ui/nina_octoprint.h"
 #include "ui/nina_spotify.h"
 #include "ui/nina_graph_overlay.h"
 #include "ui/nina_info_overlay.h"
@@ -37,7 +33,7 @@
 #include "ui/nina_session_stats.h"
 #include "ui/nina_ota_prompt.h"
 #include "ui/nina_nav_arbiter.h"
-#include "ui/nina_image_display.h"
+#include "ui/nina_image_page.h"
 #include "ui/nina_wait_overlay.h"
 #include "ui/nina_toast.h"
 #include "ota_github.h"
@@ -49,10 +45,9 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "esp_heap_caps.h"
-#include "esp_cache.h"        /* esp_cache_msync — flush PPA-source guard rows once */
 #include "esp_system.h"
 #include <time.h>
-#include <math.h>          /* expf — framerate-independent settle ease */
+#include <math.h>
 #include <stdatomic.h>     /* atomic_exchange — read-and-clear WS event flags */
 #include "perf_monitor.h"
 #include "power_mgmt.h"
@@ -101,9 +96,9 @@ _Atomic bool ota_in_progress = false;
  *
  * Returns the new handle, or NULL if allocation failed (nothing was spawned).
  */
-static TaskHandle_t psram_task_spawn(TaskFunction_t fn, const char *name,
-                                     uint32_t depth, void *arg,
-                                     UBaseType_t prio, BaseType_t core)
+TaskHandle_t psram_task_spawn(TaskFunction_t fn, const char *name,
+                              uint32_t depth, void *arg,
+                              UBaseType_t prio, BaseType_t core)
 {
     StackType_t  *stack = heap_caps_malloc(depth * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
     StaticTask_t *tcb   = heap_caps_calloc(1, sizeof(StaticTask_t),
@@ -133,10 +128,10 @@ static TaskHandle_t psram_task_spawn(TaskFunction_t fn, const char *name,
  * Returns the running handle (existing or new), or NULL only when allocation
  * failed and nothing is running.
  */
-static TaskHandle_t psram_task_ensure(TaskHandle_t *handle, portMUX_TYPE *mux,
-                                      TaskFunction_t fn, const char *name,
-                                      uint32_t depth, void *arg,
-                                      UBaseType_t prio, BaseType_t core)
+TaskHandle_t psram_task_ensure(TaskHandle_t *handle, portMUX_TYPE *mux,
+                               TaskFunction_t fn, const char *name,
+                               uint32_t depth, void *arg,
+                               UBaseType_t prio, BaseType_t core)
 {
     portENTER_CRITICAL(mux);
     TaskHandle_t existing = *handle;
@@ -255,6 +250,7 @@ _Atomic bool spotify_page_active = false;
 _Atomic bool allsky_page_active  = false;
 _Atomic bool json_page_active    = false;
 _Atomic bool ha_page_active      = false;
+_Atomic bool octoprint_page_active = false;
 _Atomic bool clock_page_active   = false;
 _Atomic bool nina_pages_active   = false;
 
@@ -270,95 +266,13 @@ static TaskHandle_t json_task_handle = NULL;
 static ha_data_t ha_data;
 static TaskHandle_t ha_task_handle = NULL;
 
-/* GOES / Image Display polling state.
- * Non-static: tasks.h externs these and web handlers use goes_task_handle /
- * goes_ensure_task_running to spawn/wake the task on runtime enable. */
-TaskHandle_t goes_task_handle = NULL;
-_Atomic bool image_display_page_active = false;
-goes_data_t goes_data;
-/* Spare buffer the slideshow prefetch loads the NEXT source into (Phase 4).
- * static: tasks.c is the sole writer/reader; narrowing scope prevents accidental
- * unlocked cross-task access (no extern in tasks.h). */
-static goes_data_t goes_prefetch_data;
-
-/* Runtime image-source override (RAM only — never persisted to NVS).
- * -1 = no override (use the persisted cfg->image_display_source);
- * 0-3 = the slideshow-selected source (GOES/Moon/Solar/Custom).
- * Written by the navigation arbiter (another task), read by goes_poll_task and
- * the Image Display UI — word atomics are lock-free, so a plain load/store is
- * the correct cross-task pattern. */
-/* These three are logically int8 (-1..3) but MUST be word-sized: the
- * esp-14.2.0 RISC-V toolchain lowers byte-wide atomic RMWs to an lr.w/sc.w
- * loop on the containing 32-bit word and ORs in the SIGN-EXTENDED value
- * without masking it to 8 bits, so storing -1 into a byte atomic also sets
- * every higher-addressed byte of that word to 0xFF. Packed as int8_t these
- * three shared one word (plus perf_monitor's s_cpu_first_sample), and every
- * goes_poll_task iteration's -1 exchanges silently wiped
- * s_image_source_override back to -1 — the arbiter then re-healed it each
- * cycle, self-sustaining a refetch/crossfade loop on the Image Display page.
- * int32_t gives each its own naturally aligned word and compiles to a plain
- * word AMO. Do not narrow these back. */
-static _Atomic int32_t s_image_source_override = -1;
-/* Source the background prefetch should load (set by image_source_trigger_prefetch,
- * consumed in Phase 4). -1 = nothing pending. */
-static _Atomic int32_t s_prefetch_source = -1;
-/* Phase 4 prefetch hand-off. s_prefetch_ready is set by the prefetch PRODUCER in
- * goes_poll_task once a NEXT-source frame has been fetched/rendered into
- * goes_prefetch_data, and cleared by the SWAP CONSUMER at the top of the loop the
- * moment it installs that buffer into goes_data. s_prefetch_ready_src records which
- * image source (0=GOES,1=Moon,2=Solar,3=Custom) the ready buffer holds so the
- * consumer can tell whether the swap already satisfies the current effective source
- * and skip a redundant foreground fetch this iteration. Both are written ONLY by
- * goes_poll_task (single writer); the atomics make the producer-then-consumer
- * publish/consume safe within that one task across loop iterations. */
-static _Atomic bool    s_prefetch_ready = false;
-static _Atomic int32_t s_prefetch_ready_src = -1;  /* int32: see block comment above s_image_source_override */
+/* OctoPrint (3D Printer page) polling state. octoprint_data is non-static and
+ * externed in tasks.h so the page renderer can read it under its own mutex,
+ * mirroring the other shared poll-task data structs. */
+octoprint_data_t octoprint_data;
+static TaskHandle_t octoprint_task_handle = NULL;
 
 static demo_task_params_t demo_params;
-
-/* ── Image-source override / prefetch plumbing ──
- * The persisted default lives in cfg->image_display_source and is only changed
- * by the web config POST handler. The slideshow drives the RAM-only override
- * above so rotation never touches NVS. */
-void image_source_set_override(int8_t src)
-{
-    atomic_store(&s_image_source_override, (int32_t)src);
-}
-
-int8_t image_source_get_override(void)
-{
-    return (int8_t)atomic_load(&s_image_source_override);
-}
-
-int8_t image_source_get_effective(void)
-{
-    int32_t ov = atomic_load(&s_image_source_override);
-    if (ov >= 0) {
-        return (int8_t)ov;
-    }
-    return (int8_t)app_config_get()->image_display_source;
-}
-
-void image_source_trigger_prefetch(int8_t src)
-{
-    atomic_store(&s_prefetch_source, (int32_t)src);
-    if (goes_task_handle) {
-        xTaskNotifyGive(goes_task_handle);
-    }
-}
-
-/* Forces the Image Display page to show the "Loading image..." animation and
- * fetch a fresh image on the next poll cycle. Used for manual navigation to the
- * page (swipe, BOOT, summary tap, web goto, Home Page change): the prefetch swap
- * fast path is bypassed while this flag is pending so a real foreground fetch
- * runs and the overlay is visible. Mirrors image_source_trigger_prefetch's wake. */
-void image_display_request_manual_fetch(void)
-{
-    atomic_store(&image_display_manual_fetch, true);
-    if (goes_task_handle) {
-        xTaskNotifyGive(goes_task_handle);
-    }
-}
 
 /**
  * @brief Page-change callback from the dashboard — signals the data task to re-tune polling.
@@ -491,8 +405,9 @@ void input_task(void *arg) {
                     && !app_config_get()->json_enabled) continue;
                 if (candidate == PAGE_IDX_HA && !nina_dashboard_is_ha_page()
                     && !app_config_get()->ha_enabled) continue;
-                if (candidate == PAGE_IDX_IMAGE_DISPLAY && !nina_dashboard_is_image_display_page()
-                    && !app_config_get()->image_display_enabled) continue;
+                if (candidate == PAGE_IDX_OCTOPRINT && !nina_dashboard_is_octoprint_page()
+                    && !app_config_get()->octoprint_enabled) continue;
+                if (PAGE_IDX_IS_IMAGE(candidate) && !nina_dashboard_page_is_available(candidate)) continue;
                 new_page = candidate;
                 break;
             }
@@ -507,7 +422,7 @@ void input_task(void *arg) {
             } else {
                 ESP_LOGW(TAG, "Display lock timeout (button page switch)");
             }
-            nav_arbiter_submit_user(new_page, esp_timer_get_time() / 1000, -1);
+            nav_arbiter_submit_user(new_page, esp_timer_get_time() / 1000);
 
             page_changed = true;
         }
@@ -855,1214 +770,71 @@ void ha_ensure_task_running(void)
 }
 
 // =============================================================================
-// GOES Image Display Poll Task — independent poller pinned to Core 0
+// OctoPrint Poll Task — independent poller pinned to Core 0
 // =============================================================================
 
-/* Last-computed moon state, written only by goes_poll_task (single writer) and
- * read by moon_caption() from the UI task. The fields are slow-changing and the
- * read is benign (pointer + float), so a lock is intentionally omitted. */
-static moon_state_t s_moon_state;
+static bool octoprint_poll_once(void *arg) {
+    (void)arg;
 
-/* One-shot tap-animation request. Set by the moon-page tap handler (UI/Core 1),
- * consumed once by goes_poll_task via atomic_exchange. Declared extern in tasks.h. */
-_Atomic bool moon_anim_request = false;
-
-/* Set by the Image Display config POST handler on a user source/band change,
- * consumed once by goes_poll_task to gate the wait overlay. Declared extern in
- * tasks.h. */
-_Atomic bool image_display_manual_fetch = false;
-
-/* ── Moon drag-to-rotate scratch + PPA output buffers ────────────────────────
- * Persistent PSRAM buffers reused across every drag frame so the realtime loop
- * does ZERO per-frame heap alloc. Lazily allocated on the first drag of a moon-
- * page visit and freed on page leave via moon_drag_buffers_free(). Owned solely
- * by goes_poll_task.
- *
- * Touch-frame pipeline (per frame):
- *   1. moon_sphere_render_into() the sphere at MOON_DRAG_SZ_TOUCH (240) into the
- *      small color/z scratch (s_drag_color / s_drag_zbuf), CPU-written;
- *   2. ppa_scale_rgb565_into_noclear() hardware-upscales 240->720 (an EXACT 3.0x
- *      ratio: 720/240=3, representable on PPA's 1/16 scale grid so the whole 720
- *      output is filled with no edge-streak remainder, and no per-frame memset)
- *      into the ping-pong output buffer s_ppa_out[ping];
- *   3. nina_image_display_show_borrowed(s_ppa_out[ping], 720, 720) points the
- *      LVGL descriptor straight at it (no copy) at scale 1.0; then flip ping.
- * The PPA driver handles cache coherency for the BLOCKING transfer in BOTH
- * directions, so the output is coherent for LVGL read when the call returns — no
- * manual esp_cache_msync. The output is DOUBLE-BUFFERED (s_ppa_out[0]/[1]); PPA
- * writes the buffer NOT currently on screen so it never tears with the LVGL flush.
- *
- * 240->720 is the SINGLE touch render size for the whole interaction (active drag
- * AND the post-release settle ease). 240 was chosen because 720/240 = 3.0x is an
- * exact integer ratio on PPA (11520 % 240 == 0); 300 (the prior settle size) maps
- * to 2.40x which PPA truncates to 2.375x, leaving a ~8px unfilled streak.
- *
- * GUARD ROWS (required): SRM bilinear UPSCALE over-reads the source bottom edge.
- * At 3.0x the last output row (719) maps to source y≈239.67, so the sampler reads
- * source row 240 — one past the 240 valid rows. The driver does NOT clamp or
- * bounds-check the INPUT sampling, so without padding that read lands in adjacent
- * heap and renders as a colored garbage band along the bottom of the disc. This is
- * INDEPENDENT of the exact-ratio fix: 3.0x kills the fill STREAK (Gotcha 4), the
- * guard rows kill this OVER-READ. Allocating MOON_DRAG_GUARD_ROWS extra zeroed rows
- * below the valid region makes that boundary sample read our own black memory. The
- * rows are zeroed + flushed to PSRAM (C2M) ONCE at alloc; the per-frame render
- * writes only rows 0..239, so they stay zeroed (no per-frame memset/msync). PPA
- * in.pic_h/block_h stay 240 (the buffer is just taller). The right edge needs no
- * guard (col 240 wraps to col 0 of the next row, in-bounds; the last row's wrap
- * lands in the guard). This matches existing project practice — the GOES/decode PPA
- * paths in this file already memset their PPA source ("Zero buffer so PPA edge
- * interpolation reads black, not heap garbage"). See reference_lvgl_ppa_scale_limitation.md
- * (Gotcha 3/4): a clean PPA upscale needs BOTH the exact n/16 ratio AND guard rows.
- *
- *   - s_drag_color: (MOON_DRAG_SZ_TOUCH + GUARD_ROWS) * MOON_DRAG_SZ_TOUCH * 2  (CPU-written + guard)
- *   - s_drag_zbuf:  MOON_DRAG_SZ_TOUCH^2 * 2  depth buffer (not DMA-read by PPA; no guard needed)
- *   - s_ppa_out[2]: 720*720*2 each            PPA upscale output, ping-pong
- * If PPA scale fails or a buffer didn't allocate, the loop falls back to the
- * software-scale path (moon_sphere_render + nina_image_display_show_scaled) so it
- * degrades gracefully instead of crashing. */
-#define MOON_DRAG_SZ_TOUCH  240          /* render size for the whole touch interaction (240->720 = exact 3.0x) */
-#define MOON_DRAG_GUARD_ROWS 8           /* zeroed rows below s_drag_color: catch PPA upscale bottom over-read */
-#define MOON_DRAG_SECTORS   96           /* tessellation: longitude bands (kills quad faceting) */
-#define MOON_DRAG_STACKS    48           /* tessellation: latitude bands */
-/* Active-drag easing is per-frame exponential (responsive to the finger). The
- * release settle uses a TIME-based ease (see below) so it reads smooth regardless
- * of the achieved framerate (~14-19fps) instead of finishing in 2-3 jumpy frames. */
-#define MOON_DRAG_EASE_A    0.35f        /* per-frame easing alpha while dragging */
-#define MOON_DRAG_SETTLE_MS 450          /* target duration of the release ease-back */
-#define MOON_DRAG_FRAME_US  22000        /* target frame period (cap; render usually dominates) */
-#define MOON_DRAG_REST_GRACE_MS 250      /* idle hold after settle before committing the crisp resting render; a new touch within this window re-enters the drag instead (avoids the eager reset / blocking-render stall on rapid re-swipe) */
-static uint16_t *s_drag_color  = NULL;
-static uint16_t *s_drag_zbuf   = NULL;
-static uint16_t *s_ppa_out[2]  = { NULL, NULL };   /* 720x720 PPA-output ping-pong */
-static int       s_ppa_ping    = 0;                /* index PPA writes next (flips each frame) */
-
-/* MOON BUFFER LIFETIME CONTRACT (fixes a confirmed use-after-free crash).
- * The moon texture (moon_sphere.cpp s_tex_buf, ~1MB) and the drag scratch above
- * are READ/WRITTEN by renders that run ONLY on goes_poll_task, and a single
- * 720px render blocks ~300ms. data_update_task (Core 1) detects the page leave,
- * so it must NOT free them itself: while a slideshow rotation fires the leave,
- * goes_poll_task can be mid-drawSphere sampling s_tex_buf, and freeing it under
- * the renderer panics inside tgx texture sampling. moon_sphere's init mutex does
- * NOT cover this — the render path never holds it across the render, and it
- * cannot cover the drag scratch at all.
- * So the free is OWNERSHIP-TRANSFERRED, not locked: data_update_task only sets
- * this request flag (AFTER nina_image_display_cleanup() has dropped the LVGL
- * descriptor that borrows s_ppa_out), and goes_poll_task performs the actual
- * free at its parked point, where no render can be in flight. One task renders,
- * the same task frees; no cross-task lock, no contention, no blocked UI. */
-static _Atomic bool s_moon_release_req = false;
-
-/* Free the moon-drag scratch and PPA output buffers and NULL them. Called ONLY
- * from goes_poll_task (see the ownership contract above). Safe to call when the
- * buffers were never allocated (NULL frees are no-ops). The page's own
- * software-scale copy buffers are freed separately in
- * nina_image_display_cleanup(). */
-static void moon_drag_buffers_free(void)
-{
-    if (s_drag_color) { heap_caps_free(s_drag_color); s_drag_color = NULL; }
-    if (s_drag_zbuf)  { heap_caps_free(s_drag_zbuf);  s_drag_zbuf  = NULL; }
-    if (s_ppa_out[0]) { heap_caps_free(s_ppa_out[0]); s_ppa_out[0] = NULL; }
-    if (s_ppa_out[1]) { heap_caps_free(s_ppa_out[1]); s_ppa_out[1] = NULL; }
-    s_ppa_ping = 0;
-}
-
-/* Provide the caption text for the Image Display page when the Moon source is
- * active. Declared (extern) in nina_image_display.c. */
-void moon_caption(char *name_out, size_t name_sz, char *pct_out, size_t pct_sz)
-{
-    /* Lock-free read is acceptable here (slow-changing, single writer). */
-    snprintf(name_out, name_sz, "%s", s_moon_state.phase_name ? s_moon_state.phase_name : "Moon");
-    snprintf(pct_out, pct_sz, "%d%%", (int)(s_moon_state.illum * 100.0f + 0.5f));
-}
-
-/* Cached rise/set results — recomputed at most once per 30 s or on location
- * change. moon_rise_set() is a 457-sample double-precision scan (~22k soft-float
- * fmod on this FPU), so it runs ONLY on goes_poll_task (Core 0, no display lock);
- * moon_overlay_info() on the UI path (Core 1, display lock held) reads the cache.
- * The spinlock keeps the six fields a consistent set across the two cores. */
-static portMUX_TYPE s_rs_mux = portMUX_INITIALIZER_UNLOCKED;
-static time_t s_rs_calc_at  = 0;
-static time_t s_rs_rise     = 0;
-static time_t s_rs_set      = 0;
-static bool   s_rs_rise_v   = false;
-static bool   s_rs_set_v    = false;
-static double s_rs_lat      = 1e9;
-static double s_rs_lon      = 1e9;
-
-/* Refresh the rise/set cache when stale (>= 30 s) or the location changed.
- * Call from goes_poll_task only — never with the display lock held. */
-static void moon_rise_set_refresh(void)
-{
-    const app_config_t *cfg = app_config_get();
-    double lat = cfg->moon_lat, lon = cfg->moon_lon;
-    if (lat == 0.0 && lon == 0.0) { lat = cfg->weather_lat; lon = cfg->weather_lon; }
-
-    time_t now;
-    time(&now);
-
-    portENTER_CRITICAL(&s_rs_mux);
-    bool stale = (s_rs_calc_at == 0 || (now - s_rs_calc_at) >= 30 ||
-                  lat != s_rs_lat || lon != s_rs_lon);
-    portEXIT_CRITICAL(&s_rs_mux);
-    if (!stale) return;
-
-    time_t rise_t = 0, set_t = 0;
-    bool   rise_v = false, set_v = false;
-    moon_rise_set(now, lat, lon, &rise_t, &rise_v, &set_t, &set_v);
-
-    portENTER_CRITICAL(&s_rs_mux);
-    s_rs_rise    = rise_t;
-    s_rs_rise_v  = rise_v;
-    s_rs_set     = set_t;
-    s_rs_set_v   = set_v;
-    s_rs_lat     = lat;
-    s_rs_lon     = lon;
-    s_rs_calc_at = now;
-    portEXIT_CRITICAL(&s_rs_mux);
-}
-
-/* Return the signed difference in LOCAL calendar days between evt and now.
- * Normalises both instants to local noon before subtracting so DST transitions
- * within the interval do not produce off-by-one errors. */
-static int local_day_delta(time_t evt, time_t ref)
-{
-    struct tm ta, tb;
-    localtime_r(&evt, &ta);
-    localtime_r(&ref, &tb);
-    ta.tm_hour = 12; ta.tm_min = 0; ta.tm_sec = 0; ta.tm_isdst = -1;
-    tb.tm_hour = 12; tb.tm_min = 0; tb.tm_sec = 0; tb.tm_isdst = -1;
-    time_t na = mktime(&ta);
-    time_t nb = mktime(&tb);
-    return (int)lround((double)(na - nb) / 86400.0);
-}
-
-/* Format a single moon event (rise or set) into `out[sz]`.
- * Output examples (all fit within 20 bytes including NUL):
- *   "Rise 14:32"       24h, same day
- *   "Rise 2:34am +1"   12h, next day
- *   "Set 09:02 -1"     24h, previous day
- *   "Rise --:--"       invalid */
-static void fmt_moon_event(char *out, size_t sz, const char *label,
-                           time_t evt, bool valid, time_t now_t, bool use_24h)
-{
-    if (!valid) {
-        snprintf(out, sz, "%s --:--", label);
-        return;
-    }
-
-    struct tm lt;
-    localtime_r(&evt, &lt);
-
-    /* Time string: 5 chars for 24h "HH:MM", up to 7 for 12h "12:34pm". */
-    char tbuf[10];
-    if (use_24h) {
-        strftime(tbuf, sizeof(tbuf), "%H:%M", &lt);
-    } else {
-        int hr = lt.tm_hour % 12;
-        if (hr == 0) hr = 12;
-        snprintf(tbuf, sizeof(tbuf), "%d:%02d%s",
-                 hr, lt.tm_min, lt.tm_hour < 12 ? "am" : "pm");
-    }
-
-    /* Day-offset suffix: "" / " +N" / " -N". Sized for the full int range so
-     * -Werror=format-truncation is satisfied (delta is realistically +/-1..2). */
-    char sfx[16] = "";
-    int  delta   = local_day_delta(evt, now_t);
-    if (delta > 0) {
-        snprintf(sfx, sizeof(sfx), " +%d", delta);
-    } else if (delta < 0) {
-        snprintf(sfx, sizeof(sfx), " %d", delta);   /* "-N" via %d with negative */
-    }
-
-    /* Longest possible result: "Rise 12:34pm +1\0" = 16 chars — fits in 20. */
-    snprintf(out, sz, "%s %s%s", label, tbuf, sfx);
-}
-
-/* Fills the four moon-overlay corner strings.  All buffers must be non-NULL.
- *   age:  "Age 11.2d"
- *   next: "Full in 3d" or "New in 18d" (whichever lunar event is sooner);
- *         "Full <1d" / "New <1d" when less than one day away.
- *   rise: "Rise 14:32"  or  "Rise --:--" (24h when cfg->weather_time_format==1,
- *         12h e.g. "Rise 2:34am" otherwise).  A day-offset suffix " +N" / " -N"
- *         is appended when the event falls on a different local calendar day.
- *   set:  same format as rise.
- * Reads cached s_moon_state (lock-free, single writer) for age/next; the rise/set
- * times come from the cache filled by moon_rise_set_refresh() on the poll task —
- * this function never runs the ephemeris scan, it is called under the display lock. */
-void moon_overlay_info(char *age,  size_t age_sz,
-                       char *next, size_t next_sz,
-                       char *rise, size_t rise_sz,
-                       char *set,  size_t set_sz)
-{
-    const double SYNODIC = 29.530588853;
-
-    /* --- Age --- */
-    double cycle = (double)s_moon_state.cycle;
-    double age_days = cycle * SYNODIC;
-    snprintf(age, age_sz, "Age %.1fd", age_days);
-
-    /* --- Next phase (Full or New, whichever is sooner) --- */
-    double days_to_full = fmod(0.5 - cycle + 1.0, 1.0) * SYNODIC;
-    double days_to_new  = fmod(1.0 - cycle,        1.0) * SYNODIC;
-    /* fmod(1.0 - 0.0, 1.0) == 0.0, which means "already new"; push to a full
-     * cycle so we report "New in 29.5d" rather than "New in 0d". */
-    if (days_to_new < 0.01) days_to_new = SYNODIC;
-
-    if (days_to_full <= days_to_new) {
-        if (days_to_full < 1.0)
-            snprintf(next, next_sz, "Full <1d");
-        else
-            snprintf(next, next_sz, "Full in %.0fd", days_to_full);
-    } else {
-        if (days_to_new < 1.0)
-            snprintf(next, next_sz, "New <1d");
-        else
-            snprintf(next, next_sz, "New in %.0fd", days_to_new);
-    }
-
-    /* --- Rise / Set (cache read only; the scan runs on the poll task) --- */
+    /* Read fields directly from the config pointer — avoids copying the full
+     * app_config_t onto this task's small stack. */
     const app_config_t *cfg = app_config_get();
 
-    time_t now;
-    time(&now);
-
-    portENTER_CRITICAL(&s_rs_mux);
-    time_t rise_t = s_rs_rise, set_t = s_rs_set;
-    bool   rise_v = s_rs_rise_v, set_v = s_rs_set_v;
-    portEXIT_CRITICAL(&s_rs_mux);
-
-    bool use_24h = (cfg->weather_time_format == 1);
-
-    /* The day-offset suffix is derived from `now` on every call, so a cache up to
-     * ~60 s old still renders the correct "+1"/"-1" across a local day rollover. */
-    fmt_moon_event(rise, rise_sz, "Rise", rise_t, rise_v, now, use_24h);
-    fmt_moon_event(set,  set_sz,  "Set",  set_t,  set_v,  now, use_24h);
+    /* Only poll when a base URL is configured. */
+    if (cfg->octoprint_url[0] != '\0') {
+        octoprint_client_poll(cfg->octoprint_url, cfg->octoprint_api_key,
+                              cfg->octoprint_image_source,
+                              cfg->octoprint_snapshot_url, &octoprint_data);
+    }
+    return true; /* no failure signal — retry at interval, matches json/ha */
 }
 
-/* ── Prefetch PRODUCER (Phase 4) ────────────────────────────────────────────
- * Consume any pending prefetch request (s_prefetch_source, set by the arbiter via
- * image_source_trigger_prefetch) and build that source's frame INTO
- * goes_prefetch_data — never goes_data — so a later rotation to it can swap in a
- * ready buffer with no network round-trip.
- *
- * TWO call sites, BOTH inside goes_poll_task, so this only ever executes in the
- * single context that owns both structs (and, for the Moon source, the only
- * context allowed to touch the tgx texture):
- *   1. the parked loop — serves requests scheduled from a NON-image slideshow
- *      stop, which is when this task is suspended and used to drop them;
- *   2. the top of the active loop body, ahead of the foreground fetch, so the
- *      deadline-bound prefetch is never serialized behind a refresh.
- * A missed request is not a cosmetic loss: with auto-rotate on, the loading
- * overlay is deliberately suppressed, so an image stop that arrives without a
- * warm frame shows a BLACK page for the whole fetch.
- *
- * On success it sets s_prefetch_ready + s_prefetch_ready_src so the swap consumer
- * at the top of the loop can install the buffer and decide whether it satisfies the
- * then-current effective source. A failure (or an empty/invalid Custom URL) leaves
- * s_prefetch_ready false, so the consumer simply does a normal foreground fetch
- * later — the existing "Loading image..." graceful-miss path, no new code.
- *
- * MEMORY: every frame written here is heap_caps_malloc'd in PSRAM by the fetch/
- * render helper (goes_client_poll* allocate the decoded RGB565; moon_sphere_render
- * allocates the rendered RGB565). The buffer is owned by goes_prefetch_data until
- * EITHER the swap consumer moves it into goes_data (and NULLs prefetch.image_buf),
- * OR a subsequent prefetch overwrites it — so this helper frees any unconsumed
- * prefetch frame before installing a new one, preventing a leak when two prefetch
- * requests land without an intervening swap. */
-static void image_prefetch_run(const app_config_t *cfg)
-{
-    int8_t pf = (int8_t)atomic_exchange(&s_prefetch_source, -1);
-    if (pf < 0) return;
+void octoprint_poll_task(void *arg) {
+    (void)arg;
+    ESP_LOGI(TAG, "OctoPrint poll task started");
 
-    /* A prior prefetch frame that was never swapped in would leak when the new
-     * fetch below replaces the pointer (goes_client_poll* free the OLD buffer they
-     * find in the target, but the moon render assigns directly), so clear it here
-     * under the prefetch lock and drop the stale ready flag. */
-    if (goes_data_lock(&goes_prefetch_data, 1000)) {
-        if (goes_prefetch_data.image_buf) {
-            heap_caps_free(goes_prefetch_data.image_buf);
-            goes_prefetch_data.image_buf = NULL;
-        }
-        goes_data_unlock(&goes_prefetch_data);
-    }
-    atomic_store(&s_prefetch_ready, false);
-    atomic_store(&s_prefetch_ready_src, -1);
+    /* Interval clamped 2-300s at config-validate time; floored here too. */
+    poll_interval_src_t interval = {
+        .seconds  = &app_config_get()->octoprint_update_interval_s,
+        .floor_ms = 2000,
+    };
 
-    esp_err_t err = ESP_FAIL;
-    if (pf == 1) {
-        /* Moon: render locally (synchronous, ~300ms). Skip until the clock is
-         * valid so the phase/orientation is correct. */
-        time_t now; time(&now);
-        bool time_valid = (now > (time_t)1577836800);
-        if (time_valid && moon_sphere_init()) {
-            double lat = cfg->moon_lat, lon = cfg->moon_lon;
-            if (lat == 0.0 && lon == 0.0) { lat = cfg->weather_lat; lon = cfg->weather_lon; }
-            moon_state_t live;
-            moon_compute(now, lat, lon, &live);
-            uint16_t *img = moon_sphere_render(SCREEN_SIZE, SCREEN_SIZE, &live,
-                                               96, 48, cfg->moon_bg_style);
-            if (img) {
-                if (goes_data_lock(&goes_prefetch_data, 1000)) {
-                    goes_prefetch_data.image_buf    = (uint8_t *)img;
-                    goes_prefetch_data.image_w      = SCREEN_SIZE;
-                    goes_prefetch_data.image_h      = SCREEN_SIZE;
-                    goes_prefetch_data.vflip        = false;
-                    goes_prefetch_data.label[0]     = '\0';
-                    goes_prefetch_data.src_kind     = 1;   /* Moon */
-                    goes_prefetch_data.error_msg[0] = '\0';
-                    goes_prefetch_data.connected    = true;
-                    goes_prefetch_data.last_poll_ms = esp_timer_get_time() / 1000;
-                    goes_data_unlock(&goes_prefetch_data);
-                    err = ESP_OK;
-                } else {
-                    heap_caps_free(img);
-                }
-            }
-        }
-    } else if (pf == 3) {                                       /* Custom image URL */
-        if (cfg->custom_image_url[0] != '\0') {
-            err = goes_client_poll_url(cfg->custom_image_url, &goes_prefetch_data, true, "Custom", 3 /* Custom */);
-        }
-    } else if (pf == 2) {                                       /* Solar (SDO/AIA) */
-        const char *url = solar_band_url(cfg->solar_band);
-        if (url && url[0]) {
-            err = goes_client_poll_url(url, &goes_prefetch_data,
-                                       solar_band_vflip(cfg->solar_band),
-                                       solar_band_label(cfg->solar_band),
-                                       2 /* Solar */);
-        }
-    } else if (pf == 0 && cfg->goes_region[0] != '\0') {        /* GOES */
-        err = goes_client_poll(cfg->goes_region, &goes_prefetch_data);
-    }
+    poll_loop_spec_t spec = {
+        .name = "octoprint",
+        .wifi_group = s_wifi_event_group,
+        .wifi_bits = WIFI_CONNECTED_BIT,
+        .page_active = &octoprint_page_active,
+        .poll_once = octoprint_poll_once,
+        .interval_ms = config_interval_ms,
+        .backoff_initial_ms = 0,
+        .backoff_max_ms = 0,
+    };
 
-    if (err == ESP_OK) {
-        atomic_store(&s_prefetch_ready_src, (int32_t)pf);
-        atomic_store(&s_prefetch_ready, true);
-    }
+    poll_loop_run(&spec, &interval);
 }
 
-void goes_poll_task(void *arg)
+/* Sole spawn path for octoprint_poll_task — boot and runtime enable both land
+ * here. 12288 bytes (vs json/ha's 10240): an https OctoPrint host runs an
+ * mbedTLS handshake on this task's stack, and the image path nests URL/path
+ * buffers plus an stb_image decode on top of it. */
+void octoprint_ensure_task_running(void)
 {
-    ESP_LOGI(TAG, "GOES poll task started");
+    if (!app_config_get()->octoprint_enabled) return;
 
-    while (1) {
-        /* Set while parked below, so the code after the park loop can tell a
-         * page (re)entry from an ordinary refresh tick and re-show the retained
-         * frame. */
-        bool re_entered = false;
-
-        /* Suspend during OTA or when the Image Display page is not visible.
-         * This is also the ONLY safe point to release the moon texture + drag
-         * scratch: reaching here proves no render is in flight on this task (the
-         * renders all run below, in this same loop body). data_update_task hands
-         * the request over via s_moon_release_req rather than freeing them
-         * itself — see the ownership contract at moon_drag_buffers_free(). */
-        while (ota_in_progress || !image_display_page_active) {
-            re_entered = true;
-            if (atomic_exchange(&s_moon_release_req, false)) {
-                moon_sphere_deinit();       /* ~1MB cached lunar texture */
-                moon_drag_buffers_free();   /* drag color/z + PPA ping-pong */
-                /* Reset drag orientation so a visit that ended mid-settle does not
-                 * carry a stale s_cur_* into the next visit (which would snap the
-                 * disc home on the first frame). */
-                moon_drag_reset();
-                ESP_LOGI(TAG, "Left Image Display: freed moon texture + drag buffers");
-            }
-            /* Serve the slideshow prefetch WHILE PARKED. The arbiter schedules the
-             * next stop's image source at every slideshow commit, including from a
-             * NON-image stop (Clock/JSON/Summary) — at which point this task is
-             * parked here. The producer used to live only after this loop, so those
-             * requests were never served and the image page arrived cold: with
-             * auto-rotate on the loading overlay is deliberately suppressed, so cold
-             * == black screen for the whole fetch. Running it here gives a full stop
-             * of lead time and makes the swap consumer below find a ready frame.
-             * Same task owns goes_prefetch_data, so the single-writer invariant and
-             * the moon-render ownership contract above are unchanged; it runs AFTER
-             * the release above so a free is never deferred behind a fetch. Skipped
-             * during OTA — that must not contend for PSRAM or the network. */
-            if (!ota_in_progress) {
-                image_prefetch_run(app_config_get());
-            }
-            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
-        }
-
-        /* Read fields directly from config pointer — avoids copying the full
-         * app_config_t onto this task's small stack. */
-        const app_config_t *cfg = app_config_get();
-
-        /* Effective source for THIS iteration: the slideshow override if active,
-         * else the persisted default. Read ONCE so a mid-iteration arbiter change
-         * cannot make the fetch dispatch and the interval/label logic disagree. */
-        int8_t eff_src = image_source_get_effective();
-
-        /* ── Retained-frame re-show on page (re)entry ───────────────────────────
-         * goes_data keeps its last decoded frame across page leave (nothing frees
-         * it there any more), but nina_image_display_cleanup() dropped the page's
-         * own LVGL copy, so the panel is blank until something is pushed. Push the
-         * retained frame here — before any fetch — so a slideshow stop never shows
-         * black while a slow/failing download runs. displayed_poll_ms was reset to
-         * 0 by cleanup(), so the new-image gate passes; force_redraw is belt-and-
-         * braces against a same-millisecond stamp.
-         *
-         * Gated on src_kind == eff_src: the buffer's own tag, never intent (a
-         * retained GOES frame must never be shown for a Solar stop). On a mismatch
-         * nothing is shown, has_image() stays false, and the overlay block below
-         * puts "Loading image..." up instead of leaving a black panel. */
-        if (re_entered) {
-            bool kept = false;
-            if (goes_data_lock(&goes_data, 200)) {
-                kept = (goes_data.image_buf != NULL && goes_data.src_kind == eff_src);
-                goes_data_unlock(&goes_data);
-            }
-            if (kept && image_display_page_active) {
-                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                    nina_image_display_force_redraw();
-                    nina_image_display_update(&goes_data);
-                    bsp_display_unlock();
-                }
-            }
-        }
-
-        /* A manual navigation/config change requests a fresh foreground fetch +
-         * loading animation. Peek the flag here WITHOUT consuming it (the single
-         * atomic_exchange consume-point is the overlay block below): when pending,
-         * the prefetch swap fast path must NOT short-circuit to sleep, so a real
-         * fetch runs this iteration and the overlay is shown. */
-        bool manual_fetch_pending = atomic_load(&image_display_manual_fetch);
-
-        /* ── Prefetch SWAP CONSUMER (Phase 4) ───────────────────────────────────
-         * The producer (end of this loop) may have fetched/rendered the NEXT
-         * slideshow image source into goes_prefetch_data ahead of time. When the
-         * arbiter then rotates to that source, install the pre-built buffer into
-         * goes_data here — instantly, with no network round-trip and no "Loading
-         * image..." overlay — instead of fetching it in the foreground below.
-         *
-         * Lock order is goes_data FIRST, then goes_prefetch_data, matching the
-         * single-writer invariant (only this task touches either struct) and the
-         * reader contract (nina_image_display_update locks goes_data, never the
-         * prefetch struct). Holding goes_data's lock across the buffer pointer move
-         * means the UI reader never sees a torn buffer. After the move the prefetch
-         * struct's image_buf is NULLed so ownership is transferred and a later
-         * prefetch re-mallocs cleanly (no double-free).
-         *
-         * swap_satisfies_eff records whether the swapped-in buffer is the source we
-         * are about to display this iteration. If it is, we skip the redundant
-         * foreground fetch (the screen already shows the right frame); if it is not
-         * (the prefetch was for a different source, e.g. the user manually navigated
-         * away from the slideshow's predicted next stop), the swap is discarded-in-
-         * place by leaving it installed but still falling through to fetch eff_src. */
-        bool swap_satisfies_eff = false;
-        {
-            bool ready = atomic_exchange(&s_prefetch_ready, false);
-            int8_t swapped_src = (int8_t)atomic_exchange(&s_prefetch_ready_src, -1);
-            if (ready && goes_prefetch_data.image_buf) {
-                bool moved = false;
-                if (goes_data_lock(&goes_data, 1000)) {
-                    if (goes_data_lock(&goes_prefetch_data, 1000)) {
-                        /* Free the frame being displaced, then move ownership of the
-                         * prefetched frame + its metadata into goes_data. */
-                        if (goes_data.image_buf) heap_caps_free(goes_data.image_buf);
-                        goes_data.image_buf    = goes_prefetch_data.image_buf;
-                        goes_data.image_w      = goes_prefetch_data.image_w;
-                        goes_data.image_h      = goes_prefetch_data.image_h;
-                        goes_data.vflip        = goes_prefetch_data.vflip;
-                        goes_data.src_kind     = goes_prefetch_data.src_kind;
-                        goes_data.connected    = goes_prefetch_data.connected;
-                        goes_data.last_poll_ms = esp_timer_get_time() / 1000;
-                        strlcpy(goes_data.label, goes_prefetch_data.label, sizeof(goes_data.label));
-                        goes_data.error_msg[0] = '\0';   /* a successful prefetch clears any stale error */
-                        goes_prefetch_data.image_buf = NULL;   /* ownership transferred */
-                        goes_data_unlock(&goes_prefetch_data);
-                        moved = true;
-                    }
-                    goes_data_unlock(&goes_data);
-                }
-
-                if (moved) {
-                    /* Signal the UI exactly like the moon resting commit does: push
-                     * the swapped frame to the panel immediately under the display
-                     * lock (force_redraw bypasses the new-image timestamp gate so a
-                     * same-millisecond stamp can't be skipped), and wake
-                     * data_update_task so its periodic image refresh also re-runs. */
-                    if (image_display_page_active) {
-                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                            nina_image_display_force_redraw();
-                            nina_image_display_update(&goes_data);
-                            bsp_display_unlock();
-                        }
-                    }
-                    if (data_task_handle) xTaskNotifyGive(data_task_handle);
-
-                    /* Only claim the foreground fetch is unnecessary when the frame
-                     * actually landed in goes_data AND it is the source we display
-                     * this iteration. A lock-miss (moved == false) falls through to a
-                     * normal foreground fetch — the graceful-miss path. */
-                    swap_satisfies_eff = (swapped_src == eff_src);
-                }
-
-                /* Lock-miss recovery: the ready flags were already cleared by the
-                 * atomic_exchange above, but a lock timeout (moved == false) left the
-                 * ~1MB prefetched PSRAM buffer stranded in goes_prefetch_data. Re-arm
-                 * the ready state so the next loop iteration retries the swap instead
-                 * of orphaning the buffer for the rest of the session (a leak if
-                 * rotation later stops and no further prefetch ever runs). */
-                if (!moved) {
-                    atomic_store(&s_prefetch_ready_src, (int32_t)swapped_src);
-                    atomic_store(&s_prefetch_ready, true);
-                }
-            }
-        }
-
-        /* ── Prefetch PRODUCER, run BEFORE the foreground fetch ─────────────────
-         * Deadline ordering, not convenience. The prefetch is the only work here
-         * with a hard deadline (the next slideshow rotation, as little as 10s);
-         * the foreground fetch below is a periodic refresh of a frame that is
-         * already on screen. Running the producer at the END of the loop body (as
-         * it used to) serialized it behind a full HTTP fetch + JPEG decode, so the
-         * next stop's frame regularly missed the rotation and that page arrived
-         * cold — black, because auto-rotate suppresses the loading overlay.
-         *
-         * It also matters on the rotation AWAY from the image page:
-         * image_display_page_active is updated by data_update_task one cycle after
-         * the arbiter commits, so the commit that schedules the next image stop
-         * still finds this task unparked. It wakes here and, with the override
-         * already cleared to -1, would otherwise burn seconds fetching the
-         * PERSISTED default source for a page we just left before ever reaching
-         * the producer. No-op when nothing is pending. */
-        image_prefetch_run(cfg);
-
-        /* A pending manual fetch always forces a fresh foreground fetch this
-         * iteration, even when the swap installed the right source: the manual
-         * path must download a new frame and show the loading animation. The swap
-         * above still ran (buffer ownership/leak invariants preserved); we only
-         * suppress the sleep-without-fetch fast path here. */
-        if (manual_fetch_pending) {
-            swap_satisfies_eff = false;
-        }
-
-        /* The swap already installed the frame for the current effective source —
-         * skip the foreground fetch/render this iteration and just sleep until the
-         * next refresh tick. A prefetch for a DIFFERENT source (swap_satisfies_eff
-         * false) falls through to fetch eff_src normally (graceful miss). */
-        if (swap_satisfies_eff) {
-            uint32_t interval_ms;
-            if (eff_src == 3) {
-                interval_ms = (uint32_t)cfg->custom_update_interval_s * 1000;
-                if (interval_ms < 10000)   interval_ms = 10000;
-                if (interval_ms > 7200000) interval_ms = 7200000;
-            } else if (eff_src == 1) {
-                interval_ms = 60000;   /* moon recompute cadence */
-            } else {
-                interval_ms = (uint32_t)cfg->goes_update_interval_s * 1000;
-                if (interval_ms < 300000)  interval_ms = 300000;
-                if (interval_ms > 7200000) interval_ms = 7200000;
-            }
-            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(interval_ms));
-            continue;
-        }
-
-        /* Moon source: render locally on-device, no network. The result is
-         * pushed into the same goes_data RGB565 sink the crossfade page reads. */
-        if (eff_src == 1) {
-            /* The moon renders locally and has its own animation; it never uses the
-             * "Loading image..." overlay or the network fetch path below. Consume a
-             * pending manual-fetch request here so a Moon-targeted manual navigation
-             * does not leave the flag stuck (it is only otherwise consumed by the
-             * GOES/Solar/Custom overlay block). The local re-render below already
-             * refreshes the frame. */
-            atomic_exchange(&image_display_manual_fetch, false);
-            time_t now; time(&now);
-            /* The moon phase/orientation needs a correct wall clock. Before SNTP
-             * sets the time (near-epoch at boot), rendering would show the wrong
-             * phase, e.g. a half-lit disc, until the next recompute. Skip the
-             * render until the clock is valid and retry quickly so the correct
-             * moon appears as soon as time syncs; then settle to ~60s. */
-            bool time_valid = (now > (time_t)1577836800);  /* >= 2020-01-01 UTC */
-            /* tgx path prepares its own texture lazily in moon_sphere_render();
-             * gate only on a valid clock (the flat PNG decode is not used). */
-            bool moon_ready = moon_sphere_init();
-            if (time_valid && moon_ready) {
-                double lat = cfg->moon_lat, lon = cfg->moon_lon;
-                if (lat == 0.0 && lon == 0.0) { lat = cfg->weather_lat; lon = cfg->weather_lon; }
-                moon_state_t live;
-                moon_compute(now, lat, lon, &live);
-                /* Keep the overlay's rise/set cache warm here — Core 0, no display
-                 * lock held. moon_overlay_info() must never run this scan itself. */
-                moon_rise_set_refresh();
-
-                /* Interactive drag-to-rotate: while a finger is down OR the disc is
-                 * still easing back to the live sky orientation after release, render
-                 * small frames in realtime and PPA hardware-upscale them to fill the
-                 * panel. The touch handlers in nina_image_display.c notify this task on
-                 * press/release, so the outer ulTaskNotifyTake wakes us; this inner
-                 * loop owns the realtime frames and SELF-SPINS (it does not wait on
-                 * notifications) until moon_drag_settled() — i.e. the finger is up AND
-                 * the eased orientation is home — then falls through to the crisp
-                 * full-res resting render (crossfaded in for a smooth handoff).
-                 *
-                 * Architecture (per-frame, zero heap alloc):
-                 *   1. ease current orientation toward the finger target (per-frame
-                 *      exp while dragging; TIME-based ease-out during the settle so it
-                 *      reads smooth at any framerate instead of jumping home);
-                 *   2. render the sphere at the single touch size (240px, 96x48
-                 *      tessellation) into PERSISTENT scratch (no alloc);
-                 *   3. PPA hardware-upscale 240->720 (exact 3.0x) into a ping-pong
-                 *      output buffer, then show_borrowed it at scale 1.0 (no copy),
-                 *      taking the display lock only around the LVGL swap.
-                 * The render + PPA run OUTSIDE the display lock so the UI task is
-                 * blocked for the minimum time. To dissolve the lighting/phase pop on
-                 * release, SETTLE frames render in TRUE_PHASE lighting (the resting
-                 * mode) so as the orientation eases home they converge on the resting
-                 * appearance; the final crisp native-720 frame is then crossfaded in
-                 * (set below). If PPA or the buffers are unavailable, the loop falls
-                 * back to a software-scaled render so it degrades instead of crashing. */
-                /* Whether the drag loop body actually ran. Sampling moon_drag_settled()
-                 * up front is unreliable: a press+release can complete before this task
-                 * wakes, leaving settled() already true so the loop never executes. We
-                 * set this inside the loop instead, so the post-settle resting commit
-                 * fires whenever a drag frame was actually put on screen. Declared
-                 * OUTSIDE the for(;;) below so it intentionally persists across outer
-                 * iterations: once any drag frame has run it stays true, so the grace
-                 * window fires after every drag including re-grabs. */
-                bool ran_drag = false;
-                /* Set when the inner render loop breaks because a free-spin hold is
-                 * active (finger up, disc held at its spun orientation). Drives the
-                 * dedicated hold-wait block below instead of the normal resting commit.
-                 * Re-evaluated each outer iteration. */
-                bool freespin_hold = false;
-                if (!moon_drag_settled()) {
-                    /* Lazy one-time allocation of the drag scratch + PPA output
-                     * (PSRAM, 128-byte aligned for the cache line). The color buffer
-                     * is 240+GUARD_ROWS tall (the guard rows absorb the SRM bottom-edge
-                     * upscale over-read; see the buffer-block comment above); the zbuf
-                     * is plain 240px (not DMA-read by PPA). The two 720x720 PPA-output
-                     * buffers ping-pong. All freed on page leave via
-                     * moon_drag_buffers_free(). This runs ONCE on entry (before the
-                     * for(;;) below); the inner "if any buffer NULL" guard makes it a
-                     * no-op when the buffers already exist, so a re-grab that loops back
-                     * into the drag while-loop never re-allocates. */
-                    if (!s_drag_color || !s_drag_zbuf || !s_ppa_out[0] || !s_ppa_out[1]) {
-                        size_t row_bytes  = (size_t)MOON_DRAG_SZ_TOUCH * 2;
-                        size_t color_sz   = ((size_t)MOON_DRAG_SZ_TOUCH + MOON_DRAG_GUARD_ROWS) * row_bytes;
-                        color_sz = (color_sz + 127) & ~(size_t)127;   /* 248*480=119040, already 128-aligned */
-                        size_t zbuf_sz    = (size_t)MOON_DRAG_SZ_TOUCH * row_bytes;
-                        zbuf_sz  = (zbuf_sz + 127) & ~(size_t)127;
-                        size_t out_sz     = (size_t)SCREEN_SIZE * SCREEN_SIZE * 2;   /* 720*720*2 = 128-aligned */
-                        moon_drag_buffers_free();   /* drop any partial alloc first */
-                        s_drag_color = (uint16_t *)heap_caps_aligned_alloc(128, color_sz, MALLOC_CAP_SPIRAM);
-                        s_drag_zbuf  = (uint16_t *)heap_caps_aligned_alloc(128, zbuf_sz, MALLOC_CAP_SPIRAM);
-                        s_ppa_out[0] = (uint16_t *)heap_caps_aligned_alloc(128, out_sz, MALLOC_CAP_SPIRAM);
-                        s_ppa_out[1] = (uint16_t *)heap_caps_aligned_alloc(128, out_sz, MALLOC_CAP_SPIRAM);
-                        if (!s_drag_color || !s_drag_zbuf || !s_ppa_out[0] || !s_ppa_out[1]) {
-                            ESP_LOGE(TAG, "moon drag buffer alloc failed; falling back to software scale");
-                            moon_drag_buffers_free();   /* drop the partial set; loop uses the SW fallback */
-                        } else {
-                            /* Zero the guard rows below the 240 valid rows and flush
-                             * them to PSRAM ONCE (C2M) so the SRM bottom-edge over-read
-                             * samples our own black memory, not adjacent heap. The
-                             * per-frame render writes only rows 0..239, so the guard
-                             * rows stay zeroed and this never repeats. Offset/length
-                             * are both 128-aligned (115200 / 3840). */
-                            uint8_t *guard = (uint8_t *)s_drag_color +
-                                             (size_t)MOON_DRAG_SZ_TOUCH * row_bytes;
-                            size_t   guard_bytes = (size_t)MOON_DRAG_GUARD_ROWS * row_bytes;
-                            memset(guard, 0, guard_bytes);
-                            esp_cache_msync(guard, guard_bytes, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
-                        }
-                    }
-                }
-
-                /* Outer loop wraps the drag/settle while-loop and a post-settle GRACE
-                 * window. The grace hold (MOON_DRAG_REST_GRACE_MS) makes the reset less
-                 * eager: after the disc eases home we wait briefly, and if the user
-                 * starts a NEW touch within that window we `continue` to re-enter the
-                 * drag while-loop and track the finger immediately, SKIPPING the
-                 * expensive crisp resting render + crossfade entirely. Only when the
-                 * full grace window elapses with no re-touch do we break out to commit
-                 * the resting frame (genuine rest -> smooth eased settle + crossfade is
-                 * preserved). A new touch makes moon_drag_settled() false again, so
-                 * re-entering the while-loop resumes tracking with no special-casing. */
-                for (;;) {
-                /* Seed the per-frame dt clock for the time-based settle ease. Keep
-                 * this immediately before the loop (after the scratch alloc above) so
-                 * the first settle frame's dt is a true frame interval and never folds
-                 * in one-time alloc latency. Re-seeded each outer iteration so a
-                 * re-touch's first settle frame gets a true dt. */
-                int64_t prev_frame_us = esp_timer_get_time();
-                freespin_hold = false;   /* re-evaluated for this outer iteration */
-                while (!moon_drag_settled()) {
-                    if (!image_display_page_active || eff_src != 1) break;
-                    ran_drag = true;   /* a drag frame is about to be shown */
-                    int64_t frame_t0 = esp_timer_get_time();
-
-                    /* 1. Ease current orientation toward the finger target. While the
-                     * finger is down, use the responsive per-frame alpha. After release
-                     * (settle), derive a framerate-independent ease-out alpha from the
-                     * frame dt so the snap-back always takes ~MOON_DRAG_SETTLE_MS and
-                     * reads smooth even at ~14fps (a fixed per-frame alpha would finish
-                     * in 2-3 frames and look like a jump). */
-                    bool active = moon_drag_active();
-                    float alpha;
-                    if (active) {
-                        alpha = MOON_DRAG_EASE_A;
-                    } else {
-                        /* tau so ~95% of the distance is covered in SETTLE_MS:
-                         * alpha = 1 - exp(-dt/tau), tau = SETTLE_MS/3. */
-                        float dt_ms = (float)(frame_t0 - prev_frame_us) / 1000.0f;
-                        float tau   = (float)MOON_DRAG_SETTLE_MS / 3.0f;
-                        alpha = 1.0f - expf(-dt_ms / tau);
-                        if (alpha < 0.02f) alpha = 0.02f;   /* never fully stall */
-                        if (alpha > 1.0f)  alpha = 1.0f;
-                    }
-                    prev_frame_us = frame_t0;
-                    moon_drag_advance(alpha);
-                    float yaw, pitch; moon_drag_get(&yaw, &pitch);
-
-                    /* Free-spin hold: after a rotate-release in free-spin mode the
-                     * disc holds its spun orientation, so moon_drag_settled() never
-                     * becomes true and this loop would busy-render an identical frame
-                     * for the whole hold window. Wait until the eased CURRENT has
-                     * actually converged onto the spun TARGET (moon_drag_advance, run
-                     * above each frame, is still easing it there) before breaking;
-                     * otherwise we would lock in a half-eased orientation as the crisp
-                     * held frame and the disc would visibly snap after lift. Once
-                     * converged, break to the hold-wait below (which sleeps instead of
-                     * re-rendering). */
-                    if (!active && moon_drag_freespin_converged()) {
-                        freespin_hold = true;
-                        break;
-                    }
-
-                    /* 2. Lighting for this frame. Active frames use the explore/config
-                     * lighting for free exploration. On settle, true-phase/explore force
-                     * TRUE_PHASE so the terminator shadow dissolves back in as the disc
-                     * returns home (matching the resting render). SURFACE_LOCKED keeps its
-                     * mode through the ease-back: its sun = R_drag(yaw,pitch)*R_sky*sun_body,
-                     * which at yaw=pitch=0 equals true-phase exactly, so the terminator
-                     * stays pinned to the surface and converges with no pop (forcing
-                     * TRUE_PHASE here would flash full-bright/dark on the first large-yaw
-                     * settle frame). The render SIZE is the single touch size (240) for the
-                     * whole interaction — active and settle — because 240->720 is an exact
-                     * 3.0x PPA ratio. */
-                    moon_light_mode_t cfg_light = (moon_light_mode_t)cfg->moon_drag_light_mode;
-                    moon_light_mode_t light;
-                    if (active) {
-                        light = cfg_light;                 /* finger down: use configured mode */
-                    } else if (cfg_light == MOON_LIGHT_SURFACE_LOCKED) {
-                        light = MOON_LIGHT_SURFACE_LOCKED; /* settle: keep terminator pinned; converges to true phase at yaw=pitch=0 */
-                    } else {
-                        light = MOON_LIGHT_TRUE_PHASE;     /* settle for true-phase/explore: dissolve terminator back in */
-                    }
-
-                    bool shown = false;
-                    if (s_drag_color && s_drag_zbuf && s_ppa_out[0] && s_ppa_out[1]) {
-                        /* Render 240px into persistent scratch — NO per-frame alloc. */
-                        uint16_t *fimg = moon_sphere_render_into(
-                            MOON_DRAG_SZ_TOUCH, MOON_DRAG_SZ_TOUCH, &live,
-                            MOON_DRAG_SECTORS, MOON_DRAG_STACKS, cfg->moon_bg_style,
-                            yaw, pitch, light, s_drag_color, s_drag_zbuf);
-                        if (fimg) {
-                            /* Red Night: recolour the 240px SOURCE, not the 720 PPA
-                             * output. The remap is per-pixel and the upscale linear, so
-                             * they commute — same result for 1/9th the pixels (57,600 vs
-                             * 518,400) every drag frame. The scratch is fully re-rendered
-                             * each frame, so this never compounds. */
-                            bool red = image_red_remap_active();
-                            if (red) {
-                                image_red_remap_rgb565_force(
-                                    fimg, (size_t)MOON_DRAG_SZ_TOUCH * MOON_DRAG_SZ_TOUCH);
-                            }
-
-                            /* PPA hardware-upscale 240->720 (exact 3.0x) into the
-                             * ping-pong output buffer NOT currently on screen. No
-                             * memset (every output pixel is written) and the blocking
-                             * PPA handles cache coherency both ways, so the buffer is
-                             * coherent for LVGL read on return. */
-                            int ping = s_ppa_ping;
-                            uint8_t *out = ppa_scale_rgb565_into_noclear(
-                                (const uint8_t *)fimg, MOON_DRAG_SZ_TOUCH, MOON_DRAG_SZ_TOUCH,
-                                MOON_DRAG_SZ_TOUCH /* stride in pixels */,
-                                SCREEN_SIZE, SCREEN_SIZE,
-                                (uint8_t *)s_ppa_out[ping],
-                                (size_t)SCREEN_SIZE * SCREEN_SIZE * 2, NULL);
-                            if (out) {
-                                /* Point the LVGL descriptor straight at the 720 buffer
-                                 * (no copy) at scale 1.0. Lock held only around the
-                                 * swap. The ping-pong guarantees we never overwrite the
-                                 * buffer LVGL is flushing. */
-                                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                                    nina_image_display_show_borrowed(s_ppa_out[ping], SCREEN_SIZE, SCREEN_SIZE);
-                                    bsp_display_unlock();
-                                }
-                                s_ppa_ping ^= 1;   /* flip: PPA writes the other buffer next frame */
-                                shown = true;
-                            }
-                            /* PPA failed: fall through to the software-scale fallback
-                             * below using the SAME already-rendered 240px scratch.
-                             * Skipped under red night — the scratch is already remapped
-                             * and show_scaled() remaps its own copy again, which would
-                             * double-darken it; leaving `shown` false hands the frame to
-                             * the fresh-render fallback below, which remaps exactly once. */
-                            if (!shown && !red && bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                                nina_image_display_show_scaled(fimg, MOON_DRAG_SZ_TOUCH, MOON_DRAG_SZ_TOUCH);
-                                bsp_display_unlock();
-                                shown = true;
-                            }
-                        }
-                    }
-
-                    if (!shown) {
-                        /* Buffers unavailable (alloc failed): render to a fresh PSRAM
-                         * buffer and let nina_image_display_update() software-scale it.
-                         * Degrades gracefully. NOTE: unlike the PPA happy path, this
-                         * exceptional fallback does ~2 allocs/frame (the fresh
-                         * moon_sphere_render_ex color/z here, plus update()'s owned-copy
-                         * alloc); the "zero per-frame heap alloc" guarantee applies only
-                         * to the PPA path, not this degraded fallback. */
-                        uint16_t *fimg = moon_sphere_render_ex(MOON_DRAG_SZ_TOUCH, MOON_DRAG_SZ_TOUCH, &live,
-                                                               MOON_DRAG_SECTORS, MOON_DRAG_STACKS,
-                                                               cfg->moon_bg_style, yaw, pitch, light);
-                        if (fimg) {
-                            if (goes_data_lock(&goes_data, 1000)) {
-                                if (goes_data.image_buf) heap_caps_free(goes_data.image_buf);
-                                goes_data.image_buf = (uint8_t *)fimg;
-                                goes_data.image_w = MOON_DRAG_SZ_TOUCH;
-                                goes_data.image_h = MOON_DRAG_SZ_TOUCH;
-                                goes_data.vflip = false;
-                                goes_data.label[0] = '\0';
-                                goes_data.src_kind = 1;   /* Moon */
-                                goes_data.connected = true;
-                                goes_data.last_poll_ms = esp_timer_get_time() / 1000;
-                                goes_data_unlock(&goes_data);
-                                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                                    nina_image_display_update(&goes_data);
-                                    bsp_display_unlock();
-                                }
-                            } else {
-                                heap_caps_free(fimg);
-                            }
-                        }
-                    }
-
-                    /* Delay only the remainder to hit the target frame period. If the
-                     * frame overran (the usual case; the PPA upscale is cheap but the
-                     * 240px tgx render dominates), just yield so we don't starve
-                     * idle/UI but also don't add latency. */
-                    int64_t spent = esp_timer_get_time() - frame_t0;
-                    int64_t remain_us = (int64_t)MOON_DRAG_FRAME_US - spent;
-                    if (remain_us > 1000) {
-                        vTaskDelay(pdMS_TO_TICKS((uint32_t)(remain_us / 1000)));
-                    } else {
-                        vTaskDelay(1);
-                    }
-                }
-
-                /* FREE-SPIN HOLD. In free-spin mode (moon_spin_mode == 1) a
-                 * rotate-release leaves the disc at its spun orientation instead of
-                 * snapping home. Render that held orientation ONCE as a crisp native-720
-                 * frame (the inner loop only ever showed the 240px PPA-upscaled version),
-                 * then sleep-poll — NOT busy-render — until either a new finger-down
-                 * re-enters the drag loop (cancels the pending return) or the configured
-                 * moon_spin_return_s elapses, at which point we trigger the eased return
-                 * home and `continue` so the inner settle loop runs the snap-back +
-                 * resting commit exactly as the rubber-band path does. */
-                if (freespin_hold) {
-                    /* One crisp held-orientation frame at native 720. moon_sphere_render_ex
-                     * owns its own PSRAM buffer; update() takes ownership and crossfades. */
-                    float hy, hp; moon_drag_get(&hy, &hp);
-                    uint16_t *hold_img = moon_sphere_render_ex(SCREEN_SIZE, SCREEN_SIZE, &live,
-                                                               96, 48, cfg->moon_bg_style,
-                                                               hy, hp, (moon_light_mode_t)cfg->moon_drag_light_mode);
-                    if (hold_img && image_display_page_active && eff_src == 1 &&
-                        !moon_drag_active()) {
-                        if (goes_data_lock(&goes_data, 1000)) {
-                            if (goes_data.image_buf) heap_caps_free(goes_data.image_buf);
-                            goes_data.image_buf = (uint8_t *)hold_img;
-                            goes_data.image_w = SCREEN_SIZE;
-                            goes_data.image_h = SCREEN_SIZE;
-                            goes_data.vflip = false;
-                            goes_data.label[0] = '\0';
-                            goes_data.src_kind = 1;   /* Moon */
-                            goes_data.connected = true;
-                            goes_data.last_poll_ms = esp_timer_get_time() / 1000;
-                            goes_data_unlock(&goes_data);
-                            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                                nina_image_display_force_redraw();
-                                nina_image_display_update(&goes_data);
-                                bsp_display_unlock();
-                            }
-                        } else {
-                            heap_caps_free(hold_img);
-                        }
-                    } else if (hold_img) {
-                        heap_caps_free(hold_img);
-                    }
-
-                    /* Sleep-poll the hold window. The configured seconds are read each
-                     * iteration so a live web-UI change takes effect within one poll step. */
-                    for (;;) {
-                        if (!image_display_page_active || eff_src != 1) break;
-                        if (moon_drag_active()) break;   /* re-touch: outer continue re-enters the drag loop */
-                        /* Mode switched to rubber band mid-hold, or the hold was cleared:
-                         * resolve by snapping home (acceptable per spec). */
-                        if (!moon_drag_freespin_pending()) {
-                            moon_drag_trigger_return();
-                            break;
-                        }
-                        if (moon_drag_freespin_elapsed(cfg->moon_spin_return_s)) {
-                            moon_drag_trigger_return();   /* target -> 0: ease home next iteration */
-                            break;
-                        }
-                        vTaskDelay(pdMS_TO_TICKS(20));
-                    }
-                    continue;   /* re-enter outer loop: re-touch resumes drag, else snap-back eases home */
-                }
-
-                /* GRACE / idle hold before committing the resting render. Poll in
-                 * small steps; if a new touch begins, restart the outer loop so the
-                 * drag while-loop re-tracks the finger immediately (no rest render,
-                 * no crossfade). Bail the whole interaction if the page/source changed.
-                 * Only a fully-elapsed grace window (no re-touch) falls through to the
-                 * resting commit below. */
-                bool regrabbed = false;
-                if (ran_drag) {
-                    int waited_ms = 0;
-                    while (waited_ms < MOON_DRAG_REST_GRACE_MS) {
-                        if (!image_display_page_active || eff_src != 1) break;
-                        if (moon_drag_active()) { regrabbed = true; break; }
-                        vTaskDelay(pdMS_TO_TICKS(20));
-                        waited_ms += 20;
-                    }
-                }
-                if (regrabbed) continue;   /* re-enter the drag while-loop */
-                break;                     /* genuine rest: commit the resting frame */
-                } /* end outer for(;;) */
-
-                /* Drag settled: the last 240px settle frame (TRUE_PHASE, PPA-upscaled)
-                 * is still on screen. The full-res resting render below commits an
-                 * OWNED native-720 frame and crossfades it in over that settle frame
-                 * for a smooth sharpen-up. The render scratch / PPA buffers are freed
-                 * on page leave, not here, so the next drag reuses them. */
-
-                /* One-shot tap animation: ~4s eased sweep through a full synodic
-                 * cycle plus a full bright-limb spin, rendered at reduced size for
-                 * smoothness. Consume the request atomically so a single tap fires
-                 * once. Both phase and orientation are periodic over the sweep, so
-                 * t=1 lands back on the live values with no visible jump. */
-                if (atomic_exchange(&moon_anim_request, false)) {
-                    /* tgx tap-animation is a later phase; consume the tap (above)
-                     * and otherwise no-op, so the resting tgx frame renders below. */
-                }
-
-                /* Normal full-res render of the live current phase. Runs whether or
-                 * not an animation played; the caption reads the resting state.
-                 * Rendered at NATIVE 720 so it displays 1:1 (no software scale) and is
-                 * the sharpest possible resting frame; the ~297ms cost is a one-shot at
-                 * rest (not per-frame), so it is fine. update() copies it into an owned
-                 * buffer and crossfades it in at scale 1.0. */
-                s_moon_state = live;
-                const int MOON_SZ = SCREEN_SIZE;
-
-                /* ABORT-IF-TOUCH-RESUMED backstop. The grace window above makes this
-                 * rare, but a touch can land right at the grace boundary, AFTER we
-                 * broke out of the outer loop. A single moon_sphere_render(720) blocks
-                 * ~297ms and cannot be interrupted mid-call, so the guard MUST be
-                 * BEFORE it: if a finger is down now, skip the resting render + crossfade
-                 * commit entirely and `continue` the task loop. moon_drag_active() makes
-                 * moon_drag_settled() false, so re-entering the moon block immediately
-                 * re-enters the drag loop and tracks the finger with no blocking stall
-                 * and no dropped frame. */
-                if (moon_drag_active()) continue;
-
-                /* Render with tgx and log timing. When debug_mode is on, also
-                 * sweep candidate sizes so the size/fps tradeoff is visible on
-                 * serial for evaluation. */
-                if (cfg->debug_mode && !moon_drag_active()) {
-                    const int sizes[3] = {240, 300, 400};
-                    for (int si = 0; si < 3; si++) {
-                        int64_t te0 = esp_timer_get_time();
-                        uint16_t *tmp = moon_sphere_render(sizes[si], sizes[si], &live, 96, 48, cfg->moon_bg_style);
-                        int64_t te = esp_timer_get_time() - te0;
-                        ESP_LOGI(TAG, "tgx moon %dx%d render %lld ms", sizes[si], sizes[si], te/1000);
-                        if (tmp) heap_caps_free(tmp);
-                    }
-                }
-                int64_t t0 = esp_timer_get_time();
-                uint16_t *img = moon_sphere_render(MOON_SZ, MOON_SZ, &live, 96, 48, cfg->moon_bg_style);
-                ESP_LOGI(TAG, "tgx moon %dx%d render %lld ms", MOON_SZ, MOON_SZ, (esp_timer_get_time()-t0)/1000);
-                if (img) {
-                    if (goes_data_lock(&goes_data, 1000)) {
-                        if (goes_data.image_buf) heap_caps_free(goes_data.image_buf);
-                        goes_data.image_buf = (uint8_t *)img;
-                        goes_data.image_w = MOON_SZ;
-                        goes_data.image_h = MOON_SZ;
-                        goes_data.vflip = false;
-                        goes_data.label[0] = '\0';
-                        goes_data.src_kind = 1;   /* Moon */
-                        goes_data.connected = true;
-                        goes_data.last_poll_ms = esp_timer_get_time() / 1000;
-                        goes_data_unlock(&goes_data);
-                        /* Push this OWNED native-720 resting frame to the panel
-                         * immediately rather than waiting on the periodic UI cadence
-                         * (data_update_task, up to update_rate_s away) to notice the new
-                         * goes_data timestamp via its new-image gate. This makes
-                         * config-driven re-renders (flip / background / orientation
-                         * toggles from the web UI, which wake this task via
-                         * xTaskNotifyGive) appear as soon as the render completes,
-                         * matching the snappiness of the other live settings. It also
-                         * still REPLACES the post-drag 240px settle frame, whose
-                         * equal-millisecond timestamp the cadence gate could otherwise
-                         * tie on and skip. force_redraw bypasses that gate; the swap is
-                         * instant (matching every other moon frame) so there is no
-                         * midpoint brightness dip. */
-                        if (image_display_page_active &&
-                            eff_src == 1) {
-                            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                                nina_image_display_force_redraw();
-                                nina_image_display_update(&goes_data);
-                                bsp_display_unlock();
-                            }
-                        }
-                    } else {
-                        heap_caps_free(img);
-                    }
-                }
-            }
-            /* The NEXT slideshow image source was already prefetched near the top
-             * of this iteration (see the deadline-ordering note there), so nothing
-             * to do before sleeping. */
-            /* Recompute ~every 60s once time is valid so orientation tracks the
-             * sky; poll every ~3s while waiting for the clock to sync. */
-            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(time_valid ? 60000 : 3000));
-            continue;
-        }
-
-        /* GOES needs network — wait for WiFi before attempting any HTTP requests. */
-        xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
-
-        /* Show the full-screen wait overlay while the Image Display page is
-         * visible and either (a) the user changed the source/band (manual flag)
-         * or (b) nothing is on screen yet — which is the case on page (re)entry
-         * because the buffers are freed on leave, so has_image() is false on the
-         * first refresh after entry. Periodic background refreshes keep the
-         * current image on screen (has_image() true) and skip the overlay so it
-         * never flickers over a good frame. A takeover on an unrelated page
-         * would be jarring, so it stays gated on image_display_page_active. The
-         * overlay is hidden again when the new image is committed in
-         * nina_image_display_update(), or below on a fetch error. */
-        bool manual_fetch = atomic_exchange(&image_display_manual_fetch, false);
-        bool show_wait = false;
-        if (image_display_page_active) {
-            /* Derive a meaningful subtitle for all four image sources so the
-             * loading overlay always names the source being fetched. */
-            char pending_label[48] = "";
-            if (eff_src == 0 && cfg->goes_region[0]) {
-                strlcpy(pending_label, goes_region_name(cfg->goes_region), sizeof(pending_label));
-            } else if (eff_src == 1) {
-                strlcpy(pending_label, "Moon", sizeof(pending_label));
-            } else if (eff_src == 2) {
-                strlcpy(pending_label, solar_band_label(cfg->solar_band), sizeof(pending_label));
-            } else if (eff_src == 3) {
-                strlcpy(pending_label, "Custom", sizeof(pending_label));
-            }
-            const char *band_name = pending_label[0] ? pending_label : NULL;
-            /* Only treat the overlay as shown if the lock was acquired and the
-             * show actually ran — otherwise the error-hide below would be a
-             * spurious no-op against an overlay that never appeared. */
-            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                /* manual_fetch (config change OR manual nav) always animates. The
-                 * cold-image trigger fires whenever nothing is on screen for this
-                 * source — INCLUDING during auto-cycle. It used to be suppressed
-                 * there to keep a prefetch miss seamless, but with goes_data now
-                 * retaining its last frame across page leave, "no image" means
-                 * genuinely nothing to show, and suppressing the overlay left a
-                 * black panel as the steady state whenever the source was
-                 * unreachable. A retained frame keeps has_image() true, so the
-                 * seamless case is still seamless and a failing fetch never flashes
-                 * an overlay over a good frame. */
-                if (manual_fetch || !nina_image_display_has_image()) {
-                    nina_wait_overlay_show("Loading image...", band_name);
-                    nina_wait_overlay_set_progress(-1);   /* indeterminate */
-                    show_wait = true;
-                }
-                bsp_display_unlock();
-            }
-        }
-
-        esp_err_t fetch_err = ESP_OK;
-        if (eff_src == 3) {                                         /* Custom image URL */
-            if (cfg->custom_image_url[0] == '\0') {
-                /* No URL configured: skip the fetch and surface the reason so the
-                 * page shows why nothing loads instead of a stuck overlay. */
-                if (goes_data_lock(&goes_data, 200)) {
-                    strlcpy(goes_data.error_msg, "No URL configured", sizeof(goes_data.error_msg));
-                    goes_data_unlock(&goes_data);
-                }
-                fetch_err = ESP_ERR_INVALID_ARG;
-            } else {
-                /* Custom uses the same software JPEG decode path as GOES/Solar,
-                 * which needs a vertical flip to display upright. */
-                fetch_err = goes_client_poll_url(cfg->custom_image_url, &goes_data, true, "Custom", 3 /* Custom */);
-            }
-        } else if (eff_src == 2) {                                  /* Solar (SDO/AIA) */
-            const char *url = solar_band_url(cfg->solar_band);
-            /* All solar bands need a vertical flip to display upright (see solar_band_vflip). */
-            if (url && url[0]) {
-                fetch_err = goes_client_poll_url(url, &goes_data, solar_band_vflip(cfg->solar_band), solar_band_label(cfg->solar_band), 2 /* Solar */);
-            } else {
-                fetch_err = ESP_ERR_INVALID_ARG;
-            }
-        } else if (cfg->goes_region[0] != '\0') {                   /* GOES */
-            fetch_err = goes_client_poll(cfg->goes_region, &goes_data);
-        } else {
-            /* No region configured: nothing is fetched, so the new image never
-             * arrives. Mark as failed so the error-hide below clears any
-             * manual-fetch overlay instead of leaving it stuck. */
-            fetch_err = ESP_FAIL;
-        }
-
-        /* On a failed manual fetch the new image never arrives, so
-         * nina_image_display_update() will not hide the overlay — clear it here
-         * so it never gets stuck. */
-        if (show_wait && fetch_err != ESP_OK) {
-            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                nina_wait_overlay_hide();
-                bsp_display_unlock();
-            }
-            nina_toast_show(TOAST_WARNING, "Failed to load image");
-        }
-
-        /* The NEXT slideshow image source was already prefetched near the top of
-         * this iteration (see the deadline-ordering note there). */
-
-        /* Sleep for the configured interval. The satellite sources (GOES/Solar)
-         * clamp to 5min-2h to respect the image cadence; the custom source uses
-         * its own interval (10s-2h) since the user controls the endpoint. */
-        uint32_t interval_ms;
-        if (eff_src == 3) {
-            interval_ms = (uint32_t)cfg->custom_update_interval_s * 1000;
-            if (interval_ms < 10000) interval_ms = 10000;
-            if (interval_ms > 7200000) interval_ms = 7200000;
-        } else {
-            interval_ms = (uint32_t)cfg->goes_update_interval_s * 1000;
-            if (interval_ms < 300000) interval_ms = 300000;
-            if (interval_ms > 7200000) interval_ms = 7200000;
-        }
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(interval_ms));
-    }
+    static portMUX_TYPE octoprint_spawn_mux = portMUX_INITIALIZER_UNLOCKED;
+    psram_task_ensure(&octoprint_task_handle, &octoprint_spawn_mux,
+                      octoprint_poll_task, "octoprint", 12288, NULL, 3, 0);
 }
 
-// =============================================================================
-// GOES task lifecycle
-// =============================================================================
-
-/* 12288 words: TLS handshake + software JPEG decode headroom (matches/exceeds
- * the spotify TLS task). */
-void goes_ensure_task_running(void)
+/* Cuts the wait for a config change that only the poller can act on (image
+ * source, snapshot URL) from up to one poll interval to ~0. Same shape as the
+ * page-activation wake below and image_page_wake's image-poller wake:
+ * poll_loop_run sleeps in ulTaskNotifyTake, so this returns it immediately and
+ * the next poll re-reads config. Harmless when the page is inactive -- the
+ * gate loop consumes the notify and tasks.c re-wakes on activation. */
+void octoprint_wake_now(void)
 {
-    static portMUX_TYPE goes_spawn_mux = portMUX_INITIALIZER_UNLOCKED;
-    psram_task_ensure(&goes_task_handle, &goes_spawn_mux,
-                      goes_poll_task, "goes", 12288, NULL, 3, 0);
+    if (octoprint_task_handle) xTaskNotifyGive(octoprint_task_handle);
 }
 
 // =============================================================================
@@ -2662,10 +1434,9 @@ void data_update_task(void *arg) {
 
         /* Initialize AllSky data struct (needed even in demo mode) */
         allsky_data_init(&allsky_data);
-        /* Initialize GOES data struct so its mutex exists even in demo mode
-         * (a later web-handler enable + page entry would otherwise NULL-deref). */
-        goes_data_init(&goes_data);
-        goes_data_init(&goes_prefetch_data);
+        /* Image pages: create the four instance mutexes so a later web-handler
+         * enable + page entry never NULL-derefs; no pollers in demo mode. */
+        image_page_init(false);
 
         instance_count = app_config_get_instance_count();
         instance_count = 3;  /* demo mode always shows all 3 instance profiles */
@@ -2757,13 +1528,13 @@ void data_update_task(void *arg) {
                     esp_err_t ota_err = ota_github_download(rel->ota_url, ota_progress_cb);
                     if (ota_err == ESP_OK) {
                         ota_github_save_pending_version(rel->tag);
-                        ESP_LOGI(TAG, "OTA download success, rebooting...");
+                        ESP_LOGI(TAG, "OTA download success");
                         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                             nina_ota_prompt_set_progress(100);
                             bsp_display_unlock();
                         }
                         vTaskDelay(pdMS_TO_TICKS(1000));
-                        esp_restart();
+                        app_reboot("boot OTA complete");
                     } else {
                         ESP_LOGE(TAG, "OTA download failed: %s", esp_err_to_name(ota_err));
                         ota_in_progress = false;
@@ -2833,14 +1604,17 @@ boot_update_check_done:
     ha_client_init(&ha_data);
     ha_ensure_task_running();
 
-    /* GOES / Image Display poll task.
-     * goes_data_init must run UNCONDITIONALLY so the mutex exists before any
-     * later web-handler-triggered enable + page entry. */
-    goes_data_init(&goes_data);
-    goes_data_init(&goes_prefetch_data);
-    if (app_config_get()->image_display_enabled) {
-        goes_ensure_task_running();
-    }
+    /* OctoPrint poll task (pinned to Core 0, networking).
+     * octoprint_client_init runs UNCONDITIONALLY so the mutex exists before any
+     * later web-handler-triggered enable + page entry; the enable check lives
+     * inside octoprint_ensure_task_running(). */
+    octoprint_client_init(&octoprint_data);
+    octoprint_ensure_task_running();
+
+    /* Image pages (GOES / Moon / Solar / Custom). Mutexes for all four, a
+     * PSRAM poller for each source enabled in config; disabled sources spawn
+     * lazily on the first enable/entry (image_page_ensure_task_running). */
+    image_page_init(true);
 
     /* Spawn async fetch worker (pinned to Core 0, networking) */
     if (s_fetch_queue && s_fetch_result_queue) {
@@ -2963,27 +1737,32 @@ main_loop:
         bool on_allsky = nina_dashboard_is_allsky_page();
         bool on_json = nina_dashboard_is_json_page();
         bool on_ha = nina_dashboard_is_ha_page();
+        bool on_octoprint = nina_dashboard_is_octoprint_page();
         bool on_sysinfo = nina_dashboard_is_sysinfo_page();
         bool on_settings = nina_dashboard_is_settings_page();
         bool on_summary = nina_dashboard_is_summary_page();
         bool on_clock = nina_dashboard_is_clock_page();
-        bool on_image_display = nina_dashboard_is_image_display_page();
+        bool on_image = PAGE_IDX_IS_IMAGE(current_active);
 
         /*
          * Page index convention (see PAGE_IDX_* / NINA_PAGE_OFFSET / EXTRA_PAGES):
          *   PAGE_IDX_ALLSKY        (0)                  = AllSky page
          *   PAGE_IDX_SPOTIFY       (1)                  = Spotify page
          *   PAGE_IDX_CLOCK         (2)                  = Clock page (always present)
-         *   PAGE_IDX_IMAGE_DISPLAY (3)                  = Image Display page
-         *   PAGE_IDX_JSON          (4)                  = JSON Display page
-         *   PAGE_IDX_HA            (5)                  = Home Assistant page
-         *   PAGE_IDX_SUMMARY       (6)                  = summary page
+         *   PAGE_IDX_IMG_GOES      (3)                  = GOES Satellite image page
+         *   PAGE_IDX_IMG_MOON      (4)                  = Moon image page
+         *   PAGE_IDX_IMG_SOLAR     (5)                  = Solar image page
+         *   PAGE_IDX_IMG_CUSTOM    (6)                  = Custom URL image page
+         *   PAGE_IDX_JSON          (7)                  = JSON Display page
+         *   PAGE_IDX_HA            (8)                  = Home Assistant page
+         *   PAGE_IDX_OCTOPRINT     (9)                  = OctoPrint 3D Printer page
+         *   PAGE_IDX_SUMMARY       (10)                 = summary page
          *   NINA_PAGE_OFFSET .. NINA_PAGE_OFFSET+pc-1   = NINA instance pages
          *   SETTINGS_PAGE_IDX(pc)                       = settings page
          *   SYSINFO_PAGE_IDX(pc)                        = sysinfo page
          *
          * active_nina_idx: the actual instance index (0..MAX_NINA_INSTANCES-1)
-         *   for the active page, or -1 if on allsky/json/ha/spotify/clock/summary/settings/sysinfo.
+         *   for the active page, or -1 if on allsky/json/ha/octoprint/spotify/clock/summary/settings/sysinfo.
          */
         bool on_spotify = nina_dashboard_is_spotify_page();
         int active_nina_idx = -1;   /* Actual instance index (for data access) */
@@ -3036,29 +1815,67 @@ main_loop:
             prev_on_spotify = on_spotify;
             spotify_page_active = on_spotify;
 
-            /* AllSky and Clock flags — wake tasks immediately on page entry */
+            /* AllSky and Clock flags — wake tasks immediately on page entry.
+             * On leave, tell the client so it can destroy its keep-alive conn
+             * slot (gate flag first, so the poll task stops before teardown —
+             * same ordering as OctoPrint below). */
             static bool prev_on_allsky = false;
             if (on_allsky && !prev_on_allsky && allsky_task_handle) {
                 xTaskNotifyGive(allsky_task_handle);
             }
-            prev_on_allsky = on_allsky;
             allsky_page_active = on_allsky;
+            if (on_allsky != prev_on_allsky) {
+                allsky_client_set_page_active(on_allsky);
+            }
+            prev_on_allsky = on_allsky;
 
-            /* JSON Display flag — wake task immediately on page entry */
+            /* JSON Display flag — wake task immediately on page entry; conn
+             * teardown on leave, as above */
             static bool prev_on_json = false;
             if (on_json && !prev_on_json && json_task_handle) {
                 xTaskNotifyGive(json_task_handle);
             }
-            prev_on_json = on_json;
             json_page_active = on_json;
+            if (on_json != prev_on_json) {
+                json_client_set_page_active(on_json);
+            }
+            prev_on_json = on_json;
 
-            /* Home Assistant flag — wake task immediately on page entry */
+            /* Home Assistant flag — wake task immediately on page entry; conn
+             * teardown on leave, as above */
             static bool prev_on_ha = false;
             if (on_ha && !prev_on_ha && ha_task_handle) {
                 xTaskNotifyGive(ha_task_handle);
             }
-            prev_on_ha = on_ha;
             ha_page_active = on_ha;
+            if (on_ha != prev_on_ha) {
+                ha_client_set_page_active(on_ha);
+            }
+            prev_on_ha = on_ha;
+
+            /* OctoPrint flag — wake on entry; on leave, gate the poll task
+             * BEFORE releasing the decoded image. A poll already past its
+             * page-active check still publishes, so this is not a lifetime
+             * guarantee (the client frees its buffer under its own mutex); it
+             * only keeps the common case from re-decoding a frame we are about
+             * to drop. Two buffers are held: the client's, released by
+             * set_page_active(false), and the page's own copy. */
+            static bool prev_on_octoprint = false;
+            if (on_octoprint && !prev_on_octoprint && octoprint_task_handle) {
+                xTaskNotifyGive(octoprint_task_handle);
+            }
+            octoprint_page_active = on_octoprint;
+            if (on_octoprint != prev_on_octoprint) {
+                octoprint_client_set_page_active(on_octoprint, &octoprint_data);
+                if (!on_octoprint) {
+                    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                        octoprint_page_free_image();
+                        bsp_display_unlock();
+                    }
+                    ESP_LOGI(TAG, "Left OctoPrint page: freed image buffers");
+                }
+            }
+            prev_on_octoprint = on_octoprint;
 
             static bool prev_on_clock = false;
             if (on_clock && !prev_on_clock) {
@@ -3066,47 +1883,6 @@ main_loop:
             }
             prev_on_clock = on_clock;
             clock_page_active = on_clock;
-
-            /* Image Display lifecycle — wake on entry, free the page's own LVGL
-             * buffers on leave (the decoded frame in goes_data is retained; see
-             * the note below). */
-            static bool prev_on_image_display = false;
-            if (on_image_display && !prev_on_image_display && goes_task_handle) {
-                xTaskNotifyGive(goes_task_handle);
-            }
-            image_display_page_active = on_image_display;   /* gate poll task BEFORE cleanup */
-            if (!on_image_display && prev_on_image_display) {
-                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                    nina_image_display_cleanup();
-                    /* If a manual fetch was still in flight when the user left,
-                     * clear its loading overlay so it can't linger off-page. */
-                    nina_wait_overlay_hide();
-                    bsp_display_unlock();
-                }
-                /* goes_data.image_buf is deliberately NOT freed here. Freeing the
-                 * last decoded frame on every page leave meant every slideshow
-                 * re-entry started from nothing, so a slow or failing source (e.g.
-                 * an SDO TLS handshake that outruns the fetch timeout) showed a
-                 * black panel for the whole stop. Keeping it costs ~1-2MB of PSRAM
-                 * for one frame and lets the re-entry path in goes_poll_task put
-                 * the last good frame back instantly. It is replaced in place by
-                 * the next successful fetch/prefetch swap, and released when the
-                 * Image Display feature is disabled (image_display_apply_live).
-                 * Moon texture + drag scratch are NOT freed here either.
-                 * Synchronization
-                 * contract: they are written by renders that run only on
-                 * goes_poll_task (a 720px render blocks ~300ms and cannot be
-                 * interrupted), so freeing them from this task raced the renderer
-                 * and crashed inside tgx texture sampling. We only request the
-                 * release; goes_poll_task frees them at its parked point. The
-                 * request is issued AFTER nina_image_display_cleanup() above, so
-                 * the LVGL descriptor borrowing s_ppa_out is already dropped by the
-                 * time the owner task can free it. */
-                atomic_store(&s_moon_release_req, true);
-                if (goes_task_handle) xTaskNotifyGive(goes_task_handle);
-                ESP_LOGI(TAG, "Left Image Display: freed page buffers (frame retained)");
-            }
-            prev_on_image_display = on_image_display;
         }
 
         // Re-read instance count from config so API URL changes take effect live
@@ -3197,13 +1973,13 @@ main_loop:
                         esp_err_t ota_err = ota_github_download(rel->ota_url, ota_progress_cb);
                         if (ota_err == ESP_OK) {
                             ota_github_save_pending_version(rel->tag);
-                            ESP_LOGI(TAG, "OTA download success, rebooting...");
+                            ESP_LOGI(TAG, "OTA download success");
                             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                                 nina_ota_prompt_set_progress(100);
                                 bsp_display_unlock();
                             }
                             vTaskDelay(pdMS_TO_TICKS(1000));
-                            esp_restart();
+                            app_reboot("on-demand OTA complete");
                         } else {
                             ESP_LOGE(TAG, "OTA download failed: %s", esp_err_to_name(ota_err));
                             ota_in_progress = false;
@@ -3306,6 +2082,17 @@ main_loop:
                     ha_client_unlock(&ha_data);
                 }
             }
+
+            /* Immediate OctoPrint render with cached data.
+             * octoprint_page_update takes the display lock itself (client lock
+             * outside, display lock inside) so the image rescale runs outside
+             * the display lock. */
+            if (on_octoprint) {
+                if (octoprint_client_lock(&octoprint_data, 15)) {
+                    octoprint_page_update(&octoprint_data);
+                    octoprint_client_unlock(&octoprint_data);
+                }
+            }
         }
 
         int64_t now_ms = esp_timer_get_time() / 1000;
@@ -3399,12 +2186,24 @@ main_loop:
                 }
                 ha_client_unlock(&ha_data);
             }
-        } else if (on_image_display) {
-            /* Image Display page — repaint when a new GOES image has arrived.
-             * nina_image_display_update locks goes_data internally; it must be
-             * called with the display lock held. */
-            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                nina_image_display_update(&goes_data);
+        } else if (on_octoprint) {
+            /* OctoPrint page — trylock-and-skip the octoprint data (like JSON).
+             * The display lock is taken INSIDE octoprint_page_update (client
+             * lock outside, display lock inside), so the bilinear image rescale
+             * runs before it and never stalls the flush task. Skipping a cycle
+             * rather than blocking the UI preserves lock-ordering discipline. */
+            if (octoprint_client_lock(&octoprint_data, 15)) {
+                octoprint_page_update(&octoprint_data);
+                octoprint_client_unlock(&octoprint_data);
+            }
+        } else if (on_image) {
+            /* Image page — repaint if the poller committed a newer frame (the
+             * poller also pushes directly; this is the retry after a skipped
+             * crossfade). render_frame takes frame_mux internally; the display
+             * lock is held here (LVGL outer, frame_mux inner). */
+            image_page_t *ip = image_page_by_page_idx(current_active);
+            if (ip && bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                image_page_render_frame(ip);
                 bsp_display_unlock();
             }
         } else if (on_summary) {

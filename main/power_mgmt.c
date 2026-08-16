@@ -6,9 +6,21 @@
 #include "esp_sleep.h"
 #include "esp_system.h"
 #include "esp_wifi.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "nvs.h"
 
 static const char *TAG = "power_mgmt";
+
+void app_reboot(const char *reason)
+{
+    ESP_LOGW(TAG, "Restarting: %s", (reason && *reason) ? reason : "unspecified");
+    /* The line is logged here, i.e. after whatever delay the caller already
+     * did, so this short window is what actually gets it out to the UART and
+     * into the PSRAM log ring before the reset. */
+    vTaskDelay(pdMS_TO_TICKS(150));
+    esp_restart();
+}
 
 RTC_DATA_ATTR static bool s_deep_sleep_intended  = false;
 RTC_DATA_ATTR static uint32_t s_crash_count        = 0;

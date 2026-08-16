@@ -185,6 +185,68 @@ uint8_t *ppa_scale_rgb565(const uint8_t *src, uint32_t src_w, uint32_t src_h,
     return dst;
 }
 
+// =============================================================================
+// Software Bilinear Scaling
+// =============================================================================
+
+void sw_scale_rgb565_bilinear(const uint16_t *src, int sw, int sh,
+                              uint16_t *dst, int dw, int dh)
+{
+    if (!src || !dst || sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) return;
+
+    /* 16.16 fixed point. Centre-aligned sample positions
+     * (src = (d + 0.5) * scale - 0.5) so the output is not shifted by half a
+     * source pixel the way edge-aligned mapping is. */
+    const uint32_t step_x = ((uint32_t)sw << 16) / (uint32_t)dw;
+    const uint32_t step_y = ((uint32_t)sh << 16) / (uint32_t)dh;
+    const int32_t  base_x = (int32_t)(step_x >> 1) - 32768;
+    int32_t        pos_y  = (int32_t)(step_y >> 1) - 32768;
+
+    for (int y = 0; y < dh; y++, pos_y += (int32_t)step_y) {
+        int32_t py = pos_y < 0 ? 0 : pos_y;
+        int y0 = py >> 16;
+        if (y0 > sh - 1) y0 = sh - 1;
+        int y1 = (y0 + 1 < sh) ? y0 + 1 : y0;
+        /* 8-bit blend weights: products stay well inside 32 bits. */
+        uint32_t wy = ((uint32_t)py >> 8) & 0xFF;
+        uint32_t iy = 256 - wy;
+
+        const uint16_t *row0 = src + (size_t)y0 * (size_t)sw;
+        const uint16_t *row1 = src + (size_t)y1 * (size_t)sw;
+        uint16_t *out = dst + (size_t)y * (size_t)dw;
+        int32_t pos_x = base_x;
+
+        for (int x = 0; x < dw; x++, pos_x += (int32_t)step_x) {
+            int32_t px = pos_x < 0 ? 0 : pos_x;
+            int x0 = px >> 16;
+            if (x0 > sw - 1) x0 = sw - 1;
+            int x1 = (x0 + 1 < sw) ? x0 + 1 : x0;
+            uint32_t wx = ((uint32_t)px >> 8) & 0xFF;
+            uint32_t ix = 256 - wx;
+
+            uint32_t p00 = row0[x0], p01 = row0[x1];
+            uint32_t p10 = row1[x0], p11 = row1[x1];
+
+            /* Interpolate each RGB565 channel at its own bit depth, then
+             * repack — blending the packed words directly would bleed carries
+             * from blue into green into red. */
+            uint32_t top = ((p00 >> 11) & 0x1F) * ix + ((p01 >> 11) & 0x1F) * wx;
+            uint32_t bot = ((p10 >> 11) & 0x1F) * ix + ((p11 >> 11) & 0x1F) * wx;
+            uint32_t r   = (top * iy + bot * wy) >> 16;
+
+            top = ((p00 >> 5) & 0x3F) * ix + ((p01 >> 5) & 0x3F) * wx;
+            bot = ((p10 >> 5) & 0x3F) * ix + ((p11 >> 5) & 0x3F) * wx;
+            uint32_t g = (top * iy + bot * wy) >> 16;
+
+            top = (p00 & 0x1F) * ix + (p01 & 0x1F) * wx;
+            bot = (p10 & 0x1F) * ix + (p11 & 0x1F) * wx;
+            uint32_t b = (top * iy + bot * wy) >> 16;
+
+            out[x] = (uint16_t)((r << 11) | (g << 5) | b);
+        }
+    }
+}
+
 /* Shared core for the two into-a-buffer scalers. `clear_dst` zeroes the
  * destination before the transfer (needed when the output is not fully covered,
  * e.g. a non-integer ratio leaves a remainder strip); `quiet` suppresses the

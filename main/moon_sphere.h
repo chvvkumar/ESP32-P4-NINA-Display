@@ -10,7 +10,8 @@ bool moon_sphere_init(void);
 /* Free the decoded PSRAM texture (~1 MB) and reset init state; the next render
  * re-decodes lazily. Call on Image Display page leave. Safe if never inited.
  * NOT safe against a concurrent render: call it only from the task that runs the
- * moon renders (goes_poll_task here), with no render in flight. */
+ * moon renders — the Moon page poller in image_page_poll.c — with no render
+ * in flight. */
 void moon_sphere_deinit(void);
 /* Render a textured, sub-solar-lit sphere for `st` into a freshly malloc'd
  * RGB565 PSRAM buffer of size w*h*2 (caller frees). Returns NULL on failure. */
@@ -33,11 +34,14 @@ uint16_t *moon_sphere_render_ex(int w, int h, const moon_state_t *st,
 /* Same as moon_sphere_render_ex() but renders into CALLER-PROVIDED color + z
  * buffers (no per-frame heap alloc/free). Both must be w*h uint16 and 128-byte
  * aligned (PPA / cache line). Returns color_buf on success or NULL on bad args.
- * Used by the drag-to-rotate loop with persistent scratch buffers. */
+ * Used by the drag-to-rotate loop with persistent scratch buffers.
+ * explore_mix (0..1) crossfades the lighting of TRUE_PHASE / SURFACE_LOCKED
+ * toward the fully-lit explore look (0 = the mode's own lighting, 1 = explore);
+ * ignored for MOON_LIGHT_EXPLORE, which is always mix 1. */
 uint16_t *moon_sphere_render_into(int w, int h, const moon_state_t *st,
                                   int nb_sectors, int nb_stacks, uint8_t bg_style,
                                   float yaw_deg, float pitch_deg,
-                                  moon_light_mode_t light_mode,
+                                  moon_light_mode_t light_mode, float explore_mix,
                                   uint16_t *color_buf, uint16_t *zbuf);
 #ifdef __cplusplus
 }

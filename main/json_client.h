@@ -32,13 +32,21 @@
 /* Resolved per-tile values in ROW-MAJOR flatten order (row 0 left->right,
  * then row 1, ...). Index i is the i-th tile in that order. The UI computes
  * label/format/color from json_tiles_config; the client only stores the raw
- * resolved scalar as a string (HA sends numbers as strings, e.g. "88"). */
+ * resolved scalar as a string (HA sends numbers as strings, e.g. "88").
+ *
+ * connected/ever_ok/fail_count together let the UI tell "never polled yet"
+ * (ever_ok=false, fail_count<3) from "briefly stale" (ever_ok=true, 1-2 fails)
+ * from "really down" (3+ fails) -- see page_conn_eval() in page_conn.h. Failed
+ * polls never wipe values[]/resolved[], so a stale page keeps showing the last
+ * good readings, dimmed. */
 typedef struct {
-    bool    connected;                                   /* last poll reached host + parsed OK */
-    char    values[JSON_MAX_TILES][JSON_TILE_VALUE_LEN]; /* raw scalar; values[i][0]=='\0' => unresolved */
-    bool    resolved[JSON_MAX_TILES];                    /* true iff path resolved this poll */
-    int     tile_count;                                  /* # tiles flattened from config this poll */
-    int64_t last_poll_ms;
+    bool     connected;                                   /* last poll reached host + parsed OK */
+    bool     ever_ok;                                     /* latched true on the first successful poll */
+    uint16_t fail_count;                                  /* consecutive failed polls (0 on success, saturates) */
+    char     values[JSON_MAX_TILES][JSON_TILE_VALUE_LEN]; /* raw scalar; values[i][0]=='\0' => unresolved */
+    bool     resolved[JSON_MAX_TILES];                    /* true iff path resolved this poll */
+    int      tile_count;                                  /* # tiles flattened from config this poll */
+    int64_t  last_poll_ms;
     SemaphoreHandle_t mutex;
 } json_data_t;
 
@@ -59,8 +67,10 @@ void json_client_unlock(json_data_t *data);
  *  - auth_header is forwarded verbatim as a raw "Name: value" request header
  *    (via http_fetch_opts_t.extra_header), e.g. "Authorization: Bearer <token>"
  *    or "X-API-Key: <key>"; empty/NULL sends no extra header.
- *  - On any failure sets data->connected=false under the mutex (mirrors
- *    allsky_client_poll error path).
+ *  - On any failure sets data->connected=false and increments fail_count under
+ *    the mutex, leaving values[]/resolved[]/tile_count at their last good
+ *    contents so the UI can render them stale. On success sets connected=true,
+ *    ever_ok=true and clears fail_count.
  */
 void json_client_poll(const char *url, const char *auth_header,
                       const char *tiles_config_json, json_data_t *data);
@@ -68,6 +78,16 @@ void json_client_poll(const char *url, const char *auth_header,
 /** Invalidate cached parsed tiles_config. Call when json_tiles_config changes.
  *  Mirrors allsky_invalidate_field_config_cache. */
 void json_client_invalidate_config_cache(void);
+
+/**
+ * Page-active gate for keep-alive teardown. Call on every JSON page
+ * enter/leave transition (tasks.c, mirrors octoprint_client_set_page_active).
+ * On leave, destroys the keep-alive conn slot -- a drained-parked slot holds an
+ * OPEN socket, and the page-gated poll loop stops running, so the slot would
+ * otherwise hold a dead socket against the ~9-connection ceiling indefinitely.
+ * Safe against a poll in flight (internal mutex + zero-wait try-take).
+ */
+void json_client_set_page_active(bool active);
 
 /**
  * Resolve a single path against a parsed cJSON root and write the raw scalar

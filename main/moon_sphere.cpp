@@ -375,8 +375,8 @@ extern "C" bool moon_sphere_init(void)
  * hold that mutex across drawSphere (a 720px render blocks ~300ms), so it is
  * still sampling s_tex_buf the whole time. Calling this from another task while
  * a render runs panics inside tgx texture sampling (confirmed crash). In this
- * firmware the sole renderer is goes_poll_task, and it frees at its parked point
- * on request from data_update_task — see the ownership contract in tasks.c.
+ * firmware the sole renderer is the Moon page poller (image_page_poll.c), and
+ * it frees at its own parked point — see the ownership contract there.
  * The state is reset to "never inited", so the next moon_sphere_init() (lazy,
  * from moon_sphere_render*) re-decodes cleanly, including the current flips.
  * Safe to call when nothing was ever allocated. */
@@ -473,6 +473,7 @@ static uint16_t *moon_sphere_render_core(int w, int h, const moon_state_t *st,
                                          uint8_t bg_style,
                                          float yaw_deg, float pitch_deg,
                                          moon_light_mode_t light_mode,
+                                         float explore_mix,
                                          uint16_t *color_buf, uint16_t *zbuf)
 {
     const size_t npix      = (size_t)w * (size_t)h;
@@ -733,21 +734,24 @@ static uint16_t *moon_sphere_render_core(int w, int h, const moon_state_t *st,
         if (nd > 1e-6f) { sun_w.x /= nd; sun_w.y /= nd; sun_w.z /= nd; }
     }
 
-    if (light_mode == MOON_LIGHT_EXPLORE) {
-        /* Explore view: light the whole disc so the user can inspect the far
-         * side while spinning. Raise ambient near full and drop diffuse to a
-         * gentle view-aligned headlight (direction along the view axis, -Z) for
-         * mild shading with no dark/night side. The sky light vector computed
-         * above is intentionally NOT used here; only the material/light params
-         * are overridden. */
-        renderer.setMaterialAmbiantStrength(0.95f);
-        renderer.setMaterialDiffuseStrength(0.15f);
-        renderer.setLightDirection(fVec3(0.0f, 0.0f, -1.0f));
-    } else {
-        /* True sub-solar phase: keep the directional sub-solar light so the real
-         * phase terminator shows (material/light defaults set above). */
-        renderer.setLightDirection(fVec3(sun_w.x, sun_w.y, sun_w.z));
+    /* Explore mix: 0 = true sub-solar phase (defaults set above: ambient 0.06,
+     * diffuse 1.0), 1 = explore view (ambient 0.95, diffuse 0.15: the whole disc
+     * is lit so the user can inspect the far side while spinning, with only a
+     * faint sub-solar shading hint). MOON_LIGHT_EXPLORE is mix 1; any other mode
+     * takes the caller's explore_mix so the drag loop can crossfade the lighting
+     * in and out over a few frames instead of switching it. ONLY the two
+     * material strengths are lerped; the light direction stays sun_w in every
+     * mode, so every intermediate mix is a continuous blend (a direction lerp
+     * from sun_w to a fixed headlight would pass through zero near new moon and
+     * jump). */
+    float mix = (light_mode == MOON_LIGHT_EXPLORE) ? 1.0f : explore_mix;
+    if (mix < 0.0f) mix = 0.0f;
+    if (mix > 1.0f) mix = 1.0f;
+    if (mix > 0.0f) {
+        renderer.setMaterialAmbiantStrength(0.06f + (0.95f - 0.06f) * mix);
+        renderer.setMaterialDiffuseStrength(1.0f  + (0.15f - 1.0f)  * mix);
     }
+    renderer.setLightDirection(fVec3(sun_w.x, sun_w.y, sun_w.z));
 
     /* ----- Draw the textured sphere -------------------------------------- */
     renderer.drawSphere(nb_sectors, nb_stacks, &s_tex);
@@ -766,13 +770,15 @@ extern "C" uint16_t *moon_sphere_render_into(int w, int h, const moon_state_t *s
                                              uint8_t bg_style,
                                              float yaw_deg, float pitch_deg,
                                              moon_light_mode_t light_mode,
+                                             float explore_mix,
                                              uint16_t *color_buf, uint16_t *zbuf)
 {
     if (w <= 0 || h <= 0 || st == nullptr || color_buf == nullptr || zbuf == nullptr)
         return nullptr;
     if (!moon_sphere_init()) return nullptr;
     return moon_sphere_render_core(w, h, st, nb_sectors, nb_stacks, bg_style,
-                                   yaw_deg, pitch_deg, light_mode, color_buf, zbuf);
+                                   yaw_deg, pitch_deg, light_mode, explore_mix,
+                                   color_buf, zbuf);
 }
 
 extern "C" uint16_t *moon_sphere_render_ex(int w, int h, const moon_state_t *st,
@@ -807,7 +813,8 @@ extern "C" uint16_t *moon_sphere_render_ex(int w, int h, const moon_state_t *st,
 
     moon_sphere_render_core(w, h, st, nb_sectors, nb_stacks,
                             bg_style, yaw_deg, pitch_deg,
-                            light_mode, color_buf, zbuf);
+                            light_mode, 0.0f /* EXPLORE mode is mix 1 internally */,
+                            color_buf, zbuf);
 
     /* z-buffer no longer needed; return only the color buffer (caller frees).
      * render_core always succeeds once color_buf/zbuf are valid (no error path). */

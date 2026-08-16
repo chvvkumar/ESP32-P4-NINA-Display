@@ -380,6 +380,8 @@ void start_web_server(void)
         { { "/api/ha-config",        HTTP_POST, ha_config_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/ha-probe",         HTTP_GET,  ha_probe_get_handler,   NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/ha-test",          HTTP_GET,  ha_test_get_handler,    NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/octoprint/appkey-request", HTTP_POST, octoprint_appkey_request_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/octoprint/appkey-status",  HTTP_GET,  octoprint_appkey_status_get_handler,   NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/spotify/config",         HTTP_GET,  spotify_config_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/spotify/config",         HTTP_POST, spotify_config_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/spotify/callback",       HTTP_GET,  spotify_callback_get_handler, NULL }, ROUTE_PUBLIC },

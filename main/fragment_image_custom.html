@@ -1,0 +1,64 @@
+
+        <div class="card">
+          <div class="card-title"><span class="card-title-label">Custom URL <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+          <div class="help-popover"><div class="help-popover-title">Custom URL page</div><p>Adds a full-screen page that shows a JPEG from a web address you provide (for example an all-sky camera or a weather map). The picture refreshes at the update interval you choose. The page appears in the page list only once a URL is set.</p><p>Fill (crop borders) trims the picture's edges to fill the 720x720 panel. Rotation and the two flips correct a picture that appears sideways or mirrored on your panel.</p></div>
+          <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+            <span class="toggle-label">Enable Custom URL page</span>
+            <label class="toggle"><input type="checkbox" id="custom_enabled" onchange="updateImagePageEnabledUI('image-custom');applyImagePage('image-custom');checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Adds a page that shows a JPEG from a web address you provide.</div>
+          <div id="customFields">
+            <div class="toggle-row" style="margin-top:16px">
+              <span class="toggle-label">Show Overlay</span>
+              <label class="toggle"><input type="checkbox" id="custom_show_overlay" onchange="applyImagePage('image-custom');checkDirty()" checked><span class="toggle-track"></span></label>
+            </div>
+            <div class="field-hint">Caption and update time overlay on the display</div>
+            <div class="toggle-row">
+              <span class="toggle-label">Fill (crop borders)</span>
+              <label class="toggle"><input type="checkbox" id="custom_crop" onchange="applyImagePage('image-custom');checkDirty()"><span class="toggle-track"></span></label>
+            </div>
+            <div class="field-hint">Zoom the picture to fill the screen, trimming its edges.</div>
+            <div class="field" style="margin-top:16px">
+              <label class="field-label">Image URL</label>
+              <input class="input" id="customImageUrl" type="url" placeholder="https://picsum.photos/720" onchange="applyImagePage('image-custom');updateImgCustomPillHint();checkDirty()">
+              <div class="field-hint">JPEG only. Max 1024x1024 pixels, max 1 MB. PNG and WebP are not supported.</div>
+            </div>
+            <div class="field" style="margin-top:16px">
+              <label class="field-label">Rotation</label>
+              <select class="input" id="customOrientation" onchange="applyImagePage('image-custom');checkDirty()">
+                <option value="0">0&deg;</option>
+                <option value="1">90&deg;</option>
+                <option value="2">180&deg;</option>
+                <option value="3">270&deg;</option>
+              </select>
+              <div class="field-hint">Rotate the custom image clockwise.</div>
+            </div>
+            <div class="toggle-row" style="margin-top:16px;border-bottom:1px solid rgba(255,255,255,0.06)">
+              <span class="toggle-label">Flip vertical</span>
+              <label class="toggle"><input type="checkbox" id="customVflip" onchange="applyImagePage('image-custom');checkDirty()"><span class="toggle-track"></span></label>
+            </div>
+            <div class="field-hint">Mirrors the custom image top-to-bottom.</div>
+            <div class="toggle-row">
+              <span class="toggle-label">Flip horizontal</span>
+              <label class="toggle"><input type="checkbox" id="customHflip" onchange="applyImagePage('image-custom');checkDirty()"><span class="toggle-track"></span></label>
+            </div>
+            <div class="field-hint">Mirrors the custom image left-to-right.</div>
+            <div class="field" style="margin-top:16px">
+              <label class="field-label">Update Interval</label>
+              <select class="input" id="customInterval" onchange="applyImagePage('image-custom');checkDirty()">
+                <option value="10">10 seconds</option>
+                <option value="30">30 seconds</option>
+                <option value="60" selected>1 minute</option>
+                <option value="300">5 minutes</option>
+                <option value="600">10 minutes</option>
+                <option value="1800">30 minutes</option>
+                <option value="3600">1 hour</option>
+                <option value="7200">2 hours</option>
+              </select>
+              <div class="field-hint">How often the custom image refreshes.</div>
+            </div>
+            <div class="field" style="margin-top:16px">
+              <button onclick="fetchCustomPreview()" class="btn btn-primary" id="customPreviewBtn" style="width:100%">Refresh on Device</button>
+            </div>
+          </div>
+        </div>

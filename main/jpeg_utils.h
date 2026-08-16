@@ -92,3 +92,24 @@ uint8_t *ppa_scale_rgb565_into_noclear(const uint8_t *src, uint32_t src_w, uint3
                                         uint32_t dst_w, uint32_t dst_h,
                                         uint8_t *dst_buf, size_t dst_buf_size,
                                         size_t *out_size);
+
+/**
+ * @brief Software BILINEAR RGB565 rescale, straight orientation (row 0 -> row 0).
+ *
+ * Use instead of the PPA scalers when image quality matters more than speed:
+ * the SRM path resamples by pixel drop/duplicate (visible banding on non-integer
+ * ratios) and does not preserve orientation, whereas this is a plain
+ * centre-aligned bilinear filter that copies rows top-down.
+ *
+ * All per-pixel arithmetic is 16.16 fixed point (no float). Both buffers are
+ * tightly packed (stride == width); src and dst must not overlap.
+ *
+ * @param src  Source RGB565 pixels
+ * @param sw   Source width in pixels (>0)
+ * @param sh   Source height in pixels (>0)
+ * @param dst  Destination RGB565 pixels, at least dw*dh*2 bytes
+ * @param dw   Destination width in pixels (>0)
+ * @param dh   Destination height in pixels (>0)
+ */
+void sw_scale_rgb565_bilinear(const uint16_t *src, int sw, int sh,
+                              uint16_t *dst, int dw, int dh);

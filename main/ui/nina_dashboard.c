@@ -17,10 +17,11 @@
 #include "nina_allsky.h"
 #include "nina_json.h"
 #include "nina_ha.h"
+#include "nina_octoprint.h"
 #include "nina_spotify.h"
 #include "nina_clock.h"
 #include "page_registry.h"
-#include "nina_image_display.h"
+#include "nina_image_page.h"
 #include "moon_interaction.h"
 #include "nina_settings_tabview.h"
 #include "nina_toast.h"
@@ -104,6 +105,24 @@ static const page_ops_t s_ha_page_ops = {
     .is_available = NULL,
 };
 
+/* OctoPrint 3D Printer page — always at PAGE_IDX_OCTOPRINT (6), excluded from
+ * indicators. octoprint_obj is NULL when disabled (same NULL-when-disabled
+ * pattern as JSON). */
+static lv_obj_t *octoprint_obj = NULL;
+static lv_obj_t *octoprint_page_created = NULL;  /* NULL until the feature is first enabled */
+
+static lv_obj_t *octoprint_ops_get_obj(void) { return octoprint_obj; }
+
+static const page_ops_t s_octoprint_page_ops = {
+    .create       = octoprint_page_create,
+    .destroy      = NULL,
+    .get_obj      = octoprint_ops_get_obj,
+    .show         = NULL,
+    .hide         = NULL,
+    .apply_theme  = octoprint_page_apply_theme,
+    .is_available = NULL,
+};
+
 /* Spotify page — always at PAGE_IDX_SPOTIFY (1), excluded from indicators */
 lv_obj_t *spotify_obj = NULL;
 static lv_obj_t *spotify_page_created = NULL;  /* NULL until the feature is first enabled */
@@ -141,29 +160,42 @@ static const page_ops_t s_clock_page_ops = {
     .is_available = NULL,   /* NULL = derive from get_obj() != NULL (always available) */
 };
 
-/* Image Display page — always at PAGE_IDX_IMAGE_DISPLAY (3), excluded from indicators */
-lv_obj_t *image_display_obj = NULL;
-static lv_obj_t *image_display_page_created = NULL;
+/* ── Image pages — PAGE_IDX_IMG_GOES..PAGE_IDX_IMG_CUSTOM, one spine, four
+ * instances (ui/nina_image_page.h). Same NULL-when-disabled pattern as the
+ * other optional pages: img_obj[s] is NULL while the source is disabled,
+ * img_created[s] is NULL until its first enable. The registry ops show/hide
+ * hooks are the page-gate for that instance's poller (image_page_set_active). */
+static lv_obj_t *img_obj[IMG_SRC_COUNT];
+static lv_obj_t *img_created[IMG_SRC_COUNT];
 
-/* ── Image Display page registry ops (Task 4.7 wave P7b) ──
- * Registered under PAGE_REF_IMG_DEFAULT: the registry's generic "the Image
- * Display page itself" id (page_idx = PAGE_IDX_IMAGE_DISPLAY, img_src = -1),
- * distinct from the per-source ids (PAGE_REF_IMG_GOES/MOON/SOLAR/CUSTOM) that
- * share the same page_idx. Page lifecycle (create/get_obj/apply_theme) is
- * per-page, not per-source, so one ops registration covers all sources. */
-static lv_obj_t *image_display_ops_get_obj(void) { return image_display_obj; }
+/* Custom URL is navigable only with a URL configured: the registry says so
+ * (page_ref_is_available) and the dashboard/swipe/BOOT/arbiter must agree, or
+ * a swipe lands on a page that toasts "Failed to load image" every interval. */
+static bool img_custom_available(void) {
+    return img_obj[IMG_SRC_CUSTOM] != NULL && app_config_get()->custom_image_url[0] != '\0';
+}
 
-static const page_ops_t s_image_display_page_ops = {
-    .create       = nina_image_display_create,
-    .destroy      = NULL,
-    .get_obj      = image_display_ops_get_obj,
-    .show         = NULL,
-    .hide         = NULL,
-    .apply_theme  = nina_image_display_apply_theme,
-    .is_available = NULL,
+#define IMG_PAGE_OPS(fn, SRC, AVAIL) \
+    static lv_obj_t *fn##_create(lv_obj_t *parent) { return image_page_create(image_page_get(SRC), parent); } \
+    static lv_obj_t *fn##_get_obj(void) { return img_obj[SRC]; } \
+    static void fn##_show(void) { image_page_set_active(image_page_get(SRC), true); } \
+    static void fn##_hide(void) { image_page_set_active(image_page_get(SRC), false); } \
+    static void fn##_theme(void) { image_page_apply_theme(image_page_get(SRC)); } \
+    static const page_ops_t fn##_ops = { fn##_create, NULL, fn##_get_obj, fn##_show, fn##_hide, fn##_theme, AVAIL };
+IMG_PAGE_OPS(img_goes,   IMG_SRC_GOES,   NULL)
+IMG_PAGE_OPS(img_moon,   IMG_SRC_MOON,   NULL)
+IMG_PAGE_OPS(img_solar,  IMG_SRC_SOLAR,  NULL)
+IMG_PAGE_OPS(img_custom, IMG_SRC_CUSTOM, img_custom_available)
+#undef IMG_PAGE_OPS
+
+static const page_ops_t *const s_img_ops[IMG_SRC_COUNT] = {
+    &img_goes_ops, &img_moon_ops, &img_solar_ops, &img_custom_ops
+};
+static const page_ref_t s_img_ref[IMG_SRC_COUNT] = {
+    PAGE_REF_IMG_GOES, PAGE_REF_IMG_MOON, PAGE_REF_IMG_SOLAR, PAGE_REF_IMG_CUSTOM
 };
 
-/* Summary page — at PAGE_IDX_SUMMARY (5), excluded from indicators */
+/* Summary page — at PAGE_IDX_SUMMARY (7), excluded from indicators */
 static lv_obj_t *summary_obj = NULL;
 
 /* ── Summary page registry ops (Task 4.7 wave P7b) ──
@@ -210,7 +242,7 @@ static const page_ops_t s_sysinfo_page_ops = {
     .apply_theme  = sysinfo_page_apply_theme,
     .is_available = NULL,
 };
-int total_page_count = 0;   /* page_count + EXTRA_PAGES (allsky + spotify + clock + image_display + json + summary + settings + sysinfo) */
+int total_page_count = 0;   /* page_count + EXTRA_PAGES (allsky + spotify + clock + 4 image pages + json + ha + octoprint + summary + settings + sysinfo) */
 
 /* Private state */
 static lv_obj_t *scr_dashboard = NULL;
@@ -295,10 +327,14 @@ lv_obj_t *create_value_label(lv_obj_t *parent) {
  *   PAGE_IDX_ALLSKY        (0)                  = AllSky page
  *   PAGE_IDX_SPOTIFY       (1)                  = Spotify page
  *   PAGE_IDX_CLOCK         (2)                  = Clock page (always present)
- *   PAGE_IDX_IMAGE_DISPLAY (3)                  = Image Display page
- *   PAGE_IDX_JSON          (4)                  = JSON Display page
- *   PAGE_IDX_HA            (5)                  = Home Assistant page
- *   PAGE_IDX_SUMMARY       (6)                  = summary page
+ *   PAGE_IDX_IMG_GOES      (3)                  = Image page: GOES
+ *   PAGE_IDX_IMG_MOON      (4)                  = Image page: Moon
+ *   PAGE_IDX_IMG_SOLAR     (5)                  = Image page: Solar
+ *   PAGE_IDX_IMG_CUSTOM    (6)                  = Image page: Custom URL
+ *   PAGE_IDX_JSON          (7)                  = JSON Display page
+ *   PAGE_IDX_HA            (8)                  = Home Assistant page
+ *   PAGE_IDX_OCTOPRINT     (9)                  = OctoPrint 3D Printer page
+ *   PAGE_IDX_SUMMARY       (10)                 = summary page
  *   NINA_PAGE_OFFSET .. NINA_PAGE_OFFSET+pc-1   = NINA instance pages  (pages[idx - NINA_PAGE_OFFSET])
  *   SETTINGS_PAGE_IDX(pc)                       = settings page
  *   SYSINFO_PAGE_IDX(pc)                        = sysinfo page
@@ -324,7 +360,8 @@ static page_ref_t page_idx_to_ref_id(int idx) {
     if (idx == PAGE_IDX_SPOTIFY) return PAGE_REF_SPOTIFY;
     if (idx == PAGE_IDX_JSON) return PAGE_REF_JSON;
     if (idx == PAGE_IDX_HA) return PAGE_REF_HA;
-    if (idx == PAGE_IDX_IMAGE_DISPLAY) return PAGE_REF_IMG_DEFAULT;
+    if (idx == PAGE_IDX_OCTOPRINT) return PAGE_REF_OCTOPRINT;
+    if (PAGE_IDX_IS_IMAGE(idx)) return s_img_ref[PAGE_IDX_TO_IMG_SRC(idx)];
     if (idx == SYSINFO_PAGE_IDX(page_count)) return PAGE_REF_SYSINFO;
     return PAGE_REF_ID_MAX;
 }
@@ -337,6 +374,12 @@ static bool ops_get_obj(int idx, lv_obj_t **obj_out) {
     if (rid >= PAGE_REF_ID_MAX) return false;
     const page_ops_t *ops = page_registry_get_ops(rid);
     if (!ops) return false;
+    /* Optional availability veto (page_registry.h): a page may exist but be
+     * un-navigable right now (Custom URL with no URL configured). */
+    if (ops->is_available && !ops->is_available()) {
+        *obj_out = NULL;
+        return true;
+    }
     *obj_out = ops->get_obj();
     return true;
 }
@@ -463,7 +506,7 @@ static bool page_is_navigable(int idx) {
 
 bool nina_dashboard_page_is_available(int page_idx) {
     /* A page is available iff its backing object exists. Optional pages
-     * (AllSky/Spotify/Image Display) have NULL objects when disabled, and NINA
+     * (AllSky/Spotify/image pages) have NULL objects when disabled, and NINA
      * indices beyond page_count resolve to NULL as well. */
     return get_page_obj(page_idx) != NULL;
 }
@@ -547,15 +590,16 @@ void nina_dashboard_apply_theme(int theme_index) {
 
     /* Ported pages re-theme through registry ops. Each page's apply_theme
      * NULL-guards its own module state internally, so re-theming a currently
-     * disabled optional page (AllSky/Spotify/Image Display) is safe — and
+     * disabled optional page (AllSky/Spotify/image pages) is safe — and
      * keeps the hidden-but-created page current so a later re-enable shows
      * the correct theme. Settings stays hand-dispatched (modal, lazy). */
     ops_apply_theme(PAGE_IDX_ALLSKY);
     ops_apply_theme(PAGE_IDX_JSON);
     ops_apply_theme(PAGE_IDX_HA);
+    ops_apply_theme(PAGE_IDX_OCTOPRINT);
     ops_apply_theme(PAGE_IDX_SPOTIFY);
     ops_apply_theme(PAGE_IDX_CLOCK);
-    ops_apply_theme(PAGE_IDX_IMAGE_DISPLAY);
+    for (int s = 0; s < IMG_SRC_COUNT; s++) ops_apply_theme(PAGE_IDX_IMG_GOES + s);
     ops_apply_theme(PAGE_IDX_SUMMARY);
     if (settings_obj) settings_tabview_apply_theme();
     ops_apply_theme(SYSINFO_PAGE_IDX(page_count));
@@ -581,7 +625,7 @@ static void bottom_row_click_cb(lv_event_t *e) {
      * immediately for instant feedback AND record a USER claim so the grace
      * window protects it from being overridden by the next resolve(). */
     nina_dashboard_show_page_animated(PAGE_IDX_SUMMARY, 0, 0);
-    nav_arbiter_submit_user(PAGE_IDX_SUMMARY, esp_timer_get_time() / 1000, -1);
+    nav_arbiter_submit_user(PAGE_IDX_SUMMARY, esp_timer_get_time() / 1000);
 }
 
 /* Build all widgets for one dashboard page */
@@ -1039,12 +1083,10 @@ static void gesture_event_cb(lv_event_t *e) {
     if (nina_info_overlay_visible()) return;
 
     /* On the Moon page, a deliberate drag-to-rotate must not also flip pages.
-     * The Moon touch handlers (nina_image_display.c) only run when the active
-     * page is the Image Display page AND the source is Moon, so moon_drag_was_rotate()
-     * can only be true in that case. A clean quick flick (little finger travel)
-     * leaves was_rotate false and still navigates. */
-    if (active_page == PAGE_IDX_IMAGE_DISPLAY && image_display_obj != NULL &&
-        image_source_get_effective() == 1 && moon_drag_was_rotate()) {
+     * The Moon touch handlers only exist on the Moon instance, so
+     * moon_drag_was_rotate() can only be true there. A clean quick flick
+     * (little finger travel) leaves was_rotate false and still navigates. */
+    if (active_page == PAGE_IDX_IMG_MOON && moon_drag_was_rotate()) {
         return;
     }
 
@@ -1060,7 +1102,7 @@ static void gesture_event_cb(lv_event_t *e) {
             int candidate = (active_page + step) % total_page_count;
             if (candidate == SETTINGS_PAGE_IDX(page_count)) continue;
             /* Skip any page with no backing object: a disabled optional feature
-             * page (AllSky/Spotify/Image Display/JSON/HA) or an unavailable
+             * page (AllSky/Spotify/image pages/JSON/HA/OctoPrint) or an unavailable
              * NINA slot. Index positions stay reserved either way. */
             if (!page_is_navigable(candidate)) continue;
             new_page = candidate;
@@ -1082,16 +1124,8 @@ static void gesture_event_cb(lv_event_t *e) {
      * instant swipe feedback AND record a USER claim so the grace window
      * (nav_grace_s) protects this page from lower-priority sources until the
      * next resolve(). */
-    if (new_page == PAGE_IDX_IMAGE_DISPLAY) {
-        /* Clear any stale slideshow image-source override BEFORE the page
-         * becomes active, so the image page renders the correct source on the
-         * very first goes_poll_task iteration. nav_arbiter_submit_user() below
-         * also clears it, but only after the page is already visible, leaving a
-         * one-frame window of the wrong source. */
-        image_source_set_override(-1);
-    }
     nina_dashboard_show_page_animated(new_page, 0, 0);
-    nav_arbiter_submit_user(new_page, esp_timer_get_time() / 1000, -1);
+    nav_arbiter_submit_user(new_page, esp_timer_get_time() / 1000);
 }
 
 /* Target name: click to request thumbnail */
@@ -1162,7 +1196,7 @@ static bool slot_is_available_cfg(int instance) {
 }
 
 /* ── Lazy optional-page lifecycle ──
- * The five optional feature pages (AllSky, Spotify, Image Display, JSON, HA)
+ * The optional feature pages (AllSky, Spotify, Image Display, JSON, HA, OctoPrint)
  * are created on FIRST ENABLE, not at boot: a feature that is off costs no
  * PSRAM and no boot latency. Index positions stay reserved either way — the
  * nav pointer is NULL while the feature is off, and every consumer already
@@ -1184,6 +1218,13 @@ static bool slot_is_available_cfg(int instance) {
  */
 static void optional_page_set_enabled(const page_ops_t *ops, lv_obj_t **created,
                                       lv_obj_t **nav, int page_idx, bool enabled) {
+    /* The web server starts before create_nina_dashboard(), so an httpd worker
+     * can reach this through a live config apply while main_cont is still NULL.
+     * Without this guard the enable path would ops->create(NULL), which builds a
+     * stray LVGL screen that create_nina_dashboard() then orphans when it clears
+     * the *_created pointers. Boot reads the same config a moment later, so
+     * dropping the call loses nothing. */
+    if (!main_cont) return;
     if (enabled) {
         if (!*created) {
             *created = ops->create(main_cont);
@@ -1226,10 +1267,12 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     json_obj = NULL;
     ha_page_created = NULL;
     ha_obj = NULL;
+    octoprint_page_created = NULL;
+    octoprint_obj = NULL;
     spotify_page_created = NULL;
     spotify_obj = NULL;
-    image_display_page_created = NULL;
-    image_display_obj = NULL;
+    memset(img_created, 0, sizeof(img_created));
+    memset(img_obj, 0, sizeof(img_obj));
 
     /* Reserved fixed NINA index band: the band is always MAX_NINA_INSTANCES wide.
      * Slot i always maps to instance i at absolute index NINA_PAGE_OFFSET + i.
@@ -1272,6 +1315,11 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     optional_page_set_enabled(&s_ha_page_ops, &ha_page_created,
                               &ha_obj, PAGE_IDX_HA, cfg->ha_enabled);
 
+    /* OctoPrint 3D Printer page — PAGE_IDX_OCTOPRINT */
+    page_registry_set_ops(PAGE_REF_OCTOPRINT, &s_octoprint_page_ops);
+    optional_page_set_enabled(&s_octoprint_page_ops, &octoprint_page_created,
+                              &octoprint_obj, PAGE_IDX_OCTOPRINT, cfg->octoprint_enabled);
+
     /* Spotify page — PAGE_IDX_SPOTIFY */
     page_registry_set_ops(PAGE_REF_SPOTIFY, &s_spotify_page_ops);
     optional_page_set_enabled(&s_spotify_page_ops, &spotify_page_created,
@@ -1282,12 +1330,14 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     clock_obj = s_clock_page_ops.create(main_cont);
     lv_obj_add_flag(clock_obj, LV_OBJ_FLAG_HIDDEN);
 
-    /* Image Display page — PAGE_IDX_IMAGE_DISPLAY. Registered under
-     * PAGE_REF_IMG_DEFAULT (the page itself, source-agnostic). */
-    page_registry_set_ops(PAGE_REF_IMG_DEFAULT, &s_image_display_page_ops);
-    optional_page_set_enabled(&s_image_display_page_ops, &image_display_page_created,
-                              &image_display_obj, PAGE_IDX_IMAGE_DISPLAY,
-                              cfg->image_display_enabled);
+    /* Image pages — PAGE_IDX_IMG_GOES..PAGE_IDX_IMG_CUSTOM. One ops table per
+     * instance, registered under its own frozen id; created only if enabled. */
+    for (int s = 0; s < IMG_SRC_COUNT; s++) {
+        page_registry_set_ops(s_img_ref[s], s_img_ops[s]);
+        optional_page_set_enabled(s_img_ops[s], &img_created[s], &img_obj[s],
+                                  PAGE_IDX_IMG_GOES + s,
+                                  image_page_config_enabled(cfg, (image_src_t)s));
+    }
 
     /* Summary page — PAGE_IDX_SUMMARY, visible by default */
     page_registry_set_ops(PAGE_REF_SUMMARY, &s_summary_page_ops);
@@ -1320,7 +1370,7 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     page_registry_set_ops(PAGE_REF_SYSINFO, &s_sysinfo_page_ops);
     sysinfo_obj = s_sysinfo_page_ops.create(main_cont);
     lv_obj_add_flag(sysinfo_obj, LV_OBJ_FLAG_HIDDEN);
-    total_page_count = page_count + EXTRA_PAGES;  /* allsky + spotify + clock + image_display + json + summary + NINA pages + settings + sysinfo */
+    total_page_count = page_count + EXTRA_PAGES;  /* allsky + spotify + clock + 4 image pages + json + ha + octoprint + summary + NINA pages + settings + sysinfo */
 
     /* Page indicator dots — one dot per available NINA slot (not allsky, spotify, summary, settings, or sysinfo) */
     create_page_indicator(scr_dashboard, nina_available_count);
@@ -1460,6 +1510,15 @@ void nina_dashboard_set_ha_enabled(bool enabled) {
                               &ha_obj, PAGE_IDX_HA, enabled);
 }
 
+bool nina_dashboard_is_octoprint_page(void) {
+    return octoprint_obj != NULL && active_page == PAGE_IDX_OCTOPRINT;
+}
+
+void nina_dashboard_set_octoprint_enabled(bool enabled) {
+    optional_page_set_enabled(&s_octoprint_page_ops, &octoprint_page_created,
+                              &octoprint_obj, PAGE_IDX_OCTOPRINT, enabled);
+}
+
 bool nina_dashboard_is_spotify_page(void) {
     return spotify_obj != NULL && active_page == PAGE_IDX_SPOTIFY;
 }
@@ -1469,13 +1528,10 @@ void nina_dashboard_set_spotify_enabled(bool enabled) {
                               &spotify_obj, PAGE_IDX_SPOTIFY, enabled);
 }
 
-bool nina_dashboard_is_image_display_page(void) {
-    return image_display_obj != NULL && active_page == PAGE_IDX_IMAGE_DISPLAY;
-}
-
-void nina_dashboard_set_image_display_enabled(bool enabled) {
-    optional_page_set_enabled(&s_image_display_page_ops, &image_display_page_created,
-                              &image_display_obj, PAGE_IDX_IMAGE_DISPLAY, enabled);
+void nina_dashboard_set_image_page_enabled(int src, bool enabled) {
+    if (src < 0 || src >= IMG_SRC_COUNT) return;
+    optional_page_set_enabled(s_img_ops[src], &img_created[src], &img_obj[src],
+                              PAGE_IDX_IMG_GOES + src, enabled);
 }
 
 bool nina_dashboard_is_clock_page(void) {
