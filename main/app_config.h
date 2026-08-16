@@ -360,7 +360,7 @@ typedef struct {
     uint8_t  octoprint_enabled;        // enable the 3D Printer page + poll task (default 0)
     char     octoprint_url[128];       // OctoPrint base URL, scheme+host+port (http/https)
     char     octoprint_api_key[64];    // OctoPrint application/API key (secret)
-    uint16_t octoprint_update_interval_s; // poll interval 2-300s (default 5)
+    uint16_t octoprint_update_interval_s; // poll interval 2-300s (default 10)
     uint8_t  octoprint_image_source;   // 0 = G-code preview, 1 = webcam snapshot (default 0)
     uint8_t  octoprint_layout;         // 0=bento 2=glass 5=overlay 6=letterbox
                                        // (default 0); 1, 3 and 4 are retired,
