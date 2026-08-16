@@ -21,6 +21,8 @@
 #include "esp_timer.h"
 #include <string.h>
 #include <stdio.h>
+#include "freertos/task.h"
+#include "net_trace.h"
 
 static const char *TAG = "spotify_auth";
 
@@ -212,6 +214,7 @@ static esp_err_t do_token_request(const char *body, size_t body_len, token_resul
 
     esp_http_client_set_header(client, "Content-Type", "application/x-www-form-urlencoded");
 
+    net_ev_note(pcTaskGetName(NULL));
     esp_err_t err = esp_http_client_open(client, (int)body_len);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "HTTP open failed: %s", esp_err_to_name(err));

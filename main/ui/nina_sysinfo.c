@@ -24,6 +24,7 @@
 #include "perf_monitor.h"
 #include "time_parse.h"
 #include "nina_idle_indicator.h"
+#include "nina_net_debug.h"
 
 /* ── Layout ──────────────────────────────────────────────────────────── */
 #define SI_GAP       10
@@ -122,6 +123,18 @@ static lv_obj_t *make_bar(lv_obj_t *parent) {
 static void gear_btn_cb(lv_event_t *e) {
     LV_UNUSED(e);
     nina_dashboard_show_page(SETTINGS_PAGE_IDX(page_count), total_page_count);
+}
+
+/* ── Background tap → NET TRACE overlay (debug_mode only) ────────────── */
+
+static void net_debug_tap_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    if (!app_config_get()->debug_mode) return;
+    lv_indev_t *indev = lv_indev_active();
+    if (indev && lv_indev_get_gesture_dir(indev) != LV_DIR_NONE) {
+        return;   /* that was a page swipe, not a tap */
+    }
+    nina_net_debug_show();
 }
 
 /* ── Page Creation ───────────────────────────────────────────────────── */
@@ -251,6 +264,16 @@ lv_obj_t *sysinfo_page_create(lv_obj_t *parent) {
         lbl_stack_hwm_val = ui_kv(perf_card, "Stack HWM", &lv_font_montserrat_18, &lv_font_montserrat_20);
         if (!g_perf.enabled) lv_obj_add_flag(perf_card, LV_OBJ_FLAG_HIDDEN);
     }
+
+    /* Transparent floating tap-catcher over the whole page: cards are clickable
+     * so a page-level CLICKED would never see taps on them. Sits below the gear
+     * button in z-order; scroll gestures still chain to si_page. */
+    lv_obj_t *tap_layer = lv_obj_create(si_page);
+    lv_obj_remove_style_all(tap_layer);
+    lv_obj_set_size(tap_layer, LV_PCT(100), LV_PCT(100));
+    lv_obj_add_flag(tap_layer, LV_OBJ_FLAG_FLOATING | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(tap_layer, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(tap_layer, net_debug_tap_cb, LV_EVENT_CLICKED, NULL);
 
     /* Floating gear button — bottom-right corner, created last for top z-order */
     lv_obj_t *btn_gear = lv_button_create(si_page);

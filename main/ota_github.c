@@ -17,6 +17,7 @@
 #include <strings.h>
 #include <stdlib.h>
 #include <stdatomic.h>
+#include "net_trace.h"
 
 static const char *TAG = "ota_github";
 
@@ -818,6 +819,7 @@ static void resolve_ota_download_url(github_release_info_t *out) {
     };
     esp_http_client_handle_t hc = esp_http_client_init(&redir_cfg);
     if (hc) {
+        net_ev_note(pcTaskGetName(NULL));
         esp_err_t herr = esp_http_client_perform(hc);
         int status = esp_http_client_get_status_code(hc);
         if (herr == ESP_OK && (status == 301 || status == 302) && resolved_url[0]) {
@@ -906,6 +908,7 @@ static void ota_download_task(void *arg) {
             goto done;
         }
 
+        net_ev_note(pcTaskGetName(NULL));
         err = esp_http_client_open(client, 0);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Failed to open connection: %s", esp_err_to_name(err));

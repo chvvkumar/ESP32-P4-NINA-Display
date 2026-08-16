@@ -2,6 +2,7 @@
 #include "build_version.h"
 #include "app_config.h"
 #include "mqtt_client.h"
+#include "net_trace.h"
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_netif.h"
@@ -162,6 +163,7 @@ static void mqtt_publish_json(const char *topic, cJSON *obj)
     if (!obj) return;
     char *payload = cJSON_PrintUnformatted(obj);
     if (payload) {
+        net_ev_note("mqtt");
         esp_mqtt_client_publish(s_mqtt_client, topic, payload, 0, 1, 1);
         free(payload);
     } else {
@@ -266,6 +268,7 @@ void mqtt_ha_publish_state(void)
     int64_t uptime_us = esp_timer_get_time();
     char uptime_str[24];
     snprintf(uptime_str, sizeof(uptime_str), "%lld", (long long)(uptime_us / 1000000));
+    net_ev_note("mqtt");
     esp_mqtt_client_publish(s_mqtt_client, s_topic_uptime_state, uptime_str, 0, 0, 0);
 
     // Text brightness state
@@ -475,6 +478,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
         s_backoff_ms = MQTT_BACKOFF_INITIAL_MS;  // Reset backoff on successful connect
 
         // Publish availability
+        net_ev_note("mqtt");
         esp_mqtt_client_publish(s_mqtt_client, s_topic_avail, "online", 0, 1, 1);
 
         // Publish HA discovery configs
@@ -663,6 +667,7 @@ void mqtt_ha_stop(void)
     }
 
     if (s_connected) {
+        net_ev_note("mqtt");
         esp_mqtt_client_publish(s_mqtt_client, s_topic_avail, "offline", 0, 1, 1);
     }
 

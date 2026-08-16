@@ -13,6 +13,7 @@
 #include "json_get.h"
 #include "app_config.h"
 #include "esp_websocket_client.h"
+#include "net_trace.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
@@ -1047,6 +1048,7 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base,
 
     switch (event_id) {
     case WEBSOCKET_EVENT_CONNECTED:
+        net_ev_note("ws");
         ESP_LOGI(TAG, "WS[%d]: Connected to NINA", index);
         ws_backoff_ms[index] = WS_BACKOFF_INITIAL_MS;
         ws_needs_reconnect[index] = false;
@@ -1073,6 +1075,7 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base,
         break;
 
     case WEBSOCKET_EVENT_DATA:
+        net_ev_note("ws");
         // Text frame (0x01) and continuation (0x00) — reassemble fragments.
         // Binary/ping/pong/close opcodes are ignored.
         if (data->op_code == 0x01 || data->op_code == 0x00) {

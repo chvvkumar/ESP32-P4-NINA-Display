@@ -5,6 +5,7 @@
 
 #include "http_fetch.h"
 #include "http_fetch_policy.h"
+#include "net_trace.h"
 
 #include <string.h>
 #include <strings.h>
@@ -279,6 +280,7 @@ static esp_err_t open_and_follow_redirects(esp_http_client_handle_t client,
                                             int *status_out, int *content_length_out,
                                             bool *opened_out, int64_t *connect_us_out,
                                             int64_t *headers_us_out) {
+    net_ev_note(pcTaskGetName(NULL));
     capture_reset(opts);
     int64_t t0 = esp_timer_get_time();
     esp_err_t err = open_write_body(client, opts, opened_out);
