@@ -12,6 +12,7 @@
 
 #include "nina_image_page.h"
 #include "nina_wait_overlay.h"
+#include "nina_nav_arbiter.h"          /* nav_arbiter_notify_content_ready */
 #include "nina_dashboard.h"            /* nina_dashboard_set_image_page_enabled (config apply, B5) */
 #include "nina_dashboard_internal.h"   /* SCREEN_SIZE, OUTER_PADDING, current_theme, PAGE_IDX_IMG_* */
 #include "image_red_remap.h"
@@ -1313,6 +1314,7 @@ void image_page_commit_frame(image_page_t *p, image_frame_t *fresh, bool force)
         if (force) image_page_force_redraw(p);
         image_page_render_frame(p);
         bsp_display_unlock();
+        nav_arbiter_notify_content_ready(p->page_idx);   /* outside the display lock */
     }
 }
 
