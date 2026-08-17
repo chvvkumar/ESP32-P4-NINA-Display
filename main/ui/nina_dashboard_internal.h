@@ -24,23 +24,24 @@
  *   PAGE_IDX_IMG_MOON       (4)  = Moon image page
  *   PAGE_IDX_IMG_SOLAR      (5)  = Solar image page
  *   PAGE_IDX_IMG_CUSTOM     (6)  = Custom URL image page
- *   PAGE_IDX_JSON           (7)  = JSON Display page
- *   PAGE_IDX_HA             (8)  = Home Assistant page
- *   PAGE_IDX_OCTOPRINT      (9)  = OctoPrint 3D Printer page
- *   PAGE_IDX_SUMMARY        (10) = Summary page
- *   NINA_PAGE_OFFSET        (11) .. NINA_PAGE_OFFSET + page_count - 1 = NINA instance pages
- *   page_count + NINA_PAGE_OFFSET     = settings page  (14)
- *   page_count + NINA_PAGE_OFFSET + 1 = sysinfo page   (15)
- *   total_page_count = page_count + EXTRA_PAGES        (16)
+ *   PAGE_IDX_IMG_RADAR      (7)  = Weather Radar image page
+ *   PAGE_IDX_JSON           (8)  = JSON Display page
+ *   PAGE_IDX_HA             (9)  = Home Assistant page
+ *   PAGE_IDX_OCTOPRINT      (10) = OctoPrint 3D Printer page
+ *   PAGE_IDX_SUMMARY        (11) = Summary page
+ *   NINA_PAGE_OFFSET        (12) .. NINA_PAGE_OFFSET + page_count - 1 = NINA instance pages
+ *   page_count + NINA_PAGE_OFFSET     = settings page  (15)
+ *   page_count + NINA_PAGE_OFFSET + 1 = sysinfo page   (16)
+ *   total_page_count = page_count + EXTRA_PAGES        (17)
  *
  * These are INTERNAL absolute indices and may shift when an optional page is
  * inserted; nothing persists them. The stable external identity is the
  * page_ref_t id / slug in page_registry.h, which is what NVS and the web API
  * exchange. Every consumer must use the macros below, never a literal.
  *
- * The four image pages are contiguous and ordered as image_src_t
- * (ui/nina_image_page.h): GOES=0, Moon=1, Solar=2, Custom=3, so the page
- * index encodes the source (PAGE_IDX_TO_IMG_SRC).
+ * The five image pages are contiguous and ordered as image_src_t
+ * (ui/nina_image_page.h): GOES=0, Moon=1, Solar=2, Custom=3, Radar=4, so the
+ * page index encodes the source (PAGE_IDX_TO_IMG_SRC).
  */
 #define PAGE_IDX_ALLSKY          0
 #define PAGE_IDX_SPOTIFY         1
@@ -49,15 +50,16 @@
 #define PAGE_IDX_IMG_MOON        4
 #define PAGE_IDX_IMG_SOLAR       5
 #define PAGE_IDX_IMG_CUSTOM      6
-#define PAGE_IDX_JSON            7
-#define PAGE_IDX_HA              8
-#define PAGE_IDX_OCTOPRINT       9
-#define PAGE_IDX_SUMMARY         10
-#define NINA_PAGE_OFFSET         11  /* first NINA page index */
-#define EXTRA_PAGES              13  /* allsky+spotify+clock+4 image+json+ha+octoprint+summary+settings+sysinfo */
+#define PAGE_IDX_IMG_RADAR       7
+#define PAGE_IDX_JSON            8
+#define PAGE_IDX_HA              9
+#define PAGE_IDX_OCTOPRINT       10
+#define PAGE_IDX_SUMMARY         11
+#define NINA_PAGE_OFFSET         12  /* first NINA page index */
+#define EXTRA_PAGES              14  /* allsky+spotify+clock+5 image+json+ha+octoprint+summary+settings+sysinfo */
 
-/* Image page helpers: contiguous band [PAGE_IDX_IMG_GOES, PAGE_IDX_IMG_CUSTOM]. */
-#define PAGE_IDX_IS_IMAGE(i)     ((i) >= PAGE_IDX_IMG_GOES && (i) <= PAGE_IDX_IMG_CUSTOM)
+/* Image page helpers: contiguous band [PAGE_IDX_IMG_GOES, PAGE_IDX_IMG_RADAR]. */
+#define PAGE_IDX_IS_IMAGE(i)     ((i) >= PAGE_IDX_IMG_GOES && (i) <= PAGE_IDX_IMG_RADAR)
 #define PAGE_IDX_TO_IMG_SRC(i)   ((i) - PAGE_IDX_IMG_GOES)   /* valid only when PAGE_IDX_IS_IMAGE(i) */
 
 /* Derived page index helpers (use these instead of hardcoded arithmetic) */

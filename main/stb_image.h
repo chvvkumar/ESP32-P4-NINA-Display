@@ -6949,17 +6949,24 @@ static stbi_uc *stbi__gif_load_next(stbi__context *s, stbi__gif *g, int *comp, i
    }
 }
 
+/* LOCAL PATCH 2026-08-16: also frees the heap-allocated context itself, so every
+ * error return of stbi__load_gif_main disposes of it exactly once. */
 static void *stbi__load_gif_main_outofmem(stbi__gif *g, stbi_uc *out, int **delays)
 {
    STBI_FREE(g->out);
    STBI_FREE(g->history);
    STBI_FREE(g->background);
+   STBI_FREE(g);
 
    if (out) STBI_FREE(out);
    if (delays && *delays) STBI_FREE(*delays);
    return stbi__errpuc("outofmem", "Out of memory");
 }
 
+/* LOCAL PATCH 2026-08-16: same 34 KB stack bomb as stbi__gif_load — the context
+ * is heap-allocated here too. This firmware never calls the multi-frame entry
+ * point today, but leaving one patched and the other not is how the crash comes
+ * back. Re-apply after any stb_image upgrade. */
 static void *stbi__load_gif_main(stbi__context *s, int **delays, int *x, int *y, int *z, int *comp, int req_comp)
 {
    if (stbi__gif_test(s)) {
@@ -6967,7 +6974,7 @@ static void *stbi__load_gif_main(stbi__context *s, int **delays, int *x, int *y,
       stbi_uc *u = 0;
       stbi_uc *out = 0;
       stbi_uc *two_back = 0;
-      stbi__gif g;
+      stbi__gif *g;
       int stride;
       int out_size = 0;
       int delays_size = 0;
@@ -6975,25 +6982,27 @@ static void *stbi__load_gif_main(stbi__context *s, int **delays, int *x, int *y,
       STBI_NOTUSED(out_size);
       STBI_NOTUSED(delays_size);
 
-      memset(&g, 0, sizeof(g));
+      g = (stbi__gif*) stbi__malloc(sizeof(stbi__gif));
+      if (!g) return stbi__errpuc("outofmem", "Out of memory");
+      memset(g, 0, sizeof(*g));
       if (delays) {
          *delays = 0;
       }
 
       do {
-         u = stbi__gif_load_next(s, &g, comp, req_comp, two_back);
+         u = stbi__gif_load_next(s, g, comp, req_comp, two_back);
          if (u == (stbi_uc *) s) u = 0;  // end of animated gif marker
 
          if (u) {
-            *x = g.w;
-            *y = g.h;
+            *x = g->w;
+            *y = g->h;
             ++layers;
-            stride = g.w * g.h * 4;
+            stride = g->w * g->h * 4;
 
             if (out) {
                void *tmp = (stbi_uc*) STBI_REALLOC_SIZED( out, out_size, layers * stride );
                if (!tmp)
-                  return stbi__load_gif_main_outofmem(&g, out, delays);
+                  return stbi__load_gif_main_outofmem(g, out, delays);
                else {
                    out = (stbi_uc*) tmp;
                    out_size = layers * stride;
@@ -7002,19 +7011,19 @@ static void *stbi__load_gif_main(stbi__context *s, int **delays, int *x, int *y,
                if (delays) {
                   int *new_delays = (int*) STBI_REALLOC_SIZED( *delays, delays_size, sizeof(int) * layers );
                   if (!new_delays)
-                     return stbi__load_gif_main_outofmem(&g, out, delays);
+                     return stbi__load_gif_main_outofmem(g, out, delays);
                   *delays = new_delays;
                   delays_size = layers * sizeof(int);
                }
             } else {
                out = (stbi_uc*)stbi__malloc( layers * stride );
                if (!out)
-                  return stbi__load_gif_main_outofmem(&g, out, delays);
+                  return stbi__load_gif_main_outofmem(g, out, delays);
                out_size = layers * stride;
                if (delays) {
                   *delays = (int*) stbi__malloc( layers * sizeof(int) );
                   if (!*delays)
-                     return stbi__load_gif_main_outofmem(&g, out, delays);
+                     return stbi__load_gif_main_outofmem(g, out, delays);
                   delays_size = layers * sizeof(int);
                }
             }
@@ -7024,52 +7033,61 @@ static void *stbi__load_gif_main(stbi__context *s, int **delays, int *x, int *y,
             }
 
             if (delays) {
-               (*delays)[layers - 1U] = g.delay;
+               (*delays)[layers - 1U] = g->delay;
             }
          }
       } while (u != 0);
 
       // free temp buffer;
-      STBI_FREE(g.out);
-      STBI_FREE(g.history);
-      STBI_FREE(g.background);
+      STBI_FREE(g->out);
+      STBI_FREE(g->history);
+      STBI_FREE(g->background);
 
       // do the final conversion after loading everything;
       if (req_comp && req_comp != 4)
-         out = stbi__convert_format(out, 4, req_comp, layers * g.w, g.h);
+         out = stbi__convert_format(out, 4, req_comp, layers * g->w, g->h);
 
       *z = layers;
+      STBI_FREE(g);   /* LOCAL PATCH: last use of g is above; `out` is the caller's */
       return out;
    } else {
       return stbi__errpuc("not GIF", "Image was not as a gif type.");
    }
 }
 
+/* LOCAL PATCH 2026-08-16: the GIF context is heap-allocated, not a stack local.
+ * sizeof(stbi__gif) is ~34904 bytes (codes[8192] alone is 32 KB) while this
+ * firmware decodes on 12288-byte task stacks, so upstream's `stbi__gif g;`
+ * automatic faults on the function prologue's stack adjustment the moment any
+ * payload is a GIF. STBI_MALLOC is routed to PSRAM (see main/stb_image.c).
+ * Re-apply this after any stb_image upgrade. */
 static void *stbi__gif_load(stbi__context *s, int *x, int *y, int *comp, int req_comp, stbi__result_info *ri)
 {
    stbi_uc *u = 0;
-   stbi__gif g;
-   memset(&g, 0, sizeof(g));
+   stbi__gif *g = (stbi__gif*) stbi__malloc(sizeof(stbi__gif));
+   if (!g) return stbi__errpuc("outofmem", "Out of memory");
+   memset(g, 0, sizeof(*g));
    STBI_NOTUSED(ri);
 
-   u = stbi__gif_load_next(s, &g, comp, req_comp, 0);
+   u = stbi__gif_load_next(s, g, comp, req_comp, 0);
    if (u == (stbi_uc *) s) u = 0;  // end of animated gif marker
    if (u) {
-      *x = g.w;
-      *y = g.h;
+      *x = g->w;
+      *y = g->h;
 
       // moved conversion to after successful load so that the same
       // can be done for multiple frames.
       if (req_comp && req_comp != 4)
-         u = stbi__convert_format(u, 4, req_comp, g.w, g.h);
-   } else if (g.out) {
+         u = stbi__convert_format(u, 4, req_comp, g->w, g->h);
+   } else if (g->out) {
       // if there was an error and we allocated an image buffer, free it!
-      STBI_FREE(g.out);
+      STBI_FREE(g->out);
    }
 
    // free buffers needed for multiple frame loading;
-   STBI_FREE(g.history);
-   STBI_FREE(g.background);
+   STBI_FREE(g->history);
+   STBI_FREE(g->background);
+   STBI_FREE(g);   /* LOCAL PATCH: context is heap-owned; `u` is not ours to free */
 
    return u;
 }

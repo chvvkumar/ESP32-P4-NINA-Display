@@ -1,9 +1,9 @@
 /**
  * @file image_page_poll.c
- * @brief Pollers for the four image pages, on the poll_task spine. One task
- *        per ENABLED source ("img_goes" .. "img_custom", 12288 B PSRAM stack,
+ * @brief Pollers for the five image pages, on the poll_task spine. One task
+ *        per ENABLED source ("img_goes" .. "img_radar", 12288 B PSRAM stack,
  *        prio 3, Core 0), gated by image_page_t.poll_gate (active || warm).
- *        GOES/Solar/Custom share net_poll_once(); the Moon renders locally in
+ *        GOES/Solar/Custom/Radar share net_poll_once(); the Moon renders locally in
  *        moon_poll_once() (ported from the former goes_poll_task moon branch)
  *        and releases its texture/scratch in moon_on_park().
  */
@@ -12,6 +12,7 @@
 #include "ui/nina_wait_overlay.h"
 #include "ui/nina_toast.h"
 #include "poll_task.h"
+#include "radar_play.h"            /* radar_frame_is_stale (ring generation) */
 #include "tasks.h"                 /* s_wifi_event_group, WIFI_CONNECTED_BIT, ota_in_progress */
 #include "app_config.h"
 #include "display_defs.h"
@@ -315,7 +316,9 @@ static uint32_t interval_cb(void *arg)
 {
     image_page_t *p = (image_page_t *)arg;
     uint32_t interval = image_page_interval_ms(p);
-    if (p->src == IMG_SRC_MOON) return interval;
+    /* Moon renders every call; radar keeps its frames in the ring rather than
+     * p->frame, so neither has a p->frame age to shorten the sleep by. */
+    if (p->src == IMG_SRC_MOON || p->src == IMG_SRC_RADAR) return interval;
     int64_t age_ms = -1;
     if (xSemaphoreTake(p->frame_mux, pdMS_TO_TICKS(100)) == pdTRUE) {
         if (p->frame.buf) age_ms = esp_timer_get_time() / 1000 - p->frame.stamp_ms;
@@ -326,7 +329,7 @@ static uint32_t interval_cb(void *arg)
     return interval - (uint32_t)age_ms;                 /* remaining */
 }
 
-/* One image download+decode in flight across ALL four pollers (today's single
+/* One image download+decode in flight across ALL five pollers (today's single
  * goes task never ran two fetches at once; two concurrent 1 MB JPEG + 2 MB
  * decode transients would exceed the PSRAM budget and double the outbound
  * TLS sockets). A mutex is the right binary gate here (only the taker gives).
@@ -351,7 +354,83 @@ static void moon_commit(image_page_t *p, uint16_t *img, int w, int h)
     image_page_commit_frame(p, &f, true);
 }
 
-/* ---- GOES / Solar / Custom ---- */
+/* ---- GOES / Solar / Custom / Radar ---- */
+
+/* Build a RIDGE still URL. `token` is a char[16] and `frame` is 0..9, so the
+ * longest possible result is 41 + 15 + 1 + 6 + NUL = 64 bytes; url[96] cannot
+ * truncate and satisfies -Werror=format-truncation on its own array bounds.
+ *
+ * HARD BAN: `frame` is an int index 0..9 and MUST STAY ONE. Never widen this
+ * to a string suffix and never let a caller pass "loop": {TOKEN}_loop.gif is
+ * an animated GIF that stb decodes by allocating all ten frames at once
+ * (12.59 MiB + 2.83 MiB scratch, reallocated up to a 26.75 MiB double-peak =
+ * intermittent OOM), and its frames are inter-frame optimised so they cannot be
+ * split apart afterwards either. The numbered stills below ARE that loop, one
+ * frame of memory at a time. The token half is held to A-Z0-9 by
+ * radar_token_valid() (radar_play.h) so it cannot smuggle "_loop.gif?" in
+ * through a query string. */
+static void radar_frame_url(char *url, size_t sz, const char token[16], int frame)
+{
+    snprintf(url, sz, "https://radar.weather.gov/ridge/standard/%s_%d.gif", token, frame);
+}
+
+/* Time of the last successful newest-frame push, so the freshness check below
+ * can skip a download. Touched only by this task. */
+static int64_t s_radar_last_push_ms = 0;
+
+/* Rebuild the history behind the newest frame after a page activation: fetch
+ * {TOKEN}_1.gif upward and APPEND each at the tail, so the ring stays
+ * newest-first without ever reordering. Frames are STAGGERED ~1 s apart rather
+ * than run back to back: this board glitches the panel under sustained radio
+ * transmission (see wifi_max_tx_dbm), and nine rapid TLS downloads are exactly
+ * that profile. Stops early when the ring fills, a fetch fails (older frames
+ * are optional), or the page is left mid-backfill. */
+#define RADAR_BACKFILL_GAP_MS 1000
+
+static void radar_backfill(image_page_t *p, const app_config_t *cfg)
+{
+    int cap = image_page_radar_capacity();
+    if (cap <= 1) return;                       /* radar_frames == 1: a still, no ring */
+
+    /* Generation FIRST, token second: the config write lands before the ring
+     * reset bumps the generation, so this order can never pair an old token
+     * with the new generation (see radar_frame_is_stale in radar_play.h). */
+    uint32_t gen = image_page_radar_gen();
+    char token[16];
+    image_page_radar_token(cfg, token, sizeof(token));
+
+    for (int i = 1; i < cap; i++) {
+        if (!atomic_load(&p->poll_gate)) break;             /* page left / un-warmed */
+        if (image_page_radar_count() >= cap) break;         /* ring full */
+        vTaskDelay(pdMS_TO_TICKS(RADAR_BACKFILL_GAP_MS));
+        /* Superseded mid-backfill (region/frame-count/crop change, page leave).
+         * image_page_radar_add() would reject these frames anyway; bailing here
+         * stops us DOWNLOADING them. This loop lives ~9 s, so without it a
+         * region switch costs up to eight more 32 KB TLS fetches for a region
+         * nobody is looking at — and sustained radio transmission is what
+         * glitches this panel (see wifi_max_tx_dbm). Placed after the delay so
+         * it gates every fetch, including the first. */
+        if (radar_frame_is_stale(gen, image_page_radar_gen())) {
+            ESP_LOGI(TAG, "radar backfill superseded at frame %d", i);
+            return;
+        }
+
+        char url[96];
+        radar_frame_url(url, sizeof(url), token, i);
+
+        image_frame_t old = {0};
+        xSemaphoreTake(s_fetch_gate, portMAX_DELAY);
+        esp_err_t e = image_fetch_custom(url, &old);
+        xSemaphoreGive(s_fetch_gate);
+        if (e != ESP_OK) {
+            if (old.buf) heap_caps_free(old.buf);
+            ESP_LOGW(TAG, "radar backfill stopped at frame %d", i);
+            break;
+        }
+        image_page_radar_add(p, &old, false, gen);          /* append at the tail */
+    }
+    ESP_LOGI(TAG, "radar ring: %d/%d frames", image_page_radar_count(), cap);
+}
 
 static bool net_poll_once(void *arg)
 {
@@ -365,7 +444,13 @@ static bool net_poll_once(void *arg)
     int64_t now_ms = esp_timer_get_time() / 1000;
     int64_t age_ms = 0;
     bool have = false;
-    if (xSemaphoreTake(p->frame_mux, pdMS_TO_TICKS(200)) == pdTRUE) {
+    if (p->src == IMG_SRC_RADAR) {
+        /* Radar's frames live in the ring, not p->frame. "Have" means the ring
+         * is FULL: a partly-built ring must keep polling so the backfill below
+         * gets its chance, whatever the interval says. */
+        have = image_page_radar_count() >= image_page_radar_capacity();
+        age_ms = now_ms - s_radar_last_push_ms;
+    } else if (xSemaphoreTake(p->frame_mux, pdMS_TO_TICKS(200)) == pdTRUE) {
         have = (p->frame.buf != NULL);
         age_ms = now_ms - p->frame.stamp_ms;
         xSemaphoreGive(p->frame_mux);
@@ -388,7 +473,12 @@ static bool net_poll_once(void *arg)
 
     image_frame_t fresh = {0};
     esp_err_t err;
-    /* Serialize the fetch+decode across the four pollers (see s_fetch_gate).
+    /* Ring generation for a radar fetch, captured BEFORE the token is resolved
+     * below and handed to image_page_radar_add() so a frame that finishes
+     * downloading after a region switch is rejected instead of mixed into the
+     * new ring. Unused by the other four sources. */
+    uint32_t radar_gen = image_page_radar_gen();
+    /* Serialize the fetch+decode across the five pollers (see s_fetch_gate).
      * A page that was left/un-warmed while we waited needs no extra test here:
      * image_page_commit_frame() retains the frame either way, and the resident
      * cap frees it if the budget is exceeded. */
@@ -400,6 +490,16 @@ static bool net_poll_once(void *arg)
         case IMG_SRC_SOLAR:
             err = image_fetch_solar(cfg->solar_band, &fresh);
             break;
+        case IMG_SRC_RADAR: {
+            /* Token resolved per fetch and never written back to config (a poll
+             * task must not persist config). Frame 0 is the newest still. */
+            char token[16];
+            image_page_radar_token(cfg, token, sizeof(token));
+            char url[96];
+            radar_frame_url(url, sizeof(url), token, 0);
+            err = image_fetch_custom(url, &fresh);
+            break;
+        }
         default:   /* IMG_SRC_CUSTOM */
             /* image_fetch_custom() rejects an empty URL without filling in a
              * reason, so name it here; image_page_set_error() below stores it
@@ -415,7 +515,23 @@ static bool net_poll_once(void *arg)
     xSemaphoreGive(s_fetch_gate);
 
     if (err == ESP_OK) {
-        image_page_commit_frame(p, &fresh, false);
+        if (p->src == IMG_SRC_RADAR) {
+            /* Newest frame at the head; a re-served identical still is deduped
+             * inside _add. Only then rebuild the history (outside the fetch
+             * gate, which the backfill re-takes per download). */
+            image_page_radar_add(p, &fresh, true, radar_gen);
+            /* Radar never goes through image_page_commit_frame(), which is what
+             * clears p->frame.error_msg for every other source (it assigns the
+             * whole zeroed `fresh`). Without this, one transient failure latches
+             * the error caption forever: image_page_render_frame() checks the
+             * error branch BEFORE the ring branch, so every later activation
+             * repaints the stale reason until the first frame lands. */
+            image_page_set_error(p, "");
+            s_radar_last_push_ms = esp_timer_get_time() / 1000;
+            if (image_page_radar_backfill_take()) radar_backfill(p, cfg);
+        } else {
+            image_page_commit_frame(p, &fresh, false);
+        }
         return true;
     }
     image_page_set_error(p, fresh.error_msg[0] ? fresh.error_msg : "Fetch failed");

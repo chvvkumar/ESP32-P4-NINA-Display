@@ -232,7 +232,7 @@ static int idle_target_resolve(void) {
     return idx;
 }
 
-/** Ordered slideshow candidate list from auto_rotate_order2[0..15]: each stop
+/** Ordered slideshow candidate list from auto_rotate_order2[0..23]: each stop
  *  id resolved to an absolute page; unavailable pages and (when configured)
  *  disconnected NINA pages are skipped. Pure. */
 static int slideshow_build_candidates(int cand_out[ARP_ORDER_CAPACITY]) {

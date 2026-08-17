@@ -17,7 +17,8 @@ typedef struct {
     int64_t   stamp_ms;       /* esp_timer ms when buf was produced; 0 = never */
 } image_frame_t;
 
-/* Fetch + decode one JPEG into *out (out must be zeroed by the caller). On
+/* Fetch + decode one image (JPEG, PNG or GIF) into *out (out must be zeroed by
+ * the caller). On
  * ESP_OK out->buf is a fresh PSRAM allocation the caller owns; on failure
  * out->buf stays NULL and out->error_msg names the reason. */
 esp_err_t image_fetch_goes(const char *region, image_frame_t *out);

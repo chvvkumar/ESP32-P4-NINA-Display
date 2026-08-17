@@ -1,7 +1,7 @@
 /**
  * @file nina_image_page.c
- * @brief Image page spine: rendering + lifecycle for the four image pages
- *        (GOES / Moon / Solar / Custom). Ported from nina_image_display.c;
+ * @brief Image page spine: rendering + lifecycle for the five image pages
+ *        (GOES / Moon / Solar / Custom / Radar). Ported from nina_image_display.c;
  *        every former module-level static is now a field of image_page_t.
  *
  * Threading: every LVGL call below runs under the display lock held by the
@@ -16,7 +16,10 @@
 #include "nina_dashboard.h"            /* nina_dashboard_set_image_page_enabled (config apply, B5) */
 #include "nina_dashboard_internal.h"   /* SCREEN_SIZE, OUTER_PADDING, current_theme, PAGE_IDX_IMG_* */
 #include "image_red_remap.h"
+#include "image_night_invert.h"        /* radar: invert the greyscale basemap only */
 #include "moon_interaction.h"
+#include "radar_sites.h"               /* radar_site_nearest (token resolution) */
+#include "radar_play.h"                /* ring size, dedupe hash, playback cursor */
 #include "app_config.h"
 #include "display_defs.h"
 #include "tasks.h"                     /* psram_task_ensure, psram_task_spawn */
@@ -25,6 +28,7 @@
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
+#include <stdio.h>                     /* snprintf (radar caption) */
 #include <string.h>
 #include <time.h>
 
@@ -32,8 +36,20 @@ static const char *TAG = "image_page";
 
 extern const lv_font_t lv_font_overpass_27;
 
-/* The four instances. Identity fields are filled by image_page_init(). */
+/* The five instances. Identity fields are filled by image_page_init(). */
 static image_page_t s_pages[IMG_SRC_COUNT];
+
+/* Weather Radar animation ring — implementation further down, forward-declared
+ * here because the render/lifecycle functions above it dispatch into the ring
+ * for IMG_SRC_RADAR. All three require the display lock held by the caller. */
+static void radar_show_idx(image_page_t *p, int idx);
+static void radar_timer_sync(image_page_t *p);
+
+/* Pending-backfill request. Declared HERE, not with the rest of the ring state
+ * further down, because image_page_set_active() (above the ring block) raises it
+ * on every activation. Atomic: set from the UI task, consumed by the poll task
+ * via image_page_radar_backfill_take(). */
+static _Atomic bool s_radar_backfill_req;
 
 static inline void set_label_if_changed(lv_obj_t *label, const char *text)
 {
@@ -413,15 +429,16 @@ void image_page_render_frame(image_page_t *p)
     bool forced = p->force_redraw;
     p->force_redraw = false;
 
-    /* Custom Image URL error overlay. A failed fetch stores a reason string in
+    /* Custom Image URL / Radar error overlay. A failed fetch stores a reason string in
      * frame.error_msg and leaves no fresh frame (stamp_ms not advanced), so the
      * new-image gate below would return early and the page would show a blank or
      * stale panel with no explanation. Read error_msg under frame_mux (like every
      * other frame read here), and when a reason is present render it as the
      * caption text and bail. A successful fetch clears error_msg, so the normal
      * swap path below runs and overwrites the caption — no stale error. Scoped to
-     * Custom, so GOES/Solar/Moon are visually unchanged. */
-    if (p->src == IMG_SRC_CUSTOM && p->frame.error_msg[0] != '\0') {
+     * the two user-addressed sources (Custom URL and Radar, whose site token can
+     * be mistyped into a 404), so GOES/Solar/Moon are visually unchanged. */
+    if ((p->src == IMG_SRC_CUSTOM || p->src == IMG_SRC_RADAR) && p->frame.error_msg[0] != '\0') {
         char err_copy[48];
         strlcpy(err_copy, p->frame.error_msg, sizeof(err_copy));
         frame_unlock(p);
@@ -430,6 +447,18 @@ void image_page_render_frame(image_page_t *p)
         hide_moon_corner_labels(p);
         /* Release any manual-fetch wait overlay so it cannot get stuck on the
          * error path (mirrors the other early-exit overlay-hide sites). */
+        nina_wait_overlay_hide();
+        return;
+    }
+
+    /* Radar keeps its decoded frames in the animation ring, never in p->frame,
+     * so the whole copy/crop/crossfade path below does not apply: re-show the
+     * frame the playback cursor is on (the ring stores them already cropped)
+     * and make sure the playback timer matches the current ring state. */
+    if (p->src == IMG_SRC_RADAR) {
+        frame_unlock(p);
+        radar_show_idx(p, -1);          /* -1 = whatever the cursor is on */
+        radar_timer_sync(p);
         nina_wait_overlay_hide();
         return;
     }
@@ -854,10 +883,14 @@ void image_page_show_scaled(image_page_t *p, const uint16_t *buf, int w, int h)
     nina_wait_overlay_hide();
 }
 
-void image_page_show_borrowed(image_page_t *p, const uint16_t *buf, int w, int h)
+/* Instant swap of the LVGL descriptor onto a buffer the PAGE DOES NOT OWN, with
+ * no copy: the slot is flagged "borrowed" so release_dsc() never frees it. Two
+ * callers share this: the moon drag loop (owner = the PPA ping-pong scratch)
+ * and the radar ring (owner = the ring slot). Each adds its own caption after
+ * the swap. Caller holds the display lock and has already checked p->active,
+ * p->root and the dimensions. */
+static void swap_borrowed_buf(image_page_t *p, const uint16_t *buf, int w, int h)
 {
-    if (!atomic_load(&p->active)) return;
-    if (!buf || !p->root || w <= 0 || h <= 0) return;
     /* A settle->resting crossfade may still be in flight when a new drag frame
      * arrives (rapid re-swipe right at the grace boundary). Rather than DROP this
      * frame (which froze the disc until the fade finished, then jumped — the
@@ -867,11 +900,11 @@ void image_page_show_borrowed(image_page_t *p, const uint16_t *buf, int w, int h
     if (p->crossfade_active) cancel_moon_crossfade(p);
 
     /* Point the BACK slot's descriptor straight at the caller's buffer — NO copy.
-     * The caller (moon drag loop) ping-pongs two 720 PPA-output buffers and hands
-     * us the one NOT currently on screen, so nothing the front image is still
-     * flushing is ever overwritten. Flag the slot "borrowed" so release_dsc()
-     * skips freeing it (the caller owns it and frees on page leave). Free any
-     * PRIOR owned buffer this slot held first. */
+     * The moon drag loop ping-pongs two 720 PPA-output buffers and hands us the
+     * one NOT currently on screen; the radar ring hands us a slot it will not
+     * free while it is displayed. Either way nothing the front image is still
+     * flushing is overwritten. Flag the slot "borrowed" so release_dsc() skips
+     * freeing it. Free any PRIOR owned buffer this slot held first. */
     bool back_is_a = !p->front_is_a;
     lv_image_dsc_t *back_dsc = p->front_is_a ? &p->dsc_b : &p->dsc_a;
     release_dsc(p, back_dsc, back_is_a);       /* free prior OWNED buffer if any */
@@ -890,7 +923,9 @@ void image_page_show_borrowed(image_page_t *p, const uint16_t *buf, int w, int h
     back_dsc->header.stride = w * 2;
     if (back_is_a) p->dsc_a_borrowed = true; else p->dsc_b_borrowed = true;
 
-    /* Full-panel buffer (720): display 1:1 (256 = 1.0x), no software scale. */
+    /* Scale to fill the panel width (256 = 1.0x). A full-panel 720 buffer (moon
+     * drag) lands on exactly 1.0x and costs no software scale; a smaller radar
+     * tile is scaled up by LVGL like every other image page. */
     uint16_t scale = (w > 0) ? (uint16_t)(((uint32_t)SCREEN_SIZE * 256 + w / 2) / w) : 256;
     lv_image_set_src(p->img_back, back_dsc);
     lv_image_set_scale(p->img_back, scale);
@@ -911,9 +946,18 @@ void image_page_show_borrowed(image_page_t *p, const uint16_t *buf, int w, int h
     p->img_back   = p->front_is_a ? lv_obj_get_child(p->root, 1)
                                   : lv_obj_get_child(p->root, 0);
 
-    /* Mark a frame as displayed (mirrors render_frame) and keep the moon caption
-     * live during the drag. */
+    /* Mark a frame as displayed (mirrors render_frame). */
     p->displayed_stamp_ms = esp_timer_get_time() / 1000;
+}
+
+void image_page_show_borrowed(image_page_t *p, const uint16_t *buf, int w, int h)
+{
+    if (!atomic_load(&p->active)) return;
+    if (!buf || !p->root || w <= 0 || h <= 0) return;
+
+    swap_borrowed_buf(p, buf, w, h);
+
+    /* Keep the moon caption live during the drag. */
     char name[24], pct[16];
     moon_caption(name, sizeof(name), pct, sizeof(pct));
     set_label_if_changed(p->lbl_region, name);
@@ -1015,7 +1059,7 @@ void image_page_apply_theme(image_page_t *p)
 
 /* ─────────────────────────── instances & gates ─────────────────────────── */
 
-static const char *const s_names[IMG_SRC_COUNT] = { "img_goes", "img_moon", "img_solar", "img_custom" };
+static const char *const s_names[IMG_SRC_COUNT] = { "img_goes", "img_moon", "img_solar", "img_custom", "img_radar" };
 
 image_page_t *image_page_get(image_src_t src)
 {
@@ -1114,6 +1158,10 @@ void image_page_set_active(image_page_t *p, bool active)
     update_gate(p);
     if (active) {
         p->last_shown_ms = esp_timer_get_time() / 1000;   /* eviction order (LRU) */
+        /* Radar frees its whole ring on leave (see the ring block), so every
+         * activation asks the poller to rebuild the history behind the newest
+         * frame. The request is a no-op once the ring is full. */
+        if (p->src == IMG_SRC_RADAR) atomic_store(&s_radar_backfill_req, true);
         image_page_ensure_task_running(p);
         image_page_render_frame(p);   /* a retained or warm frame shows instantly; no-op when empty */
         image_page_wake(p);
@@ -1125,6 +1173,11 @@ void image_page_set_active(image_page_t *p, bool active)
      * by image_page_evict_if_over_cap on later commits). Poke the poller so it
      * parks (Moon frees its texture in on_park unless it is still warm). */
     image_page_release_lvgl(p);
+    /* A full radar ring is ~6.6 MB — far past what the retained-frame budget
+     * was sized for, and it is never counted by image_page_evict_if_over_cap
+     * (which looks at p->frame, always NULL for radar). Free it outright here
+     * rather than let a parked page sit on it; the next activation backfills. */
+    if (p->src == IMG_SRC_RADAR) image_page_radar_reset(p);
     nina_wait_overlay_hide();
     image_page_wake(p);
 }
@@ -1154,6 +1207,9 @@ void image_page_disable(image_page_t *p)
     atomic_store(&p->warm, false);
     update_gate(p);
     frame_drop(p);
+    /* Radar holds its frames in the ring, not p->frame; take the display lock
+     * (this function is called without it) and drop the whole ring. */
+    if (p->src == IMG_SRC_RADAR) image_page_radar_invalidate(p);
     image_page_wake(p);
 }
 
@@ -1199,6 +1255,7 @@ bool image_page_config_enabled(const app_config_t *c, image_src_t src)
         case IMG_SRC_MOON:   return c->moon_enabled;
         case IMG_SRC_SOLAR:  return c->solar_enabled;
         case IMG_SRC_CUSTOM: return c->custom_enabled;
+        case IMG_SRC_RADAR:  return c->radar_enabled;
         default:             return false;
     }
 }
@@ -1210,6 +1267,7 @@ bool image_page_config_overlay(const app_config_t *c, image_src_t src)
         case IMG_SRC_MOON:   return c->moon_show_overlay;
         case IMG_SRC_SOLAR:  return c->solar_show_overlay;
         case IMG_SRC_CUSTOM: return c->custom_show_overlay;
+        case IMG_SRC_RADAR:  return c->radar_show_overlay;
         default:             return true;
     }
 }
@@ -1220,6 +1278,7 @@ bool image_page_config_crop(const app_config_t *c, image_src_t src)
         case IMG_SRC_GOES:   return c->goes_crop;
         case IMG_SRC_SOLAR:  return c->solar_crop;
         case IMG_SRC_CUSTOM: return c->custom_crop;
+        case IMG_SRC_RADAR:  return c->radar_crop;
         default:             return false;   /* Moon never crops */
     }
 }
@@ -1244,6 +1303,13 @@ uint32_t image_page_interval_ms(image_page_t *p)
             if (s < 10) s = 10;
             if (s > 7200) s = 7200;
             break;
+        case IMG_SRC_RADAR:
+            /* RIDGE tiles refresh every few minutes; 120 s is the floor the
+             * config clamp also enforces, so a stale blob cannot poll faster. */
+            s = c->radar_update_interval_s;
+            if (s < 120) s = 120;
+            if (s > 7200) s = 7200;
+            break;
         default: {   /* Moon: fast retry until SNTP sets the clock, then the configured cadence */
             time_t now;
             time(&now);
@@ -1257,6 +1323,51 @@ uint32_t image_page_interval_ms(image_page_t *p)
     return s * 1000u;
 }
 
+/* A RIDGE token is a site id ("KTLX"), a region token ("SOUTHEAST") or "CONUS":
+ * uppercase letters and digits only, 3..15 characters. Anything else is
+ * rejected and the caller falls back to CONUS.
+ *
+ * This is NOT cosmetic validation, it is the choke point that enforces the
+ * _loop.gif ban below. radar_frame_url() formats "%s_%d.gif", so the frame
+ * index itself can never spell "loop" — but a token carrying a query or
+ * fragment can smuggle one past it: radar_token = "KTLX_loop.gif?" builds
+ * ".../KTLX_loop.gif?_0.gif", which serves the animated loop with the rest of
+ * the path as a query string. Restricting the alphabet kills that, along with
+ * path traversal and any other URL surgery through the token field. Enforcing
+ * it here rather than at each URL site means a future radar URL cannot forget
+ * it: every builder gets its token from this function. */
+/* Implemented as radar_token_valid() in radar_play.h so the host suite can
+ * prove the _loop.gif smuggling cases stay rejected. */
+
+/* Resolved per call, never written back to config: image_page_poll.c calls this
+ * from a poll task, and a poll task must not persist config. An explicit token
+ * (a WSR-88D site id, a region token or CONUS) wins; otherwise a configured
+ * weather location picks the nearest site; otherwise the national mosaic.
+ *
+ * HARD BAN — {TOKEN}_loop.gif MUST NEVER BE FETCHED OR DECODED. It is an
+ * animated GIF whose stb path allocates every frame at once: 12.59 MiB in one
+ * go plus 2.83 MiB of scratch, grown through nine successive reallocs that can
+ * double-peak to 26.75 MiB, i.e. an intermittent OOM that depends on PSRAM
+ * fragmentation. Its frames are inter-frame optimised too (one is a 78x9 patch
+ * covering only the burnt-in timestamp), so it cannot be split into independent
+ * stills either. The ten numbered stills _0.._9 ARE the loop and cost one frame
+ * of memory at a time. radar_token_valid() (radar_play.h) is what keeps a
+ * hand-typed token from reaching it. */
+void image_page_radar_token(const app_config_t *c, char *out, size_t sz)
+{
+    if (!c || !out || sz == 0) return;
+    if (radar_token_valid(c->radar_token)) {
+        strlcpy(out, c->radar_token, sz);
+    } else if (c->radar_token[0] == '\0' &&
+               c->weather_lat != 0.0f && c->weather_lon != 0.0f) {
+        strlcpy(out, radar_site_nearest(c->weather_lat, c->weather_lon), sz);
+    } else {
+        /* Empty with no location, or a token that failed validation: the
+         * national mosaic is always a safe, always-available target. */
+        strlcpy(out, "CONUS", sz);
+    }
+}
+
 void image_page_label(image_page_t *p, char *out, size_t sz)
 {
     const app_config_t *c = app_config_get();
@@ -1267,6 +1378,15 @@ void image_page_label(image_page_t *p, char *out, size_t sz)
         case IMG_SRC_MOON:   strlcpy(out, "Moon", sz); break;
         case IMG_SRC_SOLAR:  strlcpy(out, solar_band_label(c->solar_band), sz); break;
         case IMG_SRC_CUSTOM: strlcpy(out, "Custom", sz); break;
+        case IMG_SRC_RADAR: {
+            char token[16];
+            image_page_radar_token(c, token, sizeof(token));
+            /* strlcpy/strlcat rather than snprintf: both truncate safely into
+             * sz with no format-truncation diagnostic to satisfy. */
+            strlcpy(out, "Radar ", sz);
+            strlcat(out, token, sz);
+            break;
+        }
         default: break;
     }
 }
@@ -1280,6 +1400,321 @@ bool image_page_get_error(image_page_t *p, char *out, size_t sz)
         frame_unlock(p);
     }
     return out[0] != '\0';
+}
+
+/* ───────────────────────── Weather Radar animation ring ─────────────────────
+ *
+ * The radar page keeps up to radar_frames decoded stills (index 0 = newest) and
+ * plays them oldest -> newest on an LVGL timer, holding longer on the newest.
+ * Everything else on this page is unchanged; the ring simply replaces p->frame
+ * as the storage, which is why image_page_render_frame() dispatches here.
+ *
+ * LOCKING: the ring is guarded by the DISPLAY LOCK alone — no second mutex.
+ * Every reader/mutator either runs on the UI task with the lock already held
+ * (render, playback timer, set_active) or takes it itself (the poller's
+ * image_page_radar_add / _invalidate). Never hold frame_mux across these.
+ *
+ * OWNERSHIP: the LVGL descriptor BORROWS a ring slot's buffer (release_dsc
+ * skips borrowed slots), so s_radar_shown must be detached before that buffer
+ * is freed — ring_free_slot() does exactly that.
+ *
+ * MEMORY: a full ten-frame ring of 600x550 tiles is ~6.6 MB, several times what
+ * a normal image page holds, so IMAGE_PAGE_MAX_RESIDENT (which counts p->frame
+ * and therefore never counts radar) is not the right control. Instead the whole
+ * ring is freed when the page is deactivated or disabled and rebuilt by the
+ * backfill on the next activation.
+ */
+
+typedef struct {
+    uint8_t *buf;          /* RGB565, PSRAM, owned by the ring */
+    uint16_t w, h;
+    uint32_t hash;         /* FNV-1a over buf; dedupe key */
+} radar_slot_t;
+
+static radar_slot_t   s_radar_ring[RADAR_RING_MAX];
+static _Atomic int    s_radar_count;        /* resident frames; read lock-free by the poller */
+static int            s_radar_play_idx;     /* ring index currently on screen */
+static const uint8_t *s_radar_shown;        /* buffer the LVGL descriptor borrows, or NULL */
+static lv_timer_t    *s_radar_timer;        /* playback timer; NULL when not animating */
+/* Ring generation: bumped by every reset (image_page_radar_reset, which
+ * _invalidate, page leave and page disable all route through). A producer
+ * captures it before resolving the token and hands it back to
+ * image_page_radar_add(), which drops any frame carrying an older value. That
+ * is what stops an in-flight backfill for the OLD region from repopulating the
+ * ring a region switch just cleared. uint32_t, never a narrow signed type: the
+ * esp-14.2.0 RISC-V subword atomic sequence clobbers neighbouring bytes. */
+static _Atomic uint32_t s_radar_gen;
+/* s_radar_backfill_req is declared at the top of this file — image_page_set_active()
+ * sits above this block and raises it. */
+
+int image_page_radar_capacity(void)
+{
+    uint8_t n = app_config_get()->radar_frames;
+    if (n < 1) n = 1;
+    if (n > RADAR_RING_MAX) n = RADAR_RING_MAX;
+    return (int)n;
+}
+
+int image_page_radar_count(void)
+{
+    return atomic_load(&s_radar_count);
+}
+
+bool image_page_radar_backfill_take(void)
+{
+    return atomic_exchange(&s_radar_backfill_req, false);
+}
+
+uint32_t image_page_radar_gen(void)
+{
+    return atomic_load(&s_radar_gen);
+}
+
+/* Free one slot. Display lock held. Detaches the LVGL descriptors first if they
+ * borrow this slot's buffer, so the free can never leave LVGL on freed memory. */
+static void radar_free_slot(image_page_t *p, int i)
+{
+    radar_slot_t *s = &s_radar_ring[i];
+    if (s->buf && (const uint8_t *)s->buf == s_radar_shown) {
+        image_page_release_lvgl(p);      /* drops both descriptors + borrowed flags */
+        s_radar_shown = NULL;
+    }
+    if (s->buf) heap_caps_free(s->buf);
+    memset(s, 0, sizeof(*s));
+}
+
+/* Put ring slot @p idx on screen (idx < 0 = the current cursor). Display lock
+ * held. No-op when the page has no LVGL objects or the slot is empty. */
+static void radar_show_idx(image_page_t *p, int idx)
+{
+    int count = atomic_load(&s_radar_count);
+    if (idx < 0) idx = s_radar_play_idx;
+    if (idx < 0 || idx >= count) return;
+
+    radar_slot_t *s = &s_radar_ring[idx];
+    if (!s->buf || !p->root || s->w == 0 || s->h == 0) return;
+
+    swap_borrowed_buf(p, (const uint16_t *)s->buf, (int)s->w, (int)s->h);
+    s_radar_shown   = s->buf;
+    s_radar_play_idx = idx;
+
+    char label[48];
+    image_page_label(p, label, sizeof(label));
+    set_label_if_changed(p->lbl_region, label);
+
+    /* The newest frame is stamped with the wall clock; the history frames have
+     * no per-frame time (the RIDGE stills carry none we parse), so they show
+     * their position in the loop instead of a time we would be inventing. */
+    char ts[32];
+    if (idx == 0) {
+        time_t now; struct tm ti; time(&now); localtime_r(&now, &ti);
+        strftime(ts, sizeof(ts), "Latest %H:%M", &ti);
+    } else {
+        snprintf(ts, sizeof(ts), "Loop %d/%d", count - idx, count);
+    }
+    set_label_if_changed(p->lbl_timestamp, ts);
+}
+
+static void radar_tick_cb(lv_timer_t *t)
+{
+    image_page_t *p = lv_timer_get_user_data(t);
+    int count = atomic_load(&s_radar_count);
+    if (!p || count <= 1 || !atomic_load(&p->active)) return;
+    int next = radar_play_next(s_radar_play_idx, count);
+    radar_show_idx(p, next);
+    lv_timer_set_period(t, radar_play_period_ms(next));
+}
+
+/* Create or delete the playback timer to match the current state. Display lock
+ * held. A single still (radar_frames == 1, or a ring that has not filled past
+ * one frame) never animates, matching the other image pages. */
+static void radar_timer_sync(image_page_t *p)
+{
+    bool want = atomic_load(&p->active) &&
+                image_page_radar_capacity() > 1 &&
+                atomic_load(&s_radar_count) > 1;
+    if (want && !s_radar_timer) {
+        s_radar_timer = lv_timer_create(radar_tick_cb, RADAR_PLAY_FRAME_MS, p);
+    } else if (!want && s_radar_timer) {
+        lv_timer_delete(s_radar_timer);
+        s_radar_timer = NULL;
+    }
+}
+
+void image_page_radar_reset(image_page_t *p)
+{
+    if (s_radar_timer) {
+        lv_timer_delete(s_radar_timer);
+        s_radar_timer = NULL;
+    }
+    for (int i = 0; i < RADAR_RING_MAX; i++) radar_free_slot(p, i);
+    atomic_store(&s_radar_count, 0);
+    s_radar_play_idx = 0;
+    s_radar_shown    = NULL;
+    /* Every ring reset invalidates every fetch already in flight, whatever the
+     * reason for the reset: a region/frame-count/crop change (via _invalidate),
+     * a page leave, or a page disable. Bumping here rather than at each of
+     * those call sites means a future reset path cannot forget it. Runs with
+     * the display lock held, the same lock image_page_radar_add() tests it
+     * under, so there is no window between the bump and the free. */
+    atomic_fetch_add(&s_radar_gen, 1);
+}
+
+void image_page_radar_invalidate(image_page_t *p)
+{
+    if (!p) return;
+    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+        image_page_radar_reset(p);
+        bsp_display_unlock();
+    }
+    atomic_store(&s_radar_backfill_req, true);
+}
+
+/* Center-crop a decoded radar frame in place-of-allocation: returns a fresh
+ * smaller PSRAM buffer and frees the original. Applied ONCE at insert (the
+ * playback path borrows the stored buffer and cannot crop), which is why a
+ * live radar_crop change rebuilds the whole ring. Returns false and leaves the
+ * frame untouched if the allocation fails — an uncropped frame beats none. */
+static bool radar_crop_frame(image_frame_t *f)
+{
+    const uint8_t CROP_PCT = 88;   /* same zoom the other cropped sources use */
+    uint16_t w = (uint16_t)((uint32_t)f->w * CROP_PCT / 100);
+    uint16_t h = (uint16_t)((uint32_t)f->h * CROP_PCT / 100);
+    if (w == 0 || h == 0) return false;
+    uint16_t ox = (uint16_t)((f->w - w) / 2);
+    uint16_t oy = (uint16_t)((f->h - h) / 2);
+
+    size_t   dst_stride = (size_t)w * 2;
+    size_t   src_stride = (size_t)f->w * 2;
+    uint8_t *out = heap_caps_malloc(dst_stride * h, MALLOC_CAP_SPIRAM);
+    if (!out) return false;
+    for (uint32_t y = 0; y < h; y++) {
+        memcpy(out + (size_t)y * dst_stride,
+               f->buf + (size_t)(oy + y) * src_stride + (size_t)ox * 2,
+               dst_stride);
+    }
+    heap_caps_free(f->buf);
+    f->buf = out;
+    f->w   = w;
+    f->h   = h;
+    return true;
+}
+
+void image_page_radar_add(image_page_t *p, image_frame_t *fresh, bool at_head, uint32_t gen)
+{
+    if (!p || !fresh) return;
+    if (!fresh->buf) return;
+
+    if (image_page_config_crop(app_config_get(), IMG_SRC_RADAR)) {
+        radar_crop_frame(fresh);       /* best-effort; keeps the frame either way */
+    }
+
+    /* Night readability: invert the RIDGE tile's greyscale basemap (white sheet
+     * -> black, dark state lines -> light) and leave every chromatic pixel — the
+     * whole dBZ echo ramp — untouched. See image_night_invert.h for the measured
+     * colour distribution this is built on. Gated on radar_dark_mode (default
+     * true, v64): the raw tile is 90% near-white and unusable in a dark
+     * observatory, but Light mode leaves it exactly as NWS published it.
+     *
+     * ORDER: invert BEFORE the red remap. The remap collapses luma to red
+     * shades, so running it first would destroy the neutral/chromatic
+     * distinction the invert keys on. Inverting first means Red Night renders a
+     * DARK RED radar map, which is the ideal observatory case.
+     *
+     * SEAM: this is the radar equivalent of the invert+remap block in
+     * image_page_render_frame() — radar returns early from that function
+     * because its frames live in the ring, not p->frame. Here is the only place
+     * a radar frame is committed, it runs once per FETCHED frame on the poll
+     * task (image_page_poll.c net_poll_once / radar_backfill), outside the
+     * display lock, and never again: playback borrows the stored buffer.
+     * Baked in at insert, like the crop above: a crop/token/frame-count/
+     * dark-mode change rebuilds the ring (image_page_radar_invalidate), while a live theme switch
+     * leaves the resident frames on the old remap until the next fetch — exactly
+     * how the other four pages behave, since image_page_apply_theme() restyles
+     * labels only and never re-runs the pixel pass. */
+    size_t radar_px = (size_t)fresh->w * fresh->h;
+    if (app_config_get()->radar_dark_mode) {
+        image_night_invert_rgb565((uint16_t *)fresh->buf, radar_px);
+    }
+    image_red_remap_rgb565((uint16_t *)fresh->buf, radar_px);
+
+    uint32_t hash = radar_fnv1a(fresh->buf, (size_t)fresh->w * fresh->h * 2);
+
+    bool notify = false;
+    if (!bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+        heap_caps_free(fresh->buf);
+        fresh->buf = NULL;
+        return;
+    }
+
+    /* STALENESS CHOKE POINT. Every radar frame that ever enters the ring passes
+     * through here, so this is the one place a frame fetched for a region (or
+     * crop, or frame count) the user has already left can be rejected. Tested
+     * INSIDE the display lock because that is the lock image_page_radar_reset()
+     * bumps the generation under; testing it before the lock would leave the
+     * original race in a smaller window. The producers' own abort checks are a
+     * bandwidth optimisation on top of this, never a substitute. */
+    if (radar_frame_is_stale(gen, atomic_load(&s_radar_gen))) {
+        bsp_display_unlock();
+        heap_caps_free(fresh->buf);
+        fresh->buf = NULL;
+        return;
+    }
+
+    int count = atomic_load(&s_radar_count);
+    int cap   = image_page_radar_capacity();
+
+    /* Dedupe against the entry this frame would sit next to: the head for a
+     * newest-frame push, the tail for a backfill append. RIDGE re-serves the
+     * same still between updates, so this is the common case, not an edge. */
+    uint32_t neighbour = count > 0 ? s_radar_ring[at_head ? 0 : count - 1].hash : 0;
+    if (radar_frame_is_dup(neighbour, count, hash)) {
+        bsp_display_unlock();
+        heap_caps_free(fresh->buf);
+        fresh->buf = NULL;
+        return;
+    }
+
+    if (at_head) {
+        /* Make room at the head, evicting from the oldest end. */
+        while (count >= cap) {
+            radar_free_slot(p, count - 1);
+            count--;
+        }
+        for (int i = count; i > 0; i--) s_radar_ring[i] = s_radar_ring[i - 1];
+        /* Everything shifted down one slot, so did the frame on screen. */
+        if (s_radar_play_idx + 1 < cap) s_radar_play_idx++;
+        count++;
+        s_radar_ring[0].buf  = fresh->buf;
+        s_radar_ring[0].w    = fresh->w;
+        s_radar_ring[0].h    = fresh->h;
+        s_radar_ring[0].hash = hash;
+    } else {
+        if (count >= cap) {            /* ring already full: nothing to backfill */
+            bsp_display_unlock();
+            heap_caps_free(fresh->buf);
+            fresh->buf = NULL;
+            return;
+        }
+        s_radar_ring[count].buf  = fresh->buf;
+        s_radar_ring[count].w    = fresh->w;
+        s_radar_ring[count].h    = fresh->h;
+        s_radar_ring[count].hash = hash;
+        count++;
+    }
+    fresh->buf = NULL;
+    atomic_store(&s_radar_count, count);
+
+    if (atomic_load(&p->active)) {
+        /* Show the newest frame immediately when nothing is up yet (page entry,
+         * or the displayed slot was just evicted); otherwise let the timer keep
+         * playing and only refresh the caption's frame count. */
+        radar_show_idx(p, s_radar_shown ? -1 : 0);
+        radar_timer_sync(p);
+        notify = true;
+    }
+    bsp_display_unlock();
+    if (notify) nav_arbiter_notify_content_ready(p->page_idx);
 }
 
 /* ─────────────────────────── poller -> page handoff ────────────────────── */
@@ -1325,9 +1760,10 @@ void image_page_set_error(image_page_t *p, const char *msg)
         strlcpy(p->frame.error_msg, msg ? msg : "", sizeof(p->frame.error_msg));
         frame_unlock(p);
     }
-    /* The Custom page shows the reason as its caption; render_frame() handles
-     * the error branch before the newer-frame gate, so a plain call suffices. */
-    if (p->src == IMG_SRC_CUSTOM && atomic_load(&p->active) && bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+    /* The Custom and Radar pages show the reason as their caption; render_frame()
+     * handles the error branch before the newer-frame gate, so a plain call suffices. */
+    if ((p->src == IMG_SRC_CUSTOM || p->src == IMG_SRC_RADAR) &&
+        atomic_load(&p->active) && bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
         image_page_render_frame(p);
         bsp_display_unlock();
     }
@@ -1342,6 +1778,22 @@ static bool source_params_changed(image_src_t s, const app_config_t *prev, const
         case IMG_SRC_GOES:   return strcmp(cur->goes_region, prev->goes_region) != 0;
         case IMG_SRC_SOLAR:  return cur->solar_band != prev->solar_band;
         case IMG_SRC_CUSTOM: return force_fetch || strcmp(cur->custom_image_url, prev->custom_image_url) != 0;
+        case IMG_SRC_RADAR:
+            /* Crop, frame count and map appearance join the token here (rather
+             * than in render_params_changed) because the ring stores TRANSFORMED
+             * pixels, not raw ones: frames are already cropped, sized to the
+             * capacity, and night-inverted at insert time in
+             * image_page_radar_add(). Any of those changing means rebuilding the
+             * ring from scratch, not re-rendering a cached frame. The token also
+             * changes implicitly when it is empty (auto) and the weather
+             * location moved, since that re-picks the nearest site. */
+            if (strcmp(cur->radar_token, prev->radar_token) != 0) return true;
+            if (cur->radar_frames != prev->radar_frames) return true;
+            if (cur->radar_crop != prev->radar_crop) return true;
+            if (cur->radar_dark_mode != prev->radar_dark_mode) return true;
+            return cur->radar_token[0] == '\0' &&
+                   (cur->weather_lat != prev->weather_lat ||
+                    cur->weather_lon != prev->weather_lon);
         default:             return false;   /* Moon: local render, handled below */
     }
 }
@@ -1349,11 +1801,17 @@ static bool source_params_changed(image_src_t s, const app_config_t *prev, const
 /* Per-source "re-render the cached frame locally" test: crop / rotation / flips. */
 static bool render_params_changed(image_src_t s, const app_config_t *prev, const app_config_t *cur)
 {
+    /* Radar has no local re-render: every visual parameter it owns is folded
+     * into source_params_changed above, which rebuilds the ring. */
+    if (s == IMG_SRC_RADAR) return false;
     if (image_page_config_crop(cur, s) != image_page_config_crop(prev, s)) return true;
     switch (s) {
         case IMG_SRC_GOES:   return cur->goes_orientation != prev->goes_orientation || cur->goes_vflip != prev->goes_vflip || cur->goes_hflip != prev->goes_hflip;
         case IMG_SRC_SOLAR:  return cur->solar_orientation != prev->solar_orientation || cur->solar_vflip != prev->solar_vflip || cur->solar_hflip != prev->solar_hflip;
         case IMG_SRC_CUSTOM: return cur->custom_orientation != prev->custom_orientation || cur->custom_vflip != prev->custom_vflip || cur->custom_hflip != prev->custom_hflip;
+        /* Radar has no orientation/flip settings: RIDGE tiles are already
+         * north-up, so the shared crop test above is its whole re-render gate. */
+        case IMG_SRC_RADAR:  return false;
         default:             return false;
     }
 }
@@ -1374,7 +1832,7 @@ static bool moon_params_changed(const app_config_t *prev, const app_config_t *cu
            cur->moon_lon != prev->moon_lon;
 }
 
-/* Apply image-page config changes live (preview) for all four pages, comparing
+/* Apply image-page config changes live (preview) for all five pages, comparing
  * prev to cur. Shared by the image config POST handler, the control registry
  * and config_trigger_side_effects (main Save), so live-apply lives once:
  *   - enable toggled: create/hide the page (display lock), start or park its poller;
@@ -1405,6 +1863,9 @@ void image_page_config_apply_live(const app_config_t *prev, const app_config_t *
         if (!en_cur) continue;
 
         if (source_params_changed((image_src_t)s, prev, cur, force_fetch)) {
+            /* Radar: the stored frames were cropped/sized for the OLD settings,
+             * so drop the ring before refetching rather than mixing them. */
+            if (s == IMG_SRC_RADAR) image_page_radar_invalidate(p);
             image_page_request_manual_fetch(p);            /* overlay + fresh download */
         } else if (s == IMG_SRC_MOON && moon_params_changed(prev, cur)) {
             image_page_ensure_task_running(p);

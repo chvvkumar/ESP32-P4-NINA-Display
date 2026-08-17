@@ -198,7 +198,15 @@
     BOOL      (goes_show_overlay,            "goes_show_overlay",            true) \
     BOOL      (moon_show_overlay,            "moon_show_overlay",            true) \
     BOOL      (solar_show_overlay,           "solar_show_overlay",           true) \
-    BOOL      (custom_show_overlay,          "custom_show_overlay",          true)
+    BOOL      (custom_show_overlay,          "custom_show_overlay",          true) \
+    /* -- Weather Radar page (v63) -- */ \
+    BOOL      (radar_enabled,                "radar_enabled",                false) \
+    STR       (radar_token,                  "radar_token",                  "")    /* WSR-88D site id ("KTLX"), a regional/CONUS name, or "" = resolve the nearest site at runtime. Pasted into the image URL, so it is a trust boundary: the charset rule lives in validate_config() (load path) and in parse_config_from_json() (web save path) — STR here only bounds the copy and NUL-terminates */ \
+    BOOL      (radar_show_overlay,           "radar_show_overlay",           false) \
+    BOOL      (radar_crop,                   "radar_crop",                   false) \
+    INT       (radar_update_interval_s,      "radar_update_interval_s",      300,   120,   7200)  /* true clamp, matching the image POST handler's clamp-to-bound (both write paths agree). validate_config()'s extra "0 -> 300" case for a zeroed blob now lands on 120 instead; both are legal intervals */ \
+    INT_RESET (radar_frames,                 "radar_frames",                 10,    1,     10)    /* how many radar images the page animates. RESET reproduces validate_config() exactly: both 0 (unset blob) and >10 fall back to the full 10-frame loop, never to the opposite bound */ \
+    BOOL      (radar_dark_mode,              "radar_dark_mode",              true)  /* v64: true = dark basemap (the pre-v64 behaviour, and the default), false = the NWS image as published */
 
 /* Apply every row's default value to *cfg. Called from set_defaults()
  * immediately after the memset(). Does not touch excluded/complex fields

@@ -157,6 +157,55 @@ add_nina_host_test(test_poll_backoff
 )
 
 # ---------------------------------------------------------------------------
+# test_image_probe -- magic-byte sniffing + PNG/GIF header dimension reads
+# (main/image_probe.h), the gate main/jpeg_utils.c applies to fetched payloads
+# before decoding. Header-only, no ESP-IDF dependency: jpeg_utils.c itself
+# cannot be host-compiled (driver/ppa.h, esp_cache.h, stb_image.h), which is
+# why the pure byte-offset/endianness logic lives in its own header.
+# ---------------------------------------------------------------------------
+add_nina_host_test(test_image_probe
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_image_probe.c
+)
+
+# ---------------------------------------------------------------------------
+# test_radar_sites -- nearest WSR-88D site lookup (main/radar_sites.c), which
+# resolves an empty radar_token into a RIDGE image token. Pure float math over
+# a baked table; depends only on math.h, so no shims are strictly needed but it
+# goes through add_nina_host_test() like everything else.
+# ---------------------------------------------------------------------------
+add_nina_host_test(test_radar_sites
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_radar_sites.c
+        ${NINA_REPO_ROOT}/main/radar_sites.c
+)
+
+# ---------------------------------------------------------------------------
+# test_radar_play -- pure ring/playback decisions for the radar animation
+# (main/radar_play.h): FNV-1a frame dedupe, the oldest->newest playback cursor
+# and the newest-frame hold. Header-only, no ESP-IDF dependency; the buffer
+# ownership and LVGL handoff it drives live in ui/nina_image_page.c and cannot
+# be host-compiled, which is why the decisions sit in their own header.
+# ---------------------------------------------------------------------------
+add_nina_host_test(test_radar_play
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_radar_play.c
+)
+
+# ---------------------------------------------------------------------------
+# test_night_invert -- neutral-only inversion of the NWS radar tile
+# (main/image_night_invert.h), applied once per fetched frame in
+# image_page_radar_add() before the frame enters the animation ring.
+# Header-only, no ESP-IDF dependency; nina_image_page.c (the only firmware
+# caller) pulls in LVGL and the BSP and cannot be host-compiled, which is why
+# the pixel classification lives in its own header.
+# ---------------------------------------------------------------------------
+add_nina_host_test(test_night_invert
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_night_invert.c
+)
+
+# ---------------------------------------------------------------------------
 # test_settings_table -- X-macro-driven defaults/clamp for the "simple"
 # app_config_t fields (main/settings_table.c). themes_get_count() (the one
 # runtime count_expr the table uses) is stubbed locally in the test file

@@ -823,7 +823,9 @@ static void set_defaults(app_config_t *cfg) {
     /* Default flat slideshow order (auto_rotate_order2): ARP_IDX_* values 0..7
      * only. Image Display (ARP_IDX_IMG_GOES, index 8) stays OPT-IN, excluded from
      * the fresh-install default rotation. memset() above already cleared the
-     * array, so set the explicit defaults and pad the tail (8..15) with 0xFF. */
+     * array, so set the explicit defaults and pad the tail (8..23) with 0xFF.
+     * This fills the LIVE 24-entry array at the end of app_config_t, not the
+     * retired 16-byte one that migrations land a stored blob's stops in. */
     for (int i = 0; i < 8; i++) cfg->auto_rotate_order2[i] = (uint8_t)i;   // 0..7 (Clock is last)
     for (int i = 8; i < ARP_ORDER_CAPACITY; i++) cfg->auto_rotate_order2[i] = 0xFF;
     /* update_rate_s / graph_update_interval_s: NOT table-driven — their
@@ -853,6 +855,18 @@ static void set_defaults(app_config_t *cfg) {
     cfg->ha_base_url[0] = '\0';
     cfg->ha_token[0] = '\0';
     cfg->ha_update_interval_s = 30;
+
+    // Weather Radar defaults (v63). An EMPTY radar_token is the normal state:
+    // the radar module resolves the nearest WSR-88D site from
+    // weather_lat/weather_lon at fetch time (else CONUS) and never writes the
+    // resolved value back here.
+    cfg->radar_enabled = false;
+    cfg->radar_token[0] = '\0';
+    cfg->radar_update_interval_s = 300;
+    cfg->radar_show_overlay = false;
+    cfg->radar_crop = false;
+    cfg->radar_frames = 10;   // full NOAA loop; ~660 KB of PSRAM per retained frame
+    cfg->radar_dark_mode = true;   // v64: dark basemap by default (night-friendly)
 
     // Spotify client ID: secret-like sentinel, not table-driven
     cfg->spotify_client_id[0] = '\0';
@@ -2596,6 +2610,34 @@ void image_pages_derive_from_legacy(app_config_t *cfg)
     cfg->custom_show_overlay = cfg->image_display_show_overlay;
 }
 
+/* v63 retired the 16-entry auto_rotate_order2[] in place (renamed
+ * auto_rotate_order2_retired, same offset, nothing shifted) and appended a
+ * 24-entry auto_rotate_order2[] at the END of app_config_t. Every migration is a
+ * bulk memcpy of the stored blob as a prefix, so a v46..v62 blob's stored stops
+ * land in the RETIRED array — that is exactly where those bytes were written.
+ * Lift them into the live array here, and pad the 8 new slots with 0xFF, the
+ * empty-slot sentinel every reader already uses (set_defaults() above,
+ * validate_config() below, ui/settings_tab_display.c, ui/nina_nav_arbiter.c,
+ * web_handlers_config.c).
+ *
+ * Called ONCE from the dispatcher tail rather than from each migrate_from_vNN,
+ * for the same reason image_pages_derive_from_legacy() is: the dispatcher is
+ * NON-chaining, so a v50 blob goes straight to v63 without passing through
+ * migrate_from_v62. It is gated there on version_check >= 46, because blobs
+ * older than that never had the array: their migrations call
+ * build_order2_from_legacy(), which writes the LIVE array directly, and lifting
+ * the retired array (all zeros from set_defaults, i.e. 16x ARP_IDX_SUMMARY)
+ * over that would destroy the list those migrations just built. */
+static void order2_lift_retired(app_config_t *cfg)
+{
+    for (int i = 0; i < ARP_ORDER_CAPACITY_RETIRED; i++) {
+        cfg->auto_rotate_order2[i] = cfg->auto_rotate_order2_retired[i];
+    }
+    for (int i = ARP_ORDER_CAPACITY_RETIRED; i < ARP_ORDER_CAPACITY; i++) {
+        cfg->auto_rotate_order2[i] = 0xFF;   /* empty slot */
+    }
+}
+
 /* --- v60 -> v61 migration: appends the per-page image fields (image pages
  *     split). All thirteen values are written by image_pages_derive_from_legacy(),
  *     which the dispatcher tail runs for every pre-v61 blob (single writer), so
@@ -2632,6 +2674,53 @@ static void migrate_from_v61(const void *raw, size_t raw_size, app_config_t *cfg
 
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v61 to v%d", APP_CONFIG_VERSION);
+}
+
+/* --- v62 -> v63 migration: appends the Weather Radar block and the 24-entry
+ *     auto_rotate_order2[]. Additive: the old 16-entry stop list was retired in
+ *     place, so this stays a plain prefix memcpy like every migration around it.
+ *     The stored stops land in auto_rotate_order2_retired; the dispatcher tail's
+ *     order2_lift_retired() is the single writer that moves them to the live
+ *     array. --- */
+static void migrate_from_v62(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v62_t) ? raw_size : sizeof(app_config_v62_t);
+    memcpy(cfg, raw, copy);
+
+    /* The radar block is appended past the v62 snapshot, so memcpy(copy) never
+     * touches it; the copy may still have landed inside dest tail padding, so
+     * re-assign. An empty token means "resolve the site at fetch time". */
+    cfg->radar_enabled = false;
+    cfg->radar_token[0] = '\0';
+    cfg->radar_update_interval_s = 300;
+    cfg->radar_show_overlay = false;
+    cfg->radar_crop = false;
+    cfg->radar_frames = 10;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v62 to v%d", APP_CONFIG_VERSION);
+}
+
+/* --- v63 -> v64 migration: appends radar_dark_mode (Weather Radar page "Map
+ *     appearance"). Additive and at the very end, so this stays a plain prefix
+ *     memcpy like every migration around it. An upgrading device keeps the dark
+ *     basemap it already had before the choice existed. --- */
+static void migrate_from_v63(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v63_t) ? raw_size : sizeof(app_config_v63_t);
+    memcpy(cfg, raw, copy);
+
+    /* radar_dark_mode is a SETTINGS_TABLE row, so set_defaults() above already
+     * applied it — and every OTHER (non-chaining) migration path gets it from
+     * there too. Only here can the memcpy reach it: the v63 snapshot ends one
+     * byte before the new field and its trailing padding lands on top.
+     * Re-assert it, same as migrate_from_v61 does for octoprint_overlay_visible. */
+    cfg->radar_dark_mode = true;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v63 to v%d", APP_CONFIG_VERSION);
 }
 
 
@@ -3221,6 +3310,7 @@ static bool validate_config(app_config_t *cfg) {
      * the tiles cache setter (strlcpy) and loader (tiles_cache_load_key). */
     cfg->ha_base_url[sizeof(cfg->ha_base_url) - 1] = '\0';
     cfg->ha_token[sizeof(cfg->ha_token) - 1] = '\0';
+    cfg->radar_token[sizeof(cfg->radar_token) - 1] = '\0';
 
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         if (cfg->rms_thresholds[i][0] == '\0') {
@@ -3324,6 +3414,53 @@ static bool validate_config(app_config_t *cfg) {
     }
     cfg->ha_enabled = cfg->ha_enabled ? true : false;
 
+    /* Weather Radar: sanitize the site id, clamp the poll interval, canonicalize
+     * the bools. radar_token is a WSR-88D site id ("KTLX") or "CONUS", so only
+     * [A-Z0-9] is meaningful; lowercase is folded up and anything else means the
+     * stored value is junk, which clears the field. EMPTY IS VALID and is the
+     * default: it tells the radar module to resolve the nearest site from
+     * weather_lat/weather_lon at fetch time (else CONUS). That resolved value is
+     * never written back into config — a poll task must not write config. */
+    for (int i = 0; cfg->radar_token[i] != '\0'; i++) {
+        char ch = cfg->radar_token[i];
+        if (ch >= 'a' && ch <= 'z') {
+            ch = (char)(ch - 'a' + 'A');
+            cfg->radar_token[i] = ch;
+            fixed = true;
+        }
+        if (!((ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9'))) {
+            cfg->radar_token[0] = '\0';   /* junk -> empty -> resolve at runtime */
+            fixed = true;
+            break;
+        }
+    }
+    if (cfg->radar_update_interval_s == 0) {
+        cfg->radar_update_interval_s = 300;   /* unset/zeroed blob -> the default */
+        fixed = true;
+    } else if (cfg->radar_update_interval_s < 120) {
+        cfg->radar_update_interval_s = 120;
+        fixed = true;
+    } else if (cfg->radar_update_interval_s > 7200) {
+        cfg->radar_update_interval_s = 7200;
+        fixed = true;
+    }
+    /* Animation depth: how many frames the page keeps and animates, newest
+     * first. 1 = a still image; 10 is the ceiling because NOAA offers ten
+     * frames. Each retained frame costs about 660 KB of PSRAM (about 6.6 MB at
+     * 10), so an out-of-range blob byte must not reach the page. */
+    if (cfg->radar_frames == 0) {
+        cfg->radar_frames = 10;   /* unset/zeroed blob -> the default */
+        fixed = true;
+    } else if (cfg->radar_frames > 10) {
+        cfg->radar_frames = 10;
+        fixed = true;
+    }
+    /* bool loaded from a raw NVS blob may hold any byte value; force canonical 0/1 */
+    cfg->radar_enabled      = cfg->radar_enabled ? true : false;
+    cfg->radar_show_overlay = cfg->radar_show_overlay ? true : false;
+    cfg->radar_crop         = cfg->radar_crop ? true : false;
+    cfg->radar_dark_mode    = cfg->radar_dark_mode ? true : false;
+
     /* WiFi TX power cap: whitelist, not a range — only the discrete dBm steps
      * the UI offers are meaningful, and 0 means "no cap". Anything else (a
      * stale blob byte, or a value that slipped past the settings-table range
@@ -3416,6 +3553,33 @@ void app_config_init(void) {
             nvs_commit(handle);
         }
         /* tiles_loaded stays false -> tail loads "json_tiles"/"ha_tiles" keys */
+    } else if (version_check == 63) {
+        /* v63 -> v64: appended radar_dark_mode. tiles_loaded stays false: a v63
+         * device already keeps its tiles in the "json_tiles"/"ha_tiles" NVS
+         * keys, so the tail loads them.
+         * Safe to write back immediately (unlike the v60/v62 branches): a v63
+         * blob already holds a real 24-entry auto_rotate_order2[] and real
+         * per-page image settings, so both dispatcher-tail fixups below are
+         * excluded by their literal version bounds and nothing is left to do
+         * after this. */
+        migrate_from_v63(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    } else if (version_check == 62) {
+        /* v62 -> v63: appended the Weather Radar block and the 24-entry
+         * auto_rotate_order2[]. tiles_loaded stays false: a v62 device already
+         * keeps its tiles in the "json_tiles"/"ha_tiles" NVS keys, so the tail
+         * loads them.
+         * Deliberately NO nvs_set_blob/nvs_commit here, same reasoning as the
+         * v60 branch below: the stored slideshow stops are not lifted out of
+         * auto_rotate_order2_retired until the dispatcher tail. Committing the
+         * v63-stamped blob first would, on power loss in between, leave a v63
+         * blob whose stop list silently fell back to the fresh-install default.
+         * The tail writes and commits for every pre-v63 blob that had the
+         * array. */
+        migrate_from_v62(raw, stored_size, &s_config);
+        validate_config(&s_config);
     } else if (version_check == 61) {
         /* v61 -> v62: added octoprint_overlay_visible. tiles_loaded stays
          * false: a v61 device already keeps its tiles in the
@@ -3887,6 +4051,26 @@ void app_config_init(void) {
      * choices. Every version bump past 62 must leave this literal alone. */
     if (version_check < 61) {
         image_pages_derive_from_legacy(&s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    }
+
+    /* v63 slideshow-list lift for every blob that stored the 16-entry array
+     * (v46..v62 — see order2_lift_retired). Runs after whichever legacy branch
+     * above rebuilt s_config, so the retired array holds the stored stops. The
+     * forward-tolerant (version_check > APP_CONFIG_VERSION) and current-version
+     * branches are excluded by the comparison.
+     * The LOWER bound is 46, the first version that had the array: older blobs
+     * get their list from build_order2_from_legacy() during migration, and
+     * lifting the (zeroed) retired array over it would replace the user's list
+     * with 16 copies of Summary.
+     * The UPPER bound is the LITERAL 63, not APP_CONFIG_VERSION: a v63 blob
+     * already holds a real 24-entry list, and re-lifting the retired array would
+     * silently truncate it back to the pre-v63 16 stops. Every version bump past
+     * 63 must leave this literal alone. */
+    if (version_check >= 46 && version_check < 63) {
+        order2_lift_retired(&s_config);
         validate_config(&s_config);
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);
