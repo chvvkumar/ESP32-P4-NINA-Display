@@ -862,9 +862,11 @@ static void set_defaults(app_config_t *cfg) {
     // resolved value back here.
     cfg->radar_enabled = false;
     cfg->radar_token[0] = '\0';
-    cfg->radar_update_interval_s = 300;
+    cfg->radar_update_interval_s = 900;   // 15 min; NWS publishes ~every 2 min, but a slower
+                                          // refresh costs less network and still keeps the page current
     cfg->radar_show_overlay = false;
-    cfg->radar_crop = false;
+    cfg->radar_crop = 0;      // fit mode, two states: 0 = off (whole picture), 1 = crop to a
+                              // centred square that fills the panel
     cfg->radar_frames = 10;   // full NOAA loop; ~660 KB of PSRAM per retained frame
     cfg->radar_dark_mode = true;   // v64: dark basemap by default (night-friendly)
 
@@ -2693,9 +2695,9 @@ static void migrate_from_v62(const void *raw, size_t raw_size, app_config_t *cfg
      * re-assign. An empty token means "resolve the site at fetch time". */
     cfg->radar_enabled = false;
     cfg->radar_token[0] = '\0';
-    cfg->radar_update_interval_s = 300;
+    cfg->radar_update_interval_s = 900;   /* same default as set_defaults(): 15 min */
     cfg->radar_show_overlay = false;
-    cfg->radar_crop = false;
+    cfg->radar_crop = 0;      /* fit mode, not a flag: 0 = off (whole picture) */
     cfg->radar_frames = 10;
 
     cfg->config_version = APP_CONFIG_VERSION;
@@ -3435,7 +3437,7 @@ static bool validate_config(app_config_t *cfg) {
         }
     }
     if (cfg->radar_update_interval_s == 0) {
-        cfg->radar_update_interval_s = 300;   /* unset/zeroed blob -> the default */
+        cfg->radar_update_interval_s = 900;   /* unset/zeroed blob -> the default */
         fixed = true;
     } else if (cfg->radar_update_interval_s < 120) {
         cfg->radar_update_interval_s = 120;
@@ -3455,10 +3457,14 @@ static bool validate_config(app_config_t *cfg) {
         cfg->radar_frames = 10;
         fixed = true;
     }
-    /* bool loaded from a raw NVS blob may hold any byte value; force canonical 0/1 */
+    /* bool loaded from a raw NVS blob may hold any byte value; force canonical 0/1.
+     * radar_crop is NOT in this list: it is a uint8_t fit mode, not a bool, and a
+     * device may still hold the retired value 2. Its range check is the INT (true
+     * clamp, deliberately not INT_RESET) row in settings_table.h, applied by
+     * settings_clamp_apply() further up this function: that maps a stored 2 to 1
+     * (crop), where RESET would silently un-crop those devices back to 0. */
     cfg->radar_enabled      = cfg->radar_enabled ? true : false;
     cfg->radar_show_overlay = cfg->radar_show_overlay ? true : false;
-    cfg->radar_crop         = cfg->radar_crop ? true : false;
     cfg->radar_dark_mode    = cfg->radar_dark_mode ? true : false;
 
     /* WiFi TX power cap: whitelist, not a range — only the discrete dBm steps

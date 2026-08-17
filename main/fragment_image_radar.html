@@ -1,7 +1,7 @@
 
         <div class="card">
           <div class="card-title"><span class="card-title-label">Weather Radar <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
-          <div class="help-popover"><div class="help-popover-title">Weather Radar page</div><p>Adds a full-screen page showing the latest National Weather Service radar picture. Choose a single radar site, a regional view, or the whole lower 48; the picture refreshes at the update interval you choose.</p><p>Fill (crop borders) zooms the picture to fill the 720x720 panel, trimming its edges. Coverage is the United States and its territories only.</p></div>
+          <div class="help-popover"><div class="help-popover-title">Weather Radar page</div><p>Adds a full-screen page showing the latest National Weather Service radar picture. Choose a single radar site, a regional view, or the whole lower 48; the picture refreshes at the update interval you choose.</p><p>Crop zooms the map to fill the screen and hides the National Weather Service banner and colour scale; leave it off to see the whole published picture with black bars above and below. Coverage is the United States and its territories only.</p></div>
           <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
             <span class="toggle-label">Enable Weather Radar page</span>
             <label class="toggle"><input type="checkbox" id="radar_enabled" onchange="updateImagePageEnabledUI('image-radar');applyImagePage('image-radar');checkDirty()"><span class="toggle-track"></span></label>
@@ -13,31 +13,29 @@
               <label class="toggle"><input type="checkbox" id="radar_show_overlay" onchange="applyImagePage('image-radar');checkDirty()"><span class="toggle-track"></span></label>
             </div>
             <div class="field-hint">Area name and update time overlay on the display</div>
-            <div class="toggle-row">
-              <span class="toggle-label">Fill (crop borders)</span>
+            <div class="toggle-row" style="margin-top:16px">
+              <span class="toggle-label">Dark mode</span>
+              <label class="toggle"><input type="checkbox" id="radar_dark_mode" onchange="applyImagePage('image-radar');checkDirty()"><span class="toggle-track"></span></label>
+            </div>
+            <div class="field-hint">Darkens the map background and outlines so the page is not blinding in a dark room. Turn it off to see the picture exactly as the National Weather Service publishes it, on a white background. The rain and storm colours look the same either way. The Red Night theme always uses the dark map, whatever this is set to.</div>
+            <div class="toggle-row" style="margin-top:16px">
+              <span class="toggle-label">Crop</span>
               <label class="toggle"><input type="checkbox" id="radar_crop" onchange="applyImagePage('image-radar');checkDirty()"><span class="toggle-track"></span></label>
             </div>
-            <div class="field-hint">Zoom the radar picture to fill the screen, trimming its edges.</div>
-            <div class="field" style="margin-top:16px">
-              <label class="field-label">Map appearance</label>
-              <select class="input" id="radar_dark_mode" onchange="applyImagePage('image-radar');checkDirty()">
-                <option value="1" selected>Dark (recommended at night)</option>
-                <option value="0">Light (as published by NWS)</option>
-              </select>
-              <div class="field-hint">Dark swaps the map's pale background and dark outlines around, so the page is not blinding in a dark room. Light shows the picture the way the National Weather Service publishes it, with a white background. The rain and storm colours look the same either way.</div>
-            </div>
+            <div class="field-hint">Zoom the map to fill the screen and hide the National Weather Service banner and colour scale. The sides are trimmed too, more so on wide views like the national map; turn it off to see the whole picture with bars above and below.</div>
             <div class="field" style="margin-top:16px">
               <label class="field-label">Update Interval</label>
               <select class="input" id="radar_update_interval_s" onchange="applyImagePage('image-radar');checkDirty()">
                 <option value="120">2 minutes</option>
-                <option value="300" selected>5 minutes</option>
+                <option value="300">5 minutes</option>
                 <option value="600">10 minutes</option>
-                <option value="900">15 minutes</option>
+                <option value="900" selected>15 minutes</option>
                 <option value="1800">30 minutes</option>
                 <option value="3600">1 hour</option>
                 <option value="7200">2 hours</option>
               </select>
               <div class="field-hint">How often the radar picture refreshes. The National Weather Service publishes a new picture about every 2 minutes, so checking more often than that gains nothing.</div>
+              <div class="field-hint">This also changes the look of the animation over time. When the page first loads it fills the animation with the ten most recent pictures, which are about 2 minutes apart, so it starts as a smooth 20 minute replay. From then on it adds one new picture each time it refreshes, so the older ones gradually age out and the replay stretches. At 15 minutes, after a couple of hours the animation covers about 2.5 hours in 15 minute jumps: a longer story of the weather, but a choppier one. A shorter interval keeps the animation smooth and close to real time, at the cost of more network traffic.</div>
             </div>
             <div class="field" style="margin-top:16px">
               <label class="field-label">Animation length</label>

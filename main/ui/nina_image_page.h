@@ -145,10 +145,28 @@ void image_page_set_error(image_page_t *p, const char *msg);   /* stores error_m
  * and dropped: this is the single point that keeps frames from a region the
  * user has already left out of the ring. Producers must read the generation
  * BEFORE the token they fetch with (see radar_frame_is_stale in radar_play.h).
- * Ownership of fresh->buf is taken on every path, accepted or rejected. */
-void image_page_radar_add(image_page_t *p, image_frame_t *fresh, bool at_head, uint32_t gen);
+ *
+ * @p src / @p src_len are the frame's COMPRESSED bytes from
+ * image_fetch_custom_retain() (may be NULL/0). The ring retains them so a crop,
+ * dark-mode or Red Night change can re-derive the pixels locally instead of
+ * re-downloading the whole ring; they also serve as the dedupe key.
+ *
+ * Ownership of BOTH fresh->buf and src is taken on every path, accepted or
+ * rejected: the caller must not free either after this returns. */
+void image_page_radar_add(image_page_t *p, image_frame_t *fresh, bool at_head, uint32_t gen,
+                          uint8_t *src, size_t src_len);
+/* Re-derive every resident frame from its retained compressed bytes under the
+ * CURRENT crop mode and dark/Red-Night treatment. No network. Request from any
+ * task (sets a flag + wakes the poller); the work runs on the radar poll task,
+ * one frame at a time, taking the display lock only for the pointer swaps. */
+void image_page_radar_request_retransform(image_page_t *p);
+void image_page_radar_retransform_if_requested(image_page_t *p);   /* radar poll task only */
 void image_page_radar_reset(image_page_t *p);       /* free the ring + bump the generation; display lock HELD by the caller */
-void image_page_radar_invalidate(image_page_t *p);  /* free the ring + request a backfill; takes the lock */
+/* Supersede the ring: bumps the generation UNCONDITIONALLY (so no in-flight frame
+ * from the old settings can enter), then frees it. Takes the display lock; if that
+ * times out the teardown is deferred to image_page_radar_reset_if_requested(). */
+void image_page_radar_invalidate(image_page_t *p);
+void image_page_radar_reset_if_requested(image_page_t *p);         /* radar poll task only */
 uint32_t image_page_radar_gen(void);                /* current ring generation; read BEFORE resolving the token */
 int  image_page_radar_count(void);                  /* resident frames (lock-free) */
 int  image_page_radar_capacity(void);               /* radar_frames, clamped 1..RADAR_RING_MAX */

@@ -2264,14 +2264,15 @@
     function collectTab_image_radar(data){
       data.radar_enabled=!!$('radar_enabled').checked;
       data.radar_show_overlay=!!$('radar_show_overlay').checked;
-      data.radar_crop=!!$('radar_crop').checked;
-      /* Two-option select, sent as a bool: '1' = dark basemap, '0' = the NWS
-         picture as published. The device key is a JSON bool (JSON_TO_BOOL). */
-      data.radar_dark_mode=$('radar_dark_mode').value==='1';
+      /* Crop on/off, but numeric on the wire (uint8 field): the device parses
+         it with a number check and ignores a JSON bool. */
+      data.radar_crop=$('radar_crop').checked?1:0;
+      /* Plain on/off toggle; the device key is a JSON bool (JSON_TO_BOOL). */
+      data.radar_dark_mode=!!$('radar_dark_mode').checked;
       /* Empty value = the "Automatic" option; the device then picks the nearest
          site itself, so send the empty string rather than dropping the key. */
       data.radar_token=$('radar_token').value;
-      data.radar_update_interval_s=parseInt($('radar_update_interval_s').value,10)||300;
+      data.radar_update_interval_s=parseInt($('radar_update_interval_s').value,10)||900;
       data.radar_frames=parseInt($('radar_frames').value,10)||10;
     }
 
@@ -2686,10 +2687,13 @@
     function populateTab_image_radar(data){
       if($('radar_enabled')) $('radar_enabled').checked=!!data.radar_enabled;
       if($('radar_show_overlay')) $('radar_show_overlay').checked=!!data.radar_show_overlay;
-      if($('radar_crop')) $('radar_crop').checked=!!data.radar_crop;
-      /* Dark is the default, so only an explicit false selects Light -- a
-         missing key (older firmware) must not flip the page to Light. */
-      if($('radar_dark_mode')) $('radar_dark_mode').value=(data.radar_dark_mode===false)?'0':'1';
+      /* Crop is a number on the wire, but a device that still holds the retired
+         middle value (2) must show as cropped, so any value >= 1 is checked. A
+         JSON bool from older firmware is coerced the same way. */
+      if($('radar_crop')) $('radar_crop').checked=(data.radar_crop===true)||((parseInt(data.radar_crop,10)||0)>=1);
+      /* Dark is the default, so only an explicit false clears the toggle -- a
+         missing key (older firmware) must not flip the page to the light map. */
+      if($('radar_dark_mode')) $('radar_dark_mode').checked=(data.radar_dark_mode!==false);
       /* '' is the Automatic option and a legitimate stored value, so keep it
          (|| '' only covers a missing key). An area saved by a newer firmware
          than this page knows about would not match any option; fall back to
@@ -2699,7 +2703,7 @@
         $('radar_token').value=rt;
         if($('radar_token').selectedIndex<0) $('radar_token').value='';
       }
-      if($('radar_update_interval_s')) $('radar_update_interval_s').value=String(data.radar_update_interval_s||300);
+      if($('radar_update_interval_s')) $('radar_update_interval_s').value=String(data.radar_update_interval_s||900);
       if($('radar_frames')) $('radar_frames').value=String(data.radar_frames||10);
       updateImagePageEnabledUI('image-radar');
     }

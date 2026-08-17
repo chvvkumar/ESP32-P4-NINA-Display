@@ -54,7 +54,10 @@ esp_err_t image_display_config_get_handler(httpd_req_t *req)
     cJSON_AddBoolToObject(root, "goes_crop",            cfg->goes_crop);
     cJSON_AddBoolToObject(root, "solar_crop",           cfg->solar_crop);
     cJSON_AddBoolToObject(root, "custom_crop",          cfg->custom_crop);
-    cJSON_AddBoolToObject(root, "radar_crop",           cfg->radar_crop);
+    /* 0 = whole image, 1 = cropped to fill the screen. A number, not a bool:
+     * the field is uint8_t and a device may still hold the retired value 2,
+     * which the page and the POST handler both read as crop. */
+    cJSON_AddNumberToObject(root, "radar_crop",         cfg->radar_crop);
     /* true = dark basemap, false = the NWS picture as published. */
     cJSON_AddBoolToObject(root, "radar_dark_mode",      cfg->radar_dark_mode);
     cJSON_AddNumberToObject(root, "solar_update_interval_s", cfg->solar_update_interval_s);
@@ -174,8 +177,28 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     JSON_TO_BOOL(root, "goes_crop",           cur->goes_crop);
     JSON_TO_BOOL(root, "solar_crop",          cur->solar_crop);
     JSON_TO_BOOL(root, "custom_crop",         cur->custom_crop);
-    JSON_TO_BOOL(root, "radar_crop",          cur->radar_crop);
     JSON_TO_BOOL(root, "radar_dark_mode",     cur->radar_dark_mode);
+    /* Crop off (0) or on (1). Stored as a uint8_t number, and BOTH wire shapes
+     * are accepted:
+     *   - JSON number: clamped to 0/1 here as well as in validate_config(), so a
+     *     hand-rolled POST cannot park an unknown value in the live config
+     *     between the save and the next load. Anything >= 1 lands on crop, which
+     *     is also where a device still holding the retired middle value (2) from
+     *     NVS resolves.
+     *   - JSON bool: what the previously shipped config_ui.html sent (`!!checked`).
+     *     A browser tab still holding that cached page keeps posting a bool for
+     *     the whole upgrade window; rejecting it made the toggle look dead until
+     *     a hard reload. true -> 1, false -> 0.
+     * Anything else (string, null, absent) leaves the stored value alone. */
+    cJSON *rcrop = cJSON_GetObjectItem(root, "radar_crop");
+    if (cJSON_IsBool(rcrop)) {
+        cur->radar_crop = cJSON_IsTrue(rcrop) ? 1 : 0;
+    } else if (cJSON_IsNumber(rcrop)) {
+        int v = rcrop->valueint;
+        if (v < 0) v = 0;
+        if (v > 1) v = 1;
+        cur->radar_crop = (uint8_t)v;
+    }
     /* Charset and length checked above; empty string clears it back to auto. */
     JSON_TO_STRING(root, "radar_token", cur->radar_token);
     cJSON *rinterval = cJSON_GetObjectItem(root, "radar_update_interval_s");

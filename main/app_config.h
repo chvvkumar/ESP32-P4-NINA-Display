@@ -420,9 +420,20 @@ typedef struct {
                                        // from weather_lat/weather_lon, else CONUS. The resolved
                                        // value is NEVER written back here — writing config from
                                        // a poll task is forbidden in this codebase.
-    uint16_t radar_update_interval_s;  // poll interval 120-7200 s (default 300)
+    uint16_t radar_update_interval_s;  // poll interval 120-7200 s (default 900)
     bool     radar_show_overlay;       // caption drawn over the radar image (default false)
-    bool     radar_crop;               // fill/crop borders instead of fitting (default false)
+    uint8_t  radar_crop;               // how the radar picture fits the panel. TWO states:
+                                       // 0 = off (whole image, bars top and bottom), 1 = crop
+                                       // (NOAA header/legend dropped, then a centred SQUARE crop
+                                       // that fills 720x720 with no bars). The retired middle
+                                       // value 2 ("fill screen", when 1 meant an 88% trim) can
+                                       // still sit in NVS; it clamps to 1, which is the same
+                                       // geometry it always asked for. See radar_play.h.
+                                       // Widened from bool at v64+ WITHOUT a version bump: bool
+                                       // and uint8_t are both one byte, so no offset moved, and
+                                       // the two values already stored (0/1) keep their meaning.
+                                       // The frozen app_config_v63_t snapshot below still
+                                       // declares it as bool and must stay that way.
     uint8_t  radar_frames;             // how many radar images the page keeps and animates,
                                        // newest first (1-10, default 10). 1 = a still image,
                                        // no animation. NOAA publishes a new frame roughly
@@ -3437,6 +3448,17 @@ _Static_assert(offsetof(app_config_t, radar_dark_mode) ==
                    offsetof(app_config_v63_t, auto_rotate_order2) +
                        sizeof(((app_config_v63_t *)0)->auto_rotate_order2),
                "app_config_v63_t snapshot drifted from app_config_t layout");
+
+/* radar_crop widened bool -> uint8_t (a fit mode, not a flag) with NO version bump.
+ * These two are the proof that costs nothing: the field is still one byte, and
+ * it still sits at the same offset as in the frozen v63 snapshot that declares
+ * it `bool`. Since it is one byte wide at an unchanged offset, nothing after it
+ * moved either — which the radar_dark_mode assert directly above re-checks. A
+ * stored blob therefore needs no migration: 0 and 1 already meant off and crop. */
+_Static_assert(sizeof(((app_config_t *)0)->radar_crop) == 1,
+               "radar_crop must stay one byte or the NVS blob layout shifts");
+_Static_assert(offsetof(app_config_t, radar_crop) == offsetof(app_config_v63_t, radar_crop),
+               "radar_crop moved: widening bool -> uint8_t must not shift the layout");
 
 /* migrate_from_v63 memcpy's sizeof(app_config_v63_t) bytes into app_config_t;
  * it must never exceed the destination. */

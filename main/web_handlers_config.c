@@ -636,7 +636,7 @@ static const backup_field_t s_backup_fields[] = {
      * newer firmware). */
     {"radar_enabled",              "Radar Page Enabled",   "Image Display", false, false},
     {"radar_show_overlay",         "Radar Show Overlay",   "Image Display", false, false},
-    {"radar_crop",                 "Radar Crop/Fill",      "Image Display", false, false},
+    {"radar_crop",                 "Radar Crop",           "Image Display", false, false},
     {"radar_token",                "Radar Area",           "Image Display", false, false},
     {"radar_update_interval_s",    "Radar Update Interval","Image Display", false, false},
     {"radar_frames",               "Radar Animation Length","Image Display", false, false},

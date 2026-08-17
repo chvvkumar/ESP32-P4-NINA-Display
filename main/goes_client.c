@@ -143,10 +143,23 @@ const char *goes_region_name(const char *code)
  * stb_image is compiled for (JPEG, PNG, GIF - the last one for NWS RIDGE-2
  * radar tiles). Writes the decoded frame into *out (top-down rows; see
  * STBI_NO_THREAD_LOCALS in stb_image.c for why no flip is applied anywhere any
- * more). */
-static esp_err_t fetch_image_into(const char *url, const char *label, image_frame_t *out)
+ * more).
+ *
+ * COMPRESSED-BYTE RETENTION (@p out_src / @p out_src_len, both NULL or both
+ * non-NULL). NULL is the normal case and behaves exactly as before: the
+ * compressed buffer is freed here the moment the decode is done. Non-NULL asks
+ * for the source bytes to SURVIVE the call, and then, on ESP_OK only,
+ * *out_src is a PSRAM allocation the CALLER must heap_caps_free(). On every
+ * failure path (and on a decode failure specifically) the buffer is freed here
+ * and *out_src stays NULL, so the caller frees only what it was handed.
+ *
+ * The radar ring is the one caller that asks: it re-derives its frames locally
+ * on a crop / dark-mode / Red Night change instead of re-downloading ~370 KB. */
+static esp_err_t fetch_image_into(const char *url, const char *label, image_frame_t *out,
+                                  uint8_t **out_src, size_t *out_src_len)
 {
     if (!url || !out) return ESP_ERR_INVALID_ARG;
+    if (out_src) { *out_src = NULL; *out_src_len = 0; }
 
     ESP_LOGI(TAG, "Fetching %s", url);
 
@@ -213,7 +226,12 @@ static esp_err_t fetch_image_into(const char *url, const char *label, image_fram
     uint32_t out_w = 0, out_h = 0;
     size_t out_size = 0;
     bool decoded = jpeg_sw_decode_rgb565(jpeg_buf, total_read, &rgb565, &out_w, &out_h, &out_size);
-    heap_caps_free(jpeg_buf);
+    if (out_src && decoded && rgb565) {
+        *out_src     = jpeg_buf;              /* ownership moves to the caller */
+        *out_src_len = (size_t)total_read;
+    } else {
+        heap_caps_free(jpeg_buf);
+    }
     if (!decoded || !rgb565) {
         ESP_LOGE(TAG, "Image decode failed");
         if (rgb565) heap_caps_free(rgb565);
@@ -239,17 +257,27 @@ esp_err_t image_fetch_goes(const char *region, image_frame_t *out)
     snprintf(url, sizeof(url),
              "https://cdn.star.nesdis.noaa.gov/GOES19/ABI/SECTOR/%s/GEOCOLOR/%s.jpg",
              region, size);
-    return fetch_image_into(url, goes_region_name(region), out);
+    return fetch_image_into(url, goes_region_name(region), out, NULL, NULL);
 }
 
 esp_err_t image_fetch_solar(uint8_t band, image_frame_t *out)
 {
     if (!out) return ESP_ERR_INVALID_ARG;
-    return fetch_image_into(solar_band_url(band), solar_band_label(band), out);
+    return fetch_image_into(solar_band_url(band), solar_band_label(band), out, NULL, NULL);
 }
 
 esp_err_t image_fetch_custom(const char *url, image_frame_t *out)
 {
     if (!url || !url[0] || !out) return ESP_ERR_INVALID_ARG;
-    return fetch_image_into(url, "Custom", out);
+    return fetch_image_into(url, "Custom", out, NULL, NULL);
+}
+
+esp_err_t image_fetch_custom_retain(const char *url, image_frame_t *out,
+                                    uint8_t **out_src, size_t *out_src_len)
+{
+    if (!out_src || !out_src_len) return ESP_ERR_INVALID_ARG;
+    *out_src = NULL;
+    *out_src_len = 0;
+    if (!url || !url[0] || !out) return ESP_ERR_INVALID_ARG;
+    return fetch_image_into(url, "Custom", out, out_src, out_src_len);
 }

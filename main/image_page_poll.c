@@ -415,19 +415,37 @@ static void radar_backfill(image_page_t *p, const app_config_t *cfg)
             return;
         }
 
+        /* Service a crop / dark-mode / Red-Night change BETWEEN frames rather
+         * than after the whole backfill. This loop lives ~9 s for ten frames and
+         * far longer when fetches are slow; the request used to wait for the
+         * next net_poll_once(), which is why a logged change took 18.4 s to
+         * reach the ring. Here it converges within one backfill gap.
+         *
+         * No second flag and no early exit: this is the SAME request the poll
+         * entry consumes, taken with an atomic exchange so it cannot be serviced
+         * twice or dropped, and the loop simply continues afterwards — every
+         * remaining frame is still fetched, in order, and each is baked live
+         * under the settings that just won. Safe to call from here: it runs on
+         * this task, and no insert is in flight at this point in the loop. */
+        image_page_radar_retransform_if_requested(p);
+
         char url[96];
         radar_frame_url(url, sizeof(url), token, i);
 
         image_frame_t old = {0};
+        uint8_t *src = NULL;
+        size_t   src_len = 0;
         xSemaphoreTake(s_fetch_gate, portMAX_DELAY);
-        esp_err_t e = image_fetch_custom(url, &old);
+        esp_err_t e = image_fetch_custom_retain(url, &old, &src, &src_len);
         xSemaphoreGive(s_fetch_gate);
         if (e != ESP_OK) {
             if (old.buf) heap_caps_free(old.buf);
+            /* src is NULL on every error return (see image_fetch_custom_retain). */
             ESP_LOGW(TAG, "radar backfill stopped at frame %d", i);
             break;
         }
-        image_page_radar_add(p, &old, false, gen);          /* append at the tail */
+        /* Takes both buffers, accepted or rejected. */
+        image_page_radar_add(p, &old, false, gen, src, src_len);   /* append at the tail */
     }
     ESP_LOGI(TAG, "radar ring: %d/%d frames", image_page_radar_count(), cap);
 }
@@ -437,6 +455,22 @@ static bool net_poll_once(void *arg)
     image_page_t *p = (image_page_t *)arg;
     const app_config_t *cfg = app_config_get();
     bool manual = atomic_exchange(&p->manual_fetch, false);
+
+    /* Radar, in this order and BEFORE anything can insert a frame this pass:
+     *   1. a ring teardown image_page_radar_invalidate() had to defer because the
+     *      display lock was busy (the generation bump already landed, so the ring
+     *      is only stale, never mixed) — running it here, ahead of the fetch
+     *      below, is what keeps a frame under the NEW settings from joining old
+     *      ones. A no-op unless a lock timeout actually happened;
+     *   2. a pending crop / dark-mode / Red-Night change, which re-derives the
+     *      ring from each frame's retained compressed bytes. Runs BEFORE the
+     *      freshness early-return below (a full, fresh ring is exactly when it is
+     *      needed) and costs no network.
+     * Both are no-ops for the other four sources. */
+    if (p->src == IMG_SRC_RADAR) {
+        image_page_radar_reset_if_requested(p);
+        image_page_radar_retransform_if_requested(p);
+    }
 
     /* A frame that is still within its interval (a warm/prefetched frame on
      * page entry, or a wake that was not a manual/config request) needs no
@@ -478,6 +512,11 @@ static bool net_poll_once(void *arg)
      * downloading after a region switch is rejected instead of mixed into the
      * new ring. Unused by the other four sources. */
     uint32_t radar_gen = image_page_radar_gen();
+    /* Radar retains its compressed source bytes so the ring can be re-derived
+     * locally on a crop/dark-mode/theme change. Ownership passes to
+     * image_page_radar_add(); NULL on every non-radar path and on any error. */
+    uint8_t *radar_src = NULL;
+    size_t   radar_src_len = 0;
     /* Serialize the fetch+decode across the five pollers (see s_fetch_gate).
      * A page that was left/un-warmed while we waited needs no extra test here:
      * image_page_commit_frame() retains the frame either way, and the resident
@@ -497,7 +536,7 @@ static bool net_poll_once(void *arg)
             image_page_radar_token(cfg, token, sizeof(token));
             char url[96];
             radar_frame_url(url, sizeof(url), token, 0);
-            err = image_fetch_custom(url, &fresh);
+            err = image_fetch_custom_retain(url, &fresh, &radar_src, &radar_src_len);
             break;
         }
         default:   /* IMG_SRC_CUSTOM */
@@ -519,7 +558,7 @@ static bool net_poll_once(void *arg)
             /* Newest frame at the head; a re-served identical still is deduped
              * inside _add. Only then rebuild the history (outside the fetch
              * gate, which the backfill re-takes per download). */
-            image_page_radar_add(p, &fresh, true, radar_gen);
+            image_page_radar_add(p, &fresh, true, radar_gen, radar_src, radar_src_len);
             /* Radar never goes through image_page_commit_frame(), which is what
              * clears p->frame.error_msg for every other source (it assigns the
              * whole zeroed `fresh`). Without this, one transient failure latches
@@ -543,6 +582,19 @@ static bool net_poll_once(void *arg)
         nina_toast_show(TOAST_WARNING, "Failed to load image");
     }
     return false;
+}
+
+/* Radar park point. The other consumption site for a deferred ring teardown is
+ * the top of net_poll_once(), which only runs while the page is gated ON — and
+ * the invalidate that had to defer often comes from image_page_disable(), which
+ * closes that gate immediately. Without this hook a lock timeout on the disable
+ * path would hold the whole ring (up to ~6.6 MB of PSRAM) until the page was
+ * enabled again. Blocking here is free: nothing renders on this task while
+ * parked, and no insert can be in flight (image_page_radar_add runs only on
+ * this task, and only from net_poll_once). */
+static void radar_on_park(void *arg)
+{
+    image_page_radar_reset_if_requested((image_page_t *)arg);
 }
 
 /* ---- Moon ---- */
@@ -1009,6 +1061,13 @@ void image_page_poll_task(void *arg)
     bool is_moon = (p->src == IMG_SRC_MOON);
     ESP_LOGI(TAG, "%s poll task started", p->name);
 
+    /* Park hooks: the Moon releases its texture and drag scratch; radar services
+     * a ring teardown that could not get the display lock (see radar_on_park).
+     * The other three sources hold nothing that a park should release. */
+    void (*park_cb)(void *) = NULL;
+    if (is_moon)                        park_cb = moon_on_park;
+    else if (p->src == IMG_SRC_RADAR)   park_cb = radar_on_park;
+
     /* Network sources: a failed first fetch on page entry (transient DNS/TLS)
      * must not leave the page black for a full 5-120 min interval; the spine's
      * failure backoff retries at 15 s, doubling to 5 min. The Moon never fails
@@ -1022,7 +1081,7 @@ void image_page_poll_task(void *arg)
         .interval_ms = interval_cb,
         .backoff_initial_ms = is_moon ? 0 : 15000,
         .backoff_max_ms = is_moon ? 0 : 300000,
-        .on_park = is_moon ? moon_on_park : NULL,
+        .on_park = park_cb,
     };
     poll_loop_run(&spec, p);
 }
