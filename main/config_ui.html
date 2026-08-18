@@ -1038,6 +1038,7 @@
         <button class="tab-btn" data-tab="image-solar">Solar</button>
         <button class="tab-btn" data-tab="image-custom">Custom URL</button>
         <button class="tab-btn" data-tab="image-radar">Radar</button>
+        <button class="tab-btn" data-tab="image-clouds">Cloud Cover</button>
         <button class="tab-btn" data-tab="octoprint">OctoPrint</button>
       </div>
       <div class="tab-group" data-section="device">
@@ -1095,6 +1096,7 @@
     <div id="tab-image-solar" class="tab-panel"></div>
     <div id="tab-image-custom" class="tab-panel"></div>
     <div id="tab-image-radar" class="tab-panel"></div>
+    <div id="tab-image-clouds" class="tab-panel"></div>
 
     <!-- ==================== TAB: OCTOPRINT ==================== -->
     <!-- Markup extracted to main/fragment_octoprint.html; lazily fetched by
@@ -1405,7 +1407,7 @@
       c.innerHTML='';
       /* [id, label, stop value]. Stop values are frozen page_ref ids: 0..11
          anchored block, plus appended JSON (24), Home Assistant (25),
-         OctoPrint (26) and Weather Radar (27) — keep in sync with ARP_IDX_*
+         OctoPrint (26), Weather Radar (27) and Cloud Cover (28) — keep in sync with ARP_IDX_*
          in app_config.h. */
       var items=[
         ['arp_summary','Summary',0],
@@ -1423,7 +1425,8 @@
         ['arp_img_moon','Img: Moon',9],
         ['arp_img_solar','Img: Solar',10],
         ['arp_img_custom','Img: Custom',11],
-        ['arp_img_radar','Img: Radar',27]
+        ['arp_img_radar','Img: Radar',27],
+        ['arp_img_clouds','Img: Cloud Cover',28]
       ];
       items.forEach(function(it){
         var idx=it[2];
@@ -1586,7 +1589,7 @@
        so the initial switchTab() call at boot -- which shows whichever tab
        was last active -- transparently fetches that tab's fragment first; no
        separate boot-time special case is needed for the default tab. */
-    const TAB_ORDER=['nodes','allsky','json','ha','clock','spotify','image-goes','image-moon','image-solar','image-custom','image-radar','octoprint','display','behavior','voice-clips','system','logs','backup','api'];
+    const TAB_ORDER=['nodes','allsky','json','ha','clock','spotify','image-goes','image-moon','image-solar','image-custom','image-radar','image-clouds','octoprint','display','behavior','voice-clips','system','logs','backup','api'];
     const LAZY_TABS=new Set(TAB_ORDER);
     const loadedTabs=new Set(TAB_ORDER.filter(n=>!LAZY_TABS.has(n)));
 
@@ -1772,7 +1775,7 @@
        highlights and row 2 shows the matching tab group. _lastUsedTab remembers
        the tab last visited in each section (in-memory) so a section click lands
        on a sensible default; switchTab() keeps it seeded as tabs activate. */
-    const TAB_GROUP = { nodes:'pages', allsky:'pages', json:'pages', ha:'pages', clock:'pages', spotify:'pages', 'image-goes':'pages', 'image-moon':'pages', 'image-solar':'pages', 'image-custom':'pages', 'image-radar':'pages', octoprint:'pages', display:'device', behavior:'device', 'voice-clips':'device', system:'device', logs:'tools', backup:'tools', api:'tools' };
+    const TAB_GROUP = { nodes:'pages', allsky:'pages', json:'pages', ha:'pages', clock:'pages', spotify:'pages', 'image-goes':'pages', 'image-moon':'pages', 'image-solar':'pages', 'image-custom':'pages', 'image-radar':'pages', 'image-clouds':'pages', octoprint:'pages', display:'device', behavior:'device', 'voice-clips':'device', system:'device', logs:'tools', backup:'tools', api:'tools' };
     var _lastUsedTab={};
     function highlightGroup(name){
       var sec=TAB_GROUP[name];
@@ -2085,7 +2088,7 @@
     /* === Rotation slideshow list === */
     /* Single ordered slideshow list: membership == order.
        data-arp-idx equals the slideshow stop id (0..11, 24=JSON, 25=HA,
-       26=OctoPrint, 27=Radar).
+       26=OctoPrint, 27=Radar, 28=Cloud Cover).
        Saved array holds the indices of CHECKED pills in on-screen order,
        padded to 24 slots with 0xFF (255 = unused). */
     function getRotateOrder(){
@@ -2106,9 +2109,9 @@
       var pillMap={};
       pills.forEach(function(p){ pillMap[p.getAttribute('data-arp-idx')]=p; });
       /* Members (in order) = valid stop ids (0..11, 24=JSON, 25=HA,
-         26=OctoPrint, 27=Radar) that are not the 0xFF/255 sentinel. Keep in
+         26=OctoPrint, 27=Radar, 28=Cloud Cover) that are not the 0xFF/255 sentinel. Keep in
          sync with ARP_STOP_IS_VALID in app_config.h. */
-      var members=orderArr.map(function(v){return parseInt(v);}).filter(function(v){return !isNaN(v)&&(v>=0&&v<12||v===24||v===25||v===26||v===27);});
+      var members=orderArr.map(function(v){return parseInt(v);}).filter(function(v){return !isNaN(v)&&(v>=0&&v<12||v===24||v===25||v===26||v===27||v===28);});
       /* Reorder members to the front in saved order, set their checkbox on. */
       members.forEach(function(idx){
         var p=pillMap[idx];
@@ -2276,6 +2279,13 @@
       data.radar_token=$('radar_token').value;
       data.radar_update_interval_s=parseInt($('radar_update_interval_s').value,10)||900;
       data.radar_frames=parseInt($('radar_frames').value,10)||10;
+    }
+    function collectTab_image_clouds(data){
+      data.clouds_enabled=!!$('clouds_enabled').checked;
+      data.clouds_show_overlay=!!$('clouds_show_overlay').checked;
+      data.clouds_zoom=parseInt($('clouds_zoom').value,10)||7;
+      data.clouds_update_interval_s=parseInt($('clouds_update_interval_s').value,10)||600;
+      data.clouds_frames=parseInt($('clouds_frames').value,10)||6;
     }
 
     function collectTab_octoprint(data){
@@ -2448,6 +2458,7 @@
       'image-solar': collectTab_image_solar,
       'image-custom': collectTab_image_custom,
       'image-radar': collectTab_image_radar,
+      'image-clouds': collectTab_image_clouds,
       octoprint: collectTab_octoprint,
       display: collectTab_display,
       behavior: collectTab_behavior,
@@ -2716,6 +2727,19 @@
       if($('radar_frames')) $('radar_frames').value=String(data.radar_frames||10);
       updateImagePageEnabledUI('image-radar');
     }
+    function populateTab_image_clouds(data){
+      if($('clouds_enabled')) $('clouds_enabled').checked=!!data.clouds_enabled;
+      /* Overlay defaults on, so only an explicit false clears it (missing key
+         on older firmware keeps the default). */
+      if($('clouds_show_overlay')) $('clouds_show_overlay').checked=(data.clouds_show_overlay!==false);
+      if($('clouds_zoom')){
+        var cz=parseInt(data.clouds_zoom,10)||7;
+        $('clouds_zoom').value=String((cz>=5&&cz<=9)?cz:7);
+      }
+      if($('clouds_update_interval_s')) $('clouds_update_interval_s').value=String(data.clouds_update_interval_s||600);
+      if($('clouds_frames')) $('clouds_frames').value=String(data.clouds_frames||6);
+      updateImagePageEnabledUI('image-clouds');
+    }
 
     function populateTab_octoprint(data){
       if($('octoprint_enabled')) $('octoprint_enabled').checked=!!data.octoprint_enabled;
@@ -2918,6 +2942,7 @@
       'image-solar': populateTab_image_solar,
       'image-custom': populateTab_image_custom,
       'image-radar': populateTab_image_radar,
+      'image-clouds': populateTab_image_clouds,
       octoprint: populateTab_octoprint,
       display: populateTab_display,
       behavior: populateTab_behavior,
@@ -4441,7 +4466,8 @@
       'image-moon':   {en:'moon_enabled',   fields:'moonFields',   src:1},
       'image-solar':  {en:'solar_enabled',  fields:'solarFields',  src:2},
       'image-custom': {en:'custom_enabled', fields:'customFields', src:3},
-      'image-radar':  {en:'radar_enabled',  fields:'radarFields',  src:4}
+      'image-radar':  {en:'radar_enabled',  fields:'radarFields',  src:4},
+      'image-clouds': {en:'clouds_enabled', fields:'cloudsFields', src:5}
     };
 
     function updateImagePageEnabledUI(name){

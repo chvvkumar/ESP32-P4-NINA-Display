@@ -33,7 +33,7 @@
             <div class="field">
               <label class="field-label">Interval (seconds)</label>
               <input type="number" class="input" id="auto_rotate_interval" min="4" max="3600" value="30">
-              <div class="field-hint">Seconds each page is shown before Auto Cycle advances to the next one, from 4 to 3600. For pages that download a picture (GOES, Solar, Custom URL, OctoPrint), the countdown starts once the picture has finished loading.</div>
+              <div class="field-hint">Seconds each page is shown before Auto Cycle advances to the next one, from 4 to 3600. For pages that download a picture (GOES, Solar, Custom URL, Weather Radar, Cloud Cover, OctoPrint), the countdown starts once the picture has finished loading.</div>
             </div>
             <div class="field">
               <label class="field-label">Transition</label>
@@ -57,7 +57,7 @@
             <div style="font-size:0.72rem;color:var(--text-muted);margin:-8px 0 10px;opacity:0.7">Drag to reorder</div>
             <div class="pn-pill-grid reorderable" id="arp-container"></div>
             <div class="field-hint">Pick which pages and image sources rotate, and drag to set the order.</div>
-            <div class="field-hint">Note: Image pages (GOES, Solar, and Custom URL) download a fresh image from their source each time the rotation reaches them, even if their refresh interval has not elapsed yet. Shorter rotation intervals mean more frequent downloads from those image servers.</div>
+            <div class="field-hint">Note: Image pages (GOES, Solar, Custom URL, Weather Radar, and Cloud Cover) download a fresh image from their source each time the rotation reaches them, even if their refresh interval has not elapsed yet. Shorter rotation intervals mean more frequent downloads from those image servers.</div>
           </div>
         </div>
         </div>

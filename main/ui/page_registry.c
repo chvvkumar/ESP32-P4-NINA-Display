@@ -66,6 +66,7 @@ static const page_ref_entry_t s_pages[] = {
     /* id 25 */ { PAGE_REF_HA,               "ha",                     "Home Assistant",   PAGE_REF_KIND_PAGE,         PAGE_REF_HA,           true,  "Ambient", PAGE_IDX_HA                            },
     /* id 26 */ { PAGE_REF_OCTOPRINT,        "octoprint",              "OctoPrint",        PAGE_REF_KIND_PAGE,         PAGE_REF_OCTOPRINT,    true,  "Ambient", PAGE_IDX_OCTOPRINT                     },
     /* id 27 */ { PAGE_REF_RADAR,     "image.radar",  "Weather Radar",  PAGE_REF_KIND_IMAGE_SOURCE, PAGE_REF_RADAR,      true, "Image", PAGE_IDX_IMG_RADAR  },
+    /* id 28 */ { PAGE_REF_CLOUDS,    "image.clouds", "Cloud Cover",       PAGE_REF_KIND_IMAGE_SOURCE, PAGE_REF_CLOUDS,     true, "Image", PAGE_IDX_IMG_CLOUDS },
 };
 
 int page_ref_count(void)
@@ -131,6 +132,9 @@ bool page_ref_is_available(page_ref_t id)
         /* No URL precondition: an empty radar_token resolves at fetch time
          * (nearest site, else the CONUS mosaic), so the page always has a target. */
         case PAGE_REF_RADAR:      avail = c->radar_enabled; break;
+        /* Same: the box is centred on the weather location, and (0,0) is still a
+         * valid (if empty) box, so the page always has a target. */
+        case PAGE_REF_CLOUDS:     avail = c->clouds_enabled; break;
         case PAGE_REF_SETTINGS:           /* settings: never a slideshow/nav-list target */
         case PAGE_REF_OVL_GRAPH:          /* overlays: not directly navigable             */
         case PAGE_REF_OVL_INFO_CAMERA:

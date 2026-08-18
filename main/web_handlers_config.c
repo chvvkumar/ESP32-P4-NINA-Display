@@ -59,6 +59,8 @@ extern const uint8_t fragment_image_custom_html_start[] asm("_binary_fragment_im
 extern const uint8_t fragment_image_custom_html_end[]   asm("_binary_fragment_image_custom_html_end");
 extern const uint8_t fragment_image_radar_html_start[]  asm("_binary_fragment_image_radar_html_start");
 extern const uint8_t fragment_image_radar_html_end[]    asm("_binary_fragment_image_radar_html_end");
+extern const uint8_t fragment_image_clouds_html_start[] asm("_binary_fragment_image_clouds_html_start");
+extern const uint8_t fragment_image_clouds_html_end[]   asm("_binary_fragment_image_clouds_html_end");
 extern const uint8_t fragment_octoprint_html_start[] asm("_binary_fragment_octoprint_html_start");
 extern const uint8_t fragment_octoprint_html_end[]   asm("_binary_fragment_octoprint_html_end");
 
@@ -114,6 +116,8 @@ extern const uint8_t fragment_image_custom_html_gz_start[] asm("_binary_fragment
 extern const uint8_t fragment_image_custom_html_gz_end[]   asm("_binary_fragment_image_custom_html_gz_end");
 extern const uint8_t fragment_image_radar_html_gz_start[]  asm("_binary_fragment_image_radar_html_gz_start");
 extern const uint8_t fragment_image_radar_html_gz_end[]    asm("_binary_fragment_image_radar_html_gz_end");
+extern const uint8_t fragment_image_clouds_html_gz_start[] asm("_binary_fragment_image_clouds_html_gz_start");
+extern const uint8_t fragment_image_clouds_html_gz_end[]   asm("_binary_fragment_image_clouds_html_gz_end");
 extern const uint8_t fragment_octoprint_html_gz_start[] asm("_binary_fragment_octoprint_html_gz_start");
 extern const uint8_t fragment_octoprint_html_gz_end[]   asm("_binary_fragment_octoprint_html_gz_end");
 extern const uint8_t fragment_nodes_html_gz_start[] asm("_binary_fragment_nodes_html_gz_start");
@@ -289,6 +293,8 @@ static const ui_fragment_entry_t s_ui_fragments[] = {
                        fragment_image_custom_html_gz_start,  fragment_image_custom_html_gz_end },
     { "image-radar",   fragment_image_radar_html_start,   fragment_image_radar_html_end,
                        fragment_image_radar_html_gz_start,   fragment_image_radar_html_gz_end },
+    { "image-clouds",  fragment_image_clouds_html_start,  fragment_image_clouds_html_end,
+                       fragment_image_clouds_html_gz_start,  fragment_image_clouds_html_gz_end },
     { "octoprint",     fragment_octoprint_html_start,     fragment_octoprint_html_end,
                        fragment_octoprint_html_gz_start,     fragment_octoprint_html_gz_end },
     { "nodes",         fragment_nodes_html_start,         fragment_nodes_html_end,
@@ -643,6 +649,13 @@ static const backup_field_t s_backup_fields[] = {
     {"radar_frames",               "Radar Animation Length","Radar", false, false},
     {"radar_dark_mode",            "Radar Map Appearance", "Radar", false, false},
     {"radar_map_style",            "Radar Map Style",      "Radar", false, false},
+    /* Clouds page (v66). All five are SETTINGS_TABLE rows; same reasoning as
+     * the radar block above. */
+    {"clouds_enabled",             "Cloud Cover Page Enabled",  "Cloud Cover", false, false},
+    {"clouds_show_overlay",        "Cloud Cover Show Overlay",  "Cloud Cover", false, false},
+    {"clouds_update_interval_s",   "Cloud Cover Update Interval","Cloud Cover", false, false},
+    {"clouds_frames",              "Cloud Cover Animation Length","Cloud Cover", false, false},
+    {"clouds_zoom",                "Cloud Cover Area",          "Cloud Cover", false, false},
     {"goes_region",                "GOES Region",          "GOES", false, false},
     {"goes_update_interval_s",     "GOES Update Interval", "GOES", false, false},
     {"custom_image_url",           "Custom Image URL",     "Custom URL", false, false},
@@ -1051,9 +1064,9 @@ static cJSON *build_restore_preview(const cJSON *backup_root, const cJSON *curre
     bool restore_blocked = false;
 
     /* Track which categories have changes */
-    const char *categories[] = {"Display", "Behavior", "Nodes & Data", "System", "AllSky", "Spotify", "MQTT", "OctoPrint", "GOES", "Moon", "Solar", "Custom URL", "Radar"};
-    int cat_counts[13] = {0};
-    int num_categories = 13;
+    const char *categories[] = {"Display", "Behavior", "Nodes & Data", "System", "AllSky", "Spotify", "MQTT", "OctoPrint", "GOES", "Moon", "Solar", "Custom URL", "Radar", "Cloud Cover"};
+    int cat_counts[14] = {0};
+    int num_categories = 14;
 
     for (const backup_field_t *f = s_backup_fields; f->json_key; f++) {
         /* Determine which backup section this field comes from */

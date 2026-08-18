@@ -179,14 +179,15 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
     if (new_cfg->octoprint_overlay_visible != old_cfg->octoprint_overlay_visible) {
         octoprint_page_set_overlay_visible(new_cfg->octoprint_overlay_visible);
     }
-    /* Image pages (GOES/Moon/Solar/Custom/Radar): one live-apply for all five; an
+    /* Image pages (GOES/Moon/Solar/Custom/Radar/Clouds): one live-apply for all six; an
      * enable toggle is a topology change (an optional page appeared/disappeared). */
     image_page_config_apply_live(old_cfg, new_cfg, false);
     if (new_cfg->goes_enabled != old_cfg->goes_enabled ||
         new_cfg->moon_enabled != old_cfg->moon_enabled ||
         new_cfg->solar_enabled != old_cfg->solar_enabled ||
         new_cfg->custom_enabled != old_cfg->custom_enabled ||
-        new_cfg->radar_enabled != old_cfg->radar_enabled) {
+        new_cfg->radar_enabled != old_cfg->radar_enabled ||
+        new_cfg->clouds_enabled != old_cfg->clouds_enabled) {
         topology_changed = true;
     }
     /* Weather config change — invalidate stale data and force refresh */
@@ -498,38 +499,35 @@ esp_err_t screenshot_get_handler(httpd_req_t *req)
 
     ESP_LOGI(TAG, "Snapshot captured: %lux%lu, stride=%lu", width, height, stride);
 
-    // Allocate DMA-aligned input buffer and copy pixels
-    jpeg_encode_memory_alloc_cfg_t in_mem_cfg = {
-        .buffer_direction = JPEG_ENC_ALLOC_INPUT_BUFFER,
-    };
-    size_t in_alloc_size = 0;
-    uint8_t *enc_in = (uint8_t *)jpeg_alloc_encoder_mem(raw_size, &in_mem_cfg, &in_alloc_size);
-    if (!enc_in) {
-        ESP_LOGE(TAG, "Failed to alloc JPEG encoder input buffer (%lu bytes)", raw_size);
+    // Feed the LVGL draw buffer straight to the encoder when it is already
+    // cache-line aligned and densely packed (the driver msyncs the input
+    // itself); otherwise fall back to a DMA-aligned copy.
+    uint8_t *enc_in = NULL;      // owned copy, NULL when snapshot->data is used directly
+    const uint8_t *enc_src = NULL;
+    if (((uintptr_t)snapshot->data % 128) == 0 && stride == row_size) {
+        enc_src = snapshot->data;
+    } else {
+        jpeg_encode_memory_alloc_cfg_t in_mem_cfg = {
+            .buffer_direction = JPEG_ENC_ALLOC_INPUT_BUFFER,
+        };
+        size_t in_alloc_size = 0;
+        enc_in = (uint8_t *)jpeg_alloc_encoder_mem(raw_size, &in_mem_cfg, &in_alloc_size);
+        if (!enc_in) {
+            ESP_LOGE(TAG, "Failed to alloc JPEG encoder input buffer (%lu bytes)", raw_size);
+            lv_draw_buf_destroy(snapshot);
+            httpd_resp_send_500(req);
+            return ESP_FAIL;
+        }
+        for (uint32_t y = 0; y < height; y++) {
+            memcpy(enc_in + y * row_size, snapshot->data + y * stride, row_size);
+        }
         lv_draw_buf_destroy(snapshot);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
+        snapshot = NULL;
+        enc_src = enc_in;
     }
 
-    for (uint32_t y = 0; y < height; y++) {
-        memcpy(enc_in + y * row_size, snapshot->data + y * stride, row_size);
-    }
-    lv_draw_buf_destroy(snapshot);
-
-    // Allocate DMA-aligned output buffer
-    jpeg_encode_memory_alloc_cfg_t out_mem_cfg = {
-        .buffer_direction = JPEG_ENC_ALLOC_OUTPUT_BUFFER,
-    };
-    size_t out_alloc_size = 0;
-    uint8_t *enc_out = (uint8_t *)jpeg_alloc_encoder_mem(raw_size, &out_mem_cfg, &out_alloc_size);
-    if (!enc_out) {
-        ESP_LOGE(TAG, "Failed to alloc JPEG encoder output buffer");
-        free(enc_in);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-
-    // Encode RGB565 -> JPEG
+    // Encode RGB565 -> JPEG. Output starts at raw_size/4; a too-small output
+    // buffer surfaces as ESP_ERR_INVALID_STATE, retried once at raw_size/2.
     jpeg_encode_cfg_t enc_cfg = {
         .src_type = JPEG_ENCODE_IN_FORMAT_RGB565,
         .sub_sample = JPEG_DOWN_SAMPLING_YUV422,
@@ -537,14 +535,36 @@ esp_err_t screenshot_get_handler(httpd_req_t *req)
         .width = width,
         .height = height,
     };
+    jpeg_encode_memory_alloc_cfg_t out_mem_cfg = {
+        .buffer_direction = JPEG_ENC_ALLOC_OUTPUT_BUFFER,
+    };
+    uint8_t *enc_out = NULL;
     uint32_t jpg_size = 0;
-    esp_err_t err = jpeg_encoder_process(s_jpeg_encoder, &enc_cfg,
-        enc_in, raw_size, enc_out, out_alloc_size, &jpg_size);
-    free(enc_in);
+    esp_err_t err = ESP_FAIL;
+    for (int attempt = 0; attempt < 2; attempt++) {
+        size_t want = (attempt == 0) ? raw_size / 4 : raw_size / 2;
+        size_t out_alloc_size = 0;
+        enc_out = (uint8_t *)jpeg_alloc_encoder_mem(want, &out_mem_cfg, &out_alloc_size);
+        if (!enc_out) {
+            ESP_LOGE(TAG, "Failed to alloc JPEG encoder output buffer (%u bytes)", (unsigned)want);
+            err = ESP_ERR_NO_MEM;
+            break;
+        }
+        ESP_LOGD(TAG, "JPEG output buffer: %u bytes (attempt %d)", (unsigned)out_alloc_size, attempt);
+        jpg_size = 0;
+        err = jpeg_encoder_process(s_jpeg_encoder, &enc_cfg,
+            enc_src, raw_size, enc_out, out_alloc_size, &jpg_size);
+        if (err == ESP_OK) break;
+        free(enc_out);
+        enc_out = NULL;
+        if (err != ESP_ERR_INVALID_STATE) break;
+    }
+    if (enc_in) free(enc_in);
+    if (snapshot) lv_draw_buf_destroy(snapshot);
 
     if (err != ESP_OK || jpg_size == 0) {
         ESP_LOGE(TAG, "JPEG encode failed: %s", esp_err_to_name(err));
-        free(enc_out);
+        if (enc_out) free(enc_out);
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }

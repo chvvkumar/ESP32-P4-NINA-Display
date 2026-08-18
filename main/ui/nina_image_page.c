@@ -1,7 +1,7 @@
 /**
  * @file nina_image_page.c
- * @brief Image page spine: rendering + lifecycle for the five image pages
- *        (GOES / Moon / Solar / Custom / Radar). Ported from nina_image_display.c;
+ * @brief Image page spine: rendering + lifecycle for the six image pages
+ *        (GOES / Moon / Solar / Custom / Radar / Clouds). Ported from nina_image_display.c;
  *        every former module-level static is now a field of image_page_t.
  *
  * Threading: every LVGL call below runs under the display lock held by the
@@ -37,33 +37,16 @@ static const char *TAG = "image_page";
 
 extern const lv_font_t lv_font_overpass_27;
 
-/* The five instances. Identity fields are filled by image_page_init(). */
+/* The six instances. Identity fields are filled by image_page_init(). */
 static image_page_t s_pages[IMG_SRC_COUNT];
 
-/* Weather Radar animation ring — implementation further down, forward-declared
+/* Animation ring (Radar, Clouds) — implementation further down, forward-declared
  * here because the render/lifecycle functions above it dispatch into the ring
- * for IMG_SRC_RADAR. All three require the display lock held by the caller. */
-static void radar_show_idx(image_page_t *p, int idx);
-static void radar_timer_sync(image_page_t *p);
-
-/* Pending-backfill request. Declared HERE, not with the rest of the ring state
- * further down, because image_page_set_active() (above the ring block) raises it
- * on every activation. Atomic: set from the UI task, consumed by the poll task
- * via image_page_radar_backfill_take(). */
-static _Atomic bool s_radar_backfill_req;
-
-/* Pending local re-transform request (crop / dark-mode / Red Night change).
- * Declared here for the same reason as s_radar_backfill_req: image_page_apply_theme()
- * sits above the ring block and raises it. Set from the UI or httpd task,
- * consumed by the radar poll task in image_page_radar_retransform_if_requested(). */
-static _Atomic bool s_radar_retransform_req;
-
-/* Red Night state the RESIDENT radar ring was recoloured with. Radar frames are
- * recoloured once, at insert (image_page_radar_add), so image_page_apply_theme()
- * — which sits above the ring block — needs this to tell a theme switch that
- * changes radar pixels from one that does not. Plain bool: written and read only
- * under the display lock. */
-static bool s_radar_ring_red;
+ * for the animated sources. All require the display lock held by the caller. */
+static void ring_show_idx(image_page_t *p, int idx);
+static void ring_timer_sync(image_page_t *p);
+static void ring_request_backfill(image_page_t *p);
+static bool ring_red_mismatch(image_page_t *p);
 
 static inline void set_label_if_changed(lv_obj_t *label, const char *text)
 {
@@ -472,9 +455,10 @@ void image_page_render_frame(image_page_t *p)
      * other frame read here), and when a reason is present render it as the
      * caption text and bail. A successful fetch clears error_msg, so the normal
      * swap path below runs and overwrites the caption — no stale error. Scoped to
-     * the two user-addressed sources (Custom URL and Radar, whose site token can
-     * be mistyped into a 404), so GOES/Solar/Moon are visually unchanged. */
-    if ((p->src == IMG_SRC_CUSTOM || p->src == IMG_SRC_RADAR) && p->frame.error_msg[0] != '\0') {
+     * the sources whose failures are user-visible (Custom URL, Radar whose site
+     * token can be mistyped into a 404, Clouds behind a GIBS outage), so
+     * GOES/Solar/Moon are visually unchanged. */
+    if (image_page_shows_error(p->src) && p->frame.error_msg[0] != '\0') {
         char err_copy[48];
         strlcpy(err_copy, p->frame.error_msg, sizeof(err_copy));
         frame_unlock(p);
@@ -487,14 +471,14 @@ void image_page_render_frame(image_page_t *p)
         return;
     }
 
-    /* Radar keeps its decoded frames in the animation ring, never in p->frame,
+    /* An animated page keeps its decoded frames in the ring, never in p->frame,
      * so the whole copy/crop/crossfade path below does not apply: re-show the
-     * frame the playback cursor is on (the ring stores them already cropped)
+     * frame the playback cursor is on (the ring stores them already baked)
      * and make sure the playback timer matches the current ring state. */
-    if (p->src == IMG_SRC_RADAR) {
+    if (image_src_is_animated(p->src)) {
         frame_unlock(p);
-        radar_show_idx(p, -1);          /* -1 = whatever the cursor is on */
-        radar_timer_sync(p);
+        ring_show_idx(p, -1);           /* -1 = whatever the cursor is on */
+        ring_timer_sync(p);
         nina_wait_overlay_hide();
         return;
     }
@@ -1096,9 +1080,9 @@ void image_page_apply_theme(image_page_t *p)
     if (p->lbl_moon_rise) apply_chip_style(p->lbl_moon_rise);
     if (p->lbl_moon_set)  apply_chip_style(p->lbl_moon_set);
 
-    /* Radar pixels are recoloured once, at insert, so restyling labels is not
-     * enough here: crossing the Red Night boundary changes both the remap AND
-     * (see image_page_radar_add) whether the dark treatment is forced, and
+    /* Ring pixels (Radar, Clouds) are recoloured once, at insert, so restyling
+     * labels is not enough here: crossing the Red Night boundary changes both
+     * the remap AND (see ring_bake) whether the radar dark treatment is forced, and
      * neither is reversible in place — the remap is lossy. Without this, a
      * switch INTO Red Night would leave up to ten bright frames looping for as
      * long as it takes the ring to roll over, on the one theme that must not put
@@ -1106,19 +1090,16 @@ void image_page_apply_theme(image_page_t *p)
      *
      * The fix is LOCAL: every slot keeps its compressed source bytes, so the
      * ring is re-derived from them under the new theme with no network. Request
-     * it and return; the radar poll task does the work.
+     * it and return; the page's poll task does the work.
      *
      * Gated on the state actually flipping: a switch between two non-red themes
-     * changes no radar pixel and must not rebuild anything. */
-    if (p->src == IMG_SRC_RADAR && image_page_radar_count() > 0 &&
-        s_radar_ring_red != image_red_remap_active()) {
-        image_page_radar_request_retransform(p);
-    }
+     * changes no ring pixel and must not rebuild anything. */
+    if (ring_red_mismatch(p)) image_page_ring_request_retransform(p);
 }
 
 /* ─────────────────────────── instances & gates ─────────────────────────── */
 
-static const char *const s_names[IMG_SRC_COUNT] = { "img_goes", "img_moon", "img_solar", "img_custom", "img_radar" };
+static const char *const s_names[IMG_SRC_COUNT] = { "img_goes", "img_moon", "img_solar", "img_custom", "img_radar", "img_clouds" };
 
 image_page_t *image_page_get(image_src_t src)
 {
@@ -1217,10 +1198,10 @@ void image_page_set_active(image_page_t *p, bool active)
     update_gate(p);
     if (active) {
         p->last_shown_ms = esp_timer_get_time() / 1000;   /* eviction order (LRU) */
-        /* Radar frees its whole ring on leave (see the ring block), so every
-         * activation asks the poller to rebuild the history behind the newest
-         * frame. The request is a no-op once the ring is full. */
-        if (p->src == IMG_SRC_RADAR) atomic_store(&s_radar_backfill_req, true);
+        /* An animated page frees its whole ring on leave (see the ring block),
+         * so every activation asks the poller to rebuild the history behind the
+         * newest frame. The request is a no-op once the ring is full. */
+        ring_request_backfill(p);
         image_page_ensure_task_running(p);
         image_page_render_frame(p);   /* a retained or warm frame shows instantly; no-op when empty */
         image_page_wake(p);
@@ -1232,11 +1213,12 @@ void image_page_set_active(image_page_t *p, bool active)
      * by image_page_evict_if_over_cap on later commits). Poke the poller so it
      * parks (Moon frees its texture in on_park unless it is still warm). */
     image_page_release_lvgl(p);
-    /* A full radar ring is ~6.6 MB — far past what the retained-frame budget
-     * was sized for, and it is never counted by image_page_evict_if_over_cap
-     * (which looks at p->frame, always NULL for radar). Free it outright here
-     * rather than let a parked page sit on it; the next activation backfills. */
-    if (p->src == IMG_SRC_RADAR) image_page_radar_reset(p);
+    /* A full ring is 6-10 MB — far past what the retained-frame budget was
+     * sized for, and it is never counted by image_page_evict_if_over_cap (which
+     * looks at p->frame, always NULL for an animated page). Free it outright
+     * here rather than let a parked page sit on it; the next activation
+     * backfills. No-op for the single-frame sources. */
+    image_page_ring_reset(p);
     nina_wait_overlay_hide();
     image_page_wake(p);
 }
@@ -1266,9 +1248,10 @@ void image_page_disable(image_page_t *p)
     atomic_store(&p->warm, false);
     update_gate(p);
     frame_drop(p);
-    /* Radar holds its frames in the ring, not p->frame; take the display lock
-     * (this function is called without it) and drop the whole ring. */
-    if (p->src == IMG_SRC_RADAR) image_page_radar_invalidate(p);
+    /* An animated page holds its frames in the ring, not p->frame; take the
+     * display lock (this function is called without it) and drop the whole
+     * ring. No-op for the single-frame sources. */
+    image_page_ring_invalidate(p);
     image_page_wake(p);
 }
 
@@ -1315,6 +1298,7 @@ bool image_page_config_enabled(const app_config_t *c, image_src_t src)
         case IMG_SRC_SOLAR:  return c->solar_enabled;
         case IMG_SRC_CUSTOM: return c->custom_enabled;
         case IMG_SRC_RADAR:  return c->radar_enabled;
+        case IMG_SRC_CLOUDS: return c->clouds_enabled;
         default:             return false;
     }
 }
@@ -1327,6 +1311,7 @@ bool image_page_config_overlay(const app_config_t *c, image_src_t src)
         case IMG_SRC_SOLAR:  return c->solar_show_overlay;
         case IMG_SRC_CUSTOM: return c->custom_show_overlay;
         case IMG_SRC_RADAR:  return c->radar_show_overlay;
+        case IMG_SRC_CLOUDS: return c->clouds_show_overlay;
         default:             return true;
     }
 }
@@ -1344,7 +1329,7 @@ bool image_page_config_crop(const app_config_t *c, image_src_t src)
          * radar_map_style gate lives; mirrored here so the predicate never
          * claims a crop that the bake would not apply. */
         case IMG_SRC_RADAR:  return c->radar_map_style == 0 && c->radar_crop != 0;
-        default:             return false;   /* Moon never crops */
+        default:             return false;   /* Moon and Clouds never crop */
     }
 }
 
@@ -1373,6 +1358,13 @@ uint32_t image_page_interval_ms(image_page_t *p)
              * config clamp also enforces, so a stale blob cannot poll faster. */
             s = c->radar_update_interval_s;
             if (s < 120) s = 120;
+            if (s > 7200) s = 7200;
+            break;
+        case IMG_SRC_CLOUDS:
+            /* GIBS publishes a GeoColor frame every 10 min; 300 s is the floor
+             * the config clamp also enforces. */
+            s = c->clouds_update_interval_s;
+            if (s < 300) s = 300;
             if (s > 7200) s = 7200;
             break;
         default: {   /* Moon: fast retry until SNTP sets the clock, then the configured cadence */
@@ -1452,6 +1444,7 @@ void image_page_label(image_page_t *p, char *out, size_t sz)
             strlcat(out, token, sz);
             break;
         }
+        case IMG_SRC_CLOUDS: strlcpy(out, "Cloud Cover", sz); break;
         default: break;
     }
 }
@@ -1467,36 +1460,46 @@ bool image_page_get_error(image_page_t *p, char *out, size_t sz)
     return out[0] != '\0';
 }
 
-/* ───────────────────────── Weather Radar animation ring ─────────────────────
+/* ───────────────────────── animation ring (Radar, Clouds) ────────────────────
  *
- * The radar page keeps up to radar_frames decoded stills (index 0 = newest) and
- * plays them oldest -> newest on an LVGL timer, holding longer on the newest.
- * Everything else on this page is unchanged; the ring simply replaces p->frame
- * as the storage, which is why image_page_render_frame() dispatches here.
+ * An ANIMATED image page (image_src_is_animated: Weather Radar, Clouds) keeps up
+ * to N decoded stills (index 0 = newest) and plays them oldest -> newest on an
+ * LVGL timer, holding longer on the newest. Everything else on such a page is
+ * unchanged; the ring simply replaces p->frame as the storage, which is why
+ * image_page_render_frame() dispatches here. One ring per instance
+ * (s_rings[src]); the two animated pages never share state.
  *
  * LOCKING: the ring is guarded by the DISPLAY LOCK alone — no second mutex.
  * Every reader/mutator either runs on the UI task with the lock already held
  * (render, playback timer, set_active) or takes it itself (the poller's
- * image_page_radar_add / _invalidate). Never hold frame_mux across these.
+ * image_page_ring_add / _invalidate). Never hold frame_mux across these.
  *
  * OWNERSHIP: the LVGL descriptor BORROWS a ring slot's buffer (release_dsc
- * skips borrowed slots), so s_radar_shown must be detached before that buffer
+ * skips borrowed slots), so ring->shown must be detached before that buffer
  * is freed — ring_free_slot() does exactly that.
  *
- * MEMORY: a full ten-frame ring of 600x550 tiles is ~6.6 MB, several times what
- * a normal image page holds, so IMAGE_PAGE_MAX_RESIDENT (which counts p->frame
- * and therefore never counts radar) is not the right control. Instead the whole
- * ring is freed when the page is deactivated or disabled and rebuilt by the
- * backfill on the next activation.
+ * MEMORY: a full ten-frame ring is ~6.6 MB (radar, 600x550) or ~10 MB (clouds,
+ * 720x720), several times what a normal image page holds, so
+ * IMAGE_PAGE_MAX_RESIDENT (which counts p->frame and therefore never counts a
+ * ring) is not the right control. Instead the whole ring is freed when the
+ * page is deactivated or disabled and rebuilt by the backfill on the next
+ * activation. Two animated pages are never both resident: leaving one frees it.
  *
- * RETAINED SOURCE BYTES: each slot also keeps the frame's COMPRESSED GIF (~37 KB,
- * ~370 KB for ten, against ~23 MB free PSRAM). The pixels carry the crop and the
- * night-invert baked in, so without the source the only way to re-derive them
- * was to re-download the whole ring — ~370 KB and ~9 s of staggered radio on a
- * board whose panel glitches under sustained transmission. With them,
- * image_page_radar_retransform_if_requested() rebuilds the ring locally. A slot
- * therefore owns TWO allocations and radar_free_slot() is the single place both
- * are released.
+ * RETAINED SOURCE BYTES: each slot also keeps the frame's COMPRESSED source
+ * (~37 KB radar GIF, ~90 KB clouds JPEG). The pixels carry the per-source bake
+ * (radar: crop + night invert; both: the Red Night remap), so without the
+ * source the only way to re-derive them was to re-download the whole ring.
+ * With them, image_page_ring_retransform_if_requested() rebuilds the ring
+ * locally. A slot therefore owns TWO allocations and ring_free_slot() is the
+ * single place both are released.
+ *
+ * STAMPS: a slot may carry the frame's own time (uint32 UTC seconds, 0 =
+ * unknown). Radar frames carry none (RIDGE stills have no per-frame time we
+ * parse) and are ordered by insertion (head push / tail append). Clouds frames
+ * carry the GIBS TIME they were fetched for: a stamped insert is placed by
+ * time (newest first, whatever the caller's at_head hint), and a stamp already
+ * held REPLACES that slot when the bytes differ (GIBS serves the newest one or
+ * two frames partially at first) or is dropped as a duplicate when they match.
  */
 
 typedef struct {
@@ -1505,89 +1508,135 @@ typedef struct {
     uint32_t hash;         /* FNV-1a over src (falls back to buf); dedupe key */
     uint8_t *src;          /* compressed source bytes, PSRAM, owned by the ring; NULL = not retained */
     size_t   src_len;
-    uint32_t bake_gen;     /* s_radar_bake_gen these PIXELS were produced under */
-} radar_slot_t;
+    uint32_t bake_gen;     /* ring->bake_gen these PIXELS were produced under */
+    uint32_t stamp;        /* frame time, UTC seconds; 0 = unknown */
+} ring_slot_t;
 
-static radar_slot_t   s_radar_ring[RADAR_RING_MAX];
-static _Atomic int    s_radar_count;        /* resident frames; read lock-free by the poller */
-static int            s_radar_play_idx;     /* ring index currently on screen */
-static const uint8_t *s_radar_shown;        /* buffer the LVGL descriptor borrows, or NULL */
-static lv_timer_t    *s_radar_timer;        /* playback timer; NULL when not animating */
-/* BAKE generation — distinct from the ring generation below, and answering a
- * different question. The ring generation asks "is this frame's CONTENT still
- * wanted?" (region / frame count); this one asks "were these PIXELS produced
- * under the settings in force now?" (crop, dark mode, Red Night).
- *
- * Bumped at the moment such a change is REQUESTED (the single funnel is
- * image_page_radar_request_retransform), recorded per slot by
- * image_page_radar_add() and re-stamped slot by slot as the re-transform pass
- * converts them. Playback advances only to matching slots (radar_play_next_baked),
- * so a ring that is momentarily half converted can never DISPLAY two geometries
- * — which is the property that makes the pumping structurally impossible rather
- * than merely unlikely. It replaces the old whole-pass playback hold: one
- * mechanism, per slot, instead of a global freeze that had to be raised and
- * lowered at exactly the right moments (and was not).
- *
- * uint32_t for the same reason as s_radar_gen: the esp-14.2.0 RISC-V subword
- * atomic sequence clobbers neighbouring bytes on narrow signed types. */
-static _Atomic uint32_t s_radar_bake_gen;
-/* Bake generation the "N slots stale" line was last logged for, so the count is
- * reported once per change rather than every 400 ms tick. UI task only. */
-static uint32_t       s_radar_bake_logged;
-/* Ring generation: bumped by every reset (image_page_radar_reset, which
- * _invalidate, page leave and page disable all route through). A producer
- * captures it before resolving the token and hands it back to
- * image_page_radar_add(), which drops any frame carrying an older value. That
- * is what stops an in-flight backfill for the OLD region from repopulating the
- * ring a region switch just cleared. uint32_t, never a narrow signed type: the
- * esp-14.2.0 RISC-V subword atomic sequence clobbers neighbouring bytes. */
-static _Atomic uint32_t s_radar_gen;
-/* Deferred ring teardown. Raised when image_page_radar_invalidate() could not get
- * the display lock in time: the generation bump has already landed (so nothing in
- * flight can enter the ring), but the ring itself still holds frames baked under
- * the superseded settings and they have to go. Consumed by the radar poll task,
- * which CAN block for the lock — same hand-off shape as s_radar_retransform_req.
- * Cleared by image_page_radar_reset() too, so a reset that happens by another
- * route (page leave, disable) cannot leave a stale request to wipe a later ring. */
-static _Atomic bool s_radar_reset_req;
-/* s_radar_backfill_req is declared at the top of this file — image_page_set_active()
- * sits above this block and raises it. */
+typedef struct {
+    ring_slot_t     slots[RADAR_RING_MAX];
+    _Atomic int     count;          /* resident frames; read lock-free by the poller */
+    int             play_idx;       /* ring index currently on screen */
+    const uint8_t  *shown;          /* buffer the LVGL descriptor borrows, or NULL */
+    lv_timer_t     *timer;          /* playback timer; NULL when not animating */
+    /* BAKE generation — distinct from the ring generation below, and answering a
+     * different question. The ring generation asks "is this frame's CONTENT still
+     * wanted?" (region / frame count); this one asks "were these PIXELS produced
+     * under the settings in force now?" (crop, dark mode, Red Night).
+     *
+     * Bumped at the moment such a change is REQUESTED (the single funnel is
+     * image_page_ring_request_retransform), recorded per slot by
+     * image_page_ring_add() and re-stamped slot by slot as the re-transform pass
+     * converts them. Playback advances only to matching slots (radar_play_next_baked),
+     * so a ring that is momentarily half converted can never DISPLAY two geometries
+     * — which is the property that makes the pumping structurally impossible rather
+     * than merely unlikely.
+     *
+     * uint32_t for the same reason as gen: the esp-14.2.0 RISC-V subword atomic
+     * sequence clobbers neighbouring bytes on narrow signed types. */
+    _Atomic uint32_t bake_gen;
+    uint32_t        bake_logged;    /* bake gen the "N slots stale" line was last logged for (UI task) */
+    /* Ring generation: bumped by every reset (image_page_ring_reset, which
+     * _invalidate, page leave and page disable all route through). A producer
+     * captures it before resolving the token/times and hands it back to
+     * image_page_ring_add(), which drops any frame carrying an older value. That
+     * is what stops an in-flight backfill for the OLD region from repopulating the
+     * ring a region switch just cleared. */
+    _Atomic uint32_t gen;
+    /* Deferred ring teardown. Raised when image_page_ring_invalidate() could not get
+     * the display lock in time: the generation bump has already landed (so nothing in
+     * flight can enter the ring), but the ring itself still holds frames baked under
+     * the superseded settings and they have to go. Consumed by the poll task, which
+     * CAN block for the lock. Cleared by image_page_ring_reset() too. */
+    _Atomic bool    reset_req;
+    /* Pending-backfill request: set on every activation by the UI task, consumed
+     * by the poll task via image_page_ring_backfill_take(). */
+    _Atomic bool    backfill_req;
+    /* Pending local re-transform request (crop / dark-mode / Red Night change).
+     * Set from the UI or httpd task, consumed by the poll task. */
+    _Atomic bool    retransform_req;
+    /* Red Night state the RESIDENT ring was recoloured with. Frames are recoloured
+     * once, at insert, so image_page_apply_theme() needs this to tell a theme switch
+     * that changes ring pixels from one that does not. Written and read only under
+     * the display lock. */
+    bool            ring_red;
+} image_ring_t;
 
-int image_page_radar_capacity(void)
+static image_ring_t s_rings[IMG_SRC_COUNT];   /* only the animated sources' entries are ever touched */
+
+static inline image_ring_t *ring_of(image_page_t *p)
 {
-    uint8_t n = app_config_get()->radar_frames;
+    return (p && image_src_is_animated(p->src)) ? &s_rings[p->src] : NULL;
+}
+
+/* Raise the pending-backfill request (UI task, page activation). No-op for a
+ * single-frame source. */
+static void ring_request_backfill(image_page_t *p)
+{
+    image_ring_t *r = ring_of(p);
+    if (r) atomic_store(&r->backfill_req, true);
+}
+
+/* True when a resident ring was baked under a different Red Night state than
+ * the theme now active (image_page_apply_theme). Display lock held. */
+static bool ring_red_mismatch(image_page_t *p)
+{
+    image_ring_t *r = ring_of(p);
+    return r && atomic_load(&r->count) > 0 && r->ring_red != image_red_remap_active();
+}
+
+int image_page_ring_capacity(image_page_t *p)
+{
+    const app_config_t *c = app_config_get();
+    uint8_t n = (p && p->src == IMG_SRC_CLOUDS) ? c->clouds_frames : c->radar_frames;
     if (n < 1) n = 1;
     if (n > RADAR_RING_MAX) n = RADAR_RING_MAX;
     return (int)n;
 }
 
-int image_page_radar_count(void)
+int image_page_ring_count(image_page_t *p)
 {
-    return atomic_load(&s_radar_count);
+    image_ring_t *r = ring_of(p);
+    return r ? atomic_load(&r->count) : 0;
 }
 
-bool image_page_radar_backfill_take(void)
+bool image_page_ring_backfill_take(image_page_t *p)
 {
-    return atomic_exchange(&s_radar_backfill_req, false);
+    image_ring_t *r = ring_of(p);
+    return r ? atomic_exchange(&r->backfill_req, false) : false;
 }
 
-uint32_t image_page_radar_gen(void)
+uint32_t image_page_ring_gen(image_page_t *p)
 {
-    return atomic_load(&s_radar_gen);
+    image_ring_t *r = ring_of(p);
+    return r ? atomic_load(&r->gen) : 0;
+}
+
+/* Lock-free scan for a held stamp: only the poll task inserts and only resets
+ * clear, so a torn read costs at most one redundant fetch. 0 never matches. */
+bool image_page_ring_has_stamp(image_page_t *p, uint32_t stamp)
+{
+    image_ring_t *r = ring_of(p);
+    if (!r || stamp == 0) return false;
+    int n = atomic_load(&r->count);
+    if (n > RADAR_RING_MAX) n = RADAR_RING_MAX;
+    for (int i = 0; i < n; i++) {
+        if (r->slots[i].stamp == stamp) return true;
+    }
+    return false;
 }
 
 /* Free one slot — BOTH its allocations, the decoded pixels and the retained
  * compressed source. Display lock held. Detaches the LVGL descriptors first if
  * they borrow this slot's buffer, so the free can never leave LVGL on freed
- * memory. Every ring teardown routes through here (image_page_radar_reset over
- * all RADAR_RING_MAX slots, and the oldest-end eviction in _add), so there is
- * one place to get the pairing right. */
-static void radar_free_slot(image_page_t *p, int i)
+ * memory. Every ring teardown routes through here (image_page_ring_reset over
+ * all RADAR_RING_MAX slots, the oldest-end eviction and the same-stamp replace
+ * in _add), so there is one place to get the pairing right. */
+static void ring_free_slot(image_page_t *p, image_ring_t *r, int i)
 {
-    radar_slot_t *s = &s_radar_ring[i];
-    if (s->buf && (const uint8_t *)s->buf == s_radar_shown) {
+    ring_slot_t *s = &r->slots[i];
+    if (s->buf && (const uint8_t *)s->buf == r->shown) {
         image_page_release_lvgl(p);      /* drops both descriptors + borrowed flags */
-        s_radar_shown = NULL;
+        r->shown = NULL;
     }
     if (s->buf) heap_caps_free(s->buf);
     if (s->src) heap_caps_free(s->src);
@@ -1596,29 +1645,37 @@ static void radar_free_slot(image_page_t *p, int i)
 
 /* Put ring slot @p idx on screen (idx < 0 = the current cursor). Display lock
  * held. No-op when the page has no LVGL objects or the slot is empty. */
-static void radar_show_idx(image_page_t *p, int idx)
+static void ring_show_idx(image_page_t *p, int idx)
 {
-    int count = atomic_load(&s_radar_count);
-    if (idx < 0) idx = s_radar_play_idx;
+    image_ring_t *r = ring_of(p);
+    if (!r) return;
+    int count = atomic_load(&r->count);
+    if (idx < 0) idx = r->play_idx;
     if (idx < 0 || idx >= count) return;
 
-    radar_slot_t *s = &s_radar_ring[idx];
+    ring_slot_t *s = &r->slots[idx];
     if (!s->buf || !p->root || s->w == 0 || s->h == 0) return;
 
     swap_borrowed_buf(p, (const uint16_t *)s->buf, (int)s->w, (int)s->h);
-    s_radar_shown   = s->buf;
-    s_radar_play_idx = idx;
+    r->shown    = s->buf;
+    r->play_idx = idx;
 
     char label[48];
     image_page_label(p, label, sizeof(label));
     set_label_if_changed(p->lbl_region, label);
 
-    /* The newest frame is stamped with the wall clock; the history frames have
-     * no per-frame time (the RIDGE stills carry none we parse), so they show
-     * their position in the loop instead of a time we would be inventing. */
+    /* A stamped frame shows its own time (local clock); the newest carries the
+     * "Latest" prefix. Unstamped rings (radar): the newest frame is stamped with
+     * the wall clock and the history frames show their position in the loop
+     * instead of a time we would be inventing. */
     char ts[32];
-    if (idx == 0) {
-        time_t now; struct tm ti; time(&now); localtime_r(&now, &ti);
+    struct tm ti;
+    if (s->stamp != 0) {
+        time_t t = (time_t)s->stamp;
+        localtime_r(&t, &ti);
+        strftime(ts, sizeof(ts), idx == 0 ? "Latest %H:%M" : "%H:%M", &ti);
+    } else if (idx == 0) {
+        time_t now; time(&now); localtime_r(&now, &ti);
         strftime(ts, sizeof(ts), "Latest %H:%M", &ti);
     } else {
         snprintf(ts, sizeof(ts), "Loop %d/%d", count - idx, count);
@@ -1628,17 +1685,19 @@ static void radar_show_idx(image_page_t *p, int idx)
 
 /* True if slot @p i holds pixels baked under the settings in force now. Display
  * lock held. Out-of-range answers false so a caller can use it as a guard. */
-static bool radar_slot_current(int i)
+static bool ring_slot_current(image_ring_t *r, int i)
 {
-    if (i < 0 || i >= atomic_load(&s_radar_count)) return false;
-    return s_radar_ring[i].bake_gen == atomic_load(&s_radar_bake_gen);
+    if (i < 0 || i >= atomic_load(&r->count)) return false;
+    return r->slots[i].bake_gen == atomic_load(&r->bake_gen);
 }
 
-static void radar_tick_cb(lv_timer_t *t)
+static void ring_tick_cb(lv_timer_t *t)
 {
     image_page_t *p = lv_timer_get_user_data(t);
-    int count = atomic_load(&s_radar_count);
-    if (!p || count <= 1 || !atomic_load(&p->active)) return;
+    image_ring_t *r = ring_of(p);
+    if (!r) return;
+    int count = atomic_load(&r->count);
+    if (count <= 1 || !atomic_load(&p->active)) return;
 
     /* Advance only to a slot baked under the CURRENT settings. Mid-re-transform
      * the rest still hold the old crop / dark treatment, and showing them is
@@ -1647,55 +1706,59 @@ static void radar_tick_cb(lv_timer_t *t)
      * anywhere, so hold on what is displayed rather than blank the page. */
     uint32_t gens[RADAR_RING_MAX];
     if (count > RADAR_RING_MAX) count = RADAR_RING_MAX;
-    for (int i = 0; i < count; i++) gens[i] = s_radar_ring[i].bake_gen;
-    uint32_t cur_gen = atomic_load(&s_radar_bake_gen);
+    for (int i = 0; i < count; i++) gens[i] = r->slots[i].bake_gen;
+    uint32_t cur_gen = atomic_load(&r->bake_gen);
 
     /* One line per bake change, not per tick: how much of the ring is waiting on
      * the re-transform. Makes the skip visible from /api/logs. */
-    if (cur_gen != s_radar_bake_logged) {
-        s_radar_bake_logged = cur_gen;
-        ESP_LOGI(TAG, "radar playback: %d/%d slots stale after bake change (skipped)",
-                 radar_stale_count(gens, count, cur_gen), count);
+    if (cur_gen != r->bake_logged) {
+        r->bake_logged = cur_gen;
+        ESP_LOGI(TAG, "%s playback: %d/%d slots stale after bake change (skipped)",
+                 p->name, radar_stale_count(gens, count, cur_gen), count);
     }
 
-    int next = radar_play_next_baked(s_radar_play_idx, count, gens, cur_gen);
-    if (next == s_radar_play_idx) return;
-    radar_show_idx(p, next);
+    int next = radar_play_next_baked(r->play_idx, count, gens, cur_gen);
+    if (next == r->play_idx) return;
+    ring_show_idx(p, next);
     lv_timer_set_period(t, radar_play_period_ms(next));
 }
 
 /* Create or delete the playback timer to match the current state. Display lock
- * held. A single still (radar_frames == 1, or a ring that has not filled past
- * one frame) never animates, matching the other image pages. */
-static void radar_timer_sync(image_page_t *p)
+ * held. A single still (frames == 1, or a ring that has not filled past one
+ * frame) never animates, matching the other image pages. */
+static void ring_timer_sync(image_page_t *p)
 {
+    image_ring_t *r = ring_of(p);
+    if (!r) return;
     bool want = atomic_load(&p->active) &&
-                image_page_radar_capacity() > 1 &&
-                atomic_load(&s_radar_count) > 1;
-    if (want && !s_radar_timer) {
-        s_radar_timer = lv_timer_create(radar_tick_cb, RADAR_PLAY_FRAME_MS, p);
-    } else if (!want && s_radar_timer) {
-        lv_timer_delete(s_radar_timer);
-        s_radar_timer = NULL;
+                image_page_ring_capacity(p) > 1 &&
+                atomic_load(&r->count) > 1;
+    if (want && !r->timer) {
+        r->timer = lv_timer_create(ring_tick_cb, RADAR_PLAY_FRAME_MS, p);
+    } else if (!want && r->timer) {
+        lv_timer_delete(r->timer);
+        r->timer = NULL;
     }
 }
 
-void image_page_radar_reset(image_page_t *p)
+void image_page_ring_reset(image_page_t *p)
 {
-    if (s_radar_timer) {
-        lv_timer_delete(s_radar_timer);
-        s_radar_timer = NULL;
+    image_ring_t *r = ring_of(p);
+    if (!r) return;
+    if (r->timer) {
+        lv_timer_delete(r->timer);
+        r->timer = NULL;
     }
-    for (int i = 0; i < RADAR_RING_MAX; i++) radar_free_slot(p, i);
-    atomic_store(&s_radar_count, 0);
-    s_radar_play_idx = 0;
-    s_radar_shown    = NULL;
+    for (int i = 0; i < RADAR_RING_MAX; i++) ring_free_slot(p, r, i);
+    atomic_store(&r->count, 0);
+    r->play_idx = 0;
+    r->shown    = NULL;
     /* Nothing left to re-transform; a request raised against the ring we just
      * freed would otherwise run one no-op pass later. Same for a deferred
      * teardown: the ring is gone, so honouring it later could only free a ring
      * built AFTER the change that asked for it. */
-    atomic_store(&s_radar_retransform_req, false);
-    atomic_store(&s_radar_reset_req, false);
+    atomic_store(&r->retransform_req, false);
+    atomic_store(&r->reset_req, false);
     /* The bake generation is deliberately NOT reset: it is a monotonic counter,
      * and every slot of the ring being freed here goes with it. The next ring's
      * frames stamp themselves with whatever it reads then, so they agree with
@@ -1704,60 +1767,62 @@ void image_page_radar_reset(image_page_t *p)
      * reason for the reset: a region/frame-count/crop change (via _invalidate),
      * a page leave, or a page disable. Bumping here rather than at each of
      * those call sites means a future reset path cannot forget it. Runs with
-     * the display lock held, the same lock image_page_radar_add() tests it
+     * the display lock held, the same lock image_page_ring_add() tests it
      * under, so there is no window between the bump and the free. */
-    atomic_fetch_add(&s_radar_gen, 1);
+    atomic_fetch_add(&r->gen, 1);
 }
 
-void image_page_radar_invalidate(image_page_t *p)
+void image_page_ring_invalidate(image_page_t *p)
 {
-    if (!p) return;
+    image_ring_t *r = ring_of(p);
+    if (!r) return;
     /* Bump the generation FIRST, UNCONDITIONALLY, and OUTSIDE the display lock.
      * It is an atomic and needs no lock, and it is the half that actually
      * guarantees correctness: every producer captured the old value before it
-     * started, so image_page_radar_add() drops every frame already in flight
+     * started, so image_page_ring_add() drops every frame already in flight
      * under the superseded settings. Doing this inside the lock (as it was)
      * meant a 1 s lock timeout skipped BOTH the bump and the clear, leaving a
-     * ring that could genuinely mix old and new content — the only path in the
-     * codebase that produced one. image_page_radar_reset() bumps again below;
-     * a double bump is harmless, the frame check is an inequality, not a delta. */
-    atomic_fetch_add(&s_radar_gen, 1);
+     * ring that could genuinely mix old and new content. image_page_ring_reset()
+     * bumps again below; a double bump is harmless, the frame check is an
+     * inequality, not a delta. */
+    atomic_fetch_add(&r->gen, 1);
     if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-        image_page_radar_reset(p);
+        image_page_ring_reset(p);
         bsp_display_unlock();
     } else {
-        /* Hand the teardown to the radar poll task, which can block for the lock.
+        /* Hand the teardown to the poll task, which can block for the lock.
          * Until it runs, the ring keeps showing the OLD frames: stale, never
          * mixed. Worth a line in /api/logs — a silent 1 s lock timeout is exactly
          * the kind of thing that should leave a trace. */
-        ESP_LOGW(TAG, "radar invalidate: display lock timeout, deferring ring reset");
-        atomic_store(&s_radar_reset_req, true);
+        ESP_LOGW(TAG, "%s invalidate: display lock timeout, deferring ring reset", p->name);
+        atomic_store(&r->reset_req, true);
         image_page_wake(p);
     }
-    atomic_store(&s_radar_backfill_req, true);
+    atomic_store(&r->backfill_req, true);
 }
 
-/* Service a teardown image_page_radar_invalidate() had to defer.
+/* Service a teardown image_page_ring_invalidate() had to defer.
  *
- * RADAR POLL TASK ONLY, and only at a point where no insert is in flight: the
- * top of net_poll_once() (before any image_page_radar_add() this pass) and the
- * park hook. image_page_radar_add() is called only from that same task, so
+ * THIS PAGE'S POLL TASK ONLY, and only at a point where no insert is in flight:
+ * the top of net_poll_once() (before any image_page_ring_add() this pass) and
+ * the park hook. image_page_ring_add() is called only from that same task, so
  * "no concurrent insert" is structural, not a timing argument.
  *
  * The generation was already bumped by the invalidate, so this is a pure free of
  * frames nothing will show again — a no-op on an already-empty ring. A second
  * lock timeout re-raises the request rather than dropping it; nothing was freed,
  * so retrying can neither leak nor double free. */
-void image_page_radar_reset_if_requested(image_page_t *p)
+void image_page_ring_reset_if_requested(image_page_t *p)
 {
-    if (!p || !atomic_exchange(&s_radar_reset_req, false)) return;
+    image_ring_t *r = ring_of(p);
+    if (!r || !atomic_exchange(&r->reset_req, false)) return;
     if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-        image_page_radar_reset(p);
+        image_page_ring_reset(p);
         bsp_display_unlock();
         return;
     }
-    ESP_LOGW(TAG, "radar deferred ring reset: display lock still busy, retrying");
-    atomic_store(&s_radar_reset_req, true);
+    ESP_LOGW(TAG, "%s deferred ring reset: display lock still busy, retrying", p->name);
+    atomic_store(&r->reset_req, true);
 }
 
 /* Center-crop a decoded radar frame in place-of-allocation: returns a fresh
@@ -1797,98 +1862,102 @@ static bool radar_crop_frame(image_frame_t *f, uint8_t mode)
     return true;
 }
 
-/* Apply every display transform a radar frame carries: the centred crop, the
- * night invert and the Red Night remap, in that order. THE ONE PLACE these are
- * applied — both the insert path below and the local re-transform call it, so
- * a frame re-derived from its source bytes is pixel-identical to one that came
- * off the wire under the same settings.
+/* Per-source display transforms a ring frame carries — THE ONE PLACE these are
+ * applied. Both the insert path and the local re-transform call it, so a frame
+ * re-derived from its source bytes is pixel-identical to one that came off the
+ * wire under the same settings.
  *
- * The parameters are passed in rather than read from config here so the
- * re-transform can bake a whole ring from ONE snapshot of the settings, and so
- * `dark` already folds in the Red Night override.
+ * Radar: the centred crop, the night invert and the Red Night remap, in that
+ * order. Night readability: invert the RIDGE tile's greyscale basemap (white
+ * sheet -> black, dark state lines -> light) and leave every chromatic pixel —
+ * the whole dBZ echo ramp — untouched (image_night_invert.h). Gated on
+ * radar_dark_mode (default true, v64) EXCEPT under Red Night, which forces the
+ * dark treatment whatever the toggle says: the red remap maps luma to red
+ * WITHOUT lowering it, so the light basemap would come out a BRIGHT red panel,
+ * precisely what that theme exists to prevent. Invert BEFORE the remap: the
+ * remap collapses luma to red shades and would destroy the neutral/chromatic
+ * distinction the invert keys on. Map styles 1/2 come from a different NWS
+ * service (black background, no banner, no legend): the crop has nothing to
+ * trim and the invert would turn that black sheet WHITE, so both are skipped
+ * by design there, Red Night included; the theme-gated remap still runs.
  *
- * `mode` is read as the 0..2 fit mode, not a boolean: radar_fit_rect() is a
- * no-op for 0, so no separate gate is needed.
+ * Clouds: no crop, no invert (GIBS GeoColor is already a dark night picture);
+ * only the theme-gated Red Night remap.
+ *
+ * `cfg` and `red` are passed in rather than read here so the re-transform can
+ * bake a whole ring from ONE snapshot of the settings.
  *
  * NOT ACCELERATED, deliberately: the PPA offers SRM (scale/rotate/mirror),
  * BLEND and FILL only — there is no colour-transform unit for the invert — and
  * the crop is already a row-wise memcpy. Software is correct for both. */
-static void radar_bake(image_frame_t *f, uint8_t mode, bool dark)
+static void ring_bake(image_page_t *p, image_frame_t *f, const app_config_t *cfg, bool red)
 {
-    radar_crop_frame(f, mode);            /* best-effort; keeps the frame either way */
-    size_t px = (size_t)f->w * f->h;
-    if (dark) image_night_invert_rgb565((uint16_t *)f->buf, px);
-    image_red_remap_rgb565((uint16_t *)f->buf, px);   /* self-gated on the active theme */
+    if (p->src == IMG_SRC_RADAR) {
+        bool    dark = cfg->radar_map_style == 0 && (cfg->radar_dark_mode || red);
+        uint8_t mode = cfg->radar_map_style ? 0 : cfg->radar_crop;
+        radar_crop_frame(f, mode);            /* best-effort; keeps the frame either way */
+        if (dark) image_night_invert_rgb565((uint16_t *)f->buf, (size_t)f->w * f->h);
+    }
+    image_red_remap_rgb565((uint16_t *)f->buf, (size_t)f->w * f->h);   /* self-gated on the active theme */
 }
 
 /* Free everything a rejected frame owns. Both allocations are taken over by
- * image_page_radar_add() on entry, so every one of its reject paths must land
+ * image_page_ring_add() on entry, so every one of its reject paths must land
  * here — one helper instead of five hand-paired frees. */
-static void radar_drop(image_frame_t *f, uint8_t *src)
+static void ring_drop(image_frame_t *f, uint8_t *src)
 {
     if (f && f->buf) { heap_caps_free(f->buf); f->buf = NULL; }
     if (src) heap_caps_free(src);
 }
 
-void image_page_radar_add(image_page_t *p, image_frame_t *fresh, bool at_head, uint32_t gen,
-                          uint8_t *src, size_t src_len)
+/* Move a fresh frame's allocations into slot @p i (which must be empty or already
+ * freed). Display lock held. */
+static void ring_fill_slot(image_ring_t *r, int i, image_frame_t *fresh, uint32_t hash,
+                           uint8_t *src, size_t src_len, uint32_t bake_gen, uint32_t stamp)
 {
-    if (!p || !fresh || !fresh->buf) {
-        radar_drop(fresh, src);
+    r->slots[i].buf      = fresh->buf;
+    r->slots[i].w        = fresh->w;
+    r->slots[i].h        = fresh->h;
+    r->slots[i].hash     = hash;
+    r->slots[i].src      = src;      /* ownership moves into the slot */
+    r->slots[i].src_len  = src_len;
+    r->slots[i].bake_gen = bake_gen;
+    r->slots[i].stamp    = stamp;
+    fresh->buf = NULL;
+}
+
+void image_page_ring_add(image_page_t *p, image_frame_t *fresh, bool at_head, uint32_t gen,
+                         uint8_t *src, size_t src_len, uint32_t stamp)
+{
+    image_ring_t *r = ring_of(p);
+    if (!r || !fresh || !fresh->buf) {
+        ring_drop(fresh, src);
         return;
     }
 
-    /* Night readability: invert the RIDGE tile's greyscale basemap (white sheet
-     * -> black, dark state lines -> light) and leave every chromatic pixel — the
-     * whole dBZ echo ramp — untouched. See image_night_invert.h for the measured
-     * colour distribution this is built on. Gated on radar_dark_mode (default
-     * true, v64): the raw tile is 90% near-white and unusable in a dark
-     * observatory, but with the toggle off it stays exactly as NWS published it.
-     *
-     * ...EXCEPT under Red Night, which forces the dark treatment whatever the
-     * toggle says. That theme exists for star parties under light restrictions,
-     * and the red remap below maps luma to red WITHOUT lowering it — so the
-     * light basemap would come out a BRIGHT red full-screen panel, precisely
-     * what the theme is there to prevent. Dark is the only correct answer there,
-     * so the setting does not get a say.
-     *
-     * ORDER: invert BEFORE the red remap. The remap collapses luma to red
-     * shades, so running it first would destroy the neutral/chromatic
-     * distinction the invert keys on. Inverting first means Red Night renders a
-     * DARK RED radar map, which is the ideal observatory case.
-     *
-     * SEAM: this is the radar equivalent of the invert+remap block in
-     * image_page_render_frame() — radar returns early from that function
-     * because its frames live in the ring, not p->frame. Here is the only place
-     * a radar frame is committed, it runs once per FETCHED frame on the poll
-     * task (image_page_poll.c net_poll_once / radar_backfill), outside the
-     * display lock. It is baked into the pixels, like the crop — but the
+    /* SEAM: this is the ring equivalent of the invert+remap block in
+     * image_page_render_frame() — animated pages return early from that
+     * function because their frames live in the ring, not p->frame. Here is
+     * the only place a ring frame is committed; it runs once per FETCHED frame
+     * on the poll task (image_page_poll.c net_poll_once / anim_backfill),
+     * outside the display lock. The bake is applied to the pixels — but the
      * compressed source is kept alongside, so a crop / dark-mode / Red-Night
-     * change re-bakes the ring locally (image_page_radar_retransform_if_requested)
-     * instead of re-downloading it. Only a token or frame-count change, which
-     * genuinely means different images, still rebuilds over the network. */
+     * change re-bakes the ring locally (image_page_ring_retransform_if_requested)
+     * instead of re-downloading it. Only a token / area / frame-count change,
+     * which genuinely means different images, still rebuilds over the network. */
     /* ORDERING CONTRACT, same shape as the ring generation: read the bake
      * generation BEFORE the settings it labels. The writer changes the setting
      * first and bumps second, so gen-then-settings can only ever pair OLD pixels
      * with an OLD generation (skipped by playback until the pass re-bakes them,
      * conservative and correct) or NEW pixels with a NEW one. Settings-then-gen
      * could label old pixels as current — which is the pumping bug. */
-    uint32_t bake_gen = atomic_load(&s_radar_bake_gen);
-    /* Map styles 1/2 (state / county lines) come from a different NWS service:
-     * black background, no banner, no legend. The crop has nothing to trim and
-     * the invert would turn that black sheet WHITE (and, under Red Night,
-     * bright red) — the exact failure the invert exists to prevent on style 0.
-     * So both are skipped by design there, Red Night included: the red remap
-     * inside radar_bake() is theme-gated and still runs, mapping the black
-     * ground to black and the lines/echoes to red shades. */
+    uint32_t bake_gen = atomic_load(&r->bake_gen);
     const app_config_t *cfg = app_config_get();
-    bool    red  = image_red_remap_active();
-    bool    dark = cfg->radar_map_style == 0 && (cfg->radar_dark_mode || red);
-    uint8_t mode = cfg->radar_map_style ? 0 : cfg->radar_crop;
-    radar_bake(fresh, mode, dark);
+    bool red = image_red_remap_active();
+    ring_bake(p, fresh, cfg, red);
 
-    /* Dedupe on the COMPRESSED bytes when they were retained: 37 KB hashed
-     * instead of 660 KB, and — the reason it matters — the key is invariant
+    /* Dedupe on the COMPRESSED bytes when they were retained: kilobytes hashed
+     * instead of a megabyte, and — the reason it matters — the key is invariant
      * under the transforms above, so a local re-transform never has to
      * recompute it. Falls back to the pixel hash if a caller did not retain. */
     uint32_t hash = src ? radar_fnv1a(src, src_len)
@@ -1896,76 +1965,107 @@ void image_page_radar_add(image_page_t *p, image_frame_t *fresh, bool at_head, u
 
     bool notify = false;
     if (!bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-        radar_drop(fresh, src);
+        ring_drop(fresh, src);
         return;
     }
 
-    /* STALENESS CHOKE POINT. Every radar frame that ever enters the ring passes
-     * through here, so this is the one place a frame fetched for a region (or
-     * crop, or frame count) the user has already left can be rejected. Tested
-     * INSIDE the display lock because that is the lock image_page_radar_reset()
-     * bumps the generation under; testing it before the lock would leave the
-     * original race in a smaller window. The producers' own abort checks are a
-     * bandwidth optimisation on top of this, never a substitute. */
-    if (radar_frame_is_stale(gen, atomic_load(&s_radar_gen))) {
+    /* STALENESS CHOKE POINT. Every ring frame that ever enters passes through
+     * here, so this is the one place a frame fetched for a region (or crop, or
+     * frame count) the user has already left can be rejected. Tested INSIDE the
+     * display lock because that is the lock image_page_ring_reset() bumps the
+     * generation under; testing it before the lock would leave the original
+     * race in a smaller window. The producers' own abort checks are a bandwidth
+     * optimisation on top of this, never a substitute. */
+    if (radar_frame_is_stale(gen, atomic_load(&r->gen))) {
         bsp_display_unlock();
-        radar_drop(fresh, src);
+        ring_drop(fresh, src);
         return;
     }
 
-    int count = atomic_load(&s_radar_count);
-    int cap   = image_page_radar_capacity();
+    int count = atomic_load(&r->count);
+    int cap   = image_page_ring_capacity(p);
 
-    /* Dedupe against the entry this frame would sit next to: the head for a
-     * newest-frame push, the tail for a backfill append. RIDGE re-serves the
-     * same still between updates, so this is the common case, not an edge. */
-    uint32_t neighbour = count > 0 ? s_radar_ring[at_head ? 0 : count - 1].hash : 0;
-    if (radar_frame_is_dup(neighbour, count, hash)) {
-        bsp_display_unlock();
-        radar_drop(fresh, src);
-        return;
-    }
-
-    /* Past every reject path, so this frame is going in: record the Red Night
-     * state its pixels were baked with. Every frame in the ring shares it (a
+    /* Past every reject path that depends on content, so record the Red Night
+     * state these pixels were baked with. Every frame in the ring shares it (a
      * flip clears the ring), so one flag covers the whole ring. Display lock
      * held, which is the lock image_page_apply_theme() reads it under. */
-    s_radar_ring_red = red;
+    r->ring_red = red;
 
-    if (at_head) {
-        /* Make room at the head, evicting from the oldest end. */
-        while (count >= cap) {
-            radar_free_slot(p, count - 1);
-            count--;
-        }
-        for (int i = count; i > 0; i--) s_radar_ring[i] = s_radar_ring[i - 1];
-        /* Everything shifted down one slot, so did the frame on screen. */
-        if (s_radar_play_idx + 1 < cap) s_radar_play_idx++;
-        count++;
-        s_radar_ring[0].buf     = fresh->buf;
-        s_radar_ring[0].w       = fresh->w;
-        s_radar_ring[0].h       = fresh->h;
-        s_radar_ring[0].hash    = hash;
-        s_radar_ring[0].src     = src;      /* ownership moves into the slot */
-        s_radar_ring[0].src_len = src_len;
-        s_radar_ring[0].bake_gen = bake_gen;
-    } else {
-        if (count >= cap) {            /* ring already full: nothing to backfill */
+    int pos;   /* slot the frame lands in */
+    if (stamp != 0) {
+        /* Stamped: same stamp already held -> replace when the bytes differ
+         * (a partial frame healed), drop when identical. Otherwise insert by
+         * time so the ring stays newest-first even when a gap fills in later. */
+        int same = -1;
+        for (int i = 0; i < count; i++) if (r->slots[i].stamp == stamp) { same = i; break; }
+        if (same >= 0) {
+            if (r->slots[same].hash == hash) {
+                bsp_display_unlock();
+                ring_drop(fresh, src);
+                return;
+            }
+            bool was_shown = (r->slots[same].buf && (const uint8_t *)r->slots[same].buf == r->shown);
+            ring_free_slot(p, r, same);           /* detaches LVGL if it was on screen */
+            ring_fill_slot(r, same, fresh, hash, src, src_len, bake_gen, stamp);
+            if (atomic_load(&p->active)) {
+                /* Re-show only if the healed slot was on screen (its buffer is
+                 * gone) or nothing is up yet; otherwise playback carries on. */
+                if (was_shown || !r->shown) ring_show_idx(p, was_shown ? same : -1);
+                ring_timer_sync(p);
+                notify = true;
+            }
             bsp_display_unlock();
-            radar_drop(fresh, src);
+            if (notify) nav_arbiter_notify_content_ready(p->page_idx);
             return;
         }
-        s_radar_ring[count].buf     = fresh->buf;
-        s_radar_ring[count].w       = fresh->w;
-        s_radar_ring[count].h       = fresh->h;
-        s_radar_ring[count].hash    = hash;
-        s_radar_ring[count].src     = src;  /* ownership moves into the slot */
-        s_radar_ring[count].src_len = src_len;
-        s_radar_ring[count].bake_gen = bake_gen;
-        count++;
+        pos = 0;
+        while (pos < count && r->slots[pos].stamp > stamp) pos++;
+        if (pos >= cap) {                          /* older than everything a full ring holds */
+            bsp_display_unlock();
+            ring_drop(fresh, src);
+            return;
+        }
+        /* Neighbour dedupe as for the unstamped path: two consecutive slots
+         * with identical bytes (a re-served or blank frame) are one frame. */
+        uint32_t neighbour = (pos > 0) ? r->slots[pos - 1].hash
+                           : (count > 0 ? r->slots[0].hash : 0);
+        if (radar_frame_is_dup(neighbour, count, hash)) {
+            bsp_display_unlock();
+            ring_drop(fresh, src);
+            return;
+        }
+    } else {
+        /* Unstamped (radar): dedupe against the entry this frame would sit next
+         * to — the head for a newest-frame push, the tail for a backfill append.
+         * RIDGE re-serves the same still between updates, so this is the common
+         * case, not an edge. */
+        uint32_t neighbour = count > 0 ? r->slots[at_head ? 0 : count - 1].hash : 0;
+        if (radar_frame_is_dup(neighbour, count, hash)) {
+            bsp_display_unlock();
+            ring_drop(fresh, src);
+            return;
+        }
+        if (!at_head && count >= cap) {            /* ring already full: nothing to backfill */
+            bsp_display_unlock();
+            ring_drop(fresh, src);
+            return;
+        }
+        pos = at_head ? 0 : count;
     }
-    fresh->buf = NULL;
-    atomic_store(&s_radar_count, count);
+
+    /* Make room: evict from the oldest end while full (a head/mid insert into a
+     * full ring pushes the tail out; pos < cap is guaranteed above). */
+    while (count >= cap) {
+        ring_free_slot(p, r, count - 1);
+        count--;
+    }
+    for (int i = count; i > pos; i--) r->slots[i] = r->slots[i - 1];
+    memset(&r->slots[pos], 0, sizeof(r->slots[pos]));
+    /* Everything from pos on shifted down one slot, so did the frame on screen. */
+    if (r->play_idx >= pos && r->play_idx + 1 < cap) r->play_idx++;
+    count++;
+    ring_fill_slot(r, pos, fresh, hash, src, src_len, bake_gen, stamp);
+    atomic_store(&r->count, count);
 
     if (atomic_load(&p->active)) {
         /* Show the newest frame immediately when nothing is up yet (page entry,
@@ -1977,20 +2077,24 @@ void image_page_radar_add(image_page_t *p, image_frame_t *fresh, bool at_head, u
          * frame just inserted was baked live, so it is the one slot guaranteed
          * current: jumping to it is what ends that hold at the first opportunity
          * instead of waiting for the pass. */
-        radar_show_idx(p, (s_radar_shown && radar_slot_current(s_radar_play_idx)) ? -1 : 0);
-        radar_timer_sync(p);
+        ring_show_idx(p, (r->shown && ring_slot_current(r, r->play_idx)) ? -1 : pos);
+        ring_timer_sync(p);
         notify = true;
     }
     bsp_display_unlock();
+    /* Content-ready dwell for the slideshow: the first frame that lands while
+     * the page is on screen is what the arbiter waits for. Same call
+     * image_page_commit_frame() makes for the single-frame pages. */
     if (notify) nav_arbiter_notify_content_ready(p->page_idx);
 }
 
-void image_page_radar_request_retransform(image_page_t *p)
+void image_page_ring_request_retransform(image_page_t *p)
 {
-    if (!p || p->src != IMG_SRC_RADAR) return;
+    image_ring_t *r = ring_of(p);
+    if (!r) return;
 
-    /* THE SINGLE FUNNEL for every pixel-affecting radar setting: the crop and
-     * dark-mode toggles (radar_local_params_changed, image_page_config_apply_live)
+    /* THE SINGLE FUNNEL for every pixel-affecting ring setting: the radar crop
+     * and dark-mode toggles (radar_local_params_changed, image_page_config_apply_live)
      * and the Red Night theme flip (image_page_apply_theme) both land here. So
      * this is the one place the bake generation has to be bumped, and a future
      * pixel-affecting setting gets the skip for free by routing here too.
@@ -2003,72 +2107,64 @@ void image_page_radar_request_retransform(image_page_t *p)
      *
      * Unconditional, ahead of the empty-ring return below: it is a monotonic
      * counter, and stamping later inserts with the newer value is exactly right. */
-    atomic_fetch_add(&s_radar_bake_gen, 1);
+    atomic_fetch_add(&r->bake_gen, 1);
 
     /* Nothing resident means nothing to re-derive: the next fetch already bakes
-     * the new settings in (image_page_radar_add reads them live). Without this,
+     * the new settings in (image_page_ring_add reads them live). Without this,
      * a change made while the page is away would re-bake the frames the backfill
      * has only just fetched under exactly those settings. */
-    if (image_page_radar_count() == 0) return;
-    atomic_store(&s_radar_retransform_req, true);
+    if (atomic_load(&r->count) == 0) return;
+    atomic_store(&r->retransform_req, true);
     image_page_wake(p);
 }
 
 /* Re-derive the whole ring from the retained compressed bytes under the CURRENT
- * crop mode and dark/Red-Night treatment. Replaces the ~370 KB / ~9 s staggered
- * re-download a crop or dark-mode change used to cost, on a board that glitches
- * its panel under sustained radio transmission.
+ * settings and theme. Replaces the staggered re-download a crop, dark-mode or
+ * theme change used to cost, on a board that glitches its panel under sustained
+ * radio transmission.
  *
- * RUNS ON THE RADAR POLL TASK (it blocks and allocates megabytes), never on the
+ * RUNS ON THE PAGE'S POLL TASK (it blocks and allocates megabytes), never on the
  * LVGL timer. ONE FRAME AT A TIME: peak extra memory is a single decode plus its
- * crop output (~1.3 MB), not ten.
+ * crop output, not ten.
  *
  * LOCKING: the display lock is taken only to detach the source, and again to
  * swap the pixel pointer in — never around the decode. A slot's `src` is
  * detached (set NULL) for the duration of its decode, so a concurrent
- * image_page_radar_reset() frees the slot's pixels but not the source we are
+ * image_page_ring_reset() frees the slot's pixels but not the source we are
  * reading; the generation check on re-attach then tells us the slot is gone and
  * we free both allocations ourselves. The playback timer can never see a
  * half-swapped slot: it runs on the UI task, which needs the same lock, and the
  * slot's old buffer stays valid and displayed until the swap completes.
  *
- * NO CONCURRENT INSERT is possible: image_page_radar_add() is called only from
- * this same task (net_poll_once / radar_backfill), so nothing can shift the ring
- * under a slot index while this runs. Only resets race, and the generation
- * covers those.
+ * NO CONCURRENT INSERT is possible: image_page_ring_add() is called only from
+ * this same task, so nothing can shift the ring under a slot index while this
+ * runs. Only resets race, and the generation covers those.
  *
  * ponytail: a frame whose decode fails keeps its OLD pixels rather than being
  * dropped and re-fetched — one stale-looking frame in the loop after an OOM,
  * which the next ring rollover clears. Dropping it would mean compacting the
- * ring mid-pass for a case that needs PSRAM exhaustion to reach. */
-/* One re-transform pass over the whole ring. Caller holds playback for the
- * duration (see image_page_radar_retransform_if_requested below).
+ * ring mid-pass for a case that needs PSRAM exhaustion to reach.
  *
  * Returns false ONLY when a display-lock timeout cut the pass short, which is
  * the one abort that can leave the ring genuinely part converted: the caller
  * re-raises the request so a later cycle finishes the job. A pass stopped by the
  * generation check returns true — that ring is being freed, not left mixed. */
-static bool radar_retransform_pass(image_page_t *p)
+static bool ring_retransform_pass(image_page_t *p, image_ring_t *r)
 {
-    int count = image_page_radar_count();
+    int count = atomic_load(&r->count);
     if (count <= 0) return true;
     bool aborted = false;
 
     /* ONE snapshot of the settings for the whole pass, so the ring cannot end up
      * half baked one way and half the other. The bake generation is read FIRST,
-     * same ordering contract as image_page_radar_add(): a change landing between
+     * same ordering contract as image_page_ring_add(): a change landing between
      * these two reads leaves this pass stamping the OLDER generation, so its
      * output reads as stale and the next pass (the request is re-raised) redoes
      * it — conservative, and it converges on the latest settings. */
-    uint32_t bake_gen = atomic_load(&s_radar_bake_gen);
+    uint32_t bake_gen = atomic_load(&r->bake_gen);
     const app_config_t *c = app_config_get();
-    /* Same style gate as image_page_radar_add(): styles 1/2 are served on a
-     * black background with no banner, so crop and invert are no-ops by design
-     * (the invert would whiten the black ground, Red Night included). */
-    uint8_t  mode = c->radar_map_style ? 0 : c->radar_crop;
     bool     red  = image_red_remap_active();
-    bool     dark = c->radar_map_style == 0 && (c->radar_dark_mode || red);
-    uint32_t gen  = image_page_radar_gen();
+    uint32_t gen  = atomic_load(&r->gen);
 
     /* Claim the Red Night state for this pass UP FRONT. image_page_apply_theme()
      * compares the live theme against it, so a second flip arriving mid-pass
@@ -2079,29 +2175,29 @@ static bool radar_retransform_pass(image_page_t *p)
      * behind the hold. */
     int start = 0;
     if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-        s_radar_ring_red = red;
-        start = s_radar_play_idx;
+        r->ring_red = red;
+        start = r->play_idx;
         bsp_display_unlock();
     }
 
     int64_t t0 = esp_timer_get_time();
     int done = 0;
-    ESP_LOGI(TAG, "radar re-transform: start, %d frames from slot %d (playback held)",
-             count, start);
+    ESP_LOGI(TAG, "%s re-transform: start, %d frames from slot %d (playback held)",
+             p->name, count, start);
     for (int k = 0; k < count; k++) {
         int i = radar_retransform_idx(start, k, count);
         if (!bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
             aborted = true;
             break;
         }
-        if (radar_frame_is_stale(gen, atomic_load(&s_radar_gen)) ||
-            i >= atomic_load(&s_radar_count)) {
+        if (radar_frame_is_stale(gen, atomic_load(&r->gen)) ||
+            i >= atomic_load(&r->count)) {
             bsp_display_unlock();
             break;
         }
-        uint8_t *src = s_radar_ring[i].src;
-        size_t   len = s_radar_ring[i].src_len;
-        s_radar_ring[i].src = NULL;          /* detached: this task owns it now */
+        uint8_t *src = r->slots[i].src;
+        size_t   len = r->slots[i].src_len;
+        r->slots[i].src = NULL;              /* detached: this task owns it now */
         bsp_display_unlock();
         if (!src) continue;                  /* nothing retained for this slot */
 
@@ -2113,90 +2209,88 @@ static bool radar_retransform_pass(image_page_t *p)
             f.buf = px;
             f.w   = (uint16_t)w;
             f.h   = (uint16_t)h;
-            radar_bake(&f, mode, dark);
+            ring_bake(p, &f, c, red);
         } else if (px) {
             heap_caps_free(px);
         }
 
         if (!bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-            radar_drop(&f, src);
+            ring_drop(&f, src);
             aborted = true;
             break;
         }
-        if (radar_frame_is_stale(gen, atomic_load(&s_radar_gen)) ||
-            i >= atomic_load(&s_radar_count)) {
+        if (radar_frame_is_stale(gen, atomic_load(&r->gen)) ||
+            i >= atomic_load(&r->count)) {
             bsp_display_unlock();
-            radar_drop(&f, src);             /* the slot is gone; we own both */
+            ring_drop(&f, src);              /* the slot is gone; we own both */
             break;
         }
-        s_radar_ring[i].src = src;           /* hand the source back, decoded or not */
+        r->slots[i].src = src;               /* hand the source back, decoded or not */
         if (!f.buf) {
             bsp_display_unlock();
             /* Keeps its OLD pixels and, deliberately, its OLD bake generation:
              * playback skips it instead of showing a frame at the superseded
              * geometry. It rejoins the loop when the ring rolls it out or a
              * later pass decodes it. */
-            ESP_LOGW(TAG, "radar re-transform: frame %d kept its old pixels (skipped in playback)", i);
+            ESP_LOGW(TAG, "%s re-transform: frame %d kept its old pixels (skipped in playback)", p->name, i);
             continue;
         }
-        uint8_t *old = s_radar_ring[i].buf;
-        bool was_shown = (old && (const uint8_t *)old == s_radar_shown);
+        uint8_t *old = r->slots[i].buf;
+        bool was_shown = (old && (const uint8_t *)old == r->shown);
         if (was_shown) {
             image_page_release_lvgl(p);      /* stop borrowing before the free */
-            s_radar_shown = NULL;
+            r->shown = NULL;
         }
-        s_radar_ring[i].buf = f.buf;
-        s_radar_ring[i].w   = f.w;
-        s_radar_ring[i].h   = f.h;
+        r->slots[i].buf = f.buf;
+        r->slots[i].w   = f.w;
+        r->slots[i].h   = f.h;
         /* Stamped BEFORE the re-show below, so the slot is already eligible for
          * playback by the time it is on screen. */
-        s_radar_ring[i].bake_gen = bake_gen;
+        r->slots[i].bake_gen = bake_gen;
         /* .hash is over the compressed bytes, so it survives the re-bake. */
-        if (was_shown) radar_show_idx(p, i);
+        if (was_shown) ring_show_idx(p, i);
         bsp_display_unlock();
         if (old) heap_caps_free(old);
         done++;
         vTaskDelay(pdMS_TO_TICKS(10));       /* stay polite between ~50 ms decodes */
     }
-    ESP_LOGI(TAG, "radar re-transform: %d/%d frames in %d ms (no network)",
-             done, count, (int)((esp_timer_get_time() - t0) / 1000));
+    ESP_LOGI(TAG, "%s re-transform: %d/%d frames in %d ms (no network)",
+             p->name, done, count, (int)((esp_timer_get_time() - t0) / 1000));
     return !aborted;
 }
 
 /* Re-bake the ring under the current settings.
  *
- * NO PLAYBACK HOLD. There used to be one (s_radar_hold, raised here and lowered
- * at the tail) and it was the wrong shape: it covered the PASS, while the ring
- * is mixed from the moment the setting CHANGES — which in the logged failure was
- * 18.4 s earlier, the pass being stuck behind a backfill. Per-slot bake
- * generations cover the whole window by construction and need nothing raised or
- * lowered, so the hold is gone rather than kept alongside them. Two overlapping
- * mechanisms each half-solving this is how the bug survived the first fix.
+ * NO PLAYBACK HOLD. There used to be one and it was the wrong shape: it covered
+ * the PASS, while the ring is mixed from the moment the setting CHANGES. Per-slot
+ * bake generations cover the whole window by construction and need nothing
+ * raised or lowered.
  *
  * DOUBLE REQUEST: a second toggle mid-pass bumps the bake generation again and
- * re-raises s_radar_retransform_req, so the loop runs another pass with a fresh
+ * re-raises retransform_req, so the loop runs another pass with a fresh
  * settings snapshot; the slots the first pass converted now read as stale and
  * are re-converted. The ring converges on the LATEST settings, and playback
  * shows only slots that have caught up throughout. A reset clears the request,
  * which is what ends the loop when the ring goes away. */
-void image_page_radar_retransform_if_requested(image_page_t *p)
+void image_page_ring_retransform_if_requested(image_page_t *p)
 {
-    if (!p || !atomic_exchange(&s_radar_retransform_req, false)) return;
-    if (image_page_radar_count() <= 0) return;
+    image_ring_t *r = ring_of(p);
+    if (!r || !atomic_exchange(&r->retransform_req, false)) return;
+    if (atomic_load(&r->count) <= 0) return;
 
     while (1) {
-        if (!radar_retransform_pass(p)) {
+        if (!ring_retransform_pass(p, r)) {
             /* Display lock timed out mid-pass, so the ring is part converted.
              * Re-raise and wake ourselves rather than retrying inline (that
              * would spin on a jammed lock); the next poll cycle finishes the
              * ring. Playback meanwhile runs over the converted slots only, or
              * holds on the displayed frame if none converted. */
-            ESP_LOGW(TAG, "radar re-transform: display lock timeout, retrying next cycle");
-            atomic_store(&s_radar_retransform_req, true);
+            ESP_LOGW(TAG, "%s re-transform: display lock timeout, retrying next cycle", p->name);
+            atomic_store(&r->retransform_req, true);
             image_page_wake(p);
             break;
         }
-        if (!atomic_exchange(&s_radar_retransform_req, false)) break;
+        if (!atomic_exchange(&r->retransform_req, false)) break;
     }
 }
 
@@ -2243,9 +2337,10 @@ void image_page_set_error(image_page_t *p, const char *msg)
         strlcpy(p->frame.error_msg, msg ? msg : "", sizeof(p->frame.error_msg));
         frame_unlock(p);
     }
-    /* The Custom and Radar pages show the reason as their caption; render_frame()
-     * handles the error branch before the newer-frame gate, so a plain call suffices. */
-    if ((p->src == IMG_SRC_CUSTOM || p->src == IMG_SRC_RADAR) &&
+    /* The Custom, Radar and Clouds pages show the reason as their caption;
+     * render_frame() handles the error branch before the newer-frame gate, so a
+     * plain call suffices. */
+    if (image_page_shows_error(p->src) &&
         atomic_load(&p->active) && bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
         image_page_render_frame(p);
         bsp_display_unlock();
@@ -2281,6 +2376,13 @@ static bool source_params_changed(image_src_t s, const app_config_t *prev, const
             return cur->radar_token[0] == '\0' &&
                    (cur->weather_lat != prev->weather_lat ||
                     cur->weather_lon != prev->weather_lon);
+        case IMG_SRC_CLOUDS:
+            /* Area (zoom), frame count and the weather location all change
+             * which GIBS frames are fetched: DIFFERENT images, so the ring goes. */
+            return cur->clouds_zoom != prev->clouds_zoom ||
+                   cur->clouds_frames != prev->clouds_frames ||
+                   cur->weather_lat != prev->weather_lat ||
+                   cur->weather_lon != prev->weather_lon;
         default:             return false;   /* Moon: local render, handled below */
     }
 }
@@ -2301,9 +2403,10 @@ static bool radar_local_params_changed(const app_config_t *prev, const app_confi
 /* Per-source "re-render the cached frame locally" test: crop / rotation / flips. */
 static bool render_params_changed(image_src_t s, const app_config_t *prev, const app_config_t *cur)
 {
-    /* Radar is not re-rendered from p->frame (it has none); its local changes go
-     * through radar_local_params_changed() above. */
-    if (s == IMG_SRC_RADAR) return false;
+    /* Animated pages are not re-rendered from p->frame (they have none); radar's
+     * local changes go through radar_local_params_changed() above and Clouds
+     * has no local render parameters at all. */
+    if (image_src_is_animated(s)) return false;
     if (image_page_config_crop(cur, s) != image_page_config_crop(prev, s)) return true;
     switch (s) {
         case IMG_SRC_GOES:   return cur->goes_orientation != prev->goes_orientation || cur->goes_vflip != prev->goes_vflip || cur->goes_hflip != prev->goes_hflip;
@@ -2332,7 +2435,7 @@ static bool moon_params_changed(const app_config_t *prev, const app_config_t *cu
            cur->moon_lon != prev->moon_lon;
 }
 
-/* Apply image-page config changes live (preview) for all five pages, comparing
+/* Apply image-page config changes live (preview) for all six pages, comparing
  * prev to cur. Shared by the image config POST handler, the control registry
  * and config_trigger_side_effects (main Save), so live-apply lives once:
  *   - enable toggled: create/hide the page (display lock), start or park its poller;
@@ -2363,14 +2466,14 @@ void image_page_config_apply_live(const app_config_t *prev, const app_config_t *
         if (!en_cur) continue;
 
         if (source_params_changed((image_src_t)s, prev, cur, force_fetch)) {
-            /* Radar: these are DIFFERENT images (region / frame count), so the
-             * ring goes and the poller refetches. */
-            if (s == IMG_SRC_RADAR) image_page_radar_invalidate(p);
+            /* Animated pages: these are DIFFERENT images (region / area / frame
+             * count), so the ring goes and the poller refetches. No-op otherwise. */
+            image_page_ring_invalidate(p);
             image_page_request_manual_fetch(p);            /* overlay + fresh download */
         } else if (s == IMG_SRC_RADAR && radar_local_params_changed(prev, cur)) {
             /* Same images, drawn differently: re-derive the ring from the
              * retained compressed bytes. No network, no ring teardown. */
-            image_page_radar_request_retransform(p);
+            image_page_ring_request_retransform(p);
         } else if (s == IMG_SRC_MOON && moon_params_changed(prev, cur)) {
             image_page_ensure_task_running(p);
             image_page_wake(p);                              /* local re-render, no overlay */

@@ -244,3 +244,16 @@ add_nina_host_test(test_radar_wms
 target_compile_definitions(test_radar_wms PRIVATE
     NINA_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
 )
+
+# ---------------------------------------------------------------------------
+# test_clouds_wms -- URL/geometry/time decisions for the Clouds page
+# (main/clouds_wms.h): East/West satellite pick, square Web-Mercator box from
+# lat/lon + zoom, GIBS GetMap and WMTS DescribeDomains URL shape, the
+# DescribeDomains time-list parser (start/end/PTnM segments, singles, bare
+# dates) and the UTC days-from-civil calendar helpers. Header-only, no
+# ESP-IDF dependency, no fixtures.
+# ---------------------------------------------------------------------------
+add_nina_host_test(test_clouds_wms
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_clouds_wms.c
+)
