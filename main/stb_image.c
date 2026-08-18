@@ -18,11 +18,12 @@
 #define STBI_REALLOC(p, newsz) heap_caps_realloc(p, newsz, MALLOC_CAP_SPIRAM)
 #define STBI_FREE(p)           free(p)
 
-/* Need JPEG (album/satellite art) + PNG (moon texture); disable the rest */
+/* Need JPEG (album/satellite art), PNG (moon texture, OctoPrint gcode
+ * thumbnails) and GIF (NWS RIDGE-2 weather radar tiles are served as GIF);
+ * disable the rest */
 #define STBI_NO_BMP
 #define STBI_NO_PSD
 #define STBI_NO_TGA
-#define STBI_NO_GIF
 #define STBI_NO_HDR
 #define STBI_NO_PIC
 #define STBI_NO_PNM

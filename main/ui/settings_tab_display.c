@@ -143,10 +143,11 @@ static uint32_t home_abs_to_dd_sel(int id)
 
 /* ── Slideshow order-list helpers (canonical membership) ──
  *
- * The nav arbiter slideshow reads ONLY auto_rotate_order2[0..15]
+ * The nav arbiter slideshow reads ONLY auto_rotate_order2[0..23]
  * (nina_nav_arbiter.c: slideshow_build_candidates). Each used slot holds a
  * page_ref id (== ARP_IDX_*): 0=Summary, 1..3=NINA1..3, 4=SysInfo, 5=AllSky,
- * 6=Spotify, 7=Clock, 8..11=Image sources, 24=JSON, 25=HA; 0xFF = empty.
+ * 6=Spotify, 7=Clock, 8..11=Image sources, 24=JSON, 25=HA, 26=OctoPrint,
+ * 27=Radar; 0xFF = empty.
  * The on-device checkbox table exposes only ids 0..5 (page_names below);
  * every other id is preserved across edits since this UI cannot express it. */
 

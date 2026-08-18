@@ -57,6 +57,8 @@ extern const uint8_t fragment_image_solar_html_start[]  asm("_binary_fragment_im
 extern const uint8_t fragment_image_solar_html_end[]    asm("_binary_fragment_image_solar_html_end");
 extern const uint8_t fragment_image_custom_html_start[] asm("_binary_fragment_image_custom_html_start");
 extern const uint8_t fragment_image_custom_html_end[]   asm("_binary_fragment_image_custom_html_end");
+extern const uint8_t fragment_image_radar_html_start[]  asm("_binary_fragment_image_radar_html_start");
+extern const uint8_t fragment_image_radar_html_end[]    asm("_binary_fragment_image_radar_html_end");
 extern const uint8_t fragment_octoprint_html_start[] asm("_binary_fragment_octoprint_html_start");
 extern const uint8_t fragment_octoprint_html_end[]   asm("_binary_fragment_octoprint_html_end");
 
@@ -110,6 +112,8 @@ extern const uint8_t fragment_image_solar_html_gz_start[]  asm("_binary_fragment
 extern const uint8_t fragment_image_solar_html_gz_end[]    asm("_binary_fragment_image_solar_html_gz_end");
 extern const uint8_t fragment_image_custom_html_gz_start[] asm("_binary_fragment_image_custom_html_gz_start");
 extern const uint8_t fragment_image_custom_html_gz_end[]   asm("_binary_fragment_image_custom_html_gz_end");
+extern const uint8_t fragment_image_radar_html_gz_start[]  asm("_binary_fragment_image_radar_html_gz_start");
+extern const uint8_t fragment_image_radar_html_gz_end[]    asm("_binary_fragment_image_radar_html_gz_end");
 extern const uint8_t fragment_octoprint_html_gz_start[] asm("_binary_fragment_octoprint_html_gz_start");
 extern const uint8_t fragment_octoprint_html_gz_end[]   asm("_binary_fragment_octoprint_html_gz_end");
 extern const uint8_t fragment_nodes_html_gz_start[] asm("_binary_fragment_nodes_html_gz_start");
@@ -283,6 +287,8 @@ static const ui_fragment_entry_t s_ui_fragments[] = {
                        fragment_image_solar_html_gz_start,   fragment_image_solar_html_gz_end },
     { "image-custom",  fragment_image_custom_html_start,  fragment_image_custom_html_end,
                        fragment_image_custom_html_gz_start,  fragment_image_custom_html_gz_end },
+    { "image-radar",   fragment_image_radar_html_start,   fragment_image_radar_html_end,
+                       fragment_image_radar_html_gz_start,   fragment_image_radar_html_gz_end },
     { "octoprint",     fragment_octoprint_html_start,     fragment_octoprint_html_end,
                        fragment_octoprint_html_gz_start,     fragment_octoprint_html_gz_end },
     { "nodes",         fragment_nodes_html_start,         fragment_nodes_html_end,
@@ -567,7 +573,7 @@ static const backup_field_t s_backup_fields[] = {
      * and parse_config_from_json() reads them with no hand-written arm. Registered
      * here for the diff, category grouping, sensitive split, and unknown-field
      * detection — and, for the API key, to drive strip_masked_secrets(). */
-    {"octoprint_enabled",           "3D Printer Page",        "OctoPrint", false, false},
+    {"octoprint_enabled",           "OctoPrint Page",         "OctoPrint", false, false},
     {"octoprint_url",               "OctoPrint URL",          "OctoPrint", false, false},
     {"octoprint_api_key",           "OctoPrint API Key",      "OctoPrint", true,  false, true},
     {"octoprint_update_interval_s", "OctoPrint Poll Interval","OctoPrint", false, false},
@@ -622,6 +628,21 @@ static const backup_field_t s_backup_fields[] = {
     {"custom_enabled",             "Custom Page Enabled",  "Image Display", false, false},
     {"custom_show_overlay",        "Custom Show Overlay",  "Image Display", false, false},
     {"custom_crop",                "Custom Crop/Fill",     "Image Display", false, false},
+    /* Weather Radar page (v63, plus radar_dark_mode at v64 and radar_map_style at v65).
+     * All eight are SETTINGS_TABLE rows, so
+     * serialize_config_to_json() emits them and parse_config_from_json() reads
+     * them with no hand-written arm; registered here so the diff, category
+     * grouping, sensitive split and unknown-field detection treat them like any
+     * other field (without this, every restore reports them as coming from a
+     * newer firmware). */
+    {"radar_enabled",              "Radar Page Enabled",   "Image Display", false, false},
+    {"radar_show_overlay",         "Radar Show Overlay",   "Image Display", false, false},
+    {"radar_crop",                 "Radar Crop",           "Image Display", false, false},
+    {"radar_token",                "Radar Area",           "Image Display", false, false},
+    {"radar_update_interval_s",    "Radar Update Interval","Image Display", false, false},
+    {"radar_frames",               "Radar Animation Length","Image Display", false, false},
+    {"radar_dark_mode",            "Radar Map Appearance", "Image Display", false, false},
+    {"radar_map_style",            "Radar Map Style",      "Image Display", false, false},
     {"goes_region",                "GOES Region",          "Image Display", false, false},
     {"goes_update_interval_s",     "GOES Update Interval", "Image Display", false, false},
     {"custom_image_url",           "Custom Image URL",     "Image Display", false, false},
@@ -1270,6 +1291,24 @@ static app_config_t *parse_config_from_json(cJSON *root)
      * page targets) keeps its hand-written parse below, in original relative
      * order. */
     settings_json_parse(root, cfg);
+
+    /* radar_token is a SETTINGS_TABLE STR row, so the main Save writes it here
+     * as well as the radar tab's own POST. It is pasted straight into the NWS
+     * image URL, so this path needs the same charset gate as the other two
+     * (validate_config() on load, radar_token_is_valid() in the image handler):
+     * fold lowercase up, and treat anything outside [A-Z0-9] as junk -> empty,
+     * which means "resolve the nearest site at fetch time". */
+    for (int i = 0; cfg->radar_token[i] != '\0'; i++) {
+        char ch = cfg->radar_token[i];
+        if (ch >= 'a' && ch <= 'z') {
+            ch = (char)(ch - 'a' + 'A');
+            cfg->radar_token[i] = ch;
+        }
+        if (!((ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9'))) {
+            cfg->radar_token[0] = '\0';
+            break;
+        }
+    }
 
     JSON_TO_STRING(root, "url1",           cfg->api_url[0]);
     JSON_TO_STRING(root, "url2",           cfg->api_url[1]);

@@ -141,7 +141,7 @@ Real-time 3D rendered Moon with accurate phase, libration, and sub-solar lightin
   </tr>
 </table>
 
-### OctoPrint 3D Printer Page
+### OctoPrint Page
 
 <p align="center">
   <img src="images/octoprint_hero.jpg" alt="OctoPrint page showing a live print" width="720">
@@ -391,6 +391,7 @@ Point MQTT at your broker to publish the device's own state via Home Assistant a
 - **AllSky** — a four-quadrant environmental panel (thermal, sky quality, ambient, power) fed from an AllSky API with configurable field mappings and thresholds.
 - **Weather** — OpenWeatherMap, Open-Meteo, or Weather Underground data on the clock page.
 - **Image pages** — four full-screen pages: GOES satellite, Moon (rendered on-device), NASA SDO/SOHO solar imagery, and a custom image URL. Each has its own enable, refresh interval, and overlay/crop settings.
+- **Weather Radar**: an animated NWS radar loop for a chosen radar site (or the nearest site to your weather location, or the whole CONUS). Choose how many frames to keep, the refresh interval, an optional caption, Crop (drops the NOAA header and legend), and Dark mode. The Map style option picks what the radar echoes are drawn over: Standard (roads and city names), State lines only (the default), or State and county lines. The two line-only styles remove roads and labels, which helps when highway markings look like heavy rain. Crop and Dark mode apply only to the Standard style; Red Night applies to all three.
 
 ---
 

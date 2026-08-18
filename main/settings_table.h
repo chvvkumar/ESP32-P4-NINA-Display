@@ -198,7 +198,16 @@
     BOOL      (goes_show_overlay,            "goes_show_overlay",            true) \
     BOOL      (moon_show_overlay,            "moon_show_overlay",            true) \
     BOOL      (solar_show_overlay,           "solar_show_overlay",           true) \
-    BOOL      (custom_show_overlay,          "custom_show_overlay",          true)
+    BOOL      (custom_show_overlay,          "custom_show_overlay",          true) \
+    /* -- Weather Radar page (v63) -- */ \
+    BOOL      (radar_enabled,                "radar_enabled",                false) \
+    STR       (radar_token,                  "radar_token",                  "")    /* WSR-88D site id ("KTLX"), a regional/CONUS name, or "" = resolve the nearest site at runtime. Pasted into the image URL, so it is a trust boundary: the charset rule lives in validate_config() (load path) and in parse_config_from_json() (web save path) — STR here only bounds the copy and NUL-terminates */ \
+    BOOL      (radar_show_overlay,           "radar_show_overlay",           false) \
+    INT       (radar_crop,                   "radar_crop",                   0,     0,     1)     /* how the picture fits the panel: 0 = off (whole image, bars above and below), 1 = crop (banner and colour scale trimmed, fills the panel). Stays a uint8 INT row rather than BOOL because the retired middle value (2) can still be in NVS: a true clamp maps that 2 to 1 (crop), which is the same resolution the page code applies (radar_crop >= 1 -> crop). A RESET row would send it to 0 instead and silently un-crop those devices */ \
+    INT       (radar_update_interval_s,      "radar_update_interval_s",      900,   120,   7200)  /* 15 min default. True clamp, matching the image POST handler's clamp-to-bound (both write paths agree). validate_config()'s extra "0 -> 900" case for a zeroed blob now lands on 120 instead; both are legal intervals */ \
+    INT_RESET (radar_frames,                 "radar_frames",                 10,    1,     10)    /* how many radar images the page animates. RESET reproduces validate_config() exactly: both 0 (unset blob) and >10 fall back to the full 10-frame loop, never to the opposite bound */ \
+    BOOL      (radar_dark_mode,              "radar_dark_mode",              true)  /* v64: true = dark basemap (the pre-v64 behaviour, and the default), false = the NWS image as published */ \
+    INT_RESET (radar_map_style,              "radar_map_style",              1,     0,     2)     /* v65: which map the radar echoes are drawn over: 0 = standard NWS picture with roads and city names (the pre-v65 behaviour), 1 = state lines only (the default), 2 = state and county lines. RESET, not clamp: an unknown value (stale blob byte, or a future style this firmware does not know) falls back to state lines only rather than the nearest bound */
 
 /* Apply every row's default value to *cfg. Called from set_defaults()
  * immediately after the memset(). Does not touch excluded/complex fields

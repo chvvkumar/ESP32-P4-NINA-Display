@@ -64,7 +64,8 @@ static const page_ref_entry_t s_pages[] = {
     /* id 23 */ { PAGE_REF_OVL_EVENTLOG,     "overlay.eventlog",       "Event Log",        PAGE_REF_KIND_OVERLAY,      PAGE_REF_SUMMARY,      false, "System",  -1                                     },
     /* id 24 */ { PAGE_REF_JSON,             "json",                   "JSON Display",     PAGE_REF_KIND_PAGE,         PAGE_REF_JSON,         true,  "Ambient", PAGE_IDX_JSON                          },
     /* id 25 */ { PAGE_REF_HA,               "ha",                     "Home Assistant",   PAGE_REF_KIND_PAGE,         PAGE_REF_HA,           true,  "Ambient", PAGE_IDX_HA                            },
-    /* id 26 */ { PAGE_REF_OCTOPRINT,        "octoprint",              "3D Printer",       PAGE_REF_KIND_PAGE,         PAGE_REF_OCTOPRINT,    true,  "Ambient", PAGE_IDX_OCTOPRINT                     },
+    /* id 26 */ { PAGE_REF_OCTOPRINT,        "octoprint",              "OctoPrint",        PAGE_REF_KIND_PAGE,         PAGE_REF_OCTOPRINT,    true,  "Ambient", PAGE_IDX_OCTOPRINT                     },
+    /* id 27 */ { PAGE_REF_RADAR,     "image.radar",  "Weather Radar",  PAGE_REF_KIND_IMAGE_SOURCE, PAGE_REF_RADAR,      true, "Image", PAGE_IDX_IMG_RADAR  },
 };
 
 int page_ref_count(void)
@@ -127,6 +128,9 @@ bool page_ref_is_available(page_ref_t id)
         case PAGE_REF_IMG_MOON:   avail = c->moon_enabled;  break;
         case PAGE_REF_IMG_SOLAR:  avail = c->solar_enabled; break;
         case PAGE_REF_IMG_CUSTOM: avail = c->custom_enabled && c->custom_image_url[0] != '\0'; break;
+        /* No URL precondition: an empty radar_token resolves at fetch time
+         * (nearest site, else the CONUS mosaic), so the page always has a target. */
+        case PAGE_REF_RADAR:      avail = c->radar_enabled; break;
         case PAGE_REF_SETTINGS:           /* settings: never a slideshow/nav-list target */
         case PAGE_REF_OVL_GRAPH:          /* overlays: not directly navigable             */
         case PAGE_REF_OVL_INFO_CAMERA:

@@ -1,0 +1,348 @@
+
+        <div class="card">
+          <div class="card-title"><span class="card-title-label">Weather Radar <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+          <div class="help-popover"><div class="help-popover-title">Weather Radar page</div><p>Adds a full-screen page showing the latest National Weather Service radar picture. Choose a single radar site, a regional view, or the whole lower 48; the picture refreshes at the update interval you choose and plays back the most recent pictures as a short animation.</p><p>Coverage is the United States and its territories only.</p></div>
+          <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+            <span class="toggle-label">Enable Weather Radar page</span>
+            <label class="toggle"><input type="checkbox" id="radar_enabled" onchange="updateImagePageEnabledUI('image-radar');applyImagePage('image-radar');checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Adds the Weather Radar page and starts fetching the selected area.</div>
+          <div id="radarFields">
+            <div class="toggle-row" style="margin-top:16px">
+              <span class="toggle-label">Show Overlay</span>
+              <label class="toggle"><input type="checkbox" id="radar_show_overlay" onchange="applyImagePage('image-radar');checkDirty()"><span class="toggle-track"></span></label>
+            </div>
+            <div class="field-hint">Area name and update time overlay on the display</div>
+            <div class="field" style="margin-top:16px">
+              <label class="field-label">Radar area</label>
+              <select class="input" id="radar_token" onchange="applyImagePage('image-radar');checkDirty()">
+                <option value="">Automatic (nearest radar to my location)</option>
+                <option value="CONUS">CONUS - National (lower 48)</option>
+                <optgroup label="Regional">
+                  <option value="NORTHEAST">Northeast</option>
+                  <option value="SOUTHEAST">Southeast</option>
+                  <option value="UPPERMISSVLY">Upper Mississippi Valley</option>
+                  <option value="SOUTHMISSVLY">Southern Mississippi Valley</option>
+                  <option value="NORTHROCKIES">Northern Rockies</option>
+                  <option value="SOUTHROCKIES">Southern Rockies</option>
+                  <option value="PACNORTHWEST">Pacific Northwest</option>
+                  <option value="PACSOUTHWEST">Pacific Southwest</option>
+                  <option value="CENTGRLAKES">Central Great Lakes</option>
+                  <option value="ALASKA">Alaska</option>
+                  <option value="HAWAII">Hawaii</option>
+                </optgroup>
+                <optgroup label="Alabama (AL)">
+                  <option value="KBMX">KBMX - Birmingham, AL</option>
+                  <option value="KEOX">KEOX - Ft Rucker, AL</option>
+                  <option value="KMXX">KMXX - Maxwell AFB, AL</option>
+                  <option value="KMOB">KMOB - Mobile, AL</option>
+                  <option value="KHTX">KHTX - Northeast Alabama, AL</option>
+                </optgroup>
+                <optgroup label="Alaska (AK)">
+                  <option value="PABC">PABC - Bethel, AK</option>
+                  <option value="PAPD">PAPD - Fairbanks Faa, AK</option>
+                  <option value="PAHG">PAHG - Kenai, AK</option>
+                  <option value="PAKC">PAKC - King Salmon, AK</option>
+                  <option value="PAIH">PAIH - Middleton Island, AK</option>
+                  <option value="PAEC">PAEC - Nome, AK</option>
+                  <option value="PACG">PACG - Sitka, AK</option>
+                </optgroup>
+                <optgroup label="Arizona (AZ)">
+                  <option value="KFSX">KFSX - Flagstaff, AZ</option>
+                  <option value="KIWA">KIWA - Phoenix, AZ</option>
+                  <option value="KEMX">KEMX - Tucson, AZ</option>
+                  <option value="KYUX">KYUX - Yuma, AZ</option>
+                </optgroup>
+                <optgroup label="Arkansas (AR)">
+                  <option value="KLZK">KLZK - Little Rock, AR</option>
+                  <option value="KSRX">KSRX - Western Arkansas, AR</option>
+                </optgroup>
+                <optgroup label="California (CA)">
+                  <option value="KBBX">KBBX - Beale AFB, CA</option>
+                  <option value="KEYX">KEYX - Edwards AFB, CA</option>
+                  <option value="KBHX">KBHX - Eureka (Bunker Hill), CA</option>
+                  <option value="KVTX">KVTX - Los Angeles, CA</option>
+                  <option value="KDAX">KDAX - Sacramento, CA</option>
+                  <option value="KNKX">KNKX - San Diego, CA</option>
+                  <option value="KMUX">KMUX - San Francisco, CA</option>
+                  <option value="KHNX">KHNX - San Joaquin Valley, CA</option>
+                  <option value="KSOX">KSOX - Santa Ana Mts, CA</option>
+                  <option value="KVBX">KVBX - Vandenberg AFB, CA</option>
+                </optgroup>
+                <optgroup label="Colorado (CO)">
+                  <option value="KFTG">KFTG - Denver, CO</option>
+                  <option value="KGJX">KGJX - Grand Junction, CO</option>
+                  <option value="KPUX">KPUX - Pueblo, CO</option>
+                </optgroup>
+                <optgroup label="Delaware (DE)">
+                  <option value="KDOX">KDOX - Dover AFB, DE</option>
+                </optgroup>
+                <optgroup label="Florida (FL)">
+                  <option value="KEVX">KEVX - Eglin Afb, FL</option>
+                  <option value="KJAX">KJAX - Jacksonville, FL</option>
+                  <option value="KBYX">KBYX - Key West, FL</option>
+                  <option value="KMLB">KMLB - Melbourne, FL</option>
+                  <option value="KAMX">KAMX - Miami, FL</option>
+                  <option value="KTLH">KTLH - Tallahassee, FL</option>
+                  <option value="KTBW">KTBW - Tampa, FL</option>
+                </optgroup>
+                <optgroup label="Georgia (GA)">
+                  <option value="KFFC">KFFC - Atlanta, GA</option>
+                  <option value="KVAX">KVAX - Moody AFB, GA</option>
+                  <option value="KJGX">KJGX - Robins AFB, GA</option>
+                </optgroup>
+                <optgroup label="Guam (GU)">
+                  <option value="PGUA">PGUA - Andersen AFB, GU</option>
+                </optgroup>
+                <optgroup label="Hawaii (HI)">
+                  <option value="PHKM">PHKM - Kamuela/Kohala Apt, HI</option>
+                  <option value="PHMO">PHMO - Molokai, HI</option>
+                  <option value="PHKI">PHKI - South Kauai, HI</option>
+                  <option value="PHWA">PHWA - South Shore, HI</option>
+                </optgroup>
+                <optgroup label="Idaho (ID)">
+                  <option value="KCBX">KCBX - Boise, ID</option>
+                  <option value="KSFX">KSFX - Pocatello, ID</option>
+                </optgroup>
+                <optgroup label="Illinois (IL)">
+                  <option value="KLOT">KLOT - Chicago, IL</option>
+                  <option value="KILX">KILX - Lincoln, IL</option>
+                </optgroup>
+                <optgroup label="Indiana (IN)">
+                  <option value="KVWX">KVWX - Evansville,IN, IN</option>
+                  <option value="KIND">KIND - Indianapolis, IN</option>
+                  <option value="KIWX">KIWX - Northern Indiana, IN</option>
+                </optgroup>
+                <optgroup label="Iowa (IA)">
+                  <option value="KDMX">KDMX - Des Moines, IA</option>
+                  <option value="KDVN">KDVN - Quad Cities, IA</option>
+                </optgroup>
+                <optgroup label="Kansas (KS)">
+                  <option value="KDDC">KDDC - Dodge City, KS</option>
+                  <option value="KGLD">KGLD - Goodland, KS</option>
+                  <option value="KTWX">KTWX - Topeka, KS</option>
+                  <option value="KICT">KICT - Wichita, KS</option>
+                </optgroup>
+                <optgroup label="Kentucky (KY)">
+                  <option value="KHPX">KHPX - Ft Campbell, KY</option>
+                  <option value="KJKL">KJKL - Jackson,KY, KY</option>
+                  <option value="KLVX">KLVX - Louisville, KY</option>
+                  <option value="KPAH">KPAH - Paducah, KY</option>
+                </optgroup>
+                <optgroup label="Louisiana (LA)">
+                  <option value="KPOE">KPOE - Ft Polk, LA</option>
+                  <option value="KHDC">KHDC - Hammond, LA</option>
+                  <option value="KLCH">KLCH - Lake Charles, LA</option>
+                  <option value="KSHV">KSHV - Shreveport, LA</option>
+                </optgroup>
+                <optgroup label="Maine (ME)">
+                  <option value="KCBW">KCBW - Caribou, ME</option>
+                  <option value="KGYX">KGYX - Portland,ME, ME</option>
+                </optgroup>
+                <optgroup label="Massachusetts (MA)">
+                  <option value="KBOX">KBOX - Boston, MA</option>
+                </optgroup>
+                <optgroup label="Michigan (MI)">
+                  <option value="KDTX">KDTX - Detroit, MI</option>
+                  <option value="KGRR">KGRR - Grand Rapids, MI</option>
+                  <option value="KMQT">KMQT - Marquette, MI</option>
+                  <option value="KAPX">KAPX - NCL Michigan, MI</option>
+                </optgroup>
+                <optgroup label="Minnesota (MN)">
+                  <option value="KDLH">KDLH - Duluth, MN</option>
+                  <option value="KMPX">KMPX - Minneapolis, MN</option>
+                </optgroup>
+                <optgroup label="Mississippi (MS)">
+                  <option value="KGWX">KGWX - Columbus AFB, MS</option>
+                  <option value="KDGX">KDGX - Jackson/Brandon,MS, MS</option>
+                </optgroup>
+                <optgroup label="Missouri (MO)">
+                  <option value="KEAX">KEAX - Pleasant Hill, MO</option>
+                  <option value="KSGF">KSGF - Springfield, MO</option>
+                  <option value="KLSX">KLSX - St Louis, MO</option>
+                </optgroup>
+                <optgroup label="Montana (MT)">
+                  <option value="KBLX">KBLX - Billings, MT</option>
+                  <option value="KGGW">KGGW - Glasgow, MT</option>
+                  <option value="KTFX">KTFX - Great Falls, MT</option>
+                  <option value="KMSX">KMSX - Missoula, MT</option>
+                </optgroup>
+                <optgroup label="Nebraska (NE)">
+                  <option value="KUEX">KUEX - Grand Island, NE</option>
+                  <option value="KLNX">KLNX - North Platte, NE</option>
+                  <option value="KOAX">KOAX - Omaha, NE</option>
+                </optgroup>
+                <optgroup label="Nevada (NV)">
+                  <option value="KLRX">KLRX - Elko, NV</option>
+                  <option value="KESX">KESX - Las Vegas, NV</option>
+                  <option value="KRGX">KRGX - Reno, NV</option>
+                </optgroup>
+                <optgroup label="New Jersey (NJ)">
+                  <option value="KDIX">KDIX - Philadelphia, NJ</option>
+                </optgroup>
+                <optgroup label="New Mexico (NM)">
+                  <option value="KABX">KABX - Albuquerque, NM</option>
+                  <option value="KFDX">KFDX - Cannon AFB, NM</option>
+                  <option value="KEPZ">KEPZ - El Paso, NM</option>
+                  <option value="KHDX">KHDX - Holloman AFB, NM</option>
+                </optgroup>
+                <optgroup label="New York (NY)">
+                  <option value="KENX">KENX - Albany, NY</option>
+                  <option value="KBGM">KBGM - Binghamton, NY</option>
+                  <option value="KOKX">KOKX - Brookhaven, NY</option>
+                  <option value="KBUF">KBUF - Buffalo, NY</option>
+                  <option value="KTYX">KTYX - Ft Drum, NY</option>
+                </optgroup>
+                <optgroup label="North Carolina (NC)">
+                  <option value="KMHX">KMHX - Morehead City, NC</option>
+                  <option value="KRAX">KRAX - Raleigh/Durham, NC</option>
+                  <option value="KLTX">KLTX - Wilmington, NC</option>
+                </optgroup>
+                <optgroup label="North Dakota (ND)">
+                  <option value="KBIS">KBIS - Bismarck, ND</option>
+                  <option value="KMVX">KMVX - Fargo/Grand Forks, ND</option>
+                  <option value="KMBX">KMBX - Minot AFB, ND</option>
+                </optgroup>
+                <optgroup label="Ohio (OH)">
+                  <option value="KILN">KILN - Cincinnati, OH</option>
+                  <option value="KCLE">KCLE - Cleveland, OH</option>
+                </optgroup>
+                <optgroup label="Oklahoma (OK)">
+                  <option value="KFDR">KFDR - Altus AFB, OK</option>
+                  <option value="KTLX">KTLX - Norman, OK</option>
+                  <option value="KINX">KINX - Tulsa, OK</option>
+                  <option value="KVNX">KVNX - Vance AFB, OK</option>
+                </optgroup>
+                <optgroup label="Oregon (OR)">
+                  <option value="KMAX">KMAX - Medford, OR</option>
+                  <option value="KPDT">KPDT - Pendleton, OR</option>
+                  <option value="KRTX">KRTX - Portland,OR, OR</option>
+                </optgroup>
+                <optgroup label="Pennsylvania (PA)">
+                  <option value="KPBZ">KPBZ - Pittsburgh, PA</option>
+                  <option value="KCCX">KCCX - State College, PA</option>
+                </optgroup>
+                <optgroup label="Puerto Rico (PR)">
+                  <option value="TJUA">TJUA - San Juan, PR</option>
+                </optgroup>
+                <optgroup label="South Carolina (SC)">
+                  <option value="KCLX">KCLX - Charleston,SC, SC</option>
+                  <option value="KCAE">KCAE - Columbia, SC</option>
+                  <option value="KGSP">KGSP - Greer, SC</option>
+                </optgroup>
+                <optgroup label="South Dakota (SD)">
+                  <option value="KABR">KABR - Aberdeen, SD</option>
+                  <option value="KUDX">KUDX - Rapid City, SD</option>
+                  <option value="KFSD">KFSD - Sioux Falls, SD</option>
+                </optgroup>
+                <optgroup label="Tennessee (TN)">
+                  <option value="KMRX">KMRX - Knoxville, TN</option>
+                  <option value="KNQA">KNQA - Memphis, TN</option>
+                  <option value="KOHX">KOHX - Nashville, TN</option>
+                </optgroup>
+                <optgroup label="Texas (TX)">
+                  <option value="KAMA">KAMA - Amarillo, TX</option>
+                  <option value="KEWX">KEWX - Austin/San Antonio, TX</option>
+                  <option value="KBRO">KBRO - Brownsville, TX</option>
+                  <option value="KCRP">KCRP - Corpus Christi, TX</option>
+                  <option value="KFWS">KFWS - Dallas/Ft Worth, TX</option>
+                  <option value="KDYX">KDYX - Dyess AFB, TX</option>
+                  <option value="KGRK">KGRK - Ft Hood, TX</option>
+                  <option value="KHGX">KHGX - Houston, TX</option>
+                  <option value="KDFX">KDFX - Laughlin AFB, TX</option>
+                  <option value="KLBB">KLBB - Lubbock, TX</option>
+                  <option value="KMAF">KMAF - Midland/Odessa, TX</option>
+                  <option value="KSJT">KSJT - San Angelo, TX</option>
+                </optgroup>
+                <optgroup label="Utah (UT)">
+                  <option value="KICX">KICX - Cedar City, UT</option>
+                  <option value="KMTX">KMTX - Salt Lake City, UT</option>
+                </optgroup>
+                <optgroup label="Vermont (VT)">
+                  <option value="KCXX">KCXX - Burlington, VT</option>
+                </optgroup>
+                <optgroup label="Virginia (VA)">
+                  <option value="KAKQ">KAKQ - Norfolk, VA</option>
+                  <option value="KFCX">KFCX - Roanoke, VA</option>
+                  <option value="KLWX">KLWX - Sterling, VA</option>
+                </optgroup>
+                <optgroup label="Washington (WA)">
+                  <option value="KLGX">KLGX - Langley Hill, WA</option>
+                  <option value="KATX">KATX - Seattle, WA</option>
+                  <option value="KOTX">KOTX - Spokane, WA</option>
+                </optgroup>
+                <optgroup label="West Virginia (WV)">
+                  <option value="KRLX">KRLX - Charleston,WV, WV</option>
+                </optgroup>
+                <optgroup label="Wisconsin (WI)">
+                  <option value="KGRB">KGRB - Green Bay, WI</option>
+                  <option value="KARX">KARX - La Crosse, WI</option>
+                  <option value="KMKX">KMKX - Milwaukee, WI</option>
+                </optgroup>
+                <optgroup label="Wyoming (WY)">
+                  <option value="KCYS">KCYS - Cheyenne, WY</option>
+                  <option value="KRIW">KRIW - Riverton/Lander, WY</option>
+                </optgroup>
+              </select>
+              <div class="field-hint">Automatic uses the radar nearest the location set on the System tab; falls back to the national view when none is close.</div>
+            </div>
+            <div class="card">
+              <div class="card-title"><span class="card-title-label">Map appearance <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+              <div class="help-popover"><div class="help-popover-title">Map appearance</div><p>Map style picks the picture behind the radar. The standard picture shows roads and city names. The two line-only styles draw just state lines, or state and county lines, with no roads or labels; they are useful when road markings are hard to tell from heavy rain. Dark mode and Crop apply only to the standard picture.</p><p>Dark mode darkens the map background and outlines so the page is not blinding in a dark room. Turn it off to see the picture exactly as the National Weather Service publishes it, on a white background. The rain and storm colours look the same either way. The Red Night theme always uses the dark map, whatever this is set to.</p><p>Crop zooms the map to fill the screen and hides the National Weather Service banner and colour scale. The sides are trimmed too, more so on wide views like the national map; turn it off to see the whole picture with bars above and below.</p></div>
+            <div class="field" style="margin-top:16px">
+              <label class="field-label">Map style</label>
+              <select class="input" id="radar_map_style" onchange="radarMapStyleSync();applyImagePage('image-radar');checkDirty()">
+                <option value="0">Standard (roads and city names)</option>
+                <option value="1" selected>State lines only</option>
+                <option value="2">State and county lines</option>
+              </select>
+              <div class="field-hint">Standard shows roads and city names; the two line styles draw only state or state and county lines.</div>
+            </div>
+            <div id="radarStdOnly">
+            <div class="toggle-row" style="margin-top:16px">
+              <span class="toggle-label">Dark mode</span>
+              <label class="toggle"><input type="checkbox" id="radar_dark_mode" onchange="applyImagePage('image-radar');checkDirty()"><span class="toggle-track"></span></label>
+            </div>
+            <div class="field-hint">Dark map for night viewing; off shows the picture as published on white.</div>
+            <div class="toggle-row" style="margin-top:16px">
+              <span class="toggle-label">Crop</span>
+              <label class="toggle"><input type="checkbox" id="radar_crop" onchange="applyImagePage('image-radar');checkDirty()"><span class="toggle-track"></span></label>
+            </div>
+            <div class="field-hint">Fill the screen and hide the banner and colour scale.</div>
+            </div>
+            </div>
+            <div class="card">
+              <div class="card-title"><span class="card-title-label">Animation <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+              <div class="help-popover"><div class="help-popover-title">Animation</div><p>Update Interval sets how often the radar picture refreshes. The National Weather Service publishes a new picture about every 2 minutes, so checking more often than that gains nothing.</p><p>The interval also changes the look of the animation over time. When the page first loads it fills the animation with the ten most recent pictures, which are about 2 minutes apart, so it starts as a smooth 20 minute replay. From then on it adds one new picture each time it refreshes, so the older ones gradually age out and the replay stretches. At 15 minutes, after a couple of hours the animation covers about 2.5 hours in 15 minute jumps: a longer story of the weather, but a choppier one. A shorter interval keeps the animation smooth and close to real time, at the cost of more network traffic.</p><p>Animation length sets how much recent weather the page plays back. Each frame is one radar picture taken about 2 minutes apart, so 10 frames is roughly the last 20 minutes; 1 frame is a still picture that never animates. Each extra frame is another picture the display keeps in memory, so pick a shorter animation if the device is short on room.</p></div>
+            <div class="field" style="margin-top:16px">
+              <label class="field-label">Update Interval</label>
+              <select class="input" id="radar_update_interval_s" onchange="applyImagePage('image-radar');checkDirty()">
+                <option value="120">2 minutes</option>
+                <option value="300">5 minutes</option>
+                <option value="600">10 minutes</option>
+                <option value="900" selected>15 minutes</option>
+                <option value="1800">30 minutes</option>
+                <option value="3600">1 hour</option>
+                <option value="7200">2 hours</option>
+              </select>
+              <div class="field-hint">How often a new radar picture is fetched.</div>
+            </div>
+            <div class="field" style="margin-top:16px">
+              <label class="field-label">Animation length</label>
+              <select class="input" id="radar_frames" onchange="applyImagePage('image-radar');checkDirty()">
+                <option value="1">1 frame - still picture, no animation</option>
+                <option value="2">2 frames - about 4 minutes</option>
+                <option value="3">3 frames - about 6 minutes</option>
+                <option value="4">4 frames - about 8 minutes</option>
+                <option value="5">5 frames - about 10 minutes</option>
+                <option value="6">6 frames - about 12 minutes</option>
+                <option value="7">7 frames - about 14 minutes</option>
+                <option value="8">8 frames - about 16 minutes</option>
+                <option value="9">9 frames - about 18 minutes</option>
+                <option value="10" selected>10 frames - about 20 minutes</option>
+              </select>
+              <div class="field-hint">How many recent pictures the page plays back; 1 is a still picture.</div>
+            </div>
+            </div>
+          </div>
+        </div>

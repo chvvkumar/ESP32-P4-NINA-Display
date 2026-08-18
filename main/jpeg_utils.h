@@ -4,6 +4,10 @@
 #include <stdint.h>
 #include <stddef.h>
 
+/* img_fmt_t + the pure magic/PNG/GIF header logic image_probe_format_dims()
+ * delegates to (host-testable; see test/host/test_image_probe.c). */
+#include "image_probe.h"
+
 /**
  * @brief Software JPEG decode fallback (stb_image).
  * Handles CMYK, progressive, and other JPEGs that the HW decoder rejects.
@@ -34,6 +38,25 @@ bool jpeg_sw_decode_rgb565(const uint8_t *jpg_data, size_t jpg_size,
  */
 bool jpeg_probe_dimensions(const uint8_t *jpg_data, size_t jpg_size,
                            uint32_t *out_w, uint32_t *out_h);
+
+/**
+ * @brief Identify an image by its magic bytes and read its dimensions from the
+ * header WITHOUT decoding it.
+ *
+ * Gate for fetched payloads: IMG_FMT_UNKNOWN means the bytes are not one of the
+ * formats stb_image is compiled for (HTML error pages included) and must not be
+ * handed to the decoder. Every read is bounds-checked against @p size, so a
+ * truncated response is safe to pass in.
+ *
+ * @param data   Image bytes (may be short/truncated)
+ * @param size   Byte count
+ * @param out_w  Receives width in pixels, or 0 if the header was too short
+ * @param out_h  Receives height in pixels, or 0 if the header was too short
+ * @return the detected format; IMG_FMT_UNKNOWN if none matched. On a recognised
+ *         format with 0x0 dimensions the caller should skip any size cap.
+ */
+img_fmt_t image_probe_format_dims(const uint8_t *data, size_t size,
+                                  uint32_t *out_w, uint32_t *out_h);
 
 /**
  * @brief Scale an RGB565 image buffer using the PPA hardware accelerator.

@@ -38,6 +38,7 @@ extern "C" {
  *  24  ARP_IDX_JSON       -> PAGE_IDX_JSON (7)  (== PAGE_REF_JSON)
  *  25  ARP_IDX_HA         -> PAGE_IDX_HA (8)    (== PAGE_REF_HA)
  *  26  ARP_IDX_OCTOPRINT  -> PAGE_IDX_OCTOPRINT (9) (== PAGE_REF_OCTOPRINT)
+ *  27  ARP_IDX_RADAR      -> the Weather Radar page   (== PAGE_REF_RADAR)
  * Use ARP_STOP_IS_VALID() for validation, never `< ARP_IDX_MAX` alone.
  */
 #define ARP_IDX_SUMMARY     0
@@ -56,13 +57,25 @@ extern "C" {
 #define ARP_IDX_JSON       24   /* == PAGE_REF_JSON (frozen registry id) */
 #define ARP_IDX_HA         25   /* == PAGE_REF_HA (frozen registry id) */
 #define ARP_IDX_OCTOPRINT  26   /* == PAGE_REF_OCTOPRINT (frozen registry id) */
+#define ARP_IDX_RADAR      27   /* == PAGE_REF_RADAR (frozen registry id) */
 /* True if @p b names a valid slideshow stop. */
 #define ARP_STOP_IS_VALID(b) ((b) < ARP_IDX_MAX || (b) == ARP_IDX_JSON || (b) == ARP_IDX_HA || \
-                              (b) == ARP_IDX_OCTOPRINT)
-#define ARP_ORDER_CAPACITY 16   /* size of auto_rotate_order2[] */
+                              (b) == ARP_IDX_OCTOPRINT || (b) == ARP_IDX_RADAR)
+#define ARP_ORDER_CAPACITY 24   /* size of the LIVE auto_rotate_order2[] (v63) */
+/* Size of the RETIRED auto_rotate_order2_retired[] that still sits mid-struct at
+ * its original offset. Used ONLY by the v63 migration lift in app_config.c.
+ * v63 needed a bigger stop list. Growing the array in place would have moved
+ * every field after it, which breaks two things at once: every bulk-memcpy
+ * migration (they copy a stored blob as a prefix) and the forward-tolerant
+ * downgrade path, which relies on app_config_t being strictly append-only.
+ * So the old array was RETIRED in place (reserved bytes, nothing shifts) and a
+ * new 24-entry array was appended at the end of the struct, the same
+ * retire-and-append idiom already used for auto_rotate_order[8],
+ * auto_rotate_pages and the image_display_* fields. */
+#define ARP_ORDER_CAPACITY_RETIRED 16
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 62
+#define APP_CONFIG_VERSION 65
 
 /* Tiles-config blobs no longer live inside app_config_t (v52 split them out to
  * dedicated NVS string keys "json_tiles"/"ha_tiles"). These bound the value
@@ -278,10 +291,13 @@ typedef struct {
     uint16_t custom_update_interval_s;   // poll interval in seconds (10-7200, default 60)
 
     // Added after v45 — must stay at end to preserve NVS binary compatibility
-    // Ordered slideshow stop list: array of ARP_IDX_* values, 0xFF terminator.
-    // Replaces the legacy auto_rotate_order[8] + auto_rotate_order_ext encoding;
-    // each image source is now its own distinct stop (see ARP_IDX_* above).
-    uint8_t  auto_rotate_order2[16];
+    // RETIRED v63: reserved bytes, no longer read outside the migration lift.
+    // The live slideshow stop list is auto_rotate_order2[ARP_ORDER_CAPACITY] at
+    // the END of this struct. This 16-byte array keeps its offset so that every
+    // bulk-memcpy migration still lands a v46..v62 blob's stored stops here;
+    // order2_lift_retired() (app_config.c) copies them to the live array once,
+    // from the dispatcher tail. Never read this field anywhere else.
+    uint8_t  auto_rotate_order2_retired[16];
 
     // Added after v47 — must stay at end to preserve NVS binary compatibility
     // Per-source Image Display mirror flips. 0/1 each; 0 = no flip (current
@@ -394,6 +410,69 @@ typedef struct {
                                         // screen only and is never persisted.
                                         // Ignored by the Grid (bento) layout,
                                         // which has no overlay layer.
+
+    // Added after v62 — must stay at end to preserve NVS binary compatibility
+    // Weather Radar page. Field order is FROZEN; append only.
+    bool     radar_enabled;            // enable the Weather Radar page + poll task (default false)
+    char     radar_token[16];          // WSR-88D site id, uppercase [A-Z0-9] (e.g. "KTLX"), or
+                                       // "CONUS". EMPTY is valid and means "resolve at fetch
+                                       // time": the radar module picks the nearest WSR-88D site
+                                       // from weather_lat/weather_lon, else CONUS. The resolved
+                                       // value is NEVER written back here — writing config from
+                                       // a poll task is forbidden in this codebase.
+    uint16_t radar_update_interval_s;  // poll interval 120-7200 s (default 900)
+    bool     radar_show_overlay;       // caption drawn over the radar image (default false)
+    uint8_t  radar_crop;               // how the radar picture fits the panel. TWO states:
+                                       // 0 = off (whole image, bars top and bottom), 1 = crop
+                                       // (NOAA header/legend dropped, then a centred SQUARE crop
+                                       // that fills 720x720 with no bars). The retired middle
+                                       // value 2 ("fill screen", when 1 meant an 88% trim) can
+                                       // still sit in NVS; it clamps to 1, which is the same
+                                       // geometry it always asked for. See radar_play.h.
+                                       // Widened from bool at v64+ WITHOUT a version bump: bool
+                                       // and uint8_t are both one byte, so no offset moved, and
+                                       // the two values already stored (0/1) keep their meaning.
+                                       // The frozen app_config_v63_t snapshot below still
+                                       // declares it as bool and must stay that way.
+    uint8_t  radar_frames;             // how many radar images the page keeps and animates,
+                                       // newest first (1-10, default 10). 1 = a still image,
+                                       // no animation. NOAA publishes a new frame roughly
+                                       // every 2 minutes and offers 10, which sets the
+                                       // ceiling. Each retained frame costs about 660 KB of
+                                       // PSRAM, so 10 frames is about 6.6 MB — the largest
+                                       // single memory consumer this page adds.
+
+    // The LIVE ordered slideshow stop list: ARP_IDX_* values, 0xFF = empty slot.
+    // v63 replaced the 16-entry array that still sits mid-struct (now
+    // auto_rotate_order2_retired) with this 24-entry one, appended here so no
+    // existing field moved. THE NAME IS DELIBERATELY REUSED: it is the JSON wire
+    // key exchanged with config_ui.html, so renaming it would break scripted API
+    // clients, and every reader outside app_config.* keeps working unchanged as
+    // long as it loops to ARP_ORDER_CAPACITY.
+    //
+    // 3am trap: in the frozen app_config_vNN_t snapshots below, the field named
+    // auto_rotate_order2 is the OLD 16-entry array at the OLD offset. Same name,
+    // different array. A migration that reads old->auto_rotate_order2 is reading
+    // the retired one, which is correct for a snapshot and wrong for the live
+    // struct.
+    uint8_t  auto_rotate_order2[ARP_ORDER_CAPACITY];
+
+    // Added after v63 — must stay at end to preserve NVS binary compatibility
+    bool     radar_dark_mode;          // true  = invert the greyscale basemap so
+                                       //         the radar page reads dark (default)
+                                       // false = leave the NWS image as published
+                                       //         (light background)
+
+    // Added after v64 — must stay at end to preserve NVS binary compatibility
+    uint8_t  radar_map_style;          // which map the radar echoes are drawn over:
+                                       // 0 = standard NWS picture with roads and city
+                                       //     names (the pre-v65 behaviour)
+                                       // 1 = state lines only (default)
+                                       // 2 = state and county lines
+                                       // On 1 and 2 the picture comes from a different
+                                       // NWS map service: no banner or legend, black
+                                       // background, so radar_crop and radar_dark_mode
+                                       // do not apply. Values above 2 fall back to 1.
 } app_config_t;
 
 /* ── Version 43 config struct — used only for NVS migration to v44 ────── */
@@ -730,7 +809,7 @@ typedef struct {
  * Same technique as the v44 custom_image_url assert: compare against the end
  * of the last v45 field to catch any field inserted/reordered ahead of the
  * new block. */
-_Static_assert(offsetof(app_config_t, auto_rotate_order2) ==
+_Static_assert(offsetof(app_config_t, auto_rotate_order2_retired) ==
                    offsetof(app_config_v45_t, custom_update_interval_s) +
                        sizeof(((app_config_v45_t *)0)->custom_update_interval_s),
                "app_config_v45_t snapshot drifted from app_config_t layout");
@@ -3020,6 +3099,566 @@ _Static_assert(offsetof(app_config_t, octoprint_overlay_visible) ==
  * it must never exceed the destination. */
 _Static_assert(sizeof(app_config_v61_t) <= sizeof(app_config_t),
                "v61 snapshot must not exceed the current config struct");
+
+/* ── Version 62 config struct — used only for NVS migration to v63 ────── */
+/* Byte-identical to app_config_t minus the trailing Weather Radar block and    */
+/* the appended 24-entry auto_rotate_order2[] v63 added. Same body as the v61   */
+/* snapshot plus the octoprint_overlay_visible flag v62 appended.               */
+/* NOTE: this snapshot's auto_rotate_order2[16] is the array the live struct    */
+/* now calls auto_rotate_order2_retired — same offset, same 16 bytes, different */
+/* name. The live struct's auto_rotate_order2[] is a DIFFERENT, larger array at */
+/* the end of the struct. That asymmetry is deliberate: it keeps the JSON wire  */
+/* key stable while letting the stop list grow without moving a single field.   */
+typedef struct {
+    uint32_t config_version;
+    char api_url[3][128];
+    char ntp_server[64];
+    char tz_string[64];
+    char filter_colors[3][512];
+    char rms_thresholds[3][256];
+    char hfr_thresholds[3][256];
+    int theme_index;
+    int brightness;
+    int color_brightness;
+    bool mqtt_enabled;
+    char mqtt_broker_url[128];
+    char mqtt_username[64];
+    char mqtt_password[64];
+    char mqtt_topic_prefix[64];
+    uint16_t mqtt_port;
+    int8_t   active_page_override;
+    bool     auto_rotate_enabled;
+    uint16_t auto_rotate_interval_s;
+    uint8_t  auto_rotate_effect;
+    bool     auto_rotate_skip_disconnected;
+    uint8_t  auto_rotate_pages;
+    uint8_t  update_rate_s;
+    uint8_t  graph_update_interval_s;
+    uint8_t  connection_timeout_s;
+    uint8_t  toast_duration_s;
+    bool     debug_mode;
+    bool     instance_enabled[3];
+    bool     screen_sleep_enabled;
+    uint16_t screen_sleep_timeout_s;
+    bool     alert_flash_enabled;
+    uint8_t  idle_poll_interval_s;
+    bool     wifi_power_save;
+    uint8_t  widget_style;
+    uint8_t  auto_update_check;
+    uint8_t  update_channel;
+    bool     deep_sleep_enabled;
+    uint32_t deep_sleep_wake_timer_s;
+    bool     deep_sleep_on_idle;
+    uint8_t  screen_rotation;
+    char     hostname[32];
+    char     allsky_hostname[128];
+    uint16_t allsky_update_interval_s;
+    float    allsky_dew_offset;
+    char     allsky_field_config[1536];
+    char     allsky_thresholds[1024];
+    bool     allsky_enabled;
+    bool     demo_mode;
+    bool     spotify_enabled;
+    char     spotify_client_id[64];
+    uint16_t spotify_poll_interval_ms;
+    bool     spotify_show_progress_bar;
+    uint8_t  spotify_overlay_timeout_s;
+    bool     spotify_minimal_mode;
+    bool     spotify_scroll_text;
+    wifi_network_t wifi_networks[3];
+    bool     spotify_overlay_visible;
+    uint8_t  auto_rotate_order[8];
+    uint8_t  toast_aggregation_window_s;
+    uint32_t toast_notify_mask;
+    bool     toast_instance_muted[3];
+    uint8_t  weather_provider;
+    char     weather_api_key[64];
+    float    weather_lat;
+    float    weather_lon;
+    char     weather_location_name[64];
+    uint16_t weather_poll_interval_s;
+    uint8_t  weather_units;
+    uint8_t  weather_time_format;
+    bool     idle_page_override_enabled;
+    int8_t   idle_page_override_target;
+    bool     idle_page_persistent;
+    bool     idle_indicator_enabled;
+    char     admin_password[33];
+    bool     auth_enabled;
+    bool     image_display_enabled;
+    bool     image_display_show_overlay;
+    char     goes_region[16];
+    uint16_t goes_update_interval_s;
+    uint8_t  image_display_source;
+    uint8_t  moon_bg_style;
+    float    moon_lat;
+    float    moon_lon;
+    uint8_t  solar_band;
+    bool     image_display_crop;
+    uint8_t  moon_drag_light_mode;
+    uint8_t  moon_flip_u;
+    uint8_t  moon_flip_v;
+    float    moon_roll_offset;
+    float    moon_yaw_offset;
+    float    moon_pitch_offset;
+    uint8_t  moon_north_up;
+    uint8_t  moon_spin_mode;
+    uint8_t  moon_spin_return_s;
+    uint8_t  crash_log_retention_days;
+    uint8_t  auto_rotate_pages_hi;
+    uint8_t  auto_rotate_order_ext;
+    uint8_t  goes_orientation;
+    uint8_t  solar_orientation;
+    uint16_t nav_grace_s;
+    char     custom_image_url[256];
+    uint8_t  custom_orientation;
+    uint16_t custom_update_interval_s;
+    uint8_t  auto_rotate_order2[16];   /* the RETIRED array — see the note
+                                        * on the live struct's field of the
+                                        * same name */
+    uint8_t  goes_vflip;
+    uint8_t  goes_hflip;
+    uint8_t  solar_vflip;
+    uint8_t  solar_hflip;
+    uint8_t  custom_vflip;
+    uint8_t  custom_hflip;
+    bool     home_page_lock;
+    bool     json_enabled;
+    char     json_url[256];
+    char     json_auth_header[256];
+    uint16_t json_update_interval_s;
+    bool     ha_enabled;
+    char     ha_base_url[256];
+    char     ha_token[256];
+    uint16_t ha_update_interval_s;
+    bool     setup_hint_dismissed;
+    uint8_t  alert_voice_enabled;
+    uint8_t  alert_voice_volume;
+    uint8_t  alert_voice_types;
+    uint8_t  alert_voice_repeat_min;
+    bool     alert_voice_muted[3];
+    uint32_t voice_notify_mask;
+    uint8_t  boot_jingle_enabled;
+    uint8_t  alert_voice_brief;
+    uint8_t  alert_voice_conn;
+    uint8_t  alert_voice_disc;
+    uint8_t  wifi_max_tx_dbm;
+    uint8_t  octoprint_enabled;
+    char     octoprint_url[128];
+    char     octoprint_api_key[64];
+    uint16_t octoprint_update_interval_s;
+    uint8_t  octoprint_image_source;
+    uint8_t  octoprint_layout;
+    char     octoprint_snapshot_url[128];
+    bool     goes_enabled;
+    bool     moon_enabled;
+    bool     solar_enabled;
+    bool     custom_enabled;
+    uint16_t solar_update_interval_s;
+    uint16_t moon_update_interval_s;
+    bool     goes_crop;
+    bool     solar_crop;
+    bool     custom_crop;
+    bool     goes_show_overlay;
+    bool     moon_show_overlay;
+    bool     solar_show_overlay;
+    bool     custom_show_overlay;
+    bool     octoprint_overlay_visible;
+} app_config_v62_t;
+
+/* radar_enabled (bool, align 1) appends directly after octoprint_overlay_visible
+ * (bool, align 1), so no alignment padding can sit between them. Nothing moved
+ * in v63 — the old array was retired in place — so this is the plain
+ * end-of-last-field equality the v53/v54 asserts use. */
+_Static_assert(offsetof(app_config_t, radar_enabled) ==
+                   offsetof(app_config_v62_t, octoprint_overlay_visible) +
+                       sizeof(((app_config_v62_t *)0)->octoprint_overlay_visible),
+               "app_config_v62_t snapshot drifted from app_config_t layout");
+
+/* migrate_from_v62 memcpy's sizeof(app_config_v62_t) bytes into app_config_t;
+ * it must never exceed the destination. */
+_Static_assert(sizeof(app_config_v62_t) <= sizeof(app_config_t),
+               "v62 snapshot must not exceed the current config struct");
+
+/* ── Version 63 config struct — used only for NVS migration to v64 ────── */
+/* Byte-identical to app_config_t minus the trailing radar_dark_mode flag v64  */
+/* appended. Same body as the v62 snapshot plus the Weather Radar block and    */
+/* the 24-entry auto_rotate_order2[] v63 appended.                             */
+/* Both slideshow arrays are present here, under the same names the live       */
+/* struct uses: the retired 16-entry auto_rotate_order2_retired[] mid-struct   */
+/* and the live 24-entry auto_rotate_order2[] at the end.                      */
+typedef struct {
+    uint32_t config_version;
+    char api_url[3][128];
+    char ntp_server[64];
+    char tz_string[64];
+    char filter_colors[3][512];
+    char rms_thresholds[3][256];
+    char hfr_thresholds[3][256];
+    int theme_index;
+    int brightness;
+    int color_brightness;
+    bool mqtt_enabled;
+    char mqtt_broker_url[128];
+    char mqtt_username[64];
+    char mqtt_password[64];
+    char mqtt_topic_prefix[64];
+    uint16_t mqtt_port;
+    int8_t   active_page_override;
+    bool     auto_rotate_enabled;
+    uint16_t auto_rotate_interval_s;
+    uint8_t  auto_rotate_effect;
+    bool     auto_rotate_skip_disconnected;
+    uint8_t  auto_rotate_pages;
+    uint8_t  update_rate_s;
+    uint8_t  graph_update_interval_s;
+    uint8_t  connection_timeout_s;
+    uint8_t  toast_duration_s;
+    bool     debug_mode;
+    bool     instance_enabled[3];
+    bool     screen_sleep_enabled;
+    uint16_t screen_sleep_timeout_s;
+    bool     alert_flash_enabled;
+    uint8_t  idle_poll_interval_s;
+    bool     wifi_power_save;
+    uint8_t  widget_style;
+    uint8_t  auto_update_check;
+    uint8_t  update_channel;
+    bool     deep_sleep_enabled;
+    uint32_t deep_sleep_wake_timer_s;
+    bool     deep_sleep_on_idle;
+    uint8_t  screen_rotation;
+    char     hostname[32];
+    char     allsky_hostname[128];
+    uint16_t allsky_update_interval_s;
+    float    allsky_dew_offset;
+    char     allsky_field_config[1536];
+    char     allsky_thresholds[1024];
+    bool     allsky_enabled;
+    bool     demo_mode;
+    bool     spotify_enabled;
+    char     spotify_client_id[64];
+    uint16_t spotify_poll_interval_ms;
+    bool     spotify_show_progress_bar;
+    uint8_t  spotify_overlay_timeout_s;
+    bool     spotify_minimal_mode;
+    bool     spotify_scroll_text;
+    wifi_network_t wifi_networks[3];
+    bool     spotify_overlay_visible;
+    uint8_t  auto_rotate_order[8];
+    uint8_t  toast_aggregation_window_s;
+    uint32_t toast_notify_mask;
+    bool     toast_instance_muted[3];
+    uint8_t  weather_provider;
+    char     weather_api_key[64];
+    float    weather_lat;
+    float    weather_lon;
+    char     weather_location_name[64];
+    uint16_t weather_poll_interval_s;
+    uint8_t  weather_units;
+    uint8_t  weather_time_format;
+    bool     idle_page_override_enabled;
+    int8_t   idle_page_override_target;
+    bool     idle_page_persistent;
+    bool     idle_indicator_enabled;
+    char     admin_password[33];
+    bool     auth_enabled;
+    bool     image_display_enabled;
+    bool     image_display_show_overlay;
+    char     goes_region[16];
+    uint16_t goes_update_interval_s;
+    uint8_t  image_display_source;
+    uint8_t  moon_bg_style;
+    float    moon_lat;
+    float    moon_lon;
+    uint8_t  solar_band;
+    bool     image_display_crop;
+    uint8_t  moon_drag_light_mode;
+    uint8_t  moon_flip_u;
+    uint8_t  moon_flip_v;
+    float    moon_roll_offset;
+    float    moon_yaw_offset;
+    float    moon_pitch_offset;
+    uint8_t  moon_north_up;
+    uint8_t  moon_spin_mode;
+    uint8_t  moon_spin_return_s;
+    uint8_t  crash_log_retention_days;
+    uint8_t  auto_rotate_pages_hi;
+    uint8_t  auto_rotate_order_ext;
+    uint8_t  goes_orientation;
+    uint8_t  solar_orientation;
+    uint16_t nav_grace_s;
+    char     custom_image_url[256];
+    uint8_t  custom_orientation;
+    uint16_t custom_update_interval_s;
+    uint8_t  auto_rotate_order2_retired[16];   /* the RETIRED mid-struct array,
+                                        * named exactly as the live struct
+                                        * names it — see the note there */
+    uint8_t  goes_vflip;
+    uint8_t  goes_hflip;
+    uint8_t  solar_vflip;
+    uint8_t  solar_hflip;
+    uint8_t  custom_vflip;
+    uint8_t  custom_hflip;
+    bool     home_page_lock;
+    bool     json_enabled;
+    char     json_url[256];
+    char     json_auth_header[256];
+    uint16_t json_update_interval_s;
+    bool     ha_enabled;
+    char     ha_base_url[256];
+    char     ha_token[256];
+    uint16_t ha_update_interval_s;
+    bool     setup_hint_dismissed;
+    uint8_t  alert_voice_enabled;
+    uint8_t  alert_voice_volume;
+    uint8_t  alert_voice_types;
+    uint8_t  alert_voice_repeat_min;
+    bool     alert_voice_muted[3];
+    uint32_t voice_notify_mask;
+    uint8_t  boot_jingle_enabled;
+    uint8_t  alert_voice_brief;
+    uint8_t  alert_voice_conn;
+    uint8_t  alert_voice_disc;
+    uint8_t  wifi_max_tx_dbm;
+    uint8_t  octoprint_enabled;
+    char     octoprint_url[128];
+    char     octoprint_api_key[64];
+    uint16_t octoprint_update_interval_s;
+    uint8_t  octoprint_image_source;
+    uint8_t  octoprint_layout;
+    char     octoprint_snapshot_url[128];
+    bool     goes_enabled;
+    bool     moon_enabled;
+    bool     solar_enabled;
+    bool     custom_enabled;
+    uint16_t solar_update_interval_s;
+    uint16_t moon_update_interval_s;
+    bool     goes_crop;
+    bool     solar_crop;
+    bool     custom_crop;
+    bool     goes_show_overlay;
+    bool     moon_show_overlay;
+    bool     solar_show_overlay;
+    bool     custom_show_overlay;
+    bool     octoprint_overlay_visible;
+    bool     radar_enabled;
+    char     radar_token[16];
+    uint16_t radar_update_interval_s;
+    bool     radar_show_overlay;
+    bool     radar_crop;
+    uint8_t  radar_frames;
+    uint8_t  auto_rotate_order2[ARP_ORDER_CAPACITY];
+} app_config_v63_t;
+
+/* radar_dark_mode (bool, align 1) appends directly after auto_rotate_order2[]
+ * (uint8[24], align 1), so no alignment padding can sit between them. Nothing
+ * moved in v64 — the field is a pure append — so this is the plain
+ * end-of-last-field equality the v53/v54/v62 asserts use. */
+_Static_assert(offsetof(app_config_t, radar_dark_mode) ==
+                   offsetof(app_config_v63_t, auto_rotate_order2) +
+                       sizeof(((app_config_v63_t *)0)->auto_rotate_order2),
+               "app_config_v63_t snapshot drifted from app_config_t layout");
+
+/* radar_crop widened bool -> uint8_t (a fit mode, not a flag) with NO version bump.
+ * These two are the proof that costs nothing: the field is still one byte, and
+ * it still sits at the same offset as in the frozen v63 snapshot that declares
+ * it `bool`. Since it is one byte wide at an unchanged offset, nothing after it
+ * moved either — which the radar_dark_mode assert directly above re-checks. A
+ * stored blob therefore needs no migration: 0 and 1 already meant off and crop. */
+_Static_assert(sizeof(((app_config_t *)0)->radar_crop) == 1,
+               "radar_crop must stay one byte or the NVS blob layout shifts");
+_Static_assert(offsetof(app_config_t, radar_crop) == offsetof(app_config_v63_t, radar_crop),
+               "radar_crop moved: widening bool -> uint8_t must not shift the layout");
+
+/* migrate_from_v63 memcpy's sizeof(app_config_v63_t) bytes into app_config_t;
+ * it must never exceed the destination. */
+_Static_assert(sizeof(app_config_v63_t) <= sizeof(app_config_t),
+               "v63 snapshot must not exceed the current config struct");
+
+/* ── Version 64 config struct — used only for NVS migration to v65 ────── */
+/* Byte-identical to app_config_t minus the trailing radar_map_style byte v65 */
+/* appended. Same body as the v63 snapshot plus radar_dark_mode v64 at the    */
+/* end. radar_crop is declared uint8_t here, as the live struct has had it    */
+/* since the v64 widening (one byte either way, same offset).                 */
+typedef struct {
+    uint32_t config_version;
+    char api_url[3][128];
+    char ntp_server[64];
+    char tz_string[64];
+    char filter_colors[3][512];
+    char rms_thresholds[3][256];
+    char hfr_thresholds[3][256];
+    int theme_index;
+    int brightness;
+    int color_brightness;
+    bool mqtt_enabled;
+    char mqtt_broker_url[128];
+    char mqtt_username[64];
+    char mqtt_password[64];
+    char mqtt_topic_prefix[64];
+    uint16_t mqtt_port;
+    int8_t   active_page_override;
+    bool     auto_rotate_enabled;
+    uint16_t auto_rotate_interval_s;
+    uint8_t  auto_rotate_effect;
+    bool     auto_rotate_skip_disconnected;
+    uint8_t  auto_rotate_pages;
+    uint8_t  update_rate_s;
+    uint8_t  graph_update_interval_s;
+    uint8_t  connection_timeout_s;
+    uint8_t  toast_duration_s;
+    bool     debug_mode;
+    bool     instance_enabled[3];
+    bool     screen_sleep_enabled;
+    uint16_t screen_sleep_timeout_s;
+    bool     alert_flash_enabled;
+    uint8_t  idle_poll_interval_s;
+    bool     wifi_power_save;
+    uint8_t  widget_style;
+    uint8_t  auto_update_check;
+    uint8_t  update_channel;
+    bool     deep_sleep_enabled;
+    uint32_t deep_sleep_wake_timer_s;
+    bool     deep_sleep_on_idle;
+    uint8_t  screen_rotation;
+    char     hostname[32];
+    char     allsky_hostname[128];
+    uint16_t allsky_update_interval_s;
+    float    allsky_dew_offset;
+    char     allsky_field_config[1536];
+    char     allsky_thresholds[1024];
+    bool     allsky_enabled;
+    bool     demo_mode;
+    bool     spotify_enabled;
+    char     spotify_client_id[64];
+    uint16_t spotify_poll_interval_ms;
+    bool     spotify_show_progress_bar;
+    uint8_t  spotify_overlay_timeout_s;
+    bool     spotify_minimal_mode;
+    bool     spotify_scroll_text;
+    wifi_network_t wifi_networks[3];
+    bool     spotify_overlay_visible;
+    uint8_t  auto_rotate_order[8];
+    uint8_t  toast_aggregation_window_s;
+    uint32_t toast_notify_mask;
+    bool     toast_instance_muted[3];
+    uint8_t  weather_provider;
+    char     weather_api_key[64];
+    float    weather_lat;
+    float    weather_lon;
+    char     weather_location_name[64];
+    uint16_t weather_poll_interval_s;
+    uint8_t  weather_units;
+    uint8_t  weather_time_format;
+    bool     idle_page_override_enabled;
+    int8_t   idle_page_override_target;
+    bool     idle_page_persistent;
+    bool     idle_indicator_enabled;
+    char     admin_password[33];
+    bool     auth_enabled;
+    bool     image_display_enabled;
+    bool     image_display_show_overlay;
+    char     goes_region[16];
+    uint16_t goes_update_interval_s;
+    uint8_t  image_display_source;
+    uint8_t  moon_bg_style;
+    float    moon_lat;
+    float    moon_lon;
+    uint8_t  solar_band;
+    bool     image_display_crop;
+    uint8_t  moon_drag_light_mode;
+    uint8_t  moon_flip_u;
+    uint8_t  moon_flip_v;
+    float    moon_roll_offset;
+    float    moon_yaw_offset;
+    float    moon_pitch_offset;
+    uint8_t  moon_north_up;
+    uint8_t  moon_spin_mode;
+    uint8_t  moon_spin_return_s;
+    uint8_t  crash_log_retention_days;
+    uint8_t  auto_rotate_pages_hi;
+    uint8_t  auto_rotate_order_ext;
+    uint8_t  goes_orientation;
+    uint8_t  solar_orientation;
+    uint16_t nav_grace_s;
+    char     custom_image_url[256];
+    uint8_t  custom_orientation;
+    uint16_t custom_update_interval_s;
+    uint8_t  auto_rotate_order2_retired[16];   /* the RETIRED mid-struct array,
+                                        * named exactly as the live struct
+                                        * names it — see the note there */
+    uint8_t  goes_vflip;
+    uint8_t  goes_hflip;
+    uint8_t  solar_vflip;
+    uint8_t  solar_hflip;
+    uint8_t  custom_vflip;
+    uint8_t  custom_hflip;
+    bool     home_page_lock;
+    bool     json_enabled;
+    char     json_url[256];
+    char     json_auth_header[256];
+    uint16_t json_update_interval_s;
+    bool     ha_enabled;
+    char     ha_base_url[256];
+    char     ha_token[256];
+    uint16_t ha_update_interval_s;
+    bool     setup_hint_dismissed;
+    uint8_t  alert_voice_enabled;
+    uint8_t  alert_voice_volume;
+    uint8_t  alert_voice_types;
+    uint8_t  alert_voice_repeat_min;
+    bool     alert_voice_muted[3];
+    uint32_t voice_notify_mask;
+    uint8_t  boot_jingle_enabled;
+    uint8_t  alert_voice_brief;
+    uint8_t  alert_voice_conn;
+    uint8_t  alert_voice_disc;
+    uint8_t  wifi_max_tx_dbm;
+    uint8_t  octoprint_enabled;
+    char     octoprint_url[128];
+    char     octoprint_api_key[64];
+    uint16_t octoprint_update_interval_s;
+    uint8_t  octoprint_image_source;
+    uint8_t  octoprint_layout;
+    char     octoprint_snapshot_url[128];
+    bool     goes_enabled;
+    bool     moon_enabled;
+    bool     solar_enabled;
+    bool     custom_enabled;
+    uint16_t solar_update_interval_s;
+    uint16_t moon_update_interval_s;
+    bool     goes_crop;
+    bool     solar_crop;
+    bool     custom_crop;
+    bool     goes_show_overlay;
+    bool     moon_show_overlay;
+    bool     solar_show_overlay;
+    bool     custom_show_overlay;
+    bool     octoprint_overlay_visible;
+    bool     radar_enabled;
+    char     radar_token[16];
+    uint16_t radar_update_interval_s;
+    bool     radar_show_overlay;
+    uint8_t  radar_crop;
+    uint8_t  radar_frames;
+    uint8_t  auto_rotate_order2[ARP_ORDER_CAPACITY];
+    bool     radar_dark_mode;
+} app_config_v64_t;
+
+/* radar_map_style (uint8_t, align 1) appends directly after radar_dark_mode
+ * (bool, align 1), so no alignment padding can sit between them. Nothing
+ * moved in v65 — the field is a pure append — so this is the plain
+ * end-of-last-field equality the v53/v54/v62/v63 asserts use. */
+_Static_assert(offsetof(app_config_t, radar_map_style) ==
+                   offsetof(app_config_v64_t, radar_dark_mode) +
+                       sizeof(((app_config_v64_t *)0)->radar_dark_mode),
+               "app_config_v64_t snapshot drifted from app_config_t layout");
+
+/* migrate_from_v64 memcpy's sizeof(app_config_v64_t) bytes into app_config_t;
+ * it must never exceed the destination. */
+_Static_assert(sizeof(app_config_v64_t) <= sizeof(app_config_t),
+               "v64 snapshot must not exceed the current config struct");
 
 // v17 snapshot — AllSky fields without allsky_enabled
 typedef struct {
