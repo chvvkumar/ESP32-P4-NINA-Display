@@ -17,12 +17,28 @@ typedef struct {
     int64_t   stamp_ms;       /* esp_timer ms when buf was produced; 0 = never */
 } image_frame_t;
 
-/* Fetch + decode one JPEG into *out (out must be zeroed by the caller). On
+/* Fetch + decode one image (JPEG, PNG or GIF) into *out (out must be zeroed by
+ * the caller). On
  * ESP_OK out->buf is a fresh PSRAM allocation the caller owns; on failure
  * out->buf stays NULL and out->error_msg names the reason. */
 esp_err_t image_fetch_goes(const char *region, image_frame_t *out);
 esp_err_t image_fetch_solar(uint8_t band, image_frame_t *out);
 esp_err_t image_fetch_custom(const char *url, image_frame_t *out);
+
+/* Same fetch+decode as image_fetch_custom(), but the COMPRESSED source bytes
+ * survive the call so the caller can re-decode them later without re-fetching.
+ *
+ * OWNERSHIP: on ESP_OK, *out_src is a PSRAM allocation the caller must
+ * heap_caps_free() (independently of out->buf); *out_src_len is its length. On
+ * any error return the bytes are freed internally and *out_src is NULL, so the
+ * caller frees only what it was handed. Both out params are required.
+ *
+ * Only the radar ring uses this: it retains ~37 KB per frame so a crop /
+ * dark-mode / Red Night change re-derives the ring locally instead of
+ * re-downloading it. The other pages call image_fetch_custom() and the
+ * compressed buffer is freed at decode time exactly as before. */
+esp_err_t image_fetch_custom_retain(const char *url, image_frame_t *out,
+                                    uint8_t **out_src, size_t *out_src_len);
 
 /* NESDIS sector code -> human-readable region name. Returns the code itself
  * when no match is found. Single source of truth for region labels. */

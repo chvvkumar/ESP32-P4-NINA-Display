@@ -1,81 +1,88 @@
 
       <div class="card">
         <div class="card-title"><span class="card-title-label">OctoPrint <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
-        <div class="help-popover"><div class="help-popover-title">3D Printer page</div><p>Adds a page that shows what your 3D printer is doing: print progress, time remaining, hotend and bed temperatures, and layer info. The data comes from OctoPrint, so the device needs the address of your OctoPrint server and an API key from it.</p><p>Enter the address, then press Authenticate: OctoPrint opens in a new tab and asks you to allow this display. The key is stored here as soon as you approve. If that does not work for your OctoPrint, create a key yourself under Settings, Application Keys, and paste it into the manual field below.</p><p>Page Layout changes how the printer page looks on the device. The Image setting picks what is shown alongside the numbers: the model preview embedded in the sliced file, or a live picture from the printer camera.</p></div>
+        <div class="help-popover"><div class="help-popover-title">OctoPrint page</div><p>Adds a page that shows what your 3D printer is doing: print progress, time remaining, hotend and bed temperatures, and layer info. The data comes from OctoPrint, so the device needs the address of your OctoPrint server and an API key from it.</p><p>Connection holds the address and key, Appearance picks how the page looks, and Picture picks what is shown alongside the numbers.</p></div>
         <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-          <span class="toggle-label">Enable 3D Printer page</span>
+          <span class="toggle-label">Enable OctoPrint page</span>
           <!-- No inline handler: the delegated input/change listener on .content
                already runs checkDirty() + the debounced live apply for every
                control in this card. -->
           <label class="toggle"><input type="checkbox" id="octoprint_enabled"><span class="toggle-track"></span></label>
         </div>
-        <div class="field-hint">Adds the printer page and starts reading from OctoPrint. Off hides the page and stops the requests.</div>
-      </div>
+        <div class="field-hint">Adds the OctoPrint page and starts reading from OctoPrint; off hides the page and stops the requests.</div>
 
-      <div class="card collapsed">
-        <div class="card-title"><span class="card-title-label">Connection</span></div>
-        <div class="field">
-          <label class="field-label" for="octoUrl">OctoPrint Address</label>
-          <input type="text" class="input" id="octoUrl" maxlength="127" placeholder="http://octopi.lan">
-          <div class="field-hint">Address of your OctoPrint server, the same one you open in a browser. Include http:// or https:// and a port number if you use one.</div>
-        </div>
-        <!-- Action controls, not settings: data-no-dirty keeps anything in here
-             from raising the save bar or firing a live apply. -->
-        <div class="field" data-no-dirty>
-          <button type="button" class="btn btn-outline full" id="octoKeyBtn" onclick="octoRequestKey()">Authenticate</button>
-          <div class="field-hint" id="octoKeyStatus" style="margin-top:8px"></div>
-          <div class="field-hint">Opens OctoPrint in a new tab. Sign in if asked and press Allow. The key is stored on this display as soon as you approve; the address above is saved when you press Authenticate.</div>
-        </div>
-        <details class="field">
-          <summary class="field-hint" style="cursor:pointer;margin-top:0">Enter an API key manually instead</summary>
-          <label class="field-label" for="octoApiKey" style="margin-top:8px">API Key</label>
-          <!-- A saved key comes back from the device as a row of asterisks, never
-               the real value. Selecting the field on focus means the first
-               keystroke replaces those asterisks instead of appending to them,
-               which would otherwise be stored as the key. -->
-          <input type="password" class="input" id="octoApiKey" maxlength="63" placeholder="paste key only" autocomplete="off" onfocus="this.select()">
-          <div class="field-hint">Create one in OctoPrint under Settings, Application Keys, and paste it here. Leave the field untouched to keep a saved key.</div>
-        </details>
-        <div class="field">
-          <label class="field-label" for="octoInterval">Update Interval</label>
-          <input type="number" class="input" id="octoInterval" min="2" max="300" step="1" placeholder="10">
-          <div class="field-hint">How often the device asks OctoPrint for new job and temperature values, in seconds (2 to 300).</div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title"><span class="card-title-label">Appearance</span></div>
-        <div class="field">
-          <label class="field-label" for="octoLayout">Page Layout</label>
-          <select class="input" id="octoLayout">
-            <option value="0">Grid</option>
-            <option value="2">Immersive image</option>
-            <option value="5">Floating overlay</option>
-            <option value="6">Letterbox</option>
-          </select>
-          <div class="field-hint">Changes the look of the printer page on the device. Grid arranges the numbers in cards. Immersive image fills the screen with the picture and lays the readings over it. Floating overlay fills the screen with the picture and floats the readings directly on it, with no panels. Letterbox shows the picture between a solid top bar and a solid bottom bar, with no text over the picture. The same values are shown either way.</div>
-        </div>
-        <div class="field">
-          <div class="toggle-row">
-            <span class="toggle-label">Show readings over picture</span>
-            <!-- No inline handler: the delegated input/change listener on .content
-                 runs checkDirty() + the debounced live apply for this control. -->
-            <label class="toggle"><input type="checkbox" id="octoOverlayVisible" checked><span class="toggle-track"></span></label>
+        <div class="card">
+          <div class="card-title"><span class="card-title-label">Connection <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+          <div class="help-popover"><div class="help-popover-title">Connection</div><p>OctoPrint Address is the address of your OctoPrint server, the same one you open in a browser. Include http:// or https:// and a port number if you use one.</p><p>Authenticate opens OctoPrint in a new tab. Sign in if asked and press Allow. The key is stored on this display as soon as you approve, and the address above is saved when you press Authenticate.</p><p>If that does not work for your OctoPrint, create a key yourself under Settings, Application Keys, and paste it into the manual field. Leave the manual field untouched to keep a saved key.</p><p>Update Interval sets how often the device asks OctoPrint for new job and temperature values, from 2 to 300 seconds.</p></div>
+          <div class="field">
+            <label class="field-label" for="octoUrl">OctoPrint Address</label>
+            <input type="text" class="input" id="octoUrl" maxlength="127" placeholder="http://octopi.lan">
+            <div class="field-hint">The address you open in a browser, including http:// or https:// and any port.</div>
           </div>
-          <div class="field-hint">Off hides the status, temperatures and progress readings so only the picture shows. Tapping the printer page on the device shows or hides them temporarily; this setting is what it returns to. Not used by the Grid layout.</div>
+          <!-- Action controls, not settings: data-no-dirty keeps anything in here
+               from raising the save bar or firing a live apply. -->
+          <div class="field" data-no-dirty>
+            <button type="button" class="btn btn-outline full" id="octoKeyBtn" onclick="octoRequestKey()">Authenticate</button>
+            <div class="field-hint" id="octoKeyStatus" style="margin-top:8px"></div>
+            <div class="field-hint">Opens OctoPrint in a new tab to allow this display; the key is stored here on approval.</div>
+          </div>
+          <details class="field">
+            <summary class="field-hint" style="cursor:pointer;margin-top:0">Enter an API key manually instead</summary>
+            <label class="field-label" for="octoApiKey" style="margin-top:8px">API Key</label>
+            <!-- A saved key comes back from the device as a row of asterisks, never
+                 the real value. Selecting the field on focus means the first
+                 keystroke replaces those asterisks instead of appending to them,
+                 which would otherwise be stored as the key. -->
+            <input type="password" class="input" id="octoApiKey" maxlength="63" placeholder="paste key only" autocomplete="off" onfocus="this.select()">
+            <div class="field-hint">A key from OctoPrint Settings, Application Keys; leave untouched to keep a saved key.</div>
+          </details>
+          <div class="field">
+            <label class="field-label" for="octoInterval">Update Interval</label>
+            <input type="number" class="input" id="octoInterval" min="2" max="300" step="1" placeholder="10">
+            <div class="field-hint">How often OctoPrint is asked for new values, in seconds (2 to 300).</div>
+          </div>
         </div>
-        <div class="field">
-          <label class="field-label" for="octoImageSource">Image</label>
-          <select class="input" id="octoImageSource">
-            <option value="0">G-code preview (from slicer)</option>
-            <option value="1">Camera snapshot</option>
-          </select>
-          <div class="field-hint">G-code preview shows the model picture saved inside the sliced file, which needs the PrusaSlicer Thumbnails plugin installed in OctoPrint. Camera snapshot shows a still picture from the OctoPrint webcam.</div>
+
+        <div class="card">
+          <div class="card-title"><span class="card-title-label">Appearance <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+          <div class="help-popover"><div class="help-popover-title">Appearance</div><p>Page Layout changes the look of the OctoPrint page on the device. Grid arranges the numbers in cards. Immersive image fills the screen with the picture and lays the readings over it. Floating overlay fills the screen with the picture and floats the readings directly on it, with no panels. Letterbox shows the picture between a solid top bar and a solid bottom bar, with no text over the picture. The same values are shown either way.</p><p>Show readings over picture off hides the status, temperatures and progress readings so only the picture shows. Tapping the OctoPrint page on the device shows or hides them temporarily; this setting is what it returns to. Not used by the Grid layout.</p></div>
+          <div class="field">
+            <label class="field-label" for="octoLayout">Page Layout</label>
+            <select class="input" id="octoLayout">
+              <option value="0">Grid</option>
+              <option value="2">Immersive image</option>
+              <option value="5">Floating overlay</option>
+              <option value="6">Letterbox</option>
+            </select>
+            <div class="field-hint">How the OctoPrint page arranges the picture and readings; the same values are shown either way.</div>
+          </div>
+          <div class="field">
+            <div class="toggle-row">
+              <span class="toggle-label">Show readings over picture</span>
+              <!-- No inline handler: the delegated input/change listener on .content
+                   runs checkDirty() + the debounced live apply for this control. -->
+              <label class="toggle"><input type="checkbox" id="octoOverlayVisible" checked><span class="toggle-track"></span></label>
+            </div>
+            <div class="field-hint">Off shows only the picture; a tap on the device toggles it temporarily.</div>
+          </div>
         </div>
-        <div class="field">
-          <label class="field-label" for="octoSnapshotUrl">Camera Snapshot Address <span style="color:var(--text-hint);font-weight:400">(optional)</span></label>
-          <input type="text" class="input" id="octoSnapshotUrl" maxlength="127" placeholder="http://octopi.lan/webcam/?action=snapshot">
-          <div class="field-hint">Leave blank to use the standard OctoPrint webcam address. Fill this in only if your camera is somewhere else, and enter the full address starting with http:// or https://.</div>
+
+        <div class="card">
+          <div class="card-title"><span class="card-title-label">Picture <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+          <div class="help-popover"><div class="help-popover-title">Picture</div><p>Image picks what is shown alongside the numbers. G-code preview shows the model picture saved inside the sliced file, which needs the PrusaSlicer Thumbnails plugin installed in OctoPrint. Camera snapshot shows a still picture from the OctoPrint webcam.</p><p>Camera Snapshot Address can be left blank to use the standard OctoPrint webcam address. Fill it in only if your camera is somewhere else, and enter the full address starting with http:// or https://.</p></div>
+          <div class="field">
+            <label class="field-label" for="octoImageSource">Image</label>
+            <select class="input" id="octoImageSource">
+              <option value="0">G-code preview (from slicer)</option>
+              <option value="1">Camera snapshot</option>
+            </select>
+            <div class="field-hint">G-code preview needs the PrusaSlicer Thumbnails plugin; Camera snapshot is a still from the OctoPrint webcam.</div>
+          </div>
+          <div class="field">
+            <label class="field-label" for="octoSnapshotUrl">Camera Snapshot Address <span style="color:var(--text-hint);font-weight:400">(optional)</span></label>
+            <input type="text" class="input" id="octoSnapshotUrl" maxlength="127" placeholder="http://octopi.lan/webcam/?action=snapshot">
+            <div class="field-hint">Blank uses the standard OctoPrint webcam address; fill in only if the camera is elsewhere.</div>
+          </div>
         </div>
       </div>
 

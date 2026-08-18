@@ -416,6 +416,56 @@ int main(void)
               "wifi_max_tx_dbm: in-range 13 survives the table (validate_config's whitelist kills it)");
     }
 
+    /* ── 9. radar_crop: BOTH wire shapes accepted ────────────────────────────
+     * The field is an INT row (uint8_t) so that a stored 2 from the retired
+     * three-mode range clamps to 1 rather than resetting to 0. But the
+     * previously shipped config_ui.html posted it as a JSON BOOL, and a browser
+     * tab holding that cached page keeps doing so for the whole upgrade window.
+     * Section 7 above pins "wrong type is ignored" as the rule for every other
+     * row; this is the deliberate exception, so it gets pinned by name.
+     *
+     * Sentinels are chosen so "ignored" and "parsed" can never look alike: the
+     * starting value is always the OPPOSITE of what the payload asks for. */
+    printf("9. radar_crop: accepts a JSON number AND a JSON bool\n");
+    {
+        static const struct { int is_bool; int bool_val; int num_val; int want; const char *what; } cases[] = {
+            { 1, 1, 0, 1, "bool true -> 1 (cached old page, crop ON)" },
+            { 1, 0, 0, 0, "bool false -> 0 (cached old page, crop OFF)" },
+            { 0, 0, 1, 1, "number 1 -> 1 (current page)" },
+            { 0, 0, 0, 0, "number 0 -> 0 (current page)" },
+            { 0, 0, 2, 1, "number 2 (retired fill mode) clamps to 1, never resets to 0" },
+        };
+        for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+            app_config_t cfg;
+            memset(&cfg, 0, sizeof(cfg));
+            settings_defaults_apply(&cfg);
+            cfg.radar_crop = (uint8_t)(cases[i].want ? 0 : 1);   /* opposite of the expected result */
+
+            cJSON *root = cJSON_CreateObject();
+            if (cases[i].is_bool) {
+                cJSON_AddBoolToObject(root, "radar_crop", cases[i].bool_val);
+            } else {
+                cJSON_AddNumberToObject(root, "radar_crop", cases[i].num_val);
+            }
+            settings_json_parse(root, &cfg);
+            cJSON_Delete(root);
+
+            CHECK(cfg.radar_crop == (uint8_t)cases[i].want, "radar_crop: %s", cases[i].what);
+        }
+
+        /* Still NOT a free-for-all: a shape that is neither must leave the
+         * stored value alone, exactly like every other row. */
+        app_config_t cfg;
+        memset(&cfg, 0, sizeof(cfg));
+        settings_defaults_apply(&cfg);
+        cfg.radar_crop = 1;
+        cJSON *root = cJSON_CreateObject();
+        cJSON_AddStringToObject(root, "radar_crop", "1");
+        settings_json_parse(root, &cfg);
+        cJSON_Delete(root);
+        CHECK(cfg.radar_crop == 1, "radar_crop: a string is still ignored (value untouched)");
+    }
+
     printf("\n%s: %d failure(s)\n", fails == 0 ? "PASS" : "FAIL", fails);
     return fails == 0 ? 0 : 1;
 }

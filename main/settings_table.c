@@ -214,6 +214,28 @@ void settings_json_serialize(const app_config_t *cfg, cJSON *root) {
 void settings_json_parse(const cJSON *root, app_config_t *cfg) {
     SETTINGS_TABLE(PARSE_BOOL, PARSE_INT, PARSE_INT_RESET, PARSE_FLT, PARSE_FLT_RESET,
                    PARSE_ENUM, PARSE_STR, PARSE_STR_RESET)
+
+    /* radar_crop: one field, two accepted wire shapes.
+     *
+     * It is an INT row (uint8_t, 0/1) because a device can still hold the
+     * retired middle value 2 and a true clamp has to map that to 1 rather than
+     * reset it to 0. PARSE_INT therefore takes numbers only — but the
+     * PREVIOUSLY SHIPPED config_ui.html posted this field as a JSON bool
+     * (`!!checked`). A browser tab still holding that cached page keeps posting
+     * a bool for the whole upgrade window, and without this the crop toggle
+     * silently does nothing until the user hard-reloads.
+     *
+     * Handled here rather than by loosening PARSE_INT: accepting bools for
+     * EVERY int row would silently turn `true` into 1 for brightness, ports and
+     * intervals, where it means nothing. Bounded exception, one field, and it
+     * lands inside the 0..1 range the row clamps to, so no clamp re-run is
+     * needed. The image-page POST handler (web_handlers_image_display.c) accepts
+     * the same two shapes for the same reason; both entry points must, because
+     * the main Save posts here and the per-page Apply posts there.
+     *
+     * Delete when no cached pre-radar page can plausibly still be open. */
+    const cJSON *rcrop = cJSON_GetObjectItem(root, "radar_crop");
+    if (cJSON_IsBool(rcrop)) cfg->radar_crop = cJSON_IsTrue(rcrop) ? 1 : 0;
 }
 
 #undef PARSE_BOOL

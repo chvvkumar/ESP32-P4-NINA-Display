@@ -1037,7 +1037,8 @@
         <button class="tab-btn" data-tab="image-moon">Moon</button>
         <button class="tab-btn" data-tab="image-solar">Solar</button>
         <button class="tab-btn" data-tab="image-custom">Custom URL</button>
-        <button class="tab-btn" data-tab="octoprint">3D Printer</button>
+        <button class="tab-btn" data-tab="image-radar">Radar</button>
+        <button class="tab-btn" data-tab="octoprint">OctoPrint</button>
       </div>
       <div class="tab-group" data-section="device">
         <button class="tab-btn" data-tab="display">Display</button>
@@ -1093,8 +1094,9 @@
     <div id="tab-image-moon" class="tab-panel"></div>
     <div id="tab-image-solar" class="tab-panel"></div>
     <div id="tab-image-custom" class="tab-panel"></div>
+    <div id="tab-image-radar" class="tab-panel"></div>
 
-    <!-- ==================== TAB: 3D PRINTER (OCTOPRINT) ==================== -->
+    <!-- ==================== TAB: OCTOPRINT ==================== -->
     <!-- Markup extracted to main/fragment_octoprint.html; lazily fetched by
          ensureTabLoaded() via GET /ui/fragment?tab=octoprint and injected here. -->
     <div id="tab-octoprint" class="tab-panel"></div>
@@ -1402,8 +1404,9 @@
       var alreadyWired=c.dataset.wired==='1';
       c.innerHTML='';
       /* [id, label, stop value]. Stop values are frozen page_ref ids: 0..11
-         anchored block, plus appended JSON (24), Home Assistant (25) and
-         OctoPrint (26) — keep in sync with ARP_IDX_* in app_config.h. */
+         anchored block, plus appended JSON (24), Home Assistant (25),
+         OctoPrint (26) and Weather Radar (27) — keep in sync with ARP_IDX_*
+         in app_config.h. */
       var items=[
         ['arp_summary','Summary',0],
         ['arp_nina1','NINA 1',1],
@@ -1415,11 +1418,12 @@
         ['arp_clock','Clock',7],
         ['arp_json','JSON Display',24],
         ['arp_ha','Home Assistant',25],
-        ['arp_octoprint','3D Printer',26],
+        ['arp_octoprint','OctoPrint',26],
         ['arp_img_goes','Img: GOES',8],
         ['arp_img_moon','Img: Moon',9],
         ['arp_img_solar','Img: Solar',10],
-        ['arp_img_custom','Img: Custom',11]
+        ['arp_img_custom','Img: Custom',11],
+        ['arp_img_radar','Img: Radar',27]
       ];
       items.forEach(function(it){
         var idx=it[2];
@@ -1582,7 +1586,7 @@
        so the initial switchTab() call at boot -- which shows whichever tab
        was last active -- transparently fetches that tab's fragment first; no
        separate boot-time special case is needed for the default tab. */
-    const TAB_ORDER=['nodes','allsky','json','ha','clock','spotify','image-goes','image-moon','image-solar','image-custom','octoprint','display','behavior','voice-clips','system','logs','backup','api'];
+    const TAB_ORDER=['nodes','allsky','json','ha','clock','spotify','image-goes','image-moon','image-solar','image-custom','image-radar','octoprint','display','behavior','voice-clips','system','logs','backup','api'];
     const LAZY_TABS=new Set(TAB_ORDER);
     const loadedTabs=new Set(TAB_ORDER.filter(n=>!LAZY_TABS.has(n)));
 
@@ -1768,7 +1772,7 @@
        highlights and row 2 shows the matching tab group. _lastUsedTab remembers
        the tab last visited in each section (in-memory) so a section click lands
        on a sensible default; switchTab() keeps it seeded as tabs activate. */
-    const TAB_GROUP = { nodes:'pages', allsky:'pages', json:'pages', ha:'pages', clock:'pages', spotify:'pages', 'image-goes':'pages', 'image-moon':'pages', 'image-solar':'pages', 'image-custom':'pages', octoprint:'pages', display:'device', behavior:'device', 'voice-clips':'device', system:'device', logs:'tools', backup:'tools', api:'tools' };
+    const TAB_GROUP = { nodes:'pages', allsky:'pages', json:'pages', ha:'pages', clock:'pages', spotify:'pages', 'image-goes':'pages', 'image-moon':'pages', 'image-solar':'pages', 'image-custom':'pages', 'image-radar':'pages', octoprint:'pages', display:'device', behavior:'device', 'voice-clips':'device', system:'device', logs:'tools', backup:'tools', api:'tools' };
     var _lastUsedTab={};
     function highlightGroup(name){
       var sec=TAB_GROUP[name];
@@ -2081,9 +2085,9 @@
     /* === Rotation slideshow list === */
     /* Single ordered slideshow list: membership == order.
        data-arp-idx equals the slideshow stop id (0..11, 24=JSON, 25=HA,
-       26=OctoPrint).
+       26=OctoPrint, 27=Radar).
        Saved array holds the indices of CHECKED pills in on-screen order,
-       padded to 16 slots with 0xFF (255 = unused). */
+       padded to 24 slots with 0xFF (255 = unused). */
     function getRotateOrder(){
       var pills=$('arp-container').querySelectorAll('.pn-pill[data-arp-idx]');
       var order=[];
@@ -2091,8 +2095,8 @@
         var cb=p.querySelector('input[type="checkbox"]');
         if(cb&&cb.checked) order.push(parseInt(p.getAttribute('data-arp-idx')));
       });
-      while(order.length<16/* keep in sync with ARP_ORDER_CAPACITY in app_config.h */) order.push(255);
-      return order.slice(0,16/* keep in sync with ARP_ORDER_CAPACITY in app_config.h */);
+      while(order.length<24/* keep in sync with ARP_ORDER_CAPACITY in app_config.h (24 since v63) */) order.push(255);
+      return order.slice(0,24/* keep in sync with ARP_ORDER_CAPACITY in app_config.h (24 since v63) */);
     }
 
     function setRotateOrder(orderArr){
@@ -2102,9 +2106,9 @@
       var pillMap={};
       pills.forEach(function(p){ pillMap[p.getAttribute('data-arp-idx')]=p; });
       /* Members (in order) = valid stop ids (0..11, 24=JSON, 25=HA,
-         26=OctoPrint) that are not the 0xFF/255 sentinel. Keep in sync with
-         ARP_STOP_IS_VALID in app_config.h. */
-      var members=orderArr.map(function(v){return parseInt(v);}).filter(function(v){return !isNaN(v)&&(v>=0&&v<12||v===24||v===25||v===26);});
+         26=OctoPrint, 27=Radar) that are not the 0xFF/255 sentinel. Keep in
+         sync with ARP_STOP_IS_VALID in app_config.h. */
+      var members=orderArr.map(function(v){return parseInt(v);}).filter(function(v){return !isNaN(v)&&(v>=0&&v<12||v===24||v===25||v===26||v===27);});
       /* Reorder members to the front in saved order, set their checkbox on. */
       members.forEach(function(idx){
         var p=pillMap[idx];
@@ -2256,6 +2260,22 @@
       data.custom_vflip=$('customVflip').checked?1:0;
       data.custom_hflip=$('customHflip').checked?1:0;
       data.custom_update_interval_s=parseInt($('customInterval').value,10)||60;
+    }
+    function collectTab_image_radar(data){
+      data.radar_enabled=!!$('radar_enabled').checked;
+      data.radar_show_overlay=!!$('radar_show_overlay').checked;
+      /* Crop on/off, but numeric on the wire (uint8 field): the device parses
+         it with a number check and ignores a JSON bool. */
+      data.radar_crop=$('radar_crop').checked?1:0;
+      /* Plain on/off toggle; the device key is a JSON bool (JSON_TO_BOOL). */
+      data.radar_dark_mode=!!$('radar_dark_mode').checked;
+      /* 0 standard, 1 state lines, 2 state + county lines (uint8 on the device). */
+      data.radar_map_style=parseInt($('radar_map_style').value,10)||0;
+      /* Empty value = the "Automatic" option; the device then picks the nearest
+         site itself, so send the empty string rather than dropping the key. */
+      data.radar_token=$('radar_token').value;
+      data.radar_update_interval_s=parseInt($('radar_update_interval_s').value,10)||900;
+      data.radar_frames=parseInt($('radar_frames').value,10)||10;
     }
 
     function collectTab_octoprint(data){
@@ -2427,6 +2447,7 @@
       'image-moon': collectTab_image_moon,
       'image-solar': collectTab_image_solar,
       'image-custom': collectTab_image_custom,
+      'image-radar': collectTab_image_radar,
       octoprint: collectTab_octoprint,
       display: collectTab_display,
       behavior: collectTab_behavior,
@@ -2665,6 +2686,36 @@
       if($('customInterval')) $('customInterval').value=String(data.custom_update_interval_s||60);
       updateImagePageEnabledUI('image-custom');
     }
+    function populateTab_image_radar(data){
+      if($('radar_enabled')) $('radar_enabled').checked=!!data.radar_enabled;
+      if($('radar_show_overlay')) $('radar_show_overlay').checked=!!data.radar_show_overlay;
+      /* Crop is a number on the wire, but a device that still holds the retired
+         middle value (2) must show as cropped, so any value >= 1 is checked. A
+         JSON bool from older firmware is coerced the same way. */
+      if($('radar_crop')) $('radar_crop').checked=(data.radar_crop===true)||((parseInt(data.radar_crop,10)||0)>=1);
+      /* Dark is the default, so only an explicit false clears the toggle -- a
+         missing key (older firmware) must not flip the page to the light map. */
+      if($('radar_dark_mode')) $('radar_dark_mode').checked=(data.radar_dark_mode!==false);
+      /* Missing key (older firmware) or anything out of range shows the default,
+         State lines only; an explicit 0 shows Standard. */
+      if($('radar_map_style')){
+        var rms=(data.radar_map_style===undefined||data.radar_map_style===null)?1:(parseInt(data.radar_map_style,10)||0);
+        $('radar_map_style').value=String((rms>=0&&rms<=2)?rms:1);
+      }
+      radarMapStyleSync();
+      /* '' is the Automatic option and a legitimate stored value, so keep it
+         (|| '' only covers a missing key). An area saved by a newer firmware
+         than this page knows about would not match any option; fall back to
+         Automatic rather than leaving the select blank. */
+      if($('radar_token')){
+        var rt=data.radar_token||'';
+        $('radar_token').value=rt;
+        if($('radar_token').selectedIndex<0) $('radar_token').value='';
+      }
+      if($('radar_update_interval_s')) $('radar_update_interval_s').value=String(data.radar_update_interval_s||900);
+      if($('radar_frames')) $('radar_frames').value=String(data.radar_frames||10);
+      updateImagePageEnabledUI('image-radar');
+    }
 
     function populateTab_octoprint(data){
       if($('octoprint_enabled')) $('octoprint_enabled').checked=!!data.octoprint_enabled;
@@ -2866,6 +2917,7 @@
       'image-moon': populateTab_image_moon,
       'image-solar': populateTab_image_solar,
       'image-custom': populateTab_image_custom,
+      'image-radar': populateTab_image_radar,
       octoprint: populateTab_octoprint,
       display: populateTab_display,
       behavior: populateTab_behavior,
@@ -4388,7 +4440,8 @@
       'image-goes':   {en:'goes_enabled',   fields:'goesFields',   src:0},
       'image-moon':   {en:'moon_enabled',   fields:'moonFields',   src:1},
       'image-solar':  {en:'solar_enabled',  fields:'solarFields',  src:2},
-      'image-custom': {en:'custom_enabled', fields:'customFields', src:3}
+      'image-custom': {en:'custom_enabled', fields:'customFields', src:3},
+      'image-radar':  {en:'radar_enabled',  fields:'radarFields',  src:4}
     };
 
     function updateImagePageEnabledUI(name){
@@ -4396,6 +4449,21 @@
       var on=$(t.en).checked;
       if($(t.fields)) $(t.fields).style.display=on?'':'none';
       updatePageSelectOptions();
+    }
+
+    /* Dark mode and Crop only affect the standard radar map picture; the two
+       line-only styles have neither a banner to trim nor a light background to
+       darken, so grey those controls out while such a style is selected. */
+    function radarMapStyleSync(){
+      var sel=$('radar_map_style'); if(!sel) return;
+      var std=(parseInt(sel.value,10)||0)===0;
+      var wrap=$('radarStdOnly');
+      if(wrap){
+        wrap.style.opacity=std?'':'0.5';
+        wrap.title=std?'':'Applies to the standard map only';
+      }
+      if($('radar_dark_mode')) $('radar_dark_mode').disabled=!std;
+      if($('radar_crop')) $('radar_crop').disabled=!std;
     }
 
     /* weather_lat/weather_lon are System-tab fields (Location card) reused as

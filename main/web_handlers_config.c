@@ -57,6 +57,8 @@ extern const uint8_t fragment_image_solar_html_start[]  asm("_binary_fragment_im
 extern const uint8_t fragment_image_solar_html_end[]    asm("_binary_fragment_image_solar_html_end");
 extern const uint8_t fragment_image_custom_html_start[] asm("_binary_fragment_image_custom_html_start");
 extern const uint8_t fragment_image_custom_html_end[]   asm("_binary_fragment_image_custom_html_end");
+extern const uint8_t fragment_image_radar_html_start[]  asm("_binary_fragment_image_radar_html_start");
+extern const uint8_t fragment_image_radar_html_end[]    asm("_binary_fragment_image_radar_html_end");
 extern const uint8_t fragment_octoprint_html_start[] asm("_binary_fragment_octoprint_html_start");
 extern const uint8_t fragment_octoprint_html_end[]   asm("_binary_fragment_octoprint_html_end");
 
@@ -110,6 +112,8 @@ extern const uint8_t fragment_image_solar_html_gz_start[]  asm("_binary_fragment
 extern const uint8_t fragment_image_solar_html_gz_end[]    asm("_binary_fragment_image_solar_html_gz_end");
 extern const uint8_t fragment_image_custom_html_gz_start[] asm("_binary_fragment_image_custom_html_gz_start");
 extern const uint8_t fragment_image_custom_html_gz_end[]   asm("_binary_fragment_image_custom_html_gz_end");
+extern const uint8_t fragment_image_radar_html_gz_start[]  asm("_binary_fragment_image_radar_html_gz_start");
+extern const uint8_t fragment_image_radar_html_gz_end[]    asm("_binary_fragment_image_radar_html_gz_end");
 extern const uint8_t fragment_octoprint_html_gz_start[] asm("_binary_fragment_octoprint_html_gz_start");
 extern const uint8_t fragment_octoprint_html_gz_end[]   asm("_binary_fragment_octoprint_html_gz_end");
 extern const uint8_t fragment_nodes_html_gz_start[] asm("_binary_fragment_nodes_html_gz_start");
@@ -283,6 +287,8 @@ static const ui_fragment_entry_t s_ui_fragments[] = {
                        fragment_image_solar_html_gz_start,   fragment_image_solar_html_gz_end },
     { "image-custom",  fragment_image_custom_html_start,  fragment_image_custom_html_end,
                        fragment_image_custom_html_gz_start,  fragment_image_custom_html_gz_end },
+    { "image-radar",   fragment_image_radar_html_start,   fragment_image_radar_html_end,
+                       fragment_image_radar_html_gz_start,   fragment_image_radar_html_gz_end },
     { "octoprint",     fragment_octoprint_html_start,     fragment_octoprint_html_end,
                        fragment_octoprint_html_gz_start,     fragment_octoprint_html_gz_end },
     { "nodes",         fragment_nodes_html_start,         fragment_nodes_html_end,
@@ -567,7 +573,7 @@ static const backup_field_t s_backup_fields[] = {
      * and parse_config_from_json() reads them with no hand-written arm. Registered
      * here for the diff, category grouping, sensitive split, and unknown-field
      * detection — and, for the API key, to drive strip_masked_secrets(). */
-    {"octoprint_enabled",           "3D Printer Page",        "OctoPrint", false, false},
+    {"octoprint_enabled",           "OctoPrint Page",         "OctoPrint", false, false},
     {"octoprint_url",               "OctoPrint URL",          "OctoPrint", false, false},
     {"octoprint_api_key",           "OctoPrint API Key",      "OctoPrint", true,  false, true},
     {"octoprint_update_interval_s", "OctoPrint Poll Interval","OctoPrint", false, false},
@@ -607,45 +613,60 @@ static const backup_field_t s_backup_fields[] = {
     {"spotify_scroll_text",       "Scroll Text",          "Spotify", false, false},
     {"spotify_overlay_visible",   "Show Overlay",         "Spotify", false, false},
 
-    /* Image Display */
+    /* Image pages: one category per page, matching the config tab names */
     /* Image pages (v61 split): one enable/overlay/crop/interval per page */
-    {"goes_enabled",               "GOES Page Enabled",    "Image Display", false, false},
-    {"goes_show_overlay",          "GOES Show Overlay",    "Image Display", false, false},
-    {"goes_crop",                  "GOES Crop/Fill",       "Image Display", false, false},
-    {"moon_enabled",               "Moon Page Enabled",    "Image Display", false, false},
-    {"moon_show_overlay",          "Moon Show Overlay",    "Image Display", false, false},
-    {"moon_update_interval_s",     "Moon Update Interval", "Image Display", false, false},
-    {"solar_enabled",              "Solar Page Enabled",   "Image Display", false, false},
-    {"solar_show_overlay",         "Solar Show Overlay",   "Image Display", false, false},
-    {"solar_crop",                 "Solar Crop/Fill",      "Image Display", false, false},
-    {"solar_update_interval_s",    "Solar Update Interval","Image Display", false, false},
-    {"custom_enabled",             "Custom Page Enabled",  "Image Display", false, false},
-    {"custom_show_overlay",        "Custom Show Overlay",  "Image Display", false, false},
-    {"custom_crop",                "Custom Crop/Fill",     "Image Display", false, false},
-    {"goes_region",                "GOES Region",          "Image Display", false, false},
-    {"goes_update_interval_s",     "GOES Update Interval", "Image Display", false, false},
-    {"custom_image_url",           "Custom Image URL",     "Image Display", false, false},
-    {"custom_orientation",         "Custom Orientation",   "Image Display", false, false},
-    {"custom_update_interval_s",   "Custom Update Interval","Image Display", false, false},
-    {"moon_bg_style",              "Moon Background Style", "Image Display", false, false},
-    {"moon_lat",                   "Moon Latitude",        "Image Display", false, false},
-    {"moon_lon",                   "Moon Longitude",       "Image Display", false, false},
-    {"solar_band",                 "Solar Band",           "Image Display", false, false},
-    {"moon_drag_light_mode",       "Moon Drag Lighting",   "Image Display", false, false},
-    {"goes_vflip",                 "GOES Flip Vertical",   "Image Display", false, false},
-    {"goes_hflip",                 "GOES Flip Horizontal", "Image Display", false, false},
-    {"solar_vflip",                "Solar Flip Vertical",  "Image Display", false, false},
-    {"solar_hflip",                "Solar Flip Horizontal","Image Display", false, false},
-    {"custom_vflip",               "Custom Flip Vertical", "Image Display", false, false},
-    {"custom_hflip",               "Custom Flip Horizontal","Image Display", false, false},
-    {"moon_flip_u",                "Moon Flip U",          "Image Display", false, false},
-    {"moon_flip_v",                "Moon Flip V",          "Image Display", false, false},
-    {"moon_roll_offset",           "Moon Roll Offset",     "Image Display", false, false},
-    {"moon_yaw_offset",            "Moon Yaw Offset",      "Image Display", false, false},
-    {"moon_pitch_offset",          "Moon Pitch Offset",    "Image Display", false, false},
-    {"moon_north_up",              "Moon North-Up",        "Image Display", false, false},
-    {"moon_spin_mode",             "Moon Spin Mode",       "Image Display", false, false},
-    {"moon_spin_return_s",         "Moon Spin Return (s)", "Image Display", false, false},
+    {"goes_enabled",               "GOES Page Enabled",    "GOES", false, false},
+    {"goes_show_overlay",          "GOES Show Overlay",    "GOES", false, false},
+    {"goes_crop",                  "GOES Crop/Fill",       "GOES", false, false},
+    {"moon_enabled",               "Moon Page Enabled",    "Moon", false, false},
+    {"moon_show_overlay",          "Moon Show Overlay",    "Moon", false, false},
+    {"moon_update_interval_s",     "Moon Update Interval", "Moon", false, false},
+    {"solar_enabled",              "Solar Page Enabled",   "Solar", false, false},
+    {"solar_show_overlay",         "Solar Show Overlay",   "Solar", false, false},
+    {"solar_crop",                 "Solar Crop/Fill",      "Solar", false, false},
+    {"solar_update_interval_s",    "Solar Update Interval","Solar", false, false},
+    {"custom_enabled",             "Custom Page Enabled",  "Custom URL", false, false},
+    {"custom_show_overlay",        "Custom Show Overlay",  "Custom URL", false, false},
+    {"custom_crop",                "Custom Crop/Fill",     "Custom URL", false, false},
+    /* Weather Radar page (v63, plus radar_dark_mode at v64 and radar_map_style at v65).
+     * All eight are SETTINGS_TABLE rows, so
+     * serialize_config_to_json() emits them and parse_config_from_json() reads
+     * them with no hand-written arm; registered here so the diff, category
+     * grouping, sensitive split and unknown-field detection treat them like any
+     * other field (without this, every restore reports them as coming from a
+     * newer firmware). */
+    {"radar_enabled",              "Radar Page Enabled",   "Radar", false, false},
+    {"radar_show_overlay",         "Radar Show Overlay",   "Radar", false, false},
+    {"radar_crop",                 "Radar Crop",           "Radar", false, false},
+    {"radar_token",                "Radar Area",           "Radar", false, false},
+    {"radar_update_interval_s",    "Radar Update Interval","Radar", false, false},
+    {"radar_frames",               "Radar Animation Length","Radar", false, false},
+    {"radar_dark_mode",            "Radar Map Appearance", "Radar", false, false},
+    {"radar_map_style",            "Radar Map Style",      "Radar", false, false},
+    {"goes_region",                "GOES Region",          "GOES", false, false},
+    {"goes_update_interval_s",     "GOES Update Interval", "GOES", false, false},
+    {"custom_image_url",           "Custom Image URL",     "Custom URL", false, false},
+    {"custom_orientation",         "Custom Orientation",   "Custom URL", false, false},
+    {"custom_update_interval_s",   "Custom Update Interval","Custom URL", false, false},
+    {"moon_bg_style",              "Moon Background Style", "Moon", false, false},
+    {"moon_lat",                   "Moon Latitude",        "Moon", false, false},
+    {"moon_lon",                   "Moon Longitude",       "Moon", false, false},
+    {"solar_band",                 "Solar Band",           "Solar", false, false},
+    {"moon_drag_light_mode",       "Moon Drag Lighting",   "Moon", false, false},
+    {"goes_vflip",                 "GOES Flip Vertical",   "GOES", false, false},
+    {"goes_hflip",                 "GOES Flip Horizontal", "GOES", false, false},
+    {"solar_vflip",                "Solar Flip Vertical",  "Solar", false, false},
+    {"solar_hflip",                "Solar Flip Horizontal","Solar", false, false},
+    {"custom_vflip",               "Custom Flip Vertical", "Custom URL", false, false},
+    {"custom_hflip",               "Custom Flip Horizontal","Custom URL", false, false},
+    {"moon_flip_u",                "Moon Flip U",          "Moon", false, false},
+    {"moon_flip_v",                "Moon Flip V",          "Moon", false, false},
+    {"moon_roll_offset",           "Moon Roll Offset",     "Moon", false, false},
+    {"moon_yaw_offset",            "Moon Yaw Offset",      "Moon", false, false},
+    {"moon_pitch_offset",          "Moon Pitch Offset",    "Moon", false, false},
+    {"moon_north_up",              "Moon North-Up",        "Moon", false, false},
+    {"moon_spin_mode",             "Moon Spin Mode",       "Moon", false, false},
+    {"moon_spin_return_s",         "Moon Spin Return (s)", "Moon", false, false},
 
     /* MQTT (non-sensitive) */
     {"mqtt_enabled",       "MQTT Enabled",       "MQTT", false, false},
@@ -1030,9 +1051,9 @@ static cJSON *build_restore_preview(const cJSON *backup_root, const cJSON *curre
     bool restore_blocked = false;
 
     /* Track which categories have changes */
-    const char *categories[] = {"Display", "Behavior", "Nodes & Data", "System", "AllSky", "Spotify", "MQTT", "OctoPrint"};
-    int cat_counts[8] = {0};
-    int num_categories = 8;
+    const char *categories[] = {"Display", "Behavior", "Nodes & Data", "System", "AllSky", "Spotify", "MQTT", "OctoPrint", "GOES", "Moon", "Solar", "Custom URL", "Radar"};
+    int cat_counts[13] = {0};
+    int num_categories = 13;
 
     for (const backup_field_t *f = s_backup_fields; f->json_key; f++) {
         /* Determine which backup section this field comes from */
@@ -1270,6 +1291,24 @@ static app_config_t *parse_config_from_json(cJSON *root)
      * page targets) keeps its hand-written parse below, in original relative
      * order. */
     settings_json_parse(root, cfg);
+
+    /* radar_token is a SETTINGS_TABLE STR row, so the main Save writes it here
+     * as well as the radar tab's own POST. It is pasted straight into the NWS
+     * image URL, so this path needs the same charset gate as the other two
+     * (validate_config() on load, radar_token_is_valid() in the image handler):
+     * fold lowercase up, and treat anything outside [A-Z0-9] as junk -> empty,
+     * which means "resolve the nearest site at fetch time". */
+    for (int i = 0; cfg->radar_token[i] != '\0'; i++) {
+        char ch = cfg->radar_token[i];
+        if (ch >= 'a' && ch <= 'z') {
+            ch = (char)(ch - 'a' + 'A');
+            cfg->radar_token[i] = ch;
+        }
+        if (!((ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9'))) {
+            cfg->radar_token[0] = '\0';
+            break;
+        }
+    }
 
     JSON_TO_STRING(root, "url1",           cfg->api_url[0]);
     JSON_TO_STRING(root, "url2",           cfg->api_url[1]);

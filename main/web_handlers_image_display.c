@@ -7,8 +7,29 @@
 #include <string.h>
 
 /**
- * @brief GET /api/image-display-config -- return the config fields of all four
- *        image pages (GOES, Moon, Solar, Custom URL).
+ * @brief Is this a legal NWS radar area token?
+ *
+ * The token is pasted straight into the image URL
+ * (https://radar.weather.gov/ridge/standard/<TOKEN>_0.gif), so it is a trust
+ * boundary even though the web UI only ever sends a value from its dropdown:
+ * anything outside [A-Za-z0-9] could redirect the fetch to another path.
+ * An empty token is legal and means "pick the nearest site automatically".
+ */
+static bool radar_token_is_valid(const char *tok)
+{
+    for (const char *p = tok; *p != '\0'; p++) {
+        bool alnum = (*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') ||
+                     (*p >= '0' && *p <= '9');
+        if (!alnum) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/**
+ * @brief GET /api/image-display-config -- return the config fields of all five
+ *        image pages (GOES, Moon, Solar, Custom URL, Radar).
  */
 esp_err_t image_display_config_get_handler(httpd_req_t *req)
 {
@@ -24,15 +45,30 @@ esp_err_t image_display_config_get_handler(httpd_req_t *req)
     cJSON_AddBoolToObject(root, "moon_enabled",         cfg->moon_enabled);
     cJSON_AddBoolToObject(root, "solar_enabled",        cfg->solar_enabled);
     cJSON_AddBoolToObject(root, "custom_enabled",       cfg->custom_enabled);
+    cJSON_AddBoolToObject(root, "radar_enabled",        cfg->radar_enabled);
     cJSON_AddBoolToObject(root, "goes_show_overlay",    cfg->goes_show_overlay);
     cJSON_AddBoolToObject(root, "moon_show_overlay",    cfg->moon_show_overlay);
     cJSON_AddBoolToObject(root, "solar_show_overlay",   cfg->solar_show_overlay);
     cJSON_AddBoolToObject(root, "custom_show_overlay",  cfg->custom_show_overlay);
+    cJSON_AddBoolToObject(root, "radar_show_overlay",   cfg->radar_show_overlay);
     cJSON_AddBoolToObject(root, "goes_crop",            cfg->goes_crop);
     cJSON_AddBoolToObject(root, "solar_crop",           cfg->solar_crop);
     cJSON_AddBoolToObject(root, "custom_crop",          cfg->custom_crop);
+    /* 0 = whole image, 1 = cropped to fill the screen. A number, not a bool:
+     * the field is uint8_t and a device may still hold the retired value 2,
+     * which the page and the POST handler both read as crop. */
+    cJSON_AddNumberToObject(root, "radar_crop",         cfg->radar_crop);
+    /* true = dark basemap, false = the NWS picture as published. */
+    cJSON_AddBoolToObject(root, "radar_dark_mode",      cfg->radar_dark_mode);
+    /* 0 = standard map (roads, city names), 1 = state lines only,
+     * 2 = state and county lines. Crop and dark mode apply to style 0 only. */
+    cJSON_AddNumberToObject(root, "radar_map_style",    cfg->radar_map_style);
     cJSON_AddNumberToObject(root, "solar_update_interval_s", cfg->solar_update_interval_s);
     cJSON_AddNumberToObject(root, "moon_update_interval_s",  cfg->moon_update_interval_s);
+    cJSON_AddNumberToObject(root, "radar_update_interval_s", cfg->radar_update_interval_s);
+    cJSON_AddNumberToObject(root, "radar_frames", cfg->radar_frames);
+    /* Empty string = "automatic: nearest site, else the national view". */
+    cJSON_AddStringToObject(root, "radar_token", cfg->radar_token);
 
     cJSON_AddStringToObject(root, "goes_region", cfg->goes_region);
     cJSON_AddNumberToObject(root, "goes_update_interval_s", cfg->goes_update_interval_s);
@@ -90,6 +126,15 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
         cJSON_Delete(root);
         return send_400(req, "custom_image_url too long");
     }
+    if (!validate_string_len(root, "radar_token", sizeof(((app_config_t *)0)->radar_token))) {
+        cJSON_Delete(root);
+        return send_400(req, "radar_token too long");
+    }
+    cJSON *radar_tok_item = cJSON_GetObjectItem(root, "radar_token");
+    if (cJSON_IsString(radar_tok_item) && !radar_token_is_valid(radar_tok_item->valuestring)) {
+        cJSON_Delete(root);
+        return send_400(req, "radar area must be letters and digits only");
+    }
     /* A custom URL, when present, must be an http(s) URL. validate_url_format
      * also accepts mqtt(s) schemes, so additionally require http/https here.
      * An empty string is allowed (clears the URL / "not configured" state). */
@@ -126,13 +171,69 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     JSON_TO_BOOL(root, "moon_enabled",        cur->moon_enabled);
     JSON_TO_BOOL(root, "solar_enabled",       cur->solar_enabled);
     JSON_TO_BOOL(root, "custom_enabled",      cur->custom_enabled);
+    JSON_TO_BOOL(root, "radar_enabled",       cur->radar_enabled);
     JSON_TO_BOOL(root, "goes_show_overlay",   cur->goes_show_overlay);
     JSON_TO_BOOL(root, "moon_show_overlay",   cur->moon_show_overlay);
     JSON_TO_BOOL(root, "solar_show_overlay",  cur->solar_show_overlay);
     JSON_TO_BOOL(root, "custom_show_overlay", cur->custom_show_overlay);
+    JSON_TO_BOOL(root, "radar_show_overlay",  cur->radar_show_overlay);
     JSON_TO_BOOL(root, "goes_crop",           cur->goes_crop);
     JSON_TO_BOOL(root, "solar_crop",          cur->solar_crop);
     JSON_TO_BOOL(root, "custom_crop",         cur->custom_crop);
+    JSON_TO_BOOL(root, "radar_dark_mode",     cur->radar_dark_mode);
+    /* Crop off (0) or on (1). Stored as a uint8_t number, and BOTH wire shapes
+     * are accepted:
+     *   - JSON number: clamped to 0/1 here as well as in validate_config(), so a
+     *     hand-rolled POST cannot park an unknown value in the live config
+     *     between the save and the next load. Anything >= 1 lands on crop, which
+     *     is also where a device still holding the retired middle value (2) from
+     *     NVS resolves.
+     *   - JSON bool: what the previously shipped config_ui.html sent (`!!checked`).
+     *     A browser tab still holding that cached page keeps posting a bool for
+     *     the whole upgrade window; rejecting it made the toggle look dead until
+     *     a hard reload. true -> 1, false -> 0.
+     * Anything else (string, null, absent) leaves the stored value alone. */
+    cJSON *rcrop = cJSON_GetObjectItem(root, "radar_crop");
+    if (cJSON_IsBool(rcrop)) {
+        cur->radar_crop = cJSON_IsTrue(rcrop) ? 1 : 0;
+    } else if (cJSON_IsNumber(rcrop)) {
+        int v = rcrop->valueint;
+        if (v < 0) v = 0;
+        if (v > 1) v = 1;
+        cur->radar_crop = (uint8_t)v;
+    }
+    /* Map style 0..2 (see the GET handler). Same two wire shapes as radar_crop
+     * for the same cached-page reason: an out-of-range number falls back to 1
+     * (state lines only, the default), a bool maps true -> 1 (state lines) /
+     * false -> 0 (an explicit false means the standard picture). Absent or any
+     * other type leaves the stored value alone. The live-apply step below
+     * treats a style change as a new picture and refetches. */
+    cJSON *rstyle = cJSON_GetObjectItem(root, "radar_map_style");
+    if (cJSON_IsBool(rstyle)) {
+        cur->radar_map_style = cJSON_IsTrue(rstyle) ? 1 : 0;
+    } else if (cJSON_IsNumber(rstyle)) {
+        int v = rstyle->valueint;
+        cur->radar_map_style = (v >= 0 && v <= 2) ? (uint8_t)v : 1;
+    }
+    /* Charset and length checked above; empty string clears it back to auto. */
+    JSON_TO_STRING(root, "radar_token", cur->radar_token);
+    cJSON *rinterval = cJSON_GetObjectItem(root, "radar_update_interval_s");
+    if (cJSON_IsNumber(rinterval)) {
+        int v = rinterval->valueint;
+        if (v < 120) v = 120;
+        if (v > 7200) v = 7200;
+        cur->radar_update_interval_s = (uint16_t)v;
+    }
+    /* How many radar pictures the page keeps and animates. Same 1..10 bound as
+     * validate_config() and the SETTINGS_TABLE row; each frame is a retained
+     * decoded image, so the upper bound is a memory bound, not a taste one. */
+    cJSON *rframes = cJSON_GetObjectItem(root, "radar_frames");
+    if (cJSON_IsNumber(rframes)) {
+        int v = rframes->valueint;
+        if (v < 1) v = 1;
+        if (v > 10) v = 10;
+        cur->radar_frames = (uint8_t)v;
+    }
     cJSON *sinterval = cJSON_GetObjectItem(root, "solar_update_interval_s");
     if (cJSON_IsNumber(sinterval)) {
         int v = sinterval->valueint;
@@ -248,7 +349,8 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     if (cur->goes_enabled   != prev->goes_enabled   ||
         cur->moon_enabled   != prev->moon_enabled   ||
         cur->solar_enabled  != prev->solar_enabled  ||
-        cur->custom_enabled != prev->custom_enabled) {
+        cur->custom_enabled != prev->custom_enabled ||
+        cur->radar_enabled  != prev->radar_enabled) {
         nav_arbiter_notify_topology_changed();
     }
 
@@ -296,7 +398,7 @@ esp_err_t image_display_refresh_post_handler(httpd_req_t *req)
             src = src_item->valueint;
             if (src < 0 || src >= IMG_SRC_COUNT) {
                 cJSON_Delete(root);
-                return send_400(req, "source must be 0 (GOES), 1 (Moon), 2 (Solar) or 3 (Custom)");
+                return send_400(req, "source must be 0 (GOES), 1 (Moon), 2 (Solar), 3 (Custom) or 4 (Radar)");
             }
         }
         cJSON_Delete(root);

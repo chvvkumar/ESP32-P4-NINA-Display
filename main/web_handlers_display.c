@@ -179,13 +179,14 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
     if (new_cfg->octoprint_overlay_visible != old_cfg->octoprint_overlay_visible) {
         octoprint_page_set_overlay_visible(new_cfg->octoprint_overlay_visible);
     }
-    /* Image pages (GOES/Moon/Solar/Custom): one live-apply for all four; an
+    /* Image pages (GOES/Moon/Solar/Custom/Radar): one live-apply for all five; an
      * enable toggle is a topology change (an optional page appeared/disappeared). */
     image_page_config_apply_live(old_cfg, new_cfg, false);
     if (new_cfg->goes_enabled != old_cfg->goes_enabled ||
         new_cfg->moon_enabled != old_cfg->moon_enabled ||
         new_cfg->solar_enabled != old_cfg->solar_enabled ||
-        new_cfg->custom_enabled != old_cfg->custom_enabled) {
+        new_cfg->custom_enabled != old_cfg->custom_enabled ||
+        new_cfg->radar_enabled != old_cfg->radar_enabled) {
         topology_changed = true;
     }
     /* Weather config change — invalidate stale data and force refresh */

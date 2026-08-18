@@ -139,19 +139,38 @@ const char *goes_region_name(const char *code)
     return code;
 }
 
-/* Shared fetch + JPEG-magic + dimension probe + software decode. Writes the
- * decoded frame into *out (top-down rows; see STBI_NO_THREAD_LOCALS in
- * stb_image.c for why no flip is applied anywhere any more). */
-static esp_err_t fetch_jpeg_into(const char *url, const char *label, image_frame_t *out)
+/* Shared fetch + format/dimension probe + software decode. Handles every format
+ * stb_image is compiled for (JPEG, PNG, GIF - the last one for NWS RIDGE-2
+ * radar tiles). Writes the decoded frame into *out (top-down rows; see
+ * STBI_NO_THREAD_LOCALS in stb_image.c for why no flip is applied anywhere any
+ * more).
+ *
+ * COMPRESSED-BYTE RETENTION (@p out_src / @p out_src_len, both NULL or both
+ * non-NULL). NULL is the normal case and behaves exactly as before: the
+ * compressed buffer is freed here the moment the decode is done. Non-NULL asks
+ * for the source bytes to SURVIVE the call, and then, on ESP_OK only,
+ * *out_src is a PSRAM allocation the CALLER must heap_caps_free(). On every
+ * failure path (and on a decode failure specifically) the buffer is freed here
+ * and *out_src stays NULL, so the caller frees only what it was handed.
+ *
+ * The radar ring is the one caller that asks: it re-derives its frames locally
+ * on a crop / dark-mode / Red Night change instead of re-downloading ~370 KB. */
+static esp_err_t fetch_image_into(const char *url, const char *label, image_frame_t *out,
+                                  uint8_t **out_src, size_t *out_src_len)
 {
     if (!url || !out) return ESP_ERR_INVALID_ARG;
+    if (out_src) { *out_src = NULL; *out_src_len = 0; }
 
     ESP_LOGI(TAG, "Fetching %s", url);
 
     /* Shared binary fetch shell (client setup, manual redirect chain, sizing,
      * read loop). CLAMP: an oversized Content-Length is truncated to the cap
-     * rather than rejected, so a too-large tile still gets the JPEG checks
-     * below rather than failing outright. */
+     * rather than rejected, so a too-large tile still gets the format checks
+     * below rather than failing outright. The User-Agent rides in on
+     * extra_header (the binary opts have no dedicated user_agent field, and
+     * apply_headers() replaces esp_http_client's default): NWS asks automated
+     * clients to identify themselves and Iowa Environmental Mesonet blocks
+     * anonymous ones outright. */
     const http_fetch_binary_opts_t bopts = {
         .timeout_ms = GOES_HTTP_TIMEOUT_MS,
         .use_tls_bundle = true,
@@ -160,7 +179,8 @@ static esp_err_t fetch_jpeg_into(const char *url, const char *label, image_frame
         .tx_buffer_size = 1024,
         .max_size = GOES_JPEG_MAX_SIZE,
         .oversize = HTTP_BIN_OVERSIZE_CLAMP,
-        .label = "GOES image",
+        .extra_header = "User-Agent: NINA-Display/1.0 (ESP32-P4 dashboard)",
+        .label = "image",
     };
 
     uint8_t *jpeg_buf = NULL;
@@ -173,44 +193,47 @@ static esp_err_t fetch_jpeg_into(const char *url, const char *label, image_frame
     int total_read = (int)jpeg_len;
 
     if (total_read < 1000) {
-        ESP_LOGW(TAG, "JPEG too small (%d bytes), likely error page", total_read);
+        ESP_LOGW(TAG, "Image too small (%d bytes), likely error page", total_read);
         heap_caps_free(jpeg_buf);
         strlcpy(out->error_msg, "Fetch failed", sizeof(out->error_msg));
         return ESP_FAIL;
     }
 
-    /* JPEG magic gate: SOI marker is FF D8. Reject non-JPEG payloads (HTML error
-     * pages, PNG, etc.) before handing anything to the decoder. */
-    if (jpeg_buf[0] != 0xFF || jpeg_buf[1] != 0xD8) {
-        ESP_LOGW(TAG, "Not a JPEG (magic %02X %02X)", jpeg_buf[0], jpeg_buf[1]);
+    /* Format gate + pre-decode dimension cap in one pass: reject payloads the
+     * decoder cannot handle (HTML error pages) before touching it, and reject
+     * oversized images BEFORE the big decode allocation to avoid OOM -- a small
+     * compressed file can expand to enormous dimensions. Dimensions of 0 mean
+     * the header was too short to read them, so the cap is skipped. */
+    uint32_t probe_w = 0, probe_h = 0;
+    img_fmt_t fmt = image_probe_format_dims(jpeg_buf, (size_t)total_read, &probe_w, &probe_h);
+    if (fmt == IMG_FMT_UNKNOWN) {
+        ESP_LOGW(TAG, "Unsupported image format (magic %02X %02X)", jpeg_buf[0], jpeg_buf[1]);
         heap_caps_free(jpeg_buf);
-        strlcpy(out->error_msg, "Not a JPEG image", sizeof(out->error_msg));
+        strlcpy(out->error_msg, "Unsupported image format", sizeof(out->error_msg));
+        return ESP_FAIL;
+    }
+    if ((probe_w > GOES_IMG_MAX_DIM) || (probe_h > GOES_IMG_MAX_DIM)) {
+        ESP_LOGW(TAG, "Image too large: %lux%lu (max %d)",
+                 (unsigned long)probe_w, (unsigned long)probe_h, GOES_IMG_MAX_DIM);
+        heap_caps_free(jpeg_buf);
+        strlcpy(out->error_msg, "Image too large (max 1024px)", sizeof(out->error_msg));
         return ESP_FAIL;
     }
 
-    /* Pre-decode dimension cap: a small JPEG can decode to enormous dimensions,
-     * so probe width/height from the header and reject BEFORE the big decode
-     * allocation to avoid OOM. */
-    uint32_t probe_w = 0, probe_h = 0;
-    if (jpeg_probe_dimensions(jpeg_buf, total_read, &probe_w, &probe_h)) {
-        if (probe_w > GOES_IMG_MAX_DIM || probe_h > GOES_IMG_MAX_DIM) {
-            ESP_LOGW(TAG, "JPEG too large: %lux%lu (max %d)",
-                     (unsigned long)probe_w, (unsigned long)probe_h, GOES_IMG_MAX_DIM);
-            heap_caps_free(jpeg_buf);
-            strlcpy(out->error_msg, "Image too large (max 1024px)", sizeof(out->error_msg));
-            return ESP_FAIL;
-        }
-    }
-
-    ESP_LOGI(TAG, "Downloaded %d bytes JPEG, decoding...", total_read);
+    ESP_LOGI(TAG, "Downloaded %d bytes (fmt %d), decoding...", total_read, (int)fmt);
 
     uint8_t *rgb565 = NULL;
     uint32_t out_w = 0, out_h = 0;
     size_t out_size = 0;
     bool decoded = jpeg_sw_decode_rgb565(jpeg_buf, total_read, &rgb565, &out_w, &out_h, &out_size);
-    heap_caps_free(jpeg_buf);
+    if (out_src && decoded && rgb565) {
+        *out_src     = jpeg_buf;              /* ownership moves to the caller */
+        *out_src_len = (size_t)total_read;
+    } else {
+        heap_caps_free(jpeg_buf);
+    }
     if (!decoded || !rgb565) {
-        ESP_LOGE(TAG, "JPEG decode failed");
+        ESP_LOGE(TAG, "Image decode failed");
         if (rgb565) heap_caps_free(rgb565);
         strlcpy(out->error_msg, "Decode failed", sizeof(out->error_msg));
         return ESP_FAIL;
@@ -234,17 +257,27 @@ esp_err_t image_fetch_goes(const char *region, image_frame_t *out)
     snprintf(url, sizeof(url),
              "https://cdn.star.nesdis.noaa.gov/GOES19/ABI/SECTOR/%s/GEOCOLOR/%s.jpg",
              region, size);
-    return fetch_jpeg_into(url, goes_region_name(region), out);
+    return fetch_image_into(url, goes_region_name(region), out, NULL, NULL);
 }
 
 esp_err_t image_fetch_solar(uint8_t band, image_frame_t *out)
 {
     if (!out) return ESP_ERR_INVALID_ARG;
-    return fetch_jpeg_into(solar_band_url(band), solar_band_label(band), out);
+    return fetch_image_into(solar_band_url(band), solar_band_label(band), out, NULL, NULL);
 }
 
 esp_err_t image_fetch_custom(const char *url, image_frame_t *out)
 {
     if (!url || !url[0] || !out) return ESP_ERR_INVALID_ARG;
-    return fetch_jpeg_into(url, "Custom", out);
+    return fetch_image_into(url, "Custom", out, NULL, NULL);
+}
+
+esp_err_t image_fetch_custom_retain(const char *url, image_frame_t *out,
+                                    uint8_t **out_src, size_t *out_src_len)
+{
+    if (!out_src || !out_src_len) return ESP_ERR_INVALID_ARG;
+    *out_src = NULL;
+    *out_src_len = 0;
+    if (!url || !url[0] || !out) return ESP_ERR_INVALID_ARG;
+    return fetch_image_into(url, "Custom", out, out_src, out_src_len);
 }

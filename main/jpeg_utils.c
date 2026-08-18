@@ -9,6 +9,7 @@
 #include "esp_log.h"
 #include "stb_image.h"
 #include "esp_cache.h"
+#include <string.h>
 
 static const char *TAG = "jpeg_utils";
 
@@ -35,6 +36,38 @@ bool jpeg_probe_dimensions(const uint8_t *jpg_data, size_t jpg_size,
     return true;
 }
 
+img_fmt_t image_probe_format_dims(const uint8_t *data, size_t size,
+                                  uint32_t *out_w, uint32_t *out_h)
+{
+    /* Sniff + PNG/GIF dimensions are pure byte reads, kept in image_probe.h so
+     * they can be host-tested (this file cannot: PPA/cache/stb_image). */
+    img_fmt_t fmt = image_probe_sniff(data, size, out_w, out_h);
+
+    /* JPEG is the one format image_probe_sniff() leaves at 0x0: its dimensions
+     * need the SOF marker walk, which stb_image does for us. A failed probe
+     * still yields IMG_FMT_JPEG with 0x0, same as any short header. */
+    if (fmt == IMG_FMT_JPEG) {
+        uint32_t w = 0, h = 0;
+        if (jpeg_probe_dimensions(data, size, &w, &h)) {
+            if (out_w) *out_w = w;
+            if (out_h) *out_h = h;
+        }
+    }
+    return fmt;
+}
+
+/* Format-agnostic despite the name: stbi_load_from_memory() decodes any format
+ * stb_image is compiled for (JPEG, PNG, GIF). Kept as jpeg_* to avoid churning
+ * every call site.
+ *
+ * STACK BUDGET: callers must have >= ~10 KB of stack headroom below this call.
+ * The deepest chain is PNG (zlib inflate ~4.2 KB + huffman build ~2.6 KB + the
+ * IHDR/PLTE frame ~1.4 KB, ~8.2 KB total). The GIF and JPEG decoder contexts
+ * (~35 KB and ~18 KB) are heap-allocated, not stack frames: JPEG by upstream
+ * stb, GIF by a LOCAL PATCH in stb_image.h dated 2026-08-16 (a device panicked
+ * with a hardware stack-protection fault when GIF was enabled and stb's 34 KB
+ * `stbi__gif g;` automatic hit a 12288-byte poller task stack). If that patch
+ * is ever lost to an stb upgrade, every image poller faults on the first GIF. */
 bool jpeg_sw_decode_rgb565(const uint8_t *jpg_data, size_t jpg_size,
                            uint8_t **out_buf, uint32_t *out_w, uint32_t *out_h,
                            size_t *out_size)
