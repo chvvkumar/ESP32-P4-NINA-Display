@@ -2386,6 +2386,10 @@
       data.custom_show_overlay=!!$('custom_show_overlay').checked;
       data.custom_crop=!!$('custom_crop').checked;
       data.custom_image_url=$('customImageUrl').value.trim();
+      /* Stored secret: the device hands out "********" and treats that value
+         coming back as "keep the stored header", so posting it verbatim is
+         correct. An empty string clears it. */
+      if($('customImageHeader')) data.custom_image_header=$('customImageHeader').value.trim();
       data.custom_orientation=parseInt($('customOrientation').value,10)||0;
       data.custom_vflip=$('customVflip').checked?1:0;
       data.custom_hflip=$('customHflip').checked?1:0;
@@ -2411,6 +2415,8 @@
       data.clouds_enabled=!!$('clouds_enabled').checked;
       data.clouds_show_overlay=!!$('clouds_show_overlay').checked;
       data.clouds_zoom=parseInt($('clouds_zoom').value,10)||7;
+      /* 0 GeoColor, 1 Clean infrared, 2 Air mass (uint8 on the device). */
+      data.clouds_channel=parseInt($('clouds_channel').value,10)||0;
       data.clouds_update_interval_s=parseInt($('clouds_update_interval_s').value,10)||600;
       data.clouds_frames=parseInt($('clouds_frames').value,10)||6;
     }
@@ -2815,6 +2821,7 @@
       if($('custom_show_overlay')) $('custom_show_overlay').checked=data.custom_show_overlay!=null?!!data.custom_show_overlay:true;
       if($('custom_crop')) $('custom_crop').checked=!!data.custom_crop;
       if($('customImageUrl')) $('customImageUrl').value=data.custom_image_url||'';
+      if($('customImageHeader')) $('customImageHeader').value=data.custom_image_header||'';
       updateImgCustomPillHint();
       if($('customOrientation')) $('customOrientation').value=String(data.custom_orientation||0);
       if($('customVflip')) $('customVflip').checked=!!data.custom_vflip;
@@ -2860,6 +2867,10 @@
       if($('clouds_zoom')){
         var cz=parseInt(data.clouds_zoom,10)||7;
         $('clouds_zoom').value=String((cz>=5&&cz<=9)?cz:7);
+      }
+      if($('clouds_channel')){
+        var cc=parseInt(data.clouds_channel,10)||0;
+        $('clouds_channel').value=String((cc>=0&&cc<=2)?cc:0);
       }
       if($('clouds_update_interval_s')) $('clouds_update_interval_s').value=String(data.clouds_update_interval_s||600);
       if($('clouds_frames')) $('clouds_frames').value=String(data.clouds_frames||6);

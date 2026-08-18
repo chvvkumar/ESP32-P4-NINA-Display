@@ -24,6 +24,11 @@
               <div class="field-hint">JPEG only. Max 1024x1024 pixels, max 1 MB. PNG and WebP are not supported.</div>
             </div>
             <div class="field" style="margin-top:16px">
+              <label class="field-label">Request header (optional)</label>
+              <input class="input mono" id="customImageHeader" maxlength="255" type="password" placeholder="Authorization: Bearer abc123" onchange="applyImagePage('image-custom');checkDirty()">
+              <div class="field-hint">Only needed if the image is behind a login. Enter one header line as <code>Name: value</code>, for example <code>Authorization: Bearer abc123</code> or <code>X-Api-Key: abc123</code>. Stored on the device and shown as dots; leave the dots alone to keep it, or clear the box to remove it.</div>
+            </div>
+            <div class="field" style="margin-top:16px">
               <label class="field-label">Rotation</label>
               <select class="input" id="customOrientation" onchange="applyImagePage('image-custom');checkDirty()">
                 <option value="0">0&deg;</option>

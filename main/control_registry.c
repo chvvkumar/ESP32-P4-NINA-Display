@@ -238,7 +238,7 @@ static const control_item_t s_items[] = {
     { "custom_hflip",               CTRL_TYPE_BOOL, 0, 1, 1, NULL, 0, get_custom_hflip,       set_custom_hflip,       apply_image_display },
     /* solar_band: enum with no labels -> control_item_label() returns NULL so the
      * handler formats the numeric band index as the label string. */
-    { "solar_band",                 CTRL_TYPE_ENUM, 0, 17, 1, NULL, 0, get_solar_band,             set_solar_band,             apply_image_display },
+    { "solar_band",                 CTRL_TYPE_ENUM, 0, 23, 1, NULL, 0, get_solar_band,             set_solar_band,             apply_image_display },
     { "goes_update_interval_s",     CTRL_TYPE_INT,  300, 7200, 300, NULL, 0, get_goes_update_interval_s,   set_goes_update_interval_s,   apply_image_display },
     { "custom_update_interval_s",   CTRL_TYPE_INT,  10,  7200, 60,  NULL, 0, get_custom_update_interval_s, set_custom_update_interval_s, apply_image_display },
 

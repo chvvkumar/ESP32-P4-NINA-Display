@@ -147,7 +147,7 @@
     INT_RESET (moon_bg_style,                "moon_bg_style",                0,     0,     3) \
     FLT       (moon_lat,                     "moon_lat",                     0.0f,  -90.0f, 90.0f)  /* no prior clamp; obviously-correct latitude bound */ \
     FLT       (moon_lon,                     "moon_lon",                     0.0f,  -180.0f,180.0f) /* no prior clamp; obviously-correct longitude bound */ \
-    INT_RESET (solar_band,                   "solar_band",                   0,     0,     17) \
+    INT_RESET (solar_band,                   "solar_band",                   0,     0,     23) \
     INT       (moon_flip_u,                  "moon_flip_u",                  0,     0,     1) \
     INT       (moon_flip_v,                  "moon_flip_v",                  0,     0,     1) \
     FLT       (moon_roll_offset,             "moon_roll_offset",             -7.0f, -180.0f,180.0f) \
@@ -162,6 +162,7 @@
     INT       (nav_grace_s,                  "nav_grace_s",                  10,    10,    300) \
     /* -- Custom Image URL source -- */ \
     STR       (custom_image_url,             "custom_image_url",             "https://picsum.photos/720") \
+    STR       (custom_image_header,          "custom_image_header",          "")               /* SECRET: optional raw "Name: value" header sent with the Custom URL image fetch. Marked is_sensitive+mask_preview in s_backup_fields, so strip_masked_secrets() preserves it on a sentinel POST and config_get_handler redacts it on GET */ \
     INT_RESET (custom_orientation,           "custom_orientation",           0,     0,     3) \
     INT_RESET (custom_update_interval_s,     "custom_update_interval_s",     60,    10,    7200) \
     /* -- First-boot setup hint -- */ \
@@ -213,7 +214,9 @@
     BOOL      (clouds_show_overlay,          "clouds_show_overlay",          true) \
     INT       (clouds_update_interval_s,     "clouds_update_interval_s",     900,   300,   7200)  /* 15 min default (GIBS publishes every 10 min). True clamp, matching the image POST handler's clamp-to-bound */ \
     INT_RESET (clouds_frames,                "clouds_frames",                6,     1,     10)    /* animation depth, ~1 MB PSRAM per 720x720 frame. RESET: 0 (unset blob) and >10 both fall back to the default */ \
-    INT_RESET (clouds_zoom,                  "clouds_zoom",                  7,     5,     9)     /* Web-Mercator zoom of the 720 px picture: 5 ~2500 km wide .. 9 ~150 km. RESET: an unknown value falls back to the default, never to a bound */
+    INT_RESET (clouds_zoom,                  "clouds_zoom",                  7,     5,     9)     /* Web-Mercator zoom of the 720 px picture: 5 ~2500 km wide .. 9 ~150 km. RESET: an unknown value falls back to the default, never to a bound */ \
+    /* -- Clouds satellite channel (v67) -- */ \
+    INT_RESET (clouds_channel,               "clouds_channel",               0,     0,     2)     /* which GOES ABI product the Clouds page shows: 0 = GeoColor (default), 1 = Clean Infrared (Band 13), 2 = Air Mass. RESET, not clamp: an unknown channel falls back to GeoColor, which every satellite publishes, rather than to the nearest bound */
 
 /* Apply every row's default value to *cfg. Called from set_defaults()
  * immediately after the memset(). Does not touch excluded/complex fields

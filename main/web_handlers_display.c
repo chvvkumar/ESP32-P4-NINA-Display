@@ -181,8 +181,13 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
         octoprint_page_set_overlay_visible(new_cfg->octoprint_overlay_visible);
     }
     /* Image pages (GOES/Moon/Solar/Custom/Radar/Clouds): one live-apply for all six; an
-     * enable toggle is a topology change (an optional page appeared/disappeared). */
-    image_page_config_apply_live(old_cfg, new_cfg, false);
+     * enable toggle is a topology change (an optional page appeared/disappeared).
+     * A changed Custom URL request header means the next download is a
+     * different request, so force the Custom refetch (force_fetch is consulted
+     * for that page only). */
+    image_page_config_apply_live(old_cfg, new_cfg,
+                                 strcmp(new_cfg->custom_image_header,
+                                        old_cfg->custom_image_header) != 0);
     if (new_cfg->goes_enabled != old_cfg->goes_enabled ||
         new_cfg->moon_enabled != old_cfg->moon_enabled ||
         new_cfg->solar_enabled != old_cfg->solar_enabled ||

@@ -5,10 +5,14 @@
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include <string.h>
+#include <time.h>
 
 static const char *TAG = "goes_client";
 
-#define GOES_JPEG_MAX_SIZE   (1024 * 1024)   /* 1MB: fits SOHO LASCO C3 1024 (~815KB) */
+#define GOES_JPEG_MAX_SIZE   (1024 * 1024)   /* 1MB: fits SOHO LASCO C3 1024 (~815KB) and the
+                                              * SUVI Helioviewer 720px renders (0.33-0.82MB).
+                                              * Chunked responses (GIBS, Helioviewer) allocate
+                                              * this whole cap per frame, so keep it tight. */
 #define GOES_HTTP_BUF_SIZE   4096
 #define GOES_HTTP_TIMEOUT_MS 30000
 #define GOES_IMG_MAX_DIM     1024            /* reject images wider/taller than this before decode */
@@ -40,11 +44,21 @@ static const char *goes_region_size(const char *region)
     return "600x600";
 }
 
-/* Solar imagery: SDO/AIA 1024px JPEGs (NASA SDO) plus SOHO realtime 1024px JPEGs
- * (SOHO/EIT, LASCO coronagraphs, SDO/HMI). All 1024px; LASCO C3 is ~815KB, so
- * GOES_JPEG_MAX_SIZE is 1MB to fit them. Index 0..17. */
-#define SOLAR_BAND_COUNT 18
-static const char *SOLAR_URLS[SOLAR_BAND_COUNT] = {
+/* Solar imagery. Bands 0..17 are fixed 1024px JPEG URLs: SDO/AIA (NASA SDO)
+ * plus SOHO realtime (SOHO/EIT, LASCO coronagraphs, SDO/HMI).
+ *
+ * Bands 18..23 are the NOAA GOES SUVI extreme-UV channels. SWPC publishes those
+ * only as 1280x1280 RGBA PNGs (services.swpc.noaa.gov/images/animations/suvi/),
+ * which BOTH exceed GOES_IMG_MAX_DIM and blow the PSRAM budget: stb holds the
+ * 6.55MB zlib-expanded rows and the 6.55MB RGBA image at the same time, ~14.4MB
+ * peak against ~14.4MB free (10MB at the observed minimum). So SUVI is fetched
+ * through Helioviewer's server-side renderer at 720x720 instead (~0.3-0.8MB PNG,
+ * <5MB decode peak), which keeps the existing caps intact. Its URL carries a
+ * timestamp and is built per fetch by solar_band_url(). */
+#define SOLAR_BAND_COUNT 24
+#define SOLAR_SUVI_FIRST 18                   /* first Helioviewer-rendered band */
+#define SOLAR_STATIC_URL_COUNT SOLAR_SUVI_FIRST
+static const char *SOLAR_URLS[SOLAR_STATIC_URL_COUNT] = {
     "https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0094.jpg",
     "https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0131.jpg",
     "https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0171.jpg",
@@ -67,10 +81,40 @@ static const char *SOLAR_URLS[SOLAR_BAND_COUNT] = {
 static const char *SOLAR_LABELS[SOLAR_BAND_COUNT] = {
     "AIA 94","AIA 131","AIA 171","AIA 193","AIA 211","AIA 304","AIA 335","AIA 1600","AIA 1700","AIA 4500",
     "LASCO C2","LASCO C3","SOHO EIT 171","SOHO EIT 195","SOHO EIT 284","SOHO EIT 304",
-    "HMI Continuum","HMI Magnetogram"
+    "HMI Continuum","HMI Magnetogram",
+    "SUVI 94","SUVI 131","SUVI 171","SUVI 195","SUVI 284","SUVI 304"
 };
 
-const char *solar_band_url(uint8_t idx)   { return idx < SOLAR_BAND_COUNT ? SOLAR_URLS[idx]   : SOLAR_URLS[0]; }
+/* Helioviewer sourceId per SUVI band, in SOLAR_LABELS order from index 18. */
+static const int SUVI_SOURCE_IDS[SOLAR_BAND_COUNT - SOLAR_SUVI_FIRST] = {
+    2000, 2001, 2002, 2003, 2004, 2005
+};
+
+void solar_band_url(uint8_t idx, char *out, size_t sz)
+{
+    if (!out || sz == 0) return;
+    out[0] = '\0';
+    if (idx >= SOLAR_BAND_COUNT) idx = 0;
+    if (idx < SOLAR_SUVI_FIRST) {
+        strlcpy(out, SOLAR_URLS[idx], sz);
+        return;
+    }
+    /* Helioviewer renders the closest frame to a requested instant, so the URL
+     * needs the current UTC time (NTP-set; the caller rejects an unset clock).
+     * %%5B/%%5D are the encoded brackets around the layer spec; imageScale 3.4
+     * arcsec/px puts the whole disc in 720x720 with no detector-edge corners. */
+    time_t now = time(NULL);
+    struct tm utc;
+    gmtime_r(&now, &utc);
+    char ts[24];
+    strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%SZ", &utc);
+    snprintf(out, sz,
+             "https://api.helioviewer.org/v2/takeScreenshot/"
+             "?date=%s&imageScale=3.4&layers=%%5B%d,1,100%%5D"
+             "&x0=0&y0=0&width=720&height=720&display=true&watermark=false",
+             ts, SUVI_SOURCE_IDS[idx - SOLAR_SUVI_FIRST]);
+}
+
 const char *solar_band_label(uint8_t idx) { return idx < SOLAR_BAND_COUNT ? SOLAR_LABELS[idx] : SOLAR_LABELS[0]; }
 
 /* Solar source images (SDO/AIA via sdo.gsfc.nasa.gov, SOHO/HMI via
@@ -82,6 +126,8 @@ bool solar_band_vflip(uint8_t idx) { (void)idx; return false; }
 
 /* Per-band center-crop percentage (100 = no crop). AIA (0..9) and SOHO EIT
  * (12..15) have a wide source border, so 88% zooms past the timestamp/label.
+ * SUVI (18..23) is rendered to order with no border or caption, so it is shown
+ * whole.
  * HMI continuum/magnetogram (16,17) have only a ~4.2% black margin around a
  * ~91.5%-diameter disc, so 92% trims the caption border while leaving a thin
  * black ring (disc NOT clipped). LASCO C2/C3 (10,11) fill the frame edge-to-edge
@@ -91,6 +137,7 @@ uint8_t solar_band_crop_pct(uint8_t idx)
 {
     if (idx == 10 || idx == 11) return 90;   /* LASCO: crop off the burned-in timestamp */
     if (idx == 16 || idx == 17) return 92;   /* HMI: trim to disc edge */
+    if (idx >= SOLAR_SUVI_FIRST) return 100; /* SUVI: rendered borderless */
     return 88;                               /* AIA / SOHO EIT */
 }
 
@@ -156,7 +203,8 @@ const char *goes_region_name(const char *code)
  * The radar ring is the one caller that asks: it re-derives its frames locally
  * on a crop / dark-mode / Red Night change instead of re-downloading ~370 KB. */
 static esp_err_t fetch_image_into(const char *url, const char *label, image_frame_t *out,
-                                  uint8_t **out_src, size_t *out_src_len)
+                                  uint8_t **out_src, size_t *out_src_len,
+                                  const char *auth_header)
 {
     if (!url || !out) return ESP_ERR_INVALID_ARG;
     if (out_src) { *out_src = NULL; *out_src_len = 0; }
@@ -166,11 +214,11 @@ static esp_err_t fetch_image_into(const char *url, const char *label, image_fram
     /* Shared binary fetch shell (client setup, manual redirect chain, sizing,
      * read loop). CLAMP: an oversized Content-Length is truncated to the cap
      * rather than rejected, so a too-large tile still gets the format checks
-     * below rather than failing outright. The User-Agent rides in on
-     * extra_header (the binary opts have no dedicated user_agent field, and
-     * apply_headers() replaces esp_http_client's default): NWS asks automated
-     * clients to identify themselves and Iowa Environmental Mesonet blocks
-     * anonymous ones outright. */
+     * below rather than failing outright. The User-Agent is always sent: NWS
+     * asks automated clients to identify themselves and Iowa Environmental
+     * Mesonet blocks anonymous ones outright. extra_header stays free for the
+     * caller's optional credential line (the Custom URL page's user-supplied
+     * "Name: value" header); NULL/empty means no extra header at all. */
     const http_fetch_binary_opts_t bopts = {
         .timeout_ms = GOES_HTTP_TIMEOUT_MS,
         .use_tls_bundle = true,
@@ -179,7 +227,8 @@ static esp_err_t fetch_image_into(const char *url, const char *label, image_fram
         .tx_buffer_size = 1024,
         .max_size = GOES_JPEG_MAX_SIZE,
         .oversize = HTTP_BIN_OVERSIZE_CLAMP,
-        .extra_header = "User-Agent: NINA-Display/1.0 (ESP32-P4 dashboard)",
+        .user_agent = "NINA-Display/1.0 (ESP32-P4 dashboard)",
+        .extra_header = (auth_header && auth_header[0] != '\0') ? auth_header : NULL,
         .label = "image",
     };
 
@@ -257,19 +306,27 @@ esp_err_t image_fetch_goes(const char *region, image_frame_t *out)
     snprintf(url, sizeof(url),
              "https://cdn.star.nesdis.noaa.gov/GOES19/ABI/SECTOR/%s/GEOCOLOR/%s.jpg",
              region, size);
-    return fetch_image_into(url, goes_region_name(region), out, NULL, NULL);
+    return fetch_image_into(url, goes_region_name(region), out, NULL, NULL, NULL);
 }
 
 esp_err_t image_fetch_solar(uint8_t band, image_frame_t *out)
 {
     if (!out) return ESP_ERR_INVALID_ARG;
-    return fetch_image_into(solar_band_url(band), solar_band_label(band), out, NULL, NULL);
+    /* SUVI asks Helioviewer for "the frame nearest <now>", so a pre-NTP clock
+     * would request 1970. Fail with a readable reason instead. */
+    if (band >= SOLAR_SUVI_FIRST && time(NULL) < 1700000000) {
+        strlcpy(out->error_msg, "Waiting for clock", sizeof(out->error_msg));
+        return ESP_ERR_INVALID_STATE;
+    }
+    char url[256];
+    solar_band_url(band, url, sizeof(url));
+    return fetch_image_into(url, solar_band_label(band), out, NULL, NULL, NULL);
 }
 
-esp_err_t image_fetch_custom(const char *url, image_frame_t *out)
+esp_err_t image_fetch_custom(const char *url, const char *auth_header, image_frame_t *out)
 {
     if (!url || !url[0] || !out) return ESP_ERR_INVALID_ARG;
-    return fetch_image_into(url, "Custom", out, NULL, NULL);
+    return fetch_image_into(url, "Custom", out, NULL, NULL, auth_header);
 }
 
 esp_err_t image_fetch_custom_retain(const char *url, image_frame_t *out,
@@ -279,5 +336,5 @@ esp_err_t image_fetch_custom_retain(const char *url, image_frame_t *out,
     *out_src = NULL;
     *out_src_len = 0;
     if (!url || !url[0] || !out) return ESP_ERR_INVALID_ARG;
-    return fetch_image_into(url, "Custom", out, out_src, out_src_len);
+    return fetch_image_into(url, "Custom", out, out_src, out_src_len, NULL);
 }

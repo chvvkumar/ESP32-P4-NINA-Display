@@ -239,7 +239,7 @@ Setup: Pages > GOES.
 
 ### Solar
 
-Full-screen NASA SDO and SOHO solar imagery in a chosen band (AIA wavelengths, HMI continuum and magnetogram, LASCO coronagraphs, EIT).
+Full-screen solar imagery in a chosen band: NASA SDO and SOHO (AIA wavelengths, HMI continuum and magnetogram, LASCO coronagraphs, EIT) or the NOAA GOES SUVI extreme-UV channels.
 
 Setup: Pages > Solar.
 
@@ -251,7 +251,7 @@ Setup: Pages > Solar.
 
 ### Custom Image URL
 
-Full-screen JPEG fetched from any URL you supply, for example a webcam or a weather map. JPEG only, up to 1024x1024 pixels and 1 MB; PNG and WebP are not supported.
+Full-screen JPEG fetched from any URL you supply, for example a webcam or a weather map. JPEG only, up to 1024x1024 pixels and 1 MB; PNG and WebP are not supported. A source behind a login can be reached by entering one request header line, such as `Authorization: Bearer <token>` or `X-Api-Key: <key>`; the value is stored on the device and shown masked in the web UI.
 
 Setup: Pages > Custom URL.
 
@@ -273,7 +273,7 @@ Setup: Pages > Radar. Automatic site selection uses the location on Device > Sys
 
 An animated satellite loop of the cloud cover around your location, from NOAA GOES imagery served by NASA. Day: true color. Night: infrared clouds over city lights. State and country borders and major roads are drawn over the picture. The satellite (GOES-East or GOES-West) is picked from your longitude. The source updates every 10 minutes and the newest frame is usually 30-45 minutes old.
 
-Setup: Pages > Cloud Cover (area from about 150 km to 2500 km across, up to 10 frames). The location comes from Device > System > Location.
+Setup: Pages > Cloud Cover (satellite channel, area from about 150 km to 2500 km across, up to 10 frames). The channel selects GeoColor natural color, clean infrared (cloud tops day and night) or air mass (color-coded temperature and moisture). The location comes from Device > System > Location.
 
 <p align="center">
   <img src="images/clouds.jpg" alt="Cloud Cover page" width="720">
@@ -464,5 +464,5 @@ Standard ESP-IDF 5.5.2 project: activate the IDF environment and run `idf.py bui
 - [@chicago925](https://github.com/chicago925) for the 3D printed stand ([#116](https://github.com/chvvkumar/ESP32-P4-NINA-Display/issues/116)).
 - Waveshare for the ESP32-P4-WIFI6-Touch-LCD-4B board support package.
 - [LVGL](https://lvgl.io/) and [stb_image](https://github.com/nothings/stb).
-- NASA GIBS for the Cloud Cover imagery, NASA SDO and SOHO for the solar imagery, NOAA and the NWS for radar and GOES imagery, and Open-Meteo, OpenWeatherMap and Weather Underground for weather data.
+- NASA GIBS for the Cloud Cover imagery, NASA SDO and SOHO for the solar imagery, NOAA GOES SUVI (rendered by Helioviewer) for the extreme-UV solar bands, NOAA and the NWS for radar and GOES imagery, and Open-Meteo, OpenWeatherMap and Weather Underground for weather data.
 - Espressif esp-hosted and esp_wifi_remote for the ESP32-C6 WiFi link, [tgx](https://github.com/vindar/tgx) for the moon sphere renderer, and SVOX Pico TTS (esp-picotts) for the voice clips.

@@ -633,11 +633,12 @@
                 <tr><td>goes_orientation</td><td>int</td><td>0 to 3</td><td>Rotation quadrant (0/90/180/270 degrees).</td></tr>
                 <tr><td>goes_vflip</td><td>int</td><td>0 or 1</td><td>Flip GOES image vertically (top/bottom).</td></tr>
                 <tr><td>goes_hflip</td><td>int</td><td>0 or 1</td><td>Flip GOES image horizontally (left/right).</td></tr>
-                <tr><td>solar_band</td><td>int</td><td>0 to 17</td><td>Solar / SDO / SOHO band index. An invalid value falls back to 0.</td></tr>
+                <tr><td>solar_band</td><td>int</td><td>0 to 23</td><td>Solar band index: SDO / SOHO (0 to 17) or GOES SUVI (18 to 23). An invalid value falls back to 0.</td></tr>
                 <tr><td>solar_orientation</td><td>int</td><td>0 to 3</td><td>Rotation quadrant.</td></tr>
                 <tr><td>solar_vflip</td><td>int</td><td>0 or 1</td><td>Flip solar image vertically (top/bottom).</td></tr>
                 <tr><td>solar_hflip</td><td>int</td><td>0 or 1</td><td>Flip solar image horizontally (left/right).</td></tr>
                 <tr><td>custom_image_url</td><td>string (max 256)</td><td>must start with http:// or https:// (empty string clears it)</td><td>Custom image source URL. Validated server-side.</td></tr>
+                <tr><td>custom_image_header</td><td>string (max 256)</td><td>one <code>Name: value</code> header line (empty string clears it)</td><td>Optional request header sent with the custom image fetch, for a source behind a login. Read back as <code>********</code>; posting that value back keeps the stored header.</td></tr>
                 <tr><td>custom_orientation</td><td>int</td><td>0 to 3</td><td>Rotation quadrant.</td></tr>
                 <tr><td>custom_vflip</td><td>int</td><td>0 or 1</td><td>Flip custom image vertically (top/bottom).</td></tr>
                 <tr><td>custom_hflip</td><td>int</td><td>0 or 1</td><td>Flip custom image horizontally (left/right).</td></tr>

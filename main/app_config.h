@@ -78,7 +78,7 @@ extern "C" {
 #define ARP_ORDER_CAPACITY_RETIRED 16
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 66
+#define APP_CONFIG_VERSION 67
 
 /* Tiles-config blobs no longer live inside app_config_t (v52 split them out to
  * dedicated NVS string keys "json_tiles"/"ha_tiles"). These bound the value
@@ -483,6 +483,16 @@ typedef struct {
     uint16_t clouds_update_interval_s; // 300-7200 s, default 900 (GIBS publishes every 10 min)
     uint8_t  clouds_frames;            // 1-10 animation frames, default 6 (~1 MB PSRAM each)
     uint8_t  clouds_zoom;              // 5-9 Web-Mercator zoom around weather_lat/lon, default 7
+
+    // Added after v66 — must stay at end to preserve NVS binary compatibility
+    char     custom_image_header[256]; // optional raw "Name: value" header sent with the
+                                       // Custom URL image fetch ("" = none). Same shape and
+                                       // size as json_auth_header; a stored SECRET, so it is
+                                       // redacted on GET /api/config and preserved on a
+                                       // "********" POST (see web_handlers_config.c).
+    uint8_t  clouds_channel;           // Clouds page satellite channel:
+                                       // 0 = GeoColor (default), 1 = Clean Infrared (Band 13),
+                                       // 2 = Air Mass. Values above 2 fall back to 0.
 } app_config_t;
 
 /* ── Version 43 config struct — used only for NVS migration to v44 ────── */
@@ -3853,6 +3863,196 @@ _Static_assert(offsetof(app_config_t, clouds_enabled) ==
  * it must never exceed the destination. */
 _Static_assert(sizeof(app_config_v65_t) <= sizeof(app_config_t),
                "v65 snapshot must not exceed the current config struct");
+
+/* ── Version 66 config struct — used only for NVS migration to v67 ────── */
+/* Byte-identical to app_config_t minus the two trailing fields v67       */
+/* appended (custom_image_header, clouds_channel). Same body as the v65   */
+/* snapshot plus the five clouds_* fields v66 added at the end.           */
+typedef struct {
+    uint32_t config_version;
+    char api_url[3][128];
+    char ntp_server[64];
+    char tz_string[64];
+    char filter_colors[3][512];
+    char rms_thresholds[3][256];
+    char hfr_thresholds[3][256];
+    int theme_index;
+    int brightness;
+    int color_brightness;
+    bool mqtt_enabled;
+    char mqtt_broker_url[128];
+    char mqtt_username[64];
+    char mqtt_password[64];
+    char mqtt_topic_prefix[64];
+    uint16_t mqtt_port;
+    int8_t   active_page_override;
+    bool     auto_rotate_enabled;
+    uint16_t auto_rotate_interval_s;
+    uint8_t  auto_rotate_effect;
+    bool     auto_rotate_skip_disconnected;
+    uint8_t  auto_rotate_pages;
+    uint8_t  update_rate_s;
+    uint8_t  graph_update_interval_s;
+    uint8_t  connection_timeout_s;
+    uint8_t  toast_duration_s;
+    bool     debug_mode;
+    bool     instance_enabled[3];
+    bool     screen_sleep_enabled;
+    uint16_t screen_sleep_timeout_s;
+    bool     alert_flash_enabled;
+    uint8_t  idle_poll_interval_s;
+    bool     wifi_power_save;
+    uint8_t  widget_style;
+    uint8_t  auto_update_check;
+    uint8_t  update_channel;
+    bool     deep_sleep_enabled;
+    uint32_t deep_sleep_wake_timer_s;
+    bool     deep_sleep_on_idle;
+    uint8_t  screen_rotation;
+    char     hostname[32];
+    char     allsky_hostname[128];
+    uint16_t allsky_update_interval_s;
+    float    allsky_dew_offset;
+    char     allsky_field_config[1536];
+    char     allsky_thresholds[1024];
+    bool     allsky_enabled;
+    bool     demo_mode;
+    bool     spotify_enabled;
+    char     spotify_client_id[64];
+    uint16_t spotify_poll_interval_ms;
+    bool     spotify_show_progress_bar;
+    uint8_t  spotify_overlay_timeout_s;
+    bool     spotify_minimal_mode;
+    bool     spotify_scroll_text;
+    wifi_network_t wifi_networks[3];
+    bool     spotify_overlay_visible;
+    uint8_t  auto_rotate_order[8];
+    uint8_t  toast_aggregation_window_s;
+    uint32_t toast_notify_mask;
+    bool     toast_instance_muted[3];
+    uint8_t  weather_provider;
+    char     weather_api_key[64];
+    float    weather_lat;
+    float    weather_lon;
+    char     weather_location_name[64];
+    uint16_t weather_poll_interval_s;
+    uint8_t  weather_units;
+    uint8_t  weather_time_format;
+    bool     idle_page_override_enabled;
+    int8_t   idle_page_override_target;
+    bool     idle_page_persistent;
+    bool     idle_indicator_enabled;
+    char     admin_password[33];
+    bool     auth_enabled;
+    bool     image_display_enabled;
+    bool     image_display_show_overlay;
+    char     goes_region[16];
+    uint16_t goes_update_interval_s;
+    uint8_t  image_display_source;
+    uint8_t  moon_bg_style;
+    float    moon_lat;
+    float    moon_lon;
+    uint8_t  solar_band;
+    bool     image_display_crop;
+    uint8_t  moon_drag_light_mode;
+    uint8_t  moon_flip_u;
+    uint8_t  moon_flip_v;
+    float    moon_roll_offset;
+    float    moon_yaw_offset;
+    float    moon_pitch_offset;
+    uint8_t  moon_north_up;
+    uint8_t  moon_spin_mode;
+    uint8_t  moon_spin_return_s;
+    uint8_t  crash_log_retention_days;
+    uint8_t  auto_rotate_pages_hi;
+    uint8_t  auto_rotate_order_ext;
+    uint8_t  goes_orientation;
+    uint8_t  solar_orientation;
+    uint16_t nav_grace_s;
+    char     custom_image_url[256];
+    uint8_t  custom_orientation;
+    uint16_t custom_update_interval_s;
+    uint8_t  auto_rotate_order2_retired[16];   /* the RETIRED mid-struct array,
+                                        * named exactly as the live struct
+                                        * names it — see the note there */
+    uint8_t  goes_vflip;
+    uint8_t  goes_hflip;
+    uint8_t  solar_vflip;
+    uint8_t  solar_hflip;
+    uint8_t  custom_vflip;
+    uint8_t  custom_hflip;
+    bool     home_page_lock;
+    bool     json_enabled;
+    char     json_url[256];
+    char     json_auth_header[256];
+    uint16_t json_update_interval_s;
+    bool     ha_enabled;
+    char     ha_base_url[256];
+    char     ha_token[256];
+    uint16_t ha_update_interval_s;
+    bool     setup_hint_dismissed;
+    uint8_t  alert_voice_enabled;
+    uint8_t  alert_voice_volume;
+    uint8_t  alert_voice_types;
+    uint8_t  alert_voice_repeat_min;
+    bool     alert_voice_muted[3];
+    uint32_t voice_notify_mask;
+    uint8_t  boot_jingle_enabled;
+    uint8_t  alert_voice_brief;
+    uint8_t  alert_voice_conn;
+    uint8_t  alert_voice_disc;
+    uint8_t  wifi_max_tx_dbm;
+    uint8_t  octoprint_enabled;
+    char     octoprint_url[128];
+    char     octoprint_api_key[64];
+    uint16_t octoprint_update_interval_s;
+    uint8_t  octoprint_image_source;
+    uint8_t  octoprint_layout;
+    char     octoprint_snapshot_url[128];
+    bool     goes_enabled;
+    bool     moon_enabled;
+    bool     solar_enabled;
+    bool     custom_enabled;
+    uint16_t solar_update_interval_s;
+    uint16_t moon_update_interval_s;
+    bool     goes_crop;
+    bool     solar_crop;
+    bool     custom_crop;
+    bool     goes_show_overlay;
+    bool     moon_show_overlay;
+    bool     solar_show_overlay;
+    bool     custom_show_overlay;
+    bool     octoprint_overlay_visible;
+    bool     radar_enabled;
+    char     radar_token[16];
+    uint16_t radar_update_interval_s;
+    bool     radar_show_overlay;
+    uint8_t  radar_crop;
+    uint8_t  radar_frames;
+    uint8_t  auto_rotate_order2[ARP_ORDER_CAPACITY];
+    bool     radar_dark_mode;
+    uint8_t  radar_map_style;
+    bool     clouds_enabled;
+    bool     clouds_show_overlay;
+    uint16_t clouds_update_interval_s;
+    uint8_t  clouds_frames;
+    uint8_t  clouds_zoom;
+} app_config_v66_t;
+
+/* custom_image_header (char[], align 1) appends directly after clouds_zoom
+ * (uint8_t, align 1), so no alignment padding can sit between them. Nothing
+ * moved in v67 — the fields are a pure append — so this is the plain
+ * end-of-last-field equality the v62/v63/v64/v65 asserts use. */
+_Static_assert(offsetof(app_config_t, custom_image_header) ==
+                   offsetof(app_config_v66_t, clouds_zoom) +
+                       sizeof(((app_config_v66_t *)0)->clouds_zoom),
+               "app_config_v66_t snapshot drifted from app_config_t layout");
+
+/* migrate_from_v66 memcpy's sizeof(app_config_v66_t) bytes into app_config_t;
+ * it must never exceed the destination. */
+_Static_assert(sizeof(app_config_v66_t) <= sizeof(app_config_t),
+               "v66 snapshot must not exceed the current config struct");
+
 
 // v17 snapshot — AllSky fields without allsky_enabled
 typedef struct {

@@ -5,6 +5,7 @@
 #include "esp_err.h"
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 
 /* One decoded RGB565 frame. Produced by image_fetch_*() into a caller-supplied,
  * zeroed struct; the caller (an image_page_t, see ui/nina_image_page.h) owns
@@ -23,7 +24,10 @@ typedef struct {
  * out->buf stays NULL and out->error_msg names the reason. */
 esp_err_t image_fetch_goes(const char *region, image_frame_t *out);
 esp_err_t image_fetch_solar(uint8_t band, image_frame_t *out);
-esp_err_t image_fetch_custom(const char *url, image_frame_t *out);
+/* @p auth_header is an optional raw "Name: value" request header (the Custom
+ * URL page's user-supplied header, e.g. "Authorization: Bearer xyz"); NULL or
+ * "" sends none, which is the previous behaviour. */
+esp_err_t image_fetch_custom(const char *url, const char *auth_header, image_frame_t *out);
 
 /* Same fetch+decode as image_fetch_custom(), but the COMPRESSED source bytes
  * survive the call so the caller can re-decode them later without re-fetching.
@@ -44,7 +48,11 @@ esp_err_t image_fetch_custom_retain(const char *url, image_frame_t *out,
  * when no match is found. Single source of truth for region labels. */
 const char *goes_region_name(const char *code);
 
-const char *solar_band_url(uint8_t idx);
+/* Writes the fetch URL for a solar band into out (always NUL-terminated).
+ * Bands 0..17 are fixed URLs; the GOES SUVI bands (18..23) are rendered on
+ * demand and their URL carries the current UTC time, so it is built per call
+ * and needs a live NTP clock. 256 bytes is enough for every band. */
+void        solar_band_url(uint8_t idx, char *out, size_t sz);
 const char *solar_band_label(uint8_t idx);
 bool        solar_band_vflip(uint8_t idx);
 

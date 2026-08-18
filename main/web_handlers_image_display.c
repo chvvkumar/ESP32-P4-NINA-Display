@@ -75,6 +75,8 @@ esp_err_t image_display_config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "clouds_update_interval_s", cfg->clouds_update_interval_s);
     cJSON_AddNumberToObject(root, "clouds_frames", cfg->clouds_frames);
     cJSON_AddNumberToObject(root, "clouds_zoom", cfg->clouds_zoom);
+    /* 0 = GeoColor, 1 = Clean Infrared (Band 13), 2 = Air Mass. */
+    cJSON_AddNumberToObject(root, "clouds_channel", cfg->clouds_channel);
 
     cJSON_AddStringToObject(root, "goes_region", cfg->goes_region);
     cJSON_AddNumberToObject(root, "goes_update_interval_s", cfg->goes_update_interval_s);
@@ -89,6 +91,11 @@ esp_err_t image_display_config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "solar_vflip", cfg->solar_vflip);
     cJSON_AddNumberToObject(root, "solar_hflip", cfg->solar_hflip);
     cJSON_AddStringToObject(root, "custom_image_url", cfg->custom_image_url);
+    /* Stored secret: redacted to the "********" sentinel (same as GET
+     * /api/config); the POST handler below preserves the stored header when the
+     * sentinel comes back, and an empty string clears it. */
+    cJSON_AddStringToObject(root, "custom_image_header",
+                            cfg->custom_image_header[0] != '\0' ? "********" : "");
     cJSON_AddNumberToObject(root, "custom_orientation", cfg->custom_orientation);
     cJSON_AddNumberToObject(root, "custom_vflip", cfg->custom_vflip);
     cJSON_AddNumberToObject(root, "custom_hflip", cfg->custom_hflip);
@@ -131,6 +138,10 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     if (!validate_string_len(root, "custom_image_url", sizeof(((app_config_t *)0)->custom_image_url))) {
         cJSON_Delete(root);
         return send_400(req, "custom_image_url too long");
+    }
+    if (!validate_string_len(root, "custom_image_header", sizeof(((app_config_t *)0)->custom_image_header))) {
+        cJSON_Delete(root);
+        return send_400(req, "custom_image_header too long");
     }
     if (!validate_string_len(root, "radar_token", sizeof(((app_config_t *)0)->radar_token))) {
         cJSON_Delete(root);
@@ -267,6 +278,15 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
         if (v > 9) v = 9;
         cur->clouds_zoom = (uint8_t)v;
     }
+    /* Channel picks a different GIBS layer, so it invalidates the frame ring
+     * exactly like zoom does (source_params_changed in nina_image_page.c).
+     * Out of range resets to GeoColor, matching the INT_RESET settings row. */
+    cJSON *cchan = cJSON_GetObjectItem(root, "clouds_channel");
+    if (cJSON_IsNumber(cchan)) {
+        int v = cchan->valueint;
+        if (v < 0 || v > 2) v = 0;
+        cur->clouds_channel = (uint8_t)v;
+    }
     cJSON *sinterval = cJSON_GetObjectItem(root, "solar_update_interval_s");
     if (cJSON_IsNumber(sinterval)) {
         int v = sinterval->valueint;
@@ -305,7 +325,7 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     cJSON *mlon = cJSON_GetObjectItem(root, "moon_lon");
     if (cJSON_IsNumber(mlon)) cur->moon_lon = (float)mlon->valuedouble;
     cJSON *sb = cJSON_GetObjectItem(root, "solar_band");
-    if (cJSON_IsNumber(sb)) { int v = sb->valueint; cur->solar_band = (v >= 0 && v <= 17) ? (uint8_t)v : 0; }
+    if (cJSON_IsNumber(sb)) { int v = sb->valueint; cur->solar_band = (v >= 0 && v <= 23) ? (uint8_t)v : 0; }
     cJSON *go = cJSON_GetObjectItem(root, "goes_orientation");
     if (cJSON_IsNumber(go)) { int v = go->valueint; cur->goes_orientation = (v >= 0 && v <= 3) ? (uint8_t)v : 0; }
     cJSON *gvf = cJSON_GetObjectItem(root, "goes_vflip");
@@ -321,6 +341,20 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     /* Custom image URL: length + scheme already validated above; copy bounded
      * into the 256-byte field. */
     JSON_TO_STRING(root, "custom_image_url", cur->custom_image_url);
+    /* Optional request header sent with the custom image fetch (a stored
+     * secret). The GET above hands out "********" in place of it, so a
+     * round-tripped sentinel means "keep the stored header": drop the key and
+     * the key-present-gated copy below leaves the snapshot value alone (same as
+     * strip_masked_secrets() on /api/config). An empty string clears it.
+     * http_fetch rejects a CR/LF-bearing header name or value, so no separate
+     * injection check is needed here. */
+    {
+        cJSON *ch = cJSON_GetObjectItem(root, "custom_image_header");
+        if (cJSON_IsString(ch) && strcmp(ch->valuestring, "********") == 0) {
+            cJSON_DeleteItemFromObject(root, "custom_image_header");
+        }
+    }
+    JSON_TO_STRING(root, "custom_image_header", cur->custom_image_header);
     cJSON *co = cJSON_GetObjectItem(root, "custom_orientation");
     if (cJSON_IsNumber(co)) { int v = co->valueint; cur->custom_orientation = (v >= 0 && v <= 3) ? (uint8_t)v : 0; }
     cJSON *cvf = cJSON_GetObjectItem(root, "custom_vflip");
@@ -353,6 +387,12 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     bool force_fetch = false;
     cJSON *ff = cJSON_GetObjectItem(root, "force_fetch");
     if (cJSON_IsBool(ff)) { force_fetch = cJSON_IsTrue(ff); }
+    /* A new request header means the next download is a different request, so
+     * refetch. force_fetch is consulted for the Custom page only, which is the
+     * only page the header applies to. */
+    if (strcmp(cur->custom_image_header, prev->custom_image_header) != 0) {
+        force_fetch = true;
+    }
 
     /* Preview: apply live, persist nothing (mirrors json_config_post_handler).
      * The web UI's image tabs always post preview:true -- persisting here wrote

@@ -450,6 +450,11 @@ esp_err_t config_get_handler(httpd_req_t *req)
     /* weather_api_key: same shape as octoprint_api_key (SETTINGS_TABLE row,
      * is_sensitive in s_backup_fields, so the POST sentinel is stripped). */
     REDACT_STRING_FIELD(weather_api_key);
+    /* custom_image_header: an optional "Name: value" header for the Custom URL
+     * image fetch, so it may carry an API key or bearer token. Same shape as
+     * the two above (SETTINGS_TABLE row, is_sensitive in s_backup_fields, so
+     * the POST sentinel is stripped and the stored value survives). */
+    REDACT_STRING_FIELD(custom_image_header);
     #undef REDACT_STRING_FIELD
     /* admin_password is never serialized by serialize_config_to_json() at all. */
 
@@ -659,6 +664,7 @@ static const backup_field_t s_backup_fields[] = {
     {"clouds_update_interval_s",   "Cloud Cover Update Interval","Cloud Cover", false, false},
     {"clouds_frames",              "Cloud Cover Animation Length","Cloud Cover", false, false},
     {"clouds_zoom",                "Cloud Cover Area",          "Cloud Cover", false, false},
+    {"clouds_channel",             "Cloud Cover Channel",       "Cloud Cover", false, false},   /* v67 */
     {"goes_region",                "GOES Region",          "GOES", false, false},
     {"goes_update_interval_s",     "GOES Update Interval", "GOES", false, false},
     {"custom_image_url",           "Custom Image URL",     "Custom URL", false, false},
@@ -713,6 +719,10 @@ static const backup_field_t s_backup_fields[] = {
      * change renames the device mid-session and is the diff a user most needs
      * to see. */
     {"weather_api_key",    "Weather API Key",    "Weather", true, false, true},
+    /* v67: the Custom URL image header may carry a key or bearer token, so it is
+     * sensitive+mask_preview like the other credentials here even though its
+     * category is the Custom URL page. */
+    {"custom_image_header","Custom Image Header","Custom URL", true, false, true},
     {"mqtt_username",      "MQTT Username",      "MQTT",    true, false, true},
     {"mqtt_password",      "MQTT Password",      "MQTT",    true, false, true},
     {"mqtt_broker_url",    "MQTT Broker URL",    "MQTT",    true, false, true},
@@ -765,6 +775,7 @@ static const restore_strmax_t s_restore_strmax[] = {
     {"allsky_field_config", 1536},
     {"allsky_thresholds",   1024},
     {"custom_image_url",    256},
+    {"custom_image_header", 256},
     {"json_tiles_config",   JSON_TILES_CONFIG_MAX},
     {"ha_tiles_config",     HA_TILES_CONFIG_MAX},
     {"json_url",            256},
@@ -1224,6 +1235,7 @@ static bool validate_config_fields(cJSON *root, httpd_req_t *req)
         !validate_string_len(root, "allsky_thresholds", 1024) ||
         !validate_string_len(root, "goes_region", sizeof(((app_config_t *)0)->goes_region)) ||
         !validate_string_len(root, "custom_image_url", sizeof(((app_config_t *)0)->custom_image_url)) ||
+        !validate_string_len(root, "custom_image_header", sizeof(((app_config_t *)0)->custom_image_header)) ||
         /* JSON Display / Home Assistant page fields (restore path only; absent
          * from the config POST body, which routes them through their own
          * endpoints). Bounds mirror json_config_post_handler /
