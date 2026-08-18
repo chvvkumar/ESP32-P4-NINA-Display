@@ -480,7 +480,7 @@ typedef struct {
     // Added after v65 (Clouds page) — must stay at end to preserve NVS binary compatibility
     bool     clouds_enabled;           // show the Clouds satellite page (default false)
     bool     clouds_show_overlay;      // draw the label/time strip over the picture (default true)
-    uint16_t clouds_update_interval_s; // 300-7200 s, default 600 (GIBS publishes every 10 min)
+    uint16_t clouds_update_interval_s; // 300-7200 s, default 900 (GIBS publishes every 10 min)
     uint8_t  clouds_frames;            // 1-10 animation frames, default 6 (~1 MB PSRAM each)
     uint8_t  clouds_zoom;              // 5-9 Web-Mercator zoom around weather_lat/lon, default 7
 } app_config_t;

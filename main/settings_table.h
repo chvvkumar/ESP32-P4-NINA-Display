@@ -211,7 +211,7 @@
     /* -- Clouds page (v66): NASA GIBS GOES GeoColor around weather_lat/lon -- */ \
     BOOL      (clouds_enabled,               "clouds_enabled",               false) \
     BOOL      (clouds_show_overlay,          "clouds_show_overlay",          true) \
-    INT       (clouds_update_interval_s,     "clouds_update_interval_s",     600,   300,   7200)  /* 10 min default (GIBS publishes every 10 min). True clamp, matching the image POST handler's clamp-to-bound */ \
+    INT       (clouds_update_interval_s,     "clouds_update_interval_s",     900,   300,   7200)  /* 15 min default (GIBS publishes every 10 min). True clamp, matching the image POST handler's clamp-to-bound */ \
     INT_RESET (clouds_frames,                "clouds_frames",                6,     1,     10)    /* animation depth, ~1 MB PSRAM per 720x720 frame. RESET: 0 (unset blob) and >10 both fall back to the default */ \
     INT_RESET (clouds_zoom,                  "clouds_zoom",                  7,     5,     9)     /* Web-Mercator zoom of the 720 px picture: 5 ~2500 km wide .. 9 ~150 km. RESET: an unknown value falls back to the default, never to a bound */
 

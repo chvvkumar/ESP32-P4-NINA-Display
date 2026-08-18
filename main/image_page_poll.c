@@ -387,7 +387,10 @@ static void radar_frame_url(char *url, size_t sz, const char token[16], int fram
  *   times[]       advertised TIME stamps NEWEST FIRST, verbatim as the radar
  *                 WMS caps list them (styles 1/2; empty on style 0);
  *   stamps[]      the same list as UTC seconds for a source whose stamps are
- *                 parsed (Clouds; 0 for radar = unknown, hash-only dedupe).
+ *                 parsed (Clouds; 0 for radar = unknown, hash-only dedupe);
+ *   retry_backfill Clouds: a history slot was fetched but rejected as
+ *                 incomplete (clouds_drop_incomplete), so run the backfill
+ *                 again on the next poll even without an activation request.
  * Touched only by that page's poll task (net_poll_once and anim_backfill run on
  * it sequentially). File-scope on purpose: the string table is 320 B per source
  * and does not belong on the 12288 B poller stack. */
@@ -396,6 +399,7 @@ typedef struct {
     int      ntimes;
     char     times[RADAR_WMS_TIMES_MAX][RADAR_WMS_TIME_MAX];
     uint32_t stamps[RADAR_WMS_TIMES_MAX];
+    bool     retry_backfill;
 } anim_state_t;
 static anim_state_t s_anim[IMG_SRC_COUNT];
 /* The ring indexes stamps[]/times[] up to its capacity, so the two times lists
@@ -534,9 +538,36 @@ static bool anim_frame_url(image_page_t *p, const app_config_t *cfg, const char 
     return radar_wms_url_for(url, sz, cfg, token, a->ntimes > 0 ? a->times[i] : NULL);
 }
 
+/* Clouds only: GIBS answers 200 for a slot it has not finished ingesting (the
+ * borders overlay over black, or black tile blocks), and such a frame must never
+ * reach the ring. Tests the raw decoded pixels (clouds_frame_incomplete); on a
+ * hit frees the frame and its retained source exactly as a failed decode is
+ * freed, logs once, and returns true so the caller skips the insert. The stamp
+ * is not held, so the existing paths re-fetch it on the next poll (times[0]/[1]
+ * every poll; older slots via retry_backfill). Not a failure: no caption, no
+ * toast, no spine backoff. Radar (and a NULL frame) always returns false. */
+static bool clouds_drop_incomplete(image_page_t *p, image_frame_t *f, uint8_t **src, int i)
+{
+    if (p->src != IMG_SRC_CLOUDS || f->buf == NULL) return false;
+    if (!clouds_frame_incomplete((const uint16_t *)f->buf, f->w, f->h, f->w)) return false;
+    anim_state_t *a = &s_anim[p->src];
+    ESP_LOGI(TAG, "clouds: slot %s incomplete, will retry",
+             (i >= 0 && i < a->ntimes) ? a->times[i] : "?");
+    heap_caps_free(f->buf);
+    f->buf = NULL;
+    if (*src) {
+        heap_caps_free(*src);
+        *src = NULL;
+    }
+    return true;
+}
+
 /* Fetch history frame @p i under generation @p gen and hand it to the ring
  * (accepted or rejected, the ring owns both buffers). Serialised on the fetch
- * gate. false when the fetch failed (older frames are optional). */
+ * gate. false when the fetch failed (older frames are optional). A Clouds frame
+ * rejected as incomplete counts as fetched (true) so the backfill walks on to
+ * the older, usually complete, slots; it flags retry_backfill so the slot is
+ * tried again next poll. */
 static bool anim_fetch_index(image_page_t *p, const app_config_t *cfg, const char *token,
                              int i, uint32_t gen)
 {
@@ -553,6 +584,10 @@ static bool anim_fetch_index(image_page_t *p, const app_config_t *cfg, const cha
         /* src is NULL on every error return (see image_fetch_custom_retain). */
         return false;
     }
+    if (clouds_drop_incomplete(p, &old, &src, i)) {
+        s_anim[p->src].retry_backfill = true;
+        return true;
+    }
     image_page_ring_add(p, &old, false, gen, src, src_len, anim_stamp(p, i));
     return true;
 }
@@ -564,10 +599,12 @@ static bool anim_fetch_index(image_page_t *p, const app_config_t *cfg, const cha
  * to back: this board glitches the panel under sustained radio transmission
  * (see wifi_max_tx_dbm), and nine rapid TLS downloads are exactly that profile.
  * Stops early when the ring fills, a fetch fails (older frames are optional),
- * or the page is left mid-backfill. */
+ * or the page is left mid-backfill. @p first is the first history index to
+ * fetch: 1, or 2 for Clouds, whose caller has just fetched index 1 itself (one
+ * attempt per stamp per poll). */
 #define RADAR_BACKFILL_GAP_MS 1000
 
-static void anim_backfill(image_page_t *p, const app_config_t *cfg)
+static void anim_backfill(image_page_t *p, const app_config_t *cfg, int first)
 {
     int cap = image_page_ring_capacity(p);
     if (cap <= 1) return;                       /* frames == 1: a still, no ring */
@@ -579,7 +616,7 @@ static void anim_backfill(image_page_t *p, const app_config_t *cfg)
     char token[16];
     image_page_radar_token(cfg, token, sizeof(token));
 
-    for (int i = 1; i < cap; i++) {
+    for (int i = first; i < cap; i++) {
         if (!atomic_load(&p->poll_gate)) break;             /* page left / un-warmed */
         if (image_page_ring_count(p) >= cap) break;         /* ring full */
         /* A stamped frame the ring already holds (Clouds re-entry after a
@@ -755,8 +792,21 @@ static bool net_poll_once(void *arg)
         if (animated) {
             /* Newest frame at the head; a re-served identical still is deduped
              * inside _add. Only then rebuild the history (outside the fetch
-             * gate, which the backfill re-takes per download). */
-            image_page_ring_add(p, &fresh, true, ring_gen, ring_src, ring_src_len, anim_stamp(p, 0));
+             * gate, which the backfill re-takes per download). A Clouds slot
+             * GIBS has not finished ingesting is dropped instead of inserted:
+             * expected while the newest slot fills in, so no caption, no toast,
+             * and the poll still counts as a success (no backoff); last_push_ms
+             * is left alone so the next poll re-fetches it. */
+            anim_state_t *a = &s_anim[p->src];
+            if (clouds_drop_incomplete(p, &fresh, &ring_src, 0)) {
+                if (show_wait && bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                    nina_wait_overlay_hide();
+                    bsp_display_unlock();
+                }
+            } else {
+                image_page_ring_add(p, &fresh, true, ring_gen, ring_src, ring_src_len, anim_stamp(p, 0));
+                a->last_push_ms = esp_timer_get_time() / 1000;
+            }
             /* Ring pages never go through image_page_commit_frame(), which is
              * what clears p->frame.error_msg for every other source (it assigns
              * the whole zeroed `fresh`). Without this, one transient failure
@@ -764,7 +814,10 @@ static bool net_poll_once(void *arg)
              * checks the error branch BEFORE the ring branch, so every later
              * activation repaints the stale reason until the first frame lands. */
             image_page_set_error(p, "");
-            s_anim[p->src].last_push_ms = esp_timer_get_time() / 1000;
+            /* Consume the incomplete-slot retry BEFORE this pass's fetches so a
+             * slot rejected below is retried on the NEXT poll, never twice now. */
+            bool retry = a->retry_backfill;
+            a->retry_backfill = false;
             /* Clouds: GIBS serves the newest one or two slots partially at
              * first (black quadrants until every tile is ingested), so the
              * second-newest is re-fetched on every poll too; the ring replaces
@@ -773,7 +826,9 @@ static bool net_poll_once(void *arg)
                 vTaskDelay(pdMS_TO_TICKS(RADAR_BACKFILL_GAP_MS));   /* same radio stagger as the backfill */
                 anim_fetch_index(p, cfg, token, 1, ring_gen);
             }
-            if (image_page_ring_backfill_take(p)) anim_backfill(p, cfg);
+            if (image_page_ring_backfill_take(p) || retry) {
+                anim_backfill(p, cfg, p->src == IMG_SRC_CLOUDS ? 2 : 1);
+            }
         } else {
             image_page_commit_frame(p, &fresh, false);
         }

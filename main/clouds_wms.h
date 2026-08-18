@@ -28,12 +28,14 @@
  *    or behind the real newest so a real list heals it instead of leaving a
  *    blank frame stranded as "Latest" ahead of every real stamp).
  *
- *  - ponytail: an HTTP 200 blank JPEG for a slot that DescribeDomains listed
- *    but the origin has not filled (or a partial frame with black quadrants)
- *    is not detected in this version; it enters the ring like any other
- *    frame and is only healed by the same-stamp replace on the next poll.
- *    Upgrade path: keep a per-(layer,bbox) blank length+CRC probe at
- *    TIME=2000-01-01T00:00:00Z and drop matching bodies.
+ *  - An HTTP 200 blank JPEG for a slot that DescribeDomains listed but the
+ *    origin has not filled, and a partial frame whose missing tiles are black
+ *    blocks, are caught by clouds_frame_incomplete() (black-sample fraction)
+ *    before the frame reaches the ring; the poller re-fetches the stamp on the
+ *    next poll. ponytail: a partial frame that leaves < CLOUDS_BLANK_PCT of
+ *    the samples black still slips through and is only healed by the
+ *    same-stamp replace on the next poll. Upgrade path: also compare the
+ *    tile grid against the previous frame for the same stamp.
  *
  * All maths is float-only (the P4 FPU is single precision); the calendar
  * helpers are integer days-from-civil / civil-from-days, no localtime.
@@ -346,4 +348,33 @@ static inline int clouds_parse_domains(const char *xml, size_t len, uint32_t *ou
         }
     }
     return count;
+}
+
+/* ---- blank / partial frame detection ---- */
+
+/* GIBS answers HTTP 200 for a slot whose tiles are missing: a BLANK frame is the
+ * Reference_Features_15m overlay drawn over black (~99% pure black), and a
+ * PARTIAL frame (tiles not yet ingested) has rectangular pure-black blocks.
+ * Real GeoColor is never pure black at zoom 5..9: the night background is a
+ * dark navy and daylight is land, sea or cloud, so pure 0x0000 only comes from
+ * a hole. Sample every CLOUDS_BLANK_STEP-th pixel of every CLOUDS_BLANK_STEP-th
+ * row (8100 samples of a 720x720 frame) and call the frame incomplete when more
+ * than CLOUDS_BLANK_PCT percent of them are 0x0000. Raw decoded pixels, before
+ * any bake or Red Night remap. */
+#define CLOUDS_BLANK_STEP 8      /* sample stride, pixels and rows */
+#define CLOUDS_BLANK_PCT  3      /* > this % of samples pure black = incomplete */
+
+static inline bool clouds_frame_incomplete(const uint16_t *rgb565, int w, int h, int stride_px)
+{
+    if (rgb565 == NULL || w <= 0 || h <= 0) return false;
+    if (stride_px < w) stride_px = w;
+    uint32_t n = 0, black = 0;
+    for (int y = 0; y < h; y += CLOUDS_BLANK_STEP) {
+        const uint16_t *row = rgb565 + (size_t)y * (size_t)stride_px;
+        for (int x = 0; x < w; x += CLOUDS_BLANK_STEP) {
+            n++;
+            if (row[x] == 0x0000u) black++;
+        }
+    }
+    return black * 100u > n * (uint32_t)CLOUDS_BLANK_PCT;
 }
