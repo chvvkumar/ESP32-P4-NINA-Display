@@ -226,3 +226,21 @@ add_nina_host_test(test_time_parse
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_parse.c
         ${NINA_REPO_ROOT}/main/time_parse.c
 )
+
+# ---------------------------------------------------------------------------
+# test_radar_wms -- URL/geometry decisions for the road-free radar source
+# (main/radar_wms.h): region table, float Web-Mercator, pixel sizing, GetMap
+# and GetCapabilities URL shape, and the capabilities TIME-list parser, plus
+# radar_site_coords() from main/radar_sites.c which feeds the site box.
+# Header-only, no ESP-IDF dependency. The parser also runs over two real
+# GetCapabilities documents in test/host/fixtures/ (captured 2026-08-17),
+# located at run time through NINA_FIXTURE_DIR.
+# ---------------------------------------------------------------------------
+add_nina_host_test(test_radar_wms
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_radar_wms.c
+        ${NINA_REPO_ROOT}/main/radar_sites.c
+)
+target_compile_definitions(test_radar_wms PRIVATE
+    NINA_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+)

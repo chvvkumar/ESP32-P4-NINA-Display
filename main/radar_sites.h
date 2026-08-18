@@ -20,6 +20,8 @@
 #ifndef RADAR_SITES_H
 #define RADAR_SITES_H
 
+#include <stdbool.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -35,6 +37,9 @@ typedef struct {
 /* Nearest site to the given position. Returns a pointer to a static string
  * that is never NULL and never freed. */
 const char *radar_site_nearest(float lat, float lon);
+
+/* Coordinates of a WSR-88D site by uppercase id. false when unknown. */
+bool radar_site_coords(const char *id, float *lat, float *lon);
 
 #ifdef __cplusplus
 }

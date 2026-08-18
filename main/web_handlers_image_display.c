@@ -60,6 +60,9 @@ esp_err_t image_display_config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "radar_crop",         cfg->radar_crop);
     /* true = dark basemap, false = the NWS picture as published. */
     cJSON_AddBoolToObject(root, "radar_dark_mode",      cfg->radar_dark_mode);
+    /* 0 = standard map (roads, city names), 1 = state lines only,
+     * 2 = state and county lines. Crop and dark mode apply to style 0 only. */
+    cJSON_AddNumberToObject(root, "radar_map_style",    cfg->radar_map_style);
     cJSON_AddNumberToObject(root, "solar_update_interval_s", cfg->solar_update_interval_s);
     cJSON_AddNumberToObject(root, "moon_update_interval_s",  cfg->moon_update_interval_s);
     cJSON_AddNumberToObject(root, "radar_update_interval_s", cfg->radar_update_interval_s);
@@ -198,6 +201,19 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
         if (v < 0) v = 0;
         if (v > 1) v = 1;
         cur->radar_crop = (uint8_t)v;
+    }
+    /* Map style 0..2 (see the GET handler). Same two wire shapes as radar_crop
+     * for the same cached-page reason: an out-of-range number falls back to 1
+     * (state lines only, the default), a bool maps true -> 1 (state lines) /
+     * false -> 0 (an explicit false means the standard picture). Absent or any
+     * other type leaves the stored value alone. The live-apply step below
+     * treats a style change as a new picture and refetches. */
+    cJSON *rstyle = cJSON_GetObjectItem(root, "radar_map_style");
+    if (cJSON_IsBool(rstyle)) {
+        cur->radar_map_style = cJSON_IsTrue(rstyle) ? 1 : 0;
+    } else if (cJSON_IsNumber(rstyle)) {
+        int v = rstyle->valueint;
+        cur->radar_map_style = (v >= 0 && v <= 2) ? (uint8_t)v : 1;
     }
     /* Charset and length checked above; empty string clears it back to auto. */
     JSON_TO_STRING(root, "radar_token", cur->radar_token);

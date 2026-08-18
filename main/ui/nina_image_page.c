@@ -1340,8 +1340,10 @@ bool image_page_config_crop(const app_config_t *c, image_src_t src)
         /* Radar's field is a 0..2 fit mode, not a flag; "any crop at all" is
          * all this predicate answers, and no radar path reaches it anyway
          * (render_frame returns early for radar, render_params_changed too).
-         * The mode itself is read straight from config at insert. */
-        case IMG_SRC_RADAR:  return c->radar_crop != 0;
+         * The mode itself is read straight from config at insert, where the
+         * radar_map_style gate lives; mirrored here so the predicate never
+         * claims a crop that the bake would not apply. */
+        case IMG_SRC_RADAR:  return c->radar_map_style == 0 && c->radar_crop != 0;
         default:             return false;   /* Moon never crops */
     }
 }
@@ -1872,9 +1874,18 @@ void image_page_radar_add(image_page_t *p, image_frame_t *fresh, bool at_head, u
      * conservative and correct) or NEW pixels with a NEW one. Settings-then-gen
      * could label old pixels as current — which is the pumping bug. */
     uint32_t bake_gen = atomic_load(&s_radar_bake_gen);
-    bool red  = image_red_remap_active();
-    bool dark = app_config_get()->radar_dark_mode || red;
-    radar_bake(fresh, app_config_get()->radar_crop, dark);
+    /* Map styles 1/2 (state / county lines) come from a different NWS service:
+     * black background, no banner, no legend. The crop has nothing to trim and
+     * the invert would turn that black sheet WHITE (and, under Red Night,
+     * bright red) — the exact failure the invert exists to prevent on style 0.
+     * So both are skipped by design there, Red Night included: the red remap
+     * inside radar_bake() is theme-gated and still runs, mapping the black
+     * ground to black and the lines/echoes to red shades. */
+    const app_config_t *cfg = app_config_get();
+    bool    red  = image_red_remap_active();
+    bool    dark = cfg->radar_map_style == 0 && (cfg->radar_dark_mode || red);
+    uint8_t mode = cfg->radar_map_style ? 0 : cfg->radar_crop;
+    radar_bake(fresh, mode, dark);
 
     /* Dedupe on the COMPRESSED bytes when they were retained: 37 KB hashed
      * instead of 660 KB, and — the reason it matters — the key is invariant
@@ -2051,9 +2062,12 @@ static bool radar_retransform_pass(image_page_t *p)
      * it — conservative, and it converges on the latest settings. */
     uint32_t bake_gen = atomic_load(&s_radar_bake_gen);
     const app_config_t *c = app_config_get();
-    uint8_t  mode = c->radar_crop;
+    /* Same style gate as image_page_radar_add(): styles 1/2 are served on a
+     * black background with no banner, so crop and invert are no-ops by design
+     * (the invert would whiten the black ground, Red Night included). */
+    uint8_t  mode = c->radar_map_style ? 0 : c->radar_crop;
     bool     red  = image_red_remap_active();
-    bool     dark = c->radar_dark_mode || red;
+    bool     dark = c->radar_map_style == 0 && (c->radar_dark_mode || red);
     uint32_t gen  = image_page_radar_gen();
 
     /* Claim the Red Night state for this pass UP FRONT. image_page_apply_theme()
@@ -2262,6 +2276,8 @@ static bool source_params_changed(image_src_t s, const app_config_t *prev, const
              * "keep it simple" beats a second shrink-only path). */
             if (strcmp(cur->radar_token, prev->radar_token) != 0) return true;
             if (cur->radar_frames != prev->radar_frames) return true;
+            /* radar_map_style picks a different NWS service: different images. */
+            if (cur->radar_map_style != prev->radar_map_style) return true;
             return cur->radar_token[0] == '\0' &&
                    (cur->weather_lat != prev->weather_lat ||
                     cur->weather_lon != prev->weather_lon);
@@ -2272,7 +2288,10 @@ static bool source_params_changed(image_src_t s, const app_config_t *prev, const
 /* Radar-only "re-derive the ring locally" test: purely how the SAME pictures are
  * drawn. Both are baked into the stored pixels, so they cannot be re-rendered on
  * the fly like the other pages' crop — but the ring keeps each frame's
- * compressed bytes, so re-deriving costs a decode, not a download. */
+ * compressed bytes, so re-deriving costs a decode, not a download.
+ * Deliberately NOT gated on radar_map_style: on styles 1/2 both settings are
+ * ignored at bake time, so a toggle there costs one harmless local re-derive
+ * that lands on identical pixels. Cheaper than a second predicate. */
 static bool radar_local_params_changed(const app_config_t *prev, const app_config_t *cur)
 {
     return cur->radar_crop != prev->radar_crop ||

@@ -869,6 +869,7 @@ static void set_defaults(app_config_t *cfg) {
                               // centred square that fills the panel
     cfg->radar_frames = 10;   // full NOAA loop; ~660 KB of PSRAM per retained frame
     cfg->radar_dark_mode = true;   // v64: dark basemap by default (night-friendly)
+    cfg->radar_map_style = 1;      // v65: state lines only (0 = standard NWS picture with roads and city names)
 
     // Spotify client ID: secret-like sentinel, not table-driven
     cfg->spotify_client_id[0] = '\0';
@@ -2720,9 +2721,31 @@ static void migrate_from_v63(const void *raw, size_t raw_size, app_config_t *cfg
      * byte before the new field and its trailing padding lands on top.
      * Re-assert it, same as migrate_from_v61 does for octoprint_overlay_visible. */
     cfg->radar_dark_mode = true;
+    cfg->radar_map_style = 1;   /* v65 field also lies in the v63 snapshot's tail padding; force the default (state lines only) */
 
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v63 to v%d", APP_CONFIG_VERSION);
+}
+
+/* --- v64 -> v65 migration: appends radar_map_style (Weather Radar page "Map
+ *     style"). Additive and at the very end, so this stays a plain prefix
+ *     memcpy like every migration around it. An upgrading device moves to the
+ *     v65 default, state lines only (1); the standard NWS picture with roads
+ *     and city names stays selectable as 0. --- */
+static void migrate_from_v64(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v64_t) ? raw_size : sizeof(app_config_v64_t);
+    memcpy(cfg, raw, copy);
+
+    /* radar_map_style is a SETTINGS_TABLE row, so set_defaults() above already
+     * applied it. Only here can the memcpy reach it: the v64 snapshot ends one
+     * byte before the new field and its trailing padding lands on top.
+     * Re-assert it, same as migrate_from_v63 does for radar_dark_mode. */
+    cfg->radar_map_style = 1;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v64 to v%d", APP_CONFIG_VERSION);
 }
 
 
@@ -3466,6 +3489,14 @@ static bool validate_config(app_config_t *cfg) {
     cfg->radar_enabled      = cfg->radar_enabled ? true : false;
     cfg->radar_show_overlay = cfg->radar_show_overlay ? true : false;
     cfg->radar_dark_mode    = cfg->radar_dark_mode ? true : false;
+    /* radar_map_style: 0..2, anything else (stale blob byte) falls back to the
+     * default, state lines only (1). The INT_RESET row in settings_table.h already does
+     * this in settings_clamp_apply(); kept explicit here as the last line of
+     * defence, like the flags above. */
+    if (cfg->radar_map_style > 2) {
+        cfg->radar_map_style = 1;
+        fixed = true;
+    }
 
     /* WiFi TX power cap: whitelist, not a range — only the discrete dBm steps
      * the UI offers are meaningful, and 0 means "no cap". Anything else (a
@@ -3559,6 +3590,18 @@ void app_config_init(void) {
             nvs_commit(handle);
         }
         /* tiles_loaded stays false -> tail loads "json_tiles"/"ha_tiles" keys */
+    } else if (version_check == 64) {
+        /* v64 -> v65: appended radar_map_style. tiles_loaded stays false: a v64
+         * device already keeps its tiles in the "json_tiles"/"ha_tiles" NVS
+         * keys, so the tail loads them.
+         * Safe to write back immediately, same reasoning as the v63 branch: a
+         * v64 blob already holds a real 24-entry auto_rotate_order2[] and real
+         * per-page image settings, so both dispatcher-tail fixups below are
+         * excluded by their literal version bounds. */
+        migrate_from_v64(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 63) {
         /* v63 -> v64: appended radar_dark_mode. tiles_loaded stays false: a v63
          * device already keeps its tiles in the "json_tiles"/"ha_tiles" NVS

@@ -573,7 +573,7 @@ static const backup_field_t s_backup_fields[] = {
      * and parse_config_from_json() reads them with no hand-written arm. Registered
      * here for the diff, category grouping, sensitive split, and unknown-field
      * detection — and, for the API key, to drive strip_masked_secrets(). */
-    {"octoprint_enabled",           "3D Printer Page",        "OctoPrint", false, false},
+    {"octoprint_enabled",           "OctoPrint Page",         "OctoPrint", false, false},
     {"octoprint_url",               "OctoPrint URL",          "OctoPrint", false, false},
     {"octoprint_api_key",           "OctoPrint API Key",      "OctoPrint", true,  false, true},
     {"octoprint_update_interval_s", "OctoPrint Poll Interval","OctoPrint", false, false},
@@ -628,7 +628,8 @@ static const backup_field_t s_backup_fields[] = {
     {"custom_enabled",             "Custom Page Enabled",  "Image Display", false, false},
     {"custom_show_overlay",        "Custom Show Overlay",  "Image Display", false, false},
     {"custom_crop",                "Custom Crop/Fill",     "Image Display", false, false},
-    /* Weather Radar page (v63, plus radar_dark_mode at v64). All seven are SETTINGS_TABLE rows, so
+    /* Weather Radar page (v63, plus radar_dark_mode at v64 and radar_map_style at v65).
+     * All eight are SETTINGS_TABLE rows, so
      * serialize_config_to_json() emits them and parse_config_from_json() reads
      * them with no hand-written arm; registered here so the diff, category
      * grouping, sensitive split and unknown-field detection treat them like any
@@ -641,6 +642,7 @@ static const backup_field_t s_backup_fields[] = {
     {"radar_update_interval_s",    "Radar Update Interval","Image Display", false, false},
     {"radar_frames",               "Radar Animation Length","Image Display", false, false},
     {"radar_dark_mode",            "Radar Map Appearance", "Image Display", false, false},
+    {"radar_map_style",            "Radar Map Style",      "Image Display", false, false},
     {"goes_region",                "GOES Region",          "Image Display", false, false},
     {"goes_update_interval_s",     "GOES Update Interval", "Image Display", false, false},
     {"custom_image_url",           "Custom Image URL",     "Image Display", false, false},

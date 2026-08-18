@@ -1038,7 +1038,7 @@
         <button class="tab-btn" data-tab="image-solar">Solar</button>
         <button class="tab-btn" data-tab="image-custom">Custom URL</button>
         <button class="tab-btn" data-tab="image-radar">Radar</button>
-        <button class="tab-btn" data-tab="octoprint">3D Printer</button>
+        <button class="tab-btn" data-tab="octoprint">OctoPrint</button>
       </div>
       <div class="tab-group" data-section="device">
         <button class="tab-btn" data-tab="display">Display</button>
@@ -1096,7 +1096,7 @@
     <div id="tab-image-custom" class="tab-panel"></div>
     <div id="tab-image-radar" class="tab-panel"></div>
 
-    <!-- ==================== TAB: 3D PRINTER (OCTOPRINT) ==================== -->
+    <!-- ==================== TAB: OCTOPRINT ==================== -->
     <!-- Markup extracted to main/fragment_octoprint.html; lazily fetched by
          ensureTabLoaded() via GET /ui/fragment?tab=octoprint and injected here. -->
     <div id="tab-octoprint" class="tab-panel"></div>
@@ -1418,7 +1418,7 @@
         ['arp_clock','Clock',7],
         ['arp_json','JSON Display',24],
         ['arp_ha','Home Assistant',25],
-        ['arp_octoprint','3D Printer',26],
+        ['arp_octoprint','OctoPrint',26],
         ['arp_img_goes','Img: GOES',8],
         ['arp_img_moon','Img: Moon',9],
         ['arp_img_solar','Img: Solar',10],
@@ -2269,6 +2269,8 @@
       data.radar_crop=$('radar_crop').checked?1:0;
       /* Plain on/off toggle; the device key is a JSON bool (JSON_TO_BOOL). */
       data.radar_dark_mode=!!$('radar_dark_mode').checked;
+      /* 0 standard, 1 state lines, 2 state + county lines (uint8 on the device). */
+      data.radar_map_style=parseInt($('radar_map_style').value,10)||0;
       /* Empty value = the "Automatic" option; the device then picks the nearest
          site itself, so send the empty string rather than dropping the key. */
       data.radar_token=$('radar_token').value;
@@ -2694,6 +2696,13 @@
       /* Dark is the default, so only an explicit false clears the toggle -- a
          missing key (older firmware) must not flip the page to the light map. */
       if($('radar_dark_mode')) $('radar_dark_mode').checked=(data.radar_dark_mode!==false);
+      /* Missing key (older firmware) or anything out of range shows the default,
+         State lines only; an explicit 0 shows Standard. */
+      if($('radar_map_style')){
+        var rms=(data.radar_map_style===undefined||data.radar_map_style===null)?1:(parseInt(data.radar_map_style,10)||0);
+        $('radar_map_style').value=String((rms>=0&&rms<=2)?rms:1);
+      }
+      radarMapStyleSync();
       /* '' is the Automatic option and a legitimate stored value, so keep it
          (|| '' only covers a missing key). An area saved by a newer firmware
          than this page knows about would not match any option; fall back to
@@ -4440,6 +4449,21 @@
       var on=$(t.en).checked;
       if($(t.fields)) $(t.fields).style.display=on?'':'none';
       updatePageSelectOptions();
+    }
+
+    /* Dark mode and Crop only affect the standard radar map picture; the two
+       line-only styles have neither a banner to trim nor a light background to
+       darken, so grey those controls out while such a style is selected. */
+    function radarMapStyleSync(){
+      var sel=$('radar_map_style'); if(!sel) return;
+      var std=(parseInt(sel.value,10)||0)===0;
+      var wrap=$('radarStdOnly');
+      if(wrap){
+        wrap.style.opacity=std?'':'0.5';
+        wrap.title=std?'':'Applies to the standard map only';
+      }
+      if($('radar_dark_mode')) $('radar_dark_mode').disabled=!std;
+      if($('radar_crop')) $('radar_crop').disabled=!std;
     }
 
     /* weather_lat/weather_lon are System-tab fields (Location card) reused as

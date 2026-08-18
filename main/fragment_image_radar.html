@@ -1,7 +1,7 @@
 
         <div class="card">
           <div class="card-title"><span class="card-title-label">Weather Radar <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
-          <div class="help-popover"><div class="help-popover-title">Weather Radar page</div><p>Adds a full-screen page showing the latest National Weather Service radar picture. Choose a single radar site, a regional view, or the whole lower 48; the picture refreshes at the update interval you choose.</p><p>Crop zooms the map to fill the screen and hides the National Weather Service banner and colour scale; leave it off to see the whole published picture with black bars above and below. Coverage is the United States and its territories only.</p></div>
+          <div class="help-popover"><div class="help-popover-title">Weather Radar page</div><p>Adds a full-screen page showing the latest National Weather Service radar picture. Choose a single radar site, a regional view, or the whole lower 48; the picture refreshes at the update interval you choose and plays back the most recent pictures as a short animation.</p><p>Coverage is the United States and its territories only.</p></div>
           <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
             <span class="toggle-label">Enable Weather Radar page</span>
             <label class="toggle"><input type="checkbox" id="radar_enabled" onchange="updateImagePageEnabledUI('image-radar');applyImagePage('image-radar');checkDirty()"><span class="toggle-track"></span></label>
@@ -13,46 +13,6 @@
               <label class="toggle"><input type="checkbox" id="radar_show_overlay" onchange="applyImagePage('image-radar');checkDirty()"><span class="toggle-track"></span></label>
             </div>
             <div class="field-hint">Area name and update time overlay on the display</div>
-            <div class="toggle-row" style="margin-top:16px">
-              <span class="toggle-label">Dark mode</span>
-              <label class="toggle"><input type="checkbox" id="radar_dark_mode" onchange="applyImagePage('image-radar');checkDirty()"><span class="toggle-track"></span></label>
-            </div>
-            <div class="field-hint">Darkens the map background and outlines so the page is not blinding in a dark room. Turn it off to see the picture exactly as the National Weather Service publishes it, on a white background. The rain and storm colours look the same either way. The Red Night theme always uses the dark map, whatever this is set to.</div>
-            <div class="toggle-row" style="margin-top:16px">
-              <span class="toggle-label">Crop</span>
-              <label class="toggle"><input type="checkbox" id="radar_crop" onchange="applyImagePage('image-radar');checkDirty()"><span class="toggle-track"></span></label>
-            </div>
-            <div class="field-hint">Zoom the map to fill the screen and hide the National Weather Service banner and colour scale. The sides are trimmed too, more so on wide views like the national map; turn it off to see the whole picture with bars above and below.</div>
-            <div class="field" style="margin-top:16px">
-              <label class="field-label">Update Interval</label>
-              <select class="input" id="radar_update_interval_s" onchange="applyImagePage('image-radar');checkDirty()">
-                <option value="120">2 minutes</option>
-                <option value="300">5 minutes</option>
-                <option value="600">10 minutes</option>
-                <option value="900" selected>15 minutes</option>
-                <option value="1800">30 minutes</option>
-                <option value="3600">1 hour</option>
-                <option value="7200">2 hours</option>
-              </select>
-              <div class="field-hint">How often the radar picture refreshes. The National Weather Service publishes a new picture about every 2 minutes, so checking more often than that gains nothing.</div>
-              <div class="field-hint">This also changes the look of the animation over time. When the page first loads it fills the animation with the ten most recent pictures, which are about 2 minutes apart, so it starts as a smooth 20 minute replay. From then on it adds one new picture each time it refreshes, so the older ones gradually age out and the replay stretches. At 15 minutes, after a couple of hours the animation covers about 2.5 hours in 15 minute jumps: a longer story of the weather, but a choppier one. A shorter interval keeps the animation smooth and close to real time, at the cost of more network traffic.</div>
-            </div>
-            <div class="field" style="margin-top:16px">
-              <label class="field-label">Animation length</label>
-              <select class="input" id="radar_frames" onchange="applyImagePage('image-radar');checkDirty()">
-                <option value="1">1 frame - still picture, no animation</option>
-                <option value="2">2 frames - about 4 minutes</option>
-                <option value="3">3 frames - about 6 minutes</option>
-                <option value="4">4 frames - about 8 minutes</option>
-                <option value="5">5 frames - about 10 minutes</option>
-                <option value="6">6 frames - about 12 minutes</option>
-                <option value="7">7 frames - about 14 minutes</option>
-                <option value="8">8 frames - about 16 minutes</option>
-                <option value="9">9 frames - about 18 minutes</option>
-                <option value="10" selected>10 frames - about 20 minutes</option>
-              </select>
-              <div class="field-hint">How much recent weather the page plays back. Each frame is one radar picture taken about 2 minutes apart, so 10 frames is roughly the last 20 minutes; 1 frame is a still picture that never animates. Each extra frame is another picture the display keeps in memory, so pick a shorter animation if the device is short on room.</div>
-            </div>
             <div class="field" style="margin-top:16px">
               <label class="field-label">Radar area</label>
               <select class="input" id="radar_token" onchange="applyImagePage('image-radar');checkDirty()">
@@ -324,7 +284,65 @@
                   <option value="KRIW">KRIW - Riverton/Lander, WY</option>
                 </optgroup>
               </select>
-              <div class="field-hint">Automatic uses the radar nearest the latitude and longitude set on the System tab, and falls back to the national view when no site is close enough.</div>
+              <div class="field-hint">Automatic uses the radar nearest the location set on the System tab; falls back to the national view when none is close.</div>
+            </div>
+            <div class="card">
+              <div class="card-title"><span class="card-title-label">Map appearance <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+              <div class="help-popover"><div class="help-popover-title">Map appearance</div><p>Map style picks the picture behind the radar. The standard picture shows roads and city names. The two line-only styles draw just state lines, or state and county lines, with no roads or labels; they are useful when road markings are hard to tell from heavy rain. Dark mode and Crop apply only to the standard picture.</p><p>Dark mode darkens the map background and outlines so the page is not blinding in a dark room. Turn it off to see the picture exactly as the National Weather Service publishes it, on a white background. The rain and storm colours look the same either way. The Red Night theme always uses the dark map, whatever this is set to.</p><p>Crop zooms the map to fill the screen and hides the National Weather Service banner and colour scale. The sides are trimmed too, more so on wide views like the national map; turn it off to see the whole picture with bars above and below.</p></div>
+            <div class="field" style="margin-top:16px">
+              <label class="field-label">Map style</label>
+              <select class="input" id="radar_map_style" onchange="radarMapStyleSync();applyImagePage('image-radar');checkDirty()">
+                <option value="0">Standard (roads and city names)</option>
+                <option value="1" selected>State lines only</option>
+                <option value="2">State and county lines</option>
+              </select>
+              <div class="field-hint">Standard shows roads and city names; the two line styles draw only state or state and county lines.</div>
+            </div>
+            <div id="radarStdOnly">
+            <div class="toggle-row" style="margin-top:16px">
+              <span class="toggle-label">Dark mode</span>
+              <label class="toggle"><input type="checkbox" id="radar_dark_mode" onchange="applyImagePage('image-radar');checkDirty()"><span class="toggle-track"></span></label>
+            </div>
+            <div class="field-hint">Dark map for night viewing; off shows the picture as published on white.</div>
+            <div class="toggle-row" style="margin-top:16px">
+              <span class="toggle-label">Crop</span>
+              <label class="toggle"><input type="checkbox" id="radar_crop" onchange="applyImagePage('image-radar');checkDirty()"><span class="toggle-track"></span></label>
+            </div>
+            <div class="field-hint">Fill the screen and hide the banner and colour scale.</div>
+            </div>
+            </div>
+            <div class="card">
+              <div class="card-title"><span class="card-title-label">Animation <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+              <div class="help-popover"><div class="help-popover-title">Animation</div><p>Update Interval sets how often the radar picture refreshes. The National Weather Service publishes a new picture about every 2 minutes, so checking more often than that gains nothing.</p><p>The interval also changes the look of the animation over time. When the page first loads it fills the animation with the ten most recent pictures, which are about 2 minutes apart, so it starts as a smooth 20 minute replay. From then on it adds one new picture each time it refreshes, so the older ones gradually age out and the replay stretches. At 15 minutes, after a couple of hours the animation covers about 2.5 hours in 15 minute jumps: a longer story of the weather, but a choppier one. A shorter interval keeps the animation smooth and close to real time, at the cost of more network traffic.</p><p>Animation length sets how much recent weather the page plays back. Each frame is one radar picture taken about 2 minutes apart, so 10 frames is roughly the last 20 minutes; 1 frame is a still picture that never animates. Each extra frame is another picture the display keeps in memory, so pick a shorter animation if the device is short on room.</p></div>
+            <div class="field" style="margin-top:16px">
+              <label class="field-label">Update Interval</label>
+              <select class="input" id="radar_update_interval_s" onchange="applyImagePage('image-radar');checkDirty()">
+                <option value="120">2 minutes</option>
+                <option value="300">5 minutes</option>
+                <option value="600">10 minutes</option>
+                <option value="900" selected>15 minutes</option>
+                <option value="1800">30 minutes</option>
+                <option value="3600">1 hour</option>
+                <option value="7200">2 hours</option>
+              </select>
+              <div class="field-hint">How often a new radar picture is fetched.</div>
+            </div>
+            <div class="field" style="margin-top:16px">
+              <label class="field-label">Animation length</label>
+              <select class="input" id="radar_frames" onchange="applyImagePage('image-radar');checkDirty()">
+                <option value="1">1 frame - still picture, no animation</option>
+                <option value="2">2 frames - about 4 minutes</option>
+                <option value="3">3 frames - about 6 minutes</option>
+                <option value="4">4 frames - about 8 minutes</option>
+                <option value="5">5 frames - about 10 minutes</option>
+                <option value="6">6 frames - about 12 minutes</option>
+                <option value="7">7 frames - about 14 minutes</option>
+                <option value="8">8 frames - about 16 minutes</option>
+                <option value="9">9 frames - about 18 minutes</option>
+                <option value="10" selected>10 frames - about 20 minutes</option>
+              </select>
+              <div class="field-hint">How many recent pictures the page plays back; 1 is a still picture.</div>
+            </div>
             </div>
           </div>
         </div>

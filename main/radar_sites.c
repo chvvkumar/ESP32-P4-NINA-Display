@@ -19,6 +19,7 @@
  */
 
 #include <math.h>
+#include <string.h>
 #include "radar_sites.h"
 
 /* Degrees to radians. Spelled out rather than using M_PI, which is not
@@ -217,4 +218,17 @@ const char *radar_site_nearest(float lat, float lon)
     }
 
     return best->id;
+}
+
+bool radar_site_coords(const char *id, float *lat, float *lon)
+{
+    if (id == NULL) return false;
+    for (int i = 0; i < RADAR_SITE_COUNT; i++) {
+        if (strcmp(s_radar_sites[i].id, id) == 0) {
+            if (lat) *lat = s_radar_sites[i].lat;
+            if (lon) *lon = s_radar_sites[i].lon;
+            return true;
+        }
+    }
+    return false;
 }

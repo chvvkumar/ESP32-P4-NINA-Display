@@ -13,6 +13,9 @@
 #include "ui/nina_toast.h"
 #include "poll_task.h"
 #include "radar_play.h"            /* radar_frame_is_stale (ring generation) */
+#include "radar_wms.h"             /* styles 1/2: GeoServer WMS URL builder + caps TIME parser */
+#include "radar_sites.h"           /* radar_site_coords (WMS site bbox centre) */
+#include "http_fetch.h"            /* http_fetch_text (WMS GetCapabilities) */
 #include "tasks.h"                 /* s_wifi_event_group, WIFI_CONNECTED_BIT, ota_in_progress */
 #include "app_config.h"
 #include "display_defs.h"
@@ -356,9 +359,11 @@ static void moon_commit(image_page_t *p, uint16_t *img, int w, int h)
 
 /* ---- GOES / Solar / Custom / Radar ---- */
 
-/* Build a RIDGE still URL. `token` is a char[16] and `frame` is 0..9, so the
- * longest possible result is 41 + 15 + 1 + 6 + NUL = 64 bytes; url[96] cannot
- * truncate and satisfies -Werror=format-truncation on its own array bounds.
+/* Build a RIDGE still URL (radar_map_style 0). `token` is a char[16] and
+ * `frame` is 0..9, so the longest possible result is 41 + 15 + 1 + 6 + NUL = 64
+ * bytes; the callers' url[RADAR_WMS_URL_MAX] (512, sized for the WMS request
+ * that styles 1/2 build in the same buffer) cannot truncate and satisfies
+ * -Werror=format-truncation on its own array bounds.
  *
  * HARD BAN: `frame` is an int index 0..9 and MUST STAY ONE. Never widen this
  * to a string suffix and never let a caller pass "loop": {TOKEN}_loop.gif is
@@ -378,8 +383,61 @@ static void radar_frame_url(char *url, size_t sz, const char token[16], int fram
  * can skip a download. Touched only by this task. */
 static int64_t s_radar_last_push_ms = 0;
 
+/* Advertised TIME stamps of the radar layer for styles 1/2 (GeoServer WMS),
+ * NEWEST FIRST, refreshed on every newest-frame fetch. Touched only by the
+ * radar poll task (net_poll_once and radar_backfill run on it sequentially).
+ * File-scope on purpose: 320 B does not belong on the 12288 B poller stack. */
+static char s_radar_times[RADAR_WMS_TIMES_MAX][RADAR_WMS_TIME_MAX];
+static int  s_radar_ntimes = 0;
+
+/* Build the WMS GetMap URL for `token` under styles 1/2. `token` has already
+ * passed image_page_radar_token() (A-Z0-9 only) and radar_wms_frame_url()
+ * re-checks the alphabet, so the _loop.gif ban above cannot be bypassed here.
+ * false when the token is neither a region/mosaic nor a known site (the page
+ * caption names it). */
+static bool radar_wms_url_for(char *url, size_t sz, const app_config_t *cfg,
+                              const char *token, const char *stamp)
+{
+    float lat = 0.0f, lon = 0.0f;
+    if (!radar_wms_region(token) && !radar_site_coords(token, &lat, &lon)) return false;
+    return radar_wms_frame_url(url, sz, cfg->radar_map_style, token, lat, lon, stamp);
+}
+
+/* Refresh s_radar_times from the namespace-scoped GetCapabilities document.
+ * Blind time stepping does not work (the newest frame lags wall clock by a
+ * variable amount and out-of-range TIME returns a valid near-black GIF), so
+ * the advertised list is the only safe source of stamps. Empty on any failure:
+ * the newest fetch then omits TIME (server default = newest) and backfill
+ * stops. KHDC is the standing case: its namespace GetCapabilities advertises
+ * zero layers (so no time list) although its GetMap serves a live picture, so
+ * on styles 1/2 it shows the newest picture only, with no history. */
+static void radar_wms_refresh_times(const char *token)
+{
+    char url[128];
+    char layer[32];
+    s_radar_ntimes = 0;
+    if (!radar_wms_caps_url(url, sizeof(url), token) ||
+        !radar_wms_layer_name(layer, sizeof(layer), token)) return;
+    http_fetch_opts_t opts = {
+        .timeout_ms = 10000,
+        .use_tls_bundle = true,
+        .max_response_bytes = 65536,
+        .user_agent = "NINA-Display/1.0 (ESP32-P4 dashboard)",
+    };
+    char *body = NULL;
+    size_t len = 0;
+    if (http_fetch_text(url, &opts, &body, &len) != ESP_OK) {
+        ESP_LOGW(TAG, "radar caps fetch failed for %s; newest only", token);
+        return;
+    }
+    s_radar_ntimes = radar_wms_parse_times(body, len, layer, s_radar_times, RADAR_WMS_TIMES_MAX);
+    heap_caps_free(body);
+    if (s_radar_ntimes == 0) ESP_LOGW(TAG, "no advertised radar times for %s; newest only", token);
+}
+
 /* Rebuild the history behind the newest frame after a page activation: fetch
- * {TOKEN}_1.gif upward and APPEND each at the tail, so the ring stays
+ * {TOKEN}_1.gif upward (style 0) or the advertised WMS stamps from the second
+ * newest down (styles 1/2) and APPEND each at the tail, so the ring stays
  * newest-first without ever reordering. Frames are STAGGERED ~1 s apart rather
  * than run back to back: this board glitches the panel under sustained radio
  * transmission (see wifi_max_tx_dbm), and nine rapid TLS downloads are exactly
@@ -398,6 +456,7 @@ static void radar_backfill(image_page_t *p, const app_config_t *cfg)
     uint32_t gen = image_page_radar_gen();
     char token[16];
     image_page_radar_token(cfg, token, sizeof(token));
+    uint8_t style = cfg->radar_map_style;
 
     for (int i = 1; i < cap; i++) {
         if (!atomic_load(&p->poll_gate)) break;             /* page left / un-warmed */
@@ -429,8 +488,17 @@ static void radar_backfill(image_page_t *p, const app_config_t *cfg)
          * this task, and no insert is in flight at this point in the loop. */
         image_page_radar_retransform_if_requested(p);
 
-        char url[96];
-        radar_frame_url(url, sizeof(url), token, i);
+        char url[RADAR_WMS_URL_MAX];
+        if (style == 0) {
+            radar_frame_url(url, sizeof(url), token, i);
+        } else {
+            /* Styles 1/2 index the advertised stamp list newest-first, so
+             * frame i is the i-th newest -- what RIDGE's _i.gif means on
+             * style 0. No more stamps (KHDC advertises none, parse failure,
+             * short list) or an unknown token: the history simply ends here. */
+            if (i >= s_radar_ntimes) break;
+            if (!radar_wms_url_for(url, sizeof(url), cfg, token, s_radar_times[i])) break;
+        }
 
         image_frame_t old = {0};
         uint8_t *src = NULL;
@@ -534,9 +602,25 @@ static bool net_poll_once(void *arg)
              * task must not persist config). Frame 0 is the newest still. */
             char token[16];
             image_page_radar_token(cfg, token, sizeof(token));
-            char url[96];
-            radar_frame_url(url, sizeof(url), token, 0);
-            err = image_fetch_custom_retain(url, &fresh, &radar_src, &radar_src_len);
+            char url[RADAR_WMS_URL_MAX];
+            if (cfg->radar_map_style == 0) {
+                radar_frame_url(url, sizeof(url), token, 0);
+                err = image_fetch_custom_retain(url, &fresh, &radar_src, &radar_src_len);
+                break;
+            }
+            /* Styles 1/2: the caps fetch is a network op, so it stays inside
+             * s_fetch_gate with the frame fetch. Newest = advertised stamp [0],
+             * or the server default (= newest) when none were advertised. The
+             * token passed image_page_radar_token() and radar_wms_frame_url()
+             * re-checks its alphabet, so the _loop.gif ban holds on this path. */
+            radar_wms_refresh_times(token);
+            if (!radar_wms_url_for(url, sizeof(url), cfg, token,
+                                   s_radar_ntimes > 0 ? s_radar_times[0] : NULL)) {
+                strlcpy(fresh.error_msg, "Unknown radar area", sizeof(fresh.error_msg));
+                err = ESP_ERR_INVALID_ARG;
+            } else {
+                err = image_fetch_custom_retain(url, &fresh, &radar_src, &radar_src_len);
+            }
             break;
         }
         default:   /* IMG_SRC_CUSTOM */

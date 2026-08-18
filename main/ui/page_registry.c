@@ -64,7 +64,7 @@ static const page_ref_entry_t s_pages[] = {
     /* id 23 */ { PAGE_REF_OVL_EVENTLOG,     "overlay.eventlog",       "Event Log",        PAGE_REF_KIND_OVERLAY,      PAGE_REF_SUMMARY,      false, "System",  -1                                     },
     /* id 24 */ { PAGE_REF_JSON,             "json",                   "JSON Display",     PAGE_REF_KIND_PAGE,         PAGE_REF_JSON,         true,  "Ambient", PAGE_IDX_JSON                          },
     /* id 25 */ { PAGE_REF_HA,               "ha",                     "Home Assistant",   PAGE_REF_KIND_PAGE,         PAGE_REF_HA,           true,  "Ambient", PAGE_IDX_HA                            },
-    /* id 26 */ { PAGE_REF_OCTOPRINT,        "octoprint",              "3D Printer",       PAGE_REF_KIND_PAGE,         PAGE_REF_OCTOPRINT,    true,  "Ambient", PAGE_IDX_OCTOPRINT                     },
+    /* id 26 */ { PAGE_REF_OCTOPRINT,        "octoprint",              "OctoPrint",        PAGE_REF_KIND_PAGE,         PAGE_REF_OCTOPRINT,    true,  "Ambient", PAGE_IDX_OCTOPRINT                     },
     /* id 27 */ { PAGE_REF_RADAR,     "image.radar",  "Weather Radar",  PAGE_REF_KIND_IMAGE_SOURCE, PAGE_REF_RADAR,      true, "Image", PAGE_IDX_IMG_RADAR  },
 };
 

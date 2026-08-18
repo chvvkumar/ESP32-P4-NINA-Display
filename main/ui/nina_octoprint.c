@@ -796,7 +796,7 @@ lv_obj_t *octoprint_page_create(lv_obj_t *parent)
 
     s_empty = nina_empty_state_create(s_backdrop, ICON_CLOUD_OFF,
                                       "OctoPrint Not Configured",
-                                      "Check the 3D Printer settings.", 0);
+                                      "Check the OctoPrint settings.", 0);
     return s_root;
 }
 
