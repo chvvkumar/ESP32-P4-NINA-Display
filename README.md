@@ -22,9 +22,12 @@
 
 A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nighttime-imaging.eu/), built for the Waveshare ESP32-P4-WIFI6-Touch-LCD-4B (720x720). It polls the [ninaAPI Advanced plugin](https://github.com/christian-photo/ninaAPI) over HTTP and WebSocket and shows live session data for up to three NINA computers: exposure arcs, guiding RMS, filter status, sequence progress, power draw, and a Summary page across all instances. Beyond NINA it runs a clock with weather and a 3D moon, a Spotify Now Playing screen, an AllSky environmental panel, GOES satellite, Solar and custom image pages, an animated Weather Radar loop, a Cloud Cover satellite loop, JSON Display and Home Assistant tile pages, and an OctoPrint 3D printer page. Voice alerts through the onboard speaker announce threshold breaches, connection changes and session events.
 
-<p align="center">
-  <img src="images/pic1.jpg" alt="Display showing a NINA instance page" width="720">
-</p>
+<table align="center">
+  <tr>
+    <td align="center"><img src="images/pic1.jpg" alt="Display showing a NINA instance page" width="420"></td>
+    <td align="center"><img src="images/imagepreview.jpg" alt="Display showing the full-screen image preview" width="420"></td>
+  </tr>
+</table>
 
 ## Table of Contents
 
