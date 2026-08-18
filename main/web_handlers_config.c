@@ -447,6 +447,9 @@ esp_err_t config_get_handler(httpd_req_t *req)
      * write direction needs no arm: it is is_sensitive in s_backup_fields, so
      * strip_masked_secrets() drops the sentinel and preserves the stored key. */
     REDACT_STRING_FIELD(octoprint_api_key);
+    /* weather_api_key: same shape as octoprint_api_key (SETTINGS_TABLE row,
+     * is_sensitive in s_backup_fields, so the POST sentinel is stripped). */
+    REDACT_STRING_FIELD(weather_api_key);
     #undef REDACT_STRING_FIELD
     /* admin_password is never serialized by serialize_config_to_json() at all. */
 

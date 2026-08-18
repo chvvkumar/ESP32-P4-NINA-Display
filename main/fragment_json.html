@@ -200,7 +200,7 @@
       </div>
       <div class="field">
         <label class="field-label" for="jd_auth">Auth Header <span style="color:var(--text-hint);font-weight:400">(optional)</span></label>
-        <input class="input mono" id="jd_auth" maxlength="255" placeholder="X-API-Key: &lt;key&gt;" oninput="jdOnSourceEdit()" onchange="jdOnSourceCommit()">
+        <input class="input mono" id="jd_auth" maxlength="255" type="password" autocomplete="off" placeholder="X-API-Key: &lt;key&gt;" oninput="jdOnSourceEdit()" onchange="jdOnSourceCommit()">
         <div class="field-hint">One header sent with each request, written as <code>Name: value</code> (for example <code>Authorization: Bearer &lt;token&gt;</code> or <code>X-API-Key: &lt;key&gt;</code>). Tile key paths read nested values with dot and <code>[index]</code> notation; a <code>[field=value]</code> selector matches an array element by one of its fields. Leave blank for none.</div>
       </div>
       <div class="row2">

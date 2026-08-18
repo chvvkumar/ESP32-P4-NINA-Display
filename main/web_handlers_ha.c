@@ -79,9 +79,9 @@ void ha_page_apply_live(bool enabled)
 /**
  * @brief GET /api/ha-config  -- return the Home Assistant config fields.
  *
- * Mirrors json_config_get_handler. Returns the raw token (as the JSON page
- * returns its raw auth header) so the config UI can round-trip it into the
- * password field.
+ * Mirrors json_config_get_handler. The token is redacted to the "********"
+ * sentinel (same as GET /api/config); the UI round-trips the sentinel and the
+ * POST handler below preserves the stored token when it sees it.
  */
 esp_err_t ha_config_get_handler(httpd_req_t *req)
 {
@@ -95,7 +95,7 @@ esp_err_t ha_config_get_handler(httpd_req_t *req)
 
     cJSON_AddBoolToObject(root,   "ha_enabled",           cfg->ha_enabled);
     cJSON_AddStringToObject(root, "ha_base_url",           cfg->ha_base_url);
-    cJSON_AddStringToObject(root, "ha_token",              cfg->ha_token);
+    cJSON_AddStringToObject(root, "ha_token",              cfg->ha_token[0] != '\0' ? "********" : "");
     cJSON_AddNumberToObject(root, "ha_update_interval_s",  cfg->ha_update_interval_s);
     cJSON_AddStringToObject(root, "ha_tiles_config",       app_config_get_ha_tiles());
 
@@ -162,6 +162,15 @@ esp_err_t ha_config_post_handler(httpd_req_t *req)
 
     JSON_TO_BOOL(root,   "ha_enabled",           cfg->ha_enabled);
     JSON_TO_STRING(root, "ha_base_url",          cfg->ha_base_url);
+    /* GET hands out "********" in place of the token; a round-tripped sentinel
+     * means "keep the stored token". Drop the key so the key-present-gated copy
+     * below leaves the snapshot's value alone (same as strip_masked_secrets()). */
+    {
+        cJSON *tok = cJSON_GetObjectItem(root, "ha_token");
+        if (cJSON_IsString(tok) && strcmp(tok->valuestring, "********") == 0) {
+            cJSON_DeleteItemFromObject(root, "ha_token");
+        }
+    }
     JSON_TO_STRING(root, "ha_token",             cfg->ha_token);
     JSON_TO_INT(root,    "ha_update_interval_s", cfg->ha_update_interval_s);
 
@@ -236,7 +245,10 @@ static bool ha_resolve_credentials(httpd_req_t *req, char *base, char *token)
     hlen = httpd_req_get_hdr_value_len(req, "X-HA-TOKEN");
     if (hlen > 0 && hlen < HA_TOKEN_BUF) {
         char tval[HA_TOKEN_BUF];
-        if (httpd_req_get_hdr_value_str(req, "X-HA-TOKEN", tval, sizeof(tval)) == ESP_OK) {
+        /* The form field shows the "********" sentinel for a stored token; that
+         * is not a token, so keep the saved value in that case. */
+        if (httpd_req_get_hdr_value_str(req, "X-HA-TOKEN", tval, sizeof(tval)) == ESP_OK &&
+            strcmp(tval, "********") != 0) {
             strlcpy(token, tval, HA_TOKEN_BUF);
         }
     }
