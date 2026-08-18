@@ -22,6 +22,7 @@
 #include "ui/nina_idle_indicator.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
 #include <string.h>
@@ -436,11 +437,28 @@ esp_err_t page_post_handler(httpd_req_t *req)
 // Persistent JPEG encoder engine — DMA link descriptors are allocated once from
 // internal DMA memory at startup (before display driver claims DMA resources) and
 // reused across all screenshot requests.
+//
+// The two encoder buffers below are also allocated once at boot and kept for
+// the life of the firmware. They cost 1.5 MB of PSRAM permanently
+// (720x720x2 input + 512 KB output); that was chosen deliberately because
+// request-time jpeg_alloc_encoder_mem() fails once the image-page frame rings
+// fragment PSRAM, and at boot the heap is still contiguous.
 static jpeg_encoder_handle_t s_jpeg_encoder = NULL;
+static uint8_t *s_enc_in = NULL;
+static size_t s_enc_in_size = 0;
+static uint8_t *s_enc_out = NULL;
+static size_t s_enc_out_size = 0;
+static SemaphoreHandle_t s_screenshot_mutex = NULL;   /* serialises use of the static buffers */
+
+#define SCREENSHOT_IN_RESERVE   ((size_t)SCREEN_SIZE * SCREEN_SIZE * 2)   /* RGB565 */
+#define SCREENSHOT_OUT_RESERVE  ((size_t)512 * 1024)
 
 void screenshot_encoder_init(void)
 {
     if (s_jpeg_encoder) return;
+    if (!s_screenshot_mutex) {
+        s_screenshot_mutex = xSemaphoreCreateMutex();
+    }
     jpeg_encode_engine_cfg_t engine_cfg = {
         .intr_priority = 0,
         .timeout_ms = 5000,
@@ -449,9 +467,24 @@ void screenshot_encoder_init(void)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "jpeg_new_encoder_engine failed: %s", esp_err_to_name(err));
         s_jpeg_encoder = NULL;
-    } else {
-        ESP_LOGI(TAG, "JPEG encoder engine pre-allocated");
+        return;
     }
+    ESP_LOGI(TAG, "JPEG encoder engine pre-allocated");
+
+    jpeg_encode_memory_alloc_cfg_t in_cfg = { .buffer_direction = JPEG_ENC_ALLOC_INPUT_BUFFER };
+    s_enc_in = (uint8_t *)jpeg_alloc_encoder_mem(SCREENSHOT_IN_RESERVE, &in_cfg, &s_enc_in_size);
+    if (!s_enc_in) {
+        s_enc_in_size = 0;
+        ESP_LOGE(TAG, "Screenshot input buffer alloc failed (%u bytes)", (unsigned)SCREENSHOT_IN_RESERVE);
+    }
+    jpeg_encode_memory_alloc_cfg_t out_cfg = { .buffer_direction = JPEG_ENC_ALLOC_OUTPUT_BUFFER };
+    s_enc_out = (uint8_t *)jpeg_alloc_encoder_mem(SCREENSHOT_OUT_RESERVE, &out_cfg, &s_enc_out_size);
+    if (!s_enc_out) {
+        s_enc_out_size = 0;
+        ESP_LOGE(TAG, "Screenshot output buffer alloc failed (%u bytes)", (unsigned)SCREENSHOT_OUT_RESERVE);
+    }
+    ESP_LOGI(TAG, "Screenshot buffers reserved: in=%u out=%u bytes",
+        (unsigned)s_enc_in_size, (unsigned)s_enc_out_size);
 }
 
 // Handler for screenshot capture - serves a JPEG image via hardware encoder
@@ -460,74 +493,87 @@ esp_err_t screenshot_get_handler(httpd_req_t *req)
     REQUIRE_AUTH(req);
     ESP_LOGI(TAG, "Screenshot requested");
 
-    if (!s_jpeg_encoder) {
+    if (!s_jpeg_encoder || !s_screenshot_mutex) {
         ESP_LOGE(TAG, "JPEG encoder not available (init failed at startup)");
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
+    if (xSemaphoreTake(s_screenshot_mutex, pdMS_TO_TICKS(5000)) != pdTRUE) {
+        ESP_LOGE(TAG, "Screenshot busy");
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    esp_err_t ret = ESP_FAIL;
+    uint8_t *tmp_in = NULL;      /* per-request fallbacks, freed at cleanup; statics never freed */
+    uint8_t *tmp_out = NULL;
+    lv_draw_buf_t *snapshot = NULL;
+    uint32_t width = 0, height = 0, stride = 0, row_size = 0, raw_size = 0;
+    uint8_t *enc_in = NULL;
+    uint8_t *enc_out = NULL;
+    size_t enc_out_size = 0;
+    uint32_t jpg_size = 0;
+    esp_err_t err = ESP_FAIL;
 
     // Take LVGL snapshot while holding the display lock
     if (!bsp_display_lock(5000)) {
         ESP_LOGE(TAG, "Failed to acquire display lock for screenshot");
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
+        goto fail;
     }
-
     lv_obj_t *scr = lv_scr_act();
-    if (!scr) {
-        bsp_display_unlock();
-        ESP_LOGE(TAG, "No active screen");
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
+    if (scr) {
+        snapshot = lv_snapshot_take(scr, LV_COLOR_FORMAT_RGB565);
     }
-
-    lv_draw_buf_t *snapshot = lv_snapshot_take(scr, LV_COLOR_FORMAT_RGB565);
     bsp_display_unlock();
 
     if (!snapshot || !snapshot->data) {
         ESP_LOGE(TAG, "Snapshot capture failed");
-        if (snapshot) lv_draw_buf_destroy(snapshot);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
+        goto fail;
     }
 
-    uint32_t width = snapshot->header.w;
-    uint32_t height = snapshot->header.h;
-    uint32_t stride = snapshot->header.stride;
-    uint32_t row_size = width * 2;  // RGB565: 2 bytes per pixel
-    uint32_t raw_size = row_size * height;
+    width = snapshot->header.w;
+    height = snapshot->header.h;
+    stride = snapshot->header.stride;
+    row_size = width * 2;  // RGB565: 2 bytes per pixel
+    raw_size = row_size * height;
 
     ESP_LOGI(TAG, "Snapshot captured: %lux%lu, stride=%lu", width, height, stride);
 
-    // Feed the LVGL draw buffer straight to the encoder when it is already
-    // cache-line aligned and densely packed (the driver msyncs the input
-    // itself); otherwise fall back to a DMA-aligned copy.
-    uint8_t *enc_in = NULL;      // owned copy, NULL when snapshot->data is used directly
-    const uint8_t *enc_src = NULL;
-    if (((uintptr_t)snapshot->data % 128) == 0 && stride == row_size) {
-        enc_src = snapshot->data;
-    } else {
-        jpeg_encode_memory_alloc_cfg_t in_mem_cfg = {
-            .buffer_direction = JPEG_ENC_ALLOC_INPUT_BUFFER,
-        };
-        size_t in_alloc_size = 0;
-        enc_in = (uint8_t *)jpeg_alloc_encoder_mem(raw_size, &in_mem_cfg, &in_alloc_size);
-        if (!enc_in) {
+    // Always copy into a DMA-aligned encoder buffer (feeding snapshot->data
+    // directly produced banded/stale pictures on device). Prefer the boot-time
+    // static buffers; fall back to per-request allocation only when they are
+    // missing or too small.
+    enc_in = s_enc_in;
+    if (!enc_in || raw_size > s_enc_in_size) {
+        jpeg_encode_memory_alloc_cfg_t in_cfg = { .buffer_direction = JPEG_ENC_ALLOC_INPUT_BUFFER };
+        size_t got = 0;
+        tmp_in = (uint8_t *)jpeg_alloc_encoder_mem(raw_size, &in_cfg, &got);
+        if (!tmp_in) {
             ESP_LOGE(TAG, "Failed to alloc JPEG encoder input buffer (%lu bytes)", raw_size);
-            lv_draw_buf_destroy(snapshot);
-            httpd_resp_send_500(req);
-            return ESP_FAIL;
+            goto fail;
         }
-        for (uint32_t y = 0; y < height; y++) {
-            memcpy(enc_in + y * row_size, snapshot->data + y * stride, row_size);
+        enc_in = tmp_in;
+    }
+    for (uint32_t y = 0; y < height; y++) {
+        memcpy(enc_in + y * row_size, snapshot->data + y * stride, row_size);
+    }
+    lv_draw_buf_destroy(snapshot);
+    snapshot = NULL;
+
+    enc_out = s_enc_out;
+    enc_out_size = s_enc_out_size;
+    if (!enc_out) {
+        jpeg_encode_memory_alloc_cfg_t out_cfg = { .buffer_direction = JPEG_ENC_ALLOC_OUTPUT_BUFFER };
+        tmp_out = (uint8_t *)jpeg_alloc_encoder_mem(raw_size / 2, &out_cfg, &enc_out_size);
+        if (!tmp_out) {
+            ESP_LOGE(TAG, "Failed to alloc JPEG encoder output buffer (%lu bytes)", raw_size / 2);
+            goto fail;
         }
-        lv_draw_buf_destroy(snapshot);
-        snapshot = NULL;
-        enc_src = enc_in;
+        enc_out = tmp_out;
     }
 
-    // Encode RGB565 -> JPEG. Output starts at raw_size/4; a too-small output
-    // buffer surfaces as ESP_ERR_INVALID_STATE, retried once at raw_size/2.
+    // Encode RGB565 -> JPEG. A too-small output buffer surfaces as
+    // ESP_ERR_INVALID_STATE; retry once with a per-request buffer of raw_size.
     jpeg_encode_cfg_t enc_cfg = {
         .src_type = JPEG_ENCODE_IN_FORMAT_RGB565,
         .sub_sample = JPEG_DOWN_SAMPLING_YUV422,
@@ -535,38 +581,24 @@ esp_err_t screenshot_get_handler(httpd_req_t *req)
         .width = width,
         .height = height,
     };
-    jpeg_encode_memory_alloc_cfg_t out_mem_cfg = {
-        .buffer_direction = JPEG_ENC_ALLOC_OUTPUT_BUFFER,
-    };
-    uint8_t *enc_out = NULL;
-    uint32_t jpg_size = 0;
-    esp_err_t err = ESP_FAIL;
-    for (int attempt = 0; attempt < 2; attempt++) {
-        size_t want = (attempt == 0) ? raw_size / 4 : raw_size / 2;
-        size_t out_alloc_size = 0;
-        enc_out = (uint8_t *)jpeg_alloc_encoder_mem(want, &out_mem_cfg, &out_alloc_size);
-        if (!enc_out) {
-            ESP_LOGE(TAG, "Failed to alloc JPEG encoder output buffer (%u bytes)", (unsigned)want);
-            err = ESP_ERR_NO_MEM;
-            break;
+    err = jpeg_encoder_process(s_jpeg_encoder, &enc_cfg,
+        enc_in, raw_size, enc_out, enc_out_size, &jpg_size);
+    if (err == ESP_ERR_INVALID_STATE && !tmp_out) {
+        ESP_LOGW(TAG, "JPEG output exceeded %u bytes, retrying with %lu", (unsigned)enc_out_size, raw_size);
+        jpeg_encode_memory_alloc_cfg_t out_cfg = { .buffer_direction = JPEG_ENC_ALLOC_OUTPUT_BUFFER };
+        tmp_out = (uint8_t *)jpeg_alloc_encoder_mem(raw_size, &out_cfg, &enc_out_size);
+        if (!tmp_out) {
+            ESP_LOGE(TAG, "Failed to alloc JPEG encoder retry buffer (%lu bytes)", raw_size);
+            goto fail;
         }
-        ESP_LOGD(TAG, "JPEG output buffer: %u bytes (attempt %d)", (unsigned)out_alloc_size, attempt);
+        enc_out = tmp_out;
         jpg_size = 0;
         err = jpeg_encoder_process(s_jpeg_encoder, &enc_cfg,
-            enc_src, raw_size, enc_out, out_alloc_size, &jpg_size);
-        if (err == ESP_OK) break;
-        free(enc_out);
-        enc_out = NULL;
-        if (err != ESP_ERR_INVALID_STATE) break;
+            enc_in, raw_size, enc_out, enc_out_size, &jpg_size);
     }
-    if (enc_in) free(enc_in);
-    if (snapshot) lv_draw_buf_destroy(snapshot);
-
     if (err != ESP_OK || jpg_size == 0) {
         ESP_LOGE(TAG, "JPEG encode failed: %s", esp_err_to_name(err));
-        if (enc_out) free(enc_out);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
+        goto fail;
     }
 
     ESP_LOGI(TAG, "Screenshot encoded: %lu bytes JPEG (%.1f:1 ratio)",
@@ -576,10 +608,18 @@ esp_err_t screenshot_get_handler(httpd_req_t *req)
     httpd_resp_set_type(req, "image/jpeg");
     httpd_resp_set_hdr(req, "Content-Disposition", "inline; filename=\"screenshot.jpg\"");
     httpd_resp_send(req, (const char *)enc_out, jpg_size);
-
-    free(enc_out);
     ESP_LOGI(TAG, "Screenshot sent successfully");
-    return ESP_OK;
+    ret = ESP_OK;
+    goto cleanup;
+
+fail:
+    httpd_resp_send_500(req);
+cleanup:
+    if (snapshot) lv_draw_buf_destroy(snapshot);
+    if (tmp_in) free(tmp_in);
+    if (tmp_out) free(tmp_out);
+    xSemaphoreGive(s_screenshot_mutex);
+    return ret;
 }
 
 /* POST /api/voice-preview — speak a sample voice alert through the speaker.

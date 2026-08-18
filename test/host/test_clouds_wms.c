@@ -267,6 +267,25 @@ int main(void) {
         check_int("domains: bounded by len", n, 1);
     }
 
+    /* ---- blank / partial frame detection ---- */
+    {
+        enum { W = 96, H = 64 };
+        static uint16_t px[W * H];
+        memset(px, 0, sizeof(px));
+        check_bool("incomplete: all black", clouds_frame_incomplete(px, W, H, W), true);
+        for (int i = 0; i < W * H; i++) px[i] = 0x0841;          /* night navy */
+        check_bool("incomplete: all dark navy", clouds_frame_incomplete(px, W, H, W), false);
+        /* 25% black block: top-left quadrant */
+        for (int y = 0; y < H / 2; y++)
+            for (int x = 0; x < W / 2; x++) px[y * W + x] = 0;
+        check_bool("incomplete: 25% black block", clouds_frame_incomplete(px, W, H, W), true);
+        /* ~1% black: 1 of the 12x8 = 96 sampled pixels */
+        for (int i = 0; i < W * H; i++) px[i] = 0x0841;
+        px[0] = 0;
+        check_bool("incomplete: 1% black", clouds_frame_incomplete(px, W, H, W), false);
+        check_bool("incomplete: NULL is not incomplete", clouds_frame_incomplete(NULL, W, H, W), false);
+    }
+
     printf("\n%s (%d failures)\n", fails == 0 ? "ALL PASSED" : "FAILED", fails);
     return fails == 0 ? 0 : 1;
 }

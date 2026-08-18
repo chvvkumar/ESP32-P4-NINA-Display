@@ -808,7 +808,7 @@ static void clouds_set_defaults(app_config_t *cfg)
 {
     cfg->clouds_enabled = false;
     cfg->clouds_show_overlay = true;
-    cfg->clouds_update_interval_s = 600;   /* 10 min; GIBS publishes a new GOES frame every 10 min */
+    cfg->clouds_update_interval_s = 900;   /* 15 min; GIBS publishes a new GOES frame every 10 min */
     cfg->clouds_frames = 6;                /* ~1 MB PSRAM per 720x720 frame */
     cfg->clouds_zoom = 7;                  /* ~600 km across at mid-latitudes */
 }
