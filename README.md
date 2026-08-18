@@ -20,7 +20,7 @@
   <img src="https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/chvvkumar/ESP32-P4-NINA-Display/badges/firmware-metrics.json&query=$.ota_size&label=OTA%20Binary&logo=chip&color=green" alt="OTA Size">
 </p>
 
-A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nighttime-imaging.eu/), built for the Waveshare ESP32-P4-WIFI6-Touch-LCD-4B (720x720). It polls the [ninaAPI Advanced plugin](https://github.com/christian-photo/ninaAPI) over HTTP and WebSocket and shows live session data for up to three NINA computers: exposure arcs, guiding RMS, filter status, sequence progress, power draw, and a Summary page across all instances. Beyond NINA it runs a clock with weather and a 3D moon, a Spotify Now Playing screen, an AllSky environmental panel, GOES satellite, Solar and custom image pages, an animated Weather Radar loop, a Cloud Cover satellite loop, JSON Display and Home Assistant tile pages, and an OctoPrint 3D printer page. Voice alerts through the onboard speaker announce threshold breaches, connection changes and session events.
+A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nighttime-imaging.eu/), built for the Waveshare ESP32-P4-WIFI6-Touch-LCD-4B (720x720). It polls the [ninaAPI Advanced plugin](https://github.com/christian-photo/ninaAPI) over HTTP and WebSocket and shows live session data for up to three NINA computers: exposure arcs, guiding RMS, filter status, sequence progress, power draw, and a Summary page across all instances. Beyond NINA it runs a clock page with weather, a full-screen 3D moon page, a Spotify Now Playing screen, an AllSky environmental panel, GOES satellite, Solar and custom image pages, an animated Weather Radar loop, a Cloud Cover satellite loop, JSON Display and Home Assistant tile pages, and an OctoPrint 3D printer page. Voice alerts through the onboard speaker announce threshold breaches, connection changes and session events.
 
 <table align="center">
   <tr>
@@ -78,7 +78,7 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
   <img src="images/NINA_Plugin.jpg" alt="ninaAPI plugin in the N.I.N.A. plugin manager" width="720">
 </p>
 
-2. Download `nina-display-factory.bin` from the [Releases page](https://github.com/chvvkumar/ESP32-P4-NINA-Display/releases). No build environment is needed: open the [ESP Web Flasher](https://espressif.github.io/esptool-js/) in a Chromium-based browser, connect the board over USB, and flash the file at address `0x0000`. Each release includes step-by-step flashing instructions.
+2. Download `nina-display-factory.bin` from the [Releases page](https://github.com/chvvkumar/ESP32-P4-NINA-Display/releases). No build environment is needed: open the [ESP Web Flasher](https://espressif.github.io/esptool-js/) in a Chromium-based browser, connect the board over USB, and flash the file at address `0x0000`. Each release lists the firmware files and the flashing address.
 
 3. Later updates arrive over the air: Device > System > Firmware checks GitHub releases on a chosen channel (stable, pre-release or alpha) and installs them, or flashes a `.bin` you upload from your computer. If a new firmware fails to boot, the bootloader rolls back to the previous one.
 
@@ -87,8 +87,8 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
 
 ## First-Time Setup
 
-1. On first boot, or whenever WiFi is not connected, the device broadcasts an access point named after its hostname (default `NINA-DISPLAY`, password `12345678`) and prints the network name and address on screen. Join it and open `http://192.168.4.1`.
-2. The setup page asks for your WiFi network. Save; the device joins your network and shows its address and hostname on screen until you dismiss the hint.
+1. On first boot, while no WiFi network is saved, the device broadcasts an access point named after its hostname (default `NINA-DISPLAY`, password `12345678`) and prints the network name, password and address on screen. Join it and open `http://192.168.4.1`.
+2. The setup page asks for your WiFi network. Pick it, enter the password and select Connect; the device joins your network and shows its address and hostname on screen until you dismiss the hint.
 3. Open that address, log in (see [Security](#security)), and add your NINA computers on Pages > N.I.N.A.: enter the host or IP of each PC (up to three); the page adds port 1888 and the API path for you.
 
 The access point is only on while the station link is down. Once the device joins your network the AP switches off; it comes back if the connection drops.
@@ -97,7 +97,7 @@ The access point is only on while the station link is down. Once the device join
 
 The web UI is protected by a password login (default `changeme123!`, no username). Change it on first use: Device > System > Authentication > Admin Password.
 
-- Login is required by default for every page and API endpoint. A session lasts 12 hours.
+- Login is required by default for every page and API endpoint except the login page, the favicon, the version endpoint and the Spotify OAuth callback; new routes are secured unless explicitly exempted. A session lasts 12 hours.
 - Scripts and automation can skip the login form and send the password in an `X-Auth-Password` header on each request. Wrong passwords on either path feed the same lockout.
 - WiFi and MQTT passwords, the Spotify client ID, the OctoPrint API key, the weather API key, the JSON auth header and the Home Assistant token are returned as `********` by the API; sending that placeholder back leaves the stored value unchanged.
 - Transport is HTTP, not HTTPS. Treat your LAN segment as the trust boundary.
@@ -107,13 +107,13 @@ The web UI is protected by a password login (default `changeme123!`, no username
 
 ## Pages
 
-Every page can be enabled or disabled from the web UI; the Clock, Summary and Settings pages are always present. Data pages that talk to a server show a "Connecting to ..." state until the first successful fetch, dim with a "Reconnecting..." cue after missed polls, and switch to "Cannot Reach ..." after three misses.
+Optional pages can be enabled or disabled from the web UI; the Summary, Clock, Settings and System Info pages are always present. Data pages that talk to a server show a "Connecting to ..." state until the first successful fetch, dim with a "Reconnecting..." cue after missed polls, and switch to "Cannot Reach ..." after three misses.
 
 ### Summary and NINA Instance Pages
 
-The Summary page shows a card for each configured NINA instance: name, active filter, target, sequence step and progress, RMS, HFR, safety state, and time to meridian flip. Tap a card to jump to that instance's page.
+The Summary page shows a card for each connected NINA instance (offline instances are hidden; with none connected it shows a "No N.I.N.A. Instances Connected" message): name, active filter, target, progress, RMS, HFR, safety state and time to meridian flip; with one or two cards on screen each card also shows the sequence name, completed exposures and current step. Tap a card to jump to that instance's page.
 
-Each instance page is a 720x720 grid: header (instance name, colored green when connected and red when not, and the current target), sequence, an animated exposure arc colored by the active filter, filter and timing, guiding RMS, image stats (HFR, star count), mount flip time, session time, and power (voltage, current, watts, dew-heater PWM). After 30 s without fresh data a Last update label appears; after 2 minutes the page dims.
+Each instance page is a 720x720 grid: header (instance name, colored green when connected and red when not, and the current target), sequence, an animated exposure arc colored by the active filter, filter and timing, guiding RMS, HFR, star count, mount flip time, time left on the target, and power (total current, total power, and each dew-heater or PWM channel). After 30 s without fresh data a Last update label appears; after 2 minutes the page dims.
 
 Setup: Pages > N.I.N.A. (host or IP per instance; the plugin listens on port 1888).
 
@@ -136,16 +136,16 @@ Every section on an instance page is tappable:
 
 | Tap area | Opens |
 |---|---|
-| Header | Full-screen JPEG preview of the last captured image (tap to dismiss) |
+| Header | Full-screen preview of the last captured image (double-tap to cycle zoom, back button to close) |
 | Sequence box | Sequence detail overlay (container, step, exposure counts) |
-| Exposure arc | Camera and weather overlay (camera name, temperature, dew point, humidity, pressure) |
+| Exposure arc | Camera and weather overlay (sensor, exposure, cooling and gain/offset details, plus temperature, humidity, dew point, wind, cloud and SQM from NINA's weather device) |
 | Filter label (arc center) | Filter wheel overlay (current and available filters) |
-| RMS box | RMS history graph (up to 500 points, RA/Dec/Total, threshold lines) |
-| HFR box (short tap) | HFR history graph (up to 500 points, threshold lines) |
+| RMS box | RMS history graph (25 to 400 points, RA/Dec/Total, threshold lines) |
+| HFR box (short tap) | HFR history graph (25 to 400 points, threshold lines) |
 | HFR box (long press) | Autofocus overlay (V-curve, focus position) |
 | Flip time box | Mount overlay (RA/Dec, altitude, azimuth, meridian flip state) |
-| Session time box | Session statistics overlay (total exposures, imaging time, target altitude, dawn) |
-| Stars box | Image statistics overlay (star count, HFR, FWHM, eccentricity, SNR) |
+| Time-left box | Session statistics overlay (exposures, integration time, efficiency, RMS and HFR average/best/worst, session duration) |
+| Stars box | Image statistics overlay (star count, HFR and HFR SD, pixel mean/median/stddev/min/max, capture settings, camera and telescope) |
 | Power row | Jump back to the Summary page |
 
 <table align="center">
@@ -167,11 +167,11 @@ Every section on an instance page is tappable:
   </tr>
 </table>
 
-Polling: the visible instance is polled every 2 s by default; the others get a 10 s heartbeat. The Summary page polls all instances at full rate; non-NINA pages drop every instance to a slow idle poll.
+Polling: the visible instance is polled every 5 s by default (1-10 s); the others get a 10 s heartbeat. The Summary page polls all instances at full rate; non-NINA pages drop every instance to a slow idle poll.
 
 ### Clock, Weather and Moon
 
-The Clock page shows a large analog or digital clock with current conditions, high and low, humidity, dew point, wind, UV, and hourly forecast bars from your chosen provider. The Moon page renders the Moon on the device with the current phase, libration and sub-solar lighting; drag it to look around, and pick a starfield or glow background.
+The Clock page shows a large digital clock with current conditions, high and low, humidity, dew point, wind, UV, and hourly forecast bars from your chosen provider. The Moon page renders the Moon on the device with the current phase, libration and sub-solar lighting; drag it to look around, and pick a starfield or glow background.
 
 Setup: Pages > Clock (weather provider: Open-Meteo needs no key; OpenWeatherMap and Weather Underground need an API key) and Pages > Moon. The location comes from Device > System > Location.
 
@@ -209,9 +209,9 @@ Setup: Pages > Spotify. You need a free app at [developer.spotify.com](https://d
 
 ### AllSky
 
-A four-quadrant environmental panel (thermal, sky quality, ambient, power) fed from an AllSky camera's `/all` endpoint. Each quadrant maps to fields of the AllSky JSON, with thresholds that color the readings.
+A four-quadrant environmental panel (thermal, sky quality, ambient, power) fed from an AllSky camera. The data comes from [AllSkyExtraVarsREST](https://github.com/chvvkumar/AllSkyExtraVarsREST), a small FastAPI service you install on the AllSky Raspberry Pi; it serves the AllSky overlay extra-variable JSON files (star count, exposure, temperatures, weather, planets and moon) over HTTP on port 8080, and the display reads its `/all` endpoint. Each quadrant maps to fields of that JSON, with thresholds that color the readings.
 
-Setup: Pages > AllSky (hostname of the AllSky server; the tab fetches the field list and lets you map it to the quadrants).
+Setup: install AllSkyExtraVarsREST on the AllSky Pi (`bash install.sh`), then Pages > AllSky (host and port of that service, for example `allskypi5.lan:8080`; the tab fetches the field list and lets you map it to the quadrants).
 
 <p align="center">
   <img src="images/allsky.jpg" alt="AllSky page" width="720">
@@ -239,13 +239,13 @@ Setup: Pages > Solar.
 
 ### Custom Image URL
 
-Full-screen JPEG or PNG fetched from any URL you supply, for example a webcam or a weather map.
+Full-screen JPEG fetched from any URL you supply, for example a webcam or a weather map. JPEG only, up to 1024x1024 pixels and 1 MB; PNG and WebP are not supported.
 
 Setup: Pages > Custom URL.
 
 ### Weather Radar
 
-An animated NWS radar loop (up to 10 frames) for a chosen radar site, a region, the whole CONUS, or the nearest site to your location. The map style picks what the echoes are drawn over: the standard NWS picture with roads and city names, state lines only (the default), or state and county lines. The two line-only styles remove roads and labels, which helps when highway markings look like heavy rain.
+An animated NWS radar loop (up to 10 frames) for a chosen radar site, a region, the whole CONUS, or the nearest site to your location. The map style picks what the echoes are drawn over: the standard NWS picture with roads and city names, state lines only (the default), or state and county lines. The two line-only styles remove roads and labels, which helps when highway markings look like heavy rain; on those two styles a few sites publish no frame history and show a still picture instead of a loop.
 
 Setup: Pages > Radar. Automatic site selection uses the location on Device > System.
 
@@ -281,7 +281,7 @@ Setup: Pages > Home Assistant (base URL and a long-lived access token; the tab t
 
 ### OctoPrint
 
-Shows the current print from an OctoPrint server: progress, layer, time elapsed, estimated finish, and nozzle and bed temperatures. Choose one of four layouts. The picture is either the thumbnail your slicer embeds in the G-code file or a snapshot from the printer camera. The display only reads from OctoPrint; it never sends commands to the printer.
+Shows the current print from an OctoPrint server: progress, time elapsed, time remaining, and nozzle and bed temperatures; layer count and estimated finish appear when OctoPrint has the DisplayLayerProgress plugin. Choose one of four layouts. The picture is either the thumbnail embedded in the G-code file (needs the PrusaSlicer Thumbnails plugin in OctoPrint) or a snapshot from the printer camera. The display only reads from OctoPrint; it never sends commands to the printer.
 
 Setup: Pages > OctoPrint (server address; approve the display from OctoPrint or paste an API key).
 
@@ -308,11 +308,11 @@ Setup: Pages > OctoPrint (server address; approve the display from OctoPrint or 
   </tr>
 </table>
 
-Each layout can show the printer camera instead of the slicer preview. Nozzle and bed readings change color with what the heater is doing: warming up, holding at target, cooling down, or off. Tapping the page hides the readings so only the picture shows; the Grid layout is unaffected.
+Each layout can show the printer camera instead of the slicer preview. On the Floating overlay and Letterbox layouts the nozzle and bed readings change color with what the heater is doing: warming up, holding at target, cooling down, or off; Grid and Immersive image show a heat-gradient bar instead. Tapping the page hides the readings so only the picture shows; tap again to bring them back. The change is not saved, and the Grid layout is unaffected.
 
 ### On-Device Settings and System Info
 
-Swipe to the Settings page for on-device configuration in four tabs: Display, Nodes, Behavior, and System (including Reboot and Factory Reset). The web UI exposes the full set of options. The System Info page reports IP, WiFi signal, CPU, memory, PSRAM, uptime, and task count.
+Swipe to the Settings page for on-device configuration in four tabs: Display, Nodes, Behavior, and System (including Reboot and Factory Reset). The web UI exposes the full set of options. The System Info page reports hostname and IP addresses, WiFi signal, heap and PSRAM, chip and IDF version, uptime, and task count; CPU load and performance cards appear when Debug mode is on.
 
 <table align="center">
   <tr>
@@ -331,8 +331,8 @@ Swipe left or right to change pages, or press the BOOT button on the board to ad
 
 The display picks a page on its own; a swipe or tap takes over for a configurable time (default 10 s), after which it returns to its automatic choice. Device > Behavior > Page Navigation holds the controls:
 
-- Home Page: the page the display settles on when nothing else applies. When it is a NINA instance, the display also returns there whenever that instance is online; with several instances online it shows the Summary page. An option keeps the Home Page on screen even while instances are connected.
-- Auto Cycle: rotate through a chosen, ordered list of pages on an interval with an instant, fade or slide transition, optionally skipping disconnected instances. Image pages fetch a fresh picture each time the rotation reaches them.
+- Home Page: the page the display settles on when nothing else applies. When it is a NINA instance, the display also returns there whenever that instance is online; with several online and the Home instance not among them, it shows the Summary page. An option keeps the Home Page on screen even while instances are connected.
+- Auto Cycle: rotate through a chosen, ordered list of pages on an interval with an instant, fade or slide transition, optionally skipping disconnected instances. The downloading image pages (GOES, Solar, Custom URL, Radar and Cloud Cover) fetch a fresh picture each time the rotation reaches them.
 - Switch page when no connections: show a chosen page while every enabled NINA instance is disconnected.
 
 The web Home page and the API can also send the display to any page; see [Web API](#web-api).
@@ -358,13 +358,13 @@ Toast pop-ups report equipment connects and disconnects, sequence, focuser, moun
   </tr>
 </table>
 
-Voice alerts speak through the onboard speaker using pre-rendered clips, so no network or cloud service is involved. Three sources feed them: RMS, HFR and safety threshold breaches ("Warning, NINA one, HFR, two point five, above limit"), NINA connect and disconnect announcements, and the twelve event categories above ("NINA two, Camera, disconnected"). All are on by default; volume, a brief phrasing, repeat interval and per-category toggles live on Device > Behavior, and each NINA instance can be muted separately.
+Voice alerts speak through the onboard speaker using pre-rendered clips, so no network or cloud service is involved. Three sources feed them: RMS, HFR and safety threshold breaches ("Warning, NINA one, HFR, two point five, above limit"), NINA connect and disconnect announcements, and the twelve event categories above ("NINA two, Camera, disconnected"). All are on by default on a fresh install (devices upgraded from older firmware keep their previous voice settings); volume, a brief phrasing, repeat interval and per-category toggles live on Device > Behavior, and each NINA instance can be muted separately.
 
 Custom voice clips: Device > Voice Clips lets you replace any of the 47 built-in clips (chime, startup jingle, "NINA one/two/three", digits, equipment names, event phrases) with your own recordings; upload mp3, m4a, wav or ogg and the browser converts them. Clips survive firmware updates. Limits: 10 seconds per clip, 15 seconds for the startup jingle, 4 MB in total.
 
 ## Web UI
 
-Open the device's address in a browser. The Home page shows device health at a glance, explains why the panel is on its current page, lists NINA connections and integrations, and lets you send the panel to any page with one tap. Every setting is managed from `/config`, organized into three sections: Pages (N.I.N.A., AllSky, JSON, Home Assistant, Clock, Spotify, GOES, Moon, Solar, Custom URL, Radar, Cloud Cover, OctoPrint), Device (Display, Behavior, Voice Clips, System) and Tools (Logs, Backup, API). Each section has a help button that explains what the settings do. Changes apply to the display as a live preview and persist when you select Save.
+Open the device's address in a browser. The Home page shows device health at a glance, explains why the panel is on its current page, lists NINA connections and integrations, and lets you send the panel to any enabled page with one tap. Every setting is managed from `/config`, organized into three sections: Pages (N.I.N.A., AllSky, JSON, Home Assistant, Clock, Spotify, GOES, Moon, Solar, Custom URL, Radar, Cloud Cover, OctoPrint), Device (Display, Behavior, Voice Clips, System) and Tools (Logs, Backup, API). Most settings cards carry an info button that explains what those settings do. Changes apply to the display as a live preview and persist when you select Save.
 
 <p align="center">
   <img src="images/web_home.jpg" alt="Web UI home page" width="720">
@@ -395,7 +395,7 @@ Device > System > MQTT points the display at your broker. It publishes its own s
 
 ## Web API
 
-The device serves an HTTP API on port 80. Tools > API in the web UI is an always-current reference for every endpoint with copy-paste `curl` examples. Requests need either the session cookie from `POST /api/login` or an `X-Auth-Password` header carrying the admin password.
+The device serves an HTTP API on port 80. Tools > API in the web UI documents the main endpoints with copy-paste `curl` examples, pre-filled with your device's address. While login is enabled, requests need either the session cookie from `POST /api/login` or an `X-Auth-Password` header carrying the admin password.
 
 Key endpoints:
 
@@ -424,12 +424,12 @@ curl -H "X-Auth-Password: <password>" -o screenshot.jpg http://<device-ip>/api/s
 
 ## Building from Source
 
-Standard ESP-IDF 5.5.2 project: activate the IDF environment and run `idf.py build`, or use `build_firmware.ps1` on Windows to build the factory and OTA binaries and push an OTA update to a device. See `CLAUDE.md` for the architecture, task layout and configuration conventions.
+Standard ESP-IDF 5.5.2 project: activate the IDF environment and run `idf.py build`, or use `build_firmware.ps1` on Windows to build and push an OTA update to one or more devices. See `CLAUDE.md` for the architecture, task layout and configuration conventions.
 
 ## Troubleshooting
 
 - The `NINA-DISPLAY` access point does not appear: the AP is only on while the device has no WiFi connection. If the display is already on your network, open its address instead.
-- The OTA said success but nothing changed: compare the version and behavior after reboot; a firmware that fails its health check rolls back to the previous slot. Flash the factory binary over USB if the device stays on the old version.
+- The OTA said success but nothing changed: compare the version and behavior after reboot; a firmware that crashes or resets before it finishes booting is rolled back to the previous slot. Flash the factory binary over USB if the device stays on the old version.
 - The board warns about outdated esp-hosted co-processor firmware: flash `firmware/merged-flash.bin` at `0x0000`, wait for the on-screen progress to finish, then flash the factory binary again.
 - NINA shows offline although the PC is reachable: confirm the ninaAPI Advanced plugin is installed and enabled, that it listens on port 1888, and that the Windows firewall allows the port.
 - Lost the admin password: on the device, swipe to Settings > System and select Factory Reset. This erases all settings.
@@ -440,4 +440,5 @@ Standard ESP-IDF 5.5.2 project: activate the IDF environment and run `idf.py bui
 - [@chicago925](https://github.com/chicago925) for the 3D printed stand ([#116](https://github.com/chvvkumar/ESP32-P4-NINA-Display/issues/116)).
 - Waveshare for the ESP32-P4-WIFI6-Touch-LCD-4B board support package.
 - [LVGL](https://lvgl.io/) and [stb_image](https://github.com/nothings/stb).
-- NASA GIBS for the Cloud Cover imagery, NOAA and the NWS for radar and GOES imagery, and Open-Meteo and OpenWeatherMap for weather data.
+- NASA GIBS for the Cloud Cover imagery, NASA SDO and SOHO for the solar imagery, NOAA and the NWS for radar and GOES imagery, and Open-Meteo, OpenWeatherMap and Weather Underground for weather data.
+- Espressif esp-hosted and esp_wifi_remote for the ESP32-C6 WiFi link, [tgx](https://github.com/vindar/tgx) for the moon sphere renderer, and SVOX Pico TTS (esp-picotts) for the voice clips.
