@@ -169,6 +169,8 @@ Every section on an instance page is tappable:
 
 Polling: the visible instance is polled every 5 s by default (1-10 s); the others get a 10 s heartbeat. The Summary page polls all instances at full rate; non-NINA pages drop every instance to a slow idle poll.
 
+---
+
 ### Clock, Weather and Moon
 
 The Clock page shows a large digital clock with current conditions, high and low, humidity, dew point, wind, UV, and hourly forecast bars from your chosen provider. The Moon page renders the Moon on the device with the current phase, libration and sub-solar lighting; drag it to look around, and pick a starfield or glow background.
@@ -190,6 +192,8 @@ Setup: Pages > Clock (weather provider: Open-Meteo needs no key; OpenWeatherMap 
   </tr>
 </table>
 
+---
+
 ### Spotify
 
 A full-screen Now Playing page with album art, track and artist, progress bar, and playback controls that appear on tap. Data comes from the Spotify Web API through your own Spotify developer app.
@@ -207,6 +211,8 @@ Setup: Pages > Spotify. You need a free app at [developer.spotify.com](https://d
   </tr>
 </table>
 
+---
+
 ### AllSky
 
 A four-quadrant environmental panel (thermal, sky quality, ambient, power) fed from an AllSky camera. The data comes from [AllSkyExtraVarsREST](https://github.com/chvvkumar/AllSkyExtraVarsREST), a small FastAPI service you install on the AllSky Raspberry Pi; it serves the AllSky overlay extra-variable JSON files (star count, exposure, temperatures, weather, planets and moon) over HTTP on port 8080, and the display reads its `/all` endpoint. Each quadrant maps to fields of that JSON, with thresholds that color the readings.
@@ -216,6 +222,8 @@ Setup: install AllSkyExtraVarsREST on the AllSky Pi (`bash install.sh`), then Pa
 <p align="center">
   <img src="images/allsky.jpg" alt="AllSky page" width="720">
 </p>
+
+---
 
 ### GOES Satellite
 
@@ -227,6 +235,8 @@ Setup: Pages > GOES.
   <img src="images/goes.jpg" alt="GOES satellite page" width="720">
 </p>
 
+---
+
 ### Solar
 
 Full-screen NASA SDO and SOHO solar imagery in a chosen band (AIA wavelengths, HMI continuum and magnetogram, LASCO coronagraphs, EIT).
@@ -237,11 +247,15 @@ Setup: Pages > Solar.
   <img src="images/solar.jpg" alt="Solar page" width="720">
 </p>
 
+---
+
 ### Custom Image URL
 
 Full-screen JPEG fetched from any URL you supply, for example a webcam or a weather map. JPEG only, up to 1024x1024 pixels and 1 MB; PNG and WebP are not supported.
 
 Setup: Pages > Custom URL.
+
+---
 
 ### Weather Radar
 
@@ -253,6 +267,8 @@ Setup: Pages > Radar. Automatic site selection uses the location on Device > Sys
   <img src="images/radar.jpg" alt="Weather Radar page" width="720">
 </p>
 
+---
+
 ### Cloud Cover
 
 An animated satellite loop of the cloud cover around your location, from NOAA GOES imagery served by NASA. Day: true color. Night: infrared clouds over city lights. State and country borders and major roads are drawn over the picture. The satellite (GOES-East or GOES-West) is picked from your longitude. The source updates every 10 minutes and the newest frame is usually 30-45 minutes old.
@@ -262,6 +278,8 @@ Setup: Pages > Cloud Cover (area from about 150 km to 2500 km across, up to 10 f
 <p align="center">
   <img src="images/clouds.jpg" alt="Cloud Cover page" width="720">
 </p>
+
+---
 
 ### JSON Display
 
@@ -273,11 +291,15 @@ Setup: Pages > JSON (URL and optional auth header; the tab fetches a live respon
   <img src="images/json.jpg" alt="JSON Display page" width="720">
 </p>
 
+---
+
 ### Home Assistant
 
 A tile grid over Home Assistant entity states, fetched per entity from the HA REST API. This is separate from the MQTT integration described under [Web UI](#mqtt-and-home-assistant-discovery), which publishes the display's own controls to Home Assistant.
 
 Setup: Pages > Home Assistant (base URL and a long-lived access token; the tab tests the connection and previews the tile layout on the device).
+
+---
 
 ### OctoPrint
 
@@ -309,6 +331,8 @@ Setup: Pages > OctoPrint (server address; approve the display from OctoPrint or 
 </table>
 
 Each layout can show the printer camera instead of the slicer preview. On the Floating overlay and Letterbox layouts the nozzle and bed readings change color with what the heater is doing: warming up, holding at target, cooling down, or off; Grid and Immersive image show a heat-gradient bar instead. Tapping the page hides the readings so only the picture shows; tap again to bring them back. The change is not saved, and the Grid layout is unaffected.
+
+---
 
 ### On-Device Settings and System Info
 
