@@ -1760,10 +1760,11 @@ main_loop:
          *   PAGE_IDX_IMG_SOLAR     (5)                  = Solar image page
          *   PAGE_IDX_IMG_CUSTOM    (6)                  = Custom URL image page
          *   PAGE_IDX_IMG_RADAR     (7)                  = Weather Radar image page
-         *   PAGE_IDX_JSON          (8)                  = JSON Display page
-         *   PAGE_IDX_HA            (9)                  = Home Assistant page
-         *   PAGE_IDX_OCTOPRINT     (10)                 = OctoPrint 3D Printer page
-         *   PAGE_IDX_SUMMARY       (11)                 = summary page
+         *   PAGE_IDX_IMG_CLOUDS    (8)                  = Clouds satellite image page
+         *   PAGE_IDX_JSON          (9)                  = JSON Display page
+         *   PAGE_IDX_HA            (10)                 = Home Assistant page
+         *   PAGE_IDX_OCTOPRINT     (11)                 = OctoPrint 3D Printer page
+         *   PAGE_IDX_SUMMARY       (12)                 = summary page
          *   NINA_PAGE_OFFSET .. NINA_PAGE_OFFSET+pc-1   = NINA instance pages
          *   SETTINGS_PAGE_IDX(pc)                       = settings page
          *   SYSINFO_PAGE_IDX(pc)                        = sysinfo page

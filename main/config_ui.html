@@ -709,64 +709,84 @@
     }
     .thresh-edit-row .thresh-dot:hover { transform: scale(1.08); }
 
-    /* === PAGE NAVIGATION PILLS === */
-    .pn-pill-grid {
-      display: flex; flex-wrap: wrap; gap: 8px;
+    /* === PAGE LISTS (Home Page / Pages in Rotation / idle target) === */
+    /* Title row: subsection title left, current pick right in accent */
+    .pg-title { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+    .pg-title-sum { font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--accent); font-size: 0.78rem; }
+    .pg-title-sum small { color: var(--text-hint); font-weight: 400; }
+    /* One list component: two columns of category groups, full height, no internal scroll */
+    .pg-list {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; padding: 4px 6px 6px;
+      border: 1px solid rgba(255,255,255,0.08); border-radius: var(--radius-sm); background: rgba(0,0,0,0.25);
     }
-    .pn-pill {
-      flex: 1 1 auto; min-width: 0; position: relative;
-      cursor: pointer; user-select: none;
-      display: flex; flex-direction: column; align-items: center;
+    .pg-list[hidden] { display: none; }
+    .pg-summary + .pg-list { margin-top: 8px; }
+    .pg-col { min-width: 0; }
+    .pg-group-title {
+      padding: 8px 6px 3px; font-size: 0.64rem; font-weight: 600;
+      letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-hint);
     }
-    .pn-pill input { position: absolute; opacity: 0; width: 0; height: 0; }
-    .pn-pill-visual {
-      display: flex; align-items: center; justify-content: center;
-      width: 100%; height: 34px; padding: 0 14px; border-radius: 17px;
-      font-size: 0.8rem; font-weight: 500; letter-spacing: 0.01em;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      background: rgba(0, 0, 0, 0.3); color: var(--text-muted);
-      transition: all 0.25s ease; white-space: nowrap;
+    .pg-row {
+      display: flex; align-items: center; gap: 8px; height: 31px; padding: 0 6px;
+      cursor: pointer; font-size: 0.82rem; color: var(--text-muted); border-radius: 6px;
+      border-top: 2px solid transparent; transition: background 0.15s, opacity 0.15s; user-select: none;
     }
-    /* Start page: single-select with pin badge */
-    .pn-pill.start-pill input:checked + .pn-pill-visual {
-      background: rgba(var(--accent-rgb), 0.13);
-      border-color: rgba(var(--accent-rgb), 0.45);
-      color: var(--accent);
+    .pg-row:hover { background: rgba(255,255,255,0.05); }
+    .pg-row:has(input:focus-visible) { outline: 2px solid rgba(var(--accent-rgb), 0.7); outline-offset: -2px; }
+    .pg-row input { margin: 0; width: 15px; height: 15px; accent-color: var(--accent); flex: 0 0 auto; }
+    .pg-row.pg-on { color: var(--accent); }
+    .pg-row.pg-off { color: var(--text-hint); }
+    .pg-row.pg-off.pg-on { color: var(--accent); opacity: 0.8; }
+    .pg-label { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pg-grip {
+      flex: 0 0 auto; width: 12px; color: var(--text-hint); opacity: 0.6;
+      font-size: 0.9rem; line-height: 1; letter-spacing: -2px; cursor: grab;
+    }
+    .pg-row[draggable="true"]:active .pg-grip { cursor: grabbing; }
+    .pg-row:not(.pg-on) .pg-grip { opacity: 0.2; cursor: default; }
+    /* Number/star spans exist on every row; only the picked/ticked rows show them */
+    .pg-row:not(.pg-on) .pg-num, .pg-row:not(.pg-on) .pg-star { display: none; }
+    .pg-num {
+      flex: 0 0 auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+      background: rgba(var(--accent-rgb), 0.2); color: var(--accent); font-size: 0.66rem; font-weight: 700;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .pg-star { flex: 0 0 auto; color: var(--accent); font-size: 0.8rem; line-height: 1; }
+    /* Availability chip: green when the page is enabled, muted when disabled; clickable when it points at a tab */
+    .pg-chip {
+      flex: 0 0 auto; font: inherit; font-size: 0.62rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+      padding: 1px 7px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);
+      background: transparent; color: var(--text-hint); cursor: default; transition: border-color 0.15s;
+    }
+    .pg-row:not(.pg-off) .pg-chip { color: var(--success); border-color: rgba(74,222,128,0.35); } /* --success at 35% */
+    .pg-chip[data-tab] { cursor: pointer; }
+    .pg-chip[data-tab]:hover { text-decoration: underline; border-color: rgba(255,255,255,0.3); }
+    .pg-row:not(.pg-off) .pg-chip[data-tab]:hover { border-color: rgba(74,222,128,0.7); }
+    /* Drag-to-reorder cues (rotation list) */
+    .pg-row.dragging { opacity: 0.4; }
+    .pg-row.drag-over { border-top-color: var(--accent); }
+    /* Collapsed summary row (idle target): pill-styled selection + category + ghost Change button */
+    .pg-summary { display: flex; align-items: center; gap: 12px; min-height: 36px; }
+    .pg-sel {
+      flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 10px;
+      padding: 0; background: none; border: 0; font: inherit; color: inherit; cursor: pointer; text-align: left;
+    }
+    .pg-sel-label {
+      display: inline-flex; align-items: center; height: 34px; padding: 0 14px; border-radius: 17px;
+      font-size: 0.8rem; font-weight: 500; white-space: nowrap; color: var(--accent);
+      background: rgba(var(--accent-rgb), 0.13); border: 1px solid rgba(var(--accent-rgb), 0.45);
       box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.15), inset 0 0 8px rgba(var(--accent-rgb), 0.06);
+      transition: border-color 0.15s;
     }
-    .pn-pill .pin-badge {
-      position: absolute; top: -6px; right: -6px; width: 18px; height: 18px;
-      border-radius: 50%; background: var(--accent);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 9px; color: #0a0a0b; font-weight: 800;
-      box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.45);
-      opacity: 0; transform: scale(0.4);
-      transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-      pointer-events: none;
+    .pg-sel-cat { font-size: 0.7rem; color: var(--text-hint); text-transform: uppercase; letter-spacing: 0.06em; white-space: nowrap; }
+    .pg-change {
+      flex: 0 0 auto; height: 30px; padding: 0 12px; border-radius: 15px; font: inherit; font-size: 0.76rem; font-weight: 500;
+      color: var(--text-muted); background: transparent; border: 1px solid rgba(255,255,255,0.14); cursor: pointer; transition: border-color 0.15s;
     }
-    .pn-pill.start-pill input:checked ~ .pin-badge { opacity: 1; transform: scale(1); }
-    .pn-pill:hover .pn-pill-visual { border-color: rgba(255, 255, 255, 0.15); }
-    .pn-pill.start-pill:hover input:checked + .pn-pill-visual {
-      border-color: rgba(var(--accent-rgb), 0.6);
-      box-shadow: 0 0 18px rgba(var(--accent-rgb), 0.2), inset 0 0 10px rgba(var(--accent-rgb), 0.08);
-    }
-    /* Rotation pills: multi-select */
-    .pn-pill.rotate-pill input:checked + .pn-pill-visual {
-      background: rgba(var(--accent-rgb), 0.13);
-      border-color: rgba(var(--accent-rgb), 0.4);
-      color: var(--accent);
-      box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.15), inset 0 0 8px rgba(var(--accent-rgb), 0.06);
-    }
-    .pn-pill.rotate-pill input:not(:checked) + .pn-pill-visual { opacity: 0.45; }
-    /* Home Page pills that point at a page not currently available stay
-       selectable but render dimmed (the page may become available later). */
-    .pn-pill.pn-pill-unavailable .pn-pill-visual { opacity: 0.5; }
-    .pn-pill.pn-pill-unavailable input:checked + .pn-pill-visual { opacity: 0.85; }
-    .pn-pill.rotate-pill:hover input:not(:checked) + .pn-pill-visual { opacity: 0.7; }
-    .pn-pill.rotate-pill:hover input:checked + .pn-pill-visual {
-      border-color: rgba(var(--accent-rgb), 0.55);
-      box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.22), inset 0 0 8px rgba(var(--accent-rgb), 0.08);
-    }
+    .pg-change:hover, .pg-sel:hover .pg-sel-label { border-color: rgba(255,255,255,0.3); }
+    .pg-change:focus-visible, .pg-sel:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.7); outline-offset: 2px; border-radius: 15px; }
+    @media (max-width: 559px) { .pg-list { grid-template-columns: 1fr; } }
+    @media (prefers-reduced-motion: reduce) { .pg-row, .pg-chip, .pg-sel-label, .pg-change { transition: none; } }
     .pn-section-label {
       font-size: 0.72rem; font-weight: 600; color: var(--text-muted);
       text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 12px;
@@ -781,20 +801,6 @@
     }
     .pn-sub-divider { height: 1px; background: rgba(255,255,255,0.04); margin: 4px 0; }
 
-    /* Drag-to-reorder */
-    .pn-pill.dragging { opacity: 0.4; }
-    .pn-pill.drag-over { border-left: 2px solid var(--accent); margin-left: -2px; }
-    .pn-pill-grid.reorderable { justify-content: flex-start; }
-    /* Wrapped reorder pills keep natural width and left-align instead of stretching */
-    .pn-pill-grid.reorderable .pn-pill { flex: 0 0 auto; cursor: grab; }
-    .pn-pill-grid.reorderable .pn-pill-visual { width: auto; }
-    .pn-pill-grid.reorderable .pn-pill:active { cursor: grabbing; }
-    .pn-pill-grip {
-      display: flex; justify-content: center; width: 100%;
-      color: rgba(255,255,255,0.15); font-size: 0.55rem; line-height: 1;
-      pointer-events: none; transition: color 0.2s; margin-bottom: 2px; letter-spacing: 2px;
-    }
-    .pn-pill:hover .pn-pill-grip { color: rgba(255,255,255,0.35); }
 
     /* === FIRMWARE & OTA === */
     .fw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-bottom: 24px; }
@@ -937,8 +943,6 @@
       .thresh-labels { font-size: 0.82rem; }
       .thresh-edit-row .thresh-label-sm { font-size: 0.88rem; }
       .threshold-section-title { font-size: 0.9rem; }
-      /* Page nav pills */
-      .pn-pill-visual { font-size: 0.95rem; }
       .pn-section-label { font-size: 0.88rem; }
       /* Firmware grid */
       .fw-label { font-size: 0.82rem; }
@@ -1038,6 +1042,7 @@
         <button class="tab-btn" data-tab="image-solar">Solar</button>
         <button class="tab-btn" data-tab="image-custom">Custom URL</button>
         <button class="tab-btn" data-tab="image-radar">Radar</button>
+        <button class="tab-btn" data-tab="image-clouds">Cloud Cover</button>
         <button class="tab-btn" data-tab="octoprint">OctoPrint</button>
       </div>
       <div class="tab-group" data-section="device">
@@ -1095,6 +1100,7 @@
     <div id="tab-image-solar" class="tab-panel"></div>
     <div id="tab-image-custom" class="tab-panel"></div>
     <div id="tab-image-radar" class="tab-panel"></div>
+    <div id="tab-image-clouds" class="tab-panel"></div>
 
     <!-- ==================== TAB: OCTOPRINT ==================== -->
     <!-- Markup extracted to main/fragment_octoprint.html; lazily fetched by
@@ -1254,47 +1260,14 @@
         return p.targetable && (p.kind==='page' || p.kind==='image_source');
       });
     }
-    /* Stable category display order, derived from the data: first-seen wins. */
-    function targetablePagesOrdered(){
-      var pages=targetablePages();
-      var catOrder=[];
-      pages.forEach(function(p){
-        var cat=p.category||'';
-        if(catOrder.indexOf(cat)===-1) catOrder.push(cat);
-      });
-      var out=[];
-      catOrder.forEach(function(cat){
-        pages.forEach(function(p){
-          if((p.category||'')===cat) out.push(p);
-        });
-      });
-      return out;
-    }
-    /* Build both page-driven controls (Home Page pills + idle target dropdown)
-       from _pageRegistry. Must run AFTER fetchPageRegistry() resolves and
-       BEFORE any value-set so the options/pills exist first. */
+    /* Build the registry-driven page lists (Home Page + idle target) and
+       refresh the rotation list's availability chips from _pageRegistry.
+       Must run AFTER fetchPageRegistry() resolves and BEFORE any value-set
+       so the rows exist first. */
     function populatePageControls(){
-      buildStartPagePills();
-      var sel=$('idle_page_override_target');
-      if(sel){
-        sel.innerHTML='';
-        var pages=targetablePagesOrdered();
-        var lastCat=null, group=null;
-        pages.forEach(function(p){
-          var cat=p.category||'';
-          if(cat!==lastCat){
-            group=document.createElement('optgroup');
-            group.label=cat||'Pages';
-            sel.appendChild(group);
-            lastCat=cat;
-          }
-          var opt=document.createElement('option');
-          opt.value=p.id;
-          opt.text=(p.available?'':'(unavailable) ')+p.label;
-          if(!p.available) opt.className='pn-opt-unavailable';
-          (group||sel).appendChild(opt);
-        });
-      }
+      updatePageSelectOptions(); /* rebuild + keep the pick (registry retry path) */
+      buildIdleTargetList();
+      refreshArpAvailability();
     }
 
     /* === Node Card Generation ===
@@ -1387,117 +1360,229 @@
       if(typeof initCollapsibleCards==='function') initCollapsibleCards(container);
     }
 
-    /* === Rotation Page Pill Generation ===
-       P6d: tab-behavior is now a lazily-loaded fragment, so #arp-container
-       does not exist at script-parse time. Named (not a parse-time IIFE) and
-       called from populateTab_behavior(), which runs only after the
-       fragment's markup is present. Clears the container first so repeat
-       calls (every config reload) rebuild the pills cleanly instead of
-       appending duplicates. initPillDragReorder() attaches its
-       dragstart/dragover/dragleave/drop listeners directly on the container
-       element itself (which is NOT recreated by the innerHTML clear above,
-       only its children are) -- so it must run exactly once per container;
-       a `wired` data-attribute flag guards the repeat-call case. */
+    /* === Page lists (Home Page, Rotation, Idle target) ===
+       One renderer, two modes. Rows are grouped by category into two
+       columns (NINA+Dashboards | Image+System). In check mode row positions
+       are static; the cycle order lives in an array (_arpOrder) and is shown
+       as a number on ticked rows, so drag/reorder never moves DOM nodes. */
+
+    /* Static rotation table: must exist before the registry loads (the tab
+       populates before /api/pages answers on a fresh boot). Stop ids are
+       frozen page_ref ids: 0..11 plus JSON (24), HA (25), OctoPrint (26),
+       Radar (27), Cloud Cover (28) — keep in sync with ARP_IDX_* in
+       app_config.h. */
+    var ROTATION_PAGES=[
+      {id:0, label:'Summary',        category:'NINA',    slug:'summary',      arp:'arp_summary'},
+      {id:1, label:'NINA 1',         category:'NINA',    slug:'nina.1',       arp:'arp_nina1'},
+      {id:2, label:'NINA 2',         category:'NINA',    slug:'nina.2',       arp:'arp_nina2'},
+      {id:3, label:'NINA 3',         category:'NINA',    slug:'nina.3',       arp:'arp_nina3'},
+      {id:5, label:'AllSky',         category:'Dashboards', slug:'allsky',       arp:'arp_allsky'},
+      {id:6, label:'Spotify',        category:'Dashboards', slug:'spotify',      arp:'arp_spotify'},
+      {id:7, label:'Clock',          category:'Dashboards', slug:'clock',        arp:'arp_clock'},
+      {id:24,label:'JSON Display',   category:'Dashboards', slug:'json',         arp:'arp_json'},
+      {id:25,label:'Home Assistant', category:'Dashboards', slug:'ha',           arp:'arp_ha'},
+      {id:26,label:'OctoPrint',      category:'Dashboards', slug:'octoprint',    arp:'arp_octoprint'},
+      {id:8, label:'GOES Satellite', category:'Image',   slug:'image.goes',   arp:'arp_img_goes'},
+      {id:9, label:'Moon',           category:'Image',   slug:'image.moon',   arp:'arp_img_moon'},
+      {id:10,label:'Solar',          category:'Image',   slug:'image.solar',  arp:'arp_img_solar'},
+      {id:11,label:'Custom Image',   category:'Image',   slug:'image.custom', arp:'arp_img_custom'},
+      {id:27,label:'Weather Radar',  category:'Image',   slug:'image.radar',  arp:'arp_img_radar'},
+      {id:28,label:'Cloud Cover',    category:'Image',   slug:'image.clouds', arp:'arp_img_clouds'},
+      {id:4, label:'System Info',    category:'System',  slug:'sysinfo',      arp:'arp_sysinfo'}
+    ];
+    /* Page slug -> settings tab that switches the page on/off. Pages absent
+       here (summary, clock, sysinfo) are always available. */
+    var SLUG_TAB={'nina.1':'nodes','nina.2':'nodes','nina.3':'nodes',allsky:'allsky',spotify:'spotify',
+      json:'json',ha:'ha',octoprint:'octoprint','image.goes':'image-goes','image.moon':'image-moon',
+      'image.solar':'image-solar','image.custom':'image-custom','image.radar':'image-radar','image.clouds':'image-clouds'};
+    /* Cycle order: stop ids of ticked rotation rows, first to last. */
+    var _arpOrder=[];
+
+    /* pages=[{id,label,category,slug,available,arp?}]; opts={mode:'radio'|'check',
+       name, order?}. Rebuilds innerHTML. Order inside a group is the table
+       order (static); in check mode the .pg-num shows the 1-based position of
+       the id in opts.order. Every row carries its .pg-num (check) or .pg-star
+       (radio) span; CSS hides it unless the row is .pg-on. Change handling is
+       per container (delegates), not inline. */
+    function renderPageList(c,pages,opts){
+      var check=opts.mode==='check', order=opts.order||[], html='';
+      /* Column 1 = NINA + Dashboards, column 2 = Image + System. */
+      var cols=[['NINA','Dashboards'],['Image','System']];
+      function chipHtml(p){
+        var tab=SLUG_TAB[p.slug]||'';
+        var btn=tab?document.querySelector('.tab-btn[data-tab="'+tab+'"]'):null;
+        var title=tab?'Enable or disable this page in the '+(btn?btn.textContent.trim():tab)+' tab (click to open)':'Always available';
+        return '<button type="button" class="pg-chip" tabindex="-1"'+(tab?' data-tab="'+tab+'"':'')+
+          ' title="'+escHtml(title)+'">'+(p.available===false?'disabled':'enabled')+'</button>';
+      }
+      cols.forEach(function(col){
+        html+='<div class="pg-col">';
+        col.forEach(function(cat){
+          var rows=pages.filter(function(p){return (p.category||'')===cat;});
+          if(!rows.length) return;
+          html+='<div class="pg-group"><div class="pg-group-title">'+escHtml(cat)+'</div>';
+          rows.forEach(function(p){
+            var pos=check?order.indexOf(p.id):-1;
+            var on=check&&pos>=0;
+            html+='<label class="pg-row'+(p.available===false?' pg-off':'')+(on?' pg-on':'')+'" data-arp-idx="'+p.id+'"'+
+              (on?' draggable="true"':'')+'>'+
+              (check?'<span class="pg-grip" aria-hidden="true">&#8942;&#8942;</span>':'')+
+              '<input type="'+(check?'checkbox':'radio')+'"'+
+                (p.arp?' id="'+p.arp+'"':'')+
+                (opts.name?' name="'+opts.name+'"':'')+' value="'+p.id+'"'+
+                (on?' checked':'')+'>'+
+              '<span class="pg-label">'+escHtml(p.label)+'</span>'+
+              (check?'<span class="pg-num">'+(on?pos+1:'')+'</span>':'<span class="pg-star" aria-hidden="true">&#9733;</span>')+
+              chipHtml(p)+
+            '</label>';
+          });
+          html+='</div>';
+        });
+        html+='</div>';
+      });
+      c.innerHTML=html;
+    }
+
+    /* Chip click opens the tab that owns the page. preventDefault stops the
+       enclosing label from toggling the row's radio/checkbox. */
+    document.querySelector('.content').addEventListener('click',function(e){
+      var chip=e.target.closest&&e.target.closest('.pg-chip');
+      if(!chip) return;
+      e.preventDefault(); e.stopPropagation();
+      var tab=chip.getAttribute('data-tab');
+      if(tab) switchTab(tab);
+    });
+
+    /* === Rotation list ===
+       P6d: tab-behavior is a lazily-loaded fragment, so #arp-container does
+       not exist at script-parse time; called from populateTab_behavior().
+       initPillDragReorder() attaches listeners to the container element
+       itself (which survives the innerHTML rebuild), so it runs once per
+       container; the `wired` data-attribute guards repeat calls. */
     function buildArpPills(){
       var c=$('arp-container');
       if(!c) return;
-      var alreadyWired=c.dataset.wired==='1';
-      c.innerHTML='';
-      /* [id, label, stop value]. Stop values are frozen page_ref ids: 0..11
-         anchored block, plus appended JSON (24), Home Assistant (25),
-         OctoPrint (26) and Weather Radar (27) — keep in sync with ARP_IDX_*
-         in app_config.h. */
-      var items=[
-        ['arp_summary','Summary',0],
-        ['arp_nina1','NINA 1',1],
-        ['arp_nina2','NINA 2',2],
-        ['arp_nina3','NINA 3',3],
-        ['arp_sysinfo','System Info',4],
-        ['arp_allsky','AllSky',5],
-        ['arp_spotify','Spotify',6],
-        ['arp_clock','Clock',7],
-        ['arp_json','JSON Display',24],
-        ['arp_ha','Home Assistant',25],
-        ['arp_octoprint','OctoPrint',26],
-        ['arp_img_goes','Img: GOES',8],
-        ['arp_img_moon','Img: Moon',9],
-        ['arp_img_solar','Img: Solar',10],
-        ['arp_img_custom','Img: Custom',11],
-        ['arp_img_radar','Img: Radar',27]
-      ];
-      items.forEach(function(it){
-        var idx=it[2];
-        c.insertAdjacentHTML('beforeend',
-          '<label class="pn-pill rotate-pill" draggable="true" data-arp-idx="'+idx+'">'+
-            '<span class="pn-pill-grip">\u2022\u2022\u2022</span>'+
-            '<input type="checkbox" id="'+it[0]+'" onchange="checkDirty()">'+
-            '<span class="pn-pill-visual">'+it[1]+'</span>'+
-          '</label>'
-        );
-      });
-      if(!alreadyWired){
+      renderPageList(c,ROTATION_PAGES,{mode:'check',order:_arpOrder});
+      if(c.dataset.wired!=='1'){
         initPillDragReorder(c);
+        /* Tick/untick: append/remove the id in the cycle order, then renumber.
+           checkDirty/markTouched run via the .content change delegate. */
+        c.addEventListener('change',function(e){
+          var row=e.target.closest('.pg-row');
+          if(!row) return;
+          var id=parseInt(row.getAttribute('data-arp-idx')), i=_arpOrder.indexOf(id);
+          if(e.target.checked&&i<0) _arpOrder.push(id);
+          else if(!e.target.checked&&i>=0) _arpOrder.splice(i,1);
+          renumberArp();
+        });
         c.dataset.wired='1';
       }
     }
 
-    /* === Pill Drag-to-Reorder === */
+    /* Refresh .pg-on / .pg-num / draggable on the rotation rows from
+       _arpOrder without rebuilding the list (keeps focus and scroll). */
+    function renumberArp(){
+      var c=$('arp-container');
+      if(!c) return;
+      c.querySelectorAll('.pg-row').forEach(function(row){
+        var pos=_arpOrder.indexOf(parseInt(row.getAttribute('data-arp-idx')));
+        row.classList.toggle('pg-on',pos>=0);
+        if(pos>=0) row.setAttribute('draggable','true'); else row.removeAttribute('draggable');
+        row.querySelector('.pg-num').textContent=pos>=0?pos+1:'';
+      });
+    }
+
+    /* The static rotation table has no `available` flag: derive it from the
+       registry once loaded (chip text + .pg-off). Before that every row reads
+       "enabled", matching the old all-rows-normal look. */
+    function refreshArpAvailability(){
+      var c=$('arp-container');
+      if(!c||!_pageRegistry.length) return;
+      var avail={};
+      _pageRegistry.forEach(function(p){ avail[p.id]=p.available!==false; });
+      c.querySelectorAll('.pg-row').forEach(function(row){
+        var id=parseInt(row.getAttribute('data-arp-idx'));
+        var ok=avail[id]!==false;
+        row.classList.toggle('pg-off',!ok);
+        var chip=row.querySelector('.pg-chip');
+        if(chip) chip.textContent=ok?'enabled':'disabled';
+      });
+    }
+
+    /* === Rotation Drag-to-Reorder ===
+       Only ticked rows (draggable="true") can be dragged or dropped on. A
+       drop moves the dragged id before/after the target id in _arpOrder
+       (by the pointer's Y against the target row's midline) and renumbers;
+       DOM rows never move. */
     function initPillDragReorder(container){
       var dragSrc=null;
 
+      function rowId(row){ return parseInt(row.getAttribute('data-arp-idx')); }
+      function clearOver(){ container.querySelectorAll('.pg-row.drag-over').forEach(function(p){p.classList.remove('drag-over');}); }
+      function dropRow(el){
+        var row=el&&el.closest?el.closest('.pg-row'):null;
+        return row&&row.classList.contains('pg-on')?row:null;
+      }
+      function moveInOrder(src,target,clientY){
+        var from=_arpOrder.indexOf(rowId(src)), toId=rowId(target);
+        if(from<0||_arpOrder.indexOf(toId)<0) return;
+        /* remove the dragged id first so `to` is computed on the shortened array */
+        _arpOrder.splice(from,1);
+        var to=_arpOrder.indexOf(toId);
+        var rect=target.getBoundingClientRect();
+        if(clientY>=rect.top+rect.height/2) to++;
+        _arpOrder.splice(to,0,rowId(src));
+        renumberArp();
+        checkDirty();
+      }
+
       container.addEventListener('dragstart',function(e){
-        var pill=e.target.closest('.pn-pill');
-        if(!pill) return;
-        dragSrc=pill;
-        pill.classList.add('dragging');
+        var row=dropRow(e.target);
+        if(!row){ e.preventDefault(); return; }
+        dragSrc=row;
+        row.classList.add('dragging');
         e.dataTransfer.effectAllowed='move';
         e.dataTransfer.setData('text/plain','');
       });
 
       container.addEventListener('dragover',function(e){
+        if(!dragSrc) return;
         e.preventDefault();
         e.dataTransfer.dropEffect='move';
-        var pill=e.target.closest('.pn-pill');
-        container.querySelectorAll('.pn-pill').forEach(function(p){p.classList.remove('drag-over');});
-        if(pill&&pill!==dragSrc) pill.classList.add('drag-over');
+        var row=dropRow(e.target);
+        clearOver();
+        if(row&&row!==dragSrc) row.classList.add('drag-over');
       });
 
       container.addEventListener('dragleave',function(e){
-        var pill=e.target.closest('.pn-pill');
-        if(pill) pill.classList.remove('drag-over');
+        var row=e.target.closest('.pg-row');
+        if(row) row.classList.remove('drag-over');
       });
 
       container.addEventListener('drop',function(e){
         e.preventDefault();
-        var target=e.target.closest('.pn-pill');
-        container.querySelectorAll('.pn-pill').forEach(function(p){p.classList.remove('drag-over');});
+        var target=dropRow(e.target);
+        clearOver();
         if(!target||!dragSrc||target===dragSrc) return;
-
-        /* Determine insertion position based on mouse position relative to target center */
-        var rect=target.getBoundingClientRect();
-        var midX=rect.left+rect.width/2;
-        if(e.clientX<midX){
-          container.insertBefore(dragSrc,target);
-        } else {
-          container.insertBefore(dragSrc,target.nextSibling);
-        }
-        checkDirty();
+        moveInOrder(dragSrc,target,e.clientY);
       });
 
       container.addEventListener('dragend',function(e){
-        var pill=e.target.closest('.pn-pill');
-        if(pill) pill.classList.remove('dragging');
-        container.querySelectorAll('.pn-pill').forEach(function(p){p.classList.remove('drag-over');});
+        var row=e.target.closest('.pg-row');
+        if(row) row.classList.remove('dragging');
+        clearOver();
         dragSrc=null;
       });
 
-      /* Touch support for mobile */
-      var touchSrc=null, touchClone=null, touchStartY=0, touchStartX=0;
+      /* Touch support for mobile: starts from the grip only, so a finger
+         scrolling over the (now full-width) rows is not hijacked. */
+      var touchSrc=null, touchStartY=0, touchStartX=0;
 
       container.addEventListener('touchstart',function(e){
-        var pill=e.target.closest('.pn-pill');
-        if(!pill) return;
-        touchSrc=pill;
+        if(!e.target.closest('.pg-grip')) return;
+        var row=dropRow(e.target);
+        if(!row) return;
+        touchSrc=row;
         var touch=e.touches[0];
         touchStartX=touch.clientX;
         touchStartY=touch.clientY;
@@ -1511,37 +1596,19 @@
         if(dx<10&&dy<10) return;
         e.preventDefault();
         touchSrc.classList.add('dragging');
-
-        /* Find the pill under the touch point */
-        container.querySelectorAll('.pn-pill').forEach(function(p){p.classList.remove('drag-over');});
-        var elem=document.elementFromPoint(touch.clientX,touch.clientY);
-        if(elem){
-          var target=elem.closest('.pn-pill');
-          if(target&&target!==touchSrc) target.classList.add('drag-over');
-        }
+        clearOver();
+        var target=dropRow(document.elementFromPoint(touch.clientX,touch.clientY));
+        if(target&&target!==touchSrc) target.classList.add('drag-over');
       },{passive:false});
 
       container.addEventListener('touchend',function(e){
         if(!touchSrc) return;
         touchSrc.classList.remove('dragging');
-        container.querySelectorAll('.pn-pill').forEach(function(p){p.classList.remove('drag-over');});
-
+        clearOver();
         if(e.changedTouches.length>0){
           var touch=e.changedTouches[0];
-          var elem=document.elementFromPoint(touch.clientX,touch.clientY);
-          if(elem){
-            var target=elem.closest('.pn-pill');
-            if(target&&target!==touchSrc){
-              var rect=target.getBoundingClientRect();
-              var midX=rect.left+rect.width/2;
-              if(touch.clientX<midX){
-                container.insertBefore(touchSrc,target);
-              } else {
-                container.insertBefore(touchSrc,target.nextSibling);
-              }
-              checkDirty();
-            }
-          }
+          var target=dropRow(document.elementFromPoint(touch.clientX,touch.clientY));
+          if(target&&target!==touchSrc) moveInOrder(touchSrc,target,touch.clientY);
         }
         touchSrc=null;
       });
@@ -1586,7 +1653,7 @@
        so the initial switchTab() call at boot -- which shows whichever tab
        was last active -- transparently fetches that tab's fragment first; no
        separate boot-time special case is needed for the default tab. */
-    const TAB_ORDER=['nodes','allsky','json','ha','clock','spotify','image-goes','image-moon','image-solar','image-custom','image-radar','octoprint','display','behavior','voice-clips','system','logs','backup','api'];
+    const TAB_ORDER=['nodes','allsky','json','ha','clock','spotify','image-goes','image-moon','image-solar','image-custom','image-radar','image-clouds','octoprint','display','behavior','voice-clips','system','logs','backup','api'];
     const LAZY_TABS=new Set(TAB_ORDER);
     const loadedTabs=new Set(TAB_ORDER.filter(n=>!LAZY_TABS.has(n)));
 
@@ -1772,7 +1839,7 @@
        highlights and row 2 shows the matching tab group. _lastUsedTab remembers
        the tab last visited in each section (in-memory) so a section click lands
        on a sensible default; switchTab() keeps it seeded as tabs activate. */
-    const TAB_GROUP = { nodes:'pages', allsky:'pages', json:'pages', ha:'pages', clock:'pages', spotify:'pages', 'image-goes':'pages', 'image-moon':'pages', 'image-solar':'pages', 'image-custom':'pages', 'image-radar':'pages', octoprint:'pages', display:'device', behavior:'device', 'voice-clips':'device', system:'device', logs:'tools', backup:'tools', api:'tools' };
+    const TAB_GROUP = { nodes:'pages', allsky:'pages', json:'pages', ha:'pages', clock:'pages', spotify:'pages', 'image-goes':'pages', 'image-moon':'pages', 'image-solar':'pages', 'image-custom':'pages', 'image-radar':'pages', 'image-clouds':'pages', octoprint:'pages', display:'device', behavior:'device', 'voice-clips':'device', system:'device', logs:'tools', backup:'tools', api:'tools' };
     var _lastUsedTab={};
     function highlightGroup(name){
       var sec=TAB_GROUP[name];
@@ -1830,7 +1897,7 @@
       if(name==='api' && typeof apiInjectHost==='function') apiInjectHost();
       // Voice Clips: refresh storage state + Default/Custom badges on every visit.
       if(name==='voice-clips' && typeof window.vcRefresh==='function') window.vcRefresh();
-      /* Home Page pills / idle dropdown are registry-driven; if the boot-time
+      /* Home Page / idle target lists are registry-driven; if the boot-time
          /api/pages fetch lost the race, try again whenever Behavior opens. */
       if(name==='behavior' && !_pageRegistry.length){
         fetchPageRegistry().then(function(){ if(_pageRegistry.length) populatePageControls(); });
@@ -1887,27 +1954,20 @@
     }
 
     /* === Page Navigation (Start Page + Auto Cycle) === */
+    /* Home Page list from the device page registry (single source of truth).
+       Radio value = registry id. Unavailable pages stay selectable (marked
+       "disabled") so a page that becomes available later can still be picked.
+       Radios have no id; data-cfg-key on the container tells markTouched
+       which config key this group feeds. */
     function buildStartPagePills(){
       var c=$('start-page-pills');
       if(!c) return;
-      c.innerHTML='';
-      /* Pills are built from the device page registry (single source of truth).
-         Each pill value = registry id (integer); grouped by category in the
-         registry's first-seen order. Unavailable pages stay selectable but
-         show dimmed so a page that becomes available later can still be picked. */
-      var pages=targetablePagesOrdered();
-      pages.forEach(function(p){
-        var cls='pn-pill start-pill'+(p.available?'':' pn-pill-unavailable');
-        /* Radios have no id; data-cfg-key tells markTouched which config key
-           this group feeds (see collectTab_behavior's active_page_override). */
-        c.insertAdjacentHTML('beforeend',
-          '<label class="'+cls+'" data-cfg-key="active_page_override">'+
-            '<input type="radio" name="start_page" value="'+p.id+'" onchange="onStartPageChange();checkDirty()">'+
-            '<span class="pn-pill-visual">'+p.label+'</span>'+
-            '<span class="pin-badge">&#9733;</span>'+
-          '</label>'
-        );
-      });
+      renderPageList(c,targetablePages(),{mode:'radio',name:'start_page'});
+      if(c.dataset.wired!=='1'){
+        /* checkDirty/markTouched run via the .content change delegate. */
+        c.addEventListener('change',function(e){ if(e.target.closest('.pg-row')) onStartPageChange(); });
+        c.dataset.wired='1';
+      }
     }
 
     function getStartPageValue(){
@@ -1915,11 +1975,91 @@
       return checked?parseInt(checked.value):-1;
     }
 
-    function setStartPageValue(val){
-      var radios=document.querySelectorAll('input[name="start_page"]');
-      var found=false;
+    /* Mark the checked row of a radio page list (.pg-on shows its star). */
+    function pgMarkRadioRow(c){
+      if(!c) return;
+      c.querySelectorAll('.pg-row').forEach(function(row){ row.classList.toggle('pg-on',row.querySelector('input').checked); });
+    }
+    /* Check the radio of group `name` whose value is val; first row if none matches. */
+    function pgSelectRadio(name,val){
+      var radios=document.querySelectorAll('input[name="'+name+'"]'), found=false;
       radios.forEach(function(r){ if(parseInt(r.value)===val){r.checked=true;found=true;} });
       if(!found&&radios.length>0) radios[0].checked=true;
+      return found;
+    }
+    /* {label,cat} of the checked row in a radio page list, or null. */
+    function pgChecked(c){
+      var checked=c?c.querySelector('input:checked'):null;
+      if(!checked) return null;
+      var row=checked.closest('.pg-row'), group=row.closest('.pg-group');
+      return {label:row.querySelector('.pg-label').textContent, cat:group?group.querySelector('.pg-group-title').textContent:''};
+    }
+
+    function setStartPageValue(val){
+      pgSelectRadio('start_page',val);
+      pgMarkRadioRow($('start-page-pills'));
+      updateStartPageSummary();
+    }
+
+    /* "<label> · <category>" echoed in the Home Page subsection title. */
+    function updateStartPageSummary(){
+      var s=$('start_page_summary');
+      if(!s) return;
+      var p=pgChecked($('start-page-pills'));
+      s.innerHTML=p?escHtml(p.label)+(p.cat?' <small>· '+escHtml(p.cat)+'</small>':''):'';
+    }
+
+    /* === Idle target: summary row + collapsible radio list === */
+    function buildIdleTargetList(){
+      var c=$('idle_page_override_target');
+      if(!c) return;
+      var prev=getIdleTargetValue();
+      renderPageList(c,targetablePages(),{mode:'radio',name:'idle_page_target'});
+      setIdleTargetValue(prev);
+      var sum=$('idle_target_summary');
+      if(!sum||sum.dataset.wired==='1') return;
+      sum.dataset.wired='1';
+      var viaPointer=false, t;
+      function setOpen(open,focusWhat){
+        clearTimeout(t);
+        c.hidden=!open;
+        sum.querySelectorAll('.pg-sel,.pg-change').forEach(function(b){ b.setAttribute('aria-expanded',open?'true':'false'); });
+        var ch=sum.querySelector('.pg-change');
+        if(ch) ch.textContent=open?'Done':'Change';
+        if(focusWhat==='radio'){ var r=c.querySelector('input:checked')||c.querySelector('input'); if(r) r.focus(); }
+        else if(focusWhat==='button'&&ch) ch.focus();
+      }
+      sum.addEventListener('click',function(e){
+        if(e.target.closest('.pg-sel,.pg-change')) setOpen(c.hidden,c.hidden?'radio':'button');
+      });
+      c.addEventListener('pointerdown',function(e){ viaPointer=!!e.target.closest('.pg-row'); });
+      c.addEventListener('keydown',function(e){
+        if(e.key==='Escape'){ e.preventDefault(); setOpen(false,'button'); }
+        else viaPointer=false;
+      });
+      c.addEventListener('change',function(e){
+        if(!e.target.closest('.pg-row')) return;
+        setIdleTargetValue(parseInt(e.target.value));
+        /* Pointer pick: collapse after a beat. Keyboard arrowing keeps it open. */
+        if(viaPointer){ clearTimeout(t); t=setTimeout(function(){ setOpen(false,'button'); },250); }
+      });
+    }
+
+    function getIdleTargetValue(){
+      var checked=document.querySelector('input[name="idle_page_target"]:checked');
+      return checked?parseInt(checked.value):-1;
+    }
+
+    /* -1/unknown falls back to the first row (0). Also refreshes the summary row. */
+    function setIdleTargetValue(val){
+      pgSelectRadio('idle_page_target',val);
+      var c=$('idle_page_override_target');
+      pgMarkRadioRow(c);
+      var sum=$('idle_target_summary'), p=pgChecked(c);
+      if(!sum||!p) return;
+      var lbl=sum.querySelector('.pg-sel-label'), cat=sum.querySelector('.pg-sel-cat');
+      if(lbl) lbl.textContent=p.label;
+      if(cat) cat.textContent=p.cat;
     }
 
     function onStartPageChange(){
@@ -1928,6 +2068,8 @@
          (Moon, Solar, etc.) route correctly. Value still persists via
          getConfigData() on Save. */
       if(v>=0) fetch('/api/navigate?id='+v).catch(function(){});
+      pgMarkRadioRow($('start-page-pills'));
+      updateStartPageSummary();
       updatePageNavSummary();
     }
 
@@ -2002,14 +2144,23 @@
         if(hostnameSpan) hostnameSpan.textContent=urls[i]?urls[i]:'';
         var instLbl=$('inst_lbl_'+i);
         if(instLbl) instLbl.textContent=label;
-        var arpCb=$('arp_nina'+(i+1));
-        if(arpCb){
-          var pillVisual=arpCb.nextElementSibling;
-          if(pillVisual) pillVisual.textContent=urls[i]||('NINA '+(i+1));
-        }
+        /* Same name in all three page lists (rows share data-arp-idx = registry id). */
+        var pgLabel=urls[i]||('NINA '+(i+1));
+        $$('.pg-row[data-arp-idx="'+(i+1)+'"] .pg-label').forEach(function(l){ l.textContent=pgLabel; });
       }
       updateInstanceStates();
-      updatePageSelectOptions();
+      updateStartPageSummary();
+      if($('idle_target_summary')) setIdleTargetValue(getIdleTargetValue());
+      updatePageNavSummary(); /* not updatePageSelectOptions(): a rebuild would reset the labels just set */
+    }
+
+    /* Mark page-list rows for a page enabled/disabled: .pg-off + chip text. */
+    function pgSetRowsAvail(id,on){
+      $$('.pg-row[data-arp-idx="'+id+'"]').forEach(function(row){
+        row.classList.toggle('pg-off',!on);
+        var ch=row.querySelector('.pg-chip');
+        if(ch) ch.textContent=on?'enabled':'disabled';
+      });
     }
 
     function updateInstanceStates(){
@@ -2020,8 +2171,7 @@
           if(en) card.classList.remove('node-card-disabled');
           else card.classList.add('node-card-disabled');
         }
-        var arpCb=$('arp_nina'+(i+1));
-        if(arpCb&&arpCb.parentElement) arpCb.parentElement.style.opacity=en?'':'0.45';
+        pgSetRowsAvail(i+1,en);
       }
     }
 
@@ -2083,61 +2233,41 @@
     }
 
     /* === Rotation slideshow list === */
-    /* Single ordered slideshow list: membership == order.
-       data-arp-idx equals the slideshow stop id (0..11, 24=JSON, 25=HA,
-       26=OctoPrint, 27=Radar).
-       Saved array holds the indices of CHECKED pills in on-screen order,
-       padded to 24 slots with 0xFF (255 = unused). */
+    /* Single ordered slideshow list: membership == order, held in _arpOrder
+       (stop ids 0..11, 24=JSON, 25=HA, 26=OctoPrint, 27=Radar, 28=Cloud Cover).
+       Saved array = checked ids in cycle order, padded to 24 slots with 0xFF
+       (255 = unused). */
     function getRotateOrder(){
-      var pills=$('arp-container').querySelectorAll('.pn-pill[data-arp-idx]');
-      var order=[];
-      pills.forEach(function(p){
-        var cb=p.querySelector('input[type="checkbox"]');
-        if(cb&&cb.checked) order.push(parseInt(p.getAttribute('data-arp-idx')));
-      });
+      var order=_arpOrder.slice(); /* every checkbox flip writes _arpOrder, so it is the truth */
       while(order.length<24/* keep in sync with ARP_ORDER_CAPACITY in app_config.h (24 since v63) */) order.push(255);
       return order.slice(0,24/* keep in sync with ARP_ORDER_CAPACITY in app_config.h (24 since v63) */);
     }
 
     function setRotateOrder(orderArr){
       if(!orderArr) return;
-      var container=$('arp-container');
-      var pills=Array.from(container.querySelectorAll('.pn-pill[data-arp-idx]'));
-      var pillMap={};
-      pills.forEach(function(p){ pillMap[p.getAttribute('data-arp-idx')]=p; });
-      /* Members (in order) = valid stop ids (0..11, 24=JSON, 25=HA,
-         26=OctoPrint, 27=Radar) that are not the 0xFF/255 sentinel. Keep in
-         sync with ARP_STOP_IS_VALID in app_config.h. */
-      var members=orderArr.map(function(v){return parseInt(v);}).filter(function(v){return !isNaN(v)&&(v>=0&&v<12||v===24||v===25||v===26||v===27);});
-      /* Reorder members to the front in saved order, set their checkbox on. */
-      members.forEach(function(idx){
-        var p=pillMap[idx];
-        if(p){ container.appendChild(p); var cb=p.querySelector('input[type="checkbox"]'); if(cb) cb.checked=true; }
+      /* Members (in order) = valid stop ids that are not the 0xFF/255 sentinel.
+         Keep in sync with ARP_STOP_IS_VALID in app_config.h. */
+      var members=orderArr.map(function(v){return parseInt(v);}).filter(function(v){return !isNaN(v)&&(v>=0&&v<12||v===24||v===25||v===26||v===27||v===28);});
+      _arpOrder.length=0;
+      members.forEach(function(id){ if(_arpOrder.indexOf(id)<0) _arpOrder.push(id); });
+      var c=$('arp-container');
+      if(c) c.querySelectorAll('.pg-row').forEach(function(row){
+        var cb=row.querySelector('input[type="checkbox"]');
+        if(cb) cb.checked=_arpOrder.indexOf(parseInt(row.getAttribute('data-arp-idx')))>=0;
       });
-      /* Append non-members after, uncheck them. */
-      pills.forEach(function(p){
-        if(members.indexOf(parseInt(p.getAttribute('data-arp-idx')))===-1){
-          container.appendChild(p);
-          var cb=p.querySelector('input[type="checkbox"]'); if(cb) cb.checked=false;
-        }
-      });
+      renumberArp();
     }
 
-    /* Cosmetic hint on the Img: Custom pill when no custom URL is configured.
-       The pill stays selectable; the device skips it at runtime when empty. */
+    /* Cosmetic hint on the Custom Image row when no custom URL is configured.
+       The row stays selectable; the device skips it at runtime when empty. */
     function updateImgCustomPillHint(){
       var c=$('arp-container');
       if(!c) return;
-      var pill=c.querySelector('.pn-pill[data-arp-idx="11"]');
+      var pill=c.querySelector('.pg-row[data-arp-idx="11"]');
       if(!pill) return;
       var u=$('customImageUrl')?$('customImageUrl').value.trim():'';
-      if(u){
-        pill.style.opacity='';
-        pill.removeAttribute('title');
-      } else {
-        pill.style.opacity='0.55';
-        pill.title='No custom URL configured';
-      }
+      if(u) pill.removeAttribute('title');
+      else pill.title='No custom URL configured';
     }
 
     /* === Config Data Assembly === */
@@ -2277,6 +2407,13 @@
       data.radar_update_interval_s=parseInt($('radar_update_interval_s').value,10)||900;
       data.radar_frames=parseInt($('radar_frames').value,10)||10;
     }
+    function collectTab_image_clouds(data){
+      data.clouds_enabled=!!$('clouds_enabled').checked;
+      data.clouds_show_overlay=!!$('clouds_show_overlay').checked;
+      data.clouds_zoom=parseInt($('clouds_zoom').value,10)||7;
+      data.clouds_update_interval_s=parseInt($('clouds_update_interval_s').value,10)||600;
+      data.clouds_frames=parseInt($('clouds_frames').value,10)||6;
+    }
 
     function collectTab_octoprint(data){
       /* octoprint_enabled is a numeric SETTINGS_TABLE row (uint8), so send a
@@ -2331,7 +2468,7 @@
       data.toast_notify_mask=(function(){var m=0;for(var i=0;i<12;i++){if($('notify_cat_'+i).checked) m|=(1<<i);}return m>>>0;})();
       data.voice_notify_mask=(function(){var m=0;for(var i=0;i<12;i++){if($('voice_cat_'+i).checked) m|=(1<<i);}return m>>>0;})();
       data.idle_page_override_enabled=!!$('idle_page_override_enabled').checked;
-      data.idle_page_override_target=parseInt($('idle_page_override_target').value);
+      data.idle_page_override_target=getIdleTargetValue();
       data.idle_indicator_enabled=!!$('idle_indicator_enabled').checked;
     }
 
@@ -2448,6 +2585,7 @@
       'image-solar': collectTab_image_solar,
       'image-custom': collectTab_image_custom,
       'image-radar': collectTab_image_radar,
+      'image-clouds': collectTab_image_clouds,
       octoprint: collectTab_octoprint,
       display: collectTab_display,
       behavior: collectTab_behavior,
@@ -2583,15 +2721,13 @@
       loadThresholds(data,1,'rms_thresholds_2','hfr_thresholds_2');
       loadThresholds(data,2,'rms_thresholds_3','hfr_thresholds_3');
 
-      /* Cross-tab: rebuilds the Behavior tab's Home Page pills (via
-         updatePageSelectOptions -> buildStartPagePills) and the opacity of
-         its rotation-order checkboxes (via updateInstanceStates), using the
-         Nodes-tab fields just set above. populateTab_behavior() runs later
-         in TAB_ORDER and overwrites the Home Page pill selection with the
-         real server value, so this call's transient effect on that pill is
-         harmless -- matches the original monolith, which called
-         updateNodeLabels() at this same relative point, well before its
-         final setStartPageValue() call. */
+      /* Cross-tab: stamps the NINA labels and enabled/disabled state from the
+         Nodes-tab fields just set above onto the Behavior tab's page-list
+         rows (all three lists). populateTab_behavior() runs later in
+         TAB_ORDER and rebuilds those lists from the registry, overwriting the
+         Home Page selection with the real server value; matches the original
+         monolith, which called updateNodeLabels() at this same relative
+         point, well before its final setStartPageValue() call. */
       updateNodeLabels();
     }
 
@@ -2716,6 +2852,19 @@
       if($('radar_frames')) $('radar_frames').value=String(data.radar_frames||10);
       updateImagePageEnabledUI('image-radar');
     }
+    function populateTab_image_clouds(data){
+      if($('clouds_enabled')) $('clouds_enabled').checked=!!data.clouds_enabled;
+      /* Overlay defaults on, so only an explicit false clears it (missing key
+         on older firmware keeps the default). */
+      if($('clouds_show_overlay')) $('clouds_show_overlay').checked=(data.clouds_show_overlay!==false);
+      if($('clouds_zoom')){
+        var cz=parseInt(data.clouds_zoom,10)||7;
+        $('clouds_zoom').value=String((cz>=5&&cz<=9)?cz:7);
+      }
+      if($('clouds_update_interval_s')) $('clouds_update_interval_s').value=String(data.clouds_update_interval_s||600);
+      if($('clouds_frames')) $('clouds_frames').value=String(data.clouds_frames||6);
+      updateImagePageEnabledUI('image-clouds');
+    }
 
     function populateTab_octoprint(data){
       if($('octoprint_enabled')) $('octoprint_enabled').checked=!!data.octoprint_enabled;
@@ -2749,16 +2898,17 @@
 
     async function populateTab_behavior(data){
       /* P6d: tab-behavior is now a lazily-loaded fragment. #arp-container's
-         rotation pills (buildArpPills) and #start-page-pills /
+         rotation list (buildArpPills) and #start-page-pills /
          #idle_page_override_target (populatePageControls, page-registry
          driven) must be (re)built here every time this tab populates --
          populateConfig()'s unconditional populatePageControls() call at its
          top only reaches these elements when this fragment is already
          loaded by then. buildArpPills() has no registry dependency and runs
-         first so setRotateOrder() below always has pills to select from;
+         first so setRotateOrder() below always has rows to select from;
          populatePageControls() awaits the (cached, near-instant after boot)
-         page registry fetch before building the Home Page pills and idle
-         target dropdown that setStartPageValue() needs. Both functions
+         page registry fetch before building the Home Page and idle target
+         lists that setStartPageValue()/setIdleTargetValue() need, and stamps
+         availability chips onto the rotation rows. All of them
          clear-then-rebuild, so re-running them on every populate (including
          a config reload) is safe. */
       buildArpPills();
@@ -2795,7 +2945,7 @@
       if(data.auto_rotate_order2) setRotateOrder(data.auto_rotate_order2);
 
       if($('idle_page_override_enabled')) $('idle_page_override_enabled').checked=!!data.idle_page_override_enabled;
-      if($('idle_page_override_target')) $('idle_page_override_target').value=data.idle_page_override_target!=null?data.idle_page_override_target:0;
+      setIdleTargetValue(data.idle_page_override_target!=null?data.idle_page_override_target:0);
       if($('idle_indicator_enabled')) $('idle_indicator_enabled').checked=data.idle_indicator_enabled!==false;
       toggleIdleOverride();
 
@@ -2805,7 +2955,7 @@
       // needed here (the lock has no dependent controls to show/hide).
       if($('home_page_lock')) $('home_page_lock').checked=!!data.home_page_lock;
 
-      // Home Page pills were just (re)built above by populatePageControls().
+      // Home Page list was just (re)built above by populatePageControls().
       // active_page_override is a registry id after migration (never -1);
       // default to 0 if absent.
       setStartPageValue(data.active_page_override!=null?data.active_page_override:0);
@@ -2918,6 +3068,7 @@
       'image-solar': populateTab_image_solar,
       'image-custom': populateTab_image_custom,
       'image-radar': populateTab_image_radar,
+      'image-clouds': populateTab_image_clouds,
       octoprint: populateTab_octoprint,
       display: populateTab_display,
       behavior: populateTab_behavior,
@@ -2940,7 +3091,7 @@
          the idle target dropdown options exist before any per-tab populate runs.
          populateConfig is awaited by loadConfig(); every per-tab populate below
          (including populateTab_nodes' updateNodeLabels() call and
-         populateTab_behavior's own pill/dropdown value-set) can safely assume
+         populateTab_behavior's own list value-set) can safely assume
          the registry-driven controls already exist. */
       await fetchPageRegistry();
       populatePageControls();
@@ -4210,13 +4361,8 @@
       $('spotifyConnectionFields').style.display=d;
       $('spotifyAccountCard').style.display=on?'block':'none';
       if($('spotifyPlayerCard')) $('spotifyPlayerCard').style.display=on?'block':'none';
-      var arpSpotify=$('arp_spotify');
-      if(arpSpotify){
-        var row=arpSpotify.parentNode;
-        if(row) row.style.display=on?'':'none';
-      }
+      pgSetRowsAvail(6,on); /* Spotify page rows in all three lists */
       if(on) updateSpotifyStatus();
-      updatePageSelectOptions();
     }
 
     /* Spotify OAuth callback is now handled via popup polling in spotifyLogin() —
@@ -4441,14 +4587,14 @@
       'image-moon':   {en:'moon_enabled',   fields:'moonFields',   src:1},
       'image-solar':  {en:'solar_enabled',  fields:'solarFields',  src:2},
       'image-custom': {en:'custom_enabled', fields:'customFields', src:3},
-      'image-radar':  {en:'radar_enabled',  fields:'radarFields',  src:4}
+      'image-radar':  {en:'radar_enabled',  fields:'radarFields',  src:4},
+      'image-clouds': {en:'clouds_enabled', fields:'cloudsFields', src:5}
     };
 
     function updateImagePageEnabledUI(name){
       var t=IMAGE_TABS[name]; if(!t||!$(t.en)) return;
       var on=$(t.en).checked;
       if($(t.fields)) $(t.fields).style.display=on?'':'none';
-      updatePageSelectOptions();
     }
 
     /* Dark mode and Crop only affect the standard radar map picture; the two
@@ -4594,12 +4740,7 @@
       var d=on?'':'none';
       $('allskyConnectionFields').style.display=d;
       $('allskyFieldMappingsCard').style.display=on?'block':'none';
-      var arpAllsky=$('arp_allsky');
-      if(arpAllsky){
-        var row=arpAllsky.parentNode;
-        if(row) row.style.display=on?'':'none';
-      }
-      updatePageSelectOptions();
+      pgSetRowsAvail(5,on); /* AllSky page rows in all three lists */
     }
 
     function fetchAllSkyJson(){

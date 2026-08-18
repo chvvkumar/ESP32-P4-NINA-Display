@@ -7,7 +7,7 @@
  * Each navigable page, image source, and detail overlay is assigned a stable
  * numeric id (page_ref_t) and a stable string slug. The registry maps these
  * external identities onto the runtime absolute page index (the value the
- * Navigation Arbiter commits). The five image sources are five distinct pages
+ * Navigation Arbiter commits). The six image sources are six distinct pages
  * (PAGE_IDX_IMG_*), so the index alone identifies the source.
  *
  * APPEND-ONLY / FROZEN-IDS CONTRACT
@@ -83,14 +83,15 @@ typedef uint8_t page_ref_t;
 #define PAGE_REF_HA                 ((page_ref_t)25)
 #define PAGE_REF_OCTOPRINT          ((page_ref_t)26)
 #define PAGE_REF_RADAR              ((page_ref_t)27)
+#define PAGE_REF_CLOUDS             ((page_ref_t)28)
 
 /** Exclusive upper bound on assigned ids. */
-#define PAGE_REF_ID_MAX ((page_ref_t)28)
+#define PAGE_REF_ID_MAX ((page_ref_t)29)
 
 /** What kind of UI surface a page_ref names. */
 typedef enum {
     PAGE_REF_KIND_PAGE         = 0,  /* a navigable top-level page                */
-    PAGE_REF_KIND_IMAGE_SOURCE = 1,  /* one of the five full-screen image pages (GOES/Moon/Solar/Custom/Radar) */
+    PAGE_REF_KIND_IMAGE_SOURCE = 1,  /* one of the six full-screen image pages (GOES/Moon/Solar/Custom/Radar/Clouds) */
     PAGE_REF_KIND_OVERLAY      = 2,  /* a modal overlay (not directly navigable)   */
 } page_ref_kind_t;
 

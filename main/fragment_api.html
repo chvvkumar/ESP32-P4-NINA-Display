@@ -582,7 +582,7 @@
 
         <div class="api-ep">
           <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/image-display-config</span><span class="api-badge auth">Auth</span></div>
-          <p class="api-purpose">Read the settings for the four image pages (GOES, Moon, Solar, Custom URL). Returns the full current value of every persisted parameter listed in the POST table below (force_fetch is not part of the output).</p>
+          <p class="api-purpose">Read the settings for the six image pages (GOES, Moon, Solar, Custom URL, Weather Radar, Cloud Cover). Returns the full current value of every persisted parameter listed in the POST table below (force_fetch is not part of the output).</p>
           <div class="api-snip-label">Request</div>
           <div class="api-snip" data-curl="curl -b cookies.txt http://HOST/api/image-display-config">
             <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
@@ -603,7 +603,7 @@
             <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
             <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/image-display-config -d '{"source":2,"solar_band":5}'</pre>
           </div>
-          <p class="api-purpose">Send any subset of keys; <code>source</code> (0=GOES, 1=Moon, 2=Solar, 3=Custom) selects which page's last fetch error is echoed in the response.</p>
+          <p class="api-purpose">Send any subset of keys; <code>source</code> (0=GOES, 1=Moon, 2=Solar, 3=Custom, 4=Weather Radar, 5=Cloud Cover) selects which page's last fetch error is echoed in the response.</p>
           <div class="api-snip-label">Request (force a refresh)</div>
           <div class="api-snip" data-curl="curl -b cookies.txt -X POST http://HOST/api/image-display-config -d '{&quot;force_fetch&quot;:true}'">
             <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
@@ -627,7 +627,7 @@
                 <tr><td>custom_crop</td><td>bool</td><td>true / false</td><td>Crop vs full-frame; re-renders the cached frame locally (no re-download).</td></tr>
                 <tr><td>solar_update_interval_s</td><td>int</td><td>300 to 7200 (clamped)</td><td>Solar refresh interval in seconds.</td></tr>
                 <tr><td>moon_update_interval_s</td><td>int</td><td>10 to 3600 (clamped)</td><td>Moon re-render interval in seconds.</td></tr>
-                <tr><td>source</td><td>int</td><td>0=GOES, 1=Moon, 2=Solar, 3=Custom</td><td>Action only, not persisted. Selects which page's last fetch error is echoed in the response. The same key is accepted by <code>POST /api/image-display/refresh</code> as <code>{"source":n}</code>.</td></tr>
+                <tr><td>source</td><td>int</td><td>0=GOES, 1=Moon, 2=Solar, 3=Custom, 4=Weather Radar, 5=Cloud Cover</td><td>Action only, not persisted. Selects which page's last fetch error is echoed in the response. The same key is accepted by <code>POST /api/image-display/refresh</code> as <code>{"source":n}</code>.</td></tr>
                 <tr><td>goes_region</td><td>string</td><td>region code</td><td>GOES region id.</td></tr>
                 <tr><td>goes_update_interval_s</td><td>int</td><td>300 to 7200 (clamped)</td><td>GOES refresh interval in seconds.</td></tr>
                 <tr><td>goes_orientation</td><td>int</td><td>0 to 3</td><td>Rotation quadrant (0/90/180/270 degrees).</td></tr>
@@ -811,7 +811,7 @@
 
         <div class="api-ep">
           <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/image-display/refresh</span><span class="api-badge auth">Auth</span></div>
-          <p class="api-purpose">Force an immediate re-fetch of one image page with the loading overlay. With no body it refreshes the image page currently on screen; pass {"source":0..3} (0=GOES, 1=Moon, 2=Solar, 3=Custom) to refresh a specific page. This works for all four pages, unlike the force_fetch flag on /api/image-display-config which forces a download only for the Custom URL page.</p>
+          <p class="api-purpose">Force an immediate re-fetch of one image page with the loading overlay. With no body it refreshes the image page currently on screen; pass {"source":0..5} (0=GOES, 1=Moon, 2=Solar, 3=Custom, 4=Weather Radar, 5=Cloud Cover) to refresh a specific page. This works for all six pages, unlike the force_fetch flag on /api/image-display-config which forces a download only for the Custom URL page.</p>
           <div class="api-snip-label">Request (page on screen)</div>
           <div class="api-snip" data-curl="curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST http://HOST/api/image-display/refresh">
             <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>

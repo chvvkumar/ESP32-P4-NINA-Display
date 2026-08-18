@@ -799,6 +799,20 @@ typedef struct {
     char     hostname[32];
 } app_config_v16_t;
 
+/* Clouds page (v66) defaults. Every field is a SETTINGS_TABLE row, so
+ * settings_defaults_apply() already sets them; this is re-asserted after the
+ * prefix memcpy in the v63/v64/v65 migrations because those snapshots' tail
+ * padding lands on top of the appended clouds bytes. One helper, four callers,
+ * so the defaults cannot drift between them. */
+static void clouds_set_defaults(app_config_t *cfg)
+{
+    cfg->clouds_enabled = false;
+    cfg->clouds_show_overlay = true;
+    cfg->clouds_update_interval_s = 900;   /* 15 min; GIBS publishes a new GOES frame every 10 min */
+    cfg->clouds_frames = 6;                /* ~1 MB PSRAM per 720x720 frame */
+    cfg->clouds_zoom = 7;                  /* ~600 km across at mid-latitudes */
+}
+
 static void set_defaults(app_config_t *cfg) {
     memset(cfg, 0, sizeof(app_config_t));
     settings_defaults_apply(cfg);   /* every "simple" field's default — see settings_table.h */
@@ -870,6 +884,10 @@ static void set_defaults(app_config_t *cfg) {
     cfg->radar_frames = 10;   // full NOAA loop; ~660 KB of PSRAM per retained frame
     cfg->radar_dark_mode = true;   // v64: dark basemap by default (night-friendly)
     cfg->radar_map_style = 1;      // v65: state lines only (0 = standard NWS picture with roads and city names)
+
+    // Clouds page defaults (v66). Centre comes from weather_lat/weather_lon at
+    // fetch time; nothing location-specific is stored here.
+    clouds_set_defaults(cfg);
 
     // Spotify client ID: secret-like sentinel, not table-driven
     cfg->spotify_client_id[0] = '\0';
@@ -2722,6 +2740,7 @@ static void migrate_from_v63(const void *raw, size_t raw_size, app_config_t *cfg
      * Re-assert it, same as migrate_from_v61 does for octoprint_overlay_visible. */
     cfg->radar_dark_mode = true;
     cfg->radar_map_style = 1;   /* v65 field also lies in the v63 snapshot's tail padding; force the default (state lines only) */
+    clouds_set_defaults(cfg);   /* v66 fields follow directly; same tail-padding reasoning */
 
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v63 to v%d", APP_CONFIG_VERSION);
@@ -2743,9 +2762,30 @@ static void migrate_from_v64(const void *raw, size_t raw_size, app_config_t *cfg
      * byte before the new field and its trailing padding lands on top.
      * Re-assert it, same as migrate_from_v63 does for radar_dark_mode. */
     cfg->radar_map_style = 1;
+    clouds_set_defaults(cfg);   /* v66 fields follow directly; same tail-padding reasoning */
 
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v64 to v%d", APP_CONFIG_VERSION);
+}
+
+/* --- v65 -> v66 migration: appends the five clouds_* fields (Clouds satellite
+ *     page). Additive and at the very end, so this stays a plain prefix memcpy
+ *     like every migration around it. An upgrading device gets the page
+ *     disabled with the stock defaults; nothing else changes. --- */
+static void migrate_from_v65(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v65_t) ? raw_size : sizeof(app_config_v65_t);
+    memcpy(cfg, raw, copy);
+
+    /* The clouds block is appended past the v65 snapshot, so memcpy(copy)
+     * never touches it on purpose; the snapshot's tail padding can still land
+     * on top of the first bytes, so re-assert the defaults (same as
+     * migrate_from_v64 does for radar_map_style). */
+    clouds_set_defaults(cfg);
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v65 to v%d", APP_CONFIG_VERSION);
 }
 
 
@@ -3497,6 +3537,28 @@ static bool validate_config(app_config_t *cfg) {
         cfg->radar_map_style = 1;
         fixed = true;
     }
+    /* Clouds page (v66). The SETTINGS_TABLE rows already clamp/reset these in
+     * settings_clamp_apply(); kept explicit here as the last line of defence,
+     * like the radar block above. Interval 300-7200 s (settings_clamp_apply()
+     * has already turned a zeroed blob into 300, so no separate 0 arm here),
+     * frames 1-10 (~1 MB PSRAM each), zoom 5-9. */
+    if (cfg->clouds_update_interval_s < 300) {
+        cfg->clouds_update_interval_s = 300;
+        fixed = true;
+    } else if (cfg->clouds_update_interval_s > 7200) {
+        cfg->clouds_update_interval_s = 7200;
+        fixed = true;
+    }
+    if (cfg->clouds_frames < 1 || cfg->clouds_frames > 10) {
+        cfg->clouds_frames = 6;
+        fixed = true;
+    }
+    if (cfg->clouds_zoom < 5 || cfg->clouds_zoom > 9) {
+        cfg->clouds_zoom = 7;
+        fixed = true;
+    }
+    cfg->clouds_enabled      = cfg->clouds_enabled ? true : false;
+    cfg->clouds_show_overlay = cfg->clouds_show_overlay ? true : false;
 
     /* WiFi TX power cap: whitelist, not a range — only the discrete dBm steps
      * the UI offers are meaningful, and 0 means "no cap". Anything else (a
@@ -3590,6 +3652,18 @@ void app_config_init(void) {
             nvs_commit(handle);
         }
         /* tiles_loaded stays false -> tail loads "json_tiles"/"ha_tiles" keys */
+    } else if (version_check == 65) {
+        /* v65 -> v66: appended the five clouds_* fields. tiles_loaded stays
+         * false: a v65 device already keeps its tiles in the "json_tiles"/
+         * "ha_tiles" NVS keys, so the tail loads them.
+         * Safe to write back immediately, same reasoning as the v64 branch: a
+         * v65 blob already holds a real 24-entry auto_rotate_order2[] and real
+         * per-page image settings, so both dispatcher-tail fixups below are
+         * excluded by their literal version bounds. */
+        migrate_from_v65(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 64) {
         /* v64 -> v65: appended radar_map_style. tiles_loaded stays false: a v64
          * device already keeps its tiles in the "json_tiles"/"ha_tiles" NVS

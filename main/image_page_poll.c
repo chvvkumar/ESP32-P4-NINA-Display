@@ -1,9 +1,9 @@
 /**
  * @file image_page_poll.c
- * @brief Pollers for the five image pages, on the poll_task spine. One task
- *        per ENABLED source ("img_goes" .. "img_radar", 12288 B PSRAM stack,
+ * @brief Pollers for the six image pages, on the poll_task spine. One task
+ *        per ENABLED source ("img_goes" .. "img_clouds", 12288 B PSRAM stack,
  *        prio 3, Core 0), gated by image_page_t.poll_gate (active || warm).
- *        GOES/Solar/Custom/Radar share net_poll_once(); the Moon renders locally in
+ *        GOES/Solar/Custom/Radar/Clouds share net_poll_once(); the Moon renders locally in
  *        moon_poll_once() (ported from the former goes_poll_task moon branch)
  *        and releases its texture/scratch in moon_on_park().
  */
@@ -14,8 +14,9 @@
 #include "poll_task.h"
 #include "radar_play.h"            /* radar_frame_is_stale (ring generation) */
 #include "radar_wms.h"             /* styles 1/2: GeoServer WMS URL builder + caps TIME parser */
+#include "clouds_wms.h"            /* Clouds: GIBS GetMap URL, DescribeDomains parser, UTC time helpers */
 #include "radar_sites.h"           /* radar_site_coords (WMS site bbox centre) */
-#include "http_fetch.h"            /* http_fetch_text (WMS GetCapabilities) */
+#include "http_fetch.h"            /* http_fetch_text (WMS GetCapabilities / WMTS DescribeDomains) */
 #include "tasks.h"                 /* s_wifi_event_group, WIFI_CONNECTED_BIT, ota_in_progress */
 #include "app_config.h"
 #include "display_defs.h"
@@ -319,9 +320,9 @@ static uint32_t interval_cb(void *arg)
 {
     image_page_t *p = (image_page_t *)arg;
     uint32_t interval = image_page_interval_ms(p);
-    /* Moon renders every call; radar keeps its frames in the ring rather than
-     * p->frame, so neither has a p->frame age to shorten the sleep by. */
-    if (p->src == IMG_SRC_MOON || p->src == IMG_SRC_RADAR) return interval;
+    /* Moon renders every call; the animated pages keep their frames in the ring
+     * rather than p->frame, so none has a p->frame age to shorten the sleep by. */
+    if (p->src == IMG_SRC_MOON || image_src_is_animated(p->src)) return interval;
     int64_t age_ms = -1;
     if (xSemaphoreTake(p->frame_mux, pdMS_TO_TICKS(100)) == pdTRUE) {
         if (p->frame.buf) age_ms = esp_timer_get_time() / 1000 - p->frame.stamp_ms;
@@ -332,7 +333,7 @@ static uint32_t interval_cb(void *arg)
     return interval - (uint32_t)age_ms;                 /* remaining */
 }
 
-/* One image download+decode in flight across ALL five pollers (today's single
+/* One image download+decode in flight across ALL six pollers (today's single
  * goes task never ran two fetches at once; two concurrent 1 MB JPEG + 2 MB
  * decode transients would exceed the PSRAM budget and double the outbound
  * TLS sockets). A mutex is the right binary gate here (only the taker gives).
@@ -357,7 +358,7 @@ static void moon_commit(image_page_t *p, uint16_t *img, int w, int h)
     image_page_commit_frame(p, &f, true);
 }
 
-/* ---- GOES / Solar / Custom / Radar ---- */
+/* ---- GOES / Solar / Custom / Radar / Clouds ---- */
 
 /* Build a RIDGE still URL (radar_map_style 0). `token` is a char[16] and
  * `frame` is 0..9, so the longest possible result is 41 + 15 + 1 + 6 + NUL = 64
@@ -379,16 +380,38 @@ static void radar_frame_url(char *url, size_t sz, const char token[16], int fram
     snprintf(url, sz, "https://radar.weather.gov/ridge/standard/%s_%d.gif", token, frame);
 }
 
-/* Time of the last successful newest-frame push, so the freshness check below
- * can skip a download. Touched only by this task. */
-static int64_t s_radar_last_push_ms = 0;
+/* Per-instance poller state for the ANIMATED sources (image_src_is_animated),
+ * indexed by src; the single-frame sources' entries are never touched.
+ *   last_push_ms  time of the last successful newest-frame push, so the
+ *                 freshness check can skip a download;
+ *   times[]       advertised TIME stamps NEWEST FIRST, verbatim as the radar
+ *                 WMS caps list them (styles 1/2; empty on style 0);
+ *   stamps[]      the same list as UTC seconds for a source whose stamps are
+ *                 parsed (Clouds; 0 for radar = unknown, hash-only dedupe);
+ *   retry_backfill Clouds: a history slot was fetched but rejected as
+ *                 incomplete (clouds_drop_incomplete), so run the backfill
+ *                 again on the next poll even without an activation request.
+ * Touched only by that page's poll task (net_poll_once and anim_backfill run on
+ * it sequentially). File-scope on purpose: the string table is 320 B per source
+ * and does not belong on the 12288 B poller stack. */
+typedef struct {
+    int64_t  last_push_ms;
+    int      ntimes;
+    char     times[RADAR_WMS_TIMES_MAX][RADAR_WMS_TIME_MAX];
+    uint32_t stamps[RADAR_WMS_TIMES_MAX];
+    bool     retry_backfill;
+} anim_state_t;
+static anim_state_t s_anim[IMG_SRC_COUNT];
+/* The ring indexes stamps[]/times[] up to its capacity, so the two times lists
+ * must be at least as long as the largest ring. */
+_Static_assert(RADAR_WMS_TIMES_MAX >= RADAR_RING_MAX, "radar times list shorter than the ring");
+_Static_assert(CLOUDS_TIMES_MAX >= RADAR_RING_MAX, "clouds times list shorter than the ring");
 
-/* Advertised TIME stamps of the radar layer for styles 1/2 (GeoServer WMS),
- * NEWEST FIRST, refreshed on every newest-frame fetch. Touched only by the
- * radar poll task (net_poll_once and radar_backfill run on it sequentially).
- * File-scope on purpose: 320 B does not belong on the 12288 B poller stack. */
-static char s_radar_times[RADAR_WMS_TIMES_MAX][RADAR_WMS_TIME_MAX];
-static int  s_radar_ntimes = 0;
+static inline uint32_t anim_stamp(image_page_t *p, int i)
+{
+    anim_state_t *a = &s_anim[p->src];
+    return (i >= 0 && i < a->ntimes) ? a->stamps[i] : 0;
+}
 
 /* Build the WMS GetMap URL for `token` under styles 1/2. `token` has already
  * passed image_page_radar_token() (A-Z0-9 only) and radar_wms_frame_url()
@@ -403,74 +426,218 @@ static bool radar_wms_url_for(char *url, size_t sz, const app_config_t *cfg,
     return radar_wms_frame_url(url, sz, cfg->radar_map_style, token, lat, lon, stamp);
 }
 
-/* Refresh s_radar_times from the namespace-scoped GetCapabilities document.
- * Blind time stepping does not work (the newest frame lags wall clock by a
- * variable amount and out-of-range TIME returns a valid near-black GIF), so
- * the advertised list is the only safe source of stamps. Empty on any failure:
- * the newest fetch then omits TIME (server default = newest) and backfill
- * stops. KHDC is the standing case: its namespace GetCapabilities advertises
- * zero layers (so no time list) although its GetMap serves a live picture, so
- * on styles 1/2 it shows the newest picture only, with no history. */
-static void radar_wms_refresh_times(const char *token)
+/* One small text document (WMS caps / WMTS DescribeDomains), TLS bundle, capped
+ * at @p cap bytes. Body is PSRAM, caller frees. */
+static bool anim_fetch_small(const char *url, size_t cap, char **body, size_t *len)
 {
-    char url[128];
-    char layer[32];
-    s_radar_ntimes = 0;
-    if (!radar_wms_caps_url(url, sizeof(url), token) ||
-        !radar_wms_layer_name(layer, sizeof(layer), token)) return;
     http_fetch_opts_t opts = {
         .timeout_ms = 10000,
         .use_tls_bundle = true,
-        .max_response_bytes = 65536,
+        .max_response_bytes = cap,
         .user_agent = "NINA-Display/1.0 (ESP32-P4 dashboard)",
     };
+    return http_fetch_text(url, &opts, body, len) == ESP_OK;
+}
+
+/* Refresh the radar times list from the namespace-scoped GetCapabilities
+ * document (styles 1/2). Blind time stepping does not work (the newest frame
+ * lags wall clock by a variable amount and out-of-range TIME returns a valid
+ * near-black GIF), so the advertised list is the only safe source of stamps.
+ * Empty on any failure: the newest fetch then omits TIME (server default =
+ * newest) and backfill stops. KHDC is the standing case: its namespace
+ * GetCapabilities advertises zero layers (so no time list) although its GetMap
+ * serves a live picture, so on styles 1/2 it shows the newest picture only,
+ * with no history. */
+static void radar_wms_refresh_times(anim_state_t *a, const char *token)
+{
+    char url[128];
+    char layer[32];
+    a->ntimes = 0;
+    if (!radar_wms_caps_url(url, sizeof(url), token) ||
+        !radar_wms_layer_name(layer, sizeof(layer), token)) return;
     char *body = NULL;
     size_t len = 0;
-    if (http_fetch_text(url, &opts, &body, &len) != ESP_OK) {
+    if (!anim_fetch_small(url, 65536, &body, &len)) {
         ESP_LOGW(TAG, "radar caps fetch failed for %s; newest only", token);
         return;
     }
-    s_radar_ntimes = radar_wms_parse_times(body, len, layer, s_radar_times, RADAR_WMS_TIMES_MAX);
+    a->ntimes = radar_wms_parse_times(body, len, layer, a->times, RADAR_WMS_TIMES_MAX);
     heap_caps_free(body);
-    if (s_radar_ntimes == 0) ESP_LOGW(TAG, "no advertised radar times for %s; newest only", token);
+    memset(a->stamps, 0, sizeof(a->stamps));   /* radar stamps stay unknown */
+    if (a->ntimes == 0) ESP_LOGW(TAG, "no advertised radar times for %s; newest only", token);
+}
+
+/* Refresh the Clouds times list from WMTS DescribeDomains (~320 B): the slots
+ * GIBS actually holds for the picked satellite over the last three hours,
+ * newest first, at most clouds_frames. A missing or empty answer falls back to
+ * floor(now,10min)-50min as the single newest slot (frames land 30-47 min
+ * behind wall clock; -50 keeps the guess at or behind the real newest, so it
+ * is healed rather than stranded ahead of every real stamp), so the page still
+ * shows a picture during a GIBS wobble. */
+static void clouds_refresh_times(image_page_t *p, anim_state_t *a, const app_config_t *cfg)
+{
+    time_t now_t;
+    time(&now_t);
+    uint32_t now = (uint32_t)now_t;
+    int cap = image_page_ring_capacity(p);
+    a->ntimes = 0;
+
+    char url[160];
+    if (clouds_domains_url(url, sizeof(url), clouds_layer(cfg->weather_lon), now)) {
+        char *body = NULL;
+        size_t len = 0;
+        if (anim_fetch_small(url, 4096, &body, &len)) {
+            a->ntimes = clouds_parse_domains(body, len, a->stamps, cap);
+            heap_caps_free(body);
+        }
+    }
+    if (a->ntimes == 0) {
+        ESP_LOGW(TAG, "clouds: no GIBS time list; assuming newest = now - 50 min");
+        a->stamps[0] = clouds_fallback_newest(now);
+        a->ntimes = 1;
+    }
+    for (int i = 0; i < a->ntimes; i++) {
+        clouds_time_format(a->times[i], sizeof(a->times[i]), a->stamps[i]);
+    }
+}
+
+/* Per-source hook: refresh the advertised times list before the newest fetch.
+ * A network op, so it runs inside s_fetch_gate with the frame fetch. */
+static void anim_refresh_times(image_page_t *p, const app_config_t *cfg, const char *token)
+{
+    anim_state_t *a = &s_anim[p->src];
+    if (p->src == IMG_SRC_CLOUDS) {
+        clouds_refresh_times(p, a, cfg);
+    } else if (cfg->radar_map_style != 0) {
+        radar_wms_refresh_times(a, token);
+    } else {
+        a->ntimes = 0;                          /* RIDGE stills: indexed, no time list */
+    }
+}
+
+/* Per-source hook: URL of history frame @p i (0 = newest). false when there is
+ * no such frame (list exhausted, unknown radar token) — the history ends there.
+ * Radar style 0 indexes RIDGE's _i.gif; styles 1/2 and Clouds index the times
+ * list newest-first, so frame i is the i-th newest, which is what _i.gif means. */
+static bool anim_frame_url(image_page_t *p, const app_config_t *cfg, const char *token,
+                           int i, char *url, size_t sz)
+{
+    anim_state_t *a = &s_anim[p->src];
+    if (p->src == IMG_SRC_CLOUDS) {
+        if (i >= a->ntimes) return false;
+        return clouds_frame_url(url, sz, cfg->weather_lat, cfg->weather_lon,
+                                cfg->clouds_zoom, a->stamps[i]);
+    }
+    if (cfg->radar_map_style == 0) {
+        radar_frame_url(url, sz, token, i);
+        return true;
+    }
+    /* Newest = advertised stamp [0], or the server default (= newest) when none
+     * were advertised (KHDC). Older frames need a stamp. */
+    if (i > 0 && i >= a->ntimes) return false;
+    return radar_wms_url_for(url, sz, cfg, token, a->ntimes > 0 ? a->times[i] : NULL);
+}
+
+/* Clouds only: GIBS answers 200 for a slot it has not finished ingesting (the
+ * borders overlay over black, or black tile blocks), and such a frame must never
+ * reach the ring. Tests the raw decoded pixels (clouds_frame_incomplete); on a
+ * hit frees the frame and its retained source exactly as a failed decode is
+ * freed, logs once, and returns true so the caller skips the insert. The stamp
+ * is not held, so the existing paths re-fetch it on the next poll (times[0]/[1]
+ * every poll; older slots via retry_backfill). Not a failure: no caption, no
+ * toast, no spine backoff. Radar (and a NULL frame) always returns false. */
+static bool clouds_drop_incomplete(image_page_t *p, image_frame_t *f, uint8_t **src, int i)
+{
+    if (p->src != IMG_SRC_CLOUDS || f->buf == NULL) return false;
+    if (!clouds_frame_incomplete((const uint16_t *)f->buf, f->w, f->h, f->w)) return false;
+    anim_state_t *a = &s_anim[p->src];
+    ESP_LOGI(TAG, "clouds: slot %s incomplete, will retry",
+             (i >= 0 && i < a->ntimes) ? a->times[i] : "?");
+    heap_caps_free(f->buf);
+    f->buf = NULL;
+    if (*src) {
+        heap_caps_free(*src);
+        *src = NULL;
+    }
+    return true;
+}
+
+/* Fetch history frame @p i under generation @p gen and hand it to the ring
+ * (accepted or rejected, the ring owns both buffers). Serialised on the fetch
+ * gate. false when the fetch failed (older frames are optional). A Clouds frame
+ * rejected as incomplete counts as fetched (true) so the backfill walks on to
+ * the older, usually complete, slots; it flags retry_backfill so the slot is
+ * tried again next poll. */
+static bool anim_fetch_index(image_page_t *p, const app_config_t *cfg, const char *token,
+                             int i, uint32_t gen)
+{
+    char url[RADAR_WMS_URL_MAX];
+    if (!anim_frame_url(p, cfg, token, i, url, sizeof(url))) return false;
+    image_frame_t old = {0};
+    uint8_t *src = NULL;
+    size_t   src_len = 0;
+    xSemaphoreTake(s_fetch_gate, portMAX_DELAY);
+    esp_err_t e = image_fetch_custom_retain(url, &old, &src, &src_len);
+    xSemaphoreGive(s_fetch_gate);
+    if (e != ESP_OK) {
+        if (old.buf) heap_caps_free(old.buf);
+        /* src is NULL on every error return (see image_fetch_custom_retain). */
+        return false;
+    }
+    if (clouds_drop_incomplete(p, &old, &src, i)) {
+        s_anim[p->src].retry_backfill = true;
+        return true;
+    }
+    image_page_ring_add(p, &old, false, gen, src, src_len, anim_stamp(p, i));
+    return true;
 }
 
 /* Rebuild the history behind the newest frame after a page activation: fetch
- * {TOKEN}_1.gif upward (style 0) or the advertised WMS stamps from the second
- * newest down (styles 1/2) and APPEND each at the tail, so the ring stays
- * newest-first without ever reordering. Frames are STAGGERED ~1 s apart rather
- * than run back to back: this board glitches the panel under sustained radio
- * transmission (see wifi_max_tx_dbm), and nine rapid TLS downloads are exactly
- * that profile. Stops early when the ring fills, a fetch fails (older frames
- * are optional), or the page is left mid-backfill. */
+ * frame 1 upward through the frame_url hook and hand each to the ring (tail
+ * append for radar; placed by stamp for Clouds), so the ring stays newest-first
+ * without ever reordering. Frames are STAGGERED ~1 s apart rather than run back
+ * to back: this board glitches the panel under sustained radio transmission
+ * (see wifi_max_tx_dbm), and nine rapid TLS downloads are exactly that profile.
+ * Stops early when the ring fills, a fetch fails (older frames are optional),
+ * or the page is left mid-backfill. @p first is the first history index to
+ * fetch: 1, or 2 for Clouds, whose caller has just fetched index 1 itself (one
+ * attempt per stamp per poll). */
 #define RADAR_BACKFILL_GAP_MS 1000
 
-static void radar_backfill(image_page_t *p, const app_config_t *cfg)
+static void anim_backfill(image_page_t *p, const app_config_t *cfg, int first)
 {
-    int cap = image_page_radar_capacity();
-    if (cap <= 1) return;                       /* radar_frames == 1: a still, no ring */
+    int cap = image_page_ring_capacity(p);
+    if (cap <= 1) return;                       /* frames == 1: a still, no ring */
 
     /* Generation FIRST, token second: the config write lands before the ring
      * reset bumps the generation, so this order can never pair an old token
      * with the new generation (see radar_frame_is_stale in radar_play.h). */
-    uint32_t gen = image_page_radar_gen();
+    uint32_t gen = image_page_ring_gen(p);
     char token[16];
     image_page_radar_token(cfg, token, sizeof(token));
-    uint8_t style = cfg->radar_map_style;
 
-    for (int i = 1; i < cap; i++) {
+    for (int i = first; i < cap; i++) {
         if (!atomic_load(&p->poll_gate)) break;             /* page left / un-warmed */
-        if (image_page_radar_count() >= cap) break;         /* ring full */
+        if (image_page_ring_count(p) >= cap) break;         /* ring full */
+        /* A stamped frame the ring already holds (Clouds re-entry after a
+         * partial teardown, or the times[1] repair fetch below) costs no
+         * download. */
+        if (image_page_ring_has_stamp(p, anim_stamp(p, i))) continue;
+        /* Times list exhausted (short clouds list, KHDC on styles 1/2): the
+         * history simply ends here. Checked BEFORE the delay, no warning.
+         * Radar style 0 (RIDGE _i.gif) has no list and is never exhausted. */
+        if (!(p->src == IMG_SRC_RADAR && cfg->radar_map_style == 0) &&
+            i >= s_anim[p->src].ntimes) break;
         vTaskDelay(pdMS_TO_TICKS(RADAR_BACKFILL_GAP_MS));
         /* Superseded mid-backfill (region/frame-count/crop change, page leave).
-         * image_page_radar_add() would reject these frames anyway; bailing here
+         * image_page_ring_add() would reject these frames anyway; bailing here
          * stops us DOWNLOADING them. This loop lives ~9 s, so without it a
-         * region switch costs up to eight more 32 KB TLS fetches for a region
-         * nobody is looking at — and sustained radio transmission is what
-         * glitches this panel (see wifi_max_tx_dbm). Placed after the delay so
-         * it gates every fetch, including the first. */
-        if (radar_frame_is_stale(gen, image_page_radar_gen())) {
-            ESP_LOGI(TAG, "radar backfill superseded at frame %d", i);
+         * region switch costs up to eight more TLS fetches for a region nobody
+         * is looking at — and sustained radio transmission is what glitches
+         * this panel (see wifi_max_tx_dbm). Placed after the delay so it gates
+         * every fetch, including the first. */
+        if (radar_frame_is_stale(gen, image_page_ring_gen(p))) {
+            ESP_LOGI(TAG, "%s backfill superseded at frame %d", p->name, i);
             return;
         }
 
@@ -486,36 +653,14 @@ static void radar_backfill(image_page_t *p, const app_config_t *cfg)
          * remaining frame is still fetched, in order, and each is baked live
          * under the settings that just won. Safe to call from here: it runs on
          * this task, and no insert is in flight at this point in the loop. */
-        image_page_radar_retransform_if_requested(p);
+        image_page_ring_retransform_if_requested(p);
 
-        char url[RADAR_WMS_URL_MAX];
-        if (style == 0) {
-            radar_frame_url(url, sizeof(url), token, i);
-        } else {
-            /* Styles 1/2 index the advertised stamp list newest-first, so
-             * frame i is the i-th newest -- what RIDGE's _i.gif means on
-             * style 0. No more stamps (KHDC advertises none, parse failure,
-             * short list) or an unknown token: the history simply ends here. */
-            if (i >= s_radar_ntimes) break;
-            if (!radar_wms_url_for(url, sizeof(url), cfg, token, s_radar_times[i])) break;
-        }
-
-        image_frame_t old = {0};
-        uint8_t *src = NULL;
-        size_t   src_len = 0;
-        xSemaphoreTake(s_fetch_gate, portMAX_DELAY);
-        esp_err_t e = image_fetch_custom_retain(url, &old, &src, &src_len);
-        xSemaphoreGive(s_fetch_gate);
-        if (e != ESP_OK) {
-            if (old.buf) heap_caps_free(old.buf);
-            /* src is NULL on every error return (see image_fetch_custom_retain). */
-            ESP_LOGW(TAG, "radar backfill stopped at frame %d", i);
+        if (!anim_fetch_index(p, cfg, token, i, gen)) {
+            ESP_LOGW(TAG, "%s backfill stopped at frame %d", p->name, i);
             break;
         }
-        /* Takes both buffers, accepted or rejected. */
-        image_page_radar_add(p, &old, false, gen, src, src_len);   /* append at the tail */
     }
-    ESP_LOGI(TAG, "radar ring: %d/%d frames", image_page_radar_count(), cap);
+    ESP_LOGI(TAG, "%s ring: %d/%d frames", p->name, image_page_ring_count(p), cap);
 }
 
 static bool net_poll_once(void *arg)
@@ -523,9 +668,11 @@ static bool net_poll_once(void *arg)
     image_page_t *p = (image_page_t *)arg;
     const app_config_t *cfg = app_config_get();
     bool manual = atomic_exchange(&p->manual_fetch, false);
+    bool animated = image_src_is_animated(p->src);
 
-    /* Radar, in this order and BEFORE anything can insert a frame this pass:
-     *   1. a ring teardown image_page_radar_invalidate() had to defer because the
+    /* Animated pages, in this order and BEFORE anything can insert a frame this
+     * pass:
+     *   1. a ring teardown image_page_ring_invalidate() had to defer because the
      *      display lock was busy (the generation bump already landed, so the ring
      *      is only stale, never mixed) — running it here, ahead of the fetch
      *      below, is what keeps a frame under the NEW settings from joining old
@@ -534,11 +681,9 @@ static bool net_poll_once(void *arg)
      *      ring from each frame's retained compressed bytes. Runs BEFORE the
      *      freshness early-return below (a full, fresh ring is exactly when it is
      *      needed) and costs no network.
-     * Both are no-ops for the other four sources. */
-    if (p->src == IMG_SRC_RADAR) {
-        image_page_radar_reset_if_requested(p);
-        image_page_radar_retransform_if_requested(p);
-    }
+     * Both are no-ops for the single-frame sources. */
+    image_page_ring_reset_if_requested(p);
+    image_page_ring_retransform_if_requested(p);
 
     /* A frame that is still within its interval (a warm/prefetched frame on
      * page entry, or a wake that was not a manual/config request) needs no
@@ -546,12 +691,12 @@ static bool net_poll_once(void *arg)
     int64_t now_ms = esp_timer_get_time() / 1000;
     int64_t age_ms = 0;
     bool have = false;
-    if (p->src == IMG_SRC_RADAR) {
-        /* Radar's frames live in the ring, not p->frame. "Have" means the ring
-         * is FULL: a partly-built ring must keep polling so the backfill below
+    if (animated) {
+        /* Ring frames live in the ring, not p->frame. "Have" means the ring is
+         * FULL: a partly-built ring must keep polling so the backfill below
          * gets its chance, whatever the interval says. */
-        have = image_page_radar_count() >= image_page_radar_capacity();
-        age_ms = now_ms - s_radar_last_push_ms;
+        have = image_page_ring_count(p) >= image_page_ring_capacity(p);
+        age_ms = now_ms - s_anim[p->src].last_push_ms;
     } else if (xSemaphoreTake(p->frame_mux, pdMS_TO_TICKS(200)) == pdTRUE) {
         have = (p->frame.buf != NULL);
         age_ms = now_ms - p->frame.stamp_ms;
@@ -575,17 +720,21 @@ static bool net_poll_once(void *arg)
 
     image_frame_t fresh = {0};
     esp_err_t err;
-    /* Ring generation for a radar fetch, captured BEFORE the token is resolved
-     * below and handed to image_page_radar_add() so a frame that finishes
-     * downloading after a region switch is rejected instead of mixed into the
-     * new ring. Unused by the other four sources. */
-    uint32_t radar_gen = image_page_radar_gen();
-    /* Radar retains its compressed source bytes so the ring can be re-derived
-     * locally on a crop/dark-mode/theme change. Ownership passes to
-     * image_page_radar_add(); NULL on every non-radar path and on any error. */
-    uint8_t *radar_src = NULL;
-    size_t   radar_src_len = 0;
-    /* Serialize the fetch+decode across the five pollers (see s_fetch_gate).
+    /* Ring generation for an animated fetch, captured BEFORE the token/times
+     * are resolved below and handed to image_page_ring_add() so a frame that
+     * finishes downloading after a region switch is rejected instead of mixed
+     * into the new ring. Unused by the single-frame sources. */
+    uint32_t ring_gen = image_page_ring_gen(p);
+    /* Animated pages retain their compressed source bytes so the ring can be
+     * re-derived locally on a crop/dark-mode/theme change. Ownership passes to
+     * image_page_ring_add(); NULL on every other path and on any error. */
+    uint8_t *ring_src = NULL;
+    size_t   ring_src_len = 0;
+    /* Token resolved per fetch and never written back to config (a poll task
+     * must not persist config). Radar only; "" for the others. */
+    char token[16] = "";
+    if (p->src == IMG_SRC_RADAR) image_page_radar_token(cfg, token, sizeof(token));
+    /* Serialize the fetch+decode across the six pollers (see s_fetch_gate).
      * A page that was left/un-warmed while we waited needs no extra test here:
      * image_page_commit_frame() retains the frame either way, and the resident
      * cap frees it if the budget is exceeded. */
@@ -597,29 +746,31 @@ static bool net_poll_once(void *arg)
         case IMG_SRC_SOLAR:
             err = image_fetch_solar(cfg->solar_band, &fresh);
             break;
-        case IMG_SRC_RADAR: {
-            /* Token resolved per fetch and never written back to config (a poll
-             * task must not persist config). Frame 0 is the newest still. */
-            char token[16];
-            image_page_radar_token(cfg, token, sizeof(token));
+        case IMG_SRC_RADAR:
+        case IMG_SRC_CLOUDS: {
+            /* The times refresh is a network op, so it stays inside s_fetch_gate
+             * with the frame fetch. Frame 0 is the newest. The radar token
+             * passed image_page_radar_token() and radar_wms_frame_url()
+             * re-checks its alphabet, so the _loop.gif ban holds on this path. */
             char url[RADAR_WMS_URL_MAX];
-            if (cfg->radar_map_style == 0) {
-                radar_frame_url(url, sizeof(url), token, 0);
-                err = image_fetch_custom_retain(url, &fresh, &radar_src, &radar_src_len);
+            /* Clouds stamps are derived from wall clock; before SNTP has
+             * answered the DescribeDomains window and the fallback would both
+             * be 1970 and GIBS would serve a blank frame filed as unstamped.
+             * Fail the poll instead (the spine backoff retries). Same
+             * threshold as the Moon page's clock test. */
+            if (p->src == IMG_SRC_CLOUDS && time(NULL) <= (time_t)1577836800) {
+                strlcpy(fresh.error_msg, "Waiting for clock", sizeof(fresh.error_msg));
+                err = ESP_ERR_INVALID_STATE;
                 break;
             }
-            /* Styles 1/2: the caps fetch is a network op, so it stays inside
-             * s_fetch_gate with the frame fetch. Newest = advertised stamp [0],
-             * or the server default (= newest) when none were advertised. The
-             * token passed image_page_radar_token() and radar_wms_frame_url()
-             * re-checks its alphabet, so the _loop.gif ban holds on this path. */
-            radar_wms_refresh_times(token);
-            if (!radar_wms_url_for(url, sizeof(url), cfg, token,
-                                   s_radar_ntimes > 0 ? s_radar_times[0] : NULL)) {
-                strlcpy(fresh.error_msg, "Unknown radar area", sizeof(fresh.error_msg));
+            anim_refresh_times(p, cfg, token);
+            if (!anim_frame_url(p, cfg, token, 0, url, sizeof(url))) {
+                strlcpy(fresh.error_msg, p->src == IMG_SRC_RADAR ? "Unknown radar area"
+                                                                  : "No satellite frames",
+                        sizeof(fresh.error_msg));
                 err = ESP_ERR_INVALID_ARG;
             } else {
-                err = image_fetch_custom_retain(url, &fresh, &radar_src, &radar_src_len);
+                err = image_fetch_custom_retain(url, &fresh, &ring_src, &ring_src_len);
             }
             break;
         }
@@ -638,20 +789,46 @@ static bool net_poll_once(void *arg)
     xSemaphoreGive(s_fetch_gate);
 
     if (err == ESP_OK) {
-        if (p->src == IMG_SRC_RADAR) {
+        if (animated) {
             /* Newest frame at the head; a re-served identical still is deduped
              * inside _add. Only then rebuild the history (outside the fetch
-             * gate, which the backfill re-takes per download). */
-            image_page_radar_add(p, &fresh, true, radar_gen, radar_src, radar_src_len);
-            /* Radar never goes through image_page_commit_frame(), which is what
-             * clears p->frame.error_msg for every other source (it assigns the
-             * whole zeroed `fresh`). Without this, one transient failure latches
-             * the error caption forever: image_page_render_frame() checks the
-             * error branch BEFORE the ring branch, so every later activation
-             * repaints the stale reason until the first frame lands. */
+             * gate, which the backfill re-takes per download). A Clouds slot
+             * GIBS has not finished ingesting is dropped instead of inserted:
+             * expected while the newest slot fills in, so no caption, no toast,
+             * and the poll still counts as a success (no backoff); last_push_ms
+             * is left alone so the next poll re-fetches it. */
+            anim_state_t *a = &s_anim[p->src];
+            if (clouds_drop_incomplete(p, &fresh, &ring_src, 0)) {
+                if (show_wait && bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                    nina_wait_overlay_hide();
+                    bsp_display_unlock();
+                }
+            } else {
+                image_page_ring_add(p, &fresh, true, ring_gen, ring_src, ring_src_len, anim_stamp(p, 0));
+                a->last_push_ms = esp_timer_get_time() / 1000;
+            }
+            /* Ring pages never go through image_page_commit_frame(), which is
+             * what clears p->frame.error_msg for every other source (it assigns
+             * the whole zeroed `fresh`). Without this, one transient failure
+             * latches the error caption forever: image_page_render_frame()
+             * checks the error branch BEFORE the ring branch, so every later
+             * activation repaints the stale reason until the first frame lands. */
             image_page_set_error(p, "");
-            s_radar_last_push_ms = esp_timer_get_time() / 1000;
-            if (image_page_radar_backfill_take()) radar_backfill(p, cfg);
+            /* Consume the incomplete-slot retry BEFORE this pass's fetches so a
+             * slot rejected below is retried on the NEXT poll, never twice now. */
+            bool retry = a->retry_backfill;
+            a->retry_backfill = false;
+            /* Clouds: GIBS serves the newest one or two slots partially at
+             * first (black quadrants until every tile is ingested), so the
+             * second-newest is re-fetched on every poll too; the ring replaces
+             * a held stamp whose bytes changed and drops it when identical. */
+            if (p->src == IMG_SRC_CLOUDS && atomic_load(&p->poll_gate)) {
+                vTaskDelay(pdMS_TO_TICKS(RADAR_BACKFILL_GAP_MS));   /* same radio stagger as the backfill */
+                anim_fetch_index(p, cfg, token, 1, ring_gen);
+            }
+            if (image_page_ring_backfill_take(p) || retry) {
+                anim_backfill(p, cfg, p->src == IMG_SRC_CLOUDS ? 2 : 1);
+            }
         } else {
             image_page_commit_frame(p, &fresh, false);
         }
@@ -663,22 +840,26 @@ static bool net_poll_once(void *arg)
             nina_wait_overlay_hide();
             bsp_display_unlock();
         }
-        nina_toast_show(TOAST_WARNING, "Failed to load image");
+        /* A not-yet-synced clock is expected right after boot, not a failure
+         * worth a toast; the caption already says "Waiting for clock". */
+        if (err != ESP_ERR_INVALID_STATE) {
+            nina_toast_show(TOAST_WARNING, "Failed to load image");
+        }
     }
     return false;
 }
 
-/* Radar park point. The other consumption site for a deferred ring teardown is
- * the top of net_poll_once(), which only runs while the page is gated ON — and
- * the invalidate that had to defer often comes from image_page_disable(), which
- * closes that gate immediately. Without this hook a lock timeout on the disable
- * path would hold the whole ring (up to ~6.6 MB of PSRAM) until the page was
- * enabled again. Blocking here is free: nothing renders on this task while
- * parked, and no insert can be in flight (image_page_radar_add runs only on
- * this task, and only from net_poll_once). */
-static void radar_on_park(void *arg)
+/* Animated-page park point. The other consumption site for a deferred ring
+ * teardown is the top of net_poll_once(), which only runs while the page is
+ * gated ON — and the invalidate that had to defer often comes from
+ * image_page_disable(), which closes that gate immediately. Without this hook a
+ * lock timeout on the disable path would hold the whole ring (6-10 MB of PSRAM)
+ * until the page was enabled again. Blocking here is free: nothing renders on
+ * this task while parked, and no insert can be in flight (image_page_ring_add
+ * runs only on this task, and only from net_poll_once). */
+static void anim_on_park(void *arg)
 {
-    image_page_radar_reset_if_requested((image_page_t *)arg);
+    image_page_ring_reset_if_requested((image_page_t *)arg);
 }
 
 /* ---- Moon ---- */
@@ -1145,12 +1326,13 @@ void image_page_poll_task(void *arg)
     bool is_moon = (p->src == IMG_SRC_MOON);
     ESP_LOGI(TAG, "%s poll task started", p->name);
 
-    /* Park hooks: the Moon releases its texture and drag scratch; radar services
-     * a ring teardown that could not get the display lock (see radar_on_park).
-     * The other three sources hold nothing that a park should release. */
+    /* Park hooks: the Moon releases its texture and drag scratch; an animated
+     * page services a ring teardown that could not get the display lock (see
+     * anim_on_park). The other three sources hold nothing that a park should
+     * release. */
     void (*park_cb)(void *) = NULL;
-    if (is_moon)                        park_cb = moon_on_park;
-    else if (p->src == IMG_SRC_RADAR)   park_cb = radar_on_park;
+    if (is_moon)                             park_cb = moon_on_park;
+    else if (image_src_is_animated(p->src))  park_cb = anim_on_park;
 
     /* Network sources: a failed first fetch on page entry (transient DNS/TLS)
      * must not leave the page black for a full 5-120 min interval; the spine's

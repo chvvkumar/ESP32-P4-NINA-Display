@@ -161,7 +161,7 @@ static const page_ops_t s_clock_page_ops = {
     .is_available = NULL,   /* NULL = derive from get_obj() != NULL (always available) */
 };
 
-/* ── Image pages — PAGE_IDX_IMG_GOES..PAGE_IDX_IMG_RADAR, one spine, five
+/* ── Image pages — PAGE_IDX_IMG_GOES..PAGE_IDX_IMG_CLOUDS, one spine, six
  * instances (ui/nina_image_page.h). Same NULL-when-disabled pattern as the
  * other optional pages: img_obj[s] is NULL while the source is disabled,
  * img_created[s] is NULL until its first enable. The registry ops show/hide
@@ -188,17 +188,19 @@ IMG_PAGE_OPS(img_moon,   IMG_SRC_MOON,   NULL)
 IMG_PAGE_OPS(img_solar,  IMG_SRC_SOLAR,  NULL)
 IMG_PAGE_OPS(img_custom, IMG_SRC_CUSTOM, img_custom_available)
 IMG_PAGE_OPS(img_radar,  IMG_SRC_RADAR,  NULL)
+IMG_PAGE_OPS(img_clouds, IMG_SRC_CLOUDS, NULL)
 #undef IMG_PAGE_OPS
 
 static const page_ops_t *const s_img_ops[IMG_SRC_COUNT] = {
-    &img_goes_ops, &img_moon_ops, &img_solar_ops, &img_custom_ops, &img_radar_ops
+    &img_goes_ops, &img_moon_ops, &img_solar_ops, &img_custom_ops, &img_radar_ops,
+    &img_clouds_ops
 };
 static const page_ref_t s_img_ref[IMG_SRC_COUNT] = {
     PAGE_REF_IMG_GOES, PAGE_REF_IMG_MOON, PAGE_REF_IMG_SOLAR, PAGE_REF_IMG_CUSTOM,
-    PAGE_REF_RADAR
+    PAGE_REF_RADAR, PAGE_REF_CLOUDS
 };
 
-/* Summary page — at PAGE_IDX_SUMMARY (7), excluded from indicators */
+/* Summary page — at PAGE_IDX_SUMMARY, excluded from indicators */
 static lv_obj_t *summary_obj = NULL;
 
 /* ── Summary page registry ops (Task 4.7 wave P7b) ──
@@ -245,7 +247,7 @@ static const page_ops_t s_sysinfo_page_ops = {
     .apply_theme  = sysinfo_page_apply_theme,
     .is_available = NULL,
 };
-int total_page_count = 0;   /* page_count + EXTRA_PAGES (allsky + spotify + clock + 5 image pages + json + ha + octoprint + summary + settings + sysinfo) */
+int total_page_count = 0;   /* page_count + EXTRA_PAGES (allsky + spotify + clock + 6 image pages + json + ha + octoprint + summary + settings + sysinfo) */
 
 /* Private state */
 static lv_obj_t *scr_dashboard = NULL;
@@ -335,10 +337,11 @@ lv_obj_t *create_value_label(lv_obj_t *parent) {
  *   PAGE_IDX_IMG_SOLAR     (5)                  = Image page: Solar
  *   PAGE_IDX_IMG_CUSTOM    (6)                  = Image page: Custom URL
  *   PAGE_IDX_IMG_RADAR     (7)                  = Image page: Weather Radar
- *   PAGE_IDX_JSON          (8)                  = JSON Display page
- *   PAGE_IDX_HA            (9)                  = Home Assistant page
- *   PAGE_IDX_OCTOPRINT     (10)                 = OctoPrint 3D Printer page
- *   PAGE_IDX_SUMMARY       (11)                 = summary page
+ *   PAGE_IDX_IMG_CLOUDS    (8)                  = Image page: Clouds (GOES GeoColor)
+ *   PAGE_IDX_JSON          (9)                  = JSON Display page
+ *   PAGE_IDX_HA            (10)                 = Home Assistant page
+ *   PAGE_IDX_OCTOPRINT     (11)                 = OctoPrint 3D Printer page
+ *   PAGE_IDX_SUMMARY       (12)                 = summary page
  *   NINA_PAGE_OFFSET .. NINA_PAGE_OFFSET+pc-1   = NINA instance pages  (pages[idx - NINA_PAGE_OFFSET])
  *   SETTINGS_PAGE_IDX(pc)                       = settings page
  *   SYSINFO_PAGE_IDX(pc)                        = sysinfo page
@@ -1335,7 +1338,7 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     clock_obj = s_clock_page_ops.create(main_cont);
     lv_obj_add_flag(clock_obj, LV_OBJ_FLAG_HIDDEN);
 
-    /* Image pages — PAGE_IDX_IMG_GOES..PAGE_IDX_IMG_RADAR. One ops table per
+    /* Image pages — PAGE_IDX_IMG_GOES..PAGE_IDX_IMG_CLOUDS. One ops table per
      * instance, registered under its own frozen id; created only if enabled. */
     for (int s = 0; s < IMG_SRC_COUNT; s++) {
         page_registry_set_ops(s_img_ref[s], s_img_ops[s]);
@@ -1375,7 +1378,7 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     page_registry_set_ops(PAGE_REF_SYSINFO, &s_sysinfo_page_ops);
     sysinfo_obj = s_sysinfo_page_ops.create(main_cont);
     lv_obj_add_flag(sysinfo_obj, LV_OBJ_FLAG_HIDDEN);
-    total_page_count = page_count + EXTRA_PAGES;  /* allsky + spotify + clock + 5 image pages + json + ha + octoprint + summary + NINA pages + settings + sysinfo */
+    total_page_count = page_count + EXTRA_PAGES;  /* allsky + spotify + clock + 6 image pages + json + ha + octoprint + summary + NINA pages + settings + sysinfo */
 
     /* Page indicator dots — one dot per available NINA slot (not allsky, spotify, summary, settings, or sysinfo) */
     create_page_indicator(scr_dashboard, nina_available_count);
