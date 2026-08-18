@@ -264,6 +264,9 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
    <a class="nav-tab" href="/config#image-moon">Moon</a>
    <a class="nav-tab" href="/config#image-solar">Solar</a>
    <a class="nav-tab" href="/config#image-custom">Custom URL</a>
+   <a class="nav-tab" href="/config#image-radar">Radar</a>
+   <a class="nav-tab" href="/config#image-clouds">Cloud Cover</a>
+   <a class="nav-tab" href="/config#octoprint">OctoPrint</a>
   </div>
   <div class="tab-group" data-section="device">
    <a class="nav-tab" href="/config#display">Display</a>
@@ -477,7 +480,9 @@ var ICONS = { summary: 'i-grid', sysinfo: 'i-chip', allsky: 'i-sun', spotify: 'i
 var SUBS  = { summary: 'All computers', sysinfo: 'Device status', allsky: 'Sky conditions',
               spotify: 'Music player', clock: 'Time and weather', json: 'Custom tiles',
               ha: 'Entity tiles', 'image.goes': 'Satellite view', 'image.moon': 'Moon phase',
-              'image.solar': 'Solar view', 'image.custom': 'Your image' };
+              'image.solar': 'Solar view', 'image.custom': 'Your image',
+              'image.radar': 'Weather radar', 'image.clouds': 'Satellite cloud cover',
+              octoprint: '3D printer' };
 function iconFor(slug) {
  if (slug.indexOf('nina.') === 0) return 'i-star';
  if (slug.indexOf('image') === 0) return 'i-image';

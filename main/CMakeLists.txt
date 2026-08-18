@@ -18,7 +18,7 @@ idf_component_register(
          ui/nina_empty_state.c
          ${LV_DEMOS_SOURCES}
     INCLUDE_DIRS . ui ${LV_DEMO_DIR}
-    EMBED_TXTFILES config_ui.html home_ui.html login.html setup_ui.html fragment_logs.html fragment_backup.html fragment_api.html fragment_allsky.html fragment_json.html fragment_ha.html fragment_clock.html fragment_spotify.html fragment_image_goes.html fragment_image_moon.html fragment_image_solar.html fragment_image_custom.html fragment_image_radar.html fragment_octoprint.html fragment_nodes.html fragment_display.html fragment_behavior.html fragment_system.html fragment_voice_clips.html
+    EMBED_TXTFILES config_ui.html home_ui.html login.html setup_ui.html fragment_logs.html fragment_backup.html fragment_api.html fragment_allsky.html fragment_json.html fragment_ha.html fragment_clock.html fragment_spotify.html fragment_image_goes.html fragment_image_moon.html fragment_image_solar.html fragment_image_custom.html fragment_image_radar.html fragment_image_clouds.html fragment_octoprint.html fragment_nodes.html fragment_display.html fragment_behavior.html fragment_system.html fragment_voice_clips.html
                    # Standalone audio test page (web_test_audio.c, port 8080).
                    # Deliberately NOT in WEB_GZ_ASSETS: one small page served by
                    # a second httpd instance that has no gzip negotiation.
@@ -100,6 +100,7 @@ set(WEB_GZ_ASSETS
     fragment_image_goes.html fragment_image_moon.html
     fragment_image_solar.html fragment_image_custom.html
     fragment_image_radar.html
+    fragment_image_clouds.html
     fragment_octoprint.html
     fragment_nodes.html fragment_display.html fragment_behavior.html
     fragment_system.html fragment_voice_clips.html)

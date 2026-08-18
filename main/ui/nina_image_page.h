@@ -2,8 +2,8 @@
 
 /**
  * @file nina_image_page.h
- * @brief Image page spine: ONE implementation, FIVE instances (GOES, Moon,
- *        Solar, Custom URL, Weather Radar). Each instance is a first-class page
+ * @brief Image page spine: ONE implementation, SIX instances (GOES, Moon,
+ *        Solar, Custom URL, Weather Radar, Clouds). Each instance is a first-class page
  *        with its own runtime index (PAGE_IDX_IMG_*), LVGL page, decoded frame,
  *        poller and gates. Rendering lives in ui/nina_image_page.c; the pollers
  *        live in image_page_poll.c and are built on the poll_task spine.
@@ -13,11 +13,11 @@
  *   - warm:   the page is the NEXT slideshow stop (image_page_prefetch, arbiter).
  *   - poll_gate = active || warm: the poll_task spine gate.
  *   - The decoded frame is RETAINED on leave (manual swipe-back re-shows it
- *     instantly). Cap: at most IMAGE_PAGE_MAX_RESIDENT (3) frames across the five
+ *     instantly). Cap: at most IMAGE_PAGE_MAX_RESIDENT (3) frames across the six
  *     instances; active and warm instances are pinned, and when a commit would
  *     exceed the cap the least-recently-shown other instance's frame is evicted
  *     (image_page_evict_if_over_cap). image_page_disable() frees a frame outright.
- *   - At most one download+decode is in flight across the five pollers
+ *   - At most one download+decode is in flight across the six pollers
  *     (s_fetch_gate in image_page_poll.c), matching today's single fetch task.
  *
  * Locks: LVGL display lock OUTSIDE, frame_mux INSIDE. Every image_page_*
@@ -48,14 +48,31 @@ typedef enum {
     IMG_SRC_SOLAR  = 2,
     IMG_SRC_CUSTOM = 3,
     IMG_SRC_RADAR  = 4,
-    IMG_SRC_COUNT  = 5,
+    IMG_SRC_CLOUDS = 5,
+    IMG_SRC_COUNT  = 6,
 } image_src_t;
+
+/* Sources whose frames live in the animation ring (index 0 = newest, played
+ * oldest -> newest on an LVGL timer) instead of a single p->frame. Every ring
+ * gate in nina_image_page.c / image_page_poll.c keys off this predicate, never
+ * off a source id, so a further animated source is one enum value + hooks. */
+static inline bool image_src_is_animated(image_src_t s)
+{
+    return s == IMG_SRC_RADAR || s == IMG_SRC_CLOUDS;
+}
+
+/* Sources whose fetch failure is rendered as the page caption (user-addressed
+ * or outage-prone): Custom URL, Radar (site token) and Clouds (GIBS). */
+static inline bool image_page_shows_error(image_src_t s)
+{
+    return s == IMG_SRC_CUSTOM || image_src_is_animated(s);
+}
 
 typedef struct image_page {
     /* identity: constant after image_page_init() */
     image_src_t       src;
     int               page_idx;        /* PAGE_IDX_IMG_GOES + src */
-    const char       *name;            /* task/log name: "img_goes" .. "img_radar" */
+    const char       *name;            /* task/log name: "img_goes" .. "img_clouds" */
 
     /* decoded frame, owned here, guarded by frame_mux */
     SemaphoreHandle_t frame_mux;
@@ -80,13 +97,13 @@ typedef struct image_page {
     size_t    moon_copy_cap[2];
 } image_page_t;
 
-#define IMAGE_PAGE_MAX_RESIDENT 3   /* decoded frames resident across the five instances */
+#define IMAGE_PAGE_MAX_RESIDENT 3   /* decoded frames resident across the six instances */
 
 /* ── Instances ── */
 image_page_t *image_page_get(image_src_t src);
 image_page_t *image_page_by_page_idx(int page_idx);          /* NULL if not an image page */
 
-/* Create the five instances' identities + mutexes (spawn_pollers=false) or
+/* Create the six instances' identities + mutexes (spawn_pollers=false) or
  * additionally start a poller for every source enabled in config
  * (spawn_pollers=true). Idempotent. MUST be called once with false from
  * app_main() right after app_config_init() (before the web server and before
@@ -107,7 +124,7 @@ bool     image_page_config_enabled(const app_config_t *c, image_src_t src);
 bool     image_page_config_overlay(const app_config_t *c, image_src_t src);
 bool     image_page_config_crop(const app_config_t *c, image_src_t src);
 uint32_t image_page_interval_ms(image_page_t *p);            /* live config, clamped; Moon: 3000 while the clock is invalid */
-void     image_page_label(image_page_t *p, char *out, size_t sz);   /* region name / "Moon" / band label / "Custom" / "Radar <token>" */
+void     image_page_label(image_page_t *p, char *out, size_t sz);   /* region name / "Moon" / band label / "Custom" / "Radar <token>" / "Clouds" */
 /* Radar site token for THIS fetch, resolved fresh every time and never
  * persisted (a poll task must not write config): an explicit radar_token wins,
  * else the WSR-88D site nearest the configured weather location, else the
@@ -125,26 +142,34 @@ bool     image_page_get_error(image_page_t *p, char *out, size_t sz); /* true if
  * frame_mux cannot be taken. force=true bypasses the newer-stamp gate and
  * swaps instantly (Moon). */
 void image_page_commit_frame(image_page_t *p, image_frame_t *fresh, bool force);
-void image_page_set_error(image_page_t *p, const char *msg);   /* stores error_msg; Custom/Radar render it as the caption */
+void image_page_set_error(image_page_t *p, const char *msg);   /* stores error_msg; Custom/Radar/Clouds render it as the caption */
 
-/* ── Weather Radar animation ring (IMG_SRC_RADAR only) ──
- * The radar page stores up to radar_frames decoded stills (index 0 = newest)
- * and plays them oldest -> newest on an LVGL timer, instead of keeping a single
- * frame in p->frame (which stays NULL for radar). A full ring is ~6.6 MB, so it
- * is freed whenever the page is deactivated or disabled and rebuilt by the
- * poller's backfill on the next activation. Guarded by the display lock alone;
- * see the ring block in nina_image_page.c. */
-/* Insert a decoded frame, taking ownership of fresh->buf. at_head=true is the
- * steady-state newest-frame push (evicts the oldest when full); at_head=false
- * appends an older backfill frame at the tail (ignored when full). A frame that
- * hashes equal to the entry it would sit next to is dropped. Takes the display
+/* ── Animation ring (image_src_is_animated: Weather Radar, Clouds) ──
+ * An animated page stores up to N decoded stills (index 0 = newest; N =
+ * radar_frames / clouds_frames) and plays them oldest -> newest on an LVGL
+ * timer, instead of keeping a single frame in p->frame (which stays NULL for
+ * these sources). One ring per instance. A full ring is 6-10 MB, so it is freed
+ * whenever the page is deactivated or disabled and rebuilt by the poller's
+ * backfill on the next activation. Guarded by the display lock alone; see the
+ * ring block in nina_image_page.c. Every function is a no-op (or returns 0 /
+ * false) for a single-frame source, so callers need no source test. */
+/* Insert a decoded frame, taking ownership of fresh->buf. Takes the display
  * lock itself, so it must NOT be called with the lock held.
  *
+ * @p stamp is the frame's own time (UTC seconds) or 0 when unknown. A stamped
+ * frame is placed by time (newest first) whatever @p at_head says; a stamp the
+ * ring already holds REPLACES that slot when the bytes differ (GIBS serves the
+ * newest frames partially at first) and is dropped as a duplicate when they
+ * match. For an unstamped frame at_head=true is the steady-state newest-frame
+ * push (evicts the oldest when full); at_head=false appends an older backfill
+ * frame at the tail (ignored when full). A frame that hashes equal to the
+ * entry it would sit next to is dropped.
+ *
  * @p gen is the ring generation the fetch was issued under, from
- * image_page_radar_gen(). A frame whose generation no longer matches is FREED
+ * image_page_ring_gen(). A frame whose generation no longer matches is FREED
  * and dropped: this is the single point that keeps frames from a region the
  * user has already left out of the ring. Producers must read the generation
- * BEFORE the token they fetch with (see radar_frame_is_stale in radar_play.h).
+ * BEFORE the token/times they fetch with (see radar_frame_is_stale in radar_play.h).
  *
  * @p src / @p src_len are the frame's COMPRESSED bytes from
  * image_fetch_custom_retain() (may be NULL/0). The ring retains them so a crop,
@@ -152,25 +177,31 @@ void image_page_set_error(image_page_t *p, const char *msg);   /* stores error_m
  * re-downloading the whole ring; they also serve as the dedupe key.
  *
  * Ownership of BOTH fresh->buf and src is taken on every path, accepted or
- * rejected: the caller must not free either after this returns. */
-void image_page_radar_add(image_page_t *p, image_frame_t *fresh, bool at_head, uint32_t gen,
-                          uint8_t *src, size_t src_len);
+ * rejected: the caller must not free either after this returns.
+ *
+ * Calls nav_arbiter_notify_content_ready() when a frame lands on the visible
+ * page, so the slideshow dwell starts once the picture is up (same contract as
+ * image_page_commit_frame). */
+void image_page_ring_add(image_page_t *p, image_frame_t *fresh, bool at_head, uint32_t gen,
+                         uint8_t *src, size_t src_len, uint32_t stamp);
 /* Re-derive every resident frame from its retained compressed bytes under the
- * CURRENT crop mode and dark/Red-Night treatment. No network. Request from any
- * task (sets a flag + wakes the poller); the work runs on the radar poll task,
- * one frame at a time, taking the display lock only for the pointer swaps. */
-void image_page_radar_request_retransform(image_page_t *p);
-void image_page_radar_retransform_if_requested(image_page_t *p);   /* radar poll task only */
-void image_page_radar_reset(image_page_t *p);       /* free the ring + bump the generation; display lock HELD by the caller */
+ * CURRENT bake (radar crop / dark mode) and theme (Red Night). No network.
+ * Request from any task (sets a flag + wakes the poller); the work runs on the
+ * page's poll task, one frame at a time, taking the display lock only for the
+ * pointer swaps. */
+void image_page_ring_request_retransform(image_page_t *p);
+void image_page_ring_retransform_if_requested(image_page_t *p);   /* the page's poll task only */
+void image_page_ring_reset(image_page_t *p);        /* free the ring + bump the generation; display lock HELD by the caller */
 /* Supersede the ring: bumps the generation UNCONDITIONALLY (so no in-flight frame
  * from the old settings can enter), then frees it. Takes the display lock; if that
- * times out the teardown is deferred to image_page_radar_reset_if_requested(). */
-void image_page_radar_invalidate(image_page_t *p);
-void image_page_radar_reset_if_requested(image_page_t *p);         /* radar poll task only */
-uint32_t image_page_radar_gen(void);                /* current ring generation; read BEFORE resolving the token */
-int  image_page_radar_count(void);                  /* resident frames (lock-free) */
-int  image_page_radar_capacity(void);               /* radar_frames, clamped 1..RADAR_RING_MAX */
-bool image_page_radar_backfill_take(void);          /* consume the pending-backfill request */
+ * times out the teardown is deferred to image_page_ring_reset_if_requested(). */
+void image_page_ring_invalidate(image_page_t *p);
+void image_page_ring_reset_if_requested(image_page_t *p);          /* the page's poll task only */
+uint32_t image_page_ring_gen(image_page_t *p);      /* current ring generation; read BEFORE resolving the token/times */
+int  image_page_ring_count(image_page_t *p);        /* resident frames (lock-free) */
+int  image_page_ring_capacity(image_page_t *p);     /* radar_frames / clouds_frames, clamped 1..RADAR_RING_MAX */
+bool image_page_ring_backfill_take(image_page_t *p);   /* consume the pending-backfill request */
+bool image_page_ring_has_stamp(image_page_t *p, uint32_t stamp);   /* lock-free; a held stamp needs no re-download */
 /* Enforce IMAGE_PAGE_MAX_RESIDENT: while more than the cap are resident, free the
  * frame of the least-recently-shown instance that is neither active nor warm.
  * Called by image_page_commit_frame after every commit; no display lock. */

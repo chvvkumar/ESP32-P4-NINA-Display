@@ -230,7 +230,7 @@ The home page shows device health at a glance, explains why the panel is on its 
   </tr>
   <tr>
     <td align="center"><em>AllSky (connection, per-quadrant field mappings)</em></td>
-    <td align="center"><em>Image pages (GOES / Moon / Solar / custom URL)</em></td>
+    <td align="center"><em>Image pages (GOES / Moon / Solar / custom URL / Weather Radar / Cloud Cover)</em></td>
   </tr>
   <tr>
     <td align="center"><img src="images/settings_logs.jpg" alt="Logs tab" width="480"></td>
@@ -390,8 +390,9 @@ Point MQTT at your broker to publish the device's own state via Home Assistant a
 
 - **AllSky** — a four-quadrant environmental panel (thermal, sky quality, ambient, power) fed from an AllSky API with configurable field mappings and thresholds.
 - **Weather** — OpenWeatherMap, Open-Meteo, or Weather Underground data on the clock page.
-- **Image pages** — four full-screen pages: GOES satellite, Moon (rendered on-device), NASA SDO/SOHO solar imagery, and a custom image URL. Each has its own enable, refresh interval, and overlay/crop settings.
+- **Image pages** — six full-screen pages: GOES satellite, Moon (rendered on-device), NASA SDO/SOHO solar imagery, a custom image URL, Weather Radar, and Cloud Cover. Each has its own enable, refresh interval, and overlay/crop settings.
 - **Weather Radar**: an animated NWS radar loop for a chosen radar site (or the nearest site to your weather location, or the whole CONUS). Choose how many frames to keep, the refresh interval, an optional caption, Crop (drops the NOAA header and legend), and Dark mode. The Map style option picks what the radar echoes are drawn over: Standard (roads and city names), State lines only (the default), or State and county lines. The two line-only styles remove roads and labels, which helps when highway markings look like heavy rain. Crop and Dark mode apply only to the Standard style; Red Night applies to all three.
+- **Cloud Cover**: an animated satellite loop of the cloud cover around your weather location, from NOAA GOES imagery served by NASA. Day: true colour. Night: infrared clouds over city lights. State and country borders and major roads are drawn over the picture. Choose the Area (about 150 km to 2500 km across), how many frames to keep, the refresh interval, and an optional caption. The location comes from the Location settings on the System tab; the satellite (GOES-East or GOES-West) is picked from your longitude. The source updates every 10 minutes and the newest frame is usually 30-45 minutes old.
 
 ---
 

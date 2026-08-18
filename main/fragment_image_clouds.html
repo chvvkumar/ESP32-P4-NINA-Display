@@ -1,0 +1,59 @@
+        <div class="card">
+          <div class="card-title"><span class="card-title-label">Cloud Cover <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+          <div class="help-popover"><div class="help-popover-title">Cloud Cover page</div><p>Live satellite picture of cloud cover around your location, from NOAA GOES imagery served by NASA. Day: true colour. Night: infrared clouds over city lights. Updates every 10 minutes at the source; the newest frame is usually 30-45 minutes old. Location comes from the System tab's location settings.</p><p>Coverage is the Americas and the surrounding oceans (GOES East and West).</p></div>
+          <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+            <span class="toggle-label">Enable Cloud Cover page</span>
+            <label class="toggle"><input type="checkbox" id="clouds_enabled" onchange="updateImagePageEnabledUI('image-clouds');applyImagePage('image-clouds');checkDirty()"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Adds the Cloud Cover page and starts fetching satellite pictures around your location.</div>
+          <div id="cloudsFields">
+            <div class="toggle-row" style="margin-top:16px">
+              <span class="toggle-label">Show Overlay</span>
+              <label class="toggle"><input type="checkbox" id="clouds_show_overlay" onchange="applyImagePage('image-clouds');checkDirty()"><span class="toggle-track"></span></label>
+            </div>
+            <div class="field-hint">Satellite name and picture time overlay on the display</div>
+            <div class="field" style="margin-top:16px">
+              <label class="field-label">Area</label>
+              <select class="input" id="clouds_zoom" onchange="applyImagePage('image-clouds');checkDirty()">
+                <option value="5">Region, about 2500 km across</option>
+                <option value="6">About 1200 km across</option>
+                <option value="7" selected>About 600 km across</option>
+                <option value="8">About 300 km across</option>
+                <option value="9">About 150 km across</option>
+              </select>
+              <div class="field-hint">How much of the map fits on the screen, centred on the location set on the System tab (widths quoted at mid-latitudes).</div>
+            </div>
+            <div class="card">
+              <div class="card-title"><span class="card-title-label">Animation <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+              <div class="help-popover"><div class="help-popover-title">Animation</div><p>Update Interval sets how often the page checks for a new satellite picture. The source publishes a new picture every 10 minutes, so checking more often than that gains nothing.</p><p>Animation length sets how many recent pictures the page plays back. Pictures are 10 minutes apart, so 6 frames is roughly the last hour; 1 frame is a still picture that never animates. Each frame takes about 1 MB of memory, so pick a shorter animation if the device is short on room.</p></div>
+            <div class="field" style="margin-top:16px">
+              <label class="field-label">Update Interval</label>
+              <select class="input" id="clouds_update_interval_s" onchange="applyImagePage('image-clouds');checkDirty()">
+                <option value="300">5 minutes</option>
+                <option value="600" selected>10 minutes</option>
+                <option value="900">15 minutes</option>
+                <option value="1800">30 minutes</option>
+                <option value="3600">1 hour</option>
+                <option value="7200">2 hours</option>
+              </select>
+              <div class="field-hint">How often a new satellite picture is fetched.</div>
+            </div>
+            <div class="field" style="margin-top:16px">
+              <label class="field-label">Animation length</label>
+              <select class="input" id="clouds_frames" onchange="applyImagePage('image-clouds');checkDirty()">
+                <option value="1">1 frame - still picture, no animation</option>
+                <option value="2">2 frames - about 20 minutes</option>
+                <option value="3">3 frames - about 30 minutes</option>
+                <option value="4">4 frames - about 40 minutes</option>
+                <option value="5">5 frames - about 50 minutes</option>
+                <option value="6" selected>6 frames - about 1 hour</option>
+                <option value="7">7 frames - about 70 minutes</option>
+                <option value="8">8 frames - about 80 minutes</option>
+                <option value="9">9 frames - about 90 minutes</option>
+                <option value="10">10 frames - about 100 minutes</option>
+              </select>
+              <div class="field-hint">How many recent pictures the page plays back; 1 is a still picture. About 1 MB memory per frame.</div>
+            </div>
+            </div>
+          </div>
+        </div>

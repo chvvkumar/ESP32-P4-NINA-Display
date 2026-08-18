@@ -207,7 +207,13 @@
     INT       (radar_update_interval_s,      "radar_update_interval_s",      900,   120,   7200)  /* 15 min default. True clamp, matching the image POST handler's clamp-to-bound (both write paths agree). validate_config()'s extra "0 -> 900" case for a zeroed blob now lands on 120 instead; both are legal intervals */ \
     INT_RESET (radar_frames,                 "radar_frames",                 10,    1,     10)    /* how many radar images the page animates. RESET reproduces validate_config() exactly: both 0 (unset blob) and >10 fall back to the full 10-frame loop, never to the opposite bound */ \
     BOOL      (radar_dark_mode,              "radar_dark_mode",              true)  /* v64: true = dark basemap (the pre-v64 behaviour, and the default), false = the NWS image as published */ \
-    INT_RESET (radar_map_style,              "radar_map_style",              1,     0,     2)     /* v65: which map the radar echoes are drawn over: 0 = standard NWS picture with roads and city names (the pre-v65 behaviour), 1 = state lines only (the default), 2 = state and county lines. RESET, not clamp: an unknown value (stale blob byte, or a future style this firmware does not know) falls back to state lines only rather than the nearest bound */
+    INT_RESET (radar_map_style,              "radar_map_style",              1,     0,     2)     /* v65: which map the radar echoes are drawn over: 0 = standard NWS picture with roads and city names (the pre-v65 behaviour), 1 = state lines only (the default), 2 = state and county lines. RESET, not clamp: an unknown value (stale blob byte, or a future style this firmware does not know) falls back to state lines only rather than the nearest bound */ \
+    /* -- Clouds page (v66): NASA GIBS GOES GeoColor around weather_lat/lon -- */ \
+    BOOL      (clouds_enabled,               "clouds_enabled",               false) \
+    BOOL      (clouds_show_overlay,          "clouds_show_overlay",          true) \
+    INT       (clouds_update_interval_s,     "clouds_update_interval_s",     600,   300,   7200)  /* 10 min default (GIBS publishes every 10 min). True clamp, matching the image POST handler's clamp-to-bound */ \
+    INT_RESET (clouds_frames,                "clouds_frames",                6,     1,     10)    /* animation depth, ~1 MB PSRAM per 720x720 frame. RESET: 0 (unset blob) and >10 both fall back to the default */ \
+    INT_RESET (clouds_zoom,                  "clouds_zoom",                  7,     5,     9)     /* Web-Mercator zoom of the 720 px picture: 5 ~2500 km wide .. 9 ~150 km. RESET: an unknown value falls back to the default, never to a bound */
 
 /* Apply every row's default value to *cfg. Called from set_defaults()
  * immediately after the memset(). Does not touch excluded/complex fields

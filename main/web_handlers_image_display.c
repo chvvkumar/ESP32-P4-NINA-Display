@@ -28,8 +28,8 @@ static bool radar_token_is_valid(const char *tok)
 }
 
 /**
- * @brief GET /api/image-display-config -- return the config fields of all five
- *        image pages (GOES, Moon, Solar, Custom URL, Radar).
+ * @brief GET /api/image-display-config -- return the config fields of all six
+ *        image pages (GOES, Moon, Solar, Custom URL, Radar, Clouds).
  */
 esp_err_t image_display_config_get_handler(httpd_req_t *req)
 {
@@ -46,11 +46,13 @@ esp_err_t image_display_config_get_handler(httpd_req_t *req)
     cJSON_AddBoolToObject(root, "solar_enabled",        cfg->solar_enabled);
     cJSON_AddBoolToObject(root, "custom_enabled",       cfg->custom_enabled);
     cJSON_AddBoolToObject(root, "radar_enabled",        cfg->radar_enabled);
+    cJSON_AddBoolToObject(root, "clouds_enabled",       cfg->clouds_enabled);
     cJSON_AddBoolToObject(root, "goes_show_overlay",    cfg->goes_show_overlay);
     cJSON_AddBoolToObject(root, "moon_show_overlay",    cfg->moon_show_overlay);
     cJSON_AddBoolToObject(root, "solar_show_overlay",   cfg->solar_show_overlay);
     cJSON_AddBoolToObject(root, "custom_show_overlay",  cfg->custom_show_overlay);
     cJSON_AddBoolToObject(root, "radar_show_overlay",   cfg->radar_show_overlay);
+    cJSON_AddBoolToObject(root, "clouds_show_overlay",  cfg->clouds_show_overlay);
     cJSON_AddBoolToObject(root, "goes_crop",            cfg->goes_crop);
     cJSON_AddBoolToObject(root, "solar_crop",           cfg->solar_crop);
     cJSON_AddBoolToObject(root, "custom_crop",          cfg->custom_crop);
@@ -69,6 +71,10 @@ esp_err_t image_display_config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "radar_frames", cfg->radar_frames);
     /* Empty string = "automatic: nearest site, else the national view". */
     cJSON_AddStringToObject(root, "radar_token", cfg->radar_token);
+    /* Clouds: centred on weather_lat/lon (System tab, Location card); zoom 5..9 picks the width. */
+    cJSON_AddNumberToObject(root, "clouds_update_interval_s", cfg->clouds_update_interval_s);
+    cJSON_AddNumberToObject(root, "clouds_frames", cfg->clouds_frames);
+    cJSON_AddNumberToObject(root, "clouds_zoom", cfg->clouds_zoom);
 
     cJSON_AddStringToObject(root, "goes_region", cfg->goes_region);
     cJSON_AddNumberToObject(root, "goes_update_interval_s", cfg->goes_update_interval_s);
@@ -105,7 +111,7 @@ esp_err_t image_display_config_get_handler(httpd_req_t *req)
  *        Any subset of the keys may be posted; each is applied only when
  *        present. Optional "preview" (true) applies live WITHOUT persisting;
  *        without it the values are saved to NVS as before. Optional "source"
- *        (0..3) selects which page's last fetch error to echo back; optional
+ *        (0..IMG_SRC_COUNT-1) selects which page's last fetch error to echo back; optional
  *        "force_fetch" re-downloads Custom even when nothing changed (it drives
  *        the live-apply step only, so it works in preview mode too).
  */
@@ -172,11 +178,13 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     JSON_TO_BOOL(root, "solar_enabled",       cur->solar_enabled);
     JSON_TO_BOOL(root, "custom_enabled",      cur->custom_enabled);
     JSON_TO_BOOL(root, "radar_enabled",       cur->radar_enabled);
+    JSON_TO_BOOL(root, "clouds_enabled",      cur->clouds_enabled);
     JSON_TO_BOOL(root, "goes_show_overlay",   cur->goes_show_overlay);
     JSON_TO_BOOL(root, "moon_show_overlay",   cur->moon_show_overlay);
     JSON_TO_BOOL(root, "solar_show_overlay",  cur->solar_show_overlay);
     JSON_TO_BOOL(root, "custom_show_overlay", cur->custom_show_overlay);
     JSON_TO_BOOL(root, "radar_show_overlay",  cur->radar_show_overlay);
+    JSON_TO_BOOL(root, "clouds_show_overlay", cur->clouds_show_overlay);
     JSON_TO_BOOL(root, "goes_crop",           cur->goes_crop);
     JSON_TO_BOOL(root, "solar_crop",          cur->solar_crop);
     JSON_TO_BOOL(root, "custom_crop",         cur->custom_crop);
@@ -233,6 +241,31 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
         if (v < 1) v = 1;
         if (v > 10) v = 10;
         cur->radar_frames = (uint8_t)v;
+    }
+    /* Clouds: same bounds as validate_config() and the SETTINGS_TABLE rows.
+     * Interval 300..7200 s (GIBS publishes every 10 min), frames 1..10 (~1 MB
+     * PSRAM each, so a memory bound), zoom 5..9 (Web-Mercator level of the
+     * 720 px picture around weather_lat/lon). */
+    cJSON *cinterval = cJSON_GetObjectItem(root, "clouds_update_interval_s");
+    if (cJSON_IsNumber(cinterval)) {
+        int v = cinterval->valueint;
+        if (v < 300) v = 300;
+        if (v > 7200) v = 7200;
+        cur->clouds_update_interval_s = (uint16_t)v;
+    }
+    cJSON *cframes = cJSON_GetObjectItem(root, "clouds_frames");
+    if (cJSON_IsNumber(cframes)) {
+        int v = cframes->valueint;
+        if (v < 1) v = 1;
+        if (v > 10) v = 10;
+        cur->clouds_frames = (uint8_t)v;
+    }
+    cJSON *czoom = cJSON_GetObjectItem(root, "clouds_zoom");
+    if (cJSON_IsNumber(czoom)) {
+        int v = czoom->valueint;
+        if (v < 5) v = 5;
+        if (v > 9) v = 9;
+        cur->clouds_zoom = (uint8_t)v;
     }
     cJSON *sinterval = cJSON_GetObjectItem(root, "solar_update_interval_s");
     if (cJSON_IsNumber(sinterval)) {
@@ -350,7 +383,8 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
         cur->moon_enabled   != prev->moon_enabled   ||
         cur->solar_enabled  != prev->solar_enabled  ||
         cur->custom_enabled != prev->custom_enabled ||
-        cur->radar_enabled  != prev->radar_enabled) {
+        cur->radar_enabled  != prev->radar_enabled  ||
+        cur->clouds_enabled != prev->clouds_enabled) {
         nav_arbiter_notify_topology_changed();
     }
 
@@ -377,7 +411,7 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
 }
 
 /**
- * @brief POST /api/image-display/refresh [{"source":0..3}] -- force an immediate
+ * @brief POST /api/image-display/refresh [{"source":0..IMG_SRC_COUNT-1}] -- force an immediate
  *        re-fetch (or Moon re-render) of ONE image page with the loading overlay,
  *        without changing any config. With no body or no "source" the currently
  *        visible image page is refreshed (no-op success if none is on screen).
@@ -398,7 +432,7 @@ esp_err_t image_display_refresh_post_handler(httpd_req_t *req)
             src = src_item->valueint;
             if (src < 0 || src >= IMG_SRC_COUNT) {
                 cJSON_Delete(root);
-                return send_400(req, "source must be 0 (GOES), 1 (Moon), 2 (Solar), 3 (Custom) or 4 (Radar)");
+                return send_400(req, "source must be 0 (GOES), 1 (Moon), 2 (Solar), 3 (Custom), 4 (Radar) or 5 (Cloud Cover)");
             }
         }
         cJSON_Delete(root);
