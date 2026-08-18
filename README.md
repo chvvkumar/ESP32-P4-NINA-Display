@@ -64,7 +64,7 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
 
 - [Waveshare ESP32-P4-WIFI6-Touch-LCD-4B](https://www.waveshare.com/esp32-p4-wifi6-touch-lcd-4b.htm?sku=31416): currently the only tested board. The layout is tuned for its 720x720 display.
 - [3D Printed Stand](https://www.thingiverse.com/thing:7321463) (optional): a printable stand for the display, designed by [@chicago925](https://github.com/chicago925) ([#116](https://github.com/chvvkumar/ESP32-P4-NINA-Display/issues/116)).
-- [3D Printed Mount](https://www.printables.com/model/1784141-waveshare-esp32-p4-wifi6-touch-lcd-4b-mount) (optional): a printable desk mount for the display, designed by the project author.
+- [3D Printed Mount](https://www.printables.com/model/1784141-waveshare-esp32-p4-wifi6-touch-lcd-4b-mount) (optional): a printable desk mount for the display, designed by the author.
 
 <p align="center">
   <img src="images/3d_printed_stand.jpg" alt="3D printed stand holding the display" width="720">
@@ -80,7 +80,7 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
 
 2. Download `nina-display-factory.bin` from the [Releases page](https://github.com/chvvkumar/ESP32-P4-NINA-Display/releases). No build environment is needed: open the [ESP Web Flasher](https://espressif.github.io/esptool-js/) in a Chromium-based browser, connect the board over USB, and flash the file at address `0x0000`. Each release includes step-by-step flashing instructions.
 
-3. Later updates arrive over the air. In the web UI, open Device > System > Firmware, pick an update channel (**Stable only**, **Include pre-releases**, or **Alpha (snd)**), and select **Check for Updates** then **Install Update**. **Check for updates on boot** automates the check. Manual Update flashes a `.bin` you upload from your computer. If a new firmware fails to boot, the bootloader rolls back to the previous one.
+3. Later updates arrive over the air: Device > System > Firmware checks GitHub releases on a chosen channel (stable, pre-release or alpha) and installs them, or flashes a `.bin` you upload from your computer. If a new firmware fails to boot, the bootloader rolls back to the previous one.
 
 > [!NOTE]
 > If the board warns about outdated esp-hosted co-processor firmware, flash [`firmware/merged-flash.bin`](firmware/) to the ESP32-P4 at address `0x0000`. It updates the ESP32-C6 WiFi co-processor over the internal link and shows progress on screen. When it finishes, flash `nina-display-factory.bin` again.
@@ -103,7 +103,7 @@ The web UI is protected by a password login (default `changeme123!`, no username
 - Transport is HTTP, not HTTPS. Treat your LAN segment as the trust boundary.
 
 > [!WARNING]
-> **Require login to access the web UI** can be turned off on the System tab. With it off, every endpoint is open to anyone on the LAN, including reboot, factory reset and firmware update. Use only on trusted networks.
+> Login can be turned off on the System tab. With it off, every endpoint is open to anyone on the LAN, including reboot, factory reset and firmware update. Use only on trusted networks.
 
 ## Pages
 
@@ -115,7 +115,7 @@ The Summary page shows a card for each configured NINA instance: name, active fi
 
 Each instance page is a 720x720 grid: header (instance name, colored green when connected and red when not, and the current target), sequence, an animated exposure arc colored by the active filter, filter and timing, guiding RMS, image stats (HFR, star count), mount flip time, session time, and power (voltage, current, watts, dew-heater PWM). After 30 s without fresh data a Last update label appears; after 2 minutes the page dims.
 
-Setup: Pages > N.I.N.A.: host or IP per instance, filter colors, RMS and HFR thresholds, data update rate (1-10 s), connection timeout, idle poll interval.
+Setup: Pages > N.I.N.A. (host or IP per instance; the plugin listens on port 1888).
 
 <p align="center">
   <img src="images/summary.jpg" alt="Summary page with one card per instance" width="720">
@@ -167,13 +167,13 @@ Every section on an instance page is tappable:
   </tr>
 </table>
 
-Polling: the visible instance is polled at the data update rate (default 2 s); the other instances get a 10 s heartbeat. While the Summary page is showing, all instances are polled at full rate. While a page other than a NINA page is showing, every instance drops to the idle poll interval (default 30 s) and the WebSocket connections close.
+Polling: the visible instance is polled every 2 s by default; the others get a 10 s heartbeat. The Summary page polls all instances at full rate; non-NINA pages drop every instance to a slow idle poll.
 
 ### Clock, Weather and Moon
 
 The Clock page shows a large analog or digital clock with current conditions, high and low, humidity, dew point, wind, UV, and hourly forecast bars from your chosen provider. The Moon page renders the Moon on the device with the current phase, libration and sub-solar lighting; drag it to look around, and pick a starfield or glow background.
 
-Setup: Pages > Clock: **Weather Provider** (**OpenWeatherMap**, **Open-Meteo (no key needed)**, or **Weather Underground**), API key where required, temperature units, time format, update interval (15-60 min). The location comes from Device > System > Location (city lookup or latitude and longitude). Moon: Pages > Moon: **Enable Moon page**, refresh interval, background, drag lighting, orientation.
+Setup: Pages > Clock (weather provider: Open-Meteo needs no key; OpenWeatherMap and Weather Underground need an API key) and Pages > Moon. The location comes from Device > System > Location.
 
 <p align="center">
   <img src="images/clock-face.jpg" alt="Clock page with weather" width="720">
@@ -194,15 +194,7 @@ Setup: Pages > Clock: **Weather Provider** (**OpenWeatherMap**, **Open-Meteo (no
 
 A full-screen Now Playing page with album art, track and artist, progress bar, and playback controls that appear on tap. Data comes from the Spotify Web API through your own Spotify developer app.
 
-Setup: Pages > Spotify:
-
-1. Create a free app at [developer.spotify.com](https://developer.spotify.com).
-2. Set its redirect URI to `http://127.0.0.1:8000/callback`.
-3. Paste the **Client ID** into the Spotify tab.
-4. Select **Login with Spotify** and approve access; the client ID is saved automatically.
-5. The browser lands on a page that cannot load. Copy the full address from the address bar, paste it into **Redirect URL**, and select **Submit**.
-
-Options: poll interval, **Minimal Mode**, **Show Overlay**, **Scroll Long Text**, **Show Progress Bar**, overlay timeout.
+Setup: Pages > Spotify. You need a free app at [developer.spotify.com](https://developer.spotify.com) with the redirect URI `http://127.0.0.1:8000/callback`; the tab walks you through the login.
 
 <table align="center">
   <tr>
@@ -219,7 +211,7 @@ Options: poll interval, **Minimal Mode**, **Show Overlay**, **Scroll Long Text**
 
 A four-quadrant environmental panel (thermal, sky quality, ambient, power) fed from an AllSky camera's `/all` endpoint. Each quadrant maps to fields of the AllSky JSON, with thresholds that color the readings.
 
-Setup: Pages > AllSky: **Enable AllSky**, **AllSky Hostname**, update interval (1 s to 5 min), dew point safety margin; select **Fetch JSON from AllSky** to import the field list, then assign fields under Quadrant Mappings.
+Setup: Pages > AllSky (hostname of the AllSky server; the tab fetches the field list and lets you map it to the quadrants).
 
 <p align="center">
   <img src="images/allsky.jpg" alt="AllSky page" width="720">
@@ -227,11 +219,9 @@ Setup: Pages > AllSky: **Enable AllSky**, **AllSky Hostname**, update interval (
 
 ### GOES Satellite
 
-Full-screen GOES satellite imagery for a chosen region, refreshed on an interval.
+Full-screen GOES satellite imagery for a chosen region, refreshed on an interval, with optional caption, crop, rotation and flip.
 
-Setup: Pages > GOES: **Enable GOES page**, **Region**, update interval (5 min to 2 h).
-
-Options: **Show Overlay** (caption), **Fill (crop borders)**, **Rotation**, **Flip vertical**, **Flip horizontal**.
+Setup: Pages > GOES.
 
 <p align="center">
   <img src="images/goes.jpg" alt="GOES satellite page" width="720">
@@ -241,9 +231,7 @@ Options: **Show Overlay** (caption), **Fill (crop borders)**, **Rotation**, **Fl
 
 Full-screen NASA SDO and SOHO solar imagery in a chosen band (AIA wavelengths, HMI continuum and magnetogram, LASCO coronagraphs, EIT).
 
-Setup: Pages > Solar: **Enable Solar page**, **Band**, update interval (5 min to 2 h).
-
-Options: **Show Overlay**, **Fill (crop borders)**, **Rotation**, **Flip vertical**, **Flip horizontal**.
+Setup: Pages > Solar.
 
 <p align="center">
   <img src="images/solar.jpg" alt="Solar page" width="720">
@@ -253,15 +241,13 @@ Options: **Show Overlay**, **Fill (crop borders)**, **Rotation**, **Flip vertica
 
 Full-screen JPEG or PNG fetched from any URL you supply, for example a webcam or a weather map.
 
-Setup: Pages > Custom URL: **Enable Custom URL page**, **Image URL**, update interval (10 s to 2 h).
-
-Options: **Show Overlay**, **Fill (crop borders)**, **Rotation**, **Flip vertical**, **Flip horizontal**.
+Setup: Pages > Custom URL.
 
 ### Weather Radar
 
-An animated NWS radar loop for a chosen radar site, a region, the whole CONUS, or the nearest site to your location. Choose how many frames to keep, the refresh interval, an optional caption, **Crop** (drops the NOAA header and legend), and **Dark mode**. **Map style** picks what the radar echoes are drawn over: **Standard (roads and city names)**, **State lines only** (the default), or **State and county lines**. The two line-only styles remove roads and labels, which helps when highway markings look like heavy rain. Crop and Dark mode apply only to the Standard style; the Red Night theme recolors all three.
+An animated NWS radar loop (up to 10 frames) for a chosen radar site, a region, the whole CONUS, or the nearest site to your location. The map style picks what the echoes are drawn over: the standard NWS picture with roads and city names, state lines only (the default), or state and county lines. The two line-only styles remove roads and labels, which helps when highway markings look like heavy rain.
 
-Setup: Pages > Radar: **Enable Weather Radar page**, **Radar area** (**Automatic (nearest radar to my location)** uses the Location on the System tab), update interval (2 min to 2 h), **Animation length** (1-10 frames).
+Setup: Pages > Radar. Automatic site selection uses the location on Device > System.
 
 <p align="center">
   <img src="images/radar.jpg" alt="Weather Radar page" width="720">
@@ -271,7 +257,7 @@ Setup: Pages > Radar: **Enable Weather Radar page**, **Radar area** (**Automatic
 
 An animated satellite loop of the cloud cover around your location, from NOAA GOES imagery served by NASA. Day: true color. Night: infrared clouds over city lights. State and country borders and major roads are drawn over the picture. The satellite (GOES-East or GOES-West) is picked from your longitude. The source updates every 10 minutes and the newest frame is usually 30-45 minutes old.
 
-Setup: Pages > Cloud Cover: **Enable Cloud Cover page**, **Area** (about 150 km to 2500 km across), update interval (5 min to 2 h), **Animation length** (1-10 frames), **Show Overlay**. The location comes from Device > System > Location.
+Setup: Pages > Cloud Cover (area from about 150 km to 2500 km across, up to 10 frames). The location comes from Device > System > Location.
 
 <p align="center">
   <img src="images/clouds.jpg" alt="Cloud Cover page" width="720">
@@ -281,7 +267,7 @@ Setup: Pages > Cloud Cover: **Enable Cloud Cover page**, **Area** (about 150 km 
 
 A tile grid over any JSON document reachable by URL: each tile shows one value picked from the response, with a label and unit.
 
-Setup: Pages > JSON: **Enable JSON Display**, **JSON URL**, optional **Auth Header**, poll interval (5 s to 5 min). Select **Fetch JSON** to import keys from a live response, build the layout row by row, and **Preview Layout on Device** before saving.
+Setup: Pages > JSON (URL and optional auth header; the tab fetches a live response, lets you build the tile layout and previews it on the device).
 
 <p align="center">
   <img src="images/json.jpg" alt="JSON Display page" width="720">
@@ -291,15 +277,13 @@ Setup: Pages > JSON: **Enable JSON Display**, **JSON URL**, optional **Auth Head
 
 A tile grid over Home Assistant entity states, fetched per entity from the HA REST API. This is separate from the MQTT integration described under [Web UI](#mqtt-and-home-assistant-discovery), which publishes the display's own controls to Home Assistant.
 
-Setup: Pages > Home Assistant: **Enable Home Assistant page**, **Base URL**, **Long-Lived Access Token**, poll interval (5 s to 5 min). **Test Connection** checks the token, then build the tile layout and **Preview Layout on Device**.
+Setup: Pages > Home Assistant (base URL and a long-lived access token; the tab tests the connection and previews the tile layout on the device).
 
 ### OctoPrint
 
 Shows the current print from an OctoPrint server: progress, layer, time elapsed, estimated finish, and nozzle and bed temperatures. Choose one of four layouts. The picture is either the thumbnail your slicer embeds in the G-code file or a snapshot from the printer camera. The display only reads from OctoPrint; it never sends commands to the printer.
 
-Setup: Pages > OctoPrint: **Enable OctoPrint page**, **OctoPrint Address**, then **Authenticate** to approve the display from OctoPrint (or paste an **API Key**), update interval.
-
-Options: **Page Layout** (**Grid**, **Immersive image**, **Floating overlay**, **Letterbox**), **Show readings over picture**, **Image** (**G-code preview (from slicer)** or **Camera snapshot**), **Camera Snapshot Address**.
+Setup: Pages > OctoPrint (server address; approve the display from OctoPrint or paste an API key).
 
 <p align="center">
   <img src="images/octoprint_hero.jpg" alt="OctoPrint page showing a live print" width="720">
@@ -330,8 +314,6 @@ Each layout can show the printer camera instead of the slicer preview. Nozzle an
 
 Swipe to the Settings page for on-device configuration in four tabs: Display, Nodes, Behavior, and System (including Reboot and Factory Reset). The web UI exposes the full set of options. The System Info page reports IP, WiFi signal, CPU, memory, PSRAM, uptime, and task count.
 
-Setup: none.
-
 <table align="center">
   <tr>
     <td align="center"><img src="images/display_settings.jpg" alt="On-device Settings page" width="400"></td>
@@ -347,24 +329,23 @@ Setup: none.
 
 Swipe left or right to change pages, or press the BOOT button on the board to advance (it skips the Settings page). Page-indicator dots at the bottom mark the NINA instance pages.
 
-The display picks a page on its own; a swipe or tap takes over for the **Stay on selected page** time (10-300 s, default 10), after which it returns to its automatic choice. All of these controls live on Device > Behavior > Page Navigation:
+The display picks a page on its own; a swipe or tap takes over for a configurable time (default 10 s), after which it returns to its automatic choice. Device > Behavior > Page Navigation holds the controls:
 
-- **Home Page**: the page the display settles on when nothing else applies. When it is a NINA instance, the display also returns there whenever that instance is online. With several instances online and a non-NINA Home Page, the display shows the Summary page.
-- **Always show the Home Page**: keep the Home Page on screen even while instances are connected.
-- **Auto Cycle**: rotate through the ticked **Pages in Rotation** in the order shown, with an **Interval** of 4-3600 s, a **Transition** of **Instant**, **Fade**, **Slide Left** or **Slide Right**, and **Skip disconnected nodes**. For pages that download a picture, the countdown starts once the picture has loaded, and image pages fetch a fresh picture each time the rotation reaches them.
-- **Switch page when no connections**: show a chosen **Target page** while every enabled NINA instance is confirmed disconnected, with an optional **Show idle indicator** dot.
+- Home Page: the page the display settles on when nothing else applies. When it is a NINA instance, the display also returns there whenever that instance is online; with several instances online it shows the Summary page. An option keeps the Home Page on screen even while instances are connected.
+- Auto Cycle: rotate through a chosen, ordered list of pages on an interval with an instant, fade or slide transition, optionally skipping disconnected instances. Image pages fetch a fresh picture each time the rotation reaches them.
+- Switch page when no connections: show a chosen page while every enabled NINA instance is disconnected.
 
 The web Home page and the API can also send the display to any page; see [Web API](#web-api).
 
 ## Themes
 
-Nine built-in dark themes (Default, Red Night, Cyber Dusk, Stellar Ember, Arctic Steel, Oxidized Copper, Solar Flare, Phantom Green, Bloodmoon), selectable on Device > Display > Appearance; changes apply instantly. **Widget Style** picks one of 13 panel treatments (Subtle Border, Frosted Glass, Chamfered, Scanline and others). **Text brightness** (0-100%) dims all theme colors for dark-site use, separately from the **Backlight** slider. The Red Night theme also recolors the image pages, including the radar and cloud loops.
+Nine built-in dark themes and 13 widget styles, selectable on Device > Display; changes apply instantly. A text brightness slider dims all theme colors for dark-site use, separately from the backlight. The Red Night theme also recolors the image pages, including the radar and cloud loops.
 
 Filter colors are set per instance on Pages > N.I.N.A.; new filters reported by NINA are added automatically with a default color. RMS and HFR threshold colors are configurable there too, so out-of-range values shift green to amber to red on the page and in the graphs.
 
 ## Notifications and Voice Alerts
 
-Toast pop-ups report equipment connects and disconnects, sequence, focuser, mount, meridian flip, guider, safety, error, profile, dome and flat device events, with an event history available at `/api/events`. Device > Behavior > Notifications sets **Toast duration** (3-30 s; errors and warnings show for twice that), **Border flash alerts** on RMS, HFR or safety breaches, an **Aggregation Window** that folds bursts into one pop-up, and per-category **Pop-up** and **Voice** toggles under Event Categories.
+Toast pop-ups report equipment connects and disconnects, sequence, focuser, mount, meridian flip, guider, safety, error, profile, dome and flat device events, with an event history available at `/api/events`. Device > Behavior > Notifications sets the duration, border flash alerts on RMS, HFR or safety breaches, burst aggregation, and per-category pop-up and voice toggles.
 
 <table align="center">
   <tr>
@@ -377,9 +358,9 @@ Toast pop-ups report equipment connects and disconnects, sequence, focuser, moun
   </tr>
 </table>
 
-Voice alerts speak through the onboard speaker using pre-rendered clips, so no network or cloud service is involved. Three sources feed them: RMS, HFR and safety threshold breaches ("Warning, NINA one, HFR, two point five, above limit", or a shorter form with **Brief Announcements**), NINA connect and disconnect announcements, and the twelve event categories above ("NINA two, Camera, disconnected"). Voice alerts, all twelve categories, and the connect and disconnect announcements are on by default at 90% volume; a threshold breach is announced once on entry, re-announced every **Repeat interval** minutes while it persists (0 = once only), and re-arms once the value recovers below 95% of the threshold; a 30 s per-category cooldown suppresses bursts. Each NINA node card has a voice mute for that instance, and **Startup Sound** plays a short jingle when the display finishes booting. Every toggle has a preview button that plays the announcement on the device.
+Voice alerts speak through the onboard speaker using pre-rendered clips, so no network or cloud service is involved. Three sources feed them: RMS, HFR and safety threshold breaches ("Warning, NINA one, HFR, two point five, above limit"), NINA connect and disconnect announcements, and the twelve event categories above ("NINA two, Camera, disconnected"). All are on by default; volume, a brief phrasing, repeat interval and per-category toggles live on Device > Behavior, and each NINA instance can be muted separately.
 
-Custom voice clips: Device > Voice Clips lets you replace any of the 47 built-in clips (chime, startup jingle, "NINA one/two/three", sentence fragments, digits, equipment names, event phrases). Upload mp3, m4a, wav or ogg; the browser converts to 16 kHz 16-bit mono PCM before upload, and .pcm files upload unchanged. Clips are stored on the device's storage partition, survive firmware updates, and apply immediately; each row has play and reset controls, and **Reset All Clips to Defaults** or a factory reset removes every custom clip. Limits: 10 seconds per clip, 15 seconds for the startup jingle, 4 MB in total.
+Custom voice clips: Device > Voice Clips lets you replace any of the 47 built-in clips (chime, startup jingle, "NINA one/two/three", digits, equipment names, event phrases) with your own recordings; upload mp3, m4a, wav or ogg and the browser converts them. Clips survive firmware updates. Limits: 10 seconds per clip, 15 seconds for the startup jingle, 4 MB in total.
 
 ## Web UI
 
@@ -429,17 +410,17 @@ curl -H "X-Auth-Password: <password>" -o screenshot.jpg http://<device-ip>/api/s
 
 ## Power and Display
 
-- Deep sleep (Device > System > Power Management): **Enable deep sleep (long-press BOOT to power off)**, a **Wake timer** in hours (0 = stay asleep until power-cycled), and **Auto power off when idle** after an extended disconnection from all NINA instances.
-- Screen sleep (Device > Display > Hardware): **Turn off screen when idle** blanks the backlight after a **Timeout** of 10-3600 s while the firmware keeps running; touch wakes the screen.
-- **Screen Rotation**: 0, 90, 180 or 270 degrees, applied live. **Backlight** sets the panel brightness.
-- **WiFi transmit power** (Device > System): **Maximum** or a cap of 8-20 dBm. Lowering it can cure brief teal or green screen flashes on boards whose supply sags during WiFi bursts; too low a value can make the device unreachable, so confirm the page still responds before saving.
+- Deep sleep (Device > System): long-press BOOT to power off, an optional wake timer, and auto power-off after an extended disconnection from all NINA instances.
+- Screen sleep (Device > Display): blank the backlight after an idle timeout while the firmware keeps running; touch wakes the screen.
+- Screen rotation in 90 degree steps and backlight level, applied live.
+- WiFi transmit power cap (Device > System). Lowering it can cure brief teal or green screen flashes on boards whose supply sags during WiFi bursts; too low a value can make the device unreachable, so confirm the page still responds before saving.
 
 ## Diagnostics
 
-- Tools > Logs: live device log with auto-refresh, the crash log (reboot reasons and panics), **Download**, and **Download dump** for the last core dump. Raw endpoints: `/api/logs`, `/api/crashlog`, `/api/coredump`.
+- Tools > Logs: live device log, crash log (reboot reasons and panics) and core dump download. Raw endpoints: `/api/logs`, `/api/crashlog`, `/api/coredump`.
 - `GET /api/events`: recent event history (severity, instance, message).
-- **Enable Debug Mode** (Device > System > Modes) turns on the performance monitor and `GET /api/perf` (HTTP, JSON and UI latencies, memory, CPU load).
-- **Enable Demo Mode** generates simulated session data so the pages can be exercised without a live NINA connection.
+- Debug mode (Device > System) turns on the performance monitor and `GET /api/perf` (HTTP, JSON and UI latencies, memory, CPU load).
+- Demo mode generates simulated session data so the pages can be exercised without a live NINA connection.
 
 ## Building from Source
 
@@ -451,7 +432,7 @@ Standard ESP-IDF 5.5.2 project: activate the IDF environment and run `idf.py bui
 - The OTA said success but nothing changed: compare the version and behavior after reboot; a firmware that fails its health check rolls back to the previous slot. Flash the factory binary over USB if the device stays on the old version.
 - The board warns about outdated esp-hosted co-processor firmware: flash `firmware/merged-flash.bin` at `0x0000`, wait for the on-screen progress to finish, then flash the factory binary again.
 - NINA shows offline although the PC is reachable: confirm the ninaAPI Advanced plugin is installed and enabled, that it listens on port 1888, and that the Windows firewall allows the port.
-- Lost the admin password: on the device, swipe to Settings > System and select **Factory Reset**. This erases all settings.
+- Lost the admin password: on the device, swipe to Settings > System and select Factory Reset. This erases all settings.
 
 ## Acknowledgements
 
