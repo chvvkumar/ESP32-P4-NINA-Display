@@ -116,7 +116,7 @@
     INT       (toast_aggregation_window_s,   "toast_aggregation_window_s",   5,     0,     15)    /* no prior clamp; bound sourced from POST handler */ \
     /* -- Weather -- */ \
     INT_RESET (weather_provider,             "weather_provider",             0,     0,     2) \
-    STR       (weather_api_key,              "weather_api_key",              "") \
+    STR       (weather_api_key,              "weather_api_key",              "")               /* SECRET: redacted by config_get_handler; is_sensitive in s_backup_fields so strip_masked_secrets() preserves it on a sentinel POST */ \
     FLT       (weather_lat,                  "weather_lat",                  0.0f,  -90.0f, 90.0f)  /* no prior clamp; obviously-correct latitude bound */ \
     FLT       (weather_lon,                  "weather_lon",                  0.0f,  -180.0f,180.0f) /* no prior clamp; obviously-correct longitude bound */ \
     STR       (weather_location_name,        "weather_location_name",        "") \
