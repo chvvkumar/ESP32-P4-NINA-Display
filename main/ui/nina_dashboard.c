@@ -19,6 +19,7 @@
 #include "nina_json.h"
 #include "nina_ha.h"
 #include "nina_octoprint.h"
+#include "nina_adsb.h"
 #include "nina_spotify.h"
 #include "nina_clock.h"
 #include "page_registry.h"
@@ -123,6 +124,13 @@ static const page_ops_t s_octoprint_page_ops = {
     .apply_theme  = octoprint_page_apply_theme,
     .is_available = NULL,
 };
+
+/* ADS-B page — always at PAGE_IDX_ADSB, excluded from indicators. The page
+ * module owns its own root pointer and its own is_available (root exists AND
+ * flights_enabled), so adsb_obj here is only the optional_page_set_enabled
+ * bookkeeping slot; every dispatcher reads the ops instead. */
+static lv_obj_t *adsb_obj = NULL;
+static lv_obj_t *adsb_page_created = NULL;  /* NULL until the feature is first enabled */
 
 /* Spotify page — always at PAGE_IDX_SPOTIFY (1), excluded from indicators */
 lv_obj_t *spotify_obj = NULL;
@@ -247,7 +255,7 @@ static const page_ops_t s_sysinfo_page_ops = {
     .apply_theme  = sysinfo_page_apply_theme,
     .is_available = NULL,
 };
-int total_page_count = 0;   /* page_count + EXTRA_PAGES (allsky + spotify + clock + 6 image pages + json + ha + octoprint + summary + settings + sysinfo) */
+int total_page_count = 0;   /* page_count + EXTRA_PAGES (allsky + spotify + clock + 6 image pages + json + ha + octoprint + adsb + summary + settings + sysinfo) */
 
 /* Private state */
 static lv_obj_t *scr_dashboard = NULL;
@@ -341,7 +349,8 @@ lv_obj_t *create_value_label(lv_obj_t *parent) {
  *   PAGE_IDX_JSON          (9)                  = JSON Display page
  *   PAGE_IDX_HA            (10)                 = Home Assistant page
  *   PAGE_IDX_OCTOPRINT     (11)                 = OctoPrint 3D Printer page
- *   PAGE_IDX_SUMMARY       (12)                 = summary page
+ *   PAGE_IDX_ADSB          (12)                 = ADS-B aircraft page
+ *   PAGE_IDX_SUMMARY       (13)                 = summary page
  *   NINA_PAGE_OFFSET .. NINA_PAGE_OFFSET+pc-1   = NINA instance pages  (pages[idx - NINA_PAGE_OFFSET])
  *   SETTINGS_PAGE_IDX(pc)                       = settings page
  *   SYSINFO_PAGE_IDX(pc)                        = sysinfo page
@@ -368,6 +377,7 @@ static page_ref_t page_idx_to_ref_id(int idx) {
     if (idx == PAGE_IDX_JSON) return PAGE_REF_JSON;
     if (idx == PAGE_IDX_HA) return PAGE_REF_HA;
     if (idx == PAGE_IDX_OCTOPRINT) return PAGE_REF_OCTOPRINT;
+    if (idx == PAGE_IDX_ADSB) return PAGE_REF_ADSB;
     if (PAGE_IDX_IS_IMAGE(idx)) return s_img_ref[PAGE_IDX_TO_IMG_SRC(idx)];
     if (idx == SYSINFO_PAGE_IDX(page_count)) return PAGE_REF_SYSINFO;
     return PAGE_REF_ID_MAX;
@@ -604,6 +614,7 @@ void nina_dashboard_apply_theme(int theme_index) {
     ops_apply_theme(PAGE_IDX_JSON);
     ops_apply_theme(PAGE_IDX_HA);
     ops_apply_theme(PAGE_IDX_OCTOPRINT);
+    ops_apply_theme(PAGE_IDX_ADSB);
     ops_apply_theme(PAGE_IDX_SPOTIFY);
     ops_apply_theme(PAGE_IDX_CLOCK);
     for (int s = 0; s < IMG_SRC_COUNT; s++) ops_apply_theme(PAGE_IDX_IMG_GOES + s);
@@ -1277,6 +1288,8 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     ha_obj = NULL;
     octoprint_page_created = NULL;
     octoprint_obj = NULL;
+    adsb_page_created = NULL;
+    adsb_obj = NULL;
     spotify_page_created = NULL;
     spotify_obj = NULL;
     memset(img_created, 0, sizeof(img_created));
@@ -1328,6 +1341,11 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     optional_page_set_enabled(&s_octoprint_page_ops, &octoprint_page_created,
                               &octoprint_obj, PAGE_IDX_OCTOPRINT, cfg->octoprint_enabled);
 
+    /* ADS-B page — PAGE_IDX_ADSB */
+    page_registry_set_ops(PAGE_REF_ADSB, nina_adsb_page_ops());
+    optional_page_set_enabled(nina_adsb_page_ops(), &adsb_page_created,
+                              &adsb_obj, PAGE_IDX_ADSB, cfg->flights_enabled);
+
     /* Spotify page — PAGE_IDX_SPOTIFY */
     page_registry_set_ops(PAGE_REF_SPOTIFY, &s_spotify_page_ops);
     optional_page_set_enabled(&s_spotify_page_ops, &spotify_page_created,
@@ -1378,7 +1396,7 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     page_registry_set_ops(PAGE_REF_SYSINFO, &s_sysinfo_page_ops);
     sysinfo_obj = s_sysinfo_page_ops.create(main_cont);
     lv_obj_add_flag(sysinfo_obj, LV_OBJ_FLAG_HIDDEN);
-    total_page_count = page_count + EXTRA_PAGES;  /* allsky + spotify + clock + 6 image pages + json + ha + octoprint + summary + NINA pages + settings + sysinfo */
+    total_page_count = page_count + EXTRA_PAGES;  /* allsky + spotify + clock + 6 image pages + json + ha + octoprint + adsb + summary + NINA pages + settings + sysinfo */
 
     /* Page indicator dots — one dot per available NINA slot (not allsky, spotify, summary, settings, or sysinfo) */
     create_page_indicator(scr_dashboard, nina_available_count);
@@ -1525,6 +1543,15 @@ bool nina_dashboard_is_octoprint_page(void) {
 void nina_dashboard_set_octoprint_enabled(bool enabled) {
     optional_page_set_enabled(&s_octoprint_page_ops, &octoprint_page_created,
                               &octoprint_obj, PAGE_IDX_OCTOPRINT, enabled);
+}
+
+bool nina_dashboard_is_adsb_page(void) {
+    return active_page == PAGE_IDX_ADSB && get_page_obj(PAGE_IDX_ADSB) != NULL;
+}
+
+void nina_dashboard_set_adsb_enabled(bool enabled) {
+    optional_page_set_enabled(nina_adsb_page_ops(), &adsb_page_created,
+                              &adsb_obj, PAGE_IDX_ADSB, enabled);
 }
 
 bool nina_dashboard_is_spotify_page(void) {

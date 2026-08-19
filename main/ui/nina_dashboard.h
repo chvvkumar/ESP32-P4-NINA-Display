@@ -157,6 +157,19 @@ bool nina_dashboard_is_octoprint_page(void);
 void nina_dashboard_set_octoprint_enabled(bool enabled);
 
 /**
+ * @brief Check if the active page is the ADS-B aircraft page
+ * @return true if the ADS-B page is currently shown
+ */
+bool nina_dashboard_is_adsb_page(void);
+
+/**
+ * @brief Enable or disable the ADS-B page at runtime.
+ * When disabled, switches away if currently viewing and removes from navigation.
+ * Must be called with LVGL display lock held.
+ */
+void nina_dashboard_set_adsb_enabled(bool enabled);
+
+/**
  * @brief Check if the active page is the clock page
  * @return true if the clock page is currently shown
  */

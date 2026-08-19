@@ -1044,6 +1044,7 @@
         <button class="tab-btn" data-tab="image-radar">Radar</button>
         <button class="tab-btn" data-tab="image-clouds">Cloud Cover</button>
         <button class="tab-btn" data-tab="octoprint">OctoPrint</button>
+        <button class="tab-btn" data-tab="adsb">ADS-B</button>
       </div>
       <div class="tab-group" data-section="device">
         <button class="tab-btn" data-tab="display">Display</button>
@@ -1101,6 +1102,7 @@
     <div id="tab-image-custom" class="tab-panel"></div>
     <div id="tab-image-radar" class="tab-panel"></div>
     <div id="tab-image-clouds" class="tab-panel"></div>
+    <div id="tab-adsb" class="tab-panel"></div>
 
     <!-- ==================== TAB: OCTOPRINT ==================== -->
     <!-- Markup extracted to main/fragment_octoprint.html; lazily fetched by
@@ -1369,7 +1371,7 @@
     /* Static rotation table: must exist before the registry loads (the tab
        populates before /api/pages answers on a fresh boot). Stop ids are
        frozen page_ref ids: 0..11 plus JSON (24), HA (25), OctoPrint (26),
-       Radar (27), Cloud Cover (28) — keep in sync with ARP_IDX_* in
+       Radar (27), Cloud Cover (28), ADS-B (29) — keep in sync with ARP_IDX_* in
        app_config.h. */
     var ROTATION_PAGES=[
       {id:0, label:'Summary',        category:'NINA',    slug:'summary',      arp:'arp_summary'},
@@ -1388,13 +1390,15 @@
       {id:11,label:'Custom Image',   category:'Image',   slug:'image.custom', arp:'arp_img_custom'},
       {id:27,label:'Weather Radar',  category:'Image',   slug:'image.radar',  arp:'arp_img_radar'},
       {id:28,label:'Cloud Cover',    category:'Image',   slug:'image.clouds', arp:'arp_img_clouds'},
+      {id:29,label:'ADS-B',          category:'Dashboards', slug:'adsb',      arp:'arp_adsb'},
       {id:4, label:'System Info',    category:'System',  slug:'sysinfo',      arp:'arp_sysinfo'}
     ];
     /* Page slug -> settings tab that switches the page on/off. Pages absent
        here (summary, clock, sysinfo) are always available. */
     var SLUG_TAB={'nina.1':'nodes','nina.2':'nodes','nina.3':'nodes',allsky:'allsky',spotify:'spotify',
       json:'json',ha:'ha',octoprint:'octoprint','image.goes':'image-goes','image.moon':'image-moon',
-      'image.solar':'image-solar','image.custom':'image-custom','image.radar':'image-radar','image.clouds':'image-clouds'};
+      'image.solar':'image-solar','image.custom':'image-custom','image.radar':'image-radar','image.clouds':'image-clouds',
+      adsb:'adsb'};
     /* Cycle order: stop ids of ticked rotation rows, first to last. */
     var _arpOrder=[];
 
@@ -1653,7 +1657,7 @@
        so the initial switchTab() call at boot -- which shows whichever tab
        was last active -- transparently fetches that tab's fragment first; no
        separate boot-time special case is needed for the default tab. */
-    const TAB_ORDER=['nodes','allsky','json','ha','clock','spotify','image-goes','image-moon','image-solar','image-custom','image-radar','image-clouds','octoprint','display','behavior','voice-clips','system','logs','backup','api'];
+    const TAB_ORDER=['nodes','allsky','json','ha','clock','spotify','image-goes','image-moon','image-solar','image-custom','image-radar','image-clouds','octoprint','adsb','display','behavior','voice-clips','system','logs','backup','api'];
     const LAZY_TABS=new Set(TAB_ORDER);
     const loadedTabs=new Set(TAB_ORDER.filter(n=>!LAZY_TABS.has(n)));
 
@@ -1839,7 +1843,7 @@
        highlights and row 2 shows the matching tab group. _lastUsedTab remembers
        the tab last visited in each section (in-memory) so a section click lands
        on a sensible default; switchTab() keeps it seeded as tabs activate. */
-    const TAB_GROUP = { nodes:'pages', allsky:'pages', json:'pages', ha:'pages', clock:'pages', spotify:'pages', 'image-goes':'pages', 'image-moon':'pages', 'image-solar':'pages', 'image-custom':'pages', 'image-radar':'pages', 'image-clouds':'pages', octoprint:'pages', display:'device', behavior:'device', 'voice-clips':'device', system:'device', logs:'tools', backup:'tools', api:'tools' };
+    const TAB_GROUP = { nodes:'pages', allsky:'pages', json:'pages', ha:'pages', clock:'pages', spotify:'pages', 'image-goes':'pages', 'image-moon':'pages', 'image-solar':'pages', 'image-custom':'pages', 'image-radar':'pages', 'image-clouds':'pages', octoprint:'pages', adsb:'pages', display:'device', behavior:'device', 'voice-clips':'device', system:'device', logs:'tools', backup:'tools', api:'tools' };
     var _lastUsedTab={};
     function highlightGroup(name){
       var sec=TAB_GROUP[name];
@@ -2247,7 +2251,7 @@
       if(!orderArr) return;
       /* Members (in order) = valid stop ids that are not the 0xFF/255 sentinel.
          Keep in sync with ARP_STOP_IS_VALID in app_config.h. */
-      var members=orderArr.map(function(v){return parseInt(v);}).filter(function(v){return !isNaN(v)&&(v>=0&&v<12||v===24||v===25||v===26||v===27||v===28);});
+      var members=orderArr.map(function(v){return parseInt(v);}).filter(function(v){return !isNaN(v)&&(v>=0&&v<12||v===24||v===25||v===26||v===27||v===28||v===29);});
       _arpOrder.length=0;
       members.forEach(function(id){ if(_arpOrder.indexOf(id)<0) _arpOrder.push(id); });
       var c=$('arp-container');
@@ -2439,6 +2443,23 @@
       data.octoprint_overlay_visible=!!$('octoOverlayVisible').checked;
     }
 
+    function collectTab_adsb(data){
+      /* flights_enabled is a real bool SETTINGS_TABLE row, so send a JSON bool. */
+      data.flights_enabled=!!$('flights_enabled').checked;
+      data.flights_url=$('flights_url').value.trim();
+      data.flights_update_interval_s=parseInt($('flights_update_interval_s').value,10)||3;
+      data.flights_range_nm=parseInt($('flights_range_nm').value,10)||50;
+      /* 0 is a legal elevation gate, so an empty field must not fall through
+         to the default via ||. */
+      var mel=parseInt($('flights_min_el').value,10);
+      data.flights_min_el=isNaN(mel)?10:mel;
+      /* Same for 0 = north up. */
+      var up=parseInt($('flights_up_azimuth').value,10);
+      data.flights_up_azimuth=isNaN(up)?0:up;
+      data.flights_mode=parseInt($('flights_mode').value,10)||0;
+      data.flights_route_lookup=!!$('flights_route_lookup').checked;
+    }
+
     function collectTab_display(data){
       data.theme_index=parseInt($('theme_select').value);
       data.widget_style=parseInt($('widget_style_select').value);
@@ -2593,6 +2614,7 @@
       'image-radar': collectTab_image_radar,
       'image-clouds': collectTab_image_clouds,
       octoprint: collectTab_octoprint,
+      adsb: collectTab_adsb,
       display: collectTab_display,
       behavior: collectTab_behavior,
       'voice-clips': collectTab_voice_clips,
@@ -2893,6 +2915,22 @@
       if($('octoOverlayVisible')) $('octoOverlayVisible').checked=data.octoprint_overlay_visible!=null?!!data.octoprint_overlay_visible:true;
     }
 
+    function populateTab_adsb(data){
+      if($('flights_enabled')) $('flights_enabled').checked=!!data.flights_enabled;
+      if($('flights_url')) $('flights_url').value=data.flights_url||'';
+      if($('flights_update_interval_s')) $('flights_update_interval_s').value=data.flights_update_interval_s||3;
+      if($('flights_range_nm')) $('flights_range_nm').value=data.flights_range_nm||50;
+      /* 0 is a legal value for both of these, so || would silently rewrite it. */
+      if($('flights_min_el')) $('flights_min_el').value=data.flights_min_el!=null?data.flights_min_el:10;
+      if($('flights_up_azimuth')) $('flights_up_azimuth').value=data.flights_up_azimuth!=null?data.flights_up_azimuth:0;
+      if($('flights_mode')) $('flights_mode').value=String(data.flights_mode||0);
+      /* Default is on, so an absent key must read as checked, not unchecked. */
+      if($('flights_route_lookup')) $('flights_route_lookup').checked=data.flights_route_lookup!=null?!!data.flights_route_lookup:true;
+      /* Turn the compass preview to the value just loaded. Published by the
+         fragment's own script, which runs before this hook. */
+      if(typeof window.adsbDrawCompass==='function') window.adsbDrawCompass();
+    }
+
     function populateTab_display(data){
       $('theme_select').value=data.theme_index||0;
       $('widget_style_select').value=data.widget_style||0;
@@ -3081,6 +3119,7 @@
       'image-radar': populateTab_image_radar,
       'image-clouds': populateTab_image_clouds,
       octoprint: populateTab_octoprint,
+      adsb: populateTab_adsb,
       display: populateTab_display,
       behavior: populateTab_behavior,
       /* Voice Clips has no config fields; its "populate" just (re)builds the

@@ -11,6 +11,8 @@
 #include "ui/nina_nav_arbiter.h"
 #include "ui/nina_image_page.h"
 #include "ui/nina_octoprint.h"
+#include "ui/nina_adsb.h"
+#include "adsb_client.h"
 #include "ui/nina_spotify.h"
 #include "ui/themes.h"
 #include "lvgl.h"
@@ -195,6 +197,46 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
         new_cfg->radar_enabled != old_cfg->radar_enabled ||
         new_cfg->clouds_enabled != old_cfg->clouds_enabled) {
         topology_changed = true;
+    }
+    /* ADS-B page. Three independent live effects, each with its own trigger:
+     *  - enable toggle: create/hide the page and spawn the poller;
+     *  - receiver URL / range / elevation gate: the poller re-reads the URL and
+     *    re-fetches the receiver position, and the gate/range change what it
+     *    counts, so tell the client to drop its cached receiver fix;
+     *  - view / up-direction / gate / range: the page re-reads them and repaints
+     *    so a web edit shows on the panel straight away.
+     * The interval alone needs nothing: the poll loop re-reads it every cycle. */
+    bool adsb_enable_changed = (new_cfg->flights_enabled != old_cfg->flights_enabled);
+    bool adsb_client_changed = (strcmp(new_cfg->flights_url, old_cfg->flights_url) != 0
+                                || new_cfg->flights_range_nm != old_cfg->flights_range_nm
+                                || new_cfg->flights_min_el != old_cfg->flights_min_el
+                                || new_cfg->flights_update_interval_s != old_cfg->flights_update_interval_s
+                                /* the route lookup is done by the same poller, so a
+                                   toggle here is just another client-config change */
+                                || new_cfg->flights_route_lookup != old_cfg->flights_route_lookup);
+    bool adsb_view_changed = (new_cfg->flights_mode != old_cfg->flights_mode
+                              || new_cfg->flights_up_azimuth != old_cfg->flights_up_azimuth
+                              || new_cfg->flights_min_el != old_cfg->flights_min_el
+                              || new_cfg->flights_range_nm != old_cfg->flights_range_nm);
+    if (adsb_enable_changed || adsb_view_changed) {
+        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+            if (adsb_enable_changed) {
+                nina_dashboard_set_adsb_enabled(new_cfg->flights_enabled);
+            }
+            if (adsb_view_changed) {
+                nina_adsb_config_changed();
+            }
+            bsp_display_unlock();
+        }
+    }
+    if (adsb_client_changed) {
+        adsb_client_note_config_change();
+    }
+    if (adsb_enable_changed) {
+        if (new_cfg->flights_enabled) {
+            adsb_ensure_task_running();
+        }
+        topology_changed = true;    /* optional page appeared/disappeared */
     }
     /* Weather config change — invalidate stale data and force refresh */
     if (new_cfg->weather_provider != old_cfg->weather_provider ||

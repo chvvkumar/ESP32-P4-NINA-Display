@@ -78,6 +78,22 @@
             <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
             <pre>curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/config -H 'Content-Type: application/json' -d @config.json</pre>
           </div>
+          <div class="api-snip-label">ADS-B page parameters</div>
+          <div class="api-table-wrap">
+            <table class="api-table">
+              <thead><tr><th>Param</th><th>Type</th><th>Range / Values</th><th>Notes</th></tr></thead>
+              <tbody>
+                <tr><td>flights_enabled</td><td>bool</td><td>true / false</td><td>Show the ADS-B page. The page also needs flights_url set.</td></tr>
+                <tr><td>flights_url</td><td>string (max 128)</td><td>must start with http:// or https:// (empty string clears it)</td><td>Base URL of the tar1090 / readsb receiver, no trailing path (for example <code>http://pi.lan:8080</code>). The poller appends <code>/data/aircraft.json</code>. Not a secret, so it is returned in the clear.</td></tr>
+                <tr><td>flights_update_interval_s</td><td>int</td><td>2 to 60</td><td>Aircraft poll interval in seconds. An out-of-range value falls back to 3.</td></tr>
+                <tr><td>flights_range_nm</td><td>int</td><td>10 to 250</td><td>Radar Scope outer ring in nautical miles. An out-of-range value falls back to 50.</td></tr>
+                <tr><td>flights_min_el</td><td>int</td><td>0 to 89</td><td>Elevation gate in degrees. Contacts below it are counted, not drawn. An out-of-range value falls back to 10.</td></tr>
+                <tr><td>flights_up_azimuth</td><td>int</td><td>0 to 359</td><td>Which azimuth is drawn at the top of the Sky Dome and Radar Scope. An out-of-range value falls back to 0 (north up).</td></tr>
+                <tr><td>flights_mode</td><td>int</td><td>0 to 2</td><td>View: 0 = Sky Dome, 1 = Radar Scope, 2 = Board. An invalid value falls back to 0.</td></tr>
+                <tr><td>flights_route_lookup</td><td>bool</td><td>true / false</td><td>Look up each flight's origin and destination online (adsb.im route service). Default true; false keeps the ADS-B page fully local.</td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <div class="api-ep">

@@ -895,6 +895,22 @@ static void set_defaults(app_config_t *cfg) {
     cfg->custom_image_header[0] = '\0';   // no extra header on the Custom URL fetch
     cfg->clouds_channel = 0;               // GeoColor
 
+    // v68 additions (ADS-B page). All seven are SETTINGS_TABLE rows, so
+    // settings_defaults_apply() above already set them; restated here for the
+    // same reason the radar and clouds blocks are, so every appended field's
+    // default reads in one place.
+    cfg->flights_enabled = false;
+    cfg->flights_url[0] = '\0';        // no receiver configured
+    cfg->flights_update_interval_s = 3;
+    cfg->flights_range_nm = 50;
+    cfg->flights_min_el = 10;
+    cfg->flights_up_azimuth = 0;   // north up
+    cfg->flights_mode = 0;         // Sky Dome
+
+    // v69 addition (ADS-B route lookup). Also a SETTINGS_TABLE row; restated
+    // here for the same reason as the block above.
+    cfg->flights_route_lookup = true;   // look routes up online
+
     // Spotify client ID: secret-like sentinel, not table-driven
     cfg->spotify_client_id[0] = '\0';
 
@@ -2815,6 +2831,52 @@ static void migrate_from_v66(const void *raw, size_t raw_size, app_config_t *cfg
     ESP_LOGI(TAG, "Migrated config from v66 to v%d", APP_CONFIG_VERSION);
 }
 
+/* --- v67 -> v68 migration: appends the seven flights_* fields backing the
+ *     ADS-B page (enable flag, tar1090/readsb base URL, poll interval, scope
+ *     range, elevation gate, up-azimuth, display mode). Additive and at the
+ *     very end, so this stays a plain prefix memcpy like every migration
+ *     around it. --- */
+static void migrate_from_v67(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v67_t) ? raw_size : sizeof(app_config_v67_t);
+    memcpy(cfg, raw, copy);
+
+    /* All seven fields sit past the v67 snapshot, so memcpy(copy) never touches
+     * them on purpose; the snapshot's tail padding (it ends on a uint8_t but
+     * aligns to 4) still lands on flights_enabled, so re-assert the defaults —
+     * same as migrate_from_v66 does for its two appended fields. */
+    cfg->flights_enabled = false;
+    cfg->flights_url[0] = '\0';
+    cfg->flights_update_interval_s = 3;
+    cfg->flights_range_nm = 50;
+    cfg->flights_min_el = 10;
+    cfg->flights_up_azimuth = 0;
+    cfg->flights_mode = 0;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v67 to v%d", APP_CONFIG_VERSION);
+}
+
+/* --- v68 -> v69 migration: appends flights_route_lookup, the ADS-B page's
+ *     online origin-destination lookup toggle. Additive and at the very end,
+ *     so this stays a plain prefix memcpy like every migration around it. --- */
+static void migrate_from_v68(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v68_t) ? raw_size : sizeof(app_config_v68_t);
+    memcpy(cfg, raw, copy);
+
+    /* The field sits past the v68 snapshot, so memcpy(copy) never touches it on
+     * purpose; the snapshot's tail padding (it ends on a uint8_t but aligns to
+     * 4) still lands on it, so re-assert the default. Existing devices opt in
+     * by default, matching a fresh install. */
+    cfg->flights_route_lookup = true;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v68 to v%d", APP_CONFIG_VERSION);
+}
+
 
 static void migrate_from_v36(const void *raw, size_t raw_size, app_config_t *cfg)
 {
@@ -3404,6 +3466,7 @@ static bool validate_config(app_config_t *cfg) {
     cfg->ha_token[sizeof(cfg->ha_token) - 1] = '\0';
     cfg->radar_token[sizeof(cfg->radar_token) - 1] = '\0';
     cfg->custom_image_header[sizeof(cfg->custom_image_header) - 1] = '\0';
+    cfg->flights_url[sizeof(cfg->flights_url) - 1] = '\0';
 
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         if (cfg->rms_thresholds[i][0] == '\0') {
@@ -3596,6 +3659,22 @@ static bool validate_config(app_config_t *cfg) {
         fixed = true;
     }
 
+    /* ADS-B page (v68). The six numeric flights_* fields are SETTINGS_TABLE
+     * rows, so settings_clamp_apply() above already applied their ranges
+     * (interval 2-60 s, range 10-250 nm, gate 0-89 deg, up-azimuth 0-359 deg,
+     * mode 0-2 — all RESET-to-default). Only flights_url needs a hand-written
+     * rule: it is pasted into a fetch URL, so a stored value that is neither
+     * empty nor an http(s) URL is cleared rather than passed on. Same shape as
+     * validate_url_format() enforces on the web save path. */
+    cfg->flights_enabled = cfg->flights_enabled ? true : false;
+    cfg->flights_route_lookup = cfg->flights_route_lookup ? true : false;
+    if (cfg->flights_url[0] != '\0' &&
+        strncmp(cfg->flights_url, "http://", 7) != 0 &&
+        strncmp(cfg->flights_url, "https://", 8) != 0) {
+        cfg->flights_url[0] = '\0';
+        fixed = true;
+    }
+
     /* WiFi TX power cap: whitelist, not a range — only the discrete dBm steps
      * the UI offers are meaningful, and 0 means "no cap". Anything else (a
      * stale blob byte, or a value that slipped past the settings-table range
@@ -3688,6 +3767,29 @@ void app_config_init(void) {
             nvs_commit(handle);
         }
         /* tiles_loaded stays false -> tail loads "json_tiles"/"ha_tiles" keys */
+    } else if (version_check == 68) {
+        /* v68 -> v69: appended flights_route_lookup (ADS-B route lookup).
+         * tiles_loaded stays false: a v68 device already keeps its tiles in
+         * the "json_tiles"/"ha_tiles" NVS keys, so the tail loads them.
+         * Safe to write back immediately, same reasoning as the v67 branch:
+         * both dispatcher-tail fixups below are excluded by their literal
+         * version bounds. */
+        migrate_from_v68(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    } else if (version_check == 67) {
+        /* v67 -> v68: appended the seven flights_* fields (ADS-B page).
+         * tiles_loaded stays false: a v67 device already keeps its tiles in
+         * the "json_tiles"/"ha_tiles" NVS keys, so the tail loads them.
+         * Safe to write back immediately, same reasoning as the v66 branch: a
+         * v67 blob already holds a real 24-entry auto_rotate_order2[] and real
+         * per-page image settings, so both dispatcher-tail fixups below are
+         * excluded by their literal version bounds. */
+        migrate_from_v67(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 66) {
         /* v66 -> v67: appended custom_image_header and clouds_channel.
          * tiles_loaded stays false: a v66 device already keeps its tiles in the

@@ -31,6 +31,40 @@ static void nina_fetch_set_offline(nina_client_t *data) {
     }
 }
 
+/* Parse the alt/az pointing block out of a MountInfo object (either the
+ * /equipment/mount/info Response or the "Mount" member of the bundled
+ * /equipment/info Response). Caller holds the client lock.
+ *
+ * mount_pointing_valid is recomputed from scratch every call: the mount must
+ * report Connected, not AtPark, and both angles in THIS response. A mount that
+ * drops out of the payload therefore invalidates the pointing instead of
+ * leaving the last known alt/az on screen. */
+static void parse_mount_pointing(cJSON *mount, nina_client_t *data) {
+    if (!mount) {
+        data->mount_pointing_valid = false;
+        return;
+    }
+    JSON_GET_FLOAT(mount, "SiteElevation", data->site_elev_m);
+
+    cJSON *alt = cJSON_GetObjectItem(mount, "Altitude");
+    cJSON *az  = cJSON_GetObjectItem(mount, "Azimuth");
+    bool connected = false;
+    bool at_park = false;
+    JSON_GET_BOOL(mount, "Connected", connected);
+    JSON_GET_BOOL(mount, "AtPark", at_park);
+
+    if (cJSON_IsNumber(alt) && cJSON_IsNumber(az)) {
+        data->mount_alt_deg = (float)alt->valuedouble;
+        data->mount_az_deg  = (float)az->valuedouble;
+        data->mount_pointing_valid = connected && !at_park;
+    } else {
+        data->mount_pointing_valid = false;
+    }
+    ESP_LOGD(TAG, "Mount pointing: alt=%.1f az=%.1f elev=%.0fm valid=%d",
+             data->mount_alt_deg, data->mount_az_deg, data->site_elev_m,
+             data->mount_pointing_valid);
+}
+
 /**
  * @brief Fetch camera info - ALWAYS WORKS
  * Provides: IsExposing, ExposureEndTime, Temperature, CoolerPower, CameraState
@@ -82,6 +116,11 @@ void fetch_camera_info_robust(const char *base_url, nina_client_t *data) {
         JSON_GET_STR(response, "CameraState", data->status);
         JSON_GET_FLOAT(response, "Temperature", data->camera.temp);
         JSON_GET_FLOAT(response, "CoolerPower", data->camera.cooler_power);
+
+        // Sensor geometry — feeds the FOV math in nina_client_get_pointings().
+        JSON_GET_INT(response, "XSize", data->cam_x_size);
+        JSON_GET_INT(response, "YSize", data->cam_y_size);
+        JSON_GET_FLOAT(response, "PixelSize", data->cam_pixel_size_um);
 
         // Exposure time (total length per frame)
         cJSON *exp_time = cJSON_GetObjectItem(response, "ExposureTime");
@@ -265,27 +304,53 @@ void fetch_image_history_robust(const char *base_url, nina_client_t *data) {
  */
 void fetch_profile_robust(const char *base_url, nina_client_t *data) {
     char url[256];
-    snprintf(url, sizeof(url), "%sprofile/show", base_url);
+    /* ?active=true returns the FULL active profile object (api-1.yaml:6619-6639,
+     * schema ProfileInfo at 10018), which is the only shape carrying
+     * TelescopeSettings.FocalLength. Without the parameter the endpoint returns
+     * a bare array of profile stubs; a build that ignores the parameter still
+     * returns that array, so both shapes are handled below. */
+    snprintf(url, sizeof(url), "%sprofile/show?active=true", base_url);
 
     cJSON *json = http_get_json(url);
     if (!json) return;
 
     cJSON *response = cJSON_GetObjectItem(json, "Response");
-    if (response && cJSON_IsArray(response) && nina_client_lock(data, FETCH_LOCK_MS)) {
+    if (!response || !nina_client_lock(data, FETCH_LOCK_MS)) {
+        cJSON_Delete(json);
+        return;
+    }
+
+    cJSON *profile = response;
+    if (cJSON_IsArray(response)) {
+        profile = NULL;
         cJSON *item = NULL;
         cJSON_ArrayForEach(item, response) {
-            cJSON *isActive = cJSON_GetObjectItem(item, "IsActive");
-            if (isActive && cJSON_IsTrue(isActive)) {
-                cJSON *name = cJSON_GetObjectItem(item, "Name");
-                if (name && name->valuestring) {
-                    strncpy(data->profile_name, name->valuestring, sizeof(data->profile_name) - 1);
-                    ESP_LOGI(TAG, "Profile: %s", data->profile_name);
-                }
+            if (cJSON_IsTrue(cJSON_GetObjectItem(item, "IsActive"))) {
+                profile = item;
                 break;
             }
         }
-        nina_client_unlock(data);
     }
+
+    if (profile) {
+        JSON_GET_STR(profile, "Name", data->profile_name);
+        /* TelescopeSettings.FocalLength in mm (api-1.yaml:10836-10844). Absent
+         * on the array shape, so focal_length_mm stays 0 = unknown and the FOV
+         * math falls back to its default. */
+        JSON_GET_FLOAT(cJSON_GetObjectItem(profile, "TelescopeSettings"), "FocalLength",
+                       data->focal_length_mm);
+        /* CameraSettings.PixelSize in um (api-1.yaml:10060-10074) as a fallback
+         * for cameras whose info endpoint omits PixelSize. */
+        if (data->cam_pixel_size_um <= 0.0f) {
+            JSON_GET_FLOAT(cJSON_GetObjectItem(profile, "CameraSettings"), "PixelSize",
+                           data->cam_pixel_size_um);
+        }
+        ESP_LOGI(TAG, "Profile: %s", data->profile_name);
+        ESP_LOGD(TAG, "Optics: focal=%.0fmm pixel=%.2fum sensor=%dx%d",
+                 data->focal_length_mm, data->cam_pixel_size_um,
+                 data->cam_x_size, data->cam_y_size);
+    }
+    nina_client_unlock(data);
     cJSON_Delete(json);
 }
 
@@ -338,6 +403,7 @@ void fetch_mount_robust(const char *base_url, nina_client_t *data) {
     cJSON *response = cJSON_GetObjectItem(json, "Response");
     if (response && nina_client_lock(data, FETCH_LOCK_MS)) {
         JSON_GET_STR(response, "TimeToMeridianFlipString", data->meridian_flip);
+        parse_mount_pointing(response, data);
         nina_client_unlock(data);
     }
 
@@ -576,6 +642,11 @@ int fetch_equipment_info_bundled(const char *base_url, nina_client_t *data, bool
         JSON_GET_FLOAT(camera, "Temperature", data->camera.temp);
         JSON_GET_FLOAT(camera, "CoolerPower", data->camera.cooler_power);
 
+        // Sensor geometry — feeds the FOV math in nina_client_get_pointings().
+        JSON_GET_INT(camera, "XSize", data->cam_x_size);
+        JSON_GET_INT(camera, "YSize", data->cam_y_size);
+        JSON_GET_FLOAT(camera, "PixelSize", data->cam_pixel_size_um);
+
         // Exposure time (total length per frame)
         cJSON *exp_time_cam = cJSON_GetObjectItem(camera, "ExposureTime");
         if (exp_time_cam && exp_time_cam->valuedouble > 0) {
@@ -660,8 +731,9 @@ int fetch_equipment_info_bundled(const char *base_url, nina_client_t *data, bool
     JSON_GET_INT(cJSON_GetObjectItem(response, "Focuser"), "Position", data->focuser.position);
 
     // ── Mount ──
-    JSON_GET_STR(cJSON_GetObjectItem(response, "Mount"), "TimeToMeridianFlipString",
-                 data->meridian_flip);
+    cJSON *mount = cJSON_GetObjectItem(response, "Mount");
+    JSON_GET_STR(mount, "TimeToMeridianFlipString", data->meridian_flip);
+    parse_mount_pointing(mount, data);
 
     // ── Switch ──
     cJSON *sw = cJSON_GetObjectItem(response, "Switch");

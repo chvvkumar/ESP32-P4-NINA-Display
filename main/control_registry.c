@@ -17,6 +17,7 @@
 #include "ui/nina_dashboard.h"      /* nina_dashboard_apply_theme, get_active_page */
 #include "ui/nina_image_page.h"     /* image_page_config_apply_live */
 #include "ui/nina_nav_arbiter.h"    /* nav_arbiter_notify_topology_changed, nav_arbiter_is_pinned */
+#include "ui/nina_adsb.h"           /* nina_adsb_config_changed */
 #include "ui/page_registry.h"       /* page_ref_*, PAGE_REF_* */
 
 /* ===================================================================== */
@@ -58,6 +59,9 @@ static int get_custom_hflip(const control_item_t *it, const app_config_t *c)    
 static int get_solar_band(const control_item_t *it, const app_config_t *c)                 { (void)it; return c->solar_band; }
 static int get_goes_update_interval_s(const control_item_t *it, const app_config_t *c)     { (void)it; return c->goes_update_interval_s; }
 static int get_custom_update_interval_s(const control_item_t *it, const app_config_t *c)   { (void)it; return c->custom_update_interval_s; }
+
+static int get_flights_mode(const control_item_t *it, const app_config_t *c)               { (void)it; return c->flights_mode; }
+static int get_flights_up_azimuth(const control_item_t *it, const app_config_t *c)         { (void)it; return c->flights_up_azimuth; }
 
 static int get_auto_rotate_enabled(const control_item_t *it, const app_config_t *c)          { (void)it; return c->auto_rotate_enabled ? 1 : 0; }
 static int get_auto_rotate_interval_s(const control_item_t *it, const app_config_t *c)       { (void)it; return c->auto_rotate_interval_s; }
@@ -112,6 +116,9 @@ static void set_custom_hflip(const control_item_t *it, app_config_t *c, int v)  
 static void set_solar_band(const control_item_t *it, app_config_t *c, int v)                 { (void)it; c->solar_band = (uint8_t)v; }
 static void set_goes_update_interval_s(const control_item_t *it, app_config_t *c, int v)     { (void)it; c->goes_update_interval_s = (uint16_t)v; }
 static void set_custom_update_interval_s(const control_item_t *it, app_config_t *c, int v)   { (void)it; c->custom_update_interval_s = (uint16_t)v; }
+
+static void set_flights_mode(const control_item_t *it, app_config_t *c, int v)               { (void)it; c->flights_mode = (uint8_t)v; }
+static void set_flights_up_azimuth(const control_item_t *it, app_config_t *c, int v)         { (void)it; c->flights_up_azimuth = (uint16_t)v; }
 
 static void set_auto_rotate_enabled(const control_item_t *it, app_config_t *c, int v)          { (void)it; c->auto_rotate_enabled = (v != 0); }
 static void set_auto_rotate_interval_s(const control_item_t *it, app_config_t *c, int v)       { (void)it; c->auto_rotate_interval_s = (uint16_t)v; }
@@ -182,6 +189,19 @@ static void apply_image_display(const app_config_t *prev, const app_config_t *cu
     image_page_config_apply_live(prev, cur, false);
 }
 
+/* ADS-B view / up-direction: the page keeps its own copy so an on-device drag
+ * can repaint without a config write per touch event, so a config-side change
+ * has to tell it to re-read. Safe when the page does not exist yet. */
+static void apply_adsb_view(const app_config_t *prev, const app_config_t *cur)
+{
+    (void)prev;
+    (void)cur;
+    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+        nina_adsb_config_changed();
+        bsp_display_unlock();
+    }
+}
+
 static void apply_auto_rotate_enabled(const app_config_t *prev, const app_config_t *cur)
 {
     /* app_config_save() normalizes nav mode exclusivity internally; just nudge
@@ -198,6 +218,7 @@ static void apply_auto_rotate_enabled(const app_config_t *prev, const app_config
 static const char *const rot_labels[]    = { "0deg", "90deg", "180deg", "270deg" };
 static const char *const orient_labels[] = { "0deg", "90deg", "180deg", "270deg" };
 static const char *const effect_labels[] = { "Instant", "Fade", "Slide Left", "Slide Right" };
+static const char *const flights_mode_labels[] = { "Sky Dome", "Radar Scope", "Board" };
 
 /* ===================================================================== */
 /* The registry table                                                     */
@@ -241,6 +262,12 @@ static const control_item_t s_items[] = {
     { "solar_band",                 CTRL_TYPE_ENUM, 0, 23, 1, NULL, 0, get_solar_band,             set_solar_band,             apply_image_display },
     { "goes_update_interval_s",     CTRL_TYPE_INT,  300, 7200, 300, NULL, 0, get_goes_update_interval_s,   set_goes_update_interval_s,   apply_image_display },
     { "custom_update_interval_s",   CTRL_TYPE_INT,  10,  7200, 60,  NULL, 0, get_custom_update_interval_s, set_custom_update_interval_s, apply_image_display },
+
+    /* ---- ADS-B page (both apply_adsb_view) ----
+     * up_azimuth steps 15 deg so a keypad "adjust" turns the view in useful
+     * bites; cycle wraps 359 -> 0 through the registry's own wrap. */
+    { "flights_mode",        CTRL_TYPE_ENUM, 0,   2, 1,  LBL(flights_mode_labels), get_flights_mode,      set_flights_mode,      apply_adsb_view },
+    { "flights_up_azimuth",  CTRL_TYPE_INT,  0, 359, 15, NULL, 0, get_flights_up_azimuth, set_flights_up_azimuth, apply_adsb_view },
 
     /* ---- Behavior ---- */
     { "auto_rotate_enabled",          CTRL_TYPE_BOOL, 0, 1, 1, NULL, 0, get_auto_rotate_enabled,          set_auto_rotate_enabled,          apply_auto_rotate_enabled },
