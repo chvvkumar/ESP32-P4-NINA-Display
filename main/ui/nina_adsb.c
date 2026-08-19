@@ -1313,7 +1313,7 @@ static void recompute(void)
     /* Tags are queued here and placed AFTER the mark loop: the declutter score
      * counts glyphs, so it needs every positioned contact, not just the ones
      * walked so far. l1 points into s_snap, which outlives this function. */
-    struct { int slot, x, y, mark; const char *l1; char l2[32]; } pend[ADSB_TAG_COUNT];
+    struct { int slot, x, y, mark; const char *l1; char l2[32]; } pend[ADSB_TAG_COUNT] = {{ 0 }};
     int pend_n = 0;
 
     int tags_done = 0;
