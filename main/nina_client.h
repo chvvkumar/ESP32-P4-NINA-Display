@@ -83,6 +83,23 @@ typedef struct {
     float rotator_angle;
     bool rotator_connected;
 
+    // Mount pointing — filled every cycle from the bundled /equipment/info
+    // "Mount" object, or from /equipment/mount/info on the legacy slow tier.
+    // mount_pointing_valid means: mount Connected, not AtPark, and both angles
+    // present in that response. Cleared when the instance goes offline.
+    float mount_alt_deg;        // MountInfo Altitude (degrees)
+    float mount_az_deg;         // MountInfo Azimuth (degrees)
+    float site_elev_m;          // MountInfo SiteElevation (metres)
+    bool  mount_pointing_valid;
+
+    // Camera sensor geometry (camera info XSize/YSize/PixelSize) — FOV math.
+    int   cam_x_size;
+    int   cam_y_size;
+    float cam_pixel_size_um;
+
+    // Active profile TelescopeSettings.FocalLength (mm), 0 = unknown.
+    float focal_length_mm;
+
     // Safety monitor state (updated via SAFETY-CHANGED WebSocket event)
     bool safety_is_safe;
     bool safety_connected;
@@ -148,6 +165,26 @@ typedef struct {
     // Must be created with nina_client_init_mutex() before use.
     SemaphoreHandle_t mutex;
 } nina_client_t;
+
+/* Snapshot of one online rig's sky pointing, for consumers that draw where the
+ * telescopes look (ADS-B page). fov_deg is the diagonal field of view when the
+ * sensor and focal length are all known, else 1.0. */
+typedef struct {
+    bool    valid;
+    float   alt_deg;
+    float   az_deg;
+    float   fov_deg;
+    float   site_elev_m;
+    uint8_t instance;
+} nina_pointing_t;
+
+/**
+ * Copy the pointing of every CONNECTED instance that has a valid mount pointing
+ * into @p out (at most @p max entries). Takes each client lock briefly; holds no
+ * lock on return. Safe from any task; does not touch LVGL.
+ * @return number of entries written.
+ */
+int nina_client_get_pointings(nina_pointing_t *out, int max);
 
 // One-time module init (creates DNS cache mutex). Call from app_main() before tasks.
 void nina_client_init(void);

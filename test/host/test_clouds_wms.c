@@ -1,5 +1,5 @@
 /* Host test for main/clouds_wms.h -- the pure URL/geometry/time decisions behind
- * the Clouds page (NASA GIBS WMS, GOES ABI GeoColor): satellite pick, square
+ * the Clouds page (NASA GIBS WMS, a GOES ABI channel): satellite pick, square
  * Web-Mercator box, GetMap and DescribeDomains URL shape, the DescribeDomains
  * time-list parser and the UTC calendar arithmetic. Header-only, no ESP-IDF
  * dependency; assert-style like test/host/test_radar_wms.c. */
@@ -76,13 +76,26 @@ int main(void) {
     char ts[CLOUDS_TIME_MAX];
     uint32_t times[CLOUDS_TIMES_MAX];
 
-    /* -- satellite pick ---------------------------------------------------- */
-    check_str("layer: St Louis (-90.7) -> East", clouds_layer(-90.689438f), CLOUDS_LAYER_EAST);
-    check_str("layer: Denver (-105.0) -> East", clouds_layer(-105.0f), CLOUDS_LAYER_EAST);
-    check_str("layer: -106.2 exactly -> East", clouds_layer(-106.2f), CLOUDS_LAYER_EAST);
-    check_str("layer: -106.3 -> West", clouds_layer(-106.3f), CLOUDS_LAYER_WEST);
-    check_str("layer: Seattle (-122.3) -> West", clouds_layer(-122.33f), CLOUDS_LAYER_WEST);
-    check_str("layer: (0,0) -> East", clouds_layer(0.0f), CLOUDS_LAYER_EAST);
+    /* -- satellite pick + channel table ------------------------------------ */
+    const char *geo_e = s_clouds_channels[0].east, *geo_w = s_clouds_channels[0].west;
+    check_str("layer: St Louis (-90.7) -> East", clouds_layer(0, -90.689438f), geo_e);
+    check_str("layer: Denver (-105.0) -> East", clouds_layer(0, -105.0f), geo_e);
+    check_str("layer: -106.2 exactly -> East", clouds_layer(0, -106.2f), geo_e);
+    check_str("layer: -106.3 -> West", clouds_layer(0, -106.3f), geo_w);
+    check_str("layer: Seattle (-122.3) -> West", clouds_layer(0, -122.33f), geo_w);
+    check_str("layer: (0,0) -> East", clouds_layer(0, 0.0f), geo_e);
+    /* the channel picks the layer pair; the longitude still picks East/West */
+    check_str("channel 0 -> GeoColor East", clouds_layer(0, -90.0f), "GOES-East_ABI_GeoColor");
+    check_str("channel 1 -> Clean IR East", clouds_layer(1, -90.0f),
+              "GOES-East_ABI_Band13_Clean_Infrared");
+    check_str("channel 1 -> Clean IR West", clouds_layer(1, -122.33f),
+              "GOES-West_ABI_Band13_Clean_Infrared");
+    check_str("channel 2 -> Air Mass East", clouds_layer(2, -90.0f), "GOES-East_ABI_Air_Mass");
+    check_str("channel 3 (invalid) falls back to GeoColor", clouds_layer(3, -90.0f), geo_e);
+    check_str("label 0", clouds_channel_label(0), "GeoColor");
+    check_str("label 1", clouds_channel_label(1), "Clean IR");
+    check_str("label 2", clouds_channel_label(2), "Air Mass");
+    check_str("label 9 (invalid) falls back", clouds_channel_label(9), "GeoColor");
 
     /* -- bbox -------------------------------------------------------------- */
     {
@@ -112,7 +125,7 @@ int main(void) {
     /* -- GetMap URL -------------------------------------------------------- */
     {
         uint32_t stamp = 1787025600u;   /* 2026-08-18T04:00:00Z */
-        check_bool("url: builds", clouds_frame_url(url, sizeof(url), 38.758331f, -90.689438f, 7, stamp), true);
+        check_bool("url: builds", clouds_frame_url(url, sizeof(url), 38.758331f, -90.689438f, 7, 0, stamp), true);
         printf("    url=%s\n", url);
         check_contains("url: https gibs host + epsg3857 endpoint", url,
                        "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi?", true);
@@ -139,11 +152,11 @@ int main(void) {
                    p_l >= 0 && p_l < p_c && p_c < p_b && p_b < p_w && p_w < p_h && p_h < p_f && p_f < p_t, true);
         check_bool("url: TIME is last", url[strlen(url) - 1] == 'Z' && strstr(url, "&TIME=") + 6 + 20 == url + strlen(url), true);
         /* West pick flows into the URL */
-        check_bool("url: Seattle builds", clouds_frame_url(url, sizeof(url), 47.6f, -122.33f, 6, stamp), true);
+        check_bool("url: Seattle builds", clouds_frame_url(url, sizeof(url), 47.6f, -122.33f, 6, 0, stamp), true);
         check_contains("url: Seattle uses West", url, "LAYERS=GOES-West_ABI_GeoColor,", true);
         /* too small a buffer -> false and "" */
         char tiny[64];
-        check_bool("url: tiny buffer fails", clouds_frame_url(tiny, sizeof(tiny), 1.0f, 2.0f, 7, stamp), false);
+        check_bool("url: tiny buffer fails", clouds_frame_url(tiny, sizeof(tiny), 1.0f, 2.0f, 7, 0, stamp), false);
         check_str("url: tiny buffer empty", tiny, "");
     }
 
@@ -201,14 +214,14 @@ int main(void) {
     /* -- DescribeDomains URL ---------------------------------------------- */
     {
         uint32_t now = 1787025600u + 150u;   /* 04:02:30Z */
-        check_bool("domains url builds", clouds_domains_url(url, sizeof(url), CLOUDS_LAYER_EAST, now), true);
+        check_bool("domains url builds", clouds_domains_url(url, sizeof(url), geo_e, now), true);
         printf("    url=%s\n", url);
         check_str("domains url exact", url,
                   "https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/1.0.0/GOES-East_ABI_GeoColor/default/1km/all/"
                   "2026-08-18T01:02:30Z--2026-08-18T05:02:30Z.xml");
         check_bool("domains url fits 160", strlen(url) < 160, true);
         char small[100];
-        check_bool("domains url tiny fails", clouds_domains_url(small, sizeof(small), CLOUDS_LAYER_WEST, now), false);
+        check_bool("domains url tiny fails", clouds_domains_url(small, sizeof(small), geo_w, now), false);
     }
 
     /* -- DescribeDomains parser -------------------------------------------- */
@@ -267,23 +280,27 @@ int main(void) {
         check_int("domains: bounded by len", n, 1);
     }
 
-    /* ---- blank / partial frame detection ---- */
+    /* ---- blank / partial frame detection (per-channel threshold) ---- */
     {
-        enum { W = 96, H = 64 };
+        enum { W = 96, H = 64 };            /* 12 x 8 = 96 sampled pixels */
         static uint16_t px[W * H];
         memset(px, 0, sizeof(px));
-        check_bool("incomplete: all black", clouds_frame_incomplete(px, W, H, W), true);
+        check_bool("incomplete: all black", clouds_frame_incomplete(px, W, H, W, 0), true);
+        check_bool("incomplete: all black (Air Mass too)", clouds_frame_incomplete(px, W, H, W, 2), true);
         for (int i = 0; i < W * H; i++) px[i] = 0x0841;          /* night navy */
-        check_bool("incomplete: all dark navy", clouds_frame_incomplete(px, W, H, W), false);
+        check_bool("incomplete: all dark navy", clouds_frame_incomplete(px, W, H, W, 0), false);
         /* 25% black block: top-left quadrant */
         for (int y = 0; y < H / 2; y++)
             for (int x = 0; x < W / 2; x++) px[y * W + x] = 0;
-        check_bool("incomplete: 25% black block", clouds_frame_incomplete(px, W, H, W), true);
-        /* ~1% black: 1 of the 12x8 = 96 sampled pixels */
+        check_bool("incomplete: 25% black block (GeoColor, 3%)", clouds_frame_incomplete(px, W, H, W, 0), true);
+        check_bool("incomplete: 25% black block (Clean IR, 10%)", clouds_frame_incomplete(px, W, H, W, 1), true);
+        /* Air Mass renders large legitimately black areas: 25% black is a GOOD frame */
+        check_bool("incomplete: 25% black block (Air Mass, 80%)", clouds_frame_incomplete(px, W, H, W, 2), false);
+        /* ~1% black: 1 of the 96 sampled pixels */
         for (int i = 0; i < W * H; i++) px[i] = 0x0841;
         px[0] = 0;
-        check_bool("incomplete: 1% black", clouds_frame_incomplete(px, W, H, W), false);
-        check_bool("incomplete: NULL is not incomplete", clouds_frame_incomplete(NULL, W, H, W), false);
+        check_bool("incomplete: 1% black", clouds_frame_incomplete(px, W, H, W, 0), false);
+        check_bool("incomplete: NULL is not incomplete", clouds_frame_incomplete(NULL, W, H, W, 0), false);
     }
 
     printf("\n%s (%d failures)\n", fails == 0 ? "ALL PASSED" : "FAILED", fails);

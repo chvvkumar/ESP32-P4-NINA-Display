@@ -63,6 +63,8 @@ extern const uint8_t fragment_image_clouds_html_start[] asm("_binary_fragment_im
 extern const uint8_t fragment_image_clouds_html_end[]   asm("_binary_fragment_image_clouds_html_end");
 extern const uint8_t fragment_octoprint_html_start[] asm("_binary_fragment_octoprint_html_start");
 extern const uint8_t fragment_octoprint_html_end[]   asm("_binary_fragment_octoprint_html_end");
+extern const uint8_t fragment_adsb_html_start[] asm("_binary_fragment_adsb_html_start");
+extern const uint8_t fragment_adsb_html_end[]   asm("_binary_fragment_adsb_html_end");
 
 /* P6d tab fragments -- final wave. Extracts the remaining four tabs (nodes,
  * display, behavior, system), completing the migration: all 11 tabs now ship
@@ -120,6 +122,8 @@ extern const uint8_t fragment_image_clouds_html_gz_start[] asm("_binary_fragment
 extern const uint8_t fragment_image_clouds_html_gz_end[]   asm("_binary_fragment_image_clouds_html_gz_end");
 extern const uint8_t fragment_octoprint_html_gz_start[] asm("_binary_fragment_octoprint_html_gz_start");
 extern const uint8_t fragment_octoprint_html_gz_end[]   asm("_binary_fragment_octoprint_html_gz_end");
+extern const uint8_t fragment_adsb_html_gz_start[] asm("_binary_fragment_adsb_html_gz_start");
+extern const uint8_t fragment_adsb_html_gz_end[]   asm("_binary_fragment_adsb_html_gz_end");
 extern const uint8_t fragment_nodes_html_gz_start[] asm("_binary_fragment_nodes_html_gz_start");
 extern const uint8_t fragment_nodes_html_gz_end[]   asm("_binary_fragment_nodes_html_gz_end");
 extern const uint8_t fragment_display_html_gz_start[] asm("_binary_fragment_display_html_gz_start");
@@ -297,6 +301,8 @@ static const ui_fragment_entry_t s_ui_fragments[] = {
                        fragment_image_clouds_html_gz_start,  fragment_image_clouds_html_gz_end },
     { "octoprint",     fragment_octoprint_html_start,     fragment_octoprint_html_end,
                        fragment_octoprint_html_gz_start,     fragment_octoprint_html_gz_end },
+    { "adsb",          fragment_adsb_html_start,          fragment_adsb_html_end,
+                       fragment_adsb_html_gz_start,          fragment_adsb_html_gz_end },
     { "nodes",         fragment_nodes_html_start,         fragment_nodes_html_end,
                        fragment_nodes_html_gz_start,         fragment_nodes_html_gz_end },
     { "display",       fragment_display_html_start,       fragment_display_html_end,
@@ -450,6 +456,11 @@ esp_err_t config_get_handler(httpd_req_t *req)
     /* weather_api_key: same shape as octoprint_api_key (SETTINGS_TABLE row,
      * is_sensitive in s_backup_fields, so the POST sentinel is stripped). */
     REDACT_STRING_FIELD(weather_api_key);
+    /* custom_image_header: an optional "Name: value" header for the Custom URL
+     * image fetch, so it may carry an API key or bearer token. Same shape as
+     * the two above (SETTINGS_TABLE row, is_sensitive in s_backup_fields, so
+     * the POST sentinel is stripped and the stored value survives). */
+    REDACT_STRING_FIELD(custom_image_header);
     #undef REDACT_STRING_FIELD
     /* admin_password is never serialized by serialize_config_to_json() at all. */
 
@@ -659,6 +670,20 @@ static const backup_field_t s_backup_fields[] = {
     {"clouds_update_interval_s",   "Cloud Cover Update Interval","Cloud Cover", false, false},
     {"clouds_frames",              "Cloud Cover Animation Length","Cloud Cover", false, false},
     {"clouds_zoom",                "Cloud Cover Area",          "Cloud Cover", false, false},
+    {"clouds_channel",             "Cloud Cover Channel",       "Cloud Cover", false, false},   /* v67 */
+    /* ADS-B page (v68). All seven are SETTINGS_TABLE rows, so
+     * serialize_config_to_json() emits them and parse_config_from_json() reads
+     * them with no hand-written arm; registered here so the diff, category
+     * grouping and unknown-field detection treat them like any other field.
+     * flights_url is a plain LAN URL, not a credential: not sensitive. */
+    {"flights_enabled",            "ADS-B Page Enabled",   "ADS-B", false, false},
+    {"flights_url",                "ADS-B Receiver URL",   "ADS-B", false, false},
+    {"flights_update_interval_s",  "ADS-B Update Interval","ADS-B", false, false},
+    {"flights_range_nm",           "ADS-B Scope Range",    "ADS-B", false, false},
+    {"flights_min_el",             "ADS-B Elevation Gate", "ADS-B", false, false},
+    {"flights_up_azimuth",         "ADS-B Up Azimuth",     "ADS-B", false, false},
+    {"flights_mode",               "ADS-B View",           "ADS-B", false, false},
+    {"flights_route_lookup",       "ADS-B Route Lookup",   "ADS-B", false, false},   /* v69 */
     {"goes_region",                "GOES Region",          "GOES", false, false},
     {"goes_update_interval_s",     "GOES Update Interval", "GOES", false, false},
     {"custom_image_url",           "Custom Image URL",     "Custom URL", false, false},
@@ -713,6 +738,10 @@ static const backup_field_t s_backup_fields[] = {
      * change renames the device mid-session and is the diff a user most needs
      * to see. */
     {"weather_api_key",    "Weather API Key",    "Weather", true, false, true},
+    /* v67: the Custom URL image header may carry a key or bearer token, so it is
+     * sensitive+mask_preview like the other credentials here even though its
+     * category is the Custom URL page. */
+    {"custom_image_header","Custom Image Header","Custom URL", true, false, true},
     {"mqtt_username",      "MQTT Username",      "MQTT",    true, false, true},
     {"mqtt_password",      "MQTT Password",      "MQTT",    true, false, true},
     {"mqtt_broker_url",    "MQTT Broker URL",    "MQTT",    true, false, true},
@@ -765,6 +794,8 @@ static const restore_strmax_t s_restore_strmax[] = {
     {"allsky_field_config", 1536},
     {"allsky_thresholds",   1024},
     {"custom_image_url",    256},
+    {"custom_image_header", 256},
+    {"flights_url",         128},
     {"json_tiles_config",   JSON_TILES_CONFIG_MAX},
     {"ha_tiles_config",     HA_TILES_CONFIG_MAX},
     {"json_url",            256},
@@ -785,7 +816,7 @@ static const restore_strmax_t s_restore_strmax[] = {
  * means adding one row here, not editing two strcmp chains. */
 static const char *const s_url_fields[] = {
     "url1", "url2", "url3", "mqtt_broker_url", "json_url", "ha_base_url",
-    "octoprint_url", "octoprint_snapshot_url", NULL
+    "octoprint_url", "octoprint_snapshot_url", "flights_url", NULL
 };
 
 static bool is_url_field(const char *json_key) {
@@ -1067,9 +1098,9 @@ static cJSON *build_restore_preview(const cJSON *backup_root, const cJSON *curre
     bool restore_blocked = false;
 
     /* Track which categories have changes */
-    const char *categories[] = {"Display", "Behavior", "Nodes & Data", "System", "AllSky", "Spotify", "MQTT", "OctoPrint", "GOES", "Moon", "Solar", "Custom URL", "Radar", "Cloud Cover"};
-    int cat_counts[14] = {0};
-    int num_categories = 14;
+    const char *categories[] = {"Display", "Behavior", "Nodes & Data", "System", "AllSky", "Spotify", "MQTT", "OctoPrint", "GOES", "Moon", "Solar", "Custom URL", "Radar", "Cloud Cover", "ADS-B"};
+    int cat_counts[15] = {0};
+    int num_categories = 15;
 
     for (const backup_field_t *f = s_backup_fields; f->json_key; f++) {
         /* Determine which backup section this field comes from */
@@ -1224,6 +1255,8 @@ static bool validate_config_fields(cJSON *root, httpd_req_t *req)
         !validate_string_len(root, "allsky_thresholds", 1024) ||
         !validate_string_len(root, "goes_region", sizeof(((app_config_t *)0)->goes_region)) ||
         !validate_string_len(root, "custom_image_url", sizeof(((app_config_t *)0)->custom_image_url)) ||
+        !validate_string_len(root, "custom_image_header", sizeof(((app_config_t *)0)->custom_image_header)) ||
+        !validate_string_len(root, "flights_url", sizeof(((app_config_t *)0)->flights_url)) ||
         /* JSON Display / Home Assistant page fields (restore path only; absent
          * from the config POST body, which routes them through their own
          * endpoints). Bounds mirror json_config_post_handler /

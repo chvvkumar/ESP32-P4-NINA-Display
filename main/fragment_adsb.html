@@ -1,0 +1,148 @@
+      <div class="card">
+        <div class="card-title"><span class="card-title-label">ADS-B <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">ADS-B page</div><p>Adds a page that shows the aircraft your own ADS-B receiver is hearing, with the direction your telescopes are pointing marked on it. The data comes from a tar1090 or readsb receiver on your network, so the device needs its address.</p><p>Receiver holds the address and how often it is read. View picks how the aircraft are drawn and which way the display is turned. There is no aircraft data from the internet here, only from your own receiver.</p></div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Enable ADS-B page</span>
+          <!-- No inline handler: the delegated input/change listener on .content
+               already runs checkDirty() + the debounced live apply for every
+               control in this card. -->
+          <label class="toggle"><input type="checkbox" id="flights_enabled"><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint">Adds the ADS-B page and starts reading from your receiver; off hides the page and stops the requests.</div>
+
+        <div class="card">
+          <div class="card-title"><span class="card-title-label">Receiver <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+          <div class="help-popover"><div class="help-popover-title">Receiver</div><p>Receiver Address is the address of your tar1090 or readsb page, the same one you open in a browser. Include http:// and a port number if you use one, and leave off any path.</p><p>Refresh sets how often the aircraft list is read, from 2 to 60 seconds. Three seconds keeps a fast jet moving smoothly.</p><p>Range sets how far out the Radar Scope view reaches. It does not limit what the Sky Dome or Board views show.</p></div>
+          <div class="field">
+            <label class="field-label" for="flights_url">Receiver Address</label>
+            <input type="text" class="input" id="flights_url" maxlength="127" placeholder="http://adsb-host.local:8080">
+            <div class="field-hint">The address you open in a browser. Include http:// and any port; no path.</div>
+          </div>
+          <div class="field">
+            <label class="field-label" for="flights_update_interval_s">Refresh</label>
+            <input type="number" class="input" id="flights_update_interval_s" min="2" max="60" step="1" placeholder="3">
+            <div class="field-hint">How often the aircraft list is read, in seconds (2 to 60).</div>
+          </div>
+          <div class="field">
+            <label class="field-label" for="flights_range_nm">Range</label>
+            <input type="number" class="input" id="flights_range_nm" min="10" max="250" step="5" placeholder="50">
+            <div class="field-hint">How far out the Radar Scope reaches, in nautical miles (10 to 250).</div>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Look up flight routes online</span>
+            <!-- No inline handler: the delegated input/change listener on .content
+                 already runs checkDirty() + the debounced live apply for every
+                 control in this card. -->
+            <label class="toggle"><input type="checkbox" id="flights_route_lookup"><span class="toggle-track"></span></label>
+          </div>
+          <div class="field-hint">Shows origin and destination (for example LAX-STL) next to each flight. Uses the free adsb.im route service over the internet; turn off to keep the page fully local.</div>
+        </div>
+
+        <div class="card">
+          <div class="card-title"><span class="card-title-label">View <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+          <div class="help-popover"><div class="help-popover-title">View</div><p>Sky Dome draws the sky as seen looking straight up: the middle of the circle is directly overhead and the edge is the horizon. Radar Scope draws a flat map with distance from you, like a radar screen. Board is a plain list of the nearest aircraft with no picture. Tapping the page on the device also cycles through the three.</p><p>Minimum elevation hides aircraft that sit low on the horizon, where buildings and trees are in the way anyway.</p><p>Up direction turns the whole picture so that a compass direction of your choosing is at the top of the screen. Set it to the direction your house or window faces and what you see on screen matches what you see outside. Dragging on the device turns it too, and the two stay in step.</p></div>
+          <div class="field">
+            <label class="field-label" for="flights_mode">View</label>
+            <select class="input" id="flights_mode">
+              <option value="0">Sky Dome</option>
+              <option value="1">Radar Scope</option>
+              <option value="2">Board</option>
+            </select>
+            <div class="field-hint">How the aircraft are drawn; a tap on the device cycles through the same three.</div>
+          </div>
+          <div class="field">
+            <label class="field-label" for="flights_min_el">Minimum elevation</label>
+            <input type="number" class="input" id="flights_min_el" min="0" max="89" step="1" placeholder="10">
+            <div class="field-hint">Degrees above the horizon, 0 to 89. Aircraft lower than this are counted but not drawn.</div>
+          </div>
+          <div class="field">
+            <label class="field-label" for="flights_up_azimuth">Up direction</label>
+            <div style="display:flex;align-items:center;gap:14px">
+              <input type="number" class="input" id="flights_up_azimuth" min="0" max="359" step="1" placeholder="0" style="flex:1;min-width:0">
+              <!-- Preview only: data-no-dirty keeps the SVG out of the save bar
+                   and the live apply, which the number field beside it drives. -->
+              <div data-no-dirty style="flex:0 0 auto">
+                <svg id="adsbCompass" width="100" height="100" viewBox="0 0 100 100" aria-hidden="true">
+                  <!-- Fixed part: the dial edge and the pointer marking the top
+                       of the screen. Only the rose below it turns. -->
+                  <path d="M50 9 L44 0 L56 0 Z" fill="var(--accent)"/>
+                  <circle cx="50" cy="50" r="40" fill="none" stroke="var(--border-em)" stroke-width="1.5"/>
+                  <g id="adsbCompassRose" stroke-linecap="round">
+                    <g stroke="var(--text-muted)" stroke-width="2">
+                      <line x1="50" y1="10" x2="50" y2="19"/>
+                      <line x1="50" y1="10" x2="50" y2="19" transform="rotate(90 50 50)"/>
+                      <line x1="50" y1="10" x2="50" y2="19" transform="rotate(180 50 50)"/>
+                      <line x1="50" y1="10" x2="50" y2="19" transform="rotate(270 50 50)"/>
+                    </g>
+                    <g stroke="var(--text-hint)" stroke-width="1.5">
+                      <line x1="50" y1="10" x2="50" y2="15" transform="rotate(30 50 50)"/>
+                      <line x1="50" y1="10" x2="50" y2="15" transform="rotate(60 50 50)"/>
+                      <line x1="50" y1="10" x2="50" y2="15" transform="rotate(120 50 50)"/>
+                      <line x1="50" y1="10" x2="50" y2="15" transform="rotate(150 50 50)"/>
+                      <line x1="50" y1="10" x2="50" y2="15" transform="rotate(210 50 50)"/>
+                      <line x1="50" y1="10" x2="50" y2="15" transform="rotate(240 50 50)"/>
+                      <line x1="50" y1="10" x2="50" y2="15" transform="rotate(300 50 50)"/>
+                      <line x1="50" y1="10" x2="50" y2="15" transform="rotate(330 50 50)"/>
+                    </g>
+                    <g font-size="13" font-weight="600" text-anchor="middle" dominant-baseline="central" stroke="none">
+                      <text x="50" y="28" fill="var(--accent)">N</text>
+                      <text x="72" y="50" fill="var(--text-muted)">E</text>
+                      <text x="50" y="72" fill="var(--text-muted)">S</text>
+                      <text x="28" y="50" fill="var(--text-muted)">W</text>
+                    </g>
+                  </g>
+                </svg>
+              </div>
+            </div>
+            <div class="field-hint" id="adsbUpHint">Which compass direction is drawn at the top of the screen, 0 to 359 degrees. Set this to the direction your house faces so the display matches your view. 0 is north up.</div>
+          </div>
+        </div>
+      </div>
+
+<script>
+/* ADS-B tab behavior. Everything on this tab is a plain settings field
+   collected by the shell's collectTab_adsb / populateTab_adsb; the only local
+   code is the compass preview beside the Up direction field.
+
+   loadTabFragment() re-creates this node after injecting the markup above
+   (innerHTML alone never runs scripts), so the guard below makes a second
+   execution a no-op if the fragment is refetched after a failed load. */
+(function(){
+  if(window.__adsbTabJs) return;
+  window.__adsbTabJs=true;
+
+  var NAMES=['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+
+  /* The rose turns the opposite way to the value: setting "up" to 90 (east)
+     means east is at the top, so the drawn north mark swings to the left. */
+  function adsbDrawCompass(){
+    var f=document.getElementById('flights_up_azimuth');
+    var g=document.getElementById('adsbCompassRose');
+    var h=document.getElementById('adsbUpHint');
+    if(!f||!g) return;
+    var v=parseInt(f.value,10);
+    if(isNaN(v)) v=0;
+    v=((v%360)+360)%360;
+    g.setAttribute('transform','rotate('+(-v)+' 50 50)');
+    /* The letters travel round with the rose but are turned back upright, so
+       they stay readable instead of standing on their heads at 180 degrees. */
+    var t=g.querySelectorAll('text');
+    for(var i=0;i<t.length;i++){
+      var x=t[i].getAttribute('x'), y=t[i].getAttribute('y');
+      t[i].setAttribute('transform','rotate('+v+' '+x+' '+y+')');
+    }
+    if(h) h.textContent='Top of the screen faces '+v+' degrees ('+NAMES[Math.round(v/22.5)%16]+'). Set this to the direction your house faces so the display matches your view.';
+  }
+
+  var f=document.getElementById('flights_up_azimuth');
+  if(f){
+    f.addEventListener('input',adsbDrawCompass);
+    f.addEventListener('change',adsbDrawCompass);
+  }
+  /* The shell's populateTab_adsb runs AFTER this script (loadTabFragment
+     activates fragment scripts first), so it calls this to turn the rose to the
+     loaded value. Draw once now too, for the fragment's own default. */
+  window.adsbDrawCompass=adsbDrawCompass;
+  adsbDrawCompass();
+})();
+</script>

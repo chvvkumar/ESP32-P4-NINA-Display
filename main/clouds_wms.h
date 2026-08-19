@@ -2,7 +2,7 @@
 
 /*
  * clouds_wms.h - pure URL, geometry and time decisions for the Clouds page
- * (NASA GIBS WMS, GOES ABI GeoColor over Reference_Features_15m).
+ * (NASA GIBS WMS, a GOES ABI channel over Reference_Features_15m).
  *
  * Header-only and free of ESP-IDF, FreeRTOS and LVGL, so the host test suite
  * (test/host/test_clouds_wms.c) can exercise the parts that are easy to get
@@ -32,8 +32,8 @@
  *    origin has not filled, and a partial frame whose missing tiles are black
  *    blocks, are caught by clouds_frame_incomplete() (black-sample fraction)
  *    before the frame reaches the ring; the poller re-fetches the stamp on the
- *    next poll. ponytail: a partial frame that leaves < CLOUDS_BLANK_PCT of
- *    the samples black still slips through and is only healed by the
+ *    next poll. ponytail: a partial frame that leaves less than the channel's
+ *    blank_pct of the samples black still slips through and is only healed by the
  *    same-stamp replace on the next poll. Upgrade path: also compare the
  *    tile grid against the previous frame for the same stamp.
  *
@@ -53,7 +53,7 @@
 #define CLOUDS_URL_MAX        RADAR_WMS_URL_MAX   /* 512: the GetMap URL is ~330 chars */
 #define CLOUDS_TIME_MAX       21                  /* "2026-08-18T04:00:00Z" + NUL */
 #define CLOUDS_TIMES_MAX      10                  /* == max clouds_frames (ring capacity) */
-#define CLOUDS_PERIOD_S       600u                /* GOES ABI GeoColor cadence, PT10M */
+#define CLOUDS_PERIOD_S       600u                /* GOES ABI cadence, PT10M on every channel */
 #define CLOUDS_FALLBACK_LAG_S 3000u               /* 50 min behind wall clock when the domain fetch fails */
 #define CLOUDS_PX             720                 /* frame size, native panel size */
 #define CLOUDS_ZOOM_MIN       5
@@ -62,14 +62,46 @@
 #define CLOUDS_DOMAIN_FWD_S   3600u
 
 #define CLOUDS_GIBS_BASE   "https://gibs.earthdata.nasa.gov/"
-#define CLOUDS_LAYER_WEST  "GOES-West_ABI_GeoColor"
-#define CLOUDS_LAYER_EAST  "GOES-East_ABI_GeoColor"
 #define CLOUDS_SPLIT_LON   (-106.2f)              /* midpoint of the two sub-satellite longitudes */
 
-/* Satellite by longitude only: west of the -75.2/-137.2 midpoint gets GOES-West. */
-static inline const char *clouds_layer(float lon)
+/* Channel table (config field clouds_channel, 0..2). All six layer names and
+ * their PT10M DescribeDomains lists verified live 2026-08-18; a wrong name
+ * returns a 460 B XML ServiceException, so a typo cannot silently serve the
+ * wrong picture. blank_pct is the per-channel pure-black sample fraction above
+ * which clouds_frame_incomplete() calls the frame a hole (see the measurements
+ * at that function). */
+typedef struct {
+    const char *east;       /* GIBS layer name, GOES-East */
+    const char *west;       /* GIBS layer name, GOES-West */
+    const char *label;      /* overlay strip caption */
+    uint8_t     blank_pct;  /* > this % of samples pure black = incomplete frame */
+} clouds_channel_t;
+
+#define CLOUDS_CHANNEL_COUNT 3
+
+static const clouds_channel_t s_clouds_channels[CLOUDS_CHANNEL_COUNT] = {
+    { "GOES-East_ABI_GeoColor",              "GOES-West_ABI_GeoColor",              "GeoColor", 3  },
+    { "GOES-East_ABI_Band13_Clean_Infrared", "GOES-West_ABI_Band13_Clean_Infrared", "Clean IR", 10 },
+    { "GOES-East_ABI_Air_Mass",              "GOES-West_ABI_Air_Mass",              "Air Mass", 80 },
+};
+
+/* Row for @p ch; an out-of-range value falls back to GeoColor rather than
+ * failing, so a config from a newer build never blanks the page. */
+static inline const clouds_channel_t *clouds_channel(uint8_t ch)
 {
-    return (lon < CLOUDS_SPLIT_LON) ? CLOUDS_LAYER_WEST : CLOUDS_LAYER_EAST;
+    return &s_clouds_channels[(ch < CLOUDS_CHANNEL_COUNT) ? ch : 0];
+}
+
+/* Satellite by longitude only: west of the -75.2/-137.2 midpoint gets GOES-West. */
+static inline const char *clouds_layer(uint8_t ch, float lon)
+{
+    const clouds_channel_t *c = clouds_channel(ch);
+    return (lon < CLOUDS_SPLIT_LON) ? c->west : c->east;
+}
+
+static inline const char *clouds_channel_label(uint8_t ch)
+{
+    return clouds_channel(ch)->label;
 }
 
 /* Half-width of the 720 px box in Web-Mercator metres at Web-Mercator zoom
@@ -216,7 +248,7 @@ static inline uint32_t clouds_time_step(uint32_t newest, int i)
  * character can reach the URL. Layer order: raster first, vector overlay after.
  * Returns false and writes "" when the result would not fit. */
 static inline bool clouds_frame_url(char *out, size_t sz, float lat, float lon,
-                                    uint8_t zoom, uint32_t stamp)
+                                    uint8_t zoom, uint8_t ch, uint32_t stamp)
 {
     if (out == NULL || sz == 0) return false;
     out[0] = '\0';
@@ -228,7 +260,7 @@ static inline bool clouds_frame_url(char *out, size_t sz, float lat, float lon,
                      CLOUDS_GIBS_BASE "wms/epsg3857/best/wms.cgi?SERVICE=WMS&VERSION=1.3.0"
                      "&REQUEST=GetMap&LAYERS=%s,Reference_Features_15m&CRS=EPSG:3857"
                      "&BBOX=%ld,%ld,%ld,%ld&WIDTH=%d&HEIGHT=%d&FORMAT=image/jpeg&TIME=%s",
-                     clouds_layer(lon),
+                     clouds_layer(ch, lon),
                      (long)lroundf(minx), (long)lroundf(miny),
                      (long)lroundf(maxx), (long)lroundf(maxy),
                      CLOUDS_PX, CLOUDS_PX, tstr);
@@ -355,16 +387,35 @@ static inline int clouds_parse_domains(const char *xml, size_t len, uint32_t *ou
 /* GIBS answers HTTP 200 for a slot whose tiles are missing: a BLANK frame is the
  * Reference_Features_15m overlay drawn over black (~99% pure black), and a
  * PARTIAL frame (tiles not yet ingested) has rectangular pure-black blocks.
- * Real GeoColor is never pure black at zoom 5..9: the night background is a
- * dark navy and daylight is land, sea or cloud, so pure 0x0000 only comes from
- * a hole. Sample every CLOUDS_BLANK_STEP-th pixel of every CLOUDS_BLANK_STEP-th
- * row (8100 samples of a 720x720 frame) and call the frame incomplete when more
- * than CLOUDS_BLANK_PCT percent of them are 0x0000. Raw decoded pixels, before
- * any bake or Red Night remap. */
+ * Sample every CLOUDS_BLANK_STEP-th pixel of every CLOUDS_BLANK_STEP-th row
+ * (8100 samples of a 720x720 frame) and call the frame incomplete when more
+ * than the channel's blank_pct percent of them are 0x0000. Raw decoded pixels,
+ * before any bake or Red Night remap.
+ *
+ * The threshold is PER CHANNEL because the channels differ enormously in how
+ * much legitimate black they contain. Measured 2026-08-18 on real 720x720
+ * zoom-7 GetMaps over Kansas / Florida / the Gulf (black = RGB565 0x0000 on the
+ * same 8-px sample grid this function uses):
+ *
+ *   GeoColor   0.00 - 0.09 %   (dark navy night, never pure black)  -> 3
+ *   Clean IR   0.00 %          (warm clear ground is mid-grey, not
+ *                               black; no day/night swing, it is a
+ *                               temperature product)                -> 10
+ *   Air Mass  17.3 - 54.2 %    (the product itself renders large pure
+ *                               black areas)                        -> 80
+ *   blank/partial (any channel) 95.4 - 100 %  (overlay over black)
+ *
+ * Clean IR gets 10 rather than 3 purely as headroom over a hotter scene than
+ * the ones sampled; blanks sit at 95 %+, so the extra slack costs no detection
+ * power. Air Mass at 80 still separates a real frame (54 % worst case) from a
+ * blank (95 %), but a partially ingested Air Mass frame does slip through.
+ * ponytail: single global number would reject every Air Mass frame; per-channel
+ * table entry is the cheapest fix. Upgrade path if partial Air Mass frames
+ * annoy: compare the black mask against the previous frame for the same stamp. */
 #define CLOUDS_BLANK_STEP 8      /* sample stride, pixels and rows */
-#define CLOUDS_BLANK_PCT  3      /* > this % of samples pure black = incomplete */
 
-static inline bool clouds_frame_incomplete(const uint16_t *rgb565, int w, int h, int stride_px)
+static inline bool clouds_frame_incomplete(const uint16_t *rgb565, int w, int h,
+                                           int stride_px, uint8_t ch)
 {
     if (rgb565 == NULL || w <= 0 || h <= 0) return false;
     if (stride_px < w) stride_px = w;
@@ -376,5 +427,5 @@ static inline bool clouds_frame_incomplete(const uint16_t *rgb565, int w, int h,
             if (row[x] == 0x0000u) black++;
         }
     }
-    return black * 100u > n * (uint32_t)CLOUDS_BLANK_PCT;
+    return black * 100u > n * (uint32_t)clouds_channel(ch)->blank_pct;
 }

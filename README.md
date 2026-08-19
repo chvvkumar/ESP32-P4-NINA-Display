@@ -20,7 +20,7 @@
   <img src="https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/chvvkumar/ESP32-P4-NINA-Display/badges/firmware-metrics.json&query=$.ota_size&label=OTA%20Binary&logo=chip&color=green" alt="OTA Size">
 </p>
 
-A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nighttime-imaging.eu/), built for the Waveshare ESP32-P4-WIFI6-Touch-LCD-4B (720x720). It polls the [ninaAPI Advanced plugin](https://github.com/christian-photo/ninaAPI) over HTTP and WebSocket and shows live session data for up to three NINA computers: exposure arcs, guiding RMS, filter status, sequence progress, power draw, and a Summary page across all instances. Beyond NINA it runs a clock page with weather, a full-screen 3D moon page, a Spotify Now Playing screen, an AllSky environmental panel, GOES satellite, Solar and custom image pages, an animated Weather Radar loop, a Cloud Cover satellite loop, JSON Display and Home Assistant tile pages, and an OctoPrint 3D printer page. Voice alerts through the onboard speaker announce threshold breaches, connection changes and session events.
+A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nighttime-imaging.eu/), built for the Waveshare ESP32-P4-WIFI6-Touch-LCD-4B (720x720). It polls the [ninaAPI Advanced plugin](https://github.com/christian-photo/ninaAPI) over HTTP and WebSocket and shows live session data for up to three NINA computers: exposure arcs, guiding RMS, filter status, sequence progress, power draw, and a Summary page across all instances. Beyond NINA it runs a clock page with weather, a full-screen 3D moon page, a Spotify Now Playing screen, an AllSky environmental panel, GOES satellite, Solar and custom image pages, an animated Weather Radar loop, a Cloud Cover satellite loop, JSON Display and Home Assistant tile pages, an OctoPrint 3D printer page, and an ADS-B page for aircraft overhead. Voice alerts through the onboard speaker announce threshold breaches, connection changes and session events.
 
 <table align="center">
   <tr>
@@ -48,6 +48,7 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
   - [JSON Display](#json-display)
   - [Home Assistant](#home-assistant)
   - [OctoPrint](#octoprint)
+  - [ADS-B](#ads-b)
   - [On-Device Settings and System Info](#on-device-settings-and-system-info)
 - [Navigation and Home Page](#navigation-and-home-page)
 - [Themes](#themes)
@@ -239,7 +240,7 @@ Setup: Pages > GOES.
 
 ### Solar
 
-Full-screen NASA SDO and SOHO solar imagery in a chosen band (AIA wavelengths, HMI continuum and magnetogram, LASCO coronagraphs, EIT).
+Full-screen solar imagery in a chosen band: NASA SDO and SOHO (AIA wavelengths, HMI continuum and magnetogram, LASCO coronagraphs, EIT) or the NOAA GOES SUVI extreme-UV channels.
 
 Setup: Pages > Solar.
 
@@ -251,7 +252,7 @@ Setup: Pages > Solar.
 
 ### Custom Image URL
 
-Full-screen JPEG fetched from any URL you supply, for example a webcam or a weather map. JPEG only, up to 1024x1024 pixels and 1 MB; PNG and WebP are not supported.
+Full-screen JPEG fetched from any URL you supply, for example a webcam or a weather map. JPEG only, up to 1024x1024 pixels and 1 MB; PNG and WebP are not supported. A source behind a login can be reached by entering one request header line, such as `Authorization: Bearer <token>` or `X-Api-Key: <key>`; the value is stored on the device and shown masked in the web UI.
 
 Setup: Pages > Custom URL.
 
@@ -273,7 +274,7 @@ Setup: Pages > Radar. Automatic site selection uses the location on Device > Sys
 
 An animated satellite loop of the cloud cover around your location, from NOAA GOES imagery served by NASA. Day: true color. Night: infrared clouds over city lights. State and country borders and major roads are drawn over the picture. The satellite (GOES-East or GOES-West) is picked from your longitude. The source updates every 10 minutes and the newest frame is usually 30-45 minutes old.
 
-Setup: Pages > Cloud Cover (area from about 150 km to 2500 km across, up to 10 frames). The location comes from Device > System > Location.
+Setup: Pages > Cloud Cover (satellite channel, area from about 150 km to 2500 km across, up to 10 frames). The channel selects GeoColor natural color, clean infrared (cloud tops day and night) or air mass (color-coded temperature and moisture). The location comes from Device > System > Location.
 
 <p align="center">
   <img src="images/clouds.jpg" alt="Cloud Cover page" width="720">
@@ -334,6 +335,18 @@ Each layout can show the printer camera instead of the slicer preview. On the Fl
 
 ---
 
+### ADS-B
+
+Shows the aircraft your own ADS-B receiver is hearing, with the direction each connected NINA mount is pointing marked on the same picture. Data comes from a tar1090 or readsb receiver on your network; nothing is fetched from an internet flight-tracking service.
+
+Three views, cycled by tapping the page: Sky Dome draws the sky as seen looking up, with the middle of the circle directly overhead and the rim at the horizon; Radar Scope draws a flat map by distance out to a chosen range; Board is a text list of the nearest aircraft. The three nearest to a mount get a callsign and altitude tag. Aircraft are colored by altitude, military contacts are drawn as squares, and an emergency squawk gets a red halo. An elevation setting hides aircraft low on the horizon, where they are behind buildings and trees anyway; those are still counted.
+
+Dragging on the Sky Dome or Radar Scope turns the whole picture so a chosen compass direction sits at the top, which lets the screen match the view out of a window. The turn is saved, and the web field and the drag stay in step.
+
+Setup: Pages > ADS-B (receiver address such as `http://kmoofall.lan:8080`, refresh, range, minimum elevation, up direction, view).
+
+---
+
 ### On-Device Settings and System Info
 
 Swipe to the Settings page for on-device configuration in four tabs: Display, Nodes, Behavior, and System (including Reboot and Factory Reset). The web UI exposes the full set of options. The System Info page reports hostname and IP addresses, WiFi signal, heap and PSRAM, chip and IDF version, uptime, and task count; CPU load and performance cards appear when Debug mode is on.
@@ -388,7 +401,7 @@ Custom voice clips: Device > Voice Clips lets you replace any of the 47 built-in
 
 ## Web UI
 
-Open the device's address in a browser. The Home page shows device health at a glance, explains why the panel is on its current page, lists NINA connections and integrations, and lets you send the panel to any enabled page with one tap. Every setting is managed from `/config`, organized into three sections: Pages (N.I.N.A., AllSky, JSON, Home Assistant, Clock, Spotify, GOES, Moon, Solar, Custom URL, Radar, Cloud Cover, OctoPrint), Device (Display, Behavior, Voice Clips, System) and Tools (Logs, Backup, API). Most settings cards carry an info button that explains what those settings do. Changes apply to the display as a live preview and persist when you select Save.
+Open the device's address in a browser. The Home page shows device health at a glance, explains why the panel is on its current page, lists NINA connections and integrations, and lets you send the panel to any enabled page with one tap. Every setting is managed from `/config`, organized into three sections: Pages (N.I.N.A., AllSky, JSON, Home Assistant, Clock, Spotify, GOES, Moon, Solar, Custom URL, Radar, Cloud Cover, OctoPrint, ADS-B), Device (Display, Behavior, Voice Clips, System) and Tools (Logs, Backup, API). Most settings cards carry an info button that explains what those settings do. Changes apply to the display as a live preview and persist when you select Save.
 
 <p align="center">
   <img src="images/web_home.jpg" alt="Web UI home page" width="720">
@@ -464,5 +477,5 @@ Standard ESP-IDF 5.5.2 project: activate the IDF environment and run `idf.py bui
 - [@chicago925](https://github.com/chicago925) for the 3D printed stand ([#116](https://github.com/chvvkumar/ESP32-P4-NINA-Display/issues/116)).
 - Waveshare for the ESP32-P4-WIFI6-Touch-LCD-4B board support package.
 - [LVGL](https://lvgl.io/) and [stb_image](https://github.com/nothings/stb).
-- NASA GIBS for the Cloud Cover imagery, NASA SDO and SOHO for the solar imagery, NOAA and the NWS for radar and GOES imagery, and Open-Meteo, OpenWeatherMap and Weather Underground for weather data.
+- NASA GIBS for the Cloud Cover imagery, NASA SDO and SOHO for the solar imagery, NOAA GOES SUVI (rendered by Helioviewer) for the extreme-UV solar bands, NOAA and the NWS for radar and GOES imagery, and Open-Meteo, OpenWeatherMap and Weather Underground for weather data.
 - Espressif esp-hosted and esp_wifi_remote for the ESP32-C6 WiFi link, [tgx](https://github.com/vindar/tgx) for the moon sphere renderer, and SVOX Pico TTS (esp-picotts) for the voice clips.

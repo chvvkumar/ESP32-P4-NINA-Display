@@ -483,7 +483,7 @@ static void clouds_refresh_times(image_page_t *p, anim_state_t *a, const app_con
     a->ntimes = 0;
 
     char url[160];
-    if (clouds_domains_url(url, sizeof(url), clouds_layer(cfg->weather_lon), now)) {
+    if (clouds_domains_url(url, sizeof(url), clouds_layer(cfg->clouds_channel, cfg->weather_lon), now)) {
         char *body = NULL;
         size_t len = 0;
         if (anim_fetch_small(url, 4096, &body, &len)) {
@@ -526,7 +526,7 @@ static bool anim_frame_url(image_page_t *p, const app_config_t *cfg, const char 
     if (p->src == IMG_SRC_CLOUDS) {
         if (i >= a->ntimes) return false;
         return clouds_frame_url(url, sz, cfg->weather_lat, cfg->weather_lon,
-                                cfg->clouds_zoom, a->stamps[i]);
+                                cfg->clouds_zoom, cfg->clouds_channel, a->stamps[i]);
     }
     if (cfg->radar_map_style == 0) {
         radar_frame_url(url, sz, token, i);
@@ -546,10 +546,12 @@ static bool anim_frame_url(image_page_t *p, const app_config_t *cfg, const char 
  * is not held, so the existing paths re-fetch it on the next poll (times[0]/[1]
  * every poll; older slots via retry_backfill). Not a failure: no caption, no
  * toast, no spine backoff. Radar (and a NULL frame) always returns false. */
-static bool clouds_drop_incomplete(image_page_t *p, image_frame_t *f, uint8_t **src, int i)
+static bool clouds_drop_incomplete(image_page_t *p, const app_config_t *cfg,
+                                   image_frame_t *f, uint8_t **src, int i)
 {
     if (p->src != IMG_SRC_CLOUDS || f->buf == NULL) return false;
-    if (!clouds_frame_incomplete((const uint16_t *)f->buf, f->w, f->h, f->w)) return false;
+    if (!clouds_frame_incomplete((const uint16_t *)f->buf, f->w, f->h, f->w,
+                                 cfg->clouds_channel)) return false;
     anim_state_t *a = &s_anim[p->src];
     ESP_LOGI(TAG, "clouds: slot %s incomplete, will retry",
              (i >= 0 && i < a->ntimes) ? a->times[i] : "?");
@@ -584,7 +586,7 @@ static bool anim_fetch_index(image_page_t *p, const app_config_t *cfg, const cha
         /* src is NULL on every error return (see image_fetch_custom_retain). */
         return false;
     }
-    if (clouds_drop_incomplete(p, &old, &src, i)) {
+    if (clouds_drop_incomplete(p, cfg, &old, &src, i)) {
         s_anim[p->src].retry_backfill = true;
         return true;
     }
@@ -782,7 +784,9 @@ static bool net_poll_once(void *arg)
                 strlcpy(fresh.error_msg, "No URL configured", sizeof(fresh.error_msg));
                 err = ESP_ERR_INVALID_ARG;
             } else {
-                err = image_fetch_custom(cfg->custom_image_url, &fresh);
+                /* Optional user-supplied request header (empty = none), for a
+                 * source behind an API key or bearer token. */
+                err = image_fetch_custom(cfg->custom_image_url, cfg->custom_image_header, &fresh);
             }
             break;
     }
@@ -798,7 +802,7 @@ static bool net_poll_once(void *arg)
              * and the poll still counts as a success (no backoff); last_push_ms
              * is left alone so the next poll re-fetches it. */
             anim_state_t *a = &s_anim[p->src];
-            if (clouds_drop_incomplete(p, &fresh, &ring_src, 0)) {
+            if (clouds_drop_incomplete(p, cfg, &fresh, &ring_src, 0)) {
                 if (show_wait && bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                     nina_wait_overlay_hide();
                     bsp_display_unlock();

@@ -84,9 +84,10 @@ typedef uint8_t page_ref_t;
 #define PAGE_REF_OCTOPRINT          ((page_ref_t)26)
 #define PAGE_REF_RADAR              ((page_ref_t)27)
 #define PAGE_REF_CLOUDS             ((page_ref_t)28)
+#define PAGE_REF_ADSB               ((page_ref_t)29)
 
 /** Exclusive upper bound on assigned ids. */
-#define PAGE_REF_ID_MAX ((page_ref_t)29)
+#define PAGE_REF_ID_MAX ((page_ref_t)30)
 
 /** What kind of UI surface a page_ref names. */
 typedef enum {

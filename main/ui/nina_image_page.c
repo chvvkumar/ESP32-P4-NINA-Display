@@ -21,6 +21,7 @@
 #include "moon_interaction.h"
 #include "radar_sites.h"               /* radar_site_nearest (token resolution) */
 #include "radar_play.h"                /* ring size, dedupe hash, playback cursor */
+#include "clouds_wms.h"                /* clouds_channel_label (page caption) */
 #include "app_config.h"
 #include "display_defs.h"
 #include "tasks.h"                     /* psram_task_ensure, psram_task_spawn */
@@ -1361,8 +1362,8 @@ uint32_t image_page_interval_ms(image_page_t *p)
             if (s > 7200) s = 7200;
             break;
         case IMG_SRC_CLOUDS:
-            /* GIBS publishes a GeoColor frame every 10 min; 300 s is the floor
-             * the config clamp also enforces. */
+            /* GIBS publishes on a 10 min grid (Air Mass is sparser still);
+             * 300 s is the floor the config clamp also enforces. */
             s = c->clouds_update_interval_s;
             if (s < 300) s = 300;
             if (s > 7200) s = 7200;
@@ -1444,7 +1445,11 @@ void image_page_label(image_page_t *p, char *out, size_t sz)
             strlcat(out, token, sz);
             break;
         }
-        case IMG_SRC_CLOUDS: strlcpy(out, "Cloud Cover", sz); break;
+        case IMG_SRC_CLOUDS:
+            /* Name the channel the way the Radar page names its site. */
+            strlcpy(out, "Cloud Cover ", sz);
+            strlcat(out, clouds_channel_label(c->clouds_channel), sz);
+            break;
         default: break;
     }
 }
@@ -1881,8 +1886,9 @@ static bool radar_crop_frame(image_frame_t *f, uint8_t mode)
  * trim and the invert would turn that black sheet WHITE, so both are skipped
  * by design there, Red Night included; the theme-gated remap still runs.
  *
- * Clouds: no crop, no invert (GIBS GeoColor is already a dark night picture);
- * only the theme-gated Red Night remap.
+ * Clouds: no crop, no invert on any channel (GeoColor is already a dark night
+ * picture, and Clean IR / Air Mass carry meaning in their own grey/colour ramp
+ * that an invert would reverse); only the theme-gated Red Night remap.
  *
  * `cfg` and `red` are passed in rather than read here so the re-transform can
  * bake a whole ring from ONE snapshot of the settings.
@@ -2377,9 +2383,11 @@ static bool source_params_changed(image_src_t s, const app_config_t *prev, const
                    (cur->weather_lat != prev->weather_lat ||
                     cur->weather_lon != prev->weather_lon);
         case IMG_SRC_CLOUDS:
-            /* Area (zoom), frame count and the weather location all change
-             * which GIBS frames are fetched: DIFFERENT images, so the ring goes. */
-            return cur->clouds_zoom != prev->clouds_zoom ||
+            /* Channel (a different GIBS layer), area (zoom), frame count and the
+             * weather location all change which GIBS frames are fetched:
+             * DIFFERENT images, so the ring goes. */
+            return cur->clouds_channel != prev->clouds_channel ||
+                   cur->clouds_zoom != prev->clouds_zoom ||
                    cur->clouds_frames != prev->clouds_frames ||
                    cur->weather_lat != prev->weather_lat ||
                    cur->weather_lon != prev->weather_lon;
