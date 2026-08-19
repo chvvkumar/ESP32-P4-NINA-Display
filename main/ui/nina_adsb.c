@@ -81,8 +81,8 @@ LV_FONT_DECLARE(lv_font_overpass_27);
 #define ADSB_SNAP_DEG    5.0f
 
 /* Tag box: two lines (Montserrat 20 over 18) plus 2 px of breathing room. */
-#define TAG_W  150
-#define TAG_H  48
+#define TAG_W  184
+#define TAG_H  60
 
 /* Board grid. Column x are relative to the row panel, which is 680 wide.
  *
@@ -597,7 +597,7 @@ static void disc_draw_cb(lv_event_t *e)
     for (int i = 0; i < s_mark_n; i++) {
         const adsb_mark_t *m = &s_mark[i];
         if (m->flags & MK_EMERG) {
-            draw_ring(layer, m->x, m->y, 20, COL_EMERG, 3, LV_OPA_60);
+            draw_ring(layer, m->x, m->y, 26, COL_EMERG, 3, LV_OPA_60);
         }
         if (m->flags & MK_TRI) {
             draw_tri(layer, m->tx, m->ty, m->color, m->opa);
@@ -754,7 +754,7 @@ static int inner_ring_r(void)
 /** Cost of putting a tag box here: lower is better. A hidden glyph costs 1, a
  *  hidden tag box costs 4 (two lines of text lost, not one triangle) and a
  *  scrim overlap 2. @p skip is the tagged contact's own glyph, which the leader
- *  line is supposed to reach. Glyph half-extent is 14 px (12 px triangle nose
+ *  line is supposed to reach. Glyph half-extent is 20 px (18 px triangle nose
  *  plus a margin). */
 static int tag_score(const lv_area_t *box, int skip)
 {
@@ -762,8 +762,8 @@ static int tag_score(const lv_area_t *box, int skip)
     for (int i = 0; i < s_mark_n; i++) {
         if (i == skip) continue;
         int gx = s_mark[i].x, gy = s_mark[i].y;
-        if (gx + 14 < box->x1 || gx - 14 > box->x2) continue;
-        if (gy + 14 < box->y1 || gy - 14 > box->y2) continue;
+        if (gx + 20 < box->x1 || gx - 20 > box->x2) continue;
+        if (gy + 20 < box->y1 || gy - 20 > box->y2) continue;
         s++;
     }
     for (int i = 0; i < s_tag_area_n; i++) {
@@ -803,8 +803,8 @@ static void place_tag(int slot, int x, int y, int mark_idx,
     int dx0 = x - DISC_CX, dy0 = y - DISC_CY;
     int inner = inner_ring_r();
     bool crowded = (dx0 * dx0 + dy0 * dy0) < (inner * inner);
-    int gap_x = crowded ? 70 : 20;
-    int gap_y = crowded ? 24 : 8;
+    int gap_x = crowded ? 70 : 26;
+    int gap_y = crowded ? 24 : 12;
 
     int best_x = x, best_y = y, best_score = -1;
     lv_area_t best = { x, y, x + TAG_W, y + TAG_H };
@@ -865,10 +865,10 @@ static void place_compass(void)
         /* Keep the letter clear of the header and status scrims: a letter
          * that the rotation carries to the very top or bottom slides
          * inward instead of vanishing under the strip text. */
-        int ly = y - 14;
+        int ly = y - 16;
         if (ly < HDR_H + 2)                       ly = HDR_H + 2;
-        if (ly > SCREEN_SIZE - STRIP_H - 30)      ly = SCREEN_SIZE - STRIP_H - 30;
-        lv_obj_set_pos(s_lbl_card[i], x - 10, ly);
+        if (ly > SCREEN_SIZE - STRIP_H - 34)      ly = SCREEN_SIZE - STRIP_H - 34;
+        lv_obj_set_pos(s_lbl_card[i], x - 12, ly);
     }
     float tn = (-s_up_deg) * ADSB_DEG2RAD;
     s_ntick[0] = (int16_t)(DISC_CX + (int)(NTICK_OUT * sinf(tn)));
@@ -888,7 +888,7 @@ static void place_ring_label(int slot, int r, const char *text)
 {
     int d = (int)(0.707f * (float)(r - 22));
     lv_label_set_text(s_lbl_ring[slot], text);
-    lv_obj_set_pos(s_lbl_ring[slot], DISC_CX - d - 16, DISC_CY - d - 12);
+    lv_obj_set_pos(s_lbl_ring[slot], DISC_CX - d - 20, DISC_CY - d - 14);
     show_obj(s_lbl_ring[slot], true);
 }
 
@@ -1356,7 +1356,7 @@ static void recompute(void)
             float hdg = (a->track_deg < 0.0f) ? 0.0f : a->track_deg;
             float t = (hdg - s_up_deg) * ADSB_DEG2RAD;
             float st_ = sinf(t), ct = cosf(t);
-            static const float nose[3][2] = { { 0.0f, -12.0f }, { 7.0f, 8.0f }, { -7.0f, 8.0f } };
+            static const float nose[3][2] = { { 0.0f, -18.0f }, { 10.0f, 12.0f }, { -10.0f, 12.0f } };
             for (int k = 0; k < 3; k++) {
                 /* Clockwise screen rotation (y down): heading 90 = nose to the right. */
                 float rx = nose[k][0] * ct - nose[k][1] * st_;
@@ -1563,10 +1563,10 @@ static lv_obj_t *adsb_page_create(lv_obj_t *parent)
     lv_obj_add_event_cb(s_disc, disc_draw_cb, LV_EVENT_DRAW_MAIN_END, NULL);
 
     for (int i = 0; i < 4; i++) {
-        s_lbl_card[i] = mk_label(s_content, &lv_font_montserrat_22, 0xFFFFFF, "");
+        s_lbl_card[i] = mk_label(s_content, &lv_font_montserrat_28, 0xFFFFFF, "");
     }
     for (int i = 0; i < 3; i++) {
-        s_lbl_ring[i] = mk_label(s_content, &lv_font_montserrat_18, COL_RING_LBL, "");
+        s_lbl_ring[i] = mk_label(s_content, &lv_font_montserrat_22, COL_RING_LBL, "");
     }
 
     /* A tag is a bordered scrim box with its two lines inside, so the declutter
@@ -1580,10 +1580,10 @@ static lv_obj_t *adsb_page_create(lv_obj_t *parent)
         lv_obj_set_style_border_opa(s_tag_box[i], LV_OPA_60, 0);
         lv_obj_set_style_radius(s_tag_box[i], 3, 0);
         lv_obj_clear_flag(s_tag_box[i], LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
-        s_tag_l1[i] = mk_label(s_tag_box[i], &lv_font_montserrat_20, 0xFFFFFF, "");
-        lv_obj_set_pos(s_tag_l1[i], 8, 1);
-        s_tag_l2[i] = mk_label(s_tag_box[i], &lv_font_montserrat_18, 0x808080, "");
-        lv_obj_set_pos(s_tag_l2[i], 8, 25);
+        s_tag_l1[i] = mk_label(s_tag_box[i], &lv_font_montserrat_24, 0xFFFFFF, "");
+        lv_obj_set_pos(s_tag_l1[i], 8, 2);
+        s_tag_l2[i] = mk_label(s_tag_box[i], &lv_font_montserrat_22, 0x808080, "");
+        lv_obj_set_pos(s_tag_l2[i], 8, 31);
         show_obj(s_tag_box[i], false);
     }
 
@@ -1690,13 +1690,13 @@ static lv_obj_t *adsb_page_create(lv_obj_t *parent)
 
     /* Scrims LAST so they sit over the disc and the board. */
     s_hdr = mk_scrim(s_root, 0, HDR_H);
-    s_lbl_title = mk_label(s_hdr, &lv_font_montserrat_22, 0xFFFFFF, "ADS-B");
+    s_lbl_title = mk_label(s_hdr, &lv_font_montserrat_26, 0xFFFFFF, "ADS-B");
     lv_obj_align(s_lbl_title, LV_ALIGN_LEFT_MID, 20, 0);
-    s_lbl_mount = mk_label(s_hdr, &lv_font_montserrat_18, 0x808080, "");
+    s_lbl_mount = mk_label(s_hdr, &lv_font_montserrat_22, 0x808080, "");
     lv_obj_align(s_lbl_mount, LV_ALIGN_RIGHT_MID, -20, 0);
 
     s_strip = mk_scrim(s_root, SCREEN_SIZE - STRIP_H, STRIP_H);
-    s_lbl_strip = mk_label(s_strip, &lv_font_montserrat_22, 0x808080, "");
+    s_lbl_strip = mk_label(s_strip, &lv_font_montserrat_26, 0x808080, "");
     lv_obj_align(s_lbl_strip, LV_ALIGN_LEFT_MID, 20, 0);
 
     /* Empty state needs its own opaque backdrop (nina_empty_state is 80%
