@@ -1375,14 +1375,15 @@ static void recompute(void)
         s_mark_n++;
 
         if (a->rank >= 0 && a->rank < ADSB_TAG_COUNT && tags_done < ADSB_TAG_COUNT) {
-            char *l2 = pend[pend_n].l2;
+            /* Written straight into the slot: cppcheck flags an alias pointer
+             * taken before the array element is first assigned. */
             if (s_mode == MODE_SKY) {
-                snprintf(l2, sizeof(pend[0].l2), "%03d%c  %02d\xc2\xb0",
+                snprintf(pend[pend_n].l2, sizeof(pend[pend_n].l2), "%03d%c  %02d\xc2\xb0",
                          alt_hundreds(a), vrate_char(a->vrate_fpm), (int)(a->el_deg + 0.5f));
             } else {
                 /* Scope: altitude over range — heading is already in the
                  * rotated triangle, so repeating it in the tag is noise. */
-                snprintf(l2, sizeof(pend[0].l2), "%03d  %4.1f",
+                snprintf(pend[pend_n].l2, sizeof(pend[pend_n].l2), "%03d  %4.1f",
                          alt_hundreds(a), (double)a->dist_nm);
             }
             pend[pend_n].slot = a->rank;
