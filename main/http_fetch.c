@@ -570,11 +570,13 @@ esp_err_t http_fetch_binary(const char *url, const http_fetch_binary_opts_t *opt
     /* Reuse the text path's header applier so the CR/LF injection check, the
      * "Name: value" split, and the reused-handle re-arming (method back to GET,
      * stale Content-Type dropped) behave identically for binary fetches. Only
-     * extra_header is meaningful here; every other field stays NULL. The scrub
-     * first removes whatever extra header the parked handle still carries, so
-     * this fetch cannot send a previous request's API key to a different host. */
+     * extra_header and user_agent are meaningful here; every other field stays
+     * NULL. The scrub first removes whatever extra header the parked handle
+     * still carries, so this fetch cannot send a previous request's API key to
+     * a different host. */
     scrub_stale_extra_header(client, conn, o.extra_header);
-    http_fetch_opts_t hopts = { .extra_header = o.extra_header };
+    http_fetch_opts_t hopts = { .extra_header = o.extra_header,
+                                .user_agent   = o.user_agent };
     apply_headers(client, &hopts);
 
     int status = 0;

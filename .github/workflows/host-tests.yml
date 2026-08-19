@@ -38,7 +38,8 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install cppcheck
-        run: sudo apt-get update && sudo apt-get install -y cppcheck
+        timeout-minutes: 5
+        run: sudo apt-get install -y --no-install-recommends cppcheck || (sudo apt-get update && sudo apt-get install -y --no-install-recommends cppcheck)
 
       - name: Run cppcheck against firmware sources
         run: |

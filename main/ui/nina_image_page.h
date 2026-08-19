@@ -124,7 +124,7 @@ bool     image_page_config_enabled(const app_config_t *c, image_src_t src);
 bool     image_page_config_overlay(const app_config_t *c, image_src_t src);
 bool     image_page_config_crop(const app_config_t *c, image_src_t src);
 uint32_t image_page_interval_ms(image_page_t *p);            /* live config, clamped; Moon: 3000 while the clock is invalid */
-void     image_page_label(image_page_t *p, char *out, size_t sz);   /* region name / "Moon" / band label / "Custom" / "Radar <token>" / "Clouds" */
+void     image_page_label(image_page_t *p, char *out, size_t sz);   /* region name / "Moon" / band label / "Custom" / "Radar <token>" / "Cloud Cover <channel>" */
 /* Radar site token for THIS fetch, resolved fresh every time and never
  * persisted (a poll task must not write config): an explicit radar_token wins,
  * else the WSR-88D site nearest the configured weather location, else the

@@ -29,11 +29,12 @@
  *   PAGE_IDX_JSON           (9)  = JSON Display page
  *   PAGE_IDX_HA             (10) = Home Assistant page
  *   PAGE_IDX_OCTOPRINT      (11) = OctoPrint 3D Printer page
- *   PAGE_IDX_SUMMARY        (12) = Summary page
- *   NINA_PAGE_OFFSET        (13) .. NINA_PAGE_OFFSET + page_count - 1 = NINA instance pages
- *   page_count + NINA_PAGE_OFFSET     = settings page  (16)
- *   page_count + NINA_PAGE_OFFSET + 1 = sysinfo page   (17)
- *   total_page_count = page_count + EXTRA_PAGES        (18)
+ *   PAGE_IDX_ADSB           (12) = ADS-B aircraft page
+ *   PAGE_IDX_SUMMARY        (13) = Summary page
+ *   NINA_PAGE_OFFSET        (14) .. NINA_PAGE_OFFSET + page_count - 1 = NINA instance pages
+ *   page_count + NINA_PAGE_OFFSET     = settings page  (17)
+ *   page_count + NINA_PAGE_OFFSET + 1 = sysinfo page   (18)
+ *   total_page_count = page_count + EXTRA_PAGES        (19)
  *
  * These are INTERNAL absolute indices and may shift when an optional page is
  * inserted; nothing persists them. The stable external identity is the
@@ -56,9 +57,10 @@
 #define PAGE_IDX_JSON            9
 #define PAGE_IDX_HA              10
 #define PAGE_IDX_OCTOPRINT       11
-#define PAGE_IDX_SUMMARY         12
-#define NINA_PAGE_OFFSET         13  /* first NINA page index */
-#define EXTRA_PAGES              15  /* allsky+spotify+clock+6 image+json+ha+octoprint+summary+settings+sysinfo */
+#define PAGE_IDX_ADSB            12
+#define PAGE_IDX_SUMMARY         13
+#define NINA_PAGE_OFFSET         14  /* first NINA page index */
+#define EXTRA_PAGES              16  /* allsky+spotify+clock+6 image+json+ha+octoprint+adsb+summary+settings+sysinfo */
 
 /* Image page helpers: contiguous band [PAGE_IDX_IMG_GOES, PAGE_IDX_IMG_CLOUDS]. */
 #define PAGE_IDX_IS_IMAGE(i)     ((i) >= PAGE_IDX_IMG_GOES && (i) <= PAGE_IDX_IMG_CLOUDS)

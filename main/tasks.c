@@ -13,6 +13,7 @@
 #include "json_client.h"
 #include "ha_client.h"
 #include "octoprint_client.h"
+#include "adsb_client.h"
 #include "spotify_auth.h"
 #include "spotify_client.h"
 #include "app_config.h"
@@ -25,6 +26,7 @@
 #include "ui/nina_json.h"
 #include "ui/nina_ha.h"
 #include "ui/nina_octoprint.h"
+#include "ui/nina_adsb.h"
 #include "ui/nina_spotify.h"
 #include "ui/nina_graph_overlay.h"
 #include "ui/nina_info_overlay.h"
@@ -410,6 +412,8 @@ void input_task(void *arg) {
                     && !app_config_get()->ha_enabled) continue;
                 if (candidate == PAGE_IDX_OCTOPRINT && !nina_dashboard_is_octoprint_page()
                     && !app_config_get()->octoprint_enabled) continue;
+                if (candidate == PAGE_IDX_ADSB && !nina_dashboard_is_adsb_page()
+                    && !app_config_get()->flights_enabled) continue;
                 if (PAGE_IDX_IS_IMAGE(candidate) && !nina_dashboard_page_is_available(candidate)) continue;
                 new_page = candidate;
                 break;
@@ -533,7 +537,12 @@ void instance_poll_task(void *arg) {
             /* Non-NINA page active — heartbeat-only for liveness detection.
              * WebSockets are already torn down by data_update_task.
              * Full/background polling is skipped to free resources. */
-            if (now_ms - ctx->last_heartbeat_ms >= (int64_t)app_config_get()->idle_poll_interval_s * 1000) {
+            /* The ADS-B page draws each rig's mount pointing, so while it is
+             * visible the idle tier ticks at the 10 s background rate instead
+             * of idle_poll_interval_s (30 s default) to keep that fresh. */
+            int64_t idle_ms = adsb_page_active ? (int64_t)HEARTBEAT_INTERVAL_MS
+                                               : (int64_t)app_config_get()->idle_poll_interval_s * 1000;
+            if (now_ms - ctx->last_heartbeat_ms >= idle_ms) {
                 nina_client_poll_heartbeat(url, ctx->client, idx);
                 if (nina_connection_is_connected(idx))
                     ctx->client->last_successful_poll_ms = now_ms;
@@ -1617,6 +1626,11 @@ boot_update_check_done:
     octoprint_client_init(&octoprint_data);
     octoprint_ensure_task_running();
 
+    /* ADS-B poll task (pinned to Core 0, networking). adsb_ensure_task_running()
+     * does its own init and its own flights_enabled check, so this one call
+     * covers both boot and the runtime enable from the web handler. */
+    adsb_ensure_task_running();
+
     /* Image pages (GOES / Moon / Solar / Custom). Mutexes for all four, a
      * PSRAM poller for each source enabled in config; disabled sources spawn
      * lazily on the first enable/entry (image_page_ensure_task_running). */
@@ -1744,6 +1758,7 @@ main_loop:
         bool on_json = nina_dashboard_is_json_page();
         bool on_ha = nina_dashboard_is_ha_page();
         bool on_octoprint = nina_dashboard_is_octoprint_page();
+        bool on_adsb = nina_dashboard_is_adsb_page();
         bool on_sysinfo = nina_dashboard_is_sysinfo_page();
         bool on_settings = nina_dashboard_is_settings_page();
         bool on_summary = nina_dashboard_is_summary_page();
@@ -1764,7 +1779,8 @@ main_loop:
          *   PAGE_IDX_JSON          (9)                  = JSON Display page
          *   PAGE_IDX_HA            (10)                 = Home Assistant page
          *   PAGE_IDX_OCTOPRINT     (11)                 = OctoPrint 3D Printer page
-         *   PAGE_IDX_SUMMARY       (12)                 = summary page
+         *   PAGE_IDX_ADSB          (12)                 = ADS-B aircraft page
+         *   PAGE_IDX_SUMMARY       (13)                 = summary page
          *   NINA_PAGE_OFFSET .. NINA_PAGE_OFFSET+pc-1   = NINA instance pages
          *   SETTINGS_PAGE_IDX(pc)                       = settings page
          *   SYSINFO_PAGE_IDX(pc)                        = sysinfo page
@@ -2092,6 +2108,14 @@ main_loop:
                 }
             }
 
+            /* Immediate ADS-B render with cached data */
+            if (on_adsb) {
+                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                    nina_adsb_update();
+                    bsp_display_unlock();
+                }
+            }
+
             /* Immediate OctoPrint render with cached data.
              * octoprint_page_update takes the display lock itself (client lock
              * outside, display lock inside) so the image rescale runs outside
@@ -2212,6 +2236,20 @@ main_loop:
                 bool octo_loaded = (octoprint_data.image_status != OCTO_IMG_PENDING);
                 octoprint_client_unlock(&octoprint_data);
                 if (octo_loaded) nav_arbiter_notify_content_ready(PAGE_IDX_OCTOPRINT);
+            }
+        } else if (on_adsb) {
+            /* ADS-B page — one LVGL lock section. nina_adsb_update() takes the
+             * adsb_client mutex (pointer-swap publication, never held across a
+             * parse) and the per-instance NINA client lock, both as LEAF locks
+             * with a bounded timed acquire that skips on timeout. That is the
+             * one documented exception to "client lock outside, display lock
+             * inside": nothing here can block the display lock indefinitely, and
+             * the same call already runs from the LVGL touch handler on a drag,
+             * where the display lock is held by LVGL itself and cannot be
+             * released first. */
+            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                nina_adsb_update();
+                bsp_display_unlock();
             }
         } else if (on_image) {
             /* Image page — repaint if the poller committed a newer frame (the

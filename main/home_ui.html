@@ -267,6 +267,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
    <a class="nav-tab" href="/config#image-radar">Radar</a>
    <a class="nav-tab" href="/config#image-clouds">Cloud Cover</a>
    <a class="nav-tab" href="/config#octoprint">OctoPrint</a>
+   <a class="nav-tab" href="/config#adsb">ADS-B</a>
   </div>
   <div class="tab-group" data-section="device">
    <a class="nav-tab" href="/config#display">Display</a>
@@ -482,7 +483,7 @@ var SUBS  = { summary: 'All computers', sysinfo: 'Device status', allsky: 'Sky c
               ha: 'Entity tiles', 'image.goes': 'Satellite view', 'image.moon': 'Moon phase',
               'image.solar': 'Solar view', 'image.custom': 'Your image',
               'image.radar': 'Weather radar', 'image.clouds': 'Satellite cloud cover',
-              octoprint: '3D printer' };
+              octoprint: '3D printer', adsb: 'Aircraft overhead' };
 function iconFor(slug) {
  if (slug.indexOf('nina.') === 0) return 'i-star';
  if (slug.indexOf('image') === 0) return 'i-image';

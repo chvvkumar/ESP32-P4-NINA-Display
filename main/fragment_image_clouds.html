@@ -1,6 +1,6 @@
         <div class="card">
           <div class="card-title"><span class="card-title-label">Cloud Cover <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
-          <div class="help-popover"><div class="help-popover-title">Cloud Cover page</div><p>Live satellite picture of cloud cover around your location, from NOAA GOES imagery served by NASA. Day: true colour. Night: infrared clouds over city lights. Updates every 10 minutes at the source; the newest frame is usually 30-45 minutes old. Location comes from the System tab's location settings.</p><p>Coverage is the Americas and the surrounding oceans (GOES East and West).</p></div>
+          <div class="help-popover"><div class="help-popover-title">Cloud Cover page</div><p>Live satellite picture of cloud cover around your location, from NOAA GOES imagery served by NASA. Pick the channel below: natural colour for daytime, infrared for cloud at night. Updates every 10 minutes at the source; the newest frame is usually 30-45 minutes old. Location comes from the System tab's location settings.</p><p>Coverage is the Americas and the surrounding oceans (GOES East and West).</p></div>
           <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
             <span class="toggle-label">Enable Cloud Cover page</span>
             <label class="toggle"><input type="checkbox" id="clouds_enabled" onchange="updateImagePageEnabledUI('image-clouds');applyImagePage('image-clouds');checkDirty()"><span class="toggle-track"></span></label>
@@ -12,6 +12,15 @@
               <label class="toggle"><input type="checkbox" id="clouds_show_overlay" onchange="applyImagePage('image-clouds');checkDirty()"><span class="toggle-track"></span></label>
             </div>
             <div class="field-hint">Satellite name and picture time overlay on the display</div>
+            <div class="field" style="margin-top:16px">
+              <label class="field-label">Satellite channel</label>
+              <select class="input" id="clouds_channel" onchange="applyImagePage('image-clouds');checkDirty()">
+                <option value="0" selected>GeoColor - natural colour, daytime</option>
+                <option value="1">Clean infrared - cloud tops, day and night</option>
+                <option value="2">Air mass - colour-coded temperature and moisture</option>
+              </select>
+              <div class="field-hint">Which satellite picture to show. GeoColor looks like the view from space but only shows cloud properly in daylight. Clean infrared shows cloud tops around the clock, so it is the one to use at night. Air mass colours air by temperature and moisture; it updates less often than the other two.</div>
+            </div>
             <div class="field" style="margin-top:16px">
               <label class="field-label">Area</label>
               <select class="input" id="clouds_zoom" onchange="applyImagePage('image-clouds');checkDirty()">

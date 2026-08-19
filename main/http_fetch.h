@@ -205,7 +205,14 @@ typedef struct {
                                  *  ':' and applied as one request header -- same
                                  *  semantics as http_fetch_opts_t.extra_header. Needed
                                  *  by image sources behind an API-key header (OctoPrint
-                                 *  gcode thumbnails). NULL = no extra header. */
+                                 *  gcode thumbnails, a user-supplied Custom URL header).
+                                 *  NULL = no extra header. */
+    const char *user_agent;    /**< optional: sets the "User-Agent" header, same as
+                                 *  http_fetch_opts_t.user_agent. Separate from
+                                 *  @ref extra_header so a caller that must identify
+                                 *  itself (NWS/IEM reject anonymous clients) can still
+                                 *  carry a credential header. NULL = esp_http_client's
+                                 *  default UA. */
     http_fetch_conn_t *conn;   /**< optional: NULL = one-shot client (no reuse). Same
                                  *  semantics as http_fetch_opts_t.conn, including
                                  *  drained-open parking: a fully read body leaves the

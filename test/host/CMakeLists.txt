@@ -257,3 +257,17 @@ add_nina_host_test(test_clouds_wms
     SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/test_clouds_wms.c
 )
+
+# ---------------------------------------------------------------------------
+# test_adsb_geom -- pure geometry for the ADS-B page (main/adsb_geom.h):
+# curved-earth elevation, haversine distance + initial bearing, angular
+# separation on the sky, and the Sky Dome (truncated stereographic) and Radar
+# Scope (linear) screen projections. Header-only, only <math.h>, no fixtures.
+# The JSON parser in main/adsb_client.c is NOT covered: it pulls in tasks.h ->
+# freertos/event_groups.h (no shim) plus poll_task/http_fetch, so it is
+# verified on device instead.
+# ---------------------------------------------------------------------------
+add_nina_host_test(test_adsb_geom
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_adsb_geom.c
+)

@@ -96,7 +96,9 @@ esp_err_t json_config_get_handler(httpd_req_t *req)
 
     cJSON_AddBoolToObject(root,   "json_enabled",           cfg->json_enabled);
     cJSON_AddStringToObject(root, "json_url",               cfg->json_url);
-    cJSON_AddStringToObject(root, "json_auth_header",       cfg->json_auth_header);
+    /* Redacted to the "********" sentinel (same as GET /api/config); the POST
+     * handler below preserves the stored header when the sentinel comes back. */
+    cJSON_AddStringToObject(root, "json_auth_header",       cfg->json_auth_header[0] != '\0' ? "********" : "");
     cJSON_AddNumberToObject(root, "json_update_interval_s", cfg->json_update_interval_s);
     cJSON_AddStringToObject(root, "json_tiles_config",      app_config_get_json_tiles());
 
@@ -162,6 +164,15 @@ esp_err_t json_config_post_handler(httpd_req_t *req)
 
     JSON_TO_BOOL(root,   "json_enabled",           cfg->json_enabled);
     JSON_TO_STRING(root, "json_url",               cfg->json_url);
+    /* GET hands out "********" in place of the header; a round-tripped sentinel
+     * means "keep the stored header". Drop the key so the key-present-gated copy
+     * below leaves the snapshot's value alone (same as strip_masked_secrets()). */
+    {
+        cJSON *ah = cJSON_GetObjectItem(root, "json_auth_header");
+        if (cJSON_IsString(ah) && strcmp(ah->valuestring, "********") == 0) {
+            cJSON_DeleteItemFromObject(root, "json_auth_header");
+        }
+    }
     JSON_TO_STRING(root, "json_auth_header",       cfg->json_auth_header);
     JSON_TO_INT(root,    "json_update_interval_s", cfg->json_update_interval_s);
 
@@ -242,7 +253,10 @@ esp_err_t json_proxy_get_handler(httpd_req_t *req)
     hlen = httpd_req_get_hdr_value_len(req, "X-JSON-AUTH");
     if (hlen > 0 && hlen < sizeof(auth_header)) {
         char aval[sizeof(auth_header)];
-        if (httpd_req_get_hdr_value_str(req, "X-JSON-AUTH", aval, sizeof(aval)) == ESP_OK) {
+        /* The form field shows the "********" sentinel for a stored header; that
+         * is not a header, so keep the saved value in that case. */
+        if (httpd_req_get_hdr_value_str(req, "X-JSON-AUTH", aval, sizeof(aval)) == ESP_OK &&
+            strcmp(aval, "********") != 0) {
             strlcpy(auth_header, aval, sizeof(auth_header));
         }
     }

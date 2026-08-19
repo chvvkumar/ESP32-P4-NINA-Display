@@ -67,6 +67,7 @@ static const page_ref_entry_t s_pages[] = {
     /* id 26 */ { PAGE_REF_OCTOPRINT,        "octoprint",              "OctoPrint",        PAGE_REF_KIND_PAGE,         PAGE_REF_OCTOPRINT,    true,  "Dashboards", PAGE_IDX_OCTOPRINT                     },
     /* id 27 */ { PAGE_REF_RADAR,     "image.radar",  "Weather Radar",  PAGE_REF_KIND_IMAGE_SOURCE, PAGE_REF_RADAR,      true, "Image", PAGE_IDX_IMG_RADAR  },
     /* id 28 */ { PAGE_REF_CLOUDS,    "image.clouds", "Cloud Cover",       PAGE_REF_KIND_IMAGE_SOURCE, PAGE_REF_CLOUDS,     true, "Image", PAGE_IDX_IMG_CLOUDS },
+    /* id 29 */ { PAGE_REF_ADSB,             "adsb",                   "ADS-B",            PAGE_REF_KIND_PAGE,         PAGE_REF_ADSB,         true,  "Dashboards", PAGE_IDX_ADSB                          },
 };
 
 int page_ref_count(void)
@@ -135,6 +136,9 @@ bool page_ref_is_available(page_ref_t id)
         /* Same: the box is centred on the weather location, and (0,0) is still a
          * valid (if empty) box, so the page always has a target. */
         case PAGE_REF_CLOUDS:     avail = c->clouds_enabled; break;
+        /* Same as the image pages: the receiver URL is checked by the client,
+         * not here, so an enabled page is a valid stop even before it polls. */
+        case PAGE_REF_ADSB:       avail = c->flights_enabled; break;
         case PAGE_REF_SETTINGS:           /* settings: never a slideshow/nav-list target */
         case PAGE_REF_OVL_GRAPH:          /* overlays: not directly navigable             */
         case PAGE_REF_OVL_INFO_CAMERA:

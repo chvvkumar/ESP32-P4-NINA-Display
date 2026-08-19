@@ -10,6 +10,7 @@
 #include "nina_client.h"
 #include "nina_client_internal.h"
 #include "nina_api_fetchers.h"
+#include "adsb_client.h"
 #include "nina_sequence.h"
 #include "nina_websocket.h"
 #include "nina_connection.h"
@@ -25,6 +26,7 @@
 #include "cJSON.h"
 #include <string.h>
 #include <time.h>
+#include <math.h>
 #include "perf_monitor.h"
 
 static const char *TAG = "nina_client";
@@ -43,6 +45,67 @@ typedef struct {
 
 /* One slot per poll task + one spare for safety */
 static poll_ctx_slot_t s_poll_ctx_registry[MAX_NINA_INSTANCES + 1];
+
+// =============================================================================
+// Per-instance client registry (mount pointing consumers)
+// =============================================================================
+// The nina_client_t instances are owned by data_update_task's PSRAM array, so
+// nina_client_get_pointings() has no other way to reach them. Every poll entry
+// point already receives (instance, data), so each poll self-registers its
+// pointer rather than requiring an init call from tasks.c.
+static nina_client_t *s_clients[MAX_NINA_INSTANCES];
+
+static void nina_client_register(int instance, nina_client_t *data) {
+    if (instance >= 0 && instance < MAX_NINA_INSTANCES) {
+        s_clients[instance] = data;
+    }
+}
+
+int nina_client_get_pointings(nina_pointing_t *out, int max) {
+    if (!out || max <= 0) return 0;
+
+    int n = 0;
+    for (int i = 0; i < MAX_NINA_INSTANCES && n < max; i++) {
+        nina_client_t *c = s_clients[i];
+        if (!c || nina_connection_get_state(i) != NINA_CONN_CONNECTED) continue;
+
+        /* Short hold: copy out, then release. This is the outer lock in the
+         * documented ordering (client lock outside, LVGL inside) and nothing
+         * below touches LVGL, so no lock is held on return. */
+        if (!nina_client_lock(c, 10)) continue;
+        bool  valid = c->mount_pointing_valid;
+        float alt   = c->mount_alt_deg;
+        float az    = c->mount_az_deg;
+        float elev  = c->site_elev_m;
+        int   xs    = c->cam_x_size;
+        int   ys    = c->cam_y_size;
+        float px_um = c->cam_pixel_size_um;
+        float fl_mm = c->focal_length_mm;
+        nina_client_unlock(c);
+
+        if (!valid) continue;
+
+        /* Diagonal FOV: sensor diagonal (mm) / focal length (mm) -> radians.
+         * All single-precision: the P4 FPU has no double support. */
+        float fov_deg = 1.0f;
+        if (xs > 0 && ys > 0 && px_um > 0.0f && fl_mm > 0.0f) {
+            float w_mm = (float)xs * px_um / 1000.0f;
+            float h_mm = (float)ys * px_um / 1000.0f;
+            fov_deg = sqrtf(w_mm * w_mm + h_mm * h_mm) / fl_mm * 57.29577951f;
+        }
+
+        out[n].valid       = true;
+        out[n].alt_deg     = alt;
+        out[n].az_deg      = az;
+        out[n].fov_deg     = fov_deg;
+        out[n].site_elev_m = elev;
+        out[n].instance    = (uint8_t)i;
+        n++;
+    }
+
+    ESP_LOGD(TAG, "Pointings: %d online rig(s) with valid pointing", n);
+    return n;
+}
 
 void http_poll_ctx_set(http_poll_ctx_t *ctx) {
     TaskHandle_t self = xTaskGetCurrentTaskHandle();
@@ -487,9 +550,14 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
     }
 
     // --- Connection check (both bundled and legacy paths) ---
+    nina_client_register(instance, data);
     nina_conn_state_t conn_state = nina_connection_report_poll(instance, data->connected);
     if (nina_client_lock(data, 100)) {
         data->connected = (conn_state == NINA_CONN_CONNECTED);
+        if (!data->connected) {
+            /* An offline rig must stop advertising its last known pointing. */
+            data->mount_pointing_valid = false;
+        }
         nina_client_unlock(data);
     }
 
@@ -665,10 +733,21 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
 
 void nina_client_poll_heartbeat(const char *base_url, nina_client_t *data, int instance) {
     fetch_camera_info_robust(base_url, data);
+    /* The heartbeat is camera-only, so mount_pointing_valid would never be
+     * set while a non-NINA page is showing. The ADS-B Sky Dome is the one
+     * consumer that needs it then, so fetch the mount only in that case. */
+    if (data->connected && adsb_page_active) {
+        fetch_mount_robust(base_url, data);
+    }
 
+    nina_client_register(instance, data);
     nina_conn_state_t conn_state = nina_connection_report_poll(instance, data->connected);
     if (nina_client_lock(data, 100)) {
         data->connected = (conn_state == NINA_CONN_CONNECTED);
+        if (!data->connected) {
+            /* An offline rig must stop advertising its last known pointing. */
+            data->mount_pointing_valid = false;
+        }
         nina_client_unlock(data);
     }
 
@@ -710,9 +789,14 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
         fetch_camera_info_robust(base_url, data);
     }
 
+    nina_client_register(instance, data);
     nina_conn_state_t conn_state = nina_connection_report_poll(instance, data->connected);
     if (nina_client_lock(data, 100)) {
         data->connected = (conn_state == NINA_CONN_CONNECTED);
+        if (!data->connected) {
+            /* An offline rig must stop advertising its last known pointing. */
+            data->mount_pointing_valid = false;
+        }
         nina_client_unlock(data);
     }
 
