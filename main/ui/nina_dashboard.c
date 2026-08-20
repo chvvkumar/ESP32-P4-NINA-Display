@@ -177,7 +177,7 @@ static const page_ops_t s_clock_page_ops = {
 static lv_obj_t *img_obj[IMG_SRC_COUNT];
 static lv_obj_t *img_created[IMG_SRC_COUNT];
 
-/* Custom URL is navigable only with a URL configured: the registry says so
+/* Custom Image is navigable only with a URL configured: the registry says so
  * (page_ref_is_available) and the dashboard/swipe/BOOT/arbiter must agree, or
  * a swipe lands on a page that toasts "Failed to load image" every interval. */
 static bool img_custom_available(void) {
@@ -343,7 +343,7 @@ lv_obj_t *create_value_label(lv_obj_t *parent) {
  *   PAGE_IDX_IMG_GOES      (3)                  = Image page: GOES
  *   PAGE_IDX_IMG_MOON      (4)                  = Image page: Moon
  *   PAGE_IDX_IMG_SOLAR     (5)                  = Image page: Solar
- *   PAGE_IDX_IMG_CUSTOM    (6)                  = Image page: Custom URL
+ *   PAGE_IDX_IMG_CUSTOM    (6)                  = Image page: Custom Image
  *   PAGE_IDX_IMG_RADAR     (7)                  = Image page: Weather Radar
  *   PAGE_IDX_IMG_CLOUDS    (8)                  = Image page: Clouds (GOES GeoColor)
  *   PAGE_IDX_JSON          (9)                  = JSON Display page
@@ -392,7 +392,7 @@ static bool ops_get_obj(int idx, lv_obj_t **obj_out) {
     const page_ops_t *ops = page_registry_get_ops(rid);
     if (!ops) return false;
     /* Optional availability veto (page_registry.h): a page may exist but be
-     * un-navigable right now (Custom URL with no URL configured). */
+     * un-navigable right now (Custom Image with no URL configured). */
     if (ops->is_available && !ops->is_available()) {
         *obj_out = NULL;
         return true;

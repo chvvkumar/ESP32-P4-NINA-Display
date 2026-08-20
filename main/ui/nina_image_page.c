@@ -456,7 +456,7 @@ void image_page_render_frame(image_page_t *p)
      * other frame read here), and when a reason is present render it as the
      * caption text and bail. A successful fetch clears error_msg, so the normal
      * swap path below runs and overwrites the caption — no stale error. Scoped to
-     * the sources whose failures are user-visible (Custom URL, Radar whose site
+     * the sources whose failures are user-visible (Custom Image, Radar whose site
      * token can be mistyped into a 404, Clouds behind a GIBS outage), so
      * GOES/Solar/Moon are visually unchanged. */
     if (image_page_shows_error(p->src) && p->frame.error_msg[0] != '\0') {

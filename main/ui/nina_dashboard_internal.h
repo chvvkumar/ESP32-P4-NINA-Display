@@ -23,7 +23,7 @@
  *   PAGE_IDX_IMG_GOES       (3)  = GOES Satellite image page
  *   PAGE_IDX_IMG_MOON       (4)  = Moon image page
  *   PAGE_IDX_IMG_SOLAR      (5)  = Solar image page
- *   PAGE_IDX_IMG_CUSTOM     (6)  = Custom URL image page
+ *   PAGE_IDX_IMG_CUSTOM     (6)  = Custom Image page
  *   PAGE_IDX_IMG_RADAR      (7)  = Weather Radar image page
  *   PAGE_IDX_IMG_CLOUDS     (8)  = Clouds (GOES GeoColor satellite) image page
  *   PAGE_IDX_JSON           (9)  = JSON Display page
