@@ -456,7 +456,7 @@ esp_err_t config_get_handler(httpd_req_t *req)
     /* weather_api_key: same shape as octoprint_api_key (SETTINGS_TABLE row,
      * is_sensitive in s_backup_fields, so the POST sentinel is stripped). */
     REDACT_STRING_FIELD(weather_api_key);
-    /* custom_image_header: an optional "Name: value" header for the Custom URL
+    /* custom_image_header: an optional "Name: value" header for the Custom Image
      * image fetch, so it may carry an API key or bearer token. Same shape as
      * the two above (SETTINGS_TABLE row, is_sensitive in s_backup_fields, so
      * the POST sentinel is stripped and the stored value survives). */
@@ -645,9 +645,9 @@ static const backup_field_t s_backup_fields[] = {
     {"solar_show_overlay",         "Solar Show Overlay",   "Solar", false, false},
     {"solar_crop",                 "Solar Crop/Fill",      "Solar", false, false},
     {"solar_update_interval_s",    "Solar Update Interval","Solar", false, false},
-    {"custom_enabled",             "Custom Page Enabled",  "Custom URL", false, false},
-    {"custom_show_overlay",        "Custom Show Overlay",  "Custom URL", false, false},
-    {"custom_crop",                "Custom Crop/Fill",     "Custom URL", false, false},
+    {"custom_enabled",             "Custom Page Enabled",  "Custom Image", false, false},
+    {"custom_show_overlay",        "Custom Show Overlay",  "Custom Image", false, false},
+    {"custom_crop",                "Custom Crop/Fill",     "Custom Image", false, false},
     /* Weather Radar page (v63, plus radar_dark_mode at v64 and radar_map_style at v65).
      * All eight are SETTINGS_TABLE rows, so
      * serialize_config_to_json() emits them and parse_config_from_json() reads
@@ -684,11 +684,13 @@ static const backup_field_t s_backup_fields[] = {
     {"flights_up_azimuth",         "ADS-B Up Azimuth",     "ADS-B", false, false},
     {"flights_mode",               "ADS-B View",           "ADS-B", false, false},
     {"flights_route_lookup",       "ADS-B Route Lookup",   "ADS-B", false, false},   /* v69 */
+    {"flights_label_max",          "ADS-B Scope Labels",   "ADS-B", false, false},   /* v70 */
+    {"flights_icon_style",         "ADS-B Icon Style",     "ADS-B", false, false},   /* v71 */
     {"goes_region",                "GOES Region",          "GOES", false, false},
     {"goes_update_interval_s",     "GOES Update Interval", "GOES", false, false},
-    {"custom_image_url",           "Custom Image URL",     "Custom URL", false, false},
-    {"custom_orientation",         "Custom Orientation",   "Custom URL", false, false},
-    {"custom_update_interval_s",   "Custom Update Interval","Custom URL", false, false},
+    {"custom_image_url",           "Custom Image URL",     "Custom Image", false, false},
+    {"custom_orientation",         "Custom Orientation",   "Custom Image", false, false},
+    {"custom_update_interval_s",   "Custom Update Interval","Custom Image", false, false},
     {"moon_bg_style",              "Moon Background Style", "Moon", false, false},
     {"moon_lat",                   "Moon Latitude",        "Moon", false, false},
     {"moon_lon",                   "Moon Longitude",       "Moon", false, false},
@@ -698,8 +700,8 @@ static const backup_field_t s_backup_fields[] = {
     {"goes_hflip",                 "GOES Flip Horizontal", "GOES", false, false},
     {"solar_vflip",                "Solar Flip Vertical",  "Solar", false, false},
     {"solar_hflip",                "Solar Flip Horizontal","Solar", false, false},
-    {"custom_vflip",               "Custom Flip Vertical", "Custom URL", false, false},
-    {"custom_hflip",               "Custom Flip Horizontal","Custom URL", false, false},
+    {"custom_vflip",               "Custom Flip Vertical", "Custom Image", false, false},
+    {"custom_hflip",               "Custom Flip Horizontal","Custom Image", false, false},
     {"moon_flip_u",                "Moon Flip U",          "Moon", false, false},
     {"moon_flip_v",                "Moon Flip V",          "Moon", false, false},
     {"moon_roll_offset",           "Moon Roll Offset",     "Moon", false, false},
@@ -738,10 +740,10 @@ static const backup_field_t s_backup_fields[] = {
      * change renames the device mid-session and is the diff a user most needs
      * to see. */
     {"weather_api_key",    "Weather API Key",    "Weather", true, false, true},
-    /* v67: the Custom URL image header may carry a key or bearer token, so it is
+    /* v67: the Custom Image header may carry a key or bearer token, so it is
      * sensitive+mask_preview like the other credentials here even though its
-     * category is the Custom URL page. */
-    {"custom_image_header","Custom Image Header","Custom URL", true, false, true},
+     * category is the Custom Image page. */
+    {"custom_image_header","Custom Image Header","Custom Image", true, false, true},
     {"mqtt_username",      "MQTT Username",      "MQTT",    true, false, true},
     {"mqtt_password",      "MQTT Password",      "MQTT",    true, false, true},
     {"mqtt_broker_url",    "MQTT Broker URL",    "MQTT",    true, false, true},
@@ -1098,7 +1100,7 @@ static cJSON *build_restore_preview(const cJSON *backup_root, const cJSON *curre
     bool restore_blocked = false;
 
     /* Track which categories have changes */
-    const char *categories[] = {"Display", "Behavior", "Nodes & Data", "System", "AllSky", "Spotify", "MQTT", "OctoPrint", "GOES", "Moon", "Solar", "Custom URL", "Radar", "Cloud Cover", "ADS-B"};
+    const char *categories[] = {"Display", "Behavior", "Nodes & Data", "System", "AllSky", "Spotify", "MQTT", "OctoPrint", "GOES", "Moon", "Solar", "Custom Image", "Radar", "Cloud Cover", "ADS-B"};
     int cat_counts[15] = {0};
     int num_categories = 15;
 

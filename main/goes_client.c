@@ -217,7 +217,7 @@ static esp_err_t fetch_image_into(const char *url, const char *label, image_fram
      * below rather than failing outright. The User-Agent is always sent: NWS
      * asks automated clients to identify themselves and Iowa Environmental
      * Mesonet blocks anonymous ones outright. extra_header stays free for the
-     * caller's optional credential line (the Custom URL page's user-supplied
+     * caller's optional credential line (the Custom Image page's user-supplied
      * "Name: value" header); NULL/empty means no extra header at all. */
     const http_fetch_binary_opts_t bopts = {
         .timeout_ms = GOES_HTTP_TIMEOUT_MS,

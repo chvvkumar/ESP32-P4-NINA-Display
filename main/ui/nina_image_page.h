@@ -3,7 +3,7 @@
 /**
  * @file nina_image_page.h
  * @brief Image page spine: ONE implementation, SIX instances (GOES, Moon,
- *        Solar, Custom URL, Weather Radar, Clouds). Each instance is a first-class page
+ *        Solar, Custom Image, Weather Radar, Clouds). Each instance is a first-class page
  *        with its own runtime index (PAGE_IDX_IMG_*), LVGL page, decoded frame,
  *        poller and gates. Rendering lives in ui/nina_image_page.c; the pollers
  *        live in image_page_poll.c and are built on the poll_task spine.
@@ -62,7 +62,7 @@ static inline bool image_src_is_animated(image_src_t s)
 }
 
 /* Sources whose fetch failure is rendered as the page caption (user-addressed
- * or outage-prone): Custom URL, Radar (site token) and Clouds (GIBS). */
+ * or outage-prone): Custom Image, Radar (site token) and Clouds (GIBS). */
 static inline bool image_page_shows_error(image_src_t s)
 {
     return s == IMG_SRC_CUSTOM || image_src_is_animated(s);

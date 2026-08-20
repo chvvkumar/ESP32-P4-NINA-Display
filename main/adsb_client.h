@@ -57,6 +57,7 @@ typedef struct {
     char     hex[8];
     char     flight[10];        /**< trimmed callsign, "" if none */
     char     type[6];           /**< readsb `t` */
+    char     cat[4];            /**< readsb `category` (A0-A7, B*, C*), "" if absent */
     float    lat, lon;          /**< valid iff has_pos */
     float    alt_ft;            /**< alt_geom else alt_baro; ground = 0 */
     bool     alt_is_geom;
@@ -107,6 +108,12 @@ typedef struct {
     int       fail_count;
     bool      route_lookup_active; /**< mirrors flights_route_lookup so the UI can
                                      *  label "route unknown" vs "lookup off" */
+    float     msg_rate;         /**< receiver messages per second, from the delta
+                                  *  of aircraft.json's top-level `messages` counter
+                                  *  between consecutive successful polls. 0 until
+                                  *  two polls have been seen; resets on poller start
+                                  *  or when the counter goes backwards (receiver
+                                  *  restart). Unrounded: the UI formats it. */
 } adsb_data_t;
 
 /** Create the mutex and the PSRAM data block. Idempotent. */

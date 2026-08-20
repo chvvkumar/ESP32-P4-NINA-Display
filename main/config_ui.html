@@ -1040,7 +1040,7 @@
         <button class="tab-btn" data-tab="image-goes">GOES</button>
         <button class="tab-btn" data-tab="image-moon">Moon</button>
         <button class="tab-btn" data-tab="image-solar">Solar</button>
-        <button class="tab-btn" data-tab="image-custom">Custom URL</button>
+        <button class="tab-btn" data-tab="image-custom">Custom Image</button>
         <button class="tab-btn" data-tab="image-radar">Radar</button>
         <button class="tab-btn" data-tab="image-clouds">Cloud Cover</button>
         <button class="tab-btn" data-tab="octoprint">OctoPrint</button>
@@ -1869,6 +1869,10 @@
     let _currentTab=null;
     async function switchTab(name){
       _currentTab=name;
+      /* Keep the URL in step with the visible tab so a reload (or a copied
+         link) lands back here, not on whatever hash the page arrived with.
+         replaceState: no history entry per tab, no hashchange feedback loop. */
+      try{ if(location.hash!=='#'+name) history.replaceState(null,'','#'+name); }catch(e){}
       $$('.tab-panel').forEach(p=>p.classList.remove('active'));
       $$('.tab-btn').forEach(b=>b.classList.remove('active'));
       var panel=$('tab-'+name);
@@ -2457,7 +2461,18 @@
       var up=parseInt($('flights_up_azimuth').value,10);
       data.flights_up_azimuth=isNaN(up)?0:up;
       data.flights_mode=parseInt($('flights_mode').value,10)||0;
+      data.flights_icon_style=parseInt($('flights_icon_style').value,10)||0;
       data.flights_route_lookup=!!$('flights_route_lookup').checked;
+      /* Radar Scope label count: mode select + number box fold into one
+         0-64 value (0 = none, 64 = all, else up to N). */
+      var lm=$('flights_label_mode')?$('flights_label_mode').value:'all';
+      if(lm==='none') data.flights_label_max=0;
+      else if(lm==='max'){
+        var ln=parseInt($('flights_label_n')?$('flights_label_n').value:'',10);
+        if(isNaN(ln)||ln<1) ln=10;
+        if(ln>63) ln=63;
+        data.flights_label_max=ln;
+      } else data.flights_label_max=64;
     }
 
     function collectTab_display(data){
@@ -2655,6 +2670,9 @@
        There is no whole-form fallback: with no baseline we post only the
        explicitly touched keys. */
     const _touched=new Set();
+    /* Form snapshot at the last user edit; markTouched() diffs against it to
+       map edits to real config keys. null = re-seed from loadedConfig. */
+    var _prevSnap=null;
     function touchedPayload(data){
       var base=null;
       try{ if(loadedConfig) base=JSON.parse(loadedConfig); }catch(e){}
@@ -2924,8 +2942,17 @@
       if($('flights_min_el')) $('flights_min_el').value=data.flights_min_el!=null?data.flights_min_el:10;
       if($('flights_up_azimuth')) $('flights_up_azimuth').value=data.flights_up_azimuth!=null?data.flights_up_azimuth:0;
       if($('flights_mode')) $('flights_mode').value=String(data.flights_mode||0);
+      if($('flights_icon_style')) $('flights_icon_style').value=String(data.flights_icon_style||0);
       /* Default is on, so an absent key must read as checked, not unchecked. */
       if($('flights_route_lookup')) $('flights_route_lookup').checked=data.flights_route_lookup!=null?!!data.flights_route_lookup:true;
+      /* Default is 64 (all), so an absent key must read as "All aircraft". */
+      if($('flights_label_mode')){
+        var lmax=data.flights_label_max!=null?parseInt(data.flights_label_max,10):64;
+        if(isNaN(lmax)) lmax=64;
+        $('flights_label_mode').value=(lmax<=0)?'none':(lmax>=64?'all':'max');
+        if($('flights_label_n')) $('flights_label_n').value=(lmax>0&&lmax<64)?lmax:10;
+        if(typeof window.adsbLabelModeSync==='function') window.adsbLabelModeSync();
+      }
       /* Turn the compass preview to the value just loaded. Published by the
          fragment's own script, which runs before this hook. */
       if(typeof window.adsbDrawCompass==='function') window.adsbDrawCompass();
@@ -3175,6 +3202,7 @@
       else cfgOverlay('hide');
 
       loadedConfig=JSON.stringify(getConfigData());
+      _prevSnap=null;  /* re-seed the markTouched diff from the fresh baseline */
       _populating=false;
       /* The device holding an unsaved live-applied change raises the Save bar
          (see checkDirty) but must NOT widen the POST body: dropping the
@@ -4245,6 +4273,23 @@
       if(c){
         c.getAttribute('data-cfg-key').split(/\s+/).forEach(function(k){ if(k) _touched.add(k); });
       }
+      /* Some control ids are not config keys (flights_label_mode feeds
+         flights_label_max) and carry no data-cfg-key. Diff this event's
+         collected form against the previous event's snapshot and record the
+         REAL keys that moved, so a value the user sets BACK to the baseline
+         still rides touchedPayload out -- otherwise the live-applied preview
+         stays on the device while the save bar retracts. Keys absent from the
+         previous snapshot (fragment loaded since) are skipped: their first
+         edit diffs against the baseline anyway. */
+      var data=getConfigData();
+      var prev=_prevSnap;
+      if(!prev&&loadedConfig){ try{ prev=JSON.parse(loadedConfig); }catch(e2){} }
+      if(prev){
+        Object.keys(data).forEach(function(k){
+          if(k in prev && JSON.stringify(data[k])!==JSON.stringify(prev[k])) _touched.add(k);
+        });
+      }
+      _prevSnap=data;
     }
     document.querySelector('.content').addEventListener('input',(e)=>{if(isNonSettingTarget(e))return;markTouched(e);checkDirty();liveApply();});
     document.querySelector('.content').addEventListener('change',(e)=>{if(isNonSettingTarget(e))return;markTouched(e);checkDirty();liveApply();});
