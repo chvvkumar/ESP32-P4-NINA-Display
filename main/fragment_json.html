@@ -44,6 +44,10 @@
     }
     #jd-root .jt-add { font-size:0.62rem; color:var(--accent,#7aa2f7); opacity:0; transition:opacity 0.15s; }
     #jd-root .jt-leaf:hover .jt-add, #jd-root .jt-leaf:focus-visible .jt-add { opacity:1; }
+    /* expand/collapse-all buttons over the tree */
+    #jd-root .jt-ctl { display:flex; gap:8px; margin-top:8px; }
+    #jd-root .jt-ctl.hidden { display:none; }
+    #jd-root .jt-ctl .btn { flex:1; padding:6px 10px; font-size:0.72rem; }
 
     /* row builder */
     #jd-root .rb-row {
@@ -219,12 +223,18 @@
       </div>
     </div>
 
-    <div class="subsection">
-      <div class="subsection-title">Import keys from a live response</div>
-      <button type="button" class="btn btn-primary full" id="jd_fetchBtn" onclick="jdFetchJson()">Fetch JSON</button>
-      <div class="field-hint" style="margin-top:8px">Reads the current response and lists every value. Click a value to add it as a tile.</div>
-      <div class="json-tree hidden" id="jd_tree" aria-label="Sample JSON response"></div>
+  </div>
+
+  <!-- IMPORT KEYS -->
+  <div class="card">
+    <div class="card-title"><span class="card-title-label">Import Keys</span></div>
+    <div class="field-hint" style="margin-bottom:10px">Reads the current response from the source above and lists every value. Click a value to add it as a tile.</div>
+    <button type="button" class="btn btn-primary full" id="jd_fetchBtn" onclick="jdFetchJson()">Fetch JSON</button>
+    <div class="jt-ctl hidden" id="jd_treeCtl">
+      <button type="button" class="btn btn-outline" onclick="jdTreeSetAll(true)">Expand all</button>
+      <button type="button" class="btn btn-outline" onclick="jdTreeSetAll(false)">Collapse all</button>
     </div>
+    <div class="json-tree hidden" id="jd_tree" aria-label="Sample JSON response"></div>
   </div>
 
   <!-- LAYOUT BUILDER -->
@@ -682,6 +692,7 @@
         .then(data=>{
           jdSample=data;
           tree.classList.remove("hidden"); tree.innerHTML="";
+          var ctl=$('jd_treeCtl'); if(ctl) ctl.classList.remove("hidden");
           jdBuildTree(data,"",tree,0);
           jdRenderDevice();
           btn.textContent="Refresh JSON";
@@ -700,11 +711,17 @@
           else { seg="["+k+"]"; keyLabel="["+k+"]"; }
         } else { seg=k; keyLabel=k; }
         const path=isArr?prefix+seg:(prefix?prefix+"."+k:k);
-        const line=document.createElement("div"); line.className="jt-line"; line.style.paddingLeft=(depth*14)+"px";
         if(val!==null && typeof val==="object"){
-          line.innerHTML='<span class="jt-key">'+escHtml(keyLabel)+'</span><span class="jt-punct">: '+(Array.isArray(val)?"[ &hellip; ]":"{ &hellip; }")+'</span>';
-          host.appendChild(line); jdBuildTree(val,path,host,depth+1);
+          /* Branch nodes are native <details>: the summary line toggles the
+             children, which nest inside so one click folds the whole subtree.
+             The #jd-root summary marker CSS draws the arrow. */
+          const det=document.createElement("details"); det.open=true;
+          const sum=document.createElement("summary"); sum.className="jt-line"; sum.style.paddingLeft=(depth*14)+"px";
+          sum.innerHTML='<span class="jt-key">'+escHtml(keyLabel)+'</span><span class="jt-punct">: '+(Array.isArray(val)?"[ &hellip; ]":"{ &hellip; }")+'</span>';
+          det.appendChild(sum);
+          host.appendChild(det); jdBuildTree(val,path,det,depth+1);
         } else {
+          const line=document.createElement("div"); line.className="jt-line"; line.style.paddingLeft=(depth*14)+"px";
           const leaf=document.createElement("span"); leaf.className="jt-leaf"; leaf.tabIndex=0; leaf.setAttribute("role","button");
           leaf.title='Add "'+path+'" as a tile';
           const vclass=typeof val==="number"?"jt-val-num":typeof val==="boolean"?"jt-val-bool":"jt-val-str";
@@ -716,6 +733,10 @@
           line.appendChild(leaf); host.appendChild(line);
         }
       });
+    }
+    function jdTreeSetAll(open){
+      const tree=$('jd_tree'); if(!tree) return;
+      tree.querySelectorAll('details').forEach(d=>{ d.open=open; });
     }
     function jdAddTileFromPath(path,rawVal){
       if(jdTileCount()>=JD_MAX_TILES){ jdFlashCount(); return; }
@@ -915,6 +936,7 @@
   window.jdOnSourceCommit=jdOnSourceCommit;
   window.jdOnEnabledToggle=jdOnEnabledToggle;
   window.jdFetchJson=jdFetchJson;
+  window.jdTreeSetAll=jdTreeSetAll;
   window.jdAddRow=jdAddRow;
   window.jdPreviewLayout=jdPreviewLayout;
   window.jdCollectAndSave=jdCollectAndSave;
