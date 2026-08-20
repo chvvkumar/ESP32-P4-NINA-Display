@@ -4225,10 +4225,21 @@
     }
 
     /* === Dirty State Detection === */
+    /* JSON Display and Home Assistant keep their config outside the main blob
+       (own endpoints, no collectors), so touchedPayload() can never see their
+       edits. Each fragment publishes a derived isDirty probe (current payload
+       vs last loaded/stored) that this shell polls here; their edit paths call
+       checkDirty() through their render funnel. */
+    function pageFragmentsDirty(){
+      return [window.jdIsDirty,window.haIsDirty].some(function(h){
+        if(typeof h!=='function') return false;
+        try{ return !!h(); }catch(e){ return false; }
+      });
+    }
     function checkDirty(){
       if(_populating) return;
       if(!_cfgCache||_populateFailed) return;  /* nothing loaded to compare against */
-      var dirty=_deviceDirty||Object.keys(touchedPayload(getConfigData())).length>0;
+      var dirty=_deviceDirty||pageFragmentsDirty()||Object.keys(touchedPayload(getConfigData())).length>0;
       $('saveBar').classList.toggle('visible',dirty);
     }
 
