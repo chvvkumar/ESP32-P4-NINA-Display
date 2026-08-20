@@ -490,3 +490,4 @@ Standard ESP-IDF 5.5.2 project: activate the IDF environment and run `idf.py bui
 - [LVGL](https://lvgl.io/) and [stb_image](https://github.com/nothings/stb).
 - NASA GIBS for the Cloud Cover imagery, NASA SDO and SOHO for the solar imagery, NOAA GOES SUVI (rendered by Helioviewer) for the extreme-UV solar bands, NOAA and the NWS for radar and GOES imagery, and Open-Meteo, OpenWeatherMap and Weather Underground for weather data.
 - Espressif esp-hosted and esp_wifi_remote for the ESP32-C6 WiFi link, [tgx](https://github.com/vindar/tgx) for the moon sphere renderer, and SVOX Pico TTS (esp-picotts) for the voice clips.
+- NASA's Scientific Visualization Studio for the [CGI Moon Kit](https://svs.gsfc.nasa.gov/4720) lunar surface maps used by the Moon page (visualizer Ernie Wright, USRA; scientist Noah Petro, NASA/GSFC), built from Lunar Reconnaissance Orbiter LROC WAC and LOLA data.
