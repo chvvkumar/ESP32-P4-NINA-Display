@@ -1869,6 +1869,10 @@
     let _currentTab=null;
     async function switchTab(name){
       _currentTab=name;
+      /* Keep the URL in step with the visible tab so a reload (or a copied
+         link) lands back here, not on whatever hash the page arrived with.
+         replaceState: no history entry per tab, no hashchange feedback loop. */
+      try{ if(location.hash!=='#'+name) history.replaceState(null,'','#'+name); }catch(e){}
       $$('.tab-panel').forEach(p=>p.classList.remove('active'));
       $$('.tab-btn').forEach(b=>b.classList.remove('active'));
       var panel=$('tab-'+name);
@@ -2665,6 +2669,9 @@
        There is no whole-form fallback: with no baseline we post only the
        explicitly touched keys. */
     const _touched=new Set();
+    /* Form snapshot at the last user edit; markTouched() diffs against it to
+       map edits to real config keys. null = re-seed from loadedConfig. */
+    var _prevSnap=null;
     function touchedPayload(data){
       var base=null;
       try{ if(loadedConfig) base=JSON.parse(loadedConfig); }catch(e){}
@@ -3193,6 +3200,7 @@
       else cfgOverlay('hide');
 
       loadedConfig=JSON.stringify(getConfigData());
+      _prevSnap=null;  /* re-seed the markTouched diff from the fresh baseline */
       _populating=false;
       /* The device holding an unsaved live-applied change raises the Save bar
          (see checkDirty) but must NOT widen the POST body: dropping the
@@ -4263,6 +4271,23 @@
       if(c){
         c.getAttribute('data-cfg-key').split(/\s+/).forEach(function(k){ if(k) _touched.add(k); });
       }
+      /* Some control ids are not config keys (flights_label_mode feeds
+         flights_label_max) and carry no data-cfg-key. Diff this event's
+         collected form against the previous event's snapshot and record the
+         REAL keys that moved, so a value the user sets BACK to the baseline
+         still rides touchedPayload out -- otherwise the live-applied preview
+         stays on the device while the save bar retracts. Keys absent from the
+         previous snapshot (fragment loaded since) are skipped: their first
+         edit diffs against the baseline anyway. */
+      var data=getConfigData();
+      var prev=_prevSnap;
+      if(!prev&&loadedConfig){ try{ prev=JSON.parse(loadedConfig); }catch(e2){} }
+      if(prev){
+        Object.keys(data).forEach(function(k){
+          if(k in prev && JSON.stringify(data[k])!==JSON.stringify(prev[k])) _touched.add(k);
+        });
+      }
+      _prevSnap=data;
     }
     document.querySelector('.content').addEventListener('input',(e)=>{if(isNonSettingTarget(e))return;markTouched(e);checkDirty();liveApply();});
     document.querySelector('.content').addEventListener('change',(e)=>{if(isNonSettingTarget(e))return;markTouched(e);checkDirty();liveApply();});
