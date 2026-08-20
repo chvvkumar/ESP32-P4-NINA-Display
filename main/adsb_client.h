@@ -107,6 +107,12 @@ typedef struct {
     int       fail_count;
     bool      route_lookup_active; /**< mirrors flights_route_lookup so the UI can
                                      *  label "route unknown" vs "lookup off" */
+    float     msg_rate;         /**< receiver messages per second, from the delta
+                                  *  of aircraft.json's top-level `messages` counter
+                                  *  between consecutive successful polls. 0 until
+                                  *  two polls have been seen; resets on poller start
+                                  *  or when the counter goes backwards (receiver
+                                  *  restart). Unrounded: the UI formats it. */
 } adsb_data_t;
 
 /** Create the mutex and the PSRAM data block. Idempotent. */

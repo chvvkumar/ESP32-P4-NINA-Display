@@ -892,7 +892,7 @@ static void set_defaults(app_config_t *cfg) {
     // v67 additions. Both are SETTINGS_TABLE rows, so settings_defaults_apply()
     // above already set them; restated here for the same reason the radar and
     // clouds blocks are, so every appended field's default reads in one place.
-    cfg->custom_image_header[0] = '\0';   // no extra header on the Custom URL fetch
+    cfg->custom_image_header[0] = '\0';   // no extra header on the Custom Image fetch
     cfg->clouds_channel = 0;               // GeoColor
 
     // v68 additions (ADS-B page). All seven are SETTINGS_TABLE rows, so
@@ -910,6 +910,9 @@ static void set_defaults(app_config_t *cfg) {
     // v69 addition (ADS-B route lookup). Also a SETTINGS_TABLE row; restated
     // here for the same reason as the block above.
     cfg->flights_route_lookup = true;   // look routes up online
+
+    // v70 addition (ADS-B Radar Scope label count). Also a SETTINGS_TABLE row.
+    cfg->flights_label_max = 64;        // 64 = label every drawn contact
 
     // Spotify client ID: secret-like sentinel, not table-driven
     cfg->spotify_client_id[0] = '\0';
@@ -2811,7 +2814,7 @@ static void migrate_from_v65(const void *raw, size_t raw_size, app_config_t *cfg
 }
 
 /* --- v66 -> v67 migration: appends custom_image_header (optional HTTP header
- *     for the Custom URL image fetch) and clouds_channel (Clouds page satellite
+ *     for the Custom Image fetch) and clouds_channel (Clouds page satellite
  *     channel). Additive and at the very end, so this stays a plain prefix
  *     memcpy like every migration around it. --- */
 static void migrate_from_v66(const void *raw, size_t raw_size, app_config_t *cfg)
@@ -2872,9 +2875,31 @@ static void migrate_from_v68(const void *raw, size_t raw_size, app_config_t *cfg
      * 4) still lands on it, so re-assert the default. Existing devices opt in
      * by default, matching a fresh install. */
     cfg->flights_route_lookup = true;
+    /* flights_label_max (v70) sits right after flights_route_lookup, inside
+     * that same tail padding, so re-assert it too. */
+    cfg->flights_label_max = 64;
 
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v68 to v%d", APP_CONFIG_VERSION);
+}
+
+/* --- v69 -> v70 migration: appends flights_label_max, the Radar Scope's
+ *     contact-label count. Additive and at the very end, so this stays a
+ *     plain prefix memcpy like every migration around it. --- */
+static void migrate_from_v69(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v69_t) ? raw_size : sizeof(app_config_v69_t);
+    memcpy(cfg, raw, copy);
+
+    /* The field sits past the v69 snapshot, so memcpy(copy) never touches it on
+     * purpose; the snapshot's tail padding (it ends on a bool but aligns to 4)
+     * still lands on it, so re-assert the default: label every drawn contact,
+     * matching a fresh install. */
+    cfg->flights_label_max = 64;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v69 to v%d", APP_CONFIG_VERSION);
 }
 
 
@@ -3668,6 +3693,13 @@ static bool validate_config(app_config_t *cfg) {
      * validate_url_format() enforces on the web save path. */
     cfg->flights_enabled = cfg->flights_enabled ? true : false;
     cfg->flights_route_lookup = cfg->flights_route_lookup ? true : false;
+    /* flights_label_max (v70) is a SETTINGS_TABLE INT_RESET row (0-64), so
+     * settings_clamp_apply() already reset a stale byte above 64 to the
+     * default. Belt and braces: pin the ceiling explicitly too. */
+    if (cfg->flights_label_max > 64) {   /* 64 == ADSB_MAX_AC (adsb_client.h) */
+        cfg->flights_label_max = 64;
+        fixed = true;
+    }
     if (cfg->flights_url[0] != '\0' &&
         strncmp(cfg->flights_url, "http://", 7) != 0 &&
         strncmp(cfg->flights_url, "https://", 8) != 0) {
@@ -3767,6 +3799,17 @@ void app_config_init(void) {
             nvs_commit(handle);
         }
         /* tiles_loaded stays false -> tail loads "json_tiles"/"ha_tiles" keys */
+    } else if (version_check == 69) {
+        /* v69 -> v70: appended flights_label_max (ADS-B Radar Scope labels).
+         * tiles_loaded stays false: a v69 device already keeps its tiles in
+         * the "json_tiles"/"ha_tiles" NVS keys, so the tail loads them.
+         * Safe to write back immediately, same reasoning as the v68 branch:
+         * both dispatcher-tail fixups below are excluded by their literal
+         * version bounds. */
+        migrate_from_v69(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 68) {
         /* v68 -> v69: appended flights_route_lookup (ADS-B route lookup).
          * tiles_loaded stays false: a v68 device already keeps its tiles in

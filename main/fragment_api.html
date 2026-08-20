@@ -91,6 +91,7 @@
                 <tr><td>flights_up_azimuth</td><td>int</td><td>0 to 359</td><td>Which azimuth is drawn at the top of the Sky Dome and Radar Scope. An out-of-range value falls back to 0 (north up).</td></tr>
                 <tr><td>flights_mode</td><td>int</td><td>0 to 2</td><td>View: 0 = Sky Dome, 1 = Radar Scope, 2 = Board. An invalid value falls back to 0.</td></tr>
                 <tr><td>flights_route_lookup</td><td>bool</td><td>true / false</td><td>Look up each flight's origin and destination online (adsb.im route service). Default true; false keeps the ADS-B page fully local.</td></tr>
+                <tr><td>flights_label_max</td><td>int</td><td>0 to 64</td><td>How many Radar Scope contacts get a text label: 0 = none, 1 to 63 = at most that many, nearest first, 64 = every drawn contact. Default 64; an out-of-range value falls back to 64.</td></tr>
               </tbody>
             </table>
           </div>
@@ -598,7 +599,7 @@
 
         <div class="api-ep">
           <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/image-display-config</span><span class="api-badge auth">Auth</span></div>
-          <p class="api-purpose">Read the settings for the six image pages (GOES, Moon, Solar, Custom URL, Weather Radar, Cloud Cover). Returns the full current value of every persisted parameter listed in the POST table below (force_fetch is not part of the output).</p>
+          <p class="api-purpose">Read the settings for the six image pages (GOES, Moon, Solar, Custom Image, Weather Radar, Cloud Cover). Returns the full current value of every persisted parameter listed in the POST table below (force_fetch is not part of the output).</p>
           <div class="api-snip-label">Request</div>
           <div class="api-snip" data-curl="curl -b cookies.txt http://HOST/api/image-display-config">
             <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
@@ -633,11 +634,11 @@
                 <tr><td>goes_enabled</td><td>bool</td><td>true / false</td><td>Enable that image page.</td></tr>
                 <tr><td>moon_enabled</td><td>bool</td><td>true / false</td><td>Enable that image page.</td></tr>
                 <tr><td>solar_enabled</td><td>bool</td><td>true / false</td><td>Enable that image page.</td></tr>
-                <tr><td>custom_enabled</td><td>bool</td><td>true / false</td><td>Enable that image page. The Custom URL page also needs custom_image_url set.</td></tr>
+                <tr><td>custom_enabled</td><td>bool</td><td>true / false</td><td>Enable that image page. The Custom Image page also needs custom_image_url set.</td></tr>
                 <tr><td>goes_show_overlay</td><td>bool</td><td>true / false</td><td>Show the info overlay on the GOES page.</td></tr>
                 <tr><td>moon_show_overlay</td><td>bool</td><td>true / false</td><td>Show the info overlay on the Moon page.</td></tr>
                 <tr><td>solar_show_overlay</td><td>bool</td><td>true / false</td><td>Show the info overlay on the Solar page.</td></tr>
-                <tr><td>custom_show_overlay</td><td>bool</td><td>true / false</td><td>Show the info overlay on the Custom URL page.</td></tr>
+                <tr><td>custom_show_overlay</td><td>bool</td><td>true / false</td><td>Show the info overlay on the Custom Image page.</td></tr>
                 <tr><td>goes_crop</td><td>bool</td><td>true / false</td><td>Crop vs full-frame; re-renders the cached frame locally (no re-download).</td></tr>
                 <tr><td>solar_crop</td><td>bool</td><td>true / false</td><td>Crop vs full-frame; re-renders the cached frame locally (no re-download).</td></tr>
                 <tr><td>custom_crop</td><td>bool</td><td>true / false</td><td>Crop vs full-frame; re-renders the cached frame locally (no re-download).</td></tr>
@@ -671,7 +672,7 @@
                 <tr><td>moon_north_up</td><td>int</td><td>0 or 1</td><td>Force north-up.</td></tr>
                 <tr><td>moon_spin_mode</td><td>int</td><td>0 or 1</td><td>Enable spin interaction.</td></tr>
                 <tr><td>moon_spin_return_s</td><td>int</td><td>3 to 60 (clamped)</td><td>Seconds before spin returns to rest.</td></tr>
-                <tr><td>force_fetch</td><td>bool</td><td>true / false</td><td>Action only, not persisted. Forces an immediate re-fetch (used by the Preview / Refresh button). Forces a download only for the Custom URL page; for GOES and Solar a fetch happens automatically when the band or region changed.</td></tr>
+                <tr><td>force_fetch</td><td>bool</td><td>true / false</td><td>Action only, not persisted. Forces an immediate re-fetch (used by the Preview / Refresh button). Forces a download only for the Custom Image page; for GOES and Solar a fetch happens automatically when the band or region changed.</td></tr>
               </tbody>
             </table>
           </div>
@@ -828,7 +829,7 @@
 
         <div class="api-ep">
           <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/image-display/refresh</span><span class="api-badge auth">Auth</span></div>
-          <p class="api-purpose">Force an immediate re-fetch of one image page with the loading overlay. With no body it refreshes the image page currently on screen; pass {"source":0..5} (0=GOES, 1=Moon, 2=Solar, 3=Custom, 4=Weather Radar, 5=Cloud Cover) to refresh a specific page. This works for all six pages, unlike the force_fetch flag on /api/image-display-config which forces a download only for the Custom URL page.</p>
+          <p class="api-purpose">Force an immediate re-fetch of one image page with the loading overlay. With no body it refreshes the image page currently on screen; pass {"source":0..5} (0=GOES, 1=Moon, 2=Solar, 3=Custom, 4=Weather Radar, 5=Cloud Cover) to refresh a specific page. This works for all six pages, unlike the force_fetch flag on /api/image-display-config which forces a download only for the Custom Image page.</p>
           <div class="api-snip-label">Request (page on screen)</div>
           <div class="api-snip" data-curl="curl -H 'X-Auth-Password: YOUR_PASSWORD' -X POST http://HOST/api/image-display/refresh">
             <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>

@@ -17,8 +17,22 @@
  *      ui_styles.c widget_draw_cb).
  *
  * Text is lv_labels, pre-created once and repositioned/retexted per update:
- * cardinals, ring labels, the three tag boxes, the header/status scrims, the
- * Board rows and the Board detail card. Nothing is created per poll.
+ * cardinals, ring labels, the three Sky tag boxes, the header/status scrims,
+ * the Scope corner blocks, the Board rows and the Board detail card. Nothing is
+ * created per poll. The ONE exception is the Radar Scope contact labels: up to
+ * ADSB_MAX_AC two-line texts drawn straight into the layer by disc_draw_cb()
+ * (lv_draw_label over static strings filled by recompute()), because 64 label
+ * objects repositioned per poll cost more than 64 draw tasks.
+ *
+ * RADAR SCOPE (redesign 2026-08-19): phosphor-green, no scrims. The header and
+ * status strips are hidden; four corner blocks (contacts / max range / closest
+ * aircraft / message rate) sit over the disc's outside corners with NO
+ * background. Rim, rings, crosshairs, cardinals and ring numbers are green.
+ * Every number that changes lives in its own fixed-width right-aligned label
+ * (Montserrat digits are proportional, "1" is narrow) so the text never jumps.
+ *
+ * RED NIGHT: page_col() maps every colour the page emits to a red shade
+ * (luminance into R) when theme_is_red_night(current_theme). All three modes.
  *
  * BOARD MODE is flight awareness, not an observing aid (retarget 2026-08-18):
  * it applies no elevation gate, and carries no elevation, azimuth or relative
@@ -75,14 +89,25 @@ LV_FONT_DECLARE(lv_font_overpass_27);
 #define STRIP_H        44
 #define HDR_H          44
 
-#define ADSB_TAG_COUNT   3
+#define ADSB_TAG_COUNT   3      /* Sky Dome boxed tags (rank 0-2)          */
 #define ADSB_BOARD_ROWS  5
 #define ADSB_TAP_SLOP_PX 12
 #define ADSB_SNAP_DEG    5.0f
 
-/* Tag box: two lines (Montserrat 20 over 18) plus 2 px of breathing room. */
-#define TAG_W  150
-#define TAG_H  48
+/* Tag block: two lines (Montserrat 24 over 22) plus 2 px of breathing room.
+ * The Sky boxes are exactly this big; the Scope text labels reuse the same
+ * footprint for the declutter pass so one scorer serves both. */
+#define TAG_W  184
+#define TAG_H  60
+
+/* Scope corner blocks (x1,y1,x2,y2). The tag scorer treats them like placed
+ * tags so contact labels do not land on the corner text. */
+#define CORNER_PAD   20
+#define CORNER_TOP_H 84
+#define CORNER_BL_Y  574
+#define CORNER_BR_Y  640
+#define CORNER_W_L   300
+#define CORNER_W_R   240
 
 /* Board grid. Column x are relative to the row panel, which is 680 wide.
  *
@@ -132,7 +157,8 @@ LV_FONT_DECLARE(lv_font_overpass_27);
 #define MK_EMERG   0x04   /* emergency squawk: red halo            */
 #define MK_TRI     0x08   /* Scope: heading-rotated triangle       */
 
-/* ── Fixed palette (never themed: it is the tar1090 domain convention) ── */
+/* ── Fixed palette (the tar1090 domain convention; only the colour-brightness
+ *    slider and the Red Night remap touch it, never the theme hues) ──────── */
 
 static const uint32_t ADSB_RAMP[6] = {
     0xFF5C5C,   /* ground .. 2,000 ft */
@@ -147,10 +173,18 @@ static const uint32_t ADSB_RAMP[6] = {
 /* Frame furniture, from the mockup deck (flights-options.html options 5-7).
  * These are DELIBERATELY not theme colours: current_theme->bento_border lands
  * near black on the dark themes and the range rings vanished on the panel. They
- * still go through themed() so the colour-brightness slider applies. */
-#define COL_RING_OUT    0x4A5665   /* outer rim, 2 px, fully opaque */
-#define COL_RING_IN     0x36404C   /* inner range/elevation rings   */
-#define COL_RING_LBL    0x7E8B99   /* the "10" / "30 deg" numbers   */
+ * still go through page_col() so the colour-brightness slider applies. */
+#define COL_RING_OUT    0x4A5665   /* Sky: outer rim, 2 px, fully opaque */
+#define COL_RING_IN     0x36404C   /* Sky: inner range/elevation rings   */
+#define COL_RING_LBL    0x7E8B99   /* Sky: the "10" / "30 deg" numbers   */
+
+/* Radar Scope phosphor greens. Rings/rim/cardinals/crosshairs take
+ * COL_SCOPE_GREEN, the inner rings a dimmer green that reads about as strong
+ * as COL_RING_IN did, ring numbers and corner captions sit in between. */
+#define COL_SCOPE_GREEN    0x22C55E   /* rim, cardinals, corner data lines */
+#define COL_SCOPE_RING_IN  0x1E7A45   /* inner rings, crosshair chords     */
+#define COL_SCOPE_RING_LBL 0x3FA66A   /* ring numbers                      */
+#define COL_SCOPE_CAP      0x2E9E5A   /* "CONTACTS" / "MAX RANGE" captions */
 #define COL_THREAT      0xE6B450   /* the one accent: lead contact  */
 #define COL_LEAD_BRD    0x4A3A12
 #define COL_LEAD_BG     0x120D04
@@ -179,9 +213,21 @@ static lv_obj_t *s_lbl_title;
 static lv_obj_t *s_lbl_mount;
 static lv_obj_t *s_strip;
 static lv_obj_t *s_lbl_strip;
-static lv_obj_t *s_tag_box[ADSB_TAG_COUNT];     /* scrim + border, the declutter unit */
+static lv_obj_t *s_tag_box[ADSB_TAG_COUNT];     /* Sky: scrim + border, the declutter unit */
 static lv_obj_t *s_tag_l1[ADSB_TAG_COUNT];
 static lv_obj_t *s_tag_l2[ADSB_TAG_COUNT];
+/* Scope corner blocks. Every changing number is its own fixed-width,
+ * right-aligned label; the units next to it are static text. */
+static lv_obj_t *s_sc_cap_contacts;             /* TL caption "CONTACTS"          */
+static lv_obj_t *s_sc_within;                   /* TL "%d / %d" (left aligned)    */
+static lv_obj_t *s_sc_cap_range;                /* TR caption "MAX RANGE" (right) */
+static lv_obj_t *s_sc_range;                    /* TR "%3d NM" (fixed, right)     */
+static lv_obj_t *s_sc_call;                     /* BL closest callsign / hex      */
+static lv_obj_t *s_sc_ident;                    /* BL "TYPE REG"                  */
+static lv_obj_t *s_sc_alt;                      /* BL "N ft  N kt  NNN°" (left)   */
+static lv_obj_t *s_sc_dist;                     /* BL "N.N NM" (left)             */
+static lv_obj_t *s_sc_rate;                     /* BR "%5d msg/s" (fixed, right)  */
+static lv_obj_t *s_sc_cue;                      /* BR "Reconnecting..." on STALE; on s_root so it never dims */
 static lv_obj_t *s_board;
 static lv_obj_t *s_lbl_gkk;                     /* amber eyebrow over the callsign */
 static lv_obj_t *s_lbl_glance;                  /* lead callsign, Montserrat 64   */
@@ -241,8 +287,29 @@ static adsb_fov_t s_fov[MAX_NINA_INSTANCES];
 static int        s_fov_n;
 
 typedef struct { int16_t x1, y1, x2, y2; } adsb_lead_t;
-static adsb_lead_t s_lead[ADSB_TAG_COUNT];
+static adsb_lead_t s_lead[ADSB_MAX_AC];
 static int         s_lead_n;
+
+/* Radar Scope contact labels, drawn by disc_draw_cb() with lv_draw_label.
+ * Filled for every drawn Scope contact in recompute(), then the first
+ * flights_label_max of them (rank order) are PLACED by the declutter pass and
+ * get `placed` set; the draw callback skips the rest. l1/l2 are static storage
+ * so the draw task may keep the pointer (text_local = 0): recompute() and the
+ * refresh both run under the display lock, never concurrently.
+ * PSRAM: 64 x 48 B is 3 KB the UI task's .bss does not need. */
+typedef struct {
+    int16_t  x, y;        /* top-left of the TAG_W x TAG_H block */
+    int16_t  mark;        /* index into s_mark (the glyph the leader reaches) */
+    int16_t  gx, gy;      /* glyph position */
+    int8_t   rank;        /* client rank: emergency first, then nearest */
+    uint8_t  opa;
+    bool     placed;
+    uint32_t color;       /* arrow colour, already page_col()'d */
+    char     l1[16];      /* callsign or hex (<= 10 chars)      */
+    char     l2[16];      /* "%3d %c %3d" = 9 chars             */
+} adsb_slbl_t;
+static adsb_slbl_t *s_slbl;       /* [ADSB_MAX_AC], PSRAM; NULL = no labels */
+static int          s_slbl_n;
 
 /* Position trails, projected in recompute() and drawn as polylines.
  *
@@ -275,16 +342,18 @@ static bool    s_show_rx;     /* Scope: receiver marker at the centre */
 
 /* Theme-derived draw colours, refreshed by apply_colors() so the draw callback
  * never touches current_theme or the config mutex. */
-static uint32_t s_col_line;      /* outer rim */
-static uint32_t s_col_ring_in;   /* inner rings */
+static uint32_t s_col_line;      /* outer rim (mode dependent: grey / green) */
+static uint32_t s_col_ring_in;   /* inner rings + crosshair chords */
 static uint32_t s_col_dim;
 static uint32_t s_col_ink;
+static uint32_t s_col_emerg;     /* emergency halo, page_col()'d */
 
 /* ── Forward declarations ─────────────────────────────────────────────── */
 
 static void recompute(void);
 static void apply_mode(void);
 static void apply_colors(void);
+static void apply_disc_colors(void);
 static void persist_nav_fields(void);
 
 /* ── Small helpers ────────────────────────────────────────────────────── */
@@ -299,19 +368,40 @@ static uint32_t themed(uint32_t raw)
     return app_config_apply_brightness(raw, cfg_brightness());
 }
 
+/**
+ * The ONE colour gate for this page. Under a Red Night theme every colour the
+ * page emits (ring greys, the altitude ramp, rig hues, the scope greens,
+ * scrims, board rows) collapses to a red shade: Rec.601 luminance into R,
+ * G = B = 0. A colour that is already a pure red shade (the Red Night theme's
+ * own text/label/border values, black, and anything already mapped) passes
+ * through untouched, so the function is idempotent. The colour-brightness
+ * slider is applied last in both branches.
+ */
+static uint32_t page_col(uint32_t raw)
+{
+    if (theme_is_red_night(current_theme) && (raw & 0x00FFFFu) != 0u) {
+        uint32_t r = (raw >> 16) & 0xFFu;
+        uint32_t g = (raw >> 8) & 0xFFu;
+        uint32_t b = raw & 0xFFu;
+        uint32_t luma = (299u * r + 587u * g + 114u * b) / 1000u;
+        raw = luma << 16;
+    }
+    return themed(raw);
+}
+
 static uint32_t col_bg(void)
 {
-    return themed(current_theme ? current_theme->bg_main : 0x050505);
+    return page_col(current_theme ? current_theme->bg_main : 0x050505);
 }
 
 static uint32_t col_text(void)
 {
-    return themed(current_theme ? current_theme->text_color : 0xE5E7EB);
+    return page_col(current_theme ? current_theme->text_color : 0xE5E7EB);
 }
 
 static uint32_t col_label(void)
 {
-    return themed(current_theme ? current_theme->label_color : 0x6B7280);
+    return page_col(current_theme ? current_theme->label_color : 0x6B7280);
 }
 
 /** Altitude ramp bucket. Unknown altitude (no position report yet) is grey. */
@@ -334,6 +424,15 @@ static char vrate_char(float fpm)
     return '-';
 }
 
+/** Scope-label vertical-rate cue (spec 2026-08-19): +-256 fpm dead band and a
+ *  blank, not a dash, for level flight. */
+static char scope_vc(float fpm)
+{
+    if (fpm >=  256.0f) return '^';
+    if (fpm <= -256.0f) return 'v';
+    return ' ';
+}
+
 /** Altitude in hundreds of feet, clamped to three printed digits. */
 static int alt_hundreds(const adsb_ac_t *a)
 {
@@ -346,7 +445,11 @@ static int alt_hundreds(const adsb_ac_t *a)
 /** Callsign, falling back to the ICAO hex when the contact broadcasts none. */
 static const char *call_of(const adsb_ac_t *a)
 {
-    return (a->flight[0] != '\0') ? a->flight : a->hex;
+    /* Some transponders broadcast an all-zero ident ("00000000"): treat it as
+     * none so the hex shows instead of a row of zeros. */
+    const char *f = a->flight;
+    while (*f == '0') f++;
+    return (a->flight[0] != '\0' && *f != '\0') ? a->flight : a->hex;
 }
 
 /** What is flying: the type description ("BOEING 737-800"), else the ICAO
@@ -404,6 +507,20 @@ static lv_obj_t *mk_label(lv_obj_t *parent, const lv_font_t *font, uint32_t colo
     lv_obj_set_style_text_font(l, font, 0);
     lv_obj_set_style_text_color(l, lv_color_hex(color), 0);
     lv_label_set_text(l, text ? text : "");
+    return l;
+}
+
+/** Fixed-width, right-aligned label at (x, y): the anchor for every Scope
+ *  corner number. Montserrat digits are proportional ("1" is half a "0"), so a
+ *  free-width label walks its neighbours around on every poll; pinning the
+ *  width and aligning right keeps the right edge, and the unit after it, still. */
+static lv_obj_t *mk_num(lv_obj_t *parent, const lv_font_t *font, uint32_t color,
+                        int x, int y, int w)
+{
+    lv_obj_t *l = mk_label(parent, font, color, "");
+    lv_obj_set_width(l, w);
+    lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_pos(l, x, y);
     return l;
 }
 
@@ -540,11 +657,14 @@ static void disc_draw_cb(lv_event_t *e)
 
     /* Cross hairs through the centre, plus the true-north tick. Both chords are
      * rotated with the compass (endpoints from place_compass) so the N-S line
-     * runs through the N and S letters. */
+     * runs through the N and S letters. The Scope's chords are the dim green
+     * already, so they get more opacity than the Sky's grey hairlines. */
+    bool scope = (s_mode == MODE_SCOPE);
+    lv_opa_t chord_opa = scope ? LV_OPA_70 : LV_OPA_40;
     draw_seg(layer, s_axis_x[0], s_axis_y[0], s_axis_x[2], s_axis_y[2],
-             s_col_ring_in, 1, LV_OPA_40);
+             s_col_ring_in, 1, chord_opa);
     draw_seg(layer, s_axis_x[1], s_axis_y[1], s_axis_x[3], s_axis_y[3],
-             s_col_ring_in, 1, LV_OPA_40);
+             s_col_ring_in, 1, chord_opa);
     draw_seg(layer, s_ntick[0], s_ntick[1], s_ntick[2], s_ntick[3],
              s_col_ink, 3, LV_OPA_COVER);
 
@@ -597,7 +717,7 @@ static void disc_draw_cb(lv_event_t *e)
     for (int i = 0; i < s_mark_n; i++) {
         const adsb_mark_t *m = &s_mark[i];
         if (m->flags & MK_EMERG) {
-            draw_ring(layer, m->x, m->y, 20, COL_EMERG, 3, LV_OPA_60);
+            draw_ring(layer, m->x, m->y, 26, s_col_emerg, 3, LV_OPA_60);
         }
         if (m->flags & MK_TRI) {
             draw_tri(layer, m->tx, m->ty, m->color, m->opa);
@@ -605,6 +725,28 @@ static void disc_draw_cb(lv_event_t *e)
             draw_square(layer, m);
         } else {
             draw_diamond(layer, m);
+        }
+    }
+
+    /* Radar Scope contact labels: two lines of text in the arrow's colour, no
+     * box, no background. Same 8 px / 2 px / 31 px offsets as the Sky tag box
+     * so the declutter geometry (TAG_W x TAG_H) stays honest. */
+    if (scope && s_slbl) {
+        lv_draw_label_dsc_t ld;
+        lv_draw_label_dsc_init(&ld);
+        for (int i = 0; i < s_slbl_n; i++) {
+            const adsb_slbl_t *s = &s_slbl[i];
+            if (!s->placed) continue;
+            ld.color = lv_color_hex(s->color);
+            ld.opa   = s->opa;
+            ld.font  = &lv_font_montserrat_24;
+            ld.text  = s->l1;
+            lv_area_t a1 = { s->x + 8, s->y + 2, s->x + TAG_W, s->y + 2 + 27 };
+            lv_draw_label(layer, &ld, &a1);
+            ld.font  = &lv_font_montserrat_22;
+            ld.text  = s->l2;
+            lv_area_t a2 = { s->x + 8, s->y + 31, s->x + TAG_W, s->y + 31 + 24 };
+            lv_draw_label(layer, &ld, &a2);
         }
     }
 }
@@ -710,6 +852,7 @@ static void persist_nav_fields(void)
 static void apply_mode(void)
 {
     bool disc_mode = (s_mode != MODE_BOARD);
+    bool scope     = (s_mode == MODE_SCOPE);
 
     show_obj(s_disc, disc_mode);
     for (int i = 0; i < 4; i++) show_obj(s_lbl_card[i], disc_mode);
@@ -721,14 +864,39 @@ static void apply_mode(void)
     /* The mount pointing is an observing aid; the Board is flight awareness
      * and carries no elevation or azimuth at all. */
     show_obj(s_lbl_mount, disc_mode);
+
+    /* Radar Scope: no scrims at all, four corner blocks instead. */
+    show_obj(s_hdr,   !scope);
+    show_obj(s_strip, !scope);
+    lv_obj_t *corners[] = {
+        s_sc_cap_contacts, s_sc_within, s_sc_cap_range, s_sc_range,
+        s_sc_call, s_sc_ident, s_sc_alt, s_sc_dist, s_sc_rate, s_sc_cue,
+    };
+    for (size_t i = 0; i < sizeof(corners) / sizeof(corners[0]); i++) {
+        show_obj(corners[i], scope);
+    }
+    apply_disc_colors();
 }
 
 /* ── Coordinate pipeline ──────────────────────────────────────────────── */
 
 /* Tag boxes already committed this cycle — the declutter pass tests against
  * these and nothing else. Reset alongside s_lead_n in recompute(). */
-static lv_area_t s_tag_area[ADSB_TAG_COUNT];
+static lv_area_t s_tag_area[ADSB_MAX_AC];
 static int       s_tag_area_n;
+
+/* Ring-number label boxes ("10", "50 NM"), recorded by place_ring_label() so
+ * a contact label is not parked on top of one. */
+static lv_area_t s_ring_lbl_area[3];
+static bool      s_ring_lbl_used[3];     /* slot placed this cycle */
+
+/* Scope corner text blocks, scored like placed tags (Scope only). */
+static const lv_area_t s_corner_area[4] = {
+    { 0,                        0,           CORNER_W_L,  CORNER_TOP_H },
+    { SCREEN_SIZE - CORNER_W_R, 0,           SCREEN_SIZE, CORNER_TOP_H },
+    { 0,                        CORNER_BL_Y, CORNER_W_L,  SCREEN_SIZE  },
+    { SCREEN_SIZE - CORNER_W_R, CORNER_BR_Y, SCREEN_SIZE, SCREEN_SIZE  },
+};
 
 static bool boxes_hit(const lv_area_t *a, const lv_area_t *b)
 {
@@ -754,7 +922,7 @@ static int inner_ring_r(void)
 /** Cost of putting a tag box here: lower is better. A hidden glyph costs 1, a
  *  hidden tag box costs 4 (two lines of text lost, not one triangle) and a
  *  scrim overlap 2. @p skip is the tagged contact's own glyph, which the leader
- *  line is supposed to reach. Glyph half-extent is 14 px (12 px triangle nose
+ *  line is supposed to reach. Glyph half-extent is 20 px (18 px triangle nose
  *  plus a margin). */
 static int tag_score(const lv_area_t *box, int skip)
 {
@@ -762,12 +930,20 @@ static int tag_score(const lv_area_t *box, int skip)
     for (int i = 0; i < s_mark_n; i++) {
         if (i == skip) continue;
         int gx = s_mark[i].x, gy = s_mark[i].y;
-        if (gx + 14 < box->x1 || gx - 14 > box->x2) continue;
-        if (gy + 14 < box->y1 || gy - 14 > box->y2) continue;
+        if (gx + 20 < box->x1 || gx - 20 > box->x2) continue;
+        if (gy + 20 < box->y1 || gy - 20 > box->y2) continue;
         s++;
     }
     for (int i = 0; i < s_tag_area_n; i++) {
         if (boxes_hit(box, &s_tag_area[i])) s += 4;
+    }
+    if (s_mode == MODE_SCOPE) {
+        for (int i = 0; i < 4; i++) {
+            if (boxes_hit(box, &s_corner_area[i])) s += 4;
+        }
+    }
+    for (int i = 0; i < 3; i++) {
+        if (s_ring_lbl_used[i] && boxes_hit(box, &s_ring_lbl_area[i])) s += 3;
     }
     if (box->y1 < HDR_H || box->y2 > SCREEN_SIZE - STRIP_H) s += 2;
     return s;
@@ -789,10 +965,16 @@ static int tag_score(const lv_area_t *box, int skip)
  * nearest traffic clusters at the centre, which is exactly where the boxes did
  * the most damage.
  *
- * Cost is 3 tags x 8 candidates x <=64 marks, integer compares only.
+ * Cost is tags x 8 candidates x (<=64 marks + placed tags), integer compares
+ * only: 3 tags on the Sky, up to ADSB_MAX_AC on the Scope.
+ * ponytail: O(labels x marks) per recompute, ~65K compares worst case at 64
+ * labels; fine at touch rate on the P4. A grid bucket would cut it if the
+ * drag ever stutters.
+ *
+ * Returns the chosen block in @p out and records it in s_tag_area / s_lead
+ * (the leader is dropped when the block touches the glyph, as before).
  */
-static void place_tag(int slot, int x, int y, int mark_idx,
-                      const char *l1, const char *l2)
+static void place_tag_box(int x, int y, int mark_idx, lv_area_t *out)
 {
     static const int8_t qx[4] = {  1,  1, -1, -1 };
     static const int8_t qy[4] = {  1, -1, -1,  1 };
@@ -803,10 +985,10 @@ static void place_tag(int slot, int x, int y, int mark_idx,
     int dx0 = x - DISC_CX, dy0 = y - DISC_CY;
     int inner = inner_ring_r();
     bool crowded = (dx0 * dx0 + dy0 * dy0) < (inner * inner);
-    int gap_x = crowded ? 70 : 20;
-    int gap_y = crowded ? 24 : 8;
+    int gap_x = crowded ? 70 : 26;
+    int gap_y = crowded ? 24 : 12;
 
-    int best_x = x, best_y = y, best_score = -1;
+    int best_score = -1;
     lv_area_t best = { x, y, x + TAG_W, y + TAG_H };
 
     for (int c = 0; c < 8; c++) {
@@ -821,22 +1003,17 @@ static void place_tag(int slot, int x, int y, int mark_idx,
         int sc = tag_score(&box, mark_idx);
         if (best_score < 0 || sc < best_score) {
             best_score = sc;
-            best_x = ax;
-            best_y = ay;
             best   = box;
             if (sc == 0) break;      /* clean air: nothing can beat it */
         }
     }
 
-    lv_label_set_text(s_tag_l1[slot], l1);
-    lv_label_set_text(s_tag_l2[slot], l2);
-    lv_obj_set_pos(s_tag_box[slot], best_x, best_y);
-    show_obj(s_tag_box[slot], true);
+    *out = best;
 
-    if (s_tag_area_n < ADSB_TAG_COUNT) {
+    if (s_tag_area_n < ADSB_MAX_AC) {
         s_tag_area[s_tag_area_n++] = best;
     }
-    if (s_lead_n < ADSB_TAG_COUNT) {
+    if (s_lead_n < ADSB_MAX_AC) {
         /* Nearest point of the box to the glyph — with a long radial leader the
          * closest edge is as often horizontal as vertical. */
         int ex = (x < best.x1) ? best.x1 : ((x > best.x2) ? best.x2 : x);
@@ -846,6 +1023,46 @@ static void place_tag(int slot, int x, int y, int mark_idx,
         s_lead[s_lead_n].x2 = (int16_t)ex;
         s_lead[s_lead_n].y2 = (int16_t)ey;
         s_lead_n++;
+    }
+}
+
+/** Sky Dome: place one of the three boxed tags. */
+static void place_tag(int slot, int x, int y, int mark_idx,
+                      const char *l1, const char *l2)
+{
+    lv_area_t box;
+    place_tag_box(x, y, mark_idx, &box);
+    lv_label_set_text(s_tag_l1[slot], l1);
+    lv_label_set_text(s_tag_l2[slot], l2);
+    lv_obj_set_pos(s_tag_box[slot], box.x1, box.y1);
+    show_obj(s_tag_box[slot], true);
+}
+
+/**
+ * Radar Scope: place the text labels for the first @p max drawn contacts in
+ * rank order (the client ranks nearest-first; ranks are contiguous from 0).
+ * s_slbl[] already holds every drawn contact; this marks the winners `placed`
+ * and gives each its block origin. Nearest first, so rank 0 gets the pick of
+ * the free air, exactly as the Sky tags do.
+ */
+static void place_scope_labels(int max)
+{
+    if (!s_slbl || max <= 0) return;
+    /* Rank order = emergency first, then nearest to the receiver (client's
+     * rank_contacts); no telescope input on the Scope. Selection pass, n <= 64. */
+    for (int placed = 0; placed < max; placed++) {
+        adsb_slbl_t *best = NULL;
+        for (int i = 0; i < s_slbl_n; i++) {
+            adsb_slbl_t *s = &s_slbl[i];
+            if (s->placed) continue;
+            if (!best || s->rank < best->rank) best = s;
+        }
+        if (!best) break;
+        lv_area_t box;
+        place_tag_box(best->gx, best->gy, best->mark, &box);
+        best->x = (int16_t)box.x1;
+        best->y = (int16_t)box.y1;
+        best->placed = true;
     }
 }
 
@@ -865,10 +1082,10 @@ static void place_compass(void)
         /* Keep the letter clear of the header and status scrims: a letter
          * that the rotation carries to the very top or bottom slides
          * inward instead of vanishing under the strip text. */
-        int ly = y - 14;
+        int ly = y - 16;
         if (ly < HDR_H + 2)                       ly = HDR_H + 2;
-        if (ly > SCREEN_SIZE - STRIP_H - 30)      ly = SCREEN_SIZE - STRIP_H - 30;
-        lv_obj_set_pos(s_lbl_card[i], x - 10, ly);
+        if (ly > SCREEN_SIZE - STRIP_H - 34)      ly = SCREEN_SIZE - STRIP_H - 34;
+        lv_obj_set_pos(s_lbl_card[i], x - 12, ly);
     }
     float tn = (-s_up_deg) * ADSB_DEG2RAD;
     s_ntick[0] = (int16_t)(DISC_CX + (int)(NTICK_OUT * sinf(tn)));
@@ -888,14 +1105,19 @@ static void place_ring_label(int slot, int r, const char *text)
 {
     int d = (int)(0.707f * (float)(r - 22));
     lv_label_set_text(s_lbl_ring[slot], text);
-    lv_obj_set_pos(s_lbl_ring[slot], DISC_CX - d - 16, DISC_CY - d - 12);
+    lv_obj_set_pos(s_lbl_ring[slot], DISC_CX - d - 20, DISC_CY - d - 14);
     show_obj(s_lbl_ring[slot], true);
+    /* "50 NM" at 22 px is about 72 x 26; over-cover slightly for the margin. */
+    s_ring_lbl_area[slot] = (lv_area_t){ DISC_CX - d - 24, DISC_CY - d - 18,
+                                         DISC_CX - d + 60, DISC_CY - d + 14 };
+    s_ring_lbl_used[slot] = true;
 }
 
 /** Ring radii + their labels. Sky gets 60/30 plus the gate at the rim. */
 static void place_rings(float gate, float range)
 {
     s_ring_n = 0;
+    for (int i = 0; i < 3; i++) s_ring_lbl_used[i] = false;
     char buf[16];
 
     if (s_mode == MODE_SKY) {
@@ -957,7 +1179,7 @@ static void place_fov(const nina_pointing_t *pt, int n, float gate)
         s_fov[s_fov_n].x     = (int16_t)cxp;
         s_fov[s_fov_n].y     = (int16_t)cyp;
         s_fov[s_fov_n].r     = (int16_t)r;
-        s_fov[s_fov_n].color = RIG_COL[inst];
+        s_fov[s_fov_n].color = page_col(RIG_COL[inst]);
         s_fov_n++;
     }
 }
@@ -1130,7 +1352,7 @@ static void fill_card(const adsb_ac_t *a)
     }
     /* Squawk is field 3: the only value that ever goes red. */
     lv_obj_set_style_text_color(s_card_val[3],
-                                lv_color_hex(a->emergency ? themed(COL_EMERG) : s_col_ink), 0);
+                                lv_color_hex(a->emergency ? page_col(COL_EMERG) : s_col_ink), 0);
 
     lv_label_set_text(s_card_title, call_of(a));
     show_obj(s_card_mil, (a->db_flags & 0x01) != 0);
@@ -1170,7 +1392,7 @@ static void fill_board(float range)
 
     lv_label_set_text(s_lbl_gkk, lead->emergency ? "EMERGENCY" : "NEAREST");
     lv_obj_set_style_text_color(s_lbl_gkk,
-                                lv_color_hex(themed(lead->emergency ? COL_EMERG : COL_THREAT)), 0);
+                                lv_color_hex(page_col(lead->emergency ? COL_EMERG : COL_THREAT)), 0);
     lv_label_set_text(s_lbl_glance, call_of(lead));
     lv_obj_set_style_text_color(s_lbl_glance, lv_color_hex(s_col_ink), 0);
     fill_lead_lines(lead);
@@ -1190,7 +1412,7 @@ static void fill_board(float range)
 
         lv_label_set_text(s_row_call[i], call_of(a));
         lv_obj_set_style_text_color(s_row_call[i],
-                                    lv_color_hex(a->emergency ? themed(COL_EMERG) : s_col_ink), 0);
+                                    lv_color_hex(a->emergency ? page_col(COL_EMERG) : s_col_ink), 0);
 
         lv_label_set_text(s_row_route[i], row_route_of(a));
 
@@ -1198,7 +1420,7 @@ static void fill_board(float range)
          * altitude column jitters on every poll. */
         snprintf(buf, sizeof(buf), "%03d%c", alt_hundreds(a), vrate_char(a->vrate_fpm));
         lv_label_set_text(s_row_alt[i], buf);
-        lv_obj_set_style_text_color(s_row_alt[i], lv_color_hex(themed(alt_color(a))), 0);
+        lv_obj_set_style_text_color(s_row_alt[i], lv_color_hex(page_col(alt_color(a))), 0);
 
         snprintf(buf, sizeof(buf), "%03d",
                  (int)((a->track_deg < 0.0f) ? 0.0f : a->track_deg + 0.5f));
@@ -1211,6 +1433,77 @@ static void fill_board(float range)
                              (a->seen_pos_s > STALE_DIM_S) ? LV_OPA_40 : LV_OPA_COVER, 0);
         show_obj(s_row_panel[i], true);
     }
+}
+
+/**
+ * Radar Scope corner blocks. Every number goes into its own fixed-width
+ * right-aligned label (mk_num), so nothing on screen shifts when a digit
+ * count changes. The closest aircraft is by dist_nm over has_pos contacts,
+ * deliberately NOT by rank: rank is the observing-aid order (emergency,
+ * separation from the mount), the corner is a plain "nearest traffic" read.
+ */
+static void fill_scope_corners(int within, int tracked, float range, page_conn_t st)
+{
+    char buf[32];
+
+    if (within > 99) within = 99;
+    if (tracked < 0)   tracked = 0;
+    if (tracked > 999) tracked = 999;
+    snprintf(buf, sizeof(buf), "%d / %d", within, tracked);
+    lv_label_set_text(s_sc_within, buf);
+
+    int rng = (int)(range + 0.5f);
+    if (rng > 999) rng = 999;
+    snprintf(buf, sizeof(buf), "%3d NM", rng);
+    lv_label_set_text(s_sc_range, buf);
+
+    /* msg_rate is float msg/s from the client; 0 until two polls are in. */
+    int rate = (int)(s_snap->msg_rate + 0.5f);
+    if (rate < 0)     rate = 0;
+    if (rate > 99999) rate = 99999;
+    snprintf(buf, sizeof(buf), "%5d msg/s", rate);
+    lv_label_set_text(s_sc_rate, buf);
+    lv_label_set_text(s_sc_cue, (st == PAGE_CONN_STALE) ? "Reconnecting..." : "");
+
+    const adsb_ac_t *nearest = NULL;
+    for (int i = 0; i < s_snap->count; i++) {
+        const adsb_ac_t *a = &s_snap->ac[i];
+        if (!a->has_pos) continue;
+        if (!nearest || a->dist_nm < nearest->dist_nm) nearest = a;
+    }
+
+    lv_obj_t *bl[] = { s_sc_call, s_sc_ident, s_sc_alt, s_sc_dist };
+    for (size_t i = 0; i < sizeof(bl) / sizeof(bl[0]); i++) {
+        show_obj(bl[i], nearest != NULL);
+    }
+    if (!nearest) return;
+
+    lv_label_set_text(s_sc_call, call_of(nearest));
+
+    if (nearest->type[0] && nearest->reg[0]) {
+        snprintf(buf, sizeof(buf), "%s %s", nearest->type, nearest->reg);
+    } else {
+        snprintf(buf, sizeof(buf), "%s", nearest->type[0] ? nearest->type : nearest->reg);
+    }
+    lv_label_set_text(s_sc_ident, buf);
+
+    int alt = (int)(nearest->alt_ft + 0.5f);
+    if (alt < 0)     alt = 0;
+    if (alt > 99999) alt = 99999;
+    int gs = (int)(nearest->gs_kt + 0.5f);
+    if (gs < 0)   gs = 0;
+    if (gs > 999) gs = 999;
+    int trk = (nearest->track_deg < 0.0f) ? 0 : (int)(nearest->track_deg + 0.5f);
+    if (trk > 359) trk = 359;
+    char line[48];
+    snprintf(line, sizeof(line), "%d ft  %d kt  %03d\xc2\xb0", alt, gs, trk);
+    lv_label_set_text(s_sc_alt, line);
+
+    float d = nearest->dist_nm;
+    if (d < 0.0f)   d = 0.0f;
+    if (d > 999.9f) d = 999.9f;
+    snprintf(buf, sizeof(buf), "%.1f NM", (double)d);
+    lv_label_set_text(s_sc_dist, buf);
 }
 
 /**
@@ -1292,6 +1585,7 @@ static void recompute(void)
         s_mark_n = 0;
         s_lead_n = 0;
         s_trun_n = 0;
+        s_slbl_n = 0;
         fill_board(range);
         return;
     }
@@ -1299,20 +1593,29 @@ static void recompute(void)
     /* ── Disc modes ── */
     place_compass();
     place_rings(gate, range);
-    place_fov(pt, np, gate);
+    /* Mount pointing circles are the Sky Dome's business; the Scope is a plain
+     * distance picture with no telescope input. */
+    if (s_mode == MODE_SKY) place_fov(pt, np, gate);
+    else                    s_fov_n = 0;
     s_show_rx = (s_mode == MODE_SCOPE);
+    if (s_mode == MODE_SCOPE) {
+        fill_scope_corners(within, tracked, range, st);
+    }
 
     s_mark_n     = 0;
     s_lead_n     = 0;
     s_trun_n     = 0;
     s_tag_area_n = 0;
+    s_slbl_n     = 0;
     for (int i = 0; i < ADSB_TAG_COUNT; i++) {
         show_obj(s_tag_box[i], false);
     }
 
     /* Tags are queued here and placed AFTER the mark loop: the declutter score
      * counts glyphs, so it needs every positioned contact, not just the ones
-     * walked so far. l1 points into s_snap, which outlives this function. */
+     * walked so far. l1 points into s_snap, which outlives this function.
+     * Sky: three boxed tags via pend[]. Scope: every drawn contact goes into
+     * s_slbl[] and place_scope_labels() picks the first flights_label_max. */
     struct { int slot, x, y, mark; const char *l1; char l2[32]; } pend[ADSB_TAG_COUNT] = {{ 0 }};
     int pend_n = 0;
 
@@ -1343,7 +1646,7 @@ static void recompute(void)
         memset(m, 0, sizeof(*m));
         m->x     = (int16_t)x;
         m->y     = (int16_t)y;
-        m->color = alt_color(a);
+        m->color = page_col(alt_color(a));
         m->opa   = (a->seen_pos_s > STALE_DIM_S) ? LV_OPA_50 : LV_OPA_COVER;
         if (a->db_flags & 0x01) m->flags |= MK_SQUARE;
         if (a->emergency)       m->flags |= MK_EMERG;
@@ -1356,7 +1659,7 @@ static void recompute(void)
             float hdg = (a->track_deg < 0.0f) ? 0.0f : a->track_deg;
             float t = (hdg - s_up_deg) * ADSB_DEG2RAD;
             float st_ = sinf(t), ct = cosf(t);
-            static const float nose[3][2] = { { 0.0f, -12.0f }, { 7.0f, 8.0f }, { -7.0f, 8.0f } };
+            static const float nose[3][2] = { { 0.0f, -18.0f }, { 10.0f, 12.0f }, { -10.0f, 12.0f } };
             for (int k = 0; k < 3; k++) {
                 /* Clockwise screen rotation (y down): heading 90 = nose to the right. */
                 float rx = nose[k][0] * ct - nose[k][1] * st_;
@@ -1374,18 +1677,35 @@ static void recompute(void)
         }
         s_mark_n++;
 
-        if (a->rank >= 0 && a->rank < ADSB_TAG_COUNT && tags_done < ADSB_TAG_COUNT) {
-            /* Written straight into the slot: cppcheck flags an alias pointer
-             * taken before the array element is first assigned. */
-            if (s_mode == MODE_SKY) {
-                snprintf(pend[pend_n].l2, sizeof(pend[pend_n].l2), "%03d%c  %02d\xc2\xb0",
-                         alt_hundreds(a), vrate_char(a->vrate_fpm), (int)(a->el_deg + 0.5f));
-            } else {
-                /* Scope: altitude over range — heading is already in the
-                 * rotated triangle, so repeating it in the tag is noise. */
-                snprintf(pend[pend_n].l2, sizeof(pend[pend_n].l2), "%03d  %4.1f",
-                         alt_hundreds(a), (double)a->dist_nm);
+        if (s_mode == MODE_SCOPE) {
+            /* Every drawn contact is a label candidate; the count cap is
+             * applied nearest-first (rank) by place_scope_labels(). Line 2 is
+             * FL / climb cue / ground speed: "%3d %c %3d". Written straight
+             * into the slot (cppcheck: no alias before first assignment). */
+            if (s_slbl && s_slbl_n < ADSB_MAX_AC) {
+                int gs = (int)(a->gs_kt + 0.5f);
+                if (gs < 0)   gs = 0;
+                if (gs > 999) gs = 999;
+                snprintf(s_slbl[s_slbl_n].l1, sizeof(s_slbl[s_slbl_n].l1), "%s", call_of(a));
+                snprintf(s_slbl[s_slbl_n].l2, sizeof(s_slbl[s_slbl_n].l2), "%3d %c %3d",
+                         alt_hundreds(a), scope_vc(a->vrate_fpm), gs);
+                s_slbl[s_slbl_n].gx     = (int16_t)x;
+                s_slbl[s_slbl_n].gy     = (int16_t)y;
+                s_slbl[s_slbl_n].x      = (int16_t)x;
+                s_slbl[s_slbl_n].y      = (int16_t)y;
+                s_slbl[s_slbl_n].mark   = (int16_t)midx;
+                s_slbl[s_slbl_n].rank   = a->rank;
+                s_slbl[s_slbl_n].opa    = m->opa;
+                s_slbl[s_slbl_n].color  = m->color;
+                s_slbl[s_slbl_n].placed = false;
+                s_slbl_n++;
             }
+        } else if (a->rank >= 0 && a->rank < ADSB_TAG_COUNT && tags_done < ADSB_TAG_COUNT) {
+            /* Sky: three boxed tags. Written straight into the slot: cppcheck
+             * flags an alias pointer taken before the array element is first
+             * assigned. */
+            snprintf(pend[pend_n].l2, sizeof(pend[pend_n].l2), "%03d%c  %02d\xc2\xb0",
+                     alt_hundreds(a), vrate_char(a->vrate_fpm), (int)(a->el_deg + 0.5f));
             pend[pend_n].slot = a->rank;
             pend[pend_n].x    = x;
             pend[pend_n].y    = y;
@@ -1396,13 +1716,20 @@ static void recompute(void)
         }
     }
 
-    /* Nearest first, so rank 0 gets the pick of the free air. */
-    for (int r = 0; r < ADSB_TAG_COUNT; r++) {
-        for (int i = 0; i < pend_n; i++) {
-            if (pend[i].slot == r) {
-                place_tag(r, pend[i].x, pend[i].y, pend[i].mark,
-                          pend[i].l1, pend[i].l2);
-                break;
+    if (s_mode == MODE_SCOPE) {
+        /* 0 = none, 64 (ADSB_MAX_AC) = all drawn, else the first N by rank. */
+        int lmax = cfg->flights_label_max;
+        if (lmax > ADSB_MAX_AC) lmax = ADSB_MAX_AC;
+        place_scope_labels(lmax);
+    } else {
+        /* Nearest first, so rank 0 gets the pick of the free air. */
+        for (int r = 0; r < ADSB_TAG_COUNT; r++) {
+            for (int i = 0; i < pend_n; i++) {
+                if (pend[i].slot == r) {
+                    place_tag(r, pend[i].x, pend[i].y, pend[i].mark,
+                              pend[i].l1, pend[i].l2);
+                    break;
+                }
             }
         }
     }
@@ -1438,13 +1765,45 @@ uint8_t nina_adsb_get_mode(void)
 
 /* ── Theme ────────────────────────────────────────────────────────────── */
 
+/** Disc furniture colours are mode dependent: Sky keeps the fixed greys,
+ *  Scope is phosphor green. Called from apply_colors() and apply_mode(). */
+static void apply_disc_colors(void)
+{
+    bool scope = (s_mode == MODE_SCOPE);
+    s_col_line    = page_col(scope ? COL_SCOPE_GREEN   : COL_RING_OUT);
+    s_col_ring_in = page_col(scope ? COL_SCOPE_RING_IN : COL_RING_IN);
+    uint32_t card = scope ? page_col(COL_SCOPE_GREEN) : s_col_ink;
+    uint32_t rlbl = page_col(scope ? COL_SCOPE_RING_LBL : COL_RING_LBL);
+    for (int i = 0; i < 4; i++) {
+        lv_obj_set_style_text_color(s_lbl_card[i], lv_color_hex(card), 0);
+    }
+    for (int i = 0; i < 3; i++) {
+        lv_obj_set_style_text_color(s_lbl_ring[i], lv_color_hex(rlbl), 0);
+    }
+}
+
 static void apply_colors(void)
 {
     /* Rings use the fixed scope greys, not bento_border: see COL_RING_OUT. */
-    s_col_line    = themed(COL_RING_OUT);
-    s_col_ring_in = themed(COL_RING_IN);
     s_col_dim     = col_label();
     s_col_ink     = col_text();
+    s_col_emerg   = page_col(COL_EMERG);
+    apply_disc_colors();
+
+    /* Scope corner blocks. */
+    {
+        uint32_t cap = page_col(COL_SCOPE_CAP);
+        uint32_t grn = page_col(COL_SCOPE_GREEN);
+        lv_obj_set_style_text_color(s_sc_cap_contacts, lv_color_hex(cap), 0);
+        lv_obj_set_style_text_color(s_sc_cap_range,    lv_color_hex(cap), 0);
+        lv_obj_set_style_text_color(s_sc_within,  lv_color_hex(s_col_ink), 0);
+        lv_obj_set_style_text_color(s_sc_range,   lv_color_hex(s_col_ink), 0);
+        lv_obj_set_style_text_color(s_sc_call,    lv_color_hex(s_col_ink), 0);
+        lv_obj_t *greens[] = { s_sc_ident, s_sc_alt, s_sc_dist, s_sc_rate, s_sc_cue };
+        for (size_t i = 0; i < sizeof(greens) / sizeof(greens[0]); i++) {
+            lv_obj_set_style_text_color(greens[i], lv_color_hex(grn), 0);
+        }
+    }
 
     lv_obj_set_style_bg_color(s_root, lv_color_hex(col_bg()), 0);
     lv_obj_set_style_bg_color(s_backdrop, lv_color_hex(col_bg()), 0);
@@ -1455,38 +1814,32 @@ static void apply_colors(void)
     lv_obj_set_style_text_color(s_lbl_mount, lv_color_hex(s_col_dim), 0);
     lv_obj_set_style_text_color(s_lbl_strip, lv_color_hex(s_col_dim), 0);
     lv_obj_set_style_text_color(s_lbl_glance, lv_color_hex(s_col_ink), 0);
-    lv_obj_set_style_text_color(s_lbl_gsub,   lv_color_hex(themed(COL_SUB)), 0);
-    lv_obj_set_style_text_color(s_lbl_gsub2,  lv_color_hex(themed(COL_MUTED)), 0);
-    for (int i = 0; i < 4; i++) {
-        lv_obj_set_style_text_color(s_lbl_card[i], lv_color_hex(s_col_ink), 0);
-    }
+    lv_obj_set_style_text_color(s_lbl_gsub,   lv_color_hex(page_col(COL_SUB)), 0);
+    lv_obj_set_style_text_color(s_lbl_gsub2,  lv_color_hex(page_col(COL_MUTED)), 0);
     for (int i = 0; i < 5; i++) {
-        lv_obj_set_style_text_color(s_hdr_col[i], lv_color_hex(themed(COL_MUTED_DIM)), 0);
-    }
-    for (int i = 0; i < 3; i++) {
-        lv_obj_set_style_text_color(s_lbl_ring[i], lv_color_hex(themed(COL_RING_LBL)), 0);
+        lv_obj_set_style_text_color(s_hdr_col[i], lv_color_hex(page_col(COL_MUTED_DIM)), 0);
     }
     for (int i = 0; i < ADSB_TAG_COUNT; i++) {
         lv_obj_set_style_bg_color(s_tag_box[i], lv_color_hex(col_bg()), 0);
-        lv_obj_set_style_border_color(s_tag_box[i], lv_color_hex(s_col_ring_in), 0);
+        lv_obj_set_style_border_color(s_tag_box[i], lv_color_hex(page_col(COL_RING_IN)), 0);
         lv_obj_set_style_text_color(s_tag_l1[i], lv_color_hex(s_col_ink), 0);
-        lv_obj_set_style_text_color(s_tag_l2[i], lv_color_hex(themed(COL_MUTED)), 0);
+        lv_obj_set_style_text_color(s_tag_l2[i], lv_color_hex(page_col(COL_MUTED)), 0);
     }
     for (int i = 0; i < ADSB_BOARD_ROWS; i++) {
-        lv_obj_set_style_bg_color(s_row_panel[i], lv_color_hex(themed(COL_ROW_BG)), 0);
-        lv_obj_set_style_border_color(s_row_panel[i], lv_color_hex(themed(COL_ROW_BRD)), 0);
+        lv_obj_set_style_bg_color(s_row_panel[i], lv_color_hex(page_col(COL_ROW_BG)), 0);
+        lv_obj_set_style_border_color(s_row_panel[i], lv_color_hex(page_col(COL_ROW_BRD)), 0);
         lv_obj_set_style_text_color(s_row_call[i], lv_color_hex(s_col_ink), 0);
-        lv_obj_set_style_text_color(s_row_route[i], lv_color_hex(themed(COL_MUTED)), 0);
-        lv_obj_set_style_text_color(s_row_hdg[i], lv_color_hex(themed(COL_MUTED)), 0);
-        lv_obj_set_style_text_color(s_row_dist[i], lv_color_hex(themed(COL_MUTED)), 0);
+        lv_obj_set_style_text_color(s_row_route[i], lv_color_hex(page_col(COL_MUTED)), 0);
+        lv_obj_set_style_text_color(s_row_hdg[i], lv_color_hex(page_col(COL_MUTED)), 0);
+        lv_obj_set_style_text_color(s_row_dist[i], lv_color_hex(page_col(COL_MUTED)), 0);
     }
-    lv_obj_set_style_bg_color(s_card, lv_color_hex(themed(COL_ROW_BG)), 0);
-    lv_obj_set_style_border_color(s_card, lv_color_hex(themed(COL_ROW_BRD)), 0);
+    lv_obj_set_style_bg_color(s_card, lv_color_hex(page_col(COL_ROW_BG)), 0);
+    lv_obj_set_style_border_color(s_card, lv_color_hex(page_col(COL_ROW_BRD)), 0);
     lv_obj_set_style_text_color(s_card_title, lv_color_hex(s_col_ink), 0);
-    lv_obj_set_style_bg_color(s_card_mil, lv_color_hex(themed(COL_THREAT)), 0);
-    lv_obj_set_style_text_color(s_card_mil, lv_color_hex(themed(COL_LEAD_BG)), 0);
+    lv_obj_set_style_bg_color(s_card_mil, lv_color_hex(page_col(COL_THREAT)), 0);
+    lv_obj_set_style_text_color(s_card_mil, lv_color_hex(page_col(COL_LEAD_BG)), 0);
     for (int i = 0; i < CARD_FIELDS; i++) {
-        lv_obj_set_style_text_color(s_card_key[i], lv_color_hex(themed(COL_MUTED_DIM)), 0);
+        lv_obj_set_style_text_color(s_card_key[i], lv_color_hex(page_col(COL_MUTED_DIM)), 0);
         lv_obj_set_style_text_color(s_card_val[i], lv_color_hex(s_col_ink), 0);
     }
     nina_empty_state_apply_theme(s_empty, current_theme, cfg_brightness());
@@ -1531,6 +1884,11 @@ static lv_obj_t *adsb_page_create(lv_obj_t *parent)
         s_tb = heap_caps_calloc(1, sizeof(adsb_trailbuf_t), MALLOC_CAP_SPIRAM);
         if (!s_tb) ESP_LOGW(TAG, "no PSRAM for trails; drawing contacts only");
     }
+    /* Not fatal either: the Scope draws arrows without labels. */
+    if (!s_slbl) {
+        s_slbl = heap_caps_calloc(ADSB_MAX_AC, sizeof(adsb_slbl_t), MALLOC_CAP_SPIRAM);
+        if (!s_slbl) ESP_LOGW(TAG, "no PSRAM for scope labels; drawing arrows only");
+    }
 
     s_root = lv_obj_create(parent);
     lv_obj_remove_style_all(s_root);
@@ -1563,10 +1921,10 @@ static lv_obj_t *adsb_page_create(lv_obj_t *parent)
     lv_obj_add_event_cb(s_disc, disc_draw_cb, LV_EVENT_DRAW_MAIN_END, NULL);
 
     for (int i = 0; i < 4; i++) {
-        s_lbl_card[i] = mk_label(s_content, &lv_font_montserrat_22, 0xFFFFFF, "");
+        s_lbl_card[i] = mk_label(s_content, &lv_font_montserrat_28, 0xFFFFFF, "");
     }
     for (int i = 0; i < 3; i++) {
-        s_lbl_ring[i] = mk_label(s_content, &lv_font_montserrat_18, COL_RING_LBL, "");
+        s_lbl_ring[i] = mk_label(s_content, &lv_font_montserrat_22, COL_RING_LBL, "");
     }
 
     /* A tag is a bordered scrim box with its two lines inside, so the declutter
@@ -1580,11 +1938,44 @@ static lv_obj_t *adsb_page_create(lv_obj_t *parent)
         lv_obj_set_style_border_opa(s_tag_box[i], LV_OPA_60, 0);
         lv_obj_set_style_radius(s_tag_box[i], 3, 0);
         lv_obj_clear_flag(s_tag_box[i], LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
-        s_tag_l1[i] = mk_label(s_tag_box[i], &lv_font_montserrat_20, 0xFFFFFF, "");
-        lv_obj_set_pos(s_tag_l1[i], 8, 1);
-        s_tag_l2[i] = mk_label(s_tag_box[i], &lv_font_montserrat_18, 0x808080, "");
-        lv_obj_set_pos(s_tag_l2[i], 8, 25);
+        s_tag_l1[i] = mk_label(s_tag_box[i], &lv_font_montserrat_24, 0xFFFFFF, "");
+        lv_obj_set_pos(s_tag_l1[i], 8, 2);
+        s_tag_l2[i] = mk_label(s_tag_box[i], &lv_font_montserrat_22, 0x808080, "");
+        lv_obj_set_pos(s_tag_l2[i], 8, 31);
         show_obj(s_tag_box[i], false);
+    }
+
+    /* Radar Scope corner blocks (shown by apply_mode in Scope only). No
+     * backgrounds. Line heights: Montserrat 36 = 40 px, 22 = 24 px, 18 = 21 px.
+     * Digit advance at 36 pt is <= 24 px, at 22 pt <= 15 px; the fixed widths
+     * below are sized from that. */
+    {
+        const int right_x = SCREEN_SIZE - CORNER_PAD;
+        /* Top-left: CONTACTS  "NN / NNN" */
+        s_sc_cap_contacts = mk_label(s_content, &lv_font_montserrat_18, COL_SCOPE_CAP, "CONTACTS");
+        lv_obj_set_pos(s_sc_cap_contacts, CORNER_PAD, 12);
+        s_sc_within = mk_label(s_content, &lv_font_montserrat_36, 0xFFFFFF, "");
+        lv_obj_set_pos(s_sc_within, CORNER_PAD, 32);
+        /* Top-right: MAX RANGE  "NNN NM", both right aligned on x = 700 */
+        s_sc_cap_range = mk_num(s_content, &lv_font_montserrat_18, COL_SCOPE_CAP, right_x - 200, 12, 200);
+        lv_label_set_text(s_sc_cap_range, "MAX RANGE");
+        s_sc_range = mk_num(s_content, &lv_font_montserrat_36, 0xFFFFFF, right_x - 200, 32, 200);
+        /* Bottom-left: closest aircraft, four lines ending 4 px above the edge */
+        s_sc_call  = mk_label(s_content, &lv_font_montserrat_36, 0xFFFFFF, "");
+        lv_obj_set_pos(s_sc_call, CORNER_PAD, 578);
+        clip_label(s_sc_call, CORNER_W_L - CORNER_PAD);
+        s_sc_ident = mk_label(s_content, &lv_font_montserrat_22, COL_SCOPE_GREEN, "");
+        lv_obj_set_pos(s_sc_ident, CORNER_PAD, 620);
+        clip_label(s_sc_ident, CORNER_W_L - CORNER_PAD);
+        s_sc_alt = mk_label(s_content, &lv_font_montserrat_22, COL_SCOPE_GREEN, "");
+        lv_obj_set_pos(s_sc_alt, CORNER_PAD, 646);
+        clip_label(s_sc_alt, CORNER_W_L - CORNER_PAD);
+        s_sc_dist = mk_label(s_content, &lv_font_montserrat_22, COL_SCOPE_GREEN, "");
+        lv_obj_set_pos(s_sc_dist, CORNER_PAD, 672);
+        /* Bottom-right: message rate on the same baseline as the BL bottom
+         * line; the reconnect cue above it. The cue lives on s_root (added
+         * after the scrims below) so the STALE dim never touches it. */
+        s_sc_rate = mk_num(s_content, &lv_font_montserrat_22, COL_SCOPE_GREEN, right_x - CORNER_W_R, 672, CORNER_W_R);
     }
 
     /* Board: lead block, five ranked rows, lead detail card. */
@@ -1690,14 +2081,19 @@ static lv_obj_t *adsb_page_create(lv_obj_t *parent)
 
     /* Scrims LAST so they sit over the disc and the board. */
     s_hdr = mk_scrim(s_root, 0, HDR_H);
-    s_lbl_title = mk_label(s_hdr, &lv_font_montserrat_22, 0xFFFFFF, "ADS-B");
+    s_lbl_title = mk_label(s_hdr, &lv_font_montserrat_26, 0xFFFFFF, "ADS-B");
     lv_obj_align(s_lbl_title, LV_ALIGN_LEFT_MID, 20, 0);
-    s_lbl_mount = mk_label(s_hdr, &lv_font_montserrat_18, 0x808080, "");
+    s_lbl_mount = mk_label(s_hdr, &lv_font_montserrat_22, 0x808080, "");
     lv_obj_align(s_lbl_mount, LV_ALIGN_RIGHT_MID, -20, 0);
 
     s_strip = mk_scrim(s_root, SCREEN_SIZE - STRIP_H, STRIP_H);
-    s_lbl_strip = mk_label(s_strip, &lv_font_montserrat_22, 0x808080, "");
+    s_lbl_strip = mk_label(s_strip, &lv_font_montserrat_26, 0x808080, "");
     lv_obj_align(s_lbl_strip, LV_ALIGN_LEFT_MID, 20, 0);
+
+    /* Scope reconnect cue: bottom-right, above the message rate, undimmed. */
+    s_sc_cue = mk_num(s_root, &lv_font_montserrat_22, COL_SCOPE_GREEN,
+                      SCREEN_SIZE - CORNER_PAD - CORNER_W_R, 646, CORNER_W_R);
+    lv_obj_clear_flag(s_sc_cue, LV_OBJ_FLAG_CLICKABLE);
 
     /* Empty state needs its own opaque backdrop (nina_empty_state is 80%
      * inline by contract; full-coverage consumers supply the ground). */

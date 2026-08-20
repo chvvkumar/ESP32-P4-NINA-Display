@@ -29,7 +29,7 @@ static bool radar_token_is_valid(const char *tok)
 
 /**
  * @brief GET /api/image-display-config -- return the config fields of all six
- *        image pages (GOES, Moon, Solar, Custom URL, Radar, Clouds).
+ *        image pages (GOES, Moon, Solar, Custom Image, Radar, Clouds).
  */
 esp_err_t image_display_config_get_handler(httpd_req_t *req)
 {

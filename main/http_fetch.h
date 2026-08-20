@@ -205,7 +205,7 @@ typedef struct {
                                  *  ':' and applied as one request header -- same
                                  *  semantics as http_fetch_opts_t.extra_header. Needed
                                  *  by image sources behind an API-key header (OctoPrint
-                                 *  gcode thumbnails, a user-supplied Custom URL header).
+                                 *  gcode thumbnails, a user-supplied Custom Image header).
                                  *  NULL = no extra header. */
     const char *user_agent;    /**< optional: sets the "User-Agent" header, same as
                                  *  http_fetch_opts_t.user_agent. Separate from

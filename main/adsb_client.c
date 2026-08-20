@@ -77,6 +77,15 @@ static bool  s_rx_valid = false;
 /* Set by adsb_client_note_config_change(), consumed at the top of a poll. */
 static _Atomic bool s_cfg_dirty = false;
 
+/* Receiver message-rate state: aircraft.json's top-level `messages` counter
+ * from the previous successful poll and when it was read. Only the poll task
+ * touches these. The counter is read as a double (it outgrows int32 in days)
+ * and kept as uint64_t; a value below the previous one means the receiver
+ * restarted, so the delta is dropped and the baseline re-armed. */
+static bool     s_msg_have_prev = false;
+static uint64_t s_msg_prev = 0;
+static int64_t  s_msg_prev_ms = 0;
+
 /* Route cache, poll-task-only (PSRAM). fetched_ms == 0 marks a free slot. */
 typedef struct {
     int64_t fetched_ms;      /**< when this callsign was last asked about */
@@ -114,8 +123,8 @@ static void  parse_one(const cJSON *item, adsb_ac_t *a, float min_el,
 static bool  better_than(const adsb_ac_t *a, const adsb_ac_t *b);
 static void  rank_contacts(adsb_data_t *d);
 static adsb_track_t *track_for(const char *hex, int64_t now_ms);
-static void  track_sample(adsb_track_t *tr, const adsb_ac_t *a, int32_t now_s);
-static void  track_expire(adsb_track_t *tr, int32_t now_s);
+static void  track_sample(adsb_track_t *tr, const adsb_ac_t *a, int32_t now_s, int32_t window_s);
+static void  track_expire(adsb_track_t *tr, int32_t now_s, int32_t window_s);
 static void  trail_update(adsb_data_t *d);
 static adsb_route_entry_t *route_cache_find(const char *cs);
 static adsb_route_entry_t *route_cache_slot(const char *cs, int64_t now);
@@ -442,11 +451,17 @@ static adsb_track_t *track_for(const char *hex, int64_t now_ms)
  * sample is only taken when the position actually moved -- or once every 10 s
  * regardless, which keeps a stationary contact's trail alive rather than
  * letting it age out and reappear as a jump. */
-static void track_sample(adsb_track_t *tr, const adsb_ac_t *a, int32_t now_s)
+static void track_sample(adsb_track_t *tr, const adsb_ac_t *a, int32_t now_s,
+                         int32_t window_s)
 {
     if (tr->n > 0) {
         bool moved = (a->lat != tr->last_lat) || (a->lon != tr->last_lon);
-        if (!moved && (now_s - tr->t_s[tr->n - 1]) < 10) return;
+        /* Space samples so the ring's slots cover the whole window (every
+         * poll at the 120 s baseline, every ~5 s at a 240 s window). */
+        int32_t min_gap = window_s / ADSB_TRAIL_MAX;
+        int32_t since   = now_s - tr->t_s[tr->n - 1];
+        if (since < min_gap) return;
+        if (!moved && since < 10) return;
     }
     if (tr->n >= ADSB_TRAIL_MAX) {
         memmove(&tr->pt[0], &tr->pt[1], (ADSB_TRAIL_MAX - 1) * sizeof(tr->pt[0]));
@@ -462,12 +477,12 @@ static void track_sample(adsb_track_t *tr, const adsb_ac_t *a, int32_t now_s)
     tr->last_lon = a->lon;
 }
 
-/* Drop samples older than ADSB_TRAIL_S. They are always at the head, so this is
+/* Drop samples older than the window. They are always at the head, so this is
  * one memmove and never a scan of the whole ring. */
-static void track_expire(adsb_track_t *tr, int32_t now_s)
+static void track_expire(adsb_track_t *tr, int32_t now_s, int32_t window_s)
 {
     int drop = 0;
-    while (drop < tr->n && (now_s - tr->t_s[drop]) > ADSB_TRAIL_S) drop++;
+    while (drop < tr->n && (now_s - tr->t_s[drop]) > window_s) drop++;
     if (drop == 0) return;
     tr->n = (uint8_t)(tr->n - drop);
     if (tr->n > 0) {
@@ -484,11 +499,21 @@ static void trail_update(adsb_data_t *d)
     int64_t now_ms = esp_timer_get_time() / 1000;
     int32_t now_s  = (int32_t)(now_ms / 1000);
 
+    /* The trail window scales with the configured range so a loop across the
+     * picture is about the same on-screen length at every range: 120 s at the
+     * 50 nm baseline, 240 s at 100 nm, clamped to [60, 600]. Sample spacing
+     * scales with it in track_sample so ADSB_TRAIL_MAX covers the window. */
+    int range = app_config_get()->flights_range_nm;
+    if (range < 10) range = 50;
+    int32_t window_s = (int32_t)ADSB_TRAIL_S * range / 50;
+    if (window_s < 60)  window_s = 60;
+    if (window_s > 600) window_s = 600;
+
     /* Recycle tracks whose aircraft has been gone longer than the trail window:
      * anything they still hold would have expired sample by sample anyway. */
     for (int i = 0; i < ADSB_MAX_AC; i++) {
         if (s_track[i].hex[0] != '\0' &&
-            (now_ms - s_track[i].seen_ms) > (int64_t)ADSB_TRAIL_S * 1000) {
+            (now_ms - s_track[i].seen_ms) > (int64_t)window_s * 1000) {
             s_track[i].hex[0] = '\0';
             s_track[i].n = 0;
         }
@@ -501,8 +526,8 @@ static void trail_update(adsb_data_t *d)
 
         adsb_track_t *tr = track_for(a->hex, now_ms);
         if (!tr) continue;
-        track_sample(tr, a, now_s);
-        track_expire(tr, now_s);
+        track_sample(tr, a, now_s, window_s);
+        track_expire(tr, now_s, window_s);
 
         if (tr->n > 0) {
             memcpy(d->trail[i], tr->pt, (size_t)tr->n * sizeof(adsb_trail_pt_t));
@@ -714,6 +739,7 @@ static bool adsb_poll_once(void *arg)
         /* The receiver reference may have moved, so every stored range/bearing
          * is now wrong: start the histories over rather than draw a kink. */
         if (s_track) memset(s_track, 0, ADSB_MAX_AC * sizeof(adsb_track_t));
+        s_msg_have_prev = false;   /* a different receiver has a different counter */
     }
 
     /* Receiver position: receiver.json, retried on every poll until it
@@ -754,6 +780,10 @@ static bool adsb_poll_once(void *arg)
         cJSON_Delete(root);
         goto fail;
     }
+    /* Top-level `messages`: readsb/tar1090 and dump1090 both publish it. */
+    const cJSON *msgs_j = cJSON_GetObjectItem(root, "messages");
+    bool have_msgs = cJSON_IsNumber(msgs_j) && msgs_j->valuedouble >= 0.0;
+    uint64_t msgs = have_msgs ? (uint64_t)msgs_j->valuedouble : 0;
 
     nina_pointing_t pts[MAX_NINA_INSTANCES];
     int npts = nina_client_get_pointings(pts, MAX_NINA_INSTANCES);
@@ -807,6 +837,23 @@ static bool adsb_poll_once(void *arg)
     d->ever_ok = true;
     d->last_ok_ms = d->now_ms;
     d->fail_count = 0;
+
+    /* Message rate: delta of the receiver's counter over the elapsed time.
+     * 0 until a baseline exists; a counter that went backwards (receiver
+     * restart) or a missing key re-arms the baseline instead of publishing
+     * a bogus burst. */
+    d->msg_rate = 0.0f;
+    if (have_msgs) {
+        int64_t dt_ms = d->now_ms - s_msg_prev_ms;
+        if (s_msg_have_prev && msgs >= s_msg_prev && dt_ms > 0) {
+            d->msg_rate = (float)(msgs - s_msg_prev) * 1000.0f / (float)dt_ms;
+        }
+        s_msg_prev = msgs;
+        s_msg_prev_ms = d->now_ms;
+        s_msg_have_prev = true;
+    } else {
+        s_msg_have_prev = false;
+    }
 
     /* Publish: swap the buffers, so the UI is never blocked behind a parse. */
     if (xSemaphoreTake(s_mux, portMAX_DELAY) == pdTRUE) {
@@ -863,6 +910,7 @@ static void adsb_poll_task(void *arg)
 {
     (void)arg;
     ESP_LOGI(TAG, "ADS-B poll task started");
+    s_msg_have_prev = false;   /* message-rate baseline starts fresh */
     poll_loop_spec_t spec = {
         .name = "adsb",
         .wifi_group = s_wifi_event_group,

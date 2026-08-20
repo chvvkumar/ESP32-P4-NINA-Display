@@ -1,9 +1,9 @@
 
         <div class="card">
-          <div class="card-title"><span class="card-title-label">Custom URL <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
-          <div class="help-popover"><div class="help-popover-title">Custom URL page</div><p>Adds a full-screen page that shows a JPEG from a web address you provide (for example an all-sky camera or a weather map). The picture refreshes at the update interval you choose. The page appears in the page list only once a URL is set.</p><p>Fill (crop borders) trims the picture's edges to fill the 720x720 panel. Rotation and the two flips correct a picture that appears sideways or mirrored on your panel.</p></div>
+          <div class="card-title"><span class="card-title-label">Custom Image <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+          <div class="help-popover"><div class="help-popover-title">Custom Image page</div><p>Adds a full-screen page that shows a JPEG from a web address you provide (for example an all-sky camera or a weather map). The picture refreshes at the update interval you choose. The page appears in the page list only once a URL is set.</p><p>Fill (crop borders) trims the picture's edges to fill the 720x720 panel. Rotation and the two flips correct a picture that appears sideways or mirrored on your panel.</p></div>
           <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
-            <span class="toggle-label">Enable Custom URL page</span>
+            <span class="toggle-label">Enable Custom Image page</span>
             <label class="toggle"><input type="checkbox" id="custom_enabled" onchange="updateImagePageEnabledUI('image-custom');applyImagePage('image-custom');checkDirty()"><span class="toggle-track"></span></label>
           </div>
           <div class="field-hint">Adds a page that shows a JPEG from a web address you provide.</div>

@@ -184,7 +184,7 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
     }
     /* Image pages (GOES/Moon/Solar/Custom/Radar/Clouds): one live-apply for all six; an
      * enable toggle is a topology change (an optional page appeared/disappeared).
-     * A changed Custom URL request header means the next download is a
+     * A changed Custom Image request header means the next download is a
      * different request, so force the Custom refetch (force_fetch is consulted
      * for that page only). */
     image_page_config_apply_live(old_cfg, new_cfg,
@@ -217,7 +217,9 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
     bool adsb_view_changed = (new_cfg->flights_mode != old_cfg->flights_mode
                               || new_cfg->flights_up_azimuth != old_cfg->flights_up_azimuth
                               || new_cfg->flights_min_el != old_cfg->flights_min_el
-                              || new_cfg->flights_range_nm != old_cfg->flights_range_nm);
+                              || new_cfg->flights_range_nm != old_cfg->flights_range_nm
+                              /* label count is read by the scope painter */
+                              || new_cfg->flights_label_max != old_cfg->flights_label_max);
     if (adsb_enable_changed || adsb_view_changed) {
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
             if (adsb_enable_changed) {
