@@ -431,6 +431,11 @@
         host.appendChild(r);
       });
       var empty=$('jd_devEmpty'); if(empty) empty.style.display=jdTileCount()===0?"flex":"none";
+      /* Every edit path (typed fields, add/remove buttons, color swatches)
+         funnels through this repaint, so it is the one place that can tell
+         the shell's save bar about tiles-config dirtiness -- the tiles blob
+         lives outside the main config, invisible to touchedPayload(). */
+      if(typeof checkDirty==='function') checkDirty();
     }
     /* Typing only repaints the local preview. The device is not told about a
        half-typed URL or key: text fields commit on change (blur / Enter), the
@@ -865,6 +870,13 @@
     /* Page-wide Save hook: a promise that stores this page's whole config
        (source fields + tiles + default colors), or null when the tab was never
        opened or nothing changed since it was loaded. */
+    /* Dirty probe for the shell's checkDirty(): does the current form differ
+       from what was last loaded or stored? Derived, never flagged, so no edit
+       path can forget to set it. */
+    function jdIsDirty(){
+      if(!jdLoaded || !$('jd_rowsHost')) return false;
+      return JSON.stringify(jdPayload(false))!==jdStored;
+    }
     function jdCollectAndSave(){
       /* drop any pending debounced preview: firing it after this save would
          re-apply unsaved values and race the page-wide config POST */
@@ -906,6 +918,7 @@
   window.jdAddRow=jdAddRow;
   window.jdPreviewLayout=jdPreviewLayout;
   window.jdCollectAndSave=jdCollectAndSave;
+  window.jdIsDirty=jdIsDirty;
   window.jdRevertPreview=jdRevertPreview;
 })();
 </script>
