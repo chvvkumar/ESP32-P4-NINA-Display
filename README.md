@@ -254,7 +254,7 @@ Setup: Pages > Solar.
 
 Full-screen JPEG fetched from any URL you supply, for example a webcam or a weather map. JPEG only, up to 1024x1024 pixels and 1 MB; PNG and WebP are not supported. A source behind a login can be reached by entering one request header line, such as `Authorization: Bearer <token>` or `X-Api-Key: <key>`; the value is stored on the device and shown masked in the web UI.
 
-Setup: Pages > Custom URL.
+Setup: Pages > Custom Image.
 
 ---
 
@@ -337,13 +337,13 @@ Each layout can show the printer camera instead of the slicer preview. On the Fl
 
 ### ADS-B
 
-Shows the aircraft your own ADS-B receiver is hearing, with the direction each connected NINA mount is pointing marked on the same picture. Data comes from a tar1090 or readsb receiver on your network; nothing is fetched from an internet flight-tracking service.
+Shows the aircraft your own ADS-B receiver is hearing, with the direction each connected NINA mount is pointing marked on the same picture. Data comes from a tar1090 or readsb receiver on your network. Aircraft positions never leave your network; the only optional internet lookup is the origin-destination route for each callsign (Route lookup toggle, on by default).
 
 Three views, cycled by tapping the page: Sky Dome draws the sky as seen looking up, with the middle of the circle directly overhead and the rim at the horizon; Radar Scope draws a flat map by distance out to a chosen range; Board is a text list of the nearest aircraft. The three nearest to a mount get a callsign and altitude tag. Aircraft are colored by altitude, military contacts are drawn as squares, and an emergency squawk gets a red halo. An elevation setting hides aircraft low on the horizon, where they are behind buildings and trees anyway; those are still counted.
 
 Dragging on the Sky Dome or Radar Scope turns the whole picture so a chosen compass direction sits at the top, which lets the screen match the view out of a window. The turn is saved, and the web field and the drag stay in step.
 
-Setup: Pages > ADS-B (receiver address such as `http://kmoofall.lan:8080`, refresh, range, minimum elevation, up direction, view).
+Setup: Pages > ADS-B (receiver address such as `http://kmoofall.lan:8080`, refresh, range, minimum elevation, up direction, view, Radar Scope labels: all aircraft, up to a number, or none).
 
 ---
 
@@ -369,7 +369,7 @@ Swipe left or right to change pages, or press the BOOT button on the board to ad
 The display picks a page on its own; a swipe or tap takes over for a configurable time (default 10 s), after which it returns to its automatic choice. Device > Behavior > Page Navigation holds the controls:
 
 - Home Page: the page the display settles on when nothing else applies. When it is a NINA instance, the display also returns there whenever that instance is online; with several online and the Home instance not among them, it shows the Summary page. An option keeps the Home Page on screen even while instances are connected.
-- Auto Cycle: rotate through a chosen, ordered list of pages on an interval with an instant, fade or slide transition, optionally skipping disconnected instances. The downloading image pages (GOES, Solar, Custom URL, Radar and Cloud Cover) fetch a fresh picture each time the rotation reaches them.
+- Auto Cycle: rotate through a chosen, ordered list of pages on an interval with an instant, fade or slide transition, optionally skipping disconnected instances. The downloading image pages (GOES, Solar, Custom Image, Radar and Cloud Cover) fetch a fresh picture each time the rotation reaches them.
 - Switch page when no connections: show a chosen page while every enabled NINA instance is disconnected.
 
 The web Home page and the API can also send the display to any page; see [Web API](#web-api).
@@ -401,7 +401,7 @@ Custom voice clips: Device > Voice Clips lets you replace any of the 47 built-in
 
 ## Web UI
 
-Open the device's address in a browser. The Home page shows device health at a glance, explains why the panel is on its current page, lists NINA connections and integrations, and lets you send the panel to any enabled page with one tap. Every setting is managed from `/config`, organized into three sections: Pages (N.I.N.A., AllSky, JSON, Home Assistant, Clock, Spotify, GOES, Moon, Solar, Custom URL, Radar, Cloud Cover, OctoPrint, ADS-B), Device (Display, Behavior, Voice Clips, System) and Tools (Logs, Backup, API). Most settings cards carry an info button that explains what those settings do. Changes apply to the display as a live preview and persist when you select Save.
+Open the device's address in a browser. The Home page shows device health at a glance, explains why the panel is on its current page, lists NINA connections and integrations, and lets you send the panel to any enabled page with one tap. Every setting is managed from `/config`, organized into three sections: Pages (N.I.N.A., AllSky, JSON, Home Assistant, Clock, Spotify, GOES, Moon, Solar, Custom Image, Radar, Cloud Cover, OctoPrint, ADS-B), Device (Display, Behavior, Voice Clips, System) and Tools (Logs, Backup, API). Most settings cards carry an info button that explains what those settings do. Changes apply to the display as a live preview and persist when you select Save.
 
 <p align="center">
   <img src="images/web_home.jpg" alt="Web UI home page" width="720">

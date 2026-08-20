@@ -51,6 +51,18 @@
             <div class="field-hint">How the aircraft are drawn; a tap on the device cycles through the same three.</div>
           </div>
           <div class="field">
+            <label class="field-label" for="flights_label_mode">Radar Scope labels</label>
+            <div style="display:flex;align-items:center;gap:10px">
+              <select class="input" id="flights_label_mode" style="flex:1;min-width:0">
+                <option value="all">All aircraft</option>
+                <option value="max">Up to a number</option>
+                <option value="none">None</option>
+              </select>
+              <input type="number" class="input" id="flights_label_n" min="1" max="63" step="1" placeholder="10" style="flex:0 0 90px;display:none">
+            </div>
+            <div class="field-hint">Which aircraft on the Radar Scope get a text label (flight, altitude and speed) next to their arrow. "Up to a number" labels the aircraft nearest to your receiver first. Sky Dome and Board are not affected.</div>
+          </div>
+          <div class="field">
             <label class="field-label" for="flights_min_el">Minimum elevation</label>
             <input type="number" class="input" id="flights_min_el" min="0" max="89" step="1" placeholder="10">
             <div class="field-hint">Degrees above the horizon, 0 to 89. Aircraft lower than this are counted but not drawn.</div>
@@ -144,5 +156,18 @@
      loaded value. Draw once now too, for the fragment's own default. */
   window.adsbDrawCompass=adsbDrawCompass;
   adsbDrawCompass();
+
+  /* The number box only makes sense for "Up to a number"; hide it otherwise.
+     The shell maps mode + number to the single flights_label_max value. */
+  function adsbLabelModeSync(){
+    var m=document.getElementById('flights_label_mode');
+    var n=document.getElementById('flights_label_n');
+    if(!m||!n) return;
+    n.style.display=(m.value==='max')?'':'none';
+  }
+  var m=document.getElementById('flights_label_mode');
+  if(m) m.addEventListener('change',adsbLabelModeSync);
+  window.adsbLabelModeSync=adsbLabelModeSync;
+  adsbLabelModeSync();
 })();
 </script>

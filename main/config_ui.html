@@ -1040,7 +1040,7 @@
         <button class="tab-btn" data-tab="image-goes">GOES</button>
         <button class="tab-btn" data-tab="image-moon">Moon</button>
         <button class="tab-btn" data-tab="image-solar">Solar</button>
-        <button class="tab-btn" data-tab="image-custom">Custom URL</button>
+        <button class="tab-btn" data-tab="image-custom">Custom Image</button>
         <button class="tab-btn" data-tab="image-radar">Radar</button>
         <button class="tab-btn" data-tab="image-clouds">Cloud Cover</button>
         <button class="tab-btn" data-tab="octoprint">OctoPrint</button>
@@ -2458,6 +2458,16 @@
       data.flights_up_azimuth=isNaN(up)?0:up;
       data.flights_mode=parseInt($('flights_mode').value,10)||0;
       data.flights_route_lookup=!!$('flights_route_lookup').checked;
+      /* Radar Scope label count: mode select + number box fold into one
+         0-64 value (0 = none, 64 = all, else up to N). */
+      var lm=$('flights_label_mode')?$('flights_label_mode').value:'all';
+      if(lm==='none') data.flights_label_max=0;
+      else if(lm==='max'){
+        var ln=parseInt($('flights_label_n')?$('flights_label_n').value:'',10);
+        if(isNaN(ln)||ln<1) ln=10;
+        if(ln>63) ln=63;
+        data.flights_label_max=ln;
+      } else data.flights_label_max=64;
     }
 
     function collectTab_display(data){
@@ -2926,6 +2936,14 @@
       if($('flights_mode')) $('flights_mode').value=String(data.flights_mode||0);
       /* Default is on, so an absent key must read as checked, not unchecked. */
       if($('flights_route_lookup')) $('flights_route_lookup').checked=data.flights_route_lookup!=null?!!data.flights_route_lookup:true;
+      /* Default is 64 (all), so an absent key must read as "All aircraft". */
+      if($('flights_label_mode')){
+        var lmax=data.flights_label_max!=null?parseInt(data.flights_label_max,10):64;
+        if(isNaN(lmax)) lmax=64;
+        $('flights_label_mode').value=(lmax<=0)?'none':(lmax>=64?'all':'max');
+        if($('flights_label_n')) $('flights_label_n').value=(lmax>0&&lmax<64)?lmax:10;
+        if(typeof window.adsbLabelModeSync==='function') window.adsbLabelModeSync();
+      }
       /* Turn the compass preview to the value just loaded. Published by the
          fragment's own script, which runs before this hook. */
       if(typeof window.adsbDrawCompass==='function') window.adsbDrawCompass();
