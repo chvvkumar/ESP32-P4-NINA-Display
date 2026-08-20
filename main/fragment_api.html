@@ -92,6 +92,7 @@
                 <tr><td>flights_mode</td><td>int</td><td>0 to 2</td><td>View: 0 = Sky Dome, 1 = Radar Scope, 2 = Board. An invalid value falls back to 0.</td></tr>
                 <tr><td>flights_route_lookup</td><td>bool</td><td>true / false</td><td>Look up each flight's origin and destination online (adsb.im route service). Default true; false keeps the ADS-B page fully local.</td></tr>
                 <tr><td>flights_label_max</td><td>int</td><td>0 to 64</td><td>How many Radar Scope contacts get a text label: 0 = none, 1 to 63 = at most that many, nearest first, 64 = every drawn contact. Default 64; an out-of-range value falls back to 64.</td></tr>
+                <tr><td>flights_icon_style</td><td>int</td><td>0 to 1</td><td>Shape drawn for each Radar Scope contact: 0 = arrows, 1 = aircraft silhouettes picked from the aircraft's reported category. Default 0; an invalid value falls back to 0.</td></tr>
               </tbody>
             </table>
           </div>

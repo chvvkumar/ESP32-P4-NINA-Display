@@ -218,8 +218,9 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
                               || new_cfg->flights_up_azimuth != old_cfg->flights_up_azimuth
                               || new_cfg->flights_min_el != old_cfg->flights_min_el
                               || new_cfg->flights_range_nm != old_cfg->flights_range_nm
-                              /* label count is read by the scope painter */
-                              || new_cfg->flights_label_max != old_cfg->flights_label_max);
+                              /* label count and icon style are read by the scope painter */
+                              || new_cfg->flights_label_max != old_cfg->flights_label_max
+                              || new_cfg->flights_icon_style != old_cfg->flights_icon_style);
     if (adsb_enable_changed || adsb_view_changed) {
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
             if (adsb_enable_changed) {

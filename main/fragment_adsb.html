@@ -51,6 +51,14 @@
             <div class="field-hint">How the aircraft are drawn; a tap on the device cycles through the same three.</div>
           </div>
           <div class="field">
+            <label class="field-label" for="flights_icon_style">Radar Scope icons</label>
+            <select class="input" id="flights_icon_style">
+              <option value="0">Arrows</option>
+              <option value="1">Aircraft shapes</option>
+            </select>
+            <div class="field-hint">Shape drawn for each aircraft on the Radar Scope. Aircraft shapes pick a jet, small plane, or helicopter outline from the aircraft's reported category. Sky Dome and Board are not affected.</div>
+          </div>
+          <div class="field">
             <label class="field-label" for="flights_label_mode">Radar Scope labels</label>
             <div style="display:flex;align-items:center;gap:10px">
               <select class="input" id="flights_label_mode" style="flex:1;min-width:0">

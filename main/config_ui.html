@@ -2461,6 +2461,7 @@
       var up=parseInt($('flights_up_azimuth').value,10);
       data.flights_up_azimuth=isNaN(up)?0:up;
       data.flights_mode=parseInt($('flights_mode').value,10)||0;
+      data.flights_icon_style=parseInt($('flights_icon_style').value,10)||0;
       data.flights_route_lookup=!!$('flights_route_lookup').checked;
       /* Radar Scope label count: mode select + number box fold into one
          0-64 value (0 = none, 64 = all, else up to N). */
@@ -2941,6 +2942,7 @@
       if($('flights_min_el')) $('flights_min_el').value=data.flights_min_el!=null?data.flights_min_el:10;
       if($('flights_up_azimuth')) $('flights_up_azimuth').value=data.flights_up_azimuth!=null?data.flights_up_azimuth:0;
       if($('flights_mode')) $('flights_mode').value=String(data.flights_mode||0);
+      if($('flights_icon_style')) $('flights_icon_style').value=String(data.flights_icon_style||0);
       /* Default is on, so an absent key must read as checked, not unchecked. */
       if($('flights_route_lookup')) $('flights_route_lookup').checked=data.flights_route_lookup!=null?!!data.flights_route_lookup:true;
       /* Default is 64 (all), so an absent key must read as "All aircraft". */

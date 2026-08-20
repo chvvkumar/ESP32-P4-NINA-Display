@@ -156,6 +156,12 @@ LV_FONT_DECLARE(lv_font_overpass_27);
 #define MK_SQUARE  0x02   /* military (dbFlags & 1)                */
 #define MK_EMERG   0x04   /* emergency squawk: red halo            */
 #define MK_TRI     0x08   /* Scope: heading-rotated triangle       */
+#define MK_PLANE   0x10   /* Scope: heading-rotated silhouette (flights_icon_style 1) */
+
+/* Silhouette classes for MK_PLANE, picked from readsb `category`. */
+#define PLANE_JET    0    /* airliner: swept wings and tailplane   */
+#define PLANE_SMALL  1    /* light aircraft: straight wing         */
+#define PLANE_HELI   2    /* helicopter: body, boom, rotor cross   */
 
 /* ── Fixed palette (the tar1090 domain convention; only the colour-brightness
  *    slider and the Red Night remap touch it, never the theme hues) ──────── */
@@ -274,6 +280,10 @@ typedef struct {
     uint32_t color;
     uint8_t  opa;
     uint8_t  flags;
+    uint8_t  shape;   /* PLANE_* class, valid iff MK_PLANE          */
+    float    st, ct;  /* sin/cos of the heading, precomputed here so
+                       * the draw callback multiplies but never calls
+                       * trig (file header rule)                    */
 } adsb_mark_t;
 
 static adsb_mark_t s_mark[ADSB_MAX_AC];
@@ -641,6 +651,82 @@ static void draw_square(lv_layer_t *layer, const adsb_mark_t *m)
     }
 }
 
+/* ── Aircraft silhouettes (flights_icon_style 1) ─────────────────────────
+ * Nose-up local coordinates (x right, y down, nose toward -y), one row per
+ * filled triangle: x0,y0,x1,y1,x2,y2. Sized to the 30 px triangle class the
+ * arrows use (~38 px long, ~34 px span for the jet). Rotation happens in
+ * draw_plane with the sin/cos precomputed by recompute(). */
+
+static const int8_t JET_TRIS[][6] = {
+    {   0, -19,   2, -13,  -2, -13 },   /* nose cone            */
+    {  -2, -13,   2, -13,   2,  19 },   /* fuselage quad        */
+    {  -2, -13,   2,  19,  -2,  19 },
+    {   2,  -4,  17,   9,  17,  12 },   /* right wing quad      */
+    {   2,  -4,  17,  12,   2,   5 },
+    {  -2,  -4, -17,   9, -17,  12 },   /* left wing quad       */
+    {  -2,  -4, -17,  12,  -2,   5 },
+    {   1,  13,   9,  18,   1,  17 },   /* right tailplane      */
+    {  -1,  13,  -9,  18,  -1,  17 },   /* left tailplane       */
+};
+
+static const int8_t SMALL_TRIS[][6] = {
+    {   0, -14,   2, -10,  -2, -10 },   /* nose cone            */
+    {  -2, -10,   2, -10,   2,  14 },   /* fuselage quad        */
+    {  -2, -10,   2,  14,  -2,  14 },
+    { -16,  -6,  16,  -6,  16,  -1 },   /* straight wing quad   */
+    { -16,  -6,  16,  -1, -16,  -1 },
+    {  -7,  10,   7,  10,   7,  14 },   /* straight tailplane   */
+    {  -7,  10,   7,  14,  -7,  14 },
+};
+
+static const int8_t HELI_TRIS[][6] = {
+    {   0,  -9,   5,  -2,  -5,  -2 },   /* diamond fuselage     */
+    {  -5,  -2,   5,  -2,   0,   4 },
+    {  -1,   4,   1,   4,   1,  15 },   /* tail boom quad       */
+    {  -1,   4,   1,  15,  -1,  15 },
+};
+
+/* Two crossed rotor blades over the fuselage centre (0,-2), ~26 px tip to
+ * tip, drawn as line segments: x1,y1,x2,y2. */
+static const int8_t HELI_BLADES[2][4] = {
+    {  -9, -11,   9,   7 },
+    {   9, -11,  -9,   7 },
+};
+
+/** Heading-rotated silhouette at (x,y). Same clockwise screen rotation as the
+ *  MK_TRI nose[] path: rx = px*ct - py*st, ry = px*st + py*ct. */
+static void draw_plane(lv_layer_t *layer, int x, int y, float st, float ct,
+                       uint8_t shape, uint32_t color, lv_opa_t opa)
+{
+    const int8_t (*tris)[6];
+    int n;
+    switch (shape) {
+    case PLANE_SMALL: tris = SMALL_TRIS; n = (int)(sizeof(SMALL_TRIS) / sizeof(SMALL_TRIS[0])); break;
+    case PLANE_HELI:  tris = HELI_TRIS;  n = (int)(sizeof(HELI_TRIS)  / sizeof(HELI_TRIS[0]));  break;
+    default:          tris = JET_TRIS;   n = (int)(sizeof(JET_TRIS)   / sizeof(JET_TRIS[0]));   break;
+    }
+    for (int i = 0; i < n; i++) {
+        int16_t xs[3], ys[3];
+        for (int k = 0; k < 3; k++) {
+            float px = (float)tris[i][2 * k];
+            float py = (float)tris[i][2 * k + 1];
+            xs[k] = (int16_t)(x + (int)(px * ct - py * st));
+            ys[k] = (int16_t)(y + (int)(px * st + py * ct));
+        }
+        draw_tri(layer, xs, ys, color, opa);
+    }
+    if (shape == PLANE_HELI) {
+        for (int i = 0; i < 2; i++) {
+            float x1 = (float)HELI_BLADES[i][0], y1 = (float)HELI_BLADES[i][1];
+            float x2 = (float)HELI_BLADES[i][2], y2 = (float)HELI_BLADES[i][3];
+            draw_seg(layer,
+                     x + (int)(x1 * ct - y1 * st), y + (int)(x1 * st + y1 * ct),
+                     x + (int)(x2 * ct - y2 * st), y + (int)(x2 * st + y2 * ct),
+                     color, 2, opa);
+        }
+    }
+}
+
 static void disc_draw_cb(lv_event_t *e)
 {
     lv_layer_t *layer = lv_event_get_layer(e);
@@ -719,7 +805,9 @@ static void disc_draw_cb(lv_event_t *e)
         if (m->flags & MK_EMERG) {
             draw_ring(layer, m->x, m->y, 26, s_col_emerg, 3, LV_OPA_60);
         }
-        if (m->flags & MK_TRI) {
+        if (m->flags & MK_PLANE) {
+            draw_plane(layer, m->x, m->y, m->st, m->ct, m->shape, m->color, m->opa);
+        } else if (m->flags & MK_TRI) {
             draw_tri(layer, m->tx, m->ty, m->color, m->opa);
         } else if (m->flags & MK_SQUARE) {
             draw_square(layer, m);
@@ -1506,6 +1594,18 @@ static void fill_scope_corners(int within, int tracked, float range, page_conn_t
     lv_label_set_text(s_sc_dist, buf);
 }
 
+/** Silhouette class from the readsb emitter category: A7 rotorcraft, A1/A2
+ *  light/small fixed wing, everything else (including "" and the B and C
+ *  non-aircraft code groups) the airliner outline. */
+static uint8_t shape_of_cat(const char *cat)
+{
+    if (cat[0] == 'A') {
+        if (cat[1] == '7') return PLANE_HELI;
+        if (cat[1] == '1' || cat[1] == '2') return PLANE_SMALL;
+    }
+    return PLANE_JET;
+}
+
 /**
  * Turn the held snapshot into screen coordinates and label text.
  *
@@ -1655,22 +1755,33 @@ static void recompute(void)
         build_trail(i, m->color, gate, range);
 
         if (s_mode == MODE_SCOPE) {
-            /* Heading-rotated triangle, nose along (track - up). */
+            /* Nose along (track - up), for both icon styles. */
             float hdg = (a->track_deg < 0.0f) ? 0.0f : a->track_deg;
             float t = (hdg - s_up_deg) * ADSB_DEG2RAD;
             float st_ = sinf(t), ct = cosf(t);
-            static const float nose[3][2] = { { 0.0f, -18.0f }, { 10.0f, 12.0f }, { -10.0f, 12.0f } };
-            for (int k = 0; k < 3; k++) {
-                /* Clockwise screen rotation (y down): heading 90 = nose to the right. */
-                float rx = nose[k][0] * ct - nose[k][1] * st_;
-                float ry = nose[k][0] * st_ + nose[k][1] * ct;
-                m->tx[k] = (int16_t)(x + (int)rx);
-                m->ty[k] = (int16_t)(y + (int)ry);
-            }
-            if (!(m->flags & MK_SQUARE)) {
-                m->flags |= MK_TRI;
+            if (cfg->flights_icon_style == 1 && !(m->flags & MK_SQUARE)) {
+                /* Aircraft silhouette: store the rotation, draw_plane spins
+                 * the shape table in the draw callback. Military squares and
+                 * the emergency halo keep the style-0 path below. */
+                m->st    = st_;
+                m->ct    = ct;
+                m->shape = shape_of_cat(a->cat);
+                m->flags |= MK_PLANE;
             } else {
-                m->flags |= MK_FILLED;
+                /* Heading-rotated triangle. */
+                static const float nose[3][2] = { { 0.0f, -18.0f }, { 10.0f, 12.0f }, { -10.0f, 12.0f } };
+                for (int k = 0; k < 3; k++) {
+                    /* Clockwise screen rotation (y down): heading 90 = nose to the right. */
+                    float rx = nose[k][0] * ct - nose[k][1] * st_;
+                    float ry = nose[k][0] * st_ + nose[k][1] * ct;
+                    m->tx[k] = (int16_t)(x + (int)rx);
+                    m->ty[k] = (int16_t)(y + (int)ry);
+                }
+                if (!(m->flags & MK_SQUARE)) {
+                    m->flags |= MK_TRI;
+                } else {
+                    m->flags |= MK_FILLED;
+                }
             }
         } else if (a->el_deg >= 20.0f) {
             m->flags |= MK_FILLED;
