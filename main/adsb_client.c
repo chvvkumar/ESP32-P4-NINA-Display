@@ -293,6 +293,7 @@ static void parse_one(const cJSON *item, adsb_ac_t *a, float min_el,
     str_of(item, "hex", a->hex, sizeof(a->hex));
     str_of(item, "flight", a->flight, sizeof(a->flight));
     str_of(item, "t", a->type, sizeof(a->type));
+    str_of(item, "category", a->cat, sizeof(a->cat));
     /* Aircraft-database extras (readsb serves these when it has a db loaded;
      * all three are simply absent on a bare dump1090 feed). */
     str_of(item, "r", a->reg, sizeof(a->reg));

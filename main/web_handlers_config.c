@@ -685,6 +685,7 @@ static const backup_field_t s_backup_fields[] = {
     {"flights_mode",               "ADS-B View",           "ADS-B", false, false},
     {"flights_route_lookup",       "ADS-B Route Lookup",   "ADS-B", false, false},   /* v69 */
     {"flights_label_max",          "ADS-B Scope Labels",   "ADS-B", false, false},   /* v70 */
+    {"flights_icon_style",         "ADS-B Icon Style",     "ADS-B", false, false},   /* v71 */
     {"goes_region",                "GOES Region",          "GOES", false, false},
     {"goes_update_interval_s",     "GOES Update Interval", "GOES", false, false},
     {"custom_image_url",           "Custom Image URL",     "Custom Image", false, false},

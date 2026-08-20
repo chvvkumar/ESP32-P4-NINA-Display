@@ -226,7 +226,9 @@
     INT_RESET (flights_up_azimuth,           "flights_up_azimuth",           0,     0,     359)   /* which azimuth is drawn "up". RESET rather than wrap: both writers (the on-device drag and the web field) already store a wrapped 0-359 value, so anything outside it is a stale byte and north-up is the safe fallback */ \
     INT_RESET (flights_mode,                 "flights_mode",                 0,     0,     2)     /* 0 = Sky Dome (default), 1 = Radar Scope, 2 = Board. RESET, not clamp: an unknown mode (stale byte, or a mode a future firmware knows) falls back to Sky Dome rather than to the nearest bound */     /* -- ADS-B route lookup (v69) -- */     BOOL      (flights_route_lookup,         "flights_route_lookup",         true)  /* look up each flight's origin-destination pair online (adsb.im). Default on; off keeps the ADS-B page fully local */ \
     /* -- ADS-B Radar Scope labels (v70) -- */ \
-    INT_RESET (flights_label_max,            "flights_label_max",            64,    0,     64)    /* how many Radar Scope contacts get a text label: 0 = none, 1..63 = at most N, nearest first, 64 (= ADSB_MAX_AC) = every drawn contact. RESET, not clamp: a stale byte above 64 falls back to "all", never to a partial count the user never chose */
+    INT_RESET (flights_label_max,            "flights_label_max",            64,    0,     64)    /* how many Radar Scope contacts get a text label: 0 = none, 1..63 = at most N, nearest first, 64 (= ADSB_MAX_AC) = every drawn contact. RESET, not clamp: a stale byte above 64 falls back to "all", never to a partial count the user never chose */ \
+    /* -- ADS-B Radar Scope icon style (v71) -- */ \
+    INT_RESET (flights_icon_style,           "flights_icon_style",           0,     0,     1)     /* Radar Scope contact glyph: 0 = arrows, 1 = aircraft silhouettes */
 
 /* Apply every row's default value to *cfg. Called from set_defaults()
  * immediately after the memset(). Does not touch excluded/complex fields

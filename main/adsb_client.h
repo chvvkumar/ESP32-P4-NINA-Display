@@ -57,6 +57,7 @@ typedef struct {
     char     hex[8];
     char     flight[10];        /**< trimmed callsign, "" if none */
     char     type[6];           /**< readsb `t` */
+    char     cat[4];            /**< readsb `category` (A0-A7, B*, C*), "" if absent */
     float    lat, lon;          /**< valid iff has_pos */
     float    alt_ft;            /**< alt_geom else alt_baro; ground = 0 */
     bool     alt_is_geom;
