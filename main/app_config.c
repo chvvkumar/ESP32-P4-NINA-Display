@@ -917,6 +917,9 @@ static void set_defaults(app_config_t *cfg) {
     // v71 addition (ADS-B Radar Scope icon style). Also a SETTINGS_TABLE row.
     cfg->flights_icon_style = 0;        // 0 = classic arrows
 
+    // v72 addition (Clock page layout). Also a SETTINGS_TABLE row.
+    cfg->clock_layout = 0;              // 0 = Classic
+
     // Spotify client ID: secret-like sentinel, not table-driven
     cfg->spotify_client_id[0] = '\0';
 
@@ -2878,11 +2881,12 @@ static void migrate_from_v68(const void *raw, size_t raw_size, app_config_t *cfg
      * 4) still lands on it, so re-assert the default. Existing devices opt in
      * by default, matching a fresh install. */
     cfg->flights_route_lookup = true;
-    /* flights_label_max (v70) and flights_icon_style (v71) sit right after
-     * flights_route_lookup, inside that same tail padding, so re-assert
-     * them too. */
+    /* flights_label_max (v70), flights_icon_style (v71) and clock_layout
+     * (v72) sit right after flights_route_lookup, inside that same tail
+     * padding, so re-assert them too. */
     cfg->flights_label_max = 64;
     cfg->flights_icon_style = 0;
+    cfg->clock_layout = 0;
 
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v68 to v%d", APP_CONFIG_VERSION);
@@ -2902,9 +2906,11 @@ static void migrate_from_v69(const void *raw, size_t raw_size, app_config_t *cfg
      * still lands on it, so re-assert the default: label every drawn contact,
      * matching a fresh install. */
     cfg->flights_label_max = 64;
-    /* flights_icon_style (v71) sits right after flights_label_max, inside
-     * that same tail padding, so re-assert it too. */
+    /* flights_icon_style (v71) and clock_layout (v72) sit right after
+     * flights_label_max, inside that same tail padding, so re-assert
+     * them too. */
     cfg->flights_icon_style = 0;
+    cfg->clock_layout = 0;
 
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v69 to v%d", APP_CONFIG_VERSION);
@@ -2925,9 +2931,33 @@ static void migrate_from_v70(const void *raw, size_t raw_size, app_config_t *cfg
      * 4) still lands on it, so re-assert the default: classic arrows, matching
      * a fresh install. */
     cfg->flights_icon_style = 0;
+    /* clock_layout (v72) sits right after flights_icon_style, inside that
+     * same tail padding, so re-assert it too. */
+    cfg->clock_layout = 0;
 
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v70 to v%d", APP_CONFIG_VERSION);
+}
+
+/* --- v71 -> v72 migration: appends clock_layout, the Clock page's layout
+ *     choice (0 Classic, 1 Console 92, 2 Broadside, 3 Evensong, 4 Blueprint,
+ *     5 Transit Line, 6 Night Network). Additive and at the very
+ *     end, so this stays a plain prefix memcpy like every migration around
+ *     it. --- */
+static void migrate_from_v71(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v71_t) ? raw_size : sizeof(app_config_v71_t);
+    memcpy(cfg, raw, copy);
+
+    /* The field sits past the v71 snapshot, so memcpy(copy) never touches it on
+     * purpose; the snapshot's tail padding (it ends on a uint8_t but aligns to
+     * 4) still lands on it, so re-assert the default: the Classic layout,
+     * matching a fresh install. */
+    cfg->clock_layout = 0;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v71 to v%d", APP_CONFIG_VERSION);
 }
 
 
@@ -3742,6 +3772,14 @@ static bool validate_config(app_config_t *cfg) {
         fixed = true;
     }
 
+    /* clock_layout (v72) is a SETTINGS_TABLE INT_RESET row (0-6), so
+     * settings_clamp_apply() already reset a stale byte above 6 to the
+     * default. Belt and braces: an unknown layout falls back to Classic. */
+    if (cfg->clock_layout > 6) {
+        cfg->clock_layout = 0;
+        fixed = true;
+    }
+
     /* WiFi TX power cap: whitelist, not a range — only the discrete dBm steps
      * the UI offers are meaningful, and 0 means "no cap". Anything else (a
      * stale blob byte, or a value that slipped past the settings-table range
@@ -3834,6 +3872,17 @@ void app_config_init(void) {
             nvs_commit(handle);
         }
         /* tiles_loaded stays false -> tail loads "json_tiles"/"ha_tiles" keys */
+    } else if (version_check == 71) {
+        /* v71 -> v72: appended clock_layout (Clock page layout).
+         * tiles_loaded stays false: a v71 device already keeps its tiles in
+         * the "json_tiles"/"ha_tiles" NVS keys, so the tail loads them.
+         * Safe to write back immediately, same reasoning as the v70 branch:
+         * both dispatcher-tail fixups below are excluded by their literal
+         * version bounds. */
+        migrate_from_v71(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 70) {
         /* v70 -> v71: appended flights_icon_style (ADS-B Radar Scope glyph).
          * tiles_loaded stays false: a v70 device already keeps its tiles in

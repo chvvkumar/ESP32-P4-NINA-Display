@@ -1,5 +1,22 @@
 
       <div class="card">
+        <div class="card-title"><span class="card-title-label">Appearance</span></div>
+        <div class="field">
+          <label class="field-label" for="clockLayout">Page Layout</label>
+          <select class="input" id="clockLayout" onchange="checkDirty()">
+            <option value="0">Classic</option>
+            <option value="1">Console 92</option>
+            <option value="2">Broadside</option>
+            <option value="3">Evensong</option>
+            <option value="4">Blueprint</option>
+            <option value="5">Transit Line</option>
+            <option value="6">Night Network</option>
+          </select>
+          <div class="field-hint">How the Clock page arranges the time, date and weather; the same information is shown in every layout.</div>
+        </div>
+      </div>
+
+      <div class="card">
         <div class="card-title"><span class="card-title-label">Weather <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
         <div class="help-popover"><div class="help-popover-title">Weather</div><p>Drives the weather overlay shown on the Clock page. Pick a provider and supply an API key if the provider needs one. Open-Meteo needs no key; OpenWeatherMap and Weather Underground each require a key. The forecast uses the device location set on the System tab.</p><p>The Time Format option switches the clock between 14:30 and 2:30 PM. Temperature Units switches all weather readings between degrees F and degrees C. Update Interval sets how often the device fetches new weather data.</p><p>Example: choose Open-Meteo, set units to degrees C, and the Clock page shows local conditions refreshed on the chosen interval.</p></div>
         <div class="subsection">

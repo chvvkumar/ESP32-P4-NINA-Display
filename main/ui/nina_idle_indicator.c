@@ -53,9 +53,9 @@ static void apply_red(indicator_entry_t *ind)
 
 /* ── Public API ─────────────────────────────────────────────────────── */
 
-void nina_idle_indicator_create(lv_obj_t *parent, lv_align_t align, bool bare_dot)
+lv_obj_t *nina_idle_indicator_create(lv_obj_t *parent, lv_align_t align, bool bare_dot)
 {
-    if (s_count >= MAX_INDICATORS) return;
+    if (s_count >= MAX_INDICATORS) return NULL;
 
     indicator_entry_t *ind = &s_indicators[s_count++];
     int y_offs = (align == LV_ALIGN_TOP_MID) ? 4 : -4;
@@ -109,6 +109,8 @@ void nina_idle_indicator_create(lv_obj_t *parent, lv_align_t align, bool bare_do
 
         lv_obj_add_flag(ind->pill, LV_OBJ_FLAG_HIDDEN);
     }
+
+    return ind->pill ? ind->pill : ind->dot;
 }
 
 void nina_idle_indicator_reset(void)
