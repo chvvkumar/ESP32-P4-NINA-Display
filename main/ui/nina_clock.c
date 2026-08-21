@@ -1187,7 +1187,9 @@ static void build_layout_broadside(void) {
 
     /* ── Hero: huge time, rotated PM on its right ── */
     lv_obj_t *hero = make_container(clock_root);
-    lv_obj_set_size(hero, LV_PCT(100), 212);
+    /* 24 px wider than the content column so the PM mark can sit in the
+     * root's right padding, clear of a four-digit time ("10:12"). */
+    lv_obj_set_size(hero, SCREEN_SIZE - 2 * 34 + 24, 212);
 
     lbl_time = make_label(hero, &lv_font_saira_black_300, BS_BONE, -4, "");
     lv_obj_align(lbl_time, LV_ALIGN_LEFT_MID, -6, 0);
@@ -1196,7 +1198,12 @@ static void build_layout_broadside(void) {
     lv_obj_set_style_transform_pivot_x(lbl_ampm, lv_pct(50), 0);
     lv_obj_set_style_transform_pivot_y(lbl_ampm, lv_pct(50), 0);
     lv_obj_set_style_transform_rotation(lbl_ampm, 900, 0);
-    lv_obj_align(lbl_ampm, LV_ALIGN_RIGHT_MID, 0, 0);
+    /* Rotation does not change the layout box, so the glyphs sit (w-h)/2
+     * left of the box's right edge; slide right by that to hug hero's edge. */
+    lv_label_set_text(lbl_ampm, "PM");
+    lv_obj_update_layout(lbl_ampm);
+    int32_t ampm_slide = (lv_obj_get_width(lbl_ampm) - lv_obj_get_height(lbl_ampm)) / 2;
+    lv_obj_align(lbl_ampm, LV_ALIGN_RIGHT_MID, ampm_slide, 0);
 
     /* ── Condition line (sanitized to the thin_84 glyph range) ── */
     lbl_cond = make_label(clock_root, &lv_font_saira_thin_84, BS_BONE, 2, "");
@@ -1785,16 +1792,16 @@ static void build_layout_network(void) {
     lbl_wind_val  = c_vals[4];
 
     /* Temperature line (vertical) with end ticks */
-    met_tick_a = make_bg_rect(forecast_row, 606, 33, 44, 14, MET_TEAL);
-    met_tick_b = make_bg_rect(forecast_row, 606, 697, 44, 14, MET_TEAL);
+    met_tick_a = make_bg_rect(forecast_row, 606, 21, 44, 14, MET_TEAL);
+    met_tick_b = make_bg_rect(forecast_row, 606, 685, 44, 14, MET_TEAL);
     for (int i = 0; i < FORECAST_BARS; i++) {
-        met_segs[i] = make_bg_rect(forecast_row, 621, 47 + 65 * i, 14, 65,
+        met_segs[i] = make_bg_rect(forecast_row, 621, 35 + 65 * i, 14, 65,
                                    MET_TEAL);
     }
 
     /* Temperature stations: dot on the line, hour + temp to its left */
     for (int i = 0; i < FORECAST_BARS; i++) {
-        int sy = 79 + 65 * i;
+        int sy = 67 + 65 * i;
         met_dots[i] = make_station_dot(forecast_row, 628, sy, 10, 4, MET_TEAL);
 
         forecast_lbls[i] = make_label(forecast_row, &lv_font_overpass_27,
@@ -1815,18 +1822,18 @@ static void build_layout_network(void) {
     /* Peak interchange: double ring + PEAK tag, moved to the hottest hour */
     met_peak_ring = make_container(forecast_row);
     lv_obj_set_size(met_peak_ring, 36, 36);
-    lv_obj_set_pos(met_peak_ring, 610, 61);
+    lv_obj_set_pos(met_peak_ring, 610, 49);
     lv_obj_set_style_radius(met_peak_ring, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_border_width(met_peak_ring, 5, 0);
     lv_obj_set_style_border_color(met_peak_ring, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_border_opa(met_peak_ring, LV_OPA_COVER, 0);
 
-    met_peak_core = make_bg_rect(forecast_row, 622, 73, 12, 12, 0xFFFFFF);
+    met_peak_core = make_bg_rect(forecast_row, 622, 61, 12, 12, 0xFFFFFF);
     lv_obj_set_style_radius(met_peak_core, LV_RADIUS_CIRCLE, 0);
 
     met_peak_lbl = make_label(forecast_row, &lv_font_overpass_16, MET_RED, 1,
                               "PEAK");
-    lv_obj_set_pos(met_peak_lbl, 654, 69);
+    lv_obj_set_pos(met_peak_lbl, 654, 57);
 
     /* ── Legend panel ── */
     met_legend = make_container(forecast_row);
@@ -2079,7 +2086,7 @@ static void restyle_forecast(const weather_data_t *wd, bool red_night) {
     }
 
     if (s_layout == 6) {
-        int yp = 79 + 65 * i_pk;
+        int yp = 67 + 65 * i_pk;
         if (met_peak_ring) lv_obj_set_pos(met_peak_ring, 610, yp - 18);
         if (met_peak_core) lv_obj_set_pos(met_peak_core, 622, yp - 6);
         if (met_peak_lbl)  lv_obj_set_pos(met_peak_lbl, 654, yp - 10);
