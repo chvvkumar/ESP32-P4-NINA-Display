@@ -339,6 +339,17 @@ Each layout can show the printer camera instead of the slicer preview. On the Fl
 
 Shows the aircraft your own ADS-B receiver is hearing, with the direction each connected NINA mount is pointing marked on the same picture. Data comes from a tar1090 or readsb receiver on your network. Aircraft positions never leave your network; the only optional internet lookup is the origin-destination route for each callsign (Route lookup toggle, on by default).
 
+<table align="center">
+  <tr>
+    <td align="center"><img src="images/adsb_scope.jpg" alt="Radar Scope view with aircraft arrows and range rings" width="400"></td>
+    <td align="center"><img src="images/adsb_board.jpg" alt="Board view listing the nearest aircraft with routes and altitudes" width="400"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Radar Scope</em></td>
+    <td align="center"><em>Board</em></td>
+  </tr>
+</table>
+
 Three views, cycled by tapping the page: Sky Dome draws the sky as seen looking up, with the middle of the circle directly overhead and the rim at the horizon; Radar Scope draws a flat map by distance out to a chosen range; Board is a text list of the nearest aircraft. The three nearest to a mount get a callsign and altitude tag. Aircraft are colored by altitude, military contacts are drawn as squares, and an emergency squawk gets a red halo. An elevation setting hides aircraft low on the horizon, where they are behind buildings and trees anyway; those are still counted.
 
 Dragging on the Sky Dome or Radar Scope turns the whole picture so a chosen compass direction sits at the top, which lets the screen match the view out of a window. The turn is saved, and the web field and the drag stay in step.
@@ -479,3 +490,4 @@ Standard ESP-IDF 5.5.2 project: activate the IDF environment and run `idf.py bui
 - [LVGL](https://lvgl.io/) and [stb_image](https://github.com/nothings/stb).
 - NASA GIBS for the Cloud Cover imagery, NASA SDO and SOHO for the solar imagery, NOAA GOES SUVI (rendered by Helioviewer) for the extreme-UV solar bands, NOAA and the NWS for radar and GOES imagery, and Open-Meteo, OpenWeatherMap and Weather Underground for weather data.
 - Espressif esp-hosted and esp_wifi_remote for the ESP32-C6 WiFi link, [tgx](https://github.com/vindar/tgx) for the moon sphere renderer, and SVOX Pico TTS (esp-picotts) for the voice clips.
+- NASA's Scientific Visualization Studio for the [CGI Moon Kit](https://svs.gsfc.nasa.gov/4720) lunar surface maps used by the Moon page (visualizer Ernie Wright, USRA; scientist Noah Petro, NASA/GSFC), built from Lunar Reconnaissance Orbiter LROC WAC and LOLA data.

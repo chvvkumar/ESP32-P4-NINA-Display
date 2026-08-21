@@ -421,6 +421,11 @@
         host.appendChild(r);
       });
       var empty=$('ha_devEmpty'); if(empty) empty.style.display=haTileCount()===0?"flex":"none";
+      /* Every edit path (typed fields, add/remove buttons, color swatches)
+         funnels through this repaint, so it is the one place that can tell
+         the shell's save bar about tiles-config dirtiness -- the tiles blob
+         lives outside the main config, invisible to touchedPayload(). */
+      if(typeof checkDirty==='function') checkDirty();
     }
     /* Typing only repaints the local preview and drops a stale test result. The
        device is never handed a half-typed address or token: those fields commit
@@ -900,6 +905,13 @@
     /* Page-wide Save hook: a promise that stores this page's whole config
        (connection fields + tiles + default colors), or null when the tab was
        never opened or nothing changed since it was loaded. */
+    /* Dirty probe for the shell's checkDirty(): does the current form differ
+       from what was last loaded or stored? Derived, never flagged, so no edit
+       path can forget to set it. */
+    function haIsDirty(){
+      if(!haLoaded || !$('ha_rowsHost')) return false;
+      return JSON.stringify(haPayload(false))!==haStored;
+    }
     function haCollectAndSave(){
       /* drop any pending debounced preview: firing it after this save would
          re-apply unsaved values and race the page-wide config POST */
@@ -978,6 +990,7 @@
   window.haPreviewLayout=haPreviewLayout;
   window.haTestConnection=haTestConnection;
   window.haCollectAndSave=haCollectAndSave;
+  window.haIsDirty=haIsDirty;
   window.haRevertPreview=haRevertPreview;
 })();
 </script>
