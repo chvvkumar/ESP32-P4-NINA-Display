@@ -1175,6 +1175,12 @@ static void ws_start_locked(int index, const char *base_url, nina_client_t *data
         .reconnect_timeout_ms = 86400000, // Effectively disabled; reconnect managed externally with backoff
         .network_timeout_ms = 10000,
         .buffer_size = 2048,            // Reduced from 4096 to save heap; largest WS events ~1.2KB
+        /* Half-open TCP detection: without a pong deadline the client keeps a
+         * dead connection "connected" forever, which also gates off the HTTP
+         * image-history fallback in nina_client.c. Default ping interval is
+         * 10s; a missed pong for 20s trips WEBSOCKET_EVENT_DISCONNECTED and
+         * hands recovery to the external reconnect/backoff path. */
+        .pingpong_timeout_sec = 20,
     };
 
     ws_clients[index] = esp_websocket_client_init(&ws_cfg);
