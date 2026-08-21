@@ -37,7 +37,8 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
 - [Security](#security)
 - [Pages](#pages)
   - [Summary and NINA Instance Pages](#summary-and-nina-instance-pages)
-  - [Clock, Weather and Moon](#clock-weather-and-moon)
+  - [Clock and Weather](#clock-and-weather)
+  - [Moon](#moon)
   - [Spotify](#spotify)
   - [AllSky](#allsky)
   - [GOES Satellite](#goes-satellite)
@@ -172,21 +173,11 @@ Polling: the visible instance is polled every 5 s by default (1-10 s); the other
 
 ---
 
-### Clock, Weather and Moon
+### Clock and Weather
 
-The Clock page shows a large digital clock with current conditions, high and low, humidity, dew point, wind, UV, and a 10-hour forecast from your chosen provider. The Moon page renders the Moon on the device with the current phase, libration and sub-solar lighting; drag it to look around, and pick a starfield or glow background.
+The Clock page shows a large digital clock with current conditions, high and low, humidity, dew point, wind, UV, and a 10-hour forecast from your chosen provider.
 
-Setup: Pages > Clock (weather provider: Open-Meteo needs no key; OpenWeatherMap and Weather Underground need an API key) and Pages > Moon. The location comes from Device > System > Location.
-
-Seven clock layouts are selectable from Pages > Clock:
-
-- Classic: centered serif time between two horizontal rules, weather above and below, forecast bar chart.
-- Console 92: amber console with a corner-bracket frame, four-cell readout grid and baseline bar chart.
-- Broadside: poster typography with a spread dateline, oversized time and forecast numerals sized by temperature.
-- Evensong: word clock that spells the time over a dot-leader table of readings.
-- Blueprint: drafting-sheet style with a stencil time, dimension chain and dimensioned bar chart.
-- Transit Line: metro map with the time in a roundel and the day as a snaking, temperature-colored line with ten stations.
-- Night Network: network map where a vertical temperature line crosses a horizontal conditions line.
+Setup: Pages > Clock (weather provider: Open-Meteo needs no key; OpenWeatherMap and Weather Underground need an API key). The location comes from Device > System > Location.
 
 <p align="center">
   <img src="images/clock_classic.jpg" alt="Clock page, Classic layout" width="720">
@@ -218,6 +209,12 @@ Seven clock layouts are selectable from Pages > Clock:
     <td align="center"><em>Night Network</em></td>
   </tr>
 </table>
+
+### Moon
+
+The Moon page renders the Moon on the device with the current phase, libration and sub-solar lighting; drag it to look around, and pick a starfield or glow background.
+
+Setup: Pages > Moon. The location comes from Device > System > Location.
 
 <table align="center">
   <tr>
