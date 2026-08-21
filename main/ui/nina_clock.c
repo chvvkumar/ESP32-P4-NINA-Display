@@ -215,7 +215,7 @@ static lv_obj_t *blu_peak_tick = NULL;       /* dimension tick over peak bar */
 static lv_obj_t *blu_arrow[2];               /* dimension-line arrowheads */
 
 /* Transit / Network shared widgets */
-static lv_obj_t *met_name = NULL;            /* "<WEEKDAY> LINE/NETWORK" */
+static lv_obj_t *met_name = NULL;            /* live weekday header */
 static lv_obj_t *met_segs[FORECAST_BARS];    /* route/line segments */
 static lv_obj_t *met_arcs[2];                /* Transit U-bends */
 static lv_obj_t *met_dots[FORECAST_BARS];    /* station dots */
@@ -1012,16 +1012,12 @@ static void build_layout_console(void) {
                             SCREEN_SIZE - 26,
                             LV_BORDER_SIDE_BOTTOM | LV_BORDER_SIDE_RIGHT);
 
-    /* ── Header row: date only, left-aligned where the old caption sat ── */
-    lbl_date = make_label(clock_root, &lv_font_overpass_27, CON_CREAM, 2, "---");
-    lv_obj_set_pos(lbl_date, 56, 44);
-
-    /* ── Hero time (centered) + PM chip ── */
+    /* ── Hero time (centered, in the old header band) + PM chip ── */
     lbl_time = make_label(clock_root, &lv_font_saira_thin_240, CON_AMBER, 0, "");
-    lv_obj_align(lbl_time, LV_ALIGN_TOP_MID, 0, 118);
+    lv_obj_align(lbl_time, LV_ALIGN_TOP_MID, 0, 44);
 
     lbl_ampm = make_label(clock_root, &lv_font_overpass_16, CON_AMBER, 3, "");
-    lv_obj_align(lbl_ampm, LV_ALIGN_TOP_RIGHT, -74, 284);
+    lv_obj_align(lbl_ampm, LV_ALIGN_TOP_RIGHT, -74, 210);
     lv_obj_set_style_border_width(lbl_ampm, 1, 0);
     lv_obj_set_style_border_color(lbl_ampm, lv_color_hex(CON_LINE), 0);
     lv_obj_set_style_border_opa(lbl_ampm, LV_OPA_COVER, 0);
@@ -1029,6 +1025,10 @@ static void build_layout_console(void) {
     lv_obj_set_style_pad_bottom(lbl_ampm, 5, 0);
     lv_obj_set_style_pad_left(lbl_ampm, 10, 0);
     lv_obj_set_style_pad_right(lbl_ampm, 8, 0);
+
+    /* ── Date, centered between the time glyphs and the ATMOSPHERICS rule ── */
+    lbl_date = make_label(clock_root, &lv_font_overpass_27, CON_CREAM, 2, "---");
+    lv_obj_align(lbl_date, LV_ALIGN_TOP_MID, 0, 290);
 
     /* ── Engraved section rule with knocked-out label ── */
     lv_obj_t *atmo_rule = make_rule(clock_root);
@@ -1547,9 +1547,10 @@ static void build_layout_blueprint(void) {
 
 /**
  * Layout 5 — Transit Line. Metro map: red roundel with the time in a navy
- * bar, right column naming the "<WEEKDAY> LINE", and the day as one metro
+ * bar, right column headed by the live weekday, and the day as one metro
  * line snaking three runs with two U-bends, temperature-colored segments
- * and ten stations.
+ * and ten stations. The roundel keeps to x < 360 so the right-aligned
+ * column (x >= 370) never collides with the ring or bar.
  */
 static void build_layout_transit(void) {
     lv_obj_set_style_pad_all(clock_root, 0, 0);
@@ -1557,18 +1558,20 @@ static void build_layout_transit(void) {
     lv_obj_set_layout(clock_root, LV_LAYOUT_NONE);
     lv_obj_set_style_bg_color(clock_root, lv_color_hex(MET_BG), 0);
 
-    /* ── Roundel: red ring + navy bar with the time ── */
+    /* ── Roundel: red ring + navy bar with the time. Ring 200px with a
+     * 340px bar through its center, 70px symmetric overhang each side
+     * (same disc/bar proportion as the original 240/340/50). ── */
     met_ring5 = make_container(clock_root);
-    lv_obj_set_size(met_ring5, 240, 240);
-    lv_obj_set_pos(met_ring5, 140, 30);
+    lv_obj_set_size(met_ring5, 200, 200);
+    lv_obj_set_pos(met_ring5, 90, 30);
     lv_obj_set_style_radius(met_ring5, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_width(met_ring5, 24, 0);
+    lv_obj_set_style_border_width(met_ring5, 20, 0);
     lv_obj_set_style_border_color(met_ring5, lv_color_hex(MET_RED), 0);
     lv_obj_set_style_border_opa(met_ring5, LV_OPA_COVER, 0);
 
     met_bar = make_container(clock_root);
     lv_obj_set_size(met_bar, 340, 100);
-    lv_obj_set_pos(met_bar, 90, 104);
+    lv_obj_set_pos(met_bar, 20, 80);
     lv_obj_set_style_bg_color(met_bar, lv_color_hex(MET_NAVY), 0);
     lv_obj_set_style_bg_opa(met_bar, LV_OPA_COVER, 0);
     lv_obj_set_flex_flow(met_bar, LV_FLEX_FLOW_ROW);
@@ -1580,21 +1583,20 @@ static void build_layout_transit(void) {
     lbl_ampm = make_label(met_bar, &lv_font_overpass_27, MET_GOLD, 1, "");
     lv_obj_set_style_pad_top(lbl_ampm, 30, 0);
 
-    /* ── Right column: line name, date, accent line, readings ── */
+    /* ── Right column: weekday header, date, accent line, readings ── */
     met_name = make_label(clock_root, &lv_font_hanken_black_40, MET_INK, 3,
                           "");
     lv_obj_set_style_text_align(met_name, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_style_text_line_space(met_name, 8, 0);
     lv_obj_align(met_name, LV_ALIGN_TOP_RIGHT, -20, 40);
 
     lbl_date = make_label(clock_root, &lv_font_overpass_27, MET_DIM, 2, "---");
-    lv_obj_align(lbl_date, LV_ALIGN_TOP_RIGHT, -20, 122);
+    lv_obj_align(lbl_date, LV_ALIGN_TOP_RIGHT, -20, 100);
 
     lbl_cond = make_label(clock_root, &lv_font_overpass_27, MET_GOLD, 1, "--");
     lv_obj_set_width(lbl_cond, 310);
     lv_obj_set_style_text_align(lbl_cond, LV_TEXT_ALIGN_RIGHT, 0);
     lv_label_set_long_mode(lbl_cond, LV_LABEL_LONG_DOT);
-    lv_obj_align(lbl_cond, LV_ALIGN_TOP_RIGHT, -20, 168);
+    lv_obj_align(lbl_cond, LV_ALIGN_TOP_RIGHT, -20, 146);
 
     lv_obj_t *stats = make_container(clock_root);
     lv_obj_set_size(stats, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
@@ -1604,7 +1606,7 @@ static void build_layout_transit(void) {
     lv_obj_set_style_pad_row(stats, 4, 0);
     lbl_humid_val = make_label(stats, &lv_font_overpass_27, MET_DIM, 1, "--");
     lbl_dew_val   = make_label(stats, &lv_font_overpass_27, MET_DIM, 1, "--");
-    lv_obj_align(stats, LV_ALIGN_TOP_RIGHT, -20, 214);
+    lv_obj_align(stats, LV_ALIGN_TOP_RIGHT, -20, 192);
 
     /* ── Route map (hidden until forecast data arrives) ── */
     forecast_row = make_container(clock_root);
@@ -1641,8 +1643,9 @@ static void build_layout_transit(void) {
         int band = m5_band_y[row];
         forecast_lbls[i] = make_label(forecast_row, &lv_font_overpass_27,
                                       MET_DIM, 0, "--");
-        lv_obj_set_pos(forecast_lbls[i], m5_sx[i] - 72, band + 6);
-        lv_obj_set_width(forecast_lbls[i], 48);
+        /* 64px: "10a" at overpass_27 is ~50px; 48 wrapped it */
+        lv_obj_set_pos(forecast_lbls[i], m5_sx[i] - 88, band + 6);
+        lv_obj_set_width(forecast_lbls[i], 64);
         lv_obj_set_style_text_align(forecast_lbls[i], LV_TEXT_ALIGN_RIGHT, 0);
 
         forecast_temp_lbls[i] = make_label(forecast_row,
@@ -1664,7 +1667,8 @@ static void build_layout_transit(void) {
     /* PEAK tag — repositioned to the hottest station */
     met_peak_lbl = make_label(forecast_row, &lv_font_overpass_27, MET_RED, 2,
                               "PEAK");
-    lv_obj_set_width(met_peak_lbl, 70);
+    /* 100px: "PEAK" at overpass_27 + letter_space 2 is ~70px; 70 wrapped */
+    lv_obj_set_width(met_peak_lbl, 100);
     lv_obj_set_style_text_align(met_peak_lbl, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_pos(met_peak_lbl, 0, 0);
 
@@ -1694,9 +1698,8 @@ static void make_met_chip(lv_obj_t *parent, int w, int h, int idx) {
 
 /**
  * Layout 6 — Night Network. Two-line map: the vertical Temperature line
- * crosses the horizontal Conditions line; corner block names the
- * "<WEEKDAY> NETWORK"; legend panel with line keys and temperature-band
- * swatches.
+ * crosses the horizontal Conditions line; corner block names the live
+ * weekday; legend panel with line keys and temperature-band swatches.
  */
 static void build_layout_network(void) {
     lv_obj_set_style_pad_all(clock_root, 0, 0);
@@ -1706,7 +1709,7 @@ static void build_layout_network(void) {
 
     /* ── Corner name block ── */
     met_panel = make_container(clock_root);
-    lv_obj_set_size(met_panel, 360, 272);
+    lv_obj_set_size(met_panel, 360, LV_SIZE_CONTENT);
     lv_obj_set_pos(met_panel, 24, 20);
     lv_obj_set_style_bg_color(met_panel, lv_color_hex(MET_BOX), 0);
     lv_obj_set_style_bg_opa(met_panel, LV_OPA_COVER, 0);
@@ -1733,7 +1736,7 @@ static void build_layout_network(void) {
 
     met_name = make_label(met_panel, &lv_font_hanken_black_40, MET_INK, 2,
                           "");
-    lv_obj_set_style_text_line_space(met_name, 6, 0);
+    lv_obj_set_style_pad_top(met_name, 12, 0);   /* gap under the time */
 
     lbl_date = make_label(met_panel, &lv_font_overpass_27, MET_DIM, 2, "---");
 
@@ -1751,9 +1754,9 @@ static void build_layout_network(void) {
      * temperature line between stations so it never strikes through the
      * fixed station labels; the peak double-ring moves along the
      * temperature line to the actual hottest hour. */
-    met_cline[0] = make_bg_rect(forecast_row, 60, 388, 630, 14, MET_BLUE);
-    met_cline[1] = make_bg_rect(forecast_row, 53, 373, 14, 44, MET_BLUE);
-    met_cline[2] = make_bg_rect(forecast_row, 683, 373, 14, 44, MET_BLUE);
+    met_cline[0] = make_bg_rect(forecast_row, 60, 365, 630, 14, MET_BLUE);
+    met_cline[1] = make_bg_rect(forecast_row, 53, 350, 14, 44, MET_BLUE);
+    met_cline[2] = make_bg_rect(forecast_row, 683, 350, 14, 44, MET_BLUE);
 
     /* Conditions stations: dot + value + caption, below the line */
     static const int16_t c_cx[MET_CSTATIONS] = { 85, 160, 235, 310, 385 };
@@ -1762,11 +1765,11 @@ static void build_layout_network(void) {
     };
     lv_obj_t *c_vals[MET_CSTATIONS];
     for (int k = 0; k < MET_CSTATIONS; k++) {
-        met_cdots[k] = make_station_dot(forecast_row, c_cx[k], 395, 10, 4,
+        met_cdots[k] = make_station_dot(forecast_row, c_cx[k], 372, 10, 4,
                                         MET_BLUE);
         lv_obj_t *cell = make_container(forecast_row);
         lv_obj_set_size(cell, 90, LV_SIZE_CONTENT);
-        lv_obj_set_pos(cell, c_cx[k] - 45, 416);
+        lv_obj_set_pos(cell, c_cx[k] - 45, 393);
         lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_START,
                               LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -1782,28 +1785,28 @@ static void build_layout_network(void) {
     lbl_wind_val  = c_vals[4];
 
     /* Temperature line (vertical) with end ticks */
-    met_tick_a = make_bg_rect(forecast_row, 558, 33, 44, 14, MET_TEAL);
-    met_tick_b = make_bg_rect(forecast_row, 558, 627, 44, 14, MET_TEAL);
+    met_tick_a = make_bg_rect(forecast_row, 606, 33, 44, 14, MET_TEAL);
+    met_tick_b = make_bg_rect(forecast_row, 606, 697, 44, 14, MET_TEAL);
     for (int i = 0; i < FORECAST_BARS; i++) {
-        met_segs[i] = make_bg_rect(forecast_row, 573, 47 + 58 * i, 14, 58,
+        met_segs[i] = make_bg_rect(forecast_row, 621, 47 + 65 * i, 14, 65,
                                    MET_TEAL);
     }
 
     /* Temperature stations: dot on the line, hour + temp to its left */
     for (int i = 0; i < FORECAST_BARS; i++) {
-        int sy = 76 + 58 * i;
-        met_dots[i] = make_station_dot(forecast_row, 580, sy, 10, 4, MET_TEAL);
+        int sy = 79 + 65 * i;
+        met_dots[i] = make_station_dot(forecast_row, 628, sy, 10, 4, MET_TEAL);
 
         forecast_lbls[i] = make_label(forecast_row, &lv_font_overpass_27,
                                       MET_DIM, 0, "--");
-        lv_obj_set_pos(forecast_lbls[i], 420, sy - 19);
+        lv_obj_set_pos(forecast_lbls[i], 468, sy - 19);
         lv_obj_set_width(forecast_lbls[i], 56);
         lv_obj_set_style_text_align(forecast_lbls[i], LV_TEXT_ALIGN_RIGHT, 0);
 
         forecast_temp_lbls[i] = make_label(forecast_row,
                                            &lv_font_hanken_bold_44,
                                            MET_INK, 0, "--");
-        lv_obj_set_pos(forecast_temp_lbls[i], 486, sy - 15);
+        lv_obj_set_pos(forecast_temp_lbls[i], 534, sy - 15);
         lv_obj_set_width(forecast_temp_lbls[i], 86);
         lv_obj_set_style_text_align(forecast_temp_lbls[i],
                                     LV_TEXT_ALIGN_RIGHT, 0);
@@ -1812,23 +1815,23 @@ static void build_layout_network(void) {
     /* Peak interchange: double ring + PEAK tag, moved to the hottest hour */
     met_peak_ring = make_container(forecast_row);
     lv_obj_set_size(met_peak_ring, 36, 36);
-    lv_obj_set_pos(met_peak_ring, 562, 58);
+    lv_obj_set_pos(met_peak_ring, 610, 61);
     lv_obj_set_style_radius(met_peak_ring, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_border_width(met_peak_ring, 5, 0);
     lv_obj_set_style_border_color(met_peak_ring, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_border_opa(met_peak_ring, LV_OPA_COVER, 0);
 
-    met_peak_core = make_bg_rect(forecast_row, 574, 70, 12, 12, 0xFFFFFF);
+    met_peak_core = make_bg_rect(forecast_row, 622, 73, 12, 12, 0xFFFFFF);
     lv_obj_set_style_radius(met_peak_core, LV_RADIUS_CIRCLE, 0);
 
-    met_peak_lbl = make_label(forecast_row, &lv_font_overpass_27, MET_RED, 1,
+    met_peak_lbl = make_label(forecast_row, &lv_font_overpass_16, MET_RED, 1,
                               "PEAK");
-    lv_obj_set_pos(met_peak_lbl, 606, 57);
+    lv_obj_set_pos(met_peak_lbl, 654, 69);
 
     /* ── Legend panel ── */
     met_legend = make_container(forecast_row);
-    lv_obj_set_size(met_legend, 440, LV_SIZE_CONTENT);
-    lv_obj_set_pos(met_legend, 24, 536);
+    lv_obj_set_size(met_legend, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_pos(met_legend, 24, 506);
     lv_obj_set_style_bg_color(met_legend, lv_color_hex(MET_BOX), 0);
     lv_obj_set_style_bg_opa(met_legend, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(met_legend, 2, 0);
@@ -2034,7 +2037,8 @@ static void restyle_forecast(const weather_data_t *wd, bool red_night) {
     if (s_layout == 5) {
         if (met_peak_lbl) {
             int row = m5_row_of(i_pk);
-            lv_obj_set_pos(met_peak_lbl, m5_sx[i_pk] - 35, m5_tag_y[row]);
+            /* -50 = half the 100px label width, centered on the station */
+            lv_obj_set_pos(met_peak_lbl, m5_sx[i_pk] - 50, m5_tag_y[row]);
         }
         /* U-bend colors: arrival station's band */
         if (met_arcs[0]) {
@@ -2075,10 +2079,10 @@ static void restyle_forecast(const weather_data_t *wd, bool red_night) {
     }
 
     if (s_layout == 6) {
-        int yp = 76 + 58 * i_pk;
-        if (met_peak_ring) lv_obj_set_pos(met_peak_ring, 562, yp - 18);
-        if (met_peak_core) lv_obj_set_pos(met_peak_core, 574, yp - 6);
-        if (met_peak_lbl)  lv_obj_set_pos(met_peak_lbl, 606, yp - 19);
+        int yp = 79 + 65 * i_pk;
+        if (met_peak_ring) lv_obj_set_pos(met_peak_ring, 610, yp - 18);
+        if (met_peak_core) lv_obj_set_pos(met_peak_core, 622, yp - 6);
+        if (met_peak_lbl)  lv_obj_set_pos(met_peak_lbl, 654, yp - 10);
         /* Temperature-line end ticks follow their adjacent stations */
         if (met_tick_a) {
             float f0 = (wd->hourly_temps[0] - t_min) / t_range;
@@ -2339,12 +2343,9 @@ void clock_page_update(void) {
         lv_label_set_text(lbl_date, date_buf);
     }
 
-    /* Metro layouts: live "<WEEKDAY> LINE/NETWORK" name (A-Z font) */
+    /* Metro layouts: live weekday header (A-Z font) */
     if (met_name && (s_layout == 5 || s_layout == 6)) {
-        char name_buf[24];
-        snprintf(name_buf, sizeof(name_buf), "%s\n%s", day_s,
-                 (s_layout == 5) ? "LINE" : "NETWORK");
-        lv_label_set_text(met_name, name_buf);
+        lv_label_set_text(met_name, day_s);
     }
 
     /* Blueprint dimension text under the hero digits */
