@@ -228,7 +228,9 @@
     /* -- ADS-B Radar Scope labels (v70) -- */ \
     INT_RESET (flights_label_max,            "flights_label_max",            64,    0,     64)    /* how many Radar Scope contacts get a text label: 0 = none, 1..63 = at most N, nearest first, 64 (= ADSB_MAX_AC) = every drawn contact. RESET, not clamp: a stale byte above 64 falls back to "all", never to a partial count the user never chose */ \
     /* -- ADS-B Radar Scope icon style (v71) -- */ \
-    INT_RESET (flights_icon_style,           "flights_icon_style",           0,     0,     1)     /* Radar Scope contact glyph: 0 = arrows, 1 = aircraft silhouettes */
+    INT_RESET (flights_icon_style,           "flights_icon_style",           0,     0,     1)     /* Radar Scope contact glyph: 0 = arrows, 1 = aircraft silhouettes */ \
+    /* -- Clock page layout (v72) -- */ \
+    INT_RESET (clock_layout,                 "clock_layout",                 0,     0,     6)     /* 0 = Classic (default), 1 = Console 92, 2 = Broadside, 3 = Evensong, 4 = Blueprint, 5 = Transit Line, 6 = Night Network. RESET, not clamp: layouts are unordered names, so an unknown index falls back to Classic, never to whichever layout sits at the far bound */
 
 /* Apply every row's default value to *cfg. Called from set_defaults()
  * immediately after the memset(). Does not touch excluded/complex fields

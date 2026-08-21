@@ -174,13 +174,50 @@ Polling: the visible instance is polled every 5 s by default (1-10 s); the other
 
 ### Clock, Weather and Moon
 
-The Clock page shows a large digital clock with current conditions, high and low, humidity, dew point, wind, UV, and hourly forecast bars from your chosen provider. The Moon page renders the Moon on the device with the current phase, libration and sub-solar lighting; drag it to look around, and pick a starfield or glow background.
+The Clock page shows a large digital clock with current conditions, high and low, humidity, dew point, wind, UV, and a 10-hour forecast from your chosen provider. The Moon page renders the Moon on the device with the current phase, libration and sub-solar lighting; drag it to look around, and pick a starfield or glow background.
 
 Setup: Pages > Clock (weather provider: Open-Meteo needs no key; OpenWeatherMap and Weather Underground need an API key) and Pages > Moon. The location comes from Device > System > Location.
 
+Seven clock layouts are selectable from Pages > Clock:
+
+- Classic: centered serif time between two horizontal rules, weather above and below, forecast bar chart.
+- Console 92: amber console with a corner-bracket frame, four-cell readout grid and baseline bar chart.
+- Broadside: poster typography with a spread dateline, oversized time and forecast numerals sized by temperature.
+- Evensong: word clock that spells the time over a dot-leader table of readings.
+- Blueprint: drafting-sheet style with a stencil time, dimension chain and dimensioned bar chart.
+- Transit Line: metro map with the time in a roundel and the day as a snaking, temperature-colored line with ten stations.
+- Night Network: network map where a vertical temperature line crosses a horizontal conditions line.
+
 <p align="center">
-  <img src="images/clock-face.jpg" alt="Clock page with weather" width="720">
+  <img src="images/clock_classic.jpg" alt="Clock page, Classic layout" width="720">
 </p>
+
+<table align="center">
+  <tr>
+    <td align="center"><img src="images/clock_console92.jpg" alt="Console 92 layout" width="400"></td>
+    <td align="center"><img src="images/clock_broadside.jpg" alt="Broadside layout" width="400"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Console 92</em></td>
+    <td align="center"><em>Broadside</em></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="images/clock_evensong.jpg" alt="Evensong layout" width="400"></td>
+    <td align="center"><img src="images/clock_blueprint.jpg" alt="Blueprint layout" width="400"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Evensong</em></td>
+    <td align="center"><em>Blueprint</em></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="images/clock_transit_line.jpg" alt="Transit Line layout" width="400"></td>
+    <td align="center"><img src="images/clock_night_network.jpg" alt="Night Network layout" width="400"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Transit Line</em></td>
+    <td align="center"><em>Night Network</em></td>
+  </tr>
+</table>
 
 <table align="center">
   <tr>

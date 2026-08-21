@@ -241,6 +241,15 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
         }
         topology_changed = true;    /* optional page appeared/disappeared */
     }
+    /* Clock page layout change — rebuild the clock widget tree in place. The
+     * page is always present, so no topology change; nothing else reads the
+     * field live. */
+    if (new_cfg->clock_layout != old_cfg->clock_layout) {
+        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+            clock_page_refresh_config();
+            bsp_display_unlock();
+        }
+    }
     /* Weather config change — invalidate stale data and force refresh */
     if (new_cfg->weather_provider != old_cfg->weather_provider ||
         strcmp(new_cfg->weather_api_key, old_cfg->weather_api_key) != 0 ||

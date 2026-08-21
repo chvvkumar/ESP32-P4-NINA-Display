@@ -21,8 +21,10 @@ extern "C" {
  * @param parent    LVGL parent object for the indicator.
  * @param align     Alignment within parent (e.g. LV_ALIGN_BOTTOM_MID, LV_ALIGN_TOP_MID).
  * @param bare_dot  true = bare dot only (no circle container), false = dot inside circle.
+ * @return The created root object (circle container, or the bare dot),
+ *         or NULL if the indicator registry is full. Callers may ignore it.
  */
-void nina_idle_indicator_create(lv_obj_t *parent, lv_align_t align, bool bare_dot);
+lv_obj_t *nina_idle_indicator_create(lv_obj_t *parent, lv_align_t align, bool bare_dot);
 
 /**
  * Show/hide indicator based on idle override state.

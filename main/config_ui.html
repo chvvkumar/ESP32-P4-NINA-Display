@@ -2339,6 +2339,8 @@
       data.weather_poll_interval_s=parseInt($('weather_poll_interval_s').value)||900;
       data.weather_units=parseInt($('weather_units').value)||0;
       data.weather_time_format=parseInt($('weather_time_format').value)||0;
+      /* Guarded: a browser-cached older fragment may lack this control. */
+      if($('clockLayout')) data.clock_layout=parseInt($('clockLayout').value,10)||0;
     }
 
     function collectTab_spotify(data){
@@ -2798,6 +2800,8 @@
       if($('weather_poll_interval_s')) $('weather_poll_interval_s').value=data.weather_poll_interval_s||900;
       if($('weather_units')) $('weather_units').value=data.weather_units||0;
       if($('weather_time_format')) $('weather_time_format').value=data.weather_time_format||0;
+      /* Live layouts: 0 Classic, 1 Console 92, 2 Broadside, 3 Evensong, 4 Blueprint, 5 Transit Line, 6 Night Network; anything else shows Classic. */
+      if($('clockLayout')){var cl=parseInt(data.clock_layout,10)||0;if(cl<0||cl>6)cl=0;$('clockLayout').value=String(cl);}
       toggleWeatherApiKey();
     }
 
