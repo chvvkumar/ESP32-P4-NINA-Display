@@ -614,26 +614,19 @@ ota_check_result_t ota_github_check(int channel, const char *current_version, gi
              * page 1. */
             if (strcmp(tag->valuestring, SND_ALPHA_TAG) == 0) continue;
 
-            /* Check pre-release flag — each channel only sees its own releases */
+            /* Check pre-release flag — each channel only sees its own releases.
+             * Out-of-channel releases never terminate the walk: the GitHub list
+             * orders stable X above X-dev.N even though this project ships the
+             * dev builds after the stable release, so a same-base stable release
+             * would end the walk before the newer dev target is reached. Each
+             * channel compares against its own tags only; termination comes from
+             * an in-channel release at-or-below installed, the target's
+             * full-erase floor marker, or the end of the list. A dev target with
+             * no floor marker whose installed release was deleted falls through
+             * to the page-cap fail-safe (offered as requires_full_erase). */
             cJSON *prerelease = cJSON_GetObjectItem(release, "prerelease");
             bool is_pre = cJSON_IsTrue(prerelease);
             if ((is_pre && !include_prereleases) || (!is_pre && include_prereleases)) {
-                /* Out of channel: never a target, never a marker contributor — but
-                 * it may still TERMINATE the walk. Versions across channels are one
-                 * monotone line here, so an out-of-channel release at-or-below
-                 * installed proves the path is covered. Without this the dev channel
-                 * cannot terminate at all once its own historical releases have been
-                 * deleted, and every check walks to the page cap. Only a tag that
-                 * parses as a full version may terminate: any non-semver tag
-                 * sscanf-parses as 0.0.0 and would falsely terminate on page 1. */
-                if (!channel_switch &&
-                    floor_tag_parses_as_version(tag->valuestring) &&
-                    compare_versions(tag->valuestring, current_version) <= 0) {
-                    ESP_LOGI(TAG, "Walk terminated by out-of-channel release %s (<= installed %s)",
-                             tag->valuestring, current_version);
-                    reached_installed = true;
-                    break;
-                }
                 continue;
             }
 
