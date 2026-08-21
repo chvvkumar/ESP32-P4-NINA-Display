@@ -724,6 +724,7 @@ static const backup_field_t s_backup_fields[] = {
     {"weather_poll_interval_s",   "Weather Poll Interval",  "Weather", false, false},
     {"weather_units",             "Weather Units",          "Weather", false, false},
     {"weather_time_format",       "Time Format",            "Weather", false, false},
+    {"clock_layout",              "Clock Layout",           "Weather", false, false},
 
     /* Idle Override */
     {"idle_page_override_enabled","Idle Override Enabled",  "Behavior", false, false},
@@ -851,6 +852,7 @@ static const restore_numrange_t s_restore_numrange[] = {
     {"octoprint_update_interval_s", 2, 300,  false},  /* settings_table.h INT row (clamped to bound) */
     {"octoprint_image_source",  0,    1,     false},  /* settings_table.h INT_RESET row (out of range -> 0) */
     {"octoprint_layout",        0,    6,     false},  /* settings_table.h INT_RESET row (out of range -> 0) */
+    {"clock_layout",            0,    6,     false},  /* settings_table.h INT_RESET row (out of range -> 0) */
     {"allsky_dew_offset",       -50,  50,    true},   /* app_config.c:2552 */
     {"goes_update_interval_s",  300,  7200,  false},  /* app_config.c:2556 */
     {"solar_update_interval_s", 300,  7200,  false},  /* settings_table.h INT_RESET row (out of range -> 600) */
