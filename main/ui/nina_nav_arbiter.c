@@ -283,6 +283,12 @@ static int slideshow_next(void) {
 void nav_arbiter_resolve(int64_t now_ms) {
     const app_config_t *c = app_config_get();
 
+    /* Re-sync with the real page. Modal return paths, Settings/Sysinfo links
+     * and nina_dashboard_rebuild_slot() switch pages without an arbiter commit;
+     * comparing `desired` against a stale current_committed silently drops a
+     * USER claim for the page the device is actually NOT on. */
+    s_arb.current_committed = nina_dashboard_get_active_page();
+
     /* Slideshow on/off edge: warm the first image stop's poller the moment the
      * slideshow turns on (so the first image stop is never cold), and release
      * any warm frame when it turns off. Runs before the modal early-return so

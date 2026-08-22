@@ -85,6 +85,17 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
             }
             topology_changed = true;
         }
+        /* Page layout choice changed — rebuild that slot's widget tree so the
+         * new layout appears immediately instead of only after a reboot. Not a
+         * topology change: the slot keeps its availability, only its widgets
+         * differ. Skipped when the block above already rebuilt this slot. */
+        if (!enable_changed && !url_changed &&
+            new_cfg->nina_layout[i] != old_cfg->nina_layout[i]) {
+            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                nina_dashboard_rebuild_slot(i);
+                bsp_display_unlock();
+            }
+        }
     }
     /* Demo mode is a connection/data override (issue 12): a live toggle changes
      * the connection picture, so force a topology re-resolve on the next tick. */

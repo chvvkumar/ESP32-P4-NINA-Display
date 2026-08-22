@@ -78,6 +78,13 @@ CONFIG_ESP_WIFI_ENABLED=y
 CONFIG_LV_FONT_MONTSERRAT_28=y
 CONFIG_LV_FONT_MONTSERRAT_32=y
 CONFIG_LV_FONT_MONTSERRAT_36=y
+# Exact design sizes for the Image-forward NINA layout (nina_layout_alt.h):
+# 10 px captions, 30 px vitals, 34 px sub-bar filter, 40 px target name.
+# All LVGL built-ins -- no generated font files.
+CONFIG_LV_FONT_MONTSERRAT_10=y
+CONFIG_LV_FONT_MONTSERRAT_30=y
+CONFIG_LV_FONT_MONTSERRAT_34=y
+CONFIG_LV_FONT_MONTSERRAT_40=y
 CONFIG_LV_FONT_MONTSERRAT_48=y
 
 CONFIG_LV_USE_SNAPSHOT=y
