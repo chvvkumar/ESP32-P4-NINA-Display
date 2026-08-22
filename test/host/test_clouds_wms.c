@@ -125,7 +125,7 @@ int main(void) {
     /* -- GetMap URL -------------------------------------------------------- */
     {
         uint32_t stamp = 1787025600u;   /* 2026-08-18T04:00:00Z */
-        check_bool("url: builds", clouds_frame_url(url, sizeof(url), 38.758331f, -90.689438f, 7, 0, stamp), true);
+        check_bool("url: builds", clouds_frame_url(url, sizeof(url), 38.758331f, -90.689438f, 7, 0, 0, stamp), true);
         printf("    url=%s\n", url);
         check_contains("url: https gibs host + epsg3857 endpoint", url,
                        "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi?", true);
@@ -152,11 +152,29 @@ int main(void) {
                    p_l >= 0 && p_l < p_c && p_c < p_b && p_b < p_w && p_w < p_h && p_h < p_f && p_f < p_t, true);
         check_bool("url: TIME is last", url[strlen(url) - 1] == 'Z' && strstr(url, "&TIME=") + 6 + 20 == url + strlen(url), true);
         /* West pick flows into the URL */
-        check_bool("url: Seattle builds", clouds_frame_url(url, sizeof(url), 47.6f, -122.33f, 6, 0, stamp), true);
+        check_bool("url: Seattle builds", clouds_frame_url(url, sizeof(url), 47.6f, -122.33f, 6, 0, 0, stamp), true);
         check_contains("url: Seattle uses West", url, "LAYERS=GOES-West_ABI_GeoColor,", true);
+        /* basemap suffix selects the vector overlay layers */
+        check_bool("url: basemap 1 builds", clouds_frame_url(url, sizeof(url), 38.758331f, -90.689438f, 7, 0, 1, stamp), true);
+        check_contains("url: basemap 1 = coastlines only", url,
+                       "&LAYERS=GOES-East_ABI_GeoColor,Coastlines_15m&", true);
+        check_bool("url: basemap 2 builds", clouds_frame_url(url, sizeof(url), 38.758331f, -90.689438f, 7, 0, 2, stamp), true);
+        check_contains("url: basemap 2 = features + graticule", url,
+                       "&LAYERS=GOES-East_ABI_GeoColor,Reference_Features_15m,Graticule_15m&", true);
+        check_bool("url: basemap 3 builds", clouds_frame_url(url, sizeof(url), 38.758331f, -90.689438f, 7, 0, 3, stamp), true);
+        check_contains("url: basemap 3 = satellite alone", url,
+                       "&LAYERS=GOES-East_ABI_GeoColor&", true);
+        check_bool("url: basemap 9 builds", clouds_frame_url(url, sizeof(url), 38.758331f, -90.689438f, 7, 0, 9, stamp), true);
+        check_contains("url: basemap 9 (invalid) falls back to 0", url,
+                       "&LAYERS=GOES-East_ABI_GeoColor,Reference_Features_15m&", true);
+        /* worst case (longest channel + longest suffix) still fits the buffer */
+        check_bool("url: longest channel + basemap 2 builds",
+                   clouds_frame_url(url, sizeof(url), 38.758331f, -122.33f, 5, 1, 2, stamp), true);
+        check_bool("url: worst case < CLOUDS_URL_MAX", strlen(url) < CLOUDS_URL_MAX, true);
+
         /* too small a buffer -> false and "" */
         char tiny[64];
-        check_bool("url: tiny buffer fails", clouds_frame_url(tiny, sizeof(tiny), 1.0f, 2.0f, 7, 0, stamp), false);
+        check_bool("url: tiny buffer fails", clouds_frame_url(tiny, sizeof(tiny), 1.0f, 2.0f, 7, 0, 0, stamp), false);
         check_str("url: tiny buffer empty", tiny, "");
     }
 

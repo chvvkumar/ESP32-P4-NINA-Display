@@ -12,6 +12,11 @@
               <label class="toggle"><input type="checkbox" id="clouds_show_overlay" onchange="applyImagePage('image-clouds');checkDirty()"><span class="toggle-track"></span></label>
             </div>
             <div class="field-hint">Satellite name and picture time overlay on the display</div>
+            <div class="toggle-row" style="margin-top:16px">
+              <span class="toggle-label">Show my location</span>
+              <label class="toggle"><input type="checkbox" id="clouds_show_location" onchange="applyImagePage('image-clouds');checkDirty()"><span class="toggle-track"></span></label>
+            </div>
+            <div class="field-hint">A small marker at the centre of the picture, at the location set in Weather settings.</div>
             <div class="field" style="margin-top:16px">
               <label class="field-label">Satellite channel</label>
               <select class="input" id="clouds_channel" onchange="applyImagePage('image-clouds');checkDirty()">
@@ -20,6 +25,16 @@
                 <option value="2">Air mass - colour-coded temperature and moisture</option>
               </select>
               <div class="field-hint">Which satellite picture to show. GeoColor looks like the view from space but only shows cloud properly in daylight. Clean infrared shows cloud tops around the clock, so it is the one to use at night. Air mass colours air by temperature and moisture; it updates less often than the other two.</div>
+            </div>
+            <div class="field" style="margin-top:16px">
+              <label class="field-label">Map overlay</label>
+              <select class="input" id="clouds_basemap" onchange="applyImagePage('image-clouds');checkDirty()">
+                <option value="0" selected>Borders and roads</option>
+                <option value="1">Coastlines only</option>
+                <option value="2">Borders, roads and grid</option>
+                <option value="3">None</option>
+              </select>
+              <div class="field-hint">What map lines are drawn over the satellite picture. State and country borders come from the satellite provider's reference layer; choose None for the bare satellite picture.</div>
             </div>
             <div class="field" style="margin-top:16px">
               <label class="field-label">Area</label>

@@ -920,6 +920,17 @@ static void set_defaults(app_config_t *cfg) {
     // v72 addition (Clock page layout). Also a SETTINGS_TABLE row.
     cfg->clock_layout = 0;              // 0 = Classic
 
+    // v73 addition (Cloud Cover map overlay). Also a SETTINGS_TABLE row.
+    cfg->clouds_basemap = 0;            // 0 = Borders and roads
+
+    // v74 addition (Cloud Cover location marker). Also a SETTINGS_TABLE row.
+    cfg->clouds_show_location = true;   // marker at weather_lat/weather_lon
+
+    // v75 addition (per-instance NINA page layout). Array field, so not a
+    // SETTINGS_TABLE row (the table keys one scalar per name); clamped by hand
+    // in validate_config() the same way instance_enabled[] is.
+    memset(cfg->nina_layout, 0, sizeof(cfg->nina_layout));  // 0 = Dashboard (arc)
+
     // Spotify client ID: secret-like sentinel, not table-driven
     cfg->spotify_client_id[0] = '\0';
 
@@ -2881,12 +2892,18 @@ static void migrate_from_v68(const void *raw, size_t raw_size, app_config_t *cfg
      * 4) still lands on it, so re-assert the default. Existing devices opt in
      * by default, matching a fresh install. */
     cfg->flights_route_lookup = true;
-    /* flights_label_max (v70), flights_icon_style (v71) and clock_layout
-     * (v72) sit right after flights_route_lookup, inside that same tail
-     * padding, so re-assert them too. */
+    /* flights_label_max (v70) and flights_icon_style (v71) are the only other
+     * fields inside that padding: sizeof(app_config_v68_t) is 9428 and they sit
+     * at bytes 9426 and 9427. clock_layout (v72, offset 9428), clouds_basemap
+     * (v73), clouds_show_location (v74) and nina_layout[] (v75) are all past
+     * the snapshot, so the memcpy never reaches them and set_defaults() already
+     * wrote them; they are re-asserted here only for documentation. */
     cfg->flights_label_max = 64;
     cfg->flights_icon_style = 0;
     cfg->clock_layout = 0;
+    cfg->clouds_basemap = 0;
+    cfg->clouds_show_location = true;
+    memset(cfg->nina_layout, 0, sizeof(cfg->nina_layout));
 
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v68 to v%d", APP_CONFIG_VERSION);
@@ -2906,11 +2923,17 @@ static void migrate_from_v69(const void *raw, size_t raw_size, app_config_t *cfg
      * still lands on it, so re-assert the default: label every drawn contact,
      * matching a fresh install. */
     cfg->flights_label_max = 64;
-    /* flights_icon_style (v71) and clock_layout (v72) sit right after
-     * flights_label_max, inside that same tail padding, so re-assert
-     * them too. */
+    /* flights_icon_style (v71) is the only other field inside that padding:
+     * sizeof(app_config_v69_t) is 9428 and it sits at byte 9427. clock_layout
+     * (v72, offset 9428), clouds_basemap (v73), clouds_show_location (v74) and
+     * nina_layout[] (v75) are all past the snapshot, so the memcpy never
+     * reaches them and set_defaults() already wrote them; they are re-asserted
+     * here only for documentation. */
     cfg->flights_icon_style = 0;
     cfg->clock_layout = 0;
+    cfg->clouds_basemap = 0;
+    cfg->clouds_show_location = true;
+    memset(cfg->nina_layout, 0, sizeof(cfg->nina_layout));
 
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v69 to v%d", APP_CONFIG_VERSION);
@@ -2931,9 +2954,16 @@ static void migrate_from_v70(const void *raw, size_t raw_size, app_config_t *cfg
      * 4) still lands on it, so re-assert the default: classic arrows, matching
      * a fresh install. */
     cfg->flights_icon_style = 0;
-    /* clock_layout (v72) sits right after flights_icon_style, inside that
-     * same tail padding, so re-assert it too. */
+    /* flights_icon_style above is the last byte of the padding:
+     * sizeof(app_config_v70_t) is 9428 and it sits at byte 9427. clock_layout
+     * (v72, offset 9428), clouds_basemap (v73), clouds_show_location (v74) and
+     * nina_layout[] (v75) are all past the snapshot, so the memcpy never
+     * reaches them and set_defaults() already wrote them; they are re-asserted
+     * here only for documentation. */
     cfg->clock_layout = 0;
+    cfg->clouds_basemap = 0;
+    cfg->clouds_show_location = true;
+    memset(cfg->nina_layout, 0, sizeof(cfg->nina_layout));
 
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v70 to v%d", APP_CONFIG_VERSION);
@@ -2950,14 +2980,84 @@ static void migrate_from_v71(const void *raw, size_t raw_size, app_config_t *cfg
     size_t copy = raw_size < sizeof(app_config_v71_t) ? raw_size : sizeof(app_config_v71_t);
     memcpy(cfg, raw, copy);
 
-    /* The field sits past the v71 snapshot, so memcpy(copy) never touches it on
-     * purpose; the snapshot's tail padding (it ends on a uint8_t but aligns to
-     * 4) still lands on it, so re-assert the default: the Classic layout,
-     * matching a fresh install. */
+    /* app_config_v71_t ends on flights_icon_style at byte 9427 and is exactly
+     * 9428 bytes: ZERO tail padding, unlike most snapshots here. So the memcpy
+     * stops dead at clock_layout's offset (9428) and touches none of the fields
+     * below; set_defaults() already wrote every one of them. The assignments
+     * are re-asserted defensively, for documentation only. */
     cfg->clock_layout = 0;
+    cfg->clouds_basemap = 0;
+    cfg->clouds_show_location = true;
+    memset(cfg->nina_layout, 0, sizeof(cfg->nina_layout));
 
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v71 to v%d", APP_CONFIG_VERSION);
+}
+
+/* --- v72 -> v73 migration: appends clouds_basemap, the Cloud Cover page's
+ *     map overlay choice (0 Borders and roads, 1 Coastlines only, 2 Borders,
+ *     roads and grid, 3 None). Additive and at the very end, so this stays a
+ *     plain prefix memcpy like every migration around it. --- */
+static void migrate_from_v72(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v72_t) ? raw_size : sizeof(app_config_v72_t);
+    memcpy(cfg, raw, copy);
+
+    /* The field sits past the v72 snapshot, so memcpy(copy) never touches it on
+     * purpose; the snapshot's tail padding (it ends on a uint8_t but aligns to
+     * 4) still lands on it, so re-assert the default: borders and roads,
+     * matching a fresh install. */
+    cfg->clouds_basemap = 0;
+    /* clouds_show_location (v74) and nina_layout[] (v75) sit right after
+     * clouds_basemap, inside that same tail padding, so re-assert them
+     * too. */
+    cfg->clouds_show_location = true;
+    memset(cfg->nina_layout, 0, sizeof(cfg->nina_layout));
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v72 to v%d", APP_CONFIG_VERSION);
+}
+
+/* --- v73 -> v74 migration: appends clouds_show_location, the Cloud Cover
+ *     page's "draw a marker at my location" toggle (the frame centre, that is
+ *     weather_lat/weather_lon). Additive and at the very end, so this stays a
+ *     plain prefix memcpy like every migration around it. --- */
+static void migrate_from_v73(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v73_t) ? raw_size : sizeof(app_config_v73_t);
+    memcpy(cfg, raw, copy);
+
+    /* The field sits past the v73 snapshot, so memcpy(copy) never touches it on
+     * purpose; the snapshot's tail padding (it ends on a uint8_t but aligns to
+     * 4) still lands on it, so re-assert the default: marker on, matching a
+     * fresh install. */
+    cfg->clouds_show_location = true;
+    memset(cfg->nina_layout, 0, sizeof(cfg->nina_layout));
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v73 to v%d", APP_CONFIG_VERSION);
+}
+
+/* --- v74 -> v75 migration: appends nina_layout[MAX_NINA_INSTANCES], the
+ *     per-instance NINA page layout choice (0 Dashboard/arc, 1 Image-forward).
+ *     Additive and at the very end, so this stays a plain
+ *     prefix memcpy like every migration around it. --- */
+static void migrate_from_v74(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v74_t) ? raw_size : sizeof(app_config_v74_t);
+    memcpy(cfg, raw, copy);
+
+    /* The array sits past the v74 snapshot, so memcpy(copy) never touches it on
+     * purpose; the snapshot's tail padding (it ends on a bool but aligns to 4)
+     * still lands on it, so re-assert the default: every instance on the
+     * Dashboard (arc) layout, matching a fresh install. */
+    memset(cfg->nina_layout, 0, sizeof(cfg->nina_layout));
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v74 to v%d", APP_CONFIG_VERSION);
 }
 
 
@@ -3741,6 +3841,30 @@ static bool validate_config(app_config_t *cfg) {
         cfg->clouds_channel = 0;
         fixed = true;
     }
+    /* Clouds map overlay (v73): 0 = Borders and roads, 1 = Coastlines only,
+     * 2 = Borders, roads and grid, 3 = None. RESET, not clamp — an unknown
+     * value falls back to the default overlay rather than to the nearest
+     * bound, which would silently mean "None". */
+    if (cfg->clouds_basemap > 3) {
+        cfg->clouds_basemap = 0;
+        fixed = true;
+    }
+    /* clouds_show_location (v74) needs no clamp: it is a bool, so every
+     * representable value is in range. It is a SETTINGS_TABLE BOOL row, which
+     * already normalizes it on the parse path. */
+
+    /* Per-instance NINA page layout (v75): 0 = Dashboard (arc), 1 =
+     * Image-forward. Hand-written because it is an array
+     * field and SETTINGS_TABLE keys one scalar per name. RESET, not clamp -
+     * layouts are unordered names, so an unknown index falls back to the
+     * Dashboard the device has always shown, never to whichever layout sits
+     * at the far bound. */
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        if (cfg->nina_layout[i] > 1) {
+            cfg->nina_layout[i] = 0;
+            fixed = true;
+        }
+    }
 
     /* ADS-B page (v68). The six numeric flights_* fields are SETTINGS_TABLE
      * rows, so settings_clamp_apply() above already applied their ranges
@@ -3872,6 +3996,39 @@ void app_config_init(void) {
             nvs_commit(handle);
         }
         /* tiles_loaded stays false -> tail loads "json_tiles"/"ha_tiles" keys */
+    } else if (version_check == 74) {
+        /* v74 -> v75: appended nina_layout[] (per-instance NINA page layout).
+         * tiles_loaded stays false: a v74 device already keeps its tiles in
+         * the "json_tiles"/"ha_tiles" NVS keys, so the tail loads them. Safe
+         * to write back immediately, same reasoning as the v73 branch: both
+         * dispatcher-tail fixups below are excluded by their literal version
+         * bounds. */
+        migrate_from_v74(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    } else if (version_check == 73) {
+        /* v73 -> v74: appended clouds_show_location (Cloud Cover location
+         * marker). tiles_loaded stays false: a v73 device already keeps its
+         * tiles in the "json_tiles"/"ha_tiles" NVS keys, so the tail loads
+         * them. Safe to write back immediately, same reasoning as the v72
+         * branch: both dispatcher-tail fixups below are excluded by their
+         * literal version bounds. */
+        migrate_from_v73(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    } else if (version_check == 72) {
+        /* v72 -> v73: appended clouds_basemap (Cloud Cover map overlay).
+         * tiles_loaded stays false: a v72 device already keeps its tiles in
+         * the "json_tiles"/"ha_tiles" NVS keys, so the tail loads them.
+         * Safe to write back immediately, same reasoning as the v71 branch:
+         * both dispatcher-tail fixups below are excluded by their literal
+         * version bounds. */
+        migrate_from_v72(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 71) {
         /* v71 -> v72: appended clock_layout (Clock page layout).
          * tiles_loaded stays false: a v71 device already keeps its tiles in

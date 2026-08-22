@@ -526,7 +526,8 @@ static bool anim_frame_url(image_page_t *p, const app_config_t *cfg, const char 
     if (p->src == IMG_SRC_CLOUDS) {
         if (i >= a->ntimes) return false;
         return clouds_frame_url(url, sz, cfg->weather_lat, cfg->weather_lon,
-                                cfg->clouds_zoom, cfg->clouds_channel, a->stamps[i]);
+                                cfg->clouds_zoom, cfg->clouds_channel,
+                                cfg->clouds_basemap, a->stamps[i]);
     }
     if (cfg->radar_map_style == 0) {
         radar_frame_url(url, sz, token, i);

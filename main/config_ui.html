@@ -1301,6 +1301,15 @@
             '<div class="field-hint">Host or IP of the N.I.N.A. computer running the Advanced API plugin; the web page adds port 1888 and the /v2/api/ path before saving (e.g. 192.168.1.100 becomes http://192.168.1.100:1888/v2/api/).</div></div>'+
             '</div>'+
             '<div class="subsection">'+
+            '<div class="subsection-title">Page Layout</div>'+
+            '<div class="field"><label class="field-label">Page layout</label>'+
+            '<select class="input" id="nina_layout_'+i+'" onchange="checkDirty()">'+
+            '<option value="0">Dashboard</option>'+
+            '<option value="1">Image-forward</option>'+
+            '</select>'+
+            '<div class="field-hint">How the page for this instance is drawn. Dashboard shows the exposure arc with the guider, focuser and sequence tiles. Image-forward shows the exposure readout and sub progress in large type over the latest captured image.</div></div>'+
+            '</div>'+
+            '<div class="subsection">'+
             '<div class="subsection-title">Notifications</div>'+
             '<div class="toggle-row" style="padding-bottom:0">'+
             '<span class="toggle-label">Mute Notifications</span>'+
@@ -2321,6 +2330,9 @@
       data.alert_voice_muted_1=!!$('alert_voice_muted_0').checked;
       data.alert_voice_muted_2=!!$('alert_voice_muted_1').checked;
       data.alert_voice_muted_3=!!$('alert_voice_muted_2').checked;
+      data.nina_layout_1=parseInt($('nina_layout_0').value)||0;
+      data.nina_layout_2=parseInt($('nina_layout_1').value)||0;
+      data.nina_layout_3=parseInt($('nina_layout_2').value)||0;
     }
 
     function collectTab_allsky(data){
@@ -2424,9 +2436,13 @@
     function collectTab_image_clouds(data){
       data.clouds_enabled=!!$('clouds_enabled').checked;
       data.clouds_show_overlay=!!$('clouds_show_overlay').checked;
+      data.clouds_show_location=!!$('clouds_show_location').checked;
       data.clouds_zoom=parseInt($('clouds_zoom').value,10)||7;
       /* 0 GeoColor, 1 Clean infrared, 2 Air mass (uint8 on the device). */
       data.clouds_channel=parseInt($('clouds_channel').value,10)||0;
+      /* 0 borders and roads, 1 coastlines only, 2 borders, roads and grid,
+         3 none (uint8 on the device). */
+      data.clouds_basemap=parseInt($('clouds_basemap').value,10)||0;
       data.clouds_update_interval_s=parseInt($('clouds_update_interval_s').value,10)||600;
       data.clouds_frames=parseInt($('clouds_frames').value,10)||6;
     }
@@ -2758,6 +2774,9 @@
       $('alert_voice_muted_0').checked=!!data.alert_voice_muted_1;
       $('alert_voice_muted_1').checked=!!data.alert_voice_muted_2;
       $('alert_voice_muted_2').checked=!!data.alert_voice_muted_3;
+      $('nina_layout_0').value=String(data.nina_layout_1||0);
+      $('nina_layout_1').value=String(data.nina_layout_2||0);
+      $('nina_layout_2').value=String(data.nina_layout_3||0);
 
       for(var i=0;i<3;i++){
         var key='filter_colors_'+(i+1);
@@ -2908,6 +2927,7 @@
       /* Overlay defaults on, so only an explicit false clears it (missing key
          on older firmware keeps the default). */
       if($('clouds_show_overlay')) $('clouds_show_overlay').checked=(data.clouds_show_overlay!==false);
+      if($('clouds_show_location')) $('clouds_show_location').checked=(data.clouds_show_location!==false);
       if($('clouds_zoom')){
         var cz=parseInt(data.clouds_zoom,10)||7;
         $('clouds_zoom').value=String((cz>=5&&cz<=9)?cz:7);
@@ -2915,6 +2935,10 @@
       if($('clouds_channel')){
         var cc=parseInt(data.clouds_channel,10)||0;
         $('clouds_channel').value=String((cc>=0&&cc<=2)?cc:0);
+      }
+      if($('clouds_basemap')){
+        var cb=parseInt(data.clouds_basemap,10)||0;
+        $('clouds_basemap').value=String((cb>=0&&cb<=3)?cb:0);
       }
       if($('clouds_update_interval_s')) $('clouds_update_interval_s').value=String(data.clouds_update_interval_s||600);
       if($('clouds_frames')) $('clouds_frames').value=String(data.clouds_frames||6);
