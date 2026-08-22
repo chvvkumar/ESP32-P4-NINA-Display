@@ -252,6 +252,85 @@ static void apply_chip_style(lv_obj_t *lbl)
     lv_obj_set_style_text_color(lbl, txt, 0);
 }
 
+/* ─────────────────── Cloud Cover location marker ───────────────────
+ * The Clouds frames are fetched with a bbox centred exactly on
+ * weather_lat/weather_lon (clouds_bbox() in clouds_wms.h), and every image on
+ * this page is scaled to the panel WIDTH and vertically centred
+ * (see center_image_y / swap_borrowed_buf), so the frame centre is ALWAYS the
+ * screen centre and lv_obj_center() on the page container is the location.
+ * Clouds never crops (image_page_config_crop) and has no flip/rotate, so no
+ * transform can move it off centre.
+ *
+ * One instance only (the Clouds page is created once and never destroyed —
+ * optional_page_set_enabled hides it instead), hence a single file static
+ * rather than a field on every image_page_t. Created as the LAST child of the
+ * page container so it draws above both crossfade images AND the overlay bar,
+ * and it is never a target of the crossfade opacity anim, which runs on the two
+ * lv_image objects only. Not CLICKABLE, so taps pass through to the page. */
+static lv_obj_t *s_clouds_marker;   /* NULL until the Clouds page is created */
+
+/* Colour the ring and the centre dot from the active theme. Red Night must emit
+ * only red or black (same rule as apply_chip_style), so both parts take the
+ * theme text colour there; other themes get an accent ring (progress_color)
+ * with a white dot, which keeps the marker legible whatever the accent's
+ * luminance. The 2 px black outline on both parts carries it over white cloud
+ * tops as well as dark terrain. Display lock held by the caller. */
+static void marker_apply_theme(void)
+{
+    if (!s_clouds_marker) return;
+    const theme_t *th = current_theme;
+    bool red = theme_is_red_night(th);
+    lv_color_t ring = red ? lv_color_hex(th->text_color) : lv_color_hex(th->progress_color);
+    lv_color_t dot  = red ? lv_color_hex(th->text_color) : lv_color_white();
+    lv_obj_set_style_border_color(s_clouds_marker, ring, 0);
+    lv_obj_t *centre = lv_obj_get_child(s_clouds_marker, 0);
+    if (centre) lv_obj_set_style_bg_color(centre, dot, 0);
+}
+
+/* Build the marker (36 px ring + 8 px dot; 18/4 was a speck on the 720 px panel) centred on @p parent, hidden.
+ * Display lock held by the caller (image_page_create runs under it). */
+static void marker_create(lv_obj_t *parent)
+{
+    lv_obj_t *m = lv_obj_create(parent);
+    lv_obj_remove_style_all(m);
+    lv_obj_set_size(m, 36, 36);
+    lv_obj_set_style_radius(m, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(m, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(m, 3, 0);
+    lv_obj_set_style_border_opa(m, LV_OPA_COVER, 0);
+    lv_obj_set_style_outline_width(m, 2, 0);
+    lv_obj_set_style_outline_color(m, lv_color_black(), 0);
+    lv_obj_set_style_outline_opa(m, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(m, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE |
+                         LV_OBJ_FLAG_SCROLL_CHAIN_HOR | LV_OBJ_FLAG_SCROLL_CHAIN_VER);
+    lv_obj_add_flag(m, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_center(m);
+
+    lv_obj_t *dot = lv_obj_create(m);
+    lv_obj_remove_style_all(dot);
+    lv_obj_set_size(dot, 8, 8);
+    lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
+    lv_obj_set_style_outline_width(dot, 2, 0);
+    lv_obj_set_style_outline_color(dot, lv_color_black(), 0);
+    lv_obj_set_style_outline_opa(dot, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(dot, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE |
+                           LV_OBJ_FLAG_SCROLL_CHAIN_HOR | LV_OBJ_FLAG_SCROLL_CHAIN_VER);
+    lv_obj_center(dot);
+
+    s_clouds_marker = m;
+    marker_apply_theme();
+}
+
+/* Show/hide the marker. No-op on every instance but Clouds (the pointer is NULL
+ * until the Clouds page is built). Display lock held by the caller. */
+static void marker_set_visible(bool visible)
+{
+    if (!s_clouds_marker) return;
+    if (visible) lv_obj_clear_flag(s_clouds_marker, LV_OBJ_FLAG_HIDDEN);
+    else         lv_obj_add_flag(s_clouds_marker, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void hide_moon_corner_labels(image_page_t *p);
 
 /* Show the four moon corner labels and populate them from moon_overlay_info().
@@ -425,6 +504,15 @@ lv_obj_t *image_page_create(image_page_t *p, lv_obj_t *parent)
         lv_obj_align(p->lbl_moon_set, LV_ALIGN_TOP_RIGHT, 0, 45);
         lv_label_set_text(p->lbl_moon_set, "");
         lv_obj_add_flag(p->lbl_moon_set, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    /* Cloud Cover location marker: created LAST so it stacks above both
+     * crossfade images and the overlay bar. Clouds instance only; the other
+     * five sources never build it and so can never show it. Independent of the
+     * caption overlay toggle — it has its own config flag. */
+    if (p->src == IMG_SRC_CLOUDS) {
+        marker_create(page_container);
+        marker_set_visible(app_config_get()->clouds_show_location);
     }
 
     if (!image_page_config_overlay(app_config_get(), p->src)) {
@@ -1080,6 +1168,10 @@ void image_page_apply_theme(image_page_t *p)
     if (p->lbl_moon_next) apply_chip_style(p->lbl_moon_next);
     if (p->lbl_moon_rise) apply_chip_style(p->lbl_moon_rise);
     if (p->lbl_moon_set)  apply_chip_style(p->lbl_moon_set);
+
+    /* Cloud Cover location marker follows the theme accent / Red Night rule.
+     * No-op on the other five instances (s_clouds_marker is NULL there). */
+    if (p->src == IMG_SRC_CLOUDS) marker_apply_theme();
 
     /* Ring pixels (Radar, Clouds) are recoloured once, at insert, so restyling
      * labels is not enough here: crossing the Red Night boundary changes both
@@ -2383,10 +2475,12 @@ static bool source_params_changed(image_src_t s, const app_config_t *prev, const
                    (cur->weather_lat != prev->weather_lat ||
                     cur->weather_lon != prev->weather_lon);
         case IMG_SRC_CLOUDS:
-            /* Channel (a different GIBS layer), area (zoom), frame count and the
-             * weather location all change which GIBS frames are fetched:
-             * DIFFERENT images, so the ring goes. */
+            /* Channel (a different GIBS layer), basemap (different vector
+             * overlay layers, baked into the JPEG the server returns), area
+             * (zoom), frame count and the weather location all change which
+             * GIBS frames are fetched: DIFFERENT images, so the ring goes. */
             return cur->clouds_channel != prev->clouds_channel ||
+                   cur->clouds_basemap != prev->clouds_basemap ||
                    cur->clouds_zoom != prev->clouds_zoom ||
                    cur->clouds_frames != prev->clouds_frames ||
                    cur->weather_lat != prev->weather_lat ||
@@ -2471,6 +2565,16 @@ void image_page_config_apply_live(const app_config_t *prev, const app_config_t *
             if (en_cur && !en_prev) image_page_ensure_task_running(p);
             if (!en_cur && en_prev) image_page_disable(p);   /* clear warm, free the frame */
         }
+        /* Cloud Cover location marker: pure visibility, no fetch. Deliberately
+         * NOT part of source_params_changed() — the frames are identical either
+         * way, so toggling it must never invalidate the ring. */
+        if (s == IMG_SRC_CLOUDS && prev->clouds_show_location != cur->clouds_show_location) {
+            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                marker_set_visible(cur->clouds_show_location);
+                bsp_display_unlock();
+            }
+        }
+
         if (!en_cur) continue;
 
         if (source_params_changed((image_src_t)s, prev, cur, force_fetch)) {

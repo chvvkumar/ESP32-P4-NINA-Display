@@ -13,6 +13,7 @@
 #include "display_defs.h"
 #include "themes.h"
 #include "ui_helpers.h"
+#include "nina_subbar.h"
 
 /* ── Page index constants ──
  *
@@ -86,6 +87,40 @@ void arc_interp_timer_cb(lv_timer_t *timer);
 
 typedef struct {
     lv_obj_t *page;
+
+    /* Page layout for this instance, from app_config_t::nina_layout[i]:
+     * 0 = arc dashboard (every field below the `alt` block applies),
+     * 1 = Image-forward (nina_layout_alt.h).
+     * On layout 1 the arc-path widgets are never created and the
+     * arc-path updaters never run — only `subbar`, `alt` and the shared
+     * pieces (stale label/overlay, empty_state_cont, exposure clock) exist. */
+    uint8_t layout;
+
+    /* Segmented sub-bar hero — layout 1 only. */
+    nina_subbar_t subbar;
+
+    /* Layout-specific widget pointers. Owned by the layout module that created
+     * the page (nina_layout_image.c); the spine only
+     * zeroes it. Add fields here rather than as loose dashboard_page_t members. */
+    struct {
+        lv_obj_t *lbl_target;       /* target name */
+
+        /* Layout 1 — Image-forward (nina_layout_image.c) */
+        lv_obj_t *cap_img;          /* full-bleed capture background */
+        lv_obj_t *tile_ident;       /* top text group: identity (two rows) */
+        lv_obj_t *tile_hero;        /* bottom group: value row + 12 px block ledge */
+        lv_obj_t *row_seq;          /* row 1: identity | shield | step */
+        lv_obj_t *lbl_safety;
+        lv_obj_t *lbl_seq_step;
+        lv_obj_t *row_vals;         /* bottom value row (one 64 px baseline) */
+        lv_obj_t *grp_left;         /* RMS + counter, tap = RMS graph */
+        lv_obj_t *lbl_rms;          /* TOTAL RMS, hanken 48, threshold colour */
+        lv_obj_t *lbl_count;        /* "done / target", hanken 28 */
+        lv_obj_t *lbl_elapsed;      /* "247s", hanken 64, written by the tick only */
+        lv_obj_t *lbl_filter;       /* filter name, montserrat 24, filter colour */
+        int       inst;             /* owning NINA instance index */
+        /* end Layout 1 */
+    } alt;
 
     // Header
     lv_obj_t *header_box;

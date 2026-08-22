@@ -8,6 +8,7 @@
 
 #include "nina_dashboard.h"
 #include "nina_dashboard_internal.h"
+#include "nina_layout_alt.h"
 #include "nina_empty_state.h"
 #include "nina_thumbnail.h"
 #include "nina_graph_overlay.h"
@@ -460,6 +461,8 @@ static void hide_page_at(int idx) {
             /* Stop the 200 ms arc interpolation while the page is off-screen
              * (same rule as the clock/spotify/summary timers). */
             if (pages[inst].arc_timer) lv_timer_pause(pages[inst].arc_timer);
+            /* Image-forward keeps a decoded capture alive only while visible. */
+            if (pages[inst].layout == 1) nina_layout_image_release_capture(inst);
         }
     }
     else if (idx == SETTINGS_PAGE_IDX(page_count) && settings_obj) {
@@ -533,6 +536,17 @@ static void apply_theme_to_page(dashboard_page_t *p) {
     if (!p->page || !current_theme) return;
 
     int gb = app_config_get()->color_brightness;
+
+    /* Layout 1 has none of the arc-path widgets below. Re-theme the
+     * layout body plus the shared empty state, then stop. */
+    if (p->layout != 0) {
+        nina_layout_alt_apply_theme(p);
+        nina_subbar_apply_theme(&p->subbar);
+        if (p->empty_state_cont) {
+            nina_empty_state_apply_theme(p->empty_state_cont, current_theme, gb);
+        }
+        return;
+    }
 
     if (p->lbl_instance_name) {
         uint32_t glow_color;
@@ -647,14 +661,47 @@ static void bottom_row_click_cb(lv_event_t *e) {
     nav_arbiter_submit_user(PAGE_IDX_SUMMARY, esp_timer_get_time() / 1000);
 }
 
-/* Build all widgets for one dashboard page */
+/* Shared page furniture every layout gets: the amber "Last update" stale label,
+ * the >2 min dim overlay and the branded disconnected empty state. Built after
+ * the layout body so it floats above it. */
+static void create_page_overlays(dashboard_page_t *p, int page_index);
+
+/* Build all widgets for one dashboard page.
+ *
+ * The per-instance layout (app_config_t::nina_layout[page_index]) decides what
+ * goes inside the page root: 0 builds the arc bento grid below, 1 hands
+ * the root to nina_layout_alt.h and returns. The arc-path widget pointers stay
+ * NULL on layout 1 — every consumer must NULL-guard them. */
 static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int page_index) {
     memset(p, 0, sizeof(dashboard_page_t));
+
+    {
+        const app_config_t *cfg = app_config_get();
+        uint8_t want = 0;
+        if (cfg && page_index >= 0 && page_index < MAX_NINA_INSTANCES) {
+            want = cfg->nina_layout[page_index];
+        }
+        p->layout = (want <= 1) ? want : 0;
+    }
 
     p->page = lv_obj_create(parent);
     lv_obj_remove_style_all(p->page);
     lv_obj_set_size(p->page, SCREEN_SIZE - 2 * OUTER_PADDING, SCREEN_SIZE - 2 * OUTER_PADDING);
     lv_obj_set_style_pad_gap(p->page, GRID_GAP, 0);
+
+    if (p->layout == 1) {
+        /* Image-forward is full-bleed: the capture reaches the screen edge.
+         * Negate the parent main_cont's OUTER_PADDING, the same way the six
+         * image pages do it (nina_image_page.c). Must happen before the
+         * layout body so it builds against the real 720x720 root. The
+         * shared overlays created below inherit the full-screen size, which
+         * is what a full-bleed page wants. */
+        lv_obj_set_size(p->page, SCREEN_SIZE, SCREEN_SIZE);
+        lv_obj_set_pos(p->page, -OUTER_PADDING, -OUTER_PADDING);
+        nina_layout_image_create(p, p->page, page_index);
+        create_page_overlays(p, page_index);
+        return;
+    }
 
     static lv_coord_t col_dsc[] = {LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
     static lv_coord_t row_dsc[] = {
@@ -977,6 +1024,10 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
         lv_obj_add_flag(p->box_pwr[i], LV_OBJ_FLAG_HIDDEN);
     }
 
+    create_page_overlays(p, page_index);
+}
+
+static void create_page_overlays(dashboard_page_t *p, int page_index) {
     /* Stale data indicator — floating label in upper-right corner */
     p->lbl_stale = lv_label_create(p->page);
     lv_obj_add_flag(p->lbl_stale, LV_OBJ_FLAG_FLOATING);
@@ -1030,12 +1081,6 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
         }
     }
 
-    p->arc_completing = false;
-    p->cached_end_epoch = 0;
-    p->cached_total = 0;
-    p->gap_start_epoch = 0;
-    p->cached_nina_epoch = 0;
-    p->cached_nina_mono_us = 0;
 }
 
 /* Page indicator dots at the bottom */
@@ -1205,6 +1250,32 @@ static void autofocus_long_press_cb(lv_event_t *e) {
 static void session_stats_click_cb(lv_event_t *e) {
     LV_UNUSED(e);
     nina_info_overlay_show(INFO_OVERLAY_SESSION_STATS, active_page);
+}
+
+/* ── Alternate-layout seam (nina_layout_alt.h) ──
+ * The overlay callbacks above are static to this file; the layout modules live
+ * in their own translation units. These two functions are the entire surface
+ * they reach nina_dashboard.c through. */
+
+void nina_dashboard_bind_tap(lv_obj_t *obj, nina_tap_target_t which) {
+    if (!obj) return;
+    lv_event_cb_t cb;
+    switch (which) {
+        case NINA_TAP_CAPTURE:  cb = target_name_click_cb;   break;
+        case NINA_TAP_SEQUENCE: cb = sequence_click_cb;      break;
+        case NINA_TAP_RMS:      cb = rms_click_cb;           break;
+        case NINA_TAP_FLIP:     cb = flip_click_cb;          break;
+        case NINA_TAP_SESSION:  cb = session_stats_click_cb; break;
+        case NINA_TAP_FILTER:   cb = filter_click_cb;        break;
+        default:                return;
+    }
+    lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(obj, cb, LV_EVENT_CLICKED, NULL);
+}
+
+void nina_layout_alt_apply_theme(dashboard_page_t *p) {
+    if (!p || !p->page) return;
+    if (p->layout == 1) nina_layout_image_apply_theme(p);
 }
 
 /* True iff NINA instance has a non-empty URL and is enabled in config */
@@ -1441,7 +1512,35 @@ void nina_dashboard_rebuild_slot(int instance) {
     if (instance < 0 || instance >= MAX_NINA_INSTANCES) return;
     bool want = slot_is_available_cfg(instance);
     bool have = nina_slot_available[instance];
-    if (want == have) return;                 /* nothing to do */
+
+    /* A nina_layout change keeps the slot available but replaces the whole
+     * widget tree, so it has to tear down and rebuild rather than no-op.
+     * Recurse once through the destroy path, then fall through to create. */
+    if (want && have) {
+        const app_config_t *lcfg = app_config_get();
+        uint8_t want_layout = lcfg ? lcfg->nina_layout[instance] : 0;
+        if (want_layout > 1) want_layout = 0;
+        if (want_layout == pages[instance].layout) return;   /* nothing to do */
+        have = false;
+        if (active_page == NINA_PAGE_OFFSET + instance) {
+            /* Pre-move off the dying page; the arbiter re-resolves next tick. */
+            nina_dashboard_show_page(PAGE_IDX_SUMMARY, total_page_count);
+        }
+        if (pages[instance].layout == 1) nina_layout_image_release_capture(instance);
+        if (pages[instance].arc_timer) {
+            lv_timer_delete(pages[instance].arc_timer);
+            pages[instance].arc_timer = NULL;
+        }
+        if (pages[instance].page) {
+            lv_obj_delete(pages[instance].page);
+            pages[instance].page = NULL;
+        }
+        /* Mirror the destroy branch: the create path below re-increments. */
+        nina_slot_available[instance] = false;
+        if (nina_available_count > 0) nina_available_count--;
+    } else if (want == have) {
+        return;                               /* nothing to do */
+    }
 
     if (want && !have) {
         /* Create the slot's page + arc timer. The fresh widgets carry creation
@@ -1461,8 +1560,10 @@ void nina_dashboard_rebuild_slot(int instance) {
         }
         nina_slot_available[instance] = true;
         nina_available_count++;
+        apply_theme_to_page(&pages[instance]);
     } else {
         /* Destroy the slot's page + arc timer */
+        if (pages[instance].layout == 1) nina_layout_image_release_capture(instance);
         if (active_page == NINA_PAGE_OFFSET + instance) {
             /* Pre-move off the dying page; the arbiter re-resolves next tick. */
             nina_dashboard_show_page(PAGE_IDX_SUMMARY, total_page_count);
@@ -1636,9 +1737,13 @@ static void update_indicators(void)
         }
         dot++;
     }
-    bool on_nina = (abs_page_to_instance(active_page) >= 0);
-    if (on_nina) lv_obj_clear_flag(indicator_cont, LV_OBJ_FLAG_HIDDEN);
-    else         lv_obj_add_flag(indicator_cont, LV_OBJ_FLAG_HIDDEN);
+    /* Image-forward (layout 1) fills the bottom-centre with its own readings,
+     * so the dots would collide; hide them on that layout only. */
+    int inst_now = abs_page_to_instance(active_page);
+    bool on_nina = (inst_now >= 0);
+    bool image_fwd = on_nina && pages[inst_now].layout == 1;
+    if (on_nina && !image_fwd) lv_obj_clear_flag(indicator_cont, LV_OBJ_FLAG_HIDDEN);
+    else                       lv_obj_add_flag(indicator_cont, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void fade_out_ready_cb(lv_anim_t * a)

@@ -223,13 +223,52 @@ static void find_running_step_name(cJSON *parent, char *out, size_t out_size) {
     }
 }
 
-// Helper function to recursively search for RUNNING Smart Exposure
-static cJSON* find_running_smart_exposure(cJSON *container) {
+// Nested exposure progress accumulated while unwinding from the RUNNING
+// Smart Exposure out to the target container. Starts at the Smart Exposure's
+// own Iterations / CompletedIterations; every enclosing container that carries
+// a "Loop For Iterations" condition multiplies the target and adds its
+// completed passes scaled by the inner target.
+#define NESTED_EXPOSURE_TARGET_MAX 10000
+typedef struct {
+    int target;   // Iterations x product of enclosing loop Iterations
+    int done;     // Completed exposures in that flattened count
+} nested_exposure_t;
+
+// Fold this container's "Loop For Iterations" condition(s) into *acc.
+// Iterations <= 0 is treated as "not a loop" (factor 1).
+static void apply_loop_conditions(cJSON *container, nested_exposure_t *acc) {
+    cJSON *conditions = cJSON_GetObjectItem(container, "Conditions");
+    if (!conditions || !cJSON_IsArray(conditions)) return;
+    cJSON *cond = NULL;
+    cJSON_ArrayForEach(cond, conditions) {
+        cJSON *name = cJSON_GetObjectItem(cond, "Name");
+        if (!name || !name->valuestring ||
+            strncmp(name->valuestring, "Loop For Iterations", 19) != 0) continue;
+        int iters = 0, completed = 0;
+        JSON_GET_INT(cond, "Iterations", iters);
+        JSON_GET_INT(cond, "CompletedIterations", completed);
+        if (iters <= 1) continue;
+        if (completed < 0) completed = 0;
+        if (completed > iters) completed = iters;
+        if ((int64_t)acc->target * iters > NESTED_EXPOSURE_TARGET_MAX) {
+            acc->target = NESTED_EXPOSURE_TARGET_MAX;
+            continue;
+        }
+        acc->done += completed * acc->target;
+        acc->target *= iters;
+    }
+}
+
+// Recursively search for the RUNNING Smart Exposure. When found, every
+// container on the path back out (including the one passed in) folds its loop
+// condition into *acc, so only the enclosing path contributes.
+static cJSON* find_running_smart_exposure(cJSON *container, nested_exposure_t *acc) {
     if (!container) return NULL;
 
     cJSON *items = cJSON_GetObjectItem(container, "Items");
     if (!items || !cJSON_IsArray(items)) return NULL;
 
+    cJSON *found = NULL;
     cJSON *item = NULL;
     cJSON_ArrayForEach(item, items) {
         cJSON *item_name = cJSON_GetObjectItem(item, "Name");
@@ -239,15 +278,20 @@ static cJSON* find_running_smart_exposure(cJSON *container) {
             strcmp(item_name->valuestring, "Smart Exposure") == 0) {
             if (item_status && item_status->valuestring &&
                 strcmp(item_status->valuestring, "RUNNING") == 0) {
-                return item;
+                found = item;
+                JSON_GET_INT(found, "Iterations", acc->target);
+                JSON_GET_INT(found, "CompletedIterations", acc->done);
+                if (acc->target < 1) acc->target = 1;
+                break;
             }
         }
 
-        cJSON *nested = find_running_smart_exposure(item);
-        if (nested) return nested;
+        found = find_running_smart_exposure(item, acc);
+        if (found) break;
     }
 
-    return NULL;
+    if (found) apply_loop_conditions(container, acc);
+    return found;
 }
 
 void fetch_sequence_counts_optional(const char *base_url, nina_client_t *data) {
@@ -345,11 +389,15 @@ void fetch_sequence_counts_optional(const char *base_url, nina_client_t *data) {
                 }
 
                 // Recursively search for RUNNING Smart Exposure
-                cJSON *running_exp = find_running_smart_exposure(target_container);
+                // (target/done folded with enclosing "Loop For Iterations" conditions)
+                nested_exposure_t nested = { .target = 0, .done = 0 };
+                cJSON *running_exp = find_running_smart_exposure(target_container, &nested);
 
                 if (running_exp) {
-                    JSON_GET_INT(running_exp, "CompletedIterations", data->exposure_count);
-                    JSON_GET_INT(running_exp, "Iterations", data->exposure_iterations);
+                    if (nested.done < 0) nested.done = 0;
+                    if (nested.done > nested.target) nested.done = nested.target;
+                    data->exposure_count = nested.done;
+                    data->exposure_iterations = nested.target;
                     JSON_GET_INT(running_exp, "ExposureCount", data->exposure_total_count);
 
                     cJSON *exp_time = cJSON_GetObjectItem(running_exp, "ExposureTime");
@@ -359,6 +407,21 @@ void fetch_sequence_counts_optional(const char *base_url, nina_client_t *data) {
                     }
 
                     ESP_LOGI(TAG, "Exposure count: %d/%d", data->exposure_count, data->exposure_iterations);
+
+                    /* Fallback step name: find_running_step_name() can come up
+                     * empty on a nested Smart-Exposure-in-Loop sequence even
+                     * though the running exposure was located. Name the step
+                     * from that node so the UI shows the active instruction. */
+                    if (data->container_step[0] == '\0') {
+                        cJSON *rname = cJSON_GetObjectItem(running_exp, "Name");
+                        if (rname && cJSON_IsString(rname) && rname->valuestring) {
+                            strncpy(data->container_step, rname->valuestring,
+                                    sizeof(data->container_step) - 1);
+                            data->container_step[sizeof(data->container_step) - 1] = '\0';
+                            char *suffix = strstr(data->container_step, "_Container");
+                            if (suffix) *suffix = '\0';
+                        }
+                    }
                 } else {
                     ESP_LOGD(TAG, "No RUNNING Smart Exposure found (sequence may be idle)");
                 }

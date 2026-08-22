@@ -404,6 +404,13 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
     cJSON_AddBoolToObject(obj, "instance_enabled_1", cfg->instance_enabled[0]);
     cJSON_AddBoolToObject(obj, "instance_enabled_2", cfg->instance_enabled[1]);
     cJSON_AddBoolToObject(obj, "instance_enabled_3", cfg->instance_enabled[2]);
+    /* Hardcoded 1..3 like instance_enabled_N above; the assert keeps this emit
+     * in step with the keyed parse loop, which is bound to MAX_NINA_INSTANCES. */
+    _Static_assert(MAX_NINA_INSTANCES == 3,
+                   "nina_layout_N emit must cover every instance slot");
+    cJSON_AddNumberToObject(obj, "nina_layout_1", cfg->nina_layout[0]);
+    cJSON_AddNumberToObject(obj, "nina_layout_2", cfg->nina_layout[1]);
+    cJSON_AddNumberToObject(obj, "nina_layout_3", cfg->nina_layout[2]);
     cJSON_AddStringToObject(obj, "allsky_field_config", cfg->allsky_field_config);
     cJSON_AddStringToObject(obj, "allsky_thresholds", cfg->allsky_thresholds);
     cJSON_AddStringToObject(obj, "spotify_client_id", cfg->spotify_client_id);
@@ -550,6 +557,9 @@ static const backup_field_t s_backup_fields[] = {
     {"instance_enabled_1", "Instance 1 Enabled",  "Nodes & Data", false, false},
     {"instance_enabled_2", "Instance 2 Enabled",  "Nodes & Data", false, false},
     {"instance_enabled_3", "Instance 3 Enabled",  "Nodes & Data", false, false},
+    {"nina_layout_1",      "N.I.N.A. 1 Page Layout", "Nodes & Data", false, false},
+    {"nina_layout_2",      "N.I.N.A. 2 Page Layout", "Nodes & Data", false, false},
+    {"nina_layout_3",      "N.I.N.A. 3 Page Layout", "Nodes & Data", false, false},
     {"toast_instance_muted_1",      "Instance 1 Muted",       "Nodes & Data", false, false},
     {"toast_instance_muted_2",      "Instance 2 Muted",       "Nodes & Data", false, false},
     {"toast_instance_muted_3",      "Instance 3 Muted",       "Nodes & Data", false, false},
@@ -671,6 +681,8 @@ static const backup_field_t s_backup_fields[] = {
     {"clouds_frames",              "Cloud Cover Animation Length","Cloud Cover", false, false},
     {"clouds_zoom",                "Cloud Cover Area",          "Cloud Cover", false, false},
     {"clouds_channel",             "Cloud Cover Channel",       "Cloud Cover", false, false},   /* v67 */
+    {"clouds_basemap",             "Cloud Cover Map Overlay",   "Cloud Cover", false, false},   /* v73 */
+    {"clouds_show_location",       "Cloud Cover Location Marker","Cloud Cover", false, false},  /* v74 */
     /* ADS-B page (v68). All seven are SETTINGS_TABLE rows, so
      * serialize_config_to_json() emits them and parse_config_from_json() reads
      * them with no hand-written arm; registered here so the diff, category
@@ -853,6 +865,9 @@ static const restore_numrange_t s_restore_numrange[] = {
     {"octoprint_image_source",  0,    1,     false},  /* settings_table.h INT_RESET row (out of range -> 0) */
     {"octoprint_layout",        0,    6,     false},  /* settings_table.h INT_RESET row (out of range -> 0) */
     {"clock_layout",            0,    6,     false},  /* settings_table.h INT_RESET row (out of range -> 0) */
+    {"nina_layout_1",           0,    1,     false},  /* app_config.c validate_config (out of range -> 0) */
+    {"nina_layout_2",           0,    1,     false},  /* app_config.c validate_config (out of range -> 0) */
+    {"nina_layout_3",           0,    1,     false},  /* app_config.c validate_config (out of range -> 0) */
     {"allsky_dew_offset",       -50,  50,    true},   /* app_config.c:2552 */
     {"goes_update_interval_s",  300,  7200,  false},  /* app_config.c:2556 */
     {"solar_update_interval_s", 300,  7200,  false},  /* settings_table.h INT_RESET row (out of range -> 600) */
@@ -1433,6 +1448,24 @@ static app_config_t *parse_config_from_json(cJSON *root)
     JSON_TO_BOOL(root, "instance_enabled_1", cfg->instance_enabled[0]);
     JSON_TO_BOOL(root, "instance_enabled_2", cfg->instance_enabled[1]);
     JSON_TO_BOOL(root, "instance_enabled_3", cfg->instance_enabled[2]);
+
+    /* Per-instance NINA page layout (0 Dashboard, 1 Image-forward).
+     * Array field, so keyed 1-indexed per instance like
+     * instance_enabled_N above rather than as a SETTINGS_TABLE row. Out of
+     * range resets to the Dashboard, matching validate_config(). */
+    static const char *const k_nina_layout_keys[] = {
+        "nina_layout_1", "nina_layout_2", "nina_layout_3"
+    };
+    _Static_assert(sizeof(k_nina_layout_keys) / sizeof(k_nina_layout_keys[0]) ==
+                       MAX_NINA_INSTANCES,
+                   "nina_layout JSON key list must cover every instance slot");
+    for (int li = 0; li < MAX_NINA_INSTANCES; li++) {
+        cJSON *jlayout = cJSON_GetObjectItem(root, k_nina_layout_keys[li]);
+        if (cJSON_IsNumber(jlayout)) {
+            int v = jlayout->valueint;
+            cfg->nina_layout[li] = (v >= 0 && v <= 1) ? (uint8_t)v : 0;
+        }
+    }
 
     JSON_TO_STRING(root, "allsky_field_config",  cfg->allsky_field_config);
     JSON_TO_STRING(root, "allsky_thresholds",    cfg->allsky_thresholds);

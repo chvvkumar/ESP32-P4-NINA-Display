@@ -217,6 +217,10 @@
     INT_RESET (clouds_zoom,                  "clouds_zoom",                  7,     5,     9)     /* Web-Mercator zoom of the 720 px picture: 5 ~2500 km wide .. 9 ~150 km. RESET: an unknown value falls back to the default, never to a bound */ \
     /* -- Clouds satellite channel (v67) -- */ \
     INT_RESET (clouds_channel,               "clouds_channel",               0,     0,     2)     /* which GOES ABI product the Clouds page shows: 0 = GeoColor (default), 1 = Clean Infrared (Band 13), 2 = Air Mass. RESET, not clamp: an unknown channel falls back to GeoColor, which every satellite publishes, rather than to the nearest bound */ \
+    /* -- Clouds map overlay (v73) -- */ \
+    INT_RESET (clouds_basemap,               "clouds_basemap",               0,     0,     3)     /* which map overlay is drawn over the Clouds imagery: 0 = borders and roads (default), 1 = coastlines only, 2 = borders, roads and grid, 3 = none. RESET, not clamp: an unknown value falls back to the default overlay rather than to the nearest bound, which would silently mean "none" */ \
+    /* -- Clouds location marker (v74) -- */ \
+    BOOL      (clouds_show_location,         "clouds_show_location",         true)  /* draw a small marker at the user's location (weather_lat/weather_lon), which is the frame centre. On by default */ \
     /* -- ADS-B page (v68): tar1090/readsb aircraft feed -- */ \
     BOOL      (flights_enabled,              "flights_enabled",              false) \
     STR       (flights_url,                  "flights_url",                  "")    /* tar1090/readsb base URL, no trailing path (the poller appends /data/aircraft.json). Not a secret. STR only bounds the copy and NUL-terminates; the "empty or http(s)://" scheme rule lives in validate_config(), the same trust-boundary split radar_token uses */ \
