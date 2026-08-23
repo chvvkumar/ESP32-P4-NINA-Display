@@ -237,6 +237,10 @@
       justify-self:center; display:flex; align-items:center;
     }
     .evcat-name.evcat-last, .evcat-cell.evcat-last { border-bottom:none; }
+    /* Single named events, indented under the category row they belong to. */
+    .evcat-name.evcat-sub {
+      padding-left:20px; font-size:0.78rem; color:var(--text-muted);
+    }
     /* Voice Clips tables: name | status | upload | reset | preview. One grid
        per raised subsection; the non-name columns are fixed widths so the
        tables align ACROSS sections (auto would size each section alone). */
@@ -2503,6 +2507,13 @@
       data.screen_sleep_timeout_s=parseInt($('screen_sleep_timeout').value)||60;
     }
 
+    /* Named-event switches the page does not offer (a phrase the device does
+       not raise yet) keep whatever the device had stored, so a Save cannot
+       quietly clear them. populateTab_behavior stashes them here; the collector
+       ORs them straight back. Adding the missing switch to the Behavior markup
+       is all it takes to make it a real control -- nothing here needs editing. */
+    var _voiceEvHeld=0;
+
     function collectTab_behavior(data){
       data.active_page_override=getStartPageValue();
       data.auto_rotate_enabled=!!$('auto_cycle_toggle').checked;
@@ -2526,7 +2537,16 @@
       data.boot_jingle_enabled=$('boot_jingle_enabled').checked?1:0;
       data.toast_aggregation_window_s=parseInt($('toast_aggregation_window').value)||0;
       data.toast_notify_mask=(function(){var m=0;for(var i=0;i<12;i++){if($('notify_cat_'+i).checked) m|=(1<<i);}return m>>>0;})();
-      data.voice_notify_mask=(function(){var m=0;for(var i=0;i<12;i++){if($('voice_cat_'+i).checked) m|=(1<<i);}return m>>>0;})();
+      /* One value carries both voice switches: the 12 category switches in the
+         low bits, then one switch per named event starting at bit 12. The
+         voice_ev_N id number is the EVENT number the preview endpoint takes,
+         not the bit -- the +12 is applied here and nowhere else. */
+      data.voice_notify_mask=(function(){
+        var m=_voiceEvHeld;
+        for(var i=0;i<12;i++){if($('voice_cat_'+i).checked) m|=(1<<i);}
+        for(var e=0;e<15;e++){var el=$('voice_ev_'+e); if(el&&el.checked) m|=(1<<(12+e));}
+        return m>>>0;
+      })();
       data.idle_page_override_enabled=!!$('idle_page_override_enabled').checked;
       data.idle_page_override_target=getIdleTargetValue();
       data.idle_indicator_enabled=!!$('idle_indicator_enabled').checked;
@@ -3036,8 +3056,18 @@
       updateAggregationLabel(aggWin);
       var mask=data.toast_notify_mask!=null?data.toast_notify_mask:0xFFFFFFFF;
       for(var i=0;i<12;i++){$('notify_cat_'+i).checked=!!(mask&(1<<i));}
-      var vcMask=data.voice_notify_mask!=null?data.voice_notify_mask:0x1A2;
+      /* Fallback for a reply (or a restored backup) with no voice value at all:
+         the same starting point a new device gets, which is the four default
+         categories plus every named event switched on. Leaving the named events
+         out of the fallback would silently write them all off on the next Save. */
+      var vcMask=data.voice_notify_mask!=null?data.voice_notify_mask:0x7FFF1A2;
       for(var vc=0;vc<12;vc++){$('voice_cat_'+vc).checked=!!(vcMask&(1<<vc));}
+      _voiceEvHeld=0;
+      for(var ve=0;ve<15;ve++){
+        var evEl=$('voice_ev_'+ve);
+        if(evEl) evEl.checked=!!(vcMask&(1<<(12+ve)));
+        else _voiceEvHeld|=(vcMask&(1<<(12+ve)));
+      }
 
       $('auto_cycle_toggle').checked=!!data.auto_rotate_enabled;
       toggleAutoCycle();
@@ -3532,6 +3562,13 @@
        Same-origin fetch carries the session cookie like every other POST. */
     function previewVoiceCat(bit){
       fetch('/api/voice-preview?kind=event&category='+bit+'&instance=1',{method:'POST'})
+        .then(function(r){if(!r.ok) showToast('Voice preview failed','error');})
+        .catch(function(){showToast('Voice preview failed','error');});
+    }
+    /* Named single events. The number is the event itself, not a category, so
+       this call sends event= and never category=/equipment=. */
+    function previewVoiceEvent(n){
+      fetch('/api/voice-preview?event='+n+'&instance=1',{method:'POST'})
         .then(function(r){if(!r.ok) showToast('Voice preview failed','error');})
         .catch(function(){showToast('Voice preview failed','error');});
     }

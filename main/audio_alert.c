@@ -43,7 +43,10 @@ static const char *TAG = "audio_alert";
  * the name table, so they cannot drift out of order.  EMBED_FILES derives the
  * symbol from the file's basename only, so the audio_clips/ subdirectory does
  * not appear in the symbol name.  Each X() argument is both the .pcm basename
- * and the name the /api/test/clip endpoint accepts. */
+ * and the name the /api/test/clip endpoint accepts.
+ * The per-event phrase clips (voice_event_t) are appended at the END so every
+ * existing CLIP_ID_* keeps its numeric value: SPIFFS overrides key by name,
+ * but /api/test/clip and the Voice Clips UI index by id. */
 #define CLIP_LIST(X)                                            \
     X(chime) X(warning)                                         \
     X(instance_1) X(instance_2) X(instance_3)                   \
@@ -56,7 +59,13 @@ static const char *TAG = "audio_alert";
     X(sequence_event) X(focuser_event) X(mount_event)           \
     X(meridian_flip) X(guider_event) X(safety_event)            \
     X(error_event) X(profile_changed) X(dome_event) X(flat_event)  \
-    X(boot_jingle) X(rms_above) X(hfr_above) X(and)
+    X(boot_jingle) X(rms_above) X(hfr_above) X(and)                 \
+    X(sequence_started) X(sequence_finished) X(sequence_step_failed)  \
+    X(autofocus_complete) X(autofocus_failed)                        \
+    X(meridian_flip_starting) X(mount_parked)                        \
+    X(conditions_safe) X(guiding_stopped)                            \
+    X(dome_shutter_closed) X(dome_shutter_opened)                    \
+    X(platesolve_failed) X(camera_timeout)
 
 #define CLIP_EXTERN(name)                               \
     extern const uint8_t _binary_##name##_pcm_start[];  \
@@ -225,6 +234,65 @@ static bool build_event_sentence(sentence_t *s, int category_bit,
     return true;
 }
 
+/* Phrase clip per voice_event_t.  Order MUST match the enum in audio_alert.h.
+ * 15 events, 13 new .pcm files: VOICE_EV_MERIDIAN_FLIP_COMPLETE reuses the
+ * existing meridian_flip clip ("Meridian flip complete."), and
+ * VOICE_EV_CONDITIONS_UNSAFE is reserved with no clip (see below). */
+static const clip_id_t s_event_clip[VOICE_EV_COUNT] = {
+    [VOICE_EV_SEQUENCE_STARTED]       = CLIP_ID_sequence_started,
+    [VOICE_EV_SEQUENCE_FINISHED]      = CLIP_ID_sequence_finished,
+    [VOICE_EV_SEQUENCE_STEP_FAILED]   = CLIP_ID_sequence_step_failed,
+    [VOICE_EV_AUTOFOCUS_COMPLETE]     = CLIP_ID_autofocus_complete,
+    [VOICE_EV_AUTOFOCUS_FAILED]       = CLIP_ID_autofocus_failed,
+    [VOICE_EV_MERIDIAN_FLIP_STARTING] = CLIP_ID_meridian_flip_starting,
+    [VOICE_EV_MERIDIAN_FLIP_COMPLETE] = CLIP_ID_meridian_flip,
+    [VOICE_EV_MOUNT_PARKED]           = CLIP_ID_mount_parked,
+    /* Reserved, no clip and no producer: the unsafe edge is announced by the
+     * breach/alert engine's older `unsafe` clip ("Unsafe conditions."), so a
+     * per-event phrase here would speak the same transition twice.  CLIP_COUNT
+     * is the "no clip" sentinel; build_event_id_sentence() refuses it. */
+    [VOICE_EV_CONDITIONS_UNSAFE]      = CLIP_COUNT,
+    [VOICE_EV_CONDITIONS_SAFE]        = CLIP_ID_conditions_safe,
+    [VOICE_EV_GUIDING_STOPPED]        = CLIP_ID_guiding_stopped,
+    [VOICE_EV_DOME_SHUTTER_CLOSED]    = CLIP_ID_dome_shutter_closed,
+    [VOICE_EV_DOME_SHUTTER_OPENED]    = CLIP_ID_dome_shutter_opened,
+    [VOICE_EV_PLATESOLVE_FAILED]      = CLIP_ID_platesolve_failed,
+    [VOICE_EV_CAMERA_TIMEOUT]         = CLIP_ID_camera_timeout,
+};
+
+/* Events that get the warning tone, mirroring the bad-news category rule in
+ * build_event_sentence (categories 1/5/7/8). */
+#define VOICE_EV_WARN_MASK                      \
+    ((1u << VOICE_EV_SEQUENCE_STEP_FAILED) |    \
+     (1u << VOICE_EV_AUTOFOCUS_FAILED)     |    \
+     (1u << VOICE_EV_CONDITIONS_UNSAFE)    |    \
+     (1u << VOICE_EV_PLATESOLVE_FAILED)    |    \
+     (1u << VOICE_EV_CAMERA_TIMEOUT))
+
+/* Assemble a per-event announcement (shared by the live and preview entry
+ * points): chime + warning (failure/unsafe events only) + instance + the
+ * event's phrase clip.  At most 4 clips, well under SENTENCE_MAX_CLIPS. */
+static bool build_event_id_sentence(sentence_t *s, voice_event_t ev,
+                                    int instance_idx) {
+    /* Single unsigned compare: a negative ev wraps above the count, and the
+     * enum's underlying type may be unsigned (so `ev < 0` would be a
+     * tautological-compare warning). */
+    if ((unsigned)ev >= (unsigned)VOICE_EV_COUNT) return false;
+    /* Reserved event with no clip (see s_event_clip).  Guarded here rather
+     * than at each caller so the live and preview paths -- and any future one
+     * -- all refuse it; the preview endpoint takes the event id straight from
+     * an HTTP query, so this IS reachable from outside. */
+    if (s_event_clip[ev] >= CLIP_COUNT) return false;
+    if (instance_idx < 0 || instance_idx > 2) return false;
+
+    memset(s, 0, sizeof(*s));
+    push_clip(s, CLIP_ID_chime);
+    if (VOICE_EV_WARN_MASK & (1u << ev)) push_clip(s, CLIP_ID_warning);
+    push_clip(s, CLIP_ID_instance_1 + instance_idx);
+    push_clip(s, s_event_clip[ev]);
+    return true;
+}
+
 /* Assemble a grouped equipment announcement: chime + warning (disconnects
  * only, matching build_event_sentence) + instance + each equipment clip for
  * the set bits of eq_mask ascending, with "and" before the last one when two
@@ -271,18 +339,20 @@ static bool build_conn_sentence(sentence_t *s, int instance_idx, bool connected)
     return true;
 }
 
-/* Per-(category,instance) 30 s cooldown, shared by the single-event and the
- * grouped equipment paths so they pace each other.  Deliberately unlocked:
- * callers run on several tasks (WS handlers, esp_timer), but a raced
- * read/write here only risks one duplicate or one suppressed announcement,
- * which is acceptable for a rate limiter. */
-static int64_t s_last_event_ms[12][3];
+/* Per-(slot,instance) 30 s cooldown, shared by the single-event, the grouped
+ * equipment and the per-event phrase paths so they pace each other.  Slot is
+ * the category bit (0-11) for the category paths and VOICE_EVENT_BIT_BASE + ev
+ * for the per-event paths, so a paired event (started/finished) cannot swallow
+ * itself.  Deliberately unlocked: callers run on several tasks (WS handlers,
+ * esp_timer), but a raced read/write here only risks one duplicate or one
+ * suppressed announcement, which is acceptable for a rate limiter. */
+static int64_t s_last_event_ms[VOICE_EVENT_BIT_BASE + VOICE_EV_COUNT][3];
 
-static bool event_cooldown_pass(int category_bit, int instance_idx) {
+static bool event_cooldown_pass(int slot, int instance_idx) {
     int64_t now = esp_timer_get_time() / 1000;
-    int64_t last = s_last_event_ms[category_bit][instance_idx];
+    int64_t last = s_last_event_ms[slot][instance_idx];
     if (last != 0 && now - last < 30000) return false;
-    s_last_event_ms[category_bit][instance_idx] = now;
+    s_last_event_ms[slot][instance_idx] = now;
     return true;
 }
 
@@ -504,6 +574,37 @@ void audio_alert_speak_equipment_group(int category_bit, int instance_idx,
 
     sentence_t s;
     if (build_group_sentence(&s, category_bit, instance_idx, eq_mask)) enqueue(&s);
+}
+
+void audio_alert_speak_event_id(voice_event_t ev, int instance_idx) {
+    if (!s_queue) return;
+    if ((unsigned)ev >= (unsigned)VOICE_EV_COUNT) return;
+    if (instance_idx < 0 || instance_idx > 2) return;
+
+    app_config_t *cfg = app_config_get();
+    if (!cfg->alert_voice_enabled) return;
+    if (cfg->alert_voice_muted[instance_idx]) return;
+    /* The per-event bit is checked ALONE, deliberately NOT ANDed with the
+     * event's category bit: ticking "Sequence finished" must be enough to hear
+     * it.  The category bits keep governing only the generic fallback clips. */
+    if (!(cfg->voice_notify_mask & (1u << (VOICE_EVENT_BIT_BASE + (int)ev)))) return;
+    if (!event_cooldown_pass(VOICE_EVENT_BIT_BASE + (int)ev, instance_idx)) return;
+
+    sentence_t s;
+    if (build_event_id_sentence(&s, ev, instance_idx)) enqueue(&s);
+}
+
+void audio_alert_preview_event_id(voice_event_t ev, int instance_idx) {
+    if (!s_queue) return;
+
+    sentence_t s;
+    if (build_event_id_sentence(&s, ev, instance_idx)) enqueue(&s);
+}
+
+const char *audio_alert_event_clip_name(voice_event_t ev) {
+    if ((unsigned)ev >= (unsigned)VOICE_EV_COUNT) return NULL;
+    if (s_event_clip[ev] >= CLIP_COUNT) return NULL;   /* reserved, no clip */
+    return s_clip_names[s_event_clip[ev]];
 }
 
 void audio_alert_speak_conn(int instance_idx, bool connected) {

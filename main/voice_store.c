@@ -38,8 +38,8 @@ static const char *TAG = "voice_store";
 #define VOICE_STORE_DIR       VOICE_STORE_MOUNT "/voice"
 #define VOICE_STORE_PARTITION "storage"
 
-/* Longest CLIP_LIST name is 15 chars; %.40s bounds the expansion so
- * -Werror=format-truncation can prove the paths fit. */
+/* Longest CLIP_LIST name is 22 chars ("meridian_flip_starting"); %.40s bounds
+ * the expansion so -Werror=format-truncation can prove the paths fit. */
 #define VOICE_PATH_MAX 96
 #define CLIP_NAME_FMT  "%.40s"
 
@@ -53,7 +53,12 @@ static volatile bool     s_ready = false;
  * The background scan computes them once; save/reset keep them current
  * incrementally.  s_used_cache drifts by filesystem metadata overhead between
  * boots, which is acceptable for a UI statistic.  Guarded by s_mutex. */
-#define VOICE_MAX_CLIPS 64   /* > CLIP_COUNT (~47); runtime-guarded below */
+/* Must stay > CLIP_COUNT (61 as of the per-event phrases).  Every index is
+ * runtime-guarded below, so an overflow does not corrupt anything -- it just
+ * silently drops the s_clip_size cache entry for the clips past the end, which
+ * makes their custom uploads invisible to the stats.  The scan logs loudly if
+ * that ever happens; raise this and the log goes away. */
+#define VOICE_MAX_CLIPS 96
 static size_t s_used_cache = 0;
 static size_t s_total_cache = 0;
 static size_t s_custom_cache = 0;
@@ -194,6 +199,14 @@ static void voice_store_task(void *arg) {
         }
         closedir(d);
     }
+    /* Fail loudly instead of quietly: past VOICE_MAX_CLIPS the size cache is
+     * skipped above, so a custom upload for a high-index clip would play but
+     * never show up in the stats.  Adding clips is what trips this. */
+    if (audio_alert_clip_count() > VOICE_MAX_CLIPS) {
+        ESP_LOGE(TAG, "VOICE_MAX_CLIPS (%d) < clip count (%d): raise it",
+                 VOICE_MAX_CLIPS, audio_alert_clip_count());
+    }
+
     /* One-time full-partition walk; every later stats request serves this
      * cached figure instead. */
     esp_littlefs_info(VOICE_STORE_PARTITION, &s_total_cache, &s_used_cache);
