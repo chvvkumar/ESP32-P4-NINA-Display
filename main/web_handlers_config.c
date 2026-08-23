@@ -26,64 +26,13 @@ extern const uint8_t setup_html_end[]   asm("_binary_setup_ui_html_end");
 extern const uint8_t favicon_png_start[] asm("_binary_favicon_png_start");
 extern const uint8_t favicon_png_end[]   asm("_binary_favicon_png_end");
 
-/* P6b tab fragments -- see s_ui_fragments[] below for the lookup table these feed. */
-extern const uint8_t fragment_logs_html_start[] asm("_binary_fragment_logs_html_start");
-extern const uint8_t fragment_logs_html_end[]   asm("_binary_fragment_logs_html_end");
-extern const uint8_t fragment_backup_html_start[] asm("_binary_fragment_backup_html_start");
-extern const uint8_t fragment_backup_html_end[]   asm("_binary_fragment_backup_html_end");
-extern const uint8_t fragment_api_html_start[] asm("_binary_fragment_api_html_start");
-extern const uint8_t fragment_api_html_end[]   asm("_binary_fragment_api_html_end");
-
-/* P6c tab fragments. The four image tabs (image-goes, image-moon,
- * image-solar, image-custom) have hyphenated tab names; the embedded asset
- * filenames/symbols use underscores (fragment_image_goes.html and so on),
- * so the name->symbol mapping only lines up in the s_ui_fragments[] rows
- * below, not by naming convention alone. */
-extern const uint8_t fragment_allsky_html_start[] asm("_binary_fragment_allsky_html_start");
-extern const uint8_t fragment_allsky_html_end[]   asm("_binary_fragment_allsky_html_end");
-extern const uint8_t fragment_json_html_start[] asm("_binary_fragment_json_html_start");
-extern const uint8_t fragment_json_html_end[]   asm("_binary_fragment_json_html_end");
-extern const uint8_t fragment_ha_html_start[] asm("_binary_fragment_ha_html_start");
-extern const uint8_t fragment_ha_html_end[]   asm("_binary_fragment_ha_html_end");
-extern const uint8_t fragment_clock_html_start[] asm("_binary_fragment_clock_html_start");
-extern const uint8_t fragment_clock_html_end[]   asm("_binary_fragment_clock_html_end");
-extern const uint8_t fragment_spotify_html_start[] asm("_binary_fragment_spotify_html_start");
-extern const uint8_t fragment_spotify_html_end[]   asm("_binary_fragment_spotify_html_end");
-extern const uint8_t fragment_image_goes_html_start[]   asm("_binary_fragment_image_goes_html_start");
-extern const uint8_t fragment_image_goes_html_end[]     asm("_binary_fragment_image_goes_html_end");
-extern const uint8_t fragment_image_moon_html_start[]   asm("_binary_fragment_image_moon_html_start");
-extern const uint8_t fragment_image_moon_html_end[]     asm("_binary_fragment_image_moon_html_end");
-extern const uint8_t fragment_image_solar_html_start[]  asm("_binary_fragment_image_solar_html_start");
-extern const uint8_t fragment_image_solar_html_end[]    asm("_binary_fragment_image_solar_html_end");
-extern const uint8_t fragment_image_custom_html_start[] asm("_binary_fragment_image_custom_html_start");
-extern const uint8_t fragment_image_custom_html_end[]   asm("_binary_fragment_image_custom_html_end");
-extern const uint8_t fragment_image_radar_html_start[]  asm("_binary_fragment_image_radar_html_start");
-extern const uint8_t fragment_image_radar_html_end[]    asm("_binary_fragment_image_radar_html_end");
-extern const uint8_t fragment_image_clouds_html_start[] asm("_binary_fragment_image_clouds_html_start");
-extern const uint8_t fragment_image_clouds_html_end[]   asm("_binary_fragment_image_clouds_html_end");
-extern const uint8_t fragment_octoprint_html_start[] asm("_binary_fragment_octoprint_html_start");
-extern const uint8_t fragment_octoprint_html_end[]   asm("_binary_fragment_octoprint_html_end");
-extern const uint8_t fragment_adsb_html_start[] asm("_binary_fragment_adsb_html_start");
-extern const uint8_t fragment_adsb_html_end[]   asm("_binary_fragment_adsb_html_end");
-
-/* P6d tab fragments -- final wave. Extracts the remaining four tabs (nodes,
- * display, behavior, system), completing the migration: all 11 tabs now ship
- * as lazily-fetched fragments and config_ui.html holds only the tab shell,
- * loader machinery, and the shared JS (see config_ui.html's Tab Fragment
- * Loader section for LAZY_TABS/loadedTabs). */
-extern const uint8_t fragment_nodes_html_start[] asm("_binary_fragment_nodes_html_start");
-extern const uint8_t fragment_nodes_html_end[]   asm("_binary_fragment_nodes_html_end");
-extern const uint8_t fragment_display_html_start[] asm("_binary_fragment_display_html_start");
-extern const uint8_t fragment_display_html_end[]   asm("_binary_fragment_display_html_end");
-extern const uint8_t fragment_behavior_html_start[] asm("_binary_fragment_behavior_html_start");
-extern const uint8_t fragment_behavior_html_end[]   asm("_binary_fragment_behavior_html_end");
-extern const uint8_t fragment_system_html_start[] asm("_binary_fragment_system_html_start");
-extern const uint8_t fragment_system_html_end[]   asm("_binary_fragment_system_html_end");
-
-/* Voice Clips tab (custom clip overrides). Like the image tabs, the tab name is
- * hyphenated ("voice-clips") while the asset symbol uses underscores. */
-extern const uint8_t fragment_voice_clips_html_start[] asm("_binary_fragment_voice_clips_html_start");
-extern const uint8_t fragment_voice_clips_html_end[]   asm("_binary_fragment_voice_clips_html_end");
+/* Tab fragments are embedded GZIP-ONLY (flash reclaim: the plain copies were
+ * dropped from EMBED_TXTFILES in main/CMakeLists.txt, so no
+ * _binary_fragment_*_html_start symbol exists any more -- only the _gz_ twins
+ * declared below). s_ui_fragments[] therefore carries gz pointers alone and
+ * send_embedded_asset() serves them unconditionally with Content-Encoding:
+ * gzip. The hyphenated tab names (image-goes, voice-clips, ...) still map to
+ * underscored symbols only through that table, not by naming convention. */
 
 /* Build-time gzip copies of the shell and every fragment (see WEB_GZ_ASSETS in
  * main/CMakeLists.txt). Symbol names follow the embed convention: the .gz file
@@ -171,6 +120,15 @@ static const char *asset_etag(void)
  * is a 304 with an empty body instead of a fresh transfer.
  *
  * gz_start/gz_end may be NULL to force the plain copy.
+ *
+ * plain_start/plain_end may be NULL for a GZ-ONLY asset (the tab fragments:
+ * their plain copies are no longer embedded, see s_ui_fragments[]). The gz
+ * copy is then sent unconditionally with Content-Encoding: gzip, without
+ * sniffing Accept-Encoding -- there is no plain copy left to fall back to.
+ * ponytail: that drops support for a client that does not accept gzip. Every
+ * browser has sent "Accept-Encoding: gzip" for two decades and the shell page
+ * that fetches these fragments is itself gz-preferred; if a non-gzip client
+ * ever matters, re-embed the plain copies and pass them here again.
  */
 static esp_err_t send_embedded_asset(httpd_req_t *req,
                                      const uint8_t *plain_start, const uint8_t *plain_end,
@@ -195,6 +153,11 @@ static esp_err_t send_embedded_asset(httpd_req_t *req,
     }
 
     if (gz_start != NULL && gz_end > gz_start) {
+        if (plain_start == NULL) {
+            /* gz-only asset: nothing to fall back to, so skip the sniff. */
+            httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+            return httpd_resp_send(req, (const char *)gz_start, gz_end - gz_start);
+        }
         /* On ESP_ERR_HTTPD_RESULT_TRUNC the buffer still holds a
          * null-terminated prefix (strlcpy), so searching it is safe. Clients
          * that bury "gzip" past 96 chars simply get the plain copy. */
@@ -208,6 +171,12 @@ static esp_err_t send_embedded_asset(httpd_req_t *req,
         }
     }
 
+    if (plain_start == NULL || plain_end <= plain_start) {
+        /* Caller passed neither copy: a table row lost both symbols. */
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_set_type(req, "text/plain");
+        return httpd_resp_send(req, "asset unavailable", HTTPD_RESP_USE_STRLEN);
+    }
     return httpd_resp_send(req, (const char *)plain_start, plain_end - plain_start);
 }
 
@@ -244,13 +213,12 @@ esp_err_t home_get_handler(httpd_req_t *req)
 
 /**
  * @brief One row of the tab-fragment lookup table: a `tab` query value maps
- * to an embedded HTML asset's start/end pointers (same EMBED_TXTFILES
- * pattern as config_html_start/end above).
+ * to an embedded HTML asset's gz start/end pointers (same EMBED_TXTFILES
+ * pattern as config_html_gz_start/end above). There is no plain row: the
+ * non-gz fragment copies are not embedded.
  */
 typedef struct {
     const char *name;
-    const uint8_t *start;
-    const uint8_t *end;
     const uint8_t *gz_start;
     const uint8_t *gz_end;
 } ui_fragment_entry_t;
@@ -270,49 +238,28 @@ typedef struct {
  * underscored symbols.
  */
 static const ui_fragment_entry_t s_ui_fragments[] = {
-    { "__none__", NULL, NULL, NULL, NULL },  /* placeholder so the array type-checks; never matches a real tab name */
-    { "logs",   fragment_logs_html_start,   fragment_logs_html_end,
-                fragment_logs_html_gz_start,   fragment_logs_html_gz_end },
-    { "backup", fragment_backup_html_start, fragment_backup_html_end,
-                fragment_backup_html_gz_start, fragment_backup_html_gz_end },
-    { "api",    fragment_api_html_start,    fragment_api_html_end,
-                fragment_api_html_gz_start,    fragment_api_html_gz_end },
-    { "allsky",        fragment_allsky_html_start,        fragment_allsky_html_end,
-                       fragment_allsky_html_gz_start,        fragment_allsky_html_gz_end },
-    { "json",          fragment_json_html_start,          fragment_json_html_end,
-                       fragment_json_html_gz_start,          fragment_json_html_gz_end },
-    { "ha",            fragment_ha_html_start,            fragment_ha_html_end,
-                       fragment_ha_html_gz_start,            fragment_ha_html_gz_end },
-    { "clock",         fragment_clock_html_start,         fragment_clock_html_end,
-                       fragment_clock_html_gz_start,         fragment_clock_html_gz_end },
-    { "spotify",       fragment_spotify_html_start,       fragment_spotify_html_end,
-                       fragment_spotify_html_gz_start,       fragment_spotify_html_gz_end },
-    { "image-goes",    fragment_image_goes_html_start,    fragment_image_goes_html_end,
-                       fragment_image_goes_html_gz_start,    fragment_image_goes_html_gz_end },
-    { "image-moon",    fragment_image_moon_html_start,    fragment_image_moon_html_end,
-                       fragment_image_moon_html_gz_start,    fragment_image_moon_html_gz_end },
-    { "image-solar",   fragment_image_solar_html_start,   fragment_image_solar_html_end,
-                       fragment_image_solar_html_gz_start,   fragment_image_solar_html_gz_end },
-    { "image-custom",  fragment_image_custom_html_start,  fragment_image_custom_html_end,
-                       fragment_image_custom_html_gz_start,  fragment_image_custom_html_gz_end },
-    { "image-radar",   fragment_image_radar_html_start,   fragment_image_radar_html_end,
-                       fragment_image_radar_html_gz_start,   fragment_image_radar_html_gz_end },
-    { "image-clouds",  fragment_image_clouds_html_start,  fragment_image_clouds_html_end,
-                       fragment_image_clouds_html_gz_start,  fragment_image_clouds_html_gz_end },
-    { "octoprint",     fragment_octoprint_html_start,     fragment_octoprint_html_end,
-                       fragment_octoprint_html_gz_start,     fragment_octoprint_html_gz_end },
-    { "adsb",          fragment_adsb_html_start,          fragment_adsb_html_end,
-                       fragment_adsb_html_gz_start,          fragment_adsb_html_gz_end },
-    { "nodes",         fragment_nodes_html_start,         fragment_nodes_html_end,
-                       fragment_nodes_html_gz_start,         fragment_nodes_html_gz_end },
-    { "display",       fragment_display_html_start,       fragment_display_html_end,
-                       fragment_display_html_gz_start,       fragment_display_html_gz_end },
-    { "behavior",      fragment_behavior_html_start,      fragment_behavior_html_end,
-                       fragment_behavior_html_gz_start,      fragment_behavior_html_gz_end },
-    { "system",        fragment_system_html_start,        fragment_system_html_end,
-                       fragment_system_html_gz_start,        fragment_system_html_gz_end },
-    { "voice-clips",   fragment_voice_clips_html_start,   fragment_voice_clips_html_end,
-                       fragment_voice_clips_html_gz_start,   fragment_voice_clips_html_gz_end },
+    { "__none__", NULL, NULL },  /* placeholder so the array type-checks; never matches a real tab name */
+    { "logs",         fragment_logs_html_gz_start, fragment_logs_html_gz_end },
+    { "backup",       fragment_backup_html_gz_start, fragment_backup_html_gz_end },
+    { "api",          fragment_api_html_gz_start, fragment_api_html_gz_end },
+    { "allsky",       fragment_allsky_html_gz_start, fragment_allsky_html_gz_end },
+    { "json",         fragment_json_html_gz_start, fragment_json_html_gz_end },
+    { "ha",           fragment_ha_html_gz_start, fragment_ha_html_gz_end },
+    { "clock",        fragment_clock_html_gz_start, fragment_clock_html_gz_end },
+    { "spotify",      fragment_spotify_html_gz_start, fragment_spotify_html_gz_end },
+    { "image-goes",   fragment_image_goes_html_gz_start, fragment_image_goes_html_gz_end },
+    { "image-moon",   fragment_image_moon_html_gz_start, fragment_image_moon_html_gz_end },
+    { "image-solar",  fragment_image_solar_html_gz_start, fragment_image_solar_html_gz_end },
+    { "image-custom", fragment_image_custom_html_gz_start, fragment_image_custom_html_gz_end },
+    { "image-radar",  fragment_image_radar_html_gz_start, fragment_image_radar_html_gz_end },
+    { "image-clouds", fragment_image_clouds_html_gz_start, fragment_image_clouds_html_gz_end },
+    { "octoprint",    fragment_octoprint_html_gz_start, fragment_octoprint_html_gz_end },
+    { "adsb",         fragment_adsb_html_gz_start, fragment_adsb_html_gz_end },
+    { "nodes",        fragment_nodes_html_gz_start, fragment_nodes_html_gz_end },
+    { "display",      fragment_display_html_gz_start, fragment_display_html_gz_end },
+    { "behavior",     fragment_behavior_html_gz_start, fragment_behavior_html_gz_end },
+    { "system",       fragment_system_html_gz_start, fragment_system_html_gz_end },
+    { "voice-clips",  fragment_voice_clips_html_gz_start, fragment_voice_clips_html_gz_end },
 };
 
 // Handler for GET /ui/fragment?tab=<name> -- serves one lazily-loaded config_ui.html tab fragment.
@@ -327,9 +274,9 @@ esp_err_t ui_fragment_get_handler(httpd_req_t *req)
     }
 
     for (size_t i = 0; i < sizeof(s_ui_fragments) / sizeof(s_ui_fragments[0]); i++) {
-        if (s_ui_fragments[i].start != NULL && strcmp(s_ui_fragments[i].name, tab) == 0) {
-            return send_embedded_asset(req,
-                                       s_ui_fragments[i].start, s_ui_fragments[i].end,
+        if (s_ui_fragments[i].gz_start != NULL && strcmp(s_ui_fragments[i].name, tab) == 0) {
+            /* NULL plain copy -> served gz unconditionally (see send_embedded_asset). */
+            return send_embedded_asset(req, NULL, NULL,
                                        s_ui_fragments[i].gz_start, s_ui_fragments[i].gz_end,
                                        "text/html");
         }
@@ -1494,7 +1441,9 @@ static app_config_t *parse_config_from_json(cJSON *root)
         /* Bound to defined notification-category bits (highest used bit = 11). */
         double d = vnm_item->valuedouble;
         if (d < 0) d = 0;
-        cfg->voice_notify_mask = (uint32_t)d & 0xFFFu;
+        /* bits 0-11 categories, bits 12-26 per-event phrases (v76,
+         * VOICE_EVENT_BIT_BASE + voice_event_t); bits 27-31 spare. */
+        cfg->voice_notify_mask = (uint32_t)d & 0x7FFFFFFu;
     }
 
     JSON_TO_BOOL(root, "toast_instance_muted_1", cfg->toast_instance_muted[0]);

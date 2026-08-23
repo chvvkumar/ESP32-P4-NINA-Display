@@ -938,8 +938,9 @@ static void set_defaults(app_config_t *cfg) {
 
     // Toast notification overhaul defaults (mask/per-instance mute are not table-driven)
     cfg->toast_notify_mask = 0xFFFFFFFF;  // all categories enabled
-    // Voice alert categories: all 12 (v56, not table-driven)
-    cfg->voice_notify_mask = 0xFFF;
+    // Voice alert gates: 12 categories (bits 0-11, v56) plus the 15 per-event
+    // spoken phrases (bits 12-26, v76). All on. Not table-driven.
+    cfg->voice_notify_mask = 0x7FFFFFF;
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         cfg->toast_instance_muted[i] = false;
         cfg->alert_voice_muted[i] = false;  // per-instance voice mute (v55, not table-driven)
@@ -2701,6 +2702,25 @@ static void order2_lift_retired(app_config_t *cfg)
     }
 }
 
+/* v76 turned the 15 spare bits 12-26 of voice_notify_mask into the per-event
+ * spoken-phrase gates (bit = VOICE_EVENT_BIT_BASE + voice_event_t, see
+ * main/audio_alert.h). Before v76 those bits were unreachable: validate_config
+ * clamped the mask to 0xFFF and the web UI only ever offered bits 0-11, so a
+ * stored zero there is never a user choice — it is just "this firmware had no
+ * such feature". Default them ON for upgraders, matching a fresh install.
+ *
+ * Called ONCE from the dispatcher tail rather than from each migrate_from_vNN,
+ * for the same reason image_pages_derive_from_legacy() and
+ * order2_lift_retired() are: the dispatcher is NON-chaining, so a v56 blob goes
+ * straight to v76 through migrate_from_v56 and would otherwise keep the phrases
+ * off forever. OR, never assign, so the user's category bits survive — that
+ * matters for migrate_from_v55, the one legacy path that deliberately assigns a
+ * narrowed mask (0x1A2). */
+static void voice_event_bits_default(app_config_t *cfg)
+{
+    cfg->voice_notify_mask |= 0x7FFF000u;   /* bits 12-26, VOICE_EV_* */
+}
+
 /* --- v60 -> v61 migration: appends the per-page image fields (image pages
  *     split). All thirteen values are written by image_pages_derive_from_legacy(),
  *     which the dispatcher tail runs for every pre-v61 blob (single writer), so
@@ -3058,6 +3078,35 @@ static void migrate_from_v74(const void *raw, size_t raw_size, app_config_t *cfg
 
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v74 to v%d", APP_CONFIG_VERSION);
+}
+
+/* --- v75 -> v76 migration: appends NOTHING. v76 only widens the value range
+ *     of the existing voice_notify_mask: bits 12-26 become the per-event
+ *     spoken-phrase gates (VOICE_EVENT_BIT_BASE + voice_event_t, see
+ *     main/audio_alert.h), where they used to be clamped away by
+ *     validate_config. sizeof(app_config_v75_t) == sizeof(app_config_t) (a
+ *     _Static_assert in app_config.h holds that), so this is a full-struct
+ *     copy, not a prefix copy.
+ *
+ *     Every OTHER migration path reaches the same state through the
+ *     voice_event_bits_default() fixup at the dispatcher tail; only this one
+ *     sets the bits inline, because the tail is bounded at version_check < 75
+ *     so it cannot double-run over a path that already handled them. --- */
+static void migrate_from_v75(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v75_t) ? raw_size : sizeof(app_config_v75_t);
+    memcpy(cfg, raw, copy);
+
+    /* Turn the 15 new per-event phrases ON for upgraders, matching a fresh
+     * install. The stored v75 mask kept only bits 0-11 (validate_config
+     * clamped the rest), so this never overwrites a user choice: those bits
+     * were unreachable before v76. OR, not assign, so the user's category
+     * choices in bits 0-11 survive untouched. */
+    cfg->voice_notify_mask |= 0x7FFF000u;   /* bits 12-26 */
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v75 to v%d", APP_CONFIG_VERSION);
 }
 
 
@@ -3717,9 +3766,11 @@ static bool validate_config(app_config_t *cfg) {
         cfg->graph_update_interval_s = 5;
         fixed = true;
     }
-    /* Voice alert mask: only 12 notification categories are defined. */
-    if (cfg->voice_notify_mask & ~0xFFFu) {
-        cfg->voice_notify_mask &= 0xFFFu;
+    /* Voice alert mask: 12 notification categories (bits 0-11) plus the 15
+     * per-event spoken-phrase gates (bits 12-26, VOICE_EVENT_BIT_BASE + event
+     * id). Bits 27-31 are spare and are cleared. */
+    if (cfg->voice_notify_mask & ~0x7FFFFFFu) {
+        cfg->voice_notify_mask &= 0x7FFFFFFu;
         fixed = true;
     }
     if (cfg->moon_drag_light_mode > 2) {
@@ -3996,6 +4047,19 @@ void app_config_init(void) {
             nvs_commit(handle);
         }
         /* tiles_loaded stays false -> tail loads "json_tiles"/"ha_tiles" keys */
+    } else if (version_check == 75) {
+        /* v75 -> v76: NO field appended. Only the value range of
+         * voice_notify_mask widened (bits 12-26 = the per-event spoken
+         * phrases), so the struct size is unchanged and the migration is a
+         * full-struct copy plus the mask OR. tiles_loaded stays false: a v75
+         * device already keeps its tiles in the "json_tiles"/"ha_tiles" NVS
+         * keys, so the tail loads them. Safe to write back immediately: all
+         * three dispatcher-tail fixups below are excluded by their literal
+         * version bounds. */
+        migrate_from_v75(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 74) {
         /* v74 -> v75: appended nina_layout[] (per-instance NINA page layout).
          * tiles_loaded stays false: a v74 device already keeps its tiles in
@@ -4639,6 +4703,31 @@ void app_config_init(void) {
      * 63 must leave this literal alone. */
     if (version_check >= 46 && version_check < 63) {
         order2_lift_retired(&s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    }
+
+    /* v76 per-event voice phrases ON for every blob older than v75 (see
+     * voice_event_bits_default). The dispatcher is NON-chaining: a v56 blob
+     * goes straight to v76 through migrate_from_v56, never through
+     * migrate_from_v75, so without this a device upgrading from anything but
+     * v75 would land with the 15 new phrases silently off while a v75 device
+     * got them on. Runs after whichever legacy branch above rebuilt s_config.
+     * The forward-tolerant (version_check > APP_CONFIG_VERSION) and
+     * current-version branches are excluded by the comparison.
+     * The bound is the LITERAL 75, not APP_CONFIG_VERSION: version_check == 75
+     * is handled inline by migrate_from_v75, and a v76-or-later blob holds a
+     * real user mask whose cleared per-event bits are deliberate choices that
+     * must not be forced back on. Every version bump past 76 must leave this
+     * literal alone.
+     * ponytail: this is a third independent write-back, so a very old blob can
+     * now cost three ~350 ms NVS saves on its one migration boot (plus the
+     * branch's own). Same shape as the two fixups above and it happens once per
+     * device ever; collapse all three into a single dirty flag + one save at
+     * the tail if migration boot time ever matters. */
+    if (version_check < 75) {
+        voice_event_bits_default(&s_config);
         validate_config(&s_config);
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);

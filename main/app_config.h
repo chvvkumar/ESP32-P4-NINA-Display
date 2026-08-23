@@ -83,7 +83,7 @@ extern "C" {
 #define ARP_ORDER_CAPACITY_RETIRED 16
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 75
+#define APP_CONFIG_VERSION 76
 
 /* Tiles-config blobs no longer live inside app_config_t (v52 split them out to
  * dedicated NVS string keys "json_tiles"/"ha_tiles"). These bound the value
@@ -358,8 +358,13 @@ typedef struct {
                                        // audio_alert_speak (test endpoints bypass it)
 
     // Added after v55 — must stay at end to preserve NVS binary compatibility
-    uint32_t voice_notify_mask;        // per-category voice alert mask, same bits as
-                                       // toast_notify_mask (default 0xFFF = all)
+    uint32_t voice_notify_mask;        // bits 0-11: per-category voice alert mask, same
+                                       // bits as toast_notify_mask.
+                                       // bits 12-26 (v76): per-event spoken-phrase gates,
+                                       // one per voice_event_t (bit = VOICE_EVENT_BIT_BASE
+                                       // + event id, see main/audio_alert.h). Checked
+                                       // ALONE, not ANDed with the category bit.
+                                       // bits 27-31 spare. Default 0x7FFFFFF = all on.
     uint8_t  boot_jingle_enabled;      // play the startup jingle once at boot,
                                        // 0 = off / 1 = on (default 1)
 
@@ -5707,6 +5712,211 @@ _Static_assert(offsetof(app_config_t, nina_layout) ==
  * it must never exceed the destination. */
 _Static_assert(sizeof(app_config_v74_t) <= sizeof(app_config_t),
                "v74 snapshot must not exceed the current config struct");
+
+/* ── Version 75 config struct — used only for NVS migration to v76 ──── */
+/* v76 appends NO field: it only widens the value range of the existing  */
+/* voice_notify_mask (bits 12-26 become the per-event phrase gates), so  */
+/* this snapshot is byte-identical to app_config_t as of v75. It is      */
+/* still spelled out in full rather than aliased to app_config_t so that  */
+/* a later version appending a field cannot silently change what a v75    */
+/* blob means. Same body as the v74 snapshot plus the nina_layout[]       */
+/* uint8_t array v75 added at the end.                                    */
+typedef struct {
+    uint32_t config_version;
+    char api_url[3][128];
+    char ntp_server[64];
+    char tz_string[64];
+    char filter_colors[3][512];
+    char rms_thresholds[3][256];
+    char hfr_thresholds[3][256];
+    int theme_index;
+    int brightness;
+    int color_brightness;
+    bool mqtt_enabled;
+    char mqtt_broker_url[128];
+    char mqtt_username[64];
+    char mqtt_password[64];
+    char mqtt_topic_prefix[64];
+    uint16_t mqtt_port;
+    int8_t   active_page_override;
+    bool     auto_rotate_enabled;
+    uint16_t auto_rotate_interval_s;
+    uint8_t  auto_rotate_effect;
+    bool     auto_rotate_skip_disconnected;
+    uint8_t  auto_rotate_pages;
+    uint8_t  update_rate_s;
+    uint8_t  graph_update_interval_s;
+    uint8_t  connection_timeout_s;
+    uint8_t  toast_duration_s;
+    bool     debug_mode;
+    bool     instance_enabled[3];
+    bool     screen_sleep_enabled;
+    uint16_t screen_sleep_timeout_s;
+    bool     alert_flash_enabled;
+    uint8_t  idle_poll_interval_s;
+    bool     wifi_power_save;
+    uint8_t  widget_style;
+    uint8_t  auto_update_check;
+    uint8_t  update_channel;
+    bool     deep_sleep_enabled;
+    uint32_t deep_sleep_wake_timer_s;
+    bool     deep_sleep_on_idle;
+    uint8_t  screen_rotation;
+    char     hostname[32];
+    char     allsky_hostname[128];
+    uint16_t allsky_update_interval_s;
+    float    allsky_dew_offset;
+    char     allsky_field_config[1536];
+    char     allsky_thresholds[1024];
+    bool     allsky_enabled;
+    bool     demo_mode;
+    bool     spotify_enabled;
+    char     spotify_client_id[64];
+    uint16_t spotify_poll_interval_ms;
+    bool     spotify_show_progress_bar;
+    uint8_t  spotify_overlay_timeout_s;
+    bool     spotify_minimal_mode;
+    bool     spotify_scroll_text;
+    wifi_network_t wifi_networks[3];
+    bool     spotify_overlay_visible;
+    uint8_t  auto_rotate_order[8];
+    uint8_t  toast_aggregation_window_s;
+    uint32_t toast_notify_mask;
+    bool     toast_instance_muted[3];
+    uint8_t  weather_provider;
+    char     weather_api_key[64];
+    float    weather_lat;
+    float    weather_lon;
+    char     weather_location_name[64];
+    uint16_t weather_poll_interval_s;
+    uint8_t  weather_units;
+    uint8_t  weather_time_format;
+    bool     idle_page_override_enabled;
+    int8_t   idle_page_override_target;
+    bool     idle_page_persistent;
+    bool     idle_indicator_enabled;
+    char     admin_password[33];
+    bool     auth_enabled;
+    bool     image_display_enabled;
+    bool     image_display_show_overlay;
+    char     goes_region[16];
+    uint16_t goes_update_interval_s;
+    uint8_t  image_display_source;
+    uint8_t  moon_bg_style;
+    float    moon_lat;
+    float    moon_lon;
+    uint8_t  solar_band;
+    bool     image_display_crop;
+    uint8_t  moon_drag_light_mode;
+    uint8_t  moon_flip_u;
+    uint8_t  moon_flip_v;
+    float    moon_roll_offset;
+    float    moon_yaw_offset;
+    float    moon_pitch_offset;
+    uint8_t  moon_north_up;
+    uint8_t  moon_spin_mode;
+    uint8_t  moon_spin_return_s;
+    uint8_t  crash_log_retention_days;
+    uint8_t  auto_rotate_pages_hi;
+    uint8_t  auto_rotate_order_ext;
+    uint8_t  goes_orientation;
+    uint8_t  solar_orientation;
+    uint16_t nav_grace_s;
+    char     custom_image_url[256];
+    uint8_t  custom_orientation;
+    uint16_t custom_update_interval_s;
+    uint8_t  auto_rotate_order2_retired[16];   /* the RETIRED mid-struct array,
+                                        * named exactly as the live struct
+                                        * names it — see the note there */
+    uint8_t  goes_vflip;
+    uint8_t  goes_hflip;
+    uint8_t  solar_vflip;
+    uint8_t  solar_hflip;
+    uint8_t  custom_vflip;
+    uint8_t  custom_hflip;
+    bool     home_page_lock;
+    bool     json_enabled;
+    char     json_url[256];
+    char     json_auth_header[256];
+    uint16_t json_update_interval_s;
+    bool     ha_enabled;
+    char     ha_base_url[256];
+    char     ha_token[256];
+    uint16_t ha_update_interval_s;
+    bool     setup_hint_dismissed;
+    uint8_t  alert_voice_enabled;
+    uint8_t  alert_voice_volume;
+    uint8_t  alert_voice_types;
+    uint8_t  alert_voice_repeat_min;
+    bool     alert_voice_muted[3];
+    uint32_t voice_notify_mask;
+    uint8_t  boot_jingle_enabled;
+    uint8_t  alert_voice_brief;
+    uint8_t  alert_voice_conn;
+    uint8_t  alert_voice_disc;
+    uint8_t  wifi_max_tx_dbm;
+    uint8_t  octoprint_enabled;
+    char     octoprint_url[128];
+    char     octoprint_api_key[64];
+    uint16_t octoprint_update_interval_s;
+    uint8_t  octoprint_image_source;
+    uint8_t  octoprint_layout;
+    char     octoprint_snapshot_url[128];
+    bool     goes_enabled;
+    bool     moon_enabled;
+    bool     solar_enabled;
+    bool     custom_enabled;
+    uint16_t solar_update_interval_s;
+    uint16_t moon_update_interval_s;
+    bool     goes_crop;
+    bool     solar_crop;
+    bool     custom_crop;
+    bool     goes_show_overlay;
+    bool     moon_show_overlay;
+    bool     solar_show_overlay;
+    bool     custom_show_overlay;
+    bool     octoprint_overlay_visible;
+    bool     radar_enabled;
+    char     radar_token[16];
+    uint16_t radar_update_interval_s;
+    bool     radar_show_overlay;
+    uint8_t  radar_crop;
+    uint8_t  radar_frames;
+    uint8_t  auto_rotate_order2[ARP_ORDER_CAPACITY];
+    bool     radar_dark_mode;
+    uint8_t  radar_map_style;
+    bool     clouds_enabled;
+    bool     clouds_show_overlay;
+    uint16_t clouds_update_interval_s;
+    uint8_t  clouds_frames;
+    uint8_t  clouds_zoom;
+    char     custom_image_header[256];
+    uint8_t  clouds_channel;
+    bool     flights_enabled;
+    char     flights_url[128];
+    uint16_t flights_update_interval_s;
+    uint16_t flights_range_nm;
+    uint8_t  flights_min_el;
+    uint16_t flights_up_azimuth;
+    uint8_t  flights_mode;
+    bool     flights_route_lookup;
+    uint8_t  flights_label_max;
+    uint8_t  flights_icon_style;
+    uint8_t  clock_layout;
+    uint8_t  clouds_basemap;
+    bool     clouds_show_location;
+    uint8_t  nina_layout[MAX_NINA_INSTANCES];
+} app_config_v75_t;
+
+/* v76 adds no field, so the v75 snapshot must be exactly the current
+ * struct: same size AND same trailing field offset. If a future version
+ * appends a field, the size assert below flips to != and this pair must
+ * be relaxed to the <= / end-of-last-field form the v62..v74 asserts use. */
+_Static_assert(offsetof(app_config_v75_t, nina_layout) ==
+                   offsetof(app_config_t, nina_layout),
+               "app_config_v75_t snapshot drifted from app_config_t layout");
+_Static_assert(sizeof(app_config_v75_t) == sizeof(app_config_t),
+               "v76 must not change app_config_t layout; it only widens voice_notify_mask");
 
 
 
