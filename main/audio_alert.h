@@ -64,6 +64,76 @@ void audio_alert_speak_equipment_group(int category_bit, int instance_idx,
  */
 void audio_alert_preview_event(int category_bit, int instance_idx, int equipment_idx);
 
+/* ── Per-event spoken phrases (nina_websocket.c) ────────────────────────────
+ * Distinct phrases for the events worth naming out loud; every other event
+ * keeps the generic per-category clip above.  The mask bit for event e is
+ * (VOICE_EVENT_BIT_BASE + e) in voice_notify_mask; bits 0-11 remain the
+ * per-category gates.
+ *
+ * GATING: the per-event bit is checked ALONE.  It is NOT ANDed with the
+ * event's category bit -- a user who ticks "Sequence finished" must hear it,
+ * and the category bits keep governing only the generic fallback clips.  The
+ * web UI groups the per-event checkboxes under their category heading so the
+ * relationship reads naturally without being an enforced dependency.
+ *
+ * RESERVED: VOICE_EV_CONDITIONS_UNSAFE (value 8, mask bit 20) has NO clip and
+ * NO producer.  The unsafe direction is already announced by the breach/alert
+ * engine, which speaks the older `unsafe` clip ("Unsafe conditions.") and
+ * repeats while the condition persists, so a per-event phrase here would
+ * announce the same transition twice.  The enum value is kept in place -- do
+ * NOT renumber: CONDITIONS_SAFE must stay value 9 / bit 21, and the config
+ * migration sets bits 12-26 as a block.  Reviving it takes BOTH restoring the
+ * clip (re-render conditions_unsafe.pcm via tools/gen_voice_clips.py, re-add
+ * it to CLIP_LIST and EMBED_FILES) AND adding a producer.  Until then the
+ * live and preview paths both refuse it and audio_alert_event_clip_name()
+ * returns NULL for it. */
+typedef enum {
+    VOICE_EV_SEQUENCE_STARTED = 0,
+    VOICE_EV_SEQUENCE_FINISHED,
+    VOICE_EV_SEQUENCE_STEP_FAILED,
+    VOICE_EV_AUTOFOCUS_COMPLETE,
+    VOICE_EV_AUTOFOCUS_FAILED,
+    VOICE_EV_MERIDIAN_FLIP_STARTING,
+    VOICE_EV_MERIDIAN_FLIP_COMPLETE,
+    VOICE_EV_MOUNT_PARKED,
+    VOICE_EV_CONDITIONS_UNSAFE,     /* reserved: no clip, no producer */
+    VOICE_EV_CONDITIONS_SAFE,
+    VOICE_EV_GUIDING_STOPPED,
+    VOICE_EV_DOME_SHUTTER_CLOSED,
+    VOICE_EV_DOME_SHUTTER_OPENED,
+    VOICE_EV_PLATESOLVE_FAILED,
+    VOICE_EV_CAMERA_TIMEOUT,
+    VOICE_EV_COUNT
+} voice_event_t;
+
+/** First mask bit used by voice_event_t.  Bits 0-11 are the category gates. */
+#define VOICE_EVENT_BIT_BASE 12
+
+/**
+ * Queue a spoken per-event phrase (live path).  Thread-safe.  Gated on
+ * alert_voice_enabled, alert_voice_muted[instance], the
+ * (VOICE_EVENT_BIT_BASE + ev) bit of voice_notify_mask, and a per-(event,
+ * instance) 30 s cooldown that is INDEPENDENT of the category cooldown.
+ *
+ * Sentence shape: chime [+ warning] + instance_N + the event's phrase clip.
+ * The warning prefix is added for the failure/unsafe events only
+ * (SEQUENCE_STEP_FAILED, AUTOFOCUS_FAILED, CONDITIONS_UNSAFE,
+ * PLATESOLVE_FAILED, CAMERA_TIMEOUT), mirroring the category 1/5/7/8 rule.
+ */
+void audio_alert_speak_event_id(voice_event_t ev, int instance_idx);
+
+/**
+ * Speak the same per-event sentence bypassing every gate except queue
+ * existence (web preview endpoint; mirrors audio_alert_preview_event).
+ */
+void audio_alert_preview_event_id(voice_event_t ev, int instance_idx);
+
+/**
+ * Clip basename for an event id ("sequence_started", ...), NULL out of range.
+ * VOICE_EV_MERIDIAN_FLIP_COMPLETE returns the existing "meridian_flip".
+ */
+const char *audio_alert_event_clip_name(voice_event_t ev);
+
 /* ── NINA link announcements (nina_connection.c) ──────────────────────────── */
 
 /**

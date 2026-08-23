@@ -516,7 +516,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         }
         if (toast_allowed(index, 2))
             ws_toast(index, TOAST_SUCCESS, "Sequence completed");
-        audio_alert_speak_event(2, index, -1);
+        audio_alert_speak_event_id(VOICE_EV_SEQUENCE_FINISHED, index);
         nina_event_log_add(EVENT_SEV_SUCCESS, index, "Sequence completed");
         ESP_LOGI(TAG, "WS[%d]: Sequence finished", index);
     }
@@ -531,7 +531,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         }
         if (toast_allowed(index, 2))
             ws_toast(index, TOAST_INFO, "Sequence started");
-        audio_alert_speak_event(2, index, -1);
+        audio_alert_speak_event_id(VOICE_EV_SEQUENCE_STARTED, index);
         nina_event_log_add(EVENT_SEV_INFO, index, "Sequence started");
         nina_session_stats_reset(index);
         ESP_LOGI(TAG, "WS[%d]: Sequence starting", index);
@@ -607,7 +607,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         }
         if (toast_allowed(index, 3))
             ws_toast(index, TOAST_SUCCESS, "Autofocus complete");
-        audio_alert_speak_event(3, index, -1);
+        audio_alert_speak_event_id(VOICE_EV_AUTOFOCUS_COMPLETE, index);
         nina_event_log_add_fmt(EVENT_SEV_SUCCESS, index,
             "Autofocus complete: pos %d, HFR %.2f",
             best_pos, best_hfr);
@@ -665,14 +665,24 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         if (safe) {
             if (toast_allowed(index, 7))
                 ws_toast(index, TOAST_SUCCESS, "Safe");
+            audio_alert_speak_event_id(VOICE_EV_CONDITIONS_SAFE, index);
             nina_event_log_add(EVENT_SEV_SUCCESS, index, "Observatory is safe");
         } else {
             if (toast_allowed(index, 7))
                 ws_toast(index, TOAST_ERROR, "UNSAFE");
             nina_event_log_add(EVENT_SEV_ERROR, index, "Observatory UNSAFE!");
         }
-        /* No audio_alert_speak_event(7, ...) here: the breach engine below
-         * already speaks "unsafe conditions"; a category-7 call would double up. */
+        /* Only the SAFE edge speaks from here.  The UNSAFE edge is announced by
+         * the breach engine below (ALERT_SAFETY -> the "unsafe" clip), which is
+         * also the only path that re-announces a sustained unsafe state; adding
+         * VOICE_EV_CONDITIONS_UNSAFE here would make one transition say both
+         * "Unsafe conditions." and "Conditions unsafe.".  The breach engine's
+         * edge==0 case only re-arms and never speaks, so recovery was silent
+         * until this call.  Category 7 stays unused for the same reason.
+         * ponytail: VOICE_EV_CONDITIONS_UNSAFE therefore has no live trigger --
+         * its clip is still previewable in the Voice Clips UI.  If per-event
+         * wording is wanted for the unsafe edge too, move the announcement out
+         * of alert_eval_edge() in nina_alerts.c rather than adding a call here. */
         /* Both edges into the breach engine: unsafe enters, safe re-arms so the
          * next unsafe transition speaks again.  Flash/voice gates live inside. */
         nina_alert_eval_safety(index, safe);
@@ -704,6 +714,10 @@ static void handle_websocket_message(int index, const char *payload, int len) {
             data->ui_refresh_needed = true;
             nina_client_unlock(data);
         }
+        if (toast_allowed(index, 5))
+            ws_toast(index, TOAST_INFO, "Meridian flip starting");
+        audio_alert_speak_event_id(VOICE_EV_MERIDIAN_FLIP_STARTING, index);
+        nina_event_log_add(EVENT_SEV_INFO, index, "Meridian flip starting");
         ESP_LOGI(TAG, "WS[%d]: Meridian flip starting", index);
     }
     // MOUNT-AFTER-FLIP: Meridian flip completed
@@ -715,7 +729,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         }
         if (toast_allowed(index, 5))
             ws_toast(index, TOAST_INFO, "Meridian flip completed");
-        audio_alert_speak_event(5, index, -1);
+        audio_alert_speak_event_id(VOICE_EV_MERIDIAN_FLIP_COMPLETE, index);
         nina_event_log_add(EVENT_SEV_INFO, index, "Meridian flip completed");
         ESP_LOGI(TAG, "WS[%d]: Meridian flip completed", index);
     }
@@ -731,7 +745,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         }
         if (toast_allowed(index, 6))
             ws_toast(index, TOAST_WARNING, "Guider stopped");
-        audio_alert_speak_event(6, index, -1);
+        audio_alert_speak_event_id(VOICE_EV_GUIDING_STOPPED, index);
         nina_event_log_add(EVENT_SEV_WARNING, index, "Guider stopped");
         ESP_LOGI(TAG, "WS[%d]: Guider stopped", index);
     }
@@ -764,9 +778,18 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         }
         if (toast_allowed(index, 3) || toast_allowed(index, 8))
             ws_toast(index, TOAST_ERROR, "Autofocus failed");
-        audio_alert_speak_event(8, index, -1);   /* failure -> Error category */
+        audio_alert_speak_event_id(VOICE_EV_AUTOFOCUS_FAILED, index);
         nina_event_log_add(EVENT_SEV_ERROR, index, "Autofocus failed");
         ESP_LOGW(TAG, "WS[%d]: Autofocus failed", index);
+    }
+    // ERROR-PLATESOLVE: plate solve did not solve.  Must stay ABOVE the generic
+    // "ERROR" prefix branch further down, or it falls into the generic clip.
+    else if (strcmp(evt->valuestring, "ERROR-PLATESOLVE") == 0) {
+        if (toast_allowed(index, 8))
+            ws_toast(index, TOAST_ERROR, "Plate solve failed");
+        audio_alert_speak_event_id(VOICE_EV_PLATESOLVE_FAILED, index);
+        nina_event_log_add(EVENT_SEV_ERROR, index, "Plate solve failed");
+        ESP_LOGW(TAG, "WS[%d]: Plate solve failed", index);
     }
     // CAMERA-CONNECTED: Camera connected — use aggregation
     else if (strcmp(evt->valuestring, "CAMERA-CONNECTED") == 0) {
@@ -789,7 +812,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
     else if (strcmp(evt->valuestring, "MOUNT-PARKED") == 0) {
         if (toast_allowed(index, 4))
             ws_toast(index, TOAST_INFO, "Mount parked");
-        audio_alert_speak_event(4, index, -1);
+        audio_alert_speak_event_id(VOICE_EV_MOUNT_PARKED, index);
         nina_event_log_add(EVENT_SEV_INFO, index, "Mount parked");
         ESP_LOGI(TAG, "WS[%d]: Mount parked", index);
     }
@@ -875,13 +898,13 @@ static void handle_websocket_message(int index, const char *payload, int len) {
     else if (strcmp(evt->valuestring, "DOME-SHUTTER-OPENED") == 0) {
         if (toast_allowed(index, 10))
             ws_toast(index, TOAST_INFO, "Dome shutter opened");
-        audio_alert_speak_event(10, index, -1);
+        audio_alert_speak_event_id(VOICE_EV_DOME_SHUTTER_OPENED, index);
         nina_event_log_add(EVENT_SEV_INFO, index, "Dome shutter opened");
     }
     else if (strcmp(evt->valuestring, "DOME-SHUTTER-CLOSED") == 0) {
         if (toast_allowed(index, 10))
             ws_toast(index, TOAST_INFO, "Dome shutter closed");
-        audio_alert_speak_event(10, index, -1);
+        audio_alert_speak_event_id(VOICE_EV_DOME_SHUTTER_CLOSED, index);
         nina_event_log_add(EVENT_SEV_INFO, index, "Dome shutter closed");
     }
     else if (strcmp(evt->valuestring, "FLAT-CONNECTED") == 0) {
@@ -923,7 +946,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
     else if (strcmp(evt->valuestring, "CAMERA-DOWNLOAD-TIMEOUT") == 0) {
         if (toast_allowed(index, 1) || toast_allowed(index, 8))
             ws_toast(index, TOAST_ERROR, "Camera download timeout");
-        audio_alert_speak_event(8, index, -1);   /* timeout -> Error category */
+        audio_alert_speak_event_id(VOICE_EV_CAMERA_TIMEOUT, index);
         nina_event_log_add(EVENT_SEV_ERROR, index, "Camera download timeout");
     }
     else if (strcmp(evt->valuestring, "SEQUENCE-ENTITY-FAILED") == 0) {
@@ -937,7 +960,7 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         }
         if (toast_allowed(index, 2) || toast_allowed(index, 8))
             ws_toast(index, TOAST_ERROR, msg);
-        audio_alert_speak_event(8, index, -1);   /* failure -> Error category */
+        audio_alert_speak_event_id(VOICE_EV_SEQUENCE_STEP_FAILED, index);
         nina_event_log_add_fmt(EVENT_SEV_ERROR, index, "Entity failed: %s", msg);
     }
     else {

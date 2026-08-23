@@ -64,9 +64,12 @@
   if(window.__vcTabJs) return;
   window.__vcTabJs=true;
 
-  var GROUPS=['Sounds','Identity','Sentence parts','Numbers','Equipment','Events'];
+  var GROUPS=['Sounds','Identity','Sentence parts','Numbers','Equipment','Events','Specific events'];
   /* [name, default spoken text, group index] -- names must match the
-     firmware's clip table exactly (see /api/voice-clips). */
+     firmware's clip table exactly (see /api/voice-clips).
+     Group 5 is index-mapped (see vcTexts): its order IS category_bit - 2, so
+     nothing may be inserted into it. The named phrases therefore live in their
+     own group 6, which nothing indexes by position. */
   var CLIPS=[
     ['chime','(attention chime)',0],
     ['boot_jingle','(startup jingle)',0],
@@ -114,7 +117,20 @@
     ['error_event','Error reported',5],
     ['profile_changed','Profile changed',5],
     ['dome_event','Dome event',5],
-    ['flat_event','Flat panel event',5]
+    ['flat_event','Flat panel event',5],
+    ['sequence_started','Sequence started',6],
+    ['sequence_finished','Sequence finished',6],
+    ['sequence_step_failed','Sequence step failed',6],
+    ['autofocus_complete','Autofocus complete',6],
+    ['autofocus_failed','Autofocus failed',6],
+    ['meridian_flip_starting','Meridian flip starting',6],
+    ['mount_parked','Mount parked',6],
+    ['conditions_safe','Conditions safe',6],
+    ['guiding_stopped','Guiding stopped',6],
+    ['dome_shutter_closed','Dome shutter closed',6],
+    ['dome_shutter_opened','Dome shutter opened',6],
+    ['platesolve_failed','Plate solve failed',6],
+    ['camera_timeout','Camera download timeout',6]
   ];
 
   function vcLabel(n){
@@ -227,8 +243,33 @@
     {sec:'Events',    label:'Dome event',            kind:'event',  cat:10},
     {sec:'Events',    label:'Flat panel event',      kind:'event',  cat:11},
     {sec:'NINA Link', label:'Link connected',        kind:'conn',   state:'connected'},
-    {sec:'NINA Link', label:'Link disconnected',     kind:'conn',   state:'disconnected'}
+    {sec:'NINA Link', label:'Link disconnected',     kind:'conn',   state:'disconnected'},
+    /* Named events. ev is the firmware's event number; the preview endpoint
+       takes that number directly. Event 6 has no clip of its own: it speaks the
+       existing Meridian flip clip from the Events group. Event 8 is absent by
+       design: the turn to unsafe conditions is announced by the safety alarm
+       instead, which says "Unsafe conditions" and keeps repeating while
+       conditions stay unsafe, so only the recovery to safe is listed here.
+       The numbers are not closed up: 9 stays 9. */
+    {sec:'Specific events', label:'Sequence started',        kind:'phrase', ev:0,  clip:'sequence_started'},
+    {sec:'Specific events', label:'Sequence finished',       kind:'phrase', ev:1,  clip:'sequence_finished'},
+    {sec:'Specific events', label:'Sequence step failed',    kind:'phrase', ev:2,  clip:'sequence_step_failed'},
+    {sec:'Specific events', label:'Autofocus complete',      kind:'phrase', ev:3,  clip:'autofocus_complete'},
+    {sec:'Specific events', label:'Autofocus failed',        kind:'phrase', ev:4,  clip:'autofocus_failed'},
+    {sec:'Specific events', label:'Meridian flip starting',  kind:'phrase', ev:5,  clip:'meridian_flip_starting'},
+    {sec:'Specific events', label:'Meridian flip complete',  kind:'phrase', ev:6,  clip:'meridian_flip'},
+    {sec:'Specific events', label:'Mount parked',            kind:'phrase', ev:7,  clip:'mount_parked'},
+    {sec:'Specific events', label:'Conditions safe',         kind:'phrase', ev:9,  clip:'conditions_safe'},
+    {sec:'Specific events', label:'Guiding stopped',         kind:'phrase', ev:10, clip:'guiding_stopped'},
+    {sec:'Specific events', label:'Dome shutter closed',     kind:'phrase', ev:11, clip:'dome_shutter_closed'},
+    {sec:'Specific events', label:'Dome shutter opened',     kind:'phrase', ev:12, clip:'dome_shutter_opened'},
+    {sec:'Specific events', label:'Plate solve failed',      kind:'phrase', ev:13, clip:'platesolve_failed'},
+    {sec:'Specific events', label:'Camera download timeout', kind:'phrase', ev:14, clip:'camera_timeout'}
   ];
+
+  /* Event numbers that get the "Warning" prefix, mirroring the firmware's
+     warning set for the named phrases (the failure ones). */
+  var PHRASE_WARN=[2,4,13,14];
 
   function vsInst(){
     var e=document.getElementById('vsInst');
@@ -266,10 +307,13 @@
   function vsSentence(r){
     var p=[];
     var warn=(r.kind==='breach')||
-             (r.kind==='event'&&(r.cat===1||r.cat===5||r.cat===7||r.cat===8));
+             (r.kind==='event'&&(r.cat===1||r.cat===5||r.cat===7||r.cat===8))||
+             (r.kind==='phrase'&&PHRASE_WARN.indexOf(r.ev)>=0);
     if(warn) p.push(vcText('warning')+'.');
     p.push(vcTexts(1)[vsInst()-1]);
-    if(r.kind==='breach'){
+    if(r.kind==='phrase'){
+      p.push(vcText(r.clip));
+    }else if(r.kind==='breach'){
       if(r.type==='safety') p.push(vcText('unsafe'));
       else{
         p.push(vcText(r.type));
@@ -292,6 +336,10 @@
   /* Query string is capped at 128 bytes server-side (voice_preview_post_handler);
      these stay well under it. */
   function vsUrl(r){
+    /* Named events are addressed by event number, so they send event= and
+       never category= or equipment=. r.ev is that number: it is NOT the bit
+       the setting uses, and must not have 12 added to it here. */
+    if(r.kind==='phrase') return '/api/voice-preview?event='+r.ev+'&instance='+vsInst();
     var base='/api/voice-preview?kind='+r.kind+'&instance='+vsInst();
     if(r.kind==='breach') return base+'&type='+r.type+'&value='+vsValue();
     if(r.kind==='conn')   return base+'&state='+r.state;

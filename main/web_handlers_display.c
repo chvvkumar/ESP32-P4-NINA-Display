@@ -693,6 +693,8 @@ cleanup:
 }
 
 /* POST /api/voice-preview — speak a sample voice alert through the speaker.
+ *   event=0..14&instance=1..3         (per-event phrase; no kind needed,
+ *                                      overrides category/equipment)
  *   kind=event&category=0..11&instance=1..3[&equipment=0..N]
  *   kind=breach&type=rms|hfr|safety&instance=1..3[&value=F]
  *   kind=conn&state=connected|disconnected&instance=1..3   (NINA link edge)
@@ -705,8 +707,32 @@ esp_err_t voice_preview_post_handler(httpd_req_t *req)
     REQUIRE_AUTH(req);
 
     char q[128] = {0}, kind[12] = {0}, buf[16] = {0};
-    if (httpd_req_get_url_query_str(req, q, sizeof(q)) != ESP_OK ||
-        httpd_query_key_value(q, "kind", kind, sizeof(kind)) != ESP_OK) {
+    if (httpd_req_get_url_query_str(req, q, sizeof(q)) != ESP_OK) {
+        return send_400(req, "missing kind");
+    }
+    /* Per-event phrase preview: event=<voice_event_t>&instance=1..3.
+     * Checked before kind: it needs no kind, and when present it takes
+     * precedence over (and ignores) category/equipment entirely. */
+    if (httpd_query_key_value(q, "event", buf, sizeof(buf)) == ESP_OK) {
+        int ev = atoi(buf);
+        if (ev < 0 || ev >= VOICE_EV_COUNT) {
+            /* ponytail: range spelled out in the message; re-word if
+             * VOICE_EV_COUNT ever changes. */
+            return send_400(req, "event must be 0-14");
+        }
+        if (httpd_query_key_value(q, "instance", buf, sizeof(buf)) != ESP_OK) {
+            return send_400(req, "missing instance");
+        }
+        int ev_instance = atoi(buf);
+        if (ev_instance < 1 || ev_instance > 3) {
+            return send_400(req, "instance must be 1-3");
+        }
+        audio_alert_preview_event_id((voice_event_t)ev, ev_instance - 1);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"ok\":true}");
+        return ESP_OK;
+    }
+    if (httpd_query_key_value(q, "kind", kind, sizeof(kind)) != ESP_OK) {
         return send_400(req, "missing kind");
     }
     if (strcmp(kind, "jingle") == 0) {   /* no instance/category params */

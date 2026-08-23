@@ -18,7 +18,14 @@ idf_component_register(
          ui/nina_empty_state.c
          ${LV_DEMOS_SOURCES}
     INCLUDE_DIRS . ui ${LV_DEMO_DIR}
-    EMBED_TXTFILES config_ui.html home_ui.html login.html setup_ui.html fragment_logs.html fragment_backup.html fragment_api.html fragment_allsky.html fragment_json.html fragment_ha.html fragment_clock.html fragment_spotify.html fragment_image_goes.html fragment_image_moon.html fragment_image_solar.html fragment_image_custom.html fragment_image_radar.html fragment_image_clouds.html fragment_octoprint.html fragment_adsb.html fragment_nodes.html fragment_display.html fragment_behavior.html fragment_system.html fragment_voice_clips.html
+    # The 21 fragment_*.html tabs are embedded ONLY as their .gz twins (see
+    # WEB_GZ_ASSETS below): the plain copies cost ~200 KB of flash and every
+    # client that fetches a tab sends Accept-Encoding: gzip. Their
+    # _binary_fragment_*_html_start/_end symbols therefore no longer exist --
+    # send_embedded_asset() serves the gz copy unconditionally for these.
+    # config_ui.html / home_ui.html keep both copies; login.html and
+    # setup_ui.html are plain-only (served before any UI state exists).
+    EMBED_TXTFILES config_ui.html home_ui.html login.html setup_ui.html
                    # Standalone audio test page (web_test_audio.c, port 8080).
                    # Deliberately NOT in WEB_GZ_ASSETS: one small page served by
                    # a second httpd instance that has no gzip negotiation.
@@ -47,7 +54,22 @@ idf_component_register(
                 audio_clips/guider_event.pcm audio_clips/safety_event.pcm
                 audio_clips/error_event.pcm audio_clips/profile_changed.pcm
                 audio_clips/dome_event.pcm audio_clips/flat_event.pcm
-                audio_clips/boot_jingle.pcm)
+                audio_clips/boot_jingle.pcm
+                # Per-event phrase clips (voice_event_t in audio_alert.h).
+                # 15 events, 13 files: VOICE_EV_MERIDIAN_FLIP_COMPLETE reuses
+                # meridian_flip.pcm above, and VOICE_EV_CONDITIONS_UNSAFE is
+                # reserved with no clip and no producer (the breach engine's
+                # unsafe.pcm already announces that edge). Reviving it means
+                # re-rendering conditions_unsafe.pcm from tools/gen_voice_clips.py
+                # AND adding a producer.
+                audio_clips/sequence_started.pcm audio_clips/sequence_finished.pcm
+                audio_clips/sequence_step_failed.pcm
+                audio_clips/autofocus_complete.pcm audio_clips/autofocus_failed.pcm
+                audio_clips/meridian_flip_starting.pcm audio_clips/mount_parked.pcm
+                audio_clips/conditions_safe.pcm
+                audio_clips/guiding_stopped.pcm
+                audio_clips/dome_shutter_closed.pcm audio_clips/dome_shutter_opened.pcm
+                audio_clips/platesolve_failed.pcm audio_clips/camera_timeout.pcm)
 
 idf_component_get_property(LVGL_LIB lvgl__lvgl COMPONENT_LIB)
 target_compile_options(
@@ -84,11 +106,12 @@ target_link_libraries(${COMPONENT_LIB} PRIVATE ${TGX_LIB})
 target_include_directories(${COMPONENT_LIB} PRIVATE ${CMAKE_BINARY_DIR}/generated)
 add_dependencies(${COMPONENT_LIB} generate_build_version)
 
-# Build-time gzip of the embedded web UI. Every asset listed here is embedded
-# twice: the plain copy via EMBED_TXTFILES above (symbols unchanged) and a .gz
-# copy generated below. send_embedded_asset() in web_handlers_config.c picks
-# between them per request from Accept-Encoding.
-# Keep this list in sync with the HTML entries in EMBED_TXTFILES.
+# Build-time gzip of the embedded web UI. config_ui.html and home_ui.html are
+# embedded twice: the plain copy via EMBED_TXTFILES above (symbols unchanged)
+# and a .gz copy generated below; send_embedded_asset() in
+# web_handlers_config.c picks between them per request from Accept-Encoding.
+# The fragment_*.html tabs are embedded ONLY here, as .gz -- they have no
+# plain copy and no _binary_fragment_*_html_start symbol.
 # login.html / setup_ui.html are deliberately excluded: both are served on
 # paths that must work before any UI state exists, and neither is large enough
 # to pay for the extra flash.
