@@ -410,6 +410,25 @@ static lv_obj_t *make_label(lv_obj_t *parent, const lv_font_t *font,
 }
 
 /**
+ * Fit a one-line condition label: drop to the small face when the text
+ * would overflow the label's width at the big face, and pin the height
+ * to one line so LV_LABEL_LONG_DOT clips instead of wrapping.
+ */
+static void fit_cond_one_line(lv_obj_t *lbl, const lv_font_t *big,
+                              const lv_font_t *small) {
+    if (!lbl) return;
+    int32_t w = lv_obj_get_width(lbl);
+    if (w <= 0) return;               /* not laid out yet */
+    int32_t ls = lv_obj_get_style_text_letter_space(lbl, LV_PART_MAIN);
+    lv_point_t sz;
+    lv_text_get_size(&sz, lv_label_get_text(lbl), big, ls, 0,
+                     LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    const lv_font_t *f = (sz.x <= w) ? big : small;
+    lv_obj_set_style_text_font(lbl, f, 0);
+    lv_obj_set_height(lbl, lv_font_get_line_height(f));
+}
+
+/**
  * Create a 1px horizontal rule across full width.
  */
 static lv_obj_t *make_rule(lv_obj_t *parent) {
@@ -2471,8 +2490,14 @@ void clock_page_update(void) {
             snprintf(acc_buf, sizeof(acc_buf), "%.0f\xc2\xb0 - %s",
                      wd.temp_current, cond_upper);
             lv_label_set_text(lbl_cond, acc_buf);
+            fit_cond_one_line(lbl_cond, &lv_font_overpass_27,
+                              &lv_font_overpass_16);
         } else {
             lv_label_set_text(lbl_cond, cond_upper);
+            if (s_layout == 4) {
+                fit_cond_one_line(lbl_cond, &lv_font_overpass_27,
+                                  &lv_font_overpass_16);
+            }
         }
     }
     if (lbl_cond_big) {
@@ -2485,6 +2510,8 @@ void clock_page_update(void) {
         }
         word[w_i] = '\0';
         lv_label_set_text(lbl_cond_big, word[0] ? word : "--");
+        fit_cond_one_line(lbl_cond_big, &lv_font_saira_light_46,
+                          &lv_font_overpass_27);
     }
 
     /* Hi / Lo */
