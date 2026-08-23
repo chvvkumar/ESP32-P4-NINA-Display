@@ -20,6 +20,7 @@
 #include "mqtt_ha.h"
 #include "ui/nina_dashboard.h"
 #include "ui/nina_dashboard_internal.h"
+#include "ui/nina_layout_alt.h"
 #include "ui/nina_summary.h"
 #include "ui/nina_sysinfo.h"
 #include "ui/nina_allsky.h"
@@ -1668,6 +1669,35 @@ main_loop:
                     fetch_thumbnail_pending = false;
                     if (fres.success && fres.thumbnail.rgb565_data) {
                         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            /* Image-forward (layout 1) shows the last capture as its
+                             * page background. nina_dashboard_set_thumbnail() below
+                             * takes ownership of the original (and frees it when the
+                             * overlay is hidden), so the retained copy gets its own
+                             * PSRAM buffer — exactly one owner each. */
+                            /* The page must still be the visible one: hide_page_at()
+                             * has already released the capture, so attaching a copy
+                             * to a hidden page would leak it until that page is
+                             * entered and left again. */
+                            if (fres.instance_idx >= 0 && fres.instance_idx < MAX_NINA_INSTANCES
+                                && nina_slot_available[fres.instance_idx]
+                                && pages[fres.instance_idx].layout == 1
+                                && nina_dashboard_get_active_page()
+                                       == NINA_PAGE_OFFSET + fres.instance_idx) {
+                                uint8_t *cap = heap_caps_malloc(fres.thumbnail.data_size,
+                                                                MALLOC_CAP_SPIRAM);
+                                if (cap) {
+                                    memcpy(cap, fres.thumbnail.rgb565_data,
+                                           fres.thumbnail.data_size);
+                                    nina_layout_image_set_capture(fres.instance_idx, cap,
+                                        fres.thumbnail.w, fres.thumbnail.h,
+                                        fres.thumbnail.data_size);
+                                } else {
+                                    /* Nothing allocated, nothing to free — just let
+                                     * the next event ask again. */
+                                    nina_layout_image_note_capture_request(fres.instance_idx,
+                                                                          false);
+                                }
+                            }
                             nina_dashboard_set_thumbnail(fres.thumbnail.rgb565_data,
                                 fres.thumbnail.w, fres.thumbnail.h, fres.thumbnail.data_size);
                             bsp_display_unlock();
@@ -1675,11 +1705,15 @@ main_loop:
                         } else {
                             free(fres.thumbnail.rgb565_data);
                         }
-                    } else if (!fres.success && nina_dashboard_thumbnail_requested()) {
-                        /* Fetch failed — hide loading overlay */
-                        nina_dashboard_clear_thumbnail_request();
+                    } else {
+                        /* No frame came back. Drop the Image-forward latch so the
+                         * next event gets one more try, and hide the overlay if a
+                         * user-triggered thumbnail was what failed. */
+                        bool hide_overlay = nina_dashboard_thumbnail_requested();
+                        if (hide_overlay) nina_dashboard_clear_thumbnail_request();
                         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                            nina_dashboard_hide_thumbnail();
+                            nina_layout_image_note_capture_request(fres.instance_idx, false);
+                            if (hide_overlay) nina_dashboard_hide_thumbnail();
                             bsp_display_unlock();
                         }
                     }
@@ -2320,15 +2354,21 @@ main_loop:
 
             /* ── Async thumbnail fetch (offloaded to Core 0 fetch worker) ── */
             bool want_thumbnail = nina_dashboard_thumbnail_requested();
+            /* Image-forward needs the same decoded frame for its page background:
+             * once on entry (it has none yet) and on every new image after that. */
+            bool on_image_layout = (nina_slot_available[active_nina_idx]
+                                    && pages[active_nina_idx].layout == 1);
+            bool want_capture = on_image_layout
+                                && nina_layout_image_needs_capture(active_nina_idx);
             bool auto_refresh = false;
             if (nina_client_lock(&instances[active_nina_idx], 15)) {
-                auto_refresh = nina_dashboard_thumbnail_visible()
+                auto_refresh = (nina_dashboard_thumbnail_visible() || on_image_layout)
                                && instances[active_nina_idx].new_image_available;
                 if (auto_refresh) instances[active_nina_idx].new_image_available = false;
                 nina_client_unlock(&instances[active_nina_idx]);
             }
 
-            if ((want_thumbnail || auto_refresh) && !fetch_thumbnail_pending) {
+            if ((want_thumbnail || auto_refresh || want_capture) && !fetch_thumbnail_pending) {
                 if (want_thumbnail) nina_dashboard_clear_thumbnail_request();
 
                 const char *thumb_url = app_config_get_instance_url(active_nina_idx);
@@ -2337,6 +2377,13 @@ main_loop:
                     strlcpy(req.url, thumb_url, sizeof(req.url));
                     if (xQueueSend(s_fetch_queue, &req, 0) == pdTRUE) {
                         fetch_thumbnail_pending = true;
+                        /* Latch only now the request is really in flight. An empty
+                         * URL, a disconnected rig or a full queue must leave the
+                         * next cycle free to ask again. */
+                        if (want_capture && bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_layout_image_note_capture_request(active_nina_idx, true);
+                            bsp_display_unlock();
+                        }
                     }
                 }
             }

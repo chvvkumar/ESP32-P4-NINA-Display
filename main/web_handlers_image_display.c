@@ -53,6 +53,7 @@ esp_err_t image_display_config_get_handler(httpd_req_t *req)
     cJSON_AddBoolToObject(root, "custom_show_overlay",  cfg->custom_show_overlay);
     cJSON_AddBoolToObject(root, "radar_show_overlay",   cfg->radar_show_overlay);
     cJSON_AddBoolToObject(root, "clouds_show_overlay",  cfg->clouds_show_overlay);
+    cJSON_AddBoolToObject(root, "clouds_show_location", cfg->clouds_show_location);
     cJSON_AddBoolToObject(root, "goes_crop",            cfg->goes_crop);
     cJSON_AddBoolToObject(root, "solar_crop",           cfg->solar_crop);
     cJSON_AddBoolToObject(root, "custom_crop",          cfg->custom_crop);
@@ -77,6 +78,9 @@ esp_err_t image_display_config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "clouds_zoom", cfg->clouds_zoom);
     /* 0 = GeoColor, 1 = Clean Infrared (Band 13), 2 = Air Mass. */
     cJSON_AddNumberToObject(root, "clouds_channel", cfg->clouds_channel);
+    /* 0 = borders and roads, 1 = coastlines only, 2 = borders, roads and grid,
+     * 3 = none (bare satellite picture). */
+    cJSON_AddNumberToObject(root, "clouds_basemap", cfg->clouds_basemap);
 
     cJSON_AddStringToObject(root, "goes_region", cfg->goes_region);
     cJSON_AddNumberToObject(root, "goes_update_interval_s", cfg->goes_update_interval_s);
@@ -196,6 +200,7 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
     JSON_TO_BOOL(root, "custom_show_overlay", cur->custom_show_overlay);
     JSON_TO_BOOL(root, "radar_show_overlay",  cur->radar_show_overlay);
     JSON_TO_BOOL(root, "clouds_show_overlay", cur->clouds_show_overlay);
+    JSON_TO_BOOL(root, "clouds_show_location", cur->clouds_show_location);
     JSON_TO_BOOL(root, "goes_crop",           cur->goes_crop);
     JSON_TO_BOOL(root, "solar_crop",          cur->solar_crop);
     JSON_TO_BOOL(root, "custom_crop",         cur->custom_crop);
@@ -286,6 +291,15 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
         int v = cchan->valueint;
         if (v < 0 || v > 2) v = 0;
         cur->clouds_channel = (uint8_t)v;
+    }
+    /* Basemap picks a different GIBS reference layer (or none), so it also
+     * invalidates the frame ring (source_params_changed in nina_image_page.c).
+     * Out of range resets to the default overlay. */
+    cJSON *cbase = cJSON_GetObjectItem(root, "clouds_basemap");
+    if (cJSON_IsNumber(cbase)) {
+        int v = cbase->valueint;
+        if (v < 0 || v > 3) v = 0;
+        cur->clouds_basemap = (uint8_t)v;
     }
     cJSON *sinterval = cJSON_GetObjectItem(root, "solar_update_interval_s");
     if (cJSON_IsNumber(sinterval)) {

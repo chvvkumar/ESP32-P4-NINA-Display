@@ -5,6 +5,7 @@
 
 #include "nina_dashboard.h"
 #include "nina_dashboard_internal.h"
+#include "nina_layout_alt.h"
 #include "nina_empty_state.h"
 #include "nina_connection.h"
 #include "app_config.h"
@@ -137,10 +138,51 @@ static void auto_fit_target_name_font(lv_obj_t *label) {
 }
 
 static void arc_start_exposure_anim(dashboard_page_t *p);
+static void subbar_interp_tick(dashboard_page_t *p);
+
+/* NINA-domain "now", derived from the page's cached Date-header epoch advanced
+ * by monotonic time. Falls back to the device wall clock when the pair is
+ * unknown. Read lock-free by the 200 ms timer; the pair is written under both
+ * locks in update_exposure_arc / update_exposure_anchor. */
+static int64_t page_now_nina(const dashboard_page_t *p) {
+    if (p->cached_nina_epoch != 0) {
+        return p->cached_nina_epoch +
+               (esp_timer_get_time() - p->cached_nina_mono_us) / 1000000;
+    }
+    return (int64_t)time(NULL);
+}
+
+/* Layouts 1 and 2 have no arc: drive the segmented sub bar from the same
+ * monotonic anchor, the same backward-only wall correction and the same
+ * 200 ms cadence the arc uses. No second timer exists. */
+static void subbar_interp_tick(dashboard_page_t *p) {
+    if (!p->subbar.cont) return;
+    if (p->exp_anchor_us == 0 || p->cached_total <= 0.0f || !p->cached_is_exposing) return;
+
+    float elapsed = p->exp_anchor_elapsed +
+                    (float)(esp_timer_get_time() - p->exp_anchor_us) / 1e6f;
+
+    /* Backward-only wall correction (see arc_interp_timer_cb for the rationale).
+     * Difference the epochs in int64 first — epoch seconds exceed float's
+     * 24-bit integer precision — then cast the small result for the P4 FPU. */
+    int64_t remaining_wall_ms = (p->cached_end_epoch - page_now_nina(p)) * 1000;
+    float elapsed_wall = p->cached_total - (float)remaining_wall_ms / 1000.0f;
+    if (elapsed_wall < elapsed - 1.0f) {
+        p->exp_anchor_us = esp_timer_get_time();
+        p->exp_anchor_elapsed = (elapsed_wall > 0.0f) ? elapsed_wall : 0.0f;
+        elapsed = p->exp_anchor_elapsed;
+    }
+
+    if (elapsed < 0.0f) elapsed = 0.0f;
+    if (elapsed > p->cached_total) elapsed = p->cached_total;
+    nina_subbar_set_progress(&p->subbar, elapsed / p->cached_total);
+}
 
 void arc_interp_timer_cb(lv_timer_t *timer) {
     dashboard_page_t *p = (dashboard_page_t *)lv_timer_get_user_data(timer);
-    if (!p || !p->arc_exposure || p->arc_completing) return;
+    if (!p) return;
+    if (p->layout != 0) { subbar_interp_tick(p); return; }
+    if (!p->arc_exposure || p->arc_completing) return;
     if (p->exp_anchor_us == 0 || p->cached_total <= 0) return;
 
     /* Completion is handled on the IsExposing edge in update_exposure_arc.
@@ -896,6 +938,142 @@ static void update_safety_icon(dashboard_page_t *p, const nina_client_t *data, i
     }
 }
 
+/* ── Alternate layouts (nina_layout_alt.h) ──────────────────────────────── */
+
+/* Arc-free twin of update_exposure_arc's clock bookkeeping.
+ *
+ * Layouts 1 and 2 have no lv_arc, but the 200 ms sub-bar tick needs the same
+ * state the arc path maintains: the monotonic exposure anchor, the cached
+ * end-epoch / total, the NINA clock pair and the ARC_GAP_GRACE_S 60 s
+ * inter-exposure grace. This runs on the poll path with both locks held.
+ * It touches no widgets. */
+static void update_exposure_anchor(dashboard_page_t *p, const nina_client_t *d) {
+    /* Filter change clears the anchor so the new filter starts from zero. */
+    if (d->current_filter[0] != '\0' && strcmp(p->prev_filter, d->current_filter) != 0) {
+        p->cached_end_epoch = 0;
+        p->cached_total = 0;
+        p->gap_start_epoch = 0;
+        p->exp_anchor_us = 0;
+        p->exp_anchor_elapsed = 0;
+        p->cached_nina_epoch = 0;
+        p->cached_nina_mono_us = 0;
+        snprintf(p->prev_filter, sizeof(p->prev_filter), "%s", d->current_filter);
+    }
+
+    int64_t now_nina = nina_client_now_epoch(d);
+    p->cached_nina_epoch = d->nina_clock_epoch;
+    p->cached_nina_mono_us = d->nina_clock_mono_us;
+    p->cached_is_exposing = d->is_exposing;
+
+    if (d->exposure_total > 0 && d->exposure_end_epoch > 0 && d->is_exposing) {
+        p->gap_start_epoch = 0;
+
+        bool new_exposure = (d->exposure_end_epoch != p->cached_end_epoch
+                             && d->exposure_end_epoch > now_nina)
+                            || (p->exp_anchor_us == 0);
+        bool same_exposure = (p->exp_anchor_us != 0
+                              && d->exposure_end_epoch == p->cached_end_epoch);
+        bool total_changed = (same_exposure && p->cached_total > 0.0f
+                              && fabsf(p->cached_total - d->exposure_total) > 1.0f);
+
+        p->cached_end_epoch = d->exposure_end_epoch;
+        p->cached_total = d->exposure_total;
+
+        if (new_exposure || total_changed) {
+            /* Seed the anchor with a one-time wall estimate of how far into the
+             * sub we already are (detection can land mid-sub). int64 epoch
+             * difference first, then cast the small result to float. */
+            int64_t remaining_seed_ms = (d->exposure_end_epoch - now_nina) * 1000;
+            float seed = d->exposure_total - (float)remaining_seed_ms / 1000.0f;
+            if (seed < 0.0f) seed = 0.0f;
+            if (seed > d->exposure_total) seed = d->exposure_total;
+            p->exp_anchor_us = esp_timer_get_time();
+            p->exp_anchor_elapsed = seed;
+        }
+        return;
+    }
+
+    /* Not exposing: hold the last position through the inter-exposure gap, then
+     * drop to idle once the grace window expires or the camera reports idle. */
+    if (p->cached_end_epoch > 0 && p->cached_total > 0) {
+        bool camera_idle = (strcmp(d->status, "Idle") == 0
+                         || strcmp(d->status, "NoState") == 0
+                         || strcmp(d->status, "OFFLINE") == 0);
+        /* Gap timing is a device-only duration, not a NINA-timestamp compare. */
+        int64_t now_wall = (int64_t)time(NULL);
+        if (p->gap_start_epoch == 0) p->gap_start_epoch = now_wall;
+        if (camera_idle || (now_wall - p->gap_start_epoch) > ARC_GAP_GRACE_S) {
+            p->cached_end_epoch = 0;
+            p->cached_total = 0;
+            p->gap_start_epoch = 0;
+            p->exp_anchor_us = 0;
+            p->exp_anchor_elapsed = 0;
+            p->cached_nina_epoch = 0;
+            p->cached_nina_mono_us = 0;
+        }
+    } else {
+        p->gap_start_epoch = 0;
+        p->exp_anchor_us = 0;
+        p->exp_anchor_elapsed = 0;
+    }
+}
+
+/* Update path for layout 1 (Image-forward). NONE of the arc-path updaters may run here:
+ * they dereference widgets these layouts never create. The shared pieces —
+ * disconnected empty state, stale label and stale overlay — are driven from
+ * this function so both layouts inherit them. */
+static void update_alt_layout_page(dashboard_page_t *p, const nina_client_t *d,
+                                   int inst, int gb) {
+    nina_conn_state_t conn_state = nina_connection_get_state(inst);
+
+    if (conn_state != NINA_CONN_CONNECTED) {
+        disc_gate_t *g = &s_disc_gate[inst];
+        if (!g->valid || g->state != conn_state || g->theme != current_theme
+            || g->gb != gb) {
+            g->valid = true;
+            g->state = conn_state;
+            g->theme = current_theme;
+            g->gb = gb;
+            /* Force a full sub-bar rebuild on reconnect. */
+            p->subbar.cached_target = -1;
+            p->subbar.cached_done = -1;
+            p->exp_anchor_us = 0;
+            p->exp_anchor_elapsed = 0;
+            p->cached_is_exposing = false;
+            p->cached_end_epoch = 0;
+            p->cached_total = 0;
+            p->gap_start_epoch = 0;
+            if (p->empty_state_cont) {
+                char host[64] = {0};
+                extract_host_from_url(app_config_get_instance_url(inst), host, sizeof(host));
+                char offline_title[96];
+                if (host[0]) {
+                    snprintf(offline_title, sizeof(offline_title), "%s Offline", host);
+                } else {
+                    snprintf(offline_title, sizeof(offline_title), "Node %d Offline", inst + 1);
+                }
+                nina_empty_state_set_title(p->empty_state_cont, offline_title);
+                nina_empty_state_show(p->empty_state_cont);
+            }
+        }
+        update_stale_indicator(p, d);
+        return;
+    }
+
+    /* Reconnect edge only — dismissing the overlay every poll is needless
+     * LVGL churn (same rule as the arc path's !p->nina_connected block). */
+    if (s_disc_gate[inst].valid) {
+        s_disc_gate[inst].valid = false;
+        if (p->empty_state_cont) nina_empty_state_hide(p->empty_state_cont);
+    }
+
+    update_exposure_anchor(p, d);
+
+    nina_layout_image_update(p, d, inst, gb);
+
+    update_stale_indicator(p, d);
+}
+
 void update_nina_dashboard_page(int instance, const nina_client_t *data) {
     if (instance < 0 || instance >= MAX_NINA_INSTANCES) return;
     if (!data) return;
@@ -907,6 +1085,14 @@ void update_nina_dashboard_page(int instance, const nina_client_t *data) {
     int inst = instance;     /* config lookups use the instance index directly */
 
     int gb = app_config_get()->color_brightness;
+
+    /* Layout 1 builds none of the arc-path widgets. Every updater below
+     * dereferences those widgets unconditionally, so the alt path must return
+     * before any of them runs. */
+    if (p->layout != 0) {
+        update_alt_layout_page(p, data, inst, gb);
+        return;
+    }
 
     update_safety_icon(p, data, inst);
 

@@ -47,8 +47,8 @@ typedef struct {
     } moon;
     
     // Sequence info
-    int exposure_count;         // Number of completed exposures for current filter (CompletedIterations)
-    int exposure_iterations;    // Total number of exposures planned for current filter (Iterations)
+    int exposure_count;         // Completed exposures for current filter (CompletedIterations, flattened through enclosing "Loop For Iterations" conditions)
+    int exposure_iterations;    // Planned exposures for current filter (Iterations x enclosing loop Iterations)
     int exposure_total_count;   // Cumulative exposures done for current filter (ExposureCount)
     float exposure_current;     // Elapsed time in current exposure (seconds)
     float exposure_total;       // Total duration of current exposure (seconds, from ExposureTime)

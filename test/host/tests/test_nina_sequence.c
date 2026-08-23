@@ -403,6 +403,62 @@ static void test_take_many_exposures_not_matched(void) {
     expect_float("exposure_total (NOT matched -- known limitation)", c.exposure_total, 0.0f, 0.01f);
 }
 
+/* =======================================================================
+ * (h) Smart Exposure (Iterations=1) nested inside a container whose
+ *     "Loop For Iterations_Condition" carries Iterations=10 /
+ *     CompletedIterations=4 (the live desktop-bdt978m shape). The flattened
+ *     progress must read 4/10, not 0/1, and a sibling FINISHED container's
+ *     loop must not contribute. Test (a) covers the flat, no-loop case.
+ * ======================================================================= */
+static void test_nested_loop_iterations(void) {
+    printf("\n-- test_nested_loop_iterations --\n");
+    const char *json =
+        "{"
+        "  \"Response\": ["
+        "    {"
+        "      \"Name\": \"Targets_Container\","
+        "      \"Items\": ["
+        "        {"
+        "          \"Name\": \"M31_Container\","
+        "          \"Status\": \"RUNNING\","
+        "          \"Items\": ["
+        "            {"
+        "              \"Name\": \"Done_Container\","
+        "              \"Status\": \"FINISHED\","
+        "              \"Conditions\": ["
+        "                { \"Name\": \"Loop For Iterations_Condition\", \"Iterations\": 99, \"CompletedIterations\": 99 }"
+        "              ],"
+        "              \"Items\": ["
+        "                { \"Name\": \"Smart Exposure\", \"Status\": \"FINISHED\", \"Iterations\": 1, \"CompletedIterations\": 1 }"
+        "              ]"
+        "            },"
+        "            {"
+        "              \"Name\": \"Filters_Container\","
+        "              \"Status\": \"RUNNING\","
+        "              \"Conditions\": ["
+        "                { \"Name\": \"Loop For Iterations_Condition\", \"Iterations\": 10, \"CompletedIterations\": 4 }"
+        "              ],"
+        "              \"Items\": ["
+        "                { \"Name\": \"Smart Exposure\", \"Status\": \"FINISHED\", \"Iterations\": 1, \"CompletedIterations\": 1, \"ExposureCount\": 7 },"
+        "                { \"Name\": \"Smart Exposure\", \"Status\": \"RUNNING\", \"Iterations\": 1, \"CompletedIterations\": 0, \"ExposureCount\": 7 }"
+        "              ]"
+        "            }"
+        "          ]"
+        "        }"
+        "      ]"
+        "    }"
+        "  ]"
+        "}";
+
+    nina_client_t c;
+    reset_client(&c);
+    run_fetch(json, &c);
+
+    expect_int("exposure_iterations (1 x outer loop 10)", c.exposure_iterations, 10);
+    expect_int("exposure_count (4 outer passes x 1 + 0)", c.exposure_count, 4);
+    expect_int("exposure_total_count (ExposureCount untouched)", c.exposure_total_count, 7);
+}
+
 int main(void) {
     test_normal_running_smart_exposure();
     test_no_running_target();
@@ -411,6 +467,7 @@ int main(void) {
     test_empty_null_input();
     test_container_suffix_stripping();
     test_take_many_exposures_not_matched();
+    test_nested_loop_iterations();
 
     printf("\n%s (%d failures)\n", fails ? "TESTS FAILED" : "ALL TESTS PASSED", fails);
     return fails ? 1 : 0;

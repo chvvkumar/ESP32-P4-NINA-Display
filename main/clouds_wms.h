@@ -2,7 +2,8 @@
 
 /*
  * clouds_wms.h - pure URL, geometry and time decisions for the Clouds page
- * (NASA GIBS WMS, a GOES ABI channel over Reference_Features_15m).
+ * (NASA GIBS WMS, a GOES ABI channel under a selectable vector basemap
+ * overlay: borders and roads, coastlines only, borders plus a graticule, or none).
  *
  * Header-only and free of ESP-IDF, FreeRTOS and LVGL, so the host test suite
  * (test/host/test_clouds_wms.c) can exercise the parts that are easy to get
@@ -50,7 +51,8 @@
 
 #include "radar_wms.h"   /* radar_wms_merc_x/y, radar_wms_find */
 
-#define CLOUDS_URL_MAX        RADAR_WMS_URL_MAX   /* 512: the GetMap URL is ~330 chars */
+#define CLOUDS_URL_MAX        RADAR_WMS_URL_MAX   /* 512: the GetMap URL is ~290 chars, 302 worst case
+                                                    (longest channel + longest basemap suffix) */
 #define CLOUDS_TIME_MAX       21                  /* "2026-08-18T04:00:00Z" + NUL */
 #define CLOUDS_TIMES_MAX      10                  /* == max clouds_frames (ring capacity) */
 #define CLOUDS_PERIOD_S       600u                /* GOES ABI cadence, PT10M on every channel */
@@ -102,6 +104,27 @@ static inline const char *clouds_layer(uint8_t ch, float lon)
 static inline const char *clouds_channel_label(uint8_t ch)
 {
     return clouds_channel(ch)->label;
+}
+
+/* Basemap table (config field clouds_basemap, 0..3): the vector layers appended
+ * after the raster channel in LAYERS, as a ready-made ",..." suffix (empty =
+ * satellite alone). Never add Reference_Labels_15m here: it blanks the JPEG. */
+/* Layer names verified live 2026-08-21 (5-layer GetMap incl. Coastlines_15m and
+ * Graticule_15m returned 200 image/jpeg, scratchpad gibs-catalog.md). */
+#define CLOUDS_BASEMAP_COUNT 4
+
+static const char *const s_clouds_basemaps[CLOUDS_BASEMAP_COUNT] = {
+    ",Reference_Features_15m",                  /* 0: borders and roads (default) */
+    ",Coastlines_15m",                          /* 1: coastlines only */
+    ",Reference_Features_15m,Graticule_15m",    /* 2: borders, roads and grid */
+    "",                                         /* 3: none */
+};
+
+/* Suffix for @p bm; an out-of-range value falls back to 0, so a config from a
+ * newer build never drops the overlay silently. */
+static inline const char *clouds_basemap_suffix(uint8_t bm)
+{
+    return s_clouds_basemaps[(bm < CLOUDS_BASEMAP_COUNT) ? bm : 0];
 }
 
 /* Half-width of the 720 px box in Web-Mercator metres at Web-Mercator zoom
@@ -248,7 +271,8 @@ static inline uint32_t clouds_time_step(uint32_t newest, int i)
  * character can reach the URL. Layer order: raster first, vector overlay after.
  * Returns false and writes "" when the result would not fit. */
 static inline bool clouds_frame_url(char *out, size_t sz, float lat, float lon,
-                                    uint8_t zoom, uint8_t ch, uint32_t stamp)
+                                    uint8_t zoom, uint8_t ch, uint8_t basemap,
+                                    uint32_t stamp)
 {
     if (out == NULL || sz == 0) return false;
     out[0] = '\0';
@@ -258,9 +282,9 @@ static inline bool clouds_frame_url(char *out, size_t sz, float lat, float lon,
     clouds_bbox(lat, lon, zoom, &minx, &miny, &maxx, &maxy);
     int n = snprintf(out, sz,
                      CLOUDS_GIBS_BASE "wms/epsg3857/best/wms.cgi?SERVICE=WMS&VERSION=1.3.0"
-                     "&REQUEST=GetMap&LAYERS=%s,Reference_Features_15m&CRS=EPSG:3857"
+                     "&REQUEST=GetMap&LAYERS=%s%s&CRS=EPSG:3857"
                      "&BBOX=%ld,%ld,%ld,%ld&WIDTH=%d&HEIGHT=%d&FORMAT=image/jpeg&TIME=%s",
-                     clouds_layer(ch, lon),
+                     clouds_layer(ch, lon), clouds_basemap_suffix(basemap),
                      (long)lroundf(minx), (long)lroundf(miny),
                      (long)lroundf(maxx), (long)lroundf(maxy),
                      CLOUDS_PX, CLOUDS_PX, tstr);
@@ -385,7 +409,8 @@ static inline int clouds_parse_domains(const char *xml, size_t len, uint32_t *ou
 /* ---- blank / partial frame detection ---- */
 
 /* GIBS answers HTTP 200 for a slot whose tiles are missing: a BLANK frame is the
- * Reference_Features_15m overlay drawn over black (~99% pure black), and a
+ * selected vector basemap overlay drawn over black (~99% pure black, and pure
+ * black everywhere when the basemap is "none"), and a
  * PARTIAL frame (tiles not yet ingested) has rectangular pure-black blocks.
  * Sample every CLOUDS_BLANK_STEP-th pixel of every CLOUDS_BLANK_STEP-th row
  * (8100 samples of a 720x720 frame) and call the frame incomplete when more
