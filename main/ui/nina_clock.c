@@ -418,7 +418,14 @@ static void fit_cond_one_line(lv_obj_t *lbl, const lv_font_t *big,
                               const lv_font_t *small) {
     if (!lbl) return;
     int32_t w = lv_obj_get_width(lbl);
-    if (w <= 0) return;               /* not laid out yet */
+    if (w <= 0) {
+        /* First update runs before the initial layout pass — force it so
+         * the width is real and the fit applies on page build, not a
+         * minute later on the next timer tick. */
+        lv_obj_update_layout(lbl);
+        w = lv_obj_get_width(lbl);
+        if (w <= 0) return;
+    }
     int32_t ls = lv_obj_get_style_text_letter_space(lbl, LV_PART_MAIN);
     lv_point_t sz;
     lv_text_get_size(&sz, lv_label_get_text(lbl), big, ls, 0,
