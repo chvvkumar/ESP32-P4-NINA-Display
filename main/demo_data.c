@@ -1,5 +1,6 @@
 #include "demo_data.h"
 #include "app_config.h"
+#include "tasks.h"          /* psram_task_spawn */
 #include "nina_connection.h"
 #include "ui/nina_session_stats.h"
 #include "ui/nina_safety.h"
@@ -14,6 +15,16 @@
 #include <time.h>
 
 static const char *TAG = "demo_data";
+
+/* ── Live start/stop control ──────────────────────────────────────────
+ * One persistent parked task (psram_task_spawn stacks are never freed, so
+ * the task must never delete itself). s_demo_run is the run gate raised by
+ * demo_data_start() and lowered by demo_data_stop(); s_demo_running is set
+ * by the task itself and stays true until the stop cleanup has completed. */
+static TaskHandle_t s_demo_task = NULL;
+static _Atomic bool s_demo_run = false;
+static _Atomic bool s_demo_running = false;
+static demo_task_params_t s_params;
 
 /* ── Random helpers ────────────────────────────────────────────────── */
 
@@ -206,16 +217,80 @@ static int compute_remaining_s(const demo_profile_t *prof, const demo_state_t *s
     return total_s;
 }
 
-/* ── Main task ────────────────────────────────────────────────────── */
-
-void demo_data_task(void *param)
+/* ── Stop cleanup ─────────────────────────────────────────────────────
+ * Runs on the demo task after the run gate drops. Resets exactly what demo
+ * wrote so real polling resumes cleanly. Field-by-field under the client
+ * lock — NEVER memset the struct (it holds the mutex and the PSRAM
+ * hfr_ring.hfr/.stars pointers, which must survive). */
+static void demo_stop_cleanup(nina_client_t *instances, allsky_data_t *allsky, int count)
 {
-    demo_task_params_t *p = (demo_task_params_t *)param;
-    nina_client_t *instances = p->instances;
-    allsky_data_t *allsky    = p->allsky;
-    int count = p->instance_count;
-    if (count > 3) count = 3;
+    for (int i = 0; i < count; i++) {
+        nina_client_t *d = &instances[i];
 
+        if (nina_client_lock(d, 1000)) {
+            d->connected           = false;
+            d->websocket_connected = false;
+            d->status[0]         = '\0';
+            d->target_name[0]    = '\0';
+            d->profile_name[0]   = '\0';
+            d->telescope_name[0] = '\0';
+            d->camera_name[0]    = '\0';
+            d->container_name[0] = '\0';
+            d->container_step[0] = '\0';
+            d->current_filter[0] = '\0';
+            d->exposure_current     = 0.0f;
+            d->exposure_total       = 0.0f;
+            d->exposure_count       = 0;
+            d->exposure_iterations  = 0;
+            d->exposure_total_count = 0;
+            d->exposure_end_epoch   = 0;
+            d->new_image_available  = false;
+            d->filter_count         = 0;
+            d->guider.rms_total = 0.0f;
+            d->guider.rms_ra    = 0.0f;
+            d->guider.rms_dec   = 0.0f;
+            d->focuser.position = 0;
+            d->rotator_connected = false;
+            d->safety_connected  = false;
+            d->safety_is_safe    = false;
+            strncpy(d->meridian_flip, "--:--", sizeof(d->meridian_flip) - 1);
+            d->time_remaining[0]        = '\0';
+            d->target_time_remaining[0] = '\0';
+            d->target_time_reason[0]    = '\0';
+            d->target_condition_count   = 0;   /* demo writes 2; a real rig would show a bogus "+" cue */
+            d->camera.temp              = 0.0f;
+            d->camera.cooler_power      = 0.0f;
+            d->moon.illumination        = 0.0f;
+            d->power.switch_connected = false;
+            d->power.pwm_count        = 0;
+            d->is_dithering = false;
+            d->last_image_stats.has_data = false;
+            d->hfr_ring.write_idx = 0;
+            d->hfr_ring.count     = 0;
+            nina_client_unlock(d);
+        } else {
+            ESP_LOGW(TAG, "Stop cleanup: failed to lock instance %d", i);
+        }
+
+        nina_connection_set_static_data_ready(i, false);
+        nina_connection_force_disconnect(i);
+        nina_session_stats_reset(i);
+    }
+
+    nina_safety_update(false, false);
+
+    if (allsky) {
+        if (allsky_data_lock(allsky, 500)) {
+            allsky->connected = false;
+            allsky_data_unlock(allsky);
+        }
+    }
+}
+
+/* ── One demo run: init per-instance state, generate until the run gate drops ── */
+
+static void demo_run(nina_client_t *instances, allsky_data_t *allsky, int count)
+{
     ESP_LOGI(TAG, "Starting demo data generator for %d instances", count);
 
     /* ── Initialise per-instance state ────────────────────────────── */
@@ -264,8 +339,14 @@ void demo_data_task(void *param)
 
     int cycle = 0;
 
-    /* ── Main loop — 2 second period ─────────────────────────────── */
-    while (1) {
+    /* ── Main loop — 2 second period; exits when the run gate drops ── */
+    while (s_demo_run) {
+        /* Re-assert connected each cycle so a straggling real poll failure
+         * that landed during the ON transition self-heals within 2 s. */
+        for (int i = 0; i < count; i++) {
+            nina_connection_report_poll(i, true);
+        }
+
         int64_t now_ms = esp_timer_get_time() / 1000;
         time_t now_epoch;
         time(&now_epoch);
@@ -533,6 +614,65 @@ void demo_data_task(void *param)
         }
 
         cycle++;
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        /* Notify-wake sleep so demo_data_stop() takes effect in milliseconds. */
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(2000));
     }
+}
+
+/* ── Task entry — persistent parked task, never deletes itself ────── */
+
+void demo_data_task(void *param)
+{
+    demo_task_params_t *p = (demo_task_params_t *)param;
+
+    for (;;) {
+        /* Park until demo_data_start() raises the run gate. */
+        while (!s_demo_run) {
+            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        }
+        s_demo_running = true;
+
+        int count = p->instance_count;
+        if (count > 3) count = 3;
+
+        demo_run(p->instances, p->allsky, count);
+
+        /* Run gate dropped: reset everything demo wrote, then park again. */
+        demo_stop_cleanup(p->instances, p->allsky, count);
+        s_demo_running = false;
+        ESP_LOGI(TAG, "Demo data generator stopped, task parked");
+    }
+}
+
+/* ── Live start/stop API ──────────────────────────────────────────── */
+
+void demo_data_start(nina_client_t *instances, allsky_data_t *allsky, int instance_count)
+{
+    s_params.instances      = instances;
+    s_params.allsky         = allsky;
+    s_params.instance_count = instance_count;
+    s_demo_run = true;
+    if (s_demo_task == NULL) {
+        s_demo_task = psram_task_spawn(demo_data_task, "demo", 6144, &s_params, 4, 0);
+        if (s_demo_task == NULL) {
+            s_demo_run = false;  /* spawn failed: don't report running forever */
+        }
+    } else {
+        xTaskNotifyGive(s_demo_task);
+    }
+}
+
+void demo_data_stop(void)
+{
+    s_demo_run = false;
+    if (s_demo_task) {
+        xTaskNotifyGive(s_demo_task);
+    }
+}
+
+bool demo_data_is_running(void)
+{
+    /* True from start until the stop cleanup has completed: s_demo_run covers
+     * the window before the task wakes, s_demo_running the run + cleanup. */
+    return s_demo_run || s_demo_running;
 }

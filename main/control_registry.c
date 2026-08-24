@@ -68,6 +68,7 @@ static int get_auto_rotate_interval_s(const control_item_t *it, const app_config
 static int get_auto_rotate_effect(const control_item_t *it, const app_config_t *c)           { (void)it; return c->auto_rotate_effect; }
 static int get_auto_rotate_skip_disconnected(const control_item_t *it, const app_config_t *c){ (void)it; return c->auto_rotate_skip_disconnected ? 1 : 0; }
 static int get_alert_flash_enabled(const control_item_t *it, const app_config_t *c)          { (void)it; return c->alert_flash_enabled ? 1 : 0; }
+static int get_audio_muted(const control_item_t *it, const app_config_t *c)                  { (void)it; return c->audio_muted ? 1 : 0; }
 static int get_screen_sleep_enabled(const control_item_t *it, const app_config_t *c)         { (void)it; return c->screen_sleep_enabled ? 1 : 0; }
 static int get_screen_sleep_timeout_s(const control_item_t *it, const app_config_t *c)       { (void)it; return c->screen_sleep_timeout_s; }
 static int get_idle_indicator_enabled(const control_item_t *it, const app_config_t *c)       { (void)it; return c->idle_indicator_enabled ? 1 : 0; }
@@ -125,6 +126,7 @@ static void set_auto_rotate_interval_s(const control_item_t *it, app_config_t *c
 static void set_auto_rotate_effect(const control_item_t *it, app_config_t *c, int v)           { (void)it; c->auto_rotate_effect = (uint8_t)v; }
 static void set_auto_rotate_skip_disconnected(const control_item_t *it, app_config_t *c, int v){ (void)it; c->auto_rotate_skip_disconnected = (v != 0); }
 static void set_alert_flash_enabled(const control_item_t *it, app_config_t *c, int v)          { (void)it; c->alert_flash_enabled = (v != 0); }
+static void set_audio_muted(const control_item_t *it, app_config_t *c, int v)                  { (void)it; c->audio_muted = (v != 0); }
 static void set_screen_sleep_enabled(const control_item_t *it, app_config_t *c, int v)         { (void)it; c->screen_sleep_enabled = (v != 0); }
 static void set_screen_sleep_timeout_s(const control_item_t *it, app_config_t *c, int v)       { (void)it; c->screen_sleep_timeout_s = (uint16_t)v; }
 static void set_idle_indicator_enabled(const control_item_t *it, app_config_t *c, int v)       { (void)it; c->idle_indicator_enabled = (v != 0); }
@@ -275,6 +277,9 @@ static const control_item_t s_items[] = {
     { "auto_rotate_effect",           CTRL_TYPE_ENUM, 0, 3, 1, LBL(effect_labels), get_auto_rotate_effect, set_auto_rotate_effect,         NULL },
     { "auto_rotate_skip_disconnected",CTRL_TYPE_BOOL, 0, 1, 1, NULL, 0, get_auto_rotate_skip_disconnected,set_auto_rotate_skip_disconnected,NULL },
     { "alert_flash_enabled",          CTRL_TYPE_BOOL, 0, 1, 1, NULL, 0, get_alert_flash_enabled,          set_alert_flash_enabled,          NULL },
+    /* audio_muted: no apply callback — the audio_alert enqueue gate reads
+     * config live at speak time, so the saved value is effective at once. */
+    { "audio_muted",                  CTRL_TYPE_BOOL, 0, 1, 1, NULL, 0, get_audio_muted,                  set_audio_muted,                  NULL },
     { "screen_sleep_enabled",         CTRL_TYPE_BOOL, 0, 1, 1, NULL, 0, get_screen_sleep_enabled,         set_screen_sleep_enabled,         NULL },
     { "screen_sleep_timeout_s",       CTRL_TYPE_INT,  10, 3600, 30, NULL, 0, get_screen_sleep_timeout_s,  set_screen_sleep_timeout_s,       NULL },
     { "idle_indicator_enabled",       CTRL_TYPE_BOOL, 0, 1, 1, NULL, 0, get_idle_indicator_enabled,       set_idle_indicator_enabled,       NULL },

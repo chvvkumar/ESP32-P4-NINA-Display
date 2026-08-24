@@ -356,11 +356,21 @@ static bool event_cooldown_pass(int slot, int instance_idx) {
     return true;
 }
 
-/* Post an assembled sentence.  Never blocks. */
-static void enqueue(const sentence_t *s) {
+/* Post an assembled sentence unconditionally.  Never blocks.  Reserved for
+ * the explicit user test/preview entry points (audio_alert_preview_* and
+ * audio_alert_test_*); every other caller goes through enqueue() below. */
+static void enqueue_always(const sentence_t *s) {
     if (xQueueSend(s_queue, s, 0) != pdTRUE) {
         ESP_LOGW(TAG, "Sentence dropped (queue full)");
     }
+}
+
+/* Post an assembled sentence.  Never blocks.  THE global mute gate: every
+ * normal sound path in the firmware lands here, so audio_muted silences all
+ * of them structurally in one place — no per-call-site checks. */
+static void enqueue(const sentence_t *s) {
+    if (app_config_get()->audio_muted) return;
+    enqueue_always(s);
 }
 
 /* ── Playback ───────────────────────────────────────────────────────────── */
@@ -598,7 +608,7 @@ void audio_alert_preview_event_id(voice_event_t ev, int instance_idx) {
     if (!s_queue) return;
 
     sentence_t s;
-    if (build_event_id_sentence(&s, ev, instance_idx)) enqueue(&s);
+    if (build_event_id_sentence(&s, ev, instance_idx)) enqueue_always(&s);
 }
 
 const char *audio_alert_event_clip_name(voice_event_t ev) {
@@ -624,7 +634,7 @@ void audio_alert_preview_conn(int instance_idx, bool connected) {
     if (!s_queue) return;
 
     sentence_t s;
-    if (build_conn_sentence(&s, instance_idx, connected)) enqueue(&s);
+    if (build_conn_sentence(&s, instance_idx, connected)) enqueue_always(&s);
 }
 
 void audio_alert_play_boot_jingle(void) {
@@ -639,21 +649,21 @@ void audio_alert_preview_jingle(void) {
     if (!s_queue) return;
 
     sentence_t s = { .clip = { (uint8_t)CLIP_ID_boot_jingle }, .count = 1 };
-    enqueue(&s);
+    enqueue_always(&s);
 }
 
 void audio_alert_preview_event(int category_bit, int instance_idx, int equipment_idx) {
     if (!s_queue) return;
 
     sentence_t s;
-    if (build_event_sentence(&s, category_bit, instance_idx, equipment_idx)) enqueue(&s);
+    if (build_event_sentence(&s, category_bit, instance_idx, equipment_idx)) enqueue_always(&s);
 }
 
 void audio_alert_test_speak(alert_type_t type, int instance_idx, float value) {
     if (!s_queue) return;
 
     sentence_t s;
-    if (build_sentence(&s, type, instance_idx, value)) enqueue(&s);
+    if (build_sentence(&s, type, instance_idx, value)) enqueue_always(&s);
 }
 
 bool audio_alert_test_clip(const char *name) {
@@ -662,7 +672,7 @@ bool audio_alert_test_clip(const char *name) {
     for (int i = 0; i < CLIP_COUNT; i++) {
         if (strcmp(name, s_clip_names[i]) != 0) continue;
         sentence_t s = { .clip = { (uint8_t)i }, .count = 1 };
-        enqueue(&s);
+        enqueue_always(&s);
         return true;
     }
     return false;

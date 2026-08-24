@@ -39,7 +39,12 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
 .update-badge.hide{display:none}
 .github-link{color:var(--hint);text-decoration:none;font-size:.75rem;display:flex;align-items:center;gap:6px;padding:7px 12px;border:1px solid rgba(255,255,255,.06);border-radius:10px;transition:all .2s ease;background:rgba(255,255,255,.02);white-space:nowrap}
 .github-link:hover{color:#f4f4f5;border-color:rgba(var(--a),.3);background:rgba(255,255,255,.04)}
-.deck-chip:focus-visible,.rig-row:focus-visible,.int-chip:focus-visible,.update-badge:focus-visible,.github-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* quick controls: instant device toggles, right of the GitHub link; grows later */
+.quick-controls{display:flex;align-items:center;gap:8px}
+.qc-btn{display:flex;align-items:center;gap:6px;color:var(--hint);font-size:.75rem;font-weight:500;font-family:inherit;padding:7px 12px;border:1px solid rgba(255,255,255,.06);border-radius:10px;background:rgba(255,255,255,.02);cursor:pointer;transition:all .2s ease;white-space:nowrap}
+.qc-btn:hover{color:#f4f4f5;border-color:rgba(var(--a),.3);background:rgba(255,255,255,.04)}
+.qc-btn.muted{color:#60a5fa;border-color:rgba(59,130,246,.35);background:rgba(59,130,246,.15)}
+.deck-chip:focus-visible,.rig-row:focus-visible,.int-chip:focus-visible,.update-badge:focus-visible,.github-link:focus-visible,.qc-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .nav-section:focus-visible,.nav-tab:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .content{max-width:1180px;margin:0 auto;padding:24px 24px 60px}
 .card{background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:var(--radius);padding:24px 28px;margin-bottom:20px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
@@ -250,6 +255,12 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
     GitHub
    </a>
+   <span class="quick-controls" id="quickControls">
+    <button type="button" class="qc-btn" id="muteBtn" title="Mute all audio">
+     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path id="muteIconOn" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path id="muteIconOff" style="display:none" d="M16 9l6 6M22 9l-6 6"/></svg>
+     <span id="muteLabel">Mute</span>
+    </button>
+   </span>
   </div>
  </div>
  <div class="nav-row2">
@@ -1016,6 +1027,21 @@ autoRotateToggle.addEventListener('change', function (e) {
   });
 });
 
+/* ---- quick controls: global audio mute ---- */
+function renderMute(muted) {
+ var btn = $('muteBtn');
+ btn.classList.toggle('muted', !!muted);
+ btn.title = muted ? 'Audio muted - click to unmute' : 'Mute all audio';
+ $('muteLabel').textContent = muted ? 'Muted' : 'Mute';
+ $('muteIconOn').style.display = muted ? 'none' : '';
+ $('muteIconOff').style.display = muted ? '' : 'none';
+}
+$('muteBtn').addEventListener('click', function () {
+ getJSON('/api/control/toggle?name=audio_muted', { method: 'POST' })
+  .then(function (it) { renderMute(it.value); })
+  .catch(function () {});
+});
+
 /* ---- 1s ticker: uptime + local override countdown only ---- */
 setInterval(function () {
  if (document.hidden) return;
@@ -1037,6 +1063,10 @@ getJSON('/api/version').then(function (v) {
  }).catch(function () {});
 }).then(function () {
  return getJSON('/api/pages').then(buildDeck).catch(function () {});
+}).then(function () {
+ return getJSON('/api/control/get?name=audio_muted').then(function (it) {
+  renderMute(it.value);
+ }).catch(function () {});
 }).then(function () {
  render();
  poll();
